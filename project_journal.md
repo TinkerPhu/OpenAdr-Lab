@@ -21,10 +21,10 @@ The VTN stack is live on Pi4-Server with two healthy containers:
 | Container | Image | Status | Port |
 |-----------|-------|--------|------|
 | `vtn-vtn-1` | openleadr-rs (built from source) | healthy | 3000 |
-| `vtn-vtn-db-1` | postgres:16-alpine | healthy | 5432 |
+| `vtn-db-1` | postgres:16-alpine | healthy | 5432 |
 
 **What was done:**
-- Created `VTN/docker-compose.yml` with services `vtn-db` (PostgreSQL) and `vtn` (openleadr-rs)
+- Created `VTN/docker-compose.yml` with services `db` (PostgreSQL) and `vtn` (openleadr-rs)
 - Cloned `openleadr-rs` at project root (not inside VTN/); docker-compose references `../openleadr-rs`
 - Built VTN from source inside Docker (~25 min on Pi4 ARM64, cached afterwards)
 - Confirmed VTN auto-runs SQLx migrations at startup (15 tables created)
@@ -170,7 +170,7 @@ The operator console for managing the VTN:
 Raspberry Pi 4 — Docker Host
 ├── openadr-net (bridge network)
 │
-├── vtn-vtn-db-1      [postgres:16-alpine]     :5432  RUNNING
+├── vtn-db-1      [postgres:16-alpine]     :5432  RUNNING
 ├── vtn-vtn-1          [openleadr-rs]           :3000  RUNNING
 │
 ├── ven-1              [ven-app]                :8081  NOT YET
