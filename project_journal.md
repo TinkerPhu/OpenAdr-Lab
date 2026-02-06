@@ -173,7 +173,7 @@ Raspberry Pi 4 — Docker Host
 ├── vtn-db-1      [postgres:16-alpine]     :5432  RUNNING
 ├── vtn-vtn-1          [openleadr-rs]           :3000  RUNNING
 │
-├── ven-1              [ven-app]                :8081  NOT YET
+├── ven-ven-1-1        [ven-app]                :8081  RUNNING
 ├── ven-2              [ven-app]                :8082  NOT YET
 ├── ven-3              [ven-app]                :8083  NOT YET
 │
@@ -184,14 +184,64 @@ Raspberry Pi 4 — Docker Host
 
 ---
 
+## Phase 2 Work Log: VEN Deployment (2026-02-06)
+
+### Discovering the Correct VTN API Shapes
+
+The VEN code had been scaffolded with assumed API field names (`name`, `program_id`, `/oauth/token`). To find the actual shapes, I queried the live VTN:
+
+1. **Token endpoint**: Already confirmed in Phase 1 as `POST /auth/token` (not `/oauth/token`).
+2. **Programs**: Created a test program via `POST /programs` with `{"programName": "Test DR Program"}` and inspected the response. Discovered the VTN uses `programName` (not `name`) and `programLongName`.
+3. **Events**: Created a test event via `POST /events` with `{"programID": "...", "eventName": "...", "intervals": [...]}` and inspected the response. Discovered the VTN uses `programID` (not `program_id`), `createdDateTime` (not `created_at`), and `eventName`. Events have no `status` field — status must be derived from interval timing.
+
+### Discovering the User/VEN Management API
+
+The VTN's test fixtures only included `ven-1`. To add `ven-2` and `ven-3`, I needed to figure out the user management API:
+
+1. **Read the fixture SQL files** on the Pi (`/srv/docker/openadr_lab/openleadr-rs/fixtures/test_user_credentials.sql`) to understand the data model: `"user"` table → `user_credentials` table → `user_ven` table → `ven` table.
+2. **Tried `POST /users`** with `user-manager` credentials. Got a 400 error: "missing field `roles`". Added `"roles": []` — success.
+3. **Credentials were tricky**: The `user_credentials` table stores argon2 hashes, so direct SQL INSERT wouldn't work. I searched the openleadr-rs source code on the Pi (`grep -n 'credential' .../api/user.rs`) and found `add_credential` is a `POST /users/{id}` with `{"client_id": "...", "client_secret": "..."}`. This auto-hashes the secret.
+4. **Created VEN entities**: `POST /vens` with `ven-manager` credentials creates VEN entities.
+5. **Role assignment**: Read the Rust source (`jwt.rs`) to find the `AuthRole` enum uses `#[serde(tag = "role", content = "id")]`, so the JSON format is `{"role": "VEN", "id": "<ven-uuid>"}`. Applied via `PUT /users/{id}` with the roles array.
+
+### Complete API sequence for adding a new VEN
+
+```
+1. POST /users             (user-manager)  → create user
+2. POST /users/{userId}    (user-manager)  → add client_id/client_secret
+3. POST /vens              (ven-manager)   → create VEN entity
+4. PUT  /users/{userId}    (user-manager)  → assign VEN role with VEN ID
+```
+
+### VEN Build and Deploy
+
+- Rewrote `VEN/Dockerfile` to use `rust:1.90-alpine` (matching VTN) with multi-stage build, dep caching, and nonroot user
+- Created `VEN/docker-compose.yml` with 3 VEN services sharing the VTN's external network (`vtn_openadr-net`)
+- Built VEN on Pi4: ~10 min for dependencies + 1 min for app code (total ~11 min)
+- VEN-1 started and immediately:
+  - Authenticated with VTN using `ven-1/ven-1`
+  - Polled 1 program, 1 event
+  - Sensor sampler generating simulated power readings
+
+### Docker Compose Project Name Insight
+
+Docker Compose prefixes container names with the **project name**, which defaults to the parent directory name. Since the VTN compose is in `VTN/`, a service called `vtn-db` resulted in container `vtn-vtn-db-1`. Reverted the service to just `db` so the container is `vtn-db-1`.
+
+---
+
 ## Key Learnings
 
 - VTN auto-migrates on first boot — no need for manual `cargo sqlx migrate run`
 - Token endpoint is `/auth/token`, not `/oauth/token`
 - Token expires in 30 days (2,592,000 sec), not 1 hour
 - VTN build takes ~25 min on Pi4 ARM64 (first time); cached builds are fast
+- VEN build takes ~11 min on Pi4 ARM64 (first time); cached rebuilds are ~1 min
 - SSH to Pi has no interactive terminal — git credentials must be written directly to `~/.git-credentials`
 - Role-based access is enforced: wrong role = 403 Forbidden
+- Docker Compose project name = directory name; avoid duplicating it in service names
+- VTN API field names follow OpenADR 3 spec: `programName`, `programID`, `createdDateTime`, `venName`
+- To discover an unfamiliar API: create test data, inspect responses, and read the source when needed
+- User credential creation requires the API (not raw SQL) because secrets are argon2-hashed server-side
 
 ---
 
