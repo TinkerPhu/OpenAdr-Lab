@@ -1,0 +1,10 @@
+{
+  "venName": "ven-1",
+  "vtnBaseUrl": "http://vtn:3000",
+  "lastProgramsSyncAt": "2026-02-05T12:00:00Z",
+  "lastEventsSyncAt": "2026-02-05T12:00:10Z",
+  "lastTokenRefreshAt": "2026-02-05T11:58:00Z",
+  "pollEventsSecs": 30,
+  "pollProgramsSecs": 300,
+  "errors": { "auth": 0, "vtn": 1, "parse": 0 }
+}

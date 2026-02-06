@@ -1,0 +1,1 @@
+docker: docker runs on ssh Pi4-Server. run all tasks with docker on Pi4-Server via ssh in directory /srv/openadr_lab.

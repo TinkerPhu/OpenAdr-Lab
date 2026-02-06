@@ -1,0 +1,40 @@
+services:
+  ven1:
+    build: ./ven-app
+    environment:
+      - LISTEN_ADDR=0.0.0.0:8080
+      - VTN_BASE_URL=http://vtn:3000
+      - CLIENT_ID=ven1
+      - CLIENT_SECRET=ven1secret
+      - VEN_NAME=ven-1
+      - POLL_EVENTS_SECS=30
+      - POLL_PROGRAMS_SECS=300
+      - PERSIST_PATH=/data/state.json
+    volumes:
+      - ven1-data:/data
+    ports:
+      - "8081:8080"
+    depends_on:
+      - vtn
+
+  ven2:
+    build: ./ven-app
+    environment:
+      - LISTEN_ADDR=0.0.0.0:8080
+      - VTN_BASE_URL=http://vtn:3000
+      - CLIENT_ID=ven2
+      - CLIENT_SECRET=ven2secret
+      - VEN_NAME=ven-2
+      - POLL_EVENTS_SECS=30
+      - POLL_PROGRAMS_SECS=300
+      - PERSIST_PATH=/data/state.json
+    volumes:
+      - ven2-data:/data
+    ports:
+      - "8082:8080"
+    depends_on:
+      - vtn
+
+volumes:
+  ven1-data:
+  ven2-data:

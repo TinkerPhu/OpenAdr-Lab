@@ -1,0 +1,26 @@
+What you’ll still need to adjust (once you run it)
+
+    VTN endpoints: In vtn.rs I used:
+
+    POST {base}/oauth/token
+
+    GET {base}/programs
+
+    GET {base}/events
+
+You’ll likely need to tweak those paths to match the VTN you’re running.
+
+    Event filtering: Eventually you’ll want:
+
+    “events for this VEN” (not all events)
+
+    “events for program(s) my VEN participates in”
+    Those are usually query params or different endpoints.
+
+    Sensor source: Replace the fake sampler with:
+
+    MQTT subscriber (best on Pi),
+
+    Modbus TCP/RTU,
+
+    GPIO/I2C sensor reading, etc.

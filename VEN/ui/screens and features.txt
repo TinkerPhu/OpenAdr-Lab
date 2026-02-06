@@ -1,0 +1,78 @@
+Screens and features
+1) Top app shell
+
+AppBar
+
+    Title: “VEN Dashboard”
+
+    VEN selector (base URL dropdown) for http://raspberrypi:8081, :8082, etc.
+
+    Refresh button
+
+    Auto-refresh toggle + interval selector (events 30s, programs 5m, sensors 10s default)
+
+Connection status chip
+
+    Green “Healthy” if /health returns ok
+
+    Red “Offline” if failing
+
+2) Dashboard page
+
+Cards (MUI Card):
+
+    Programs: count, last updated, quick list (first 3)
+
+    Events: count, by status (derived from event.status), last updated
+
+    Sensor snapshot:
+
+        power_w, temperature_c, voltage_v
+
+        timestamp
+
+        raw JSON (expand)
+
+Optional (nice to have):
+
+    “Mini chart” for power over time (from periodic /sensors polling; the UI stores a rolling buffer client-side)
+
+3) Programs page
+
+    Table or list of programs (id, name)
+
+    Search filter (by id/name)
+
+    Copy-to-clipboard program id
+
+4) Events page
+
+    Table with sortable columns:
+
+        id
+
+        program_id
+
+        status
+
+        created_at (if present)
+
+    Filter chips: status, program_id
+
+    Row click → Event detail dialog
+
+        Pretty JSON viewer of raw
+
+        Copy raw JSON
+
+        Download raw JSON file
+
+5) Sensors page
+
+    Live sensor card + optional local history chart
+
+    If you keep POST /sensors, add a simple form for manual injection (useful for testing):
+
+        power_w, temperature_c, voltage_v, raw JSON field
+
+        POST to /sensors

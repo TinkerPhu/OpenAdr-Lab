@@ -1,0 +1,17 @@
+{
+  "report_name": "telemetry_usage",
+  "resource_id": "ven-1-meter",
+  "measurement": "powerReal",
+  "unit": "kW",
+  "interval": "PT5M",
+  "data": [
+    {
+      "ts": "2026-02-05T12:00:00Z",
+      "value": 42.1
+    },
+    {
+      "ts": "2026-02-05T12:05:00Z",
+      "value": 40.8
+    }
+  ]
+}
