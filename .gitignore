@@ -21,4 +21,4 @@ target
 #.idea/
 
 # Cloned third-party repos (nested git repos, cloned at deploy time)
-VTN/openleadr-rs/
+openleadr-rs/
