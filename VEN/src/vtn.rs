@@ -108,8 +108,8 @@ impl VtnClient {
             .await
             .context(format!("GET {path} failed"))?;
 
-        if resp.status() == StatusCode::UNAUTHORIZED {
-            // Token may have been revoked; refresh once and retry
+        if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
+            // Token invalid or VTN restarted with new signing key; refresh once and retry
             self.invalidate_token().await;
             let new_token = self.ensure_token().await?;
             let resp = self.http
