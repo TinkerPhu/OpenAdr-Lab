@@ -157,7 +157,44 @@ docker compose -f tests/docker-compose.test.yml up --build \
 docker compose -f tests/docker-compose.test.yml down
 ```
 
-### 8. VTN BFF + VTN Web UI — Not Started
+### 8. VTN Seeded with Demo Data
+
+**Status: COMPLETE**
+
+Created `scripts/seed_vtn.py` — a standalone Python script that populates the VTN with realistic demo data via the REST API.
+
+**Programs created (3):**
+
+| programName | Description |
+|---|---|
+| Summer Peak DR | Demand response for summer peak hours |
+| EV Managed Charging | Managed EV charging load shifting |
+| HVAC Optimization | Building HVAC pre-cool/pre-heat |
+
+**Events created (6 — 2 per program):**
+
+| Program | eventName | Payload (kW) |
+|---|---|---|
+| Summer Peak DR | peak-curtail-1 | 5.0 |
+| Summer Peak DR | peak-curtail-2 | 10.0 |
+| EV Managed Charging | ev-shift-morning | 3.5 |
+| EV Managed Charging | ev-shift-evening | 7.0 |
+| HVAC Optimization | precool-event | 2.0 |
+| HVAC Optimization | preheat-event | 4.0 |
+
+**Script features:**
+- Authenticates as `any-business` via `POST /auth/token`
+- Idempotent for programs — checks existing by name, skips duplicates
+- Takes `--vtn-url`, `--client-id`, `--client-secret` args
+- Prints summary of all created/skipped resources
+
+**Verified:**
+- All 3 programs and 6 events visible on VTN
+- Events flowing to all 3 VENs (within 30s poll cycle)
+- Programs visible to VENs (within 300s poll cycle)
+- VEN Web UI at port 8084 reflects the data
+
+### 9. VTN BFF + VTN Web UI — Not Started
 
 **Status: NOT STARTED — blueprints written, no code**
 
@@ -170,14 +207,7 @@ Based on the system design's implementation order (Section 19) and current state
 ### ~~Phase 1: Complete the VEN Application~~ DONE
 ### ~~Phase 2: VEN Web UI~~ DONE
 
-### Phase 3: Create Programs and Events via VTN API (Priority: HIGH)
-
-The VTN is running but empty — no programs or events exist yet.
-
-1. **Create test programs** via curl/API (using `any-business` credentials)
-2. **Create test events** targeted at VENs
-3. **Verify VEN polls pick up events**
-4. **Verify event distribution across multiple VENs**
+### ~~Phase 3: Seed VTN with Programs & Events~~ DONE
 
 ### Phase 4: VTN BFF + VTN Web UI (Priority: LOWER)
 
@@ -339,6 +369,27 @@ Much faster than the Rust VEN (~11 min) or VTN (~25 min) builds.
 
 ---
 
+## Phase 5 Work Log: Seed VTN with Demo Data (2026-02-07)
+
+### Approach
+
+Created a standalone Python script (`scripts/seed_vtn.py`) rather than ad-hoc curl commands. This makes seeding repeatable and documentable. The script reuses the same API patterns proven in the integration test suite (`tests/features/helpers/api_client.py`).
+
+### Idempotency
+
+The script lists existing programs before creating new ones. If a program with the same `programName` already exists, it's skipped. Events are always created (the VTN doesn't enforce unique event names), so re-running the script adds duplicate events. This is acceptable for a demo environment.
+
+### Verification
+
+After seeding, confirmed:
+- VTN shows 4 programs (3 new + 1 "Test DR Program" from earlier integration testing)
+- All events visible on VTN
+- Events propagated to all 3 VENs within their 30s event poll interval
+- Programs propagate within the 300s program poll interval
+- VEN Web UI (port 8084) displays the data
+
+---
+
 ## Key Learnings
 
 - VTN auto-migrates on first boot — no need for manual `cargo sqlx migrate run`
@@ -365,4 +416,4 @@ Much faster than the Rust VEN (~11 min) or VTN (~25 min) builds.
 
 ---
 
-*Last updated: 2026-02-06*
+*Last updated: 2026-02-07*
