@@ -1,4 +1,4 @@
-import { Event, Program, SensorSnapshot } from "./types";
+import type { Event, Program, SensorSnapshot } from "./types";
 
 export class VenApi {
   constructor(public baseUrl: string) {}
