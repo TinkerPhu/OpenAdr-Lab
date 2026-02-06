@@ -77,33 +77,39 @@ so none of these are needed on the host.**
 
 # 2. Clone the OpenLEADR Repository
 
+Clone from the **project root** (one level above `VTN/`):
+
 ```bash
+cd /srv/openadr_lab          # or wherever your project root is
 git clone https://github.com/OpenLEADR/openleadr-rs.git
-cd openleadr-rs
 ```
+
+> **Do not** `cd` into the clone. The `VTN/docker-compose.yml` references it
+> via `build: context: ../openleadr-rs`.
 
 This repository contains:
 
 - VTN server implementation
 - VEN client library
-- Docker setup
-- SQL migrations
-- Test credential fixtures
+- Docker setup (`vtn.Dockerfile`)
+- SQL migrations (`openleadr-vtn/migrations/`)
+- Test credential fixtures (`fixtures/test_user_credentials.sql`)
 
 ---
 
 # 3. Start PostgreSQL via Docker
 
-From the repository root:
+From the `VTN/` directory (where `docker-compose.yml` lives):
 
 ```bash
-docker compose up -d db
+cd VTN
+docker compose up -d vtn-db
 ```
 
 Expected result:
 
-- A PostgreSQL container starts in the background.
-- Default DB name/user/password are defined in the repo compose file.
+- A PostgreSQL 16 Alpine container starts in the background.
+- Default DB name/user/password: `openadr` / `openadr` / `openadr` (from `.env`).
 
 Verify:
 
@@ -111,49 +117,27 @@ Verify:
 docker ps
 ```
 
-You should see a running Postgres container.
+You should see a running Postgres container (`vtn-vtn-db-1`).
 
 ---
 
-# 4. Run SQL Migrations
+# 4. SQL Migrations — Automatic
 
-Migrations create all required database tables.
+Migrations create all required database tables (15 tables total).
 
-**Blog post method** (requires Rust + sqlx‑cli on host):
+**The VTN binary runs migrations automatically at startup.** No manual
+migration step is needed. This was confirmed during deployment — the VTN
+log shows SQLx migrations executing on first boot, creating all tables
+including `_sqlx_migrations`, `program`, `event`, `ven`, `"user"`, etc.
 
-```bash
-cargo sqlx migrate run
-```
-
-**Docker‑based alternative** (no host tooling needed):
-
-The VTN binary may run migrations automatically at startup. If it does not,
-and tables are missing after step 5, you can run migrations from a temporary
-container:
-
-```bash
-docker run --rm --network=host \
-  -e DATABASE_URL=postgres://openadr:openadr@localhost:5432/openadr \
-  ghcr.io/launchbadge/sqlx-cli migrate run
-```
-
-> **Assumption:** Whether the openleadr‑rs VTN auto‑migrates at startup has
-> not been verified. We will confirm this when we first bring up the stack.
-> If it does, this step can be skipped entirely.
-
-Expected result:
-
-- Migration scripts execute successfully.
-- Tables for users, clients, programs, events, etc. are created.
-
-If migration fails, ensure:
-
-- DB container is running
-- Environment variables in `.env` or compose match defaults
+> **Skip this step entirely.** It is listed here only to document that the
+> blog post's `cargo sqlx migrate run` is unnecessary with the Docker setup.
 
 ---
 
 # 5. Start the Full VTN Stack
+
+From the `VTN/` directory:
 
 ```bash
 docker compose up -d
@@ -161,8 +145,11 @@ docker compose up -d
 
 This starts:
 
-- VTN server
-- Any dependent services defined in compose
+- `vtn-db` — PostgreSQL database (starts first, waits for healthy)
+- `vtn` — OpenLEADR VTN server (builds from `../openleadr-rs/vtn.Dockerfile`)
+
+> **First build takes ~25 minutes on a Pi4 (ARM64).** Subsequent builds use
+> Docker layer cache and are much faster.
 
 Verify containers:
 
@@ -170,69 +157,71 @@ Verify containers:
 docker ps
 ```
 
+You should see two containers: `vtn-vtn-db-1` and `vtn-vtn-1`.
+
+Check VTN health:
+
+```bash
+curl http://localhost:3000/health
+```
+
+Expected response: `OK`
+
 ---
 
 # 6. Verify VTN API is Reachable
 
-Open in browser or curl:
-
-```
-http://localhost:3000
-```
-
-Test an endpoint (unauthenticated call will likely fail but confirms routing):
+Test an unauthenticated call (confirms routing is working):
 
 ```bash
 curl http://localhost:3000/programs
 ```
 
-Expected result:
+Expected result — HTTP 401 JSON error:
 
-- HTTP response from VTN
-- Possibly empty or unauthorized
+```json
+{
+  "type": "about:blank",
+  "status": 401,
+  "title": "Unauthorized",
+  "detail": "..."
+}
+```
+
+This confirms the VTN is running and enforcing authentication.
 
 ---
 
-# 7. Load Default Credential Fixtures
+# 7. Load Default Credential Fixtures (Required)
 
-After migrations, the database contains no users/clients.
+After migrations, the database contains **no users or clients**. Without
+loading fixtures, all OAuth token requests will fail with `invalid_client`.
 
-The project provides a SQL fixture used in tests.
-
-**Blog post method** (requires psql on host):
-
-```bash
-psql -U openadr -W openadr -h localhost openadr < fixtures/test_user_credentials.sql
-```
-
-Password when prompted: `openadr`
-
-**Docker‑based alternative** (no host psql needed):
+The project provides a SQL fixture with test credentials:
 
 ```bash
-docker exec -i $(docker compose ps -q db) \
-  psql -U openadr openadr < openleadr-rs/fixtures/test_user_credentials.sql
+docker exec -i vtn-vtn-db-1 \
+  psql -U openadr openadr < ../openleadr-rs/fixtures/test_user_credentials.sql
 ```
 
-Expected result:
+> Run this from the `VTN/` directory so the relative path to the fixture
+> file resolves correctly.
 
-- Default OAuth clients/users inserted
-- Example client: `any-business`
+Expected result — five test users inserted:
+
+| client_id | client_secret | Role | Access |
+|-----------|--------------|------|--------|
+| `any-business` | `any-business` | AnyBusiness | programs, events |
+| `ven-manager` | `ven-manager` | VenManager | programs, events, **vens** |
+| `user-manager` | `user-manager` | UserManager | user management |
+| `business-1` | `business-1` | Business (scoped) | scoped access |
+| `ven-1` | `ven-1` | VEN (scoped) | scoped VEN access |
 
 ---
 
 # 8. Obtain OAuth Access Token
 
-Use client credentials grant.
-
-Endpoint name depends on configuration.
-
-Common paths:
-
-- `/auth/token`
-- `/oauth/token`
-
-Try:
+Use the client credentials grant against `/auth/token`:
 
 ```bash
 curl -X POST \
@@ -241,39 +230,46 @@ curl -X POST \
   http://localhost:3000/auth/token
 ```
 
-If 404, try:
-
-```bash
-http://localhost:3000/oauth/token
-```
+> **Confirmed:** The token endpoint is `/auth/token`. The path `/oauth/token`
+> returns 404.
 
 Expected response:
 
 ```json
 {
-  "access_token": "...",
+  "access_token": "eyJ...",
   "token_type": "Bearer",
-  "expires_in": 3600
+  "expires_in": 2592000
 }
 ```
 
+> **Note:** `expires_in` is 2592000 seconds (30 days), not 3600 (1 hour).
+
 ---
 
-# 9. Call an Authenticated Endpoint
+# 9. Call Authenticated Endpoints
 
-Use the token:
+Save the token for reuse:
 
 ```bash
-curl -H "Authorization: Bearer <ACCESS_TOKEN>" \
-  http://localhost:3000/programs
+TOKEN=$(curl -s -X POST \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'grant_type=client_credentials&client_id=any-business&client_secret=any-business' \
+  http://localhost:3000/auth/token | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 ```
 
-Expected result:
+Test authenticated endpoints:
 
-- Valid JSON response
-- Likely empty list (no programs created yet)
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/programs
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/events
+```
 
-This matches the blog author’s state.
+Expected result: `[]` (empty JSON arrays — no programs or events created yet).
+
+> **Role limitations:** The `any-business` user can access `/programs` and
+> `/events`, but **not** `/vens` (returns 403 Forbidden). To manage VENs,
+> obtain a token with the `ven-manager` credentials instead.
 
 ---
 
@@ -282,7 +278,7 @@ This matches the blog author’s state.
 Use any SQL client (psql, Beekeeper Studio, etc.), or use `docker exec`:
 
 ```bash
-docker exec -it $(docker compose ps -q db) psql -U openadr openadr
+docker exec -it vtn-vtn-db-1 psql -U openadr openadr
 ```
 
 List tables:
@@ -291,11 +287,14 @@ List tables:
 \dt
 ```
 
-Inspect users:
+Inspect credential fixtures:
 
 ```sql
-SELECT * FROM users;
+SELECT * FROM user_credentials;
 ```
+
+> **Note:** The user table is named `"user"` (quoted — it's a SQL reserved
+> word). Use double quotes when querying it: `SELECT * FROM "user";`
 
 ---
 

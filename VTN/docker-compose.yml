@@ -11,7 +11,7 @@
 #
 # Usage:
 #   # Step 1: Start the database first
-#   docker compose up -d db
+#   docker compose up -d vtn-db
 #
 #   # Step 2: Wait for healthy, then start the VTN
 #   docker compose up -d vtn
@@ -27,7 +27,7 @@ services:
   # ---------------------------------------------------------------------------
   # PostgreSQL — VTN persistence
   # ---------------------------------------------------------------------------
-  db:
+  vtn-db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -44,7 +44,7 @@ services:
     ports:
       - "${PG_PORT:-5432}:5432"
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - vtn-db-data:/var/lib/postgresql/data
     networks:
       - openadr-net
 
@@ -61,7 +61,7 @@ services:
       - "${VTN_PORT:-3000}:3000"
     environment:
       RUST_LOG: ${RUST_LOG:-info}
-      DATABASE_URL: postgres://${PG_USER:-openadr}:${PG_PASSWORD:-openadr}@db:5432/${PG_DB:-openadr}
+      DATABASE_URL: postgres://${PG_USER:-openadr}:${PG_PASSWORD:-openadr}@vtn-db:5432/${PG_DB:-openadr}
       # OAuth — internal provider (HMAC, auto-generated secret)
       # Set OAUTH_BASE64_SECRET for a fixed key; omit to let VTN generate one.
       # OAUTH_TYPE: INTERNAL
@@ -74,13 +74,13 @@ services:
       retries: 5
       start_period: 30s
     depends_on:
-      db:
+      vtn-db:
         condition: service_healthy
     networks:
       - openadr-net
 
 volumes:
-  db-data:
+  vtn-db-data:
     driver: local
 
 networks:
