@@ -1,0 +1,88 @@
+###############################################################################
+# OpenADR 3 VTN Stack — Docker Compose
+#
+# Based on: openleadr-rs upstream docker-compose + vtn_setup_from_blog guide
+#
+# Prerequisites:
+#   1. Clone the openleadr-rs repo into this directory:
+#      git clone https://github.com/OpenLEADR/openleadr-rs.git
+#
+#   2. Copy .env.example to .env (or use defaults)
+#
+# Usage:
+#   # Step 1: Start the database first
+#   docker compose up -d db
+#
+#   # Step 2: Wait for healthy, then start the VTN
+#   docker compose up -d vtn
+#
+#   # Step 3: Verify
+#   curl http://localhost:3000/health
+#
+# To rebuild after upstream changes:
+#   docker compose up --force-recreate --build --no-deps vtn
+###############################################################################
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — VTN persistence
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-openadr}
+      POSTGRES_DB: ${PG_DB:-openadr}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-openadr}
+      POSTGRES_HOST_AUTH_METHOD: trust
+      TZ: ${PG_TZ:-UTC}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openadr"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - openadr-net
+
+  # ---------------------------------------------------------------------------
+  # VTN — openleadr-rs server
+  # Built from the cloned openleadr-rs repository (./openleadr-rs)
+  # ---------------------------------------------------------------------------
+  vtn:
+    build:
+      context: ./openleadr-rs
+      dockerfile: vtn.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${VTN_PORT:-3000}:3000"
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      DATABASE_URL: postgres://${PG_USER:-openadr}:${PG_PASSWORD:-openadr}@db:5432/${PG_DB:-openadr}
+      # OAuth — internal provider (HMAC, auto-generated secret)
+      # Set OAUTH_BASE64_SECRET for a fixed key; omit to let VTN generate one.
+      # OAUTH_TYPE: INTERNAL
+      # OAUTH_KEY_TYPE: HMAC
+      # OAUTH_BASE64_SECRET: ${OAUTH_BASE64_SECRET:-}
+    healthcheck:
+      test: curl --fail http://127.0.0.1:3000/health || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - openadr-net
+
+volumes:
+  db-data:
+    driver: local
+
+networks:
+  openadr-net:
+    driver: bridge
