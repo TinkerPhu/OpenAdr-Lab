@@ -25,3 +25,6 @@ openleadr-rs/
 
 # Docker bind-mount data directories
 **/data/
+
+# Claude Code local settings
+.claude/settings.local.json
