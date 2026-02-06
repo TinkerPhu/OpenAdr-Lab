@@ -64,20 +64,26 @@ The VTN stack is live on Pi4-Server with two healthy containers:
 | VEN Container Blueprint | `VEN/ven_container_blueprint.md` | Rust VEN application |
 | VEN Web UI Blueprint | `VEN/ui/ven_web_ui_blueprint.md` | React + MUI VEN dashboard |
 | VTN DTO Examples | `VTN/DTO examples/` | JSON/TS sample payloads |
+| Integration Tests | `tests/` | behave/Gherkin + Docker Compose test stack |
 
-### 5. VEN Application — Scaffolded (Not Complete)
+### 5. VEN Application — Deployed and Running
 
-**Status: IN PROGRESS — code scaffolded, not building/running yet**
+**Status: COMPLETE**
 
-Rust source files exist:
-- `VEN/Cargo.toml` — dependencies defined (axum, tokio, reqwest, chrono, etc.)
-- `VEN/src/config.rs` — env-based config loader (complete)
-- `VEN/src/main.rs` — exists
-- `VEN/src/models.rs` — exists
-- `VEN/src/state.rs` — exists
-- `VEN/src/vtn.rs` — exists
+Three VEN instances running on Pi4-Server, all connecting to the VTN:
 
-Local `cargo` build started (target/ artifacts present) but **no Dockerfile, no docker-compose, not deployed to Pi yet**.
+| Container | Credentials | Port |
+|-----------|-------------|------|
+| `ven-ven-1-1` | ven-1/ven-1 | 8081 |
+| `ven-ven-2-1` | ven-2/ven-2 | 8082 |
+| `ven-ven-3-1` | ven-3/ven-3 | 8083 |
+
+**What was done:**
+- Completed Rust source: `main.rs`, `models.rs`, `state.rs`, `vtn.rs`, `config.rs`
+- Created `VEN/Dockerfile` (multi-stage rust:1.90-alpine build, nonroot user)
+- Created `VEN/docker-compose.yml` with 3 VEN services on external `vtn_openadr-net`
+- Registered ven-2 and ven-3 OAuth credentials via VTN API
+- VENs poll programs (300s), events (30s), generate fake sensor data (10s), persist state (15s)
 
 ### 6. VEN Web UI — Scaffolded (Not Complete)
 
@@ -93,7 +99,48 @@ React/TypeScript files exist:
 
 **No `package.json`, no `vite.config.ts`, no Dockerfile** — not buildable yet.
 
-### 7. VTN BFF + VTN Web UI — Not Started
+### 7. Integration Test Suite — Complete
+
+**Status: COMPLETE**
+
+End-to-end integration tests using Python `behave` (Cucumber/Gherkin) running inside a self-contained Docker Compose test stack. Tests are black-box HTTP calls — no code linkage to VEN/VTN.
+
+**Test stack** (`tests/docker-compose.test.yml`, project name `openadr-test`):
+
+| Service | Image | Purpose |
+|---------|-------|---------|
+| `test-db` | postgres:16-alpine | Ephemeral DB (no volume) |
+| `test-vtn` | build openleadr-rs | VTN server (auto-migrates) |
+| `test-ven-1` | build VEN | Single VEN with 5s poll intervals |
+| `test-runner` | build tests/ | Loads fixtures via psql, runs `behave` |
+
+**Test results: 6 features, 12 scenarios, 43 steps — all passing.**
+
+| Feature | Scenarios | What's tested |
+|---------|-----------|---------------|
+| `vtn_auth` | 2 | Valid/invalid OAuth token requests |
+| `vtn_programs` | 3 | Create, list, unauthenticated rejection |
+| `vtn_events` | 2 | Create event for program, list events |
+| `ven_health` | 1 | Health endpoint returns "ok" |
+| `ven_integration` | 3 | VEN reflects VTN programs/events, auto-generates sensors |
+| `ven_sensors` | 1 | POST sensor data, GET it back |
+
+**Key design decisions:**
+- Isolated `test-net` network, no published ports (no conflict with production)
+- VEN poll intervals set to 5s (not 30/300s) for fast test feedback
+- Test-runner loads SQL fixtures via `psql` in entrypoint before running behave
+- Integration tests use `poll_until()` for eventual consistency checks
+- No persistence volume on test VEN (ephemeral)
+
+**Run command:**
+```bash
+cd /srv/docker/openadr_lab
+docker compose -f tests/docker-compose.test.yml up --build \
+  --abort-on-container-exit --exit-code-from test-runner
+docker compose -f tests/docker-compose.test.yml down
+```
+
+### 8. VTN BFF + VTN Web UI — Not Started
 
 **Status: NOT STARTED — blueprints written, no code**
 
@@ -174,8 +221,8 @@ Raspberry Pi 4 — Docker Host
 ├── vtn-vtn-1          [openleadr-rs]           :3000  RUNNING
 │
 ├── ven-ven-1-1        [ven-app]                :8081  RUNNING
-├── ven-2              [ven-app]                :8082  NOT YET
-├── ven-3              [ven-app]                :8083  NOT YET
+├── ven-ven-2-1        [ven-app]                :8082  RUNNING
+├── ven-ven-3-1        [ven-app]                :8083  RUNNING
 │
 ├── vtn-bff            [rust axum]              :8090  NOT YET
 ├── vtn-ui             [react+nginx]            :8080  NOT YET
@@ -229,6 +276,34 @@ Docker Compose prefixes container names with the **project name**, which default
 
 ---
 
+## Phase 3 Work Log: Integration Test Suite (2026-02-06)
+
+### Design Decisions
+
+Chose Python `behave` (Gherkin/Cucumber) for integration tests — familiar BDD syntax, fast iteration, no need to compile. Tests are pure black-box HTTP calls: they hit the VTN and VEN REST APIs and assert on responses.
+
+The test stack runs in a completely isolated Docker Compose project (`openadr-test`) with its own network (`test-net`), no published ports, and no shared volumes. This means tests can run alongside the production stack without interference.
+
+### Initial Approach: fixture-loader Container
+
+First design used a separate `fixture-loader` service (postgres:16-alpine) that ran `test_user_credentials.sql` and exited. The VEN depended on it via `service_completed_successfully`. Problem: `--abort-on-container-exit` kills ALL containers when ANY container exits, including the fixture-loader. The test-runner never got a chance to start.
+
+### Fix: Load Fixtures in Test-Runner
+
+Moved fixture loading into the test-runner's entrypoint script. Added `postgresql-client` to the Python Alpine image. The entrypoint runs `psql` to load fixtures, then `exec behave`. This means only long-running services (db, vtn, ven) and the test-runner exist — no premature exits.
+
+The VEN starts before fixtures are loaded (it depends on test-vtn healthy, not fixtures). Its poll retry logic handles the initial auth failures gracefully — once fixtures are loaded and the next poll cycle fires (5s), authentication succeeds.
+
+### Duplicate Program Name Bug
+
+The `vtn_events.feature` used a `Background` that created a program named "event-test-program". Since Background runs before **each** scenario, the second scenario hit a unique constraint violation. Fixed by using unique program names per scenario.
+
+### Test Execution Performance
+
+All 12 scenarios complete in ~9 seconds (after services are healthy). The VEN's 5-second poll interval (vs 30/300s in production) keeps the integration tests snappy. The `poll_until()` helper in `wait.py` handles eventual consistency by retrying with a timeout.
+
+---
+
 ## Key Learnings
 
 - VTN auto-migrates on first boot — no need for manual `cargo sqlx migrate run`
@@ -242,6 +317,10 @@ Docker Compose prefixes container names with the **project name**, which default
 - VTN API field names follow OpenADR 3 spec: `programName`, `programID`, `createdDateTime`, `venName`
 - To discover an unfamiliar API: create test data, inspect responses, and read the source when needed
 - User credential creation requires the API (not raw SQL) because secrets are argon2-hashed server-side
+- `--abort-on-container-exit` kills everything when ANY container exits — don't use one-shot containers alongside it
+- Gherkin `Background` runs before EACH scenario, not once per feature — use unique test data names
+- VEN poll retry logic handles auth failures gracefully — safe to start before fixtures are loaded
+- `poll_until()` with short intervals is the right pattern for testing eventual consistency across services
 
 ---
 
