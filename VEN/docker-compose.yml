@@ -1,0 +1,110 @@
+###############################################################################
+# OpenADR 3 VEN Stack — Docker Compose
+#
+# Deploys VEN containers that connect to the running VTN.
+#
+# Prerequisites:
+#   - VTN stack must be running (see VTN/docker-compose.yml)
+#   - VEN OAuth credentials must be loaded in VTN DB fixtures
+#
+# Usage:
+#   docker compose up -d ven-1
+#   curl http://localhost:8081/health
+#
+# Scale to multiple VENs:
+#   docker compose up -d ven-1 ven-2 ven-3
+###############################################################################
+
+services:
+  ven-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://vtn:3000"
+      CLIENT_ID: "ven-1"
+      CLIENT_SECRET: "ven-1"
+      VEN_NAME: "ven-1"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      RUST_LOG: "info"
+    volumes:
+      - ven-1-data:/data
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - vtn_openadr-net
+
+  ven-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://vtn:3000"
+      CLIENT_ID: "ven-2"
+      CLIENT_SECRET: "ven-2"
+      VEN_NAME: "ven-2"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      RUST_LOG: "info"
+    volumes:
+      - ven-2-data:/data
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - vtn_openadr-net
+
+  ven-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8083:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://vtn:3000"
+      CLIENT_ID: "ven-3"
+      CLIENT_SECRET: "ven-3"
+      VEN_NAME: "ven-3"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      RUST_LOG: "info"
+    volumes:
+      - ven-3-data:/data
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - vtn_openadr-net
+
+volumes:
+  ven-1-data:
+  ven-2-data:
+  ven-3-data:
+
+networks:
+  vtn_openadr-net:
+    external: true
