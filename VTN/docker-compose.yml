@@ -4,8 +4,8 @@
 # Based on: openleadr-rs upstream docker-compose + vtn_setup_from_blog guide
 #
 # Prerequisites:
-#   1. Clone the openleadr-rs repo into this directory:
-#      git clone https://github.com/OpenLEADR/openleadr-rs.git
+#   1. Clone the openleadr-rs repo into the project root (one level up):
+#      cd .. && git clone https://github.com/OpenLEADR/openleadr-rs.git
 #
 #   2. Copy .env.example to .env (or use defaults)
 #
@@ -54,7 +54,7 @@ services:
   # ---------------------------------------------------------------------------
   vtn:
     build:
-      context: ./openleadr-rs
+      context: ../openleadr-rs
       dockerfile: vtn.Dockerfile
     restart: unless-stopped
     ports:
