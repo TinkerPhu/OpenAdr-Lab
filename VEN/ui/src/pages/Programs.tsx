@@ -1,23 +1,37 @@
 import { useMemo, useState } from "react";
-import { Paper, Stack, TextField, Typography, List, ListItem, ListItemText } from "@mui/material";
-import { Program } from "../api/types";
+import {
+  List, ListItem, ListItemText, Paper, Stack, TextField, Typography,
+} from "@mui/material";
+import { usePrograms } from "../api/hooks";
 
-export function ProgramsPage(props: { programs: Program[]; lastUpdated?: Date | null }) {
+export function ProgramsPage() {
+  const { data: programs = [], dataUpdatedAt } = usePrograms();
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
-    return props.programs.filter(p => {
+    return programs.filter((p) => {
       const hay = `${p.id} ${p.name ?? ""}`.toLowerCase();
       return hay.includes(query.toLowerCase());
     });
-  }, [props.programs, query]);
+  }, [programs, query]);
+
+  const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleString() : "—";
 
   return (
     <Stack spacing={2}>
       <div>
-        <Typography variant="h5">Programs</Typography>
-        <Typography variant="body2" color="text.secondary">
-          Last updated: {props.lastUpdated ? props.lastUpdated.toLocaleString() : "—"}
+        <Typography
+          variant="h5"
+          data-testid="programs-heading"
+        >
+          Programs
+        </Typography>
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          data-testid="programs-last-updated"
+        >
+          Last updated: {lastUpdated}
         </Typography>
       </div>
 
@@ -28,13 +42,17 @@ export function ProgramsPage(props: { programs: Program[]; lastUpdated?: Date | 
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           fullWidth
+          inputProps={{
+            "data-testid": "programs-search",
+            "aria-label": "Search programs",
+          }}
         />
       </Paper>
 
       <Paper>
-        <List dense>
-          {filtered.map(p => (
-            <ListItem key={p.id}>
+        <List dense data-testid="programs-list">
+          {filtered.map((p) => (
+            <ListItem key={p.id} data-testid={`program-item-${p.id}`}>
               <ListItemText
                 primary={p.name ?? p.id}
                 secondary={p.name ? p.id : undefined}
@@ -42,7 +60,7 @@ export function ProgramsPage(props: { programs: Program[]; lastUpdated?: Date | 
             </ListItem>
           ))}
           {filtered.length === 0 && (
-            <ListItem>
+            <ListItem data-testid="programs-empty">
               <ListItemText primary="No programs" />
             </ListItem>
           )}

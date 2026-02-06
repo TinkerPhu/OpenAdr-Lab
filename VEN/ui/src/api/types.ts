@@ -5,7 +5,7 @@ export type Event = {
   program_id?: string | null;
   created_at?: string | null;
   status?: string | null;
-  raw: any;
+  raw: unknown;
 };
 
 export type SensorSnapshot = {
@@ -14,5 +14,5 @@ export type SensorSnapshot = {
   temperature_c?: number | null;
   power_w?: number | null;
   voltage_v?: number | null;
-  raw: any;
+  raw: unknown;
 };
