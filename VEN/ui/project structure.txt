@@ -1,0 +1,18 @@
+src/
+  api/
+    client.ts
+    types.ts
+  hooks/
+    usePoll.ts
+  components/
+    VenSelector.tsx
+    StatusChip.tsx
+    JsonDialog.tsx
+    ErrorSnackbar.tsx
+  pages/
+    Dashboard.tsx
+    Programs.tsx
+    Events.tsx
+    Sensors.tsx
+  App.tsx
+  main.tsx

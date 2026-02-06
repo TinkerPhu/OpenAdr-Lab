@@ -1,0 +1,5 @@
+report:
+  name: telemetry_usage
+  unit: kW
+  interval: 5m
+  resource_id: meter-1
