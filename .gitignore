@@ -22,3 +22,6 @@ target
 
 # Cloned third-party repos (nested git repos, cloned at deploy time)
 openleadr-rs/
+
+# Docker bind-mount data directories
+**/data/
