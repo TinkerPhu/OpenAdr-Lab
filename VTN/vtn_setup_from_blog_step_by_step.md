@@ -57,47 +57,21 @@ Log out and back in after adding yourself to the docker group.
 
 ---
 
-## 1.3 Rust Toolchain
+## 1.3 NOT required for Docker‑based deployment
 
-Install via rustup:
+The original blog post installs Rust, sqlx‑cli, and psql on the host because
+it builds and runs the VTN natively. **Our setup builds the VTN inside Docker,
+so none of these are needed on the host.**
 
-```bash
-curl https://sh.rustup.rs -sSf | sh
-source $HOME/.cargo/env
-```
+| Tool | Blog post needed it for | Why we skip it |
+|------|-------------------------|----------------|
+| **Rust toolchain** (~1–2 GB) | Building VTN binary | `vtn.Dockerfile` uses `rust:1.90-alpine` as its build stage — compilation happens inside the Docker image ([source: vtn.Dockerfile from repo](https://github.com/OpenLEADR/openleadr-rs/blob/main/vtn.Dockerfile)) |
+| **sqlx‑cli** | Running `cargo sqlx migrate run` | The Dockerfile builds with `SQLX_OFFLINE=true`, embedding migration metadata. See section 4 for how we handle migrations. |
+| **psql** (PostgreSQL client) | Loading test fixtures | We use `docker exec` into the Postgres container instead (see section 7). |
 
-Verify:
-
-```bash
-rustc --version
-cargo --version
-```
-
----
-
-## 1.4 sqlx CLI
-
-Required for running migrations.
-
-```bash
-cargo install sqlx-cli
-```
-
-Verify:
-
-```bash
-sqlx --version
-```
-
----
-
-## 1.5 PostgreSQL client (psql)
-
-Used to load credential fixtures.
-
-```bash
-sudo apt-get install postgresql-client
-```
+> **Note on build time:** The first `docker compose up` builds the VTN from
+> source inside Docker. On a Pi4 (ARM64) this takes ~15–30 minutes. Subsequent
+> builds use Docker layer cache and are much faster.
 
 ---
 
@@ -145,11 +119,27 @@ You should see a running Postgres container.
 
 Migrations create all required database tables.
 
-From the repository root:
+**Blog post method** (requires Rust + sqlx‑cli on host):
 
 ```bash
 cargo sqlx migrate run
 ```
+
+**Docker‑based alternative** (no host tooling needed):
+
+The VTN binary may run migrations automatically at startup. If it does not,
+and tables are missing after step 5, you can run migrations from a temporary
+container:
+
+```bash
+docker run --rm --network=host \
+  -e DATABASE_URL=postgres://openadr:openadr@localhost:5432/openadr \
+  ghcr.io/launchbadge/sqlx-cli migrate run
+```
+
+> **Assumption:** Whether the openleadr‑rs VTN auto‑migrates at startup has
+> not been verified. We will confirm this when we first bring up the stack.
+> If it does, this step can be skipped entirely.
 
 Expected result:
 
@@ -209,16 +199,19 @@ After migrations, the database contains no users/clients.
 
 The project provides a SQL fixture used in tests.
 
-Load it:
+**Blog post method** (requires psql on host):
 
 ```bash
 psql -U openadr -W openadr -h localhost openadr < fixtures/test_user_credentials.sql
 ```
 
-Password when prompted:
+Password when prompted: `openadr`
 
-```
-openadr
+**Docker‑based alternative** (no host psql needed):
+
+```bash
+docker exec -i $(docker compose ps -q db) \
+  psql -U openadr openadr < openleadr-rs/fixtures/test_user_credentials.sql
 ```
 
 Expected result:
@@ -286,12 +279,10 @@ This matches the blog author’s state.
 
 # 10. Inspect Database (Optional)
 
-Use any SQL client (psql, Beekeeper Studio, etc.).
-
-Example:
+Use any SQL client (psql, Beekeeper Studio, etc.), or use `docker exec`:
 
 ```bash
-psql -U openadr -h localhost openadr
+docker exec -it $(docker compose ps -q db) psql -U openadr openadr
 ```
 
 List tables:
