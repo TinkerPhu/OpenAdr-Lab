@@ -1,40 +1,65 @@
-import { Paper, Stack, Typography } from "@mui/material";
-import { SensorSnapshot } from "../api/types";
-import { JsonDialog } from "../components/JsonDialog";
 import { useState } from "react";
+import { Link as MuiLink, Paper, Stack, Typography } from "@mui/material";
+import { useSensor } from "../api/hooks";
+import { JsonDialog } from "../components/JsonDialog";
+import { SensorForm } from "../components/SensorForm";
 
-export function SensorsPage(props: { sensor: SensorSnapshot | null; lastUpdated?: Date | null }) {
+export function SensorsPage() {
+  const { data: sensor, dataUpdatedAt } = useSensor();
   const [openRaw, setOpenRaw] = useState(false);
-  const s = props.sensor;
+
+  const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleString() : "—";
 
   return (
     <Stack spacing={2}>
       <div>
-        <Typography variant="h5">Sensors</Typography>
-        <Typography variant="body2" color="text.secondary">
-          Last updated: {props.lastUpdated ? props.lastUpdated.toLocaleString() : "—"}
+        <Typography
+          variant="h5"
+          data-testid="sensors-heading"
+        >
+          Sensors
+        </Typography>
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          data-testid="sensors-last-updated"
+        >
+          Last updated: {lastUpdated}
         </Typography>
       </div>
 
       <Paper sx={{ p: 2 }}>
         <Stack spacing={1}>
-          <Typography>Timestamp: {s?.ts ?? "—"}</Typography>
-          <Typography>Power (W): {s?.power_w ?? "—"}</Typography>
-          <Typography>Temp (°C): {s?.temperature_c ?? "—"}</Typography>
-          <Typography>Voltage (V): {s?.voltage_v ?? "—"}</Typography>
-          <Typography
-            sx={{ cursor: "pointer", color: "primary.main", width: "fit-content" }}
+          <Typography data-testid="sensor-timestamp">
+            Timestamp: {sensor?.ts ?? "—"}
+          </Typography>
+          <Typography data-testid="sensor-power">
+            Power (W): {sensor?.power_w ?? "—"}
+          </Typography>
+          <Typography data-testid="sensor-temp">
+            Temp (C): {sensor?.temperature_c ?? "—"}
+          </Typography>
+          <Typography data-testid="sensor-voltage">
+            Voltage (V): {sensor?.voltage_v ?? "—"}
+          </Typography>
+          <MuiLink
+            component="button"
             onClick={() => setOpenRaw(true)}
+            data-testid="sensor-raw-link"
+            aria-label="View raw JSON"
+            sx={{ width: "fit-content", cursor: "pointer" }}
           >
             View raw JSON
-          </Typography>
+          </MuiLink>
         </Stack>
       </Paper>
+
+      <SensorForm />
 
       <JsonDialog
         open={openRaw}
         title="Sensor raw payload"
-        json={s?.raw ?? {}}
+        json={sensor?.raw ?? {}}
         onClose={() => setOpenRaw(false)}
       />
     </Stack>
