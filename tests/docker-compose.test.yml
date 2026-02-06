@@ -1,7 +1,7 @@
 ###############################################################################
 # OpenADR 3 Integration Test Stack
 #
-# Self-contained test environment: DB + VTN + fixture-loader + VEN + test-runner
+# Self-contained test environment: DB + VTN + VEN + test-runner
 # No published ports — no conflict with production stack.
 #
 # Usage (on Pi):
@@ -55,27 +55,8 @@ services:
       - test-net
 
   # ---------------------------------------------------------------------------
-  # Fixture loader — runs test_user_credentials.sql then exits
-  # ---------------------------------------------------------------------------
-  fixture-loader:
-    image: postgres:16-alpine
-    depends_on:
-      test-vtn:
-        condition: service_healthy
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        echo "Loading test fixtures..."
-        PGPASSWORD=openadr psql -h test-db -U openadr -d openadr \
-          -f /fixtures/test_user_credentials.sql
-        echo "Fixtures loaded."
-    volumes:
-      - ../openleadr-rs/fixtures:/fixtures:ro
-    networks:
-      - test-net
-
-  # ---------------------------------------------------------------------------
   # VEN — single instance with fast polling (5s) for test speed
+  # Starts before fixtures; poll retry handles initial auth failures.
   # ---------------------------------------------------------------------------
   test-ven-1:
     build:
@@ -97,13 +78,13 @@ services:
       retries: 10
       start_period: 10s
     depends_on:
-      fixture-loader:
-        condition: service_completed_successfully
+      test-vtn:
+        condition: service_healthy
     networks:
       - test-net
 
   # ---------------------------------------------------------------------------
-  # Test runner — behave (Python Cucumber)
+  # Test runner — loads fixtures via psql, then runs behave
   # ---------------------------------------------------------------------------
   test-runner:
     build:
@@ -112,6 +93,8 @@ services:
     environment:
       VTN_BASE_URL: "http://test-vtn:3000"
       VEN_BASE_URL: "http://test-ven-1:8080"
+    volumes:
+      - ../openleadr-rs/fixtures:/fixtures:ro
     depends_on:
       test-vtn:
         condition: service_healthy
