@@ -103,7 +103,7 @@ From the `VTN/` directory (where `docker-compose.yml` lives):
 
 ```bash
 cd VTN
-docker compose up -d vtn-db
+docker compose up -d db
 ```
 
 Expected result:
@@ -117,7 +117,7 @@ Verify:
 docker ps
 ```
 
-You should see a running Postgres container (`vtn-vtn-db-1`).
+You should see a running Postgres container (`vtn-db-1`).
 
 ---
 
@@ -145,7 +145,7 @@ docker compose up -d
 
 This starts:
 
-- `vtn-db` — PostgreSQL database (starts first, waits for healthy)
+- `db` — PostgreSQL database (starts first, waits for healthy)
 - `vtn` — OpenLEADR VTN server (builds from `../openleadr-rs/vtn.Dockerfile`)
 
 > **First build takes ~25 minutes on a Pi4 (ARM64).** Subsequent builds use
@@ -157,7 +157,7 @@ Verify containers:
 docker ps
 ```
 
-You should see two containers: `vtn-vtn-db-1` and `vtn-vtn-1`.
+You should see two containers: `vtn-db-1` and `vtn-vtn-1`.
 
 Check VTN health:
 
@@ -200,7 +200,7 @@ loading fixtures, all OAuth token requests will fail with `invalid_client`.
 The project provides a SQL fixture with test credentials:
 
 ```bash
-docker exec -i vtn-vtn-db-1 \
+docker exec -i vtn-db-1 \
   psql -U openadr openadr < ../openleadr-rs/fixtures/test_user_credentials.sql
 ```
 
@@ -278,7 +278,7 @@ Expected result: `[]` (empty JSON arrays — no programs or events created yet).
 Use any SQL client (psql, Beekeeper Studio, etc.), or use `docker exec`:
 
 ```bash
-docker exec -it vtn-vtn-db-1 psql -U openadr openadr
+docker exec -it vtn-db-1 psql -U openadr openadr
 ```
 
 List tables:
