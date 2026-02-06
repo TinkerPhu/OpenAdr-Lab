@@ -44,7 +44,7 @@ services:
     ports:
       - "${PG_PORT:-5432}:5432"
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - ./data/db:/var/lib/postgresql/data
     networks:
       - openadr-net
 
@@ -78,10 +78,6 @@ services:
         condition: service_healthy
     networks:
       - openadr-net
-
-volumes:
-  db-data:
-    driver: local
 
 networks:
   openadr-net:
