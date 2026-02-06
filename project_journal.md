@@ -85,19 +85,36 @@ Three VEN instances running on Pi4-Server, all connecting to the VTN:
 - Registered ven-2 and ven-3 OAuth credentials via VTN API
 - VENs poll programs (300s), events (30s), generate fake sensor data (10s), persist state (15s)
 
-### 6. VEN Web UI — Scaffolded (Not Complete)
+### 6. VEN Web UI — Built, Tested, and Deployed
 
-**Status: IN PROGRESS — components started, not buildable yet**
+**Status: COMPLETE**
 
-React/TypeScript files exist:
-- `VEN/ui/src/App.tsx`
-- `VEN/ui/src/api/client.ts`
-- `VEN/ui/src/hooks/usePoll.ts`
-- `VEN/ui/src/pages/Dashboard.tsx`, `Events.tsx`, `Programs.tsx`, `Sensors.tsx`
-- `VEN/ui/src/components/JsonDialog.tsx`
-- `VEN/ui/src/datamodel.ts`
+React + TypeScript SPA served by nginx on port 8084:
 
-**No `package.json`, no `vite.config.ts`, no Dockerfile** — not buildable yet.
+| Container | Image | Status | Port |
+|-----------|-------|--------|------|
+| `ven-ui-1` | ven-ui (node build + nginx) | running | 8084 |
+
+**What was done:**
+- Created full Vite build infrastructure (`package.json`, `vite.config.ts`, `tsconfig.json`, `index.html`)
+- Replaced manual `usePoll` hook with `@tanstack/react-query` (`useQuery` with `refetchInterval`)
+- Created `VenContext` for multi-VEN support — selector switches data across all pages
+- Added `data-testid` and `aria` attributes on all interactive/data elements per `REACT_GUIDELINES.md`
+- Removed redundant `role` attributes where MUI already provides them natively
+- Created `SensorForm` component for POST /sensors injection
+- Wrote 31 component tests across 6 test files (Vitest + Testing Library)
+- Multi-stage Docker build (node:20-alpine build + nginx:alpine serve) with SPA fallback
+- Deployed to Pi4-Server as `ui` service in VEN docker-compose
+
+**Architecture:**
+- `src/api/hooks.ts` — 5 react-query hooks (`useHealth`, `usePrograms`, `useEvents`, `useSensor`, `usePostSensor`)
+- `src/api/client.ts` — `VenApi` class wrapping fetch calls to VEN REST API
+- `src/api/types.ts` — `Program`, `Event`, `SensorSnapshot` types
+- Pages: Dashboard (summary cards), Programs (searchable list), Events (filterable table with JSON dialog), Sensors (live data + injection form)
+
+**Also updated:**
+- `ReactCodingGuideLines.md` → renamed to `REACT_GUIDELINES.md`
+- Guidelines updated: consistent function component signatures (no `FC`), smart `role` usage, Vitest test patterns, react-query v5 object syntax
 
 ### 7. Integration Test Suite — Complete
 
@@ -150,34 +167,10 @@ docker compose -f tests/docker-compose.test.yml down
 
 Based on the system design's implementation order (Section 19) and current state:
 
-### Phase 1: Complete the VEN Application (Priority: HIGH)
+### ~~Phase 1: Complete the VEN Application~~ DONE
+### ~~Phase 2: VEN Web UI~~ DONE
 
-This is the next logical step. The VTN is running but there's nothing talking to it.
-
-**Tasks:**
-1. **Finish the VEN Rust application** — complete `main.rs`, `models.rs`, `state.rs`, `vtn.rs` to implement:
-   - OAuth client (client_credentials grant against `/auth/token`)
-   - Program poller (every 5 min)
-   - Event poller (every 30 sec)
-   - Sensor sampler (simulated telemetry)
-   - Local REST API (GET /health, /events, /programs, /sensors)
-2. **Create VEN Dockerfile** — multi-stage Rust build (similar to vtn.Dockerfile)
-3. **Create VEN docker-compose.yml** — initially for 1 VEN, then scale to 3
-4. **Register VEN OAuth clients in VTN DB** — the test fixtures only have `ven-1`; add `ven-2`, `ven-3`
-5. **Deploy to Pi4-Server** — build and run alongside VTN stack
-6. **Validate end-to-end** — VEN obtains token, discovers programs, polls events
-
-### Phase 2: VEN Web UI (Priority: MEDIUM)
-
-Once VENs are running and their APIs are accessible:
-
-1. **Scaffold the React app properly** — `package.json`, Vite config, MUI
-2. **Complete the UI pages** — Dashboard, Events, Programs, Sensors
-3. **Add multi-VEN selector** — switch between VEN1/VEN2/VEN3
-4. **Containerize** — Nginx-based Docker image
-5. **Deploy to Pi4-Server**
-
-### Phase 3: Create Programs and Events via VTN API (Priority: MEDIUM)
+### Phase 3: Create Programs and Events via VTN API (Priority: HIGH)
 
 The VTN is running but empty — no programs or events exist yet.
 
@@ -224,9 +217,10 @@ Raspberry Pi 4 — Docker Host
 ├── ven-ven-2-1        [ven-app]                :8082  RUNNING
 ├── ven-ven-3-1        [ven-app]                :8083  RUNNING
 │
+├── ven-ui-1           [react+nginx]            :8084  RUNNING
+│
 ├── vtn-bff            [rust axum]              :8090  NOT YET
-├── vtn-ui             [react+nginx]            :8080  NOT YET
-└── ven-ui             [react+nginx]            :8084  NOT YET
+└── vtn-ui             [react+nginx]            :8080  NOT YET
 ```
 
 ---
@@ -304,6 +298,47 @@ All 12 scenarios complete in ~9 seconds (after services are healthy). The VEN's 
 
 ---
 
+## Phase 4 Work Log: VEN Web UI (2026-02-06)
+
+### From Scaffold to Buildable App
+
+The VEN UI had been scaffolded (App.tsx, 4 pages, API client, usePoll hook, JsonDialog) but was not buildable — no `package.json`, no Vite config, no `index.html`, no entry point.
+
+### Key Architecture Changes
+
+1. **Replaced `usePoll` with `@tanstack/react-query`**: Per `REACT_GUIDELINES.md`, switched from manual polling + `useState` to `useQuery` with `refetchInterval`. Each page now fetches its own data — App.tsx no longer manages all state centrally.
+
+2. **Created `VenContext`**: Stores `{ venUrl, setVenUrl, api }`. Changing `venUrl` in the selector invalidates all queries via `queryClient.invalidateQueries()`.
+
+3. **Moved types**: `datamodel.ts` → `api/types.ts`, changed `raw: any` to `raw: unknown` for type safety.
+
+4. **Smart `role` attributes**: Initially added `role` to every interactive element per the guidelines. Then updated the guidelines themselves to note that MUI provides native roles (dialog, button, combobox, table, list, etc.) — removed 27 redundant `role` attributes, kept only `role="status"` and `role="alert"` where Typography lacks semantic meaning.
+
+### Vite Build on Windows Subst Drives
+
+Hit a Vite build error: `The "fileName" properties of emitted chunks must not be absolute paths, received "C:/DriveD/..."`. Root cause: `D:` drive is a Windows `subst` of `C:\DriveD`, and Vite resolves the real path internally causing a mismatch. Fixed by building from the real path. Not an issue in Docker (Linux).
+
+### React Guidelines Improvements
+
+Updated `REACT_GUIDELINES.md` (renamed from `ReactCodingGuideLines.md`):
+- Unified component signature style: plain `function` (not `FC`)
+- Updated `role` guidance: only add when component doesn't provide natively
+- Replaced Cypress assertion examples with Testing Library/Vitest
+- Added Vitest + Testing Library setup section
+- Updated react-query examples to v5 object syntax
+- Marked auth/token sections as reference material
+
+### Docker Build Performance
+
+VEN UI builds fast on the Pi (~33s total):
+- `npm ci`: ~34s (237 packages)
+- `tsc + vite build`: ~33s (963 modules)
+- nginx image layer: instant
+
+Much faster than the Rust VEN (~11 min) or VTN (~25 min) builds.
+
+---
+
 ## Key Learnings
 
 - VTN auto-migrates on first boot — no need for manual `cargo sqlx migrate run`
@@ -321,6 +356,12 @@ All 12 scenarios complete in ~9 seconds (after services are healthy). The VEN's 
 - Gherkin `Background` runs before EACH scenario, not once per feature — use unique test data names
 - VEN poll retry logic handles auth failures gracefully — safe to start before fixtures are loaded
 - `poll_until()` with short intervals is the right pattern for testing eventual consistency across services
+- MUI components provide native ARIA roles — don't duplicate them (e.g. `<Button>` already has `role="button"`)
+- Use `role="status"` and `role="alert"` on `<Typography>` for screen reader announcements — these are semantic roles the element doesn't have natively
+- Windows `subst` drives cause Vite build failures — Vite resolves to real path internally, creating mismatches. Build from real path or in Docker
+- React Query `refetchInterval` is a cleaner replacement for manual `setInterval` polling — handles loading/error states, caching, and query invalidation
+- VEN UI Docker build (~33s) is dramatically faster than Rust builds (~11-25 min) since it's just npm + Vite bundling
+- `React.FC` is discouraged — use plain `function` with typed props for cleaner, more explicit component signatures
 
 ---
 
