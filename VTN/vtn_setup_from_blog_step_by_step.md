@@ -80,7 +80,7 @@ so none of these are needed on the host.**
 Clone from the **project root** (one level above `VTN/`):
 
 ```bash
-cd /srv/openadr_lab          # or wherever your project root is
+cd /srv/docker/openadr_lab          # or wherever your project root is
 git clone https://github.com/OpenLEADR/openleadr-rs.git
 ```
 
