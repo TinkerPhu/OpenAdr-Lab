@@ -13,9 +13,9 @@ import { EventsPage } from "./pages/Events";
 import { SensorsPage } from "./pages/Sensors";
 
 const DEFAULT_VENS = [
-  { label: "VEN1", url: "http://raspberrypi.local:8211" },
-  { label: "VEN2", url: "http://raspberrypi.local:8212" },
-  { label: "VEN3", url: "http://raspberrypi.local:8213" },
+  { label: "VEN1", url: "http://pi4server.local:8211" },
+  { label: "VEN2", url: "http://pi4server.local:8212" },
+  { label: "VEN3", url: "http://pi4server.local:8213" },
 ];
 
 type VenContextType = {
