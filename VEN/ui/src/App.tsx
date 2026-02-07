@@ -11,15 +11,17 @@ import { DashboardPage } from "./pages/Dashboard";
 import { ProgramsPage } from "./pages/Programs";
 import { EventsPage } from "./pages/Events";
 import { SensorsPage } from "./pages/Sensors";
+import { ReportsPage } from "./pages/Reports";
 
 const DEFAULT_VENS = [
-  { label: "VEN1", url: "http://pi4server.local:8211" },
-  { label: "VEN2", url: "http://pi4server.local:8212" },
-  { label: "VEN3", url: "http://pi4server.local:8213" },
+  { label: "VEN1", url: "http://pi4server.local:8211", venName: "ven-1" },
+  { label: "VEN2", url: "http://pi4server.local:8212", venName: "ven-2" },
+  { label: "VEN3", url: "http://pi4server.local:8213", venName: "ven-3" },
 ];
 
 type VenContextType = {
   venUrl: string;
+  venName: string;
   setVenUrl: (url: string) => void;
   api: VenApi;
 };
@@ -80,7 +82,8 @@ export default function App() {
     queryClient.invalidateQueries();
   }
 
-  const ctx = useMemo(() => ({ venUrl, setVenUrl, api }), [venUrl, api]);
+  const venName = DEFAULT_VENS.find((v) => v.url === venUrl)?.venName ?? "ven-1";
+  const ctx = useMemo(() => ({ venUrl, venName, setVenUrl, api }), [venUrl, venName, api]);
 
   return (
     <VenContext.Provider value={ctx}>
@@ -174,6 +177,13 @@ export default function App() {
             >
               Sensors
             </Button>
+            <Button
+              component={Link}
+              to="/reports"
+              data-testid="nav-reports"
+            >
+              Reports
+            </Button>
           </Stack>
 
           <Routes>
@@ -181,6 +191,7 @@ export default function App() {
             <Route path="/programs" element={<ProgramsPage />} />
             <Route path="/events" element={<EventsPage />} />
             <Route path="/sensors" element={<SensorsPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
           </Routes>
         </Container>
       </BrowserRouter>

@@ -14,6 +14,7 @@ vi.mock("../api/client", () => ({
     programs: vi.fn().mockResolvedValue([]),
     events: vi.fn().mockResolvedValue([]),
     vens: vi.fn().mockResolvedValue([]),
+    reports: vi.fn().mockResolvedValue([]),
   })),
 }));
 
@@ -41,6 +42,7 @@ describe("App shell", () => {
     expect(screen.getByTestId("nav-programs")).toBeVisible();
     expect(screen.getByTestId("nav-events")).toBeVisible();
     expect(screen.getByTestId("nav-vens")).toBeVisible();
+    expect(screen.getByTestId("nav-reports")).toBeVisible();
   });
 
   it("renders auto-refresh toggle", () => {

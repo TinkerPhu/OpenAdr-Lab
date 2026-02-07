@@ -18,8 +18,24 @@ const useVensMock = vi.fn(() => ({
 
 const deleteMock = vi.fn();
 
+const mockPrograms = [
+  {
+    id: "p1",
+    programName: "Summer Peak DR",
+    targets: [{ type: "VEN_NAME", values: ["ven-1", "ven-2"] }],
+    createdDateTime: "2026-01-01",
+  },
+  {
+    id: "p2",
+    programName: "HVAC Optimization",
+    targets: null,
+    createdDateTime: "2026-01-02",
+  },
+];
+
 vi.mock("../api/hooks", () => ({
   useVens: () => useVensMock(),
+  usePrograms: () => ({ data: mockPrograms, dataUpdatedAt: Date.now() }),
   useDeleteVen: () => ({ mutate: deleteMock, isPending: false }),
 }));
 

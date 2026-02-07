@@ -246,12 +246,7 @@ Based on the system design's implementation order (Section 19) and current state
 
 ### ~~Phase 4: VTN BFF + VTN Web UI~~ DONE
 
-### Phase 5: Reporting and Telemetry (Priority: LOWER)
-
-1. **Implement report sender in VEN** — submit telemetry to VTN
-2. **Verify VTN report ingestion**
-3. **Add telemetry charts to VEN UI**
-4. **Evaluate whether VTN persists report datapoints** (known open question)
+### ~~Phase 5: Enrollment & Reports (Phase 10)~~ DONE
 
 ### Phase 6: Hardening and Observability (Priority: FUTURE)
 
@@ -590,6 +585,84 @@ After Phases 1–8, the system was functional but had gaps: the VEN sensor POST 
 
 ---
 
+## Phase 10 Work Log: Enrollment & Reports (2026-02-07)
+
+### Motivation
+
+Both UIs displayed all Programs and Events identically regardless of which VEN was viewing them. In real OpenADR, a VTN **enrolls** specific VENs in specific Programs via `targets` with `VEN_NAME`. The VTN (openleadr-rs) already implements this filtering server-side — we just needed UI + BFF + VEN layers to expose it. Additionally, the VTN's report system (POST/GET/DELETE /reports) was unused.
+
+### Sub-phase 10a: Enrollment — Seed + VTN UI
+
+**Seed script** (`scripts/seed_vtn.py`):
+- Added `programLongName`, `programType`, and `targets` to PROGRAMS data
+- Enrollment map: "Summer Peak DR" → ven-1, ven-2 | "EV Managed Charging" → ven-2, ven-3 | "HVAC Optimization" → no targets (open)
+- Added `update_program()` function to PUT targets onto existing programs (idempotent re-runs)
+
+**VTN UI**:
+- Extended `Program` type with `programLongName`, `programType`, `targets`; added `TargetEntry` type
+- `ProgramFormDialog` gained `programLongName`, `programType` text fields and VEN enrollment multi-select (checkboxes)
+- Programs page shows enrolled VEN names as Chips (or "Open — all VENs")
+- VENs page cross-references program targets to show enrolled programs per VEN
+- 39/39 tests passing
+
+**Key insight**: Programs without `targets` are visible to **all** VENs (open programs). Programs with `targets: [{type: "VEN_NAME", values: [...]}]` are visible only to enrolled VENs. This natural "available vs enrolled" distinction requires no extra endpoints.
+
+### Sub-phase 10b: Reports — VTN BFF + VTN UI
+
+**BFF** (`VTN/bff/src/routes/reports.rs`):
+- `GET /api/reports` — cached proxy (10s TTL) via `any-business` credential
+- `DELETE /api/reports/:id` — proxy with cache invalidation
+- No POST — only VENs (with VEN credentials) can create reports
+
+**VTN UI**:
+- Reports page with table (clientName, reportName, program, event, created), search, JsonDialog, delete with ConfirmDialog
+- Dashboard reports count card, nav link
+- 47/47 tests passing (6 files)
+
+### Sub-phase 10c: Reports — VEN Backend
+
+**VtnClient** (`VEN/src/vtn.rs`):
+- Added `post_json()` with 401-retry pattern (same as `get_json`)
+- Added `fetch_reports()` and `submit_report(body)` methods
+
+**AppState/AppCtx** (`VEN/src/state.rs`, `main.rs`):
+- Added `reports: Vec<serde_json::Value>` to state
+- Added reports polling loop (configurable interval, default 60s)
+- VtnClient stored in AppCtx for POST forwarding
+- Routes: `GET /reports` (cached), `POST /reports` (forward to VTN, return 201)
+
+### Sub-phase 10d: VEN UI Enhancements
+
+- Programs page shows `programLongName` and `programType` as secondary text
+- Events page resolves `programID` → `programName` via lookup map
+- New Reports page: table of existing reports, "Submit Report" form with event dropdown, auto-populated programID from selected event, clientName from VEN context
+- Dashboard reports count card
+- `venName` added to VEN context for report clientName
+- 30/30 tests passing (6 files)
+
+### Sub-phase 10e: Integration Tests
+
+**New feature files**:
+- `enrollment.feature` (2 scenarios): open program visible to all VENs, targeted program visible only to enrolled VEN
+- `bff_reports.feature` (1 scenario): list reports via BFF returns JSON array
+- `ven_reports.feature` (1 scenario): submit report via VEN-1, verify round-trip through VEN and BFF
+
+**Infrastructure changes**:
+- Added `test-ven-2` service to `docker-compose.test.yml` (needed for enrollment tests)
+- Added `provision_ven2.py` — provisions ven-2 user/credentials/VEN entity via API (idempotent)
+- Updated entrypoint to run provisioning after fixtures
+- Added `VEN2_BASE_URL` to api_client.py and environment.py
+
+### Issues and Learnings
+
+- `targets` wire format is `[{type: "VEN_NAME", values: [...]}]` — array of objects, not an object map
+- VTN `POST /reports` returns **201**, not 200 — VEN backend must forward this status
+- BFF report cache won't auto-invalidate when VENs POST reports — relies on short TTL (10s)
+- Test fixtures only include ven-1 — ven-2 must be provisioned via API in entrypoint
+- VTN POST /reports requires VEN role — business credentials get 403
+
+---
+
 ## Key Learnings
 
 - VTN auto-migrates on first boot — no need for manual `cargo sqlx migrate run`
@@ -620,6 +693,11 @@ After Phases 1–8, the system was functional but had gaps: the VEN sensor POST 
 - Avoid DTO normalization across layers — pass through upstream field names (e.g. VTN's `programName`, `programID`) as-is. One vocabulary reduces code, boilerplate, and debugging friction
 - Docker Compose `.env` files silently override `${VAR:-default}` in YAML — always check for stale `.env` values after changing defaults
 - When multiple containers on a shared host need ports, pick a dedicated range (e.g. 82xx) to avoid conflicts with existing services
+
+- OpenADR enrollment via `targets` is a first-class VTN feature — no custom endpoints needed. Programs without targets are "open" (all VENs see them)
+- VTN POST /reports requires VEN role — a BFF with business credentials cannot create reports on behalf of VENs
+- When adding a second VEN to the test stack, all credentials must be provisioned via API since fixture SQL only covers ven-1
+- Axum 0.7 path params use `:id` syntax — `{id}` is axum 0.8+ and silently returns 404
 
 ---
 

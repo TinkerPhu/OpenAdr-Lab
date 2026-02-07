@@ -4,20 +4,30 @@ import {
   TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
 import type { VtnEvent } from "../api/types";
-import { useEvents } from "../api/hooks";
+import { useEvents, usePrograms } from "../api/hooks";
 import { JsonDialog } from "../components/JsonDialog";
 
 export function EventsPage() {
   const { data: events = [], dataUpdatedAt } = useEvents();
+  const { data: programs = [] } = usePrograms();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<VtnEvent | null>(null);
 
+  const programMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of programs) {
+      map.set(p.id, p.programName ?? p.id);
+    }
+    return map;
+  }, [programs]);
+
   const filtered = useMemo(() => {
     return events.filter((e) => {
-      const hay = `${e.id} ${e.programID ?? ""} ${e.eventName ?? ""}`.toLowerCase();
+      const progName = e.programID ? programMap.get(e.programID) ?? "" : "";
+      const hay = `${e.id} ${e.programID ?? ""} ${e.eventName ?? ""} ${progName}`.toLowerCase();
       return hay.includes(query.toLowerCase());
     });
-  }, [events, query]);
+  }, [events, query, programMap]);
 
   const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleString() : "—";
 
@@ -57,9 +67,8 @@ export function EventsPage() {
         <Table size="small" data-testid="events-table">
           <TableHead>
             <TableRow>
-              <TableCell>ID</TableCell>
               <TableCell>Event Name</TableCell>
-              <TableCell>Program ID</TableCell>
+              <TableCell>Program</TableCell>
               <TableCell>Created</TableCell>
             </TableRow>
           </TableHead>
@@ -72,15 +81,16 @@ export function EventsPage() {
                 onClick={() => setSelected(e)}
                 data-testid={`event-row-${e.id}`}
               >
-                <TableCell sx={{ fontFamily: "monospace" }}>{e.id}</TableCell>
                 <TableCell>{e.eventName ?? "—"}</TableCell>
-                <TableCell sx={{ fontFamily: "monospace" }}>{e.programID ?? "—"}</TableCell>
+                <TableCell>
+                  {e.programID ? (programMap.get(e.programID) ?? e.programID) : "—"}
+                </TableCell>
                 <TableCell>{e.createdDateTime ?? "—"}</TableCell>
               </TableRow>
             ))}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} align="center" data-testid="events-empty">
+                <TableCell colSpan={3} align="center" data-testid="events-empty">
                   No events
                 </TableCell>
               </TableRow>

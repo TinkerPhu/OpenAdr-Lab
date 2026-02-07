@@ -66,6 +66,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/events/:id", put(routes::events::update_event).delete(routes::events::delete_event))
         .route("/api/vens", get(routes::vens::get_vens))
         .route("/api/vens/:id", delete(routes::vens::delete_ven))
+        .route("/api/reports", get(routes::reports::get_reports))
+        .route("/api/reports/:id", delete(routes::reports::delete_report))
         .with_state(ctx)
         .layer(cors);
 

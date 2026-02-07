@@ -48,3 +48,23 @@ export function usePostSensor() {
     },
   });
 }
+
+export function useReports() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["reports", api.baseUrl],
+    queryFn: () => api.reports(),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useSubmitReport() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: unknown) => api.submitReport(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+    },
+  });
+}

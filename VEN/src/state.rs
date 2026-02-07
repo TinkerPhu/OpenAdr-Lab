@@ -12,6 +12,7 @@ pub struct AppState {
 pub struct InnerState {
     pub programs: Vec<serde_json::Value>,
     pub events: Vec<serde_json::Value>,
+    pub reports: Vec<serde_json::Value>,
     pub sensor: SensorSnapshot,
 }
 
@@ -21,6 +22,7 @@ impl AppState {
             inner: Arc::new(RwLock::new(InnerState {
                 programs: vec![],
                 events: vec![],
+                reports: vec![],
                 sensor: SensorSnapshot::empty_now(),
             })),
         }
@@ -34,6 +36,10 @@ impl AppState {
         // Keep newest first (assume poller provides newest first; enforce anyway)
         events.truncate(max_keep);
         self.inner.write().await.events = events;
+    }
+
+    pub async fn set_reports(&self, reports: Vec<serde_json::Value>) {
+        self.inner.write().await.reports = reports;
     }
 
     pub async fn update_sensor(&self, sensor: SensorSnapshot) {
@@ -50,6 +56,10 @@ impl AppState {
 
     pub async fn events(&self) -> Vec<serde_json::Value> {
         self.inner.read().await.events.clone()
+    }
+
+    pub async fn reports(&self) -> Vec<serde_json::Value> {
+        self.inner.read().await.reports.clone()
     }
 
     pub async fn sensor(&self) -> SensorSnapshot {
@@ -73,6 +83,7 @@ impl Clone for InnerState {
         Self {
             programs: self.programs.clone(),
             events: self.events.clone(),
+            reports: self.reports.clone(),
             sensor: self.sensor.clone(),
         }
     }

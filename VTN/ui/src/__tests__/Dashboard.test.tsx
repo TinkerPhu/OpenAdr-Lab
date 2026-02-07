@@ -25,11 +25,16 @@ const mockVens = [
   { id: "v2", venName: "ven-2", createdDateTime: "2026-01-02" },
 ];
 
+const mockReports = [
+  { id: "r1", programID: "p1", eventID: "e1", clientName: "ven-1", resources: [], createdDateTime: "2026-01-01" },
+];
+
 vi.mock("../api/hooks", () => ({
   useHealth: vi.fn(() => ({ data: mockHealth, isError: false })),
   usePrograms: vi.fn(() => ({ data: mockPrograms })),
   useEvents: vi.fn(() => ({ data: mockEvents })),
   useVens: vi.fn(() => ({ data: mockVens })),
+  useReports: vi.fn(() => ({ data: mockReports })),
 }));
 
 function renderDashboard() {

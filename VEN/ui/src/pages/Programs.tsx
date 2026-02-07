@@ -10,7 +10,7 @@ export function ProgramsPage() {
 
   const filtered = useMemo(() => {
     return programs.filter((p) => {
-      const hay = `${p.id} ${p.programName ?? ""}`.toLowerCase();
+      const hay = `${p.id} ${p.programName ?? ""} ${p.programLongName ?? ""}`.toLowerCase();
       return hay.includes(query.toLowerCase());
     });
   }, [programs, query]);
@@ -55,7 +55,9 @@ export function ProgramsPage() {
             <ListItem key={p.id} data-testid={`program-item-${p.id}`}>
               <ListItemText
                 primary={p.programName ?? p.id}
-                secondary={p.programName ? p.id : undefined}
+                secondary={
+                  [p.programLongName, p.programType].filter(Boolean).join(" — ") || p.id
+                }
               />
             </ListItem>
           ))}

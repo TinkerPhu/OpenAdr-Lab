@@ -9,6 +9,7 @@ pub struct Config {
     pub ven_name: String,
     pub poll_events_secs: u64,
     pub poll_programs_secs: u64,
+    pub poll_reports_secs: u64,
     pub persist_path: Option<String>,
 }
 
@@ -30,6 +31,11 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(300);
 
+        let poll_reports_secs = std::env::var("POLL_REPORTS_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60);
+
         let persist_path = std::env::var("PERSIST_PATH").ok();
 
         Ok(Self {
@@ -40,6 +46,7 @@ impl Config {
             ven_name,
             poll_events_secs,
             poll_programs_secs,
+            poll_reports_secs,
             persist_path,
         })
     }

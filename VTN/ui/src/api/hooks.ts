@@ -100,3 +100,21 @@ export function useDeleteVen() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["vens"] }),
   });
 }
+
+export function useReports() {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["reports"],
+    queryFn: () => api.reports(),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useDeleteReport() {
+  const { api } = useBffContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteReport(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["reports"] }),
+  });
+}

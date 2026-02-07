@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY behave.ini .
 COPY features/ features/
+COPY provision_ven2.py .
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 

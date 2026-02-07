@@ -5,6 +5,7 @@ import requests
 
 VTN_BASE_URL = os.environ.get("VTN_BASE_URL", "http://test-vtn:3000")
 VEN_BASE_URL = os.environ.get("VEN_BASE_URL", "http://test-ven-1:8080")
+VEN2_BASE_URL = os.environ.get("VEN2_BASE_URL", "http://test-ven-2:8080")
 BFF_BASE_URL = os.environ.get("BFF_BASE_URL", "http://test-bff:8090")
 
 
