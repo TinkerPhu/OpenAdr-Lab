@@ -10,7 +10,7 @@ def step_wait_ven_program(context, name):
 
     context.ven_programs = poll_until(
         fetch,
-        lambda progs: any(p.get("name") == name for p in progs),
+        lambda progs: any(p.get("programName") == name for p in progs),
         timeout=30,
         interval=3,
         description=f"VEN shows program '{name}'",
@@ -19,7 +19,7 @@ def step_wait_ven_program(context, name):
 
 @then('the VEN program list contains "{name}"')
 def step_ven_program_list_contains(context, name):
-    names = [p.get("name") for p in context.ven_programs]
+    names = [p.get("programName") for p in context.ven_programs]
     assert name in names, f"'{name}' not in VEN program names: {names}"
 
 

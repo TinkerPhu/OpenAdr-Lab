@@ -6,9 +6,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventsPage } from "../pages/Events";
 
 const mockEvents = [
-  { id: "e1", program_id: "p1", status: "active", created_at: "2024-01-01", raw: { foo: 1 } },
-  { id: "e2", program_id: "p1", status: "completed", created_at: "2024-01-02", raw: { bar: 2 } },
-  { id: "e3", program_id: "p2", status: "active", created_at: "2024-01-03", raw: { baz: 3 } },
+  { id: "e1", programID: "p1", eventName: "peak-curtail-1", createdDateTime: "2024-01-01" },
+  { id: "e2", programID: "p1", eventName: "peak-curtail-2", createdDateTime: "2024-01-02" },
+  { id: "e3", programID: "p2", eventName: "ev-shift-morning", createdDateTime: "2024-01-03" },
 ];
 
 const useEventsMock = vi.fn(() => ({
@@ -56,27 +56,19 @@ describe("EventsPage", () => {
     expect(screen.getByTestId("event-row-e3")).toBeVisible();
   });
 
-  it("renders filter chips", () => {
+  it("displays event name and program ID in table", () => {
     renderEvents();
-    expect(screen.getByTestId("events-filter-all")).toBeVisible();
-    expect(screen.getByTestId("events-filter-active")).toBeVisible();
-    expect(screen.getByTestId("events-filter-completed")).toBeVisible();
-  });
-
-  it("filters by status when chip is clicked", async () => {
-    renderEvents();
-    await userEvent.click(screen.getByTestId("events-filter-completed"));
-    expect(screen.getByTestId("event-row-e2")).toBeVisible();
-    expect(screen.queryByTestId("event-row-e1")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("event-row-e3")).not.toBeInTheDocument();
+    expect(screen.getByTestId("event-row-e1")).toHaveTextContent("peak-curtail-1");
+    expect(screen.getByTestId("event-row-e1")).toHaveTextContent("p1");
   });
 
   it("filters events by search query", async () => {
     renderEvents();
     const search = screen.getByTestId("events-search");
-    await userEvent.type(search, "e1");
+    await userEvent.type(search, "peak-curtail-1");
     expect(screen.getByTestId("event-row-e1")).toBeVisible();
     expect(screen.queryByTestId("event-row-e2")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("event-row-e3")).not.toBeInTheDocument();
   });
 
   it("shows empty state when no events match", async () => {
@@ -91,8 +83,8 @@ describe("EventsPage", () => {
     renderEvents();
     await userEvent.click(screen.getByTestId("event-row-e1"));
     expect(screen.getByTestId("json-dialog")).toBeVisible();
-    expect(screen.getByTestId("json-dialog-title")).toHaveTextContent("Event e1");
-    expect(screen.getByTestId("json-dialog-content")).toHaveTextContent('"foo": 1');
+    expect(screen.getByTestId("json-dialog-title")).toHaveTextContent("Event peak-curtail-1");
+    expect(screen.getByTestId("json-dialog-content")).toHaveTextContent('"programID": "p1"');
   });
 
   it("shows empty state when data is empty", () => {

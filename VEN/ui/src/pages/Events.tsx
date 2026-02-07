@@ -1,31 +1,23 @@
 import { useMemo, useState } from "react";
 import {
-  Box, Chip, Paper, Stack, Table, TableBody, TableCell, TableContainer,
+  Box, Paper, Stack, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
-import type { Event } from "../api/types";
+import type { VtnEvent } from "../api/types";
 import { useEvents } from "../api/hooks";
 import { JsonDialog } from "../components/JsonDialog";
 
 export function EventsPage() {
   const { data: events = [], dataUpdatedAt } = useEvents();
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Event | null>(null);
-
-  const statuses = useMemo(() => {
-    const s = new Set<string>();
-    events.forEach((e) => e.status && s.add(e.status));
-    return Array.from(s).sort();
-  }, [events]);
+  const [selected, setSelected] = useState<VtnEvent | null>(null);
 
   const filtered = useMemo(() => {
     return events.filter((e) => {
-      if (statusFilter && e.status !== statusFilter) return false;
-      const hay = `${e.id} ${e.program_id ?? ""} ${e.status ?? ""}`.toLowerCase();
+      const hay = `${e.id} ${e.programID ?? ""} ${e.eventName ?? ""}`.toLowerCase();
       return hay.includes(query.toLowerCase());
     });
-  }, [events, statusFilter, query]);
+  }, [events, query]);
 
   const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleString() : "—";
 
@@ -48,40 +40,17 @@ export function EventsPage() {
       </Box>
 
       <Paper sx={{ p: 2 }}>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center">
-          <TextField
-            label="Search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            size="small"
-            fullWidth
-            inputProps={{
-              "data-testid": "events-search",
-              "aria-label": "Search events",
-            }}
-          />
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            <Chip
-              label="All"
-              clickable
-              color={!statusFilter ? "primary" : "default"}
-              onClick={() => setStatusFilter(null)}
-              data-testid="events-filter-all"
-              aria-pressed={!statusFilter}
-            />
-            {statuses.map((s) => (
-              <Chip
-                key={s}
-                label={s}
-                clickable
-                color={statusFilter === s ? "primary" : "default"}
-                onClick={() => setStatusFilter(s)}
-                data-testid={`events-filter-${s}`}
-                aria-pressed={statusFilter === s}
-              />
-            ))}
-          </Stack>
-        </Stack>
+        <TextField
+          label="Search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          size="small"
+          fullWidth
+          inputProps={{
+            "data-testid": "events-search",
+            "aria-label": "Search events",
+          }}
+        />
       </Paper>
 
       <TableContainer component={Paper}>
@@ -89,8 +58,8 @@ export function EventsPage() {
           <TableHead>
             <TableRow>
               <TableCell>ID</TableCell>
-              <TableCell>Program</TableCell>
-              <TableCell>Status</TableCell>
+              <TableCell>Event Name</TableCell>
+              <TableCell>Program ID</TableCell>
               <TableCell>Created</TableCell>
             </TableRow>
           </TableHead>
@@ -104,9 +73,9 @@ export function EventsPage() {
                 data-testid={`event-row-${e.id}`}
               >
                 <TableCell sx={{ fontFamily: "monospace" }}>{e.id}</TableCell>
-                <TableCell>{e.program_id ?? "—"}</TableCell>
-                <TableCell>{e.status ?? "—"}</TableCell>
-                <TableCell>{e.created_at ?? "—"}</TableCell>
+                <TableCell>{e.eventName ?? "—"}</TableCell>
+                <TableCell sx={{ fontFamily: "monospace" }}>{e.programID ?? "—"}</TableCell>
+                <TableCell>{e.createdDateTime ?? "—"}</TableCell>
               </TableRow>
             ))}
             {filtered.length === 0 && (
@@ -122,8 +91,8 @@ export function EventsPage() {
 
       <JsonDialog
         open={!!selected}
-        title={selected ? `Event ${selected.id}` : "Event"}
-        json={selected?.raw ?? {}}
+        title={selected ? `Event ${selected.eventName ?? selected.id}` : "Event"}
+        json={selected ?? {}}
         onClose={() => setSelected(null)}
       />
     </Stack>
