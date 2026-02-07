@@ -4,8 +4,10 @@ use anyhow::{Context, Result};
 pub struct Config {
     pub listen_addr: String,
     pub vtn_base_url: String,
-    pub client_id: String,
-    pub client_secret: String,
+    pub business_client_id: String,
+    pub business_client_secret: String,
+    pub ven_mgr_client_id: String,
+    pub ven_mgr_client_secret: String,
     pub cache_ttl_programs: u64,
     pub cache_ttl_events: u64,
     pub cache_ttl_vens: u64,
@@ -16,9 +18,16 @@ impl Config {
         let listen_addr =
             std::env::var("BFF_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8090".into());
         let vtn_base_url = std::env::var("VTN_BASE_URL").context("VTN_BASE_URL missing")?;
-        let client_id = std::env::var("VTN_CLIENT_ID").context("VTN_CLIENT_ID missing")?;
-        let client_secret =
-            std::env::var("VTN_CLIENT_SECRET").context("VTN_CLIENT_SECRET missing")?;
+
+        let business_client_id =
+            std::env::var("VTN_BUSINESS_CLIENT_ID").context("VTN_BUSINESS_CLIENT_ID missing")?;
+        let business_client_secret = std::env::var("VTN_BUSINESS_CLIENT_SECRET")
+            .context("VTN_BUSINESS_CLIENT_SECRET missing")?;
+
+        let ven_mgr_client_id =
+            std::env::var("VTN_VEN_MGR_CLIENT_ID").context("VTN_VEN_MGR_CLIENT_ID missing")?;
+        let ven_mgr_client_secret = std::env::var("VTN_VEN_MGR_CLIENT_SECRET")
+            .context("VTN_VEN_MGR_CLIENT_SECRET missing")?;
 
         let cache_ttl_programs = std::env::var("CACHE_TTL_PROGRAMS")
             .ok()
@@ -38,8 +47,10 @@ impl Config {
         Ok(Self {
             listen_addr,
             vtn_base_url,
-            client_id,
-            client_secret,
+            business_client_id,
+            business_client_secret,
+            ven_mgr_client_id,
+            ven_mgr_client_secret,
             cache_ttl_programs,
             cache_ttl_events,
             cache_ttl_vens,

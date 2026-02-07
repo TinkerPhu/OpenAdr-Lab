@@ -9,7 +9,7 @@ pub async fn get_programs(State(ctx): State<AppCtx>) -> Result<Json<serde_json::
         return Ok(Json(cached));
     }
 
-    let data = ctx.vtn.get_json("/programs").await?;
+    let data = ctx.business.get_json("/programs").await?;
     ctx.cache
         .set(
             "programs".into(),

@@ -9,7 +9,7 @@ pub async fn get_events(State(ctx): State<AppCtx>) -> Result<Json<serde_json::Va
         return Ok(Json(cached));
     }
 
-    let data = ctx.vtn.get_json("/events").await?;
+    let data = ctx.business.get_json("/events").await?;
     ctx.cache
         .set(
             "events".into(),
