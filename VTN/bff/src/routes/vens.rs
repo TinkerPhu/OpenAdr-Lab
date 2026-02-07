@@ -9,7 +9,7 @@ pub async fn get_vens(State(ctx): State<AppCtx>) -> Result<Json<serde_json::Valu
         return Ok(Json(cached));
     }
 
-    let data = ctx.vtn.get_json("/vens").await?;
+    let data = ctx.ven_mgr.get_json("/vens").await?;
     ctx.cache
         .set(
             "vens".into(),
