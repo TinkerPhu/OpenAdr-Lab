@@ -74,9 +74,9 @@ Three VEN instances running on Pi4-Server, all connecting to the VTN:
 
 | Container | Credentials | Port |
 |-----------|-------------|------|
-| `ven-ven-1-1` | ven-1/ven-1 | 8081 |
-| `ven-ven-2-1` | ven-2/ven-2 | 8082 |
-| `ven-ven-3-1` | ven-3/ven-3 | 8083 |
+| `ven-ven-1-1` | ven-1/ven-1 | 8211 |
+| `ven-ven-2-1` | ven-2/ven-2 | 8212 |
+| `ven-ven-3-1` | ven-3/ven-3 | 8213 |
 
 **What was done:**
 - Completed Rust source: `main.rs`, `models.rs`, `state.rs`, `vtn.rs`, `config.rs`
@@ -93,7 +93,7 @@ React + TypeScript SPA served by nginx on port 8084:
 
 | Container | Image | Status | Port |
 |-----------|-------|--------|------|
-| `ven-ui-1` | ven-ui (node build + nginx) | running | 8084 |
+| `ven-ui-1` | ven-ui (node build + nginx) | running | 8214 |
 
 **What was done:**
 - Created full Vite build infrastructure (`package.json`, `vite.config.ts`, `tsconfig.json`, `index.html`)
@@ -109,7 +109,7 @@ React + TypeScript SPA served by nginx on port 8084:
 **Architecture:**
 - `src/api/hooks.ts` — 5 react-query hooks (`useHealth`, `usePrograms`, `useEvents`, `useSensor`, `usePostSensor`)
 - `src/api/client.ts` — `VenApi` class wrapping fetch calls to VEN REST API
-- `src/api/types.ts` — `Program`, `Event`, `SensorSnapshot` types
+- `src/api/types.ts` — `Program`, `VtnEvent`, `SensorSnapshot` types
 - Pages: Dashboard (summary cards), Programs (searchable list), Events (filterable table with JSON dialog), Sensors (live data + injection form)
 
 **Also updated:**
@@ -202,7 +202,7 @@ Rust axum BFF (Backend-for-Frontend) proxying the VTN API with OAuth token manag
 
 | Container | Image | Status | Port |
 |-----------|-------|--------|------|
-| `vtn-bff-1` | vtn-bff (rust:1.90-alpine build) | healthy | 8090 |
+| `vtn-bff-1` | vtn-bff (rust:1.90-alpine build) | healthy | 8220 |
 
 **Endpoints:**
 - `GET /api/health` — BFF status + VTN reachability/auth check
@@ -221,7 +221,7 @@ React + TypeScript SPA served by nginx on port 8080, with nginx proxying `/api/`
 
 | Container | Image | Status | Port |
 |-----------|-------|--------|------|
-| `vtn-ui-1` | vtn-ui (node build + nginx) | running | 8080 |
+| `vtn-ui-1` | vtn-ui (node build + nginx) | running | 8221 |
 
 **What was done:**
 - Created full Vite build infrastructure mirroring VEN UI patterns
@@ -269,17 +269,17 @@ Based on the system design's implementation order (Section 19) and current state
 Raspberry Pi 4 — Docker Host
 ├── openadr-net (bridge network)
 │
-├── vtn-db-1      [postgres:16-alpine]     :5432  RUNNING
-├── vtn-vtn-1          [openleadr-rs]           :3000  RUNNING
+├── vtn-db-1      [postgres:16-alpine]     :8201  RUNNING
+├── vtn-vtn-1          [openleadr-rs]           :8200  RUNNING
 │
-├── ven-ven-1-1        [ven-app]                :8081  RUNNING
-├── ven-ven-2-1        [ven-app]                :8082  RUNNING
-├── ven-ven-3-1        [ven-app]                :8083  RUNNING
+├── ven-ven-1-1        [ven-app]                :8211  RUNNING
+├── ven-ven-2-1        [ven-app]                :8212  RUNNING
+├── ven-ven-3-1        [ven-app]                :8213  RUNNING
 │
-├── ven-ui-1           [react+nginx]            :8084  RUNNING
+├── ven-ui-1           [react+nginx]            :8214  RUNNING
 │
-├── vtn-bff-1          [rust axum BFF]           :8090  RUNNING
-└── vtn-ui-1           [react+nginx]            :8080  RUNNING
+├── vtn-bff-1          [rust axum BFF]          :8220  RUNNING
+└── vtn-ui-1           [react+nginx]            :8221  RUNNING
 ```
 
 ---
@@ -448,6 +448,69 @@ Follows the same patterns as the VEN UI but simpler:
 
 Vitest failed when run from `D:\Tinker\...` (subst drive) because Vite resolves to the real path `C:\DriveD\Tinker\...`. The `setupFiles` path couldn't be found. Fix: removed `root: resolve(__dirname)` from `vite.config.ts` and run tests from the real path. Updated auto-memory with detailed notes to prevent recurrence.
 
+## Phase 7 Work Log: Port Remapping to 8200 Range (2026-02-07)
+
+### Motivation
+
+Ports 8080 (UI) and 8090 (BFF) conflicted with existing containers (`data_acquisition` and `dokuwiki`) on Pi4. Rather than risk future conflicts, all OpenADR Lab ports were moved to the 8200 range with a clear allocation scheme.
+
+### Port Allocation
+
+| Container | Old Port | New Port |
+|-----------|----------|----------|
+| vtn-vtn-1 | 3000 | 8200 |
+| vtn-db-1 | 5432 | 8201 |
+| ven-ven-1-1 | 8081 | 8211 |
+| ven-ven-2-1 | 8082 | 8212 |
+| ven-ven-3-1 | 8083 | 8213 |
+| ven-ui-1 | 8084 | 8214 |
+| vtn-bff-1 | 8090 | 8220 |
+| vtn-ui-1 | 8080 | 8221 |
+
+### .env Override Pitfall
+
+Docker Compose `${VAR:-default}` syntax in YAML is overridden by `.env` files. The local `.env` and the Pi4's `.env` both had the old port values, silently ignoring the new defaults. Had to update both.
+
+### Hostname Fix
+
+Hardcoded `raspberrypi.local` didn't resolve — Pi4's actual hostname is `pi4server`, so `pi4server.local` works via mDNS/Avahi.
+
+---
+
+## Phase 8 Work Log: Remove VEN DTO Normalization (2026-02-07)
+
+### Motivation
+
+The project rule (CLAUDE.md `dto:` directive) states: "pass through upstream field names across all layers — backend, BFF, UI. One vocabulary everywhere reduces boilerplate and debugging friction." The VEN backend had normalized VTN response fields (`programName` → `name`, `programID` → `program_id`, `createdDateTime` → `created_at`) into Rust structs, then the UI used those snake_case names. The VTN UI already used native field names. This meant two different vocabularies for the same data.
+
+### Changes Made
+
+**VEN Rust Backend:**
+- Removed `Program` and `Event` structs from `models.rs` (only `SensorSnapshot` remains — it's locally generated, not from VTN)
+- Removed `parse_programs_loose()` and `parse_events_loose()` from `vtn.rs` — `fetch_programs()` and `fetch_events()` now return `Vec<serde_json::Value>` directly
+- Updated `state.rs` to store `Vec<serde_json::Value>` instead of typed structs
+- `main.rs` handlers unchanged — `Json(ctx.state.programs().await)` passes through raw VTN JSON
+
+**VEN UI (TypeScript):**
+- `types.ts`: `name` → `programName`, `program_id` → `programID`, `created_at` → `createdDateTime`, added `eventName`, removed `status`. Renamed `Event` → `VtnEvent` (consistent with VTN UI, avoids DOM `Event` collision). Added `[key: string]: unknown` index signature for pass-through.
+- `Events.tsx`: Replaced status filter chips with simple text search (VTN events have no `status` field). Added eventName column. JSON dialog now shows the entire event object (not a nested `raw` field).
+- `Dashboard.tsx`, `Programs.tsx`: `p.name` → `p.programName`
+- `client.ts`: `Event` → `VtnEvent`
+
+**Tests:**
+- All mock data updated to use native field names
+- Events test: removed 1 status filter test, added 1 eventName display test
+- Integration test `ven_integration_steps.py`: `p.get("name")` → `p.get("programName")`
+
+**Test Results After Changes:**
+- VEN UI: 30/30 passed
+- VTN UI: 26/26 passed (unchanged, already used native names)
+- Integration tests: to be verified after deployment
+
+### Impact
+
+Net deletion: -76 lines. Both UIs now use identical field names (`programName`, `programID`, `eventName`, `createdDateTime`, `venName`). No translation layer between VTN responses and any consumer. Debugging is simpler — the JSON you see in the VTN API is the same JSON everywhere.
+
 ---
 
 ## Key Learnings
@@ -477,6 +540,9 @@ Vitest failed when run from `D:\Tinker\...` (subst drive) because Vite resolves 
 - nginx reverse proxy (`proxy_pass`) eliminates CORS issues — the browser sees same-origin `/api/` calls
 - BFF TTL cache (HashMap + Instant + Duration) is sufficient for 3-4 entries — no need for an external crate
 - Vite `resolve(__dirname)` in `root` config triggers real-path resolution on Windows subst drives — omit `root` entirely
+- Avoid DTO normalization across layers — pass through upstream field names (e.g. VTN's `programName`, `programID`) as-is. One vocabulary reduces code, boilerplate, and debugging friction
+- Docker Compose `.env` files silently override `${VAR:-default}` in YAML — always check for stale `.env` values after changing defaults
+- When multiple containers on a shared host need ports, pick a dedicated range (e.g. 82xx) to avoid conflicts with existing services
 
 ---
 
