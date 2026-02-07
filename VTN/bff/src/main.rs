@@ -15,7 +15,8 @@ use vtn_client::VtnClient;
 
 #[derive(Clone)]
 pub struct AppCtx {
-    pub vtn: VtnClient,
+    pub business: VtnClient,
+    pub ven_mgr: VtnClient,
     pub cache: Arc<TtlCache>,
     pub config: Arc<Config>,
 }
@@ -29,14 +30,21 @@ async fn main() -> anyhow::Result<()> {
     let cfg = Config::from_env()?;
     info!("starting BFF on {}", cfg.listen_addr);
 
-    let vtn = VtnClient::new(
+    let business = VtnClient::new(
         cfg.vtn_base_url.clone(),
-        cfg.client_id.clone(),
-        cfg.client_secret.clone(),
+        cfg.business_client_id.clone(),
+        cfg.business_client_secret.clone(),
+    );
+
+    let ven_mgr = VtnClient::new(
+        cfg.vtn_base_url.clone(),
+        cfg.ven_mgr_client_id.clone(),
+        cfg.ven_mgr_client_secret.clone(),
     );
 
     let ctx = AppCtx {
-        vtn,
+        business,
+        ven_mgr,
         cache: Arc::new(TtlCache::new()),
         config: Arc::new(cfg.clone()),
     };

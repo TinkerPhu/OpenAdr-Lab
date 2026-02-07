@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::AppCtx;
 
 pub async fn health(State(ctx): State<AppCtx>) -> Json<serde_json::Value> {
-    let (reachable, auth_ok) = ctx.vtn.check_health().await;
+    let (reachable, auth_ok) = ctx.business.check_health().await;
 
     Json(json!({
         "time": Utc::now().to_rfc3339(),
