@@ -61,11 +61,11 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/api/health", get(routes::health::health))
         .route("/api/programs", get(routes::programs::get_programs).post(routes::programs::create_program))
-        .route("/api/programs/{id}", put(routes::programs::update_program).delete(routes::programs::delete_program))
+        .route("/api/programs/:id", put(routes::programs::update_program).delete(routes::programs::delete_program))
         .route("/api/events", get(routes::events::get_events).post(routes::events::create_event))
-        .route("/api/events/{id}", put(routes::events::update_event).delete(routes::events::delete_event))
+        .route("/api/events/:id", put(routes::events::update_event).delete(routes::events::delete_event))
         .route("/api/vens", get(routes::vens::get_vens))
-        .route("/api/vens/{id}", delete(routes::vens::delete_ven))
+        .route("/api/vens/:id", delete(routes::vens::delete_ven))
         .with_state(ctx)
         .layer(cors);
 
