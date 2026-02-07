@@ -1,4 +1,4 @@
-import type { VtnEvent, Program, SensorSnapshot } from "./types";
+import type { VtnEvent, Program, Report, SensorSnapshot } from "./types";
 
 export class VenApi {
   constructor(public baseUrl: string) {}
@@ -38,6 +38,22 @@ export class VenApi {
       body: JSON.stringify(payload),
     });
     if (!r.ok) throw new Error(`post sensors ${r.status}`);
+    return r.json();
+  }
+
+  async reports(): Promise<Report[]> {
+    const r = await fetch(this.url("/reports"));
+    if (!r.ok) throw new Error(`reports ${r.status}`);
+    return r.json();
+  }
+
+  async submitReport(payload: unknown): Promise<Report> {
+    const r = await fetch(this.url("/reports"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(`submit report ${r.status}`);
     return r.json();
   }
 }

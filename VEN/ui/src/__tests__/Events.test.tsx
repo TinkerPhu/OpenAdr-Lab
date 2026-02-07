@@ -11,6 +11,11 @@ const mockEvents = [
   { id: "e3", programID: "p2", eventName: "ev-shift-morning", createdDateTime: "2024-01-03" },
 ];
 
+const mockPrograms = [
+  { id: "p1", programName: "Program Alpha" },
+  { id: "p2", programName: "Program Beta" },
+];
+
 const useEventsMock = vi.fn(() => ({
   data: mockEvents,
   dataUpdatedAt: Date.now(),
@@ -18,6 +23,7 @@ const useEventsMock = vi.fn(() => ({
 
 vi.mock("../api/hooks", () => ({
   useEvents: () => useEventsMock(),
+  usePrograms: () => ({ data: mockPrograms }),
 }));
 
 function renderEvents() {
@@ -59,7 +65,7 @@ describe("EventsPage", () => {
   it("displays event name and program ID in table", () => {
     renderEvents();
     expect(screen.getByTestId("event-row-e1")).toHaveTextContent("peak-curtail-1");
-    expect(screen.getByTestId("event-row-e1")).toHaveTextContent("p1");
+    expect(screen.getByTestId("event-row-e1")).toHaveTextContent("Program Alpha");
   });
 
   it("filters events by search query", async () => {

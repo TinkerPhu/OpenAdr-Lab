@@ -1,11 +1,12 @@
 import { Grid, Paper, Stack, Typography } from "@mui/material";
-import { useHealth, usePrograms, useEvents, useSensor } from "../api/hooks";
+import { useHealth, usePrograms, useEvents, useSensor, useReports } from "../api/hooks";
 
 export function DashboardPage() {
   const health = useHealth();
   const programs = usePrograms();
   const events = useEvents();
   const sensor = useSensor();
+  const reports = useReports();
 
   const healthStatus = health.isError ? "offline" : health.data ? "ok" : "unknown";
 
@@ -45,6 +46,15 @@ export function DashboardPage() {
           </Typography>
           <Typography variant="h4" data-testid="dash-events-count">
             {events.data?.length ?? 0}
+          </Typography>
+        </Paper>
+      </Grid>
+
+      <Grid item xs={12} md={3}>
+        <Paper sx={{ p: 2 }} data-testid="dash-reports-card">
+          <Typography variant="h6">Reports</Typography>
+          <Typography variant="h4" data-testid="dash-reports-count">
+            {reports.data?.length ?? 0}
           </Typography>
         </Paper>
       </Grid>

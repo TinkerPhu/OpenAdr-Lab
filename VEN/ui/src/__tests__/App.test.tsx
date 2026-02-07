@@ -9,6 +9,8 @@ vi.mock("../api/client", () => ({
     health: vi.fn().mockResolvedValue("ok"),
     programs: vi.fn().mockResolvedValue([]),
     events: vi.fn().mockResolvedValue([]),
+    reports: vi.fn().mockResolvedValue([]),
+    submitReport: vi.fn().mockResolvedValue({}),
     sensors: vi.fn().mockResolvedValue({
       id: "s1", ts: "2024-01-01T00:00:00Z",
       temperature_c: 22, power_w: 100, voltage_v: 230, raw: {},
@@ -47,6 +49,7 @@ describe("App shell", () => {
     expect(screen.getByTestId("nav-programs")).toBeVisible();
     expect(screen.getByTestId("nav-events")).toBeVisible();
     expect(screen.getByTestId("nav-sensors")).toBeVisible();
+    expect(screen.getByTestId("nav-reports")).toBeVisible();
   });
 
   it("renders auto-refresh toggle", () => {
