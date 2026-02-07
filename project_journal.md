@@ -194,9 +194,44 @@ Created `scripts/seed_vtn.py` — a standalone Python script that populates the 
 - Programs visible to VENs (within 300s poll cycle)
 - VEN Web UI at port 8084 reflects the data
 
-### 9. VTN BFF + VTN Web UI — Not Started
+### 9. VTN BFF — Deployed and Running
 
-**Status: NOT STARTED — blueprints written, no code**
+**Status: COMPLETE**
+
+Rust axum BFF (Backend-for-Frontend) proxying the VTN API with OAuth token management and TTL caching:
+
+| Container | Image | Status | Port |
+|-----------|-------|--------|------|
+| `vtn-bff-1` | vtn-bff (rust:1.90-alpine build) | healthy | 8090 |
+
+**Endpoints:**
+- `GET /api/health` — BFF status + VTN reachability/auth check
+- `GET /api/programs` — cached proxy (30s TTL) via `any-business` credential
+- `GET /api/events` — cached proxy (10s TTL) via `any-business` credential
+- `GET /api/vens` — cached proxy (10s TTL) via `ven-manager` credential
+
+**Key design decision — dual credentials:**
+The VTN enforces role-based access: `any-business` can access `/programs` and `/events` but NOT `/vens` (403), while `ven-manager` can access `/vens` but NOT `/programs`/`/events`. The BFF uses two separate VtnClient instances with independent OAuth tokens to cover all endpoints.
+
+### 10. VTN Web UI — Deployed and Running
+
+**Status: COMPLETE**
+
+React + TypeScript SPA served by nginx on port 8080, with nginx proxying `/api/` to the BFF:
+
+| Container | Image | Status | Port |
+|-----------|-------|--------|------|
+| `vtn-ui-1` | vtn-ui (node build + nginx) | running | 8080 |
+
+**What was done:**
+- Created full Vite build infrastructure mirroring VEN UI patterns
+- `BffApi` class with 4 methods (health, programs, events, vens)
+- 4 react-query hooks with appropriate polling intervals (10-30s)
+- `BffContext` provider (simpler than VEN's — no VEN selector, single BFF)
+- nginx reverse proxy: `/api/*` → `bff:8090`, everything else → SPA
+- 4 pages: Dashboard (summary cards with VTN health), Programs (searchable list with JSON dialog), Events (searchable table with JSON dialog), VENs (searchable list with JSON dialog)
+- 26 component tests across 5 test files (all passing)
+- Multi-stage Docker build (node:20-alpine + nginx:alpine)
 
 ---
 
@@ -209,13 +244,7 @@ Based on the system design's implementation order (Section 19) and current state
 
 ### ~~Phase 3: Seed VTN with Programs & Events~~ DONE
 
-### Phase 4: VTN BFF + VTN Web UI (Priority: LOWER)
-
-The operator console for managing the VTN:
-
-1. **Build the Rust BFF** (axum) — OAuth proxy, caching, event composition
-2. **Build the React VTN UI** — Dashboard, Programs, VENs, Events, Event Composer
-3. **Deploy as additional containers on Pi4-Server**
+### ~~Phase 4: VTN BFF + VTN Web UI~~ DONE
 
 ### Phase 5: Reporting and Telemetry (Priority: LOWER)
 
@@ -249,8 +278,8 @@ Raspberry Pi 4 — Docker Host
 │
 ├── ven-ui-1           [react+nginx]            :8084  RUNNING
 │
-├── vtn-bff            [rust axum]              :8090  NOT YET
-└── vtn-ui             [react+nginx]            :8080  NOT YET
+├── vtn-bff-1          [rust axum BFF]           :8090  RUNNING
+└── vtn-ui-1           [react+nginx]            :8080  RUNNING
 ```
 
 ---
@@ -390,6 +419,37 @@ After seeding, confirmed:
 
 ---
 
+## Phase 6 Work Log: VTN BFF + VTN Web UI (2026-02-07)
+
+### Dual Credential Discovery
+
+The plan assumed `ven-manager` could access `/programs`, `/events`, AND `/vens`. In practice, the VTN's role-based access is stricter:
+- `any-business` → `/programs`, `/events` (but 403 on `/vens`)
+- `ven-manager` → `/vens` (but empty arrays from `/programs`, `/events`)
+
+Fixed by giving the BFF two VtnClient instances (`business` and `ven_mgr`), each with its own OAuth token. Programs and events route through `business`, VENs route through `ven_mgr`.
+
+### BFF Build Performance
+
+First build on Pi4: ~11 min (deps cached from VEN build sharing the same base image). Cached rebuilds (source-only changes): ~1 min.
+
+### Port Conflicts
+
+Both port 8090 (BFF) and 8080 (UI) were occupied by unrelated containers (`dokuwiki` and `data_acquisition`). Stopped them before starting the new services.
+
+### VTN UI Architecture
+
+Follows the same patterns as the VEN UI but simpler:
+- No VEN selector (single BFF target)
+- `BffApi` uses empty `baseUrl` — all `/api/*` calls are same-origin, proxied by nginx
+- VTN's native field names used throughout: `programName`, `programID`, `eventName`, `venName`, `createdDateTime`
+
+### Windows Subst Drive Issue (Again)
+
+Vitest failed when run from `D:\Tinker\...` (subst drive) because Vite resolves to the real path `C:\DriveD\Tinker\...`. The `setupFiles` path couldn't be found. Fix: removed `root: resolve(__dirname)` from `vite.config.ts` and run tests from the real path. Updated auto-memory with detailed notes to prevent recurrence.
+
+---
+
 ## Key Learnings
 
 - VTN auto-migrates on first boot — no need for manual `cargo sqlx migrate run`
@@ -413,6 +473,10 @@ After seeding, confirmed:
 - React Query `refetchInterval` is a cleaner replacement for manual `setInterval` polling — handles loading/error states, caching, and query invalidation
 - VEN UI Docker build (~33s) is dramatically faster than Rust builds (~11-25 min) since it's just npm + Vite bundling
 - `React.FC` is discouraged — use plain `function` with typed props for cleaner, more explicit component signatures
+- VTN role-based access is per-endpoint: `any-business` sees programs/events, `ven-manager` sees VENs — a BFF needing all three must use multiple credentials
+- nginx reverse proxy (`proxy_pass`) eliminates CORS issues — the browser sees same-origin `/api/` calls
+- BFF TTL cache (HashMap + Instant + Duration) is sufficient for 3-4 entries — no need for an external crate
+- Vite `resolve(__dirname)` in `root` config triggers real-path resolution on Windows subst drives — omit `root` entirely
 
 ---
 
