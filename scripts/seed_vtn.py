@@ -2,7 +2,7 @@
 """Seed the VTN with demo programs and events.
 
 Usage:
-    python3 seed_vtn.py --vtn-url http://localhost:3000
+    python3 seed_vtn.py --vtn-url http://localhost:8200
 """
 
 import argparse
@@ -95,7 +95,7 @@ def create_event(base_url, token, program_id, event_name, values):
 
 def main():
     parser = argparse.ArgumentParser(description="Seed the VTN with demo programs and events")
-    parser.add_argument("--vtn-url", default="http://localhost:3000", help="VTN base URL")
+    parser.add_argument("--vtn-url", default="http://localhost:8200", help="VTN base URL")
     parser.add_argument("--client-id", default="any-business", help="OAuth client ID")
     parser.add_argument("--client-secret", default="any-business", help="OAuth client secret")
     args = parser.parse_args()

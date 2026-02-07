@@ -17,7 +17,7 @@
 #   docker compose up -d vtn
 #
 #   # Step 3: Verify
-#   curl http://localhost:3000/health
+#   curl http://localhost:8200/health
 #
 # To rebuild after upstream changes:
 #   docker compose up --force-recreate --build --no-deps vtn
@@ -42,7 +42,7 @@ services:
       timeout: 5s
       retries: 5
     ports:
-      - "${PG_PORT:-5432}:5432"
+      - "${PG_PORT:-8201}:5432"
     volumes:
       - ./data/db:/var/lib/postgresql/data
     networks:
@@ -58,7 +58,7 @@ services:
       dockerfile: vtn.Dockerfile
     restart: unless-stopped
     ports:
-      - "${VTN_PORT:-3000}:3000"
+      - "${VTN_PORT:-8200}:3000"
     environment:
       RUST_LOG: ${RUST_LOG:-info}
       DATABASE_URL: postgres://${PG_USER:-openadr}:${PG_PASSWORD:-openadr}@db:5432/${PG_DB:-openadr}
@@ -86,7 +86,7 @@ services:
     build: ./bff
     restart: unless-stopped
     ports:
-      - "8090:8090"
+      - "8220:8090"
     environment:
       BFF_LISTEN_ADDR: "0.0.0.0:8090"
       VTN_BASE_URL: "http://vtn:3000"
@@ -114,7 +114,7 @@ services:
     build: ./ui
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "8221:80"
     depends_on:
       bff:
         condition: service_healthy
