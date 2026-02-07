@@ -1,11 +1,17 @@
-export type Program = { id: string; name?: string | null };
-
-export type Event = {
+export type Program = {
   id: string;
-  program_id?: string | null;
-  created_at?: string | null;
-  status?: string | null;
-  raw: unknown;
+  programName?: string | null;
+  createdDateTime?: string | null;
+  [key: string]: unknown;
+};
+
+export type VtnEvent = {
+  id: string;
+  programID?: string | null;
+  eventName?: string | null;
+  createdDateTime?: string | null;
+  intervals?: unknown;
+  [key: string]: unknown;
 };
 
 export type SensorSnapshot = {

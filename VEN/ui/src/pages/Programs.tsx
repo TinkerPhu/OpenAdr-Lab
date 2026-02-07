@@ -10,7 +10,7 @@ export function ProgramsPage() {
 
   const filtered = useMemo(() => {
     return programs.filter((p) => {
-      const hay = `${p.id} ${p.name ?? ""}`.toLowerCase();
+      const hay = `${p.id} ${p.programName ?? ""}`.toLowerCase();
       return hay.includes(query.toLowerCase());
     });
   }, [programs, query]);
@@ -54,8 +54,8 @@ export function ProgramsPage() {
           {filtered.map((p) => (
             <ListItem key={p.id} data-testid={`program-item-${p.id}`}>
               <ListItemText
-                primary={p.name ?? p.id}
-                secondary={p.name ? p.id : undefined}
+                primary={p.programName ?? p.id}
+                secondary={p.programName ? p.id : undefined}
               />
             </ListItem>
           ))}

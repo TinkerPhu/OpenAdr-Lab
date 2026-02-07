@@ -1,4 +1,4 @@
-use crate::models::{Event, Program, SensorSnapshot};
+use crate::models::SensorSnapshot;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -10,8 +10,8 @@ pub struct AppState {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InnerState {
-    pub programs: Vec<Program>,
-    pub events: Vec<Event>,
+    pub programs: Vec<serde_json::Value>,
+    pub events: Vec<serde_json::Value>,
     pub sensor: SensorSnapshot,
 }
 
@@ -26,11 +26,11 @@ impl AppState {
         }
     }
 
-    pub async fn set_programs(&self, programs: Vec<Program>) {
+    pub async fn set_programs(&self, programs: Vec<serde_json::Value>) {
         self.inner.write().await.programs = programs;
     }
 
-    pub async fn set_events(&self, mut events: Vec<Event>, max_keep: usize) {
+    pub async fn set_events(&self, mut events: Vec<serde_json::Value>, max_keep: usize) {
         // Keep newest first (assume poller provides newest first; enforce anyway)
         events.truncate(max_keep);
         self.inner.write().await.events = events;
@@ -44,11 +44,11 @@ impl AppState {
         self.inner.read().await.clone()
     }
 
-    pub async fn programs(&self) -> Vec<Program> {
+    pub async fn programs(&self) -> Vec<serde_json::Value> {
         self.inner.read().await.programs.clone()
     }
 
-    pub async fn events(&self) -> Vec<Event> {
+    pub async fn events(&self) -> Vec<serde_json::Value> {
         self.inner.read().await.events.clone()
     }
 

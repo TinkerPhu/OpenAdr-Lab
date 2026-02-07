@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::models::{Event, Program};
-
 #[derive(Clone)]
 pub struct VtnClient {
     http: reqwest::Client,
@@ -136,45 +134,13 @@ impl VtnClient {
         Ok(resp.json().await?)
     }
 
-    pub async fn fetch_programs(&self) -> Result<Vec<Program>> {
+    pub async fn fetch_programs(&self) -> Result<Vec<serde_json::Value>> {
         let raw = self.get_json("/programs").await?;
-        Ok(parse_programs_loose(raw))
+        Ok(raw.as_array().cloned().unwrap_or_default())
     }
 
-    pub async fn fetch_events(&self) -> Result<Vec<Event>> {
+    pub async fn fetch_events(&self) -> Result<Vec<serde_json::Value>> {
         let raw = self.get_json("/events").await?;
-        Ok(parse_events_loose(raw))
+        Ok(raw.as_array().cloned().unwrap_or_default())
     }
-}
-
-// Parsers aligned with actual openleadr-rs VTN response shapes.
-fn parse_programs_loose(raw: serde_json::Value) -> Vec<Program> {
-    let arr = raw.as_array().cloned().unwrap_or_default();
-    arr.into_iter()
-        .filter_map(|v| {
-            let id = v.get("id")?.as_str()?.to_string();
-            let name = v.get("programName").and_then(|n| n.as_str().map(|s| s.to_string()));
-            Some(Program { id, name })
-        })
-        .collect()
-}
-
-fn parse_events_loose(raw: serde_json::Value) -> Vec<Event> {
-    let arr = raw.as_array().cloned().unwrap_or_default();
-    arr.into_iter()
-        .filter_map(|v| {
-            let id = v.get("id")?.as_str()?.to_string();
-            let program_id = v.get("programID").and_then(|p| p.as_str().map(|s| s.to_string()));
-            let created_at = v.get("createdDateTime")
-                .and_then(|d| d.as_str())
-                .and_then(|s| s.parse().ok());
-            Some(Event {
-                id,
-                program_id,
-                created_at,
-                status: None, // openleadr-rs events don't have a status field; derive from intervals if needed
-                raw: v,
-            })
-        })
-        .collect()
 }
