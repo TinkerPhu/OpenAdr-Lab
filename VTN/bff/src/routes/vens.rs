@@ -1,4 +1,7 @@
-use axum::{extract::State, Json};
+use axum::{
+    extract::{Path, State},
+    Json,
+};
 use std::time::Duration;
 
 use crate::error::AppError;
@@ -18,4 +21,13 @@ pub async fn get_vens(State(ctx): State<AppCtx>) -> Result<Json<serde_json::Valu
         )
         .await;
     Ok(Json(data))
+}
+
+pub async fn delete_ven(
+    State(ctx): State<AppCtx>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    ctx.ven_mgr.delete_json(&format!("/vens/{id}")).await?;
+    ctx.cache.invalidate("vens").await;
+    Ok(Json(serde_json::json!({"deleted": id})))
 }

@@ -1,4 +1,7 @@
-use axum::{extract::State, Json};
+use axum::{
+    extract::{Path, State},
+    Json,
+};
 use std::time::Duration;
 
 use crate::error::AppError;
@@ -18,4 +21,32 @@ pub async fn get_events(State(ctx): State<AppCtx>) -> Result<Json<serde_json::Va
         )
         .await;
     Ok(Json(data))
+}
+
+pub async fn create_event(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let data = ctx.business.post_json("/events", body).await?;
+    ctx.cache.invalidate("events").await;
+    Ok(Json(data))
+}
+
+pub async fn update_event(
+    State(ctx): State<AppCtx>,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let data = ctx.business.put_json(&format!("/events/{id}"), body).await?;
+    ctx.cache.invalidate("events").await;
+    Ok(Json(data))
+}
+
+pub async fn delete_event(
+    State(ctx): State<AppCtx>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    ctx.business.delete_json(&format!("/events/{id}")).await?;
+    ctx.cache.invalidate("events").await;
+    Ok(Json(serde_json::json!({"deleted": id})))
 }

@@ -24,3 +24,11 @@ impl SensorSnapshot {
         }
     }
 }
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SensorInput {
+    pub temperature_c: Option<f64>,
+    pub power_w: Option<f64>,
+    pub voltage_v: Option<f64>,
+    pub raw: Option<serde_json::Value>,
+}

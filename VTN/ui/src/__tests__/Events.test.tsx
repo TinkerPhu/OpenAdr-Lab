@@ -11,13 +11,26 @@ const mockEvents = [
   { id: "e3", programID: "p2", eventName: "EV Charge", createdDateTime: "2026-01-03", intervals: [] },
 ];
 
+const mockPrograms = [
+  { id: "p1", programName: "Program Alpha", createdDateTime: "2026-01-01" },
+  { id: "p2", programName: "Program Beta", createdDateTime: "2026-01-02" },
+];
+
 const useEventsMock = vi.fn(() => ({
   data: mockEvents,
   dataUpdatedAt: Date.now(),
 }));
 
+const createMock = vi.fn();
+const updateMock = vi.fn();
+const deleteMock = vi.fn();
+
 vi.mock("../api/hooks", () => ({
   useEvents: () => useEventsMock(),
+  usePrograms: () => ({ data: mockPrograms, dataUpdatedAt: Date.now() }),
+  useCreateEvent: () => ({ mutate: createMock, isPending: false }),
+  useUpdateEvent: () => ({ mutate: updateMock, isPending: false }),
+  useDeleteEvent: () => ({ mutate: deleteMock, isPending: false }),
 }));
 
 function renderEvents() {
@@ -84,5 +97,33 @@ describe("EventsPage", () => {
     useEventsMock.mockReturnValue({ data: [], dataUpdatedAt: Date.now() });
     renderEvents();
     expect(screen.getByTestId("events-empty")).toBeVisible();
+  });
+
+  it("opens create event dialog", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("create-event-btn"));
+    expect(screen.getByTestId("event-form-dialog")).toBeVisible();
+  });
+
+  it("opens edit dialog with pre-filled data", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("edit-event-e1"));
+    expect(screen.getByTestId("event-name-input")).toHaveValue("Peak Event");
+  });
+
+  it("opens confirm dialog on delete click", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("delete-event-e1"));
+    expect(screen.getByTestId("confirm-dialog")).toBeVisible();
+  });
+
+  it("calls delete on confirm", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("delete-event-e1"));
+    await userEvent.click(screen.getByTestId("confirm-dialog-ok"));
+    expect(deleteMock).toHaveBeenCalledWith(
+      "e1",
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
   });
 });
