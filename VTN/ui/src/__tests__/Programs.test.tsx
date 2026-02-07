@@ -10,7 +10,7 @@ const mockPrograms = [
     id: "p1",
     programName: "Program Alpha",
     programLongName: "Alpha Long Name",
-    targets: [{ type: "VEN_NAME", values: ["ven-1", "ven-2"] }],
+    targets: [{ type: "VEN_NAME", values: ["ven-1"] }, { type: "VEN_NAME", values: ["ven-2"] }],
     createdDateTime: "2026-01-01",
   },
   {

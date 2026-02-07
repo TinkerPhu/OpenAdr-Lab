@@ -16,8 +16,9 @@ type ProgramFormDialogProps = {
 
 function getEnrolledVenNames(program: Program | null): string[] {
   if (!program?.targets) return [];
-  const entry = program.targets.find((t) => t.type === "VEN_NAME");
-  return entry?.values ?? [];
+  return program.targets
+    .filter((t) => t.type === "VEN_NAME")
+    .flatMap((t) => t.values);
 }
 
 export function ProgramFormDialog(props: ProgramFormDialogProps) {
@@ -50,7 +51,7 @@ export function ProgramFormDialog(props: ProgramFormDialogProps) {
     if (programType.trim()) input.programType = programType.trim();
     input.targets =
       selectedVens.length > 0
-        ? [{ type: "VEN_NAME", values: selectedVens }]
+        ? selectedVens.map((v) => ({ type: "VEN_NAME", values: [v] }))
         : null;
     onSubmit(input);
   }

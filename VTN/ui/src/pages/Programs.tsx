@@ -13,9 +13,11 @@ import { ProgramFormDialog } from "../components/ProgramFormDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
 function enrollmentLabel(program: Program): string {
-  const entry = program.targets?.find((t) => t.type === "VEN_NAME");
-  if (!entry || entry.values.length === 0) return "Open — all VENs";
-  return entry.values.join(", ");
+  const venNames = (program.targets ?? [])
+    .filter((t) => t.type === "VEN_NAME")
+    .flatMap((t) => t.values);
+  if (venNames.length === 0) return "Open — all VENs";
+  return venNames.join(", ");
 }
 
 export function ProgramsPage() {
