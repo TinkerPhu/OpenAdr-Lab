@@ -13,7 +13,7 @@ Feature: VEN Program Enrollment
     And VEN-2 has program "enroll-open-test"
 
   Scenario: Targeted program is visible only to enrolled VEN
-    When I create a program named "enroll-targeted-test" targeting "ven-1"
+    When I create a program named "enroll-targeted-test" targeting "ven-1-name"
     And I wait for VEN-1 to show program "enroll-targeted-test"
     Then VEN-1 has program "enroll-targeted-test"
     And VEN-2 does not have program "enroll-targeted-test"

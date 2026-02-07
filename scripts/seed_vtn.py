@@ -17,7 +17,7 @@ PROGRAMS = [
         "programName": "Summer Peak DR",
         "programLongName": "Summer Peak Demand Response Program",
         "programType": "DEMAND_RESPONSE",
-        "targets": [{"type": "VEN_NAME", "values": ["ven-1", "ven-2"]}],
+        "targets": [{"type": "VEN_NAME", "values": ["ven-1-name", "ven-2"]}],
     },
     {
         "programName": "EV Managed Charging",
