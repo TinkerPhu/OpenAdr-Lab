@@ -25,12 +25,21 @@ export function EventsPage() {
   const [editTarget, setEditTarget] = useState<VtnEvent | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<VtnEvent | null>(null);
 
+  const programMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of programs) {
+      map.set(p.id, p.programName ?? p.id);
+    }
+    return map;
+  }, [programs]);
+
   const filtered = useMemo(() => {
     return events.filter((e) => {
-      const hay = `${e.id} ${e.eventName ?? ""} ${e.programID ?? ""}`.toLowerCase();
+      const progName = e.programID ? programMap.get(e.programID) ?? "" : "";
+      const hay = `${e.id} ${e.eventName ?? ""} ${e.programID ?? ""} ${progName}`.toLowerCase();
       return hay.includes(query.toLowerCase());
     });
-  }, [events, query]);
+  }, [events, query, programMap]);
 
   const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleString() : "—";
 
@@ -98,7 +107,7 @@ export function EventsPage() {
           <TableHead>
             <TableRow>
               <TableCell>Event Name</TableCell>
-              <TableCell>Program ID</TableCell>
+              <TableCell>Program</TableCell>
               <TableCell>Created</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
@@ -113,7 +122,9 @@ export function EventsPage() {
                 data-testid={`event-row-${e.id}`}
               >
                 <TableCell>{e.eventName ?? e.id}</TableCell>
-                <TableCell sx={{ fontFamily: "monospace" }}>{e.programID ?? "—"}</TableCell>
+                <TableCell>
+                  {e.programID ? (programMap.get(e.programID) ?? e.programID) : "—"}
+                </TableCell>
                 <TableCell>{e.createdDateTime ?? "—"}</TableCell>
                 <TableCell align="right">
                   <IconButton
