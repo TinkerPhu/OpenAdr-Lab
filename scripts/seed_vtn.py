@@ -17,13 +17,19 @@ PROGRAMS = [
         "programName": "Summer Peak DR",
         "programLongName": "Summer Peak Demand Response Program",
         "programType": "DEMAND_RESPONSE",
-        "targets": [{"type": "VEN_NAME", "values": ["ven-1-name", "ven-2"]}],
+        "targets": [
+            {"type": "VEN_NAME", "values": ["ven-1-name"]},
+            {"type": "VEN_NAME", "values": ["ven-2"]},
+        ],
     },
     {
         "programName": "EV Managed Charging",
         "programLongName": "Electric Vehicle Managed Charging Program",
         "programType": "LOAD_SHIFTING",
-        "targets": [{"type": "VEN_NAME", "values": ["ven-2", "ven-3"]}],
+        "targets": [
+            {"type": "VEN_NAME", "values": ["ven-2"]},
+            {"type": "VEN_NAME", "values": ["ven-3"]},
+        ],
     },
     {
         "programName": "HVAC Optimization",
