@@ -3,21 +3,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Program {
-    pub id: String,
-    pub name: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Event {
-    pub id: String,
-    pub program_id: Option<String>,
-    pub created_at: Option<DateTime<Utc>>,
-    pub status: Option<String>,
-    pub raw: serde_json::Value,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SensorSnapshot {
     pub id: Uuid,
     pub ts: DateTime<Utc>,

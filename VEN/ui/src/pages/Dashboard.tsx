@@ -31,7 +31,7 @@ export function DashboardPage() {
           <Stack spacing={0.5} mt={1}>
             {programs.data?.slice(0, 3).map((p) => (
               <Typography key={p.id} variant="body2">
-                {p.name ?? p.id}
+                {p.programName ?? p.id}
               </Typography>
             ))}
           </Stack>

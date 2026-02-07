@@ -6,9 +6,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ProgramsPage } from "../pages/Programs";
 
 const mockPrograms = [
-  { id: "p1", name: "Program Alpha" },
-  { id: "p2", name: "Program Beta" },
-  { id: "p3", name: "Program Gamma" },
+  { id: "p1", programName: "Program Alpha" },
+  { id: "p2", programName: "Program Beta" },
+  { id: "p3", programName: "Program Gamma" },
 ];
 
 const useProgramsMock = vi.fn(() => ({

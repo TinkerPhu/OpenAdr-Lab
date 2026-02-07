@@ -1,4 +1,4 @@
-import type { Event, Program, SensorSnapshot } from "./types";
+import type { VtnEvent, Program, SensorSnapshot } from "./types";
 
 export class VenApi {
   constructor(public baseUrl: string) {}
@@ -19,7 +19,7 @@ export class VenApi {
     return r.json();
   }
 
-  async events(limit = 100): Promise<Event[]> {
+  async events(limit = 100): Promise<VtnEvent[]> {
     const r = await fetch(this.url(`/events?limit=${limit}`));
     if (!r.ok) throw new Error(`events ${r.status}`);
     return r.json();

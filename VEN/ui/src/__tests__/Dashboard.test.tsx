@@ -5,13 +5,13 @@ import { describe, it, expect, vi } from "vitest";
 import { DashboardPage } from "../pages/Dashboard";
 
 const mockPrograms = [
-  { id: "p1", name: "Program Alpha" },
-  { id: "p2", name: "Program Beta" },
+  { id: "p1", programName: "Program Alpha" },
+  { id: "p2", programName: "Program Beta" },
 ];
 
 const mockEvents = [
-  { id: "e1", program_id: "p1", status: "active", created_at: "2024-01-01", raw: {} },
-  { id: "e2", program_id: "p1", status: "completed", created_at: "2024-01-02", raw: {} },
+  { id: "e1", programID: "p1", eventName: "ev-1", createdDateTime: "2024-01-01" },
+  { id: "e2", programID: "p1", eventName: "ev-2", createdDateTime: "2024-01-02" },
 ];
 
 const mockSensor = {
