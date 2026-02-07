@@ -1,19 +1,26 @@
 import { useMemo, useState } from "react";
 import {
-  Button, IconButton, List, ListItem, ListItemButton, ListItemText,
+  Button, Chip, IconButton, List, ListItem, ListItemButton, ListItemText,
   Paper, Stack, TextField, Typography,
 } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
 import AddIcon from "@mui/icons-material/Add";
 import type { Program, ProgramInput } from "../api/types";
-import { usePrograms, useCreateProgram, useUpdateProgram, useDeleteProgram } from "../api/hooks";
+import { usePrograms, useVens, useCreateProgram, useUpdateProgram, useDeleteProgram } from "../api/hooks";
 import { JsonDialog } from "../components/JsonDialog";
 import { ProgramFormDialog } from "../components/ProgramFormDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
+function enrollmentLabel(program: Program): string {
+  const entry = program.targets?.find((t) => t.type === "VEN_NAME");
+  if (!entry || entry.values.length === 0) return "Open — all VENs";
+  return entry.values.join(", ");
+}
+
 export function ProgramsPage() {
   const { data: programs = [], dataUpdatedAt } = usePrograms();
+  const { data: vens = [] } = useVens();
   const createMut = useCreateProgram();
   const updateMut = useUpdateProgram();
   const deleteMut = useDeleteProgram();
@@ -26,7 +33,7 @@ export function ProgramsPage() {
 
   const filtered = useMemo(() => {
     return programs.filter((p) => {
-      const hay = `${p.id} ${p.programName ?? ""}`.toLowerCase();
+      const hay = `${p.id} ${p.programName ?? ""} ${p.programLongName ?? ""}`.toLowerCase();
       return hay.includes(query.toLowerCase());
     });
   }, [programs, query]);
@@ -123,7 +130,18 @@ export function ProgramsPage() {
               <ListItemButton onClick={() => setSelected(p)}>
                 <ListItemText
                   primary={p.programName ?? p.id}
-                  secondary={`${p.id}${p.createdDateTime ? ` — ${p.createdDateTime}` : ""}`}
+                  secondary={
+                    <>
+                      {p.programLongName && <span>{p.programLongName} — </span>}
+                      <Chip
+                        label={enrollmentLabel(p)}
+                        size="small"
+                        variant="outlined"
+                        sx={{ height: 18, fontSize: "0.75rem" }}
+                        data-testid={`enrollment-${p.id}`}
+                      />
+                    </>
+                  }
                 />
               </ListItemButton>
             </ListItem>
@@ -146,6 +164,7 @@ export function ProgramsPage() {
       <ProgramFormDialog
         open={formOpen}
         program={editTarget}
+        vens={vens}
         onSubmit={handleFormSubmit}
         onCancel={() => setFormOpen(false)}
         loading={createMut.isPending || updateMut.isPending}

@@ -70,6 +70,36 @@ services:
       VEN_NAME: "ven-1"
       POLL_EVENTS_SECS: "5"
       POLL_PROGRAMS_SECS: "5"
+      POLL_REPORTS_SECS: "5"
+      RUST_LOG: "info"
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      test-vtn:
+        condition: service_healthy
+    networks:
+      - test-net
+
+  # ---------------------------------------------------------------------------
+  # VEN-2 — second instance for enrollment tests
+  # ---------------------------------------------------------------------------
+  test-ven-2:
+    build:
+      context: ../VEN
+      dockerfile: Dockerfile
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://test-vtn:3000"
+      CLIENT_ID: "ven-2"
+      CLIENT_SECRET: "ven-2"
+      VEN_NAME: "ven-2"
+      POLL_EVENTS_SECS: "5"
+      POLL_PROGRAMS_SECS: "5"
+      POLL_REPORTS_SECS: "5"
       RUST_LOG: "info"
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
@@ -120,6 +150,7 @@ services:
     environment:
       VTN_BASE_URL: "http://test-vtn:3000"
       VEN_BASE_URL: "http://test-ven-1:8080"
+      VEN2_BASE_URL: "http://test-ven-2:8080"
       BFF_BASE_URL: "http://test-bff:8090"
     volumes:
       - ../openleadr-rs/fixtures:/fixtures:ro
@@ -127,6 +158,8 @@ services:
       test-vtn:
         condition: service_healthy
       test-ven-1:
+        condition: service_healthy
+      test-ven-2:
         condition: service_healthy
       test-bff:
         condition: service_healthy

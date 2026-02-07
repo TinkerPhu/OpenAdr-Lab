@@ -11,6 +11,7 @@ pub struct Config {
     pub cache_ttl_programs: u64,
     pub cache_ttl_events: u64,
     pub cache_ttl_vens: u64,
+    pub cache_ttl_reports: u64,
 }
 
 impl Config {
@@ -44,6 +45,11 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(10);
 
+        let cache_ttl_reports = std::env::var("CACHE_TTL_REPORTS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10);
+
         Ok(Self {
             listen_addr,
             vtn_base_url,
@@ -54,6 +60,7 @@ impl Config {
             cache_ttl_programs,
             cache_ttl_events,
             cache_ttl_vens,
+            cache_ttl_reports,
         })
     }
 }

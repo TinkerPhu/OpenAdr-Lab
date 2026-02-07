@@ -1,16 +1,29 @@
 import { useMemo, useState } from "react";
 import {
-  IconButton, List, ListItem, ListItemButton, ListItemText,
+  Chip, IconButton, List, ListItem, ListItemButton, ListItemText,
   Paper, Stack, TextField, Typography,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
-import type { Ven } from "../api/types";
-import { useVens, useDeleteVen } from "../api/hooks";
+import type { Program, Ven } from "../api/types";
+import { useVens, useDeleteVen, usePrograms } from "../api/hooks";
 import { JsonDialog } from "../components/JsonDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
+function enrolledProgramNames(ven: Ven, programs: Program[]): string[] {
+  const venName = ven.venName ?? ven.id;
+  return programs
+    .filter((p) => {
+      if (!p.targets) return false; // open programs don't count as "enrolled"
+      return p.targets.some(
+        (t) => t.type === "VEN_NAME" && t.values.includes(venName),
+      );
+    })
+    .map((p) => p.programName ?? p.id);
+}
+
 export function VensPage() {
   const { data: vens = [], dataUpdatedAt } = useVens();
+  const { data: programs = [] } = usePrograms();
   const deleteMut = useDeleteVen();
 
   const [query, setQuery] = useState("");
@@ -59,30 +72,51 @@ export function VensPage() {
 
       <Paper>
         <List dense data-testid="vens-list">
-          {filtered.map((v) => (
-            <ListItem
-              key={v.id}
-              disablePadding
-              data-testid={`ven-item-${v.id}`}
-              secondaryAction={
-                <IconButton
-                  size="small"
-                  onClick={(e) => { e.stopPropagation(); setDeleteTarget(v); }}
-                  data-testid={`delete-ven-${v.id}`}
-                  aria-label={`Delete ${v.venName}`}
-                >
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              }
-            >
-              <ListItemButton onClick={() => setSelected(v)}>
-                <ListItemText
-                  primary={v.venName ?? v.id}
-                  secondary={`${v.id}${v.createdDateTime ? ` — ${v.createdDateTime}` : ""}`}
-                />
-              </ListItemButton>
-            </ListItem>
-          ))}
+          {filtered.map((v) => {
+            const enrolled = enrolledProgramNames(v, programs);
+            return (
+              <ListItem
+                key={v.id}
+                disablePadding
+                data-testid={`ven-item-${v.id}`}
+                secondaryAction={
+                  <IconButton
+                    size="small"
+                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(v); }}
+                    data-testid={`delete-ven-${v.id}`}
+                    aria-label={`Delete ${v.venName}`}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                }
+              >
+                <ListItemButton onClick={() => setSelected(v)}>
+                  <ListItemText
+                    primary={v.venName ?? v.id}
+                    secondary={
+                      <>
+                        {v.id}
+                        {enrolled.length > 0 && (
+                          <span>
+                            {" — "}
+                            {enrolled.map((name) => (
+                              <Chip
+                                key={name}
+                                label={name}
+                                size="small"
+                                variant="outlined"
+                                sx={{ height: 18, fontSize: "0.7rem", mr: 0.5 }}
+                              />
+                            ))}
+                          </span>
+                        )}
+                      </>
+                    }
+                  />
+                </ListItemButton>
+              </ListItem>
+            );
+          })}
           {filtered.length === 0 && (
             <ListItem data-testid="vens-empty">
               <ListItemText primary="No VENs" />

@@ -6,9 +6,33 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ProgramsPage } from "../pages/Programs";
 
 const mockPrograms = [
-  { id: "p1", programName: "Program Alpha", createdDateTime: "2026-01-01" },
-  { id: "p2", programName: "Program Beta", createdDateTime: "2026-01-02" },
-  { id: "p3", programName: "Program Gamma", createdDateTime: "2026-01-03" },
+  {
+    id: "p1",
+    programName: "Program Alpha",
+    programLongName: "Alpha Long Name",
+    targets: [{ type: "VEN_NAME", values: ["ven-1", "ven-2"] }],
+    createdDateTime: "2026-01-01",
+  },
+  {
+    id: "p2",
+    programName: "Program Beta",
+    programLongName: null,
+    targets: null,
+    createdDateTime: "2026-01-02",
+  },
+  {
+    id: "p3",
+    programName: "Program Gamma",
+    programLongName: null,
+    targets: [{ type: "VEN_NAME", values: ["ven-3"] }],
+    createdDateTime: "2026-01-03",
+  },
+];
+
+const mockVens = [
+  { id: "v1", venName: "ven-1", createdDateTime: "2026-01-01" },
+  { id: "v2", venName: "ven-2", createdDateTime: "2026-01-01" },
+  { id: "v3", venName: "ven-3", createdDateTime: "2026-01-01" },
 ];
 
 const useProgramsMock = vi.fn(() => ({
@@ -22,6 +46,7 @@ const deleteMock = vi.fn();
 
 vi.mock("../api/hooks", () => ({
   usePrograms: () => useProgramsMock(),
+  useVens: () => ({ data: mockVens, dataUpdatedAt: Date.now() }),
   useCreateProgram: () => ({ mutate: createMock, isPending: false }),
   useUpdateProgram: () => ({ mutate: updateMock, isPending: false }),
   useDeleteProgram: () => ({ mutate: deleteMock, isPending: false }),
@@ -63,6 +88,17 @@ describe("ProgramsPage", () => {
     expect(screen.getByTestId("program-item-p3")).toBeVisible();
   });
 
+  it("shows enrollment info for targeted programs", () => {
+    renderPrograms();
+    expect(screen.getByTestId("enrollment-p1")).toHaveTextContent("ven-1, ven-2");
+    expect(screen.getByTestId("enrollment-p3")).toHaveTextContent("ven-3");
+  });
+
+  it("shows open label for programs without targets", () => {
+    renderPrograms();
+    expect(screen.getByTestId("enrollment-p2")).toHaveTextContent("Open — all VENs");
+  });
+
   it("filters programs by search query", async () => {
     renderPrograms();
     const search = screen.getByTestId("programs-search");
@@ -93,19 +129,27 @@ describe("ProgramsPage", () => {
     expect(screen.getByTestId("json-dialog-title")).toHaveTextContent("Program: Program Alpha");
   });
 
-  it("opens create program dialog", async () => {
+  it("opens create program dialog with VEN checkboxes", async () => {
     renderPrograms();
     await userEvent.click(screen.getByTestId("create-program-btn"));
     expect(screen.getByTestId("program-form-dialog")).toBeVisible();
+    expect(screen.getByTestId("program-ven-checkboxes")).toBeVisible();
+    expect(screen.getByTestId("ven-checkbox-ven-1")).toBeVisible();
+    expect(screen.getByTestId("ven-checkbox-ven-2")).toBeVisible();
+    expect(screen.getByTestId("ven-checkbox-ven-3")).toBeVisible();
   });
 
-  it("submits new program", async () => {
+  it("submits new program with selected VENs", async () => {
     renderPrograms();
     await userEvent.click(screen.getByTestId("create-program-btn"));
     await userEvent.type(screen.getByTestId("program-name-input"), "New Program");
+    await userEvent.click(screen.getByTestId("ven-checkbox-ven-1"));
     await userEvent.click(screen.getByTestId("program-form-submit"));
     expect(createMock).toHaveBeenCalledWith(
-      { programName: "New Program" },
+      {
+        programName: "New Program",
+        targets: [{ type: "VEN_NAME", values: ["ven-1"] }],
+      },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
   });
@@ -114,6 +158,7 @@ describe("ProgramsPage", () => {
     renderPrograms();
     await userEvent.click(screen.getByTestId("edit-program-p1"));
     expect(screen.getByTestId("program-name-input")).toHaveValue("Program Alpha");
+    expect(screen.getByTestId("program-long-name-input")).toHaveValue("Alpha Long Name");
   });
 
   it("opens confirm dialog on delete click", async () => {

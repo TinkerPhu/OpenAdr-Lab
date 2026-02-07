@@ -23,6 +23,7 @@ use vtn::VtnClient;
 #[derive(Clone)]
 struct AppCtx {
     state: AppState,
+    vtn: VtnClient,
 }
 
 #[tokio::main]
@@ -83,6 +84,23 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // Poll reports
+    {
+        let state = state.clone();
+        let vtn = vtn.clone();
+        let secs = cfg.poll_reports_secs;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(secs));
+            loop {
+                interval.tick().await;
+                match vtn.fetch_reports().await {
+                    Ok(reports) => state.set_reports(reports).await,
+                    Err(e) => error!("report poll failed: {e:#}"),
+                }
+            }
+        });
+    }
+
     // Fake sensor sampler (replace with MQTT/Modbus/etc.)
     {
         let state = state.clone();
@@ -121,7 +139,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // HTTP API
-    let ctx = AppCtx { state };
+    let ctx = AppCtx { state, vtn };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -133,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/events", get(get_events))
         .route("/programs", get(get_programs))
         .route("/sensors", get(get_sensors).post(post_sensors))
+        .route("/reports", get(get_reports).post(post_reports))
         .with_state(ctx)
         .layer(cors);
 
@@ -184,4 +203,25 @@ async fn post_sensors(
     };
     ctx.state.update_sensor(snap.clone()).await;
     Json(snap)
+}
+
+async fn get_reports(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.reports().await)
+}
+
+async fn post_reports(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    match ctx.vtn.submit_report(body).await {
+        Ok(result) => (axum::http::StatusCode::CREATED, Json(result)).into_response(),
+        Err(e) => {
+            error!("report submission failed: {e:#}");
+            (
+                axum::http::StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error": format!("{e:#}")})),
+            )
+                .into_response()
+        }
+    }
 }

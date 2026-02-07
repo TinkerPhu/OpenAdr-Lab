@@ -13,9 +13,24 @@ import requests
 # ── Demo data ────────────────────────────────────────────────────────────────
 
 PROGRAMS = [
-    {"programName": "Summer Peak DR", "desc": "Demand response for summer peak hours"},
-    {"programName": "EV Managed Charging", "desc": "Managed EV charging load shifting"},
-    {"programName": "HVAC Optimization", "desc": "Building HVAC pre-cool/pre-heat"},
+    {
+        "programName": "Summer Peak DR",
+        "programLongName": "Summer Peak Demand Response Program",
+        "programType": "DEMAND_RESPONSE",
+        "targets": [{"type": "VEN_NAME", "values": ["ven-1", "ven-2"]}],
+    },
+    {
+        "programName": "EV Managed Charging",
+        "programLongName": "Electric Vehicle Managed Charging Program",
+        "programType": "LOAD_SHIFTING",
+        "targets": [{"type": "VEN_NAME", "values": ["ven-2", "ven-3"]}],
+    },
+    {
+        "programName": "HVAC Optimization",
+        "programLongName": "Building HVAC Pre-Cool/Pre-Heat Optimization",
+        "programType": "OPTIMIZATION",
+        "targets": None,  # open — visible to all VENs
+    },
 ]
 
 EVENTS = {
@@ -63,11 +78,36 @@ def list_programs(base_url, token):
     return r.json()
 
 
-def create_program(base_url, token, program_name):
+def create_program(base_url, token, prog):
+    body = {"programName": prog["programName"], "intervalPeriod": None, "programDescriptions": None}
+    if prog.get("programLongName"):
+        body["programLongName"] = prog["programLongName"]
+    if prog.get("programType"):
+        body["programType"] = prog["programType"]
+    if prog.get("targets"):
+        body["targets"] = prog["targets"]
     r = requests.post(
         f"{base_url}/programs",
         headers=auth_headers(token),
-        json={"programName": program_name, "intervalPeriod": None, "programDescriptions": None},
+        json=body,
+        timeout=10,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def update_program(base_url, token, program_id, prog):
+    """PUT targets/metadata onto an existing program (idempotent re-runs)."""
+    body = {"programName": prog["programName"]}
+    if prog.get("programLongName"):
+        body["programLongName"] = prog["programLongName"]
+    if prog.get("programType"):
+        body["programType"] = prog["programType"]
+    body["targets"] = prog.get("targets")  # None clears targets (open program)
+    r = requests.put(
+        f"{base_url}/programs/{program_id}",
+        headers=auth_headers(token),
+        json=body,
         timeout=10,
     )
     r.raise_for_status()
@@ -117,15 +157,16 @@ def main():
     existing = list_programs(base, token)
     existing_names = {p["programName"]: p["id"] for p in existing}
 
-    # Create programs
+    # Create programs (or update targets on existing)
     program_ids = {}  # programName -> id
     for prog in PROGRAMS:
         name = prog["programName"]
         if name in existing_names:
             program_ids[name] = existing_names[name]
-            print(f"Program '{name}' already exists  id={program_ids[name]}")
+            update_program(base, token, program_ids[name], prog)
+            print(f"Program '{name}' already exists — updated targets  id={program_ids[name]}")
         else:
-            body = create_program(base, token, name)
+            body = create_program(base, token, prog)
             program_ids[name] = body["id"]
             print(f"Created program '{name}'  id={program_ids[name]}")
 

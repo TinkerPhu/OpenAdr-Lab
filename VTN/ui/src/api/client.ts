@@ -1,4 +1,4 @@
-import type { EventInput, HealthStatus, Program, ProgramInput, VtnEvent, Ven } from "./types";
+import type { EventInput, HealthStatus, Program, ProgramInput, Report, VtnEvent, Ven } from "./types";
 
 export class BffApi {
   constructor(public baseUrl: string = "") {}
@@ -74,5 +74,16 @@ export class BffApi {
   async deleteVen(id: string): Promise<void> {
     const r = await this.jsonReq("DELETE", `/api/vens/${id}`);
     if (!r.ok) throw new Error(`deleteVen ${r.status}`);
+  }
+
+  async reports(): Promise<Report[]> {
+    const r = await fetch(this.url("/api/reports"));
+    if (!r.ok) throw new Error(`reports ${r.status}`);
+    return r.json();
+  }
+
+  async deleteReport(id: string): Promise<void> {
+    const r = await this.jsonReq("DELETE", `/api/reports/${id}`);
+    if (!r.ok) throw new Error(`deleteReport ${r.status}`);
   }
 }
