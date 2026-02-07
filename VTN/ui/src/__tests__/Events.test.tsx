@@ -69,6 +69,12 @@ describe("EventsPage", () => {
     expect(screen.getByTestId("event-row-e3")).toBeVisible();
   });
 
+  it("displays program name instead of program ID", () => {
+    renderEvents();
+    expect(screen.getByTestId("event-row-e1")).toHaveTextContent("Program Alpha");
+    expect(screen.getByTestId("event-row-e3")).toHaveTextContent("Program Beta");
+  });
+
   it("filters events by search query", async () => {
     renderEvents();
     const search = screen.getByTestId("events-search");
