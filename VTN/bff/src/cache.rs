@@ -27,4 +27,9 @@ impl TtlCache {
         let mut entries = self.entries.write().await;
         entries.insert(key, (value, Instant::now(), ttl));
     }
+
+    pub async fn invalidate(&self, key: &str) {
+        let mut entries = self.entries.write().await;
+        entries.remove(key);
+    }
 }

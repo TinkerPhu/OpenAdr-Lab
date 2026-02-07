@@ -16,8 +16,15 @@ const useProgramsMock = vi.fn(() => ({
   dataUpdatedAt: Date.now(),
 }));
 
+const createMock = vi.fn();
+const updateMock = vi.fn();
+const deleteMock = vi.fn();
+
 vi.mock("../api/hooks", () => ({
   usePrograms: () => useProgramsMock(),
+  useCreateProgram: () => ({ mutate: createMock, isPending: false }),
+  useUpdateProgram: () => ({ mutate: updateMock, isPending: false }),
+  useDeleteProgram: () => ({ mutate: deleteMock, isPending: false }),
 }));
 
 function renderPrograms() {
@@ -84,5 +91,44 @@ describe("ProgramsPage", () => {
     await userEvent.click(screen.getByText("Program Alpha"));
     expect(screen.getByTestId("json-dialog")).toBeVisible();
     expect(screen.getByTestId("json-dialog-title")).toHaveTextContent("Program: Program Alpha");
+  });
+
+  it("opens create program dialog", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("create-program-btn"));
+    expect(screen.getByTestId("program-form-dialog")).toBeVisible();
+  });
+
+  it("submits new program", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("create-program-btn"));
+    await userEvent.type(screen.getByTestId("program-name-input"), "New Program");
+    await userEvent.click(screen.getByTestId("program-form-submit"));
+    expect(createMock).toHaveBeenCalledWith(
+      { programName: "New Program" },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("opens edit dialog with pre-filled data", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("edit-program-p1"));
+    expect(screen.getByTestId("program-name-input")).toHaveValue("Program Alpha");
+  });
+
+  it("opens confirm dialog on delete click", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("delete-program-p1"));
+    expect(screen.getByTestId("confirm-dialog")).toBeVisible();
+  });
+
+  it("calls delete on confirm", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("delete-program-p1"));
+    await userEvent.click(screen.getByTestId("confirm-dialog-ok"));
+    expect(deleteMock).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
   });
 });

@@ -513,6 +513,83 @@ Net deletion: -76 lines. Both UIs now use identical field names (`programName`, 
 
 ---
 
+## Phase 9 Work Log: Testing & Cleanup — Full CRUD (2026-02-07)
+
+### Motivation
+
+After Phases 1–8, the system was functional but had gaps: the VEN sensor POST endpoint rejected partial payloads (422), duplicate events accumulated from re-running the seed script, and both UIs were read-only despite the VTN API supporting full CRUD.
+
+### Sub-task 1: Fix VEN Sensor POST 422
+
+**Root cause**: `post_sensors` deserialized `Json<SensorSnapshot>`, which required `id` (Uuid) and `ts` (DateTime) — fields a form or sensor client shouldn't have to provide.
+
+**Fix**: Added `SensorInput` struct (all optional fields) to `models.rs`. Updated `post_sensors` handler to accept `SensorInput` and build a full `SensorSnapshot` with `Uuid::new_v4()` and `Utc::now()` server-side.
+
+### Sub-task 2: Seed Script Idempotency
+
+**Problem**: `seed_vtn.py` was idempotent for programs (checked by name) but always created events, producing duplicates on re-run.
+
+**Fix**: Added `list_events()` helper. Before creating each event, checks if `(programID, eventName)` already exists — skips with "already exists — skipping" message.
+
+### Sub-task 3: BFF Write Methods
+
+**Problem**: BFF only supported GET and had CORS limited to `Method::GET`.
+
+**Changes**:
+- `vtn_client.rs`: Added `post_json()`, `put_json()`, `delete_json()` — all follow the existing 401-retry pattern
+- `cache.rs`: Added `invalidate(key)` method
+- `main.rs`: Expanded CORS to GET/POST/PUT/DELETE, added 7 new routes
+- Route handlers in `programs.rs`, `events.rs`, `vens.rs`: create/update/delete handlers that proxy to VTN and invalidate cache
+
+**Route map**:
+| Method | Path | Client | Cache |
+|---|---|---|---|
+| POST | `/api/programs` | business | invalidate "programs" |
+| PUT | `/api/programs/{id}` | business | invalidate "programs" |
+| DELETE | `/api/programs/{id}` | business | invalidate "programs" |
+| POST | `/api/events` | business | invalidate "events" |
+| PUT | `/api/events/{id}` | business | invalidate "events" |
+| DELETE | `/api/events/{id}` | business | invalidate "events" |
+| DELETE | `/api/vens/{id}` | ven_mgr | invalidate "vens" |
+
+### Sub-task 4: VTN UI CRUD
+
+**New components**:
+- `ConfirmDialog.tsx` — reusable delete confirmation dialog
+- `ProgramFormDialog.tsx` — create/edit program (name field)
+- `EventFormDialog.tsx` — create/edit event (name, program dropdown, intervals JSON)
+
+**API layer**:
+- `client.ts`: Added 7 write methods (`createProgram`, `updateProgram`, `deleteProgram`, `createEvent`, `updateEvent`, `deleteEvent`, `deleteVen`)
+- `hooks.ts`: Added 7 `useMutation` hooks with `queryClient.invalidateQueries()` on success
+- `types.ts`: Added `ProgramInput` and `EventInput` types
+
+**Page updates**:
+- Programs: Create button, edit/delete icons per item
+- Events: Create button, edit/delete icons per row, Actions column
+- VENs: Delete icon per item (no create — provisioning is too complex)
+
+**Test results**: 37/37 passed (was 26/26 — added 11 CRUD tests)
+
+### Sub-task 5: Integration Tests
+
+**Sensor partial POST tests** (`ven_sensors.feature`):
+- Added 2 scenarios: temperature-only POST, power-only POST
+- Updated existing full-POST test to use `SensorInput` format (no `id`/`ts` fields)
+
+**BFF CRUD tests** (3 new feature files):
+- `bff_programs.feature`: create, update, delete programs via BFF (3 scenarios)
+- `bff_events.feature`: create, delete events via BFF (2 scenarios)
+- `bff_vens.feature`: list VENs, health check (2 scenarios)
+
+**Infrastructure**:
+- Added `test-bff` service to `docker-compose.test.yml`
+- Added BFF helpers (`bff_get`, `bff_post`, `bff_put`, `bff_delete`) to `api_client.py`
+- Updated `environment.py` to wait for BFF health
+- Step file `bff_crud_steps.py` reuses shared assertion steps from `vtn_auth_steps.py` and `vtn_programs_steps.py`
+
+---
+
 ## Key Learnings
 
 - VTN auto-migrates on first boot — no need for manual `cargo sqlx migrate run`

@@ -1,4 +1,3 @@
-import uuid
 from behave import given, when, then
 from features.helpers.api_client import ven_get, ven_post
 
@@ -8,15 +7,26 @@ def step_post_sensor(context, temp, power):
     r = ven_post(
         "/sensors",
         json={
-            "id": str(uuid.uuid4()),
-            "ts": "2025-01-01T00:00:00Z",
             "temperature_c": temp,
             "power_w": power,
-            "voltage_v": None,
             "raw": {"source": "test"},
         },
     )
     r.raise_for_status()
+
+
+@given("I post partial sensor data with only temperature {temp:g}")
+def step_post_partial_temp(context, temp):
+    r = ven_post("/sensors", json={"temperature_c": temp})
+    r.raise_for_status()
+    context.post_response = r.json()
+
+
+@given("I post partial sensor data with only power {power:g}")
+def step_post_partial_power(context, power):
+    r = ven_post("/sensors", json={"power_w": power})
+    r.raise_for_status()
+    context.post_response = r.json()
 
 
 @when("I GET the VEN sensor snapshot")
@@ -34,3 +44,9 @@ def step_sensor_temp(context, temp):
 def step_sensor_power(context, power):
     actual = context.ven_sensor.get("power_w")
     assert actual == power, f"Expected power {power}, got {actual}"
+
+
+@then('the sensor has a generated "{field}"')
+def step_sensor_has_generated(context, field):
+    val = context.ven_sensor.get(field)
+    assert val is not None, f"Expected generated '{field}', got None"

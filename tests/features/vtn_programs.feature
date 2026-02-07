@@ -17,3 +17,5 @@ Feature: VTN Program Management
   Scenario: Unauthenticated request is rejected
     When I GET "/programs" without authentication
     Then the response status is 401
+
+# TODO: test BFF returns 404 when deleting non-existent program

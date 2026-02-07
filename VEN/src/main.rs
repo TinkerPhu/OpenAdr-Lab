@@ -12,11 +12,12 @@ use axum::{
 };
 use chrono::Utc;
 use config::Config;
-use models::SensorSnapshot;
+use models::{SensorInput, SensorSnapshot};
 use serde::Deserialize;
 use state::AppState;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
+use uuid::Uuid;
 use vtn::VtnClient;
 
 #[derive(Clone)]
@@ -171,9 +172,16 @@ async fn get_sensors(State(ctx): State<AppCtx>) -> impl IntoResponse {
 
 async fn post_sensors(
     State(ctx): State<AppCtx>,
-    Json(mut snap): Json<SensorSnapshot>,
+    Json(input): Json<SensorInput>,
 ) -> impl IntoResponse {
-    snap.ts = Utc::now();
+    let snap = SensorSnapshot {
+        id: Uuid::new_v4(),
+        ts: Utc::now(),
+        temperature_c: input.temperature_c,
+        power_w: input.power_w,
+        voltage_v: input.voltage_v,
+        raw: input.raw.unwrap_or(serde_json::json!({})),
+    };
     ctx.state.update_sensor(snap.clone()).await;
     Json(snap)
 }

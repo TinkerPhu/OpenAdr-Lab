@@ -23,3 +23,13 @@ export type Ven = {
   venName: string | null;
   createdDateTime: string | null;
 };
+
+export type ProgramInput = {
+  programName: string;
+};
+
+export type EventInput = {
+  programID: string;
+  eventName: string;
+  intervals: unknown[];
+};

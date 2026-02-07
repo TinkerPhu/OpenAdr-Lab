@@ -84,6 +84,33 @@ services:
       - test-net
 
   # ---------------------------------------------------------------------------
+  # BFF — proxies VTN with dual credentials
+  # ---------------------------------------------------------------------------
+  test-bff:
+    build:
+      context: ../VTN/bff
+      dockerfile: Dockerfile
+    environment:
+      BFF_LISTEN_ADDR: "0.0.0.0:8090"
+      VTN_BASE_URL: "http://test-vtn:3000"
+      VTN_BUSINESS_CLIENT_ID: "any-business"
+      VTN_BUSINESS_CLIENT_SECRET: "any-business"
+      VTN_VEN_MGR_CLIENT_ID: "ven-manager"
+      VTN_VEN_MGR_CLIENT_SECRET: "ven-manager"
+      RUST_LOG: "info"
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8090/api/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      test-vtn:
+        condition: service_healthy
+    networks:
+      - test-net
+
+  # ---------------------------------------------------------------------------
   # Test runner — loads fixtures via psql, then runs behave
   # ---------------------------------------------------------------------------
   test-runner:
@@ -93,12 +120,15 @@ services:
     environment:
       VTN_BASE_URL: "http://test-vtn:3000"
       VEN_BASE_URL: "http://test-ven-1:8080"
+      BFF_BASE_URL: "http://test-bff:8090"
     volumes:
       - ../openleadr-rs/fixtures:/fixtures:ro
     depends_on:
       test-vtn:
         condition: service_healthy
       test-ven-1:
+        condition: service_healthy
+      test-bff:
         condition: service_healthy
     networks:
       - test-net
