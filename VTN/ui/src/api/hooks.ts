@@ -1,5 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useBffContext } from "../App";
+import type { EventInput, ProgramInput } from "./types";
 
 export function useHealth() {
   const { api } = useBffContext();
@@ -19,6 +20,33 @@ export function usePrograms() {
   });
 }
 
+export function useCreateProgram() {
+  const { api } = useBffContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ProgramInput) => api.createProgram(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["programs"] }),
+  });
+}
+
+export function useUpdateProgram() {
+  const { api } = useBffContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: ProgramInput }) => api.updateProgram(id, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["programs"] }),
+  });
+}
+
+export function useDeleteProgram() {
+  const { api } = useBffContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteProgram(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["programs"] }),
+  });
+}
+
 export function useEvents() {
   const { api } = useBffContext();
   return useQuery({
@@ -28,11 +56,47 @@ export function useEvents() {
   });
 }
 
+export function useCreateEvent() {
+  const { api } = useBffContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: EventInput) => api.createEvent(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["events"] }),
+  });
+}
+
+export function useUpdateEvent() {
+  const { api } = useBffContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: EventInput }) => api.updateEvent(id, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["events"] }),
+  });
+}
+
+export function useDeleteEvent() {
+  const { api } = useBffContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteEvent(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["events"] }),
+  });
+}
+
 export function useVens() {
   const { api } = useBffContext();
   return useQuery({
     queryKey: ["vens"],
     queryFn: () => api.vens(),
     refetchInterval: 15_000,
+  });
+}
+
+export function useDeleteVen() {
+  const { api } = useBffContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteVen(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["vens"] }),
   });
 }

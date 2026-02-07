@@ -16,8 +16,11 @@ const useVensMock = vi.fn(() => ({
   dataUpdatedAt: Date.now(),
 }));
 
+const deleteMock = vi.fn();
+
 vi.mock("../api/hooks", () => ({
   useVens: () => useVensMock(),
+  useDeleteVen: () => ({ mutate: deleteMock, isPending: false }),
 }));
 
 function renderVens() {
@@ -84,5 +87,21 @@ describe("VensPage", () => {
     await userEvent.click(screen.getByText("ven-1"));
     expect(screen.getByTestId("json-dialog")).toBeVisible();
     expect(screen.getByTestId("json-dialog-title")).toHaveTextContent("VEN: ven-1");
+  });
+
+  it("opens confirm dialog on VEN delete click", async () => {
+    renderVens();
+    await userEvent.click(screen.getByTestId("delete-ven-v1"));
+    expect(screen.getByTestId("confirm-dialog")).toBeVisible();
+  });
+
+  it("calls deleteVen on confirm", async () => {
+    renderVens();
+    await userEvent.click(screen.getByTestId("delete-ven-v1"));
+    await userEvent.click(screen.getByTestId("confirm-dialog-ok"));
+    expect(deleteMock).toHaveBeenCalledWith(
+      "v1",
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
   });
 });

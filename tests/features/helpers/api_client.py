@@ -1,10 +1,11 @@
-"""Thin HTTP helpers for talking to the VTN and VEN APIs."""
+"""Thin HTTP helpers for talking to the VTN, VEN, and BFF APIs."""
 
 import os
 import requests
 
 VTN_BASE_URL = os.environ.get("VTN_BASE_URL", "http://test-vtn:3000")
 VEN_BASE_URL = os.environ.get("VEN_BASE_URL", "http://test-ven-1:8080")
+BFF_BASE_URL = os.environ.get("BFF_BASE_URL", "http://test-bff:8090")
 
 
 # ── VTN helpers ──────────────────────────────────────────────────────────────
@@ -71,3 +72,25 @@ def ven_post(path, json=None):
         json=json,
         timeout=10,
     )
+
+
+# ── BFF helpers ──────────────────────────────────────────────────────────────
+
+def bff_get(path, params=None):
+    """GET against the BFF (no auth — BFF handles VTN auth internally)."""
+    return requests.get(f"{BFF_BASE_URL}{path}", params=params, timeout=10)
+
+
+def bff_post(path, json=None):
+    """POST against the BFF."""
+    return requests.post(f"{BFF_BASE_URL}{path}", json=json, timeout=10)
+
+
+def bff_put(path, json=None):
+    """PUT against the BFF."""
+    return requests.put(f"{BFF_BASE_URL}{path}", json=json, timeout=10)
+
+
+def bff_delete(path):
+    """DELETE against the BFF."""
+    return requests.delete(f"{BFF_BASE_URL}{path}", timeout=10)

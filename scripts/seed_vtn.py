@@ -74,6 +74,12 @@ def create_program(base_url, token, program_name):
     return r.json()
 
 
+def list_events(base_url, token):
+    r = requests.get(f"{base_url}/events", headers=auth_headers(token), timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
 def create_event(base_url, token, program_id, event_name, values):
     r = requests.post(
         f"{base_url}/events",
@@ -125,17 +131,26 @@ def main():
 
     print()
 
+    # Check existing events to allow idempotent re-runs
+    existing_events = list_events(base, token)
+    existing_keys = {(e["programID"], e["eventName"]) for e in existing_events}
+
     # Create events
     created_events = 0
+    skipped_events = 0
     for prog_name, events in EVENTS.items():
         prog_id = program_ids[prog_name]
         for evt in events:
-            body = create_event(base, token, prog_id, evt["eventName"], evt["values"])
-            print(f"Created event '{evt['eventName']}' for '{prog_name}'  id={body['id']}")
-            created_events += 1
+            if (prog_id, evt["eventName"]) in existing_keys:
+                print(f"Event '{evt['eventName']}' for '{prog_name}' already exists — skipping")
+                skipped_events += 1
+            else:
+                body = create_event(base, token, prog_id, evt["eventName"], evt["values"])
+                print(f"Created event '{evt['eventName']}' for '{prog_name}'  id={body['id']}")
+                created_events += 1
 
     # Summary
-    print(f"\nDone: {len(program_ids)} programs, {created_events} events")
+    print(f"\nDone: {len(program_ids)} programs, {created_events} events created, {skipped_events} skipped")
 
 
 if __name__ == "__main__":

@@ -1,15 +1,21 @@
 import { useMemo, useState } from "react";
 import {
-  List, ListItem, ListItemButton, ListItemText, Paper, Stack, TextField, Typography,
+  IconButton, List, ListItem, ListItemButton, ListItemText,
+  Paper, Stack, TextField, Typography,
 } from "@mui/material";
+import DeleteIcon from "@mui/icons-material/Delete";
 import type { Ven } from "../api/types";
-import { useVens } from "../api/hooks";
+import { useVens, useDeleteVen } from "../api/hooks";
 import { JsonDialog } from "../components/JsonDialog";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 export function VensPage() {
   const { data: vens = [], dataUpdatedAt } = useVens();
+  const deleteMut = useDeleteVen();
+
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Ven | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Ven | null>(null);
 
   const filtered = useMemo(() => {
     return vens.filter((v) => {
@@ -19,6 +25,12 @@ export function VensPage() {
   }, [vens, query]);
 
   const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleString() : "—";
+
+  function handleDeleteConfirm() {
+    if (deleteTarget) {
+      deleteMut.mutate(deleteTarget.id, { onSuccess: () => setDeleteTarget(null) });
+    }
+  }
 
   return (
     <Stack spacing={2}>
@@ -48,7 +60,21 @@ export function VensPage() {
       <Paper>
         <List dense data-testid="vens-list">
           {filtered.map((v) => (
-            <ListItem key={v.id} disablePadding data-testid={`ven-item-${v.id}`}>
+            <ListItem
+              key={v.id}
+              disablePadding
+              data-testid={`ven-item-${v.id}`}
+              secondaryAction={
+                <IconButton
+                  size="small"
+                  onClick={(e) => { e.stopPropagation(); setDeleteTarget(v); }}
+                  data-testid={`delete-ven-${v.id}`}
+                  aria-label={`Delete ${v.venName}`}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              }
+            >
               <ListItemButton onClick={() => setSelected(v)}>
                 <ListItemText
                   primary={v.venName ?? v.id}
@@ -70,6 +96,15 @@ export function VensPage() {
         title={selected ? `VEN: ${selected.venName ?? selected.id}` : "VEN"}
         json={selected ?? {}}
         onClose={() => setSelected(null)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete VEN"
+        message={`Delete "${deleteTarget?.venName ?? deleteTarget?.id}"? This cannot be undone.`}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteTarget(null)}
+        loading={deleteMut.isPending}
       />
     </Stack>
   );
