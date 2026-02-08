@@ -84,6 +84,26 @@ def ven_post(path, json=None):
     )
 
 
+# ── VEN-2 helpers ────────────────────────────────────────────────────────────
+
+def ven2_get(path, params=None):
+    """GET against VEN-2 (no auth required)."""
+    return requests.get(
+        f"{VEN2_BASE_URL}{path}",
+        params=params,
+        timeout=10,
+    )
+
+
+def ven2_post(path, json=None):
+    """POST against VEN-2 (no auth required)."""
+    return requests.post(
+        f"{VEN2_BASE_URL}{path}",
+        json=json,
+        timeout=10,
+    )
+
+
 # ── BFF helpers ──────────────────────────────────────────────────────────────
 
 def bff_get(path, params=None):
