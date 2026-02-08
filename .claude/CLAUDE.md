@@ -5,3 +5,5 @@ dto: avoid DTO normalization. pass through upstream field names (e.g. OpenADR sp
 workflow: always keep a project_journal.md in projects where you write for each large step what you did, why you did it and what issues/key-learnings you had. it shall explain, how the project was implemented.
 
 NEVER stop docker containers that are not involved in this project without asking. They are productive containers. 
+
+When researching about OpenADR reference, only use OpenADR 3 resources. General Questions can be researched from any versions.
