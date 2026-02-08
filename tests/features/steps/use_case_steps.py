@@ -60,7 +60,7 @@ def step_create_targeted_program_save_id(context, name, ven):
     context.saved_program_id = r.json()["id"]
 
 
-@given('I create a program "{name}" targeting "{ven1}" and "{ven2}" and save its ID')
+@given('I create a program "{name}" targeting both "{ven1}" and "{ven2}" and save its ID')
 def step_create_dual_targeted_program_save_id(context, name, ven1, ven2):
     r = vtn_post(
         "/programs",

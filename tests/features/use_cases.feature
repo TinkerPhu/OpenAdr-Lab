@@ -37,7 +37,7 @@ Feature: OpenADR Use Cases — Full End-to-End
     And the VEN-1 event "uc3-e2e-price" has 3 intervals
 
   Scenario: UC4 - Peak Shaving (targeted to VEN-1 and VEN-2)
-    Given I create a program "uc4-e2e-peak" targeting "ven-1-name" and "ven-2" and save its ID
+    Given I create a program "uc4-e2e-peak" targeting both "ven-1-name" and "ven-2" and save its ID
     When I create a UC event "uc4-e2e-peak-shave" with type "IMPORT_CAPACITY_LIMIT" priority 3 and 1 interval with intervalPeriod
     Then the response status is 201
     When I wait for VEN-1 to show event "uc4-e2e-peak-shave"
