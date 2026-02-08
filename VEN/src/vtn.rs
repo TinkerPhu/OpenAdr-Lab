@@ -10,6 +10,7 @@ pub struct VtnClient {
     base_url: String,
     client_id: String,
     client_secret: String,
+    ven_name: String,
     token: Arc<tokio::sync::RwLock<Option<Token>>>,
 }
 
@@ -29,12 +30,13 @@ struct Token {
 }
 
 impl VtnClient {
-    pub fn new(base_url: String, client_id: String, client_secret: String) -> Self {
+    pub fn new(base_url: String, client_id: String, client_secret: String, ven_name: String) -> Self {
         Self {
             http: reqwest::Client::new(),
             base_url,
             client_id,
             client_secret,
+            ven_name,
             token: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
@@ -175,6 +177,65 @@ impl VtnClient {
         Ok(resp.json().await?)
     }
 
+    /// PUT JSON to a VTN endpoint with automatic 401-retry.
+    async fn put_json(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value> {
+        let token = self.ensure_token().await?;
+        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
+
+        let resp = self.http
+            .put(&url)
+            .bearer_auth(&token)
+            .json(&body)
+            .send()
+            .await
+            .context(format!("PUT {path} failed"))?;
+
+        if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
+            self.invalidate_token().await;
+            let new_token = self.ensure_token().await?;
+            let resp = self.http
+                .put(&url)
+                .bearer_auth(&new_token)
+                .json(&body)
+                .send()
+                .await
+                .context(format!("PUT {path} retry failed"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("{path} returned {status}: {body}");
+            }
+            return Ok(resp.json().await?);
+        }
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("{path} returned {status}: {body}");
+        }
+
+        Ok(resp.json().await?)
+    }
+
+    /// POST JSON, returning the raw response (status + body) without error-mapping.
+    async fn post_json_raw(&self, path: &str, body: &serde_json::Value) -> Result<(StatusCode, String)> {
+        let token = self.ensure_token().await?;
+        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
+
+        let resp = self.http
+            .post(&url)
+            .bearer_auth(&token)
+            .json(body)
+            .send()
+            .await
+            .context(format!("POST {path} failed"))?;
+
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        Ok((status, text))
+    }
+
     pub async fn fetch_programs(&self) -> Result<Vec<serde_json::Value>> {
         let raw = self.get_json("/programs").await?;
         Ok(raw.as_array().cloned().unwrap_or_default())
@@ -186,11 +247,52 @@ impl VtnClient {
     }
 
     pub async fn fetch_reports(&self) -> Result<Vec<serde_json::Value>> {
-        let raw = self.get_json("/reports").await?;
+        let path = format!("/reports?clientName={}", self.ven_name);
+        let raw = self.get_json(&path).await?;
         Ok(raw.as_array().cloned().unwrap_or_default())
     }
 
     pub async fn submit_report(&self, body: serde_json::Value) -> Result<serde_json::Value> {
         self.post_json("/reports", body).await
+    }
+
+    /// Submit a report with upsert semantics: on 409 Conflict, find the existing
+    /// report by name and update it instead.
+    pub async fn upsert_report(&self, body: serde_json::Value) -> Result<serde_json::Value> {
+        let (status, text) = self.post_json_raw("/reports", &body).await?;
+
+        if status == StatusCode::CONFLICT {
+            // Extract reportName from the request body
+            let report_name = body.get("reportName")
+                .and_then(|v| v.as_str())
+                .context("409 Conflict but no reportName in body")?;
+
+            let id = self.find_report_by_name(report_name).await?;
+            return self.update_report(&id, body).await;
+        }
+
+        if !status.is_success() {
+            anyhow::bail!("/reports returned {status}: {text}");
+        }
+
+        serde_json::from_str(&text).context("parse report response")
+    }
+
+    pub async fn update_report(&self, id: &str, body: serde_json::Value) -> Result<serde_json::Value> {
+        let path = format!("/reports/{id}");
+        self.put_json(&path, body).await
+    }
+
+    /// Search own reports (already filtered by client_name) for a matching reportName.
+    async fn find_report_by_name(&self, report_name: &str) -> Result<String> {
+        let reports = self.fetch_reports().await?;
+        for r in &reports {
+            if r.get("reportName").and_then(|v| v.as_str()) == Some(report_name) {
+                if let Some(id) = r.get("id").and_then(|v| v.as_str()) {
+                    return Ok(id.to_string());
+                }
+            }
+        }
+        anyhow::bail!("no report found with name '{report_name}'")
     }
 }

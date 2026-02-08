@@ -23,12 +23,14 @@ const mockReports = [
 ];
 
 const mutateMock = vi.fn();
+const updateMutateMock = vi.fn();
 
 vi.mock("../api/hooks", () => ({
   useReports: () => ({ data: mockReports, dataUpdatedAt: Date.now() }),
   useEvents: () => ({ data: mockEvents }),
   usePrograms: () => ({ data: mockPrograms }),
   useSubmitReport: () => ({ mutate: mutateMock, isPending: false }),
+  useUpdateReport: () => ({ mutate: updateMutateMock, isPending: false }),
 }));
 
 vi.mock("../App", () => ({
@@ -49,6 +51,7 @@ function renderReports() {
 describe("ReportsPage", () => {
   beforeEach(() => {
     mutateMock.mockReset();
+    updateMutateMock.mockReset();
   });
 
   it("renders heading and reports table", () => {
@@ -91,6 +94,38 @@ describe("ReportsPage", () => {
     await userEvent.click(screen.getByTestId("report-suggest-btn"));
 
     expect((nameInput as HTMLInputElement).value).toBe("my-custom-name");
+  });
+
+  it("renders Edit button on each report row", () => {
+    renderReports();
+    expect(screen.getByTestId("report-edit-r1")).toBeVisible();
+  });
+
+  it("clicking Edit opens form in edit mode with populated fields", async () => {
+    renderReports();
+    await userEvent.click(screen.getByTestId("report-edit-r1"));
+
+    expect(screen.getByTestId("report-form")).toBeVisible();
+    expect(screen.getByText("Edit Report")).toBeVisible();
+
+    const nameInput = screen.getByTestId("report-name-input") as HTMLInputElement;
+    expect(nameInput.value).toBe("test-report");
+
+    const submitBtn = screen.getByTestId("report-submit-btn");
+    expect(submitBtn).toHaveTextContent("Update");
+  });
+
+  it("submitting in edit mode calls updateMutate", async () => {
+    renderReports();
+    await userEvent.click(screen.getByTestId("report-edit-r1"));
+    await userEvent.click(screen.getByTestId("report-submit-btn"));
+
+    expect(updateMutateMock).toHaveBeenCalledTimes(1);
+    expect(updateMutateMock.mock.calls[0][0]).toMatchObject({
+      id: "r1",
+      payload: expect.objectContaining({ eventID: "e1" }),
+    });
+    expect(mutateMock).not.toHaveBeenCalled();
   });
 });
 
