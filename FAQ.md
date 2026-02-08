@@ -90,7 +90,7 @@ An office building's HVAC reduces power demand during a peak demand event.
       {
         "id": 0,
         "payloads": [
-          { "type": "DEMAND", "values": [45.2] },
+          { "type": "DEMAND", "values": [52.1] },
           { "type": "BASELINE", "values": [62.0] },
           { "type": "OPERATING_STATE", "values": ["REDUCED"] }
         ]
@@ -98,9 +98,25 @@ An office building's HVAC reduces power demand during a peak demand event.
       {
         "id": 1,
         "payloads": [
+          { "type": "DEMAND", "values": [45.2] },
+          { "type": "BASELINE", "values": [62.0] },
+          { "type": "OPERATING_STATE", "values": ["REDUCED"] }
+        ]
+      },
+      {
+        "id": 2,
+        "payloads": [
           { "type": "DEMAND", "values": [43.8] },
           { "type": "BASELINE", "values": [62.0] },
           { "type": "OPERATING_STATE", "values": ["REDUCED"] }
+        ]
+      },
+      {
+        "id": 3,
+        "payloads": [
+          { "type": "DEMAND", "values": [55.4] },
+          { "type": "BASELINE", "values": [62.0] },
+          { "type": "OPERATING_STATE", "values": ["NORMAL"] }
         ]
       }
     ]
@@ -108,7 +124,7 @@ An office building's HVAC reduces power demand during a peak demand event.
 ]
 ```
 
-**What it shows:** HVAC normally draws 62 kW (`BASELINE`). During the DR event it reduced to 45.2 kW then 43.8 kW (`DEMAND`), saving ~18 kW. `OPERATING_STATE` confirms the system is in reduced mode. The resource-level `intervalPeriod` defines the timing: interval 0 = 14:00-14:15, interval 1 = 14:15-14:30 (computed as `start + id * duration`).
+**What it shows:** HVAC normally draws 62 kW (`BASELINE`). Event starts at 14:00 — demand drops from 52 kW to 44 kW over 45 minutes as the system ramps down. At 14:45 (interval 3) the event ends and the HVAC returns to `NORMAL` mode at 55.4 kW, recovering toward baseline. The resource-level `intervalPeriod` defines the timing: interval 0 = 14:00, interval 1 = 14:15, etc. (computed as `start + id * duration`).
 
 ---
 
@@ -134,7 +150,23 @@ An EV charger throttles power during a peak pricing event and reports battery st
         "id": 1,
         "payloads": [
           { "type": "DEMAND", "values": [3.3] },
-          { "type": "STORAGE_CHARGE_LEVEL", "values": [52] },
+          { "type": "STORAGE_CHARGE_LEVEL", "values": [51] },
+          { "type": "STORAGE_MAX_CHARGE_POWER", "values": [7.4] }
+        ]
+      },
+      {
+        "id": 2,
+        "payloads": [
+          { "type": "DEMAND", "values": [3.3] },
+          { "type": "STORAGE_CHARGE_LEVEL", "values": [53] },
+          { "type": "STORAGE_MAX_CHARGE_POWER", "values": [7.4] }
+        ]
+      },
+      {
+        "id": 3,
+        "payloads": [
+          { "type": "DEMAND", "values": [7.4] },
+          { "type": "STORAGE_CHARGE_LEVEL", "values": [56] },
           { "type": "STORAGE_MAX_CHARGE_POWER", "values": [7.4] }
         ]
       }
@@ -143,7 +175,7 @@ An EV charger throttles power during a peak pricing event and reports battery st
 ]
 ```
 
-**What it shows:** Charger is capable of 7.4 kW (`STORAGE_MAX_CHARGE_POWER`) but throttled to 3.3 kW (`DEMAND`) during peak. Battery went from 48% to 52% (`STORAGE_CHARGE_LEVEL`) over 1 hour at the reduced rate (two 30-min intervals). The 4% gain in 60 minutes at 3.3 kW is realistic for a ~60 kWh battery.
+**What it shows:** Charger is capable of 7.4 kW (`STORAGE_MAX_CHARGE_POWER`) but throttled to 3.3 kW (`DEMAND`) during peak hours (intervals 0-2). Battery rises slowly: 48% → 51% → 53% at the reduced rate (~2% per 30 min at 3.3 kW on a ~60 kWh battery). At 18:30 (interval 3) the peak event ends and charging resumes at full 7.4 kW, with SOC jumping to 56%.
 
 ---
 
@@ -160,17 +192,33 @@ A campus aggregates demand across multiple buildings to prove overall load curta
       {
         "id": 0,
         "payloads": [
-          { "type": "DEMAND", "values": [320] },
+          { "type": "DEMAND", "values": [420] },
           { "type": "BASELINE", "values": [480] },
-          { "type": "LOAD_SHED_DELTA_AVAILABLE", "values": [25] }
+          { "type": "LOAD_SHED_DELTA_AVAILABLE", "values": [80] }
         ]
       },
       {
         "id": 1,
         "payloads": [
+          { "type": "DEMAND", "values": [340] },
+          { "type": "BASELINE", "values": [480] },
+          { "type": "LOAD_SHED_DELTA_AVAILABLE", "values": [25] }
+        ]
+      },
+      {
+        "id": 2,
+        "payloads": [
           { "type": "DEMAND", "values": [305] },
           { "type": "BASELINE", "values": [480] },
           { "type": "LOAD_SHED_DELTA_AVAILABLE", "values": [10] }
+        ]
+      },
+      {
+        "id": 3,
+        "payloads": [
+          { "type": "DEMAND", "values": [310] },
+          { "type": "BASELINE", "values": [480] },
+          { "type": "LOAD_SHED_DELTA_AVAILABLE", "values": [5] }
         ]
       }
     ]
@@ -178,7 +226,7 @@ A campus aggregates demand across multiple buildings to prove overall load curta
 ]
 ```
 
-**What it shows:** Campus baseline is 480 kW. Currently drawing 320 kW then 305 kW — a reduction of 160-175 kW (33-36%). `LOAD_SHED_DELTA_AVAILABLE` indicates 25 kW then 10 kW of additional curtailment still possible. `AGGREGATED_REPORT` is a special OpenADR resource name for multi-resource summaries.
+**What it shows:** Campus baseline is 480 kW. Over 1 hour the demand ramps down: 420 → 340 → 305 → 310 kW as buildings progressively shed load. Peak reduction of 175 kW (36%) at interval 2. `LOAD_SHED_DELTA_AVAILABLE` drops from 80 to 5 kW, showing the campus is approaching its curtailment limit. `AGGREGATED_REPORT` is a special OpenADR resource name for multi-resource summaries.
 
 ---
 
