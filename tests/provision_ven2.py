@@ -74,12 +74,16 @@ def main():
     print(f"  Created VEN entity {ven_id}")
 
     # 4. Assign VEN role
+    role_payload = {"roles": [{"role": "VEN", "id": ven_id}]}
+    print(f"  Assigning role: PUT /users/{user_id} with {role_payload}")
     r = requests.put(
         f"{VTN}/users/{user_id}",
         headers=auth(um_token),
-        json={"roles": [{"role": "VEN", "id": ven_id}]},
+        json=role_payload,
         timeout=10,
     )
+    if not r.ok:
+        print(f"  Role assignment failed: {r.status_code} {r.text[:500]}")
     r.raise_for_status()
     print("  Assigned VEN role")
     print("ven-2 provisioned successfully.")
