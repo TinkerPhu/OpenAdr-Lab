@@ -762,4 +762,57 @@ After deployment:
 
 ---
 
+## Phase 11b Work Log: Full E2E Use Case Tests (2026-02-08)
+
+### Motivation
+
+The Phase 11 use case integration tests only verified that the VTN accepted event payloads with the right types. They didn't test what makes each use case meaningful: enrollment targeting (right VEN sees the event, wrong VEN doesn't), event propagation through VENs, report submission round-trips, and event cancellation visibility.
+
+### Changes Made
+
+**`tests/features/helpers/api_client.py`**:
+- Added `ven2_get()` and `ven2_post()` helpers for consistent VEN-2 HTTP access (previously done inline via raw `requests.get` in enrollment steps)
+
+**`tests/features/use_cases.feature`** — full rewrite:
+- Each of the 8 scenarios now follows the complete flow:
+  1. Create program with enrollment targets (single VEN, dual VEN, or open)
+  2. Create event with UC-specific payload type, priority, and interval count
+  3. Wait for enrolled VEN(s) to receive the event by name (30s poll)
+  4. Verify non-enrolled VEN(s) do NOT see the event
+  5. Verify event structure on VEN side (payload type, priority, interval count, intervalPeriod)
+  6. VEN submits report for the event
+  7. Verify report visible on VTN
+  8. (UC8) Delete event → verify VEN no longer sees it
+
+**`tests/features/steps/use_case_steps.py`** — full rewrite:
+- Program creation steps: single-target, dual-target ("targeting both"), open — all save program ID
+- Event creation steps: with priority + interval count, with intervalPeriod, with targets
+- VEN polling steps: wait for VEN-1/VEN-2 to show event by name
+- Negative assertions: VEN-1/VEN-2 does not have event
+- VEN-side structure checks: payload type, priority, interval count, intervalPeriod
+- Report submission via VEN-1/VEN-2 for a specific event
+- Report verification on VTN by clientName + eventID
+- Event deletion by name and cancellation detection (event disappears from VEN)
+
+**`tests/provision_ven2.py`**:
+- Fixed `PUT /users/{id}` to include required `reference` and `description` fields (VTN API requires full body on PUT)
+
+### Test Results
+
+**13 features, 33 scenarios, 171 steps — all passing** (59 seconds).
+
+The 8 use case scenarios went from verifying only VTN response shapes to testing the full lifecycle across VTN → VEN → VEN report → VTN report visibility.
+
+### Issues Encountered
+
+1. **Behave AmbiguousStep**: The step `I create a program "{name}" targeting "{ven1}" and "{ven2}" and save its ID` was matched by `I create a program "{name}" targeting "{ven}" and save its ID` (behave's `{...}` captures greedily). Fixed by using `"targeting both"` for the dual-target variant.
+
+2. **provision_ven2.py 400 error**: The VTN's `PUT /users/{id}` endpoint changed to require the full user body (`reference`, `description`, `roles`) — not just `roles`. This was a pre-existing issue masked by the test stack not being rebuilt recently.
+
+### Key Insight
+
+The test infrastructure already had all building blocks (2 VENs with 5s poll, `poll_until`, report submission, enrollment helpers). Extending the tests was purely wiring — no new infrastructure needed.
+
+---
+
 *Last updated: 2026-02-08*
