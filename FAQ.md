@@ -75,152 +75,154 @@ This aligns with the pattern stated in CLAUDE.md: avoid DTO normalization and pa
 
 ### Q: What should I put in a Report?
 
-**A:** A report contains measurements/telemetry from one or more resources (devices) in response to a DR event. Here are 3 realistic examples:
+**A:** A report contains measurements/telemetry from one or more resources (devices) in response to a DR event. The `resources` JSON field is what you fill in the VEN UI form. Here are 3 realistic examples:
 
-#### Example 1: HVAC Temperature Response Report
+#### Example 1: HVAC Load Reduction Report
+
+An office building's HVAC reduces power demand during a peak demand event.
+
 ```json
-{
-  "resources": [
-    {
-      "resourceName": "HVAC-Unit-1",
-      "intervals": [
-        {
-          "id": 0,
-          "payloads": [
-            {
-              "type": "TEMPERATURE",
-              "values": [22.5]
-            },
-            {
-              "type": "MODE",
-              "values": ["HEATING"]
-            }
-          ]
-        },
-        {
-          "id": 1,
-          "payloads": [
-            {
-              "type": "TEMPERATURE",
-              "values": [23.1]
-            },
-            {
-              "type": "MODE",
-              "values": ["HEATING"]
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
+[
+  {
+    "resourceName": "HVAC-Building-7",
+    "intervalPeriod": {
+      "start": "2026-02-08T14:00:00Z",
+      "duration": "PT15M"
+    },
+    "intervals": [
+      {
+        "id": 0,
+        "intervalPeriod": { "start": "2026-02-08T14:00:00Z", "duration": "PT15M" },
+        "payloads": [
+          { "type": "DEMAND", "values": [45.2] },
+          { "type": "BASELINE", "values": [62.0] },
+          { "type": "OPERATING_STATE", "values": ["REDUCED"] }
+        ]
+      },
+      {
+        "id": 1,
+        "intervalPeriod": { "start": "2026-02-08T14:15:00Z", "duration": "PT15M" },
+        "payloads": [
+          { "type": "DEMAND", "values": [43.8] },
+          { "type": "BASELINE", "values": [62.0] },
+          { "type": "OPERATING_STATE", "values": ["REDUCED"] }
+        ]
+      }
+    ]
+  }
+]
 ```
-**Context:** VTN sent a heating reduction event. HVAC reports temperature readings every 5 minutes and current operating mode.
+
+**What it shows:** HVAC normally draws 62 kW (`BASELINE`). During the DR event it reduced to 45.2 kW then 43.8 kW (`DEMAND`), saving ~18 kW. `OPERATING_STATE` confirms the system is in reduced mode. Each interval covers 15 minutes with an explicit timestamp.
 
 ---
 
-#### Example 2: EV Charger State Report
+#### Example 2: EV Charger Managed Charging Report
+
+An EV charger throttles power during a peak pricing event and reports battery state.
+
 ```json
-{
-  "resources": [
-    {
-      "resourceName": "EV_CHARGER_ZONE_A",
-      "intervals": [
-        {
-          "id": 0,
-          "payloads": [
-            {
-              "type": "POWER_REAL",
-              "values": [7500]
-            },
-            {
-              "type": "STATE_OF_CHARGE",
-              "values": [45]
-            }
-          ]
-        },
-        {
-          "id": 1,
-          "payloads": [
-            {
-              "type": "POWER_REAL",
-              "values": [3700]
-            },
-            {
-              "type": "STATE_OF_CHARGE",
-              "values": [62]
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
+[
+  {
+    "resourceName": "EV-Charger-Bay-3",
+    "intervals": [
+      {
+        "id": 0,
+        "intervalPeriod": { "start": "2026-02-08T17:00:00Z", "duration": "PT30M" },
+        "payloads": [
+          { "type": "DEMAND", "values": [3.3] },
+          { "type": "STORAGE_CHARGE_LEVEL", "values": [48] },
+          { "type": "STORAGE_MAX_CHARGE_POWER", "values": [7.4] }
+        ]
+      },
+      {
+        "id": 1,
+        "intervalPeriod": { "start": "2026-02-08T17:30:00Z", "duration": "PT30M" },
+        "payloads": [
+          { "type": "DEMAND", "values": [3.3] },
+          { "type": "STORAGE_CHARGE_LEVEL", "values": [52] },
+          { "type": "STORAGE_MAX_CHARGE_POWER", "values": [7.4] }
+        ]
+      }
+    ]
+  }
+]
 ```
-**Context:** VTN sent a managed charging event during peak hours. EV charger reduced from 7.5kW to 3.7kW and reports actual power draw and vehicle battery state of charge.
+
+**What it shows:** Charger is capable of 7.4 kW (`STORAGE_MAX_CHARGE_POWER`) but throttled to 3.3 kW (`DEMAND`) during peak. Battery went from 48% to 52% (`STORAGE_CHARGE_LEVEL`) over 1 hour at the reduced rate. The 4% gain in 60 minutes at 3.3 kW is realistic for a ~60 kWh battery.
 
 ---
 
-#### Example 3: Aggregated Multi-Resource Report
+#### Example 3: Aggregated Campus Report
+
+A campus aggregates demand across multiple buildings to prove overall load curtailment.
+
 ```json
-{
-  "resources": [
-    {
-      "resourceName": "AGGREGATED_REPORT",
-      "intervals": [
-        {
-          "id": 0,
-          "payloads": [
-            {
-              "type": "DEMAND_RESPONSE_BASELINE",
-              "values": [15000]
-            },
-            {
-              "type": "ACTUAL_POWER",
-              "values": [12500]
-            },
-            {
-              "type": "COMPLIANCE_STATUS",
-              "values": ["COMPLIANT"]
-            }
-          ]
-        },
-        {
-          "id": 1,
-          "payloads": [
-            {
-              "type": "DEMAND_RESPONSE_BASELINE",
-              "values": [15000]
-            },
-            {
-              "type": "ACTUAL_POWER",
-              "values": [13200]
-            },
-            {
-              "type": "COMPLIANCE_STATUS",
-              "values": ["COMPLIANT"]
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
+[
+  {
+    "resourceName": "AGGREGATED_REPORT",
+    "intervals": [
+      {
+        "id": 0,
+        "intervalPeriod": { "start": "2026-02-08T14:00:00Z", "duration": "PT15M" },
+        "payloads": [
+          { "type": "DEMAND", "values": [320] },
+          { "type": "BASELINE", "values": [480] },
+          { "type": "LOAD_SHED_DELTA_AVAILABLE", "values": [25] }
+        ]
+      },
+      {
+        "id": 1,
+        "intervalPeriod": { "start": "2026-02-08T14:15:00Z", "duration": "PT15M" },
+        "payloads": [
+          { "type": "DEMAND", "values": [305] },
+          { "type": "BASELINE", "values": [480] },
+          { "type": "LOAD_SHED_DELTA_AVAILABLE", "values": [10] }
+        ]
+      }
+    ]
+  }
+]
 ```
-**Context:** Aggregated report across 5 facilities. VTN requested load curtailment. Report shows combined baseline (15kW expected), actual usage (12.5-13.2kW), and compliance.
+
+**What it shows:** Campus baseline is 480 kW. Currently drawing 320 kW then 305 kW — a reduction of 160-175 kW (33-36%). `LOAD_SHED_DELTA_AVAILABLE` indicates 25 kW then 10 kW of additional curtailment still possible. `AGGREGATED_REPORT` is a special OpenADR resource name for multi-resource summaries.
 
 ---
+
+#### OpenADR 3 Report Payload Types (from openleadr-rs)
+
+These are the standard `type` values for report payloads:
+
+| Type | Purpose | Typical Unit |
+|---|---|---|
+| `USAGE` | Energy consumed over interval | kWh |
+| `DEMAND` | Power draw at a point in time | kW |
+| `SETPOINT` | Target value (e.g. thermostat) | kW, °C |
+| `BASELINE` | Expected consumption without DR | kW |
+| `DELTA_USAGE` | Change in usage vs baseline | kWh |
+| `OPERATING_STATE` | Device mode (NORMAL, REDUCED, OFF) | — |
+| `READING` | Raw meter reading | kWh, V, A |
+| `STORAGE_CHARGE_LEVEL` | Battery state of charge | % |
+| `STORAGE_MAX_CHARGE_POWER` | Max charge capability | kW |
+| `STORAGE_MAX_DISCHARGE_POWER` | Max discharge capability | kW |
+| `STORAGE_USABLE_CAPACITY` | Total usable battery capacity | kWh |
+| `LOAD_SHED_DELTA_AVAILABLE` | Additional curtailment possible | kW |
+| `GENERATION_DELTA_AVAILABLE` | Additional generation possible | kW |
+| `SIMPLE_LEVEL` | Simple 0-3 level indicator | — |
+| `DATA_QUALITY` | Confidence in reported data | — |
+
+Custom/private strings are also allowed for application-specific types.
 
 #### Key Points:
-- **resources** — Array of devices/systems reporting data. Use `"AGGREGATED_REPORT"` for facility-wide summaries.
-- **intervals** — Time periods (usually 5-15 min) with measurements. Each interval has an `id` (0, 1, 2...) and `payloads`.
-- **payloads** — Array of measurement types. Each has a `type` (POWER_REAL, TEMPERATURE, STATE_OF_CHARGE, etc.) and `values` array.
-- **values** — The actual readings. Can be numbers, strings, or booleans depending on type.
+- **resources** — Array of devices/systems. Use `"AGGREGATED_REPORT"` for facility-wide summaries.
+- **intervalPeriod** — Each interval should carry a `start` (ISO 8601) and `duration` (ISO 8601, e.g. `"PT15M"` = 15 min). Can also be set at the resource level as a default.
+- **payloads** — Array of `{type, values}`. Use standard `ReportType` values from the table above.
+- **DEMAND vs BASELINE** — Report both to show the actual reduction. The VTN/utility can calculate savings as `BASELINE - DEMAND`.
 
 ---
 
 ## References
 
-- [Official OpenADR 2.0b Specification](https://www.openadr.org/specification)
-- [OpenADR 2.0 Demand Response Program Implementation Guide](https://www.openadr.org/assets/openadr_drprogramguide_v1.0.pdf)
-- [OpenADR Schema Repository (GitHub)](https://github.com/sangeeths/OpenADR)
+- [OpenADR 3 Specification](https://www.openadr.org/specification)
+- [OpenADR 3.0 Overview](https://www.openadr.org/openadr-3-0)
+- [openleadr-rs — OpenADR 3 VTN/VEN in Rust](https://github.com/OpenLEADR/openleadr-rs)
