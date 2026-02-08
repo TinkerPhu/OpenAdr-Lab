@@ -946,4 +946,34 @@ Prepared the TinkerPhu/openleadr-rs fork for upstream pull requests. Each distin
 
 ---
 
+## Phase 12: VEN Report Isolation (Security Fix)
+
+**Status: COMPLETE**
+
+### Problem
+Report queries used `ven_program` (enrollment) table for access control. This meant VENs enrolled in the same program could see each other's reports — a data isolation violation. For example, if VEN-1 and VEN-2 were both enrolled in "Summer Peak DR", VEN-1 could see VEN-2's reports.
+
+### Solution
+Added a `ven_id` column to the `report` table that tracks which VEN created each report. Changed all report queries (retrieve, retrieve_all, update) to filter by `r.ven_id = ANY(user_ven_ids)` for VEN users, replacing the old `ven_program` JOIN approach.
+
+### Changes Made
+
+1. **New migration** (`migrations/20260208000000_report_add_ven_id.sql`):
+   - `ALTER TABLE report ADD COLUMN ven_id text REFERENCES ven(id)`
+   - Backfill existing reports by matching `client_name` to `ven_name`
+
+2. **Report Rust code** (`openleadr-vtn/src/data_source/postgres/report.rs`):
+   - Added `ven_id: Option<String>` to `PostgresReport` struct
+   - `create()`: Stores the authenticated VEN's ID in the new column
+   - `retrieve()`, `retrieve_all()`, `update()`: Replaced `LEFT JOIN ven_program` with `r.ven_id = ANY($user_ven_ids)` for VEN users
+   - Business users unchanged — they still see reports scoped to their programs
+
+3. **SQLx offline cache**: Updated all 5 report query cache files with new column, new queries, and recomputed SHA-256 hashes
+
+### Key Learning
+- Program enrollment (`ven_program`) is appropriate for controlling which programs/events a VEN can see — those are shared resources
+- Reports are VEN-private data and require direct ownership tracking (`ven_id`), not enrollment-based access
+
+---
+
 *Last updated: 2026-02-08*
