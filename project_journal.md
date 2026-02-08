@@ -859,4 +859,91 @@ Forking before submodule-ing means we can patch `openleadr-rs` if needed (bug fi
 
 ---
 
+## Phase 12: Suggest Example Button + Duplicate Reports Fix
+
+### What We Did
+
+1. **VEN UI "Suggest Example" button** — Added a `buildExampleResources(event, venName)` function and a "Suggest Example" button to the Reports form (`VEN/ui/src/pages/Reports.tsx`). When clicked, it reads the selected event's `intervals`, generates a matching `resources` array with `resourceName: "{venName}-meter"`, and auto-fills the `reportName`. For `SIMPLE` payloads with value `0`, suggests `1` (acknowledged). For other non-zero values, applies ±4% random offset to simulate real measurements.
+
+2. **Duplicate reports bug fix in openleadr-rs** — Discovered that the VTN's `GET /reports` endpoint returned duplicate rows when a program had multiple VEN enrollments. Root cause: the `retrieve` and `retrieve_all` SQL queries in `openleadr-vtn/src/data_source/postgres/report.rs` used `LEFT JOIN ven_program` for permission filtering but didn't use `DISTINCT`. A program with 2 VEN enrollments (e.g., Summer Peak DR targeting ven-1 and ven-2) produced 2 identical rows per report. Fixed by adding `SELECT DISTINCT r.*` to both queries.
+
+### Why
+
+- Users had no way to know the OpenADR 3 report resource schema, making it impossible to create meaningful reports without consulting documentation.
+- The duplicate report rows were confusing — the VTN UI showed 2 identical entries for a single submitted report.
+
+### Key Learnings
+
+- **SQLx offline cache hashes are SHA-256 of the exact query string** between `r#"` and `"#` in the Rust source. Whitespace (including trailing spaces) matters. When modifying queries, the `.sqlx/query-{hash}.json` files must be renamed to match the new hash, and the `hash` field and `query` field inside must also be updated.
+- **The `ven_program` JOIN is the root cause** — it's used for permission filtering (ensuring VENs only see reports for programs they're enrolled in), but it multiplies rows when a program has multiple enrollments. `DISTINCT` is the correct fix since `r.*` columns are identical across the joined rows.
+
+---
+
+### Phase 12: Report Upsert, Edit Button & Own-Reports Filter
+
+**Status: COMPLETE**
+
+### What
+
+Three related improvements to VEN report handling:
+
+1. **Own-reports filter** — VEN backend now calls `GET /reports?clientName={ven_name}` instead of `GET /reports`, so each VEN only sees its own reports in the UI.
+2. **Upsert on POST** — When VTN returns 409 Conflict (duplicate `reportName`), the VEN backend automatically finds the existing report by name and issues `PUT /reports/{id}` instead. This makes report submission idempotent by name.
+3. **Edit button in VEN UI** — Each report row has an Edit icon button. Clicking it opens the form in edit mode with fields pre-populated. Submit calls `PUT /reports/{id}` directly.
+
+### Changes
+
+| File | Change |
+|------|--------|
+| `VEN/src/vtn.rs` | Added `ven_name` field, `put_json()`, `post_json_raw()`, `upsert_report()`, `update_report()`, `find_report_by_name()`; `fetch_reports()` now filters by `clientName` |
+| `VEN/src/main.rs` | Passed `ven_name` to VtnClient, added `Method::PUT` to CORS, `/reports/:id` PUT route, `put_report` handler, changed `post_reports` to use `upsert_report()` |
+| `VEN/ui/src/api/client.ts` | Added `updateReport(id, payload)` method |
+| `VEN/ui/src/api/hooks.ts` | Added `useUpdateReport()` mutation hook |
+| `VEN/ui/src/pages/Reports.tsx` | Added edit mode state, Edit icon button per row, form title/button toggling, update mutation call |
+| `VEN/ui/src/__tests__/Reports.test.tsx` | Added 3 tests for edit mode (renders Edit button, populates form, calls update mutation) |
+
+### Why
+
+- VENs seeing other VENs' reports was confusing and a privacy concern — each VEN should only see its own data.
+- 409 Conflict on duplicate report names blocked users from correcting reports — upsert makes it seamless.
+- No edit capability meant users had to delete and recreate reports to fix mistakes.
+
+### Key Learnings
+
+- VTN already supports `?clientName=X` query parameter filtering on `GET /reports` — no VTN changes needed.
+- The upsert pattern (POST → 409 → find by name → PUT) keeps the UI simple — the POST endpoint handles both create and update transparently.
+- `post_json_raw()` (returning status + body text) was needed to detect 409 without the existing `post_json()` error-mapping eating the status code.
+
+---
+
+### Upstream Contributions: openleadr-rs Pull Requests
+
+**Status: IN PROGRESS**
+
+### What
+
+Prepared the TinkerPhu/openleadr-rs fork for upstream pull requests. Each distinct fix/change gets its own branch based on `upstream/main` with the relevant commit(s) cherry-picked, keeping PRs atomic and reviewable.
+
+### PR Workflow
+
+1. Develop and test fix on `main` in the submodule (as part of normal lab work)
+2. Create a topic branch from `upstream/main`: `git checkout -b fix/<topic> upstream/main`
+3. Cherry-pick the relevant commit(s)
+4. Push to origin: `git push origin fix/<topic>`
+5. Create PR via `gh pr create --repo OpenLEADR/openleadr-rs --head TinkerPhu:fix/<topic> --base main`
+6. Switch back to `main`
+
+### Submitted PRs
+
+| PR | Branch | Description |
+|----|--------|-------------|
+| [#357](https://github.com/OpenLEADR/openleadr-rs/pull/357) | `fix/duplicate-report-rows` | Add `DISTINCT` to report queries to prevent duplicate rows caused by `ven_program` JOIN with multiple enrollments |
+
+### Infrastructure
+
+- Installed GitHub CLI (`gh` v2.86.0) for creating PRs from the terminal
+- `gh auth login` authenticated via browser with scopes: `gist`, `read:org`, `repo`, `workflow`
+
+---
+
 *Last updated: 2026-02-08*
