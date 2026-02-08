@@ -26,6 +26,7 @@ export function ProgramFormDialog(props: ProgramFormDialogProps) {
   const [name, setName] = useState("");
   const [longName, setLongName] = useState("");
   const [programType, setProgramType] = useState("");
+  const [descriptionUrl, setDescriptionUrl] = useState("");
   const [selectedVens, setSelectedVens] = useState<string[]>([]);
 
   useEffect(() => {
@@ -33,6 +34,7 @@ export function ProgramFormDialog(props: ProgramFormDialogProps) {
       setName(program?.programName ?? "");
       setLongName(program?.programLongName ?? "");
       setProgramType(program?.programType ?? "");
+      setDescriptionUrl(program?.programDescriptions?.[0]?.url ?? "");
       setSelectedVens(getEnrolledVenNames(program));
     }
   }, [open, program]);
@@ -49,6 +51,11 @@ export function ProgramFormDialog(props: ProgramFormDialogProps) {
     const input: ProgramInput = { programName: name };
     if (longName.trim()) input.programLongName = longName.trim();
     if (programType.trim()) input.programType = programType.trim();
+    if (descriptionUrl.trim()) {
+      input.programDescriptions = [{ url: descriptionUrl.trim() }];
+    } else {
+      input.programDescriptions = null;
+    }
     input.targets =
       selectedVens.length > 0
         ? selectedVens.map((v) => ({ type: "VEN_NAME", values: [v] }))
@@ -84,6 +91,15 @@ export function ProgramFormDialog(props: ProgramFormDialogProps) {
           value={programType}
           onChange={(e) => setProgramType(e.target.value)}
           inputProps={{ "data-testid": "program-type-input" }}
+        />
+        <TextField
+          margin="dense"
+          label="Description URL"
+          fullWidth
+          type="url"
+          value={descriptionUrl}
+          onChange={(e) => setDescriptionUrl(e.target.value)}
+          inputProps={{ "data-testid": "program-description-url-input" }}
         />
         {vens.length > 0 && (
           <>
