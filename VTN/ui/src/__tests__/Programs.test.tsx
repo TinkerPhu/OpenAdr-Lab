@@ -10,6 +10,7 @@ const mockPrograms = [
     id: "p1",
     programName: "Program Alpha",
     programLongName: "Alpha Long Name",
+    programDescriptions: [{ url: "https://example.com/alpha" }],
     targets: [{ type: "VEN_NAME", values: ["ven-1"] }, { type: "VEN_NAME", values: ["ven-2"] }],
     createdDateTime: "2026-01-01",
   },
@@ -149,6 +150,23 @@ describe("ProgramsPage", () => {
       {
         programName: "New Program",
         targets: [{ type: "VEN_NAME", values: ["ven-1"] }],
+        programDescriptions: null,
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("submits program with description URL", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("create-program-btn"));
+    await userEvent.type(screen.getByTestId("program-name-input"), "Program with URL");
+    await userEvent.type(screen.getByTestId("program-description-url-input"), "https://example.com/test");
+    await userEvent.click(screen.getByTestId("program-form-submit"));
+    expect(createMock).toHaveBeenCalledWith(
+      {
+        programName: "Program with URL",
+        programDescriptions: [{ url: "https://example.com/test" }],
+        targets: null,
       },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
@@ -159,6 +177,7 @@ describe("ProgramsPage", () => {
     await userEvent.click(screen.getByTestId("edit-program-p1"));
     expect(screen.getByTestId("program-name-input")).toHaveValue("Program Alpha");
     expect(screen.getByTestId("program-long-name-input")).toHaveValue("Alpha Long Name");
+    expect(screen.getByTestId("program-description-url-input")).toHaveValue("https://example.com/alpha");
   });
 
   it("opens confirm dialog on delete click", async () => {

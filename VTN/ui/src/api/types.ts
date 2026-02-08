@@ -9,11 +9,16 @@ export type TargetEntry = {
   values: string[];
 };
 
+export type ProgramDescription = {
+  url: string;
+};
+
 export type Program = {
   id: string;
   programName: string | null;
   programLongName?: string | null;
   programType?: string | null;
+  programDescriptions?: ProgramDescription[] | null;
   targets?: TargetEntry[] | null;
   createdDateTime: string | null;
 };
@@ -36,6 +41,7 @@ export type ProgramInput = {
   programName: string;
   programLongName?: string | null;
   programType?: string | null;
+  programDescriptions?: ProgramDescription[] | null;
   targets?: TargetEntry[] | null;
 };
 
