@@ -23,10 +23,18 @@ export type Program = {
   createdDateTime: string | null;
 };
 
+export type IntervalPeriod = {
+  start: string;
+  duration?: string | null;
+};
+
 export type VtnEvent = {
   id: string;
   programID: string | null;
   eventName: string | null;
+  priority?: number | null;
+  intervalPeriod?: IntervalPeriod | null;
+  targets?: TargetEntry[] | null;
   createdDateTime: string | null;
   intervals: unknown;
 };
@@ -48,6 +56,9 @@ export type ProgramInput = {
 export type EventInput = {
   programID: string;
   eventName: string;
+  priority?: number | null;
+  intervalPeriod?: IntervalPeriod | null;
+  targets?: TargetEntry[] | null;
   intervals: unknown[];
 };
 

@@ -6,9 +6,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventsPage } from "../pages/Events";
 
 const mockEvents = [
-  { id: "e1", programID: "p1", eventName: "Peak Event", createdDateTime: "2026-01-01", intervals: [{ id: 0 }] },
+  { id: "e1", programID: "p1", eventName: "Peak Event", priority: 0, intervalPeriod: { start: "2026-02-09T14:00:00Z", duration: "PT4H" }, createdDateTime: "2026-01-01", intervals: [{ id: 0 }] },
   { id: "e2", programID: "p1", eventName: "Off-Peak Event", createdDateTime: "2026-01-02", intervals: [] },
-  { id: "e3", programID: "p2", eventName: "EV Charge", createdDateTime: "2026-01-03", intervals: [] },
+  { id: "e3", programID: "p2", eventName: "EV Charge", priority: 5, createdDateTime: "2026-01-03", intervals: [] },
 ];
 
 const mockPrograms = [
@@ -103,6 +103,12 @@ describe("EventsPage", () => {
     useEventsMock.mockReturnValue({ data: [], dataUpdatedAt: Date.now() });
     renderEvents();
     expect(screen.getByTestId("events-empty")).toBeVisible();
+  });
+
+  it("displays priority and start time columns", () => {
+    renderEvents();
+    expect(screen.getByTestId("event-row-e1")).toHaveTextContent("0");
+    expect(screen.getByTestId("event-row-e3")).toHaveTextContent("5");
   });
 
   it("opens create event dialog", async () => {
