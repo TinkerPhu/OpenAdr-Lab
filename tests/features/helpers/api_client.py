@@ -55,6 +55,15 @@ def vtn_post(path, token, json=None):
     )
 
 
+def vtn_delete(path, token):
+    """Authenticated DELETE against the VTN."""
+    return requests.delete(
+        f"{VTN_BASE_URL}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+
+
 # ── VEN helpers ──────────────────────────────────────────────────────────────
 
 def ven_get(path, params=None):

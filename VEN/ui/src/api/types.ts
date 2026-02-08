@@ -7,12 +7,31 @@ export type Program = {
   [key: string]: unknown;
 };
 
+export type IntervalPeriod = {
+  start: string;
+  duration?: string | null;
+};
+
+export type TargetEntry = {
+  type: string;
+  values: string[];
+};
+
+export type Interval = {
+  id: number;
+  intervalPeriod?: IntervalPeriod | null;
+  payloads?: { type: string; values: number[] }[];
+};
+
 export type VtnEvent = {
   id: string;
   programID?: string | null;
   eventName?: string | null;
+  priority?: number | null;
+  intervalPeriod?: IntervalPeriod | null;
+  targets?: TargetEntry[] | null;
   createdDateTime?: string | null;
-  intervals?: unknown;
+  intervals?: Interval[];
   [key: string]: unknown;
 };
 
