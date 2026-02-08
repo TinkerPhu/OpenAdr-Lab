@@ -68,3 +68,15 @@ export function useSubmitReport() {
     },
   });
 }
+
+export function useUpdateReport() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: unknown }) =>
+      api.updateReport(id, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+    },
+  });
+}
