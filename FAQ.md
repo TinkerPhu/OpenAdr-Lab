@@ -230,6 +230,145 @@ A campus aggregates demand across multiple buildings to prove overall load curta
 
 ---
 
+---
+
+## VTN and Resources
+
+### Q: Does a VTN need to know about every individual resource (device) of each VEN?
+
+**A: Usually not.** It depends on the use case:
+
+**Simple DR programs (most common):** The VTN only cares about total load reduction per VEN. VENs report using `AGGREGATED_REPORT` as the resource name — one summary per VEN showing total `DEMAND` vs `BASELINE`. No individual device tracking. This is how most real-world utility DR programs work.
+
+**Advanced use cases where VTNs track resources:**
+- **DER fleet management** — Individual batteries/inverters with different capacities and constraints
+- **EV fleet charging** — Scheduling individual chargers with different power ratings
+- **Regulatory compliance** — Proving specific equipment participated in an event
+- **Granular optimization** — Deciding which specific devices to curtail vs. keep running
+
+**The resource registry is optional.** OpenADR 3 provides `GET/POST /vens/{venID}/resources` for VENs to register their devices, but VENs can submit reports with any `resourceName` string without pre-registering it. The VTN stores whatever the report contains.
+
+**For our lab:** The seed data programs (Summer Peak DR, EV Managed Charging, HVAC Optimization) are simple DR. `AGGREGATED_REPORT` (Example 3 above) is the most realistic choice.
+
+### Q: Do resources have types so a VTN can filter for e.g. all EV chargers?
+
+**A: No.** Resources in OpenADR 3 don't have a dedicated type/category field. A resource only has:
+
+- `resourceName` — A free-text identifier (e.g. "EV-Charger-Bay-3")
+- `attributes` — Optional generic key-value pairs
+- `targets` — Optional targeting criteria
+
+There is no `resourceType: "EV_CHARGER"` field. A VTN cannot natively query "give me all EV charger resources across all VENs."
+
+**Workarounds in the spec:**
+
+1. **`attributes`** — Store a custom type as a key-value pair: `{ "type": "RESOURCE_TYPE", "values": ["EV_CHARGER"] }`. But this is application-specific, not standardized — every deployment would need to agree on the same attribute names.
+
+2. **`GROUP` targeting** — Assign resources to groups (e.g. group "EV_CHARGERS") via the `targets` field. Events can then target the group. But this is for event targeting, not VTN-side querying.
+
+**In practice:** VTNs that need resource categorization build their own metadata layer on top of OpenADR. The protocol intentionally stays generic — it defines how to communicate DR signals and telemetry, not how to model an energy asset inventory.
+
+### Q: How does GROUP targeting work in practice?
+
+A realistic scenario — a campus VEN manages mixed resources (solar inverters, EV chargers, HVAC). The VTN wants to curtail only the solar inverters during a grid emergency:
+
+1. **VEN registers resources** with group targets (out-of-band or via `/vens/{venID}/resources`):
+   - 3 inverters → group `SOLAR_INVERTERS`
+   - 2 chargers → group `EV_CHARGERS`
+   - 1 HVAC → group `HVAC`
+
+2. **VTN creates an event** targeting the group:
+   ```json
+   {
+     "programID": "solar-curtailment-program",
+     "eventName": "Grid Emergency - Zero Export",
+     "targets": [{ "type": "GROUP", "values": ["SOLAR_INVERTERS"] }],
+     "intervalPeriod": { "start": "2026-02-08T14:00:00Z", "duration": "PT30M" },
+     "intervals": [
+       { "id": 0, "payloads": [{ "type": "EXPORT_CAPACITY_LIMIT", "values": [0] }] },
+       { "id": 1, "payloads": [{ "type": "EXPORT_CAPACITY_LIMIT", "values": [0] }] },
+       { "id": 2, "payloads": [{ "type": "EXPORT_CAPACITY_LIMIT", "values": [50] }] },
+       { "id": 3, "payloads": [{ "type": "EXPORT_CAPACITY_LIMIT", "values": [100] }] }
+     ]
+   }
+   ```
+
+3. **VEN receives the event**, matches `GROUP=SOLAR_INVERTERS` against its resources, and curtails only the 3 inverters. EV chargers and HVAC keep running normally. The event says: "14:00–15:00 zero export for 1 hour, then ramp back to 50 kW at 15:00, and 100 kW at 15:30."
+
+4. **VEN reports back** with measurements for the affected inverters only.
+
+**Key insight:** The VTN doesn't directly control resources. It sends group-targeted events to VENs. Each VEN locally matches the target against its own resources and decides what to do.
+
+---
+
+## Event Structure — How Events Carry Instructions
+
+### Q: How does a VTN tell a VEN what to do?
+
+**A: Through event intervals.** Events don't have a separate "instruction" or "command" field. The `intervals` array IS the signal — each interval combines **when** (time window) + **what** (instruction):
+
+```json
+{
+  "programID": "...",
+  "eventName": "Peak Reduction",
+  "intervalPeriod": { "start": "2026-02-08T14:00:00Z", "duration": "PT30M" },
+  "intervals": [
+    { "id": 0, "payloads": [{ "type": "DISPATCH_SETPOINT", "values": [25.0] }] },
+    { "id": 1, "payloads": [{ "type": "DISPATCH_SETPOINT", "values": [10.0] }] },
+    { "id": 2, "payloads": [{ "type": "DISPATCH_SETPOINT", "values": [50.0] }] }
+  ]
+}
+```
+
+This says: "14:00–14:30 run at 25 kW, 14:30–15:00 drop to 10 kW, 15:00–15:30 ramp back to 50 kW." The `intervalPeriod` cascades the same way as in reports — set once at the event level, each interval's time is `start + id × duration`.
+
+### OpenADR 3 Event Types (from openleadr-rs)
+
+These are the standard `type` values for event payloads (instructions from VTN to VEN):
+
+**Setpoints & Control:**
+
+| Type | What the VTN is saying | Value type |
+|---|---|---|
+| `SIMPLE` | Curtailment level 0-3 (0=normal, 3=max) | integer |
+| `DISPATCH_SETPOINT` | "Run at exactly X kW" | float (kW) |
+| `DISPATCH_SETPOINT_RELATIVE` | "Adjust by X kW from current" | float (kW) |
+| `CONTROL_SETPOINT` | Generic setpoint (e.g. thermostat °C) | float |
+| `CHARGE_STATE_SETPOINT` | "Charge battery to X%" | float (%) |
+
+**Pricing & Market:**
+
+| Type | What the VTN is saying | Value type |
+|---|---|---|
+| `PRICE` | Import price signal | float (currency/kWh) |
+| `EXPORT_PRICE` | Export price signal | float (currency/kWh) |
+| `GHG` | Carbon intensity signal | float (g CO2/kWh) |
+| `CURVE` | Price/quantity curve | point array |
+
+**Capacity Limits:**
+
+| Type | What the VTN is saying | Value type |
+|---|---|---|
+| `IMPORT_CAPACITY_LIMIT` | "Don't consume more than X kW" | float (kW) |
+| `EXPORT_CAPACITY_LIMIT` | "Don't export more than X kW" | float (kW) |
+| `IMPORT_CAPACITY_RESERVATION` | Reserved import capacity | float (kW) |
+| `EXPORT_CAPACITY_RESERVATION` | Reserved export capacity | float (kW) |
+
+**Alerts:**
+
+| Type | What it signals |
+|---|---|
+| `ALERT_GRID_EMERGENCY` | Grid emergency — shed load immediately |
+| `ALERT_BLACK_START` | Black start event |
+| `ALERT_POSSIBLE_OUTAGE` | Possible outage warning |
+| `ALERT_FLEX_ALERT` | Voluntary conservation request |
+| `ALERT_FIRE` / `ALERT_FREEZING` / `ALERT_WIND` | Weather-related alerts |
+| `ALERT_TSUNAMI` / `ALERT_AIR_QUALITY` / `ALERT_OTHER` | Other emergency alerts |
+
+Custom/private strings are also allowed for application-specific event types.
+
+---
+
 #### OpenADR 3 Report Payload Types (from openleadr-rs)
 
 These are the standard `type` values for report payloads:
