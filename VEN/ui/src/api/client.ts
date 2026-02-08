@@ -56,4 +56,14 @@ export class VenApi {
     if (!r.ok) throw new Error(`submit report ${r.status}`);
     return r.json();
   }
+
+  async updateReport(id: string, payload: unknown): Promise<Report> {
+    const r = await fetch(this.url(`/reports/${id}`), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(`update report ${r.status}`);
+    return r.json();
+  }
 }

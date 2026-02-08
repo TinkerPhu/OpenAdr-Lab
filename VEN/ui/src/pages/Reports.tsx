@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import {
-  Button, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, TextField, Typography,
+  Button, IconButton, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableContainer,
+  TableHead, TableRow, TextField, Tooltip, Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
+import EditIcon from "@mui/icons-material/Edit";
 import type { Report, VtnEvent } from "../api/types";
-import { useReports, useSubmitReport, useEvents, usePrograms } from "../api/hooks";
+import { useReports, useSubmitReport, useUpdateReport, useEvents, usePrograms } from "../api/hooks";
 import { useVenContext } from "../App";
 import { JsonDialog } from "../components/JsonDialog";
 
@@ -32,11 +33,13 @@ export function ReportsPage() {
   const { data: events = [] } = useEvents();
   const { data: programs = [] } = usePrograms();
   const submitMut = useSubmitReport();
+  const updateMut = useUpdateReport();
   const { venName } = useVenContext();
 
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Report | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [editingReport, setEditingReport] = useState<Report | null>(null);
 
   // Form state
   const [eventID, setEventID] = useState("");
@@ -71,10 +74,21 @@ export function ReportsPage() {
     resourcesValid = false;
   }
 
+  const isEditing = editingReport !== null;
+
   function handleOpenForm() {
+    setEditingReport(null);
     setEventID(events[0]?.id ?? "");
     setReportName("");
     setResources("[]");
+    setFormOpen(true);
+  }
+
+  function handleEdit(report: Report) {
+    setEditingReport(report);
+    setEventID(report.eventID ?? "");
+    setReportName(report.reportName ?? "");
+    setResources(JSON.stringify(report.resources ?? [], null, 2));
     setFormOpen(true);
   }
 
@@ -86,7 +100,15 @@ export function ReportsPage() {
       resources: JSON.parse(resources),
     };
     if (reportName.trim()) payload.reportName = reportName.trim();
-    submitMut.mutate(payload, { onSuccess: () => setFormOpen(false) });
+
+    if (isEditing) {
+      updateMut.mutate(
+        { id: editingReport.id, payload },
+        { onSuccess: () => { setFormOpen(false); setEditingReport(null); } },
+      );
+    } else {
+      submitMut.mutate(payload, { onSuccess: () => setFormOpen(false) });
+    }
   }
 
   return (
@@ -133,6 +155,7 @@ export function ReportsPage() {
               <TableCell>Program</TableCell>
               <TableCell>Event</TableCell>
               <TableCell>Created</TableCell>
+              <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -151,11 +174,22 @@ export function ReportsPage() {
                 </TableCell>
                 <TableCell sx={{ fontFamily: "monospace" }}>{r.eventID ?? "—"}</TableCell>
                 <TableCell>{r.createdDateTime ?? "—"}</TableCell>
+                <TableCell>
+                  <Tooltip title="Edit report">
+                    <IconButton
+                      size="small"
+                      onClick={(e) => { e.stopPropagation(); handleEdit(r); }}
+                      data-testid={`report-edit-${r.id}`}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </TableCell>
               </TableRow>
             ))}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} align="center" data-testid="reports-empty">
+                <TableCell colSpan={6} align="center" data-testid="reports-empty">
                   No reports
                 </TableCell>
               </TableRow>
@@ -166,7 +200,7 @@ export function ReportsPage() {
 
       {formOpen && (
         <Paper sx={{ p: 2 }} data-testid="report-form">
-          <Typography variant="h6" sx={{ mb: 1 }}>Submit Report</Typography>
+          <Typography variant="h6" sx={{ mb: 1 }}>{isEditing ? "Edit Report" : "Submit Report"}</Typography>
           <Stack spacing={1.5}>
             <TextField
               select
@@ -235,10 +269,12 @@ export function ReportsPage() {
               <Button
                 variant="contained"
                 onClick={handleSubmit}
-                disabled={!eventID || !resourcesValid || submitMut.isPending}
+                disabled={!eventID || !resourcesValid || submitMut.isPending || updateMut.isPending}
                 data-testid="report-submit-btn"
               >
-                {submitMut.isPending ? "Submitting..." : "Submit"}
+                {(submitMut.isPending || updateMut.isPending)
+                  ? (isEditing ? "Updating..." : "Submitting...")
+                  : (isEditing ? "Update" : "Submit")}
               </Button>
             </Stack>
           </Stack>

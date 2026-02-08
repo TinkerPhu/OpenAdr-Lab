@@ -4,10 +4,10 @@ mod state;
 mod vtn;
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::Method,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use chrono::Utc;
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let vtn = VtnClient::new(cfg.vtn_base_url.clone(), cfg.client_id.clone(), cfg.client_secret.clone());
+    let vtn = VtnClient::new(cfg.vtn_base_url.clone(), cfg.client_id.clone(), cfg.client_secret.clone(), cfg.ven_name.clone());
 
     // Poll programs
     {
@@ -143,7 +143,7 @@ async fn main() -> anyhow::Result<()> {
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST])
+        .allow_methods([Method::GET, Method::POST, Method::PUT])
         .allow_headers(Any);
 
     let app = Router::new()
@@ -152,6 +152,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/programs", get(get_programs))
         .route("/sensors", get(get_sensors).post(post_sensors))
         .route("/reports", get(get_reports).post(post_reports))
+        .route("/reports/:id", put(put_report))
         .with_state(ctx)
         .layer(cors);
 
@@ -213,10 +214,28 @@ async fn post_reports(
     State(ctx): State<AppCtx>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    match ctx.vtn.submit_report(body).await {
+    match ctx.vtn.upsert_report(body).await {
         Ok(result) => (axum::http::StatusCode::CREATED, Json(result)).into_response(),
         Err(e) => {
             error!("report submission failed: {e:#}");
+            (
+                axum::http::StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error": format!("{e:#}")})),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn put_report(
+    State(ctx): State<AppCtx>,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    match ctx.vtn.update_report(&id, body).await {
+        Ok(result) => (axum::http::StatusCode::OK, Json(result)).into_response(),
+        Err(e) => {
+            error!("report update failed: {e:#}");
             (
                 axum::http::StatusCode::BAD_GATEWAY,
                 Json(serde_json::json!({"error": format!("{e:#}")})),
