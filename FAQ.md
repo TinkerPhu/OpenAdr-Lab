@@ -85,14 +85,10 @@ An office building's HVAC reduces power demand during a peak demand event.
 [
   {
     "resourceName": "HVAC-Building-7",
-    "intervalPeriod": {
-      "start": "2026-02-08T14:00:00Z",
-      "duration": "PT15M"
-    },
+    "intervalPeriod": { "start": "2026-02-08T14:00:00Z", "duration": "PT15M" },
     "intervals": [
       {
         "id": 0,
-        "intervalPeriod": { "start": "2026-02-08T14:00:00Z", "duration": "PT15M" },
         "payloads": [
           { "type": "DEMAND", "values": [45.2] },
           { "type": "BASELINE", "values": [62.0] },
@@ -101,7 +97,6 @@ An office building's HVAC reduces power demand during a peak demand event.
       },
       {
         "id": 1,
-        "intervalPeriod": { "start": "2026-02-08T14:15:00Z", "duration": "PT15M" },
         "payloads": [
           { "type": "DEMAND", "values": [43.8] },
           { "type": "BASELINE", "values": [62.0] },
@@ -113,7 +108,7 @@ An office building's HVAC reduces power demand during a peak demand event.
 ]
 ```
 
-**What it shows:** HVAC normally draws 62 kW (`BASELINE`). During the DR event it reduced to 45.2 kW then 43.8 kW (`DEMAND`), saving ~18 kW. `OPERATING_STATE` confirms the system is in reduced mode. Each interval covers 15 minutes with an explicit timestamp.
+**What it shows:** HVAC normally draws 62 kW (`BASELINE`). During the DR event it reduced to 45.2 kW then 43.8 kW (`DEMAND`), saving ~18 kW. `OPERATING_STATE` confirms the system is in reduced mode. The resource-level `intervalPeriod` defines the timing: interval 0 = 14:00-14:15, interval 1 = 14:15-14:30 (computed as `start + id * duration`).
 
 ---
 
@@ -125,10 +120,10 @@ An EV charger throttles power during a peak pricing event and reports battery st
 [
   {
     "resourceName": "EV-Charger-Bay-3",
+    "intervalPeriod": { "start": "2026-02-08T17:00:00Z", "duration": "PT30M" },
     "intervals": [
       {
         "id": 0,
-        "intervalPeriod": { "start": "2026-02-08T17:00:00Z", "duration": "PT30M" },
         "payloads": [
           { "type": "DEMAND", "values": [3.3] },
           { "type": "STORAGE_CHARGE_LEVEL", "values": [48] },
@@ -137,7 +132,6 @@ An EV charger throttles power during a peak pricing event and reports battery st
       },
       {
         "id": 1,
-        "intervalPeriod": { "start": "2026-02-08T17:30:00Z", "duration": "PT30M" },
         "payloads": [
           { "type": "DEMAND", "values": [3.3] },
           { "type": "STORAGE_CHARGE_LEVEL", "values": [52] },
@@ -149,7 +143,7 @@ An EV charger throttles power during a peak pricing event and reports battery st
 ]
 ```
 
-**What it shows:** Charger is capable of 7.4 kW (`STORAGE_MAX_CHARGE_POWER`) but throttled to 3.3 kW (`DEMAND`) during peak. Battery went from 48% to 52% (`STORAGE_CHARGE_LEVEL`) over 1 hour at the reduced rate. The 4% gain in 60 minutes at 3.3 kW is realistic for a ~60 kWh battery.
+**What it shows:** Charger is capable of 7.4 kW (`STORAGE_MAX_CHARGE_POWER`) but throttled to 3.3 kW (`DEMAND`) during peak. Battery went from 48% to 52% (`STORAGE_CHARGE_LEVEL`) over 1 hour at the reduced rate (two 30-min intervals). The 4% gain in 60 minutes at 3.3 kW is realistic for a ~60 kWh battery.
 
 ---
 
@@ -161,10 +155,10 @@ A campus aggregates demand across multiple buildings to prove overall load curta
 [
   {
     "resourceName": "AGGREGATED_REPORT",
+    "intervalPeriod": { "start": "2026-02-08T14:00:00Z", "duration": "PT15M" },
     "intervals": [
       {
         "id": 0,
-        "intervalPeriod": { "start": "2026-02-08T14:00:00Z", "duration": "PT15M" },
         "payloads": [
           { "type": "DEMAND", "values": [320] },
           { "type": "BASELINE", "values": [480] },
@@ -173,7 +167,6 @@ A campus aggregates demand across multiple buildings to prove overall load curta
       },
       {
         "id": 1,
-        "intervalPeriod": { "start": "2026-02-08T14:15:00Z", "duration": "PT15M" },
         "payloads": [
           { "type": "DEMAND", "values": [305] },
           { "type": "BASELINE", "values": [480] },
@@ -215,7 +208,7 @@ Custom/private strings are also allowed for application-specific types.
 
 #### Key Points:
 - **resources** — Array of devices/systems. Use `"AGGREGATED_REPORT"` for facility-wide summaries.
-- **intervalPeriod** — Each interval should carry a `start` (ISO 8601) and `duration` (ISO 8601, e.g. `"PT15M"` = 15 min). Can also be set at the resource level as a default.
+- **intervalPeriod** — Set once at the **resource level** with `start` and `duration`. Individual interval times are computed as `start + (id × duration)`. Only add `intervalPeriod` on a specific interval if it needs to **override** the resource default (e.g., different duration). Don't repeat it on every interval.
 - **payloads** — Array of `{type, values}`. Use standard `ReportType` values from the table above.
 - **DEMAND vs BASELINE** — Report both to show the actual reduction. The VTN/utility can calculate savings as `BASELINE - DEMAND`.
 
