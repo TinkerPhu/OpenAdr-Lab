@@ -48,6 +48,33 @@ This aligns with the pattern stated in CLAUDE.md: avoid DTO normalization and pa
 
 ---
 
+---
+
+## VEN UI - Sensor Page
+
+### Q: What happens when I submit a sensor reading in the VEN UI?
+
+**A: The sensor reading is stored locally in the VEN's memory only.** It's not sent to the VTN, and it's not a report draft.
+
+### Step-by-step flow:
+
+1. **Fill form** — Enter Temperature (C), Power (W), Voltage (V), and optional Raw JSON
+2. **Click Submit** — Makes a `POST /sensors` request to the VEN application
+3. **VEN stores locally** — The VEN stores it in-memory with a UUID and timestamp
+4. **UI refreshes** — Success message appears, data shows on Sensors page
+
+### Key details:
+
+- **Not sent to VTN** — The VTN never sees this sensor data
+- **Not a report** — Reports are submitted separately via the Reports page
+- **Local simulation only** — This is mock/test data for the VEN
+- **Auto-sampler** — The VEN also generates fake sensor values automatically every 10 seconds
+- **Optional persistence** — If configured, sensor state is saved to disk every 15 seconds
+
+**Purpose:** This feature lets you inject test sensor data into the VEN without a real sensor connected. Useful for testing DR event responses and report generation without hardware.
+
+---
+
 ## References
 
 - [Official OpenADR 2.0b Specification](https://www.openadr.org/specification)
