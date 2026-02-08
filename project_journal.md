@@ -815,4 +815,48 @@ The test infrastructure already had all building blocks (2 VENs with 5s poll, `p
 
 ---
 
+## Phase 11c Work Log: openleadr-rs as Git Submodule (2026-02-08)
+
+### Motivation
+
+The `openleadr-rs` directory was a manually-cloned third-party repo excluded via `.gitignore`. Anyone cloning the project had to know to also clone `openleadr-rs` separately — nothing in the repo itself indicated this dependency or which commit to use. A git submodule makes `git clone --recursive` produce a ready-to-build repo.
+
+### Changes Made
+
+1. Removed the `openleadr-rs/` entry from `.gitignore`
+2. Deleted the existing standalone clone
+3. Added `openleadr-rs` as a git submodule (pinned at commit `606dfb2`)
+4. Forked `OpenLEADR/openleadr-rs` → `TinkerPhu/openleadr-rs` via GitHub API
+5. Updated the submodule URL to point to the fork
+6. Added `upstream` remote inside the submodule for syncing with the original
+
+### Syncing with Upstream
+
+To pull in updates from OpenLEADR:
+```bash
+cd openleadr-rs
+git fetch upstream
+git merge upstream/main
+git push origin main
+cd ..
+git add openleadr-rs
+git commit -m "Update openleadr-rs submodule to latest upstream"
+```
+Or use GitHub's "Sync fork" button, then `git submodule update --remote` locally.
+
+### Deployment Note
+
+On Pi4-Server (or any existing clone), a one-time init is needed after pulling:
+```bash
+git pull
+git submodule update --init --recursive
+```
+Subsequent `git pull` + `git submodule update` keeps it in sync.
+
+### Key Insight
+
+Forking before submodule-ing means we can patch `openleadr-rs` if needed (bug fixes, custom behavior) without waiting for upstream merges, while still easily pulling upstream updates.
+
+---
+
 *Last updated: 2026-02-08*
