@@ -1,0 +1,150 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter } from "react-router-dom";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ReportsPage, buildExampleResources } from "../pages/Reports";
+import type { VtnEvent } from "../api/types";
+
+const mockEvents = [
+  {
+    id: "e1", programID: "p1", eventName: "emergency-load-shed",
+    intervals: [{ id: 0, payloads: [{ type: "SIMPLE", values: [0] }] }],
+  },
+  {
+    id: "e2", programID: "p1", eventName: "peak-shave",
+    intervals: [{ id: 0, payloads: [{ type: "IMPORT_CAPACITY_LIMIT", values: [50] }] }],
+  },
+];
+
+const mockPrograms = [{ id: "p1", programName: "Program Alpha" }];
+const mockReports = [
+  { id: "r1", clientName: "ven-1", reportName: "test-report", programID: "p1", eventID: "e1", createdDateTime: "2024-01-01" },
+];
+
+const mutateMock = vi.fn();
+
+vi.mock("../api/hooks", () => ({
+  useReports: () => ({ data: mockReports, dataUpdatedAt: Date.now() }),
+  useEvents: () => ({ data: mockEvents }),
+  usePrograms: () => ({ data: mockPrograms }),
+  useSubmitReport: () => ({ mutate: mutateMock, isPending: false }),
+}));
+
+vi.mock("../App", () => ({
+  useVenContext: () => ({ venUrl: "http://localhost:8081", venName: "ven-1", setVenUrl: vi.fn(), api: {} }),
+}));
+
+function renderReports() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <ReportsPage />
+      </BrowserRouter>
+    </QueryClientProvider>,
+  );
+}
+
+describe("ReportsPage", () => {
+  beforeEach(() => {
+    mutateMock.mockReset();
+  });
+
+  it("renders heading and reports table", () => {
+    renderReports();
+    expect(screen.getByTestId("reports-heading")).toHaveTextContent("Reports");
+    expect(screen.getByTestId("reports-table")).toBeVisible();
+    expect(screen.getByTestId("report-row-r1")).toBeVisible();
+  });
+
+  it("opens form when Submit Report is clicked", async () => {
+    renderReports();
+    await userEvent.click(screen.getByTestId("submit-report-btn"));
+    expect(screen.getByTestId("report-form")).toBeVisible();
+    expect(screen.getByTestId("report-suggest-btn")).toBeVisible();
+  });
+
+  it("Suggest Example fills resources and reportName", async () => {
+    renderReports();
+    await userEvent.click(screen.getByTestId("submit-report-btn"));
+    await userEvent.click(screen.getByTestId("report-suggest-btn"));
+
+    const resourcesInput = screen.getByTestId("report-resources-input") as HTMLTextAreaElement;
+    const parsed = JSON.parse(resourcesInput.value);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].resourceName).toBe("ven-1-meter");
+    expect(parsed[0].intervals[0].payloads[0].type).toBe("SIMPLE");
+    // SIMPLE with value 0 → suggests 1
+    expect(parsed[0].intervals[0].payloads[0].values[0]).toBe(1);
+
+    const nameInput = screen.getByTestId("report-name-input") as HTMLInputElement;
+    expect(nameInput.value).toBe("report-emergency-load-shed");
+  });
+
+  it("does not overwrite reportName if already filled", async () => {
+    renderReports();
+    await userEvent.click(screen.getByTestId("submit-report-btn"));
+
+    const nameInput = screen.getByTestId("report-name-input");
+    await userEvent.type(nameInput, "my-custom-name");
+    await userEvent.click(screen.getByTestId("report-suggest-btn"));
+
+    expect((nameInput as HTMLInputElement).value).toBe("my-custom-name");
+  });
+});
+
+describe("buildExampleResources", () => {
+  it("returns SIMPLE value 1 for SIMPLE payload with value 0", () => {
+    const event: VtnEvent = {
+      id: "e1",
+      intervals: [{ id: 0, payloads: [{ type: "SIMPLE", values: [0] }] }],
+    };
+    const result = JSON.parse(buildExampleResources(event, "ven-1"));
+    expect(result[0].resourceName).toBe("ven-1-meter");
+    expect(result[0].intervals[0].payloads[0].values[0]).toBe(1);
+  });
+
+  it("applies offset to non-zero values", () => {
+    const event: VtnEvent = {
+      id: "e2",
+      intervals: [{ id: 0, payloads: [{ type: "IMPORT_CAPACITY_LIMIT", values: [50] }] }],
+    };
+    const result = JSON.parse(buildExampleResources(event, "ven-2"));
+    const val = result[0].intervals[0].payloads[0].values[0];
+    // Should be within ±5% of 50 → between 47 and 53
+    expect(val).toBeGreaterThanOrEqual(47);
+    expect(val).toBeLessThanOrEqual(53);
+  });
+
+  it("keeps zero for non-SIMPLE payload with value 0", () => {
+    const event: VtnEvent = {
+      id: "e3",
+      intervals: [{ id: 0, payloads: [{ type: "IMPORT_CAPACITY_LIMIT", values: [0] }] }],
+    };
+    const result = JSON.parse(buildExampleResources(event, "ven-1"));
+    expect(result[0].intervals[0].payloads[0].values[0]).toBe(0);
+  });
+
+  it("handles event with no intervals", () => {
+    const event: VtnEvent = { id: "e4" };
+    const result = JSON.parse(buildExampleResources(event, "ven-1"));
+    expect(result[0].resourceName).toBe("ven-1-meter");
+    expect(result[0].intervals).toEqual([]);
+  });
+
+  it("handles multiple intervals and payloads", () => {
+    const event: VtnEvent = {
+      id: "e5",
+      intervals: [
+        { id: 0, payloads: [{ type: "SIMPLE", values: [0] }, { type: "IMPORT_CAPACITY_LIMIT", values: [100] }] },
+        { id: 1, payloads: [{ type: "SIMPLE", values: [0] }] },
+      ],
+    };
+    const result = JSON.parse(buildExampleResources(event, "test-ven"));
+    expect(result[0].intervals).toHaveLength(2);
+    expect(result[0].intervals[0].payloads).toHaveLength(2);
+    expect(result[0].intervals[0].payloads[0].values[0]).toBe(1);
+    expect(result[0].intervals[1].payloads[0].values[0]).toBe(1);
+  });
+});

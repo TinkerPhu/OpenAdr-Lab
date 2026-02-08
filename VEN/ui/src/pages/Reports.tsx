@@ -4,10 +4,28 @@ import {
   TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
-import type { Report } from "../api/types";
+import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
+import type { Report, VtnEvent } from "../api/types";
 import { useReports, useSubmitReport, useEvents, usePrograms } from "../api/hooks";
 import { useVenContext } from "../App";
 import { JsonDialog } from "../components/JsonDialog";
+
+export function buildExampleResources(event: VtnEvent, venName: string): string {
+  const intervals = (event.intervals ?? []).map((iv) => ({
+    id: iv.id,
+    payloads: (iv.payloads ?? []).map((p) => ({
+      type: p.type,
+      values: p.values.map((v) => {
+        if (p.type === "SIMPLE" && v === 0) return 1;
+        if (v === 0) return 0;
+        const offset = 1 + (Math.random() * 0.08 - 0.04); // ±4%
+        return Math.round(v * offset * 10) / 10;
+      }),
+    })),
+  }));
+  const resource = { resourceName: `${venName}-meter`, intervals };
+  return JSON.stringify([resource], null, 2);
+}
 
 export function ReportsPage() {
   const { data: reports = [], dataUpdatedAt } = useReports();
@@ -198,6 +216,21 @@ export function ReportsPage() {
             />
             <Stack direction="row" spacing={1}>
               <Button onClick={() => setFormOpen(false)}>Cancel</Button>
+              <Button
+                variant="outlined"
+                startIcon={<AutoFixHighIcon />}
+                disabled={!selectedEvent}
+                onClick={() => {
+                  if (!selectedEvent) return;
+                  setResources(buildExampleResources(selectedEvent, venName));
+                  if (!reportName.trim()) {
+                    setReportName(`report-${selectedEvent.eventName ?? selectedEvent.id}`);
+                  }
+                }}
+                data-testid="report-suggest-btn"
+              >
+                Suggest Example
+              </Button>
               <Button
                 variant="contained"
                 onClick={handleSubmit}
