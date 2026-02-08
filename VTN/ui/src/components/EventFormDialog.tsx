@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Button, Dialog, DialogActions, DialogContent, DialogTitle,
-  MenuItem, TextField,
+  MenuItem, Stack, TextField,
 } from "@mui/material";
 import type { EventInput, Program, VtnEvent } from "../api/types";
 
@@ -18,12 +18,20 @@ export function EventFormDialog(props: EventFormDialogProps) {
   const { open, event, programs, onSubmit, onCancel, loading = false } = props;
   const [eventName, setEventName] = useState("");
   const [programID, setProgramID] = useState("");
+  const [priority, setPriority] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [duration, setDuration] = useState("");
+  const [targets, setTargets] = useState("");
   const [intervals, setIntervals] = useState("[]");
 
   useEffect(() => {
     if (open) {
       setEventName(event?.eventName ?? "");
       setProgramID(event?.programID ?? (programs[0]?.id ?? ""));
+      setPriority(event?.priority != null ? String(event.priority) : "");
+      setStartTime(event?.intervalPeriod?.start ?? "");
+      setDuration(event?.intervalPeriod?.duration ?? "");
+      setTargets(event?.targets ? JSON.stringify(event.targets, null, 2) : "");
       setIntervals(event?.intervals ? JSON.stringify(event.intervals, null, 2) : "[]");
     }
   }, [open, event, programs]);
@@ -35,6 +43,39 @@ export function EventFormDialog(props: EventFormDialogProps) {
     JSON.parse(intervals);
   } catch {
     intervalsValid = false;
+  }
+
+  let targetsValid = true;
+  if (targets.trim()) {
+    try {
+      JSON.parse(targets);
+    } catch {
+      targetsValid = false;
+    }
+  }
+
+  const priorityNum = priority.trim() === "" ? null : Number(priority);
+  const priorityValid = priority.trim() === "" || (!isNaN(priorityNum!) && Number.isInteger(priorityNum));
+
+  function handleSubmit() {
+    const input: EventInput = {
+      eventName,
+      programID,
+      intervals: JSON.parse(intervals),
+    };
+    if (priorityNum != null) {
+      input.priority = priorityNum;
+    }
+    if (startTime.trim()) {
+      input.intervalPeriod = {
+        start: startTime.trim(),
+        duration: duration.trim() || null,
+      };
+    }
+    if (targets.trim()) {
+      input.targets = JSON.parse(targets);
+    }
+    onSubmit(input);
   }
 
   return (
@@ -67,6 +108,49 @@ export function EventFormDialog(props: EventFormDialogProps) {
         </TextField>
         <TextField
           margin="dense"
+          label="Priority"
+          fullWidth
+          type="number"
+          value={priority}
+          onChange={(e) => setPriority(e.target.value)}
+          error={!priorityValid}
+          helperText={priorityValid ? "0 = highest. Leave empty for no priority." : "Must be an integer"}
+          inputProps={{ "data-testid": "event-priority-input", min: 0 }}
+        />
+        <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+          <TextField
+            margin="dense"
+            label="Start Time (ISO 8601)"
+            fullWidth
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            placeholder="2026-02-09T14:00:00Z"
+            inputProps={{ "data-testid": "event-start-input" }}
+          />
+          <TextField
+            margin="dense"
+            label="Duration (ISO 8601)"
+            fullWidth
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+            placeholder="PT4H"
+            inputProps={{ "data-testid": "event-duration-input" }}
+          />
+        </Stack>
+        <TextField
+          margin="dense"
+          label="Targets (JSON)"
+          fullWidth
+          multiline
+          minRows={2}
+          value={targets}
+          onChange={(e) => setTargets(e.target.value)}
+          error={!targetsValid}
+          helperText={targetsValid ? 'e.g. [{"type":"VEN_NAME","values":["ven-1"]}]' : "Invalid JSON"}
+          inputProps={{ "data-testid": "event-targets-input" }}
+        />
+        <TextField
+          margin="dense"
           label="Intervals (JSON)"
           fullWidth
           multiline
@@ -81,9 +165,9 @@ export function EventFormDialog(props: EventFormDialogProps) {
       <DialogActions>
         <Button onClick={onCancel}>Cancel</Button>
         <Button
-          onClick={() => onSubmit({ eventName, programID, intervals: JSON.parse(intervals) })}
+          onClick={handleSubmit}
           variant="contained"
-          disabled={!eventName.trim() || !programID || !intervalsValid || loading}
+          disabled={!eventName.trim() || !programID || !intervalsValid || !targetsValid || !priorityValid || loading}
           data-testid="event-form-submit"
         >
           {loading ? "Saving..." : isEdit ? "Save" : "Create"}

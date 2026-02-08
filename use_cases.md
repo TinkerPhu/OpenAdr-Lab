@@ -137,16 +137,23 @@ Non-operational events used to verify that VENs are reachable and responsive.
 **Description:**
 An active or upcoming event is withdrawn due to changing grid conditions.
 
+**OpenADR 3 Implementation:**
+In OpenADR 3 (and openleadr-rs), there is no "cancel" status field on events. Cancellation is achieved by **deleting the event** via `DELETE /events/{id}`. VENs detect cancellation when the event disappears from their next poll cycle.
+
 **Characteristics:**
-- Immediate effect
+- Immediate effect (next poll cycle)
 - Must override previous instructions
 
 **Typical Signals:**
-- Event cancel message or status update
+- Event deletion (no cancel payload — event simply vanishes)
 
 **What to test:**
+- VEN detects event removal on next poll
 - Clean rollback behavior
 - State consistency after cancel
+
+**Demo:**
+Run `python3 scripts/seed_vtn.py --vtn-url http://Pi4-Server:8200 --demo-cancel` to create a `cancel-demo-event`, wait 5 seconds for VEN polling, then delete it.
 
 ---
 

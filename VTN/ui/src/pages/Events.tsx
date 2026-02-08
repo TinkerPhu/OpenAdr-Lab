@@ -108,6 +108,8 @@ export function EventsPage() {
             <TableRow>
               <TableCell>Event Name</TableCell>
               <TableCell>Program</TableCell>
+              <TableCell>Priority</TableCell>
+              <TableCell>Start</TableCell>
               <TableCell>Created</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
@@ -125,6 +127,8 @@ export function EventsPage() {
                 <TableCell>
                   {e.programID ? (programMap.get(e.programID) ?? e.programID) : "—"}
                 </TableCell>
+                <TableCell>{e.priority != null ? e.priority : "—"}</TableCell>
+                <TableCell>{e.intervalPeriod?.start ? new Date(e.intervalPeriod.start).toLocaleString() : "—"}</TableCell>
                 <TableCell>{e.createdDateTime ?? "—"}</TableCell>
                 <TableCell align="right">
                   <IconButton
@@ -148,7 +152,7 @@ export function EventsPage() {
             ))}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} align="center" data-testid="events-empty">
+                <TableCell colSpan={6} align="center" data-testid="events-empty">
                   No events
                 </TableCell>
               </TableRow>

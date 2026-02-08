@@ -701,4 +701,65 @@ Both UIs displayed all Programs and Events identically regardless of which VEN w
 
 ---
 
-*Last updated: 2026-02-07*
+## Phase 11 Work Log: Use Case Readiness (2026-02-08)
+
+### Motivation
+
+The `use_cases.md` defines 8 real-world OpenADR scenarios, but seed data was trivial (single SIMPLE intervals, no timing/priority), VTN UI couldn't create realistic events (no priority/intervalPeriod/targets fields), and VEN UI only showed name/program/date (no payload interpretation, no status).
+
+### Changes Made
+
+**Phase 1: Realistic Seed Data** (`scripts/seed_vtn.py`)
+- Rewrote EVENTS from 6 generic events to 8 use-case-specific events
+- Each event uses appropriate payload type: SIMPLE, EXPORT_CAPACITY_LIMIT, PRICE, IMPORT_CAPACITY_LIMIT, CHARGE_STATE_SETPOINT
+- Events include priority (0=emergency to 5=low), intervalPeriod (start+duration), targets, and multi-interval structures (up to 24 for pricing)
+- Added `--demo-cancel` flag for UC8 (creates event, waits 5s, deletes it)
+- Events are timestamped relative to `now` for realistic lifecycle display
+
+**Phase 2: VTN UI Event Form + Table** (`VTN/ui/`)
+- Added `IntervalPeriod` type, extended `VtnEvent` and `EventInput` with `priority`, `intervalPeriod`, `targets`
+- `EventFormDialog`: added priority number input, start time + duration fields, targets JSON textarea
+- Events table: added Priority and Start columns (from 4 to 6 columns)
+- 50/50 tests passing (+1 new test for priority/start columns)
+
+**Phase 3: VEN UI Table Columns** (`VEN/ui/`)
+- Added typed `Interval`, `IntervalPeriod`, `TargetEntry` types alongside catch-all
+- Events table expanded from 3 to 8 columns: Name, Program, Priority, Payload Type, Intervals, Status, Start, Created
+- `getPayloadType()` extracts `intervals[0].payloads[0].type`
+
+**Phase 4: VEN UI Event Detail Panel** (`VEN/ui/src/components/EventDetailPanel.tsx`)
+- New component replacing JsonDialog for event inspection
+- Shows: event name with status chip + priority badge, program name, start/duration, targets as chips, intervals table (ID, Start, Duration, Payload with human-readable labels), raw JSON collapsible
+- Payload type labels map: SIMPLE→"Simple Signal", PRICE→"Price Signal", etc.
+
+**Phase 5: VEN UI Event Status** (`VEN/ui/src/utils/eventStatus.ts`)
+- Pure function `getEventStatus(event, now?)` → "scheduled" | "active" | "completed" | "no timing"
+- Parses ISO 8601 durations (PnDTnHnMnS)
+- Status chips: green=active, blue=scheduled, grey=completed, yellow=no timing
+- 14 unit tests for status derivation + color mapping
+- 45/45 VEN UI tests passing
+
+**Phase 6: Cancellation Documentation** (`use_cases.md`)
+- Documented that OpenADR 3 cancellation = DELETE (no cancel status field)
+- Added demo command example
+
+**Phase 7: Integration Tests** (`tests/features/use_cases.feature`)
+- 8 scenarios covering all use cases: SIMPLE+priority, EXPORT_CAPACITY_LIMIT+multi-interval, PRICE, IMPORT_CAPACITY_LIMIT+intervalPeriod, IMPORT_CAPACITY_LIMIT+targets, CHARGE_STATE_SETPOINT, SIMPLE no-op, DELETE cancellation
+- Added `vtn_delete()` helper to api_client.py
+- Step definitions in `use_case_steps.py` verify payload types, priorities, interval counts, intervalPeriod, targets, and deletion
+
+### Key Insight
+
+**Zero backend/BFF changes needed.** The VTN API already supported all fields (priority, targets, intervalPeriod, all payload types). The BFF is a transparent JSON proxy. The VEN stores raw JSON. All work was purely in seed data, UI forms, UI display, and tests. This validates the "pass-through DTO" architecture — adding new event complexity was a UI-only change.
+
+### Deployment Required
+
+After deployment:
+1. Re-run seed script to create new events: `python3 seed_vtn.py --vtn-url http://Pi4-Server:8200`
+2. Rebuild VEN UI: `docker compose up -d --build ui` (in VEN/)
+3. Rebuild VTN UI: `docker compose up -d --build ui` (in VTN/)
+4. No BFF or VEN backend rebuilds needed
+
+---
+
+*Last updated: 2026-02-08*
