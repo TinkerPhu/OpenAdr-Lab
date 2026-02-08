@@ -224,7 +224,8 @@ export function ReportsPage() {
                   if (!selectedEvent) return;
                   setResources(buildExampleResources(selectedEvent, venName));
                   if (!reportName.trim()) {
-                    setReportName(`report-${selectedEvent.eventName ?? selectedEvent.id}`);
+                    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+                    setReportName(`report-${selectedEvent.eventName ?? selectedEvent.id}-${ts}`);
                   }
                 }}
                 data-testid="report-suggest-btn"

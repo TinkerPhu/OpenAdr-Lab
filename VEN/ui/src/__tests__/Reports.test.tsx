@@ -79,7 +79,7 @@ describe("ReportsPage", () => {
     expect(parsed[0].intervals[0].payloads[0].values[0]).toBe(1);
 
     const nameInput = screen.getByTestId("report-name-input") as HTMLInputElement;
-    expect(nameInput.value).toBe("report-emergency-load-shed");
+    expect(nameInput.value).toMatch(/^report-emergency-load-shed-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$/);
   });
 
   it("does not overwrite reportName if already filled", async () => {
