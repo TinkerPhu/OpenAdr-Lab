@@ -314,6 +314,21 @@ def create_event(base_url, token, program_id, evt):
     return r.json()
 
 
+def list_reports(base_url, token):
+    r = requests.get(f"{base_url}/reports", headers=auth_headers(token), timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
+def delete_report(base_url, token, report_id):
+    r = requests.delete(
+        f"{base_url}/reports/{report_id}",
+        headers=auth_headers(token),
+        timeout=10,
+    )
+    r.raise_for_status()
+
+
 def delete_event(base_url, token, event_id):
     r = requests.delete(
         f"{base_url}/events/{event_id}",
@@ -370,9 +385,22 @@ def main():
 
     # Delete existing seed events (removes stale timings before recreating)
     existing_events = list_events(base, token)
+    seed_event_ids = {
+        ex["id"] for ex in existing_events
+        if (ex["programID"], ex["eventName"]) in seed_keys
+    }
+
+    # Delete reports that reference seed events first (FK constraint)
+    if seed_event_ids:
+        all_reports = list_reports(base, token)
+        for rpt in all_reports:
+            if rpt.get("eventID") in seed_event_ids:
+                delete_report(base, token, rpt["id"])
+                print(f"Deleted report '{rpt.get('clientName', '?')}'  id={rpt['id']}")
+
     deleted_events = 0
     for ex in existing_events:
-        if (ex["programID"], ex["eventName"]) in seed_keys:
+        if ex["id"] in seed_event_ids:
             delete_event(base, token, ex["id"])
             print(f"Deleted stale event '{ex['eventName']}'  id={ex['id']}")
             deleted_events += 1
