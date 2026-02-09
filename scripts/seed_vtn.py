@@ -360,35 +360,40 @@ def main():
 
     print()
 
-    # Check existing events to allow idempotent re-runs
-    existing_events = list_events(base, token)
-    existing_keys = {(e["programID"], e["eventName"]) for e in existing_events}
+    # Build set of (programID, eventName) keys that belong to the seed data.
+    # Only these will be deleted on re-run — user-created events are preserved.
+    seed_keys = set()
+    for prog_name, events in events_data.items():
+        prog_id = program_ids[prog_name]
+        for evt in events:
+            seed_keys.add((prog_id, evt["eventName"]))
 
-    # Create events
+    # Delete existing seed events (removes stale timings before recreating)
+    existing_events = list_events(base, token)
+    deleted_events = 0
+    for ex in existing_events:
+        if (ex["programID"], ex["eventName"]) in seed_keys:
+            delete_event(base, token, ex["id"])
+            print(f"Deleted stale event '{ex['eventName']}'  id={ex['id']}")
+            deleted_events += 1
+
+    if deleted_events:
+        print()
+
+    # Create events with fresh timings
     created_events = 0
-    skipped_events = 0
     cancel_event_id = None
     for prog_name, events in events_data.items():
         prog_id = program_ids[prog_name]
         for evt in events:
-            if (prog_id, evt["eventName"]) in existing_keys:
-                print(f"Event '{evt['eventName']}' for '{prog_name}' already exists — skipping")
-                skipped_events += 1
-                # Track cancel-demo-event ID for --demo-cancel
-                if evt["eventName"] == "cancel-demo-event":
-                    for ex in existing_events:
-                        if ex["programID"] == prog_id and ex["eventName"] == "cancel-demo-event":
-                            cancel_event_id = ex["id"]
-                            break
-            else:
-                body = create_event(base, token, prog_id, evt)
-                print(f"Created event '{evt['eventName']}' for '{prog_name}'  id={body['id']}")
-                created_events += 1
-                if evt["eventName"] == "cancel-demo-event":
-                    cancel_event_id = body["id"]
+            body = create_event(base, token, prog_id, evt)
+            print(f"Created event '{evt['eventName']}' for '{prog_name}'  id={body['id']}")
+            created_events += 1
+            if evt["eventName"] == "cancel-demo-event":
+                cancel_event_id = body["id"]
 
     # Summary
-    print(f"\nDone: {len(program_ids)} programs, {created_events} events created, {skipped_events} skipped")
+    print(f"\nDone: {len(program_ids)} programs, {deleted_events} old seed events removed, {created_events} events created")
 
     # UC8: Demo cancellation
     if args.demo_cancel and cancel_event_id:
