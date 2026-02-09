@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
@@ -48,6 +48,9 @@ function renderEvents() {
 
 describe("EventsPage", () => {
   beforeEach(() => {
+    createMock.mockClear();
+    updateMock.mockClear();
+    deleteMock.mockClear();
     useEventsMock.mockReturnValue({
       data: mockEvents,
       dataUpdatedAt: Date.now(),
@@ -135,6 +138,120 @@ describe("EventsPage", () => {
     await userEvent.click(screen.getByTestId("confirm-dialog-ok"));
     expect(deleteMock).toHaveBeenCalledWith(
       "e1",
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("saves updated eventName on edit", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("edit-event-e1"));
+    const nameInput = screen.getByTestId("event-name-input");
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "Renamed Event");
+    await userEvent.click(screen.getByTestId("event-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({ eventName: "Renamed Event" }),
+      }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("saves updated priority on edit", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("edit-event-e1"));
+    const priorityInput = screen.getByTestId("event-priority-input");
+    await userEvent.clear(priorityInput);
+    await userEvent.type(priorityInput, "10");
+    await userEvent.click(screen.getByTestId("event-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({ priority: 10 }),
+      }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("saves updated start time on edit", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("edit-event-e1"));
+    const startInput = screen.getByTestId("event-start-input");
+    await userEvent.clear(startInput);
+    await userEvent.type(startInput, "2026-03-01T10:00:00Z");
+    await userEvent.click(screen.getByTestId("event-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          intervalPeriod: expect.objectContaining({ start: "2026-03-01T10:00:00Z" }),
+        }),
+      }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("saves updated duration on edit", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("edit-event-e1"));
+    const durationInput = screen.getByTestId("event-duration-input");
+    await userEvent.clear(durationInput);
+    await userEvent.type(durationInput, "PT2H");
+    await userEvent.click(screen.getByTestId("event-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          intervalPeriod: expect.objectContaining({ duration: "PT2H" }),
+        }),
+      }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("saves updated intervals on edit", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("edit-event-e1"));
+    const intervalsInput = screen.getByTestId("event-intervals-input");
+    fireEvent.change(intervalsInput, { target: { value: '[{"id":1}]' } });
+    await userEvent.click(screen.getByTestId("event-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({ intervals: [{ id: 1 }] }),
+      }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("saves updated targets on edit", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("edit-event-e1"));
+    const targetsInput = screen.getByTestId("event-targets-input");
+    fireEvent.change(targetsInput, { target: { value: '[{"type":"VEN_NAME","values":["ven-3"]}]' } });
+    await userEvent.click(screen.getByTestId("event-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          targets: [{ type: "VEN_NAME", values: ["ven-3"] }],
+        }),
+      }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("submits create event with all fields", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("create-event-btn"));
+    await userEvent.type(screen.getByTestId("event-name-input"), "New Event");
+    await userEvent.type(screen.getByTestId("event-priority-input"), "3");
+    await userEvent.type(screen.getByTestId("event-start-input"), "2026-04-01T08:00:00Z");
+    await userEvent.type(screen.getByTestId("event-duration-input"), "PT1H");
+    await userEvent.click(screen.getByTestId("event-form-submit"));
+    expect(createMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "New Event",
+        programID: "p1",
+        priority: 3,
+        intervalPeriod: { start: "2026-04-01T08:00:00Z", duration: "PT1H" },
+        intervals: [],
+      }),
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
   });

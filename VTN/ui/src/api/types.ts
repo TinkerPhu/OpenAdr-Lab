@@ -10,7 +10,7 @@ export type TargetEntry = {
 };
 
 export type ProgramDescription = {
-  url: string;
+  URL: string;
 };
 
 export type Program = {
