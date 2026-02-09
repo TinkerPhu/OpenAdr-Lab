@@ -976,4 +976,23 @@ Added a `ven_id` column to the `report` table that tracks which VEN created each
 
 ---
 
-*Last updated: 2026-02-08*
+## Phase 12b: Seed Script Idempotency (2026-02-09)
+
+### What
+Made `scripts/seed_vtn.py` fully idempotent — re-running it deletes old seed events and recreates them with fresh timestamps relative to `now`, so events are always "active" after seeding.
+
+### Why
+On a fresh clone or after time passes, the seed events had stale timestamps (e.g. "starts in 2 minutes" from days ago). Re-running the old script just skipped existing events, leaving the stale timings. Users cloning the repo need a single command to get realistic, active demo data.
+
+### Changes
+- Seed events are now matched by `(programID, eventName)` — only these are deleted and recreated
+- User-created events (different names) are never touched
+- Reports referencing seed events are deleted first to avoid FK 409 Conflict errors
+- Programs are still create-or-update (no deletion needed)
+
+### Key Learning
+- VTN returns **409 Conflict** when deleting events that have associated reports (FK constraint, no `ON DELETE CASCADE`). Must delete reports first, then events.
+
+---
+
+*Last updated: 2026-02-09*
