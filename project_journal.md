@@ -990,8 +990,38 @@ On a fresh clone or after time passes, the seed events had stale timestamps (e.g
 - Reports referencing seed events are deleted first to avoid FK 409 Conflict errors
 - Programs are still create-or-update (no deletion needed)
 
-### Key Learning
+### Key Learnings
 - VTN returns **409 Conflict** when deleting events that have associated reports (FK constraint, no `ON DELETE CASCADE`). Must delete reports first, then events.
+- **Side effect**: Any user-created reports that reference seed events will be deleted when re-seeding. This is inherent to the approach — seed events are replaced, so their associated reports (including manually created ones) must go too. Users should be aware that reports tied to seed events are ephemeral.
+
+---
+
+## Phase 12: Fix Program Description URL Save + Comprehensive Edit Tests
+
+### What Was Done
+1. **Bug fix: Description URL field name mismatch** — The VTN (openleadr-rs) serializes the description URL field as `"URL"` (uppercase, via `#[serde(rename = "URL")]`), but the UI was sending `"url"` (lowercase). This caused a silent save failure: clicking Save on a program edit with a changed Description URL did nothing. Fixed by changing `ProgramDescription` type from `{ url: string }` to `{ URL: string }` and updating all references in `ProgramFormDialog.tsx` and test mocks.
+
+2. **Comprehensive program edit tests** (7 new tests) — Verifies that every editable field in the program form dialog correctly reaches the `updateMock`: programName, programLongName, programType, description URL, clearing description URL, VEN enrollment changes, and clearing all VEN enrollment.
+
+3. **Comprehensive event edit tests** (8 new tests) — Verifies all editable fields in the event form dialog: eventName, priority, start time, duration, intervals (JSON), targets (JSON), and a full create-event test with all fields populated.
+
+### Why
+- The Description URL bug was a user-facing regression: edits appeared to succeed (no error shown) but were silently rejected by the VTN due to field name mismatch.
+- The new tests ensure all form fields are correctly wired to the mutation payloads, preventing similar regressions for any field.
+
+### Issues / Key Learnings
+- **userEvent.type treats `{` as a special key descriptor** — In `@testing-library/user-event`, curly braces are reserved for keyboard shortcuts (e.g., `{Enter}`). To type literal JSON with braces, use `fireEvent.change()` instead of `userEvent.type()`.
+- **Program/Event update mutations wrap payload as `{ id, input }`** — Test assertions must match this shape, not just the inner `ProgramInput`/`EventInput`.
+- **Mock clearing in beforeEach** — Without `mockClear()`, assertions on `updateMock` accumulate across tests and can match stale calls.
+
+### Files Changed
+- `VTN/ui/src/api/types.ts` — `ProgramDescription.url` → `.URL`
+- `VTN/ui/src/components/ProgramFormDialog.tsx` — Two references updated
+- `VTN/ui/src/__tests__/Programs.test.tsx` — Mock data + 7 new edit tests
+- `VTN/ui/src/__tests__/Events.test.tsx` — 8 new edit tests
+
+### Test Results
+- 64 tests passing across 6 test files (was 49 tests before)
 
 ---
 

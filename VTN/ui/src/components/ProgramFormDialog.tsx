@@ -34,7 +34,7 @@ export function ProgramFormDialog(props: ProgramFormDialogProps) {
       setName(program?.programName ?? "");
       setLongName(program?.programLongName ?? "");
       setProgramType(program?.programType ?? "");
-      setDescriptionUrl(program?.programDescriptions?.[0]?.url ?? "");
+      setDescriptionUrl(program?.programDescriptions?.[0]?.URL ?? "");
       setSelectedVens(getEnrolledVenNames(program));
     }
   }, [open, program]);
@@ -52,7 +52,7 @@ export function ProgramFormDialog(props: ProgramFormDialogProps) {
     if (longName.trim()) input.programLongName = longName.trim();
     if (programType.trim()) input.programType = programType.trim();
     if (descriptionUrl.trim()) {
-      input.programDescriptions = [{ url: descriptionUrl.trim() }];
+      input.programDescriptions = [{ URL: descriptionUrl.trim() }];
     } else {
       input.programDescriptions = null;
     }

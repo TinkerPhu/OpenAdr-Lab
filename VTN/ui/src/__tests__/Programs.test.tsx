@@ -10,7 +10,7 @@ const mockPrograms = [
     id: "p1",
     programName: "Program Alpha",
     programLongName: "Alpha Long Name",
-    programDescriptions: [{ url: "https://example.com/alpha" }],
+    programDescriptions: [{ URL: "https://example.com/alpha" }],
     targets: [{ type: "VEN_NAME", values: ["ven-1"] }, { type: "VEN_NAME", values: ["ven-2"] }],
     createdDateTime: "2026-01-01",
   },
@@ -68,6 +68,9 @@ function renderPrograms() {
 
 describe("ProgramsPage", () => {
   beforeEach(() => {
+    createMock.mockClear();
+    updateMock.mockClear();
+    deleteMock.mockClear();
     useProgramsMock.mockReturnValue({
       data: mockPrograms,
       dataUpdatedAt: Date.now(),
@@ -165,7 +168,7 @@ describe("ProgramsPage", () => {
     expect(createMock).toHaveBeenCalledWith(
       {
         programName: "Program with URL",
-        programDescriptions: [{ url: "https://example.com/test" }],
+        programDescriptions: [{ URL: "https://example.com/test" }],
         targets: null,
       },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
@@ -192,6 +195,114 @@ describe("ProgramsPage", () => {
     await userEvent.click(screen.getByTestId("confirm-dialog-ok"));
     expect(deleteMock).toHaveBeenCalledWith(
       "p1",
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("saves updated programName on edit", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("edit-program-p1"));
+    const nameInput = screen.getByTestId("program-name-input");
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "Renamed Alpha");
+    await userEvent.click(screen.getByTestId("program-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "p1", input: expect.objectContaining({ programName: "Renamed Alpha" }) }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("saves updated programLongName on edit", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("edit-program-p1"));
+    const longNameInput = screen.getByTestId("program-long-name-input");
+    await userEvent.clear(longNameInput);
+    await userEvent.type(longNameInput, "New Long Name");
+    await userEvent.click(screen.getByTestId("program-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "p1", input: expect.objectContaining({ programLongName: "New Long Name" }) }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("saves updated programType on edit", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("edit-program-p1"));
+    const typeInput = screen.getByTestId("program-type-input");
+    await userEvent.type(typeInput, "PRICING_TARIFF");
+    await userEvent.click(screen.getByTestId("program-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "p1", input: expect.objectContaining({ programType: "PRICING_TARIFF" }) }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("saves updated description URL on edit", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("edit-program-p1"));
+    const urlInput = screen.getByTestId("program-description-url-input");
+    await userEvent.clear(urlInput);
+    await userEvent.type(urlInput, "https://example.com/updated");
+    await userEvent.click(screen.getByTestId("program-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "p1",
+        input: expect.objectContaining({
+          programDescriptions: [{ URL: "https://example.com/updated" }],
+        }),
+      }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("clears description URL on edit", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("edit-program-p1"));
+    const urlInput = screen.getByTestId("program-description-url-input");
+    await userEvent.clear(urlInput);
+    await userEvent.click(screen.getByTestId("program-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "p1",
+        input: expect.objectContaining({ programDescriptions: null }),
+      }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("saves updated VEN enrollment on edit", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("edit-program-p1"));
+    // p1 has ven-1 and ven-2 checked; uncheck ven-1, check ven-3
+    await userEvent.click(screen.getByTestId("ven-checkbox-ven-1"));
+    await userEvent.click(screen.getByTestId("ven-checkbox-ven-3"));
+    await userEvent.click(screen.getByTestId("program-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "p1",
+        input: expect.objectContaining({
+          targets: [
+            { type: "VEN_NAME", values: ["ven-2"] },
+            { type: "VEN_NAME", values: ["ven-3"] },
+          ],
+        }),
+      }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("clears VEN enrollment on edit", async () => {
+    renderPrograms();
+    await userEvent.click(screen.getByTestId("edit-program-p1"));
+    // p1 has ven-1 and ven-2 checked; uncheck both
+    await userEvent.click(screen.getByTestId("ven-checkbox-ven-1"));
+    await userEvent.click(screen.getByTestId("ven-checkbox-ven-2"));
+    await userEvent.click(screen.getByTestId("program-form-submit"));
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "p1",
+        input: expect.objectContaining({ targets: null }),
+      }),
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
   });
