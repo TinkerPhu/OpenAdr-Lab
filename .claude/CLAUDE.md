@@ -7,3 +7,5 @@ workflow: always keep a project_journal.md in projects where you write for each 
 NEVER stop docker containers that are not involved in this project without asking. They are productive containers. 
 
 When researching about OpenADR reference, only use OpenADR 3 resources. General Questions can be researched from any versions.
+
+Do not add co-authoring footers to commit messages or PR descriptions. they might get rejected.
