@@ -32,9 +32,14 @@ def before_all(context):
     context._browser = None
 
 
+def _is_ui(scenario):
+    """Check for @ui tag on scenario or its parent feature."""
+    return "ui" in scenario.tags or "ui" in scenario.feature.tags
+
+
 def before_scenario(context, scenario):
     """Launch browser page for @ui scenarios."""
-    if "ui" in scenario.tags:
+    if _is_ui(scenario):
         if context._pw is None:
             from playwright.sync_api import sync_playwright
             context._pw = sync_playwright().start()
@@ -47,7 +52,7 @@ def before_scenario(context, scenario):
 
 def after_scenario(context, scenario):
     """Close browser page after @ui scenarios."""
-    if "ui" in scenario.tags and hasattr(context, "browser_page"):
+    if _is_ui(scenario) and hasattr(context, "browser_page"):
         context.browser_page.close()
 
 
