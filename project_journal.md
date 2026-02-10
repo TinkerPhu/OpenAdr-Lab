@@ -1025,4 +1025,40 @@ On a fresh clone or after time passes, the seed events had stale timestamps (e.g
 
 ---
 
-*Last updated: 2026-02-09*
+### 12. E2E UI Tests with Playwright + Behave
+
+**Status: COMPLETE**
+
+Added browser-driven end-to-end tests that exercise the full stack: headless Chromium -> nginx -> BFF -> VTN -> PostgreSQL -> VEN polling -> VEN API verification.
+
+**Architecture:**
+- New `test-ui` service in docker-compose.test.yml (nginx + React app, proxying `/api/` to test-bff)
+- Test runner switched from Alpine to Debian-slim (Playwright needs glibc for Chromium)
+- Page-object helper (`ui.py`) using `data-testid` selectors throughout
+- 5 UI scenarios (UC1-UC4, UC7) covering: open programs, targeted programs, dual-targeting, multi-interval events, intervalPeriod, report round-trip
+- 12 existing API verification steps reused as-is from `use_case_steps.py`
+
+**Files changed:**
+- `tests/nginx-test.conf` (new) — nginx config pointing to test-bff
+- `tests/Dockerfile` (modified) — Alpine -> Debian-slim, Playwright install
+- `tests/requirements.txt` (modified) — added playwright
+- `tests/docker-compose.test.yml` (modified) — test-ui service, UI_BASE_URL env
+- `tests/features/environment.py` (modified) — browser lifecycle hooks with @ui tag
+- `tests/features/helpers/ui.py` (new) — VtnUi page object class
+- `tests/features/steps/ui_steps.py` (new) — UI step definitions
+- `tests/features/ui_use_cases.feature` (new) — 5 UI scenarios
+
+**Issues & Key Learnings:**
+1. **Behave step ambiguity** — `{param}` captures greedily, so `'create a program "{name}" via the UI'` matches `'create a program "{name}" targeting "{ven}" via the UI'`. Fix: use `use_step_matcher("re")` with `[^"]+` capture groups for targeted variants.
+2. **Feature-level @ui tag** — Behave's `scenario.tags` only includes scenario-level tags, not inherited feature tags. Fixed with helper `_is_ui(scenario)` checking both `scenario.tags` and `scenario.feature.tags`.
+3. **Missing VTN token** — UI scenarios reuse API steps (e.g. `the report for event ... appears in VTN`) that need `context.vtn_token`. Fixed by auto-provisioning token in `before_scenario` for UI scenarios.
+4. **Playwright on Pi4 ARM64** — Works out of the box with `playwright install chromium --with-deps` on Debian-slim. First build downloads ~300MB (Chromium + dependencies), cached in Docker layers.
+5. **MUI Select interaction** — MUI's `<TextField select>` puts `data-testid` on the hidden `<input>`. Playwright clicks the parent div to open the dropdown, then selects `li[role="option"]` by text.
+
+**Test Results:**
+- 15 features, 41 scenarios, 263 steps — all passing
+- UI tests add ~50s to the test run (total 1m48s vs ~1m for API-only)
+
+---
+
+*Last updated: 2026-02-10*
