@@ -1046,7 +1046,7 @@ Added browser-driven end-to-end tests that exercise the full stack: headless Chr
 - `tests/features/environment.py` (modified) — browser lifecycle hooks with @ui tag
 - `tests/features/helpers/ui.py` (new) — VtnUi page object class
 - `tests/features/steps/ui_steps.py` (new) — UI step definitions
-- `tests/features/ui_use_cases.feature` (new) — 5 UI scenarios
+- `tests/features/ui_use_cases.feature` (new) — 8 UI scenarios (all use cases)
 
 **Issues & Key Learnings:**
 1. **Behave step ambiguity** — `{param}` captures greedily, so `'create a program "{name}" via the UI'` matches `'create a program "{name}" targeting "{ven}" via the UI'`. Fix: use `use_step_matcher("re")` with `[^"]+` capture groups for targeted variants.
@@ -1056,8 +1056,9 @@ Added browser-driven end-to-end tests that exercise the full stack: headless Chr
 5. **MUI Select interaction** — MUI's `<TextField select>` puts `data-testid` on the hidden `<input>`. Playwright clicks the parent div to open the dropdown, then selects `li[role="option"]` by text.
 
 **Test Results:**
-- 15 features, 41 scenarios, 263 steps — all passing
-- UI tests add ~50s to the test run (total 1m48s vs ~1m for API-only)
+- 15 features, 44 scenarios, 299 steps — all passing
+- All 8 UI use cases (UC1-UC8) covered: open programs, targeted programs, dual-targeting, multi-interval events, intervalPeriod, event-level targets, battery dispatch, event cancellation via UI delete, report round-trip
+- UI tests add ~75s to the test run (total 2m15s vs ~1m for API-only)
 
 ---
 
