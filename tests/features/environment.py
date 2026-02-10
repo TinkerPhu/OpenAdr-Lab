@@ -48,6 +48,9 @@ def before_scenario(context, scenario):
         from features.helpers.ui import VtnUi
         context.ui = VtnUi(context.browser_page)
         context.ui.open()
+        # UI scenarios reuse API verification steps that need a VTN token
+        from features.helpers.api_client import get_token_value
+        context.vtn_token = get_token_value("any-business", "any-business")
 
 
 def after_scenario(context, scenario):
