@@ -141,6 +141,26 @@ services:
       - test-net
 
   # ---------------------------------------------------------------------------
+  # VTN UI — nginx serving the React app, proxying /api/ to test-bff
+  # ---------------------------------------------------------------------------
+  test-ui:
+    build:
+      context: ../VTN/ui
+      dockerfile: Dockerfile
+    volumes:
+      - ./nginx-test.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:80/ || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      test-bff:
+        condition: service_healthy
+    networks:
+      - test-net
+
+  # ---------------------------------------------------------------------------
   # Test runner — loads fixtures via psql, then runs behave
   # ---------------------------------------------------------------------------
   test-runner:
@@ -152,6 +172,7 @@ services:
       VEN_BASE_URL: "http://test-ven-1:8080"
       VEN2_BASE_URL: "http://test-ven-2:8080"
       BFF_BASE_URL: "http://test-bff:8090"
+      UI_BASE_URL: "http://test-ui:80"
     volumes:
       - ../openleadr-rs/fixtures:/fixtures:ro
     depends_on:
@@ -162,6 +183,8 @@ services:
       test-ven-2:
         condition: service_healthy
       test-bff:
+        condition: service_healthy
+      test-ui:
         condition: service_healthy
     networks:
       - test-net
