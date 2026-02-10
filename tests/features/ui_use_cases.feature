@@ -23,7 +23,7 @@ Feature: UI Use Cases — Full End-to-End via Browser
   Scenario: UI-UC1 - Emergency Load Shed (targeted to VEN-1 only)
     Given I open the VTN UI
     When I navigate to the Programs page
-    And I create a program "ui-uc1-emergency" targeting "ven-1-name" via the UI
+    And I create a UI program "ui-uc1-emergency" targeting "ven-1-name"
     Then the program "ui-uc1-emergency" appears in the UI programs list
     When I navigate to the Events page
     And I create a UI event "ui-uc1-loadshed" for program "ui-uc1-emergency" with type "SIMPLE" priority 0 and 1 interval
@@ -40,7 +40,7 @@ Feature: UI Use Cases — Full End-to-End via Browser
   Scenario: UI-UC2 - Export Limitation (targeted to VEN-2 only)
     Given I open the VTN UI
     When I navigate to the Programs page
-    And I create a program "ui-uc2-export" targeting "ven-2" via the UI
+    And I create a UI program "ui-uc2-export" targeting "ven-2"
     Then the program "ui-uc2-export" appears in the UI programs list
     When I navigate to the Events page
     And I create a UI event "ui-uc2-export-limit" for program "ui-uc2-export" with type "EXPORT_CAPACITY_LIMIT" priority 5 and 3 intervals
@@ -68,7 +68,7 @@ Feature: UI Use Cases — Full End-to-End via Browser
   Scenario: UI-UC4 - Peak Shaving (targeted to VEN-1 and VEN-2)
     Given I open the VTN UI
     When I navigate to the Programs page
-    And I create a program "ui-uc4-peak" targeting both "ven-1-name" and "ven-2" via the UI
+    And I create a UI program "ui-uc4-peak" targeting both "ven-1-name" and "ven-2"
     Then the program "ui-uc4-peak" appears in the UI programs list
     When I navigate to the Events page
     And I create a UI event "ui-uc4-peak-shave" for program "ui-uc4-peak" with type "IMPORT_CAPACITY_LIMIT" priority 3 and 1 interval with intervalPeriod
