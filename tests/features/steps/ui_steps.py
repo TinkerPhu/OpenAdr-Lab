@@ -94,6 +94,13 @@ def step_ui_create_event_with_targets(context, name, prog, ptype, pri, count):
     )
 
 
+# -- event deletion via UI --
+
+@when('I delete event "{name}" via the UI')
+def step_ui_delete_event(context, name):
+    context.ui.delete_event_by_name(name)
+
+
 # -- UI verification steps --
 
 @then('the program "{name}" appears in the UI programs list')
@@ -104,6 +111,11 @@ def step_ui_program_visible(context, name):
 @then('the event "{name}" appears in the UI events table')
 def step_ui_event_visible(context, name):
     assert context.ui.event_visible(name), f"Event '{name}' not visible in UI"
+
+
+@then('the event "{name}" is gone from the UI events table')
+def step_ui_event_not_visible(context, name):
+    assert context.ui.event_not_visible(name), f"Event '{name}' still visible in UI"
 
 
 @then('the report from "{client}" appears in the UI reports table')

@@ -79,3 +79,45 @@ Feature: UI Use Cases — Full End-to-End via Browser
     And the VEN-1 event "ui-uc4-peak-shave" has an intervalPeriod
     When I submit a report via VEN-1 for event "ui-uc4-peak-shave"
     Then the report for event "ui-uc4-peak-shave" from "ven-1" appears in VTN
+
+  Scenario: UI-UC5 - EV Charging (targeted to VEN-2 with event-level targets)
+    Given I open the VTN UI
+    When I navigate to the Programs page
+    And I create a UI program "ui-uc5-ev" targeting "ven-2"
+    Then the program "ui-uc5-ev" appears in the UI programs list
+    When I navigate to the Events page
+    And I create a UI event "ui-uc5-ev-charge" for program "ui-uc5-ev" with type "IMPORT_CAPACITY_LIMIT" priority 2 and 1 interval with targets
+    Then the event "ui-uc5-ev-charge" appears in the UI events table
+    When I wait for VEN-2 to show event "ui-uc5-ev-charge"
+    Then VEN-1 does not have event "ui-uc5-ev-charge"
+    And the VEN-2 event "ui-uc5-ev-charge" has payload type "IMPORT_CAPACITY_LIMIT"
+    When I submit a report via VEN-2 for event "ui-uc5-ev-charge"
+    Then the report for event "ui-uc5-ev-charge" from "ven-2" appears in VTN
+
+  Scenario: UI-UC6 - Battery Dispatch (targeted to VEN-1 only)
+    Given I open the VTN UI
+    When I navigate to the Programs page
+    And I create a UI program "ui-uc6-battery" targeting "ven-1-name"
+    Then the program "ui-uc6-battery" appears in the UI programs list
+    When I navigate to the Events page
+    And I create a UI event "ui-uc6-battery-dispatch" for program "ui-uc6-battery" with type "CHARGE_STATE_SETPOINT" priority 3 and 3 intervals
+    Then the event "ui-uc6-battery-dispatch" appears in the UI events table
+    When I wait for VEN-1 to show event "ui-uc6-battery-dispatch"
+    Then VEN-2 does not have event "ui-uc6-battery-dispatch"
+    And the VEN-1 event "ui-uc6-battery-dispatch" has payload type "CHARGE_STATE_SETPOINT"
+    And the VEN-1 event "ui-uc6-battery-dispatch" has 3 intervals
+    When I submit a report via VEN-1 for event "ui-uc6-battery-dispatch"
+    Then the report for event "ui-uc6-battery-dispatch" from "ven-1" appears in VTN
+
+  Scenario: UI-UC8 - Event Cancellation (delete via UI, VEN loses event)
+    Given I open the VTN UI
+    When I navigate to the Programs page
+    And I create a UI program "ui-uc8-cancel" targeting "ven-1-name"
+    Then the program "ui-uc8-cancel" appears in the UI programs list
+    When I navigate to the Events page
+    And I create a UI event "ui-uc8-cancel-evt" for program "ui-uc8-cancel" with type "SIMPLE" priority 5 and 1 interval
+    Then the event "ui-uc8-cancel-evt" appears in the UI events table
+    When I wait for VEN-1 to show event "ui-uc8-cancel-evt"
+    And I delete event "ui-uc8-cancel-evt" via the UI
+    Then the event "ui-uc8-cancel-evt" is gone from the UI events table
+    When I wait for VEN-1 to no longer show event "ui-uc8-cancel-evt"

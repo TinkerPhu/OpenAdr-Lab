@@ -115,6 +115,24 @@ class VtnUi:
         self.page.click(tid("confirm-dialog-ok"))
         self.page.wait_for_selector(tid("confirm-dialog"), state="detached")
 
+    def delete_event_by_name(self, name):
+        """Delete an event by clicking its delete button (found via aria-label)."""
+        self.page.click(f'button[aria-label="Delete {name}"]')
+        self.page.wait_for_selector(tid("confirm-dialog"))
+        self.page.click(tid("confirm-dialog-ok"))
+        self.page.wait_for_selector(tid("confirm-dialog"), state="detached")
+
+    def event_not_visible(self, name, timeout=10000):
+        """Wait until an event row with the given name is gone from the table."""
+        try:
+            self.page.wait_for_selector(
+                f'{tid("events-table")} >> text="{name}"',
+                state="detached", timeout=timeout
+            )
+            return True
+        except Exception:
+            return False
+
     # -- reports --
 
     def report_visible(self, client_name, timeout=10000):
