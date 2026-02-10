@@ -1,7 +1,7 @@
 """Step definitions for UI-driven scenarios."""
 
 import json
-from behave import given, when, then
+from behave import given, when, then, register_type, use_step_matcher
 
 
 # -- navigation --
@@ -27,21 +27,22 @@ def step_nav_reports(context):
     context.ui.go_reports()
 
 
-# -- program creation via UI --
+# -- program creation via UI (use regex matcher to avoid ambiguity) --
 
-@when('I create a program "{name}" via the UI')
-def step_ui_create_program_open(context, name):
-    context.ui.create_program(name)
+use_step_matcher("re")
 
 
-@when('I create a program "{name}" targeting "{ven}" via the UI')
+@when('I create a UI program "(?P<name>[^"]+)" targeting both "(?P<ven1>[^"]+)" and "(?P<ven2>[^"]+)"')
+def step_ui_create_program_dual(context, name, ven1, ven2):
+    context.ui.create_program(name, ven_targets=[ven1, ven2])
+
+
+@when('I create a UI program "(?P<name>[^"]+)" targeting "(?P<ven>[^"]+)"')
 def step_ui_create_program_targeted(context, name, ven):
     context.ui.create_program(name, ven_targets=[ven])
 
 
-@when('I create a program "{name}" targeting both "{ven1}" and "{ven2}" via the UI')
-def step_ui_create_program_dual(context, name, ven1, ven2):
-    context.ui.create_program(name, ven_targets=[ven1, ven2])
+use_step_matcher("parse")
 
 
 @when('I create an open program "{name}" via the UI')
