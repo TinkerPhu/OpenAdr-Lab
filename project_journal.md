@@ -1060,6 +1060,38 @@ Added browser-driven end-to-end tests that exercise the full stack: headless Chr
 - All 8 UI use cases (UC1-UC8) covered: open programs, targeted programs, dual-targeting, multi-interval events, intervalPeriod, event-level targets, battery dispatch, event cancellation via UI delete, report round-trip
 - UI tests add ~75s to the test run (total 2m15s vs ~1m for API-only)
 
+### 13. Upstream Pull Requests — Contributing Back to openleadr-rs
+
+**Status: IN PROGRESS**
+
+Submitted two pull requests to the upstream `OpenLEADR/openleadr-rs` repository from our fork (`TinkerPhu/openleadr-rs`):
+
+**PR #357 — Fix duplicate reports caused by ven_program JOIN** (`fix/duplicate-report-rows`)
+- Added `DISTINCT` to report retrieve and retrieve_all queries to prevent duplicate rows when a program has multiple VEN enrollments
+- Coverage went up from 80.72% to 81.25%
+
+**PR #365 — Fix VEN report isolation: add ven_id ownership tracking** (`fix/report-ven-isolation`)
+- Replaces PR #359 which was incorrectly pushed from `main`
+- Security fix: VENs enrolled in the same program could previously see each other's reports
+- Adds `ven_id` column to report table with FK to ven, backfills via migration
+- All report CRUD queries filter by `r.ven_id` instead of joining through `ven_program`
+
+**What was done:**
+1. Rebased both branches onto latest `upstream/main`
+2. Added `Signed-off-by` lines (DCO requirement) using GitHub noreply email
+3. Fixed Clippy warning: annotated unused `ven_id` field in `PostgresReport` with `#[allow(unused)]`
+4. Closed PR #359 (was on `main` branch — bad practice) and reopened as PR #365 from a proper feature branch
+5. Reset fork's `main` to match upstream (force-push) to clean up divergence
+6. Updated submodule reference in main project to point to clean upstream `main`
+
+**Issues & Key Learnings:**
+1. **Never push PRs from `main`** — always use feature branches. Pushing from `main` causes the fork to diverge from upstream, making future syncs messy. PR #359 had to be closed and recreated as PR #365 because GitHub doesn't allow changing a PR's head branch.
+2. **Signed-off-by (DCO)** — many open-source projects require `git commit --signoff` to certify you have the right to submit the code. Use `--author="Name <email>"` to control what appears publicly.
+3. **GitHub noreply email** — use `username@users.noreply.github.com` to keep your private email out of public commit history while satisfying DCO requirements.
+4. **SQLx hash verification** — when creating .sqlx cache files on Windows, always verify hashes account for CRLF→LF conversion (GitHub CI runs on Linux). We confirmed hashes matched by converting CRLF to LF before hashing.
+5. **Cherry-pick conflicts** — commits built on top of each other can't be cleanly cherry-picked individually. Better to apply the combined diff manually and create a single clean commit.
+6. **GitHub can't change PR head branch** — if a PR is on the wrong branch, you must close and recreate it. Leave a comment explaining why so the maintainer understands.
+
 ---
 
 *Last updated: 2026-02-10*
