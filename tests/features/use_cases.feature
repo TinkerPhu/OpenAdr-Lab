@@ -86,3 +86,59 @@ Feature: OpenADR Use Cases — Full End-to-End
     And I delete event "uc8-e2e-cancel-evt"
     Then the response status is 200
     When I wait for VEN-1 to no longer show event "uc8-e2e-cancel-evt"
+
+  # ── Extended coverage scenarios ──────────────────────────────────────────
+
+  Scenario: UC3b - Day-ahead pricing with 24 hourly intervals
+    Given I create an open program "uc3b-e2e-24h" and save its ID
+    When I create a UC event "uc3b-e2e-24h-price" with type "PRICE" priority 5 and 24 intervals
+    Then the response status is 201
+    When I wait for VEN-1 to show event "uc3b-e2e-24h-price"
+    And I wait for VEN-2 to show event "uc3b-e2e-24h-price"
+    Then the VEN-1 event "uc3b-e2e-24h-price" has 24 intervals
+    And the VEN-1 event "uc3b-e2e-24h-price" has payload type "PRICE"
+
+  Scenario: UC3c - Price correction after initial publish
+    Given I create an open program "uc3c-e2e-correction" and save its ID
+    When I create a UC event "uc3c-e2e-orig" with type "PRICE" priority 5 and 1 interval
+    Then the response status is 201
+    When I wait for VEN-1 to show event "uc3c-e2e-orig"
+    Then the VEN-1 event "uc3c-e2e-orig" has payload value 0
+    When I update event "uc3c-e2e-orig" with type "PRICE" and value 0.99
+    And I wait for VEN-1 event "uc3c-e2e-orig" to have payload value 0.99
+    Then the VEN-1 event "uc3c-e2e-orig" has payload value 0.99
+
+  Scenario: UC4b - Modify peak shaving limit mid-flight
+    Given I create a program "uc4b-e2e-modify" targeting "ven-1-name" and save its ID
+    When I create a UC event "uc4b-e2e-peak" with type "IMPORT_CAPACITY_LIMIT" priority 3 and 1 interval with intervalPeriod
+    Then the response status is 201
+    When I wait for VEN-1 to show event "uc4b-e2e-peak"
+    Then the VEN-1 event "uc4b-e2e-peak" has payload value 0
+    When I update event "uc4b-e2e-peak" with type "IMPORT_CAPACITY_LIMIT" and value 30
+    And I wait for VEN-1 event "uc4b-e2e-peak" to have payload value 30
+    Then the VEN-1 event "uc4b-e2e-peak" has payload value 30
+
+  Scenario: UC5b - Overlapping EV events with different priorities
+    Given I create a program "uc5b-e2e-overlap" targeting "ven-2" and save its ID
+    When I create a UC event "uc5b-e2e-high" with type "IMPORT_CAPACITY_LIMIT" priority 2 and 1 interval
+    Then the response status is 201
+    When I create a UC event "uc5b-e2e-low" with type "IMPORT_CAPACITY_LIMIT" priority 4 and 1 interval
+    Then the response status is 201
+    When I wait for VEN-2 to show event "uc5b-e2e-high"
+    And I wait for VEN-2 to show event "uc5b-e2e-low"
+    Then the VEN-2 event "uc5b-e2e-high" has priority 2
+    And the VEN-2 event "uc5b-e2e-low" has priority 4
+
+  Scenario: UC6b - Conflicting charge and discharge events
+    Given I create a program "uc6b-e2e-conflict" targeting "ven-1-name" and save its ID
+    When I create a UC event "uc6b-e2e-charge" with type "CHARGE_STATE_SETPOINT" priority 3 and value 80
+    Then the response status is 201
+    When I create a UC event "uc6b-e2e-discharge" with type "CHARGE_STATE_SETPOINT" priority 2 and value -50
+    Then the response status is 201
+    When I wait for VEN-1 to show event "uc6b-e2e-charge"
+    And I wait for VEN-1 to show event "uc6b-e2e-discharge"
+    Then VEN-1 has 2 events matching prefix "uc6b-e2e-"
+    And the VEN-1 event "uc6b-e2e-charge" has payload value 80
+    And the VEN-1 event "uc6b-e2e-discharge" has payload value -50
+    And the VEN-1 event "uc6b-e2e-discharge" has priority 2
+    And the VEN-1 event "uc6b-e2e-charge" has priority 3

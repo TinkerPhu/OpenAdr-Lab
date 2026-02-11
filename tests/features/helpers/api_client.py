@@ -55,6 +55,19 @@ def vtn_post(path, token, json=None):
     )
 
 
+def vtn_put(path, token, json=None):
+    """Authenticated PUT against the VTN."""
+    return requests.put(
+        f"{VTN_BASE_URL}{path}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json=json,
+        timeout=10,
+    )
+
+
 def vtn_delete(path, token):
     """Authenticated DELETE against the VTN."""
     return requests.delete(
