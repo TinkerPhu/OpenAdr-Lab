@@ -17,27 +17,8 @@ HEALTH_URLS = {
     "test-ven-2": f"{VEN2_BASE_URL}/health",
 }
 
-
-@given('I wait for VEN-1 to show event "{name}"')
-@when('I wait for VEN-1 to show event "{name}"')
-def step_wait_ven1_event(context, name):
-    poll_until(
-        lambda: ven_get("/events").json(),
-        lambda events: any(e.get("eventName") == name for e in events),
-        timeout=30, interval=3,
-        description=f"VEN-1 shows event '{name}'",
-    )
-
-
-@given('I wait for VEN-2 to show event "{name}"')
-@when('I wait for VEN-2 to show event "{name}"')
-def step_wait_ven2_event(context, name):
-    poll_until(
-        lambda: ven2_get("/events").json(),
-        lambda events: any(e.get("eventName") == name for e in events),
-        timeout=30, interval=3,
-        description=f"VEN-2 shows event '{name}'",
-    )
+# NOTE: "I wait for VEN-1/VEN-2 to show event" steps are defined in
+# use_case_steps.py (with both @given and @when decorators).
 
 
 @when('the "{service}" service is stopped')
