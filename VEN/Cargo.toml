@@ -6,16 +6,18 @@ edition = "2021"
 [dependencies]
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 thiserror = "1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
 
 # Optional: if you want persistence to disk
 tokio-util = "0.7"

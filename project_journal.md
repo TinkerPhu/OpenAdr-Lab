@@ -1166,4 +1166,74 @@ Two complementary approaches:
 
 ---
 
+### 15. Observability — Structured JSON Logging, Metrics & Correlation IDs
+
+**Status: COMPLETE**
+
+**What:** Added production-grade observability to VEN and BFF services: structured JSON logs, Prometheus metrics endpoints, request tracing middleware with correlation IDs propagated from UI through BFF to VTN.
+
+**Why:** System Design Section 14 requires structured logging, metrics, and request tracing. Plaintext logs are hard to parse in production. Correlation IDs let operators trace a single user action across all services.
+
+**Changes:**
+
+1. **Structured JSON Logging (VEN + BFF)**
+   - Switched `tracing_subscriber::fmt()` to `.json()` in both services
+   - Added `json` feature to `tracing-subscriber` in both `Cargo.toml` files
+   - Added structured fields (`resource`, `count`) to VEN poll-loop log messages
+
+2. **Request Tracing Middleware (BFF)**
+   - Added `tower-http` features: `trace`, `request-id`, `propagate-header`
+   - Installed `SetRequestIdLayer` → `TraceLayer` → `PropagateRequestIdLayer` middleware stack
+   - Generates `X-Request-ID` UUID if not present in incoming request
+   - Copies `X-Request-ID` to response headers
+   - `TraceLayer` logs method, path, status, latency per request
+
+3. **Request Tracing (VEN)**
+   - Added `TraceLayer::new_for_http()` to VEN's router
+
+4. **X-Request-ID Propagation (BFF → VTN)**
+   - Added `request_id: Option<&str>` parameter to all `VtnClient` methods (`get_json`, `post_json`, `put_json`, `delete_json`)
+   - Helper `apply_request_id()` conditionally sets the header on outgoing reqwest requests
+   - All route handlers extract `X-Request-ID` from incoming `HeaderMap` and pass it through
+   - Added `request_id()` helper in `routes/mod.rs`
+
+5. **Prometheus Metrics (VEN)**
+   - Added `metrics` + `metrics-exporter-prometheus` crates
+   - Installed `PrometheusBuilder` recorder at startup
+   - `/metrics` route serves Prometheus text format
+   - Poll loops instrumented: `poll_success_total{resource}`, `poll_error_total{resource}`
+   - Report submission instrumented: `reports_sent_total`
+
+6. **Prometheus Metrics (BFF)**
+   - Same crates, same recorder setup
+   - `/api/metrics` route serves Prometheus text format
+   - Axum middleware records `http_requests_total{method,path,status}` and `http_request_duration_seconds{method,path}` for every request
+
+7. **UI Correlation IDs (VTN UI + VEN UI)**
+   - Both API clients now send `X-Request-ID: crypto.randomUUID()` on every fetch call
+   - Centralized via `getReq()` (GET) and `jsonReq()` (POST/PUT/DELETE) helper methods
+
+**Key decisions:**
+- Did NOT modify the VTN (openleadr-rs submodule) — it's upstream code
+- Used `metrics` 0.24 facade (not `prometheus` crate directly) for idiomatic Rust metrics
+- BFF metrics middleware uses `from_fn_with_state` for per-route instrumentation
+- Request ID is optional (`Option<&str>`) to avoid breaking internal VtnClient usage
+
+**Files modified:**
+- `VEN/Cargo.toml` — json, trace features, metrics crates
+- `VEN/src/main.rs` — JSON logging, TraceLayer, metrics recorder + `/metrics` route, instrumented polls
+- `VTN/bff/Cargo.toml` — json, trace/request-id/propagate-header features, uuid, metrics crates
+- `VTN/bff/src/main.rs` — JSON logging, middleware stack, metrics recorder + middleware
+- `VTN/bff/src/vtn_client.rs` — `request_id` parameter + `apply_request_id()` helper
+- `VTN/bff/src/routes/mod.rs` — `request_id()` helper, `metrics` module
+- `VTN/bff/src/routes/programs.rs` — extract and forward X-Request-ID
+- `VTN/bff/src/routes/events.rs` — extract and forward X-Request-ID
+- `VTN/bff/src/routes/vens.rs` — extract and forward X-Request-ID
+- `VTN/bff/src/routes/reports.rs` — extract and forward X-Request-ID
+- `VTN/bff/src/routes/metrics.rs` — new: Prometheus metrics endpoint
+- `VTN/ui/src/api/client.ts` — X-Request-ID on all API calls
+- `VEN/ui/src/api/client.ts` — X-Request-ID on all API calls
+
+---
+
 *Last updated: 2026-02-11*
