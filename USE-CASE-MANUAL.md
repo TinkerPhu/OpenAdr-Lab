@@ -709,30 +709,66 @@ Run the full E2E test suite (all 8 use cases, API + UI):
 ssh Pi4-Server "cd /srv/docker/openadr_lab/tests && docker compose -f docker-compose.test.yml run --rm test"
 ```
 
-This executes 44 scenarios (299 steps) including all use cases via both API calls and browser-driven UI interactions.
+This executes 49 scenarios (348 steps) including all use cases via both API calls and browser-driven UI interactions.
 
 ---
 
 ## E2E Test Coverage Analysis
 
-The automated test suite (`tests/features/use_cases.feature`) covers all 8 use cases. This section maps each use case's "What to test" criteria from `USE-CASES.md` against what the E2E tests actually verify, and identifies gaps that could be closed.
+The automated test suite (`tests/features/use_cases.feature`) covers all 8 use cases with full coverage of every "What to test" criterion. The suite includes 13 scenarios (8 core + 5 extended) covering enrollment targeting, event creation, VEN reception, report submission, cancellation, event modification, overlapping events, and conflicting dispatch.
+
+**Test results: 15 features, 49 scenarios, 348 steps — all passing (2m50s)**
 
 ### Coverage Matrix
 
-| UC | "What to test" | Currently Tested | Gap |
-|---|---|---|---|
-| **UC1** | Priority handling, event acknowledgment, correct timing | Priority 0 verified, payload type SIMPLE, VEN targeting, report round-trip | None — fully covered |
-| **UC2** | Interval sequencing, unit interpretation, smooth recovery | 3 intervals with EXPORT_CAPACITY_LIMIT, interval count verified, VEN targeting, report | None — fully covered |
-| **UC3** | Uniform interval handling, large interval counts, late updates | 3 PRICE intervals, both VENs see it, payload type verified | Large interval counts (24h), late update/correction |
-| **UC4** | Event lifecycle (far/near/active), event modification | Scheduled event with intervalPeriod, both VENs receive, report | Event modification (PUT to update) |
-| **UC5** | Overlapping events, priority resolution, group membership | Event-level targets, VEN targeting, report | Overlapping events, priority resolution |
-| **UC6** | Interval timing accuracy, conflicting state requests | 3 intervals with charge(+)/discharge(-) values, targeting, report | Conflicting state requests |
-| **UC7** | Acknowledgment handling, reporting/telemetry coupling | Open program, both VENs receive, report round-trip | None — fully covered |
-| **UC8** | VEN detects removal, clean rollback, state consistency | Event created, VEN receives, event deleted, VEN no longer shows it | None — fully covered |
+| UC | "What to test" | How It's Tested |
+|---|---|---|
+| **UC1** | Priority handling, event acknowledgment, correct timing | Priority 0 verified, payload type SIMPLE, VEN targeting, report round-trip |
+| **UC2** | Interval sequencing, unit interpretation, smooth recovery | 3 intervals with EXPORT_CAPACITY_LIMIT, interval count verified, VEN targeting, report |
+| **UC3** | Uniform interval handling, large interval counts, late updates | UC3: 3 intervals. UC3b: 24 hourly intervals. UC3c: price correction via PUT, VEN picks up new value |
+| **UC4** | Event lifecycle (far/near/active), event modification | UC4: scheduled event with intervalPeriod. UC4b: modify limit via PUT, VEN sees updated value |
+| **UC5** | Overlapping events, priority resolution, group membership | UC5: event-level targets. UC5b: two concurrent events with priority 2 and 4, both delivered |
+| **UC6** | Interval timing accuracy, conflicting state requests | UC6: 3-interval charge/discharge cycle. UC6b: simultaneous charge (+80) and discharge (-50) events |
+| **UC7** | Acknowledgment handling, reporting/telemetry coupling | Open program, both VENs receive, report round-trip |
+| **UC8** | VEN detects removal, clean rollback, state consistency | Event created, VEN receives, event deleted, VEN no longer shows it |
 
-### Feasibility of Closing Gaps
+### Extended Scenarios (implemented)
 
-All gaps can be closed by extending the existing test infrastructure. No new tools or helpers are needed beyond adding a `vtn_put` function to `api_client.py`.
+#### UC3b - Day-ahead pricing with 24 hourly intervals
+
+Tests that the VTN can deliver a large event with 24 intervals (realistic hourly pricing curve) and both VENs receive all 24 intervals intact.
+
+#### UC3c - Price correction after initial publish
+
+Tests event modification: creates a pricing event, waits for VEN to receive it, then updates the event via PUT with a corrected price. Verifies the VEN picks up the new value on its next poll cycle.
+
+#### UC4b - Modify peak shaving limit mid-flight
+
+Tests that an active peak shaving event can be modified (e.g., changing the import capacity limit from 0 to 30 kW) and the VEN sees the updated value.
+
+#### UC5b - Overlapping EV events with different priorities
+
+Tests that two events under the same program (priority 2 and priority 4) are both delivered to the same VEN. Verifies both events arrive with correct priority values. (Priority resolution is VEN-local — the VTN delivers all events.)
+
+#### UC6b - Conflicting charge and discharge events
+
+Tests that two CHARGE_STATE_SETPOINT events — one requesting charge (+80) and one requesting discharge (-50) — are both delivered to the same VEN with correct payload values and priorities. (Conflict resolution is VEN-local.)
+
+### Implementation Details
+
+The extended scenarios required:
+- `vtn_put` helper in `api_client.py`
+- `_build_intervals` extended for 24-hour pricing curves
+- New step: create event with explicit value (`priority X and value Y`)
+- New step: update event via PUT (`I update event "X" with type "Y" and value Z`)
+- New step: poll for updated value (`I wait for VEN-1 event "X" to have payload value Y`)
+- New assertions: payload value check, VEN-2 priority check, event count by prefix
+
+All previously proposed gap scenarios from the feasibility analysis below have been implemented and are passing.
+
+### Original Feasibility Analysis
+
+The following analysis was written before implementation. It is preserved for reference.
 
 #### UC3 Gap: Large Interval Counts
 
@@ -816,18 +852,15 @@ Scenario: UC6b - Conflicting charge/discharge events
   Then VEN-1 has 2 events matching prefix "uc6b-"
 ```
 
-### Implementation Effort
+### Implementation Summary
 
-| Change | Effort | Files to Modify |
-|---|---|---|
-| Add `vtn_put` helper | 1 min | `tests/features/helpers/api_client.py` |
-| UC3b: 24 intervals | 5 min | `use_cases.feature`, `use_case_steps.py` (extend `_build_intervals` for count=24) |
-| UC3c: Price correction | 15 min | `use_cases.feature`, `use_case_steps.py` (new update step + poll-for-value step) |
-| UC4b: Event modification | 5 min | `use_cases.feature` (reuses UC3c steps) |
-| UC5b: Overlapping events | 10 min | `use_cases.feature`, `use_case_steps.py` (new priority assertion for VEN-2) |
-| UC6b: Conflicting dispatch | 10 min | `use_cases.feature`, `use_case_steps.py` (new event-count assertion) |
+All gaps were implemented and are passing. Files modified:
 
-Total: ~45 min of implementation to achieve full coverage of all "What to test" criteria.
+| File | Changes |
+|---|---|
+| `tests/features/helpers/api_client.py` | Added `vtn_put` helper |
+| `tests/features/steps/use_case_steps.py` | Extended `_build_intervals` for 24h pricing, added event update step, poll-for-value step, create-with-value step, VEN-2 priority assertion, event count by prefix |
+| `tests/features/use_cases.feature` | Added 5 new scenarios (UC3b, UC3c, UC4b, UC5b, UC6b) |
 
 ---
 
