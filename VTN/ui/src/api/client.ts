@@ -8,19 +8,31 @@ export class BffApi {
   }
 
   private async jsonReq(method: string, path: string, body?: unknown): Promise<Response> {
-    const opts: RequestInit = { method, headers: { "Content-Type": "application/json" } };
+    const opts: RequestInit = {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Request-ID": crypto.randomUUID(),
+      },
+    };
     if (body !== undefined) opts.body = JSON.stringify(body);
     return fetch(this.url(path), opts);
   }
 
+  private async getReq(path: string): Promise<Response> {
+    return fetch(this.url(path), {
+      headers: { "X-Request-ID": crypto.randomUUID() },
+    });
+  }
+
   async health(): Promise<HealthStatus> {
-    const r = await fetch(this.url("/api/health"));
+    const r = await this.getReq("/api/health");
     if (!r.ok) throw new Error(`health ${r.status}`);
     return r.json();
   }
 
   async programs(): Promise<Program[]> {
-    const r = await fetch(this.url("/api/programs"));
+    const r = await this.getReq("/api/programs");
     if (!r.ok) throw new Error(`programs ${r.status}`);
     return r.json();
   }
@@ -43,7 +55,7 @@ export class BffApi {
   }
 
   async events(): Promise<VtnEvent[]> {
-    const r = await fetch(this.url("/api/events"));
+    const r = await this.getReq("/api/events");
     if (!r.ok) throw new Error(`events ${r.status}`);
     return r.json();
   }
@@ -66,7 +78,7 @@ export class BffApi {
   }
 
   async vens(): Promise<Ven[]> {
-    const r = await fetch(this.url("/api/vens"));
+    const r = await this.getReq("/api/vens");
     if (!r.ok) throw new Error(`vens ${r.status}`);
     return r.json();
   }
@@ -77,7 +89,7 @@ export class BffApi {
   }
 
   async reports(): Promise<Report[]> {
-    const r = await fetch(this.url("/api/reports"));
+    const r = await this.getReq("/api/reports");
     if (!r.ok) throw new Error(`reports ${r.status}`);
     return r.json();
   }

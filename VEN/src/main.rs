@@ -12,10 +12,14 @@ use axum::{
 };
 use chrono::Utc;
 use config::Config;
+use metrics::counter;
+use metrics_exporter_prometheus::PrometheusBuilder;
 use models::{SensorInput, SensorSnapshot};
 use serde::Deserialize;
 use state::AppState;
+use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 use uuid::Uuid;
 use vtn::VtnClient;
@@ -24,13 +28,17 @@ use vtn::VtnClient;
 struct AppCtx {
     state: AppState,
     vtn: VtnClient,
+    metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
+        .json()
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()))
         .init();
+
+    let metrics_handle = PrometheusBuilder::new().install_recorder()?;
 
     let cfg = Config::from_env()?;
     info!("starting ven {} listening on {}", cfg.ven_name, cfg.listen_addr);
@@ -60,8 +68,15 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 interval.tick().await;
                 match vtn.fetch_programs().await {
-                    Ok(programs) => state.set_programs(programs).await,
-                    Err(e) => error!("program poll failed: {e:#}"),
+                    Ok(programs) => {
+                        counter!("poll_success_total", "resource" => "programs").increment(1);
+                        info!(resource = "programs", count = programs.len(), "poll success");
+                        state.set_programs(programs).await;
+                    }
+                    Err(e) => {
+                        counter!("poll_error_total", "resource" => "programs").increment(1);
+                        error!(resource = "programs", "poll failed: {e:#}");
+                    }
                 }
             }
         });
@@ -77,8 +92,15 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 interval.tick().await;
                 match vtn.fetch_events().await {
-                    Ok(events) => state.set_events(events, 500).await,
-                    Err(e) => error!("event poll failed: {e:#}"),
+                    Ok(events) => {
+                        counter!("poll_success_total", "resource" => "events").increment(1);
+                        info!(resource = "events", count = events.len(), "poll success");
+                        state.set_events(events, 500).await;
+                    }
+                    Err(e) => {
+                        counter!("poll_error_total", "resource" => "events").increment(1);
+                        error!(resource = "events", "poll failed: {e:#}");
+                    }
                 }
             }
         });
@@ -94,8 +116,15 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 interval.tick().await;
                 match vtn.fetch_reports().await {
-                    Ok(reports) => state.set_reports(reports).await,
-                    Err(e) => error!("report poll failed: {e:#}"),
+                    Ok(reports) => {
+                        counter!("poll_success_total", "resource" => "reports").increment(1);
+                        info!(resource = "reports", count = reports.len(), "poll success");
+                        state.set_reports(reports).await;
+                    }
+                    Err(e) => {
+                        counter!("poll_error_total", "resource" => "reports").increment(1);
+                        error!(resource = "reports", "poll failed: {e:#}");
+                    }
                 }
             }
         });
@@ -139,7 +168,11 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // HTTP API
-    let ctx = AppCtx { state, vtn };
+    let ctx = AppCtx {
+        state,
+        vtn,
+        metrics_handle: Arc::new(metrics_handle),
+    };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -153,7 +186,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/sensors", get(get_sensors).post(post_sensors))
         .route("/reports", get(get_reports).post(post_reports))
         .route("/reports/:id", put(put_report))
+        .route("/metrics", get(get_metrics))
         .with_state(ctx)
+        .layer(TraceLayer::new_for_http())
         .layer(cors);
 
     let listener = tokio::net::TcpListener::bind(cfg.listen_addr).await?;
@@ -163,6 +198,10 @@ async fn main() -> anyhow::Result<()> {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn get_metrics(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    ctx.metrics_handle.render()
 }
 
 #[derive(Deserialize)]
@@ -215,7 +254,10 @@ async fn post_reports(
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     match ctx.vtn.upsert_report(body).await {
-        Ok(result) => (axum::http::StatusCode::CREATED, Json(result)).into_response(),
+        Ok(result) => {
+            counter!("reports_sent_total").increment(1);
+            (axum::http::StatusCode::CREATED, Json(result)).into_response()
+        }
         Err(e) => {
             error!("report submission failed: {e:#}");
             (
@@ -233,7 +275,10 @@ async fn put_report(
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     match ctx.vtn.update_report(&id, body).await {
-        Ok(result) => (axum::http::StatusCode::OK, Json(result)).into_response(),
+        Ok(result) => {
+            counter!("reports_sent_total").increment(1);
+            (axum::http::StatusCode::OK, Json(result)).into_response()
+        }
         Err(e) => {
             error!("report update failed: {e:#}");
             (
