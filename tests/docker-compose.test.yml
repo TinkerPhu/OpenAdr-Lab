@@ -175,6 +175,7 @@ services:
       UI_BASE_URL: "http://test-ui:80"
     volumes:
       - ../openleadr-rs/fixtures:/fixtures:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       test-vtn:
         condition: service_healthy
