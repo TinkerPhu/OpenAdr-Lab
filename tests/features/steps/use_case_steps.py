@@ -159,6 +159,7 @@ def step_create_uc_event_with_targets(context, name, ptype, pri, count):
 
 # ── VEN event polling ────────────────────────────────────────────────────────
 
+@given('I wait for VEN-1 to show event "{name}"')
 @when('I wait for VEN-1 to show event "{name}"')
 def step_wait_ven1_event(context, name):
     poll_until(
@@ -170,6 +171,7 @@ def step_wait_ven1_event(context, name):
     )
 
 
+@given('I wait for VEN-2 to show event "{name}"')
 @when('I wait for VEN-2 to show event "{name}"')
 def step_wait_ven2_event(context, name):
     poll_until(
