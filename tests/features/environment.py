@@ -59,9 +59,13 @@ def after_scenario(context, scenario):
         context.browser_page.close()
 
     # Resilience cleanup: restart any services stopped during the scenario
-    if hasattr(context, "_stopped_services") and context._stopped_services:
+    try:
+        stopped = context._stopped_services
+    except (AttributeError, KeyError):
+        stopped = None
+    if stopped:
         from features.helpers import docker_ctl
-        for svc in context._stopped_services:
+        for svc in stopped:
             try:
                 docker_ctl.start_service(svc)
             except Exception as exc:
