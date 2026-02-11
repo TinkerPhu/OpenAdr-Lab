@@ -136,11 +136,22 @@ class VtnUi:
     # -- reports --
 
     def report_visible(self, client_name, timeout=10000):
-        """Check if a report from client_name is visible."""
+        """Check if a report from client_name is visible.
+
+        Retries once with a page reload if the first attempt fails,
+        since the reports page loads data once on navigation.
+        """
+        selector = f'{tid("reports-table")} >> text="{client_name}"'
         try:
-            self.page.wait_for_selector(
-                f'{tid("reports-table")} >> text="{client_name}"', timeout=timeout
-            )
+            self.page.wait_for_selector(selector, timeout=timeout)
+            return True
+        except Exception:
+            pass
+        # Reload and retry once
+        self.page.reload()
+        self.page.wait_for_selector(tid("reports-heading"))
+        try:
+            self.page.wait_for_selector(selector, timeout=timeout)
             return True
         except Exception:
             return False

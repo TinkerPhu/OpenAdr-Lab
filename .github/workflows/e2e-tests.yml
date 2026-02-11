@@ -27,3 +27,24 @@ jobs:
         if: always()
         working-directory: tests
         run: docker compose -f docker-compose.test.yml down -v
+
+  resilience:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: e2e  # run after main tests pass
+
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build and run resilience tests
+        working-directory: tests
+        run: |
+          docker compose -f docker-compose.test.yml run --build --rm test-runner --tags=@resilience
+
+      - name: Tear down
+        if: always()
+        working-directory: tests
+        run: docker compose -f docker-compose.test.yml down -v

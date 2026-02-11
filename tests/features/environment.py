@@ -54,9 +54,22 @@ def before_scenario(context, scenario):
 
 
 def after_scenario(context, scenario):
-    """Close browser page after @ui scenarios."""
+    """Close browser page after @ui scenarios; restart stopped services."""
     if _is_ui(scenario) and hasattr(context, "browser_page"):
         context.browser_page.close()
+
+    # Resilience cleanup: restart any services stopped during the scenario
+    if hasattr(context, "_stopped_services") and context._stopped_services:
+        from features.helpers import docker_ctl
+        for svc in context._stopped_services:
+            try:
+                docker_ctl.start_service(svc)
+            except Exception as exc:
+                print(f"Warning: failed to restart {svc}: {exc}")
+        context._stopped_services = []
+        # Wait for VTN to be healthy before next scenario
+        from features.helpers.wait import wait_for_url
+        wait_for_url(f"{VTN_BASE_URL}/health", timeout=60)
 
 
 def after_all(context):
