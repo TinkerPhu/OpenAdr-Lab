@@ -1092,6 +1092,30 @@ Submitted two pull requests to the upstream `OpenLEADR/openleadr-rs` repository 
 5. **Cherry-pick conflicts** — commits built on top of each other can't be cleanly cherry-picked individually. Better to apply the combined diff manually and create a single clean commit.
 6. **GitHub can't change PR head branch** — if a PR is on the wrong branch, you must close and recreate it. Leave a comment explaining why so the maintainer understands.
 
+### 14. Use Case Manual & Extended E2E Coverage
+
+**Status: COMPLETE**
+
+Created `USE-CASE-MANUAL.md` — a step-by-step replay guide for all 8 use cases with real-world motivations, concrete examples, and exact curl commands. Then extended the E2E test suite to achieve full coverage of every "What to test" criterion from `USE-CASES.md`.
+
+**5 new scenarios added:**
+
+| Scenario | UC Gap Closed | What It Tests |
+|---|---|---|
+| UC3b | Large interval counts | 24 hourly price intervals delivered intact |
+| UC3c | Late updates/corrections | Price correction via PUT, VEN picks up new value |
+| UC4b | Event modification | Peak shaving limit modified mid-flight |
+| UC5b | Overlapping events | Two concurrent events with different priorities |
+| UC6b | Conflicting state requests | Simultaneous charge (+80) and discharge (-50) events |
+
+**Test Results:** 15 features, 49 scenarios, 348 steps — all passing (2m50s)
+
+**Files changed:**
+- `USE-CASE-MANUAL.md` (new) — replay guide with coverage analysis
+- `tests/features/helpers/api_client.py` — added `vtn_put` helper
+- `tests/features/steps/use_case_steps.py` — new steps for event update, poll-for-value, create-with-value, VEN-2 priority, event count by prefix; extended `_build_intervals` for 24h pricing
+- `tests/features/use_cases.feature` — 5 new scenarios
+
 ---
 
 *Last updated: 2026-02-10*
