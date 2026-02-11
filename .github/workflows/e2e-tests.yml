@@ -1,0 +1,29 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # allow manual trigger
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build and run test stack
+        working-directory: tests
+        run: |
+          docker compose -f docker-compose.test.yml run --build --rm test-runner
+
+      - name: Tear down
+        if: always()
+        working-directory: tests
+        run: docker compose -f docker-compose.test.yml down -v
