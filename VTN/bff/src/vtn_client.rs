@@ -93,15 +93,29 @@ impl VtnClient {
         Ok(access)
     }
 
+    fn apply_request_id(
+        &self,
+        builder: reqwest::RequestBuilder,
+        request_id: Option<&str>,
+    ) -> reqwest::RequestBuilder {
+        if let Some(rid) = request_id {
+            builder.header("x-request-id", rid)
+        } else {
+            builder
+        }
+    }
+
     /// GET a VTN endpoint with automatic 401-retry.
-    pub async fn get_json(&self, path: &str) -> Result<serde_json::Value> {
+    pub async fn get_json(
+        &self,
+        path: &str,
+        request_id: Option<&str>,
+    ) -> Result<serde_json::Value> {
         let token = self.ensure_token().await?;
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
 
         let resp = self
-            .http
-            .get(&url)
-            .bearer_auth(&token)
+            .apply_request_id(self.http.get(&url).bearer_auth(&token), request_id)
             .send()
             .await
             .context(format!("GET {path} failed"))?;
@@ -110,9 +124,7 @@ impl VtnClient {
             self.invalidate_token().await;
             let new_token = self.ensure_token().await?;
             let resp = self
-                .http
-                .get(&url)
-                .bearer_auth(&new_token)
+                .apply_request_id(self.http.get(&url).bearer_auth(&new_token), request_id)
                 .send()
                 .await
                 .context(format!("GET {path} retry failed"))?;
@@ -135,15 +147,20 @@ impl VtnClient {
     }
 
     /// POST JSON to a VTN endpoint with automatic 401-retry.
-    pub async fn post_json(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value> {
+    pub async fn post_json(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+        request_id: Option<&str>,
+    ) -> Result<serde_json::Value> {
         let token = self.ensure_token().await?;
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
 
         let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(&token)
-            .json(&body)
+            .apply_request_id(
+                self.http.post(&url).bearer_auth(&token).json(&body),
+                request_id,
+            )
             .send()
             .await
             .context(format!("POST {path} failed"))?;
@@ -152,10 +169,10 @@ impl VtnClient {
             self.invalidate_token().await;
             let new_token = self.ensure_token().await?;
             let resp = self
-                .http
-                .post(&url)
-                .bearer_auth(&new_token)
-                .json(&body)
+                .apply_request_id(
+                    self.http.post(&url).bearer_auth(&new_token).json(&body),
+                    request_id,
+                )
                 .send()
                 .await
                 .context(format!("POST {path} retry failed"))?;
@@ -178,15 +195,20 @@ impl VtnClient {
     }
 
     /// PUT JSON to a VTN endpoint with automatic 401-retry.
-    pub async fn put_json(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value> {
+    pub async fn put_json(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+        request_id: Option<&str>,
+    ) -> Result<serde_json::Value> {
         let token = self.ensure_token().await?;
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
 
         let resp = self
-            .http
-            .put(&url)
-            .bearer_auth(&token)
-            .json(&body)
+            .apply_request_id(
+                self.http.put(&url).bearer_auth(&token).json(&body),
+                request_id,
+            )
             .send()
             .await
             .context(format!("PUT {path} failed"))?;
@@ -195,10 +217,10 @@ impl VtnClient {
             self.invalidate_token().await;
             let new_token = self.ensure_token().await?;
             let resp = self
-                .http
-                .put(&url)
-                .bearer_auth(&new_token)
-                .json(&body)
+                .apply_request_id(
+                    self.http.put(&url).bearer_auth(&new_token).json(&body),
+                    request_id,
+                )
                 .send()
                 .await
                 .context(format!("PUT {path} retry failed"))?;
@@ -221,14 +243,16 @@ impl VtnClient {
     }
 
     /// DELETE a VTN endpoint with automatic 401-retry.
-    pub async fn delete_json(&self, path: &str) -> Result<()> {
+    pub async fn delete_json(
+        &self,
+        path: &str,
+        request_id: Option<&str>,
+    ) -> Result<()> {
         let token = self.ensure_token().await?;
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
 
         let resp = self
-            .http
-            .delete(&url)
-            .bearer_auth(&token)
+            .apply_request_id(self.http.delete(&url).bearer_auth(&token), request_id)
             .send()
             .await
             .context(format!("DELETE {path} failed"))?;
@@ -237,9 +261,10 @@ impl VtnClient {
             self.invalidate_token().await;
             let new_token = self.ensure_token().await?;
             let resp = self
-                .http
-                .delete(&url)
-                .bearer_auth(&new_token)
+                .apply_request_id(
+                    self.http.delete(&url).bearer_auth(&new_token),
+                    request_id,
+                )
                 .send()
                 .await
                 .context(format!("DELETE {path} retry failed"))?;
