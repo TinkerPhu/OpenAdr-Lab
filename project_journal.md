@@ -1278,4 +1278,26 @@ Two complementary approaches:
 
 ---
 
+### 16. CI Docker Build Cache — GitHub Actions Optimization
+
+**Status: COMPLETE**
+
+**Problem:** The E2E CI workflow was timing out at 30 minutes because it rebuilt all Rust binaries from scratch on every run (~25 min VTN + ~11 min VEN + ~2 min BFF). The last successful run took 46m37s; recent runs were cancelled at 30m30s.
+
+**What was done:**
+- Increased `timeout-minutes` from 30 to 60 for both `e2e` and `resilience` jobs (safety net)
+- Added `docker/setup-buildx-action@v3` for BuildKit support
+- Replaced `docker compose run --build` with `docker/bake-action@v5` using GitHub Actions cache backend (`type=gha,mode=max`)
+- Bake action reads the compose file natively, builds all images with layer caching, and loads them into the local Docker daemon (`load: true`)
+- Test run step uses `docker compose run --rm` without `--build` (images already built by bake)
+
+**Why bake-action:** It natively understands docker-compose files (no separate bake HCL needed) and integrates with GitHub Actions cache backend. The `mode=max` setting caches all layers (not just final), maximizing cache hit rate for Rust incremental builds.
+
+**Expected impact:**
+- Cold cache: ~46 min (now completes within 60 min timeout)
+- Warm cache, no Rust changes: ~5-10 min
+- Warm cache, Rust source changes: ~15-25 min (dependency layers cached)
+
+---
+
 *Last updated: 2026-02-12*
