@@ -71,4 +71,10 @@ export class VenApi {
     if (!r.ok) throw new Error(`update report ${r.status}`);
     return r.json();
   }
+
+  async metrics(): Promise<string> {
+    const r = await this.getReq("/metrics");
+    if (!r.ok) throw new Error(`metrics ${r.status}`);
+    return r.text();
+  }
 }

@@ -98,4 +98,10 @@ export class BffApi {
     const r = await this.jsonReq("DELETE", `/api/reports/${id}`);
     if (!r.ok) throw new Error(`deleteReport ${r.status}`);
   }
+
+  async metrics(): Promise<string> {
+    const r = await this.getReq("/api/metrics");
+    if (!r.ok) throw new Error(`metrics ${r.status}`);
+    return r.text();
+  }
 }

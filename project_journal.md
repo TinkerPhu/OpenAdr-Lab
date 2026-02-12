@@ -1236,4 +1236,46 @@ Two complementary approaches:
 
 ---
 
-*Last updated: 2026-02-11*
+### 15b. Metrics UI Pages + Use Case Manual Rewrite
+
+**Status: COMPLETE**
+
+**What:** Added Prometheus metrics pages to both VTN UI and VEN UI, and rewrote USE-CASE-MANUAL.md from curl-based CLI instructions to step-by-step web UI walkthroughs.
+
+**Metrics Pages:**
+- Both UIs fetch raw Prometheus text from their respective `/api/metrics` (BFF) and `/metrics` (VEN) endpoints
+- Inline `parsePrometheusText()` utility parses `# TYPE`/`# HELP` comment lines and metric lines with labels into structured rows
+- Displayed in MUI Tables grouped by metric name, with labels in monospace and values right-aligned
+- Auto-refresh every 10 seconds via react-query `refetchInterval`
+- VEN UI includes `api.baseUrl` in the query key so metrics update when switching VENs
+
+**USE-CASE-MANUAL.md Rewrite:**
+- All 8 use cases (UC1-UC8) now have "Step-by-Step Replay (Web UI)" sections describing exact UI actions: which page to navigate to, which buttons to click, which fields to fill, what values to enter
+- Instructions reference actual form fields (Program Name, Enrolled VENs checkboxes, Event Name, Program dropdown, Priority, Start Time, Duration, Targets JSON, Intervals JSON)
+- Original curl commands preserved in a collapsible `<details>` section ("CLI Reference") at the bottom
+- Quick Reference tables updated to use UI terminology (checkboxes instead of JSON targets)
+
+**Files created:**
+- `VTN/ui/src/pages/Metrics.tsx` — VTN metrics page
+- `VEN/ui/src/pages/Metrics.tsx` — VEN metrics page
+
+**Files modified:**
+- `VTN/ui/src/api/client.ts` — added `metrics()` method
+- `VTN/ui/src/api/hooks.ts` — added `useMetrics()` hook
+- `VTN/ui/src/App.tsx` — added `/metrics` route and nav button
+- `VEN/ui/src/api/client.ts` — added `metrics()` method
+- `VEN/ui/src/api/hooks.ts` — added `useMetrics()` hook
+- `VEN/ui/src/App.tsx` — added `/metrics` route and nav button
+- `USE-CASE-MANUAL.md` — complete rewrite (UI-first + curl reference)
+
+**Color scheme differentiation:**
+- VTN UI: teal primary (`#00695c`) — operator/server role
+- VEN UI: indigo primary (`#283593`) — device/client role
+- Both share amber secondary (`#ff8f00`) for visual cohesion
+- Applied via MUI `createTheme` + `ThemeProvider` in `main.tsx`
+
+**Build verification:** Both `npm run build` pass (tsc + vite) with no type errors.
+
+---
+
+*Last updated: 2026-02-12*
