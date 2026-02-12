@@ -11,6 +11,7 @@ import { ProgramsPage } from "./pages/Programs";
 import { EventsPage } from "./pages/Events";
 import { VensPage } from "./pages/Vens";
 import { ReportsPage } from "./pages/Reports";
+import { MetricsPage } from "./pages/Metrics";
 
 type BffContextType = {
   api: BffApi;
@@ -125,6 +126,9 @@ export default function App() {
             <Button component={Link} to="/reports" data-testid="nav-reports">
               Reports
             </Button>
+            <Button component={Link} to="/metrics" data-testid="nav-metrics">
+              Metrics
+            </Button>
           </Stack>
 
           <Routes>
@@ -133,6 +137,7 @@ export default function App() {
             <Route path="/events" element={<EventsPage />} />
             <Route path="/vens" element={<VensPage />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/metrics" element={<MetricsPage />} />
           </Routes>
         </Container>
       </BrowserRouter>

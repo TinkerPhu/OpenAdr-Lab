@@ -118,3 +118,12 @@ export function useDeleteReport() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["reports"] }),
   });
 }
+
+export function useMetrics() {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["metrics"],
+    queryFn: () => api.metrics(),
+    refetchInterval: 10_000,
+  });
+}
