@@ -80,3 +80,12 @@ export function useUpdateReport() {
     },
   });
 }
+
+export function useMetrics() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["metrics", api.baseUrl],
+    queryFn: () => api.metrics(),
+    refetchInterval: 10_000,
+  });
+}

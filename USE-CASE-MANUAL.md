@@ -1,47 +1,28 @@
 # OpenADR Use Case Manual — Step-by-Step Replay Guide
 
-This manual explains how to replay all 8 use cases from `USE-CASES.md` against the running OpenADR lab. Each use case includes the real-world motivation, a concrete example, and the exact API calls (curl commands) to execute it manually.
+This manual explains how to replay all 8 use cases from `USE-CASES.md` against the running OpenADR lab. Each use case includes the real-world motivation, a concrete example, and step-by-step UI instructions.
 
-All commands assume the VTN is running at `http://Pi4-Server:8200` and the VENs at ports `8211` (VEN-1), `8212` (VEN-2), `8213` (VEN-3).
+**VTN UI:** http://Pi4-Server:8221
+**VEN UI:** http://Pi4-Server:8214
 
 ---
 
 ## Prerequisites
 
-### Get an Authentication Token
-
-Every VTN API call requires a Bearer token. Obtain one first:
-
-```bash
-TOKEN=$(curl -s -X POST http://Pi4-Server:8200/auth/token \
-  -d "grant_type=client_credentials&client_id=any-business&client_secret=any-business" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
-```
-
-The token is valid for 30 days. Store it in the `TOKEN` variable for all subsequent commands.
-
 ### Verify the System Is Running
 
-```bash
-# VTN health
-curl http://Pi4-Server:8200/health
-
-# VEN-1 health
-curl http://Pi4-Server:8211/health
-
-# VEN-2 health
-curl http://Pi4-Server:8212/health
-```
+1. Open the **VTN UI** at http://Pi4-Server:8221 — the health chip in the top bar should show **"VTN: ok"** (green)
+2. Open the **VEN UI** at http://Pi4-Server:8214 — the health chip should show **"ok"** (green) for the selected VEN
 
 ### Understanding the Flow
 
 Every use case follows the same OpenADR 3 pattern:
 
-1. **Create a Program** on the VTN (with optional enrollment targets)
+1. **Create a Program** on the VTN UI (with optional enrollment targets)
 2. **Create an Event** under that program (with intervals and payload signals)
 3. **VENs poll** the VTN and receive the event (within 30 seconds)
-4. **VENs submit Reports** acknowledging the event
-5. **VTN operator** can view reports to confirm compliance
+4. **VENs submit Reports** acknowledging the event (via VEN UI)
+5. **VTN operator** can view reports on the VTN UI to confirm compliance
 
 ---
 
@@ -62,76 +43,40 @@ It's a 42°C afternoon in August. Air conditioning across the city is running at
 - **Single interval** (one clear instruction)
 - **Targeted** to specific VENs (only enrolled participants)
 
-### Step-by-Step Replay
+### Step-by-Step Replay (Web UI)
 
-**1. Create a targeted program (only VEN-1 receives events):**
+**VTN UI** (http://Pi4-Server:8221):
 
-```bash
-curl -s -X POST http://Pi4-Server:8200/programs \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programName": "manual-uc1-emergency",
-    "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}]
-  }' | python3 -m json.tool
-```
+1. Navigate to **Programs** page
+2. Click **"Create"** button
+3. Enter Program Name: `manual-uc1-emergency`
+4. Under **Enrolled VENs**, check **ven-1-name** (leave others unchecked)
+5. Click **"Create"**
+6. Navigate to **Events** page
+7. Click **"Create"** button
+8. Enter Event Name: `manual-emergency-loadshed`
+9. Select Program: `manual-uc1-emergency` from the dropdown
+10. Enter Priority: `0`
+11. Paste into Intervals (JSON):
+    ```json
+    [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [0]}]}]
+    ```
+12. Click **"Create"**
 
-Save the returned `id` as `PROGRAM_ID`.
+**VEN UI** (http://Pi4-Server:8214):
 
-**2. Create the emergency event (priority 0, SIMPLE payload):**
+13. Select **VEN1** in the VEN dropdown (top bar)
+14. Navigate to **Events** — verify `manual-emergency-loadshed` appears (wait up to 30s for polling)
+15. Select **VEN2** in the VEN dropdown
+16. Navigate to **Events** — verify `manual-emergency-loadshed` does **NOT** appear (enrollment targeting)
+17. Switch back to **VEN1** in the dropdown
+18. Navigate to **Reports** → click **"Submit Report"**
+19. Select Event: `manual-emergency-loadshed` from the dropdown
+20. Click **"Suggest Example"** → click **"Submit"**
 
-```bash
-curl -s -X POST http://Pi4-Server:8200/events \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programID": "'$PROGRAM_ID'",
-    "eventName": "manual-emergency-loadshed",
-    "priority": 0,
-    "intervals": [
-      {"id": 0, "payloads": [{"type": "SIMPLE", "values": [0]}]}
-    ]
-  }' | python3 -m json.tool
-```
+**VTN UI** (http://Pi4-Server:8221):
 
-**3. Verify VEN-1 received it (wait up to 30 seconds for polling):**
-
-```bash
-curl -s http://Pi4-Server:8211/events | python3 -m json.tool
-# Look for "eventName": "manual-emergency-loadshed"
-```
-
-**4. Verify VEN-2 did NOT receive it (enrollment targeting):**
-
-```bash
-curl -s http://Pi4-Server:8212/events | python3 -m json.tool
-# Should NOT contain "manual-emergency-loadshed"
-```
-
-**5. Submit a report from VEN-1 acknowledging the event:**
-
-```bash
-# First get the event ID from VEN-1
-EVENT_ID=$(curl -s http://Pi4-Server:8211/events \
-  | python3 -c "import sys,json; evts=json.load(sys.stdin); print(next(e['id'] for e in evts if e['eventName']=='manual-emergency-loadshed'))")
-
-curl -s -X POST http://Pi4-Server:8211/reports \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programID": "'$PROGRAM_ID'",
-    "eventID": "'$EVENT_ID'",
-    "clientName": "ven-1",
-    "resources": []
-  }' | python3 -m json.tool
-```
-
-**6. Verify the report is visible in VTN:**
-
-```bash
-curl -s http://Pi4-Server:8200/reports \
-  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
-# Look for clientName "ven-1" and the matching eventID
-```
+21. Navigate to **Reports** — verify a report from `ven-1` appears with the matching event ID
 
 ### What to Observe
 
@@ -159,53 +104,36 @@ A neighborhood with heavy solar PV penetration is over-generating at noon. The d
 - **Priority 5** (normal operational priority)
 - **Targeted** to specific VENs with solar installations
 
-### Step-by-Step Replay
+### Step-by-Step Replay (Web UI)
 
-**1. Create a targeted program (only VEN-2):**
+**VTN UI** (http://Pi4-Server:8221):
 
-```bash
-curl -s -X POST http://Pi4-Server:8200/programs \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programName": "manual-uc2-export",
-    "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}]
-  }' | python3 -m json.tool
-```
-
-Save the `id` as `PROGRAM_ID`.
-
-**2. Create the export limitation event with 3 intervals:**
-
-```bash
-curl -s -X POST http://Pi4-Server:8200/events \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programID": "'$PROGRAM_ID'",
-    "eventName": "manual-export-limit",
-    "priority": 5,
-    "intervals": [
+1. Navigate to **Programs** page
+2. Click **"Create"**
+3. Enter Program Name: `manual-uc2-export`
+4. Under **Enrolled VENs**, check **ven-2** only
+5. Click **"Create"**
+6. Navigate to **Events** page
+7. Click **"Create"**
+8. Enter Event Name: `manual-export-limit`
+9. Select Program: `manual-uc2-export`
+10. Enter Priority: `5`
+11. Paste into Intervals (JSON):
+    ```json
+    [
       {"id": 0, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]},
       {"id": 1, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [50.0]}]},
       {"id": 2, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]}
     ]
-  }' | python3 -m json.tool
-```
+    ```
+12. Click **"Create"**
 
-**3. Verify VEN-2 received it with all 3 intervals:**
+**VEN UI** (http://Pi4-Server:8214):
 
-```bash
-curl -s http://Pi4-Server:8212/events | python3 -m json.tool
-# Look for "manual-export-limit" with 3 intervals
-```
-
-**4. Verify VEN-1 did NOT receive it:**
-
-```bash
-curl -s http://Pi4-Server:8211/events | python3 -m json.tool
-# Should NOT contain "manual-export-limit"
-```
+13. Select **VEN2** in the VEN dropdown
+14. Navigate to **Events** — verify `manual-export-limit` appears with 3 intervals
+15. Select **VEN1** in the VEN dropdown
+16. Navigate to **Events** — verify `manual-export-limit` does **NOT** appear
 
 ### What to Observe
 
@@ -232,47 +160,36 @@ A utility publishes tomorrow's hourly electricity prices: $0.06/kWh at 3 AM (off
 - **No targeting** (open program — all VENs see it)
 - **No direct control mandate** — VENs decide locally how to respond
 
-### Step-by-Step Replay
+### Step-by-Step Replay (Web UI)
 
-**1. Create an open program (no targets — visible to all VENs):**
+**VTN UI** (http://Pi4-Server:8221):
 
-```bash
-curl -s -X POST http://Pi4-Server:8200/programs \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programName": "manual-uc3-pricing",
-    "targets": null
-  }' | python3 -m json.tool
-```
-
-Save the `id` as `PROGRAM_ID`.
-
-**2. Create a pricing event with 3 intervals (off-peak, peak, off-peak):**
-
-```bash
-curl -s -X POST http://Pi4-Server:8200/events \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programID": "'$PROGRAM_ID'",
-    "eventName": "manual-tou-pricing",
-    "priority": 5,
-    "intervals": [
+1. Navigate to **Programs** page
+2. Click **"Create"**
+3. Enter Program Name: `manual-uc3-pricing`
+4. Leave **all VEN checkboxes unchecked** (open program — visible to all VENs)
+5. Click **"Create"**
+6. Navigate to **Events** page
+7. Click **"Create"**
+8. Enter Event Name: `manual-tou-pricing`
+9. Select Program: `manual-uc3-pricing`
+10. Enter Priority: `5`
+11. Paste into Intervals (JSON):
+    ```json
+    [
       {"id": 0, "payloads": [{"type": "PRICE", "values": [0.12]}]},
       {"id": 1, "payloads": [{"type": "PRICE", "values": [0.35]}]},
       {"id": 2, "payloads": [{"type": "PRICE", "values": [0.15]}]}
     ]
-  }' | python3 -m json.tool
-```
+    ```
+12. Click **"Create"**
 
-**3. Verify BOTH VEN-1 and VEN-2 received it (open program):**
+**VEN UI** (http://Pi4-Server:8214):
 
-```bash
-curl -s http://Pi4-Server:8211/events | python3 -m json.tool
-curl -s http://Pi4-Server:8212/events | python3 -m json.tool
-# Both should contain "manual-tou-pricing"
-```
+13. Select **VEN1** in the VEN dropdown
+14. Navigate to **Events** — verify `manual-tou-pricing` appears
+15. Select **VEN2** in the VEN dropdown
+16. Navigate to **Events** — verify `manual-tou-pricing` also appears here (open program)
 
 ### What to Observe
 
@@ -299,52 +216,34 @@ The grid operator sees that tomorrow at 2 PM, demand will peak at 95% of grid ca
 - **Priority 3** (moderate — planned, not emergency)
 - **Targeted** to multiple VENs
 
-### Step-by-Step Replay
+### Step-by-Step Replay (Web UI)
 
-**1. Create a program targeting both VEN-1 and VEN-2:**
+**VTN UI** (http://Pi4-Server:8221):
 
-```bash
-curl -s -X POST http://Pi4-Server:8200/programs \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programName": "manual-uc4-peak",
-    "targets": [
-      {"type": "VEN_NAME", "values": ["ven-1-name"]},
-      {"type": "VEN_NAME", "values": ["ven-2"]}
-    ]
-  }' | python3 -m json.tool
-```
+1. Navigate to **Programs** page
+2. Click **"Create"**
+3. Enter Program Name: `manual-uc4-peak`
+4. Under **Enrolled VENs**, check both **ven-1-name** and **ven-2**
+5. Click **"Create"**
+6. Navigate to **Events** page
+7. Click **"Create"**
+8. Enter Event Name: `manual-peak-shave`
+9. Select Program: `manual-uc4-peak`
+10. Enter Priority: `3`
+11. Enter Start Time: `2026-03-01T14:00:00Z`
+12. Enter Duration: `PT4H`
+13. Paste into Intervals (JSON):
+    ```json
+    [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [50.0]}]}]
+    ```
+14. Click **"Create"**
 
-Save the `id` as `PROGRAM_ID`.
+**VEN UI** (http://Pi4-Server:8214):
 
-**2. Create the peak shaving event with intervalPeriod:**
-
-```bash
-curl -s -X POST http://Pi4-Server:8200/events \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programID": "'$PROGRAM_ID'",
-    "eventName": "manual-peak-shave",
-    "priority": 3,
-    "intervalPeriod": {
-      "start": "2026-03-01T14:00:00Z",
-      "duration": "PT4H"
-    },
-    "intervals": [
-      {"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [50.0]}]}
-    ]
-  }' | python3 -m json.tool
-```
-
-**3. Verify both VENs received it:**
-
-```bash
-curl -s http://Pi4-Server:8211/events | python3 -m json.tool
-curl -s http://Pi4-Server:8212/events | python3 -m json.tool
-# Both should contain "manual-peak-shave" with an intervalPeriod
-```
+15. Select **VEN1** in the VEN dropdown
+16. Navigate to **Events** — verify `manual-peak-shave` appears with an intervalPeriod
+17. Select **VEN2** in the VEN dropdown
+18. Navigate to **Events** — verify `manual-peak-shave` also appears (both VENs enrolled)
 
 ### What to Observe
 
@@ -372,48 +271,36 @@ A fleet of 50 EVs returns to the company parking garage at 5 PM and all plug in.
 - **Priority 2** (high — grid stability concern)
 - **Group-based** — targets specific VENs representing charging infrastructure
 
-### Step-by-Step Replay
+### Step-by-Step Replay (Web UI)
 
-**1. Create a targeted program (VEN-2 represents the charging station):**
+**VTN UI** (http://Pi4-Server:8221):
 
-```bash
-curl -s -X POST http://Pi4-Server:8200/programs \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programName": "manual-uc5-ev",
-    "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}]
-  }' | python3 -m json.tool
-```
+1. Navigate to **Programs** page
+2. Click **"Create"**
+3. Enter Program Name: `manual-uc5-ev`
+4. Under **Enrolled VENs**, check **ven-2** only
+5. Click **"Create"**
+6. Navigate to **Events** page
+7. Click **"Create"**
+8. Enter Event Name: `manual-ev-charge-control`
+9. Select Program: `manual-uc5-ev`
+10. Enter Priority: `2`
+11. Paste into Targets (JSON):
+    ```json
+    [{"type": "VEN_NAME", "values": ["ven-2"]}]
+    ```
+12. Paste into Intervals (JSON):
+    ```json
+    [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [0.0]}]}]
+    ```
+13. Click **"Create"**
 
-Save the `id` as `PROGRAM_ID`.
+**VEN UI** (http://Pi4-Server:8214):
 
-**2. Create the EV charging event with event-level targets:**
-
-```bash
-curl -s -X POST http://Pi4-Server:8200/events \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programID": "'$PROGRAM_ID'",
-    "eventName": "manual-ev-charge-control",
-    "priority": 2,
-    "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}],
-    "intervals": [
-      {"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [0.0]}]}
-    ]
-  }' | python3 -m json.tool
-```
-
-**3. Verify VEN-2 received it and VEN-1 did not:**
-
-```bash
-curl -s http://Pi4-Server:8212/events | python3 -m json.tool
-# Should contain "manual-ev-charge-control"
-
-curl -s http://Pi4-Server:8211/events | python3 -m json.tool
-# Should NOT contain "manual-ev-charge-control"
-```
+14. Select **VEN2** in the VEN dropdown
+15. Navigate to **Events** — verify `manual-ev-charge-control` appears
+16. Select **VEN1** in the VEN dropdown
+17. Navigate to **Events** — verify `manual-ev-charge-control` does **NOT** appear
 
 ### What to Observe
 
@@ -443,54 +330,37 @@ A 500 kWh community battery receives a 3-phase dispatch:
 - **Priority 3** (planned dispatch)
 - **Targeted** to the VEN controlling the battery
 
-### Step-by-Step Replay
+### Step-by-Step Replay (Web UI)
 
-**1. Create a targeted program (VEN-1 represents the battery site):**
+**VTN UI** (http://Pi4-Server:8221):
 
-```bash
-curl -s -X POST http://Pi4-Server:8200/programs \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programName": "manual-uc6-battery",
-    "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}]
-  }' | python3 -m json.tool
-```
-
-Save the `id` as `PROGRAM_ID`.
-
-**2. Create the battery dispatch event with 3 intervals (charge / idle / discharge):**
-
-```bash
-curl -s -X POST http://Pi4-Server:8200/events \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programID": "'$PROGRAM_ID'",
-    "eventName": "manual-battery-dispatch",
-    "priority": 3,
-    "intervals": [
+1. Navigate to **Programs** page
+2. Click **"Create"**
+3. Enter Program Name: `manual-uc6-battery`
+4. Under **Enrolled VENs**, check **ven-1-name** only
+5. Click **"Create"**
+6. Navigate to **Events** page
+7. Click **"Create"**
+8. Enter Event Name: `manual-battery-dispatch`
+9. Select Program: `manual-uc6-battery`
+10. Enter Priority: `3`
+11. Paste into Intervals (JSON):
+    ```json
+    [
       {"id": 0, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [80.0]}]},
       {"id": 1, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [0.0]}]},
       {"id": 2, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [-50.0]}]}
     ]
-  }' | python3 -m json.tool
-```
+    ```
+12. Click **"Create"**
 
-**3. Verify VEN-1 received all 3 intervals:**
+**VEN UI** (http://Pi4-Server:8214):
 
-```bash
-curl -s http://Pi4-Server:8211/events | python3 -m json.tool
-# Should contain "manual-battery-dispatch" with 3 intervals
-# Values: 80.0 (charge), 0.0 (idle), -50.0 (discharge)
-```
-
-**4. Verify VEN-2 did NOT receive it:**
-
-```bash
-curl -s http://Pi4-Server:8212/events | python3 -m json.tool
-# Should NOT contain "manual-battery-dispatch"
-```
+13. Select **VEN1** in the VEN dropdown
+14. Navigate to **Events** — verify `manual-battery-dispatch` appears with 3 intervals
+15. Click the event row to inspect details — values should be 80.0 (charge), 0.0 (idle), -50.0 (discharge)
+16. Select **VEN2** in the VEN dropdown
+17. Navigate to **Events** — verify `manual-battery-dispatch` does **NOT** appear
 
 ### What to Observe
 
@@ -518,81 +388,40 @@ Before the summer demand response season begins, the utility sends a "heartbeat"
 - **Priority 5** (low — informational only)
 - **Report round-trip** is the key verification
 
-### Step-by-Step Replay
+### Step-by-Step Replay (Web UI)
 
-**1. Create an open program:**
+**VTN UI** (http://Pi4-Server:8221):
 
-```bash
-curl -s -X POST http://Pi4-Server:8200/programs \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programName": "manual-uc7-connectivity",
-    "targets": null
-  }' | python3 -m json.tool
-```
+1. Navigate to **Programs** page
+2. Click **"Create"**
+3. Enter Program Name: `manual-uc7-connectivity`
+4. Leave **all VEN checkboxes unchecked** (open program)
+5. Click **"Create"**
+6. Navigate to **Events** page
+7. Click **"Create"**
+8. Enter Event Name: `manual-heartbeat`
+9. Select Program: `manual-uc7-connectivity`
+10. Enter Priority: `5`
+11. Paste into Intervals (JSON):
+    ```json
+    [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [0]}]}]
+    ```
+12. Click **"Create"**
 
-Save the `id` as `PROGRAM_ID`.
+**VEN UI** (http://Pi4-Server:8214):
 
-**2. Create the heartbeat event:**
+13. Select **VEN1** in the VEN dropdown
+14. Navigate to **Events** — verify `manual-heartbeat` appears
+15. Navigate to **Reports** → click **"Submit Report"**
+16. Select Event: `manual-heartbeat` → click **"Suggest Example"** → click **"Submit"**
+17. Select **VEN2** in the VEN dropdown
+18. Navigate to **Events** — verify `manual-heartbeat` also appears
+19. Navigate to **Reports** → click **"Submit Report"**
+20. Select Event: `manual-heartbeat` → click **"Suggest Example"** → click **"Submit"**
 
-```bash
-curl -s -X POST http://Pi4-Server:8200/events \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programID": "'$PROGRAM_ID'",
-    "eventName": "manual-heartbeat",
-    "priority": 5,
-    "intervals": [
-      {"id": 0, "payloads": [{"type": "SIMPLE", "values": [0]}]}
-    ]
-  }' | python3 -m json.tool
-```
+**VTN UI** (http://Pi4-Server:8221):
 
-**3. Verify both VENs received it:**
-
-```bash
-curl -s http://Pi4-Server:8211/events | python3 -m json.tool
-curl -s http://Pi4-Server:8212/events | python3 -m json.tool
-# Both should contain "manual-heartbeat"
-```
-
-**4. Submit reports from both VENs to confirm connectivity:**
-
-```bash
-# Get the event ID
-EVENT_ID=$(curl -s http://Pi4-Server:8211/events \
-  | python3 -c "import sys,json; evts=json.load(sys.stdin); print(next(e['id'] for e in evts if e['eventName']=='manual-heartbeat'))")
-
-# VEN-1 report
-curl -s -X POST http://Pi4-Server:8211/reports \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programID": "'$PROGRAM_ID'",
-    "eventID": "'$EVENT_ID'",
-    "clientName": "ven-1",
-    "resources": []
-  }' | python3 -m json.tool
-
-# VEN-2 report
-curl -s -X POST http://Pi4-Server:8212/reports \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programID": "'$PROGRAM_ID'",
-    "eventID": "'$EVENT_ID'",
-    "clientName": "ven-2",
-    "resources": []
-  }' | python3 -m json.tool
-```
-
-**5. Verify both reports appear in VTN:**
-
-```bash
-curl -s http://Pi4-Server:8200/reports \
-  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
-# Should contain reports from both "ven-1" and "ven-2"
-```
+21. Navigate to **Reports** — verify reports from both `ven-1` and `ven-2` appear
 
 ### What to Observe
 
@@ -619,65 +448,47 @@ At 1 PM, the grid operator creates a peak shaving event for 4-6 PM. At 3 PM, a l
 - VENs detect cancellation when the event disappears from their poll results
 - The VEN must cleanly roll back any preparation it made for the event
 
-### Step-by-Step Replay
+### Step-by-Step Replay (Web UI)
 
-**1. Create a targeted program:**
+**VTN UI** (http://Pi4-Server:8221):
 
-```bash
-curl -s -X POST http://Pi4-Server:8200/programs \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programName": "manual-uc8-cancel",
-    "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}]
-  }' | python3 -m json.tool
-```
+1. Navigate to **Programs** page
+2. Click **"Create"**
+3. Enter Program Name: `manual-uc8-cancel`
+4. Under **Enrolled VENs**, check **ven-1-name** only
+5. Click **"Create"**
+6. Navigate to **Events** page
+7. Click **"Create"**
+8. Enter Event Name: `manual-cancel-test`
+9. Select Program: `manual-uc8-cancel`
+10. Enter Priority: `5`
+11. Paste into Intervals (JSON):
+    ```json
+    [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [1]}]}]
+    ```
+12. Click **"Create"**
 
-Save the `id` as `PROGRAM_ID`.
+**VEN UI** (http://Pi4-Server:8214):
 
-**2. Create an event:**
+13. Select **VEN1** in the VEN dropdown
+14. Navigate to **Events** — verify `manual-cancel-test` appears (wait up to 30s)
 
-```bash
-curl -s -X POST http://Pi4-Server:8200/events \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "programID": "'$PROGRAM_ID'",
-    "eventName": "manual-cancel-test",
-    "priority": 5,
-    "intervals": [
-      {"id": 0, "payloads": [{"type": "SIMPLE", "values": [1]}]}
-    ]
-  }' | python3 -m json.tool
-```
+**VTN UI** (http://Pi4-Server:8221):
 
-Save the returned `id` as `EVENT_ID`.
+15. Navigate to **Events** page
+16. Find `manual-cancel-test` in the table
+17. Click the **delete icon** (trash can) on that event row
+18. In the confirmation dialog, click **"Delete"**
 
-**3. Verify VEN-1 received the event (wait up to 30 seconds):**
+**VEN UI** (http://Pi4-Server:8214):
 
-```bash
-curl -s http://Pi4-Server:8211/events | python3 -m json.tool
-# Should contain "manual-cancel-test"
-```
-
-**4. Delete (cancel) the event:**
-
-```bash
-curl -s -X DELETE http://Pi4-Server:8200/events/$EVENT_ID \
-  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
-```
-
-**5. Verify VEN-1 no longer has the event (wait up to 30 seconds for next poll):**
-
-```bash
-curl -s http://Pi4-Server:8211/events | python3 -m json.tool
-# "manual-cancel-test" should be GONE
-```
+19. Select **VEN1** in the VEN dropdown (if not already selected)
+20. Navigate to **Events** — verify `manual-cancel-test` has **disappeared** (wait up to 30s for next poll)
 
 ### What to Observe
 
-- The event appears on VEN-1 after creation (step 3)
-- After deletion, the event vanishes from VEN-1's event list (step 5)
+- The event appears on VEN-1 after creation (step 14)
+- After deletion, the event vanishes from VEN-1's event list (step 20)
 - This is how OpenADR 3 handles cancellation — there is no "cancelled" status field
 - VENs must detect the absence of a previously-seen event and react accordingly
 
@@ -713,154 +524,150 @@ This executes 49 scenarios (348 steps) including all use cases via both API call
 
 ---
 
-## E2E Test Coverage Analysis
+## CLI Reference (curl commands)
 
-The automated test suite (`tests/features/use_cases.feature`) covers all 8 use cases with full coverage of every "What to test" criterion. The suite includes 13 scenarios (8 core + 5 extended) covering enrollment targeting, event creation, VEN reception, report submission, cancellation, event modification, overlapping events, and conflicting dispatch.
+<details>
+<summary>Click to expand curl commands for all use cases</summary>
 
-**Test results: 15 features, 49 scenarios, 348 steps — all passing (2m50s)**
+### Prerequisites
 
-### Coverage Matrix
-
-| UC | "What to test" | How It's Tested |
-|---|---|---|
-| **UC1** | Priority handling, event acknowledgment, correct timing | Priority 0 verified, payload type SIMPLE, VEN targeting, report round-trip |
-| **UC2** | Interval sequencing, unit interpretation, smooth recovery | 3 intervals with EXPORT_CAPACITY_LIMIT, interval count verified, VEN targeting, report |
-| **UC3** | Uniform interval handling, large interval counts, late updates | UC3: 3 intervals. UC3b: 24 hourly intervals. UC3c: price correction via PUT, VEN picks up new value |
-| **UC4** | Event lifecycle (far/near/active), event modification | UC4: scheduled event with intervalPeriod. UC4b: modify limit via PUT, VEN sees updated value |
-| **UC5** | Overlapping events, priority resolution, group membership | UC5: event-level targets. UC5b: two concurrent events with priority 2 and 4, both delivered |
-| **UC6** | Interval timing accuracy, conflicting state requests | UC6: 3-interval charge/discharge cycle. UC6b: simultaneous charge (+80) and discharge (-50) events |
-| **UC7** | Acknowledgment handling, reporting/telemetry coupling | Open program, both VENs receive, report round-trip |
-| **UC8** | VEN detects removal, clean rollback, state consistency | Event created, VEN receives, event deleted, VEN no longer shows it |
-
-### Extended Scenarios (implemented)
-
-#### UC3b - Day-ahead pricing with 24 hourly intervals
-
-Tests that the VTN can deliver a large event with 24 intervals (realistic hourly pricing curve) and both VENs receive all 24 intervals intact.
-
-#### UC3c - Price correction after initial publish
-
-Tests event modification: creates a pricing event, waits for VEN to receive it, then updates the event via PUT with a corrected price. Verifies the VEN picks up the new value on its next poll cycle.
-
-#### UC4b - Modify peak shaving limit mid-flight
-
-Tests that an active peak shaving event can be modified (e.g., changing the import capacity limit from 0 to 30 kW) and the VEN sees the updated value.
-
-#### UC5b - Overlapping EV events with different priorities
-
-Tests that two events under the same program (priority 2 and priority 4) are both delivered to the same VEN. Verifies both events arrive with correct priority values. (Priority resolution is VEN-local — the VTN delivers all events.)
-
-#### UC6b - Conflicting charge and discharge events
-
-Tests that two CHARGE_STATE_SETPOINT events — one requesting charge (+80) and one requesting discharge (-50) — are both delivered to the same VEN with correct payload values and priorities. (Conflict resolution is VEN-local.)
-
-### Implementation Details
-
-The extended scenarios required:
-- `vtn_put` helper in `api_client.py`
-- `_build_intervals` extended for 24-hour pricing curves
-- New step: create event with explicit value (`priority X and value Y`)
-- New step: update event via PUT (`I update event "X" with type "Y" and value Z`)
-- New step: poll for updated value (`I wait for VEN-1 event "X" to have payload value Y`)
-- New assertions: payload value check, VEN-2 priority check, event count by prefix
-
-All previously proposed gap scenarios from the feasibility analysis below have been implemented and are passing.
-
-### Original Feasibility Analysis
-
-The following analysis was written before implementation. It is preserved for reference.
-
-#### UC3 Gap: Large Interval Counts
-
-**What to add:** A scenario that creates an event with 24 intervals (hourly day-ahead pricing) and verifies the VEN receives all 24 with correct values.
-
-**Feasible?** Yes. The `_build_intervals` helper already supports variable counts. Just add a new step variant or extend the existing one to handle 24 intervals, then assert `len(intervals) == 24` on the VEN side.
-
-```gherkin
-Scenario: UC3b - Day-ahead pricing with 24 hourly intervals
-  Given I create an open program "uc3b-24h-pricing" and save its ID
-  When I create a UC event "uc3b-24h-price" with type "PRICE" priority 5 and 24 intervals
-  Then the response status is 201
-  When I wait for VEN-1 to show event "uc3b-24h-price"
-  Then the VEN-1 event "uc3b-24h-price" has 24 intervals
+```bash
+TOKEN=$(curl -s -X POST http://Pi4-Server:8200/auth/token \
+  -d "grant_type=client_credentials&client_id=any-business&client_secret=any-business" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 ```
 
-#### UC3 Gap: Late Update / Correction
+### UC1 — Emergency Load Shed
 
-**What to add:** A scenario that creates a pricing event, waits for VEN to receive it, then updates (PUT) the event with corrected prices, and verifies the VEN picks up the new values.
+```bash
+# Create targeted program
+curl -s -X POST http://Pi4-Server:8200/programs \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"programName": "manual-uc1-emergency", "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}]}' | python3 -m json.tool
 
-**Feasible?** Yes. Requires adding `vtn_put` to `api_client.py` (one-liner, same pattern as `vtn_post`) and a new step for updating events. The VEN poller already picks up changes on subsequent polls.
+# Save PROGRAM_ID from response, then create event
+curl -s -X POST http://Pi4-Server:8200/events \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-emergency-loadshed", "priority": 0, "intervals": [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [0]}]}]}' | python3 -m json.tool
 
-```gherkin
-Scenario: UC3c - Price correction after initial publish
-  Given I create an open program "uc3c-correction" and save its ID
-  When I create a UC event "uc3c-orig-price" with type "PRICE" priority 5 and 1 interval
-  And I wait for VEN-1 to show event "uc3c-orig-price"
-  When I update event "uc3c-orig-price" with new PRICE value 0.99
-  And I wait for VEN-1 event "uc3c-orig-price" to have PRICE value 0.99
-  Then the VEN-1 event "uc3c-orig-price" has payload value 0.99
+# Verify VEN-1 received it
+curl -s http://Pi4-Server:8211/events | python3 -m json.tool
+
+# Verify VEN-2 did NOT receive it
+curl -s http://Pi4-Server:8212/events | python3 -m json.tool
+
+# Submit report from VEN-1
+EVENT_ID=$(curl -s http://Pi4-Server:8211/events | python3 -c "import sys,json; evts=json.load(sys.stdin); print(next(e['id'] for e in evts if e['eventName']=='manual-emergency-loadshed'))")
+curl -s -X POST http://Pi4-Server:8211/reports \
+  -H "Content-Type: application/json" \
+  -d '{"programID": "'$PROGRAM_ID'", "eventID": "'$EVENT_ID'", "clientName": "ven-1", "resources": []}' | python3 -m json.tool
+
+# Verify report in VTN
+curl -s http://Pi4-Server:8200/reports -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
 ```
 
-#### UC4 Gap: Event Modification
+### UC2 — Renewable Export Limitation
 
-**What to add:** A scenario that creates a peak shaving event, waits for VEN to receive it, then modifies the event (e.g., changes the import capacity limit from 50 to 30), and verifies the VEN sees the updated value.
+```bash
+curl -s -X POST http://Pi4-Server:8200/programs \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programName": "manual-uc2-export", "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}]}' | python3 -m json.tool
 
-**Feasible?** Yes. Same `vtn_put` helper as UC3. The VTN supports `PUT /events/{id}` for updates.
-
-```gherkin
-Scenario: UC4b - Modify peak shaving limit mid-flight
-  Given I create a program "uc4b-modify" targeting "ven-1-name" and save its ID
-  When I create a UC event "uc4b-peak" with type "IMPORT_CAPACITY_LIMIT" priority 3 and 1 interval
-  And I wait for VEN-1 to show event "uc4b-peak"
-  When I update event "uc4b-peak" with new IMPORT_CAPACITY_LIMIT value 30.0
-  And I wait for VEN-1 event "uc4b-peak" to have payload value 30.0
-  Then the VEN-1 event "uc4b-peak" has payload value 30.0
+curl -s -X POST http://Pi4-Server:8200/events \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-export-limit", "priority": 5, "intervals": [{"id": 0, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]}, {"id": 1, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [50.0]}]}, {"id": 2, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]}]}' | python3 -m json.tool
 ```
 
-#### UC5 Gap: Overlapping Events and Priority Resolution
+### UC3 — Dynamic Price Signal
 
-**What to add:** A scenario that creates two events under the same program for the same VEN — one with priority 2 and one with priority 4 — and verifies the VEN sees both. Priority resolution is a VEN-local decision (the VTN delivers all events; the VEN decides which to act on), so the test verifies that both events arrive and have the correct priorities.
+```bash
+curl -s -X POST http://Pi4-Server:8200/programs \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programName": "manual-uc3-pricing", "targets": null}' | python3 -m json.tool
 
-**Feasible?** Yes. No new helpers needed — just create two events in sequence and assert both are visible with correct priorities.
-
-```gherkin
-Scenario: UC5b - Overlapping EV events with different priorities
-  Given I create a program "uc5b-overlap" targeting "ven-2" and save its ID
-  When I create a UC event "uc5b-high" with type "IMPORT_CAPACITY_LIMIT" priority 2 and 1 interval
-  And I create a UC event "uc5b-low" with type "IMPORT_CAPACITY_LIMIT" priority 4 and 1 interval
-  And I wait for VEN-2 to show event "uc5b-high"
-  And I wait for VEN-2 to show event "uc5b-low"
-  Then the VEN-2 event "uc5b-high" has priority 2
-  And the VEN-2 event "uc5b-low" has priority 4
+curl -s -X POST http://Pi4-Server:8200/events \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-tou-pricing", "priority": 5, "intervals": [{"id": 0, "payloads": [{"type": "PRICE", "values": [0.12]}]}, {"id": 1, "payloads": [{"type": "PRICE", "values": [0.35]}]}, {"id": 2, "payloads": [{"type": "PRICE", "values": [0.15]}]}]}' | python3 -m json.tool
 ```
 
-Note: True priority *resolution* (which event the VEN acts on) depends on VEN-side logic. The E2E test can only verify both events are delivered with correct priority values. This is a valid test because OpenADR leaves priority handling to the VEN.
+### UC4 — Planned Peak Shaving
 
-#### UC6 Gap: Conflicting State Requests
+```bash
+curl -s -X POST http://Pi4-Server:8200/programs \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programName": "manual-uc4-peak", "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}, {"type": "VEN_NAME", "values": ["ven-2"]}]}' | python3 -m json.tool
 
-**What to add:** A scenario that creates two events for the same VEN — one requesting charge and one requesting discharge — and verifies both arrive. Like priority resolution, conflict handling is a VEN-local decision.
-
-**Feasible?** Yes. Same pattern as UC5b.
-
-```gherkin
-Scenario: UC6b - Conflicting charge/discharge events
-  Given I create a program "uc6b-conflict" targeting "ven-1-name" and save its ID
-  When I create a UC event "uc6b-charge" with type "CHARGE_STATE_SETPOINT" priority 3 and 1 interval
-  And I create a UC event "uc6b-discharge" with type "CHARGE_STATE_SETPOINT" priority 2 and 1 interval
-  And I wait for VEN-1 to show event "uc6b-charge"
-  And I wait for VEN-1 to show event "uc6b-discharge"
-  Then VEN-1 has 2 events matching prefix "uc6b-"
+curl -s -X POST http://Pi4-Server:8200/events \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-peak-shave", "priority": 3, "intervalPeriod": {"start": "2026-03-01T14:00:00Z", "duration": "PT4H"}, "intervals": [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [50.0]}]}]}' | python3 -m json.tool
 ```
 
-### Implementation Summary
+### UC5 — EV Charging Management
 
-All gaps were implemented and are passing. Files modified:
+```bash
+curl -s -X POST http://Pi4-Server:8200/programs \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programName": "manual-uc5-ev", "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}]}' | python3 -m json.tool
 
-| File | Changes |
-|---|---|
-| `tests/features/helpers/api_client.py` | Added `vtn_put` helper |
-| `tests/features/steps/use_case_steps.py` | Extended `_build_intervals` for 24h pricing, added event update step, poll-for-value step, create-with-value step, VEN-2 priority assertion, event count by prefix |
-| `tests/features/use_cases.feature` | Added 5 new scenarios (UC3b, UC3c, UC4b, UC5b, UC6b) |
+curl -s -X POST http://Pi4-Server:8200/events \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-ev-charge-control", "priority": 2, "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}], "intervals": [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [0.0]}]}]}' | python3 -m json.tool
+```
+
+### UC6 — Battery Dispatch Window
+
+```bash
+curl -s -X POST http://Pi4-Server:8200/programs \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programName": "manual-uc6-battery", "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}]}' | python3 -m json.tool
+
+curl -s -X POST http://Pi4-Server:8200/events \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-battery-dispatch", "priority": 3, "intervals": [{"id": 0, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [80.0]}]}, {"id": 1, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [0.0]}]}, {"id": 2, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [-50.0]}]}]}' | python3 -m json.tool
+```
+
+### UC7 — Connectivity Check
+
+```bash
+curl -s -X POST http://Pi4-Server:8200/programs \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programName": "manual-uc7-connectivity", "targets": null}' | python3 -m json.tool
+
+curl -s -X POST http://Pi4-Server:8200/events \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-heartbeat", "priority": 5, "intervals": [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [0]}]}]}' | python3 -m json.tool
+
+# Submit reports from VENs
+EVENT_ID=$(curl -s http://Pi4-Server:8211/events | python3 -c "import sys,json; evts=json.load(sys.stdin); print(next(e['id'] for e in evts if e['eventName']=='manual-heartbeat'))")
+
+curl -s -X POST http://Pi4-Server:8211/reports -H "Content-Type: application/json" \
+  -d '{"programID": "'$PROGRAM_ID'", "eventID": "'$EVENT_ID'", "clientName": "ven-1", "resources": []}' | python3 -m json.tool
+
+curl -s -X POST http://Pi4-Server:8212/reports -H "Content-Type: application/json" \
+  -d '{"programID": "'$PROGRAM_ID'", "eventID": "'$EVENT_ID'", "clientName": "ven-2", "resources": []}' | python3 -m json.tool
+```
+
+### UC8 — Event Cancellation
+
+```bash
+curl -s -X POST http://Pi4-Server:8200/programs \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programName": "manual-uc8-cancel", "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}]}' | python3 -m json.tool
+
+curl -s -X POST http://Pi4-Server:8200/events \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-cancel-test", "priority": 5, "intervals": [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [1]}]}]}' | python3 -m json.tool
+
+# Save EVENT_ID, verify VEN-1 received it, then delete
+curl -s -X DELETE http://Pi4-Server:8200/events/$EVENT_ID -H "Authorization: Bearer $TOKEN"
+
+# Verify VEN-1 no longer has the event
+curl -s http://Pi4-Server:8211/events | python3 -m json.tool
+```
+
+</details>
 
 ---
 
@@ -888,7 +695,7 @@ All gaps were implemented and are passing. Files modified:
 
 | Targeting | Visibility | Example |
 |---|---|---|
-| `"targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}]` | Only VEN-1 | UC1, UC6 |
-| `"targets": [{"type":"VEN_NAME","values":["ven-1-name"]},{"type":"VEN_NAME","values":["ven-2"]}]` | VEN-1 and VEN-2 | UC4 |
-| `"targets": null` | All VENs (open) | UC3, UC7 |
-| Event-level `"targets"` | Further restrict within program | UC5 |
+| Check specific VEN checkboxes | Only those VENs | UC1, UC6 |
+| Check multiple VEN checkboxes | Multiple VENs | UC4 |
+| Leave all checkboxes unchecked | All VENs (open) | UC3, UC7 |
+| Event-level Targets (JSON) | Further restrict within program | UC5 |
