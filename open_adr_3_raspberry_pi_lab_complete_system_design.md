@@ -459,17 +459,9 @@ Pi 4GB supports ~5 VENs comfortably.
 
 ---
 
-# 17. Reverse Proxy (Optional Enhancement)
+# 17. TLS (Optional Enhancement)
 
-Single entrypoint:
-
-| Path | Target |
-|------|---------|
-| /vtn | VTN UI |
-| /ven/1 | VEN1 |
-| /ven/2 | VEN2 |
-
-Simplifies access + TLS.
+Optional TLS termination via reverse proxy (Caddy / Traefik) for encrypted access to individual services.
 
 ---
 
