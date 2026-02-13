@@ -1404,6 +1404,32 @@ New `ven_simulator.feature` with 6 scenarios:
 | Tests | `ven_simulator.feature`, `sim_steps.py` | `docker-compose.test.yml` |
 | Docker | — | `VEN/docker-compose.yml`, `tests/docker-compose.test.yml` |
 
+### Deployment & Verification
+
+Built and deployed to Pi4-Server. VEN build with new simulator/reactor modules: ~11 min (first build with new deps). All 3 VENs came up healthy with distinct behavior matching their profiles:
+
+| VEN | Profile | Observed Behavior |
+|-----|---------|-------------------|
+| ven-1 (8211) | EV+PV, ramp | Net import ~3.7kW, EV charging at 7.4kW, PV generating |
+| ven-2 (8212) | Heater+PV, delayed | Net export ~1.4kW, large PV output exceeding heater load |
+| ven-3 (8213) | Full mix, partial | Net import ~7.7kW, all devices active, 70% compliance |
+
+The reactor immediately detected existing seeded events and began FSM transitions.
+
+### Test Results
+
+**16 features, 53 scenarios, 363 steps — all passing (3m18s)**
+
+The 6 skipped scenarios are pre-existing `@upstream_pending` (2) and `@resilience` (4) tags.
+
+### Issues Encountered
+
+1. **Compilation errors (3)**: First push had `winner.value` instead of `winner.payload_value` in `arbitration.rs`, and `defaults` moved value in `reactor/mod.rs` match arms needed `.clone()`. Fixed in a follow-up commit.
+
+2. **Test race condition**: `ven_simulator.feature:26` ("Sensor values come from simulator") failed because `ven_sensors.feature` runs earlier (alphabetical order) and its last scenario POSTs partial sensor data with `raw: {}` (no source field). If the 1-second tick loop hadn't fired yet, the GET returned stale data. Fixed by adding a 3-second wait before the sensor source assertion.
+
+3. **Stale test DB**: First test run had 33 failures due to leftover data from a previous test run. Fixed by running `docker compose down -v` to remove the ephemeral DB volume before re-running.
+
 ### Deferred (not in scope)
 
 - EV charging taper curve near 100% SOC
