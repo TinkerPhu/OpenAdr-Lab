@@ -1,5 +1,8 @@
 mod config;
 mod models;
+mod profile;
+mod reactor;
+mod simulator;
 mod state;
 mod vtn;
 
@@ -15,12 +18,16 @@ use config::Config;
 use metrics::counter;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use models::{SensorInput, SensorSnapshot};
+use profile::Profile;
+use reactor::Reactor;
 use serde::Deserialize;
+use simulator::SimState;
 use state::AppState;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 use vtn::VtnClient;
 
@@ -55,6 +62,15 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
+
+    // Load simulator profile
+    let profile = if let Some(ref path) = cfg.profile_path {
+        Profile::load(path).await
+    } else {
+        warn!("PROFILE_PATH not set, using default profile");
+        Profile::default()
+    };
+    let profile = Arc::new(profile);
 
     let vtn = VtnClient::new(cfg.vtn_base_url.clone(), cfg.client_id.clone(), cfg.client_secret.clone(), cfg.ven_name.clone());
 
@@ -130,25 +146,84 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Fake sensor sampler (replace with MQTT/Modbus/etc.)
+    // Simulator + Reactor tick loop (replaces fake sensor)
+    let sim_state = {
+        // Try to load persisted sim state
+        let data_dir = cfg.persist_path.as_deref()
+            .and_then(|p| std::path::Path::new(p).parent())
+            .and_then(|p| p.to_str())
+            .unwrap_or("/data");
+
+        let loaded = simulator::persist::load(data_dir).await;
+        let sim = loaded.unwrap_or_else(|| SimState::from_profile(&profile));
+        Arc::new(Mutex::new(sim))
+    };
+
+    let reactor_state = Arc::new(Mutex::new(Reactor::new()));
+
     {
         let state = state.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
-            loop {
-                interval.tick().await;
+        let sim = sim_state.clone();
+        let reactor = reactor_state.clone();
+        let profile = profile.clone();
+        let tick_s = profile.simulator.tick_s;
+        let persist_every_s = profile.simulator.persist_every_s;
+        let data_dir = cfg.persist_path.as_deref()
+            .and_then(|p| std::path::Path::new(p).parent())
+            .and_then(|p| p.to_str())
+            .unwrap_or("/data")
+            .to_string();
 
-                // Example: fake power value
-                let mut snap = state.sensor().await;
-                snap.ts = Utc::now();
-                snap.power_w = Some((snap.ts.timestamp() % 100) as f64); // placeholder
-                snap.raw = serde_json::json!({"source": "fake"});
-                state.update_sensor(snap).await;
+        tokio::spawn(async move {
+            let mut tick_interval = tokio::time::interval(std::time::Duration::from_secs(tick_s));
+            let mut persist_counter: u64 = 0;
+            let persist_every_ticks = if tick_s > 0 { persist_every_s / tick_s } else { 15 };
+
+            loop {
+                tick_interval.tick().await;
+                let now = Utc::now();
+                let dt_s = tick_s as f64;
+
+                // Get current events
+                let events = state.events().await;
+
+                // Reactor: evaluate events → setpoints
+                let setpoints = {
+                    let mut sim_guard = sim.lock().await;
+                    let mut reactor_guard = reactor.lock().await;
+                    let setpoints = reactor_guard.evaluate(&events, &sim_guard, &profile, now, dt_s);
+
+                    // Simulator: apply setpoints → update device states
+                    sim_guard.tick(dt_s, &setpoints, now);
+
+                    // Update sensor snapshot (backward compat)
+                    let sensor = sim_guard.to_sensor_snapshot();
+                    state.update_sensor(sensor).await;
+
+                    // Update sim + trace in app state
+                    let sim_snap = sim_guard.to_sim_snapshot();
+                    let trace = reactor_guard.trace_entries();
+                    state.update_sim(sim_snap, trace).await;
+
+                    setpoints
+                };
+
+                let _ = setpoints; // used above, suppress warning
+
+                // Periodic persist
+                persist_counter += 1;
+                if persist_counter >= persist_every_ticks {
+                    persist_counter = 0;
+                    let sim_guard = sim.lock().await;
+                    if let Err(e) = simulator::persist::save(&sim_guard, &data_dir).await {
+                        error!("sim persist failed: {e:#}");
+                    }
+                }
             }
         });
     }
 
-    // Optional persistence task
+    // Optional persistence task for main app state
     if let Some(path) = cfg.persist_path.clone() {
         let state = state.clone();
         tokio::spawn(async move {
@@ -186,13 +261,37 @@ async fn main() -> anyhow::Result<()> {
         .route("/sensors", get(get_sensors).post(post_sensors))
         .route("/reports", get(get_reports).post(post_reports))
         .route("/reports/:id", put(put_report))
+        .route("/sim", get(get_sim))
+        .route("/trace", get(get_trace))
         .route("/metrics", get(get_metrics))
         .with_state(ctx)
         .layer(TraceLayer::new_for_http())
         .layer(cors);
 
-    let listener = tokio::net::TcpListener::bind(cfg.listen_addr).await?;
-    axum::serve(listener, app).await?;
+    // Graceful shutdown: persist sim state on SIGTERM
+    let sim_for_shutdown = sim_state.clone();
+    let data_dir_for_shutdown = cfg.persist_path.as_deref()
+        .and_then(|p| std::path::Path::new(p).parent())
+        .and_then(|p| p.to_str())
+        .unwrap_or("/data")
+        .to_string();
+
+    let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;
+    info!("listening on {}", cfg.listen_addr);
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            let _ = tokio::signal::ctrl_c().await;
+            info!("shutdown signal received, persisting sim state");
+            let sim_guard = sim_for_shutdown.lock().await;
+            if let Err(e) = simulator::persist::save(&sim_guard, &data_dir_for_shutdown).await {
+                error!("shutdown persist failed: {e:#}");
+            } else {
+                info!("sim state persisted on shutdown");
+            }
+        })
+        .await?;
+
     Ok(())
 }
 
@@ -288,4 +387,32 @@ async fn put_report(
                 .into_response()
         }
     }
+}
+
+async fn get_sim(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    match ctx.state.sim().await {
+        Some(sim) => Json(serde_json::to_value(sim).unwrap_or_default()).into_response(),
+        None => (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "simulator not yet initialized"})),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct TraceQuery {
+    limit: Option<usize>,
+}
+
+async fn get_trace(
+    State(ctx): State<AppCtx>,
+    Query(q): Query<TraceQuery>,
+) -> impl IntoResponse {
+    let mut trace = ctx.state.trace().await;
+    let limit = q.limit.unwrap_or(50);
+    // Return newest first
+    trace.reverse();
+    trace.truncate(limit);
+    Json(trace)
 }

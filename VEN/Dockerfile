@@ -31,6 +31,9 @@ RUN chmod 755 /app/ven-app
 RUN mkdir -p /data && chown nonroot:nonroot /data
 VOLUME ["/data"]
 
+# Config mount point for profile YAML
+RUN mkdir -p /config && chown nonroot:nonroot /config
+
 EXPOSE 8080
 USER $user
 

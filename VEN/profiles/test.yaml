@@ -1,0 +1,24 @@
+# Test profile: All devices, instant compliance, fast persist
+devices:
+  ev:
+    max_charge_kw: 7.0
+    initial_soc: 0.50
+    battery_kwh: 50.0
+  heater:
+    max_kw: 3.0
+    temp_initial_c: 20.0
+    temp_min_c: 18.0
+    temp_max_c: 23.0
+  pv:
+    rated_kw: 5.0
+  base_load_w: 500
+
+reactor:
+  strategy: instant
+  compliance: 1.0
+  price_low: 0.10
+  price_high: 0.35
+
+simulator:
+  tick_s: 1
+  persist_every_s: 10
