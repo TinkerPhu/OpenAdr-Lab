@@ -2,7 +2,8 @@
 
 import time
 from behave import when, then
-from features.helpers.api_client import ven_get
+from features.helpers.api_client import ven_get, VEN_BASE_URL
+import requests
 
 
 @when("I query VEN-1 simulator state")
@@ -75,3 +76,35 @@ def step_trace_contains_mode(context, mode):
         f"No trace entry with mode '{mode}'. "
         f"Modes found: {[e.get('mode') for e in entries[:10]]}"
     )
+
+
+@then('an auto-report for event "{event_name}" exists on VEN-1')
+def step_auto_report_exists(context, event_name):
+    # Find the event ID from VEN-1's event list
+    events = requests.get(f"{VEN_BASE_URL}/events", timeout=10).json()
+    event = next((e for e in events if e.get("eventName") == event_name), None)
+    assert event is not None, f"Event '{event_name}' not found on VEN-1"
+    event_id = event["id"]
+
+    expected_prefix = f"auto-ven-1-{event_id}"
+
+    # Check VEN-1's reports for a matching auto-report
+    reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=10).json()
+    matching = [
+        r for r in reports
+        if r.get("reportName", "").startswith("auto-ven-1-")
+        and r.get("eventID") == event_id
+    ]
+    assert len(matching) > 0, (
+        f"No auto-report found for event '{event_name}' (id={event_id}). "
+        f"Report names: {[r.get('reportName') for r in reports[:10]]}"
+    )
+
+    # Verify report has USAGE payload with numeric value
+    report = matching[0]
+    resources = report.get("resources", [])
+    assert len(resources) > 0, "Auto-report has no resources"
+    payloads = resources[0].get("intervals", [{}])[0].get("payloads", [])
+    types = [p.get("type") for p in payloads]
+    assert "USAGE" in types, f"Expected USAGE payload, got types: {types}"
+    assert "OPERATING_STATE" in types, f"Expected OPERATING_STATE payload, got types: {types}"

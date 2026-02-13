@@ -122,6 +122,8 @@ pub struct SimulatorConfig {
     pub tick_s: u64,
     #[serde(default = "default_persist_every")]
     pub persist_every_s: u64,
+    #[serde(default = "default_report_interval")]
+    pub report_interval_s: u64,
 }
 
 impl Default for SimulatorConfig {
@@ -129,6 +131,7 @@ impl Default for SimulatorConfig {
         Self {
             tick_s: default_tick(),
             persist_every_s: default_persist_every(),
+            report_interval_s: default_report_interval(),
         }
     }
 }
@@ -138,6 +141,9 @@ fn default_tick() -> u64 {
 }
 fn default_persist_every() -> u64 {
     15
+}
+fn default_report_interval() -> u64 {
+    60
 }
 
 impl Profile {
