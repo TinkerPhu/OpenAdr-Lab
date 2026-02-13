@@ -1,4 +1,6 @@
 use crate::models::SensorSnapshot;
+use crate::reactor::trace::TraceEntry;
+use crate::simulator::SimSnapshot;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -14,6 +16,10 @@ pub struct InnerState {
     pub events: Vec<serde_json::Value>,
     pub reports: Vec<serde_json::Value>,
     pub sensor: SensorSnapshot,
+    #[serde(skip)]
+    pub sim: Option<SimSnapshot>,
+    #[serde(skip)]
+    pub trace: Vec<TraceEntry>,
 }
 
 impl AppState {
@@ -24,6 +30,8 @@ impl AppState {
                 events: vec![],
                 reports: vec![],
                 sensor: SensorSnapshot::empty_now(),
+                sim: None,
+                trace: vec![],
             })),
         }
     }
@@ -33,7 +41,6 @@ impl AppState {
     }
 
     pub async fn set_events(&self, mut events: Vec<serde_json::Value>, max_keep: usize) {
-        // Keep newest first (assume poller provides newest first; enforce anyway)
         events.truncate(max_keep);
         self.inner.write().await.events = events;
     }
@@ -44,6 +51,12 @@ impl AppState {
 
     pub async fn update_sensor(&self, sensor: SensorSnapshot) {
         self.inner.write().await.sensor = sensor;
+    }
+
+    pub async fn update_sim(&self, sim: SimSnapshot, trace: Vec<TraceEntry>) {
+        let mut inner = self.inner.write().await;
+        inner.sim = Some(sim);
+        inner.trace = trace;
     }
 
     pub async fn snapshot(&self) -> InnerState {
@@ -66,6 +79,14 @@ impl AppState {
         self.inner.read().await.sensor.clone()
     }
 
+    pub async fn sim(&self) -> Option<SimSnapshot> {
+        self.inner.read().await.sim.clone()
+    }
+
+    pub async fn trace(&self) -> Vec<TraceEntry> {
+        self.inner.read().await.trace.clone()
+    }
+
     pub async fn load_from_json(&self, json: &str) -> anyhow::Result<()> {
         let parsed: InnerState = serde_json::from_str(json)?;
         *self.inner.write().await = parsed;
@@ -77,7 +98,6 @@ impl AppState {
     }
 }
 
-// Required because we clone InnerState in snapshot()
 impl Clone for InnerState {
     fn clone(&self) -> Self {
         Self {
@@ -85,6 +105,8 @@ impl Clone for InnerState {
             events: self.events.clone(),
             reports: self.reports.clone(),
             sensor: self.sensor.clone(),
+            sim: self.sim.clone(),
+            trace: self.trace.clone(),
         }
     }
 }

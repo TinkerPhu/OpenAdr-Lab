@@ -11,6 +11,7 @@ pub struct Config {
     pub poll_programs_secs: u64,
     pub poll_reports_secs: u64,
     pub persist_path: Option<String>,
+    pub profile_path: Option<String>,
 }
 
 impl Config {
@@ -37,6 +38,7 @@ impl Config {
             .unwrap_or(60);
 
         let persist_path = std::env::var("PERSIST_PATH").ok();
+        let profile_path = std::env::var("PROFILE_PATH").ok();
 
         Ok(Self {
             listen_addr,
@@ -48,6 +50,7 @@ impl Config {
             poll_programs_secs,
             poll_reports_secs,
             persist_path,
+            profile_path,
         })
     }
 }

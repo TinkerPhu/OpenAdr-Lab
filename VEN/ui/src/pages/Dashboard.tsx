@@ -1,5 +1,16 @@
-import { Grid, Paper, Stack, Typography } from "@mui/material";
-import { useHealth, usePrograms, useEvents, useSensor, useReports } from "../api/hooks";
+import { Chip, Grid, Paper, Stack, Typography } from "@mui/material";
+import { useHealth, usePrograms, useEvents, useSensor, useReports, useSim } from "../api/hooks";
+
+function fmtNum(v: number | undefined | null, decimals = 1): string {
+  if (v == null) return "—";
+  return v.toFixed(decimals);
+}
+
+function ModeBadge({ mode }: { mode?: string }) {
+  if (!mode || mode === "IDLE") return <Chip label="IDLE" size="small" />;
+  const color = mode === "EXPORT_CAP" ? "warning" : mode === "IMPORT_CAP" ? "info" : mode === "PRICE" ? "secondary" : "default";
+  return <Chip label={mode} size="small" color={color} />;
+}
 
 export function DashboardPage() {
   const health = useHealth();
@@ -7,6 +18,7 @@ export function DashboardPage() {
   const events = useEvents();
   const sensor = useSensor();
   const reports = useReports();
+  const sim = useSim();
 
   const healthStatus = health.isError ? "offline" : health.data ? "ok" : "unknown";
 
@@ -75,6 +87,78 @@ export function DashboardPage() {
               Voltage (V): {sensor.data?.voltage_v ?? "—"}
             </Typography>
           </Stack>
+        </Paper>
+      </Grid>
+
+      {/* Simulation card */}
+      <Grid item xs={12} md={6}>
+        <Paper sx={{ p: 2 }} data-testid="dash-sim-card">
+          <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+            <Typography variant="h6">Simulation</Typography>
+            {sim.data && <ModeBadge mode={sim.data.pv ? "active" : undefined} />}
+          </Stack>
+          {sim.isError ? (
+            <Typography color="text.secondary">Simulator not available</Typography>
+          ) : sim.data ? (
+            <Grid container spacing={1}>
+              <Grid item xs={6}>
+                <Stack spacing={0.5}>
+                  <Typography variant="subtitle2">Power</Typography>
+                  <Typography data-testid="sim-net-power">
+                    Net: {fmtNum(sim.data.net_power_w, 0)} W
+                  </Typography>
+                  <Typography data-testid="sim-import">
+                    Import: {fmtNum(sim.data.import_w, 0)} W
+                  </Typography>
+                  <Typography data-testid="sim-export">
+                    Export: {fmtNum(sim.data.export_w, 0)} W
+                  </Typography>
+                </Stack>
+              </Grid>
+              <Grid item xs={6}>
+                <Stack spacing={0.5}>
+                  <Typography variant="subtitle2">Energy</Typography>
+                  <Typography data-testid="sim-import-kwh">
+                    Import: {fmtNum(sim.data.import_kwh, 3)} kWh
+                  </Typography>
+                  <Typography data-testid="sim-export-kwh">
+                    Export: {fmtNum(sim.data.export_kwh, 3)} kWh
+                  </Typography>
+                </Stack>
+              </Grid>
+              {sim.data.ev && (
+                <Grid item xs={4}>
+                  <Stack spacing={0.5}>
+                    <Typography variant="subtitle2">EV Charger</Typography>
+                    <Typography>SOC: {(sim.data.ev.soc * 100).toFixed(1)}%</Typography>
+                    <Typography>Power: {fmtNum(sim.data.ev.current_kw)} kW</Typography>
+                    <Typography>Plugged: {sim.data.ev.plugged ? "Yes" : "No"}</Typography>
+                  </Stack>
+                </Grid>
+              )}
+              {sim.data.heater && (
+                <Grid item xs={4}>
+                  <Stack spacing={0.5}>
+                    <Typography variant="subtitle2">Heater</Typography>
+                    <Typography>Temp: {fmtNum(sim.data.heater.temp_c)}°C</Typography>
+                    <Typography>Power: {fmtNum(sim.data.heater.current_kw)} kW</Typography>
+                  </Stack>
+                </Grid>
+              )}
+              {sim.data.pv && (
+                <Grid item xs={4}>
+                  <Stack spacing={0.5}>
+                    <Typography variant="subtitle2">PV Inverter</Typography>
+                    <Typography>Output: {fmtNum(sim.data.pv.current_kw)} kW</Typography>
+                    <Typography>Irradiance: {(sim.data.pv.irradiance * 100).toFixed(0)}%</Typography>
+                    <Typography>Curtailment: {(sim.data.pv.curtailment * 100).toFixed(0)}%</Typography>
+                  </Stack>
+                </Grid>
+              )}
+            </Grid>
+          ) : (
+            <Typography color="text.secondary">Loading...</Typography>
+          )}
         </Paper>
       </Grid>
     </Grid>

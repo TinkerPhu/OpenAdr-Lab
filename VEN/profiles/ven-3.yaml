@@ -1,0 +1,25 @@
+# VEN-3: Full mix (EV + Heater + PV, partial compliance)
+devices:
+  ev:
+    max_charge_kw: 11.0
+    initial_soc: 0.30
+    battery_kwh: 75.0
+  heater:
+    max_kw: 3.0
+    temp_initial_c: 21.0
+    temp_min_c: 18.0
+    temp_max_c: 22.0
+  pv:
+    rated_kw: 6.0
+  base_load_w: 800
+
+reactor:
+  strategy: partial
+  compliance: 0.7
+  ramp_duration_s: 180
+  price_low: 0.12
+  price_high: 0.40
+
+simulator:
+  tick_s: 1
+  persist_every_s: 15

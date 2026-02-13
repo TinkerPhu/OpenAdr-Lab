@@ -1,4 +1,4 @@
-import type { VtnEvent, Program, Report, SensorSnapshot } from "./types";
+import type { VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry } from "./types";
 
 export class VenApi {
   constructor(public baseUrl: string) {}
@@ -69,6 +69,18 @@ export class VenApi {
   async updateReport(id: string, payload: unknown): Promise<Report> {
     const r = await this.jsonReq("PUT", `/reports/${id}`, payload);
     if (!r.ok) throw new Error(`update report ${r.status}`);
+    return r.json();
+  }
+
+  async sim(): Promise<SimSnapshot> {
+    const r = await this.getReq("/sim");
+    if (!r.ok) throw new Error(`sim ${r.status}`);
+    return r.json();
+  }
+
+  async trace(limit = 50): Promise<TraceEntry[]> {
+    const r = await this.getReq(`/trace?limit=${limit}`);
+    if (!r.ok) throw new Error(`trace ${r.status}`);
     return r.json();
   }
 

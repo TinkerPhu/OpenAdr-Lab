@@ -81,6 +81,24 @@ export function useUpdateReport() {
   });
 }
 
+export function useSim() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["sim", api.baseUrl],
+    queryFn: () => api.sim(),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useTrace() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["trace", api.baseUrl],
+    queryFn: () => api.trace(),
+    refetchInterval: 10_000,
+  });
+}
+
 export function useMetrics() {
   const { api } = useVenContext();
   return useQuery({
