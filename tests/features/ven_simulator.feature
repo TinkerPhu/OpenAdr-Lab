@@ -24,7 +24,8 @@ Feature: VEN Simulator & Reactor
     And each trace entry has fields "ts,mode,fsm_state,reason"
 
   Scenario: Sensor values come from simulator
-    When I GET the VEN sensor snapshot
+    When I wait 3 seconds for the reactor
+    And I GET the VEN sensor snapshot
     Then the sensor raw source is "simulator"
 
   Scenario: Export capacity event triggers reactor response
