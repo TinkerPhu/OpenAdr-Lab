@@ -22,5 +22,8 @@ metrics-exporter-prometheus = "0.16"
 # Optional: if you want persistence to disk
 tokio-util = "0.7"
 
+serde_yaml = "0.9"
+rand = "0.8"
+
 # If you decide to use the Rust VEN library:
 # openleadr-client = "0.1"   # check repo/docs for exact version you want

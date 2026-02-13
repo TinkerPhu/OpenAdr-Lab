@@ -1,0 +1,21 @@
+# VEN-1: Residential prosumer (EV + PV, ramp strategy)
+devices:
+  ev:
+    max_charge_kw: 7.4
+    initial_soc: 0.40
+    battery_kwh: 60.0
+    soc_target: 0.80
+  pv:
+    rated_kw: 8.0
+  base_load_w: 500
+
+reactor:
+  strategy: ramp
+  ramp_duration_s: 300
+  compliance: 1.0
+  price_low: 0.10
+  price_high: 0.35
+
+simulator:
+  tick_s: 1
+  persist_every_s: 15

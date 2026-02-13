@@ -32,9 +32,11 @@ services:
       POLL_EVENTS_SECS: "30"
       POLL_PROGRAMS_SECS: "300"
       PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
     volumes:
       - ./data/ven-1:/data
+      - ./profiles/ven-1.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -60,9 +62,11 @@ services:
       POLL_EVENTS_SECS: "30"
       POLL_PROGRAMS_SECS: "300"
       PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
     volumes:
       - ./data/ven-2:/data
+      - ./profiles/ven-2.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -88,9 +92,11 @@ services:
       POLL_EVENTS_SECS: "30"
       POLL_PROGRAMS_SECS: "300"
       PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
     volumes:
       - ./data/ven-3:/data
+      - ./profiles/ven-3.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s

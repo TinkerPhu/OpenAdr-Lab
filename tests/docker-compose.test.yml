@@ -71,7 +71,10 @@ services:
       POLL_EVENTS_SECS: "5"
       POLL_PROGRAMS_SECS: "5"
       POLL_REPORTS_SECS: "5"
+      PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
+    volumes:
+      - ../VEN/profiles/test.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 5s
@@ -100,7 +103,10 @@ services:
       POLL_EVENTS_SECS: "5"
       POLL_PROGRAMS_SECS: "5"
       POLL_REPORTS_SECS: "5"
+      PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
+    volumes:
+      - ../VEN/profiles/test.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 5s
