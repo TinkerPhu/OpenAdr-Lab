@@ -230,10 +230,10 @@ impl Reactor {
                     }
                 } else {
                     // Mid-range price: use defaults
-                    defaults
+                    defaults.clone()
                 }
             }
-            ReactorMode::Idle => defaults,
+            ReactorMode::Idle => defaults.clone(),
         };
 
         // Interpolate between defaults and target based on factor
