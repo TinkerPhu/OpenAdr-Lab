@@ -1,5 +1,10 @@
 import type { EventInput, HealthStatus, Program, ProgramInput, Report, VtnEvent, Ven } from "./types";
 
+let reqCounter = 0;
+function requestId(): string {
+  return `${Date.now()}-${++reqCounter}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export class BffApi {
   constructor(public baseUrl: string = "") {}
 
@@ -12,7 +17,7 @@ export class BffApi {
       method,
       headers: {
         "Content-Type": "application/json",
-        "X-Request-ID": crypto.randomUUID(),
+        "X-Request-ID": requestId(),
       },
     };
     if (body !== undefined) opts.body = JSON.stringify(body);
@@ -21,7 +26,7 @@ export class BffApi {
 
   private async getReq(path: string): Promise<Response> {
     return fetch(this.url(path), {
-      headers: { "X-Request-ID": crypto.randomUUID() },
+      headers: { "X-Request-ID": requestId() },
     });
   }
 
