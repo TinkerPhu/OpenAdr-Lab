@@ -80,12 +80,12 @@ pub fn arbitrate(intervals: &[ActiveInterval]) -> Option<ControlIntent> {
     let event_ids: Vec<String> = intervals.iter().map(|iv| iv.event_id.clone()).collect();
     let description = format!(
         "{}={:.1} (event: {}, priority: {})",
-        winner.payload_type, winner.value, winner.event_name, winner.priority
+        winner.payload_type, winner.payload_value, winner.event_name, winner.priority
     );
 
     Some(ControlIntent {
         mode,
-        value: winner.value,
+        value: winner.payload_value,
         event_ids,
         description,
     })
