@@ -2,6 +2,7 @@ mod config;
 mod models;
 mod profile;
 mod reactor;
+mod reporter;
 mod simulator;
 mod state;
 mod vtn;
@@ -168,6 +169,9 @@ async fn main() -> anyhow::Result<()> {
         let profile = profile.clone();
         let tick_s = profile.simulator.tick_s;
         let persist_every_s = profile.simulator.persist_every_s;
+        let report_interval_s = profile.simulator.report_interval_s;
+        let ven_name = cfg.ven_name.clone();
+        let vtn_for_tick = vtn.clone();
         let data_dir = cfg.persist_path.as_deref()
             .and_then(|p| std::path::Path::new(p).parent())
             .and_then(|p| p.to_str())
@@ -178,6 +182,12 @@ async fn main() -> anyhow::Result<()> {
             let mut tick_interval = tokio::time::interval(std::time::Duration::from_secs(tick_s));
             let mut persist_counter: u64 = 0;
             let persist_every_ticks = if tick_s > 0 { persist_every_s / tick_s } else { 15 };
+            let mut report_counter: u64 = 0;
+            let report_every_ticks = if tick_s > 0 && report_interval_s > 0 {
+                report_interval_s / tick_s
+            } else {
+                0
+            };
 
             loop {
                 tick_interval.tick().await;
@@ -188,7 +198,7 @@ async fn main() -> anyhow::Result<()> {
                 let events = state.events().await;
 
                 // Reactor: evaluate events → setpoints
-                let setpoints = {
+                let (setpoints, sim_snapshot, reactor_mode) = {
                     let mut sim_guard = sim.lock().await;
                     let mut reactor_guard = reactor.lock().await;
                     let setpoints = reactor_guard.evaluate(&events, &sim_guard, &profile, now, dt_s);
@@ -205,10 +215,41 @@ async fn main() -> anyhow::Result<()> {
                     let trace = reactor_guard.trace_entries();
                     state.update_sim(sim_snap, trace).await;
 
-                    setpoints
+                    // Snapshot sim state for reporting (avoid holding lock during HTTP)
+                    let sim_clone = sim_guard.clone();
+                    let mode = setpoints.mode.clone();
+
+                    (setpoints, sim_clone, mode)
                 };
 
                 let _ = setpoints; // used above, suppress warning
+
+                // Periodic auto-report submission
+                if report_every_ticks > 0 {
+                    report_counter += 1;
+                    if report_counter >= report_every_ticks {
+                        report_counter = 0;
+                        let reports = reporter::build_reports_for_active_events(
+                            &events, &sim_snapshot, &reactor_mode, &ven_name, now,
+                        );
+                        for report in reports {
+                            let report_name = report.get("reportName")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            match vtn_for_tick.upsert_report(report).await {
+                                Ok(_) => {
+                                    counter!("auto_reports_sent_total").increment(1);
+                                    info!(report_name, "auto-report submitted");
+                                }
+                                Err(e) => {
+                                    counter!("auto_reports_error_total").increment(1);
+                                    error!(report_name, "auto-report failed: {e:#}");
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Periodic persist
                 persist_counter += 1;

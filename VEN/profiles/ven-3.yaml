@@ -23,3 +23,4 @@ reactor:
 simulator:
   tick_s: 1
   persist_every_s: 15
+  report_interval_s: 60
