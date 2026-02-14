@@ -8,6 +8,19 @@ from features.helpers.api_client import (
 from features.helpers.wait import poll_until
 
 
+def _create_or_reuse_program(token, body):
+    """POST /programs; on 409 (duplicate), look up existing by name."""
+    r = vtn_post("/programs", token, json=body)
+    if r.status_code == 409:
+        name = body["programName"]
+        programs = vtn_get("/programs", token).json()
+        match = [p for p in programs if p.get("programName") == name]
+        assert match, f"409 but program '{name}' not found in GET /programs"
+        return match[0]["id"]
+    r.raise_for_status()
+    return r.json()["id"]
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _ven1_events():
@@ -60,24 +73,17 @@ def _build_intervals(ptype, count):
 
 @given('I create a program "{name}" targeting "{ven}" and save its ID')
 def step_create_targeted_program_save_id(context, name, ven):
-    r = vtn_post(
-        "/programs",
+    context.saved_program_id = _create_or_reuse_program(
         context.vtn_token,
-        json={
-            "programName": name,
-            "targets": [{"type": "VEN_NAME", "values": [ven]}],
-        },
+        {"programName": name, "targets": [{"type": "VEN_NAME", "values": [ven]}]},
     )
-    r.raise_for_status()
-    context.saved_program_id = r.json()["id"]
 
 
 @given('I create a program "{name}" targeting both "{ven1}" and "{ven2}" and save its ID')
 def step_create_dual_targeted_program_save_id(context, name, ven1, ven2):
-    r = vtn_post(
-        "/programs",
+    context.saved_program_id = _create_or_reuse_program(
         context.vtn_token,
-        json={
+        {
             "programName": name,
             "targets": [
                 {"type": "VEN_NAME", "values": [ven1]},
@@ -85,19 +91,14 @@ def step_create_dual_targeted_program_save_id(context, name, ven1, ven2):
             ],
         },
     )
-    r.raise_for_status()
-    context.saved_program_id = r.json()["id"]
 
 
 @given('I create an open program "{name}" and save its ID')
 def step_create_open_program_save_id(context, name):
-    r = vtn_post(
-        "/programs",
+    context.saved_program_id = _create_or_reuse_program(
         context.vtn_token,
-        json={"programName": name, "targets": None},
+        {"programName": name, "targets": None},
     )
-    r.raise_for_status()
-    context.saved_program_id = r.json()["id"]
 
 
 # ── event creation ───────────────────────────────────────────────────────────
