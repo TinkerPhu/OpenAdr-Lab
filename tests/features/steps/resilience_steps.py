@@ -2,7 +2,7 @@
 
 import os
 from behave import given, when, then
-from features.helpers.api_client import ven_get, ven2_get
+from features.helpers.api_client import ven_get, ven2_get, get_token_value
 from features.helpers.wait import poll_until
 from features.helpers import docker_ctl
 
@@ -45,6 +45,12 @@ def step_wait_healthy(context, service):
     if not url:
         raise ValueError(f"No health URL configured for service '{service}'")
     docker_ctl.wait_for_healthy(url, timeout=60)
+
+
+@when('I refresh my VTN token as "{user}"')
+@given('I refresh my VTN token as "{user}"')
+def step_refresh_token(context, user):
+    context.vtn_token = get_token_value(user, user)
 
 
 @then('VEN-1 still serves cached event "{name}"')
