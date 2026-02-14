@@ -25,9 +25,12 @@ HEALTH_URLS = {
 def step_stop_service(context, service):
     docker_ctl.stop_service(service)
     # Track stopped services for cleanup in after_scenario
-    if not hasattr(context, "_stopped_services"):
-        context._stopped_services = []
-    context._stopped_services.append(service)
+    try:
+        stopped = context._stopped_services
+    except (AttributeError, KeyError):
+        stopped = []
+        context._stopped_services = stopped
+    stopped.append(service)
 
 
 @when('the "{service}" service is restarted')
