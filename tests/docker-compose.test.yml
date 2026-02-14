@@ -6,9 +6,11 @@
 #
 # Usage (on Pi):
 #   cd /srv/docker/openadr_lab
-#   docker compose -f tests/docker-compose.test.yml up --build \
-#     --abort-on-container-exit --exit-code-from test-runner
-#   docker compose -f tests/docker-compose.test.yml down
+#   docker compose -f tests/docker-compose.test.yml run --build --rm test-runner
+#   docker compose -f tests/docker-compose.test.yml down -v
+#
+# NOTE: Do NOT use `up --exit-code-from` — it implies --abort-on-container-exit,
+# which kills the stack when resilience tests intentionally stop a service.
 ###############################################################################
 
 name: openadr-test
