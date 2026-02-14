@@ -19,6 +19,7 @@ Feature: Failure Recovery
     And I wait for VEN-1 to show event "resync-evt-1"
     When the "test-vtn" service is restarted
     And I wait for the "test-vtn" service to be healthy
+    And I refresh my VTN token as "any-business"
     And I create an event for the saved program named "resync-evt-2"
     Then VEN-1 picks up event "resync-evt-2" within 30 seconds
 
@@ -29,6 +30,7 @@ Feature: Failure Recovery
     And I wait for VEN-2 to show event "dual-evt"
     When the "test-vtn" service is restarted
     And I wait for the "test-vtn" service to be healthy
+    And I refresh my VTN token as "any-business"
     And I create an event for the saved program named "dual-evt-2"
     Then VEN-1 picks up event "dual-evt-2" within 30 seconds
     And VEN-2 picks up event "dual-evt-2" within 30 seconds
