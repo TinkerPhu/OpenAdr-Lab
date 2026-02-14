@@ -4,9 +4,10 @@ import type { SensorSnapshot } from "./types";
 
 export function useHealth() {
   const { api } = useVenContext();
+  console.log("[VEN-UI] useHealth hook called, baseUrl:", api.baseUrl);
   return useQuery({
     queryKey: ["health", api.baseUrl],
-    queryFn: () => api.health(),
+    queryFn: () => { console.log("[VEN-UI] useHealth queryFn firing"); return api.health(); },
     refetchInterval: 10_000,
   });
 }

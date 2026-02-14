@@ -13,6 +13,8 @@ export class BffApi {
   }
 
   private async jsonReq(method: string, path: string, body?: unknown): Promise<Response> {
+    const url = this.url(path);
+    console.log(`[BFF] ${method} ${url}`);
     const opts: RequestInit = {
       method,
       headers: {
@@ -21,13 +23,29 @@ export class BffApi {
       },
     };
     if (body !== undefined) opts.body = JSON.stringify(body);
-    return fetch(this.url(path), opts);
+    try {
+      const r = await fetch(url, opts);
+      console.log(`[BFF] ${method} ${url} → ${r.status}`);
+      return r;
+    } catch (err) {
+      console.error(`[BFF] ${method} ${url} → network error:`, err);
+      throw err;
+    }
   }
 
   private async getReq(path: string): Promise<Response> {
-    return fetch(this.url(path), {
-      headers: { "X-Request-ID": requestId() },
-    });
+    const url = this.url(path);
+    console.log(`[BFF] GET ${url}`);
+    try {
+      const r = await fetch(url, {
+        headers: { "X-Request-ID": requestId() },
+      });
+      console.log(`[BFF] GET ${url} → ${r.status}`);
+      return r;
+    } catch (err) {
+      console.error(`[BFF] GET ${url} → network error:`, err);
+      throw err;
+    }
   }
 
   async health(): Promise<HealthStatus> {

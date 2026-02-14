@@ -11,6 +11,8 @@ const theme = createTheme({
   },
 });
 
+console.log("[VTN-UI] main.tsx executing at", new Date().toISOString());
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

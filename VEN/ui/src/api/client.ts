@@ -8,20 +8,38 @@ export class VenApi {
   }
 
   private async getReq(path: string): Promise<Response> {
-    return fetch(this.url(path), {
-      headers: { "X-Request-ID": crypto.randomUUID() },
-    });
+    const url = this.url(path);
+    console.log(`[VEN] GET ${url}`);
+    try {
+      const r = await fetch(url, {
+        headers: { "X-Request-ID": crypto.randomUUID() },
+      });
+      console.log(`[VEN] GET ${url} → ${r.status}`);
+      return r;
+    } catch (err) {
+      console.error(`[VEN] GET ${url} → network error:`, err);
+      throw err;
+    }
   }
 
   private async jsonReq(method: string, path: string, body: unknown): Promise<Response> {
-    return fetch(this.url(path), {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        "X-Request-ID": crypto.randomUUID(),
-      },
-      body: JSON.stringify(body),
-    });
+    const url = this.url(path);
+    console.log(`[VEN] ${method} ${url}`);
+    try {
+      const r = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Request-ID": crypto.randomUUID(),
+        },
+        body: JSON.stringify(body),
+      });
+      console.log(`[VEN] ${method} ${url} → ${r.status}`);
+      return r;
+    } catch (err) {
+      console.error(`[VEN] ${method} ${url} → network error:`, err);
+      throw err;
+    }
   }
 
   async health(): Promise<string> {
