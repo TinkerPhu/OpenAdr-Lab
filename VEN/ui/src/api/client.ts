@@ -1,5 +1,10 @@
 import type { VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry } from "./types";
 
+let reqCounter = 0;
+function requestId(): string {
+  return `${Date.now()}-${++reqCounter}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export class VenApi {
   constructor(public baseUrl: string) {}
 
@@ -12,7 +17,7 @@ export class VenApi {
     console.log(`[VEN] GET ${url}`);
     try {
       const r = await fetch(url, {
-        headers: { "X-Request-ID": crypto.randomUUID() },
+        headers: { "X-Request-ID": requestId() },
       });
       console.log(`[VEN] GET ${url} → ${r.status}`);
       return r;
@@ -30,7 +35,7 @@ export class VenApi {
         method,
         headers: {
           "Content-Type": "application/json",
-          "X-Request-ID": crypto.randomUUID(),
+          "X-Request-ID": requestId(),
         },
         body: JSON.stringify(body),
       });
