@@ -1,41 +1,48 @@
-"""Helper to manage Docker Compose services from within the test-runner container."""
+"""Helper to manage Docker containers from within the test-runner container.
+
+Uses raw `docker stop/start` instead of `docker compose stop/start` to avoid
+Docker Compose aborting the entire stack when a container exits.
+"""
 
 import subprocess
 import time
 
 PROJECT_NAME = "openadr-test"
-COMPOSE_FILE = "/compose/docker-compose.test.yml"
 
 
-def _compose(*args):
-    """Run a docker compose command and return the CompletedProcess."""
-    cmd = [
-        "docker", "compose",
-        "-p", PROJECT_NAME,
-        *args,
-    ]
+def _container_name(service):
+    """Map a compose service name to its container name."""
+    return f"{PROJECT_NAME}-{service}-1"
+
+
+def _docker(*args):
+    """Run a docker command and return the CompletedProcess."""
+    cmd = ["docker", *args]
     return subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
 
 def stop_service(service):
-    """Stop a running compose service (container stays, process stops)."""
-    result = _compose("stop", "-t", "5", service)
+    """Stop a running container (container stays, process stops)."""
+    name = _container_name(service)
+    result = _docker("stop", "-t", "5", name)
     if result.returncode != 0:
-        raise RuntimeError(f"Failed to stop {service}: {result.stderr}")
+        raise RuntimeError(f"Failed to stop {name}: {result.stderr}")
 
 
 def start_service(service):
-    """Start a previously stopped compose service."""
-    result = _compose("start", service)
+    """Start a previously stopped container."""
+    name = _container_name(service)
+    result = _docker("start", name)
     if result.returncode != 0:
-        raise RuntimeError(f"Failed to start {service}: {result.stderr}")
+        raise RuntimeError(f"Failed to start {name}: {result.stderr}")
 
 
 def restart_service(service):
-    """Restart a compose service."""
-    result = _compose("restart", "-t", "5", service)
+    """Restart a container."""
+    name = _container_name(service)
+    result = _docker("restart", "-t", "5", name)
     if result.returncode != 0:
-        raise RuntimeError(f"Failed to restart {service}: {result.stderr}")
+        raise RuntimeError(f"Failed to restart {name}: {result.stderr}")
 
 
 def wait_for_healthy(url, timeout=60, interval=2):
