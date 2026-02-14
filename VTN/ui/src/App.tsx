@@ -26,7 +26,8 @@ export function useBffContext(): BffContextType {
 }
 
 function HealthChip() {
-  const { data, isError } = useHealth();
+  const { data, isError, isLoading, fetchStatus, error } = useHealth();
+  console.log("[VTN-UI] HealthChip render:", { isLoading, isError, fetchStatus, data, error: error?.message });
   const vtnOk = data?.vtn?.reachable && data?.vtn?.authOk;
   const status = isError ? "offline" : vtnOk ? "ok" : data ? "degraded" : "unknown";
   const color = status === "ok" ? "success" : status === "offline" ? "error" : status === "degraded" ? "warning" : "default";
@@ -43,9 +44,12 @@ function HealthChip() {
   );
 }
 
+console.log("[VTN-UI] Module loaded at", new Date().toISOString());
+
 export default function App() {
+  console.log("[VTN-UI] App render");
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const api = useMemo(() => new BffApi(), []);
+  const api = useMemo(() => { console.log("[VTN-UI] BffApi created"); return new BffApi(); }, []);
   const queryClient = useQueryClient();
 
   function handleRefreshAll() {

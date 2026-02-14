@@ -37,7 +37,8 @@ export function useVenContext(): VenContextType {
 }
 
 function HealthChip() {
-  const { data, isError } = useHealth();
+  const { data, isError, isLoading, fetchStatus, error } = useHealth();
+  console.log("[VEN-UI] HealthChip render:", { isLoading, isError, fetchStatus, data, error: error?.message });
   const status = isError ? "offline" : data ? "ok" : "unknown";
   const color = status === "ok" ? "success" : status === "offline" ? "error" : "default";
 
@@ -53,10 +54,13 @@ function HealthChip() {
   );
 }
 
+console.log("[VEN-UI] Module loaded at", new Date().toISOString());
+
 export default function App() {
+  console.log("[VEN-UI] App render");
   const [venUrl, setVenUrl] = useState(DEFAULT_VENS[0].url);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const api = useMemo(() => new VenApi(venUrl), [venUrl]);
+  const api = useMemo(() => { console.log("[VEN-UI] VenApi created for", venUrl); return new VenApi(venUrl); }, [venUrl]);
   const queryClient = useQueryClient();
 
   function handleVenChange(url: string) {

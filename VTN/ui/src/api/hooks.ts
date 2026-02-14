@@ -4,9 +4,10 @@ import type { EventInput, ProgramInput } from "./types";
 
 export function useHealth() {
   const { api } = useBffContext();
+  console.log("[VTN-UI] useHealth hook called");
   return useQuery({
     queryKey: ["health"],
-    queryFn: () => api.health(),
+    queryFn: () => { console.log("[VTN-UI] useHealth queryFn firing"); return api.health(); },
     refetchInterval: 10_000,
   });
 }
