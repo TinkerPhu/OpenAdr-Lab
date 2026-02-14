@@ -27,6 +27,7 @@ def step_ven2_token(context):
 # ── event creation with name ────────────────────────────────────────────────
 
 @given('I create an event for the saved program named "{name}"')
+@when('I create an event for the saved program named "{name}"')
 def step_create_named_event(context, name):
     r = vtn_post(
         "/events",
