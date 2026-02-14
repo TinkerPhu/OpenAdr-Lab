@@ -6,7 +6,6 @@ Feature: VEN Isolation
     And I have a VEN-1 token
     And I have a VEN-2 token
 
-  @upstream_pending
   Scenario: VEN can only see its own reports
     Given I create an open program "isolation-report-test" and save its ID
     And I create an event for the saved program named "iso-evt"
@@ -22,7 +21,6 @@ Feature: VEN Isolation
     When VEN-2 queries VTN for VENs
     Then VEN-2 sees only its own VEN record
 
-  @upstream_pending
   Scenario: VEN cannot retrieve another VEN's report by ID
     Given I create an open program "isolation-id-test" and save its ID
     And I create an event for the saved program named "iso-id-evt"
