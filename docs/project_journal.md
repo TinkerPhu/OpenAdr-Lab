@@ -1435,8 +1435,91 @@ The 6 skipped scenarios are pre-existing `@upstream_pending` (2) and `@resilienc
 - EV charging taper curve near 100% SOC
 - Comfort/deadline constraints
 - PV cloud dip simulation
-- Auto-report submission from tick loop
 
 ---
 
-*Last updated: 2026-02-13*
+## Phase 16: Auto-Report Submission from Tick Loop
+
+**Status: COMPLETE**
+
+### What
+
+Closed the reporting loop: VENs now automatically submit OpenADR reports to the VTN every `report_interval_s` (default 60s) for each active event. Reports contain **actual simulator measurements** — not echoed event values — so the VTN operator sees real device response in near-real-time.
+
+### Why
+
+Reports were previously user-triggered only (manual form in VEN UI). The system design specifies periodic report submission, and with the simulator and reactor producing real device states, auto-reporting completes the feedback loop.
+
+### How
+
+**New module: `VEN/src/reporter.rs`**
+- `build_report()` maps event payload types to report payload types with actual sim values:
+  - `IMPORT_CAPACITY_LIMIT` → `USAGE` with actual `import_w`
+  - `EXPORT_CAPACITY_LIMIT` → `USAGE` with actual `export_w`
+  - `PRICE` → `USAGE` with actual `net_power_w`
+  - `SIMPLE` → `SIMPLE` with `1` (acknowledged)
+- Additional resource payloads: `OPERATING_STATE` (reactor mode), `STORAGE_CHARGE_LEVEL` (EV SOC if present)
+- Report naming: `auto-{ven_name}-{event_id}` — one report per active event, upserted each cycle
+
+**Tick loop integration (`main.rs`)**
+- Added `report_counter` alongside existing `persist_counter`
+- Clones `SimState` snapshot outside the lock to avoid blocking during HTTP calls
+- Calls `vtn.upsert_report()` for each active event; logs success/failure, never blocks the tick
+
+**Profile config**
+- Added `report_interval_s` to `SimulatorConfig` (default 60, test profile uses 10)
+
+### Test Results
+
+**16 features, 54 scenarios, 370 steps — all passing (3m28s)**
+
+New scenario: "Auto-report submitted for active event" — creates an `IMPORT_CAPACITY_LIMIT` event, waits 15s, verifies VEN-1 has an auto-report with `USAGE` and `OPERATING_STATE` payloads.
+
+The 6 skipped scenarios are pre-existing `@upstream_pending` (2) and `@resilience` (4) tags.
+
+### Key Decisions
+
+1. **Actual sim values, not echoed event values** — more realistic and useful for the operator than ±4% noise on the event payload.
+2. **Upsert semantics** — `auto-{ven}-{event_id}` naming + `upsert_report()` means repeated submissions update the same report, not a growing list of snapshots.
+3. **No separate task** — reuses existing tick loop with a counter, same pattern as persist. Avoids additional tokio::spawn complexity.
+4. **SimState clone outside lock** — prevents the Mutex from being held during network I/O.
+
+---
+
+## Phase 16: Active Event Filter + Delete Error Handling
+
+**Status: COMPLETE**
+
+### What
+
+Added `?active=true|false` query parameter to the VTN events endpoint for filtering events by their temporal status. Also added user-friendly error messages when event deletion fails due to FK constraints, and documented the "Ending the Emergency" workflow for UC1.
+
+### Changes
+
+| File | Change |
+|------|--------|
+| `openleadr-rs/.../api/event.rs` | Added `active: Option<bool>` to `QueryParams` |
+| `openleadr-rs/.../data_source/postgres/event.rs` | Added `is_event_active()` helper, post-filter in `retrieve_all` |
+| `VTN/bff/src/routes/events.rs` | Accept `?active` query param, forward to VTN, separate cache keys |
+| `VTN/ui/src/components/ConfirmDialog.tsx` | Added `error` prop with MUI Alert display |
+| `VTN/ui/src/pages/Events.tsx` | Added `deleteError` state, `onError` handler on delete mutation |
+| `docs/USE-CASE-MANUAL.md` | Added "Ending the Emergency" section to UC1, replaced "Cleanup" with "Event Lifecycle" |
+| `docs/WHISH_LIST.md` | Added DB-level optimization and VEN polling filter as future work |
+
+### Filter Logic (Application-Level)
+
+The `?active` filter works as a post-filter in Rust after fetching from the database (no SQL changes, no migration, no SQLx cache change):
+
+- `active=true`: keep events where `interval_period` is None, duration is None, or `start + duration > now`
+- `active=false`: keep only past events (complement)
+- absent: return all (backward compatible)
+
+### Key Decisions
+
+1. **Post-filter, not SQL** — avoids migration and SQLx cache changes. DB optimization deferred until event table grows large.
+2. **Events are permanent records** — deletion fails when reports exist (FK constraint). The correct pattern is to edit the event to add timing, marking it as completed.
+3. **Separate cache keys** — BFF caches `events`, `events?active=true`, `events?active=false` independently to avoid stale filtered results.
+
+---
+
+*Last updated: 2026-02-15*
