@@ -87,7 +87,7 @@ describe("EventsPage", () => {
   it("shows status chips", () => {
     renderEvents();
     expect(screen.getByTestId("event-status-e1")).toBeVisible();
-    expect(screen.getByTestId("event-status-e3")).toHaveTextContent("no timing");
+    expect(screen.getByTestId("event-status-e3")).toHaveTextContent("immediate");
   });
 
   it("filters events by search query", async () => {
