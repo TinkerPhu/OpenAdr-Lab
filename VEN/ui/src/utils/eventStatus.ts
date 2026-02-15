@@ -1,6 +1,6 @@
 import type { VtnEvent } from "../api/types";
 
-export type EventStatus = "scheduled" | "active" | "completed" | "no timing";
+export type EventStatus = "scheduled" | "active" | "completed" | "immediate";
 
 /**
  * Parse an ISO 8601 duration string (e.g. "PT4H", "PT30M", "PT1H30M") into milliseconds.
@@ -18,19 +18,19 @@ function parseDuration(dur: string): number {
 
 /**
  * Derive event status from intervalPeriod vs current time.
- * - no intervalPeriod.start → "no timing"
+ * - no intervalPeriod.start → "immediate"
  * - now < start → "scheduled"
  * - start <= now < end → "active"
  * - now >= end → "completed"
  */
 export function getEventStatus(event: VtnEvent, now?: Date): EventStatus {
   const ip = event.intervalPeriod;
-  if (!ip?.start) return "no timing";
+  if (!ip?.start) return "immediate";
 
   const currentTime = (now ?? new Date()).getTime();
   const start = new Date(ip.start).getTime();
 
-  if (isNaN(start)) return "no timing";
+  if (isNaN(start)) return "immediate";
 
   if (currentTime < start) return "scheduled";
 
@@ -53,6 +53,6 @@ export function statusColor(status: EventStatus): "success" | "warning" | "defau
     case "active": return "success";
     case "scheduled": return "info";
     case "completed": return "default";
-    case "no timing": return "warning";
+    case "immediate": return "warning";
   }
 }

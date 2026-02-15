@@ -198,6 +198,20 @@ impl Reactor {
                     mode: "IMPORT_CAP".to_string(),
                 }
             }
+            ReactorMode::Simple => {
+                if intent.value < 1.0 {
+                    // SIMPLE 0 = curtail: reduce all flexible loads to minimum
+                    Setpoints {
+                        ev_charge_kw: 0.0,
+                        heater_kw: 0.0,
+                        pv_curtailment: 0.0, // keep PV exporting
+                        mode: "SIMPLE".to_string(),
+                    }
+                } else {
+                    // SIMPLE >= 1 = normal operation
+                    defaults.clone()
+                }
+            }
             ReactorMode::Price => {
                 let price = intent.value;
                 if price >= profile.reactor.price_high {
