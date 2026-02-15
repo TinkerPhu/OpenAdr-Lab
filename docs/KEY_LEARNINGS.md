@@ -40,6 +40,7 @@
 - `--abort-on-container-exit` kills everything when ANY container exits — don't use one-shot containers alongside it
 - When multiple containers on a shared host need ports, pick a dedicated range (e.g. 82xx) to avoid conflicts with existing services
 - Stale test DB can cause mass test failures — `docker compose down -v` removes ephemeral DB volumes
+- **`docker compose` working directory matters** — `docker compose -f path/to/compose.yml run ...` resolves `context: .` relative to the compose file, but the entrypoint's `WORKDIR` and behave's `paths` setting depend on the build context being correct. Running `docker compose` from the wrong directory can cause `ConfigError: No steps directory` or similar path resolution failures. Always run from the project root: `cd /srv/docker/openadr_lab && docker compose -f tests/docker-compose.test.yml run ...`
 
 ## Testing
 
