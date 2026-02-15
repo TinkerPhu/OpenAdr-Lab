@@ -114,6 +114,30 @@ pub fn find_active_intervals(
 
         if let Some(intervals) = intervals {
             for interval in intervals {
+                // Check per-interval timing (overrides event-level timing)
+                let iv_start = interval
+                    .get("intervalPeriod")
+                    .and_then(|ip| ip.get("start"))
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<DateTime<Utc>>().ok());
+                let iv_duration_s = interval
+                    .get("intervalPeriod")
+                    .and_then(|ip| ip.get("duration"))
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| parse_duration_secs(s));
+
+                if let Some(start) = iv_start {
+                    if now < start {
+                        continue; // interval not started yet
+                    }
+                    if let Some(dur_s) = iv_duration_s {
+                        let end = start + chrono::Duration::seconds(dur_s as i64);
+                        if now >= end {
+                            continue; // interval already ended
+                        }
+                    }
+                }
+
                 let payloads = interval
                     .get("payloads")
                     .and_then(|v| v.as_array());
