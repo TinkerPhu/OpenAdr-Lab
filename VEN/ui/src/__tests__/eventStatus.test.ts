@@ -7,12 +7,12 @@ function makeEvent(overrides: Partial<VtnEvent> = {}): VtnEvent {
 }
 
 describe("getEventStatus", () => {
-  it("returns 'no timing' when no intervalPeriod", () => {
-    expect(getEventStatus(makeEvent())).toBe("no timing");
+  it("returns 'immediate' when no intervalPeriod", () => {
+    expect(getEventStatus(makeEvent())).toBe("immediate");
   });
 
-  it("returns 'no timing' when intervalPeriod has no start", () => {
-    expect(getEventStatus(makeEvent({ intervalPeriod: { start: "" } }))).toBe("no timing");
+  it("returns 'immediate' when intervalPeriod has no start", () => {
+    expect(getEventStatus(makeEvent({ intervalPeriod: { start: "" } }))).toBe("immediate");
   });
 
   it("returns 'scheduled' when start is in the future", () => {
@@ -81,5 +81,5 @@ describe("statusColor", () => {
   it("maps active to success", () => expect(statusColor("active")).toBe("success"));
   it("maps scheduled to info", () => expect(statusColor("scheduled")).toBe("info"));
   it("maps completed to default", () => expect(statusColor("completed")).toBe("default"));
-  it("maps no timing to warning", () => expect(statusColor("no timing")).toBe("warning"));
+  it("maps immediate to warning", () => expect(statusColor("immediate")).toBe("warning"));
 });

@@ -8,6 +8,7 @@ pub enum ReactorMode {
     ExportCapLimit,
     ImportCapLimit,
     Price,
+    Simple,
 }
 
 impl std::fmt::Display for ReactorMode {
@@ -17,6 +18,7 @@ impl std::fmt::Display for ReactorMode {
             Self::ExportCapLimit => write!(f, "EXPORT_CAP"),
             Self::ImportCapLimit => write!(f, "IMPORT_CAP"),
             Self::Price => write!(f, "PRICE"),
+            Self::Simple => write!(f, "SIMPLE"),
         }
     }
 }
@@ -47,8 +49,8 @@ pub fn arbitrate(intervals: &[ActiveInterval]) -> Option<ControlIntent> {
 
     for iv in intervals {
         match iv.payload_type.as_str() {
-            "EXPORT_CAPACITY_LIMIT" | "IMPORT_CAPACITY_LIMIT" => constraints.push(iv),
-            "PRICE" | "SIMPLE" => incentives.push(iv),
+            "EXPORT_CAPACITY_LIMIT" | "IMPORT_CAPACITY_LIMIT" | "SIMPLE" => constraints.push(iv),
+            "PRICE" => incentives.push(iv),
             _ => {} // ignore unknown types
         }
     }
@@ -74,6 +76,7 @@ pub fn arbitrate(intervals: &[ActiveInterval]) -> Option<ControlIntent> {
     let mode = match winner.payload_type.as_str() {
         "EXPORT_CAPACITY_LIMIT" => ReactorMode::ExportCapLimit,
         "IMPORT_CAPACITY_LIMIT" => ReactorMode::ImportCapLimit,
+        "SIMPLE" => ReactorMode::Simple,
         _ => ReactorMode::Price,
     };
 

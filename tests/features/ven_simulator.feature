@@ -48,6 +48,16 @@ Feature: VEN Simulator & Reactor
     And I query VEN-1 decision trace
     Then the trace contains an entry with mode "PRICE"
 
+  Scenario: Simple curtail event triggers reactor response
+    Given I have a VTN token as "any-business"
+    And I create a program "sim-test-simple" targeting "ven-1-name" and save its ID
+    When I create a UC event "sim-simple-curtail" with type "SIMPLE" priority 0 and value 0
+    Then the response status is 201
+    When I wait for VEN-1 to show event "sim-simple-curtail"
+    And I wait 5 seconds for the reactor
+    And I query VEN-1 decision trace
+    Then the trace contains an entry with mode "SIMPLE"
+
   Scenario: Auto-report submitted for active event
     Given I have a VTN token as "any-business"
     And I create a program "auto-report-test" targeting "ven-1-name" and save its ID
