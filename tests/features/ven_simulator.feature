@@ -58,6 +58,18 @@ Feature: VEN Simulator & Reactor
     And I query VEN-1 decision trace
     Then the trace contains an entry with mode "SIMPLE"
 
+  Scenario: Per-interval timing — only current interval drives reactor
+    Given I have a VTN token as "any-business"
+    And I create a program "sim-test-timed" targeting "ven-1-name" and save its ID
+    # Create 3-interval event: first interval active now (EXPORT_CAPACITY_LIMIT 100/50/100)
+    When I create a timed UC event "sim-timed-intervals" with type "EXPORT_CAPACITY_LIMIT" priority 0 and 3 intervals
+    Then the response status is 201
+    When I wait for VEN-1 to show event "sim-timed-intervals"
+    And I wait 5 seconds for the reactor
+    And I query VEN-1 decision trace
+    # The first interval (value 100.0) should be active now
+    Then the trace contains an entry with mode "EXPORT_CAP"
+
   Scenario: Auto-report submitted for active event
     Given I have a VTN token as "any-business"
     And I create a program "auto-report-test" targeting "ven-1-name" and save its ID
