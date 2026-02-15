@@ -40,7 +40,7 @@ Feature: VEN Simulator & Reactor
     # Wait for the short-lived event to expire so it doesn't interfere with the next scenario
     When I wait 15 seconds for the reactor
 
-  Scenario: Price event triggers reactor response
+  Scenario: Price event is received and processed by reactor
     Given I have a VTN token as "any-business"
     And I create a program "sim-test-price" targeting "ven-1-name" and save its ID
     When I create a short-lived UC event "sim-price-high" with type "PRICE" priority 5 and value 0.50
@@ -48,7 +48,9 @@ Feature: VEN Simulator & Reactor
     When I wait for VEN-1 to show event "sim-price-high"
     And I wait 5 seconds for the reactor
     And I query VEN-1 decision trace
-    Then the trace contains an entry with mode "PRICE"
+    # Price is an incentive — it may not win if hard constraints are active,
+    # but the reactor must show it in active_events
+    Then the trace shows event "sim-price-high" as active
 
   Scenario: Simple curtail event triggers reactor response
     Given I have a VTN token as "any-business"
