@@ -319,7 +319,7 @@ def step_create_short_lived_uc_event(context, name, ptype, pri, val):
         "priority": pri,
         "intervalPeriod": {
             "start": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "duration": "PT60S",
+            "duration": "PT15S",
         },
         "intervals": [{"id": 0, "payloads": [{"type": ptype, "values": [val]}]}],
     }

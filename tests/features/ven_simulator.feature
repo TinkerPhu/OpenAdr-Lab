@@ -37,6 +37,8 @@ Feature: VEN Simulator & Reactor
     And I wait 5 seconds for the reactor
     And I query VEN-1 decision trace
     Then the trace contains an entry with mode "EXPORT_CAP"
+    # Wait for the short-lived event to expire so it doesn't interfere with the next scenario
+    When I wait 15 seconds for the reactor
 
   Scenario: Price event triggers reactor response
     Given I have a VTN token as "any-business"
@@ -73,7 +75,7 @@ Feature: VEN Simulator & Reactor
   Scenario: Auto-report submitted for active event
     Given I have a VTN token as "any-business"
     And I create a program "auto-report-test" targeting "ven-1-name" and save its ID
-    When I create a short-lived UC event "auto-report-evt" with type "IMPORT_CAPACITY_LIMIT" priority 0 and value 5000
+    When I create a UC event "auto-report-evt" with type "IMPORT_CAPACITY_LIMIT" priority 0 and value 5000
     Then the response status is 201
     When I wait for VEN-1 to show event "auto-report-evt"
     And I wait 15 seconds for the reactor
