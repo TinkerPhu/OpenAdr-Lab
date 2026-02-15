@@ -242,7 +242,7 @@ impl VtnClient {
     }
 
     pub async fn fetch_events(&self) -> Result<Vec<serde_json::Value>> {
-        let raw = self.get_json("/events").await?;
+        let raw = self.get_json("/events?active=true").await?;
         Ok(raw.as_array().cloned().unwrap_or_default())
     }
 
