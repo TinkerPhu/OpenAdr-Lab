@@ -309,6 +309,28 @@ def step_create_timed_uc_event(context, name, ptype, pri, count):
 
 # ── event deletion ───────────────────────────────────────────────────────────
 
+@when('I create a short-lived UC event "{name}" with type "{ptype}" priority {pri:d} and value {val:g}')
+def step_create_short_lived_uc_event(context, name, ptype, pri, val):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    body = {
+        "programID": context.saved_program_id,
+        "eventName": name,
+        "priority": pri,
+        "intervalPeriod": {
+            "start": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "duration": "PT60S",
+        },
+        "intervals": [{"id": 0, "payloads": [{"type": ptype, "values": [val]}]}],
+    }
+    context.response = vtn_post("/events", context.vtn_token, json=body)
+    if context.response.status_code == 201:
+        context.created_event = context.response.json()
+        if not hasattr(context, "uc_events"):
+            context.uc_events = {}
+        context.uc_events[name] = context.created_event
+
+
 @when('I create a UC event "{name}" with type "{ptype}" priority {pri:d} and value {val:g}')
 def step_create_uc_event_with_value(context, name, ptype, pri, val):
     body = {
