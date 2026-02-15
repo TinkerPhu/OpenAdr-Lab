@@ -34,7 +34,9 @@ A heatwave pushes electricity demand beyond grid capacity. The utility needs to 
 
 ### Real-World Example
 
-It's a 42°C afternoon in August. Air conditioning across the city is running at full blast. The grid operator sees frequency dropping and issues an emergency demand response signal: "All enrolled commercial buildings must reduce consumption by 100% of their curtailable load within the next 2 minutes, for 30 minutes."
+It's a 42°C afternoon in August. Air conditioning across the city is running at full blast. The grid operator sees frequency dropping and issues an emergency demand response signal: "All enrolled commercial buildings must reduce consumption by 100% of their curtailable load immediately."
+
+> **Note on timing:** The event carries no `intervalPeriod` — no start time and no duration. From the VEN's perspective, the signal means "curtail now, indefinitely." The VEN has no way of knowing how long the curtailment will last. To end the emergency, the operator edits the event and adds a start time and duration (see [Ending the Emergency](#ending-the-emergency-uc1) below). This is the correct OpenADR 3 pattern: events are permanent records, and adding timing marks them as completed.
 
 ### Key Characteristics
 
@@ -84,6 +86,40 @@ It's a 42°C afternoon in August. Air conditioning across the city is running at
 - Priority 0 marks this as the highest-urgency event
 - The SIMPLE payload with value `0` represents "curtail now"
 - The report round-trip confirms the VEN acknowledged the instruction
+
+
+### Ending the Emergency {#ending-the-emergency-uc1}
+
+When the grid emergency is over, the operator **edits** the event to add timing — this marks it as "completed" without deleting it. Events in OpenADR 3 are permanent contractual records; deletion may fail if reports reference the event.
+
+**VTN UI** (http://Pi4-Server:8221):
+
+1. Navigate to **Events** page
+2. Find `manual-emergency-loadshed` in the table
+3. Click the **edit icon** (pencil) on that event row
+4. Enter Start Time: the time the emergency began (e.g., `2026-02-15T14:00:00Z`)
+5. Enter Duration: how long the curtailment lasted (e.g., `PT30M` for 30 minutes)
+6. Click **"Save"**
+
+**VEN UI** (http://Pi4-Server:8214):
+
+7. Select **VEN1** in the VEN dropdown
+8. Navigate to **Events** — the event now shows the start time and duration, marking it as a completed historical record
+
+> **Why edit instead of delete?** Once a VEN submits a report referencing an event, the event cannot be deleted (FK constraint). Editing the event to add timing is the correct way to "close" it. The event remains in the system as an auditable record of the emergency response.
+
+### OpenADR's Voluntary Nature
+
+OpenADR signals are always advisory, never mandatory at the protocol level. The VTN sends signals; the VEN decides what to do. The relationship works in layers:
+
+1. **Program enrollment is voluntary** — the site owner opts in (and can opt out)
+2. **Event compliance is voluntary** — the VEN receives the signal but the local site decides whether to follow it
+3. **The VEN is the customer's agent**, not the utility's — it represents the building/site owner's interests
+4. **Reports close the loop** — the VEN reports what it *actually* did (which may differ from what was requested)
+
+What makes it "mandatory" in practice is the **contractual agreement** outside the protocol — the customer signed up for a DR program and may face financial penalties (reduced incentive payments, higher tariffs) for non-compliance. But the protocol itself never forces action.
+
+In our lab, the reactor's compliance strategy (ramp, delayed, partial, ignore) models different levels of VEN autonomy. A runtime override capability is planned — see `docs/ven-runtime-override-capability-planning.md`.
 
 ---
 
@@ -699,3 +735,34 @@ curl -s http://Pi4-Server:8211/events | python3 -m json.tool
 | Check multiple VEN checkboxes | Multiple VENs | UC4 |
 | Leave all checkboxes unchecked | All VENs (open) | UC3, UC7 |
 | Event-level Targets (JSON) | Further restrict within program | UC5 |
+
+---
+
+## Event Lifecycle
+
+Events in OpenADR 3 are **permanent contractual records**. Once a VEN submits a report referencing an event, the event cannot be deleted (the database enforces this via foreign key constraints).
+
+### How to "Close" an Event
+
+The correct way to end an active event is to **edit it and add timing**:
+
+1. Navigate to **Events** in the VTN UI
+2. Click the **edit icon** on the event
+3. Set a **Start Time** (when the event began) and **Duration** (how long it lasted)
+4. Click **"Save"**
+
+The event remains in the system as an auditable record. With the `?active=true` filter (once applied to polling), completed events will automatically be excluded from VEN poll results.
+
+### Deletion (When Possible)
+
+If no reports reference an event, it can be deleted. Deletion order matters due to FK constraints:
+
+1. Delete **reports** first (they reference events and programs)
+2. Delete **events** second (they reference programs)
+3. Delete **programs** last
+
+If you attempt to delete an event that has reports, the VTN UI will show an error message explaining the constraint. Use the edit approach above instead.
+
+### Why Leaving Data Is Fine
+
+Test data does no harm — programs and events with unique names won't collide. The seed script is idempotent and handles pre-existing data.
