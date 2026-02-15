@@ -31,7 +31,7 @@ Feature: VEN Simulator & Reactor
   Scenario: Export capacity event triggers reactor response
     Given I have a VTN token as "any-business"
     And I create a program "sim-test-export" targeting "ven-1-name" and save its ID
-    When I create a UC event "sim-export-cap" with type "EXPORT_CAPACITY_LIMIT" priority 0 and value 5000
+    When I create a short-lived UC event "sim-export-cap" with type "EXPORT_CAPACITY_LIMIT" priority 0 and value 5000
     Then the response status is 201
     When I wait for VEN-1 to show event "sim-export-cap"
     And I wait 5 seconds for the reactor
@@ -41,7 +41,7 @@ Feature: VEN Simulator & Reactor
   Scenario: Price event triggers reactor response
     Given I have a VTN token as "any-business"
     And I create a program "sim-test-price" targeting "ven-1-name" and save its ID
-    When I create a UC event "sim-price-high" with type "PRICE" priority 5 and value 0.50
+    When I create a short-lived UC event "sim-price-high" with type "PRICE" priority 5 and value 0.50
     Then the response status is 201
     When I wait for VEN-1 to show event "sim-price-high"
     And I wait 5 seconds for the reactor
@@ -51,7 +51,7 @@ Feature: VEN Simulator & Reactor
   Scenario: Simple curtail event triggers reactor response
     Given I have a VTN token as "any-business"
     And I create a program "sim-test-simple" targeting "ven-1-name" and save its ID
-    When I create a UC event "sim-simple-curtail" with type "SIMPLE" priority 0 and value 0
+    When I create a short-lived UC event "sim-simple-curtail" with type "SIMPLE" priority 0 and value 0
     Then the response status is 201
     When I wait for VEN-1 to show event "sim-simple-curtail"
     And I wait 5 seconds for the reactor
@@ -73,7 +73,7 @@ Feature: VEN Simulator & Reactor
   Scenario: Auto-report submitted for active event
     Given I have a VTN token as "any-business"
     And I create a program "auto-report-test" targeting "ven-1-name" and save its ID
-    When I create a UC event "auto-report-evt" with type "IMPORT_CAPACITY_LIMIT" priority 0 and value 5000
+    When I create a short-lived UC event "auto-report-evt" with type "IMPORT_CAPACITY_LIMIT" priority 0 and value 5000
     Then the response status is 201
     When I wait for VEN-1 to show event "auto-report-evt"
     And I wait 15 seconds for the reactor
