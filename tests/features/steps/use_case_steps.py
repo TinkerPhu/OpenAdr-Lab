@@ -35,8 +35,30 @@ def _find_event(events, name):
     return next((e for e in events if e.get("eventName") == name), None)
 
 
-def _build_intervals(ptype, count):
-    """Build interval list. UC6 uses negative values for discharge."""
+def _build_intervals(ptype, count, timed=False):
+    """Build interval list with optional per-interval timing.
+
+    When timed=True, each interval gets a 2-minute window starting from now,
+    staggered sequentially. This ensures only one interval is active at a time.
+    When timed=False (default), intervals have no timing (all active simultaneously).
+    """
+    values = _interval_values(ptype, count)
+    if not timed:
+        return values
+
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    for i, iv in enumerate(values):
+        start = now + timedelta(minutes=2 * i)
+        iv["intervalPeriod"] = {
+            "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "duration": "PT2M",
+        }
+    return values
+
+
+def _interval_values(ptype, count):
+    """Build raw interval payloads without timing."""
     if ptype == "CHARGE_STATE_SETPOINT" and count == 3:
         return [
             {"id": 0, "payloads": [{"type": ptype, "values": [80.0]}]},
@@ -267,6 +289,22 @@ def step_ven1_event_has_interval_period(context, name):
     ip = evt.get("intervalPeriod")
     assert ip is not None, "intervalPeriod missing on VEN-1 event"
     assert "start" in ip, "intervalPeriod missing 'start'"
+
+
+@when('I create a timed UC event "{name}" with type "{ptype}" priority {pri:d} and {count:d} intervals')
+def step_create_timed_uc_event(context, name, ptype, pri, count):
+    body = {
+        "programID": context.saved_program_id,
+        "eventName": name,
+        "priority": pri,
+        "intervals": _build_intervals(ptype, count, timed=True),
+    }
+    context.response = vtn_post("/events", context.vtn_token, json=body)
+    if context.response.status_code == 201:
+        context.created_event = context.response.json()
+        if not hasattr(context, "uc_events"):
+            context.uc_events = {}
+        context.uc_events[name] = context.created_event
 
 
 # ── event deletion ───────────────────────────────────────────────────────────
