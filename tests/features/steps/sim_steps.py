@@ -86,6 +86,18 @@ def step_trace_does_not_contain_mode(context, mode):
     )
 
 
+@then('the trace shows event "{event_name}" as active')
+def step_trace_shows_event_active(context, event_name):
+    entries = context.trace_response
+    assert any(
+        event_name in e.get("active_events", [])
+        for e in entries
+    ), (
+        f"No trace entry with event '{event_name}' in active_events. "
+        f"Recent active events: {[e.get('active_events', []) for e in entries[:5]]}"
+    )
+
+
 @then('an auto-report for event "{event_name}" exists on VEN-1')
 def step_auto_report_exists(context, event_name):
     # Find the event ID from VEN-1's event list
