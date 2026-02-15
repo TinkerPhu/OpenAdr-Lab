@@ -24,6 +24,7 @@ export function EventsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<VtnEvent | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<VtnEvent | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const programMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -63,7 +64,15 @@ export function EventsPage() {
 
   function handleDeleteConfirm() {
     if (deleteTarget) {
-      deleteMut.mutate(deleteTarget.id, { onSuccess: () => setDeleteTarget(null) });
+      deleteMut.mutate(deleteTarget.id, {
+        onSuccess: () => { setDeleteTarget(null); setDeleteError(null); },
+        onError: () => {
+          setDeleteError(
+            "Cannot delete this event — reports or other records reference it. " +
+            "To end an active event, edit it and set a start time and duration instead."
+          );
+        },
+      });
     }
   }
 
@@ -182,8 +191,9 @@ export function EventsPage() {
         title="Delete Event"
         message={`Delete "${deleteTarget?.eventName ?? deleteTarget?.id}"? This cannot be undone.`}
         onConfirm={handleDeleteConfirm}
-        onCancel={() => setDeleteTarget(null)}
+        onCancel={() => { setDeleteTarget(null); setDeleteError(null); }}
         loading={deleteMut.isPending}
+        error={deleteError}
       />
     </Stack>
   );
