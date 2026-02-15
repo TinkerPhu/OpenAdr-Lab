@@ -78,6 +78,14 @@ def step_trace_contains_mode(context, mode):
     )
 
 
+@then('the trace does not contain mode "{mode}"')
+def step_trace_does_not_contain_mode(context, mode):
+    entries = context.trace_response
+    assert not any(e.get("mode") == mode for e in entries), (
+        f"Found unexpected trace entry with mode '{mode}'"
+    )
+
+
 @then('an auto-report for event "{event_name}" exists on VEN-1')
 def step_auto_report_exists(context, event_name):
     # Find the event ID from VEN-1's event list
