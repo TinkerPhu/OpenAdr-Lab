@@ -1522,4 +1522,22 @@ The `?active` filter works as a post-filter in Rust after fetching from the data
 
 ---
 
-*Last updated: 2026-02-15*
+## Phase 16: Reactor Per-Interval Fix (2026-02-16)
+
+### What was done
+Fixed a bug where the reactor FSM treated all intervals of an event as one continuous activation. When a multi-interval price event had different prices per interval (e.g., $0.12 → $0.35 → $0.15), the FSM would just keep ramping its interpolation factor without resetting, causing VENs to effectively ignore price changes between intervals.
+
+### Root cause
+The FSM only tracked `event_active: bool` — it didn't know *what* the instruction was, just that *an* instruction existed. So mid-range prices (between `price_low` and `price_high`) still showed "Ramping (50%)" even though the target setpoints were identical to defaults (interpolating between defaults and defaults = no change).
+
+### Changes
+1. **`target_key()` function** — computes a string key representing the effective instruction (e.g., `PRICE_HIGH_0.3500`, `PRICE_MID`, `IMPORT_CAP_50.00`). When this key changes between ticks, the FSM resets to Idle and starts ramping fresh toward the new target.
+2. **`is_effectively_active()` function** — mid-range prices (between thresholds) now return `false`, so the FSM stays Idle or ramps back instead of spuriously ramping toward defaults.
+3. **Improved trace reason** — mid-range price intervals now show "Price $0.12 in mid-range (low: $0.10, high: $0.35) — no action" instead of misleading "Ramping (50%)".
+
+### Key learning
+The FSM and the setpoint computation are decoupled by design (FSM produces a factor, setpoints are computed from intent). This means the FSM must also know when the *effective* intent changes, not just whether any event exists. A boolean `event_active` is insufficient for multi-interval events with varying payloads.
+
+---
+
+*Last updated: 2026-02-16*
