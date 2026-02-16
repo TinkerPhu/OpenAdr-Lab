@@ -5,6 +5,14 @@ This manual explains how to replay all 8 use cases from `USE-CASES.md` against t
 **VTN UI:** http://Pi4-Server:8221
 **VEN UI:** http://Pi4-Server:8214
 
+### Timestamps and Time Zones
+
+All timestamps in this manual use **local time with an explicit offset** — currently CET (`+01:00` in winter, `+02:00` in summer). The VTN requires RFC 3339 format, so naive timestamps (without timezone) are rejected.
+
+When you see a timestamp like `2026-02-15T20:00:00+01:00`, that means "8 PM local time". The VTN converts it to UTC internally, and the VEN UI displays it back in your local time zone.
+
+> **Tip:** Just type your local clock time and append `+01:00` (winter) or `+02:00` (summer/CEST).
+
 ---
 
 ## Prerequisites
@@ -97,7 +105,7 @@ When the grid emergency is over, the operator **edits** the event to add timing 
 1. Navigate to **Events** page
 2. Find `manual-emergency-loadshed` in the table
 3. Click the **edit icon** (pencil) on that event row
-4. Enter Start Time: the time the emergency began (e.g., `2026-02-15T14:00:00Z`)
+4. Enter Start Time: the time the emergency began (e.g., `2026-02-15T15:00:00+01:00`)
 5. Enter Duration: how long the curtailment lasted (e.g., `PT30M` for 30 minutes)
 6. Click **"Save"**
 
@@ -154,7 +162,7 @@ A neighborhood with heavy solar PV penetration is over-generating at noon. The d
 8. Enter Event Name: `manual-export-limit`
 9. Select Program: `manual-uc2-export`
 10. Enter Priority: `5`
-11. Paste into Intervals (JSON) — replace `START` with the current time (UTC, a few seconds from now):
+11. Paste into Intervals (JSON) — replace timestamps with your current local time (staggered 2 minutes apart, with `+01:00` for CET):
     ```json
     [
       {"id": 0, "intervalPeriod": {"start": "START", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]},
@@ -162,12 +170,12 @@ A neighborhood with heavy solar PV penetration is over-generating at noon. The d
       {"id": 2, "intervalPeriod": {"start": "START+4M", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]}
     ]
     ```
-    **Example** (if current UTC time is 14:00:00):
+    **Example** (if your local time is 20:00 CET):
     ```json
     [
-      {"id": 0, "intervalPeriod": {"start": "2026-02-15T14:00:00Z", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]},
-      {"id": 1, "intervalPeriod": {"start": "2026-02-15T14:02:00Z", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [50.0]}]},
-      {"id": 2, "intervalPeriod": {"start": "2026-02-15T14:04:00Z", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]}
+      {"id": 0, "intervalPeriod": {"start": "2026-02-15T20:00:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]},
+      {"id": 1, "intervalPeriod": {"start": "2026-02-15T20:02:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [50.0]}]},
+      {"id": 2, "intervalPeriod": {"start": "2026-02-15T20:04:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]}
     ]
     ```
     Each interval is 2 minutes for quick observation. In production, these would be 20-minute windows.
@@ -223,15 +231,15 @@ A utility publishes tomorrow's hourly electricity prices: $0.06/kWh at 3 AM (off
 8. Enter Event Name: `manual-tou-pricing`
 9. Select Program: `manual-uc3-pricing`
 10. Enter Priority: `5`
-11. Paste into Intervals (JSON) — replace timestamps with current UTC time (staggered 2 minutes apart):
+11. Paste into Intervals (JSON) — replace timestamps with your current local time (staggered 2 minutes apart, with `+01:00` for CET):
     ```json
     [
-      {"id": 0, "intervalPeriod": {"start": "2026-02-15T14:00:00Z", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.12]}]},
-      {"id": 1, "intervalPeriod": {"start": "2026-02-15T14:02:00Z", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.35]}]},
-      {"id": 2, "intervalPeriod": {"start": "2026-02-15T14:04:00Z", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.15]}]}
+      {"id": 0, "intervalPeriod": {"start": "2026-02-15T20:00:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.12]}]},
+      {"id": 1, "intervalPeriod": {"start": "2026-02-15T20:02:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.35]}]},
+      {"id": 2, "intervalPeriod": {"start": "2026-02-15T20:04:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.15]}]}
     ]
     ```
-    Adjust the start times to your current UTC time. Each interval is 2 minutes for quick observation. In production, these would be hourly (PT1H) or longer.
+    Adjust the start times to your current local time. Each interval is 2 minutes for quick observation. In production, these would be hourly (PT1H) or longer.
 12. Click **"Create"**
 
 **VEN UI** (http://Pi4-Server:8214):
@@ -284,7 +292,7 @@ The grid operator sees that tomorrow at 2 PM, demand will peak at 95% of grid ca
 8. Enter Event Name: `manual-peak-shave`
 9. Select Program: `manual-uc4-peak`
 10. Enter Priority: `3`
-11. Enter Start Time: `2026-03-01T14:00:00Z`
+11. Enter Start Time: `2026-03-01T15:00:00+01:00`
 12. Enter Duration: `PT4H`
 13. Paste into Intervals (JSON):
     ```json
@@ -398,15 +406,15 @@ A 500 kWh community battery receives a 3-phase dispatch:
 8. Enter Event Name: `manual-battery-dispatch`
 9. Select Program: `manual-uc6-battery`
 10. Enter Priority: `3`
-11. Paste into Intervals (JSON) — replace timestamps with current UTC time (staggered 2 minutes apart):
+11. Paste into Intervals (JSON) — replace timestamps with your current local time (staggered 2 minutes apart, with `+01:00` for CET):
     ```json
     [
-      {"id": 0, "intervalPeriod": {"start": "2026-02-15T14:00:00Z", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [80.0]}]},
-      {"id": 1, "intervalPeriod": {"start": "2026-02-15T14:02:00Z", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [0.0]}]},
-      {"id": 2, "intervalPeriod": {"start": "2026-02-15T14:04:00Z", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [-50.0]}]}
+      {"id": 0, "intervalPeriod": {"start": "2026-02-15T20:00:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [80.0]}]},
+      {"id": 1, "intervalPeriod": {"start": "2026-02-15T20:02:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [0.0]}]},
+      {"id": 2, "intervalPeriod": {"start": "2026-02-15T20:04:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [-50.0]}]}
     ]
     ```
-    Adjust the start times to your current UTC time. Each interval is 2 minutes for quick observation.
+    Adjust the start times to your current local time. Each interval is 2 minutes for quick observation.
 12. Click **"Create"**
 
 **VEN UI** (http://Pi4-Server:8214):
@@ -634,7 +642,7 @@ curl -s -X POST http://Pi4-Server:8200/programs \
 
 curl -s -X POST http://Pi4-Server:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-export-limit", "priority": 5, "intervals": [{"id": 0, "intervalPeriod": {"start": "'$(date -u -d '+0 min' +%Y-%m-%dT%H:%M:%SZ)'", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]}, {"id": 1, "intervalPeriod": {"start": "'$(date -u -d '+2 min' +%Y-%m-%dT%H:%M:%SZ)'", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [50.0]}]}, {"id": 2, "intervalPeriod": {"start": "'$(date -u -d '+4 min' +%Y-%m-%dT%H:%M:%SZ)'", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]}]}' | python3 -m json.tool
+  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-export-limit", "priority": 5, "intervals": [{"id": 0, "intervalPeriod": {"start": "'$(date -d '+0 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]}, {"id": 1, "intervalPeriod": {"start": "'$(date -d '+2 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [50.0]}]}, {"id": 2, "intervalPeriod": {"start": "'$(date -d '+4 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]}]}' | python3 -m json.tool
 ```
 
 ### UC3 — Dynamic Price Signal
@@ -646,7 +654,7 @@ curl -s -X POST http://Pi4-Server:8200/programs \
 
 curl -s -X POST http://Pi4-Server:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-tou-pricing", "priority": 5, "intervals": [{"id": 0, "intervalPeriod": {"start": "'$(date -u -d '+0 min' +%Y-%m-%dT%H:%M:%SZ)'", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.12]}]}, {"id": 1, "intervalPeriod": {"start": "'$(date -u -d '+2 min' +%Y-%m-%dT%H:%M:%SZ)'", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.35]}]}, {"id": 2, "intervalPeriod": {"start": "'$(date -u -d '+4 min' +%Y-%m-%dT%H:%M:%SZ)'", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.15]}]}]}' | python3 -m json.tool
+  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-tou-pricing", "priority": 5, "intervals": [{"id": 0, "intervalPeriod": {"start": "'$(date -d '+0 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.12]}]}, {"id": 1, "intervalPeriod": {"start": "'$(date -d '+2 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.35]}]}, {"id": 2, "intervalPeriod": {"start": "'$(date -d '+4 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.15]}]}]}' | python3 -m json.tool
 ```
 
 ### UC4 — Planned Peak Shaving
@@ -658,7 +666,7 @@ curl -s -X POST http://Pi4-Server:8200/programs \
 
 curl -s -X POST http://Pi4-Server:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-peak-shave", "priority": 3, "intervalPeriod": {"start": "2026-03-01T14:00:00Z", "duration": "PT4H"}, "intervals": [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [50.0]}]}]}' | python3 -m json.tool
+  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-peak-shave", "priority": 3, "intervalPeriod": {"start": "2026-03-01T15:00:00+01:00", "duration": "PT4H"}, "intervals": [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [50.0]}]}]}' | python3 -m json.tool
 ```
 
 ### UC5 — EV Charging Management
@@ -682,7 +690,7 @@ curl -s -X POST http://Pi4-Server:8200/programs \
 
 curl -s -X POST http://Pi4-Server:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-battery-dispatch", "priority": 3, "intervals": [{"id": 0, "intervalPeriod": {"start": "'$(date -u -d '+0 min' +%Y-%m-%dT%H:%M:%SZ)'", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [80.0]}]}, {"id": 1, "intervalPeriod": {"start": "'$(date -u -d '+2 min' +%Y-%m-%dT%H:%M:%SZ)'", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [0.0]}]}, {"id": 2, "intervalPeriod": {"start": "'$(date -u -d '+4 min' +%Y-%m-%dT%H:%M:%SZ)'", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [-50.0]}]}]}' | python3 -m json.tool
+  -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-battery-dispatch", "priority": 3, "intervals": [{"id": 0, "intervalPeriod": {"start": "'$(date -d '+0 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [80.0]}]}, {"id": 1, "intervalPeriod": {"start": "'$(date -d '+2 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [0.0]}]}, {"id": 2, "intervalPeriod": {"start": "'$(date -d '+4 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [-50.0]}]}]}' | python3 -m json.tool
 ```
 
 ### UC7 — Connectivity Check
