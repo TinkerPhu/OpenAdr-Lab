@@ -44,6 +44,40 @@ impl Setpoints {
     }
 }
 
+/// Compute a key representing the effective target from the current intent.
+/// When this key changes between ticks, the FSM resets to react to the new instruction.
+fn target_key(intent: &Option<ControlIntent>, profile: &Profile) -> String {
+    match intent {
+        None => "IDLE".to_string(),
+        Some(ci) => match ci.mode {
+            ReactorMode::Price => {
+                if ci.value >= profile.reactor.price_high {
+                    format!("PRICE_HIGH_{:.4}", ci.value)
+                } else if ci.value <= profile.reactor.price_low {
+                    format!("PRICE_LOW_{:.4}", ci.value)
+                } else {
+                    "PRICE_MID".to_string()
+                }
+            }
+            _ => format!("{}_{:.2}", ci.mode, ci.value),
+        },
+    }
+}
+
+/// Whether the current intent requires an active response (setpoints differ from defaults).
+fn is_effectively_active(intent: &Option<ControlIntent>, profile: &Profile) -> bool {
+    match intent {
+        None => false,
+        Some(ci) => match ci.mode {
+            ReactorMode::Price => {
+                ci.value >= profile.reactor.price_high || ci.value <= profile.reactor.price_low
+            }
+            ReactorMode::Idle => false,
+            _ => true, // capacity limits, SIMPLE always require action
+        },
+    }
+}
+
 /// The reactor: evaluates events and computes setpoints for the simulator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Reactor {
@@ -51,6 +85,8 @@ pub struct Reactor {
     pub trace: DecisionTrace,
     #[serde(skip)]
     last_mode: Option<ReactorMode>,
+    #[serde(skip)]
+    last_target_key: Option<String>,
 }
 
 impl Reactor {
@@ -59,6 +95,7 @@ impl Reactor {
             fsm: ReactorFsm::new(),
             trace: DecisionTrace::new(),
             last_mode: None,
+            last_target_key: None,
         }
     }
 
@@ -81,14 +118,28 @@ impl Reactor {
         // Arbitrate: select winning control intent
         let intent = arbitrate(&active);
 
-        let (event_active, mode, winning_desc) = match &intent {
-            Some(ci) => (true, ci.mode.clone(), Some(ci.description.clone())),
-            None => (false, ReactorMode::Idle, None),
+        // Detect instruction changes between intervals and reset FSM
+        let current_key = target_key(&intent, profile);
+        let key_changed = self.last_target_key.as_ref() != Some(&current_key);
+        if key_changed {
+            if let Some(ref _prev) = self.last_target_key {
+                // Target changed — reset FSM so it ramps fresh toward new target
+                self.fsm = ReactorFsm::new();
+            }
+            self.last_target_key = Some(current_key);
+        }
+
+        // Mid-range price = target is defaults = no action needed
+        let effective_active = is_effectively_active(&intent, profile);
+
+        let (mode, winning_desc) = match &intent {
+            Some(ci) => (ci.mode.clone(), Some(ci.description.clone())),
+            None => (ReactorMode::Idle, None),
         };
 
         // FSM transition
         let factor = self.fsm.transition(
-            event_active,
+            effective_active,
             dt_s,
             profile.reactor.delay_s,
             profile.reactor.ramp_duration_s,
@@ -125,19 +176,27 @@ impl Reactor {
         }
 
         // Build reason
-        let reason = match (&mode, &self.fsm.state) {
-            (ReactorMode::Idle, _) => "No active events".to_string(),
-            (_, fsm::FsmState::Delaying { .. }) => {
+        let reason = match (&mode, &self.fsm.state, effective_active) {
+            (ReactorMode::Idle, _, _) => "No active events".to_string(),
+            (ReactorMode::Price, fsm::FsmState::Idle, false) => {
+                format!(
+                    "Price ${:.2} in mid-range (low: ${:.2}, high: ${:.2}) — no action",
+                    intent.as_ref().map(|ci| ci.value).unwrap_or(0.0),
+                    profile.reactor.price_low,
+                    profile.reactor.price_high
+                )
+            }
+            (_, fsm::FsmState::Delaying { .. }, _) => {
                 format!("Delaying before response (strategy: {})", profile.reactor.strategy)
             }
-            (_, fsm::FsmState::Ramping { .. }) => {
+            (_, fsm::FsmState::Ramping { .. }, _) => {
                 format!("Ramping to target (factor: {:.0}%)", factor * 100.0)
             }
-            (_, fsm::FsmState::Holding) => {
+            (_, fsm::FsmState::Holding, _) => {
                 format!("Holding setpoints for {}", winning_desc.as_deref().unwrap_or("event"))
             }
-            (_, fsm::FsmState::RampingBack { .. }) => "Ramping back to defaults".to_string(),
-            (_, fsm::FsmState::Idle) => "Idle".to_string(),
+            (_, fsm::FsmState::RampingBack { .. }, _) => "Ramping back to defaults".to_string(),
+            (_, fsm::FsmState::Idle, _) => "Idle".to_string(),
         };
 
         // Record trace entry
