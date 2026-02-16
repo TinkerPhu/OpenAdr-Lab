@@ -23,5 +23,14 @@ target
 # Docker bind-mount data directories
 **/data/
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Test artifacts
+*.output
+*.stackdump
+
 # Claude Code local settings
 .claude/settings.local.json
