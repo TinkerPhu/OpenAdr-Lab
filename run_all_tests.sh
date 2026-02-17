@@ -122,35 +122,8 @@ fi
 if $RUN_RUST; then
     header "3. openleadr-rs Cargo Tests (on Pi4-Server)"
     if ssh -o ConnectTimeout=5 "$PI4_HOST" true 2>/dev/null; then
-        # Run cargo tests inside a temporary container with a DB
-        RUST_TEST_CMD=$(cat <<'REMOTESCRIPT'
-cd /srv/docker/openadr_lab/openleadr-rs
-
-echo "Starting test database..."
-docker compose up db --wait -d 2>&1
-
-echo "Running cargo tests in container..."
-docker run --rm \
-  --network openleadr-rs_default \
-  -e DATABASE_URL=postgres://openadr:openadr@db:5432/openadr \
-  -e RUST_BACKTRACE=1 \
-  -e SQLX_OFFLINE=true \
-  -v "$(pwd):/workspace" \
-  -w /workspace \
-  rust:1.90-slim \
-  bash -c "
-    apt-get update -qq && apt-get install -y -qq pkg-config libssl-dev > /dev/null 2>&1
-    cargo test --workspace 2>&1
-  "
-RESULT=$?
-
-echo "Stopping test database..."
-docker compose down 2>&1
-
-exit $RESULT
-REMOTESCRIPT
-)
-        if ssh "$PI4_HOST" "$RUST_TEST_CMD" 2>&1; then
+        RUST_CMD="cd $PI4_DIR && docker compose -f tests/docker-compose.cargo-test.yml run --build --rm cargo-test 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.cargo-test.yml down 2>&1; exit \$RESULT"
+        if ssh "$PI4_HOST" "$RUST_CMD" 2>&1; then
             pass "openleadr-rs cargo tests"
         else
             fail "openleadr-rs cargo tests"
