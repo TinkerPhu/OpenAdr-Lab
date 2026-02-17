@@ -6,3 +6,7 @@ VEN polling with active filter: change VEN's `/events` poll to use `?active=true
 As a user I should be able to influence the siumulation setpoints of the simulated devices like user desired EV-Chager setpoint (overridden by events) and irradiance level.
 create a separate tab in the VEN UI to graphically show the traces in a curve diagram, showing the values of the traces graphically.
 Add a filter in VTN UI event table to omit the past events.
+Add a DB-Reset script so it can be re-seeded easily.
+
+
+add a setup script that docker composes all required containers.

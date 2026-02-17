@@ -115,6 +115,8 @@ def build_events():
                 ],
             },
             # UC5: EV Charge Pause — 2 intervals (pause/resume)
+            # Event targets only ven-2 (not ven-3) to demonstrate two-layer filtering:
+            # program enrollment (ven-2 + ven-3) vs event targeting (ven-2 only)
             {
                 "eventName": "ev-charge-pause",
                 "priority": 2,
@@ -124,7 +126,6 @@ def build_events():
                 },
                 "targets": [
                     {"type": "VEN_NAME", "values": ["ven-2"]},
-                    {"type": "VEN_NAME", "values": ["ven-3"]},
                 ],
                 "intervals": [
                     {
