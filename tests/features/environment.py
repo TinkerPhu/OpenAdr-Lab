@@ -7,8 +7,30 @@ from features.helpers.wait import wait_for_url
 UI_BASE_URL = os.environ.get("UI_BASE_URL", "http://test-ui:80")
 
 
+def _check_not_live():
+    """Abort if URLs point at live instances (not test-* or localhost)."""
+    from urllib.parse import urlparse
+    safe_hosts = {"localhost", "127.0.0.1"}
+    urls = {
+        "VTN_BASE_URL": VTN_BASE_URL,
+        "VEN_BASE_URL": VEN_BASE_URL,
+        "VEN2_BASE_URL": VEN2_BASE_URL,
+        "BFF_BASE_URL": BFF_BASE_URL,
+    }
+    for name, url in urls.items():
+        host = urlparse(url).hostname or ""
+        if host not in safe_hosts and not host.startswith("test-"):
+            if os.environ.get("ALLOW_LIVE_TESTS", "").lower() not in ("1", "true", "yes"):
+                raise RuntimeError(
+                    f"SAFETY: {name}={url} points at live host '{host}'. "
+                    f"Tests should run against the test Docker compose stack (test-* hostnames). "
+                    f"Set ALLOW_LIVE_TESTS=true to override."
+                )
+
+
 def before_all(context):
     """Wait for all services to be reachable before running any tests."""
+    _check_not_live()
     print(f"Waiting for VTN at {VTN_BASE_URL} ...")
     wait_for_url(f"{VTN_BASE_URL}/health", timeout=120)
 
