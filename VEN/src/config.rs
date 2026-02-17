@@ -30,7 +30,7 @@ impl Config {
         let poll_programs_secs = std::env::var("POLL_PROGRAMS_SECS")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(300);
+            .unwrap_or(30);
 
         let poll_reports_secs = std::env::var("POLL_REPORTS_SECS")
             .ok()
