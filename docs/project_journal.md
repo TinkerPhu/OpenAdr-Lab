@@ -1540,4 +1540,77 @@ The FSM and the setpoint computation are decoupled by design (FSM produces a fac
 
 ---
 
-*Last updated: 2026-02-16*
+## Phase 16: Fix VEN_NAME target reconstruction (upstream PR #372)
+
+**Date**: 2026-02-17
+
+### Problem
+`extract_vens()` in openleadr-rs strips VEN_NAME targets on program creation and stores them as `ven_program` rows in the database. But `retrieve` / `retrieve_all` never reconstructed them — `p.targets` was always NULL for VEN enrollment. Operators who created enrollment couldn't read it back via the API, and the VTN UI couldn't display enrollment checkboxes correctly.
+
+### What we did
+1. **Created branch `fix/program-ven-targets`** from `upstream/main` (commit `b24836f`, release 0.1.3)
+2. **Added `enrich_ven_targets()` helper** in `openleadr-vtn/src/data_source/postgres/program.rs`:
+   - Single query against `ven_program` + `ven` for fetched program IDs
+   - Groups by program_id, merges `TargetEntry { VENName, [names] }` into `content.targets`
+   - Only runs for business users — VENs never see other VENs' enrollment
+   - Called from `retrieve`, `retrieve_all`, `create`, and `update`
+3. **Manually created SQLx offline cache** — computed SHA256 of exact query text for the `.sqlx/query-*.json` file
+4. **Reduced VEN `poll_programs_secs`** default from 300 to 30 for faster program discovery
+5. **Created upstream PR** [#372](https://github.com/OpenLEADR/openleadr-rs/pull/372)
+
+### Key learnings
+- **SQLx offline cache hashing**: The hash is SHA256 of the exact raw string content (between `r#"` and `"#`). Trailing whitespace matters! A single space difference invalidates the cache. When computing manually, beware of shell `$1` interpolation.
+- **Docker rebuild from scratch**: Docker's `COPY . .` invalidates all subsequent layers when any file changes. A single-line change triggers ~25 min full recompile. Cargo-chef or BuildKit cache mounts would fix this.
+- **BFF can't fix this bug**: The VTN API has no endpoint exposing `ven_program` associations. The enrollment data is only in the database, so the fix must be in the VTN data layer.
+
+---
+
+## Phase 17: Event-level VEN_NAME target filtering (Object Privacy layer 2)
+
+**Date**: 2026-02-17
+**Branch**: `fix/event-ven-targets` (from `upstream/main`)
+**PR**: [#373](https://github.com/OpenLEADR/openleadr-rs/pull/373)
+
+### Problem
+
+OpenADR 3 specifies two-layer Object Privacy for events:
+1. **Program-level** (layer 1): VEN_NAME targets on a program control which VENs see the program and its events — already implemented via `ven_program` table
+2. **Event-level** (layer 2): VEN_NAME targets on an event further restrict which enrolled VENs see that specific event — **was missing**
+
+Our UC5 seed data exposed the bug: program "EV Managed Charging" enrolls ven-2 + ven-3, event "ev-charge-pause" targets only ven-2, but ven-3 could still see the event.
+
+### Solution
+
+Added a SQL WHERE clause to both `retrieve()` and `retrieve_all()` in `openleadr-vtn/src/data_source/postgres/event.rs`. For VEN users, if the event has VEN_NAME targets, only show the event if the VEN's name matches. The clause uses four OR branches:
+- `NOT $is_ven` — skip for business users
+- `e.targets IS NULL` — no event targets → visible
+- `NOT EXISTS (VEN_NAME in targets)` — has targets but no VEN_NAME type → visible
+- `EXISTS (VEN's name in VEN_NAME values)` — VEN is explicitly targeted → visible
+
+No new query parameters needed — reuses existing `is_ven()` and `ven_ids_string()`.
+
+### Changes
+
+1. Modified SQL in `event.rs` — `retrieve()` and `retrieve_all()`
+2. Created test fixture `fixtures/events-ven-targets.sql` with event-4 (VEN_NAME target for ven-1-name only)
+3. Added 4 unit tests in `mod ven_target_filtering`:
+   - VEN in targets → sees event
+   - VEN enrolled but not in targets → hidden
+   - Event without VEN_NAME targets → all enrolled VENs see it
+   - Business user → sees all events
+4. Updated SQLx offline cache (2 files renamed with new hashes)
+5. Built and deployed on Pi4 (~28 min full rebuild from upstream/main)
+
+### Verification
+
+| User | ev-charge-pause visible? | Expected |
+|---|---|---|
+| ven-2 | Yes | Yes (targeted) |
+| ven-3 | No | No (enrolled but not targeted) |
+| business | Yes | Yes (sees all) |
+
+Events without VEN_NAME targets (e.g., from "HVAC Optimization") remain visible to all enrolled VENs — no regression.
+
+---
+
+*Last updated: 2026-02-17*
