@@ -5,20 +5,20 @@
 - Hash = SHA-256 of the exact query string between `r#"` and `"#` (whitespace matters)
 - File naming: `.sqlx/query-{hash}.json`, `hash` field inside must match
 - When modifying SQL in Rust source, must update/rename `.sqlx` cache files with new hash
-- **NEVER edit `.sqlx` queries or surrounding Rust code from Windows** — the Edit tool may strip trailing whitespace inside SQL strings, changing the hash. Even restoring the whitespace won't help because Windows CRLF vs Linux LF produces different hashes
-- **NEVER compute hashes manually** — line endings differ between platforms
-- **Mandatory workflow**: always generate cache files on Pi4-Server (the build target):
+- **Preferred workflow** — generate cache on Pi4-Server (safest, reads the exact bytes Rust will compile):
   1. Push Rust code changes to the fork
   2. Pull on Pi4-Server
   3. Run hash script on Pi4 reading the actual `.rs` file:
      ```python
-     import hashlib, re, json, shutil
+     import hashlib, re, json
      with open('openleadr-vtn/src/data_source/postgres/event.rs') as f: content = f.read()
      queries = re.findall(r'r#"(.*?)"#', content, re.DOTALL)
      for i, q in enumerate(queries): print(i, hashlib.sha256(q.encode()).hexdigest())
      ```
-  4. Copy an existing `.sqlx/query-*.json`, update `hash` field, save as new filename
+  4. Copy an existing `.sqlx/query-*.json`, update `hash` + `query` fields, save as new filename
   5. Commit from Pi4 and push
+- **Alternative (Windows-safe)** — define SQL inline in a Python `.py` script file, run on Windows with `python gen_sqlx_cache.py`. This avoids reading the `.rs` file (avoiding CRLF/LF ambiguity) because Python string literals use `\n` (LF), matching what Rust/SQLx sees on Pi4. Verified working in Phase 17.
+- **Risk**: if the Edit tool alters whitespace inside the SQL `r#"..."#` block (e.g. strips trailing spaces), the hash changes silently and the build fails 25 min later — always verify the generated hash against what Pi4 computes
 - **Symlink note**: `openleadr-vtn/.sqlx` → `../.sqlx`. Use `.sqlx/` path for `git add`, not `openleadr-vtn/.sqlx/`
 - **When replacing a cache file**: (1) DELETE the old file (`git rm`), (2) create new file with correct hash as filename AND in `hash` field, (3) **update the `query` field** inside the JSON to match the actual current SQL text from the source. Copying an old file and only changing `hash` field leaves stale query text → SQLx "hash collision" error
 - **The `query` field inside the cache JSON must match the SQL in the `.rs` file exactly** — if it doesn't, SQLx detects the mismatch and fails
