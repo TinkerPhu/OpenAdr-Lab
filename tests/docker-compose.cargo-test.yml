@@ -1,0 +1,48 @@
+###############################################################################
+# Cargo test stack for openleadr-rs (submodule)
+#
+# Usage (on Pi4-Server):
+#   cd /srv/docker/openadr_lab
+#   docker compose -f tests/docker-compose.cargo-test.yml run --build --rm cargo-test
+#   docker compose -f tests/docker-compose.cargo-test.yml down
+#
+# Named volumes keep the cargo registry and build artifacts across runs,
+# so subsequent test runs only recompile changed crates.
+###############################################################################
+
+name: openadr-cargo-test
+
+services:
+  db:
+    image: ghcr.io/tweedegolf/postgres:18
+    environment:
+      POSTGRES_USER: openadr
+      POSTGRES_DB: openadr
+      POSTGRES_PASSWORD: openadr
+      POSTGRES_HOST_AUTH_METHOD: trust
+      TZ: UTC
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openadr"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  cargo-test:
+    build:
+      context: ../openleadr-rs
+      dockerfile: ../tests/Dockerfile.cargo-test
+    environment:
+      DATABASE_URL: postgres://openadr:openadr@db:5432/openadr
+      SQLX_OFFLINE: "true"
+      RUST_BACKTRACE: "1"
+      CARGO_HOME: /cargo-cache
+    volumes:
+      - cargo-registry:/cargo-cache
+      - cargo-target:/app/target
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  cargo-registry:
+  cargo-target:
