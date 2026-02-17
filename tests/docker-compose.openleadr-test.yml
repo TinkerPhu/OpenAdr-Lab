@@ -3,11 +3,8 @@
 #
 # Usage (on Pi4-Server):
 #   cd /srv/docker/openadr_lab
-#   docker compose -f tests/docker-compose.cargo-test.yml run --build --rm cargo-test
-#   docker compose -f tests/docker-compose.cargo-test.yml down
-#
-# Named volumes keep the cargo registry and build artifacts across runs,
-# so subsequent test runs only recompile changed crates.
+#   docker compose -f tests/docker-compose.openleadr-test.yml run --build --rm cargo-test
+#   docker compose -f tests/docker-compose.openleadr-test.yml down
 ###############################################################################
 
 name: openadr-cargo-test
@@ -30,19 +27,11 @@ services:
   cargo-test:
     build:
       context: ../openleadr-rs
-      dockerfile: ../tests/Dockerfile.cargo-test
+      dockerfile: ../tests/Dockerfile.openleadr-test
     environment:
       DATABASE_URL: postgres://openadr:openadr@db:5432/openadr
       SQLX_OFFLINE: "true"
       RUST_BACKTRACE: "1"
-      CARGO_HOME: /cargo-cache
-    volumes:
-      - cargo-registry:/cargo-cache
-      - cargo-target:/app/target
     depends_on:
       db:
         condition: service_healthy
-
-volumes:
-  cargo-registry:
-  cargo-target:
