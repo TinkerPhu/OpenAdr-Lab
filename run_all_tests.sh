@@ -122,7 +122,7 @@ fi
 if $RUN_RUST; then
     header "3. openleadr-rs Cargo Tests (on Pi4-Server)"
     if ssh -o ConnectTimeout=5 "$PI4_HOST" true 2>/dev/null; then
-        RUST_CMD="cd $PI4_DIR && docker compose -f tests/docker-compose.cargo-test.yml run --build --rm cargo-test 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.cargo-test.yml down 2>&1; exit \$RESULT"
+        RUST_CMD="cd $PI4_DIR && docker compose -f tests/docker-compose.openleadr-test.yml run --build --rm cargo-test 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.openleadr-test.yml down 2>&1; exit \$RESULT"
         if ssh "$PI4_HOST" "$RUST_CMD" 2>&1; then
             pass "openleadr-rs cargo tests"
         else
