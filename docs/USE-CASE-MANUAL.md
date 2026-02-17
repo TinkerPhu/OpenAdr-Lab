@@ -292,7 +292,7 @@ The grid operator sees that tomorrow at 2 PM, demand will peak at 95% of grid ca
 8. Enter Event Name: `manual-peak-shave`
 9. Select Program: `manual-uc4-peak`
 10. Enter Priority: `3`
-11. Enter Start Time: `2026-03-01T15:00:00+01:00`
+11. Enter Start Time: `2026-03-01T15:00:00+01:00` (14 days in future)
 12. Enter Duration: `PT4H`
 13. Paste into Intervals (JSON):
     ```json
@@ -329,9 +329,9 @@ A fleet of 50 EVs returns to the company parking garage at 5 PM and all plug in.
 ### Key Characteristics
 
 - **Payload type: IMPORT_CAPACITY_LIMIT** (0 = pause charging)
-- **Event-level targets** (targets on the event itself, not just the program)
+- **Two-layer filtering** — program enrollment targets multiple VENs, event targets a subset
 - **Priority 2** (high — grid stability concern)
-- **Group-based** — targets specific VENs representing charging infrastructure
+- **Group-based** — program enrolls all EV sites, event targets a specific charging station
 
 ### Step-by-Step Replay (Web UI)
 
@@ -340,14 +340,14 @@ A fleet of 50 EVs returns to the company parking garage at 5 PM and all plug in.
 1. Navigate to **Programs** page
 2. Click **"Create"**
 3. Enter Program Name: `manual-uc5-ev`
-4. Under **Enrolled VENs**, check **ven-2** only
+4. Under **Enrolled VENs**, check both **ven-2** and **ven-3** (both are EV charging sites)
 5. Click **"Create"**
 6. Navigate to **Events** page
 7. Click **"Create"**
 8. Enter Event Name: `manual-ev-charge-control`
 9. Select Program: `manual-uc5-ev`
 10. Enter Priority: `2`
-11. Paste into Targets (JSON):
+11. Paste into Targets (JSON) — target only ven-2 (not ven-3):
     ```json
     [{"type": "VEN_NAME", "values": ["ven-2"]}]
     ```
@@ -360,15 +360,21 @@ A fleet of 50 EVs returns to the company parking garage at 5 PM and all plug in.
 **VEN UI** (http://Pi4-Server:8214):
 
 14. Select **VEN2** in the VEN dropdown
-15. Navigate to **Events** — verify `manual-ev-charge-control` appears
-16. Select **VEN1** in the VEN dropdown
-17. Navigate to **Events** — verify `manual-ev-charge-control` does **NOT** appear
+15. Navigate to **Events** — verify `manual-ev-charge-control` appears (enrolled in program AND targeted by event)
+16. Select **VEN3** in the VEN dropdown
+17. Navigate to **Events** — verify `manual-ev-charge-control` does **NOT** appear (enrolled in program but NOT targeted by event)
+18. Select **VEN1** in the VEN dropdown
+19. Navigate to **Events** — verify `manual-ev-charge-control` does **NOT** appear (not enrolled in program at all)
 
 ### What to Observe
 
-- The event has its own `targets` array (event-level targeting), in addition to the program's enrollment
+- **Two-layer filtering in action:**
+  - VEN-2 sees the event (enrolled in program + targeted by event)
+  - VEN-3 does NOT see the event (enrolled in program but not targeted by event)
+  - VEN-1 does NOT see the event (not enrolled in program at all)
+- The program's enrollment targets (`ven-2`, `ven-3`) control who can see the program
+- The event's own `targets` array further restricts which enrolled VENs receive this specific event
 - `IMPORT_CAPACITY_LIMIT` of `0.0` means "stop drawing power" (pause charging)
-- Only VEN-2 (the EV site) sees the event
 
 ---
 
@@ -672,10 +678,12 @@ curl -s -X POST http://Pi4-Server:8200/events \
 ### UC5 — EV Charging Management
 
 ```bash
+# Enroll both ven-2 and ven-3 in the program
 curl -s -X POST http://Pi4-Server:8200/programs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"programName": "manual-uc5-ev", "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}]}' | python3 -m json.tool
+  -d '{"programName": "manual-uc5-ev", "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}, {"type": "VEN_NAME", "values": ["ven-3"]}]}' | python3 -m json.tool
 
+# Target only ven-2 in the event (ven-3 enrolled but not targeted)
 curl -s -X POST http://Pi4-Server:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-ev-charge-control", "priority": 2, "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}], "intervals": [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [0.0]}]}]}' | python3 -m json.tool
@@ -763,7 +771,7 @@ curl -s http://Pi4-Server:8211/events | python3 -m json.tool
 | Check specific VEN checkboxes | Only those VENs | UC1, UC6 |
 | Check multiple VEN checkboxes | Multiple VENs | UC4 |
 | Leave all checkboxes unchecked | All VENs (open) | UC3, UC7 |
-| Event-level Targets (JSON) | Further restrict within program | UC5 |
+| Event-level Targets (JSON) | Further restrict within enrolled VENs | UC5 (program: ven-2+ven-3, event: ven-2 only) |
 
 ---
 
