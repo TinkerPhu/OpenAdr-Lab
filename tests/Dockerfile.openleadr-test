@@ -15,4 +15,5 @@ WORKDIR /app
 COPY . .
 ENV SQLX_OFFLINE=true
 ENV RUST_BACKTRACE=1
+ENV CARGO_BUILD_JOBS=1
 CMD ["cargo", "test", "--workspace"]
