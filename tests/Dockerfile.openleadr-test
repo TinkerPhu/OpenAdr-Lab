@@ -2,31 +2,16 @@
 # Dockerfile for running openleadr-rs cargo tests.
 #
 # Build context: ../openleadr-rs (the submodule root)
-# Used by: tests/docker-compose.cargo-test.yml
+# Used by: tests/docker-compose.openleadr-test.yml
 #
-# Mirrors the cargo-chef pattern from the submodule's dev branch vtn.Dockerfile.
-# Dependency compilation is a cached Docker layer — only changed crates recompile.
+# Compiled artifacts live in named Docker volumes (see docker-compose), so
+# only changed crates are recompiled on each run. First run is slow (~25 min
+# on Pi4 ARM64); subsequent runs are ~1-2 min.
 ###############################################################################
 
-FROM rust:1.90-alpine AS base
+FROM rust:1.90-alpine
 RUN apk add --no-cache alpine-sdk openssl-dev openssl-libs-static
-
-# --- Stage 1: planner (extract dependency recipe) ---
-FROM base AS planner
-RUN cargo install cargo-chef
 WORKDIR /app
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-# --- Stage 2: cook (compile dependencies only — cached as Docker layer) ---
-FROM base AS cook
-RUN cargo install cargo-chef
-WORKDIR /app
-COPY --from=planner /app/recipe.json recipe.json
-RUN SQLX_OFFLINE=true cargo chef cook --tests --workspace --recipe-path recipe.json
-
-# --- Stage 3: run tests ---
-FROM cook AS tester
 COPY . .
 ENV SQLX_OFFLINE=true
 ENV RUST_BACKTRACE=1
