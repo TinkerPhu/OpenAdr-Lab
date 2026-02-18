@@ -11,6 +11,9 @@
 #   vtn        — openleadr-rs VTN (triggers SQLx migrations)
 #   seed       — loads test_user_credentials fixture after migrations
 #   cargo-test — runs cargo test --workspace against the seeded stack
+#
+# Named volumes (cargo-registry, cargo-git, cargo-target) cache compiled
+# artifacts between runs. First run is slow; subsequent runs are ~1-2 min.
 ###############################################################################
 
 name: openadr-cargo-test
@@ -66,6 +69,15 @@ services:
       DATABASE_URL: postgres://openadr:openadr@db:5432/openadr
       SQLX_OFFLINE: "true"
       RUST_BACKTRACE: "1"
+    volumes:
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - cargo-target:/app/target
     depends_on:
       seed:
         condition: service_completed_successfully
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  cargo-target:
