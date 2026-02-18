@@ -5,6 +5,12 @@
 #   cd /srv/docker/openadr_lab
 #   docker compose -f tests/docker-compose.openleadr-test.yml run --build --rm cargo-test
 #   docker compose -f tests/docker-compose.openleadr-test.yml down
+#
+# Services:
+#   db         — PostgreSQL (ephemeral)
+#   vtn        — openleadr-rs VTN (triggers SQLx migrations)
+#   seed       — loads test_user_credentials fixture after migrations
+#   cargo-test — runs cargo test --workspace against the seeded stack
 ###############################################################################
 
 name: openadr-cargo-test
@@ -24,14 +30,43 @@ services:
       timeout: 5s
       retries: 10
 
+  vtn:
+    build:
+      context: ../openleadr-rs
+      dockerfile: vtn.Dockerfile
+    environment:
+      DATABASE_URL: postgres://openadr:openadr@db:5432/openadr
+      RUST_LOG: warn
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  seed:
+    image: postgres:16-alpine
+    depends_on:
+      vtn:
+        condition: service_healthy
+    volumes:
+      - ../openleadr-rs/fixtures:/fixtures:ro
+    environment:
+      PGPASSWORD: openadr
+    command: >
+      sh -c "psql -h db -U openadr -d openadr -f /fixtures/test_user_credentials.sql"
+
   cargo-test:
     build:
       context: ../openleadr-rs
       dockerfile: ../tests/Dockerfile.openleadr-test
     environment:
       DATABASE_URL: postgres://openadr:openadr@db:5432/openadr
+      OPENLEADR_RS_VTN_URL: http://vtn:3000
       SQLX_OFFLINE: "true"
       RUST_BACKTRACE: "1"
     depends_on:
-      db:
-        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
