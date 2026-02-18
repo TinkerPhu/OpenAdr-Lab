@@ -1613,4 +1613,55 @@ Events without VEN_NAME targets (e.g., from "HVAC Optimization") remain visible 
 
 ---
 
-*Last updated: 2026-02-17*
+## Phase 17b: Perfect Upstream Commits — PR #373 DCO Fix + Test Stack Safety (2026-02-18)
+
+### Problem
+
+PR #373 (`fix/event-ven-targets`) had a DCO failure on `337ca5c` ("Fix test fixtures"): the commit author was `TinkerPhu@users.noreply.github.com` but `Signed-off-by` used `tinker.phu@gmail.com` — the DCO bot requires these to match exactly.
+
+The local branch was also in a messy state: 4 commits locally (a stray `fixup!` from an aborted rebase) vs 3 on origin.
+
+Additionally, the first cargo test run on Pi4 caused a hard crash: two `cargo test --workspace` containers started simultaneously (first nohup launch reported exit code 1 due to stderr output, but the container had actually launched; the second explicit launch added a second), maxing out the Pi4's CPU and RAM until SSH became unreachable and required a power cycle.
+
+### What Was Done
+
+**Step 1 — Branch cleanup:** Reset local branch to origin state (3 commits: `284fe7e`, `337ca5c`, `8b1c380`).
+
+**Step 2 — Squash + DCO fix:** Used `git reset --soft upstream/main` to unstage all 3 commits into the index, then created a single clean commit with:
+- Author email: `TinkerPhu@users.noreply.github.com`
+- `Signed-off-by: TinkerPhu <TinkerPhu@users.noreply.github.com>` (matching)
+- A comprehensive commit message covering all 3 original changes
+
+This is simpler than interactive rebase for a squash: `--soft` keeps changes staged, one `git commit -s` produces a single clean commit.
+
+**Step 3 — Docker test stack hardening:**
+
+The Pi crash was caused by two concurrent `cargo test --workspace` containers. Fixed in two layers:
+- `CARGO_BUILD_JOBS=4` in `Dockerfile.openleadr-test` — limits parallelism per container (single container uses 4 jobs, two accidental containers use 8 total which is manageable vs the unlimited default)
+- `deploy.resources.limits: cpus: '1.5', memory: 1500M` in compose — hard cap enforced by Docker
+- Added `docker compose down` as mandatory first step in usage comment to prevent accidental duplicate runs
+
+Note: We initially set `CARGO_BUILD_JOBS=1` (maximum safety) but observed via `top` that only one cargo process ran. Changed to 4 to match the previous behavior that had worked fine.
+
+**Named volumes survive power cycle:** Confirmed Docker named volumes persist across Pi reboots. After the power cycle and restart, the build resumed from cached artifacts with zero recompilation (no `Compiling` lines in log — went straight to running tests).
+
+**Step 4 — Force-push and CI verification:**
+
+Force-pushed the squashed branch to origin. Upstream CI result on PR #373:
+- DCO (both probot and cncf/dco2): ✅ SUCCESS
+- Build and test (stable, all targets): ✅ SUCCESS
+- Build and test (msrv): ✅ SUCCESS
+- Clippy, Format, Audit, Unused deps: ✅ SUCCESS
+
+**PR #372 comment:** Added a comment explaining the MSRV failure and stable build cancellations are pre-existing on `main` since Feb 9, 2026 (before our PR was opened), unrelated to our changes.
+
+### Key Learnings
+
+- **`git reset --soft <base>` is the simplest squash method** — no interactive rebase needed. All changes land in the index; one `git commit -s` creates a clean single commit. Avoids editor interaction entirely.
+- **Bash `exit code 1` from nohup over SSH ≠ process failed** — nohup writes "nohup: ignoring input" to stderr, causing SSH's exit code to be 1. But the Docker container was actually started. Always verify with `docker ps` before concluding a background launch failed, and always run `docker compose down` first to avoid duplicate containers.
+- **Docker named volumes survive power cycles** — Pi crash did not corrupt volumes. After restart, cargo resumed with 100% cache hit rate.
+- **`CARGO_BUILD_JOBS` is not the same as `--jobs`** — it controls compilation parallelism within a single cargo invocation. Even without it, a second container running concurrently is the real risk.
+
+---
+
+*Last updated: 2026-02-18*
