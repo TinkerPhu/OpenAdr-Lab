@@ -10,3 +10,5 @@ NEVER stop docker containers that are not involved in this project without askin
 When researching about OpenADR reference, only use OpenADR 3 resources. General Questions can be researched from any versions.
 
 Do not add co-authoring footers to commit messages or PR descriptions. they might get rejected.
+
+Only consider upstream PR and commits after the code is tested completely without failure and the commits are ready for the upstream CI acceptance tests.
