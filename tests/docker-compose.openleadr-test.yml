@@ -3,6 +3,7 @@
 #
 # Usage (on Pi4-Server):
 #   cd /srv/docker/openadr_lab
+#   docker compose -f tests/docker-compose.openleadr-test.yml down   # ALWAYS run first
 #   docker compose -f tests/docker-compose.openleadr-test.yml run --build --rm cargo-test
 #   docker compose -f tests/docker-compose.openleadr-test.yml down
 #
@@ -76,6 +77,11 @@ services:
     depends_on:
       seed:
         condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1500M
 
 volumes:
   cargo-registry:
