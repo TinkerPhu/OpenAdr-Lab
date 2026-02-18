@@ -64,7 +64,6 @@ services:
       dockerfile: ../tests/Dockerfile.openleadr-test
     environment:
       DATABASE_URL: postgres://openadr:openadr@db:5432/openadr
-      OPENLEADR_RS_VTN_URL: http://vtn:3000
       SQLX_OFFLINE: "true"
       RUST_BACKTRACE: "1"
     depends_on:
