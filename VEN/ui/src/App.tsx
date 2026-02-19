@@ -14,6 +14,7 @@ import { SensorsPage } from "./pages/Sensors";
 import { ReportsPage } from "./pages/Reports";
 import { MetricsPage } from "./pages/Metrics";
 import { TracePage } from "./pages/Trace";
+import { SimulationPage } from "./pages/Simulation";
 
 const DEFAULT_VENS = [
   { label: "VEN1", url: "http://pi4server.local:8211", venName: "ven-1" },
@@ -164,6 +165,13 @@ export default function App() {
             </Button>
             <Button
               component={Link}
+              to="/simulation"
+              data-testid="nav-simulation"
+            >
+              Simulation
+            </Button>
+            <Button
+              component={Link}
               to="/programs"
               data-testid="nav-programs"
             >
@@ -208,6 +216,7 @@ export default function App() {
 
           <Routes>
             <Route path="/" element={<DashboardPage />} />
+            <Route path="/simulation" element={<SimulationPage />} />
             <Route path="/programs" element={<ProgramsPage />} />
             <Route path="/events" element={<EventsPage />} />
             <Route path="/sensors" element={<SensorsPage />} />

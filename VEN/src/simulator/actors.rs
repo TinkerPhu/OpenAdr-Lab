@@ -59,7 +59,7 @@ pub struct Heater {
     pub temp_min_c: f64,
     pub temp_max_c: f64,
     pub current_kw: f64,
-    ambient_temp_c: f64,
+    pub ambient_temp_c: f64,
     thermal_mass: f64, // kWh per degree C
 }
 
@@ -133,16 +133,18 @@ impl PvInverter {
     }
 
     /// Update state. `curtailment_fraction` 0.0 = full output, 1.0 = fully curtailed.
-    /// Uses time-of-day sinusoidal irradiance model.
+    /// `irradiance_override` overrides the time-based sin model when Some(v).
     /// Returns actual generation in kW (positive value — sign convention applied by power_model).
-    pub fn update(&mut self, _dt_s: f64, curtailment_fraction: f64, hour_of_day: f64) -> f64 {
-        // Sinusoidal irradiance: sun from 6am to 6pm
-        self.irradiance = if hour_of_day >= 6.0 && hour_of_day <= 18.0 {
-            let angle = std::f64::consts::PI * (hour_of_day - 6.0) / 12.0;
-            angle.sin()
-        } else {
-            0.0
-        };
+    pub fn update(&mut self, _dt_s: f64, curtailment_fraction: f64, hour_of_day: f64, irradiance_override: Option<f64>) -> f64 {
+        self.irradiance = irradiance_override.unwrap_or_else(|| {
+            // Sinusoidal irradiance: sun from 6am to 6pm
+            if hour_of_day >= 6.0 && hour_of_day <= 18.0 {
+                let angle = std::f64::consts::PI * (hour_of_day - 6.0) / 12.0;
+                angle.sin()
+            } else {
+                0.0
+            }
+        });
 
         self.curtailment = curtailment_fraction.clamp(0.0, 1.0);
         let output = self.rated_kw * self.irradiance * (1.0 - self.curtailment);
@@ -182,13 +184,16 @@ mod tests {
         let cfg = PvConfig { rated_kw: 10.0 };
         let mut pv = PvInverter::from_config(&cfg);
         // Noon = peak
-        let kw = pv.update(1.0, 0.0, 12.0);
+        let kw = pv.update(1.0, 0.0, 12.0, None);
         assert!((kw - 10.0).abs() < 0.01);
         // Midnight = zero
-        let kw = pv.update(1.0, 0.0, 0.0);
+        let kw = pv.update(1.0, 0.0, 0.0, None);
         assert_eq!(kw, 0.0);
         // Full curtailment = zero
-        let kw = pv.update(1.0, 1.0, 12.0);
+        let kw = pv.update(1.0, 1.0, 12.0, None);
         assert_eq!(kw, 0.0);
+        // Manual irradiance override
+        let kw = pv.update(1.0, 0.0, 0.0, Some(1.0)); // midnight but forced full sun
+        assert!((kw - 10.0).abs() < 0.01);
     }
 }
