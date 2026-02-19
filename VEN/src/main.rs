@@ -11,7 +11,7 @@ use axum::{
     extract::{Path, Query, State},
     http::Method,
     response::IntoResponse,
-    routing::{get, post, put},
+    routing::{get, put},
     Json, Router,
 };
 use chrono::Utc;
