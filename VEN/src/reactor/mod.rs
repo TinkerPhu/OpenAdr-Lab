@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::profile::Profile;
 use crate::simulator::SimState;
+use crate::state::UserOverrides;
 use arbitration::{arbitrate, ControlIntent, ReactorMode};
 use fsm::ReactorFsm;
 use interval::find_active_intervals;
@@ -24,14 +25,12 @@ pub struct Setpoints {
 
 impl Setpoints {
     /// Default setpoints: all devices at their normal operating point.
-    pub fn defaults(profile: &Profile) -> Self {
+    /// `overrides.ev_desired_kw` replaces the profile-based idle charge rate when set.
+    pub fn defaults(profile: &Profile, overrides: &UserOverrides) -> Self {
         Self {
-            ev_charge_kw: profile
-                .devices
-                .ev
-                .as_ref()
-                .map(|e| e.max_charge_kw)
-                .unwrap_or(0.0),
+            ev_charge_kw: overrides.ev_desired_kw.unwrap_or_else(|| {
+                profile.devices.ev.as_ref().map(|e| e.max_charge_kw).unwrap_or(0.0)
+            }),
             heater_kw: profile
                 .devices
                 .heater
@@ -107,8 +106,9 @@ impl Reactor {
         profile: &Profile,
         now: DateTime<Utc>,
         dt_s: f64,
+        overrides: &UserOverrides,
     ) -> Setpoints {
-        let defaults = Setpoints::defaults(profile);
+        let defaults = Setpoints::defaults(profile, overrides);
 
         // Find currently active intervals
         let active = find_active_intervals(events, now);
@@ -148,7 +148,7 @@ impl Reactor {
 
         // Compute setpoints from intent
         let mut setpoints = if let Some(ref ci) = intent {
-            self.compute_setpoints(ci, factor, profile, sim)
+            self.compute_setpoints(ci, factor, profile, sim, overrides)
         } else {
             defaults.clone()
         };
@@ -222,8 +222,9 @@ impl Reactor {
         factor: f64,
         profile: &Profile,
         _sim: &SimState,
+        overrides: &UserOverrides,
     ) -> Setpoints {
-        let defaults = Setpoints::defaults(profile);
+        let defaults = Setpoints::defaults(profile, overrides);
 
         let target = match intent.mode {
             ReactorMode::ExportCapLimit => {

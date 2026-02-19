@@ -1,4 +1,4 @@
-import type { VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry } from "./types";
+import type { VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry, UserOverrides } from "./types";
 
 let reqCounter = 0;
 function requestId(): string {
@@ -105,6 +105,17 @@ export class VenApi {
     const r = await this.getReq(`/trace?limit=${limit}`);
     if (!r.ok) throw new Error(`trace ${r.status}`);
     return r.json();
+  }
+
+  async getSimOverride(): Promise<UserOverrides> {
+    const r = await this.getReq("/sim/override");
+    if (!r.ok) throw new Error(`sim override ${r.status}`);
+    return r.json();
+  }
+
+  async postSimOverride(overrides: UserOverrides): Promise<void> {
+    const r = await this.jsonReq("POST", "/sim/override", overrides);
+    if (!r.ok) throw new Error(`post sim override ${r.status}`);
   }
 
   async metrics(): Promise<string> {

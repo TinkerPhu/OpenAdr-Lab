@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::models::SensorSnapshot;
 use crate::profile::Profile;
 use crate::reactor::Setpoints;
+use crate::state::UserOverrides;
 use actors::{EvCharger, Heater, PvInverter};
 use energy::EnergyCounter;
 
@@ -46,9 +47,38 @@ impl SimState {
     }
 
     /// Run one simulation tick.
-    pub fn tick(&mut self, dt_s: f64, setpoints: &Setpoints, now: DateTime<Utc>) {
+    pub fn tick(&mut self, dt_s: f64, setpoints: &Setpoints, now: DateTime<Utc>, overrides: &UserOverrides) {
         let hour = now.format("%H").to_string().parse::<f64>().unwrap_or(12.0)
             + now.format("%M").to_string().parse::<f64>().unwrap_or(0.0) / 60.0;
+
+        // Apply device spec overrides each tick (shadow profile values)
+        if let (Some(ref mut ev), Some(max_kw)) = (&mut self.ev, overrides.ev_max_charge_kw) {
+            ev.max_charge_kw = max_kw;
+        }
+        if let (Some(ref mut ev), Some(target)) = (&mut self.ev, overrides.ev_soc_target) {
+            ev.soc_target = target;
+        }
+        if let (Some(ref mut ev), Some(plugged)) = (&mut self.ev, overrides.ev_plugged) {
+            ev.plugged = plugged;
+        }
+        if let (Some(ref mut h), Some(max_kw)) = (&mut self.heater, overrides.heater_max_kw) {
+            h.max_kw = max_kw;
+        }
+        if let (Some(ref mut h), Some(min)) = (&mut self.heater, overrides.heater_temp_min_c) {
+            h.temp_min_c = min;
+        }
+        if let (Some(ref mut h), Some(max)) = (&mut self.heater, overrides.heater_temp_max_c) {
+            h.temp_max_c = max;
+        }
+        if let (Some(ref mut h), Some(amb)) = (&mut self.heater, overrides.ambient_temp_c) {
+            h.ambient_temp_c = amb;
+        }
+        if let (Some(ref mut pv), Some(rated)) = (&mut self.pv, overrides.pv_rated_kw) {
+            pv.rated_kw = rated;
+        }
+        if let Some(base) = overrides.base_load_w {
+            self.base_load_w = base;
+        }
 
         // Update actors
         let ev_w = if let Some(ref mut ev) = self.ev {
@@ -64,7 +94,7 @@ impl SimState {
         };
 
         let pv_gen_w = if let Some(ref mut pv) = self.pv {
-            pv.update(dt_s, setpoints.pv_curtailment, hour) * 1000.0
+            pv.update(dt_s, setpoints.pv_curtailment, hour, overrides.pv_irradiance) * 1000.0
         } else {
             0.0
         };
@@ -115,11 +145,15 @@ impl SimState {
                 plugged: ev.plugged,
                 current_kw: ev.current_kw,
                 max_charge_kw: ev.max_charge_kw,
+                soc_target: ev.soc_target,
+                battery_kwh: ev.battery_kwh,
             }),
             heater: self.heater.as_ref().map(|h| HeaterSnapshot {
                 temp_c: h.temp_c,
                 current_kw: h.current_kw,
                 max_kw: h.max_kw,
+                temp_min_c: h.temp_min_c,
+                temp_max_c: h.temp_max_c,
             }),
             pv: self.pv.as_ref().map(|pv| PvSnapshot {
                 irradiance: pv.irradiance,
@@ -153,6 +187,8 @@ pub struct EvSnapshot {
     pub plugged: bool,
     pub current_kw: f64,
     pub max_charge_kw: f64,
+    pub soc_target: f64,
+    pub battery_kwh: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,6 +196,8 @@ pub struct HeaterSnapshot {
     pub temp_c: f64,
     pub current_kw: f64,
     pub max_kw: f64,
+    pub temp_min_c: f64,
+    pub temp_max_c: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

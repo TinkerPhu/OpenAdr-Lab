@@ -60,12 +60,16 @@ export type EvSnapshot = {
   plugged: boolean;
   current_kw: number;
   max_charge_kw: number;
+  soc_target: number;
+  battery_kwh: number;
 };
 
 export type HeaterSnapshot = {
   temp_c: number;
   current_kw: number;
   max_kw: number;
+  temp_min_c: number;
+  temp_max_c: number;
 };
 
 export type PvSnapshot = {
@@ -94,6 +98,20 @@ export type Setpoints = {
   heater_kw: number;
   pv_curtailment: number;
   mode: string;
+};
+
+export type UserOverrides = {
+  pv_irradiance?: number;
+  ambient_temp_c?: number;
+  ev_desired_kw?: number;
+  ev_plugged?: boolean;
+  ev_max_charge_kw?: number;
+  ev_soc_target?: number;
+  heater_max_kw?: number;
+  heater_temp_min_c?: number;
+  heater_temp_max_c?: number;
+  pv_rated_kw?: number;
+  base_load_w?: number;
 };
 
 export type TraceEntry = {
