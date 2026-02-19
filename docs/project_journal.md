@@ -1664,4 +1664,93 @@ Force-pushed the squashed branch to origin. Upstream CI result on PR #373:
 
 ---
 
+## Phase 17c: Fix PR #372 Missing Fixture — `add_with_mixed_targets` (2026-02-18)
+
+### Problem
+
+PR #372 (`fix/program-ven-targets`) passed local review but failed upstream CI `cargo test` with:
+
+```
+failed to apply test fixture "fixtures/vens.sql":
+PgDatabaseError { code: "23503",
+  message: "insert or update on table \"user_ven\" violates foreign key constraint \"user_ven_user_id_fkey\"",
+  detail: "Key (user_id)=(user-1) is not present in table \"user\"." }
+```
+
+Root cause: the new test `add_with_mixed_targets` was annotated `#[sqlx::test(fixtures("vens"))]` but `fixtures/vens.sql` inserts `user_ven (ven_id='ven-1', user_id='user-1')`, and `user-1` only exists in `fixtures/users.sql`. Every other test that loads `vens` always lists `users` first — this one was accidentally missing it.
+
+### What Was Done
+
+**Reproduce:** Checked out the PR branch on Pi4 (`git -C openleadr-rs checkout fix/program-ven-targets`), then ran the failing test via the cargo-test Docker stack with `--build` to force a fresh image from the PR source:
+
+```
+docker compose run --build --rm cargo-test cargo test -p openleadr-vtn --lib add_with_mixed_targets
+```
+
+Confirmed exact FK violation. Note: the `--build` flag was essential — without it, the stale cached image (compiled from old source) ran 0 tests because `add_with_mixed_targets` hadn't existed yet when the image was built.
+
+**Fix:** One-line change in `openleadr-vtn/src/data_source/postgres/program.rs` line 897:
+
+```rust
+// Before
+#[sqlx::test(fixtures("vens"))]
+// After
+#[sqlx::test(fixtures("users", "vens"))]
+```
+
+**Verify fix:** Rebuilt image again (`--build`) and ran the same targeted test → `test result: ok. 1 passed; 0 failed`.
+
+**Full suite:** Ran `cargo test -p openleadr-vtn --lib` without `--build` (images already current) → `114 passed; 0 failed; 1 ignored`. No regressions. The 1 ignored test is a pre-existing `#[ignore]` for an upstream issue (#104).
+
+**Commit to PR branch:** `git commit --amend --no-edit` on `fix/program-ven-targets`, preserving the DCO-signed message, then force-pushed. SHA changed `5e7507c → 881f3c2`.
+
+**Apply to dev branch:** Pulled `dev` (was 11 commits behind), applied the same fix, committed with DCO sign-off message `"fix: add missing users fixture in add_with_mixed_targets test"`, pushed to `origin/dev` as `b48c231`.
+
+**Update main repo submodule:** Committed `"submodule: fix missing users fixture in add_with_mixed_targets test"` pointing to `b48c231`, pushed to `origin/main` as `a7116d9`.
+
+---
+
+## Phase 18: Simulation Tab — Device State, Charts & Runtime Controls (2026-02-19)
+
+**Status: COMPLETE**
+
+Added a dedicated **Simulation** tab to the VEN UI, replacing the basic sim card on Dashboard with a full-featured page covering three sections.
+
+### What was done
+
+**Backend — `UserOverrides` system**
+- Added `UserOverrides` struct to `state.rs` with 11 optional override fields:
+  - Environment: `pv_irradiance`, `ambient_temp_c`
+  - EV preference: `ev_desired_kw`, `ev_plugged`
+  - Device specs: `ev_max_charge_kw`, `ev_soc_target`, `heater_max_kw`, `heater_temp_min/max_c`, `pv_rated_kw`, `base_load_w`
+- Added `GET /sim/override` and `POST /sim/override` endpoints
+- Threaded `overrides` into the tick loop: fetched from state before lock acquisition, passed to `reactor.evaluate()` and `sim.tick()`
+- `Setpoints::defaults()` now uses `overrides.ev_desired_kw` as the idle EV charge rate (user preference, overridden by active DR events)
+- `SimState.tick()` applies device spec overrides at the start of each tick (shadow profile values each cycle)
+- Made `Heater.ambient_temp_c` public; `PvInverter.update()` accepts an `irradiance_override: Option<f64>` parameter
+- Extended snapshots: `EvSnapshot` gains `soc_target`, `battery_kwh`; `HeaterSnapshot` gains `temp_min_c`, `temp_max_c`
+
+**Frontend — Simulation page**
+- Added recharts ^2.15.4 dependency; updated `package-lock.json`
+- New `Simulation.tsx` page with three sections:
+  - **A — Device State**: power/energy summary card + per-device cards (EV SOC bar, Heater temp gauge, PV irradiance bar)
+  - **B — Setpoints Chart**: recharts `LineChart` driven by `useTrace(100)` showing ev_charge_kw, heater_kw, pv_curtailment_pct over the last 100 ticks
+  - **C — Controls**: sliders + switches for all `UserOverrides` fields; debounced POST (500ms); "⚡ Event active" badge when reactor mode ≠ IDLE
+- Added `Simulation` tab and `/simulation` route in `App.tsx` (after Dashboard)
+- Added `useSimOverride()`, `useSetSimOverride()` hooks; updated `useTrace(limit)` signature
+
+### Key Learnings
+- **`UserOverrides` must use `#[serde(default)]` in `InnerState`** — without it, loading old persisted state (which lacks the field) would fail deserialization.
+- **`routing::post` vs `MethodRouter::post()`** — Axum's `routing::post()` function creates a standalone MethodRouter; `MethodRouter::post()` adds a handler to an existing one. When chaining `get(h1).post(h2)`, only `routing::get` is used, not `routing::post`.
+- **`npm ci` requires lock file in sync** — Adding a new dependency to `package.json` without running `npm install` first causes the Docker build to fail at `npm ci`. Always run `npm install` locally and commit the updated `package-lock.json`.
+
+### Key Learnings
+
+- **`docker compose run --build` is required when source changes and the image bakes source via `COPY . .`** — without it, the cached image runs the old binary and the new test simply does not exist in it. The "118 filtered out, 0 run" result is a silent false negative that can mask both failures and successes.
+- **Named volumes only help the container that mounts them** — the cargo-target volume accelerates the `cargo-test` step (incremental builds ~1.5 min), but the VTN image rebuild triggered by `COPY . .` invalidation still recompiles from scratch (~25 min). These are two separate caching layers with no interaction.
+- **sed is unreliable for multi-line patterns on Pi4 Alpine** — Python one-liner was more reliable: `content.replace('<old multiline string>', '<new multiline string>')`.
+- **Submodule checkout conflicts** — after `git submodule update --init`, if local edits exist in the submodule, git refuses to switch branches. Fix: `git checkout -- <file>` inside the submodule first, then re-run the update.
+
+---
+
 *Last updated: 2026-02-18*
