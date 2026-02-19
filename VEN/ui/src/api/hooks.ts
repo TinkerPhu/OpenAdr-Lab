@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useVenContext } from "../App";
-import type { SensorSnapshot } from "./types";
+import type { SensorSnapshot, UserOverrides } from "./types";
 
 export function useHealth() {
   const { api } = useVenContext();
@@ -91,12 +91,32 @@ export function useSim() {
   });
 }
 
-export function useTrace() {
+export function useTrace(limit = 50) {
   const { api } = useVenContext();
   return useQuery({
-    queryKey: ["trace", api.baseUrl],
-    queryFn: () => api.trace(),
+    queryKey: ["trace", api.baseUrl, limit],
+    queryFn: () => api.trace(limit),
     refetchInterval: 10_000,
+  });
+}
+
+export function useSimOverride() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["simOverride", api.baseUrl],
+    queryFn: () => api.getSimOverride(),
+    staleTime: Infinity, // only fetch on mount; user controls the state
+  });
+}
+
+export function useSetSimOverride() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (overrides: UserOverrides) => api.postSimOverride(overrides),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["simOverride"] });
+    },
   });
 }
 

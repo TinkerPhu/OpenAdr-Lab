@@ -23,7 +23,7 @@ use profile::Profile;
 use reactor::Reactor;
 use serde::Deserialize;
 use simulator::SimState;
-use state::AppState;
+use state::{AppState, UserOverrides};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
@@ -194,17 +194,18 @@ async fn main() -> anyhow::Result<()> {
                 let now = Utc::now();
                 let dt_s = tick_s as f64;
 
-                // Get current events
+                // Get current events and user overrides
                 let events = state.events().await;
+                let overrides = state.overrides().await;
 
                 // Reactor: evaluate events → setpoints
                 let (setpoints, sim_snapshot, reactor_mode) = {
                     let mut sim_guard = sim.lock().await;
                     let mut reactor_guard = reactor.lock().await;
-                    let setpoints = reactor_guard.evaluate(&events, &sim_guard, &profile, now, dt_s);
+                    let setpoints = reactor_guard.evaluate(&events, &sim_guard, &profile, now, dt_s, &overrides);
 
                     // Simulator: apply setpoints → update device states
-                    sim_guard.tick(dt_s, &setpoints, now);
+                    sim_guard.tick(dt_s, &setpoints, now, &overrides);
 
                     // Update sensor snapshot (backward compat)
                     let sensor = sim_guard.to_sensor_snapshot();
@@ -303,6 +304,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/reports", get(get_reports).post(post_reports))
         .route("/reports/:id", put(put_report))
         .route("/sim", get(get_sim))
+        .route("/sim/override", get(get_sim_override).post(post_sim_override))
         .route("/trace", get(get_trace))
         .route("/metrics", get(get_metrics))
         .with_state(ctx)
@@ -439,6 +441,18 @@ async fn get_sim(State(ctx): State<AppCtx>) -> impl IntoResponse {
         )
             .into_response(),
     }
+}
+
+async fn get_sim_override(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.overrides().await)
+}
+
+async fn post_sim_override(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<UserOverrides>,
+) -> impl IntoResponse {
+    ctx.state.set_overrides(body).await;
+    axum::http::StatusCode::NO_CONTENT
 }
 
 #[derive(Deserialize)]
