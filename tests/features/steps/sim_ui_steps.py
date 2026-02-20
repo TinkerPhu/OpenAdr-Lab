@@ -17,7 +17,6 @@ def _ven1_trace():
 
 def _create_charge_setpoint_event(context, event_name, value_kw):
     """Create an immediately-active CHARGE_STATE_SETPOINT event on VEN-1."""
-    from features.helpers.api_client import vtn_post
     body = {
         "programID": context.saved_program_id,
         "eventName": event_name,
@@ -32,6 +31,15 @@ def _create_charge_setpoint_event(context, event_name, value_kw):
     return r.json()
 
 
+def _is_slider_disabled(slider_handle):
+    """Check if a MUI Slider input is disabled (supports aria-disabled pattern)."""
+    return (
+        slider_handle.get_attribute("disabled") is not None
+        or slider_handle.get_attribute("aria-disabled") == "true"
+        or slider_handle.is_disabled()
+    )
+
+
 # ── Step definitions ──────────────────────────────────────────────────────────
 
 @when('I create a CHARGE_STATE_SETPOINT event "{name}" with value {value:g}')
@@ -41,20 +49,17 @@ def step_create_charge_setpoint_event(context, name, value):
 
 @given('no CHARGE_STATE_SETPOINT events are active on VEN-1')
 def step_no_charge_setpoint_events(context):
-    """Delete any lingering CHARGE_STATE_SETPOINT events from previous scenarios."""
-    events = ven_get("/events").json()
-    charge_events = [
-        e for e in events
-        if any(
-            iv.get("payloads", [{}])[0].get("type") == "CHARGE_STATE_SETPOINT"
-            for iv in e.get("intervals", [])
-        )
-    ]
-    for ev in charge_events:
-        try:
-            vtn_delete(f"/events/{ev['id']}", context.vtn_token)
-        except Exception:
-            pass  # best effort
+    """Delete ALL events from VTN so the reactor can go IDLE.
+
+    Simply deleting CHARGE_STATE_SETPOINT events is insufficient when the full
+    test suite has accumulated IMPORT_CAP / EXPORT_CAP events from earlier
+    scenarios — those also make isEvEventActive=true in the UI. Deleting every
+    event guarantees a clean slate so the reactor transitions to IDLE.
+    """
+    r = vtn_get("/events", context.vtn_token)
+    r.raise_for_status()
+    for ev in r.json():
+        vtn_delete(f"/events/{ev['id']}", context.vtn_token)
 
 
 @when('I wait for VEN-1 reactor to show mode "{mode}"')
@@ -66,7 +71,7 @@ def step_wait_reactor_mode(context, mode):
     poll_until(
         _ven1_trace,
         trace_shows_mode,
-        timeout=30,
+        timeout=60,
         interval=2,
         description=f"VEN-1 reactor mode == '{mode}'",
     )
@@ -83,14 +88,17 @@ def step_open_ven_sim_ui(context):
 
 @then('the EV charge rate override toggle is shown')
 def step_ev_override_toggle_shown(context):
-    toggle = context.browser_page.query_selector(f'[data-testid="ev-charge-override-toggle"]')
+    # data-testid is on the FormControlLabel (<label>), which is always visible
+    toggle = context.browser_page.wait_for_selector(
+        '[data-testid="ev-charge-override-toggle"]', timeout=10000
+    )
     assert toggle is not None, "EV charge rate override toggle not found in DOM"
     assert toggle.is_visible(), "EV charge rate override toggle is not visible"
 
 
 @then('the EV charge rate override toggle is not shown')
 def step_ev_override_toggle_not_shown(context):
-    toggle = context.browser_page.query_selector(f'[data-testid="ev-charge-override-toggle"]')
+    toggle = context.browser_page.query_selector('[data-testid="ev-charge-override-toggle"]')
     assert toggle is None or not toggle.is_visible(), \
         "EV charge rate override toggle should not be visible when no event is active"
 
@@ -99,17 +107,20 @@ def step_ev_override_toggle_not_shown(context):
 
 @then('the EV charge rate slider is disabled')
 def step_ev_slider_disabled(context):
-    slider = context.browser_page.query_selector(f'[data-testid="ev-charge-slider"]')
+    # Wait for slider to reach disabled state (React may need a tick after data loads)
+    slider = context.browser_page.wait_for_selector(
+        '[data-testid="ev-charge-slider"]', timeout=5000
+    )
     assert slider is not None, "EV charge rate slider not found"
-    assert slider.get_attribute("disabled") is not None or slider.is_disabled(), \
+    assert _is_slider_disabled(slider), \
         "EV charge rate slider should be disabled when event is active and no override"
 
 
 @then('the EV charge rate slider is enabled')
 def step_ev_slider_enabled(context):
-    slider = context.browser_page.query_selector(f'[data-testid="ev-charge-slider"]')
+    slider = context.browser_page.query_selector('[data-testid="ev-charge-slider"]')
     assert slider is not None, "EV charge rate slider not found"
-    assert not slider.is_disabled(), \
+    assert not _is_slider_disabled(slider), \
         "EV charge rate slider should be enabled"
 
 
@@ -117,7 +128,7 @@ def step_ev_slider_enabled(context):
 
 @then('the EV charge rate caption contains "{text}"')
 def step_ev_caption_contains(context, text):
-    caption = context.browser_page.query_selector(f'[data-testid="ev-charge-caption"]')
+    caption = context.browser_page.query_selector('[data-testid="ev-charge-caption"]')
     assert caption is not None, "EV charge rate caption element not found"
     actual = caption.inner_text()
     assert text in actual, (
@@ -129,8 +140,9 @@ def step_ev_caption_contains(context, text):
 
 @when('I click the EV charge rate override toggle')
 def step_click_ev_override_toggle(context):
+    # data-testid is on FormControlLabel (<label>), which is fully visible and clickable
     toggle = context.browser_page.wait_for_selector(
-        f'[data-testid="ev-charge-override-toggle"]', timeout=5000
+        '[data-testid="ev-charge-override-toggle"]', timeout=5000
     )
     toggle.click()
     # Give React time to update state

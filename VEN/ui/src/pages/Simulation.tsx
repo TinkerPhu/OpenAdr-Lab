@@ -357,13 +357,13 @@ function OverridableControl({
         <Typography variant="body2" fontWeight={500}>{label}</Typography>
         {isEventActive && (
           <FormControlLabel
+            data-testid={toggleTestId}
             sx={{ ml: 0.5 }}
             control={
               <Switch
                 size="small"
                 checked={isOverriding}
                 onChange={(e) => onToggle(e.target.checked, vtnIntentValue)}
-                inputProps={{ "data-testid": toggleTestId } as React.InputHTMLAttributes<HTMLInputElement>}
               />
             }
             label={<Typography variant="caption">Owner override</Typography>}
