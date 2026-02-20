@@ -26,20 +26,29 @@ impl EvCharger {
     }
 
     /// Update state. `commanded_kw` is the desired charge rate from reactor.
-    /// Returns actual power consumed (positive = import).
+    /// Positive = charging (import), negative = discharging/V2G (export).
+    /// Returns actual power (positive = import, negative = export).
     pub fn update(&mut self, dt_s: f64, commanded_kw: f64) -> f64 {
-        if !self.plugged || self.soc >= 1.0 {
+        if !self.plugged {
             self.current_kw = 0.0;
             return 0.0;
         }
 
-        // Clamp commanded power to device limits
-        let kw = commanded_kw.clamp(0.0, self.max_charge_kw);
+        // Clamp commanded power to device limits (bidirectional)
+        let kw = commanded_kw.clamp(-self.max_charge_kw, self.max_charge_kw);
 
-        // Update SOC: energy_added_kwh = kw * dt_h
+        // Hard stops at SoC bounds: can't charge above 100% or discharge below 0%
+        let kw = if kw > 0.0 && self.soc >= 1.0 {
+            0.0
+        } else if kw < 0.0 && self.soc <= 0.0 {
+            0.0
+        } else {
+            kw
+        };
+
+        // Update SOC: positive kw charges, negative discharges
         let dt_h = dt_s / 3600.0;
-        let energy_kwh = kw * dt_h;
-        self.soc += energy_kwh / self.battery_kwh;
+        self.soc += (kw * dt_h) / self.battery_kwh;
         self.soc = self.soc.clamp(0.0, 1.0);
 
         self.current_kw = kw;
@@ -176,7 +185,26 @@ mod tests {
             ev.update(1.0, 10.0);
         }
         assert!((ev.soc - 1.0).abs() < 0.001);
+        // At full SoC, charging command returns 0
         assert_eq!(ev.update(1.0, 10.0), 0.0);
+    }
+
+    #[test]
+    fn ev_discharges_v2g_and_stops_at_empty() {
+        let cfg = EvConfig {
+            max_charge_kw: 10.0,
+            initial_soc: 0.01,
+            battery_kwh: 10.0,
+            soc_target: 1.0,
+        };
+        let mut ev = EvCharger::from_config(&cfg);
+        // Discharge at -10 kW until empty
+        for _ in 0..1000 {
+            ev.update(1.0, -10.0);
+        }
+        assert!((ev.soc - 0.0).abs() < 0.001);
+        // At empty SoC, discharge command returns 0
+        assert_eq!(ev.update(1.0, -10.0), 0.0);
     }
 
     #[test]
