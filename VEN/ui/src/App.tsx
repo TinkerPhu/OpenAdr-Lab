@@ -17,9 +17,9 @@ import { TracePage } from "./pages/Trace";
 import { SimulationPage } from "./pages/Simulation";
 
 const DEFAULT_VENS = [
-  { label: "VEN1", url: "http://pi4server.local:8211", venName: "ven-1" },
-  { label: "VEN2", url: "http://pi4server.local:8212", venName: "ven-2" },
-  { label: "VEN3", url: "http://pi4server.local:8213", venName: "ven-3" },
+  { label: "VEN1", url: import.meta.env.VITE_VEN_1_URL || "http://pi4server.local:8211", venName: "ven-1" },
+  { label: "VEN2", url: import.meta.env.VITE_VEN_2_URL || "http://pi4server.local:8212", venName: "ven-2" },
+  { label: "VEN3", url: import.meta.env.VITE_VEN_3_URL || "http://pi4server.local:8213", venName: "ven-3" },
 ];
 
 type VenContextType = {

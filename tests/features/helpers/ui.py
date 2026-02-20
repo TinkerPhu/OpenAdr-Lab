@@ -1,8 +1,9 @@
-"""Playwright helpers for driving the VTN UI."""
+"""Playwright helpers for driving the VTN UI and VEN UI."""
 
 import os
 
 UI_BASE_URL = os.environ.get("UI_BASE_URL", "http://test-ui:80")
+VEN_UI_BASE_URL = os.environ.get("VEN_UI_BASE_URL", "http://test-ven-ui:80")
 
 
 def tid(testid):
@@ -155,3 +156,18 @@ class VtnUi:
             return True
         except Exception:
             return False
+
+
+class VenUi:
+    """Wraps a Playwright page with VEN UI-specific actions."""
+
+    def __init__(self, page):
+        self.page = page
+
+    def open(self):
+        self.page.goto(VEN_UI_BASE_URL)
+        self.page.wait_for_selector(tid("nav-simulation"))
+
+    def go_simulation(self):
+        self.page.click(tid("nav-simulation"))
+        self.page.wait_for_selector(tid("ev-charge-caption"), timeout=15000)

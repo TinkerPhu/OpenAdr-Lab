@@ -5,6 +5,7 @@ from features.helpers.api_client import VTN_BASE_URL, VEN_BASE_URL, VEN2_BASE_UR
 from features.helpers.wait import wait_for_url
 
 UI_BASE_URL = os.environ.get("UI_BASE_URL", "http://test-ui:80")
+VEN_UI_BASE_URL = os.environ.get("VEN_UI_BASE_URL", "http://test-ven-ui:80")
 
 
 def _check_not_live():
@@ -47,6 +48,10 @@ def before_all(context):
         print(f"Waiting for UI at {UI_BASE_URL} ...")
         wait_for_url(UI_BASE_URL, timeout=120)
 
+    if os.environ.get("VEN_UI_BASE_URL"):
+        print(f"Waiting for VEN UI at {VEN_UI_BASE_URL} ...")
+        wait_for_url(VEN_UI_BASE_URL, timeout=120)
+
     print("All services healthy — starting tests.")
 
     # Playwright browser — started once, shared across all @ui scenarios
@@ -59,8 +64,13 @@ def _is_ui(scenario):
     return "ui" in scenario.tags or "ui" in scenario.feature.tags
 
 
+def _is_ven_ui(scenario):
+    """Check for @ven-ui tag (VEN simulation UI scenarios)."""
+    return "ven-ui" in scenario.tags or "ven-ui" in scenario.feature.tags
+
+
 def before_scenario(context, scenario):
-    """Launch browser page for @ui scenarios."""
+    """Launch browser page for @ui and @ven-ui scenarios."""
     if _is_ui(scenario):
         if context._pw is None:
             from playwright.sync_api import sync_playwright
@@ -74,10 +84,21 @@ def before_scenario(context, scenario):
         from features.helpers.api_client import get_token_value
         context.vtn_token = get_token_value("any-business", "any-business")
 
+    if _is_ven_ui(scenario):
+        if context._pw is None:
+            from playwright.sync_api import sync_playwright
+            context._pw = sync_playwright().start()
+            context._browser = context._pw.chromium.launch(headless=True)
+        context.browser_page = context._browser.new_page()
+        from features.helpers.ui import VenUi
+        context.ven_ui = VenUi(context.browser_page)
+        from features.helpers.api_client import get_token_value
+        context.vtn_token = get_token_value("any-business", "any-business")
+
 
 def after_scenario(context, scenario):
-    """Close browser page after @ui scenarios; restart stopped services."""
-    if _is_ui(scenario) and hasattr(context, "browser_page"):
+    """Close browser page after @ui/@ven-ui scenarios; restart stopped services."""
+    if (_is_ui(scenario) or _is_ven_ui(scenario)) and hasattr(context, "browser_page"):
         context.browser_page.close()
 
     # Resilience cleanup: restart any services stopped during the scenario
