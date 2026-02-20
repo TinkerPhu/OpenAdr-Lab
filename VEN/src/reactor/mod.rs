@@ -307,6 +307,17 @@ impl Reactor {
                     defaults.clone()
                 }
             }
+            ReactorMode::ChargeSetpoint => {
+                // Direct EV charge setpoint command — may be negative for V2G discharge
+                let max_kw = profile.devices.ev.as_ref().map(|e| e.max_charge_kw).unwrap_or(0.0);
+                let target_kw = intent.value.clamp(-max_kw, max_kw);
+                Setpoints {
+                    ev_charge_kw: target_kw,
+                    heater_kw: defaults.heater_kw,
+                    pv_curtailment: defaults.pv_curtailment,
+                    mode: "CHARGE_SETPOINT".to_string(),
+                }
+            }
             ReactorMode::Idle => defaults.clone(),
         };
 

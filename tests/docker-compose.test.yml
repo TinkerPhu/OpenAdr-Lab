@@ -169,6 +169,28 @@ services:
       - test-net
 
   # ---------------------------------------------------------------------------
+  # VEN UI — React SPA served by nginx, pointed at test-ven-1
+  # ---------------------------------------------------------------------------
+  test-ven-ui:
+    build:
+      context: ../VEN/ui
+      dockerfile: Dockerfile
+      args:
+        VITE_VEN_1_URL: "http://test-ven-1:8080"
+        VITE_VEN_2_URL: "http://test-ven-2:8080"
+        VITE_VEN_3_URL: "http://test-ven-1:8080"
+    healthcheck:
+      test: curl --fail http://127.0.0.1:80/ || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      test-ven-1:
+        condition: service_healthy
+    networks:
+      - test-net
+
+  # ---------------------------------------------------------------------------
   # Test runner — loads fixtures via psql, then runs behave
   # ---------------------------------------------------------------------------
   test-runner:
@@ -181,6 +203,7 @@ services:
       VEN2_BASE_URL: "http://test-ven-2:8080"
       BFF_BASE_URL: "http://test-bff:8090"
       UI_BASE_URL: "http://test-ui:80"
+      VEN_UI_BASE_URL: "http://test-ven-ui:80"
     volumes:
       - ../openleadr-rs/fixtures:/fixtures:ro
       - /var/run/docker.sock:/var/run/docker.sock
@@ -194,6 +217,8 @@ services:
       test-bff:
         condition: service_healthy
       test-ui:
+        condition: service_healthy
+      test-ven-ui:
         condition: service_healthy
     networks:
       - test-net

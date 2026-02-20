@@ -105,6 +105,9 @@ export type UserOverrides = {
   ambient_temp_c?: number;
   ev_desired_kw?: number;
   ev_plugged?: boolean;
+  ev_force_kw?: number;
+  heater_force_kw?: number;
+  pv_force_curtailment?: number;
   ev_max_charge_kw?: number;
   ev_soc_target?: number;
   heater_max_kw?: number;

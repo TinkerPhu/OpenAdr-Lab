@@ -202,7 +202,12 @@ async fn main() -> anyhow::Result<()> {
                 let (setpoints, sim_snapshot, reactor_mode) = {
                     let mut sim_guard = sim.lock().await;
                     let mut reactor_guard = reactor.lock().await;
-                    let setpoints = reactor_guard.evaluate(&events, &sim_guard, &profile, now, dt_s, &overrides);
+                    let mut setpoints = reactor_guard.evaluate(&events, &sim_guard, &profile, now, dt_s, &overrides);
+
+                    // Owner force-overrides applied AFTER reactor (trace records VTN intent unaffected)
+                    if let Some(kw) = overrides.ev_force_kw       { setpoints.ev_charge_kw   = kw; }
+                    if let Some(kw) = overrides.heater_force_kw   { setpoints.heater_kw       = kw; }
+                    if let Some(c)  = overrides.pv_force_curtailment { setpoints.pv_curtailment = c; }
 
                     // Simulator: apply setpoints → update device states
                     sim_guard.tick(dt_s, &setpoints, now, &overrides);
