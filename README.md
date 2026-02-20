@@ -1,12 +1,17 @@
 # OpenADR 3 Raspberry Pi Lab
 
-A Raspberry Pi 4-hosted **OpenADR 3.0 laboratory environment** for demand response experimentation, multi-VEN simulation, and edge computing research.
+A Raspberry Pi4-hosted **OpenADR 3.0 laboratory environment** for demand response experimentation, multi-VEN simulation, and edge computing research.
+
+## The context
+
+This project is built around the https://github.com/OpenLEADR/openleadr-rs project, and adds infrastructure to experiment and demonstrate. It is close to 100% written by AI which allowed me to get fast progress in short time. 
+Tests guarantee the expected behaviour, side effects have not been checked, so no warranties for that!
 
 ## Architecture
 
 ```
 Raspberry Pi 4 (Docker)
-+-----------------------------------------------+
++------------------------------------------------+
 |  VTN Stack                                     |
 |  +--------+  +--------+  +---------+           |
 |  | VTN    |  | BFF    |  | VTN UI  |           |

@@ -12,3 +12,4 @@ When researching about OpenADR reference, only use OpenADR 3 resources. General 
 Do not add co-authoring footers to commit messages or PR descriptions. they might get rejected.
 
 Only consider upstream PR and commits after the code is tested completely without failure and the commits are ready for the upstream CI acceptance tests.
+After creating upstream PR, wait for the CI to actually run and report before drawing any conclusions about main branch being pre-broken. If anything fails, we investigate it properly rather than writing it off.
