@@ -68,7 +68,7 @@ def step_wait_reactor_mode(context, mode):
         trace_shows_mode,
         timeout=30,
         interval=2,
-        error_msg=f"VEN-1 reactor never showed mode '{mode}'",
+        description=f"VEN-1 reactor mode == '{mode}'",
     )
 
 
