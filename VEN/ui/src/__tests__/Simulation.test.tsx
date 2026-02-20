@@ -57,7 +57,7 @@ function makeTrace(mode: string, ev_charge_kw = 7, heater_kw = 2, pv_curtailment
 
 const mockSimData = vi.fn(() => baseSim);
 const mockTrace1Data = vi.fn(() => [makeTrace("IDLE", 11, 2, 0)]);
-const mockSimOverrideData = vi.fn<[], UserOverrides>(() => ({}));
+const mockSimOverrideData = vi.fn(() => ({} as UserOverrides));
 const mockSetSimOverride = vi.fn(() => ({ mutate: vi.fn() }));
 
 vi.mock("../api/hooks", () => ({
