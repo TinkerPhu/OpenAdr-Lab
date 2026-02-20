@@ -31,52 +31,34 @@ def _create_charge_setpoint_event(context, event_name, value_kw):
     return r.json()
 
 
-def _is_slider_disabled(page, testid):
-    """Check if a MUI Slider is visually disabled.
+def _wait_slider_disabled(page, testid, expect_disabled: bool, timeout_ms=5000):
+    """Poll via wait_for_function until the MUI Slider has (or lacks) Mui-disabled.
 
-    MUI v5 Slider sets a `Mui-disabled` CSS class on the root <span> element
-    when disabled, rather than putting `disabled` / `aria-disabled` on the inner
-    <input type="range"> element.  Playwright's is_disabled() and
-    get_attribute("disabled") both miss this pattern.  We use page.evaluate()
-    to inspect the actual DOM.
+    MUI v5 Slider marks its root <span> with the 'Mui-disabled' CSS class when
+    disabled. Neither the 'disabled' attribute nor 'aria-disabled' is reliably
+    present on the inner <input type="range"> element itself.
     """
-    result = page.evaluate(f"""() => {{
-        const input = document.querySelector('[data-testid="{testid}"]');
-        if (!input) return {{"found": false, "disabled": false}};
-        // Check both the input itself and its closest MuiSlider ancestor
-        const root = input.closest('[class*="MuiSlider-root"]') || input.parentElement;
-        const rootMuiDisabled = root ? root.classList.contains("Mui-disabled") : false;
-        const inputDisabled = input.hasAttribute("disabled");
-        const inputAriaDisabled = input.getAttribute("aria-disabled") === "true";
-        return {{
-            "found": true,
-            "disabled": inputDisabled || inputAriaDisabled || rootMuiDisabled,
-            "inputDisabled": inputDisabled,
-            "inputAriaDisabled": inputAriaDisabled,
-            "rootMuiDisabled": rootMuiDisabled
-        }};
-    }}""")
-    return bool(result.get("disabled", False))
+    condition = "true" if expect_disabled else "false"
+    js = f"""(testid) => {{
+        const input = document.querySelector('[data-testid="' + testid + '"]');
+        if (!input) return false;
+        const root = input.closest('[class*="MuiSlider-root"]');
+        const muiDisabled = root ? root.classList.contains("Mui-disabled") : false;
+        return muiDisabled === {condition};
+    }}"""
+    page.wait_for_function(js, arg=testid, timeout=timeout_ms)
 
 
 def _delete_all_vtn_events(token):
-    """Delete all events visible to any-business from VTN (with pagination)."""
-    skip = 0
-    limit = 200
-    deleted = 0
-    while True:
-        r = vtn_get("/events", token, params={"skip": skip, "limit": limit})
-        r.raise_for_status()
-        events = r.json()
-        if not events:
-            break
-        for ev in events:
-            vtn_delete(f"/events/{ev['id']}", token)
-            deleted += 1
-        if len(events) < limit:
-            break
-        skip += limit
-    return deleted
+    """Delete all events visible to the given token from VTN.
+
+    Note: openleadr-rs does not accept 'skip' / 'limit' pagination params on
+    GET /events — calling without params returns all events.
+    """
+    r = vtn_get("/events", token)
+    r.raise_for_status()
+    for ev in r.json():
+        vtn_delete(f"/events/{ev['id']}", token)
 
 
 # ── Step definitions ──────────────────────────────────────────────────────────
@@ -92,9 +74,7 @@ def step_no_charge_setpoint_events(context):
 
     Simply deleting CHARGE_STATE_SETPOINT events is insufficient when the full
     test suite has accumulated IMPORT_CAP / EXPORT_CAP events from earlier
-    scenarios — those also make isEvEventActive=true in the UI. Deleting every
-    event guarantees a clean slate so the reactor transitions to IDLE.
-    Uses pagination (limit=200) to handle large test databases.
+    scenarios — those also make isEvEventActive=true in the UI.
     """
     _delete_all_vtn_events(context.vtn_token)
 
@@ -125,7 +105,7 @@ def step_open_ven_sim_ui(context):
 
 @then('the EV charge rate override toggle is shown')
 def step_ev_override_toggle_shown(context):
-    # data-testid is on the FormControlLabel (<label>), which is always visible
+    # data-testid is on FormControlLabel (<label>), which is always visible
     toggle = context.browser_page.wait_for_selector(
         '[data-testid="ev-charge-override-toggle"]', timeout=10000
     )
@@ -144,21 +124,24 @@ def step_ev_override_toggle_not_shown(context):
 
 @then('the EV charge rate slider is disabled')
 def step_ev_slider_disabled(context):
-    # Wait for slider to be present, then evaluate its disabled state via Mui class
-    context.browser_page.wait_for_selector(
-        '[data-testid="ev-charge-slider"]', timeout=5000
-    )
-    assert _is_slider_disabled(context.browser_page, "ev-charge-slider"), \
-        "EV charge rate slider should be disabled when event is active and no override"
+    # wait_for_function polls until Mui-disabled class is present on slider root
+    try:
+        _wait_slider_disabled(context.browser_page, "ev-charge-slider",
+                              expect_disabled=True, timeout_ms=5000)
+    except Exception:
+        raise AssertionError(
+            "EV charge rate slider should be disabled when event is active and no override"
+        )
 
 
 @then('the EV charge rate slider is enabled')
 def step_ev_slider_enabled(context):
-    context.browser_page.wait_for_selector(
-        '[data-testid="ev-charge-slider"]', timeout=5000
-    )
-    assert not _is_slider_disabled(context.browser_page, "ev-charge-slider"), \
-        "EV charge rate slider should be enabled"
+    # wait_for_function polls until Mui-disabled class is absent from slider root
+    try:
+        _wait_slider_disabled(context.browser_page, "ev-charge-slider",
+                              expect_disabled=False, timeout_ms=5000)
+    except Exception:
+        raise AssertionError("EV charge rate slider should be enabled")
 
 
 # ── Caption assertions ────────────────────────────────────────────────────────
