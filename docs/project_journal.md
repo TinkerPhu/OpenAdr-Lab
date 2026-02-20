@@ -1753,4 +1753,57 @@ Added a dedicated **Simulation** tab to the VEN UI, replacing the basic sim card
 
 ---
 
-*Last updated: 2026-02-18*
+## Phase 19: Event-level VEN_NAME Filter + Strip (Object Privacy layer 2, supersedes #373) (2026-02-20)
+
+**Status: COMPLETE — deployed, PR #374 open upstream, all CI green**
+
+Implemented `fix/event-ven-target-privacy` in the `openleadr-rs` submodule: a complete two-level object privacy solution for events with `type: VEN_NAME` targets. Supersedes the reverted PR #373 by adding both filter AND strip in one clean commit.
+
+### What was done
+
+**Privacy level 1 — Filter (same as PR #373 intent)**
+- VENs not listed in an event's `VEN_NAME` targets get a 404 on `GET /events/{id}` and are excluded from `GET /events` list responses.
+- Implemented via SQL `AND (NOT $is_ven OR e.targets IS NULL OR ...)` blocks using `jsonb_array_elements` + `ven` table join to match `ven_name`.
+
+**Privacy level 2 — Strip (new in this PR)**
+- VENs that ARE listed (and can see the event) receive responses with all `VEN_NAME` target entries removed from `targets`.
+- Prevents enrolled VENs from discovering which other VENs are also targeted.
+- Business users (`AnyBusiness`) see the full unstripped target list.
+- Implemented via `strip_ven_name_targets(event, is_ven)` helper applied after DB fetch.
+
+**Tests**
+- New fixture: `fixtures/events-ven-targets.sql` (event-4 in program-1, targets ven-1-name)
+- New test module: `data_source::postgres::event::tests::ven_target_filtering` with 4 cases:
+  - `ven_in_targets_sees_event_stripped` — ven-1 can read event-4 but VEN_NAME targets are stripped
+  - `ven_not_in_targets_gets_not_found` — ven-2 gets 404 on event-4
+  - `ven_list_filters_and_strips` — ven-1 sees 1 stripped event, ven-2 sees 0
+  - `business_sees_full_targets` — business user sees full targets
+
+**SQLx cache**: Updated `query-638ae341...json` (retrieve) and `query-5184613a...json` (retrieve_all).
+
+**Deployment**
+- Squashed to 1 clean DCO commit: `0a6014e` on `fix/event-ven-target-privacy`
+- Merged into `dev` branch (conflict-resolved with dev's `filter.active` post-processing)
+- VTN image rebuilt and redeployed on Pi4
+- Full integration test suite: **17 features, 62 scenarios, 439 steps — all passed**
+- **Upstream PR #374** opened against `OpenLEADR/openleadr-rs:main` — all 13 CI checks passed (DCO, Format, Audit, Clippy ×4, Build+test ×5, unused-deps)
+
+### Issues encountered
+
+- **`Ok(` dropped during edit** — The `retrieve()` function originally has `Ok(sqlx::query_as!(...` wrapped around the chain. When adding the SQL AND block in a previous session, the `Ok(` was accidentally dropped, leaving a dangling `)`. The symptom was "unexpected closing delimiter" at the closing `}` of the impl block. Fix: restore `Ok(`.
+- **Docker image not rebuilt** — Running `docker compose run --rm cargo-test` without `--build` uses the cached image. The new tests simply didn't appear in the test list (silent false-negative). Fix: explicitly run `docker compose build cargo-test` before testing.
+- **Double Signed-off-by in commit** — The commit message HEREDOC already contained a `Signed-off-by` line, and `-s` added another. Fixed by `git commit --amend` with a clean single sign-off before pushing to the PR branch.
+- **`cargo fmt` failure on first CI run** — Rustfmt reformats long chained closures into block form (`.map(|e| { ... })`), and wraps long `VenId::new(...)` constructor calls across lines. Fix: always run `cargo fmt` locally before force-pushing the PR branch.
+- **Merge conflict with dev** — Dev branch had `filter.active` post-processing in `retrieve_all()` (from a local feature branch), not in upstream/main. Resolved by combining both: apply strip in the map, then post-filter by active status.
+
+### Key Learnings
+
+- **`docker compose build <service>` is the reliable way to rebuild a specific image** — `docker compose run --build SERVICE` may only rebuild dependencies, not the service itself. Always explicitly run `docker compose build cargo-test` after source changes before running tests.
+- **Docker cargo-test uses named volume for compiled artifacts** — if the image isn't rebuilt with new source, Cargo sees unchanged fingerprints and skips recompilation. The tests still "run" but use the old binary — new tests don't appear at all.
+- **`Ok(sqlx::query_as!(...))` pattern** — `retrieve()` wraps the entire async chain in `Ok(...)`, using `?` at the end to propagate errors from `try_into()`. The closing `)` closes `Ok(`, not a separate expression. Strip and map must be inserted before `?` but inside the `Ok(...)` chain.
+- **Always run `cargo fmt` before pushing a PR branch** — rustfmt has opinions on line-length wrapping that differ from hand-written style. A format failure is a trivially avoidable CI failure.
+- **Do not assume CI failures are pre-existing** — investigate every failure as potentially caused by our own changes before drawing any conclusions.
+
+---
+
+*Last updated: 2026-02-20 — PR #374 all CI green*
