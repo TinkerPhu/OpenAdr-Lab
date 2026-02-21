@@ -32,25 +32,19 @@ def _create_charge_setpoint_event(context, event_name, value_kw):
 
 
 def _wait_slider_disabled(page, testid, expect_disabled: bool, timeout_ms=10000):
-    """Poll via wait_for_function until the MUI Slider <input> native disabled attribute matches.
+    """Wait until the MUI Slider inside the Box wrapper has the expected disabled state.
 
-    MUI v5 Slider sets the native 'disabled' boolean attribute on the hidden
-    <input type="range"> element when the slider is disabled. This is the same
-    mechanism that @testing-library's toBeDisabled() checks in unit tests and is
-    more reliable than checking the 'Mui-disabled' CSS class on the root span.
-
-    slotProps={{ input: { "data-testid": ... } }} places the testid directly on
-    the <input type="range"> element (confirmed via MUI v5 useSlotProps source).
+    The Slider is wrapped in <Box data-testid={sliderTestId}> in Simulation.tsx.
+    MUI sets the native 'disabled' attribute on the hidden <input type="range">
+    when disabled. We use Playwright wait_for_selector with a CSS :disabled /
+    :not([disabled]) pseudo-class scoped to the wrapper — no custom JavaScript
+    required, and state='attached' works on hidden elements.
     """
-    condition = "true" if expect_disabled else "false"
-    js = f"""(testid) => {{
-        const wrapper = document.querySelector('[data-testid="' + testid + '"]');
-        if (!wrapper) return false;
-        const input = wrapper.querySelector('input[type="range"]');
-        if (!input) return false;
-        return input.disabled === {condition};
-    }}"""
-    page.wait_for_function(js, arg=testid, timeout=timeout_ms)
+    if expect_disabled:
+        selector = f'[data-testid="{testid}"] input[type="range"]:disabled'
+    else:
+        selector = f'[data-testid="{testid}"] input[type="range"]:not([disabled])'
+    page.wait_for_selector(selector, state="attached", timeout=timeout_ms)
 
 
 def _delete_all_vtn_events(token):
