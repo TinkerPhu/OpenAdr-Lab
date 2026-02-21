@@ -8,14 +8,23 @@ use super::Setpoints;
 
 const MAX_TRACE_ENTRIES: usize = 1000;
 
-/// Integer-rounded setpoints stored in the trace ring buffer.
-/// Using i32 instead of f64 saves ~40 % of JSON payload per entry;
-/// kW precision beyond 1 W is not meaningful for a 1-second tick.
+/// Serialize an f32 rounded to 2 decimal places (0.01 resolution).
+/// Converts via f64 before rounding to avoid f32 precision artifacts.
+fn serialize_round2<S: serde::Serializer>(v: &f32, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_f64(((*v as f64) * 100.0).round() / 100.0)
+}
+
+/// f32 setpoints stored in the trace ring buffer.
+/// Serialized with 0.01 resolution to keep JSON payload compact
+/// while retaining sub-kW precision for ramp visibility in the chart.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraceSetpoints {
-    pub ev_charge_kw: i32,
-    pub heater_kw: i32,
-    pub pv_curtailment_pct: i32, // 0–100 (rounded from 0.0–1.0)
+    #[serde(serialize_with = "serialize_round2")]
+    pub ev_charge_kw: f32,
+    #[serde(serialize_with = "serialize_round2")]
+    pub heater_kw: f32,
+    #[serde(serialize_with = "serialize_round2")]
+    pub pv_curtailment_pct: f32, // 0.0–100.0
     pub mode: String,
 }
 
@@ -78,9 +87,9 @@ impl DecisionTrace {
             active_events,
             winning_intent,
             setpoints: TraceSetpoints {
-                ev_charge_kw: setpoints.ev_charge_kw.round() as i32,
-                heater_kw: setpoints.heater_kw.round() as i32,
-                pv_curtailment_pct: (setpoints.pv_curtailment * 100.0).round() as i32,
+                ev_charge_kw: setpoints.ev_charge_kw as f32,
+                heater_kw: setpoints.heater_kw as f32,
+                pv_curtailment_pct: (setpoints.pv_curtailment * 100.0) as f32,
                 mode: setpoints.mode.clone(),
             },
             constraints,
