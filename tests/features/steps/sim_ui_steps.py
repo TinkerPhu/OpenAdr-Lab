@@ -44,7 +44,9 @@ def _wait_slider_disabled(page, testid, expect_disabled: bool, timeout_ms=10000)
     """
     condition = "true" if expect_disabled else "false"
     js = f"""(testid) => {{
-        const input = document.querySelector('[data-testid="' + testid + '"]');
+        const wrapper = document.querySelector('[data-testid="' + testid + '"]');
+        if (!wrapper) return false;
+        const input = wrapper.querySelector('input[type="range"]');
         if (!input) return false;
         return input.disabled === {condition};
     }}"""
