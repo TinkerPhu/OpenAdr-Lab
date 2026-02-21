@@ -370,18 +370,19 @@ function OverridableControl({
           />
         )}
       </Stack>
-      <Slider
-        min={min}
-        max={max}
-        step={step}
-        value={sliderValue}
-        disabled={sliderDisabled}
-        onChange={(_, v) => onSliderChange(v as number)}
-        valueLabelDisplay="auto"
-        valueLabelFormat={(v) => formatValue(v)}
-        sx={isOverriding ? { color: "warning.main" } : undefined}
-        slotProps={{ input: { "data-testid": sliderTestId } as React.InputHTMLAttributes<HTMLInputElement> }}
-      />
+      <Box data-testid={sliderTestId}>
+        <Slider
+          min={min}
+          max={max}
+          step={step}
+          value={sliderValue}
+          disabled={sliderDisabled}
+          onChange={(_, v) => onSliderChange(v as number)}
+          valueLabelDisplay="auto"
+          valueLabelFormat={(v) => formatValue(v)}
+          sx={isOverriding ? { color: "warning.main" } : undefined}
+        />
+      </Box>
       <Typography
         variant="caption"
         color={isOverriding ? "warning.main" : isEventActive ? "primary.main" : "text.secondary"}
