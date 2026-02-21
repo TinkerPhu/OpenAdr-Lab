@@ -336,11 +336,12 @@ function OverridableControl({
   onToggle,
   onSliderChange,
 }: OverridableControlProps) {
-  const isOverriding = forceValue !== undefined;
+  // Rust serializes Option::None as JSON null; use != null to catch both null and undefined
+  const isOverriding = forceValue != null;
   // Slider disabled when event active and owner has not chosen to override
   const sliderDisabled = isEventActive && !isOverriding;
   // Slider value: force value if set, otherwise VTN intent (shown for reference)
-  const sliderValue = isOverriding ? forceValue : vtnIntentValue;
+  const sliderValue = forceValue ?? vtnIntentValue;
 
   let captionText: string;
   if (isOverriding) {
