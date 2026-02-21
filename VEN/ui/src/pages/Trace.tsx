@@ -86,7 +86,7 @@ export function TracePage() {
                 <TableCell sx={{ fontSize: "0.75rem" }}>
                   EV: {entry.setpoints.ev_charge_kw.toFixed(1)}kW |
                   Heat: {entry.setpoints.heater_kw.toFixed(1)}kW |
-                  PV curt: {(entry.setpoints.pv_curtailment * 100).toFixed(0)}%
+                  PV curt: {entry.setpoints.pv_curtailment_pct.toFixed(0)}%
                 </TableCell>
                 <TableCell sx={{ fontSize: "0.75rem", maxWidth: 300 }}>
                   {entry.reason}
