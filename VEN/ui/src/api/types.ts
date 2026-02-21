@@ -74,7 +74,7 @@ export type HeaterSnapshot = {
 
 export type PvSnapshot = {
   irradiance: number;
-  curtailment: number;
+  export_limit_kw: number | null; // active export cap (kW); null = no limit
   current_kw: number;
   rated_kw: number;
 };
@@ -96,7 +96,7 @@ export type SimSnapshot = {
 export type Setpoints = {
   ev_charge_kw: number;
   heater_kw: number;
-  pv_curtailment_pct: number; // 0–100 integer (rounded from 0.0–1.0 on the backend)
+  pv_export_limit_kw: number | null; // active export cap (kW); null = no limit
   mode: string;
 };
 
@@ -107,7 +107,7 @@ export type UserOverrides = {
   ev_plugged?: boolean;
   ev_force_kw?: number;
   heater_force_kw?: number;
-  pv_force_curtailment?: number;
+  pv_force_export_limit_kw?: number;
   ev_max_charge_kw?: number;
   ev_soc_target?: number;
   heater_max_kw?: number;
