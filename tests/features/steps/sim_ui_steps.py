@@ -54,22 +54,37 @@ def _delete_all_vtn_events(token):
     ON DELETE RESTRICT, so deleting events while reports reference them returns
     409 Conflict. The business token can delete reports (BusinessUser extractor).
 
+    VEN-1 runs at ~1Hz and may submit a new report between our report-delete and
+    event-delete passes. We retry the whole loop up to 3 times to handle this race.
+
     Note: openleadr-rs does not accept 'skip' / 'limit' pagination params on
     GET /events — calling without params returns all events.
     """
-    # Delete all reports first to remove the FK constraint on event_id
-    r = vtn_get("/reports", token)
-    r.raise_for_status()
-    for rpt in r.json():
-        r = vtn_delete(f"/reports/{rpt['id']}", token)
+    for attempt in range(3):
+        # Delete all reports to remove the FK constraint on event_id
+        r = vtn_get("/reports", token)
         r.raise_for_status()
+        for rpt in r.json():
+            r2 = vtn_delete(f"/reports/{rpt['id']}", token)
+            if r2.status_code not in (200, 204, 404):
+                r2.raise_for_status()
 
-    # Now delete events
-    r = vtn_get("/events", token)
-    r.raise_for_status()
-    for ev in r.json():
-        r = vtn_delete(f"/events/{ev['id']}", token)
+        # Delete all events; if a 409 is returned a new report snuck in — retry
+        r = vtn_get("/events", token)
         r.raise_for_status()
+        conflict = False
+        for ev in r.json():
+            r2 = vtn_delete(f"/events/{ev['id']}", token)
+            if r2.status_code == 409:
+                conflict = True
+                break
+            r2.raise_for_status()
+
+        if not conflict:
+            break
+        time.sleep(1)  # give VEN time to finish submitting the report
+    else:
+        raise AssertionError("Could not delete all events after 3 attempts (persistent 409)")
 
     # Verify all events were actually removed before the caller proceeds
     r = vtn_get("/events", token)
