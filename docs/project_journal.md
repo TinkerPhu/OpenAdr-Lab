@@ -1837,3 +1837,38 @@ PR #374 had all 13 CI checks green but Codecov flagged one uncovered line — li
 - **`basic_create_read` flaky failure in `--jobs 2` run** — client integration test races against other tests hitting the shared VTN server. Passes in isolation. Pre-existing issue, unrelated to our changes.
 
 *Last updated: 2026-02-21 — Phase 19b complete, all CI green, deployed to Pi4*
+
+---
+
+## Phase 20: Simulation Tab Override UI Tests (2026-02-21)
+
+### What was done
+
+Fixed all 3 failing `@ven-ui` scenarios in `tests/features/sim_override_ui.feature`. The feature tests the EV charge rate slider disabled/enabled state and the owner override toggle on the Simulation tab. Full suite went from 454 steps passed / 3 failed → **468 steps passed / 0 failed**.
+
+**Root causes found and fixed (in order of discovery):**
+
+1. **`slotProps.input` doesn't forward `data-testid` in real Chromium** — MUI Slider's `slotProps={{ input: { "data-testid": testId } }}` works in JSDOM (unit tests) but does not reliably reach the native `<input>` element in a Chromium browser via Playwright. Fixed by wrapping each `<Slider>` in `<Box data-testid={sliderTestId}>` and scoping all selectors to `[data-testid="..."] input[type="range"]`.
+
+2. **`wait_for_function` JS polling unreliable for slider state** — replaced with Playwright's native `wait_for_selector` using CSS `:disabled` / `:not([disabled])` pseudo-classes with `state="attached"` (works on visually hidden inputs). Timeout increased 5000→10000ms.
+
+3. **Event DELETE returns 409 (FK constraint)** — `report.event_id` has `ON DELETE RESTRICT`. VEN-1 submits reports for active events, so events can't be deleted while reports exist. Fixed by deleting all reports via `GET /reports` + `DELETE /reports/{id}` before deleting events.
+
+4. **Race condition: 409 still occurs after report deletion** — VEN-1 runs at ~1Hz and can submit a new report between the report-delete pass and the event-delete pass. Fixed by retrying the full delete-reports-then-delete-events loop up to 3 times with a 1s pause.
+
+5. **`isOverriding` always `true` after reset (core bug)** — Rust serializes `Option<f64>::None` as JSON `null`. The React check `forceValue !== undefined` treats `null` as truthy, so `isOverriding` was always `true` after a `POST /sim/override {}` reset. All 3 slider scenarios failed because the slider appeared "overriding" when it shouldn't. Fixed with `forceValue != null` (loose equality, catches both `null` and `undefined`) and `forceValue ?? vtnIntentValue` for the slider value.
+
+6. **Override state bleeds between scenarios** — VEN containers are long-lived; `UserOverrides` set in Scenario 2 (toggle click → `ev_force_kw=7.0`) survives in memory to Scenario 3. Fixed by adding `And the VEN-1 sim overrides are reset` to the behave Background (calls `POST /sim/override {}`).
+
+**Test isolation note on disk persistence**: VEN disk persistence (`PERSIST_PATH`) is a production feature for surviving Pi4 reboots — the sim state (SoC, temperatures, energy counters) has meaningful continuity. In the test environment, `PERSIST_PATH` is not set; state is in-memory only. The bleed-over issue was purely in-memory state within a long-lived container, unrelated to disk.
+
+### Issues encountered
+
+- **`docker compose run --build` doesn't rebuild `depends_on` images** — `test-ven-ui` was rebuilt to a stale image for several test runs. Fix: explicitly `docker compose build --no-cache test-ven-ui` after source changes.
+- **Unit tests (JSDOM) masked the Chromium selector bug** — `slotProps.input` worked in JSDOM so all 69 unit tests passed, giving false confidence. The E2E tests were the only signal that the selector didn't work in a real browser.
+
+### Key Learnings
+
+See KEY_LEARNINGS.md (Playwright section and React/UI section) for the MUI Slider selector pattern and the Rust `null` vs JS `undefined` pitfall.
+
+*Last updated: 2026-02-21 — Phase 20 complete, all 468 E2E steps pass, deployed to Pi4*

@@ -29,6 +29,7 @@ vi.mock("../api/hooks", () => ({
   useEvents: vi.fn(() => ({ data: mockEvents })),
   useSensor: vi.fn(() => ({ data: mockSensor })),
   useReports: vi.fn(() => ({ data: [] })),
+  useSim: vi.fn(() => ({ data: null, isError: false })),
 }));
 
 function renderDashboard() {
