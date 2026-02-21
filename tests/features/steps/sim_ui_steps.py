@@ -54,16 +54,29 @@ def _wait_slider_disabled(page, testid, expect_disabled: bool, timeout_ms=10000)
 
 
 def _delete_all_vtn_events(token):
-    """Delete all events visible to the given token from VTN, then verify none remain.
+    """Delete all reports then all events visible to the given token from VTN.
+
+    Reports must be deleted first — the report table has a FK on event_id with
+    ON DELETE RESTRICT, so deleting events while reports reference them returns
+    409 Conflict. The business token can delete reports (BusinessUser extractor).
 
     Note: openleadr-rs does not accept 'skip' / 'limit' pagination params on
     GET /events — calling without params returns all events.
     """
+    # Delete all reports first to remove the FK constraint on event_id
+    r = vtn_get("/reports", token)
+    r.raise_for_status()
+    for rpt in r.json():
+        r = vtn_delete(f"/reports/{rpt['id']}", token)
+        r.raise_for_status()
+
+    # Now delete events
     r = vtn_get("/events", token)
     r.raise_for_status()
     for ev in r.json():
         r = vtn_delete(f"/events/{ev['id']}", token)
         r.raise_for_status()
+
     # Verify all events were actually removed before the caller proceeds
     r = vtn_get("/events", token)
     r.raise_for_status()
