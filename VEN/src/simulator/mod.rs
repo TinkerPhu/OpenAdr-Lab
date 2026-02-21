@@ -94,7 +94,7 @@ impl SimState {
         };
 
         let pv_gen_w = if let Some(ref mut pv) = self.pv {
-            pv.update(dt_s, setpoints.pv_curtailment, hour, overrides.pv_irradiance) * 1000.0
+            pv.update(dt_s, setpoints.pv_export_limit_kw, hour, overrides.pv_irradiance) * 1000.0
         } else {
             0.0
         };
@@ -157,7 +157,7 @@ impl SimState {
             }),
             pv: self.pv.as_ref().map(|pv| PvSnapshot {
                 irradiance: pv.irradiance,
-                curtailment: pv.curtailment,
+                export_limit_kw: pv.export_limit_kw,
                 current_kw: pv.current_kw,
                 rated_kw: pv.rated_kw,
             }),
@@ -203,7 +203,7 @@ pub struct HeaterSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PvSnapshot {
     pub irradiance: f64,
-    pub curtailment: f64,
+    pub export_limit_kw: Option<f64>, // active export cap; None = no limit
     pub current_kw: f64,
     pub rated_kw: f64,
 }

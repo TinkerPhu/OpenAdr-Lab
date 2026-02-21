@@ -14,6 +14,14 @@ fn serialize_round2<S: serde::Serializer>(v: &f32, s: S) -> Result<S::Ok, S::Err
     s.serialize_f64(((*v as f64) * 100.0).round() / 100.0)
 }
 
+/// Serialize Option<f32> as null or a 2-decimal-place number.
+fn serialize_opt_round2<S: serde::Serializer>(v: &Option<f32>, s: S) -> Result<S::Ok, S::Error> {
+    match v {
+        None => s.serialize_none(),
+        Some(f) => s.serialize_f64(((*f as f64) * 100.0).round() / 100.0),
+    }
+}
+
 /// f32 setpoints stored in the trace ring buffer.
 /// Serialized with 0.01 resolution to keep JSON payload compact
 /// while retaining sub-kW precision for ramp visibility in the chart.
@@ -23,8 +31,9 @@ pub struct TraceSetpoints {
     pub ev_charge_kw: f32,
     #[serde(serialize_with = "serialize_round2")]
     pub heater_kw: f32,
-    #[serde(serialize_with = "serialize_round2")]
-    pub pv_curtailment_pct: f32, // 0.0–100.0
+    /// Active export cap in kW; null = no limit (full output).
+    #[serde(serialize_with = "serialize_opt_round2")]
+    pub pv_export_limit_kw: Option<f32>,
     pub mode: String,
 }
 
@@ -89,7 +98,7 @@ impl DecisionTrace {
             setpoints: TraceSetpoints {
                 ev_charge_kw: setpoints.ev_charge_kw as f32,
                 heater_kw: setpoints.heater_kw as f32,
-                pv_curtailment_pct: (setpoints.pv_curtailment * 100.0) as f32,
+                pv_export_limit_kw: setpoints.pv_export_limit_kw.map(|v| v as f32),
                 mode: setpoints.mode.clone(),
             },
             constraints,

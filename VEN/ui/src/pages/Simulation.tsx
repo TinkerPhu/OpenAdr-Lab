@@ -155,7 +155,7 @@ function HeaterCard({ sim }: { sim: SimSnapshot }) {
 
 function PvCard({ sim }: { sim: SimSnapshot }) {
   if (!sim.pv) return null;
-  const { irradiance, curtailment, current_kw, rated_kw } = sim.pv;
+  const { irradiance, export_limit_kw, current_kw, rated_kw } = sim.pv;
   return (
     <Paper sx={{ p: 2 }}>
       <Typography variant="subtitle1" fontWeight="bold" mb={1}>
@@ -165,7 +165,9 @@ function PvCard({ sim }: { sim: SimSnapshot }) {
         <Typography>Output: {fmtNum(current_kw)} kW / {fmtNum(rated_kw)} kW rated</Typography>
         <Stack direction="row" spacing={1}>
           <Typography>Irradiance: {(irradiance * 100).toFixed(0)}%</Typography>
-          <Typography>Curtailment: {(curtailment * 100).toFixed(0)}%</Typography>
+          <Typography>
+            Export limit: {export_limit_kw != null ? `${fmtNum(export_limit_kw)} kW` : "none"}
+          </Typography>
         </Stack>
         <Box sx={{ px: 1 }}>
           <Box
@@ -203,7 +205,7 @@ type ChartPoint = {
   // Actual reactor setpoints (past only)
   ev_charge_kw?: number;
   heater_kw?: number;
-  pv_curtailed_kw?: number;   // curtailment_pct/100 * rated_kw
+  pv_export_limit_kw?: number;   // curtailment_pct/100 * rated_kw
   // Desired values from VTN event payloads (past + future)
   ev_desired?: number;
   heater_desired?: number;
@@ -288,7 +290,6 @@ function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
   const traceQuery = useTrace(1000);
   const eventsQuery = useEvents();
   const events = eventsQuery.data ?? [];
-  const ratedKw = sim?.pv?.rated_kw ?? 0;
 
   // Chronological order from the (newest-first) trace response
   const traceEntries = [...(traceQuery.data ?? [])].reverse();
@@ -317,9 +318,9 @@ function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
       isFuture: false,
       ev_charge_kw: sim?.ev != null ? entry.setpoints.ev_charge_kw : undefined,
       heater_kw: sim?.heater != null ? entry.setpoints.heater_kw : undefined,
-      pv_curtailed_kw:
+      pv_export_limit_kw:
         sim?.pv != null
-          ? (entry.setpoints.pv_curtailment_pct / 100) * ratedKw
+          ? (entry.setpoints.pv_export_limit_kw ?? undefined)
           : undefined,
       ev_desired:
         sim?.ev != null
@@ -411,8 +412,8 @@ function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
             {hasPv && (
               <Line
                 type="monotone"
-                dataKey="pv_curtailed_kw"
-                name="PV curtailed (kW)"
+                dataKey="pv_export_limit_kw"
+                name="PV export limit (kW)"
                 stroke="#f5c518"
                 dot={false}
                 isAnimationActive={false}
@@ -681,31 +682,32 @@ function PvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
   }
 
   const traceMode = latestTrace?.mode ?? "IDLE";
-  const isPvEventActive = traceMode === "EXPORT_CAP" || traceMode === "IMPORT_CAP";
+  const isPvEventActive = traceMode === "EXPORT_CAP";
 
-  // pv_curtailment_pct is already 0–100 integer from the backend
-  const vtnPvCurtailment = latestTrace?.setpoints.pv_curtailment_pct ?? 0;
+  // pv_export_limit_kw is null when no limit is active; fall back to rated_kw for slider display
+  const ratedKw = overrides.pv_rated_kw ?? sim.pv.rated_kw;
+  const vtnPvLimitKw = latestTrace?.setpoints.pv_export_limit_kw ?? ratedKw;
 
   return (
     <Box>
       <Typography variant="subtitle2" mb={1}>PV Inverter</Typography>
       <Stack spacing={2} sx={{ pl: 1 }}>
         <OverridableControl
-          label="PV Curtailment"
+          label="PV Export Limit"
           isEventActive={isPvEventActive}
-          vtnIntentValue={vtnPvCurtailment}
-          formatValue={(v) => `${v.toFixed(0)}% curtailment`}
-          forceValue={overrides.pv_force_curtailment != null ? overrides.pv_force_curtailment * 100 : undefined}
+          vtnIntentValue={vtnPvLimitKw}
+          formatValue={(v) => `${v.toFixed(1)} kW`}
+          forceValue={overrides.pv_force_export_limit_kw}
           min={0}
-          max={100}
-          step={1}
+          max={ratedKw}
+          step={0.1}
           toggleTestId="pv-force-override-toggle"
           sliderTestId="pv-force-slider"
           captionTestId="pv-force-caption"
           onToggle={(enabled, initialValue) => {
-            onChange({ pv_force_curtailment: enabled ? initialValue / 100 : undefined });
+            onChange({ pv_force_export_limit_kw: enabled ? initialValue : undefined });
           }}
-          onSliderChange={(v) => onChange({ pv_force_curtailment: v / 100 })}
+          onSliderChange={(v) => onChange({ pv_force_export_limit_kw: v })}
         />
         <FormControlLabel
           control={

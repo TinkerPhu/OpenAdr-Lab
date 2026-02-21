@@ -207,7 +207,7 @@ async fn main() -> anyhow::Result<()> {
                     // Owner force-overrides applied AFTER reactor (trace records VTN intent unaffected)
                     if let Some(kw) = overrides.ev_force_kw       { setpoints.ev_charge_kw   = kw; }
                     if let Some(kw) = overrides.heater_force_kw   { setpoints.heater_kw       = kw; }
-                    if let Some(c)  = overrides.pv_force_curtailment { setpoints.pv_curtailment = c; }
+                    if let Some(limit) = overrides.pv_force_export_limit_kw { setpoints.pv_export_limit_kw = Some(limit); }
 
                     // Simulator: apply setpoints → update device states
                     sim_guard.tick(dt_s, &setpoints, now, &overrides);

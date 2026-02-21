@@ -20,7 +20,7 @@ pub struct UserOverrides {
     // Owner force-overrides: beat VTN events; None = let reactor/events control
     pub ev_force_kw: Option<f64>,
     pub heater_force_kw: Option<f64>,
-    pub pv_force_curtailment: Option<f64>,
+    pub pv_force_export_limit_kw: Option<f64>,
 
     // Device spec overrides (shadow profile values)
     pub ev_max_charge_kw: Option<f64>,
