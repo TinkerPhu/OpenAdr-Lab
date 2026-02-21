@@ -3,6 +3,7 @@ Feature: Simulation tab override switch UI
   Background:
     Given I have a VTN token as "any-business"
     And I create a program "sim-uc6-ui" targeting "ven-1-name" and save its ID
+    And the VEN-1 sim overrides are reset
 
   @ven-ui
   Scenario: EV charge rate slider is disabled when CHARGE_STATE_SETPOINT event is active
