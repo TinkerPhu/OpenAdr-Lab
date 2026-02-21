@@ -82,6 +82,18 @@ def _delete_all_vtn_events(token):
 
 # ── Step definitions ──────────────────────────────────────────────────────────
 
+@given('the VEN-1 sim overrides are reset')
+def step_reset_ven_overrides(context):
+    """POST empty UserOverrides to VEN-1 to clear any persisted force values.
+
+    Force overrides (ev_force_kw etc.) persist on the VEN between test runs.
+    Without this reset, a toggle click in scenario N bleeds into scenario N+1,
+    making the slider appear enabled/overriding when it should be VTN-controlled.
+    """
+    r = ven_post("/sim/override", json={})
+    r.raise_for_status()
+
+
 @when('I create a CHARGE_STATE_SETPOINT event "{name}" with value {value:g}')
 def step_create_charge_setpoint_event(context, name, value):
     _create_charge_setpoint_event(context, name, value)
