@@ -2,7 +2,7 @@
 
 import time
 from behave import given, when, then
-from features.helpers.api_client import vtn_post, vtn_delete, vtn_get, ven_get
+from features.helpers.api_client import vtn_post, vtn_delete, vtn_get, ven_get, ven_post
 from features.helpers.wait import poll_until
 from features.helpers.ui import tid
 
