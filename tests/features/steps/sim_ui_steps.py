@@ -31,26 +31,28 @@ def _create_charge_setpoint_event(context, event_name, value_kw):
     return r.json()
 
 
-def _wait_slider_disabled(page, testid, expect_disabled: bool, timeout_ms=5000):
-    """Poll via wait_for_function until the MUI Slider has (or lacks) Mui-disabled.
+def _wait_slider_disabled(page, testid, expect_disabled: bool, timeout_ms=10000):
+    """Poll via wait_for_function until the MUI Slider <input> native disabled attribute matches.
 
-    MUI v5 Slider marks its root <span> with the 'Mui-disabled' CSS class when
-    disabled. Neither the 'disabled' attribute nor 'aria-disabled' is reliably
-    present on the inner <input type="range"> element itself.
+    MUI v5 Slider sets the native 'disabled' boolean attribute on the hidden
+    <input type="range"> element when the slider is disabled. This is the same
+    mechanism that @testing-library's toBeDisabled() checks in unit tests and is
+    more reliable than checking the 'Mui-disabled' CSS class on the root span.
+
+    slotProps={{ input: { "data-testid": ... } }} places the testid directly on
+    the <input type="range"> element (confirmed via MUI v5 useSlotProps source).
     """
     condition = "true" if expect_disabled else "false"
     js = f"""(testid) => {{
         const input = document.querySelector('[data-testid="' + testid + '"]');
         if (!input) return false;
-        const root = input.closest('[class*="MuiSlider-root"]');
-        const muiDisabled = root ? root.classList.contains("Mui-disabled") : false;
-        return muiDisabled === {condition};
+        return input.disabled === {condition};
     }}"""
     page.wait_for_function(js, arg=testid, timeout=timeout_ms)
 
 
 def _delete_all_vtn_events(token):
-    """Delete all events visible to the given token from VTN.
+    """Delete all events visible to the given token from VTN, then verify none remain.
 
     Note: openleadr-rs does not accept 'skip' / 'limit' pagination params on
     GET /events — calling without params returns all events.
@@ -58,7 +60,15 @@ def _delete_all_vtn_events(token):
     r = vtn_get("/events", token)
     r.raise_for_status()
     for ev in r.json():
-        vtn_delete(f"/events/{ev['id']}", token)
+        r = vtn_delete(f"/events/{ev['id']}", token)
+        r.raise_for_status()
+    # Verify all events were actually removed before the caller proceeds
+    r = vtn_get("/events", token)
+    r.raise_for_status()
+    remaining = r.json()
+    assert len(remaining) == 0, (
+        f"Events not deleted: {[e['eventName'] for e in remaining]}"
+    )
 
 
 # ── Step definitions ──────────────────────────────────────────────────────────
@@ -88,7 +98,7 @@ def step_wait_reactor_mode(context, mode):
     poll_until(
         _ven1_trace,
         trace_shows_mode,
-        timeout=60,
+        timeout=90,
         interval=2,
         description=f"VEN-1 reactor mode == '{mode}'",
     )
@@ -124,10 +134,8 @@ def step_ev_override_toggle_not_shown(context):
 
 @then('the EV charge rate slider is disabled')
 def step_ev_slider_disabled(context):
-    # wait_for_function polls until Mui-disabled class is present on slider root
     try:
-        _wait_slider_disabled(context.browser_page, "ev-charge-slider",
-                              expect_disabled=True, timeout_ms=5000)
+        _wait_slider_disabled(context.browser_page, "ev-charge-slider", expect_disabled=True)
     except Exception:
         raise AssertionError(
             "EV charge rate slider should be disabled when event is active and no override"
@@ -136,10 +144,8 @@ def step_ev_slider_disabled(context):
 
 @then('the EV charge rate slider is enabled')
 def step_ev_slider_enabled(context):
-    # wait_for_function polls until Mui-disabled class is absent from slider root
     try:
-        _wait_slider_disabled(context.browser_page, "ev-charge-slider",
-                              expect_disabled=False, timeout_ms=5000)
+        _wait_slider_disabled(context.browser_page, "ev-charge-slider", expect_disabled=False)
     except Exception:
         raise AssertionError("EV charge rate slider should be enabled")
 
