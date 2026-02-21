@@ -151,7 +151,7 @@ export function DashboardPage() {
                     <Typography variant="subtitle2">PV Inverter</Typography>
                     <Typography>Output: {fmtNum(sim.data.pv.current_kw)} kW</Typography>
                     <Typography>Irradiance: {(sim.data.pv.irradiance * 100).toFixed(0)}%</Typography>
-                    <Typography>Curtailment: {(sim.data.pv.curtailment * 100).toFixed(0)}%</Typography>
+                    <Typography>Export limit: {sim.data.pv.export_limit_kw != null ? `${sim.data.pv.export_limit_kw.toFixed(1)} kW` : "none"}</Typography>
                   </Stack>
                 </Grid>
               )}
