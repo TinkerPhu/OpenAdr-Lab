@@ -1807,3 +1807,33 @@ Implemented `fix/event-ven-target-privacy` in the `openleadr-rs` submodule: a co
 ---
 
 *Last updated: 2026-02-20 — PR #374 all CI green*
+
+---
+
+## Phase 19b: PR #374 Codecov coverage fix (2026-02-21)
+
+### What was done
+
+PR #374 had all 13 CI checks green but Codecov flagged one uncovered line — line 152 in `openleadr-vtn/src/data_source/postgres/event.rs`, which is the closing `}` of `if let Some(ref mut targets) = event.content.targets` inside `strip_ven_name_targets`. This represents the path where `is_ven == true` but `event.content.targets` is already `None`.
+
+**Fix**
+- Added `event-5` to `fixtures/events-ven-targets.sql`: same program-1, `targets: NULL` in DB
+- Added 5th test `ven_sees_event_with_null_targets`: ven-1 retrieves event-5 and gets it back with `targets: None` — covers the uncovered path
+- Updated `ven_list_filters_and_strips` assertions: event-5 is visible to all VENs, so ven-1 now sees 2 events (not 1) and ven-2 sees 1 (not 0); used `.any()` to find event-4 in the list instead of asserting on position
+
+**Squash and CI**
+- Intermediate test commits had wrong `Signed-off-by` email (`tinker@phu.eu` instead of `TinkerPhu@users.noreply.github.com`) causing DCO failure
+- All 3 commits squashed to 1 clean commit via `git reset --soft <base>`, force-pushed — all 13 CI checks passed
+
+**Deployment**
+- Merged into `dev` (conflict-resolved by taking fix branch version)
+- Submodule updated to `dev` tip, pushed to origin
+- VTN image rebuilt and redeployed on Pi4
+
+### Issues encountered
+
+- **New `#[sqlx::test]` functions not appearing in test output** — root cause: Docker cargo-test image was stale (source baked in at image build time, not volume-mounted). Running `cargo clean` alone doesn't help if the image is old. Fix: `docker compose run --build` to rebuild image, then `cargo clean` inside the container, then test.
+- **Wrong Signed-off-by email** — intermediate commits used `tinker@phu.eu`. DCO bot requires exact match with commit author email. Fix: squash all commits with correct email.
+- **`basic_create_read` flaky failure in `--jobs 2` run** — client integration test races against other tests hitting the shared VTN server. Passes in isolation. Pre-existing issue, unrelated to our changes.
+
+*Last updated: 2026-02-21 — Phase 19b complete, all CI green, deployed to Pi4*
