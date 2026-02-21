@@ -6,7 +6,18 @@ use super::arbitration::ReactorMode;
 use super::fsm::FsmState;
 use super::Setpoints;
 
-const MAX_TRACE_ENTRIES: usize = 100;
+const MAX_TRACE_ENTRIES: usize = 1000;
+
+/// Integer-rounded setpoints stored in the trace ring buffer.
+/// Using i32 instead of f64 saves ~40 % of JSON payload per entry;
+/// kW precision beyond 1 W is not meaningful for a 1-second tick.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceSetpoints {
+    pub ev_charge_kw: i32,
+    pub heater_kw: i32,
+    pub pv_curtailment_pct: i32, // 0–100 (rounded from 0.0–1.0)
+    pub mode: String,
+}
 
 /// A single decision trace entry — one per reactor tick.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,7 +27,7 @@ pub struct TraceEntry {
     pub fsm_state: String,
     pub active_events: Vec<String>,
     pub winning_intent: Option<String>,
-    pub setpoints: Setpoints,
+    pub setpoints: TraceSetpoints,
     pub constraints: Vec<String>,
     pub reason: String,
 }
@@ -66,7 +77,12 @@ impl DecisionTrace {
             fsm_state: fsm_state.to_string(),
             active_events,
             winning_intent,
-            setpoints: setpoints.clone(),
+            setpoints: TraceSetpoints {
+                ev_charge_kw: setpoints.ev_charge_kw.round() as i32,
+                heater_kw: setpoints.heater_kw.round() as i32,
+                pv_curtailment_pct: (setpoints.pv_curtailment * 100.0).round() as i32,
+                mode: setpoints.mode.clone(),
+            },
             constraints,
             reason,
         });

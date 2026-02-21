@@ -40,14 +40,14 @@ const baseSim: SimSnapshot = {
   },
 };
 
-function makeTrace(mode: string, ev_charge_kw = 7, heater_kw = 2, pv_curtailment = 0): TraceEntry {
+function makeTrace(mode: string, ev_charge_kw = 7, heater_kw = 2, pv_curtailment_pct = 0): TraceEntry {
   return {
     ts: "2026-02-20T10:00:00Z",
     mode,
     fsm_state: "Holding",
     active_events: ["test-event"],
     winning_intent: `${mode}=7.0 (event: test-event, priority: 0)`,
-    setpoints: { ev_charge_kw, heater_kw, pv_curtailment, mode },
+    setpoints: { ev_charge_kw, heater_kw, pv_curtailment_pct, mode },
     constraints: ["EV max 11.0kW"],
     reason: "Holding setpoints for test-event",
   };
@@ -65,6 +65,7 @@ vi.mock("../api/hooks", () => ({
   useTrace: (limit: number) => ({
     data: limit === 1 ? mockTrace1Data() : [],
   }),
+  useEvents: () => ({ data: [] }),
   useSimOverride: () => ({ data: mockSimOverrideData() }),
   useSetSimOverride: () => mockSetSimOverride(),
 }));
@@ -211,7 +212,7 @@ describe("SimulationPage — PV curtailment override controls", () => {
   });
 
   it("pv force slider is disabled when EXPORT_CAP event active and no override", () => {
-    mockTrace1Data.mockReturnValue([makeTrace("EXPORT_CAP", 11, 4, 0.5)]);
+    mockTrace1Data.mockReturnValue([makeTrace("EXPORT_CAP", 11, 4, 50)]);
     renderSim();
     const wrapper = screen.getByTestId("pv-force-slider");
     const input = wrapper.querySelector("input[type='range']") as HTMLInputElement;
@@ -220,7 +221,7 @@ describe("SimulationPage — PV curtailment override controls", () => {
   });
 
   it("pv curtailment override toggle enables slider", async () => {
-    mockTrace1Data.mockReturnValue([makeTrace("EXPORT_CAP", 11, 4, 0.5)]);
+    mockTrace1Data.mockReturnValue([makeTrace("EXPORT_CAP", 11, 4, 50)]);
     renderSim();
 
     const toggle = screen.getByTestId("pv-force-override-toggle");
