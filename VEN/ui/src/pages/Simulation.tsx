@@ -21,8 +21,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useSim, useTrace, useSimOverride, useSetSimOverride } from "../api/hooks";
-import type { UserOverrides, SimSnapshot, TraceEntry } from "../api/types";
+import { useSim, useTrace, useEvents, useSimOverride, useSetSimOverride } from "../api/hooks";
+import type { UserOverrides, SimSnapshot, TraceEntry, VtnEvent } from "../api/types";
 
 function fmtNum(v: number | undefined | null, decimals = 1): string {
   if (v == null) return "—";
@@ -199,34 +199,182 @@ function PvCard({ sim }: { sim: SimSnapshot }) {
 
 type ChartPoint = {
   time: string;
+  isFuture?: boolean;
+  // Actual reactor setpoints (past only)
   ev_charge_kw?: number;
   heater_kw?: number;
-  pv_curtailment_pct?: number;
+  pv_curtailed_kw?: number;   // curtailment_pct/100 * rated_kw
+  // Desired values from VTN event payloads (past + future)
+  ev_desired?: number;
+  heater_desired?: number;
+  pv_desired?: number;
 };
 
-function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
-  const traceQuery = useTrace(100);
+/** Parse ISO 8601 duration string (e.g. "PT1H30M") → seconds. */
+function parseIsoDuration(s: string): number {
+  const m = s.match(
+    /^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/
+  );
+  if (!m) return 0;
+  return (
+    parseFloat(m[1] ?? "0") * 365 * 24 * 3600 +
+    parseFloat(m[2] ?? "0") * 30 * 24 * 3600 +
+    parseFloat(m[3] ?? "0") * 24 * 3600 +
+    parseFloat(m[4] ?? "0") * 3600 +
+    parseFloat(m[5] ?? "0") * 60 +
+    parseFloat(m[6] ?? "0")
+  );
+}
 
-  const chartData: ChartPoint[] = (traceQuery.data ?? [])
-    .slice()
-    .reverse()
-    .map((entry) => ({
+/**
+ * For a given Unix timestamp (ms) and event list, return the winning event's
+ * payload value for `payloadType`. Returns undefined if no event interval is
+ * active at that moment. Arbitration: lowest priority wins; newest
+ * createdDateTime breaks ties (mirrors reactor arbitration).
+ */
+function getDesiredValue(
+  tsMs: number,
+  events: VtnEvent[],
+  payloadType: string
+): number | undefined {
+  type Candidate = { priority: number; createdMs: number; value: number };
+  const candidates: Candidate[] = [];
+
+  for (const event of events) {
+    const topStart = event.intervalPeriod?.start
+      ? new Date(event.intervalPeriod.start).getTime()
+      : null;
+    const topDurationMs = event.intervalPeriod?.duration
+      ? parseIsoDuration(event.intervalPeriod.duration) * 1000
+      : null;
+
+    for (const interval of event.intervals ?? []) {
+      const startMs =
+        interval.intervalPeriod?.start
+          ? new Date(interval.intervalPeriod.start).getTime()
+          : topStart;
+      const durationMs =
+        interval.intervalPeriod?.duration
+          ? parseIsoDuration(interval.intervalPeriod.duration) * 1000
+          : topDurationMs;
+
+      if (startMs == null) continue;
+      const endMs = durationMs != null ? startMs + durationMs : Infinity;
+      if (tsMs < startMs || tsMs >= endMs) continue;
+
+      const payload = interval.payloads?.find((p) => p.type === payloadType);
+      if (!payload || payload.values.length === 0) continue;
+
+      candidates.push({
+        priority: event.priority ?? 999,
+        createdMs: event.createdDateTime
+          ? new Date(event.createdDateTime).getTime()
+          : 0,
+        value: payload.values[0],
+      });
+    }
+  }
+
+  if (candidates.length === 0) return undefined;
+  candidates.sort((a, b) =>
+    a.priority !== b.priority
+      ? a.priority - b.priority
+      : b.createdMs - a.createdMs
+  );
+  return candidates[0].value;
+}
+
+function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
+  const traceQuery = useTrace(1000);
+  const eventsQuery = useEvents();
+  const events = eventsQuery.data ?? [];
+  const ratedKw = sim?.pv?.rated_kw ?? 0;
+
+  // Chronological order from the (newest-first) trace response
+  const traceEntries = [...(traceQuery.data ?? [])].reverse();
+
+  // Infer tick interval from consecutive timestamps (median of first 10 diffs)
+  let tickIntervalMs = 1000;
+  if (traceEntries.length >= 2) {
+    const diffs: number[] = [];
+    for (let i = 1; i < Math.min(traceEntries.length, 11); i++) {
+      const d =
+        new Date(traceEntries[i].ts).getTime() -
+        new Date(traceEntries[i - 1].ts).getTime();
+      if (d > 0) diffs.push(d);
+    }
+    if (diffs.length > 0) {
+      diffs.sort((a, b) => a - b);
+      tickIntervalMs = diffs[Math.floor(diffs.length / 2)];
+    }
+  }
+
+  // Past points — actual setpoints + desired from events
+  const pastPoints: ChartPoint[] = traceEntries.map((entry) => {
+    const tsMs = new Date(entry.ts).getTime();
+    return {
       time: new Date(entry.ts).toLocaleTimeString(),
+      isFuture: false,
       ev_charge_kw: sim?.ev != null ? entry.setpoints.ev_charge_kw : undefined,
       heater_kw: sim?.heater != null ? entry.setpoints.heater_kw : undefined,
-      pv_curtailment_pct: sim?.pv != null ? entry.setpoints.pv_curtailment * 100 : undefined,
-    }));
+      pv_curtailed_kw:
+        sim?.pv != null
+          ? (entry.setpoints.pv_curtailment_pct / 100) * ratedKw
+          : undefined,
+      ev_desired:
+        sim?.ev != null
+          ? getDesiredValue(tsMs, events, "CHARGE_STATE_SETPOINT")
+          : undefined,
+      heater_desired:
+        sim?.heater != null
+          ? getDesiredValue(tsMs, events, "IMPORT_CAPACITY_LIMIT")
+          : undefined,
+      pv_desired:
+        sim?.pv != null
+          ? getDesiredValue(tsMs, events, "EXPORT_CAPACITY_LIMIT")
+          : undefined,
+    };
+  });
+
+  // Future points — desired from events only (500 synthetic ticks)
+  const FUTURE_COUNT = 500;
+  const now = Date.now();
+  const futurePoints: ChartPoint[] = Array.from({ length: FUTURE_COUNT }, (_, i) => {
+    const tsMs = now + (i + 1) * tickIntervalMs;
+    return {
+      time: new Date(tsMs).toLocaleTimeString(),
+      isFuture: true,
+      ev_desired:
+        sim?.ev != null
+          ? getDesiredValue(tsMs, events, "CHARGE_STATE_SETPOINT")
+          : undefined,
+      heater_desired:
+        sim?.heater != null
+          ? getDesiredValue(tsMs, events, "IMPORT_CAPACITY_LIMIT")
+          : undefined,
+      pv_desired:
+        sim?.pv != null
+          ? getDesiredValue(tsMs, events, "EXPORT_CAPACITY_LIMIT")
+          : undefined,
+    };
+  });
+
+  const chartData: ChartPoint[] = [...pastPoints, ...futurePoints];
 
   const hasEv = sim?.ev != null;
   const hasHeater = sim?.heater != null;
   const hasPv = sim?.pv != null;
 
+  const isEvEventActive = chartData.some((p) => p.ev_desired !== undefined);
+  const isImportCapActive = chartData.some((p) => p.heater_desired !== undefined);
+  const isExportCapActive = chartData.some((p) => p.pv_desired !== undefined);
+
   return (
     <Paper sx={{ p: 2 }}>
       <Typography variant="subtitle1" fontWeight="bold" mb={2}>
-        Reactor Setpoints (last 100 ticks)
+        Reactor Setpoints — last 1 000 ticks + 8 min projection
       </Typography>
-      {chartData.length === 0 ? (
+      {traceEntries.length === 0 ? (
         <Typography color="text.secondary">No trace data yet…</Typography>
       ) : (
         <ResponsiveContainer width="100%" height={280}>
@@ -263,9 +411,42 @@ function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
             {hasPv && (
               <Line
                 type="monotone"
-                dataKey="pv_curtailment_pct"
-                name="PV curtailment (%)"
+                dataKey="pv_curtailed_kw"
+                name="PV curtailed (kW)"
                 stroke="#f5c518"
+                dot={false}
+                isAnimationActive={false}
+              />
+            )}
+            {hasEv && isEvEventActive && (
+              <Line
+                type="monotone"
+                dataKey="ev_desired"
+                name="EV target (VTN)"
+                stroke="#1976d2"
+                strokeDasharray="5 5"
+                dot={false}
+                isAnimationActive={false}
+              />
+            )}
+            {hasHeater && isImportCapActive && (
+              <Line
+                type="monotone"
+                dataKey="heater_desired"
+                name="Import cap (VTN)"
+                stroke="#7b1fa2"
+                strokeDasharray="5 5"
+                dot={false}
+                isAnimationActive={false}
+              />
+            )}
+            {hasPv && isExportCapActive && (
+              <Line
+                type="monotone"
+                dataKey="pv_desired"
+                name="Export cap (VTN)"
+                stroke="#388e3c"
+                strokeDasharray="5 5"
                 dot={false}
                 isAnimationActive={false}
               />
@@ -502,7 +683,8 @@ function PvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
   const traceMode = latestTrace?.mode ?? "IDLE";
   const isPvEventActive = traceMode === "EXPORT_CAP" || traceMode === "IMPORT_CAP";
 
-  const vtnPvCurtailment = latestTrace?.setpoints.pv_curtailment ?? 0;
+  // pv_curtailment_pct is already 0–100 integer from the backend
+  const vtnPvCurtailment = latestTrace?.setpoints.pv_curtailment_pct ?? 0;
 
   return (
     <Box>
@@ -511,7 +693,7 @@ function PvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
         <OverridableControl
           label="PV Curtailment"
           isEventActive={isPvEventActive}
-          vtnIntentValue={vtnPvCurtailment * 100}
+          vtnIntentValue={vtnPvCurtailment}
           formatValue={(v) => `${v.toFixed(0)}% curtailment`}
           forceValue={overrides.pv_force_curtailment != null ? overrides.pv_force_curtailment * 100 : undefined}
           min={0}

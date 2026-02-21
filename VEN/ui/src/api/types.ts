@@ -96,7 +96,7 @@ export type SimSnapshot = {
 export type Setpoints = {
   ev_charge_kw: number;
   heater_kw: number;
-  pv_curtailment: number;
+  pv_curtailment_pct: number; // 0–100 integer (rounded from 0.0–1.0 on the backend)
   mode: string;
 };
 
