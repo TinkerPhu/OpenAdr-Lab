@@ -98,9 +98,10 @@ describe("SimulationPage — EV override controls", () => {
     renderSim();
     // No override toggle should be shown (no event)
     expect(screen.queryByTestId("ev-charge-override-toggle")).not.toBeInTheDocument();
-    // Slider is enabled
-    const slider = screen.getByTestId("ev-charge-slider");
-    expect(slider).not.toBeDisabled();
+    // Slider is enabled — data-testid is on the Box wrapper; find input inside it
+    const wrapper = screen.getByTestId("ev-charge-slider");
+    const input = wrapper.querySelector("input[type='range']") as HTMLInputElement;
+    expect(input).not.toBeDisabled();
     // Caption says idle default
     expect(screen.getByTestId("ev-charge-caption")).toHaveTextContent("No active event");
   });
@@ -110,9 +111,10 @@ describe("SimulationPage — EV override controls", () => {
     renderSim();
     // Toggle switch should be visible
     expect(screen.getByTestId("ev-charge-override-toggle")).toBeInTheDocument();
-    // Slider input should be disabled
-    const slider = screen.getByTestId("ev-charge-slider");
-    expect(slider).toBeDisabled();
+    // Slider input should be disabled — data-testid is on the Box wrapper
+    const wrapper = screen.getByTestId("ev-charge-slider");
+    const input = wrapper.querySelector("input[type='range']") as HTMLInputElement;
+    expect(input).toBeDisabled();
     // Caption mentions VTN commands
     expect(screen.getByTestId("ev-charge-caption")).toHaveTextContent("VTN commands");
   });
@@ -126,8 +128,9 @@ describe("SimulationPage — EV override controls", () => {
   it("ev slider has negative range when ev max_charge_kw is 11", () => {
     mockTrace1Data.mockReturnValue([makeTrace("IDLE", 11, 2, 0)]);
     renderSim();
-    const slider = screen.getByTestId("ev-charge-slider");
-    expect(slider).toHaveAttribute("aria-valuemin", "-11");
+    const wrapper = screen.getByTestId("ev-charge-slider");
+    const input = wrapper.querySelector("input[type='range']") as HTMLInputElement;
+    expect(input).toHaveAttribute("aria-valuemin", "-11");
   });
 
   it("ev override toggle enables slider and shows override caption", async () => {
@@ -140,8 +143,9 @@ describe("SimulationPage — EV override controls", () => {
     });
 
     // Slider should now be enabled
-    const slider = screen.getByTestId("ev-charge-slider");
-    expect(slider).not.toBeDisabled();
+    const wrapper = screen.getByTestId("ev-charge-slider");
+    const input = wrapper.querySelector("input[type='range']") as HTMLInputElement;
+    expect(input).not.toBeDisabled();
     // Caption should mention overriding
     expect(screen.getByTestId("ev-charge-caption")).toHaveTextContent("Overriding VTN");
   });
@@ -169,8 +173,9 @@ describe("SimulationPage — Heater override controls", () => {
   it("heater force slider is disabled when IMPORT_CAP event active and no override", () => {
     mockTrace1Data.mockReturnValue([makeTrace("IMPORT_CAP", 0, 0, 0)]);
     renderSim();
-    const slider = screen.getByTestId("heater-force-slider");
-    expect(slider).toBeDisabled();
+    const wrapper = screen.getByTestId("heater-force-slider");
+    const input = wrapper.querySelector("input[type='range']") as HTMLInputElement;
+    expect(input).toBeDisabled();
   });
 
   it("heater override toggle enables slider", async () => {
@@ -182,8 +187,9 @@ describe("SimulationPage — Heater override controls", () => {
       await userEvent.click(toggle);
     });
 
-    const slider = screen.getByTestId("heater-force-slider");
-    expect(slider).not.toBeDisabled();
+    const wrapper = screen.getByTestId("heater-force-slider");
+    const input = wrapper.querySelector("input[type='range']") as HTMLInputElement;
+    expect(input).not.toBeDisabled();
   });
 
   it("heater force slider is enabled when no event", () => {
@@ -191,8 +197,9 @@ describe("SimulationPage — Heater override controls", () => {
     renderSim();
     // No toggle shown when no event
     expect(screen.queryByTestId("heater-force-override-toggle")).not.toBeInTheDocument();
-    const slider = screen.getByTestId("heater-force-slider");
-    expect(slider).not.toBeDisabled();
+    const wrapper = screen.getByTestId("heater-force-slider");
+    const input = wrapper.querySelector("input[type='range']") as HTMLInputElement;
+    expect(input).not.toBeDisabled();
   });
 });
 
@@ -206,8 +213,9 @@ describe("SimulationPage — PV curtailment override controls", () => {
   it("pv force slider is disabled when EXPORT_CAP event active and no override", () => {
     mockTrace1Data.mockReturnValue([makeTrace("EXPORT_CAP", 11, 4, 0.5)]);
     renderSim();
-    const slider = screen.getByTestId("pv-force-slider");
-    expect(slider).toBeDisabled();
+    const wrapper = screen.getByTestId("pv-force-slider");
+    const input = wrapper.querySelector("input[type='range']") as HTMLInputElement;
+    expect(input).toBeDisabled();
     expect(screen.getByTestId("pv-force-caption")).toHaveTextContent("VTN commands");
   });
 
@@ -220,15 +228,17 @@ describe("SimulationPage — PV curtailment override controls", () => {
       await userEvent.click(toggle);
     });
 
-    const slider = screen.getByTestId("pv-force-slider");
-    expect(slider).not.toBeDisabled();
+    const wrapper = screen.getByTestId("pv-force-slider");
+    const input = wrapper.querySelector("input[type='range']") as HTMLInputElement;
+    expect(input).not.toBeDisabled();
   });
 
   it("pv force slider is enabled when no event", () => {
     mockTrace1Data.mockReturnValue([makeTrace("IDLE", 11, 2, 0)]);
     renderSim();
     expect(screen.queryByTestId("pv-force-override-toggle")).not.toBeInTheDocument();
-    const slider = screen.getByTestId("pv-force-slider");
-    expect(slider).not.toBeDisabled();
+    const wrapper = screen.getByTestId("pv-force-slider");
+    const input = wrapper.querySelector("input[type='range']") as HTMLInputElement;
+    expect(input).not.toBeDisabled();
   });
 });
