@@ -126,9 +126,9 @@ impl Heater {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PvInverter {
     pub rated_kw: f64,
-    pub irradiance: f64,     // 0.0..1.0 current solar irradiance factor
-    pub curtailment: f64,    // 0.0..1.0 fraction curtailed (0 = no curtailment)
-    pub current_kw: f64,     // actual output (positive value, sign applied in power model)
+    pub irradiance: f64,           // 0.0..1.0 current solar irradiance factor
+    pub export_limit_kw: Option<f64>, // active export cap (kW); None = no limit
+    pub current_kw: f64,           // actual output (positive value, sign applied in power model)
 }
 
 impl PvInverter {
@@ -136,15 +136,15 @@ impl PvInverter {
         Self {
             rated_kw: cfg.rated_kw,
             irradiance: 0.0,
-            curtailment: 0.0,
+            export_limit_kw: None,
             current_kw: 0.0,
         }
     }
 
-    /// Update state. `curtailment_fraction` 0.0 = full output, 1.0 = fully curtailed.
+    /// Update state. `export_limit_kw`: None = full output, Some(x) = clamp output to x kW.
     /// `irradiance_override` overrides the time-based sin model when Some(v).
     /// Returns actual generation in kW (positive value — sign convention applied by power_model).
-    pub fn update(&mut self, _dt_s: f64, curtailment_fraction: f64, hour_of_day: f64, irradiance_override: Option<f64>) -> f64 {
+    pub fn update(&mut self, _dt_s: f64, export_limit_kw: Option<f64>, hour_of_day: f64, irradiance_override: Option<f64>) -> f64 {
         self.irradiance = irradiance_override.unwrap_or_else(|| {
             // Sinusoidal irradiance: sun from 6am to 6pm
             if hour_of_day >= 6.0 && hour_of_day <= 18.0 {
@@ -155,8 +155,12 @@ impl PvInverter {
             }
         });
 
-        self.curtailment = curtailment_fraction.clamp(0.0, 1.0);
-        let output = self.rated_kw * self.irradiance * (1.0 - self.curtailment);
+        let natural_output = self.rated_kw * self.irradiance;
+        let output = match export_limit_kw {
+            Some(limit) => natural_output.min(limit.max(0.0)),
+            None => natural_output,
+        };
+        self.export_limit_kw = export_limit_kw;
         self.current_kw = output;
         output
     }
@@ -211,17 +215,20 @@ mod tests {
     fn pv_sinusoidal_model() {
         let cfg = PvConfig { rated_kw: 10.0 };
         let mut pv = PvInverter::from_config(&cfg);
-        // Noon = peak
-        let kw = pv.update(1.0, 0.0, 12.0, None);
+        // Noon = peak, no limit
+        let kw = pv.update(1.0, None, 12.0, None);
         assert!((kw - 10.0).abs() < 0.01);
-        // Midnight = zero
-        let kw = pv.update(1.0, 0.0, 0.0, None);
+        // Midnight = zero regardless of limit
+        let kw = pv.update(1.0, None, 0.0, None);
         assert_eq!(kw, 0.0);
-        // Full curtailment = zero
-        let kw = pv.update(1.0, 1.0, 12.0, None);
+        // Export limit of 0 kW = zero output
+        let kw = pv.update(1.0, Some(0.0), 12.0, None);
         assert_eq!(kw, 0.0);
-        // Manual irradiance override
-        let kw = pv.update(1.0, 0.0, 0.0, Some(1.0)); // midnight but forced full sun
+        // Export limit of 5 kW clamps noon output from 10 kW to 5 kW
+        let kw = pv.update(1.0, Some(5.0), 12.0, None);
+        assert!((kw - 5.0).abs() < 0.01);
+        // Manual irradiance override, no limit
+        let kw = pv.update(1.0, None, 0.0, Some(1.0)); // midnight but forced full sun
         assert!((kw - 10.0).abs() < 0.01);
     }
 }

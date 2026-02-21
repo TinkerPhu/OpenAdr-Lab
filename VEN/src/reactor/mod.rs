@@ -19,7 +19,8 @@ use trace::DecisionTrace;
 pub struct Setpoints {
     pub ev_charge_kw: f64,
     pub heater_kw: f64,
-    pub pv_curtailment: f64, // 0.0 = no curtailment, 1.0 = full curtailment
+    /// Maximum PV export in kW. None = no limit (full output). Some(x) = clamp output to x kW.
+    pub pv_export_limit_kw: Option<f64>,
     pub mode: String,
 }
 
@@ -37,7 +38,7 @@ impl Setpoints {
                 .as_ref()
                 .map(|h| h.max_kw * 0.5) // default: half power
                 .unwrap_or(0.0),
-            pv_curtailment: 0.0,
+            pv_export_limit_kw: None,
             mode: "IDLE".to_string(),
         }
     }
@@ -172,7 +173,7 @@ impl Reactor {
             ));
         }
         if profile.devices.pv.is_some() {
-            constraints.push("PV curtailment 0-100%".to_string());
+            constraints.push("PV export limit (kW)".to_string());
         }
 
         // Build reason
@@ -228,7 +229,7 @@ impl Reactor {
 
         let target = match intent.mode {
             ReactorMode::ExportCapLimit => {
-                // Reduce export: increase consumption (charge EV, heat more), curtail PV
+                // Reduce export: increase consumption (charge EV, heat more), limit PV output
                 let ev_max = profile
                     .devices
                     .ev
@@ -243,18 +244,18 @@ impl Reactor {
                     .unwrap_or(0.0);
 
                 Setpoints {
-                    ev_charge_kw: ev_max,        // charge at max
-                    heater_kw: heater_max,        // heat at max
-                    pv_curtailment: 0.5,          // curtail 50% as fallback
+                    ev_charge_kw: ev_max,
+                    heater_kw: heater_max,
+                    pv_export_limit_kw: Some(intent.value.max(0.0)), // direct from payload (kW)
                     mode: "EXPORT_CAP".to_string(),
                 }
             }
             ReactorMode::ImportCapLimit => {
-                // Reduce import: decrease consumption, maximize PV export
+                // Reduce import: decrease consumption, maximize PV export (no limit)
                 Setpoints {
-                    ev_charge_kw: 0.0,   // stop charging
-                    heater_kw: 0.0,      // stop heating (thermostat override may kick in)
-                    pv_curtailment: 0.0,  // full PV output
+                    ev_charge_kw: 0.0,
+                    heater_kw: 0.0,
+                    pv_export_limit_kw: None,
                     mode: "IMPORT_CAP".to_string(),
                 }
             }
@@ -264,7 +265,7 @@ impl Reactor {
                     Setpoints {
                         ev_charge_kw: 0.0,
                         heater_kw: 0.0,
-                        pv_curtailment: 0.0, // keep PV exporting
+                        pv_export_limit_kw: None, // keep PV exporting
                         mode: "SIMPLE".to_string(),
                     }
                 } else {
@@ -279,7 +280,7 @@ impl Reactor {
                     Setpoints {
                         ev_charge_kw: 0.0,
                         heater_kw: 0.0,
-                        pv_curtailment: 0.0,
+                        pv_export_limit_kw: None,
                         mode: "PRICE".to_string(),
                     }
                 } else if price <= profile.reactor.price_low {
@@ -299,7 +300,7 @@ impl Reactor {
                     Setpoints {
                         ev_charge_kw: ev_max,
                         heater_kw: heater_max,
-                        pv_curtailment: 0.0,
+                        pv_export_limit_kw: None,
                         mode: "PRICE".to_string(),
                     }
                 } else {
@@ -314,7 +315,7 @@ impl Reactor {
                 Setpoints {
                     ev_charge_kw: target_kw,
                     heater_kw: defaults.heater_kw,
-                    pv_curtailment: defaults.pv_curtailment,
+                    pv_export_limit_kw: defaults.pv_export_limit_kw,
                     mode: "CHARGE_SETPOINT".to_string(),
                 }
             }
@@ -326,12 +327,14 @@ impl Reactor {
     }
 
     /// Linear interpolation between two setpoint sets.
+    /// EV and heater ramp gradually. Export limit is a hard constraint applied
+    /// immediately when the target has one (no value to interpolate between None and Some).
     fn interpolate(&self, from: &Setpoints, to: &Setpoints, factor: f64) -> Setpoints {
         let f = factor.clamp(0.0, 1.0);
         Setpoints {
             ev_charge_kw: from.ev_charge_kw + (to.ev_charge_kw - from.ev_charge_kw) * f,
             heater_kw: from.heater_kw + (to.heater_kw - from.heater_kw) * f,
-            pv_curtailment: from.pv_curtailment + (to.pv_curtailment - from.pv_curtailment) * f,
+            pv_export_limit_kw: if f > 0.0 { to.pv_export_limit_kw } else { from.pv_export_limit_kw },
             mode: to.mode.clone(),
         }
     }
