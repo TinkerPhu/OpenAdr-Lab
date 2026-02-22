@@ -1872,3 +1872,66 @@ Fixed all 3 failing `@ven-ui` scenarios in `tests/features/sim_override_ui.featu
 See KEY_LEARNINGS.md (Playwright section and React/UI section) for the MUI Slider selector pattern and the Rust `null` vs JS `undefined` pitfall.
 
 *Last updated: 2026-02-21 — Phase 20 complete, all 468 E2E steps pass, deployed to Pi4*
+
+---
+
+## Phase 21: Simulation Chart — Desired Event Curves, Extended Window, and PV Refactor (2026-02-22)
+
+### What was done
+
+Three related improvements landed in this phase, driven by a design review of the simulation chart and the PV control model.
+
+#### 1. Extended trace window + desired event overlay lines
+
+The trace ring buffer was expanded from 100 → **1 000 entries**. The simulation chart now shows the last 1 000 past ticks plus 500 synthetic future ticks (~8 min projection at 1 s tick interval).
+
+Dashed "desired" overlay lines were added to the chart, sourced from active VTN event payloads:
+- **EV** — `CHARGE_STATE_SETPOINT` payload (kW), same blue `#1976d2`, dashed
+- **Heater** — `IMPORT_CAPACITY_LIMIT` payload (kW), purple `#7b1fa2`, dashed
+- **PV** — `EXPORT_CAPACITY_LIMIT` payload (kW), green `#388e3c`, dashed
+
+Each dashed line only appears during the event's interval window. Arbitration mirrors the reactor: lowest `priority` wins, newest `createdDateTime` breaks ties. A `parseIsoDuration` helper parses ISO 8601 interval durations. Future points carry event-derived desired values but no actual setpoints.
+
+#### 2. TraceSetpoints: f64 → f32 with 0.01-resolution JSON serializer
+
+`TraceSetpoints` was introduced as a separate struct from the runtime `Setpoints` (which remains f64 for reactor math precision). Fields are stored as `f32` and serialized with a custom `serialize_round2` function that rounds via f64 to 2 decimal places on the wire. At 1 000 entries this meaningfully reduces the JSON payload for `GET /trace`.
+
+#### 3. PV export limit refactor (pv_curtailment → pv_export_limit_kw)
+
+A design review revealed that using `pv_curtailment: f64` (0.0–1.0 fraction) as the PV control channel was semantically wrong:
+
+- `EXPORT_CAPACITY_LIMIT` is an **absolute kW cap** — exactly what a modern inverter's power register accepts directly.
+- The reactor was ignoring the event payload value entirely and hardcoding `pv_curtailment = 0.5` as a fallback.
+- Continuing to express this as a percentage in the trace (`pv_curtailment_pct`) only amplified the confusion.
+
+**Refactor:** `pv_curtailment` was replaced with `pv_export_limit_kw: Option<f64>` throughout the entire stack:
+
+| Layer | Before | After |
+|---|---|---|
+| `Setpoints` (reactor runtime) | `pv_curtailment: f64` (0.0–1.0) | `pv_export_limit_kw: Option<f64>` |
+| `ExportCapLimit` reactor mode | hardcoded `0.5` | `Some(intent.value)` — direct from payload |
+| `PvInverter::update()` | `curtailment_fraction: f64` | `export_limit_kw: Option<f64>` |
+| Simulator physics | `output = rated * irradiance * (1 - curtailment)` | `output = min(rated * irradiance, limit)` |
+| `PvSnapshot` API | `curtailment: f64` | `export_limit_kw: Option<f64>` (null = no limit) |
+| `UserOverrides` | `pv_force_curtailment: Option<f64>` | `pv_force_export_limit_kw: Option<f64>` |
+| `TraceSetpoints` | `pv_curtailment_pct: f32` | `pv_export_limit_kw: Option<f32>` (null = no limit) |
+| Chart solid line | "PV curtailed (kW)" | "PV export limit (kW)" |
+| PvControls slider | 0–100% | 0–rated_kw |
+
+The `interpolate()` function treats `pv_export_limit_kw` as a hard constraint (applied immediately when the target has one) rather than interpolating between `None` and `Some` — consistent with how a real inverter enforces a power register.
+
+With this change, the chart's dashed desired line (`EXPORT_CAPACITY_LIMIT` payload) and the solid actual line (reactor's enforced cap) now show the same quantity in the same unit. The gap between them is meaningful: it only exists during the FSM ramp-up delay.
+
+### Issues encountered
+
+- **Three stray `curtailment` / `pv_curtailment_pct` references** found by the Docker build rather than locally: `Trace.tsx`, `Dashboard.tsx`, and `Simulation.tsx` each had one missed field. Fixed immediately after each build failure.
+- **`ratedKw` variable became unused** after the PV chart logic was simplified (no longer needed to convert curtailment % → kW). Removed to avoid TypeScript warnings.
+- **`traceEntries.length === 0` guard** needed to replace `chartData.length === 0` — after adding 500 synthetic future points, chartData is never empty even before any trace data arrives, which caused `ResponsiveContainer` to render in tests (triggering a `ResizeObserver is not defined` error in jsdom). Guarding on `traceEntries` (past data only) restores the "No trace data yet" fallback correctly.
+
+### Key Learnings
+
+- **`Option<f64>` in Rust serializes as JSON `null`** — consistent with the existing pattern for other optional fields; TypeScript types use `number | null` to match.
+- **Hard constraints should not be interpolated** — a kW cap either applies or doesn't. Using `if f > 0.0 { to.value } else { from.value }` for binary fields in `interpolate()` is cleaner than trying to blend `None` and `Some`.
+- **Docker build is the final TypeScript type-checker for the full project** — running `npm test` locally only covers tested components; pages like `Dashboard.tsx` and `Trace.tsx` that have no dedicated tests only fail at `tsc` time during the Docker build. Running `tsc` locally before pushing would catch these earlier.
+
+*Last updated: 2026-02-22 — Phase 21 complete, 69 UI tests pass, deployed to Pi4*
