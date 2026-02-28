@@ -36,3 +36,4 @@ __pycache__/
 .claude/settings.local.json
 *.bkp
 *.dtmp
+docs/pdf/*
