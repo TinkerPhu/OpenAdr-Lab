@@ -11,7 +11,7 @@ devices:
 
 reactor:
   strategy: ramp
-  ramp_duration_s: 300
+  ramp_duration_s: 30
   compliance: 1.0
   price_low: 0.10
   price_high: 0.35

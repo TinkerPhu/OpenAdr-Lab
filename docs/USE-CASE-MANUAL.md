@@ -415,9 +415,9 @@ A 500 kWh community battery receives a 3-phase dispatch:
 11. Paste into Intervals (JSON) — replace timestamps with your current local time (staggered 2 minutes apart, with `+01:00` for CET):
     ```json
     [
-      {"id": 0, "intervalPeriod": {"start": "2026-02-15T20:00:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [80.0]}]},
+      {"id": 0, "intervalPeriod": {"start": "2026-02-15T20:00:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [6.0]}]},
       {"id": 1, "intervalPeriod": {"start": "2026-02-15T20:02:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [0.0]}]},
-      {"id": 2, "intervalPeriod": {"start": "2026-02-15T20:04:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [-50.0]}]}
+      {"id": 2, "intervalPeriod": {"start": "2026-02-15T20:04:00+01:00", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [-5.0]}]}
     ]
     ```
     Adjust the start times to your current local time. Each interval is 2 minutes for quick observation.
