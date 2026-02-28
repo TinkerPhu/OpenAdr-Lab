@@ -19,3 +19,7 @@ add code coverage tools to tests and formater and linter tools to be applied for
 check and remove warnings in all builds.
 
 check for code quality and refactoring possibilities.
+
+write down all your findings to the test errors around VEN UI simulation tests into ven_ui_simulation_test_issues.md. 
+
+The fix is there. Docker's layer cache is stale — it doesn't see the change to Simulation.tsx. Need to force a rebuild without cache
