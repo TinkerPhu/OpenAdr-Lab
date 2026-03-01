@@ -1,20 +1,95 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  # OpenADR Lab — Project Context
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  ## Domain
+  OpenADR 3 demand-response lab. A VTN (Virtual Top Node) manages programs, events, and reports.
+  VENs (Virtual End Nodes) enroll in programs, receive events, react with physical devices (PV, heater,
+  EV charger, load), and submit resource-usage reports. The core library is openleadr-rs, 
+  which implements a previous OpenADR Version: 3.0. The docs only describe OpenADR Version 3.1
+  specification (programs, events, targets, intervals, payloadDescriptors, resources, etc.).
+  The change to 3.1 is upcomming. There will be breking changes.
+
+  ## Stack
+  - **VTN**: openleadr-rs (Rust/Axum, PostgreSQL 16, SQLx). Running as Docker container on Pi4-Server.
+  - **BFF** (Backend for Frontend): Rust/Axum proxy. Dual-credential: `any-business` for programs/events/reports, `ven-manager` for VENs.
+  - **VEN**: Rust/Tokio async service. Physics-based simulator (PV, heater, EV, load). FSM reactor (Idle→Delaying→Ramping→Holding→RampingBack→Idle). Per-VEN YAML profiles.
+  - **VEN UI**: React + TypeScript + Vite + Recharts. Nginx reverse-proxy in Docker.
+  - **VTN UI**: React + TypeScript + Vite + Recharts. Nginx reverse-proxy in Docker.
+  - **Testing**: Cucumber/BDD (integration), Playwright (E2E UI), cargo test (unit + sqlx).
+  - **Infrastructure**: Docker Compose on Raspberry Pi 4 (ARM64) via SSH. Path: `/srv/docker/openadr_lab`.
+
+  ## DTO / Field Naming Convention
+  CRITICAL: Do NOT normalize field names. Pass upstream OpenADR spec names unchanged across all layers —
+  Rust structs, BFF JSON, React hooks, UI components. One vocabulary everywhere.
+  Examples: `programName`, `programID`, `venName`, `eventName`, `createdDateTime`, `payloadDescriptors`,
+  `intervalPeriod`, `objectType`, `targets` (array of `{type, values}`).
+
+  ## API Conventions
+  - VTN base: `http://Pi4-Server:8200`
+  - BFF base: `http://Pi4-Server:8220`
+  - Auth: OAuth2 client-credentials (`POST /auth/token`). Token lifetime 30 days.
+  - Enrollment: programs `targets: [{type: "VEN_NAME", values: [...]}]` restricts visibility.
+  - Reports: VEN role required to POST. BFF proxies with VEN credentials.
+  - Sign convention for energy/power: positive = import from grid, negative = export.
+
+  ## VEN Simulator & Reactor
+  - Devices: PV (solar), Heater (thermal model), EV Charger, Flexible Load.
+  - PV model: `sin(π*(hour-6)/12)` for 6am–6pm, 0 otherwise.
+  - Heater: ambient loss 0.1 kW/°C, thermostat hard limits.
+  - Reactor strategies: instant, ramp, delayed, partial (compliance factor), ignore.
+  - Signal types: EXPORT_CAPACITY_LIMIT, IMPORT_CAPACITY_LIMIT, PRICE, SIMPLE.
+  - Arbitration: hard constraints > incentives; lower priority wins; newest event breaks ties.
+  - Sim state persisted to `/data/sim_state.json` (atomic write, survives restart).
+
+  ## Running Containers (Pi4-Server)
+  | Container     | Port | Role                          |
+  |---------------|------|-------------------------------|
+  | vtn-vtn-1     | 8200 | openleadr-rs VTN              |
+  | vtn-db-1      | 8201 | PostgreSQL 16                 |
+  | ven-ven-1-1   | 8211 | VEN instance 1                |
+  | ven-ven-2-1   | 8212 | VEN instance 2                |
+  | ven-ven-3-1   | 8213 | VEN instance 3                |
+  | ven-ui-1      | 8214 | React VEN Web UI              |
+  | vtn-bff-1     | 8220 | Rust Axum BFF                 |
+  | vtn-ui-1      | 8221 | React VTN Web UI (nginx proxy)|
+
+  ## Workflow Rules
+  - Docker commands run via SSH on Pi4-Server in `/srv/docker/openadr_lab`.
+  - Never stop containers not involved in the current change.
+  - Always `docker compose down` before `docker compose run` for cargo-test.
+  - Deploy: commit → git push → ssh Pi4-Server git pull → docker compose up --build -d.
+  - openleadr-rs is a git submodule (`TinkerPhu/openleadr-rs` fork).
+  - Upstream PRs only after tests pass completely; wait for CI to report before conclusions.
+  - Keep `docs/project_journal.md` updated with each major step.
+  - Key learnings go in `docs/KEY_LEARNINGS.md`.
+
+  ## Code Style
+  - Rust: `cargo fmt` before every PR push. Clippy clean.
+  - TypeScript: strict mode, no `any`. ESLint clean.
+  - React: follow the guidelines in docs/REACT_GUIDELINES.md
+  - Commits: conventional-style messages, no co-author footers.
+  - Tests: BDD scenarios in `features/` (Cucumber), UI tests in `e2e/` (Playwright).
+
+rules:
+  proposal:
+    - Identify which containers or services are affected (VTN, BFF, VEN, VEN UI, VTN UI).
+    - Include a "Non-goals" section to bound scope.
+    - Note any OpenADR 3.1 spec requirements that constrain the design.
+    - State whether a change to openleadr-rs is required.
+  specs:
+    - Use Given/When/Then format for all scenarios.
+    - Scenario names must be concrete and behaviour-focused, not implementation-focused.
+    - Cover happy path, error/edge cases, and boundary conditions.
+    - Group scenarios into features by domain concept (programs, events, reports, VEN, simulator, etc.).
+  design:
+    - Show data flow across all affected layers (VTN → BFF → UI or VEN → BFF → UI).
+    - Preserve upstream OpenADR field names — never rename them in diagrams or code snippets.
+    - Include API contract changes (new endpoints, changed payloads) as concrete JSON examples.
+    - Note Docker/infrastructure changes if any service needs rebuilding or new env vars.
+  tasks:
+    - Each task must be scoped to a single layer or file group (no cross-cutting mega-tasks).
+    - Include a test/validation step for every implementation task.
+    - Order tasks so infrastructure/schema changes come before application logic.
+    - Flag tasks that require `--build` on Pi4-Server or a cargo-test rebuild.
