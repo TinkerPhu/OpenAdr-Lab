@@ -274,7 +274,7 @@ fn allocate_consumption(
         }
 
         // Compute allocation (read slot values first, then mutate)
-        let (power_kw, surplus_used, _grid_used, cost, co2, energy_kwh) = {
+        let (power_kw, surplus_used, grid_used, cost, co2, energy_kwh) = {
             let slot = &slots[entry.slot_index];
             let import_head = (slot.import_cap_kw - slot.net_import_kw).max(0.0);
             let power = packets[pi]
@@ -296,11 +296,8 @@ fn allocate_consumption(
             continue;
         }
 
-        // Clamp to undelivered
-        let energy_kwh = energy_kwh.min(undelivered);
-        let power_kw = energy_kwh / slot_h;
-        let surplus_used = surplus_used.min(power_kw);
-        let grid_used = (power_kw - surplus_used).max(0.0);
+        // No power clamping — dispatcher detects completion in real time.
+        // Track allocated energy to avoid scheduling more slots than needed.
 
         let slot = &mut slots[entry.slot_index];
         slot.surplus_available_kw -= surplus_used;
@@ -318,7 +315,8 @@ fn allocate_consumption(
             co2_g: co2,
         });
 
-        *allocated.entry(entry.packet_id).or_insert(0.0) += energy_kwh;
+        // Track energy booked for this packet so far (capped at undelivered to avoid over-scheduling)
+        *allocated.entry(entry.packet_id).or_insert(0.0) += energy_kwh.min(undelivered);
 
         if packets[pi].status == PacketStatus::Pending {
             packets[pi].status = PacketStatus::Scheduled;
