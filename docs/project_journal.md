@@ -1940,7 +1940,7 @@ With this change, the chart's dashed desired line (`EXPORT_CAPACITY_LIMIT` paylo
 
 ## Phase 22: VEN HEMS Controller — Stage 1 Entity Model
 
-**Status: COMPLETE (local) — BDD tests running on Pi4**
+**Status: COMPLETE — 10 BDD scenarios pass on Pi4-Server (1 feature, 48 steps)**
 
 ### What Was Done
 
@@ -1995,3 +1995,8 @@ Foundation for the full HEMS implementation (Stages 2–6). Every later module i
 - **`reporter.rs` had a `SimState { ... }` struct literal** used in unit tests — missed adding `battery: None`. Discovered by `cargo test`, fixed quickly. Lesson: always run `cargo test` after adding required fields to structs.
 - **`PowerAdjustability` needs `Steps`** — user correctly noted that `OnOff` only covers binary devices; devices with discrete power levels (3-speed pumps, step-controlled chargers) need `Steps` with a `step_values_kw: Vec<f64>` in `AssetPowerAdjustability`. Added as a distinct variant between `OnOff` and `Continuous`.
 - **Stashed local change on Pi** — Pi had a stale local modification to `ven-1.yaml` from a previous session. Used `git stash` before pull.
+- **Entity model diverged from spec** — First pass missed several enums, had wrong variant names, and incorrect struct fields. Lesson: always compare implementation against the spec document line by line before committing. A gap-analysis agent pass caught 20+ discrepancies.
+- **Second pass completions**: `PlanningHorizon` (§6.1), expanded `PlanTimeSlot` (§6.2: GridEffectiveCost, RateEstimated, ExportCapacityLimit_kW, SurplusAvailable_kW, ImportFlexibility_kW, ExportFlexibility_kW), expanded `PacketAllocation` (§6.3: SurplusPower_kW, GridPower_kW, MarginalValue, CO2_g), `PenaltyCondition` variant fix (§6.7), added `PenaltyThreshold` + `PenaltyRule` (§6.6/6.8), `DispatchCommand` (§7.1), rewritten `DispatchState` (§7.2), two-layer `Plan` structure per §6.10 (FirmSlots/FlexibleSlots/Envelopes/summaries).
+- **BDD step: `is greater than 0` vs `:f` type** — Behave's `{threshold:f}` doesn't parse bare integer `0`; feature file must use `0.0`.
+- **Ambiguous step error**: parametric `@given("the VEN battery has initial SoC {soc:f}")` conflicts with any concrete step matching the same pattern. Remove concrete duplicates.
+- **BDD test path inside container**: Dockerfile copies `features/` to `/tests/features/`. The entrypoint already calls `exec behave "$@"`, so the correct invocation is `docker compose run ... test-runner features/ven_entity_model.feature` (without repeating `behave`).
