@@ -2,6 +2,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::entities::rate_snapshot::RateSnapshot;
+use crate::entities::site_meter::PowerSnapshot;
+
 /// Current capacity state derived from active OpenADR events.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OadrCapacityState {
@@ -20,32 +23,48 @@ pub struct OadrCapacityState {
     pub last_updated: Option<DateTime<Utc>>,
 }
 
-/// Configuration for an OpenADR program this VEN participates in.
+/// Configuration for an OpenADR program this VEN participates in (§5.1).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OadrProgramConfig {
     pub program_id: String,
     pub program_name: String,
-    /// Is this VEN enrolled in this program?
-    pub enrolled: bool,
-    /// Report descriptors from the program definition
-    pub report_descriptors: Vec<serde_json::Value>,
+    /// Signal types this program sends (e.g. ["PRICE", "GHG", "EXPORT_PRICE"])
+    pub payload_types: Vec<String>,
+    /// Report types VTN expects from us (e.g. ["USAGE", "DEMAND"])
+    pub report_types: Vec<String>,
+    pub currency: Option<String>,  // e.g. "EUR"
+    pub units: Option<String>,     // e.g. "KWH"
+    pub is_capacity_program: bool, // participates in capacity management
 }
 
-/// Cache of active OpenADR events (refreshed by the poll loop).
+/// Internal representation of a received OpenADR event, translated into domain terms (§5.2).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OadrEventCache {
-    pub events: Vec<serde_json::Value>,
-    pub last_fetched: Option<DateTime<Utc>>,
+    pub event_id: String,
+    pub program_id: String,
+    pub event_name: Option<String>,
+    pub received_at: Option<DateTime<Utc>>,
+
+    // Translated content
+    pub rate_snapshots: Vec<RateSnapshot>,        // PRICE, EXPORT_PRICE, GHG per interval
+    pub capacity_limits: Vec<RateSnapshot>,       // IMPORT/EXPORT_CAPACITY_LIMIT per interval
+    pub alert_type: Option<String>,               // e.g. "ALERT_GRID_EMERGENCY"
+    pub alert_message: Option<String>,
+    pub dispatch_setpoints: Vec<PowerSnapshot>,   // DISPATCH_SETPOINT per interval
+
+    pub raw: serde_json::Value,                   // original OpenADR event JSON
 }
 
-/// A pending report obligation derived from an OpenADR event's reportDescriptors.
+/// Pending report obligation derived from OpenADR event's reportDescriptors (§5.3).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OadrReportObligation {
     pub id: Uuid,
     pub event_id: String,
     pub program_id: Option<String>,
-    /// Report type: "USAGE", "DEMAND", "USAGE_FORECAST", "STORAGE_CHARGE_STATE", …
-    pub report_type: String,
+    /// e.g. "USAGE", "DEMAND", "USAGE_FORECAST", "STORAGE_CHARGE_STATE"
+    pub payload_type: String,
+    /// e.g. "DIRECT_READ", "FORECAST"
+    pub reading_type: String,
     pub resource_name: Option<String>,
     pub due_at: DateTime<Utc>,
     pub interval_duration_s: u64,
@@ -58,4 +77,15 @@ impl OadrReportObligation {
     pub fn is_due(&self, now: DateTime<Utc>) -> bool {
         !self.fulfilled && now >= self.due_at
     }
+}
+
+/// A capacity reservation request sent to the VTN (Stage 2+).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OadrCapacityRequest {
+    pub program_id: String,
+    pub requested_import_kw: Option<f64>,
+    pub requested_export_kw: Option<f64>,
+    pub time_window_start: DateTime<Utc>,
+    pub time_window_end: DateTime<Utc>,
+    pub reason: String,
 }
