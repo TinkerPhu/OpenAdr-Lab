@@ -192,6 +192,40 @@ def step_wait_ven_rates(context, count):
     )
 
 
+@when("I wait for the VEN /rates endpoint to have a snapshot with co2_g_kwh")
+def step_wait_ven_rates_co2(context):
+    def fetch():
+        resp = ven_get("/rates")
+        if not resp.ok:
+            return []
+        return resp.json()
+
+    context.ven_rates = poll_until(
+        fetch,
+        lambda rates: isinstance(rates, list) and any(s.get("co2_g_kwh") is not None for s in rates),
+        timeout=30,
+        interval=3,
+        description="VEN /rates has a snapshot with co2_g_kwh",
+    )
+
+
+@when("I wait for the VEN /rates endpoint to have a snapshot with export_price_eur_kwh")
+def step_wait_ven_rates_export_price(context):
+    def fetch():
+        resp = ven_get("/rates")
+        if not resp.ok:
+            return []
+        return resp.json()
+
+    context.ven_rates = poll_until(
+        fetch,
+        lambda rates: isinstance(rates, list) and any(s.get("export_price_eur_kwh") is not None for s in rates),
+        timeout=30,
+        interval=3,
+        description="VEN /rates has a snapshot with export_price_eur_kwh",
+    )
+
+
 @when("I wait for the VEN /capacity import_limit_kw to be {expected:f}")
 def step_wait_ven_capacity_limit(context, expected):
     def fetch():
