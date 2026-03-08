@@ -14,6 +14,7 @@ Feature: UC-08..UC-10 — Edge Case Use Cases
     When I POST a sim override setting ev_plugged to false
     And I wait 3 seconds
     And I GET /sim from the VEN
+
     Then the response status is 200
     And the sim EV current_kw is 0.0
 
@@ -23,6 +24,7 @@ Feature: UC-08..UC-10 — Edge Case Use Cases
     And I POST a sim override setting ev_plugged to true
     And I wait 2 seconds
     And I GET /sim from the VEN
+
     Then the response status is 200
     And the sim EV field is present
 
