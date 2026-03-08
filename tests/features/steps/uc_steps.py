@@ -97,22 +97,14 @@ def step_sim_override_ev_zero(context):
     context.last_response = r
 
 
-@when("I GET /sim from the VEN")
-def step_get_sim(context):
-    r = ven_get("/sim")
-    context.last_response = r
-    context.last_sim = r.json() if r.ok else None
-    context.last_response_json = context.last_sim
-
-
 # ---------------------------------------------------------------------------
-# Then: sim assertions
+# Then: sim assertions (use last_response_json set by generic "I GET {path} from the VEN")
 # ---------------------------------------------------------------------------
 
 @then("the sim EV current_kw is 0.0")
 def step_sim_ev_current_zero(context):
-    sim = context.last_sim
-    assert sim is not None, "No sim response stored"
+    sim = context.last_response_json
+    assert sim is not None, "No sim JSON in context — use 'I GET /sim from the VEN'"
     ev = sim.get("ev")
     assert ev is not None, f"No 'ev' field in sim response: {list(sim.keys())}"
     kw = ev.get("current_kw", None)
@@ -124,8 +116,8 @@ def step_sim_ev_current_zero(context):
 
 @then("the sim EV field is present")
 def step_sim_ev_field_present(context):
-    sim = context.last_sim
-    assert sim is not None, "No sim response stored"
+    sim = context.last_response_json
+    assert sim is not None, "No sim JSON in context"
     ev = sim.get("ev")
     assert ev is not None, f"'ev' field not present in sim: {list(sim.keys())}"
 
