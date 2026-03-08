@@ -120,8 +120,7 @@ async fn main() -> anyhow::Result<()> {
                         let rates = controller::openadr_interface::parse_rate_snapshots(&events);
                         state.set_planned_rates(rates).await;
 
-                        let cap = state.capacity_state().await;
-                        let new_cap = controller::openadr_interface::parse_capacity_state(&events, cap);
+                        let new_cap = controller::openadr_interface::parse_capacity_state(&events);
                         state.set_capacity_state(new_cap).await;
 
                         let existing_obs = state.obligations().await;

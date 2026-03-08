@@ -193,11 +193,11 @@ pub fn parse_rate_snapshots(events: &[Value]) -> Vec<RateSnapshot> {
 // Capacity state parsing
 // ---------------------------------------------------------------------------
 
-/// Parse capacity limits from events with IMPORT_CAPACITY_LIMIT,
-/// EXPORT_CAPACITY_LIMIT, IMPORT_CAPACITY_SUBSCRIPTION,
-/// IMPORT_CAPACITY_RESERVATION payload types.
+/// Parse capacity limits from the CURRENT set of active events.
+/// Computed from scratch on each call — reflects the live VTN state.
 /// Strictest limit wins (lowest value when multiple events specify same field).
-pub fn parse_capacity_state(events: &[Value], mut existing: OadrCapacityState) -> OadrCapacityState {
+pub fn parse_capacity_state(events: &[Value]) -> OadrCapacityState {
+    let mut existing = OadrCapacityState::default();
     let mut import_limit: Option<(f64, String)> = None;
     let mut export_limit: Option<(f64, String)> = None;
     let mut import_sub: Option<f64> = None;
@@ -537,8 +537,7 @@ mod tests {
                 ]
             }
         ]);
-        let existing = OadrCapacityState::default();
-        let cap = parse_capacity_state(events.as_array().unwrap(), existing);
+        let cap = parse_capacity_state(events.as_array().unwrap());
         assert_eq!(cap.import_limit_kw, Some(5.0));
         assert_eq!(cap.import_limit_event_id, Some("evt-cap".to_string()));
     }
@@ -565,8 +564,7 @@ mod tests {
                 }]
             }
         ]);
-        let existing = OadrCapacityState::default();
-        let cap = parse_capacity_state(events.as_array().unwrap(), existing);
+        let cap = parse_capacity_state(events.as_array().unwrap());
         assert_eq!(cap.import_limit_kw, Some(3.0));
         assert_eq!(cap.import_limit_event_id, Some("evt-b".to_string()));
     }
