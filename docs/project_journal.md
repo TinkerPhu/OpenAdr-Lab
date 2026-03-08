@@ -2034,3 +2034,9 @@ Implemented Stage 2: the VEN now parses multi-interval OpenADR events into struc
 - **Behave field-specific wait steps** — scenarios that share VEN state (rate snapshots accumulate across scenarios in the same test session) need wait conditions that check for the specific field they just created (e.g., `any(s.get("co2_g_kwh") is not None`)  rather than "at least 1 snapshot exists" (which would return immediately from previous scenarios' data).
 - **Unique program names per scenario** — VTN enforces unique program names; use `uuid.uuid4().hex[:8]` suffix to avoid 409 conflicts across scenarios.
 - **`docker compose down -v` doesn't clear named volumes** — but the test DB uses anonymous volumes, so it should clear. Stale data appeared because a background test run left containers up. Always ensure a clean stack before running tests.
+- **`step_response_status` vs `context.response` vs `context.last_response`** — entity model steps used `context.last_response` while use_case_steps used `context.response`. Fixed by making `step_response_status` fall back to `context.response` when `context.last_response` is absent. This was a pre-existing bug unrelated to Stage 2.
+- **Test runner image must be rebuilt after step file changes** — step files are `COPY`'d into the image at build time. Running without `--build` after modifying step files uses stale code silently.
+
+### Stage 2 Final Status
+
+**25 scenarios, 135 steps — all passing** across `ven_entity_model.feature`, `ven_rate_system.feature`, `ven_simulator.feature`.
