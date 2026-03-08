@@ -17,6 +17,7 @@ use axum::{
     Json, Router,
 };
 use chrono::Utc;
+use entities::asset::PlanTrigger;
 use config::Config;
 use metrics::counter;
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -76,6 +77,16 @@ async fn main() -> anyhow::Result<()> {
     let profile = Arc::new(profile);
 
     let vtn = VtnClient::new(cfg.vtn_base_url.clone(), cfg.client_id.clone(), cfg.client_secret.clone(), cfg.ven_name.clone());
+
+    // Seed EnergyPackets from profile (Stage 3)
+    {
+        let now = Utc::now();
+        let seeded = controller::planner::seed_packets_from_profile(&profile, now);
+        if !seeded.is_empty() {
+            info!(count = seeded.len(), "seeded EnergyPackets from profile");
+            state.set_active_packets(seeded).await;
+        }
+    }
 
     // Poll programs
     {
@@ -305,6 +316,37 @@ async fn main() -> anyhow::Result<()> {
                         "obligation fulfilled (stub)"
                     );
                 }
+            }
+        });
+    }
+
+    // Planning loop (Stage 3) — runs immediately then every replan_interval_s
+    {
+        let state = state.clone();
+        let profile = profile.clone();
+        let replan_s = profile.planner.replan_interval_s;
+        tokio::spawn(async move {
+            // First run: wait a bit for the event poll to populate rates, then plan
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            loop {
+                let now = Utc::now();
+                let rates = state.planned_rates().await;
+                let packets = state.active_packets().await;
+                let capacity = state.capacity_state().await;
+                let plan = controller::planner::run_planner(
+                    &rates,
+                    &packets,
+                    &capacity,
+                    &profile,
+                    now,
+                    PlanTrigger::Periodic,
+                );
+                // Update packets with planner's lifecycle transitions
+                state.set_active_packets(plan.packets.clone()).await;
+                state.set_active_plan(Some(plan)).await;
+                info!("plan cycle complete");
+
+                tokio::time::sleep(std::time::Duration::from_secs(replan_s)).await;
             }
         });
     }
