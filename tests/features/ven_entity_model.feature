@@ -1,6 +1,6 @@
 Feature: VEN Entity Model — Stage 1 Foundation
   Verify that all domain entities compile, the Battery actor is present in /sim,
-  and stub endpoints (/packets, /plan, /rates) respond correctly.
+  and HEMS endpoints (/packets, /plan, /rates) respond correctly.
   Existing endpoints remain backward-compatible.
 
   Background:
@@ -26,22 +26,17 @@ Feature: VEN Entity Model — Stage 1 Foundation
     When I GET /sim from the VEN
     Then the response JSON field "battery.current_kw" equals 0.0
 
-  # --- Stub endpoints ---
+  # --- HEMS endpoints (live after Stage 3) ---
 
-  Scenario: GET /packets returns an empty list (no packets scheduled yet)
+  Scenario: GET /packets returns a JSON array
     When I GET /packets from the VEN
     Then the response status is 200
-    And the response JSON is an empty array
+    And the response JSON is an array
 
-  Scenario: GET /plan returns null (no plan computed yet)
-    When I GET /plan from the VEN
-    Then the response status is 200
-    And the response JSON is null
-
-  Scenario: GET /rates returns an empty list (no rates received yet)
+  Scenario: GET /rates returns a JSON array
     When I GET /rates from the VEN
     Then the response status is 200
-    And the response JSON is an empty array
+    And the response JSON is an array
 
   # --- Backward compatibility ---
 
