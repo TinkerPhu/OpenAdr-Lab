@@ -2040,3 +2040,50 @@ Implemented Stage 2: the VEN now parses multi-interval OpenADR events into struc
 ### Stage 2 Final Status
 
 **25 scenarios, 135 steps — all passing** across `ven_entity_model.feature`, `ven_rate_system.feature`, `ven_simulator.feature`.
+
+---
+
+## Phase 21: VEN HEMS Controller — Stage 3 (EnergyPacket + Planner)
+
+**Status: COMPLETE**
+
+Implemented Stage 3: the VEN HEMS planner — an 8-phase greedy scheduler that produces a Plan from RateSnapshots and profile-seeded EnergyPackets.
+
+### New: `VEN/src/controller/planner.rs`
+
+8-phase algorithm:
+- **Phase 1 PREPARE**: Build 5-min slot grid for 24h horizon; FIRM = first 4h, FLEXIBLE = rest. Populate import/export prices, CO2, PV forecast (sinusoidal), surplus, capacity limits.
+- **Phase 2+3 SCORE+ALLOCATE**: Build (packet, FIRM slot) CalcCache entries with MarginalValue = ComfortBid × TimePressure. Sort by MarginalValue DESC; greedy fill respecting import cap and surplus pool.
+- **Phase 4 BATTERY**: Charge in below-median-price slots, discharge in above-median/efficiency slots (arbitrage).
+- **Phase 5**: Residual PV already in slot.net_export_kw.
+- **Phase 6**: Penalty check deferred to Stage 4.
+- **Phase 7 ENVELOPES**: For each packet with unallocated energy in FLEXIBLE horizon, build FlexibilityEnvelope with power range, window, rate estimates.
+- **Phase 8 FINALIZE**: Update packet estimated_cost/co2/completion; compute slot flexibility headroom.
+
+### Profile seeding
+
+- Added `PlannerConfig` and `PacketSeed`/`ComfortRateSeed` structs to `profile.rs`
+- `seed_packets_from_profile()` creates EnergyPackets from profile at VEN startup
+- Test profile seeds 1 EV packet: 5% → 80% SoC target, 45kWh energy need, €0.50–€0.05/kWh comfort rates
+
+### Planning loop in `main.rs`
+
+- Planner runs 5s after startup, then every `replan_interval_s` (20s in test profile)
+- After each plan, updates `active_packets` (with lifecycle transitions) and `active_plan` in AppState
+- Uses `PlanTrigger::Periodic` for all cycles in Stage 3
+
+### BDD Tests
+
+- `tests/features/ven_planner.feature` — 6 scenarios covering packet seeding, plan structure, EV allocation, and flexibility envelopes
+- `tests/features/steps/planner_steps.py` — step definitions
+
+### Issues / Key Learnings
+
+- **Step conflict: concrete vs parametric `@when`**: `@when("I GET /packets from the VEN")` conflicted with `@when("I GET {path} from the VEN")`. Solution: remove concrete step and rely on the parametric one from entity_model_steps.py.
+- **Envelope test needs FIRM overflow**: With EV needing only 15kWh and FIRM holding 28kWh, all energy fits in FIRM → no envelopes. Fixed by lowering `initial_soc` to 0.05 (needs 45kWh), which overflows into FLEXIBLE horizon.
+- **Stage 1 "stub" scenarios become wrong**: `GET /packets returns empty array` and `GET /plan returns null` scenarios from entity_model.feature were no longer correct after Stage 3 seeding/planning. Updated to test actual live behavior (non-empty array for /packets, array for /rates; /plan covered by planner feature).
+- **Greedy correctness**: CalcCache entries sorted by `MarginalValue = ComfortBid × TimePressure` ensures most urgent/valuable packet-slot pairs get priority, preventing starvation of urgent but low-comfort packets.
+
+### Stage 3 Final Status
+
+**30 scenarios, 162 steps — all passing** across `ven_entity_model.feature`, `ven_rate_system.feature`, `ven_planner.feature`, `ven_simulator.feature`.
