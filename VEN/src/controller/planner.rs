@@ -54,6 +54,10 @@ pub fn run_planner(
     let (mut firm_slots, flexible_slots) =
         build_grid(rates, capacity, profile, now, step_s, total_steps, firm_boundary);
 
+    // Preserve terminal packets (cancelled/completed/failed) for history visibility
+    let terminal_pkts: Vec<EnergyPacket> =
+        packets.iter().filter(|p| p.is_terminal()).cloned().collect();
+
     // Work on non-terminal packets only
     let mut pkts: Vec<EnergyPacket> =
         packets.iter().filter(|p| !p.is_terminal()).cloned().collect();
@@ -83,6 +87,9 @@ pub fn run_planner(
         estimated_cost_eur: envelopes.iter().map(|e| e.estimated_cost_eur).sum(),
         estimated_co2_g: envelopes.iter().map(|e| e.estimated_co2_g).sum(),
     };
+
+    // Re-append terminal packets so they remain visible in GET /packets
+    pkts.extend(terminal_pkts);
 
     Plan {
         id: Uuid::new_v4(),
