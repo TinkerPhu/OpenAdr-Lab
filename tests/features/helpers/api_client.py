@@ -97,6 +97,14 @@ def ven_post(path, json=None):
     )
 
 
+def ven_delete(path):
+    """DELETE against the VEN (no auth required)."""
+    return requests.delete(
+        f"{VEN_BASE_URL}{path}",
+        timeout=10,
+    )
+
+
 # ── VEN-2 helpers ────────────────────────────────────────────────────────────
 
 def ven2_get(path, params=None):
