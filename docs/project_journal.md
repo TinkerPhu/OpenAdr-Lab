@@ -2000,3 +2000,37 @@ Foundation for the full HEMS implementation (Stages 2–6). Every later module i
 - **BDD step: `is greater than 0` vs `:f` type** — Behave's `{threshold:f}` doesn't parse bare integer `0`; feature file must use `0.0`.
 - **Ambiguous step error**: parametric `@given("the VEN battery has initial SoC {soc:f}")` conflicts with any concrete step matching the same pattern. Remove concrete duplicates.
 - **BDD test path inside container**: Dockerfile copies `features/` to `/tests/features/`. The entrypoint already calls `exec behave "$@"`, so the correct invocation is `docker compose run ... test-runner features/ven_entity_model.feature` (without repeating `behave`).
+
+## Phase 23: VEN HEMS Controller — Stage 2 OpenADR Interface + Rate System
+
+**Status: COMPLETE — 16 BDD scenarios pass (Stage 1 + Stage 2 combined, 77 steps)**
+
+### What Was Done
+
+Implemented Stage 2: the VEN now parses multi-interval OpenADR events into structured rate snapshots, tracks report obligations, and updates capacity state.
+
+#### New: `VEN/src/controller/openadr_interface.rs`
+
+- `parse_rate_snapshots(events)` — iterates event intervals, merges PRICE/EXPORT_PRICE/GHG payloads per `(interval_start, interval_end)` into `RateSnapshot` values, sorted by start time
+- `parse_capacity_state(events)` — computes from scratch on each poll; IMPORT/EXPORT_CAPACITY_LIMIT/SUBSCRIPTION/RESERVATION; strictest-wins (min) across multiple events
+- `extract_report_obligations(events, now, existing)` — parses `reportDescriptors`, deduplicates by `(event_id, payload_type)`
+- ISO8601 duration parser covering PT5M/PT15M/PT1H/P1D/combined forms
+- 10 unit tests
+
+#### Extended `main.rs`
+
+- Event poll loop now calls all three interface functions after fetching events
+- Obligation-check tokio::spawn (5s) marks due obligations fulfilled
+- Routes: `GET /rates`, `GET /obligations`, `GET /capacity`
+
+#### BDD Tests
+
+- `tests/features/ven_rate_system.feature` — 6 scenarios
+- `tests/features/steps/rate_steps.py` — step definitions
+
+### Issues / Key Learnings
+
+- **`parse_capacity_state` must compute from scratch** — initial design merged with existing state, which caused stale capacity values to persist when old events from previous test runs accumulated in the VTN. Computing from scratch ensures the VEN always reflects current active events. Test revealed this: `import_limit_kw: 0.0` appeared because a previous test run's events were still in the VTN DB.
+- **Behave field-specific wait steps** — scenarios that share VEN state (rate snapshots accumulate across scenarios in the same test session) need wait conditions that check for the specific field they just created (e.g., `any(s.get("co2_g_kwh") is not None`)  rather than "at least 1 snapshot exists" (which would return immediately from previous scenarios' data).
+- **Unique program names per scenario** — VTN enforces unique program names; use `uuid.uuid4().hex[:8]` suffix to avoid 409 conflicts across scenarios.
+- **`docker compose down -v` doesn't clear named volumes** — but the test DB uses anonymous volumes, so it should clear. Stale data appeared because a background test run left containers up. Always ensure a clean stack before running tests.
