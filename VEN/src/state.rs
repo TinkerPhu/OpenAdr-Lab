@@ -8,8 +8,28 @@ use crate::simulator::SimSnapshot;
 use chrono::DateTime;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+/// Per-asset cumulative energy/cost/CO₂ since VEN startup.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AssetLedgerEntry {
+    pub asset_id: String,
+    pub energy_kwh: f64,
+    pub cost_eur: f64,
+    pub co2_g: f64,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+impl AssetLedgerEntry {
+    pub fn new(asset_id: &str) -> Self {
+        Self {
+            asset_id: asset_id.to_string(),
+            ..Default::default()
+        }
+    }
+}
 
 /// User-adjustable simulation parameters, sent via POST /sim/override.
 /// All fields are optional; None means "use profile default".
@@ -67,6 +87,8 @@ pub struct InnerState {
     pub capacity_state: OadrCapacityState,
     #[serde(skip)]
     pub report_obligations: Vec<OadrReportObligation>,
+    #[serde(skip)]
+    pub asset_ledger: HashMap<String, AssetLedgerEntry>,
 }
 
 impl AppState {
@@ -85,6 +107,7 @@ impl AppState {
                 planned_rates: vec![],
                 capacity_state: OadrCapacityState::default(),
                 report_obligations: vec![],
+                asset_ledger: HashMap::new(),
             })),
         }
     }
@@ -216,6 +239,14 @@ impl AppState {
         }
     }
 
+    pub async fn asset_ledger(&self) -> HashMap<String, AssetLedgerEntry> {
+        self.inner.read().await.asset_ledger.clone()
+    }
+
+    pub async fn set_asset_ledger(&self, ledger: HashMap<String, AssetLedgerEntry>) {
+        self.inner.write().await.asset_ledger = ledger;
+    }
+
     /// Return all unfulfilled obligations whose due_at <= now.
     pub async fn due_obligations(&self, now: DateTime<Utc>) -> Vec<OadrReportObligation> {
         self.inner
@@ -254,6 +285,7 @@ impl Clone for InnerState {
             planned_rates: self.planned_rates.clone(),
             capacity_state: self.capacity_state.clone(),
             report_obligations: self.report_obligations.clone(),
+            asset_ledger: self.asset_ledger.clone(),
         }
     }
 }

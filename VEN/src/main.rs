@@ -17,7 +17,8 @@ use axum::{
     Json, Router,
 };
 use chrono::Utc;
-use entities::asset::PlanTrigger;
+use entities::asset::{ComfortRate, CompletionPolicy, PlanTrigger, UserRequestMode};
+use entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
 use config::Config;
 use metrics::counter;
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -40,6 +41,7 @@ struct AppCtx {
     state: AppState,
     vtn: VtnClient,
     metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
+    trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
 }
 
 #[tokio::main]
@@ -55,6 +57,11 @@ async fn main() -> anyhow::Result<()> {
     info!("starting ven {} listening on {}", cfg.ven_name, cfg.listen_addr);
 
     let state = AppState::new();
+
+    // PlanTrigger watch channel — event poll and dispatcher send triggers;
+    // planning loop receives them for reactive replanning.
+    let (trigger_tx, trigger_rx) = tokio::sync::watch::channel(PlanTrigger::Periodic);
+    let trigger_tx = Arc::new(trigger_tx);
 
     // Optional: load persisted state
     if let Some(path) = cfg.persist_path.clone() {
@@ -117,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
         let state = state.clone();
         let vtn = vtn.clone();
         let secs = cfg.poll_events_secs;
+        let trigger_tx_events = trigger_tx.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(secs));
             loop {
@@ -141,6 +149,9 @@ async fn main() -> anyhow::Result<()> {
                         state.add_obligations(new_obs).await;
 
                         state.set_events(events, 500).await;
+
+                        // Signal planner: rates may have changed
+                        let _ = trigger_tx_events.send(PlanTrigger::RateChange);
                     }
                     Err(e) => {
                         counter!("poll_error_total", "resource" => "events").increment(1);
@@ -200,6 +211,7 @@ async fn main() -> anyhow::Result<()> {
         let report_interval_s = profile.simulator.report_interval_s;
         let ven_name = cfg.ven_name.clone();
         let vtn_for_tick = vtn.clone();
+        let trigger_tx_tick = trigger_tx.clone();
         let data_dir = cfg.persist_path.as_deref()
             .and_then(|p| std::path::Path::new(p).parent())
             .and_then(|p| p.to_str())
@@ -226,13 +238,26 @@ async fn main() -> anyhow::Result<()> {
                 let events = state.events().await;
                 let overrides = state.overrides().await;
 
-                // Reactor: evaluate events → setpoints
+                // Pre-tick: snapshot plan/packets/rates for dispatcher (no lock needed)
+                let plan_snap = state.active_plan().await;
+                let packets_snap = state.active_packets().await;
+                let rates_snap = state.planned_rates().await;
+
+                // Reactor: evaluate events → setpoints; dispatcher overlays plan allocations
                 let (setpoints, sim_snapshot, reactor_mode) = {
                     let mut sim_guard = sim.lock().await;
                     let mut reactor_guard = reactor.lock().await;
                     let mut setpoints = reactor_guard.evaluate(&events, &sim_guard, &profile, now, dt_s, &overrides);
 
-                    // Owner force-overrides applied AFTER reactor (trace records VTN intent unaffected)
+                    // Dispatcher overlay: HEMS plan allocations override reactor for managed assets
+                    if let Some(ref plan) = plan_snap {
+                        let disp = controller::dispatcher::get_setpoints(plan, &packets_snap, now);
+                        if let Some(kw) = disp.ev_kw      { setpoints.ev_charge_kw  = kw; }
+                        if let Some(kw) = disp.battery_kw { setpoints.battery_kw    = kw; }
+                        if let Some(kw) = disp.heater_kw  { setpoints.heater_kw     = kw; }
+                    }
+
+                    // Owner force-overrides beat everything (including dispatcher)
                     if let Some(kw) = overrides.ev_force_kw       { setpoints.ev_charge_kw   = kw; }
                     if let Some(kw) = overrides.heater_force_kw   { setpoints.heater_kw       = kw; }
                     if let Some(limit) = overrides.pv_force_export_limit_kw { setpoints.pv_export_limit_kw = Some(limit); }
@@ -247,7 +272,21 @@ async fn main() -> anyhow::Result<()> {
                     // Update sim + trace in app state
                     let sim_snap = sim_guard.to_sim_snapshot();
                     let trace = reactor_guard.trace_entries();
-                    state.update_sim(sim_snap, trace).await;
+                    state.update_sim(sim_snap.clone(), trace).await;
+
+                    // Post-tick: accumulate actual energy into packets and transition statuses
+                    let mut updated_pkts = packets_snap.clone();
+                    let trigger_opt =
+                        controller::dispatcher::update_packets(&mut updated_pkts, &sim_snap, dt_s, now);
+                    state.set_active_packets(updated_pkts).await;
+                    if let Some(t) = trigger_opt {
+                        let _ = trigger_tx_tick.send(t);
+                    }
+
+                    // Post-tick: update asset energy ledger
+                    let mut ledger = state.asset_ledger().await;
+                    controller::monitor::update_ledger(&mut ledger, &sim_snap, &rates_snap, dt_s, now);
+                    state.set_asset_ledger(ledger).await;
 
                     // Snapshot sim state for reporting (avoid holding lock during HTTP)
                     let sim_clone = sim_guard.clone();
@@ -320,33 +359,39 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Planning loop (Stage 3) — runs immediately then every replan_interval_s
+    // Planning loop (Stage 4) — reactive: runs on trigger OR periodic timer
     {
         let state = state.clone();
         let profile = profile.clone();
         let replan_s = profile.planner.replan_interval_s;
+        let mut trigger_rx = trigger_rx;
         tokio::spawn(async move {
-            // First run: wait a bit for the event poll to populate rates, then plan
+            // Initial delay: let event poll populate rates before first plan
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             loop {
                 let now = Utc::now();
                 let rates = state.planned_rates().await;
                 let packets = state.active_packets().await;
                 let capacity = state.capacity_state().await;
+                let trigger = trigger_rx.borrow().clone();
                 let plan = controller::planner::run_planner(
                     &rates,
                     &packets,
                     &capacity,
                     &profile,
                     now,
-                    PlanTrigger::Periodic,
+                    trigger,
                 );
-                // Update packets with planner's lifecycle transitions
+                // Planner may transition packet statuses (Pending→Scheduled, etc.)
                 state.set_active_packets(plan.packets.clone()).await;
                 state.set_active_plan(Some(plan)).await;
                 info!("plan cycle complete");
 
-                tokio::time::sleep(std::time::Duration::from_secs(replan_s)).await;
+                // Wait for next trigger OR periodic timeout (whichever comes first)
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(replan_s)) => {}
+                    _ = trigger_rx.changed() => {}
+                }
             }
         });
     }
@@ -375,6 +420,7 @@ async fn main() -> anyhow::Result<()> {
         state,
         vtn,
         metrics_handle: Arc::new(metrics_handle),
+        trigger_tx,
     };
 
     let cors = CorsLayer::new()
@@ -393,13 +439,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/sim/override", get(get_sim_override).post(post_sim_override))
         .route("/trace", get(get_trace))
         .route("/metrics", get(get_metrics))
-        // HEMS stub routes (Stage 1)
-        .route("/packets", get(get_packets))
+        // HEMS Stage 1–3 routes
+        .route("/packets", get(get_packets).post(post_packets))
         .route("/plan", get(get_plan))
         .route("/rates", get(get_rates))
         // HEMS Stage 2 routes
         .route("/capacity", get(get_capacity))
         .route("/obligations", get(get_obligations))
+        // HEMS Stage 4 routes
+        .route("/ledger", get(get_ledger))
         .with_state(ctx)
         .layer(TraceLayer::new_for_http())
         .layer(cors);
@@ -593,5 +641,82 @@ async fn get_capacity(State(ctx): State<AppCtx>) -> impl IntoResponse {
 /// GET /obligations — returns pending report obligations (Stage 2).
 async fn get_obligations(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.obligations().await)
+}
+
+/// POST /packets body shape (Stage 4).
+#[derive(Deserialize)]
+struct CreatePacketRequest {
+    asset_id: String,
+    target_energy_kwh: Option<f64>,
+    target_soc: Option<f64>,
+    desired_power_kw: Option<f64>,
+    latest_end: Option<chrono::DateTime<Utc>>,
+}
+
+/// POST /packets — create a new EnergyPacket and trigger a replan (Stage 4).
+async fn post_packets(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<CreatePacketRequest>,
+) -> impl IntoResponse {
+    let now = Utc::now();
+    let desired_power_kw = body.desired_power_kw.unwrap_or(1.0);
+    let target_energy_kwh = body.target_energy_kwh.unwrap_or(desired_power_kw); // default: 1h
+
+    let packet = EnergyPacket {
+        id: Uuid::new_v4(),
+        asset_id: body.asset_id,
+        status: PacketStatus::Pending,
+        earliest_start: now,
+        latest_start: None,
+        target_energy_kwh,
+        target_soc: body.target_soc,
+        desired_power_kw,
+        value_curve: ValueCurve {
+            comfort_rates: vec![
+                ComfortRate { fill: 0.0, max_marginal_price: 0.35, max_marginal_co2: 0.0 },
+                ComfortRate { fill: 1.0, max_marginal_price: 0.05, max_marginal_co2: 0.0 },
+            ],
+            deadline_tiers: body
+                .latest_end
+                .map(|le| {
+                    vec![DeadlineTier {
+                        deadline: le,
+                        max_total_cost_eur: None,
+                        max_marginal_rate_eur_kwh: None,
+                        min_completion: 0.8,
+                    }]
+                })
+                .unwrap_or_default(),
+            active_tier_index: 0,
+        },
+        request_mode: UserRequestMode::ByDeadline,
+        completion_policy: CompletionPolicy::Stop,
+        post_deadline_comfort_bid: None,
+        planned_power_profile: vec![],
+        past_power_profile: vec![],
+        accumulated_cost_eur: 0.0,
+        accumulated_co2_g: 0.0,
+        estimated_cost_eur: 0.0,
+        estimated_co2_g: 0.0,
+        estimated_completion: 0.0,
+        last_estimate_at: None,
+        created_at: now,
+        updated_at: now,
+    };
+
+    let mut packets = ctx.state.active_packets().await;
+    packets.push(packet.clone());
+    ctx.state.set_active_packets(packets).await;
+
+    // Signal the planning loop: a new packet needs scheduling
+    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+
+    info!(asset_id = %packet.asset_id, packet_id = %packet.id, "new EnergyPacket created via POST /packets");
+    (axum::http::StatusCode::CREATED, Json(packet))
+}
+
+/// GET /ledger — returns per-asset cumulative energy/cost/CO₂ (Stage 4).
+async fn get_ledger(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.asset_ledger().await)
 }
 
