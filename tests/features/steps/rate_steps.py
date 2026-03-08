@@ -1,5 +1,6 @@
 """Step definitions for VEN Rate System (Stage 2) BDD tests."""
 
+import uuid
 from behave import given, when, then
 from features.helpers.api_client import get_token_value, vtn_post, ven_get
 from features.helpers.wait import poll_until
@@ -11,11 +12,13 @@ from features.helpers.wait import poll_until
 
 @given("I create a rate-system program and save its ID")
 def step_create_rate_program(context):
+    # Use a unique name per scenario run to avoid 409 conflicts
+    unique_name = f"rate-test-{uuid.uuid4().hex[:8]}"
     r = vtn_post(
         "/programs",
         context.vtn_token,
         json={
-            "programName": "rate-system-test-program",
+            "programName": unique_name,
             "intervalPeriod": None,
             "programDescriptions": None,
         },
