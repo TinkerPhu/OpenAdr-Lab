@@ -9,6 +9,10 @@ pub struct Profile {
     pub reactor: ReactorConfig,
     #[serde(default)]
     pub simulator: SimulatorConfig,
+    #[serde(default)]
+    pub planner: PlannerConfig,
+    #[serde(default)]
+    pub packets: Vec<PacketSeed>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -182,6 +186,62 @@ fn default_report_interval() -> u64 {
     60
 }
 
+/// Configuration for the HEMS Planner (Stage 3).
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlannerConfig {
+    /// Planning timestep in seconds (default 300 = 5 min).
+    #[serde(default = "default_plan_step")]
+    pub plan_step_s: u64,
+    /// Near-horizon window in hours — slots here become FIRM (default 4).
+    #[serde(default = "default_near_horizon_h")]
+    pub near_horizon_h: u64,
+    /// Total planning horizon in hours (default 24).
+    #[serde(default = "default_plan_horizon_h")]
+    pub plan_horizon_h: u64,
+    /// Seconds between periodic replanning cycles (default 300).
+    #[serde(default = "default_replan_interval")]
+    pub replan_interval_s: u64,
+}
+
+impl Default for PlannerConfig {
+    fn default() -> Self {
+        Self {
+            plan_step_s: default_plan_step(),
+            near_horizon_h: default_near_horizon_h(),
+            plan_horizon_h: default_plan_horizon_h(),
+            replan_interval_s: default_replan_interval(),
+        }
+    }
+}
+
+fn default_plan_step() -> u64 { 300 }
+fn default_near_horizon_h() -> u64 { 4 }
+fn default_plan_horizon_h() -> u64 { 24 }
+fn default_replan_interval() -> u64 { 300 }
+
+/// A single comfort-rate point for a seeded packet.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ComfortRateSeed {
+    pub fill: f64,
+    pub bid: f64,
+}
+
+/// An EnergyPacket pre-configured in the device profile (seeded at startup).
+#[derive(Debug, Clone, Deserialize)]
+pub struct PacketSeed {
+    /// Asset id this packet targets: "ev", "heater", etc.
+    pub asset: String,
+    /// SoC target (0.0–1.0) for battery-like assets.
+    pub target_soc: Option<f64>,
+    /// Hours from VEN startup until this packet's deadline.
+    pub latest_end_h: f64,
+    /// Preferred charge power (kW); defaults to asset's max_charge_kw.
+    pub desired_power_kw: Option<f64>,
+    /// Comfort rates for ValueCurve (fill→bid pairs, ascending fill).
+    #[serde(default)]
+    pub comfort_rates: Vec<ComfortRateSeed>,
+}
+
 impl Profile {
     pub async fn load(path: &str) -> Self {
         match Self::try_load(path).await {
@@ -213,6 +273,8 @@ impl Profile {
             },
             reactor: ReactorConfig::default(),
             simulator: SimulatorConfig::default(),
+            planner: PlannerConfig::default(),
+            packets: vec![],
         }
     }
 }
