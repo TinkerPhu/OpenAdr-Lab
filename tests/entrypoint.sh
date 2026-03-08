@@ -10,4 +10,4 @@ echo "Provisioning ven-2 via API..."
 python provision_ven2.py
 echo "Provisioning done."
 
-exec behave "$@"
+exec python -m behave "$@"
