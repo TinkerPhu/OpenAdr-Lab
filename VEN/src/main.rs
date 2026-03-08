@@ -1,4 +1,5 @@
 mod config;
+mod controller;
 mod entities;
 mod models;
 mod profile;
@@ -113,6 +114,22 @@ async fn main() -> anyhow::Result<()> {
                     Ok(events) => {
                         counter!("poll_success_total", "resource" => "events").increment(1);
                         info!(resource = "events", count = events.len(), "poll success");
+
+                        // Parse rates and capacity from new events (Stage 2)
+                        let now = Utc::now();
+                        let rates = controller::openadr_interface::parse_rate_snapshots(&events);
+                        state.set_planned_rates(rates).await;
+
+                        let cap = state.capacity_state().await;
+                        let new_cap = controller::openadr_interface::parse_capacity_state(&events, cap);
+                        state.set_capacity_state(new_cap).await;
+
+                        let existing_obs = state.obligations().await;
+                        let new_obs = controller::openadr_interface::extract_report_obligations(
+                            &events, now, &existing_obs,
+                        );
+                        state.add_obligations(new_obs).await;
+
                         state.set_events(events, 500).await;
                     }
                     Err(e) => {
@@ -271,6 +288,28 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // Obligation check loop (every 5s — Stage 2)
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+                let now = Utc::now();
+                let due = state.due_obligations(now).await;
+                for ob in due {
+                    // Stage 2: mark fulfilled; actual report building is reporter.rs work
+                    state.mark_obligation_fulfilled(ob.id).await;
+                    info!(
+                        obligation_id = %ob.id,
+                        payload_type = %ob.payload_type,
+                        "obligation fulfilled (stub)"
+                    );
+                }
+            }
+        });
+    }
+
     // Optional persistence task for main app state
     if let Some(path) = cfg.persist_path.clone() {
         let state = state.clone();
@@ -317,6 +356,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/packets", get(get_packets))
         .route("/plan", get(get_plan))
         .route("/rates", get(get_rates))
+        // HEMS Stage 2 routes
+        .route("/capacity", get(get_capacity))
+        .route("/obligations", get(get_obligations))
         .with_state(ctx)
         .layer(TraceLayer::new_for_http())
         .layer(cors);
@@ -497,8 +539,18 @@ async fn get_plan(State(ctx): State<AppCtx>) -> impl IntoResponse {
     }
 }
 
-/// GET /rates — returns planned rate snapshots (empty until Stage 2).
+/// GET /rates — returns planned rate snapshots parsed from active events (Stage 2).
 async fn get_rates(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.planned_rates().await)
+}
+
+/// GET /capacity — returns the current OadrCapacityState (Stage 2).
+async fn get_capacity(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.capacity_state().await)
+}
+
+/// GET /obligations — returns pending report obligations (Stage 2).
+async fn get_obligations(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.obligations().await)
 }
 
