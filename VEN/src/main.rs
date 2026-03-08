@@ -13,11 +13,12 @@ use axum::{
     extract::{Path, Query, State},
     http::Method,
     response::IntoResponse,
-    routing::{get, put},
+    routing::{delete, get, put},
     Json, Router,
 };
 use chrono::Utc;
 use entities::asset::{ComfortRate, CompletionPolicy, PlanTrigger, UserRequestMode};
+use controller::user_request::CreateUserRequestBody;
 use entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
 use config::Config;
 use metrics::counter;
@@ -42,6 +43,7 @@ struct AppCtx {
     vtn: VtnClient,
     metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
+    profile: Arc<Profile>,
 }
 
 #[tokio::main]
@@ -421,6 +423,7 @@ async fn main() -> anyhow::Result<()> {
         vtn,
         metrics_handle: Arc::new(metrics_handle),
         trigger_tx,
+        profile: profile.clone(),
     };
 
     let cors = CorsLayer::new()
@@ -448,6 +451,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/obligations", get(get_obligations))
         // HEMS Stage 4 routes
         .route("/ledger", get(get_ledger))
+        // HEMS Stage 5 routes
+        .route("/requests", get(get_requests).post(post_requests))
+        .route("/requests/:id", delete(delete_request))
+        .route("/flexibility", get(get_flexibility))
         .with_state(ctx)
         .layer(TraceLayer::new_for_http())
         .layer(cors);
@@ -718,5 +725,75 @@ async fn post_packets(
 /// GET /ledger — returns per-asset cumulative energy/cost/CO₂ (Stage 4).
 async fn get_ledger(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.asset_ledger().await)
+}
+
+// --- Stage 5: User Request Manager ---
+
+/// GET /requests — list all user requests.
+async fn get_requests(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.active_requests().await)
+}
+
+/// POST /requests — create a user energy task request (Stage 5).
+async fn post_requests(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<CreateUserRequestBody>,
+) -> impl IntoResponse {
+    let now = Utc::now();
+    let sim = ctx.state.sim().await;
+
+    match controller::user_request::create_from_body(body, &ctx.profile, sim.as_ref(), now) {
+        Ok((user_req, packet)) => {
+            info!(
+                request_id = %user_req.id,
+                packet_id = %packet.id,
+                asset_id = %packet.asset_id,
+                target_kwh = packet.target_energy_kwh,
+                "user request created"
+            );
+            let mut packets = ctx.state.active_packets().await;
+            packets.push(packet);
+            ctx.state.set_active_packets(packets).await;
+            ctx.state.upsert_request(user_req.clone()).await;
+            let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+            (axum::http::StatusCode::CREATED, Json(serde_json::to_value(user_req).unwrap_or_default())).into_response()
+        }
+        Err(e) => {
+            warn!("POST /requests rejected: {e}");
+            (
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// DELETE /requests/:id — cancel a user request and abandon its packet (Stage 5).
+async fn delete_request(
+    State(ctx): State<AppCtx>,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse {
+    match ctx.state.cancel_request(id).await {
+        Some(packet_id) => {
+            ctx.state.abandon_packet(packet_id).await;
+            let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+            info!(request_id = %id, packet_id = %packet_id, "user request cancelled");
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
+        None => (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "request not found"})),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /flexibility — returns FlexibilityEnvelopes from the active plan (Stage 5).
+async fn get_flexibility(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    match ctx.state.active_plan().await {
+        Some(plan) => Json(serde_json::to_value(plan.envelopes).unwrap_or_default()).into_response(),
+        None => Json(serde_json::json!([])).into_response(),
+    }
 }
 
