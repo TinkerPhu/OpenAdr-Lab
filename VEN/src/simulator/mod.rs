@@ -11,7 +11,7 @@ use crate::models::SensorSnapshot;
 use crate::profile::Profile;
 use crate::reactor::Setpoints;
 use crate::state::UserOverrides;
-use actors::{EvCharger, Heater, PvInverter};
+use actors::{Battery, EvCharger, Heater, PvInverter};
 use energy::EnergyCounter;
 
 /// Full simulator state — persisted to disk.
@@ -20,6 +20,7 @@ pub struct SimState {
     pub ev: Option<EvCharger>,
     pub heater: Option<Heater>,
     pub pv: Option<PvInverter>,
+    pub battery: Option<Battery>,
     pub base_load_w: f64,
     pub energy: EnergyCounter,
     pub net_power_w: f64,
@@ -36,6 +37,7 @@ impl SimState {
             ev: profile.devices.ev.as_ref().map(EvCharger::from_config),
             heater: profile.devices.heater.as_ref().map(Heater::from_config),
             pv: profile.devices.pv.as_ref().map(PvInverter::from_config),
+            battery: profile.devices.battery.as_ref().map(Battery::from_config),
             base_load_w: profile.devices.base_load_w,
             energy: EnergyCounter::new(),
             net_power_w: 0.0,
@@ -99,8 +101,15 @@ impl SimState {
             0.0
         };
 
-        // Compute net power
-        let result = power_model::compute_net_power(self.base_load_w, ev_w, heater_w, pv_gen_w);
+        // Battery: commanded by setpoints.battery_kw (0.0 = hold in Stage 1)
+        let battery_w = if let Some(ref mut bat) = self.battery {
+            bat.update(dt_s, setpoints.battery_kw) * 1000.0
+        } else {
+            0.0
+        };
+
+        // Compute net power (battery positive = import, negative = export)
+        let result = power_model::compute_net_power(self.base_load_w, ev_w + battery_w, heater_w, pv_gen_w);
         self.net_power_w = result.net_w;
         self.import_w = result.import_w;
         self.export_w = result.export_w;
@@ -161,6 +170,14 @@ impl SimState {
                 current_kw: pv.current_kw,
                 rated_kw: pv.rated_kw,
             }),
+            battery: self.battery.as_ref().map(|b| BatterySnapshot {
+                soc: b.soc,
+                current_kw: b.current_kw,
+                capacity_kwh: b.capacity_kwh,
+                max_charge_kw: b.max_charge_kw,
+                max_discharge_kw: b.max_discharge_kw,
+                min_soc: b.min_soc,
+            }),
         }
     }
 }
@@ -179,6 +196,7 @@ pub struct SimSnapshot {
     pub ev: Option<EvSnapshot>,
     pub heater: Option<HeaterSnapshot>,
     pub pv: Option<PvSnapshot>,
+    pub battery: Option<BatterySnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,4 +224,14 @@ pub struct PvSnapshot {
     pub export_limit_kw: Option<f64>, // active export cap; None = no limit
     pub current_kw: f64,
     pub rated_kw: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatterySnapshot {
+    pub soc: f64,
+    pub current_kw: f64,    // positive = charging (import), negative = discharging (export)
+    pub capacity_kwh: f64,
+    pub max_charge_kw: f64,
+    pub max_discharge_kw: f64,
+    pub min_soc: f64,
 }

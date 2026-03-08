@@ -1,3 +1,7 @@
+use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
+use crate::entities::energy_packet::EnergyPacket;
+use crate::entities::plan::Plan;
+use crate::entities::rate_snapshot::RateSnapshot;
 use crate::models::SensorSnapshot;
 use crate::reactor::trace::TraceEntry;
 use crate::simulator::SimSnapshot;
@@ -49,6 +53,18 @@ pub struct InnerState {
     pub trace: Vec<TraceEntry>,
     #[serde(default)]
     pub overrides: UserOverrides,
+
+    // HEMS state (not persisted in simple state.json — managed by controller loops)
+    #[serde(skip)]
+    pub active_packets: Vec<EnergyPacket>,
+    #[serde(skip)]
+    pub active_plan: Option<Plan>,
+    #[serde(skip)]
+    pub planned_rates: Vec<RateSnapshot>,
+    #[serde(skip)]
+    pub capacity_state: OadrCapacityState,
+    #[serde(skip)]
+    pub report_obligations: Vec<OadrReportObligation>,
 }
 
 impl AppState {
@@ -62,6 +78,11 @@ impl AppState {
                 sim: None,
                 trace: vec![],
                 overrides: UserOverrides::default(),
+                active_packets: vec![],
+                active_plan: None,
+                planned_rates: vec![],
+                capacity_state: OadrCapacityState::default(),
+                report_obligations: vec![],
             })),
         }
     }
@@ -125,6 +146,48 @@ impl AppState {
         self.inner.write().await.overrides = o;
     }
 
+    // --- HEMS accessors ---
+
+    pub async fn active_packets(&self) -> Vec<EnergyPacket> {
+        self.inner.read().await.active_packets.clone()
+    }
+
+    pub async fn set_active_packets(&self, packets: Vec<EnergyPacket>) {
+        self.inner.write().await.active_packets = packets;
+    }
+
+    pub async fn active_plan(&self) -> Option<Plan> {
+        self.inner.read().await.active_plan.clone()
+    }
+
+    pub async fn set_active_plan(&self, plan: Option<Plan>) {
+        self.inner.write().await.active_plan = plan;
+    }
+
+    pub async fn planned_rates(&self) -> Vec<RateSnapshot> {
+        self.inner.read().await.planned_rates.clone()
+    }
+
+    pub async fn set_planned_rates(&self, rates: Vec<RateSnapshot>) {
+        self.inner.write().await.planned_rates = rates;
+    }
+
+    pub async fn capacity_state(&self) -> OadrCapacityState {
+        self.inner.read().await.capacity_state.clone()
+    }
+
+    pub async fn set_capacity_state(&self, state: OadrCapacityState) {
+        self.inner.write().await.capacity_state = state;
+    }
+
+    pub async fn report_obligations(&self) -> Vec<OadrReportObligation> {
+        self.inner.read().await.report_obligations.clone()
+    }
+
+    pub async fn set_report_obligations(&self, obligations: Vec<OadrReportObligation>) {
+        self.inner.write().await.report_obligations = obligations;
+    }
+
     pub async fn load_from_json(&self, json: &str) -> anyhow::Result<()> {
         let parsed: InnerState = serde_json::from_str(json)?;
         *self.inner.write().await = parsed;
@@ -146,6 +209,11 @@ impl Clone for InnerState {
             sim: self.sim.clone(),
             trace: self.trace.clone(),
             overrides: self.overrides.clone(),
+            active_packets: self.active_packets.clone(),
+            active_plan: self.active_plan.clone(),
+            planned_rates: self.planned_rates.clone(),
+            capacity_state: self.capacity_state.clone(),
+            report_obligations: self.report_obligations.clone(),
         }
     }
 }
