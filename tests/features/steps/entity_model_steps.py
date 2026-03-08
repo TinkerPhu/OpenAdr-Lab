@@ -42,10 +42,6 @@ def step_ven_battery_at_min_soc(context):
     context.expected_battery_soc = context.battery_min_soc
 
 
-@given("the VEN battery has initial SoC 1.0")
-def step_ven_battery_at_full(context):
-    context.expected_battery_soc = 1.0
-
 
 @when("I GET {path} from the VEN")
 def step_ven_get(context, path):
