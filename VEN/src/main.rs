@@ -1,4 +1,5 @@
 mod config;
+mod entities;
 mod models;
 mod profile;
 mod reactor;
@@ -312,6 +313,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/sim/override", get(get_sim_override).post(post_sim_override))
         .route("/trace", get(get_trace))
         .route("/metrics", get(get_metrics))
+        // HEMS stub routes (Stage 1)
+        .route("/packets", get(get_packets))
+        .route("/plan", get(get_plan))
+        .route("/rates", get(get_rates))
         .with_state(ctx)
         .layer(TraceLayer::new_for_http())
         .layer(cors);
@@ -476,3 +481,24 @@ async fn get_trace(
     trace.truncate(limit);
     Json(trace)
 }
+
+// --- HEMS stub routes (Stage 1) ---
+
+/// GET /packets — returns active EnergyPackets (empty until Stage 3).
+async fn get_packets(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.active_packets().await)
+}
+
+/// GET /plan — returns the active Plan (null until Stage 3).
+async fn get_plan(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    match ctx.state.active_plan().await {
+        Some(plan) => Json(serde_json::to_value(plan).unwrap_or_default()).into_response(),
+        None => Json(serde_json::Value::Null).into_response(),
+    }
+}
+
+/// GET /rates — returns planned rate snapshots (empty until Stage 2).
+async fn get_rates(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.planned_rates().await)
+}
+

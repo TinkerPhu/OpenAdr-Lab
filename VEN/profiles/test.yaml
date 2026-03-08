@@ -1,4 +1,4 @@
-# Test profile: All devices, instant compliance, fast persist
+# Test profile: All devices including battery, instant compliance, fast persist
 devices:
   ev:
     max_charge_kw: 7.0
@@ -11,6 +11,13 @@ devices:
     temp_max_c: 23.0
   pv:
     rated_kw: 5.0
+  battery:
+    capacity_kwh: 10.0
+    max_charge_kw: 5.0
+    max_discharge_kw: 5.0
+    initial_soc: 0.50
+    round_trip_efficiency: 0.92
+    min_soc: 0.10
   base_load_w: 500
 
 reactor:

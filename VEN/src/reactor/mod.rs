@@ -21,6 +21,9 @@ pub struct Setpoints {
     pub heater_kw: f64,
     /// Maximum PV export in kW. None = no limit (full output). Some(x) = clamp output to x kW.
     pub pv_export_limit_kw: Option<f64>,
+    /// Battery setpoint in kW. Positive = charge (import), negative = discharge (export).
+    /// Set by the Dispatcher in later stages; 0.0 = hold in Stage 1.
+    pub battery_kw: f64,
     pub mode: String,
 }
 
@@ -39,6 +42,7 @@ impl Setpoints {
                 .map(|h| h.max_kw * 0.5) // default: half power
                 .unwrap_or(0.0),
             pv_export_limit_kw: None,
+            battery_kw: 0.0, // hold — Dispatcher controls in later stages
             mode: "IDLE".to_string(),
         }
     }
@@ -247,6 +251,7 @@ impl Reactor {
                     ev_charge_kw: ev_max,
                     heater_kw: heater_max,
                     pv_export_limit_kw: Some(intent.value.max(0.0)), // direct from payload (kW)
+                    battery_kw: 0.0,
                     mode: "EXPORT_CAP".to_string(),
                 }
             }
@@ -256,6 +261,7 @@ impl Reactor {
                     ev_charge_kw: 0.0,
                     heater_kw: 0.0,
                     pv_export_limit_kw: None,
+                    battery_kw: 0.0,
                     mode: "IMPORT_CAP".to_string(),
                 }
             }
@@ -266,6 +272,7 @@ impl Reactor {
                         ev_charge_kw: 0.0,
                         heater_kw: 0.0,
                         pv_export_limit_kw: None, // keep PV exporting
+                        battery_kw: 0.0,
                         mode: "SIMPLE".to_string(),
                     }
                 } else {
@@ -281,6 +288,7 @@ impl Reactor {
                         ev_charge_kw: 0.0,
                         heater_kw: 0.0,
                         pv_export_limit_kw: None,
+                        battery_kw: 0.0,
                         mode: "PRICE".to_string(),
                     }
                 } else if price <= profile.reactor.price_low {
@@ -301,6 +309,7 @@ impl Reactor {
                         ev_charge_kw: ev_max,
                         heater_kw: heater_max,
                         pv_export_limit_kw: None,
+                        battery_kw: 0.0,
                         mode: "PRICE".to_string(),
                     }
                 } else {
@@ -316,6 +325,7 @@ impl Reactor {
                     ev_charge_kw: target_kw,
                     heater_kw: defaults.heater_kw,
                     pv_export_limit_kw: defaults.pv_export_limit_kw,
+                    battery_kw: 0.0,
                     mode: "CHARGE_SETPOINT".to_string(),
                 }
             }
@@ -335,6 +345,7 @@ impl Reactor {
             ev_charge_kw: from.ev_charge_kw + (to.ev_charge_kw - from.ev_charge_kw) * f,
             heater_kw: from.heater_kw + (to.heater_kw - from.heater_kw) * f,
             pv_export_limit_kw: if f > 0.0 { to.pv_export_limit_kw } else { from.pv_export_limit_kw },
+            battery_kw: from.battery_kw + (to.battery_kw - from.battery_kw) * f,
             mode: to.mode.clone(),
         }
     }

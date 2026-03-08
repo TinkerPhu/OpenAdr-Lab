@@ -16,6 +16,7 @@ pub struct DeviceConfig {
     pub ev: Option<EvConfig>,
     pub heater: Option<HeaterConfig>,
     pub pv: Option<PvConfig>,
+    pub battery: Option<BatteryConfig>,
     #[serde(default = "default_base_load")]
     pub base_load_w: f64,
 }
@@ -82,6 +83,41 @@ pub struct PvConfig {
 
 fn default_pv_rated() -> f64 {
     5.0
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BatteryConfig {
+    #[serde(default = "default_battery_capacity")]
+    pub capacity_kwh: f64,
+    #[serde(default = "default_battery_charge")]
+    pub max_charge_kw: f64,
+    #[serde(default = "default_battery_discharge")]
+    pub max_discharge_kw: f64,
+    #[serde(default = "default_battery_soc")]
+    pub initial_soc: f64,
+    #[serde(default = "default_battery_efficiency")]
+    pub round_trip_efficiency: f64,
+    #[serde(default = "default_battery_min_soc")]
+    pub min_soc: f64,
+}
+
+fn default_battery_capacity() -> f64 {
+    10.0
+}
+fn default_battery_charge() -> f64 {
+    5.0
+}
+fn default_battery_discharge() -> f64 {
+    5.0
+}
+fn default_battery_soc() -> f64 {
+    0.5
+}
+fn default_battery_efficiency() -> f64 {
+    0.92
+}
+fn default_battery_min_soc() -> f64 {
+    0.10
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -172,6 +208,7 @@ impl Profile {
                 ev: None,
                 heater: None,
                 pv: None,
+                battery: None,
                 base_load_w: default_base_load(),
             },
             reactor: ReactorConfig::default(),

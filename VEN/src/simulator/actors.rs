@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::profile::{EvConfig, HeaterConfig, PvConfig};
+use crate::profile::{BatteryConfig, EvConfig, HeaterConfig, PvConfig};
 
 /// EV Charger: consumes power to charge battery (positive = import)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +167,65 @@ impl PvInverter {
 
     /// Power in watts (positive = generation)
     pub fn generation_w(&self) -> f64 {
+        self.current_kw * 1000.0
+    }
+}
+
+/// Battery storage: bidirectional, positive = charge (import), negative = discharge (export).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Battery {
+    pub soc: f64,                   // 0.0..1.0
+    pub capacity_kwh: f64,
+    pub max_charge_kw: f64,
+    pub max_discharge_kw: f64,
+    pub round_trip_efficiency: f64, // 0.0..1.0 (e.g. 0.92)
+    pub min_soc: f64,               // hard stop lower bound (e.g. 0.10)
+    pub current_kw: f64,            // actual power this tick (positive = charge, negative = discharge)
+}
+
+impl Battery {
+    pub fn from_config(cfg: &BatteryConfig) -> Self {
+        Self {
+            soc: cfg.initial_soc,
+            capacity_kwh: cfg.capacity_kwh,
+            max_charge_kw: cfg.max_charge_kw,
+            max_discharge_kw: cfg.max_discharge_kw,
+            round_trip_efficiency: cfg.round_trip_efficiency,
+            min_soc: cfg.min_soc,
+            current_kw: 0.0,
+        }
+    }
+
+    /// Update state. `commanded_kw`: positive = charge, negative = discharge.
+    /// Returns actual power (positive = import, negative = export).
+    pub fn update(&mut self, dt_s: f64, commanded_kw: f64) -> f64 {
+        // Clamp to device limits
+        let kw = commanded_kw.clamp(-self.max_discharge_kw, self.max_charge_kw);
+
+        // Hard stops at SoC bounds
+        let kw = if kw > 0.0 && self.soc >= 1.0 {
+            0.0
+        } else if kw < 0.0 && self.soc <= self.min_soc {
+            0.0
+        } else {
+            kw
+        };
+
+        let dt_h = dt_s / 3600.0;
+        if kw > 0.0 {
+            // Charging: apply round-trip efficiency on input
+            self.soc += (kw * dt_h * self.round_trip_efficiency) / self.capacity_kwh;
+        } else {
+            // Discharging: raw energy drawn from storage
+            self.soc += (kw * dt_h) / self.capacity_kwh;
+        }
+        self.soc = self.soc.clamp(0.0, 1.0);
+
+        self.current_kw = kw;
+        kw
+    }
+
+    pub fn power_w(&self) -> f64 {
         self.current_kw * 1000.0
     }
 }
