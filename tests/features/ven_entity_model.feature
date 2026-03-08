@@ -13,9 +13,9 @@ Feature: VEN Entity Model — Stage 1 Foundation
     Then the response status is 200
     And the response JSON has field "battery"
     And the response JSON field "battery.soc" is a number between 0.0 and 1.0
-    And the response JSON field "battery.capacity_kwh" is greater than 0
-    And the response JSON field "battery.max_charge_kw" is greater than 0
-    And the response JSON field "battery.max_discharge_kw" is greater than 0
+    And the response JSON field "battery.capacity_kwh" is greater than 0.0
+    And the response JSON field "battery.max_charge_kw" is greater than 0.0
+    And the response JSON field "battery.max_discharge_kw" is greater than 0.0
 
   Scenario: Battery SoC stays within valid range over time
     When I wait 3 seconds
