@@ -136,6 +136,7 @@ mod tests {
             ev: None,
             heater: None,
             pv: None,
+            battery: None,
             base_load_w: 500.0,
             energy: crate::simulator::energy::EnergyCounter::new(),
             net_power_w: 1200.0,
