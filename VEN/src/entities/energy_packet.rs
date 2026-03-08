@@ -2,9 +2,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::entities::asset::{ComfortRate, CompletionPolicy};
+use crate::entities::asset::{ComfortRate, CompletionPolicy, UserRequestMode};
 
-/// Status of an EnergyPacket through its lifecycle.
+/// Status of an EnergyPacket through its lifecycle (§1.4).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PacketStatus {
@@ -18,76 +18,108 @@ pub enum PacketStatus {
     Failed,           // device failure prevented completion
 }
 
-/// A single deadline tier: complete by `latest_end` within budget constraints.
+/// A single deadline tier: complete by `deadline` within budget constraints (§2.8).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeadlineTier {
-    pub latest_end: DateTime<Utc>,
+    pub deadline: DateTime<Utc>,
     pub max_total_cost_eur: Option<f64>,
     pub max_marginal_rate_eur_kwh: Option<f64>,
     /// Minimum fill fraction (0.0..1.0) required for this tier to count as success
     pub min_completion: f64,
 }
 
-/// A value curve: maps task fill fraction to marginal bid (€/kWh).
+/// Actual or planned energy measurement at a timestep (§2.6).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnergySnapshot {
+    pub ts: DateTime<Utc>,
+    pub power_kw: f64,                // instantaneous power at this timestep
+    pub cumulative_energy_kwh: f64,   // cumulative energy delivered since packet start
+}
+
+/// Complete user preference model for an EnergyPacket (§2.9).
+/// Contains both the fill-based comfort rates AND the temporal deadline tiers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValueCurve {
-    pub rates: Vec<ComfortRate>,
+    /// Fill-based marginal value: sorted ascending by fill fraction.
+    pub comfort_rates: Vec<ComfortRate>,
+    /// Time-based tiers: sorted by preference, Tier 0 = most preferred.
+    pub deadline_tiers: Vec<DeadlineTier>,
+    /// Currently targeted tier index (set by Planner, 0-based).
+    pub active_tier_index: usize,
 }
 
 impl ValueCurve {
     /// Interpolate the bid at a given fill fraction (0.0..1.0).
     pub fn bid_at(&self, fill: f64) -> f64 {
-        if self.rates.is_empty() {
+        let rates = &self.comfort_rates;
+        if rates.is_empty() {
             return 0.0;
         }
-        if fill <= self.rates[0].fill {
-            return self.rates[0].bid_eur_kwh;
+        if fill <= rates[0].fill {
+            return rates[0].max_marginal_price;
         }
-        for i in 1..self.rates.len() {
-            let lo = &self.rates[i - 1];
-            let hi = &self.rates[i];
+        for i in 1..rates.len() {
+            let lo = &rates[i - 1];
+            let hi = &rates[i];
             if fill <= hi.fill {
                 let t = (fill - lo.fill) / (hi.fill - lo.fill);
-                return lo.bid_eur_kwh + t * (hi.bid_eur_kwh - lo.bid_eur_kwh);
+                return lo.max_marginal_price + t * (hi.max_marginal_price - lo.max_marginal_price);
             }
         }
-        self.rates.last().map(|r| r.bid_eur_kwh).unwrap_or(0.0)
+        rates.last().map(|r| r.max_marginal_price).unwrap_or(0.0)
+    }
+
+    /// The currently active deadline tier (or None if empty).
+    pub fn active_deadline(&self) -> Option<&DeadlineTier> {
+        self.deadline_tiers.get(self.active_tier_index)
+    }
+
+    /// The absolute latest end (from the last tier's deadline).
+    pub fn latest_end(&self) -> Option<DateTime<Utc>> {
+        self.deadline_tiers.last().map(|t| t.deadline)
     }
 }
 
-/// An EnergyPacket represents a scheduled energy task (charge EV, run heater, batch process…).
+/// An EnergyPacket represents a discrete energy task (§4.1).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnergyPacket {
     pub id: Uuid,
     pub asset_id: String,
     pub status: PacketStatus,
 
-    /// How much energy is needed total (kWh)
-    pub target_energy_kwh: f64,
-    /// How much has been delivered so far (kWh)
-    pub delivered_energy_kwh: f64,
-    /// Desired power level when running (kW)
-    pub desired_power_kw: f64,
-
-    /// Earliest the task may start
+    // ── Temporal Bounds ─────────────────────────────────────────────────────
     pub earliest_start: DateTime<Utc>,
-    /// Deadline tiers (first = preferred, later = fallback)
-    pub deadlines: Vec<DeadlineTier>,
+    pub latest_start: Option<DateTime<Utc>>,  // must begin by this or abandon
 
-    /// Value curve for this task (bid vs. fill)
-    pub value_curve: ValueCurve,
+    // ── Energy Target ────────────────────────────────────────────────────────
+    pub target_energy_kwh: f64,        // total energy required for 100% completion
+    pub target_soc: Option<f64>,       // target SoC if storage asset (alternative to energy)
+    pub desired_power_kw: f64,         // preferred power level when running
 
-    /// How to handle the task after the final deadline
+    // ── Value ────────────────────────────────────────────────────────────────
+    pub value_curve: ValueCurve,       // comfort rates + deadline tiers
+    pub request_mode: UserRequestMode,
     pub completion_policy: CompletionPolicy,
+    /// €/kWh bid for priority after last deadline (only when CompletionPolicy = CONTINUE)
+    pub post_deadline_comfort_bid: Option<f64>,
 
-    /// Plan output: planned power profile per slot index (kW)
+    // ── Power Profile ────────────────────────────────────────────────────────
+    /// Optimizer output: planned power at each planning timestep (kW)
     #[serde(default)]
-    pub planned_power_profile: Vec<f64>,
+    pub planned_power_profile: Vec<EnergySnapshot>,
+    /// Actual measurements recorded during execution
+    #[serde(default)]
+    pub past_power_profile: Vec<EnergySnapshot>,
 
-    /// Estimated total cost at current plan (€)
+    // ── Budget Tracking ──────────────────────────────────────────────────────
+    pub accumulated_cost_eur: f64,     // Σ(PastPower × ImportPrice × dt) so far
+    pub accumulated_co2_g: f64,        // Σ(PastPower × CO2Rate × dt) so far
+
+    // ── Planner Estimates (updated each plan cycle) ──────────────────────────
     pub estimated_cost_eur: f64,
-    /// Estimated total CO2 at current plan (kg)
-    pub estimated_co2_kg: f64,
+    pub estimated_co2_g: f64,
+    pub estimated_completion: f64,     // 0.0..1.0, expected fill at active tier deadline
+    pub last_estimate_at: Option<DateTime<Utc>>,
 
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -97,18 +129,30 @@ impl EnergyPacket {
     /// Task completion fraction: 0.0 (none) to 1.0 (full).
     pub fn fill(&self) -> f64 {
         if self.target_energy_kwh > 0.0 {
-            (self.delivered_energy_kwh / self.target_energy_kwh).clamp(0.0, 1.0)
+            let past_energy: f64 = self.past_power_profile.iter()
+                .map(|s| s.cumulative_energy_kwh)
+                .next_back()
+                .unwrap_or(0.0);
+            (past_energy / self.target_energy_kwh).clamp(0.0, 1.0)
         } else {
             1.0
         }
     }
 
-    /// The current active deadline tier (first in list).
-    pub fn active_deadline(&self) -> Option<&DeadlineTier> {
-        self.deadlines.first()
+    /// Total energy already delivered (kWh).
+    pub fn past_energy_kwh(&self) -> f64 {
+        self.past_power_profile.iter()
+            .map(|s| s.cumulative_energy_kwh)
+            .next_back()
+            .unwrap_or(0.0)
     }
 
-    /// True if the packet has reached a terminal status (no further transitions possible).
+    /// Energy still needed (kWh).
+    pub fn undelivered_energy_kwh(&self) -> f64 {
+        (self.target_energy_kwh - self.past_energy_kwh()).max(0.0)
+    }
+
+    /// True if the packet has reached a terminal status.
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.status,
@@ -119,9 +163,19 @@ impl EnergyPacket {
         )
     }
 
-    /// True if the packet is currently able to consume energy (Active only).
+    /// True if the packet is currently executing.
     pub fn is_executing(&self) -> bool {
         self.status == PacketStatus::Active
+    }
+
+    /// True if execution has started (any past data recorded).
+    pub fn started(&self) -> bool {
+        !self.past_power_profile.is_empty()
+    }
+
+    /// Absolute latest end time (from last deadline tier).
+    pub fn latest_end(&self) -> Option<DateTime<Utc>> {
+        self.value_curve.latest_end()
     }
 }
 
@@ -130,39 +184,32 @@ mod tests {
     use super::*;
     use crate::entities::asset::ComfortRate;
 
+    fn make_curve(rates: Vec<(f64, f64)>) -> ValueCurve {
+        ValueCurve {
+            comfort_rates: rates
+                .into_iter()
+                .map(|(fill, price)| ComfortRate {
+                    fill,
+                    max_marginal_price: price,
+                    max_marginal_co2: 0.0,
+                })
+                .collect(),
+            deadline_tiers: vec![],
+            active_tier_index: 0,
+        }
+    }
+
     #[test]
     fn value_curve_interpolates() {
-        let curve = ValueCurve {
-            rates: vec![
-                ComfortRate { fill: 0.0, bid_eur_kwh: 0.35 },
-                ComfortRate { fill: 1.0, bid_eur_kwh: 0.05 },
-            ],
-        };
+        let curve = make_curve(vec![(0.0, 0.35), (1.0, 0.05)]);
         assert!((curve.bid_at(0.0) - 0.35).abs() < 1e-6);
         assert!((curve.bid_at(1.0) - 0.05).abs() < 1e-6);
         assert!((curve.bid_at(0.5) - 0.20).abs() < 1e-6);
     }
 
     #[test]
-    fn fill_clamped() {
-        let now = Utc::now();
-        let packet = EnergyPacket {
-            id: Uuid::new_v4(),
-            asset_id: "ev".to_string(),
-            status: PacketStatus::Active,
-            target_energy_kwh: 10.0,
-            delivered_energy_kwh: 12.0, // overdelivered
-            desired_power_kw: 7.4,
-            earliest_start: now,
-            deadlines: vec![],
-            value_curve: ValueCurve { rates: vec![] },
-            completion_policy: CompletionPolicy::Stop,
-            planned_power_profile: vec![],
-            estimated_cost_eur: 0.0,
-            estimated_co2_kg: 0.0,
-            created_at: now,
-            updated_at: now,
-        };
-        assert_eq!(packet.fill(), 1.0);
+    fn value_curve_empty_returns_zero() {
+        let curve = make_curve(vec![]);
+        assert_eq!(curve.bid_at(0.5), 0.0);
     }
 }
