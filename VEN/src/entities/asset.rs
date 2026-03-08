@@ -6,51 +6,58 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PowerAdjustability {
     None,           // observe only (e.g. cooking stove, fixed load)
-    Recommendation, // controller can suggest but not enforce (e.g. washing machine)
-    OnOff,          // binary: either 0 or max power
-    Steps,          // N discrete power levels (e.g. 3-speed pump, step-controlled charger)
-    Continuous,     // any value in [min_kw, max_kw] — full range control
+    Recommendation, // VEN can suggest but not enforce (e.g. washing machine)
+    OnOff,          // binary switching — equivalent to Stepped with [0, MaxPower]
+    Stepped,        // discrete power levels (e.g. 0/3/6 kW pump, step-controlled charger)
+    Stepless,       // continuously adjustable within [min_kw, max_kw]
+    Croppable,      // can be curtailed downward only (e.g. PV — can't produce more than natural)
 }
 
-/// How quickly a device responds to setpoint changes.
+/// Device health and communication status (not response speed).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DeviceResponsiveness {
-    Instant,  // < 1 second
-    Fast,     // 1–30 seconds
-    Slow,     // 30s – 5 minutes
-    VerySlow, // > 5 minutes
+    Responsive,   // device confirms setpoints within expected delay
+    Degraded,     // device responds but outside expected parameters
+    Unresponsive, // device not confirming setpoint changes
+    Offline,      // device not communicating at all
 }
 
-/// How to handle completion at packet deadline.
+/// How to handle completion when the last explicit DeadlineTier expires and packet is not done.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CompletionPolicy {
-    Stop,     // stop at deadline regardless of fill
-    Continue, // continue beyond deadline if needed
-    Abandon,  // abandon if not completed by deadline
+    /// Terminate immediately → PARTIAL_COMPLETED if FillPercentage < 1.0.
+    /// Use when the asset is needed for another task or partial result is acceptable.
+    Stop,
+    /// Keep going, bidding at PostDeadlineComfortBid for priority.
+    /// The bid determines how aggressively the packet competes after the deadline.
+    Continue,
 }
 
-/// How a user requested the energy task.
+/// How a user requested an energy task — determines Planner behavior.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum RequestMode {
-    Charge,    // charge EV to target SoC
-    Heat,      // heat to target temperature
-    Batch,     // run a batch process (washing machine, etc.)
-    Discharge, // discharge battery / V2G
+pub enum UserRequestMode {
+    Asap,            // as soon as possible, cost-aware
+    AsapFree,        // as soon as possible, only free/surplus energy
+    ByDeadline,      // complete by deadline, cost-aware
+    ByDeadlineFree,  // complete by deadline, only free energy
+    MaxCost,         // complete whenever, but within total cost limit
+    Opportunistic,   // use only free/surplus energy, no deadline
 }
 
 /// What triggered a plan recomputation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PlanTrigger {
-    Periodic,
-    RateChange,
-    CapacityChange,
-    DeviceDeviation,
-    UserRequest,
-    Alert,
+    Periodic,        // regular planning cycle (every PlanTimeStep)
+    RateChange,      // new PRICE/GHG/EXPORT_PRICE event from VTN
+    CapacityChange,  // new capacity limit/reservation from VTN
+    Alert,           // emergency/flex alert from VTN
+    UserRequest,     // new or modified EnergyPacket from user
+    DeviceDeviation, // significant actual vs. planned deviation detected
+    AssetStateChange, // device connected/disconnected/failed
 }
 
 /// Power range for an asset: minimum and maximum controllable power in kW.

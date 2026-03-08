@@ -8,13 +8,14 @@ use crate::entities::asset::{ComfortRate, CompletionPolicy};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PacketStatus {
-    Pending,          // created, not yet scheduled
-    Scheduled,        // allocated in plan
-    Active,           // currently executing
-    Completed,        // successfully finished
-    PartialCompleted, // finished with < 100% fill at deadline
-    Failed,           // device failed mid-execution
-    Abandoned,        // infeasible or past deadline
+    Pending,          // not yet started, waiting for optimal slot
+    Scheduled,        // planned start time assigned
+    Active,           // currently executing (energy flowing)
+    Paused,           // temporarily suspended (by conflict, VTN, or user)
+    Completed,        // target energy/SoC reached (FillPercentage = 1.0)
+    PartialCompleted, // deadline reached with FillPercentage < 1.0 and CompletionPolicy = STOP
+    Abandoned,        // all tiers exhausted or user cancelled
+    Failed,           // device failure prevented completion
 }
 
 /// A single deadline tier: complete by `latest_end` within budget constraints.
@@ -107,7 +108,7 @@ impl EnergyPacket {
         self.deadlines.first()
     }
 
-    /// True if the packet has reached a terminal status.
+    /// True if the packet has reached a terminal status (no further transitions possible).
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.status,
@@ -116,6 +117,11 @@ impl EnergyPacket {
                 | PacketStatus::Failed
                 | PacketStatus::Abandoned
         )
+    }
+
+    /// True if the packet is currently able to consume energy (Active only).
+    pub fn is_executing(&self) -> bool {
+        self.status == PacketStatus::Active
     }
 }
 
