@@ -11,14 +11,6 @@ from features.helpers.wait import poll_until
 # When: poll VEN planner endpoints
 # ---------------------------------------------------------------------------
 
-@when("I GET /packets from the VEN")
-def step_get_packets(context):
-    resp = ven_get("/packets")
-    resp.raise_for_status()
-    context.last_response = resp
-    context.last_response_json = resp.json()
-
-
 @when("I wait for the VEN /plan endpoint to return a plan")
 def step_wait_for_plan(context):
     def fetch():
