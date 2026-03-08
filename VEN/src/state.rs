@@ -1,4 +1,5 @@
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
+use crate::entities::user_request::{UserRequest, UserRequestStatus};
 use crate::entities::energy_packet::EnergyPacket;
 use crate::entities::plan::Plan;
 use crate::entities::rate_snapshot::RateSnapshot;
@@ -89,6 +90,8 @@ pub struct InnerState {
     pub report_obligations: Vec<OadrReportObligation>,
     #[serde(skip)]
     pub asset_ledger: HashMap<String, AssetLedgerEntry>,
+    #[serde(skip)]
+    pub active_requests: Vec<UserRequest>,
 }
 
 impl AppState {
@@ -108,6 +111,7 @@ impl AppState {
                 capacity_state: OadrCapacityState::default(),
                 report_obligations: vec![],
                 asset_ledger: HashMap::new(),
+                active_requests: vec![],
             })),
         }
     }
@@ -239,6 +243,44 @@ impl AppState {
         }
     }
 
+    pub async fn active_requests(&self) -> Vec<UserRequest> {
+        self.inner.read().await.active_requests.clone()
+    }
+
+    pub async fn set_active_requests(&self, requests: Vec<UserRequest>) {
+        self.inner.write().await.active_requests = requests;
+    }
+
+    /// Add a user request; replace if same id already exists.
+    pub async fn upsert_request(&self, req: UserRequest) {
+        let mut inner = self.inner.write().await;
+        if let Some(pos) = inner.active_requests.iter().position(|r| r.id == req.id) {
+            inner.active_requests[pos] = req;
+        } else {
+            inner.active_requests.push(req);
+        }
+    }
+
+    /// Cancel a user request by id: mark it Cancelled and return the linked packet_id.
+    pub async fn cancel_request(&self, id: uuid::Uuid) -> Option<uuid::Uuid> {
+        let mut inner = self.inner.write().await;
+        if let Some(req) = inner.active_requests.iter_mut().find(|r| r.id == id) {
+            req.status = UserRequestStatus::Cancelled;
+            Some(req.packet_id)
+        } else {
+            None
+        }
+    }
+
+    /// Abandon a packet by id (set status to Abandoned).
+    pub async fn abandon_packet(&self, packet_id: uuid::Uuid) {
+        use crate::entities::energy_packet::PacketStatus;
+        let mut inner = self.inner.write().await;
+        if let Some(pkt) = inner.active_packets.iter_mut().find(|p| p.id == packet_id) {
+            pkt.status = PacketStatus::Abandoned;
+        }
+    }
+
     pub async fn asset_ledger(&self) -> HashMap<String, AssetLedgerEntry> {
         self.inner.read().await.asset_ledger.clone()
     }
@@ -286,6 +328,7 @@ impl Clone for InnerState {
             capacity_state: self.capacity_state.clone(),
             report_obligations: self.report_obligations.clone(),
             asset_ledger: self.asset_ledger.clone(),
+            active_requests: self.active_requests.clone(),
         }
     }
 }
