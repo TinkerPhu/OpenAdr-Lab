@@ -5,6 +5,8 @@ use crate::entities::rate_snapshot::RateSnapshot;
 use crate::models::SensorSnapshot;
 use crate::reactor::trace::TraceEntry;
 use crate::simulator::SimSnapshot;
+use chrono::DateTime;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -186,6 +188,44 @@ impl AppState {
 
     pub async fn set_report_obligations(&self, obligations: Vec<OadrReportObligation>) {
         self.inner.write().await.report_obligations = obligations;
+    }
+
+    /// Alias used by the controller (Stage 2).
+    pub async fn obligations(&self) -> Vec<OadrReportObligation> {
+        self.inner.read().await.report_obligations.clone()
+    }
+
+    /// Append new obligations without duplicating existing ones (keyed by id).
+    pub async fn add_obligations(&self, new_obs: Vec<OadrReportObligation>) {
+        if new_obs.is_empty() {
+            return;
+        }
+        let mut inner = self.inner.write().await;
+        for ob in new_obs {
+            if !inner.report_obligations.iter().any(|e| e.id == ob.id) {
+                inner.report_obligations.push(ob);
+            }
+        }
+    }
+
+    /// Mark an obligation as fulfilled by its UUID.
+    pub async fn mark_obligation_fulfilled(&self, id: uuid::Uuid) {
+        let mut inner = self.inner.write().await;
+        if let Some(ob) = inner.report_obligations.iter_mut().find(|o| o.id == id) {
+            ob.fulfilled = true;
+        }
+    }
+
+    /// Return all unfulfilled obligations whose due_at <= now.
+    pub async fn due_obligations(&self, now: DateTime<Utc>) -> Vec<OadrReportObligation> {
+        self.inner
+            .read()
+            .await
+            .report_obligations
+            .iter()
+            .filter(|o| o.is_due(now))
+            .cloned()
+            .collect()
     }
 
     pub async fn load_from_json(&self, json: &str) -> anyhow::Result<()> {
