@@ -1935,3 +1935,63 @@ With this change, the chart's dashed desired line (`EXPORT_CAPACITY_LIMIT` paylo
 - **Docker build is the final TypeScript type-checker for the full project** — running `npm test` locally only covers tested components; pages like `Dashboard.tsx` and `Trace.tsx` that have no dedicated tests only fail at `tsc` time during the Docker build. Running `tsc` locally before pushing would catch these earlier.
 
 *Last updated: 2026-02-22 — Phase 21 complete, 69 UI tests pass, deployed to Pi4*
+
+---
+
+## Phase 22: VEN HEMS Controller — Stage 1 Entity Model
+
+**Status: COMPLETE (local) — BDD tests running on Pi4**
+
+### What Was Done
+
+Implemented Stage 1 of the full HEMS (Home Energy Management System) controller plan. This stage is purely additive: no behavior changes, all existing endpoints work unchanged.
+
+#### New: `VEN/src/entities/` module
+
+All domain types from the implementation plan's Step 1:
+
+| File | Key Types |
+|---|---|
+| `asset.rs` | `PowerAdjustability` (None/Recommendation/OnOff/**Steps**/Continuous), `CompletionPolicy`, `PlanTrigger`, `AssetProfile`, `AssetState`, `AssetForecast`, `AssetFlexibility`, `AssetLedger`, `AssetHeuristics`, `ThermalModelParams`, `DefaultValueCurve`, `ComfortRate` |
+| `energy_packet.rs` | `EnergyPacket`, `PacketStatus`, `DeadlineTier`, `ValueCurve` (with `bid_at()` interpolation) |
+| `rate_snapshot.rs` | `RateSnapshot`, `PlannedRates`, `PastRates`, `RateHeuristic` |
+| `plan.rs` | `Plan`, `PlanTimeSlot`, `SlotType` (Firm/Flexible), `PacketAllocation`, `FlexibilityEnvelope`, `PlanWarning`, `CalcCache` |
+| `capacity.rs` | `OadrCapacityState`, `OadrProgramConfig`, `OadrEventCache`, `OadrReportObligation` |
+| `site_meter.rs` | `SiteMeter`, `PowerSnapshot`, `DispatchState`, `DeviceSession` |
+
+#### Battery actor (`simulator/actors.rs`)
+
+New `Battery` struct with bidirectional storage physics:
+- `update(dt_s, commanded_kw)` — positive=charge, negative=discharge
+- Hard stops at SoC=0 (min_soc) and SoC=1.0
+- Round-trip efficiency applied on charge path only
+- `BatteryConfig` in `profile.rs` with defaults (10kWh, 5kW, 0.92 efficiency, min_soc=0.10)
+- ven-1 and test profiles now include a battery section
+
+#### Simulator/state extensions
+
+- `SimState` and `SimSnapshot` include `battery: Option<Battery/BatterySnapshot>`
+- `Setpoints` gains `battery_kw: f64 = 0.0` (held by Dispatcher in Stage 4)
+- `AppState` / `InnerState` extended with 5 HEMS fields (all `#[serde(skip)]`)
+- Accessor methods on `AppState` for packets, plan, rates, capacity, obligations
+
+#### Stub routes (backward compat maintained)
+
+- `GET /packets` → `[]` (will be filled by Stage 3 Planner)
+- `GET /plan` → `null` (will be filled by Stage 3 Planner)
+- `GET /rates` → `[]` (will be filled by Stage 2 OpenADR Interface)
+
+#### BDD tests
+
+- `tests/features/ven_entity_model.feature` — 13 scenarios
+- `tests/features/steps/entity_model_steps.py` — generic JSON assertion helpers reusable in later stages
+
+### Why
+
+Foundation for the full HEMS implementation (Stages 2–6). Every later module imports from `entities/` — having clean, compiling types first ensures no rework.
+
+### Issues / Key Learnings
+
+- **`reporter.rs` had a `SimState { ... }` struct literal** used in unit tests — missed adding `battery: None`. Discovered by `cargo test`, fixed quickly. Lesson: always run `cargo test` after adding required fields to structs.
+- **`PowerAdjustability` needs `Steps`** — user correctly noted that `OnOff` only covers binary devices; devices with discrete power levels (3-speed pumps, step-controlled chargers) need `Steps` with a `step_values_kw: Vec<f64>` in `AssetPowerAdjustability`. Added as a distinct variant between `OnOff` and `Continuous`.
+- **Stashed local change on Pi** — Pi had a stale local modification to `ven-1.yaml` from a previous session. Used `git stash` before pull.
