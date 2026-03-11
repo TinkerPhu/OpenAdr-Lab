@@ -2087,3 +2087,57 @@ Implemented Stage 3: the VEN HEMS planner — an 8-phase greedy scheduler that p
 ### Stage 3 Final Status
 
 **30 scenarios, 162 steps — all passing** across `ven_entity_model.feature`, `ven_rate_system.feature`, `ven_planner.feature`, `ven_simulator.feature`.
+
+---
+
+## Phase 22: Stage 6 BDD Test Suite — Full Green (27 features, 123 scenarios, 801 steps)
+
+**Status: COMPLETE**
+
+Fixed all failing BDD scenarios after the Stage 6 UC test suite run revealed 17 failures caused by cascading test contamination.
+
+### Root Causes Found
+
+#### 1. IMPORT_CAPACITY_LIMIT default value = 0.0 (critical)
+
+`_build_intervals("IMPORT_CAPACITY_LIMIT", count=1)` in `use_case_steps.py` fell through to the generic `values: [0.0]` fallback. A 0.0 kW import cap means "no grid import" — `parse_capacity_state()` picks the global minimum across all visible events, so any single 0.0 event contaminates every test that reads `/capacity`. UC-04 created such an event in an open program; VEN-1 saw it and all subsequent EV/battery scenarios failed.
+
+**Fix**: Default to `10000.0` for IMPORT_CAPACITY_LIMIT and EXPORT_CAPACITY_LIMIT (effectively unconstrained):
+```python
+_CAPACITY_TYPES = {"IMPORT_CAPACITY_LIMIT", "EXPORT_CAPACITY_LIMIT"}
+default = 10000.0 if ptype in _CAPACITY_TYPES else 0.0
+```
+
+#### 2. Stale VTN events leaking across scenarios
+
+Events created in one scenario (rate system, capacity, use-case events) persisted for all subsequent scenarios because the ephemeral DB only resets between full runs, not between behave scenarios.
+
+**Fix**: Added `_cleanup_vtn_events(context)` in `environment.py` `after_scenario`. It deletes all events tracked in `context.rate_event_id`, `context.planner_event_id`, `context.created_event`, and `context.uc_events` via authenticated VTN DELETE calls.
+
+#### 3. PV nighttime failure (UC-03, UC-12c)
+
+PV model is `sin(π*(hour-6)/12)` for 6am-6pm, 0 otherwise. Tests checking for "pv" in the ledger always fail at night. `POST /sim/override` replaces the **entire** override state (not a patch), so any override that doesn't include `pv_irradiance` clears any previously set value.
+
+**Fix**: Added `When I POST a sim override with full PV irradiance` step (sets `pv_irradiance: 1.0`) to UC-03 and UC-12c explicitly.
+
+#### 4. Battery never in ledger (UC-11c)
+
+Battery only appears in `/ledger` when `bat.current_kw.abs() > 1e-6`. The planner only allocates battery for arbitrage when there is a price spread across slots. With no PRICE events active, all slots have the same price → median equals all prices → no arbitrage condition satisfied → battery stays at 0 kW forever.
+
+**Fix**: Added `battery_force_kw: Option<f64>` to `UserOverrides` in `VEN/src/state.rs` and applied it in `main.rs` like the existing `ev_force_kw` / `heater_force_kw`. Added `When I POST a sim override forcing battery to charge at {kw:f} kW` step. UC-11c now forces 2.0 kW charging to guarantee ledger accumulation.
+
+#### 5. behave `{:f}` does not match bare integers
+
+Step text `"at 2 kW"` doesn't match `{kw:f}` — must use `"at 2.0 kW"`.
+
+### Key Learnings
+
+- `POST /sim/override` is a **full replace**, not a patch. Every scenario that needs a specific override must set it explicitly, even if a prior scenario already set it.
+- `--build` is **always required** when any file baked into the test-runner Docker image changes (`.feature`, `steps/`, `helpers/`, Rust source). Without it, the old image silently runs with old code.
+- When `parse_capacity_state` returns a minimum, a single incorrectly-valued event can block the entire site.
+
+### Final Test Status
+
+**27 features passed, 0 failed — 123 scenarios, 801 steps — all green**
+
+Commits: `2bc0a1c` → `b461b88` → `932cfe6` → `c864e75`
