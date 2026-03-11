@@ -11,9 +11,14 @@ def step_create_program_save_id(context, name):
         context.vtn_token,
         json={"programName": name, "intervalPeriod": None, "programDescriptions": None},
     )
+    if r.status_code == 409:
+        programs = vtn_get("/programs", context.vtn_token).json()
+        match = [p for p in programs if p.get("programName") == name]
+        assert match, f"409 but program '{name}' not found in GET /programs"
+        context.saved_program_id = match[0]["id"]
+        return
     r.raise_for_status()
-    body = r.json()
-    context.saved_program_id = body["id"]
+    context.saved_program_id = r.json()["id"]
 
 
 @when("I create an event for the saved program")
