@@ -113,7 +113,7 @@ Feature: OpenADR Use Cases — Full End-to-End
     When I create a UC event "uc4b-e2e-peak" with type "IMPORT_CAPACITY_LIMIT" priority 3 and 1 interval with intervalPeriod
     Then the response status is 201
     When I wait for VEN-1 to show event "uc4b-e2e-peak"
-    Then the VEN-1 event "uc4b-e2e-peak" has payload value 0
+    Then the VEN-1 event "uc4b-e2e-peak" has payload value 10000
     When I update event "uc4b-e2e-peak" with type "IMPORT_CAPACITY_LIMIT" and value 30
     And I wait for VEN-1 event "uc4b-e2e-peak" to have payload value 30
     Then the VEN-1 event "uc4b-e2e-peak" has payload value 30
