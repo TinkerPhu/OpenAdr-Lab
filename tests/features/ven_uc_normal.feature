@@ -54,7 +54,8 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
   # Observable: PV energy accumulates in the ledger; battery SoC rises over time.
 
   Scenario: UC-03 — PV surplus accumulates in the asset ledger
-    When I wait for the VEN /plan endpoint to return a plan
+    When I POST a sim override with full PV irradiance
+    And I wait for the VEN /plan endpoint to return a plan
     And I wait 5 seconds
     And I GET /ledger from the VEN
     Then the response status is 200
