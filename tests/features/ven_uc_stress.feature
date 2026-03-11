@@ -53,7 +53,8 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
     Then the plan has field "warnings"
 
   Scenario: UC-12c — Ledger accumulates energy for all active assets concurrently
-    When I wait for the VEN /plan to have an EV allocation in firm_slots
+    When I POST a sim override with full PV irradiance
+    And I wait for the VEN /plan to have an EV allocation in firm_slots
     And I wait 5 seconds
     And I GET /ledger from the VEN
     Then the response status is 200
