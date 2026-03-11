@@ -129,6 +129,14 @@ def step_sim_override_pv_full(context):
     context.last_response = r
 
 
+@when("I POST a sim override forcing battery to charge at {kw:f} kW")
+def step_sim_override_battery_charge(context, kw):
+    """Force battery charging at kw to guarantee ledger accumulation regardless of plan."""
+    r = ven_post("/sim/override", json={"battery_force_kw": kw})
+    r.raise_for_status()
+    context.last_response = r
+
+
 # ---------------------------------------------------------------------------
 # Then: sim assertions (use last_response_json set by generic "I GET {path} from the VEN")
 # ---------------------------------------------------------------------------

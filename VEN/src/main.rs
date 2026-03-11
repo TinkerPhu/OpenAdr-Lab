@@ -262,6 +262,7 @@ async fn main() -> anyhow::Result<()> {
                     // Owner force-overrides beat everything (including dispatcher)
                     if let Some(kw) = overrides.ev_force_kw       { setpoints.ev_charge_kw   = kw; }
                     if let Some(kw) = overrides.heater_force_kw   { setpoints.heater_kw       = kw; }
+                    if let Some(kw) = overrides.battery_force_kw  { setpoints.battery_kw      = kw; }
                     if let Some(limit) = overrides.pv_force_export_limit_kw { setpoints.pv_export_limit_kw = Some(limit); }
 
                     // Simulator: apply setpoints → update device states
