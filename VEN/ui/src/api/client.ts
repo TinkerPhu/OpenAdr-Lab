@@ -160,9 +160,9 @@ export class VenApi {
     return r.json();
   }
 
-  async requests(): Promise<UserRequest[]> {
+  async userRequests(): Promise<UserRequest[]> {
     const r = await this.getReq("/user-requests");
-    if (!r.ok) throw new Error(`requests ${r.status}`);
+    if (!r.ok) throw new Error(`user-requests ${r.status}`);
     return r.json();
   }
 
