@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useVenContext } from "../App";
-import type { SensorSnapshot, UserOverrides } from "./types";
+import type { SensorSnapshot, UserOverrides, CreateUserRequestBody } from "./types";
 
 export function useHealth() {
   const { api } = useVenContext();
@@ -180,5 +180,29 @@ export function useRequests() {
     queryKey: ["requests", api.baseUrl],
     queryFn: () => api.requests(),
     refetchInterval: 10_000,
+  });
+}
+
+export function usePostRequest() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateUserRequestBody) => api.postRequest(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["requests"] });
+      queryClient.invalidateQueries({ queryKey: ["packets"] });
+      queryClient.invalidateQueries({ queryKey: ["plan"] });
+    },
+  });
+}
+
+export function useDeleteRequest() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteRequest(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["requests"] });
+    },
   });
 }

@@ -237,6 +237,8 @@ export type UserRequest = {
   asset_id: string;
   target_energy_kwh: number;
   target_soc: number | null;
+  desired_power_kw: number;
+  completion_policy: string;
   deadlines: Array<{
     latest_end: string;
     max_total_cost_eur: number | null;
@@ -247,6 +249,22 @@ export type UserRequest = {
   estimated_cost_eur: number;
   estimated_co2_g: number;
   created_at: string;
+  updated_at: string;
+};
+
+export type CreateUserRequestBody = {
+  asset_id: string;
+  target_soc: number | null;
+  target_energy_kwh: number | null;
+  desired_power_kw: number | null;
+  completion_policy: string | null;
+  deadlines: Array<{
+    latest_end: string;
+    max_total_cost_eur: number | null;
+    max_marginal_rate_eur_kwh: number | null;
+    min_completion: number | null;
+  }>;
+  comfort_rates: null;
 };
 
 export type FlexibilityEnvelope = {
