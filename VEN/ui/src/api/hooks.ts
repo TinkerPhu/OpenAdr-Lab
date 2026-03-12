@@ -178,7 +178,7 @@ export function useRequests() {
   const { api } = useVenContext();
   return useQuery({
     queryKey: ["user_requests", api.baseUrl],
-    queryFn: () => api.requests(),
+    queryFn: () => api.userRequests(),
     refetchInterval: 10_000,
   });
 }
