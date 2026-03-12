@@ -49,7 +49,7 @@ function statusColor(
 
 // ── Create Dialog ─────────────────────────────────────────────────────────────
 
-function CreateRequestDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function CreateUserRequestDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const postMut = usePostRequest();
 
   const [assetId, setAssetId] = useState("");
@@ -98,7 +98,7 @@ function CreateRequestDialog({ open, onClose }: { open: boolean; onClose: () => 
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>New Request</DialogTitle>
+      <DialogTitle>New User Request</DialogTitle>
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
           {error && <Alert severity="error">{error}</Alert>}
@@ -190,23 +190,23 @@ function CreateRequestDialog({ open, onClose }: { open: boolean; onClose: () => 
   );
 }
 
-// ── Delete Confirm Dialog ─────────────────────────────────────────────────────
+// ── Cancel Confirm Dialog ─────────────────────────────────────────────────────
 
-function DeleteConfirmDialog({
-  request,
+function CancelUserRequestDialog({
+  userRequest,
   onClose,
 }: {
-  request: UserRequest | null;
+  userRequest: UserRequest | null;
   onClose: () => void;
 }) {
   const deleteMut = useDeleteRequest();
   const [error, setError] = useState<string | null>(null);
 
   async function handleConfirm() {
-    if (!request) return;
+    if (!userRequest) return;
     setError(null);
     try {
-      await deleteMut.mutateAsync(request.id);
+      await deleteMut.mutateAsync(userRequest.id);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -214,18 +214,18 @@ function DeleteConfirmDialog({
   }
 
   return (
-    <Dialog open={!!request} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Cancel Request</DialogTitle>
+    <Dialog open={!!userRequest} onClose={onClose} maxWidth="xs" fullWidth>
+      <DialogTitle>Cancel User Request</DialogTitle>
       <DialogContent>
         {error && <Alert severity="error" sx={{ mb: 1 }}>{error}</Alert>}
         <Typography>
-          Cancel request for asset <strong>{request?.asset_id}</strong>? The associated packet will
-          be ABANDONED.
+          Cancel user request for asset <strong>{userRequest?.asset_id}</strong>? The associated
+          packet will be ABANDONED.
         </Typography>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={deleteMut.isPending}>
-          Cancel
+          Close
         </Button>
         <Button
           onClick={handleConfirm}
@@ -234,7 +234,7 @@ function DeleteConfirmDialog({
           disabled={deleteMut.isPending}
           startIcon={deleteMut.isPending ? <CircularProgress size={14} /> : undefined}
         >
-          Confirm Delete
+          Confirm Cancel
         </Button>
       </DialogActions>
     </Dialog>
@@ -243,24 +243,24 @@ function DeleteConfirmDialog({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-export function RequestsPage() {
-  const { data: requests, isLoading, isError, error } = useRequests();
+export function UserRequestsPage() {
+  const { data: userRequests, isLoading, isError, error } = useRequests();
   const [createOpen, setCreateOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<UserRequest | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<UserRequest | null>(null);
 
   return (
     <Box>
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
-        <Typography variant="h5">Requests</Typography>
+        <Typography variant="h5">User Requests</Typography>
         <Button variant="contained" onClick={() => setCreateOpen(true)}>
-          New Request
+          New User Request
         </Button>
       </Box>
 
       {isLoading && <CircularProgress />}
       {isError && <Alert severity="error">{String(error)}</Alert>}
 
-      {requests && (
+      {userRequests && (
         <TableContainer component={Paper}>
           <Table size="small">
             <TableHead>
@@ -277,14 +277,14 @@ export function RequestsPage() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {requests.length === 0 && (
+              {userRequests.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={9} align="center" sx={{ color: "text.secondary" }}>
-                    No requests yet
+                    No user requests yet
                   </TableCell>
                 </TableRow>
               )}
-              {requests.map((req) => {
+              {userRequests.map((req) => {
                 const firstDeadline = req.deadlines?.[0];
                 const target =
                   req.target_soc != null
@@ -324,11 +324,11 @@ export function RequestsPage() {
                       {new Date(req.created_at).toLocaleString()}
                     </TableCell>
                     <TableCell padding="none">
-                      <Tooltip title="Cancel request">
+                      <Tooltip title="Cancel user request">
                         <span>
                           <IconButton
                             size="small"
-                            onClick={() => setDeleteTarget(req)}
+                            onClick={() => setCancelTarget(req)}
                             disabled={req.status !== "ACTIVE"}
                           >
                             <DeleteIcon fontSize="small" />
@@ -344,8 +344,8 @@ export function RequestsPage() {
         </TableContainer>
       )}
 
-      <CreateRequestDialog open={createOpen} onClose={() => setCreateOpen(false)} />
-      <DeleteConfirmDialog request={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      <CreateUserRequestDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      <CancelUserRequestDialog userRequest={cancelTarget} onClose={() => setCancelTarget(null)} />
     </Box>
   );
 }

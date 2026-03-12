@@ -25,7 +25,7 @@ def step_post_user_request(context, asset_id, soc, hours):
         ],
         "completion_policy": "STOP",
     }
-    r = ven_post("/requests", json=payload)
+    r = ven_post("/user-requests", json=payload)
     context.last_response = r
     try:
         context.last_response_json = r.json()
@@ -52,7 +52,7 @@ def step_post_user_request_with_budget(context, asset_id, soc, cost):
         ],
         "completion_policy": "STOP",
     }
-    r = ven_post("/requests", json=payload)
+    r = ven_post("/user-requests", json=payload)
     context.last_response = r
     try:
         context.last_response_json = r.json()
@@ -76,7 +76,7 @@ def step_post_multi_tier_request(context, asset_id):
         ],
         "completion_policy": "STOP",
     }
-    r = ven_post("/requests", json=payload)
+    r = ven_post("/user-requests", json=payload)
     context.last_response = r
     try:
         context.last_response_json = r.json()
@@ -99,13 +99,13 @@ def step_save_request_id(context):
 def step_delete_user_request(context):
     req_id = context.saved_request_id
     assert req_id, "No saved_request_id in context"
-    r = ven_delete(f"/requests/{req_id}")
+    r = ven_delete(f"/user-requests/{req_id}")
     context.last_response = r
     context.last_response_json = None
 
 
 # ---------------------------------------------------------------------------
-# Then: assertions on /requests and cancellation
+# Then: assertions on /user-requests and cancellation
 # ---------------------------------------------------------------------------
 
 @then("the requests list has at least {count:d} item")
@@ -118,7 +118,7 @@ def step_requests_at_least(context, count):
 
 @then("the cancelled packet is in ABANDONED status")
 def step_cancelled_packet_abandoned(context):
-    """After DELETE /requests/:id, GET /packets and verify the packet is ABANDONED."""
+    """After DELETE /user-requests/:id, GET /packets and verify the packet is ABANDONED."""
     packet_id = getattr(context, "saved_packet_id", None)
     assert packet_id, "No saved_packet_id in context — did 'I save the request ID' run?"
 

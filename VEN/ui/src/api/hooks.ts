@@ -177,7 +177,7 @@ export function useLedger() {
 export function useRequests() {
   const { api } = useVenContext();
   return useQuery({
-    queryKey: ["requests", api.baseUrl],
+    queryKey: ["user_requests", api.baseUrl],
     queryFn: () => api.requests(),
     refetchInterval: 10_000,
   });
@@ -189,7 +189,7 @@ export function usePostRequest() {
   return useMutation({
     mutationFn: (body: CreateUserRequestBody) => api.postRequest(body),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["requests"] });
+      queryClient.invalidateQueries({ queryKey: ["user_requests"] });
       queryClient.invalidateQueries({ queryKey: ["packets"] });
       queryClient.invalidateQueries({ queryKey: ["plan"] });
     },
@@ -202,7 +202,7 @@ export function useDeleteRequest() {
   return useMutation({
     mutationFn: (id: string) => api.deleteRequest(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["requests"] });
+      queryClient.invalidateQueries({ queryKey: ["user_requests"] });
     },
   });
 }
