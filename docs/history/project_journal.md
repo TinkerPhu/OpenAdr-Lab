@@ -2141,3 +2141,45 @@ Step text `"at 2 kW"` doesn't match `{kw:f}` — must use `"at 2.0 kW"`.
 **27 features passed, 0 failed — 123 scenarios, 801 steps — all green**
 
 Commits: `2bc0a1c` → `b461b88` → `932cfe6` → `c864e75`
+
+---
+
+## Phase 23: Controller Dashboard Page
+
+**Status: COMPLETE**
+
+### What was done
+
+Added a new **Controller** page to the VEN web UI at `/controller`, giving a "glass box" view of what the HEMS controller is actually doing.
+
+**Files changed:**
+- `VEN/ui/src/api/types.ts` — added 11 new HEMS types: `RateSnapshot`, `PlannedRates`, `OadrCapacityState`, `PacketStatus`, `PacketAllocation`, `PlanTimeSlot`, `EnergyPacket`, `FirmSummary`, `Plan`, `AssetLedger`, `UserRequest`, `FlexibilityEnvelope`
+- `VEN/ui/src/api/client.ts` — added 7 API methods: `packets()`, `plan()`, `rates()`, `capacity()`, `ledger()`, `requests()`, `flexibility()`
+- `VEN/ui/src/api/hooks.ts` — added 6 hooks: `usePackets`, `usePlan`, `useRates`, `useCapacity`, `useLedger`, `useRequests`
+- `VEN/ui/src/pages/Controller.tsx` — new page (~420 lines) with all sections
+- `VEN/ui/src/App.tsx` — nav button + route for `/controller`
+
+**Page sections:**
+1. **Status bar** — 3 Paper cards: capacity limits (import/export/subscribed), active plan summary (trigger, cost, warnings), packet counts (active/pending/done)
+2. **Power chart** — `ComposedChart` with `syncId="ctrl"`: solid lines for past trace (EV/heater/PV/net), dashed lines for plan allocations per asset type, step lines for import/export capacity limits, red dashed NOW reference line
+3. **Rate chart** — `ComposedChart` with `syncId="ctrl"`: step areas for import/export prices (left Y axis), CO₂ step line (right Y axis), NOW reference line
+4. **Active Packets table** — shows non-terminal packets with inline fill-% progress bar (green ≥80%, orange ≥40%, red <40%), deadline, and estimated cost
+5. **Energy Ledger table** — per-asset import kWh, export kWh, cost €, CO₂ g
+
+**Data strategy:**
+- Past trace: `GET /trace?limit=500` reversed to chronological order
+- Future plan: `firm_slots + flexible_slots` from `GET /plan`
+- Both mapped to numeric `ts` (Unix ms) for chart X axis
+- `buildPowerChartData()` merges past+future into one sorted array; fields are null for the "other" side so recharts creates a clean gap at the NOW line
+- Rate chart from `GET /rates` snapshots
+
+### Key learnings
+
+- When a recharts data point has `null` for a `Line` dataKey, it creates a gap (`connectNulls={false}`). Setting past points' `plan_*` to `null` and future points' `trace_*` to `null` gives a clean visual split at the NOW line without any special logic.
+- `GET /plan` returns JSON `null` when no plan exists yet. The client method must handle `data === null` explicitly before casting.
+- Pi4 may have uncommitted local files that block `git pull`. Use `git stash` before pull in deploy scripts.
+- Docker service name is `ui` (not `ven-ui`) in `VEN/docker-compose.yml`.
+
+### Commit
+
+`dd3cee6`
