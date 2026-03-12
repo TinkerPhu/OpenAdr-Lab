@@ -23,3 +23,21 @@ check for code quality and refactoring possibilities.
 write down all your findings to the test errors around VEN UI simulation tests into ven_ui_simulation_test_issues.md. 
 
 The fix is there. Docker's layer cache is stale — it doesn't see the change to Simulation.tsx. Need to force a rebuild without cache
+
+
+add time provider for simulation: 
+pub trait TimeContext: Clone + Send + Sync + 'static {
+    type Instant: Copy + Ord + Send + 'static;
+
+    fn now(&self) -> Self::Instant;
+    fn sleep_until(&self, deadline: Self::Instant) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+
+    fn pause(&self);
+    fn resume(&self);
+    fn set_rate(&self, rate: f64);
+    fn advance(&self, delta: Duration);
+}
+
+
+how can I test the ven controller in ui?
