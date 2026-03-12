@@ -12,32 +12,33 @@ from features.steps.sim_ui_steps import _delete_all_vtn_events
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _get_or_create_program(token, ven_name="ven-1"):
-    """Return the ID of a program targeting ven_name, creating one if needed."""
+def _get_or_create_program(token):
+    """Return the ID of any available program, creating one if none exist."""
     r = vtn_get("/programs", token)
     r.raise_for_status()
-    for prog in r.json():
-        targets = prog.get("targets") or []
-        for t in targets:
-            if t.get("type") == "VEN_NAME" and ven_name in (t.get("values") or []):
-                return prog["id"]
-    # Create a minimal program targeting this VEN
-    body = {
-        "programName": f"controller-ui-test-{int(time.time())}",
-        "targets": [{"type": "VEN_NAME", "values": [ven_name]}],
-    }
-    r = vtn_post("/programs", token, json=body)
-    r.raise_for_status()
-    return r.json()["id"]
+    progs = r.json()
+    if progs:
+        return progs[0]["id"]
+    # Create a minimal open program (no targets = visible to all VENs)
+    r2 = vtn_post("/programs", token, json={"programName": "test-controller-ui"})
+    if r2.status_code == 409:
+        # Race or leftover — fetch again
+        r3 = vtn_get("/programs", token)
+        r3.raise_for_status()
+        progs3 = r3.json()
+        if progs3:
+            return progs3[0]["id"]
+        raise AssertionError("POST /programs returned 409 but GET /programs is still empty")
+    r2.raise_for_status()
+    return r2.json()["id"]
 
 
-def _create_price_event(token, program_id, import_rate, ven_name="ven-1"):
-    """POST a 2-hour PRICE event targeting ven_name to VTN."""
+def _create_price_event(token, program_id, import_rate):
+    """POST a PRICE event to VTN (open targets = visible to all VENs)."""
     body = {
         "programID": program_id,
         "eventName": f"ctrl-ui-price-{int(time.time())}",
         "priority": 0,
-        "targets": [{"type": "VEN_NAME", "values": [ven_name]}],
         "intervals": [
             {
                 "id": 0,
@@ -97,9 +98,9 @@ def step_ven1_has_plan(context):
 @given("a PRICE event with import rate {rate:f} EUR/kWh is active on VEN-1")
 def step_create_price_event(context, rate):
     """POST a PRICE event to VTN targeting VEN-1 and store its ID for cleanup."""
-    program_id = _get_or_create_program(context.vtn_token, ven_name="ven-1")
+    program_id = _get_or_create_program(context.vtn_token)
     context.saved_program_id = program_id
-    event = _create_price_event(context.vtn_token, program_id, rate, ven_name="ven-1")
+    event = _create_price_event(context.vtn_token, program_id, rate)
     context.created_event_id = event["id"]
 
 
