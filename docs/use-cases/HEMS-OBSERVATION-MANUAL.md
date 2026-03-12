@@ -64,7 +64,11 @@ The **Controller** page is the primary observation surface for all HEMS use case
 3. Navigate to the **Controller** page — you should see seeded packets in the Packets table and a Power chart with trace lines
 4. Open the **Simulation** page in a second tab
 
-For use cases that create energy requests, use the **Requests** page (nav button in the VEN UI). No curl required. The page shows all requests with status chips, lets you submit a new request via a form, and lets you cancel active requests inline.
+For use cases that create energy requests, use the **User Requests** page (nav button in the VEN UI). No curl required:
+- Click **New User Request** — a monospace JSON textarea opens, prefilled with a working EV example (deadline = tomorrow 07:00)
+- Select-all, paste the JSON for the use case, click **Submit**
+- Use **Reset to EV example** if you want to start from the prefill again
+- Cancel an active request with the trash icon → confirm dialog
 
 If you prefer curl (e.g. for scripting or automation), the CLI equivalents are listed in the **CLI Reference** section at the end of this document. Set up shortcuts:
 ```bash
@@ -87,19 +91,29 @@ VEN3=http://Pi4-Server:8213
 
 1. Switch to **VEN1** in the VEN dropdown
 
-2. Navigate to the **User Requests** page and click **New User Request**. Fill in:
-   - **Asset ID**: `ev`
-   - **Target SoC**: `0.8`
-   - **Desired Power (kW)**: `7.0`
-   - **Completion Policy**: `CONTINUE`
-   - **Deadlines** (JSON):
-     ```json
-     [{"latest_end": "2026-03-13T07:00:00+01:00", "max_total_cost_eur": 3.00, "max_marginal_rate_eur_kwh": 0.30, "min_completion": null}]
-     ```
-     Replace the date with tomorrow's 07:00 in your timezone.
-   - Click **Submit**
+2. Navigate to the **User Requests** page → **New User Request**. Paste this JSON (the dialog is prefilled with a similar example — select-all and replace):
 
-   The new row appears immediately in the Requests table with status **ACTIVE**.
+```json
+{
+  "asset_id": "ev",
+  "target_soc": 0.80,
+  "target_energy_kwh": null,
+  "desired_power_kw": 7.0,
+  "completion_policy": "CONTINUE",
+  "deadlines": [
+    {
+      "latest_end": "TOMORROW_07:00:00Z",
+      "max_total_cost_eur": 3.00,
+      "max_marginal_rate_eur_kwh": 0.30,
+      "min_completion": 0.8
+    }
+  ],
+  "comfort_rates": null
+}
+```
+Replace `TOMORROW_07:00:00Z` with tomorrow's 07:00 in ISO 8601 (e.g. `2026-03-13T07:00:00+01:00`). The prefilled example already has tomorrow 07:00 — you can also just edit `max_marginal_rate_eur_kwh` to `0.30` in the existing prefill instead of replacing the whole block.
+
+Click **Submit**. The new row appears in the User Requests table with status **ACTIVE**.
 
 ### What to observe
 
@@ -142,17 +156,27 @@ The VEN processes the new packet within one planning cycle (~20 seconds). The of
 
 1. Switch to **VEN1**
 2. On the **Simulation** page, enable **Manual Irradiance** at 80% to simulate strong PV production
-3. Navigate to the **User Requests** page and click **New User Request**. Fill in:
-   - **Asset ID**: `ev`
-   - **Target Energy (kWh)**: `2.0`
-   - **Desired Power (kW)**: `7.0`
-   - **Completion Policy**: `STOP`
-   - **Deadlines** (JSON):
-     ```json
-     [{"latest_end": "2026-03-12T14:00:00+01:00", "max_total_cost_eur": 2.00, "min_completion": null, "max_marginal_rate_eur_kwh": null}]
-     ```
-     Replace the date with today's 14:00 in your timezone.
-   - Click **Submit**
+3. Navigate to the **User Requests** page → **New User Request**. Paste this JSON:
+
+```json
+{
+  "asset_id": "ev",
+  "target_soc": null,
+  "target_energy_kwh": 2.0,
+  "desired_power_kw": 7.0,
+  "completion_policy": "STOP",
+  "deadlines": [
+    {
+      "latest_end": "TODAY_14:00:00+01:00",
+      "max_total_cost_eur": 2.00,
+      "max_marginal_rate_eur_kwh": null,
+      "min_completion": null
+    }
+  ],
+  "comfort_rates": null
+}
+```
+Replace `TODAY_14:00:00+01:00` with today's 14:00 in ISO 8601 (e.g. `2026-03-12T14:00:00+01:00`). Click **Submit**.
 
 ### What to observe
 
@@ -443,20 +467,33 @@ The `accumulated_cost_eur` in the Ledger carries over across the disconnect — 
 
 ### Setup
 
-Navigate to the **User Requests** page and click **New User Request**. Fill in:
-- **Asset ID**: `ev`
-- **Target SoC**: `0.8`
-- **Desired Power (kW)**: `7.0`
-- **Completion Policy**: `CONTINUE`
-- **Deadlines** (JSON — paste the two-tier array):
-  ```json
-  [
-    {"latest_end": "2026-03-12T22:00:00+01:00", "max_total_cost_eur": 5.00, "max_marginal_rate_eur_kwh": 0.50, "min_completion": null},
-    {"latest_end": "2026-03-14T18:00:00+01:00", "max_total_cost_eur": 1.00, "max_marginal_rate_eur_kwh": 0.10, "min_completion": null}
-  ]
-  ```
-  Replace dates with today's 22:00 and this Friday 18:00.
-- Click **Submit**
+Navigate to the **User Requests** page → **New User Request**. Paste this JSON:
+
+```json
+{
+  "asset_id": "ev",
+  "target_soc": 0.80,
+  "target_energy_kwh": null,
+  "desired_power_kw": 7.0,
+  "completion_policy": "CONTINUE",
+  "deadlines": [
+    {
+      "latest_end": "TODAY_22:00:00+01:00",
+      "max_total_cost_eur": 5.00,
+      "max_marginal_rate_eur_kwh": 0.50,
+      "min_completion": null
+    },
+    {
+      "latest_end": "FRIDAY_18:00:00+01:00",
+      "max_total_cost_eur": 1.00,
+      "max_marginal_rate_eur_kwh": 0.10,
+      "min_completion": null
+    }
+  ],
+  "comfort_rates": null
+}
+```
+Replace `TODAY_22:00:00+01:00` with tonight's 22:00 and `FRIDAY_18:00:00+01:00` with this Friday's 18:00 in ISO 8601. Click **Submit**.
 
 For Tier 0 to fail by time: run this in the afternoon when fewer than ~4.3h of off-peak remain before 22:00.
 For Tier 1 to fail by budget: the €0.10 max marginal rate is below all available rates (off-peak is €0.12+), so it will always fail.
@@ -474,11 +511,11 @@ For Tier 1 to fail by budget: the €0.10 max marginal rate is below all availab
 **Controller → Status bar, Plan card:**
 - Warning count > 0
 
-To inspect warning details: `GET http://Pi4-Server:8211/plan` — the `warnings` array in the JSON contains the message text (`"EV can only reach ~X% of target by tonight"` etc.). The **Requests** page also shows the stalled request with status `ACTIVE` and estimated cost at or near €0.
+To inspect warning details: `GET http://Pi4-Server:8211/plan` — the `warnings` array in the JSON contains the message text (`"EV can only reach ~X% of target by tonight"` etc.). The **User Requests** page also shows the stalled request with status `ACTIVE` and estimated cost at or near €0.
 
 ### Repairing the situation
 
-On the **User Requests** page, find the stalled user request and click the **delete (trash) icon** → confirm in the dialog. Then submit a new user request with the second deadline budget raised to €4.00 (use the **New User Request** form, same fields but `max_total_cost_eur: 4.00` on Tier 1).
+On the **User Requests** page, find the stalled user request and click the **delete (trash) icon** → confirm. Then open **New User Request** and paste the same JSON as above, with `max_total_cost_eur` on Tier 1 changed from `1.00` to `4.00`.
 
 ---
 
