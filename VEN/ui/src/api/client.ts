@@ -1,4 +1,7 @@
-import type { VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry, UserOverrides } from "./types";
+import type {
+  VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry, UserOverrides,
+  PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger, UserRequest, FlexibilityEnvelope,
+} from "./types";
 
 let reqCounter = 0;
 function requestId(): string {
@@ -122,5 +125,49 @@ export class VenApi {
     const r = await this.getReq("/metrics");
     if (!r.ok) throw new Error(`metrics ${r.status}`);
     return r.text();
+  }
+
+  async packets(): Promise<EnergyPacket[]> {
+    const r = await this.getReq("/packets");
+    if (!r.ok) throw new Error(`packets ${r.status}`);
+    return r.json();
+  }
+
+  async plan(): Promise<Plan | null> {
+    const r = await this.getReq("/plan");
+    if (!r.ok) throw new Error(`plan ${r.status}`);
+    const data = await r.json();
+    if (data === null) return null;
+    return data as Plan;
+  }
+
+  async rates(): Promise<PlannedRates> {
+    const r = await this.getReq("/rates");
+    if (!r.ok) throw new Error(`rates ${r.status}`);
+    return r.json();
+  }
+
+  async capacity(): Promise<OadrCapacityState> {
+    const r = await this.getReq("/capacity");
+    if (!r.ok) throw new Error(`capacity ${r.status}`);
+    return r.json();
+  }
+
+  async ledger(): Promise<AssetLedger[]> {
+    const r = await this.getReq("/ledger");
+    if (!r.ok) throw new Error(`ledger ${r.status}`);
+    return r.json();
+  }
+
+  async requests(): Promise<UserRequest[]> {
+    const r = await this.getReq("/requests");
+    if (!r.ok) throw new Error(`requests ${r.status}`);
+    return r.json();
+  }
+
+  async flexibility(): Promise<FlexibilityEnvelope[]> {
+    const r = await this.getReq("/flexibility");
+    if (!r.ok) throw new Error(`flexibility ${r.status}`);
+    return r.json();
   }
 }
