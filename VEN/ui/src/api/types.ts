@@ -127,3 +127,136 @@ export type TraceEntry = {
   constraints: string[];
   reason: string;
 };
+
+// ─── HEMS Controller types ────────────────────────────────────────────────────
+
+export type RateSnapshot = {
+  interval_start: string;
+  interval_end: string;
+  import_price_eur_kwh: number | null;
+  export_price_eur_kwh: number | null;
+  co2_g_kwh: number | null;
+  source_event_id: string | null;
+  is_forecast: boolean;
+};
+
+export type PlannedRates = {
+  snapshots: RateSnapshot[];
+};
+
+export type OadrCapacityState = {
+  import_limit_kw: number | null;
+  export_limit_kw: number | null;
+  import_subscription_kw: number | null;
+  import_reservation_kw: number | null;
+  import_limit_event_id: string | null;
+  export_limit_event_id: string | null;
+  last_updated: string | null;
+};
+
+export type PacketStatus =
+  | "PENDING" | "SCHEDULED" | "ACTIVE" | "PAUSED"
+  | "COMPLETED" | "PARTIAL_COMPLETED" | "ABANDONED" | "FAILED";
+
+export type PacketAllocation = {
+  packet_id: string;
+  asset_id: string;
+  power_kw: number;
+  cost_eur: number;
+  co2_g: number;
+};
+
+export type PlanTimeSlot = {
+  slot_index: number;
+  start: string;
+  end: string;
+  slot_type: "FIRM" | "FLEXIBLE";
+  import_price_eur_kwh: number;
+  export_price_eur_kwh: number;
+  co2_g_kwh: number;
+  import_cap_kw: number;
+  export_cap_kw: number;
+  allocations: PacketAllocation[];
+  net_import_kw: number;
+  net_export_kw: number;
+};
+
+export type EnergyPacket = {
+  id: string;
+  asset_id: string;
+  status: PacketStatus;
+  target_energy_kwh: number;
+  target_soc: number | null;
+  desired_power_kw: number;
+  estimated_cost_eur: number;
+  estimated_co2_g: number;
+  estimated_completion: number;
+  accumulated_cost_eur: number;
+  value_curve: {
+    deadline_tiers: Array<{
+      deadline: string;
+      max_total_cost_eur: number | null;
+      min_completion: number;
+    }>;
+    active_tier_index: number;
+  };
+  created_at: string;
+  updated_at: string;
+};
+
+export type FirmSummary = {
+  total_cost_eur: number;
+  total_co2_g: number;
+  total_import_kwh: number;
+  total_export_kwh: number;
+};
+
+export type Plan = {
+  id: string;
+  created_at: string;
+  trigger: string;
+  firm_slots: PlanTimeSlot[];
+  flexible_slots: PlanTimeSlot[];
+  firm_summary: FirmSummary;
+  warnings: Array<{ severity: string; message: string; packet_id: string | null }>;
+};
+
+export type AssetLedger = {
+  asset_id: string;
+  total_consumption_kwh: number;
+  total_production_kwh: number;
+  total_import_cost_eur: number;
+  total_export_revenue_eur: number;
+  total_co2_g: number;
+};
+
+export type UserRequestStatus = "ACTIVE" | "COMPLETED" | "CANCELLED" | "FAILED";
+
+export type UserRequest = {
+  id: string;
+  asset_id: string;
+  target_energy_kwh: number;
+  target_soc: number | null;
+  deadlines: Array<{
+    latest_end: string;
+    max_total_cost_eur: number | null;
+    min_completion: number;
+  }>;
+  packet_id: string;
+  status: UserRequestStatus;
+  estimated_cost_eur: number;
+  estimated_co2_g: number;
+  created_at: string;
+};
+
+export type FlexibilityEnvelope = {
+  packet_id: string;
+  asset_id: string;
+  energy_needed_kwh: number;
+  power_min_kw: number;
+  power_max_kw: number;
+  window_start: string;
+  window_end: string;
+  max_acceptable_rate: number;
+  estimated_cost_eur: number;
+};

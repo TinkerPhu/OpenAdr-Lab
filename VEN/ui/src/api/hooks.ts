@@ -128,3 +128,57 @@ export function useMetrics() {
     refetchInterval: 10_000,
   });
 }
+
+export function usePackets() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["packets", api.baseUrl],
+    queryFn: () => api.packets(),
+    refetchInterval: 10_000,
+  });
+}
+
+export function usePlan() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["plan", api.baseUrl],
+    queryFn: () => api.plan(),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useRates() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["rates", api.baseUrl],
+    queryFn: () => api.rates(),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useCapacity() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["capacity", api.baseUrl],
+    queryFn: () => api.capacity(),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useLedger() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["ledger", api.baseUrl],
+    queryFn: () => api.ledger(),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useRequests() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["requests", api.baseUrl],
+    queryFn: () => api.requests(),
+    refetchInterval: 10_000,
+  });
+}
