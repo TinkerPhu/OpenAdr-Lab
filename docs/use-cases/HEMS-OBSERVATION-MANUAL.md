@@ -12,12 +12,13 @@ This manual shows how to observe all 14 HEMS controller use cases from `docs/VEN
 | Page | What it shows |
 |---|---|
 | **Controller** | Power chart (history + plan), Rate chart, Packets table (fill%), Ledger, Status bar |
+| **Requests** | User requests table with status chips; form to create new requests; inline cancel |
 | **Simulation** | Device state cards (EV SoC, Heater temp, PV output), Setpoints chart, Override sliders |
 | **Trace** | Per-tick decision log: mode, FSM state, active events, setpoints, constraints |
 | **Events** | Raw OpenADR events polled from VTN |
 | **Dashboard** | Latest sensor snapshot |
 
-The **Controller** page is the primary observation surface for all HEMS use cases. Open it in one browser tab and keep the **Simulation** page open in another.
+The **Controller** page is the primary observation surface for all HEMS use cases. Open it in one browser tab and keep the **Simulation** page open in another. Use the **Requests** page to submit and cancel energy requests without curl.
 
 ---
 
@@ -35,15 +36,15 @@ The **Controller** page is the primary observation surface for all HEMS use case
 
 | UC | Observable? | Key trigger | Primary page |
 |---|---|---|---|
-| UC-01 EV Overnight Charge | ✅ Full (+ API call) | `POST /requests` | Controller: Packets + Power chart |
-| UC-02 Washing Machine Batch | ⚠️ Concept only — no washing machine in profiles | `POST /requests` (EV as proxy) | Controller: Packets |
+| UC-01 EV Overnight Charge | ✅ Full | Requests page → New Request | Controller: Packets + Power chart |
+| UC-02 Washing Machine Batch | ⚠️ Concept only — no washing machine in profiles | Requests page → New Request (EV as proxy) | Controller: Packets |
 | UC-03 PV Surplus Cascade | ✅ Full | Use VEN1, sunny sim time | Controller: Power chart |
 | UC-04 Day-Ahead Price Update | ✅ Full | VTN PRICE event | Controller: Rate chart |
 | UC-05 Favorable Far-Horizon | ✅ Full | VTN cheap-window PRICE event | Controller: Rate chart + Packets |
 | UC-06 Grid Emergency Alert | ✅ Full | VTN IMPORT_CAPACITY_LIMIT=0 | Simulation setpoints + Trace |
 | UC-07 Capacity Reservation | ⚠️ Partial — VEN→VTN reservation not implemented | VTN IMPORT_CAPACITY_LIMIT | Controller: Capacity card |
 | UC-08 EV Disconnects Mid-Charge | ✅ Full | Simulation: unplug EV toggle | Controller: Packets (PAUSED) |
-| UC-09 Tier Fallback | ✅ Full (+ API call) | `POST /requests` (tight budget) | Controller: Plan card warnings |
+| UC-09 Tier Fallback | ✅ Full | Requests page → New Request (tight budget) | Controller: Plan card warnings |
 | UC-10 Peak Demand Penalty | ⚠️ Partial — no penalty rule UI | Simulation: raise base_load_w | Controller: Power chart (EV steps down) |
 | UC-11 Consumption-Only Site | ✅ Full | Use VEN2 or zero PV irradiance | Controller: Power chart (no PV negative) |
 | UC-12 VTN Communication Loss | ⚠️ Partial — requires terminal step | `ssh` stop VTN container | Controller: Plan card warnings |
@@ -51,7 +52,7 @@ The **Controller** page is the primary observation surface for all HEMS use case
 | UC-14 Thermal Feedback Loop | ✅ Full | Simulation: ambient_temp_c slider | Simulation HeaterCard + Controller |
 
 > **Two cases not fully observable:**
-> - **UC-02**: No washing machine in any VEN profile. You can create a packet for a `"washer"` asset via the API, but the simulator won't execute it. Use the EV to observe the same planning behavior (deferral to cheap window).
+> - **UC-02**: No washing machine in any VEN profile. You can create a packet for a `"washer"` asset via the Requests page, but the simulator won't execute it. Use the EV to observe the same planning behavior (deferral to cheap window).
 > - **UC-07**: The VEN proactively requesting additional capacity from the VTN is not yet implemented. Only the opposite direction (VTN sending a capacity limit) is observable. The Capacity card in the Controller status bar shows any active limit.
 
 ---
@@ -63,7 +64,9 @@ The **Controller** page is the primary observation surface for all HEMS use case
 3. Navigate to the **Controller** page — you should see seeded packets in the Packets table and a Power chart with trace lines
 4. Open the **Simulation** page in a second tab
 
-For use cases requiring API calls, set up a token shortcut in your terminal:
+For use cases that create energy requests, use the **Requests** page (nav button in the VEN UI). No curl required. The page shows all requests with status chips, lets you submit a new request via a form, and lets you cancel active requests inline.
+
+If you prefer curl (e.g. for scripting or automation), the CLI equivalents are listed in the **CLI Reference** section at the end of this document. Set up shortcuts:
 ```bash
 VEN1=http://Pi4-Server:8211
 VEN2=http://Pi4-Server:8212
@@ -84,25 +87,19 @@ VEN3=http://Pi4-Server:8213
 
 1. Switch to **VEN1** in the VEN dropdown
 
-2. Submit an EV charge request (terminal):
-```bash
-curl -s -X POST $VEN1/requests \
-  -H "Content-Type: application/json" \
-  -d '{
-    "asset_id": "ev",
-    "target_soc": 0.80,
-    "desired_power_kw": 7.0,
-    "deadlines": [
-      {
-        "latest_end": "TOMORROW_07:00+01:00",
-        "max_total_cost_eur": 3.00,
-        "max_marginal_rate_eur_kwh": 0.30
-      }
-    ],
-    "completion_policy": "CONTINUE"
-  }' | python3 -m json.tool
-```
-Replace `TOMORROW_07:00+01:00` with tomorrow's 07:00 in your timezone (e.g. `2026-03-13T07:00:00+01:00`).
+2. Navigate to the **Requests** page and click **New Request**. Fill in:
+   - **Asset ID**: `ev`
+   - **Target SoC**: `0.8`
+   - **Desired Power (kW)**: `7.0`
+   - **Completion Policy**: `CONTINUE`
+   - **Deadlines** (JSON):
+     ```json
+     [{"latest_end": "2026-03-13T07:00:00+01:00", "max_total_cost_eur": 3.00, "max_marginal_rate_eur_kwh": 0.30, "min_completion": null}]
+     ```
+     Replace the date with tomorrow's 07:00 in your timezone.
+   - Click **Submit**
+
+   The new row appears immediately in the Requests table with status **ACTIVE**.
 
 ### What to observe
 
@@ -145,23 +142,17 @@ The VEN processes the new packet within one planning cycle (~20 seconds). The of
 
 1. Switch to **VEN1**
 2. On the **Simulation** page, enable **Manual Irradiance** at 80% to simulate strong PV production
-3. Post a short EV charge request with a midday deadline:
-```bash
-curl -s -X POST $VEN1/requests \
-  -H "Content-Type: application/json" \
-  -d '{
-    "asset_id": "ev",
-    "target_energy_kwh": 2.0,
-    "desired_power_kw": 7.0,
-    "deadlines": [
-      {
-        "latest_end": "TODAY_14:00+01:00",
-        "max_total_cost_eur": 2.00
-      }
-    ],
-    "completion_policy": "STOP"
-  }' | python3 -m json.tool
-```
+3. Navigate to the **Requests** page and click **New Request**. Fill in:
+   - **Asset ID**: `ev`
+   - **Target Energy (kWh)**: `2.0`
+   - **Desired Power (kW)**: `7.0`
+   - **Completion Policy**: `STOP`
+   - **Deadlines** (JSON):
+     ```json
+     [{"latest_end": "2026-03-12T14:00:00+01:00", "max_total_cost_eur": 2.00, "min_completion": null, "max_marginal_rate_eur_kwh": null}]
+     ```
+     Replace the date with today's 14:00 in your timezone.
+   - Click **Submit**
 
 ### What to observe
 
@@ -452,29 +443,20 @@ The `accumulated_cost_eur` in the Ledger carries over across the disconnect — 
 
 ### Setup
 
-```bash
-curl -s -X POST $VEN1/requests \
-  -H "Content-Type: application/json" \
-  -d '{
-    "asset_id": "ev",
-    "target_soc": 0.80,
-    "desired_power_kw": 7.0,
-    "deadlines": [
-      {
-        "latest_end": "TODAY_22:00+01:00",
-        "max_total_cost_eur": 5.00,
-        "max_marginal_rate_eur_kwh": 0.50
-      },
-      {
-        "latest_end": "FRIDAY_18:00+01:00",
-        "max_total_cost_eur": 1.00,
-        "max_marginal_rate_eur_kwh": 0.10
-      }
-    ],
-    "completion_policy": "CONTINUE"
-  }' | python3 -m json.tool
-```
-Replace dates with today's 22:00 and this Friday 18:00.
+Navigate to the **Requests** page and click **New Request**. Fill in:
+- **Asset ID**: `ev`
+- **Target SoC**: `0.8`
+- **Desired Power (kW)**: `7.0`
+- **Completion Policy**: `CONTINUE`
+- **Deadlines** (JSON — paste the two-tier array):
+  ```json
+  [
+    {"latest_end": "2026-03-12T22:00:00+01:00", "max_total_cost_eur": 5.00, "max_marginal_rate_eur_kwh": 0.50, "min_completion": null},
+    {"latest_end": "2026-03-14T18:00:00+01:00", "max_total_cost_eur": 1.00, "max_marginal_rate_eur_kwh": 0.10, "min_completion": null}
+  ]
+  ```
+  Replace dates with today's 22:00 and this Friday 18:00.
+- Click **Submit**
 
 For Tier 0 to fail by time: run this in the afternoon when fewer than ~4.3h of off-peak remain before 22:00.
 For Tier 1 to fail by budget: the €0.10 max marginal rate is below all available rates (off-peak is €0.12+), so it will always fail.
@@ -492,15 +474,11 @@ For Tier 1 to fail by budget: the €0.10 max marginal rate is below all availab
 **Controller → Status bar, Plan card:**
 - Warning count > 0
 
-To inspect warning details: `GET http://Pi4-Server:8211/plan` — the `warnings` array in the JSON contains the message text (`"EV can only reach ~X% of target by tonight"` etc.).
+To inspect warning details: `GET http://Pi4-Server:8211/plan` — the `warnings` array in the JSON contains the message text (`"EV can only reach ~X% of target by tonight"` etc.). The **Requests** page also shows the stalled request with status `ACTIVE` and estimated cost at or near €0.
 
 ### Repairing the situation
-Edit the second deadline budget upward to €4.00:
-```bash
-# Delete the old request first, then re-create with corrected budgets
-curl -s -X DELETE $VEN1/requests/<REQUEST_ID>
-# Then re-POST with max_total_cost_eur: 4.00 on Tier 1
-```
+
+On the **Requests** page, find the stalled request and click the **delete (trash) icon** → confirm in the dialog. Then submit a new request with the second deadline budget raised to €4.00 (use the **New Request** form, same fields but `max_total_cost_eur: 4.00` on Tier 1).
 
 ---
 
@@ -720,7 +698,7 @@ The feedback loop is: ambient drops → heat loss rate increases → thermal mod
 
 ## CLI Reference: POST /requests
 
-The `/requests` endpoint is the main API for UC-01, UC-09, and the UC-02 proxy. No UI form exists in the VEN web interface.
+The **Requests** page (http://Pi4-Server:8214/requests) is the primary way to submit and cancel requests. The curl commands below are provided as alternatives for scripting, automation, or quick access without opening a browser.
 
 ### EV charge to target SoC
 
@@ -780,10 +758,13 @@ curl -s http://Pi4-Server:8211/flexibility | python3 -m json.tool
 
 ---
 
-## Quick Reference: What Each Controller Section Shows
+## Quick Reference: What Each UI Section Shows
 
 | Section | UC-relevance |
 |---|---|
+| **Requests page → New Request form** | UC-01 (EV overnight), UC-02 (batch proxy), UC-09 (tier fallback) — submit requests |
+| **Requests page → status chips** | All request UCs — see ACTIVE / COMPLETED / CANCELLED / FAILED at a glance |
+| **Requests page → delete button** | UC-09 (cancel stalled request and re-submit with corrected budgets) |
 | **Status bar → Capacity card** | UC-07 (capacity limit from VTN), UC-06 (emergency) |
 | **Status bar → Plan card** | UC-04/05 (trigger: RATE_CHANGE), UC-09 (warning count), UC-12 (stale rate warning) |
 | **Status bar → Packets card** | All UCs with packets — counts by status |
