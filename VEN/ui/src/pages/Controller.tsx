@@ -167,10 +167,10 @@ function PlanCard({ plan }: { plan: Plan | null | undefined }) {
         <Stack spacing={0.5}>
           <Typography variant="body2">Trigger: {plan.trigger}</Typography>
           <Typography variant="body2">
-            Firm cost: €{plan.firm_summary.total_cost_eur.toFixed(3)}
+            Firm cost: €{plan.firm_summary?.total_cost_eur?.toFixed(3) ?? "—"}
           </Typography>
           <Typography variant="body2">
-            Import: {plan.firm_summary.total_import_kwh.toFixed(2)} kWh
+            Import: {plan.firm_summary?.total_import_kwh?.toFixed(2) ?? "—"} kWh
           </Typography>
           <Stack direction="row" spacing={1} alignItems="center">
             <Typography variant="body2">Warnings:</Typography>
@@ -252,13 +252,13 @@ const timeFmt = (v: number) => new Date(v).toLocaleTimeString();
 function PowerChart({ data, nowTs }: { data: ControllerPowerPoint[]; nowTs: number }) {
   if (data.length === 0) {
     return (
-      <Paper sx={{ p: 2 }}>
+      <Paper sx={{ p: 2 }} data-testid="controller-power-chart-empty">
         <Typography color="text.secondary">No power data yet — waiting for trace…</Typography>
       </Paper>
     );
   }
   return (
-    <Paper sx={{ p: 2 }}>
+    <Paper sx={{ p: 2 }} data-testid="controller-power-chart">
       <Typography variant="subtitle1" fontWeight="bold" mb={1}>
         Power — History (solid) + Plan (dashed) [kW]
       </Typography>
@@ -313,7 +313,7 @@ function PowerChart({ data, nowTs }: { data: ControllerPowerPoint[]; nowTs: numb
 function RateChart({ data, nowTs }: { data: RateChartPoint[]; nowTs: number }) {
   if (data.length === 0) {
     return (
-      <Paper sx={{ p: 2 }}>
+      <Paper sx={{ p: 2 }} data-testid="controller-rate-chart-empty">
         <Typography color="text.secondary">
           No rate data — no active price events
         </Typography>
@@ -321,7 +321,7 @@ function RateChart({ data, nowTs }: { data: RateChartPoint[]; nowTs: number }) {
     );
   }
   return (
-    <Paper sx={{ p: 2 }}>
+    <Paper sx={{ p: 2 }} data-testid="controller-rate-chart">
       <Typography variant="subtitle1" fontWeight="bold" mb={1}>
         Rates — Prices + CO₂
       </Typography>
@@ -415,7 +415,7 @@ function fillBarColor(pct: number): string {
 function PacketsTable({ packets }: { packets: EnergyPacket[] | undefined }) {
   const rows = (packets ?? []).filter((p) => !TERMINAL_STATUSES.has(p.status));
   return (
-    <Paper sx={{ p: 2 }}>
+    <Paper sx={{ p: 2 }} data-testid="controller-packets-table">
       <Typography variant="subtitle1" fontWeight="bold" mb={1}>
         Active Packets
       </Typography>
@@ -493,7 +493,7 @@ function PacketsTable({ packets }: { packets: EnergyPacket[] | undefined }) {
 
 function LedgerTable({ ledger }: { ledger: AssetLedger[] | undefined }) {
   return (
-    <Paper sx={{ p: 2 }}>
+    <Paper sx={{ p: 2 }} data-testid="controller-ledger">
       <Typography variant="subtitle1" fontWeight="bold" mb={1}>
         Energy Ledger
       </Typography>
