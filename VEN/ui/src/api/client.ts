@@ -1,6 +1,7 @@
 import type {
   VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry, UserOverrides,
   PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger, UserRequest, FlexibilityEnvelope,
+  CreateUserRequestBody,
 } from "./types";
 
 let reqCounter = 0;
@@ -169,5 +170,19 @@ export class VenApi {
     const r = await this.getReq("/flexibility");
     if (!r.ok) throw new Error(`flexibility ${r.status}`);
     return r.json();
+  }
+
+  async postRequest(body: CreateUserRequestBody): Promise<UserRequest> {
+    const r = await this.jsonReq("POST", "/requests", body);
+    if (!r.ok) throw new Error((await r.text()) || `POST /requests failed: ${r.status}`);
+    return r.json();
+  }
+
+  async deleteRequest(id: string): Promise<void> {
+    const url = this.url(`/requests/${id}`);
+    console.log(`[VEN] DELETE ${url}`);
+    const r = await fetch(url, { method: "DELETE", headers: { "X-Request-ID": requestId() } });
+    console.log(`[VEN] DELETE ${url} → ${r.status}`);
+    if (!r.ok) throw new Error((await r.text()) || `DELETE /requests/${id} failed: ${r.status}`);
   }
 }
