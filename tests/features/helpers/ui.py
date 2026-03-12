@@ -171,3 +171,7 @@ class VenUi:
     def go_simulation(self):
         self.page.click(tid("nav-simulation"))
         self.page.wait_for_selector(tid("ev-charge-caption"), timeout=15000)
+
+    def go_controller(self):
+        self.page.click(tid("nav-controller"))
+        self.page.wait_for_selector(tid("controller-packets-table"), timeout=15000)
