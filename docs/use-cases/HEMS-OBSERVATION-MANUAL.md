@@ -36,15 +36,15 @@ The **Controller** page is the primary observation surface for all HEMS use case
 
 | UC | Observable? | Key trigger | Primary page |
 |---|---|---|---|
-| UC-01 EV Overnight Charge | ✅ Full | Requests page → New Request | Controller: Packets + Power chart |
-| UC-02 Washing Machine Batch | ⚠️ Concept only — no washing machine in profiles | Requests page → New Request (EV as proxy) | Controller: Packets |
+| UC-01 EV Overnight Charge | ✅ Full | User Requests page → New User Request | Controller: Packets + Power chart |
+| UC-02 Washing Machine Batch | ⚠️ Concept only — no washing machine in profiles | User Requests page → New User Request (EV as proxy) | Controller: Packets |
 | UC-03 PV Surplus Cascade | ✅ Full | Use VEN1, sunny sim time | Controller: Power chart |
 | UC-04 Day-Ahead Price Update | ✅ Full | VTN PRICE event | Controller: Rate chart |
 | UC-05 Favorable Far-Horizon | ✅ Full | VTN cheap-window PRICE event | Controller: Rate chart + Packets |
 | UC-06 Grid Emergency Alert | ✅ Full | VTN IMPORT_CAPACITY_LIMIT=0 | Simulation setpoints + Trace |
 | UC-07 Capacity Reservation | ⚠️ Partial — VEN→VTN reservation not implemented | VTN IMPORT_CAPACITY_LIMIT | Controller: Capacity card |
 | UC-08 EV Disconnects Mid-Charge | ✅ Full | Simulation: unplug EV toggle | Controller: Packets (PAUSED) |
-| UC-09 Tier Fallback | ✅ Full | Requests page → New Request (tight budget) | Controller: Plan card warnings |
+| UC-09 Tier Fallback | ✅ Full | User Requests page → New User Request (tight budget) | Controller: Plan card warnings |
 | UC-10 Peak Demand Penalty | ⚠️ Partial — no penalty rule UI | Simulation: raise base_load_w | Controller: Power chart (EV steps down) |
 | UC-11 Consumption-Only Site | ✅ Full | Use VEN2 or zero PV irradiance | Controller: Power chart (no PV negative) |
 | UC-12 VTN Communication Loss | ⚠️ Partial — requires terminal step | `ssh` stop VTN container | Controller: Plan card warnings |
@@ -52,7 +52,7 @@ The **Controller** page is the primary observation surface for all HEMS use case
 | UC-14 Thermal Feedback Loop | ✅ Full | Simulation: ambient_temp_c slider | Simulation HeaterCard + Controller |
 
 > **Two cases not fully observable:**
-> - **UC-02**: No washing machine in any VEN profile. You can create a packet for a `"washer"` asset via the Requests page, but the simulator won't execute it. Use the EV to observe the same planning behavior (deferral to cheap window).
+> - **UC-02**: No washing machine in any VEN profile. You can create a packet for a `"washer"` asset via the User Requests page, but the simulator won't execute it. Use the EV to observe the same planning behavior (deferral to cheap window).
 > - **UC-07**: The VEN proactively requesting additional capacity from the VTN is not yet implemented. Only the opposite direction (VTN sending a capacity limit) is observable. The Capacity card in the Controller status bar shows any active limit.
 
 ---
@@ -87,7 +87,7 @@ VEN3=http://Pi4-Server:8213
 
 1. Switch to **VEN1** in the VEN dropdown
 
-2. Navigate to the **Requests** page and click **New Request**. Fill in:
+2. Navigate to the **User Requests** page and click **New User Request**. Fill in:
    - **Asset ID**: `ev`
    - **Target SoC**: `0.8`
    - **Desired Power (kW)**: `7.0`
@@ -142,7 +142,7 @@ The VEN processes the new packet within one planning cycle (~20 seconds). The of
 
 1. Switch to **VEN1**
 2. On the **Simulation** page, enable **Manual Irradiance** at 80% to simulate strong PV production
-3. Navigate to the **Requests** page and click **New Request**. Fill in:
+3. Navigate to the **User Requests** page and click **New User Request**. Fill in:
    - **Asset ID**: `ev`
    - **Target Energy (kWh)**: `2.0`
    - **Desired Power (kW)**: `7.0`
@@ -443,7 +443,7 @@ The `accumulated_cost_eur` in the Ledger carries over across the disconnect — 
 
 ### Setup
 
-Navigate to the **Requests** page and click **New Request**. Fill in:
+Navigate to the **User Requests** page and click **New User Request**. Fill in:
 - **Asset ID**: `ev`
 - **Target SoC**: `0.8`
 - **Desired Power (kW)**: `7.0`
@@ -478,7 +478,7 @@ To inspect warning details: `GET http://Pi4-Server:8211/plan` — the `warnings`
 
 ### Repairing the situation
 
-On the **Requests** page, find the stalled request and click the **delete (trash) icon** → confirm in the dialog. Then submit a new request with the second deadline budget raised to €4.00 (use the **New Request** form, same fields but `max_total_cost_eur: 4.00` on Tier 1).
+On the **User Requests** page, find the stalled user request and click the **delete (trash) icon** → confirm in the dialog. Then submit a new user request with the second deadline budget raised to €4.00 (use the **New User Request** form, same fields but `max_total_cost_eur: 4.00` on Tier 1).
 
 ---
 
@@ -696,15 +696,15 @@ The feedback loop is: ambient drops → heat loss rate increases → thermal mod
 
 ---
 
-## CLI Reference: POST /requests
+## CLI Reference: POST /user-requests
 
-The **Requests** page (http://Pi4-Server:8214/requests) is the primary way to submit and cancel requests. The curl commands below are provided as alternatives for scripting, automation, or quick access without opening a browser.
+The **User Requests** page (http://Pi4-Server:8214/user-requests) is the primary way to submit and cancel user requests. The curl commands below are provided as alternatives for scripting, automation, or quick access without opening a browser.
 
 ### EV charge to target SoC
 
 ```bash
 # VEN1: charge EV to 80% by tomorrow 07:00, budget €3
-curl -s -X POST http://Pi4-Server:8211/requests \
+curl -s -X POST http://Pi4-Server:8211/user-requests \
   -H "Content-Type: application/json" \
   -d '{
     "asset_id": "ev",
@@ -718,7 +718,7 @@ curl -s -X POST http://Pi4-Server:8211/requests \
 ### Multi-tier deadline (UC-09)
 
 ```bash
-curl -s -X POST http://Pi4-Server:8211/requests \
+curl -s -X POST http://Pi4-Server:8211/user-requests \
   -H "Content-Type: application/json" \
   -d '{
     "asset_id": "ev",
@@ -735,13 +735,13 @@ curl -s -X POST http://Pi4-Server:8211/requests \
 ### Cancel a request
 
 ```bash
-curl -s -X DELETE http://Pi4-Server:8211/requests/<REQUEST_ID>
+curl -s -X DELETE http://Pi4-Server:8211/user-requests/<REQUEST_ID>
 ```
 
 ### List all requests
 
 ```bash
-curl -s http://Pi4-Server:8211/requests | python3 -m json.tool
+curl -s http://Pi4-Server:8211/user-requests | python3 -m json.tool
 ```
 
 ### View active plan (full JSON including warnings)
@@ -762,9 +762,9 @@ curl -s http://Pi4-Server:8211/flexibility | python3 -m json.tool
 
 | Section | UC-relevance |
 |---|---|
-| **Requests page → New Request form** | UC-01 (EV overnight), UC-02 (batch proxy), UC-09 (tier fallback) — submit requests |
-| **Requests page → status chips** | All request UCs — see ACTIVE / COMPLETED / CANCELLED / FAILED at a glance |
-| **Requests page → delete button** | UC-09 (cancel stalled request and re-submit with corrected budgets) |
+| **User Requests page → New User Request form** | UC-01 (EV overnight), UC-02 (batch proxy), UC-09 (tier fallback) — submit user requests |
+| **User Requests page → status chips** | All user request UCs — see ACTIVE / COMPLETED / CANCELLED / FAILED at a glance |
+| **User Requests page → delete button** | UC-09 (cancel stalled user request and re-submit with corrected budgets) |
 | **Status bar → Capacity card** | UC-07 (capacity limit from VTN), UC-06 (emergency) |
 | **Status bar → Plan card** | UC-04/05 (trigger: RATE_CHANGE), UC-09 (warning count), UC-12 (stale rate warning) |
 | **Status bar → Packets card** | All UCs with packets — counts by status |

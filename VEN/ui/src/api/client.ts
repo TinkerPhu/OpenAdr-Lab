@@ -161,7 +161,7 @@ export class VenApi {
   }
 
   async requests(): Promise<UserRequest[]> {
-    const r = await this.getReq("/requests");
+    const r = await this.getReq("/user-requests");
     if (!r.ok) throw new Error(`requests ${r.status}`);
     return r.json();
   }
@@ -173,16 +173,16 @@ export class VenApi {
   }
 
   async postRequest(body: CreateUserRequestBody): Promise<UserRequest> {
-    const r = await this.jsonReq("POST", "/requests", body);
-    if (!r.ok) throw new Error((await r.text()) || `POST /requests failed: ${r.status}`);
+    const r = await this.jsonReq("POST", "/user-requests", body);
+    if (!r.ok) throw new Error((await r.text()) || `POST /user-requests failed: ${r.status}`);
     return r.json();
   }
 
   async deleteRequest(id: string): Promise<void> {
-    const url = this.url(`/requests/${id}`);
+    const url = this.url(`/user-requests/${id}`);
     console.log(`[VEN] DELETE ${url}`);
     const r = await fetch(url, { method: "DELETE", headers: { "X-Request-ID": requestId() } });
     console.log(`[VEN] DELETE ${url} → ${r.status}`);
-    if (!r.ok) throw new Error((await r.text()) || `DELETE /requests/${id} failed: ${r.status}`);
+    if (!r.ok) throw new Error((await r.text()) || `DELETE /user-requests/${id} failed: ${r.status}`);
   }
 }
