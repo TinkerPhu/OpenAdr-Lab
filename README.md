@@ -62,15 +62,48 @@ ssh Pi4-Server "cd /srv/docker/openadr_lab/VEN && docker compose up -d --build"
 The project includes integration tests (behave/BDD), resilience tests, and E2E browser tests (Playwright), all running in Docker.
 
 ```bash
-# Run all tests locally
-cd tests
-docker compose -f docker-compose.test.yml run --build --rm test-runner
+bash run_all_tests.sh              # run everything
+bash run_all_tests.sh --local      # UI unit tests only (vitest)
+bash run_all_tests.sh --e2e        # E2E behave tests only
+bash run_all_tests.sh --resilience # resilience tests only
+bash run_all_tests.sh --rust       # openleadr-rs cargo tests only
+```
 
-# Run only resilience tests
-docker compose -f docker-compose.test.yml run --build --rm test-runner --tags=@resilience
+Configure the docker host at the top of `run_all_tests.sh`:
+
+```bash
+DOCKER_HOST=""                        # "" = run docker commands locally (no SSH)
+                                      # set to e.g. "Pi4-Server" for a remote host
+DOCKER_DIR="/srv/docker/openadr_lab"  # repo path on the docker host
 ```
 
 Tests also run automatically via GitHub Actions on push to `main`.
+
+## Running on a different Linux Docker host
+
+The project was developed on a Raspberry Pi 4 (ARM64). All images are multi-arch and the application code is architecture-agnostic, so it runs on any Linux Docker host. Three things need to be adjusted:
+
+**1. `run_all_tests.sh`** — set your host and repo path:
+```bash
+DOCKER_HOST=""                        # "" = local; or SSH hostname e.g. "my-server"
+DOCKER_DIR="/your/repo/path"
+```
+
+**2. `tests/docker-compose.openleadr-test.yml`** — remove the Pi4 resource caps (they prevent OOM crashes on 4 GB RAM; unnecessary on bigger machines):
+```yaml
+# delete or raise this block:
+deploy:
+  resources:
+    limits:
+      cpus: '1.5'
+      memory: 1500M
+```
+
+**3. `tests/Dockerfile.openleadr-test`** — remove or raise the Cargo job limit (set to 4 to avoid Pi4 OOM during linking):
+```dockerfile
+# delete or set higher, e.g. ENV CARGO_BUILD_JOBS=8
+ENV CARGO_BUILD_JOBS=4
+```
 
 ## Project Structure
 
