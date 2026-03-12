@@ -94,15 +94,17 @@ function buildPowerChartData(
 
   const futurePoints: ControllerPowerPoint[] = [];
   if (plan) {
-    for (const slot of [...plan.firm_slots, ...plan.flexible_slots]) {
+    const allSlots = [...(plan.firm_slots ?? []), ...(plan.flexible_slots ?? [])];
+    for (const slot of allSlots) {
       const ts = new Date(slot.start).getTime();
-      const planEv = slot.allocations
+      const allocs = slot.allocations ?? [];
+      const planEv = allocs
         .filter((a) => a.asset_id.toLowerCase().includes("ev"))
         .reduce((s, a) => s + a.power_kw, 0);
-      const planHeater = slot.allocations
+      const planHeater = allocs
         .filter((a) => a.asset_id.toLowerCase().includes("heater"))
         .reduce((s, a) => s + a.power_kw, 0);
-      const planPv = slot.allocations
+      const planPv = allocs
         .filter((a) => a.asset_id.toLowerCase().includes("pv"))
         .reduce((s, a) => s + a.power_kw, 0);
       futurePoints.push({
@@ -125,7 +127,7 @@ function buildPowerChartData(
 }
 
 function buildRateChartData(rates: PlannedRates | undefined): RateChartPoint[] {
-  if (!rates) return [];
+  if (!rates?.snapshots) return [];
   return rates.snapshots.map((s) => ({
     ts: new Date(s.interval_start).getTime(),
     import_price: s.import_price_eur_kwh,
@@ -172,8 +174,8 @@ function PlanCard({ plan }: { plan: Plan | null | undefined }) {
           </Typography>
           <Stack direction="row" spacing={1} alignItems="center">
             <Typography variant="body2">Warnings:</Typography>
-            {plan.warnings.length > 0 ? (
-              <Chip label={plan.warnings.length} size="small" color="warning" />
+            {(plan.warnings ?? []).length > 0 ? (
+              <Chip label={(plan.warnings ?? []).length} size="small" color="warning" />
             ) : (
               <Typography variant="body2">0</Typography>
             )}
