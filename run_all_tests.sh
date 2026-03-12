@@ -5,31 +5,71 @@
 # Usage:
 #   bash run_all_tests.sh              # run everything
 #   bash run_all_tests.sh --local      # local tests only (UI unit tests)
-#   bash run_all_tests.sh --e2e        # E2E behave tests only (on Pi4)
-#   bash run_all_tests.sh --resilience # resilience tests only (on Pi4)
-#   bash run_all_tests.sh --rust       # openleadr-rs cargo tests only (on Pi4)
+#   bash run_all_tests.sh --e2e        # E2E behave tests only
+#   bash run_all_tests.sh --resilience # resilience tests only
+#   bash run_all_tests.sh --rust       # openleadr-rs cargo tests only
 #
 # Prerequisites:
 #   - Node.js + npm installed locally (for UI tests)
-#   - SSH access to Pi4-Server configured
-#   - Git repo cloned at /srv/docker/openadr_lab on Pi4-Server
+#   - SSH access to DOCKER_HOST configured (when running remotely)
+#   - Git repo cloned at DOCKER_DIR on the docker host
 #
 set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-PI4_HOST="Pi4-Server"
-PI4_DIR="/srv/docker/openadr_lab"
+# SSH hostname of the machine running Docker.
+# Set to empty string "" to run docker commands directly on this machine (no SSH).
+# Example remote value: "Pi4-Server"
+DOCKER_HOST=""                        # "" = local docker; remote example: "Pi4-Server"
+DOCKER_DIR="/srv/docker/openadr_lab"  # repo path on the docker host
 
-# Resolve real path for Windows subst drive workaround
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# On Windows subst D: -> C:\DriveD, vitest needs the real path
-if [[ "$SCRIPT_DIR" == /d/* || "$SCRIPT_DIR" == D:* ]]; then
-    REAL_ROOT="${SCRIPT_DIR//\/d\//\/c\/DriveD\/}"
-    REAL_ROOT="${REAL_ROOT//D:\//C:\\DriveD\\}"
+# Auto-detect: if DOCKER_HOST is empty, "localhost", or matches this machine's
+# hostname, docker commands run locally without SSH.
+_THIS_HOST="$(hostname -s 2>/dev/null || true)"
+if [[ -z "$DOCKER_HOST" || "$DOCKER_HOST" == "localhost" || "$_THIS_HOST" == "$DOCKER_HOST" ]]; then
+    _DOCKER_IS_LOCAL=true
 else
-    REAL_ROOT="$SCRIPT_DIR"
+    _DOCKER_IS_LOCAL=false
 fi
+
+# run_docker_cmd <cmd>  — runs a shell command on the docker host (local or remote)
+run_docker_cmd() {
+    if $_DOCKER_IS_LOCAL; then
+        bash -c "$1"
+    else
+        ssh "$DOCKER_HOST" "$1"
+    fi
+}
+
+# can_reach_docker  — returns 0 if the docker host is reachable
+can_reach_docker() {
+    if $_DOCKER_IS_LOCAL; then
+        return 0
+    else
+        ssh -o ConnectTimeout=5 "$DOCKER_HOST" true 2>/dev/null
+    fi
+}
+
+_DOCKER_LABEL="$( $_DOCKER_IS_LOCAL && echo "local" || echo "$DOCKER_HOST" )"
+
+# Resolve real path for Windows subst drive workaround.
+# Only applied on Windows (MINGW/CYGWIN/MSYS); Linux/macOS use SCRIPT_DIR as-is.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|CYGWIN*|MSYS*)
+        # On Windows subst D: -> C:\DriveD, vitest needs the real path
+        if [[ "$SCRIPT_DIR" == /d/* || "$SCRIPT_DIR" == D:* ]]; then
+            REAL_ROOT="${SCRIPT_DIR//\/d\//\/c\/DriveD\/}"
+            REAL_ROOT="${REAL_ROOT//D:\//C:\\DriveD\\}"
+        else
+            REAL_ROOT="$SCRIPT_DIR"
+        fi
+        ;;
+    *)
+        REAL_ROOT="$SCRIPT_DIR"
+        ;;
+esac
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 
@@ -120,53 +160,55 @@ fi
 # ── 2. openleadr-rs Cargo Tests ─────────────────────────────────────────────
 
 if $RUN_RUST; then
-    header "3. openleadr-rs Cargo Tests (on Pi4-Server)"
-    if ssh -o ConnectTimeout=5 "$PI4_HOST" true 2>/dev/null; then
-        RUST_CMD="cd $PI4_DIR && docker compose -f tests/docker-compose.openleadr-test.yml run --build --rm cargo-test 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.openleadr-test.yml down 2>&1; exit \$RESULT"
-        if ssh "$PI4_HOST" "$RUST_CMD" 2>&1; then
+    header "3. openleadr-rs Cargo Tests (docker: $_DOCKER_LABEL)"
+    if can_reach_docker; then
+        RUST_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.openleadr-test.yml run --build --rm cargo-test 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.openleadr-test.yml down 2>&1; exit \$RESULT"
+        if run_docker_cmd "$RUST_CMD"; then
             pass "openleadr-rs cargo tests"
         else
             fail "openleadr-rs cargo tests"
         fi
     else
-        skip "openleadr-rs cargo tests (cannot reach Pi4-Server)"
+        skip "openleadr-rs cargo tests (cannot reach $_DOCKER_LABEL)"
     fi
 fi
 
 # ── 3. E2E Behave Tests ─────────────────────────────────────────────────────
 
 if $RUN_E2E; then
-    header "4. E2E Integration Tests (behave on Pi4-Server)"
-    if ssh -o ConnectTimeout=5 "$PI4_HOST" true 2>/dev/null; then
-        echo "  Syncing latest code to Pi4..."
-        ssh "$PI4_HOST" "cd $PI4_DIR && git pull --recurse-submodules" 2>&1
+    header "4. E2E Integration Tests (behave, docker: $_DOCKER_LABEL)"
+    if can_reach_docker; then
+        if ! $_DOCKER_IS_LOCAL; then
+            echo "  Syncing latest code to $_DOCKER_LABEL..."
+            run_docker_cmd "cd $DOCKER_DIR && git pull --recurse-submodules" 2>&1
+        fi
 
         echo "  Building and running test stack (this may take a few minutes)..."
-        E2E_CMD="cd $PI4_DIR && docker compose -f tests/docker-compose.test.yml run --build --rm test-runner 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.test.yml down -v 2>&1; exit \$RESULT"
-        if ssh "$PI4_HOST" "$E2E_CMD" 2>&1; then
+        E2E_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.test.yml run --build --rm test-runner 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.test.yml down -v 2>&1; exit \$RESULT"
+        if run_docker_cmd "$E2E_CMD"; then
             pass "E2E behave tests"
         else
             fail "E2E behave tests"
         fi
     else
-        skip "E2E behave tests (cannot reach Pi4-Server)"
+        skip "E2E behave tests (cannot reach $_DOCKER_LABEL)"
     fi
 fi
 
 # ── 4. Resilience Tests ─────────────────────────────────────────────────────
 
 if $RUN_RESILIENCE; then
-    header "5. Resilience / Failure Recovery Tests (behave on Pi4-Server)"
-    if ssh -o ConnectTimeout=5 "$PI4_HOST" true 2>/dev/null; then
+    header "5. Resilience / Failure Recovery Tests (docker: $_DOCKER_LABEL)"
+    if can_reach_docker; then
         echo "  Building and running resilience tests..."
-        RES_CMD="cd $PI4_DIR && docker compose -f tests/docker-compose.test.yml run --build --rm test-runner --tags=@resilience 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.test.yml down -v 2>&1; exit \$RESULT"
-        if ssh "$PI4_HOST" "$RES_CMD" 2>&1; then
+        RES_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.test.yml run --build --rm test-runner --tags=@resilience 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.test.yml down -v 2>&1; exit \$RESULT"
+        if run_docker_cmd "$RES_CMD"; then
             pass "Resilience tests"
         else
             fail "Resilience tests"
         fi
     else
-        skip "Resilience tests (cannot reach Pi4-Server)"
+        skip "Resilience tests (cannot reach $_DOCKER_LABEL)"
     fi
 fi
 
