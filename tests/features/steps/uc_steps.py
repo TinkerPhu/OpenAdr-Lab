@@ -85,7 +85,7 @@ def step_post_continue_request(context, asset_id):
         ],
         "completion_policy": "CONTINUE",
     }
-    r = ven_post("/requests", json=payload)
+    r = ven_post("/user-requests", json=payload)
     context.last_response = r
     try:
         context.last_response_json = r.json()

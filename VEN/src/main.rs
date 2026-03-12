@@ -453,8 +453,8 @@ async fn main() -> anyhow::Result<()> {
         // HEMS Stage 4 routes
         .route("/ledger", get(get_ledger))
         // HEMS Stage 5 routes
-        .route("/requests", get(get_requests).post(post_requests))
-        .route("/requests/:id", delete(delete_request))
+        .route("/user-requests", get(get_requests).post(post_requests))
+        .route("/user-requests/:id", delete(delete_request))
         .route("/flexibility", get(get_flexibility))
         .with_state(ctx)
         .layer(TraceLayer::new_for_http())
@@ -730,12 +730,12 @@ async fn get_ledger(State(ctx): State<AppCtx>) -> impl IntoResponse {
 
 // --- Stage 5: User Request Manager ---
 
-/// GET /requests — list all user requests.
+/// GET /user-requests — list all user requests.
 async fn get_requests(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.active_requests().await)
 }
 
-/// POST /requests — create a user energy task request (Stage 5).
+/// POST /user-requests — create a user energy task request (Stage 5).
 async fn post_requests(
     State(ctx): State<AppCtx>,
     Json(body): Json<CreateUserRequestBody>,
@@ -760,7 +760,7 @@ async fn post_requests(
             (axum::http::StatusCode::CREATED, Json(serde_json::to_value(user_req).unwrap_or_default())).into_response()
         }
         Err(e) => {
-            warn!("POST /requests rejected: {e}");
+            warn!("POST /user-requests rejected: {e}");
             (
                 axum::http::StatusCode::UNPROCESSABLE_ENTITY,
                 Json(serde_json::json!({"error": e.to_string()})),
@@ -770,7 +770,7 @@ async fn post_requests(
     }
 }
 
-/// DELETE /requests/:id — cancel a user request and abandon its packet (Stage 5).
+/// DELETE /user-requests/:id — cancel a user request and abandon its packet (Stage 5).
 async fn delete_request(
     State(ctx): State<AppCtx>,
     Path(id): Path<Uuid>,

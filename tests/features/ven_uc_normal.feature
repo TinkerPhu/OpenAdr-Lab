@@ -43,9 +43,9 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
     And the response JSON field "completion_policy" is the string "CONTINUE"
     And the response JSON field "tier_count" is greater than 1.0
 
-  Scenario: UC-02b — CONTINUE policy request appears in /requests list
+  Scenario: UC-02b — CONTINUE policy request appears in /user-requests list
     When I POST a CONTINUE policy request for asset "ev" with two deadline tiers
-    And I GET /requests from the VEN
+    And I GET /user-requests from the VEN
     Then the response JSON is an array
     And the requests list has at least 1 item
 
