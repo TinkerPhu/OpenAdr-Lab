@@ -90,22 +90,34 @@ OpenAdr-Lab/
   tests/
     features/             # Behave BDD scenarios (15 features, 49 scenarios)
     docker-compose.test.yml
-  docs/                   # Project documentation
+  docs/
+    architecture/         # System design, concepts, diagrams
+    use-cases/            # Use case definitions and manual
+    guidelines/           # Coding and testing conventions
+    reference/            # KEY_LEARNINGS, GLOSSARY, FAQ
+    plans/                # Active and archived implementation plans
+    history/              # Project journal
+    VEN_Controller/       # HEMS controller design documents
+    specs/                # OpenADR 3.1.0 specification (markdown)
+    BACKLOG.md            # Future work wishlist
 ```
 
 ## Documentation
 
 | Document | Description |
 |---|---|
-| [System Design](docs/open_adr_3_raspberry_pi_lab_complete_system_design.md) | Full architecture, data flows, and design decisions |
-| [Project Journal](docs/project_journal.md) | Implementation history, key learnings, and phase summaries |
-| [Use Case Manual](docs/USE-CASE-MANUAL.md) | Step-by-step guide for all demand response use cases |
-| [Use Cases](docs/USE-CASES.md) | Use case definitions and test coverage |
-| [Testing Guide](docs/TESTING.md) | Test strategy, running tests, and CI setup |
-| [FAQ](docs/FAQ.md) | Common questions and troubleshooting |
-| [Glossary](docs/GLOSSARY.md) | OpenADR terminology reference |
-| [DR Simulation Concept](docs/concept_vtn_ven_demand_response_simulation.md) | Concept for realistic demand response simulation |
-| [React Guidelines](docs/REACT_GUIDELINES.md) | UI development conventions |
+| [System Design](docs/architecture/system_design.md) | Full architecture, data flows, and design decisions |
+| [DR Simulation Concept](docs/architecture/concept_vtn_ven_demand_response_simulation.md) | Concept for realistic demand response simulation |
+| [Use Case Manual](docs/use-cases/USE-CASE-MANUAL.md) | Step-by-step guide for all demand response use cases |
+| [Use Cases](docs/use-cases/USE-CASES.md) | Use case definitions and test coverage |
+| [Testing Guide](docs/guidelines/TESTING.md) | Test strategy, running tests, and CI setup |
+| [React Guidelines](docs/guidelines/REACT_GUIDELINES.md) | UI development conventions |
+| [Key Learnings](docs/reference/KEY_LEARNINGS.md) | Hard-won lessons from implementation |
+| [FAQ](docs/reference/FAQ.md) | Common questions and troubleshooting |
+| [Glossary](docs/reference/GLOSSARY.md) | OpenADR terminology reference |
+| [Project Journal](docs/history/project_journal.md) | Implementation history and phase summaries |
+| [Backlog](docs/BACKLOG.md) | Future work wishlist |
+| [Active Plans](docs/plans/active/) | In-flight implementation plans |
 
 ## Seeded Data
 
