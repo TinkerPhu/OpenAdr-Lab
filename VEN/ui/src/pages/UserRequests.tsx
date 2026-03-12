@@ -9,12 +9,8 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  FormControl,
   IconButton,
-  InputLabel,
-  MenuItem,
   Paper,
-  Select,
   Table,
   TableBody,
   TableCell,
@@ -29,11 +25,29 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import { useRequests, usePostRequest, useDeleteRequest } from "../api/hooks";
 import type { CreateUserRequestBody, UserRequest, UserRequestStatus } from "../api/types";
 
-const DEADLINES_PLACEHOLDER = JSON.stringify(
-  [{ latest_end: "2026-03-12T22:00:00Z", max_total_cost_eur: 2.5, min_completion: 0.8 }],
-  null,
-  2,
-);
+function evExample(): string {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(7, 0, 0, 0);
+  const deadline = tomorrow.toISOString().replace(".000", "");
+  const body: CreateUserRequestBody = {
+    asset_id: "ev",
+    target_soc: 0.80,
+    target_energy_kwh: null,
+    desired_power_kw: 7.0,
+    completion_policy: "CONTINUE",
+    deadlines: [
+      {
+        latest_end: deadline,
+        max_total_cost_eur: 3.00,
+        max_marginal_rate_eur_kwh: null,
+        min_completion: 0.8,
+      },
+    ],
+    comfort_rates: null,
+  };
+  return JSON.stringify(body, null, 2);
+}
 
 function statusColor(
   status: UserRequestStatus,
@@ -51,45 +65,25 @@ function statusColor(
 
 function CreateUserRequestDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const postMut = usePostRequest();
-
-  const [assetId, setAssetId] = useState("");
-  const [targetSoc, setTargetSoc] = useState("");
-  const [targetEnergyKwh, setTargetEnergyKwh] = useState("");
-  const [desiredPowerKw, setDesiredPowerKw] = useState("");
-  const [completionPolicy, setCompletionPolicy] = useState("STOP");
-  const [deadlinesJson, setDeadlinesJson] = useState(DEADLINES_PLACEHOLDER);
+  const [json, setJson] = useState(() => evExample());
   const [error, setError] = useState<string | null>(null);
 
-  let deadlinesValid = false;
+  let parsed: CreateUserRequestBody | null = null;
+  let jsonError: string | null = null;
   try {
-    const parsed = JSON.parse(deadlinesJson);
-    deadlinesValid = Array.isArray(parsed) && parsed.length > 0;
-  } catch {
-    deadlinesValid = false;
+    parsed = JSON.parse(json);
+  } catch (e) {
+    jsonError = e instanceof Error ? e.message : "Invalid JSON";
   }
 
-  const submitDisabled = !assetId.trim() || !deadlinesValid || postMut.isPending;
+  const submitDisabled = parsed === null || postMut.isPending;
 
   async function handleSubmit() {
+    if (!parsed) return;
     setError(null);
-    const body: CreateUserRequestBody = {
-      asset_id: assetId.trim(),
-      target_soc: targetSoc !== "" ? parseFloat(targetSoc) : null,
-      target_energy_kwh: targetEnergyKwh !== "" ? parseFloat(targetEnergyKwh) : null,
-      desired_power_kw: desiredPowerKw !== "" ? parseFloat(desiredPowerKw) : null,
-      completion_policy: completionPolicy || null,
-      deadlines: JSON.parse(deadlinesJson),
-      comfort_rates: null,
-    };
     try {
-      await postMut.mutateAsync(body);
-      // reset and close
-      setAssetId("");
-      setTargetSoc("");
-      setTargetEnergyKwh("");
-      setDesiredPowerKw("");
-      setCompletionPolicy("STOP");
-      setDeadlinesJson(DEADLINES_PLACEHOLDER);
+      await postMut.mutateAsync(parsed);
+      setJson(evExample());
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -102,78 +96,25 @@ function CreateUserRequestDialog({ open, onClose }: { open: boolean; onClose: ()
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
           {error && <Alert severity="error">{error}</Alert>}
-
           <TextField
-            label="Asset ID"
-            value={assetId}
-            onChange={(e) => setAssetId(e.target.value)}
-            required
-            placeholder="ev"
-            size="small"
-          />
-
-          <TextField
-            label="Target SoC (0.0–1.0)"
-            value={targetSoc}
-            onChange={(e) => setTargetSoc(e.target.value)}
-            type="number"
-            inputProps={{ min: 0, max: 1, step: 0.05 }}
-            size="small"
-            placeholder="0.8"
-            helperText="Optional — percentage as decimal (e.g. 0.8 = 80%)"
-          />
-
-          <TextField
-            label="Target Energy (kWh)"
-            value={targetEnergyKwh}
-            onChange={(e) => setTargetEnergyKwh(e.target.value)}
-            type="number"
-            inputProps={{ min: 0, step: 0.1 }}
-            size="small"
-            helperText="Optional — set if target_soc not provided"
-          />
-
-          <TextField
-            label="Desired Power (kW)"
-            value={desiredPowerKw}
-            onChange={(e) => setDesiredPowerKw(e.target.value)}
-            type="number"
-            inputProps={{ min: 0, step: 0.1 }}
-            size="small"
-            placeholder="3.7"
-            helperText="Optional — max charge rate"
-          />
-
-          <FormControl size="small">
-            <InputLabel>Completion Policy</InputLabel>
-            <Select
-              value={completionPolicy}
-              label="Completion Policy"
-              onChange={(e) => setCompletionPolicy(e.target.value)}
-            >
-              <MenuItem value="STOP">STOP</MenuItem>
-              <MenuItem value="CONTINUE">CONTINUE</MenuItem>
-            </Select>
-          </FormControl>
-
-          <TextField
-            label="Deadlines (JSON array)"
-            value={deadlinesJson}
-            onChange={(e) => setDeadlinesJson(e.target.value)}
+            label="Request JSON"
+            value={json}
+            onChange={(e) => setJson(e.target.value)}
             multiline
-            rows={5}
+            rows={18}
             required
-            error={!deadlinesValid}
-            helperText={
-              deadlinesValid
-                ? "Valid JSON array"
-                : "Must be a non-empty JSON array with at least one deadline"
-            }
+            error={jsonError !== null}
+            helperText={jsonError ?? "Edit the JSON and click Submit"}
             size="small"
+            inputProps={{ style: { fontFamily: "monospace", fontSize: 12 } }}
           />
         </Box>
       </DialogContent>
       <DialogActions>
+        <Button onClick={() => setJson(evExample())} disabled={postMut.isPending}>
+          Reset to EV example
+        </Button>
+        <Box sx={{ flex: 1 }} />
         <Button onClick={onClose} disabled={postMut.isPending}>
           Cancel
         </Button>
