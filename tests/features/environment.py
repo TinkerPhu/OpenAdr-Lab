@@ -90,16 +90,21 @@ def before_all(context):
 
     print("All services healthy — starting tests.")
 
-    # Wipe all programs (and cascaded events) from the test VTN before each run.
-    # This prevents 409 conflicts from accumulated state across multiple test runs.
-    _cleanup_all_programs()
-
-    # Re-verify VTN health after bulk deletes — VTN may be briefly busy under load.
-    wait_for_url(f"{VTN_BASE_URL}/health", timeout=30)
-
     # Playwright browser — started once, shared across all @ui scenarios
     context._pw = None
     context._browser = None
+
+
+def before_feature(context, feature):
+    """Wipe all programs (cascading to events) before each feature.
+
+    Running cleanup per-feature rather than once at before_all means:
+    - Each feature starts with an empty program list, preventing 409 conflicts
+      from hardcoded names used by earlier features in the same run.
+    - Deletions are small (a handful from the previous feature), so VTN is
+      never hit with a 100-item bulk delete that could cause BFF 502 errors.
+    """
+    _cleanup_all_programs()
 
 
 def _is_ui(scenario):
