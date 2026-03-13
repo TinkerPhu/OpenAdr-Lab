@@ -140,9 +140,7 @@ export type RateSnapshot = {
   is_forecast: boolean;
 };
 
-export type PlannedRates = {
-  snapshots: RateSnapshot[];
-};
+export type PlannedRates = RateSnapshot[];
 
 export type OadrCapacityState = {
   import_limit_kw: number | null;

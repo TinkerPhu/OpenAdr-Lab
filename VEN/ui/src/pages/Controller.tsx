@@ -127,8 +127,8 @@ function buildPowerChartData(
 }
 
 function buildRateChartData(rates: PlannedRates | undefined): RateChartPoint[] {
-  if (!rates?.snapshots) return [];
-  return rates.snapshots.map((s) => ({
+  if (!rates || rates.length === 0) return [];
+  return rates.map((s) => ({
     ts: new Date(s.interval_start).getTime(),
     import_price: s.import_price_eur_kwh,
     export_price: s.export_price_eur_kwh,
