@@ -105,31 +105,39 @@ def before_scenario(context, scenario):
         context.vtn_token = get_token_value("any-business", "any-business")
 
 
-def _cleanup_vtn_events(context):
-    """Delete all VTN events created during this scenario.
+def _cleanup_vtn_resources(context):
+    """Delete all VTN events and programs created during this scenario.
 
     Prevents capacity-limit events (and other persistent events) from leaking
     across scenarios and poisoning parse_capacity_state's global-minimum logic.
+    Also deletes programs so UI scenarios can re-run without 409 conflicts.
     """
     try:
         from features.helpers.api_client import vtn_delete, get_token_value
         token = get_token_value("any-business", "any-business")
 
-        ids: set = set()
+        event_ids: set = set()
         for attr in ("rate_event_id", "planner_event_id"):
             val = getattr(context, attr, None)
             if val:
-                ids.add(val)
+                event_ids.add(val)
         created = getattr(context, "created_event", None)
         if isinstance(created, dict) and created.get("id"):
-            ids.add(created["id"])
+            event_ids.add(created["id"])
         for evt in getattr(context, "uc_events", {}).values():
             if isinstance(evt, dict) and evt.get("id"):
-                ids.add(evt["id"])
+                event_ids.add(evt["id"])
 
-        for eid in ids:
+        for eid in event_ids:
             try:
                 vtn_delete(f"/events/{eid}", token)
+            except Exception:
+                pass
+
+        program_id = getattr(context, "saved_program_id", None)
+        if program_id:
+            try:
+                vtn_delete(f"/programs/{program_id}", token)
             except Exception:
                 pass
     except Exception as exc:
@@ -138,7 +146,7 @@ def _cleanup_vtn_events(context):
 
 def after_scenario(context, scenario):
     """Close browser page after @ui/@ven-ui scenarios; restart stopped services."""
-    _cleanup_vtn_events(context)
+    _cleanup_vtn_resources(context)
 
     if (_is_ui(scenario) or _is_ven_ui(scenario)) and hasattr(context, "browser_page"):
         context.browser_page.close()
