@@ -2183,3 +2183,82 @@ Added a new **Controller** page to the VEN web UI at `/controller`, giving a "gl
 ### Commit
 
 `dd3cee6`
+
+---
+
+## Phase 23: Controller UI E2E Tests + Bug Fixes
+
+**Status: COMPLETE**
+
+### Goal
+
+Write Playwright/Behave E2E tests for the Controller page (TDD approach), use them to catch crashes, fix the crashes, and verify all 3 scenarios pass.
+
+### Bugs Fixed
+
+**1. `firm_summary` null crash (PlanCard):**
+`plan.firm_summary.total_cost_eur.toFixed(3)` crashed when `plan.firm_summary` was null on the first planning cycle. Fixed with optional chaining:
+```tsx
+Firm cost: €{plan.firm_summary?.total_cost_eur?.toFixed(3) ?? "—"}
+Import: {plan.firm_summary?.total_import_kwh?.toFixed(2) ?? "—"} kWh
+```
+
+**2. `PlannedRates` type mismatch:**
+The TypeScript type declared `PlannedRates` as an object with a `snapshots` field, but the API returns a flat `RateSnapshot[]`. Fixed: `export type PlannedRates = RateSnapshot[]` and updated `buildRateChartData()` to use `rates.map(...)` directly.
+
+**3. `AssetLedger` field name mismatch:**
+TypeScript type had wrong field names (`total_consumption_kwh`, `total_production_kwh`, etc.) while the Rust `AssetLedgerEntry` struct has `energy_kwh`, `cost_eur`, `co2_g`, `updated_at`. Fixed type and `LedgerTable` rendering to use actual field names.
+
+**4. `ledger()` object vs array:**
+The `/ledger` endpoint returns `HashMap<String, AssetLedgerEntry>` serialized as a JSON object `{"heater": {...}, "ev": {...}}`, not an array. The client method was calling `.map()` on the object. Fixed by detecting the format and converting: `Object.values(data)`.
+
+**5. f64::MAX sentinel for "no capacity limit":**
+The Rust backend uses `f64::MAX` (= `Number.MAX_VALUE` ≈ 1.8e308) to mean "no capacity limit". Using `isFinite()` to detect this fails because `isFinite(Number.MAX_VALUE) === true`. Fixed with a threshold check: `slot.import_cap_kw < 1e15 ? slot.import_cap_kw : null`.
+
+**6. PRICE event missing `intervalPeriod`:**
+The test step was creating a PRICE event without an `intervalPeriod` field. VEN's `parse_rate_snapshots` requires `intervalPeriod` to determine when an interval is active; without it, rates stayed empty indefinitely. Fixed by adding `intervalPeriod: {start: now.isoformat()+"Z", duration: "PT4H"}` to the event body.
+
+### Key Learnings
+
+**Behave entrypoint — double-invocation bug:**
+The test-runner's `entrypoint.sh` already runs `exec python -m behave "$@"`. Passing `python -m behave features/...` as the docker compose run command causes double-invocation. Correct invocation: `docker compose run --build --rm test-runner features/<feature>.feature`.
+
+**test-ven-ui rebuild required:**
+`docker compose run --build test-runner` only rebuilds `test-runner`, NOT `test-ven-ui`. After changing VEN UI React source, must explicitly run `docker compose build test-ven-ui` before the test run.
+
+**Recommended sequence:**
+```bash
+docker compose down
+docker compose build test-ven-ui
+docker compose run --build --rm test-runner features/controller_ui.feature
+```
+
+**React 18 unhandled errors = empty root div:**
+When a React component throws during render without an Error Boundary, React 18 unmounts the entire tree. Tests see only a timeout with no clue about the cause. Diagnose with Playwright's `page.on("pageerror", ...)` and `page.on("console", ...)` listeners — added to `environment.py` for all `@ven-ui` scenarios.
+
+**API contract verification:**
+TypeScript types can silently diverge from actual API responses. When a page crashes, verify with `docker exec <container> curl -s <endpoint>` before editing types. Never trust declared types without confirming against live data.
+
+### Files Changed
+
+- `VEN/ui/src/pages/Controller.tsx` — null guards, data-testid attributes, type fixes for rates/ledger/cap
+- `VEN/ui/src/api/types.ts` — `PlannedRates` flat array, `AssetLedger` correct field names
+- `VEN/ui/src/api/client.ts` — `ledger()` object→array conversion
+- `tests/features/controller_ui.feature` — 3 new @ven-ui scenarios
+- `tests/features/steps/controller_ui_steps.py` — step implementations
+- `tests/features/helpers/ui.py` — `go_controller()` method with debug dump
+- `tests/features/environment.py` — pageerror + console listeners for @ven-ui
+
+### Result
+
+All 3 Controller UI scenarios pass:
+```
+1 feature passed, 0 failed, 0 skipped
+3 scenarios passed, 0 failed, 0 skipped
+15 steps passed, 0 failed, 0 skipped, 0 undefined
+```
+
+### Commits
+
+`dea8d71`, `79911e3`, `8a001b1`, `ed8209e`, `d5de560`, `e565ad7`, `fd4b200`, `93e0a39`
+
