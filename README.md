@@ -41,21 +41,94 @@ Raspberry Pi 4 (Docker)
 | VEN | Rust (axum + tokio) | Polling-based VEN with sensor simulation |
 | VEN UI | React + MUI + nginx | Device dashboard (events, programs, sensors) |
 
-## Quick Start
+## Setup
+
+### Prerequisites
+
+- Linux host with Docker and Docker Compose v2
+- Git with submodule support
+- Python 3 + `requests` library (for seeding: `pip3 install requests`)
+
+### 1. Clone the repository
 
 ```bash
-# Clone with submodules (openleadr-rs fork)
 git clone --recursive https://github.com/TinkerPhu/OpenAdr-Lab.git
-
-# Deploy VTN stack
-ssh Pi4-Server "cd /srv/docker/openadr_lab/VTN && docker compose up -d --build"
-
-# Seed programs and events
-ssh Pi4-Server "cd /srv/docker/openadr_lab && python3 scripts/seed_vtn.py"
-
-# Deploy VEN stack
-ssh Pi4-Server "cd /srv/docker/openadr_lab/VEN && docker compose up -d --build"
+cd OpenAdr-Lab
 ```
+
+If you already cloned without `--recursive`:
+```bash
+git submodule update --init
+```
+
+### 2. Deploy the VTN stack
+
+The VTN stack includes PostgreSQL, the openleadr-rs VTN, the BFF proxy, and the VTN operator UI.
+
+> **Note:** First build compiles openleadr-rs from source. Expect ~25 min on a Raspberry Pi 4, ~5 min on a modern x86 machine.
+
+```bash
+cd VTN
+docker compose up -d --build
+cd ..
+```
+
+The VTN auto-migrates its database on first boot (15 tables via SQLx). Fixture credentials (`any-business`, `ven-manager`, `ven-1`…`ven-3`) are seeded automatically.
+
+Verify:
+```bash
+curl http://localhost:8200/health
+```
+
+### 3. Seed demo programs and events
+
+```bash
+python3 scripts/seed_vtn.py --vtn-url http://localhost:8200
+```
+
+Creates 3 demand response programs and 6 events (see [Seeded Data](#seeded-data)). Safe to re-run — skips programs that already exist.
+
+### 4. Deploy the VEN stack
+
+The VEN stack runs 3 VEN instances and the VEN device UI.
+
+> **Note:** First build compiles the VEN Rust application. Expect ~11 min on Pi 4, ~2 min on x86.
+
+```bash
+cd VEN
+docker compose up -d --build
+cd ..
+```
+
+Verify:
+```bash
+curl http://localhost:8211/health
+curl http://localhost:8212/health
+curl http://localhost:8213/health
+```
+
+### 5. Open the UIs
+
+| UI | URL | Description |
+|---|---|---|
+| VTN Operator UI | `http://localhost:8221` | Programs, events, VENs, reports |
+| VEN Device UI | `http://localhost:8214` | Events, sensors, simulation, controller |
+
+---
+
+**Remote host (e.g. Raspberry Pi accessed via SSH)?** Push the repo to the host first, then run the same commands over SSH:
+
+```bash
+# Initial copy
+rsync -av --exclude=target --exclude=node_modules OpenAdr-Lab/ pi@raspberrypi:/srv/openadr_lab/
+
+# Deploy
+ssh pi@raspberrypi "cd /srv/openadr_lab/VTN && docker compose up -d --build"
+ssh pi@raspberrypi "cd /srv/openadr_lab && python3 scripts/seed_vtn.py --vtn-url http://localhost:8200"
+ssh pi@raspberrypi "cd /srv/openadr_lab/VEN && docker compose up -d --build"
+```
+
+Replace `pi@raspberrypi` and `/srv/openadr_lab` with your host and path. Access the UIs at `http://<host-ip>:8221` and `http://<host-ip>:8214`.
 
 ## Testing
 
