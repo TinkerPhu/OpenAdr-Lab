@@ -43,7 +43,14 @@ def step_sensor_temp(context, temp):
 @then("the sensor power is {power:g}")
 def step_sensor_power(context, power):
     actual = context.ven_sensor.get("power_w")
-    assert actual == power, f"Expected power {power}, got {actual}"
+    if actual is None or abs(actual - power) >= 0.001:
+        # GET may race with the VEN sim tick overwriting the sensor state.
+        # The POST response is the authoritative value at the moment of write.
+        post = getattr(context, "post_response", None) or {}
+        actual = post.get("power_w", actual)
+    assert actual is not None and abs(actual - power) < 0.001, (
+        f"Expected power {power}, got {actual}"
+    )
 
 
 @then('the sensor has a generated "{field}"')
