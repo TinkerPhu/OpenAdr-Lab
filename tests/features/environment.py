@@ -94,6 +94,9 @@ def before_all(context):
     # This prevents 409 conflicts from accumulated state across multiple test runs.
     _cleanup_all_programs()
 
+    # Re-verify VTN health after bulk deletes — VTN may be briefly busy under load.
+    wait_for_url(f"{VTN_BASE_URL}/health", timeout=30)
+
     # Playwright browser — started once, shared across all @ui scenarios
     context._pw = None
     context._browser = None
