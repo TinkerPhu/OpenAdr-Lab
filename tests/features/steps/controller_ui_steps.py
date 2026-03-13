@@ -67,19 +67,15 @@ def _ven1_plan():
 
 @given("no price events are active on VEN-1")
 def step_no_price_events(context):
-    """Delete all VTN events, then wait for VEN-1 /rates to return empty snapshots."""
+    """Delete all VTN events, then wait for VEN-1 /rates to return empty list."""
     _delete_all_vtn_events(context.vtn_token)
-
-    def rates_empty(rates):
-        snaps = rates.get("snapshots") if isinstance(rates, dict) else None
-        return not snaps  # None or empty list
 
     poll_until(
         _ven1_rates,
-        rates_empty,
+        lambda rates: isinstance(rates, list) and len(rates) == 0,
         timeout=30,
         interval=2,
-        description="VEN-1 /rates returns empty snapshots",
+        description="VEN-1 /rates returns empty list",
     )
 
 
@@ -106,14 +102,10 @@ def step_create_price_event(context, rate):
 
 @given("I wait for VEN-1 to have rate data")
 def step_wait_for_rate_data(context):
-    """Poll GET /rates until snapshots is non-null and non-empty."""
-    def rates_populated(rates):
-        snaps = rates.get("snapshots") if isinstance(rates, dict) else None
-        return snaps is not None and len(snaps) > 0
-
+    """Poll GET /rates until it returns a non-empty list of snapshots."""
     poll_until(
         _ven1_rates,
-        rates_populated,
+        lambda rates: isinstance(rates, list) and len(rates) > 0,
         timeout=30,
         interval=2,
         description="VEN-1 /rates has non-empty snapshots",
