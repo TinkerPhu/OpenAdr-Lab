@@ -117,8 +117,9 @@ function buildPowerChartData(
         plan_heater: planHeater,
         plan_pv: planPv,
         plan_net: slot.net_import_kw,
-        import_cap: slot.import_cap_kw,
-        export_cap: slot.export_cap_kw,
+        // Guard against Number.MAX_VALUE sentinel (= no limit) — renders as null gap
+        import_cap: isFinite(slot.import_cap_kw) ? slot.import_cap_kw : null,
+        export_cap: isFinite(slot.export_cap_kw) ? slot.export_cap_kw : null,
       });
     }
   }
