@@ -90,6 +90,15 @@ def before_scenario(context, scenario):
             context._pw = sync_playwright().start()
             context._browser = context._pw.chromium.launch(headless=True)
         context.browser_page = context._browser.new_page()
+        # Capture JavaScript console errors and page-level exceptions for debugging
+        context.browser_page.on(
+            "console",
+            lambda msg: print(f"[BROWSER:{msg.type}] {msg.text}") if msg.type in ("error", "warning") else None,
+        )
+        context.browser_page.on(
+            "pageerror",
+            lambda exc: print(f"[PAGE ERROR] {exc}"),
+        )
         from features.helpers.ui import VenUi
         context.ven_ui = VenUi(context.browser_page)
         from features.helpers.api_client import get_token_value
