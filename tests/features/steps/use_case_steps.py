@@ -1,5 +1,6 @@
 """Step definitions for full end-to-end use case scenarios."""
 
+from datetime import datetime, timedelta, timezone
 from behave import given, when, then
 from features.helpers.api_client import (
     vtn_get, vtn_post, vtn_put, vtn_delete,
@@ -46,7 +47,6 @@ def _build_intervals(ptype, count, timed=False):
     if not timed:
         return values
 
-    from datetime import datetime, timedelta, timezone
     now = datetime.now(timezone.utc)
     for i, iv in enumerate(values):
         start = now + timedelta(minutes=2 * i)
@@ -155,7 +155,7 @@ def step_create_uc_event_with_ip(context, name, ptype, pri, count):
         "eventName": name,
         "priority": pri,
         "intervalPeriod": {
-            "start": "2026-03-01T14:00:00Z",
+            "start": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "duration": "PT4H",
         },
         "intervals": _build_intervals(ptype, count),
@@ -316,7 +316,6 @@ def step_create_timed_uc_event(context, name, ptype, pri, count):
 
 @when('I create a short-lived UC event "{name}" with type "{ptype}" priority {pri:d} and value {val:g}')
 def step_create_short_lived_uc_event(context, name, ptype, pri, val):
-    from datetime import datetime, timedelta, timezone
     now = datetime.now(timezone.utc)
     body = {
         "programID": context.saved_program_id,
