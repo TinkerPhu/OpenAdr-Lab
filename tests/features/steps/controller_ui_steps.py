@@ -103,7 +103,7 @@ def step_create_price_event(context, rate):
     program_id = _get_or_create_program(context.vtn_token)
     context.saved_program_id = program_id
     event = _create_price_event(context.vtn_token, program_id, rate)
-    context.created_event_id = event["id"]
+    context.created_event = event  # picked up by _cleanup_vtn_events in environment.py
 
 
 @given("I wait for VEN-1 to have rate data")
