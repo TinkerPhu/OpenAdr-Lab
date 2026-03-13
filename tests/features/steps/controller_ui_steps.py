@@ -1,6 +1,7 @@
 """Step definitions for VEN Controller Dashboard UI scenarios."""
 
 import time
+import datetime
 from behave import given, when, then
 from features.helpers.api_client import vtn_post, vtn_get, ven_get
 from features.helpers.wait import poll_until
@@ -34,7 +35,8 @@ def _get_or_create_program(token):
 
 
 def _create_price_event(token, program_id, import_rate):
-    """POST a PRICE event to VTN (open targets = visible to all VENs)."""
+    """POST a PRICE event with intervalPeriod to VTN (open targets = visible to all VENs)."""
+    now = datetime.datetime.utcnow().replace(microsecond=0)
     body = {
         "programID": program_id,
         "eventName": f"ctrl-ui-price-{int(time.time())}",
@@ -42,6 +44,10 @@ def _create_price_event(token, program_id, import_rate):
         "intervals": [
             {
                 "id": 0,
+                "intervalPeriod": {
+                    "start": now.isoformat() + "Z",
+                    "duration": "PT4H",
+                },
                 "payloads": [{"type": "PRICE", "values": [import_rate]}],
             }
         ],

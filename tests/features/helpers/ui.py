@@ -174,4 +174,14 @@ class VenUi:
 
     def go_controller(self):
         self.page.click(tid("nav-controller"))
-        self.page.wait_for_selector(tid("controller-packets-table"), timeout=15000)
+        try:
+            self.page.wait_for_selector(tid("controller-packets-table"), timeout=15000)
+        except Exception as e:
+            try:
+                print(f"\n[go_controller] FAILED. URL={self.page.url}")
+                html = self.page.content()
+                # Print first 4000 chars to see if there's an error boundary or crash
+                print(f"[go_controller] HTML snippet: {html[:4000]}")
+            except Exception:
+                pass
+            raise
