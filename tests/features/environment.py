@@ -29,6 +29,42 @@ def _check_not_live():
                 )
 
 
+def _cleanup_all_programs():
+    """Delete every program in the test VTN before the run starts.
+
+    Programs (and their cascaded events) accumulate across runs when scenarios
+    create them with hardcoded names. With enough programs the VTN's default
+    page size causes GET /programs to miss entries, breaking _create_or_reuse_program.
+    Wiping state here ensures every run starts clean.
+    """
+    try:
+        from features.helpers.api_client import vtn_get, vtn_delete, get_token_value
+        token = get_token_value("any-business", "any-business")
+        skip = 0
+        limit = 50
+        deleted = 0
+        while True:
+            r = vtn_get(f"/programs?limit={limit}&skip={skip}", token)
+            if not r.ok:
+                break
+            programs = r.json()
+            if not programs:
+                break
+            for p in programs:
+                try:
+                    vtn_delete(f"/programs/{p['id']}", token)
+                    deleted += 1
+                except Exception:
+                    pass
+            if len(programs) < limit:
+                break
+            skip += limit
+        if deleted:
+            print(f"Pre-run cleanup: deleted {deleted} programs from test VTN.")
+    except Exception as exc:
+        print(f"Warning: pre-run program cleanup failed: {exc}")
+
+
 def before_all(context):
     """Wait for all services to be reachable before running any tests."""
     _check_not_live()
@@ -53,6 +89,10 @@ def before_all(context):
         wait_for_url(VEN_UI_BASE_URL, timeout=120)
 
     print("All services healthy — starting tests.")
+
+    # Wipe all programs (and cascaded events) from the test VTN before each run.
+    # This prevents 409 conflicts from accumulated state across multiple test runs.
+    _cleanup_all_programs()
 
     # Playwright browser — started once, shared across all @ui scenarios
     context._pw = None
@@ -134,12 +174,6 @@ def _cleanup_vtn_resources(context):
             except Exception:
                 pass
 
-        program_id = getattr(context, "saved_program_id", None)
-        if program_id:
-            try:
-                vtn_delete(f"/programs/{program_id}", token)
-            except Exception:
-                pass
     except Exception as exc:
         print(f"Warning: event cleanup failed: {exc}")
 
