@@ -1,6 +1,7 @@
 """Step definitions for VEN Rate System (Stage 2) BDD tests."""
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from behave import given, when, then
 from features.helpers.api_client import get_token_value, vtn_post, ven_get
 from features.helpers.wait import poll_until
@@ -38,29 +39,14 @@ def step_create_3interval_price_event(context):
             "priority": 1,
             "intervals": [
                 {
-                    "id": 0,
+                    "id": i,
                     "intervalPeriod": {
-                        "start": "2025-01-01T14:00:00Z",
+                        "start": (datetime.now(timezone.utc) + timedelta(hours=1 + i)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                         "duration": "PT1H",
                     },
-                    "payloads": [{"type": "PRICE", "values": [0.25]}],
-                },
-                {
-                    "id": 1,
-                    "intervalPeriod": {
-                        "start": "2025-01-01T15:00:00Z",
-                        "duration": "PT1H",
-                    },
-                    "payloads": [{"type": "PRICE", "values": [0.30]}],
-                },
-                {
-                    "id": 2,
-                    "intervalPeriod": {
-                        "start": "2025-01-01T16:00:00Z",
-                        "duration": "PT1H",
-                    },
-                    "payloads": [{"type": "PRICE", "values": [0.35]}],
-                },
+                    "payloads": [{"type": "PRICE", "values": [0.25 + i * 0.05]}],
+                }
+                for i in range(3)
             ],
         },
     )
@@ -81,7 +67,7 @@ def step_create_ghg_event(context):
                 {
                     "id": 0,
                     "intervalPeriod": {
-                        "start": "2025-01-01T10:00:00Z",
+                        "start": (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                         "duration": "PT1H",
                     },
                     "payloads": [{"type": "GHG", "values": [210.5]}],
@@ -106,7 +92,7 @@ def step_create_export_price_event(context):
                 {
                     "id": 0,
                     "intervalPeriod": {
-                        "start": "2025-01-01T11:00:00Z",
+                        "start": (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                         "duration": "PT1H",
                     },
                     "payloads": [{"type": "EXPORT_PRICE", "values": [0.10]}],
@@ -131,7 +117,7 @@ def step_create_capacity_limit_event(context, limit):
                 {
                     "id": 0,
                     "intervalPeriod": {
-                        "start": "2025-01-01T12:00:00Z",
+                        "start": (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                         "duration": "PT1H",
                     },
                     "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [limit]}],
@@ -157,7 +143,7 @@ def step_create_price_event_no_descriptors(context):
                 {
                     "id": 0,
                     "intervalPeriod": {
-                        "start": "2025-01-01T09:00:00Z",
+                        "start": (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                         "duration": "PT1H",
                     },
                     "payloads": [{"type": "PRICE", "values": [0.20]}],

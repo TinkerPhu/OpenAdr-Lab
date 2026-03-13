@@ -70,11 +70,12 @@ def step_ui_create_event(context, name, prog, ptype, pri, count):
 def step_ui_create_event_with_ip(context, name, prog, ptype, pri, count):
     from features.steps.use_case_steps import _build_intervals
     intervals = _build_intervals(ptype, count)
+    from datetime import datetime, timezone
     context.ui.create_event(
         name=name,
         program_name=prog,
         priority=pri,
-        start="2026-03-01T14:00:00Z",
+        start=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         duration="PT4H",
         intervals_json=json.dumps(intervals),
     )
