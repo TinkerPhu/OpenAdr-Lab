@@ -97,7 +97,6 @@ VEN3=http://Pi4-Server:8213
 {
   "asset_id": "ev",
   "target_soc": 0.80,
-  "target_energy_kwh": null,
   "desired_power_kw": 7.0,
   "completion_policy": "CONTINUE",
   "deadlines": [
@@ -107,11 +106,12 @@ VEN3=http://Pi4-Server:8213
       "max_marginal_rate_eur_kwh": 0.30,
       "min_completion": 0.8
     }
-  ],
-  "comfort_rates": null
+  ]
 }
 ```
-Replace `TOMORROW_07:00:00Z` with tomorrow's 07:00 in ISO 8601 (e.g. `2026-03-13T07:00:00+01:00`). The prefilled example already has tomorrow 07:00 — you can also just edit `max_marginal_rate_eur_kwh` to `0.30` in the existing prefill instead of replacing the whole block.
+Replace `TOMORROW_07:00:00Z` with tomorrow's 07:00 in ISO 8601 (e.g. `2026-03-14T07:00:00+01:00`). The prefilled example already has tomorrow 07:00 — you can also just edit `max_marginal_rate_eur_kwh` to `0.30` in the existing prefill instead of replacing the whole block.
+
+> **If you get a 422 "zero energy" error:** the EV SoC in the simulator is already at or above 80%. Go to the **Simulation** page and lower the EV SoC (e.g. set a manual override or wait for the sim to discharge), then retry.
 
 Click **Submit**. The new row appears in the User Requests table with status **ACTIVE**.
 
@@ -161,19 +161,15 @@ The VEN processes the new packet within one planning cycle (~20 seconds). The of
 ```json
 {
   "asset_id": "ev",
-  "target_soc": null,
   "target_energy_kwh": 2.0,
   "desired_power_kw": 7.0,
   "completion_policy": "STOP",
   "deadlines": [
     {
       "latest_end": "TODAY_14:00:00+01:00",
-      "max_total_cost_eur": 2.00,
-      "max_marginal_rate_eur_kwh": null,
-      "min_completion": null
+      "max_total_cost_eur": 2.00
     }
-  ],
-  "comfort_rates": null
+  ]
 }
 ```
 Replace `TODAY_14:00:00+01:00` with today's 14:00 in ISO 8601 (e.g. `2026-03-12T14:00:00+01:00`). Click **Submit**.
@@ -473,24 +469,20 @@ Navigate to the **User Requests** page → **New User Request**. Paste this JSON
 {
   "asset_id": "ev",
   "target_soc": 0.80,
-  "target_energy_kwh": null,
   "desired_power_kw": 7.0,
   "completion_policy": "CONTINUE",
   "deadlines": [
     {
       "latest_end": "TODAY_22:00:00+01:00",
       "max_total_cost_eur": 5.00,
-      "max_marginal_rate_eur_kwh": 0.50,
-      "min_completion": null
+      "max_marginal_rate_eur_kwh": 0.50
     },
     {
       "latest_end": "FRIDAY_18:00:00+01:00",
       "max_total_cost_eur": 1.00,
-      "max_marginal_rate_eur_kwh": 0.10,
-      "min_completion": null
+      "max_marginal_rate_eur_kwh": 0.10
     }
-  ],
-  "comfort_rates": null
+  ]
 }
 ```
 Replace `TODAY_22:00:00+01:00` with tonight's 22:00 and `FRIDAY_18:00:00+01:00` with this Friday's 18:00 in ISO 8601. Click **Submit**.
