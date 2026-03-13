@@ -505,8 +505,7 @@ function LedgerTable({ ledger }: { ledger: AssetLedger[] | undefined }) {
           <TableHead>
             <TableRow>
               <TableCell>Asset</TableCell>
-              <TableCell align="right">Import kWh</TableCell>
-              <TableCell align="right">Export kWh</TableCell>
+              <TableCell align="right">Energy kWh</TableCell>
               <TableCell align="right">Cost €</TableCell>
               <TableCell align="right">CO₂ g</TableCell>
             </TableRow>
@@ -516,16 +515,13 @@ function LedgerTable({ ledger }: { ledger: AssetLedger[] | undefined }) {
               <TableRow key={l.asset_id}>
                 <TableCell>{l.asset_id}</TableCell>
                 <TableCell align="right">
-                  {l.total_consumption_kwh.toFixed(3)}
+                  {l.energy_kwh.toFixed(3)}
                 </TableCell>
                 <TableCell align="right">
-                  {l.total_production_kwh.toFixed(3)}
+                  €{l.cost_eur.toFixed(4)}
                 </TableCell>
                 <TableCell align="right">
-                  €{l.total_import_cost_eur.toFixed(4)}
-                </TableCell>
-                <TableCell align="right">
-                  {l.total_co2_g.toFixed(1)}
+                  {l.co2_g.toFixed(1)}
                 </TableCell>
               </TableRow>
             ))}

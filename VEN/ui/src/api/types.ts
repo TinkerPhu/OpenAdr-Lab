@@ -221,11 +221,10 @@ export type Plan = {
 
 export type AssetLedger = {
   asset_id: string;
-  total_consumption_kwh: number;
-  total_production_kwh: number;
-  total_import_cost_eur: number;
-  total_export_revenue_eur: number;
-  total_co2_g: number;
+  energy_kwh: number;
+  cost_eur: number;
+  co2_g: number;
+  updated_at: string | null;
 };
 
 export type UserRequestStatus = "ACTIVE" | "COMPLETED" | "CANCELLED" | "FAILED";
