@@ -157,7 +157,10 @@ export class VenApi {
   async ledger(): Promise<AssetLedger[]> {
     const r = await this.getReq("/ledger");
     if (!r.ok) throw new Error(`ledger ${r.status}`);
-    return r.json();
+    const data = await r.json();
+    // API returns {assetId: AssetLedger, ...} — convert to array
+    if (Array.isArray(data)) return data;
+    return Object.values(data) as AssetLedger[];
   }
 
   async userRequests(): Promise<UserRequest[]> {
