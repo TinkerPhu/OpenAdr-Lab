@@ -2328,3 +2328,69 @@ Two consecutive runs (first `--build`, second without) both 0 failures.
 
 `13a541c`, `852cc50`, `01f7592`, `9bf31e4`, `0b7be38`
 
+
+---
+
+## Phase 26: Controller V2 Dashboard — Full Matrix Layout
+
+**Date**: 2026-03-14
+**Branch**: `001-controller-dashboard-v2`
+**Scope**: New `/controller-v2` React page with per-asset cells (left metrics / mid timeline / right controls), two grid-level cells (tariff + accumulated power), cell pinning/collapse, and Rust backend override stubs.
+
+### What Was Built
+
+**BDD-first (Constitution Principle II)**: All 4 feature files written and confirmed failing before any implementation code was written.
+
+**Backend stubs** (`VEN/src/state.rs`, `VEN/src/simulator/mod.rs`, `VEN/src/main.rs`):
+- `ev_initial_soc: Option<f64>` — one-shot SoC jump; cleared in `main.rs` after tick
+- `battery_initial_soc: Option<f64>` — one-shot SoC jump
+- `battery_capacity_kwh: Option<f64>` — persistent capacity override
+
+**Frontend components** (all under `VEN/ui/src/components/controller-v2/`):
+- `types.ts` — `AssetId`, `AssetSummary`, `AssetTimePoint`, `TariffSnapshot`, `TariffTimePoint`, `StackedAreaPoint`, `CollapseState`
+- `dataBuilders.ts` — `deriveAssetSummaries`, `buildAssetTimeline`, `buildStackedAreaData`, `buildTariffTimeline`, `deriveTariffSnapshot`, `findCurrentTariff`
+- `AssetLeftSection.tsx` — power/cost/CO₂/SoC metrics, all `data-testid` per contracts
+- `AssetMidSection.tsx` + `AssetTimelineChart.tsx` — recharts `ComposedChart` with power/cost/CO₂ lines, NOW `ReferenceLine`
+- `AssetRightSection.tsx` — two MUI Accordions (Status Settings defaultExpanded, Simulation Characteristics collapsed); per-asset controls for EV/Battery/Heater/PV/BaseLoad
+- `AssetCell.tsx` — three-section horizontal layout, MUI `Collapse` for left/right, pin/collapse buttons
+- `PinnedZone.tsx` — sticky container for pinned cells
+- `GridTariffCell.tsx` — 5 tariff metrics + `TariffChart`
+- `GridAccumulatedCell.tsx` — per-asset power list + `StackedAreaChart`
+- `charts/TariffChart.tsx` — 5 series, dual Y-axes
+- `charts/StackedAreaChart.tsx` — bidirectional stacking with `stackId="positive"` / `stackId="negative"`
+- `VEN/ui/src/pages/ControllerV2.tsx` — full page with all hooks, pinned/collapse state, all cell renderers
+
+**BDD tests** (14 scenarios, 58 steps — all passing):
+- `01_layout.feature` — grid cells visible above assets
+- `02_asset_cells.feature` — power/cost/CO₂/SoC values, NOW line
+- `03_simulation_controls.feature` — EV plugged toggle, SoC slider, POST /sim/override
+- `04_navigation.feature` — pin, unpin, collapse left/right
+
+**Unit tests**: `ControllerV2.test.tsx` — 21 tests, all passing.
+
+**Full suite**: 33 features, 143 scenarios, 895 steps — zero failures.
+
+### Key Decisions
+
+1. **One-shot stub clearing in main.rs, not tick()**: The `tick()` method receives `&UserOverrides` (immutable reference), so clearing can't happen there. Clearing is done in `main.rs` after the tick block by cloning+patching and posting back to shared state.
+
+2. **`data-testid` INSIDE MUI Collapse**: For collapse tests that use Playwright `is_visible()`, the `data-testid` element must be inside the `Collapse` component so `is_visible()` returns `false` when the content is hidden.
+
+3. **Bidirectional recharts stacking**: Positive values use `stackId="positive"`, negative values use `stackId="negative"` with a mirrored negative series.
+
+4. **ResizeObserver mock in test setup**: recharts `ResponsiveContainer` requires `ResizeObserver` which jsdom doesn't provide. Mocked in `setup.ts` using `globalThis` (not `global`) to avoid TypeScript compile failure in browser target.
+
+5. **MUI Switch click target**: Playwright's `el.click()` on the MUI Switch root `<span>` does not reliably trigger `onChange`. Must target `input[type="checkbox"]` inside it.
+
+6. **Null vs absent in sim overrides**: When `POST {}` clears overrides, the GET response returns `{"ev_plugged": null}`. Python's `dict.get("ev_plugged", True)` returns `None` (key present), not `True`. Must handle `None` explicitly: `True if v is None else v`.
+
+### Issues Encountered
+
+- TypeScript compile errors (`Cannot find name 'onOverrideChange'`, `unused 'overrides'`, `unused 'nowMs'`) — caught at Docker build time, fixed before deploy.
+- `global` not available in browser TypeScript target — replaced with `globalThis`.
+- Wrong docker-compose directory for Pi4-Server builds (`/srv/docker/openadr_lab/VEN/` not root).
+- BDD toggle test failing due to null handling and MUI Switch click target — both fixed in step definitions.
+
+### Commits
+
+`63244ef`, `219bcdc`, `12055ae`, `115fed3`, `08ea264`, `f104589`, `ebc4688`, `cbf24d6`

@@ -38,7 +38,7 @@
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
 - [X] T007 Add 3 stub fields to `UserOverrides` struct in `VEN/src/state.rs`: `ev_initial_soc: Option<f64>`, `battery_initial_soc: Option<f64>`, `battery_capacity_kwh: Option<f64>`; apply one-shot / persistent semantics in the simulator tick handler
-- [ ] T008 Rebuild and redeploy VEN backend on Pi4-Server after `state.rs` change: `docker compose build ven-ven-1 && docker compose up -d ven-ven-1`
+- [X] T008 Rebuild and redeploy VEN backend on Pi4-Server after `state.rs` change: `docker compose build ven-ven-1 && docker compose up -d ven-ven-1`
 - [X] T009 Create `VEN/ui/src/components/controller-v2/types.ts` — define: `AssetId`, `AssetSummary`, `AssetTimePoint`, `TariffSnapshot`, `TariffTimePoint`, `StackedAreaPoint`, `PinnedState`, `CollapseState` (per data-model.md)
 - [X] T010 Create stub `VEN/ui/src/components/controller-v2/dataBuilders.ts` — declare all 5 functions from contracts/ui-components.md with empty return values: `buildAssetTimeline()`, `buildStackedAreaData()`, `buildTariffTimeline()`, `findCurrentTariff()`, `deriveAssetSummaries()`
 
@@ -52,11 +52,11 @@
 
 **Independent Test**: Load `/controller-v2`, verify each asset cell's left section displays labeled power/cost/CO₂ values with correct units and sign convention, without requiring any graph or controls to work.
 
-- [ ] T011 [US1] Implement `deriveAssetSummaries()` in `VEN/ui/src/components/controller-v2/dataBuilders.ts` — reads `SimSnapshot` + tariff intervals + `UserRequest[]` + `Plan | null` → returns `AssetSummary[]` per data-model.md; includes `findCurrentTariff()` helper
-- [ ] T012 [US1] Implement `AssetLeftSection` in `VEN/ui/src/components/controller-v2/AssetLeftSection.tsx` — displays power, cost rate, CO₂eq rate, SoC (if applicable), forecast energy (if plan data available), active user request (if any); all `data-testid` attributes per contracts/ui-components.md
-- [ ] T013 [US1] Implement `AssetCell` shell in `VEN/ui/src/components/controller-v2/AssetCell.tsx` — three-section horizontal layout (left / mid placeholder / right placeholder); wires `AssetLeftSection`; collapse toggles for left and right; pin button; all `data-testid` attributes
-- [ ] T014 [US1] Implement `ControllerV2` page in `VEN/ui/src/pages/ControllerV2.tsx` — calls `useSim()`, `useRates()`, `useUserRequests()`, `usePlan()`; detects present assets from `SimSnapshot`; derives `AssetSummary[]` via `deriveAssetSummaries()`; renders one `AssetCell` per asset in vertical stack; initialises `pinnedCellIds` and `collapseState` useState
-- [ ] T015 [US1] Rebuild VEN UI on Pi4-Server and verify US1 BDD scenarios in `02_asset_cells.feature` (left-section assertions) pass
+- [X] T011 [US1] Implement `deriveAssetSummaries()` in `VEN/ui/src/components/controller-v2/dataBuilders.ts` — reads `SimSnapshot` + tariff intervals + `UserRequest[]` + `Plan | null` → returns `AssetSummary[]` per data-model.md; includes `findCurrentTariff()` helper
+- [X] T012 [US1] Implement `AssetLeftSection` in `VEN/ui/src/components/controller-v2/AssetLeftSection.tsx` — displays power, cost rate, CO₂eq rate, SoC (if applicable), forecast energy (if plan data available), active user request (if any); all `data-testid` attributes per contracts/ui-components.md
+- [X] T013 [US1] Implement `AssetCell` shell in `VEN/ui/src/components/controller-v2/AssetCell.tsx` — three-section horizontal layout (left / mid placeholder / right placeholder); wires `AssetLeftSection`; collapse toggles for left and right; pin button; all `data-testid` attributes
+- [X] T014 [US1] Implement `ControllerV2` page in `VEN/ui/src/pages/ControllerV2.tsx` — calls `useSim()`, `useRates()`, `useUserRequests()`, `usePlan()`; detects present assets from `SimSnapshot`; derives `AssetSummary[]` via `deriveAssetSummaries()`; renders one `AssetCell` per asset in vertical stack; initialises `pinnedCellIds` and `collapseState` useState
+- [X] T015 [US1] Rebuild VEN UI on Pi4-Server and verify US1 BDD scenarios in `02_asset_cells.feature` (left-section assertions) pass
 
 **Checkpoint**: Each asset cell shows live power/cost/CO₂ values. Mid and right sections are visible as placeholders. US1 acceptance scenarios pass.
 
@@ -68,11 +68,11 @@
 
 **Independent Test**: With simulation running, verify the mid section graph renders trace data to the left of the NOW line and plan allocations to the right, using the correct line styles, without the right section controls needing to work.
 
-- [ ] T016 [US2] Implement `buildAssetTimeline()` in `VEN/ui/src/components/controller-v2/dataBuilders.ts` — merges `TraceEntry[]` (past, per-asset setpoints) + `Plan` firm/flexible slot allocations (future, per-asset `power_kw`) + `RateSnapshot[]` (tariffs) → `AssetTimePoint[]`; marks each point `isPast`; derives `costRateEurH` and `co2RateGH` per point via `findCurrentTariff()`
-- [ ] T017 [US2] Implement `AssetTimelineChart` in `VEN/ui/src/components/controller-v2/charts/AssetTimelineChart.tsx` — recharts `ComposedChart`; power solid line, cost rate dashed (`strokeDasharray="5 5"`), CO₂eq rate dotted (`strokeDasharray="2 2"`); all lines share asset color; dual Y-axes (power left, rates right); `ReferenceLine` at `nowMs` red dotted; `connectNulls={false}`; legend with units; `data-testid="asset-timeline-chart-{assetId}"`
-- [ ] T018 [US2] Implement `AssetMidSection` in `VEN/ui/src/components/controller-v2/AssetMidSection.tsx` — `ResponsiveContainer` wrapping `AssetTimelineChart`; receives `assetId`, `timePoints`, `color`; `data-testid="asset-cell-{assetId}-mid"`
-- [ ] T019 [US2] Wire `AssetMidSection` into `AssetCell` — add `timePoints: AssetTimePoint[]` and `color: string` props to `AssetCell`; pass from `ControllerV2.tsx` using `buildAssetTimeline()` (add `useTrace(500)` hook call to page)
-- [ ] T020 [US2] Rebuild VEN UI on Pi4-Server and verify US2 BDD scenarios in `02_asset_cells.feature` (graph assertions) pass
+- [X] T016 [US2] Implement `buildAssetTimeline()` in `VEN/ui/src/components/controller-v2/dataBuilders.ts` — merges `TraceEntry[]` (past, per-asset setpoints) + `Plan` firm/flexible slot allocations (future, per-asset `power_kw`) + `RateSnapshot[]` (tariffs) → `AssetTimePoint[]`; marks each point `isPast`; derives `costRateEurH` and `co2RateGH` per point via `findCurrentTariff()`
+- [X] T017 [US2] Implement `AssetTimelineChart` in `VEN/ui/src/components/controller-v2/charts/AssetTimelineChart.tsx` — recharts `ComposedChart`; power solid line, cost rate dashed (`strokeDasharray="5 5"`), CO₂eq rate dotted (`strokeDasharray="2 2"`); all lines share asset color; dual Y-axes (power left, rates right); `ReferenceLine` at `nowMs` red dotted; `connectNulls={false}`; legend with units; `data-testid="asset-timeline-chart-{assetId}"`
+- [X] T018 [US2] Implement `AssetMidSection` in `VEN/ui/src/components/controller-v2/AssetMidSection.tsx` — `ResponsiveContainer` wrapping `AssetTimelineChart`; receives `assetId`, `timePoints`, `color`; `data-testid="asset-cell-{assetId}-mid"`
+- [X] T019 [US2] Wire `AssetMidSection` into `AssetCell` — add `timePoints: AssetTimePoint[]` and `color: string` props to `AssetCell`; pass from `ControllerV2.tsx` using `buildAssetTimeline()` (add `useTrace(500)` hook call to page)
+- [X] T020 [US2] Rebuild VEN UI on Pi4-Server and verify US2 BDD scenarios in `02_asset_cells.feature` (graph assertions) pass
 
 **Checkpoint**: Asset timeline graphs show past trace + planned future with correct line styles and NOW marker. US2 acceptance scenarios pass.
 
@@ -84,13 +84,13 @@
 
 **Independent Test**: Load the dashboard with at least two active assets. Verify the Tariff Cell left section shows import/export tariff and derived rates, and the Accumulated Asset Power Cell stacked area chart shows each asset as a colored area (positive above x-axis, negative below), summing to grid power.
 
-- [ ] T021 [US4] Implement `buildTariffTimeline()` and `buildStackedAreaData()` in `VEN/ui/src/components/controller-v2/dataBuilders.ts` — tariff timeline merges `RateSnapshot[]` intervals + trace net power (past) + plan `net_import_kw` (future) → `TariffTimePoint[]`; stacked area data splits each asset power into `_pos`/`_neg` per time point → `StackedAreaPoint[]`
-- [ ] T022 [P] [US4] Implement `TariffChart` in `VEN/ui/src/components/controller-v2/charts/TariffChart.tsx` — 5 series: import tariff [€/kWh] red dashed, import CO₂eq tariff [g CO₂eq/kWh] red dotted, export tariff [€/kWh] green dashed, total cost rate [€/h] black dashed, grid power [kW] black solid; `ReferenceLine` at `nowMs`; `data-testid="tariff-chart"`
-- [ ] T023 [P] [US4] Implement `StackedAreaChart` in `VEN/ui/src/components/controller-v2/charts/StackedAreaChart.tsx` — recharts `AreaChart`; for each asset render `{id}_pos` Area with `stackId="positive"` and `{id}_neg` Area with `stackId="negative"`; asset colors from `colorMap`; `ReferenceLine` at `nowMs`; `data-testid="accumulated-area-chart"`
-- [ ] T024 [P] [US4] Implement `GridTariffCell` in `VEN/ui/src/components/controller-v2/GridTariffCell.tsx` — left section: 5 labeled values from `TariffSnapshot` (import tariff, import CO₂eq tariff, export tariff, total cost rate, grid power); right section: `TariffChart`; pin button; no controls; all `data-testid` attributes per contracts/ui-components.md
-- [ ] T025 [P] [US4] Implement `GridAccumulatedCell` in `VEN/ui/src/components/controller-v2/GridAccumulatedCell.tsx` — left section: list of all assets with current power [kW] from `AssetSummary[]`; right section: `StackedAreaChart`; pin button; no controls; all `data-testid` attributes
-- [ ] T026 [US4] Wire grid cells into `ControllerV2.tsx` — render `GridTariffCell` and `GridAccumulatedCell` above asset cells using `buildTariffTimeline()`, `buildStackedAreaData()`, and a derived `TariffSnapshot` from current `/sim` + `/rates`
-- [ ] T027 [US4] Rebuild VEN UI on Pi4-Server and verify US4 BDD scenarios in `01_layout.feature` (grid cell ordering and content) pass
+- [X] T021 [US4] Implement `buildTariffTimeline()` and `buildStackedAreaData()` in `VEN/ui/src/components/controller-v2/dataBuilders.ts` — tariff timeline merges `RateSnapshot[]` intervals + trace net power (past) + plan `net_import_kw` (future) → `TariffTimePoint[]`; stacked area data splits each asset power into `_pos`/`_neg` per time point → `StackedAreaPoint[]`
+- [X] T022 [P] [US4] Implement `TariffChart` in `VEN/ui/src/components/controller-v2/charts/TariffChart.tsx` — 5 series: import tariff [€/kWh] red dashed, import CO₂eq tariff [g CO₂eq/kWh] red dotted, export tariff [€/kWh] green dashed, total cost rate [€/h] black dashed, grid power [kW] black solid; `ReferenceLine` at `nowMs`; `data-testid="tariff-chart"`
+- [X] T023 [P] [US4] Implement `StackedAreaChart` in `VEN/ui/src/components/controller-v2/charts/StackedAreaChart.tsx` — recharts `AreaChart`; for each asset render `{id}_pos` Area with `stackId="positive"` and `{id}_neg` Area with `stackId="negative"`; asset colors from `colorMap`; `ReferenceLine` at `nowMs`; `data-testid="accumulated-area-chart"`
+- [X] T024 [P] [US4] Implement `GridTariffCell` in `VEN/ui/src/components/controller-v2/GridTariffCell.tsx` — left section: 5 labeled values from `TariffSnapshot` (import tariff, import CO₂eq tariff, export tariff, total cost rate, grid power); right section: `TariffChart`; pin button; no controls; all `data-testid` attributes per contracts/ui-components.md
+- [X] T025 [P] [US4] Implement `GridAccumulatedCell` in `VEN/ui/src/components/controller-v2/GridAccumulatedCell.tsx` — left section: list of all assets with current power [kW] from `AssetSummary[]`; right section: `StackedAreaChart`; pin button; no controls; all `data-testid` attributes
+- [X] T026 [US4] Wire grid cells into `ControllerV2.tsx` — render `GridTariffCell` and `GridAccumulatedCell` above asset cells using `buildTariffTimeline()`, `buildStackedAreaData()`, and a derived `TariffSnapshot` from current `/sim` + `/rates`
+- [X] T027 [US4] Rebuild VEN UI on Pi4-Server and verify US4 BDD scenarios in `01_layout.feature` (grid cell ordering and content) pass
 
 **Checkpoint**: Both grid cells visible above asset cells, showing live tariff data and stacked area power breakdown. US4 acceptance scenarios pass.
 
@@ -102,9 +102,9 @@
 
 **Independent Test**: Toggle the EV plugged-in switch. Verify the EV power value in the left section updates to 0 (or charging rate) within 5 seconds, and the POST to `/sim/override` carries the updated `ev_plugged` value.
 
-- [ ] T028 [US3] Implement `AssetRightSection` in `VEN/ui/src/components/controller-v2/AssetRightSection.tsx` — two MUI Accordion groups: **Status Settings** (expanded by default — SoC slider for EV/Battery using stub fields, power on/off toggle) and **Simulation Characteristics** (collapsed by default — capacity, power limits, temp range, delays per asset type); read initial values from `SimSnapshot` + `UserOverrides`; POST changes via read-current-merge-write pattern using `useSetSimOverride()`; all `data-testid` attributes per contracts/ui-components.md
-- [ ] T029 [US3] Wire `AssetRightSection` into `AssetCell` — add `simSnapshot`, `overrides`, `onOverrideChange` props; call `useSimOverride()` and `useSetSimOverride()` in `ControllerV2.tsx`; pass down through `AssetCell`
-- [ ] T030 [US3] Rebuild VEN UI on Pi4-Server and verify US3 BDD scenarios in `03_simulation_controls.feature` pass
+- [X] T028 [US3] Implement `AssetRightSection` in `VEN/ui/src/components/controller-v2/AssetRightSection.tsx` — two MUI Accordion groups: **Status Settings** (expanded by default — SoC slider for EV/Battery using stub fields, power on/off toggle) and **Simulation Characteristics** (collapsed by default — capacity, power limits, temp range, delays per asset type); read initial values from `SimSnapshot` + `UserOverrides`; POST changes via read-current-merge-write pattern using `useSetSimOverride()`; all `data-testid` attributes per contracts/ui-components.md
+- [X] T029 [US3] Wire `AssetRightSection` into `AssetCell` — add `simSnapshot`, `overrides`, `onOverrideChange` props; call `useSimOverride()` and `useSetSimOverride()` in `ControllerV2.tsx`; pass down through `AssetCell`
+- [X] T030 [US3] Rebuild VEN UI on Pi4-Server and verify US3 BDD scenarios in `03_simulation_controls.feature` pass
 
 **Checkpoint**: Each asset cell right section shows live-readable controls. EV plugged toggle works end-to-end. US3 acceptance scenarios pass.
 
@@ -116,11 +116,11 @@
 
 **Independent Test**: On a page with 4+ cells, pin one cell, scroll down. The pinned cell remains at the top of the viewport. Unpin — it returns to its natural position. Collapse the left section of an asset cell — only graph and right section remain visible.
 
-- [ ] T031 [US5] Implement `PinnedZone` in `VEN/ui/src/components/controller-v2/PinnedZone.tsx` — sticky `position: sticky; top: 0` or `position: fixed` container rendering all currently pinned cells; `data-testid="pinned-zone"`
-- [ ] T032 [US5] Add pin/collapse state and handlers to `ControllerV2.tsx` — `pinnedCellIds: string[]` state; `handleTogglePin(cellId)` adds/removes from array; `collapseState: CollapseState` state; `handleToggleCollapse(cellId, section)` flips boolean; thread all handlers down to cell components
-- [ ] T033 [US5] Wire pin toggle into `AssetCell`, `GridTariffCell`, `GridAccumulatedCell` — show pin icon button; call `onTogglePin`; move pinned cells into `PinnedZone` in `ControllerV2.tsx` render
-- [ ] T034 [US5] Wire collapse toggles into `AssetCell` — left and right section collapse buttons call `onToggleCollapse`; wrap each section in MUI `Collapse`; collapse icon rotates to indicate state
-- [ ] T035 [US5] Rebuild VEN UI on Pi4-Server and verify US5 BDD scenarios in `04_navigation.feature` pass
+- [X] T031 [US5] Implement `PinnedZone` in `VEN/ui/src/components/controller-v2/PinnedZone.tsx` — sticky `position: sticky; top: 0` or `position: fixed` container rendering all currently pinned cells; `data-testid="pinned-zone"`
+- [X] T032 [US5] Add pin/collapse state and handlers to `ControllerV2.tsx` — `pinnedCellIds: string[]` state; `handleTogglePin(cellId)` adds/removes from array; `collapseState: CollapseState` state; `handleToggleCollapse(cellId, section)` flips boolean; thread all handlers down to cell components
+- [X] T033 [US5] Wire pin toggle into `AssetCell`, `GridTariffCell`, `GridAccumulatedCell` — show pin icon button; call `onTogglePin`; move pinned cells into `PinnedZone` in `ControllerV2.tsx` render
+- [X] T034 [US5] Wire collapse toggles into `AssetCell` — left and right section collapse buttons call `onToggleCollapse`; wrap each section in MUI `Collapse`; collapse icon rotates to indicate state
+- [X] T035 [US5] Rebuild VEN UI on Pi4-Server and verify US5 BDD scenarios in `04_navigation.feature` pass
 
 **Checkpoint**: Pin/collapse/unpin all work end-to-end. Page scroll is smooth with many cells. US5 acceptance scenarios pass.
 
@@ -130,10 +130,10 @@
 
 **Purpose**: Unit test coverage, data-testid audit, full test suite validation, documentation.
 
-- [ ] T036 Write `VEN/ui/src/__tests__/ControllerV2.test.tsx` — mock all hooks (`vi.mock("../api/hooks", ...)`); test: page renders without crash, asset cells present for each mocked asset, grid cells present, pin button present, left/right collapse buttons present; use `data-testid` selectors
-- [ ] T037 Audit `data-testid` coverage across all new components against `contracts/ui-components.md` — every listed `data-testid` must exist in the corresponding component
-- [ ] T038 Run full BDD test suite on Pi4-Server — zero failures required: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner`
-- [ ] T039 Update `docs/history/project_journal.md` — record what was built, key decisions, issues encountered; update `docs/reference/KEY_LEARNINGS.md` with any new lessons
+- [X] T036 Write `VEN/ui/src/__tests__/ControllerV2.test.tsx` — mock all hooks (`vi.mock("../api/hooks", ...)`); test: page renders without crash, asset cells present for each mocked asset, grid cells present, pin button present, left/right collapse buttons present; use `data-testid` selectors
+- [X] T037 Audit `data-testid` coverage across all new components against `contracts/ui-components.md` — every listed `data-testid` must exist in the corresponding component
+- [X] T038 Run full BDD test suite on Pi4-Server — zero failures required: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner`
+- [X] T039 Update `docs/history/project_journal.md` — record what was built, key decisions, issues encountered; update `docs/reference/KEY_LEARNINGS.md` with any new lessons
 
 **Checkpoint**: All 39 tasks complete. Zero test failures. Documentation updated. Feature ready for review.
 
