@@ -33,7 +33,7 @@ export function AssetCell({
   pinned,
   onTogglePin,
   onToggleCollapse,
-  onOverrideChange: _onOverrideChange,
+  onOverrideChange,
 }: AssetCellProps) {
   const cellId = `asset:${assetId}`;
   const color = ASSET_COLORS[assetId] ?? "#888";
