@@ -159,17 +159,18 @@ def step_ev_soc_slider_visible(context):
 
 @when("I toggle the EV plugged switch in the controller V2 EV cell")
 def step_toggle_ev_plugged(context):
-    # Read current state before toggle
+    # Read current state before toggle; None means "not set" → displays as True (checked)
     r = ven_get("/sim/override")
     r.raise_for_status()
     overrides = r.json()
-    context.ev_plugged_before = overrides.get("ev_plugged", True)
+    ev_plugged_raw = overrides.get("ev_plugged")
+    context.ev_plugged_before = True if ev_plugged_raw is None else ev_plugged_raw
 
-    # Click the switch
-    el = context.browser_page.wait_for_selector(
-        tid("ctrl-ev-plugged"), timeout=10000
+    # MUI Switch renders data-testid on a <span>; click the inner <input> to reliably toggle
+    checkbox = context.browser_page.wait_for_selector(
+        f'{tid("ctrl-ev-plugged")} input[type="checkbox"]', timeout=10000
     )
-    el.click()
+    checkbox.click()
 
 
 @then("the EV plugged state changes in VEN-1 sim override")
@@ -179,7 +180,8 @@ def step_ev_plugged_state_changed(context):
     def get_plugged():
         r = ven_get("/sim/override")
         r.raise_for_status()
-        return r.json().get("ev_plugged")
+        v = r.json().get("ev_plugged")
+        return True if v is None else v
 
     poll_until(
         get_plugged,
