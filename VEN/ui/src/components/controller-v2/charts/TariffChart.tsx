@@ -1,0 +1,120 @@
+import {
+  ComposedChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ReferenceLine,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
+import type { TariffTimePoint } from "../types";
+
+interface TariffChartProps {
+  data: TariffTimePoint[];
+  nowMs: number;
+}
+
+function formatTs(ts: number) {
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+export function TariffChart({ data, nowMs }: TariffChartProps) {
+  return (
+    <div data-testid="tariff-chart" style={{ width: "100%", height: 160 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+          <XAxis
+            dataKey="ts"
+            scale="time"
+            type="number"
+            domain={["auto", "auto"]}
+            tickFormatter={formatTs}
+            tick={{ fontSize: 10 }}
+          />
+          <YAxis yAxisId="tariff" tick={{ fontSize: 10 }} width={40} />
+          <YAxis yAxisId="power" orientation="right" tick={{ fontSize: 10 }} width={40} />
+          <Tooltip
+            labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
+            formatter={(value: number, name: string) => [value?.toFixed(4), name]}
+          />
+          <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
+
+          {/* Import tariff [€/kWh] — red dashed */}
+          <Line
+            yAxisId="tariff"
+            type="stepAfter"
+            dataKey="importPriceEurKwh"
+            name="Import tariff [€/kWh]"
+            stroke="#f44336"
+            strokeDasharray="5 5"
+            strokeWidth={1.5}
+            dot={false}
+            connectNulls={false}
+          />
+
+          {/* Import CO₂eq tariff [g CO₂eq/kWh] — red dotted */}
+          <Line
+            yAxisId="tariff"
+            type="stepAfter"
+            dataKey="co2GKwh"
+            name="CO₂eq tariff [g/kWh]"
+            stroke="#f44336"
+            strokeDasharray="2 2"
+            strokeWidth={1.5}
+            dot={false}
+            connectNulls={false}
+          />
+
+          {/* Export tariff [€/kWh] — green dashed */}
+          <Line
+            yAxisId="tariff"
+            type="stepAfter"
+            dataKey="exportPriceEurKwh"
+            name="Export tariff [€/kWh]"
+            stroke="#4caf50"
+            strokeDasharray="5 5"
+            strokeWidth={1.5}
+            dot={false}
+            connectNulls={false}
+          />
+
+          {/* Total cost rate [€/h] — black dashed */}
+          <Line
+            yAxisId="tariff"
+            type="stepAfter"
+            dataKey="totalCostRateEurH"
+            name="Cost rate [€/h]"
+            stroke="#212121"
+            strokeDasharray="5 5"
+            strokeWidth={1.5}
+            dot={false}
+            connectNulls={false}
+          />
+
+          {/* Grid power [kW] — black solid */}
+          <Line
+            yAxisId="power"
+            type="stepAfter"
+            dataKey="gridPowerKw"
+            name="Grid power [kW]"
+            stroke="#212121"
+            strokeWidth={2}
+            dot={false}
+            connectNulls={false}
+          />
+
+          {/* NOW reference line */}
+          <ReferenceLine
+            yAxisId="tariff"
+            x={nowMs}
+            stroke="#f44336"
+            strokeDasharray="3 3"
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
