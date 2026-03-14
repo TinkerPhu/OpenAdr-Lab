@@ -2,9 +2,11 @@ import { useState, useMemo } from "react";
 import { Alert, Box, CircularProgress, Typography } from "@mui/material";
 import { useSim, useRates, usePlan, useRequests, useTrace, useSimOverride, useSetSimOverride } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller-v2/types";
-import { deriveAssetSummaries, buildAssetTimeline } from "../components/controller-v2/dataBuilders";
+import { deriveAssetSummaries, buildAssetTimeline, buildStackedAreaData, buildTariffTimeline, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
 import { AssetCell } from "../components/controller-v2/AssetCell";
 import { PinnedZone } from "../components/controller-v2/PinnedZone";
+import { GridTariffCell } from "../components/controller-v2/GridTariffCell";
+import { GridAccumulatedCell } from "../components/controller-v2/GridAccumulatedCell";
 import type { UserOverrides } from "../api/types";
 
 export function ControllerV2Page() {
@@ -65,6 +67,21 @@ export function ControllerV2Page() {
     return map;
   }, [assetSummaries, trace, plan, tariffs, nowMs]);
 
+  const tariffSnapshot = useMemo(() => {
+    if (!sim) return null;
+    return deriveTariffSnapshot(sim, tariffs, nowMs);
+  }, [sim, tariffs, nowMs]);
+
+  const tariffTimeline = useMemo(
+    () => buildTariffTimeline(tariffs, trace, plan ?? null, nowMs),
+    [tariffs, trace, plan, nowMs]
+  );
+
+  const stackedAreaPoints = useMemo(
+    () => buildStackedAreaData(trace, plan ?? null, nowMs),
+    [trace, plan, nowMs]
+  );
+
   if (simLoading) {
     return (
       <Box data-testid="controller-v2-page" sx={{ p: 4, textAlign: "center" }}>
@@ -120,56 +137,26 @@ export function ControllerV2Page() {
 
       {/* Scrollable content */}
       <Box data-testid="scrollable-content">
-        {/* Grid-level cells (placeholder until Phase 4b) */}
-        <Box
-          data-testid="grid-tariff-cell"
-          sx={{
-            border: "1px solid",
-            borderColor: "divider",
-            p: 1,
-            mb: 1,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <Typography variant="body2" fontWeight="bold">
-            Tariff Cell
-          </Typography>
-          <Box
-            data-testid="grid-tariff-cell-pin-btn"
-            component="button"
-            onClick={() => handleTogglePin("grid:tariff")}
-            sx={{ cursor: "pointer", background: "none", border: "none" }}
-          >
-            📌
-          </Box>
-        </Box>
+        {/* Grid-level cells */}
+        {tariffSnapshot && !pinnedCellIds.includes("grid:tariff") && (
+          <GridTariffCell
+            snapshot={tariffSnapshot}
+            timePoints={tariffTimeline}
+            nowMs={nowMs}
+            pinned={false}
+            onTogglePin={() => handleTogglePin("grid:tariff")}
+          />
+        )}
 
-        <Box
-          data-testid="grid-accumulated-cell"
-          sx={{
-            border: "1px solid",
-            borderColor: "divider",
-            p: 1,
-            mb: 1,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <Typography variant="body2" fontWeight="bold">
-            Accumulated Asset Power
-          </Typography>
-          <Box
-            data-testid="grid-accumulated-cell-pin-btn"
-            component="button"
-            onClick={() => handleTogglePin("grid:accumulated")}
-            sx={{ cursor: "pointer", background: "none", border: "none" }}
-          >
-            📌
-          </Box>
-        </Box>
+        {!pinnedCellIds.includes("grid:accumulated") && (
+          <GridAccumulatedCell
+            assetSummaries={assetSummaries}
+            stackedAreaPoints={stackedAreaPoints}
+            nowMs={nowMs}
+            pinned={false}
+            onTogglePin={() => handleTogglePin("grid:accumulated")}
+          />
+        )}
 
         {/* Asset cells */}
         {assetSummaries
