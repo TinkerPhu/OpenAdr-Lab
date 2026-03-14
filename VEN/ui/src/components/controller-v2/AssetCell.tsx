@@ -7,6 +7,7 @@ import type { AssetId, AssetSummary, AssetTimePoint } from "./types";
 import { ASSET_COLORS } from "./types";
 import { AssetLeftSection } from "./AssetLeftSection";
 import { AssetMidSection } from "./AssetMidSection";
+import { AssetRightSection } from "./AssetRightSection";
 import type { SimSnapshot, UserOverrides } from "../../api/types";
 
 interface AssetCellProps {
@@ -26,8 +27,8 @@ export function AssetCell({
   assetId,
   summary,
   timePoints,
-  simSnapshot: _simSnapshot,
-  simOverrides: _simOverrides,
+  simSnapshot,
+  simOverrides,
   collapsed,
   pinned,
   onTogglePin,
@@ -86,13 +87,15 @@ export function AssetCell({
         </IconButton>
       </Tooltip>
 
-      {/* Right section — simulation controls (placeholder until Phase 5) */}
+      {/* Right section — simulation controls */}
       <Collapse in={!collapsed.right} orientation="horizontal">
-        <Box
-          data-testid={`asset-cell-${assetId}-right`}
-          sx={{ minWidth: 180, px: 1, py: 1 }}
-        >
-          {/* AssetRightSection will be wired here in T029 */}
+        <Box data-testid={`asset-cell-${assetId}-right`}>
+          <AssetRightSection
+            assetId={assetId}
+            simSnapshot={simSnapshot}
+            overrides={simOverrides}
+            onOverrideChange={onOverrideChange}
+          />
         </Box>
       </Collapse>
 
