@@ -6,6 +6,7 @@ import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import type { AssetId, AssetSummary, AssetTimePoint } from "./types";
 import { ASSET_COLORS } from "./types";
 import { AssetLeftSection } from "./AssetLeftSection";
+import { AssetMidSection } from "./AssetMidSection";
 import type { SimSnapshot, UserOverrides } from "../../api/types";
 
 interface AssetCellProps {
@@ -24,7 +25,7 @@ interface AssetCellProps {
 export function AssetCell({
   assetId,
   summary,
-  timePoints: _timePoints,
+  timePoints,
   simSnapshot: _simSnapshot,
   simOverrides: _simOverrides,
   collapsed,
@@ -65,13 +66,13 @@ export function AssetCell({
         </IconButton>
       </Tooltip>
 
-      {/* Mid section — timeline graph (placeholder until Phase 4a) */}
-      <Box
-        data-testid={`asset-cell-${assetId}-mid`}
-        sx={{ flex: 1, minHeight: 100, display: "flex", alignItems: "center", justifyContent: "center" }}
-      >
-        {/* AssetMidSection will be wired here in T019 */}
-      </Box>
+      {/* Mid section — timeline graph */}
+      <AssetMidSection
+        assetId={assetId}
+        timePoints={timePoints}
+        color={color}
+        nowMs={Date.now()}
+      />
 
       {/* Collapse right toggle */}
       <Tooltip title={collapsed.right ? "Expand right" : "Collapse right"}>
