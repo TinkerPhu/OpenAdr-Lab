@@ -16,6 +16,7 @@ import { MetricsPage } from "./pages/Metrics";
 import { TracePage } from "./pages/Trace";
 import { SimulationPage } from "./pages/Simulation";
 import { ControllerPage } from "./pages/Controller";
+import { ControllerV2Page } from "./pages/ControllerV2";
 import { UserRequestsPage } from "./pages/UserRequests";
 
 const DEFAULT_VENS = [
@@ -181,6 +182,13 @@ export default function App() {
             </Button>
             <Button
               component={Link}
+              to="/controller-v2"
+              data-testid="nav-controller-v2"
+            >
+              Controller V2
+            </Button>
+            <Button
+              component={Link}
               to="/user-requests"
               data-testid="nav-user-requests"
             >
@@ -234,6 +242,7 @@ export default function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/simulation" element={<SimulationPage />} />
             <Route path="/controller" element={<ControllerPage />} />
+            <Route path="/controller-v2" element={<ControllerV2Page />} />
             <Route path="/user-requests" element={<UserRequestsPage />} />
             <Route path="/programs" element={<ProgramsPage />} />
             <Route path="/events" element={<EventsPage />} />
