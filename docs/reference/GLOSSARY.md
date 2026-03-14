@@ -19,6 +19,25 @@
 | **VEN** | Virtual End Node | The client side of OpenADR. Runs at the customer site (building, factory, EV fleet). Receives events from the VTN, controls local devices, and reports back telemetry. |
 | **BFF** | Backend For Frontend | An API proxy between the VTN UI and the VTN. Handles authentication, caching, and simplifies the VTN API for the web frontend. Not part of the OpenADR spec — an architectural pattern used in this lab. |
 
+## HEMS — Home Energy Management System
+
+| Term | Full Name | Explanation |
+|---|---|---|
+| **HEMS** | Home Energy Management System | Software and hardware system that monitors and controls energy flows within a home or small site. Coordinates DERs (solar, battery, EV charger, HVAC) to minimise cost, maximise self-consumption, or respond to DR signals from a VTN. In this lab, the HEMS controller runs inside the VEN. |
+| **Planner** | Energy Planner | Component of the HEMS that schedules future energy use. Given rate forecasts, device constraints, and DR obligations, it builds an optimal time-slot plan (FIRM + FLEXIBLE slots) using a greedy algorithm. |
+| **Dispatcher** | Setpoint Dispatcher | Real-time control loop (1 s tick) that translates the planner's slot schedule into live device setpoints and accumulates the asset ledger. |
+| **Asset Ledger** | — | Cumulative energy accounting record maintained by the Dispatcher. Tracks how much energy each asset imported/exported and the associated cost/revenue. |
+| **Energy Packet** | — | A schedulable unit of energy delivery: a fixed amount of energy (kWh) for a specific asset, with a time window and status (PENDING → ACTIVE → COMPLETED / ABANDONED). |
+| **FIRM slot** | Firm Commitment Slot | A planner output slot that must be executed — typically driven by a hard user request or minimum SOC constraint. Cannot be deferred. |
+| **FLEXIBLE slot** | Flexible Opportunity Slot | A planner output slot that can be shifted or cancelled if constraints change. Typically price-driven charging windows. |
+| **Rate Snapshot** | — | A point-in-time price signal parsed from a VTN event payload. Contains start time, duration, import price ($/kWh), and export price. |
+| **Capacity State** | — | Current grid capacity constraints parsed from a VTN event: import limit (kW) and export limit (kW) the VEN must not exceed. |
+| **User Request** | — | An explicit energy delivery request submitted by the occupant (e.g. "charge EV to 80% by 07:00"). The planner honours these as FIRM slots. Supports ASAP, BY_DEADLINE, and SCHEDULED modes. |
+| **SOC target** | State-of-Charge Target | Desired battery or EV charge level (%) at a given deadline. The planner back-calculates the required charging power and window to meet it. |
+| **FlexibilityEnvelope** | — | The range of power the HEMS can flex (increase or decrease) in each time slot, as seen from the grid. Exposed to aggregators to let them predict available DR capacity. |
+| **PV** | Photovoltaic (Solar) | Solar panel array modelled in the VEN simulator. Output follows a `sin(π*(hour-6)/12)` curve between 06:00–18:00; zero otherwise. Sign convention: negative = export (generation). |
+| **Sign convention** | Grid Sign Convention | Positive = power imported from grid; negative = power exported to grid. Applies uniformly to setpoints, ledger entries, and reports in this lab. |
+
 ## Energy & Grid Concepts
 
 | Term | Full Name | Explanation |
