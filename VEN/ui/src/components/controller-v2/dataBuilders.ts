@@ -358,7 +358,7 @@ export function buildTariffTimeline(
   tariffs: RateSnapshot[],
   traceEntries: TraceEntry[],
   plan: Plan | null,
-  nowMs: number
+  _nowMs: number
 ): TariffTimePoint[] {
   if (tariffs.length === 0) return [];
 
