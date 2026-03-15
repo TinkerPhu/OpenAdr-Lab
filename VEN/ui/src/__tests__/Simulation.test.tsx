@@ -17,6 +17,7 @@ const baseSim: SimSnapshot = {
   base_load_w: 500,
   import_kwh: 1.5,
   export_kwh: 0,
+  assets: {},
   ev: {
     soc: 0.5,
     plugged: true,
