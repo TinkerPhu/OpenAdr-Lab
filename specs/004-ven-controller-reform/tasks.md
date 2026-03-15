@@ -27,7 +27,7 @@
 - [x] T007 Add new BDD scenarios to `tests/features/ven_entity_model.feature`: `GET /trace/events` returns a list of typed controller events after VEN operation. (US2)
 - [x] T008 [P] Add new BDD scenarios for `GET /trace/history?asset=ev&limit=5` returning rows with `power_kw` and `soc_pct` fields. (US2)
 - [x] T009 Add new BDD scenario for `GET /tariffs` returning the same tariff data structure that `GET /rates` previously returned. (US5)
-- [ ] T010 Run the full BDD suite on Pi4-Server (`docker compose -f tests/docker-compose.test.yml run --build --rm test-runner`) — confirm the new `GET /trace/events`, `GET /trace/history`, and `GET /tariffs` scenarios fail (red phase). All existing passing scenarios must still pass.
+- [x] T010 Run the full BDD suite on Pi4-Server (`docker compose -f tests/docker-compose.test.yml run --build --rm test-runner`) — confirm the new `GET /trace/events`, `GET /trace/history`, and `GET /tariffs` scenarios fail (red phase). All existing passing scenarios must still pass.
 
 **Checkpoint**: BDD suite is red on new endpoints. Phase 1 complete — Rust implementation may begin.
 
@@ -64,13 +64,13 @@
 
 **Independent Test**: Run `tests/features/use_cases.feature` and `tests/features/ven_uc_normal.feature` — all 12 UC scenarios pass.
 
-- [ ] T025 [P] [US1] Delete `VEN/src/reactor/` directory entirely (all 5 files: `mod.rs`, `arbitration.rs`, `fsm.rs`, `interval.rs`, `trace.rs`).
-- [ ] T026 [P] [US1] Rewrite `VEN/src/controller/dispatcher.rs`: replace `get_setpoints` and `update_packets` with new `pub fn build_setpoints(plan: &Plan, assets: &[AssetEntry], capacity: &OadrCapacityState, now: DateTime<Utc>) -> HashMap<String, f64>`. Scan FIRM and FLEXIBLE slots for the slot covering `now`; fill gaps with `asset.state.default_setpoint()`; enforce `ExportCapLimit` on `pv` key if active. Delete `DispatcherSetpoints` struct.
-- [ ] T027 [US1] Remove `mod reactor;` and `mod reporter;` from `VEN/src/main.rs`. Remove `reactor_state: Arc<Mutex<Reactor>>` initialization. Remove `use reactor::Reactor;`.
-- [ ] T028 [US1] Rewrite the tick loop in `VEN/src/main.rs` to the new sequence: (1) `dispatcher::build_setpoints(plan, assets, capacity, now)` → setpoints map; (2) `sim.tick(dt_s, setpoints, now, &overrides)`; (3) `state.update_sim(sim_snap)`; (4) timer check for measurement reports. Remove the reactor evaluate call and all force-override overlay lines (`ev_force_kw`, `heater_force_kw`, `battery_force_kw`, `pv_force_export_limit_kw`).
-- [ ] T029 [US1] Update the planning loop in `VEN/src/main.rs`: after `run_planner(...)` completes, push a `ControllerEvent::PlanCycle { ts, trigger_reason, firm_slots, flexible_slots }` via `state.push_controller_event(...)`.
-- [ ] T030 [US1] Run `cargo build` and fix all remaining compile errors from the reactor deletion and tick loop rewrite in `VEN/src/main.rs` and related files.
-- [ ] T031 [US1] Deploy updated VEN to Pi4-Server (`git push` → `git pull` → `docker compose up -d --build`). Run `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner features/use_cases.feature features/ven_uc_normal.feature` and verify all UC-01–UC-12 scenarios pass.
+- [x] T025 [P] [US1] Delete `VEN/src/reactor/` directory entirely (all 5 files: `mod.rs`, `arbitration.rs`, `fsm.rs`, `interval.rs`, `trace.rs`).
+- [x] T026 [P] [US1] Rewrite `VEN/src/controller/dispatcher.rs`: replace `get_setpoints` and `update_packets` with new `pub fn build_setpoints(plan: &Plan, assets: &[AssetEntry], capacity: &OadrCapacityState, now: DateTime<Utc>) -> HashMap<String, f64>`. Scan FIRM and FLEXIBLE slots for the slot covering `now`; fill gaps with `asset.state.default_setpoint()`; enforce `ExportCapLimit` on `pv` key if active. Delete `DispatcherSetpoints` struct.
+- [x] T027 [US1] Remove `mod reactor;` and `mod reporter;` from `VEN/src/main.rs`. Remove `reactor_state: Arc<Mutex<Reactor>>` initialization. Remove `use reactor::Reactor;`.
+- [x] T028 [US1] Rewrite the tick loop in `VEN/src/main.rs` to the new sequence: (1) `dispatcher::build_setpoints(plan, assets, capacity, now)` → setpoints map; (2) `sim.tick(dt_s, setpoints, now, &overrides)`; (3) `state.update_sim(sim_snap)`; (4) timer check for measurement reports. Remove the reactor evaluate call and all force-override overlay lines (`ev_force_kw`, `heater_force_kw`, `battery_force_kw`, `pv_force_export_limit_kw`).
+- [x] T029 [US1] Update the planning loop in `VEN/src/main.rs`: after `run_planner(...)` completes, push a `ControllerEvent::PlanCycle { ts, trigger_reason, firm_slots, flexible_slots }` via `state.push_controller_event(...)`.
+- [x] T030 [US1] Run `cargo build` and fix all remaining compile errors from the reactor deletion and tick loop rewrite in `VEN/src/main.rs` and related files.
+- [x] T031 [US1] Deploy updated VEN to Pi4-Server (`git push` → `git pull` → `docker compose up -d --build`). Run `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner features/use_cases.feature features/ven_uc_normal.feature` and verify all UC-01–UC-12 scenarios pass.
 
 **Checkpoint**: Single control path confirmed. UC-01–UC-12 all green. Reactor is gone.
 
