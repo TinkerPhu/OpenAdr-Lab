@@ -86,7 +86,9 @@ def step_battery_commanded_charge(context):
 
 @then("the response status is {code:d}")
 def step_response_status(context, code):
-    resp = getattr(context, "last_response", None) or getattr(context, "response", None)
+    resp = getattr(context, "last_response", None)
+    if resp is None:
+        resp = getattr(context, "response", None)
     assert resp is not None, "No response stored in context (checked last_response and response)"
     assert resp.status_code == code, (
         f"Expected HTTP {code}, got {resp.status_code}. "
