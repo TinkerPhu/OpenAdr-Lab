@@ -79,6 +79,15 @@ export type PvSnapshot = {
   rated_kw: number;
 };
 
+export type BatterySnapshot = {
+  soc: number;
+  current_kw: number;      // positive = charging (import), negative = discharging (export)
+  capacity_kwh: number;
+  max_charge_kw: number;
+  max_discharge_kw: number;
+  min_soc: number;
+};
+
 export type SimSnapshot = {
   ts: string;
   net_power_w: number;
@@ -91,6 +100,7 @@ export type SimSnapshot = {
   ev?: EvSnapshot | null;
   heater?: HeaterSnapshot | null;
   pv?: PvSnapshot | null;
+  battery?: BatterySnapshot | null;
 };
 
 export type Setpoints = {
@@ -107,6 +117,7 @@ export type UserOverrides = {
   ev_plugged?: boolean;
   ev_force_kw?: number;
   heater_force_kw?: number;
+  battery_force_kw?: number;
   pv_force_export_limit_kw?: number;
   ev_max_charge_kw?: number;
   ev_soc_target?: number;
@@ -115,6 +126,10 @@ export type UserOverrides = {
   heater_temp_max_c?: number;
   pv_rated_kw?: number;
   base_load_w?: number;
+  // Stub fields — one-shot SoC setters and persistent capacity override
+  ev_initial_soc?: number;
+  battery_initial_soc?: number;
+  battery_capacity_kwh?: number;
 };
 
 export type TraceEntry = {

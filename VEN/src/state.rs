@@ -58,6 +58,12 @@ pub struct UserOverrides {
     pub heater_temp_max_c: Option<f64>,
     pub pv_rated_kw: Option<f64>,
     pub base_load_w: Option<f64>,
+
+    // Stub fields — one-shot SoC jumps and persistent battery capacity override
+    // These will be replaced with proper endpoints in a future change.
+    pub ev_initial_soc: Option<f64>,         // One-shot: jump EV SoC to value [0.0–1.0], then clear
+    pub battery_initial_soc: Option<f64>,    // One-shot: jump battery SoC to value [0.0–1.0], then clear
+    pub battery_capacity_kwh: Option<f64>,   // Persistent: override battery capacity_kwh while set
 }
 
 #[derive(Clone)]
