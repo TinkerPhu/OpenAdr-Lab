@@ -1,5 +1,4 @@
-ven-controller-dashboard-v2: make a second controller page in the ven ui with the final goal to replace the current. the page shall 
-contain a series of cells, stacked vertically. One cell for each asset. On top of the page are also grid related cells.
+ven-controller-dashboard-v2: make a second controller page in the ven ui with the final goal to replace the current. the page shall contain a series of cells, stacked vertically. One cell for each asset. On top of the page are also grid related cells.
 
 ## Asset cells:
 An asset cell is split in three sections: left, mid, right section. left and right sections can be collapsed by user.
