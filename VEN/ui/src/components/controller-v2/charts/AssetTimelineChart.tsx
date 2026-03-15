@@ -36,7 +36,6 @@ export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartPro
         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
         <XAxis
           dataKey="ts"
-          scale="time"
           type="number"
           domain={["auto", "auto"]}
           tickFormatter={formatTs}
