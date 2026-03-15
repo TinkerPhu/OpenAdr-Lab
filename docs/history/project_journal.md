@@ -2394,3 +2394,44 @@ Two consecutive runs (first `--build`, second without) both 0 failures.
 ### Commits
 
 `63244ef`, `219bcdc`, `12055ae`, `115fed3`, `08ea264`, `f104589`, `ebc4688`, `cbf24d6`
+
+---
+
+### 25. VEN Simulator Reform — Generic Asset Model (speckit 002)
+
+**Status: COMPLETE** | Branch: `002-ven-simulator-reform`
+
+**What was done:**
+
+Replaced the hardcoded per-device named fields in `SimState` (ev, heater, pv, battery, base_load_w, energy) with a generic `Vec<AssetEntry>` model. Each entry holds an `AssetState` enum variant, a setpoint, the last actual power, and a per-asset `EnergyCounter`. This removes the need for device-specific branches throughout the tick loop, planner, and dispatcher.
+
+**Architecture changes:**
+- `VEN/src/simulator/actors.rs` deleted — replaced by `simulator/assets/` directory with one file per asset type (`ev.rs`, `heater.rs`, `pv.rs`, `battery.rs`, `base_load.rs`, `mod.rs`)
+- `AssetState` enum dispatches all 8 methods via match (exhaustiveness guarantees new types are handled)
+- `TickEnvironment = HashMap<String, f64>` passed to `update()` — assets read what they need (hour_of_day, ambient_temp_c, pv_irradiance)
+- `Profile.devices: DeviceConfig` supplemented with `Profile.assets: Vec<AssetConfig>` using `#[serde(tag = "type", rename_all = "snake_case")]` internally-tagged enum for YAML deserialization
+- All 4 YAML profiles migrated to `assets:` list format; legacy `devices:` still supported as fallback
+- `SimState.tick()` now accepts `HashMap<String, f64>` setpoints (keyed by asset id) instead of the named `Setpoints` struct
+- `SimState.to_sim_snapshot()` outputs `assets: HashMap<String, AssetSnapshot>` (generic) PLUS backward-compat named fields (`ev`, `heater`, `pv`, `battery`, `base_load_w`) derived from the typed `AssetState` so existing UI consumers require no changes
+- `power_model.rs` simplified to `random_voltage()` only; grid totals derived inline in tick
+- `UserOverrides` stub fields removed: `ev_initial_soc`, `battery_initial_soc`, `battery_capacity_kwh`
+- New API endpoints: `GET /sim/schema`, `POST /sim/reset/:asset_id`, `PUT /sim/config/battery`
+- `controller/trace.rs` added with `AssetHistoryBuffer` ring-buffer data structure (no callers yet)
+
+**Key issues and learnings:**
+
+1. **`_resolve_nested` backward compat**: Feature files use paths like `"battery.soc"` against the `/sim` response. The new format is `assets.battery.soc`. Updated `_resolve_nested` in `entity_model_steps.py` to fall back to `data["assets"][first_part]` when the top-level key is not found.
+
+2. **`user_request.rs` reads `SimSnapshot` not `SimState`**: The `resolve_target()` function receives `Option<&SimSnapshot>`. `SimSnapshot.assets` is `HashMap<String, AssetSnapshot>` and `AssetSnapshot.values` is a flat `HashMap<String, f64>`. SoC is stored as `soc_pct` (0-100). Changed access from `.ev().map(|e| e.soc)` to `.assets.get("ev").and_then(|a| a.values.get("soc_pct")).map(|pct| pct / 100.0)`.
+
+3. **UI tests broke without compat fields**: `Simulation.tsx` and `Controller.tsx` components check `sim.ev != null` before rendering device cards. With the new format lacking top-level named fields, all device cards returned null → all Playwright UI tests timed out. Solution: add backward-compat typed snapshots (`LegacyEvSnapshot`, etc.) reconstructed directly from the typed `AssetState` in `to_sim_snapshot()`. Zero UI changes needed.
+
+4. **`serde(flatten)` on `AssetSnapshot.values`**: Applied to merge the asset's generic state values flat into the JSON object alongside `power_kw`. This allows Python `_resolve_nested` to reach `assets.battery.soc` without an extra `values` nesting level.
+
+5. **`base_load` asset id**: The base load asset is stored under id `"base_load"` (with underscore) in the `Vec<AssetEntry>`. The old response had `base_load_w: f64` at the top level. This is now restored as a compat field derived from `assets.get("base_load").last_power_kw * 1000`.
+
+**Final test result:**
+
+33 features, 143 scenarios, 895 steps — all passing with 0 failures on Pi4-Server ARM64.
+
+**Commits:** `b4eea32`, `6a5163b`, `09a64fe`
