@@ -22,6 +22,12 @@ function formatTs(ts: number) {
 }
 
 export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartProps) {
+  // When data is empty, provide a fallback domain so the NOW reference line renders
+  const xDomain: [number, number] | ["auto", "auto"] =
+    data.length > 0
+      ? ["auto", "auto"]
+      : [nowMs - 3_600_000, nowMs + 3_600_000];
+
   return (
     <ResponsiveContainer width="100%" height={140}>
       <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -30,7 +36,7 @@ export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartPro
           dataKey="ts"
           scale="time"
           type="number"
-          domain={["auto", "auto"]}
+          domain={xDomain}
           tickFormatter={formatTs}
           tick={{ fontSize: 10 }}
         />
