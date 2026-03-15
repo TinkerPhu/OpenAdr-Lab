@@ -50,3 +50,8 @@ also add ui tests for UserRequests and Controller in VEN\ui\src\__tests__
 
 the ven poll interval should be configurable in the config file so during test we can easily shorten it. or is there a better option? 
 
+VEN\src\controller\user_request.rs contains switches on asset types. this should be inside the assets.
+
+min_soc is NOT in state_values. this will always return the default 0.10 since min_soc is not in values
+
+reactor still there?
