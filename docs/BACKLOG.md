@@ -50,4 +50,3 @@ also add ui tests for UserRequests and Controller in VEN\ui\src\__tests__
 
 the ven poll interval should be configurable in the config file so during test we can easily shorten it. or is there a better option? 
 
-can we fix this issue? - **Windows SSH PATH issue** — Git Bash SSH (`C:\Program Files\Git\usr\bin\ssh.exe`) takes PATH precedence over Windows OpenSSH and cannot find `C:\Users\<user>\.ssh\config`. Use full path `"C:/Windows/System32/OpenSSH/ssh.exe"` in Claude Code Bash commands when SSH connections fail silently.
