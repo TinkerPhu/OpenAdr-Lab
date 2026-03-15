@@ -39,20 +39,20 @@
 
 **⚠️ CRITICAL**: All user story Rust work depends on these foundations.
 
-- [ ] T011 [US5] Rename `VEN/src/entities/rate_snapshot.rs` → `VEN/src/entities/tariff_snapshot.rs`. Inside the file: rename `RateSnapshot` → `TariffSnapshot`, `PlannedRates` → `PlannedTariffs`, `PastRates` → `PastTariffs`, `RateHeuristic` → `TariffHeuristic`.
-- [ ] T012 [P] [US5] Update `VEN/src/entities/mod.rs`: change `pub mod rate_snapshot;` → `pub mod tariff_snapshot;`.
-- [ ] T013 [US5] Update all Rust files importing `RateSnapshot`/`PlannedRates`/`PastRates`: `VEN/src/state.rs`, `VEN/src/controller/openadr_interface.rs`, `VEN/src/controller/monitor.rs`, `VEN/src/controller/planner.rs`, `VEN/src/main.rs`. Replace every occurrence with the new `TariffSnapshot`/`PlannedTariffs`/`PastTariffs` names.
-- [ ] T014 [US5] In `VEN/src/state.rs`: rename field `planned_rates: Vec<RateSnapshot>` → `planned_tariffs: Vec<TariffSnapshot>`; rename accessor methods `planned_rates()` → `planned_tariffs()`, `set_planned_rates()` → `set_planned_tariffs()`.
-- [ ] T015 [US5] In `VEN/src/main.rs`: rename `GET /rates` route handler `get_rates` → `get_tariffs`; update route registration `.route("/rates", ...)` → `.route("/tariffs", ...)`.
-- [ ] T016 [US2] Add `ControllerEvent` enum (all 7 variants: `OpenAdrArrived`, `OpenAdrExpired`, `RateChange`, `CapacityChange`, `PlanCycle`, `PacketTransition`, `RequestTransition`) to `VEN/src/controller/trace.rs`. Derive `Debug, Clone, Serialize, Deserialize`. Use `serde(tag = "type")` for tagged JSON.
-- [ ] T017 [P] [US2] Add `ControllerEventLog` struct to `VEN/src/controller/trace.rs` with `push`, `entries`, `len` methods and a `capacity: usize` (default 500).
-- [ ] T018 [US2] Add `ControllerTrace` struct to `VEN/src/controller/trace.rs` holding `event_log: ControllerEventLog` and `asset_history: HashMap<String, AssetHistoryBuffer>`. Add methods: `push_event`, `push_asset_row`, `events`, `asset_history`.
-- [ ] T019 [US2] Update `VEN/src/state.rs`: remove `use crate::reactor::trace::TraceEntry;`; add `use crate::controller::trace::ControllerTrace;`. Remove field `trace: Vec<TraceEntry>`; add `controller_trace: ControllerTrace` with `#[serde(skip)]`. Update `InnerState::new()`.
-- [ ] T020 [P] [US2] Add AppState accessor methods to `VEN/src/state.rs`: `controller_trace() -> ControllerTrace`, `set_controller_trace(ControllerTrace)`, `push_controller_event(ControllerEvent)`.
-- [ ] T021 [US2] Replace `update_sim(sim: SimSnapshot, trace: Vec<TraceEntry>)` with `update_sim(sim: SimSnapshot)` in `VEN/src/state.rs`. Update all callers.
-- [ ] T022 Update `VEN/src/controller/mod.rs`: add `pub mod reporter;` and `pub mod timeline;`; add group comments: `// ── VTN protocol adapter ──`, `// ── Control logic ──`, `// ── Observability ──` above the appropriate module declarations.
-- [ ] T023 [P] Create `VEN/src/controller/timeline.rs` stub: single `pub fn build_asset_timeline(_history: &HashMap<String, AssetHistoryBuffer>) -> serde_json::Value { serde_json::Value::Null }`.
-- [ ] T024 Run `cargo build` on Pi4-Server (or locally) and fix all compile errors introduced by T011–T023. The build must succeed cleanly before proceeding.
+- [x] T011 [US5] Rename `VEN/src/entities/rate_snapshot.rs` → `VEN/src/entities/tariff_snapshot.rs`. Inside the file: rename `RateSnapshot` → `TariffSnapshot`, `PlannedRates` → `PlannedTariffs`, `PastRates` → `PastTariffs`, `RateHeuristic` → `TariffHeuristic`.
+- [x] T012 [P] [US5] Update `VEN/src/entities/mod.rs`: change `pub mod rate_snapshot;` → `pub mod tariff_snapshot;`.
+- [x] T013 [US5] Update all Rust files importing `RateSnapshot`/`PlannedRates`/`PastRates`: `VEN/src/state.rs`, `VEN/src/controller/openadr_interface.rs`, `VEN/src/controller/monitor.rs`, `VEN/src/controller/planner.rs`, `VEN/src/main.rs`. Replace every occurrence with the new `TariffSnapshot`/`PlannedTariffs`/`PastTariffs` names.
+- [x] T014 [US5] In `VEN/src/state.rs`: rename field `planned_rates: Vec<RateSnapshot>` → `planned_tariffs: Vec<TariffSnapshot>`; rename accessor methods `planned_rates()` → `planned_tariffs()`, `set_planned_rates()` → `set_planned_tariffs()`.
+- [x] T015 [US5] In `VEN/src/main.rs`: rename `GET /rates` route handler `get_rates` → `get_tariffs`; update route registration `.route("/rates", ...)` → `.route("/tariffs", ...)`.
+- [x] T016 [US2] Add `ControllerEvent` enum (all 7 variants: `OpenAdrArrived`, `OpenAdrExpired`, `RateChange`, `CapacityChange`, `PlanCycle`, `PacketTransition`, `RequestTransition`) to `VEN/src/controller/trace.rs`. Derive `Debug, Clone, Serialize, Deserialize`. Use `serde(tag = "type")` for tagged JSON.
+- [x] T017 [P] [US2] Add `ControllerEventLog` struct to `VEN/src/controller/trace.rs` with `push`, `entries`, `len` methods and a `capacity: usize` (default 500).
+- [x] T018 [US2] Add `ControllerTrace` struct to `VEN/src/controller/trace.rs` holding `event_log: ControllerEventLog` and `asset_history: HashMap<String, AssetHistoryBuffer>`. Add methods: `push_event`, `push_asset_row`, `events`, `asset_history`.
+- [x] T019 [US2] Update `VEN/src/state.rs`: remove `use crate::reactor::trace::TraceEntry;`; add `use crate::controller::trace::ControllerTrace;`. Remove field `trace: Vec<TraceEntry>`; add `controller_trace: ControllerTrace` with `#[serde(skip)]`. Update `InnerState::new()`.
+- [x] T020 [P] [US2] Add AppState accessor methods to `VEN/src/state.rs`: `controller_trace() -> ControllerTrace`, `set_controller_trace(ControllerTrace)`, `push_controller_event(ControllerEvent)`.
+- [x] T021 [US2] Replace `update_sim(sim: SimSnapshot, trace: Vec<TraceEntry>)` with `update_sim(sim: SimSnapshot)` in `VEN/src/state.rs`. Update all callers.
+- [x] T022 Update `VEN/src/controller/mod.rs`: add `pub mod reporter;` and `pub mod timeline;`; add group comments: `// ── VTN protocol adapter ──`, `// ── Control logic ──`, `// ── Observability ──` above the appropriate module declarations.
+- [x] T023 [P] Create `VEN/src/controller/timeline.rs` stub: single `pub fn build_asset_timeline(_history: &HashMap<String, AssetHistoryBuffer>) -> serde_json::Value { serde_json::Value::Null }`.
+- [x] T024 Run `cargo build` on Pi4-Server (or locally) and fix all compile errors introduced by T011–T023. The build must succeed cleanly before proceeding.
 
 **Checkpoint**: VEN compiles cleanly with renamed types, new trace types, and updated state. Behaviorally identical to before — no running behavior has changed.
 
