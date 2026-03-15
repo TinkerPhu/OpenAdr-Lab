@@ -33,12 +33,10 @@ impl Setpoints {
     pub fn defaults(profile: &Profile, overrides: &UserOverrides) -> Self {
         Self {
             ev_charge_kw: overrides.ev_desired_kw.unwrap_or_else(|| {
-                profile.devices.ev.as_ref().map(|e| e.max_charge_kw).unwrap_or(0.0)
+                profile.ev_config().map(|e| e.max_charge_kw).unwrap_or(0.0)
             }),
             heater_kw: profile
-                .devices
-                .heater
-                .as_ref()
+                .heater_config()
                 .map(|h| h.max_kw * 0.5) // default: half power
                 .unwrap_or(0.0),
             pv_export_limit_kw: None,
@@ -167,16 +165,16 @@ impl Reactor {
 
         // Build constraints list for trace
         let mut constraints = Vec::new();
-        if let Some(ref ev) = profile.devices.ev {
+        if let Some(ev) = profile.ev_config() {
             constraints.push(format!("EV max {:.1}kW", ev.max_charge_kw));
         }
-        if let Some(ref h) = profile.devices.heater {
+        if let Some(h) = profile.heater_config() {
             constraints.push(format!(
                 "Heater max {:.1}kW, range {:.0}-{:.0}°C",
                 h.max_kw, h.temp_min_c, h.temp_max_c
             ));
         }
-        if profile.devices.pv.is_some() {
+        if profile.pv_config().is_some() {
             constraints.push("PV export limit (kW)".to_string());
         }
 
@@ -234,18 +232,8 @@ impl Reactor {
         let target = match intent.mode {
             ReactorMode::ExportCapLimit => {
                 // Reduce export: increase consumption (charge EV, heat more), limit PV output
-                let ev_max = profile
-                    .devices
-                    .ev
-                    .as_ref()
-                    .map(|e| e.max_charge_kw)
-                    .unwrap_or(0.0);
-                let heater_max = profile
-                    .devices
-                    .heater
-                    .as_ref()
-                    .map(|h| h.max_kw)
-                    .unwrap_or(0.0);
+                let ev_max = profile.ev_config().map(|e| e.max_charge_kw).unwrap_or(0.0);
+                let heater_max = profile.heater_config().map(|h| h.max_kw).unwrap_or(0.0);
 
                 Setpoints {
                     ev_charge_kw: ev_max,
@@ -293,18 +281,8 @@ impl Reactor {
                     }
                 } else if price <= profile.reactor.price_low {
                     // Low price: increase loads (valley fill)
-                    let ev_max = profile
-                        .devices
-                        .ev
-                        .as_ref()
-                        .map(|e| e.max_charge_kw)
-                        .unwrap_or(0.0);
-                    let heater_max = profile
-                        .devices
-                        .heater
-                        .as_ref()
-                        .map(|h| h.max_kw)
-                        .unwrap_or(0.0);
+                    let ev_max = profile.ev_config().map(|e| e.max_charge_kw).unwrap_or(0.0);
+                    let heater_max = profile.heater_config().map(|h| h.max_kw).unwrap_or(0.0);
                     Setpoints {
                         ev_charge_kw: ev_max,
                         heater_kw: heater_max,
@@ -319,7 +297,7 @@ impl Reactor {
             }
             ReactorMode::ChargeSetpoint => {
                 // Direct EV charge setpoint command — may be negative for V2G discharge
-                let max_kw = profile.devices.ev.as_ref().map(|e| e.max_charge_kw).unwrap_or(0.0);
+                let max_kw = profile.ev_config().map(|e| e.max_charge_kw).unwrap_or(0.0);
                 let target_kw = intent.value.clamp(-max_kw, max_kw);
                 Setpoints {
                     ev_charge_kw: target_kw,

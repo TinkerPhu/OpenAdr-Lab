@@ -2,9 +2,39 @@ use serde::Deserialize;
 use std::path::Path;
 use tracing::{info, warn};
 
+/// Asset configuration tagged enum for the new `assets:` list format in YAML.
+/// Each entry has a `type` discriminator plus type-specific fields.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AssetConfig {
+    Ev(EvConfig),
+    Heater(HeaterConfig),
+    Pv(PvConfig),
+    Battery(BatteryConfig),
+    BaseLoad(BaseLoadConfig),
+}
+
+impl AssetConfig {
+    /// Asset identifier — must be present in every YAML entry.
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Ev(c) => &c.id,
+            Self::Heater(c) => &c.id,
+            Self::Pv(c) => &c.id,
+            Self::Battery(c) => &c.id,
+            Self::BaseLoad(c) => &c.id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Profile {
+    /// Legacy named-device format (old YAML). Used during transition.
+    #[serde(default)]
     pub devices: DeviceConfig,
+    /// New typed asset list format.
+    #[serde(default)]
+    pub assets: Vec<AssetConfig>,
     #[serde(default)]
     pub reactor: ReactorConfig,
     #[serde(default)]
@@ -15,7 +45,7 @@ pub struct Profile {
     pub packets: Vec<PacketSeed>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct DeviceConfig {
     pub ev: Option<EvConfig>,
     pub heater: Option<HeaterConfig>,
@@ -31,18 +61,29 @@ fn default_base_load() -> f64 {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct EvConfig {
+    #[serde(default = "default_asset_id_ev")]
+    pub id: String,
     #[serde(default = "default_ev_max_charge")]
     pub max_charge_kw: f64,
+    #[serde(default = "default_ev_max_discharge")]
+    pub max_discharge_kw: f64,
     #[serde(default = "default_ev_soc")]
     pub initial_soc: f64,
     #[serde(default = "default_ev_battery")]
     pub battery_kwh: f64,
     #[serde(default = "default_ev_soc_target")]
     pub soc_target: f64,
+    #[serde(default)]
+    pub default_charge_kw: f64,
 }
+
+fn default_asset_id_ev() -> String { "ev".into() }
 
 fn default_ev_max_charge() -> f64 {
     7.4
+}
+fn default_ev_max_discharge() -> f64 {
+    0.0
 }
 fn default_ev_soc() -> f64 {
     0.5
@@ -56,6 +97,8 @@ fn default_ev_soc_target() -> f64 {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct HeaterConfig {
+    #[serde(default = "default_asset_id_heater")]
+    pub id: String,
     #[serde(default = "default_heater_max")]
     pub max_kw: f64,
     #[serde(default = "default_heater_temp")]
@@ -65,6 +108,8 @@ pub struct HeaterConfig {
     #[serde(default = "default_heater_max_temp")]
     pub temp_max_c: f64,
 }
+
+fn default_asset_id_heater() -> String { "heater".into() }
 
 fn default_heater_max() -> f64 {
     5.0
@@ -81,16 +126,21 @@ fn default_heater_max_temp() -> f64 {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PvConfig {
+    #[serde(default = "default_asset_id_pv")]
+    pub id: String,
     #[serde(default = "default_pv_rated")]
     pub rated_kw: f64,
 }
 
+fn default_asset_id_pv() -> String { "pv".into() }
 fn default_pv_rated() -> f64 {
     5.0
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BatteryConfig {
+    #[serde(default = "default_asset_id_battery")]
+    pub id: String,
     #[serde(default = "default_battery_capacity")]
     pub capacity_kwh: f64,
     #[serde(default = "default_battery_charge")]
@@ -104,6 +154,8 @@ pub struct BatteryConfig {
     #[serde(default = "default_battery_min_soc")]
     pub min_soc: f64,
 }
+
+fn default_asset_id_battery() -> String { "battery".into() }
 
 fn default_battery_capacity() -> f64 {
     10.0
@@ -123,6 +175,18 @@ fn default_battery_efficiency() -> f64 {
 fn default_battery_min_soc() -> f64 {
     0.10
 }
+
+/// Base load fixed background consumption.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BaseLoadConfig {
+    #[serde(default = "default_asset_id_base_load")]
+    pub id: String,
+    #[serde(default = "default_base_load_kw")]
+    pub baseline_kw: f64,
+}
+
+fn default_asset_id_base_load() -> String { "base_load".into() }
+fn default_base_load_kw() -> f64 { 0.5 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ReactorConfig {
@@ -243,6 +307,36 @@ pub struct PacketSeed {
 }
 
 impl Profile {
+    /// Returns the EV config: checks `assets` list first, falls back to legacy `devices`.
+    pub fn ev_config(&self) -> Option<&EvConfig> {
+        self.assets.iter().find_map(|a| if let AssetConfig::Ev(c) = a { Some(c) } else { None })
+            .or(self.devices.ev.as_ref())
+    }
+
+    /// Returns the Heater config: checks `assets` list first, falls back to legacy `devices`.
+    pub fn heater_config(&self) -> Option<&HeaterConfig> {
+        self.assets.iter().find_map(|a| if let AssetConfig::Heater(c) = a { Some(c) } else { None })
+            .or(self.devices.heater.as_ref())
+    }
+
+    /// Returns the PV config: checks `assets` list first, falls back to legacy `devices`.
+    pub fn pv_config(&self) -> Option<&PvConfig> {
+        self.assets.iter().find_map(|a| if let AssetConfig::Pv(c) = a { Some(c) } else { None })
+            .or(self.devices.pv.as_ref())
+    }
+
+    /// Returns the Battery config: checks `assets` list first, falls back to legacy `devices`.
+    pub fn battery_config(&self) -> Option<&BatteryConfig> {
+        self.assets.iter().find_map(|a| if let AssetConfig::Battery(c) = a { Some(c) } else { None })
+            .or(self.devices.battery.as_ref())
+    }
+
+    /// Returns the base load in kW: checks `assets` list first, falls back to legacy `devices.base_load_w`.
+    pub fn base_load_kw(&self) -> f64 {
+        self.assets.iter().find_map(|a| if let AssetConfig::BaseLoad(c) = a { Some(c.baseline_kw) } else { None })
+            .unwrap_or(self.devices.base_load_w / 1000.0)
+    }
+
     pub async fn load(path: &str) -> Self {
         match Self::try_load(path).await {
             Ok(p) => {
@@ -264,13 +358,8 @@ impl Profile {
 
     pub fn default() -> Self {
         Self {
-            devices: DeviceConfig {
-                ev: None,
-                heater: None,
-                pv: None,
-                battery: None,
-                base_load_w: default_base_load(),
-            },
+            devices: DeviceConfig::default(),
+            assets: vec![],
             reactor: ReactorConfig::default(),
             simulator: SimulatorConfig::default(),
             planner: PlannerConfig::default(),

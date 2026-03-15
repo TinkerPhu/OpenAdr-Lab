@@ -88,15 +88,23 @@ export type BatterySnapshot = {
   min_soc: number;
 };
 
+export type AssetSnapshot = {
+  power_kw: number;
+  [key: string]: number;
+};
+
 export type SimSnapshot = {
   ts: string;
   net_power_w: number;
   import_w: number;
   export_w: number;
   voltage_v: number;
-  base_load_w: number;
   import_kwh: number;
   export_kwh: number;
+  /** Generic per-asset map (new format). */
+  assets: Record<string, AssetSnapshot>;
+  /** Backward-compat derived fields. */
+  base_load_w: number;
   ev?: EvSnapshot | null;
   heater?: HeaterSnapshot | null;
   pv?: PvSnapshot | null;
@@ -126,10 +134,6 @@ export type UserOverrides = {
   heater_temp_max_c?: number;
   pv_rated_kw?: number;
   base_load_w?: number;
-  // Stub fields — one-shot SoC setters and persistent capacity override
-  ev_initial_soc?: number;
-  battery_initial_soc?: number;
-  battery_capacity_kwh?: number;
 };
 
 export type TraceEntry = {
