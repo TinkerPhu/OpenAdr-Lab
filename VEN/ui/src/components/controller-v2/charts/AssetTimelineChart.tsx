@@ -22,12 +22,15 @@ function formatTs(ts: number) {
 }
 
 export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartProps) {
-  // Always include a NOW anchor point so recharts renders the reference line even when
-  // there are no trace setpoints (Phase 4 will replace this with real history data).
+  // Ensure at least a 2-point range so recharts can compute the X scale and render the
+  // NOW reference line even when there are no trace setpoints (Phase 4 wires history).
   const chartData: AssetTimePoint[] =
     data.length > 0
       ? data
-      : [{ ts: nowMs, powerKw: 0, costRateEurH: null, co2RateGH: null, isPast: true }];
+      : [
+          { ts: nowMs - 3_600_000, powerKw: 0, costRateEurH: null, co2RateGH: null, isPast: true },
+          { ts: nowMs + 3_600_000, powerKw: 0, costRateEurH: null, co2RateGH: null, isPast: false },
+        ];
 
   return (
     <ResponsiveContainer width="100%" height={140}>
