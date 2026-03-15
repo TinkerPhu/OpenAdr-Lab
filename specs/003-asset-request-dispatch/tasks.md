@@ -22,9 +22,9 @@ No setup required — this is a pure refactor of an existing Rust service. No ne
 
 **⚠️ CRITICAL**: T003 depends on T001 and T002. No user story work can begin until T003 is complete.
 
-- [ ] T001 [P] Add `resolve_request_target` to `EvCharger` in `VEN/src/simulator/assets/ev.rs`
-- [ ] T002 [P] Add `resolve_request_target` to `Battery` in `VEN/src/simulator/assets/battery.rs`
-- [ ] T003 Add `resolve_request_target` dispatch method to `AssetState` in `VEN/src/simulator/assets/mod.rs` (depends on T001, T002)
+- [x] T001 [P] Add `resolve_request_target` to `EvCharger` in `VEN/src/simulator/assets/ev.rs`
+- [x] T002 [P] Add `resolve_request_target` to `Battery` in `VEN/src/simulator/assets/battery.rs`
+- [x] T003 Add `resolve_request_target` dispatch method to `AssetState` in `VEN/src/simulator/assets/mod.rs` (depends on T001, T002)
 
 **Checkpoint**: `AssetState::resolve_request_target` compiles and handles all 5 variants. `cargo check` passes.
 
@@ -36,9 +36,9 @@ No setup required — this is a pure refactor of an existing Rust service. No ne
 
 **Independent Test**: `POST /user-requests` for `asset_id: "ev"` with `target_soc: 0.9` returns 201 with correct `target_energy_kwh`. Same for `"battery"`.
 
-- [ ] T004 [US1] Refactor `resolve_target` in `VEN/src/controller/user_request.rs`: replace `match body.asset_id.as_str()` switch with lookup into `&[AssetEntry]` and call to `entry.state.resolve_request_target(...)` (depends on T003)
-- [ ] T005 [US1] Update `create_from_body` signature in `VEN/src/controller/user_request.rs`: replace `profile: &Profile, sim: Option<&SimSnapshot>` with `assets: &[AssetEntry]`; remove `use crate::profile::Profile` and `use crate::simulator::SimSnapshot` imports (depends on T004)
-- [ ] T006 [US1] Update `post_requests` handler in `VEN/src/main.rs`: replace `ctx.state.sim().await` + `&ctx.profile` arguments with `ctx.sim.lock().await.assets.clone()` passed as `&assets` (depends on T005)
+- [x] T004 [US1] Refactor `resolve_target` in `VEN/src/controller/user_request.rs`: replace `match body.asset_id.as_str()` switch with lookup into `&[AssetEntry]` and call to `entry.state.resolve_request_target(...)` (depends on T003)
+- [x] T005 [US1] Update `create_from_body` signature in `VEN/src/controller/user_request.rs`: replace `profile: &Profile, sim: Option<&SimSnapshot>` with `assets: &[AssetEntry]`; remove `use crate::profile::Profile` and `use crate::simulator::SimSnapshot` imports (depends on T004)
+- [x] T006 [US1] Update `post_requests` handler in `VEN/src/main.rs`: replace `ctx.state.sim().await` + `&ctx.profile` arguments with `ctx.sim.lock().await.assets.clone()` passed as `&assets` (depends on T005)
 
 **Checkpoint**: `cargo build` passes. `POST /user-requests` for `"ev"` and `"battery"` return 201. All existing `ven_user_request.feature` scenarios pass.
 
@@ -50,7 +50,7 @@ No setup required — this is a pure refactor of an existing Rust service. No ne
 
 **Independent Test**: `POST /user-requests` with `asset_id: "pv"` returns 422 with `"error"` field.
 
-- [ ] T007 [US2] Check `tests/features/ven_user_request.feature` for a scenario covering non-storage asset rejection; if absent, add scenario: `POST /user-requests` for asset `"pv"` with `target_soc: 0.9` expects status 422 and `"error"` field in response (depends on T005)
+- [x] T007 [US2] Check `tests/features/ven_user_request.feature` for a scenario covering non-storage asset rejection; if absent, add scenario: `POST /user-requests` for asset `"pv"` with `target_soc: 0.9` expects status 422 and `"error"` field in response (depends on T005)
 
 **Checkpoint**: New or existing non-storage rejection scenario passes in the BDD suite.
 
@@ -62,8 +62,8 @@ No setup required — this is a pure refactor of an existing Rust service. No ne
 
 **Independent Test**: `grep -n "match body.asset_id\|ev_config\|battery_config\|use crate::profile\|SimSnapshot" VEN/src/controller/user_request.rs` → zero results.
 
-- [ ] T008 [US3] Run full BDD test suite on Pi4-Server and confirm zero regressions: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner` (depends on T007)
-- [ ] T009 [US3] Verify structural acceptance criteria: confirm `user_request.rs` contains no `match body.asset_id`, no `ev_config()`, no `battery_config()`, no `Profile` import, no `SimSnapshot` import (depends on T006)
+- [x] T008 [US3] Run full BDD test suite on Pi4-Server and confirm zero regressions: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner` (depends on T007)
+- [x] T009 [US3] Verify structural acceptance criteria: confirm `user_request.rs` contains no `match body.asset_id`, no `ev_config()`, no `battery_config()`, no `Profile` import, no `SimSnapshot` import (depends on T006)
 
 **Checkpoint**: All 5 acceptance criteria from spec met. Full BDD suite green.
 
@@ -71,7 +71,7 @@ No setup required — this is a pure refactor of an existing Rust service. No ne
 
 ## Phase 6: Polish
 
-- [ ] T010 Update `docs/history/project_journal.md` with what was done, why, and any key learnings from this refactor
+- [x] T010 Update `docs/history/project_journal.md` with what was done, why, and any key learnings from this refactor
 
 ---
 
