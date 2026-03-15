@@ -134,7 +134,9 @@ def step_now_line_visible(context):
         # Debug: print the innerHTML of the chart container to diagnose
         try:
             inner = chart.evaluate("el => el.innerHTML")
-            print(f"\n[DEBUG] asset-timeline-chart-ev innerHTML (first 2000 chars): {inner[:2000]}")
+            has_rl = "recharts-reference-line" in inner
+            print(f"\n[DEBUG] innerHTML len={len(inner)}, has recharts-reference-line={has_rl}")
+            print(f"\n[DEBUG] last 1000 chars: {inner[-1000:]}")
         except Exception as ie:
             print(f"\n[DEBUG] failed to get innerHTML: {ie}")
         ref_line = None
