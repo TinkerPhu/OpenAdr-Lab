@@ -3,8 +3,6 @@ mod controller;
 mod entities;
 mod models;
 mod profile;
-mod reactor;
-mod reporter;
 mod simulator;
 mod state;
 mod vtn;
@@ -25,7 +23,6 @@ use metrics::counter;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use models::{SensorInput, SensorSnapshot};
 use profile::Profile;
-use reactor::Reactor;
 use serde::Deserialize;
 use simulator::SimState;
 use state::{AppState, UserOverrides};
@@ -202,12 +199,9 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(Mutex::new(sim))
     };
 
-    let reactor_state = Arc::new(Mutex::new(Reactor::new()));
-
     {
         let state = state.clone();
         let sim = sim_state.clone();
-        let reactor = reactor_state.clone();
         let profile = profile.clone();
         let tick_s = profile.simulator.tick_s;
         let persist_every_s = profile.simulator.persist_every_s;
@@ -241,37 +235,30 @@ async fn main() -> anyhow::Result<()> {
                 let events = state.events().await;
                 let overrides = state.overrides().await;
 
-                // Pre-tick: snapshot plan/packets/rates for dispatcher (no lock needed)
+                // Pre-tick: snapshot plan/packets/capacity/tariffs for dispatcher
                 let plan_snap = state.active_plan().await;
                 let packets_snap = state.active_packets().await;
+                let capacity_snap = state.capacity_state().await;
                 let rates_snap = state.planned_tariffs().await;
 
-                // Reactor: evaluate events → setpoints; dispatcher overlays plan allocations
-                let (setpoints, sim_snapshot, reactor_mode) = {
+                // Tick loop: build_setpoints → sim.tick → update_sim → accounting
+                let sim_snapshot = {
                     let mut sim_guard = sim.lock().await;
-                    let mut reactor_guard = reactor.lock().await;
-                    let mut setpoints = reactor_guard.evaluate(&events, &sim_guard, &profile, now, dt_s, &overrides);
 
-                    // Dispatcher overlay: HEMS plan allocations override reactor for managed assets
-                    if let Some(ref plan) = plan_snap {
-                        let disp = controller::dispatcher::get_setpoints(plan, &packets_snap, now);
-                        if let Some(kw) = disp.ev_kw      { setpoints.ev_charge_kw  = kw; }
-                        if let Some(kw) = disp.battery_kw { setpoints.battery_kw    = kw; }
-                        if let Some(kw) = disp.heater_kw  { setpoints.heater_kw     = kw; }
-                    }
-
-                    // Owner force-overrides beat everything (including dispatcher)
-                    if let Some(kw) = overrides.ev_force_kw       { setpoints.ev_charge_kw   = kw; }
-                    if let Some(kw) = overrides.heater_force_kw   { setpoints.heater_kw       = kw; }
-                    if let Some(kw) = overrides.battery_force_kw  { setpoints.battery_kw      = kw; }
-                    if let Some(limit) = overrides.pv_force_export_limit_kw { setpoints.pv_export_limit_kw = Some(limit); }
-
-                    // Build setpoints HashMap for generic tick interface
-                    let mut sp_map = std::collections::HashMap::new();
-                    sp_map.insert("ev".to_string(), setpoints.ev_charge_kw);
-                    sp_map.insert("heater".to_string(), setpoints.heater_kw);
-                    sp_map.insert("pv".to_string(), setpoints.pv_export_limit_kw.unwrap_or(f64::MAX));
-                    sp_map.insert("battery".to_string(), setpoints.battery_kw);
+                    // Build setpoints from plan (single authoritative control path)
+                    let sp_map: std::collections::HashMap<String, f64> = match &plan_snap {
+                        Some(ref plan) => controller::dispatcher::build_setpoints(
+                            plan,
+                            &sim_guard.assets,
+                            &capacity_snap,
+                            now,
+                        ),
+                        None => sim_guard
+                            .assets
+                            .iter()
+                            .map(|a| (a.id.clone(), a.state.default_setpoint()))
+                            .collect(),
+                    };
 
                     // Simulator: apply setpoints → update device states
                     sim_guard.tick(dt_s, sp_map, now, &overrides);
@@ -298,40 +285,17 @@ async fn main() -> anyhow::Result<()> {
                     controller::monitor::update_ledger(&mut ledger, &sim_snap, &rates_snap, dt_s, now);
                     state.set_asset_ledger(ledger).await;
 
-                    // Snapshot sim state for reporting (avoid holding lock during HTTP)
-                    let sim_clone = sim_guard.clone();
-                    let mode = setpoints.mode.clone();
-
-                    (setpoints, sim_clone, mode)
+                    sim_guard.clone()
                 };
 
-                let _ = setpoints; // used above, suppress warning
+                let _ = sim_snapshot; // used by reporting in Phase 6
 
-
-                // Periodic auto-report submission
+                // Periodic auto-report (Phase 6: will use controller::reporter)
                 if report_every_ticks > 0 {
                     report_counter += 1;
                     if report_counter >= report_every_ticks {
                         report_counter = 0;
-                        let reports = reporter::build_reports_for_active_events(
-                            &events, &sim_snapshot, &reactor_mode, &ven_name, now,
-                        );
-                        for report in reports {
-                            let report_name = report.get("reportName")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown")
-                                .to_string();
-                            match vtn_for_tick.upsert_report(report).await {
-                                Ok(_) => {
-                                    counter!("auto_reports_sent_total").increment(1);
-                                    info!(report_name, "auto-report submitted");
-                                }
-                                Err(e) => {
-                                    counter!("auto_reports_error_total").increment(1);
-                                    error!(report_name, "auto-report failed: {e:#}");
-                                }
-                            }
-                        }
+                        // TODO Phase 6 (T049): replace with controller::reporter::build_measurement_report
                     }
                 }
 
@@ -394,9 +358,21 @@ async fn main() -> anyhow::Result<()> {
                     trigger,
                 );
                 // Planner may transition packet statuses (Pending→Scheduled, etc.)
+                let firm_count = plan.firm_slots.len();
+                let flex_count = plan.flexible_slots.len();
                 state.set_active_packets(plan.packets.clone()).await;
                 state.set_active_plan(Some(plan)).await;
                 info!("plan cycle complete");
+
+                // Emit PlanCycle controller event (T029)
+                state.push_controller_event(
+                    controller::trace::ControllerEvent::PlanCycle {
+                        ts: now,
+                        trigger_reason: format!("{:?}", trigger),
+                        firm_slots: firm_count,
+                        flexible_slots: flex_count,
+                    }
+                ).await;
 
                 // Wait for next trigger OR periodic timeout (whichever comes first)
                 tokio::select! {

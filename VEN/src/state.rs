@@ -44,12 +44,6 @@ pub struct UserOverrides {
     pub ev_desired_kw: Option<f64>,      // idle charge rate; None = ev.max_charge_kw
     pub ev_plugged: Option<bool>,        // None = always true
 
-    // Owner force-overrides: beat VTN events; None = let reactor/events control
-    pub ev_force_kw: Option<f64>,
-    pub heater_force_kw: Option<f64>,
-    pub battery_force_kw: Option<f64>,   // positive = charge, negative = discharge
-    pub pv_force_export_limit_kw: Option<f64>,
-
     // Device spec overrides (shadow profile values)
     pub ev_max_charge_kw: Option<f64>,
     pub ev_soc_target: Option<f64>,
