@@ -128,18 +128,7 @@ def step_now_line_visible(context):
     assert chart is not None, "asset-timeline-chart-ev not found"
     # Wait for the recharts reference line element (has class recharts-reference-line).
     # Uses wait_for_selector (not query_selector) to account for async recharts rendering.
-    try:
-        ref_line = chart.wait_for_selector(".recharts-reference-line", timeout=5000)
-    except Exception:
-        # Debug: print the innerHTML of the chart container to diagnose
-        try:
-            inner = chart.evaluate("el => el.innerHTML")
-            has_rl = "recharts-reference-line" in inner
-            print(f"\n[DEBUG] innerHTML len={len(inner)}, has recharts-reference-line={has_rl}")
-            print(f"\n[DEBUG] last 1000 chars: {inner[-1000:]}")
-        except Exception as ie:
-            print(f"\n[DEBUG] failed to get innerHTML: {ie}")
-        ref_line = None
+    ref_line = chart.wait_for_selector(".recharts-reference-line", timeout=5000)
     assert ref_line is not None, "No recharts-reference-line found inside asset-timeline-chart-ev"
 
 
