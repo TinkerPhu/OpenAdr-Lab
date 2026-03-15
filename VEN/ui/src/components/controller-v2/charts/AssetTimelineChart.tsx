@@ -7,6 +7,7 @@ import {
   Tooltip,
   ReferenceLine,
   Legend,
+  ResponsiveContainer,
 } from "recharts";
 import type { AssetTimePoint } from "../types";
 
@@ -38,10 +39,12 @@ export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartPro
   const tMax = Math.max(nowMs + 300_000, ...chartData.map((p) => p.ts));
 
   return (
-    <ComposedChart data={chartData} width={600} height={140} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+    <ResponsiveContainer width="100%" height={140}>
+      <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
         <XAxis
           dataKey="ts"
+          scale="time"
           type="number"
           domain={[tMin, tMax]}
           tickFormatter={formatTs}
@@ -101,6 +104,7 @@ export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartPro
           strokeDasharray="3 3"
           label={{ value: "NOW", position: "top", fontSize: 9, fill: "#f44336" }}
         />
-    </ComposedChart>
+      </ComposedChart>
+    </ResponsiveContainer>
   );
 }
