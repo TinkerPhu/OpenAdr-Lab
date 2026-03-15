@@ -101,7 +101,7 @@ function EvStatusControls({
         step={1}
         value={socPct}
         data-testid="ctrl-ev-soc"
-        onChange={(_e, v) => onChange({ ev_initial_soc: (v as number) / 100 })}
+        disabled
         valueLabelDisplay="auto"
         valueLabelFormat={(v) => `${v}%`}
       />
@@ -168,7 +168,7 @@ function BatteryStatusControls({
         step={1}
         value={socPct}
         data-testid="ctrl-battery-soc"
-        onChange={(_e, v) => onChange({ battery_initial_soc: (v as number) / 100 })}
+        disabled
         valueLabelDisplay="auto"
         valueLabelFormat={(v) => `${v}%`}
       />
@@ -185,7 +185,7 @@ function BatterySimCharacteristics({
   overrides?: UserOverrides;
   onChange: (p: Partial<UserOverrides>) => void;
 }) {
-  const cap = overrides?.battery_capacity_kwh ?? sim?.battery?.capacity_kwh ?? 10;
+  const cap = sim?.battery?.capacity_kwh ?? 10;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
@@ -197,7 +197,7 @@ function BatterySimCharacteristics({
         step={1}
         value={cap}
         data-testid="ctrl-battery-battery_capacity_kwh"
-        onChange={(_e, v) => onChange({ battery_capacity_kwh: v as number })}
+        disabled
         valueLabelDisplay="auto"
       />
       <Typography variant="caption">Force charge/discharge kW</Typography>
