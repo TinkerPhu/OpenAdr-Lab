@@ -13,7 +13,7 @@ use axum::{
     extract::{Path, Query, State},
     http::Method,
     response::IntoResponse,
-    routing::{delete, get, put},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use chrono::Utc;
@@ -44,6 +44,7 @@ struct AppCtx {
     metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
     profile: Arc<Profile>,
+    sim: Arc<Mutex<SimState>>,
 }
 
 #[tokio::main]
@@ -265,8 +266,15 @@ async fn main() -> anyhow::Result<()> {
                     if let Some(kw) = overrides.battery_force_kw  { setpoints.battery_kw      = kw; }
                     if let Some(limit) = overrides.pv_force_export_limit_kw { setpoints.pv_export_limit_kw = Some(limit); }
 
+                    // Build setpoints HashMap for generic tick interface
+                    let mut sp_map = std::collections::HashMap::new();
+                    sp_map.insert("ev".to_string(), setpoints.ev_charge_kw);
+                    sp_map.insert("heater".to_string(), setpoints.heater_kw);
+                    sp_map.insert("pv".to_string(), setpoints.pv_export_limit_kw.unwrap_or(f64::MAX));
+                    sp_map.insert("battery".to_string(), setpoints.battery_kw);
+
                     // Simulator: apply setpoints → update device states
-                    sim_guard.tick(dt_s, &setpoints, now, &overrides);
+                    sim_guard.tick(dt_s, sp_map, now, &overrides);
 
                     // Update sensor snapshot (backward compat)
                     let sensor = sim_guard.to_sensor_snapshot();
@@ -300,13 +308,6 @@ async fn main() -> anyhow::Result<()> {
 
                 let _ = setpoints; // used above, suppress warning
 
-                // Clear one-shot stub fields (ev_initial_soc, battery_initial_soc) after tick applied them
-                if overrides.ev_initial_soc.is_some() || overrides.battery_initial_soc.is_some() {
-                    let mut cleared = overrides.clone();
-                    cleared.ev_initial_soc = None;
-                    cleared.battery_initial_soc = None;
-                    state.set_overrides(cleared).await;
-                }
 
                 // Periodic auto-report submission
                 if report_every_ticks > 0 {
@@ -433,6 +434,7 @@ async fn main() -> anyhow::Result<()> {
         metrics_handle: Arc::new(metrics_handle),
         trigger_tx,
         profile: profile.clone(),
+        sim: sim_state.clone(),
     };
 
     let cors = CorsLayer::new()
@@ -448,6 +450,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/reports", get(get_reports).post(post_reports))
         .route("/reports/:id", put(put_report))
         .route("/sim", get(get_sim))
+        .route("/sim/schema", get(get_sim_schema))
+        .route("/sim/reset/:asset_id", post(post_sim_reset))
+        .route("/sim/config/battery", put(put_sim_config_battery))
         .route("/sim/override", get(get_sim_override).post(post_sim_override))
         .route("/trace", get(get_trace))
         .route("/metrics", get(get_metrics))
@@ -586,6 +591,74 @@ async fn put_report(
             )
                 .into_response()
         }
+    }
+}
+
+/// GET /sim/schema — returns control descriptors for all configured assets.
+async fn get_sim_schema(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    let sim = ctx.sim.lock().await;
+    let schema: std::collections::HashMap<String, Vec<simulator::assets::ControlDescriptor>> = sim
+        .assets
+        .iter()
+        .map(|entry| (entry.id.clone(), entry.state.control_schema()))
+        .collect();
+    Json(schema)
+}
+
+#[derive(serde::Deserialize)]
+struct SocBody {
+    soc: f64,
+}
+
+/// POST /sim/reset/:asset_id — jump an asset's SoC to the given value.
+async fn post_sim_reset(
+    State(ctx): State<AppCtx>,
+    Path(asset_id): Path<String>,
+    Json(body): Json<SocBody>,
+) -> impl IntoResponse {
+    if !(0.0..=1.0).contains(&body.soc) {
+        return (axum::http::StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "soc must be between 0.0 and 1.0"}))).into_response();
+    }
+    let mut sim = ctx.sim.lock().await;
+    match sim.asset_mut(&asset_id) {
+        Some(entry) => {
+            let mut values = std::collections::HashMap::new();
+            values.insert("soc".to_string(), body.soc);
+            entry.state.reset(values);
+            drop(sim);
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
+        None => (axum::http::StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("asset '{}' not found", asset_id)}))).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct BatteryConfigBody {
+    capacity_kwh: f64,
+}
+
+/// PUT /sim/config/battery — update battery capacity_kwh.
+async fn put_sim_config_battery(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<BatteryConfigBody>,
+) -> impl IntoResponse {
+    if body.capacity_kwh <= 0.0 {
+        return (axum::http::StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "capacity_kwh must be > 0"}))).into_response();
+    }
+    let mut sim = ctx.sim.lock().await;
+    match sim.asset_mut("battery") {
+        Some(entry) => {
+            let mut values = std::collections::HashMap::new();
+            values.insert("capacity_kwh".to_string(), body.capacity_kwh);
+            entry.state.update_config(values);
+            drop(sim);
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
+        None => (axum::http::StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "battery asset not found"}))).into_response(),
     }
 }
 

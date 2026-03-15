@@ -124,10 +124,5 @@ pub fn update_packets(
 
 /// Extract the actual delivered power for a packet's asset from the simulator snapshot.
 fn actual_power_kw(pkt: &EnergyPacket, sim: &SimSnapshot) -> f64 {
-    match pkt.asset_id.as_str() {
-        "ev" => sim.ev.as_ref().map(|e| e.current_kw.max(0.0)).unwrap_or(0.0),
-        "battery" => sim.battery.as_ref().map(|b| b.current_kw).unwrap_or(0.0),
-        "heater" => sim.heater.as_ref().map(|h| h.current_kw.max(0.0)).unwrap_or(0.0),
-        _ => 0.0,
-    }
+    sim.assets.get(&pkt.asset_id).map(|a| a.power_kw).unwrap_or(0.0)
 }

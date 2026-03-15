@@ -1,13 +1,17 @@
 # VEN-2: Commercial building (Heater + PV, delayed strategy)
-devices:
-  heater:
+assets:
+  - type: heater
+    id: heater
     max_kw: 5.0
     temp_initial_c: 20.0
     temp_min_c: 19.0
     temp_max_c: 23.0
-  pv:
+  - type: pv
+    id: pv
     rated_kw: 12.0
-  base_load_w: 2000
+  - type: base_load
+    id: base_load
+    baseline_kw: 2.0
 
 reactor:
   strategy: delayed

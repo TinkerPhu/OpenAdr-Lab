@@ -66,7 +66,7 @@ pub fn run_planner(
     allocate_consumption(&mut firm_slots, &mut pkts, slot_h, now);
 
     // Phase 4: Battery arbitrage
-    if let Some(battery) = &profile.devices.battery {
+    if let Some(battery) = profile.battery_config() {
         allocate_battery(&mut firm_slots, battery, slot_h);
     }
 
@@ -120,7 +120,7 @@ fn build_grid(
 ) -> (Vec<PlanTimeSlot>, Vec<PlanTimeSlot>) {
     let import_cap = capacity.import_limit_kw.unwrap_or(f64::MAX);
     let export_cap = capacity.export_limit_kw.unwrap_or(f64::MAX);
-    let baseline_kw = profile.devices.base_load_w / 1000.0;
+    let baseline_kw = profile.base_load_kw();
     let rates_empty = rates.is_empty();
 
     let mut firm = Vec::new();
@@ -561,7 +561,7 @@ fn rate_co2_at(rates: &[RateSnapshot], ts: DateTime<Utc>) -> Option<f64> {
 // ─── PV forecast (sinusoidal model, 6am–18pm) ─────────────────────────────────
 
 fn pv_forecast(profile: &Profile, ts: DateTime<Utc>) -> f64 {
-    let pv = match &profile.devices.pv {
+    let pv = match profile.pv_config() {
         Some(p) => p,
         None => return 0.0,
     };
@@ -592,7 +592,7 @@ fn seed_to_packet(
 
     let (target_energy_kwh, desired_power_kw) = match asset_id.as_str() {
         "ev" => {
-            if let Some(ev) = &profile.devices.ev {
+            if let Some(ev) = profile.ev_config() {
                 let target_soc = seed.target_soc.unwrap_or(ev.soc_target);
                 let energy = (target_soc - ev.initial_soc).max(0.0) * ev.battery_kwh;
                 let power = seed.desired_power_kw.unwrap_or(ev.max_charge_kw);
@@ -602,7 +602,7 @@ fn seed_to_packet(
             }
         }
         "battery" => {
-            if let Some(bat) = &profile.devices.battery {
+            if let Some(bat) = profile.battery_config() {
                 let target_soc = seed.target_soc.unwrap_or(1.0);
                 let energy = (target_soc - bat.initial_soc).max(0.0) * bat.capacity_kwh;
                 let power = seed.desired_power_kw.unwrap_or(bat.max_charge_kw);
