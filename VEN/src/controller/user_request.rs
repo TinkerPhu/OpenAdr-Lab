@@ -196,12 +196,13 @@ fn resolve_target(
 
     match body.asset_id.as_str() {
         "ev" => {
-            let ev_cfg = profile.devices.ev.as_ref().ok_or_else(|| {
+            let ev_cfg = profile.ev_config().ok_or_else(|| {
                 RequestError::UnknownAsset("ev".to_string())
             })?;
             let current_soc = sim
-                .and_then(|s| s.ev.as_ref())
-                .map(|e| e.soc)
+                .and_then(|s| s.assets.get("ev"))
+                .and_then(|a| a.values.get("soc_pct"))
+                .map(|pct| pct / 100.0)
                 .unwrap_or(ev_cfg.initial_soc);
             let target_soc = body.target_soc.unwrap_or(ev_cfg.soc_target);
             let delta = (target_soc - current_soc).max(0.0);
@@ -213,12 +214,13 @@ fn resolve_target(
             Ok((kwh, power))
         }
         "battery" => {
-            let bat = profile.devices.battery.as_ref().ok_or_else(|| {
+            let bat = profile.battery_config().ok_or_else(|| {
                 RequestError::UnknownAsset("battery".to_string())
             })?;
             let current_soc = sim
-                .and_then(|s| s.battery.as_ref())
-                .map(|b| b.soc)
+                .and_then(|s| s.assets.get("battery"))
+                .and_then(|a| a.values.get("soc_pct"))
+                .map(|pct| pct / 100.0)
                 .unwrap_or(bat.initial_soc);
             let target_soc = body.target_soc.unwrap_or(1.0);
             let delta = (target_soc - current_soc).max(0.0);

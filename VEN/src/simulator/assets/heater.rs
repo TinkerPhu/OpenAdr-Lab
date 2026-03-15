@@ -1,0 +1,127 @@
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+use crate::profile::HeaterConfig;
+use super::{AssetCapabilities, ControlDescriptor, ControlKind, TickEnvironment};
+
+/// Heater: consumes power for space heating (positive = import).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Heater {
+    pub temp_c: f64,
+    pub max_kw: f64,
+    pub temp_min_c: f64,
+    pub temp_max_c: f64,
+    pub current_kw: f64,
+    pub ambient_temp_c: f64,
+    thermal_mass: f64, // kWh per degree C
+}
+
+impl Heater {
+    pub fn from_config(cfg: &HeaterConfig) -> Self {
+        Self {
+            temp_c: cfg.temp_initial_c,
+            max_kw: cfg.max_kw,
+            temp_min_c: cfg.temp_min_c,
+            temp_max_c: cfg.temp_max_c,
+            current_kw: 0.0,
+            ambient_temp_c: 10.0,
+            thermal_mass: 2.0,
+        }
+    }
+
+    pub fn update(&mut self, dt_s: f64, setpoint: f64, env: &TickEnvironment) -> f64 {
+        if let Some(&amb) = env.get("ambient_temp_c") {
+            self.ambient_temp_c = amb;
+        }
+        let dt_h = dt_s / 3600.0;
+        let loss_rate_kw = (self.temp_c - self.ambient_temp_c) * 0.1;
+        let heat_loss_kwh = loss_rate_kw * dt_h;
+        let kw = setpoint.clamp(0.0, self.max_kw);
+        let heat_input_kwh = kw * dt_h;
+        let net_energy_kwh = heat_input_kwh - heat_loss_kwh;
+        self.temp_c += net_energy_kwh / self.thermal_mass;
+        if self.temp_c < self.temp_min_c {
+            let forced_kw = self.max_kw;
+            self.current_kw = forced_kw;
+            return forced_kw;
+        }
+        if self.temp_c > self.temp_max_c {
+            self.current_kw = 0.0;
+            return 0.0;
+        }
+        self.current_kw = kw;
+        kw
+    }
+
+    pub fn predict(&self, setpoint: f64) -> Vec<(chrono::DateTime<Utc>, f64)> {
+        vec![(Utc::now(), setpoint.clamp(0.0, self.max_kw))]
+    }
+
+    pub fn state_values(&self) -> HashMap<String, f64> {
+        let mut m = HashMap::new();
+        m.insert("temp_c".into(), self.temp_c);
+        m.insert("current_kw".into(), self.current_kw);
+        m
+    }
+
+    pub fn default_setpoint(&self) -> f64 {
+        self.max_kw * 0.5
+    }
+
+    pub fn capabilities(&self, asset_id: &str) -> AssetCapabilities {
+        AssetCapabilities {
+            asset_id: asset_id.to_string(),
+            max_import_kw: self.max_kw,
+            max_export_kw: 0.0,
+            is_flexible: true,
+            energy_state: None,
+            availability: None,
+        }
+    }
+
+    pub fn control_schema(&self) -> Vec<ControlDescriptor> {
+        vec![
+            ControlDescriptor {
+                key: "heater_max_kw".into(),
+                label: "Max Heating Power".into(),
+                kind: ControlKind::NumberInput,
+                min: Some(0.0),
+                max: Some(20.0),
+                unit: "kW".into(),
+            },
+            ControlDescriptor {
+                key: "heater_temp_min_c".into(),
+                label: "Min Temperature".into(),
+                kind: ControlKind::Slider,
+                min: Some(10.0),
+                max: Some(25.0),
+                unit: "°C".into(),
+            },
+            ControlDescriptor {
+                key: "heater_temp_max_c".into(),
+                label: "Max Temperature".into(),
+                kind: ControlKind::Slider,
+                min: Some(10.0),
+                max: Some(30.0),
+                unit: "°C".into(),
+            },
+        ]
+    }
+
+    pub fn reset(&mut self, values: HashMap<String, f64>) {
+        if let Some(&t) = values.get("temp_c") {
+            self.temp_c = t;
+        }
+    }
+
+    pub fn update_config(&mut self, values: HashMap<String, f64>) {
+        if let Some(&v) = values.get("max_kw") {
+            self.max_kw = v.max(0.0);
+        }
+    }
+
+    pub fn power_w(&self) -> f64 {
+        self.current_kw * 1000.0
+    }
+}
