@@ -7,7 +7,6 @@ import {
   Tooltip,
   ReferenceLine,
   Legend,
-  ResponsiveContainer,
 } from "recharts";
 import type { AssetTimePoint } from "../types";
 
@@ -33,8 +32,7 @@ export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartPro
         ];
 
   return (
-    <ResponsiveContainer width="100%" height={140}>
-      <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+    <ComposedChart data={chartData} width={600} height={140} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
         <XAxis
           dataKey="ts"
@@ -98,7 +96,6 @@ export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartPro
           strokeDasharray="3 3"
           label={{ value: "NOW", position: "top", fontSize: 9, fill: "#f44336" }}
         />
-      </ComposedChart>
-    </ResponsiveContainer>
+    </ComposedChart>
   );
 }
