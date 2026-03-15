@@ -127,6 +127,11 @@ async fn main() -> anyhow::Result<()> {
         let trigger_tx_events = trigger_tx.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(secs));
+            // Track previous event IDs and tariff count for change detection (T034/T035)
+            let mut prev_event_ids: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            let mut prev_tariff_count: usize = 0;
+            let mut prev_import_limit: Option<f64> = None;
             loop {
                 interval.tick().await;
                 match vtn.fetch_events().await {
@@ -137,9 +142,112 @@ async fn main() -> anyhow::Result<()> {
                         // Parse rates and capacity from new events (Stage 2)
                         let now = Utc::now();
                         let rates = controller::openadr_interface::parse_rate_snapshots(&events);
-                        state.set_planned_tariffs(rates).await;
-
                         let new_cap = controller::openadr_interface::parse_capacity_state(&events);
+
+                        // T034: Emit OpenAdrArrived / OpenAdrExpired for event set changes
+                        let current_ids: std::collections::HashSet<String> = events
+                            .iter()
+                            .filter_map(|e| e.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                            .collect();
+                        for evt in &events {
+                            if let Some(id) = evt.get("id").and_then(|v| v.as_str()) {
+                                if !prev_event_ids.contains(id) {
+                                    let name = evt
+                                        .get("eventName")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or(id)
+                                        .to_string();
+                                    let (signal_type, value, interval_n) = evt
+                                        .get("intervals")
+                                        .and_then(|v| v.as_array())
+                                        .and_then(|arr| arr.first())
+                                        .and_then(|iv| iv.get("payloads"))
+                                        .and_then(|v| v.as_array())
+                                        .and_then(|arr| arr.first())
+                                        .map(|p| {
+                                            let sig = p
+                                                .get("type")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("UNKNOWN")
+                                                .to_string();
+                                            let val = p
+                                                .get("values")
+                                                .and_then(|v| v.as_array())
+                                                .and_then(|a| a.first())
+                                                .and_then(|v| v.as_f64())
+                                                .unwrap_or(0.0);
+                                            let n = evt
+                                                .get("intervals")
+                                                .and_then(|v| v.as_array())
+                                                .map(|a| a.len() as u32)
+                                                .unwrap_or(0);
+                                            (sig, val, n)
+                                        })
+                                        .unwrap_or_else(|| ("UNKNOWN".to_string(), 0.0, 0));
+                                    state
+                                        .push_controller_event(
+                                            controller::trace::ControllerEvent::OpenAdrArrived {
+                                                ts: now,
+                                                event_name: name,
+                                                signal_type,
+                                                value,
+                                                interval: interval_n,
+                                            },
+                                        )
+                                        .await;
+                                }
+                            }
+                        }
+                        for old_id in &prev_event_ids {
+                            if !current_ids.contains(old_id) {
+                                state
+                                    .push_controller_event(
+                                        controller::trace::ControllerEvent::OpenAdrExpired {
+                                            ts: now,
+                                            event_name: old_id.clone(),
+                                        },
+                                    )
+                                    .await;
+                            }
+                        }
+                        prev_event_ids = current_ids;
+
+                        // T035: Emit RateChange when tariff count changes
+                        if !rates.is_empty() && rates.len() != prev_tariff_count {
+                            if let Some(first) = rates.first() {
+                                state
+                                    .push_controller_event(
+                                        controller::trace::ControllerEvent::RateChange {
+                                            ts: now,
+                                            interval_start: first.interval_start,
+                                            import_eur_kwh: first
+                                                .import_price_eur_kwh
+                                                .unwrap_or(0.0),
+                                            export_eur_kwh: first
+                                                .export_price_eur_kwh
+                                                .unwrap_or(0.0),
+                                        },
+                                    )
+                                    .await;
+                            }
+                        }
+                        prev_tariff_count = rates.len();
+
+                        // T035: Emit CapacityChange when import limit changes
+                        if new_cap.import_limit_kw != prev_import_limit {
+                            state
+                                .push_controller_event(
+                                    controller::trace::ControllerEvent::CapacityChange {
+                                        ts: now,
+                                        import_limit_kw: new_cap.import_limit_kw,
+                                        export_limit_kw: new_cap.export_limit_kw,
+                                    },
+                                )
+                                .await;
+                            prev_import_limit = new_cap.import_limit_kw;
+                        }
+
+                        state.set_planned_tariffs(rates).await;
                         state.set_capacity_state(new_cap).await;
 
                         let existing_obs = state.obligations().await;
@@ -284,6 +392,44 @@ async fn main() -> anyhow::Result<()> {
                     let mut ledger = state.asset_ledger().await;
                     controller::monitor::update_ledger(&mut ledger, &sim_snap, &rates_snap, dt_s, now);
                     state.set_asset_ledger(ledger).await;
+
+                    // Post-tick: push asset history rows (T032 — drives GET /trace/history)
+                    {
+                        let current_tariff = rates_snap.iter().find(|t| {
+                            t.interval_start <= now && now < t.interval_end
+                        });
+                        let import_price = current_tariff
+                            .and_then(|t| t.import_price_eur_kwh)
+                            .unwrap_or(0.0);
+                        let export_price = current_tariff
+                            .and_then(|t| t.export_price_eur_kwh)
+                            .unwrap_or(0.0);
+                        let co2_g_kwh = current_tariff
+                            .and_then(|t| t.co2_g_kwh)
+                            .unwrap_or(0.0);
+
+                        for (asset_id, asset_snap) in &sim_snap.assets {
+                            let mut row: std::collections::HashMap<String, f64> =
+                                std::collections::HashMap::new();
+                            row.insert("power_kw".to_string(), asset_snap.power_kw);
+                            for (k, v) in &asset_snap.values {
+                                row.insert(k.clone(), *v);
+                            }
+                            let cost_rate_eur_h = if asset_snap.power_kw >= 0.0 {
+                                asset_snap.power_kw * import_price
+                            } else {
+                                -asset_snap.power_kw * export_price
+                            };
+                            let co2_rate_g_h = if asset_snap.power_kw > 0.0 {
+                                asset_snap.power_kw * co2_g_kwh
+                            } else {
+                                0.0
+                            };
+                            row.insert("cost_rate_eur_h".to_string(), cost_rate_eur_h);
+                            row.insert("co2_rate_g_h".to_string(), co2_rate_g_h);
+                            state.push_asset_row(asset_id, now, row).await;
+                        }
+                    }
 
                     sim_guard.clone()
                 };
