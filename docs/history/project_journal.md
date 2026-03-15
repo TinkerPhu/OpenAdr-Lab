@@ -2434,4 +2434,39 @@ Replaced the hardcoded per-device named fields in `SimState` (ev, heater, pv, ba
 
 33 features, 143 scenarios, 895 steps — all passing with 0 failures on Pi4-Server ARM64.
 
+---
+
+## speckit 003: Asset Request Dispatch Refactor
+
+**Date**: 2026-03-15
+**Branch**: `003-asset-request-dispatch`
+**Scope**: Pure internal refactor — no API, behavior, or UI changes.
+
+### What was done
+
+Removed the hardcoded `match body.asset_id.as_str()` switch from `controller/user_request.rs` by adding a `resolve_request_target` method to the `AssetState` enum dispatch chain. Each energy-storage asset type (`EvCharger`, `Battery`) now declares its own request resolution logic. Non-storage types (`Heater`, `PvInverter`, `BaseLoad`) return `None`, which the controller maps to `RequestError::UnknownAsset`.
+
+`user_request.rs` now receives `&[AssetEntry]` instead of `(&Profile, Option<&SimSnapshot>)`, eliminating the `Profile` and `SimSnapshot` imports entirely. The caller in `main.rs` briefly locks `ctx.sim: Arc<Mutex<SimState>>`, clones the assets vec, and passes it in.
+
+Added a new BDD scenario: "Request for a non-storage asset is rejected" — `POST /user-requests` for `asset_id: "pv"` must return 422 with an `"error"` field.
+
+### Issues encountered
+
+**1. Pre-existing TypeScript build errors (speckit 002 leftovers):**
+- `Simulation.test.tsx` and `ControllerV2.test.tsx` mocks were missing the `assets` field added to `SimSnapshot` in speckit 002. Fixed by adding `assets: {}` to both mocks.
+- `AssetRightSection.tsx` referenced `ev_initial_soc`, `battery_initial_soc`, and `battery_capacity_kwh` on `UserOverrides`, which don't exist in the type. These fields have no backend support (SoC state changes require `POST /sim/reset/:id`, capacity config requires `PUT /sim/config/battery`). Fixed by making those sliders read-only (`disabled`) and removing the invalid `onChange` calls.
+
+**2. New BDD scenario failing — falsy 4xx response in Python `or` chain:**
+`entity_model_steps.py` checked for `last_response` with `getattr(...) or getattr(...)`. `requests.Response` with a 4xx status code evaluates to `False` in a boolean context, so the `or` chain fell through to `None` and the assertion failed. Fixed by using `is None` check instead of `or`.
+
+### Key learnings
+
+- `requests.Response` is falsy for 4xx/5xx responses (`response.ok == False`). Never use Python `or` to chain response fallbacks — use explicit `is None` checks.
+- Pre-existing TypeScript compilation errors in test builds can block CI even when the Rust refactor itself is correct. Always run the full build (including UI) before declaring success.
+- After speckit 002's generic asset model, `user_request.rs` no longer needed `Profile` — each `AssetEntry` carries its own config in `AssetState`. The dependency was purely incidental and the refactor removed it cleanly.
+
+### Final test result
+
+33 features, 144 scenarios, 899 steps — all passing with 0 failures on Pi4-Server ARM64.
+
 **Commits:** `b4eea32`, `6a5163b`, `09a64fe`
