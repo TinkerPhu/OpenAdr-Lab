@@ -1,6 +1,6 @@
 Feature: VEN Entity Model — Stage 1 Foundation
   Verify that all domain entities compile, the Battery actor is present in /sim,
-  and HEMS endpoints (/packets, /plan, /rates) respond correctly.
+  and HEMS endpoints (/packets, /plan, /tariffs) respond correctly.
   Existing endpoints remain backward-compatible.
 
   Background:
@@ -33,8 +33,8 @@ Feature: VEN Entity Model — Stage 1 Foundation
     Then the response status is 200
     And the response JSON is an array
 
-  Scenario: GET /rates returns a JSON array
-    When I GET /rates from the VEN
+  Scenario: GET /tariffs returns a JSON array
+    When I GET /tariffs from the VEN
     Then the response status is 200
     And the response JSON is an array
 
@@ -60,7 +60,13 @@ Feature: VEN Entity Model — Stage 1 Foundation
     Then the response status is 200
     And the response JSON is an array
 
-  Scenario: Existing /trace endpoint still works
-    When I GET /trace from the VEN
+  Scenario: GET /trace/events endpoint returns a JSON array
+    When I GET /trace/events from the VEN
+    Then the response status is 200
+    And the response JSON is an array
+
+  Scenario: GET /trace/history returns asset history rows for EV
+    When I wait 3 seconds
+    And I GET /trace/history?asset=ev&limit=5 from the VEN
     Then the response status is 200
     And the response JSON is an array
