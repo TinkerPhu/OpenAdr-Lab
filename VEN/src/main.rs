@@ -379,19 +379,26 @@ async fn main() -> anyhow::Result<()> {
                     let sim_snap = sim_guard.to_sim_snapshot();
                     state.update_sim(sim_snap.clone()).await;
 
-                    // Post-tick: accumulate actual energy into packets and transition statuses
+                    // Post-tick: consolidated accounting — packets + ledger (T041/T043)
                     let mut updated_pkts = packets_snap.clone();
-                    let trigger_opt =
-                        controller::dispatcher::update_packets(&mut updated_pkts, &sim_snap, dt_s, now);
+                    let mut ledger = state.asset_ledger().await;
+                    let (trigger_opt, pkt_events) = controller::monitor::record_tick(
+                        &mut updated_pkts,
+                        &mut ledger,
+                        &sim_snap,
+                        &rates_snap,
+                        dt_s,
+                        now,
+                    );
                     state.set_active_packets(updated_pkts).await;
+                    state.set_asset_ledger(ledger).await;
+                    // Push PacketTransition events (T042)
+                    for evt in pkt_events {
+                        state.push_controller_event(evt).await;
+                    }
                     if let Some(t) = trigger_opt {
                         let _ = trigger_tx_tick.send(t);
                     }
-
-                    // Post-tick: update asset energy ledger
-                    let mut ledger = state.asset_ledger().await;
-                    controller::monitor::update_ledger(&mut ledger, &sim_snap, &rates_snap, dt_s, now);
-                    state.set_asset_ledger(ledger).await;
 
                     // Post-tick: push asset history rows (T032 — drives GET /trace/history)
                     {
@@ -996,6 +1003,16 @@ async fn post_requests(
             packets.push(packet);
             ctx.state.set_active_packets(packets).await;
             ctx.state.upsert_request(user_req.clone()).await;
+            // T044: emit RequestTransition for new request
+            ctx.state.push_controller_event(
+                controller::trace::ControllerEvent::RequestTransition {
+                    ts: now,
+                    request_id: user_req.id,
+                    asset_id: user_req.asset_id.clone(),
+                    from_status: "None".to_string(),
+                    to_status: format!("{:?}", user_req.status),
+                },
+            ).await;
             let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
             (axum::http::StatusCode::CREATED, Json(serde_json::to_value(user_req).unwrap_or_default())).into_response()
         }
@@ -1018,6 +1035,16 @@ async fn delete_request(
     match ctx.state.cancel_request(id).await {
         Some(packet_id) => {
             ctx.state.abandon_packet(packet_id).await;
+            // T044: emit RequestTransition for cancellation
+            ctx.state.push_controller_event(
+                controller::trace::ControllerEvent::RequestTransition {
+                    ts: Utc::now(),
+                    request_id: id,
+                    asset_id: String::new(),
+                    from_status: "Active".to_string(),
+                    to_status: "Cancelled".to_string(),
+                },
+            ).await;
             let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
             info!(request_id = %id, packet_id = %packet_id, "user request cancelled");
             axum::http::StatusCode::NO_CONTENT.into_response()
