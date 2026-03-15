@@ -311,7 +311,8 @@ function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
   }
 
   // Past points — actual setpoints + desired from events
-  const pastPoints: ChartPoint[] = traceEntries.map((entry) => {
+  // Guard: new ControllerEvent format no longer has setpoints; entries skipped until Phase 4
+  const pastPoints: ChartPoint[] = traceEntries.filter((e) => !!e.setpoints).map((entry) => {
     const tsMs = new Date(entry.ts).getTime();
     return {
       time: new Date(entry.ts).toLocaleTimeString(),
@@ -581,12 +582,11 @@ function EvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
   if (!sim.ev) return null;
   const maxKw = overrides.ev_max_charge_kw ?? sim.ev.max_charge_kw;
 
-  // Is a VTN event commanding EV charge? — mode is charge-setpoint or any capacity limit
-  const traceMode = latestTrace?.mode ?? "IDLE";
-  const isEvEventActive = traceMode !== "IDLE" && traceMode !== "PRICE";
+  // Is a VTN event commanding EV charge? — reactor mode removed; always inactive without reactor
+  const isEvEventActive = false;
 
-  // VTN intent for EV charge rate comes from reactor trace setpoints
-  const vtnEvKw = latestTrace?.setpoints.ev_charge_kw ?? (overrides.ev_desired_kw ?? sim.ev.max_charge_kw);
+  // EV charge rate: from current sim state (reactor trace setpoints removed with reactor)
+  const vtnEvKw = (overrides.ev_desired_kw ?? sim.ev.max_charge_kw);
 
   return (
     <Box>
@@ -681,12 +681,12 @@ function PvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
     }
   }
 
-  const traceMode = latestTrace?.mode ?? "IDLE";
-  const isPvEventActive = traceMode === "EXPORT_CAP";
+  // PV event active: reactor mode removed; capacity state checked via events directly (Phase 4+)
+  const isPvEventActive = false;
 
-  // pv_export_limit_kw is null when no limit is active; fall back to rated_kw for slider display
+  // pv_export_limit_kw: fall back to rated_kw for slider display (reactor trace removed)
   const ratedKw = overrides.pv_rated_kw ?? sim.pv.rated_kw;
-  const vtnPvLimitKw = latestTrace?.setpoints.pv_export_limit_kw ?? ratedKw;
+  const vtnPvLimitKw = ratedKw;
 
   return (
     <Box>
@@ -759,10 +759,10 @@ function HeaterControls({ sim, overrides, onChange, latestTrace }: ControlsProps
   const maxC = overrides.heater_temp_max_c ?? sim.heater.temp_max_c;
   const heaterMax = overrides.heater_max_kw ?? sim.heater.max_kw;
 
-  const traceMode = latestTrace?.mode ?? "IDLE";
-  const isHeaterEventActive = traceMode === "IMPORT_CAP" || traceMode === "EXPORT_CAP" || traceMode === "SIMPLE";
+  // Heater event active: reactor mode removed (Phase 4+ will use capacity state)
+  const isHeaterEventActive = false;
 
-  const vtnHeaterKw = latestTrace?.setpoints.heater_kw ?? heaterMax * 0.5;
+  const vtnHeaterKw = heaterMax * 0.5;
 
   return (
     <Box>
