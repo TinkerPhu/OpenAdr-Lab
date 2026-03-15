@@ -1,24 +1,30 @@
 # Test profile: All devices including battery, instant compliance, fast persist
-devices:
-  ev:
+assets:
+  - type: ev
+    id: ev
     max_charge_kw: 7.0
     initial_soc: 0.05
     battery_kwh: 60.0
-  heater:
+  - type: heater
+    id: heater
     max_kw: 3.0
     temp_initial_c: 20.0
     temp_min_c: 18.0
     temp_max_c: 23.0
-  pv:
+  - type: pv
+    id: pv
     rated_kw: 5.0
-  battery:
+  - type: battery
+    id: battery
     capacity_kwh: 10.0
     max_charge_kw: 5.0
     max_discharge_kw: 5.0
     initial_soc: 0.50
     round_trip_efficiency: 0.92
     min_soc: 0.10
-  base_load_w: 500
+  - type: base_load
+    id: base_load
+    baseline_kw: 0.5
 
 reactor:
   strategy: instant

@@ -8,13 +8,22 @@ from features.helpers.api_client import ven_get, ven_post, VEN_BASE_URL
 
 
 def _resolve_nested(data, path):
-    """Resolve a dotted path like 'battery.soc' into nested dict value."""
+    """Resolve a dotted path like 'battery.soc' into nested dict value.
+
+    Falls back to data['assets'][first_part] when the first key is not found
+    at the root level, supporting the new SimSnapshot.assets structure.
+    """
     parts = path.split(".")
     val = data
-    for part in parts:
+    for i, part in enumerate(parts):
         if not isinstance(val, dict):
             return None
-        val = val.get(part)
+        if part in val:
+            val = val[part]
+        elif i == 0 and isinstance(data.get("assets"), dict) and part in data["assets"]:
+            val = data["assets"][part]
+        else:
+            return None
     return val
 
 
@@ -37,7 +46,7 @@ def step_ven_battery_at_min_soc(context):
     """Use the sim response to confirm battery is at or near min_soc."""
     r = ven_get("/sim")
     r.raise_for_status()
-    battery = r.json().get("battery", {})
+    battery = r.json().get("assets", {}).get("battery", {})
     context.battery_min_soc = battery.get("min_soc", 0.10)
     context.expected_battery_soc = context.battery_min_soc
 
@@ -178,8 +187,8 @@ def step_battery_current_kw_is_zero(context):
     """Stage 1: battery holds at 0 (no dispatcher yet)."""
     r = ven_get("/sim")
     r.raise_for_status()
-    battery = r.json().get("battery")
-    assert battery is not None, "No battery in /sim response"
-    assert abs(battery.get("current_kw", 999)) < 1e-6, (
-        f"Expected battery.current_kw = 0.0, got {battery.get('current_kw')}"
+    battery = r.json().get("assets", {}).get("battery")
+    assert battery is not None, "No battery in /sim response assets"
+    assert abs(battery.get("power_kw", 999)) < 1e-6, (
+        f"Expected battery.power_kw = 0.0, got {battery.get('power_kw')}"
     )
