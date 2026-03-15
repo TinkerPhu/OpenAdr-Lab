@@ -35,10 +35,11 @@ def step_sim_has_field(context, field):
 
 @then('the sim response has device "{device}"')
 def step_sim_has_device(context, device):
-    val = context.sim_response.get(device)
+    assets = context.sim_response.get("assets", {})
+    val = assets.get(device)
     assert val is not None, (
-        f"Expected device '{device}' in sim response, got None. "
-        f"Available: {[k for k in context.sim_response if context.sim_response[k] is not None]}"
+        f"Expected device '{device}' in sim response assets, got None. "
+        f"Available: {list(assets.keys())}"
     )
 
 

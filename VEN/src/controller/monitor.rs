@@ -33,59 +33,22 @@ pub fn update_ledger(
         })
         .unwrap_or((DEFAULT_IMPORT_PRICE, DEFAULT_CO2_G_KWH));
 
-    // EV (consumption only; negative current means fault — ignore)
-    if let Some(ev) = &sim.ev {
-        let kw = ev.current_kw.max(0.0);
-        if kw > 1e-6 {
-            let entry = ledger
-                .entry("ev".to_string())
-                .or_insert_with(|| AssetLedgerEntry::new("ev"));
-            entry.energy_kwh += kw * dt_h;
+    for (asset_id, asset_snap) in &sim.assets {
+        let kw = asset_snap.power_kw;
+        if kw.abs() <= 1e-6 {
+            continue;
+        }
+
+        let entry = ledger
+            .entry(asset_id.clone())
+            .or_insert_with(|| AssetLedgerEntry::new(asset_id));
+        entry.energy_kwh += kw.abs() * dt_h;
+
+        // Importing assets (positive kw) incur cost and CO₂
+        if kw > 0.0 {
             entry.cost_eur += kw * dt_h * import_price;
             entry.co2_g += kw * dt_h * co2_rate;
-            entry.updated_at = Some(now);
         }
-    }
-
-    // Heater (consumption only)
-    if let Some(h) = &sim.heater {
-        let kw = h.current_kw.max(0.0);
-        if kw > 1e-6 {
-            let entry = ledger
-                .entry("heater".to_string())
-                .or_insert_with(|| AssetLedgerEntry::new("heater"));
-            entry.energy_kwh += kw * dt_h;
-            entry.cost_eur += kw * dt_h * import_price;
-            entry.co2_g += kw * dt_h * co2_rate;
-            entry.updated_at = Some(now);
-        }
-    }
-
-    // Battery (bidirectional: positive = charging/import, negative = discharging/export)
-    if let Some(bat) = &sim.battery {
-        if bat.current_kw.abs() > 1e-6 {
-            let entry = ledger
-                .entry("battery".to_string())
-                .or_insert_with(|| AssetLedgerEntry::new("battery"));
-            entry.energy_kwh += bat.current_kw.abs() * dt_h;
-            if bat.current_kw > 0.0 {
-                // Charging costs money
-                entry.cost_eur += bat.current_kw * dt_h * import_price;
-                entry.co2_g += bat.current_kw * dt_h * co2_rate;
-            }
-            entry.updated_at = Some(now);
-        }
-    }
-
-    // PV (generation — track energy produced, no cost)
-    if let Some(pv) = &sim.pv {
-        let kw = pv.current_kw.max(0.0);
-        if kw > 1e-6 {
-            let entry = ledger
-                .entry("pv".to_string())
-                .or_insert_with(|| AssetLedgerEntry::new("pv"));
-            entry.energy_kwh += kw * dt_h;
-            entry.updated_at = Some(now);
-        }
+        entry.updated_at = Some(now);
     }
 }
