@@ -1,6 +1,6 @@
 /// Stage 3 — HEMS Planning Algorithm (8-phase greedy scheduler).
 ///
-/// Produces a Plan from RateSnapshots + EnergyPackets + device profile.
+/// Produces a Plan from TariffSnapshots + EnergyPackets + device profile.
 /// Phase 6 (penalty check) is deferred to Stage 4.
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PlanTrigger, UserRequestMode};
 use crate::entities::capacity::OadrCapacityState;
@@ -9,7 +9,7 @@ use crate::entities::plan::{
     FirmSummary, FlexibilityEnvelope, FlexibleSummary, PacketAllocation, Plan, PlanTimeSlot,
     PlanningHorizon, SlotType,
 };
-use crate::entities::rate_snapshot::RateSnapshot;
+use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::profile::{BatteryConfig, Profile};
 use chrono::{DateTime, Duration, Timelike, Utc};
 use std::f64::consts::PI;
@@ -25,7 +25,7 @@ const CO2_WEIGHT: f64 = 0.0001; // €/g ≈ €100/tonne
 
 /// Run the full 8-phase planning algorithm and return a new Plan.
 pub fn run_planner(
-    rates: &[RateSnapshot],
+    rates: &[TariffSnapshot],
     packets: &[EnergyPacket],
     capacity: &OadrCapacityState,
     profile: &Profile,
@@ -110,7 +110,7 @@ pub fn run_planner(
 // ─── Phase 1: Build planning grid ────────────────────────────────────────────
 
 fn build_grid(
-    rates: &[RateSnapshot],
+    rates: &[TariffSnapshot],
     capacity: &OadrCapacityState,
     profile: &Profile,
     now: DateTime<Utc>,
@@ -537,21 +537,21 @@ fn summarize_firm(slots: &[PlanTimeSlot], slot_h: f64) -> FirmSummary {
 
 // ─── Rate helpers ─────────────────────────────────────────────────────────────
 
-fn rate_import_at(rates: &[RateSnapshot], ts: DateTime<Utc>) -> Option<f64> {
+fn rate_import_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
     rates
         .iter()
         .find(|r| r.interval_start <= ts && ts < r.interval_end)
         .and_then(|r| r.import_price_eur_kwh)
 }
 
-fn rate_export_at(rates: &[RateSnapshot], ts: DateTime<Utc>) -> Option<f64> {
+fn rate_export_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
     rates
         .iter()
         .find(|r| r.interval_start <= ts && ts < r.interval_end)
         .and_then(|r| r.export_price_eur_kwh)
 }
 
-fn rate_co2_at(rates: &[RateSnapshot], ts: DateTime<Utc>) -> Option<f64> {
+fn rate_co2_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
     rates
         .iter()
         .find(|r| r.interval_start <= ts && ts < r.interval_end)
