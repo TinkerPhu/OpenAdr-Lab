@@ -145,12 +145,12 @@ def step_sim_override_battery_charge(context, kw):
 def step_sim_ev_current_zero(context):
     sim = context.last_response_json
     assert sim is not None, "No sim JSON in context — use 'I GET /sim from the VEN'"
-    ev = sim.get("ev")
-    assert ev is not None, f"No 'ev' field in sim response: {list(sim.keys())}"
-    kw = ev.get("current_kw", None)
-    assert kw is not None, f"'ev.current_kw' not present: {ev}"
+    ev = sim.get("assets", {}).get("ev")
+    assert ev is not None, f"No 'ev' field in sim assets: {list(sim.get('assets', {}).keys())}"
+    kw = ev.get("power_kw", None)
+    assert kw is not None, f"'ev.power_kw' not present: {ev}"
     assert abs(kw) < 0.1, (
-        f"Expected EV current_kw ≈ 0.0 after unplug, got {kw}"
+        f"Expected EV power_kw ≈ 0.0 after unplug, got {kw}"
     )
 
 
@@ -158,8 +158,8 @@ def step_sim_ev_current_zero(context):
 def step_sim_ev_field_present(context):
     sim = context.last_response_json
     assert sim is not None, "No sim JSON in context"
-    ev = sim.get("ev")
-    assert ev is not None, f"'ev' field not present in sim: {list(sim.keys())}"
+    ev = sim.get("assets", {}).get("ev")
+    assert ev is not None, f"'ev' field not present in sim assets: {list(sim.get('assets', {}).keys())}"
 
 
 # ---------------------------------------------------------------------------

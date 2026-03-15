@@ -33,11 +33,11 @@ pub fn build_report(
 
     // Map event payload type → report payload type + actual sim value
     let (report_type, report_value) = match payload_type {
-        "IMPORT_CAPACITY_LIMIT" => ("USAGE", sim.import_w),
-        "EXPORT_CAPACITY_LIMIT" => ("USAGE", sim.export_w),
-        "PRICE" => ("USAGE", sim.net_power_w),
+        "IMPORT_CAPACITY_LIMIT" => ("USAGE", sim.grid.import_w),
+        "EXPORT_CAPACITY_LIMIT" => ("USAGE", sim.grid.export_w),
+        "PRICE" => ("USAGE", sim.grid.net_power_w),
         "SIMPLE" => ("SIMPLE", 1.0),
-        _ => ("USAGE", sim.net_power_w),
+        _ => ("USAGE", sim.grid.net_power_w),
     };
 
     // Build resource payloads
@@ -53,7 +53,7 @@ pub fn build_report(
     ];
 
     // Add EV SOC if present
-    if let Some(ref ev) = sim.ev {
+    if let Some(ev) = sim.ev() {
         payloads.push(json!({
             "type": "STORAGE_CHARGE_LEVEL",
             "values": [format!("{:.1}", ev.soc * 100.0)]
@@ -133,16 +133,15 @@ mod tests {
 
     fn make_sim() -> SimState {
         SimState {
-            ev: None,
-            heater: None,
-            pv: None,
-            battery: None,
-            base_load_w: 500.0,
-            energy: crate::simulator::energy::EnergyCounter::new(),
-            net_power_w: 1200.0,
-            import_w: 1500.0,
-            export_w: 300.0,
-            voltage_v: 230.0,
+            assets: vec![],
+            grid: crate::simulator::GridMeter {
+                net_power_w: 1200.0,
+                import_w: 1500.0,
+                export_w: 300.0,
+                voltage_v: 230.0,
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+            },
             last_tick: Utc::now(),
         }
     }
