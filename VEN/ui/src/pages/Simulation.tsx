@@ -22,7 +22,7 @@ import {
   YAxis,
 } from "recharts";
 import { useSim, useTrace, useEvents, useSimOverride, useSetSimOverride } from "../api/hooks";
-import type { UserOverrides, SimSnapshot, TraceEntry, VtnEvent } from "../api/types";
+import type { UserOverrides, SimSnapshot, VtnEvent } from "../api/types";
 
 function fmtNum(v: number | undefined | null, decimals = 1): string {
   if (v == null) return "—";
@@ -466,7 +466,6 @@ type ControlsProps = {
   sim: SimSnapshot;
   overrides: UserOverrides;
   onChange: (patch: Partial<UserOverrides>) => void;
-  latestTrace: TraceEntry | undefined;
 };
 
 /**
@@ -578,7 +577,7 @@ function OverridableControl({
   );
 }
 
-function EvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
+function EvControls({ sim, overrides, onChange }: ControlsProps) {
   if (!sim.ev) return null;
   const maxKw = overrides.ev_max_charge_kw ?? sim.ev.max_charge_kw;
 
@@ -668,7 +667,7 @@ function EvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
   );
 }
 
-function PvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
+function PvControls({ sim, overrides, onChange }: ControlsProps) {
   if (!sim.pv) return null;
   const [manualIrradiance, setManualIrradiance] = useState(overrides.pv_irradiance != null);
 
@@ -753,7 +752,7 @@ function PvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
   );
 }
 
-function HeaterControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
+function HeaterControls({ sim, overrides, onChange }: ControlsProps) {
   if (!sim.heater) return null;
   const minC = overrides.heater_temp_min_c ?? sim.heater.temp_min_c;
   const maxC = overrides.heater_temp_max_c ?? sim.heater.temp_max_c;
@@ -899,8 +898,6 @@ export function SimulationPage() {
   );
 
   const sim = simQuery.data;
-  const traceQuery = useTrace(1);
-  const latestTrace = traceQuery.data?.[0];
 
   return (
     <Stack spacing={3}>
@@ -959,25 +956,21 @@ export function SimulationPage() {
                 sim={sim}
                 overrides={localOverrides}
                 onChange={updateOverride}
-                latestTrace={latestTrace}
               />
               <PvControls
                 sim={sim}
                 overrides={localOverrides}
                 onChange={updateOverride}
-                latestTrace={latestTrace}
               />
               <HeaterControls
                 sim={sim}
                 overrides={localOverrides}
                 onChange={updateOverride}
-                latestTrace={latestTrace}
               />
               <BaseLoadControls
                 sim={sim}
                 overrides={localOverrides}
                 onChange={updateOverride}
-                latestTrace={latestTrace}
               />
             </Stack>
           </Paper>
