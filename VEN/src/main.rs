@@ -349,6 +349,7 @@ async fn main() -> anyhow::Result<()> {
                 let packets = state.active_packets().await;
                 let capacity = state.capacity_state().await;
                 let trigger = trigger_rx.borrow().clone();
+                let trigger_reason = format!("{:?}", trigger);
                 let plan = controller::planner::run_planner(
                     &rates,
                     &packets,
@@ -368,7 +369,7 @@ async fn main() -> anyhow::Result<()> {
                 state.push_controller_event(
                     controller::trace::ControllerEvent::PlanCycle {
                         ts: now,
-                        trigger_reason: format!("{:?}", trigger),
+                        trigger_reason,
                         firm_slots: firm_count,
                         flexible_slots: flex_count,
                     }
