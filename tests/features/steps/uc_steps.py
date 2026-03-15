@@ -101,14 +101,14 @@ def step_post_continue_request(context, asset_id):
 
 @when("I POST a sim override setting ev_plugged to false")
 def step_sim_override_ev_unplugged(context):
-    r = ven_post("/sim/override", json={"ev_plugged": False})
+    r = ven_post("/sim/override", json={"ev_plugged": 0.0})
     r.raise_for_status()
     context.last_response = r
 
 
 @when("I POST a sim override setting ev_plugged to true")
 def step_sim_override_ev_plugged(context):
-    r = ven_post("/sim/override", json={"ev_plugged": True})
+    r = ven_post("/sim/override", json={"ev_plugged": 1.0})
     r.raise_for_status()
     context.last_response = r
 
@@ -128,13 +128,6 @@ def step_sim_override_pv_full(context):
     r.raise_for_status()
     context.last_response = r
 
-
-@when("I POST a sim override forcing battery to charge at {kw:f} kW")
-def step_sim_override_battery_charge(context, kw):
-    """Force battery charging at kw to guarantee ledger accumulation regardless of plan."""
-    r = ven_post("/sim/override", json={"battery_force_kw": kw})
-    r.raise_for_status()
-    context.last_response = r
 
 
 # ---------------------------------------------------------------------------
