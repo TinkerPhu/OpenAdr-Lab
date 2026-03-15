@@ -31,13 +31,19 @@ export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartPro
           { ts: nowMs + 3_600_000, powerKw: 0, costRateEurH: null, co2RateGH: null, isPast: false },
         ];
 
+  // Domain must always include nowMs so the NOW reference line is rendered.
+  // Future-only data (plan slots) would otherwise start at > nowMs, pushing the
+  // reference line off the left edge of the chart.
+  const tMin = Math.min(nowMs - 300_000, ...chartData.map((p) => p.ts));
+  const tMax = Math.max(nowMs + 300_000, ...chartData.map((p) => p.ts));
+
   return (
     <ComposedChart data={chartData} width={600} height={140} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
         <XAxis
           dataKey="ts"
           type="number"
-          domain={["auto", "auto"]}
+          domain={[tMin, tMax]}
           tickFormatter={formatTs}
           tick={{ fontSize: 10 }}
         />
