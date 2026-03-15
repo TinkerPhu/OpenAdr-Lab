@@ -822,9 +822,9 @@ async fn post_requests(
     Json(body): Json<CreateUserRequestBody>,
 ) -> impl IntoResponse {
     let now = Utc::now();
-    let sim = ctx.state.sim().await;
+    let assets = ctx.sim.lock().await.assets.clone();
 
-    match controller::user_request::create_from_body(body, &ctx.profile, sim.as_ref(), now) {
+    match controller::user_request::create_from_body(body, &assets, now) {
         Ok((user_req, packet)) => {
             info!(
                 request_id = %user_req.id,
