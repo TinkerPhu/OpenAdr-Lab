@@ -6,8 +6,7 @@
 use crate::entities::asset::{ComfortRate, CompletionPolicy, UserRequestMode};
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
 use crate::entities::user_request::{RequestDeadline, UserRequest, UserRequestStatus};
-use crate::profile::Profile;
-use crate::simulator::SimSnapshot;
+use crate::simulator::AssetEntry;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -59,8 +58,7 @@ impl std::fmt::Display for RequestError {
 /// Create a (UserRequest, EnergyPacket) pair from the POST /requests body.
 pub fn create_from_body(
     body: CreateUserRequestBody,
-    profile: &Profile,
-    sim: Option<&SimSnapshot>,
+    assets: &[AssetEntry],
     now: DateTime<Utc>,
 ) -> Result<(UserRequest, EnergyPacket), RequestError> {
     if body.deadlines.is_empty() {
@@ -69,7 +67,7 @@ pub fn create_from_body(
 
     // Compute target energy and desired power
     let (target_energy_kwh, desired_power_kw) =
-        resolve_target(&body, profile, sim)?;
+        resolve_target(&body, assets)?;
 
     // Build completion policy
     let completion_policy = match body
@@ -182,8 +180,7 @@ pub fn create_from_body(
 /// Compute target energy (kWh) and desired power (kW) from the request body.
 fn resolve_target(
     body: &CreateUserRequestBody,
-    profile: &Profile,
-    sim: Option<&SimSnapshot>,
+    assets: &[AssetEntry],
 ) -> Result<(f64, f64), RequestError> {
     // Explicit target energy wins
     if let Some(kwh) = body.target_energy_kwh {
@@ -194,43 +191,13 @@ fn resolve_target(
         return Ok((kwh, power));
     }
 
-    match body.asset_id.as_str() {
-        "ev" => {
-            let ev_cfg = profile.ev_config().ok_or_else(|| {
-                RequestError::UnknownAsset("ev".to_string())
-            })?;
-            let current_soc = sim
-                .and_then(|s| s.assets.get("ev"))
-                .and_then(|a| a.values.get("soc_pct"))
-                .map(|pct| pct / 100.0)
-                .unwrap_or(ev_cfg.initial_soc);
-            let target_soc = body.target_soc.unwrap_or(ev_cfg.soc_target);
-            let delta = (target_soc - current_soc).max(0.0);
-            let kwh = delta * ev_cfg.battery_kwh;
-            if kwh < 1e-6 {
-                return Err(RequestError::ZeroEnergy);
-            }
-            let power = body.desired_power_kw.unwrap_or(ev_cfg.max_charge_kw);
-            Ok((kwh, power))
-        }
-        "battery" => {
-            let bat = profile.battery_config().ok_or_else(|| {
-                RequestError::UnknownAsset("battery".to_string())
-            })?;
-            let current_soc = sim
-                .and_then(|s| s.assets.get("battery"))
-                .and_then(|a| a.values.get("soc_pct"))
-                .map(|pct| pct / 100.0)
-                .unwrap_or(bat.initial_soc);
-            let target_soc = body.target_soc.unwrap_or(1.0);
-            let delta = (target_soc - current_soc).max(0.0);
-            let kwh = delta * bat.capacity_kwh;
-            if kwh < 1e-6 {
-                return Err(RequestError::ZeroEnergy);
-            }
-            let power = body.desired_power_kw.unwrap_or(bat.max_charge_kw);
-            Ok((kwh, power))
-        }
-        other => Err(RequestError::UnknownAsset(other.to_string())),
-    }
+    let entry = assets
+        .iter()
+        .find(|a| a.id == body.asset_id)
+        .ok_or_else(|| RequestError::UnknownAsset(body.asset_id.clone()))?;
+
+    entry
+        .state
+        .resolve_request_target(body.target_soc, body.desired_power_kw)
+        .ok_or_else(|| RequestError::UnknownAsset(body.asset_id.clone()))
 }

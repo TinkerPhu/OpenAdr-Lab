@@ -127,6 +127,22 @@ impl EvCharger {
     pub fn power_w(&self) -> f64 {
         self.current_kw * 1000.0
     }
+
+    /// Resolve a user request target for this EV charger.
+    /// Returns (target_energy_kwh, desired_power_kw), or None if already at/above target.
+    pub fn resolve_request_target(
+        &self,
+        target_soc: Option<f64>,
+        desired_power_kw: Option<f64>,
+    ) -> Option<(f64, f64)> {
+        let target = target_soc.unwrap_or(self.soc_target);
+        let delta = (target - self.soc).max(0.0);
+        let kwh = delta * self.battery_kwh;
+        if kwh < 1e-6 {
+            return None;
+        }
+        Some((kwh, desired_power_kw.unwrap_or(self.max_charge_kw)))
+    }
 }
 
 #[cfg(test)]
