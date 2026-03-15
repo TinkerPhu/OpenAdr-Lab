@@ -140,7 +140,7 @@ async fn main() -> anyhow::Result<()> {
                         // Parse rates and capacity from new events (Stage 2)
                         let now = Utc::now();
                         let rates = controller::openadr_interface::parse_rate_snapshots(&events);
-                        state.set_planned_rates(rates).await;
+                        state.set_planned_tariffs(rates).await;
 
                         let new_cap = controller::openadr_interface::parse_capacity_state(&events);
                         state.set_capacity_state(new_cap).await;
@@ -244,7 +244,7 @@ async fn main() -> anyhow::Result<()> {
                 // Pre-tick: snapshot plan/packets/rates for dispatcher (no lock needed)
                 let plan_snap = state.active_plan().await;
                 let packets_snap = state.active_packets().await;
-                let rates_snap = state.planned_rates().await;
+                let rates_snap = state.planned_tariffs().await;
 
                 // Reactor: evaluate events → setpoints; dispatcher overlays plan allocations
                 let (setpoints, sim_snapshot, reactor_mode) = {
@@ -280,10 +280,9 @@ async fn main() -> anyhow::Result<()> {
                     let sensor = sim_guard.to_sensor_snapshot();
                     state.update_sensor(sensor).await;
 
-                    // Update sim + trace in app state
+                    // Update sim in app state
                     let sim_snap = sim_guard.to_sim_snapshot();
-                    let trace = reactor_guard.trace_entries();
-                    state.update_sim(sim_snap.clone(), trace).await;
+                    state.update_sim(sim_snap.clone()).await;
 
                     // Post-tick: accumulate actual energy into packets and transition statuses
                     let mut updated_pkts = packets_snap.clone();
@@ -382,7 +381,7 @@ async fn main() -> anyhow::Result<()> {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             loop {
                 let now = Utc::now();
-                let rates = state.planned_rates().await;
+                let rates = state.planned_tariffs().await;
                 let packets = state.active_packets().await;
                 let capacity = state.capacity_state().await;
                 let trigger = trigger_rx.borrow().clone();
@@ -454,12 +453,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/sim/reset/:asset_id", post(post_sim_reset))
         .route("/sim/config/battery", put(put_sim_config_battery))
         .route("/sim/override", get(get_sim_override).post(post_sim_override))
-        .route("/trace", get(get_trace))
+        .route("/trace/events", get(get_trace_events))
+        .route("/trace/history", get(get_trace_history))
         .route("/metrics", get(get_metrics))
         // HEMS Stage 1–3 routes
         .route("/packets", get(get_packets).post(post_packets))
         .route("/plan", get(get_plan))
-        .route("/rates", get(get_rates))
+        .route("/tariffs", get(get_tariffs))
         // HEMS Stage 2 routes
         .route("/capacity", get(get_capacity))
         .route("/obligations", get(get_obligations))
@@ -690,16 +690,52 @@ struct TraceQuery {
     limit: Option<usize>,
 }
 
-async fn get_trace(
+#[derive(Deserialize)]
+struct TraceHistoryQuery {
+    asset: String,
+    limit: Option<usize>,
+}
+
+/// GET /trace/events?limit=N — returns recent ControllerEvent log entries (newest first).
+async fn get_trace_events(
     State(ctx): State<AppCtx>,
     Query(q): Query<TraceQuery>,
 ) -> impl IntoResponse {
-    let mut trace = ctx.state.trace().await;
     let limit = q.limit.unwrap_or(50);
-    // Return newest first
-    trace.reverse();
-    trace.truncate(limit);
-    Json(trace)
+    let ct = ctx.state.controller_trace().await;
+    let mut events = ct.events();
+    events.reverse();
+    events.truncate(limit);
+    Json(events)
+}
+
+/// GET /trace/history?asset=<id>&limit=N — returns timeline rows for an asset.
+async fn get_trace_history(
+    State(ctx): State<AppCtx>,
+    Query(q): Query<TraceHistoryQuery>,
+) -> impl IntoResponse {
+    let ct = ctx.state.controller_trace().await;
+    let limit = q.limit.unwrap_or(100);
+    match ct.asset_history_for(&q.asset) {
+        None => Json(Vec::<serde_json::Value>::new()).into_response(),
+        Some(buf) => {
+            let mut points = buf.to_timeline(None);
+            points.reverse();
+            points.truncate(limit);
+            let json: Vec<serde_json::Value> = points
+                .into_iter()
+                .map(|p| {
+                    let mut m = serde_json::Map::new();
+                    m.insert("ts".to_string(), serde_json::json!(p.ts));
+                    for (k, v) in p.values {
+                        m.insert(k, serde_json::json!(v));
+                    }
+                    serde_json::Value::Object(m)
+                })
+                .collect();
+            Json(json).into_response()
+        }
+    }
 }
 
 // --- HEMS stub routes (Stage 1) ---
@@ -717,9 +753,9 @@ async fn get_plan(State(ctx): State<AppCtx>) -> impl IntoResponse {
     }
 }
 
-/// GET /rates — returns planned rate snapshots parsed from active events (Stage 2).
-async fn get_rates(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.planned_rates().await)
+/// GET /tariffs — returns planned tariff snapshots parsed from active events.
+async fn get_tariffs(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.planned_tariffs().await)
 }
 
 /// GET /capacity — returns the current OadrCapacityState (Stage 2).

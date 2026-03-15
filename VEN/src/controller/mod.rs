@@ -1,6 +1,17 @@
-pub mod dispatcher;
-pub mod monitor;
+// ── OpenADR interface ─────────────────────────────────────────────────────────
 pub mod openadr_interface;
+
+// ── Planning & dispatch ───────────────────────────────────────────────────────
+pub mod dispatcher;
 pub mod planner;
-pub mod trace;
+pub mod timeline;
+
+// ── Monitoring & reporting ────────────────────────────────────────────────────
+pub mod monitor;
+pub mod reporter;
+
+// ── User requests ─────────────────────────────────────────────────────────────
 pub mod user_request;
+
+// ── Observability ─────────────────────────────────────────────────────────────
+pub mod trace;

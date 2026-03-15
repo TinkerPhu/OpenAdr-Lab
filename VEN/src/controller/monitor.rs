@@ -2,7 +2,7 @@
 ///
 /// Tracks energy delivered per asset per tick and accumulates cost/CO₂.
 /// Deviation detection and timeout checks are deferred to Stage 5.
-use crate::entities::rate_snapshot::RateSnapshot;
+use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::simulator::SimSnapshot;
 use crate::state::AssetLedgerEntry;
 use chrono::{DateTime, Utc};
@@ -15,7 +15,7 @@ const DEFAULT_CO2_G_KWH: f64 = 300.0;
 pub fn update_ledger(
     ledger: &mut HashMap<String, AssetLedgerEntry>,
     sim: &SimSnapshot,
-    rates: &[RateSnapshot],
+    rates: &[TariffSnapshot],
     dt_s: f64,
     now: DateTime<Utc>,
 ) {
