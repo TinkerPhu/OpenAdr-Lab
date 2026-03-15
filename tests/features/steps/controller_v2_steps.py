@@ -126,8 +126,9 @@ def step_now_line_visible(context):
         tid("asset-timeline-chart-ev"), timeout=10000
     )
     assert chart is not None, "asset-timeline-chart-ev not found"
-    # Look for the recharts reference line element (has class recharts-reference-line)
-    ref_line = chart.query_selector(".recharts-reference-line")
+    # Wait for the recharts reference line element (has class recharts-reference-line).
+    # Uses wait_for_selector (not query_selector) to account for async recharts rendering.
+    ref_line = chart.wait_for_selector(".recharts-reference-line", timeout=5000)
     assert ref_line is not None, "No recharts-reference-line found inside asset-timeline-chart-ev"
 
 
