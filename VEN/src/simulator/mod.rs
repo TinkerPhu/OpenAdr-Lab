@@ -82,6 +82,18 @@ impl SimState {
             self.base_load_w = base;
         }
 
+        // Apply stub one-shot SoC setters (cleared by caller after this tick)
+        if let (Some(ref mut ev), Some(soc)) = (&mut self.ev, overrides.ev_initial_soc) {
+            ev.soc = soc.clamp(0.0, 1.0);
+        }
+        if let (Some(ref mut bat), Some(soc)) = (&mut self.battery, overrides.battery_initial_soc) {
+            bat.soc = soc.clamp(0.0, 1.0);
+        }
+        // Apply stub persistent battery capacity override
+        if let (Some(ref mut bat), Some(cap)) = (&mut self.battery, overrides.battery_capacity_kwh) {
+            bat.capacity_kwh = cap.max(0.1);
+        }
+
         // Update actors
         let ev_w = if let Some(ref mut ev) = self.ev {
             ev.update(dt_s, setpoints.ev_charge_kw) * 1000.0

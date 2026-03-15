@@ -300,6 +300,14 @@ async fn main() -> anyhow::Result<()> {
 
                 let _ = setpoints; // used above, suppress warning
 
+                // Clear one-shot stub fields (ev_initial_soc, battery_initial_soc) after tick applied them
+                if overrides.ev_initial_soc.is_some() || overrides.battery_initial_soc.is_some() {
+                    let mut cleared = overrides.clone();
+                    cleared.ev_initial_soc = None;
+                    cleared.battery_initial_soc = None;
+                    state.set_overrides(cleared).await;
+                }
+
                 // Periodic auto-report submission
                 if report_every_ticks > 0 {
                     report_counter += 1;
