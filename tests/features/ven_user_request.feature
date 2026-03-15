@@ -43,6 +43,13 @@ Feature: VEN User Request Manager — Stage 5
     Then the response status is 204
     And the cancelled packet is in ABANDONED status
 
+  # --- Non-storage asset rejection ---
+
+  Scenario: Request for a non-storage asset is rejected
+    When I POST a user request for asset "pv" with target_soc 0.90 and latest_end in 12 hours
+    Then the response status is 422
+    And the response JSON has field "error"
+
   # --- GET /flexibility ---
 
   Scenario: GET /flexibility returns the plan envelopes array

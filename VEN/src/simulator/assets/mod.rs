@@ -162,6 +162,21 @@ impl AssetState {
         }
     }
 
+    /// Resolve a user request target for this asset.
+    /// Returns Some((target_energy_kwh, desired_power_kw)) for energy-storage assets,
+    /// or None if the asset does not support SoC-based requests.
+    pub fn resolve_request_target(
+        &self,
+        target_soc: Option<f64>,
+        desired_power_kw: Option<f64>,
+    ) -> Option<(f64, f64)> {
+        match self {
+            Self::Ev(inner) => inner.resolve_request_target(target_soc, desired_power_kw),
+            Self::Battery(inner) => inner.resolve_request_target(target_soc, desired_power_kw),
+            Self::Heater(_) | Self::Pv(_) | Self::BaseLoad(_) => None,
+        }
+    }
+
     /// Update config fields in place (e.g. capacity_kwh).
     pub fn update_config(&mut self, values: HashMap<String, f64>) {
         match self {
