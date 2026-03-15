@@ -2,9 +2,9 @@ use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
 use crate::entities::user_request::{UserRequest, UserRequestStatus};
 use crate::entities::energy_packet::EnergyPacket;
 use crate::entities::plan::Plan;
-use crate::entities::rate_snapshot::RateSnapshot;
+use crate::entities::tariff_snapshot::TariffSnapshot;
+use crate::controller::trace::ControllerTrace;
 use crate::models::SensorSnapshot;
-use crate::reactor::trace::TraceEntry;
 use crate::simulator::SimSnapshot;
 use chrono::DateTime;
 use chrono::Utc;
@@ -75,7 +75,7 @@ pub struct InnerState {
     #[serde(skip)]
     pub sim: Option<SimSnapshot>,
     #[serde(skip)]
-    pub trace: Vec<TraceEntry>,
+    pub controller_trace: ControllerTrace,
     #[serde(default)]
     pub overrides: UserOverrides,
 
@@ -85,7 +85,7 @@ pub struct InnerState {
     #[serde(skip)]
     pub active_plan: Option<Plan>,
     #[serde(skip)]
-    pub planned_rates: Vec<RateSnapshot>,
+    pub planned_tariffs: Vec<TariffSnapshot>,
     #[serde(skip)]
     pub capacity_state: OadrCapacityState,
     #[serde(skip)]
@@ -105,11 +105,11 @@ impl AppState {
                 reports: vec![],
                 sensor: SensorSnapshot::empty_now(),
                 sim: None,
-                trace: vec![],
+                controller_trace: ControllerTrace::new(),
                 overrides: UserOverrides::default(),
                 active_packets: vec![],
                 active_plan: None,
-                planned_rates: vec![],
+                planned_tariffs: vec![],
                 capacity_state: OadrCapacityState::default(),
                 report_obligations: vec![],
                 asset_ledger: HashMap::new(),
@@ -135,10 +135,8 @@ impl AppState {
         self.inner.write().await.sensor = sensor;
     }
 
-    pub async fn update_sim(&self, sim: SimSnapshot, trace: Vec<TraceEntry>) {
-        let mut inner = self.inner.write().await;
-        inner.sim = Some(sim);
-        inner.trace = trace;
+    pub async fn update_sim(&self, sim: SimSnapshot) {
+        self.inner.write().await.sim = Some(sim);
     }
 
     pub async fn snapshot(&self) -> InnerState {
@@ -165,8 +163,25 @@ impl AppState {
         self.inner.read().await.sim.clone()
     }
 
-    pub async fn trace(&self) -> Vec<TraceEntry> {
-        self.inner.read().await.trace.clone()
+    pub async fn controller_trace(&self) -> ControllerTrace {
+        self.inner.read().await.controller_trace.clone()
+    }
+
+    pub async fn push_controller_event(&self, event: crate::controller::trace::ControllerEvent) {
+        self.inner.write().await.controller_trace.push_event(event);
+    }
+
+    pub async fn push_asset_row(
+        &self,
+        asset_id: &str,
+        ts: chrono::DateTime<chrono::Utc>,
+        values: HashMap<String, f64>,
+    ) {
+        self.inner
+            .write()
+            .await
+            .controller_trace
+            .push_asset_row(asset_id, ts, values);
     }
 
     pub async fn overrides(&self) -> UserOverrides {
@@ -195,12 +210,12 @@ impl AppState {
         self.inner.write().await.active_plan = plan;
     }
 
-    pub async fn planned_rates(&self) -> Vec<RateSnapshot> {
-        self.inner.read().await.planned_rates.clone()
+    pub async fn planned_tariffs(&self) -> Vec<TariffSnapshot> {
+        self.inner.read().await.planned_tariffs.clone()
     }
 
-    pub async fn set_planned_rates(&self, rates: Vec<RateSnapshot>) {
-        self.inner.write().await.planned_rates = rates;
+    pub async fn set_planned_tariffs(&self, tariffs: Vec<TariffSnapshot>) {
+        self.inner.write().await.planned_tariffs = tariffs;
     }
 
     pub async fn capacity_state(&self) -> OadrCapacityState {
@@ -322,11 +337,11 @@ impl Clone for InnerState {
             reports: self.reports.clone(),
             sensor: self.sensor.clone(),
             sim: self.sim.clone(),
-            trace: self.trace.clone(),
+            controller_trace: self.controller_trace.clone(),
             overrides: self.overrides.clone(),
             active_packets: self.active_packets.clone(),
             active_plan: self.active_plan.clone(),
-            planned_rates: self.planned_rates.clone(),
+            planned_tariffs: self.planned_tariffs.clone(),
             capacity_state: self.capacity_state.clone(),
             report_obligations: self.report_obligations.clone(),
             asset_ledger: self.asset_ledger.clone(),

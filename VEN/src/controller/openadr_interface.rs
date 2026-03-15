@@ -3,7 +3,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
-use crate::entities::rate_snapshot::RateSnapshot;
+use crate::entities::tariff_snapshot::TariffSnapshot;
 
 // ---------------------------------------------------------------------------
 // ISO 8601 duration parser (subset: PT<n>H, PT<n>M, PT<n>S, combinations)
@@ -77,10 +77,10 @@ fn parse_iso8601_duration(s: &str) -> i64 {
 
 /// Parse all rate snapshots from a slice of OpenADR events.
 /// Handles PRICE, EXPORT_PRICE, GHG payload types per event interval.
-/// Multiple payload types for the same interval are merged into one RateSnapshot.
-pub fn parse_rate_snapshots(events: &[Value]) -> Vec<RateSnapshot> {
+/// Multiple payload types for the same interval are merged into one TariffSnapshot.
+pub fn parse_rate_snapshots(events: &[Value]) -> Vec<TariffSnapshot> {
     // Key: (interval_start_millis, interval_end_millis) → accumulated snapshot
-    let mut map: std::collections::BTreeMap<(i64, i64), RateSnapshot> =
+    let mut map: std::collections::BTreeMap<(i64, i64), TariffSnapshot> =
         std::collections::BTreeMap::new();
 
     for event in events {
@@ -124,7 +124,7 @@ pub fn parse_rate_snapshots(events: &[Value]) -> Vec<RateSnapshot> {
             let key = (interval_start.timestamp(), interval_end.timestamp());
 
             // Seed the map entry if not present
-            let entry = map.entry(key).or_insert_with(|| RateSnapshot {
+            let entry = map.entry(key).or_insert_with(|| TariffSnapshot {
                 interval_start,
                 interval_end,
                 import_price_eur_kwh: None,
@@ -176,7 +176,7 @@ pub fn parse_rate_snapshots(events: &[Value]) -> Vec<RateSnapshot> {
 
     // Filter to only snapshots that have at least one rate field set,
     // then sort by interval_start.
-    let mut result: Vec<RateSnapshot> = map
+    let mut result: Vec<TariffSnapshot> = map
         .into_values()
         .filter(|s| {
             s.import_price_eur_kwh.is_some()
