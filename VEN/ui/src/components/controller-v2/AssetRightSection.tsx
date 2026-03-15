@@ -150,7 +150,7 @@ function EvSimCharacteristics({
 function BatteryStatusControls({
   sim,
   overrides: _overrides,
-  onChange,
+  onChange: _onChange,
 }: {
   sim?: SimSnapshot;
   overrides?: UserOverrides;
