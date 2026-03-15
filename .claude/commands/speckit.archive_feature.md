@@ -31,7 +31,10 @@ This command closes out a completed speckit feature by moving its spec directory
    - `git add -A specs/`
    - Commit with message: `chore: archive spec kit artifacts for <FEATURE_ID>`
 
-6. **Report**: Output the result:
+6. **Ask the user if merge to main is requested**
+   - if afirmative, merge current branch with main.
+
+7. **Report**: Output the result:
    - Path archived to
    - Commit hash
    - Remind the user that `postponed_features.md` is preserved inside the archive and should be referenced when starting the next feature
