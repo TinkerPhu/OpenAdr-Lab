@@ -8,8 +8,6 @@ This command closes out a completed speckit feature by moving its spec directory
 
 **When to use**: After all tasks are complete, the retrospective checklist is done, and the feature branch is ready to merge (or already merged) into main.
 
-**What it does NOT do**: delete `postponed_features.md`, modify `main`, push to remote, or touch any source code.
-
 ## Execution Steps
 
 1. **Setup**: Run `.specify/scripts/powershell/check-prerequisites.ps1 -Json` from repo root and parse JSON for `FEATURE_DIR`.
