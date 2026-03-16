@@ -58,7 +58,7 @@ def _create_price_event(token, program_id, import_rate):
 
 
 def _ven1_rates():
-    r = ven_get("/rates")
+    r = ven_get("/tariffs")
     r.raise_for_status()
     return r.json()
 
@@ -81,7 +81,7 @@ def step_no_price_events(context):
         lambda rates: isinstance(rates, list) and len(rates) == 0,
         timeout=30,
         interval=2,
-        description="VEN-1 /rates returns empty list",
+        description="VEN-1 /tariffs returns empty list",
     )
 
 
@@ -108,13 +108,13 @@ def step_create_price_event(context, rate):
 
 @given("I wait for VEN-1 to have rate data")
 def step_wait_for_rate_data(context):
-    """Poll GET /rates until it returns a non-empty list of snapshots."""
+    """Poll GET /tariffs until it returns a non-empty list of snapshots."""
     poll_until(
         _ven1_rates,
         lambda rates: isinstance(rates, list) and len(rates) > 0,
         timeout=30,
         interval=2,
-        description="VEN-1 /rates has non-empty snapshots",
+        description="VEN-1 /tariffs has non-empty snapshots",
     )
 
 

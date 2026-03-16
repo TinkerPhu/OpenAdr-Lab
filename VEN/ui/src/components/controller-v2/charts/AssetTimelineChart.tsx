@@ -22,15 +22,31 @@ function formatTs(ts: number) {
 }
 
 export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartProps) {
+  // Ensure at least a 2-point range so recharts can compute the X scale and render the
+  // NOW reference line even when there are no trace setpoints (Phase 4 wires history).
+  const chartData: AssetTimePoint[] =
+    data.length > 0
+      ? data
+      : [
+          { ts: nowMs - 3_600_000, powerKw: 0, costRateEurH: null, co2RateGH: null, isPast: true },
+          { ts: nowMs + 3_600_000, powerKw: 0, costRateEurH: null, co2RateGH: null, isPast: false },
+        ];
+
+  // Domain must always include nowMs so the NOW reference line is rendered.
+  // Future-only data (plan slots) would otherwise start at > nowMs, pushing the
+  // reference line off the left edge of the chart.
+  const tMin = Math.min(nowMs - 300_000, ...chartData.map((p) => p.ts));
+  const tMax = Math.max(nowMs + 300_000, ...chartData.map((p) => p.ts));
+
   return (
     <ResponsiveContainer width="100%" height={140}>
-      <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+      <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
         <XAxis
           dataKey="ts"
           scale="time"
           type="number"
-          domain={["auto", "auto"]}
+          domain={[tMin, tMax]}
           tickFormatter={formatTs}
           tick={{ fontSize: 10 }}
         />

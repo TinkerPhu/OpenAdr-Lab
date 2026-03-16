@@ -73,10 +73,12 @@ function buildPowerChartData(
   traceEntries: TraceEntry[],
   plan: Plan | null
 ): ControllerPowerPoint[] {
-  const pastPoints: ControllerPowerPoint[] = traceEntries.map((e) => {
-    const ev = e.setpoints.ev_charge_kw;
-    const heater = e.setpoints.heater_kw;
-    const pv = e.setpoints.pv_export_limit_kw ?? 0;
+  // Guard: new ControllerEvent format no longer has setpoints — skip until Phase 4
+  const pastPoints: ControllerPowerPoint[] = traceEntries.filter((e) => !!e.setpoints).map((e) => {
+    const sp = e.setpoints!;
+    const ev = sp.ev_charge_kw;
+    const heater = sp.heater_kw;
+    const pv = sp.pv_export_limit_kw ?? 0;
     return {
       ts: new Date(e.ts).getTime(),
       trace_ev: ev,

@@ -84,9 +84,9 @@ export function TracePage() {
                   {entry.winning_intent ?? "—"}
                 </TableCell>
                 <TableCell sx={{ fontSize: "0.75rem" }}>
-                  EV: {entry.setpoints.ev_charge_kw.toFixed(1)}kW |
-                  Heat: {entry.setpoints.heater_kw.toFixed(1)}kW |
-                  PV limit: {entry.setpoints.pv_export_limit_kw != null ? `${entry.setpoints.pv_export_limit_kw.toFixed(2)} kW` : "—"}
+                  {entry.setpoints
+                    ? `EV: ${entry.setpoints.ev_charge_kw.toFixed(1)}kW | Heat: ${entry.setpoints.heater_kw.toFixed(1)}kW | PV limit: ${entry.setpoints.pv_export_limit_kw != null ? `${entry.setpoints.pv_export_limit_kw.toFixed(2)} kW` : "—"}`
+                    : "—"}
                 </TableCell>
                 <TableCell sx={{ fontSize: "0.75rem", maxWidth: 300 }}>
                   {entry.reason}
