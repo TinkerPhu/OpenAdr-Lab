@@ -160,11 +160,11 @@ def step_create_price_event_no_descriptors(context):
 # When: poll VEN endpoints
 # ---------------------------------------------------------------------------
 
-@when("I wait for the VEN /rates endpoint to have at least {count:d} snapshot")
-@when("I wait for the VEN /rates endpoint to have at least {count:d} snapshots")
+@when("I wait for the VEN /tariffs endpoint to have at least {count:d} snapshot")
+@when("I wait for the VEN /tariffs endpoint to have at least {count:d} snapshots")
 def step_wait_ven_rates(context, count):
     def fetch():
-        resp = ven_get("/rates")
+        resp = ven_get("/tariffs")
         if not resp.ok:
             return []
         return resp.json()
@@ -174,14 +174,14 @@ def step_wait_ven_rates(context, count):
         lambda rates: isinstance(rates, list) and len(rates) >= count,
         timeout=30,
         interval=3,
-        description=f"VEN /rates has >= {count} snapshot(s)",
+        description=f"VEN /tariffs has >= {count} snapshot(s)",
     )
 
 
-@when("I wait for the VEN /rates endpoint to have a snapshot with co2_g_kwh")
+@when("I wait for the VEN /tariffs endpoint to have a snapshot with co2_g_kwh")
 def step_wait_ven_rates_co2(context):
     def fetch():
-        resp = ven_get("/rates")
+        resp = ven_get("/tariffs")
         if not resp.ok:
             return []
         return resp.json()
@@ -191,14 +191,14 @@ def step_wait_ven_rates_co2(context):
         lambda rates: isinstance(rates, list) and any(s.get("co2_g_kwh") is not None for s in rates),
         timeout=30,
         interval=3,
-        description="VEN /rates has a snapshot with co2_g_kwh",
+        description="VEN /tariffs has a snapshot with co2_g_kwh",
     )
 
 
-@when("I wait for the VEN /rates endpoint to have a snapshot with export_price_eur_kwh")
+@when("I wait for the VEN /tariffs endpoint to have a snapshot with export_price_eur_kwh")
 def step_wait_ven_rates_export_price(context):
     def fetch():
-        resp = ven_get("/rates")
+        resp = ven_get("/tariffs")
         if not resp.ok:
             return []
         return resp.json()
@@ -208,7 +208,7 @@ def step_wait_ven_rates_export_price(context):
         lambda rates: isinstance(rates, list) and any(s.get("export_price_eur_kwh") is not None for s in rates),
         timeout=30,
         interval=3,
-        description="VEN /rates has a snapshot with export_price_eur_kwh",
+        description="VEN /tariffs has a snapshot with export_price_eur_kwh",
     )
 
 

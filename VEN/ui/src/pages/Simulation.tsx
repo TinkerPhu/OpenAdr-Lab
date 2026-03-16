@@ -22,7 +22,7 @@ import {
   YAxis,
 } from "recharts";
 import { useSim, useTrace, useEvents, useSimOverride, useSetSimOverride } from "../api/hooks";
-import type { UserOverrides, SimSnapshot, TraceEntry, VtnEvent } from "../api/types";
+import type { UserOverrides, SimSnapshot, VtnEvent } from "../api/types";
 
 function fmtNum(v: number | undefined | null, decimals = 1): string {
   if (v == null) return "—";
@@ -311,7 +311,8 @@ function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
   }
 
   // Past points — actual setpoints + desired from events
-  const pastPoints: ChartPoint[] = traceEntries.map((entry) => {
+  // Guard: new ControllerEvent format no longer has setpoints; entries skipped until Phase 4
+  const pastPoints: ChartPoint[] = traceEntries.filter((e) => !!e.setpoints).map((entry) => {
     const tsMs = new Date(entry.ts).getTime();
     return {
       time: new Date(entry.ts).toLocaleTimeString(),
@@ -465,7 +466,6 @@ type ControlsProps = {
   sim: SimSnapshot;
   overrides: UserOverrides;
   onChange: (patch: Partial<UserOverrides>) => void;
-  latestTrace: TraceEntry | undefined;
 };
 
 /**
@@ -577,16 +577,15 @@ function OverridableControl({
   );
 }
 
-function EvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
+function EvControls({ sim, overrides, onChange }: ControlsProps) {
   if (!sim.ev) return null;
   const maxKw = overrides.ev_max_charge_kw ?? sim.ev.max_charge_kw;
 
-  // Is a VTN event commanding EV charge? — mode is charge-setpoint or any capacity limit
-  const traceMode = latestTrace?.mode ?? "IDLE";
-  const isEvEventActive = traceMode !== "IDLE" && traceMode !== "PRICE";
+  // Is a VTN event commanding EV charge? — reactor mode removed; always inactive without reactor
+  const isEvEventActive = false;
 
-  // VTN intent for EV charge rate comes from reactor trace setpoints
-  const vtnEvKw = latestTrace?.setpoints.ev_charge_kw ?? (overrides.ev_desired_kw ?? sim.ev.max_charge_kw);
+  // EV charge rate: from current sim state (reactor trace setpoints removed with reactor)
+  const vtnEvKw = (overrides.ev_desired_kw ?? sim.ev.max_charge_kw);
 
   return (
     <Box>
@@ -668,7 +667,7 @@ function EvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
   );
 }
 
-function PvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
+function PvControls({ sim, overrides, onChange }: ControlsProps) {
   if (!sim.pv) return null;
   const [manualIrradiance, setManualIrradiance] = useState(overrides.pv_irradiance != null);
 
@@ -681,12 +680,12 @@ function PvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
     }
   }
 
-  const traceMode = latestTrace?.mode ?? "IDLE";
-  const isPvEventActive = traceMode === "EXPORT_CAP";
+  // PV event active: reactor mode removed; capacity state checked via events directly (Phase 4+)
+  const isPvEventActive = false;
 
-  // pv_export_limit_kw is null when no limit is active; fall back to rated_kw for slider display
+  // pv_export_limit_kw: fall back to rated_kw for slider display (reactor trace removed)
   const ratedKw = overrides.pv_rated_kw ?? sim.pv.rated_kw;
-  const vtnPvLimitKw = latestTrace?.setpoints.pv_export_limit_kw ?? ratedKw;
+  const vtnPvLimitKw = ratedKw;
 
   return (
     <Box>
@@ -753,16 +752,16 @@ function PvControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
   );
 }
 
-function HeaterControls({ sim, overrides, onChange, latestTrace }: ControlsProps) {
+function HeaterControls({ sim, overrides, onChange }: ControlsProps) {
   if (!sim.heater) return null;
   const minC = overrides.heater_temp_min_c ?? sim.heater.temp_min_c;
   const maxC = overrides.heater_temp_max_c ?? sim.heater.temp_max_c;
   const heaterMax = overrides.heater_max_kw ?? sim.heater.max_kw;
 
-  const traceMode = latestTrace?.mode ?? "IDLE";
-  const isHeaterEventActive = traceMode === "IMPORT_CAP" || traceMode === "EXPORT_CAP" || traceMode === "SIMPLE";
+  // Heater event active: reactor mode removed (Phase 4+ will use capacity state)
+  const isHeaterEventActive = false;
 
-  const vtnHeaterKw = latestTrace?.setpoints.heater_kw ?? heaterMax * 0.5;
+  const vtnHeaterKw = heaterMax * 0.5;
 
   return (
     <Box>
@@ -899,8 +898,6 @@ export function SimulationPage() {
   );
 
   const sim = simQuery.data;
-  const traceQuery = useTrace(1);
-  const latestTrace = traceQuery.data?.[0];
 
   return (
     <Stack spacing={3}>
@@ -959,25 +956,21 @@ export function SimulationPage() {
                 sim={sim}
                 overrides={localOverrides}
                 onChange={updateOverride}
-                latestTrace={latestTrace}
               />
               <PvControls
                 sim={sim}
                 overrides={localOverrides}
                 onChange={updateOverride}
-                latestTrace={latestTrace}
               />
               <HeaterControls
                 sim={sim}
                 overrides={localOverrides}
                 onChange={updateOverride}
-                latestTrace={latestTrace}
               />
               <BaseLoadControls
                 sim={sim}
                 overrides={localOverrides}
                 onChange={updateOverride}
-                latestTrace={latestTrace}
               />
             </Stack>
           </Paper>

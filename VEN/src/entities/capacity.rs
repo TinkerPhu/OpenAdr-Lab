@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::entities::rate_snapshot::RateSnapshot;
+use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::entities::site_meter::PowerSnapshot;
 
 /// Current capacity state derived from active OpenADR events.
@@ -46,8 +46,8 @@ pub struct OadrEventCache {
     pub received_at: Option<DateTime<Utc>>,
 
     // Translated content
-    pub rate_snapshots: Vec<RateSnapshot>,        // PRICE, EXPORT_PRICE, GHG per interval
-    pub capacity_limits: Vec<RateSnapshot>,       // IMPORT/EXPORT_CAPACITY_LIMIT per interval
+    pub rate_snapshots: Vec<TariffSnapshot>,        // PRICE, EXPORT_PRICE, GHG per interval
+    pub capacity_limits: Vec<TariffSnapshot>,       // IMPORT/EXPORT_CAPACITY_LIMIT per interval
     pub alert_type: Option<String>,               // e.g. "ALERT_GRID_EMERGENCY"
     pub alert_message: Option<String>,
     pub dispatch_setpoints: Vec<PowerSnapshot>,   // DISPATCH_SETPOINT per interval

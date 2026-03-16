@@ -15,14 +15,9 @@ def step_query_sim(context):
 
 @when("I query VEN-1 decision trace")
 def step_query_trace(context):
-    r = ven_get("/trace")
+    r = ven_get("/trace/events")
     r.raise_for_status()
     context.trace_response = r.json()
-
-
-@when("I wait {seconds:d} seconds for the reactor")
-def step_wait_seconds(context, seconds):
-    time.sleep(seconds)
 
 
 @then('the sim response has field "{field}"')
@@ -52,6 +47,7 @@ def step_trace_is_list(context):
 
 @then('each trace entry has fields "{fields}"')
 def step_trace_entry_fields(context, fields):
+    # ControllerEvent uses "type" and "ts" as common fields (tagged enum).
     required = [f.strip() for f in fields.split(",")]
     for i, entry in enumerate(context.trace_response):
         for field in required:

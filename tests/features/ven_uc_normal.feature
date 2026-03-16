@@ -65,11 +65,11 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
   # VTN posts a multi-interval PRICE event. VEN polls it and populates /rates.
   # The plan is retriggered and uses the new rates.
 
-  Scenario: UC-04a — PRICE event from VTN populates /rates with import prices
+  Scenario: UC-04a — PRICE event from VTN populates /tariffs with import prices
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
-    When I wait for the VEN /rates endpoint to have at least 1 snapshot
+    When I wait for the VEN /tariffs endpoint to have at least 1 snapshot
     Then all rate snapshots have an import_price_eur_kwh value
 
   Scenario: UC-04b — Plan after PRICE event has rate-priced firm slots

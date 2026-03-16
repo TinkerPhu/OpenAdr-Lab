@@ -106,8 +106,14 @@ export class VenApi {
   }
 
   async trace(limit = 50): Promise<TraceEntry[]> {
-    const r = await this.getReq(`/trace?limit=${limit}`);
-    if (!r.ok) throw new Error(`trace ${r.status}`);
+    const r = await this.getReq(`/trace/events?limit=${limit}`);
+    if (!r.ok) throw new Error(`trace/events ${r.status}`);
+    return r.json();
+  }
+
+  async assetHistory(assetId: string, limit = 100): Promise<Record<string, unknown>[]> {
+    const r = await this.getReq(`/trace/history?asset=${assetId}&limit=${limit}`);
+    if (!r.ok) throw new Error(`trace/history ${r.status}`);
     return r.json();
   }
 
@@ -143,8 +149,8 @@ export class VenApi {
   }
 
   async rates(): Promise<PlannedRates> {
-    const r = await this.getReq("/rates");
-    if (!r.ok) throw new Error(`rates ${r.status}`);
+    const r = await this.getReq("/tariffs");
+    if (!r.ok) throw new Error(`tariffs ${r.status}`);
     return r.json();
   }
 

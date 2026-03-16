@@ -9,19 +9,19 @@ Feature: VEN Rate System — OpenADR Interface (Stage 2)
   Scenario: 3-interval PRICE event produces 3 rate snapshots
     Given I create a rate-system program and save its ID
     And I create a 3-interval PRICE event for the saved program
-    When I wait for the VEN /rates endpoint to have at least 3 snapshots
+    When I wait for the VEN /tariffs endpoint to have at least 3 snapshots
     Then all rate snapshots have an import_price_eur_kwh value
 
   Scenario: GHG event produces rate snapshots with co2_g_kwh values
     Given I create a rate-system program and save its ID
     And I create a GHG event for the saved program
-    When I wait for the VEN /rates endpoint to have a snapshot with co2_g_kwh
+    When I wait for the VEN /tariffs endpoint to have a snapshot with co2_g_kwh
     Then at least one rate snapshot has a co2_g_kwh value
 
   Scenario: EXPORT_PRICE event produces rate snapshots with export_price_eur_kwh
     Given I create a rate-system program and save its ID
     And I create an EXPORT_PRICE event for the saved program
-    When I wait for the VEN /rates endpoint to have a snapshot with export_price_eur_kwh
+    When I wait for the VEN /tariffs endpoint to have a snapshot with export_price_eur_kwh
     Then at least one rate snapshot has an export_price_eur_kwh value
 
   Scenario: IMPORT_CAPACITY_LIMIT event updates the capacity state
@@ -33,7 +33,7 @@ Feature: VEN Rate System — OpenADR Interface (Stage 2)
   Scenario: GET /obligations returns empty list when events have no reportDescriptors
     Given I create a rate-system program and save its ID
     And I create a PRICE event with no reportDescriptors for the saved program
-    When I wait for the VEN /rates endpoint to have at least 1 snapshot
+    When I wait for the VEN /tariffs endpoint to have at least 1 snapshot
     Then the VEN /obligations response is a JSON array
 
   Scenario: GET /capacity returns a JSON object with expected fields

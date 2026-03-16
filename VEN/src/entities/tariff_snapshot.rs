@@ -1,29 +1,29 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// A single rate data point for a time interval.
+/// A single tariff data point for a time interval (tariff = price per kWh).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RateSnapshot {
+pub struct TariffSnapshot {
     pub interval_start: DateTime<Utc>,
     pub interval_end: DateTime<Utc>,
     pub import_price_eur_kwh: Option<f64>,
     pub export_price_eur_kwh: Option<f64>,
     pub co2_g_kwh: Option<f64>,
-    /// Source event ID that provided this rate
+    /// Source event ID that provided this tariff
     pub source_event_id: Option<String>,
-    /// Whether this is a measured past rate or a forecast
+    /// Whether this is a measured past tariff or a forecast
     pub is_forecast: bool,
 }
 
-/// Collection of planned (future) rate snapshots.
+/// Collection of planned (future) tariff snapshots.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PlannedRates {
-    pub snapshots: Vec<RateSnapshot>,
+pub struct PlannedTariffs {
+    pub snapshots: Vec<TariffSnapshot>,
 }
 
-impl PlannedRates {
-    /// Find the rate snapshot covering a given timestamp.
-    pub fn rate_at(&self, ts: DateTime<Utc>) -> Option<&RateSnapshot> {
+impl PlannedTariffs {
+    /// Find the tariff snapshot covering a given timestamp.
+    pub fn tariff_at(&self, ts: DateTime<Utc>) -> Option<&TariffSnapshot> {
         self.snapshots
             .iter()
             .find(|s| s.interval_start <= ts && ts < s.interval_end)
@@ -43,21 +43,21 @@ impl PlannedRates {
     }
 }
 
-/// Collection of past (measured) rate snapshots for cost attribution.
+/// Collection of past (measured) tariff snapshots for cost attribution.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PastRates {
-    pub snapshots: Vec<RateSnapshot>,
+pub struct PastTariffs {
+    pub snapshots: Vec<TariffSnapshot>,
 }
 
-/// Heuristic rate forecast used when live price data is unavailable.
+/// Heuristic tariff forecast used when live price data is unavailable.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RateHeuristic {
+pub struct TariffHeuristic {
     /// Hourly average import prices (24 values, one per hour of day)
     pub hourly_avg_import_eur_kwh: Vec<f64>,
     pub last_updated: Option<DateTime<Utc>>,
 }
 
-impl Default for RateHeuristic {
+impl Default for TariffHeuristic {
     fn default() -> Self {
         Self {
             hourly_avg_import_eur_kwh: vec![0.20; 24],
