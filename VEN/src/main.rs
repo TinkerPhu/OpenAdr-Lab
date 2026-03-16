@@ -392,9 +392,21 @@ async fn main() -> anyhow::Result<()> {
                     );
                     state.set_active_packets(updated_pkts).await;
                     state.set_asset_ledger(ledger).await;
-                    // Push PacketTransition events (T042)
+                    // Push PacketTransition events + fire event-driven status reports (T042/T051)
                     for evt in pkt_events {
-                        state.push_controller_event(evt).await;
+                        state.push_controller_event(evt.clone()).await;
+                        // T051: status report for each PacketTransition
+                        let trace = state.controller_trace().await;
+                        if let Some(report) = controller::reporter::build_status_report(
+                            &evt,
+                            &trace.asset_history,
+                            &ven_name,
+                            now,
+                        ) {
+                            if let Err(e) = vtn_for_tick.upsert_report(report).await {
+                                error!("status report (packet transition) submission failed: {e:#}");
+                            }
+                        }
                     }
                     if let Some(t) = trigger_opt {
                         let _ = trigger_tx_tick.send(t);
@@ -443,12 +455,25 @@ async fn main() -> anyhow::Result<()> {
 
                 let _ = sim_snapshot; // used by reporting in Phase 6
 
-                // Periodic auto-report (Phase 6: will use controller::reporter)
+                // Periodic measurement reports (T049)
                 if report_every_ticks > 0 {
                     report_counter += 1;
                     if report_counter >= report_every_ticks {
                         report_counter = 0;
-                        // TODO Phase 6 (T049): replace with controller::reporter::build_measurement_report
+                        let events = state.events().await;
+                        let trace = state.controller_trace().await;
+                        let reports =
+                            controller::reporter::build_measurement_reports_for_active_events(
+                                &events,
+                                &trace.asset_history,
+                                &ven_name,
+                                now,
+                            );
+                        for report in reports {
+                            if let Err(e) = vtn_for_tick.upsert_report(report).await {
+                                error!("measurement report submission failed: {e:#}");
+                            }
+                        }
                     }
                 }
 
@@ -493,6 +518,8 @@ async fn main() -> anyhow::Result<()> {
         let profile = profile.clone();
         let replan_s = profile.planner.replan_interval_s;
         let mut trigger_rx = trigger_rx;
+        let cfg_ven_name = cfg.ven_name.clone();
+        let state_vtn = vtn.clone();
         tokio::spawn(async move {
             // Initial delay: let event poll populate rates before first plan
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -519,14 +546,28 @@ async fn main() -> anyhow::Result<()> {
                 info!("plan cycle complete");
 
                 // Emit PlanCycle controller event (T029)
-                state.push_controller_event(
-                    controller::trace::ControllerEvent::PlanCycle {
-                        ts: now,
-                        trigger_reason,
-                        firm_slots: firm_count,
-                        flexible_slots: flex_count,
+                let plan_cycle_event = controller::trace::ControllerEvent::PlanCycle {
+                    ts: now,
+                    trigger_reason,
+                    firm_slots: firm_count,
+                    flexible_slots: flex_count,
+                };
+                state.push_controller_event(plan_cycle_event.clone()).await;
+
+                // Event-driven status report on PlanCycle (T050)
+                {
+                    let trace = state.controller_trace().await;
+                    if let Some(report) = controller::reporter::build_status_report(
+                        &plan_cycle_event,
+                        &trace.asset_history,
+                        &cfg_ven_name,
+                        now,
+                    ) {
+                        if let Err(e) = state_vtn.upsert_report(report).await {
+                            error!("status report (plan cycle) submission failed: {e:#}");
+                        }
                     }
-                ).await;
+                }
 
                 // Wait for next trigger OR periodic timeout (whichever comes first)
                 tokio::select! {
