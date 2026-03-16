@@ -118,14 +118,14 @@
 
 **Independent Test**: With a VTN connected, a `PlanCycle` event triggers a TELEMETRY_STATUS report submission visible in VTN reports. The timer-driven TELEMETRY_USAGE report fires on schedule.
 
-- [ ] T046 [US4] Create `VEN/src/controller/reporter.rs` with `pub fn build_measurement_report(asset_history: &HashMap<String, AssetHistoryBuffer>, ven_name: &str, now: DateTime<Utc>) -> Option<serde_json::Value>`. Content: TELEMETRY_USAGE / READING — last row of each asset's history (power_kw, cumulative energy, soc_pct where available). No `reactor_mode` parameter.
-- [ ] T047 [P] [US4] Add `pub fn build_status_report(event: &ControllerEvent, asset_history: &HashMap<String, AssetHistoryBuffer>, ven_name: &str, now: DateTime<Utc>) -> Option<serde_json::Value>` to `VEN/src/controller/reporter.rs`. Content: TELEMETRY_STATUS — describes VEN's current response from the most recent asset history rows. Only emits a report for `PlanCycle` and `PacketTransition` event types; returns `None` for all others.
-- [ ] T048 [US4] Delete `VEN/src/reporter.rs` (old top-level reporter).
-- [ ] T049 [US4] Update `VEN/src/main.rs` timer-driven report block: replace `reporter::build_reports_for_active_events(...)` call with `controller::reporter::build_measurement_report(asset_history, &ven_name, now)`. Update import.
-- [ ] T050 [US4] Add event-driven status report dispatch in `VEN/src/main.rs`: in the planning loop, after `push_controller_event(PlanCycle {...})`, call `controller::reporter::build_status_report(&event, &history, &ven_name, now)` and if `Some(report)`, submit via `vtn.upsert_report(report)`. Log failure without retry.
-- [ ] T051 [US4] In the tick loop, after `monitor::record_tick` returns and `PacketTransition` events have been pushed, fire event-driven status reports for each `PacketTransition` event (same pattern as T050).
-- [ ] T052 [US4] Run `cargo build` and fix any compile errors from the reporter relocation and old `reporter::` call sites.
-- [ ] T053 [US4] Deploy to Pi4-Server and run reporter-related BDD scenarios to verify TELEMETRY_USAGE and TELEMETRY_STATUS reports are submitted correctly.
+- [x] T046 [US4] Create `VEN/src/controller/reporter.rs` with `pub fn build_measurement_report(asset_history: &HashMap<String, AssetHistoryBuffer>, ven_name: &str, now: DateTime<Utc>) -> Option<serde_json::Value>`. Content: TELEMETRY_USAGE / READING — last row of each asset's history (power_kw, cumulative energy, soc_pct where available). No `reactor_mode` parameter.
+- [x] T047 [P] [US4] Add `pub fn build_status_report(event: &ControllerEvent, asset_history: &HashMap<String, AssetHistoryBuffer>, ven_name: &str, now: DateTime<Utc>) -> Option<serde_json::Value>` to `VEN/src/controller/reporter.rs`. Content: TELEMETRY_STATUS — describes VEN's current response from the most recent asset history rows. Only emits a report for `PlanCycle` and `PacketTransition` event types; returns `None` for all others.
+- [x] T048 [US4] Delete `VEN/src/reporter.rs` (old top-level reporter).
+- [x] T049 [US4] Update `VEN/src/main.rs` timer-driven report block: replace `reporter::build_reports_for_active_events(...)` call with `controller::reporter::build_measurement_report(asset_history, &ven_name, now)`. Update import.
+- [x] T050 [US4] Add event-driven status report dispatch in `VEN/src/main.rs`: in the planning loop, after `push_controller_event(PlanCycle {...})`, call `controller::reporter::build_status_report(&event, &history, &ven_name, now)` and if `Some(report)`, submit via `vtn.upsert_report(report)`. Log failure without retry.
+- [x] T051 [US4] In the tick loop, after `monitor::record_tick` returns and `PacketTransition` events have been pushed, fire event-driven status reports for each `PacketTransition` event (same pattern as T050).
+- [x] T052 [US4] Run `cargo build` and fix any compile errors from the reporter relocation and old `reporter::` call sites.
+- [x] T053 [US4] Deploy to Pi4-Server and run reporter-related BDD scenarios to verify TELEMETRY_USAGE and TELEMETRY_STATUS reports are submitted correctly.
 
 **Checkpoint**: Dual-mode reporting working. No `reactor_mode` parameter anywhere in reporter code.
 
@@ -137,8 +137,8 @@
 
 **Independent Test**: `GET /tariffs` returns the same data structure as the old `GET /rates`. Zero occurrences of `RateSnapshot`, `PlannedRates`, `PastRates` in `VEN/src/`. `GET /rates` returns 404.
 
-- [ ] T054 [P] [US5] Run grep over `VEN/src/` for `RateSnapshot`, `PlannedRates`, `PastRates`, `rate_snapshot` — verify zero occurrences. Fix any missed callers if found.
-- [ ] T055 [US5] Deploy to Pi4-Server and run the `GET /tariffs` BDD scenario added in T009. Verify 200 response with correct tariff structure. Verify `GET /rates` returns 404.
+- [x] T054 [P] [US5] Run grep over `VEN/src/` for `RateSnapshot`, `PlannedRates`, `PastRates`, `rate_snapshot` — verify zero occurrences. Fix any missed callers if found.
+- [x] T055 [US5] Deploy to Pi4-Server and run the `GET /tariffs` BDD scenario added in T009. Verify 200 response with correct tariff structure. Verify `GET /rates` returns 404.
 
 **Checkpoint**: Tariff rename verified end-to-end.
 
