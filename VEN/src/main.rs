@@ -631,6 +631,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/packets", get(get_packets).post(post_packets))
         .route("/plan", get(get_plan))
         .route("/tariffs", get(get_tariffs))
+        // Timeline routes (speckit 005) — /all must precede /:asset_id
+        .route("/timeline/all", get(get_timeline_all))
+        .route("/timeline/:asset_id", get(get_timeline))
         // HEMS Stage 2 routes
         .route("/capacity", get(get_capacity))
         .route("/obligations", get(get_obligations))
@@ -927,6 +930,139 @@ async fn get_plan(State(ctx): State<AppCtx>) -> impl IntoResponse {
 /// GET /tariffs — returns planned tariff snapshots parsed from active events.
 async fn get_tariffs(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.planned_tariffs().await)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Timeline endpoints (speckit 005)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct TimelineParams {
+    hours_back: Option<f64>,
+    hours_forward: Option<f64>,
+}
+
+/// Serialize a Vec<AssetTimelinePoint> to `[{"ts": "...", "values": {...}}, ...]`
+/// filtering out NaN values (JSON does not support NaN).
+fn serialize_timeline(
+    points: Vec<controller::trace::AssetTimelinePoint>,
+) -> Vec<serde_json::Value> {
+    points
+        .into_iter()
+        .map(|p| {
+            let values: serde_json::Map<String, serde_json::Value> = p
+                .values
+                .into_iter()
+                .filter(|(_, v)| !v.is_nan())
+                .map(|(k, v)| (k, serde_json::json!(v)))
+                .collect();
+            serde_json::json!({ "ts": p.ts, "values": values })
+        })
+        .collect()
+}
+
+/// GET /timeline/:asset_id — merged past+future timeline for one asset.
+async fn get_timeline(
+    State(ctx): State<AppCtx>,
+    Path(asset_id): Path<String>,
+    Query(params): Query<TimelineParams>,
+) -> impl IntoResponse {
+    use axum::http::StatusCode;
+    use controller::timeline::{build_asset_timeline, TimeWindow};
+    use std::collections::HashSet;
+
+    let now = Utc::now();
+    let hours_back = params.hours_back.unwrap_or(1.0);
+    let hours_forward = params.hours_forward.unwrap_or(1.0);
+
+    let ct = ctx.state.controller_trace().await;
+    let plan = ctx.state.active_plan().await;
+
+    // Build the set of known sim asset IDs from the current sim snapshot.
+    let known_assets: HashSet<String> = {
+        let sim = ctx.sim.lock().await;
+        sim.assets.iter().map(|e| e.id.clone()).collect()
+    };
+
+    match build_asset_timeline(
+        &asset_id,
+        &known_assets,
+        &ct.asset_history,
+        plan.as_ref(),
+        now,
+        TimeWindow { hours_back, hours_forward },
+    ) {
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
+        )
+            .into_response(),
+        Some(points) => Json(serialize_timeline(points)).into_response(),
+    }
+}
+
+/// GET /timeline/all — merged timelines for all configured assets + "grid".
+async fn get_timeline_all(
+    State(ctx): State<AppCtx>,
+    Query(params): Query<TimelineParams>,
+) -> impl IntoResponse {
+    use controller::timeline::{build_asset_timeline, TimeWindow};
+    use std::collections::HashSet;
+
+    let now = Utc::now();
+    let hours_back = params.hours_back.unwrap_or(1.0);
+    let hours_forward = params.hours_forward.unwrap_or(1.0);
+
+    let ct = ctx.state.controller_trace().await;
+    let plan = ctx.state.active_plan().await;
+
+    let known_assets: HashSet<String> = {
+        let sim = ctx.sim.lock().await;
+        sim.assets.iter().map(|e| e.id.clone()).collect()
+    };
+
+    let window = TimeWindow { hours_back, hours_forward };
+    let mut result: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+
+    // All sim assets
+    for asset_id in &known_assets {
+        if let Some(points) = build_asset_timeline(
+            asset_id,
+            &known_assets,
+            &ct.asset_history,
+            plan.as_ref(),
+            now,
+            TimeWindow {
+                hours_back: window.hours_back,
+                hours_forward: window.hours_forward,
+            },
+        ) {
+            result.insert(
+                asset_id.clone(),
+                serde_json::Value::Array(serialize_timeline(points)),
+            );
+        }
+    }
+
+    // Grid virtual asset
+    if let Some(points) = build_asset_timeline(
+        "grid",
+        &known_assets,
+        &ct.asset_history,
+        plan.as_ref(),
+        now,
+        TimeWindow {
+            hours_back: window.hours_back,
+            hours_forward: window.hours_forward,
+        },
+    ) {
+        result.insert(
+            "grid".to_string(),
+            serde_json::Value::Array(serialize_timeline(points)),
+        );
+    }
+
+    Json(serde_json::Value::Object(result))
 }
 
 /// GET /capacity — returns the current OadrCapacityState (Stage 2).
