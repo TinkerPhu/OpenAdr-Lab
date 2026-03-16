@@ -10,7 +10,7 @@ from features.helpers.ui import tid
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _ven1_trace():
-    r = ven_get("/trace?limit=10")
+    r = ven_get("/trace/events?limit=10")
     r.raise_for_status()
     return r.json()
 
@@ -99,11 +99,10 @@ def _delete_all_vtn_events(token):
 
 @given('the VEN-1 sim overrides are reset')
 def step_reset_ven_overrides(context):
-    """POST empty UserOverrides to VEN-1 to clear any persisted force values.
+    """POST empty UserOverrides to VEN-1 to clear any persisted override values.
 
-    Force overrides (ev_force_kw etc.) persist on the VEN between test runs.
-    Without this reset, a toggle click in scenario N bleeds into scenario N+1,
-    making the slider appear enabled/overriding when it should be VTN-controlled.
+    Without this reset, environmental overrides set in scenario N bleed into
+    scenario N+1, causing unexpected sim state in subsequent scenarios.
     """
     r = ven_post("/sim/override", json={})
     r.raise_for_status()
@@ -116,7 +115,7 @@ def step_create_charge_setpoint_event(context, name, value):
 
 @given('no CHARGE_STATE_SETPOINT events are active on VEN-1')
 def step_no_charge_setpoint_events(context):
-    """Delete ALL events from VTN so the reactor can go IDLE.
+    """Delete ALL events from VTN so the controller returns to no-event state.
 
     Simply deleting CHARGE_STATE_SETPOINT events is insufficient when the full
     test suite has accumulated IMPORT_CAP / EXPORT_CAP events from earlier
@@ -125,19 +124,6 @@ def step_no_charge_setpoint_events(context):
     _delete_all_vtn_events(context.vtn_token)
 
 
-@when('I wait for VEN-1 reactor to show mode "{mode}"')
-@given('I wait for VEN-1 reactor to show mode "{mode}"')
-def step_wait_reactor_mode(context, mode):
-    def trace_shows_mode(trace):
-        return len(trace) > 0 and trace[0].get("mode") == mode
-
-    poll_until(
-        _ven1_trace,
-        trace_shows_mode,
-        timeout=90,
-        interval=2,
-        description=f"VEN-1 reactor mode == '{mode}'",
-    )
 
 
 @when('I open the VEN-1 simulation UI')

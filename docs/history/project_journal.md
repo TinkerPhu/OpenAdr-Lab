@@ -2470,3 +2470,63 @@ Added a new BDD scenario: "Request for a non-storage asset is rejected" — `POS
 33 features, 144 scenarios, 899 steps — all passing with 0 failures on Pi4-Server ARM64.
 
 **Commits:** `b4eea32`, `6a5163b`, `09a64fe`
+
+---
+
+## Phase 24b: VEN Controller Reform (speckit 004)
+
+**Status: COMPLETE**
+**Date: 2026-03-15 → 2026-03-16**
+**Commits:** `c84f273`, `90edebb`, `b77c152` (+ Phase 1-3 from prior session)
+
+### Objective
+
+Full reform of the VEN controller architecture across 5 user stories:
+
+1. **US1 — Single Authoritative Control Path**: Delete the reactor, rewrite the dispatcher and tick loop so the planner is the sole authority
+2. **US2 — Controller Observability**: Wire asset history buffers + emit `ControllerEvent` entries, expose `GET /trace/events` + `GET /trace/history`
+3. **US3 — Correct Packet Energy Accounting**: Consolidate into `monitor::record_tick`, emit `PacketTransition`/`RequestTransition` events
+4. **US4 — Dual-Mode Reporting**: New `controller/reporter.rs` with timer-driven measurement reports + event-driven status reports
+5. **US5 — Tariff Nomenclature**: Rename `RateSnapshot` → `TariffSnapshot`, `GET /rates` → `GET /tariffs`
+
+### What was done
+
+**Phase 1 (BDD First Gate):** Rewrote all BDD scenarios referencing old reactor/trace/rates endpoints before touching Rust. `/trace` → `/trace/events`, `/rates` → `/tariffs`, removed force-override tests and FSM state tests. New scenarios added for `GET /trace/events`, `GET /trace/history`, `GET /tariffs`. Suite ran red on new endpoints as required.
+
+**Phase 2 (Foundational):** Renamed `RateSnapshot` → `TariffSnapshot`, `PlannedRates` → `PlannedTariffs` across all files. Added `ControllerEvent` enum (7 variants) with `serde(tag = "type")`. Added `AssetHistoryBuffer` ring buffer and `ControllerTrace` holder. Updated `state.rs` to hold `controller_trace` and expose `push_controller_event` + `push_asset_row`.
+
+**Phase 3 (Reactor Deletion):** Deleted all 5 files in `VEN/src/reactor/`. Rewrote `dispatcher::build_setpoints` as the single control function (plan → setpoints, no FSM/reactor). Rewrote the tick loop: `build_setpoints → sim.tick → update_sim`. All UC-01–UC-12 use case scenarios confirmed passing. Regression fixes required: null-guard `entry.setpoints` in `Controller.tsx` and `Trace.tsx`, explicit domain computation in `AssetTimelineChart.tsx` to force NOW reference line visible, restored `ResponsiveContainer` after discovering its async `ResizeObserver` is needed for MUI Collapse animation timing.
+
+**Phase 4 (Observability):** Wired asset history writes per tick loop (T032): every tick, each asset's `power_kw`, state values, `cost_rate_eur_h`, and `co2_rate_g_h` are pushed to `AssetHistoryBuffer`. Added OpenADR event detection in the poll-events task: `OpenAdrArrived`/`Expired` on event set changes, `RateChange` on tariff count change, `CapacityChange` on import limit change. `GET /trace/events` returns newest-first ControllerEvents; `GET /trace/history?asset=ev&limit=5` returns timeline rows with `power_kw`, `soc_pct`, `cost_rate_eur_h`, `co2_rate_g_h`, etc.
+
+**Phase 5 (Packet Accounting):** Rewrote `monitor.rs`: replaced `update_ledger` with `record_tick` which combines ledger accumulation, packet status transitions (Scheduled→Active, Active→Completed/PartialCompleted), and `PacketTransition` event emission. `RequestTransition` events added to HTTP handlers. All ledger/dispatcher BDD scenarios verified passing.
+
+**Phase 6 (Reporter Reform):** Created `controller/reporter.rs` with `build_measurement_report` (per-event, uses asset history) and `build_measurement_reports_for_active_events` (timer entry point), plus `build_status_report` (for PlanCycle/PacketTransition). Deleted orphaned `src/reporter.rs` (was using deleted `reactor::interval`). Timer block now calls `build_measurement_reports_for_active_events` every `report_interval_s`. Planning loop emits status report on each PlanCycle. Tick loop emits status reports on PacketTransitions. Fixed the known regression: `ven_simulator.feature:26 Auto-report submitted for active event`.
+
+**Phase 7 (Tariff Verification):** Confirmed `GET /tariffs` returns tariff data, `GET /rates` returns 404. No struct-level uses of old `RateSnapshot`/`PlannedRates`/`PastRates` remain.
+
+**Final result:** 32 features passed, 0 failed, 1 skipped — 137 scenarios passed, 0 failed.
+
+### Issues encountered
+
+**1. recharts ReferenceLine silently hidden when x falls outside domain:**
+When `buildAssetTimeline` returns only future plan slots (all timestamps ≥ nowMs), recharts auto-computes the domain as `[T1, Tn]` where `T1 > nowMs`. The `x={nowMs}` reference line is outside this domain and silently dropped. Fix: explicit domain computation: `tMin = Math.min(nowMs - 300_000, ...chartData.ts)`, `tMax = Math.max(nowMs + 300_000, ...chartData.ts)`. Also added a 2-point fallback chart data when `data.length === 0` to ensure nowMs is always in range.
+
+**2. ResponsiveContainer async timing is a test dependency:**
+While debugging the recharts domain issue, `ResponsiveContainer` was temporarily replaced with `ComposedChart width={600}`. This caused the collapse-section navigation tests to fail because `ResponsiveContainer` uses `ResizeObserver` (async), which provides a natural timing delay that MUI `Collapse` animations rely on during tests. Restoring `ResponsiveContainer` fixed both issues.
+
+**3. Docker container reuse masks new image:**
+When re-running tests after rebuilding `test-ven-ui`, `docker compose run --rm test-runner` reused the still-running `test-ven-ui` container from the previous run (cached old image). Always run `docker compose down` before `docker compose run` after rebuilding dependent services.
+
+**4. Phase 6 reporter used deleted reactor dependency:**
+The old `VEN/src/reporter.rs` imported `crate::reactor::interval::find_active_intervals`. Since `src/reporter.rs` was never added to `mod` declarations in `main.rs`, it compiled silently despite the broken imports. The Phase 3 reactor deletion orphaned it without a visible build error. Fixed in Phase 6 by creating the new `controller/reporter.rs` with inline interval-activity detection (no reactor dependency) and deleting the old file.
+
+**5. "Already up to date" masks forgotten git push:**
+Several times, `git pull` on Pi4 showed "Already up to date" while Docker was still building from the previous commit because the local commit hadn't been pushed yet. Pattern: always `git push` locally before SSH → Pi4 → `git pull`.
+
+### Key learnings
+
+- recharts silently drops reference lines whose `x` value falls outside the XAxis domain. Always compute a domain that explicitly includes the reference line value.
+- `ResponsiveContainer`'s async `ResizeObserver` creates a timing buffer that can be load-bearing for animation-dependent tests. Never replace it with a fixed-width chart without checking test timing assumptions.
+- When deleting a Rust module, always search for all `use crate::<module>::` references in files that might not be compiled (orphaned modules, disabled `mod` declarations). Build success only confirms compiled code.
+- An event-driven reporter that uses `ControllerEvent` variants as dispatch key is cleaner than a reactor-mode string parameter. The `serde(tag = "type")` enum makes trace events directly serializable to JSON without extra mapping.

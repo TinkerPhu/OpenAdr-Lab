@@ -252,13 +252,14 @@ function getTraceAssetPower(
   assetId: AssetId,
   entry: TraceEntry
 ): number | null {
+  // Guard: new ControllerEvent format no longer has setpoints — history wired in Phase 4
+  if (!entry.setpoints) return null;
   switch (assetId) {
     case "ev":
       return entry.setpoints.ev_charge_kw;
     case "heater":
       return entry.setpoints.heater_kw;
     case "pv":
-      // PV is export (negative), limit is not direct power — skip for now
       return entry.setpoints.pv_export_limit_kw !== null
         ? -Math.abs(entry.setpoints.pv_export_limit_kw)
         : null;
@@ -288,8 +289,9 @@ export function buildStackedAreaData(
     base_load_pos: 0, base_load_neg: 0,
   });
 
-  // Past: from trace
+  // Past: from trace (Phase 4 will wire asset history here; setpoints removed with reactor)
   for (const entry of traceEntries) {
+    if (!entry.setpoints) continue; // new ControllerEvent format — skip until Phase 4
     const ts = new Date(entry.ts).getTime();
     const ev = entry.setpoints.ev_charge_kw;
     const heater = entry.setpoints.heater_kw;

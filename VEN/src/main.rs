@@ -3,8 +3,6 @@ mod controller;
 mod entities;
 mod models;
 mod profile;
-mod reactor;
-mod reporter;
 mod simulator;
 mod state;
 mod vtn;
@@ -25,7 +23,6 @@ use metrics::counter;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use models::{SensorInput, SensorSnapshot};
 use profile::Profile;
-use reactor::Reactor;
 use serde::Deserialize;
 use simulator::SimState;
 use state::{AppState, UserOverrides};
@@ -130,6 +127,11 @@ async fn main() -> anyhow::Result<()> {
         let trigger_tx_events = trigger_tx.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(secs));
+            // Track previous event IDs and tariff count for change detection (T034/T035)
+            let mut prev_event_ids: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            let mut prev_tariff_count: usize = 0;
+            let mut prev_import_limit: Option<f64> = None;
             loop {
                 interval.tick().await;
                 match vtn.fetch_events().await {
@@ -140,9 +142,112 @@ async fn main() -> anyhow::Result<()> {
                         // Parse rates and capacity from new events (Stage 2)
                         let now = Utc::now();
                         let rates = controller::openadr_interface::parse_rate_snapshots(&events);
-                        state.set_planned_rates(rates).await;
-
                         let new_cap = controller::openadr_interface::parse_capacity_state(&events);
+
+                        // T034: Emit OpenAdrArrived / OpenAdrExpired for event set changes
+                        let current_ids: std::collections::HashSet<String> = events
+                            .iter()
+                            .filter_map(|e| e.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                            .collect();
+                        for evt in &events {
+                            if let Some(id) = evt.get("id").and_then(|v| v.as_str()) {
+                                if !prev_event_ids.contains(id) {
+                                    let name = evt
+                                        .get("eventName")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or(id)
+                                        .to_string();
+                                    let (signal_type, value, interval_n) = evt
+                                        .get("intervals")
+                                        .and_then(|v| v.as_array())
+                                        .and_then(|arr| arr.first())
+                                        .and_then(|iv| iv.get("payloads"))
+                                        .and_then(|v| v.as_array())
+                                        .and_then(|arr| arr.first())
+                                        .map(|p| {
+                                            let sig = p
+                                                .get("type")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("UNKNOWN")
+                                                .to_string();
+                                            let val = p
+                                                .get("values")
+                                                .and_then(|v| v.as_array())
+                                                .and_then(|a| a.first())
+                                                .and_then(|v| v.as_f64())
+                                                .unwrap_or(0.0);
+                                            let n = evt
+                                                .get("intervals")
+                                                .and_then(|v| v.as_array())
+                                                .map(|a| a.len() as u32)
+                                                .unwrap_or(0);
+                                            (sig, val, n)
+                                        })
+                                        .unwrap_or_else(|| ("UNKNOWN".to_string(), 0.0, 0));
+                                    state
+                                        .push_controller_event(
+                                            controller::trace::ControllerEvent::OpenAdrArrived {
+                                                ts: now,
+                                                event_name: name,
+                                                signal_type,
+                                                value,
+                                                interval: interval_n,
+                                            },
+                                        )
+                                        .await;
+                                }
+                            }
+                        }
+                        for old_id in &prev_event_ids {
+                            if !current_ids.contains(old_id) {
+                                state
+                                    .push_controller_event(
+                                        controller::trace::ControllerEvent::OpenAdrExpired {
+                                            ts: now,
+                                            event_name: old_id.clone(),
+                                        },
+                                    )
+                                    .await;
+                            }
+                        }
+                        prev_event_ids = current_ids;
+
+                        // T035: Emit RateChange when tariff count changes
+                        if !rates.is_empty() && rates.len() != prev_tariff_count {
+                            if let Some(first) = rates.first() {
+                                state
+                                    .push_controller_event(
+                                        controller::trace::ControllerEvent::RateChange {
+                                            ts: now,
+                                            interval_start: first.interval_start,
+                                            import_eur_kwh: first
+                                                .import_price_eur_kwh
+                                                .unwrap_or(0.0),
+                                            export_eur_kwh: first
+                                                .export_price_eur_kwh
+                                                .unwrap_or(0.0),
+                                        },
+                                    )
+                                    .await;
+                            }
+                        }
+                        prev_tariff_count = rates.len();
+
+                        // T035: Emit CapacityChange when import limit changes
+                        if new_cap.import_limit_kw != prev_import_limit {
+                            state
+                                .push_controller_event(
+                                    controller::trace::ControllerEvent::CapacityChange {
+                                        ts: now,
+                                        import_limit_kw: new_cap.import_limit_kw,
+                                        export_limit_kw: new_cap.export_limit_kw,
+                                    },
+                                )
+                                .await;
+                            prev_import_limit = new_cap.import_limit_kw;
+                        }
+
+                        state.set_planned_tariffs(rates).await;
                         state.set_capacity_state(new_cap).await;
 
                         let existing_obs = state.obligations().await;
@@ -202,12 +307,9 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(Mutex::new(sim))
     };
 
-    let reactor_state = Arc::new(Mutex::new(Reactor::new()));
-
     {
         let state = state.clone();
         let sim = sim_state.clone();
-        let reactor = reactor_state.clone();
         let profile = profile.clone();
         let tick_s = profile.simulator.tick_s;
         let persist_every_s = profile.simulator.persist_every_s;
@@ -241,37 +343,30 @@ async fn main() -> anyhow::Result<()> {
                 let events = state.events().await;
                 let overrides = state.overrides().await;
 
-                // Pre-tick: snapshot plan/packets/rates for dispatcher (no lock needed)
+                // Pre-tick: snapshot plan/packets/capacity/tariffs for dispatcher
                 let plan_snap = state.active_plan().await;
                 let packets_snap = state.active_packets().await;
-                let rates_snap = state.planned_rates().await;
+                let capacity_snap = state.capacity_state().await;
+                let rates_snap = state.planned_tariffs().await;
 
-                // Reactor: evaluate events → setpoints; dispatcher overlays plan allocations
-                let (setpoints, sim_snapshot, reactor_mode) = {
+                // Tick loop: build_setpoints → sim.tick → update_sim → accounting
+                let sim_snapshot = {
                     let mut sim_guard = sim.lock().await;
-                    let mut reactor_guard = reactor.lock().await;
-                    let mut setpoints = reactor_guard.evaluate(&events, &sim_guard, &profile, now, dt_s, &overrides);
 
-                    // Dispatcher overlay: HEMS plan allocations override reactor for managed assets
-                    if let Some(ref plan) = plan_snap {
-                        let disp = controller::dispatcher::get_setpoints(plan, &packets_snap, now);
-                        if let Some(kw) = disp.ev_kw      { setpoints.ev_charge_kw  = kw; }
-                        if let Some(kw) = disp.battery_kw { setpoints.battery_kw    = kw; }
-                        if let Some(kw) = disp.heater_kw  { setpoints.heater_kw     = kw; }
-                    }
-
-                    // Owner force-overrides beat everything (including dispatcher)
-                    if let Some(kw) = overrides.ev_force_kw       { setpoints.ev_charge_kw   = kw; }
-                    if let Some(kw) = overrides.heater_force_kw   { setpoints.heater_kw       = kw; }
-                    if let Some(kw) = overrides.battery_force_kw  { setpoints.battery_kw      = kw; }
-                    if let Some(limit) = overrides.pv_force_export_limit_kw { setpoints.pv_export_limit_kw = Some(limit); }
-
-                    // Build setpoints HashMap for generic tick interface
-                    let mut sp_map = std::collections::HashMap::new();
-                    sp_map.insert("ev".to_string(), setpoints.ev_charge_kw);
-                    sp_map.insert("heater".to_string(), setpoints.heater_kw);
-                    sp_map.insert("pv".to_string(), setpoints.pv_export_limit_kw.unwrap_or(f64::MAX));
-                    sp_map.insert("battery".to_string(), setpoints.battery_kw);
+                    // Build setpoints from plan (single authoritative control path)
+                    let sp_map: std::collections::HashMap<String, f64> = match &plan_snap {
+                        Some(ref plan) => controller::dispatcher::build_setpoints(
+                            plan,
+                            &sim_guard.assets,
+                            &capacity_snap,
+                            now,
+                        ),
+                        None => sim_guard
+                            .assets
+                            .iter()
+                            .map(|a| (a.id.clone(), a.state.default_setpoint()))
+                            .collect(),
+                    };
 
                     // Simulator: apply setpoints → update device states
                     sim_guard.tick(dt_s, sp_map, now, &overrides);
@@ -280,57 +375,103 @@ async fn main() -> anyhow::Result<()> {
                     let sensor = sim_guard.to_sensor_snapshot();
                     state.update_sensor(sensor).await;
 
-                    // Update sim + trace in app state
+                    // Update sim in app state
                     let sim_snap = sim_guard.to_sim_snapshot();
-                    let trace = reactor_guard.trace_entries();
-                    state.update_sim(sim_snap.clone(), trace).await;
+                    state.update_sim(sim_snap.clone()).await;
 
-                    // Post-tick: accumulate actual energy into packets and transition statuses
+                    // Post-tick: consolidated accounting — packets + ledger (T041/T043)
                     let mut updated_pkts = packets_snap.clone();
-                    let trigger_opt =
-                        controller::dispatcher::update_packets(&mut updated_pkts, &sim_snap, dt_s, now);
+                    let mut ledger = state.asset_ledger().await;
+                    let (trigger_opt, pkt_events) = controller::monitor::record_tick(
+                        &mut updated_pkts,
+                        &mut ledger,
+                        &sim_snap,
+                        &rates_snap,
+                        dt_s,
+                        now,
+                    );
                     state.set_active_packets(updated_pkts).await;
+                    state.set_asset_ledger(ledger).await;
+                    // Push PacketTransition events + fire event-driven status reports (T042/T051)
+                    for evt in pkt_events {
+                        state.push_controller_event(evt.clone()).await;
+                        // T051: status report for each PacketTransition
+                        let trace = state.controller_trace().await;
+                        if let Some(report) = controller::reporter::build_status_report(
+                            &evt,
+                            &trace.asset_history,
+                            &ven_name,
+                            now,
+                        ) {
+                            if let Err(e) = vtn_for_tick.upsert_report(report).await {
+                                error!("status report (packet transition) submission failed: {e:#}");
+                            }
+                        }
+                    }
                     if let Some(t) = trigger_opt {
                         let _ = trigger_tx_tick.send(t);
                     }
 
-                    // Post-tick: update asset energy ledger
-                    let mut ledger = state.asset_ledger().await;
-                    controller::monitor::update_ledger(&mut ledger, &sim_snap, &rates_snap, dt_s, now);
-                    state.set_asset_ledger(ledger).await;
+                    // Post-tick: push asset history rows (T032 — drives GET /trace/history)
+                    {
+                        let current_tariff = rates_snap.iter().find(|t| {
+                            t.interval_start <= now && now < t.interval_end
+                        });
+                        let import_price = current_tariff
+                            .and_then(|t| t.import_price_eur_kwh)
+                            .unwrap_or(0.0);
+                        let export_price = current_tariff
+                            .and_then(|t| t.export_price_eur_kwh)
+                            .unwrap_or(0.0);
+                        let co2_g_kwh = current_tariff
+                            .and_then(|t| t.co2_g_kwh)
+                            .unwrap_or(0.0);
 
-                    // Snapshot sim state for reporting (avoid holding lock during HTTP)
-                    let sim_clone = sim_guard.clone();
-                    let mode = setpoints.mode.clone();
+                        for (asset_id, asset_snap) in &sim_snap.assets {
+                            let mut row: std::collections::HashMap<String, f64> =
+                                std::collections::HashMap::new();
+                            row.insert("power_kw".to_string(), asset_snap.power_kw);
+                            for (k, v) in &asset_snap.values {
+                                row.insert(k.clone(), *v);
+                            }
+                            let cost_rate_eur_h = if asset_snap.power_kw >= 0.0 {
+                                asset_snap.power_kw * import_price
+                            } else {
+                                -asset_snap.power_kw * export_price
+                            };
+                            let co2_rate_g_h = if asset_snap.power_kw > 0.0 {
+                                asset_snap.power_kw * co2_g_kwh
+                            } else {
+                                0.0
+                            };
+                            row.insert("cost_rate_eur_h".to_string(), cost_rate_eur_h);
+                            row.insert("co2_rate_g_h".to_string(), co2_rate_g_h);
+                            state.push_asset_row(asset_id, now, row).await;
+                        }
+                    }
 
-                    (setpoints, sim_clone, mode)
+                    sim_guard.clone()
                 };
 
-                let _ = setpoints; // used above, suppress warning
+                let _ = sim_snapshot; // used by reporting in Phase 6
 
-
-                // Periodic auto-report submission
+                // Periodic measurement reports (T049)
                 if report_every_ticks > 0 {
                     report_counter += 1;
                     if report_counter >= report_every_ticks {
                         report_counter = 0;
-                        let reports = reporter::build_reports_for_active_events(
-                            &events, &sim_snapshot, &reactor_mode, &ven_name, now,
-                        );
+                        let events = state.events().await;
+                        let trace = state.controller_trace().await;
+                        let reports =
+                            controller::reporter::build_measurement_reports_for_active_events(
+                                &events,
+                                &trace.asset_history,
+                                &ven_name,
+                                now,
+                            );
                         for report in reports {
-                            let report_name = report.get("reportName")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown")
-                                .to_string();
-                            match vtn_for_tick.upsert_report(report).await {
-                                Ok(_) => {
-                                    counter!("auto_reports_sent_total").increment(1);
-                                    info!(report_name, "auto-report submitted");
-                                }
-                                Err(e) => {
-                                    counter!("auto_reports_error_total").increment(1);
-                                    error!(report_name, "auto-report failed: {e:#}");
-                                }
+                            if let Err(e) = vtn_for_tick.upsert_report(report).await {
+                                error!("measurement report submission failed: {e:#}");
                             }
                         }
                     }
@@ -377,15 +518,18 @@ async fn main() -> anyhow::Result<()> {
         let profile = profile.clone();
         let replan_s = profile.planner.replan_interval_s;
         let mut trigger_rx = trigger_rx;
+        let cfg_ven_name = cfg.ven_name.clone();
+        let state_vtn = vtn.clone();
         tokio::spawn(async move {
             // Initial delay: let event poll populate rates before first plan
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             loop {
                 let now = Utc::now();
-                let rates = state.planned_rates().await;
+                let rates = state.planned_tariffs().await;
                 let packets = state.active_packets().await;
                 let capacity = state.capacity_state().await;
                 let trigger = trigger_rx.borrow().clone();
+                let trigger_reason = format!("{:?}", trigger);
                 let plan = controller::planner::run_planner(
                     &rates,
                     &packets,
@@ -395,9 +539,35 @@ async fn main() -> anyhow::Result<()> {
                     trigger,
                 );
                 // Planner may transition packet statuses (Pending→Scheduled, etc.)
+                let firm_count = plan.firm_slots.len();
+                let flex_count = plan.flexible_slots.len();
                 state.set_active_packets(plan.packets.clone()).await;
                 state.set_active_plan(Some(plan)).await;
                 info!("plan cycle complete");
+
+                // Emit PlanCycle controller event (T029)
+                let plan_cycle_event = controller::trace::ControllerEvent::PlanCycle {
+                    ts: now,
+                    trigger_reason,
+                    firm_slots: firm_count,
+                    flexible_slots: flex_count,
+                };
+                state.push_controller_event(plan_cycle_event.clone()).await;
+
+                // Event-driven status report on PlanCycle (T050)
+                {
+                    let trace = state.controller_trace().await;
+                    if let Some(report) = controller::reporter::build_status_report(
+                        &plan_cycle_event,
+                        &trace.asset_history,
+                        &cfg_ven_name,
+                        now,
+                    ) {
+                        if let Err(e) = state_vtn.upsert_report(report).await {
+                            error!("status report (plan cycle) submission failed: {e:#}");
+                        }
+                    }
+                }
 
                 // Wait for next trigger OR periodic timeout (whichever comes first)
                 tokio::select! {
@@ -454,12 +624,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/sim/reset/:asset_id", post(post_sim_reset))
         .route("/sim/config/battery", put(put_sim_config_battery))
         .route("/sim/override", get(get_sim_override).post(post_sim_override))
-        .route("/trace", get(get_trace))
+        .route("/trace/events", get(get_trace_events))
+        .route("/trace/history", get(get_trace_history))
         .route("/metrics", get(get_metrics))
         // HEMS Stage 1–3 routes
         .route("/packets", get(get_packets).post(post_packets))
         .route("/plan", get(get_plan))
-        .route("/rates", get(get_rates))
+        .route("/tariffs", get(get_tariffs))
         // HEMS Stage 2 routes
         .route("/capacity", get(get_capacity))
         .route("/obligations", get(get_obligations))
@@ -690,16 +861,52 @@ struct TraceQuery {
     limit: Option<usize>,
 }
 
-async fn get_trace(
+#[derive(Deserialize)]
+struct TraceHistoryQuery {
+    asset: String,
+    limit: Option<usize>,
+}
+
+/// GET /trace/events?limit=N — returns recent ControllerEvent log entries (newest first).
+async fn get_trace_events(
     State(ctx): State<AppCtx>,
     Query(q): Query<TraceQuery>,
 ) -> impl IntoResponse {
-    let mut trace = ctx.state.trace().await;
     let limit = q.limit.unwrap_or(50);
-    // Return newest first
-    trace.reverse();
-    trace.truncate(limit);
-    Json(trace)
+    let ct = ctx.state.controller_trace().await;
+    let mut events = ct.events();
+    events.reverse();
+    events.truncate(limit);
+    Json(events)
+}
+
+/// GET /trace/history?asset=<id>&limit=N — returns timeline rows for an asset.
+async fn get_trace_history(
+    State(ctx): State<AppCtx>,
+    Query(q): Query<TraceHistoryQuery>,
+) -> impl IntoResponse {
+    let ct = ctx.state.controller_trace().await;
+    let limit = q.limit.unwrap_or(100);
+    match ct.asset_history_for(&q.asset) {
+        None => Json(Vec::<serde_json::Value>::new()).into_response(),
+        Some(buf) => {
+            let mut points = buf.to_timeline(None);
+            points.reverse();
+            points.truncate(limit);
+            let json: Vec<serde_json::Value> = points
+                .into_iter()
+                .map(|p| {
+                    let mut m = serde_json::Map::new();
+                    m.insert("ts".to_string(), serde_json::json!(p.ts));
+                    for (k, v) in p.values {
+                        m.insert(k, serde_json::json!(v));
+                    }
+                    serde_json::Value::Object(m)
+                })
+                .collect();
+            Json(json).into_response()
+        }
+    }
 }
 
 // --- HEMS stub routes (Stage 1) ---
@@ -717,9 +924,9 @@ async fn get_plan(State(ctx): State<AppCtx>) -> impl IntoResponse {
     }
 }
 
-/// GET /rates — returns planned rate snapshots parsed from active events (Stage 2).
-async fn get_rates(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.planned_rates().await)
+/// GET /tariffs — returns planned tariff snapshots parsed from active events.
+async fn get_tariffs(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.planned_tariffs().await)
 }
 
 /// GET /capacity — returns the current OadrCapacityState (Stage 2).
@@ -837,6 +1044,16 @@ async fn post_requests(
             packets.push(packet);
             ctx.state.set_active_packets(packets).await;
             ctx.state.upsert_request(user_req.clone()).await;
+            // T044: emit RequestTransition for new request
+            ctx.state.push_controller_event(
+                controller::trace::ControllerEvent::RequestTransition {
+                    ts: now,
+                    request_id: user_req.id,
+                    asset_id: user_req.asset_id.clone(),
+                    from_status: "None".to_string(),
+                    to_status: format!("{:?}", user_req.status),
+                },
+            ).await;
             let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
             (axum::http::StatusCode::CREATED, Json(serde_json::to_value(user_req).unwrap_or_default())).into_response()
         }
@@ -859,6 +1076,16 @@ async fn delete_request(
     match ctx.state.cancel_request(id).await {
         Some(packet_id) => {
             ctx.state.abandon_packet(packet_id).await;
+            // T044: emit RequestTransition for cancellation
+            ctx.state.push_controller_event(
+                controller::trace::ControllerEvent::RequestTransition {
+                    ts: Utc::now(),
+                    request_id: id,
+                    asset_id: String::new(),
+                    from_status: "Active".to_string(),
+                    to_status: "Cancelled".to_string(),
+                },
+            ).await;
             let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
             info!(request_id = %id, packet_id = %packet_id, "user request cancelled");
             axum::http::StatusCode::NO_CONTENT.into_response()
