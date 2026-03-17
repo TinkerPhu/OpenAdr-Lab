@@ -126,7 +126,6 @@ export function ControllerV2Page() {
         {!pinnedCellIds.includes("grid:accumulated") && (
           <GridAccumulatedCell
             assetSummaries={assetSummaries}
-            nowMs={nowMs}
             pinned={false}
             onTogglePin={() => handleTogglePin("grid:accumulated")}
           />

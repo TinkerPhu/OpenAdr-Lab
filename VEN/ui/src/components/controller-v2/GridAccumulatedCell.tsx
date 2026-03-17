@@ -45,18 +45,18 @@ function buildStackedFromAllTimelines(
 
 interface GridAccumulatedCellProps {
   assetSummaries: AssetSummary[];
-  nowMs: number;
   pinned: boolean;
   onTogglePin: () => void;
 }
 
 export function GridAccumulatedCell({
   assetSummaries,
-  nowMs,
   pinned,
   onTogglePin,
 }: GridAccumulatedCellProps) {
   const { data: allTimelines = {} } = useAllTimelines();
+  // nowMs updates each time fresh timeline data arrives, matching AssetCell's pattern.
+  const nowMs = useMemo(() => Date.now(), [allTimelines]);
   const stackedAreaPoints = useMemo(
     () => buildStackedFromAllTimelines(allTimelines),
     [allTimelines]
