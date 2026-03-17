@@ -1,19 +1,20 @@
+import { useMemo } from "react";
 import { Box, Collapse, IconButton, Paper, Tooltip } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
-import type { AssetId, AssetSummary, AssetTimePoint } from "./types";
+import type { AssetId, AssetSummary } from "./types";
 import { ASSET_COLORS } from "./types";
 import { AssetLeftSection } from "./AssetLeftSection";
 import { AssetMidSection } from "./AssetMidSection";
 import { AssetRightSection } from "./AssetRightSection";
 import type { SimSnapshot, UserOverrides } from "../../api/types";
+import { useTimeline } from "../../api/hooks";
 
 interface AssetCellProps {
   assetId: AssetId;
   summary: AssetSummary;
-  timePoints: AssetTimePoint[];
   simSnapshot: SimSnapshot | undefined;
   simOverrides: UserOverrides | undefined;
   collapsed: { left: boolean; right: boolean };
@@ -26,7 +27,6 @@ interface AssetCellProps {
 export function AssetCell({
   assetId,
   summary,
-  timePoints,
   simSnapshot,
   simOverrides,
   collapsed,
@@ -37,6 +37,10 @@ export function AssetCell({
 }: AssetCellProps) {
   const cellId = `asset:${assetId}`;
   const color = ASSET_COLORS[assetId] ?? "#888";
+
+  const { data: timelineData = [] } = useTimeline(assetId);
+  // nowMs updates each time fresh timeline data arrives (every 10s refetch cycle).
+  const nowMs = useMemo(() => Date.now(), [timelineData]);
 
   return (
     <Paper
@@ -70,9 +74,9 @@ export function AssetCell({
       {/* Mid section — timeline graph */}
       <AssetMidSection
         assetId={assetId}
-        timePoints={timePoints}
+        timePoints={timelineData}
         color={color}
-        nowMs={Date.now()}
+        nowMs={nowMs}
       />
 
       {/* Collapse right toggle */}
