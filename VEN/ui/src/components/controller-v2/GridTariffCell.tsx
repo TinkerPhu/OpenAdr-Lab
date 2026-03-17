@@ -84,29 +84,29 @@ export function GridTariffCell({
         />
       </Box>
 
-      {/* Extended window toggle */}
-      <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h tariff horizon (no past)"}>
-        <IconButton
-          size="small"
-          data-testid="grid-tariff-cell-extend-btn"
-          onClick={() => setExtended((v) => !v)}
-          sx={{ alignSelf: "center", mx: 0.5 }}
-        >
-          {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
-        </IconButton>
-      </Tooltip>
-
-      {/* Pin button */}
-      <Tooltip title={pinned ? "Unpin" : "Pin to top"}>
-        <IconButton
-          size="small"
-          data-testid="grid-tariff-cell-pin-btn"
-          onClick={onTogglePin}
-          sx={{ alignSelf: "flex-start", m: 0.5 }}
-        >
-          {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
-        </IconButton>
-      </Tooltip>
+      {/* Right column: pin button on top, expand toggle below */}
+      <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <Tooltip title={pinned ? "Unpin" : "Pin to top"}>
+          <IconButton
+            size="small"
+            data-testid="grid-tariff-cell-pin-btn"
+            onClick={onTogglePin}
+            sx={{ m: 0.5 }}
+          >
+            {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+        <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h tariff horizon (no past)"}>
+          <IconButton
+            size="small"
+            data-testid="grid-tariff-cell-extend-btn"
+            onClick={() => setExtended((v) => !v)}
+            sx={{ m: 0.5 }}
+          >
+            {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+      </Box>
     </Paper>
   );
 }

@@ -214,6 +214,44 @@ describe("ControllerV2Page — pin and collapse buttons", () => {
   });
 });
 
+describe("ControllerV2Page — expand button is below pin button", () => {
+  beforeEach(() => {
+    mockSim.mockReturnValue(baseSim);
+    mockRates.mockReturnValue(baseRates);
+    mockOverrides.mockReturnValue(baseOverrides);
+  });
+
+  // Returns true when `a` appears before `b` in the document.
+  function isBefore(a: Element, b: Element) {
+    return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }
+
+  const allAssets = ["ev", "battery", "heater", "pv", "base_load"] as const;
+
+  for (const assetId of allAssets) {
+    it(`expand button is below pin button on ${assetId} cell`, () => {
+      renderPage();
+      const pinBtn = screen.getByTestId(`asset-cell-${assetId}-pin-btn`);
+      const extendBtn = screen.getByTestId(`asset-cell-${assetId}-extend-btn`);
+      expect(isBefore(pinBtn, extendBtn)).toBe(true);
+    });
+  }
+
+  it("expand button is below pin button on grid tariff cell", () => {
+    renderPage();
+    const pinBtn = screen.getByTestId("grid-tariff-cell-pin-btn");
+    const extendBtn = screen.getByTestId("grid-tariff-cell-extend-btn");
+    expect(isBefore(pinBtn, extendBtn)).toBe(true);
+  });
+
+  it("expand button is below pin button on grid accumulated cell", () => {
+    renderPage();
+    const pinBtn = screen.getByTestId("grid-accumulated-cell-pin-btn");
+    const extendBtn = screen.getByTestId("grid-accumulated-cell-extend-btn");
+    expect(isBefore(pinBtn, extendBtn)).toBe(true);
+  });
+});
+
 describe("ControllerV2Page — error and loading states", () => {
   it("shows error state when sim fails", () => {
     vi.mocked(vi.fn()).mockReturnValue(null);

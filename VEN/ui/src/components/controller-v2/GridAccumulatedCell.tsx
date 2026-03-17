@@ -1,12 +1,17 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Box, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
+import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
+import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
 import type { AssetId, AssetSummary, StackedAreaPoint } from "./types";
 import { ASSET_COLORS } from "./types";
 import { StackedAreaChart } from "./charts/StackedAreaChart";
 import { useAllTimelines } from "../../api/hooks";
 import type { AssetTimelinePoint } from "./types";
+
+const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
+const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
 
 const KNOWN_ASSETS: AssetId[] = ["ev", "heater", "pv", "battery", "base_load"];
 
@@ -54,7 +59,10 @@ export function GridAccumulatedCell({
   pinned,
   onTogglePin,
 }: GridAccumulatedCellProps) {
-  const { data: allTimelines = {} } = useAllTimelines();
+  const [extended, setExtended] = useState(false);
+  const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
+
+  const { data: allTimelines = {} } = useAllTimelines(window.hoursBack, window.hoursForward);
   // nowMs updates each time fresh timeline data arrives, matching AssetCell's pattern.
   const nowMs = useMemo(() => Date.now(), [allTimelines]);
   const stackedAreaPoints = useMemo(
@@ -95,20 +103,34 @@ export function GridAccumulatedCell({
           assetIds={assetIds as AssetId[]}
           colorMap={ASSET_COLORS}
           nowMs={nowMs}
+          hoursBack={window.hoursBack}
+          hoursForward={window.hoursForward}
         />
       </Box>
 
-      {/* Pin button */}
-      <Tooltip title={pinned ? "Unpin" : "Pin to top"}>
-        <IconButton
-          size="small"
-          data-testid="grid-accumulated-cell-pin-btn"
-          onClick={onTogglePin}
-          sx={{ alignSelf: "flex-start", m: 0.5 }}
-        >
-          {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
-        </IconButton>
-      </Tooltip>
+      {/* Right column: pin button on top, expand toggle below */}
+      <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <Tooltip title={pinned ? "Unpin" : "Pin to top"}>
+          <IconButton
+            size="small"
+            data-testid="grid-accumulated-cell-pin-btn"
+            onClick={onTogglePin}
+            sx={{ m: 0.5 }}
+          >
+            {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+        <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h planning horizon"}>
+          <IconButton
+            size="small"
+            data-testid="grid-accumulated-cell-extend-btn"
+            onClick={() => setExtended((v) => !v)}
+            sx={{ m: 0.5 }}
+          >
+            {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+      </Box>
     </Paper>
   );
 }
