@@ -117,7 +117,6 @@ export function ControllerV2Page() {
         {tariffSnapshot && !pinnedCellIds.includes("grid:tariff") && (
           <GridTariffCell
             snapshot={tariffSnapshot}
-            nowMs={nowMs}
             pinned={false}
             onTogglePin={() => handleTogglePin("grid:tariff")}
           />
