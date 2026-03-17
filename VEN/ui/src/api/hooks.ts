@@ -178,7 +178,7 @@ export function useAllTimelines(hoursBack = 1.0, hoursForward = 1.0) {
   });
 }
 
-export function useRates() {
+export function useTariffs() {
   const { api } = useVenContext();
   return useQuery({
     queryKey: ["rates", api.baseUrl],
@@ -186,6 +186,9 @@ export function useRates() {
     refetchInterval: 30_000,
   });
 }
+
+/** @deprecated Use useTariffs instead. Alias kept for legacy Controller page. */
+export const useRates = useTariffs;
 
 export function useCapacity() {
   const { api } = useVenContext();
