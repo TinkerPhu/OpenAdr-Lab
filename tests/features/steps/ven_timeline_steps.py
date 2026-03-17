@@ -15,15 +15,6 @@ def step_ven_is_running(context):
 
 # ── Then ─────────────────────────────────────────────────────────────────────
 
-@then("the response JSON is an array")
-def step_response_is_array(context):
-    resp = getattr(context, "last_response", None)
-    assert resp is not None, "No response in context"
-    data = resp.json()
-    assert isinstance(data, list), f"Expected JSON array, got {type(data).__name__}: {str(data)[:200]}"
-    context.last_response_json = data
-
-
 @then("the response JSON is an object")
 def step_response_is_object(context):
     resp = getattr(context, "last_response", None)
