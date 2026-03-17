@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { Alert, Box, CircularProgress, Typography } from "@mui/material";
-import { useSim, useRates, usePlan, useRequests, useSimOverride, useSetSimOverride } from "../api/hooks";
+import { useSim, useTariffs, usePlan, useRequests, useSimOverride, useSetSimOverride } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller-v2/types";
 import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
 import { AssetCell } from "../components/controller-v2/AssetCell";
@@ -10,10 +10,10 @@ import { GridAccumulatedCell } from "../components/controller-v2/GridAccumulated
 import type { UserOverrides } from "../api/types";
 
 export function ControllerV2Page() {
-  const nowMs = Date.now();
+  const nowMs = useMemo(() => Date.now(), []);
 
   const { data: sim, isLoading: simLoading, isError: simError } = useSim();
-  const { data: rates } = useRates();
+  const { data: rates } = useTariffs();
   const { data: plan } = usePlan();
   const { data: userRequests } = useRequests();
   const { data: simOverrides } = useSimOverride();
