@@ -9,10 +9,10 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import type { AssetTimePoint } from "../types";
+import type { AssetTimelinePoint } from "../types";
 
 interface AssetTimelineChartProps {
-  data: AssetTimePoint[];
+  data: AssetTimelinePoint[];
   color: string;
   nowMs: number;
 }
@@ -23,20 +23,18 @@ function formatTs(ts: number) {
 
 export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartProps) {
   // Ensure at least a 2-point range so recharts can compute the X scale and render the
-  // NOW reference line even when there are no trace setpoints (Phase 4 wires history).
-  const chartData: AssetTimePoint[] =
+  // NOW reference line even when there are no data points yet.
+  const chartData: AssetTimelinePoint[] =
     data.length > 0
       ? data
       : [
-          { ts: nowMs - 3_600_000, powerKw: 0, costRateEurH: null, co2RateGH: null, isPast: true },
-          { ts: nowMs + 3_600_000, powerKw: 0, costRateEurH: null, co2RateGH: null, isPast: false },
+          { ts: nowMs - 3_600_000, values: {} },
+          { ts: nowMs + 3_600_000, values: {} },
         ];
 
-  // Domain must always include nowMs so the NOW reference line is rendered.
-  // Future-only data (plan slots) would otherwise start at > nowMs, pushing the
-  // reference line off the left edge of the chart.
-  const tMin = Math.min(nowMs - 300_000, ...chartData.map((p) => p.ts));
-  const tMax = Math.max(nowMs + 300_000, ...chartData.map((p) => p.ts));
+  // Fixed ±1h domain centred on nowMs keeps the X-axis stable across refreshes.
+  const tMin = nowMs - 3_600_000;
+  const tMax = nowMs + 3_600_000;
 
   return (
     <ResponsiveContainer width="100%" height={140}>
@@ -58,11 +56,11 @@ export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartPro
         />
         <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
 
-        {/* Power — solid */}
+        {/* Power — solid. Accessor function required; dataKey dot-notation cannot traverse nested maps. */}
         <Line
           yAxisId="power"
           type="stepAfter"
-          dataKey="powerKw"
+          dataKey={(pt: AssetTimelinePoint) => pt.values["power_kw"] ?? null}
           name="Power [kW]"
           stroke={color}
           strokeWidth={2}
@@ -74,7 +72,7 @@ export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartPro
         <Line
           yAxisId="rates"
           type="stepAfter"
-          dataKey="costRateEurH"
+          dataKey={(pt: AssetTimelinePoint) => pt.values["cost_rate_eur_h"] ?? null}
           name="Cost rate [€/h]"
           stroke={color}
           strokeWidth={1.5}
@@ -87,7 +85,7 @@ export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartPro
         <Line
           yAxisId="rates"
           type="stepAfter"
-          dataKey="co2RateGH"
+          dataKey={(pt: AssetTimelinePoint) => pt.values["co2_rate_g_h"] ?? null}
           name="CO₂eq rate [g/h]"
           stroke={color}
           strokeWidth={1.5}
