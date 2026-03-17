@@ -193,8 +193,12 @@ class VenUi:
         except Exception as e:
             try:
                 print(f"\n[go_controller_v2] FAILED. URL={self.page.url}")
-                html = self.page.content()
-                print(f"[go_controller_v2] HTML snippet: {html[:8000]}")
-            except Exception:
-                pass
+                # Print body content separately to get past the large <head> CSS
+                body = self.page.locator("body").inner_html()
+                print(f"[go_controller_v2] BODY (first 6000): {body[:6000]}")
+                # Check for specific testid
+                root = self.page.locator("#root").inner_html()
+                print(f"[go_controller_v2] ROOT (first 6000): {root[:6000]}")
+            except Exception as ex2:
+                print(f"[go_controller_v2] Could not get body: {ex2}")
             raise
