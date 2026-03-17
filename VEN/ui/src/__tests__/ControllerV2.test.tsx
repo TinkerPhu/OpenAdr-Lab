@@ -16,7 +16,10 @@ const baseSim: SimSnapshot = {
   base_load_w: 500,
   import_kwh: 5.0,
   export_kwh: 0,
-  assets: {},
+  assets: {
+    ev: { power_kw: 7, soc: 0.5 },
+    battery: { power_kw: 1, soc: 0.6 },
+  },
   ev: {
     soc: 0.5,
     plugged: true,
@@ -69,6 +72,12 @@ const mockRates = vi.fn(() => baseRates);
 const mockOverrides = vi.fn(() => baseOverrides);
 const mockSetOverride = vi.fn(() => ({ mutate: vi.fn() }));
 
+// Minimal EV schema for testing schema-driven AssetRightSection
+const evSchema = [
+  { key: "ev_plugged", label: "Plugged In", kind: "Switch", min: null, max: null, unit: "" },
+  { key: "ev_desired_kw", label: "Charge Rate", kind: "Slider", min: 0, max: 11, unit: "kW" },
+];
+
 vi.mock("../api/hooks", () => ({
   useSim: () => ({ data: mockSim(), isLoading: false, isError: false }),
   useRates: () => ({ data: mockRates() }),
@@ -79,6 +88,7 @@ vi.mock("../api/hooks", () => ({
   useSetSimOverride: () => mockSetOverride(),
   useTimeline: () => ({ data: [] }),
   useAllTimelines: () => ({ data: {} }),
+  useSimSchema: () => ({ data: { ev: evSchema } }),
 }));
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

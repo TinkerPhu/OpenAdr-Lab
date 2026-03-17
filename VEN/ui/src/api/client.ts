@@ -1,7 +1,7 @@
 import type {
   VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry, UserOverrides,
   PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger, UserRequest, FlexibilityEnvelope,
-  CreateUserRequestBody,
+  CreateUserRequestBody, ControlDescriptor,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller-v2/types";
 
@@ -115,6 +115,12 @@ export class VenApi {
   async assetHistory(assetId: string, limit = 100): Promise<Record<string, unknown>[]> {
     const r = await this.getReq(`/trace/history?asset=${assetId}&limit=${limit}`);
     if (!r.ok) throw new Error(`trace/history ${r.status}`);
+    return r.json();
+  }
+
+  async simSchema(): Promise<Record<string, ControlDescriptor[]>> {
+    const r = await this.getReq("/sim/schema");
+    if (!r.ok) throw new Error(`sim/schema ${r.status}`);
     return r.json();
   }
 

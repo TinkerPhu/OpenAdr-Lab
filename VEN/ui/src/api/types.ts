@@ -147,6 +147,20 @@ export type TraceEntry = {
   reason: string;
 };
 
+// ─── Sim schema types ─────────────────────────────────────────────────────────
+
+export type ControlKind = "Slider" | "Switch" | "NumberInput";
+
+/** Descriptor for one controllable parameter from GET /sim/schema. */
+export type ControlDescriptor = {
+  key: string;
+  label: string;
+  kind: ControlKind;
+  min: number | null;
+  max: number | null;
+  unit: string;
+};
+
 // ─── HEMS Controller types ────────────────────────────────────────────────────
 
 export type RateSnapshot = {

@@ -100,6 +100,15 @@ export function useTrace(limit = 50) {
   });
 }
 
+export function useSimSchema() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["sim", "schema", api.baseUrl],
+    queryFn: () => api.simSchema(),
+    staleTime: Infinity, // schema doesn't change at runtime
+  });
+}
+
 export function useSimOverride() {
   const { api } = useVenContext();
   return useQuery({
