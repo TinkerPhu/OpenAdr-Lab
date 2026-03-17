@@ -16,7 +16,10 @@ export function AssetLeftSection({ summary }: AssetLeftSectionProps) {
       data-testid={`asset-cell-${assetId}-left`}
       sx={{ minWidth: 160, px: 1.5, py: 1, display: "flex", flexDirection: "column", gap: 0.5 }}
     >
-      <Typography variant="body2" fontWeight="bold" data-testid={`asset-power-${assetId}`}>
+      <Typography variant="body2" fontWeight="bold" data-testid={`asset-name-${assetId}`}>
+        {summary.label}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" data-testid={`asset-power-${assetId}`}>
         {sign(powerKw)}
         {powerKw.toFixed(2)} kW
       </Typography>
