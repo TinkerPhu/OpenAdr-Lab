@@ -187,14 +187,14 @@ class VenUi:
             raise
 
     def go_controller_v2(self):
-        self.page.click(tid("nav-controller-v2"))
+        self.page.goto(f"{VEN_UI_BASE_URL}/controller-v2")
         try:
             self.page.wait_for_selector(tid("controller-v2-page"), timeout=15000)
         except Exception as e:
             try:
                 print(f"\n[go_controller_v2] FAILED. URL={self.page.url}")
                 html = self.page.content()
-                print(f"[go_controller_v2] HTML snippet: {html[:4000]}")
+                print(f"[go_controller_v2] HTML snippet: {html[:8000]}")
             except Exception:
                 pass
             raise
