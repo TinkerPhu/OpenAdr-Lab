@@ -16,23 +16,55 @@ interface StackedAreaChartProps {
   assetIds: AssetId[];
   colorMap: Record<string, string>;
   nowMs: number;
+  hoursBack?: number;
+  hoursForward?: number;
 }
 
 function formatTs(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function StackedAreaChart({ data, assetIds, colorMap, nowMs }: StackedAreaChartProps) {
+const EMPTY_PT = (): Omit<StackedAreaPoint, "ts"> => ({
+  ev_pos: 0, ev_neg: 0,
+  heater_pos: 0, heater_neg: 0,
+  pv_pos: 0, pv_neg: 0,
+  battery_pos: 0, battery_neg: 0,
+  base_load_pos: 0, base_load_neg: 0,
+});
+
+export function StackedAreaChart({
+  data,
+  assetIds,
+  colorMap,
+  nowMs,
+  hoursBack = 1.0,
+  hoursForward = 1.0,
+}: StackedAreaChartProps) {
+  // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes
+  // and ensures the NOW reference line is always within the visible range.
+  const tMin = nowMs - hoursBack * 3_600_000;
+  const tMax = nowMs + hoursForward * 3_600_000;
+
+  // Ensure at least two boundary points so recharts can render the X scale and
+  // the NOW reference line even when there are no data points yet.
+  const chartData: StackedAreaPoint[] =
+    data.length > 0
+      ? data
+      : [
+          { ts: tMin, ...EMPTY_PT() },
+          { ts: tMax, ...EMPTY_PT() },
+        ];
+
   return (
     <div data-testid="accumulated-area-chart" style={{ width: "100%", height: 160 }}>
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
           <XAxis
             dataKey="ts"
             scale="time"
             type="number"
-            domain={["auto", "auto"]}
+            domain={[tMin, tMax]}
             tickFormatter={formatTs}
             tick={{ fontSize: 10 }}
           />
@@ -80,6 +112,7 @@ export function StackedAreaChart({ data, assetIds, colorMap, nowMs }: StackedAre
             x={nowMs}
             stroke="#f44336"
             strokeDasharray="3 3"
+            label={{ value: "NOW", position: "top", fontSize: 9, fill: "#f44336" }}
           />
         </AreaChart>
       </ResponsiveContainer>
