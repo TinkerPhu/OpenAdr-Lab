@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ControllerV2Page } from "../pages/ControllerV2";
-import type { SimSnapshot, UserOverrides, RateSnapshot } from "../api/types";
+import type { SimSnapshot, UserOverrides, TariffSnapshot } from "../api/types";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ const baseSim: SimSnapshot = {
   },
 };
 
-const baseRates: RateSnapshot[] = [
+const baseRates: TariffSnapshot[] = [
   {
     interval_start: "2026-03-14T00:00:00Z",
     interval_end: "2026-03-15T00:00:00Z",
@@ -80,7 +80,7 @@ const evSchema = [
 
 vi.mock("../api/hooks", () => ({
   useSim: () => ({ data: mockSim(), isLoading: false, isError: false }),
-  useRates: () => ({ data: mockRates() }),
+  useTariffs: () => ({ data: mockRates() }),
   usePlan: () => ({ data: null }),
   useRequests: () => ({ data: [] }),
   useTrace: () => ({ data: [] }),
