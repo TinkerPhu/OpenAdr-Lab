@@ -39,9 +39,13 @@ export function AssetRightSection({
   }
 
   function getValue(key: string): number | boolean | null {
-    if (overrides == null) return null;
-    const v = (overrides as Record<string, unknown>)[key];
-    if (typeof v === "number" || typeof v === "boolean") return v;
+    if (overrides != null) {
+      const v = (overrides as Record<string, unknown>)[key];
+      if (typeof v === "number" || typeof v === "boolean") return v;
+    }
+    // Fall back to the sim's actual current value so the switch reflects reality
+    // when no override is active (null override means "use sim default").
+    if (key === "ev_plugged") return sim?.ev?.plugged ?? null;
     return null;
   }
 
