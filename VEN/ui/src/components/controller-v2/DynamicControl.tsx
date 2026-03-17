@@ -15,7 +15,7 @@ export function DynamicControl({ descriptor, value, onChange }: DynamicControlPr
   const { key, label, kind, min, max, unit } = descriptor;
   const testId = `ctrl-${key.replace(/_/g, "-")}`;
 
-  if (kind === "Switch") {
+  if (kind === "switch") {
     return (
       <FormControlLabel
         control={
@@ -31,7 +31,7 @@ export function DynamicControl({ descriptor, value, onChange }: DynamicControlPr
     );
   }
 
-  if (kind === "Slider") {
+  if (kind === "slider") {
     const numVal = typeof value === "number" ? value : (min ?? 0);
     return (
       <Box>
