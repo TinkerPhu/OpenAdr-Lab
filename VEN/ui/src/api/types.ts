@@ -149,7 +149,7 @@ export type TraceEntry = {
 
 // ─── Sim schema types ─────────────────────────────────────────────────────────
 
-export type ControlKind = "Slider" | "Switch" | "NumberInput";
+export type ControlKind = "slider" | "switch" | "number_input";
 
 /** Descriptor for one controllable parameter from GET /sim/schema. */
 export type ControlDescriptor = {
