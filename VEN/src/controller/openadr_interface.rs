@@ -28,11 +28,19 @@ fn parse_iso8601_duration(s: &str) -> i64 {
 
     let mut total_secs: i64 = 0;
 
-    // Parse date part (D only — Y/M ignored for simplicity)
+    // Parse date part (Y, M, D)
     let mut buf = String::new();
     for ch in date_part.chars() {
         if ch.is_ascii_digit() {
             buf.push(ch);
+        } else if ch == 'Y' {
+            let v: i64 = buf.parse().unwrap_or(0);
+            total_secs += v * 365 * 86400; // approximate: 1 year = 365 days
+            buf.clear();
+        } else if ch == 'M' {
+            let v: i64 = buf.parse().unwrap_or(0);
+            total_secs += v * 30 * 86400; // approximate: 1 month = 30 days
+            buf.clear();
         } else if ch == 'D' {
             let v: i64 = buf.parse().unwrap_or(0);
             total_secs += v * 86400;
@@ -78,8 +86,12 @@ fn parse_iso8601_duration(s: &str) -> i64 {
 /// Parse all rate snapshots from a slice of OpenADR events.
 /// Handles PRICE, EXPORT_PRICE, GHG payload types per event interval.
 /// Multiple payload types for the same interval are merged into one TariffSnapshot.
-pub fn parse_rate_snapshots(events: &[Value]) -> Vec<TariffSnapshot> {
-    // Key: (interval_start_millis, interval_end_millis) → accumulated snapshot
+///
+/// Supports looping events: when `event.intervalPeriod.duration` exceeds the total
+/// span of all intervals, the interval set is repeated (offset by one cycle each time)
+/// to cover [now − 1 cycle … now + 3 days]. This implements the OpenADR 3 spec's
+/// "persistent daily prices" pattern (`event.intervalPeriod.duration = "P9999Y"`).
+pub fn parse_rate_snapshots(events: &[Value], now: DateTime<Utc>) -> Vec<TariffSnapshot> {
     let mut map: std::collections::BTreeMap<(i64, i64), TariffSnapshot> =
         std::collections::BTreeMap::new();
 
@@ -94,88 +106,110 @@ pub fn parse_rate_snapshots(events: &[Value]) -> Vec<TariffSnapshot> {
             None => continue,
         };
 
+        // ── Collect base intervals ────────────────────────────────────────────
+        // Each entry: (start, duration_secs, payloads: Vec<(type, value)>)
+        let mut base: Vec<(DateTime<Utc>, i64, Vec<(String, f64)>)> = Vec::new();
+
         for interval in intervals {
-            // Parse interval period
             let interval_period = match interval.get("intervalPeriod") {
                 Some(ip) => ip,
                 None => continue,
             };
-
-            let start_str = match interval_period
-                .get("start")
-                .and_then(|v| v.as_str())
-            {
+            let start_str = match interval_period.get("start").and_then(|v| v.as_str()) {
                 Some(s) => s,
                 None => continue,
             };
-
             let interval_start: DateTime<Utc> = match start_str.parse() {
                 Ok(dt) => dt,
                 Err(_) => continue,
             };
+            let duration_secs = parse_iso8601_duration(
+                interval_period
+                    .get("duration")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("PT1H"),
+            );
 
-            let duration_str = interval_period
-                .get("duration")
-                .and_then(|v| v.as_str())
-                .unwrap_or("PT1H");
-            let duration_secs = parse_iso8601_duration(duration_str);
-            let interval_end = interval_start + Duration::seconds(duration_secs);
-
-            let key = (interval_start.timestamp(), interval_end.timestamp());
-
-            // Seed the map entry if not present
-            let entry = map.entry(key).or_insert_with(|| TariffSnapshot {
-                interval_start,
-                interval_end,
-                import_price_eur_kwh: None,
-                export_price_eur_kwh: None,
-                co2_g_kwh: None,
-                source_event_id: event_id.clone(),
-                is_forecast: false,
-            });
-
-            // Merge payloads
-            let payloads = match interval.get("payloads").and_then(|v| v.as_array()) {
-                Some(arr) => arr,
-                None => continue,
-            };
-
-            for payload in payloads {
-                let payload_type = match payload.get("type").and_then(|v| v.as_str()) {
-                    Some(t) => t,
-                    None => continue,
-                };
-                let value = payload
-                    .get("values")
-                    .and_then(|v| v.as_array())
-                    .and_then(|arr| arr.first())
-                    .and_then(|v| v.as_f64());
-
-                match payload_type {
-                    "PRICE" => {
-                        if let Some(v) = value {
-                            entry.import_price_eur_kwh = Some(v);
+            let mut payloads: Vec<(String, f64)> = Vec::new();
+            if let Some(ps) = interval.get("payloads").and_then(|v| v.as_array()) {
+                for p in ps {
+                    let t = p.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    let v = p
+                        .get("values")
+                        .and_then(|v| v.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|v| v.as_f64());
+                    if matches!(t, "PRICE" | "EXPORT_PRICE" | "GHG") {
+                        if let Some(val) = v {
+                            payloads.push((t.to_string(), val));
                         }
                     }
-                    "EXPORT_PRICE" => {
-                        if let Some(v) = value {
-                            entry.export_price_eur_kwh = Some(v);
-                        }
+                }
+            }
+
+            base.push((interval_start, duration_secs, payloads));
+        }
+
+        if base.is_empty() {
+            continue;
+        }
+
+        // ── Determine looping offsets ─────────────────────────────────────────
+        let first_start = base.iter().map(|(s, _, _)| *s).min().unwrap();
+        let last_end = base
+            .iter()
+            .map(|(s, d, _)| *s + Duration::seconds(*d))
+            .max()
+            .unwrap();
+        let cycle_secs = (last_end - first_start).num_seconds();
+
+        let event_dur_secs = event
+            .get("intervalPeriod")
+            .and_then(|ip| ip.get("duration"))
+            .and_then(|v| v.as_str())
+            .map(|s| parse_iso8601_duration(s))
+            .unwrap_or(cycle_secs);
+
+        let offsets: Vec<i64> = if cycle_secs > 0 && event_dur_secs > cycle_secs {
+            let elapsed = (now - first_start).num_seconds().max(0);
+            let n = elapsed / cycle_secs; // index of the cycle that contains now
+            let from = n.saturating_sub(1); // one cycle back for "most recent past" fallback
+            let ahead = (3 * 86400i64) / cycle_secs + 2; // cycles needed to cover 3 days ahead
+            let to = (from + ahead).min(from + 10); // hard cap: at most 11 cycles total
+            (from..=to).map(|k| k * cycle_secs).collect()
+        } else {
+            vec![0i64]
+        };
+
+        // ── Insert snapshots into map for each offset ─────────────────────────
+        for &offset in &offsets {
+            for (base_start, dur, payloads) in &base {
+                let start = *base_start + Duration::seconds(offset);
+                let end = start + Duration::seconds(*dur);
+                let key = (start.timestamp(), end.timestamp());
+
+                let entry = map.entry(key).or_insert_with(|| TariffSnapshot {
+                    interval_start: start,
+                    interval_end: end,
+                    import_price_eur_kwh: None,
+                    export_price_eur_kwh: None,
+                    co2_g_kwh: None,
+                    source_event_id: event_id.clone(),
+                    is_forecast: start > now,
+                });
+
+                for (t, v) in payloads {
+                    match t.as_str() {
+                        "PRICE" => entry.import_price_eur_kwh = Some(*v),
+                        "EXPORT_PRICE" => entry.export_price_eur_kwh = Some(*v),
+                        "GHG" => entry.co2_g_kwh = Some(*v),
+                        _ => {}
                     }
-                    "GHG" => {
-                        if let Some(v) = value {
-                            entry.co2_g_kwh = Some(v);
-                        }
-                    }
-                    // Capacity types handled separately
-                    _ => {}
                 }
             }
         }
     }
 
-    // Filter to only snapshots that have at least one rate field set,
-    // then sort by interval_start.
     let mut result: Vec<TariffSnapshot> = map
         .into_values()
         .filter(|s| {
@@ -420,6 +454,17 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_iso8601_duration_years() {
+        let secs = parse_iso8601_duration("P9999Y");
+        assert!(secs > 9998i64 * 365 * 86400, "P9999Y should be a very large value");
+    }
+
+    #[test]
+    fn test_parse_iso8601_duration_months() {
+        assert_eq!(parse_iso8601_duration("P1M"), 30 * 86400);
+    }
+
+    #[test]
     fn test_parse_rate_snapshots_price() {
         let events = json!([
             {
@@ -460,7 +505,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(events.as_array().unwrap());
+        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), Utc::now());
         assert_eq!(snapshots.len(), 3);
         assert_eq!(snapshots[0].import_price_eur_kwh, Some(0.25));
         assert_eq!(snapshots[1].import_price_eur_kwh, Some(0.30));
@@ -487,7 +532,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(events.as_array().unwrap());
+        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), Utc::now());
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].co2_g_kwh, Some(200.0));
     }
@@ -512,7 +557,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(events.as_array().unwrap());
+        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), Utc::now());
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].export_price_eur_kwh, Some(0.10));
     }
@@ -606,6 +651,137 @@ mod tests {
         assert_eq!(obligations[0].payload_type, "USAGE");
         assert_eq!(obligations[0].reading_type, "DIRECT_READ");
         assert!(!obligations[0].fulfilled);
+    }
+
+    #[test]
+    fn test_parse_rate_snapshots_no_loop_when_duration_equals_cycle() {
+        // event.intervalPeriod.duration == sum of intervals → no looping
+        let now: DateTime<Utc> = "2026-03-17T12:00:00Z".parse().unwrap();
+        let events = json!([{
+            "id": "evt-noloop",
+            "programID": "prog-1",
+            "intervalPeriod": {
+                "start": "2026-03-17T00:00:00Z",
+                "duration": "PT2H"
+            },
+            "intervals": [
+                {
+                    "id": 0,
+                    "intervalPeriod": {"start": "2026-03-17T00:00:00Z", "duration": "PT1H"},
+                    "payloads": [{"type": "PRICE", "values": [0.10]}]
+                },
+                {
+                    "id": 1,
+                    "intervalPeriod": {"start": "2026-03-17T01:00:00Z", "duration": "PT1H"},
+                    "payloads": [{"type": "PRICE", "values": [0.20]}]
+                }
+            ]
+        }]);
+        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), now);
+        assert_eq!(snapshots.len(), 2, "no looping expected when duration == cycle");
+    }
+
+    #[test]
+    fn test_parse_rate_snapshots_looping_covers_now() {
+        // 2-hour cycle starting 2026-01-01, P9999Y duration → should loop
+        // now is 2 days later — original intervals are long expired
+        let now: DateTime<Utc> = "2026-01-03T00:30:00Z".parse().unwrap();
+        let events = json!([{
+            "id": "evt-loop",
+            "programID": "prog-1",
+            "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "P9999Y"},
+            "intervals": [
+                {
+                    "id": 0,
+                    "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "PT1H"},
+                    "payloads": [{"type": "PRICE", "values": [0.10]}]
+                },
+                {
+                    "id": 1,
+                    "intervalPeriod": {"start": "2026-01-01T01:00:00Z", "duration": "PT1H"},
+                    "payloads": [{"type": "PRICE", "values": [0.20]}]
+                }
+            ]
+        }]);
+        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), now);
+
+        // More than 2 intervals: looping occurred
+        assert!(snapshots.len() > 2, "expected looped intervals, got {}", snapshots.len());
+
+        // An interval must cover now (2026-01-03T00:30 → cycle 24, interval 0: 00:00–01:00)
+        let current = snapshots
+            .iter()
+            .find(|s| s.interval_start <= now && now < s.interval_end);
+        assert!(current.is_some(), "no interval covers now");
+        assert_eq!(current.unwrap().import_price_eur_kwh, Some(0.10));
+    }
+
+    #[test]
+    fn test_parse_rate_snapshots_looping_has_future_intervals() {
+        let now: DateTime<Utc> = "2026-01-03T00:30:00Z".parse().unwrap();
+        let events = json!([{
+            "id": "evt-loop",
+            "programID": "prog-1",
+            "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "P9999Y"},
+            "intervals": [
+                {
+                    "id": 0,
+                    "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "PT1H"},
+                    "payloads": [{"type": "PRICE", "values": [0.10]}]
+                },
+                {
+                    "id": 1,
+                    "intervalPeriod": {"start": "2026-01-01T01:00:00Z", "duration": "PT1H"},
+                    "payloads": [{"type": "PRICE", "values": [0.20]}]
+                }
+            ]
+        }]);
+        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), now);
+        assert!(
+            snapshots.iter().any(|s| s.is_forecast),
+            "expected at least one future (forecast) interval"
+        );
+    }
+
+    #[test]
+    fn test_parse_rate_snapshots_looping_24h_cycle() {
+        // 24 hourly intervals (like the seed price event), P9999Y → daily repeat
+        // now is 2 days + 14.5 h after base midnight
+        let now: DateTime<Utc> = "2026-01-03T14:30:00Z".parse().unwrap();
+
+        let intervals: Vec<serde_json::Value> = (0u32..24)
+            .map(|h| {
+                json!({
+                    "id": h,
+                    "intervalPeriod": {
+                        "start": format!("2026-01-01T{:02}:00:00Z", h),
+                        "duration": "PT1H"
+                    },
+                    "payloads": [{"type": "PRICE", "values": [h as f64]}]
+                })
+            })
+            .collect();
+
+        let events = json!([{
+            "id": "evt-daily",
+            "programID": "prog-1",
+            "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "P9999Y"},
+            "intervals": intervals
+        }]);
+        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), now);
+
+        assert!(
+            snapshots.len() > 24,
+            "expected more than 24 intervals (looping), got {}",
+            snapshots.len()
+        );
+
+        // now = 2026-01-03T14:30 → cycle 2 (offset 2×86400s), hour 14 → price = 14.0
+        let current = snapshots
+            .iter()
+            .find(|s| s.interval_start <= now && now < s.interval_end);
+        assert!(current.is_some(), "no interval covers now at {}", now);
+        assert_eq!(current.unwrap().import_price_eur_kwh, Some(14.0));
     }
 
     #[test]
