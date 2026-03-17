@@ -148,7 +148,7 @@ def build_events():
                 "priority": None,
                 "intervalPeriod": {
                     "start": midnight.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "duration": "PT24H",
+                    "duration": "P9999Y",
                 },
                 "intervals": [
                     {

@@ -141,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
 
                         // Parse rates and capacity from new events (Stage 2)
                         let now = Utc::now();
-                        let rates = controller::openadr_interface::parse_rate_snapshots(&events);
+                        let rates = controller::openadr_interface::parse_rate_snapshots(&events, now);
                         let new_cap = controller::openadr_interface::parse_capacity_state(&events);
 
                         // T034: Emit OpenAdrArrived / OpenAdrExpired for event set changes
