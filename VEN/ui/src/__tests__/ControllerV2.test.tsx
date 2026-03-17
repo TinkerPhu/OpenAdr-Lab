@@ -77,6 +77,8 @@ vi.mock("../api/hooks", () => ({
   useTrace: () => ({ data: [] }),
   useSimOverride: () => ({ data: mockOverrides() }),
   useSetSimOverride: () => mockSetOverride(),
+  useTimeline: () => ({ data: [] }),
+  useAllTimelines: () => ({ data: {} }),
 }));
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

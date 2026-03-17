@@ -1,10 +1,10 @@
 import { Box } from "@mui/material";
-import type { AssetId, AssetTimePoint } from "./types";
+import type { AssetId, AssetTimelinePoint } from "./types";
 import { AssetTimelineChart } from "./charts/AssetTimelineChart";
 
 interface AssetMidSectionProps {
   assetId: AssetId;
-  timePoints: AssetTimePoint[];
+  timePoints: AssetTimelinePoint[];
   color: string;
   nowMs: number;
 }

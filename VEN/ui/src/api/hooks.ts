@@ -147,6 +147,28 @@ export function usePlan() {
   });
 }
 
+export function useTimeline(
+  assetId: string,
+  hoursBack = 1.0,
+  hoursForward = 1.0
+) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["timeline", api.baseUrl, assetId, hoursBack, hoursForward],
+    queryFn: () => api.timeline(assetId, { hoursBack, hoursForward }),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useAllTimelines(hoursBack = 1.0, hoursForward = 1.0) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["timeline/all", api.baseUrl, hoursBack, hoursForward],
+    queryFn: () => api.allTimelines({ hoursBack, hoursForward }),
+    refetchInterval: 10_000,
+  });
+}
+
 export function useRates() {
   const { api } = useVenContext();
   return useQuery({

@@ -3,6 +3,7 @@ import type {
   PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger, UserRequest, FlexibilityEnvelope,
   CreateUserRequestBody,
 } from "./types";
+import type { AssetTimelinePoint } from "../components/controller-v2/types";
 
 let reqCounter = 0;
 function requestId(): string {
@@ -173,6 +174,38 @@ export class VenApi {
     const r = await this.getReq("/user-requests");
     if (!r.ok) throw new Error(`user-requests ${r.status}`);
     return r.json();
+  }
+
+  async timeline(
+    assetId: string,
+    params?: { hoursBack?: number; hoursForward?: number }
+  ): Promise<AssetTimelinePoint[]> {
+    const qs = new URLSearchParams();
+    if (params?.hoursBack !== undefined) qs.set("hours_back", String(params.hoursBack));
+    if (params?.hoursForward !== undefined) qs.set("hours_forward", String(params.hoursForward));
+    const path = `/timeline/${encodeURIComponent(assetId)}${qs.toString() ? `?${qs}` : ""}`;
+    const r = await this.getReq(path);
+    if (!r.ok) throw new Error(`timeline/${assetId} ${r.status}`);
+    const raw: { ts: string; values: Record<string, number> }[] = await r.json();
+    return raw.map((pt) => ({ ts: new Date(pt.ts).getTime(), values: pt.values }));
+  }
+
+  async allTimelines(
+    params?: { hoursBack?: number; hoursForward?: number }
+  ): Promise<Record<string, AssetTimelinePoint[]>> {
+    const qs = new URLSearchParams();
+    if (params?.hoursBack !== undefined) qs.set("hours_back", String(params.hoursBack));
+    if (params?.hoursForward !== undefined) qs.set("hours_forward", String(params.hoursForward));
+    const path = `/timeline/all${qs.toString() ? `?${qs}` : ""}`;
+    const r = await this.getReq(path);
+    if (!r.ok) throw new Error(`timeline/all ${r.status}`);
+    const raw: Record<string, { ts: string; values: Record<string, number> }[]> = await r.json();
+    return Object.fromEntries(
+      Object.entries(raw).map(([id, pts]) => [
+        id,
+        pts.map((pt) => ({ ts: new Date(pt.ts).getTime(), values: pt.values })),
+      ])
+    );
   }
 
   async flexibility(): Promise<FlexibilityEnvelope[]> {
