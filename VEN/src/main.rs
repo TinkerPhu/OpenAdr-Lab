@@ -940,6 +940,31 @@ async fn get_tariffs(State(ctx): State<AppCtx>) -> impl IntoResponse {
 struct TimelineParams {
     hours_back: Option<f64>,
     hours_forward: Option<f64>,
+    /// Maximum number of data points to return. If the raw series has more
+    /// points, it is evenly downsampled. Default: 120 (2 min at 1s resolution).
+    max_points: Option<usize>,
+}
+
+/// Downsample a sorted time series to at most `max_points` entries by
+/// striding evenly through the series. The last point is always included.
+fn downsample(points: Vec<serde_json::Value>, max_points: usize) -> Vec<serde_json::Value> {
+    let n = points.len();
+    if n <= max_points || max_points == 0 {
+        return points;
+    }
+    let step = (n as f64 / max_points as f64).ceil() as usize;
+    let mut result: Vec<serde_json::Value> = points
+        .iter()
+        .step_by(step)
+        .cloned()
+        .collect();
+    // Always include the last point for accurate "now" boundary.
+    if result.last() != points.last() {
+        if let Some(last) = points.last() {
+            result.push(last.clone());
+        }
+    }
+    result
 }
 
 /// Serialize a Vec<AssetTimelinePoint> to `[{"ts": "...", "values": {...}}, ...]`
@@ -974,6 +999,7 @@ async fn get_timeline(
     let now = Utc::now();
     let hours_back = params.hours_back.unwrap_or(1.0);
     let hours_forward = params.hours_forward.unwrap_or(1.0);
+    let max_points = params.max_points.unwrap_or(120);
 
     let ct = ctx.state.controller_trace().await;
     let plan = ctx.state.active_plan().await;
@@ -997,7 +1023,7 @@ async fn get_timeline(
             Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
         )
             .into_response(),
-        Some(points) => Json(serialize_timeline(points)).into_response(),
+        Some(points) => Json(downsample(serialize_timeline(points), max_points)).into_response(),
     }
 }
 
@@ -1012,6 +1038,7 @@ async fn get_timeline_all(
     let now = Utc::now();
     let hours_back = params.hours_back.unwrap_or(1.0);
     let hours_forward = params.hours_forward.unwrap_or(1.0);
+    let max_points = params.max_points.unwrap_or(120);
 
     let ct = ctx.state.controller_trace().await;
     let plan = ctx.state.active_plan().await;
@@ -1039,7 +1066,7 @@ async fn get_timeline_all(
         ) {
             result.insert(
                 asset_id.clone(),
-                serde_json::Value::Array(serialize_timeline(points)),
+                serde_json::Value::Array(downsample(serialize_timeline(points), max_points)),
             );
         }
     }
@@ -1058,7 +1085,7 @@ async fn get_timeline_all(
     ) {
         result.insert(
             "grid".to_string(),
-            serde_json::Value::Array(serialize_timeline(points)),
+            serde_json::Value::Array(downsample(serialize_timeline(points), max_points)),
         );
     }
 

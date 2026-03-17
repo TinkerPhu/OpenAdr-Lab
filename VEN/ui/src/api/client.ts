@@ -184,11 +184,12 @@ export class VenApi {
 
   async timeline(
     assetId: string,
-    params?: { hoursBack?: number; hoursForward?: number }
+    params?: { hoursBack?: number; hoursForward?: number; maxPoints?: number }
   ): Promise<AssetTimelinePoint[]> {
     const qs = new URLSearchParams();
     if (params?.hoursBack !== undefined) qs.set("hours_back", String(params.hoursBack));
     if (params?.hoursForward !== undefined) qs.set("hours_forward", String(params.hoursForward));
+    if (params?.maxPoints !== undefined) qs.set("max_points", String(params.maxPoints));
     const path = `/timeline/${encodeURIComponent(assetId)}${qs.toString() ? `?${qs}` : ""}`;
     const r = await this.getReq(path);
     if (!r.ok) throw new Error(`timeline/${assetId} ${r.status}`);
@@ -197,11 +198,12 @@ export class VenApi {
   }
 
   async allTimelines(
-    params?: { hoursBack?: number; hoursForward?: number }
+    params?: { hoursBack?: number; hoursForward?: number; maxPoints?: number }
   ): Promise<Record<string, AssetTimelinePoint[]>> {
     const qs = new URLSearchParams();
     if (params?.hoursBack !== undefined) qs.set("hours_back", String(params.hoursBack));
     if (params?.hoursForward !== undefined) qs.set("hours_forward", String(params.hoursForward));
+    if (params?.maxPoints !== undefined) qs.set("max_points", String(params.maxPoints));
     const path = `/timeline/all${qs.toString() ? `?${qs}` : ""}`;
     const r = await this.getReq(path);
     if (!r.ok) throw new Error(`timeline/all ${r.status}`);
