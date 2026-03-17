@@ -581,11 +581,12 @@ function EvControls({ sim, overrides, onChange }: ControlsProps) {
   if (!sim.ev) return null;
   const maxKw = overrides.ev_max_charge_kw ?? sim.ev.max_charge_kw;
 
-  // Is a VTN event commanding EV charge? — reactor mode removed; always inactive without reactor
-  const isEvEventActive = false;
-
-  // EV charge rate: from current sim state (reactor trace setpoints removed with reactor)
-  const vtnEvKw = (overrides.ev_desired_kw ?? sim.ev.max_charge_kw);
+  const { data: traceData = [] } = useTrace(1);
+  const latestTrace = traceData[0];
+  const isEvEventActive = latestTrace?.mode === "CHARGE_SETPOINT";
+  const vtnEvKw = isEvEventActive
+    ? (latestTrace?.setpoints?.ev_charge_kw ?? sim.ev.max_charge_kw)
+    : (overrides.ev_desired_kw ?? sim.ev.max_charge_kw);
 
   return (
     <Box>
@@ -680,12 +681,14 @@ function PvControls({ sim, overrides, onChange }: ControlsProps) {
     }
   }
 
-  // PV event active: reactor mode removed; capacity state checked via events directly (Phase 4+)
-  const isPvEventActive = false;
+  const { data: traceData = [] } = useTrace(1);
+  const latestTrace = traceData[0];
+  const isPvEventActive = latestTrace?.mode === "EXPORT_CAP";
 
-  // pv_export_limit_kw: fall back to rated_kw for slider display (reactor trace removed)
   const ratedKw = overrides.pv_rated_kw ?? sim.pv.rated_kw;
-  const vtnPvLimitKw = ratedKw;
+  const vtnPvLimitKw = isPvEventActive
+    ? (latestTrace?.setpoints?.pv_export_limit_kw ?? ratedKw)
+    : ratedKw;
 
   return (
     <Box>
@@ -758,10 +761,12 @@ function HeaterControls({ sim, overrides, onChange }: ControlsProps) {
   const maxC = overrides.heater_temp_max_c ?? sim.heater.temp_max_c;
   const heaterMax = overrides.heater_max_kw ?? sim.heater.max_kw;
 
-  // Heater event active: reactor mode removed (Phase 4+ will use capacity state)
-  const isHeaterEventActive = false;
-
-  const vtnHeaterKw = heaterMax * 0.5;
+  const { data: traceData = [] } = useTrace(1);
+  const latestTrace = traceData[0];
+  const isHeaterEventActive = latestTrace?.mode === "IMPORT_CAP";
+  const vtnHeaterKw = isHeaterEventActive
+    ? (latestTrace?.setpoints?.heater_kw ?? heaterMax * 0.5)
+    : heaterMax * 0.5;
 
   return (
     <Box>
