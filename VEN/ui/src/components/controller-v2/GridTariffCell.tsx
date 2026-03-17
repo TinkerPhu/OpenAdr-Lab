@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Box, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
@@ -26,14 +26,12 @@ function toTariffTimePoints(points: AssetTimelinePoint[], nowMs: number): Tariff
 
 interface GridTariffCellProps {
   snapshot: TariffSnapshot;
-  nowMs: number;
   pinned: boolean;
   onTogglePin: () => void;
 }
 
 export function GridTariffCell({
   snapshot,
-  nowMs,
   pinned,
   onTogglePin,
 }: GridTariffCellProps) {
@@ -41,6 +39,8 @@ export function GridTariffCell({
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
 
   const { data: timelineData = [] } = useTimeline("grid", window.hoursBack, window.hoursForward);
+  // nowMs updates each time fresh timeline data arrives, matching AssetCell's pattern.
+  const nowMs = useMemo(() => Date.now(), [timelineData]);
   const tariffTimePoints = toTariffTimePoints(timelineData, nowMs);
 
   const fmt = (v: number | null, decimals = 4) =>
@@ -76,7 +76,12 @@ export function GridTariffCell({
 
       {/* Right: tariff chart */}
       <Box sx={{ flex: 1, minWidth: 200 }}>
-        <TariffChart data={tariffTimePoints} nowMs={nowMs} />
+        <TariffChart
+          data={tariffTimePoints}
+          nowMs={nowMs}
+          hoursBack={window.hoursBack}
+          hoursForward={window.hoursForward}
+        />
       </Box>
 
       {/* Extended window toggle */}
