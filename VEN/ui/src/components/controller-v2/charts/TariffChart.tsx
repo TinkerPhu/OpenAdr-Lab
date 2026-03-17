@@ -14,23 +14,39 @@ import type { TariffTimePoint } from "../types";
 interface TariffChartProps {
   data: TariffTimePoint[];
   nowMs: number;
+  hoursBack?: number;
+  hoursForward?: number;
 }
 
 function formatTs(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function TariffChart({ data, nowMs }: TariffChartProps) {
+export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }: TariffChartProps) {
+  // Domain driven by hoursBack/hoursForward keeps the X-axis stable and ensures the
+  // NOW reference line is always visible even when past tariff data is absent.
+  const tMin = nowMs - hoursBack * 3_600_000;
+  const tMax = nowMs + hoursForward * 3_600_000;
+
+  // Ensure at least a 2-point range so recharts can render the NOW line when data is empty.
+  const chartData: TariffTimePoint[] =
+    data.length > 0
+      ? data
+      : [
+          { ts: tMin, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null, isForecast: false },
+          { ts: tMax, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null, isForecast: true },
+        ];
+
   return (
     <div data-testid="tariff-chart" style={{ width: "100%", height: 160 }}>
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
           <XAxis
             dataKey="ts"
             scale="time"
             type="number"
-            domain={["auto", "auto"]}
+            domain={[tMin, tMax]}
             tickFormatter={formatTs}
             tick={{ fontSize: 10 }}
           />
@@ -112,6 +128,7 @@ export function TariffChart({ data, nowMs }: TariffChartProps) {
             x={nowMs}
             stroke="#f44336"
             strokeDasharray="3 3"
+            label={{ value: "NOW", position: "top", fontSize: 9, fill: "#f44336" }}
           />
         </ComposedChart>
       </ResponsiveContainer>
