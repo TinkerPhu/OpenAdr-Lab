@@ -163,7 +163,7 @@ export type ControlDescriptor = {
 
 // ─── HEMS Controller types ────────────────────────────────────────────────────
 
-export type RateSnapshot = {
+export type TariffSnapshot = {
   interval_start: string;
   interval_end: string;
   import_price_eur_kwh: number | null;
@@ -173,7 +173,10 @@ export type RateSnapshot = {
   is_forecast: boolean;
 };
 
-export type PlannedRates = RateSnapshot[];
+/** @deprecated Renamed to TariffSnapshot. Kept as alias for backward compat with Controller.tsx. */
+export type RateSnapshot = TariffSnapshot;
+
+export type PlannedRates = TariffSnapshot[];
 
 export type OadrCapacityState = {
   import_limit_kw: number | null;
