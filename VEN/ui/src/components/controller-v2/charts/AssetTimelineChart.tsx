@@ -15,26 +15,34 @@ interface AssetTimelineChartProps {
   data: AssetTimelinePoint[];
   color: string;
   nowMs: number;
+  hoursBack?: number;
+  hoursForward?: number;
 }
 
 function formatTs(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function AssetTimelineChart({ data, color, nowMs }: AssetTimelineChartProps) {
+export function AssetTimelineChart({
+  data,
+  color,
+  nowMs,
+  hoursBack = 1.0,
+  hoursForward = 1.0,
+}: AssetTimelineChartProps) {
   // Ensure at least a 2-point range so recharts can compute the X scale and render the
   // NOW reference line even when there are no data points yet.
   const chartData: AssetTimelinePoint[] =
     data.length > 0
       ? data
       : [
-          { ts: nowMs - 3_600_000, values: {} },
-          { ts: nowMs + 3_600_000, values: {} },
+          { ts: nowMs - hoursBack * 3_600_000, values: {} },
+          { ts: nowMs + hoursForward * 3_600_000, values: {} },
         ];
 
-  // Fixed ±1h domain centred on nowMs keeps the X-axis stable across refreshes.
-  const tMin = nowMs - 3_600_000;
-  const tMax = nowMs + 3_600_000;
+  // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes.
+  const tMin = nowMs - hoursBack * 3_600_000;
+  const tMax = nowMs + hoursForward * 3_600_000;
 
   return (
     <ResponsiveContainer width="100%" height={140}>

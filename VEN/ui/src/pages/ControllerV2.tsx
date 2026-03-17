@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { Alert, Box, CircularProgress, Typography } from "@mui/material";
 import { useSim, useRates, usePlan, useRequests, useTrace, useSimOverride, useSetSimOverride } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller-v2/types";
-import { deriveAssetSummaries, buildStackedAreaData, buildTariffTimeline, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
+import { deriveAssetSummaries, buildStackedAreaData, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
 import { AssetCell } from "../components/controller-v2/AssetCell";
 import { PinnedZone } from "../components/controller-v2/PinnedZone";
 import { GridTariffCell } from "../components/controller-v2/GridTariffCell";
@@ -60,11 +60,6 @@ export function ControllerV2Page() {
     if (!sim) return null;
     return deriveTariffSnapshot(sim, tariffs, nowMs);
   }, [sim, tariffs, nowMs]);
-
-  const tariffTimeline = useMemo(
-    () => buildTariffTimeline(tariffs, trace, plan ?? null, nowMs),
-    [tariffs, trace, plan, nowMs]
-  );
 
   const stackedAreaPoints = useMemo(
     () => buildStackedAreaData(trace, plan ?? null, nowMs),
@@ -129,7 +124,6 @@ export function ControllerV2Page() {
         {tariffSnapshot && !pinnedCellIds.includes("grid:tariff") && (
           <GridTariffCell
             snapshot={tariffSnapshot}
-            timePoints={tariffTimeline}
             nowMs={nowMs}
             pinned={false}
             onTogglePin={() => handleTogglePin("grid:tariff")}

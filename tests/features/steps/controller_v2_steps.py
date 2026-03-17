@@ -140,6 +140,44 @@ def step_battery_soc_visible(context):
     assert el is not None and el.is_visible(), "asset-soc-battery not visible"
 
 
+@then("the battery asset timeline chart is visible")
+def step_battery_timeline_visible(context):
+    el = context.browser_page.wait_for_selector(
+        tid("asset-timeline-chart-battery"), timeout=10000
+    )
+    assert el is not None and el.is_visible(), "asset-timeline-chart-battery not visible"
+
+
+@then("the base_load asset timeline chart is visible")
+def step_base_load_timeline_visible(context):
+    el = context.browser_page.wait_for_selector(
+        tid("asset-timeline-chart-base_load"), timeout=10000
+    )
+    assert el is not None and el.is_visible(), "asset-timeline-chart-base_load not visible"
+
+
+@then("the EV asset cell shows an extend-window button")
+def step_ev_extend_btn_visible(context):
+    el = context.browser_page.wait_for_selector(
+        tid("asset-cell-ev-extend-btn"), timeout=10000
+    )
+    assert el is not None and el.is_visible(), "asset-cell-ev-extend-btn not visible"
+
+
+@then("the heater asset cell has no extend-window button")
+def step_heater_no_extend_btn(context):
+    el = context.browser_page.query_selector(tid("asset-cell-heater-extend-btn"))
+    assert el is None, "asset-cell-heater-extend-btn should not be present but was found"
+
+
+@then("the grid tariff cell shows an extend-window button")
+def step_tariff_extend_btn_visible(context):
+    el = context.browser_page.wait_for_selector(
+        tid("grid-tariff-cell-extend-btn"), timeout=10000
+    )
+    assert el is not None and el.is_visible(), "grid-tariff-cell-extend-btn not visible"
+
+
 # ── Simulation controls: 03_simulation_controls.feature ───────────────────────
 
 @then("the EV plugged toggle is visible in the EV cell right section")
