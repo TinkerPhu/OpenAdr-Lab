@@ -1,12 +1,31 @@
+import { useState } from "react";
 import { Box, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
+import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
+import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
 import type { TariffSnapshot, TariffTimePoint } from "./types";
 import { TariffChart } from "./charts/TariffChart";
+import { useTimeline } from "../../api/hooks";
+import type { AssetTimelinePoint } from "./types";
+
+const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
+const EXTENDED_WINDOW = { hoursBack: 0.0, hoursForward: 24.0 };
+
+function toTariffTimePoints(points: AssetTimelinePoint[], nowMs: number): TariffTimePoint[] {
+  return points.map((p) => ({
+    ts: p.ts,
+    importPriceEurKwh: p.values["import_price_eur_kwh"] ?? null,
+    exportPriceEurKwh: p.values["export_price_eur_kwh"] ?? null,
+    co2GKwh: p.values["co2_rate_g_h"] ?? null,
+    totalCostRateEurH: p.values["cost_rate_eur_h"] ?? null,
+    gridPowerKw: p.values["power_kw"] ?? null,
+    isForecast: p.ts > nowMs,
+  }));
+}
 
 interface GridTariffCellProps {
   snapshot: TariffSnapshot;
-  timePoints: TariffTimePoint[];
   nowMs: number;
   pinned: boolean;
   onTogglePin: () => void;
@@ -14,11 +33,16 @@ interface GridTariffCellProps {
 
 export function GridTariffCell({
   snapshot,
-  timePoints,
   nowMs,
   pinned,
   onTogglePin,
 }: GridTariffCellProps) {
+  const [extended, setExtended] = useState(false);
+  const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
+
+  const { data: timelineData = [] } = useTimeline("grid", window.hoursBack, window.hoursForward);
+  const tariffTimePoints = toTariffTimePoints(timelineData, nowMs);
+
   const fmt = (v: number | null, decimals = 4) =>
     v === null ? "—" : v.toFixed(decimals);
 
@@ -52,8 +76,20 @@ export function GridTariffCell({
 
       {/* Right: tariff chart */}
       <Box sx={{ flex: 1, minWidth: 200 }}>
-        <TariffChart data={timePoints} nowMs={nowMs} />
+        <TariffChart data={tariffTimePoints} nowMs={nowMs} />
       </Box>
+
+      {/* Extended window toggle */}
+      <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h tariff horizon (no past)"}>
+        <IconButton
+          size="small"
+          data-testid="grid-tariff-cell-extend-btn"
+          onClick={() => setExtended((v) => !v)}
+          sx={{ alignSelf: "center", mx: 0.5 }}
+        >
+          {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
+        </IconButton>
+      </Tooltip>
 
       {/* Pin button */}
       <Tooltip title={pinned ? "Unpin" : "Pin to top"}>
