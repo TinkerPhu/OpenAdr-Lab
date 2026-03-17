@@ -32,7 +32,7 @@ This command closes out a completed speckit feature by moving its spec directory
    - Commit with message: `chore: archive spec kit artifacts for <FEATURE_ID>`
 
 6. **Ask the user if merge to main is requested**
-   - if afirmative, merge current branch with main.
+   - if afirmative, rebase the branch on top of main and fast-forward merge it to main.
 
 7. **Report**: Output the result:
    - Path archived to
