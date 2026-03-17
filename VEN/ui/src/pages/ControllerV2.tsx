@@ -1,8 +1,8 @@
 import { useState, useMemo } from "react";
 import { Alert, Box, CircularProgress, Typography } from "@mui/material";
-import { useSim, useRates, usePlan, useRequests, useTrace, useSimOverride, useSetSimOverride } from "../api/hooks";
+import { useSim, useRates, usePlan, useRequests, useSimOverride, useSetSimOverride } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller-v2/types";
-import { deriveAssetSummaries, buildStackedAreaData, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
+import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
 import { AssetCell } from "../components/controller-v2/AssetCell";
 import { PinnedZone } from "../components/controller-v2/PinnedZone";
 import { GridTariffCell } from "../components/controller-v2/GridTariffCell";
@@ -16,7 +16,6 @@ export function ControllerV2Page() {
   const { data: rates } = useRates();
   const { data: plan } = usePlan();
   const { data: userRequests } = useRequests();
-  const { data: traceEntries } = useTrace(500);
   const { data: simOverrides } = useSimOverride();
   const { mutate: setOverride } = useSetSimOverride();
 
@@ -49,7 +48,6 @@ export function ControllerV2Page() {
 
   const tariffs = rates ?? [];
   const requests = userRequests ?? [];
-  const trace = traceEntries ?? [];
 
   const assetSummaries = useMemo(() => {
     if (!sim) return [];
@@ -60,11 +58,6 @@ export function ControllerV2Page() {
     if (!sim) return null;
     return deriveTariffSnapshot(sim, tariffs, nowMs);
   }, [sim, tariffs, nowMs]);
-
-  const stackedAreaPoints = useMemo(
-    () => buildStackedAreaData(trace, plan ?? null, nowMs),
-    [trace, plan, nowMs]
-  );
 
   if (simLoading) {
     return (
@@ -133,7 +126,6 @@ export function ControllerV2Page() {
         {!pinnedCellIds.includes("grid:accumulated") && (
           <GridAccumulatedCell
             assetSummaries={assetSummaries}
-            stackedAreaPoints={stackedAreaPoints}
             nowMs={nowMs}
             pinned={false}
             onTogglePin={() => handleTogglePin("grid:accumulated")}
