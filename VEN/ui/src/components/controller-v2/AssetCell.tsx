@@ -15,13 +15,16 @@ import type { SimSnapshot, UserOverrides } from "../../api/types";
 import { useTimeline } from "../../api/hooks";
 
 /**
- * Assets with a non-default extended time window.
- * Assets not listed here have no extend toggle button.
- * Default window is ±1h. Extended windows are useful for planning-horizon assets.
+ * Extended time window per asset. All assets support expanding to 24h forward.
+ * Default window is ±1h. The extended window is useful for seeing planned
+ * setpoints and scheduled packets across the full planning horizon.
  */
 const EXTENDED_WINDOWS: Partial<Record<AssetId, { hoursBack: number; hoursForward: number }>> = {
   ev: { hoursBack: 1.0, hoursForward: 24.0 },
   battery: { hoursBack: 1.0, hoursForward: 24.0 },
+  heater: { hoursBack: 1.0, hoursForward: 24.0 },
+  pv: { hoursBack: 1.0, hoursForward: 24.0 },
+  base_load: { hoursBack: 1.0, hoursForward: 24.0 },
 };
 
 const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
@@ -100,20 +103,6 @@ export function AssetCell({
         hoursForward={window.hoursForward}
       />
 
-      {/* Extended window toggle — only shown for assets in EXTENDED_WINDOWS */}
-      {extendedWindow && (
-        <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h planning horizon"}>
-          <IconButton
-            size="small"
-            data-testid={`asset-cell-${assetId}-extend-btn`}
-            onClick={() => setExtended((v) => !v)}
-            sx={{ alignSelf: "center", mx: 0.5 }}
-          >
-            {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
-          </IconButton>
-        </Tooltip>
-      )}
-
       {/* Collapse right toggle */}
       <Tooltip title={collapsed.right ? "Expand right" : "Collapse right"}>
         <IconButton
@@ -138,17 +127,31 @@ export function AssetCell({
         </Box>
       </Collapse>
 
-      {/* Pin button */}
-      <Tooltip title={pinned ? "Unpin cell" : "Pin cell to top"}>
-        <IconButton
-          size="small"
-          data-testid={`asset-cell-${assetId}-pin-btn`}
-          onClick={() => onTogglePin(cellId)}
-          sx={{ alignSelf: "flex-start", m: 0.5 }}
-        >
-          {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
-        </IconButton>
-      </Tooltip>
+      {/* Right column: pin button on top, expand toggle below */}
+      <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <Tooltip title={pinned ? "Unpin cell" : "Pin cell to top"}>
+          <IconButton
+            size="small"
+            data-testid={`asset-cell-${assetId}-pin-btn`}
+            onClick={() => onTogglePin(cellId)}
+            sx={{ m: 0.5 }}
+          >
+            {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+        {extendedWindow && (
+          <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h planning horizon"}>
+            <IconButton
+              size="small"
+              data-testid={`asset-cell-${assetId}-extend-btn`}
+              onClick={() => setExtended((v) => !v)}
+              sx={{ m: 0.5 }}
+            >
+              {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+        )}
+      </Box>
     </Paper>
   );
 }
