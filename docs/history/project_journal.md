@@ -2530,3 +2530,63 @@ Several times, `git pull` on Pi4 showed "Already up to date" while Docker was st
 - `ResponsiveContainer`'s async `ResizeObserver` creates a timing buffer that can be load-bearing for animation-dependent tests. Never replace it with a fixed-width chart without checking test timing assumptions.
 - When deleting a Rust module, always search for all `use crate::<module>::` references in files that might not be compiled (orphaned modules, disabled `mod` declarations). Build success only confirms compiled code.
 - An event-driven reporter that uses `ControllerEvent` variants as dispatch key is cleaner than a reactor-mode string parameter. The `serde(tag = "type")` enum makes trace events directly serializable to JSON without extra mapping.
+
+## Phase 25: VEN Timeline UI (speckit 005)
+
+**Status: COMPLETE**
+**Date: 2026-03-16 → 2026-03-17**
+**Branch:** `005-ven-timeline-ui`
+**Commits:** `ad24e90`, `9d9ab4f`, `2812a37`, `bb37aa2`, `3ca3399`, `f054409`, `abe0f3e`, `ed4c35e`
+
+### Objective
+
+Add per-asset timeline charts, grid-level stacked area chart, and schema-driven simulation controls to the Controller V2 UI. Full BDD coverage for 19 new `@ven-ui` scenarios.
+
+### What was done
+
+**Phases 1–5 (prior session):**
+- Backend: added `AssetHistoryBuffer` ring buffer (3600 rows/asset, 1 sample/sec), `GET /timeline/:asset_id`, `GET /timeline/all` endpoints with query params `hours_back`, `hours_forward`, `max_points`.
+- Frontend: `useTimeline` / `useAllTimelines` hooks, `AssetMidSection` recharts area chart with NOW reference line, `GridAccumulatedCell` stacked area from `useAllTimelines`, schema-driven `DynamicControl` in `AssetRightSection`, per-cell extended window toggle.
+- BDD: 19 new scenarios across 4 feature files (`01_timeline.feature`, `02_asset_cells.feature`, `03_simulation_controls.feature`, `04_navigation.feature`).
+
+**Phase 6 (schema-driven controls):** Added `GET /sim/schema` to Rust backend returning `HashMap<assetId, Vec<ControlDescriptor>>`. Each descriptor has `key`, `label`, `kind` (`switch`/`slider`/`number_input`), `min`, `max`, `unit`. `AssetRightSection` fetches schema via `useSimSchema()` and renders controls via `DynamicControl`.
+
+**Phase 7 (GridAccumulatedCell):** Stacked area chart driven by `useAllTimelines`. Each asset gets its own `Area` with positive/negative value handling.
+
+**Phase 8 (API rename & cleanup):**
+- `RateSnapshot` → `TariffSnapshot` in TypeScript (alias kept for backward compat)
+- `useRates` → `useTariffs` (alias kept)
+- Deleted `buildAssetTimeline`, `buildTariffTimeline`, `buildStackedAreaData`, `getTraceAssetPower` from `dataBuilders.ts` (replaced by hook-driven data flow)
+- `nowMs` in `ControllerV2.tsx` changed to `useMemo(() => Date.now(), [])` to avoid rendering on every data refetch
+
+**Phase 9 (browser freeze fix):** After deploying, the Pi4 browser froze because the timeline buffer had accumulated 3600 rows/asset × 5 assets + 1 allTimelines call = ~21,000+ data points. Added server-side `max_points` downsampling: `TimelineParams.max_points` (default 120) with a `downsample()` stride function in Rust that always preserves the last point. A fresh VEN returns ~62 points; a 1-hour-old VEN returns exactly 120. Freezes eliminated.
+
+**Phase 10 (ControlKind case fix):** Rust `#[serde(rename_all = "snake_case")]` produces `"switch"`, `"slider"`, `"number_input"`. TypeScript `ControlKind` had PascalCase `"Switch"`, `"Slider"`, `"NumberInput"`. `DynamicControl` comparisons never matched so all controls fell through to the NumberInput/TextField fallback — MUI Switch never rendered. Fixed by aligning `ControlKind` to snake_case.
+
+**Phase 11 (ev_plugged fallback):** Even with the correct Switch rendering, toggling sent `ev_plugged: true` (not false). Root cause: when no override is set (`overrides = {}`), `getValue("ev_plugged")` returned `null`; `Boolean(null) = false` rendered Switch as unchecked. The sim's actual default is `plugged = true`. Clicking unchecked → checked = `true` → POST sends `true`, not the expected toggle to `false`. Fixed by adding a sim-snapshot fallback in `getValue` for `ev_plugged`: when override is unset, fall back to `sim.ev.plugged`.
+
+**Final result:** 33 features passed, 0 failed, 1 skipped — 149 scenarios passed, 0 failed — 884 steps.
+
+### Issues encountered
+
+**1. Missing committed files caused build failure on Pi4:**
+`api/hooks.ts` and `api/types.ts` were modified locally but never staged. The Pi4 build failed with "Module has no exported member 'TariffSnapshot'". Fixed by committing them as a separate fix commit.
+
+**2. AmbiguousStep — duplicate step definition:**
+`the response JSON is an array` was defined in both `ven_timeline_steps.py` and `entity_model_steps.py`. behave raises `AmbiguousStep` and exits. Fixed by removing from the new file.
+
+**3. Browser freeze from accumulated timeline data:**
+test-ven-ui was stale (21 hours old). After rebuild, all `@ven-ui` scenarios failed because recharts was processing ~18,000+ data points on a Pi4 ARM CPU, freezing the JS thread. Playwright's `wait_for_selector` timed out with "locator resolved to visible" in the call log — the element existed in DOM but JS was frozen. The `inner_html()` call also timed out. Diagnosed by examining Playwright's own call log entries. Fixed by server-side downsampling.
+
+**4. ControlKind case mismatch — silent rendering fallback:**
+Backend `serde(rename_all = "snake_case")` vs TypeScript PascalCase. Scenario 9 (visibility) still passed because the fallback TextField also had `data-testid`, but scenario 17 (interaction) failed when looking for `input[type="checkbox"]` inside it.
+
+**5. Switch checked state reflects sim state, not override state:**
+When override is empty (`{}`), the control should show the sim's current hardware state, not assume a default of `false`. Any switch-type control that can be absent from overrides needs a sim-state fallback. Only `ev_plugged` was affected in this project; addressed with a targeted fallback.
+
+### Key learnings
+
+- Server-side `max_points` downsampling is essential for timeline APIs consumed by browser charts on constrained hardware. 3600 rows/asset at 5+ assets = browser freeze on Pi4.
+- When Playwright `wait_for_selector` times out but the call log shows "locator resolved to visible", the page DOM is present but the JS thread is blocked. This points to CPU overload from data processing, not a missing element.
+- Rust `#[serde(rename_all = "snake_case")]` produces lowercase underscore names. Any TypeScript `ControlKind` or enum must match exactly — case mismatches produce no TypeScript error (it's a string union) but silently fall through to a wrong rendering branch.
+- Schema-driven controls (Switch/Slider) need to display the system's current real state as initial value, not assume `false`/0. When the backend override is absent, use the sim snapshot value as fallback so the user sees accurate state before interacting.
