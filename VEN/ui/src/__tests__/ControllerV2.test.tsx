@@ -230,6 +230,44 @@ describe("ControllerV2Page — error and loading states", () => {
   });
 });
 
+describe("ControllerV2Page — asset cell left section line order", () => {
+  beforeEach(() => {
+    mockSim.mockReturnValue(baseSim);
+    mockRates.mockReturnValue(baseRates);
+  });
+
+  // Helper: returns true if `a` appears before `b` in the DOM.
+  function isBefore(a: Element, b: Element) {
+    return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }
+
+  it("asset name is the first (bold title) line — shows 'EV'", () => {
+    renderPage();
+    expect(screen.getByTestId("asset-name-ev")).toHaveTextContent("EV");
+  });
+
+  it("asset name appears before power in the EV left section", () => {
+    renderPage();
+    const nameEl = screen.getByTestId("asset-name-ev");
+    const powerEl = screen.getByTestId("asset-power-ev");
+    expect(isBefore(nameEl, powerEl)).toBe(true);
+  });
+
+  it("asset power appears before price rate in the EV left section", () => {
+    renderPage();
+    const powerEl = screen.getByTestId("asset-power-ev");
+    const costEl = screen.getByTestId("asset-cost-rate-ev");
+    expect(isBefore(powerEl, costEl)).toBe(true);
+  });
+
+  it("price rate appears before GHG rate in the EV left section", () => {
+    renderPage();
+    const costEl = screen.getByTestId("asset-cost-rate-ev");
+    const co2El = screen.getByTestId("asset-co2-rate-ev");
+    expect(isBefore(costEl, co2El)).toBe(true);
+  });
+});
+
 describe("ControllerV2Page — simulation controls", () => {
   beforeEach(() => {
     mockSim.mockReturnValue(baseSim);
