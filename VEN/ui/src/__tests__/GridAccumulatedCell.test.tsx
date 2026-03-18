@@ -41,14 +41,14 @@ vi.mock("../components/controller-v2/charts/StackedAreaChart", () => ({
 let allTimelinesData: Record<string, unknown> = {};
 
 vi.mock("../api/hooks", () => ({
-  useSim: () => ({ data: baseSim, isLoading: false, isError: false }),
-  useTariffs: () => ({ data: [] }),
-  usePlan: () => ({ data: null }),
-  useRequests: () => ({ data: [] }),
+  useSim: () => ({ data: baseSim, isLoading: false, isError: false, refetch: vi.fn() }),
+  useTariffs: () => ({ data: [], refetch: vi.fn() }),
+  usePlan: () => ({ data: null, refetch: vi.fn() }),
+  useRequests: () => ({ data: [], refetch: vi.fn() }),
   useSimOverride: () => ({ data: {} }),
   useSetSimOverride: () => ({ mutate: vi.fn() }),
   useTimeline: () => ({ data: [] }),
-  useAllTimelines: () => ({ data: allTimelinesData }),
+  useAllTimelines: () => ({ data: allTimelinesData, refetch: vi.fn() }),
   useSimSchema: () => ({ data: {} }),
 }));
 

@@ -1,14 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Box, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
 import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
 import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
-import type { AssetId, AssetSummary, StackedAreaPoint } from "./types";
+import type { AssetId, AssetSummary, AssetTimelinePoint, StackedAreaPoint } from "./types";
 import { ASSET_COLORS } from "./types";
 import { StackedAreaChart } from "./charts/StackedAreaChart";
-import { useAllTimelines } from "../../api/hooks";
-import type { AssetTimelinePoint } from "./types";
 
 const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
 const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
@@ -50,21 +48,28 @@ function buildStackedFromAllTimelines(
 
 interface GridAccumulatedCellProps {
   assetSummaries: AssetSummary[];
+  /** Timeline data from the shared useAllTimelines query on the page. */
+  allTimelines: Record<string, AssetTimelinePoint[]>;
+  /** Epoch ms — shared across all cells from the page for a consistent NOW line. */
+  nowMs: number;
+  /** Whether this cell's time window is expanded to 24h forward. */
+  extended: boolean;
   pinned: boolean;
   onTogglePin: () => void;
+  onToggleExpand: () => void;
 }
 
 export function GridAccumulatedCell({
   assetSummaries,
+  allTimelines,
+  nowMs,
+  extended,
   pinned,
   onTogglePin,
+  onToggleExpand,
 }: GridAccumulatedCellProps) {
-  const [extended, setExtended] = useState(false);
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
 
-  const { data: allTimelines = {} } = useAllTimelines(window.hoursBack, window.hoursForward);
-  // nowMs updates each time fresh timeline data arrives, matching AssetCell's pattern.
-  const nowMs = useMemo(() => Date.now(), [allTimelines]);
   const stackedAreaPoints = useMemo(
     () => buildStackedFromAllTimelines(allTimelines),
     [allTimelines]
@@ -124,7 +129,7 @@ export function GridAccumulatedCell({
           <IconButton
             size="small"
             data-testid="grid-accumulated-cell-extend-btn"
-            onClick={() => setExtended((v) => !v)}
+            onClick={onToggleExpand}
             sx={{ m: 0.5 }}
           >
             {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
