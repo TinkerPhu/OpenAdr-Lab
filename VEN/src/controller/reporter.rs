@@ -155,11 +155,11 @@ pub fn build_measurement_report(
     if let Some(ev_buf) = asset_history.get("ev") {
         let pts = ev_buf.to_timeline(None);
         if let Some(last) = pts.last() {
-            if let Some(&soc) = last.values.get("soc_pct") {
+            if let Some(&soc) = last.values.get("soc") {
                 if !soc.is_nan() {
                     payloads.push(json!({
                         "type": "STORAGE_CHARGE_LEVEL",
-                        "values": [format!("{:.1}", soc)]
+                        "values": [format!("{:.1}", soc * 100.0)]
                     }));
                 }
             }

@@ -61,7 +61,6 @@ impl Heater {
     pub fn state_values(&self) -> HashMap<String, f64> {
         let mut m = HashMap::new();
         m.insert("temp_c".into(), self.temp_c);
-        m.insert("current_kw".into(), self.current_kw);
         m.insert("max_kw".into(), self.max_kw);
         m.insert("temp_min_c".into(), self.temp_min_c);
         m.insert("temp_max_c".into(), self.temp_max_c);

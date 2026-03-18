@@ -97,25 +97,25 @@ export function deriveAssetSummaries(
   const evAsset = sim.assets["ev"];
   if (evAsset) {
     summaries.push(
-      makeSummary("ev", "EV", evAsset.current_kw ?? 0, (evAsset.soc ?? 0) * 100)
+      makeSummary("ev", "EV", evAsset.power_kw, (evAsset.soc ?? 0) * 100)
     );
   }
   const heaterAsset = sim.assets["heater"];
   if (heaterAsset) {
     summaries.push(
-      makeSummary("heater", "Heater", heaterAsset.current_kw ?? 0, null)
+      makeSummary("heater", "Heater", heaterAsset.power_kw, null)
     );
   }
   const pvAsset = sim.assets["pv"];
   if (pvAsset) {
     summaries.push(
-      makeSummary("pv", "PV", -Math.abs(pvAsset.current_kw ?? 0), null)
+      makeSummary("pv", "PV", -Math.abs(pvAsset.power_kw), null)
     );
   }
   const batteryAsset = sim.assets["battery"];
   if (batteryAsset) {
     summaries.push(
-      makeSummary("battery", "Battery", batteryAsset.current_kw ?? 0, (batteryAsset.soc ?? 0) * 100)
+      makeSummary("battery", "Battery", batteryAsset.power_kw, (batteryAsset.soc ?? 0) * 100)
     );
   }
   // BaseLoad is always present

@@ -131,7 +131,7 @@ export function DashboardPage() {
                   <Stack spacing={0.5}>
                     <Typography variant="subtitle2">EV Charger</Typography>
                     <Typography>SOC: {((sim.data.assets["ev"].soc ?? 0) * 100).toFixed(1)}%</Typography>
-                    <Typography>Power: {fmtNum(sim.data.assets["ev"].current_kw)} kW</Typography>
+                    <Typography>Power: {fmtNum(sim.data.assets["ev"].power_kw)} kW</Typography>
                     <Typography>Plugged: {(sim.data.assets["ev"].plugged ?? 0) !== 0 ? "Yes" : "No"}</Typography>
                   </Stack>
                 </Grid>
@@ -141,7 +141,7 @@ export function DashboardPage() {
                   <Stack spacing={0.5}>
                     <Typography variant="subtitle2">Heater</Typography>
                     <Typography>Temp: {fmtNum(sim.data.assets["heater"].temp_c)}°C</Typography>
-                    <Typography>Power: {fmtNum(sim.data.assets["heater"].current_kw)} kW</Typography>
+                    <Typography>Power: {fmtNum(sim.data.assets["heater"].power_kw)} kW</Typography>
                   </Stack>
                 </Grid>
               )}
@@ -149,7 +149,7 @@ export function DashboardPage() {
                 <Grid item xs={4}>
                   <Stack spacing={0.5}>
                     <Typography variant="subtitle2">PV Inverter</Typography>
-                    <Typography>Output: {fmtNum(sim.data.assets["pv"].current_kw)} kW</Typography>
+                    <Typography>Output: {fmtNum(sim.data.assets["pv"].power_kw)} kW</Typography>
                     <Typography>Irradiance: {((sim.data.assets["pv"].irradiance ?? 0) * 100).toFixed(0)}%</Typography>
                     <Typography>Export limit: {"export_limit_kw" in sim.data.assets["pv"] ? `${sim.data.assets["pv"].export_limit_kw.toFixed(1)} kW` : "none"}</Typography>
                   </Stack>
