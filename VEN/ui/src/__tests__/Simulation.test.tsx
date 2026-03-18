@@ -10,34 +10,12 @@ import type { SimSnapshot, TraceEntry, UserOverrides } from "../api/types";
 
 const baseSim: SimSnapshot = {
   ts: "2026-02-20T10:00:00Z",
-  net_power_w: 500,
-  import_w: 500,
-  export_w: 0,
-  voltage_v: 230,
-  base_load_w: 500,
-  import_kwh: 1.5,
-  export_kwh: 0,
-  assets: {},
-  ev: {
-    soc: 0.5,
-    plugged: true,
-    current_kw: 7,
-    max_charge_kw: 11,
-    soc_target: 0.9,
-    battery_kwh: 60,
-  },
-  heater: {
-    temp_c: 20,
-    current_kw: 2,
-    max_kw: 4,
-    temp_min_c: 18,
-    temp_max_c: 24,
-  },
-  pv: {
-    irradiance: 0.8,
-    export_limit_kw: null,
-    current_kw: 5,
-    rated_kw: 8,
+  grid: { net_power_w: 500, voltage_v: 230, import_kwh: 1.5, export_kwh: 0 },
+  assets: {
+    ev: { power_kw: 7, soc: 0.5, soc_pct: 50, plugged: 1, current_kw: 7, max_charge_kw: 11, soc_target: 0.9, battery_kwh: 60 },
+    heater: { power_kw: 2, temp_c: 20, current_kw: 2, max_kw: 4, temp_min_c: 18, temp_max_c: 24 },
+    pv: { power_kw: -5, irradiance: 0.8, current_kw: -5, rated_kw: 8 },
+    base_load: { power_kw: 0.5 },
   },
 };
 
