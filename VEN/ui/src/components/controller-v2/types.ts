@@ -99,7 +99,6 @@ export type TariffTimePoint = {
   totalCostRateEurH: number | null;
   /** Grid power [kW] from trace (past) or plan net_import_kw (future) */
   gridPowerKw: number | null;
-  isForecast: boolean;
 };
 
 // ─── Stacked area (accumulated asset power cell) ──────────────────────────────

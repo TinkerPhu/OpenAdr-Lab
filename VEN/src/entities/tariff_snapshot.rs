@@ -11,8 +11,6 @@ pub struct TariffSnapshot {
     pub co2_g_kwh: Option<f64>,
     /// Source event ID that provided this tariff
     pub source_event_id: Option<String>,
-    /// Whether this is a measured past tariff or a forecast
-    pub is_forecast: bool,
 }
 
 /// Collection of planned (future) tariff snapshots.
