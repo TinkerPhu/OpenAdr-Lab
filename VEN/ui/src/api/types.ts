@@ -55,60 +55,22 @@ export type SensorSnapshot = {
   raw: unknown;
 };
 
-export type EvSnapshot = {
-  soc: number;
-  plugged: boolean;
-  current_kw: number;
-  max_charge_kw: number;
-  soc_target: number;
-  battery_kwh: number;
-};
-
-export type HeaterSnapshot = {
-  temp_c: number;
-  current_kw: number;
-  max_kw: number;
-  temp_min_c: number;
-  temp_max_c: number;
-};
-
-export type PvSnapshot = {
-  irradiance: number;
-  export_limit_kw: number | null; // active export cap (kW); null = no limit
-  current_kw: number;
-  rated_kw: number;
-};
-
-export type BatterySnapshot = {
-  soc: number;
-  current_kw: number;      // positive = charging (import), negative = discharging (export)
-  capacity_kwh: number;
-  max_charge_kw: number;
-  max_discharge_kw: number;
-  min_soc: number;
-};
-
 export type AssetSnapshot = {
   power_kw: number;
   [key: string]: number;
 };
 
-export type SimSnapshot = {
-  ts: string;
+export type GridSnapshot = {
   net_power_w: number;
-  import_w: number;
-  export_w: number;
   voltage_v: number;
   import_kwh: number;
   export_kwh: number;
-  /** Generic per-asset map (new format). */
+};
+
+export type SimSnapshot = {
+  ts: string;
+  grid: GridSnapshot;
   assets: Record<string, AssetSnapshot>;
-  /** Backward-compat derived fields. */
-  base_load_w: number;
-  ev?: EvSnapshot | null;
-  heater?: HeaterSnapshot | null;
-  pv?: PvSnapshot | null;
-  battery?: BatterySnapshot | null;
 };
 
 export type Setpoints = {

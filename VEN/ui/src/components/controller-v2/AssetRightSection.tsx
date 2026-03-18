@@ -28,10 +28,7 @@ export function AssetRightSection({
   const { data: schema = {} } = useSimSchema();
   const controls = schema[assetId] ?? [];
 
-  // Generic SoC lookup: check assets map first, fall back to typed legacy fields.
-  const socRaw =
-    sim?.assets?.[assetId]?.["soc"] ??
-    (assetId === "ev" ? sim?.ev?.soc : assetId === "battery" ? sim?.battery?.soc : undefined);
+  const socRaw = sim?.assets?.[assetId]?.["soc"];
   const socPct = socRaw !== undefined ? socRaw * 100 : null;
 
   function handleChange(key: string, val: number | boolean) {
@@ -45,7 +42,10 @@ export function AssetRightSection({
     }
     // Fall back to the sim's actual current value so the switch reflects reality
     // when no override is active (null override means "use sim default").
-    if (key === "ev_plugged") return sim?.ev?.plugged ?? null;
+    if (key === "ev_plugged") {
+      const p = sim?.assets?.["ev"]?.["plugged"];
+      return p !== undefined ? p !== 0 : null;
+    }
     return null;
   }
 
