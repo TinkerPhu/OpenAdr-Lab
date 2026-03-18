@@ -54,8 +54,8 @@ export function AssetRightSection({
       data-testid={`right-section-${assetId}`}
       sx={{ minWidth: 200, maxWidth: 300 }}
     >
-      {/* Status Settings — expanded by default */}
-      <Accordion defaultExpanded data-testid={`status-settings-accordion-${assetId}`}>
+      {/* Status Settings */}
+      <Accordion data-testid={`status-settings-accordion-${assetId}`}>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography variant="caption" fontWeight="bold">
             Status Settings

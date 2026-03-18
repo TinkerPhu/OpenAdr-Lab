@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -269,6 +270,66 @@ describe("ControllerV2Page — asset cell left section line order", () => {
     const costEl = screen.getByTestId("asset-cost-rate-ev");
     const co2El = screen.getByTestId("asset-co2-rate-ev");
     expect(isBefore(costEl, co2El)).toBe(true);
+  });
+});
+
+describe("ControllerV2Page — right section collapsed by default", () => {
+  beforeEach(() => {
+    mockSim.mockReturnValue(baseSim);
+    mockRates.mockReturnValue(baseRates);
+  });
+
+  it("collapse-right button for EV shows 'Expand right' label on initial render", () => {
+    renderPage();
+    expect(screen.getByTestId("asset-cell-ev-collapse-right"))
+      .toHaveAttribute("aria-label", "Expand right");
+  });
+
+  it("collapse-right button for battery shows 'Expand right' label on initial render", () => {
+    renderPage();
+    expect(screen.getByTestId("asset-cell-battery-collapse-right"))
+      .toHaveAttribute("aria-label", "Expand right");
+  });
+
+  it("clicking collapse-right for EV changes label to 'Collapse right'", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("asset-cell-ev-collapse-right"));
+    expect(screen.getByTestId("asset-cell-ev-collapse-right"))
+      .toHaveAttribute("aria-label", "Collapse right");
+  });
+});
+
+describe("ControllerV2Page — settings accordion collapsed by default", () => {
+  beforeEach(() => {
+    mockSim.mockReturnValue(baseSim);
+    mockRates.mockReturnValue(baseRates);
+  });
+
+  // The right section uses MUI <Collapse in={!collapsed.right}>, so the
+  // accordion inside is aria-hidden until the right section is expanded first.
+  // These tests expand the right section, then assert the accordion state.
+
+  it("status-settings accordion for EV starts collapsed (aria-expanded=false)", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    // Expand the right section so the accordion becomes accessible.
+    await user.click(screen.getByTestId("asset-cell-ev-collapse-right"));
+    const accordion = screen.getByTestId("status-settings-accordion-ev");
+    // MUI AccordionSummary renders role="button" on a div; query without name.
+    const summaryBtn = within(accordion).getByRole("button");
+    expect(summaryBtn).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("status-settings accordion for EV expands on click", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    // Expand the right section first.
+    await user.click(screen.getByTestId("asset-cell-ev-collapse-right"));
+    const accordion = screen.getByTestId("status-settings-accordion-ev");
+    const summaryBtn = within(accordion).getByRole("button");
+    await user.click(summaryBtn);
+    expect(summaryBtn).toHaveAttribute("aria-expanded", "true");
   });
 });
 
