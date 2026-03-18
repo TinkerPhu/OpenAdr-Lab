@@ -32,6 +32,7 @@ function fmtNum(v: number | undefined | null, decimals = 1): string {
 // ─── Section A: Device State Cards ──────────────────────────────────────────
 
 function PowerCard({ sim }: { sim: SimSnapshot }) {
+  const netW = sim.grid.net_power_w;
   return (
     <Paper sx={{ p: 2 }}>
       <Typography variant="subtitle1" fontWeight="bold" mb={1}>
@@ -41,17 +42,17 @@ function PowerCard({ sim }: { sim: SimSnapshot }) {
         <Grid item xs={6}>
           <Stack spacing={0.5}>
             <Typography variant="caption" color="text.secondary">Instantaneous</Typography>
-            <Typography>Net: {fmtNum(sim.net_power_w, 0)} W</Typography>
-            <Typography>Import: {fmtNum(sim.import_w, 0)} W</Typography>
-            <Typography>Export: {fmtNum(sim.export_w, 0)} W</Typography>
-            <Typography>Base load: {fmtNum(sim.base_load_w, 0)} W</Typography>
+            <Typography>Net: {fmtNum(netW, 0)} W</Typography>
+            <Typography>Import: {fmtNum(netW > 0 ? netW : 0, 0)} W</Typography>
+            <Typography>Export: {fmtNum(netW < 0 ? -netW : 0, 0)} W</Typography>
+            <Typography>Base load: {fmtNum((sim.assets["base_load"]?.power_kw ?? 0) * 1000, 0)} W</Typography>
           </Stack>
         </Grid>
         <Grid item xs={6}>
           <Stack spacing={0.5}>
             <Typography variant="caption" color="text.secondary">Session totals</Typography>
-            <Typography>Import: {fmtNum(sim.import_kwh, 3)} kWh</Typography>
-            <Typography>Export: {fmtNum(sim.export_kwh, 3)} kWh</Typography>
+            <Typography>Import: {fmtNum(sim.grid.import_kwh, 3)} kWh</Typography>
+            <Typography>Export: {fmtNum(sim.grid.export_kwh, 3)} kWh</Typography>
           </Stack>
         </Grid>
       </Grid>
@@ -60,8 +61,14 @@ function PowerCard({ sim }: { sim: SimSnapshot }) {
 }
 
 function EvCard({ sim }: { sim: SimSnapshot }) {
-  if (!sim.ev) return null;
-  const { soc, plugged, current_kw, max_charge_kw, soc_target, battery_kwh } = sim.ev;
+  const evAsset = sim.assets["ev"];
+  if (!evAsset) return null;
+  const soc = evAsset.soc ?? 0;
+  const plugged = (evAsset.plugged ?? 0) !== 0;
+  const current_kw = evAsset.current_kw ?? 0;
+  const max_charge_kw = evAsset.max_charge_kw ?? 0;
+  const soc_target = evAsset.soc_target ?? 0;
+  const battery_kwh = evAsset.battery_kwh ?? 0;
   const socPct = (soc * 100).toFixed(1);
   const targetPct = (soc_target * 100).toFixed(0);
   return (
@@ -109,8 +116,13 @@ function EvCard({ sim }: { sim: SimSnapshot }) {
 }
 
 function HeaterCard({ sim }: { sim: SimSnapshot }) {
-  if (!sim.heater) return null;
-  const { temp_c, current_kw, max_kw, temp_min_c, temp_max_c } = sim.heater;
+  const heaterAsset = sim.assets["heater"];
+  if (!heaterAsset) return null;
+  const temp_c = heaterAsset.temp_c ?? 0;
+  const current_kw = heaterAsset.current_kw ?? 0;
+  const max_kw = heaterAsset.max_kw ?? 0;
+  const temp_min_c = heaterAsset.temp_min_c ?? 0;
+  const temp_max_c = heaterAsset.temp_max_c ?? 0;
   const tempRange = temp_max_c - temp_min_c;
   const tempFraction = Math.max(0, Math.min(1, (temp_c - temp_min_c) / (tempRange || 1)));
   return (
@@ -154,8 +166,12 @@ function HeaterCard({ sim }: { sim: SimSnapshot }) {
 }
 
 function PvCard({ sim }: { sim: SimSnapshot }) {
-  if (!sim.pv) return null;
-  const { irradiance, export_limit_kw, current_kw, rated_kw } = sim.pv;
+  const pvAsset = sim.assets["pv"];
+  if (!pvAsset) return null;
+  const irradiance = pvAsset.irradiance ?? 0;
+  const current_kw = pvAsset.current_kw ?? 0;
+  const rated_kw = pvAsset.rated_kw ?? 0;
+  const export_limit_kw = "export_limit_kw" in pvAsset ? pvAsset.export_limit_kw : null;
   return (
     <Paper sx={{ p: 2 }}>
       <Typography variant="subtitle1" fontWeight="bold" mb={1}>
@@ -310,6 +326,10 @@ function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
     }
   }
 
+  const hasEv = "ev" in (sim?.assets ?? {});
+  const hasHeater = "heater" in (sim?.assets ?? {});
+  const hasPv = "pv" in (sim?.assets ?? {});
+
   // Past points — actual setpoints + desired from events
   // Guard: new ControllerEvent format no longer has setpoints; entries skipped until Phase 4
   const pastPoints: ChartPoint[] = traceEntries.filter((e) => !!e.setpoints).map((entry) => {
@@ -317,24 +337,12 @@ function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
     return {
       time: new Date(entry.ts).toLocaleTimeString(),
       isFuture: false,
-      ev_charge_kw: sim?.ev != null ? entry.setpoints.ev_charge_kw : undefined,
-      heater_kw: sim?.heater != null ? entry.setpoints.heater_kw : undefined,
-      pv_export_limit_kw:
-        sim?.pv != null
-          ? (entry.setpoints.pv_export_limit_kw ?? undefined)
-          : undefined,
-      ev_desired:
-        sim?.ev != null
-          ? getDesiredValue(tsMs, events, "CHARGE_STATE_SETPOINT")
-          : undefined,
-      heater_desired:
-        sim?.heater != null
-          ? getDesiredValue(tsMs, events, "IMPORT_CAPACITY_LIMIT")
-          : undefined,
-      pv_desired:
-        sim?.pv != null
-          ? getDesiredValue(tsMs, events, "EXPORT_CAPACITY_LIMIT")
-          : undefined,
+      ev_charge_kw: hasEv ? entry.setpoints.ev_charge_kw : undefined,
+      heater_kw: hasHeater ? entry.setpoints.heater_kw : undefined,
+      pv_export_limit_kw: hasPv ? (entry.setpoints.pv_export_limit_kw ?? undefined) : undefined,
+      ev_desired: hasEv ? getDesiredValue(tsMs, events, "CHARGE_STATE_SETPOINT") : undefined,
+      heater_desired: hasHeater ? getDesiredValue(tsMs, events, "IMPORT_CAPACITY_LIMIT") : undefined,
+      pv_desired: hasPv ? getDesiredValue(tsMs, events, "EXPORT_CAPACITY_LIMIT") : undefined,
     };
   });
 
@@ -346,26 +354,13 @@ function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
     return {
       time: new Date(tsMs).toLocaleTimeString(),
       isFuture: true,
-      ev_desired:
-        sim?.ev != null
-          ? getDesiredValue(tsMs, events, "CHARGE_STATE_SETPOINT")
-          : undefined,
-      heater_desired:
-        sim?.heater != null
-          ? getDesiredValue(tsMs, events, "IMPORT_CAPACITY_LIMIT")
-          : undefined,
-      pv_desired:
-        sim?.pv != null
-          ? getDesiredValue(tsMs, events, "EXPORT_CAPACITY_LIMIT")
-          : undefined,
+      ev_desired: hasEv ? getDesiredValue(tsMs, events, "CHARGE_STATE_SETPOINT") : undefined,
+      heater_desired: hasHeater ? getDesiredValue(tsMs, events, "IMPORT_CAPACITY_LIMIT") : undefined,
+      pv_desired: hasPv ? getDesiredValue(tsMs, events, "EXPORT_CAPACITY_LIMIT") : undefined,
     };
   });
 
   const chartData: ChartPoint[] = [...pastPoints, ...futurePoints];
-
-  const hasEv = sim?.ev != null;
-  const hasHeater = sim?.heater != null;
-  const hasPv = sim?.pv != null;
 
   const isEvEventActive = chartData.some((p) => p.ev_desired !== undefined);
   const isImportCapActive = chartData.some((p) => p.heater_desired !== undefined);
@@ -578,15 +573,18 @@ function OverridableControl({
 }
 
 function EvControls({ sim, overrides, onChange }: ControlsProps) {
-  if (!sim.ev) return null;
-  const maxKw = overrides.ev_max_charge_kw ?? sim.ev.max_charge_kw;
+  const evAsset = sim.assets["ev"];
+  if (!evAsset) return null;
+  const simMaxKw = evAsset.max_charge_kw ?? 11;
+  const simSocTarget = evAsset.soc_target ?? 0.8;
+  const maxKw = overrides.ev_max_charge_kw ?? simMaxKw;
 
   const { data: traceData = [] } = useTrace(1);
   const latestTrace = traceData[0];
   const isEvEventActive = latestTrace?.mode === "CHARGE_SETPOINT";
   const vtnEvKw = isEvEventActive
-    ? (latestTrace?.setpoints?.ev_charge_kw ?? sim.ev.max_charge_kw)
-    : (overrides.ev_desired_kw ?? sim.ev.max_charge_kw);
+    ? (latestTrace?.setpoints?.ev_charge_kw ?? simMaxKw)
+    : (overrides.ev_desired_kw ?? simMaxKw);
 
   return (
     <Box>
@@ -611,14 +609,14 @@ function EvControls({ sim, overrides, onChange }: ControlsProps) {
         />
         <Box>
           <Typography variant="body2" gutterBottom>
-            Desired idle charge rate: {fmtNum(overrides.ev_desired_kw ?? sim.ev.max_charge_kw)} kW
+            Desired idle charge rate: {fmtNum(overrides.ev_desired_kw ?? simMaxKw)} kW
           </Typography>
           <Typography variant="caption" color="text.secondary">Owner preference — active when no event</Typography>
           <Slider
             min={0}
             max={maxKw}
             step={0.1}
-            value={overrides.ev_desired_kw ?? sim.ev.max_charge_kw}
+            value={overrides.ev_desired_kw ?? simMaxKw}
             onChange={(_, v) => onChange({ ev_desired_kw: v as number })}
             valueLabelDisplay="auto"
             valueLabelFormat={(v) => `${v.toFixed(1)} kW`}
@@ -626,14 +624,14 @@ function EvControls({ sim, overrides, onChange }: ControlsProps) {
         </Box>
         <Box>
           <Typography variant="body2" gutterBottom>
-            Max charge rate: {fmtNum(overrides.ev_max_charge_kw ?? sim.ev.max_charge_kw)} kW
+            Max charge rate: {fmtNum(overrides.ev_max_charge_kw ?? simMaxKw)} kW
           </Typography>
           <Typography variant="caption" color="text.secondary">Physical device limit, owner-controlled</Typography>
           <Slider
             min={0}
             max={22}
             step={0.5}
-            value={overrides.ev_max_charge_kw ?? sim.ev.max_charge_kw}
+            value={overrides.ev_max_charge_kw ?? simMaxKw}
             onChange={(_, v) => onChange({ ev_max_charge_kw: v as number })}
             valueLabelDisplay="auto"
             valueLabelFormat={(v) => `${v.toFixed(1)} kW`}
@@ -641,14 +639,14 @@ function EvControls({ sim, overrides, onChange }: ControlsProps) {
         </Box>
         <Box>
           <Typography variant="body2" gutterBottom>
-            SOC target: {((overrides.ev_soc_target ?? sim.ev.soc_target) * 100).toFixed(0)}%
+            SOC target: {((overrides.ev_soc_target ?? simSocTarget) * 100).toFixed(0)}%
           </Typography>
           <Typography variant="caption" color="text.secondary">Owner preference</Typography>
           <Slider
             min={0}
             max={1}
             step={0.05}
-            value={overrides.ev_soc_target ?? sim.ev.soc_target}
+            value={overrides.ev_soc_target ?? simSocTarget}
             onChange={(_, v) => onChange({ ev_soc_target: v as number })}
             valueLabelDisplay="auto"
             valueLabelFormat={(v) => `${(v * 100).toFixed(0)}%`}
@@ -669,7 +667,10 @@ function EvControls({ sim, overrides, onChange }: ControlsProps) {
 }
 
 function PvControls({ sim, overrides, onChange }: ControlsProps) {
-  if (!sim.pv) return null;
+  const pvAsset = sim.assets["pv"];
+  if (!pvAsset) return null;
+  const simRatedKw = pvAsset.rated_kw ?? 0;
+  const simIrradiance = pvAsset.irradiance ?? 0;
   const [manualIrradiance, setManualIrradiance] = useState(overrides.pv_irradiance != null);
 
   function handleManualToggle(checked: boolean) {
@@ -677,7 +678,7 @@ function PvControls({ sim, overrides, onChange }: ControlsProps) {
     if (!checked) {
       onChange({ pv_irradiance: undefined });
     } else {
-      onChange({ pv_irradiance: sim.pv?.irradiance ?? 0.5 });
+      onChange({ pv_irradiance: simIrradiance ?? 0.5 });
     }
   }
 
@@ -685,7 +686,7 @@ function PvControls({ sim, overrides, onChange }: ControlsProps) {
   const latestTrace = traceData[0];
   const isPvEventActive = latestTrace?.mode === "EXPORT_CAP";
 
-  const ratedKw = overrides.pv_rated_kw ?? sim.pv.rated_kw;
+  const ratedKw = overrides.pv_rated_kw ?? simRatedKw;
   const vtnPvLimitKw = isPvEventActive
     ? (latestTrace?.setpoints?.pv_export_limit_kw ?? ratedKw)
     : ratedKw;
@@ -738,13 +739,13 @@ function PvControls({ sim, overrides, onChange }: ControlsProps) {
         )}
         <Box>
           <Typography variant="body2" gutterBottom>
-            Rated capacity (profile override): {fmtNum(overrides.pv_rated_kw ?? sim.pv.rated_kw)} kW
+            Rated capacity (profile override): {fmtNum(overrides.pv_rated_kw ?? simRatedKw)} kW
           </Typography>
           <Slider
             min={0}
             max={20}
             step={0.5}
-            value={overrides.pv_rated_kw ?? sim.pv.rated_kw}
+            value={overrides.pv_rated_kw ?? simRatedKw}
             onChange={(_, v) => onChange({ pv_rated_kw: v as number })}
             valueLabelDisplay="auto"
             valueLabelFormat={(v) => `${v.toFixed(1)} kW`}
@@ -756,10 +757,11 @@ function PvControls({ sim, overrides, onChange }: ControlsProps) {
 }
 
 function HeaterControls({ sim, overrides, onChange }: ControlsProps) {
-  if (!sim.heater) return null;
-  const minC = overrides.heater_temp_min_c ?? sim.heater.temp_min_c;
-  const maxC = overrides.heater_temp_max_c ?? sim.heater.temp_max_c;
-  const heaterMax = overrides.heater_max_kw ?? sim.heater.max_kw;
+  const heaterAsset = sim.assets["heater"];
+  if (!heaterAsset) return null;
+  const minC = overrides.heater_temp_min_c ?? (heaterAsset.temp_min_c ?? 18);
+  const maxC = overrides.heater_temp_max_c ?? (heaterAsset.temp_max_c ?? 24);
+  const heaterMax = overrides.heater_max_kw ?? (heaterAsset.max_kw ?? 3);
 
   const { data: traceData = [] } = useTrace(1);
   const latestTrace = traceData[0];
@@ -842,19 +844,20 @@ function HeaterControls({ sim, overrides, onChange }: ControlsProps) {
 }
 
 function BaseLoadControls({ overrides, onChange, sim }: ControlsProps) {
+  const baseLoadW = (sim.assets["base_load"]?.power_kw ?? 0) * 1000;
   return (
     <Box>
       <Typography variant="subtitle2" mb={1}>Base Load</Typography>
       <Stack spacing={2} sx={{ pl: 1 }}>
         <Box>
           <Typography variant="body2" gutterBottom>
-            Base load (profile override): {fmtNum(overrides.base_load_w ?? sim.base_load_w, 0)} W
+            Base load (profile override): {fmtNum(overrides.base_load_w ?? baseLoadW, 0)} W
           </Typography>
           <Slider
             min={0}
             max={5000}
             step={50}
-            value={overrides.base_load_w ?? sim.base_load_w}
+            value={overrides.base_load_w ?? baseLoadW}
             onChange={(_, v) => onChange({ base_load_w: v as number })}
             valueLabelDisplay="auto"
             valueLabelFormat={(v) => `${v} W`}
@@ -920,17 +923,17 @@ export function SimulationPage() {
             <Grid item xs={12} md={6}>
               <PowerCard sim={sim} />
             </Grid>
-            {sim.ev && (
+            {"ev" in sim.assets && (
               <Grid item xs={12} md={6}>
                 <EvCard sim={sim} />
               </Grid>
             )}
-            {sim.heater && (
+            {"heater" in sim.assets && (
               <Grid item xs={12} md={6}>
                 <HeaterCard sim={sim} />
               </Grid>
             )}
-            {sim.pv && (
+            {"pv" in sim.assets && (
               <Grid item xs={12} md={6}>
                 <PvCard sim={sim} />
               </Grid>

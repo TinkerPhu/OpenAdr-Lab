@@ -241,70 +241,15 @@ impl SimState {
             });
         }
 
-        // Backward-compat typed fields reconstructed from the typed AssetState.
-        let ev = self.asset("ev").and_then(|e| {
-            if let AssetState::Ev(s) = &e.state {
-                Some(LegacyEvSnapshot {
-                    soc: s.soc,
-                    plugged: s.plugged,
-                    current_kw: s.current_kw,
-                    max_charge_kw: s.max_charge_kw,
-                    soc_target: s.soc_target,
-                    battery_kwh: s.battery_kwh,
-                })
-            } else { None }
-        });
-        let heater = self.asset("heater").and_then(|e| {
-            if let AssetState::Heater(s) = &e.state {
-                Some(LegacyHeaterSnapshot {
-                    temp_c: s.temp_c,
-                    current_kw: s.current_kw,
-                    max_kw: s.max_kw,
-                    temp_min_c: s.temp_min_c,
-                    temp_max_c: s.temp_max_c,
-                })
-            } else { None }
-        });
-        let pv = self.asset("pv").and_then(|e| {
-            if let AssetState::Pv(s) = &e.state {
-                Some(LegacyPvSnapshot {
-                    irradiance: s.irradiance,
-                    export_limit_kw: s.export_limit_kw,
-                    current_kw: -s.current_kw,  // negative = export, matches old convention
-                    rated_kw: s.rated_kw,
-                })
-            } else { None }
-        });
-        let battery = self.asset("battery").and_then(|e| {
-            if let AssetState::Battery(s) = &e.state {
-                Some(LegacyBatterySnapshot {
-                    soc: s.soc,
-                    current_kw: s.current_kw,
-                    capacity_kwh: s.capacity_kwh,
-                    max_charge_kw: s.max_charge_kw,
-                    max_discharge_kw: s.max_discharge_kw,
-                    min_soc: s.min_soc,
-                })
-            } else { None }
-        });
-        let base_load_w = self.asset("base_load")
-            .map(|e| e.last_power_kw * 1000.0)
-            .unwrap_or(0.0);
-
         SimSnapshot {
             ts: self.last_tick,
-            net_power_w: self.grid.net_power_w,
-            import_w: self.grid.import_w,
-            export_w: self.grid.export_w,
-            voltage_v: self.grid.voltage_v,
-            import_kwh: self.grid.import_kwh,
-            export_kwh: self.grid.export_kwh,
+            grid: GridSnapshot {
+                net_power_w: self.grid.net_power_w,
+                voltage_v: self.grid.voltage_v,
+                import_kwh: self.grid.import_kwh,
+                export_kwh: self.grid.export_kwh,
+            },
             assets: assets_map,
-            base_load_w,
-            ev,
-            heater,
-            pv,
-            battery,
         }
     }
 }
@@ -319,61 +264,19 @@ pub struct AssetSnapshot {
     pub values: HashMap<String, f64>,
 }
 
-// ─── Backward-compat typed snapshots (mirrors old per-device fields) ─────────
-
+/// Grid meter snapshot in the /sim response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LegacyEvSnapshot {
-    pub soc: f64,
-    pub plugged: bool,
-    pub current_kw: f64,
-    pub max_charge_kw: f64,
-    pub soc_target: f64,
-    pub battery_kwh: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LegacyHeaterSnapshot {
-    pub temp_c: f64,
-    pub current_kw: f64,
-    pub max_kw: f64,
-    pub temp_min_c: f64,
-    pub temp_max_c: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LegacyPvSnapshot {
-    pub irradiance: f64,
-    pub export_limit_kw: Option<f64>,
-    pub current_kw: f64,
-    pub rated_kw: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LegacyBatterySnapshot {
-    pub soc: f64,
-    pub current_kw: f64,
-    pub capacity_kwh: f64,
-    pub max_charge_kw: f64,
-    pub max_discharge_kw: f64,
-    pub min_soc: f64,
+pub struct GridSnapshot {
+    pub net_power_w: f64,
+    pub voltage_v: f64,
+    pub import_kwh: f64,
+    pub export_kwh: f64,
 }
 
 /// API response for GET /sim
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimSnapshot {
     pub ts: DateTime<Utc>,
-    pub net_power_w: f64,
-    pub import_w: f64,
-    pub export_w: f64,
-    pub voltage_v: f64,
-    pub import_kwh: f64,
-    pub export_kwh: f64,
-    /// Generic per-asset data (new format).
+    pub grid: GridSnapshot,
     pub assets: HashMap<String, AssetSnapshot>,
-    /// Backward-compat fields derived from assets for existing UI consumers.
-    pub base_load_w: f64,
-    pub ev: Option<LegacyEvSnapshot>,
-    pub heater: Option<LegacyHeaterSnapshot>,
-    pub pv: Option<LegacyPvSnapshot>,
-    pub battery: Option<LegacyBatterySnapshot>,
 }

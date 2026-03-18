@@ -94,34 +94,34 @@ export function deriveAssetSummaries(
     };
   }
 
-  if (sim.ev) {
+  const evAsset = sim.assets["ev"];
+  if (evAsset) {
     summaries.push(
-      makeSummary("ev", "EV", sim.ev.current_kw, sim.ev.soc * 100)
+      makeSummary("ev", "EV", evAsset.current_kw ?? 0, (evAsset.soc ?? 0) * 100)
     );
   }
-  if (sim.heater) {
+  const heaterAsset = sim.assets["heater"];
+  if (heaterAsset) {
     summaries.push(
-      makeSummary("heater", "Heater", sim.heater.current_kw, null)
+      makeSummary("heater", "Heater", heaterAsset.current_kw ?? 0, null)
     );
   }
-  if (sim.pv) {
+  const pvAsset = sim.assets["pv"];
+  if (pvAsset) {
     summaries.push(
-      makeSummary("pv", "PV", -Math.abs(sim.pv.current_kw), null)
+      makeSummary("pv", "PV", -Math.abs(pvAsset.current_kw ?? 0), null)
     );
   }
-  if (sim.battery) {
+  const batteryAsset = sim.assets["battery"];
+  if (batteryAsset) {
     summaries.push(
-      makeSummary(
-        "battery",
-        "Battery",
-        sim.battery.current_kw,
-        sim.battery.soc * 100
-      )
+      makeSummary("battery", "Battery", batteryAsset.current_kw ?? 0, (batteryAsset.soc ?? 0) * 100)
     );
   }
   // BaseLoad is always present
+  const baseLoadAsset = sim.assets["base_load"];
   summaries.push(
-    makeSummary("base_load", "Base Load", sim.base_load_w / 1000, null)
+    makeSummary("base_load", "Base Load", (baseLoadAsset?.power_kw ?? 0), null)
   );
 
   return summaries;
@@ -191,7 +191,7 @@ export function deriveTariffSnapshot(
   nowMs: number
 ): TariffSnapshot {
   const t = findCurrentTariff(tariffs, nowMs);
-  const gridPowerKw = sim.net_power_w / 1000;
+  const gridPowerKw = sim.grid.net_power_w / 1000;
   const importP = t?.import_price_eur_kwh ?? null;
   const exportP = t?.export_price_eur_kwh ?? null;
   const totalCostRateEurH =

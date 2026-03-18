@@ -20,11 +20,61 @@ def step_query_trace(context):
     context.trace_response = r.json()
 
 
+@then('the sim response top-level keys are "{keys}"')
+def step_sim_top_level_keys(context, keys):
+    required = {k.strip() for k in keys.split(",")}
+    actual = set(context.sim_response.keys())
+    assert required.issubset(actual), (
+        f"Expected top-level keys {required} to be present, got: {actual}"
+    )
+    assert actual == required, (
+        f"Expected exactly top-level keys {required}, got extra: {actual - required}"
+    )
+
+
 @then('the sim response has field "{field}"')
 def step_sim_has_field(context, field):
     assert field in context.sim_response, (
         f"Expected field '{field}' in sim response, "
         f"got keys: {list(context.sim_response.keys())}"
+    )
+
+
+@then('the sim response does not have field "{field}"')
+def step_sim_does_not_have_field(context, field):
+    assert field not in context.sim_response, (
+        f"Expected field '{field}' to be absent from sim response top level, "
+        f"but it was present. Keys: {list(context.sim_response.keys())}"
+    )
+
+
+@then('the sim grid has field "{field}"')
+def step_sim_grid_has_field(context, field):
+    grid = context.sim_response.get("grid", {})
+    assert field in grid, (
+        f"Expected field '{field}' in sim.grid, got keys: {list(grid.keys())}"
+    )
+
+
+@then('the sim grid does not have field "{field}"')
+def step_sim_grid_does_not_have_field(context, field):
+    grid = context.sim_response.get("grid", {})
+    assert field not in grid, (
+        f"Expected field '{field}' to be absent from sim.grid, "
+        f"but it was present. Keys: {list(grid.keys())}"
+    )
+
+
+@then('the sim device "{device}" has field "{field}"')
+def step_sim_device_has_field(context, device, field):
+    assets = context.sim_response.get("assets", {})
+    asset = assets.get(device)
+    assert asset is not None, (
+        f"Device '{device}' not found in sim assets. Available: {list(assets.keys())}"
+    )
+    assert field in asset, (
+        f"Expected field '{field}' in sim.assets['{device}'], "
+        f"got keys: {list(asset.keys())}"
     )
 
 

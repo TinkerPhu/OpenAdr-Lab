@@ -14,18 +14,8 @@ import type { SimSnapshot } from "../api/types";
 
 const baseSim: SimSnapshot = {
   ts: "2026-01-01T10:00:00Z",
-  net_power_w: 0,
-  import_w: 0,
-  export_w: 0,
-  voltage_v: 230,
-  base_load_w: 0,
-  import_kwh: 0,
-  export_kwh: 0,
+  grid: { net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
   assets: {},
-  ev: { soc: 0.5, plugged: false, current_kw: 0, max_charge_kw: 11, soc_target: 0.9, battery_kwh: 60 },
-  heater: { temp_c: 20, current_kw: 0, max_kw: 4, temp_min_c: 18, temp_max_c: 24 },
-  pv: { irradiance: 0, export_limit_kw: null, current_kw: 0, rated_kw: 8 },
-  battery: { soc: 0.5, current_kw: 0, capacity_kwh: 10, max_charge_kw: 5, max_discharge_kw: 5, min_soc: 0.1 },
 };
 
 // ─── Mock StackedAreaChart — expose nowMs as a DOM data attribute ─────────────

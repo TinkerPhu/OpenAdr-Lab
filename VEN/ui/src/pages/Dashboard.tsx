@@ -95,7 +95,7 @@ export function DashboardPage() {
         <Paper sx={{ p: 2 }} data-testid="dash-sim-card">
           <Stack direction="row" alignItems="center" spacing={1} mb={1}>
             <Typography variant="h6">Simulation</Typography>
-            {sim.data && <ModeBadge mode={sim.data.pv ? "active" : undefined} />}
+            {sim.data && <ModeBadge mode={"pv" in sim.data.assets ? "active" : undefined} />}
           </Stack>
           {sim.isError ? (
             <Typography color="text.secondary">Simulator not available</Typography>
@@ -105,13 +105,13 @@ export function DashboardPage() {
                 <Stack spacing={0.5}>
                   <Typography variant="subtitle2">Power</Typography>
                   <Typography data-testid="sim-net-power">
-                    Net: {fmtNum(sim.data.net_power_w, 0)} W
+                    Net: {fmtNum(sim.data.grid.net_power_w, 0)} W
                   </Typography>
                   <Typography data-testid="sim-import">
-                    Import: {fmtNum(sim.data.import_w, 0)} W
+                    Import: {fmtNum(sim.data.grid.net_power_w > 0 ? sim.data.grid.net_power_w : 0, 0)} W
                   </Typography>
                   <Typography data-testid="sim-export">
-                    Export: {fmtNum(sim.data.export_w, 0)} W
+                    Export: {fmtNum(sim.data.grid.net_power_w < 0 ? -sim.data.grid.net_power_w : 0, 0)} W
                   </Typography>
                 </Stack>
               </Grid>
@@ -119,39 +119,39 @@ export function DashboardPage() {
                 <Stack spacing={0.5}>
                   <Typography variant="subtitle2">Energy</Typography>
                   <Typography data-testid="sim-import-kwh">
-                    Import: {fmtNum(sim.data.import_kwh, 3)} kWh
+                    Import: {fmtNum(sim.data.grid.import_kwh, 3)} kWh
                   </Typography>
                   <Typography data-testid="sim-export-kwh">
-                    Export: {fmtNum(sim.data.export_kwh, 3)} kWh
+                    Export: {fmtNum(sim.data.grid.export_kwh, 3)} kWh
                   </Typography>
                 </Stack>
               </Grid>
-              {sim.data.ev && (
+              {"ev" in sim.data.assets && (
                 <Grid item xs={4}>
                   <Stack spacing={0.5}>
                     <Typography variant="subtitle2">EV Charger</Typography>
-                    <Typography>SOC: {(sim.data.ev.soc * 100).toFixed(1)}%</Typography>
-                    <Typography>Power: {fmtNum(sim.data.ev.current_kw)} kW</Typography>
-                    <Typography>Plugged: {sim.data.ev.plugged ? "Yes" : "No"}</Typography>
+                    <Typography>SOC: {((sim.data.assets["ev"].soc ?? 0) * 100).toFixed(1)}%</Typography>
+                    <Typography>Power: {fmtNum(sim.data.assets["ev"].current_kw)} kW</Typography>
+                    <Typography>Plugged: {(sim.data.assets["ev"].plugged ?? 0) !== 0 ? "Yes" : "No"}</Typography>
                   </Stack>
                 </Grid>
               )}
-              {sim.data.heater && (
+              {"heater" in sim.data.assets && (
                 <Grid item xs={4}>
                   <Stack spacing={0.5}>
                     <Typography variant="subtitle2">Heater</Typography>
-                    <Typography>Temp: {fmtNum(sim.data.heater.temp_c)}°C</Typography>
-                    <Typography>Power: {fmtNum(sim.data.heater.current_kw)} kW</Typography>
+                    <Typography>Temp: {fmtNum(sim.data.assets["heater"].temp_c)}°C</Typography>
+                    <Typography>Power: {fmtNum(sim.data.assets["heater"].current_kw)} kW</Typography>
                   </Stack>
                 </Grid>
               )}
-              {sim.data.pv && (
+              {"pv" in sim.data.assets && (
                 <Grid item xs={4}>
                   <Stack spacing={0.5}>
                     <Typography variant="subtitle2">PV Inverter</Typography>
-                    <Typography>Output: {fmtNum(sim.data.pv.current_kw)} kW</Typography>
-                    <Typography>Irradiance: {(sim.data.pv.irradiance * 100).toFixed(0)}%</Typography>
-                    <Typography>Export limit: {sim.data.pv.export_limit_kw != null ? `${sim.data.pv.export_limit_kw.toFixed(1)} kW` : "none"}</Typography>
+                    <Typography>Output: {fmtNum(sim.data.assets["pv"].current_kw)} kW</Typography>
+                    <Typography>Irradiance: {((sim.data.assets["pv"].irradiance ?? 0) * 100).toFixed(0)}%</Typography>
+                    <Typography>Export limit: {"export_limit_kw" in sim.data.assets["pv"] ? `${sim.data.assets["pv"].export_limit_kw.toFixed(1)} kW` : "none"}</Typography>
                   </Stack>
                 </Grid>
               )}
