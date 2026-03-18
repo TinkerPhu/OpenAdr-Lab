@@ -33,8 +33,8 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
     data.length > 0
       ? data
       : [
-          { ts: tMin, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null, isForecast: false },
-          { ts: tMax, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null, isForecast: true },
+          { ts: tMin, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
+          { ts: tMax, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
         ];
 
   return (

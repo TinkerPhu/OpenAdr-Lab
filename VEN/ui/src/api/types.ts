@@ -132,7 +132,6 @@ export type TariffSnapshot = {
   export_price_eur_kwh: number | null;
   co2_g_kwh: number | null;
   source_event_id: string | null;
-  is_forecast: boolean;
 };
 
 /** @deprecated Renamed to TariffSnapshot. Kept as alias for backward compat with Controller.tsx. */

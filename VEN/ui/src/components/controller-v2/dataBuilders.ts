@@ -16,11 +16,11 @@ import type {
 } from "./types";
 import { ASSET_COLORS } from "./types";
 import type {
-  Plan,
   TariffSnapshot as ApiTariffSnapshot,
   SimSnapshot,
   UserRequest,
 } from "../../api/types";
+import type { AssetTimelinePoint } from "./types";
 
 // ─── findCurrentTariff ────────────────────────────────────────────────────────
 
@@ -59,7 +59,7 @@ export function deriveAssetSummaries(
   sim: SimSnapshot,
   tariffs: ApiTariffSnapshot[],
   userRequests: UserRequest[],
-  plan: Plan | null,
+  allTimelines: Record<string, AssetTimelinePoint[]>,
   nowMs: number
 ): AssetSummary[] {
   const currentTariff = findCurrentTariff(tariffs, nowMs);
@@ -77,7 +77,7 @@ export function deriveAssetSummaries(
         : Math.abs(powerKw) * (currentTariff?.export_price_eur_kwh ?? 0);
     const co2RateGH = powerKw * (currentTariff?.co2_g_kwh ?? 0);
 
-    const forecastEnergyKwh = computeForecastEnergy(plan, assetId, nowMs);
+    const forecastEnergyKwh = computeForecastEnergy(allTimelines[assetId] ?? [], nowMs);
 
     const activeRequest = findActiveRequest(userRequests, assetId, nowMs);
 
@@ -128,25 +128,22 @@ export function deriveAssetSummaries(
 }
 
 function computeForecastEnergy(
-  plan: Plan | null,
-  assetId: AssetId,
+  timelinePoints: AssetTimelinePoint[],
   nowMs: number
 ): number | null {
-  if (!plan) return null;
-  const slots = [...plan.firm_slots, ...plan.flexible_slots];
+  const future = timelinePoints.filter((p) => p.ts > nowMs);
+  if (future.length === 0) return null;
   let totalKwh = 0;
   let found = false;
-  for (const slot of slots) {
-    const slotEnd = new Date(slot.end).getTime();
-    if (slotEnd <= nowMs) continue;
-    for (const alloc of slot.allocations) {
-      if (alloc.asset_id === assetId) {
-        const slotStart = Math.max(new Date(slot.start).getTime(), nowMs);
-        const durationH = (slotEnd - slotStart) / 3_600_000;
-        totalKwh += Math.abs(alloc.power_kw) * durationH;
-        found = true;
-      }
-    }
+  for (let i = 0; i < future.length; i++) {
+    const power = future[i].values["power_kw"];
+    if (power === undefined || power === null) continue;
+    const nextTs = future[i + 1]?.ts ?? future[i].ts;
+    const prevGap = i > 0 ? future[i].ts - future[i - 1].ts : 0;
+    const durationMs = i < future.length - 1 ? nextTs - future[i].ts : prevGap;
+    const durationH = durationMs / 3_600_000;
+    totalKwh += Math.abs(power) * durationH;
+    found = true;
   }
   return found ? totalKwh : null;
 }

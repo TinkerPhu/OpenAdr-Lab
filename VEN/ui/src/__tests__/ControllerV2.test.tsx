@@ -27,7 +27,6 @@ const baseRates: TariffSnapshot[] = [
     export_price_eur_kwh: 0.05,
     co2_g_kwh: 300,
     source_event_id: null,
-    is_forecast: false,
   },
 ];
 
@@ -49,7 +48,6 @@ const evSchema = [
 vi.mock("../api/hooks", () => ({
   useSim: () => ({ data: mockSim(), isLoading: false, isError: false, refetch: vi.fn() }),
   useTariffs: () => ({ data: mockRates(), refetch: vi.fn() }),
-  usePlan: () => ({ data: null, refetch: vi.fn() }),
   useRequests: () => ({ data: [], refetch: vi.fn() }),
   useTrace: () => ({ data: [] }),
   useSimOverride: () => ({ data: mockOverrides() }),

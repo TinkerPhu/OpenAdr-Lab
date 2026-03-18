@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { Alert, Box, CircularProgress, Typography } from "@mui/material";
-import { useSim, useTariffs, usePlan, useRequests, useSimOverride, useSetSimOverride, useAllTimelines } from "../api/hooks";
+import { useSim, useTariffs, useRequests, useSimOverride, useSetSimOverride, useAllTimelines } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller-v2/types";
 import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
 import { AssetCell } from "../components/controller-v2/AssetCell";
@@ -12,7 +12,6 @@ import type { UserOverrides } from "../api/types";
 export function ControllerV2Page() {
   const { data: sim, isLoading: simLoading, isError: simError, refetch: refetchSim } = useSim({ refetchInterval: false });
   const { data: rates, refetch: refetchTariffs } = useTariffs({ refetchInterval: false });
-  const { data: plan, refetch: refetchPlan } = usePlan({ refetchInterval: false });
   const { data: userRequests, refetch: refetchRequests } = useRequests({ refetchInterval: false });
   const { data: simOverrides } = useSimOverride();
   const { mutate: setOverride } = useSetSimOverride();
@@ -41,13 +40,12 @@ export function ControllerV2Page() {
   useEffect(() => {
     const id = setInterval(() => {
       refetchSim();
-      refetchPlan();
       refetchTariffs();
       refetchRequests();
       refetchTimelines();
     }, 10_000);
     return () => clearInterval(id);
-  }, [refetchSim, refetchPlan, refetchTariffs, refetchRequests, refetchTimelines]);
+  }, [refetchSim, refetchTariffs, refetchRequests, refetchTimelines]);
 
   function handleTogglePin(cellId: string) {
     setPinnedCellIds((prev) =>
@@ -87,8 +85,8 @@ export function ControllerV2Page() {
 
   const assetSummaries = useMemo(() => {
     if (!sim) return [];
-    return deriveAssetSummaries(sim, tariffs, requests, plan ?? null, Date.now());
-  }, [sim, tariffs, requests, plan]);
+    return deriveAssetSummaries(sim, tariffs, requests, allTimelines, Date.now());
+  }, [sim, tariffs, requests, allTimelines]);
 
   const tariffSnapshot = useMemo(() => {
     if (!sim) return null;
@@ -157,8 +155,11 @@ export function ControllerV2Page() {
         {tariffSnapshot && !pinnedCellIds.includes("grid:tariff") && (
           <GridTariffCell
             snapshot={tariffSnapshot}
+            gridTimeline={allTimelines["grid"] ?? []}
+            extended={expandedCells.has("grid:tariff")}
             pinned={false}
             onTogglePin={() => handleTogglePin("grid:tariff")}
+            onToggleExpand={() => handleToggleExpand("grid:tariff")}
           />
         )}
 
