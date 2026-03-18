@@ -82,8 +82,6 @@ pub fn build_asset_timeline(
                 values.insert("cost_rate_eur_h".into(), cost_rate);
                 let co2_rate = net_kw.max(0.0) * slot.co2_g_kwh;
                 values.insert("co2_rate_g_h".into(), co2_rate);
-                values.insert("import_price_eur_kwh".into(), slot.import_price_eur_kwh);
-                values.insert("export_price_eur_kwh".into(), slot.export_price_eur_kwh);
                 values.insert("import_limit_kw".into(), slot.import_cap_kw);
                 values.insert("export_limit_kw".into(), slot.export_cap_kw);
             } else {
@@ -327,7 +325,6 @@ mod tests {
         assert_eq!(result.len(), 1);
         let p = &result[0];
         assert!((p.values["power_kw"] - 2.0).abs() < 1e-9);
-        assert!(p.values.contains_key("import_price_eur_kwh"));
         assert!(p.values.contains_key("import_limit_kw"));
     }
 

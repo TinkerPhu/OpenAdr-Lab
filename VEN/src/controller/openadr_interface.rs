@@ -195,7 +195,6 @@ pub fn parse_rate_snapshots(events: &[Value], now: DateTime<Utc>) -> Vec<TariffS
                     export_price_eur_kwh: None,
                     co2_g_kwh: None,
                     source_event_id: event_id.clone(),
-                    is_forecast: start > now,
                 });
 
                 for (t, v) in payloads {
@@ -738,8 +737,8 @@ mod tests {
         }]);
         let snapshots = parse_rate_snapshots(events.as_array().unwrap(), now);
         assert!(
-            snapshots.iter().any(|s| s.is_forecast),
-            "expected at least one future (forecast) interval"
+            snapshots.iter().any(|s| s.interval_start > now),
+            "expected at least one future interval"
         );
     }
 
