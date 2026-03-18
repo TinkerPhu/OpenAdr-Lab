@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Alert, Box, CircularProgress, Typography } from "@mui/material";
-import { useSim, useTariffs, usePlan, useRequests, useSimOverride, useSetSimOverride } from "../api/hooks";
+import { useSim, useTariffs, usePlan, useRequests, useSimOverride, useSetSimOverride, useAllTimelines } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller-v2/types";
 import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
 import { AssetCell } from "../components/controller-v2/AssetCell";
@@ -10,22 +10,58 @@ import { GridAccumulatedCell } from "../components/controller-v2/GridAccumulated
 import type { UserOverrides } from "../api/types";
 
 export function ControllerV2Page() {
-  const nowMs = useMemo(() => Date.now(), []);
-
-  const { data: sim, isLoading: simLoading, isError: simError } = useSim();
-  const { data: rates } = useTariffs();
-  const { data: plan } = usePlan();
-  const { data: userRequests } = useRequests();
+  const { data: sim, isLoading: simLoading, isError: simError, refetch: refetchSim } = useSim({ refetchInterval: false });
+  const { data: rates, refetch: refetchTariffs } = useTariffs({ refetchInterval: false });
+  const { data: plan, refetch: refetchPlan } = usePlan({ refetchInterval: false });
+  const { data: userRequests, refetch: refetchRequests } = useRequests({ refetchInterval: false });
   const { data: simOverrides } = useSimOverride();
   const { mutate: setOverride } = useSetSimOverride();
 
   const [pinnedCellIds, setPinnedCellIds] = useState<string[]>([]);
   const [collapseState, setCollapseState] = useState<CollapseState>({});
+  const [expandedCells, setExpandedCells] = useState<Set<string>>(new Set());
+
+  // Widen the timeline window whenever any cell is expanded.
+  const hoursForward = expandedCells.size > 0 ? 24.0 : 1.0;
+
+  // Single timeline query shared by all asset cells and the accumulated cell.
+  // refetchInterval: false — driven exclusively by the unified timer below so
+  // all data sources update in the same tick.
+  const { data: allTimelines = {}, refetch: refetchTimelines } = useAllTimelines(
+    1.0,
+    hoursForward,
+    { refetchInterval: false }
+  );
+
+  // Shared nowMs: advances only when fresh timeline data arrives, keeping the
+  // NOW reference line consistent across all charts in the same render.
+  const nowMs = useMemo(() => Date.now(), [allTimelines]);
+
+  // Single poll timer — all sources refresh in one tick.
+  useEffect(() => {
+    const id = setInterval(() => {
+      refetchSim();
+      refetchPlan();
+      refetchTariffs();
+      refetchRequests();
+      refetchTimelines();
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [refetchSim, refetchPlan, refetchTariffs, refetchRequests, refetchTimelines]);
 
   function handleTogglePin(cellId: string) {
     setPinnedCellIds((prev) =>
       prev.includes(cellId) ? prev.filter((id) => id !== cellId) : [...prev, cellId]
     );
+  }
+
+  function handleToggleExpand(cellId: string) {
+    setExpandedCells((prev) => {
+      const next = new Set(prev);
+      if (next.has(cellId)) next.delete(cellId);
+      else next.add(cellId);
+      return next;
+    });
   }
 
   function handleToggleCollapse(cellId: string, section: "left" | "right") {
@@ -51,13 +87,13 @@ export function ControllerV2Page() {
 
   const assetSummaries = useMemo(() => {
     if (!sim) return [];
-    return deriveAssetSummaries(sim, tariffs, requests, plan ?? null, nowMs);
-  }, [sim, tariffs, requests, plan, nowMs]);
+    return deriveAssetSummaries(sim, tariffs, requests, plan ?? null, Date.now());
+  }, [sim, tariffs, requests, plan]);
 
   const tariffSnapshot = useMemo(() => {
     if (!sim) return null;
-    return deriveTariffSnapshot(sim, tariffs, nowMs);
-  }, [sim, tariffs, nowMs]);
+    return deriveTariffSnapshot(sim, tariffs, Date.now());
+  }, [sim, tariffs]);
 
   if (simLoading) {
     return (
@@ -92,9 +128,13 @@ export function ControllerV2Page() {
           simSnapshot={sim}
           simOverrides={simOverrides}
           collapsed={{ left: collapsed.leftCollapsed, right: collapsed.rightCollapsed }}
+          timePoints={allTimelines[assetId] ?? []}
+          nowMs={nowMs}
+          extended={expandedCells.has(cellId)}
           pinned
           onTogglePin={handleTogglePin}
           onToggleCollapse={handleToggleCollapse}
+          onToggleExpand={handleToggleExpand}
           onOverrideChange={handleOverrideChange}
         />
       );
@@ -125,8 +165,12 @@ export function ControllerV2Page() {
         {!pinnedCellIds.includes("grid:accumulated") && (
           <GridAccumulatedCell
             assetSummaries={assetSummaries}
+            allTimelines={allTimelines}
+            nowMs={nowMs}
+            extended={expandedCells.has("grid:accumulated")}
             pinned={false}
             onTogglePin={() => handleTogglePin("grid:accumulated")}
+            onToggleExpand={() => handleToggleExpand("grid:accumulated")}
           />
         )}
 
@@ -147,9 +191,13 @@ export function ControllerV2Page() {
                 simSnapshot={sim}
                 simOverrides={simOverrides}
                 collapsed={{ left: collapsed.leftCollapsed, right: collapsed.rightCollapsed }}
+                timePoints={allTimelines[summary.assetId] ?? []}
+                nowMs={nowMs}
+                extended={expandedCells.has(cellId)}
                 pinned={false}
                 onTogglePin={handleTogglePin}
                 onToggleCollapse={handleToggleCollapse}
+                onToggleExpand={handleToggleExpand}
                 onOverrideChange={handleOverrideChange}
               />
             );

@@ -58,14 +58,14 @@ vi.mock("../components/controller-v2/charts/TariffChart", () => ({
 let timelineData: unknown[] = [];
 
 vi.mock("../api/hooks", () => ({
-  useSim: () => ({ data: baseSim, isLoading: false, isError: false }),
-  useTariffs: () => ({ data: [] }),
-  usePlan: () => ({ data: null }),
-  useRequests: () => ({ data: [] }),
+  useSim: () => ({ data: baseSim, isLoading: false, isError: false, refetch: vi.fn() }),
+  useTariffs: () => ({ data: [], refetch: vi.fn() }),
+  usePlan: () => ({ data: null, refetch: vi.fn() }),
+  useRequests: () => ({ data: [], refetch: vi.fn() }),
   useSimOverride: () => ({ data: {} }),
   useSetSimOverride: () => ({ mutate: vi.fn() }),
   useTimeline: () => ({ data: timelineData }),
-  useAllTimelines: () => ({ data: {} }),
+  useAllTimelines: () => ({ data: {}, refetch: vi.fn() }),
   useSimSchema: () => ({ data: {} }),
 }));
 

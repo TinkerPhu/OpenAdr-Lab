@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Box, Collapse, IconButton, Paper, Tooltip } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
@@ -6,28 +6,15 @@ import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
 import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
-import type { AssetId, AssetSummary } from "./types";
+import type { AssetId, AssetSummary, AssetTimelinePoint } from "./types";
 import { ASSET_COLORS } from "./types";
 import { AssetLeftSection } from "./AssetLeftSection";
 import { AssetMidSection } from "./AssetMidSection";
 import { AssetRightSection } from "./AssetRightSection";
 import type { SimSnapshot, UserOverrides } from "../../api/types";
-import { useTimeline } from "../../api/hooks";
-
-/**
- * Extended time window per asset. All assets support expanding to 24h forward.
- * Default window is ±1h. The extended window is useful for seeing planned
- * setpoints and scheduled packets across the full planning horizon.
- */
-const EXTENDED_WINDOWS: Partial<Record<AssetId, { hoursBack: number; hoursForward: number }>> = {
-  ev: { hoursBack: 1.0, hoursForward: 24.0 },
-  battery: { hoursBack: 1.0, hoursForward: 24.0 },
-  heater: { hoursBack: 1.0, hoursForward: 24.0 },
-  pv: { hoursBack: 1.0, hoursForward: 24.0 },
-  base_load: { hoursBack: 1.0, hoursForward: 24.0 },
-};
 
 const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
+const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
 
 interface AssetCellProps {
   assetId: AssetId;
@@ -35,9 +22,16 @@ interface AssetCellProps {
   simSnapshot: SimSnapshot | undefined;
   simOverrides: UserOverrides | undefined;
   collapsed: { left: boolean; right: boolean };
+  /** Timeline points from the shared useAllTimelines query on the page. */
+  timePoints: AssetTimelinePoint[];
+  /** Epoch ms — shared across all cells from the page for a consistent NOW line. */
+  nowMs: number;
+  /** Whether this cell's time window is expanded to 24h forward. */
+  extended: boolean;
   pinned: boolean;
   onTogglePin: (cellId: string) => void;
   onToggleCollapse: (cellId: string, section: "left" | "right") => void;
+  onToggleExpand: (cellId: string) => void;
   onOverrideChange: (patch: Partial<UserOverrides>) => void;
 }
 
@@ -47,22 +41,22 @@ export function AssetCell({
   simSnapshot,
   simOverrides,
   collapsed,
+  timePoints,
+  nowMs,
+  extended,
   pinned,
   onTogglePin,
   onToggleCollapse,
+  onToggleExpand,
   onOverrideChange,
 }: AssetCellProps) {
   const cellId = `asset:${assetId}`;
   const color = ASSET_COLORS[assetId] ?? "#888";
 
-  const extendedWindow = EXTENDED_WINDOWS[assetId];
-  const [extended, setExtended] = useState(false);
-
-  const window = extended && extendedWindow ? extendedWindow : DEFAULT_WINDOW;
-
-  const { data: timelineData = [] } = useTimeline(assetId, window.hoursBack, window.hoursForward);
-  // nowMs updates each time fresh timeline data arrives (every 10s refetch cycle).
-  const nowMs = useMemo(() => Date.now(), [timelineData]);
+  // Display window: each cell clips its chart domain independently.
+  // The shared useAllTimelines query on the page always fetches the widest
+  // window needed (24h if any cell is expanded), so data is always available.
+  const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
 
   return (
     <Paper
@@ -96,7 +90,7 @@ export function AssetCell({
       {/* Mid section — timeline graph */}
       <AssetMidSection
         assetId={assetId}
-        timePoints={timelineData}
+        timePoints={timePoints}
         color={color}
         nowMs={nowMs}
         hoursBack={window.hoursBack}
@@ -139,18 +133,16 @@ export function AssetCell({
             {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
           </IconButton>
         </Tooltip>
-        {extendedWindow && (
-          <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h planning horizon"}>
-            <IconButton
-              size="small"
-              data-testid={`asset-cell-${assetId}-extend-btn`}
-              onClick={() => setExtended((v) => !v)}
-              sx={{ m: 0.5 }}
-            >
-              {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
-            </IconButton>
-          </Tooltip>
-        )}
+        <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h planning horizon"}>
+          <IconButton
+            size="small"
+            data-testid={`asset-cell-${assetId}-extend-btn`}
+            onClick={() => onToggleExpand(cellId)}
+            sx={{ m: 0.5 }}
+          >
+            {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
       </Box>
     </Paper>
   );
