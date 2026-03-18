@@ -82,12 +82,12 @@ export function useUpdateReport() {
   });
 }
 
-export function useSim() {
+export function useSim(options?: { refetchInterval?: number | false }) {
   const { api } = useVenContext();
   return useQuery({
     queryKey: ["sim", api.baseUrl],
     queryFn: () => api.sim(),
-    refetchInterval: 10_000,
+    refetchInterval: options?.refetchInterval ?? 10_000,
   });
 }
 
@@ -147,12 +147,12 @@ export function usePackets() {
   });
 }
 
-export function usePlan() {
+export function usePlan(options?: { refetchInterval?: number | false }) {
   const { api } = useVenContext();
   return useQuery({
     queryKey: ["plan", api.baseUrl],
     queryFn: () => api.plan(),
-    refetchInterval: 10_000,
+    refetchInterval: options?.refetchInterval ?? 10_000,
   });
 }
 
@@ -169,21 +169,25 @@ export function useTimeline(
   });
 }
 
-export function useAllTimelines(hoursBack = 1.0, hoursForward = 1.0) {
+export function useAllTimelines(
+  hoursBack = 1.0,
+  hoursForward = 1.0,
+  options?: { refetchInterval?: number | false }
+) {
   const { api } = useVenContext();
   return useQuery({
     queryKey: ["timeline/all", api.baseUrl, hoursBack, hoursForward],
     queryFn: () => api.allTimelines({ hoursBack, hoursForward }),
-    refetchInterval: 10_000,
+    refetchInterval: options?.refetchInterval ?? 10_000,
   });
 }
 
-export function useTariffs() {
+export function useTariffs(options?: { refetchInterval?: number | false }) {
   const { api } = useVenContext();
   return useQuery({
     queryKey: ["rates", api.baseUrl],
     queryFn: () => api.rates(),
-    refetchInterval: 30_000,
+    refetchInterval: options?.refetchInterval ?? 30_000,
   });
 }
 
@@ -208,12 +212,12 @@ export function useLedger() {
   });
 }
 
-export function useRequests() {
+export function useRequests(options?: { refetchInterval?: number | false }) {
   const { api } = useVenContext();
   return useQuery({
     queryKey: ["user_requests", api.baseUrl],
     queryFn: () => api.userRequests(),
-    refetchInterval: 10_000,
+    refetchInterval: options?.refetchInterval ?? 10_000,
   });
 }
 

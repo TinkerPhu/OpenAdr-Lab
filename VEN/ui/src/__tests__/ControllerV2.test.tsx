@@ -79,15 +79,15 @@ const evSchema = [
 ];
 
 vi.mock("../api/hooks", () => ({
-  useSim: () => ({ data: mockSim(), isLoading: false, isError: false }),
-  useTariffs: () => ({ data: mockRates() }),
-  usePlan: () => ({ data: null }),
-  useRequests: () => ({ data: [] }),
+  useSim: () => ({ data: mockSim(), isLoading: false, isError: false, refetch: vi.fn() }),
+  useTariffs: () => ({ data: mockRates(), refetch: vi.fn() }),
+  usePlan: () => ({ data: null, refetch: vi.fn() }),
+  useRequests: () => ({ data: [], refetch: vi.fn() }),
   useTrace: () => ({ data: [] }),
   useSimOverride: () => ({ data: mockOverrides() }),
   useSetSimOverride: () => mockSetOverride(),
   useTimeline: () => ({ data: [] }),
-  useAllTimelines: () => ({ data: {} }),
+  useAllTimelines: () => ({ data: {}, refetch: vi.fn() }),
   useSimSchema: () => ({ data: { ev: evSchema } }),
 }));
 
