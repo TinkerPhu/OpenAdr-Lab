@@ -87,12 +87,16 @@ pub fn build_asset_timeline(
                 values.insert("import_limit_kw".into(), slot.import_cap_kw);
                 values.insert("export_limit_kw".into(), slot.export_cap_kw);
             } else {
-                // Physical asset: find its allocation in this slot.
-                let Some(alloc) = slot.allocations.iter().find(|a| a.asset_id == asset_id) else {
-                    // No energy allocated for this asset in this slot — omit.
-                    continue;
-                };
-                let power_kw = alloc.power_kw;
+                // Physical asset: use its allocation for this slot, or 0 kW if absent.
+                // We always emit a point (even 0 kW) so that all assets share the same
+                // set of plan-slot timestamps. Omitting zero-allocation slots causes the
+                // stacked chart to fall back to an exact-match miss → false zero spikes.
+                let power_kw = slot
+                    .allocations
+                    .iter()
+                    .find(|a| a.asset_id == asset_id)
+                    .map(|a| a.power_kw)
+                    .unwrap_or(0.0);
                 values.insert("power_kw".into(), power_kw);
                 let cost_rate = power_kw * slot.import_price_eur_kwh;
                 values.insert("cost_rate_eur_h".into(), cost_rate);
@@ -328,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn slot_without_asset_allocation_is_skipped() {
+    fn slot_without_asset_allocation_emits_zero_kw() {
         let now = ts(0);
         let known = make_known(&["ev", "battery"]);
         let history = HashMap::new();
@@ -344,8 +348,10 @@ mod tests {
             TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
         )
         .unwrap();
-        // No EV allocation → no future point for EV
-        assert_eq!(result.len(), 0);
+        // No EV allocation → still emits a 0 kW point so timestamps stay aligned
+        // across all assets (prevents false zero-spikes in the stacked area chart).
+        assert_eq!(result.len(), 1);
+        assert!((result[0].values["power_kw"]).abs() < 1e-9);
     }
 
     #[test]
