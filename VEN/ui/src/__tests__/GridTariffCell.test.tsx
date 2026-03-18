@@ -9,6 +9,7 @@
  * instead of Recharts auto-domain, which may exclude nowMs when past data is absent.
  */
 import { render, screen, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { ControllerV2Page } from "../pages/ControllerV2";
@@ -172,5 +173,47 @@ describe("GridTariffCell — now line position", () => {
     // Both past and future must be covered so the now line is never outside the domain
     expect(hoursBack).toBeGreaterThanOrEqual(1.0);
     expect(hoursForward).toBeGreaterThanOrEqual(1.0);
+  });
+});
+
+describe("GridTariffCell — expanded state", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    allTimelinesData = {};
+    tariffsData = [];
+  });
+
+  it("TariffChart receives hoursBack=0 and hoursForward=24 when expand button is clicked", async () => {
+    const user = userEvent.setup();
+    const qc = makeQueryClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <ControllerV2Page />
+      </QueryClientProvider>
+    );
+
+    await user.click(screen.getByTestId("grid-tariff-cell-extend-btn"));
+
+    const chart = screen.getByTestId("tariff-chart");
+    expect(parseFloat(chart.getAttribute("data-hours-back") ?? "-1")).toBe(0);
+    expect(parseFloat(chart.getAttribute("data-hours-forward") ?? "-1")).toBe(24);
+  });
+
+  it("TariffChart returns to default window when expand button is clicked again", async () => {
+    const user = userEvent.setup();
+    const qc = makeQueryClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <ControllerV2Page />
+      </QueryClientProvider>
+    );
+
+    const btn = screen.getByTestId("grid-tariff-cell-extend-btn");
+    await user.click(btn); // expand
+    await user.click(btn); // collapse
+
+    const chart = screen.getByTestId("tariff-chart");
+    expect(parseFloat(chart.getAttribute("data-hours-back") ?? "0")).toBeGreaterThanOrEqual(1);
+    expect(parseFloat(chart.getAttribute("data-hours-forward") ?? "0")).toBeGreaterThanOrEqual(1);
   });
 });
