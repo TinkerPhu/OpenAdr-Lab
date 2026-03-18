@@ -16,10 +16,13 @@ const KNOWN_ASSETS: AssetId[] = ["ev", "heater", "pv", "battery", "base_load"];
 function buildStackedFromAllTimelines(
   allTimelines: Record<string, AssetTimelinePoint[]>
 ): StackedAreaPoint[] {
-  // Collect all unique timestamps across all asset timelines.
+  // Collect timestamps from KNOWN_ASSETS only. The "grid" virtual asset and any
+  // unknown entries are excluded because they have plan-slot entries at timestamps
+  // where known assets have no allocation — causing those assets to fall through
+  // to 0 on exact-match, producing false zero-spikes in the stacked chart.
   const tsSet = new Set<number>();
-  for (const points of Object.values(allTimelines)) {
-    for (const p of points) tsSet.add(p.ts);
+  for (const assetId of KNOWN_ASSETS) {
+    for (const p of (allTimelines[assetId] ?? [])) tsSet.add(p.ts);
   }
   const sortedTs = [...tsSet].sort((a, b) => a - b);
 
