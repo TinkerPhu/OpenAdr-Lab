@@ -134,7 +134,7 @@ def step_sim_override_pv_full(context):
 # Then: sim assertions (use last_response_json set by generic "I GET {path} from the VEN")
 # ---------------------------------------------------------------------------
 
-@then("the sim EV current_kw is 0.0")
+@then("the sim EV power_kw is 0.0")
 def step_sim_ev_current_zero(context):
     sim = context.last_response_json
     assert sim is not None, "No sim JSON in context — use 'I GET /sim from the VEN'"

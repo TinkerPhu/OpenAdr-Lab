@@ -6,8 +6,8 @@ use crate::profile::PvConfig;
 use super::{AssetCapabilities, ControlDescriptor, ControlKind, TickEnvironment};
 
 /// PV Inverter: generates power.
-/// `current_kw` stores the positive generation value.
-/// Sign convention (export = negative) is applied in `AssetState::current_kw()`.
+/// `current_kw` stores the positive generation value (internal).
+/// Sign convention (export = negative) is applied via `power_kw` in the API response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PvInverter {
     pub rated_kw: f64,
@@ -64,7 +64,6 @@ impl PvInverter {
     pub fn state_values(&self) -> HashMap<String, f64> {
         let mut m = HashMap::new();
         m.insert("irradiance".into(), self.irradiance);
-        m.insert("current_kw".into(), -self.current_kw); // negative = export
         m.insert("rated_kw".into(), self.rated_kw);
         if let Some(lim) = self.export_limit_kw {
             m.insert("export_limit_kw".into(), lim);

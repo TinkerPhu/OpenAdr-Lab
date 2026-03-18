@@ -16,7 +16,7 @@ Feature: UC-08..UC-10 — Edge Case Use Cases
     And I GET /sim from the VEN
 
     Then the response status is 200
-    And the sim EV current_kw is 0.0
+    And the sim EV power_kw is 0.0
 
   Scenario: UC-08b — Re-plugging the EV resumes charging
     When I POST a sim override setting ev_plugged to false

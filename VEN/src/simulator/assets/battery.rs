@@ -57,9 +57,7 @@ impl Battery {
 
     pub fn state_values(&self) -> HashMap<String, f64> {
         let mut m = HashMap::new();
-        m.insert("soc_pct".into(), self.soc * 100.0);
         m.insert("soc".into(), self.soc);
-        m.insert("current_kw".into(), self.current_kw);
         m.insert("capacity_kwh".into(), self.capacity_kwh);
         m.insert("max_charge_kw".into(), self.max_charge_kw);
         m.insert("max_discharge_kw".into(), self.max_discharge_kw);
