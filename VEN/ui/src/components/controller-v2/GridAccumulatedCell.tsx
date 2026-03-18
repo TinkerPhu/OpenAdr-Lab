@@ -69,11 +69,13 @@ export function GridAccumulatedCell({
   onToggleExpand,
 }: GridAccumulatedCellProps) {
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
+  const tMin = nowMs - window.hoursBack * 3_600_000;
+  const tMax = nowMs + window.hoursForward * 3_600_000;
 
-  const stackedAreaPoints = useMemo(
-    () => buildStackedFromAllTimelines(allTimelines),
-    [allTimelines]
-  );
+  const stackedAreaPoints = useMemo(() => {
+    const all = buildStackedFromAllTimelines(allTimelines);
+    return all.filter((p) => p.ts >= tMin && p.ts <= tMax);
+  }, [allTimelines, tMin, tMax]);
 
   const assetIds = assetSummaries.map((s) => s.assetId);
 
