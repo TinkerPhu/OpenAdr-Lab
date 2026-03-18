@@ -1,47 +1,46 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { Box, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
 import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
 import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
-import type { TariffSnapshot, TariffTimePoint } from "./types";
+import type { TariffSnapshot } from "./types";
 import { TariffChart } from "./charts/TariffChart";
-import { useTimeline } from "../../api/hooks";
+import { useTariffs } from "../../api/hooks";
 import type { AssetTimelinePoint } from "./types";
+import { buildTariffPricePoints, buildPowerPoints } from "./tariffBuilders";
 
 const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
 const EXTENDED_WINDOW = { hoursBack: 0.0, hoursForward: 24.0 };
 
-function toTariffTimePoints(points: AssetTimelinePoint[], nowMs: number): TariffTimePoint[] {
-  return points.map((p) => ({
-    ts: p.ts,
-    importPriceEurKwh: p.values["import_price_eur_kwh"] ?? null,
-    exportPriceEurKwh: p.values["export_price_eur_kwh"] ?? null,
-    co2GKwh: p.values["co2_rate_g_h"] ?? null,
-    totalCostRateEurH: p.values["cost_rate_eur_h"] ?? null,
-    gridPowerKw: p.values["power_kw"] ?? null,
-    isForecast: p.ts > nowMs,
-  }));
-}
-
 interface GridTariffCellProps {
   snapshot: TariffSnapshot;
+  gridTimeline: AssetTimelinePoint[];
+  extended: boolean;
   pinned: boolean;
   onTogglePin: () => void;
+  onToggleExpand: () => void;
 }
 
 export function GridTariffCell({
   snapshot,
+  gridTimeline,
+  extended,
   pinned,
   onTogglePin,
+  onToggleExpand,
 }: GridTariffCellProps) {
-  const [extended, setExtended] = useState(false);
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
 
-  const { data: timelineData = [] } = useTimeline("grid", window.hoursBack, window.hoursForward);
-  // nowMs updates each time fresh timeline data arrives, matching AssetCell's pattern.
-  const nowMs = useMemo(() => Date.now(), [timelineData]);
-  const tariffTimePoints = toTariffTimePoints(timelineData, nowMs);
+  const { data: tariffsData = [] } = useTariffs();
+  // nowMs updates each time fresh data arrives, matching AssetCell's pattern.
+  const nowMs = useMemo(() => Date.now(), [gridTimeline, tariffsData]);
+
+  const tariffTimePoints = useMemo(() => {
+    const pricePoints = buildTariffPricePoints(tariffsData);
+    const powerPoints = buildPowerPoints(gridTimeline);
+    return [...pricePoints, ...powerPoints].sort((a, b) => a.ts - b.ts);
+  }, [gridTimeline, tariffsData]);
 
   const fmt = (v: number | null, decimals = 4) =>
     v === null ? "—" : v.toFixed(decimals);
@@ -100,7 +99,7 @@ export function GridTariffCell({
           <IconButton
             size="small"
             data-testid="grid-tariff-cell-extend-btn"
-            onClick={() => setExtended((v) => !v)}
+            onClick={onToggleExpand}
             sx={{ m: 0.5 }}
           >
             {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}

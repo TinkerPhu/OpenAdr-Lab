@@ -2,7 +2,7 @@
  * GridTariffCell — now line position test
  *
  * Asserts that the nowMs passed to TariffChart stays current as time passes
- * and timeline data refreshes, rather than being frozen at page-mount time.
+ * and allTimelines data refreshes, rather than being frozen at page-mount time.
  *
  * Also asserts that TariffChart receives hoursBack and hoursForward so the
  * chart can use a fixed domain [nowMs - hoursBack*h, nowMs + hoursForward*h]
@@ -45,17 +45,16 @@ vi.mock("../components/controller-v2/charts/TariffChart", () => ({
 
 // ─── Mutable: changed between renders to simulate React Query data refresh ───
 
-let timelineData: unknown[] = [];
+let allTimelinesData: Record<string, unknown[]> = {};
+let tariffsData: unknown[] = [];
 
 vi.mock("../api/hooks", () => ({
   useSim: () => ({ data: baseSim, isLoading: false, isError: false, refetch: vi.fn() }),
-  useTariffs: () => ({ data: [], refetch: vi.fn() }),
-  usePlan: () => ({ data: null, refetch: vi.fn() }),
+  useTariffs: () => ({ data: tariffsData, refetch: vi.fn() }),
   useRequests: () => ({ data: [], refetch: vi.fn() }),
   useSimOverride: () => ({ data: {} }),
   useSetSimOverride: () => ({ mutate: vi.fn() }),
-  useTimeline: () => ({ data: timelineData }),
-  useAllTimelines: () => ({ data: {}, refetch: vi.fn() }),
+  useAllTimelines: () => ({ data: allTimelinesData, refetch: vi.fn() }),
   useSimSchema: () => ({ data: {} }),
 }));
 
@@ -70,7 +69,8 @@ function makeQueryClient() {
 describe("GridTariffCell — now line position", () => {
   afterEach(() => {
     vi.useRealTimers();
-    timelineData = [];
+    allTimelinesData = {};
+    tariffsData = [];
   });
 
   it("nowMs passed to TariffChart advances when timeline data refreshes after time has passed", () => {
@@ -94,8 +94,8 @@ describe("GridTariffCell — now line position", () => {
     // Simulate 5 minutes passing (user keeps the page open)
     act(() => void vi.advanceTimersByTime(5 * 60 * 1000));
 
-    // Simulate useTimeline React Query refetch: swap in a new array reference.
-    timelineData = [];
+    // Simulate useAllTimelines React Query refetch: swap in a new object reference.
+    allTimelinesData = {};
     act(() => {
       rerender(
         <QueryClientProvider client={qc}>
@@ -111,6 +111,46 @@ describe("GridTariffCell — now line position", () => {
     const t5 = new Date("2026-01-01T10:05:00.000Z").getTime();
 
     // nowMs must have advanced to T+5min, not remain frozen at the page-mount value T+0
+    expect(updatedNowMs).toBeGreaterThanOrEqual(t5);
+  });
+
+  it("nowMs advances when tariffsData changes (not just gridTimeline)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T10:00:00.000Z"));
+
+    const qc = makeQueryClient();
+    const { rerender } = render(
+      <QueryClientProvider client={qc}>
+        <ControllerV2Page />
+      </QueryClientProvider>
+    );
+
+    const t0 = new Date("2026-01-01T10:00:00.000Z").getTime();
+    const initialNowMs = parseInt(
+      screen.getByTestId("tariff-chart").getAttribute("data-now-ms")!,
+      10
+    );
+    expect(initialNowMs).toBe(t0);
+
+    // Advance time 5 minutes
+    act(() => void vi.advanceTimersByTime(5 * 60 * 1000));
+
+    // Swap tariffsData to a new array ref — leave allTimelinesData unchanged
+    tariffsData = [];
+    act(() => {
+      rerender(
+        <QueryClientProvider client={qc}>
+          <ControllerV2Page />
+        </QueryClientProvider>
+      );
+    });
+
+    const updatedNowMs = parseInt(
+      screen.getByTestId("tariff-chart").getAttribute("data-now-ms")!,
+      10
+    );
+    const t5 = new Date("2026-01-01T10:05:00.000Z").getTime();
+
     expect(updatedNowMs).toBeGreaterThanOrEqual(t5);
   });
 
