@@ -31,9 +31,7 @@ impl BaseLoad {
     }
 
     pub fn state_values(&self) -> HashMap<String, f64> {
-        let mut m = HashMap::new();
-        m.insert("current_kw".into(), self.current_kw);
-        m
+        HashMap::new()
     }
 
     pub fn default_setpoint(&self) -> f64 {

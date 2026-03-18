@@ -65,7 +65,7 @@ function EvCard({ sim }: { sim: SimSnapshot }) {
   if (!evAsset) return null;
   const soc = evAsset.soc ?? 0;
   const plugged = (evAsset.plugged ?? 0) !== 0;
-  const current_kw = evAsset.current_kw ?? 0;
+  const current_kw = evAsset.power_kw;
   const max_charge_kw = evAsset.max_charge_kw ?? 0;
   const soc_target = evAsset.soc_target ?? 0;
   const battery_kwh = evAsset.battery_kwh ?? 0;
@@ -119,7 +119,7 @@ function HeaterCard({ sim }: { sim: SimSnapshot }) {
   const heaterAsset = sim.assets["heater"];
   if (!heaterAsset) return null;
   const temp_c = heaterAsset.temp_c ?? 0;
-  const current_kw = heaterAsset.current_kw ?? 0;
+  const current_kw = heaterAsset.power_kw;
   const max_kw = heaterAsset.max_kw ?? 0;
   const temp_min_c = heaterAsset.temp_min_c ?? 0;
   const temp_max_c = heaterAsset.temp_max_c ?? 0;
@@ -169,7 +169,7 @@ function PvCard({ sim }: { sim: SimSnapshot }) {
   const pvAsset = sim.assets["pv"];
   if (!pvAsset) return null;
   const irradiance = pvAsset.irradiance ?? 0;
-  const current_kw = pvAsset.current_kw ?? 0;
+  const current_kw = pvAsset.power_kw;
   const rated_kw = pvAsset.rated_kw ?? 0;
   const export_limit_kw = "export_limit_kw" in pvAsset ? pvAsset.export_limit_kw : null;
   return (

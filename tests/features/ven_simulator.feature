@@ -33,9 +33,7 @@ Feature: VEN Simulator
     When I query VEN-1 simulator state
     Then the sim device "ev" has field "power_kw"
     And the sim device "ev" has field "soc"
-    And the sim device "ev" has field "soc_pct"
     And the sim device "ev" has field "plugged"
-    And the sim device "ev" has field "current_kw"
     And the sim device "ev" has field "max_charge_kw"
     And the sim device "ev" has field "soc_target"
     And the sim device "ev" has field "battery_kwh"
@@ -44,7 +42,6 @@ Feature: VEN Simulator
     When I query VEN-1 simulator state
     Then the sim device "heater" has field "power_kw"
     And the sim device "heater" has field "temp_c"
-    And the sim device "heater" has field "current_kw"
     And the sim device "heater" has field "max_kw"
     And the sim device "heater" has field "temp_min_c"
     And the sim device "heater" has field "temp_max_c"
@@ -53,7 +50,6 @@ Feature: VEN Simulator
     When I query VEN-1 simulator state
     Then the sim device "pv" has field "power_kw"
     And the sim device "pv" has field "irradiance"
-    And the sim device "pv" has field "current_kw"
     And the sim device "pv" has field "rated_kw"
 
   Scenario: Battery asset has expected fields in sim response
@@ -61,8 +57,6 @@ Feature: VEN Simulator
     Then the sim response has device "battery"
     And the sim device "battery" has field "power_kw"
     And the sim device "battery" has field "soc"
-    And the sim device "battery" has field "soc_pct"
-    And the sim device "battery" has field "current_kw"
     And the sim device "battery" has field "capacity_kwh"
     And the sim device "battery" has field "max_charge_kw"
     And the sim device "battery" has field "max_discharge_kw"
@@ -72,7 +66,6 @@ Feature: VEN Simulator
     When I query VEN-1 simulator state
     Then the sim response has device "base_load"
     And the sim device "base_load" has field "power_kw"
-    And the sim device "base_load" has field "current_kw"
 
   Scenario: Sensor values come from simulator
     When I wait 3 seconds
