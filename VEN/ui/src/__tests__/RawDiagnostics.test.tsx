@@ -138,9 +138,10 @@ describe("RawDiagnosticsPage", () => {
     expect(screen.getByTestId("diagnostic-cell-timeline")).toBeInTheDocument();
   });
 
-  it("Timeline cell starts with series placeholder text", () => {
+  it("Timeline cell starts with empty series state (chart always rendered, no series available)", () => {
     renderPage();
-    expect(screen.getByText("Select a series and click refresh to load timeline data.")).toBeInTheDocument();
+    expect(screen.getByTestId("timeline-series-chart")).toBeInTheDocument();
+    expect(screen.getByText("No data for selected series")).toBeInTheDocument();
   });
 
   it("Timeline cell refresh button triggers api.allTimelines()", async () => {
