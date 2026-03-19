@@ -11,11 +11,12 @@ import type { AssetTimelinePoint } from "./types";
 import { buildTariffPricePoints, buildPowerPoints } from "./tariffBuilders";
 
 const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
-const EXTENDED_WINDOW = { hoursBack: 0.0, hoursForward: 24.0 };
+const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
 
 interface GridTariffCellProps {
   snapshot: TariffSnapshot;
   gridTimeline: AssetTimelinePoint[];
+  nowMs: number;
   extended: boolean;
   pinned: boolean;
   onTogglePin: () => void;
@@ -25,6 +26,7 @@ interface GridTariffCellProps {
 export function GridTariffCell({
   snapshot,
   gridTimeline,
+  nowMs,
   extended,
   pinned,
   onTogglePin,
@@ -33,8 +35,6 @@ export function GridTariffCell({
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
 
   const { data: tariffsData = [] } = useTariffs();
-  // nowMs updates each time fresh data arrives, matching AssetCell's pattern.
-  const nowMs = useMemo(() => Date.now(), [gridTimeline, tariffsData]);
 
   const tariffTimePoints = useMemo(() => {
     const pricePoints = buildTariffPricePoints(tariffsData);
@@ -95,7 +95,7 @@ export function GridTariffCell({
             {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
           </IconButton>
         </Tooltip>
-        <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h tariff horizon (no past)"}>
+        <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h tariff horizon"}>
           <IconButton
             size="small"
             data-testid="grid-tariff-cell-extend-btn"

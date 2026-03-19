@@ -115,7 +115,7 @@ describe("GridTariffCell — now line position", () => {
     expect(updatedNowMs).toBeGreaterThanOrEqual(t5);
   });
 
-  it("nowMs advances when tariffsData changes (not just gridTimeline)", () => {
+  it("nowMs does NOT advance when only tariffsData changes (nowMs comes from page-level allTimelines)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T10:00:00.000Z"));
 
@@ -133,11 +133,9 @@ describe("GridTariffCell — now line position", () => {
     );
     expect(initialNowMs).toBe(t0);
 
-    // Advance time 5 minutes
+    // Advance time 5 minutes then refresh ONLY tariffsData — allTimelinesData stays the same object
     act(() => void vi.advanceTimersByTime(5 * 60 * 1000));
-
-    // Swap tariffsData to a new array ref — leave allTimelinesData unchanged
-    tariffsData = [];
+    tariffsData = []; // new array reference, but allTimelinesData unchanged
     act(() => {
       rerender(
         <QueryClientProvider client={qc}>
@@ -146,13 +144,13 @@ describe("GridTariffCell — now line position", () => {
       );
     });
 
-    const updatedNowMs = parseInt(
+    const nowMsAfter = parseInt(
       screen.getByTestId("tariff-chart").getAttribute("data-now-ms")!,
       10
     );
-    const t5 = new Date("2026-01-01T10:05:00.000Z").getTime();
 
-    expect(updatedNowMs).toBeGreaterThanOrEqual(t5);
+    // nowMs must remain at T0, not advance — tariffs no longer drive nowMs
+    expect(nowMsAfter).toBe(t0);
   });
 
   it("TariffChart receives hoursBack >= 1 and hoursForward >= 1 for fixed-domain coverage", () => {
@@ -183,7 +181,7 @@ describe("GridTariffCell — expanded state", () => {
     tariffsData = [];
   });
 
-  it("TariffChart receives hoursBack=0 and hoursForward=24 when expand button is clicked", async () => {
+  it("TariffChart receives hoursBack=1 and hoursForward=24 when expand button is clicked", async () => {
     const user = userEvent.setup();
     const qc = makeQueryClient();
     render(
@@ -195,7 +193,7 @@ describe("GridTariffCell — expanded state", () => {
     await user.click(screen.getByTestId("grid-tariff-cell-extend-btn"));
 
     const chart = screen.getByTestId("tariff-chart");
-    expect(parseFloat(chart.getAttribute("data-hours-back") ?? "-1")).toBe(0);
+    expect(parseFloat(chart.getAttribute("data-hours-back") ?? "-1")).toBe(1);
     expect(parseFloat(chart.getAttribute("data-hours-forward") ?? "-1")).toBe(24);
   });
 

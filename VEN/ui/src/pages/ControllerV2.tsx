@@ -156,6 +156,7 @@ export function ControllerV2Page() {
           <GridTariffCell
             snapshot={tariffSnapshot}
             gridTimeline={allTimelines["grid"] ?? []}
+            nowMs={nowMs}
             extended={expandedCells.has("grid:tariff")}
             pinned={false}
             onTogglePin={() => handleTogglePin("grid:tariff")}
