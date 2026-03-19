@@ -19,9 +19,9 @@ Feature: VEN Raw Data Diagnostics Page
     Then the Tariffs chart is displayed
 
   Scenario: Timeline cell shows series dropdown and refreshes
-    When I select "grid" from the Timeline series dropdown
-    And I click the refresh button in the "Timeline" cell
-    Then the Timeline chart is displayed
+    When I click the refresh button in the "Timeline" cell
+    Then the series dropdown lists the available asset series
+    And the Timeline chart is displayed
 
   Scenario: Each cell refreshes independently
     When I click the refresh button in the "Simulator State" cell
