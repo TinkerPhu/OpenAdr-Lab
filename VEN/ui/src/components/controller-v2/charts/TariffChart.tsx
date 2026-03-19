@@ -28,10 +28,21 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
   const tMin = nowMs - hoursBack * 3_600_000;
   const tMax = nowMs + hoursForward * 3_600_000;
 
+  // Clip data to [tMin, tMax]. recharts does not clip rendered data to the XAxis domain —
+  // without this the chart auto-scales to the full data extent (e.g. 6×24h from /tariffs).
+  // Keep the last point before tMin as a left anchor so stepAfter lines start at the
+  // correct value at the left edge of the window.
+  const clipped = (() => {
+    const upToEnd = data.filter((p) => p.ts <= tMax);
+    const lastBefore = upToEnd.filter((p) => p.ts < tMin).slice(-1);
+    const inWindow = upToEnd.filter((p) => p.ts >= tMin);
+    return [...lastBefore, ...inWindow];
+  })();
+
   // Ensure at least a 2-point range so recharts can render the NOW line when data is empty.
   const chartData: TariffTimePoint[] =
-    data.length > 0
-      ? data
+    clipped.length > 0
+      ? clipped
       : [
           { ts: tMin, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
           { ts: tMax, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
