@@ -133,8 +133,8 @@ function buildRateChartData(rates: PlannedRates | undefined): RateChartPoint[] {
   if (!rates || rates.length === 0) return [];
   return rates.map((s) => ({
     ts: new Date(s.interval_start).getTime(),
-    import_price: s.import_price_eur_kwh,
-    export_price: s.export_price_eur_kwh,
+    import_price: s.import_tariff_eur_kwh,
+    export_price: s.export_tariff_eur_kwh,
     co2: s.co2_g_kwh,
   }));
 }

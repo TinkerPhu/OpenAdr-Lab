@@ -51,7 +51,7 @@ export type AssetSummary = {
  * ts is epoch ms (parsed from the ISO string the API returns).
  * values is a sparse map: keys present depend on the asset and data availability.
  * Common keys: "power_kw", "cost_rate_eur_h", "co2_rate_g_h"
- * Grid keys also include: "import_price_eur_kwh", "export_price_eur_kwh", etc.
+ * Grid keys also include: "import_tariff_eur_kwh", "export_tariff_eur_kwh", etc.
  */
 export type AssetTimelinePoint = {
   /** Epoch ms — X-axis value */

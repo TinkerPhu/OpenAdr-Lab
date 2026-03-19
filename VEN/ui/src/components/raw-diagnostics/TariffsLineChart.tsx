@@ -13,8 +13,8 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
 
   const points = data.map((snap) => ({
     ts: new Date(snap.interval_start).getTime(),
-    import_price_eur_kwh: snap.import_price_eur_kwh,
-    export_price_eur_kwh: snap.export_price_eur_kwh,
+    import_tariff_eur_kwh: snap.import_tariff_eur_kwh,
+    export_tariff_eur_kwh: snap.export_tariff_eur_kwh,
     co2_g_kwh: snap.co2_g_kwh,
   }));
 
@@ -40,7 +40,7 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
         <Legend />
         <Line
           type="stepAfter"
-          dataKey="import_price_eur_kwh"
+          dataKey="import_tariff_eur_kwh"
           stroke={CHART_COLORS[0]}
           dot={false}
           connectNulls={false}
@@ -49,7 +49,7 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
         />
         <Line
           type="stepAfter"
-          dataKey="export_price_eur_kwh"
+          dataKey="export_tariff_eur_kwh"
           stroke={CHART_COLORS[1]}
           dot={false}
           connectNulls={false}

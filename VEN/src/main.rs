@@ -221,10 +221,10 @@ async fn main() -> anyhow::Result<()> {
                                             ts: now,
                                             interval_start: first.interval_start,
                                             import_eur_kwh: first
-                                                .import_price_eur_kwh
+                                                .import_tariff_eur_kwh
                                                 .unwrap_or(0.0),
                                             export_eur_kwh: first
-                                                .export_price_eur_kwh
+                                                .export_tariff_eur_kwh
                                                 .unwrap_or(0.0),
                                         },
                                     )
@@ -418,10 +418,10 @@ async fn main() -> anyhow::Result<()> {
                             t.interval_start <= now && now < t.interval_end
                         });
                         let import_price = current_tariff
-                            .and_then(|t| t.import_price_eur_kwh)
+                            .and_then(|t| t.import_tariff_eur_kwh)
                             .unwrap_or(0.0);
                         let export_price = current_tariff
-                            .and_then(|t| t.export_price_eur_kwh)
+                            .and_then(|t| t.export_tariff_eur_kwh)
                             .unwrap_or(0.0);
                         let co2_g_kwh = current_tariff
                             .and_then(|t| t.co2_g_kwh)

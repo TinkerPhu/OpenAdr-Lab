@@ -5,8 +5,8 @@ import type { AssetTimelinePoint, TariffTimePoint } from "./types";
 export function buildTariffPricePoints(tariffs: ApiTariffSnapshot[]): TariffTimePoint[] {
   return tariffs.map((t) => ({
     ts: new Date(t.interval_start).getTime(),
-    importPriceEurKwh: t.import_price_eur_kwh ?? null,
-    exportPriceEurKwh: t.export_price_eur_kwh ?? null,
+    importPriceEurKwh: t.import_tariff_eur_kwh ?? null,
+    exportPriceEurKwh: t.export_tariff_eur_kwh ?? null,
     co2GKwh: t.co2_g_kwh ?? null,
     totalCostRateEurH: null,
     gridPowerKw: null,

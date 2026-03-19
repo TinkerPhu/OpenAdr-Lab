@@ -41,10 +41,8 @@ export function findCurrentTariff(
 
   let best: ApiTariffSnapshot | null = null;
   for (const t of sorted) {
-    const start = new Date(t.interval_start).getTime();
-    const end = new Date(t.interval_end).getTime();
-    if (tsMs >= start && tsMs < end) return t;
-    if (start <= tsMs) best = t;
+    if (new Date(t.interval_start).getTime() <= tsMs) best = t;
+    else break;
   }
   return best;
 }
@@ -73,8 +71,8 @@ export function deriveAssetSummaries(
   ): AssetSummary {
     const costRateEurH =
       powerKw >= 0
-        ? powerKw * (currentTariff?.import_price_eur_kwh ?? 0)
-        : Math.abs(powerKw) * (currentTariff?.export_price_eur_kwh ?? 0);
+        ? powerKw * (currentTariff?.import_tariff_eur_kwh ?? 0)
+        : Math.abs(powerKw) * (currentTariff?.export_tariff_eur_kwh ?? 0);
     const co2RateGH = powerKw * (currentTariff?.co2_g_kwh ?? 0);
 
     const forecastEnergyKwh = computeForecastEnergy(allTimelines[assetId] ?? [], nowMs);
@@ -189,8 +187,8 @@ export function deriveTariffSnapshot(
 ): TariffSnapshot {
   const t = findCurrentTariff(tariffs, nowMs);
   const gridPowerKw = sim.grid.net_power_w / 1000;
-  const importP = t?.import_price_eur_kwh ?? null;
-  const exportP = t?.export_price_eur_kwh ?? null;
+  const importP = t?.import_tariff_eur_kwh ?? null;
+  const exportP = t?.export_tariff_eur_kwh ?? null;
   const totalCostRateEurH =
     gridPowerKw >= 0
       ? gridPowerKw * (importP ?? 0)

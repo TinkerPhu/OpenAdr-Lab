@@ -78,7 +78,7 @@ pub fn build_asset_timeline(
                 // Grid virtual asset: net site power and tariff keys.
                 let net_kw = slot.net_import_kw - slot.net_export_kw;
                 values.insert("power_kw".into(), net_kw);
-                let cost_rate = net_kw.max(0.0) * slot.import_price_eur_kwh;
+                let cost_rate = net_kw.max(0.0) * slot.import_tariff_eur_kwh;
                 values.insert("cost_rate_eur_h".into(), cost_rate);
                 let co2_rate = net_kw.max(0.0) * slot.co2_g_kwh;
                 values.insert("co2_rate_g_h".into(), co2_rate);
@@ -96,7 +96,7 @@ pub fn build_asset_timeline(
                     .map(|a| a.power_kw)
                     .unwrap_or(0.0);
                 values.insert("power_kw".into(), power_kw);
-                let cost_rate = power_kw * slot.import_price_eur_kwh;
+                let cost_rate = power_kw * slot.import_tariff_eur_kwh;
                 values.insert("cost_rate_eur_h".into(), cost_rate);
                 let co2_rate = power_kw * slot.co2_g_kwh;
                 values.insert("co2_rate_g_h".into(), co2_rate);
@@ -183,8 +183,8 @@ mod tests {
             start,
             end: start + Duration::seconds(300),
             slot_type: SlotType::Firm,
-            import_price_eur_kwh: 0.20,
-            export_price_eur_kwh: 0.05,
+            import_tariff_eur_kwh: 0.20,
+            export_tariff_eur_kwh: 0.05,
             co2_g_kwh: 300.0,
             grid_effective_cost: 0.26,
             rate_estimated: false,
@@ -309,7 +309,7 @@ mod tests {
         let mut slot = make_slot(60, "", 0.0, now);
         slot.net_import_kw = 2.0;
         slot.net_export_kw = 0.0;
-        slot.import_price_eur_kwh = 0.25;
+        slot.import_tariff_eur_kwh = 0.25;
         slot.co2_g_kwh = 350.0;
         plan.firm_slots.push(slot);
 

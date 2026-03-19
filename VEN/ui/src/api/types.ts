@@ -127,11 +127,9 @@ export type ControlDescriptor = {
 
 export type TariffSnapshot = {
   interval_start: string;
-  interval_end: string;
-  import_price_eur_kwh: number | null;
-  export_price_eur_kwh: number | null;
+  import_tariff_eur_kwh: number | null;
+  export_tariff_eur_kwh: number | null;
   co2_g_kwh: number | null;
-  source_event_id: string | null;
 };
 
 /** @deprecated Renamed to TariffSnapshot. Kept as alias for backward compat with Controller.tsx. */
@@ -166,8 +164,8 @@ export type PlanTimeSlot = {
   start: string;
   end: string;
   slot_type: "FIRM" | "FLEXIBLE";
-  import_price_eur_kwh: number;
-  export_price_eur_kwh: number;
+  import_tariff_eur_kwh: number;
+  export_tariff_eur_kwh: number;
   co2_g_kwh: number;
   import_cap_kw: number;
   export_cap_kw: number;

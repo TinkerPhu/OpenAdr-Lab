@@ -170,13 +170,13 @@ def step_plan_flexible_slots_nonempty(context):
 
 @then("the plan firm_slots have import prices populated")
 def step_plan_firm_slots_have_prices(context):
-    """Verify every FIRM slot has a non-zero import_price_eur_kwh."""
+    """Verify every FIRM slot has a non-zero import_tariff_eur_kwh."""
     plan = context.ven_plan
     firm = plan.get("firm_slots", [])
     assert firm, "No firm_slots in plan"
     for slot in firm:
-        price = slot.get("import_price_eur_kwh")
-        assert price is not None, f"Slot missing import_price_eur_kwh: {slot}"
+        price = slot.get("import_tariff_eur_kwh")
+        assert price is not None, f"Slot missing import_tariff_eur_kwh: {slot}"
 
 
 @then("all plan firm slots have import_cap_kw of at most {cap:f}")

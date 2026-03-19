@@ -12,11 +12,9 @@ describe("buildTariffPricePoints", () => {
   function makeTariff(overrides: Partial<ApiTariffSnapshot> = {}): ApiTariffSnapshot {
     return {
       interval_start: "2026-01-01T10:00:00Z",
-      interval_end: "2026-01-01T11:00:00Z",
-      import_price_eur_kwh: 0.25,
-      export_price_eur_kwh: 0.10,
+      import_tariff_eur_kwh: 0.25,
+      export_tariff_eur_kwh: 0.10,
       co2_g_kwh: 350,
-      source_event_id: null,
       ...overrides,
     };
   }
@@ -31,13 +29,13 @@ describe("buildTariffPricePoints", () => {
     expect(result[0].co2GKwh).toBe(420);
   });
 
-  it("preserves null import_price_eur_kwh as null", () => {
-    const result = buildTariffPricePoints([makeTariff({ import_price_eur_kwh: null })]);
+  it("preserves null import_tariff_eur_kwh as null", () => {
+    const result = buildTariffPricePoints([makeTariff({ import_tariff_eur_kwh: null })]);
     expect(result[0].importPriceEurKwh).toBeNull();
   });
 
-  it("preserves null export_price_eur_kwh as null", () => {
-    const result = buildTariffPricePoints([makeTariff({ export_price_eur_kwh: null })]);
+  it("preserves null export_tariff_eur_kwh as null", () => {
+    const result = buildTariffPricePoints([makeTariff({ export_tariff_eur_kwh: null })]);
     expect(result[0].exportPriceEurKwh).toBeNull();
   });
 
@@ -103,19 +101,15 @@ describe("merge and sort tariff + power points", () => {
     const tariffPoints = buildTariffPricePoints([
       {
         interval_start: new Date(100).toISOString(),
-        interval_end: new Date(200).toISOString(),
-        import_price_eur_kwh: 0.2,
-        export_price_eur_kwh: null,
+        import_tariff_eur_kwh: 0.2,
+        export_tariff_eur_kwh: null,
         co2_g_kwh: null,
-        source_event_id: null,
       },
       {
         interval_start: new Date(300).toISOString(),
-        interval_end: new Date(400).toISOString(),
-        import_price_eur_kwh: 0.3,
-        export_price_eur_kwh: null,
+        import_tariff_eur_kwh: 0.3,
+        export_tariff_eur_kwh: null,
         co2_g_kwh: null,
-        source_event_id: null,
       },
     ]);
     const powerPoints = buildPowerPoints([{ ts: 200, values: { power_kw: 5.0 } }]);
@@ -128,11 +122,9 @@ describe("merge and sort tariff + power points", () => {
     const tariffPoints = buildTariffPricePoints([
       {
         interval_start: new Date(100).toISOString(),
-        interval_end: new Date(200).toISOString(),
-        import_price_eur_kwh: 0.2,
-        export_price_eur_kwh: 0.1,
+        import_tariff_eur_kwh: 0.2,
+        export_tariff_eur_kwh: 0.1,
         co2_g_kwh: 350,
-        source_event_id: null,
       },
     ]);
     const powerPoints = buildPowerPoints([
