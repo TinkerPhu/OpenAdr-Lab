@@ -1,6 +1,7 @@
 import {
-  AreaChart,
+  ComposedChart,
   Area,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -30,6 +31,7 @@ const EMPTY_PT = (): Omit<StackedAreaPoint, "ts"> => ({
   pv_pos: 0, pv_neg: 0,
   battery_pos: 0, battery_neg: 0,
   base_load_pos: 0, base_load_neg: 0,
+  gridPowerKw: null,
 });
 
 export function StackedAreaChart({
@@ -58,7 +60,7 @@ export function StackedAreaChart({
   return (
     <div data-testid="accumulated-area-chart" style={{ width: "100%", height: 160 }}>
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
           <XAxis
             dataKey="ts"
@@ -109,6 +111,18 @@ export function StackedAreaChart({
             />
           ))}
 
+          {/* Grid power — net import/export sum of all assets */}
+          <Line
+            type="stepAfter"
+            dataKey="gridPowerKw"
+            name="Grid [kW]"
+            stroke="#212121"
+            strokeWidth={2}
+            dot={false}
+            connectNulls={false}
+            isAnimationActive={false}
+          />
+
           {/* NOW reference line */}
           <ReferenceLine
             x={nowMs}
@@ -116,7 +130,7 @@ export function StackedAreaChart({
             strokeDasharray="3 3"
             label={{ value: "NOW", position: "top", fontSize: 9, fill: "#f44336" }}
           />
-        </AreaChart>
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );

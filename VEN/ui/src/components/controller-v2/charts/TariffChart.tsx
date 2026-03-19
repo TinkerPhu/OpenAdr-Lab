@@ -82,7 +82,6 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             tick={{ fontSize: 10 }}
           />
           <YAxis yAxisId="tariff" tick={{ fontSize: 10 }} width={40} />
-          <YAxis yAxisId="power" orientation="right" tick={{ fontSize: 10 }} width={40} />
           <Tooltip
             labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
             formatter={(value: number, name: string) => [value?.toFixed(4), name]}
@@ -99,7 +98,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             strokeDasharray="5 5"
             strokeWidth={1.5}
             dot={false}
-            connectNulls={false}
+            connectNulls={true}
             isAnimationActive={false}
           />
 
@@ -113,7 +112,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             strokeDasharray="2 2"
             strokeWidth={1.5}
             dot={false}
-            connectNulls={false}
+            connectNulls={true}
             isAnimationActive={false}
           />
 
@@ -127,7 +126,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             strokeDasharray="5 5"
             strokeWidth={1.5}
             dot={false}
-            connectNulls={false}
+            connectNulls={true}
             isAnimationActive={false}
           />
 
@@ -141,20 +140,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             strokeDasharray="5 5"
             strokeWidth={1.5}
             dot={false}
-            connectNulls={false}
-            isAnimationActive={false}
-          />
-
-          {/* Grid power [kW] — black solid */}
-          <Line
-            yAxisId="power"
-            type="stepAfter"
-            dataKey="gridPowerKw"
-            name="Grid power [kW]"
-            stroke="#212121"
-            strokeWidth={2}
-            dot={false}
-            connectNulls={false}
+            connectNulls={true}
             isAnimationActive={false}
           />
 
