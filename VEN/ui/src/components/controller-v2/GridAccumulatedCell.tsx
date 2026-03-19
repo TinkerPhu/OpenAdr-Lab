@@ -13,6 +13,24 @@ const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
 
 const KNOWN_ASSETS: AssetId[] = ["ev", "heater", "pv", "battery", "base_load"];
 
+/** Binary search: index of the point with ts closest to `target` within `toleranceMs`. */
+function findNearest(points: AssetTimelinePoint[], target: number, toleranceMs: number): AssetTimelinePoint | undefined {
+  let lo = 0;
+  let hi = points.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].ts < target) lo = mid + 1;
+    else hi = mid;
+  }
+  // lo is the first index with ts >= target; also check lo-1 for the closest
+  const candidates = [points[lo - 1], points[lo]].filter(Boolean) as AssetTimelinePoint[];
+  const best = candidates.reduce<AssetTimelinePoint | undefined>((prev, cur) => {
+    if (!prev) return cur;
+    return Math.abs(cur.ts - target) < Math.abs(prev.ts - target) ? cur : prev;
+  }, undefined);
+  return best && Math.abs(best.ts - target) <= toleranceMs ? best : undefined;
+}
+
 function buildStackedFromAllTimelines(
   allTimelines: Record<string, AssetTimelinePoint[]>
 ): StackedAreaPoint[] {
@@ -25,6 +43,12 @@ function buildStackedFromAllTimelines(
     for (const p of (allTimelines[assetId] ?? [])) tsSet.add(p.ts);
   }
   const sortedTs = [...tsSet].sort((a, b) => a - b);
+
+  // Tolerance for nearest-neighbour lookup: half the typical sample interval (15 s).
+  // All assets are pushed in the same sim tick, so any timestamp drift is sub-second.
+  // Independent per-asset downsampling can shift timestamps by up to one stride (~30 s),
+  // so 15 s catches genuine alignment while avoiding cross-slot false matches.
+  const TOLERANCE_MS = 15_000;
 
   const emptyPt = (): Omit<StackedAreaPoint, "ts"> => ({
     ev_pos: 0, ev_neg: 0,
@@ -39,7 +63,7 @@ function buildStackedFromAllTimelines(
     for (const assetId of KNOWN_ASSETS) {
       const points = allTimelines[assetId];
       if (!points) continue;
-      const match = points.find((p) => p.ts === ts);
+      const match = findNearest(points, ts, TOLERANCE_MS);
       const kw = match?.values["power_kw"] ?? 0;
       const key = assetId as AssetId;
       pt[`${key}_pos` as keyof StackedAreaPoint] = Math.max(0, kw) as never;
