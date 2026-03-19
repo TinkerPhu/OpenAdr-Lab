@@ -100,6 +100,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             strokeWidth={1.5}
             dot={false}
             connectNulls={false}
+            isAnimationActive={false}
           />
 
           {/* Import CO₂eq tariff [g CO₂eq/kWh] — red dotted */}
@@ -113,6 +114,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             strokeWidth={1.5}
             dot={false}
             connectNulls={false}
+            isAnimationActive={false}
           />
 
           {/* Export tariff [€/kWh] — green dashed */}
@@ -126,6 +128,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             strokeWidth={1.5}
             dot={false}
             connectNulls={false}
+            isAnimationActive={false}
           />
 
           {/* Total cost rate [€/h] — black dashed */}
@@ -139,6 +142,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             strokeWidth={1.5}
             dot={false}
             connectNulls={false}
+            isAnimationActive={false}
           />
 
           {/* Grid power [kW] — black solid */}
@@ -151,6 +155,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             strokeWidth={2}
             dot={false}
             connectNulls={false}
+            isAnimationActive={false}
           />
 
           {/* NOW reference line */}

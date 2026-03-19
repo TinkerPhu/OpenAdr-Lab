@@ -88,6 +88,7 @@ export function StackedAreaChart({
               fillOpacity={0.6}
               dot={false}
               connectNulls={false}
+              isAnimationActive={false}
             />
           ))}
 
@@ -104,6 +105,7 @@ export function StackedAreaChart({
               fillOpacity={0.3}
               dot={false}
               connectNulls={false}
+              isAnimationActive={false}
             />
           ))}
 

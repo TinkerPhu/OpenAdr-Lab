@@ -62,6 +62,7 @@ export function TimelineSeriesChart({ data, selectedSeries, onSeriesChange }: Ti
                 dot={false}
                 connectNulls={false}
                 name="power_kw"
+                isAnimationActive={false}
               />
             </LineChart>
           </ResponsiveContainer>
