@@ -96,11 +96,6 @@ pub fn parse_rate_snapshots(events: &[Value], now: DateTime<Utc>) -> Vec<TariffS
         std::collections::BTreeMap::new();
 
     for event in events {
-        let event_id = event
-            .get("id")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
         let intervals = match event.get("intervals").and_then(|v| v.as_array()) {
             Some(arr) => arr,
             None => continue,
@@ -188,19 +183,28 @@ pub fn parse_rate_snapshots(events: &[Value], now: DateTime<Utc>) -> Vec<TariffS
                 let end = start + Duration::seconds(*dur);
                 let key = (start.timestamp(), end.timestamp());
 
+                // CONFLICT NOTE: Multiple active events can define prices for the same interval
+                // (e.g. one PRICE event + one GHG event, or two PRICE events from different programs).
+                // This merge uses last-write-wins: whichever event is processed last in the loop
+                // overwrites a previously-set value for the same field.
+                //
+                // OpenADR 3 spec (§ 6.6) defines event `priority` (lower = higher priority) but
+                // does not specify how to resolve two ACTIVE events with overlapping price payloads.
+                // We do not currently sort by priority before merging — a known limitation.
+                // If strict priority-based resolution is needed, sort `events` by ascending priority
+                // before the outer loop.
                 let entry = map.entry(key).or_insert_with(|| TariffSnapshot {
                     interval_start: start,
                     interval_end: end,
-                    import_price_eur_kwh: None,
-                    export_price_eur_kwh: None,
+                    import_tariff_eur_kwh: None,
+                    export_tariff_eur_kwh: None,
                     co2_g_kwh: None,
-                    source_event_id: event_id.clone(),
                 });
 
                 for (t, v) in payloads {
                     match t.as_str() {
-                        "PRICE" => entry.import_price_eur_kwh = Some(*v),
-                        "EXPORT_PRICE" => entry.export_price_eur_kwh = Some(*v),
+                        "PRICE" => entry.import_tariff_eur_kwh = Some(*v),
+                        "EXPORT_PRICE" => entry.export_tariff_eur_kwh = Some(*v),
                         "GHG" => entry.co2_g_kwh = Some(*v),
                         _ => {}
                     }
@@ -212,8 +216,8 @@ pub fn parse_rate_snapshots(events: &[Value], now: DateTime<Utc>) -> Vec<TariffS
     let mut result: Vec<TariffSnapshot> = map
         .into_values()
         .filter(|s| {
-            s.import_price_eur_kwh.is_some()
-                || s.export_price_eur_kwh.is_some()
+            s.import_tariff_eur_kwh.is_some()
+                || s.export_tariff_eur_kwh.is_some()
                 || s.co2_g_kwh.is_some()
         })
         .collect();
@@ -506,9 +510,9 @@ mod tests {
         ]);
         let snapshots = parse_rate_snapshots(events.as_array().unwrap(), Utc::now());
         assert_eq!(snapshots.len(), 3);
-        assert_eq!(snapshots[0].import_price_eur_kwh, Some(0.25));
-        assert_eq!(snapshots[1].import_price_eur_kwh, Some(0.30));
-        assert_eq!(snapshots[2].import_price_eur_kwh, Some(0.35));
+        assert_eq!(snapshots[0].import_tariff_eur_kwh, Some(0.25));
+        assert_eq!(snapshots[1].import_tariff_eur_kwh, Some(0.30));
+        assert_eq!(snapshots[2].import_tariff_eur_kwh, Some(0.35));
     }
 
     #[test]
@@ -558,7 +562,7 @@ mod tests {
         ]);
         let snapshots = parse_rate_snapshots(events.as_array().unwrap(), Utc::now());
         assert_eq!(snapshots.len(), 1);
-        assert_eq!(snapshots[0].export_price_eur_kwh, Some(0.10));
+        assert_eq!(snapshots[0].export_tariff_eur_kwh, Some(0.10));
     }
 
     #[test]
@@ -712,7 +716,7 @@ mod tests {
             .iter()
             .find(|s| s.interval_start <= now && now < s.interval_end);
         assert!(current.is_some(), "no interval covers now");
-        assert_eq!(current.unwrap().import_price_eur_kwh, Some(0.10));
+        assert_eq!(current.unwrap().import_tariff_eur_kwh, Some(0.10));
     }
 
     #[test]
@@ -780,7 +784,7 @@ mod tests {
             .iter()
             .find(|s| s.interval_start <= now && now < s.interval_end);
         assert!(current.is_some(), "no interval covers now at {}", now);
-        assert_eq!(current.unwrap().import_price_eur_kwh, Some(14.0));
+        assert_eq!(current.unwrap().import_tariff_eur_kwh, Some(14.0));
     }
 
     #[test]

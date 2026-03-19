@@ -43,8 +43,8 @@ pub fn record_tick(
     let applicable = tariffs
         .iter()
         .find(|r| r.interval_start <= now && now < r.interval_end);
-    let import_price = applicable
-        .and_then(|r| r.import_price_eur_kwh)
+    let import_tariff = applicable
+        .and_then(|r| r.import_tariff_eur_kwh)
         .unwrap_or(DEFAULT_IMPORT_PRICE);
     let co2_rate = applicable
         .and_then(|r| r.co2_g_kwh)
@@ -62,7 +62,7 @@ pub fn record_tick(
             .or_insert_with(|| AssetLedgerEntry::new(asset_id));
         entry.energy_kwh += kw.abs() * dt_h;
         if kw > 0.0 {
-            entry.cost_eur += kw * dt_h * import_price;
+            entry.cost_eur += kw * dt_h * import_tariff;
             entry.co2_g += kw * dt_h * co2_rate;
         }
         entry.updated_at = Some(now);

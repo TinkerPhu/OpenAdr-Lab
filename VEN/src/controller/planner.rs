@@ -130,10 +130,10 @@ fn build_grid(
         let start = now + Duration::seconds((i as i64) * step_s as i64);
         let end = start + Duration::seconds(step_s as i64);
 
-        let import_price = rate_import_at(rates, start).unwrap_or(DEFAULT_IMPORT_PRICE);
-        let export_price = rate_export_at(rates, start).unwrap_or(DEFAULT_EXPORT_PRICE);
-        let co2 = rate_co2_at(rates, start).unwrap_or(DEFAULT_CO2_G_KWH);
-        let grid_eff = import_price + co2 * CO2_WEIGHT;
+        let import_tariff = tariff_import_at(rates, start).unwrap_or(DEFAULT_IMPORT_PRICE);
+        let export_tariff = tariff_export_at(rates, start).unwrap_or(DEFAULT_EXPORT_PRICE);
+        let co2 = tariff_co2_at(rates, start).unwrap_or(DEFAULT_CO2_G_KWH);
+        let grid_eff = import_tariff + co2 * CO2_WEIGHT;
 
         let pv_kw = pv_forecast(profile, start);
         let net = baseline_kw - pv_kw; // positive = need to import, negative = surplus
@@ -152,8 +152,8 @@ fn build_grid(
             start,
             end,
             slot_type,
-            import_price_eur_kwh: import_price,
-            export_price_eur_kwh: export_price,
+            import_tariff_eur_kwh: import_tariff,
+            export_tariff_eur_kwh: export_tariff,
             co2_g_kwh: co2,
             grid_effective_cost: grid_eff,
             rate_estimated: rates_empty,
@@ -241,8 +241,8 @@ fn allocate_consumption(
 
             let surplus_frac =
                 (slot.surplus_available_kw / packet.desired_power_kw.max(1e-9)).min(1.0);
-            let eff_cost = slot.import_price_eur_kwh * (1.0 - surplus_frac)
-                + slot.export_price_eur_kwh * surplus_frac;
+            let eff_cost = slot.import_tariff_eur_kwh * (1.0 - surplus_frac)
+                + slot.export_tariff_eur_kwh * surplus_frac;
 
             let eligible = comfort_bid >= eff_cost || time_pressure >= 2.0;
             let marginal_value = comfort_bid * time_pressure;
@@ -293,8 +293,8 @@ fn allocate_consumption(
             let surplus = slot.surplus_available_kw.min(power);
             let grid = (power - surplus).max(0.0);
             let e = power * slot_h;
-            let c = surplus * slot.export_price_eur_kwh * slot_h
-                + grid * slot.import_price_eur_kwh * slot_h;
+            let c = surplus * slot.export_tariff_eur_kwh * slot_h
+                + grid * slot.import_tariff_eur_kwh * slot_h;
             let co2v = grid * slot.co2_g_kwh * slot_h;
             (power, surplus, grid, c, co2v, e)
         };
@@ -339,8 +339,8 @@ fn allocate_battery(slots: &mut Vec<PlanTimeSlot>, battery: &BatteryConfig, slot
         return;
     }
 
-    // Compute median price as arbitrage threshold
-    let mut prices: Vec<f64> = slots.iter().map(|s| s.import_price_eur_kwh).collect();
+    // Compute median tariff as arbitrage threshold
+    let mut prices: Vec<f64> = slots.iter().map(|s| s.import_tariff_eur_kwh).collect();
     prices.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let median = prices[n / 2];
     let eff = battery.round_trip_efficiency.sqrt();
@@ -350,7 +350,7 @@ fn allocate_battery(slots: &mut Vec<PlanTimeSlot>, battery: &BatteryConfig, slot
     let min_soc = battery.min_soc;
 
     for slot in slots.iter_mut() {
-        let price = slot.import_price_eur_kwh;
+        let price = slot.import_tariff_eur_kwh;
 
         if price < median * eff {
             // Cheap slot: charge from surplus or cheap grid
@@ -450,7 +450,7 @@ fn build_envelopes(
         let window_start = eligible[0].start;
         let window_end = eligible[n - 1].end;
 
-        let avg_import = eligible.iter().map(|s| s.import_price_eur_kwh).sum::<f64>() / n as f64;
+        let avg_import = eligible.iter().map(|s| s.import_tariff_eur_kwh).sum::<f64>() / n as f64;
         let avg_co2 = eligible.iter().map(|s| s.co2_g_kwh).sum::<f64>() / n as f64;
 
         let fill_now = packet.fill();
@@ -535,23 +535,23 @@ fn summarize_firm(slots: &[PlanTimeSlot], slot_h: f64) -> FirmSummary {
     s
 }
 
-// ─── Rate helpers ─────────────────────────────────────────────────────────────
+// ─── Tariff helpers ───────────────────────────────────────────────────────────
 
-fn rate_import_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
+fn tariff_import_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
     rates
         .iter()
         .find(|r| r.interval_start <= ts && ts < r.interval_end)
-        .and_then(|r| r.import_price_eur_kwh)
+        .and_then(|r| r.import_tariff_eur_kwh)
 }
 
-fn rate_export_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
+fn tariff_export_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
     rates
         .iter()
         .find(|r| r.interval_start <= ts && ts < r.interval_end)
-        .and_then(|r| r.export_price_eur_kwh)
+        .and_then(|r| r.export_tariff_eur_kwh)
 }
 
-fn rate_co2_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
+fn tariff_co2_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
     rates
         .iter()
         .find(|r| r.interval_start <= ts && ts < r.interval_end)

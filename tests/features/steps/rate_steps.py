@@ -195,7 +195,7 @@ def step_wait_ven_rates_co2(context):
     )
 
 
-@when("I wait for the VEN /tariffs endpoint to have a snapshot with export_price_eur_kwh")
+@when("I wait for the VEN /tariffs endpoint to have a snapshot with export_tariff_eur_kwh")
 def step_wait_ven_rates_export_price(context):
     def fetch():
         resp = ven_get("/tariffs")
@@ -205,10 +205,10 @@ def step_wait_ven_rates_export_price(context):
 
     context.ven_rates = poll_until(
         fetch,
-        lambda rates: isinstance(rates, list) and any(s.get("export_price_eur_kwh") is not None for s in rates),
+        lambda rates: isinstance(rates, list) and any(s.get("export_tariff_eur_kwh") is not None for s in rates),
         timeout=30,
         interval=3,
-        description="VEN /tariffs has a snapshot with export_price_eur_kwh",
+        description="VEN /tariffs has a snapshot with export_tariff_eur_kwh",
     )
 
 
@@ -240,13 +240,13 @@ def step_get_capacity(context):
 # Then: assertions
 # ---------------------------------------------------------------------------
 
-@then("all rate snapshots have an import_price_eur_kwh value")
+@then("all rate snapshots have an import_tariff_eur_kwh value")
 def step_all_snapshots_have_import_price(context):
     rates = context.ven_rates
     assert rates, "No rate snapshots returned"
     for snap in rates:
-        assert snap.get("import_price_eur_kwh") is not None, (
-            f"Rate snapshot missing import_price_eur_kwh: {snap}"
+        assert snap.get("import_tariff_eur_kwh") is not None, (
+            f"Rate snapshot missing import_tariff_eur_kwh: {snap}"
         )
 
 
@@ -258,11 +258,11 @@ def step_at_least_one_snapshot_has_co2(context):
     )
 
 
-@then("at least one rate snapshot has an export_price_eur_kwh value")
+@then("at least one rate snapshot has an export_tariff_eur_kwh value")
 def step_at_least_one_snapshot_has_export_price(context):
     rates = context.ven_rates
-    assert any(s.get("export_price_eur_kwh") is not None for s in rates), (
-        f"No rate snapshot has export_price_eur_kwh. Snapshots: {rates}"
+    assert any(s.get("export_tariff_eur_kwh") is not None for s in rates), (
+        f"No rate snapshot has export_tariff_eur_kwh. Snapshots: {rates}"
     )
 
 

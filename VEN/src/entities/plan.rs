@@ -53,10 +53,10 @@ pub struct PlanTimeSlot {
     pub slot_type: SlotType,
 
     // --- External Conditions (from RateSnapshot) ---
-    /// Import price for this slot (€/kWh)
-    pub import_price_eur_kwh: f64,
-    /// Export price for this slot (€/kWh)
-    pub export_price_eur_kwh: f64,
+    /// Import tariff for this slot (€/kWh)
+    pub import_tariff_eur_kwh: f64,
+    /// Export tariff for this slot (€/kWh)
+    pub export_tariff_eur_kwh: f64,
     /// CO2 intensity for this slot (g/kWh)
     pub co2_g_kwh: f64,
     /// = ImportPrice + (CO2Rate × CO2Weight); used for FLEXIBLE slot scoring and storage arbitrage
