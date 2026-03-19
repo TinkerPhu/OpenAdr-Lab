@@ -56,6 +56,7 @@ function buildStackedFromAllTimelines(
     pv_pos: 0, pv_neg: 0,
     battery_pos: 0, battery_neg: 0,
     base_load_pos: 0, base_load_neg: 0,
+    gridPowerKw: null,
   });
 
   return sortedTs.map((ts) => {
@@ -69,6 +70,11 @@ function buildStackedFromAllTimelines(
       pt[`${key}_pos` as keyof StackedAreaPoint] = Math.max(0, kw) as never;
       pt[`${key}_neg` as keyof StackedAreaPoint] = Math.min(0, kw) as never;
     }
+    // Grid power: nearest-neighbour lookup, same tolerance as assets
+    const gridPoints = allTimelines["grid"] ?? [];
+    const gridMatch = findNearest(gridPoints, ts, TOLERANCE_MS);
+    pt.gridPowerKw = gridMatch?.values["power_kw"] ?? null;
+
     return pt;
   });
 }
