@@ -36,7 +36,27 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
     const upToEnd = data.filter((p) => p.ts <= tMax);
     const lastBefore = upToEnd.filter((p) => p.ts < tMin).slice(-1);
     const inWindow = upToEnd.filter((p) => p.ts >= tMin);
-    return [...lastBefore, ...inWindow];
+    const windowed = [...lastBefore, ...inWindow];
+
+    // Carry-forward the last known tariff prices to tMax. The merged dataset contains
+    // power points (gridTimeline) with null tariff fields after the last tariff snapshot.
+    // connectNulls=false stops the stepAfter line at the last non-null value rather than
+    // extending to the right edge — a sentinel at tMax prevents this gap.
+    const lastTariff = [...windowed].reverse().find(
+      (p) => p.importPriceEurKwh !== null || p.exportPriceEurKwh !== null || p.co2GKwh !== null
+    );
+    if (lastTariff) {
+      windowed.push({
+        ts: tMax,
+        importPriceEurKwh: lastTariff.importPriceEurKwh,
+        exportPriceEurKwh: lastTariff.exportPriceEurKwh,
+        co2GKwh: lastTariff.co2GKwh,
+        totalCostRateEurH: null,
+        gridPowerKw: null,
+      });
+    }
+
+    return windowed;
   })();
 
   // Ensure at least a 2-point range so recharts can render the NOW line when data is empty.
