@@ -120,6 +120,7 @@ export type StackedAreaPoint = {
   battery_neg: number;
   base_load_pos: number;
   base_load_neg: number;
+  gridPowerKw: number | null;
 };
 
 // ─── UI state ────────────────────────────────────────────────────────────────
