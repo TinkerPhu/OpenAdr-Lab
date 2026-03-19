@@ -18,6 +18,7 @@ import { SimulationPage } from "./pages/Simulation";
 import { ControllerPage } from "./pages/Controller";
 import { ControllerV2Page } from "./pages/ControllerV2";
 import { UserRequestsPage } from "./pages/UserRequests";
+import { RawDiagnosticsPage } from "./pages/RawDiagnostics";
 
 const DEFAULT_VENS = [
   { label: "VEN1", url: import.meta.env.VITE_VEN_1_URL || "http://pi4server.local:8211", venName: "ven-1" },
@@ -236,6 +237,13 @@ export default function App() {
             >
               Metrics
             </Button>
+            <Button
+              component={Link}
+              to="/raw-diagnostics"
+              data-testid="nav-raw-diagnostics"
+            >
+              Raw Data
+            </Button>
           </Stack>
 
           <Routes>
@@ -250,6 +258,7 @@ export default function App() {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/trace" element={<TracePage />} />
             <Route path="/metrics" element={<MetricsPage />} />
+            <Route path="/raw-diagnostics" element={<RawDiagnosticsPage />} />
           </Routes>
         </Container>
       </BrowserRouter>
