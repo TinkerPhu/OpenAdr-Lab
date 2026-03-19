@@ -74,6 +74,7 @@ export function AssetTimelineChart({
           strokeWidth={2}
           dot={false}
           connectNulls={false}
+          isAnimationActive={false}
         />
 
         {/* Cost rate — dashed */}
@@ -87,6 +88,7 @@ export function AssetTimelineChart({
           strokeDasharray="5 5"
           dot={false}
           connectNulls={false}
+          isAnimationActive={false}
         />
 
         {/* CO₂eq rate — dotted */}
@@ -100,6 +102,7 @@ export function AssetTimelineChart({
           strokeDasharray="2 2"
           dot={false}
           connectNulls={false}
+          isAnimationActive={false}
         />
 
         {/* NOW reference line */}

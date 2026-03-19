@@ -45,6 +45,7 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
           dot={false}
           connectNulls={false}
           name="import €/kWh"
+          isAnimationActive={false}
         />
         <Line
           type="stepAfter"
@@ -53,6 +54,7 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
           dot={false}
           connectNulls={false}
           name="export €/kWh"
+          isAnimationActive={false}
         />
         <Line
           type="stepAfter"
@@ -61,6 +63,7 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
           dot={false}
           connectNulls={false}
           name="CO₂ g/kWh"
+          isAnimationActive={false}
         />
       </LineChart>
     </ResponsiveContainer>

@@ -30,6 +30,7 @@ export function SimProfileChart({ data }: SimProfileChartProps) {
           dot={true}
           connectNulls={false}
           name="power_kw"
+          isAnimationActive={false}
         />
       </LineChart>
     </ResponsiveContainer>
