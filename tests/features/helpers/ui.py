@@ -198,3 +198,7 @@ class VenUi:
             except Exception:
                 pass
             raise
+
+    def go_raw_diagnostics(self):
+        self.page.click(tid("nav-raw-diagnostics"))
+        self.page.wait_for_selector(tid("raw-diagnostics-page"), timeout=15000)
