@@ -19,11 +19,9 @@ const baseSim: SimSnapshot = {
 const baseTariffs: PlannedRates = [
   {
     interval_start: "2026-03-18T09:00:00Z",
-    interval_end: "2026-03-18T10:00:00Z",
-    import_price_eur_kwh: 0.25,
-    export_price_eur_kwh: 0.05,
+    import_tariff_eur_kwh: 0.25,
+    export_tariff_eur_kwh: 0.05,
     co2_g_kwh: 350,
-    source_event_id: null,
   },
 ];
 

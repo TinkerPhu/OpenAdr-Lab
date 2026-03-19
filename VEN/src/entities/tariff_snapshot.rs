@@ -5,12 +5,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TariffSnapshot {
     pub interval_start: DateTime<Utc>,
+    #[serde(skip_serializing)]
     pub interval_end: DateTime<Utc>,
-    pub import_price_eur_kwh: Option<f64>,
-    pub export_price_eur_kwh: Option<f64>,
+    pub import_tariff_eur_kwh: Option<f64>,
+    pub export_tariff_eur_kwh: Option<f64>,
     pub co2_g_kwh: Option<f64>,
-    /// Source event ID that provided this tariff
-    pub source_event_id: Option<String>,
 }
 
 /// Collection of planned (future) tariff snapshots.
@@ -27,12 +26,12 @@ impl PlannedTariffs {
             .find(|s| s.interval_start <= ts && ts < s.interval_end)
     }
 
-    /// Average import price over all planned snapshots; returns 0.20 if empty.
-    pub fn avg_import_price(&self) -> f64 {
+    /// Average import tariff over all planned snapshots; returns 0.20 if empty.
+    pub fn avg_import_tariff(&self) -> f64 {
         let prices: Vec<f64> = self
             .snapshots
             .iter()
-            .filter_map(|s| s.import_price_eur_kwh)
+            .filter_map(|s| s.import_tariff_eur_kwh)
             .collect();
         if prices.is_empty() {
             return 0.20; // fallback flat rate
