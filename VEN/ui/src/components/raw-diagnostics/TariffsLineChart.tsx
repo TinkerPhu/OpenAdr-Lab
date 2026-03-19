@@ -33,8 +33,8 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
         <YAxis />
         <Tooltip
           labelFormatter={(v: number) => new Date(v).toLocaleString()}
-          formatter={(v: number | null, name: string) =>
-            v !== null ? [`${v.toFixed(4)}`, name] : ["—", name]
+          formatter={(v, name) =>
+            typeof v === "number" ? [`${v.toFixed(4)}`, String(name)] : ["—", String(name)]
           }
         />
         <Legend />
