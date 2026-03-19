@@ -76,17 +76,12 @@ export function RawDiagnosticsPage() {
         isError={timelineQuery.isError}
         onRefresh={() => timelineQuery.refetch()}
       >
-        {timelineQuery.data ? (
-          <TimelineSeriesChart
-            data={timelineQuery.data}
-            selectedSeries={selectedSeries}
-            onSeriesChange={setSelectedSeries}
-          />
-        ) : (
-          <Typography variant="body2" color="text.secondary">
-            Select a series and click refresh to load timeline data.
-          </Typography>
-        )}
+        {/* Always render the chart so the series dropdown is present before first load */}
+        <TimelineSeriesChart
+          data={timelineQuery.data ?? {}}
+          selectedSeries={selectedSeries}
+          onSeriesChange={setSelectedSeries}
+        />
       </DiagnosticCell>
     </div>
   );
