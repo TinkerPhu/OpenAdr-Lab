@@ -145,6 +145,21 @@ impl EvCharger {
         }
     }
 
+    pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
+        vec![
+            crate::entities::asset::ComfortRate { fill: 0.0, max_marginal_price: 0.35, max_marginal_co2: 0.0 },
+            crate::entities::asset::ComfortRate { fill: 1.0, max_marginal_price: 0.05, max_marginal_co2: 0.0 },
+        ]
+    }
+
+    pub fn default_completion_policy(&self) -> crate::entities::asset::CompletionPolicy {
+        crate::entities::asset::CompletionPolicy::Stop
+    }
+
+    pub fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
+        None
+    }
+
     pub fn power_w(&self) -> f64 {
         self.current_kw * 1000.0
     }

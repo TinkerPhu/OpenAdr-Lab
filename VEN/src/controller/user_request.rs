@@ -65,18 +65,21 @@ pub fn create_from_body(
         return Err(RequestError::NoDeadlines);
     }
 
+    // Look up asset entry for defaults
+    let entry = assets
+        .iter()
+        .find(|a| a.id == body.asset_id)
+        .ok_or_else(|| RequestError::UnknownAsset(body.asset_id.clone()))?;
+
     // Compute target energy and desired power
     let (target_energy_kwh, desired_power_kw) =
-        resolve_target(&body, assets)?;
+        resolve_target(&body, entry)?;
 
-    // Build completion policy
-    let completion_policy = match body
-        .completion_policy
-        .as_deref()
-        .unwrap_or("STOP")
-    {
-        "CONTINUE" => CompletionPolicy::Continue,
-        _ => CompletionPolicy::Stop,
+    // Build completion policy (user-specified or asset default)
+    let completion_policy = match body.completion_policy.as_deref() {
+        Some("CONTINUE") => CompletionPolicy::Continue,
+        Some(_) => CompletionPolicy::Stop,
+        None => entry.state.default_completion_policy(),
     };
 
     // Build comfort rates (user-specified or asset default)
@@ -90,10 +93,7 @@ pub fn create_from_body(
             })
             .collect()
     } else {
-        vec![
-            ComfortRate { fill: 0.0, max_marginal_price: 0.35, max_marginal_co2: 0.0 },
-            ComfortRate { fill: 1.0, max_marginal_price: 0.05, max_marginal_co2: 0.0 },
-        ]
+        entry.state.default_comfort_rates()
     };
 
     // Build deadline tiers from input
@@ -131,7 +131,7 @@ pub fn create_from_body(
         },
         request_mode: UserRequestMode::ByDeadline,
         completion_policy,
-        post_deadline_comfort_bid: None,
+        post_deadline_comfort_bid: entry.state.default_post_deadline_comfort_bid(),
         planned_power_profile: vec![],
         past_power_profile: vec![],
         accumulated_cost_eur: 0.0,
@@ -163,7 +163,10 @@ pub fn create_from_body(
         target_energy_kwh,
         desired_power_kw,
         deadlines: request_deadlines,
-        completion_policy: body.completion_policy.unwrap_or_else(|| "STOP".to_string()),
+        completion_policy: body.completion_policy.unwrap_or_else(|| match entry.state.default_completion_policy() {
+            CompletionPolicy::Continue => "CONTINUE".to_string(),
+            CompletionPolicy::Stop => "STOP".to_string(),
+        }),
         max_total_cost_eur,
         tier_count,
         packet_id,
@@ -180,7 +183,7 @@ pub fn create_from_body(
 /// Compute target energy (kWh) and desired power (kW) from the request body.
 fn resolve_target(
     body: &CreateUserRequestBody,
-    assets: &[AssetEntry],
+    entry: &AssetEntry,
 ) -> Result<(f64, f64), RequestError> {
     // Explicit target energy wins
     if let Some(kwh) = body.target_energy_kwh {
@@ -190,11 +193,6 @@ fn resolve_target(
         let power = body.desired_power_kw.unwrap_or(1.0);
         return Ok((kwh, power));
     }
-
-    let entry = assets
-        .iter()
-        .find(|a| a.id == body.asset_id)
-        .ok_or_else(|| RequestError::UnknownAsset(body.asset_id.clone()))?;
 
     entry
         .state
