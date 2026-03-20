@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Asset Interface — forecast() and past() Methods
+# Specification Quality Checklist: Asset Interface — forecast() and history() Methods
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-03-20

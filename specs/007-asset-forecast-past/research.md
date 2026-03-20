@@ -1,4 +1,4 @@
-# Research: Asset Interface forecast() and past() — RF-01
+# Research: Asset Interface forecast() and history() — RF-01
 
 ## Current Codebase Findings
 
@@ -35,15 +35,15 @@ The rename `predict → forecast` plus the new `timespan: Duration` parameter re
 
 Assets have **no direct access** to their own history buffer.
 
-**Decision: pass history as parameter to `past()`**
+**Decision: pass history as parameter to `history()`**
 
-Rather than moving buffer ownership into each `AssetEntry` (which would require restructuring `AppState`, `SimState`, and persistence), `past()` receives the buffer as a parameter:
+Rather than moving buffer ownership into each `AssetEntry` (which would require restructuring `AppState`, `SimState`, and persistence), `history()` receives the buffer as a parameter:
 
 ```rust
-past(timespan: Duration, history: &AssetHistoryBuffer) -> AssetSeries
+history(timespan: Duration, history: &AssetHistoryBuffer) -> AssetSeries
 ```
 
-The caller (planner, timeline endpoint, reporter) already has access to the buffer via `ControllerTrace`. This satisfies the spec's requirement that the asset *defines* what `past()` returns, without restructuring ownership.
+The caller (planner, timeline endpoint, reporter) already has access to the buffer via `ControllerTrace`. This satisfies the spec's requirement that the asset *defines* what `history()` returns, without restructuring ownership.
 
 **Rationale**: Lean Architecture (Constitution IV) — moving buffer ownership into `AssetEntry` would require changes to `SimState` persistence, `AppState`, and all callers. Passing a reference achieves the same interface contract with zero structural changes.
 
@@ -51,7 +51,7 @@ The caller (planner, timeline endpoint, reporter) already has access to the buff
 
 ### History buffer content
 
-`AssetHistoryBuffer` stores sparse columns keyed by string name. The `power_kw` column is written for every asset on every tick via `state_values()`. The `past()` implementation extracts the `power_kw` column for the relevant asset.
+`AssetHistoryBuffer` stores sparse columns keyed by string name. The `power_kw` column is written for every asset on every tick via `state_values()`. The `history()` implementation extracts the `power_kw` column for the relevant asset.
 
 Buffer capacity: 3600 rows (~1 hour at 1 Hz tick rate).
 
