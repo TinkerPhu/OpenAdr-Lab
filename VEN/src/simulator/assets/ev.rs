@@ -54,8 +54,21 @@ impl EvCharger {
         kw
     }
 
-    pub fn forecast(&self, _timespan: Duration) -> QuantitySeries {
-        QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Step)
+    pub fn forecast(&self, timespan: Duration) -> QuantitySeries {
+        if timespan <= Duration::zero() {
+            return QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Step);
+        }
+        let now = Utc::now();
+        let power = if self.plugged { self.current_kw } else { 0.0 };
+        QuantitySeries {
+            samples: vec![
+                (now, power),
+                (now + timespan, power),
+            ],
+            quantity: Quantity::Power,
+            unit: Unit::Kilowatt,
+            interpolation: Interpolation::Step,
+        }
     }
 
     pub fn past(&self, _timespan: Duration, _history: &AssetHistoryBuffer) -> QuantitySeries {

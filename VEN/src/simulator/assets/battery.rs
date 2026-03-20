@@ -53,8 +53,58 @@ impl Battery {
         kw
     }
 
-    pub fn forecast(&self, _timespan: Duration) -> QuantitySeries {
-        QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear)
+    pub fn forecast(&self, timespan: Duration) -> QuantitySeries {
+        if timespan <= Duration::zero() {
+            return QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
+        }
+        let now = Utc::now();
+        let end = now + timespan;
+        let setpoint = self.current_kw.clamp(-self.max_discharge_kw, self.max_charge_kw);
+        let mut samples: Vec<(chrono::DateTime<Utc>, f64)> = Vec::new();
+
+        let mut t = now;
+        let mut soc = self.soc;
+        let mut last_kw = setpoint;
+
+        while t < end {
+            // Compute power for this minute-long step.
+            let kw = if setpoint > 0.0 && soc >= 1.0 {
+                0.0
+            } else if setpoint < 0.0 && soc <= self.min_soc {
+                0.0
+            } else {
+                setpoint
+            };
+            samples.push((t, kw));
+            last_kw = kw;
+
+            // Integrate SoC forward by 1 minute.
+            let dt_h = 1.0 / 60.0;
+            if kw > 0.0 {
+                soc += (kw * dt_h * self.round_trip_efficiency) / self.capacity_kwh;
+            } else {
+                soc += (kw * dt_h) / self.capacity_kwh;
+            }
+            soc = soc.clamp(0.0, 1.0);
+
+            t = t + Duration::seconds(60);
+        }
+        // Mandatory boundary point — recompute power at end with current soc.
+        let end_kw = if setpoint > 0.0 && soc >= 1.0 {
+            0.0
+        } else if setpoint < 0.0 && soc <= self.min_soc {
+            0.0
+        } else {
+            setpoint
+        };
+        samples.push((end, end_kw));
+
+        QuantitySeries {
+            samples,
+            quantity: Quantity::Power,
+            unit: Unit::Kilowatt,
+            interpolation: Interpolation::Linear,
+        }
     }
 
     pub fn past(&self, _timespan: Duration, _history: &AssetHistoryBuffer) -> QuantitySeries {
