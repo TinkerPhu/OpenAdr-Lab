@@ -9,7 +9,7 @@ import type { SimSnapshot, PlannedRates } from "../api/types";
 
 const baseSim: SimSnapshot = {
   ts: "2026-03-18T10:00:00Z",
-  grid: { net_power_w: 1200, voltage_v: 230, import_kwh: 5, export_kwh: 0 },
+  grid: { net_power_w: 1200, import_w: 1200, export_w: 0, voltage_v: 230, import_kwh: 5, export_kwh: 0 },
   assets: {
     ev: { power_kw: 7 },
     battery: { power_kw: -2 },
