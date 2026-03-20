@@ -832,9 +832,10 @@ async fn post_sim_reset(
 #[derive(serde::Deserialize)]
 struct BatteryConfigBody {
     capacity_kwh: f64,
+    min_soc: Option<f64>,
 }
 
-/// PUT /sim/config/battery — update battery capacity_kwh.
+/// PUT /sim/config/battery — update battery capacity_kwh and/or min_soc.
 async fn put_sim_config_battery(
     State(ctx): State<AppCtx>,
     Json(body): Json<BatteryConfigBody>,
@@ -843,11 +844,20 @@ async fn put_sim_config_battery(
         return (axum::http::StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "capacity_kwh must be > 0"}))).into_response();
     }
+    if let Some(min_soc) = body.min_soc {
+        if !(0.0..=1.0).contains(&min_soc) {
+            return (axum::http::StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "min_soc must be between 0.0 and 1.0"}))).into_response();
+        }
+    }
     let mut sim = ctx.sim.lock().await;
     match sim.asset_mut("battery") {
         Some(entry) => {
             let mut values = std::collections::HashMap::new();
             values.insert("capacity_kwh".to_string(), body.capacity_kwh);
+            if let Some(min_soc) = body.min_soc {
+                values.insert("min_soc".to_string(), min_soc);
+            }
             entry.state.update_config(values);
             drop(sim);
             axum::http::StatusCode::NO_CONTENT.into_response()
