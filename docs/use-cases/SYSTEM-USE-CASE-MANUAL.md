@@ -1,6 +1,6 @@
 # OpenADR Use Case Manual — Step-by-Step Replay Guide
 
-This manual explains how to replay all 8 use cases from `USE-CASES.md` against the running OpenADR lab. Each use case includes the real-world motivation, a concrete example, and step-by-step UI instructions.
+This manual explains how to replay all 8 use cases from `SYSTEM-USE-CASES.md` against the running OpenADR lab. Each use case includes the real-world motivation, a concrete example, and step-by-step UI instructions.
 
 **VTN UI:** http://Pi4-Server:8221
 **VEN UI:** http://Pi4-Server:8214
