@@ -1,3 +1,5 @@
+> **ARCHIVED** — Superseded by [docs/architecture/VTN_ARCHITECTURE.md](VTN_ARCHITECTURE.md).
+
 # OpenADR 3 Raspberry Pi Lab
 ## Complete System Architecture & Design (Rewritten + Extended)
 
