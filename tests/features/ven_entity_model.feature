@@ -40,16 +40,12 @@ Feature: VEN Entity Model — Stage 1 Foundation
 
   # --- Backward compatibility ---
 
-  Scenario: Existing /sim endpoint still returns all legacy fields
+  Scenario: Existing /sim endpoint returns structured ts + grid + assets
     When I GET /sim from the VEN
     Then the response status is 200
-    And the response JSON has field "net_power_w"
-    And the response JSON has field "import_w"
-    And the response JSON has field "export_w"
-    And the response JSON has field "import_kwh"
-    And the response JSON has field "export_kwh"
-    And the response JSON has field "ev"
-    And the response JSON has field "pv"
+    And the response JSON has field "ts"
+    And the response JSON has field "grid"
+    And the response JSON has field "assets"
 
   Scenario: Existing /health endpoint still works
     When I GET /health from the VEN

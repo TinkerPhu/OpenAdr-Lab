@@ -17,7 +17,7 @@ const H = 3_600_000;           // one hour in ms
 /** Minimal SimSnapshot with just an ev asset */
 const sim: SimSnapshot = {
   ts: "2026-01-01T10:00:00Z",
-  grid: { net_power_w: 0, import_w: 0, export_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
+  grid: { net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
   assets: { ev: { power_kw: 0, soc: 0.5 } },
 };
 
