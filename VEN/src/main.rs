@@ -1,3 +1,4 @@
+mod assets;
 mod common;
 mod config;
 mod controller;
