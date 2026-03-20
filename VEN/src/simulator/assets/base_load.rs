@@ -28,8 +28,20 @@ impl BaseLoad {
         self.baseline_kw
     }
 
-    pub fn forecast(&self, _timespan: Duration) -> QuantitySeries {
-        QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Step)
+    pub fn forecast(&self, timespan: Duration) -> QuantitySeries {
+        if timespan <= Duration::zero() {
+            return QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Step);
+        }
+        let now = Utc::now();
+        QuantitySeries {
+            samples: vec![
+                (now, self.baseline_kw),
+                (now + timespan, self.baseline_kw),
+            ],
+            quantity: Quantity::Power,
+            unit: Unit::Kilowatt,
+            interpolation: Interpolation::Step,
+        }
     }
 
     pub fn past(&self, _timespan: Duration, _history: &AssetHistoryBuffer) -> QuantitySeries {

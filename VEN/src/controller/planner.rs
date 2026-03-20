@@ -2,6 +2,7 @@
 ///
 /// Produces a Plan from TariffSnapshots + EnergyPackets + device profile.
 /// Phase 6 (penalty check) is deferred to Stage 4.
+use crate::common::{Interpolation, QuantitySeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PlanTrigger, UserRequestMode};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
@@ -11,8 +12,8 @@ use crate::entities::plan::{
 };
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::profile::{BatteryConfig, Profile};
-use chrono::{DateTime, Duration, Timelike, Utc};
-use std::f64::consts::PI;
+use chrono::{DateTime, Duration, Utc};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -31,6 +32,7 @@ pub fn run_planner(
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
+    asset_forecasts: &HashMap<String, QuantitySeries>,
 ) -> Plan {
     let step_s = profile.planner.plan_step_s;
     let horizon_h = profile.planner.plan_horizon_h;
@@ -52,7 +54,7 @@ pub fn run_planner(
 
     // Phase 1: Build planning grid
     let (mut firm_slots, flexible_slots) =
-        build_grid(rates, capacity, profile, now, step_s, total_steps, firm_boundary);
+        build_grid(rates, capacity, profile, now, step_s, total_steps, firm_boundary, asset_forecasts);
 
     // Preserve terminal packets (cancelled/completed/failed) for history visibility
     let terminal_pkts: Vec<EnergyPacket> =
@@ -117,6 +119,7 @@ fn build_grid(
     step_s: u64,
     total_steps: usize,
     firm_boundary: DateTime<Utc>,
+    asset_forecasts: &HashMap<String, QuantitySeries>,
 ) -> (Vec<PlanTimeSlot>, Vec<PlanTimeSlot>) {
     let import_cap = capacity.import_limit_kw.unwrap_or(f64::MAX);
     let export_cap = capacity.export_limit_kw.unwrap_or(f64::MAX);
@@ -135,7 +138,9 @@ fn build_grid(
         let co2 = tariff_co2_at(rates, start).unwrap_or(DEFAULT_CO2_G_KWH);
         let grid_eff = import_tariff + co2 * CO2_WEIGHT;
 
-        let pv_kw = pv_forecast(profile, start);
+        // PV forecast: negative = export, so we negate to get positive generation magnitude.
+        let pv_export_kw = nearest_value(asset_forecasts.get("pv"), start);
+        let pv_kw = -pv_export_kw; // convert export (negative) to generation magnitude (positive)
         let net = baseline_kw - pv_kw; // positive = need to import, negative = surplus
         let surplus = (-net).max(0.0);
         let net_import = net.max(0.0);
@@ -558,18 +563,40 @@ fn tariff_co2_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
         .and_then(|r| r.co2_g_kwh)
 }
 
-// ─── PV forecast (sinusoidal model, 6am–18pm) ─────────────────────────────────
+// ─── Forecast lookup helper ───────────────────────────────────────────────────
 
-fn pv_forecast(profile: &Profile, ts: DateTime<Utc>) -> f64 {
-    let pv = match profile.pv_config() {
-        Some(p) => p,
-        None => return 0.0,
+/// Return the forecast value for a given timestamp from a QuantitySeries.
+/// - If the series is empty or absent, returns 0.0.
+/// - Step series: last sample at or before ts; falls back to first sample.
+/// - Linear series: nearest sample by timestamp.
+fn nearest_value(series: Option<&QuantitySeries>, ts: DateTime<Utc>) -> f64 {
+    let s = match series {
+        Some(s) if !s.samples.is_empty() => s,
+        _ => return 0.0,
     };
-    let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
-    if hour < 6.0 || hour > 18.0 {
-        return 0.0;
+    match s.interpolation {
+        Interpolation::Step => {
+            // Last sample at or before ts.
+            s.samples
+                .iter()
+                .rev()
+                .find(|(t, _)| *t <= ts)
+                .or_else(|| s.samples.first())
+                .map(|(_, v)| *v)
+                .unwrap_or(0.0)
+        }
+        Interpolation::Linear => {
+            // Nearest sample by absolute time distance.
+            s.samples
+                .iter()
+                .min_by_key(|(t, _)| {
+                    let diff = (*t - ts).num_milliseconds().unsigned_abs();
+                    diff
+                })
+                .map(|(_, v)| *v)
+                .unwrap_or(0.0)
+        }
     }
-    pv.rated_kw * (PI * (hour - 6.0) / 12.0).sin().max(0.0)
 }
 
 // ─── Packet seeding from profile ─────────────────────────────────────────────

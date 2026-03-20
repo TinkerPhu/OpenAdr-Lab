@@ -521,6 +521,7 @@ async fn main() -> anyhow::Result<()> {
         let mut trigger_rx = trigger_rx;
         let cfg_ven_name = cfg.ven_name.clone();
         let state_vtn = vtn.clone();
+        let sim_for_planner = sim_state.clone();
         tokio::spawn(async move {
             // Initial delay: let event poll populate rates before first plan
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -531,6 +532,20 @@ async fn main() -> anyhow::Result<()> {
                 let capacity = state.capacity_state().await;
                 let trigger = trigger_rx.borrow().clone();
                 let trigger_reason = format!("{:?}", trigger);
+
+                // Compute per-asset forecasts covering the planning horizon.
+                let planning_horizon = chrono::Duration::seconds(
+                    (profile.planner.plan_horizon_h * 3600) as i64,
+                );
+                let asset_forecasts: std::collections::HashMap<String, crate::common::QuantitySeries> = {
+                    let sim_guard = sim_for_planner.lock().await;
+                    sim_guard
+                        .assets
+                        .iter()
+                        .map(|e| (e.id.clone(), e.state.forecast(planning_horizon)))
+                        .collect()
+                };
+
                 let plan = controller::planner::run_planner(
                     &rates,
                     &packets,
@@ -538,6 +553,7 @@ async fn main() -> anyhow::Result<()> {
                     &profile,
                     now,
                     trigger,
+                    &asset_forecasts,
                 );
                 // Planner may transition packet statuses (Pending→Scheduled, etc.)
                 let firm_count = plan.firm_slots.len();
