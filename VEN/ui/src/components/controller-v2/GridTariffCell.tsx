@@ -68,9 +68,6 @@ export function GridTariffCell({
         <Typography variant="caption" color="text.secondary" data-testid="tariff-total-cost-rate">
           Cost rate: {fmt(snapshot.totalCostRateEurH, 3)} €/h
         </Typography>
-        <Typography variant="caption" color="text.secondary" data-testid="tariff-grid-power">
-          Grid: {snapshot.gridPowerKw.toFixed(2)} kW
-        </Typography>
       </Box>
 
       {/* Right: tariff chart */}
