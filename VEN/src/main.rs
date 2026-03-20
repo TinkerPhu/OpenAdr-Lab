@@ -1,3 +1,4 @@
+mod common;
 mod config;
 mod controller;
 mod entities;
@@ -634,6 +635,8 @@ async fn main() -> anyhow::Result<()> {
         // Timeline routes (speckit 005) — /all must precede /:asset_id
         .route("/timeline/all", get(get_timeline_all))
         .route("/timeline/:asset_id", get(get_timeline))
+        // Asset forecast endpoint (speckit 007)
+        .route("/forecast/:asset_id", get(get_asset_forecast))
         // HEMS Stage 2 routes
         .route("/capacity", get(get_capacity))
         .route("/obligations", get(get_obligations))
@@ -1090,6 +1093,51 @@ async fn get_timeline_all(
     }
 
     Json(serde_json::Value::Object(result))
+}
+
+/// Query parameters for GET /forecast/:asset_id.
+#[derive(Deserialize)]
+struct ForecastParams {
+    timespan_s: Option<f64>,
+}
+
+/// GET /forecast/:asset_id — forward-looking QuantitySeries for one asset (speckit 007).
+/// Returns `{"samples": [{"ts": "...", "value": ...}], "quantity": "...", "unit": "...", "interpolation": "..."}`.
+async fn get_asset_forecast(
+    State(ctx): State<AppCtx>,
+    Path(asset_id): Path<String>,
+    Query(params): Query<ForecastParams>,
+) -> impl IntoResponse {
+    use axum::http::StatusCode;
+    use chrono::Duration;
+
+    let timespan_s = params.timespan_s.unwrap_or(0.0);
+    let timespan = Duration::milliseconds((timespan_s * 1000.0) as i64);
+
+    let sim = ctx.sim.lock().await;
+    let entry = sim.assets.iter().find(|e| e.id == asset_id);
+    match entry {
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
+        )
+            .into_response(),
+        Some(entry) => {
+            let series = entry.state.forecast(timespan);
+            let samples: Vec<serde_json::Value> = series
+                .samples
+                .iter()
+                .map(|(ts, v)| serde_json::json!({ "ts": ts, "value": v }))
+                .collect();
+            Json(serde_json::json!({
+                "samples": samples,
+                "quantity": series.quantity,
+                "unit": series.unit,
+                "interpolation": series.interpolation,
+            }))
+            .into_response()
+        }
+    }
 }
 
 /// GET /capacity — returns the current OadrCapacityState (Stage 2).

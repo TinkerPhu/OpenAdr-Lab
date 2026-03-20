@@ -1,7 +1,9 @@
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::common::{Interpolation, Quantity, QuantitySeries, Unit};
+use crate::controller::trace::AssetHistoryBuffer;
 use crate::profile::PvConfig;
 use super::{AssetCapabilities, ControlDescriptor, ControlKind, TickEnvironment};
 
@@ -56,9 +58,12 @@ impl PvInverter {
         output
     }
 
-    pub fn predict(&self, setpoint: f64) -> Vec<(chrono::DateTime<Utc>, f64)> {
-        let limit = if setpoint >= f64::MAX * 0.5 { self.rated_kw } else { setpoint.max(0.0) };
-        vec![(Utc::now(), (self.rated_kw * self.irradiance).min(limit))]
+    pub fn forecast(&self, _timespan: Duration) -> QuantitySeries {
+        QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear)
+    }
+
+    pub fn past(&self, _timespan: Duration, _history: &AssetHistoryBuffer) -> QuantitySeries {
+        QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear)
     }
 
     pub fn state_values(&self) -> HashMap<String, f64> {

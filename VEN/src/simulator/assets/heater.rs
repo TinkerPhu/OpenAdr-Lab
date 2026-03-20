@@ -1,7 +1,9 @@
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::common::{Interpolation, Quantity, QuantitySeries, Unit};
+use crate::controller::trace::AssetHistoryBuffer;
 use crate::profile::HeaterConfig;
 use super::{AssetCapabilities, ControlDescriptor, ControlKind, TickEnvironment};
 
@@ -54,8 +56,12 @@ impl Heater {
         kw
     }
 
-    pub fn predict(&self, setpoint: f64) -> Vec<(chrono::DateTime<Utc>, f64)> {
-        vec![(Utc::now(), setpoint.clamp(0.0, self.max_kw))]
+    pub fn forecast(&self, _timespan: Duration) -> QuantitySeries {
+        QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear)
+    }
+
+    pub fn past(&self, _timespan: Duration, _history: &AssetHistoryBuffer) -> QuantitySeries {
+        QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear)
     }
 
     pub fn state_values(&self) -> HashMap<String, f64> {

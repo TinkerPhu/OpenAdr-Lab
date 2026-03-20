@@ -1,7 +1,9 @@
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::common::{Interpolation, Quantity, QuantitySeries, Unit};
+use crate::controller::trace::AssetHistoryBuffer;
 use crate::profile::BaseLoadConfig;
 use super::{AssetCapabilities, ControlDescriptor, TickEnvironment};
 
@@ -26,8 +28,12 @@ impl BaseLoad {
         self.baseline_kw
     }
 
-    pub fn predict(&self, _setpoint: f64) -> Vec<(chrono::DateTime<Utc>, f64)> {
-        vec![(Utc::now(), self.baseline_kw)]
+    pub fn forecast(&self, _timespan: Duration) -> QuantitySeries {
+        QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Step)
+    }
+
+    pub fn past(&self, _timespan: Duration, _history: &AssetHistoryBuffer) -> QuantitySeries {
+        QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Step)
     }
 
     pub fn state_values(&self) -> HashMap<String, f64> {

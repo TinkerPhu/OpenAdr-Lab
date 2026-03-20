@@ -15,8 +15,8 @@
 
 **Purpose**: Create the `common/` module that all user stories depend on.
 
-- [ ] T001 Create `VEN/src/common/mod.rs` with `Interpolation`, `Quantity`, `Unit`, and `QuantitySeries` types as specified in `data-model.md` — derive `Debug`, `Clone` on all types
-- [ ] T002 Add `mod common;` to `VEN/src/main.rs` and add `use crate::common::*;` where needed; confirm `cargo check` passes with zero errors
+- [x] T001 Create `VEN/src/common/mod.rs` with `Interpolation`, `Quantity`, `Unit`, and `QuantitySeries` types as specified in `data-model.md` — derive `Debug`, `Clone` on all types
+- [x] T002 Add `mod common;` to `VEN/src/main.rs` and add `use crate::common::*;` where needed; confirm `cargo check` passes with zero errors
 
 ---
 
@@ -26,9 +26,9 @@
 
 ⚠️ **CRITICAL**: Write BDD files first, run them, confirm they FAIL. Only then proceed to implementation.
 
-- [ ] T003 [P] Write `tests/features/asset_forecast.feature` — BDD scenarios for `forecast(timespan)` covering: PV at noon (positive power), PV at night (zero), battery at 80% SoC, EV with no session (zero), base-load constant, heater thermal decay, zero timespan returns empty series, mandatory boundary point at `now + timespan`
-- [ ] T004 [P] Write `tests/features/asset_history.feature` — BDD scenarios for `past(timespan)`: PV 30-min history returns samples, partial buffer (asset just started) returns available data only, empty buffer returns empty series, mandatory boundary point at `now − timespan`
-- [ ] T005 Add `forecast(timespan: Duration) -> QuantitySeries` and `past(timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries` dispatch arms to `impl AssetState` in `VEN/src/simulator/assets/mod.rs`; remove `predict()`; stub implementations return empty `QuantitySeries` so the codebase compiles; fix all call sites of `predict()` to compile
+- [x] T003 [P] Write `tests/features/asset_forecast.feature` — BDD scenarios for `forecast(timespan)` covering: PV at noon (positive power), PV at night (zero), battery at 80% SoC, EV with no session (zero), base-load constant, heater thermal decay, zero timespan returns empty series, mandatory boundary point at `now + timespan`
+- [x] T004 [P] Write `tests/features/asset_history.feature` — BDD scenarios for `past(timespan)`: PV 30-min history returns samples, partial buffer (asset just started) returns available data only, empty buffer returns empty series, mandatory boundary point at `now − timespan`
+- [x] T005 Add `forecast(timespan: Duration) -> QuantitySeries` and `past(timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries` dispatch arms to `impl AssetState` in `VEN/src/simulator/assets/mod.rs`; remove `predict()`; stub implementations return empty `QuantitySeries` so the codebase compiles; fix all call sites of `predict()` to compile
 - [ ] T006 Run BDD suite on Pi4 for the two new feature files and confirm all new scenarios **FAIL** (red phase); fix any step-definition compile errors without touching implementation
 
 **Checkpoint**: BDD scenarios exist and fail. Dispatch stubs compile. Implementation can now begin.
