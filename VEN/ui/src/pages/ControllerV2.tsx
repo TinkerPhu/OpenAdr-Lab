@@ -171,6 +171,7 @@ export function ControllerV2Page() {
             nowMs={nowMs}
             extended={expandedCells.has("grid:accumulated")}
             pinned={false}
+            gridPowerKw={tariffSnapshot?.gridPowerKw ?? 0}
             onTogglePin={() => handleTogglePin("grid:accumulated")}
             onToggleExpand={() => handleToggleExpand("grid:accumulated")}
           />
