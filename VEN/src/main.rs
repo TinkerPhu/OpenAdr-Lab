@@ -1189,7 +1189,7 @@ async fn get_asset_history(
             let history = ct.asset_history.get(&asset_id);
             let empty_buf = crate::controller::trace::AssetHistoryBuffer::new(0);
             let buf = history.unwrap_or(&empty_buf);
-            let series = entry.state.past(timespan, buf);
+            let series = entry.state.history(timespan, buf);
             let samples: Vec<serde_json::Value> = series
                 .samples
                 .iter()

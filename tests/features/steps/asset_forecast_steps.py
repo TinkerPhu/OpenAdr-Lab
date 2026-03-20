@@ -1,4 +1,4 @@
-"""Step definitions for asset forecast() and past() BDD tests (speckit 007)."""
+"""Step definitions for asset forecast() and history() BDD tests (speckit 007)."""
 
 import time
 from datetime import datetime, timezone, timedelta

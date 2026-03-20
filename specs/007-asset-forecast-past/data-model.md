@@ -1,4 +1,4 @@
-# Data Model: Asset Interface forecast() and past() — RF-01
+# Data Model: Asset Interface forecast() and history() — RF-01
 
 ## New Types
 
@@ -65,7 +65,7 @@ Declares the measurement scale of the `f64` values.
 **Invariants:**
 - Samples are strictly ascending in timestamp.
 - For non-empty series from `forecast(timespan)`: last sample timestamp == `now + timespan`.
-- For non-empty series from `past(timespan)`: first sample timestamp == `now − timespan`.
+- For non-empty series from `history(timespan)`: first sample timestamp == `now − timespan`.
 - Sign convention for power: positive = import from grid, negative = export.
 
 **Upgrade path**: RF-05 introduces `TimeSeries<T>` alongside `QuantitySeries`. A future speckit introduces `MultiQuantitySeries` (multiple quantities per timestamp — e.g., power + SOC + temperature in one series), which builds on `QuantitySeries`. No redesign of `QuantitySeries` itself is required.
@@ -81,7 +81,7 @@ New dispatch methods replacing `predict()`:
 | Method | Signature | Replaces |
 |---|---|---|
 | `forecast` | `(&self, timespan: Duration) -> QuantitySeries` | `predict(setpoint, horizon_s, env)` |
-| `past` | `(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries` | *(new)* |
+| `history` | `(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries` | *(new)* |
 
 `predict()` is removed. `forecast()` does not take a `setpoint` parameter — each asset uses its current internal setpoint.
 
@@ -109,9 +109,9 @@ New parameter:
 
 ---
 
-## `past()` Data Extraction
+## `history()` Data Extraction
 
-`past(timespan, history: &AssetHistoryBuffer)` for all asset types:
+`history(timespan, history: &AssetHistoryBuffer)` for all asset types:
 
 1. Compute `start = now − timespan`.
 2. Slice buffer to `[start, now]` using `AssetHistoryBuffer::to_timeline(Some((start, now)))`.
@@ -129,7 +129,7 @@ VEN/src/
     mod.rs          ← Interpolation, Quantity, Unit, QuantitySeries  (NEW MODULE)
   simulator/
     assets/
-      mod.rs        ← AssetState: forecast() + past() dispatch; predict() removed
+      mod.rs        ← AssetState: forecast() + history() dispatch; predict() removed
       pv.rs         ← forecast(timespan) → QuantitySeries
       battery.rs    ← forecast(timespan) → QuantitySeries
       ev.rs         ← forecast(timespan) → QuantitySeries
@@ -137,5 +137,5 @@ VEN/src/
       base_load.rs  ← forecast(timespan) → QuantitySeries
   controller/
     planner.rs      ← pv_forecast() removed; asset_forecasts param added
-  main.rs           ← compute forecast map; wire past() into timeline handler
+  main.rs           ← compute forecast map; wire history() into timeline handler
 ```
