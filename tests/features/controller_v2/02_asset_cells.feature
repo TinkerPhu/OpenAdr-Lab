@@ -32,8 +32,8 @@ Feature: Controller V2 — Asset Cell Content
     Then the EV asset cell shows an extend-window button
 
   @ven-ui
-  Scenario: Per-cell extended window toggle is not shown on heater cell
-    Then the heater asset cell has no extend-window button
+  Scenario: Per-cell extended window toggle is available on heater cell
+    Then the heater asset cell shows an extend-window button
 
   @ven-ui
   Scenario: Tariff cell extended window toggle is visible

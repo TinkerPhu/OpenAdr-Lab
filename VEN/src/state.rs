@@ -273,11 +273,19 @@ impl AppState {
     }
 
     /// Cancel a user request by id: mark it Cancelled and return the linked packet_id.
+    /// Cancel a user request AND abandon its linked packet atomically
+    /// (single write lock prevents the planner from seeing stale SCHEDULED status).
     pub async fn cancel_request(&self, id: uuid::Uuid) -> Option<uuid::Uuid> {
+        use crate::entities::energy_packet::PacketStatus;
         let mut inner = self.inner.write().await;
         if let Some(req) = inner.active_requests.iter_mut().find(|r| r.id == id) {
             req.status = UserRequestStatus::Cancelled;
-            Some(req.packet_id)
+            let packet_id = req.packet_id;
+            // Abandon the linked packet in the same write lock
+            if let Some(pkt) = inner.active_packets.iter_mut().find(|p| p.id == packet_id) {
+                pkt.status = PacketStatus::Abandoned;
+            }
+            Some(packet_id)
         } else {
             None
         }
