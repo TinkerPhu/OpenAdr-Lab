@@ -123,7 +123,7 @@ Operator creates event (VTN UI)
   → BFF proxies: POST /events  →  VTN stores, assigns eventID
   → (30 s later) VEN polls: GET /events
   → VEN evaluates intervals against local targets
-  → VEN translates event type → internal signal (OadrSignalSnapshot / CapacityState / alert)
+  → VEN translates event type → internal signal (OadrEventSnapshot / CapacityState / alert)
   → PlanTrigger.RATE_CHANGE or CAPACITY_CHANGE emitted
   → Planner replans
   → (next report cycle) VEN: POST /reports
@@ -318,3 +318,23 @@ ensures state survives container restarts. DB is not exposed to VENs — only VT
 **Decision:** Field names pass through all layers unchanged: `programName`, `venName`, `eventName`, etc.
 **Rationale:** One vocabulary across backend, BFF, and UI reduces boilerplate and debugging
 friction. Any translation layer is a future source of bugs and cognitive overhead.
+
+### D-06: VTN Controller Symmetry — shared abstractions staged in VEN/src/common/
+
+**Observation:** A future VTN operator/aggregator controller (fleet flexibility aggregation,
+M&V, event creation optimisation) would need the same foundational abstractions as the VEN
+HEMS controller:
+- `TimeSeries<T>` with typed interpolation (Step for tariffs, Linear for power)
+- Interval arithmetic: overlap, union-of-breakpoints, time-weighted average
+- `FlexibilityEnvelope` (VEN produces it; VTN aggregates it across fleet)
+- Baseline model (VEN reports it; VTN uses it for M&V)
+
+The planning algorithms themselves are **not** shared — VEN does single-site greedy
+scheduling; a VTN controller would do fleet-level dispatch optimisation across N VENs.
+
+**Decision:** Shared abstractions are introduced as `VEN/src/common/` — a plain Rust module,
+not a separate crate. When a VTN controller is built, `common/` is extracted into a shared
+workspace crate at that point. No API changes are required at extraction time because the
+module boundary is already clean.
+
+See `VEN_ARCHITECTURE.md §1` (target source layout) and `docs/BACKLOG.md RF-05`.

@@ -30,8 +30,8 @@ follows production-inspired design patterns.
 | Term | Full Name | Definition |
 |---|---|---|
 | **Utility** | Electric Utility | Company that generates, transmits, and/or distributes electricity to customers. Operates the grid and runs demand response programs. Examples: PG&E, E.ON, ConEdison. |
-| **DSO** | Distribution System Operator | Entity responsible for operating the local electricity distribution network. In Europe, DSOs are often separate from energy retailers. |
-| **TSO** | Transmission System Operator | Entity responsible for the high-voltage transmission grid. Examples: TenneT, Amprion, National Grid ESO. |
+| **DSO** | Distribution System Operator | Entity responsible for operating the local electricity distribution network. In Europe, DSOs are often separate from energy retailers. Examples (CH): EWZ, BKW Netz, SH Power; (DE): Bayernwerk Netz, Netze BW; (FR): Enedis (formerly ERDF). |
+| **TSO** | Transmission System Operator | Entity responsible for the high-voltage transmission grid. Examples (CH): Swissgrid; (DE): TenneT DE, Amprion, 50Hertz, TransnetBW; (FR): RTE (Réseau de Transport d'Électricité). |
 | **Aggregator** | DR Aggregator | Company that bundles many small DER/load resources from multiple customers into a single portfolio large enough to participate in wholesale energy markets or utility DR programs. |
 | **Prosumer** | Producer + Consumer | End customer that both consumes and produces electricity (e.g. a home with solar panels and a battery). |
 
@@ -51,16 +51,16 @@ follows production-inspired design patterns.
 | **HEMS** | Home Energy Management System | Software system that monitors and controls energy flows within a home or small site. Coordinates DERs (solar, battery, EV charger, HVAC) to minimise cost, maximise self-consumption, or respond to DR signals. In this lab the HEMS controller runs inside the VEN. |
 | **Planner** | Energy Planner | Component of the HEMS that schedules future energy use. Given tariff forecasts, device constraints, and DR obligations, it builds an optimal time-slot plan (FIRM + FLEXIBLE slots) using a greedy algorithm. |
 | **Dispatcher** | Setpoint Dispatcher | Real-time control loop (1 s tick) that translates the planner's slot schedule into live device setpoints and accumulates the asset ledger. |
-| **Asset Ledger** | — | Cumulative energy accounting record maintained by the Dispatcher. Tracks how much energy each asset imported/exported and the associated cost/revenue. **In-memory only; resets on restart.** |
+| **Asset Ledger** | — | Cumulative energy accounting record maintained by the Dispatcher. Tracks how much energy each asset imported/exported and the associated cost/revenue. **In-memory only; resets on restart. POTENTIAL FOR PERSISTANCE, needs VEN Persistance** |
 | **Energy Packet** | — | A schedulable unit of energy delivery: a fixed amount of energy (kWh) for a specific asset, with a time window and status (`PENDING → ACTIVE → COMPLETED / ABANDONED`). |
 | **FIRM slot** | Firm Commitment Slot | A planner output slot that must be executed — driven by a hard user request or minimum SOC constraint. Cannot be deferred. |
 | **FLEXIBLE slot** | Flexible Opportunity Slot | A planner output slot that can be shifted or cancelled if constraints change. Typically price-driven charging windows. |
-| **OadrSignalSnapshot** | — | `RateSnapshot` [RENAME → `OadrSignalSnapshot`] — A point-in-time capture of all time-varying OpenADR signals at one poll tick: import/export tariff (€/kWh), CO₂ intensity, and capacity limits. Unified in one row for temporal correlation — all fields are valid at the same timestamp. Price fields originate from `PRICE`/`EXPORT_PRICE` events; capacity fields from `IMPORT_CAPACITY_LIMIT` / `EXPORT_CAPACITY_LIMIT` events. |
-| **Capacity State** | — | Current grid capacity constraints parsed from a VTN subscription/reservation event: subscribed import (kW), subscribed export (kW), reserved import (kW), reserved export (kW). Distinct from per-interval capacity limits (which live in OadrSignalSnapshot). |
+| **OadrEventSnapshot** | — | `RateSnapshot` [RENAME → `OadrEventSnapshot`] — A point-in-time capture of all time-varying OpenADR events at one poll tick: import/export tariff (€/kWh), CO₂ intensity, and capacity limits. Unified in one row for temporal correlation — all fields are valid at the same timestamp. Price fields originate from `PRICE`/`EXPORT_PRICE` events; capacity fields from `IMPORT_CAPACITY_LIMIT` / `EXPORT_CAPACITY_LIMIT` events. |
+| **Capacity State** | — | Current grid capacity constraints parsed from a VTN subscription/reservation event: subscribed import (kW), subscribed export (kW), reserved import (kW), reserved export (kW). Distinct from per-interval capacity limits (which live in OadrEventSnapshot). |
 | **User Request** | — | An explicit energy delivery request submitted by the occupant (e.g. "charge EV to 80% by 07:00"). The planner honours these as FIRM slots. Supports `ASAP`, `BY_DEADLINE`, `MAX_COST`, `OPPORTUNISTIC` modes. |
 | **SOC target** | State-of-Charge Target | Desired battery or EV charge level (%) at a given deadline. The planner back-calculates the required charging power and window to meet it. |
 | **FlexibilityEnvelope** | — | The range of power the HEMS can flex (increase or decrease) in each time slot, as seen from the grid. Exposed to aggregators to let them predict available DR capacity. |
-| **Baseline** | Demand Baseline | The expected energy consumption without any DR intervention. Used in M&V calculations to measure actual load reduction. **Distinct from Forecast** (see below). |
+| **Baseline** | Demand Baseline | The expected energy consumption without any DR intervention. Used in M&V (Measurement & Verification) calculations to measure actual load reduction. **Distinct from Forecast** (see below). |
 | **Forecast** | Planner Forecast | The planner's per-slot prediction of energy consumption or generation. May use physics models, heuristics, or historical patterns. A forward-looking planning input, not a historical M&V reference. |
 
 ### 2.4 Energy & Grid Concepts
@@ -93,7 +93,8 @@ This convention applies uniformly at the site boundary (utility meter) to: setpo
                     ← export tariff
 ```
 
-At any instant: `P_util = P_import + P_export` (where `P_import ≥ 0, P_export ≤ 0`).
+`P_util` is a **single signed value** at the meter — the physical connection to the grid cannot import and export simultaneously. `P_import` and `P_export` are not two separate measurements; they are two names for the same `P_util` conditioned on its sign: `P_import = P_util` when `P_util ≥ 0` (site is net consuming), `P_export = P_util` when `P_util ≤ 0` (site is net producing). Exactly one is non-zero at any instant.
+
 Within the site: `Σ(P) = P_util − (P_consume + P_generate + P_store + P_release) = 0 W`.
 
 Generation (`P_generate`) and battery discharge (`P_release`) have negative values by definition.
@@ -108,6 +109,7 @@ They result in net export to grid **only if** their magnitude exceeds simultaneo
 | **€/kWh** | Tariff | Cost per unit of energy |
 | **€/h** | Rate | Cost per unit of time (power-based billing) |
 | **gCO₂eq/kWh** | Grid carbon intensity | Used in GHG event payloads |
+| **gCO₂eq/h** | Carbon Rate | GHG production per unit of time |
 | **%** | State of Charge | Battery/EV charge level (0–100%) |
 
 ### 2.7 ISO 8601 Duration Syntax
@@ -154,7 +156,7 @@ as-is. See `docs/openadr_3_1_specs/2_OpenADR 3.1.0_Definition_20250801.md` for a
 | `EXPORT_CAPACITY_LIMIT` | Hard export cap per interval (kW) |
 | `IMPORT_CAPACITY_SUBSCRIPTION` / `_RESERVATION` | Subscribed/reserved capacity (kW) |
 | `EXPORT_CAPACITY_SUBSCRIPTION` / `_RESERVATION` | Subscribed/reserved capacity (kW) |
-| `SIMPLE` | Curtailment level 0–3 |
+| `SIMPLE` | Curtailment level 0–3 (see note on profiles below) |
 | `DISPATCH_SETPOINT` | Absolute power setpoint (kW) |
 | `CHARGE_STATE_SETPOINT` | Battery/EV target SOC (%) |
 | `ALERT_GRID_EMERGENCY` / `ALERT_FLEX_ALERT` / etc. | Grid alerts |
@@ -164,6 +166,22 @@ as-is. See `docs/openadr_3_1_specs/2_OpenADR 3.1.0_Definition_20250801.md` for a
 `USAGE`, `DEMAND`, `BASELINE`, `STORAGE_CHARGE_LEVEL`, `STORAGE_MAX_CHARGE_POWER`,
 `STORAGE_MAX_DISCHARGE_POWER`, `OPERATING_STATE`, `USAGE_FORECAST`,
 `IMPORT_CAPACITY_RESERVATION`, `EXPORT_CAPACITY_RESERVATION`.
+
+**OpenADR 3 Certification Profiles:** OpenADR 3 introduced named certification profiles to
+avoid ambiguous interpretations of payload types like `SIMPLE`. In OpenADR 2.0b, `SIMPLE`
+carried implicit meaning that varied by deployment (curtailment level, price tier, or shed
+percentage — depending on the utility's convention). OpenADR 3 makes the meaning explicit
+through profiles: a profile defines which payload types a VEN/VTN must support and how to
+interpret them. Two profiles are defined in v3.1.0:
+- **Continuous Pricing (CP)** — VEN receives `PRICE`, `GHG`, and `ALERT` payloads and
+  optimises locally; no direct control mandate.
+- **Baseline Profile (BP)** — General flexibility system; covers direct control and dispatch
+  setpoints.
+
+VENs may implement any combination of profiles. VTNs must implement all profiles for
+commercial certification. This lab does not implement profile-based certification; it uses
+the raw payload types directly. Future VEN versions may add profile-aware interpretation of
+`SIMPLE` (mapping levels 0–3 to explicit actions) once the use case is defined.
 
 **Cancellation:** OpenADR 3 has no `cancel` status on events. Cancellation is achieved by
 deleting the event via `DELETE /events/{id}`. VENs detect removal on the next poll cycle.
@@ -265,7 +283,7 @@ MaxPower_kW      — maximum power
 PowerSteps       — discrete levels (null if STEPLESS)
 ```
 
-**OadrSignalSnapshot** (`RateSnapshot` [RENAME → `OadrSignalSnapshot`])
+**OadrEventSnapshot** (`RateSnapshot` [RENAME → `OadrEventSnapshot`])
 ```
 TimeStamp             — RFC 3339
 ImportPrice           — €/kWh (tariff for grid import)
@@ -369,10 +387,18 @@ Key implications:
 | **FR-OA-02** | VEN MUST obtain and refresh an OAuth2 token before calling any VTN endpoint. Token expires in 30 days; refresh on 401 response. |
 | **FR-OA-03** | VEN MUST detect event deletion (next poll returns fewer events) and treat it as cancellation; roll back any active DR response on that event. |
 | **FR-OA-04** | VEN MUST submit reports for any active `reportDescriptor` obligation extracted from event payloads. |
-| **FR-OA-05** | VEN MUST apply `targets` filtering — respond only to events targeted at its `venName` or to untargeted events. |
 | **FR-OA-06** | All timestamps MUST be UTC, ISO 8601 / RFC 3339 format. |
 | **FR-OA-07** | On VTN communication failure, VEN MUST back off exponentially (1 min → 2 min → 4 min → 8 min → max 15 min) and continue operating on last-known state. |
 | **FR-OA-08** | VEN MUST handle event priority: lower priority number = higher priority. Newer event breaks ties at equal priority. |
+
+> **Note — VEN-side target filtering (FR-OA-05 removed):** OpenADR 3.1 §"Object Privacy"
+> assigns target filtering to the **VTN**, not the VEN. On a VEN request the VTN SHALL
+> perform VEN_NAME matching and return an empty set for events the VEN is not targeted by.
+> Additionally, the VTN strips VEN_NAME entries from the `targets` field in responses so
+> VENs cannot infer which other VENs have access to an event (privacy). Both behaviours are
+> implemented in openleadr-rs (`event.rs` — SQL-level filtering + `strip_ven_name_targets()`,
+> merged in PR #374). The VEN therefore never receives events it should not act on and has
+> no need to perform its own target matching.
 
 ### 4.2 HEMS Controller Requirements (UC-01–UC-12)
 
@@ -411,13 +437,28 @@ For full step-by-step traces see `docs/VEN_Controller/Step5_UseCases.md` [ARCHIV
 | **OA-07** | Program Enrollment / Connectivity | VEN MUST acknowledge no-op events and send telemetry on schedule |
 | **OA-08** | Event Cancellation | VEN MUST detect event deletion on next poll; perform clean rollback; maintain state consistency |
 
-### 4.4 Simulator Requirements
+### 4.4 Asset Interface Requirements
+
+Every asset (simulated or measured) MUST expose the same three-window interface to the
+controller. The controller MUST NOT contain asset-specific formulas or physics. Whether
+an asset is backed by a physics simulator, a real sensor, or a cloud API is an implementation
+detail invisible to the planner, dispatcher, and monitor.
+
+| Requirement | Description |
+|---|---|
+| **FR-ASSET-01** | Every asset MUST implement `current() → f64` — the present power in kW (sign convention: positive = import/consume, negative = export/generate). |
+| **FR-ASSET-02** | Every asset MUST implement `forecast(horizon: Duration) → Vec<(DateTime, f64)>` — predicted power over the planning horizon, derived from the asset's own model (physics, heuristics, or external data). The planner MUST call this; it MUST NOT compute asset forecasts inline. |
+| **FR-ASSET-03** | Every asset MUST implement `past(window: Duration) → Vec<(DateTime, f64)>` — recorded power history over the given window. For simulated assets this is the simulation record; for measured assets it is sensor readings. |
+| **FR-ASSET-04** | The asset's simulation backend (physics model, irradiation curve, thermal model, etc.) MUST be encapsulated within the asset. Only the UI/test layer may read or write simulation parameters (via `/sim` endpoints). The controller layers (planner, dispatcher, monitor) MUST access assets only through the three-window interface above. |
+| **FR-ASSET-05** | A simulated asset and a measured asset of the same type MUST be interchangeable from the controller's perspective — swapping one for the other MUST require no changes outside the asset's own module. |
+
+### 4.5 Simulator Requirements
 
 | Requirement | Description |
 |---|---|
 | **FR-SIM-01** | Simulator MUST model at minimum: PV, battery, EV, heater, base load. |
 | **FR-SIM-02** | Asset model MUST be generic (`Vec<AssetEntry>`) — adding a new asset type must not require changes to the core simulator loop. |
-| **FR-SIM-03** | PV generation MUST follow `P_pv = P_max × sin(π × (hour − 6) / 12)` for 06:00–18:00, zero otherwise. Sign convention: negative (generation/export). |
+| **FR-SIM-03** | PV generation MUST be derived from irradiation: `P_pv = P_max × (irradiation_W_m2 / irradiation_stc_W_m2)`. The default irradiation model follows `irradiation = irradiation_peak × sin(π × (hour − 6) / 12)` for 06:00–18:00, zero otherwise. Irradiation MUST be clamped to zero outside daylight hours regardless of manual overrides. Sign convention: `P_pv` is negative (generation/export). — *UI note: the current irradiation override in the simulator UI does not enforce the day/night clamp; this is a separate UI bug.* |
 | **FR-SIM-04** | Battery MUST support bidirectional power (charge = positive, discharge = negative), round-trip efficiency, and SOC bounds. |
 | **FR-SIM-05** | EV MUST support minimum charge rate (1.5 kW), stepless adjustment, 10 s response delay model. |
 | **FR-SIM-06** | Heater MUST implement thermal model: `dT/dt = (P_heater × efficiency − ambient_loss) / thermal_mass`. |
