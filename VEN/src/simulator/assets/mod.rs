@@ -1,5 +1,8 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
+
+use crate::common::QuantitySeries;
+use crate::controller::trace::AssetHistoryBuffer;
 
 pub mod base_load;
 pub mod battery;
@@ -90,20 +93,25 @@ impl AssetState {
         }
     }
 
-    /// Forward projection. Returns (timestamp, power_kw) pairs.
-    /// Stub in speckit 1.
-    pub fn predict(
-        &self,
-        setpoint: f64,
-        _horizon_s: f64,
-        _env: &TickEnvironment,
-    ) -> Vec<(DateTime<Utc>, f64)> {
+    /// Forward projection. Returns a self-describing QuantitySeries over [now, now + timespan].
+    pub fn forecast(&self, timespan: Duration) -> QuantitySeries {
         match self {
-            Self::Ev(inner) => inner.predict(setpoint),
-            Self::Heater(inner) => inner.predict(setpoint),
-            Self::Pv(inner) => inner.predict(setpoint),
-            Self::Battery(inner) => inner.predict(setpoint),
-            Self::BaseLoad(inner) => inner.predict(setpoint),
+            Self::Ev(inner) => inner.forecast(timespan),
+            Self::Heater(inner) => inner.forecast(timespan),
+            Self::Pv(inner) => inner.forecast(timespan),
+            Self::Battery(inner) => inner.forecast(timespan),
+            Self::BaseLoad(inner) => inner.forecast(timespan),
+        }
+    }
+
+    /// Historical power data. Returns a self-describing QuantitySeries over [now - timespan, now].
+    pub fn past(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries {
+        match self {
+            Self::Ev(inner) => inner.past(timespan, history),
+            Self::Heater(inner) => inner.past(timespan, history),
+            Self::Pv(inner) => inner.past(timespan, history),
+            Self::Battery(inner) => inner.past(timespan, history),
+            Self::BaseLoad(inner) => inner.past(timespan, history),
         }
     }
 
