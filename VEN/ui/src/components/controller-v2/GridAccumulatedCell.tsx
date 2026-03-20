@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Box, IconButton, Paper, Tooltip, Typography } from "@mui/material";
+import { Box, Divider, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
 import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
@@ -88,6 +88,7 @@ interface GridAccumulatedCellProps {
   /** Whether this cell's time window is expanded to 24h forward. */
   extended: boolean;
   pinned: boolean;
+  gridPowerKw: number;
   onTogglePin: () => void;
   onToggleExpand: () => void;
 }
@@ -98,6 +99,7 @@ export function GridAccumulatedCell({
   nowMs,
   extended,
   pinned,
+  gridPowerKw,
   onTogglePin,
   onToggleExpand,
 }: GridAccumulatedCellProps) {
@@ -134,6 +136,10 @@ export function GridAccumulatedCell({
             {s.powerKw.toFixed(2)} kW
           </Typography>
         ))}
+        <Divider sx={{ my: 0.5 }} />
+        <Typography variant="caption" color="text.secondary" data-testid="accumulated-grid-power">
+          Grid: {gridPowerKw >= 0 ? "+" : ""}{gridPowerKw.toFixed(2)} kW
+        </Typography>
       </Box>
 
       {/* Right: stacked area chart */}
