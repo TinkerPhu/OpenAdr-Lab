@@ -185,6 +185,39 @@ impl AssetState {
         }
     }
 
+    /// Default comfort rates for user requests targeting this asset type.
+    pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
+        match self {
+            Self::Ev(inner) => inner.default_comfort_rates(),
+            Self::Heater(inner) => inner.default_comfort_rates(),
+            Self::Pv(inner) => inner.default_comfort_rates(),
+            Self::Battery(inner) => inner.default_comfort_rates(),
+            Self::BaseLoad(inner) => inner.default_comfort_rates(),
+        }
+    }
+
+    /// Default completion policy for user requests targeting this asset type.
+    pub fn default_completion_policy(&self) -> crate::entities::asset::CompletionPolicy {
+        match self {
+            Self::Ev(inner) => inner.default_completion_policy(),
+            Self::Heater(inner) => inner.default_completion_policy(),
+            Self::Pv(inner) => inner.default_completion_policy(),
+            Self::Battery(inner) => inner.default_completion_policy(),
+            Self::BaseLoad(inner) => inner.default_completion_policy(),
+        }
+    }
+
+    /// Default post-deadline comfort bid for user requests targeting this asset type.
+    pub fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
+        match self {
+            Self::Ev(inner) => inner.default_post_deadline_comfort_bid(),
+            Self::Heater(inner) => inner.default_post_deadline_comfort_bid(),
+            Self::Pv(inner) => inner.default_post_deadline_comfort_bid(),
+            Self::Battery(inner) => inner.default_post_deadline_comfort_bid(),
+            Self::BaseLoad(inner) => inner.default_post_deadline_comfort_bid(),
+        }
+    }
+
     /// Update config fields in place (e.g. capacity_kwh).
     pub fn update_config(&mut self, values: HashMap<String, f64>) {
         match self {
