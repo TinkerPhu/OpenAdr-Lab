@@ -1,17 +1,21 @@
-pub mod assets;
 pub mod energy;
 pub mod persist;
 pub mod power_model;
+
+// Re-export asset types so existing call sites using `simulator::assets::*` still compile.
+pub mod assets {
+    pub use crate::assets::*;
+}
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::assets::{AssetState, BaseLoad, Battery, EvCharger, Heater, PvInverter, TickEnvironment};
 use crate::models::SensorSnapshot;
 use crate::profile::{AssetConfig, BaseLoadConfig, Profile};
 use crate::state::UserOverrides;
-use assets::{AssetState, BaseLoad, Battery, EvCharger, Heater, PvInverter, TickEnvironment};
 use energy::EnergyCounter;
 
 /// One entry in the generic asset list.
