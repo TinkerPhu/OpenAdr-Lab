@@ -87,8 +87,8 @@ VEN/src/
   entities/
   assets/              — one module per asset type; each owns physics + forecast + history
     mod.rs             — AssetInterface trait + AssetEntry
-    pv/                — PvAsset: irradiation model, forecast(), past(), /sim params
-    battery/           — BatteryAsset: SOC model, forecast(), past(), /sim params
+    pv/                — PvAsset: irradiation model, forecast(), history(), /sim params
+    battery/           — BatteryAsset: SOC model, forecast(), history(), /sim params
     ev/                — EvAsset
     heater/            — HeaterAsset: thermal model
     base_load/         — BaseLoadAsset
@@ -635,7 +635,7 @@ A 5-min slot straddling a 10:57 boundary with €0.20 before and €0.15 after w
 For capacity: `effective_limit(slot) = min(capacity_i for all intervals overlapping slot)`.
 
 **Report generation (target behaviour):**
-Evaluate `asset.past(interval_period)` bucketed to the obligation's interval grid.
+Evaluate `asset.history(interval_period)` bucketed to the obligation's interval grid.
 Payload type determines aggregator: `USAGE → sum(kWh)`, `DEMAND → mean(kW)`,
 `STORAGE_CHARGE_LEVEL → last(%)`, `BASELINE → last(kW)`.
 

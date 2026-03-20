@@ -105,13 +105,13 @@ impl AssetState {
     }
 
     /// Historical power data. Returns a self-describing QuantitySeries over [now - timespan, now].
-    pub fn past(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries {
+    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries {
         match self {
-            Self::Ev(inner) => inner.past(timespan, history),
-            Self::Heater(inner) => inner.past(timespan, history),
-            Self::Pv(inner) => inner.past(timespan, history),
-            Self::Battery(inner) => inner.past(timespan, history),
-            Self::BaseLoad(inner) => inner.past(timespan, history),
+            Self::Ev(inner) => inner.history(timespan, history),
+            Self::Heater(inner) => inner.history(timespan, history),
+            Self::Pv(inner) => inner.history(timespan, history),
+            Self::Battery(inner) => inner.history(timespan, history),
+            Self::BaseLoad(inner) => inner.history(timespan, history),
         }
     }
 
@@ -197,7 +197,7 @@ impl AssetState {
     }
 }
 
-// ─── Shared past() helper ────────────────────────────────────────────────────
+// ─── Shared history() helper ─────────────────────────────────────────────────
 
 /// Slice the ring buffer to [now − timespan, now] and return a QuantitySeries.
 ///
@@ -205,7 +205,7 @@ impl AssetState {
 /// - Prepends a boundary point at `now − timespan` using the declared interpolation mode:
 ///   Step → holds the first available sample's value; Linear → same (first available value).
 /// - Returns empty series if the buffer is empty or timespan ≤ 0.
-pub fn past_from_buffer(
+pub fn history_from_buffer(
     timespan: Duration,
     history: &AssetHistoryBuffer,
     quantity: Quantity,

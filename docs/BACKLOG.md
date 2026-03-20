@@ -3,9 +3,9 @@
 These items improve internal consistency and architecture without changing external behaviour.
 Each is a prerequisite for future feature work as noted.
 
-### RF-01 — Asset Interface: implement forecast() and past() on each asset
+### RF-01 — Asset Interface: implement forecast() and history() on each asset
 **What:** Each asset type (PV, battery, EV, heater, base load) must implement the
-`AssetInterface` trait: `current()`, `forecast(timespan)`, `past(timespan)`.
+`AssetInterface` trait: `current()`, `forecast(timespan)`, `history(timespan)`.
 **Why:** The planner currently contains a standalone `pv_forecast()` function
 (`planner.rs:561–573`) that duplicates PV physics. This violates the single-responsibility
 principle and will break when a real sensor replaces the simulator — the planner would
@@ -14,8 +14,11 @@ still use the wrong formula.
 - Implement `predict()` properly on `PvInverter`, `Battery`, `EvCharger`, `Heater`, `BaseLoad`
   (currently all stubs returning single-point `(now, current_power)`)
 - Remove `pv_forecast()` from `planner.rs`; replace call sites with `asset.forecast(ts)`
-- Implement `past(window)` on each asset backed by its `EnergyCounter` / power profile ring buffer
+- Implement `history(window)` on each asset backed by its `EnergyCounter` / power profile ring buffer
 **Prerequisite for:** real sensor integration (RF-03), timeline visualisation accuracy
+
+### RF-01a - ~~rename past() to recordings()~~ resolved: renamed to history()
+- Was too general a name. Renamed to `history()`, which pairs cleanly with `forecast()` and aligns with the HTTP endpoint `/history/:asset_id`. Implemented in speckit 007.
 
 ### RF-02 — Flatten simulator/assets/ into assets/
 **What:** Move `VEN/src/simulator/assets/{ev,heater,pv,battery,base_load}` into a top-level

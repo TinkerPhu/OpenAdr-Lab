@@ -5,7 +5,7 @@
 | File | Change |
 |---|---|
 | `VEN/src/common/mod.rs` | **NEW FILE**: `Interpolation`, `Quantity`, `Unit`, `QuantitySeries` — add `mod common;` to `main.rs` |
-| `VEN/src/simulator/assets/mod.rs` | Add `forecast()` + `past()` dispatch on `AssetState`; remove `predict()` |
+| `VEN/src/simulator/assets/mod.rs` | Add `forecast()` + `history()` dispatch on `AssetState`; remove `predict()` |
 | `VEN/src/simulator/assets/pv.rs` | Replace `predict()` with `forecast(timespan)` — full sinusoidal model |
 | `VEN/src/simulator/assets/battery.rs` | Replace `predict()` with `forecast(timespan)` — SOC trajectory |
 | `VEN/src/simulator/assets/ev.rs` | Replace `predict()` with `forecast(timespan)` — flat/zero |
@@ -14,7 +14,7 @@
 | `VEN/src/controller/planner.rs` | Remove `pv_forecast()`; add `asset_forecasts` param to `run_planner()` + `build_grid()` |
 | `VEN/src/main.rs` | Compute forecast map from `SimState.assets` before each `run_planner()` call |
 | `tests/features/asset_forecast.feature` | New BDD scenarios for forecast() per asset type |
-| `tests/features/asset_history.feature` | New BDD scenarios for past() |
+| `tests/features/asset_history.feature` | New BDD scenarios for history() |
 
 ---
 
@@ -36,7 +36,7 @@ pub struct QuantitySeries {
 }
 ```
 
-Then add `forecast()` and `past()` dispatch arms to `impl AssetState` in `simulator/assets/mod.rs` (remove `predict()`).
+Then add `forecast()` and `history()` dispatch arms to `impl AssetState` in `simulator/assets/mod.rs` (remove `predict()`).
 
 ### 2. Implement `forecast(timespan)` on each asset
 
@@ -75,7 +75,7 @@ let asset_forecasts: HashMap<String, QuantitySeries> = sim_state.assets
     .collect();
 ```
 
-### 5. Implement `past(timespan, history)` on `AssetState`
+### 5. Implement `history(timespan, history)` on `AssetState`
 
 Each variant delegates to its struct; the struct implementation slices the buffer and extracts `power_kw`, prepending the boundary point. All variants share the same extraction logic — put it in a helper in `mod.rs`.
 

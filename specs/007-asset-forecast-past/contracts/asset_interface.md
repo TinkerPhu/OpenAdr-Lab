@@ -1,4 +1,4 @@
-# Contract: Asset Interface — forecast() and past()
+# Contract: Asset Interface — forecast() and history()
 
 Internal Rust function contracts. These define the behavioral guarantees each asset implementation must satisfy.
 
@@ -59,7 +59,7 @@ struct QuantitySeries {
 
 ---
 
-## AssetState::past(timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries
+## AssetState::history(timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries
 
 **Pre-conditions:**
 - `timespan > Duration::zero()`

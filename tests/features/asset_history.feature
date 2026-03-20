@@ -1,7 +1,7 @@
-Feature: Asset Interface — past(timespan)
+Feature: Asset Interface — history(timespan)
   Each asset returns historical power samples from the ring buffer via
   GET /history/:asset_id?timespan_s=N, returning a full QuantitySeries response
-  (samples, quantity, unit, interpolation). These scenarios fail when past()
+  (samples, quantity, unit, interpolation). These scenarios fail when history()
   stubs return empty and pass after T015–T021 are complete.
 
   Background:

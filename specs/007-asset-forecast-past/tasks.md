@@ -1,4 +1,4 @@
-# Tasks: Asset Interface — forecast() and past()
+# Tasks: Asset Interface — forecast() and history()
 
 **Input**: Design documents from `/specs/007-asset-forecast-past/`
 **Branch**: `007-asset-forecast-past`
@@ -27,8 +27,8 @@
 ⚠️ **CRITICAL**: Write BDD files first, run them, confirm they FAIL. Only then proceed to implementation.
 
 - [x] T003 [P] Write `tests/features/asset_forecast.feature` — BDD scenarios for `forecast(timespan)` covering: PV at noon (positive power), PV at night (zero), battery at 80% SoC, EV with no session (zero), base-load constant, heater thermal decay, zero timespan returns empty series, mandatory boundary point at `now + timespan`
-- [x] T004 [P] Write `tests/features/asset_history.feature` — BDD scenarios for `past(timespan)`: PV 30-min history returns samples, partial buffer (asset just started) returns available data only, empty buffer returns empty series, mandatory boundary point at `now − timespan`
-- [x] T005 Add `forecast(timespan: Duration) -> QuantitySeries` and `past(timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries` dispatch arms to `impl AssetState` in `VEN/src/simulator/assets/mod.rs`; remove `predict()`; stub implementations return empty `QuantitySeries` so the codebase compiles; fix all call sites of `predict()` to compile
+- [x] T004 [P] Write `tests/features/asset_history.feature` — BDD scenarios for `history(timespan)`: PV 30-min history returns samples, partial buffer (asset just started) returns available data only, empty buffer returns empty series, mandatory boundary point at `now − timespan`
+- [x] T005 Add `forecast(timespan: Duration) -> QuantitySeries` and `history(timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries` dispatch arms to `impl AssetState` in `VEN/src/simulator/assets/mod.rs`; remove `predict()`; stub implementations return empty `QuantitySeries` so the codebase compiles; fix all call sites of `predict()` to compile
 - [x] T006 Run BDD suite on Pi4 for the two new feature files and confirm all new scenarios **FAIL** (red phase); fix any step-definition compile errors without touching implementation
 
 **Checkpoint**: BDD scenarios exist and fail. Dispatch stubs compile. Implementation can now begin.
@@ -56,20 +56,20 @@
 
 ## Phase 4: User Story 2 — UI Timeline Uses Asset History (P2)
 
-**Goal**: Each asset can return its own historical power data via `past(timespan, history)`; the timeline endpoint sources data through this method.
+**Goal**: Each asset can return its own historical power data via `history(timespan, history)`; the timeline endpoint sources data through this method.
 
 **Independent Test**: Call `GET /timeline/pv?hours_back=0.5` — response must contain samples from the last 30 minutes with no NaN values; same call for battery; simulated vs. measured assets must produce the same response shape.
 
-- [x] T015 [US2] Add `past_from_buffer(timespan: Duration, history: &AssetHistoryBuffer, interpolation: Interpolation) -> QuantitySeries` shared helper to `VEN/src/simulator/assets/mod.rs`: slice buffer to `[now − timespan, now]`, extract `power_kw` column (drop NaN rows), prepend boundary point at `now − timespan` using declared interpolation mode, return `QuantitySeries { samples, quantity: Power, unit: Kilowatt, interpolation }`
-- [x] T016 [P] [US2] Implement `past(timespan, history)` on `PvInverter` in `VEN/src/simulator/assets/pv.rs`: delegate to `past_from_buffer` with `interpolation = Linear`
-- [x] T017 [P] [US2] Implement `past(timespan, history)` on `Battery` in `VEN/src/simulator/assets/battery.rs`: delegate to `past_from_buffer` with `interpolation = Linear`
-- [x] T018 [P] [US2] Implement `past(timespan, history)` on `EvCharger` in `VEN/src/simulator/assets/ev.rs`: delegate to `past_from_buffer` with `interpolation = Step`
-- [x] T019 [P] [US2] Implement `past(timespan, history)` on `Heater` in `VEN/src/simulator/assets/heater.rs`: delegate to `past_from_buffer` with `interpolation = Linear`
-- [x] T020 [P] [US2] Implement `past(timespan, history)` on `BaseLoad` in `VEN/src/simulator/assets/base_load.rs`: delegate to `past_from_buffer` with `interpolation = Step`
-- [x] T021 [US2] Wire `past()` into the timeline handler in `VEN/src/main.rs`: for each asset in `sim_state.assets`, replace direct `trace.asset_history_for(id)` slice with `asset.past(window_duration, history_buf)` and return the `QuantitySeries` samples; keep `"grid"` virtual asset using existing direct buffer access (no `AssetState` for grid)
+- [x] T015 [US2] Add `history_from_buffer(timespan: Duration, history: &AssetHistoryBuffer, interpolation: Interpolation) -> QuantitySeries` shared helper to `VEN/src/simulator/assets/mod.rs`: slice buffer to `[now − timespan, now]`, extract `power_kw` column (drop NaN rows), prepend boundary point at `now − timespan` using declared interpolation mode, return `QuantitySeries { samples, quantity: Power, unit: Kilowatt, interpolation }`
+- [x] T016 [P] [US2] Implement `history(timespan, history)` on `PvInverter` in `VEN/src/simulator/assets/pv.rs`: delegate to `history_from_buffer` with `interpolation = Linear`
+- [x] T017 [P] [US2] Implement `history(timespan, history)` on `Battery` in `VEN/src/simulator/assets/battery.rs`: delegate to `history_from_buffer` with `interpolation = Linear`
+- [x] T018 [P] [US2] Implement `history(timespan, history)` on `EvCharger` in `VEN/src/simulator/assets/ev.rs`: delegate to `history_from_buffer` with `interpolation = Step`
+- [x] T019 [P] [US2] Implement `history(timespan, history)` on `Heater` in `VEN/src/simulator/assets/heater.rs`: delegate to `history_from_buffer` with `interpolation = Linear`
+- [x] T020 [P] [US2] Implement `history(timespan, history)` on `BaseLoad` in `VEN/src/simulator/assets/base_load.rs`: delegate to `history_from_buffer` with `interpolation = Step`
+- [x] T021 [US2] Wire `history()` into the timeline handler in `VEN/src/main.rs`: for each asset in `sim_state.assets`, replace direct `trace.asset_history_for(id)` slice with `asset.history(window_duration, history_buf)` and return the `QuantitySeries` samples; keep `"grid"` virtual asset using existing direct buffer access (no `AssetState` for grid)
 - [ ] T022 [US2] On Pi4 run BDD suite with `--build`; `asset_history.feature` scenarios must now pass alongside all existing scenarios
 
-**Checkpoint**: Timeline sourced via `past()`. US1 and US2 both independently green.
+**Checkpoint**: Timeline sourced via `history()`. US1 and US2 both independently green.
 
 ---
 
@@ -79,7 +79,7 @@
 
 **Independent Test**: Swap `PvInverter` (simulated) for `MeasuredPv` stub in the test profile; run full BDD suite; zero source changes outside the asset file itself.
 
-- [ ] T023 [US3] Add `MeasuredPv` struct to `VEN/src/simulator/assets/pv.rs` (or a `#[cfg(test)]` module): implements `forecast(timespan)` returning a flat `QuantitySeries` at current power (Linear interpolation), and `past(timespan, history)` delegating to `past_from_buffer`; add a `AssetState::MeasuredPv(MeasuredPv)` variant (or use feature flag) so it can be loaded from a test profile
+- [ ] T023 [US3] Add `MeasuredPv` struct to `VEN/src/simulator/assets/pv.rs` (or a `#[cfg(test)]` module): implements `forecast(timespan)` returning a flat `QuantitySeries` at current power (Linear interpolation), and `history(timespan, history)` delegating to `history_from_buffer`; add a `AssetState::MeasuredPv(MeasuredPv)` variant (or use feature flag) so it can be loaded from a test profile
 - [ ] T024 [US3] Create `VEN/profiles/measured_test.yaml` with `MeasuredPv` as the PV asset; run the full BDD suite on Pi4 pointing to this profile; confirm all scenarios pass with zero changes to `planner.rs`, `dispatcher.rs`, or `reporter.rs`
 - [ ] T025 [US3] Remove `MeasuredPv` variant and `measured_test.yaml` — interchangeability verified; document outcome in `docs/history/project_journal.md` under RF-01
 
@@ -111,7 +111,7 @@
 
 - **US1**: No dependency on US2 or US3
 - **US2**: No dependency on US1 or US3 (can develop in parallel with US1 after Phase 2)
-- **US3**: Depends on US1 and US2 being complete (needs both forecast and past working)
+- **US3**: Depends on US1 and US2 being complete (needs both forecast and history working)
 
 ---
 
@@ -127,7 +127,7 @@ T003 ∥ T004  →  T005  →  T006
 # Phase 3 — five forecast implementations in parallel
 T007 ∥ T008 ∥ T009 ∥ T010 ∥ T011  →  T012  →  T013  →  T014
 
-# Phase 4 — one helper, then five past() in parallel
+# Phase 4 — one helper, then five history() in parallel
 T015  →  T016 ∥ T017 ∥ T018 ∥ T019 ∥ T020  →  T021  →  T022
 
 # Phase 3 and Phase 4 can run in parallel after Phase 2 if two developers
@@ -152,7 +152,7 @@ T026 ∥ T027  →  T028  →  T029
 
 1. Setup + Foundational → compiles, BDD red
 2. US1 complete → planner using asset forecasts, BDD green
-3. US2 complete → timeline sourced via `past()`, BDD green
+3. US2 complete → timeline sourced via `history()`, BDD green
 4. US3 complete → interface contract verified
 5. Polish → full regression + docs
 

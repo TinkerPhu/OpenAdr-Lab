@@ -44,8 +44,8 @@ impl BaseLoad {
         }
     }
 
-    pub fn past(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries {
-        super::past_from_buffer(timespan, history, Quantity::Power, Unit::Kilowatt, Interpolation::Step)
+    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries {
+        super::history_from_buffer(timespan, history, Quantity::Power, Unit::Kilowatt, Interpolation::Step)
     }
 
     pub fn state_values(&self) -> HashMap<String, f64> {

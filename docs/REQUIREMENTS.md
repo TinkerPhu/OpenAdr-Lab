@@ -448,7 +448,7 @@ detail invisible to the planner, dispatcher, and monitor.
 |---|---|
 | **FR-ASSET-01** | Every asset MUST implement `current() → f64` — the present power in kW (sign convention: positive = import/consume, negative = export/generate). |
 | **FR-ASSET-02** | Every asset MUST implement `forecast(horizon: Duration) → Vec<(DateTime, f64)>` — predicted power over the planning horizon, derived from the asset's own model (physics, heuristics, or external data). The planner MUST call this; it MUST NOT compute asset forecasts inline. |
-| **FR-ASSET-03** | Every asset MUST implement `past(window: Duration) → Vec<(DateTime, f64)>` — recorded power history over the given window. For simulated assets this is the simulation record; for measured assets it is sensor readings. |
+| **FR-ASSET-03** | Every asset MUST implement `history(window: Duration) → Vec<(DateTime, f64)>` — recorded power history over the given window. For simulated assets this is the simulation record; for measured assets it is sensor readings. |
 | **FR-ASSET-04** | The asset's simulation backend (physics model, irradiation curve, thermal model, etc.) MUST be encapsulated within the asset. Only the UI/test layer may read or write simulation parameters (via `/sim` endpoints). The controller layers (planner, dispatcher, monitor) MUST access assets only through the three-window interface above. |
 | **FR-ASSET-05** | A simulated asset and a measured asset of the same type MUST be interchangeable from the controller's perspective — swapping one for the other MUST require no changes outside the asset's own module. |
 

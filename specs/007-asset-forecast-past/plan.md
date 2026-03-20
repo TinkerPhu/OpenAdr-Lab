@@ -1,4 +1,4 @@
-# Implementation Plan: Asset Interface — forecast() and past()
+# Implementation Plan: Asset Interface — forecast() and history()
 
 **Branch**: `007-asset-forecast-past` | **Date**: 2026-03-20 | **Spec**: [spec.md](spec.md)
 
@@ -6,7 +6,7 @@
 
 ## Summary
 
-Each of the five VEN asset types (PV, battery, EV, heater, base load) gains a proper `forecast(timespan)` implementation using its own physics model, and a `past(timespan, history)` method that slices the existing ring buffer. Both return a new `QuantitySeries` type (in `VEN/src/common/`) carrying samples with declared `Quantity`, `Unit`, and `Interpolation` fields. The planner's internal `pv_forecast()` duplicate is removed; the planner receives a pre-computed forecast map instead.
+Each of the five VEN asset types (PV, battery, EV, heater, base load) gains a proper `forecast(timespan)` implementation using its own physics model, and a `history(timespan, history)` method that slices the existing ring buffer. Both return a new `QuantitySeries` type (in `VEN/src/common/`) carrying samples with declared `Quantity`, `Unit`, and `Interpolation` fields. The planner's internal `pv_forecast()` duplicate is removed; the planner receives a pre-computed forecast map instead.
 
 ---
 
@@ -33,7 +33,7 @@ Each of the five VEN asset types (PV, battery, EV, heater, base load) gains a pr
 | I — OpenADR Spec Fidelity | ✅ PASS | Internal Rust API only; no OpenADR field names involved |
 | II — BDD-First Testing | ✅ PASS | New `.feature` files written before any implementation code |
 | III — Upstream Compatibility | ✅ PASS | VEN code only; `openleadr-rs` submodule not touched |
-| IV — Lean Architecture | ✅ PASS | `past()` receives buffer as parameter (no ownership restructuring); `nearest_value()` helper is ~10 lines |
+| IV — Lean Architecture | ✅ PASS | `history()` receives buffer as parameter (no ownership restructuring); `nearest_value()` helper is ~10 lines |
 | V — Infrastructure Parity | ✅ PASS | All BDD tests run on Pi4 via SSH; `--build` always passed |
 
 No Complexity Tracking violations.
@@ -64,7 +64,7 @@ VEN/src/
     mod.rs              ← NEW MODULE: Interpolation, Quantity, Unit, QuantitySeries
   simulator/
     assets/
-      mod.rs              ← + forecast() + past() dispatch on AssetState
+      mod.rs              ← + forecast() + history() dispatch on AssetState
                              - predict() removed
       pv.rs               ← + forecast(timespan) — sinusoidal irradiation model
       battery.rs          ← + forecast(timespan) — SOC trajectory
@@ -76,11 +76,11 @@ VEN/src/
                              + asset_forecasts param on run_planner() + build_grid()
                              + nearest_value() helper (private)
   main.rs                 ← + compute forecast map before run_planner() calls
-                             + past() wired into timeline endpoint handler
+                             + history() wired into timeline endpoint handler
 
 tests/features/
   asset_forecast.feature  ← NEW: BDD scenarios for forecast() per asset type
-  asset_history.feature   ← NEW: BDD scenarios for past()
+  asset_history.feature   ← NEW: BDD scenarios for history()
 ```
 
 **Structure Decision**: Single-project layout (VEN backend). All changes are within `VEN/src/` — no new modules or crates.
@@ -95,7 +95,7 @@ Key resolved decisions:
 
 | Decision | Outcome |
 |---|---|
-| `past()` buffer ownership | Pass `&AssetHistoryBuffer` as parameter — no restructuring |
+| `history()` buffer ownership | Pass `&AssetHistoryBuffer` as parameter — no restructuring |
 | Planner access to assets | Pre-compute forecast map; pass as `&HashMap<String, QuantitySeries>` |
 | `predict()` fate | Removed — `forecast()` is a clean replacement, not an addition |
 | Forecast resolution | 1 sample/minute for continuous assets; two points (now + boundary) for Step assets |
@@ -120,8 +120,8 @@ Full pre/post-condition contracts in [contracts/asset_interface.md](contracts/as
 3. Implement `forecast()` on PV first (unblocks planner change)
 4. Remove `pv_forecast()` from planner, wire forecast map → existing BDD suite stays green
 5. Implement `forecast()` on battery, EV, heater, base_load
-6. Implement `past()` dispatch + per-asset extraction logic
-7. Wire `past()` into timeline handler in `main.rs`
+6. Implement `history()` dispatch + per-asset extraction logic
+7. Wire `history()` into timeline handler in `main.rs`
 8. Run full BDD suite on Pi4
 
 ### Constitution check (post-design)
