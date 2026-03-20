@@ -1,3 +1,5 @@
+> **ARCHIVED** — Superseded by [docs/REQUIREMENTS.md](../REQUIREMENTS.md).
+
 # Energy Flow Directions
 
 In this project the directions are according to a virtual image. On the left side the Utility (external electric energy provider), on the right side the users assets. The center could be seen as the central connection board (often the breaker board), where all wires are connected to:
