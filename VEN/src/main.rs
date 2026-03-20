@@ -1352,7 +1352,7 @@ async fn delete_request(
 ) -> impl IntoResponse {
     match ctx.state.cancel_request(id).await {
         Some(packet_id) => {
-            ctx.state.abandon_packet(packet_id).await;
+            // abandon_packet is now atomic inside cancel_request
             // T044: emit RequestTransition for cancellation
             ctx.state.push_controller_event(
                 controller::trace::ControllerEvent::RequestTransition {

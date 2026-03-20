@@ -62,6 +62,8 @@ export type AssetSnapshot = {
 
 export type GridSnapshot = {
   net_power_w: number;
+  import_w: number;
+  export_w: number;
   voltage_v: number;
   import_kwh: number;
   export_kwh: number;

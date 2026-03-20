@@ -245,10 +245,23 @@ impl SimState {
             ts: self.last_tick,
             grid: GridSnapshot {
                 net_power_w: self.grid.net_power_w,
+                import_w: self.grid.import_w,
+                export_w: self.grid.export_w,
                 voltage_v: self.grid.voltage_v,
                 import_kwh: self.grid.import_kwh,
                 export_kwh: self.grid.export_kwh,
             },
+            // Flat legacy aliases
+            net_power_w: self.grid.net_power_w,
+            import_w: self.grid.import_w,
+            export_w: self.grid.export_w,
+            import_kwh: self.grid.import_kwh,
+            export_kwh: self.grid.export_kwh,
+            ev: assets_map.get("ev").cloned(),
+            pv: assets_map.get("pv").cloned(),
+            battery: assets_map.get("battery").cloned(),
+            heater: assets_map.get("heater").cloned(),
+            base_load: assets_map.get("base_load").cloned(),
             assets: assets_map,
         }
     }
@@ -268,6 +281,8 @@ pub struct AssetSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GridSnapshot {
     pub net_power_w: f64,
+    pub import_w: f64,
+    pub export_w: f64,
     pub voltage_v: f64,
     pub import_kwh: f64,
     pub export_kwh: f64,
@@ -279,4 +294,20 @@ pub struct SimSnapshot {
     pub ts: DateTime<Utc>,
     pub grid: GridSnapshot,
     pub assets: HashMap<String, AssetSnapshot>,
+    // Flat legacy aliases — UI uses grid.*/assets.*, BDD tests check top-level keys.
+    pub net_power_w: f64,
+    pub import_w: f64,
+    pub export_w: f64,
+    pub import_kwh: f64,
+    pub export_kwh: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ev: Option<AssetSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pv: Option<AssetSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub battery: Option<AssetSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heater: Option<AssetSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_load: Option<AssetSnapshot>,
 }

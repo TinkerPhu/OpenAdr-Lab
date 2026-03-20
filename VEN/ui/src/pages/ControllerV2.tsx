@@ -64,7 +64,7 @@ export function ControllerV2Page() {
 
   function handleToggleCollapse(cellId: string, section: "left" | "right") {
     setCollapseState((prev) => {
-      const current = prev[cellId] ?? { leftCollapsed: false, rightCollapsed: true };
+      const current = prev[cellId] ?? { leftCollapsed: false, rightCollapsed: false };
       return {
         ...prev,
         [cellId]: {
@@ -117,7 +117,7 @@ export function ControllerV2Page() {
       const assetId = cellId.replace("asset:", "") as AssetId;
       const summary = assetSummaries.find((s) => s.assetId === assetId);
       if (!summary) return null;
-      const collapsed = collapseState[cellId] ?? { leftCollapsed: false, rightCollapsed: true };
+      const collapsed = collapseState[cellId] ?? { leftCollapsed: false, rightCollapsed: false };
       return (
         <AssetCell
           key={cellId}
@@ -184,7 +184,7 @@ export function ControllerV2Page() {
             const cellId = `asset:${summary.assetId}`;
             const collapsed = collapseState[cellId] ?? {
               leftCollapsed: false,
-              rightCollapsed: true,
+              rightCollapsed: false,
             };
             return (
               <AssetCell

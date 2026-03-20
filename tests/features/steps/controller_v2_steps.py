@@ -164,10 +164,12 @@ def step_ev_extend_btn_visible(context):
     assert el is not None and el.is_visible(), "asset-cell-ev-extend-btn not visible"
 
 
-@then("the heater asset cell has no extend-window button")
-def step_heater_no_extend_btn(context):
-    el = context.browser_page.query_selector(tid("asset-cell-heater-extend-btn"))
-    assert el is None, "asset-cell-heater-extend-btn should not be present but was found"
+@then("the heater asset cell shows an extend-window button")
+def step_heater_extend_btn_visible(context):
+    el = context.browser_page.wait_for_selector(
+        tid("asset-cell-heater-extend-btn"), timeout=10000
+    )
+    assert el is not None and el.is_visible(), "asset-cell-heater-extend-btn not visible"
 
 
 @then("the grid tariff cell shows an extend-window button")
