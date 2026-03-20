@@ -30,18 +30,6 @@ def step_get_forecast(context, asset_id, timespan_s):
         context.forecast_json = None
 
 
-@when("I GET /timeline/{asset_id}?hours_back={hours_back} from the VEN")
-def step_get_timeline(context, asset_id, hours_back):
-    context.history_hours_back = float(hours_back)
-    context.history_request_time = datetime.now(timezone.utc)
-    r = ven_get(f"/timeline/{asset_id}", params={"hours_back": hours_back})
-    context.last_response = r
-    if r.status_code == 200:
-        context.timeline_json = r.json()
-    else:
-        context.timeline_json = None
-
-
 @when("I GET /history/{asset_id}?timespan_s={timespan_s} from the VEN")
 def step_get_history(context, asset_id, timespan_s):
     context.history_timespan_s = float(timespan_s)
