@@ -651,8 +651,9 @@ async fn main() -> anyhow::Result<()> {
         // Timeline routes (speckit 005) — /all must precede /:asset_id
         .route("/timeline/all", get(get_timeline_all))
         .route("/timeline/:asset_id", get(get_timeline))
-        // Asset forecast endpoint (speckit 007)
+        // Asset forecast + history endpoints (speckit 007)
         .route("/forecast/:asset_id", get(get_asset_forecast))
+        .route("/history/:asset_id", get(get_asset_history))
         // HEMS Stage 2 routes
         .route("/capacity", get(get_capacity))
         .route("/obligations", get(get_obligations))
@@ -1140,6 +1141,55 @@ async fn get_asset_forecast(
             .into_response(),
         Some(entry) => {
             let series = entry.state.forecast(timespan);
+            let samples: Vec<serde_json::Value> = series
+                .samples
+                .iter()
+                .map(|(ts, v)| serde_json::json!({ "ts": ts, "value": v }))
+                .collect();
+            Json(serde_json::json!({
+                "samples": samples,
+                "quantity": series.quantity,
+                "unit": series.unit,
+                "interpolation": series.interpolation,
+            }))
+            .into_response()
+        }
+    }
+}
+
+/// Query parameters for GET /history/:asset_id.
+#[derive(Deserialize)]
+struct HistoryParams {
+    timespan_s: Option<f64>,
+}
+
+/// GET /history/:asset_id — historical QuantitySeries for one asset (speckit 007).
+/// Returns `{"samples": [{"ts": "...", "value": ...}], "quantity": "...", "unit": "...", "interpolation": "..."}`.
+async fn get_asset_history(
+    State(ctx): State<AppCtx>,
+    Path(asset_id): Path<String>,
+    Query(params): Query<HistoryParams>,
+) -> impl IntoResponse {
+    use axum::http::StatusCode;
+    use chrono::Duration;
+
+    let timespan_s = params.timespan_s.unwrap_or(0.0);
+    let timespan = Duration::milliseconds((timespan_s * 1000.0) as i64);
+
+    let ct = ctx.state.controller_trace().await;
+    let sim = ctx.sim.lock().await;
+    let entry = sim.assets.iter().find(|e| e.id == asset_id);
+    match entry {
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
+        )
+            .into_response(),
+        Some(entry) => {
+            let history = ct.asset_history.get(&asset_id);
+            let empty_buf = crate::controller::trace::AssetHistoryBuffer::new(0);
+            let buf = history.unwrap_or(&empty_buf);
+            let series = entry.state.past(timespan, buf);
             let samples: Vec<serde_json::Value> = series
                 .samples
                 .iter()
