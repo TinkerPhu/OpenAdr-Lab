@@ -17,7 +17,7 @@ No new logic. No new tests needed (existing BDD suite provides full coverage).
 
 **Purpose**: Confirm the baseline builds cleanly before touching anything.
 
-- [ ] T001 Verify `cargo build` passes on branch `008-flatten-assets-module` (confirm clean baseline before any file moves) in `VEN/`
+- [x] T001 Verify `cargo build` passes on branch `008-flatten-assets-module` (confirm clean baseline before any file moves) in `VEN/`
 
 ---
 
@@ -28,22 +28,20 @@ into the crate. Must complete before US1 (build verification) or US2 (test verif
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T002 Create `VEN/src/assets/mod.rs` — copy content verbatim from `VEN/src/simulator/assets/mod.rs`; update the five `pub mod` declarations at the top if they reference a non-relative path (they are relative, so no change expected)
-- [ ] T003 [P] Create `VEN/src/assets/pv.rs` — copy content verbatim from `VEN/src/simulator/assets/pv.rs`
-- [ ] T004 [P] Create `VEN/src/assets/battery.rs` — copy content verbatim from `VEN/src/simulator/assets/battery.rs`
-- [ ] T005 [P] Create `VEN/src/assets/ev.rs` — copy content verbatim from `VEN/src/simulator/assets/ev.rs`
-- [ ] T006 [P] Create `VEN/src/assets/heater.rs` — copy content verbatim from `VEN/src/simulator/assets/heater.rs`
-- [ ] T007 [P] Create `VEN/src/assets/base_load.rs` — copy content verbatim from `VEN/src/simulator/assets/base_load.rs`
-- [ ] T008 Update `VEN/src/simulator/mod.rs` — remove `pub mod assets;`; add re-export bridge (depends on T002–T007):
+- [x] T002 Create `VEN/src/assets/mod.rs` — copy content verbatim from `VEN/src/simulator/assets/mod.rs`; update the five `pub mod` declarations at the top if they reference a non-relative path (they are relative, so no change expected)
+- [x] T003 [P] Create `VEN/src/assets/pv.rs` — copy content verbatim from `VEN/src/simulator/assets/pv.rs`
+- [x] T004 [P] Create `VEN/src/assets/battery.rs` — copy content verbatim from `VEN/src/simulator/assets/battery.rs`
+- [x] T005 [P] Create `VEN/src/assets/ev.rs` — copy content verbatim from `VEN/src/simulator/assets/ev.rs`
+- [x] T006 [P] Create `VEN/src/assets/heater.rs` — copy content verbatim from `VEN/src/simulator/assets/heater.rs`
+- [x] T007 [P] Create `VEN/src/assets/base_load.rs` — copy content verbatim from `VEN/src/simulator/assets/base_load.rs`
+- [x] T008 Update `VEN/src/simulator/mod.rs` — remove `pub mod assets;`; add re-export bridge (depends on T002–T007):
   ```rust
-  pub use crate::assets::{
-      AssetState, AssetCapabilities, TickEnvironment,
-      EnergyState, TimeWindow, ControlKind, ControlDescriptor,
-      history_from_buffer,
-  };
+  pub mod assets {
+      pub use crate::assets::*;
+  }
   ```
-  Also update any `use super::assets::…` or `use crate::simulator::assets::…` within the file to `use crate::assets::…`
-- [ ] T009 Add `pub mod assets;` declaration to `VEN/src/main.rs` alongside the existing `mod simulator;` line (depends on T002)
+  Also update `use assets::` within the file to `use crate::assets::…`
+- [x] T009 Add `pub mod assets;` declaration to `VEN/src/main.rs` alongside the existing `mod simulator;` line (depends on T002)
 
 **Checkpoint**: Foundation ready — new module is declared and wired; ready for build verification.
 
@@ -57,10 +55,10 @@ into the crate. Must complete before US1 (build verification) or US2 (test verif
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] Run `cargo build` in `VEN/` and fix every compiler error caused by stale `use crate::simulator::assets::…` references in any file (likely `VEN/src/controller/planner.rs`, `VEN/src/controller/dispatcher.rs`, `VEN/src/entities/asset.rs`); update each to `use crate::assets::…` (depends on T008, T009)
-- [ ] T011 [US1] Delete `VEN/src/simulator/assets/` directory (all six files) — only after T010 produces a clean build (depends on T010)
-- [ ] T012 [US1] Run `cargo build` again in `VEN/` to confirm zero errors and zero warnings after deletion (depends on T011)
-- [ ] T013 [US1] Run `grep -r "simulator::assets" VEN/src/` and confirm zero matches (or only re-export lines in `simulator/mod.rs`) (depends on T012)
+- [x] T010 [US1] Run `cargo build` in `VEN/` and fix every compiler error caused by stale `use crate::simulator::assets::…` references in any file (likely `VEN/src/controller/planner.rs`, `VEN/src/controller/dispatcher.rs`, `VEN/src/entities/asset.rs`); update each to `use crate::assets::…` (depends on T008, T009)
+- [x] T011 [US1] Delete `VEN/src/simulator/assets/` directory (all six files) — only after T010 produces a clean build (depends on T010)
+- [x] T012 [US1] Run `cargo build` again in `VEN/` to confirm zero errors and zero warnings after deletion (depends on T011)
+- [x] T013 [US1] Run `grep -r "simulator::assets" VEN/src/` and confirm zero matches (or only re-export lines in `simulator/mod.rs`) (depends on T012)
 
 **Checkpoint**: User Story 1 complete — new directory structure is live, old path is gone, build is clean.
 
@@ -74,9 +72,9 @@ into the crate. Must complete before US1 (build verification) or US2 (test verif
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] Run `cargo test --workspace` in `VEN/` and confirm all tests pass (same count as baseline) (depends on T012)
-- [ ] T015 [US2] Push branch to remote and deploy to Pi4-Server: `git push`, then `ssh Pi4-Server "cd /srv/docker/openadr_lab && git pull"` (depends on T014)
-- [ ] T016 [US2] Run BDD integration tests on Pi4-Server: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner` — confirm 895 steps, 0 failures (depends on T015)
+- [x] T014 [US2] Run `cargo test --workspace` in `VEN/` and confirm all tests pass (same count as baseline) (depends on T012)
+- [x] T015 [US2] Push branch to remote and deploy to Pi4-Server: `git push`, then `ssh Pi4-Server "cd /srv/docker/openadr_lab && git pull"` (depends on T014)
+- [x] T016 [US2] Run BDD integration tests on Pi4-Server: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner` — confirm 895 steps, 0 failures (depends on T015)
 
 **Checkpoint**: User Stories 1 AND 2 complete — structure is correct and all tests green.
 
@@ -84,9 +82,9 @@ into the crate. Must complete before US1 (build verification) or US2 (test verif
 
 ## Phase 5: Polish & Cross-Cutting Concerns
 
-- [ ] T017 [P] Add entry to `docs/history/project_journal.md` documenting the RF-02 move: what changed, why, and any issues encountered
-- [ ] T018 [P] Run `cargo clippy` in `VEN/` and fix any new lint warnings introduced by the move (depends on T012)
-- [ ] T019 Run quickstart.md verification checklist (5 steps) to confirm all acceptance criteria are met (depends on T016)
+- [x] T017 [P] Add entry to `docs/history/project_journal.md` documenting the RF-02 move: what changed, why, and any issues encountered
+- [x] T018 [P] Run `cargo clippy` in `VEN/` and fix any new lint warnings introduced by the move (depends on T012)
+- [x] T019 Run quickstart.md verification checklist (5 steps) to confirm all acceptance criteria are met (depends on T016)
 
 ---
 

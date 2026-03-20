@@ -2640,4 +2640,34 @@ Controls existed in DOM but MUI Accordion was collapsed by default. Playwright f
 
 - When multiple BDD tests make contradictory assertions about the same endpoint, identify the authoritative one (usually the most recent feature spec) rather than trying to satisfy both.
 - Race conditions between long-running loops (planner) and HTTP handlers require merge-on-write semantics, not just atomic reads. A snapshot taken before a state change can overwrite the change when written back.
+
+---
+
+## RF-02: Flatten simulator/assets/ → assets/ (speckit 008)
+
+**Date**: 2026-03-20
+**Branch**: `008-flatten-assets-module`
+
+### Objective
+
+Move `VEN/src/simulator/assets/` to a top-level `VEN/src/assets/` module. Each asset owns its physics model, forecast logic, simulation state, and `/sim` parameter types. The `simulator/` wrapper no longer implies simulation is a global concern.
+
+### What changed
+
+- Created `VEN/src/assets/{mod,pv,battery,ev,heater,base_load}.rs` — content verbatim from `simulator/assets/`.
+- Added `mod assets;` declaration to `main.rs`.
+- In `simulator/mod.rs`: replaced `pub mod assets;` with a re-export bridge (`pub mod assets { pub use crate::assets::*; }`) and updated the local `use assets::` import to `use crate::assets::`.
+- Deleted `VEN/src/simulator/assets/` directory.
+
+### Key decisions
+
+- **Flat files preserved** (not converted to sub-directories). The backlog notation of `pv/` etc. is aspirational; current code doesn't warrant a second level.
+- **Re-export bridge** in `simulator/mod.rs` kept `simulator::assets::ControlDescriptor` working in `main.rs:795` without a separate code change. Can be removed in a later cleanup.
+- **`AssetEntry`, `SimState`, `GridMeter` stayed in `simulator/mod.rs`** — moving them was out-of-scope and would have touched dispatcher and planner without adding value.
+
+### Results
+
+- `cargo build`: zero errors, pre-existing warnings only.
+- `cargo test --workspace`: 48/48 pass.
+- BDD integration suite: 173 scenarios, 1024 steps, 0 failures.
 - Behave `{param}` captures are greedy — `{hours_back}` matches `0&hours_forward=1`. Avoid registering step patterns that partially overlap with existing generic steps.
