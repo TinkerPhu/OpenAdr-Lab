@@ -161,6 +161,9 @@ impl Battery {
         if let Some(&v) = values.get("capacity_kwh") {
             self.capacity_kwh = v.max(0.1);
         }
+        if let Some(&v) = values.get("min_soc") {
+            self.min_soc = v.clamp(0.0, 1.0);
+        }
     }
 
     pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
