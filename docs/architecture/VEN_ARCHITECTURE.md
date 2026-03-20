@@ -36,8 +36,22 @@ via the OpenADR 3 REST API. Internally it has two major subsystems: the **HEMS C
 │  └─────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │                          Simulator                                      │ │
-│  │   PV  │  Battery  │  EV  │  Heater  │  BaseLoad   (Vec<AssetEntry>)    │ │
+│  │                     Asset Layer  (Vec<AssetEntry>)                      │ │
+│  │                                                                         │ │
+│  │  ┌──────────────────────────────────────────────────────────────────┐  │ │
+│  │  │  AssetInterface: current() · forecast(horizon) · past(window)    │  │ │
+│  │  └──────────────────────────────────────────────────────────────────┘  │ │
+│  │          ▲                                            ▲                 │ │
+│  │  ┌───────┴────────┐                       ┌──────────┴──────────┐      │ │
+│  │  │ SimulatedAsset │  ← physics models     │  MeasuredAsset      │      │ │
+│  │  │ PV · Battery   │    per asset type     │  (future: real HW   │      │ │
+│  │  │ EV · Heater    │                       │   / external API)   │      │ │
+│  │  │ BaseLoad       │                       └─────────────────────┘      │ │
+│  │  └───────┬────────┘                                                     │ │
+│  │          │ UI only                                                      │ │
+│  │  ┌───────▼────────┐                                                     │ │
+│  │  │ /sim endpoints │  ← simulation params, overrides, schema, reset      │ │
+│  │  └────────────────┘                                                     │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
 │  REST API (Axum, port 8080 internal / 821x host)                            │
@@ -50,16 +64,42 @@ via the OpenADR 3 REST API. Internally it has two major subsystems: the **HEMS C
                    └──────────┘
 ```
 
-**Source layout:**
+**Source layout (current):**
 ```
 VEN/src/
   main.rs              — Axum router + all handler functions
   controller/          — dispatcher, monitor, openadr_interface, planner, user_request
   entities/            — asset, capacity, energy_packet, plan, rate_snapshot, site_meter, user_request
   simulator/           — mod.rs, assets/{ev,heater,pv,battery,base_load}, energy, persist, power_model
-  reactor/             — REMOVED (see §5.3)
+  reactor/             — REMOVED (see §3.3)
   reporter.rs          — report-building logic (no HTTP endpoints)
 ```
+
+**Source layout (target — post asset-interface + common refactor):**
+```
+VEN/src/
+  main.rs
+  common/              — shared abstractions; no VEN-specific logic
+    mod.rs
+    timeseries.rs      — TimeSeries<T>, Interpolation, bucket(), resample()
+    interval.rs        — overlap(), union_of_breakpoints(), time-weighted average
+  controller/
+  entities/
+  assets/              — one module per asset type; each owns physics + forecast + history
+    mod.rs             — AssetInterface trait + AssetEntry
+    pv/                — PvAsset: irradiation model, forecast(), past(), /sim params
+    battery/           — BatteryAsset: SOC model, forecast(), past(), /sim params
+    ev/                — EvAsset
+    heater/            — HeaterAsset: thermal model
+    base_load/         — BaseLoadAsset
+  reporter.rs
+```
+
+`common/` is a plain Rust module (`mod common;` in `main.rs`), not a separate crate.
+When a VTN controller is built, `common/` can be extracted into a shared workspace crate
+at that point — its public API will not need to change.
+
+See `docs/BACKLOG.md §Refactoring` for the migration plan.
 
 ---
 
@@ -69,7 +109,7 @@ VEN/src/
 
 | Component | Module | Cycle / Trigger | Owns |
 |---|---|---|---|
-| **OpenADR Interface** | `controller/openadr_interface` | 30 s poll + event-driven | `OadrEventCache`, `OadrSignalSnapshots` [RENAME], `OadrCapacityState`, `OadrReportObligations`, `PlannedRates` |
+| **OpenADR Interface** | `controller/openadr_interface` | 30 s poll + event-driven | `OadrEventCache`, `OadrEventSnapshots` [RENAME], `OadrCapacityState`, `OadrReportObligations`, `PlannedRates` |
 | **User Request Manager** | `controller/user_request` | Event-driven (API call) | `UserRequest`, `EnergyPacket` (creation) |
 | **Monitor** | `controller/monitor` | 1 s tick | `AssetLedger`, `PastEnergySum`, deviation detection |
 | **Planner** | `controller/planner` | Watch channel + 20 s periodic | `Plan`, `FlexibilityEnvelopes`, `PlanWarnings` |
@@ -85,11 +125,11 @@ knows about OpenADR HTTP, OAuth, and event payload formats.
 
 | OpenADR EventType | Internal target |
 |---|---|
-| `PRICE` | `OadrSignalSnapshot.ImportPrice` |
-| `EXPORT_PRICE` | `OadrSignalSnapshot.ExportPrice` |
-| `GHG` | `OadrSignalSnapshot.ImportCO2` |
-| `IMPORT_CAPACITY_LIMIT` | `OadrSignalSnapshot.ImportCapacityLimit` (per interval) |
-| `EXPORT_CAPACITY_LIMIT` | `OadrSignalSnapshot.ExportCapacityLimit` (per interval) |
+| `PRICE` | `OadrEventSnapshot.ImportPrice` |
+| `EXPORT_PRICE` | `OadrEventSnapshot.ExportPrice` |
+| `GHG` | `OadrEventSnapshot.ImportCO2` |
+| `IMPORT_CAPACITY_LIMIT` | `OadrEventSnapshot.ImportCapacityLimit` (per interval) |
+| `EXPORT_CAPACITY_LIMIT` | `OadrEventSnapshot.ExportCapacityLimit` (per interval) |
 | `IMPORT_CAPACITY_SUBSCRIPTION` | `OadrCapacityState.ImportSubscription_kW` |
 | `EXPORT_CAPACITY_SUBSCRIPTION` | `OadrCapacityState.ExportSubscription_kW` |
 | `IMPORT_CAPACITY_RESERVATION` | `OadrCapacityState.ImportReservation_kW` |
@@ -165,7 +205,7 @@ For the complete algorithm see `docs/VEN_Controller/Step4_Algorithm.md` [ARCHIVE
 Phase 1 — PREPARE
   Build planning grid (slots × tariffs × limits)
   Classify slots: FIRM (near-horizon) vs FLEXIBLE (far-horizon)
-  Populate baseline from asset forecasts
+  Populate baseline by calling asset.forecast(horizon) for each asset — NO inline formulas
   Classify assets and packets
 
 Phase 2 — SCORE (FIRM slots only)
@@ -241,7 +281,7 @@ t=0.1s   Monitor
            → Deviation detection → PlanTrigger? (via watch channel)
 
 t=30s    OpenADR Interface polls VTN
-           → New events → translate to OadrSignalSnapshots, CapacityState
+           → New events → translate to OadrEventSnapshots, CapacityState
            → PlanTrigger.RATE_CHANGE or CAPACITY_CHANGE if changed
 
 t=20s    Planner (if triggered)
@@ -253,11 +293,37 @@ t=20s    Planner (if triggered)
 
 ---
 
-## 3. Simulator & Reactor
+## 3. Asset Layer
+
+### 3.0 Asset Abstraction
+
+Each asset exposes a uniform interface to the controller. The controller never calls
+physics functions directly or reads simulation parameters.
+
+```
+trait AssetInterface {
+    fn current(&self) -> f64;                              // kW now
+    fn forecast(&self, horizon: Duration) -> Vec<(DateTime<Utc>, f64)>;  // predicted kW
+    fn past(&self, window: Duration) -> Vec<(DateTime<Utc>, f64)>;       // recorded kW
+}
+```
+
+Two implementations exist (or will exist):
+
+| Implementation | Backend | Used by |
+|---|---|---|
+| `SimulatedAsset` | Physics model (sin, SOC, thermal) | All current VENs |
+| `MeasuredAsset` | Real sensor / hardware API | Future real deployments |
+
+From the controller's perspective these are identical. Swapping a `SimulatedAsset` for a
+`MeasuredAsset` requires no changes outside that asset's module.
+
+**Simulation parameters** (irradiation curve, initial SOC, rated power, thermal constants)
+are only accessible through the `/sim` API endpoints. The controller never reads them.
 
 ### 3.1 Generic Asset Model
 
-The simulator uses a generic, extensible model: `SimState.assets: Vec<AssetEntry>`.
+The simulator implements the asset interface using a generic model: `SimState.assets: Vec<AssetEntry>`.
 
 ```rust
 struct SimState {
@@ -303,13 +369,22 @@ assets:
 
 #### PV Inverter
 
+Irradiation is the primary simulated quantity; P_pv is derived from it:
+
 ```
-P_pv(t) = -P_max × sin(π × (hour − 6) / 12)   for 06:00 ≤ hour ≤ 18:00
-P_pv(t) = 0                                     otherwise
+irradiation(t) = irradiation_peak × sin(π × (hour − 6) / 12)   for 06:00 ≤ hour ≤ 18:00
+irradiation(t) = 0                                               otherwise (clamped)
+
+P_pv(t) = −P_max × (irradiation(t) / irradiation_stc)
 ```
 
-Sign convention: negative (generation, exported or self-consumed).
+`irradiation_stc` = 1000 W/m² (Standard Test Conditions reference).
+Irradiation is clamped to zero outside daylight hours regardless of manual UI overrides.
+Sign convention: `P_pv` is negative (generation, exported or self-consumed).
 Curtailment: if `ExportCapacityLimit` is set and `|P_pv| > limit`, the inverter is cropped to `−limit`.
+
+**Forecast:** `PvAsset.forecast(horizon)` applies the same irradiation model over future
+time slots. The planner calls this — it does not contain a PV formula of its own.
 
 #### Battery
 
@@ -424,7 +499,7 @@ Physics-based device simulation.
 
 | Method | Path | Stage | Description |
 |---|---|---|---|
-| GET | `/rates` [RENAME → `/tariffs`] | 2 | `OadrSignalSnapshot` array parsed from active events |
+| GET | `/rates` [RENAME → `/tariffs`] | 2 | `OadrEventSnapshot` array parsed from active events |
 | GET | `/capacity` | 2 | `OadrCapacityState` parsed from active events |
 | GET | `/obligations` | 2 | Pending report obligations extracted from events |
 | GET | `/packets` | 3 | All EnergyPackets (FIRM + FLEXIBLE + terminal) |
@@ -450,7 +525,130 @@ Physics-based device simulation.
 
 ---
 
-## 5. Design Decisions
+## 5. Time-Series Alignment
+
+The system deals with multiple time series that originate from different sources and carry
+different natural periods. They rarely align on a common grid:
+
+| Series | Typical period | Origin | Type |
+|---|---|---|---|
+| Asset power (sim) | 1 s | Simulator tick | Continuous physical |
+| Planning grid slots | 60–300 s (configurable) | Planner | Derived |
+| PRICE / GHG events | 1 h (day-ahead) | VTN OpenADR | Piecewise-constant |
+| Capacity limit events | 3–6 h | VTN OpenADR | Piecewise-constant |
+| SIMPLE / alert events | Variable | VTN OpenADR | Piecewise-constant |
+| Report obligations | 15–30 min (typical) | VTN event `reportDescriptors` | Aggregation target |
+| UI chart buckets | Variable (display width) | Browser | Downsampled |
+
+### 5.1 Interpolation Semantics by Signal Type
+
+Different signal types require different interpolation rules. Mixing rules is a source of
+silent bugs (e.g. linearly interpolating a tariff implies a continuous ramp, which is wrong).
+
+| Signal type | Examples | Correct rule | Wrong |
+|---|---|---|---|
+| **Piecewise-constant** | Tariff (€/kWh), capacity limit (kW), SIMPLE level | **Step / LOCF** — value holds until the next breakpoint | Linear interpolation |
+| **Continuous physical** | Power (kW), temperature (°C), SOC (%) | **Linear** between measured points | Carrying last value flat |
+| **Cumulative** | Energy (kWh), cost (€) | **Sum within bucket** — never interpolate | Any interpolation |
+
+**LOCF** = Last Observation Carried Forward — the value at time `t` is the most recent value
+at or before `t`. Correct for tariffs and any signal that "takes effect and stays in effect".
+
+### 5.2 Current Implementation (Audit)
+
+The codebase uses three different strategies with no shared abstraction:
+
+**Planner — tariff lookup** (`planner.rs:540–560`, `tariff_import_at()`):
+Exact-interval containment: `interval_start ≤ ts < interval_end`. Applied at the slot
+**start timestamp only**. A planning slot that spans a tariff boundary gets the rate from
+the first half only — the boundary is invisible to the planner.
+
+```
+Tariff:   [10:00──────── €0.20 ────────11:00)  [11:00── €0.15 ──12:00)
+Slots:    [10:30──────────────────── 11:10)
+Lookup:   tariff_at(10:30) = €0.20  ← 10:57–11:10 billed at wrong rate
+```
+
+**Planner — capacity** (`openadr_interface.rs:236–320`):
+Treated as a scalar state (strictest-limit-wins across all active events). Per-interval
+capacity changes within an event are flattened to a single value — slot-level variation lost.
+
+**Event merge** (`openadr_interface.rs:179–213`):
+Last-write-wins when multiple events define the same interval. The OpenADR `priority` field
+is parsed but not used in ordering. A higher-priority event that is processed first can be
+silently overwritten by a lower-priority one processed later.
+
+**UI stacked chart** (`GridAccumulatedCell.tsx:16–80`):
+Nearest-neighbour binary search with 15 s tolerance. Breaks when assets have different
+effective sampling rates (e.g. one asset downsampled to 30 s strides, another at 1 s).
+Currently mitigated by excluding the `grid` virtual asset from timestamp collection to
+avoid false zero-spikes. Known deferred fix — see BACKLOG RF-05.
+
+**Report generation** (`reporter.rs`):
+Latest snapshot only — no per-interval aggregation. Does not align to the report obligation's
+`intervalPeriod`. Produces one data point regardless of reporting interval length.
+
+### 5.3 Target Architecture — `TimeSeries<T>`
+
+A single reusable abstraction should replace all ad-hoc lookups. See BACKLOG RF-05 and RF-06
+for the implementation plan.
+
+```
+TimeSeries<T> {
+    points:        Vec<(DateTime<Utc>, T)>,
+    interpolation: Interpolation,  // Step | Linear | None
+}
+
+enum Interpolation {
+    Step,    // LOCF — correct for tariffs, capacity limits, states
+    Linear,  // correct for power, temperature, SOC
+    None,    // cumulative values — aggregate only, never interpolate
+}
+
+impl<T> TimeSeries<T> {
+    fn at(&self, ts: DateTime<Utc>) -> Option<T>
+    // Evaluate at any timestamp using the declared interpolation rule.
+
+    fn resample(&self, grid: &[DateTime<Utc>]) -> TimeSeries<T>
+    // Project onto an arbitrary timestamp grid (union-of-breakpoints or fixed).
+
+    fn merge(series: &[TimeSeries<T>]) -> TimeSeries<T>
+    // Union-of-breakpoints merge: collect all breakpoints from all inputs,
+    // evaluate each series at every breakpoint using its own rule.
+
+    fn bucket(&self, width: Duration, agg: Aggregator) -> TimeSeries<T>
+    // Downsample: mean (power), last (states), sum (cumulative).
+}
+```
+
+**Planner slot costing (target behaviour):**
+Instead of sampling tariff at `slot.start`, compute the time-weighted average across the slot:
+
+```
+effective_tariff(slot) =
+  Σ( tariff_i × overlap(slot, interval_i) ) / slot.duration
+```
+
+A 5-min slot straddling a 10:57 boundary with €0.20 before and €0.15 after would give:
+`(7 min × €0.20 + 3 min × €0.15) / 10 min = €0.185/kWh` — correct to three decimal places.
+
+For capacity: `effective_limit(slot) = min(capacity_i for all intervals overlapping slot)`.
+
+**Report generation (target behaviour):**
+Evaluate `asset.past(interval_period)` bucketed to the obligation's interval grid.
+Payload type determines aggregator: `USAGE → sum(kWh)`, `DEMAND → mean(kW)`,
+`STORAGE_CHARGE_LEVEL → last(%)`, `BASELINE → last(kW)`.
+
+### 5.4 OpenADR Spec Position
+
+The spec defines interval structure but leaves VEN-side alignment to the implementer:
+- Mixed `intervalPeriod` granularities within a single event (or across events) are legal.
+- Reports may use `dataQuality = ESTIMATED` for interpolated/inferred values — acknowledged but unspecified.
+- Event `priority` is defined but conflict resolution for overlapping same-type payloads is not specified; priority-based ordering before merge is the correct interpretation.
+
+---
+
+## 6. Design Decisions
 
 ### D-01: Greedy Planner (not LP/MILP)
 
@@ -477,9 +675,9 @@ See §3.3. Controller is the single control authority.
 **Rationale:** The hardcoded named-field model required touching every layer when adding an
 asset type. The generic model isolates new asset types to their own module.
 
-### D-05: OadrSignalSnapshot Unification
+### D-05: OadrEventSnapshot Unification
 
-**Decision:** `RateSnapshot` [RENAME → `OadrSignalSnapshot`] holds all time-varying signals
+**Decision:** `RateSnapshot` [RENAME → `OadrEventSnapshot`] holds all time-varying signals
 (price, CO₂, capacity limits) in one struct per poll tick.
 **Rationale:** All fields are co-valid at the same timestamp. A unified struct eliminates
 temporal alignment bugs that arise when price and capacity signals are stored separately.
