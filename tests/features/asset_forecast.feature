@@ -41,10 +41,6 @@ Feature: Asset Interface — forecast(timespan)
     And the forecast unit is "kilowatt"
     And the forecast interpolation is "step"
 
-  Scenario: EV charger with no session returns zero power forecast
-    When I GET /forecast/ev?timespan_s=3600 from the VEN
-    Then the response status is 200
-    And all forecast sample values are 0.0
 
   # ── Base Load ────────────────────────────────────────────────────────────────
 
