@@ -182,8 +182,22 @@ def step_tariff_extend_btn_visible(context):
 
 # ── Simulation controls: 03_simulation_controls.feature ───────────────────────
 
+
+def _expand_ev_status_accordion(page):
+    """Click the EV status-settings accordion header to expand it (collapsed by default)."""
+    header = page.wait_for_selector(
+        tid("status-settings-accordion-ev"), timeout=10000
+    )
+    assert header is not None, "status-settings-accordion-ev not found"
+    # Click the accordion summary (first child div) to expand
+    header.query_selector("[role='button']").click()
+    import time
+    time.sleep(0.4)  # wait for MUI expand animation
+
+
 @then("the EV plugged toggle is visible in the EV cell right section")
 def step_ev_plugged_toggle_visible(context):
+    _expand_ev_status_accordion(context.browser_page)
     el = context.browser_page.wait_for_selector(
         tid("ctrl-ev-plugged"), timeout=10000
     )
@@ -192,6 +206,7 @@ def step_ev_plugged_toggle_visible(context):
 
 @then("the EV SoC slider is visible in the EV cell right section")
 def step_ev_soc_slider_visible(context):
+    _expand_ev_status_accordion(context.browser_page)
     el = context.browser_page.wait_for_selector(
         tid("ctrl-ev-soc"), timeout=10000
     )
@@ -200,6 +215,7 @@ def step_ev_soc_slider_visible(context):
 
 @when("I toggle the EV plugged switch in the controller V2 EV cell")
 def step_toggle_ev_plugged(context):
+    _expand_ev_status_accordion(context.browser_page)
     # Read current state before toggle; None means "not set" → displays as True (checked)
     r = ven_get("/sim/override")
     r.raise_for_status()
