@@ -48,4 +48,51 @@ impl QuantitySeries {
             interpolation,
         }
     }
+
+    /// Verify that all timestamps are strictly ascending.
+    pub fn is_ascending(&self) -> bool {
+        self.samples.windows(2).all(|w| w[0].0 < w[1].0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    #[test]
+    fn empty_series_has_no_samples() {
+        let s = QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
+        assert!(s.samples.is_empty());
+    }
+
+    #[test]
+    fn empty_series_is_trivially_ascending() {
+        let s = QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
+        assert!(s.is_ascending());
+    }
+
+    #[test]
+    fn non_empty_series_ascending_check() {
+        let now = Utc::now();
+        let s = QuantitySeries {
+            samples: vec![(now, 1.0), (now + Duration::seconds(60), 2.0)],
+            quantity: Quantity::Power,
+            unit: Unit::Kilowatt,
+            interpolation: Interpolation::Linear,
+        };
+        assert!(s.is_ascending());
+    }
+
+    #[test]
+    fn series_with_same_timestamp_not_ascending() {
+        let now = Utc::now();
+        let s = QuantitySeries {
+            samples: vec![(now, 1.0), (now, 2.0)],
+            quantity: Quantity::Power,
+            unit: Unit::Kilowatt,
+            interpolation: Interpolation::Linear,
+        };
+        assert!(!s.is_ascending());
+    }
 }

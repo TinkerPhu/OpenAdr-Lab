@@ -191,6 +191,10 @@ mod tests {
         e
     }
 
+    fn make_pv(rated_kw: f64) -> PvInverter {
+        PvInverter { rated_kw, irradiance: 0.0, export_limit_kw: None, current_kw: 0.0 }
+    }
+
     #[test]
     fn pv_sinusoidal_model() {
         let cfg = PvConfig { id: "pv".to_string(), rated_kw: 10.0 };
@@ -205,5 +209,58 @@ mod tests {
         assert!((kw - 5.0).abs() < 0.01);
         let kw = pv.update(1.0, f64::MAX, &env_irradiance(1.0));
         assert!((kw - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn forecast_zero_timespan_returns_empty() {
+        let pv = make_pv(5.0);
+        let series = pv.forecast(Duration::zero());
+        assert!(series.samples.is_empty(), "Zero timespan must return empty series");
+    }
+
+    #[test]
+    fn forecast_has_boundary_point_at_end() {
+        let pv = make_pv(5.0);
+        let timespan = Duration::seconds(300); // 5 minutes
+        let before = chrono::Utc::now();
+        let series = pv.forecast(timespan);
+        let after = chrono::Utc::now();
+        assert!(!series.samples.is_empty(), "Non-zero timespan must produce samples");
+        let last_ts = series.samples.last().unwrap().0;
+        let expected_min = before + timespan;
+        let expected_max = after + timespan;
+        assert!(
+            last_ts >= expected_min && last_ts <= expected_max,
+            "Boundary point {last_ts} must be at now+timespan (range [{expected_min}, {expected_max}])"
+        );
+    }
+
+    #[test]
+    fn forecast_samples_ascending() {
+        let pv = make_pv(5.0);
+        let series = pv.forecast(Duration::seconds(120));
+        let timestamps: Vec<_> = series.samples.iter().map(|(t, _)| t).collect();
+        for i in 1..timestamps.len() {
+            assert!(timestamps[i] > timestamps[i - 1], "Timestamps must be strictly ascending");
+        }
+    }
+
+    #[test]
+    fn forecast_all_negative_at_noon_for_rated_pv() {
+        // At noon, PV exports → all values should be ≤ 0
+        let pv = make_pv(5.0);
+        let series = pv.forecast(Duration::seconds(60));
+        for (ts, v) in &series.samples {
+            assert!(*v <= 0.0, "PV value at {ts} should be ≤ 0 (export), got {v}");
+        }
+    }
+
+    #[test]
+    fn forecast_rated_zero_returns_all_zero() {
+        let pv = make_pv(0.0); // no PV
+        let series = pv.forecast(Duration::seconds(300));
+        for (_, v) in &series.samples {
+            assert_eq!(*v, 0.0, "Zero-rated PV must produce all-zero series");
+        }
     }
 }
