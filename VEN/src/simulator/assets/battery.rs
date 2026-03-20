@@ -107,8 +107,8 @@ impl Battery {
         }
     }
 
-    pub fn past(&self, _timespan: Duration, _history: &AssetHistoryBuffer) -> QuantitySeries {
-        QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear)
+    pub fn past(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries {
+        super::past_from_buffer(timespan, history, Quantity::Power, Unit::Kilowatt, Interpolation::Linear)
     }
 
     pub fn state_values(&self) -> HashMap<String, f64> {

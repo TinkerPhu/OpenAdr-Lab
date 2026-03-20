@@ -48,7 +48,7 @@
 - [x] T011 [P] [US1] Implement `forecast(timespan)` on `BaseLoad` in `VEN/src/simulator/assets/base_load.rs`: two samples — `(now, baseline_kw)` and boundary point at `now + timespan` with same value; `interpolation = Step`
 - [x] T012 [US1] In `VEN/src/controller/planner.rs`: remove `pv_forecast()` function; add `asset_forecasts: &HashMap<String, QuantitySeries>` parameter to `run_planner()` and `build_grid()`; replace `pv_forecast(profile, start)` call with `nearest_value(asset_forecasts.get("pv"), start)`; add private `nearest_value(series: Option<&QuantitySeries>, ts: DateTime<Utc>) -> f64` helper (Step: last-value-at-or-before; Linear: nearest-neighbour; absent/empty: 0.0)
 - [x] T013 [US1] In `VEN/src/main.rs`: before each `run_planner()` call, compute `asset_forecasts: HashMap<String, QuantitySeries>` by calling `entry.state.forecast(planning_horizon_duration)` for each asset in `sim_state.assets`; pass map to `run_planner()`
-- [ ] T014 [US1] Run `cargo test` locally; fix any remaining compile errors; then on Pi4 run full BDD suite (`docker compose -f tests/docker-compose.test.yml run --build --rm test-runner`) — all existing scenarios must pass plus `asset_forecast.feature` scenarios must now pass
+- [x] T014 [US1] Run `cargo test` locally; fix any remaining compile errors; then on Pi4 run full BDD suite (`docker compose -f tests/docker-compose.test.yml run --build --rm test-runner`) — all existing scenarios must pass plus `asset_forecast.feature` scenarios must now pass
 
 **Checkpoint**: PV forecast drives the planner. `pv_forecast()` is gone. All existing BDD tests green.
 
@@ -60,13 +60,13 @@
 
 **Independent Test**: Call `GET /timeline/pv?hours_back=0.5` — response must contain samples from the last 30 minutes with no NaN values; same call for battery; simulated vs. measured assets must produce the same response shape.
 
-- [ ] T015 [US2] Add `past_from_buffer(timespan: Duration, history: &AssetHistoryBuffer, interpolation: Interpolation) -> QuantitySeries` shared helper to `VEN/src/simulator/assets/mod.rs`: slice buffer to `[now − timespan, now]`, extract `power_kw` column (drop NaN rows), prepend boundary point at `now − timespan` using declared interpolation mode, return `QuantitySeries { samples, quantity: Power, unit: Kilowatt, interpolation }`
-- [ ] T016 [P] [US2] Implement `past(timespan, history)` on `PvInverter` in `VEN/src/simulator/assets/pv.rs`: delegate to `past_from_buffer` with `interpolation = Linear`
-- [ ] T017 [P] [US2] Implement `past(timespan, history)` on `Battery` in `VEN/src/simulator/assets/battery.rs`: delegate to `past_from_buffer` with `interpolation = Linear`
-- [ ] T018 [P] [US2] Implement `past(timespan, history)` on `EvCharger` in `VEN/src/simulator/assets/ev.rs`: delegate to `past_from_buffer` with `interpolation = Step`
-- [ ] T019 [P] [US2] Implement `past(timespan, history)` on `Heater` in `VEN/src/simulator/assets/heater.rs`: delegate to `past_from_buffer` with `interpolation = Linear`
-- [ ] T020 [P] [US2] Implement `past(timespan, history)` on `BaseLoad` in `VEN/src/simulator/assets/base_load.rs`: delegate to `past_from_buffer` with `interpolation = Step`
-- [ ] T021 [US2] Wire `past()` into the timeline handler in `VEN/src/main.rs`: for each asset in `sim_state.assets`, replace direct `trace.asset_history_for(id)` slice with `asset.past(window_duration, history_buf)` and return the `QuantitySeries` samples; keep `"grid"` virtual asset using existing direct buffer access (no `AssetState` for grid)
+- [x] T015 [US2] Add `past_from_buffer(timespan: Duration, history: &AssetHistoryBuffer, interpolation: Interpolation) -> QuantitySeries` shared helper to `VEN/src/simulator/assets/mod.rs`: slice buffer to `[now − timespan, now]`, extract `power_kw` column (drop NaN rows), prepend boundary point at `now − timespan` using declared interpolation mode, return `QuantitySeries { samples, quantity: Power, unit: Kilowatt, interpolation }`
+- [x] T016 [P] [US2] Implement `past(timespan, history)` on `PvInverter` in `VEN/src/simulator/assets/pv.rs`: delegate to `past_from_buffer` with `interpolation = Linear`
+- [x] T017 [P] [US2] Implement `past(timespan, history)` on `Battery` in `VEN/src/simulator/assets/battery.rs`: delegate to `past_from_buffer` with `interpolation = Linear`
+- [x] T018 [P] [US2] Implement `past(timespan, history)` on `EvCharger` in `VEN/src/simulator/assets/ev.rs`: delegate to `past_from_buffer` with `interpolation = Step`
+- [x] T019 [P] [US2] Implement `past(timespan, history)` on `Heater` in `VEN/src/simulator/assets/heater.rs`: delegate to `past_from_buffer` with `interpolation = Linear`
+- [x] T020 [P] [US2] Implement `past(timespan, history)` on `BaseLoad` in `VEN/src/simulator/assets/base_load.rs`: delegate to `past_from_buffer` with `interpolation = Step`
+- [x] T021 [US2] Wire `past()` into the timeline handler in `VEN/src/main.rs`: for each asset in `sim_state.assets`, replace direct `trace.asset_history_for(id)` slice with `asset.past(window_duration, history_buf)` and return the `QuantitySeries` samples; keep `"grid"` virtual asset using existing direct buffer access (no `AssetState` for grid)
 - [ ] T022 [US2] On Pi4 run BDD suite with `--build`; `asset_history.feature` scenarios must now pass alongside all existing scenarios
 
 **Checkpoint**: Timeline sourced via `past()`. US1 and US2 both independently green.
