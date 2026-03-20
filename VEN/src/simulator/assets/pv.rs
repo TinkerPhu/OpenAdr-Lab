@@ -58,8 +58,58 @@ impl PvInverter {
         output
     }
 
-    pub fn forecast(&self, _timespan: Duration) -> QuantitySeries {
-        QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear)
+    pub fn forecast(&self, timespan: Duration) -> QuantitySeries {
+        if timespan <= Duration::zero() {
+            return QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
+        }
+        let now = Utc::now();
+        let end = now + timespan;
+        let total_s = timespan.num_seconds();
+        let mut samples: Vec<(chrono::DateTime<Utc>, f64)> = Vec::new();
+
+        // One sample per minute across the timespan.
+        let mut t = now;
+        while t < end {
+            samples.push((t, self.irradiance_at(t)));
+            t = t + Duration::seconds(60);
+        }
+        // Mandatory boundary point at now + timespan.
+        samples.push((end, self.irradiance_at(end)));
+
+        // Deduplicate if the last regular sample landed on the boundary.
+        if samples.len() >= 2 {
+            let n = samples.len();
+            if (samples[n - 2].0 - samples[n - 1].0).num_seconds().abs() < 1 {
+                samples.truncate(n - 1);
+                samples.push((end, self.irradiance_at(end)));
+            }
+        }
+
+        QuantitySeries {
+            samples,
+            quantity: Quantity::Power,
+            unit: Unit::Kilowatt,
+            interpolation: Interpolation::Linear,
+        }
+    }
+
+    /// Compute power output at a given timestamp using the sinusoidal irradiation model.
+    /// Returns a negative value (export convention).
+    fn irradiance_at(&self, ts: chrono::DateTime<Utc>) -> f64 {
+        use chrono::Timelike;
+        let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
+        let irradiance = if hour >= 6.0 && hour <= 18.0 {
+            let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
+            angle.sin()
+        } else {
+            0.0
+        };
+        let natural_kw = self.rated_kw * irradiance;
+        let limited_kw = match self.export_limit_kw {
+            Some(limit) => natural_kw.min(limit),
+            None => natural_kw,
+        };
+        -limited_kw // negative = export
     }
 
     pub fn past(&self, _timespan: Duration, _history: &AssetHistoryBuffer) -> QuantitySeries {

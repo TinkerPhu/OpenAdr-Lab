@@ -56,8 +56,54 @@ impl Heater {
         kw
     }
 
-    pub fn forecast(&self, _timespan: Duration) -> QuantitySeries {
-        QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear)
+    pub fn forecast(&self, timespan: Duration) -> QuantitySeries {
+        if timespan <= Duration::zero() {
+            return QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
+        }
+        let now = Utc::now();
+        let end = now + timespan;
+        let setpoint = self.current_kw.clamp(0.0, self.max_kw);
+        let mut samples: Vec<(chrono::DateTime<Utc>, f64)> = Vec::new();
+
+        let mut t = now;
+        let mut temp = self.temp_c;
+
+        while t < end {
+            // Apply thermal model for this minute step.
+            let dt_h = 1.0 / 60.0;
+            let loss_rate_kw = (temp - self.ambient_temp_c) * 0.1;
+            let heat_loss_kwh = loss_rate_kw * dt_h;
+            let kw = if temp < self.temp_min_c {
+                self.max_kw // thermostat forces full heat
+            } else if temp > self.temp_max_c {
+                0.0 // thermostat shuts off
+            } else {
+                setpoint
+            };
+            samples.push((t, kw));
+
+            let heat_input_kwh = kw * dt_h;
+            let net_energy_kwh = heat_input_kwh - heat_loss_kwh;
+            temp += net_energy_kwh / self.thermal_mass;
+
+            t = t + Duration::seconds(60);
+        }
+        // Mandatory boundary point.
+        let end_kw = if temp < self.temp_min_c {
+            self.max_kw
+        } else if temp > self.temp_max_c {
+            0.0
+        } else {
+            setpoint
+        };
+        samples.push((end, end_kw));
+
+        QuantitySeries {
+            samples,
+            quantity: Quantity::Power,
+            unit: Unit::Kilowatt,
+            interpolation: Interpolation::Linear,
+        }
     }
 
     pub fn past(&self, _timespan: Duration, _history: &AssetHistoryBuffer) -> QuantitySeries {
