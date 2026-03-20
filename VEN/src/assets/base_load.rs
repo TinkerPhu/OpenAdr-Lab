@@ -75,6 +75,21 @@ impl BaseLoad {
         // nothing to reset
     }
 
+    pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
+        vec![
+            crate::entities::asset::ComfortRate { fill: 0.0, max_marginal_price: 0.0, max_marginal_co2: 0.0 },
+            crate::entities::asset::ComfortRate { fill: 1.0, max_marginal_price: 0.0, max_marginal_co2: 0.0 },
+        ]
+    }
+
+    pub fn default_completion_policy(&self) -> crate::entities::asset::CompletionPolicy {
+        crate::entities::asset::CompletionPolicy::Stop
+    }
+
+    pub fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
+        None
+    }
+
     pub fn update_config(&mut self, values: HashMap<String, f64>) {
         if let Some(&v) = values.get("baseline_kw") {
             self.baseline_kw = v.max(0.0);
