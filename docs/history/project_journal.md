@@ -2590,3 +2590,54 @@ When override is empty (`{}`), the control should show the sim's current hardwar
 - When Playwright `wait_for_selector` times out but the call log shows "locator resolved to visible", the page DOM is present but the JS thread is blocked. This points to CPU overload from data processing, not a missing element.
 - Rust `#[serde(rename_all = "snake_case")]` produces lowercase underscore names. Any TypeScript `ControlKind` or enum must match exactly — case mismatches produce no TypeScript error (it's a string union) but silently fall through to a wrong rendering branch.
 - Schema-driven controls (Switch/Slider) need to display the system's current real state as initial value, not assume `false`/0. When the backend override is absent, use the sim snapshot value as fallback so the user sees accurate state before interacting.
+
+---
+
+### Phase 27: Asset Interface — forecast() & past() (speckit 007)
+
+**Status: COMPLETE** — 36 features, 173 scenarios, 1024 steps, 0 failures
+
+**What was done:**
+
+1. **New `common/` module** (`VEN/src/common/mod.rs`): Introduced `QuantitySeries` type with `samples: Vec<(DateTime<Utc>, f64)>`, `Quantity`/`Unit`/`Interpolation` enums, and `is_ascending()` invariant check. This is the shared return type for all asset forecasting.
+
+2. **`forecast(timespan)` on all 5 assets**: Each asset type implements its own forecasting model:
+   - **PV**: sinusoidal irradiance model (`sin(π*(hour-6)/12)`) sampled per minute, negative values (export convention)
+   - **Battery**: SoC trajectory at current setpoint, power clamps at SoC limits, 1 sample/min
+   - **EV**: 2-point Step series (constant power if plugged, zero if not)
+   - **Heater**: thermal decay model, 1 sample/min
+   - **Base load**: 2-point Step at baseline_kw
+
+3. **`past(timespan)` on all 5 assets**: Shared `past_from_buffer()` helper slices `AssetHistoryBuffer` to `[now-timespan, now]`, extracts `power_kw` column, prepends boundary point.
+
+4. **Planner wiring**: `run_planner()` now accepts `asset_forecasts: &HashMap<String, QuantitySeries>` and uses `nearest_value()` helper for Step/Linear lookup. Removed internal `pv_forecast()` function.
+
+5. **New API endpoints**: `GET /forecast/:asset_id?timespan_s=N` and `GET /history/:asset_id?timespan_s=N` return full `QuantitySeries` JSON.
+
+6. **BDD coverage**: 12 new scenarios across `asset_forecast.feature` (8) and `asset_history.feature` (5), plus 48 Rust unit tests (edge cases, boundary points, ascending order, sign convention).
+
+7. **Pre-existing failure fixes** (10 resolved):
+   - SimSnapshot `ven_entity_model.feature` test updated to match Phase 24 structured API
+   - Cancellation race: `cancel_request()` now atomically marks both request and packet; `set_active_packets()` merge-on-write preserves terminal packets
+   - Timeline step conflict: dead step definition removed
+   - UI: `rightCollapsed` default changed to `false`, heater extend button test aligned with component, accordion expansion added to EV control test steps
+
+### Issues encountered
+
+**1. Dead step definition hijacked ven_timeline.feature:**
+My `asset_forecast_steps.py` had a leftover `@when("I GET /timeline/{asset_id}?hours_back={hours_back} from the VEN")` step. Behave's `{hours_back}` captured `0&hours_forward=1`, causing `float()` parse error. The step was unused (original feature uses generic `I GET {path}` step). Fixed by removing.
+
+**2. Planner-vs-cancellation race condition:**
+`cancel_request()` and `abandon_packet()` were two separate write locks. The planner could snapshot packets between them (seeing SCHEDULED), then overwrite ABANDONED back to SCHEDULED via `set_active_packets()`. Fixed with: (a) atomic cancellation in single write lock, (b) merge-on-write in `set_active_packets()` that preserves terminal packets.
+
+**3. Contradicting BDD tests for SimSnapshot:**
+`ven_entity_model.feature:43` expected flat top-level fields (`net_power_w`, `ev`, `pv`). `ven_simulator.feature:5` (Phase 24 authoritative) enforced `{ts, grid, assets}` only. Initially added flat fields, then reverted when the simulator tests broke. Fixed by updating the entity model test to match the current structured API.
+
+**4. EV control tests failing — hidden inside collapsed accordion:**
+Controls existed in DOM but MUI Accordion was collapsed by default. Playwright found elements but `is_visible()` returned false. Fixed by expanding the accordion in the step definition before asserting visibility, keeping the component's default-collapsed behavior.
+
+### Key learnings
+
+- When multiple BDD tests make contradictory assertions about the same endpoint, identify the authoritative one (usually the most recent feature spec) rather than trying to satisfy both.
+- Race conditions between long-running loops (planner) and HTTP handlers require merge-on-write semantics, not just atomic reads. A snapshot taken before a state change can overwrite the change when written back.
+- Behave `{param}` captures are greedy — `{hours_back}` matches `0&hours_forward=1`. Avoid registering step patterns that partially overlap with existing generic steps.
