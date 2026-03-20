@@ -183,3 +183,52 @@ impl Battery {
         Some((kwh, desired_power_kw.unwrap_or(self.max_charge_kw)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::profile::BatteryConfig;
+
+    fn make_battery(soc: f64) -> Battery {
+        let cfg = BatteryConfig {
+            id: "battery".to_string(),
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            round_trip_efficiency: 0.95,
+            min_soc: 0.1,
+            initial_soc: soc,
+        };
+        Battery::from_config(&cfg)
+    }
+
+    #[test]
+    fn forecast_zero_timespan_returns_empty() {
+        let bat = make_battery(0.5);
+        let series = bat.forecast(Duration::zero());
+        assert!(series.samples.is_empty());
+    }
+
+    #[test]
+    fn forecast_at_full_soc_charge_setpoint_returns_zero() {
+        // Battery at 100% SoC with charge setpoint → all zeros (can't charge)
+        let mut bat = make_battery(1.0);
+        bat.current_kw = 5.0; // charge setpoint
+        let series = bat.forecast(Duration::seconds(300));
+        for (_, v) in &series.samples {
+            assert_eq!(*v, 0.0, "Full SoC battery with charge setpoint must return zero");
+        }
+    }
+
+    #[test]
+    fn forecast_has_boundary_point() {
+        let bat = make_battery(0.5);
+        let timespan = Duration::seconds(120);
+        let before = chrono::Utc::now();
+        let series = bat.forecast(timespan);
+        let after = chrono::Utc::now();
+        assert!(!series.samples.is_empty());
+        let last_ts = series.samples.last().unwrap().0;
+        assert!(last_ts >= before + timespan && last_ts <= after + timespan);
+    }
+}

@@ -89,8 +89,8 @@
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T026 [P] Add `cargo test` unit tests for edge cases in `VEN/src/simulator/assets/` test modules: zero timespan returns empty series, PV at night returns all-zero samples, battery at full SoC with charge setpoint returns zero power, EV with no session returns zero, boundary point timestamp equals `now + timespan` exactly
-- [ ] T027 [P] Add `cargo test` unit tests for `QuantitySeries` invariants in `VEN/src/common/mod.rs`: samples are ascending, boundary point present on non-empty series, `quantity`/`unit`/`interpolation` match expected values per asset type
+- [x] T026 [P] Add `cargo test` unit tests for edge cases in `VEN/src/simulator/assets/` test modules: zero timespan returns empty series, PV at night returns all-zero samples, battery at full SoC with charge setpoint returns zero power, EV with no session returns zero, boundary point timestamp equals `now + timespan` exactly
+- [x] T027 [P] Add `cargo test` unit tests for `QuantitySeries` invariants in `VEN/src/common/mod.rs`: samples are ascending, boundary point present on non-empty series, `quantity`/`unit`/`interpolation` match expected values per asset type
 - [ ] T028 Run full BDD suite on Pi4 across all 27+ features to confirm zero regressions from this refactoring
 - [ ] T029 Write journal entry in `docs/history/project_journal.md`: what was done, pv_forecast() removal rationale, QuantitySeries design decisions, key learnings
 

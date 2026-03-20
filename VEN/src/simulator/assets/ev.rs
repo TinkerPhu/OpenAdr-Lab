@@ -167,6 +167,45 @@ impl EvCharger {
 }
 
 #[cfg(test)]
+mod forecast_tests {
+    use super::*;
+
+    fn make_ev(plugged: bool, current_kw: f64) -> EvCharger {
+        EvCharger {
+            soc: 0.5, plugged, max_charge_kw: 7.4, max_discharge_kw: 0.0,
+            battery_kwh: 40.0, soc_target: 0.8, default_charge_kw: 7.4, current_kw,
+        }
+    }
+
+    #[test]
+    fn forecast_not_plugged_returns_zero() {
+        let ev = make_ev(false, 7.4);
+        let series = ev.forecast(Duration::seconds(3600));
+        for (_, v) in &series.samples {
+            assert_eq!(*v, 0.0, "Unplugged EV must return zero power");
+        }
+    }
+
+    #[test]
+    fn forecast_zero_timespan_returns_empty() {
+        let ev = make_ev(true, 7.4);
+        let series = ev.forecast(Duration::zero());
+        assert!(series.samples.is_empty());
+    }
+
+    #[test]
+    fn forecast_has_two_samples_with_boundary() {
+        let ev = make_ev(true, 7.4);
+        let timespan = Duration::seconds(600);
+        let before = chrono::Utc::now();
+        let series = ev.forecast(timespan);
+        let after = chrono::Utc::now();
+        assert_eq!(series.samples.len(), 2, "Step forecast must have exactly 2 samples");
+        let last_ts = series.samples.last().unwrap().0;
+        assert!(last_ts >= before + timespan && last_ts <= after + timespan);
+    }
+}
+#[cfg(test)]
 mod tests {
     use super::*;
 
