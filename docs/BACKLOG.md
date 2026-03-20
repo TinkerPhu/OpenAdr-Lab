@@ -5,7 +5,7 @@ Each is a prerequisite for future feature work as noted.
 
 ### RF-01 — Asset Interface: implement forecast() and past() on each asset
 **What:** Each asset type (PV, battery, EV, heater, base load) must implement the
-`AssetInterface` trait: `current()`, `forecast(horizon)`, `past(window)`.
+`AssetInterface` trait: `current()`, `forecast(timespan)`, `past(timespan)`.
 **Why:** The planner currently contains a standalone `pv_forecast()` function
 (`planner.rs:561–573`) that duplicates PV physics. This violates the single-responsibility
 principle and will break when a real sensor replaces the simulator — the planner would
@@ -68,6 +68,13 @@ rename operation with no API changes.
 - Replace `findNearest()` + `buildStackedFromAllTimelines()` in `GridAccumulatedCell.tsx`
   with bucket aggregation: `mean` for power, `last` for states
 - Replace single-snapshot report generation with interval-bucketed aggregation
+**Grid-alignment rounding rule** (agreed during RF-01 spec, deferred here):
+When `resample(interval)` is applied to a series anchored at `now`, timestamps MUST be
+rounded to the interval grid boundary — not computed as `now ± n×interval`:
+- `forecast(timespan).resample(interval)`: first point = `ceil(now, interval)` (next boundary)
+- `past(timespan).resample(interval)`: last point = `floor(now, interval)` (last complete interval)
+- Example: `now = 12:22`, `interval = 5 min` → forecast starts `12:25`, past ends `12:20`
+This ensures series from different assets automatically share timestamps after resampling.
 **Prerequisite for:** RF-06, accurate report generation, accurate UI stacked charts
 
 ### RF-06 — Planner slot costing: time-weighted tariff across slot boundaries
