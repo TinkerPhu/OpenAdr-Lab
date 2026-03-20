@@ -127,9 +127,9 @@ This guarantees at least one sample for any positive timespan and gives downstre
 
 ### Functional Requirements
 
-- **FR-001**: Each asset type (PV, battery, EV charger, heater, base load) MUST implement a `forecast(timespan)` method that returns an `AssetSeries` — a list of time-stamped power samples from the current moment through `timespan` at the asset's natural resolution, together with a declared `Interpolation` mode.
+- **FR-001**: Each asset type (PV, battery, EV charger, heater, base load) MUST implement a `forecast(timespan)` method that returns a `QuantitySeries` — a list of time-stamped samples from the current moment through `timespan` at the asset's natural resolution, with declared `Quantity`, `Unit`, and `Interpolation` fields.
 
-- **FR-002**: Each asset type MUST implement a `past(timespan)` method that returns an `AssetSeries` — a list of time-stamped power samples covering the last `timespan` duration at the ring buffer's stored resolution, together with a declared `Interpolation` mode.
+- **FR-002**: Each asset type MUST implement a `past(timespan)` method that returns a `QuantitySeries` — a list of time-stamped samples covering the last `timespan` duration at the ring buffer's stored resolution, with declared `Quantity`, `Unit`, and `Interpolation` fields.
 
 - **FR-003**: `forecast()` MUST use the same physics model that the asset uses for simulation — there must be no separate copy of asset-specific formulas anywhere in the controller or planner.
 
@@ -143,29 +143,49 @@ This guarantees at least one sample for any positive timespan and gives downstre
 
 - **FR-008**: The `past()` series MUST NOT contain future-timestamped entries.
 
-- **FR-010**: Every non-empty `AssetSeries` returned by `forecast()` MUST include a sample at exactly `now + timespan` as the last entry. Every non-empty `AssetSeries` returned by `past()` MUST include a sample at exactly `now − timespan` as the first entry. If no natural sample falls on that timestamp, the value is computed by interpolating from surrounding samples according to the declared `Interpolation` mode (`Step` = hold last value; `Linear` = weighted interpolation between neighbours).
+- **FR-010**: Every non-empty `QuantitySeries` returned by `forecast()` MUST include a sample at exactly `now + timespan` as the last entry. Every non-empty `QuantitySeries` returned by `past()` MUST include a sample at exactly `now − timespan` as the first entry. If no natural sample falls on that timestamp, the value is computed by interpolating from surrounding samples according to the declared `Interpolation` mode (`Step` = hold last value; `Linear` = weighted interpolation between neighbours).
 
-- **FR-011**: Each asset MUST declare its `Interpolation` mode as part of its `AssetSeries` return. The declared mode governs both how the mandatory boundary point value is computed (FR-010) and how consumers should read values between samples. Typical assignments: `Linear` for power, temperature, and state-of-charge (continuously varying); `Step` for discrete states, on/off loads, and base-load (constant between ticks).
+- **FR-011**: Each asset MUST populate all three metadata fields of the returned `QuantitySeries`: `quantity` (what is measured), `unit` (scale of the f64 values), and `interpolation` (how values between samples are read). For `forecast()` and `past()` returning power: `quantity = Power`, `unit = Kilowatt`, interpolation as appropriate per asset physics.
 
-- **FR-012 (deferred to RF-05)**: Resampling of `AssetSeries` to a caller-specified interval, including grid-aligned rounding, is out of scope for this feature. It will be addressed when `TimeSeries<T>` is introduced in RF-05. At that point `AssetSeries` becomes `TimeSeries<f64>` — no structural redesign needed.
+- **FR-012 (deferred to RF-05)**: Resampling of `QuantitySeries` to a caller-specified interval, including grid-aligned rounding, is out of scope for this feature. It will be addressed when `TimeSeries<T>` is introduced in RF-05. A future speckit will introduce `MultiQuantitySeries` (multiple quantities per timestamp) building on `QuantitySeries`.
 
 ### Key Entities
 
 - **Asset**: A physical or simulated energy device (PV, battery, EV, heater, base load). Each asset owns its own forward model (for `forecast`) and its own history (for `past`). Assets are interchangeable through a common interface.
 
-- **AssetSeries**: The return type of both `forecast()` and `past()`. Contains:
-  - `samples` — a time-ordered list of `(timestamp, power_kw)` pairs
+- **QuantitySeries**: The return type of both `forecast()` and `past()`. Lives in `VEN/src/common/`. Contains:
+  - `samples` — a time-ordered list of `(timestamp, f64)` pairs
+  - `quantity` — a `Quantity` variant declaring what is being measured
+  - `unit` — a `Unit` variant declaring the scale of the `f64` values
   - `interpolation` — a declared `Interpolation` mode that describes how values between samples should be read and how the mandatory boundary point is computed
 
-  `AssetSeries` is the direct precursor to `TimeSeries<f64>` in RF-05; the structure is intentionally compatible.
+  `QuantitySeries` is the direct precursor to a future `MultiQuantitySeries` (multiple quantities per timestamp, introduced in a later speckit) and to `TimeSeries<T>` in RF-05. The structure is intentionally compatible with both.
+
+- **Quantity** (enum): Declares what physical or financial quantity the series represents.
+  - `Power` — instantaneous power at the site or asset boundary
+  - `Energy` — cumulative energy over an interval
+  - `StateOfCharge` — battery or EV charge level as a fraction
+  - `Temperature` — thermal state (room, ambient, or device)
+  - `Irradiance` — solar irradiance at the PV surface
+  - `Tariff` — import or export price per unit of energy
+  - `Co2Intensity` — CO₂ emission factor per unit of energy
+
+- **Unit** (enum): Declares the measurement unit of the `f64` values.
+  - `Kilowatt` — kW
+  - `KilowattHour` — kWh
+  - `Percent` — 0–100 (used for state-of-charge)
+  - `Celsius` — °C
+  - `WattsPerSquareMeter` — W/m²
+  - `EuroPerKilowattHour` — €/kWh
+  - `GramsPerKilowattHour` — gCO₂/kWh
 
 - **Interpolation** (enum with two variants):
   - `Linear` — values vary continuously between samples; use weighted interpolation to read any point between two known samples. Appropriate for power, temperature, state-of-charge.
-  - `Step` — value holds constant from one sample until the next (last-observation-carried-forward). Appropriate for discrete states, on/off loads, and constant base-load.
+  - `Step` — value holds constant from one sample until the next (last-observation-carried-forward). Appropriate for discrete states, on/off loads, tariffs, and constant base-load.
 
 - **Timespan**: A positive duration. Used as the sole parameter for both `forecast()` (how far ahead) and `past()` (how far back).
 
-- **Boundary Point**: The mandatory endpoint sample that every non-empty `AssetSeries` must contain — `now + timespan` for `forecast()`, `now − timespan` for `past()`. Its value is interpolated from surrounding samples using the declared `Interpolation` mode.
+- **Boundary Point**: The mandatory endpoint sample that every non-empty `QuantitySeries` must contain — `now + timespan` for `forecast()`, `now − timespan` for `past()`. Its value is interpolated from surrounding samples using the declared `Interpolation` mode.
 
 ---
 
