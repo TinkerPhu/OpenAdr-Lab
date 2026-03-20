@@ -192,8 +192,24 @@ impl AppState {
         self.inner.read().await.active_packets.clone()
     }
 
+    /// Merge planner output with current state: if a packet became terminal
+    /// (e.g. ABANDONED via cancellation) since the planner snapshot, keep the
+    /// terminal version instead of reverting to the planner's stale copy.
     pub async fn set_active_packets(&self, packets: Vec<EnergyPacket>) {
-        self.inner.write().await.active_packets = packets;
+        let mut inner = self.inner.write().await;
+        let current = &inner.active_packets;
+        let merged: Vec<EnergyPacket> = packets
+            .into_iter()
+            .map(|plan_pkt| {
+                if let Some(cur) = current.iter().find(|c| c.id == plan_pkt.id) {
+                    if cur.is_terminal() && !plan_pkt.is_terminal() {
+                        return cur.clone(); // keep terminal status
+                    }
+                }
+                plan_pkt
+            })
+            .collect();
+        inner.active_packets = merged;
     }
 
     pub async fn active_plan(&self) -> Option<Plan> {
