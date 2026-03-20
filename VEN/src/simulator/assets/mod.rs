@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
 
-use crate::common::QuantitySeries;
+use crate::common::{Interpolation, Quantity, QuantitySeries, Unit};
 use crate::controller::trace::AssetHistoryBuffer;
 
 pub mod base_load;
@@ -195,4 +195,48 @@ impl AssetState {
             Self::BaseLoad(inner) => inner.update_config(values),
         }
     }
+}
+
+// ─── Shared past() helper ────────────────────────────────────────────────────
+
+/// Slice the ring buffer to [now − timespan, now] and return a QuantitySeries.
+///
+/// - Extracts the `power_kw` column; drops NaN rows.
+/// - Prepends a boundary point at `now − timespan` using the declared interpolation mode:
+///   Step → holds the first available sample's value; Linear → same (first available value).
+/// - Returns empty series if the buffer is empty or timespan ≤ 0.
+pub fn past_from_buffer(
+    timespan: Duration,
+    history: &AssetHistoryBuffer,
+    quantity: Quantity,
+    unit: Unit,
+    interpolation: Interpolation,
+) -> QuantitySeries {
+    if timespan <= Duration::zero() {
+        return QuantitySeries::empty(quantity, unit, interpolation);
+    }
+    let now = Utc::now();
+    let window_start = now - timespan;
+
+    // Slice to [window_start, now] and extract power_kw column (drop NaN).
+    let points = history.to_timeline(Some((window_start, now)));
+    let mut samples: Vec<(DateTime<Utc>, f64)> = points
+        .iter()
+        .filter_map(|p| {
+            let v = p.values.get("power_kw").copied()?;
+            if v.is_nan() { None } else { Some((p.ts, v)) }
+        })
+        .collect();
+
+    if samples.is_empty() {
+        return QuantitySeries::empty(quantity, unit, interpolation);
+    }
+
+    // Prepend boundary point at window_start if not already there.
+    if samples[0].0 > window_start + Duration::milliseconds(500) {
+        let boundary_value = samples[0].1; // hold first known value
+        samples.insert(0, (window_start, boundary_value));
+    }
+
+    QuantitySeries { samples, quantity, unit, interpolation }
 }
