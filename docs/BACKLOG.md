@@ -48,53 +48,71 @@ The controller should ask the asset for its defaults, not hard-code them.
 **What:** `min_soc` is not written to `state_values`, so it always returns the default 0.10.
 **Why:** Bug — user-configured `min_soc` is silently ignored at runtime.
 
-### RF-05 — TimeSeries\<T\> abstraction + common/ module
-**What:** Create `VEN/src/common/` as a plain Rust module (`mod common;` in `main.rs`) —
-no separate crate, no workspace changes. Introduce `TimeSeries<T>` with a declared
-`Interpolation` mode (`Step | Linear | None`) and operations: `at(ts)`, `resample(grid)`,
-`merge(series)`, `bucket(width, agg)`, plus interval arithmetic helpers (`overlap()`,
-`union_of_breakpoints()`, time-weighted average). Replace all ad-hoc lookup functions.
-**Why:** The codebase has three independent strategies (exact-interval match in planner,
+### RF-05a — QuantitySeries resampling operations
+**What:** Add resampling operations to the existing `QuantitySeries` in `VEN/src/common/mod.rs`:
+- `resample_uniform(width: Duration) -> QuantitySeries` — resample onto a regular grid with
+  the given step width. Interpolation uses the series' own `interpolation` field (Step = LOCF,
+  Linear = proportional). Aggregation within each bucket is also determined by the
+  interpolation mode (Step/Linear → time-weighted mean).
+- `resample_to_grid(timestamps: &[DateTime<Utc>]) -> QuantitySeries` — resample onto an
+  arbitrary timestamp grid. Each output point is the interpolated value at that timestamp.
+**Why:** The codebase has three independent lookup strategies (exact-interval match in planner,
 nearest-neighbour in UI, latest-snapshot in reporter) with no shared semantics. This causes
-silent correctness bugs when signals of different types are mixed or when series have
-different periods. See `VEN_ARCHITECTURE.md §5` for full audit. The `common/` module boundary
-is drawn now so that when a VTN controller is built, extraction into a shared crate is a
-rename operation with no API changes.
-**Files to create:**
-- `VEN/src/common/mod.rs`
-- `VEN/src/common/timeseries.rs` — `TimeSeries<T>`, `Interpolation`, `Aggregator`
-- `VEN/src/common/interval.rs` — `overlap()`, `union_of_breakpoints()`, time-weighted average
-**Changes required:**
-- Wrap `TariffSnapshot` series as `TimeSeries<f64>` with `Interpolation::Step`
-- Wrap asset power history as `TimeSeries<f64>` with `Interpolation::Linear`
-- Replace `tariff_import_at()`, `tariff_export_at()`, `tariff_co2_at()` in `planner.rs`
-- Replace `findNearest()` + `buildStackedFromAllTimelines()` in `GridAccumulatedCell.tsx`
-  with bucket aggregation: `mean` for power, `last` for states
-- Replace single-snapshot report generation with interval-bucketed aggregation
-**Grid-alignment rounding rule** (agreed during RF-01 spec, deferred here):
-When `resample(interval)` is applied to a series anchored at `now`, timestamps MUST be
+silent correctness bugs when signals of different interpolation types are mixed or when
+series have different periods. See `VEN_ARCHITECTURE.md §5` for full audit.
+Adding operations to the existing `QuantitySeries` avoids introducing a parallel container —
+the struct already carries `samples`, `interpolation`, `quantity`, and `unit`.
+**Grid-alignment rounding rule** (agreed during RF-01 spec):
+When `resample_uniform(interval)` is applied to a series anchored at `now`, timestamps MUST be
 rounded to the interval grid boundary — not computed as `now ± n×interval`:
-- `forecast(timespan).resample(interval)`: first point = `ceil(now, interval)` (next boundary)
-- `past(timespan).resample(interval)`: last point = `floor(now, interval)` (last complete interval)
-- Example: `now = 12:22`, `interval = 5 min` → forecast starts `12:25`, past ends `12:20`
+- `forecast(timespan).resample_uniform(interval)`: first point = `ceil(now, interval)`
+- `history(timespan).resample_uniform(interval)`: last point = `floor(now, interval)`
+- Example: `now = 12:22`, `interval = 5 min` → forecast starts `12:25`, history ends `12:20`
 This ensures series from different assets automatically share timestamps after resampling.
-**Prerequisite for:** RF-06, accurate report generation, accurate UI stacked charts
+**Deliverable:** Methods on `QuantitySeries` with comprehensive unit tests, no integration changes.
+**Prerequisite for:** RF-05b, RF-05c
+
+### RF-05b — Backend adoption of QuantitySeries resampling
+**What:** Replace all ad-hoc time-series lookup functions in backend Rust code with
+`QuantitySeries` resampling operations.
+**Changes required:**
+- Convert `TariffSnapshot` series into `QuantitySeries` (Step interpolation) at the
+  OpenADR interface boundary — one series per quantity (import, export, CO2)
+- Replace `tariff_import_at()`, `tariff_export_at()`, `tariff_co2_at()` in `planner.rs`
+  with `resample_uniform(slot_width)` called once before the slot loop
+- Replace `nearest_value()` with the same resampled series lookup
+- Replace single-snapshot report generation with `resample_uniform(obligation_interval)`
+**Why:** After resampling all series to the planner's slot width, the slot loop becomes a
+simple index lookup — no per-slot search, no interpolation bugs, and tariffs that span
+slot boundaries are correctly time-weighted.
+**Depends on:** RF-05a
+**Prerequisite for:** RF-06, accurate report generation
+
+### RF-05c — Frontend adoption: uniform resampling for stacked charts
+**What:** Replace `findNearest()` + `buildStackedFromAllTimelines()` in
+`GridAccumulatedCell.tsx` with uniform resampling: resample each asset's timeline to the
+chart's display interval before stacking.
+**Why:** See `feedback_accumulated_chart_downsampling.md` for the timestamp misalignment bug.
+Uniform resampling guarantees all assets share the same timestamp grid — no tolerance-based
+nearest-neighbour matching needed.
+**Depends on:** RF-05a (concept — TypeScript port of the same semantics)
+**Prerequisite for:** accurate UI stacked charts
 
 ### RF-06 — Planner slot costing: time-weighted tariff across slot boundaries
-**What:** Replace `tariff_at(slot.start)` in `planner.rs:build_grid()` with a
-time-weighted average over the full slot duration:
+**What:** With RF-05b in place, tariff series are already resampled to the slot grid using
+`resample_uniform(slot_width)`. Each resampled point is the time-weighted average across
+that bucket — so slot costing is automatically correct. RF-06 becomes a verification task:
+confirm that `resample_uniform` with Step interpolation produces the correct time-weighted
+average when a slot spans a tariff boundary.
 ```
-effective_tariff(slot) =
-  Σ( tariff_i × overlap(slot, interval_i) ) / slot.duration
+Example: slot [10:55, 11:00) with tariff [10:00=€0.20, 11:00=€0.15]
+resample_uniform(5min) at 10:55 → €0.20 (entire bucket within €0.20 interval)
+slot [10:57, 11:02) → (3min × €0.20 + 2min × €0.15) / 5min = €0.185
 ```
-For capacity limits: `effective_limit(slot) = min(capacity_i for all overlapping intervals)`.
-**Why:** A planning slot that spans a tariff boundary (e.g. a 5-min slot crossing 11:00 when
-the hourly price changes) is silently billed at the wrong rate for part of the slot. At a
-5-min planning resolution with 1-hour tariff periods the error is small but non-zero, and it
-grows if planning resolution is coarser than the tariff granularity. Capacity limit errors
-(using a prior-slot limit for the whole slot) can cause constraint violations.
+For capacity limits: `resample_uniform` with Step + min aggregation gives the strictest
+limit that applies anywhere within each slot.
 **Prerequisite for:** accurate cost estimates in plan warnings and user notifications
-**Depends on:** RF-05 (`TimeSeries<T>.resample()` makes this trivial to compute)
+**Depends on:** RF-05b (resampling already in place)
 
 ---
 
