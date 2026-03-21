@@ -15,3 +15,5 @@ Only consider upstream PR and commits after the code is tested completely withou
 After creating upstream PR, wait for the CI to actually run and report before drawing any conclusions about main branch being pre-broken. If anything fails, we investigate it properly rather than writing it off.
 
 docs/specs/pdf/: do not read, search, or reference any files under this directory. Use the markdown versions in docs/specs/ instead.
+
+naming: variables and function names for physical quantities must include the unit as suffix (e.g. `power_kw`, `energy_kwh`, `temperature_c`, `tariff_eur_per_kwh`, `soc_pct`). When adding new code, check nearby code or nearby source files for existing suffixes to stay consistent.

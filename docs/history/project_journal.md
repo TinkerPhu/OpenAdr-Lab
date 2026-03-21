@@ -2599,7 +2599,7 @@ When override is empty (`{}`), the control should show the sim's current hardwar
 
 **What was done:**
 
-1. **New `common/` module** (`VEN/src/common/mod.rs`): Introduced `QuantityTimeline` type with `samples: Vec<(DateTime<Utc>, f64)>`, `Quantity`/`Unit`/`Interpolation` enums, and `is_ascending()` invariant check. This is the shared return type for all asset forecasting.
+1. **New `common/` module** (`VEN/src/common/mod.rs`): Introduced `TimeSeries` type with `samples: Vec<(DateTime<Utc>, f64)>`, `Quantity`/`Unit`/`Interpolation` enums, and `is_ascending()` invariant check. This is the shared return type for all asset forecasting.
 
 2. **`forecast(timespan)` on all 5 assets**: Each asset type implements its own forecasting model:
    - **PV**: sinusoidal irradiance model (`sin(π*(hour-6)/12)`) sampled per minute, negative values (export convention)
@@ -2610,9 +2610,9 @@ When override is empty (`{}`), the control should show the sim's current hardwar
 
 3. **`past(timespan)` on all 5 assets**: Shared `past_from_buffer()` helper slices `AssetHistoryBuffer` to `[now-timespan, now]`, extracts `power_kw` column, prepends boundary point.
 
-4. **Planner wiring**: `run_planner()` now accepts `asset_forecasts: &HashMap<String, QuantityTimeline>` and uses `nearest_value()` helper for Step/Linear lookup. Removed internal `pv_forecast()` function.
+4. **Planner wiring**: `run_planner()` now accepts `asset_forecasts: &HashMap<String, TimeSeries>` and uses `nearest_value()` helper for Step/Linear lookup. Removed internal `pv_forecast()` function.
 
-5. **New API endpoints**: `GET /forecast/:asset_id?timespan_s=N` and `GET /history/:asset_id?timespan_s=N` return full `QuantityTimeline` JSON.
+5. **New API endpoints**: `GET /forecast/:asset_id?timespan_s=N` and `GET /history/:asset_id?timespan_s=N` return full `TimeSeries` JSON.
 
 6. **BDD coverage**: 12 new scenarios across `asset_forecast.feature` (8) and `asset_history.feature` (5), plus 48 Rust unit tests (edge cases, boundary points, ascending order, sign convention).
 

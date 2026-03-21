@@ -6,7 +6,7 @@
 
 ## Summary
 
-Each of the five VEN asset types (PV, battery, EV, heater, base load) gains a proper `forecast(timespan)` implementation using its own physics model, and a `history(timespan, history)` method that slices the existing ring buffer. Both return a new `QuantityTimeline` type (in `VEN/src/common/`) carrying samples with declared `Quantity`, `Unit`, and `Interpolation` fields. The planner's internal `pv_forecast()` duplicate is removed; the planner receives a pre-computed forecast map instead.
+Each of the five VEN asset types (PV, battery, EV, heater, base load) gains a proper `forecast(timespan)` implementation using its own physics model, and a `history(timespan, history)` method that slices the existing ring buffer. Both return a new `TimeSeries` type (in `VEN/src/common/`) carrying samples with declared `Quantity`, `Unit`, and `Interpolation` fields. The planner's internal `pv_forecast()` duplicate is removed; the planner receives a pre-computed forecast map instead.
 
 ---
 
@@ -19,7 +19,7 @@ Each of the five VEN asset types (PV, battery, EV, heater, base load) gains a pr
 **Target Platform**: Linux ARM64 (Raspberry Pi 4), Docker Compose v2
 **Project Type**: Library module within VEN backend service
 **Performance Goals**: `forecast(8h)` must complete in < 1 ms per asset (480 samples × simple arithmetic)
-**Constraints**: No new crates, no workspace changes; `QuantityTimeline` must be structurally compatible with future `TimeSeries<T>` from RF-05 and a future `MultiQuantityTimeline`
+**Constraints**: No new crates, no workspace changes; `TimeSeries` must be structurally compatible with future `TimeSeries<T>` from RF-05 and a future `MultiTimeSeries`
 **Scale/Scope**: 5 asset types × 2 methods = 10 implementations; 1 planner change; ~2 new BDD feature files
 
 ---
@@ -61,7 +61,7 @@ specs/007-asset-forecast-past/
 ```text
 VEN/src/
   common/
-    mod.rs              ← NEW MODULE: Interpolation, Quantity, Unit, QuantityTimeline
+    mod.rs              ← NEW MODULE: Interpolation, Quantity, Unit, TimeSeries
   simulator/
     assets/
       mod.rs              ← + forecast() + history() dispatch on AssetState
@@ -96,7 +96,7 @@ Key resolved decisions:
 | Decision | Outcome |
 |---|---|
 | `history()` buffer ownership | Pass `&AssetHistoryBuffer` as parameter — no restructuring |
-| Planner access to assets | Pre-compute forecast map; pass as `&HashMap<String, QuantityTimeline>` |
+| Planner access to assets | Pre-compute forecast map; pass as `&HashMap<String, TimeSeries>` |
 | `predict()` fate | Removed — `forecast()` is a clean replacement, not an addition |
 | Forecast resolution | 1 sample/minute for continuous assets; two points (now + boundary) for Step assets |
 | Nearest-value lookup | `nearest_value()` helper in `planner.rs` — 10 lines, Step/Linear aware, replaced by RF-05 resample later |
@@ -107,7 +107,7 @@ Key resolved decisions:
 
 ### New types
 
-`Interpolation`, `Quantity`, `Unit`, and `QuantityTimeline` added to `VEN/src/common/mod.rs` (new module). See [data-model.md](data-model.md).
+`Interpolation`, `Quantity`, `Unit`, and `TimeSeries` added to `VEN/src/common/mod.rs` (new module). See [data-model.md](data-model.md).
 
 ### Contracts
 
@@ -115,7 +115,7 @@ Full pre/post-condition contracts in [contracts/asset_interface.md](contracts/as
 
 ### Implementation order (recommended)
 
-1. Create `VEN/src/common/mod.rs` with `Interpolation`, `Quantity`, `Unit`, `QuantityTimeline`; add `mod common;` to `main.rs` → compile check
+1. Create `VEN/src/common/mod.rs` with `Interpolation`, `Quantity`, `Unit`, `TimeSeries`; add `mod common;` to `main.rs` → compile check
 2. Write BDD feature files (Constitution II — tests before code)
 3. Implement `forecast()` on PV first (unblocks planner change)
 4. Remove `pv_forecast()` from planner, wire forecast map → existing BDD suite stays green
@@ -131,5 +131,5 @@ Full pre/post-condition contracts in [contracts/asset_interface.md](contracts/as
 | I — OpenADR Spec Fidelity | ✅ PASS | No field naming involved |
 | II — BDD-First Testing | ✅ PASS | Feature files authored before step 3 above |
 | III — Upstream Compatibility | ✅ PASS | No submodule changes |
-| IV — Lean Architecture | ✅ PASS | `nearest_value()` is the only new helper; `QuantityTimeline` is four fields; `common/` is one file |
+| IV — Lean Architecture | ✅ PASS | `nearest_value()` is the only new helper; `TimeSeries` is four fields; `common/` is one file |
 | V — Infrastructure Parity | ✅ PASS | Test command unchanged |

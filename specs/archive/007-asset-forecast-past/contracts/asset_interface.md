@@ -24,7 +24,7 @@ enum Unit {
     WattsPerSquareMeter, EuroPerKilowattHour, GramsPerKilowattHour,
 }
 
-struct QuantityTimeline {
+struct TimeSeries {
     samples:       Vec<(DateTime<Utc>, f64)>,  // ascending timestamps
     quantity:      Quantity,
     unit:          Unit,
@@ -34,7 +34,7 @@ struct QuantityTimeline {
 
 ---
 
-## AssetState::forecast(timespan: Duration) -> QuantityTimeline
+## AssetState::forecast(timespan: Duration) -> TimeSeries
 
 **Pre-conditions:**
 - `timespan > Duration::zero()`
@@ -59,7 +59,7 @@ struct QuantityTimeline {
 
 ---
 
-## AssetState::history(timespan: Duration, history: &AssetHistoryBuffer) -> QuantityTimeline
+## AssetState::history(timespan: Duration, history: &AssetHistoryBuffer) -> TimeSeries
 
 **Pre-conditions:**
 - `timespan > Duration::zero()`
@@ -85,7 +85,7 @@ pub fn run_planner(
     profile:          &Profile,
     now:              DateTime<Utc>,
     trigger:          PlanTrigger,
-    asset_forecasts:  &HashMap<String, QuantityTimeline>,   // NEW
+    asset_forecasts:  &HashMap<String, TimeSeries>,   // NEW
 ) -> Plan
 ```
 
@@ -98,7 +98,7 @@ pub fn run_planner(
 For the planner to read a forecast value at a specific slot timestamp (until RF-05 provides `resample()`):
 
 ```
-fn nearest_value(series: &QuantityTimeline, ts: DateTime<Utc>) -> f64
+fn nearest_value(series: &TimeSeries, ts: DateTime<Utc>) -> f64
 ```
 
 - Finds the sample with the closest timestamp to `ts`.
