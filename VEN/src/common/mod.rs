@@ -262,6 +262,79 @@ fn ceil_to_grid(ts: DateTime<Utc>, width_ms: i64) -> DateTime<Utc> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ISO 8601 duration parser
+// ---------------------------------------------------------------------------
+
+/// Parse an ISO 8601 duration string into total seconds.
+///
+/// Supports: `PT1H`, `PT15M`, `PT30S`, `PT1H30M`, `P1D`, `P1M`, `P1Y`,
+/// and combinations thereof (e.g. `P1DT6H`).
+/// Year and month are approximated: 1Y = 365 days, 1M = 30 days.
+/// Returns 3600 (1 hour) as a fallback for unparseable or zero-result strings.
+pub(crate) fn parse_iso8601_duration_secs(s: &str) -> i64 {
+    let s = s.trim();
+    if !s.starts_with('P') {
+        return 3600; // fallback: 1 hour
+    }
+    let rest = &s[1..];
+    let (date_part, time_part) = if let Some(t_pos) = rest.find('T') {
+        (&rest[..t_pos], &rest[t_pos + 1..])
+    } else {
+        (rest, "")
+    };
+
+    let mut total_secs: i64 = 0;
+
+    let mut buf = String::new();
+    for ch in date_part.chars() {
+        if ch.is_ascii_digit() {
+            buf.push(ch);
+        } else if ch == 'Y' {
+            let v: i64 = buf.parse().unwrap_or(0);
+            total_secs += v * 365 * 86400;
+            buf.clear();
+        } else if ch == 'M' {
+            let v: i64 = buf.parse().unwrap_or(0);
+            total_secs += v * 30 * 86400;
+            buf.clear();
+        } else if ch == 'D' {
+            let v: i64 = buf.parse().unwrap_or(0);
+            total_secs += v * 86400;
+            buf.clear();
+        } else {
+            buf.clear();
+        }
+    }
+
+    buf.clear();
+    for ch in time_part.chars() {
+        if ch.is_ascii_digit() || ch == '.' {
+            buf.push(ch);
+        } else if ch == 'H' {
+            let v: f64 = buf.parse().unwrap_or(0.0);
+            total_secs += v as i64 * 3600;
+            buf.clear();
+        } else if ch == 'M' {
+            let v: f64 = buf.parse().unwrap_or(0.0);
+            total_secs += v as i64 * 60;
+            buf.clear();
+        } else if ch == 'S' {
+            let v: f64 = buf.parse().unwrap_or(0.0);
+            total_secs += v as i64;
+            buf.clear();
+        } else {
+            buf.clear();
+        }
+    }
+
+    if total_secs <= 0 {
+        3600
+    } else {
+        total_secs
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -690,5 +763,45 @@ mod tests {
     fn ceil_to_grid_rounds_up() {
         assert_eq!(ceil_to_grid(t(10, 1, 0), 300_000), t(10, 5, 0));
         assert_eq!(ceil_to_grid(t(10, 22, 0), 300_000), t(10, 25, 0));
+    }
+
+    // ── parse_iso8601_duration_secs ──────────────────────────────────
+
+    #[test]
+    fn test_parse_iso8601_duration_hour() {
+        assert_eq!(parse_iso8601_duration_secs("PT1H"), 3600);
+    }
+
+    #[test]
+    fn test_parse_iso8601_duration_minutes() {
+        assert_eq!(parse_iso8601_duration_secs("PT15M"), 900);
+        assert_eq!(parse_iso8601_duration_secs("PT5M"), 300);
+    }
+
+    #[test]
+    fn test_parse_iso8601_duration_combined() {
+        assert_eq!(parse_iso8601_duration_secs("PT1H30M"), 5400);
+    }
+
+    #[test]
+    fn test_parse_iso8601_duration_days() {
+        assert_eq!(parse_iso8601_duration_secs("P1D"), 86400);
+    }
+
+    #[test]
+    fn test_parse_iso8601_duration_years() {
+        let secs = parse_iso8601_duration_secs("P9999Y");
+        assert!(secs > 9998i64 * 365 * 86400, "P9999Y should be a very large value");
+    }
+
+    #[test]
+    fn test_parse_iso8601_duration_months() {
+        assert_eq!(parse_iso8601_duration_secs("P1M"), 30 * 86400);
+    }
+
+    #[test]
+    fn test_parse_iso8601_duration_secs_day() {
+        // Explicit coverage for the gap in the old reporter parser (which ignored date parts).
+        assert_eq!(parse_iso8601_duration_secs("P1D"), 86400);
     }
 }

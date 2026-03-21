@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use tracing::debug;
 
-use crate::common::{Aggregation, Interpolation, TimeSeries};
+use crate::common::{parse_iso8601_duration_secs, Aggregation, Interpolation, TimeSeries};
 use crate::controller::trace::{AssetHistoryBuffer, ControllerEvent};
 use crate::entities::capacity::OadrReportObligation;
 
@@ -46,37 +46,6 @@ fn history_to_timeseries(
 // Interval activity detection
 // ---------------------------------------------------------------------------
 
-/// Parse a minimal ISO 8601 duration string (PTxH / PTxM / PTxS combos).
-fn parse_duration_secs(s: &str) -> i64 {
-    let s = s.trim();
-    if !s.starts_with('P') {
-        return 3_600; // 1-hour fallback
-    }
-    let rest = &s[1..];
-    let (_, time_part) = if let Some(t) = rest.find('T') {
-        (&rest[..t], &rest[t + 1..])
-    } else {
-        (rest, "")
-    };
-    let mut total: i64 = 0;
-    let mut buf = String::new();
-    for ch in time_part.chars() {
-        if ch.is_ascii_digit() || ch == '.' {
-            buf.push(ch);
-        } else if ch == 'H' {
-            total += buf.parse::<f64>().unwrap_or(0.0) as i64 * 3_600;
-            buf.clear();
-        } else if ch == 'M' {
-            total += buf.parse::<f64>().unwrap_or(0.0) as i64 * 60;
-            buf.clear();
-        } else if ch == 'S' {
-            total += buf.parse::<f64>().unwrap_or(0.0) as i64;
-            buf.clear();
-        }
-    }
-    if total <= 0 { 3_600 } else { total }
-}
-
 /// Returns true if `event` has at least one interval that is currently active.
 ///
 /// An interval is active when:
@@ -106,7 +75,7 @@ fn event_is_active(event: &Value, now: DateTime<Utc>) -> bool {
         let duration_secs = ip
             .get("duration")
             .and_then(|v| v.as_str())
-            .map(parse_duration_secs)
+            .map(parse_iso8601_duration_secs)
             .unwrap_or(365 * 24 * 3_600);
         let interval_end = interval_start + Duration::seconds(duration_secs);
         interval_start <= now && now < interval_end
