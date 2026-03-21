@@ -193,7 +193,7 @@ export class VenApi {
     const path = `/timeline/${encodeURIComponent(assetId)}${qs.toString() ? `?${qs}` : ""}`;
     const r = await this.getReq(path);
     if (!r.ok) throw new Error(`timeline/${assetId} ${r.status}`);
-    const raw: { ts: string; values: Record<string, number> }[] = await r.json();
+    const raw: { ts: string; values: Record<string, number> | null }[] = await r.json();
     return raw.map((pt) => ({ ts: new Date(pt.ts).getTime(), values: pt.values }));
   }
 
@@ -207,7 +207,7 @@ export class VenApi {
     const path = `/timeline/all${qs.toString() ? `?${qs}` : ""}`;
     const r = await this.getReq(path);
     if (!r.ok) throw new Error(`timeline/all ${r.status}`);
-    const raw: Record<string, { ts: string; values: Record<string, number> }[]> = await r.json();
+    const raw: Record<string, { ts: string; values: Record<string, number> | null }[]> = await r.json();
     return Object.fromEntries(
       Object.entries(raw).map(([id, pts]) => [
         id,
