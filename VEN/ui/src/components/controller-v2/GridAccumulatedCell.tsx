@@ -13,68 +13,32 @@ const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
 
 const KNOWN_ASSETS: AssetId[] = ["ev", "heater", "pv", "battery", "base_load"];
 
-/** Binary search: index of the point with ts closest to `target` within `toleranceMs`. */
-function findNearest(points: AssetTimelinePoint[], target: number, toleranceMs: number): AssetTimelinePoint | undefined {
-  let lo = 0;
-  let hi = points.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (points[mid].ts < target) lo = mid + 1;
-    else hi = mid;
-  }
-  // lo is the first index with ts >= target; also check lo-1 for the closest
-  const candidates = [points[lo - 1], points[lo]].filter(Boolean) as AssetTimelinePoint[];
-  const best = candidates.reduce<AssetTimelinePoint | undefined>((prev, cur) => {
-    if (!prev) return cur;
-    return Math.abs(cur.ts - target) < Math.abs(prev.ts - target) ? cur : prev;
-  }, undefined);
-  return best && Math.abs(best.ts - target) <= toleranceMs ? best : undefined;
-}
-
-function buildStackedFromAllTimelines(
+/** Build stacked-area data by positional zip across grid-aligned asset arrays. */
+export function buildStackedFromAllTimelines(
   allTimelines: Record<string, AssetTimelinePoint[]>
 ): StackedAreaPoint[] {
-  // Collect timestamps from KNOWN_ASSETS only. The "grid" virtual asset and any
-  // unknown entries are excluded because they have plan-slot entries at timestamps
-  // where known assets have no allocation — causing those assets to fall through
-  // to 0 on exact-match, producing false zero-spikes in the stacked chart.
-  const tsSet = new Set<number>();
-  for (const assetId of KNOWN_ASSETS) {
-    for (const p of (allTimelines[assetId] ?? [])) tsSet.add(p.ts);
-  }
-  const sortedTs = [...tsSet].sort((a, b) => a - b);
+  // Use the first known asset's array to determine length and timestamps.
+  // RF-05c guarantees all assets share the same ts at each index.
+  const refAsset = KNOWN_ASSETS.find((id) => (allTimelines[id]?.length ?? 0) > 0);
+  const refPoints = refAsset ? allTimelines[refAsset] : [];
+  if (!refPoints || refPoints.length === 0) return [];
 
-  // Tolerance for nearest-neighbour lookup: half the typical sample interval (15 s).
-  // All assets are pushed in the same sim tick, so any timestamp drift is sub-second.
-  // Independent per-asset downsampling can shift timestamps by up to one stride (~30 s),
-  // so 15 s catches genuine alignment while avoiding cross-slot false matches.
-  const TOLERANCE_MS = 15_000;
-
-  const emptyPt = (): Omit<StackedAreaPoint, "ts"> => ({
-    ev_pos: 0, ev_neg: 0,
-    heater_pos: 0, heater_neg: 0,
-    pv_pos: 0, pv_neg: 0,
-    battery_pos: 0, battery_neg: 0,
-    base_load_pos: 0, base_load_neg: 0,
-    gridPowerKw: null,
-  });
-
-  return sortedTs.map((ts) => {
-    const pt: StackedAreaPoint = { ts, ...emptyPt() };
+  return refPoints.map((ref, i) => {
+    const pt: StackedAreaPoint = {
+      ts: ref.ts,
+      ev_pos: 0, ev_neg: 0,
+      heater_pos: 0, heater_neg: 0,
+      pv_pos: 0, pv_neg: 0,
+      battery_pos: 0, battery_neg: 0,
+      base_load_pos: 0, base_load_neg: 0,
+      gridPowerKw: null,
+    };
     for (const assetId of KNOWN_ASSETS) {
-      const points = allTimelines[assetId];
-      if (!points) continue;
-      const match = findNearest(points, ts, TOLERANCE_MS);
-      const kw = match?.values?.["power_kw"] ?? 0;
-      const key = assetId as AssetId;
-      pt[`${key}_pos` as keyof StackedAreaPoint] = Math.max(0, kw) as never;
-      pt[`${key}_neg` as keyof StackedAreaPoint] = Math.min(0, kw) as never;
+      const kw = allTimelines[assetId]?.[i]?.values?.["power_kw"] ?? 0;
+      pt[`${assetId}_pos` as keyof StackedAreaPoint] = Math.max(0, kw) as never;
+      pt[`${assetId}_neg` as keyof StackedAreaPoint] = Math.min(0, kw) as never;
     }
-    // Grid power: nearest-neighbour lookup, same tolerance as assets
-    const gridPoints = allTimelines["grid"] ?? [];
-    const gridMatch = findNearest(gridPoints, ts, TOLERANCE_MS);
-    pt.gridPowerKw = gridMatch?.values?.["power_kw"] ?? null;
-
+    pt.gridPowerKw = allTimelines["grid"]?.[i]?.values?.["power_kw"] ?? null;
     return pt;
   });
 }

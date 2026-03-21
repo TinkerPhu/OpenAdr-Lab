@@ -56,7 +56,7 @@ export type AssetSummary = {
 export type AssetTimelinePoint = {
   /** Epoch ms — X-axis value */
   ts: number;
-  /** Sparse values map — NaN values filtered out by the backend. Null for empty grid buckets. */
+  /** Sparse values map — NaN values filtered out by the backend. null for empty grid buckets. */
   values: Record<string, number> | null;
 };
 

@@ -172,12 +172,12 @@ export function useTimeline(
 export function useAllTimelines(
   hoursBack = 1.0,
   hoursForward = 1.0,
-  options?: { refetchInterval?: number | false }
+  options?: { refetchInterval?: number | false; resolution?: number }
 ) {
   const { api } = useVenContext();
   return useQuery({
-    queryKey: ["timeline/all", api.baseUrl, hoursBack, hoursForward],
-    queryFn: () => api.allTimelines({ hoursBack, hoursForward }),
+    queryKey: ["timeline/all", api.baseUrl, hoursBack, hoursForward, options?.resolution],
+    queryFn: () => api.allTimelines({ hoursBack, hoursForward, resolution: options?.resolution }),
     refetchInterval: options?.refetchInterval ?? 10_000,
   });
 }
