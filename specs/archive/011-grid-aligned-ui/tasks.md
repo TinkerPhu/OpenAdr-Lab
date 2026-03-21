@@ -103,7 +103,7 @@
 - [x] T012 [P] Update `RawDiagnostics` type annotation in `VEN/ui/src/pages/RawDiagnostics.tsx` — the `useQuery<Record<string, AssetTimelinePoint[]>>` generic may need updating if `AssetTimelinePoint` change requires it
 - [x] T013 [P] Update empty-data fallback in `AssetTimelineChart` (line 39) — change `values: {}` to remain compatible with the nullable type (already valid, verify no TS error)
 - [x] T014 Run full `npm test` in `VEN/ui/` to verify all vitest tests pass
-- [ ] T015 Run quickstart.md validation — verify Controller V2 page renders correctly with live backend (blocked: requires RF-05c deployed)
+- [x] T015 Run quickstart.md validation — verify Controller V2 page renders correctly with live backend (RF-05c deployed, 37 features 188 scenarios 1067 steps all pass)
 
 ---
 
