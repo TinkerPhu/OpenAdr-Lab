@@ -89,17 +89,17 @@ No asset state is passed. The fix: add `asset_forecasts: &HashMap<String, AssetS
 
 ## Decisions
 
-### D-01: QuantityTimeline return type in VEN/src/common/
+### D-01: TimeSeries return type in VEN/src/common/
 
 **Decision**: New module `VEN/src/common/mod.rs` with four types:
 - `enum Interpolation { Linear, Step }`
 - `enum Quantity { Power, Energy, StateOfCharge, Temperature, Irradiance, Tariff, Co2Intensity }`
 - `enum Unit { Kilowatt, KilowattHour, Percent, Celsius, WattsPerSquareMeter, EuroPerKilowattHour, GramsPerKilowattHour }`
-- `struct QuantityTimeline { samples, quantity, unit, interpolation }`
+- `struct TimeSeries { samples, quantity, unit, interpolation }`
 
-**Rationale**: `QuantityTimeline` is a universal, self-describing time series. Placing it in `common/` (not in `simulator/assets/`) draws the module boundary that RF-05 will build out. A future speckit will introduce `MultiQuantityTimeline`. Enum unit is type-safe and avoids string typos. Compatible with future `TimeSeries<T>` from RF-05.
+**Rationale**: `TimeSeries` is a universal, self-describing time series. Placing it in `common/` (not in `simulator/assets/`) draws the module boundary that RF-05 will build out. A future speckit will introduce `MultiTimeSeries`. Enum unit is type-safe and avoids string typos. Compatible with future `TimeSeries<T>` from RF-05.
 
-**Alternative considered**: Keeping it in `simulator/assets/mod.rs` alongside `AssetState`. Rejected — `QuantityTimeline` has no dependency on asset simulation; it belongs in the shared module. Moving it later would be churn.
+**Alternative considered**: Keeping it in `simulator/assets/mod.rs` alongside `AssetState`. Rejected — `TimeSeries` has no dependency on asset simulation; it belongs in the shared module. Moving it later would be churn.
 
 ---
 

@@ -538,7 +538,7 @@ async fn main() -> anyhow::Result<()> {
                 let planning_horizon = chrono::Duration::seconds(
                     (profile.planner.plan_horizon_h * 3600) as i64,
                 );
-                let asset_forecasts: std::collections::HashMap<String, crate::common::QuantityTimeline> = {
+                let asset_forecasts: std::collections::HashMap<String, crate::common::TimeSeries> = {
                     let sim_guard = sim_for_planner.lock().await;
                     sim_guard
                         .assets
@@ -1129,8 +1129,8 @@ struct ForecastParams {
     timespan_s: Option<f64>,
 }
 
-/// GET /forecast/:asset_id — forward-looking QuantityTimeline for one asset (speckit 007).
-/// Returns `{"samples": [{"ts": "...", "value": ...}], "quantity": "...", "unit": "...", "interpolation": "..."}`.
+/// GET /forecast/:asset_id — forward-looking TimeSeries for one asset (speckit 007).
+/// Returns `{"samples": [{"ts": "...", "value": ...}], "interpolation": "..."}`.
 async fn get_asset_forecast(
     State(ctx): State<AppCtx>,
     Path(asset_id): Path<String>,
@@ -1159,8 +1159,6 @@ async fn get_asset_forecast(
                 .collect();
             Json(serde_json::json!({
                 "samples": samples,
-                "quantity": series.quantity,
-                "unit": series.unit,
                 "interpolation": series.interpolation,
             }))
             .into_response()
@@ -1174,8 +1172,9 @@ struct HistoryParams {
     timespan_s: Option<f64>,
 }
 
-/// GET /history/:asset_id — historical QuantityTimeline for one asset (speckit 007).
-/// Returns `{"samples": [{"ts": "...", "value": ...}], "quantity": "...", "unit": "...", "interpolation": "..."}`.
+/// GET /history/:asset_id — historical TimeSeries for one asset (speckit 007).
+/// Returns `{"samples": [{"ts": "...", "value": ...}], "interpolation": "..."}`.
+
 async fn get_asset_history(
     State(ctx): State<AppCtx>,
     Path(asset_id): Path<String>,
@@ -1208,8 +1207,6 @@ async fn get_asset_history(
                 .collect();
             Json(serde_json::json!({
                 "samples": samples,
-                "quantity": series.quantity,
-                "unit": series.unit,
                 "interpolation": series.interpolation,
             }))
             .into_response()

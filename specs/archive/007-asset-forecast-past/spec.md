@@ -127,9 +127,9 @@ This guarantees at least one sample for any positive timespan and gives downstre
 
 ### Functional Requirements
 
-- **FR-001**: Each asset type (PV, battery, EV charger, heater, base load) MUST implement a `forecast(timespan)` method that returns a `QuantityTimeline` — a list of time-stamped samples from the current moment through `timespan` at the asset's natural resolution, with declared `Quantity`, `Unit`, and `Interpolation` fields.
+- **FR-001**: Each asset type (PV, battery, EV charger, heater, base load) MUST implement a `forecast(timespan)` method that returns a `TimeSeries` — a list of time-stamped samples from the current moment through `timespan` at the asset's natural resolution, with declared `Quantity`, `Unit`, and `Interpolation` fields.
 
-- **FR-002**: Each asset type MUST implement a `history(timespan)` method that returns a `QuantityTimeline` — a list of time-stamped samples covering the last `timespan` duration at the ring buffer's stored resolution, with declared `Quantity`, `Unit`, and `Interpolation` fields.
+- **FR-002**: Each asset type MUST implement a `history(timespan)` method that returns a `TimeSeries` — a list of time-stamped samples covering the last `timespan` duration at the ring buffer's stored resolution, with declared `Quantity`, `Unit`, and `Interpolation` fields.
 
 - **FR-003**: `forecast()` MUST use the same physics model that the asset uses for simulation — there must be no separate copy of asset-specific formulas anywhere in the controller or planner.
 
@@ -143,23 +143,23 @@ This guarantees at least one sample for any positive timespan and gives downstre
 
 - **FR-008**: The `history()` series MUST NOT contain future-timestamped entries.
 
-- **FR-010**: Every non-empty `QuantityTimeline` returned by `forecast()` MUST include a sample at exactly `now + timespan` as the last entry. Every non-empty `QuantityTimeline` returned by `history()` MUST include a sample at exactly `now − timespan` as the first entry. If no natural sample falls on that timestamp, the value is computed by interpolating from surrounding samples according to the declared `Interpolation` mode (`Step` = hold last value; `Linear` = weighted interpolation between neighbours).
+- **FR-010**: Every non-empty `TimeSeries` returned by `forecast()` MUST include a sample at exactly `now + timespan` as the last entry. Every non-empty `TimeSeries` returned by `history()` MUST include a sample at exactly `now − timespan` as the first entry. If no natural sample falls on that timestamp, the value is computed by interpolating from surrounding samples according to the declared `Interpolation` mode (`Step` = hold last value; `Linear` = weighted interpolation between neighbours).
 
-- **FR-011**: Each asset MUST populate all three metadata fields of the returned `QuantityTimeline`: `quantity` (what is measured), `unit` (scale of the f64 values), and `interpolation` (how values between samples are read). For `forecast()` and `history()` returning power: `quantity = Power`, `unit = Kilowatt`, interpolation as appropriate per asset physics.
+- **FR-011**: Each asset MUST populate all three metadata fields of the returned `TimeSeries`: `quantity` (what is measured), `unit` (scale of the f64 values), and `interpolation` (how values between samples are read). For `forecast()` and `history()` returning power: `quantity = Power`, `unit = Kilowatt`, interpolation as appropriate per asset physics.
 
-- **FR-012 (deferred to RF-05)**: Resampling of `QuantityTimeline` to a caller-specified interval, including grid-aligned rounding, is out of scope for this feature. It will be addressed when `TimeSeries<T>` is introduced in RF-05. A future speckit will introduce `MultiQuantityTimeline` (multiple quantities per timestamp) building on `QuantityTimeline`.
+- **FR-012 (deferred to RF-05)**: Resampling of `TimeSeries` to a caller-specified interval, including grid-aligned rounding, is out of scope for this feature. It will be addressed when `TimeSeries<T>` is introduced in RF-05. A future speckit will introduce `MultiTimeSeries` (multiple quantities per timestamp) building on `TimeSeries`.
 
 ### Key Entities
 
 - **Asset**: A physical or simulated energy device (PV, battery, EV, heater, base load). Each asset owns its own forward model (for `forecast`) and its own history (for `history`). Assets are interchangeable through a common interface.
 
-- **QuantityTimeline**: The return type of both `forecast()` and `history()`. Lives in `VEN/src/common/`. Contains:
+- **TimeSeries**: The return type of both `forecast()` and `history()`. Lives in `VEN/src/common/`. Contains:
   - `samples` — a time-ordered list of `(timestamp, f64)` pairs
   - `quantity` — a `Quantity` variant declaring what is being measured
   - `unit` — a `Unit` variant declaring the scale of the `f64` values
   - `interpolation` — a declared `Interpolation` mode that describes how values between samples should be read and how the mandatory boundary point is computed
 
-  `QuantityTimeline` is the direct precursor to a future `MultiQuantityTimeline` (multiple quantities per timestamp, introduced in a later speckit) and to `TimeSeries<T>` in RF-05. The structure is intentionally compatible with both.
+  `TimeSeries` is the direct precursor to a future `MultiTimeSeries` (multiple quantities per timestamp, introduced in a later speckit) and to `TimeSeries<T>` in RF-05. The structure is intentionally compatible with both.
 
 - **Quantity** (enum): Declares what physical or financial quantity the series represents.
   - `Power` — instantaneous power at the site or asset boundary
@@ -185,7 +185,7 @@ This guarantees at least one sample for any positive timespan and gives downstre
 
 - **Timespan**: A positive duration. Used as the sole parameter for both `forecast()` (how far ahead) and `history()` (how far back).
 
-- **Boundary Point**: The mandatory endpoint sample that every non-empty `QuantityTimeline` must contain — `now + timespan` for `forecast()`, `now − timespan` for `history()`. Its value is interpolated from surrounding samples using the declared `Interpolation` mode.
+- **Boundary Point**: The mandatory endpoint sample that every non-empty `TimeSeries` must contain — `now + timespan` for `forecast()`, `now − timespan` for `history()`. Its value is interpolated from surrounding samples using the declared `Interpolation` mode.
 
 ---
 

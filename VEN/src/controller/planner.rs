@@ -2,7 +2,7 @@
 ///
 /// Produces a Plan from TariffSnapshots + EnergyPackets + device profile.
 /// Phase 6 (penalty check) is deferred to Stage 4.
-use crate::common::{Interpolation, QuantityTimeline};
+use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PlanTrigger, UserRequestMode};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
@@ -32,7 +32,7 @@ pub fn run_planner(
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
-    asset_forecasts: &HashMap<String, QuantityTimeline>,
+    asset_forecasts: &HashMap<String, TimeSeries>,
 ) -> Plan {
     let step_s = profile.planner.plan_step_s;
     let horizon_h = profile.planner.plan_horizon_h;
@@ -119,7 +119,7 @@ fn build_grid(
     step_s: u64,
     total_steps: usize,
     firm_boundary: DateTime<Utc>,
-    asset_forecasts: &HashMap<String, QuantityTimeline>,
+    asset_forecasts: &HashMap<String, TimeSeries>,
 ) -> (Vec<PlanTimeSlot>, Vec<PlanTimeSlot>) {
     let import_cap = capacity.import_limit_kw.unwrap_or(f64::MAX);
     let export_cap = capacity.export_limit_kw.unwrap_or(f64::MAX);
@@ -565,11 +565,11 @@ fn tariff_co2_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
 
 // ─── Forecast lookup helper ───────────────────────────────────────────────────
 
-/// Return the forecast value for a given timestamp from a QuantityTimeline.
+/// Return the forecast value for a given timestamp from a TimeSeries.
 /// - If the series is empty or absent, returns 0.0.
 /// - Step series: last sample at or before ts; falls back to first sample.
 /// - Linear series: nearest sample by timestamp.
-fn nearest_value(series: Option<&QuantityTimeline>, ts: DateTime<Utc>) -> f64 {
+fn nearest_value(series: Option<&TimeSeries>, ts: DateTime<Utc>) -> f64 {
     let s = match series {
         Some(s) if !s.samples.is_empty() => s,
         _ => return 0.0,

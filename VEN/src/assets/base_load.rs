@@ -2,7 +2,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::common::{Interpolation, Quantity, QuantityTimeline, Unit};
+use crate::common::{Interpolation, TimeSeries};
 use crate::controller::trace::AssetHistoryBuffer;
 use crate::profile::BaseLoadConfig;
 use super::{AssetCapabilities, ControlDescriptor, TickEnvironment};
@@ -28,24 +28,22 @@ impl BaseLoad {
         self.baseline_kw
     }
 
-    pub fn forecast(&self, timespan: Duration) -> QuantityTimeline {
+    pub fn forecast(&self, timespan: Duration) -> TimeSeries {
         if timespan <= Duration::zero() {
-            return QuantityTimeline::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Step);
+            return TimeSeries::empty(Interpolation::Step);
         }
         let now = Utc::now();
-        QuantityTimeline {
+        TimeSeries {
             samples: vec![
                 (now, self.baseline_kw),
                 (now + timespan, self.baseline_kw),
             ],
-            quantity: Quantity::Power,
-            unit: Unit::Kilowatt,
             interpolation: Interpolation::Step,
         }
     }
 
-    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantityTimeline {
-        super::history_from_buffer(timespan, history, Quantity::Power, Unit::Kilowatt, Interpolation::Step)
+    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> TimeSeries {
+        super::history_from_buffer(timespan, history, Interpolation::Step)
     }
 
     pub fn state_values(&self) -> HashMap<String, f64> {
