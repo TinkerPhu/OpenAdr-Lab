@@ -1,225 +1,125 @@
-# VEN Backend Refactoring Backlog
+## REQUIREMENTS.md and VEN_ARCHITECTURE.md: Requirements Gap Backlog (from 2026-03-21 code audit)
 
-Generated from architecture analysis on 2026-03-21.
-Items ordered by execution priority: safe deletions first, then consolidations, then structural moves.
-
----
-
-## RF-B01: Delete dead `dispatcher::update_packets`
-
-**Status**: DONE
-**Risk**: Low (dead code removal)
-**Files**: `VEN/src/controller/dispatcher.rs` (lines 81-131)
-
-The function `update_packets` is marked with the comment "NOTE: This function will be superseded by `monitor::record_tick`" — and it was. `monitor::record_tick` is the only caller in the tick loop. `update_packets` is never called anywhere.
-
-**Work**:
-- Delete `update_packets` and its unused imports (`EnergyPacket`, `EnergySnapshot`, `PacketStatus`, `SimSnapshot`, `Uuid` — verify each isn't used by `build_setpoints`).
-- Remove the now-unnecessary `use` of `EnergySnapshot` and `PacketStatus` if they become orphaned.
-
-**Test**:
-- `cargo build --workspace` compiles without errors.
-- `cargo test --workspace` passes (no test references `update_packets`).
-- `grep -r "update_packets" VEN/src/` returns zero hits.
-- Full BDD suite passes unchanged (the function was never called at runtime).
+Items ordered by recommended implementation sequence: dependencies first, then by impact.
 
 ---
 
-## RF-B02: Delete unused `PlannedTariffs`, `PastTariffs`, `TariffHeuristic`
-
-**Status**: DONE
-**Risk**: Low (dead code removal)
-**Files**: `VEN/src/entities/tariff_snapshot.rs`
-
-Three types are declared but never referenced outside their own file:
-- `PlannedTariffs` (lines 18-43) — has `tariff_at()` and `avg_import_tariff()`, never called.
-- `PastTariffs` (lines 129-133) — empty wrapper, never instantiated.
-- `TariffHeuristic` (lines 136-150) — never instantiated.
-
-**Work**:
-- Delete the three structs and their `impl` blocks.
-- Keep `TariffSnapshot` and `TariffTimeSeries` (those are actively used).
-
-**Test**:
-- `cargo build --workspace` compiles without errors.
-- `grep -r "PlannedTariffs\|PastTariffs\|TariffHeuristic" VEN/src/` returns zero hits.
-- All existing `tariff_snapshot::tests` still pass.
-- BDD suite passes unchanged.
+### BL-01: PlanTrigger wiring — RATE_CHANGE / CAPACITY_CHANGE
+**Req:** UC-04, UC-07, VEN_ARCHITECTURE §2.1
+**Problem:** `openadr_interface` parses new rates and capacity from VTN events, but never emits `PlanTrigger::RateChange` or `PlanTrigger::CapacityChange` on the watch channel. The planner only replans on the 20s periodic tick or on packet transitions — rate/capacity changes are invisible until the next periodic cycle.
+**Fix:** After `parse_rate_snapshots()` / `parse_capacity_state()` in the poll loop (`main.rs:133-216`), compare new values against previous. If changed, send the appropriate `PlanTrigger` variant on the watch channel.
+**Complexity:** Small (1–2 hours). Diff detection + channel send.
+**Verify:** BDD test: seed a PRICE event mid-run, assert replan fires within one poll cycle (not 20s).
 
 ---
 
-## RF-B03: Remove `obligations()` alias from `AppState`
-
-**Status**: BACKLOG
-**Risk**: Low (rename only)
-**Files**: `VEN/src/state.rs`, callers in `main.rs`
-
-`obligations()` (line 248) is a byte-for-byte duplicate of `report_obligations()` (line 239). Both return `self.inner.read().await.report_obligations.clone()`.
-
-**Work**:
-- Find all callers of `obligations()` (expected: `main.rs` event poll loop, obligation check loop).
-- Replace with `report_obligations()`.
-- Delete the `obligations()` method.
-
-**Test**:
-- `cargo build --workspace` compiles.
-- `grep -r "\.obligations()" VEN/src/` returns only `report_obligations()` references and `due_obligations()`.
-- BDD suite passes unchanged.
+### BL-02: Event priority ordering before merge
+**Req:** FR-OA-08
+**Problem:** `openadr_interface.rs:186-195` merges events in array order (last-write-wins). A lower-priority event processed later silently overwrites a higher-priority one. The `priority` field is not read at all.
+**Fix:** Extract `priority` (integer, lower = higher priority) and `createdDateTime` from each event. Sort events by ascending priority, then descending `createdDateTime` (newer breaks ties), before entering the merge loop.
+**Complexity:** Small (1–2 hours). Sort + two field extractions.
+**Verify:** Unit test: two PRICE events with same interval, different priorities — higher-priority value wins. Second test: same priority, newer event wins.
 
 ---
 
-## RF-B04: Consolidate ISO 8601 duration parsers
-
-**Status**: BACKLOG
-**Risk**: Low (shared utility extraction)
-**Files**: `VEN/src/controller/openadr_interface.rs`, `VEN/src/controller/reporter.rs`, `VEN/src/common/mod.rs`
-
-Two independent implementations exist:
-- `openadr_interface::parse_iso8601_duration` — full (Y/M/D/H/M/S), 80 lines.
-- `reporter::parse_duration_secs` — partial (H/M/S only), 28 lines.
-
-The reporter version silently ignores day-level durations, which is a latent bug if a report descriptor ever uses `P1D` style durations.
-
-**Work**:
-- Move `parse_iso8601_duration` to `common/mod.rs` as `pub(crate) fn parse_iso8601_duration_secs(s: &str) -> i64`.
-- Replace both call sites with the shared version.
-- Delete both local copies.
-
-**Test**:
-- All existing `openadr_interface::tests::test_parse_iso8601_duration_*` tests still pass (move them to `common::tests`).
-- Add one test confirming `parse_iso8601_duration_secs("P1D")` returns 86400 (this was a gap in the reporter's version).
-- `cargo test --workspace` passes.
-- BDD suite passes unchanged.
+### BL-03: Exponential backoff on VTN communication failure
+**Req:** FR-OA-07
+**Problem:** All poll loops (`main.rs:101-298`) use fixed `tokio::time::interval`. On VTN failure, VEN retries every 30s indefinitely — no backoff, no jitter.
+**Fix:** Replace fixed interval with adaptive delay: on success reset to 30s; on failure double delay (30s → 60s → 120s → 240s → 480s → max 900s). Add ±10% jitter. On success, reset immediately.
+**Complexity:** Medium (2–4 hours). Affects 3 poll loops (programs, events, reports). Extract shared backoff helper.
+**Verify:** Integration test: stop VTN, observe VEN log shows increasing intervals. Restart VTN, observe immediate reset to 30s.
 
 ---
 
-## RF-B05: Extract `net_import_kw` helper in reporter
-
-**Status**: BACKLOG
-**Risk**: Low (local refactor within one module)
-**Files**: `VEN/src/controller/reporter.rs`
-
-The pattern:
-```rust
-let net_import_kw: f64 = asset_history
-    .values()
-    .filter_map(|buf| { buf.to_timeline(None).last()... })
-    .filter(|&kw| kw > 0.0)
-    .sum();
-```
-appears 3 times in `reporter.rs` (lines 108-115, 133-140, 250-257).
-
-**Work**:
-- Extract `fn latest_net_import_kw(asset_history: &HashMap<String, AssetHistoryBuffer>) -> f64`.
-- Replace all three sites.
-
-**Test**:
-- `cargo build --workspace` compiles.
-- Add a unit test: build an `AssetHistoryBuffer` with known values, verify `latest_net_import_kw` returns the correct sum of positive-power assets.
-- BDD suite passes unchanged (reporter output is identical).
+### BL-04: ALERT_GRID_EMERGENCY handling
+**Req:** UC-06, OA-01
+**Problem:** `ALERT_GRID_EMERGENCY` and `ALERT_BLACK_START` event types are not parsed. Emergency signals from the VTN are silently ignored.
+**Fix:** In `openadr_interface`, detect ALERT payload types. Create a high-priority synthetic `EnergyPacket` (shed/limit import) and emit `PlanTrigger::Alert`. Planner treats alert packets as highest-priority FIRM allocations.
+**Complexity:** Medium (3–5 hours). New parsing path + synthetic packet creation + planner priority handling.
+**Verify:** BDD test: send ALERT_GRID_EMERGENCY event, assert planner creates shed packet and reduces import within one poll cycle.
 
 ---
 
-## RF-B06: Add `EnergyPacket::builder()` or `EnergyPacket::new()` constructor
-
-**Status**: BACKLOG
-**Risk**: Medium (touches 3 construction sites)
-**Files**: `VEN/src/entities/energy_packet.rs`, `VEN/src/main.rs` (post_packets), `VEN/src/controller/planner.rs` (seed_to_packet), `VEN/src/controller/user_request.rs` (create_from_body)
-
-Creating an EnergyPacket requires setting ~25 fields. Three sites duplicate the full struct literal:
-- `post_packets` handler (main.rs:1326-1366)
-- `seed_to_packet` (planner.rs:628-661)
-- `create_from_body` (user_request.rs:118-145)
-
-**Work**:
-- Add `EnergyPacket::new(asset_id, target_energy_kwh, desired_power_kw, value_curve, now) -> EnergyPacket` that sets all defaults (Pending status, empty profiles, zero accumulators, etc.).
-- Refactor all three call sites to use it, then override specific fields as needed.
-
-**Test**:
-- Unit test: `EnergyPacket::new(...)` returns a packet with `status == Pending`, empty `past_power_profile`, zero `accumulated_cost_eur`, correct `created_at`.
-- `cargo test --workspace` passes.
-- BDD suite passes unchanged — the constructed packets must be functionally identical.
-- Specifically verify UC-07 (user request) and UC-01 (event-driven scheduling) BDD scenarios still pass.
+### BL-05: Obligation-triggered report submission
+**Req:** FR-OA-04
+**Problem:** `main.rs:506-512` checks `due_obligations(now)` and marks them `fulfilled`, but does **not** build or submit reports. Reports are only sent on timer (`report_interval_s`) and packet transitions — not when obligations actually become due.
+**Fix:** In the obligation check loop, when `due_obligations` returns non-empty: call `build_measurement_reports_for_active_events()` for each due obligation, submit via `upsert_report()`, then mark fulfilled.
+**Complexity:** Small–Medium (2–3 hours). Wire existing report builder to obligation trigger.
+**Verify:** BDD test: create event with `reportDescriptor` that has short interval, assert report submitted at `due_at` time (not just at timer tick).
 
 ---
 
-## RF-B07: Consolidate `finalize_packets` into single-pass per packet
-
-**Status**: DONE
-**Risk**: Low (local optimization in planner)
-**Files**: `VEN/src/controller/planner.rs` (lines 508-543)
-
-`finalize_packets` does three separate `firm_slots.iter().flat_map().filter().map().sum()` passes per packet to compute `allocated_kwh`, `cost`, and `co2`. These can be a single pass.
-
-**Work**:
-- Replace the three passes with one loop accumulating all three values.
-
-**Test**:
-- Existing `planner::tests` pass.
-- Add a targeted test: create a plan with 2 packets across 3 slots, verify `estimated_cost_eur`, `estimated_co2_g`, and `estimated_completion` match the expected values.
-- BDD suite passes unchanged.
+### BL-06: DISPATCH_SETPOINT + CHARGE_STATE_SETPOINT parsing
+**Req:** UC-13, VEN_ARCHITECTURE §2.1
+**Problem:** These event types are not parsed in `openadr_interface`. `DISPATCH_SETPOINT` should bypass the planner and go directly to the dispatcher. `CHARGE_STATE_SETPOINT` should create/modify an EnergyPacket targeting the specified SOC.
+**Fix:** Add parsing branches in `openadr_interface` for both types. `DISPATCH_SETPOINT` → store in `OadrEventCache.dispatch_setpoints` (field already exists in `capacity.rs:53`) and flag for dispatcher override. `CHARGE_STATE_SETPOINT` → create EnergyPacket with target SOC via user_request machinery.
+**Complexity:** Medium (4–6 hours). Two new parsing paths + dispatcher override mode + packet creation.
+**Verify:** BDD test: send DISPATCH_SETPOINT event, assert sim setpoint matches within one poll cycle. Send CHARGE_STATE_SETPOINT, assert EnergyPacket created with correct target.
 
 ---
 
-## RF-B08: Extract event poll change-detection into a function
-
-**Status**: DONE
-**Risk**: Medium (touches the critical event poll loop)
-**Files**: `VEN/src/main.rs` (lines 125-273)
-
-The event poll loop contains ~150 lines of inline logic: JSON traversal for trace events (OpenAdrArrived/Expired), rate change detection, capacity change detection. This logic is interleaved with state updates and should be a testable function.
-
-**Work**:
-- Extract a pure function: `fn detect_event_changes(events: &[Value], prev_ids: &HashSet<String>, prev_tariff_count: usize, prev_import_limit: Option<f64>, now: DateTime<Utc>) -> EventChanges` where `EventChanges` holds the lists of arrived/expired events, rate/capacity change flags, and parsed trace events.
-- The loop body becomes: call `detect_event_changes`, push returned trace events, update prev state, store rates/capacity/obligations.
-
-**Test**:
-- Unit test `detect_event_changes` with: (a) new event appears -> OpenAdrArrived emitted, (b) event disappears -> OpenAdrExpired emitted, (c) tariff count changes -> RateChange emitted, (d) import limit changes -> CapacityChange emitted, (e) no changes -> no events emitted.
-- BDD suite passes unchanged.
+### BL-07: StaleRatePolicy dispatch in planner
+**Req:** UC-12, REQUIREMENTS §3.2.1
+**Problem:** `StaleRatePolicy` enum is defined (`asset.rs:109-114`) with 4 variants (LAST_KNOWN, HEURISTIC_FORECAST, DEFER_TO_FLEXIBLE, SAFE_AVERAGE), but the planner has no dispatch logic. When VTN is unreachable, slots beyond the last known tariff get no special treatment.
+**Fix:** In planner Phase 1 (`build_grid`), after populating tariff data, detect slots with no rate coverage. Apply the configured `StaleRatePolicy`: LAST_KNOWN → repeat last value; DEFER_TO_FLEXIBLE → mark those slots FLEXIBLE regardless of horizon; SAFE_AVERAGE → use configurable percentile tariff.
+**Complexity:** Medium (3–4 hours). Policy dispatch + per-slot fallback logic.
+**Verify:** Unit test: planner with rates covering only 2h of a 6h horizon, each policy variant produces different slot classifications and costs.
 
 ---
 
-## RF-B09: Extract HTTP handlers and DTOs from `main.rs`
-
-**Status**: DONE
-**Risk**: Medium (large structural move, no logic changes)
-**Files**: `VEN/src/main.rs` -> new `VEN/src/routes.rs` (or `VEN/src/routes/` module)
-
-`main.rs` is 1473 lines, of which ~800 are HTTP handler functions and their request/response DTOs. The `main()` function itself (startup + background loops) is the remaining ~600 lines.
-
-**Work**:
-- Create `VEN/src/routes.rs` (or `routes/mod.rs` with sub-modules by domain: `sim.rs`, `timeline.rs`, `hems.rs`, `trace.rs`).
-- Move `AppCtx` to a shared location (e.g., keep in `main.rs` or put in `state.rs`).
-- Move all handler functions and their query/body DTOs.
-- `main.rs` retains: module declarations, `main()` with startup and background loops, router construction.
-
-**Test**:
-- `cargo build --workspace` compiles.
-- `cargo test --workspace` passes.
-- Full BDD suite passes unchanged (all 33+ features, 143+ scenarios).
-- Verify every endpoint responds identically by running the E2E test suite.
+### BL-08: SITE_RESIDUAL computation
+**Req:** REQUIREMENTS §3.3, VEN_ARCHITECTURE §2.1 (Monitor)
+**Problem:** `AssetType::SiteResidual` is defined but never instantiated. The monitor does not compute `P_residual = P_utility − Σ P_modelled_assets`. Unmodeled site consumption is invisible to the planner.
+**Fix:** In the monitor's 1s tick, compute residual power from grid meter minus sum of all modeled asset powers. Expose as a virtual asset entry (read-only, not controllable). Include in planner baseline so it accounts for background load.
+**Complexity:** Medium (3–4 hours). New virtual asset + monitor computation + planner baseline integration.
+**Verify:** Unit test: sim with known base_load + PV, grid meter shows extra 500W → SITE_RESIDUAL reads 500W. Planner baseline includes it.
 
 ---
 
-## RF-B10: Extract background loops from `main.rs`
+### BL-09: Phase 6 — Penalty threshold check
+**Req:** UC-10, VEN_ARCHITECTURE §2.3
+**Problem:** Planner Phase 6 is marked "deferred to Stage 4" (`planner.rs:76`). No penalty avoidance logic exists. Peak demand penalties are not evaluated.
+**Fix:** After Phase 5, evaluate each FIRM slot against configurable penalty thresholds (e.g., MeasurementWindow peak kW). If projected peak exceeds threshold, compute penalty cost vs. avoidance cost (rescheduling allocations to stay below). Reschedule if avoidance is cheaper.
+**Complexity:** Large (5–8 hours). Needs penalty rule configuration, threshold evaluation, cost comparison, and slot reallocation.
+**Verify:** BDD test: configure 10kW penalty threshold, schedule 12kW of load in one slot, assert planner splits across two slots to stay below threshold.
 
-**Status**: DONE
-**Risk**: Medium (structural move, no logic changes)
-**Depends on**: RF-B08, RF-B09 (cleaner after handlers and change-detection are extracted)
-**Files**: `VEN/src/main.rs` -> new `VEN/src/loops.rs`
+---
 
-After RF-B09, `main.rs` still has ~600 lines of background loop setup. Each loop (program poll, event poll, report poll, sim tick, obligation check, planning, persistence) can be a function that takes its dependencies and returns a `JoinHandle`.
+### BL-10: FlexibilityEnvelope → VTN report
+**Req:** UC-05, UC-07
+**Problem:** Planner builds `FlexibilityEnvelope` (Phase 7) and exposes via `GET /flexibility`, but never submits them to the VTN as `IMPORT_CAPACITY_RESERVATION` / `EXPORT_CAPACITY_RESERVATION` reports. Aggregators cannot see available DR capacity.
+**Fix:** In the report submission loop, when a new plan is produced with non-empty envelopes, build report payloads of type `IMPORT_CAPACITY_RESERVATION` / `EXPORT_CAPACITY_RESERVATION` from the envelope data and submit to VTN.
+**Complexity:** Medium (3–5 hours). Report payload construction from envelope fields + submission wiring.
+**Verify:** BDD test: planner produces envelopes for FLEXIBLE packets, assert VTN receives capacity reservation report with matching power/energy values.
 
-**Work**:
-- Create `VEN/src/loops.rs` with functions like `spawn_program_poll(state, vtn, interval_secs) -> JoinHandle<()>`.
-- `main()` becomes: config + state init + spawn calls + router + serve. Target: ~100 lines.
+---
 
-**Test**:
-- `cargo build --workspace` compiles.
-- `cargo test --workspace` passes.
-- Full BDD suite passes unchanged.
-- `wc -l VEN/src/main.rs` is under 150 lines.
+### BL-11: Time-weighted tariff averaging for planner slot costing
+**Req:** VEN_ARCHITECTURE §5.3
+**Problem:** Planner evaluates tariff at `slot.start` only. A 5-min slot straddling a tariff boundary (e.g., €0.20 → €0.15 at 10:57) uses only the first tariff, ignoring the 3 min at the cheaper rate.
+**Fix:** Replace `tariff_at(slot.start)` with `Σ(tariff_i × overlap(slot, interval_i)) / slot.duration` using the existing `TimeSeries` abstraction. For capacity: `min(capacity_i for all overlapping intervals)`.
+**Complexity:** Small–Medium (2–3 hours). Use existing TimeSeries infrastructure.
+**Verify:** Unit test: 10-min slot spanning tariff boundary at minute 7 → weighted average matches `(7*0.20 + 3*0.15)/10 = 0.185`.
 
+---
+
+### BL-12: EV minimum charge rate + response delay model
+**Req:** FR-SIM-05
+**Problem:** EV asset has no 1.5kW minimum active charge rate floor. Setpoints between 0 and 1.5kW are accepted (should snap to 0 or 1.5kW). 10s response delay not modeled — setpoints apply instantly.
+**Fix:** In `assets/ev.rs` update logic: if `0 < setpoint < min_charge_kw`, snap to 0. Add single-step lag buffer: store commanded setpoint, apply previous tick's command (simulating 10s delay at 10s tick or interpolated at 1s tick).
+**Complexity:** Small (1–2 hours).
+**Verify:** Unit test: setpoint 0.5kW → actual power 0. Setpoint 7kW at t=0 → actual power still 0 at t=0, becomes 7kW at t=10s.
+
+---
+
+### BL-13: Early firm-up heuristic
+**Req:** VEN_ARCHITECTURE §2.3
+**Problem:** Spec says if rate variance across FLEXIBLE window is < 10% (flat rate), FLEXIBLE slots may firm up early. Code comment at `planner.rs:271` acknowledges this but it's not implemented.
+**Fix:** After Phase 7, compute variance of tariff across all FLEXIBLE slots. If coefficient of variation < 0.10, reclassify FLEXIBLE → FIRM and re-run allocation (Phases 2–5) for those slots.
+**Complexity:** Small (1–2 hours). Statistical check + slot reclassification.
+**Verify:** Unit test: flat-rate tariff (all €0.15) → all slots classified FIRM. Variable tariff (€0.10–€0.30) → FLEXIBLE slots remain FLEXIBLE.
+
+---
 
 
 
