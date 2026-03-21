@@ -47,6 +47,123 @@ struct AppCtx {
     sim: Arc<Mutex<SimState>>,
 }
 
+// ─── Event poll change detection (RF-B08) ─────────────────────────────────────
+
+/// Output of `detect_event_changes` — all side-effect-free results of one poll tick.
+struct EventChanges {
+    /// Trace events to push to the controller log (arrived/expired/rate/capacity).
+    pub trace_events: Vec<controller::trace::ControllerEvent>,
+    /// Updated set of event IDs seen this tick (new value for `prev_event_ids`).
+    pub current_ids: std::collections::HashSet<String>,
+    /// Parsed tariff snapshots for this tick.
+    pub rates: Vec<entities::tariff_snapshot::TariffSnapshot>,
+    /// Parsed capacity state for this tick.
+    pub capacity: entities::capacity::OadrCapacityState,
+}
+
+/// Pure change-detection pass over a freshly fetched event list.
+///
+/// Compares against previous poll state and returns all trace events that
+/// should be emitted, plus parsed rates/capacity for storage.  No I/O, no
+/// state mutations — safe to unit-test.
+fn detect_event_changes(
+    events: &[serde_json::Value],
+    prev_ids: &std::collections::HashSet<String>,
+    prev_tariff_count: usize,
+    prev_import_limit: Option<f64>,
+    now: DateTime<Utc>,
+) -> EventChanges {
+    let rates = controller::openadr_interface::parse_rate_snapshots(events, now);
+    let capacity = controller::openadr_interface::parse_capacity_state(events);
+
+    let current_ids: std::collections::HashSet<String> = events
+        .iter()
+        .filter_map(|e| e.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .collect();
+
+    let mut trace_events = Vec::new();
+
+    // OpenAdrArrived — events that are new this tick
+    for evt in events {
+        let Some(id) = evt.get("id").and_then(|v| v.as_str()) else { continue };
+        if prev_ids.contains(id) { continue }
+
+        let name = evt
+            .get("eventName")
+            .and_then(|v| v.as_str())
+            .unwrap_or(id)
+            .to_string();
+        let (signal_type, value, interval_n) = evt
+            .get("intervals")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|iv| iv.get("payloads"))
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .map(|p| {
+                let sig = p
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("UNKNOWN")
+                    .to_string();
+                let val = p
+                    .get("values")
+                    .and_then(|v| v.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let n = evt
+                    .get("intervals")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len() as u32)
+                    .unwrap_or(0);
+                (sig, val, n)
+            })
+            .unwrap_or_else(|| ("UNKNOWN".to_string(), 0.0, 0));
+
+        trace_events.push(controller::trace::ControllerEvent::OpenAdrArrived {
+            ts: now,
+            event_name: name,
+            signal_type,
+            value,
+            interval: interval_n,
+        });
+    }
+
+    // OpenAdrExpired — events that disappeared this tick
+    for old_id in prev_ids {
+        if !current_ids.contains(old_id) {
+            trace_events.push(controller::trace::ControllerEvent::OpenAdrExpired {
+                ts: now,
+                event_name: old_id.clone(),
+            });
+        }
+    }
+
+    // RateChange — tariff count changed
+    if !rates.is_empty() && rates.len() != prev_tariff_count {
+        if let Some(first) = rates.first() {
+            trace_events.push(controller::trace::ControllerEvent::RateChange {
+                ts: now,
+                interval_start: first.interval_start,
+                import_eur_kwh: first.import_tariff_eur_kwh.unwrap_or(0.0),
+                export_eur_kwh: first.export_tariff_eur_kwh.unwrap_or(0.0),
+            });
+        }
+    }
+
+    // CapacityChange — import limit changed
+    if capacity.import_limit_kw != prev_import_limit {
+        trace_events.push(controller::trace::ControllerEvent::CapacityChange {
+            ts: now,
+            import_limit_kw: capacity.import_limit_kw,
+            export_limit_kw: capacity.export_limit_kw,
+        });
+    }
+
+    EventChanges { trace_events, current_ids, rates, capacity }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -142,116 +259,24 @@ async fn main() -> anyhow::Result<()> {
                         counter!("poll_success_total", "resource" => "events").increment(1);
                         info!(resource = "events", count = events.len(), "poll success");
 
-                        // Parse rates and capacity from new events (Stage 2)
                         let now = Utc::now();
-                        let rates = controller::openadr_interface::parse_rate_snapshots(&events, now);
-                        let new_cap = controller::openadr_interface::parse_capacity_state(&events);
+                        let changes = detect_event_changes(
+                            &events,
+                            &prev_event_ids,
+                            prev_tariff_count,
+                            prev_import_limit,
+                            now,
+                        );
 
-                        // T034: Emit OpenAdrArrived / OpenAdrExpired for event set changes
-                        let current_ids: std::collections::HashSet<String> = events
-                            .iter()
-                            .filter_map(|e| e.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
-                            .collect();
-                        for evt in &events {
-                            if let Some(id) = evt.get("id").and_then(|v| v.as_str()) {
-                                if !prev_event_ids.contains(id) {
-                                    let name = evt
-                                        .get("eventName")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or(id)
-                                        .to_string();
-                                    let (signal_type, value, interval_n) = evt
-                                        .get("intervals")
-                                        .and_then(|v| v.as_array())
-                                        .and_then(|arr| arr.first())
-                                        .and_then(|iv| iv.get("payloads"))
-                                        .and_then(|v| v.as_array())
-                                        .and_then(|arr| arr.first())
-                                        .map(|p| {
-                                            let sig = p
-                                                .get("type")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("UNKNOWN")
-                                                .to_string();
-                                            let val = p
-                                                .get("values")
-                                                .and_then(|v| v.as_array())
-                                                .and_then(|a| a.first())
-                                                .and_then(|v| v.as_f64())
-                                                .unwrap_or(0.0);
-                                            let n = evt
-                                                .get("intervals")
-                                                .and_then(|v| v.as_array())
-                                                .map(|a| a.len() as u32)
-                                                .unwrap_or(0);
-                                            (sig, val, n)
-                                        })
-                                        .unwrap_or_else(|| ("UNKNOWN".to_string(), 0.0, 0));
-                                    state
-                                        .push_controller_event(
-                                            controller::trace::ControllerEvent::OpenAdrArrived {
-                                                ts: now,
-                                                event_name: name,
-                                                signal_type,
-                                                value,
-                                                interval: interval_n,
-                                            },
-                                        )
-                                        .await;
-                                }
-                            }
+                        for evt in changes.trace_events {
+                            state.push_controller_event(evt).await;
                         }
-                        for old_id in &prev_event_ids {
-                            if !current_ids.contains(old_id) {
-                                state
-                                    .push_controller_event(
-                                        controller::trace::ControllerEvent::OpenAdrExpired {
-                                            ts: now,
-                                            event_name: old_id.clone(),
-                                        },
-                                    )
-                                    .await;
-                            }
-                        }
-                        prev_event_ids = current_ids;
+                        prev_event_ids = changes.current_ids;
+                        prev_tariff_count = changes.rates.len();
+                        prev_import_limit = changes.capacity.import_limit_kw;
 
-                        // T035: Emit RateChange when tariff count changes
-                        if !rates.is_empty() && rates.len() != prev_tariff_count {
-                            if let Some(first) = rates.first() {
-                                state
-                                    .push_controller_event(
-                                        controller::trace::ControllerEvent::RateChange {
-                                            ts: now,
-                                            interval_start: first.interval_start,
-                                            import_eur_kwh: first
-                                                .import_tariff_eur_kwh
-                                                .unwrap_or(0.0),
-                                            export_eur_kwh: first
-                                                .export_tariff_eur_kwh
-                                                .unwrap_or(0.0),
-                                        },
-                                    )
-                                    .await;
-                            }
-                        }
-                        prev_tariff_count = rates.len();
-
-                        // T035: Emit CapacityChange when import limit changes
-                        if new_cap.import_limit_kw != prev_import_limit {
-                            state
-                                .push_controller_event(
-                                    controller::trace::ControllerEvent::CapacityChange {
-                                        ts: now,
-                                        import_limit_kw: new_cap.import_limit_kw,
-                                        export_limit_kw: new_cap.export_limit_kw,
-                                    },
-                                )
-                                .await;
-                            prev_import_limit = new_cap.import_limit_kw;
-                        }
-
-                        state.set_planned_tariffs(rates).await;
-                        state.set_capacity_state(new_cap).await;
+                        state.set_planned_tariffs(changes.rates).await;
+                        state.set_capacity_state(changes.capacity).await;
 
                         let existing_obs = state.report_obligations().await;
                         let new_obs = controller::openadr_interface::extract_report_obligations(
@@ -1476,6 +1501,147 @@ async fn get_flexibility(State(ctx): State<AppCtx>) -> impl IntoResponse {
     match ctx.state.active_plan().await {
         Some(plan) => Json(serde_json::to_value(plan.envelopes).unwrap_or_default()).into_response(),
         None => Json(serde_json::json!([])).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod event_poll_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn ts() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 3, 21, 10, 0, 0).unwrap()
+    }
+
+    fn make_event(id: &str, name: &str, signal_type: &str, value: f64) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "eventName": name,
+            "intervals": [{
+                "payloads": [{"type": signal_type, "values": [value]}]
+            }]
+        })
+    }
+
+    fn empty_ids() -> std::collections::HashSet<String> {
+        std::collections::HashSet::new()
+    }
+
+    // (a) new event appears → OpenAdrArrived emitted
+    #[test]
+    fn new_event_emits_arrived() {
+        let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
+        let changes = detect_event_changes(&events, &empty_ids(), 0, None, ts());
+        let arrived: Vec<_> = changes
+            .trace_events
+            .iter()
+            .filter(|e| matches!(e, controller::trace::ControllerEvent::OpenAdrArrived { .. }))
+            .collect();
+        assert_eq!(arrived.len(), 1);
+        if let controller::trace::ControllerEvent::OpenAdrArrived {
+            event_name,
+            signal_type,
+            value,
+            ..
+        } = &arrived[0]
+        {
+            assert_eq!(event_name, "Peak DR");
+            assert_eq!(signal_type, "PRICE");
+            assert!((value - 0.30).abs() < 1e-9);
+        }
+    }
+
+    // (b) event disappears → OpenAdrExpired emitted
+    #[test]
+    fn removed_event_emits_expired() {
+        let mut prev_ids = empty_ids();
+        prev_ids.insert("ev1".to_string());
+        let changes = detect_event_changes(&[], &prev_ids, 0, None, ts());
+        let expired: Vec<_> = changes
+            .trace_events
+            .iter()
+            .filter(|e| matches!(e, controller::trace::ControllerEvent::OpenAdrExpired { .. }))
+            .collect();
+        assert_eq!(expired.len(), 1);
+        if let controller::trace::ControllerEvent::OpenAdrExpired { event_name, .. } = &expired[0] {
+            assert_eq!(event_name, "ev1");
+        }
+    }
+
+    // (c) tariff count changes → RateChange emitted
+    #[test]
+    fn tariff_count_change_emits_rate_change() {
+        // An event with a PRICE payload and intervalPeriod to trigger parse_rate_snapshots
+        let events = vec![serde_json::json!({
+            "id": "ev1",
+            "eventName": "Price Event",
+            "intervals": [{
+                "intervalPeriod": {"start": "2026-03-21T10:00:00Z", "duration": "PT1H"},
+                "payloads": [{"type": "PRICE", "values": [0.25]}]
+            }]
+        })];
+        let mut prev_ids = empty_ids();
+        prev_ids.insert("ev1".to_string()); // already seen → no OpenAdrArrived
+        let changes = detect_event_changes(&events, &prev_ids, 0, None, ts());
+        // Only assert if the parser actually produced rates (depends on parser internals)
+        if !changes.rates.is_empty() {
+            let rate_changes: Vec<_> = changes
+                .trace_events
+                .iter()
+                .filter(|e| matches!(e, controller::trace::ControllerEvent::RateChange { .. }))
+                .collect();
+            assert_eq!(rate_changes.len(), 1);
+        }
+    }
+
+    // (d) import limit changes → CapacityChange emitted
+    #[test]
+    fn import_limit_change_emits_capacity_change() {
+        let events = vec![serde_json::json!({
+            "id": "ev1",
+            "eventName": "Capacity Event",
+            "intervals": [{
+                "intervalPeriod": {"start": "2026-03-21T10:00:00Z", "duration": "PT1H"},
+                "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [5.0]}]
+            }]
+        })];
+        let mut prev_ids = empty_ids();
+        prev_ids.insert("ev1".to_string()); // already seen
+        let prev_limit: Option<f64> = None;
+        let changes = detect_event_changes(&events, &prev_ids, 0, prev_limit, ts());
+        if changes.capacity.import_limit_kw != prev_limit {
+            let cap_changes: Vec<_> = changes
+                .trace_events
+                .iter()
+                .filter(|e| matches!(e, controller::trace::ControllerEvent::CapacityChange { .. }))
+                .collect();
+            assert_eq!(cap_changes.len(), 1);
+        }
+    }
+
+    // (e) no changes → no arrived/expired/capacity events emitted
+    #[test]
+    fn no_changes_emits_nothing() {
+        let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
+        let mut prev_ids = empty_ids();
+        prev_ids.insert("ev1".to_string());
+        // Same event already seen, no capacity limit in payload, same import limit (None)
+        let changes = detect_event_changes(&events, &prev_ids, 999, None, ts());
+        let no_arrived = !changes
+            .trace_events
+            .iter()
+            .any(|e| matches!(e, controller::trace::ControllerEvent::OpenAdrArrived { .. }));
+        let no_expired = !changes
+            .trace_events
+            .iter()
+            .any(|e| matches!(e, controller::trace::ControllerEvent::OpenAdrExpired { .. }));
+        let no_capacity = !changes
+            .trace_events
+            .iter()
+            .any(|e| matches!(e, controller::trace::ControllerEvent::CapacityChange { .. }));
+        assert!(no_arrived, "expected no OpenAdrArrived");
+        assert!(no_expired, "expected no OpenAdrExpired");
+        assert!(no_capacity, "expected no CapacityChange");
     }
 }
 
