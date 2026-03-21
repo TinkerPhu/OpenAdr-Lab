@@ -18,9 +18,9 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use entities::asset::{ComfortRate, CompletionPolicy, PlanTrigger, UserRequestMode};
+use entities::asset::{ComfortRate, PlanTrigger};
 use controller::user_request::CreateUserRequestBody;
-use entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
+use entities::energy_packet::{DeadlineTier, EnergyPacket, ValueCurve};
 use config::Config;
 use metrics::counter;
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -1350,46 +1350,27 @@ async fn post_packets(
     let desired_power_kw = body.desired_power_kw.unwrap_or(1.0);
     let target_energy_kwh = body.target_energy_kwh.unwrap_or(desired_power_kw); // default: 1h
 
+    let value_curve = ValueCurve {
+        comfort_rates: vec![
+            ComfortRate { fill: 0.0, max_marginal_price: 0.35, max_marginal_co2: 0.0 },
+            ComfortRate { fill: 1.0, max_marginal_price: 0.05, max_marginal_co2: 0.0 },
+        ],
+        deadline_tiers: body
+            .latest_end
+            .map(|le| {
+                vec![DeadlineTier {
+                    deadline: le,
+                    max_total_cost_eur: None,
+                    max_marginal_rate_eur_kwh: None,
+                    min_completion: 0.8,
+                }]
+            })
+            .unwrap_or_default(),
+        active_tier_index: 0,
+    };
     let packet = EnergyPacket {
-        id: Uuid::new_v4(),
-        asset_id: body.asset_id,
-        status: PacketStatus::Pending,
-        earliest_start: now,
-        latest_start: None,
-        target_energy_kwh,
         target_soc: body.target_soc,
-        desired_power_kw,
-        value_curve: ValueCurve {
-            comfort_rates: vec![
-                ComfortRate { fill: 0.0, max_marginal_price: 0.35, max_marginal_co2: 0.0 },
-                ComfortRate { fill: 1.0, max_marginal_price: 0.05, max_marginal_co2: 0.0 },
-            ],
-            deadline_tiers: body
-                .latest_end
-                .map(|le| {
-                    vec![DeadlineTier {
-                        deadline: le,
-                        max_total_cost_eur: None,
-                        max_marginal_rate_eur_kwh: None,
-                        min_completion: 0.8,
-                    }]
-                })
-                .unwrap_or_default(),
-            active_tier_index: 0,
-        },
-        request_mode: UserRequestMode::ByDeadline,
-        completion_policy: CompletionPolicy::Stop,
-        post_deadline_comfort_bid: None,
-        planned_power_profile: vec![],
-        past_power_profile: vec![],
-        accumulated_cost_eur: 0.0,
-        accumulated_co2_g: 0.0,
-        estimated_cost_eur: 0.0,
-        estimated_co2_g: 0.0,
-        estimated_completion: 0.0,
-        last_estimate_at: None,
-        created_at: now,
-        updated_at: now,
+        ..EnergyPacket::new(body.asset_id, target_energy_kwh, desired_power_kw, value_curve, now)
     };
 
     let mut packets = ctx.state.active_packets().await;
