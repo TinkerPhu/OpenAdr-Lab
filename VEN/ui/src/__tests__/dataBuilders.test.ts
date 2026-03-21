@@ -115,4 +115,18 @@ describe("computeForecastEnergy via deriveAssetSummaries", () => {
     ];
     expect(forecastFor(points)).toBeCloseTo(8, 6);
   });
+
+  it("skips points with values: null (empty grid buckets)", () => {
+    // [+1h power=4, +2h null, +3h power=4]
+    // i=0: power=4, duration=1h → 4 kWh
+    // i=1: values null → skipped
+    // i=2 (last): power=4, prevGap=1h → 4 kWh
+    // total = 8 kWh
+    const points: AssetTimelinePoint[] = [
+      makePoint(NOW + 1 * H, 4),
+      { ts: NOW + 2 * H, values: null },
+      makePoint(NOW + 3 * H, 4),
+    ];
+    expect(forecastFor(points)).toBeCloseTo(8, 6);
+  });
 });
