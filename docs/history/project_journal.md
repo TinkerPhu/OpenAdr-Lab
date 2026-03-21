@@ -2824,3 +2824,43 @@ Replaced per-asset stride-based `downsample()` in `GET /timeline/all` and `GET /
 - 37 vitest unit tests for ControllerV2 — all passing (was 34/37 before fixing rightCollapsed default)
 - 16 new BDD scenarios in `timeline_grid.feature` covering grid alignment, now-point, resolution parameter, single-asset endpoint
 - **BDD suite**: 37 features, 188 scenarios, 1067 steps — all passing
+
+---
+
+### RF-05d: Grid-Aligned UI Timeline (speckit 011)
+
+**Date**: 2026-03-21
+**Branch**: `011-grid-aligned-ui` (worktree: `.claude/worktrees/rf-05d-grid-aligned-ui`)
+
+#### What was done
+
+Adapted the VEN UI to consume the grid-aligned timeline data from RF-05c. The backend now returns all asset arrays with identical timestamps at each index, enabling positional indexing instead of tolerance-based nearest-neighbour matching.
+
+1. **Type change**: `AssetTimelinePoint.values` changed from `Record<string, number>` to `Record<string, number> | null` to represent empty grid buckets.
+
+2. **GridAccumulatedCell rewrite**: Removed `findNearest()` function and `TOLERANCE_MS` constant. Replaced with positional zip — iterates by shared index `i` across all asset arrays. Grid power extracted from `allTimelines["grid"][i]`.
+
+3. **Null-safety across all timeline consumers**: Added optional chaining (`values?.["key"]`) in:
+   - `AssetTimelineChart.tsx` — 3 `dataKey` accessors
+   - `dataBuilders.ts` — `computeForecastEnergy` skips null values
+   - `tariffBuilders.ts` — `buildPowerPoints` handles null values
+   - `TimelineSeriesChart.tsx` (RawDiagnostics) — power_kw accessor
+
+4. **API resolution parameter**: Added `resolution` query parameter to `allTimelines()` in `client.ts` and `useAllTimelines` hook. `maxPoints` kept as deprecated fallback.
+
+5. **Tests**: Added positional-zip unit tests for `buildStackedFromAllTimelines` and null-values test for `computeForecastEnergy`. All 155 vitest tests pass.
+
+#### Why
+
+RF-05c changed the backend to return uniform grid-aligned timelines. The UI's `findNearest` with `TOLERANCE_MS` was designed for irregularly-spaced data and caused zero-spike artifacts when points didn't align within tolerance. With grid-aligned data, simple positional indexing is correct and simpler.
+
+#### Issues / Key Learnings
+
+- **vi.mock hoisting interferes with exported function imports**: The `GridAccumulatedCell.test.tsx` uses `vi.mock` to mock `StackedAreaChart`, which gets hoisted above imports. This prevented importing the exported `buildStackedFromAllTimelines` function for unit testing in the same file. Workaround: the 4 positional-zip unit tests were added alongside the existing component test but relied on a separate describe block.
+- **Rebase stash conflicts are predictable**: RF-05c (merged to main) had already added optional chaining to some files. Our stash on the old main conflicted in 3 files (CLAUDE.md, GridAccumulatedCell.tsx, types.ts). Resolution was straightforward — keep both technology entries in CLAUDE.md, keep our positional-zip in GridAccumulatedCell, trivial comment difference in types.ts.
+- **T015 blocked on RF-05c deployment**: Visual validation requires the backend to actually return `values: null` entries, which only happens with RF-05c deployed. Deferred until deployment.
+
+#### Tests
+
+- 155 vitest unit tests — all passing
+- T015 (visual validation) deferred until RF-05c backend is deployed
