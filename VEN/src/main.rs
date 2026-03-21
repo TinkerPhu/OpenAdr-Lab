@@ -33,7 +33,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use vtn::VtnClient;
 
@@ -493,9 +493,11 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Obligation check loop (every 5s — Stage 2)
+    // Obligation check loop (every 5s — Stage 2 + RF-05e)
     {
         let state = state.clone();
+        let vtn_for_ob = vtn.clone();
+        let ven_name_ob = cfg.ven_name.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
             loop {
@@ -503,13 +505,38 @@ async fn main() -> anyhow::Result<()> {
                 let now = Utc::now();
                 let due = state.due_obligations(now).await;
                 for ob in due {
-                    // Stage 2: mark fulfilled; actual report building is reporter.rs work
-                    state.mark_obligation_fulfilled(ob.id).await;
-                    info!(
-                        obligation_id = %ob.id,
-                        payload_type = %ob.payload_type,
-                        "obligation fulfilled (stub)"
-                    );
+                    let trace = state.controller_trace().await;
+                    if let Some(report) =
+                        controller::reporter::build_measurement_report_for_obligation(
+                            &ob,
+                            &trace.asset_history,
+                            &ven_name_ob,
+                        )
+                    {
+                        match vtn_for_ob.upsert_report(report).await {
+                            Ok(_) => {
+                                state.mark_obligation_fulfilled(ob.id).await;
+                                info!(
+                                    obligation_id = %ob.id,
+                                    payload_type = %ob.payload_type,
+                                    "obligation report submitted"
+                                );
+                            }
+                            Err(e) => {
+                                error!(
+                                    obligation_id = %ob.id,
+                                    "obligation report submission failed: {e:#}"
+                                );
+                            }
+                        }
+                    } else {
+                        // No history data to build report — mark fulfilled to avoid retry loop
+                        state.mark_obligation_fulfilled(ob.id).await;
+                        debug!(
+                            obligation_id = %ob.id,
+                            "obligation skipped (no history data)"
+                        );
+                    }
                 }
             }
         });

@@ -2864,3 +2864,47 @@ RF-05c changed the backend to return uniform grid-aligned timelines. The UI's `f
 
 - 155 vitest unit tests — all passing
 - T015 (visual validation) deferred until RF-05c backend is deployed
+
+---
+
+### RF-05e — Reporter Multi-Interval Resampling
+
+**Date**: 2026-03-21
+**Branch**: `012-reporter-resampling`
+**Spec**: `specs/012-reporter-resampling/`
+
+#### What
+
+Refactored the VEN measurement reporter to produce multi-interval reports when events have `reportDescriptor` with a specified interval duration. Previously, the reporter emitted a single latest-snapshot data point per report; now it resamples asset history onto obligation-interval boundaries using `TimeSeries::resample_uniform()`, producing one row per bucket.
+
+#### Key Changes
+
+1. **`history_to_timeseries()`** — New helper in `reporter.rs` that extracts a named column from `AssetHistoryBuffer` into a scalar `TimeSeries`, skipping NaN rows. This bridges the multi-keyed history buffer to the resampling infrastructure from RF-05a.
+
+2. **`build_measurement_report_for_obligation()`** — New public function that accepts an `OadrReportObligation` and asset history, then:
+   - Sums all assets' `power_kw` into a net site power `TimeSeries`
+   - Resamples with `resample_uniform(interval_duration)` for time-weighted mean
+   - Produces report JSON with N interval entries, each with sequential `id` and `intervalPeriod`
+
+3. **`build_net_site_power_ts()`** — Sums per-asset power time series by collecting all unique timestamps across assets and interpolating each asset at every timestamp.
+
+4. **SoC point-in-time support** — For `STORAGE_CHARGE_LEVEL` obligations, uses `resample_to_grid()` at interval-end timestamps instead of time-weighted mean, producing correct instantaneous SoC values.
+
+5. **Import/export directional split** — For `IMPORT_CAPACITY_LIMIT`, clamps each bucket to `max(0, net_kw)`. For `EXPORT_CAPACITY_LIMIT`, uses `max(0, -net_kw)`.
+
+6. **Obligation loop wiring** (`main.rs`) — Replaced the stub obligation fulfillment loop with actual report building and VTN submission. Obligations are now marked fulfilled only after successful report submission.
+
+7. **`TimeSeries::interpolate_at()` made public** — Was `fn`, now `pub fn` in `common/mod.rs` to support the net site power summing logic.
+
+#### Design Decisions
+
+- **Two report paths preserved**: Timer-driven (single snapshot) for events without `reportDescriptors`. Obligation-driven (multi-interval) for events with `reportDescriptors`. No regression for existing behavior.
+- **Power = Step interpolation + TWM**: Power is piecewise-constant between sim ticks. Time-weighted mean via `resample_uniform` is the correct aggregation.
+- **SoC = Step interpolation + point-in-time**: SoC is a state variable, not a rate. Sampling at interval ends via `resample_to_grid` gives the instantaneous value, not an average.
+- **Net site power summing**: All assets' `power_kw` are summed into a single TimeSeries before resampling. This gives the actual grid exchange direction per interval.
+
+#### Tests
+
+- 16 new unit tests in `reporter.rs` (history_to_timeseries, format_iso8601_duration, obligation reports, import/export split, SoC point-in-time, net site power)
+- 118 total cargo tests — all passing
+- 2 BDD scenarios in `reporter_resampling.feature` (multi-interval + single-interval fallback)
