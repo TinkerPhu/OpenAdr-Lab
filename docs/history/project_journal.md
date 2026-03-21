@@ -2710,3 +2710,56 @@ Add resampling operations to the existing `TimeSeries` struct (formerly `Quantit
 - 36 unit tests, all passing (`cargo test common::tests`).
 - Tests cover: interpolation (9 tests), time-weighted mean (6 tests), resample_to_grid (5 tests), resample_uniform (8 tests), grid alignment helpers (4 tests), plus 4 pre-existing ascending/empty tests.
 - No integration changes — pure library addition.
+
+---
+
+## Phase 27: RF-05b — Backend Adoption of TimeSeries Resampling
+
+**Date**: 2026-03-21
+**Branch**: `009-backend-timeseries-adoption` (git worktree at `docs/worktrees/009`)
+**Scope**: Planner tariff + forecast lookup refactor — replace ad-hoc per-slot scans with pre-resampled HashMap lookups
+
+### What changed
+
+Replaced all ad-hoc per-slot tariff and forecast lookup functions in the VEN planner with pre-resampled `TimeSeries` arrays from RF-05a.
+
+**New type — `TariffTimeSeries`** (`VEN/src/entities/tariff_snapshot.rs`):
+- Three independent `TimeSeries` fields: `import_eur_kwh`, `export_eur_kwh`, `co2_g_kwh` — all Step-interpolated
+- `from_snapshots(&[TariffSnapshot])` constructor: sorts by `interval_start`, emits `(ts, value)` only for `Some` fields, last-write-wins for duplicate timestamps
+- `is_empty()` helper for the `rate_estimated` flag
+
+**Planner signature change** (`VEN/src/controller/planner.rs`):
+- `run_planner()` and `build_grid()`: `rates: &[TariffSnapshot]` → `tariffs: &TariffTimeSeries`
+- Before the slot loop: `resample_uniform(slot_duration)` on all three tariff series + all asset forecasts, then collect into `HashMap<i64, f64>` keyed by epoch seconds
+- Slot loop: `import_map.get(&epoch).copied().unwrap_or(DEFAULT_*)` instead of `tariff_import_at(rates, start)`
+- Same pattern for asset forecasts: `HashMap<&str, HashMap<i64, f64>>` keyed by asset ID then epoch
+
+**Removed functions** (4 total):
+- `tariff_import_at()`, `tariff_export_at()`, `tariff_co2_at()` — O(n) per-slot scans
+- `nearest_value()` — ad-hoc forecast lookup
+
+**Caller update** (`VEN/src/main.rs`):
+- Planning loop converts `Vec<TariffSnapshot>` → `TariffTimeSeries` via `from_snapshots()` before calling `run_planner()`
+
+### Why
+
+1. **Correctness**: Mid-slot tariff changes are now correctly time-weighted (e.g., a 5-min slot spanning a tariff boundary gets the weighted average, not whichever tariff happens to cover the slot start)
+2. **Performance**: O(1) HashMap lookup per slot instead of O(n) linear scan through all tariff snapshots
+3. **Consistency**: All time-series access unified behind the `TimeSeries` abstraction from RF-05a
+
+### Key learnings
+
+- **Single-sample Step series only covers one resampled bucket.** A single Step sample at 10:00 only produces one bucket at 10:00 from `resample_uniform` — it does NOT propagate LOCF to all future slots. This is correct: `resample_uniform` generates buckets within `[ceil(first), floor(last)]`, and with one sample first==last. Slots beyond that correctly fall back to `DEFAULT_IMPORT_PRICE`. Initial test expectation was wrong — renamed test to `single_sample_tariff_covers_first_slot_only`.
+
+- **HashMap<i64, f64> keyed by epoch seconds is the right lookup structure.** Positional indexing (slot index → array index) would be fragile if grids are offset. Epoch-keyed maps are robust regardless of grid alignment.
+
+- **Reporter resampling (Phase 5) is significantly more complex than planner resampling.** Deferred to RF-05e in BACKLOG. Five complications: obligation interval not plumbed to reporter, AssetHistoryBuffer returns multi-keyed snapshots not scalar TimeSeries, report JSON hardcoded to single interval, EV SoC needs point-in-time sampling not time-weighted mean, import/export split needs sign-based partitioning.
+
+- **Speckit worktree workflow works well for isolated feature development.** Working in `docs/worktrees/009` kept the feature branch isolated from main while allowing easy merge back.
+
+### Tests
+
+- 5 unit tests for `TariffTimeSeries::from_snapshots()`: normal, None gaps, empty, unsorted, duplicate timestamps
+- 7 unit tests for planner resampling: boundary-aligned tariffs, mid-slot tariff change (time-weighted), empty tariff series, single-sample tariff, PV linear forecast, empty forecast, missing asset key
+- 92 cargo tests total — all passing
+- **BDD suite**: 36 features, 173 scenarios, 1010 steps — all passing (up from 143 scenarios / 895 steps in the task spec, reflecting other features added since)
