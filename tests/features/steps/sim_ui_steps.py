@@ -193,5 +193,4 @@ def step_click_ev_override_toggle(context):
         '[data-testid="ev-charge-override-toggle"]', timeout=5000
     )
     toggle.click()
-    # Give React time to update state
-    time.sleep(0.5)
+    # Next step uses _wait_slider_disabled() which polls for DOM state

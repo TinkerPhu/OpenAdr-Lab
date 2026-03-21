@@ -26,7 +26,6 @@ def step_wait_for_plan(context):
         fetch,
         lambda plan: plan is not None and "id" in plan,
         timeout=60,
-        interval=3,
         description="VEN /plan returns a non-null plan",
     )
 

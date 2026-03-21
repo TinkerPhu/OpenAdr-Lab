@@ -21,7 +21,7 @@ def wait_for_url(url, timeout=60, interval=2):
     )
 
 
-def poll_until(fn, predicate, timeout=30, interval=2, description="condition"):
+def poll_until(fn, predicate, timeout=30, interval=1, description="condition"):
     """Call *fn()* repeatedly until *predicate(result)* is truthy.
 
     Returns the first result that satisfies the predicate.

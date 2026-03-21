@@ -18,16 +18,13 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
 
   Scenario: UC-11b — Plan runs without crashing when no packets match any firm slot
     When I POST a sim override with no EV charging demand
-    And I wait 5 seconds
     And I wait for the VEN /plan endpoint to return a plan
     Then the plan has field "id"
     And the plan has field "firm_slots"
 
   Scenario: UC-11c — Asset ledger tracks energy in active assets
-    When I wait 5 seconds
-    And I GET /ledger from the VEN
-    Then the response status is 200
-    And the response JSON has field "ev"
+    When I poll VEN /ledger until field "ev" is present
+    Then the response JSON has field "ev"
 
   # --- UC-12: Multi-Asset Coordination Under Import Cap ---
   # With EV + heater + battery all active under an import cap,
@@ -54,8 +51,6 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
   Scenario: UC-12c — Ledger accumulates energy for all active assets concurrently
     When I POST a sim override with full PV irradiance
     And I wait for the VEN /plan to have an EV allocation in firm_slots
-    And I wait 5 seconds
-    And I GET /ledger from the VEN
-    Then the response status is 200
-    And the response JSON has field "ev"
+    And I poll VEN /ledger until field "pv" is present
+    Then the response JSON has field "ev"
     And the response JSON has field "pv"

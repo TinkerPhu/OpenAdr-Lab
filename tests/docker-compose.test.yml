@@ -57,7 +57,7 @@ services:
       - test-net
 
   # ---------------------------------------------------------------------------
-  # VEN — single instance with fast polling (5s) for test speed
+  # VEN — single instance with fast polling (2s) for test speed
   # Starts before fixtures; poll retry handles initial auth failures.
   # ---------------------------------------------------------------------------
   test-ven-1:
@@ -70,9 +70,9 @@ services:
       CLIENT_ID: "ven-1"
       CLIENT_SECRET: "ven-1"
       VEN_NAME: "ven-1"
-      POLL_EVENTS_SECS: "5"
-      POLL_PROGRAMS_SECS: "5"
-      POLL_REPORTS_SECS: "5"
+      POLL_EVENTS_SECS: "2"
+      POLL_PROGRAMS_SECS: "2"
+      POLL_REPORTS_SECS: "2"
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
     volumes:
@@ -102,9 +102,9 @@ services:
       CLIENT_ID: "ven-2"
       CLIENT_SECRET: "ven-2"
       VEN_NAME: "ven-2"
-      POLL_EVENTS_SECS: "5"
-      POLL_PROGRAMS_SECS: "5"
-      POLL_REPORTS_SECS: "5"
+      POLL_EVENTS_SECS: "2"
+      POLL_PROGRAMS_SECS: "2"
+      POLL_REPORTS_SECS: "2"
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
     volumes:
