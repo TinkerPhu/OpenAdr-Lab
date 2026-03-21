@@ -33,7 +33,7 @@ Declares the physical or financial meaning of the `f64` values.
 | `Tariff` | Import or export price per energy unit | `EuroPerKilowattHour` | `Step` |
 | `Co2Intensity` | CO₂ emission factor per energy unit | `GramsPerKilowattHour` | `Step` |
 
-"Default interpolation" is a documentation convention — `interpolation` is always set explicitly on each `QuantitySeries` instance.
+"Default interpolation" is a documentation convention — `interpolation` is always set explicitly on each `QuantityTimeline` instance.
 
 ---
 
@@ -53,7 +53,7 @@ Declares the measurement scale of the `f64` values.
 
 ---
 
-### `QuantitySeries` (struct)
+### `QuantityTimeline` (struct)
 
 | Field | Type | Description |
 |---|---|---|
@@ -68,7 +68,7 @@ Declares the measurement scale of the `f64` values.
 - For non-empty series from `history(timespan)`: first sample timestamp == `now − timespan`.
 - Sign convention for power: positive = import from grid, negative = export.
 
-**Upgrade path**: RF-05 introduces `TimeSeries<T>` alongside `QuantitySeries`. A future speckit introduces `MultiQuantitySeries` (multiple quantities per timestamp — e.g., power + SOC + temperature in one series), which builds on `QuantitySeries`. No redesign of `QuantitySeries` itself is required.
+**Upgrade path**: RF-05 introduces `TimeSeries<T>` alongside `QuantityTimeline`. A future speckit introduces `MultiQuantityTimeline` (multiple quantities per timestamp — e.g., power + SOC + temperature in one series), which builds on `QuantityTimeline`. No redesign of `QuantityTimeline` itself is required.
 
 ---
 
@@ -80,8 +80,8 @@ New dispatch methods replacing `predict()`:
 
 | Method | Signature | Replaces |
 |---|---|---|
-| `forecast` | `(&self, timespan: Duration) -> QuantitySeries` | `predict(setpoint, horizon_s, env)` |
-| `history` | `(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries` | *(new)* |
+| `forecast` | `(&self, timespan: Duration) -> QuantityTimeline` | `predict(setpoint, horizon_s, env)` |
+| `history` | `(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantityTimeline` | *(new)* |
 
 `predict()` is removed. `forecast()` does not take a `setpoint` parameter — each asset uses its current internal setpoint.
 
@@ -93,7 +93,7 @@ New parameter:
 
 | Parameter | Type | Description |
 |---|---|---|
-| `asset_forecasts` | `&HashMap<String, QuantitySeries>` | Pre-computed forecasts keyed by asset_id. Planner reads `"pv"` to replace the removed `pv_forecast()`. |
+| `asset_forecasts` | `&HashMap<String, QuantityTimeline>` | Pre-computed forecasts keyed by asset_id. Planner reads `"pv"` to replace the removed `pv_forecast()`. |
 
 ---
 
@@ -117,7 +117,7 @@ New parameter:
 2. Slice buffer to `[start, now]` using `AssetHistoryBuffer::to_timeline(Some((start, now)))`.
 3. Extract `power_kw` column; drop NaN rows.
 4. Prepend boundary point at `start` using the asset's `Interpolation` mode.
-5. Return `QuantitySeries { samples, quantity: Power, unit: Kilowatt, interpolation }`.
+5. Return `QuantityTimeline { samples, quantity: Power, unit: Kilowatt, interpolation }`.
 
 ---
 
@@ -126,15 +126,15 @@ New parameter:
 ```text
 VEN/src/
   common/
-    mod.rs          ← Interpolation, Quantity, Unit, QuantitySeries  (NEW MODULE)
+    mod.rs          ← Interpolation, Quantity, Unit, QuantityTimeline  (NEW MODULE)
   simulator/
     assets/
       mod.rs        ← AssetState: forecast() + history() dispatch; predict() removed
-      pv.rs         ← forecast(timespan) → QuantitySeries
-      battery.rs    ← forecast(timespan) → QuantitySeries
-      ev.rs         ← forecast(timespan) → QuantitySeries
-      heater.rs     ← forecast(timespan) → QuantitySeries
-      base_load.rs  ← forecast(timespan) → QuantitySeries
+      pv.rs         ← forecast(timespan) → QuantityTimeline
+      battery.rs    ← forecast(timespan) → QuantityTimeline
+      ev.rs         ← forecast(timespan) → QuantityTimeline
+      heater.rs     ← forecast(timespan) → QuantityTimeline
+      base_load.rs  ← forecast(timespan) → QuantityTimeline
   controller/
     planner.rs      ← pv_forecast() removed; asset_forecasts param added
   main.rs           ← compute forecast map; wire history() into timeline handler

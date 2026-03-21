@@ -2,7 +2,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::common::{Interpolation, Quantity, QuantitySeries, Unit};
+use crate::common::{Interpolation, Quantity, QuantityTimeline, Unit};
 use crate::controller::trace::AssetHistoryBuffer;
 use crate::profile::HeaterConfig;
 use super::{AssetCapabilities, ControlDescriptor, ControlKind, TickEnvironment};
@@ -56,9 +56,9 @@ impl Heater {
         kw
     }
 
-    pub fn forecast(&self, timespan: Duration) -> QuantitySeries {
+    pub fn forecast(&self, timespan: Duration) -> QuantityTimeline {
         if timespan <= Duration::zero() {
-            return QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
+            return QuantityTimeline::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
         }
         let now = Utc::now();
         let end = now + timespan;
@@ -98,7 +98,7 @@ impl Heater {
         };
         samples.push((end, end_kw));
 
-        QuantitySeries {
+        QuantityTimeline {
             samples,
             quantity: Quantity::Power,
             unit: Unit::Kilowatt,
@@ -106,7 +106,7 @@ impl Heater {
         }
     }
 
-    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantitySeries {
+    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantityTimeline {
         super::history_from_buffer(timespan, history, Quantity::Power, Unit::Kilowatt, Interpolation::Linear)
     }
 

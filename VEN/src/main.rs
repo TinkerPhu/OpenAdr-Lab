@@ -538,7 +538,7 @@ async fn main() -> anyhow::Result<()> {
                 let planning_horizon = chrono::Duration::seconds(
                     (profile.planner.plan_horizon_h * 3600) as i64,
                 );
-                let asset_forecasts: std::collections::HashMap<String, crate::common::QuantitySeries> = {
+                let asset_forecasts: std::collections::HashMap<String, crate::common::QuantityTimeline> = {
                     let sim_guard = sim_for_planner.lock().await;
                     sim_guard
                         .assets
@@ -1129,7 +1129,7 @@ struct ForecastParams {
     timespan_s: Option<f64>,
 }
 
-/// GET /forecast/:asset_id — forward-looking QuantitySeries for one asset (speckit 007).
+/// GET /forecast/:asset_id — forward-looking QuantityTimeline for one asset (speckit 007).
 /// Returns `{"samples": [{"ts": "...", "value": ...}], "quantity": "...", "unit": "...", "interpolation": "..."}`.
 async fn get_asset_forecast(
     State(ctx): State<AppCtx>,
@@ -1174,7 +1174,7 @@ struct HistoryParams {
     timespan_s: Option<f64>,
 }
 
-/// GET /history/:asset_id — historical QuantitySeries for one asset (speckit 007).
+/// GET /history/:asset_id — historical QuantityTimeline for one asset (speckit 007).
 /// Returns `{"samples": [{"ts": "...", "value": ...}], "quantity": "...", "unit": "...", "interpolation": "..."}`.
 async fn get_asset_history(
     State(ctx): State<AppCtx>,

@@ -1,5 +1,5 @@
 Feature: Asset Interface — forecast(timespan)
-  Each asset type returns a self-describing QuantitySeries via GET /forecast/:asset_id.
+  Each asset type returns a self-describing QuantityTimeline via GET /forecast/:asset_id.
   Stubs return empty series; only after per-asset implementation do these scenarios pass.
 
   Background:
