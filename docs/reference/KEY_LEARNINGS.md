@@ -178,3 +178,13 @@
 - **Schema-driven Switch must reflect sim state, not assume false** — when a boolean override is absent from `UserOverrides`, the control should display the sim's current hardware state as its initial value. Defaulting to `Boolean(null) = false` causes a click to toggle in the wrong direction (sends `true` instead of `false`). Add a per-key sim-snapshot fallback in `getValue` for any boolean control whose absent-override semantic is "use hardware default".
 - **Stale test-ven-ui image silently runs old code** — `docker compose run --build test-runner` does NOT rebuild `test-ven-ui`. Must explicitly `docker compose build test-ven-ui` before the run whenever React source changes. The image bakes source at build time via `COPY`.
 - **Uncommitted files cause Pi4 build failure, not local failure** — TypeScript files modified locally but not staged pass local `npm test` because the dev server uses the filesystem directly. The Pi4 Docker build fails because `COPY . .` copies only committed files. Always stage and commit all changed source files before pushing and deploying.
+
+## OpenADR reportDescriptor Fields
+
+- **VTN (openleadr-rs) does not store arbitrary reportDescriptor fields** — only the OpenADR 3.0 schema fields are persisted: `payloadType`, `readingType`, `aggregate`, `startInterval`, `numIntervals`, `historical`, `frequency`, `repeat`. Custom fields like `duration` are silently dropped.
+- **Use `frequency` (integer seconds) for report interval duration** — `frequency` is the correct OpenADR 3.0 field for specifying how often a VEN should report. It's an integer, not an ISO 8601 duration string. Default to 3600 if not specified.
+
+## Docker Test Infrastructure
+
+- **`docker compose run --build` only rebuilds the run target** — dependent services (test-ven-1, test-ven-2, etc.) are NOT rebuilt. After changing VEN Rust source, must explicitly `docker compose -f tests/docker-compose.test.yml build --no-cache test-ven-1` to ensure the new binary is baked into the image. Without `--no-cache`, Docker's layer cache may reuse stale `COPY src ./src` layers if the build context hash hasn't changed (e.g., due to intermediate cached layers).
+- **Timer-driven and obligation-driven reports must use distinct reportNames** — if both paths use the same `reportName`, `upsert_report()` causes one to overwrite the other. Use `ob-{ven}-{event}-{type}` for obligation reports vs `auto-{ven}-{event}` for timer reports. Events with `reportDescriptors` should be skipped by the timer path entirely.
