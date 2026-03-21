@@ -68,7 +68,7 @@ export function AssetTimelineChart({
         <Line
           yAxisId="power"
           type="stepAfter"
-          dataKey={(pt: AssetTimelinePoint) => pt.values["power_kw"] ?? null}
+          dataKey={(pt: AssetTimelinePoint) => pt.values?.["power_kw"] ?? null}
           name="Power [kW]"
           stroke={color}
           strokeWidth={2}
@@ -81,7 +81,7 @@ export function AssetTimelineChart({
         <Line
           yAxisId="rates"
           type="stepAfter"
-          dataKey={(pt: AssetTimelinePoint) => pt.values["cost_rate_eur_h"] ?? null}
+          dataKey={(pt: AssetTimelinePoint) => pt.values?.["cost_rate_eur_h"] ?? null}
           name="Cost rate [€/h]"
           stroke={color}
           strokeWidth={1.5}
@@ -95,7 +95,7 @@ export function AssetTimelineChart({
         <Line
           yAxisId="rates"
           type="stepAfter"
-          dataKey={(pt: AssetTimelinePoint) => pt.values["co2_rate_g_h"] ?? null}
+          dataKey={(pt: AssetTimelinePoint) => pt.values?.["co2_rate_g_h"] ?? null}
           name="CO₂eq rate [g/h]"
           stroke={color}
           strokeWidth={1.5}

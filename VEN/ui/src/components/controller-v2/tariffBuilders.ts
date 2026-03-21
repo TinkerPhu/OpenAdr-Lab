@@ -20,7 +20,7 @@ export function buildPowerPoints(points: AssetTimelinePoint[]): TariffTimePoint[
     importPriceEurKwh: null,
     exportPriceEurKwh: null,
     co2GKwh: null,
-    totalCostRateEurH: p.values["cost_rate_eur_h"] ?? null,
-    gridPowerKw: p.values["power_kw"] ?? null,
+    totalCostRateEurH: p.values?.["cost_rate_eur_h"] ?? null,
+    gridPowerKw: p.values?.["power_kw"] ?? null,
   }));
 }
