@@ -39,4 +39,4 @@ __pycache__/
 *.pdf
 
 # Git worktrees
-docs/worktrees/
+.claude/worktrees/
