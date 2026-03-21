@@ -3,8 +3,8 @@
 /// Provides the logic to translate a POST /requests body into an EnergyPacket
 /// with proper ValueCurve (multi-tier deadlines, comfort rates), and computes
 /// target energy from the asset's current state + profile.
-use crate::entities::asset::{ComfortRate, CompletionPolicy, UserRequestMode};
-use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
+use crate::entities::asset::{ComfortRate, CompletionPolicy};
+use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, ValueCurve};
 use crate::entities::user_request::{RequestDeadline, UserRequest, UserRequestStatus};
 use crate::simulator::AssetEntry;
 use chrono::{DateTime, Utc};
@@ -111,37 +111,19 @@ pub fn create_from_body(
     let tier_count = deadline_tiers.len();
     let max_total_cost_eur = body.deadlines.first().and_then(|d| d.max_total_cost_eur);
 
-    let packet_id = Uuid::new_v4();
     let request_id = Uuid::new_v4();
 
     // Build EnergyPacket
+    let value_curve = ValueCurve {
+        comfort_rates,
+        deadline_tiers,
+        active_tier_index: 0,
+    };
     let packet = EnergyPacket {
-        id: packet_id,
-        asset_id: body.asset_id.clone(),
-        status: PacketStatus::Pending,
-        earliest_start: now,
-        latest_start: None,
-        target_energy_kwh,
         target_soc: body.target_soc,
-        desired_power_kw,
-        value_curve: ValueCurve {
-            comfort_rates,
-            deadline_tiers,
-            active_tier_index: 0,
-        },
-        request_mode: UserRequestMode::ByDeadline,
         completion_policy,
         post_deadline_comfort_bid: entry.state.default_post_deadline_comfort_bid(),
-        planned_power_profile: vec![],
-        past_power_profile: vec![],
-        accumulated_cost_eur: 0.0,
-        accumulated_co2_g: 0.0,
-        estimated_cost_eur: 0.0,
-        estimated_co2_g: 0.0,
-        estimated_completion: 0.0,
-        last_estimate_at: None,
-        created_at: now,
-        updated_at: now,
+        ..EnergyPacket::new(body.asset_id.clone(), target_energy_kwh, desired_power_kw, value_curve, now)
     };
 
     // Build UserRequest (thin wrapper linking to the packet)
@@ -169,7 +151,7 @@ pub fn create_from_body(
         }),
         max_total_cost_eur,
         tier_count,
-        packet_id,
+        packet_id: packet.id,
         status: UserRequestStatus::Active,
         estimated_cost_eur: 0.0,
         estimated_co2_g: 0.0,

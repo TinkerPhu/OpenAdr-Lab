@@ -3,7 +3,7 @@
 /// Produces a Plan from TariffSnapshots + EnergyPackets + device profile.
 /// Phase 6 (penalty check) is deferred to Stage 4.
 use crate::common::{Aggregation, TimeSeries};
-use crate::entities::asset::{ComfortRate, CompletionPolicy, PlanTrigger, UserRequestMode};
+use crate::entities::asset::{ComfortRate, PlanTrigger};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
 use crate::entities::plan::{
@@ -625,38 +625,19 @@ fn seed_to_packet(
             .collect()
     };
 
+    let value_curve = ValueCurve {
+        comfort_rates,
+        deadline_tiers: vec![DeadlineTier {
+            deadline: latest_end,
+            max_total_cost_eur: None,
+            max_marginal_rate_eur_kwh: None,
+            min_completion: 0.8,
+        }],
+        active_tier_index: 0,
+    };
     EnergyPacket {
-        id: Uuid::new_v4(),
-        asset_id,
-        status: PacketStatus::Pending,
-        earliest_start: now,
-        latest_start: None,
-        target_energy_kwh,
         target_soc: seed.target_soc,
-        desired_power_kw,
-        value_curve: ValueCurve {
-            comfort_rates,
-            deadline_tiers: vec![DeadlineTier {
-                deadline: latest_end,
-                max_total_cost_eur: None,
-                max_marginal_rate_eur_kwh: None,
-                min_completion: 0.8,
-            }],
-            active_tier_index: 0,
-        },
-        request_mode: UserRequestMode::ByDeadline,
-        completion_policy: CompletionPolicy::Stop,
-        post_deadline_comfort_bid: None,
-        planned_power_profile: vec![],
-        past_power_profile: vec![],
-        accumulated_cost_eur: 0.0,
-        accumulated_co2_g: 0.0,
-        estimated_cost_eur: 0.0,
-        estimated_co2_g: 0.0,
-        estimated_completion: 0.0,
-        last_estimate_at: None,
-        created_at: now,
-        updated_at: now,
+        ..EnergyPacket::new(asset_id, target_energy_kwh, desired_power_kw, value_curve, now)
     }
 }
 
