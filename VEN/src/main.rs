@@ -547,8 +547,9 @@ async fn main() -> anyhow::Result<()> {
                         .collect()
                 };
 
+                let tariff_ts = crate::entities::tariff_snapshot::TariffTimeSeries::from_snapshots(&rates);
                 let plan = controller::planner::run_planner(
-                    &rates,
+                    &tariff_ts,
                     &packets,
                     &capacity,
                     &profile,
