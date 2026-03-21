@@ -227,8 +227,20 @@ pub fn build_measurement_reports_for_active_events(
         if !event_is_active(event, now) {
             continue;
         }
+        // Skip events with reportDescriptors — those are handled by the obligation loop
+        let descriptors = event
+            .get("reportDescriptors")
+            .and_then(|v| v.as_array());
+        let has_descriptors = descriptors
+            .map_or(false, |arr| !arr.is_empty());
+        if has_descriptors {
+            let event_id = event.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            debug!(event_id, "timer-driven: skipping event with reportDescriptors");
+            continue;
+        }
         if let Some(event_id) = event.get("id").and_then(|v| v.as_str()) {
             if seen.insert(event_id.to_string()) {
+                debug!(event_id, "timer-driven: building single-interval report");
                 if let Some(report) = build_measurement_report(event, asset_history, ven_name) {
                     reports.push(report);
                 }
@@ -263,7 +275,7 @@ pub fn build_measurement_report_for_obligation(
     let program_id = obligation.program_id.as_deref()?;
     let event_id = &obligation.event_id;
 
-    let report_name = format!("auto-{}-{}", ven_name, event_id);
+    let report_name = format!("ob-{}-{}-{}", ven_name, event_id, obligation.payload_type);
     let resource_name = format!("{}-meter", ven_name);
     let interval_width = Duration::seconds(obligation.interval_duration_s as i64);
     let duration_iso = format_iso8601_duration(obligation.interval_duration_s);
