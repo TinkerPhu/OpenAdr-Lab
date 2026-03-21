@@ -512,26 +512,17 @@ fn finalize_packets(
     now: DateTime<Utc>,
 ) {
     for packet in packets.iter_mut() {
-        let allocated_kwh: f64 = firm_slots
-            .iter()
-            .flat_map(|s| s.allocations.iter())
-            .filter(|a| a.packet_id == packet.id)
-            .map(|a| a.power_kw * slot_h)
-            .sum();
+        let mut allocated_kwh = 0.0_f64;
+        let mut cost = 0.0_f64;
+        let mut co2 = 0.0_f64;
 
-        let cost: f64 = firm_slots
-            .iter()
-            .flat_map(|s| s.allocations.iter())
-            .filter(|a| a.packet_id == packet.id)
-            .map(|a| a.cost_eur)
-            .sum();
-
-        let co2: f64 = firm_slots
-            .iter()
-            .flat_map(|s| s.allocations.iter())
-            .filter(|a| a.packet_id == packet.id)
-            .map(|a| a.co2_g)
-            .sum();
+        for alloc in firm_slots.iter().flat_map(|s| s.allocations.iter()) {
+            if alloc.packet_id == packet.id {
+                allocated_kwh += alloc.power_kw * slot_h;
+                cost += alloc.cost_eur;
+                co2 += alloc.co2_g;
+            }
+        }
 
         packet.estimated_cost_eur = cost;
         packet.estimated_co2_g = co2;
@@ -819,5 +810,98 @@ mod tests {
         );
         // PV should be 0.0 since "pv" key is missing
         assert!((firm[0].pv_forecast_kw).abs() < 1e-9);
+    }
+
+    // ── finalize_packets single-pass test (RF-B07) ───────────────────────────
+
+    fn make_slot(allocations: Vec<PacketAllocation>) -> PlanTimeSlot {
+        PlanTimeSlot {
+            slot_index: 0,
+            start: ts(10, 0, 0),
+            end: ts(10, 5, 0),
+            slot_type: SlotType::Firm,
+            import_tariff_eur_kwh: 0.20,
+            export_tariff_eur_kwh: 0.05,
+            co2_g_kwh: 300.0,
+            grid_effective_cost: 0.20,
+            rate_estimated: false,
+            import_cap_kw: 10.0,
+            export_cap_kw: 10.0,
+            baseline_kw: 0.0,
+            pv_forecast_kw: 0.0,
+            surplus_available_kw: 0.0,
+            allocations,
+            net_import_kw: 0.0,
+            net_export_kw: 0.0,
+            import_flexibility_kw: 0.0,
+            export_flexibility_kw: 0.0,
+        }
+    }
+
+    fn make_alloc(packet_id: Uuid, power_kw: f64, cost_eur: f64, co2_g: f64) -> PacketAllocation {
+        PacketAllocation {
+            packet_id,
+            asset_id: "ev".to_string(),
+            power_kw,
+            surplus_power_kw: 0.0,
+            grid_power_kw: power_kw,
+            marginal_value: 0.0,
+            cost_eur,
+            co2_g,
+        }
+    }
+
+    #[test]
+    fn finalize_packets_single_pass_matches_three_pass() {
+        let slot_h = 5.0 / 60.0; // 5-minute slots → 1/12 h
+        let now = ts(10, 0, 0);
+
+        let curve = ValueCurve {
+            comfort_rates: vec![],
+            deadline_tiers: vec![],
+            active_tier_index: 0,
+        };
+
+        // Two packets across three slots
+        let mut p1 = EnergyPacket::new("ev".to_string(), 10.0, 7.2, curve.clone(), now);
+        let mut p2 = EnergyPacket::new("heater".to_string(), 5.0, 3.0, curve, now);
+
+        // Slot 0: p1 gets 7.2 kW (cost 0.06 €, co2 18 g), p2 gets 3.0 kW (cost 0.025 €, co2 7.5 g)
+        let slot0 = make_slot(vec![
+            make_alloc(p1.id, 7.2, 0.06, 18.0),
+            make_alloc(p2.id, 3.0, 0.025, 7.5),
+        ]);
+        // Slot 1: p1 gets 7.2 kW (cost 0.06 €, co2 18 g)
+        let slot1 = make_slot(vec![
+            make_alloc(p1.id, 7.2, 0.06, 18.0),
+        ]);
+        // Slot 2: p2 gets 3.0 kW (cost 0.025 €, co2 7.5 g)
+        let slot2 = make_slot(vec![
+            make_alloc(p2.id, 3.0, 0.025, 7.5),
+        ]);
+
+        let firm_slots = vec![slot0, slot1, slot2];
+        let mut packets = vec![p1, p2];
+
+        finalize_packets(&mut packets, &firm_slots, slot_h, now);
+
+        let out_p1 = &packets[0];
+        let out_p2 = &packets[1];
+
+        // p1: 2 slots × 7.2 kW → allocated_kwh = 2 × 7.2 × slot_h = 1.2 kWh
+        // target=10, past=0 → completion = 1.2/10 = 0.12
+        let expected_p1_kwh = 2.0 * 7.2 * slot_h;
+        assert!((out_p1.estimated_cost_eur - 0.12).abs() < 1e-9);
+        assert!((out_p1.estimated_co2_g - 36.0).abs() < 1e-9);
+        assert!((out_p1.estimated_completion - expected_p1_kwh / 10.0).abs() < 1e-9);
+        assert_eq!(out_p1.last_estimate_at, Some(now));
+
+        // p2: 2 slots × 3.0 kW → allocated_kwh = 2 × 3.0 × slot_h = 0.5 kWh
+        // target=5, past=0 → completion = 0.5/5 = 0.1
+        let expected_p2_kwh = 2.0 * 3.0 * slot_h;
+        assert!((out_p2.estimated_cost_eur - 0.05).abs() < 1e-9);
+        assert!((out_p2.estimated_co2_g - 15.0).abs() < 1e-9);
+        assert!((out_p2.estimated_completion - expected_p2_kwh / 5.0).abs() < 1e-9);
+        assert_eq!(out_p2.last_estimate_at, Some(now));
     }
 }
