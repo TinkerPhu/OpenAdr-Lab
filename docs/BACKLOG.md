@@ -181,7 +181,7 @@ The event poll loop contains ~150 lines of inline logic: JSON traversal for trac
 
 ## RF-B09: Extract HTTP handlers and DTOs from `main.rs`
 
-**Status**: BACKLOG
+**Status**: DONE
 **Risk**: Medium (large structural move, no logic changes)
 **Files**: `VEN/src/main.rs` -> new `VEN/src/routes.rs` (or `VEN/src/routes/` module)
 
