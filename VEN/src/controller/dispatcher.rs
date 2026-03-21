@@ -4,10 +4,8 @@
 /// constraints, produce a HashMap<asset_id, kW> that drives the simulator tick.
 /// There is no concept of "reactor mode" here — the plan is the sole authority.
 use crate::entities::capacity::OadrCapacityState;
-use crate::entities::energy_packet::{EnergyPacket, EnergySnapshot, PacketStatus};
 use crate::entities::plan::Plan;
-use crate::entities::asset::PlanTrigger;
-use crate::simulator::{AssetEntry, SimSnapshot};
+use crate::simulator::AssetEntry;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -71,61 +69,4 @@ pub fn build_setpoints(
     }
 
     setpoints
-}
-
-/// Post-tick: accumulate actual simulator power into packet profiles and
-/// transition packet statuses (Scheduled→Active, Active→Completed, etc.).
-///
-/// Returns an optional PlanTrigger when a replan is warranted (e.g. completion).
-/// NOTE: This function will be superseded by `monitor::record_tick` in Phase 5 (T041).
-pub fn update_packets(
-    packets: &mut Vec<EnergyPacket>,
-    sim: &SimSnapshot,
-    dt_s: f64,
-    now: DateTime<Utc>,
-) -> Option<PlanTrigger> {
-    let dt_h = dt_s / 3600.0;
-    let mut trigger: Option<PlanTrigger> = None;
-
-    for pkt in packets.iter_mut() {
-        if pkt.is_terminal() {
-            continue;
-        }
-
-        let actual_kw = sim.assets.get(&pkt.asset_id).map(|a| a.power_kw).unwrap_or(0.0);
-
-        let prev_energy = pkt.past_energy_kwh();
-        let new_energy = prev_energy + actual_kw * dt_h;
-
-        pkt.past_power_profile.push(EnergySnapshot {
-            ts: now,
-            power_kw: actual_kw,
-            cumulative_energy_kwh: new_energy,
-        });
-        pkt.updated_at = now;
-
-        if pkt.status == PacketStatus::Scheduled && actual_kw > 0.01 {
-            pkt.status = PacketStatus::Active;
-        }
-
-        if pkt.target_energy_kwh > 0.0 && new_energy >= pkt.target_energy_kwh - 1e-4 {
-            pkt.status = PacketStatus::Completed;
-            trigger = Some(PlanTrigger::DeviceDeviation);
-            continue;
-        }
-
-        if let Some(latest) = pkt.latest_end() {
-            if now > latest {
-                let fill = pkt.fill();
-                if fill >= 0.99 {
-                    pkt.status = PacketStatus::Completed;
-                } else {
-                    pkt.status = PacketStatus::PartialCompleted;
-                }
-                trigger = Some(PlanTrigger::DeviceDeviation);
-            }
-        }
-    }
-
-    trigger
 }
