@@ -32,14 +32,14 @@ pub enum Unit {
 }
 
 #[derive(Debug, Clone)]
-pub struct QuantitySeries {
+pub struct QuantityTimeline {
     pub samples: Vec<(DateTime<Utc>, f64)>,
     pub quantity: Quantity,
     pub unit: Unit,
     pub interpolation: Interpolation,
 }
 
-impl QuantitySeries {
+impl QuantityTimeline {
     pub fn empty(quantity: Quantity, unit: Unit, interpolation: Interpolation) -> Self {
         Self {
             samples: Vec::new(),
@@ -62,20 +62,20 @@ mod tests {
 
     #[test]
     fn empty_series_has_no_samples() {
-        let s = QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
+        let s = QuantityTimeline::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
         assert!(s.samples.is_empty());
     }
 
     #[test]
     fn empty_series_is_trivially_ascending() {
-        let s = QuantitySeries::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
+        let s = QuantityTimeline::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
         assert!(s.is_ascending());
     }
 
     #[test]
     fn non_empty_series_ascending_check() {
         let now = Utc::now();
-        let s = QuantitySeries {
+        let s = QuantityTimeline {
             samples: vec![(now, 1.0), (now + Duration::seconds(60), 2.0)],
             quantity: Quantity::Power,
             unit: Unit::Kilowatt,
@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn series_with_same_timestamp_not_ascending() {
         let now = Utc::now();
-        let s = QuantitySeries {
+        let s = QuantityTimeline {
             samples: vec![(now, 1.0), (now, 2.0)],
             quantity: Quantity::Power,
             unit: Unit::Kilowatt,

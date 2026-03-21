@@ -48,19 +48,19 @@ The controller should ask the asset for its defaults, not hard-code them.
 **What:** `min_soc` is not written to `state_values`, so it always returns the default 0.10.
 **Why:** Bug — user-configured `min_soc` is silently ignored at runtime.
 
-### RF-05a — QuantitySeries resampling operations
-**What:** Add resampling operations to the existing `QuantitySeries` in `VEN/src/common/mod.rs`:
-- `resample_uniform(width: Duration) -> QuantitySeries` — resample onto a regular grid with
+### RF-05a — QuantityTimeline resampling operations
+**What:** Add resampling operations to the existing `QuantityTimeline` in `VEN/src/common/mod.rs`:
+- `resample_uniform(width: Duration) -> QuantityTimeline` — resample onto a regular grid with
   the given step width. Interpolation uses the series' own `interpolation` field (Step = LOCF,
   Linear = proportional). Aggregation within each bucket is also determined by the
   interpolation mode (Step/Linear → time-weighted mean).
-- `resample_to_grid(timestamps: &[DateTime<Utc>]) -> QuantitySeries` — resample onto an
+- `resample_to_grid(timestamps: &[DateTime<Utc>]) -> QuantityTimeline` — resample onto an
   arbitrary timestamp grid. Each output point is the interpolated value at that timestamp.
 **Why:** The codebase has three independent lookup strategies (exact-interval match in planner,
 nearest-neighbour in UI, latest-snapshot in reporter) with no shared semantics. This causes
 silent correctness bugs when signals of different interpolation types are mixed or when
 series have different periods. See `VEN_ARCHITECTURE.md §5` for full audit.
-Adding operations to the existing `QuantitySeries` avoids introducing a parallel container —
+Adding operations to the existing `QuantityTimeline` avoids introducing a parallel container —
 the struct already carries `samples`, `interpolation`, `quantity`, and `unit`.
 **Grid-alignment rounding rule** (agreed during RF-01 spec):
 When `resample_uniform(interval)` is applied to a series anchored at `now`, timestamps MUST be
@@ -69,14 +69,14 @@ rounded to the interval grid boundary — not computed as `now ± n×interval`:
 - `history(timespan).resample_uniform(interval)`: last point = `floor(now, interval)`
 - Example: `now = 12:22`, `interval = 5 min` → forecast starts `12:25`, history ends `12:20`
 This ensures series from different assets automatically share timestamps after resampling.
-**Deliverable:** Methods on `QuantitySeries` with comprehensive unit tests, no integration changes.
+**Deliverable:** Methods on `QuantityTimeline` with comprehensive unit tests, no integration changes.
 **Prerequisite for:** RF-05b, RF-05c
 
-### RF-05b — Backend adoption of QuantitySeries resampling
+### RF-05b — Backend adoption of QuantityTimeline resampling
 **What:** Replace all ad-hoc time-series lookup functions in backend Rust code with
-`QuantitySeries` resampling operations.
+`QuantityTimeline` resampling operations.
 **Changes required:**
-- Convert `TariffSnapshot` series into `QuantitySeries` (Step interpolation) at the
+- Convert `TariffSnapshot` series into `QuantityTimeline` (Step interpolation) at the
   OpenADR interface boundary — one series per quantity (import, export, CO2)
 - Replace `tariff_import_at()`, `tariff_export_at()`, `tariff_co2_at()` in `planner.rs`
   with `resample_uniform(slot_width)` called once before the slot loop
