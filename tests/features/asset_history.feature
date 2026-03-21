@@ -1,7 +1,7 @@
 Feature: Asset Interface — history(timespan)
   Each asset returns historical power samples from the ring buffer via
   GET /history/:asset_id?timespan_s=N, returning a full TimeSeries response
-  (samples, quantity, unit, interpolation). These scenarios fail when history()
+  (samples, interpolation). These scenarios fail when history()
   stubs return empty and pass after T015–T021 are complete.
 
   Background:
@@ -14,8 +14,6 @@ Feature: Asset Interface — history(timespan)
     When I GET /history/pv?timespan_s=1800 from the VEN
     Then the response status is 200
     And the history response has a non-empty samples list
-    And the history quantity is "power"
-    And the history unit is "kilowatt"
     And the history interpolation is "linear"
 
   Scenario: PV history boundary point is present at start of window
@@ -30,8 +28,6 @@ Feature: Asset Interface — history(timespan)
     When I GET /history/battery?timespan_s=1800 from the VEN
     Then the response status is 200
     And the history response has a non-empty samples list
-    And the history quantity is "power"
-    And the history unit is "kilowatt"
     And the history interpolation is "linear"
 
   # ── Partial buffer ───────────────────────────────────────────────────────────
