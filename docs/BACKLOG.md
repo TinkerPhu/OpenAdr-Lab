@@ -145,7 +145,7 @@ Creating an EnergyPacket requires setting ~25 fields. Three sites duplicate the 
 
 ## RF-B07: Consolidate `finalize_packets` into single-pass per packet
 
-**Status**: BACKLOG
+**Status**: DONE
 **Risk**: Low (local optimization in planner)
 **Files**: `VEN/src/controller/planner.rs` (lines 508-543)
 
