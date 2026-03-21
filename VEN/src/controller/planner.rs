@@ -10,7 +10,7 @@ use crate::entities::plan::{
     FirmSummary, FlexibilityEnvelope, FlexibleSummary, PacketAllocation, Plan, PlanTimeSlot,
     PlanningHorizon, SlotType,
 };
-use crate::entities::tariff_snapshot::TariffSnapshot;
+use crate::entities::tariff_snapshot::TariffTimeSeries;
 use crate::profile::{BatteryConfig, Profile};
 use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ const CO2_WEIGHT: f64 = 0.0001; // €/g ≈ €100/tonne
 
 /// Run the full 8-phase planning algorithm and return a new Plan.
 pub fn run_planner(
-    rates: &[TariffSnapshot],
+    tariffs: &TariffTimeSeries,
     packets: &[EnergyPacket],
     capacity: &OadrCapacityState,
     profile: &Profile,
@@ -54,7 +54,7 @@ pub fn run_planner(
 
     // Phase 1: Build planning grid
     let (mut firm_slots, flexible_slots) =
-        build_grid(rates, capacity, profile, now, step_s, total_steps, firm_boundary, asset_forecasts);
+        build_grid(tariffs, capacity, profile, now, step_s, total_steps, firm_boundary, asset_forecasts);
 
     // Preserve terminal packets (cancelled/completed/failed) for history visibility
     let terminal_pkts: Vec<EnergyPacket> =
@@ -112,7 +112,7 @@ pub fn run_planner(
 // ─── Phase 1: Build planning grid ────────────────────────────────────────────
 
 fn build_grid(
-    rates: &[TariffSnapshot],
+    tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
     profile: &Profile,
     now: DateTime<Utc>,
@@ -124,7 +124,26 @@ fn build_grid(
     let import_cap = capacity.import_limit_kw.unwrap_or(f64::MAX);
     let export_cap = capacity.export_limit_kw.unwrap_or(f64::MAX);
     let baseline_kw = profile.base_load_kw();
-    let rates_empty = rates.is_empty();
+    let rates_empty = tariffs.is_empty();
+
+    // Pre-resample tariff series to slot grid (HashMap<epoch_sec, value>)
+    let slot_dur = Duration::seconds(step_s as i64);
+    let import_map: HashMap<i64, f64> = tariffs.import_eur_kwh.resample_uniform(slot_dur)
+        .samples.iter().map(|(ts, v)| (ts.timestamp(), *v)).collect();
+    let export_map: HashMap<i64, f64> = tariffs.export_eur_kwh.resample_uniform(slot_dur)
+        .samples.iter().map(|(ts, v)| (ts.timestamp(), *v)).collect();
+    let co2_map: HashMap<i64, f64> = tariffs.co2_g_kwh.resample_uniform(slot_dur)
+        .samples.iter().map(|(ts, v)| (ts.timestamp(), *v)).collect();
+
+    // Pre-resample asset forecasts to slot grid
+    let forecast_maps: HashMap<&str, HashMap<i64, f64>> = asset_forecasts
+        .iter()
+        .map(|(id, ts)| {
+            let map: HashMap<i64, f64> = ts.resample_uniform(slot_dur)
+                .samples.iter().map(|(t, v)| (t.timestamp(), *v)).collect();
+            (id.as_str(), map)
+        })
+        .collect();
 
     let mut firm = Vec::new();
     let mut flex = Vec::new();
@@ -132,14 +151,17 @@ fn build_grid(
     for i in 0..total_steps {
         let start = now + Duration::seconds((i as i64) * step_s as i64);
         let end = start + Duration::seconds(step_s as i64);
+        let epoch = start.timestamp();
 
-        let import_tariff = tariff_import_at(rates, start).unwrap_or(DEFAULT_IMPORT_PRICE);
-        let export_tariff = tariff_export_at(rates, start).unwrap_or(DEFAULT_EXPORT_PRICE);
-        let co2 = tariff_co2_at(rates, start).unwrap_or(DEFAULT_CO2_G_KWH);
+        let import_tariff = import_map.get(&epoch).copied().unwrap_or(DEFAULT_IMPORT_PRICE);
+        let export_tariff = export_map.get(&epoch).copied().unwrap_or(DEFAULT_EXPORT_PRICE);
+        let co2 = co2_map.get(&epoch).copied().unwrap_or(DEFAULT_CO2_G_KWH);
         let grid_eff = import_tariff + co2 * CO2_WEIGHT;
 
         // PV forecast: negative = export, so we negate to get positive generation magnitude.
-        let pv_export_kw = nearest_value(asset_forecasts.get("pv"), start);
+        let pv_export_kw = forecast_maps.get("pv")
+            .and_then(|m| m.get(&epoch).copied())
+            .unwrap_or(0.0);
         let pv_kw = -pv_export_kw; // convert export (negative) to generation magnitude (positive)
         let net = baseline_kw - pv_kw; // positive = need to import, negative = surplus
         let surplus = (-net).max(0.0);
@@ -540,65 +562,6 @@ fn summarize_firm(slots: &[PlanTimeSlot], slot_h: f64) -> FirmSummary {
     s
 }
 
-// ─── Tariff helpers ───────────────────────────────────────────────────────────
-
-fn tariff_import_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
-    rates
-        .iter()
-        .find(|r| r.interval_start <= ts && ts < r.interval_end)
-        .and_then(|r| r.import_tariff_eur_kwh)
-}
-
-fn tariff_export_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
-    rates
-        .iter()
-        .find(|r| r.interval_start <= ts && ts < r.interval_end)
-        .and_then(|r| r.export_tariff_eur_kwh)
-}
-
-fn tariff_co2_at(rates: &[TariffSnapshot], ts: DateTime<Utc>) -> Option<f64> {
-    rates
-        .iter()
-        .find(|r| r.interval_start <= ts && ts < r.interval_end)
-        .and_then(|r| r.co2_g_kwh)
-}
-
-// ─── Forecast lookup helper ───────────────────────────────────────────────────
-
-/// Return the forecast value for a given timestamp from a TimeSeries.
-/// - If the series is empty or absent, returns 0.0.
-/// - Step series: last sample at or before ts; falls back to first sample.
-/// - Linear series: nearest sample by timestamp.
-fn nearest_value(series: Option<&TimeSeries>, ts: DateTime<Utc>) -> f64 {
-    let s = match series {
-        Some(s) if !s.samples.is_empty() => s,
-        _ => return 0.0,
-    };
-    match s.interpolation {
-        Interpolation::Step => {
-            // Last sample at or before ts.
-            s.samples
-                .iter()
-                .rev()
-                .find(|(t, _)| *t <= ts)
-                .or_else(|| s.samples.first())
-                .map(|(_, v)| *v)
-                .unwrap_or(0.0)
-        }
-        Interpolation::Linear => {
-            // Nearest sample by absolute time distance.
-            s.samples
-                .iter()
-                .min_by_key(|(t, _)| {
-                    let diff = (*t - ts).num_milliseconds().unsigned_abs();
-                    diff
-                })
-                .map(|(_, v)| *v)
-                .unwrap_or(0.0)
-        }
-    }
-}
-
 // ─── Packet seeding from profile ─────────────────────────────────────────────
 
 /// Create EnergyPackets from profile seed entries at VEN startup.
@@ -694,5 +657,185 @@ fn seed_to_packet(
         last_estimate_at: None,
         created_at: now,
         updated_at: now,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entities::tariff_snapshot::TariffSnapshot;
+    use chrono::TimeZone;
+
+    fn ts(hour: u32, min: u32, sec: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 3, 21, hour, min, sec).unwrap()
+    }
+
+    fn snap(start: DateTime<Utc>, end: DateTime<Utc>, imp: Option<f64>, exp: Option<f64>, co2: Option<f64>) -> TariffSnapshot {
+        TariffSnapshot {
+            interval_start: start,
+            interval_end: end,
+            import_tariff_eur_kwh: imp,
+            export_tariff_eur_kwh: exp,
+            co2_g_kwh: co2,
+        }
+    }
+
+    fn empty_capacity() -> OadrCapacityState {
+        OadrCapacityState {
+            import_limit_kw: None,
+            export_limit_kw: None,
+            import_subscription_kw: None,
+            import_reservation_kw: None,
+            import_limit_event_id: None,
+            export_limit_event_id: None,
+            last_updated: None,
+        }
+    }
+
+    fn test_profile(step_s: u64, horizon_h: u64) -> Profile {
+        let mut p = Profile::default();
+        p.planner.plan_step_s = step_s;
+        p.planner.plan_horizon_h = horizon_h;
+        p.planner.near_horizon_h = horizon_h; // all firm
+        p
+    }
+
+    // ── Tariff resampling tests (T008) ──────────────────────────────────────
+
+    #[test]
+    fn boundary_aligned_tariffs_match_old_behavior() {
+        // Tariffs aligned on 5-min boundaries: each slot gets its exact tariff
+        let snaps = vec![
+            snap(ts(10, 0, 0), ts(10, 5, 0), Some(0.20), Some(0.05), Some(300.0)),
+            snap(ts(10, 5, 0), ts(10, 10, 0), Some(0.25), Some(0.06), Some(350.0)),
+        ];
+        let tariffs = TariffTimeSeries::from_snapshots(&snaps);
+        let now = ts(10, 0, 0);
+        let (firm, _) = build_grid(
+            &tariffs, &empty_capacity(), &test_profile(300, 1), now,
+            300, 2, now + Duration::hours(1), &HashMap::new(),
+        );
+        assert_eq!(firm.len(), 2);
+        assert!((firm[0].import_tariff_eur_kwh - 0.20).abs() < 1e-9);
+        assert!((firm[1].import_tariff_eur_kwh - 0.25).abs() < 1e-9);
+        assert!((firm[0].export_tariff_eur_kwh - 0.05).abs() < 1e-9);
+        assert!((firm[0].co2_g_kwh - 300.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn mid_slot_tariff_change_produces_time_weighted_average() {
+        // Tariff changes at 10:03 inside a 5-min slot [10:00, 10:05)
+        // 0.20 for 3 min, 0.10 for 2 min → TWM = (3*0.20 + 2*0.10)/5 = 0.16
+        let snaps = vec![
+            snap(ts(10, 0, 0), ts(10, 3, 0), Some(0.20), None, None),
+            snap(ts(10, 3, 0), ts(10, 10, 0), Some(0.10), None, None),
+        ];
+        let tariffs = TariffTimeSeries::from_snapshots(&snaps);
+        let now = ts(10, 0, 0);
+        let (firm, _) = build_grid(
+            &tariffs, &empty_capacity(), &test_profile(300, 1), now,
+            300, 1, now + Duration::hours(1), &HashMap::new(),
+        );
+        assert_eq!(firm.len(), 1);
+        assert!((firm[0].import_tariff_eur_kwh - 0.16).abs() < 1e-9);
+    }
+
+    #[test]
+    fn empty_tariff_series_uses_defaults() {
+        let tariffs = TariffTimeSeries::from_snapshots(&[]);
+        let now = ts(10, 0, 0);
+        let (firm, _) = build_grid(
+            &tariffs, &empty_capacity(), &test_profile(300, 1), now,
+            300, 2, now + Duration::hours(1), &HashMap::new(),
+        );
+        assert_eq!(firm.len(), 2);
+        assert!((firm[0].import_tariff_eur_kwh - DEFAULT_IMPORT_PRICE).abs() < 1e-9);
+        assert!((firm[0].export_tariff_eur_kwh - DEFAULT_EXPORT_PRICE).abs() < 1e-9);
+        assert!((firm[0].co2_g_kwh - DEFAULT_CO2_G_KWH).abs() < 1e-9);
+        assert!(firm[0].rate_estimated);
+    }
+
+    #[test]
+    fn single_sample_tariff_covers_first_slot_only() {
+        // One tariff sample at 10:00 → resample_uniform produces one bucket at
+        // 10:00 (LOCF can't extend past data for aggregation). Slot 0 gets 0.30,
+        // subsequent slots fall back to default.
+        let snaps = vec![
+            snap(ts(10, 0, 0), ts(11, 0, 0), Some(0.30), Some(0.08), Some(400.0)),
+        ];
+        let tariffs = TariffTimeSeries::from_snapshots(&snaps);
+        let now = ts(10, 0, 0);
+        let (firm, _) = build_grid(
+            &tariffs, &empty_capacity(), &test_profile(300, 1), now,
+            300, 4, now + Duration::hours(1), &HashMap::new(),
+        );
+        assert_eq!(firm.len(), 4);
+        assert!((firm[0].import_tariff_eur_kwh - 0.30).abs() < 1e-9);
+        assert!(!firm[0].rate_estimated);
+        // Slots beyond the single bucket fall back to default
+        assert!((firm[1].import_tariff_eur_kwh - DEFAULT_IMPORT_PRICE).abs() < 1e-9);
+    }
+
+    // ── Asset forecast resampling tests (T013) ──────────────────────────────
+
+    #[test]
+    fn pv_linear_forecast_resampled() {
+        // PV forecast: linear ramp from -10.0 to 0.0 over 10 min (export sign)
+        // Slot [10:00, 10:05): TWM of linear from -10→-5 = -7.5
+        let pv = TimeSeries {
+            samples: vec![
+                (ts(10, 0, 0), -10.0),
+                (ts(10, 10, 0), 0.0),
+            ],
+            interpolation: Interpolation::Linear,
+        };
+        let mut forecasts = HashMap::new();
+        forecasts.insert("pv".to_string(), pv);
+
+        let tariffs = TariffTimeSeries::from_snapshots(&[
+            snap(ts(10, 0, 0), ts(11, 0, 0), Some(0.20), Some(0.05), Some(300.0)),
+        ]);
+        let now = ts(10, 0, 0);
+        let (firm, _) = build_grid(
+            &tariffs, &empty_capacity(), &test_profile(300, 1), now,
+            300, 1, now + Duration::hours(1), &forecasts,
+        );
+        // pv_export_kw = -7.5 (TWM), pv_kw = 7.5 (generation)
+        assert!((firm[0].pv_forecast_kw - 7.5).abs() < 0.1);
+    }
+
+    #[test]
+    fn empty_forecast_defaults_to_zero() {
+        let tariffs = TariffTimeSeries::from_snapshots(&[
+            snap(ts(10, 0, 0), ts(11, 0, 0), Some(0.20), Some(0.05), Some(300.0)),
+        ]);
+        let now = ts(10, 0, 0);
+        let (firm, _) = build_grid(
+            &tariffs, &empty_capacity(), &test_profile(300, 1), now,
+            300, 1, now + Duration::hours(1), &HashMap::new(),
+        );
+        assert!((firm[0].pv_forecast_kw).abs() < 1e-9);
+    }
+
+    #[test]
+    fn missing_asset_key_defaults_to_zero() {
+        // Only "heater" forecast provided, no "pv"
+        let heater = TimeSeries {
+            samples: vec![(ts(10, 0, 0), 2.0)],
+            interpolation: Interpolation::Step,
+        };
+        let mut forecasts = HashMap::new();
+        forecasts.insert("heater".to_string(), heater);
+
+        let tariffs = TariffTimeSeries::from_snapshots(&[
+            snap(ts(10, 0, 0), ts(11, 0, 0), Some(0.20), Some(0.05), Some(300.0)),
+        ]);
+        let now = ts(10, 0, 0);
+        let (firm, _) = build_grid(
+            &tariffs, &empty_capacity(), &test_profile(300, 1), now,
+            300, 1, now + Duration::hours(1), &forecasts,
+        );
+        // PV should be 0.0 since "pv" key is missing
+        assert!((firm[0].pv_forecast_kw).abs() < 1e-9);
     }
 }
