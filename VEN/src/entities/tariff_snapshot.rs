@@ -14,34 +14,6 @@ pub struct TariffSnapshot {
     pub co2_g_kwh: Option<f64>,
 }
 
-/// Collection of planned (future) tariff snapshots.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PlannedTariffs {
-    pub snapshots: Vec<TariffSnapshot>,
-}
-
-impl PlannedTariffs {
-    /// Find the tariff snapshot covering a given timestamp.
-    pub fn tariff_at(&self, ts: DateTime<Utc>) -> Option<&TariffSnapshot> {
-        self.snapshots
-            .iter()
-            .find(|s| s.interval_start <= ts && ts < s.interval_end)
-    }
-
-    /// Average import tariff over all planned snapshots; returns 0.20 if empty.
-    pub fn avg_import_tariff(&self) -> f64 {
-        let prices: Vec<f64> = self
-            .snapshots
-            .iter()
-            .filter_map(|s| s.import_tariff_eur_kwh)
-            .collect();
-        if prices.is_empty() {
-            return 0.20; // fallback flat rate
-        }
-        prices.iter().sum::<f64>() / prices.len() as f64
-    }
-}
-
 /// Three independent TimeSeries (import, export, CO2) with Step interpolation,
 /// constructed from TariffSnapshot lists at the OpenADR interface boundary.
 #[derive(Debug, Clone)]
@@ -123,29 +95,6 @@ impl TariffTimeSeries {
         self.import_eur_kwh.samples.is_empty()
             && self.export_eur_kwh.samples.is_empty()
             && self.co2_g_kwh.samples.is_empty()
-    }
-}
-
-/// Collection of past (measured) tariff snapshots for cost attribution.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PastTariffs {
-    pub snapshots: Vec<TariffSnapshot>,
-}
-
-/// Heuristic tariff forecast used when live price data is unavailable.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TariffHeuristic {
-    /// Hourly average import prices (24 values, one per hour of day)
-    pub hourly_avg_import_eur_kwh: Vec<f64>,
-    pub last_updated: Option<DateTime<Utc>>,
-}
-
-impl Default for TariffHeuristic {
-    fn default() -> Self {
-        Self {
-            hourly_avg_import_eur_kwh: vec![0.20; 24],
-            last_updated: None,
-        }
     }
 }
 
