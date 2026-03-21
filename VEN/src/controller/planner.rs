@@ -2,7 +2,7 @@
 ///
 /// Produces a Plan from TariffSnapshots + EnergyPackets + device profile.
 /// Phase 6 (penalty check) is deferred to Stage 4.
-use crate::common::TimeSeries;
+use crate::common::{Aggregation, TimeSeries};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PlanTrigger, UserRequestMode};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
@@ -128,18 +128,18 @@ fn build_grid(
 
     // Pre-resample tariff series to slot grid (HashMap<epoch_sec, value>)
     let slot_dur = Duration::seconds(step_s as i64);
-    let import_map: HashMap<i64, f64> = tariffs.import_eur_kwh.resample_uniform(slot_dur)
+    let import_map: HashMap<i64, f64> = tariffs.import_eur_kwh.resample_uniform(slot_dur, Aggregation::Mean)
         .samples.iter().map(|(ts, v)| (ts.timestamp(), *v)).collect();
-    let export_map: HashMap<i64, f64> = tariffs.export_eur_kwh.resample_uniform(slot_dur)
+    let export_map: HashMap<i64, f64> = tariffs.export_eur_kwh.resample_uniform(slot_dur, Aggregation::Mean)
         .samples.iter().map(|(ts, v)| (ts.timestamp(), *v)).collect();
-    let co2_map: HashMap<i64, f64> = tariffs.co2_g_kwh.resample_uniform(slot_dur)
+    let co2_map: HashMap<i64, f64> = tariffs.co2_g_kwh.resample_uniform(slot_dur, Aggregation::Mean)
         .samples.iter().map(|(ts, v)| (ts.timestamp(), *v)).collect();
 
     // Pre-resample asset forecasts to slot grid
     let forecast_maps: HashMap<&str, HashMap<i64, f64>> = asset_forecasts
         .iter()
         .map(|(id, ts)| {
-            let map: HashMap<i64, f64> = ts.resample_uniform(slot_dur)
+            let map: HashMap<i64, f64> = ts.resample_uniform(slot_dur, Aggregation::Mean)
                 .samples.iter().map(|(t, v)| (t.timestamp(), *v)).collect();
             (id.as_str(), map)
         })
