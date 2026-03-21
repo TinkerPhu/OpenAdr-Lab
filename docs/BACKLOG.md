@@ -203,7 +203,7 @@ The event poll loop contains ~150 lines of inline logic: JSON traversal for trac
 
 ## RF-B10: Extract background loops from `main.rs`
 
-**Status**: BACKLOG
+**Status**: DONE
 **Risk**: Medium (structural move, no logic changes)
 **Depends on**: RF-B08, RF-B09 (cleaner after handlers and change-detection are extracted)
 **Files**: `VEN/src/main.rs` -> new `VEN/src/loops.rs`
