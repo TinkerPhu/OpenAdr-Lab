@@ -2,82 +2,9 @@ use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::common::parse_iso8601_duration_secs;
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
 use crate::entities::tariff_snapshot::TariffSnapshot;
-
-// ---------------------------------------------------------------------------
-// ISO 8601 duration parser (subset: PT<n>H, PT<n>M, PT<n>S, combinations)
-// ---------------------------------------------------------------------------
-
-/// Parse a simple ISO 8601 duration string into total seconds.
-/// Supports: PT1H, PT15M, PT5M, PT30S, PT1H30M, etc.
-/// Does not support year/month designators (P1Y, P1M).
-fn parse_iso8601_duration(s: &str) -> i64 {
-    let s = s.trim();
-    if !s.starts_with('P') {
-        return 3600; // fallback: 1 hour
-    }
-    // Strip leading 'P'
-    let rest = &s[1..];
-    // Find the 'T' separator
-    let (date_part, time_part) = if let Some(t_pos) = rest.find('T') {
-        (&rest[..t_pos], &rest[t_pos + 1..])
-    } else {
-        (rest, "")
-    };
-
-    let mut total_secs: i64 = 0;
-
-    // Parse date part (Y, M, D)
-    let mut buf = String::new();
-    for ch in date_part.chars() {
-        if ch.is_ascii_digit() {
-            buf.push(ch);
-        } else if ch == 'Y' {
-            let v: i64 = buf.parse().unwrap_or(0);
-            total_secs += v * 365 * 86400; // approximate: 1 year = 365 days
-            buf.clear();
-        } else if ch == 'M' {
-            let v: i64 = buf.parse().unwrap_or(0);
-            total_secs += v * 30 * 86400; // approximate: 1 month = 30 days
-            buf.clear();
-        } else if ch == 'D' {
-            let v: i64 = buf.parse().unwrap_or(0);
-            total_secs += v * 86400;
-            buf.clear();
-        } else {
-            buf.clear();
-        }
-    }
-
-    // Parse time part (H, M, S)
-    buf.clear();
-    for ch in time_part.chars() {
-        if ch.is_ascii_digit() || ch == '.' {
-            buf.push(ch);
-        } else if ch == 'H' {
-            let v: f64 = buf.parse().unwrap_or(0.0);
-            total_secs += v as i64 * 3600;
-            buf.clear();
-        } else if ch == 'M' {
-            let v: f64 = buf.parse().unwrap_or(0.0);
-            total_secs += v as i64 * 60;
-            buf.clear();
-        } else if ch == 'S' {
-            let v: f64 = buf.parse().unwrap_or(0.0);
-            total_secs += v as i64;
-            buf.clear();
-        } else {
-            buf.clear();
-        }
-    }
-
-    if total_secs <= 0 {
-        3600 // fallback
-    } else {
-        total_secs
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Rate snapshot parsing
@@ -118,7 +45,7 @@ pub fn parse_rate_snapshots(events: &[Value], now: DateTime<Utc>) -> Vec<TariffS
                 Ok(dt) => dt,
                 Err(_) => continue,
             };
-            let duration_secs = parse_iso8601_duration(
+            let duration_secs = parse_iso8601_duration_secs(
                 interval_period
                     .get("duration")
                     .and_then(|v| v.as_str())
@@ -162,7 +89,7 @@ pub fn parse_rate_snapshots(events: &[Value], now: DateTime<Utc>) -> Vec<TariffS
             .get("intervalPeriod")
             .and_then(|ip| ip.get("duration"))
             .and_then(|v| v.as_str())
-            .map(|s| parse_iso8601_duration(s))
+            .map(|s| parse_iso8601_duration_secs(s))
             .unwrap_or(cycle_secs);
 
         let offsets: Vec<i64> = if cycle_secs > 0 && event_dur_secs > cycle_secs {
@@ -428,38 +355,6 @@ pub fn extract_report_obligations(
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn test_parse_iso8601_duration_hour() {
-        assert_eq!(parse_iso8601_duration("PT1H"), 3600);
-    }
-
-    #[test]
-    fn test_parse_iso8601_duration_minutes() {
-        assert_eq!(parse_iso8601_duration("PT15M"), 900);
-        assert_eq!(parse_iso8601_duration("PT5M"), 300);
-    }
-
-    #[test]
-    fn test_parse_iso8601_duration_combined() {
-        assert_eq!(parse_iso8601_duration("PT1H30M"), 5400);
-    }
-
-    #[test]
-    fn test_parse_iso8601_duration_days() {
-        assert_eq!(parse_iso8601_duration("P1D"), 86400);
-    }
-
-    #[test]
-    fn test_parse_iso8601_duration_years() {
-        let secs = parse_iso8601_duration("P9999Y");
-        assert!(secs > 9998i64 * 365 * 86400, "P9999Y should be a very large value");
-    }
-
-    #[test]
-    fn test_parse_iso8601_duration_months() {
-        assert_eq!(parse_iso8601_duration("P1M"), 30 * 86400);
-    }
 
     #[test]
     fn test_parse_rate_snapshots_price() {
