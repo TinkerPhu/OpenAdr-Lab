@@ -183,8 +183,23 @@ def step_tariff_extend_btn_visible(context):
 # ── Simulation controls: 03_simulation_controls.feature ───────────────────────
 
 
+def _expand_ev_right_section(page):
+    """Expand the right section if it is collapsed (collapsed by default)."""
+    btn = page.wait_for_selector(
+        tid("asset-cell-ev-collapse-right"), timeout=10000
+    )
+    label = btn.get_attribute("aria-label") or ""
+    if "Expand" in label:
+        btn.click()
+        # Wait for right section content to appear
+        page.wait_for_selector(
+            tid("asset-cell-ev-right"), state="visible", timeout=5000,
+        )
+
+
 def _expand_ev_status_accordion(page):
-    """Click the EV status-settings accordion header to expand it (collapsed by default)."""
+    """Expand the right section (if collapsed) then click the accordion header."""
+    _expand_ev_right_section(page)
     header = page.wait_for_selector(
         tid("status-settings-accordion-ev"), timeout=10000
     )
@@ -327,6 +342,16 @@ def step_collapse_right_ev(context):
         tid("asset-cell-ev-collapse-right"), timeout=10000
     )
     el.click()
+
+
+@then("the EV asset cell right section is visible")
+def step_ev_right_visible(context):
+    right = context.browser_page.wait_for_selector(
+        tid("asset-cell-ev-right"), state="visible", timeout=5000
+    )
+    assert right is not None and right.is_visible(), (
+        "asset-cell-ev-right is not visible after expand"
+    )
 
 
 @then("the EV asset cell right section is not visible")
