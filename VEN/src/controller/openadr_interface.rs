@@ -392,18 +392,12 @@ pub fn extract_report_obligations(
                 .unwrap_or("DIRECT_READ")
                 .to_string();
 
-            // interval duration: from descriptor or default 3600
+            // interval duration: from descriptor.frequency (seconds) or default 3600
             let interval_duration_s: u64 = descriptor
-                .get("duration")
-                .and_then(|v| v.as_str())
-                .map(|s| parse_iso8601_duration(s) as u64)
-                .or_else(|| {
-                    descriptor
-                        .get("reportingPeriod")
-                        .and_then(|rp| rp.get("duration"))
-                        .and_then(|v| v.as_str())
-                        .map(|s| parse_iso8601_duration(s) as u64)
-                })
+                .get("frequency")
+                .and_then(|v| v.as_i64())
+                .filter(|&f| f > 0)
+                .map(|f| f as u64)
                 .unwrap_or(3600);
 
             let due_at = now + Duration::seconds(interval_duration_s as i64);
@@ -817,5 +811,25 @@ mod tests {
             extract_report_obligations(events.as_array().unwrap(), now, &existing);
         // Should not add a duplicate
         assert!(obligations.is_empty());
+    }
+
+    #[test]
+    fn test_extract_report_obligations_frequency_field() {
+        let events = json!([
+            {
+                "id": "evt-1",
+                "programID": "prog-1",
+                "reportDescriptors": [
+                    {"payloadType": "USAGE", "readingType": "DIRECT_READ", "frequency": 900}
+                ],
+                "intervals": []
+            }
+        ]);
+        let now = Utc::now();
+        let obligations =
+            extract_report_obligations(events.as_array().unwrap(), now, &[]);
+        assert_eq!(obligations.len(), 1);
+        assert_eq!(obligations[0].interval_duration_s, 900);
+        assert_eq!(obligations[0].due_at, now + Duration::seconds(900));
     }
 }

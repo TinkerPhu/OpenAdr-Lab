@@ -6,8 +6,8 @@ from features.helpers.api_client import vtn_post, VEN_BASE_URL
 from features.helpers.wait import poll_until
 
 
-@given('I create an event for the saved program with a reportDescriptor interval of "{duration}"')
-def step_create_event_with_report_descriptor(context, duration):
+@given('I create an event for the saved program with a reportDescriptor frequency of {freq_s:d} seconds')
+def step_create_event_with_report_descriptor(context, freq_s):
     r = vtn_post(
         "/events",
         context.vtn_token,
@@ -21,7 +21,8 @@ def step_create_event_with_report_descriptor(context, duration):
                 {
                     "payloadType": "USAGE",
                     "readingType": "DIRECT_READ",
-                    "duration": duration,
+                    "frequency": freq_s,
+                    "repeat": 1,
                 }
             ],
         },
@@ -69,20 +70,23 @@ def step_wait_ven1_obligations_fulfilled(context, count):
     context.ven1_obligations = obligations
 
 
-@when("I wait for VEN-1 to submit at least {count:d} timer-driven report")
-@when("I wait for VEN-1 to submit at least {count:d} timer-driven reports")
-def step_wait_ven1_timer_reports(context, count):
-    def fetch():
-        return requests.get(f"{VEN_BASE_URL}/reports", timeout=10).json()
+@when("I wait for VEN-1 to submit at least {count:d} timer-driven report for the event")
+@when("I wait for VEN-1 to submit at least {count:d} timer-driven reports for the event")
+def step_wait_ven1_timer_reports_for_event(context, count):
+    event_id = context.saved_event_id
 
-    reports = poll_until(
+    def fetch():
+        reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=10).json()
+        return [r for r in reports if r.get("eventID") == event_id]
+
+    matching = poll_until(
         fetch,
         lambda rs: len(rs) >= count,
-        timeout=60,
+        timeout=90,
         interval=3,
-        description=f"VEN-1 has >= {count} reports",
+        description=f"VEN-1 has >= {count} reports for event {event_id}",
     )
-    context.ven1_reports = reports
+    context.ven1_reports = matching
 
 
 @then("the latest VEN-1 report for the event has multiple intervals")
