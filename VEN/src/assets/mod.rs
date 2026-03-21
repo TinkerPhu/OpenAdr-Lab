@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
 
-use crate::common::{Interpolation, Quantity, QuantityTimeline, Unit};
+use crate::common::{Interpolation, TimeSeries};
 use crate::controller::trace::AssetHistoryBuffer;
 
 pub mod base_load;
@@ -93,8 +93,8 @@ impl AssetState {
         }
     }
 
-    /// Forward projection. Returns a self-describing QuantityTimeline over [now, now + timespan].
-    pub fn forecast(&self, timespan: Duration) -> QuantityTimeline {
+    /// Forward projection. Returns a self-describing TimeSeries over [now, now + timespan].
+    pub fn forecast(&self, timespan: Duration) -> TimeSeries {
         match self {
             Self::Ev(inner) => inner.forecast(timespan),
             Self::Heater(inner) => inner.forecast(timespan),
@@ -104,8 +104,8 @@ impl AssetState {
         }
     }
 
-    /// Historical power data. Returns a self-describing QuantityTimeline over [now - timespan, now].
-    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> QuantityTimeline {
+    /// Historical power data. Returns a self-describing TimeSeries over [now - timespan, now].
+    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> TimeSeries {
         match self {
             Self::Ev(inner) => inner.history(timespan, history),
             Self::Heater(inner) => inner.history(timespan, history),
@@ -232,7 +232,7 @@ impl AssetState {
 
 // ─── Shared history() helper ─────────────────────────────────────────────────
 
-/// Slice the ring buffer to [now − timespan, now] and return a QuantityTimeline.
+/// Slice the ring buffer to [now − timespan, now] and return a TimeSeries.
 ///
 /// - Extracts the `power_kw` column; drops NaN rows.
 /// - Prepends a boundary point at `now − timespan` using the declared interpolation mode:
@@ -241,12 +241,10 @@ impl AssetState {
 pub fn history_from_buffer(
     timespan: Duration,
     history: &AssetHistoryBuffer,
-    quantity: Quantity,
-    unit: Unit,
     interpolation: Interpolation,
-) -> QuantityTimeline {
+) -> TimeSeries {
     if timespan <= Duration::zero() {
-        return QuantityTimeline::empty(quantity, unit, interpolation);
+        return TimeSeries::empty(interpolation);
     }
     let now = Utc::now();
     let window_start = now - timespan;
@@ -262,7 +260,7 @@ pub fn history_from_buffer(
         .collect();
 
     if samples.is_empty() {
-        return QuantityTimeline::empty(quantity, unit, interpolation);
+        return TimeSeries::empty(interpolation);
     }
 
     // Prepend boundary point at window_start if not already there.
@@ -271,5 +269,5 @@ pub fn history_from_buffer(
         samples.insert(0, (window_start, boundary_value));
     }
 
-    QuantityTimeline { samples, quantity, unit, interpolation }
+    TimeSeries { samples, interpolation }
 }

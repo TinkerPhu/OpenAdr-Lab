@@ -15,7 +15,7 @@
 
 **Purpose**: Create the `common/` module that all user stories depend on.
 
-- [x] T001 Create `VEN/src/common/mod.rs` with `Interpolation`, `Quantity`, `Unit`, and `QuantityTimeline` types as specified in `data-model.md` — derive `Debug`, `Clone` on all types
+- [x] T001 Create `VEN/src/common/mod.rs` with `Interpolation`, `Quantity`, `Unit`, and `TimeSeries` types as specified in `data-model.md` — derive `Debug`, `Clone` on all types
 - [x] T002 Add `mod common;` to `VEN/src/main.rs` and add `use crate::common::*;` where needed; confirm `cargo check` passes with zero errors
 
 ---
@@ -28,7 +28,7 @@
 
 - [x] T003 [P] Write `tests/features/asset_forecast.feature` — BDD scenarios for `forecast(timespan)` covering: PV at noon (positive power), PV at night (zero), battery at 80% SoC, EV with no session (zero), base-load constant, heater thermal decay, zero timespan returns empty series, mandatory boundary point at `now + timespan`
 - [x] T004 [P] Write `tests/features/asset_history.feature` — BDD scenarios for `history(timespan)`: PV 30-min history returns samples, partial buffer (asset just started) returns available data only, empty buffer returns empty series, mandatory boundary point at `now − timespan`
-- [x] T005 Add `forecast(timespan: Duration) -> QuantityTimeline` and `history(timespan: Duration, history: &AssetHistoryBuffer) -> QuantityTimeline` dispatch arms to `impl AssetState` in `VEN/src/simulator/assets/mod.rs`; remove `predict()`; stub implementations return empty `QuantityTimeline` so the codebase compiles; fix all call sites of `predict()` to compile
+- [x] T005 Add `forecast(timespan: Duration) -> TimeSeries` and `history(timespan: Duration, history: &AssetHistoryBuffer) -> TimeSeries` dispatch arms to `impl AssetState` in `VEN/src/simulator/assets/mod.rs`; remove `predict()`; stub implementations return empty `TimeSeries` so the codebase compiles; fix all call sites of `predict()` to compile
 - [x] T006 Run BDD suite on Pi4 for the two new feature files and confirm all new scenarios **FAIL** (red phase); fix any step-definition compile errors without touching implementation
 
 **Checkpoint**: BDD scenarios exist and fail. Dispatch stubs compile. Implementation can now begin.
@@ -46,8 +46,8 @@
 - [x] T009 [P] [US1] Implement `forecast(timespan)` on `EvCharger` in `VEN/src/simulator/assets/ev.rs`: two samples only — `(now, setpoint_or_zero)` and boundary point at `now + timespan` with same value; `interpolation = Step`
 - [x] T010 [P] [US1] Implement `forecast(timespan)` on `Heater` in `VEN/src/simulator/assets/heater.rs`: thermal decay toward setpoint using existing thermal model coefficients; 1 sample/minute; boundary point; `interpolation = Linear`
 - [x] T011 [P] [US1] Implement `forecast(timespan)` on `BaseLoad` in `VEN/src/simulator/assets/base_load.rs`: two samples — `(now, baseline_kw)` and boundary point at `now + timespan` with same value; `interpolation = Step`
-- [x] T012 [US1] In `VEN/src/controller/planner.rs`: remove `pv_forecast()` function; add `asset_forecasts: &HashMap<String, QuantityTimeline>` parameter to `run_planner()` and `build_grid()`; replace `pv_forecast(profile, start)` call with `nearest_value(asset_forecasts.get("pv"), start)`; add private `nearest_value(series: Option<&QuantityTimeline>, ts: DateTime<Utc>) -> f64` helper (Step: last-value-at-or-before; Linear: nearest-neighbour; absent/empty: 0.0)
-- [x] T013 [US1] In `VEN/src/main.rs`: before each `run_planner()` call, compute `asset_forecasts: HashMap<String, QuantityTimeline>` by calling `entry.state.forecast(planning_horizon_duration)` for each asset in `sim_state.assets`; pass map to `run_planner()`
+- [x] T012 [US1] In `VEN/src/controller/planner.rs`: remove `pv_forecast()` function; add `asset_forecasts: &HashMap<String, TimeSeries>` parameter to `run_planner()` and `build_grid()`; replace `pv_forecast(profile, start)` call with `nearest_value(asset_forecasts.get("pv"), start)`; add private `nearest_value(series: Option<&TimeSeries>, ts: DateTime<Utc>) -> f64` helper (Step: last-value-at-or-before; Linear: nearest-neighbour; absent/empty: 0.0)
+- [x] T013 [US1] In `VEN/src/main.rs`: before each `run_planner()` call, compute `asset_forecasts: HashMap<String, TimeSeries>` by calling `entry.state.forecast(planning_horizon_duration)` for each asset in `sim_state.assets`; pass map to `run_planner()`
 - [x] T014 [US1] Run `cargo test` locally; fix any remaining compile errors; then on Pi4 run full BDD suite (`docker compose -f tests/docker-compose.test.yml run --build --rm test-runner`) — all existing scenarios must pass plus `asset_forecast.feature` scenarios must now pass
 
 **Checkpoint**: PV forecast drives the planner. `pv_forecast()` is gone. All existing BDD tests green.
@@ -60,13 +60,13 @@
 
 **Independent Test**: Call `GET /timeline/pv?hours_back=0.5` — response must contain samples from the last 30 minutes with no NaN values; same call for battery; simulated vs. measured assets must produce the same response shape.
 
-- [x] T015 [US2] Add `history_from_buffer(timespan: Duration, history: &AssetHistoryBuffer, interpolation: Interpolation) -> QuantityTimeline` shared helper to `VEN/src/simulator/assets/mod.rs`: slice buffer to `[now − timespan, now]`, extract `power_kw` column (drop NaN rows), prepend boundary point at `now − timespan` using declared interpolation mode, return `QuantityTimeline { samples, quantity: Power, unit: Kilowatt, interpolation }`
+- [x] T015 [US2] Add `history_from_buffer(timespan: Duration, history: &AssetHistoryBuffer, interpolation: Interpolation) -> TimeSeries` shared helper to `VEN/src/simulator/assets/mod.rs`: slice buffer to `[now − timespan, now]`, extract `power_kw` column (drop NaN rows), prepend boundary point at `now − timespan` using declared interpolation mode, return `TimeSeries { samples, quantity: Power, unit: Kilowatt, interpolation }`
 - [x] T016 [P] [US2] Implement `history(timespan, history)` on `PvInverter` in `VEN/src/simulator/assets/pv.rs`: delegate to `history_from_buffer` with `interpolation = Linear`
 - [x] T017 [P] [US2] Implement `history(timespan, history)` on `Battery` in `VEN/src/simulator/assets/battery.rs`: delegate to `history_from_buffer` with `interpolation = Linear`
 - [x] T018 [P] [US2] Implement `history(timespan, history)` on `EvCharger` in `VEN/src/simulator/assets/ev.rs`: delegate to `history_from_buffer` with `interpolation = Step`
 - [x] T019 [P] [US2] Implement `history(timespan, history)` on `Heater` in `VEN/src/simulator/assets/heater.rs`: delegate to `history_from_buffer` with `interpolation = Linear`
 - [x] T020 [P] [US2] Implement `history(timespan, history)` on `BaseLoad` in `VEN/src/simulator/assets/base_load.rs`: delegate to `history_from_buffer` with `interpolation = Step`
-- [x] T021 [US2] Wire `history()` into the timeline handler in `VEN/src/main.rs`: for each asset in `sim_state.assets`, replace direct `trace.asset_history_for(id)` slice with `asset.history(window_duration, history_buf)` and return the `QuantityTimeline` samples; keep `"grid"` virtual asset using existing direct buffer access (no `AssetState` for grid)
+- [x] T021 [US2] Wire `history()` into the timeline handler in `VEN/src/main.rs`: for each asset in `sim_state.assets`, replace direct `trace.asset_history_for(id)` slice with `asset.history(window_duration, history_buf)` and return the `TimeSeries` samples; keep `"grid"` virtual asset using existing direct buffer access (no `AssetState` for grid)
 - [ ] T022 [US2] On Pi4 run BDD suite with `--build`; `asset_history.feature` scenarios must now pass alongside all existing scenarios
 
 **Checkpoint**: Timeline sourced via `history()`. US1 and US2 both independently green.
@@ -79,7 +79,7 @@
 
 **Independent Test**: Swap `PvInverter` (simulated) for `MeasuredPv` stub in the test profile; run full BDD suite; zero source changes outside the asset file itself.
 
-- [ ] T023 [US3] Add `MeasuredPv` struct to `VEN/src/simulator/assets/pv.rs` (or a `#[cfg(test)]` module): implements `forecast(timespan)` returning a flat `QuantityTimeline` at current power (Linear interpolation), and `history(timespan, history)` delegating to `history_from_buffer`; add a `AssetState::MeasuredPv(MeasuredPv)` variant (or use feature flag) so it can be loaded from a test profile
+- [ ] T023 [US3] Add `MeasuredPv` struct to `VEN/src/simulator/assets/pv.rs` (or a `#[cfg(test)]` module): implements `forecast(timespan)` returning a flat `TimeSeries` at current power (Linear interpolation), and `history(timespan, history)` delegating to `history_from_buffer`; add a `AssetState::MeasuredPv(MeasuredPv)` variant (or use feature flag) so it can be loaded from a test profile
 - [ ] T024 [US3] Create `VEN/profiles/measured_test.yaml` with `MeasuredPv` as the PV asset; run the full BDD suite on Pi4 pointing to this profile; confirm all scenarios pass with zero changes to `planner.rs`, `dispatcher.rs`, or `reporter.rs`
 - [ ] T025 [US3] Remove `MeasuredPv` variant and `measured_test.yaml` — interchangeability verified; document outcome in `docs/history/project_journal.md` under RF-01
 
@@ -90,9 +90,9 @@
 ## Phase 6: Polish & Cross-Cutting Concerns
 
 - [x] T026 [P] Add `cargo test` unit tests for edge cases in `VEN/src/simulator/assets/` test modules: zero timespan returns empty series, PV at night returns all-zero samples, battery at full SoC with charge setpoint returns zero power, EV with no session returns zero, boundary point timestamp equals `now + timespan` exactly
-- [x] T027 [P] Add `cargo test` unit tests for `QuantityTimeline` invariants in `VEN/src/common/mod.rs`: samples are ascending, boundary point present on non-empty series, `quantity`/`unit`/`interpolation` match expected values per asset type
+- [x] T027 [P] Add `cargo test` unit tests for `TimeSeries` invariants in `VEN/src/common/mod.rs`: samples are ascending, boundary point present on non-empty series, `quantity`/`unit`/`interpolation` match expected values per asset type
 - [ ] T028 Run full BDD suite on Pi4 across all 27+ features to confirm zero regressions from this refactoring
-- [ ] T029 Write journal entry in `docs/history/project_journal.md`: what was done, pv_forecast() removal rationale, QuantityTimeline design decisions, key learnings
+- [ ] T029 Write journal entry in `docs/history/project_journal.md`: what was done, pv_forecast() removal rationale, TimeSeries design decisions, key learnings
 
 ---
 

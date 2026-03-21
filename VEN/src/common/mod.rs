@@ -7,44 +7,16 @@ pub enum Interpolation {
     Step,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Quantity {
-    Power,
-    Energy,
-    StateOfCharge,
-    Temperature,
-    Irradiance,
-    Tariff,
-    Co2Intensity,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Unit {
-    Kilowatt,
-    KilowattHour,
-    Percent,
-    Celsius,
-    WattsPerSquareMeter,
-    EuroPerKilowattHour,
-    GramsPerKilowattHour,
-}
-
 #[derive(Debug, Clone)]
-pub struct QuantityTimeline {
+pub struct TimeSeries {
     pub samples: Vec<(DateTime<Utc>, f64)>,
-    pub quantity: Quantity,
-    pub unit: Unit,
     pub interpolation: Interpolation,
 }
 
-impl QuantityTimeline {
-    pub fn empty(quantity: Quantity, unit: Unit, interpolation: Interpolation) -> Self {
+impl TimeSeries {
+    pub fn empty(interpolation: Interpolation) -> Self {
         Self {
             samples: Vec::new(),
-            quantity,
-            unit,
             interpolation,
         }
     }
@@ -158,16 +130,14 @@ impl QuantityTimeline {
     /// Resample onto an arbitrary timestamp grid. Each output point is the
     /// interpolated value at that timestamp. Points where interpolation is
     /// undefined are skipped.
-    pub fn resample_to_grid(&self, timestamps: &[DateTime<Utc>]) -> QuantityTimeline {
+    pub fn resample_to_grid(&self, timestamps: &[DateTime<Utc>]) -> TimeSeries {
         let samples: Vec<(DateTime<Utc>, f64)> = timestamps
             .iter()
             .filter_map(|&ts| self.interpolate_at(ts).map(|v| (ts, v)))
             .collect();
 
-        QuantityTimeline {
+        TimeSeries {
             samples,
-            quantity: self.quantity.clone(),
-            unit: self.unit.clone(),
             interpolation: self.interpolation.clone(),
         }
     }
@@ -180,13 +150,11 @@ impl QuantityTimeline {
     /// - Last bucket starts at or before `floor(last_sample, width)`
     ///
     /// This ensures series from different assets share timestamps after resampling.
-    pub fn resample_uniform(&self, width: Duration) -> QuantityTimeline {
+    pub fn resample_uniform(&self, width: Duration) -> TimeSeries {
         let width_ms = width.num_milliseconds();
         if self.samples.is_empty() || width_ms <= 0 {
-            return QuantityTimeline {
+            return TimeSeries {
                 samples: Vec::new(),
-                quantity: self.quantity.clone(),
-                unit: self.unit.clone(),
                 interpolation: self.interpolation.clone(),
             };
         }
@@ -207,10 +175,8 @@ impl QuantityTimeline {
             t = t + width;
         }
 
-        QuantityTimeline {
+        TimeSeries {
             samples,
-            quantity: self.quantity.clone(),
-            unit: self.unit.clone(),
             interpolation: self.interpolation.clone(),
         }
     }
@@ -244,20 +210,16 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 3, 21, hour, min, sec).unwrap()
     }
 
-    fn step_series(samples: Vec<(DateTime<Utc>, f64)>) -> QuantityTimeline {
-        QuantityTimeline {
+    fn step_series(samples: Vec<(DateTime<Utc>, f64)>) -> TimeSeries {
+        TimeSeries {
             samples,
-            quantity: Quantity::Tariff,
-            unit: Unit::EuroPerKilowattHour,
             interpolation: Interpolation::Step,
         }
     }
 
-    fn linear_series(samples: Vec<(DateTime<Utc>, f64)>) -> QuantityTimeline {
-        QuantityTimeline {
+    fn linear_series(samples: Vec<(DateTime<Utc>, f64)>) -> TimeSeries {
+        TimeSeries {
             samples,
-            quantity: Quantity::Power,
-            unit: Unit::Kilowatt,
             interpolation: Interpolation::Linear,
         }
     }
@@ -266,23 +228,21 @@ mod tests {
 
     #[test]
     fn empty_series_has_no_samples() {
-        let s = QuantityTimeline::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
+        let s = TimeSeries::empty(Interpolation::Linear);
         assert!(s.samples.is_empty());
     }
 
     #[test]
     fn empty_series_is_trivially_ascending() {
-        let s = QuantityTimeline::empty(Quantity::Power, Unit::Kilowatt, Interpolation::Linear);
+        let s = TimeSeries::empty(Interpolation::Linear);
         assert!(s.is_ascending());
     }
 
     #[test]
     fn non_empty_series_ascending_check() {
         let now = Utc::now();
-        let s = QuantityTimeline {
+        let s = TimeSeries {
             samples: vec![(now, 1.0), (now + Duration::seconds(60), 2.0)],
-            quantity: Quantity::Power,
-            unit: Unit::Kilowatt,
             interpolation: Interpolation::Linear,
         };
         assert!(s.is_ascending());
@@ -291,10 +251,8 @@ mod tests {
     #[test]
     fn series_with_same_timestamp_not_ascending() {
         let now = Utc::now();
-        let s = QuantityTimeline {
+        let s = TimeSeries {
             samples: vec![(now, 1.0), (now, 2.0)],
-            quantity: Quantity::Power,
-            unit: Unit::Kilowatt,
             interpolation: Interpolation::Linear,
         };
         assert!(!s.is_ascending());
