@@ -1,192 +1,227 @@
-## Refactoring
+# VEN Backend Refactoring Backlog
 
-These items improve internal consistency and architecture without changing external behaviour.
-Each is a prerequisite for future feature work as noted.
+Generated from architecture analysis on 2026-03-21.
+Items ordered by execution priority: safe deletions first, then consolidations, then structural moves.
 
-### RF-01 — Asset Interface: implement forecast() and history() on each asset
-**What:** Each asset type (PV, battery, EV, heater, base load) must implement the
-`AssetInterface` trait: `current()`, `forecast(timespan)`, `history(timespan)`.
-**Why:** The planner currently contains a standalone `pv_forecast()` function
-(`planner.rs:561–573`) that duplicates PV physics. This violates the single-responsibility
-principle and will break when a real sensor replaces the simulator — the planner would
-still use the wrong formula.
-**Changes required:**
-- Implement `predict()` properly on `PvInverter`, `Battery`, `EvCharger`, `Heater`, `BaseLoad`
-  (currently all stubs returning single-point `(now, current_power)`)
-- Remove `pv_forecast()` from `planner.rs`; replace call sites with `asset.forecast(ts)`
-- Implement `history(window)` on each asset backed by its `EnergyCounter` / power profile ring buffer
-**Prerequisite for:** real sensor integration (RF-03), timeline visualisation accuracy
+---
 
-### RF-01a - ~~rename past() to recordings()~~ resolved: renamed to history()
-- Was too general a name. Renamed to `history()`, which pairs cleanly with `forecast()` and aligns with the HTTP endpoint `/history/:asset_id`. Implemented in speckit 007.
+## RF-B01: Delete dead `dispatcher::update_packets`
 
-### RF-02 — Flatten simulator/assets/ into assets/
-**What:** Move `VEN/src/simulator/assets/{ev,heater,pv,battery,base_load}` into a top-level
-`VEN/src/assets/` directory. Each asset module owns its physics model, forecast logic,
-simulation state, and `/sim` parameter types.
-**Why:** The current layout implies simulation is a global concern. After RF-01, each asset
-*is* its own simulator. The `simulator/` wrapper becomes redundant. The target layout is:
+**Status**: BACKLOG
+**Risk**: Low (dead code removal)
+**Files**: `VEN/src/controller/dispatcher.rs` (lines 81-131)
+
+The function `update_packets` is marked with the comment "NOTE: This function will be superseded by `monitor::record_tick`" — and it was. `monitor::record_tick` is the only caller in the tick loop. `update_packets` is never called anywhere.
+
+**Work**:
+- Delete `update_packets` and its unused imports (`EnergyPacket`, `EnergySnapshot`, `PacketStatus`, `SimSnapshot`, `Uuid` — verify each isn't used by `build_setpoints`).
+- Remove the now-unnecessary `use` of `EnergySnapshot` and `PacketStatus` if they become orphaned.
+
+**Test**:
+- `cargo build --workspace` compiles without errors.
+- `cargo test --workspace` passes (no test references `update_packets`).
+- `grep -r "update_packets" VEN/src/` returns zero hits.
+- Full BDD suite passes unchanged (the function was never called at runtime).
+
+---
+
+## RF-B02: Delete unused `PlannedTariffs`, `PastTariffs`, `TariffHeuristic`
+
+**Status**: BACKLOG
+**Risk**: Low (dead code removal)
+**Files**: `VEN/src/entities/tariff_snapshot.rs`
+
+Three types are declared but never referenced outside their own file:
+- `PlannedTariffs` (lines 18-43) — has `tariff_at()` and `avg_import_tariff()`, never called.
+- `PastTariffs` (lines 129-133) — empty wrapper, never instantiated.
+- `TariffHeuristic` (lines 136-150) — never instantiated.
+
+**Work**:
+- Delete the three structs and their `impl` blocks.
+- Keep `TariffSnapshot` and `TariffTimeSeries` (those are actively used).
+
+**Test**:
+- `cargo build --workspace` compiles without errors.
+- `grep -r "PlannedTariffs\|PastTariffs\|TariffHeuristic" VEN/src/` returns zero hits.
+- All existing `tariff_snapshot::tests` still pass.
+- BDD suite passes unchanged.
+
+---
+
+## RF-B03: Remove `obligations()` alias from `AppState`
+
+**Status**: BACKLOG
+**Risk**: Low (rename only)
+**Files**: `VEN/src/state.rs`, callers in `main.rs`
+
+`obligations()` (line 248) is a byte-for-byte duplicate of `report_obligations()` (line 239). Both return `self.inner.read().await.report_obligations.clone()`.
+
+**Work**:
+- Find all callers of `obligations()` (expected: `main.rs` event poll loop, obligation check loop).
+- Replace with `report_obligations()`.
+- Delete the `obligations()` method.
+
+**Test**:
+- `cargo build --workspace` compiles.
+- `grep -r "\.obligations()" VEN/src/` returns only `report_obligations()` references and `due_obligations()`.
+- BDD suite passes unchanged.
+
+---
+
+## RF-B04: Consolidate ISO 8601 duration parsers
+
+**Status**: BACKLOG
+**Risk**: Low (shared utility extraction)
+**Files**: `VEN/src/controller/openadr_interface.rs`, `VEN/src/controller/reporter.rs`, `VEN/src/common/mod.rs`
+
+Two independent implementations exist:
+- `openadr_interface::parse_iso8601_duration` — full (Y/M/D/H/M/S), 80 lines.
+- `reporter::parse_duration_secs` — partial (H/M/S only), 28 lines.
+
+The reporter version silently ignores day-level durations, which is a latent bug if a report descriptor ever uses `P1D` style durations.
+
+**Work**:
+- Move `parse_iso8601_duration` to `common/mod.rs` as `pub(crate) fn parse_iso8601_duration_secs(s: &str) -> i64`.
+- Replace both call sites with the shared version.
+- Delete both local copies.
+
+**Test**:
+- All existing `openadr_interface::tests::test_parse_iso8601_duration_*` tests still pass (move them to `common::tests`).
+- Add one test confirming `parse_iso8601_duration_secs("P1D")` returns 86400 (this was a gap in the reporter's version).
+- `cargo test --workspace` passes.
+- BDD suite passes unchanged.
+
+---
+
+## RF-B05: Extract `net_import_kw` helper in reporter
+
+**Status**: BACKLOG
+**Risk**: Low (local refactor within one module)
+**Files**: `VEN/src/controller/reporter.rs`
+
+The pattern:
+```rust
+let net_import_kw: f64 = asset_history
+    .values()
+    .filter_map(|buf| { buf.to_timeline(None).last()... })
+    .filter(|&kw| kw > 0.0)
+    .sum();
 ```
-VEN/src/assets/
-  pv/        — PvAsset (irradiation model, forecast, past, sim params)
-  battery/   — BatteryAsset
-  ev/        — EvAsset
-  heater/    — HeaterAsset
-  base_load/ — BaseLoadAsset
-  mod.rs     — AssetInterface trait + AssetEntry + Vec<AssetEntry> SimState
-```
-**Prerequisite for:** RF-01, clean addition of MeasuredAsset variants
+appears 3 times in `reporter.rs` (lines 108-115, 133-140, 250-257).
 
-### RF-03 — Asset type switches in user_request.rs → move into assets
-**What:** `VEN/src/controller/user_request.rs` contains `match asset_type { ... }` blocks
-that set default `CompletionPolicy`, `PostDeadlineComfortBid`, etc. per asset type.
-**Why:** These defaults are asset-specific knowledge and belong inside each asset module.
-The controller should ask the asset for its defaults, not hard-code them.
-**Note:** Already tracked as a one-liner in the old BACKLOG below.
+**Work**:
+- Extract `fn latest_net_import_kw(asset_history: &HashMap<String, AssetHistoryBuffer>) -> f64`.
+- Replace all three sites.
 
-### RF-04 — min_soc not in state_values
-**What:** `min_soc` is not written to `state_values`, so it always returns the default 0.10.
-**Why:** Bug — user-configured `min_soc` is silently ignored at runtime.
+**Test**:
+- `cargo build --workspace` compiles.
+- Add a unit test: build an `AssetHistoryBuffer` with known values, verify `latest_net_import_kw` returns the correct sum of positive-power assets.
+- BDD suite passes unchanged (reporter output is identical).
 
-### RF-05a — TimeSeries resampling operations
-**What:** Add resampling operations to the existing `TimeSeries` in `VEN/src/common/mod.rs`:
-- `resample_uniform(width: Duration) -> TimeSeries` — resample onto a regular grid with
-  the given step width. Interpolation uses the series' own `interpolation` field (Step = LOCF,
-  Linear = proportional). Aggregation within each bucket is also determined by the
-  interpolation mode (Step/Linear → time-weighted mean).
-- `resample_to_grid(timestamps: &[DateTime<Utc>]) -> TimeSeries` — resample onto an
-  arbitrary timestamp grid. Each output point is the interpolated value at that timestamp.
-**Why:** The codebase has three independent lookup strategies (exact-interval match in planner,
-nearest-neighbour in UI, latest-snapshot in reporter) with no shared semantics. This causes
-silent correctness bugs when signals of different interpolation types are mixed or when
-series have different periods. See `VEN_ARCHITECTURE.md §5` for full audit.
-Adding operations to the existing `TimeSeries` avoids introducing a parallel container —
-the struct already carries `samples`, `interpolation`, `quantity`, and `unit`.
-**Grid-alignment rounding rule** (agreed during RF-01 spec):
-When `resample_uniform(interval)` is applied to a series anchored at `now`, timestamps MUST be
-rounded to the interval grid boundary — not computed as `now ± n×interval`:
-- `forecast(timespan).resample_uniform(interval)`: first point = `ceil(now, interval)`
-- `history(timespan).resample_uniform(interval)`: last point = `floor(now, interval)`
-- Example: `now = 12:22`, `interval = 5 min` → forecast starts `12:25`, history ends `12:20`
-This ensures series from different assets automatically share timestamps after resampling.
-**Deliverable:** Methods on `TimeSeries` with comprehensive unit tests, no integration changes.
-**Prerequisite for:** RF-05b, RF-05c
+---
 
-### RF-05b — Backend adoption of TimeSeries resampling
-**What:** Replace all ad-hoc time-series lookup functions in backend Rust code with
-`TimeSeries` resampling operations.
-**Changes required:**
-- Convert `TariffSnapshot` series into `TimeSeries` (Step interpolation) at the
-  OpenADR interface boundary — one series per quantity (import, export, CO2)
-- Replace `tariff_import_at()`, `tariff_export_at()`, `tariff_co2_at()` in `planner.rs`
-  with `resample_uniform(slot_width)` called once before the slot loop
-- Replace `nearest_value()` with the same resampled series lookup
-- Replace single-snapshot report generation with `resample_uniform(obligation_interval)`
-**Why:** After resampling all series to the planner's slot width, the slot loop becomes a
-simple index lookup — no per-slot search, no interpolation bugs, and tariffs that span
-slot boundaries are correctly time-weighted.
-**Depends on:** RF-05a
-**Prerequisite for:** RF-06, accurate report generation
+## RF-B06: Add `EnergyPacket::builder()` or `EnergyPacket::new()` constructor
 
-### RF-05c — Backend: uniform-grid timeline API with now-point
-**What:** Modify `GET /timeline/all` (and `GET /timeline/:asset_id`) to resample all assets
-onto a shared uniform time grid with a now-point. The response format stays unchanged
-(`Record<string, {ts, values}[]>`). Each asset's array is three segments concatenated in
-ascending time order: (1) history grid points, (2) a single now-point, (3) future grid points.
-**Why:** Investigation showed that history timestamps are already aligned across assets
-(all pushed with the same `now` in the tick loop). Misalignment only occurs because
-the per-asset `downsample()` stride in `get_timeline_all` picks different indices per asset.
-The fix belongs in the API: return a shared grid so the UI needs no interpolation at all.
-**New query parameter:**
-- `resolution` (optional, seconds) — bucket width for the uniform grid. Default: auto-calculated
-  from `hours_back + hours_forward` to target ~300 points. Replaces `max_points`.
-**Response format (unchanged shape, new alignment guarantees):**
-```json
-{
-  "ev": [
-    {"ts": "2026-03-21T11:00:00Z", "values": {"power_kw": 2.1}},
-    {"ts": "2026-03-21T11:00:10Z", "values": {"power_kw": 2.3}},
-    {"ts": "2026-03-21T11:00:17Z", "values": {"power_kw": 2.4}},
-    {"ts": "2026-03-21T11:00:20Z", "values": {"power_kw": 3.0}},
-    {"ts": "2026-03-21T11:00:30Z", "values": null}
-  ],
-  "battery": [
-    {"ts": "2026-03-21T11:00:00Z", "values": {"power_kw": -0.5}},
-    {"ts": "2026-03-21T11:00:10Z", "values": {"power_kw": -0.8}},
-    {"ts": "2026-03-21T11:00:17Z", "values": {"power_kw": -0.9}},
-    {"ts": "2026-03-21T11:00:20Z", "values": {"power_kw": -1.0}},
-    {"ts": "2026-03-21T11:00:30Z", "values": null}
-  ]
-}
-```
-In the example above (resolution=10s, now=11:00:17Z): index 0-1 are history grid points,
-index 2 is the now-point (not grid-aligned), index 3-4 are future grid points.
-**Key design decisions:**
-- All assets share the same `ts` values at each index — the UI can index by position.
-- Grid timestamps are snapped to round boundaries of the resolution (deterministic: same
-  resolution + window = same grid, regardless of when the call is made).
-- The now-point sits between history and future grid portions at the exact server `now`,
-  preserving ascending sort order. It provides instantaneous values so the UI does not
-  need to interpolate (the UI doesn't know the interpolation method).
-- History buckets: aggregate via time-weighted mean (LOCF within bucket, then average).
-- Future (plan) buckets: step interpolation — each bucket gets the plan slot value that covers
-  its start timestamp.
-- Empty buckets: `{"ts": "...", "values": null}` — no data available.
-- `resolution` replaces `max_points`. `max_points` kept as deprecated alias.
-- `/tariffs` is NOT resampled — tariffs are sparse step functions (1-10 points per 24h),
-  render correctly as-is, and cost/CO₂ rates are already baked into each timeline point.
-**Depends on:** RF-05a (TimeSeries resampling concepts)
-**Prerequisite for:** RF-05d (UI cleanup)
+**Status**: BACKLOG
+**Risk**: Medium (touches 3 construction sites)
+**Files**: `VEN/src/entities/energy_packet.rs`, `VEN/src/main.rs` (post_packets), `VEN/src/controller/planner.rs` (seed_to_packet), `VEN/src/controller/user_request.rs` (create_from_body)
 
-### RF-05d — Frontend: remove findNearest, use grid-aligned API response
-**What:** Update `GridAccumulatedCell.tsx` to consume the grid-aligned response from RF-05c.
-Remove `findNearest()`, `TOLERANCE_MS`, and the tolerance-based matching logic.
-**Changes required:**
-- Replace `buildStackedFromAllTimelines` with a simple positional zip across assets
-  (all arrays share the same indices and `ts` values — no lookup needed).
-- Handle `values: null` entries from empty grid buckets (render as gaps in the chart).
-- Remove `findNearest()` function entirely.
-- Update or replace `GridAccumulatedCell.test.tsx` to test the new direct-index approach.
-**Note:** No response shape change — the format is still `Record<string, {ts, values}[]>`.
-The client/hook code does not need updating. The now-point is already inline in the array.
-**Depends on:** RF-05c
-**Prerequisite for:** accurate UI stacked charts
+Creating an EnergyPacket requires setting ~25 fields. Three sites duplicate the full struct literal:
+- `post_packets` handler (main.rs:1326-1366)
+- `seed_to_packet` (planner.rs:628-661)
+- `create_from_body` (user_request.rs:118-145)
 
-### RF-05e — Reporter adoption: multi-interval resampling for measurement reports
-**What:** Refactor `build_measurement_report()` in `VEN/src/controller/reporter.rs` to
-resample asset history to obligation intervals using `resample_uniform()`, producing one
-report row per interval instead of a single latest-snapshot.
-**Why:** Currently the reporter emits a single data point per report. With resampled history,
-reports can cover multiple obligation intervals with correctly aggregated values.
-**Complications identified (from RF-05b analysis):**
-1. Obligation interval duration is not currently passed into the reporter — needs plumbing
-   from the event's report descriptor
-2. `AssetHistoryBuffer` returns multi-keyed snapshots (power, SoC, temperature), not scalar
-   `TimeSeries` — needs per-asset-type conversion logic
-3. Report JSON payload is hardcoded to a single interval — needs structural change to emit
-   an array of interval payloads
-4. EV SoC requires point-in-time sampling (not time-weighted mean) — different aggregation
-   semantics than power quantities
-5. Import/export split per interval requires sign-based partitioning of the resampled power
-   series
-**Depends on:** RF-05a, RF-05b (resampling infrastructure + planner adoption)
-**Prerequisite for:** accurate multi-interval OpenADR measurement reports
+**Work**:
+- Add `EnergyPacket::new(asset_id, target_energy_kwh, desired_power_kw, value_curve, now) -> EnergyPacket` that sets all defaults (Pending status, empty profiles, zero accumulators, etc.).
+- Refactor all three call sites to use it, then override specific fields as needed.
 
-### RF-06 — Planner slot costing: time-weighted tariff across slot boundaries
-**What:** With RF-05b in place, tariff series are already resampled to the slot grid using
-`resample_uniform(slot_width)`. Each resampled point is the time-weighted average across
-that bucket — so slot costing is automatically correct. RF-06 becomes a verification task:
-confirm that `resample_uniform` with Step interpolation produces the correct time-weighted
-average when a slot spans a tariff boundary.
-```
-Example: slot [10:55, 11:00) with tariff [10:00=€0.20, 11:00=€0.15]
-resample_uniform(5min) at 10:55 → €0.20 (entire bucket within €0.20 interval)
-slot [10:57, 11:02) → (3min × €0.20 + 2min × €0.15) / 5min = €0.185
-```
-For capacity limits: `resample_uniform` with Step + min aggregation gives the strictest
-limit that applies anywhere within each slot.
-**Prerequisite for:** accurate cost estimates in plan warnings and user notifications
-**Depends on:** RF-05b (resampling already in place)
+**Test**:
+- Unit test: `EnergyPacket::new(...)` returns a packet with `status == Pending`, empty `past_power_profile`, zero `accumulated_cost_eur`, correct `created_at`.
+- `cargo test --workspace` passes.
+- BDD suite passes unchanged — the constructed packets must be functionally identical.
+- Specifically verify UC-07 (user request) and UC-01 (event-driven scheduling) BDD scenarios still pass.
+
+---
+
+## RF-B07: Consolidate `finalize_packets` into single-pass per packet
+
+**Status**: BACKLOG
+**Risk**: Low (local optimization in planner)
+**Files**: `VEN/src/controller/planner.rs` (lines 508-543)
+
+`finalize_packets` does three separate `firm_slots.iter().flat_map().filter().map().sum()` passes per packet to compute `allocated_kwh`, `cost`, and `co2`. These can be a single pass.
+
+**Work**:
+- Replace the three passes with one loop accumulating all three values.
+
+**Test**:
+- Existing `planner::tests` pass.
+- Add a targeted test: create a plan with 2 packets across 3 slots, verify `estimated_cost_eur`, `estimated_co2_g`, and `estimated_completion` match the expected values.
+- BDD suite passes unchanged.
+
+---
+
+## RF-B08: Extract event poll change-detection into a function
+
+**Status**: BACKLOG
+**Risk**: Medium (touches the critical event poll loop)
+**Files**: `VEN/src/main.rs` (lines 125-273)
+
+The event poll loop contains ~150 lines of inline logic: JSON traversal for trace events (OpenAdrArrived/Expired), rate change detection, capacity change detection. This logic is interleaved with state updates and should be a testable function.
+
+**Work**:
+- Extract a pure function: `fn detect_event_changes(events: &[Value], prev_ids: &HashSet<String>, prev_tariff_count: usize, prev_import_limit: Option<f64>, now: DateTime<Utc>) -> EventChanges` where `EventChanges` holds the lists of arrived/expired events, rate/capacity change flags, and parsed trace events.
+- The loop body becomes: call `detect_event_changes`, push returned trace events, update prev state, store rates/capacity/obligations.
+
+**Test**:
+- Unit test `detect_event_changes` with: (a) new event appears -> OpenAdrArrived emitted, (b) event disappears -> OpenAdrExpired emitted, (c) tariff count changes -> RateChange emitted, (d) import limit changes -> CapacityChange emitted, (e) no changes -> no events emitted.
+- BDD suite passes unchanged.
+
+---
+
+## RF-B09: Extract HTTP handlers and DTOs from `main.rs`
+
+**Status**: BACKLOG
+**Risk**: Medium (large structural move, no logic changes)
+**Files**: `VEN/src/main.rs` -> new `VEN/src/routes.rs` (or `VEN/src/routes/` module)
+
+`main.rs` is 1473 lines, of which ~800 are HTTP handler functions and their request/response DTOs. The `main()` function itself (startup + background loops) is the remaining ~600 lines.
+
+**Work**:
+- Create `VEN/src/routes.rs` (or `routes/mod.rs` with sub-modules by domain: `sim.rs`, `timeline.rs`, `hems.rs`, `trace.rs`).
+- Move `AppCtx` to a shared location (e.g., keep in `main.rs` or put in `state.rs`).
+- Move all handler functions and their query/body DTOs.
+- `main.rs` retains: module declarations, `main()` with startup and background loops, router construction.
+
+**Test**:
+- `cargo build --workspace` compiles.
+- `cargo test --workspace` passes.
+- Full BDD suite passes unchanged (all 33+ features, 143+ scenarios).
+- Verify every endpoint responds identically by running the E2E test suite.
+
+---
+
+## RF-B10: Extract background loops from `main.rs`
+
+**Status**: BACKLOG
+**Risk**: Medium (structural move, no logic changes)
+**Depends on**: RF-B08, RF-B09 (cleaner after handlers and change-detection are extracted)
+**Files**: `VEN/src/main.rs` -> new `VEN/src/loops.rs`
+
+After RF-B09, `main.rs` still has ~600 lines of background loop setup. Each loop (program poll, event poll, report poll, sim tick, obligation check, planning, persistence) can be a function that takes its dependencies and returns a `JoinHandle`.
+
+**Work**:
+- Create `VEN/src/loops.rs` with functions like `spawn_program_poll(state, vtn, interval_secs) -> JoinHandle<()>`.
+- `main()` becomes: config + state init + spawn calls + router + serve. Target: ~100 lines.
+
+**Test**:
+- `cargo build --workspace` compiles.
+- `cargo test --workspace` passes.
+- Full BDD suite passes unchanged.
+- `wc -l VEN/src/main.rs` is under 150 lines.
+
+
+
 
 ---
 
