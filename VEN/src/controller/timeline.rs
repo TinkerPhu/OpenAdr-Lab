@@ -13,6 +13,208 @@ use std::collections::{HashMap, HashSet};
 use crate::controller::trace::{AssetHistoryBuffer, AssetTimelinePoint};
 use crate::entities::plan::Plan;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Uniform grid resampling (RF-05c)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Compute uniform grid timestamps snapped to round boundaries of `resolution_s`.
+///
+/// Returns `(history_grid, future_grid)` where:
+/// - `history_grid` covers `[window_start..now)` snapped to multiples of `resolution_s`
+/// - `future_grid` covers `(now..window_end]` snapped to multiples of `resolution_s`
+///
+/// Grid timestamps are deterministic: same resolution + window = same grid.
+pub fn compute_uniform_grid(
+    window_start: DateTime<Utc>,
+    window_end: DateTime<Utc>,
+    now: DateTime<Utc>,
+    resolution_s: u64,
+) -> (Vec<DateTime<Utc>>, Vec<DateTime<Utc>>) {
+    let res = resolution_s.max(1) as i64;
+
+    // Snap window_start up to next grid boundary.
+    let start_epoch = window_start.timestamp();
+    let first_grid = if start_epoch % res == 0 {
+        start_epoch
+    } else {
+        start_epoch + (res - start_epoch.rem_euclid(res))
+    };
+
+    let now_epoch = now.timestamp();
+    let end_epoch = window_end.timestamp();
+
+    // Snap window_end down to grid boundary.
+    let last_grid = end_epoch - end_epoch.rem_euclid(res);
+
+    // History grid: all grid points in [first_grid, now_epoch)
+    let mut history = Vec::new();
+    let mut t = first_grid;
+    while t < now_epoch {
+        if let Some(dt) = DateTime::from_timestamp(t, 0) {
+            history.push(dt);
+        }
+        t += res;
+    }
+
+    // Future grid: all grid points in (now_epoch, last_grid]
+    // Start from the first grid point strictly after now.
+    let future_start = if now_epoch % res == 0 {
+        now_epoch + res
+    } else {
+        now_epoch + (res - now_epoch.rem_euclid(res))
+    };
+    let mut future = Vec::new();
+    t = future_start;
+    while t <= last_grid {
+        if let Some(dt) = DateTime::from_timestamp(t, 0) {
+            future.push(dt);
+        }
+        t += res;
+    }
+
+    (history, future)
+}
+
+/// Resample raw sorted points onto a uniform grid using LOCF time-weighted mean.
+///
+/// For each grid timestamp, aggregates all raw points in `[grid_ts, grid_ts + resolution)`.
+/// - Multiple rows: LOCF time-weighted average.
+/// - Single row: that row's values.
+/// - No rows: `None` (will be serialized as `{"ts": "...", "values": null}`).
+pub fn resample_to_grid(
+    raw: &[AssetTimelinePoint],
+    grid: &[DateTime<Utc>],
+    resolution_s: u64,
+) -> Vec<Option<HashMap<String, f64>>> {
+    let res_ms = (resolution_s.max(1) as i64) * 1000;
+
+    grid.iter()
+        .map(|&grid_ts| {
+            let bucket_start_ms = grid_ts.timestamp_millis();
+            let bucket_end_ms = bucket_start_ms + res_ms;
+
+            // Collect rows in [bucket_start, bucket_end)
+            let rows: Vec<&AssetTimelinePoint> = raw
+                .iter()
+                .filter(|p| {
+                    let t = p.ts.timestamp_millis();
+                    t >= bucket_start_ms && t < bucket_end_ms
+                })
+                .collect();
+
+            if rows.is_empty() {
+                return None;
+            }
+
+            // Collect all value keys across rows in this bucket.
+            let mut all_keys: HashSet<&String> = HashSet::new();
+            for r in &rows {
+                for k in r.values.keys() {
+                    all_keys.insert(k);
+                }
+            }
+
+            // LOCF time-weighted mean per key.
+            let mut result: HashMap<String, f64> = HashMap::new();
+            let mut any_non_nan = false;
+
+            for key in all_keys {
+                let weighted_avg = locf_weighted_mean(
+                    &rows,
+                    key,
+                    bucket_start_ms,
+                    bucket_end_ms,
+                );
+                if !weighted_avg.is_nan() {
+                    any_non_nan = true;
+                }
+                result.insert(key.clone(), weighted_avg);
+            }
+
+            if any_non_nan {
+                Some(result)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// LOCF time-weighted mean for a single key across rows in a bucket.
+fn locf_weighted_mean(
+    rows: &[&AssetTimelinePoint],
+    key: &str,
+    bucket_start_ms: i64,
+    bucket_end_ms: i64,
+) -> f64 {
+    let total_duration = (bucket_end_ms - bucket_start_ms) as f64;
+    if total_duration <= 0.0 {
+        return f64::NAN;
+    }
+
+    let mut weighted_sum = 0.0;
+    let mut total_weight = 0.0;
+    let mut last_value = f64::NAN;
+    let mut last_time_ms = bucket_start_ms;
+
+    for row in rows {
+        let row_time_ms = row.ts.timestamp_millis().max(bucket_start_ms);
+        let val = row.values.get(key).copied().unwrap_or(f64::NAN);
+
+        // Weight the previous value (LOCF) for the interval [last_time, row_time)
+        if !last_value.is_nan() && row_time_ms > last_time_ms {
+            let dt = (row_time_ms - last_time_ms) as f64;
+            weighted_sum += last_value * dt;
+            total_weight += dt;
+        }
+
+        last_value = val;
+        last_time_ms = row_time_ms;
+    }
+
+    // Carry the last value forward to bucket end.
+    if !last_value.is_nan() && bucket_end_ms > last_time_ms {
+        let dt = (bucket_end_ms - last_time_ms) as f64;
+        weighted_sum += last_value * dt;
+        total_weight += dt;
+    }
+
+    if total_weight > 0.0 {
+        weighted_sum / total_weight
+    } else {
+        f64::NAN
+    }
+}
+
+/// Build the now-point for an asset: instantaneous values at exact `now`.
+///
+/// Uses the most recent row from the history buffer. Returns an all-NaN point
+/// if no history exists (the caller should still include it for array alignment).
+pub fn build_now_point(
+    asset_id: &str,
+    now: DateTime<Utc>,
+    history: &HashMap<String, AssetHistoryBuffer>,
+) -> AssetTimelinePoint {
+    if let Some(buf) = history.get(asset_id) {
+        let all = buf.to_timeline(None);
+        if let Some(last) = all.last() {
+            // Use the last row's values at the exact `now` timestamp.
+            let values: HashMap<String, f64> = last
+                .values
+                .iter()
+                .filter(|(_, v)| !v.is_nan())
+                .map(|(k, v)| (k.clone(), *v))
+                .collect();
+            return AssetTimelinePoint { ts: now, values };
+        }
+    }
+    // No history: return empty values (will serialize as {}).
+    AssetTimelinePoint {
+        ts: now,
+        values: HashMap::new(),
+    }
+}
+
 /// Time window parameters for `build_asset_timeline`.
 pub struct TimeWindow {
     /// Hours of history to include (clamped to ≥ 0).
@@ -371,5 +573,147 @@ mod tests {
         for w in result.windows(2) {
             assert!(w[0].ts <= w[1].ts, "Result is not sorted: {:?} > {:?}", w[0].ts, w[1].ts);
         }
+    }
+
+    // ─── Uniform grid tests (RF-05c) ─────────────────────────────────────────
+
+    #[test]
+    fn compute_grid_uniform_spacing() {
+        // now at epoch 1000, window [900..1100], resolution=10
+        let now = DateTime::from_timestamp(1000, 0).unwrap();
+        let start = DateTime::from_timestamp(900, 0).unwrap();
+        let end = DateTime::from_timestamp(1100, 0).unwrap();
+        let (hist, fut) = compute_uniform_grid(start, end, now, 10);
+
+        // History: 900, 910, 920, ..., 990 (10 points)
+        assert_eq!(hist.len(), 10);
+        for w in hist.windows(2) {
+            assert_eq!((w[1] - w[0]).num_seconds(), 10);
+        }
+        assert_eq!(hist[0].timestamp(), 900);
+        assert_eq!(hist.last().unwrap().timestamp(), 990);
+
+        // Future: 1010, 1020, ..., 1100 (10 points)
+        assert_eq!(fut.len(), 10);
+        for w in fut.windows(2) {
+            assert_eq!((w[1] - w[0]).num_seconds(), 10);
+        }
+        assert_eq!(fut[0].timestamp(), 1010);
+        assert_eq!(fut.last().unwrap().timestamp(), 1100);
+    }
+
+    #[test]
+    fn compute_grid_snaps_to_round_boundaries() {
+        // Window start at 903, should snap up to 910
+        let now = DateTime::from_timestamp(1000, 0).unwrap();
+        let start = DateTime::from_timestamp(903, 0).unwrap();
+        let end = DateTime::from_timestamp(1097, 0).unwrap();
+        let (hist, fut) = compute_uniform_grid(start, end, now, 10);
+
+        assert_eq!(hist[0].timestamp(), 910);
+        // End snaps down to 1090
+        assert_eq!(fut.last().unwrap().timestamp(), 1090);
+    }
+
+    #[test]
+    fn compute_grid_deterministic() {
+        let now1 = DateTime::from_timestamp(1000, 0).unwrap();
+        let now2 = DateTime::from_timestamp(1000, 0).unwrap();
+        let start = DateTime::from_timestamp(900, 0).unwrap();
+        let end = DateTime::from_timestamp(1100, 0).unwrap();
+        let (h1, f1) = compute_uniform_grid(start, end, now1, 10);
+        let (h2, f2) = compute_uniform_grid(start, end, now2, 10);
+        assert_eq!(h1, h2);
+        assert_eq!(f1, f2);
+    }
+
+    #[test]
+    fn compute_grid_now_on_boundary() {
+        // now is exactly on a grid boundary (1000, resolution=10)
+        let now = DateTime::from_timestamp(1000, 0).unwrap();
+        let start = DateTime::from_timestamp(980, 0).unwrap();
+        let end = DateTime::from_timestamp(1020, 0).unwrap();
+        let (hist, fut) = compute_uniform_grid(start, end, now, 10);
+
+        // History should NOT include now itself (strictly < now)
+        assert!(hist.iter().all(|t| t.timestamp() < 1000));
+        // 980, 990
+        assert_eq!(hist.len(), 2);
+
+        // Future should NOT include now either (strictly > now)
+        assert!(fut.iter().all(|t| t.timestamp() > 1000));
+        // 1010, 1020
+        assert_eq!(fut.len(), 2);
+    }
+
+    #[test]
+    fn resample_multiple_rows_per_bucket() {
+        // 3 rows in a single 10-second bucket: ts(0)=1.0, ts(3)=2.0, ts(7)=3.0
+        let points = vec![
+            AssetTimelinePoint { ts: ts(0), values: [("power_kw".into(), 1.0)].into() },
+            AssetTimelinePoint { ts: ts(3), values: [("power_kw".into(), 2.0)].into() },
+            AssetTimelinePoint { ts: ts(7), values: [("power_kw".into(), 3.0)].into() },
+        ];
+        let grid = vec![ts(0)]; // single bucket [0, 10)
+        let result = resample_to_grid(&points, &grid, 10);
+        assert_eq!(result.len(), 1);
+        let vals = result[0].as_ref().unwrap();
+        // LOCF weighted mean: 1.0 * 3s + 2.0 * 4s + 3.0 * 3s = 3 + 8 + 9 = 20 / 10 = 2.0
+        assert!((vals["power_kw"] - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resample_single_row_per_bucket() {
+        let points = vec![
+            AssetTimelinePoint { ts: ts(2), values: [("power_kw".into(), 5.0)].into() },
+        ];
+        let grid = vec![ts(0)]; // bucket [0, 10)
+        let result = resample_to_grid(&points, &grid, 10);
+        let vals = result[0].as_ref().unwrap();
+        // Single row at ts(2), LOCF carries to ts(10): 5.0 for 8 out of 10 seconds
+        // But since it's the only value, weighted mean = 5.0
+        assert!((vals["power_kw"] - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resample_empty_bucket_returns_none() {
+        let points: Vec<AssetTimelinePoint> = vec![];
+        let grid = vec![ts(0)]; // bucket [0, 10) — no rows
+        let result = resample_to_grid(&points, &grid, 10);
+        assert!(result[0].is_none());
+    }
+
+    #[test]
+    fn resample_nan_only_bucket_returns_none() {
+        let points = vec![
+            AssetTimelinePoint { ts: ts(0), values: [("power_kw".into(), f64::NAN)].into() },
+        ];
+        let grid = vec![ts(0)];
+        let result = resample_to_grid(&points, &grid, 10);
+        assert!(result[0].is_none());
+    }
+
+    #[test]
+    fn build_now_point_uses_last_history_row() {
+        let now = ts(100);
+        let mut hist = HashMap::new();
+        let mut buf = AssetHistoryBuffer::new(100);
+        buf.push(ts(50), [("power_kw".into(), 1.0), ("soc".into(), 0.5)].into());
+        buf.push(ts(99), [("power_kw".into(), 2.0), ("soc".into(), 0.6)].into());
+        hist.insert("ev".to_string(), buf);
+
+        let np = build_now_point("ev", now, &hist);
+        assert_eq!(np.ts, now);
+        assert!((np.values["power_kw"] - 2.0).abs() < 1e-9);
+        assert!((np.values["soc"] - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn build_now_point_empty_history() {
+        let now = ts(100);
+        let hist: HashMap<String, AssetHistoryBuffer> = HashMap::new();
+        let np = build_now_point("ev", now, &hist);
+        assert_eq!(np.ts, now);
+        assert!(np.values.is_empty());
     }
 }

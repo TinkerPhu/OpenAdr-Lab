@@ -38,7 +38,10 @@ def step_every_point_has_values(context):
     assert isinstance(data, list), "Response is not a list"
     for i, point in enumerate(data):
         assert "values" in point, f"Point {i} missing 'values' field: {point}"
-        assert isinstance(point["values"], dict), f"Point {i} 'values' is not an object: {point['values']}"
+        # values can be null (empty grid bucket) or a dict
+        assert point["values"] is None or isinstance(point["values"], dict), (
+            f"Point {i} 'values' is not an object or null: {point['values']}"
+        )
 
 
 @then('the timeline all response contains key "{key}"')

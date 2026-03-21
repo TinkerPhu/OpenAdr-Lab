@@ -25,13 +25,13 @@
 
 **Purpose**: Pure resampling functions that all user stories depend on. Must complete before any handler changes.
 
-- [ ] T001 Implement `compute_uniform_grid()` in `VEN/src/controller/timeline.rs` — takes `window_start`, `window_end`, `now`, `resolution_s` and returns `(history_timestamps: Vec<DateTime>, future_timestamps: Vec<DateTime>)` with timestamps snapped to round boundaries of resolution. Include unit tests: verify uniform spacing, round-boundary snapping, determinism (same inputs = same grid), edge case where `now` falls exactly on a grid boundary.
+- [x] T001 Implement `compute_uniform_grid()` in `VEN/src/controller/timeline.rs` — takes `window_start`, `window_end`, `now`, `resolution_s` and returns `(history_timestamps: Vec<DateTime>, future_timestamps: Vec<DateTime>)` with timestamps snapped to round boundaries of resolution. Include unit tests: verify uniform spacing, round-boundary snapping, determinism (same inputs = same grid), edge case where `now` falls exactly on a grid boundary.
 
-- [ ] T002 Implement `resample_to_grid()` in `VEN/src/controller/timeline.rs` — takes a `Vec<AssetTimelinePoint>` (raw sorted points) and a `Vec<DateTime>` (grid timestamps) and returns `Vec<AssetTimelinePoint>` with one entry per grid timestamp. History buckets use LOCF time-weighted mean; empty buckets get `values: None`. Include unit tests: verify LOCF aggregation with multiple rows per bucket, single row per bucket, empty buckets produce null, NaN-only buckets produce null.
+- [x] T002 Implement `resample_to_grid()` in `VEN/src/controller/timeline.rs` — takes a `Vec<AssetTimelinePoint>` (raw sorted points) and a `Vec<DateTime>` (grid timestamps) and returns `Vec<AssetTimelinePoint>` with one entry per grid timestamp. History buckets use LOCF time-weighted mean; empty buckets get `values: None`. Include unit tests: verify LOCF aggregation with multiple rows per bucket, single row per bucket, empty buckets produce null, NaN-only buckets produce null.
 
-- [ ] T003 Implement `build_now_point()` in `VEN/src/controller/timeline.rs` — takes `asset_id`, `now`, `history` (AssetHistoryBuffer), and `known_assets` and returns an `AssetTimelinePoint` at exact `now` with instantaneous values from the most recent history row. For the "grid" virtual asset, compute from the latest history row if available. Include unit tests: verify `ts == now`, values match last history row, empty history returns NaN-only point.
+- [x] T003 Implement `build_now_point()` in `VEN/src/controller/timeline.rs` — takes `asset_id`, `now`, `history` (AssetHistoryBuffer), and `known_assets` and returns an `AssetTimelinePoint` at exact `now` with instantaneous values from the most recent history row. For the "grid" virtual asset, compute from the latest history row if available. Include unit tests: verify `ts == now`, values match last history row, empty history returns NaN-only point.
 
-- [ ] T004 Update `serialize_timeline()` in `VEN/src/main.rs` to emit `"values": null` (JSON null) when an `AssetTimelinePoint` has `values: None` or all-NaN values, instead of omitting the entry. The `ts` field must always be present.
+- [x] T004 Update `serialize_timeline()` in `VEN/src/main.rs` to emit `"values": null` (JSON null) when an `AssetTimelinePoint` has `values: None` or all-NaN values, instead of omitting the entry. The `ts` field must always be present.
 
 **Checkpoint**: Core resampling logic complete and unit-tested. Handlers not yet changed.
 
@@ -45,7 +45,7 @@
 
 ### BDD Tests for US1+US2
 
-- [ ] T005 [US1] Write BDD feature file `tests/features/timeline_grid.feature` with scenarios:
+- [x] T005 [US1] Write BDD feature file `tests/features/timeline_grid.feature` with scenarios:
   1. GET /timeline/all returns arrays of equal length for all assets
   2. All assets share the same ts value at each index position
   3. Grid-portion timestamps are uniformly spaced
@@ -55,15 +55,15 @@
   7. Empty future buckets have values null
   8. Response format is unchanged (object with asset keys, each value is an array of {ts, values})
 
-- [ ] T006 [US1] Write step definitions in `tests/features/steps/timeline_grid_steps.py` — implement all steps for the scenarios in T005. Use existing VEN HTTP helpers.
+- [x] T006 [US1] Write step definitions in `tests/features/steps/timeline_grid_steps.py` — implement all steps for the scenarios in T005. Use existing VEN HTTP helpers.
 
 ### Implementation for US1+US2
 
-- [ ] T007 [US1] Add `resolution` field to `TimelineParams` struct in `VEN/src/main.rs`. Add `resolve_resolution()` helper that returns `resolution` if set, else converts `max_points` via `ceil(total_window_s / max_points)`, else auto-calculates `ceil(total_window_s / 300)`. Clamp grid points to max 3600.
+- [x] T007 [US1] Add `resolution` field to `TimelineParams` struct in `VEN/src/main.rs`. Add `resolve_resolution()` helper that returns `resolution` if set, else converts `max_points` via `ceil(total_window_s / max_points)`, else auto-calculates `ceil(total_window_s / 300)`. Clamp grid points to max 3600.
 
-- [ ] T008 [US1] Rewrite `get_timeline_all()` handler in `VEN/src/main.rs`: compute the shared uniform grid once via `compute_uniform_grid()`, then for each asset: (1) call `build_asset_timeline()` for raw points, (2) split raw points into history (ts < now) and future (ts >= now), (3) resample history onto `history_timestamps` via `resample_to_grid()`, (4) resample future onto `future_timestamps` via `resample_to_grid()`, (5) build now-point via `build_now_point()`, (6) concatenate `[...history_grid, now_point, ...future_grid]`. Remove `downsample()` calls.
+- [x] T008 [US1] Rewrite `get_timeline_all()` handler in `VEN/src/main.rs`: compute the shared uniform grid once via `compute_uniform_grid()`, then for each asset: (1) call `build_asset_timeline()` for raw points, (2) split raw points into history (ts < now) and future (ts >= now), (3) resample history onto `history_timestamps` via `resample_to_grid()`, (4) resample future onto `future_timestamps` via `resample_to_grid()`, (5) build now-point via `build_now_point()`, (6) concatenate `[...history_grid, now_point, ...future_grid]`. Remove `downsample()` calls.
 
-- [ ] T009 [US1] Update existing BDD scenarios in `tests/features/ven_timeline.feature` that may break: "every timeline point has a values object" must now tolerate `null` values for empty grid buckets. Update step definitions in `tests/features/steps/ven_timeline_steps.py` if needed.
+- [x] T009 [US1] Update existing BDD scenarios in `tests/features/ven_timeline.feature` that may break: "every timeline point has a values object" must now tolerate `null` values for empty grid buckets. Update step definitions in `tests/features/steps/ven_timeline_steps.py` if needed.
 
 **Checkpoint**: `GET /timeline/all` returns grid-aligned arrays with now-point. All assets have identical lengths and ts values. BDD tests pass.
 
@@ -77,17 +77,17 @@
 
 ### BDD Tests for US3
 
-- [ ] T010 [US3] Add BDD scenarios to `tests/features/timeline_grid.feature`:
+- [x] T010 [US3] Add BDD scenarios to `tests/features/timeline_grid.feature`:
   1. GET /timeline/all?resolution=30 returns 30-second spacing in grid portions
   2. GET /timeline/all with no resolution auto-calculates targeting ~300 points
   3. GET /timeline/all?max_points=150 produces equivalent resolution
   4. GET /timeline/all?resolution=30&max_points=150 uses resolution=30 (resolution wins)
 
-- [ ] T011 [US3] Implement step definitions for T010 scenarios in `tests/features/steps/timeline_grid_steps.py`.
+- [x] T011 [US3] Implement step definitions for T010 scenarios in `tests/features/steps/timeline_grid_steps.py`.
 
 ### Implementation for US3
 
-- [ ] T012 [US3] Verify `resolve_resolution()` from T007 handles all cases: resolution-only, max_points-only, both (resolution wins), neither (auto ~300). Add cargo unit tests for each case in `VEN/src/main.rs` or a test module.
+- [x] T012 [US3] Verify `resolve_resolution()` from T007 handles all cases: resolution-only, max_points-only, both (resolution wins), neither (auto ~300). Add cargo unit tests for each case in `VEN/src/main.rs` or a test module.
 
 **Checkpoint**: Resolution parameter works. Deprecated max_points still functions. BDD tests pass.
 
@@ -101,16 +101,16 @@
 
 ### BDD Tests for US4
 
-- [ ] T013 [US4] Add BDD scenarios to `tests/features/timeline_grid.feature`:
+- [x] T013 [US4] Add BDD scenarios to `tests/features/timeline_grid.feature`:
   1. GET /timeline/ev returns uniformly spaced ts with now-point
   2. GET /timeline/ev?resolution=30 returns 30-second spacing
   3. GET /timeline/unknown_asset_xyz returns 404 (unchanged)
 
-- [ ] T014 [US4] Implement step definitions for T013 scenarios in `tests/features/steps/timeline_grid_steps.py`.
+- [x] T014 [US4] Implement step definitions for T013 scenarios in `tests/features/steps/timeline_grid_steps.py`.
 
 ### Implementation for US4
 
-- [ ] T015 [US4] Rewrite `get_timeline()` handler in `VEN/src/main.rs` to use the same grid resampling + now-point logic as `get_timeline_all()`. Extract shared logic into a helper if duplication is significant (but prefer inline if it's just a few lines).
+- [x] T015 [US4] Rewrite `get_timeline()` handler in `VEN/src/main.rs` to use the same grid resampling + now-point logic as `get_timeline_all()`. Extract shared logic into a helper if duplication is significant (but prefer inline if it's just a few lines).
 
 **Checkpoint**: Single-asset endpoint uses uniform grid. BDD tests pass. 404 behavior unchanged.
 
@@ -118,7 +118,7 @@
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T016 Remove the old `downsample()` function from `VEN/src/main.rs` if no longer referenced.
+- [x] T016 Remove the old `downsample()` function from `VEN/src/main.rs` if no longer referenced.
 - [ ] T017 Run full BDD test suite (`tests/features/`) to verify no regressions across all existing scenarios.
 - [ ] T018 Update `docs/history/project_journal.md` with implementation summary, decisions, and key learnings.
 
