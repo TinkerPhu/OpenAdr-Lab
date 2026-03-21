@@ -68,7 +68,7 @@ Feature: VEN Simulator
     And the sim device "base_load" has field "power_kw"
 
   Scenario: Sensor values come from simulator
-    When I poll VEN /sensors until field "source" is present
+    When I poll VEN /sensors until field "raw.source" is present
     And I GET the VEN sensor snapshot
     Then the sensor raw source is "simulator"
 
