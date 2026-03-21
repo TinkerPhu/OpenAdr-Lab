@@ -120,7 +120,7 @@
 
 - [x] T016 Remove the old `downsample()` function from `VEN/src/main.rs` if no longer referenced.
 - [x] T017 Run full BDD test suite (`tests/features/`) to verify no regressions across all existing scenarios.
-- [ ] T018 Update `docs/history/project_journal.md` with implementation summary, decisions, and key learnings.
+- [x] T018 Update `docs/history/project_journal.md` with implementation summary, decisions, and key learnings.
 
 ---
 

@@ -2763,3 +2763,64 @@ Replaced all ad-hoc per-slot tariff and forecast lookup functions in the VEN pla
 - 7 unit tests for planner resampling: boundary-aligned tariffs, mid-slot tariff change (time-weighted), empty tariff series, single-sample tariff, PV linear forecast, empty forecast, missing asset key
 - 92 cargo tests total — all passing
 - **BDD suite**: 36 features, 173 scenarios, 1010 steps — all passing (up from 143 scenarios / 895 steps in the task spec, reflecting other features added since)
+
+---
+
+### 27. Uniform-Grid Timeline API (RF-05c)
+
+**Status: COMPLETE**
+
+**Branch**: `010-uniform-grid-timeline`
+**Spec**: `specs/010-uniform-grid-timeline/`
+
+#### What was done
+
+Replaced per-asset stride-based `downsample()` in `GET /timeline/all` and `GET /timeline/:asset_id` with a shared uniform time grid. All assets now share identical `ts` values at each index position, eliminating cross-asset timestamp misalignment that caused false zero-spikes in the UI stacked area chart.
+
+**Backend (VEN/src/controller/timeline.rs)**:
+- `compute_uniform_grid()` — generates history + future timestamp vectors snapped to round boundaries of `resolution_s` for determinism (same inputs always produce the same grid)
+- `resample_to_grid()` — resamples raw `AssetTimelinePoint` data onto the grid using LOCF time-weighted mean; empty buckets return `None`
+- `build_now_point()` — extracts instantaneous values from the most recent history row at exact server `now`
+- 10 unit tests covering spacing, snapping, determinism, LOCF aggregation, empty/NaN buckets, now-point construction
+
+**Backend (VEN/src/main.rs)**:
+- Added `resolution` query parameter to `TimelineParams` (replaces `max_points` as deprecated alias)
+- `resolve_resolution_s()` — priority: `resolution` > `max_points` > auto (~300 points), capped at 3600 grid points
+- `serialize_grid_timeline()` + `serialize_now_point()` — serialize grid data with `{"ts": "...", "values": null}` for empty buckets
+- `build_grid_aligned_array()` — builds three-segment array `[...history_grid, now_point, ...future_grid]` for one asset
+- Rewrote `get_timeline_all()` and `get_timeline()` handlers to use shared uniform grid
+- Removed unused `downsample()` and `serialize_timeline()` functions
+- 7 unit tests for resolution resolution logic
+
+**UI null guards (VEN/ui/src/)**:
+- Updated `AssetTimelinePoint.values` type to `Record<string, number> | null`
+- Added optional chaining (`?.["key"]`) at all 8 access sites across `dataBuilders.ts`, `tariffBuilders.ts`, `GridAccumulatedCell.tsx`, `AssetTimelineChart.tsx`, `TimelineSeriesChart.tsx`, `client.ts`
+
+**UI default state fix**:
+- Changed `rightCollapsed` default from `false` to `true` in `ControllerV2.tsx` — right section starts collapsed
+- Added `_expand_ev_right_section()` BDD step helper to expand right panel before interacting with accordion controls
+- Updated navigation BDD scenario to test expand→collapse round-trip
+
+**Response format**: Unchanged (`Record<string, {ts, values}[]>`). The only structural difference is that `values` can now be `null` for empty grid buckets instead of being absent. The three-segment array (history grid → now-point → future grid) is transparent to consumers since it preserves ascending time order.
+
+#### Key decisions
+
+- **Grid snapped to round boundaries**: `resolution=10` gives timestamps at `:00`, `:10`, `:20` etc. This ensures the same `resolution` + time window always produces the same grid regardless of when the call is made.
+- **Now-point is NOT grid-aligned**: It sits between history and future grid portions at exact server `now`. The UI needs the VALUE at `now` (not just the position) because it cannot interpolate without knowing the interpolation method.
+- **LOCF time-weighted mean for history**: When multiple raw points fall in one grid bucket, their values are weighted by the time each was the "current" value within the bucket.
+- **`values: null` for empty buckets**: Rather than omitting entries (which would break array alignment), empty future buckets serialize as `{"ts": "...", "values": null}`.
+
+#### Key learnings
+
+- **Backend response changes break UI silently**: Changing `values` from always-object to sometimes-null caused `TypeError: Cannot read properties of null` in 21 BDD scenarios across controller_v2 and raw_diagnostics. The UI code accessed `values.power_kw` and `values["power_kw"]` without null guards. Always check downstream consumers when changing response shapes.
+- **Never dismiss test failures as pre-existing without verifying**: Initial reaction was "those are UI tests, unrelated to backend changes." Reading the actual error message (`Cannot read properties of null (reading 'power_kw')`) immediately revealed the connection. Added CLAUDE.md rule to prevent this.
+- **Vitest must run from the real filesystem path, not from a git worktree**: The worktree has no `node_modules` and the subst drive path causes vite resolution failures. Solution: copy changed files to the main repo path, run vitest, then restore.
+- **Duplicate behave step definitions cause load-time crashes**: `@when('I GET {path} from the VEN')` was defined in both `entity_model_steps.py` and `timeline_grid_steps.py`. Behave raises `AmbiguousStep` at import time, failing ALL tests. Solution: reuse existing step definitions instead of redefining.
+- **`_find_now_index()` detects the now-point by spacing anomaly**: Since the now-point is not grid-aligned, it creates two non-dominant gaps (before and after). The BDD test helper finds it by computing the dominant delta and scanning for a point where both adjacent gaps differ from it.
+
+#### Tests
+
+- 17 Rust unit tests for timeline resampling (10 in timeline.rs, 7 in main.rs)
+- 37 vitest unit tests for ControllerV2 — all passing (was 34/37 before fixing rightCollapsed default)
+- 16 new BDD scenarios in `timeline_grid.feature` covering grid alignment, now-point, resolution parameter, single-asset endpoint
+- **BDD suite**: 37 features, 188 scenarios, 1067 steps — all passing
