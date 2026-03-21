@@ -8,6 +8,13 @@ pub enum Interpolation {
 }
 
 #[derive(Debug, Clone)]
+pub enum Aggregation {
+    Mean,
+    Min,
+    Max,
+}
+
+#[derive(Debug, Clone)]
 pub struct TimeSeries {
     pub samples: Vec<(DateTime<Utc>, f64)>,
     pub interpolation: Interpolation,
@@ -127,6 +134,52 @@ impl TimeSeries {
         Some(weighted_sum / total_dur)
     }
 
+    /// Compute the minimum value of the signal over `[start, end)`.
+    ///
+    /// For Step: checks LOCF values at each change-point within the bucket.
+    /// For Linear: each sub-segment is monotonic, so extremes occur at endpoints.
+    fn bucket_min(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Option<f64> {
+        self.bucket_extreme(start, end, |a, b| a.min(b))
+    }
+
+    /// Compute the maximum value of the signal over `[start, end)`.
+    fn bucket_max(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Option<f64> {
+        self.bucket_extreme(start, end, |a, b| a.max(b))
+    }
+
+    /// Shared logic for bucket_min / bucket_max.
+    fn bucket_extreme(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        pick: impl Fn(f64, f64) -> f64,
+    ) -> Option<f64> {
+        if start >= end || self.samples.is_empty() {
+            return None;
+        }
+
+        let v_start = self.interpolate_at(start)?;
+        let mut result = v_start;
+
+        // Check all interior sample points
+        for &(t, _) in &self.samples {
+            if t > start && t < end {
+                if let Some(v) = self.interpolate_at(t) {
+                    result = pick(result, v);
+                }
+            }
+        }
+
+        // For Linear, also check the end boundary (value may differ)
+        if matches!(self.interpolation, Interpolation::Linear) {
+            if let Some(v_end) = self.interpolate_at(end) {
+                result = pick(result, v_end);
+            }
+        }
+
+        Some(result)
+    }
+
     /// Resample onto an arbitrary timestamp grid. Each output point is the
     /// interpolated value at that timestamp. Points where interpolation is
     /// undefined are skipped.
@@ -142,15 +195,19 @@ impl TimeSeries {
         }
     }
 
-    /// Resample onto a regular grid with bucket-width `width`, using
-    /// time-weighted mean aggregation within each bucket.
+    /// Resample onto a regular grid with bucket-width `width`.
+    ///
+    /// Aggregation mode controls how values within each bucket are combined:
+    /// - `Mean`: time-weighted mean (correct for tariffs/prices)
+    /// - `Min`: minimum value in bucket (correct for capacity limits)
+    /// - `Max`: maximum value in bucket
     ///
     /// Grid timestamps are aligned to epoch-based boundaries:
     /// - First bucket starts at `ceil(first_sample, width)`
     /// - Last bucket starts at or before `floor(last_sample, width)`
     ///
     /// This ensures series from different assets share timestamps after resampling.
-    pub fn resample_uniform(&self, width: Duration) -> TimeSeries {
+    pub fn resample_uniform(&self, width: Duration, agg: Aggregation) -> TimeSeries {
         let width_ms = width.num_milliseconds();
         if self.samples.is_empty() || width_ms <= 0 {
             return TimeSeries {
@@ -169,8 +226,13 @@ impl TimeSeries {
         let mut t = grid_start;
         while t <= grid_end {
             let bucket_end = t + width;
-            if let Some(mean) = self.time_weighted_mean(t, bucket_end) {
-                samples.push((t, mean));
+            let value = match agg {
+                Aggregation::Mean => self.time_weighted_mean(t, bucket_end),
+                Aggregation::Min => self.bucket_min(t, bucket_end),
+                Aggregation::Max => self.bucket_max(t, bucket_end),
+            };
+            if let Some(v) = value {
+                samples.push((t, v));
             }
             t = t + width;
         }
@@ -204,6 +266,8 @@ fn ceil_to_grid(ts: DateTime<Utc>, width_ms: i64) -> DateTime<Utc> {
 mod tests {
     use super::*;
     use chrono::{Duration, TimeZone, Utc};
+
+    fn mean() -> Aggregation { Aggregation::Mean }
 
     /// Helper: build a fixed base time for deterministic tests.
     fn t(hour: u32, min: u32, sec: u32) -> DateTime<Utc> {
@@ -433,7 +497,7 @@ mod tests {
     #[test]
     fn resample_uniform_empty() {
         let s = step_series(vec![]);
-        let r = s.resample_uniform(Duration::minutes(5));
+        let r = s.resample_uniform(Duration::minutes(5), mean());
         assert!(r.samples.is_empty());
     }
 
@@ -441,7 +505,7 @@ mod tests {
     fn resample_uniform_tariff_boundary() {
         // Tariff: 0.20 from 10:00, changes to 0.15 at 11:00 (step)
         let s = step_series(vec![(t(10, 0, 0), 0.20), (t(11, 0, 0), 0.15)]);
-        let r = s.resample_uniform(Duration::minutes(5));
+        let r = s.resample_uniform(Duration::minutes(5), mean());
 
         // Grid: 10:00, 10:05, 10:10, ..., 10:55, 11:00
         // Bucket [10:55, 11:00): entirely 0.20
@@ -462,7 +526,7 @@ mod tests {
             (t(12, 22, 0), 1.0),
             (t(12, 40, 0), 2.0),
         ]);
-        let r = s.resample_uniform(Duration::minutes(5));
+        let r = s.resample_uniform(Duration::minutes(5), mean());
         assert!(!r.samples.is_empty());
         assert_eq!(r.samples[0].0, t(12, 25, 0));
     }
@@ -474,7 +538,7 @@ mod tests {
             (t(12, 0, 0), 1.0),
             (t(12, 22, 0), 2.0),
         ]);
-        let r = s.resample_uniform(Duration::minutes(5));
+        let r = s.resample_uniform(Duration::minutes(5), mean());
         let last = r.samples.last().unwrap();
         assert_eq!(last.0, t(12, 20, 0));
     }
@@ -484,7 +548,7 @@ mod tests {
         // Linear ramp: 0.0 at 10:00, 60.0 at 11:00
         // 5-min buckets. Bucket [10:00, 10:05): TWM = trapezoid(0, 5) = 2.5
         let s = linear_series(vec![(t(10, 0, 0), 0.0), (t(11, 0, 0), 60.0)]);
-        let r = s.resample_uniform(Duration::minutes(5));
+        let r = s.resample_uniform(Duration::minutes(5), mean());
         assert_eq!(r.samples.len(), 12); // 10:00..10:55
         // First bucket [10:00, 10:05): mean of linear from 0→5 = 2.5
         assert!((r.samples[0].1 - 2.5).abs() < 1e-9);
@@ -497,7 +561,7 @@ mod tests {
         let s = step_series(vec![(t(10, 0, 0), 5.0), (t(10, 3, 0), 7.0)]);
         // 5-min width, data spans 3 minutes → floor(10:03) = 10:00, ceil(10:00) = 10:00
         // But bucket [10:00, 10:05) extends past last sample — Step LOCF handles this
-        let r = s.resample_uniform(Duration::minutes(5));
+        let r = s.resample_uniform(Duration::minutes(5), mean());
         assert_eq!(r.samples.len(), 1);
         // TWM: 3min×5.0 + 2min×7.0 = 29 / 5 = 5.8
         assert!((r.samples[0].1 - 5.8).abs() < 1e-9);
@@ -512,7 +576,7 @@ mod tests {
             (t(10, 5, 0), 2.0),
             (t(10, 10, 0), 3.0),
         ]);
-        let r = s.resample_uniform(Duration::minutes(5));
+        let r = s.resample_uniform(Duration::minutes(5), mean());
         assert_eq!(r.samples.len(), 3);
         assert!((r.samples[0].1 - 1.0).abs() < 1e-9);
         assert!((r.samples[1].1 - 2.0).abs() < 1e-9);
@@ -528,10 +592,78 @@ mod tests {
             (t(10, 5, 0), 2.0),
             (t(10, 10, 0), 3.0),
         ]);
-        let r = s.resample_uniform(Duration::minutes(5));
+        let r = s.resample_uniform(Duration::minutes(5), mean());
         assert_eq!(r.samples.len(), 2);
         assert!((r.samples[0].1 - 1.5).abs() < 1e-9); // TWM of linear 1→2
         assert!((r.samples[1].1 - 2.5).abs() < 1e-9); // TWM of linear 2→3
+    }
+
+    // ── resample_uniform with Min/Max ────────────────────────────────
+
+    #[test]
+    fn resample_uniform_min_step_mid_bucket_change() {
+        // Step: 10.0 at 10:00, drops to 3.0 at 10:03
+        // Bucket [10:00, 10:05): min = 3.0
+        let s = step_series(vec![(t(10, 0, 0), 10.0), (t(10, 3, 0), 3.0)]);
+        let r = s.resample_uniform(Duration::minutes(5), Aggregation::Min);
+        assert_eq!(r.samples.len(), 1);
+        assert!((r.samples[0].1 - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resample_uniform_max_step_mid_bucket_change() {
+        // Step: 3.0 at 10:00, jumps to 10.0 at 10:03
+        // Bucket [10:00, 10:05): max = 10.0
+        let s = step_series(vec![(t(10, 0, 0), 3.0), (t(10, 3, 0), 10.0)]);
+        let r = s.resample_uniform(Duration::minutes(5), Aggregation::Max);
+        assert_eq!(r.samples.len(), 1);
+        assert!((r.samples[0].1 - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resample_uniform_min_linear_ramp() {
+        // Linear ramp 0→60 over 10:00–11:00
+        // Bucket [10:00, 10:05): min at start = 0.0, max at end = 5.0
+        let s = linear_series(vec![(t(10, 0, 0), 0.0), (t(11, 0, 0), 60.0)]);
+        let r_min = s.resample_uniform(Duration::minutes(5), Aggregation::Min);
+        let r_max = s.resample_uniform(Duration::minutes(5), Aggregation::Max);
+        // First bucket: min=0.0, max=5.0
+        assert!((r_min.samples[0].1 - 0.0).abs() < 1e-9);
+        assert!((r_max.samples[0].1 - 5.0).abs() < 1e-9);
+        // Last bucket [10:55, 11:00): min=55.0, max=60.0
+        assert!((r_min.samples[11].1 - 55.0).abs() < 1e-9);
+        assert!((r_max.samples[11].1 - 60.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resample_uniform_constant_min_max_equal_mean() {
+        // Constant 5.0 → min = max = mean = 5.0
+        let s = step_series(vec![(t(10, 0, 0), 5.0)]);
+        let r_mean = s.resample_uniform(Duration::minutes(5), mean());
+        let r_min = s.resample_uniform(Duration::minutes(5), Aggregation::Min);
+        let r_max = s.resample_uniform(Duration::minutes(5), Aggregation::Max);
+        assert_eq!(r_mean.samples.len(), 1);
+        assert_eq!(r_min.samples.len(), 1);
+        assert_eq!(r_max.samples.len(), 1);
+        assert!((r_mean.samples[0].1 - 5.0).abs() < 1e-9);
+        assert!((r_min.samples[0].1 - 5.0).abs() < 1e-9);
+        assert!((r_max.samples[0].1 - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resample_uniform_min_capacity_limit_across_boundary() {
+        // Capacity limit: 10kW from 10:00, drops to 5kW at 10:57
+        // 5-min bucket [10:55, 11:00): contains the drop at 10:57
+        // Min should be 5.0 (the strictest limit)
+        let s = step_series(vec![(t(10, 0, 0), 10.0), (t(10, 57, 0), 5.0)]);
+        let r = s.resample_uniform(Duration::minutes(5), Aggregation::Min);
+        let bucket_1055 = r.samples.iter().find(|(ts, _)| *ts == t(10, 55, 0));
+        assert!(bucket_1055.is_some());
+        assert!((bucket_1055.unwrap().1 - 5.0).abs() < 1e-9);
+        // Earlier buckets should all be 10.0
+        let bucket_1050 = r.samples.iter().find(|(ts, _)| *ts == t(10, 50, 0));
+        assert!(bucket_1050.is_some());
+        assert!((bucket_1050.unwrap().1 - 10.0).abs() < 1e-9);
     }
 
     // ── grid alignment helpers ──────────────────────────────────────
