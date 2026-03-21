@@ -503,26 +503,7 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 interval.tick().await;
                 let now = Utc::now();
-                let all_obs = state.obligations().await;
                 let due = state.due_obligations(now).await;
-                debug!(
-                    total_obligations = all_obs.len(),
-                    due_count = due.len(),
-                    "obligation check tick"
-                );
-                for ob in &all_obs {
-                    debug!(
-                        obligation_id = %ob.id,
-                        event_id = %ob.event_id,
-                        payload_type = %ob.payload_type,
-                        interval_duration_s = ob.interval_duration_s,
-                        fulfilled = ob.fulfilled,
-                        due_at = %ob.due_at,
-                        now = %now,
-                        is_due = (now >= ob.due_at && !ob.fulfilled),
-                        "obligation state"
-                    );
-                }
                 for ob in due {
                     let trace = state.controller_trace().await;
                     if let Some(report) =
