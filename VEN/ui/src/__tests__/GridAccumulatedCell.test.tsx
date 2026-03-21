@@ -1,14 +1,15 @@
 /**
- * GridAccumulatedCell — now line position test
- *
- * Asserts that the nowMs passed to StackedAreaChart stays current as time passes
- * and allTimelines data refreshes, rather than being frozen at page-mount time.
+ * GridAccumulatedCell tests:
+ * 1. nowMs advancement (page-level integration)
+ * 2. buildStackedFromAllTimelines positional-zip logic (unit)
  */
 import { render, screen, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { ControllerV2Page } from "../pages/ControllerV2";
+import { buildStackedFromAllTimelines } from "../components/controller-v2/GridAccumulatedCell";
 import type { SimSnapshot } from "../api/types";
+import type { AssetTimelinePoint } from "../components/controller-v2/types";
 
 // ─── Minimal sim fixture ─────────────────────────────────────────────────────
 
@@ -46,7 +47,15 @@ function makeQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
+function pt(ts: number, power_kw: number): AssetTimelinePoint {
+  return { ts, values: { power_kw } };
+}
+
+function nullPt(ts: number): AssetTimelinePoint {
+  return { ts, values: null };
+}
+
+// ─── Tests: nowMs advancement ────────────────────────────────────────────────
 
 describe("GridAccumulatedCell — now line position", () => {
   afterEach(() => {
@@ -76,7 +85,6 @@ describe("GridAccumulatedCell — now line position", () => {
     act(() => void vi.advanceTimersByTime(5 * 60 * 1000));
 
     // Simulate allTimelines React Query refetch: swap in a new object reference.
-    // An empty record is valid input to buildStackedFromAllTimelines (yields no rows).
     allTimelinesData = {};
     act(() => {
       rerender(
@@ -94,5 +102,72 @@ describe("GridAccumulatedCell — now line position", () => {
 
     // nowMs must have advanced to T+5min, not remain frozen at the page-mount value T+0
     expect(updatedNowMs).toBeGreaterThanOrEqual(t5);
+  });
+});
+
+// ─── Tests: buildStackedFromAllTimelines positional zip ──────────────────────
+
+describe("buildStackedFromAllTimelines — positional zip", () => {
+  it("zips asset values by position across aligned arrays", () => {
+    const timelines: Record<string, AssetTimelinePoint[]> = {
+      ev: [pt(1000, 3.0), pt(2000, 4.0)],
+      battery: [pt(1000, -1.0), pt(2000, -2.0)],
+      base_load: [pt(1000, 1.5), pt(2000, 1.5)],
+      grid: [pt(1000, 3.5), pt(2000, 3.5)],
+    };
+    const result = buildStackedFromAllTimelines(timelines);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].ts).toBe(1000);
+    expect(result[0].ev_pos).toBe(3.0);
+    expect(result[0].ev_neg).toBe(0);
+    expect(result[0].battery_pos).toBe(0);
+    expect(result[0].battery_neg).toBe(-1.0);
+    expect(result[0].base_load_pos).toBe(1.5);
+    expect(result[0].gridPowerKw).toBe(3.5);
+
+    expect(result[1].ts).toBe(2000);
+    expect(result[1].ev_pos).toBe(4.0);
+    expect(result[1].battery_neg).toBe(-2.0);
+  });
+
+  it("returns empty array when no known assets have data", () => {
+    const result = buildStackedFromAllTimelines({});
+    expect(result).toHaveLength(0);
+  });
+
+  it("handles values: null entries as zero contribution", () => {
+    const timelines: Record<string, AssetTimelinePoint[]> = {
+      ev: [pt(1000, 5.0), nullPt(2000)],
+      base_load: [pt(1000, 1.0), nullPt(2000)],
+      grid: [pt(1000, 6.0), nullPt(2000)],
+    };
+    const result = buildStackedFromAllTimelines(timelines);
+
+    expect(result).toHaveLength(2);
+    // First point: normal values
+    expect(result[0].ev_pos).toBe(5.0);
+    expect(result[0].gridPowerKw).toBe(6.0);
+    // Second point: null values → zero/null
+    expect(result[1].ev_pos).toBe(0);
+    expect(result[1].ev_neg).toBe(0);
+    expect(result[1].base_load_pos).toBe(0);
+    expect(result[1].gridPowerKw).toBeNull();
+  });
+
+  it("treats missing assets as zero at every position", () => {
+    const timelines: Record<string, AssetTimelinePoint[]> = {
+      ev: [pt(1000, 2.0)],
+      // no heater, pv, battery, base_load, grid
+    };
+    const result = buildStackedFromAllTimelines(timelines);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].ev_pos).toBe(2.0);
+    expect(result[0].heater_pos).toBe(0);
+    expect(result[0].pv_pos).toBe(0);
+    expect(result[0].battery_pos).toBe(0);
+    expect(result[0].base_load_pos).toBe(0);
+    expect(result[0].gridPowerKw).toBeNull();
   });
 });
