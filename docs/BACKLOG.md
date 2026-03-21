@@ -7,7 +7,7 @@ Items ordered by execution priority: safe deletions first, then consolidations, 
 
 ## RF-B01: Delete dead `dispatcher::update_packets`
 
-**Status**: BACKLOG
+**Status**: DONE
 **Risk**: Low (dead code removal)
 **Files**: `VEN/src/controller/dispatcher.rs` (lines 81-131)
 
