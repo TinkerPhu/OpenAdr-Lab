@@ -60,23 +60,6 @@ def step_forecast_empty(context):
     assert len(data["samples"]) == 0, f"Expected empty samples, got {len(data['samples'])} items"
 
 
-@then("the forecast quantity is \"{expected}\"")
-def step_forecast_quantity(context, expected):
-    data = context.forecast_json
-    assert data is not None, "No forecast JSON in context"
-    assert data.get("quantity") == expected, (
-        f"Expected quantity '{expected}', got '{data.get('quantity')}'"
-    )
-
-
-@then("the forecast unit is \"{expected}\"")
-def step_forecast_unit(context, expected):
-    data = context.forecast_json
-    assert data is not None, "No forecast JSON in context"
-    assert data.get("unit") == expected, (
-        f"Expected unit '{expected}', got '{data.get('unit')}'"
-    )
-
 
 @then("the forecast interpolation is \"{expected}\"")
 def step_forecast_interpolation(context, expected):
@@ -142,23 +125,6 @@ def step_history_valid(context):
     assert data is not None, "No history JSON in context"
     assert "samples" in data, f"Response missing 'samples' key"
 
-
-@then("the history quantity is \"{expected}\"")
-def step_history_quantity(context, expected):
-    data = context.history_json
-    assert data is not None, "No history JSON in context"
-    assert data.get("quantity") == expected, (
-        f"Expected quantity '{expected}', got '{data.get('quantity')}'"
-    )
-
-
-@then("the history unit is \"{expected}\"")
-def step_history_unit(context, expected):
-    data = context.history_json
-    assert data is not None, "No history JSON in context"
-    assert data.get("unit") == expected, (
-        f"Expected unit '{expected}', got '{data.get('unit')}'"
-    )
 
 
 @then("the history interpolation is \"{expected}\"")
