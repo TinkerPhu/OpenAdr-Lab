@@ -134,7 +134,7 @@ function computeForecastEnergy(
   let totalKwh = 0;
   let found = false;
   for (let i = 0; i < future.length; i++) {
-    const power = future[i].values["power_kw"];
+    const power = future[i].values?.["power_kw"];
     if (power === undefined || power === null) continue;
     const nextTs = future[i + 1]?.ts ?? future[i].ts;
     const prevGap = i > 0 ? future[i].ts - future[i - 1].ts : 0;

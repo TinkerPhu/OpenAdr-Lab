@@ -13,7 +13,7 @@ export function TimelineSeriesChart({ data, selectedSeries, onSeriesChange }: Ti
   const seriesKeys = Object.keys(data);
   const points = (data[selectedSeries] ?? []).map((p) => ({
     ts: p.ts,
-    power_kw: p.values.power_kw ?? null,
+    power_kw: p.values?.power_kw ?? null,
   }));
 
   return (

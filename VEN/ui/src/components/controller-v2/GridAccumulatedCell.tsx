@@ -65,7 +65,7 @@ function buildStackedFromAllTimelines(
       const points = allTimelines[assetId];
       if (!points) continue;
       const match = findNearest(points, ts, TOLERANCE_MS);
-      const kw = match?.values["power_kw"] ?? 0;
+      const kw = match?.values?.["power_kw"] ?? 0;
       const key = assetId as AssetId;
       pt[`${key}_pos` as keyof StackedAreaPoint] = Math.max(0, kw) as never;
       pt[`${key}_neg` as keyof StackedAreaPoint] = Math.min(0, kw) as never;
@@ -73,7 +73,7 @@ function buildStackedFromAllTimelines(
     // Grid power: nearest-neighbour lookup, same tolerance as assets
     const gridPoints = allTimelines["grid"] ?? [];
     const gridMatch = findNearest(gridPoints, ts, TOLERANCE_MS);
-    pt.gridPowerKw = gridMatch?.values["power_kw"] ?? null;
+    pt.gridPowerKw = gridMatch?.values?.["power_kw"] ?? null;
 
     return pt;
   });
