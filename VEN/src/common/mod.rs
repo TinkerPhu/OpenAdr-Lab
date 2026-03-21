@@ -31,7 +31,7 @@ impl TimeSeries {
     /// - Before first sample → `None`
     /// - After last sample: Step → LOCF, Linear → `None`
     /// - Between samples: Step → left value (LOCF), Linear → proportional
-    fn interpolate_at(&self, ts: DateTime<Utc>) -> Option<f64> {
+    pub fn interpolate_at(&self, ts: DateTime<Utc>) -> Option<f64> {
         if self.samples.is_empty() {
             return None;
         }
