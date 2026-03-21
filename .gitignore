@@ -37,3 +37,6 @@ __pycache__/
 *.bkp
 *.dtmp
 *.pdf
+
+# Git worktrees
+docs/worktrees/
