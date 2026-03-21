@@ -2671,3 +2671,42 @@ Move `VEN/src/simulator/assets/` to a top-level `VEN/src/assets/` module. Each a
 - `cargo test --workspace`: 48/48 pass.
 - BDD integration suite: 173 scenarios, 1024 steps, 0 failures.
 - Behave `{param}` captures are greedy — `{hours_back}` matches `0&hours_forward=1`. Avoid registering step patterns that partially overlap with existing generic steps.
+
+---
+
+## RF-05a — TimeSeries Resampling Operations
+
+**Date:** 2026-03-21
+**Branch:** `009-backend-timeseries-adoption`
+
+### Objective
+
+Add resampling operations to the existing `TimeSeries` struct (formerly `QuantityTimeline`) in `VEN/src/common/mod.rs`. The codebase had three independent time-series lookup strategies — exact-interval match in the planner, nearest-neighbour in the UI, and latest-snapshot in the reporter — with no shared semantics. This caused silent correctness bugs when signals of different interpolation types were mixed or when series had different periods.
+
+### What changed
+
+- **`interpolate_at(ts) -> Option<f64>`** (private): Evaluates the series at any timestamp using its declared interpolation mode. Step uses LOCF (last observation carried forward); Linear uses proportional interpolation between surrounding samples. No extrapolation for Linear past the last sample.
+
+- **`time_weighted_mean(start, end) -> Option<f64>`** (private): Computes the time-weighted average of the signal over `[start, end)`. Builds split points from the bucket boundaries and interior sample timestamps, then integrates piecewise — constant segments for Step, trapezoids for Linear. Returns `None` if the signal is undefined at any required point (e.g. Linear past data end).
+
+- **`resample_to_grid(timestamps) -> TimeSeries`** (public): Point-evaluates the series at each provided timestamp. Skips timestamps where interpolation is undefined.
+
+- **`resample_uniform(width) -> TimeSeries`** (public): Resamples onto an epoch-aligned regular grid using time-weighted mean aggregation within each bucket. Grid boundaries use `ceil(first_sample, width)` / `floor(last_sample, width)` so that series from different assets automatically share timestamps after resampling.
+
+- **`floor_to_grid` / `ceil_to_grid`** (module-level helpers): Epoch-based grid alignment using `rem_euclid` for correct handling of all timestamps.
+
+- **Struct rename**: `QuantityTimeline` was renamed to `TimeSeries` and the `quantity`/`unit` fields were removed (moved to the caller's responsibility). The `Quantity` and `Unit` enums were also removed from `common/mod.rs`.
+
+### Key decisions
+
+- **Step LOCF extends past data; Linear does not.** For Step, the signal is defined everywhere after the first sample (carries forward indefinitely). For Linear, `time_weighted_mean` returns `None` if the bucket extends past the last sample — this naturally excludes incomplete buckets from `resample_uniform` output. This asymmetry matches the physical semantics: tariffs (Step) hold until explicitly changed, while power measurements (Linear) can't be extrapolated.
+
+- **`time_weighted_mean` uses `interpolate_at` for values, not direct sample access.** The split points determine *where* to break the integral; the values come from `interpolate_at` which finds surrounding samples via binary search. This keeps the algorithm clean even when bucket boundaries don't align with samples.
+
+- **Grid alignment uses epoch-based `rem_euclid`, not relative-to-anchor.** This ensures `resample_uniform(5min)` always produces timestamps like `:00`, `:05`, `:10` regardless of when the data starts — critical for cross-asset alignment.
+
+### Results
+
+- 36 unit tests, all passing (`cargo test common::tests`).
+- Tests cover: interpolation (9 tests), time-weighted mean (6 tests), resample_to_grid (5 tests), resample_uniform (8 tests), grid alignment helpers (4 tests), plus 4 pre-existing ascending/empty tests.
+- No integration changes — pure library addition.
