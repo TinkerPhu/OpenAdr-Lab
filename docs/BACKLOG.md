@@ -88,9 +88,11 @@ slot boundaries are correctly time-weighted.
 **Depends on:** RF-05a
 **Prerequisite for:** RF-06, accurate report generation
 
-### RF-05c — Backend: uniform-grid timeline API with `now_point`
-**What:** Modify `GET /timeline/all` (and `GET /timeline/:asset_id`) to return all assets
-resampled onto a shared uniform time grid, plus a dedicated `now_point` for each asset.
+### RF-05c — Backend: uniform-grid timeline API with now-point
+**What:** Modify `GET /timeline/all` (and `GET /timeline/:asset_id`) to resample all assets
+onto a shared uniform time grid with a now-point. The response format stays unchanged
+(`Record<string, {ts, values}[]>`). Each asset's array is three segments concatenated in
+ascending time order: (1) history grid points, (2) a single now-point, (3) future grid points.
 **Why:** Investigation showed that history timestamps are already aligned across assets
 (all pushed with the same `now` in the tick loop). Misalignment only occurs because
 the per-asset `downsample()` stride in `get_timeline_all` picks different indices per asset.
@@ -98,27 +100,38 @@ The fix belongs in the API: return a shared grid so the UI needs no interpolatio
 **New query parameter:**
 - `resolution` (optional, seconds) — bucket width for the uniform grid. Default: auto-calculated
   from `hours_back + hours_forward` to target ~300 points. Replaces `max_points`.
-**Response shape change for `/timeline/all`:**
+**Response format (unchanged shape, new alignment guarantees):**
 ```json
 {
-  "resolution_s": 10,
-  "now_ms": 1711036800000,
-  "grid_timestamps": ["2026-03-21T11:00:00Z", "2026-03-21T11:00:10Z", "..."],
-  "assets": {
-    "ev":      { "now_point": {"ts": "...", "values": {}}, "points": ["..."] },
-    "battery": { "now_point": {"ts": "...", "values": {}}, "points": ["..."] }
-  }
+  "ev": [
+    {"ts": "2026-03-21T11:00:00Z", "values": {"power_kw": 2.1}},
+    {"ts": "2026-03-21T11:00:10Z", "values": {"power_kw": 2.3}},
+    {"ts": "2026-03-21T11:00:17Z", "values": {"power_kw": 2.4}},
+    {"ts": "2026-03-21T11:00:20Z", "values": {"power_kw": 3.0}},
+    {"ts": "2026-03-21T11:00:30Z", "values": null}
+  ],
+  "battery": [
+    {"ts": "2026-03-21T11:00:00Z", "values": {"power_kw": -0.5}},
+    {"ts": "2026-03-21T11:00:10Z", "values": {"power_kw": -0.8}},
+    {"ts": "2026-03-21T11:00:17Z", "values": {"power_kw": -0.9}},
+    {"ts": "2026-03-21T11:00:20Z", "values": {"power_kw": -1.0}},
+    {"ts": "2026-03-21T11:00:30Z", "values": null}
+  ]
 }
 ```
+In the example above (resolution=10s, now=11:00:17Z): index 0-1 are history grid points,
+index 2 is the now-point (not grid-aligned), index 3-4 are future grid points.
 **Key design decisions:**
-- `grid_timestamps` is the shared uniform grid — every asset's `points` array has the same
-  length and timestamps. The UI can index by position, no lookup needed.
-- `now_point` is a single extra point per asset at the exact `now` timestamp (which typically
-  does NOT fall on a grid boundary). The UI uses this for the "now" cursor display without
-  distorting the uniform grid.
+- All assets share the same `ts` values at each index — the UI can index by position.
+- Grid timestamps are snapped to round boundaries of the resolution (deterministic: same
+  resolution + window = same grid, regardless of when the call is made).
+- The now-point sits between history and future grid portions at the exact server `now`,
+  preserving ascending sort order. It provides instantaneous values so the UI does not
+  need to interpolate (the UI doesn't know the interpolation method).
 - History buckets: aggregate via time-weighted mean (LOCF within bucket, then average).
 - Future (plan) buckets: step interpolation — each bucket gets the plan slot value that covers
   its start timestamp.
+- Empty buckets: `{"ts": "...", "values": null}` — no data available.
 - `resolution` replaces `max_points`. `max_points` kept as deprecated alias.
 - `/tariffs` is NOT resampled — tariffs are sparse step functions (1-10 points per 24h),
   render correctly as-is, and cost/CO₂ rates are already baked into each timeline point.
@@ -126,17 +139,16 @@ The fix belongs in the API: return a shared grid so the UI needs no interpolatio
 **Prerequisite for:** RF-05d (UI cleanup)
 
 ### RF-05d — Frontend: remove findNearest, use grid-aligned API response
-**What:** Update `GridAccumulatedCell.tsx` to consume the new grid-aligned response from
-RF-05c. Remove `findNearest()`, `TOLERANCE_MS`, and the tolerance-based matching logic.
+**What:** Update `GridAccumulatedCell.tsx` to consume the grid-aligned response from RF-05c.
+Remove `findNearest()`, `TOLERANCE_MS`, and the tolerance-based matching logic.
 **Changes required:**
-- Update `allTimelines` client/hook to parse the new response shape (`grid_timestamps`,
-  per-asset `points` array, `now_point`).
 - Replace `buildStackedFromAllTimelines` with a simple positional zip across assets
-  (all arrays share the same indices — no lookup needed).
-- Add a single extra `StackedAreaPoint` at `now_ms` using each asset's `now_point` values,
-  inserted at the correct position in the sorted output.
+  (all arrays share the same indices and `ts` values — no lookup needed).
+- Handle `values: null` entries from empty grid buckets (render as gaps in the chart).
 - Remove `findNearest()` function entirely.
 - Update or replace `GridAccumulatedCell.test.tsx` to test the new direct-index approach.
+**Note:** No response shape change — the format is still `Record<string, {ts, values}[]>`.
+The client/hook code does not need updating. The now-point is already inline in the array.
 **Depends on:** RF-05c
 **Prerequisite for:** accurate UI stacked charts
 
