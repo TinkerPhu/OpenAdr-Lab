@@ -1,22 +1,7 @@
 """Step definitions for Uniform-Grid Timeline API (RF-05c)."""
 
 from datetime import datetime, timezone
-from behave import when, then
-from features.helpers.api_client import ven_get
-
-
-# ── When ─────────────────────────────────────────────────────────────────────
-
-@when('I GET {path} from the VEN')
-def step_get_from_ven(context, path):
-    # Strip leading/trailing whitespace, split path?query
-    path = path.strip()
-    if '?' in path:
-        base, qs = path.split('?', 1)
-        params = dict(p.split('=', 1) for p in qs.split('&'))
-    else:
-        base, params = path, None
-    context.last_response = ven_get(f"/{base.lstrip('/')}", params=params)
+from behave import then
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
