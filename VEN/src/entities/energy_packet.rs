@@ -126,6 +126,41 @@ pub struct EnergyPacket {
 }
 
 impl EnergyPacket {
+    /// Construct a new packet with all defaults set (Pending, empty profiles, zero accumulators).
+    /// Callers override specific fields via struct update syntax as needed.
+    pub fn new(
+        asset_id: String,
+        target_energy_kwh: f64,
+        desired_power_kw: f64,
+        value_curve: ValueCurve,
+        now: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            asset_id,
+            status: PacketStatus::Pending,
+            earliest_start: now,
+            latest_start: None,
+            target_energy_kwh,
+            target_soc: None,
+            desired_power_kw,
+            value_curve,
+            request_mode: UserRequestMode::ByDeadline,
+            completion_policy: CompletionPolicy::Stop,
+            post_deadline_comfort_bid: None,
+            planned_power_profile: vec![],
+            past_power_profile: vec![],
+            accumulated_cost_eur: 0.0,
+            accumulated_co2_g: 0.0,
+            estimated_cost_eur: 0.0,
+            estimated_co2_g: 0.0,
+            estimated_completion: 0.0,
+            last_estimate_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
     /// Task completion fraction: 0.0 (none) to 1.0 (full).
     pub fn fill(&self) -> f64 {
         if self.target_energy_kwh > 0.0 {
@@ -197,6 +232,25 @@ mod tests {
             deadline_tiers: vec![],
             active_tier_index: 0,
         }
+    }
+
+    #[test]
+    fn new_sets_defaults() {
+        let now = Utc::now();
+        let curve = ValueCurve { comfort_rates: vec![], deadline_tiers: vec![], active_tier_index: 0 };
+        let p = EnergyPacket::new("ev".to_string(), 10.0, 3.0, curve, now);
+        assert_eq!(p.status, PacketStatus::Pending);
+        assert!(p.past_power_profile.is_empty());
+        assert!(p.planned_power_profile.is_empty());
+        assert_eq!(p.accumulated_cost_eur, 0.0);
+        assert_eq!(p.accumulated_co2_g, 0.0);
+        assert_eq!(p.estimated_cost_eur, 0.0);
+        assert_eq!(p.estimated_completion, 0.0);
+        assert_eq!(p.created_at, now);
+        assert_eq!(p.target_energy_kwh, 10.0);
+        assert_eq!(p.desired_power_kw, 3.0);
+        assert!(p.target_soc.is_none());
+        assert!(p.last_estimate_at.is_none());
     }
 
     #[test]
