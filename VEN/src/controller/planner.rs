@@ -2,7 +2,7 @@
 ///
 /// Produces a Plan from TariffSnapshots + EnergyPackets + device profile.
 /// Phase 6 (penalty check) is deferred to Stage 4.
-use crate::common::{Interpolation, TimeSeries};
+use crate::common::TimeSeries;
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PlanTrigger, UserRequestMode};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
@@ -663,6 +663,7 @@ fn seed_to_packet(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::Interpolation;
     use crate::entities::tariff_snapshot::TariffSnapshot;
     use chrono::TimeZone;
 
