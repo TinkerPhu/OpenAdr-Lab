@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use tracing::debug;
 
-use crate::common::{Interpolation, TimeSeries};
+use crate::common::{Aggregation, Interpolation, TimeSeries};
 use crate::controller::trace::{AssetHistoryBuffer, ControllerEvent};
 use crate::entities::capacity::OadrReportObligation;
 
@@ -290,7 +290,7 @@ pub fn build_measurement_report_for_obligation(
             build_soc_intervals(asset_history, interval_width, &duration_iso)
         }
         _ => {
-            let resampled = net_power_ts.resample_uniform(interval_width);
+            let resampled = net_power_ts.resample_uniform(interval_width, Aggregation::Mean);
             resampled
                 .samples
                 .iter()
@@ -412,7 +412,7 @@ fn build_soc_intervals(
     };
 
     // Build interval-end timestamps using the same grid alignment as resample_uniform
-    let resampled_uniform = soc_ts.resample_uniform(interval_width);
+    let resampled_uniform = soc_ts.resample_uniform(interval_width, Aggregation::Mean);
     let interval_end_timestamps: Vec<DateTime<Utc>> = resampled_uniform
         .samples
         .iter()
