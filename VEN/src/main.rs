@@ -253,7 +253,7 @@ async fn main() -> anyhow::Result<()> {
                         state.set_planned_tariffs(rates).await;
                         state.set_capacity_state(new_cap).await;
 
-                        let existing_obs = state.obligations().await;
+                        let existing_obs = state.report_obligations().await;
                         let new_obs = controller::openadr_interface::extract_report_obligations(
                             &events, now, &existing_obs,
                         );
@@ -1328,7 +1328,7 @@ async fn get_capacity(State(ctx): State<AppCtx>) -> impl IntoResponse {
 
 /// GET /obligations — returns pending report obligations (Stage 2).
 async fn get_obligations(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.obligations().await)
+    Json(ctx.state.report_obligations().await)
 }
 
 /// POST /packets body shape (Stage 4).

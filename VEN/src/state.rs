@@ -244,11 +244,6 @@ impl AppState {
         self.inner.write().await.report_obligations = obligations;
     }
 
-    /// Alias used by the controller (Stage 2).
-    pub async fn obligations(&self) -> Vec<OadrReportObligation> {
-        self.inner.read().await.report_obligations.clone()
-    }
-
     /// Append new obligations without duplicating existing ones (keyed by id).
     pub async fn add_obligations(&self, new_obs: Vec<OadrReportObligation>) {
         if new_obs.is_empty() {
