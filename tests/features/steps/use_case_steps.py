@@ -194,7 +194,6 @@ def step_wait_ven1_event(context, name):
         _ven1_events,
         lambda events: _find_event(events, name) is not None,
         timeout=30,
-        interval=3,
         description=f"VEN-1 shows event '{name}'",
     )
 
@@ -206,7 +205,6 @@ def step_wait_ven2_event(context, name):
         _ven2_events,
         lambda events: _find_event(events, name) is not None,
         timeout=30,
-        interval=3,
         description=f"VEN-2 shows event '{name}'",
     )
 
@@ -217,7 +215,6 @@ def step_wait_ven1_event_gone(context, name):
         _ven1_events,
         lambda events: _find_event(events, name) is None,
         timeout=30,
-        interval=3,
         description=f"VEN-1 no longer shows event '{name}'",
     )
 
@@ -407,7 +404,6 @@ def step_report_visible_in_vtn(context, name, client):
             for r in reports
         ),
         timeout=30,
-        interval=3,
         description=f"Report from '{client}' for event '{name}' in VTN",
     )
 
@@ -448,7 +444,6 @@ def step_wait_ven1_event_value(context, name, val):
         lambda: check(),
         lambda result: result is True,
         timeout=30,
-        interval=3,
         description=f"VEN-1 event '{name}' has payload value {val}",
     )
 
@@ -466,7 +461,6 @@ def step_wait_ven2_event_value(context, name, val):
         lambda: check(),
         lambda result: result is True,
         timeout=30,
-        interval=3,
         description=f"VEN-2 event '{name}' has payload value {val}",
     )
 

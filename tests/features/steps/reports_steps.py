@@ -24,7 +24,6 @@ def step_wait_ven1_events(context, count):
         fetch,
         lambda events: len(events) >= count,
         timeout=30,
-        interval=3,
         description=f"VEN-1 has >= {count} events",
     )
 
@@ -66,7 +65,6 @@ def step_report_in_ven1(context):
             for r in rs
         ),
         timeout=30,
-        interval=3,
         description="Report appears in VEN-1",
     )
     assert len(reports) > 0
@@ -86,7 +84,6 @@ def step_report_in_bff(context):
             for r in rs
         ),
         timeout=30,
-        interval=3,
         description="Report appears in BFF",
     )
     assert len(reports) > 0

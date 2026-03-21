@@ -12,21 +12,15 @@ Feature: UC-08..UC-10 — Edge Case Use Cases
 
   Scenario: UC-08a — Unplugging the EV via override drops EV current to zero
     When I POST a sim override setting ev_plugged to false
-    And I wait 3 seconds
-    And I GET /sim from the VEN
-
-    Then the response status is 200
-    And the sim EV power_kw is 0.0
+    And I poll VEN /sim until field "ev.power_kw" equals 0.0
+    Then the sim EV power_kw is 0.0
 
   Scenario: UC-08b — Re-plugging the EV resumes charging
     When I POST a sim override setting ev_plugged to false
     And I wait 2 seconds
     And I POST a sim override setting ev_plugged to true
-    And I wait 2 seconds
-    And I GET /sim from the VEN
-
-    Then the response status is 200
-    And the sim EV field is present
+    And I poll VEN /sim until field "ev" is present
+    Then the sim EV field is present
 
   # --- UC-09: Tier Fallback (Tight Budget) ---
   # A request with two tiers (tight budget tier 1, fallback tier 2) is created.

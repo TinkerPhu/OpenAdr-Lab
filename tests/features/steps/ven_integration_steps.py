@@ -12,7 +12,6 @@ def step_wait_ven_program(context, name):
         fetch,
         lambda progs: any(p.get("programName") == name for p in progs),
         timeout=30,
-        interval=3,
         description=f"VEN shows program '{name}'",
     )
 
@@ -32,7 +31,6 @@ def step_wait_ven_events(context, count):
         fetch,
         lambda events: len(events) >= count,
         timeout=30,
-        interval=3,
         description=f"VEN has >= {count} events",
     )
 
@@ -51,7 +49,6 @@ def step_wait_ven_sensor_power(context):
         fetch,
         lambda s: s.get("power_w") is not None,
         timeout=30,
-        interval=3,
         description="VEN sensor has power_w",
     )
 

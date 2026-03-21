@@ -68,7 +68,7 @@ Feature: VEN Simulator
     And the sim device "base_load" has field "power_kw"
 
   Scenario: Sensor values come from simulator
-    When I wait 3 seconds
+    When I poll VEN /sensors until field "source" is present
     And I GET the VEN sensor snapshot
     Then the sensor raw source is "simulator"
 
@@ -78,5 +78,4 @@ Feature: VEN Simulator
     When I create a UC event "auto-report-evt" with type "IMPORT_CAPACITY_LIMIT" priority 0 and value 5000
     Then the response status is 201
     When I wait for VEN-1 to show event "auto-report-evt"
-    And I wait 15 seconds
     Then an auto-report for event "auto-report-evt" exists on VEN-1

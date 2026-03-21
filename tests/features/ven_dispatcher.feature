@@ -10,8 +10,7 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
 
   Scenario: EV packet transitions to ACTIVE once the dispatcher starts commanding power
     When I wait for the VEN /plan to have an EV allocation in firm_slots
-    And I wait 3 seconds
-    And I GET /packets from the VEN
+    And I poll VEN /packets until asset "ev" has status "ACTIVE"
     Then the response JSON is an array
     And at least one packet has asset_id "ev"
     And at least one packet with asset_id "ev" has status "ACTIVE"
@@ -35,8 +34,6 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
 
   Scenario: GET /ledger returns per-asset energy accumulation after charging
     When I wait for the VEN /plan to have an EV allocation in firm_slots
-    And I wait 5 seconds
-    And I GET /ledger from the VEN
-    Then the response status is 200
-    And the response JSON has field "ev"
+    And I poll VEN /ledger until field "ev.energy_kwh" is greater than 0.0
+    Then the response JSON has field "ev"
     And the response JSON field "ev.energy_kwh" is greater than 0.0
