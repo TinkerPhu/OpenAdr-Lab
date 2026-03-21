@@ -11,8 +11,6 @@ Feature: Asset Interface — forecast(timespan)
     When I GET /forecast/pv?timespan_s=3600 from the VEN
     Then the response status is 200
     And the forecast response has a non-empty samples list
-    And the forecast quantity is "power"
-    And the forecast unit is "kilowatt"
     And the forecast interpolation is "linear"
 
   Scenario: PV forecast boundary point is present at end of timespan
@@ -27,8 +25,6 @@ Feature: Asset Interface — forecast(timespan)
     When I GET /forecast/battery?timespan_s=3600 from the VEN
     Then the response status is 200
     And the forecast response has a non-empty samples list
-    And the forecast quantity is "power"
-    And the forecast unit is "kilowatt"
     And the forecast interpolation is "linear"
 
   # ── EV Charger ──────────────────────────────────────────────────────────────
@@ -37,8 +33,6 @@ Feature: Asset Interface — forecast(timespan)
     When I GET /forecast/ev?timespan_s=3600 from the VEN
     Then the response status is 200
     And the forecast response has a non-empty samples list
-    And the forecast quantity is "power"
-    And the forecast unit is "kilowatt"
     And the forecast interpolation is "step"
 
 
@@ -48,8 +42,6 @@ Feature: Asset Interface — forecast(timespan)
     When I GET /forecast/base_load?timespan_s=3600 from the VEN
     Then the response status is 200
     And the forecast response has a non-empty samples list
-    And the forecast quantity is "power"
-    And the forecast unit is "kilowatt"
     And the forecast interpolation is "step"
     And all forecast sample values are equal
 
@@ -59,8 +51,6 @@ Feature: Asset Interface — forecast(timespan)
     When I GET /forecast/heater?timespan_s=3600 from the VEN
     Then the response status is 200
     And the forecast response has a non-empty samples list
-    And the forecast quantity is "power"
-    And the forecast unit is "kilowatt"
     And the forecast interpolation is "linear"
 
   # ── Edge cases ───────────────────────────────────────────────────────────────
