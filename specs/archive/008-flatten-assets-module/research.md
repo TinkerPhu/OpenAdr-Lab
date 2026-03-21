@@ -78,7 +78,7 @@ originals are gone.
 | `crate::simulator::assets::*` | `simulator/mod.rs` | Direct sub-module declaration |
 | `crate::simulator::AssetEntry` | `main.rs` likely via `simulator::*` | Stays in `simulator/mod.rs` |
 | `crate::simulator::AssetState` | `simulator/mod.rs`, `controller/*`, `entities/asset.rs` | Will be `crate::assets::AssetState` |
-| `crate::common::*` | `simulator/assets/mod.rs` | References `QuantitySeries`, `AssetInterface` — these stay in `common/` |
+| `crate::common::*` | `simulator/assets/mod.rs` | References `QuantityTimeline`, `AssetInterface` — these stay in `common/` |
 
 > Exact use paths are confirmed at build time; the compiler will emit errors for every missed
 > reference.
