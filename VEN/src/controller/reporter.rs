@@ -86,6 +86,39 @@ fn event_is_active(event: &Value, now: DateTime<Utc>) -> bool {
 // Measurement report (timer-driven, T046)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Latest asset power helpers
+// ---------------------------------------------------------------------------
+
+/// Sum the most-recent `power_kw` across all assets that are currently importing
+/// (positive power). Returns 0.0 if the history is empty or all assets are exporting.
+fn latest_net_import_kw(asset_history: &HashMap<String, AssetHistoryBuffer>) -> f64 {
+    asset_history
+        .values()
+        .filter_map(|buf| {
+            buf.to_timeline(None)
+                .last()
+                .map(|p| p.values.get("power_kw").copied().unwrap_or(0.0))
+        })
+        .filter(|&kw| kw > 0.0)
+        .sum()
+}
+
+/// Sum the most-recent `power_kw` across all assets that are currently exporting
+/// (negative power), returned as a positive magnitude.
+fn latest_net_export_kw(asset_history: &HashMap<String, AssetHistoryBuffer>) -> f64 {
+    asset_history
+        .values()
+        .filter_map(|buf| {
+            buf.to_timeline(None)
+                .last()
+                .map(|p| p.values.get("power_kw").copied().unwrap_or(0.0))
+        })
+        .filter(|&kw| kw < 0.0)
+        .map(|kw| -kw)
+        .sum()
+}
+
 /// Build a TELEMETRY_USAGE measurement report for a single active OpenADR event.
 ///
 /// The report includes:
@@ -105,15 +138,7 @@ pub fn build_measurement_report(
     let report_name = format!("auto-{}-{}", ven_name, event_id);
     let resource_name = format!("{}-meter", ven_name);
 
-    // Compute net site import power from latest asset history rows
-    let net_import_kw: f64 = asset_history
-        .values()
-        .filter_map(|buf| {
-            let pts = buf.to_timeline(None);
-            pts.last().map(|p| p.values.get("power_kw").copied().unwrap_or(0.0))
-        })
-        .filter(|&kw| kw > 0.0) // only import contributions
-        .sum();
+    let net_import_kw = latest_net_import_kw(asset_history);
     let net_import_w = net_import_kw * 1000.0;
 
     // Extract the primary payload type from the event's first interval
@@ -131,15 +156,7 @@ pub fn build_measurement_report(
     let (report_type, report_value) = match payload_type {
         "IMPORT_CAPACITY_LIMIT" => ("USAGE", net_import_w),
         "EXPORT_CAPACITY_LIMIT" => {
-            let export_kw: f64 = asset_history
-                .values()
-                .filter_map(|buf| {
-                    let pts = buf.to_timeline(None);
-                    pts.last().map(|p| p.values.get("power_kw").copied().unwrap_or(0.0))
-                })
-                .filter(|&kw| kw < 0.0)
-                .map(|kw| -kw)
-                .sum();
+            let export_kw = latest_net_export_kw(asset_history);
             ("USAGE", export_kw * 1000.0)
         }
         "PRICE" => ("USAGE", net_import_w),
@@ -478,15 +495,7 @@ pub fn build_status_report(
         _ => return None,
     };
 
-    // Compute site-level net import for the status snapshot
-    let net_import_kw: f64 = asset_history
-        .values()
-        .filter_map(|buf| {
-            let pts = buf.to_timeline(None);
-            pts.last().map(|p| p.values.get("power_kw").copied().unwrap_or(0.0))
-        })
-        .filter(|&kw| kw > 0.0)
-        .sum();
+    let net_import_kw = latest_net_import_kw(asset_history);
 
     let resource_name = asset_id_opt
         .as_deref()
@@ -803,5 +812,36 @@ mod tests {
         let history = HashMap::new();
         let net = build_net_site_power_ts(&history);
         assert!(net.samples.is_empty());
+    }
+
+    // ── latest_net_import_kw / latest_net_export_kw ───────────────
+
+    #[test]
+    fn latest_net_import_kw_sums_positive_assets() {
+        let mut history = HashMap::new();
+        history.insert("a".into(), make_buf(&[(0, &[("power_kw", 3.0)])]));
+        history.insert("b".into(), make_buf(&[(0, &[("power_kw", -2.0)])])); // export — ignored
+        assert!((latest_net_import_kw(&history) - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn latest_net_import_kw_empty_history_returns_zero() {
+        let history: HashMap<String, AssetHistoryBuffer> = HashMap::new();
+        assert_eq!(latest_net_import_kw(&history), 0.0);
+    }
+
+    #[test]
+    fn latest_net_import_kw_all_exporting_returns_zero() {
+        let mut history = HashMap::new();
+        history.insert("pv".into(), make_buf(&[(0, &[("power_kw", -5.0)])]));
+        assert_eq!(latest_net_import_kw(&history), 0.0);
+    }
+
+    #[test]
+    fn latest_net_export_kw_sums_negative_assets_as_positive() {
+        let mut history = HashMap::new();
+        history.insert("pv".into(), make_buf(&[(0, &[("power_kw", -2.5)])]));
+        history.insert("load".into(), make_buf(&[(0, &[("power_kw", 1.0)])])); // import — ignored
+        assert!((latest_net_export_kw(&history) - 2.5).abs() < 1e-9);
     }
 }
