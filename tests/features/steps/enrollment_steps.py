@@ -37,7 +37,6 @@ def step_wait_ven1_program(context, name):
         lambda: _ven_programs(VEN_BASE_URL),
         lambda progs: any(p.get("programName") == name for p in progs),
         timeout=30,
-        interval=3,
         description=f"VEN-1 shows program '{name}'",
     )
 
@@ -48,7 +47,6 @@ def step_wait_ven2_program(context, name):
         lambda: _ven_programs(VEN2_BASE_URL),
         lambda progs: any(p.get("programName") == name for p in progs),
         timeout=30,
-        interval=3,
         description=f"VEN-2 shows program '{name}'",
     )
 

@@ -11,10 +11,8 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
 
   Scenario: UC-01a — Profile-seeded EV packet is planned and dispatched to ACTIVE
     When I wait for the VEN /plan to have an EV allocation in firm_slots
-    And I wait 3 seconds
-    And I GET /packets from the VEN
-    Then the response status is 200
-    And the response JSON is an array
+    And I poll VEN /packets until asset "ev" has status "ACTIVE"
+    Then the response JSON is an array
     And at least one packet has asset_id "ev"
     And at least one packet with asset_id "ev" has status "ACTIVE"
 
@@ -56,10 +54,8 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
   Scenario: UC-03 — PV surplus accumulates in the asset ledger
     When I POST a sim override with full PV irradiance
     And I wait for the VEN /plan endpoint to return a plan
-    And I wait 5 seconds
-    And I GET /ledger from the VEN
-    Then the response status is 200
-    And the response JSON has field "pv"
+    And I poll VEN /ledger until field "pv" is present
+    Then the response JSON has field "pv"
 
   # --- UC-04: Day-Ahead PRICE Event Triggers Rate Update ---
   # VTN posts a multi-interval PRICE event. VEN polls it and populates /rates.

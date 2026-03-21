@@ -173,7 +173,6 @@ def step_wait_ven_rates(context, count):
         fetch,
         lambda rates: isinstance(rates, list) and len(rates) >= count,
         timeout=30,
-        interval=3,
         description=f"VEN /tariffs has >= {count} snapshot(s)",
     )
 
@@ -190,7 +189,6 @@ def step_wait_ven_rates_co2(context):
         fetch,
         lambda rates: isinstance(rates, list) and any(s.get("co2_g_kwh") is not None for s in rates),
         timeout=30,
-        interval=3,
         description="VEN /tariffs has a snapshot with co2_g_kwh",
     )
 
@@ -207,7 +205,6 @@ def step_wait_ven_rates_export_price(context):
         fetch,
         lambda rates: isinstance(rates, list) and any(s.get("export_tariff_eur_kwh") is not None for s in rates),
         timeout=30,
-        interval=3,
         description="VEN /tariffs has a snapshot with export_tariff_eur_kwh",
     )
 
@@ -224,7 +221,6 @@ def step_wait_ven_capacity_limit(context, expected):
         fetch,
         lambda cap: isinstance(cap, dict) and cap.get("import_limit_kw") == expected,
         timeout=30,
-        interval=3,
         description=f"VEN /capacity import_limit_kw == {expected}",
     )
 

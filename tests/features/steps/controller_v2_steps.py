@@ -191,8 +191,11 @@ def _expand_ev_status_accordion(page):
     assert header is not None, "status-settings-accordion-ev not found"
     # Click the accordion summary (first child div) to expand
     header.query_selector("[role='button']").click()
-    import time
-    time.sleep(0.4)  # wait for MUI expand animation
+    # Wait for the MUI accordion content panel to become visible
+    page.wait_for_selector(
+        f'{tid("status-settings-accordion-ev")} [role="region"]',
+        state="visible", timeout=5000,
+    )
 
 
 @then("the EV plugged toggle is visible in the EV cell right section")

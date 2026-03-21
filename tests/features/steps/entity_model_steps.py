@@ -5,6 +5,7 @@ import json
 import requests
 from behave import given, when, then
 from features.helpers.api_client import ven_get, ven_post, VEN_BASE_URL
+from features.helpers.wait import poll_until
 
 
 def _resolve_nested(data, path):
@@ -70,6 +71,74 @@ def step_ven_post_with_body(context, path):
 @when("I wait {seconds:d} seconds")
 def step_wait_seconds(context, seconds):
     time.sleep(seconds)
+
+
+@when('I poll VEN {path} until field "{field}" is present')
+def step_poll_ven_field_present(context, path, field):
+    """Poll a VEN endpoint until a dotted field path is non-None."""
+    def fetch():
+        r = ven_get(path)
+        r.raise_for_status()
+        return r.json()
+
+    context.last_response_json = poll_until(
+        fetch,
+        lambda data: _resolve_nested(data, field) is not None,
+        timeout=15,
+        description=f"VEN {path} field '{field}' is present",
+    )
+
+
+@when('I poll VEN {path} until field "{field}" is greater than {threshold:f}')
+def step_poll_ven_field_gt(context, path, field, threshold):
+    """Poll a VEN endpoint until a field exceeds a threshold."""
+    def fetch():
+        r = ven_get(path)
+        r.raise_for_status()
+        return r.json()
+
+    def check(data):
+        val = _resolve_nested(data, field)
+        return isinstance(val, (int, float)) and val > threshold
+
+    context.last_response_json = poll_until(
+        fetch, check, timeout=15,
+        description=f"VEN {path} field '{field}' > {threshold}",
+    )
+
+
+@when('I poll VEN {path} until field "{field}" equals {expected:f}')
+def step_poll_ven_field_eq(context, path, field, expected):
+    """Poll a VEN endpoint until a field equals an expected value."""
+    def fetch():
+        r = ven_get(path)
+        r.raise_for_status()
+        return r.json()
+
+    def check(data):
+        val = _resolve_nested(data, field)
+        return isinstance(val, (int, float)) and abs(val - expected) < 0.001
+
+    context.last_response_json = poll_until(
+        fetch, check, timeout=15,
+        description=f"VEN {path} field '{field}' == {expected}",
+    )
+
+
+@when('I poll VEN {path} until it is a non-empty array')
+def step_poll_ven_nonempty_array(context, path):
+    """Poll a VEN endpoint until it returns a non-empty JSON array."""
+    def fetch():
+        r = ven_get(path)
+        r.raise_for_status()
+        return r.json()
+
+    context.last_response_json = poll_until(
+        fetch,
+        lambda data: isinstance(data, list) and len(data) > 0,
+        timeout=15,
+        description=f"VEN {path} returns non-empty array",
+    )
 
 
 @when("the battery is commanded to discharge")

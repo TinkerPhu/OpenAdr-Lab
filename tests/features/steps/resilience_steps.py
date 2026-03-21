@@ -65,8 +65,7 @@ def step_ven1_picks_up(context, name, seconds):
     poll_until(
         lambda: ven_get("/events").json(),
         lambda events: any(e.get("eventName") == name for e in events),
-        timeout=seconds, interval=3,
-        description=f"VEN-1 picks up event '{name}'",
+        timeout=seconds,        description=f"VEN-1 picks up event '{name}'",
     )
 
 
@@ -75,6 +74,5 @@ def step_ven2_picks_up(context, name, seconds):
     poll_until(
         lambda: ven2_get("/events").json(),
         lambda events: any(e.get("eventName") == name for e in events),
-        timeout=seconds, interval=3,
-        description=f"VEN-2 picks up event '{name}'",
+        timeout=seconds,        description=f"VEN-2 picks up event '{name}'",
     )

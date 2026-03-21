@@ -18,8 +18,7 @@ Feature: VEN Entity Model — Stage 1 Foundation
     And the response JSON field "battery.max_discharge_kw" is greater than 0.0
 
   Scenario: Battery SoC stays within valid range over time
-    When I wait 3 seconds
-    And I GET /sim from the VEN
+    When I poll VEN /sim until field "battery.soc" is present
     Then the response JSON field "battery.soc" is a number between 0.0 and 1.0
 
   Scenario: Battery power_kw is 0.0 when no dispatcher is active (Stage 1 hold)
@@ -62,7 +61,5 @@ Feature: VEN Entity Model — Stage 1 Foundation
     And the response JSON is an array
 
   Scenario: GET /trace/history returns asset history rows for EV
-    When I wait 3 seconds
-    And I GET /trace/history?asset=ev&limit=5 from the VEN
-    Then the response status is 200
-    And the response JSON is an array
+    When I poll VEN /trace/history?asset=ev&limit=5 until it is a non-empty array
+    Then the response JSON is an array
