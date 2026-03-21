@@ -163,7 +163,7 @@ Creating an EnergyPacket requires setting ~25 fields. Three sites duplicate the 
 
 ## RF-B08: Extract event poll change-detection into a function
 
-**Status**: BACKLOG
+**Status**: DONE
 **Risk**: Medium (touches the critical event poll loop)
 **Files**: `VEN/src/main.rs` (lines 125-273)
 
