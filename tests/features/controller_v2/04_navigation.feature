@@ -26,6 +26,9 @@ Feature: Controller V2 — Navigation and Layout Controls
     Then the EV asset cell left section is not visible
 
   @ven-ui
-  Scenario: Collapse right section hides the right panel
+  Scenario: Right section starts collapsed and can be expanded then collapsed
+    Then the EV asset cell right section is not visible
+    When I click the collapse right button on the EV asset cell
+    Then the EV asset cell right section is visible
     When I click the collapse right button on the EV asset cell
     Then the EV asset cell right section is not visible
