@@ -27,7 +27,7 @@ The function `update_packets` is marked with the comment "NOTE: This function wi
 
 ## RF-B02: Delete unused `PlannedTariffs`, `PastTariffs`, `TariffHeuristic`
 
-**Status**: BACKLOG
+**Status**: DONE
 **Risk**: Low (dead code removal)
 **Files**: `VEN/src/entities/tariff_snapshot.rs`
 
