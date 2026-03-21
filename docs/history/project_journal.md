@@ -2903,8 +2903,19 @@ Refactored the VEN measurement reporter to produce multi-interval reports when e
 - **SoC = Step interpolation + point-in-time**: SoC is a state variable, not a rate. Sampling at interval ends via `resample_to_grid` gives the instantaneous value, not an average.
 - **Net site power summing**: All assets' `power_kw` are summed into a single TimeSeries before resampling. This gives the actual grid exchange direction per interval.
 
+#### BDD Integration Issues & Fixes
+
+The initial BDD tests failed due to three issues discovered during Pi4 integration testing:
+
+1. **VTN does not store `duration` in reportDescriptors**. The OpenADR 3.0 `reportDescriptor` has a `frequency` field (integer seconds), not a `duration` field (ISO 8601). The VTN silently drops unknown fields. Fix: changed `extract_report_obligations()` to read `descriptor.frequency` instead of `descriptor.duration`.
+
+2. **Timer/obligation report collision**. Both the timer-driven and obligation-driven paths submitted reports with the same `reportName` (`auto-{ven}-{event}`), causing upsert overwrites. The timer path would overwrite the multi-interval obligation report with a single-interval snapshot. Fix: (a) obligation reports use distinct `reportName` (`ob-{ven}-{event}-{type}`), (b) timer-driven path skips events that have `reportDescriptors` in the event JSON.
+
+3. **Docker build caching**. `docker compose run --build test-runner` only rebuilds the test-runner, NOT the VEN service. VEN changes require explicit `docker compose build --no-cache test-ven-1`. This caused multiple debug cycles where the old VEN code was running despite source changes on Pi4.
+
 #### Tests
 
-- 16 new unit tests in `reporter.rs` (history_to_timeseries, format_iso8601_duration, obligation reports, import/export split, SoC point-in-time, net site power)
-- 118 total cargo tests — all passing
+- 17 new unit tests in `reporter.rs` + `openadr_interface.rs` (history_to_timeseries, format_iso8601_duration, obligation reports, import/export split, SoC point-in-time, net site power, frequency field parsing)
+- 119 total cargo tests — all passing
 - 2 BDD scenarios in `reporter_resampling.feature` (multi-interval + single-interval fallback)
+- Full regression: 38 features, 190 scenarios, 1083 steps — all passing
