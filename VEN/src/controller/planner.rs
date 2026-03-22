@@ -2,14 +2,14 @@
 ///
 /// Produces a Plan from TariffSnapshots + EnergyPackets + SimState.
 /// Phase 6 (penalty check) is deferred to Stage 4.
-use crate::assets::{AssetCapability, AssetConfig, AssetState};
+use crate::assets::{AssetCapability, AssetState};
 use crate::common::Aggregation;
 use crate::controller::reservation::{AssetReservation, ReservationLayer};
 use crate::entities::asset::{ComfortRate, PlanTrigger};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
 use crate::entities::plan::{
-    ComfortBoundType, FirmSummary, FlexibilityEnvelope, FlexibleSummary, LookaheadContext,
+    FirmSummary, FlexibilityEnvelope, FlexibleSummary, LookaheadContext,
     PacketAllocation, Plan, PlanReason, PlanStep, PlanTimeSlot, PlanningHorizon,
     ReservationSource, SlotType,
 };
@@ -121,6 +121,11 @@ pub fn run_planner(
     let asset_order: &[&str] = &["pv", "base_load", "ev", "battery", "heater"];
     let uncontrollable: &[&str] = &["pv", "base_load"];
 
+    // Pre-extract slot windows for deadline-pressure calculation in rules_choose().
+    // Cannot pass &firm_slots into the iter_mut loop (simultaneous mut + immutable borrow).
+    let firm_slot_windows: Vec<(DateTime<Utc>, DateTime<Utc>)> =
+        firm_slots.iter().map(|s| (s.start, s.end)).collect();
+
     for slot in firm_slots.iter_mut() {
         let ts = slot.start;
 
@@ -152,7 +157,7 @@ pub fn run_planner(
                 };
                 rules_choose(
                     aid, phys_cap, avail_cap, &res,
-                    slot.import_tariff_eur_kwh, slot, &firm_slots, &pkts,
+                    slot.import_tariff_eur_kwh, slot, &firm_slot_windows, &pkts,
                     &allocated, &site_ctx, la, reservations,
                     median_tariff, profile.battery_config(), slot_h, now,
                 )
@@ -400,7 +405,7 @@ fn rules_choose(
     res: &AssetReservation,
     tariff_t: f64,
     slot: &PlanTimeSlot,
-    firm_slots: &[PlanTimeSlot],
+    firm_slot_windows: &[(DateTime<Utc>, DateTime<Utc>)],
     packets: &[EnergyPacket],
     allocated: &HashMap<Uuid, f64>,
     site_ctx: &SiteContext,
@@ -440,9 +445,9 @@ fn rules_choose(
                 return None;
             }
             let latest_end = p.latest_end().unwrap_or(far_future);
-            let slots_remaining = firm_slots
+            let slots_remaining = firm_slot_windows
                 .iter()
-                .filter(|s| s.start >= p.earliest_start && s.end <= latest_end)
+                .filter(|(start, end)| *start >= p.earliest_start && *end <= latest_end)
                 .count()
                 .max(1);
             let slots_needed =
