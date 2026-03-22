@@ -121,6 +121,30 @@ pub struct FlexibilityEnvelope {
     pub estimated_co2_g: f64,
 }
 
+/// Live site-level flexibility available to the grid right now (§9).
+///
+/// Computed directly from current asset state and active reservations —
+/// independent of the active plan. Always queryable without triggering
+/// a planning cycle.
+///
+/// up_kw:   how much the VEN can reduce grid consumption right now (kW, ≥ 0).
+/// down_kw: how much the VEN can increase grid consumption right now (kW, ≥ 0).
+///
+/// Duration fields estimate how long the VEN can sustain the headroom based
+/// on available storage energy. None if no storage assets are present.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SiteFlexibilityEnvelope {
+    pub ts:              DateTime<Utc>,
+    /// Consumption-reduction headroom available right now (kW). Always ≥ 0.
+    pub up_kw:           f64,
+    /// Consumption-increase headroom available right now (kW). Always ≥ 0.
+    pub down_kw:         f64,
+    /// Estimated duration up_kw can be sustained, in seconds. None = no storage.
+    pub up_duration_s:   Option<u64>,
+    /// Estimated duration down_kw can be sustained, in seconds. None = no storage.
+    pub down_duration_s: Option<u64>,
+}
+
 /// Severity of a plan warning.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
