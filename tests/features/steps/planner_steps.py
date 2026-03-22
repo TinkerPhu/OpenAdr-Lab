@@ -164,12 +164,6 @@ def step_firm_slot_has_allocation(context, asset_id):
         any(a.get("asset_id") == asset_id for a in slot.get("allocations", []))
         for slot in firm
     )
-    if not found:
-        caps = [s.get("import_cap_kw") for s in firm[:3]]
-        packets = plan.get("packets", [])
-        pkt_info = [(p.get("asset_id"), p.get("status"), p.get("remaining_energy_kwh")) for p in packets]
-        print(f"[DEBUG UC-12a] first 3 firm slot import_cap_kw: {caps}")
-        print(f"[DEBUG UC-12a] packets: {pkt_info}")
     assert found, (
         f"No firm slot has an allocation for asset '{asset_id}'. "
         f"Checked {len(firm)} firm slots."
