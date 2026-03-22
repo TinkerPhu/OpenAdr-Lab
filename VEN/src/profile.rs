@@ -2,6 +2,8 @@ use serde::Deserialize;
 use std::path::Path;
 use tracing::{info, warn};
 
+use crate::controller::flexibility_policy::FlexibilityPolicy;
+
 /// YAML-loaded asset profile tagged enum for the `assets:` list format.
 /// Each entry has a `type` discriminator plus type-specific fields.
 /// Renamed from `AssetConfig` in Phase A to avoid collision with `assets::AssetConfig`
@@ -45,6 +47,8 @@ pub struct Profile {
     pub planner: PlannerConfig,
     #[serde(default)]
     pub packets: Vec<PacketSeed>,
+    #[serde(default)]
+    pub flexibility_policy: FlexibilityPolicy,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -426,6 +430,7 @@ impl Profile {
             simulator: SimulatorConfig::default(),
             planner: PlannerConfig::default(),
             packets: vec![],
+            flexibility_policy: FlexibilityPolicy::default(),
         }
     }
 }
