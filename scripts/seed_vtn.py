@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Seed the VTN with demo programs and events for all 8 use cases.
 
+Also provisions ven-2 and ven-3 via API if they don't exist yet.
+(ven-1 is created by the SQL fixture test_user_credentials.sql.)
+
 Usage:
     python3 seed_vtn.py --vtn-url http://localhost:8200
     python3 seed_vtn.py --vtn-url http://localhost:8200 --demo-cancel
+    python3 seed_vtn.py --vtn-url http://localhost:8200 --skip-provision
 """
 
 import argparse
@@ -221,6 +225,14 @@ def build_events():
     }
 
 
+# ── VENs to provision via API (ven-1 is created by the SQL fixture) ──────────
+
+VENS_TO_PROVISION = [
+    {"ven_name": "ven-2", "client_id": "ven-2", "client_secret": "ven-2", "user_ref": "ven-2-user"},
+    {"ven_name": "ven-3", "client_id": "ven-3", "client_secret": "ven-3", "user_ref": "ven-3-user"},
+]
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def get_token(base_url, client_id, client_secret):
@@ -339,6 +351,45 @@ def delete_event(base_url, token, event_id):
     r.raise_for_status()
 
 
+def provision_vens(base, vens):
+    """Provision VEN users, credentials, and VEN entities via API. Idempotent."""
+    um_token = get_token(base, "user-manager", "user-manager")
+    vm_token = get_token(base, "ven-manager", "ven-manager")
+
+    for ven in vens:
+        # Check if already provisioned by testing the credentials
+        r = requests.post(
+            f"{base}/auth/token",
+            data={"grant_type": "client_credentials", "client_id": ven["client_id"], "client_secret": ven["client_secret"]},
+            timeout=10,
+        )
+        if r.ok:
+            print(f"VEN '{ven['ven_name']}' already provisioned — skipping.")
+            continue
+
+        print(f"Provisioning VEN '{ven['ven_name']}' ...")
+
+        r = requests.post(f"{base}/users", headers=auth_headers(um_token),
+                          json={"reference": ven["user_ref"], "description": f"VEN {ven['ven_name']}", "roles": []}, timeout=10)
+        r.raise_for_status()
+        user_id = r.json()["id"]
+
+        r = requests.post(f"{base}/users/{user_id}", headers=auth_headers(um_token),
+                          json={"client_id": ven["client_id"], "client_secret": ven["client_secret"]}, timeout=10)
+        r.raise_for_status()
+
+        r = requests.post(f"{base}/vens", headers=auth_headers(vm_token),
+                          json={"venName": ven["ven_name"]}, timeout=10)
+        r.raise_for_status()
+        ven_id = r.json()["id"]
+
+        r = requests.put(f"{base}/users/{user_id}", headers=auth_headers(um_token),
+                         json={"reference": ven["user_ref"], "description": f"VEN {ven['ven_name']}",
+                               "roles": [{"role": "VEN", "id": ven_id}]}, timeout=10)
+        r.raise_for_status()
+        print(f"  '{ven['ven_name']}' provisioned (user={user_id}, ven={ven_id})")
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -347,10 +398,17 @@ def main():
     parser.add_argument("--client-id", default="any-business", help="OAuth client ID")
     parser.add_argument("--client-secret", default="any-business", help="OAuth client secret")
     parser.add_argument("--demo-cancel", action="store_true", help="Demo UC8: create then delete cancel-demo-event")
+    parser.add_argument("--skip-provision", action="store_true", help="Skip VEN provisioning (e.g. test stack handles it separately)")
     args = parser.parse_args()
 
     base = args.vtn_url.rstrip("/")
     events_data = build_events()
+
+    # Provision VENs before creating programs (programs with VEN_NAME targets
+    # require those VEN entities to already exist in the VTN)
+    if not args.skip_provision:
+        provision_vens(base, VENS_TO_PROVISION)
+        print()
 
     # Authenticate
     print(f"Authenticating as {args.client_id} at {base} ...")
