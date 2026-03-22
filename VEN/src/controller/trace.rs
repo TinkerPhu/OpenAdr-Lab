@@ -251,7 +251,10 @@ mod tests {
     #[test]
     fn push_and_retrieve() {
         let mut buf = AssetHistoryBuffer::new(10);
-        buf.push(ts(0), [("soc".into(), 0.5), ("power_kw".into(), 2.0)].into());
+        buf.push(
+            ts(0),
+            [("soc".into(), 0.5), ("power_kw".into(), 2.0)].into(),
+        );
         buf.push(ts(1), [("soc".into(), 0.51)].into());
 
         assert_eq!(buf.len(), 2);

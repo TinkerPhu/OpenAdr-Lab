@@ -288,10 +288,7 @@ pub fn extract_report_obligations(
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let descriptors = match event
-            .get("reportDescriptors")
-            .and_then(|v| v.as_array())
-        {
+        let descriptors = match event.get("reportDescriptors").and_then(|v| v.as_array()) {
             Some(arr) => arr,
             None => continue,
         };
@@ -303,11 +300,12 @@ pub fn extract_report_obligations(
             };
 
             // Skip if already tracked
-            let already_exists = existing.iter().any(|ob| {
-                ob.event_id == event_id && ob.payload_type == payload_type
-            }) || result.iter().any(|ob| {
-                ob.event_id == event_id && ob.payload_type == payload_type
-            });
+            let already_exists = existing
+                .iter()
+                .any(|ob| ob.event_id == event_id && ob.payload_type == payload_type)
+                || result
+                    .iter()
+                    .any(|ob| ob.event_id == event_id && ob.payload_type == payload_type);
 
             if already_exists {
                 continue;
@@ -516,8 +514,7 @@ mod tests {
             }
         ]);
         let now = Utc::now();
-        let obligations =
-            extract_report_obligations(events.as_array().unwrap(), now, &[]);
+        let obligations = extract_report_obligations(events.as_array().unwrap(), now, &[]);
         assert!(obligations.is_empty());
     }
 
@@ -537,8 +534,7 @@ mod tests {
             }
         ]);
         let now = Utc::now();
-        let obligations =
-            extract_report_obligations(events.as_array().unwrap(), now, &[]);
+        let obligations = extract_report_obligations(events.as_array().unwrap(), now, &[]);
         assert_eq!(obligations.len(), 1);
         assert_eq!(obligations[0].payload_type, "USAGE");
         assert_eq!(obligations[0].reading_type, "DIRECT_READ");
@@ -570,7 +566,11 @@ mod tests {
             ]
         }]);
         let snapshots = parse_rate_snapshots(events.as_array().unwrap(), now);
-        assert_eq!(snapshots.len(), 2, "no looping expected when duration == cycle");
+        assert_eq!(
+            snapshots.len(),
+            2,
+            "no looping expected when duration == cycle"
+        );
     }
 
     #[test]
@@ -598,7 +598,11 @@ mod tests {
         let snapshots = parse_rate_snapshots(events.as_array().unwrap(), now);
 
         // More than 2 intervals: looping occurred
-        assert!(snapshots.len() > 2, "expected looped intervals, got {}", snapshots.len());
+        assert!(
+            snapshots.len() > 2,
+            "expected looped intervals, got {}",
+            snapshots.len()
+        );
 
         // An interval must cover now (2026-01-03T00:30 → cycle 24, interval 0: 00:00–01:00)
         let current = snapshots
@@ -702,8 +706,7 @@ mod tests {
             fulfilled: false,
             created_at: now,
         }];
-        let obligations =
-            extract_report_obligations(events.as_array().unwrap(), now, &existing);
+        let obligations = extract_report_obligations(events.as_array().unwrap(), now, &existing);
         // Should not add a duplicate
         assert!(obligations.is_empty());
     }
@@ -721,8 +724,7 @@ mod tests {
             }
         ]);
         let now = Utc::now();
-        let obligations =
-            extract_report_obligations(events.as_array().unwrap(), now, &[]);
+        let obligations = extract_report_obligations(events.as_array().unwrap(), now, &[]);
         assert_eq!(obligations.len(), 1);
         assert_eq!(obligations[0].interval_duration_s, 900);
         assert_eq!(obligations[0].due_at, now + Duration::seconds(900));

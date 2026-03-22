@@ -340,7 +340,9 @@ mod tests {
     use super::*;
     use chrono::{Duration, TimeZone, Utc};
 
-    fn mean() -> Aggregation { Aggregation::Mean }
+    fn mean() -> Aggregation {
+        Aggregation::Mean
+    }
 
     /// Helper: build a fixed base time for deterministic tests.
     fn t(hour: u32, min: u32, sec: u32) -> DateTime<Utc> {
@@ -595,10 +597,7 @@ mod tests {
     #[test]
     fn resample_uniform_forecast_alignment() {
         // Data starts at 12:22 — first bucket should be at 12:25 (ceil)
-        let s = step_series(vec![
-            (t(12, 22, 0), 1.0),
-            (t(12, 40, 0), 2.0),
-        ]);
+        let s = step_series(vec![(t(12, 22, 0), 1.0), (t(12, 40, 0), 2.0)]);
         let r = s.resample_uniform(Duration::minutes(5), mean());
         assert!(!r.samples.is_empty());
         assert_eq!(r.samples[0].0, t(12, 25, 0));
@@ -607,10 +606,7 @@ mod tests {
     #[test]
     fn resample_uniform_history_alignment() {
         // Data ends at 12:22 — last bucket starts at 12:20 (floor)
-        let s = step_series(vec![
-            (t(12, 0, 0), 1.0),
-            (t(12, 22, 0), 2.0),
-        ]);
+        let s = step_series(vec![(t(12, 0, 0), 1.0), (t(12, 22, 0), 2.0)]);
         let r = s.resample_uniform(Duration::minutes(5), mean());
         let last = r.samples.last().unwrap();
         assert_eq!(last.0, t(12, 20, 0));
@@ -623,7 +619,7 @@ mod tests {
         let s = linear_series(vec![(t(10, 0, 0), 0.0), (t(11, 0, 0), 60.0)]);
         let r = s.resample_uniform(Duration::minutes(5), mean());
         assert_eq!(r.samples.len(), 12); // 10:00..10:55
-        // First bucket [10:00, 10:05): mean of linear from 0→5 = 2.5
+                                         // First bucket [10:00, 10:05): mean of linear from 0→5 = 2.5
         assert!((r.samples[0].1 - 2.5).abs() < 1e-9);
         // Last bucket [10:55, 11:00): mean of linear from 55→60 = 57.5
         assert!((r.samples[11].1 - 57.5).abs() < 1e-9);
@@ -791,7 +787,10 @@ mod tests {
     #[test]
     fn test_parse_iso8601_duration_years() {
         let secs = parse_iso8601_duration_secs("P9999Y");
-        assert!(secs > 9998i64 * 365 * 86400, "P9999Y should be a very large value");
+        assert!(
+            secs > 9998i64 * 365 * 86400,
+            "P9999Y should be a very large value"
+        );
     }
 
     #[test]

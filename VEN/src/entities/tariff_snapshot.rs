@@ -107,7 +107,13 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 3, 21, hour, min, 0).unwrap()
     }
 
-    fn snap(start: DateTime<Utc>, end: DateTime<Utc>, imp: Option<f64>, exp: Option<f64>, co2: Option<f64>) -> TariffSnapshot {
+    fn snap(
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        imp: Option<f64>,
+        exp: Option<f64>,
+        co2: Option<f64>,
+    ) -> TariffSnapshot {
         TariffSnapshot {
             interval_start: start,
             interval_end: end,

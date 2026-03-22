@@ -1,9 +1,9 @@
+use crate::controller::trace::ControllerTrace;
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
-use crate::entities::user_request::{UserRequest, UserRequestStatus};
 use crate::entities::energy_packet::EnergyPacket;
 use crate::entities::plan::Plan;
 use crate::entities::tariff_snapshot::TariffSnapshot;
-use crate::controller::trace::ControllerTrace;
+use crate::entities::user_request::{UserRequest, UserRequestStatus};
 use crate::models::SensorSnapshot;
 use crate::simulator::SimSnapshot;
 use chrono::DateTime;
@@ -37,12 +37,12 @@ impl AssetLedgerEntry {
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct UserOverrides {
     // Environment inputs
-    pub pv_irradiance: Option<f64>,      // 0.0–1.0; None = auto (time-based sin model)
-    pub ambient_temp_c: Option<f64>,     // None = fixed 10.0°C
+    pub pv_irradiance: Option<f64>, // 0.0–1.0; None = auto (time-based sin model)
+    pub ambient_temp_c: Option<f64>, // None = fixed 10.0°C
 
     // EV preference (overridden by active events)
-    pub ev_desired_kw: Option<f64>,      // idle charge rate; None = ev.max_charge_kw
-    pub ev_plugged: Option<bool>,        // None = always true
+    pub ev_desired_kw: Option<f64>, // idle charge rate; None = ev.max_charge_kw
+    pub ev_plugged: Option<bool>,   // None = always true
 
     // Device spec overrides (shadow profile values)
     pub ev_max_charge_kw: Option<f64>,
@@ -52,7 +52,6 @@ pub struct UserOverrides {
     pub heater_temp_max_c: Option<f64>,
     pub pv_rated_kw: Option<f64>,
     pub base_load_w: Option<f64>,
-
 }
 
 #[derive(Clone)]

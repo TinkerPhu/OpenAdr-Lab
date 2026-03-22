@@ -42,7 +42,10 @@ async fn main() -> anyhow::Result<()> {
     let metrics_handle = PrometheusBuilder::new().install_recorder()?;
 
     let cfg = Config::from_env()?;
-    info!("starting ven {} listening on {}", cfg.ven_name, cfg.listen_addr);
+    info!(
+        "starting ven {} listening on {}",
+        cfg.ven_name, cfg.listen_addr
+    );
 
     let state = AppState::new();
 
@@ -89,7 +92,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Derive shared data_dir from persist_path
-    let data_dir = cfg.persist_path.as_deref()
+    let data_dir = cfg
+        .persist_path
+        .as_deref()
         .and_then(|p| std::path::Path::new(p).parent())
         .and_then(|p| p.to_str())
         .unwrap_or("/data")
@@ -104,16 +109,30 @@ async fn main() -> anyhow::Result<()> {
 
     // Spawn background loops
     loops::spawn_program_poll(state.clone(), vtn.clone(), cfg.poll_programs_secs);
-    loops::spawn_event_poll(state.clone(), vtn.clone(), cfg.poll_events_secs, trigger_tx.clone());
+    loops::spawn_event_poll(
+        state.clone(),
+        vtn.clone(),
+        cfg.poll_events_secs,
+        trigger_tx.clone(),
+    );
     loops::spawn_report_poll(state.clone(), vtn.clone(), cfg.poll_reports_secs);
     loops::spawn_sim_tick(
-        state.clone(), sim_state.clone(), profile.clone(),
-        cfg.ven_name.clone(), vtn.clone(), trigger_tx.clone(), data_dir.clone(),
+        state.clone(),
+        sim_state.clone(),
+        profile.clone(),
+        cfg.ven_name.clone(),
+        vtn.clone(),
+        trigger_tx.clone(),
+        data_dir.clone(),
     );
     loops::spawn_obligation_check(state.clone(), vtn.clone(), cfg.ven_name.clone());
     loops::spawn_planning(
-        state.clone(), profile.clone(), vtn.clone(),
-        cfg.ven_name.clone(), trigger_rx, sim_state.clone(),
+        state.clone(),
+        profile.clone(),
+        vtn.clone(),
+        cfg.ven_name.clone(),
+        trigger_rx,
+        sim_state.clone(),
     );
     if let Some(path) = cfg.persist_path.clone() {
         loops::spawn_state_persist(state.clone(), path);
