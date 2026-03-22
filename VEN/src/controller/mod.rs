@@ -3,6 +3,7 @@ pub mod openadr_interface;
 
 // ── Planning & dispatch ───────────────────────────────────────────────────────
 pub mod dispatcher;
+pub mod flexibility_policy;
 pub mod planner;
 pub mod reservation;
 pub mod timeline;
