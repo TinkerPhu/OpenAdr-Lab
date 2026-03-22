@@ -127,6 +127,7 @@ def step_future_simple_event(context, kw, hours, duration):
         "programID": program_id,
         "eventName": f"future-simple-{hours}h",
         "intervals": [{
+            "id": 0,
             "intervalPeriod": {
                 "start":    start.isoformat(),
                 "duration": f"PT{duration}H",
@@ -161,6 +162,7 @@ def step_expired_simple_event(context, kw, hours):
         "programID": program_id,
         "eventName": f"expired-simple-{hours}h-ago",
         "intervals": [{
+            "id": 0,
             "intervalPeriod": {
                 "start":    start.isoformat(),
                 "duration": "PT1H",
