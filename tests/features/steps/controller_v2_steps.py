@@ -156,28 +156,12 @@ def step_base_load_timeline_visible(context):
     assert el is not None and el.is_visible(), "asset-timeline-chart-base_load not visible"
 
 
-@then("the EV asset cell shows an extend-window button")
-def step_ev_extend_btn_visible(context):
+@then("the global time range extend button is visible")
+def step_global_extend_btn_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("asset-cell-ev-extend-btn"), timeout=10000
+        tid("global-time-range-extend-btn"), timeout=10000
     )
-    assert el is not None and el.is_visible(), "asset-cell-ev-extend-btn not visible"
-
-
-@then("the heater asset cell shows an extend-window button")
-def step_heater_extend_btn_visible(context):
-    el = context.browser_page.wait_for_selector(
-        tid("asset-cell-heater-extend-btn"), timeout=10000
-    )
-    assert el is not None and el.is_visible(), "asset-cell-heater-extend-btn not visible"
-
-
-@then("the grid tariff cell shows an extend-window button")
-def step_tariff_extend_btn_visible(context):
-    el = context.browser_page.wait_for_selector(
-        tid("grid-tariff-cell-extend-btn"), timeout=10000
-    )
-    assert el is not None and el.is_visible(), "grid-tariff-cell-extend-btn not visible"
+    assert el is not None and el.is_visible(), "global-time-range-extend-btn not visible"
 
 
 # ── Simulation controls: 03_simulation_controls.feature ───────────────────────
