@@ -3,6 +3,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::common::parse_iso8601_duration_secs;
+use crate::controller::reservation::{FlexDirection, Reservation, ReservationSource};
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 
@@ -263,6 +264,110 @@ pub fn parse_capacity_state(events: &[Value]) -> OadrCapacityState {
     }
 
     existing
+}
+
+// ---------------------------------------------------------------------------
+// FIRM reservation extraction
+// ---------------------------------------------------------------------------
+
+/// Convert SIMPLE-type FIRM demand response events into `Reservation` records.
+///
+/// Each interval of a SIMPLE event that is currently active (window overlaps now)
+/// produces one Reservation:
+///   - window     = interval [start, start + duration)
+///   - kw         = payload value (consumption reduction magnitude, kW)
+///   - direction  = Up (SIMPLE events demand consumption reduction)
+///   - priority   = 1
+///   - source     = VtnFirmEvent { event_id }
+///   - asset_id   = None (site-level)
+///
+/// Intervals where end <= now (expired) or start > now (future, not yet active)
+/// are excluded. Phase C handles pre-announced future events.
+///
+/// IMPORT_CAPACITY_LIMIT and EXPORT_CAPACITY_LIMIT payloads are ignored here —
+/// they go through OadrCapacityState / GridState.
+pub fn parse_firm_reservations(events: &[Value], now: DateTime<Utc>) -> Vec<Reservation> {
+    let mut result = Vec::new();
+
+    for event in events {
+        let event_id = match event.get("id").and_then(|v| v.as_str()) {
+            Some(id) => id.to_string(),
+            None => continue,
+        };
+
+        let intervals = match event.get("intervals").and_then(|v| v.as_array()) {
+            Some(arr) => arr,
+            None => continue,
+        };
+
+        for interval in intervals {
+            let payloads = match interval.get("payloads").and_then(|v| v.as_array()) {
+                Some(arr) => arr,
+                None => continue,
+            };
+
+            for payload in payloads {
+                let payload_type = match payload.get("type").and_then(|v| v.as_str()) {
+                    Some(t) => t,
+                    None => continue,
+                };
+                if payload_type != "SIMPLE" {
+                    continue;
+                }
+
+                let kw = match payload
+                    .get("values")
+                    .and_then(|v| v.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|v| v.as_f64())
+                {
+                    Some(v) => v,
+                    None => continue,
+                };
+
+                // Parse window from intervalPeriod; fall back to [now, now+1d) if absent.
+                let (window_start, window_end) =
+                    if let Some(ip) = interval.get("intervalPeriod") {
+                        let start: DateTime<Utc> = match ip
+                            .get("start")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| s.parse().ok())
+                        {
+                            Some(dt) => dt,
+                            None => now,
+                        };
+                        let dur_secs = parse_iso8601_duration_secs(
+                            ip.get("duration")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("PT1H"),
+                        );
+                        let end = start + Duration::seconds(dur_secs);
+                        (start, end)
+                    } else {
+                        (now, now + Duration::days(1))
+                    };
+
+                // Skip expired or not-yet-active intervals.
+                if window_end <= now || window_start > now {
+                    continue;
+                }
+
+                result.push(Reservation {
+                    id: Uuid::new_v4(),
+                    window: (window_start, window_end),
+                    asset_id: None,
+                    kw,
+                    direction: FlexDirection::Up,
+                    source: ReservationSource::VtnFirmEvent {
+                        event_id: event_id.clone(),
+                    },
+                    priority: 1,
+                });
+            }
+        }
+    }
+
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -728,5 +833,112 @@ mod tests {
         assert_eq!(obligations.len(), 1);
         assert_eq!(obligations[0].interval_duration_s, 900);
         assert_eq!(obligations[0].due_at, now + Duration::seconds(900));
+    }
+
+    // ── parse_firm_reservations ──────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_firm_reservations_active_simple_event() {
+        let now = Utc::now();
+        let start = now - Duration::minutes(30);
+        let events = json!([{
+            "id": "evt-firm-1",
+            "intervals": [{
+                "intervalPeriod": {
+                    "start": start.to_rfc3339(),
+                    "duration": "PT1H"
+                },
+                "payloads": [{"type": "SIMPLE", "values": [5.0]}]
+            }]
+        }]);
+        let result = parse_firm_reservations(events.as_array().unwrap(), now);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].kw, 5.0);
+        assert_eq!(result[0].priority, 1);
+        assert!(result[0].asset_id.is_none());
+        let (ws, we) = result[0].window;
+        assert!(ws <= now && now < we);
+    }
+
+    #[test]
+    fn test_parse_firm_reservations_future_event_excluded() {
+        let now = Utc::now();
+        let start = now + Duration::hours(2);
+        let events = json!([{
+            "id": "evt-future",
+            "intervals": [{
+                "intervalPeriod": {
+                    "start": start.to_rfc3339(),
+                    "duration": "PT1H"
+                },
+                "payloads": [{"type": "SIMPLE", "values": [10.0]}]
+            }]
+        }]);
+        let result = parse_firm_reservations(events.as_array().unwrap(), now);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_firm_reservations_expired_event_excluded() {
+        let now = Utc::now();
+        let start = now - Duration::hours(3);
+        let events = json!([{
+            "id": "evt-expired",
+            "intervals": [{
+                "intervalPeriod": {
+                    "start": start.to_rfc3339(),
+                    "duration": "PT1H"
+                },
+                "payloads": [{"type": "SIMPLE", "values": [8.0]}]
+            }]
+        }]);
+        let result = parse_firm_reservations(events.as_array().unwrap(), now);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_firm_reservations_capacity_limit_ignored() {
+        let now = Utc::now();
+        let start = now - Duration::minutes(10);
+        let events = json!([{
+            "id": "evt-cap",
+            "intervals": [{
+                "intervalPeriod": {
+                    "start": start.to_rfc3339(),
+                    "duration": "PT1H"
+                },
+                "payloads": [
+                    {"type": "IMPORT_CAPACITY_LIMIT", "values": [15.0]},
+                    {"type": "EXPORT_CAPACITY_LIMIT", "values": [5.0]}
+                ]
+            }]
+        }]);
+        let result = parse_firm_reservations(events.as_array().unwrap(), now);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_firm_reservations_multiple_intervals() {
+        let now = Utc::now();
+        let s1 = now - Duration::hours(1);
+        let s2 = now - Duration::minutes(20);
+        let events = json!([{
+            "id": "evt-multi",
+            "intervals": [
+                {
+                    "intervalPeriod": {"start": s1.to_rfc3339(), "duration": "PT2H"},
+                    "payloads": [{"type": "SIMPLE", "values": [3.0]}]
+                },
+                {
+                    "intervalPeriod": {"start": s2.to_rfc3339(), "duration": "PT1H"},
+                    "payloads": [{"type": "SIMPLE", "values": [7.0]}]
+                }
+            ]
+        }]);
+        let result = parse_firm_reservations(events.as_array().unwrap(), now);
+        assert_eq!(result.len(), 2);
+        let kws: Vec<f64> = result.iter().map(|r| r.kw).collect();
+        assert!(kws.contains(&3.0));
+        assert!(kws.contains(&7.0));
     }
 }
