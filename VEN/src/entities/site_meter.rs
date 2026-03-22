@@ -30,14 +30,14 @@ pub struct PowerSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SiteMeter {
     pub meter_id: String,
-    pub ts: DateTime<Utc>,               // last measurement time
-    pub net_import_kw: f64,              // positive = importing from grid, negative = exporting
-    pub voltage_v: Option<f64>,          // grid voltage (optional, for power quality)
-    pub frequency_hz: Option<f64>,       // grid frequency (optional)
-    pub cumulative_import_kwh: f64,      // total imported energy (meter reading)
-    pub cumulative_export_kwh: f64,      // total exported energy (meter reading)
-    pub measurement_interval_s: u64,     // how often the meter is read
-    pub is_online: bool,                 // meter communication status
+    pub ts: DateTime<Utc>,           // last measurement time
+    pub net_import_kw: f64,          // positive = importing from grid, negative = exporting
+    pub voltage_v: Option<f64>,      // grid voltage (optional, for power quality)
+    pub frequency_hz: Option<f64>,   // grid frequency (optional)
+    pub cumulative_import_kwh: f64,  // total imported energy (meter reading)
+    pub cumulative_export_kwh: f64,  // total exported energy (meter reading)
+    pub measurement_interval_s: u64, // how often the meter is read
+    pub is_online: bool,             // meter communication status
 
     /// Per-asset current power (asset_id → kW, positive = import)
     pub asset_power: HashMap<String, f64>,
@@ -94,9 +94,9 @@ pub struct DeviceSession {
     pub start_time: DateTime<Utc>,
     pub end_time: Option<DateTime<Utc>>,
 
-    pub commanded_setpoint_kw: f64,       // current setpoint sent to device
-    pub measured_power_kw: f64,           // current actual power from device
-    pub cumulative_delivered_kwh: f64,    // energy delivered in this session
+    pub commanded_setpoint_kw: f64, // current setpoint sent to device
+    pub measured_power_kw: f64,     // current actual power from device
+    pub cumulative_delivered_kwh: f64, // energy delivered in this session
 
     pub responsiveness: DeviceResponsiveness,
     /// How many consecutive deviation-above-threshold readings

@@ -18,7 +18,7 @@ pub enum SlotType {
 pub struct PlanningHorizon {
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
-    pub step_size_s: u64,   // planning timestep in seconds (e.g. 300 = 5min)
+    pub step_size_s: u64, // planning timestep in seconds (e.g. 300 = 5min)
     pub num_steps: usize,
     pub near_horizon: DateTime<Utc>, // = now + NearHorizonDuration
     pub far_horizon: DateTime<Utc>,  // = end_time
@@ -188,8 +188,7 @@ impl Plan {
 
     /// Return the plan slot that covers `now`, if any.
     pub fn current_slot(&self, now: DateTime<Utc>) -> Option<&PlanTimeSlot> {
-        self.all_slots()
-            .find(|s| s.start <= now && now < s.end)
+        self.all_slots().find(|s| s.start <= now && now < s.end)
     }
 }
 

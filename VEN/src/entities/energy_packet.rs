@@ -32,8 +32,8 @@ pub struct DeadlineTier {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnergySnapshot {
     pub ts: DateTime<Utc>,
-    pub power_kw: f64,                // instantaneous power at this timestep
-    pub cumulative_energy_kwh: f64,   // cumulative energy delivered since packet start
+    pub power_kw: f64,              // instantaneous power at this timestep
+    pub cumulative_energy_kwh: f64, // cumulative energy delivered since packet start
 }
 
 /// Complete user preference model for an EnergyPacket (§2.9).
@@ -89,15 +89,15 @@ pub struct EnergyPacket {
 
     // ── Temporal Bounds ─────────────────────────────────────────────────────
     pub earliest_start: DateTime<Utc>,
-    pub latest_start: Option<DateTime<Utc>>,  // must begin by this or abandon
+    pub latest_start: Option<DateTime<Utc>>, // must begin by this or abandon
 
     // ── Energy Target ────────────────────────────────────────────────────────
-    pub target_energy_kwh: f64,        // total energy required for 100% completion
-    pub target_soc: Option<f64>,       // target SoC if storage asset (alternative to energy)
-    pub desired_power_kw: f64,         // preferred power level when running
+    pub target_energy_kwh: f64, // total energy required for 100% completion
+    pub target_soc: Option<f64>, // target SoC if storage asset (alternative to energy)
+    pub desired_power_kw: f64,  // preferred power level when running
 
     // ── Value ────────────────────────────────────────────────────────────────
-    pub value_curve: ValueCurve,       // comfort rates + deadline tiers
+    pub value_curve: ValueCurve, // comfort rates + deadline tiers
     pub request_mode: UserRequestMode,
     pub completion_policy: CompletionPolicy,
     /// €/kWh bid for priority after last deadline (only when CompletionPolicy = CONTINUE)
@@ -112,13 +112,13 @@ pub struct EnergyPacket {
     pub past_power_profile: Vec<EnergySnapshot>,
 
     // ── Budget Tracking ──────────────────────────────────────────────────────
-    pub accumulated_cost_eur: f64,     // Σ(PastPower × ImportPrice × dt) so far
-    pub accumulated_co2_g: f64,        // Σ(PastPower × CO2Rate × dt) so far
+    pub accumulated_cost_eur: f64, // Σ(PastPower × ImportPrice × dt) so far
+    pub accumulated_co2_g: f64,    // Σ(PastPower × CO2Rate × dt) so far
 
     // ── Planner Estimates (updated each plan cycle) ──────────────────────────
     pub estimated_cost_eur: f64,
     pub estimated_co2_g: f64,
-    pub estimated_completion: f64,     // 0.0..1.0, expected fill at active tier deadline
+    pub estimated_completion: f64, // 0.0..1.0, expected fill at active tier deadline
     pub last_estimate_at: Option<DateTime<Utc>>,
 
     pub created_at: DateTime<Utc>,
@@ -164,7 +164,9 @@ impl EnergyPacket {
     /// Task completion fraction: 0.0 (none) to 1.0 (full).
     pub fn fill(&self) -> f64 {
         if self.target_energy_kwh > 0.0 {
-            let past_energy: f64 = self.past_power_profile.iter()
+            let past_energy: f64 = self
+                .past_power_profile
+                .iter()
                 .map(|s| s.cumulative_energy_kwh)
                 .next_back()
                 .unwrap_or(0.0);
@@ -176,7 +178,8 @@ impl EnergyPacket {
 
     /// Total energy already delivered (kWh).
     pub fn past_energy_kwh(&self) -> f64 {
-        self.past_power_profile.iter()
+        self.past_power_profile
+            .iter()
             .map(|s| s.cumulative_energy_kwh)
             .next_back()
             .unwrap_or(0.0)
@@ -237,7 +240,11 @@ mod tests {
     #[test]
     fn new_sets_defaults() {
         let now = Utc::now();
-        let curve = ValueCurve { comfort_rates: vec![], deadline_tiers: vec![], active_tier_index: 0 };
+        let curve = ValueCurve {
+            comfort_rates: vec![],
+            deadline_tiers: vec![],
+            active_tier_index: 0,
+        };
         let p = EnergyPacket::new("ev".to_string(), 10.0, 3.0, curve, now);
         assert_eq!(p.status, PacketStatus::Pending);
         assert!(p.past_power_profile.is_empty());

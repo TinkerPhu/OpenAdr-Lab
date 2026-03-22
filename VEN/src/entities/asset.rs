@@ -98,7 +98,7 @@ pub enum RateUnit {
     Usd,
     Chf,
     #[serde(rename = "g_CO2_eq")]
-    GCo2Eq,  // grams CO2 equivalent (grid intensity)
+    GCo2Eq, // grams CO2 equivalent (grid intensity)
     #[serde(rename = "kg_CO2_eq")]
     KgCo2Eq, // kilograms CO2 equivalent (user-facing budgets)
 }
@@ -169,7 +169,7 @@ pub struct PowerRange {
 /// Parameters for thermal model — heater / heat pump (§3.1.1).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThermalModelParams {
-    pub thermal_mass_kwh_per_k: f64,  // energy to raise mass by 1K
+    pub thermal_mass_kwh_per_k: f64,     // energy to raise mass by 1K
     pub insulation_factor_kw_per_k: f64, // heat loss rate in kW/K
     pub min_temperature_c: f64,
     pub max_temperature_c: f64,
@@ -179,9 +179,9 @@ pub struct ThermalModelParams {
 /// MaxMarginalPrice is a priority bid, not the actual price paid.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComfortRate {
-    pub fill: f64,                 // 0.0..1.0 task completion fraction
-    pub max_marginal_price: f64,   // max €/kWh the user bids — determines priority
-    pub max_marginal_co2: f64,     // max gCO2/kWh user accepts at this fill level
+    pub fill: f64,               // 0.0..1.0 task completion fraction
+    pub max_marginal_price: f64, // max €/kWh the user bids — determines priority
+    pub max_marginal_co2: f64,   // max gCO2/kWh user accepts at this fill level
 }
 
 // ─── Asset Layer ─────────────────────────────────────────────────────────────
@@ -191,20 +191,20 @@ pub struct ComfortRate {
 pub struct AssetProfile {
     pub asset_id: String,
     pub asset_type: AssetType,
-    pub name: String,                         // human-readable, e.g. "Rooftop PV"
+    pub name: String, // human-readable, e.g. "Rooftop PV"
     pub power_range: PowerRange,
     pub adjustability: PowerAdjustability,
-    pub auto_follow: bool,                    // can device auto-adjust to fill gaps?
-    pub bidirectional: bool,                  // can both consume and produce? (battery, V2G)
-    pub has_storage: bool,                    // does it have an energy buffer?
-    pub max_capacity_kwh: Option<f64>,        // storage capacity if has_storage
-    pub min_soc: Option<f64>,                 // minimum SoC for discharge (e.g. 0.10)
-    pub efficiency: f64,                      // round-trip or conversion efficiency (0.0–1.0)
-    pub response_delay_s: f64,                // expected time to confirm setpoint change
-    pub deviation_threshold_kw: f64,          // |actual - planned| above this triggers replan
+    pub auto_follow: bool,             // can device auto-adjust to fill gaps?
+    pub bidirectional: bool,           // can both consume and produce? (battery, V2G)
+    pub has_storage: bool,             // does it have an energy buffer?
+    pub max_capacity_kwh: Option<f64>, // storage capacity if has_storage
+    pub min_soc: Option<f64>,          // minimum SoC for discharge (e.g. 0.10)
+    pub efficiency: f64,               // round-trip or conversion efficiency (0.0–1.0)
+    pub response_delay_s: f64,         // expected time to confirm setpoint change
+    pub deviation_threshold_kw: f64,   // |actual - planned| above this triggers replan
     pub default_value_curve: Option<DefaultValueCurve>,
     pub thermal_model: Option<ThermalModelParams>,
-    pub oadr_resource_name: String,           // maps to OpenADR resource.resourceName
+    pub oadr_resource_name: String, // maps to OpenADR resource.resourceName
 }
 
 /// Default value curve for an asset (used when no user-provided bid is given).
@@ -219,9 +219,9 @@ pub struct AssetState {
     pub ts: DateTime<Utc>,
     pub asset_id: String,
 
-    pub commanded_kw: f64,          // setpoint sent to device
-    pub actual_kw: f64,             // measured power from device (positive = import)
-    pub power_deviation_kw: f64,    // = actual_kw - commanded_kw (derived)
+    pub commanded_kw: f64,       // setpoint sent to device
+    pub actual_kw: f64,          // measured power from device (positive = import)
+    pub power_deviation_kw: f64, // = actual_kw - commanded_kw (derived)
 
     pub responsiveness: DeviceResponsiveness,
     pub last_confirmed_response: Option<DateTime<Utc>>,
@@ -275,9 +275,9 @@ pub struct AssetLedger {
     pub period_start: Option<DateTime<Utc>>,
     pub period_end: Option<DateTime<Utc>>, // None = ongoing
 
-    pub total_consumption_kwh: f64,  // all energy consumed (packets + untracked)
-    pub total_production_kwh: f64,   // all energy produced
-    pub total_import_cost_eur: f64,  // cost of imported energy attributed to this asset
+    pub total_consumption_kwh: f64, // all energy consumed (packets + untracked)
+    pub total_production_kwh: f64,  // all energy produced
+    pub total_import_cost_eur: f64, // cost of imported energy attributed to this asset
     pub total_export_revenue_eur: f64,
     pub total_co2_g: f64,
 
