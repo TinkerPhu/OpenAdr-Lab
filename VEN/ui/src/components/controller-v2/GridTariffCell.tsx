@@ -2,8 +2,6 @@ import { useMemo } from "react";
 import { Box, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
-import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
-import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
 import type { TariffSnapshot } from "./types";
 import { TariffChart } from "./charts/TariffChart";
 import { useTariffs } from "../../api/hooks";
@@ -20,7 +18,6 @@ interface GridTariffCellProps {
   extended: boolean;
   pinned: boolean;
   onTogglePin: () => void;
-  onToggleExpand: () => void;
 }
 
 export function GridTariffCell({
@@ -30,7 +27,6 @@ export function GridTariffCell({
   extended,
   pinned,
   onTogglePin,
-  onToggleExpand,
 }: GridTariffCellProps) {
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
 
@@ -80,7 +76,7 @@ export function GridTariffCell({
         />
       </Box>
 
-      {/* Right column: pin button on top, expand toggle below */}
+      {/* Right column: pin button */}
       <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <Tooltip title={pinned ? "Unpin" : "Pin to top"}>
           <IconButton
@@ -90,16 +86,6 @@ export function GridTariffCell({
             sx={{ m: 0.5 }}
           >
             {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
-          </IconButton>
-        </Tooltip>
-        <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h tariff horizon"}>
-          <IconButton
-            size="small"
-            data-testid="grid-tariff-cell-extend-btn"
-            onClick={onToggleExpand}
-            sx={{ m: 0.5 }}
-          >
-            {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
           </IconButton>
         </Tooltip>
       </Box>

@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
-import { Alert, Box, CircularProgress, Typography } from "@mui/material";
+import { Alert, Box, CircularProgress, IconButton, Tooltip, Typography } from "@mui/material";
+import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
+import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
 import { useSim, useTariffs, useRequests, useSimOverride, useSetSimOverride, useAllTimelines } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller-v2/types";
 import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
@@ -18,10 +20,10 @@ export function ControllerV2Page() {
 
   const [pinnedCellIds, setPinnedCellIds] = useState<string[]>([]);
   const [collapseState, setCollapseState] = useState<CollapseState>({});
-  const [expandedCells, setExpandedCells] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState(false);
 
-  // Widen the timeline window whenever any cell is expanded.
-  const hoursForward = expandedCells.size > 0 ? 24.0 : 1.0;
+  // Widen the timeline window when the global expand toggle is active.
+  const hoursForward = expanded ? 24.0 : 1.0;
 
   // Single timeline query shared by all asset cells and the accumulated cell.
   // refetchInterval: false — driven exclusively by the unified timer below so
@@ -53,13 +55,8 @@ export function ControllerV2Page() {
     );
   }
 
-  function handleToggleExpand(cellId: string) {
-    setExpandedCells((prev) => {
-      const next = new Set(prev);
-      if (next.has(cellId)) next.delete(cellId);
-      else next.add(cellId);
-      return next;
-    });
+  function handleToggleExpand() {
+    setExpanded((prev) => !prev);
   }
 
   function handleToggleCollapse(cellId: string, section: "left" | "right") {
@@ -128,11 +125,10 @@ export function ControllerV2Page() {
           collapsed={{ left: collapsed.leftCollapsed, right: collapsed.rightCollapsed }}
           timePoints={allTimelines[assetId] ?? []}
           nowMs={nowMs}
-          extended={expandedCells.has(cellId)}
+          extended={expanded}
           pinned
           onTogglePin={handleTogglePin}
           onToggleCollapse={handleToggleCollapse}
-          onToggleExpand={handleToggleExpand}
           onOverrideChange={handleOverrideChange}
         />
       );
@@ -142,9 +138,15 @@ export function ControllerV2Page() {
 
   return (
     <Box data-testid="controller-v2-page">
-      <Typography variant="h6" sx={{ mb: 1 }}>
-        Controller V2
-      </Typography>
+      <Box sx={{ display: "flex", alignItems: "center", mb: 1, pr: 0.5 }}>
+        <Typography variant="h6">Controller V2</Typography>
+        <Box sx={{ flex: 1 }} />
+        <Tooltip title={expanded ? "Collapse to ±1h view" : "Expand to 24h planning horizon"}>
+          <IconButton data-testid="global-time-range-extend-btn" size="small" onClick={handleToggleExpand} sx={{ m: 0.5 }}>
+            {expanded ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+      </Box>
 
       {/* Pinned zone */}
       <PinnedZone pinnedCellIds={pinnedCellIds}>{pinnedElements}</PinnedZone>
@@ -157,10 +159,9 @@ export function ControllerV2Page() {
             snapshot={tariffSnapshot}
             gridTimeline={allTimelines["grid"] ?? []}
             nowMs={nowMs}
-            extended={expandedCells.has("grid:tariff")}
+            extended={expanded}
             pinned={false}
             onTogglePin={() => handleTogglePin("grid:tariff")}
-            onToggleExpand={() => handleToggleExpand("grid:tariff")}
           />
         )}
 
@@ -169,11 +170,10 @@ export function ControllerV2Page() {
             assetSummaries={assetSummaries}
             allTimelines={allTimelines}
             nowMs={nowMs}
-            extended={expandedCells.has("grid:accumulated")}
+            extended={expanded}
             pinned={false}
             gridPowerKw={tariffSnapshot?.gridPowerKw ?? 0}
             onTogglePin={() => handleTogglePin("grid:accumulated")}
-            onToggleExpand={() => handleToggleExpand("grid:accumulated")}
           />
         )}
 
@@ -196,11 +196,10 @@ export function ControllerV2Page() {
                 collapsed={{ left: collapsed.leftCollapsed, right: collapsed.rightCollapsed }}
                 timePoints={allTimelines[summary.assetId] ?? []}
                 nowMs={nowMs}
-                extended={expandedCells.has(cellId)}
+                extended={expanded}
                 pinned={false}
                 onTogglePin={handleTogglePin}
                 onToggleCollapse={handleToggleCollapse}
-                onToggleExpand={handleToggleExpand}
                 onOverrideChange={handleOverrideChange}
               />
             );
