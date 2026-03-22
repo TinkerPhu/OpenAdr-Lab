@@ -17,10 +17,11 @@ Feature: FlexibilityPolicy — proactive flexibility reserves
 
   Scenario: Future SIMPLE event reduces import cap for slots inside the event window
     Given a VTN IMPORT_CAPACITY_LIMIT event with value 10.0 kW is active
-    And a VTN SIMPLE event with value 5.0 kW starting in 4 hours for 2 hours
+    And a VTN SIMPLE event with value 5.0 kW starting in 2 hours for 2 hours
     When I wait for the policy VEN plan to have at least one firm slot with import_cap_kw at most 2.1 kW
     Then at least one policy VEN firm slot has import_cap_kw at most 2.1 kW
-    # Grid cap 10.0 − policy reserve 3.0 − SIMPLE reserve 5.0 = 2.0 kW for window slots
+    # Event window 2h–4h overlaps near horizon (firm_slots cover 0–4h).
+    # Grid cap 10.0 − policy reserve 3.0 − SIMPLE reserve 5.0 = 2.0 kW for those slots.
 
   Scenario: Expired SIMPLE event interval produces no reservation
     Given a VTN IMPORT_CAPACITY_LIMIT event with value 10.0 kW is active
