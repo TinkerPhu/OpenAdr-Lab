@@ -243,6 +243,26 @@ def step_response_json_array(context):
     )
 
 
+@then('the response JSON contains field "{field}"')
+def step_response_json_has_field(context, field):
+    data = context.last_response_json
+    assert isinstance(data, dict), (
+        f"Expected JSON object, got {type(data).__name__}: {data!r}"
+    )
+    assert field in data, (
+        f"Response missing field '{field}'. Keys: {list(data.keys())}"
+    )
+
+
+@then('the response JSON field "{field}" is greater than {threshold:f}')
+def step_response_json_field_gt(context, field, threshold):
+    data = context.last_response_json
+    assert isinstance(data, dict), f"Expected JSON object, got {type(data).__name__}: {data!r}"
+    val = data.get(field)
+    assert isinstance(val, (int, float)), f"Field '{field}' is not a number: {val!r}"
+    assert val > threshold, f"Field '{field}' = {val} is not > {threshold}"
+
+
 @then("the response JSON is null")
 def step_response_json_null(context):
     # axum returns JSON null as the literal "null"

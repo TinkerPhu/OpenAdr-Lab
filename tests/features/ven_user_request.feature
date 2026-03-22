@@ -52,7 +52,8 @@ Feature: VEN User Request Manager — Stage 5
 
   # --- GET /flexibility ---
 
-  Scenario: GET /flexibility returns the plan envelopes array
+  Scenario: GET /flexibility returns a site-level flexibility object
     When I GET /flexibility from the VEN
     Then the response status is 200
-    And the response JSON is an array
+    And the response JSON contains field "up_kw"
+    And the response JSON contains field "down_kw"
