@@ -1,73 +1,175 @@
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::{
+    Asset, AssetCapabilities, AssetCapability, AssetState, ControlDescriptor, ControlKind,
+    EnergyState,
+};
 use crate::common::{Interpolation, TimeSeries};
 use crate::controller::trace::AssetHistoryBuffer;
 use crate::profile::BatteryConfig;
-use super::{AssetCapabilities, ControlDescriptor, ControlKind, EnergyState, TickEnvironment};
 
-/// Battery storage: bidirectional.
-/// Positive = charge (import), negative = discharge (export).
+/// Battery storage config. Bidirectional.
+/// Positive setpoint = charge (import), negative = discharge (export).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Battery {
-    pub soc: f64,
     pub capacity_kwh: f64,
     pub max_charge_kw: f64,
     pub max_discharge_kw: f64,
     pub round_trip_efficiency: f64,
     pub min_soc: f64,
-    pub current_kw: f64,
+}
+
+/// Battery mutable state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatteryState {
+    /// State of charge in [0.0, 1.0]. 0.0 = empty, 1.0 = full.
+    pub soc_pct: f64,
+    /// Actual power last tick. Positive = charging (import). Negative = discharging (export).
+    pub actual_power_kw: f64,
 }
 
 impl Battery {
     pub fn from_config(cfg: &BatteryConfig) -> Self {
         Self {
-            soc: cfg.initial_soc,
             capacity_kwh: cfg.capacity_kwh,
             max_charge_kw: cfg.max_charge_kw,
             max_discharge_kw: cfg.max_discharge_kw,
             round_trip_efficiency: cfg.round_trip_efficiency,
             min_soc: cfg.min_soc,
-            current_kw: 0.0,
         }
     }
 
-    pub fn update(&mut self, dt_s: f64, setpoint: f64, _env: &TickEnvironment) -> f64 {
-        let kw = setpoint.clamp(-self.max_discharge_kw, self.max_charge_kw);
-        let kw = if kw > 0.0 && self.soc >= 1.0 {
+    pub fn initial_state(cfg: &BatteryConfig) -> BatteryState {
+        BatteryState {
+            soc_pct: cfg.initial_soc,
+            actual_power_kw: 0.0,
+        }
+    }
+
+    /// Pure physics step. Returns (new_state, actual_power_kw).
+    pub fn step_inner(
+        &self,
+        state: &BatteryState,
+        setpoint_kw: f64,
+        dt: Duration,
+    ) -> (BatteryState, f64) {
+        let dt_h = dt.num_milliseconds() as f64 / 3_600_000.0;
+        let clamped = setpoint_kw
+            .max(-self.max_discharge_kw)
+            .min(self.max_charge_kw);
+        let actual = if clamped > 0.0 && state.soc_pct >= 1.0 {
             0.0
-        } else if kw < 0.0 && self.soc <= self.min_soc {
+        } else if clamped < 0.0 && state.soc_pct <= self.min_soc {
             0.0
         } else {
-            kw
+            clamped
         };
-        let dt_h = dt_s / 3600.0;
-        if kw > 0.0 {
-            self.soc += (kw * dt_h * self.round_trip_efficiency) / self.capacity_kwh;
-        } else {
-            self.soc += (kw * dt_h) / self.capacity_kwh;
-        }
-        self.soc = self.soc.clamp(0.0, 1.0);
-        self.current_kw = kw;
-        kw
+        let energy_kwh = actual
+            * dt_h
+            * if actual > 0.0 {
+                self.round_trip_efficiency
+            } else {
+                1.0
+            };
+        let new_soc = (state.soc_pct + energy_kwh / self.capacity_kwh).clamp(0.0, 1.0);
+        (
+            BatteryState {
+                soc_pct: new_soc,
+                actual_power_kw: actual,
+            },
+            actual,
+        )
     }
 
-    pub fn forecast(&self, timespan: Duration) -> TimeSeries {
+    /// Point-in-time feasible power range.
+    pub fn capability_inner(&self, state: &BatteryState) -> AssetCapability {
+        AssetCapability {
+            max_export_kw: if state.soc_pct <= self.min_soc {
+                0.0
+            } else {
+                -self.max_discharge_kw
+            },
+            max_import_kw: if state.soc_pct >= 1.0 {
+                0.0
+            } else {
+                self.max_charge_kw
+            },
+        }
+    }
+
+    pub fn default_setpoint(&self) -> f64 {
+        0.0 // hold by default; dispatcher controls
+    }
+
+    pub fn state_values(&self, state: &BatteryState) -> HashMap<String, f64> {
+        let mut m = HashMap::new();
+        m.insert("soc".into(), state.soc_pct);
+        m.insert("capacity_kwh".into(), self.capacity_kwh);
+        m.insert("max_charge_kw".into(), self.max_charge_kw);
+        m.insert("max_discharge_kw".into(), self.max_discharge_kw);
+        m.insert("min_soc".into(), self.min_soc);
+        m
+    }
+
+    pub fn capabilities(&self, asset_id: &str, state: &BatteryState) -> AssetCapabilities {
+        let cap = self.capability_inner(state);
+        AssetCapabilities {
+            asset_id: asset_id.to_string(),
+            max_import_kw: cap.max_import_kw,
+            max_export_kw: self.max_discharge_kw,
+            is_flexible: true,
+            energy_state: Some(EnergyState {
+                current_kwh: state.soc_pct * self.capacity_kwh,
+                min_kwh: self.min_soc * self.capacity_kwh,
+                max_kwh: self.capacity_kwh,
+            }),
+            availability: None,
+        }
+    }
+
+    pub fn control_schema(&self) -> Vec<ControlDescriptor> {
+        vec![ControlDescriptor {
+            key: "battery_force_kw".into(),
+            label: "Force Power".into(),
+            kind: ControlKind::Slider,
+            min: Some(-self.max_discharge_kw),
+            max: Some(self.max_charge_kw),
+            unit: "kW".into(),
+        }]
+    }
+
+    pub fn reset(&self, state: &mut BatteryState, values: HashMap<String, f64>) {
+        if let Some(&soc) = values.get("soc") {
+            state.soc_pct = soc.clamp(0.0, 1.0);
+        }
+    }
+
+    pub fn update_config(&mut self, values: HashMap<String, f64>) {
+        if let Some(&v) = values.get("capacity_kwh") {
+            self.capacity_kwh = v.max(0.1);
+        }
+        if let Some(&v) = values.get("min_soc") {
+            self.min_soc = v.clamp(0.0, 1.0);
+        }
+    }
+
+    pub fn forecast(&self, state: &BatteryState, timespan: Duration) -> TimeSeries {
         if timespan <= Duration::zero() {
             return TimeSeries::empty(Interpolation::Linear);
         }
         let now = Utc::now();
         let end = now + timespan;
-        let setpoint = self.current_kw.clamp(-self.max_discharge_kw, self.max_charge_kw);
-        let mut samples: Vec<(chrono::DateTime<Utc>, f64)> = Vec::new();
+        let setpoint = state
+            .actual_power_kw
+            .clamp(-self.max_discharge_kw, self.max_charge_kw);
+        let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
 
         let mut t = now;
-        let mut soc = self.soc;
-        let mut last_kw = setpoint;
+        let mut soc = state.soc_pct;
 
         while t < end {
-            // Compute power for this minute-long step.
             let kw = if setpoint > 0.0 && soc >= 1.0 {
                 0.0
             } else if setpoint < 0.0 && soc <= self.min_soc {
@@ -76,9 +178,7 @@ impl Battery {
                 setpoint
             };
             samples.push((t, kw));
-            last_kw = kw;
 
-            // Integrate SoC forward by 1 minute.
             let dt_h = 1.0 / 60.0;
             if kw > 0.0 {
                 soc += (kw * dt_h * self.round_trip_efficiency) / self.capacity_kwh;
@@ -86,10 +186,8 @@ impl Battery {
                 soc += (kw * dt_h) / self.capacity_kwh;
             }
             soc = soc.clamp(0.0, 1.0);
-
             t = t + Duration::seconds(60);
         }
-        // Mandatory boundary point — recompute power at end with current soc.
         let end_kw = if setpoint > 0.0 && soc >= 1.0 {
             0.0
         } else if setpoint < 0.0 && soc <= self.min_soc {
@@ -109,65 +207,18 @@ impl Battery {
         super::history_from_buffer(timespan, history, Interpolation::Linear)
     }
 
-    pub fn state_values(&self) -> HashMap<String, f64> {
-        let mut m = HashMap::new();
-        m.insert("soc".into(), self.soc);
-        m.insert("capacity_kwh".into(), self.capacity_kwh);
-        m.insert("max_charge_kw".into(), self.max_charge_kw);
-        m.insert("max_discharge_kw".into(), self.max_discharge_kw);
-        m.insert("min_soc".into(), self.min_soc);
-        m
-    }
-
-    pub fn default_setpoint(&self) -> f64 {
-        0.0 // hold by default; dispatcher controls
-    }
-
-    pub fn capabilities(&self, asset_id: &str) -> AssetCapabilities {
-        AssetCapabilities {
-            asset_id: asset_id.to_string(),
-            max_import_kw: self.max_charge_kw,
-            max_export_kw: self.max_discharge_kw,
-            is_flexible: true,
-            energy_state: Some(EnergyState {
-                current_kwh: self.soc * self.capacity_kwh,
-                min_kwh: self.min_soc * self.capacity_kwh,
-                max_kwh: self.capacity_kwh,
-            }),
-            availability: None,
-        }
-    }
-
-    pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        vec![ControlDescriptor {
-            key: "battery_force_kw".into(),
-            label: "Force Power".into(),
-            kind: ControlKind::Slider,
-            min: Some(-self.max_discharge_kw),
-            max: Some(self.max_charge_kw),
-            unit: "kW".into(),
-        }]
-    }
-
-    pub fn reset(&mut self, values: HashMap<String, f64>) {
-        if let Some(&soc) = values.get("soc") {
-            self.soc = soc.clamp(0.0, 1.0);
-        }
-    }
-
-    pub fn update_config(&mut self, values: HashMap<String, f64>) {
-        if let Some(&v) = values.get("capacity_kwh") {
-            self.capacity_kwh = v.max(0.1);
-        }
-        if let Some(&v) = values.get("min_soc") {
-            self.min_soc = v.clamp(0.0, 1.0);
-        }
-    }
-
     pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
         vec![
-            crate::entities::asset::ComfortRate { fill: 0.0, max_marginal_price: 0.20, max_marginal_co2: 0.0 },
-            crate::entities::asset::ComfortRate { fill: 1.0, max_marginal_price: 0.05, max_marginal_co2: 0.0 },
+            crate::entities::asset::ComfortRate {
+                fill: 0.0,
+                max_marginal_price: 0.20,
+                max_marginal_co2: 0.0,
+            },
+            crate::entities::asset::ComfortRate {
+                fill: 1.0,
+                max_marginal_price: 0.05,
+                max_marginal_co2: 0.0,
+            },
         ]
     }
 
@@ -179,19 +230,14 @@ impl Battery {
         None
     }
 
-    pub fn power_w(&self) -> f64 {
-        self.current_kw * 1000.0
-    }
-
-    /// Resolve a user request target for this battery.
-    /// Returns (target_energy_kwh, desired_power_kw), or None if already at/above target.
     pub fn resolve_request_target(
         &self,
+        state: &BatteryState,
         target_soc: Option<f64>,
         desired_power_kw: Option<f64>,
     ) -> Option<(f64, f64)> {
         let target = target_soc.unwrap_or(1.0);
-        let delta = (target - self.soc).max(0.0);
+        let delta = (target - state.soc_pct).max(0.0);
         let kwh = delta * self.capacity_kwh;
         if kwh < 1e-6 {
             return None;
@@ -200,12 +246,29 @@ impl Battery {
     }
 }
 
+impl Asset for Battery {
+    fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
+        let AssetState::Battery(s) = state else {
+            unreachable!("Battery/state mismatch")
+        };
+        let (ns, p) = self.step_inner(s, setpoint_kw, dt);
+        (AssetState::Battery(ns), p)
+    }
+
+    fn capability(&self, state: &AssetState) -> AssetCapability {
+        let AssetState::Battery(s) = state else {
+            unreachable!()
+        };
+        self.capability_inner(s)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::profile::BatteryConfig;
 
-    fn make_battery(soc: f64) -> Battery {
+    fn make_battery_cfg(initial_soc: f64) -> (Battery, BatteryState) {
         let cfg = BatteryConfig {
             id: "battery".to_string(),
             capacity_kwh: 10.0,
@@ -213,38 +276,52 @@ mod tests {
             max_discharge_kw: 5.0,
             round_trip_efficiency: 0.95,
             min_soc: 0.1,
-            initial_soc: soc,
+            initial_soc,
         };
-        Battery::from_config(&cfg)
+        (Battery::from_config(&cfg), Battery::initial_state(&cfg))
     }
 
     #[test]
     fn forecast_zero_timespan_returns_empty() {
-        let bat = make_battery(0.5);
-        let series = bat.forecast(Duration::zero());
+        let (bat, state) = make_battery_cfg(0.5);
+        let series = bat.forecast(&state, Duration::zero());
         assert!(series.samples.is_empty());
     }
 
     #[test]
     fn forecast_at_full_soc_charge_setpoint_returns_zero() {
-        // Battery at 100% SoC with charge setpoint → all zeros (can't charge)
-        let mut bat = make_battery(1.0);
-        bat.current_kw = 5.0; // charge setpoint
-        let series = bat.forecast(Duration::seconds(300));
+        let (bat, mut state) = make_battery_cfg(1.0);
+        state.actual_power_kw = 5.0;
+        let series = bat.forecast(&state, Duration::seconds(300));
         for (_, v) in &series.samples {
-            assert_eq!(*v, 0.0, "Full SoC battery with charge setpoint must return zero");
+            assert_eq!(
+                *v, 0.0,
+                "Full SoC battery with charge setpoint must return zero"
+            );
         }
     }
 
     #[test]
     fn forecast_has_boundary_point() {
-        let bat = make_battery(0.5);
+        let (bat, state) = make_battery_cfg(0.5);
         let timespan = Duration::seconds(120);
-        let before = chrono::Utc::now();
-        let series = bat.forecast(timespan);
-        let after = chrono::Utc::now();
+        let before = Utc::now();
+        let series = bat.forecast(&state, timespan);
+        let after = Utc::now();
         assert!(!series.samples.is_empty());
         let last_ts = series.samples.last().unwrap().0;
         assert!(last_ts >= before + timespan && last_ts <= after + timespan);
+    }
+
+    #[test]
+    fn step_charges_and_stops_at_full() {
+        let (bat, mut state) = make_battery_cfg(0.99);
+        for _ in 0..1000 {
+            let (ns, _) = bat.step_inner(&state, 10.0, Duration::seconds(1));
+            state = ns;
+        }
+        assert!((state.soc_pct - 1.0).abs() < 0.001);
+        let (_, actual) = bat.step_inner(&state, 10.0, Duration::seconds(1));
+        assert_eq!(actual, 0.0);
     }
 }

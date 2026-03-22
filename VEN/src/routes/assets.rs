@@ -33,15 +33,14 @@ pub async fn get_asset_forecast(
     let timespan = Duration::milliseconds((timespan_s * 1000.0) as i64);
 
     let sim = ctx.sim.lock().await;
-    let entry = sim.assets.iter().find(|e| e.id == asset_id);
-    match entry {
+    match sim.find_asset(&asset_id) {
         None => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
         )
             .into_response(),
-        Some(entry) => {
-            let series = entry.state.forecast(timespan);
+        Some((entry, cfg)) => {
+            let series = cfg.forecast(&entry.state, timespan);
             let samples: Vec<serde_json::Value> = series
                 .samples
                 .iter()
@@ -71,18 +70,17 @@ pub async fn get_asset_history(
 
     let ct = ctx.state.controller_trace().await;
     let sim = ctx.sim.lock().await;
-    let entry = sim.assets.iter().find(|e| e.id == asset_id);
-    match entry {
+    match sim.find_asset(&asset_id) {
         None => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
         )
             .into_response(),
-        Some(entry) => {
+        Some((_entry, cfg)) => {
             let history = ct.asset_history.get(&asset_id);
             let empty_buf = crate::controller::trace::AssetHistoryBuffer::new(0);
             let buf = history.unwrap_or(&empty_buf);
-            let series = entry.state.history(timespan, buf);
+            let series = cfg.history(timespan, buf);
             let samples: Vec<serde_json::Value> = series
                 .samples
                 .iter()

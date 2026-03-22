@@ -12,23 +12,33 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::assets::{AssetState, BaseLoad, Battery, EvCharger, Heater, PvInverter, TickEnvironment};
+use crate::assets::{
+    AssetConfig, AssetState, BaseLoad, Battery, BatteryState, EvCharger, EvState, Heater,
+    PvInverter,
+};
+use crate::controller::trace::AssetHistoryBuffer;
 use crate::models::SensorSnapshot;
-use crate::profile::{AssetConfig, BaseLoadConfig, Profile};
+use crate::profile::{AssetProfile, BaseLoadConfig, Profile};
 use crate::state::UserOverrides;
 use energy::EnergyCounter;
 
 /// One entry in the generic asset list.
+/// Config is NOT stored here — it lives in `SimState.asset_configs` (parallel by index).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetEntry {
     pub id: String,
+    /// Mutable physics state. Written by the dispatcher every tick.
     pub state: AssetState,
-    /// Last commanded setpoint (kW).
-    pub setpoint: f64,
-    /// Actual power output from the last tick (kW). Positive = import, negative = export.
+    /// Last commanded setpoint (kW, signed).
+    pub setpoint_kw: f64,
+    /// Actual power from the last tick (kW). Positive = import, negative = export.
     pub last_power_kw: f64,
     /// Cumulative energy for this asset since startup.
     pub energy: EnergyCounter,
+    /// Per-asset history ring buffer. Initialized empty in CP1; wired in CP2.
+    /// Ephemeral — not persisted to disk.
+    #[serde(skip, default = "default_history_buffer")]
+    pub history: AssetHistoryBuffer,
 }
 
 /// Grid-level totals derived by summing all asset powers.
@@ -45,6 +55,9 @@ pub struct GridMeter {
 /// Full simulator state — persisted to disk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimState {
+    /// Physics config — parallel to `assets` by index, loaded from profile.
+    pub asset_configs: Vec<AssetConfig>,
+    /// Mutable state + history for each asset.
     pub assets: Vec<AssetEntry>,
     pub grid: GridMeter,
     pub last_tick: DateTime<Utc>,
@@ -61,74 +74,158 @@ impl SimState {
         self.assets.iter_mut().find(|a| a.id == id)
     }
 
-    /// Convenience accessor: returns the EvCharger if an "ev" asset exists.
-    pub fn ev(&self) -> Option<&EvCharger> {
+    /// Look up entry + config by id (immutable).
+    pub fn find_asset(&self, id: &str) -> Option<(&AssetEntry, &AssetConfig)> {
+        self.assets
+            .iter()
+            .zip(self.asset_configs.iter())
+            .find(|(e, _)| e.id == id)
+    }
+
+    /// Look up entry + config by id (mutable). Uses index to satisfy borrow checker.
+    pub fn find_asset_mut(&mut self, id: &str) -> Option<(&mut AssetEntry, &mut AssetConfig)> {
+        let idx = self.assets.iter().position(|a| a.id == id)?;
+        Some((&mut self.assets[idx], &mut self.asset_configs[idx]))
+    }
+
+    /// Iterator over (entry, config) pairs — parallel by index.
+    pub fn iter_assets(&self) -> impl Iterator<Item = (&AssetEntry, &AssetConfig)> {
+        self.assets.iter().zip(self.asset_configs.iter())
+    }
+
+    /// Convenience accessor: returns the EvState if an "ev" asset exists.
+    pub fn ev_state(&self) -> Option<&EvState> {
         self.asset("ev").and_then(|e| {
-            if let AssetState::Ev(ev) = &e.state { Some(ev) } else { None }
+            if let AssetState::Ev(s) = &e.state {
+                Some(s)
+            } else {
+                None
+            }
         })
     }
 
-    /// Convenience accessor: returns the Battery if a "battery" asset exists.
-    pub fn battery(&self) -> Option<&Battery> {
+    /// Convenience accessor: returns the BatteryState if a "battery" asset exists.
+    pub fn battery_state(&self) -> Option<&BatteryState> {
         self.asset("battery").and_then(|e| {
-            if let AssetState::Battery(b) = &e.state { Some(b) } else { None }
+            if let AssetState::Battery(s) = &e.state {
+                Some(s)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Convenience accessor: returns the Battery config if a "battery" asset exists.
+    pub fn battery_config(&self) -> Option<&Battery> {
+        self.find_asset("battery").and_then(|(_, cfg)| {
+            if let AssetConfig::Battery(b) = cfg {
+                Some(b)
+            } else {
+                None
+            }
         })
     }
 
     /// Initialize from profile configuration, preferring `assets` list over legacy `devices`.
     pub fn from_profile(profile: &Profile) -> Self {
+        let mut configs: Vec<AssetConfig> = Vec::new();
         let mut entries: Vec<AssetEntry> = Vec::new();
 
         if !profile.assets.is_empty() {
-            for cfg in &profile.assets {
-                let state = match cfg {
-                    AssetConfig::Ev(c) => AssetState::Ev(EvCharger::from_config(c)),
-                    AssetConfig::Heater(c) => AssetState::Heater(Heater::from_config(c)),
-                    AssetConfig::Pv(c) => AssetState::Pv(PvInverter::from_config(c)),
-                    AssetConfig::Battery(c) => AssetState::Battery(Battery::from_config(c)),
-                    AssetConfig::BaseLoad(c) => AssetState::BaseLoad(BaseLoad::from_config(c)),
-                };
-                let setpoint = state.default_setpoint();
+            for ap in &profile.assets {
+                let (cfg, state) = asset_config_and_state_from_profile(ap);
+                let setpoint_kw = cfg.default_setpoint(&state);
                 entries.push(AssetEntry {
-                    id: cfg.id().to_string(),
+                    id: ap.id().to_string(),
                     state,
-                    setpoint,
+                    setpoint_kw,
                     last_power_kw: 0.0,
                     energy: EnergyCounter::new(),
+                    history: AssetHistoryBuffer::new(3600),
                 });
+                configs.push(cfg);
             }
         } else {
             // Fall back to legacy `devices` format
             let dev = &profile.devices;
             if let Some(c) = &dev.ev {
-                let state = AssetState::Ev(EvCharger::from_config(c));
-                let sp = state.default_setpoint();
-                entries.push(AssetEntry { id: c.id.clone(), state, setpoint: sp, last_power_kw: 0.0, energy: EnergyCounter::new() });
+                let cfg = AssetConfig::Ev(EvCharger::from_config(c));
+                let state = AssetState::Ev(EvCharger::initial_state(c));
+                let sp = cfg.default_setpoint(&state);
+                entries.push(AssetEntry {
+                    id: c.id.clone(),
+                    state,
+                    setpoint_kw: sp,
+                    last_power_kw: 0.0,
+                    energy: EnergyCounter::new(),
+                    history: AssetHistoryBuffer::new(3600),
+                });
+                configs.push(cfg);
             }
             if let Some(c) = &dev.heater {
-                let state = AssetState::Heater(Heater::from_config(c));
-                let sp = state.default_setpoint();
-                entries.push(AssetEntry { id: c.id.clone(), state, setpoint: sp, last_power_kw: 0.0, energy: EnergyCounter::new() });
+                let cfg = AssetConfig::Heater(Heater::from_config(c));
+                let state = AssetState::Heater(Heater::initial_state(c));
+                let sp = cfg.default_setpoint(&state);
+                entries.push(AssetEntry {
+                    id: c.id.clone(),
+                    state,
+                    setpoint_kw: sp,
+                    last_power_kw: 0.0,
+                    energy: EnergyCounter::new(),
+                    history: AssetHistoryBuffer::new(3600),
+                });
+                configs.push(cfg);
             }
             if let Some(c) = &dev.pv {
-                let state = AssetState::Pv(PvInverter::from_config(c));
-                let sp = state.default_setpoint();
-                entries.push(AssetEntry { id: c.id.clone(), state, setpoint: sp, last_power_kw: 0.0, energy: EnergyCounter::new() });
+                let cfg = AssetConfig::Pv(PvInverter::from_config(c));
+                let state = AssetState::Pv(PvInverter::initial_state(c));
+                let sp = cfg.default_setpoint(&state);
+                entries.push(AssetEntry {
+                    id: c.id.clone(),
+                    state,
+                    setpoint_kw: sp,
+                    last_power_kw: 0.0,
+                    energy: EnergyCounter::new(),
+                    history: AssetHistoryBuffer::new(3600),
+                });
+                configs.push(cfg);
             }
             if let Some(c) = &dev.battery {
-                let state = AssetState::Battery(Battery::from_config(c));
-                let sp = state.default_setpoint();
-                entries.push(AssetEntry { id: c.id.clone(), state, setpoint: sp, last_power_kw: 0.0, energy: EnergyCounter::new() });
+                let cfg = AssetConfig::Battery(Battery::from_config(c));
+                let state = AssetState::Battery(Battery::initial_state(c));
+                let sp = cfg.default_setpoint(&state);
+                entries.push(AssetEntry {
+                    id: c.id.clone(),
+                    state,
+                    setpoint_kw: sp,
+                    last_power_kw: 0.0,
+                    energy: EnergyCounter::new(),
+                    history: AssetHistoryBuffer::new(3600),
+                });
+                configs.push(cfg);
             }
             if dev.base_load_w > 0.0 {
-                let c = BaseLoadConfig { id: "base_load".to_string(), baseline_kw: dev.base_load_w / 1000.0 };
-                let state = AssetState::BaseLoad(BaseLoad::from_config(&c));
-                let sp = state.default_setpoint();
-                entries.push(AssetEntry { id: c.id.clone(), state, setpoint: sp, last_power_kw: 0.0, energy: EnergyCounter::new() });
+                let c = BaseLoadConfig {
+                    id: "base_load".to_string(),
+                    baseline_kw: dev.base_load_w / 1000.0,
+                };
+                let cfg = AssetConfig::BaseLoad(BaseLoad::from_config(&c));
+                let state = AssetState::BaseLoad(BaseLoad::initial_state(&c));
+                let sp = cfg.default_setpoint(&state);
+                entries.push(AssetEntry {
+                    id: c.id.clone(),
+                    state,
+                    setpoint_kw: sp,
+                    last_power_kw: 0.0,
+                    energy: EnergyCounter::new(),
+                    history: AssetHistoryBuffer::new(3600),
+                });
+                configs.push(cfg);
             }
         }
 
         Self {
+            asset_configs: configs,
             assets: entries,
             grid: GridMeter::default(),
             last_tick: Utc::now(),
@@ -136,76 +233,96 @@ impl SimState {
     }
 
     /// Run one simulation tick.
-    pub fn tick(&mut self, dt_s: f64, setpoints: HashMap<String, f64>, now: DateTime<Utc>, overrides: &UserOverrides) {
+    pub fn tick(
+        &mut self,
+        dt_s: f64,
+        setpoints: HashMap<String, f64>,
+        now: DateTime<Utc>,
+        overrides: &UserOverrides,
+    ) {
         let hour = now.format("%H").to_string().parse::<f64>().unwrap_or(12.0)
             + now.format("%M").to_string().parse::<f64>().unwrap_or(0.0) / 60.0;
 
-        // Build TickEnvironment
-        let mut env = TickEnvironment::new();
-        env.insert("hour_of_day".to_string(), hour);
-        if let Some(amb) = overrides.ambient_temp_c {
-            env.insert("ambient_temp_c".to_string(), amb);
-        }
-        if let Some(irr) = overrides.pv_irradiance {
-            env.insert("pv_irradiance".to_string(), irr);
-        }
+        let irradiance = overrides.pv_irradiance.unwrap_or_else(|| {
+            if hour >= 6.0 && hour <= 18.0 {
+                let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
+                angle.sin()
+            } else {
+                0.0
+            }
+        });
 
-        // Apply device spec overrides each tick (shadow profile values)
-        for asset in &mut self.assets {
-            match asset.id.as_str() {
-                "ev" => {
-                    if let AssetState::Ev(ev) = &mut asset.state {
-                        if let Some(max_kw) = overrides.ev_max_charge_kw { ev.max_charge_kw = max_kw; }
-                        if let Some(target) = overrides.ev_soc_target { ev.soc_target = target; }
-                        if let Some(plugged) = overrides.ev_plugged { ev.plugged = plugged; }
+        let dt = chrono::Duration::milliseconds((dt_s * 1000.0) as i64);
+        let mut total_kw = 0.0;
+
+        for (cfg, entry) in self.asset_configs.iter_mut().zip(self.assets.iter_mut()) {
+            // ── Set env fields in config before step() ────────────────────
+            match cfg {
+                AssetConfig::Pv(pv) => pv.irradiance = irradiance,
+                AssetConfig::Heater(h) => {
+                    h.ambient_temp_c = overrides.ambient_temp_c.unwrap_or(10.0)
+                }
+                _ => {}
+            }
+
+            // ── Apply UserOverride config mutations ───────────────────────
+            match cfg {
+                AssetConfig::Ev(ev) => {
+                    if let Some(v) = overrides.ev_max_charge_kw {
+                        ev.max_charge_kw = v;
+                    }
+                    if let Some(v) = overrides.ev_soc_target {
+                        ev.soc_target = v;
+                    }
+                    if let Some(b) = overrides.ev_plugged {
+                        if let AssetState::Ev(s) = &mut entry.state {
+                            s.plugged = b;
+                        }
                     }
                 }
-                "heater" => {
-                    if let AssetState::Heater(h) = &mut asset.state {
-                        if let Some(max_kw) = overrides.heater_max_kw { h.max_kw = max_kw; }
-                        if let Some(min) = overrides.heater_temp_min_c { h.temp_min_c = min; }
-                        if let Some(max) = overrides.heater_temp_max_c { h.temp_max_c = max; }
+                AssetConfig::Heater(h) => {
+                    if let Some(v) = overrides.heater_max_kw {
+                        h.max_kw = v;
+                    }
+                    if let Some(v) = overrides.heater_temp_min_c {
+                        h.temp_min_c = v;
+                    }
+                    if let Some(v) = overrides.heater_temp_max_c {
+                        h.temp_max_c = v;
                     }
                 }
-                "pv" => {
-                    if let AssetState::Pv(pv) = &mut asset.state {
-                        if let Some(rated) = overrides.pv_rated_kw { pv.rated_kw = rated; }
+                AssetConfig::Pv(pv) => {
+                    if let Some(v) = overrides.pv_rated_kw {
+                        pv.rated_kw = v;
                     }
                 }
-                "battery" => {
-                    if let AssetState::Battery(_bat) = &mut asset.state {
-                        // Battery state is controlled via POST /sim/reset/battery and PUT /sim/config/battery
-                    }
-                }
-                "base_load" => {
-                    if let AssetState::BaseLoad(bl) = &mut asset.state {
-                        if let Some(w) = overrides.base_load_w { bl.baseline_kw = w / 1000.0; }
+                AssetConfig::BaseLoad(bl) => {
+                    if let Some(w) = overrides.base_load_w {
+                        bl.baseline_kw = w / 1000.0;
                     }
                 }
                 _ => {}
             }
+
+            // ── Dispatch physics ──────────────────────────────────────────
+            let sp = setpoints
+                .get(&entry.id)
+                .copied()
+                .unwrap_or_else(|| cfg.default_setpoint(&entry.state));
+            let (new_state, actual_kw) = cfg.step(&entry.state, sp, dt);
+            entry.state = new_state;
+            entry.last_power_kw = actual_kw;
+            entry.setpoint_kw = sp;
+            entry.energy.integrate(actual_kw * 1000.0, dt_s);
+            total_kw += actual_kw;
         }
 
-        // Tick each asset; accumulate grid power
-        let mut total_kw = 0.0;
-        for asset in &mut self.assets {
-            let sp = setpoints.get(&asset.id).copied()
-                .unwrap_or_else(|| asset.state.default_setpoint());
-            let power_kw = asset.state.update(dt_s, sp, &env);
-            asset.last_power_kw = power_kw;
-            asset.setpoint = sp;
-            // Integrate per-asset energy (in watts to match EnergyCounter interface)
-            asset.energy.integrate(power_kw * 1000.0, dt_s);
-            total_kw += power_kw;
-        }
-
-        // Derive grid meter
-        let net_kw = total_kw;
-        let import_kw = net_kw.max(0.0);
-        let export_kw = (-net_kw).max(0.0);
+        // ── Derive grid meter ─────────────────────────────────────────────
+        let import_kw = total_kw.max(0.0);
+        let export_kw = (-total_kw).max(0.0);
         let dt_h = dt_s / 3600.0;
 
-        self.grid.net_power_w = net_kw * 1000.0;
+        self.grid.net_power_w = total_kw * 1000.0;
         self.grid.import_w = import_kw * 1000.0;
         self.grid.export_w = export_kw * 1000.0;
         self.grid.voltage_v = power_model::random_voltage();
@@ -218,7 +335,11 @@ impl SimState {
     /// Build a SensorSnapshot for backward compatibility with /sensors endpoint.
     pub fn to_sensor_snapshot(&self) -> SensorSnapshot {
         let temp_c = self.asset("heater").and_then(|e| {
-            if let AssetState::Heater(h) = &e.state { Some(h.temp_c) } else { None }
+            if let AssetState::Heater(s) = &e.state {
+                Some(s.temperature_c)
+            } else {
+                None
+            }
         });
         SensorSnapshot {
             id: Uuid::new_v4(),
@@ -237,12 +358,15 @@ impl SimState {
     /// Build a SimSnapshot for the /sim endpoint.
     pub fn to_sim_snapshot(&self) -> SimSnapshot {
         let mut assets_map = HashMap::new();
-        for entry in &self.assets {
-            let values = entry.state.state_values();
-            assets_map.insert(entry.id.clone(), AssetSnapshot {
-                power_kw: entry.last_power_kw,
-                values,
-            });
+        for (entry, cfg) in self.iter_assets() {
+            let values = cfg.state_values(&entry.state);
+            assets_map.insert(
+                entry.id.clone(),
+                AssetSnapshot {
+                    power_kw: entry.last_power_kw,
+                    values,
+                },
+            );
         }
 
         SimSnapshot {
@@ -256,6 +380,36 @@ impl SimState {
             assets: assets_map,
         }
     }
+}
+
+/// Convert a profile AssetProfile entry into (AssetConfig, initial AssetState).
+fn asset_config_and_state_from_profile(ap: &AssetProfile) -> (AssetConfig, AssetState) {
+    match ap {
+        AssetProfile::Battery(c) => (
+            AssetConfig::Battery(Battery::from_config(c)),
+            AssetState::Battery(Battery::initial_state(c)),
+        ),
+        AssetProfile::Ev(c) => (
+            AssetConfig::Ev(EvCharger::from_config(c)),
+            AssetState::Ev(EvCharger::initial_state(c)),
+        ),
+        AssetProfile::Heater(c) => (
+            AssetConfig::Heater(Heater::from_config(c)),
+            AssetState::Heater(Heater::initial_state(c)),
+        ),
+        AssetProfile::Pv(c) => (
+            AssetConfig::Pv(PvInverter::from_config(c)),
+            AssetState::Pv(PvInverter::initial_state(c)),
+        ),
+        AssetProfile::BaseLoad(c) => (
+            AssetConfig::BaseLoad(BaseLoad::from_config(c)),
+            AssetState::BaseLoad(BaseLoad::initial_state(c)),
+        ),
+    }
+}
+
+fn default_history_buffer() -> AssetHistoryBuffer {
+    AssetHistoryBuffer::new(3600)
 }
 
 /// Per-asset snapshot in the /sim response.

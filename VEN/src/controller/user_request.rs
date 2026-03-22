@@ -3,6 +3,7 @@
 /// Provides the logic to translate a POST /requests body into an EnergyPacket
 /// with proper ValueCurve (multi-tier deadlines, comfort rates), and computes
 /// target energy from the asset's current state + profile.
+use crate::assets::AssetConfig;
 use crate::entities::asset::{ComfortRate, CompletionPolicy};
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, ValueCurve};
 use crate::entities::user_request::{RequestDeadline, UserRequest, UserRequestStatus};
@@ -59,27 +60,29 @@ impl std::fmt::Display for RequestError {
 pub fn create_from_body(
     body: CreateUserRequestBody,
     assets: &[AssetEntry],
+    asset_configs: &[AssetConfig],
     now: DateTime<Utc>,
 ) -> Result<(UserRequest, EnergyPacket), RequestError> {
     if body.deadlines.is_empty() {
         return Err(RequestError::NoDeadlines);
     }
 
-    // Look up asset entry for defaults
-    let entry = assets
+    // Look up asset entry + config for defaults
+    let idx = assets
         .iter()
-        .find(|a| a.id == body.asset_id)
+        .position(|a| a.id == body.asset_id)
         .ok_or_else(|| RequestError::UnknownAsset(body.asset_id.clone()))?;
+    let entry = &assets[idx];
+    let cfg = &asset_configs[idx];
 
     // Compute target energy and desired power
-    let (target_energy_kwh, desired_power_kw) =
-        resolve_target(&body, entry)?;
+    let (target_energy_kwh, desired_power_kw) = resolve_target(&body, entry, cfg)?;
 
     // Build completion policy (user-specified or asset default)
     let completion_policy = match body.completion_policy.as_deref() {
         Some("CONTINUE") => CompletionPolicy::Continue,
         Some(_) => CompletionPolicy::Stop,
-        None => entry.state.default_completion_policy(),
+        None => cfg.default_completion_policy(),
     };
 
     // Build comfort rates (user-specified or asset default)
@@ -93,7 +96,7 @@ pub fn create_from_body(
             })
             .collect()
     } else {
-        entry.state.default_comfort_rates()
+        cfg.default_comfort_rates()
     };
 
     // Build deadline tiers from input
@@ -122,8 +125,14 @@ pub fn create_from_body(
     let packet = EnergyPacket {
         target_soc: body.target_soc,
         completion_policy,
-        post_deadline_comfort_bid: entry.state.default_post_deadline_comfort_bid(),
-        ..EnergyPacket::new(body.asset_id.clone(), target_energy_kwh, desired_power_kw, value_curve, now)
+        post_deadline_comfort_bid: cfg.default_post_deadline_comfort_bid(),
+        ..EnergyPacket::new(
+            body.asset_id.clone(),
+            target_energy_kwh,
+            desired_power_kw,
+            value_curve,
+            now,
+        )
     };
 
     // Build UserRequest (thin wrapper linking to the packet)
@@ -145,9 +154,11 @@ pub fn create_from_body(
         target_energy_kwh,
         desired_power_kw,
         deadlines: request_deadlines,
-        completion_policy: body.completion_policy.unwrap_or_else(|| match entry.state.default_completion_policy() {
-            CompletionPolicy::Continue => "CONTINUE".to_string(),
-            CompletionPolicy::Stop => "STOP".to_string(),
+        completion_policy: body.completion_policy.unwrap_or_else(|| {
+            match cfg.default_completion_policy() {
+                CompletionPolicy::Continue => "CONTINUE".to_string(),
+                CompletionPolicy::Stop => "STOP".to_string(),
+            }
         }),
         max_total_cost_eur,
         tier_count,
@@ -166,6 +177,7 @@ pub fn create_from_body(
 fn resolve_target(
     body: &CreateUserRequestBody,
     entry: &AssetEntry,
+    cfg: &AssetConfig,
 ) -> Result<(f64, f64), RequestError> {
     // Explicit target energy wins
     if let Some(kwh) = body.target_energy_kwh {
@@ -176,8 +188,6 @@ fn resolve_target(
         return Ok((kwh, power));
     }
 
-    entry
-        .state
-        .resolve_request_target(body.target_soc, body.desired_power_kw)
+    cfg.resolve_request_target(&entry.state, body.target_soc, body.desired_power_kw)
         .ok_or_else(|| RequestError::UnknownAsset(body.asset_id.clone()))
 }

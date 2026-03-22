@@ -2,11 +2,13 @@ use serde::Deserialize;
 use std::path::Path;
 use tracing::{info, warn};
 
-/// Asset configuration tagged enum for the new `assets:` list format in YAML.
+/// YAML-loaded asset profile tagged enum for the `assets:` list format.
 /// Each entry has a `type` discriminator plus type-specific fields.
+/// Renamed from `AssetConfig` in Phase A to avoid collision with `assets::AssetConfig`
+/// (runtime physics dispatch enum).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum AssetConfig {
+pub enum AssetProfile {
     Ev(EvConfig),
     Heater(HeaterConfig),
     Pv(PvConfig),
@@ -14,7 +16,7 @@ pub enum AssetConfig {
     BaseLoad(BaseLoadConfig),
 }
 
-impl AssetConfig {
+impl AssetProfile {
     /// Asset identifier — must be present in every YAML entry.
     pub fn id(&self) -> &str {
         match self {
@@ -34,7 +36,7 @@ pub struct Profile {
     pub devices: DeviceConfig,
     /// New typed asset list format.
     #[serde(default)]
-    pub assets: Vec<AssetConfig>,
+    pub assets: Vec<AssetProfile>,
     #[serde(default)]
     pub reactor: ReactorConfig,
     #[serde(default)]
@@ -77,7 +79,9 @@ pub struct EvConfig {
     pub default_charge_kw: f64,
 }
 
-fn default_asset_id_ev() -> String { "ev".into() }
+fn default_asset_id_ev() -> String {
+    "ev".into()
+}
 
 fn default_ev_max_charge() -> f64 {
     7.4
@@ -109,7 +113,9 @@ pub struct HeaterConfig {
     pub temp_max_c: f64,
 }
 
-fn default_asset_id_heater() -> String { "heater".into() }
+fn default_asset_id_heater() -> String {
+    "heater".into()
+}
 
 fn default_heater_max() -> f64 {
     5.0
@@ -132,7 +138,9 @@ pub struct PvConfig {
     pub rated_kw: f64,
 }
 
-fn default_asset_id_pv() -> String { "pv".into() }
+fn default_asset_id_pv() -> String {
+    "pv".into()
+}
 fn default_pv_rated() -> f64 {
     5.0
 }
@@ -155,7 +163,9 @@ pub struct BatteryConfig {
     pub min_soc: f64,
 }
 
-fn default_asset_id_battery() -> String { "battery".into() }
+fn default_asset_id_battery() -> String {
+    "battery".into()
+}
 
 fn default_battery_capacity() -> f64 {
     10.0
@@ -185,8 +195,12 @@ pub struct BaseLoadConfig {
     pub baseline_kw: f64,
 }
 
-fn default_asset_id_base_load() -> String { "base_load".into() }
-fn default_base_load_kw() -> f64 { 0.5 }
+fn default_asset_id_base_load() -> String {
+    "base_load".into()
+}
+fn default_base_load_kw() -> f64 {
+    0.5
+}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ReactorConfig {
@@ -278,10 +292,18 @@ impl Default for PlannerConfig {
     }
 }
 
-fn default_plan_step() -> u64 { 300 }
-fn default_near_horizon_h() -> u64 { 4 }
-fn default_plan_horizon_h() -> u64 { 24 }
-fn default_replan_interval() -> u64 { 300 }
+fn default_plan_step() -> u64 {
+    300
+}
+fn default_near_horizon_h() -> u64 {
+    4
+}
+fn default_plan_horizon_h() -> u64 {
+    24
+}
+fn default_replan_interval() -> u64 {
+    300
+}
 
 /// A single comfort-rate point for a seeded packet.
 #[derive(Debug, Clone, Deserialize)]
@@ -309,31 +331,71 @@ pub struct PacketSeed {
 impl Profile {
     /// Returns the EV config: checks `assets` list first, falls back to legacy `devices`.
     pub fn ev_config(&self) -> Option<&EvConfig> {
-        self.assets.iter().find_map(|a| if let AssetConfig::Ev(c) = a { Some(c) } else { None })
+        self.assets
+            .iter()
+            .find_map(|a| {
+                if let AssetProfile::Ev(c) = a {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
             .or(self.devices.ev.as_ref())
     }
 
     /// Returns the Heater config: checks `assets` list first, falls back to legacy `devices`.
     pub fn heater_config(&self) -> Option<&HeaterConfig> {
-        self.assets.iter().find_map(|a| if let AssetConfig::Heater(c) = a { Some(c) } else { None })
+        self.assets
+            .iter()
+            .find_map(|a| {
+                if let AssetProfile::Heater(c) = a {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
             .or(self.devices.heater.as_ref())
     }
 
     /// Returns the PV config: checks `assets` list first, falls back to legacy `devices`.
     pub fn pv_config(&self) -> Option<&PvConfig> {
-        self.assets.iter().find_map(|a| if let AssetConfig::Pv(c) = a { Some(c) } else { None })
+        self.assets
+            .iter()
+            .find_map(|a| {
+                if let AssetProfile::Pv(c) = a {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
             .or(self.devices.pv.as_ref())
     }
 
     /// Returns the Battery config: checks `assets` list first, falls back to legacy `devices`.
     pub fn battery_config(&self) -> Option<&BatteryConfig> {
-        self.assets.iter().find_map(|a| if let AssetConfig::Battery(c) = a { Some(c) } else { None })
+        self.assets
+            .iter()
+            .find_map(|a| {
+                if let AssetProfile::Battery(c) = a {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
             .or(self.devices.battery.as_ref())
     }
 
     /// Returns the base load in kW: checks `assets` list first, falls back to legacy `devices.base_load_w`.
     pub fn base_load_kw(&self) -> f64 {
-        self.assets.iter().find_map(|a| if let AssetConfig::BaseLoad(c) = a { Some(c.baseline_kw) } else { None })
+        self.assets
+            .iter()
+            .find_map(|a| {
+                if let AssetProfile::BaseLoad(c) = a {
+                    Some(c.baseline_kw)
+                } else {
+                    None
+                }
+            })
             .unwrap_or(self.devices.base_load_w / 1000.0)
     }
 
