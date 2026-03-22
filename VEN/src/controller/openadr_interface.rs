@@ -281,8 +281,10 @@ pub fn parse_capacity_state(events: &[Value]) -> OadrCapacityState {
 ///   - source     = VtnFirmEvent { event_id }
 ///   - asset_id   = None (site-level)
 ///
-/// Intervals where end <= now (expired) or start > now (future, not yet active)
-/// are excluded. Phase C handles pre-announced future events.
+/// Expired intervals (window_end <= now) are excluded. Future intervals
+/// (window_start > now) are included — the planner queries future time points
+/// so each reservation is inactive at now but active for the relevant plan slots.
+/// Intervals without intervalPeriod are excluded (semantically undefined).
 ///
 /// IMPORT_CAPACITY_LIMIT and EXPORT_CAPACITY_LIMIT payloads are ignored here —
 /// they go through OadrCapacityState / GridState.
@@ -349,8 +351,11 @@ pub fn parse_firm_reservations(events: &[Value], now: DateTime<Utc>) -> Vec<Rese
                 let window_end = window_start + Duration::seconds(dur_secs);
                 let (window_start, window_end) = (window_start, window_end);
 
-                // Skip expired or not-yet-active intervals.
-                if window_end <= now || window_start > now {
+                // Skip expired intervals. Future windows (window_start > now) are
+                // intentionally included — ReservationLayer::query_asset() gates
+                // activation by window bounds, so the reservation is inactive at
+                // now but correctly active when the planner queries future slots.
+                if window_end <= now {
                     continue;
                 }
 
@@ -863,7 +868,9 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_firm_reservations_future_event_excluded() {
+    fn test_future_simple_interval_now_included() {
+        // CP4: future intervals must be included so the planner protects capacity
+        // for pre-announced events before they become active.
         let now = Utc::now();
         let start = now + Duration::hours(2);
         let events = json!([{
@@ -877,7 +884,12 @@ mod tests {
             }]
         }]);
         let result = parse_firm_reservations(events.as_array().unwrap(), now);
-        assert_eq!(result.len(), 0);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].kw, 10.0);
+        assert!(result[0].asset_id.is_none());
+        let (ws, we) = result[0].window;
+        assert_eq!(ws, start);
+        assert_eq!(we, start + Duration::hours(1));
     }
 
     #[test]
@@ -962,5 +974,38 @@ mod tests {
             0,
             "interval with no intervalPeriod must be skipped"
         );
+    }
+
+    #[test]
+    fn test_future_reservation_inactive_at_now_via_query_asset() {
+        // CP4 integration: a future reservation is emitted by parse_firm_reservations
+        // but must be inactive at now and active inside its window.
+        use crate::controller::reservation::ReservationLayer;
+
+        let now = Utc::now();
+        let future_start = now + Duration::hours(6);
+        let events = json!([{
+            "id": "evt-future-layer3",
+            "intervals": [{
+                "intervalPeriod": {
+                    "start": future_start.to_rfc3339(),
+                    "duration": "PT1H"
+                },
+                "payloads": [{"type": "SIMPLE", "values": [4.0]}]
+            }]
+        }]);
+        let reservations = parse_firm_reservations(events.as_array().unwrap(), now);
+        assert_eq!(reservations.len(), 1, "future interval must be included");
+
+        let mut layer = ReservationLayer::new();
+        for r in reservations {
+            layer.insert(r);
+        }
+
+        let at_now = layer.query_asset("battery", now);
+        assert_eq!(at_now.reserved_up_kw, 0.0, "reservation must be inactive at now");
+
+        let at_future = layer.query_asset("battery", future_start + Duration::minutes(30));
+        assert_eq!(at_future.reserved_up_kw, 4.0, "reservation must be active inside window");
     }
 }
