@@ -283,6 +283,9 @@ pub struct PlannerConfig {
     /// Seconds between periodic replanning cycles (default 300).
     #[serde(default = "default_replan_interval")]
     pub replan_interval_s: u64,
+    /// Lookahead window for capability/tariff precomputation (hours, default 2.0).
+    #[serde(default = "default_lookahead_h")]
+    pub lookahead_h: f64,
 }
 
 impl Default for PlannerConfig {
@@ -292,6 +295,7 @@ impl Default for PlannerConfig {
             near_horizon_h: default_near_horizon_h(),
             plan_horizon_h: default_plan_horizon_h(),
             replan_interval_s: default_replan_interval(),
+            lookahead_h: default_lookahead_h(),
         }
     }
 }
@@ -307,6 +311,9 @@ fn default_plan_horizon_h() -> u64 {
 }
 fn default_replan_interval() -> u64 {
     300
+}
+fn default_lookahead_h() -> f64 {
+    2.0
 }
 
 /// A single comfort-rate point for a seeded packet.

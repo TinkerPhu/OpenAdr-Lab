@@ -1,16 +1,19 @@
-/// Stage 3 — HEMS Planning Algorithm (8-phase greedy scheduler).
+/// Stage 3 — HEMS Planning Algorithm (greedy per-step loop, Phase D).
 ///
-/// Produces a Plan from TariffSnapshots + EnergyPackets + device profile.
+/// Produces a Plan from TariffSnapshots + EnergyPackets + SimState.
 /// Phase 6 (penalty check) is deferred to Stage 4.
-use crate::common::{Aggregation, TimeSeries};
-use crate::controller::reservation::ReservationLayer;
+use crate::assets::{AssetCapability, AssetConfig, AssetState};
+use crate::common::Aggregation;
+use crate::controller::reservation::{AssetReservation, ReservationLayer};
 use crate::entities::asset::{ComfortRate, PlanTrigger};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
 use crate::entities::plan::{
-    FirmSummary, FlexibilityEnvelope, FlexibleSummary, PacketAllocation, Plan, PlanTimeSlot,
-    PlanningHorizon, SlotType,
+    ComfortBoundType, FirmSummary, FlexibilityEnvelope, FlexibleSummary, LookaheadContext,
+    PacketAllocation, Plan, PlanReason, PlanStep, PlanTimeSlot, PlanningHorizon,
+    ReservationSource, SlotType,
 };
+use crate::simulator::SimState;
 
 /// Running sum of already-committed setpoints at the current time step.
 /// Built incrementally as each asset is resolved. Internal to CP2 loop.
@@ -36,8 +39,11 @@ const CO2_WEIGHT: f64 = 0.0001; // €/g ≈ €100/tonne
 
 // ─── Public entry point ───────────────────────────────────────────────────────
 
-/// Run the full 8-phase planning algorithm and return a new Plan.
+/// Run the greedy per-step planning loop and return a new Plan + audit trail.
+///
+/// The caller assigns `plan.steps = steps` after the call.
 pub fn run_planner(
+    assets: &SimState,
     tariffs: &TariffTimeSeries,
     packets: &[EnergyPacket],
     capacity: &OadrCapacityState,
@@ -45,12 +51,13 @@ pub fn run_planner(
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
-    asset_forecasts: &HashMap<String, TimeSeries>,
-) -> Plan {
+) -> (Plan, Vec<PlanStep>) {
     let step_s = profile.planner.plan_step_s;
     let horizon_h = profile.planner.plan_horizon_h;
     let near_h = profile.planner.near_horizon_h;
+    let lookahead_h = profile.planner.lookahead_h;
     let slot_h = step_s as f64 / 3600.0;
+    let slot_dur = Duration::seconds(step_s as i64);
 
     let horizon_end = now + Duration::seconds((horizon_h * 3600) as i64);
     let firm_boundary = now + Duration::seconds((near_h * 3600) as i64);
@@ -65,49 +72,130 @@ pub fn run_planner(
         far_horizon: horizon_end,
     };
 
-    // Phase 1: Build planning grid
-    let (mut firm_slots, flexible_slots) = build_grid(
-        tariffs,
-        capacity,
-        reservations,
-        profile,
-        now,
-        step_s,
-        total_steps,
-        firm_boundary,
-        asset_forecasts,
-    );
+    // PV forecast for build_grid (from SimState; sign: export≤0 → negate for generation≥0)
+    let pv_kw_map: HashMap<i64, f64> = assets
+        .iter_assets()
+        .find(|(e, _)| e.id == "pv")
+        .map(|(e, cfg)| {
+            cfg.capability_trajectory(
+                &e.state,
+                Duration::seconds((horizon_h * 3600) as i64),
+                slot_dur,
+            )
+            .into_iter()
+            .map(|(ts, cap)| (ts.timestamp(), -cap.max_export_kw))
+            .collect()
+        })
+        .unwrap_or_default();
 
-    // Preserve terminal packets (cancelled/completed/failed) for history visibility
-    let terminal_pkts: Vec<EnergyPacket> = packets
-        .iter()
-        .filter(|p| p.is_terminal())
-        .cloned()
-        .collect();
+    // Phase 1: Build planning grid (B1 fix: no site_import_reduction_kw here)
+    let (mut firm_slots, flexible_slots) =
+        build_grid(tariffs, capacity, profile, now, step_s, total_steps, firm_boundary, &pv_kw_map);
 
-    // Work on non-terminal packets only
-    let mut pkts: Vec<EnergyPacket> = packets
-        .iter()
-        .filter(|p| !p.is_terminal())
-        .cloned()
-        .collect();
+    // Preserve terminal packets; work on non-terminal only
+    let terminal_pkts: Vec<EnergyPacket> =
+        packets.iter().filter(|p| p.is_terminal()).cloned().collect();
+    let mut pkts: Vec<EnergyPacket> =
+        packets.iter().filter(|p| !p.is_terminal()).cloned().collect();
 
-    // Phase 2+3: Score + allocate consumption to FIRM slots
-    allocate_consumption(&mut firm_slots, &mut pkts, slot_h, now);
+    // Median import tariff for battery arbitrage threshold
+    let median_tariff = {
+        let mut prices: Vec<f64> = firm_slots.iter().map(|s| s.import_tariff_eur_kwh).collect();
+        prices.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        prices.get(prices.len() / 2).copied().unwrap_or(DEFAULT_IMPORT_PRICE)
+    };
 
-    // Phase 4: Battery arbitrage
-    if let Some(battery) = profile.battery_config() {
-        allocate_battery(&mut firm_slots, battery, slot_h);
+    // Pre-loop: lookahead context per asset
+    let lookahead_window = Duration::seconds((lookahead_h * 3600.0) as i64);
+    let lookaheads = precompute_lookahead(assets, tariffs, now, lookahead_window, slot_dur);
+
+    // Per-step mutable asset states (start from current SimState)
+    let mut asset_states: HashMap<String, AssetState> =
+        assets.iter_assets().map(|(e, _)| (e.id.clone(), e.state.clone())).collect();
+
+    // Per-plan allocated energy per packet (tracks total across all slots)
+    let mut allocated: HashMap<Uuid, f64> = pkts.iter().map(|p| (p.id, 0.0_f64)).collect();
+    let mut plan_steps: Vec<PlanStep> = Vec::new();
+
+    // Asset processing order per spec §3.4: uncontrollable first, controllable last
+    let asset_order: &[&str] = &["pv", "base_load", "ev", "battery", "heater"];
+    let uncontrollable: &[&str] = &["pv", "base_load"];
+
+    for slot in firm_slots.iter_mut() {
+        let ts = slot.start;
+
+        let mut site_ctx = SiteContext {
+            planned_others_kw: 0.0,
+            import_limit_kw: slot.import_cap_kw,
+            export_limit_kw: slot.export_cap_kw,
+            pv_forecast_kw: 0.0,
+        };
+
+        for &aid in asset_order {
+            let (state, cfg) = match (asset_states.get(aid), assets.iter_assets().find(|(e, _)| e.id == aid)) {
+                (Some(s), Some((_, c))) => (s.clone(), c),
+                _ => continue,
+            };
+
+            let phys_cap = cfg.capability(&state);
+            let avail_cap = reservations.available_cap(aid, phys_cap, ts);
+            let res = reservations.query_asset(aid, ts);
+
+            let (setpoint_kw, reason) = if uncontrollable.contains(&aid) {
+                // Uncontrollable: free-run power, no decision
+                let (_, power_kw) = cfg.step(&state, 0.0, slot_dur);
+                (power_kw, PlanReason::Idle)
+            } else {
+                let la = match lookaheads.get(aid) {
+                    Some(l) => l,
+                    None => continue,
+                };
+                rules_choose(
+                    aid, phys_cap, avail_cap, &res,
+                    slot.import_tariff_eur_kwh, slot, &firm_slots, &pkts,
+                    &allocated, &site_ctx, la, reservations,
+                    median_tariff, profile.battery_config(), slot_h, now,
+                )
+            };
+
+            let (next_state, actual_kw) = cfg.step(&state, setpoint_kw, slot_dur);
+
+            if aid == "pv" {
+                site_ctx.pv_forecast_kw = actual_kw;
+            }
+
+            plan_steps.push(PlanStep {
+                ts,
+                asset_id: aid.to_string(),
+                state_before: state,
+                capability: phys_cap,
+                reserved_up_kw: res.reserved_up_kw,
+                reserved_down_kw: res.reserved_down_kw,
+                avail_max_export_kw: avail_cap.max_export_kw,
+                avail_max_import_kw: avail_cap.max_import_kw,
+                setpoint_kw,
+                actual_power_kw: actual_kw,
+                reason,
+            });
+
+            update_slot_from_step(slot, aid, actual_kw, &pkts, &mut allocated, slot_h);
+            site_ctx.planned_others_kw += actual_kw;
+            asset_states.insert(aid.to_string(), next_state);
+        }
     }
 
-    // Phase 5: Residual PV surplus already reflected in slot.net_export_kw
+    // Transition Pending → Scheduled for any packet that got energy booked
+    for p in pkts.iter_mut() {
+        let booked = *allocated.get(&p.id).unwrap_or(&0.0);
+        if booked > 0.0 && p.status == PacketStatus::Pending {
+            p.status = PacketStatus::Scheduled;
+        }
+    }
 
-    // Phase 6: Penalty check — deferred to Stage 4
-
-    // Phase 7: Flexibility envelopes
+    // Phase 7: Flexibility envelopes (unchanged)
     let envelopes = build_envelopes(&pkts, &flexible_slots, &firm_slots, slot_h);
 
-    // Phase 8: Finalize
+    // Phase 8: Finalize (unchanged)
     finalize_packets(&mut pkts, &firm_slots, slot_h, now);
     update_slot_flexibility(&mut firm_slots);
 
@@ -118,10 +206,9 @@ pub fn run_planner(
         estimated_co2_g: envelopes.iter().map(|e| e.estimated_co2_g).sum(),
     };
 
-    // Re-append terminal packets so they remain visible in GET /packets
     pkts.extend(terminal_pkts);
 
-    Plan {
+    let plan = Plan {
         id: Uuid::new_v4(),
         created_at: now,
         trigger,
@@ -134,8 +221,10 @@ pub fn run_planner(
         flexible_summary,
         packets: pkts,
         warnings: vec![],
-        steps: vec![],
-    }
+        steps: vec![], // caller assigns plan.steps = plan_steps
+    };
+
+    (plan, plan_steps)
 }
 
 // ─── Phase 1: Build planning grid ────────────────────────────────────────────
@@ -143,20 +232,18 @@ pub fn run_planner(
 fn build_grid(
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
-    reservations: &ReservationLayer,
     profile: &Profile,
     now: DateTime<Utc>,
     step_s: u64,
     total_steps: usize,
     firm_boundary: DateTime<Utc>,
-    asset_forecasts: &HashMap<String, TimeSeries>,
+    pv_kw_map: &HashMap<i64, f64>,
 ) -> (Vec<PlanTimeSlot>, Vec<PlanTimeSlot>) {
     let import_cap = capacity.import_limit_kw.unwrap_or(f64::MAX);
     let export_cap = capacity.export_limit_kw.unwrap_or(f64::MAX);
     let baseline_kw = profile.base_load_kw();
     let rates_empty = tariffs.is_empty();
 
-    // Pre-resample tariff series to slot grid (HashMap<epoch_sec, value>)
     let slot_dur = Duration::seconds(step_s as i64);
     let import_map: HashMap<i64, f64> = tariffs
         .import_eur_kwh
@@ -180,20 +267,6 @@ fn build_grid(
         .map(|(ts, v)| (ts.timestamp(), *v))
         .collect();
 
-    // Pre-resample asset forecasts to slot grid
-    let forecast_maps: HashMap<&str, HashMap<i64, f64>> = asset_forecasts
-        .iter()
-        .map(|(id, ts)| {
-            let map: HashMap<i64, f64> = ts
-                .resample_uniform(slot_dur, Aggregation::Mean)
-                .samples
-                .iter()
-                .map(|(t, v)| (t.timestamp(), *v))
-                .collect();
-            (id.as_str(), map)
-        })
-        .collect();
-
     let mut firm = Vec::new();
     let mut flex = Vec::new();
 
@@ -213,12 +286,8 @@ fn build_grid(
         let co2 = co2_map.get(&epoch).copied().unwrap_or(DEFAULT_CO2_G_KWH);
         let grid_eff = import_tariff + co2 * CO2_WEIGHT;
 
-        // PV forecast: negative = export, so we negate to get positive generation magnitude.
-        let pv_export_kw = forecast_maps
-            .get("pv")
-            .and_then(|m| m.get(&epoch).copied())
-            .unwrap_or(0.0);
-        let pv_kw = -pv_export_kw; // convert export (negative) to generation magnitude (positive)
+        // PV forecast from capability_trajectory (already in generation-magnitude convention, ≥ 0)
+        let pv_kw = pv_kw_map.get(&epoch).copied().unwrap_or(0.0);
         let net = baseline_kw - pv_kw; // positive = need to import, negative = surplus
         let surplus = (-net).max(0.0);
         let net_import = net.max(0.0);
@@ -230,9 +299,8 @@ fn build_grid(
             SlotType::Flexible
         };
 
-        let effective_import_cap_kw =
-            (import_cap - reservations.site_import_reduction_kw(start)).max(0.0);
-
+        // B1 fix: import_cap_kw is the raw OadrCapacityState value.
+        // FIRM reservation effect lives in per-step available_cap() call in rules_choose().
         let slot = PlanTimeSlot {
             slot_index: i,
             start,
@@ -243,7 +311,7 @@ fn build_grid(
             co2_g_kwh: co2,
             grid_effective_cost: grid_eff,
             rate_estimated: rates_empty,
-            import_cap_kw: effective_import_cap_kw,
+            import_cap_kw: import_cap,
             export_cap_kw: export_cap,
             baseline_kw,
             pv_forecast_kw: pv_kw,
@@ -265,228 +333,296 @@ fn build_grid(
     (firm, flex)
 }
 
-// ─── Phase 2+3: Score + Allocate Consumption (FIRM only) ─────────────────────
+// ─── Lookahead precomputation ─────────────────────────────────────────────────
 
-struct AllocEntry {
-    slot_index: usize,
-    packet_id: Uuid,
-    marginal_value: f64,
-    eligible: bool,
+fn precompute_lookahead(
+    sim: &SimState,
+    tariffs: &TariffTimeSeries,
+    now: DateTime<Utc>,
+    lookahead_window: Duration,
+    resolution: Duration,
+) -> HashMap<String, LookaheadContext> {
+    let n = (lookahead_window.num_seconds() / resolution.num_seconds().max(1)) as usize;
+
+    // Pre-build import tariff map over lookahead window
+    let import_map: HashMap<i64, f64> = tariffs
+        .import_eur_kwh
+        .resample_uniform(resolution, Aggregation::Mean)
+        .samples
+        .iter()
+        .map(|(ts, v)| (ts.timestamp(), *v))
+        .collect();
+
+    let mut result = HashMap::new();
+    for (entry, cfg) in sim.iter_assets() {
+        let traj = cfg.capability_trajectory(&entry.state, lookahead_window, resolution);
+
+        let mut tariff_min = f64::MAX;
+        let mut tariff_max = f64::MIN;
+        for i in 0..n {
+            let t = now + resolution * i as i32;
+            let v = import_map.get(&t.timestamp()).copied().unwrap_or(DEFAULT_IMPORT_PRICE);
+            tariff_min = tariff_min.min(v);
+            tariff_max = tariff_max.max(v);
+        }
+        if tariff_min == f64::MAX {
+            tariff_min = DEFAULT_IMPORT_PRICE;
+        }
+        if tariff_max == f64::MIN {
+            tariff_max = DEFAULT_IMPORT_PRICE;
+        }
+
+        let ceiling_eta = traj.iter()
+            .find(|(_, cap)| cap.max_import_kw < 1e-3)
+            .map(|(ts, _)| *ts);
+        let floor_eta = traj.iter()
+            .find(|(_, cap)| cap.max_export_kw > -1e-3)
+            .map(|(ts, _)| *ts);
+
+        result.insert(entry.id.clone(), LookaheadContext {
+            capability_trajectory: traj,
+            tariff_min_ahead_eur_per_kwh: tariff_min,
+            tariff_max_ahead_eur_per_kwh: tariff_max,
+            ceiling_eta,
+            floor_eta,
+        });
+    }
+    result
 }
 
-fn allocate_consumption(
-    slots: &mut Vec<PlanTimeSlot>,
-    packets: &mut Vec<EnergyPacket>,
+// ─── Rules engine ─────────────────────────────────────────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+fn rules_choose(
+    asset_id: &str,
+    phys_cap: AssetCapability,
+    avail_cap: AssetCapability,
+    res: &AssetReservation,
+    tariff_t: f64,
+    slot: &PlanTimeSlot,
+    firm_slots: &[PlanTimeSlot],
+    packets: &[EnergyPacket],
+    allocated: &HashMap<Uuid, f64>,
+    site_ctx: &SiteContext,
+    _lookahead: &LookaheadContext,
+    reservations: &ReservationLayer,
+    median_tariff: f64,
+    battery_cfg: Option<&BatteryConfig>,
     slot_h: f64,
     now: DateTime<Utc>,
-) {
-    // Track energy already allocated for each packet in this plan cycle
-    let mut allocated: std::collections::HashMap<Uuid, f64> =
-        packets.iter().map(|p| (p.id, 0.0_f64)).collect();
+) -> (f64, PlanReason) {
+    // Rule 1: reservation blocks all headroom
+    if avail_cap.max_import_kw <= 1e-6 && avail_cap.max_export_kw >= -1e-6 {
+        let source = reservations.primary_source(asset_id, slot.start);
+        let required_kw = res.reserved_up_kw.max(res.reserved_down_kw);
+        return (0.0, PlanReason::FirmObligation { source, required_kw });
+    }
 
-    // Build scoring entries
+    // Rule 4: SoC/comfort ceiling (no import headroom left)
+    if avail_cap.max_import_kw < 1e-6 {
+        return (0.0, PlanReason::SocCeiling { soc_pct: 100.0 });
+    }
+
+    // Rule 5: SoC/comfort floor (no export headroom, but asset can generate)
+    if avail_cap.max_export_kw > -1e-6 && phys_cap.max_export_kw < -1e-3 {
+        return (0.0, PlanReason::SocFloor { soc_pct: 0.0 });
+    }
+
+    // Rules 6+7: best active packet for this asset
     let far_future = now + Duration::days(365);
-    let mut entries: Vec<AllocEntry> = Vec::new();
-
-    for packet in packets.iter() {
-        if packet.is_terminal() || packet.target_energy_kwh <= 0.0 {
-            continue;
-        }
-        let undelivered = packet.undelivered_energy_kwh();
-        if undelivered <= 0.0 {
-            continue;
-        }
-
-        let latest_end = packet.latest_end().unwrap_or(far_future);
-
-        let slots_remaining = slots
-            .iter()
-            .filter(|s| s.start >= packet.earliest_start && s.end <= latest_end)
-            .count()
-            .max(1);
-
-        let slots_needed =
-            (undelivered / packet.desired_power_kw.max(1e-9) / slot_h).ceil() as usize;
-        let time_pressure = (slots_needed as f64 / slots_remaining as f64)
-            .max(1.0)
-            .min(3.0);
-
-        for (si, slot) in slots.iter().enumerate() {
-            if slot.start < packet.earliest_start || slot.start >= latest_end {
-                continue;
+    let best = packets
+        .iter()
+        .filter(|p| p.asset_id == asset_id && !p.is_terminal())
+        .filter_map(|p| {
+            let already = *allocated.get(&p.id).unwrap_or(&0.0);
+            let undelivered = (p.undelivered_energy_kwh() - already).max(0.0);
+            if undelivered <= 1e-6 {
+                return None;
             }
+            let latest_end = p.latest_end().unwrap_or(far_future);
+            let slots_remaining = firm_slots
+                .iter()
+                .filter(|s| s.start >= p.earliest_start && s.end <= latest_end)
+                .count()
+                .max(1);
+            let slots_needed =
+                (undelivered / p.desired_power_kw.max(1e-9) / slot_h).ceil() as usize;
+            let time_pressure = (slots_needed as f64 / slots_remaining as f64).clamp(1.0, 3.0);
 
-            let import_head = (slot.import_cap_kw - slot.net_import_kw).max(0.0);
-            if import_head <= 0.0 && slot.surplus_available_kw <= 0.0 {
-                continue;
-            }
-
-            let fill = packet.fill() + allocated[&packet.id] / packet.target_energy_kwh.max(1e-9);
-            let comfort_bid = packet.value_curve.bid_at(fill.min(1.0));
+            let fill = p.fill() + already / p.target_energy_kwh.max(1e-9);
+            let comfort_bid = p.value_curve.bid_at(fill.min(1.0));
 
             let surplus_frac =
-                (slot.surplus_available_kw / packet.desired_power_kw.max(1e-9)).min(1.0);
-            let eff_cost = slot.import_tariff_eur_kwh * (1.0 - surplus_frac)
+                (slot.surplus_available_kw / p.desired_power_kw.max(1e-9)).min(1.0);
+            let eff_cost = tariff_t * (1.0 - surplus_frac)
                 + slot.export_tariff_eur_kwh * surplus_frac;
 
             let eligible = comfort_bid >= eff_cost || time_pressure >= 2.0;
-            let marginal_value = comfort_bid * time_pressure;
-
-            entries.push(AllocEntry {
-                slot_index: si,
-                packet_id: packet.id,
-                marginal_value,
-                eligible,
-            });
-        }
-    }
-
-    // Sort by MarginalValue DESC (greedy knapsack)
-    entries.sort_by(|a, b| {
-        b.marginal_value
-            .partial_cmp(&a.marginal_value)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    // Greedy allocation pass
-    for entry in &entries {
-        if !entry.eligible {
-            continue;
-        }
-
-        let pi = match packets.iter().position(|p| p.id == entry.packet_id) {
-            Some(i) => i,
-            None => continue,
-        };
-
-        let already = *allocated.get(&entry.packet_id).unwrap_or(&0.0);
-        let undelivered = (packets[pi].undelivered_energy_kwh() - already).max(0.0);
-        if undelivered <= 1e-6 {
-            continue;
-        }
-
-        // Compute allocation (read slot values first, then mutate)
-        let (power_kw, surplus_used, grid_used, cost, co2, energy_kwh) = {
-            let slot = &slots[entry.slot_index];
-            let import_head = (slot.import_cap_kw - slot.net_import_kw).max(0.0);
-            let power = packets[pi]
-                .desired_power_kw
-                .min(import_head + slot.surplus_available_kw);
-            if power <= 0.0 {
-                continue;
+            if !eligible {
+                return None;
             }
-            let surplus = slot.surplus_available_kw.min(power);
-            let grid = (power - surplus).max(0.0);
-            let e = power * slot_h;
-            let c = surplus * slot.export_tariff_eur_kwh * slot_h
-                + grid * slot.import_tariff_eur_kwh * slot_h;
-            let co2v = grid * slot.co2_g_kwh * slot_h;
-            (power, surplus, grid, c, co2v, e)
-        };
-
-        if power_kw <= 0.0 {
-            continue;
-        }
-
-        // No power clamping — dispatcher detects completion in real time.
-        // Track allocated energy to avoid scheduling more slots than needed.
-
-        let slot = &mut slots[entry.slot_index];
-        slot.surplus_available_kw -= surplus_used;
-        slot.net_import_kw += grid_used;
-        slot.net_export_kw = (slot.net_export_kw - surplus_used).max(0.0);
-
-        slot.allocations.push(PacketAllocation {
-            packet_id: entry.packet_id,
-            asset_id: packets[pi].asset_id.clone(),
-            power_kw,
-            surplus_power_kw: surplus_used,
-            grid_power_kw: grid_used,
-            marginal_value: entry.marginal_value,
-            cost_eur: cost,
-            co2_g: co2,
+            Some((p, comfort_bid, time_pressure))
+        })
+        .max_by(|a, b| {
+            (a.1 * a.2)
+                .partial_cmp(&(b.1 * b.2))
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Track energy booked for this packet so far (capped at undelivered to avoid over-scheduling)
-        *allocated.entry(entry.packet_id).or_insert(0.0) += energy_kwh.min(undelivered);
+    if let Some((packet, comfort_bid, time_pressure)) = best {
+        let import_head = (slot.import_cap_kw - slot.net_import_kw).max(0.0);
+        let desired = packet
+            .desired_power_kw
+            .min(import_head + slot.surplus_available_kw);
+        let desired = desired.clamp(avail_cap.max_export_kw, avail_cap.max_import_kw);
+        // Rule 2: clamp by remaining site import headroom
+        let site_head = (site_ctx.import_limit_kw - site_ctx.planned_others_kw).max(0.0);
+        let setpoint = desired.min(site_head).min(avail_cap.max_import_kw);
 
-        if packets[pi].status == PacketStatus::Pending {
-            packets[pi].status = PacketStatus::Scheduled;
+        if setpoint > 1e-6 {
+            if time_pressure >= 2.0 {
+                // Rule 7: deadline pressure — treat as firm obligation
+                return (
+                    setpoint,
+                    PlanReason::FirmObligation {
+                        source: ReservationSource::UserRequest { request_id: packet.id },
+                        required_kw: setpoint,
+                    },
+                );
+            } else {
+                // Rule 6: cheap enough / comfort-bid eligible
+                return (
+                    setpoint,
+                    PlanReason::CheapTariff {
+                        tariff_eur_per_kwh: tariff_t,
+                        threshold_eur_per_kwh: comfort_bid,
+                    },
+                );
+            }
         }
     }
+
+    // Rule 8: surplus opportunity (no packet, avoid waste)
+    if slot.surplus_available_kw > 1e-3 && avail_cap.max_import_kw > 1e-6 {
+        let take = slot.surplus_available_kw.min(avail_cap.max_import_kw);
+        if take > 1e-6 {
+            return (
+                take,
+                PlanReason::CheapTariff {
+                    tariff_eur_per_kwh: slot.export_tariff_eur_kwh,
+                    threshold_eur_per_kwh: slot.export_tariff_eur_kwh,
+                },
+            );
+        }
+    }
+
+    // Rules 9+10: battery arbitrage
+    if asset_id == "battery" {
+        if let Some(bat) = battery_cfg {
+            let eff = bat.round_trip_efficiency.sqrt();
+            if tariff_t < median_tariff * eff {
+                // Rule 9: cheap — charge
+                let site_head = (site_ctx.import_limit_kw - site_ctx.planned_others_kw).max(0.0);
+                let charge_kw = avail_cap.max_import_kw.min(site_head).max(0.0);
+                if charge_kw > 0.01 {
+                    return (
+                        charge_kw,
+                        PlanReason::CheapTariff {
+                            tariff_eur_per_kwh: tariff_t,
+                            threshold_eur_per_kwh: median_tariff * eff,
+                        },
+                    );
+                }
+            } else if tariff_t > median_tariff / eff {
+                // Rule 10: expensive — discharge
+                let discharge_kw = (-avail_cap.max_export_kw).max(0.0);
+                if discharge_kw > 0.01 {
+                    return (
+                        -discharge_kw,
+                        PlanReason::ExpensiveTariff {
+                            tariff_eur_per_kwh: tariff_t,
+                            threshold_eur_per_kwh: median_tariff / eff,
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    // Rule 12: idle
+    (0.0, PlanReason::Idle)
 }
 
-// ─── Phase 4: Battery Arbitrage ───────────────────────────────────────────────
+// ─── Slot bookkeeping helper ──────────────────────────────────────────────────
 
-fn allocate_battery(slots: &mut Vec<PlanTimeSlot>, battery: &BatteryConfig, slot_h: f64) {
-    let n = slots.len();
-    if n < 2 {
-        return;
-    }
+fn update_slot_from_step(
+    slot: &mut PlanTimeSlot,
+    asset_id: &str,
+    actual_kw: f64,
+    packets: &[EnergyPacket],
+    allocated: &mut HashMap<Uuid, f64>,
+    slot_h: f64,
+) {
+    if actual_kw > 1e-6 {
+        // Import: find the active packet for this asset
+        if let Some(packet) =
+            packets.iter().find(|p| p.asset_id == asset_id && !p.is_terminal())
+        {
+            let surplus_used = slot.surplus_available_kw.min(actual_kw);
+            let grid_used = (actual_kw - surplus_used).max(0.0);
+            let energy_kwh = actual_kw * slot_h;
+            let cost = surplus_used * slot.export_tariff_eur_kwh * slot_h
+                + grid_used * slot.import_tariff_eur_kwh * slot_h;
+            let co2 = grid_used * slot.co2_g_kwh * slot_h;
 
-    // Compute median tariff as arbitrage threshold
-    let mut prices: Vec<f64> = slots.iter().map(|s| s.import_tariff_eur_kwh).collect();
-    prices.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median = prices[n / 2];
-    let eff = battery.round_trip_efficiency.sqrt();
+            slot.surplus_available_kw -= surplus_used;
+            slot.net_import_kw += grid_used;
+            slot.net_export_kw = (slot.net_export_kw - surplus_used).max(0.0);
+            *allocated.entry(packet.id).or_insert(0.0) += energy_kwh;
 
-    let mut soc = battery.initial_soc;
-    let cap = battery.capacity_kwh;
-    let min_soc = battery.min_soc;
+            slot.allocations.push(PacketAllocation {
+                packet_id: packet.id,
+                asset_id: asset_id.to_string(),
+                power_kw: actual_kw,
+                surplus_power_kw: surplus_used,
+                grid_power_kw: grid_used,
+                marginal_value: 0.0,
+                cost_eur: cost,
+                co2_g: co2,
+            });
+        } else {
+            // Battery arbitrage (no packet)
+            let surplus_used = slot.surplus_available_kw.min(actual_kw);
+            let grid_used = (actual_kw - surplus_used).max(0.0);
+            slot.surplus_available_kw -= surplus_used;
+            slot.net_import_kw += grid_used;
 
-    for slot in slots.iter_mut() {
-        let price = slot.import_tariff_eur_kwh;
-
-        if price < median * eff {
-            // Cheap slot: charge from surplus or cheap grid
-            let head_kwh = (cap - soc * cap).min(battery.max_charge_kw * slot_h);
-            let surp_kwh = slot.surplus_available_kw * slot_h;
-            let grid_head_kwh = (slot.import_cap_kw - slot.net_import_kw).max(0.0) * slot_h;
-            let charge_kwh = (surp_kwh + grid_head_kwh).min(head_kwh).max(0.0);
-
-            if charge_kwh > 0.01 {
-                let surp_used = surp_kwh.min(charge_kwh);
-                let grid_used = (charge_kwh - surp_used).max(0.0);
-                let charge_kw = charge_kwh / slot_h;
-
-                slot.surplus_available_kw -= surp_used / slot_h;
-                slot.net_import_kw += grid_used / slot_h;
-                soc = (soc + charge_kwh * eff / cap).min(1.0);
-
-                slot.allocations.push(PacketAllocation {
-                    packet_id: Uuid::nil(),
-                    asset_id: "battery".to_string(),
-                    power_kw: charge_kw,
-                    surplus_power_kw: surp_used / slot_h,
-                    grid_power_kw: grid_used / slot_h,
-                    marginal_value: 0.0,
-                    cost_eur: grid_used * price,
-                    co2_g: grid_used * slot.co2_g_kwh,
-                });
-            }
-        } else if price > median / eff {
-            // Expensive slot: discharge battery
-            let avail_kwh = ((soc - min_soc) * cap)
-                .min(battery.max_discharge_kw * slot_h)
-                .max(0.0);
-
-            if avail_kwh > 0.01 {
-                let discharge_kw = avail_kwh / slot_h;
-                slot.net_import_kw = (slot.net_import_kw - discharge_kw).max(0.0);
-                soc = (soc - avail_kwh / cap / eff).max(min_soc);
-
-                slot.allocations.push(PacketAllocation {
-                    packet_id: Uuid::nil(),
-                    asset_id: "battery".to_string(),
-                    power_kw: -discharge_kw,
-                    surplus_power_kw: 0.0,
-                    grid_power_kw: -discharge_kw,
-                    marginal_value: 0.0,
-                    cost_eur: -avail_kwh * price,
-                    co2_g: 0.0,
-                });
-            }
+            slot.allocations.push(PacketAllocation {
+                packet_id: Uuid::nil(),
+                asset_id: asset_id.to_string(),
+                power_kw: actual_kw,
+                surplus_power_kw: surplus_used,
+                grid_power_kw: grid_used,
+                marginal_value: 0.0,
+                cost_eur: grid_used * slot.import_tariff_eur_kwh * slot_h,
+                co2_g: grid_used * slot.co2_g_kwh * slot_h,
+            });
         }
+    } else if actual_kw < -1e-6 {
+        // Export / discharge
+        let discharge_kw = -actual_kw;
+        slot.net_import_kw = (slot.net_import_kw - discharge_kw).max(0.0);
+
+        slot.allocations.push(PacketAllocation {
+            packet_id: Uuid::nil(),
+            asset_id: asset_id.to_string(),
+            power_kw: actual_kw,
+            surplus_power_kw: 0.0,
+            grid_power_kw: actual_kw,
+            marginal_value: 0.0,
+            cost_eur: -discharge_kw * slot.import_tariff_eur_kwh * slot_h,
+            co2_g: 0.0,
+        });
     }
 }
 

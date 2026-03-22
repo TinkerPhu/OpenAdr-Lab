@@ -479,17 +479,6 @@ pub(crate) fn spawn_planning(
             let trigger = trigger_rx.borrow().clone();
             let trigger_reason = format!("{:?}", trigger);
 
-            // Compute per-asset forecasts covering the planning horizon.
-            let planning_horizon =
-                chrono::Duration::seconds((profile.planner.plan_horizon_h * 3600) as i64);
-            let asset_forecasts: std::collections::HashMap<String, crate::common::TimeSeries> = {
-                let sim_guard = sim.lock().await;
-                sim_guard
-                    .iter_assets()
-                    .map(|(e, cfg)| (e.id.clone(), cfg.forecast(&e.state, planning_horizon)))
-                    .collect()
-            };
-
             let tariff_ts =
                 crate::entities::tariff_snapshot::TariffTimeSeries::from_snapshots(&rates);
             let events = state.events().await;
@@ -498,10 +487,14 @@ pub(crate) fn spawn_planning(
                 reservation_layer.insert(r);
             }
             // Phase C — policy reservations
+            let planning_horizon =
+                chrono::Duration::seconds((profile.planner.plan_horizon_h * 3600) as i64);
             for r in profile.flexibility_policy.generate_reservations(now, now + planning_horizon) {
                 reservation_layer.insert(r);
             }
-            let plan = controller::planner::run_planner(
+            let sim_guard_for_planner = sim.lock().await;
+            let (mut plan, plan_steps) = controller::planner::run_planner(
+                &*sim_guard_for_planner,
                 &tariff_ts,
                 &packets,
                 &capacity,
@@ -509,8 +502,9 @@ pub(crate) fn spawn_planning(
                 &profile,
                 now,
                 trigger,
-                &asset_forecasts,
             );
+            drop(sim_guard_for_planner);
+            plan.steps = plan_steps;
             // Planner may transition packet statuses (Pending→Scheduled, etc.)
             let firm_count = plan.firm_slots.len();
             let flex_count = plan.flexible_slots.len();
