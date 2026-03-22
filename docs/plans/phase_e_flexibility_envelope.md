@@ -141,7 +141,7 @@ pub fn compute_envelope(
                     _ => continue,
                 };
                 available_discharge_kwh += (soc - b.min_soc).max(0.0) * b.capacity_kwh;
-                available_charge_kwh    += (b.max_soc - soc).max(0.0) * b.capacity_kwh;
+                available_charge_kwh    += (1.0_f64 - soc).max(0.0) * b.capacity_kwh;
             }
             AssetConfig::Ev(e) => {
                 let (soc, plugged) = match &entry.state {
@@ -149,8 +149,8 @@ pub fn compute_envelope(
                     _ => continue,
                 };
                 if plugged {
-                    available_discharge_kwh += (soc - e.min_soc).max(0.0) * e.capacity_kwh;
-                    available_charge_kwh    += (e.max_soc - soc).max(0.0) * e.capacity_kwh;
+                    available_discharge_kwh += (soc - e.min_soc).max(0.0) * e.battery_kwh;
+                    available_charge_kwh    += (1.0_f64 - soc).max(0.0) * e.battery_kwh;
                 }
             }
             _ => {}
