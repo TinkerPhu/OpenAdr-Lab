@@ -3,8 +3,8 @@
 /// Produces a Plan from TariffSnapshots + EnergyPackets + device profile.
 /// Phase 6 (penalty check) is deferred to Stage 4.
 use crate::common::{Aggregation, TimeSeries};
-use crate::entities::asset::{ComfortRate, PlanTrigger};
 use crate::controller::reservation::ReservationLayer;
+use crate::entities::asset::{ComfortRate, PlanTrigger};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
 use crate::entities::plan::{

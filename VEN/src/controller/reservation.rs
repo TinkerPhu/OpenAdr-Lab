@@ -90,8 +90,7 @@ impl ReservationLayer {
             if ws > t || t >= we {
                 continue;
             }
-            let applies =
-                r.asset_id.is_none() || r.asset_id.as_deref() == Some(asset_id);
+            let applies = r.asset_id.is_none() || r.asset_id.as_deref() == Some(asset_id);
             if !applies {
                 continue;
             }
