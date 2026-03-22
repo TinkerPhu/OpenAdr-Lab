@@ -32,11 +32,6 @@ def step_wait_for_steps(context, asset_id):
     context.last_checked_asset = asset_id
 
 
-@when("I GET /plan?summary from the VEN")
-def step_get_plan_summary(context):
-    context.last_response = ven_get("/plan?summary")
-
-
 # ── Given steps ───────────────────────────────────────────────────────────────
 
 @given("I create a 4-hour PRICE event at {price:f} EUR/kWh for the saved program")

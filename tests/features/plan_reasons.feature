@@ -39,7 +39,7 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
   # ── Scenario 5: GET /plan?summary omits the steps array ──────────────────
   Scenario: GET /plan?summary returns plan without steps
     When I wait for the VEN /plan endpoint to return a plan
-    And I GET /plan?summary from the VEN
+    And I GET "/plan?summary" from the VEN
     Then the response status is 200
     And the response body has field "id"
     And the response body has an empty "steps" array
