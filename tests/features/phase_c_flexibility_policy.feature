@@ -1,9 +1,11 @@
-Feature: FlexibilityPolicy — Layer 1 default reserve
+Feature: FlexibilityPolicy — proactive flexibility reserves
 
-  The planner reduces the effective grid import cap by the site-level Up reservation
-  on every planning cycle (via site_import_reduction_kw). Without policy, a 10.0 kW
-  IMPORT_CAPACITY_LIMIT event yields import_cap_kw=10.0 on firm slots. With
-  default_reserve up_kw=3.0, effective cap = 10.0 - 3.0 = 7.0 kW.
+  The planner reduces the effective grid import cap by site-level Up reservations.
+  Without policy, a 10.0 kW IMPORT_CAPACITY_LIMIT event yields import_cap_kw=10.0.
+  With default_reserve up_kw=3.0, effective cap = 10.0 - 3.0 = 7.0 kW (Layer 1).
+  A future SIMPLE event (CP4) adds a further reservation for its window slots only.
+
+  # Layer 1 — always-active default reserve (CP3)
 
   Scenario: Default reserve reduces effective grid import cap on all firm slots
     Given a VTN IMPORT_CAPACITY_LIMIT event with value 10.0 kW is active
@@ -11,7 +13,7 @@ Feature: FlexibilityPolicy — Layer 1 default reserve
     Then every policy VEN firm slot has import_cap_kw at most 7.1 kW
     # Grid cap 10.0 − policy reserve up_kw 3.0 = 7.0 kW effective cap
 
-Feature: FlexibilityPolicy — Layer 3 pre-announced VTN events
+  # Layer 3 — pre-announced future VTN events (CP4)
 
   Scenario: Future SIMPLE event reduces import cap for slots inside the event window
     Given a VTN IMPORT_CAPACITY_LIMIT event with value 10.0 kW is active
