@@ -8,6 +8,8 @@ echo "Fixtures loaded."
 
 echo "Provisioning ven-2 via API..."
 python provision_ven2.py
+echo "Provisioning ven-policy via API..."
+python provision_ven_policy.py
 echo "Provisioning done."
 
 exec python -m behave "$@"

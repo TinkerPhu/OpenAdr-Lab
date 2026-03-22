@@ -131,9 +131,9 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
-      CLIENT_ID: "ven-1"
-      CLIENT_SECRET: "ven-1"
-      VEN_NAME: "ven-1"
+      CLIENT_ID: "ven-policy"
+      CLIENT_SECRET: "ven-policy"
+      VEN_NAME: "ven-policy"
       POLL_EVENTS_SECS: "2"
       POLL_PROGRAMS_SECS: "2"
       POLL_REPORTS_SECS: "2"
