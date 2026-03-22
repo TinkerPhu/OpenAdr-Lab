@@ -1,8 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::common::{Interpolation, TimeSeries};
-use crate::controller::trace::AssetHistoryBuffer;
 
 pub mod base_load;
 pub mod battery;
@@ -137,6 +136,76 @@ pub struct TrajectoryPoint {
     pub state: AssetState,
 }
 
+/// One recorded tick in a per-asset history buffer.
+#[derive(Debug, Clone)]
+pub struct HistoryPoint {
+    pub ts: DateTime<Utc>,
+    /// Signed: positive = import from grid, negative = export.
+    pub power_kw: f64,
+    /// Full state snapshot at this tick.
+    pub state: AssetState,
+}
+
+/// Rolling per-asset ring buffer of `HistoryPoint` values.
+///
+/// Capacity defaults to 3600 entries ≈ 1 h at 1 s tick rate.
+/// Oldest point is evicted automatically when full.
+#[derive(Debug, Clone)]
+pub struct AssetHistoryBuffer {
+    capacity: usize,
+    points: VecDeque<HistoryPoint>,
+}
+
+impl AssetHistoryBuffer {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            points: VecDeque::with_capacity(capacity),
+        }
+    }
+
+    /// Append a point, evicting the oldest when at capacity.
+    pub fn push(&mut self, point: HistoryPoint) {
+        if self.points.len() == self.capacity {
+            self.points.pop_front();
+        }
+        self.points.push_back(point);
+    }
+
+    /// All points in `[now − window, now]`, ordered ascending.
+    pub fn slice(&self, window: Duration, now: DateTime<Utc>) -> Vec<HistoryPoint> {
+        let start = now - window;
+        self.points
+            .iter()
+            .filter(|p| p.ts >= start && p.ts <= now)
+            .cloned()
+            .collect()
+    }
+
+    /// Most recent point.
+    pub fn latest(&self) -> Option<&HistoryPoint> {
+        self.points.back()
+    }
+
+    /// Last-observation-carried-forward power at or before `t`.
+    /// Returns `None` if no point exists at or before `t`.
+    pub fn power_at(&self, t: DateTime<Utc>) -> Option<f64> {
+        self.points
+            .iter()
+            .rev()
+            .find(|p| p.ts <= t)
+            .map(|p| p.power_kw)
+    }
+
+    pub fn len(&self) -> usize {
+        self.points.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.points.is_empty()
+    }
+}
+
 /// Runtime config dispatch enum. Holds physics config for each asset type.
 /// This is the renamed + restructured successor to what was previously called `AssetState`
 /// (which conflated config and state).
@@ -258,16 +327,6 @@ impl AssetConfig {
         }
     }
 
-    pub fn history(&self, timespan: Duration, buffer: &AssetHistoryBuffer) -> TimeSeries {
-        match self {
-            Self::Battery(cfg) => cfg.history(timespan, buffer),
-            Self::Ev(cfg) => cfg.history(timespan, buffer),
-            Self::Heater(cfg) => cfg.history(timespan, buffer),
-            Self::Pv(cfg) => cfg.history(timespan, buffer),
-            Self::BaseLoad(cfg) => cfg.history(timespan, buffer),
-        }
-    }
-
     pub fn resolve_request_target(
         &self,
         state: &AssetState,
@@ -356,47 +415,5 @@ pub trait Asset: Send + Sync {
             });
         }
         Trajectory { points }
-    }
-}
-
-// ─── Shared history() helper ─────────────────────────────────────────────────
-
-/// Slice the ring buffer to [now − timespan, now] and return a TimeSeries.
-pub fn history_from_buffer(
-    timespan: Duration,
-    history: &AssetHistoryBuffer,
-    interpolation: Interpolation,
-) -> TimeSeries {
-    if timespan <= Duration::zero() {
-        return TimeSeries::empty(interpolation);
-    }
-    let now = Utc::now();
-    let window_start = now - timespan;
-
-    let points = history.to_timeline(Some((window_start, now)));
-    let mut samples: Vec<(DateTime<Utc>, f64)> = points
-        .iter()
-        .filter_map(|p| {
-            let v = p.values.get("power_kw").copied()?;
-            if v.is_nan() {
-                None
-            } else {
-                Some((p.ts, v))
-            }
-        })
-        .collect();
-
-    if samples.is_empty() {
-        return TimeSeries::empty(interpolation);
-    }
-
-    if samples[0].0 > window_start + Duration::milliseconds(500) {
-        let boundary_value = samples[0].1;
-        samples.insert(0, (window_start, boundary_value));
-    }
-
-    TimeSeries {
-        samples,
-        interpolation,
     }
 }

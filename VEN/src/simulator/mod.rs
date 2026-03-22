@@ -13,10 +13,9 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::assets::{
-    AssetConfig, AssetState, BaseLoad, Battery, BatteryState, EvCharger, EvState, Heater,
-    PvInverter,
+    AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, Battery, BatteryState, EvCharger,
+    EvState, Heater, PvInverter,
 };
-use crate::controller::trace::AssetHistoryBuffer;
 use crate::models::SensorSnapshot;
 use crate::profile::{AssetProfile, BaseLoadConfig, Profile};
 use crate::state::UserOverrides;

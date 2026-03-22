@@ -7,6 +7,8 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use crate::simulator::SimState;
+
 use crate::AppCtx;
 
 #[derive(Deserialize)]
@@ -105,18 +107,14 @@ pub async fn get_timeline(
     let (history_grid, future_grid) =
         compute_uniform_grid(window_start, window_end, now, resolution_s);
 
-    let ct = ctx.state.controller_trace().await;
     let plan = ctx.state.active_plan().await;
-
-    let known_assets: HashSet<String> = {
-        let sim = ctx.sim.lock().await;
-        sim.assets.iter().map(|e| e.id.clone()).collect()
-    };
+    let sim_guard = ctx.sim.lock().await;
+    let known_assets: HashSet<String> = sim_guard.assets.iter().map(|e| e.id.clone()).collect();
 
     match build_grid_aligned_array(
         &asset_id,
         &known_assets,
-        &ct.asset_history,
+        &*sim_guard,
         plan.as_ref(),
         now,
         hours_back,
@@ -139,7 +137,7 @@ pub async fn get_timeline(
 pub fn build_grid_aligned_array(
     asset_id: &str,
     known_assets: &std::collections::HashSet<String>,
-    history: &HashMap<String, crate::controller::trace::AssetHistoryBuffer>,
+    sim: &SimState,
     plan: Option<&crate::entities::plan::Plan>,
     now: DateTime<Utc>,
     hours_back: f64,
@@ -155,7 +153,7 @@ pub fn build_grid_aligned_array(
     let raw = build_asset_timeline(
         asset_id,
         known_assets,
-        history,
+        sim,
         plan,
         now,
         TimeWindow {
@@ -173,7 +171,7 @@ pub fn build_grid_aligned_array(
     let fut_resampled = resample_to_grid(&raw_future, future_grid, resolution_s);
 
     // Build now-point.
-    let now_point = build_now_point(asset_id, now, history);
+    let now_point = build_now_point(asset_id, now, sim);
 
     // Concatenate: history_grid + now_point + future_grid.
     let mut out = serialize_grid_timeline(history_grid, &hist_resampled);
@@ -203,13 +201,9 @@ pub async fn get_timeline_all(
     let (history_grid, future_grid) =
         compute_uniform_grid(window_start, window_end, now, resolution_s);
 
-    let ct = ctx.state.controller_trace().await;
     let plan = ctx.state.active_plan().await;
-
-    let known_assets: HashSet<String> = {
-        let sim = ctx.sim.lock().await;
-        sim.assets.iter().map(|e| e.id.clone()).collect()
-    };
+    let sim_guard = ctx.sim.lock().await;
+    let known_assets: HashSet<String> = sim_guard.assets.iter().map(|e| e.id.clone()).collect();
 
     let mut result: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
 
@@ -218,7 +212,7 @@ pub async fn get_timeline_all(
         if let Some(arr) = build_grid_aligned_array(
             asset_id,
             &known_assets,
-            &ct.asset_history,
+            &*sim_guard,
             plan.as_ref(),
             now,
             hours_back,
@@ -235,7 +229,7 @@ pub async fn get_timeline_all(
     if let Some(arr) = build_grid_aligned_array(
         "grid",
         &known_assets,
-        &ct.asset_history,
+        &*sim_guard,
         plan.as_ref(),
         now,
         hours_back,

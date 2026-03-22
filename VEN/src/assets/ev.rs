@@ -7,7 +7,7 @@ use super::{
     EnergyState,
 };
 use crate::common::{Interpolation, TimeSeries};
-use crate::controller::trace::AssetHistoryBuffer;
+
 use crate::profile::EvConfig;
 
 /// EV Charger config. Positive = charge (import), negative = V2G discharge (export).
@@ -189,10 +189,6 @@ impl EvCharger {
             samples: vec![(now, power), (now + timespan, power)],
             interpolation: Interpolation::Step,
         }
-    }
-
-    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> TimeSeries {
-        super::history_from_buffer(timespan, history, Interpolation::Step)
     }
 
     pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {

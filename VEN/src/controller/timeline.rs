@@ -10,8 +10,9 @@
 use chrono::{DateTime, Duration, Utc};
 use std::collections::{HashMap, HashSet};
 
-use crate::controller::trace::{AssetHistoryBuffer, AssetTimelinePoint};
+use crate::controller::trace::AssetTimelinePoint;
 use crate::entities::plan::Plan;
+use crate::simulator::SimState;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Uniform grid resampling (RF-05c)
@@ -183,27 +184,16 @@ fn locf_weighted_mean(
 
 /// Build the now-point for an asset: instantaneous values at exact `now`.
 ///
-/// Uses the most recent row from the history buffer. Returns an all-NaN point
-/// if no history exists (the caller should still include it for array alignment).
-pub fn build_now_point(
-    asset_id: &str,
-    now: DateTime<Utc>,
-    history: &HashMap<String, AssetHistoryBuffer>,
-) -> AssetTimelinePoint {
-    if let Some(buf) = history.get(asset_id) {
-        let all = buf.to_timeline(None);
-        if let Some(last) = all.last() {
-            // Use the last row's values at the exact `now` timestamp.
-            let values: HashMap<String, f64> = last
-                .values
-                .iter()
-                .filter(|(_, v)| !v.is_nan())
-                .map(|(k, v)| (k.clone(), *v))
-                .collect();
+/// Uses the most recent `HistoryPoint` from the per-asset ring buffer.
+/// Returns an empty-values point if no history exists.
+pub fn build_now_point(asset_id: &str, now: DateTime<Utc>, sim: &SimState) -> AssetTimelinePoint {
+    if let Some((entry, cfg)) = sim.find_asset(asset_id) {
+        if let Some(last) = entry.history.latest() {
+            let mut values = cfg.state_values(&last.state);
+            values.insert("power_kw".into(), last.power_kw);
             return AssetTimelinePoint { ts: now, values };
         }
     }
-    // No history: return empty values (will serialize as {}).
     AssetTimelinePoint {
         ts: now,
         values: HashMap::new(),
@@ -227,7 +217,7 @@ pub struct TimeWindow {
 pub fn build_asset_timeline(
     asset_id: &str,
     known_assets: &HashSet<String>,
-    history: &HashMap<String, AssetHistoryBuffer>,
+    sim: &SimState,
     plan: Option<&Plan>,
     now: DateTime<Utc>,
     window: TimeWindow,
@@ -245,20 +235,24 @@ pub fn build_asset_timeline(
     let past_start = now - Duration::milliseconds((hours_back * 3_600_000.0) as i64);
     let future_end = now + Duration::milliseconds((hours_forward * 3_600_000.0) as i64);
 
-    // ── Past: from history buffer ──────────────────────────────────────────────
+    // ── Past: from per-asset history ring buffer ───────────────────────────────
 
-    let mut points: Vec<AssetTimelinePoint> = history
-        .get(asset_id)
-        .map(|buf| {
-            buf.to_timeline(Some((past_start, now)))
-                .into_iter()
-                .filter(|p| {
-                    // Exclude rows that are entirely NaN (no data recorded yet).
-                    p.values.values().any(|v| !v.is_nan())
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut points: Vec<AssetTimelinePoint> = if let Some((entry, cfg)) = sim.find_asset(asset_id) {
+        let back_window = Duration::milliseconds((hours_back * 3_600_000.0) as i64);
+        entry
+            .history
+            .slice(back_window, now)
+            .into_iter()
+            .filter(|p| p.ts >= past_start)
+            .map(|p| {
+                let mut values = cfg.state_values(&p.state);
+                values.insert("power_kw".into(), p.power_kw);
+                AssetTimelinePoint { ts: p.ts, values }
+            })
+            .collect()
+    } else {
+        vec![]
+    };
 
     // ── Future: from plan slots ────────────────────────────────────────────────
 
@@ -319,12 +313,17 @@ pub fn build_asset_timeline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::controller::trace::AssetHistoryBuffer;
+    use crate::assets::{
+        AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, BaseLoadState, EvCharger, EvState,
+        HistoryPoint,
+    };
     use crate::entities::asset::PlanTrigger;
     use crate::entities::plan::{
         FirmSummary, FlexibleSummary, PacketAllocation, Plan, PlanTimeSlot, PlanningHorizon,
         SlotType,
     };
+    use crate::simulator::energy::EnergyCounter;
+    use crate::simulator::{AssetEntry, GridMeter, SimState};
     use chrono::Utc;
     use uuid::Uuid;
 
@@ -336,14 +335,82 @@ mod tests {
         ids.iter().map(|s| s.to_string()).collect()
     }
 
-    fn make_history(asset_id: &str, rows: &[(i64, f64)]) -> HashMap<String, AssetHistoryBuffer> {
-        let mut hist = HashMap::new();
-        let mut buf = AssetHistoryBuffer::new(3600);
+    /// Create a BaseLoad AssetEntry + AssetConfig with history rows `(offset_s, power_kw)`.
+    fn make_base_entry(id: &str, rows: &[(i64, f64)]) -> (AssetEntry, AssetConfig) {
+        let cfg = AssetConfig::BaseLoad(BaseLoad { baseline_kw: 0.0 });
+        let mut entry = AssetEntry {
+            id: id.to_string(),
+            state: AssetState::BaseLoad(BaseLoadState {
+                actual_power_kw: 0.0,
+            }),
+            setpoint_kw: 0.0,
+            last_power_kw: 0.0,
+            energy: EnergyCounter {
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+            },
+            history: AssetHistoryBuffer::new(3600),
+        };
         for (offset, power) in rows {
-            buf.push(ts(*offset), [("power_kw".to_string(), *power)].into());
+            entry.history.push(HistoryPoint {
+                ts: ts(*offset),
+                power_kw: *power,
+                state: AssetState::BaseLoad(BaseLoadState {
+                    actual_power_kw: *power,
+                }),
+            });
         }
-        hist.insert(asset_id.to_string(), buf);
-        hist
+        (entry, cfg)
+    }
+
+    /// Create an EV AssetEntry + AssetConfig with history rows `(offset_s, power_kw, soc_pct)`.
+    fn make_ev_entry(id: &str, rows: &[(i64, f64, f64)]) -> (AssetEntry, AssetConfig) {
+        let cfg = AssetConfig::Ev(EvCharger {
+            max_charge_kw: 11.0,
+            max_discharge_kw: 0.0,
+            battery_kwh: 60.0,
+            soc_target: 0.8,
+            default_charge_kw: 7.4,
+            min_soc: 0.1,
+        });
+        let mut entry = AssetEntry {
+            id: id.to_string(),
+            state: AssetState::Ev(EvState {
+                soc_pct: 0.5,
+                plugged: true,
+                actual_power_kw: 0.0,
+            }),
+            setpoint_kw: 0.0,
+            last_power_kw: 0.0,
+            energy: EnergyCounter {
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+            },
+            history: AssetHistoryBuffer::new(3600),
+        };
+        for (offset, power, soc) in rows {
+            entry.history.push(HistoryPoint {
+                ts: ts(*offset),
+                power_kw: *power,
+                state: AssetState::Ev(EvState {
+                    soc_pct: *soc,
+                    plugged: true,
+                    actual_power_kw: *power,
+                }),
+            });
+        }
+        (entry, cfg)
+    }
+
+    /// Build a SimState from (AssetEntry, AssetConfig) pairs.
+    fn make_sim(entries: Vec<(AssetEntry, AssetConfig)>) -> SimState {
+        let (assets, configs): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
+        SimState {
+            asset_configs: configs,
+            assets,
+            grid: GridMeter::default(),
+            last_tick: DateTime::from_timestamp(0, 0).unwrap(),
+        }
     }
 
     fn empty_plan(now: DateTime<Utc>) -> Plan {
@@ -416,12 +483,12 @@ mod tests {
     #[test]
     fn unknown_asset_returns_none() {
         let known = make_known(&["ev"]);
-        let history = HashMap::new();
+        let sim = make_sim(vec![]);
         let now = Utc::now();
         let result = build_asset_timeline(
             "xyz",
             &known,
-            &history,
+            &sim,
             None,
             now,
             TimeWindow {
@@ -437,11 +504,14 @@ mod tests {
         let now = ts(100);
         let known = make_known(&["ev"]);
         // 3 rows: ts(0), ts(50), ts(100) — all within 1h back from ts(100)
-        let history = make_history("ev", &[(0, 1.0), (50, 2.0), (100, 3.0)]);
+        let sim = make_sim(vec![make_base_entry(
+            "ev",
+            &[(0, 1.0), (50, 2.0), (100, 3.0)],
+        )]);
         let result = build_asset_timeline(
             "ev",
             &known,
-            &history,
+            &sim,
             None,
             now,
             TimeWindow {
@@ -459,14 +529,14 @@ mod tests {
     fn future_only_window_returns_plan_points() {
         let now = ts(0);
         let known = make_known(&["ev"]);
-        let history = HashMap::new();
+        let sim = make_sim(vec![]);
         let mut plan = empty_plan(now);
         // Slot starting 60s from now with EV allocation
         plan.firm_slots.push(make_slot(60, "ev", 3.5, now));
         let result = build_asset_timeline(
             "ev",
             &known,
-            &history,
+            &sim,
             Some(&plan),
             now,
             TimeWindow {
@@ -487,13 +557,13 @@ mod tests {
         let now = ts(3600); // 1 hour into epoch
         let known = make_known(&["ev"]);
         // 2 past rows within 1h back
-        let history = make_history("ev", &[(0, 1.0), (1800, 2.0)]);
+        let sim = make_sim(vec![make_base_entry("ev", &[(0, 1.0), (1800, 2.0)])]);
         let mut plan = empty_plan(now);
         plan.firm_slots.push(make_slot(60, "ev", 3.0, now));
         let result = build_asset_timeline(
             "ev",
             &known,
-            &history,
+            &sim,
             Some(&plan),
             now,
             TimeWindow {
@@ -514,7 +584,7 @@ mod tests {
     fn grid_asset_returns_net_power_and_tariff_keys() {
         let now = ts(0);
         let known = make_known(&["ev"]);
-        let history = HashMap::new();
+        let sim = make_sim(vec![]);
         let mut plan = empty_plan(now);
         // Grid slot: net_import_kw = 2.0
         let mut slot = make_slot(60, "", 0.0, now);
@@ -527,7 +597,7 @@ mod tests {
         let result = build_asset_timeline(
             "grid",
             &known,
-            &history,
+            &sim,
             Some(&plan),
             now,
             TimeWindow {
@@ -546,14 +616,14 @@ mod tests {
     fn slot_without_asset_allocation_emits_zero_kw() {
         let now = ts(0);
         let known = make_known(&["ev", "battery"]);
-        let history = HashMap::new();
+        let sim = make_sim(vec![]);
         let mut plan = empty_plan(now);
         // Slot only has battery allocation, no EV allocation
         plan.firm_slots.push(make_slot(60, "battery", 2.0, now));
         let result = build_asset_timeline(
             "ev",
             &known,
-            &history,
+            &sim,
             Some(&plan),
             now,
             TimeWindow {
@@ -572,14 +642,14 @@ mod tests {
     fn result_is_sorted_ascending() {
         let now = ts(3600);
         let known = make_known(&["ev"]);
-        let history = make_history("ev", &[(1800, 1.0), (3600, 2.0)]);
+        let sim = make_sim(vec![make_base_entry("ev", &[(1800, 1.0), (3600, 2.0)])]);
         let mut plan = empty_plan(now);
         plan.firm_slots.push(make_slot(300, "ev", 3.0, now));
         plan.firm_slots.push(make_slot(600, "ev", 3.5, now));
         let result = build_asset_timeline(
             "ev",
             &known,
-            &history,
+            &sim,
             Some(&plan),
             now,
             TimeWindow {
@@ -730,19 +800,9 @@ mod tests {
     #[test]
     fn build_now_point_uses_last_history_row() {
         let now = ts(100);
-        let mut hist = HashMap::new();
-        let mut buf = AssetHistoryBuffer::new(100);
-        buf.push(
-            ts(50),
-            [("power_kw".into(), 1.0), ("soc".into(), 0.5)].into(),
-        );
-        buf.push(
-            ts(99),
-            [("power_kw".into(), 2.0), ("soc".into(), 0.6)].into(),
-        );
-        hist.insert("ev".to_string(), buf);
+        let sim = make_sim(vec![make_ev_entry("ev", &[(50, 1.0, 0.5), (99, 2.0, 0.6)])]);
 
-        let np = build_now_point("ev", now, &hist);
+        let np = build_now_point("ev", now, &sim);
         assert_eq!(np.ts, now);
         assert!((np.values["power_kw"] - 2.0).abs() < 1e-9);
         assert!((np.values["soc"] - 0.6).abs() < 1e-9);
@@ -751,8 +811,8 @@ mod tests {
     #[test]
     fn build_now_point_empty_history() {
         let now = ts(100);
-        let hist: HashMap<String, AssetHistoryBuffer> = HashMap::new();
-        let np = build_now_point("ev", now, &hist);
+        let sim = make_sim(vec![]);
+        let np = build_now_point("ev", now, &sim);
         assert_eq!(np.ts, now);
         assert!(np.values.is_empty());
     }
