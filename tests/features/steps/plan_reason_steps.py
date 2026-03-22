@@ -9,6 +9,30 @@ from features.helpers.wait import poll_until
 
 # ── When steps ────────────────────────────────────────────────────────────────
 
+@when('I wait for a "{kind}" PlanStep for asset "{asset_id}"')
+def step_wait_for_reason_kind(context, kind, asset_id):
+    def fetch():
+        resp = ven_get("/plan")
+        if not resp.ok:
+            return None
+        body = resp.json()
+        if not isinstance(body, dict):
+            return None
+        matching = [
+            s for s in body.get("steps", [])
+            if s.get("asset_id") == asset_id and s.get("reason", {}).get("kind") == kind
+        ]
+        return matching if matching else None
+
+    context.last_matching_steps = poll_until(
+        fetch,
+        lambda x: x is not None,
+        timeout=90,
+        description=f"VEN /plan has a '{kind}' step for asset '{asset_id}'",
+    )
+    context.last_checked_asset = asset_id
+
+
 @when('I wait for the VEN /plan to have steps for asset "{asset_id}"')
 def step_wait_for_steps(context, asset_id):
     def fetch():
