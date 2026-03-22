@@ -10,7 +10,7 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
   Scenario: Battery charges when tariff is below median
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
-    And I create a 4-hour PRICE event at 0.05 EUR/kWh for the saved program
+    And I create a 1-hour PRICE event at 0.05 EUR/kWh for the saved program
     When I wait for the VEN /plan to have steps for asset "battery"
     Then at least one PlanStep for asset "battery" has reason kind "CHEAP_TARIFF"
     And that PlanStep has setpoint_kw greater than 0.0
@@ -19,7 +19,7 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
   Scenario: Battery discharges when tariff is above median
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
-    And I create a 4-hour PRICE event at 0.40 EUR/kWh for the saved program
+    And I create a 1-hour PRICE event at 0.40 EUR/kWh for the saved program
     When I wait for the VEN /plan to have steps for asset "battery"
     Then at least one PlanStep for asset "battery" has reason kind "EXPENSIVE_TARIFF"
     And that PlanStep has setpoint_kw less than 0.0
@@ -39,7 +39,7 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
   # ── Scenario 5: GET /plan?summary omits the steps array ──────────────────
   Scenario: GET /plan?summary returns plan without steps
     When I wait for the VEN /plan endpoint to return a plan
-    And I GET "/plan?summary" from the VEN
+    And I request the VEN plan summary
     Then the response status is 200
-    And the response body has field "id"
+    And the response JSON has field "id"
     And the response body has an empty "steps" array

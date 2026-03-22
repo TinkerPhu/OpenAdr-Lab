@@ -32,9 +32,15 @@ def step_wait_for_steps(context, asset_id):
     context.last_checked_asset = asset_id
 
 
+@when("I request the VEN plan summary")
+def step_request_plan_summary(context):
+    context.last_response = ven_get("/plan?summary")
+    context.last_response_json = context.last_response.json()
+
+
 # ── Given steps ───────────────────────────────────────────────────────────────
 
-@given("I create a 4-hour PRICE event at {price:f} EUR/kWh for the saved program")
+@given("I create a 1-hour PRICE event at {price:f} EUR/kWh for the saved program")
 def step_create_price_event(context, price):
     now = datetime.now(timezone.utc)
     intervals = [
@@ -46,7 +52,7 @@ def step_create_price_event(context, price):
             },
             "payloads": [{"type": "PRICE", "values": [price]}],
         }
-        for i in range(4)
+        for i in range(1)
     ]
     r = vtn_post("/events", context.vtn_token, json={
         "programID": context.saved_program_id,
@@ -70,6 +76,7 @@ def step_post_ev_packet(context, soc, power, hours):
         "asset_id": "ev",
         "target_soc": soc,
         "desired_power_kw": power,
+        "target_energy_kwh": power * hours * 3.0,
         "latest_end": latest_end,
     })
     r.raise_for_status()

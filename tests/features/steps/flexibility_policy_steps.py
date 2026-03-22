@@ -1,13 +1,13 @@
 """
 Step definitions for phase_c_flexibility_policy.feature.
 
-The policy VEN runs with policy_test.yaml (default_reserve up_kw=3.0).
-A VTN IMPORT_CAPACITY_LIMIT event sets a finite grid cap (e.g. 10.0 kW).
-The planner reduces it by site_import_reduction_kw = 3.0 kW.
+The policy VEN runs with policy_test.yaml (default_reserve_up_kw=3.0).
+Phase D: reservations are recorded in PlanStep.reserved_up_kw (summed over all
+active reservations at each timestep) rather than reducing slot.import_cap_kw.
 
-Layer 1 (CP3): import_cap_kw = 10.0 - 3.0 = 7.0 kW on all firm slots.
+Layer 1 (CP3): reserved_up_kw=3.0 on all steps (policy default reserve).
 Layer 3 (CP4): future SIMPLE event with value 5.0 kW →
-  import_cap_kw = 10.0 - 3.0 - 5.0 = 2.0 kW for slots inside the event window.
+  reserved_up_kw=8.0 (3.0+5.0) for steps inside the event window.
 """
 import os
 import time
@@ -57,48 +57,42 @@ def step_create_capacity_limit_event(context, kw):
     context.uc_events["policy-cap"] = event
 
 
-@when("I wait for the policy VEN plan to have firm slots with import_cap_kw at most {cap:f} kW")
-def step_wait_policy_plan_cap(context, cap):
-    """Poll policy VEN /plan until all firm slots reflect the reduced cap."""
+@when("I wait for the policy VEN plan steps to have reserved_up_kw at least {min_kw:f} kW")
+def step_wait_policy_plan_min_reserved(context, min_kw):
+    """Poll policy VEN /plan until all steps show reserved_up_kw >= min_kw."""
     deadline = time.time() + _PLAN_TIMEOUT_S
     while time.time() < deadline:
         r = _policy_get("/plan")
         if r.status_code == 200:
             plan = r.json()
-            if plan and plan.get("firm_slots"):
-                all_ok = all(
-                    slot.get("import_cap_kw", float("inf")) <= cap + 0.1
-                    for slot in plan["firm_slots"]
-                )
-                if all_ok:
-                    context.policy_firm_slots = plan["firm_slots"]
-                    return
+            steps = plan.get("steps", [])
+            if steps and all(s.get("reserved_up_kw", 0.0) >= min_kw - 0.1 for s in steps):
+                context.policy_plan_steps = steps
+                return
         time.sleep(1)
-    # Capture last seen cap for diagnostic
-    last_cap = None
+    last_val = None
     r = _policy_get("/plan")
     if r.status_code == 200:
-        plan = r.json()
-        slots = plan.get("firm_slots", [])
-        if slots:
-            last_cap = slots[0].get("import_cap_kw")
+        steps = r.json().get("steps", [])
+        if steps:
+            last_val = steps[0].get("reserved_up_kw")
     raise AssertionError(
-        f"policy VEN firm slots never showed import_cap_kw ≤ {cap} kW "
-        f"after {_PLAN_TIMEOUT_S}s (last seen: {last_cap})"
+        f"policy VEN steps never showed reserved_up_kw >= {min_kw} kW "
+        f"after {_PLAN_TIMEOUT_S}s (last seen: {last_val})"
     )
 
 
-@then("every policy VEN firm slot has import_cap_kw at most {cap:f} kW")
-def step_every_policy_slot_cap(context, cap):
-    slots = getattr(context, "policy_firm_slots", [])
-    assert slots, "no firm slots found — When step did not complete"
+@then("every policy VEN plan step has reserved_up_kw at least {min_kw:f} kW")
+def step_every_policy_step_reserved(context, min_kw):
+    steps = getattr(context, "policy_plan_steps", [])
+    assert steps, "no plan steps found — When step did not complete"
     violations = [
-        (s.get("slot_index"), s.get("import_cap_kw"))
-        for s in slots
-        if s.get("import_cap_kw", float("inf")) > cap + 0.1
+        (s.get("asset_id"), s.get("ts"), s.get("reserved_up_kw"))
+        for s in steps
+        if s.get("reserved_up_kw", 0.0) < min_kw - 0.1
     ]
     assert not violations, (
-        f"firm slots exceeded {cap} kW import_cap_kw: {violations}"
+        f"plan steps with reserved_up_kw < {min_kw} kW: {violations[:5]}"
     )
 
 
@@ -176,34 +170,34 @@ def step_expired_simple_event(context, kw, hours):
     context.uc_events["policy-expired-simple"] = r.json()
 
 
-@when("I wait for the policy VEN plan to have at least one firm slot with import_cap_kw at most {cap:f} kW")
-def step_wait_at_least_one_slot_capped(context, cap):
-    """Poll GET /plan until at least one firm slot has import_cap_kw <= cap."""
+@when("I wait for the policy VEN plan steps to have at least one with reserved_up_kw at least {min_kw:f} kW")
+def step_wait_at_least_one_step_reserved(context, min_kw):
+    """Poll GET /plan until at least one step has reserved_up_kw >= min_kw."""
     deadline = time.time() + _PLAN_TIMEOUT_S
     while time.time() < deadline:
         r = _policy_get("/plan")
         if r.status_code == 200:
             plan = r.json()
-            slots = plan.get("firm_slots", [])
-            matching = [s for s in slots if s.get("import_cap_kw", float("inf")) <= cap + 0.1]
+            steps = plan.get("steps", [])
+            matching = [s for s in steps if s.get("reserved_up_kw", 0.0) >= min_kw - 0.1]
             if matching:
-                context.policy_matching_slots = matching
+                context.policy_matching_steps = matching
                 return
         time.sleep(1)
-    last_caps = []
+    last_vals = []
     r = _policy_get("/plan")
     if r.status_code == 200:
-        last_caps = [s.get("import_cap_kw") for s in r.json().get("firm_slots", [])]
+        last_vals = [s.get("reserved_up_kw") for s in r.json().get("steps", [])][:5]
     raise AssertionError(
-        f"Timeout: no firm slot with import_cap_kw <= {cap} kW after {_PLAN_TIMEOUT_S}s "
-        f"(sample caps: {last_caps[:5]})"
+        f"Timeout: no step with reserved_up_kw >= {min_kw} kW after {_PLAN_TIMEOUT_S}s "
+        f"(sample reserved_up_kw: {last_vals})"
     )
 
 
-@then("at least one policy VEN firm slot has import_cap_kw at most {cap:f} kW")
-def step_at_least_one_slot_capped(context, cap):
-    slots = getattr(context, "policy_matching_slots", [])
-    assert slots, f"Expected at least one firm slot with import_cap_kw <= {cap} kW, found none"
-    for s in slots:
-        actual = s.get("import_cap_kw", float("inf"))
-        assert actual <= cap + 0.1, f"Slot import_cap_kw={actual} exceeds {cap + 0.1} kW"
+@then("at least one policy VEN plan step has reserved_up_kw at least {min_kw:f} kW")
+def step_at_least_one_step_reserved(context, min_kw):
+    steps = getattr(context, "policy_matching_steps", [])
+    assert steps, f"Expected at least one step with reserved_up_kw >= {min_kw} kW, found none"
+    for s in steps:
+        actual = s.get("reserved_up_kw", 0.0)
+        assert actual >= min_kw - 0.1, f"Step reserved_up_kw={actual} < {min_kw - 0.1} kW"
