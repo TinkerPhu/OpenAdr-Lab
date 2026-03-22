@@ -4,6 +4,7 @@
 /// Phase 6 (penalty check) is deferred to Stage 4.
 use crate::common::{Aggregation, TimeSeries};
 use crate::entities::asset::{ComfortRate, PlanTrigger};
+use crate::controller::reservation::ReservationLayer;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
 use crate::entities::plan::{
@@ -29,6 +30,7 @@ pub fn run_planner(
     tariffs: &TariffTimeSeries,
     packets: &[EnergyPacket],
     capacity: &OadrCapacityState,
+    reservations: &ReservationLayer,
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
@@ -56,6 +58,7 @@ pub fn run_planner(
     let (mut firm_slots, flexible_slots) = build_grid(
         tariffs,
         capacity,
+        reservations,
         profile,
         now,
         step_s,
@@ -128,6 +131,7 @@ pub fn run_planner(
 fn build_grid(
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
+    reservations: &ReservationLayer,
     profile: &Profile,
     now: DateTime<Utc>,
     step_s: u64,
@@ -214,6 +218,9 @@ fn build_grid(
             SlotType::Flexible
         };
 
+        let effective_import_cap_kw =
+            (import_cap - reservations.site_import_reduction_kw(start)).max(0.0);
+
         let slot = PlanTimeSlot {
             slot_index: i,
             start,
@@ -224,7 +231,7 @@ fn build_grid(
             co2_g_kwh: co2,
             grid_effective_cost: grid_eff,
             rate_estimated: rates_empty,
-            import_cap_kw: import_cap,
+            import_cap_kw: effective_import_cap_kw,
             export_cap_kw: export_cap,
             baseline_kw,
             pv_forecast_kw: pv_kw,
@@ -761,6 +768,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
+            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
@@ -788,6 +796,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
+            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
@@ -806,6 +815,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
+            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
@@ -837,6 +847,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
+            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
@@ -875,6 +886,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
+            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
@@ -899,6 +911,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
+            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
@@ -930,6 +943,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
+            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,

@@ -125,4 +125,15 @@ impl ReservationLayer {
             max_export_kw: (phys_cap.max_export_kw + res.reserved_down_kw).min(0.0),
         }
     }
+
+    /// Sum of all site-level Up reservations active at `t` (kW).
+    /// Used by `build_grid()` to reduce `import_cap_kw` per planning slot.
+    pub fn site_import_reduction_kw(&self, t: DateTime<Utc>) -> f64 {
+        self.reservations
+            .iter()
+            .filter(|r| r.asset_id.is_none() && r.direction == FlexDirection::Up)
+            .filter(|r| r.window.0 <= t && t < r.window.1)
+            .map(|r| r.kw)
+            .sum()
+    }
 }
