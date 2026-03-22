@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::entities::asset::PlanTrigger;
+use crate::assets::{AssetCapability, AssetState};
+use crate::entities::asset::{PlanTrigger, UserRequestMode};
 use crate::entities::energy_packet::EnergyPacket;
 
 /// Whether a plan time slot is firm (near-horizon, dispatched) or flexible (far-horizon) (§6.2.1).
@@ -178,6 +179,8 @@ pub struct Plan {
     /// Snapshot of all packets considered at plan time
     pub packets: Vec<EnergyPacket>,
     pub warnings: Vec<PlanWarning>,
+    /// Full per-(ts × asset) audit trail. Populated by Phase D CP2.
+    pub steps: Vec<PlanStep>,
 }
 
 impl Plan {
@@ -190,6 +193,78 @@ impl Plan {
     pub fn current_slot(&self, now: DateTime<Utc>) -> Option<&PlanTimeSlot> {
         self.all_slots().find(|s| s.start <= now && now < s.end)
     }
+}
+
+// ─── Phase D types ────────────────────────────────────────────────────────────
+
+/// Source that created a reservation (moved from controller/reservation.rs to
+/// avoid entities → controller circular dependency).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ReservationSource {
+    /// VTN SIMPLE-type FIRM event: "reduce consumption by kw kW during window."
+    VtnFirmEvent { event_id: String },
+    /// FlexibilityPolicy scheduled window (Phase C).
+    PolicySchedule { policy_id: String },
+    /// FlexibilityPolicy default reserve (Phase C).
+    PolicyDefault,
+    /// User request (Phase F).
+    UserRequest { request_id: Uuid },
+}
+
+/// Which comfort bound was violated to produce a setpoint.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ComfortBoundType {
+    MinTemperature,
+    MaxTemperature,
+    MinSoc,
+    MaxSoc,
+}
+
+/// The rule that fired to produce a PlanStep's setpoint.
+/// Emitted at decision time — never reconstructed after the fact.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PlanReason {
+    FirmObligation { source: ReservationSource, required_kw: f64 },
+    CheapTariff { tariff_eur_per_kwh: f64, threshold_eur_per_kwh: f64 },
+    ExpensiveTariff { tariff_eur_per_kwh: f64, threshold_eur_per_kwh: f64 },
+    GridImportLimit { limit_kw: f64 },
+    GridExportLimit { limit_kw: f64 },
+    SocCeiling { soc_pct: f64 },
+    SocFloor { soc_pct: f64 },
+    ComfortBound { bound_type: ComfortBoundType },
+    UserOverride { request_id: Uuid, mode: UserRequestMode },
+    PolicyReserve { policy_id: String },
+    OpportunityMissed { reason: String },
+    Idle,
+}
+
+/// One planning decision for one asset at one time step.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanStep {
+    pub ts: DateTime<Utc>,
+    pub asset_id: String,
+    pub state_before: AssetState,
+    pub capability: AssetCapability,
+    pub reserved_up_kw: f64,
+    pub reserved_down_kw: f64,
+    pub avail_max_export_kw: f64,
+    pub avail_max_import_kw: f64,
+    pub setpoint_kw: f64,
+    pub actual_power_kw: f64,
+    pub reason: PlanReason,
+}
+
+/// Pre-computed per asset before the planning loop.
+/// Internal to the planner — not serialized.
+#[derive(Debug, Clone)]
+pub struct LookaheadContext {
+    pub capability_trajectory: Vec<(DateTime<Utc>, AssetCapability)>,
+    pub tariff_min_ahead_eur_per_kwh: f64,
+    pub tariff_max_ahead_eur_per_kwh: f64,
+    pub ceiling_eta: Option<DateTime<Utc>>,
+    pub floor_eta: Option<DateTime<Utc>>,
 }
 
 /// Intermediate calculation cache used during planning per (packet × slot) (§2.10).

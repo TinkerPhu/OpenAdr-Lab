@@ -11,6 +11,17 @@ use crate::entities::plan::{
     FirmSummary, FlexibilityEnvelope, FlexibleSummary, PacketAllocation, Plan, PlanTimeSlot,
     PlanningHorizon, SlotType,
 };
+
+/// Running sum of already-committed setpoints at the current time step.
+/// Built incrementally as each asset is resolved. Internal to CP2 loop.
+#[derive(Debug, Clone, Default)]
+pub struct SiteContext {
+    pub planned_others_kw: f64,
+    pub import_limit_kw: f64,
+    pub export_limit_kw: f64,
+    /// PV free-run forecast at this step (≤ 0, kW).
+    pub pv_forecast_kw: f64,
+}
 use crate::entities::tariff_snapshot::TariffTimeSeries;
 use crate::profile::{BatteryConfig, Profile};
 use chrono::{DateTime, Duration, Utc};
@@ -123,6 +134,7 @@ pub fn run_planner(
         flexible_summary,
         packets: pkts,
         warnings: vec![],
+        steps: vec![],
     }
 }
 

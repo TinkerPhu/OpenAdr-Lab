@@ -1,7 +1,8 @@
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 
 use crate::assets::AssetCapability;
+
+pub use crate::entities::plan::ReservationSource;
 
 /// Direction of flexibility constraint.
 ///
@@ -11,24 +12,6 @@ use crate::assets::AssetCapability;
 pub enum FlexDirection {
     Up,
     Down,
-}
-
-/// Source that created a reservation.
-///
-/// Note: OpenADR IMPORT/EXPORT_CAPACITY_LIMIT events do NOT produce Reservation
-/// records. They are expressed through the Grid virtual asset's capability.
-/// Only SIMPLE-type FIRM demand response events use VtnFirmEvent here.
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum ReservationSource {
-    /// VTN SIMPLE-type FIRM event: "reduce consumption by kw kW during window."
-    VtnFirmEvent { event_id: String },
-    /// FlexibilityPolicy scheduled window (Phase C).
-    PolicySchedule { policy_id: String },
-    /// FlexibilityPolicy default reserve (Phase C).
-    PolicyDefault,
-    /// User request (Phase F).
-    UserRequest { request_id: Uuid },
 }
 
 /// A single capacity reservation. Time-windowed, asset-scoped or site-level.
