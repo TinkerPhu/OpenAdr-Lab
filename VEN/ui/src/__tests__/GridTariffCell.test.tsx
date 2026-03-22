@@ -174,14 +174,14 @@ describe("GridTariffCell — now line position", () => {
   });
 });
 
-describe("GridTariffCell — expanded state", () => {
+describe("GridTariffCell — expanded state via global button", () => {
   afterEach(() => {
     vi.useRealTimers();
     allTimelinesData = {};
     tariffsData = [];
   });
 
-  it("TariffChart receives hoursBack=1 and hoursForward=24 when expand button is clicked", async () => {
+  it("TariffChart receives hoursBack=1 and hoursForward=24 when global expand button is clicked", async () => {
     const user = userEvent.setup();
     const qc = makeQueryClient();
     render(
@@ -190,14 +190,14 @@ describe("GridTariffCell — expanded state", () => {
       </QueryClientProvider>
     );
 
-    await user.click(screen.getByTestId("grid-tariff-cell-extend-btn"));
+    await user.click(screen.getByTestId("global-time-range-extend-btn"));
 
     const chart = screen.getByTestId("tariff-chart");
     expect(parseFloat(chart.getAttribute("data-hours-back") ?? "-1")).toBe(1);
     expect(parseFloat(chart.getAttribute("data-hours-forward") ?? "-1")).toBe(24);
   });
 
-  it("TariffChart returns to default window when expand button is clicked again", async () => {
+  it("TariffChart returns to default window when global expand button is clicked again", async () => {
     const user = userEvent.setup();
     const qc = makeQueryClient();
     render(
@@ -206,7 +206,7 @@ describe("GridTariffCell — expanded state", () => {
       </QueryClientProvider>
     );
 
-    const btn = screen.getByTestId("grid-tariff-cell-extend-btn");
+    const btn = screen.getByTestId("global-time-range-extend-btn");
     await user.click(btn); // expand
     await user.click(btn); // collapse
 

@@ -2,8 +2,6 @@ import { useMemo } from "react";
 import { Box, Divider, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
-import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
-import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
 import type { AssetId, AssetSummary, AssetTimelinePoint, StackedAreaPoint } from "./types";
 import { ASSET_COLORS } from "./types";
 import { StackedAreaChart } from "./charts/StackedAreaChart";
@@ -54,7 +52,6 @@ interface GridAccumulatedCellProps {
   pinned: boolean;
   gridPowerKw: number;
   onTogglePin: () => void;
-  onToggleExpand: () => void;
 }
 
 export function GridAccumulatedCell({
@@ -65,7 +62,6 @@ export function GridAccumulatedCell({
   pinned,
   gridPowerKw,
   onTogglePin,
-  onToggleExpand,
 }: GridAccumulatedCellProps) {
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
   const tMin = nowMs - window.hoursBack * 3_600_000;
@@ -118,7 +114,7 @@ export function GridAccumulatedCell({
         />
       </Box>
 
-      {/* Right column: pin button on top, expand toggle below */}
+      {/* Right column: pin button */}
       <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <Tooltip title={pinned ? "Unpin" : "Pin to top"}>
           <IconButton
@@ -128,16 +124,6 @@ export function GridAccumulatedCell({
             sx={{ m: 0.5 }}
           >
             {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
-          </IconButton>
-        </Tooltip>
-        <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h planning horizon"}>
-          <IconButton
-            size="small"
-            data-testid="grid-accumulated-cell-extend-btn"
-            onClick={onToggleExpand}
-            sx={{ m: 0.5 }}
-          >
-            {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
           </IconButton>
         </Tooltip>
       </Box>

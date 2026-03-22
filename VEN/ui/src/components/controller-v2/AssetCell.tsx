@@ -3,8 +3,6 @@ import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
-import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
-import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
 import type { AssetId, AssetSummary, AssetTimelinePoint } from "./types";
 import { ASSET_COLORS } from "./types";
 import { AssetLeftSection } from "./AssetLeftSection";
@@ -30,7 +28,6 @@ interface AssetCellProps {
   pinned: boolean;
   onTogglePin: (cellId: string) => void;
   onToggleCollapse: (cellId: string, section: "left" | "right") => void;
-  onToggleExpand: (cellId: string) => void;
   onOverrideChange: (patch: Partial<UserOverrides>) => void;
 }
 
@@ -46,7 +43,6 @@ export function AssetCell({
   pinned,
   onTogglePin,
   onToggleCollapse,
-  onToggleExpand,
   onOverrideChange,
 }: AssetCellProps) {
   const cellId = `asset:${assetId}`;
@@ -120,7 +116,7 @@ export function AssetCell({
         </Box>
       </Collapse>
 
-      {/* Right column: pin button on top, expand toggle below */}
+      {/* Right column: pin button */}
       <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <Tooltip title={pinned ? "Unpin cell" : "Pin cell to top"}>
           <IconButton
@@ -130,16 +126,6 @@ export function AssetCell({
             sx={{ m: 0.5 }}
           >
             {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
-          </IconButton>
-        </Tooltip>
-        <Tooltip title={extended ? "Collapse to ±1h view" : "Expand to 24h planning horizon"}>
-          <IconButton
-            size="small"
-            data-testid={`asset-cell-${assetId}-extend-btn`}
-            onClick={() => onToggleExpand(cellId)}
-            sx={{ m: 0.5 }}
-          >
-            {extended ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
           </IconButton>
         </Tooltip>
       </Box>
