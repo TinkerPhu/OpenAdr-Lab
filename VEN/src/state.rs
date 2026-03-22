@@ -1,7 +1,7 @@
 use crate::controller::trace::ControllerTrace;
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
 use crate::entities::energy_packet::EnergyPacket;
-use crate::entities::plan::Plan;
+use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::entities::user_request::{UserRequest, UserRequestStatus};
 use crate::models::SensorSnapshot;
@@ -87,6 +87,8 @@ pub struct InnerState {
     pub asset_ledger: HashMap<String, AssetLedgerEntry>,
     #[serde(skip)]
     pub active_requests: Vec<UserRequest>,
+    #[serde(skip)]
+    pub site_envelope: Option<SiteFlexibilityEnvelope>,
 }
 
 impl AppState {
@@ -107,6 +109,7 @@ impl AppState {
                 report_obligations: vec![],
                 asset_ledger: HashMap::new(),
                 active_requests: vec![],
+                site_envelope: None,
             })),
         }
     }
@@ -305,6 +308,14 @@ impl AppState {
         self.inner.write().await.asset_ledger = ledger;
     }
 
+    pub async fn site_envelope(&self) -> Option<SiteFlexibilityEnvelope> {
+        self.inner.read().await.site_envelope.clone()
+    }
+
+    pub async fn set_site_envelope(&self, env: SiteFlexibilityEnvelope) {
+        self.inner.write().await.site_envelope = Some(env);
+    }
+
     /// Return all unfulfilled obligations whose due_at <= now.
     pub async fn due_obligations(&self, now: DateTime<Utc>) -> Vec<OadrReportObligation> {
         self.inner
@@ -345,6 +356,7 @@ impl Clone for InnerState {
             report_obligations: self.report_obligations.clone(),
             asset_ledger: self.asset_ledger.clone(),
             active_requests: self.active_requests.clone(),
+            site_envelope: self.site_envelope.clone(),
         }
     }
 }

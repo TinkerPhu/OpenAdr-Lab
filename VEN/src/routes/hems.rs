@@ -1,5 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
+    http::StatusCode,
     response::IntoResponse,
     Json,
 };
@@ -217,12 +218,13 @@ pub async fn delete_request(State(ctx): State<AppCtx>, Path(id): Path<Uuid>) -> 
     }
 }
 
-/// GET /flexibility — returns FlexibilityEnvelopes from the active plan (Stage 5).
+/// GET /flexibility — returns the live site-level flexibility envelope (Phase E).
+///
+/// Updated every dispatcher tick (~1s) and after every planner cycle.
+/// Returns 204 No Content until the first dispatcher tick completes.
 pub async fn get_flexibility(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    match ctx.state.active_plan().await {
-        Some(plan) => {
-            Json(serde_json::to_value(plan.envelopes).unwrap_or_default()).into_response()
-        }
-        None => Json(serde_json::json!([])).into_response(),
+    match ctx.state.site_envelope().await {
+        Some(env) => Json(env).into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
     }
 }
