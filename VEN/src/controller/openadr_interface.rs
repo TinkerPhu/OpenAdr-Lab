@@ -332,27 +332,29 @@ pub fn parse_firm_reservations(events: &[Value], now: DateTime<Utc>) -> Vec<Rese
                     None => continue,
                 };
 
-                // Parse window from intervalPeriod; fall back to [now, now+1d) if absent.
-                let (window_start, window_end) =
-                    if let Some(ip) = interval.get("intervalPeriod") {
-                        let start: DateTime<Utc> = match ip
-                            .get("start")
-                            .and_then(|v| v.as_str())
-                            .and_then(|s| s.parse().ok())
-                        {
-                            Some(dt) => dt,
-                            None => now,
-                        };
-                        let dur_secs = parse_iso8601_duration_secs(
-                            ip.get("duration")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("PT1H"),
-                        );
-                        let end = start + Duration::seconds(dur_secs);
-                        (start, end)
-                    } else {
-                        (now, now + Duration::days(1))
-                    };
+                // Parse window from intervalPeriod. Skip intervals without one —
+                // a FIRM reservation with no time bounds is semantically undefined
+                // and would wrongly match all slots (causing cross-feature contamination
+                // from timeless test events lingering in VEN state).
+                let ip = match interval.get("intervalPeriod") {
+                    Some(ip) => ip,
+                    None => continue,
+                };
+                let window_start: DateTime<Utc> = match ip
+                    .get("start")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                {
+                    Some(dt) => dt,
+                    None => now,
+                };
+                let dur_secs = parse_iso8601_duration_secs(
+                    ip.get("duration")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("PT1H"),
+                );
+                let window_end = window_start + Duration::seconds(dur_secs);
+                let (window_start, window_end) = (window_start, window_end);
 
                 // Skip expired or not-yet-active intervals.
                 if window_end <= now || window_start > now {
@@ -947,5 +949,25 @@ mod tests {
         let kws: Vec<f64> = result.iter().map(|r| r.kw).collect();
         assert!(kws.contains(&3.0));
         assert!(kws.contains(&7.0));
+    }
+
+    #[test]
+    fn test_parse_firm_reservations_no_interval_period_skipped() {
+        // Timeless SIMPLE events (no intervalPeriod) must be ignored — they would
+        // otherwise act as always-active reservations and cause cross-feature
+        // contamination when stale events linger in VEN state between BDD scenarios.
+        let now = Utc::now();
+        let events = json!([{
+            "id": "evt-timeless",
+            "intervals": [{
+                "payloads": [{"type": "SIMPLE", "values": [1.0]}]
+            }]
+        }]);
+        let result = parse_firm_reservations(events.as_array().unwrap(), now);
+        assert_eq!(
+            result.len(),
+            0,
+            "interval with no intervalPeriod must be skipped"
+        );
     }
 }
