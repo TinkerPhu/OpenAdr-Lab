@@ -11,18 +11,16 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a 1-hour PRICE event at 0.05 EUR/kWh for the saved program
-    When I wait for the VEN /plan to have steps for asset "battery"
-    Then at least one PlanStep for asset "battery" has reason kind "CHEAP_TARIFF"
-    And that PlanStep has setpoint_kw greater than 0.0
+    When I wait for a "CHEAP_TARIFF" PlanStep for asset "battery"
+    Then that PlanStep has setpoint_kw greater than 0.0
 
   # ── Scenario 2: Battery discharges on expensive tariff ───────────────────
   Scenario: Battery discharges when tariff is above median
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a 1-hour PRICE event at 0.40 EUR/kWh for the saved program
-    When I wait for the VEN /plan to have steps for asset "battery"
-    Then at least one PlanStep for asset "battery" has reason kind "EXPENSIVE_TARIFF"
-    And that PlanStep has setpoint_kw less than 0.0
+    When I wait for a "EXPENSIVE_TARIFF" PlanStep for asset "battery"
+    Then that PlanStep has setpoint_kw less than 0.0
 
   # ── Scenario 3: EV charges under deadline pressure ───────────────────────
   Scenario: EV charges under deadline pressure
