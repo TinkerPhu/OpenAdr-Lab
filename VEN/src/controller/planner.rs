@@ -142,6 +142,7 @@ fn build_grid(
     let import_cap = capacity.import_limit_kw.unwrap_or(f64::MAX);
     let export_cap = capacity.export_limit_kw.unwrap_or(f64::MAX);
     let baseline_kw = profile.base_load_kw();
+    tracing::warn!(import_cap = import_cap, export_cap = export_cap, "build_grid: capacity values");
     let rates_empty = tariffs.is_empty();
 
     // Pre-resample tariff series to slot grid (HashMap<epoch_sec, value>)
