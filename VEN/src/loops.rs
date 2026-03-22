@@ -497,6 +497,10 @@ pub(crate) fn spawn_planning(
             for r in controller::openadr_interface::parse_firm_reservations(&events, now) {
                 reservation_layer.insert(r);
             }
+            // Phase C — policy reservations
+            for r in profile.flexibility_policy.generate_reservations(now, now + planning_horizon) {
+                reservation_layer.insert(r);
+            }
             let plan = controller::planner::run_planner(
                 &tariff_ts,
                 &packets,

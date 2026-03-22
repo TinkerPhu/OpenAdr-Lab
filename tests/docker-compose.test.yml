@@ -122,6 +122,38 @@ services:
       - test-net
 
   # ---------------------------------------------------------------------------
+  # VEN-policy — third instance with FlexibilityPolicy for CP3 BDD scenarios
+  # ---------------------------------------------------------------------------
+  test-ven-policy:
+    build:
+      context: ../VEN
+      dockerfile: Dockerfile
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://test-vtn:3000"
+      CLIENT_ID: "ven-1"
+      CLIENT_SECRET: "ven-1"
+      VEN_NAME: "ven-1"
+      POLL_EVENTS_SECS: "2"
+      POLL_PROGRAMS_SECS: "2"
+      POLL_REPORTS_SECS: "2"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+    volumes:
+      - ../VEN/profiles/policy_test.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      test-vtn:
+        condition: service_healthy
+    networks:
+      - test-net
+
+  # ---------------------------------------------------------------------------
   # BFF — proxies VTN with dual credentials
   # ---------------------------------------------------------------------------
   test-bff:
@@ -201,6 +233,7 @@ services:
       VTN_BASE_URL: "http://test-vtn:3000"
       VEN_BASE_URL: "http://test-ven-1:8080"
       VEN2_BASE_URL: "http://test-ven-2:8080"
+      VEN_POLICY_BASE_URL: "http://test-ven-policy:8080"
       BFF_BASE_URL: "http://test-bff:8090"
       UI_BASE_URL: "http://test-ui:80"
       VEN_UI_BASE_URL: "http://test-ven-ui:80"
@@ -213,6 +246,8 @@ services:
       test-ven-1:
         condition: service_healthy
       test-ven-2:
+        condition: service_healthy
+      test-ven-policy:
         condition: service_healthy
       test-bff:
         condition: service_healthy
