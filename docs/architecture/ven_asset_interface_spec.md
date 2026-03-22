@@ -442,6 +442,9 @@ pub enum FlexDirection {
 
 #[derive(Debug, Clone)]
 pub enum ReservationSource {
+    /// VTN SIMPLE-type demand response event: "reduce consumption by kw kW."
+    /// Used only for FIRM obligations. Capacity limits (IMPORT/EXPORT_CAPACITY_LIMIT)
+    /// are NOT modelled here — see "Capacity limits" note below.
     VtnFirmEvent   { event_id: String },
     PolicySchedule { policy_id: String },
     PolicyDefault,
@@ -460,6 +463,30 @@ pub struct AssetReservation {
 pub struct ReservationLayer {
     reservations: Vec<Reservation>,
 }
+
+// ── Capacity limits — design note ────────────────────────────────────────────
+//
+// OpenADR IMPORT_CAPACITY_LIMIT and EXPORT_CAPACITY_LIMIT events do NOT produce
+// Reservation records and are NOT stored in the ReservationLayer.
+//
+// Rationale: Reservation.kw encodes a *reduction magnitude* (headroom held, ≥ 0).
+// A VTN capacity limit is an *absolute ceiling*, not a reduction amount. The delta
+// between the physical grid connection and the limit is site-specific and not
+// available in the event payload. Treating a limit value as a reduction would
+// silently produce wrong available_cap() results.
+//
+// The correct owner is the Grid virtual asset (assets/grid.rs):
+//   - Capacity limit events update GridState.import_limit_kw / export_limit_kw.
+//   - Grid.capability() returns [export_limit_kw, import_limit_kw].
+//   - The planner reads site limits from SiteContext.import_limit_kw (§3.4),
+//     populated from the Grid asset's constrained capability.
+//
+// Until the Grid virtual asset is implemented, capacity limits flow through
+// OadrCapacityState → PlanTimeSlot.import_cap_kw / .export_cap_kw (legacy path).
+//
+// The ReservationLayer handles only demand-response obligations expressible as
+// reduction magnitudes: SIMPLE FIRM events, FlexibilityPolicy reserves, UserRequests.
+// ─────────────────────────────────────────────────────────────────────────────
 
 impl ReservationLayer {
     pub fn new() -> Self;
