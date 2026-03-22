@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::IntoResponse,
     Json,
 };
@@ -28,10 +28,26 @@ pub async fn get_packets(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.active_packets().await)
 }
 
+/// Query params for GET /plan.
+#[derive(Deserialize, Default)]
+pub struct PlanQuery {
+    /// When present, return plan with steps=[] (omit the audit trail).
+    pub summary: Option<String>,
+}
+
 /// GET /plan — returns the active Plan (null until Stage 3).
-pub async fn get_plan(State(ctx): State<AppCtx>) -> impl IntoResponse {
+/// GET /plan?summary — returns the plan with steps omitted.
+pub async fn get_plan(
+    State(ctx): State<AppCtx>,
+    Query(q): Query<PlanQuery>,
+) -> impl IntoResponse {
     match ctx.state.active_plan().await {
-        Some(plan) => Json(serde_json::to_value(plan).unwrap_or_default()).into_response(),
+        Some(mut plan) => {
+            if q.summary.is_some() {
+                plan.steps = vec![];
+            }
+            Json(serde_json::to_value(plan).unwrap_or_default()).into_response()
+        }
         None => Json(serde_json::Value::Null).into_response(),
     }
 }
