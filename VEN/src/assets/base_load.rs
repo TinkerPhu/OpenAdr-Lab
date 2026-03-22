@@ -4,7 +4,6 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapabilities, AssetCapability, AssetState, ControlDescriptor};
 use crate::common::{Interpolation, TimeSeries};
-use crate::controller::trace::AssetHistoryBuffer;
 use crate::profile::BaseLoadConfig;
 
 /// Base load config. Fixed background consumption (positive = import).
@@ -98,10 +97,6 @@ impl BaseLoad {
             samples: vec![(now, self.baseline_kw), (now + timespan, self.baseline_kw)],
             interpolation: Interpolation::Step,
         }
-    }
-
-    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> TimeSeries {
-        super::history_from_buffer(timespan, history, Interpolation::Step)
     }
 
     pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {

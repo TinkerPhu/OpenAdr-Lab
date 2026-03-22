@@ -25,8 +25,8 @@ const DEFAULT_CO2_G_KWH: f64 = 300.0;
 /// Returns `(Option<PlanTrigger>, Vec<ControllerEvent>)`.
 /// The caller is responsible for pushing the returned events into the controller trace.
 ///
-/// NOTE: Asset history rows are pushed separately in the tick loop via
-/// `state.push_asset_row(...)` to avoid cloning the full ControllerTrace buffer.
+/// NOTE: Asset history rows are pushed directly into each asset's per-asset ring buffer
+/// in the tick loop (`entry.history.push(HistoryPoint { ... })`).
 pub fn record_tick(
     packets: &mut Vec<EnergyPacket>,
     ledger: &mut HashMap<String, AssetLedgerEntry>,

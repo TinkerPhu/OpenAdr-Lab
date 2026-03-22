@@ -6,7 +6,6 @@ use super::{
     Asset, AssetCapabilities, AssetCapability, AssetState, ControlDescriptor, ControlKind,
 };
 use crate::common::{Interpolation, TimeSeries};
-use crate::controller::trace::AssetHistoryBuffer;
 use crate::profile::PvConfig;
 
 /// PV Inverter config. Generates power (export = negative).
@@ -163,10 +162,6 @@ impl PvInverter {
             None => natural_kw,
         };
         -limited_kw // negative = export
-    }
-
-    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> TimeSeries {
-        super::history_from_buffer(timespan, history, Interpolation::Linear)
     }
 
     pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {

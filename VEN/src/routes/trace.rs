@@ -36,26 +36,34 @@ pub async fn get_trace_history(
     State(ctx): State<AppCtx>,
     Query(q): Query<TraceHistoryQuery>,
 ) -> impl IntoResponse {
-    let ct = ctx.state.controller_trace().await;
+    use chrono::{Duration, Utc};
     let limit = q.limit.unwrap_or(100);
-    match ct.asset_history_for(&q.asset) {
-        None => Json(Vec::<serde_json::Value>::new()).into_response(),
-        Some(buf) => {
-            let mut points = buf.to_timeline(None);
-            points.reverse();
-            points.truncate(limit);
-            let json: Vec<serde_json::Value> = points
-                .into_iter()
-                .map(|p| {
-                    let mut m = serde_json::Map::new();
-                    m.insert("ts".to_string(), serde_json::json!(p.ts));
-                    for (k, v) in p.values {
-                        m.insert(k, serde_json::json!(v));
-                    }
-                    serde_json::Value::Object(m)
-                })
-                .collect();
-            Json(json).into_response()
-        }
-    }
+    let now = Utc::now();
+    // Slice up to 24 h of history (buffer holds ~1 h at 1 s tick; 24 h is a safe ceiling).
+    let window = Duration::hours(24);
+
+    let sim = ctx.sim.lock().await;
+    let mut json: Vec<serde_json::Value> = match sim.find_asset(&q.asset) {
+        None => vec![],
+        Some((entry, cfg)) => entry
+            .history
+            .slice(window, now)
+            .into_iter()
+            .map(|p| {
+                let mut values = cfg.state_values(&p.state);
+                values.insert("power_kw".into(), p.power_kw);
+                let mut m = serde_json::Map::new();
+                m.insert("ts".to_string(), serde_json::json!(p.ts));
+                for (k, v) in values {
+                    m.insert(k, serde_json::json!(v));
+                }
+                serde_json::Value::Object(m)
+            })
+            .collect(),
+    };
+    drop(sim);
+
+    json.reverse();
+    json.truncate(limit);
+    Json(json)
 }

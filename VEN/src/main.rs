@@ -125,7 +125,12 @@ async fn main() -> anyhow::Result<()> {
         trigger_tx.clone(),
         data_dir.clone(),
     );
-    loops::spawn_obligation_check(state.clone(), vtn.clone(), cfg.ven_name.clone());
+    loops::spawn_obligation_check(
+        state.clone(),
+        sim_state.clone(),
+        vtn.clone(),
+        cfg.ven_name.clone(),
+    );
     loops::spawn_planning(
         state.clone(),
         profile.clone(),
