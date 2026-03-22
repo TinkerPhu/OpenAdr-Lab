@@ -79,9 +79,16 @@ pub async fn get_asset_history(
         Some(entry) => {
             use crate::common::{Interpolation, TimeSeries};
             let points = entry.history.slice(timespan, now);
+            // Prepend a LOCF boundary point at now-timespan so consumers always
+            // get a sample anchored at the start of the requested window.
+            let boundary_ts = now - timespan;
+            let boundary_power = entry.history.power_at(boundary_ts).unwrap_or(0.0);
+            let mut samples: Vec<(chrono::DateTime<chrono::Utc>, f64)> =
+                vec![(boundary_ts, boundary_power)];
+            samples.extend(points.iter().map(|p| (p.ts, p.power_kw)));
             let series = TimeSeries {
-                samples: points.iter().map(|p| (p.ts, p.power_kw)).collect(),
-                interpolation: Interpolation::Step,
+                samples,
+                interpolation: Interpolation::Linear,
             };
             let samples: Vec<serde_json::Value> = series
                 .samples
