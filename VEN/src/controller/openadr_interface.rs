@@ -315,6 +315,13 @@ pub fn parse_firm_reservations(events: &[Value], now: DateTime<Utc>) -> Vec<Rese
                     continue;
                 }
 
+                tracing::warn!(
+                    event_id = %event_id,
+                    payload_type = payload_type,
+                    payload = %payload,
+                    "parse_firm_reservations: SIMPLE payload found — creating reservation"
+                );
+
                 let kw = match payload
                     .get("values")
                     .and_then(|v| v.as_array())
