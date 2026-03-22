@@ -11,6 +11,7 @@ use crate::assets::{AssetState, HistoryPoint};
 use crate::common::{parse_iso8601_duration_secs, Aggregation, Interpolation, TimeSeries};
 use crate::controller::trace::ControllerEvent;
 use crate::entities::capacity::OadrReportObligation;
+use crate::entities::plan::SiteFlexibilityEnvelope;
 use crate::simulator::SimState;
 
 // ---------------------------------------------------------------------------
@@ -238,6 +239,7 @@ pub fn build_measurement_report_for_obligation(
     obligation: &OadrReportObligation,
     sim: &SimState,
     ven_name: &str,
+    site_envelope: Option<&SiteFlexibilityEnvelope>,
 ) -> Option<Value> {
     let program_id = obligation.program_id.as_deref()?;
     let event_id = &obligation.event_id;
@@ -255,6 +257,26 @@ pub fn build_measurement_report_for_obligation(
     let intervals: Vec<Value> = match payload_type.as_str() {
         "STORAGE_CHARGE_STATE" | "STORAGE_CHARGE_LEVEL" => {
             build_soc_intervals(sim, interval_width, &duration_iso)
+        }
+        "IMPORT_CAPACITY_RESERVATION" => {
+            let up_w = site_envelope.map(|e| e.up_kw * 1000.0).unwrap_or(0.0);
+            vec![json!({
+                "id": 0,
+                "payloads": [
+                    {"type": "IMPORT_CAPACITY_RESERVATION", "values": [up_w]},
+                    {"type": "OPERATING_STATE", "values": ["ACTIVE"]}
+                ]
+            })]
+        }
+        "EXPORT_CAPACITY_RESERVATION" => {
+            let down_w = site_envelope.map(|e| e.down_kw * 1000.0).unwrap_or(0.0);
+            vec![json!({
+                "id": 0,
+                "payloads": [
+                    {"type": "EXPORT_CAPACITY_RESERVATION", "values": [down_w]},
+                    {"type": "OPERATING_STATE", "values": ["ACTIVE"]}
+                ]
+            })]
         }
         _ => {
             let resampled = net_power_ts.resample_uniform(interval_width, Aggregation::Mean);
@@ -722,7 +744,7 @@ mod tests {
         )]);
 
         let ob = make_obligation("ev1", "prog1", "USAGE", 900);
-        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1").unwrap();
+        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).unwrap();
 
         let intervals = report["resources"][0]["intervals"].as_array().unwrap();
         assert!(
@@ -755,14 +777,14 @@ mod tests {
             created_at: Utc::now(),
         };
         let sim = make_sim(vec![]);
-        assert!(build_measurement_report_for_obligation(&ob, &sim, "ven-1").is_none());
+        assert!(build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).is_none());
     }
 
     #[test]
     fn obligation_report_empty_history_returns_none() {
         let ob = make_obligation("e1", "p1", "USAGE", 900);
         let sim = make_sim(vec![]);
-        assert!(build_measurement_report_for_obligation(&ob, &sim, "ven-1").is_none());
+        assert!(build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).is_none());
     }
 
     // ── import/export split ────────────────────────────────────────
@@ -771,7 +793,7 @@ mod tests {
     fn obligation_report_import_clamps_negative_to_zero() {
         let sim = make_sim(vec![make_entry("pv", &[(0, -5.0), (900, -5.0)])]);
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_LIMIT", 900);
-        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1").unwrap();
+        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).unwrap();
         let intervals = report["resources"][0]["intervals"].as_array().unwrap();
         for iv in intervals {
             let usage = iv["payloads"]
@@ -792,7 +814,7 @@ mod tests {
     fn obligation_report_export_uses_absolute_negative() {
         let sim = make_sim(vec![make_entry("pv", &[(0, -3.0), (900, -3.0)])]);
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_LIMIT", 900);
-        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1").unwrap();
+        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).unwrap();
         let intervals = report["resources"][0]["intervals"].as_array().unwrap();
         for iv in intervals {
             let usage = iv["payloads"]
@@ -823,7 +845,7 @@ mod tests {
             ],
         )]);
         let ob = make_obligation("e1", "p1", "STORAGE_CHARGE_LEVEL", 900);
-        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1").unwrap();
+        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).unwrap();
         let intervals = report["resources"][0]["intervals"].as_array().unwrap();
         assert!(!intervals.is_empty());
         for iv in intervals {
@@ -892,5 +914,60 @@ mod tests {
             make_entry("load", &[(0, 1.0)]), // import — ignored
         ]);
         assert!((latest_net_export_kw(&sim) - 2.5).abs() < 1e-9);
+    }
+
+    // ── IMPORT/EXPORT_CAPACITY_RESERVATION ────────────────────────
+
+    #[test]
+    fn test_reporter_import_capacity_reservation_from_envelope() {
+        let sim = make_sim(vec![]);
+        let env = SiteFlexibilityEnvelope {
+            ts: Utc::now(),
+            up_kw: 5.0,
+            down_kw: 3.0,
+            up_duration_s: None,
+            down_duration_s: None,
+        };
+        let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
+        let report =
+            build_measurement_report_for_obligation(&ob, &sim, "ven-test", Some(&env))
+                .expect("should return Some");
+        let val = report["resources"][0]["intervals"][0]["payloads"][0]["values"][0]
+            .as_f64()
+            .unwrap();
+        assert!((val - 5000.0).abs() < 1.0, "expected 5000 W, got {val}");
+    }
+
+    #[test]
+    fn test_reporter_export_capacity_reservation_from_envelope() {
+        let sim = make_sim(vec![]);
+        let env = SiteFlexibilityEnvelope {
+            ts: Utc::now(),
+            up_kw: 5.0,
+            down_kw: 3.0,
+            up_duration_s: None,
+            down_duration_s: None,
+        };
+        let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_RESERVATION", 900);
+        let report =
+            build_measurement_report_for_obligation(&ob, &sim, "ven-test", Some(&env))
+                .expect("should return Some");
+        let val = report["resources"][0]["intervals"][0]["payloads"][0]["values"][0]
+            .as_f64()
+            .unwrap();
+        assert!((val - 3000.0).abs() < 1.0, "expected 3000 W, got {val}");
+    }
+
+    #[test]
+    fn test_reporter_capacity_reservation_no_envelope_returns_zero() {
+        // When site_envelope is None (VEN just started), report 0 W — do NOT return None.
+        let sim = make_sim(vec![]);
+        let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
+        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-test", None)
+            .expect("should return Some even with no envelope");
+        let val = report["resources"][0]["intervals"][0]["payloads"][0]["values"][0]
+            .as_f64()
+            .unwrap();
+        assert_eq!(val, 0.0, "expected 0.0 W when no envelope");
     }
 }
