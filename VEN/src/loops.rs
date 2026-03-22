@@ -368,6 +368,18 @@ pub(crate) fn spawn_sim_tick(
                     }
                 }
 
+                // Refresh site envelope on every sim tick (~1s).
+                // Done inside the sim lock to avoid a second lock acquisition.
+                {
+                    let events_snap = state.events().await;
+                    let env = controller::envelope::compute_envelope_from_events(
+                        &*sim_guard,
+                        &events_snap,
+                        now,
+                    );
+                    state.set_site_envelope(env).await;
+                }
+
                 sim_guard.clone()
             };
 
@@ -510,6 +522,19 @@ pub(crate) fn spawn_planning(
             let flex_count = plan.flexible_slots.len();
             state.set_active_packets(plan.packets.clone()).await;
             state.set_active_plan(Some(plan)).await;
+
+            // Refresh site envelope immediately after each plan cycle.
+            {
+                let sim_guard = sim.lock().await;
+                let env = controller::envelope::compute_envelope_from_events(
+                    &*sim_guard,
+                    &events,
+                    now,
+                );
+                drop(sim_guard);
+                state.set_site_envelope(env).await;
+            }
+
             info!("plan cycle complete");
 
             // Emit PlanCycle controller event (T029)

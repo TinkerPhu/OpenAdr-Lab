@@ -15,17 +15,17 @@ Feature: UC-05..UC-07 — VTN Coordination Use Cases
     Then the plan has field "flexible_slots"
     And the plan flexible_slots is a non-empty array
 
-  Scenario: UC-05b — Flexibility envelopes are accessible via GET /flexibility
+  Scenario: UC-05b — GET /flexibility returns live site-level flexibility envelope
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
     When I wait for the VEN /plan to have envelopes
     And I GET /flexibility from the VEN
     Then the response status is 200
-    And the response JSON is an array
-    And the flexibility envelopes contain an entry for asset "ev"
+    And the response JSON contains field "up_kw"
+    And the response JSON contains field "down_kw"
 
-  Scenario: UC-05c — Each flexibility envelope has energy_needed and rate range fields
+  Scenario: UC-05c — Each flexibility envelope in /plan has energy_needed and rate range fields
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
@@ -33,6 +33,15 @@ Feature: UC-05..UC-07 — VTN Coordination Use Cases
     Then the first envelope has field "energy_needed_kwh"
     And the first envelope has field "max_acceptable_rate"
     And the first envelope field "energy_needed_kwh" is greater than 0.0
+
+  @phase-e
+  Scenario: UC-05d — GET /flexibility returns site-level headroom with correct shape
+    When I GET /flexibility from the VEN
+    Then the response status is 200
+    And the response JSON contains field "up_kw"
+    And the response JSON contains field "down_kw"
+    And the response JSON contains field "ts"
+    And the response JSON field "down_kw" is greater than 0.0
 
   # --- UC-06: Grid Emergency Alert via Import Capacity Limit ---
   # When the VTN sends an IMPORT_CAPACITY_LIMIT event, the VEN updates
