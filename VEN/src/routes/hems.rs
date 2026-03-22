@@ -8,10 +8,10 @@ use serde::Deserialize;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::AppCtx;
 use crate::controller::user_request::CreateUserRequestBody;
 use crate::entities::asset::{ComfortRate, PlanTrigger};
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, ValueCurve};
+use crate::AppCtx;
 
 /// POST /packets body shape (Stage 4).
 #[derive(Deserialize)]
@@ -62,8 +62,16 @@ pub async fn post_packets(
 
     let value_curve = ValueCurve {
         comfort_rates: vec![
-            ComfortRate { fill: 0.0, max_marginal_price: 0.35, max_marginal_co2: 0.0 },
-            ComfortRate { fill: 1.0, max_marginal_price: 0.05, max_marginal_co2: 0.0 },
+            ComfortRate {
+                fill: 0.0,
+                max_marginal_price: 0.35,
+                max_marginal_co2: 0.0,
+            },
+            ComfortRate {
+                fill: 1.0,
+                max_marginal_price: 0.05,
+                max_marginal_co2: 0.0,
+            },
         ],
         deadline_tiers: body
             .latest_end
@@ -80,7 +88,13 @@ pub async fn post_packets(
     };
     let packet = EnergyPacket {
         target_soc: body.target_soc,
-        ..EnergyPacket::new(body.asset_id, target_energy_kwh, desired_power_kw, value_curve, now)
+        ..EnergyPacket::new(
+            body.asset_id,
+            target_energy_kwh,
+            desired_power_kw,
+            value_curve,
+            now,
+        )
     };
 
     let mut packets = ctx.state.active_packets().await;
@@ -110,9 +124,12 @@ pub async fn post_requests(
     Json(body): Json<CreateUserRequestBody>,
 ) -> impl IntoResponse {
     let now = Utc::now();
-    let assets = ctx.sim.lock().await.assets.clone();
+    let (assets, asset_configs) = {
+        let sim = ctx.sim.lock().await;
+        (sim.assets.clone(), sim.asset_configs.clone())
+    };
 
-    match crate::controller::user_request::create_from_body(body, &assets, now) {
+    match crate::controller::user_request::create_from_body(body, &assets, &asset_configs, now) {
         Ok((user_req, packet)) => {
             info!(
                 request_id = %user_req.id,
@@ -126,17 +143,23 @@ pub async fn post_requests(
             ctx.state.set_active_packets(packets).await;
             ctx.state.upsert_request(user_req.clone()).await;
             // T044: emit RequestTransition for new request
-            ctx.state.push_controller_event(
-                crate::controller::trace::ControllerEvent::RequestTransition {
-                    ts: now,
-                    request_id: user_req.id,
-                    asset_id: user_req.asset_id.clone(),
-                    from_status: "None".to_string(),
-                    to_status: format!("{:?}", user_req.status),
-                },
-            ).await;
+            ctx.state
+                .push_controller_event(
+                    crate::controller::trace::ControllerEvent::RequestTransition {
+                        ts: now,
+                        request_id: user_req.id,
+                        asset_id: user_req.asset_id.clone(),
+                        from_status: "None".to_string(),
+                        to_status: format!("{:?}", user_req.status),
+                    },
+                )
+                .await;
             let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
-            (axum::http::StatusCode::CREATED, Json(serde_json::to_value(user_req).unwrap_or_default())).into_response()
+            (
+                axum::http::StatusCode::CREATED,
+                Json(serde_json::to_value(user_req).unwrap_or_default()),
+            )
+                .into_response()
         }
         Err(e) => {
             warn!("POST /user-requests rejected: {e}");
@@ -150,23 +173,22 @@ pub async fn post_requests(
 }
 
 /// DELETE /user-requests/:id — cancel a user request and abandon its packet (Stage 5).
-pub async fn delete_request(
-    State(ctx): State<AppCtx>,
-    Path(id): Path<Uuid>,
-) -> impl IntoResponse {
+pub async fn delete_request(State(ctx): State<AppCtx>, Path(id): Path<Uuid>) -> impl IntoResponse {
     match ctx.state.cancel_request(id).await {
         Some(packet_id) => {
             // abandon_packet is now atomic inside cancel_request
             // T044: emit RequestTransition for cancellation
-            ctx.state.push_controller_event(
-                crate::controller::trace::ControllerEvent::RequestTransition {
-                    ts: Utc::now(),
-                    request_id: id,
-                    asset_id: String::new(),
-                    from_status: "Active".to_string(),
-                    to_status: "Cancelled".to_string(),
-                },
-            ).await;
+            ctx.state
+                .push_controller_event(
+                    crate::controller::trace::ControllerEvent::RequestTransition {
+                        ts: Utc::now(),
+                        request_id: id,
+                        asset_id: String::new(),
+                        from_status: "Active".to_string(),
+                        to_status: "Cancelled".to_string(),
+                    },
+                )
+                .await;
             let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
             info!(request_id = %id, packet_id = %packet_id, "user request cancelled");
             axum::http::StatusCode::NO_CONTENT.into_response()
@@ -182,7 +204,9 @@ pub async fn delete_request(
 /// GET /flexibility — returns FlexibilityEnvelopes from the active plan (Stage 5).
 pub async fn get_flexibility(State(ctx): State<AppCtx>) -> impl IntoResponse {
     match ctx.state.active_plan().await {
-        Some(plan) => Json(serde_json::to_value(plan.envelopes).unwrap_or_default()).into_response(),
+        Some(plan) => {
+            Json(serde_json::to_value(plan.envelopes).unwrap_or_default()).into_response()
+        }
         None => Json(serde_json::json!([])).into_response(),
     }
 }

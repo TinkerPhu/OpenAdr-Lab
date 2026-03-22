@@ -3,6 +3,7 @@
 /// Single responsibility: given the current plan, simulator assets, and capacity
 /// constraints, produce a HashMap<asset_id, kW> that drives the simulator tick.
 /// There is no concept of "reactor mode" here — the plan is the sole authority.
+use crate::assets::AssetConfig;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::Plan;
 use crate::simulator::AssetEntry;
@@ -21,13 +22,15 @@ use uuid::Uuid;
 pub fn build_setpoints(
     plan: &Plan,
     assets: &[AssetEntry],
+    asset_configs: &[AssetConfig],
     capacity: &OadrCapacityState,
     now: DateTime<Utc>,
 ) -> HashMap<String, f64> {
     // Start with defaults from current asset state
     let mut setpoints: HashMap<String, f64> = assets
         .iter()
-        .map(|a| (a.id.clone(), a.state.default_setpoint()))
+        .zip(asset_configs.iter())
+        .map(|(a, cfg)| (a.id.clone(), cfg.default_setpoint(&a.state)))
         .collect();
 
     // Try FIRM slot first, then FLEXIBLE

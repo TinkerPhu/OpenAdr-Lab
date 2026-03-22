@@ -10,17 +10,15 @@ pub mod ev;
 pub mod heater;
 pub mod pv;
 
-pub use base_load::BaseLoad;
-pub use battery::Battery;
-pub use ev::EvCharger;
-pub use heater::Heater;
-pub use pv::PvInverter;
+pub use base_load::{BaseLoad, BaseLoadState};
+pub use battery::{Battery, BatteryState};
+pub use ev::{EvCharger, EvState};
+pub use heater::{Heater, HeaterState};
+pub use pv::{PvInverter, PvState};
 
-/// Generic environment passed to all assets during a physics tick.
-/// Each asset reads what it needs and ignores the rest.
-pub type TickEnvironment = HashMap<String, f64>;
+// ─── Legacy types (still used by planner / dispatcher / routes) ───────────────
 
-/// Planning capability descriptor for a single asset.
+/// Planning capability descriptor for a single asset (legacy — kept for planner compat).
 #[derive(Debug, Clone)]
 pub struct AssetCapabilities {
     pub asset_id: String,
@@ -66,178 +64,304 @@ pub struct ControlDescriptor {
     pub unit: String,
 }
 
-/// Discriminated union over all supported asset types.
-/// Serialized/deserialized with an internal "type" tag for sim_state.json persistence.
+// ─── Phase A new types ────────────────────────────────────────────────────────
+
+/// Point-in-time feasible power range. Valid only for the state it was computed from.
+///
+/// Sign convention: negative = export/generation, positive = import/consumption.
+///   max_export_kw ≤ 0  — floor (maximum export magnitude)
+///   max_import_kw ≥ 0  — ceiling (maximum import magnitude)
+///
+/// For non-curtailable assets (PV, BaseLoad): max_export_kw == max_import_kw == actual_power_kw.
+#[derive(Debug, Clone, Copy)]
+pub struct AssetCapability {
+    pub max_export_kw: f64,
+    pub max_import_kw: f64,
+}
+
+impl AssetCapability {
+    /// True if the asset has no controllable headroom (point-range capability).
+    pub fn is_fixed(&self) -> bool {
+        (self.max_import_kw - self.max_export_kw).abs() < 1e-6
+    }
+}
+
+/// State-only enum. Variants hold only mutable runtime state — no config fields.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "asset_type", rename_all = "snake_case")]
 pub enum AssetState {
-    Ev(EvCharger),
-    Heater(Heater),
-    Pv(PvInverter),
-    Battery(Battery),
-    BaseLoad(BaseLoad),
+    Battery(BatteryState),
+    Ev(EvState),
+    Heater(HeaterState),
+    Pv(PvState),
+    BaseLoad(BaseLoadState),
+    /// Virtual asset: derived from sum of all other assets + VTN capacity limits.
+    Grid(GridState),
 }
 
 impl AssetState {
-    /// Run one physics tick. Returns actual power in kW (positive = import, negative = export).
-    pub fn update(&mut self, dt_s: f64, setpoint: f64, env: &TickEnvironment) -> f64 {
+    /// Actual power in this state. Positive = import from grid, negative = export.
+    pub fn actual_power_kw(&self) -> f64 {
         match self {
-            Self::Ev(inner) => inner.update(dt_s, setpoint, env),
-            Self::Heater(inner) => inner.update(dt_s, setpoint, env),
-            Self::Pv(inner) => {
-                let gen = inner.update(dt_s, setpoint, env);
-                -gen // PV generation is negative (export)
-            }
-            Self::Battery(inner) => inner.update(dt_s, setpoint, env),
-            Self::BaseLoad(inner) => inner.update(dt_s, setpoint, env),
+            Self::Battery(s) => s.actual_power_kw,
+            Self::Ev(s) => s.actual_power_kw,
+            Self::Heater(s) => s.actual_power_kw,
+            Self::Pv(s) => s.actual_power_kw,
+            Self::BaseLoad(s) => s.actual_power_kw,
+            Self::Grid(s) => s.net_power_kw,
+        }
+    }
+}
+
+/// Grid virtual state. Not controllable; derived from sum of all other assets.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GridState {
+    /// Net site power. Positive = importing from grid. Negative = exporting to grid.
+    pub net_power_kw: f64,
+    /// Maximum site import power allowed by active VTN events. Always ≥ 0.
+    pub import_limit_kw: f64,
+    /// Maximum site export power allowed by active VTN events. Always ≤ 0.
+    pub export_limit_kw: f64,
+}
+
+/// Trajectory produced by simulate_forward() / simulate_free().
+pub struct Trajectory {
+    pub points: Vec<TrajectoryPoint>,
+}
+
+/// State is the state AFTER the step at `ts`.
+pub struct TrajectoryPoint {
+    pub ts: DateTime<Utc>,
+    /// Signed: positive = import, negative = export.
+    pub power_kw: f64,
+    pub state: AssetState,
+}
+
+/// Runtime config dispatch enum. Holds physics config for each asset type.
+/// This is the renamed + restructured successor to what was previously called `AssetState`
+/// (which conflated config and state).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "asset_type", rename_all = "snake_case")]
+pub enum AssetConfig {
+    Battery(Battery),
+    Ev(EvCharger),
+    Heater(Heater),
+    Pv(PvInverter),
+    BaseLoad(BaseLoad),
+}
+
+impl AssetConfig {
+    // ── Asset trait dispatch ────────────────────────────────────────────────
+
+    pub fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
+        use Asset as _;
+        match self {
+            Self::Battery(cfg) => cfg.step(state, setpoint_kw, dt),
+            Self::Ev(cfg) => cfg.step(state, setpoint_kw, dt),
+            Self::Heater(cfg) => cfg.step(state, setpoint_kw, dt),
+            Self::Pv(cfg) => cfg.step(state, setpoint_kw, dt),
+            Self::BaseLoad(cfg) => cfg.step(state, setpoint_kw, dt),
         }
     }
 
-    /// Forward projection. Returns a self-describing TimeSeries over [now, now + timespan].
-    pub fn forecast(&self, timespan: Duration) -> TimeSeries {
+    pub fn capability(&self, state: &AssetState) -> AssetCapability {
+        use Asset as _;
         match self {
-            Self::Ev(inner) => inner.forecast(timespan),
-            Self::Heater(inner) => inner.forecast(timespan),
-            Self::Pv(inner) => inner.forecast(timespan),
-            Self::Battery(inner) => inner.forecast(timespan),
-            Self::BaseLoad(inner) => inner.forecast(timespan),
+            Self::Battery(cfg) => cfg.capability(state),
+            Self::Ev(cfg) => cfg.capability(state),
+            Self::Heater(cfg) => cfg.capability(state),
+            Self::Pv(cfg) => cfg.capability(state),
+            Self::BaseLoad(cfg) => cfg.capability(state),
         }
     }
 
-    /// Historical power data. Returns a self-describing TimeSeries over [now - timespan, now].
-    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> TimeSeries {
+    // ── Dispatch methods (previously on AssetState) ─────────────────────────
+
+    pub fn default_setpoint(&self, _state: &AssetState) -> f64 {
         match self {
-            Self::Ev(inner) => inner.history(timespan, history),
-            Self::Heater(inner) => inner.history(timespan, history),
-            Self::Pv(inner) => inner.history(timespan, history),
-            Self::Battery(inner) => inner.history(timespan, history),
-            Self::BaseLoad(inner) => inner.history(timespan, history),
+            Self::Battery(cfg) => cfg.default_setpoint(),
+            Self::Ev(cfg) => cfg.default_setpoint(),
+            Self::Heater(cfg) => cfg.default_setpoint(),
+            Self::Pv(cfg) => cfg.default_setpoint(),
+            Self::BaseLoad(cfg) => cfg.default_setpoint(),
         }
     }
 
-    /// Asset-specific state as a key-value map.
-    pub fn state_values(&self) -> HashMap<String, f64> {
-        match self {
-            Self::Ev(inner) => inner.state_values(),
-            Self::Heater(inner) => inner.state_values(),
-            Self::Pv(inner) => inner.state_values(),
-            Self::Battery(inner) => inner.state_values(),
-            Self::BaseLoad(inner) => inner.state_values(),
+    pub fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
+        match (self, state) {
+            (Self::Battery(cfg), AssetState::Battery(s)) => cfg.state_values(s),
+            (Self::Ev(cfg), AssetState::Ev(s)) => cfg.state_values(s),
+            (Self::Heater(cfg), AssetState::Heater(s)) => cfg.state_values(s),
+            (Self::Pv(cfg), AssetState::Pv(s)) => cfg.state_values(s),
+            (Self::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.state_values(s),
+            _ => HashMap::new(),
         }
     }
 
-    /// Natural operating setpoint when no plan allocation is active.
-    pub fn default_setpoint(&self) -> f64 {
-        match self {
-            Self::Ev(inner) => inner.default_setpoint(),
-            Self::Heater(inner) => inner.default_setpoint(),
-            Self::Pv(inner) => inner.default_setpoint(),
-            Self::Battery(inner) => inner.default_setpoint(),
-            Self::BaseLoad(inner) => inner.default_setpoint(),
+    pub fn capabilities(&self, asset_id: &str, state: &AssetState) -> AssetCapabilities {
+        match (self, state) {
+            (Self::Battery(cfg), AssetState::Battery(s)) => cfg.capabilities(asset_id, s),
+            (Self::Ev(cfg), AssetState::Ev(s)) => cfg.capabilities(asset_id, s),
+            (Self::Heater(cfg), AssetState::Heater(s)) => cfg.capabilities(asset_id, s),
+            (Self::Pv(cfg), AssetState::Pv(s)) => cfg.capabilities(asset_id, s),
+            (Self::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.capabilities(asset_id, s),
+            _ => AssetCapabilities {
+                asset_id: asset_id.to_string(),
+                max_import_kw: 0.0,
+                max_export_kw: 0.0,
+                is_flexible: false,
+                energy_state: None,
+                availability: None,
+            },
         }
     }
 
-    /// Planning interface capabilities.
-    pub fn capabilities(&self, asset_id: &str) -> AssetCapabilities {
-        match self {
-            Self::Ev(inner) => inner.capabilities(asset_id),
-            Self::Heater(inner) => inner.capabilities(asset_id),
-            Self::Pv(inner) => inner.capabilities(asset_id),
-            Self::Battery(inner) => inner.capabilities(asset_id),
-            Self::BaseLoad(inner) => inner.capabilities(asset_id),
-        }
-    }
-
-    /// UI control descriptors for POST /sim/override parameters.
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {
         match self {
-            Self::Ev(inner) => inner.control_schema(),
-            Self::Heater(inner) => inner.control_schema(),
-            Self::Pv(inner) => inner.control_schema(),
-            Self::Battery(inner) => inner.control_schema(),
-            Self::BaseLoad(inner) => inner.control_schema(),
+            Self::Battery(cfg) => cfg.control_schema(),
+            Self::Ev(cfg) => cfg.control_schema(),
+            Self::Heater(cfg) => cfg.control_schema(),
+            Self::Pv(cfg) => cfg.control_schema(),
+            Self::BaseLoad(cfg) => cfg.control_schema(),
         }
     }
 
-    /// Write initial state directly (e.g. SoC jump).
-    pub fn reset(&mut self, values: HashMap<String, f64>) {
+    pub fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
+        match (self, state) {
+            (Self::Battery(cfg), AssetState::Battery(s)) => cfg.reset(s, values),
+            (Self::Ev(cfg), AssetState::Ev(s)) => cfg.reset(s, values),
+            (Self::Heater(cfg), AssetState::Heater(s)) => cfg.reset(s, values),
+            (Self::Pv(cfg), AssetState::Pv(s)) => cfg.reset(s, values),
+            (Self::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.reset(s, values),
+            _ => {}
+        }
+    }
+
+    pub fn update_config(&mut self, values: HashMap<String, f64>) {
         match self {
-            Self::Ev(inner) => inner.reset(values),
-            Self::Heater(inner) => inner.reset(values),
-            Self::Pv(inner) => inner.reset(values),
-            Self::Battery(inner) => inner.reset(values),
-            Self::BaseLoad(inner) => inner.reset(values),
+            Self::Battery(cfg) => cfg.update_config(values),
+            Self::Ev(cfg) => cfg.update_config(values),
+            Self::Heater(cfg) => cfg.update_config(values),
+            Self::Pv(cfg) => cfg.update_config(values),
+            Self::BaseLoad(cfg) => cfg.update_config(values),
         }
     }
 
-    /// Resolve a user request target for this asset.
-    /// Returns Some((target_energy_kwh, desired_power_kw)) for energy-storage assets,
-    /// or None if the asset does not support SoC-based requests.
+    pub fn forecast(&self, state: &AssetState, timespan: Duration) -> TimeSeries {
+        match (self, state) {
+            (Self::Battery(cfg), AssetState::Battery(s)) => cfg.forecast(s, timespan),
+            (Self::Ev(cfg), AssetState::Ev(s)) => cfg.forecast(s, timespan),
+            (Self::Heater(cfg), AssetState::Heater(s)) => cfg.forecast(s, timespan),
+            (Self::Pv(cfg), AssetState::Pv(s)) => cfg.forecast(s, timespan),
+            (Self::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.forecast(s, timespan),
+            _ => TimeSeries::empty(Interpolation::Linear),
+        }
+    }
+
+    pub fn history(&self, timespan: Duration, buffer: &AssetHistoryBuffer) -> TimeSeries {
+        match self {
+            Self::Battery(cfg) => cfg.history(timespan, buffer),
+            Self::Ev(cfg) => cfg.history(timespan, buffer),
+            Self::Heater(cfg) => cfg.history(timespan, buffer),
+            Self::Pv(cfg) => cfg.history(timespan, buffer),
+            Self::BaseLoad(cfg) => cfg.history(timespan, buffer),
+        }
+    }
+
     pub fn resolve_request_target(
         &self,
+        state: &AssetState,
         target_soc: Option<f64>,
         desired_power_kw: Option<f64>,
     ) -> Option<(f64, f64)> {
-        match self {
-            Self::Ev(inner) => inner.resolve_request_target(target_soc, desired_power_kw),
-            Self::Battery(inner) => inner.resolve_request_target(target_soc, desired_power_kw),
-            Self::Heater(_) | Self::Pv(_) | Self::BaseLoad(_) => None,
+        match (self, state) {
+            (Self::Battery(cfg), AssetState::Battery(s)) => {
+                cfg.resolve_request_target(s, target_soc, desired_power_kw)
+            }
+            (Self::Ev(cfg), AssetState::Ev(s)) => {
+                cfg.resolve_request_target(s, target_soc, desired_power_kw)
+            }
+            _ => None,
         }
     }
 
-    /// Default comfort rates for user requests targeting this asset type.
     pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
         match self {
-            Self::Ev(inner) => inner.default_comfort_rates(),
-            Self::Heater(inner) => inner.default_comfort_rates(),
-            Self::Pv(inner) => inner.default_comfort_rates(),
-            Self::Battery(inner) => inner.default_comfort_rates(),
-            Self::BaseLoad(inner) => inner.default_comfort_rates(),
+            Self::Battery(cfg) => cfg.default_comfort_rates(),
+            Self::Ev(cfg) => cfg.default_comfort_rates(),
+            Self::Heater(cfg) => cfg.default_comfort_rates(),
+            Self::Pv(cfg) => cfg.default_comfort_rates(),
+            Self::BaseLoad(cfg) => cfg.default_comfort_rates(),
         }
     }
 
-    /// Default completion policy for user requests targeting this asset type.
     pub fn default_completion_policy(&self) -> crate::entities::asset::CompletionPolicy {
         match self {
-            Self::Ev(inner) => inner.default_completion_policy(),
-            Self::Heater(inner) => inner.default_completion_policy(),
-            Self::Pv(inner) => inner.default_completion_policy(),
-            Self::Battery(inner) => inner.default_completion_policy(),
-            Self::BaseLoad(inner) => inner.default_completion_policy(),
+            Self::Battery(cfg) => cfg.default_completion_policy(),
+            Self::Ev(cfg) => cfg.default_completion_policy(),
+            Self::Heater(cfg) => cfg.default_completion_policy(),
+            Self::Pv(cfg) => cfg.default_completion_policy(),
+            Self::BaseLoad(cfg) => cfg.default_completion_policy(),
         }
     }
 
-    /// Default post-deadline comfort bid for user requests targeting this asset type.
     pub fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
         match self {
-            Self::Ev(inner) => inner.default_post_deadline_comfort_bid(),
-            Self::Heater(inner) => inner.default_post_deadline_comfort_bid(),
-            Self::Pv(inner) => inner.default_post_deadline_comfort_bid(),
-            Self::Battery(inner) => inner.default_post_deadline_comfort_bid(),
-            Self::BaseLoad(inner) => inner.default_post_deadline_comfort_bid(),
+            Self::Battery(cfg) => cfg.default_post_deadline_comfort_bid(),
+            Self::Ev(cfg) => cfg.default_post_deadline_comfort_bid(),
+            Self::Heater(cfg) => cfg.default_post_deadline_comfort_bid(),
+            Self::Pv(cfg) => cfg.default_post_deadline_comfort_bid(),
+            Self::BaseLoad(cfg) => cfg.default_post_deadline_comfort_bid(),
         }
     }
+}
 
-    /// Update config fields in place (e.g. capacity_kwh).
-    pub fn update_config(&mut self, values: HashMap<String, f64>) {
-        match self {
-            Self::Ev(inner) => inner.update_config(values),
-            Self::Heater(inner) => inner.update_config(values),
-            Self::Pv(inner) => inner.update_config(values),
-            Self::Battery(inner) => inner.update_config(values),
-            Self::BaseLoad(inner) => inner.update_config(values),
+/// Phase A subset of the Asset trait. Full trait (with id(), current_state(), history())
+/// added in Phase B/C when trait objects (&dyn Asset) are used by the planner.
+pub trait Asset: Send + Sync {
+    /// Pure physics step. Returns (new_state, actual_power_kw).
+    /// actual_power_kw may differ from setpoint_kw (e.g. SoC ceiling clamps charge rate).
+    /// Sign convention: positive = import/charge, negative = export/discharge.
+    fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64);
+
+    /// Point-in-time feasible power range given current state.
+    fn capability(&self, state: &AssetState) -> AssetCapability;
+
+    /// Project state forward over an explicit setpoint schedule (default impl).
+    /// `setpoints` is a list of (slot_start, setpoint_kw) pairs in ascending time order.
+    fn simulate_forward(
+        &self,
+        initial: &AssetState,
+        setpoints: &[(DateTime<Utc>, f64)],
+    ) -> Trajectory {
+        let mut state = initial.clone();
+        let mut points = Vec::new();
+        for window in setpoints.windows(2) {
+            let (ts, sp) = window[0];
+            let dt = window[1].0 - ts;
+            let (next, actual_kw) = self.step(&state, sp, dt);
+            points.push(TrajectoryPoint {
+                ts,
+                power_kw: actual_kw,
+                state: state.clone(),
+            });
+            state = next;
         }
+        if let Some(&(ts, sp)) = setpoints.last() {
+            let (_, actual_kw) = self.step(&state, sp, Duration::seconds(0));
+            points.push(TrajectoryPoint {
+                ts,
+                power_kw: actual_kw,
+                state,
+            });
+        }
+        Trajectory { points }
     }
 }
 
 // ─── Shared history() helper ─────────────────────────────────────────────────
 
 /// Slice the ring buffer to [now − timespan, now] and return a TimeSeries.
-///
-/// - Extracts the `power_kw` column; drops NaN rows.
-/// - Prepends a boundary point at `now − timespan` using the declared interpolation mode:
-///   Step → holds the first available sample's value; Linear → same (first available value).
-/// - Returns empty series if the buffer is empty or timespan ≤ 0.
 pub fn history_from_buffer(
     timespan: Duration,
     history: &AssetHistoryBuffer,
@@ -249,13 +373,16 @@ pub fn history_from_buffer(
     let now = Utc::now();
     let window_start = now - timespan;
 
-    // Slice to [window_start, now] and extract power_kw column (drop NaN).
     let points = history.to_timeline(Some((window_start, now)));
     let mut samples: Vec<(DateTime<Utc>, f64)> = points
         .iter()
         .filter_map(|p| {
             let v = p.values.get("power_kw").copied()?;
-            if v.is_nan() { None } else { Some((p.ts, v)) }
+            if v.is_nan() {
+                None
+            } else {
+                Some((p.ts, v))
+            }
         })
         .collect();
 
@@ -263,11 +390,13 @@ pub fn history_from_buffer(
         return TimeSeries::empty(interpolation);
     }
 
-    // Prepend boundary point at window_start if not already there.
     if samples[0].0 > window_start + Duration::milliseconds(500) {
-        let boundary_value = samples[0].1; // hold first known value
+        let boundary_value = samples[0].1;
         samples.insert(0, (window_start, boundary_value));
     }
 
-    TimeSeries { samples, interpolation }
+    TimeSeries {
+        samples,
+        interpolation,
+    }
 }

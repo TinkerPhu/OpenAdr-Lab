@@ -50,8 +50,12 @@ pub(crate) fn detect_event_changes(
 
     // OpenAdrArrived — events that are new this tick
     for evt in events {
-        let Some(id) = evt.get("id").and_then(|v| v.as_str()) else { continue };
-        if prev_ids.contains(id) { continue }
+        let Some(id) = evt.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if prev_ids.contains(id) {
+            continue;
+        }
 
         let name = evt
             .get("eventName")
@@ -126,7 +130,12 @@ pub(crate) fn detect_event_changes(
         });
     }
 
-    EventChanges { trace_events, current_ids, rates, capacity }
+    EventChanges {
+        trace_events,
+        current_ids,
+        rates,
+        capacity,
+    }
 }
 
 // ─── Background loop spawners ──────────────────────────────────────────────────
@@ -143,7 +152,11 @@ pub(crate) fn spawn_program_poll(
             match vtn.fetch_programs().await {
                 Ok(programs) => {
                     counter!("poll_success_total", "resource" => "programs").increment(1);
-                    info!(resource = "programs", count = programs.len(), "poll success");
+                    info!(
+                        resource = "programs",
+                        count = programs.len(),
+                        "poll success"
+                    );
                     state.set_programs(programs).await;
                 }
                 Err(e) => {
@@ -196,7 +209,9 @@ pub(crate) fn spawn_event_poll(
 
                     let existing_obs = state.report_obligations().await;
                     let new_obs = controller::openadr_interface::extract_report_obligations(
-                        &events, now, &existing_obs,
+                        &events,
+                        now,
+                        &existing_obs,
                     );
                     state.add_obligations(new_obs).await;
 
@@ -253,7 +268,11 @@ pub(crate) fn spawn_sim_tick(
     tokio::spawn(async move {
         let mut tick_interval = tokio::time::interval(std::time::Duration::from_secs(tick_s));
         let mut persist_counter: u64 = 0;
-        let persist_every_ticks = if tick_s > 0 { persist_every_s / tick_s } else { 15 };
+        let persist_every_ticks = if tick_s > 0 {
+            persist_every_s / tick_s
+        } else {
+            15
+        };
         let mut report_counter: u64 = 0;
         let report_every_ticks = if tick_s > 0 && report_interval_s > 0 {
             report_interval_s / tick_s
@@ -285,13 +304,15 @@ pub(crate) fn spawn_sim_tick(
                     Some(ref plan) => controller::dispatcher::build_setpoints(
                         plan,
                         &sim_guard.assets,
+                        &sim_guard.asset_configs,
                         &capacity_snap,
                         now,
                     ),
                     None => sim_guard
                         .assets
                         .iter()
-                        .map(|a| (a.id.clone(), a.state.default_setpoint()))
+                        .zip(sim_guard.asset_configs.iter())
+                        .map(|(a, cfg)| (a.id.clone(), cfg.default_setpoint(&a.state)))
                         .collect(),
                 };
 
@@ -341,18 +362,16 @@ pub(crate) fn spawn_sim_tick(
 
                 // Post-tick: push asset history rows (T032 — drives GET /trace/history)
                 {
-                    let current_tariff = rates_snap.iter().find(|t| {
-                        t.interval_start <= now && now < t.interval_end
-                    });
+                    let current_tariff = rates_snap
+                        .iter()
+                        .find(|t| t.interval_start <= now && now < t.interval_end);
                     let import_price = current_tariff
                         .and_then(|t| t.import_tariff_eur_kwh)
                         .unwrap_or(0.0);
                     let export_price = current_tariff
                         .and_then(|t| t.export_tariff_eur_kwh)
                         .unwrap_or(0.0);
-                    let co2_g_kwh = current_tariff
-                        .and_then(|t| t.co2_g_kwh)
-                        .unwrap_or(0.0);
+                    let co2_g_kwh = current_tariff.and_then(|t| t.co2_g_kwh).unwrap_or(0.0);
 
                     for (asset_id, asset_snap) in &sim_snap.assets {
                         let mut row: std::collections::HashMap<String, f64> =
@@ -389,13 +408,12 @@ pub(crate) fn spawn_sim_tick(
                     report_counter = 0;
                     let events = state.events().await;
                     let trace = state.controller_trace().await;
-                    let reports =
-                        controller::reporter::build_measurement_reports_for_active_events(
-                            &events,
-                            &trace.asset_history,
-                            &ven_name,
-                            now,
-                        );
+                    let reports = controller::reporter::build_measurement_reports_for_active_events(
+                        &events,
+                        &trace.asset_history,
+                        &ven_name,
+                        now,
+                    );
                     for report in reports {
                         if let Err(e) = vtn.upsert_report(report).await {
                             error!("measurement report submission failed: {e:#}");
@@ -430,13 +448,11 @@ pub(crate) fn spawn_obligation_check(
             let due = state.due_obligations(now).await;
             for ob in due {
                 let trace = state.controller_trace().await;
-                if let Some(report) =
-                    controller::reporter::build_measurement_report_for_obligation(
-                        &ob,
-                        &trace.asset_history,
-                        &ven_name,
-                    )
-                {
+                if let Some(report) = controller::reporter::build_measurement_report_for_obligation(
+                    &ob,
+                    &trace.asset_history,
+                    &ven_name,
+                ) {
                     match vtn.upsert_report(report).await {
                         Ok(_) => {
                             state.mark_obligation_fulfilled(ob.id).await;
@@ -487,19 +503,18 @@ pub(crate) fn spawn_planning(
             let trigger_reason = format!("{:?}", trigger);
 
             // Compute per-asset forecasts covering the planning horizon.
-            let planning_horizon = chrono::Duration::seconds(
-                (profile.planner.plan_horizon_h * 3600) as i64,
-            );
+            let planning_horizon =
+                chrono::Duration::seconds((profile.planner.plan_horizon_h * 3600) as i64);
             let asset_forecasts: std::collections::HashMap<String, crate::common::TimeSeries> = {
                 let sim_guard = sim.lock().await;
                 sim_guard
-                    .assets
-                    .iter()
-                    .map(|e| (e.id.clone(), e.state.forecast(planning_horizon)))
+                    .iter_assets()
+                    .map(|(e, cfg)| (e.id.clone(), cfg.forecast(&e.state, planning_horizon)))
                     .collect()
             };
 
-            let tariff_ts = crate::entities::tariff_snapshot::TariffTimeSeries::from_snapshots(&rates);
+            let tariff_ts =
+                crate::entities::tariff_snapshot::TariffTimeSeries::from_snapshots(&rates);
             let plan = controller::planner::run_planner(
                 &tariff_ts,
                 &packets,
@@ -549,10 +564,7 @@ pub(crate) fn spawn_planning(
     })
 }
 
-pub(crate) fn spawn_state_persist(
-    state: AppState,
-    path: String,
-) -> tokio::task::JoinHandle<()> {
+pub(crate) fn spawn_state_persist(state: AppState, path: String) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
         loop {
