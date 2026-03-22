@@ -195,7 +195,10 @@ pub fn build_measurement_report(
         }]
     });
 
-    debug!(report_name, event_id, report_type, report_value, "built measurement report");
+    debug!(
+        report_name,
+        event_id, report_type, report_value, "built measurement report"
+    );
     Some(report)
 }
 
@@ -214,14 +217,14 @@ pub fn build_measurement_reports_for_active_events(
             continue;
         }
         // Skip events with reportDescriptors — those are handled by the obligation loop
-        let descriptors = event
-            .get("reportDescriptors")
-            .and_then(|v| v.as_array());
-        let has_descriptors = descriptors
-            .map_or(false, |arr| !arr.is_empty());
+        let descriptors = event.get("reportDescriptors").and_then(|v| v.as_array());
+        let has_descriptors = descriptors.map_or(false, |arr| !arr.is_empty());
         if has_descriptors {
             let event_id = event.get("id").and_then(|v| v.as_str()).unwrap_or("?");
-            debug!(event_id, "timer-driven: skipping event with reportDescriptors");
+            debug!(
+                event_id,
+                "timer-driven: skipping event with reportDescriptors"
+            );
             continue;
         }
         if let Some(event_id) = event.get("id").and_then(|v| v.as_str()) {
@@ -333,9 +336,7 @@ pub fn build_measurement_report_for_obligation(
 }
 
 /// Sum all assets' `power_kw` columns into a single net site power TimeSeries.
-fn build_net_site_power_ts(
-    asset_history: &HashMap<String, AssetHistoryBuffer>,
-) -> TimeSeries {
+fn build_net_site_power_ts(asset_history: &HashMap<String, AssetHistoryBuffer>) -> TimeSeries {
     let mut per_asset: Vec<TimeSeries> = asset_history
         .values()
         .map(|buf| history_to_timeseries(buf, "power_kw", Interpolation::Step, None))
@@ -360,10 +361,7 @@ fn build_net_site_power_ts(
     let samples: Vec<(DateTime<Utc>, f64)> = all_ts
         .iter()
         .filter_map(|&t| {
-            let sum: f64 = per_asset
-                .iter()
-                .filter_map(|s| s.interpolate_at(t))
-                .sum();
+            let sum: f64 = per_asset.iter().filter_map(|s| s.interpolate_at(t)).sum();
             Some((t, sum))
         })
         .collect();
@@ -638,8 +636,7 @@ mod tests {
         history.insert("site".to_string(), buf);
 
         let ob = make_obligation("ev1", "prog1", "USAGE", 900);
-        let report =
-            build_measurement_report_for_obligation(&ob, &history, "ven-1").unwrap();
+        let report = build_measurement_report_for_obligation(&ob, &history, "ven-1").unwrap();
 
         let intervals = report["resources"][0]["intervals"].as_array().unwrap();
         assert!(
@@ -676,34 +673,26 @@ mod tests {
             created_at: Utc::now(),
         };
         let history = HashMap::new();
-        assert!(
-            build_measurement_report_for_obligation(&ob, &history, "ven-1").is_none()
-        );
+        assert!(build_measurement_report_for_obligation(&ob, &history, "ven-1").is_none());
     }
 
     #[test]
     fn obligation_report_empty_history_returns_none() {
         let ob = make_obligation("e1", "p1", "USAGE", 900);
         let history = HashMap::new();
-        assert!(
-            build_measurement_report_for_obligation(&ob, &history, "ven-1").is_none()
-        );
+        assert!(build_measurement_report_for_obligation(&ob, &history, "ven-1").is_none());
     }
 
     // ── import/export split ────────────────────────────────────────
 
     #[test]
     fn obligation_report_import_clamps_negative_to_zero() {
-        let buf = make_buf(&[
-            (0, &[("power_kw", -5.0)]),
-            (900, &[("power_kw", -5.0)]),
-        ]);
+        let buf = make_buf(&[(0, &[("power_kw", -5.0)]), (900, &[("power_kw", -5.0)])]);
         let mut history = HashMap::new();
         history.insert("pv".to_string(), buf);
 
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_LIMIT", 900);
-        let report =
-            build_measurement_report_for_obligation(&ob, &history, "ven-1").unwrap();
+        let report = build_measurement_report_for_obligation(&ob, &history, "ven-1").unwrap();
         let intervals = report["resources"][0]["intervals"].as_array().unwrap();
 
         for iv in intervals {
@@ -723,16 +712,12 @@ mod tests {
 
     #[test]
     fn obligation_report_export_uses_absolute_negative() {
-        let buf = make_buf(&[
-            (0, &[("power_kw", -3.0)]),
-            (900, &[("power_kw", -3.0)]),
-        ]);
+        let buf = make_buf(&[(0, &[("power_kw", -3.0)]), (900, &[("power_kw", -3.0)])]);
         let mut history = HashMap::new();
         history.insert("pv".to_string(), buf);
 
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_LIMIT", 900);
-        let report =
-            build_measurement_report_for_obligation(&ob, &history, "ven-1").unwrap();
+        let report = build_measurement_report_for_obligation(&ob, &history, "ven-1").unwrap();
         let intervals = report["resources"][0]["intervals"].as_array().unwrap();
 
         for iv in intervals {
@@ -764,8 +749,7 @@ mod tests {
         history.insert("ev".to_string(), buf);
 
         let ob = make_obligation("e1", "p1", "STORAGE_CHARGE_LEVEL", 900);
-        let report =
-            build_measurement_report_for_obligation(&ob, &history, "ven-1").unwrap();
+        let report = build_measurement_report_for_obligation(&ob, &history, "ven-1").unwrap();
         let intervals = report["resources"][0]["intervals"].as_array().unwrap();
 
         assert!(!intervals.is_empty());
@@ -789,14 +773,8 @@ mod tests {
 
     #[test]
     fn net_site_power_sums_assets() {
-        let buf1 = make_buf(&[
-            (0, &[("power_kw", 2.0)]),
-            (60, &[("power_kw", 3.0)]),
-        ]);
-        let buf2 = make_buf(&[
-            (0, &[("power_kw", -1.0)]),
-            (60, &[("power_kw", 1.0)]),
-        ]);
+        let buf1 = make_buf(&[(0, &[("power_kw", 2.0)]), (60, &[("power_kw", 3.0)])]);
+        let buf2 = make_buf(&[(0, &[("power_kw", -1.0)]), (60, &[("power_kw", 1.0)])]);
         let mut history = HashMap::new();
         history.insert("ev".to_string(), buf1);
         history.insert("pv".to_string(), buf2);

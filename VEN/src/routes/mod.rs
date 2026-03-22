@@ -27,14 +27,23 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/health", get(system::health))
         .route("/events", get(events::get_events))
         .route("/programs", get(events::get_programs))
-        .route("/sensors", get(events::get_sensors).post(events::post_sensors))
-        .route("/reports", get(reports::get_reports).post(reports::post_reports))
+        .route(
+            "/sensors",
+            get(events::get_sensors).post(events::post_sensors),
+        )
+        .route(
+            "/reports",
+            get(reports::get_reports).post(reports::post_reports),
+        )
         .route("/reports/:id", put(reports::put_report))
         .route("/sim", get(sim::get_sim))
         .route("/sim/schema", get(sim::get_sim_schema))
         .route("/sim/reset/:asset_id", post(sim::post_sim_reset))
         .route("/sim/config/battery", put(sim::put_sim_config_battery))
-        .route("/sim/override", get(sim::get_sim_override).post(sim::post_sim_override))
+        .route(
+            "/sim/override",
+            get(sim::get_sim_override).post(sim::post_sim_override),
+        )
         .route("/trace/events", get(trace::get_trace_events))
         .route("/trace/history", get(trace::get_trace_history))
         .route("/metrics", get(system::get_metrics))
@@ -54,7 +63,10 @@ pub fn build_router(ctx: AppCtx) -> Router {
         // HEMS Stage 4 routes
         .route("/ledger", get(hems::get_ledger))
         // HEMS Stage 5 routes
-        .route("/user-requests", get(hems::get_requests).post(hems::post_requests))
+        .route(
+            "/user-requests",
+            get(hems::get_requests).post(hems::post_requests),
+        )
         .route("/user-requests/:id", delete(hems::delete_request))
         .route("/flexibility", get(hems::get_flexibility))
         .with_state(ctx)

@@ -71,7 +71,9 @@ pub fn serialize_grid_timeline(
 }
 
 /// Serialize a single AssetTimelinePoint (the now-point) to JSON.
-pub fn serialize_now_point(point: &crate::controller::trace::AssetTimelinePoint) -> serde_json::Value {
+pub fn serialize_now_point(
+    point: &crate::controller::trace::AssetTimelinePoint,
+) -> serde_json::Value {
     let values: serde_json::Map<String, serde_json::Value> = point
         .values
         .iter()
@@ -87,8 +89,8 @@ pub async fn get_timeline(
     Path(asset_id): Path<String>,
     Query(params): Query<TimelineParams>,
 ) -> impl IntoResponse {
-    use axum::http::StatusCode;
     use crate::controller::timeline::compute_uniform_grid;
+    use axum::http::StatusCode;
     use std::collections::HashSet;
 
     let now = Utc::now();
@@ -100,7 +102,8 @@ pub async fn get_timeline(
 
     let window_start = now - chrono::Duration::milliseconds((hours_back * 3_600_000.0) as i64);
     let window_end = now + chrono::Duration::milliseconds((hours_forward * 3_600_000.0) as i64);
-    let (history_grid, future_grid) = compute_uniform_grid(window_start, window_end, now, resolution_s);
+    let (history_grid, future_grid) =
+        compute_uniform_grid(window_start, window_end, now, resolution_s);
 
     let ct = ctx.state.controller_trace().await;
     let plan = ctx.state.active_plan().await;
@@ -155,7 +158,10 @@ pub fn build_grid_aligned_array(
         history,
         plan,
         now,
-        TimeWindow { hours_back, hours_forward },
+        TimeWindow {
+            hours_back,
+            hours_forward,
+        },
     )?;
 
     // Split raw points into history (ts < now) and future (ts >= now).
@@ -194,7 +200,8 @@ pub async fn get_timeline_all(
 
     let window_start = now - chrono::Duration::milliseconds((hours_back * 3_600_000.0) as i64);
     let window_end = now + chrono::Duration::milliseconds((hours_forward * 3_600_000.0) as i64);
-    let (history_grid, future_grid) = compute_uniform_grid(window_start, window_end, now, resolution_s);
+    let (history_grid, future_grid) =
+        compute_uniform_grid(window_start, window_end, now, resolution_s);
 
     let ct = ctx.state.controller_trace().await;
     let plan = ctx.state.active_plan().await;

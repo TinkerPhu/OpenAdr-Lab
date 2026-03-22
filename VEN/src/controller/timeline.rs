@@ -119,12 +119,7 @@ pub fn resample_to_grid(
             let mut any_non_nan = false;
 
             for key in all_keys {
-                let weighted_avg = locf_weighted_mean(
-                    &rows,
-                    key,
-                    bucket_start_ms,
-                    bucket_end_ms,
-                );
+                let weighted_avg = locf_weighted_mean(&rows, key, bucket_start_ms, bucket_end_ms);
                 if !weighted_avg.is_nan() {
                     any_non_nan = true;
                 }
@@ -325,11 +320,11 @@ pub fn build_asset_timeline(
 mod tests {
     use super::*;
     use crate::controller::trace::AssetHistoryBuffer;
-    use crate::entities::plan::{
-        PacketAllocation, Plan, PlanTimeSlot, PlanningHorizon, SlotType, FirmSummary,
-        FlexibleSummary,
-    };
     use crate::entities::asset::PlanTrigger;
+    use crate::entities::plan::{
+        FirmSummary, FlexibleSummary, PacketAllocation, Plan, PlanTimeSlot, PlanningHorizon,
+        SlotType,
+    };
     use chrono::Utc;
     use uuid::Uuid;
 
@@ -345,10 +340,7 @@ mod tests {
         let mut hist = HashMap::new();
         let mut buf = AssetHistoryBuffer::new(3600);
         for (offset, power) in rows {
-            buf.push(
-                ts(*offset),
-                [("power_kw".to_string(), *power)].into(),
-            );
+            buf.push(ts(*offset), [("power_kw".to_string(), *power)].into());
         }
         hist.insert(asset_id.to_string(), buf);
         hist
@@ -378,7 +370,12 @@ mod tests {
         }
     }
 
-    fn make_slot(start_offset_s: i64, asset_id: &str, power_kw: f64, now: DateTime<Utc>) -> PlanTimeSlot {
+    fn make_slot(
+        start_offset_s: i64,
+        asset_id: &str,
+        power_kw: f64,
+        now: DateTime<Utc>,
+    ) -> PlanTimeSlot {
         let start = now + Duration::seconds(start_offset_s);
         PlanTimeSlot {
             slot_index: 0,
@@ -427,7 +424,10 @@ mod tests {
             &history,
             None,
             now,
-            TimeWindow { hours_back: 1.0, hours_forward: 1.0 },
+            TimeWindow {
+                hours_back: 1.0,
+                hours_forward: 1.0,
+            },
         );
         assert!(result.is_none());
     }
@@ -444,7 +444,10 @@ mod tests {
             &history,
             None,
             now,
-            TimeWindow { hours_back: 1.0, hours_forward: 0.0 },
+            TimeWindow {
+                hours_back: 1.0,
+                hours_forward: 0.0,
+            },
         )
         .unwrap();
         assert_eq!(result.len(), 3);
@@ -466,7 +469,10 @@ mod tests {
             &history,
             Some(&plan),
             now,
-            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+            TimeWindow {
+                hours_back: 0.0,
+                hours_forward: 1.0,
+            },
         )
         .unwrap();
         assert_eq!(result.len(), 1);
@@ -490,7 +496,10 @@ mod tests {
             &history,
             Some(&plan),
             now,
-            TimeWindow { hours_back: 1.0, hours_forward: 1.0 },
+            TimeWindow {
+                hours_back: 1.0,
+                hours_forward: 1.0,
+            },
         )
         .unwrap();
         // Both past rows (ts(0), ts(1800)) and 1 future point
@@ -521,7 +530,10 @@ mod tests {
             &history,
             Some(&plan),
             now,
-            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+            TimeWindow {
+                hours_back: 0.0,
+                hours_forward: 1.0,
+            },
         )
         .unwrap();
         assert_eq!(result.len(), 1);
@@ -544,7 +556,10 @@ mod tests {
             &history,
             Some(&plan),
             now,
-            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+            TimeWindow {
+                hours_back: 0.0,
+                hours_forward: 1.0,
+            },
         )
         .unwrap();
         // No EV allocation → still emits a 0 kW point so timestamps stay aligned
@@ -567,11 +582,19 @@ mod tests {
             &history,
             Some(&plan),
             now,
-            TimeWindow { hours_back: 1.0, hours_forward: 1.0 },
+            TimeWindow {
+                hours_back: 1.0,
+                hours_forward: 1.0,
+            },
         )
         .unwrap();
         for w in result.windows(2) {
-            assert!(w[0].ts <= w[1].ts, "Result is not sorted: {:?} > {:?}", w[0].ts, w[1].ts);
+            assert!(
+                w[0].ts <= w[1].ts,
+                "Result is not sorted: {:?} > {:?}",
+                w[0].ts,
+                w[1].ts
+            );
         }
     }
 
@@ -650,9 +673,18 @@ mod tests {
     fn resample_multiple_rows_per_bucket() {
         // 3 rows in a single 10-second bucket: ts(0)=1.0, ts(3)=2.0, ts(7)=3.0
         let points = vec![
-            AssetTimelinePoint { ts: ts(0), values: [("power_kw".into(), 1.0)].into() },
-            AssetTimelinePoint { ts: ts(3), values: [("power_kw".into(), 2.0)].into() },
-            AssetTimelinePoint { ts: ts(7), values: [("power_kw".into(), 3.0)].into() },
+            AssetTimelinePoint {
+                ts: ts(0),
+                values: [("power_kw".into(), 1.0)].into(),
+            },
+            AssetTimelinePoint {
+                ts: ts(3),
+                values: [("power_kw".into(), 2.0)].into(),
+            },
+            AssetTimelinePoint {
+                ts: ts(7),
+                values: [("power_kw".into(), 3.0)].into(),
+            },
         ];
         let grid = vec![ts(0)]; // single bucket [0, 10)
         let result = resample_to_grid(&points, &grid, 10);
@@ -664,9 +696,10 @@ mod tests {
 
     #[test]
     fn resample_single_row_per_bucket() {
-        let points = vec![
-            AssetTimelinePoint { ts: ts(2), values: [("power_kw".into(), 5.0)].into() },
-        ];
+        let points = vec![AssetTimelinePoint {
+            ts: ts(2),
+            values: [("power_kw".into(), 5.0)].into(),
+        }];
         let grid = vec![ts(0)]; // bucket [0, 10)
         let result = resample_to_grid(&points, &grid, 10);
         let vals = result[0].as_ref().unwrap();
@@ -685,9 +718,10 @@ mod tests {
 
     #[test]
     fn resample_nan_only_bucket_returns_none() {
-        let points = vec![
-            AssetTimelinePoint { ts: ts(0), values: [("power_kw".into(), f64::NAN)].into() },
-        ];
+        let points = vec![AssetTimelinePoint {
+            ts: ts(0),
+            values: [("power_kw".into(), f64::NAN)].into(),
+        }];
         let grid = vec![ts(0)];
         let result = resample_to_grid(&points, &grid, 10);
         assert!(result[0].is_none());
@@ -698,8 +732,14 @@ mod tests {
         let now = ts(100);
         let mut hist = HashMap::new();
         let mut buf = AssetHistoryBuffer::new(100);
-        buf.push(ts(50), [("power_kw".into(), 1.0), ("soc".into(), 0.5)].into());
-        buf.push(ts(99), [("power_kw".into(), 2.0), ("soc".into(), 0.6)].into());
+        buf.push(
+            ts(50),
+            [("power_kw".into(), 1.0), ("soc".into(), 0.5)].into(),
+        );
+        buf.push(
+            ts(99),
+            [("power_kw".into(), 2.0), ("soc".into(), 0.6)].into(),
+        );
         hist.insert("ev".to_string(), buf);
 
         let np = build_now_point("ev", now, &hist);

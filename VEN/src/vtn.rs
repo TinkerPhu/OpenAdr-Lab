@@ -30,7 +30,12 @@ struct Token {
 }
 
 impl VtnClient {
-    pub fn new(base_url: String, client_id: String, client_secret: String, ven_name: String) -> Self {
+    pub fn new(
+        base_url: String,
+        client_id: String,
+        client_secret: String,
+        ven_name: String,
+    ) -> Self {
         Self {
             http: reqwest::Client::new(),
             base_url,
@@ -67,7 +72,8 @@ impl VtnClient {
             client_secret: &'a str,
         }
 
-        let resp = self.http
+        let resp = self
+            .http
             .post(token_url)
             .form(&Form {
                 grant_type: "client_credentials",
@@ -101,7 +107,8 @@ impl VtnClient {
         let token = self.ensure_token().await?;
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
 
-        let resp = self.http
+        let resp = self
+            .http
             .get(&url)
             .bearer_auth(&token)
             .send()
@@ -112,7 +119,8 @@ impl VtnClient {
             // Token invalid or VTN restarted with new signing key; refresh once and retry
             self.invalidate_token().await;
             let new_token = self.ensure_token().await?;
-            let resp = self.http
+            let resp = self
+                .http
                 .get(&url)
                 .bearer_auth(&new_token)
                 .send()
@@ -141,7 +149,8 @@ impl VtnClient {
         let token = self.ensure_token().await?;
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
 
-        let resp = self.http
+        let resp = self
+            .http
             .post(&url)
             .bearer_auth(&token)
             .json(&body)
@@ -152,7 +161,8 @@ impl VtnClient {
         if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
             self.invalidate_token().await;
             let new_token = self.ensure_token().await?;
-            let resp = self.http
+            let resp = self
+                .http
                 .post(&url)
                 .bearer_auth(&new_token)
                 .json(&body)
@@ -182,7 +192,8 @@ impl VtnClient {
         let token = self.ensure_token().await?;
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
 
-        let resp = self.http
+        let resp = self
+            .http
             .put(&url)
             .bearer_auth(&token)
             .json(&body)
@@ -193,7 +204,8 @@ impl VtnClient {
         if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
             self.invalidate_token().await;
             let new_token = self.ensure_token().await?;
-            let resp = self.http
+            let resp = self
+                .http
                 .put(&url)
                 .bearer_auth(&new_token)
                 .json(&body)
@@ -219,11 +231,16 @@ impl VtnClient {
     }
 
     /// POST JSON, returning the raw response (status + body) without error-mapping.
-    async fn post_json_raw(&self, path: &str, body: &serde_json::Value) -> Result<(StatusCode, String)> {
+    async fn post_json_raw(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<(StatusCode, String)> {
         let token = self.ensure_token().await?;
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
 
-        let resp = self.http
+        let resp = self
+            .http
             .post(&url)
             .bearer_auth(&token)
             .json(body)
@@ -263,7 +280,8 @@ impl VtnClient {
 
         if status == StatusCode::CONFLICT {
             // Extract reportName from the request body
-            let report_name = body.get("reportName")
+            let report_name = body
+                .get("reportName")
                 .and_then(|v| v.as_str())
                 .context("409 Conflict but no reportName in body")?;
 
@@ -278,7 +296,11 @@ impl VtnClient {
         serde_json::from_str(&text).context("parse report response")
     }
 
-    pub async fn update_report(&self, id: &str, body: serde_json::Value) -> Result<serde_json::Value> {
+    pub async fn update_report(
+        &self,
+        id: &str,
+        body: serde_json::Value,
+    ) -> Result<serde_json::Value> {
         let path = format!("/reports/{id}");
         self.put_json(&path, body).await
     }
