@@ -119,4 +119,21 @@ impl ReservationLayer {
             .map(|r| r.kw)
             .sum()
     }
+
+    /// Source of the lowest-priority-number (highest authority) reservation active
+    /// at `t` for `asset_id` (including site-level). Returns `PolicyDefault` if none
+    /// found — caller should only invoke when a reservation is known to be active.
+    pub fn primary_source(&self, asset_id: &str, t: DateTime<Utc>) -> ReservationSource {
+        self.reservations
+            .iter()
+            .filter(|r| {
+                let (ws, we) = r.window;
+                ws <= t
+                    && t < we
+                    && (r.asset_id.is_none() || r.asset_id.as_deref() == Some(asset_id))
+            })
+            .min_by_key(|r| r.priority)
+            .map(|r| r.source.clone())
+            .unwrap_or(ReservationSource::PolicyDefault)
+    }
 }

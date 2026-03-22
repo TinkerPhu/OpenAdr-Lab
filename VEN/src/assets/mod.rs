@@ -373,6 +373,33 @@ impl AssetConfig {
             Self::BaseLoad(cfg) => cfg.default_post_deadline_comfort_bid(),
         }
     }
+
+    pub fn simulate_free(&self, state: &AssetState, duration: Duration) -> Trajectory {
+        use Asset as _;
+        match self {
+            Self::Battery(cfg) => cfg.simulate_free(state, duration),
+            Self::Ev(cfg) => cfg.simulate_free(state, duration),
+            Self::Heater(cfg) => cfg.simulate_free(state, duration),
+            Self::Pv(cfg) => cfg.simulate_free(state, duration),
+            Self::BaseLoad(cfg) => cfg.simulate_free(state, duration),
+        }
+    }
+
+    pub fn capability_trajectory(
+        &self,
+        state: &AssetState,
+        duration: Duration,
+        resolution: Duration,
+    ) -> Vec<(DateTime<Utc>, AssetCapability)> {
+        use Asset as _;
+        match self {
+            Self::Battery(cfg) => cfg.capability_trajectory(state, duration, resolution),
+            Self::Ev(cfg) => cfg.capability_trajectory(state, duration, resolution),
+            Self::Heater(cfg) => cfg.capability_trajectory(state, duration, resolution),
+            Self::Pv(cfg) => cfg.capability_trajectory(state, duration, resolution),
+            Self::BaseLoad(cfg) => cfg.capability_trajectory(state, duration, resolution),
+        }
+    }
 }
 
 /// Phase A subset of the Asset trait. Full trait (with id(), current_state(), history())
@@ -385,6 +412,34 @@ pub trait Asset: Send + Sync {
 
     /// Point-in-time feasible power range given current state.
     fn capability(&self, state: &AssetState) -> AssetCapability;
+
+    /// Free-run: step with setpoint=0.0 for `duration`. Single physics step.
+    /// Override for assets where "free run" means something other than zero setpoint.
+    fn simulate_free(&self, initial: &AssetState, duration: Duration) -> Trajectory {
+        let now = Utc::now();
+        self.simulate_forward(initial, &[(now, 0.0), (now + duration, 0.0)])
+    }
+
+    /// Capability at each `resolution` step in free-run (setpoint=0.0).
+    /// Steps `duration / resolution` times; returns (timestamp, capability) pairs.
+    /// Used by `precompute_lookahead()`.
+    fn capability_trajectory(
+        &self,
+        initial: &AssetState,
+        duration: Duration,
+        resolution: Duration,
+    ) -> Vec<(DateTime<Utc>, AssetCapability)> {
+        let now = Utc::now();
+        let n = (duration.num_seconds() / resolution.num_seconds().max(1)) as usize;
+        let mut state = initial.clone();
+        let mut result = Vec::with_capacity(n);
+        for i in 1..=n {
+            let (next, _) = self.step(&state, 0.0, resolution);
+            result.push((now + resolution * i as i32, self.capability(&next)));
+            state = next;
+        }
+        result
+    }
 
     /// Project state forward over an explicit setpoint schedule (default impl).
     /// `setpoints` is a list of (slot_start, setpoint_kw) pairs in ascending time order.
