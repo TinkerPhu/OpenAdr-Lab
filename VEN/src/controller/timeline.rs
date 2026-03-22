@@ -434,6 +434,7 @@ mod tests {
             flexible_summary: FlexibleSummary::default(),
             packets: vec![],
             warnings: vec![],
+            steps: vec![],
         }
     }
 

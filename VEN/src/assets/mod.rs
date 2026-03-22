@@ -72,7 +72,7 @@ pub struct ControlDescriptor {
 ///   max_import_kw ≥ 0  — ceiling (maximum import magnitude)
 ///
 /// For non-curtailable assets (PV, BaseLoad): max_export_kw == max_import_kw == actual_power_kw.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct AssetCapability {
     pub max_export_kw: f64,
     pub max_import_kw: f64,
