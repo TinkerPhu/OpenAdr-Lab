@@ -37,7 +37,7 @@ reactor:
 simulator:
   tick_s: 1
   persist_every_s: 10
-  report_interval_s: 10
+  report_interval_s: 300
 
 planner:
   plan_step_s: 300
