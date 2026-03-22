@@ -3,17 +3,18 @@
 ## Context
 
 Phase B delivered an explicit `ReservationLayer` in `controller/reservation.rs`.
-The planner now calls `reservations.import_limit_kw(t)` and `reservations.available_cap(asset_id, phys_cap, t)`
-instead of reading scalar fields from `OadrCapacityState`. The `available_cap()` method is
-currently a pass-through stub with a `// Phase C will subtract asset-level reservations here` comment.
+The planner now calls `reservations.available_cap(asset_id, phys_cap, t)` per asset per
+planning step alongside `OadrCapacityState` for site-level capacity limits. The
+`available_cap()` method is already fully implemented (per spec §2) — Phase B completed it.
 
-Phase C is **additive**: a new `FlexibilityPolicy` module generates `Reservation` records from
-profile YAML config and from pre-announced VTN events. The planner is unchanged — it already
-calls `available_cap()`, which Phase C implements properly.
+Phase C is **additive**: a new `FlexibilityPolicy` module generates `Reservation` records
+from profile YAML config. The planner is unchanged — it already calls `available_cap()`,
+which will now receive policy reservations in addition to VTN FIRM event reservations.
 
 **Architecture reference:** `docs/architecture/ven_planning_architecture.md` §6
+**Interface spec:** `docs/architecture/ven_asset_interface_spec.md` §5
 **Prerequisite:** Phase B CP1 + CP2 + CP3 complete, all BDD scenarios green.
-**Gate per CP:** stated at the end of each checkpoint.
+**Gate per CP:** stated at end of each checkpoint.
 **Final gate:** New BDD scenarios for policy-constrained planning green.
 
 ---
@@ -22,344 +23,204 @@ calls `available_cap()`, which Phase C implements properly.
 
 | Element | Current state (after Phase B) | After Phase C |
 |---|---|---|
-| `ReservationLayer::available_cap()` | Pass-through stub | Applies per-asset Up/Down reservations |
-| `controller/flexibility_policy.rs` | Does not exist | New module: Layer 1 + Layer 2 |
-| `Profile` (profile.rs) | No policy field | `flexibility_policy: FlexibilityPolicyConfig` |
-| `spawn_planning()` | Builds `ReservationLayer` from capacity events only | Also merges policy reservations |
-| `openadr_interface.rs` | No SIMPLE-event → reservation mapping | New `parse_firm_event_reservations()` |
+| `controller/flexibility_policy.rs` | Does not exist | New module: `FlexibilityPolicy`, `DefaultReserve`, `ScheduledWindow` |
+| `Profile` (profile.rs) | No policy field | `flexibility_policy: FlexibilityPolicy` (with `#[serde(default)]`) |
+| `spawn_planning()` | Builds `ReservationLayer` from SIMPLE FIRM events only | Also merges policy reservations |
+| `openadr_interface.rs` `parse_firm_reservations()` | Excludes future-period intervals | Extended to include pre-announced future intervals (Layer 3) |
 | BDD suite | 123 scenarios | 123 + new policy scenarios |
 
-Nothing in the physics models, route handlers, or plan entity changes.
+`ReservationLayer`, `available_cap()`, `insert()`, `query_asset()` — unchanged.
+Physics models, route handlers, plan entity — unchanged.
 
 ---
 
-## Reservation semantics for per-asset reservations (Phase C)
+## Reservation semantics (recap from Phase B / spec §2)
 
-Phase B site-level reservations (`asset_id = None`) use `kw` as an **absolute ceiling**:
-- `import_limit_kw(t)` = `min(kw)` across all site-level Up reservations.
+`Reservation.kw` is always a **reduction magnitude** (≥ 0), never an absolute ceiling.
+`asset_id = None` = site-level: `query_asset()` applies the reservation to every asset
+queried, which is correct — a site-level policy reserve reduces available headroom for
+all controllable assets simultaneously without needing a profile parameter.
 
-Phase C per-asset reservations (`asset_id = Some(...)`) use `kw` as **headroom to preserve**:
-- `available_cap()` reduces `phys_cap.max_import_kw` by `kw` for each active per-asset Up reservation.
+This is why `FlexibilityPolicy::generate_reservations()` does **not** take a profile
+parameter: it emits site-level reservations (`asset_id: None`) and the existing
+`available_cap()` distributes them to each asset automatically.
 
-These two interpretations never overlap (`import_limit_kw()` filters `asset_id.is_none()`;
-`available_cap()` filters `asset_id == Some(target_id)`). Document both in `reservation.rs` comments.
-
-### Distribution policy (scope note)
-
-Architecture §5.4 describes a `distribute()` function that splits a site-level headroom
-requirement across assets proportionally to their current capability. This is **Phase D** scope.
-
-For Phase C: `default_reserve.up_kw` and `scheduled_window.reserve_up_kw` are applied to
-**each controllable asset independently** — i.e., every controllable asset gets the full
-`kw` reservation. This is conservative (may over-reserve for multi-asset sites) but correct
-for single-asset setups and safe as a first iteration. A note in the YAML documents this.
-
-Controllable assets (get reservations): Battery, Ev, Heater.
-Non-controllable (excluded): Pv, BaseLoad — their `available_cap()` is always pass-through
-since `capability()` already returns a point-range for these.
+> **Note on per-asset distribution (Phase D):** The architecture §5.4 `distribute()`
+> function (split a site reserve proportionally across assets by current capability) is
+> Phase D scope. Site-level is the correct and spec-consistent starting point for Phase C.
 
 ---
 
-## Checkpoint 1 — `FlexibilityPolicyConfig` structs + YAML extension
+## Checkpoint 1 — `FlexibilityPolicy` structs + YAML extension
 
-### New structs in `controller/flexibility_policy.rs`
+### New file: `VEN/src/controller/flexibility_policy.rs`
+
+Struct names and field names match spec §5 exactly. The two justified deviations from
+the spec's native types are noted inline.
 
 ```rust
+use chrono::{DateTime, NaiveTime, Utc, Weekday};
 use serde::Deserialize;
+use uuid::Uuid;
 
-/// YAML-loaded configuration for the VEN's proactive flexibility policy.
-/// All fields are optional — a VEN with no `flexibility_policy:` section
-/// in its profile behaves identically to Phase B (no policy reservations).
+use crate::controller::reservation::{FlexDirection, Reservation, ReservationSource};
+
+/// Proactive flexibility policy — generates Reservation records so the planner
+/// always holds a configurable headroom for grid response.
+///
+/// Derives Default so Profile can use `#[serde(default)]`: an absent
+/// `flexibility_policy:` section in YAML produces zero reserve and no windows,
+/// which is behaviourally identical to Phase B.
 #[derive(Debug, Clone, Default, Deserialize)]
-pub struct FlexibilityPolicyConfig {
-    /// Layer 1: always-active headroom reserve. Lowest priority (100).
+pub struct FlexibilityPolicy {
+    /// Layer 1: always-active headroom floor. Priority 100 (lowest).
     #[serde(default)]
-    pub default_reserve: Option<DefaultReserve>,
+    pub default_reserve: DefaultReserve,
     /// Layer 2: time-windowed reserves for known DR contracts or patterns.
     #[serde(default)]
     pub scheduled_windows: Vec<ScheduledWindow>,
 }
 
-/// Always-active headroom floor. Ensures the planner never consumes all
-/// available capability.
+/// Always-active headroom floor. Both fields default to 0.0 (inactive).
 ///
-/// `up_kw` and `down_kw` are applied to **each controllable asset** as an
-/// independent per-asset headroom reservation. Site-level proportional
-/// distribution is Phase D (architecture §5.4).
-#[derive(Debug, Clone, Deserialize)]
+/// Reservations produced are site-level (`asset_id = None`): they reduce
+/// available headroom for every controllable asset via `available_cap()`.
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct DefaultReserve {
-    /// Minimum upward flexibility to keep free (import reduction headroom), kW.
+    /// Minimum upward flexibility headroom to keep free, kW (magnitude ≥ 0).
     #[serde(default)]
     pub up_kw: f64,
-    /// Minimum downward flexibility to keep free (export reduction headroom), kW.
+    /// Minimum downward flexibility headroom to keep free, kW (magnitude ≥ 0).
     #[serde(default)]
     pub down_kw: f64,
 }
 
 /// A time-windowed scheduled reserve — e.g., a known DR contract window.
 ///
-/// The planner protects `reserve_up_kw` of import headroom during this
-/// window on each controllable asset (same distribution note as DefaultReserve).
+/// `pre_load_minutes` shifts the reservation window backwards so the planner
+/// begins protecting capacity before the window opens — required when battery
+/// pre-charge is needed (charge from 10% to usable SoC takes time).
 ///
-/// `pre_load_minutes` extends the reservation window *backwards* so the
-/// planner begins protecting capacity before the window starts — critical
-/// when battery pre-charge is needed (e.g., the battery cannot charge from
-/// 10% to usable in zero seconds).
+/// Note on YAML types (justified deviations from spec §5):
+/// - `days`: stored as `Vec<String>` (["Mon", "Tue", …]) and parsed at runtime —
+///   chrono::Weekday has no built-in "Mon"/"Tue" serde support without a custom
+///   deserializer. Spec specifies `Vec<Weekday>`.
+/// - `time_start` / `time_end`: stored as `String` ("HH:MM") and parsed at runtime
+///   for the same reason. Spec specifies `NaiveTime`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScheduledWindow {
-    /// Unique identifier for this window (used in ReservationSource).
+    /// Unique identifier (used in ReservationSource::PolicySchedule).
     pub id: String,
-    /// Days of the week this window applies. Accepted strings:
-    /// "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun"
+    /// Days of week: "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun".
     #[serde(default)]
     pub days: Vec<String>,
-    /// Window start time in "HH:MM" (24-hour, local VEN time = UTC for now).
+    /// Window start in "HH:MM" (24-hour UTC).
     pub time_start: String,
-    /// Window end time in "HH:MM".
+    /// Window end in "HH:MM" (24-hour UTC).
     pub time_end: String,
-    /// Import headroom to protect during this window, kW.
+    /// Upward headroom to protect during the window, kW (magnitude ≥ 0).
     #[serde(default)]
     pub reserve_up_kw: f64,
-    /// How many minutes before `time_start` to begin reserving capacity.
-    /// The planner starts protecting capacity at `time_start − pre_load_minutes`.
+    /// Downward headroom to protect during the window, kW (magnitude ≥ 0).
     #[serde(default)]
-    pub pre_load_minutes: u64,
-}
-```
-
-Wire into `controller/mod.rs`:
-
-```rust
-pub mod flexibility_policy;
-```
-
-### YAML profile extension — `profile.rs`
-
-Add to `Profile`:
-
-```rust
-#[serde(default)]
-pub flexibility_policy: FlexibilityPolicyConfig,
-```
-
-Import:
-
-```rust
-use crate::controller::flexibility_policy::FlexibilityPolicyConfig;
-```
-
-### Example YAML (not written to any profile in CP1 — profiles remain unchanged)
-
-```yaml
-flexibility_policy:
-  default_reserve:
-    up_kw: 3.0    # keep 3 kW of import headroom per controllable asset, always
-    down_kw: 0.0
-  scheduled_windows:
-    - id: "peak_dr_weekday"
-      days: ["Mon", "Tue", "Wed", "Thu", "Fri"]
-      time_start: "16:00"
-      time_end:   "20:00"
-      reserve_up_kw: 5.0
-      pre_load_minutes: 60
-```
-
-**CP1 gate:** `cargo check` passes. No profile YAML files are changed. No behavior change.
-
----
-
-## Checkpoint 2 — Extend `ReservationLayer::available_cap()`
-
-This is the only change to `controller/reservation.rs` in Phase C. The stub is replaced with
-real logic. Site-level reservation paths (`import_limit_kw()`, `export_limit_kw()`) are unchanged.
-
-### Updated `available_cap()` in `reservation.rs`
-
-```rust
-/// Effective available capability for `asset_id` after applying per-asset
-/// headroom reservations active at time `t`.
-///
-/// Per-asset reservations (`asset_id = Some(...)`) use `kw` as **headroom
-/// to preserve** — distinct from site-level reservations which use `kw` as
-/// an absolute ceiling. See module-level doc comment.
-///
-/// Conflict resolution for per-asset reservations:
-/// - Multiple Up reservations on the same asset: sum their `kw` values
-///   (each reservation independently carves out headroom).
-/// - The result is clamped so max_import_kw never drops below max_export_kw.
-pub fn available_cap(
-    &self,
-    asset_id: &str,
-    phys_cap: AssetCapability,
-    t: DateTime<Utc>,
-) -> AssetCapability {
-    let active = self.query(t);
-
-    let reserved_up_kw: f64 = active
-        .iter()
-        .filter(|r| {
-            r.asset_id.as_deref() == Some(asset_id)
-                && r.direction == FlexDirection::Up
-        })
-        .map(|r| r.kw)
-        .sum();
-
-    let reserved_down_kw: f64 = active
-        .iter()
-        .filter(|r| {
-            r.asset_id.as_deref() == Some(asset_id)
-                && r.direction == FlexDirection::Down
-        })
-        .map(|r| r.kw)
-        .sum();
-
-    AssetCapability {
-        // Reduce max import by reserved up headroom; floor at max_export_kw.
-        max_import_kw: (phys_cap.max_import_kw - reserved_up_kw)
-            .max(phys_cap.max_export_kw),
-        // Reduce max export by reserved down headroom (make less negative); ceiling at max_import_kw.
-        max_export_kw: (phys_cap.max_export_kw + reserved_down_kw)
-            .min(phys_cap.max_import_kw),
-    }
-}
-```
-
-### Unit tests for `available_cap()` (in `reservation.rs` test module)
-
-```
-test_available_cap_no_reservations_returns_physical
-    // No reservations → identical to phys_cap.
-
-test_available_cap_up_reservation_reduces_max_import
-    // 3.0 kW Up reservation on "battery" with phys_cap {max_import_kw: 5.0, max_export_kw: -5.0}
-    // → available {max_import_kw: 2.0, max_export_kw: -5.0}
-
-test_available_cap_down_reservation_reduces_max_export
-    // 2.0 kW Down reservation on "battery"
-    // → max_export_kw = -5.0 + 2.0 = -3.0
-
-test_available_cap_multiple_up_reservations_are_summed
-    // Two Up reservations of 2.0 and 3.0 kW → reserved_up = 5.0 kW
-
-test_available_cap_reservation_clamps_to_zero
-    // 10.0 kW Up reservation on asset with max_import_kw = 3.0 → max_import_kw = max_export_kw
-
-test_available_cap_site_level_reservation_does_not_apply
-    // Reservation with asset_id = None → not applied to "battery" (site-level path only)
-
-test_available_cap_different_asset_does_not_apply
-    // Reservation for "ev" → not applied when querying "battery"
-
-test_available_cap_expired_reservation_does_not_apply
-    // Reservation with window_end before t → not active, not applied
-```
-
-**CP2 gate:** `cargo test` (unit tests) passes. No planner change yet — `available_cap()` is called by
-the planner in Phase B but currently has no per-asset reservations to apply, so BDD behavior is unchanged.
-
----
-
-## Checkpoint 3 — `flexibility_policy.rs`: generate reservations
-
-Add a `FlexibilityPolicy` struct that wraps `FlexibilityPolicyConfig` and exposes one method:
-`reservations(profile, now, horizon) -> Vec<Reservation>`.
-
-### `FlexibilityPolicy` struct
-
-```rust
-use chrono::{DateTime, Datelike, Duration, NaiveTime, Utc, Weekday};
-use crate::controller::reservation::{FlexDirection, Reservation, ReservationSource};
-use crate::profile::{AssetProfile, Profile};
-
-pub struct FlexibilityPolicy {
-    pub config: FlexibilityPolicyConfig,
+    pub reserve_down_kw: f64,
+    /// Minutes before `time_start` to begin reserving. Spec type: u32.
+    #[serde(default)]
+    pub pre_load_minutes: u32,
 }
 
 impl FlexibilityPolicy {
-    pub fn new(config: FlexibilityPolicyConfig) -> Self {
-        Self { config }
-    }
-
-    /// Generate all policy reservations for the planning horizon [now, now+horizon].
+    /// Materialise Reservation records covering [from, until].
     ///
-    /// Returns an empty vec if the profile has no `flexibility_policy` section.
-    /// The caller merges these into the `ReservationLayer` alongside VTN reservations.
-    pub fn reservations(
+    /// All reservations are site-level (asset_id = None). `available_cap()` in
+    /// ReservationLayer applies them to each asset that is queried — no profile
+    /// parameter needed. Matches spec §5 signature exactly.
+    ///
+    /// Called once per planning cycle in `spawn_planning()`.
+    pub fn generate_reservations(
         &self,
-        profile:  &Profile,
-        now:      DateTime<Utc>,
-        horizon:  Duration,
+        from:  DateTime<Utc>,
+        until: DateTime<Utc>,
     ) -> Vec<Reservation> {
         let mut out = Vec::new();
-        let controllable_ids = controllable_asset_ids(profile);
 
-        // Layer 1: default reserve
-        if let Some(ref reserve) = self.config.default_reserve {
-            for id in &controllable_ids {
-                if reserve.up_kw > 0.0 {
-                    out.push(Reservation {
-                        window_start: now,
-                        window_end:   now + horizon,
-                        asset_id:     Some(id.clone()),
-                        kw:           reserve.up_kw,
-                        direction:    FlexDirection::Up,
-                        source:       ReservationSource::PolicyDefault,
-                        priority:     100, // lowest — VTN and scheduled windows always win
-                    });
-                }
-                if reserve.down_kw > 0.0 {
-                    out.push(Reservation {
-                        window_start: now,
-                        window_end:   now + horizon,
-                        asset_id:     Some(id.clone()),
-                        kw:           reserve.down_kw,
-                        direction:    FlexDirection::Down,
-                        source:       ReservationSource::PolicyDefault,
-                        priority:     100,
-                    });
-                }
-            }
+        // Layer 1 — default reserve
+        if self.default_reserve.up_kw > 0.0 {
+            out.push(Reservation {
+                id:        Uuid::new_v4(),
+                window:    (from, until),
+                asset_id:  None,
+                kw:        self.default_reserve.up_kw,
+                direction: FlexDirection::Up,
+                source:    ReservationSource::PolicyDefault,
+                priority:  100,
+            });
+        }
+        if self.default_reserve.down_kw > 0.0 {
+            out.push(Reservation {
+                id:        Uuid::new_v4(),
+                window:    (from, until),
+                asset_id:  None,
+                kw:        self.default_reserve.down_kw,
+                direction: FlexDirection::Down,
+                source:    ReservationSource::PolicyDefault,
+                priority:  100,
+            });
         }
 
-        // Layer 2: scheduled windows
-        for window in &self.config.scheduled_windows {
+        // Layer 2 — scheduled windows
+        for window in &self.scheduled_windows {
             let Ok(t_start) = NaiveTime::parse_from_str(&window.time_start, "%H:%M") else {
-                tracing::warn!(id = %window.id, "invalid time_start, skipping window");
+                tracing::warn!(id = %window.id, "invalid time_start — window skipped");
                 continue;
             };
             let Ok(t_end) = NaiveTime::parse_from_str(&window.time_end, "%H:%M") else {
-                tracing::warn!(id = %window.id, "invalid time_end, skipping window");
+                tracing::warn!(id = %window.id, "invalid time_end — window skipped");
                 continue;
             };
-            let pre_load = Duration::minutes(window.pre_load_minutes as i64);
-            let active_weekdays = parse_weekdays(&window.days);
+            let active_days = parse_weekdays(&window.days);
+            let pre_load = chrono::Duration::minutes(window.pre_load_minutes as i64);
 
-            // Walk each day in [now, now+horizon] and emit a reservation for matching days.
-            let mut cursor = now;
-            while cursor <= now + horizon {
+            // Walk each calendar day in [from, until] and emit for matching weekdays.
+            let mut cursor = from;
+            while cursor <= until {
                 let date = cursor.date_naive();
-                if active_weekdays.contains(&date.weekday()) {
+                if active_days.contains(&date.weekday()) {
                     let ws = date.and_time(t_start).and_utc() - pre_load;
                     let we = date.and_time(t_end).and_utc();
-                    if we > now && ws < now + horizon {
-                        for id in &controllable_ids {
-                            if window.reserve_up_kw > 0.0 {
-                                out.push(Reservation {
-                                    window_start: ws.max(now),
-                                    window_end:   we.min(now + horizon),
-                                    asset_id:     Some(id.clone()),
-                                    kw:           window.reserve_up_kw,
-                                    direction:    FlexDirection::Up,
-                                    source:       ReservationSource::PolicySchedule {
-                                        policy_id: window.id.clone(),
-                                    },
-                                    priority: 50,
-                                });
-                            }
+                    // Clamp to [from, until]; skip if window is fully outside.
+                    if we > from && ws < until {
+                        let clamped_ws = ws.max(from);
+                        let clamped_we = we.min(until);
+                        if window.reserve_up_kw > 0.0 {
+                            out.push(Reservation {
+                                id:        Uuid::new_v4(),
+                                window:    (clamped_ws, clamped_we),
+                                asset_id:  None,
+                                kw:        window.reserve_up_kw,
+                                direction: FlexDirection::Up,
+                                source:    ReservationSource::PolicySchedule {
+                                    policy_id: window.id.clone(),
+                                },
+                                priority:  50,
+                            });
+                        }
+                        if window.reserve_down_kw > 0.0 {
+                            out.push(Reservation {
+                                id:        Uuid::new_v4(),
+                                window:    (clamped_ws, clamped_we),
+                                asset_id:  None,
+                                kw:        window.reserve_down_kw,
+                                direction: FlexDirection::Down,
+                                source:    ReservationSource::PolicySchedule {
+                                    policy_id: window.id.clone(),
+                                },
+                                priority:  50,
+                            });
                         }
                     }
                 }
-                cursor += Duration::days(1);
+                cursor += chrono::Duration::days(1);
             }
         }
 
@@ -367,19 +228,8 @@ impl FlexibilityPolicy {
     }
 }
 
-/// Asset IDs for which the policy should generate per-asset reservations.
-/// Excludes Pv and BaseLoad (fixed output — no controllable headroom).
-fn controllable_asset_ids(profile: &Profile) -> Vec<String> {
-    profile
-        .assets
-        .iter()
-        .filter(|a| !matches!(a, AssetProfile::Pv(_) | AssetProfile::BaseLoad(_)))
-        .map(|a| a.id().to_string())
-        .collect()
-}
-
-/// Parse ["Mon", "Tue", ...] strings into chrono Weekday values.
-/// Unknown strings are silently ignored.
+/// Parse ["Mon", "Tue", …] strings into chrono Weekday values.
+/// Unrecognised strings are silently ignored with a warning.
 fn parse_weekdays(days: &[String]) -> Vec<Weekday> {
     days.iter()
         .filter_map(|d| match d.as_str() {
@@ -390,222 +240,206 @@ fn parse_weekdays(days: &[String]) -> Vec<Weekday> {
             "Fri" => Some(Weekday::Fri),
             "Sat" => Some(Weekday::Sat),
             "Sun" => Some(Weekday::Sun),
-            _ => None,
+            other => {
+                tracing::warn!("unknown weekday string: {other}");
+                None
+            }
         })
         .collect()
 }
 ```
 
-### Unit tests for `FlexibilityPolicy::reservations()`
+### Wire into `controller/mod.rs`
+
+```rust
+pub mod flexibility_policy;
+```
+
+### YAML profile extension — `profile.rs`
+
+Add to `Profile`:
+
+```rust
+use crate::controller::flexibility_policy::FlexibilityPolicy;
+
+// in Profile struct:
+#[serde(default)]
+pub flexibility_policy: FlexibilityPolicy,
+```
+
+`FlexibilityPolicy` derives `Default` so an absent `flexibility_policy:` section in
+YAML is behaviourally identical to Phase B (no new reservations generated).
+
+### Reference YAML (not added to any profile in CP1 — profiles unchanged)
+
+```yaml
+flexibility_policy:
+  default_reserve:
+    up_kw: 3.0
+    down_kw: 0.0
+  scheduled_windows:
+    - id: "peak_dr_weekday"
+      days: ["Mon", "Tue", "Wed", "Thu", "Fri"]
+      time_start: "16:00"
+      time_end:   "20:00"
+      reserve_up_kw: 10.0
+      reserve_down_kw: 0.0
+      pre_load_minutes: 60
+```
+
+**CP1 gate:** `cargo check` passes. No profile YAML files changed. No behaviour change.
+
+---
+
+## Checkpoint 2 — Unit tests for `FlexibilityPolicy::generate_reservations()`
+
+All tests live in the `#[cfg(test)]` block of `controller/flexibility_policy.rs`.
+`available_cap()` is already fully tested in `reservation.rs` (Phase B); no need to
+re-test it here beyond the integration assertion below.
 
 ```
-test_no_config_returns_empty
-    // FlexibilityPolicyConfig::default() with battery + ev profile
-    // → reservations() == []
+test_default_policy_generates_no_reservations
+    // FlexibilityPolicy::default(), any [from, until]
+    // → generate_reservations() returns []
 
-test_default_reserve_up_generates_per_controllable_asset
-    // default_reserve { up_kw: 3.0, down_kw: 0.0 }, profile with battery + ev + pv
-    // → 2 Up reservations (battery, ev), 0 for pv
-    // → each has priority=100, source=PolicyDefault, window=[now, now+horizon]
+test_default_reserve_up_generates_site_level_reservation
+    // default_reserve { up_kw: 3.0, down_kw: 0.0 }
+    // → 1 reservation: asset_id=None, direction=Up, kw=3.0, priority=100
+    // → window == (from, until) exactly
 
 test_default_reserve_both_directions
-    // default_reserve { up_kw: 3.0, down_kw: 2.0 }, profile with battery
-    // → 2 reservations (one Up, one Down) for battery
+    // default_reserve { up_kw: 3.0, down_kw: 2.0 }
+    // → 2 reservations: one Up, one Down, both site-level
 
-test_scheduled_window_matching_day_emits_reservation
-    // Tuesday, time_start="14:00", time_end="16:00", days=["Tue"], reserve_up_kw=5.0
-    // now = Monday 10:00 UTC, horizon = 48 h
-    // → 1 reservation for the Tuesday window
+test_default_reserve_zero_kw_not_emitted
+    // default_reserve { up_kw: 0.0, down_kw: 1.0 }
+    // → 1 reservation (Down only); zero-kW Up is not emitted
 
-test_scheduled_window_non_matching_day_emits_nothing
-    // days=["Mon"], now = Tuesday → no reservations in 24h horizon
+test_site_level_applies_to_all_assets_via_available_cap
+    // Integration: insert a site-level Up reservation of 3.0 kW into ReservationLayer.
+    // query_asset("battery", t) → reserved_up_kw = 3.0
+    // query_asset("ev",      t) → reserved_up_kw = 3.0
+    // Both assets reduced by the same reservation — no profile lookup needed.
+
+test_scheduled_window_matching_day_emits_up_and_down
+    // Tuesday window 14:00–16:00, reserve_up_kw=5.0, reserve_down_kw=2.0
+    // from = Monday 10:00, until = Wednesday 10:00
+    // → 2 reservations (Up + Down) covering Tuesday 14:00–16:00
+
+test_scheduled_window_non_matching_day_skipped
+    // days=["Mon"], from/until span Tuesday only → 0 reservations
 
 test_scheduled_window_pre_load_shifts_window_start
     // time_start="16:00", pre_load_minutes=60
-    // → window_start = 15:00 on the matching day
+    // → window.0 = 15:00 on the matching day
 
-test_scheduled_window_applies_to_controllable_assets_only
-    // profile: battery + ev + pv, window.reserve_up_kw=5.0
-    // → reservations only for battery and ev
+test_scheduled_window_reserve_down_zero_not_emitted
+    // reserve_down_kw=0.0 → only Up reservation emitted
 
-test_available_cap_integration_layer1_layer2
-    // Construct a ReservationLayer with both a default reserve and a scheduled window.
-    // At a time inside the window: available_cap = phys_cap - max(default_reserve, window reserve)
-    // Note: both reservations are summed (not max'd) — document this behavior.
+test_scheduled_window_clamped_to_horizon
+    // Window would start before `from` or end after `until` → clamped correctly
+
+test_invalid_time_start_skips_window
+    // time_start="25:99" → window skipped, no panic
+
+test_multiple_windows_multiple_days
+    // Two windows on different days → both emit reservations within horizon
 ```
 
-**CP3 gate:** `cargo test` (unit tests) passes. No wire-up yet — `FlexibilityPolicy` is not called
-from any production path. BDD behavior unchanged.
+**CP2 gate:** `cargo test` (unit tests) passes. No production wiring yet — behaviour unchanged.
 
 ---
 
-## Checkpoint 4 — Wire `FlexibilityPolicy` into `spawn_planning()`
+## Checkpoint 3 — Wire `FlexibilityPolicy` into `spawn_planning()`
 
-This is the behavioral change. The planner now receives a `ReservationLayer` that includes
-both VTN capacity reservations (Phase B) and policy reservations (Phase C Layer 1 + 2).
+This is the behavioural change. The `ReservationLayer` passed to `run_planner()` now
+contains both SIMPLE FIRM event reservations (Phase B) and policy reservations (Phase C).
 
 ### Changes to `spawn_planning()` in `loops.rs`
 
-Add at the top of the planning loop body (after reading state, before `run_planner()`):
+The existing Phase B code builds `reservation_layer` from `parse_firm_reservations()`.
+Add policy reservation injection immediately after:
 
 ```rust
-// Build ReservationLayer: VTN capacity reservations (Phase B) + policy reservations (Phase C).
+// Existing Phase B code (unchanged):
 let events = state.events().await;
-let mut reservations = controller::reservation::ReservationLayer::new();
-
-// Phase B: VTN IMPORT/EXPORT_CAPACITY_LIMIT events → site-level reservations
-for r in controller::openadr_interface::parse_capacity_reservations(&events, now) {
-    reservations.add(r);
+let mut reservation_layer = controller::reservation::ReservationLayer::new();
+for r in controller::openadr_interface::parse_firm_reservations(&events, now) {
+    reservation_layer.insert(r);
 }
 
-// Phase C: FlexibilityPolicy → per-asset headroom reservations
-let policy = controller::flexibility_policy::FlexibilityPolicy::new(
-    profile.flexibility_policy.clone(),
-);
+// Phase C addition — policy reservations:
 let planning_horizon = chrono::Duration::hours(profile.planner.plan_horizon_h as i64);
-for r in policy.reservations(&profile, now, planning_horizon) {
-    reservations.add(r);
+for r in profile.flexibility_policy.generate_reservations(now, now + planning_horizon) {
+    reservation_layer.insert(r);
 }
 ```
 
-Pass `&reservations` to `run_planner()` instead of `&capacity`.
+No other changes. `run_planner()` signature is unchanged.
 
-> **Note:** `state.events()` is already called in the existing planning loop body — deduplicate
-> this read rather than calling it twice. Check the actual order in the current `spawn_planning()`
-> implementation and consolidate.
+### Regression protection
 
-### Verify no regression
+`test.yaml` has no `flexibility_policy:` section →
+`FlexibilityPolicy::default()` → `generate_reservations()` returns `[]` →
+existing 123 BDD scenarios are unaffected by definition.
 
-Before wiring, add one BDD assertion scenario (or cargo integration test):
-
-```
-Scenario: Default reserve reduces planner's available import capacity
-  Given the VEN profile has default_reserve up_kw 3.0
-  And the battery has max_charge_kw 5.0
-  When the planner runs with no VTN events
-  Then no battery charging slot exceeds 2.0 kW
-```
-
-This scenario should FAIL before CP4 (no policy, full 5 kW is used) and PASS after CP4.
-
-### Update test profiles
-
-Add `flexibility_policy` section to `VEN/profiles/test.yaml` with conservative defaults
-(or none, to preserve existing BDD behavior — see below).
-
-**Critical:** The existing 123 BDD scenarios were written without policy reserves. Adding
-`default_reserve` to `test.yaml` would cause every planner assertion to fail (reserved
-headroom changes all setpoints).
-
-**Resolution:** Leave `test.yaml` unchanged (no `flexibility_policy` section). The existing
-scenarios continue to pass because `FlexibilityPolicyConfig::default()` has `None` for
-`default_reserve` and empty `scheduled_windows`.
-
-New BDD scenarios for policy behavior use a dedicated test fixture (see §BDD scenarios).
-
-**CP4 gate:** All 123 existing BDD scenarios green. At least one new policy scenario passes.
-`cargo clippy -- -D warnings` clean. `cargo fmt --check` clean.
+**CP3 gate:** All 123 existing BDD scenarios green. At least one new policy scenario
+green (see §BDD scenarios). `cargo clippy -- -D warnings` clean. `cargo fmt --check` clean.
 
 ---
 
-## Checkpoint 5 — Pre-announced VTN events (Layer 3)
+## Checkpoint 4 — Layer 3: extend `parse_firm_reservations()` for pre-announced events
 
-Layer 3 handles VTN events with a future `activePeriod.start`. The planner should begin
-protecting capacity as soon as the event is received, not when it becomes active.
+The arch doc §6 Layer 3 requires that VTN SIMPLE events with a **future** `activePeriod`
+create reservations immediately on receipt, so the planner protects capacity before the
+window opens. Phase B explicitly excluded future intervals with this comment:
 
-This is distinct from Phase B's `parse_capacity_reservations()` which already handles
-IMPORT_CAPACITY_LIMIT events with future `intervalPeriod` dates. Layer 3 extends this to
-**SIMPLE events** (demand-response level signals), which don't carry a kW value directly.
+> *"Intervals where end ≤ now (expired) or start > now (future, not yet active) are
+> excluded. Phase C handles pre-announced future events."*
 
-### Design: SIMPLE event → kW mapping
+### Change to `parse_firm_reservations()` in `openadr_interface.rs`
 
-OpenADR SIMPLE events use integer levels (0, 1, 2, 3). The VEN must map these to kW.
-Add a configurable mapping to `FlexibilityPolicyConfig`:
-
-```rust
-/// kW response per SIMPLE signal level (index = level, value = import reduction kW).
-/// Level 0 = no action. Defaults: [0.0, 2.0, 5.0, 10.0].
-#[serde(default = "default_simple_level_kw")]
-pub simple_event_response_kw: Vec<f64>,
-```
+Remove only the `window_start > now` exclusion. Keep the `window_end <= now` exclusion
+(expired intervals remain irrelevant).
 
 ```rust
-fn default_simple_level_kw() -> Vec<f64> {
-    vec![0.0, 2.0, 5.0, 10.0]
+// Before (Phase B — remove this condition):
+if window_end <= now || window_start > now {
+    continue;
 }
-```
 
-YAML:
-```yaml
-flexibility_policy:
-  simple_event_response_kw: [0.0, 2.0, 5.0, 10.0]
-```
-
-### New function: `parse_firm_event_reservations()` in `openadr_interface.rs`
-
-```rust
-/// Parse SIMPLE events with a future activePeriod into Reservation records.
-///
-/// Creates one per-controllable-asset Up reservation per SIMPLE event
-/// that has activePeriod.start in the future. The kW value is derived
-/// from the SIMPLE level and the VEN's `simple_event_response_kw` mapping.
-///
-/// Events with activePeriod.start <= now are already active — they are
-/// handled by the reactor, not by pre-announced reservations.
-///
-/// Note: IMPORT_CAPACITY_LIMIT events with future intervalPeriod are already
-/// handled by parse_capacity_reservations() (Phase B). This function is
-/// specifically for SIMPLE-level events.
-pub fn parse_firm_event_reservations(
-    events: &[Value],
-    profile: &Profile,
-    now: DateTime<Utc>,
-) -> Vec<Reservation> { … }
-```
-
-**Implementation notes:**
-- For each event: check `event.activePeriod.start` (ISO 8601 string) > now.
-- Extract first SIMPLE payload value from first interval → `level: usize`.
-- Look up `profile.flexibility_policy.simple_event_response_kw[level]` → `kw_per_asset`.
-- If `kw_per_asset == 0.0` → skip.
-- Parse `activePeriod.duration` to determine `window_end`.
-- Emit one `Reservation { asset_id: Some(id), kw, direction: Up, source: VtnFirmEvent, priority: 1 }`
-  per controllable asset.
-
-### Wire into `spawn_planning()` (addition to CP4)
-
-Add alongside the other reservation builders:
-
-```rust
-// Phase C Layer 3: pre-announced SIMPLE events → per-asset reservations
-for r in controller::openadr_interface::parse_firm_event_reservations(&events, &profile, now) {
-    reservations.add(r);
+// After (Phase C):
+if window_end <= now {
+    continue;
 }
+// Future windows (window_start > now) are intentionally included.
+// ReservationLayer::query_asset() gates activation by window: a future reservation
+// is inactive at t=now but correctly active when the planner queries t=now+Nh.
 ```
 
-### Unit tests for `parse_firm_event_reservations()`
+No other changes. The SIMPLE payload value is already read directly as kW (no
+level-mapping config needed — consistent with Phase B and the arch doc).
+
+### Unit tests
 
 ```
-test_future_simple_event_creates_reservation
-    // Event with activePeriod.start = now + 6h, SIMPLE level 2
-    // Profile with battery + ev, simple_event_response_kw = [0.0, 2.0, 5.0, 10.0]
-    // → 2 reservations (battery, ev), kw = 5.0, window = [now+6h, now+8h]
+test_future_simple_interval_now_included
+    // interval window_start = now + 6h → reservation IS emitted (was excluded in Phase B)
 
-test_active_simple_event_not_repeated_here
-    // Event with activePeriod.start = now - 1h (already active)
-    // → 0 reservations (not pre-announced)
+test_expired_interval_still_excluded
+    // window_end <= now → 0 reservations (unchanged)
 
-test_simple_level_0_skipped
-    // SIMPLE level 0 → kw = 0.0 → no reservation
+test_currently_active_interval_still_included
+    // window overlaps now → reservation emitted (unchanged)
 
-test_non_simple_event_ignored
-    // Event with PRICE payload → 0 reservations
-
-test_no_simple_events_returns_empty
-    // Empty events list → []
+test_future_reservation_inactive_at_now_via_query_asset
+    // Insert future reservation into ReservationLayer.
+    // query_asset(asset, now)       → reserved_up_kw = 0.0  (not yet active)
+    // query_asset(asset, now + 7h)  → reserved_up_kw = kw   (active)
 ```
 
-**CP5 gate:** `cargo test` unit tests pass. All 123 existing BDD scenarios green.
+**CP4 gate:** Unit tests pass. All 123 BDD scenarios green.
+New pre-announced event BDD scenario green (see §BDD scenarios).
 
 ---
 
@@ -613,34 +447,36 @@ test_no_simple_events_returns_empty
 
 New feature file: `tests/features/phase_c_flexibility_policy.feature`
 
-These scenarios require a test VEN profile with `flexibility_policy` configured.
-Either use a dedicated test endpoint (`POST /sim/reset/:id` with a policy-enabled profile)
-or add a `test_policy.yaml` profile with `PROFILE_PATH` override in the test compose.
+`test.yaml` remains unchanged. New scenarios use a dedicated profile with a
+`flexibility_policy:` section, loaded via `POST /sim/reset/:id` or a
+`PROFILE_PATH` override in the test compose configuration.
 
 ```gherkin
 Feature: FlexibilityPolicy — Layer 1 default reserve
 
-  Background:
+  Scenario: Default reserve reduces available import headroom for all assets
     Given the VEN profile has default_reserve up_kw 3.0
-    And the battery has max_charge_kw 5.0 and initial_soc 0.10
+    And the battery has max_charge_kw 5.0
     And there are no VTN events
-
-  Scenario: Default reserve caps battery charging below physical max
     When the planner runs
-    Then all battery charging slots have setpoint_kw <= 2.0
+    Then all battery charging slots have setpoint_kw at most 2.0
+    # site-level 3.0 kW Up reservation → available_cap.max_import_kw = 5.0 − 3.0 = 2.0
 
-  Scenario: Default reserve does not apply to PV or BaseLoad
+  Scenario: Default reserve of 0.0 has no effect
+    Given the VEN profile has default_reserve up_kw 0.0 and down_kw 0.0
+    And the battery has max_charge_kw 5.0
     When the planner runs
-    Then pv and base_load are not affected by policy reservations
+    Then battery charging is not limited by policy
 
 Feature: FlexibilityPolicy — Layer 2 scheduled windows
 
-  Scenario: Scheduled DR window reserves capacity before window start
+  Scenario: Scheduled window reserves headroom including pre-load period
     Given the VEN profile has a scheduled window "peak_dr" on today from 16:00 to 20:00
     And the window has pre_load_minutes 60 and reserve_up_kw 5.0
     And the battery has max_charge_kw 8.0
-    When the planner runs at 15:30
+    When the planner runs at 14:00
     Then battery charging during 15:00–20:00 does not exceed 3.0 kW
+    # 8.0 − 5.0 = 3.0 kW available during pre-load + window
     And battery charging before 15:00 is not constrained by the window
 
   Scenario: Scheduled window on non-matching day has no effect
@@ -651,17 +487,17 @@ Feature: FlexibilityPolicy — Layer 2 scheduled windows
 
 Feature: FlexibilityPolicy — Layer 3 pre-announced VTN events
 
-  Scenario: Future SIMPLE event creates pre-announced reservation
-    Given a VTN SIMPLE level 2 event with activePeriod starting in 4 hours
-    And the VEN profile maps SIMPLE level 2 to 5.0 kW
+  Scenario: Future SIMPLE event creates a reservation for the event window
+    Given a VTN SIMPLE event with value 5.0 and intervalPeriod starting in 4 hours
+    And the battery has max_charge_kw 5.0
     When the planner runs
     Then battery setpoints during the event window are at most 0.0 kW
-    # (battery max_charge = 5.0 kW, reserved 5.0 kW → available = 0.0)
+    # site-level 5.0 kW Up reservation → available = 5.0 − 5.0 = 0.0
 
-  Scenario: Already-active SIMPLE event is not double-counted
-    Given a VTN SIMPLE level 2 event that started 1 hour ago
+  Scenario: Expired SIMPLE event interval produces no reservation
+    Given a VTN SIMPLE event whose intervalPeriod ended 1 hour ago
     When the planner runs
-    Then the pre-announced reservation path adds 0 reservations for this event
+    Then no reservation exists for the expired interval
 ```
 
 ---
@@ -670,12 +506,11 @@ Feature: FlexibilityPolicy — Layer 3 pre-announced VTN events
 
 | File | Change |
 |---|---|
-| `controller/flexibility_policy.rs` | New — `FlexibilityPolicyConfig`, `FlexibilityPolicy::reservations()` |
+| `controller/flexibility_policy.rs` | New — `FlexibilityPolicy`, `DefaultReserve`, `ScheduledWindow`, `generate_reservations()`, `parse_weekdays()` |
 | `controller/mod.rs` | Add `pub mod flexibility_policy;` |
-| `controller/reservation.rs` | Replace `available_cap()` stub with real per-asset logic; add unit tests |
-| `profile.rs` | Add `flexibility_policy: FlexibilityPolicyConfig` field to `Profile` |
-| `controller/openadr_interface.rs` | Add `parse_firm_event_reservations()` + unit tests |
-| `loops.rs` | `spawn_planning()`: build + merge policy reservations into `ReservationLayer` |
+| `profile.rs` | Add `flexibility_policy: FlexibilityPolicy` field + import |
+| `loops.rs` | `spawn_planning()`: inject policy reservations into `ReservationLayer` |
+| `controller/openadr_interface.rs` | Remove future-interval exclusion from `parse_firm_reservations()` |
 | `tests/features/phase_c_flexibility_policy.feature` | New BDD feature file |
 
 ---
@@ -684,24 +519,25 @@ Feature: FlexibilityPolicy — Layer 3 pre-announced VTN events
 
 | CP | Changes | Risk | Gate |
 |---|---|---|---|
-| 1 | New structs + YAML field (no behavior change) | Minimal — additive | `cargo check` |
-| 2 | `available_cap()` implementation + unit tests | Low — no callers yet emit per-asset reservations | `cargo test` unit |
-| 3 | `FlexibilityPolicy::reservations()` + unit tests | Low — not wired to production yet | `cargo test` unit |
-| 4 | Wire into `spawn_planning()` | Medium — changes planner input; existing tests protect against regression | 123 BDD green + new policy scenario |
-| 5 | `parse_firm_event_reservations()` + wire | Low — additive function; existing tests protect main path | unit tests + 123 BDD green |
-| Gate | New BDD scenarios | — | All new scenarios green |
+| 1 | New structs + YAML field (additive, no behaviour change) | Minimal | `cargo check` |
+| 2 | `generate_reservations()` unit tests | Minimal — logic not yet wired | `cargo test` unit |
+| 3 | Wire into `spawn_planning()` | Low — `test.yaml` has no policy; existing BDD unaffected | 123 BDD green + new policy scenario |
+| 4 | Extend `parse_firm_reservations()` for future intervals | Low — additive filter relaxation | unit tests + 123 BDD green + pre-announced scenario |
 
-Total scope: ~350 lines of new code, ~5 lines changed in `loops.rs`, ~10 lines changed in `reservation.rs`.
-No behavior change for VENs with no `flexibility_policy` in their YAML profile.
-Sets the foundation for Phase D (planner loop refactor + `PlanReason` audit trail).
+Total scope: ~200 lines new in `flexibility_policy.rs`, ~6 lines in `loops.rs`,
+~5 lines changed in `openadr_interface.rs`.
+
+No behaviour change for VENs without a `flexibility_policy:` section in their YAML.
+Sets the foundation for Phase D (planner loop refactor + `PlanReason` audit trail,
+where `PolicyReserve` will surface these reservations on every `PlanStep`).
 
 ---
 
 ## Out of scope for Phase C
 
-- Site-level headroom distribution across assets (`distribute()` policy — Phase D §5.4)
-- `PlanReason::PolicyReserve` on every PlanStep (Phase D)
+- Per-asset reservation distribution (`distribute()` policy — arch doc §5.4, Phase D)
+- `PlanReason::PolicyReserve` on every `PlanStep` (Phase D)
 - `LookaheadContext` enrichment for proactive pre-loading (Phase D)
-- `FlexibilityEnvelope` as first-class output (`compute_envelope()` — Phase E)
-- Adaptive policy layer (learned patterns → auto-generated ScheduledWindows — future)
-- `ComfortBound` reservations from asset profile (heater `comfort_min_c` / `comfort_max_c` — Phase D)
+- `FlexibilityEnvelope` as first-class output (Phase E)
+- `ComfortBound` reservations from asset profile (heater `temp_min_c`/`temp_max_c` — Phase D)
+- Adaptive policy layer (learned patterns → auto-generated `ScheduledWindow`s — future)
