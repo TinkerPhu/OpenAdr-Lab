@@ -625,6 +625,17 @@ pub fn run_planner(
 ) -> (Plan, Vec<PlanStep>)              // Plan + full audit trail
 ```
 
+**Interim implementation note (Phase D):**
+`&[&dyn Asset]` requires that each asset's config and state are accessible through a
+single `dyn Asset` reference. Currently `AssetConfig` (config-only enum) and
+`AssetEntry` (carries state + history) are separate types. `AssetEntry` implementing
+`Asset` would satisfy this — deferred to a future Phase A extension.
+
+Until then, Phase D uses `&SimState` in place of `&[&dyn Asset]`, and keeps the
+`capacity: &OadrCapacityState` parameter (the Grid virtual asset is not yet
+implemented; capacity limits flow through `OadrCapacityState → slot.import_cap_kw`
+as documented in §2). The return type `(Plan, Vec<PlanStep>)` is adopted as specified.
+
 ---
 
 ## 4. `simulator/mod.rs` — AssetEntry (Phase A change)
