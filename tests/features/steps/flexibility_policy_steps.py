@@ -28,12 +28,15 @@ def step_create_capacity_limit_event(context, kw):
     """Create an open program + IMPORT_CAPACITY_LIMIT event via VTN.
 
     Stores the event in context.uc_events so environment.py after_scenario
-    cleanup deletes it automatically.
+    cleanup deletes it automatically. Uses a unique program name per scenario
+    to avoid 409 conflicts from programs not cleaned between scenarios.
     """
+    import uuid
     token = getattr(context, "vtn_token", None) or get_token_value("any-business", "any-business")
 
-    # Create open program (no VEN_NAME target → all VENs receive it)
-    r = vtn_post("/programs", token, json={"programName": "policy-cap-test", "targets": None})
+    # Unique name avoids 409 when program from a previous scenario wasn't deleted.
+    prog_name = f"policy-cap-{uuid.uuid4().hex[:8]}"
+    r = vtn_post("/programs", token, json={"programName": prog_name, "targets": None})
     assert r.status_code == 201, f"program creation failed: {r.status_code} {r.text}"
     program_id = r.json()["id"]
     context._policy_program_id = program_id  # reused by Layer 3 And steps
