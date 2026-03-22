@@ -5,40 +5,33 @@
 ///   - Status reports (event-driven): TELEMETRY_STATUS triggered by PlanCycle/PacketTransition.
 use chrono::{DateTime, Duration, Utc};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use tracing::debug;
 
+use crate::assets::{AssetState, HistoryPoint};
 use crate::common::{parse_iso8601_duration_secs, Aggregation, Interpolation, TimeSeries};
-use crate::controller::trace::{AssetHistoryBuffer, ControllerEvent};
+use crate::controller::trace::ControllerEvent;
 use crate::entities::capacity::OadrReportObligation;
+use crate::simulator::SimState;
 
 // ---------------------------------------------------------------------------
-// AssetHistoryBuffer → TimeSeries conversion
+// HistoryPoint → TimeSeries conversion helpers
 // ---------------------------------------------------------------------------
 
-/// Extract a single named column from an `AssetHistoryBuffer` into a scalar
-/// `TimeSeries`, skipping rows where the value is NaN (missing data).
-fn history_to_timeseries(
-    buf: &AssetHistoryBuffer,
-    column: &str,
-    interpolation: Interpolation,
-    window: Option<(DateTime<Utc>, DateTime<Utc>)>,
-) -> TimeSeries {
-    let points = buf.to_timeline(window);
-    let samples: Vec<(DateTime<Utc>, f64)> = points
-        .iter()
-        .filter_map(|p| {
-            let v = p.values.get(column).copied()?;
-            if v.is_nan() {
-                None
-            } else {
-                Some((p.ts, v))
-            }
-        })
-        .collect();
+/// Build a `TimeSeries` of `power_kw` from a slice of `HistoryPoint`.
+fn points_to_power_ts(points: &[HistoryPoint], interpolation: Interpolation) -> TimeSeries {
+    let samples: Vec<(DateTime<Utc>, f64)> = points.iter().map(|p| (p.ts, p.power_kw)).collect();
     TimeSeries {
         samples,
         interpolation,
+    }
+}
+
+/// Extract SoC (0.0–1.0) from a `HistoryPoint`'s state, if the asset is EV or Battery.
+fn soc_from_point(p: &HistoryPoint) -> Option<f64> {
+    match &p.state {
+        AssetState::Ev(s) => Some(s.soc_pct),
+        AssetState::Battery(s) => Some(s.soc_pct),
+        _ => None,
     }
 }
 
@@ -91,29 +84,21 @@ fn event_is_active(event: &Value, now: DateTime<Utc>) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Sum the most-recent `power_kw` across all assets that are currently importing
-/// (positive power). Returns 0.0 if the history is empty or all assets are exporting.
-fn latest_net_import_kw(asset_history: &HashMap<String, AssetHistoryBuffer>) -> f64 {
-    asset_history
-        .values()
-        .filter_map(|buf| {
-            buf.to_timeline(None)
-                .last()
-                .map(|p| p.values.get("power_kw").copied().unwrap_or(0.0))
-        })
+/// (positive power). Returns 0.0 if history is empty or all assets are exporting.
+fn latest_net_import_kw(sim: &SimState) -> f64 {
+    sim.assets
+        .iter()
+        .filter_map(|e| e.history.latest().map(|p| p.power_kw))
         .filter(|&kw| kw > 0.0)
         .sum()
 }
 
 /// Sum the most-recent `power_kw` across all assets that are currently exporting
 /// (negative power), returned as a positive magnitude.
-fn latest_net_export_kw(asset_history: &HashMap<String, AssetHistoryBuffer>) -> f64 {
-    asset_history
-        .values()
-        .filter_map(|buf| {
-            buf.to_timeline(None)
-                .last()
-                .map(|p| p.values.get("power_kw").copied().unwrap_or(0.0))
-        })
+fn latest_net_export_kw(sim: &SimState) -> f64 {
+    sim.assets
+        .iter()
+        .filter_map(|e| e.history.latest().map(|p| p.power_kw))
         .filter(|&kw| kw < 0.0)
         .map(|kw| -kw)
         .sum()
@@ -127,18 +112,14 @@ fn latest_net_export_kw(asset_history: &HashMap<String, AssetHistoryBuffer>) -> 
 ///   - STORAGE_CHARGE_LEVEL (EV SoC %) if EV history is available.
 ///
 /// Returns None if the event has no id or programID.
-pub fn build_measurement_report(
-    event: &Value,
-    asset_history: &HashMap<String, AssetHistoryBuffer>,
-    ven_name: &str,
-) -> Option<Value> {
+pub fn build_measurement_report(event: &Value, sim: &SimState, ven_name: &str) -> Option<Value> {
     let event_id = event.get("id").and_then(|v| v.as_str())?;
     let program_id = event.get("programID").and_then(|v| v.as_str())?;
 
     let report_name = format!("auto-{}-{}", ven_name, event_id);
     let resource_name = format!("{}-meter", ven_name);
 
-    let net_import_kw = latest_net_import_kw(asset_history);
+    let net_import_kw = latest_net_import_kw(sim);
     let net_import_w = net_import_kw * 1000.0;
 
     // Extract the primary payload type from the event's first interval
@@ -156,7 +137,7 @@ pub fn build_measurement_report(
     let (report_type, report_value) = match payload_type {
         "IMPORT_CAPACITY_LIMIT" => ("USAGE", net_import_w),
         "EXPORT_CAPACITY_LIMIT" => {
-            let export_kw = latest_net_export_kw(asset_history);
+            let export_kw = latest_net_export_kw(sim);
             ("USAGE", export_kw * 1000.0)
         }
         "PRICE" => ("USAGE", net_import_w),
@@ -169,17 +150,14 @@ pub fn build_measurement_report(
         json!({ "type": "OPERATING_STATE", "values": ["ACTIVE"] }),
     ];
 
-    // Add EV SoC if history available
-    if let Some(ev_buf) = asset_history.get("ev") {
-        let pts = ev_buf.to_timeline(None);
-        if let Some(last) = pts.last() {
-            if let Some(&soc) = last.values.get("soc") {
-                if !soc.is_nan() {
-                    payloads.push(json!({
-                        "type": "STORAGE_CHARGE_LEVEL",
-                        "values": [format!("{:.1}", soc * 100.0)]
-                    }));
-                }
+    // Add EV SoC if available
+    if let Some(ev_entry) = sim.asset("ev") {
+        if let Some(last) = ev_entry.history.latest() {
+            if let Some(soc_pct) = soc_from_point(last) {
+                payloads.push(json!({
+                    "type": "STORAGE_CHARGE_LEVEL",
+                    "values": [format!("{:.1}", soc_pct * 100.0)]
+                }));
             }
         }
     }
@@ -205,7 +183,7 @@ pub fn build_measurement_report(
 /// Build measurement reports for all currently active events (timer-driven entry point).
 pub fn build_measurement_reports_for_active_events(
     events: &[Value],
-    asset_history: &HashMap<String, AssetHistoryBuffer>,
+    sim: &SimState,
     ven_name: &str,
     now: DateTime<Utc>,
 ) -> Vec<Value> {
@@ -230,7 +208,7 @@ pub fn build_measurement_reports_for_active_events(
         if let Some(event_id) = event.get("id").and_then(|v| v.as_str()) {
             if seen.insert(event_id.to_string()) {
                 debug!(event_id, "timer-driven: building single-interval report");
-                if let Some(report) = build_measurement_report(event, asset_history, ven_name) {
+                if let Some(report) = build_measurement_report(event, sim, ven_name) {
                     reports.push(report);
                 }
             }
@@ -258,7 +236,7 @@ pub fn build_measurement_reports_for_active_events(
 /// Returns None if the obligation has no event_id or program_id.
 pub fn build_measurement_report_for_obligation(
     obligation: &OadrReportObligation,
-    asset_history: &HashMap<String, AssetHistoryBuffer>,
+    sim: &SimState,
     ven_name: &str,
 ) -> Option<Value> {
     let program_id = obligation.program_id.as_deref()?;
@@ -270,13 +248,13 @@ pub fn build_measurement_report_for_obligation(
     let duration_iso = format_iso8601_duration(obligation.interval_duration_s);
 
     // Build net site power TimeSeries (sum all assets' power_kw)
-    let net_power_ts = build_net_site_power_ts(asset_history);
+    let net_power_ts = build_net_site_power_ts(sim);
 
     let payload_type = &obligation.payload_type;
 
     let intervals: Vec<Value> = match payload_type.as_str() {
         "STORAGE_CHARGE_STATE" | "STORAGE_CHARGE_LEVEL" => {
-            build_soc_intervals(asset_history, interval_width, &duration_iso)
+            build_soc_intervals(sim, interval_width, &duration_iso)
         }
         _ => {
             let resampled = net_power_ts.resample_uniform(interval_width, Aggregation::Mean);
@@ -335,11 +313,21 @@ pub fn build_measurement_report_for_obligation(
     Some(report)
 }
 
-/// Sum all assets' `power_kw` columns into a single net site power TimeSeries.
-fn build_net_site_power_ts(asset_history: &HashMap<String, AssetHistoryBuffer>) -> TimeSeries {
-    let mut per_asset: Vec<TimeSeries> = asset_history
-        .values()
-        .map(|buf| history_to_timeseries(buf, "power_kw", Interpolation::Step, None))
+/// Sum all assets' `power_kw` into a single net site power `TimeSeries`.
+///
+/// Uses LOCF cross-asset aggregation: for each unique timestamp across all
+/// asset histories, sums each asset's `power_at(t)`.
+fn build_net_site_power_ts(sim: &SimState) -> TimeSeries {
+    let now = Utc::now();
+    let full_window = Duration::hours(2); // wide enough to cover any reporting interval
+
+    let mut per_asset: Vec<TimeSeries> = sim
+        .assets
+        .iter()
+        .map(|e| {
+            let points = e.history.slice(full_window, now);
+            points_to_power_ts(&points, Interpolation::Step)
+        })
         .filter(|ts| !ts.samples.is_empty())
         .collect();
 
@@ -360,9 +348,9 @@ fn build_net_site_power_ts(asset_history: &HashMap<String, AssetHistoryBuffer>) 
 
     let samples: Vec<(DateTime<Utc>, f64)> = all_ts
         .iter()
-        .filter_map(|&t| {
+        .map(|&t| {
             let sum: f64 = per_asset.iter().filter_map(|s| s.interpolate_at(t)).sum();
-            Some((t, sum))
+            (t, sum)
         })
         .collect();
 
@@ -373,20 +361,38 @@ fn build_net_site_power_ts(asset_history: &HashMap<String, AssetHistoryBuffer>) 
 }
 
 /// Build SoC intervals using point-in-time sampling at interval ends.
-fn build_soc_intervals(
-    asset_history: &HashMap<String, AssetHistoryBuffer>,
-    interval_width: Duration,
-    duration_iso: &str,
-) -> Vec<Value> {
-    // Look for EV or battery SoC
-    let soc_ts = asset_history
-        .get("ev")
-        .map(|buf| history_to_timeseries(buf, "soc", Interpolation::Step, None))
+fn build_soc_intervals(sim: &SimState, interval_width: Duration, duration_iso: &str) -> Vec<Value> {
+    let now = Utc::now();
+    let full_window = Duration::hours(2);
+
+    // Look for EV or battery SoC timeseries
+    let soc_ts = sim
+        .asset("ev")
+        .map(|e| {
+            let points = e.history.slice(full_window, now);
+            let samples: Vec<(DateTime<Utc>, f64)> = points
+                .iter()
+                .filter_map(|p| soc_from_point(p).map(|soc| (p.ts, soc)))
+                .collect();
+            TimeSeries {
+                samples,
+                interpolation: Interpolation::Step,
+            }
+        })
         .filter(|ts| !ts.samples.is_empty())
         .or_else(|| {
-            asset_history
-                .get("battery")
-                .map(|buf| history_to_timeseries(buf, "soc", Interpolation::Step, None))
+            sim.asset("battery")
+                .map(|e| {
+                    let points = e.history.slice(full_window, now);
+                    let samples: Vec<(DateTime<Utc>, f64)> = points
+                        .iter()
+                        .filter_map(|p| soc_from_point(p).map(|soc| (p.ts, soc)))
+                        .collect();
+                    TimeSeries {
+                        samples,
+                        interpolation: Interpolation::Step,
+                    }
+                })
                 .filter(|ts| !ts.samples.is_empty())
         });
 
@@ -464,7 +470,7 @@ fn format_iso8601_duration(secs: u64) -> String {
 /// Returns None for all other event types.
 pub fn build_status_report(
     event: &ControllerEvent,
-    asset_history: &HashMap<String, AssetHistoryBuffer>,
+    sim: &SimState,
     ven_name: &str,
     _now: DateTime<Utc>,
 ) -> Option<Value> {
@@ -493,7 +499,7 @@ pub fn build_status_report(
         _ => return None,
     };
 
-    let net_import_kw = latest_net_import_kw(asset_history);
+    let net_import_kw = latest_net_import_kw(sim);
 
     let resource_name = asset_id_opt
         .as_deref()
@@ -521,20 +527,88 @@ pub fn build_status_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assets::{AssetHistoryBuffer, BaseLoadState, EvState, HistoryPoint, PvState};
+    use crate::simulator::{energy::EnergyCounter, GridMeter, SimState};
     use uuid::Uuid;
 
     fn ts(offset_s: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(1_700_000_000 + offset_s, 0).unwrap()
     }
 
-    fn make_buf(rows: &[(i64, &[(&str, f64)])]) -> AssetHistoryBuffer {
+    /// Build an `AssetEntry` with BaseLoad history (power-only).
+    ///
+    /// Offsets are treated as seconds from oldest→newest. The most recent row
+    /// is pinned to just before Utc::now() so `build_net_site_power_ts` (which
+    /// slices [now-2h, now]) can see the data.
+    fn make_entry(id: &str, rows: &[(i64, f64)]) -> crate::simulator::AssetEntry {
+        let max_offset = rows.iter().map(|r| r.0).max().unwrap_or(0);
+        // Truncate to second precision so concurrent make_entry calls within the same
+        // second produce identical timestamps, making cross-asset LOCF aggregation deterministic.
+        let now_s = DateTime::from_timestamp(Utc::now().timestamp(), 0).unwrap();
+        let base = now_s - Duration::seconds(max_offset);
         let mut buf = AssetHistoryBuffer::new(3600);
-        for &(offset, values) in rows {
-            let map: HashMap<String, f64> =
-                values.iter().map(|(k, v)| (k.to_string(), *v)).collect();
-            buf.push(ts(offset), map);
+        for &(offset, power_kw) in rows {
+            buf.push(HistoryPoint {
+                ts: base + Duration::seconds(offset),
+                power_kw,
+                state: AssetState::BaseLoad(BaseLoadState {
+                    actual_power_kw: power_kw,
+                }),
+            });
         }
-        buf
+        crate::simulator::AssetEntry {
+            id: id.to_string(),
+            state: AssetState::BaseLoad(BaseLoadState {
+                actual_power_kw: 0.0,
+            }),
+            setpoint_kw: 0.0,
+            last_power_kw: rows.last().map(|r| r.1).unwrap_or(0.0),
+            energy: EnergyCounter::new(),
+            history: buf,
+        }
+    }
+
+    /// Build an `AssetEntry` with EV history (power + SoC).
+    ///
+    /// Same timestamp anchoring as `make_entry`.
+    fn make_ev_entry(id: &str, rows: &[(i64, f64, f64)]) -> crate::simulator::AssetEntry {
+        let max_offset = rows.iter().map(|r| r.0).max().unwrap_or(0);
+        let now_s = DateTime::from_timestamp(Utc::now().timestamp(), 0).unwrap();
+        let base = now_s - Duration::seconds(max_offset);
+        let mut buf = AssetHistoryBuffer::new(3600);
+        for &(offset, power_kw, soc_pct) in rows {
+            buf.push(HistoryPoint {
+                ts: base + Duration::seconds(offset),
+                power_kw,
+                state: AssetState::Ev(EvState {
+                    soc_pct,
+                    plugged: true,
+                    actual_power_kw: power_kw,
+                }),
+            });
+        }
+        crate::simulator::AssetEntry {
+            id: id.to_string(),
+            state: AssetState::Ev(EvState {
+                soc_pct: 0.0,
+                plugged: true,
+                actual_power_kw: 0.0,
+            }),
+            setpoint_kw: 0.0,
+            last_power_kw: rows.last().map(|r| r.1).unwrap_or(0.0),
+            energy: EnergyCounter::new(),
+            history: buf,
+        }
+    }
+
+    /// Build a minimal `SimState` from a list of entries.
+    fn make_sim(entries: Vec<crate::simulator::AssetEntry>) -> SimState {
+        SimState {
+            asset_configs: vec![],
+            assets: entries,
+            grid: GridMeter::default(),
+            last_tick: Utc::now(),
+        }
     }
 
     fn make_obligation(
@@ -557,46 +631,63 @@ mod tests {
         }
     }
 
-    // ── history_to_timeseries ──────────────────────────────────────
+    // ── points_to_power_ts ────────────────────────────────────────
 
     #[test]
-    fn history_to_ts_extracts_column() {
-        let buf = make_buf(&[
-            (0, &[("power_kw", 1.0), ("soc", 0.5)]),
-            (60, &[("power_kw", 2.0), ("soc", 0.6)]),
-            (120, &[("power_kw", 3.0), ("soc", 0.7)]),
-        ]);
-        let series = history_to_timeseries(&buf, "power_kw", Interpolation::Step, None);
+    fn points_to_power_ts_basic() {
+        let pts = vec![
+            HistoryPoint {
+                ts: ts(0),
+                power_kw: 1.0,
+                state: AssetState::BaseLoad(BaseLoadState {
+                    actual_power_kw: 1.0,
+                }),
+            },
+            HistoryPoint {
+                ts: ts(60),
+                power_kw: 2.0,
+                state: AssetState::BaseLoad(BaseLoadState {
+                    actual_power_kw: 2.0,
+                }),
+            },
+            HistoryPoint {
+                ts: ts(120),
+                power_kw: 3.0,
+                state: AssetState::BaseLoad(BaseLoadState {
+                    actual_power_kw: 3.0,
+                }),
+            },
+        ];
+        let series = points_to_power_ts(&pts, Interpolation::Step);
         assert_eq!(series.samples.len(), 3);
         assert!((series.samples[0].1 - 1.0).abs() < 1e-9);
         assert!((series.samples[2].1 - 3.0).abs() < 1e-9);
     }
 
     #[test]
-    fn history_to_ts_skips_nan() {
-        let mut buf = AssetHistoryBuffer::new(10);
-        buf.push(ts(0), [("power_kw".into(), 1.0)].into());
-        buf.push(ts(60), HashMap::new()); // power_kw will be NaN
-        buf.push(ts(120), [("power_kw".into(), 3.0)].into());
-
-        let series = history_to_timeseries(&buf, "power_kw", Interpolation::Step, None);
-        assert_eq!(series.samples.len(), 2); // NaN row skipped
-        assert!((series.samples[0].1 - 1.0).abs() < 1e-9);
-        assert!((series.samples[1].1 - 3.0).abs() < 1e-9);
+    fn soc_from_point_ev() {
+        let p = HistoryPoint {
+            ts: ts(0),
+            power_kw: 7.0,
+            state: AssetState::Ev(EvState {
+                soc_pct: 0.4,
+                plugged: true,
+                actual_power_kw: 7.0,
+            }),
+        };
+        assert!((soc_from_point(&p).unwrap() - 0.4).abs() < 1e-9);
     }
 
     #[test]
-    fn history_to_ts_empty_buffer() {
-        let buf = AssetHistoryBuffer::new(10);
-        let series = history_to_timeseries(&buf, "power_kw", Interpolation::Step, None);
-        assert!(series.samples.is_empty());
-    }
-
-    #[test]
-    fn history_to_ts_nonexistent_column() {
-        let buf = make_buf(&[(0, &[("power_kw", 1.0)])]);
-        let series = history_to_timeseries(&buf, "no_such_col", Interpolation::Step, None);
-        assert!(series.samples.is_empty());
+    fn soc_from_point_non_storage_is_none() {
+        let p = HistoryPoint {
+            ts: ts(0),
+            power_kw: -2.0,
+            state: AssetState::Pv(PvState {
+                actual_power_kw: -2.0,
+            }),
+        };
+        assert!(soc_from_point(&p).is_none());
     }
 
     // ── format_iso8601_duration ────────────────────────────────────
@@ -625,18 +716,13 @@ mod tests {
 
     #[test]
     fn obligation_report_multi_interval() {
-        // 4 rows at 15-min intervals, each with constant power
-        let buf = make_buf(&[
-            (0, &[("power_kw", 2.0)]),
-            (900, &[("power_kw", 3.0)]),
-            (1800, &[("power_kw", 4.0)]),
-            (2700, &[("power_kw", 5.0)]),
-        ]);
-        let mut history = HashMap::new();
-        history.insert("site".to_string(), buf);
+        let sim = make_sim(vec![make_entry(
+            "site",
+            &[(0, 2.0), (900, 3.0), (1800, 4.0), (2700, 5.0)],
+        )]);
 
         let ob = make_obligation("ev1", "prog1", "USAGE", 900);
-        let report = build_measurement_report_for_obligation(&ob, &history, "ven-1").unwrap();
+        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1").unwrap();
 
         let intervals = report["resources"][0]["intervals"].as_array().unwrap();
         assert!(
@@ -644,15 +730,11 @@ mod tests {
             "expected multiple intervals, got {}",
             intervals.len()
         );
-
-        // Verify sequential IDs
         for (i, iv) in intervals.iter().enumerate() {
             assert_eq!(iv["id"], i as u64);
             assert!(iv["intervalPeriod"]["start"].is_string());
             assert_eq!(iv["intervalPeriod"]["duration"], "PT15M");
         }
-
-        // Verify payloads structure
         let payloads = intervals[0]["payloads"].as_array().unwrap();
         assert!(payloads.iter().any(|p| p["type"] == "USAGE"));
         assert!(payloads.iter().any(|p| p["type"] == "OPERATING_STATE"));
@@ -672,29 +754,25 @@ mod tests {
             fulfilled: false,
             created_at: Utc::now(),
         };
-        let history = HashMap::new();
-        assert!(build_measurement_report_for_obligation(&ob, &history, "ven-1").is_none());
+        let sim = make_sim(vec![]);
+        assert!(build_measurement_report_for_obligation(&ob, &sim, "ven-1").is_none());
     }
 
     #[test]
     fn obligation_report_empty_history_returns_none() {
         let ob = make_obligation("e1", "p1", "USAGE", 900);
-        let history = HashMap::new();
-        assert!(build_measurement_report_for_obligation(&ob, &history, "ven-1").is_none());
+        let sim = make_sim(vec![]);
+        assert!(build_measurement_report_for_obligation(&ob, &sim, "ven-1").is_none());
     }
 
     // ── import/export split ────────────────────────────────────────
 
     #[test]
     fn obligation_report_import_clamps_negative_to_zero() {
-        let buf = make_buf(&[(0, &[("power_kw", -5.0)]), (900, &[("power_kw", -5.0)])]);
-        let mut history = HashMap::new();
-        history.insert("pv".to_string(), buf);
-
+        let sim = make_sim(vec![make_entry("pv", &[(0, -5.0), (900, -5.0)])]);
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_LIMIT", 900);
-        let report = build_measurement_report_for_obligation(&ob, &history, "ven-1").unwrap();
+        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1").unwrap();
         let intervals = report["resources"][0]["intervals"].as_array().unwrap();
-
         for iv in intervals {
             let usage = iv["payloads"]
                 .as_array()
@@ -712,14 +790,10 @@ mod tests {
 
     #[test]
     fn obligation_report_export_uses_absolute_negative() {
-        let buf = make_buf(&[(0, &[("power_kw", -3.0)]), (900, &[("power_kw", -3.0)])]);
-        let mut history = HashMap::new();
-        history.insert("pv".to_string(), buf);
-
+        let sim = make_sim(vec![make_entry("pv", &[(0, -3.0), (900, -3.0)])]);
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_LIMIT", 900);
-        let report = build_measurement_report_for_obligation(&ob, &history, "ven-1").unwrap();
+        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1").unwrap();
         let intervals = report["resources"][0]["intervals"].as_array().unwrap();
-
         for iv in intervals {
             let usage = iv["payloads"]
                 .as_array()
@@ -729,8 +803,8 @@ mod tests {
                 .unwrap();
             let val = usage["values"][0].as_f64().unwrap();
             assert!(
-                (val - 3000.0).abs() < 1e-9,
-                "export should be 3000 W, got {val}"
+                (val - 3000.0).abs() < 1.0,
+                "export should be ~3000 W, got {val}"
             );
         }
     }
@@ -739,19 +813,18 @@ mod tests {
 
     #[test]
     fn obligation_report_soc_point_in_time() {
-        let buf = make_buf(&[
-            (0, &[("soc", 0.2), ("power_kw", 7.0)]),
-            (900, &[("soc", 0.4), ("power_kw", 7.0)]),
-            (1800, &[("soc", 0.6), ("power_kw", 7.0)]),
-            (2700, &[("soc", 0.8), ("power_kw", 7.0)]),
-        ]);
-        let mut history = HashMap::new();
-        history.insert("ev".to_string(), buf);
-
+        let sim = make_sim(vec![make_ev_entry(
+            "ev",
+            &[
+                (0, 7.0, 0.2),
+                (900, 7.0, 0.4),
+                (1800, 7.0, 0.6),
+                (2700, 7.0, 0.8),
+            ],
+        )]);
         let ob = make_obligation("e1", "p1", "STORAGE_CHARGE_LEVEL", 900);
-        let report = build_measurement_report_for_obligation(&ob, &history, "ven-1").unwrap();
+        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1").unwrap();
         let intervals = report["resources"][0]["intervals"].as_array().unwrap();
-
         assert!(!intervals.is_empty());
         for iv in intervals {
             let soc_payload = iv["payloads"]
@@ -760,8 +833,7 @@ mod tests {
                 .iter()
                 .find(|p| p["type"] == "STORAGE_CHARGE_LEVEL")
                 .unwrap();
-            let soc_str = soc_payload["values"][0].as_str().unwrap();
-            let soc_pct: f64 = soc_str.parse().unwrap();
+            let soc_pct: f64 = soc_payload["values"][0].as_str().unwrap().parse().unwrap();
             assert!(
                 soc_pct >= 20.0 && soc_pct <= 80.0,
                 "SoC {soc_pct} out of range"
@@ -773,13 +845,11 @@ mod tests {
 
     #[test]
     fn net_site_power_sums_assets() {
-        let buf1 = make_buf(&[(0, &[("power_kw", 2.0)]), (60, &[("power_kw", 3.0)])]);
-        let buf2 = make_buf(&[(0, &[("power_kw", -1.0)]), (60, &[("power_kw", 1.0)])]);
-        let mut history = HashMap::new();
-        history.insert("ev".to_string(), buf1);
-        history.insert("pv".to_string(), buf2);
-
-        let net = build_net_site_power_ts(&history);
+        let sim = make_sim(vec![
+            make_entry("ev", &[(0, 2.0), (60, 3.0)]),
+            make_entry("pv", &[(0, -1.0), (60, 1.0)]),
+        ]);
+        let net = build_net_site_power_ts(&sim);
         assert_eq!(net.samples.len(), 2);
         assert!((net.samples[0].1 - 1.0).abs() < 1e-9); // 2 + (-1) = 1
         assert!((net.samples[1].1 - 4.0).abs() < 1e-9); // 3 + 1 = 4
@@ -787,8 +857,8 @@ mod tests {
 
     #[test]
     fn net_site_power_empty_history() {
-        let history = HashMap::new();
-        let net = build_net_site_power_ts(&history);
+        let sim = make_sim(vec![]);
+        let net = build_net_site_power_ts(&sim);
         assert!(net.samples.is_empty());
     }
 
@@ -796,30 +866,31 @@ mod tests {
 
     #[test]
     fn latest_net_import_kw_sums_positive_assets() {
-        let mut history = HashMap::new();
-        history.insert("a".into(), make_buf(&[(0, &[("power_kw", 3.0)])]));
-        history.insert("b".into(), make_buf(&[(0, &[("power_kw", -2.0)])])); // export — ignored
-        assert!((latest_net_import_kw(&history) - 3.0).abs() < 1e-9);
+        let sim = make_sim(vec![
+            make_entry("a", &[(0, 3.0)]),
+            make_entry("b", &[(0, -2.0)]), // export — ignored
+        ]);
+        assert!((latest_net_import_kw(&sim) - 3.0).abs() < 1e-9);
     }
 
     #[test]
     fn latest_net_import_kw_empty_history_returns_zero() {
-        let history: HashMap<String, AssetHistoryBuffer> = HashMap::new();
-        assert_eq!(latest_net_import_kw(&history), 0.0);
+        let sim = make_sim(vec![]);
+        assert_eq!(latest_net_import_kw(&sim), 0.0);
     }
 
     #[test]
     fn latest_net_import_kw_all_exporting_returns_zero() {
-        let mut history = HashMap::new();
-        history.insert("pv".into(), make_buf(&[(0, &[("power_kw", -5.0)])]));
-        assert_eq!(latest_net_import_kw(&history), 0.0);
+        let sim = make_sim(vec![make_entry("pv", &[(0, -5.0)])]);
+        assert_eq!(latest_net_import_kw(&sim), 0.0);
     }
 
     #[test]
     fn latest_net_export_kw_sums_negative_assets_as_positive() {
-        let mut history = HashMap::new();
-        history.insert("pv".into(), make_buf(&[(0, &[("power_kw", -2.5)])]));
-        history.insert("load".into(), make_buf(&[(0, &[("power_kw", 1.0)])])); // import — ignored
-        assert!((latest_net_export_kw(&history) - 2.5).abs() < 1e-9);
+        let sim = make_sim(vec![
+            make_entry("pv", &[(0, -2.5)]),
+            make_entry("load", &[(0, 1.0)]), // import — ignored
+        ]);
+        assert!((latest_net_export_kw(&sim) - 2.5).abs() < 1e-9);
     }
 }

@@ -7,7 +7,6 @@ use super::{
     EnergyState,
 };
 use crate::common::{Interpolation, TimeSeries};
-use crate::controller::trace::AssetHistoryBuffer;
 use crate::profile::BatteryConfig;
 
 /// Battery storage config. Bidirectional.
@@ -201,10 +200,6 @@ impl Battery {
             samples,
             interpolation: Interpolation::Linear,
         }
-    }
-
-    pub fn history(&self, timespan: Duration, history: &AssetHistoryBuffer) -> TimeSeries {
-        super::history_from_buffer(timespan, history, Interpolation::Linear)
     }
 
     pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {

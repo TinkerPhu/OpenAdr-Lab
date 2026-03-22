@@ -67,20 +67,22 @@ pub async fn get_asset_history(
 
     let timespan_s = params.timespan_s.unwrap_or(0.0);
     let timespan = Duration::milliseconds((timespan_s * 1000.0) as i64);
+    let now = chrono::Utc::now();
 
-    let ct = ctx.state.controller_trace().await;
     let sim = ctx.sim.lock().await;
-    match sim.find_asset(&asset_id) {
+    match sim.asset(&asset_id) {
         None => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
         )
             .into_response(),
-        Some((_entry, cfg)) => {
-            let history = ct.asset_history.get(&asset_id);
-            let empty_buf = crate::controller::trace::AssetHistoryBuffer::new(0);
-            let buf = history.unwrap_or(&empty_buf);
-            let series = cfg.history(timespan, buf);
+        Some(entry) => {
+            use crate::common::{Interpolation, TimeSeries};
+            let points = entry.history.slice(timespan, now);
+            let series = TimeSeries {
+                samples: points.iter().map(|p| (p.ts, p.power_kw)).collect(),
+                interpolation: Interpolation::Step,
+            };
             let samples: Vec<serde_json::Value> = series
                 .samples
                 .iter()

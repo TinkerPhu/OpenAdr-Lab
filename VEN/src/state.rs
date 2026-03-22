@@ -164,19 +164,6 @@ impl AppState {
         self.inner.write().await.controller_trace.push_event(event);
     }
 
-    pub async fn push_asset_row(
-        &self,
-        asset_id: &str,
-        ts: chrono::DateTime<chrono::Utc>,
-        values: HashMap<String, f64>,
-    ) {
-        self.inner
-            .write()
-            .await
-            .controller_trace
-            .push_asset_row(asset_id, ts, values);
-    }
-
     pub async fn overrides(&self) -> UserOverrides {
         self.inner.read().await.overrides.clone()
     }

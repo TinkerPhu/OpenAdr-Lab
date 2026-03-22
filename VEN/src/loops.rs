@@ -344,13 +344,9 @@ pub(crate) fn spawn_sim_tick(
                 for evt in pkt_events {
                     state.push_controller_event(evt.clone()).await;
                     // T051: status report for each PacketTransition
-                    let trace = state.controller_trace().await;
-                    if let Some(report) = controller::reporter::build_status_report(
-                        &evt,
-                        &trace.asset_history,
-                        &ven_name,
-                        now,
-                    ) {
+                    if let Some(report) =
+                        controller::reporter::build_status_report(&evt, &*sim_guard, &ven_name, now)
+                    {
                         if let Err(e) = vtn.upsert_report(report).await {
                             error!("status report (packet transition) submission failed: {e:#}");
                         }
@@ -360,39 +356,15 @@ pub(crate) fn spawn_sim_tick(
                     let _ = trigger_tx.send(t);
                 }
 
-                // Post-tick: push asset history rows (T032 — drives GET /trace/history)
+                // Post-tick: push HistoryPoint per asset into per-asset ring buffer (CP2).
                 {
-                    let current_tariff = rates_snap
-                        .iter()
-                        .find(|t| t.interval_start <= now && now < t.interval_end);
-                    let import_price = current_tariff
-                        .and_then(|t| t.import_tariff_eur_kwh)
-                        .unwrap_or(0.0);
-                    let export_price = current_tariff
-                        .and_then(|t| t.export_tariff_eur_kwh)
-                        .unwrap_or(0.0);
-                    let co2_g_kwh = current_tariff.and_then(|t| t.co2_g_kwh).unwrap_or(0.0);
-
-                    for (asset_id, asset_snap) in &sim_snap.assets {
-                        let mut row: std::collections::HashMap<String, f64> =
-                            std::collections::HashMap::new();
-                        row.insert("power_kw".to_string(), asset_snap.power_kw);
-                        for (k, v) in &asset_snap.values {
-                            row.insert(k.clone(), *v);
-                        }
-                        let cost_rate_eur_h = if asset_snap.power_kw >= 0.0 {
-                            asset_snap.power_kw * import_price
-                        } else {
-                            -asset_snap.power_kw * export_price
-                        };
-                        let co2_rate_g_h = if asset_snap.power_kw > 0.0 {
-                            asset_snap.power_kw * co2_g_kwh
-                        } else {
-                            0.0
-                        };
-                        row.insert("cost_rate_eur_h".to_string(), cost_rate_eur_h);
-                        row.insert("co2_rate_g_h".to_string(), co2_rate_g_h);
-                        state.push_asset_row(asset_id, now, row).await;
+                    use crate::assets::HistoryPoint;
+                    for entry in &mut sim_guard.assets {
+                        entry.history.push(HistoryPoint {
+                            ts: now,
+                            power_kw: entry.last_power_kw,
+                            state: entry.state.clone(),
+                        });
                     }
                 }
 
@@ -407,13 +379,14 @@ pub(crate) fn spawn_sim_tick(
                 if report_counter >= report_every_ticks {
                     report_counter = 0;
                     let events = state.events().await;
-                    let trace = state.controller_trace().await;
+                    let sim_guard = sim.lock().await;
                     let reports = controller::reporter::build_measurement_reports_for_active_events(
                         &events,
-                        &trace.asset_history,
+                        &*sim_guard,
                         &ven_name,
                         now,
                     );
+                    drop(sim_guard);
                     for report in reports {
                         if let Err(e) = vtn.upsert_report(report).await {
                             error!("measurement report submission failed: {e:#}");
@@ -437,6 +410,7 @@ pub(crate) fn spawn_sim_tick(
 
 pub(crate) fn spawn_obligation_check(
     state: AppState,
+    sim: Arc<Mutex<SimState>>,
     vtn: VtnClient,
     ven_name: String,
 ) -> tokio::task::JoinHandle<()> {
@@ -447,12 +421,15 @@ pub(crate) fn spawn_obligation_check(
             let now = Utc::now();
             let due = state.due_obligations(now).await;
             for ob in due {
-                let trace = state.controller_trace().await;
-                if let Some(report) = controller::reporter::build_measurement_report_for_obligation(
-                    &ob,
-                    &trace.asset_history,
-                    &ven_name,
-                ) {
+                let report_opt = {
+                    let sim_guard = sim.lock().await;
+                    controller::reporter::build_measurement_report_for_obligation(
+                        &ob,
+                        &*sim_guard,
+                        &ven_name,
+                    )
+                };
+                if let Some(report) = report_opt {
                     match vtn.upsert_report(report).await {
                         Ok(_) => {
                             state.mark_obligation_fulfilled(ob.id).await;
@@ -542,13 +519,16 @@ pub(crate) fn spawn_planning(
 
             // Event-driven status report on PlanCycle (T050)
             {
-                let trace = state.controller_trace().await;
-                if let Some(report) = controller::reporter::build_status_report(
-                    &plan_cycle_event,
-                    &trace.asset_history,
-                    &ven_name,
-                    now,
-                ) {
+                let report_opt = {
+                    let sim_guard = sim.lock().await;
+                    controller::reporter::build_status_report(
+                        &plan_cycle_event,
+                        &*sim_guard,
+                        &ven_name,
+                        now,
+                    )
+                };
+                if let Some(report) = report_opt {
                     if let Err(e) = vtn.upsert_report(report).await {
                         error!("status report (plan cycle) submission failed: {e:#}");
                     }
