@@ -433,12 +433,14 @@ pub(crate) fn spawn_obligation_check(
             let now = Utc::now();
             let due = state.due_obligations(now).await;
             for ob in due {
+                let env = state.site_envelope().await;
                 let report_opt = {
                     let sim_guard = sim.lock().await;
                     controller::reporter::build_measurement_report_for_obligation(
                         &ob,
                         &*sim_guard,
                         &ven_name,
+                        env.as_ref(),
                     )
                 };
                 if let Some(report) = report_opt {
