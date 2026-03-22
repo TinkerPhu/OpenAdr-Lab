@@ -492,10 +492,16 @@ pub(crate) fn spawn_planning(
 
             let tariff_ts =
                 crate::entities::tariff_snapshot::TariffTimeSeries::from_snapshots(&rates);
+            let events = state.events().await;
+            let mut reservation_layer = controller::reservation::ReservationLayer::new();
+            for r in controller::openadr_interface::parse_firm_reservations(&events, now) {
+                reservation_layer.insert(r);
+            }
             let plan = controller::planner::run_planner(
                 &tariff_ts,
                 &packets,
                 &capacity,
+                &reservation_layer,
                 &profile,
                 now,
                 trigger,
