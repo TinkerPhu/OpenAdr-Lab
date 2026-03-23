@@ -186,9 +186,23 @@ def _cleanup_vtn_resources(context):
         print(f"Warning: event cleanup failed: {exc}")
 
 
+def _reset_ven_sim_overrides():
+    """POST empty UserOverrides to VEN-1 to clear any sim override bleed.
+
+    Prevents overrides set in one scenario (e.g. ev_plugged=false) from
+    leaking into subsequent scenarios that don't belong to the same feature.
+    """
+    try:
+        from features.helpers.api_client import ven_post
+        ven_post("/sim/override", json={})
+    except Exception:
+        pass
+
+
 def after_scenario(context, scenario):
     """Close browser page after @ui/@ven-ui scenarios; restart stopped services."""
     _cleanup_vtn_resources(context)
+    _reset_ven_sim_overrides()
 
     if (_is_ui(scenario) or _is_ven_ui(scenario)) and hasattr(context, "browser_page"):
         context.browser_page.close()
