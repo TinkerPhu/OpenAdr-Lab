@@ -111,6 +111,10 @@ pub struct EnergyPacket {
     #[serde(default)]
     pub past_power_profile: Vec<EnergySnapshot>,
 
+    // ── Leeway (§8.2) ────────────────────────────────────────────────────────
+    pub interruptible: bool,        // planner may pause/resume this packet
+    pub tolerance_min: Option<i64>, // ±N minutes around deadline acceptable
+
     // ── Budget Tracking ──────────────────────────────────────────────────────
     pub accumulated_cost_eur: f64, // Σ(PastPower × ImportPrice × dt) so far
     pub accumulated_co2_g: f64,    // Σ(PastPower × CO2Rate × dt) so far
@@ -148,6 +152,8 @@ impl EnergyPacket {
             request_mode: UserRequestMode::ByDeadline,
             completion_policy: CompletionPolicy::Stop,
             post_deadline_comfort_bid: None,
+            interruptible: false,
+            tolerance_min: None,
             planned_power_profile: vec![],
             past_power_profile: vec![],
             accumulated_cost_eur: 0.0,

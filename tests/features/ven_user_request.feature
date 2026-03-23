@@ -57,3 +57,22 @@ Feature: VEN User Request Manager — Stage 5
     Then the response status is 200
     And the response JSON contains field "up_kw"
     And the response JSON contains field "down_kw"
+
+  # --- Phase F: User leeway ---
+
+  Scenario: Request with tolerance_min and interruptible stores leeway fields
+    When I POST a user request with interruptible true and tolerance_min 15 for asset "ev"
+    Then the response status is 201
+    And the response JSON field "tolerance_min" equals 15.0
+    And the response JSON field "interruptible" is true
+
+  Scenario: Budget ceiling via budget_eur is reflected in user request
+    When I POST a user request with budget_eur 2.50 for asset "ev"
+    Then the response status is 201
+    And the response JSON field "max_total_cost_eur" is greater than 0.0
+
+  Scenario: Interruptible scheduled packet contributes to up_kw in flexibility envelope
+    Given the VEN has a scheduled interruptible EV packet
+    When I GET /flexibility from the VEN
+    Then the response status is 200
+    And the response JSON field "up_kw" is greater than 0.0
