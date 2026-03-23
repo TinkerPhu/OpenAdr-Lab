@@ -2974,3 +2974,48 @@ Phase C flexibility policy tests checked `import_cap_kw` on `firm_slots` (the ol
 
 - 40 features, 196 scenarios, 1114 steps — all passing
 - No regressions introduced
+
+---
+
+### Phase D (CP1–CP3) — Complete: Planner Refactor + PlanReason Audit Trail
+
+**Status: COMPLETE — 41 features, 203 scenarios, 1168 steps, 0 failures**
+
+**Branch**: `worktree-phase-d-planner-refactor`
+
+#### What was done
+
+**CP1 — Types** (`cd6b4b8` base): Added `PlanReason` enum (IDLE, FIRM_OBLIGATION, CHEAP_TARIFF, EXPENSIVE_TARIFF, CURTAILMENT, POLICY_CAP), `PlanStep` struct, `LookaheadContext`, `SiteContext`, and `Plan.steps: Vec<PlanStep>` field.
+
+**CP2 — Unified per-step loop** (`cd6b4b8`): Replaced the old multi-phase planner with a single unified `rules_choose()` function that evaluates all rules for each asset at each timestep and returns a `(setpoint_kw, PlanReason)` pair. The B1 fix (reservations recorded as `reserved_up_kw` per step rather than reducing `import_cap_kw`) landed here too.
+
+**CP3 — API exposure + BDD scenarios** (`3583178`): Added `GET /plan?summary` (returns plan with `steps: []` to omit the large audit trail from summary views). Added `plan_reasons.feature` (5 scenarios) and `plan_reason_steps.py`.
+
+#### Bug fixes during BDD gate
+
+Multiple rounds of fixes were required before all 203 scenarios passed:
+
+1. **`resolve_E0502` borrow conflict** (`85a9658`): `run_planner()` had a lifetime conflict between mutable borrow of `lookahead` and immutable borrow inside the loop. Fixed by extracting `tariff_eur_per_kwh` and `reserved_up_kw` before the mutable borrow.
+
+2. **AmbiguousStep for `?summary`** (`660878b`): The new `GET /plan?summary` step conflicted with an existing generic GET step. Disambiguated by adding a dedicated `step_request_plan_summary` function.
+
+3. **Test design fixes** (`e257648`): Phase D scenarios required several test-side corrections:
+   - PRICE events switched from 4-hour to 2-interval design (1h target + 3h reset) to prevent LOCF carrying the tariff beyond the event window
+   - EV time_pressure packet corrected (POST format with `latest_end` as ISO timestamp)
+   - `?summary` step renamed to avoid ambiguity
+   - Phase C `reserved_up_kw` assertions updated for the B1 fix
+
+4. **Tariff lookup bug** (`2592c44`): `build_grid()` used `resample_uniform + HashMap` for tariff lookup — the HashMap key never matched because `resample_uniform` aligns to epoch-grid boundaries while planner slots start at `now` (arbitrary seconds). All lookups returned `None`, so every slot got `DEFAULT_IMPORT_PRICE`. Fixed by replacing all three maps with direct `interpolate_at(slot_start)` calls per slot.
+
+5. **Stale plan polling** (`35e95ac`): Scenarios 1–2 waited for any steps to exist but immediately got the stale pre-event plan. Added targeted `When I wait for a "{kind}" PlanStep for asset "{asset_id}"` polling steps that block until the specific reason kind appears.
+
+6. **IDLE scenario** (`c145928`): Scenario 4 polled all battery steps with `IDLE` kind — but ran right after Scenario 3 which posted a cheap-tariff event. Added a wait step to give the planner time to clear the stale tariff before asserting.
+
+7. **EV sim override contamination** (`4b4357e` + `d7b38b1`): `phase_a_physics.feature` (added by a concurrent commit `5c0c77e`) sets `ev_plugged=false` in its last scenario and does not restore it. The `after_scenario` hook in `environment.py` was missing a sim override reset. First fix posted `{}` (insufficient — only clears UserOverrides, doesn't undo `EvState.plugged` mutation). Second fix posts `{"ev_plugged": True}` which explicitly restores `EvState.plugged` on the next sim tick, preventing contamination of all subsequent features.
+
+#### Key learnings
+
+- `resample_uniform` is epoch-aligned; direct `interpolate_at()` per slot is the correct approach for planner tariff lookup.
+- Two-interval event design (target + reset) is required for LOCF-based tariff steps — a single interval carries forward to all subsequent slots.
+- `POST /sim/override` replaces the entire UserOverrides struct but does NOT undo direct state mutations (e.g. `EvState.plugged`). To restore state, explicitly POST the desired restored value.
+- Always add targeted polling steps (waiting for a specific reason kind) rather than generic "has steps" polls — the generic poll returns immediately with stale data.
