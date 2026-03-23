@@ -54,9 +54,10 @@ pub fn build_router(ctx: AppCtx) -> Router {
         // Timeline routes (speckit 005) — /all must precede /:asset_id
         .route("/timeline/all", get(timeline::get_timeline_all))
         .route("/timeline/:asset_id", get(timeline::get_timeline))
-        // Asset forecast + history endpoints (speckit 007)
+        // Asset forecast + history + capability endpoints (speckit 007 / Phase A)
         .route("/forecast/:asset_id", get(assets::get_asset_forecast))
         .route("/history/:asset_id", get(assets::get_asset_history))
+        .route("/capability/:asset_id", get(assets::get_asset_capability))
         // HEMS Stage 2 routes
         .route("/capacity", get(hems::get_capacity))
         .route("/obligations", get(hems::get_obligations))
