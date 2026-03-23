@@ -249,29 +249,6 @@ fn build_grid(
     let baseline_kw = profile.base_load_kw();
     let rates_empty = tariffs.is_empty();
 
-    let slot_dur = Duration::seconds(step_s as i64);
-    let import_map: HashMap<i64, f64> = tariffs
-        .import_eur_kwh
-        .resample_uniform(slot_dur, Aggregation::Mean)
-        .samples
-        .iter()
-        .map(|(ts, v)| (ts.timestamp(), *v))
-        .collect();
-    let export_map: HashMap<i64, f64> = tariffs
-        .export_eur_kwh
-        .resample_uniform(slot_dur, Aggregation::Mean)
-        .samples
-        .iter()
-        .map(|(ts, v)| (ts.timestamp(), *v))
-        .collect();
-    let co2_map: HashMap<i64, f64> = tariffs
-        .co2_g_kwh
-        .resample_uniform(slot_dur, Aggregation::Mean)
-        .samples
-        .iter()
-        .map(|(ts, v)| (ts.timestamp(), *v))
-        .collect();
-
     let mut firm = Vec::new();
     let mut flex = Vec::new();
 
@@ -280,15 +257,20 @@ fn build_grid(
         let end = start + Duration::seconds(step_s as i64);
         let epoch = start.timestamp();
 
-        let import_tariff = import_map
-            .get(&epoch)
-            .copied()
+        // Use Step LOCF interpolation so tariff lookups work regardless of whether slot
+        // timestamps align with the event intervalPeriod grid boundaries.
+        let import_tariff = tariffs
+            .import_eur_kwh
+            .interpolate_at(start)
             .unwrap_or(DEFAULT_IMPORT_PRICE);
-        let export_tariff = export_map
-            .get(&epoch)
-            .copied()
+        let export_tariff = tariffs
+            .export_eur_kwh
+            .interpolate_at(start)
             .unwrap_or(DEFAULT_EXPORT_PRICE);
-        let co2 = co2_map.get(&epoch).copied().unwrap_or(DEFAULT_CO2_G_KWH);
+        let co2 = tariffs
+            .co2_g_kwh
+            .interpolate_at(start)
+            .unwrap_or(DEFAULT_CO2_G_KWH);
         let grid_eff = import_tariff + co2 * CO2_WEIGHT;
 
         // PV forecast from capability_trajectory (already in generation-magnitude convention, ≥ 0)
@@ -349,15 +331,6 @@ fn precompute_lookahead(
 ) -> HashMap<String, LookaheadContext> {
     let n = (lookahead_window.num_seconds() / resolution.num_seconds().max(1)) as usize;
 
-    // Pre-build import tariff map over lookahead window
-    let import_map: HashMap<i64, f64> = tariffs
-        .import_eur_kwh
-        .resample_uniform(resolution, Aggregation::Mean)
-        .samples
-        .iter()
-        .map(|(ts, v)| (ts.timestamp(), *v))
-        .collect();
-
     let mut result = HashMap::new();
     for (entry, cfg) in sim.iter_assets() {
         let traj = cfg.capability_trajectory(&entry.state, lookahead_window, resolution);
@@ -366,7 +339,10 @@ fn precompute_lookahead(
         let mut tariff_max = f64::MIN;
         for i in 0..n {
             let t = now + resolution * i as i32;
-            let v = import_map.get(&t.timestamp()).copied().unwrap_or(DEFAULT_IMPORT_PRICE);
+            let v = tariffs
+                .import_eur_kwh
+                .interpolate_at(t)
+                .unwrap_or(DEFAULT_IMPORT_PRICE);
             tariff_min = tariff_min.min(v);
             tariff_max = tariff_max.max(v);
         }
@@ -937,9 +913,9 @@ mod tests {
     }
 
     #[test]
-    fn mid_slot_tariff_change_produces_time_weighted_average() {
-        // Tariff changes at 10:03 inside a 5-min slot [10:00, 10:05)
-        // 0.20 for 3 min, 0.10 for 2 min → TWM = (3*0.20 + 2*0.10)/5 = 0.16
+    fn mid_slot_tariff_change_uses_start_of_slot_value() {
+        // Tariff changes at 10:03 inside a 5-min slot [10:00, 10:05).
+        // interpolate_at(10:00) = 0.20 (Step LOCF: value at slot start).
         let snaps = vec![
             snap(ts(10, 0, 0), ts(10, 3, 0), Some(0.20), None, None),
             snap(ts(10, 3, 0), ts(10, 10, 0), Some(0.10), None, None),
@@ -958,7 +934,7 @@ mod tests {
             &HashMap::new(),
         );
         assert_eq!(firm.len(), 1);
-        assert!((firm[0].import_tariff_eur_kwh - 0.16).abs() < 1e-9);
+        assert!((firm[0].import_tariff_eur_kwh - 0.20).abs() < 1e-9);
     }
 
     #[test]
@@ -984,10 +960,9 @@ mod tests {
     }
 
     #[test]
-    fn single_sample_tariff_covers_first_slot_only() {
-        // One tariff sample at 10:00 → resample_uniform produces one bucket at
-        // 10:00 (LOCF can't extend past data for aggregation). Slot 0 gets 0.30,
-        // subsequent slots fall back to default.
+    fn single_sample_tariff_locf_covers_all_slots() {
+        // One tariff sample at 10:00 with interval ending 11:00.
+        // interpolate_at uses Step LOCF: all slots at or after 10:00 get 0.30.
         let snaps = vec![snap(
             ts(10, 0, 0),
             ts(11, 0, 0),
@@ -1011,8 +986,9 @@ mod tests {
         assert_eq!(firm.len(), 4);
         assert!((firm[0].import_tariff_eur_kwh - 0.30).abs() < 1e-9);
         assert!(!firm[0].rate_estimated);
-        // Slots beyond the single bucket fall back to default
-        assert!((firm[1].import_tariff_eur_kwh - DEFAULT_IMPORT_PRICE).abs() < 1e-9);
+        // Step LOCF carries value to all subsequent slots
+        assert!((firm[1].import_tariff_eur_kwh - 0.30).abs() < 1e-9);
+        assert!((firm[3].import_tariff_eur_kwh - 0.30).abs() < 1e-9);
     }
 
     // ── Asset forecast resampling tests (T013) ──────────────────────────────
