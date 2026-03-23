@@ -55,6 +55,33 @@ pub async fn get_asset_forecast(
     }
 }
 
+/// GET /capability/:asset_id — point-in-time feasible power range for one asset (Phase A).
+/// Returns `{"max_import_kw": ..., "max_export_kw": ..., "is_fixed": ...}`.
+pub async fn get_asset_capability(
+    State(ctx): State<AppCtx>,
+    Path(asset_id): Path<String>,
+) -> impl IntoResponse {
+    use axum::http::StatusCode;
+
+    let sim = ctx.sim.lock().await;
+    match sim.find_asset(&asset_id) {
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("unknown asset: {}", asset_id) })),
+        )
+            .into_response(),
+        Some((entry, cfg)) => {
+            let cap = cfg.capability(&entry.state);
+            Json(serde_json::json!({
+                "max_import_kw": cap.max_import_kw,
+                "max_export_kw": cap.max_export_kw,
+                "is_fixed": cap.is_fixed(),
+            }))
+            .into_response()
+        }
+    }
+}
+
 /// GET /history/:asset_id — historical TimeSeries for one asset (speckit 007).
 /// Returns `{"samples": [{"ts": "...", "value": ...}], "interpolation": "..."}`.
 pub async fn get_asset_history(
