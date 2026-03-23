@@ -67,16 +67,27 @@ def step_request_plan_summary(context):
 @given("I create a 1-hour PRICE event at {price:f} EUR/kWh for the saved program")
 def step_create_price_event(context, price):
     now = datetime.now(timezone.utc)
+    # Two intervals: 1h at the target price, then 3h at DEFAULT (0.20).
+    # The second interval acts as a "reset" so Step LOCF doesn't carry the price
+    # beyond the 1-hour window into the rest of the 4h planning horizon.
+    DEFAULT_IMPORT_PRICE = 0.20
     intervals = [
         {
-            "id": i,
+            "id": 0,
             "intervalPeriod": {
-                "start": (now + timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "start": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "duration": "PT1H",
             },
             "payloads": [{"type": "PRICE", "values": [price]}],
-        }
-        for i in range(1)
+        },
+        {
+            "id": 1,
+            "intervalPeriod": {
+                "start": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "duration": "PT3H",
+            },
+            "payloads": [{"type": "PRICE", "values": [DEFAULT_IMPORT_PRICE]}],
+        },
     ]
     r = vtn_post("/events", context.vtn_token, json={
         "programID": context.saved_program_id,
