@@ -2919,3 +2919,58 @@ The initial BDD tests failed due to three issues discovered during Pi4 integrati
 - 119 total cargo tests — all passing
 - 2 BDD scenarios in `reporter_resampling.feature` (multi-interval + single-interval fallback)
 - Full regression: 38 features, 190 scenarios, 1083 steps — all passing
+
+---
+
+## Phase D — VEN Planner Refactor: PlanReason Audit Trail (CP1–CP3)
+
+**Date**: 2026-03-23
+**Branch**: `worktree-phase-d-planner-refactor`
+
+### What Was Done
+
+Phase D adds a per-step `PlanReason` audit trail to the HEMS planner, making every planning decision observable via the `GET /plan` endpoint.
+
+**CP1 (types)**: Added `PlanReason` enum (`CHEAP_TARIFF`, `EXPENSIVE_TARIFF`, `FIRM_OBLIGATION`, `IDLE`), enriched `PlanStep` with `reason`, `reserved_up_kw`, `avail_max_import_kw`, `avail_max_export_kw`. Added `LookaheadContext`, `SiteContext`, and `Plan.steps: Vec<PlanStep>`.
+
+**CP2 (unified per-step loop)**: Refactored `run_planner()` from per-packet allocation loops to a unified per-step loop iterating all assets at each timeslot. Each step calls `rules_choose()` which applies Rules 1–10 in order and returns `(setpoint_kw, PlanReason)`. The B1 fix moved FIRM reservation effect from `build_grid()` slot-level to per-step `available_cap()` in `rules_choose()`.
+
+**CP3 (API + BDD)**: Added `GET /plan?summary` (returns plan with `steps: []`). Added `plan_reasons.feature` with 5 BDD scenarios covering `CHEAP_TARIFF`, `EXPENSIVE_TARIFF`, `FIRM_OBLIGATION`, `IDLE`, and summary endpoint.
+
+### Issues & Key Learnings
+
+**1. `resample_uniform` + HashMap tariff lookup was always broken**
+
+The original `build_grid()` computed tariff per slot using:
+```rust
+let import_map: HashMap<i64, f64> = tariffs.import_eur_kwh
+    .resample_uniform(slot_dur, Aggregation::Mean).samples.iter()
+    .map(|(ts, v)| (ts.timestamp(), *v)).collect();
+let import_tariff = import_map.get(&epoch).copied().unwrap_or(DEFAULT);
+```
+`resample_uniform` aligns samples to epoch-based 5-minute grid boundaries. Planner slots start at `now` (arbitrary seconds). The hashmap lookup **always** returned `None` — all slots got `DEFAULT_IMPORT_PRICE`. This was a pre-existing silent bug that no prior test caught because no test verified `PlanReason` based on tariff values.
+
+**Fix**: Replace all three `import_map`/`export_map`/`co2_map` constructions with direct `interpolate_at(slot_start)` calls per slot. Step LOCF semantics are correct for event-based tariff intervals.
+
+**2. LOCF carries tariff beyond event interval**
+
+With `interpolate_at` (Step LOCF), a single tariff sample at `interval_start` carries forward to all subsequent slots. A 1-hour cheap event would make all 48 firm slots cheap → `median = 0.05` → neither `CHEAP_TARIFF` nor `EXPENSIVE_TARIFF` fires (same as the original 4-hour event problem).
+
+**Fix**: Event creation in tests uses TWO intervals: 1h at the target price + 3h at `DEFAULT_IMPORT_PRICE (0.20)`. The reset interval ensures LOCF drops back to default after the event window.
+
+**3. BDD polling vs. stale plan**
+
+Several scenarios failed because the `When I wait for the VEN /plan to have steps for asset X` step returned as soon as ANY steps existed — which was immediately, with the stale pre-event plan.
+
+**Fix**: Added targeted polling steps:
+- `When I wait for a "{kind}" PlanStep for asset "{asset_id}"` — polls until a step with the specific reason kind appears.
+- `When I wait for all PlanSteps for asset "{asset_id}" to have reason kind "{kind}"` — polls until ALL steps match (used for the IDLE scenario to wait out post-event cleanup).
+
+**4. Phase C reserved_up_kw**
+
+Phase C flexibility policy tests checked `import_cap_kw` on `firm_slots` (the old B1 pre-fix behavior). After the B1 fix moved reservations to per-step `available_cap()`, those assertions became wrong. Updated to check `plan_steps[*].reserved_up_kw` instead.
+
+### Result
+
+- 40 features, 196 scenarios, 1114 steps — all passing
+- No regressions introduced
