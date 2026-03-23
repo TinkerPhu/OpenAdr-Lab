@@ -31,7 +31,7 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
 
   # ── Scenario 4: Battery is idle with no active packets and median tariff ──
   Scenario: Battery is idle when no packets and tariff is at median
-    When I wait for the VEN /plan to have steps for asset "battery"
+    When I wait for all PlanSteps for asset "battery" to have reason kind "IDLE"
     Then all PlanSteps for asset "battery" have reason kind "IDLE"
 
   # ── Scenario 5: GET /plan?summary omits the steps array ──────────────────

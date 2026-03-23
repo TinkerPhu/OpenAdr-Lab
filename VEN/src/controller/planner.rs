@@ -3,7 +3,6 @@
 /// Produces a Plan from TariffSnapshots + EnergyPackets + SimState.
 /// Phase 6 (penalty check) is deferred to Stage 4.
 use crate::assets::{AssetCapability, AssetState};
-use crate::common::Aggregation;
 use crate::controller::reservation::{AssetReservation, ReservationLayer};
 use crate::entities::asset::{ComfortRate, PlanTrigger};
 use crate::entities::capacity::OadrCapacityState;
