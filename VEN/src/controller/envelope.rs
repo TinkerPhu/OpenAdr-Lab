@@ -4,6 +4,7 @@ use serde_json::Value;
 use crate::assets::{AssetConfig, AssetState};
 use crate::controller::openadr_interface::parse_firm_reservations;
 use crate::controller::reservation::ReservationLayer;
+use crate::entities::energy_packet::{EnergyPacket, PacketStatus};
 use crate::entities::plan::SiteFlexibilityEnvelope;
 use crate::simulator::SimState;
 
@@ -27,6 +28,7 @@ use crate::simulator::SimState;
 pub fn compute_envelope(
     sim: &SimState,
     reservation_layer: &ReservationLayer,
+    packets: &[EnergyPacket],
     now: DateTime<Utc>,
 ) -> SiteFlexibilityEnvelope {
     let mut up_kw = 0.0_f64;
@@ -67,6 +69,16 @@ pub fn compute_envelope(
         }
     }
 
+    // Interruptible scheduled/active packets donate their running power as up headroom (§8.4).
+    for p in packets {
+        if p.interruptible
+            && !p.is_terminal()
+            && matches!(p.status, PacketStatus::Active | PacketStatus::Scheduled)
+        {
+            up_kw += p.desired_power_kw.max(0.0);
+        }
+    }
+
     let up_duration_s = if up_kw > 1e-6 && available_discharge_kwh > 1e-6 {
         Some((available_discharge_kwh / up_kw * 3600.0) as u64)
     } else {
@@ -95,6 +107,7 @@ pub fn compute_envelope(
 pub fn compute_envelope_from_events(
     sim: &SimState,
     events: &[Value],
+    packets: &[EnergyPacket],
     now: DateTime<Utc>,
 ) -> SiteFlexibilityEnvelope {
     let reservations = parse_firm_reservations(events, now);
@@ -102,7 +115,7 @@ pub fn compute_envelope_from_events(
     for r in reservations {
         layer.insert(r);
     }
-    compute_envelope(sim, &layer, now)
+    compute_envelope(sim, &layer, packets, now)
 }
 
 #[cfg(test)]
@@ -212,7 +225,7 @@ mod tests {
     #[test]
     fn test_compute_envelope_no_assets_returns_zero() {
         let sim = make_sim(vec![], vec![]);
-        let env = compute_envelope(&sim, &ReservationLayer::new(), Utc::now());
+        let env = compute_envelope(&sim, &ReservationLayer::new(), &[], Utc::now());
         assert_eq!(env.up_kw, 0.0);
         assert_eq!(env.down_kw, 0.0);
         assert!(env.up_duration_s.is_none());
@@ -226,7 +239,7 @@ mod tests {
             vec![make_ev_config(7.0, 40.0)],
             vec![make_ev_entry("ev", 0.5, true, 7.0)],
         );
-        let env = compute_envelope(&sim, &ReservationLayer::new(), Utc::now());
+        let env = compute_envelope(&sim, &ReservationLayer::new(), &[], Utc::now());
         assert!((env.up_kw - 7.0).abs() < 1e-6, "up_kw should be 7.0, got {}", env.up_kw);
         assert!((env.down_kw).abs() < 1e-6, "down_kw should be 0.0, got {}", env.down_kw);
     }
@@ -238,7 +251,7 @@ mod tests {
             vec![make_battery_config(10.0, 5.0, 0.1)],
             vec![make_battery_entry("bat", 0.5, 0.0)],
         );
-        let env = compute_envelope(&sim, &ReservationLayer::new(), Utc::now());
+        let env = compute_envelope(&sim, &ReservationLayer::new(), &[], Utc::now());
         assert!(env.up_kw > 0.0, "expected up_kw > 0, got {}", env.up_kw);
         assert!(env.down_kw > 0.0, "expected down_kw > 0, got {}", env.down_kw);
         assert!((env.up_kw - 5.0).abs() < 1e-6, "up_kw should be 5.0, got {}", env.up_kw);
@@ -255,7 +268,7 @@ mod tests {
         );
         let mut layer = ReservationLayer::new();
         layer.insert(up_reservation("bat", 3.0, now));
-        let env = compute_envelope(&sim, &layer, now);
+        let env = compute_envelope(&sim, &layer, &[], now);
         // up_kw unaffected (UP reservation does not change max_export_kw)
         assert!((env.up_kw - 5.0).abs() < 1e-6, "up_kw should be 5.0, got {}", env.up_kw);
         // down_kw reduced from 5.0 to 2.0 (5.0 - 3.0)
@@ -269,7 +282,7 @@ mod tests {
             vec![make_pv_config(5.0)],
             vec![make_pv_entry("pv", -2.0)],
         );
-        let env = compute_envelope(&sim, &ReservationLayer::new(), Utc::now());
+        let env = compute_envelope(&sim, &ReservationLayer::new(), &[], Utc::now());
         assert!((env.up_kw).abs() < 1e-6, "PV up_kw should be 0, got {}", env.up_kw);
         assert!((env.down_kw).abs() < 1e-6, "PV down_kw should be 0, got {}", env.down_kw);
     }
@@ -286,7 +299,7 @@ mod tests {
             vec![make_battery_config(10.0, 5.0, 0.1)],
             vec![make_battery_entry("bat", 0.5, 0.0)],
         );
-        let env = compute_envelope(&sim, &ReservationLayer::new(), Utc::now());
+        let env = compute_envelope(&sim, &ReservationLayer::new(), &[], Utc::now());
         assert_eq!(env.up_duration_s, Some(2880), "up_duration_s mismatch: {:?}", env.up_duration_s);
         assert_eq!(env.down_duration_s, Some(3600), "down_duration_s mismatch: {:?}", env.down_duration_s);
     }

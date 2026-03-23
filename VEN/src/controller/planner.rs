@@ -419,10 +419,17 @@ fn rules_choose(
             if undelivered <= 1e-6 {
                 return None;
             }
-            let latest_end = p.latest_end().unwrap_or(far_future);
+            // Budget gate (§8.4): skip packet if accumulated cost already reached the ceiling.
+            if let Some(budget) = p.value_curve.deadline_tiers.first().and_then(|t| t.max_total_cost_eur) {
+                if p.accumulated_cost_eur >= budget {
+                    return None;
+                }
+            }
+            let deadline_with_tolerance = p.latest_end().unwrap_or(far_future)
+                + Duration::seconds(p.tolerance_min.unwrap_or(0) * 60);
             let slots_remaining = firm_slot_windows
                 .iter()
-                .filter(|(start, end)| *start >= p.earliest_start && *end <= latest_end)
+                .filter(|(start, end)| *start >= p.earliest_start && *end <= deadline_with_tolerance)
                 .count()
                 .max(1);
             let slots_needed =
@@ -671,7 +678,12 @@ fn build_envelopes(
             slots_available: n,
             max_acceptable_rate: packet.value_curve.bid_at(fill_now),
             min_acceptable_rate: packet.value_curve.bid_at(fill_after),
-            budget_remaining_eur: f64::MAX,
+            budget_remaining_eur: packet.value_curve
+                .deadline_tiers
+                .first()
+                .and_then(|t| t.max_total_cost_eur)
+                .map(|b| (b - packet.accumulated_cost_eur).max(0.0))
+                .unwrap_or(f64::MAX),
             estimated_cost_eur: energy_for_flex * avg_import,
             estimated_co2_g: energy_for_flex * avg_co2,
         });

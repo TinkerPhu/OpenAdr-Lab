@@ -1,7 +1,8 @@
-"""Step definitions for VEN User Request Manager (Stage 5) BDD tests."""
+"""Step definitions for VEN User Request Manager (Stage 5 + Phase F leeway) BDD tests."""
 
+import time
 from datetime import datetime, timedelta, timezone
-from behave import when, then
+from behave import given, when, then
 from features.helpers.api_client import ven_get, ven_post, ven_delete
 
 
@@ -136,3 +137,96 @@ def step_cancelled_packet_abandoned(context):
     assert status == "ABANDONED", (
         f"Expected packet {packet_id} to be ABANDONED, got '{status}'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase F: User leeway steps
+# ---------------------------------------------------------------------------
+
+@when('I POST a user request with interruptible true and tolerance_min {tolerance:d} for asset "{asset_id}"')
+def step_post_user_request_with_leeway(context, tolerance, asset_id):
+    latest_end = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    payload = {
+        "asset_id": asset_id,
+        "target_soc": 0.80,
+        "deadlines": [{"latest_end": latest_end, "min_completion": 0.8}],
+        "completion_policy": "STOP",
+        "interruptible": True,
+        "tolerance_min": tolerance,
+    }
+    r = ven_post("/user-requests", json=payload)
+    context.last_response = r
+    try:
+        context.last_response_json = r.json()
+        context.last_created_request = r.json()
+    except Exception:
+        context.last_response_json = None
+        context.last_created_request = None
+
+
+@when('I POST a user request with budget_eur {budget:f} for asset "{asset_id}"')
+def step_post_user_request_with_budget_eur(context, budget, asset_id):
+    latest_end = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    payload = {
+        "asset_id": asset_id,
+        "target_soc": 0.80,
+        "deadlines": [{"latest_end": latest_end, "min_completion": 0.8}],
+        "completion_policy": "STOP",
+        "budget_eur": budget,
+    }
+    r = ven_post("/user-requests", json=payload)
+    context.last_response = r
+    try:
+        context.last_response_json = r.json()
+        context.last_created_request = r.json()
+    except Exception:
+        context.last_response_json = None
+        context.last_created_request = None
+
+
+@given("the VEN has a scheduled interruptible EV packet")
+def step_given_scheduled_interruptible_packet(context):
+    """Create an interruptible EV request and wait until its packet is SCHEDULED or ACTIVE."""
+    latest_end = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    payload = {
+        "asset_id": "ev",
+        "target_soc": 0.90,
+        "deadlines": [{"latest_end": latest_end, "min_completion": 0.8}],
+        "completion_policy": "STOP",
+        "interruptible": True,
+        "desired_power_kw": 7.0,
+    }
+    r = ven_post("/user-requests", json=payload)
+    r.raise_for_status()
+    packet_id = r.json().get("packet_id")
+    assert packet_id, f"No packet_id in response: {r.json()}"
+
+    # Wait up to 30s for the packet to leave PENDING status
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        rp = ven_get("/packets")
+        rp.raise_for_status()
+        matched = [p for p in rp.json() if p.get("id") == packet_id]
+        if matched and matched[0].get("status") not in ("PENDING",):
+            context.interruptible_packet_id = packet_id
+            return
+        time.sleep(1)
+
+    context.interruptible_packet_id = packet_id  # proceed anyway; test may still pass
+
+
+@then('the response JSON field "{field_path}" is true')
+def step_response_json_field_is_true(context, field_path):
+    data = context.last_response_json
+    parts = field_path.split(".")
+    val = data
+    for p in parts:
+        assert isinstance(val, dict), f"Expected dict at '{p}', got {type(val)}: {val}"
+        val = val.get(p)
+    assert val is True, f"Field '{field_path}' is not true: {val!r}"

@@ -41,6 +41,10 @@ pub struct UserRequest {
     pub status: UserRequestStatus,
     pub estimated_cost_eur: f64,
     pub estimated_co2_g: f64,
+    // ── Leeway fields (§8.2 / ven_asset_interface_spec §7) ──────────────────
+    pub interruptible: bool,        // planner may pause/resume this packet
+    pub tolerance_min: Option<i64>, // ±N minutes around deadline acceptable
+    pub budget_eur: Option<f64>,    // max the user is willing to pay (top-level ceiling)
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
