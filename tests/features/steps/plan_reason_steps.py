@@ -33,6 +33,31 @@ def step_wait_for_reason_kind(context, kind, asset_id):
     context.last_checked_asset = asset_id
 
 
+@when('I wait for all PlanSteps for asset "{asset_id}" to have reason kind "{kind}"')
+def step_wait_for_all_reason_kind(context, asset_id, kind):
+    def fetch():
+        resp = ven_get("/plan")
+        if not resp.ok:
+            return None
+        body = resp.json()
+        if not isinstance(body, dict):
+            return None
+        steps = [s for s in body.get("steps", []) if s.get("asset_id") == asset_id]
+        if not steps:
+            return None
+        if all(s.get("reason", {}).get("kind") == kind for s in steps):
+            return body
+        return None
+
+    context.ven_plan = poll_until(
+        fetch,
+        lambda x: x is not None,
+        timeout=60,
+        description=f"All VEN /plan steps for '{asset_id}' have reason.kind='{kind}'",
+    )
+    context.last_checked_asset = asset_id
+
+
 @when('I wait for the VEN /plan to have steps for asset "{asset_id}"')
 def step_wait_for_steps(context, asset_id):
     def fetch():
