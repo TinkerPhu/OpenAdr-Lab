@@ -194,7 +194,7 @@ def _reset_ven_sim_overrides():
     """
     try:
         from features.helpers.api_client import ven_post
-        ven_post("/sim/override", json={})
+        ven_post("/sim/override", json={"ev_plugged": True})
     except Exception:
         pass
 
