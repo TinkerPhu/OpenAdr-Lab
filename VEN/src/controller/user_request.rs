@@ -22,6 +22,10 @@ pub struct CreateUserRequestBody {
     pub deadlines: Vec<RequestDeadlineInput>,
     pub completion_policy: Option<String>,
     pub comfort_rates: Option<Vec<ComfortRateInput>>,
+    // ── Leeway fields (§8.2) ────────────────────────────────────────────────
+    pub budget_eur: Option<f64>,     // top-level cost ceiling shorthand
+    pub interruptible: Option<bool>, // planner may pause/resume
+    pub tolerance_min: Option<i64>,  // ±N minutes around deadline acceptable
 }
 
 #[derive(Debug, Deserialize)]
@@ -100,7 +104,7 @@ pub fn create_from_body(
     };
 
     // Build deadline tiers from input
-    let deadline_tiers: Vec<DeadlineTier> = body
+    let mut deadline_tiers: Vec<DeadlineTier> = body
         .deadlines
         .iter()
         .map(|d| DeadlineTier {
@@ -111,8 +115,17 @@ pub fn create_from_body(
         })
         .collect();
 
+    // Apply top-level budget_eur as first-tier cost ceiling if not already set
+    if let Some(budget) = body.budget_eur {
+        if let Some(first) = deadline_tiers.first_mut() {
+            if first.max_total_cost_eur.is_none() {
+                first.max_total_cost_eur = Some(budget);
+            }
+        }
+    }
+
     let tier_count = deadline_tiers.len();
-    let max_total_cost_eur = body.deadlines.first().and_then(|d| d.max_total_cost_eur);
+    let max_total_cost_eur = deadline_tiers.first().and_then(|t| t.max_total_cost_eur);
 
     let request_id = Uuid::new_v4();
 
@@ -122,10 +135,15 @@ pub fn create_from_body(
         deadline_tiers,
         active_tier_index: 0,
     };
+    let interruptible = body.interruptible.unwrap_or(false);
+    let tolerance_min = body.tolerance_min;
+
     let packet = EnergyPacket {
         target_soc: body.target_soc,
         completion_policy,
         post_deadline_comfort_bid: cfg.default_post_deadline_comfort_bid(),
+        interruptible,
+        tolerance_min,
         ..EnergyPacket::new(
             body.asset_id.clone(),
             target_energy_kwh,
@@ -135,15 +153,17 @@ pub fn create_from_body(
         )
     };
 
-    // Build UserRequest (thin wrapper linking to the packet)
-    let request_deadlines: Vec<crate::entities::user_request::RequestDeadline> = body
-        .deadlines
+    // Build UserRequest (thin wrapper linking to the packet).
+    // Derive deadlines from the packet's value_curve so budget_eur mutation is reflected.
+    let request_deadlines: Vec<crate::entities::user_request::RequestDeadline> = packet
+        .value_curve
+        .deadline_tiers
         .iter()
-        .map(|d| RequestDeadline {
-            latest_end: d.latest_end,
-            max_total_cost_eur: d.max_total_cost_eur,
-            max_marginal_rate_eur_kwh: d.max_marginal_rate_eur_kwh,
-            min_completion: d.min_completion.unwrap_or(0.8),
+        .map(|t| RequestDeadline {
+            latest_end: t.deadline,
+            max_total_cost_eur: t.max_total_cost_eur,
+            max_marginal_rate_eur_kwh: t.max_marginal_rate_eur_kwh,
+            min_completion: t.min_completion,
         })
         .collect();
 
@@ -166,6 +186,9 @@ pub fn create_from_body(
         status: UserRequestStatus::Active,
         estimated_cost_eur: 0.0,
         estimated_co2_g: 0.0,
+        interruptible,
+        tolerance_min,
+        budget_eur: body.budget_eur,
         created_at: now,
         updated_at: now,
     };

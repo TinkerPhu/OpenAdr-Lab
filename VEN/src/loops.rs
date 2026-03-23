@@ -372,9 +372,11 @@ pub(crate) fn spawn_sim_tick(
                 // Done inside the sim lock to avoid a second lock acquisition.
                 {
                     let events_snap = state.events().await;
+                    let packets_snap = state.active_packets().await;
                     let env = controller::envelope::compute_envelope_from_events(
                         &*sim_guard,
                         &events_snap,
+                        &packets_snap,
                         now,
                     );
                     state.set_site_envelope(env).await;
@@ -522,7 +524,8 @@ pub(crate) fn spawn_planning(
             // Planner may transition packet statuses (Pending→Scheduled, etc.)
             let firm_count = plan.firm_slots.len();
             let flex_count = plan.flexible_slots.len();
-            state.set_active_packets(plan.packets.clone()).await;
+            let plan_packets = plan.packets.clone();
+            state.set_active_packets(plan_packets.clone()).await;
             state.set_active_plan(Some(plan)).await;
 
             // Refresh site envelope immediately after each plan cycle.
@@ -531,6 +534,7 @@ pub(crate) fn spawn_planning(
                 let env = controller::envelope::compute_envelope_from_events(
                     &*sim_guard,
                     &events,
+                    &plan_packets,
                     now,
                 );
                 drop(sim_guard);
