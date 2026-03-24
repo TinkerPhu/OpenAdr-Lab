@@ -368,6 +368,16 @@ pub(crate) fn spawn_sim_tick(
                     }
                 }
 
+                // Update Grid virtual asset with net power + VTN capacity limits.
+                // Done here (not inside tick()) so capacity_snap is available.
+                {
+                    let net_power_kw = sim_guard.grid.net_power_w / 1000.0;
+                    let import_limit_kw = capacity_snap.import_limit_kw.unwrap_or(f64::MAX);
+                    // OadrCapacityState.export_limit_kw is a positive magnitude; negate for sign convention.
+                    let export_limit_kw_signed = -(capacity_snap.export_limit_kw.unwrap_or(f64::MAX));
+                    sim_guard.grid_asset.update(net_power_kw, import_limit_kw, export_limit_kw_signed, now);
+                }
+
                 // Refresh site envelope on every sim tick (~1s).
                 // Done inside the sim lock to avoid a second lock acquisition.
                 {

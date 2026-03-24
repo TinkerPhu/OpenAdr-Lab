@@ -838,7 +838,6 @@ fn seed_to_packet(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::Interpolation;
     use crate::entities::tariff_snapshot::TariffSnapshot;
     use chrono::TimeZone;
 
@@ -908,7 +907,6 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
@@ -936,7 +934,6 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
@@ -955,7 +952,6 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
@@ -986,7 +982,6 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
@@ -1006,14 +1001,9 @@ mod tests {
 
     #[test]
     fn pv_linear_forecast_resampled() {
-        // PV forecast: linear ramp from -10.0 to 0.0 over 10 min (export sign)
-        // Slot [10:00, 10:05): TWM of linear from -10→-5 = -7.5
-        let pv = TimeSeries {
-            samples: vec![(ts(10, 0, 0), -10.0), (ts(10, 10, 0), 0.0)],
-            interpolation: Interpolation::Linear,
-        };
-        let mut forecasts = HashMap::new();
-        forecasts.insert("pv".to_string(), pv);
+        // PV forecast at slot start (10:00): 7.5 kW generation magnitude
+        let mut pv_kw_map = HashMap::new();
+        pv_kw_map.insert(ts(10, 0, 0).timestamp(), 7.5_f64);
 
         let tariffs = TariffTimeSeries::from_snapshots(&[snap(
             ts(10, 0, 0),
@@ -1026,15 +1016,13 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
             1,
             now + Duration::hours(1),
-            &forecasts,
+            &pv_kw_map,
         );
-        // pv_export_kw = -7.5 (TWM), pv_kw = 7.5 (generation)
         assert!((firm[0].pv_forecast_kw - 7.5).abs() < 0.1);
     }
 
@@ -1051,7 +1039,6 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
@@ -1064,14 +1051,7 @@ mod tests {
 
     #[test]
     fn missing_asset_key_defaults_to_zero() {
-        // Only "heater" forecast provided, no "pv"
-        let heater = TimeSeries {
-            samples: vec![(ts(10, 0, 0), 2.0)],
-            interpolation: Interpolation::Step,
-        };
-        let mut forecasts = HashMap::new();
-        forecasts.insert("heater".to_string(), heater);
-
+        // Empty pv_kw_map — slot timestamp not present, defaults to 0.0
         let tariffs = TariffTimeSeries::from_snapshots(&[snap(
             ts(10, 0, 0),
             ts(11, 0, 0),
@@ -1083,15 +1063,13 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &ReservationLayer::new(),
             &test_profile(300, 1),
             now,
             300,
             1,
             now + Duration::hours(1),
-            &forecasts,
+            &HashMap::new(),
         );
-        // PV should be 0.0 since "pv" key is missing
         assert!((firm[0].pv_forecast_kw).abs() < 1e-9);
     }
 

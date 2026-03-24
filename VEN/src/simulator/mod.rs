@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::assets::{
     AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, Battery, BatteryState, EvCharger,
-    EvState, Heater, PvInverter,
+    EvState, Grid, Heater, PvInverter,
 };
 use crate::models::SensorSnapshot;
 use crate::profile::{AssetProfile, BaseLoadConfig, Profile};
@@ -59,6 +59,11 @@ pub struct SimState {
     /// Mutable state + history for each asset.
     pub assets: Vec<AssetEntry>,
     pub grid: GridMeter,
+    /// Grid virtual asset — implements the full `Asset` trait (id, current_state,
+    /// history, capability). Updated each tick with net power + VTN limits.
+    /// Not part of `asset_configs` / `assets` (Grid is read-only, not dispatched).
+    #[serde(skip, default)]
+    pub grid_asset: Grid,
     pub last_tick: DateTime<Utc>,
 }
 
@@ -227,6 +232,7 @@ impl SimState {
             asset_configs: configs,
             assets: entries,
             grid: GridMeter::default(),
+            grid_asset: Grid::new(),
             last_tick: Utc::now(),
         }
     }
