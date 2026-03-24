@@ -26,12 +26,6 @@ assets:
     id: base_load
     baseline_kw: 0.5
 
-reactor:
-  strategy: instant
-  compliance: 1.0
-  price_low: 0.10
-  price_high: 0.35
-
 simulator:
   tick_s: 1
   persist_every_s: 10

@@ -218,7 +218,7 @@ function PvCard({ sim }: { sim: SimSnapshot }) {
 type ChartPoint = {
   time: string;
   isFuture?: boolean;
-  // Actual reactor setpoints (past only)
+  // Actual dispatcher setpoints (past only)
   ev_charge_kw?: number;
   heater_kw?: number;
   pv_export_limit_kw?: number;   // curtailment_pct/100 * rated_kw
@@ -248,7 +248,7 @@ function parseIsoDuration(s: string): number {
  * For a given Unix timestamp (ms) and event list, return the winning event's
  * payload value for `payloadType`. Returns undefined if no event interval is
  * active at that moment. Arbitration: lowest priority wins; newest
- * createdDateTime breaks ties (mirrors reactor arbitration).
+ * createdDateTime breaks ties (mirrors planner arbitration).
  */
 function getDesiredValue(
   tsMs: number,
@@ -369,7 +369,7 @@ function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
   return (
     <Paper sx={{ p: 2 }}>
       <Typography variant="subtitle1" fontWeight="bold" mb={2}>
-        Reactor Setpoints — last 1 000 ticks + 8 min projection
+        Dispatcher Setpoints — last 1 000 ticks + 8 min projection
       </Typography>
       {traceEntries.length === 0 ? (
         <Typography color="text.secondary">No trace data yet…</Typography>
@@ -475,7 +475,7 @@ type OverridableControlProps = {
   label: string;
   /** Whether a VTN event is commanding this quantity right now */
   isEventActive: boolean;
-  /** The VTN-intended value for this quantity (from reactor trace) */
+  /** The VTN-intended value for this quantity (from planner trace) */
   vtnIntentValue: number;
   /** Label format for the VTN intent, e.g. "7.0 kW" */
   formatValue: (v: number) => string;
