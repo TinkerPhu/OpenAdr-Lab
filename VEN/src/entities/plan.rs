@@ -257,7 +257,7 @@ pub enum PlanReason {
     GridExportLimit { limit_kw: f64 },
     SocCeiling { soc_pct: f64 },
     SocFloor { soc_pct: f64 },
-    ComfortBound { bound_type: ComfortBoundType },
+    ComfortBound { asset_id: String, bound_type: ComfortBoundType },
     UserOverride { request_id: Uuid, mode: UserRequestMode },
     PolicyReserve { policy_id: String },
     OpportunityMissed { reason: String },
