@@ -1,4 +1,4 @@
-# VEN-3: Full mix (EV + Heater + PV, partial compliance)
+# VEN-3: Full mix (EV + Heater + PV)
 assets:
   - type: ev
     id: ev
@@ -17,13 +17,6 @@ assets:
   - type: base_load
     id: base_load
     baseline_kw: 0.8
-
-reactor:
-  strategy: partial
-  compliance: 0.7
-  ramp_duration_s: 180
-  price_low: 0.12
-  price_high: 0.40
 
 simulator:
   tick_s: 1

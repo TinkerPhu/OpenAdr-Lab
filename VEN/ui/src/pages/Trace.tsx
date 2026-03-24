@@ -46,7 +46,7 @@ export function TracePage() {
           Decision Trace
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Last {entries?.length ?? 0} reactor decisions (newest first). Updated: {lastUpdated}
+          Last {entries?.length ?? 0} controller decisions (newest first). Updated: {lastUpdated}
         </Typography>
       </div>
 

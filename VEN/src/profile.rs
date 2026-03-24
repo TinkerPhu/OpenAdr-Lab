@@ -40,8 +40,6 @@ pub struct Profile {
     #[serde(default)]
     pub assets: Vec<AssetProfile>,
     #[serde(default)]
-    pub reactor: ReactorConfig,
-    #[serde(default)]
     pub simulator: SimulatorConfig,
     #[serde(default)]
     pub planner: PlannerConfig,
@@ -206,37 +204,6 @@ fn default_base_load_kw() -> f64 {
     0.5
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct ReactorConfig {
-    #[serde(default = "default_strategy")]
-    pub strategy: String,
-    #[serde(default = "default_ramp_duration")]
-    pub ramp_duration_s: u64,
-    #[serde(default)]
-    pub delay_s: u64,
-    #[serde(default = "default_compliance")]
-    pub compliance: f64,
-    #[serde(default = "default_price_low")]
-    pub price_low: f64,
-    #[serde(default = "default_price_high")]
-    pub price_high: f64,
-}
-
-fn default_strategy() -> String {
-    "instant".into()
-}
-fn default_ramp_duration() -> u64 {
-    300
-}
-fn default_compliance() -> f64 {
-    1.0
-}
-fn default_price_low() -> f64 {
-    0.10
-}
-fn default_price_high() -> f64 {
-    0.35
-}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SimulatorConfig {
@@ -433,7 +400,6 @@ impl Profile {
         Self {
             devices: DeviceConfig::default(),
             assets: vec![],
-            reactor: ReactorConfig::default(),
             simulator: SimulatorConfig::default(),
             planner: PlannerConfig::default(),
             packets: vec![],

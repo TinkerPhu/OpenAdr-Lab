@@ -1,4 +1,4 @@
-# VEN-1: Residential prosumer (EV + PV + Battery, ramp strategy)
+# VEN-1: Residential prosumer (EV + PV + Battery)
 assets:
   - type: ev
     id: ev
@@ -20,13 +20,6 @@ assets:
   - type: base_load
     id: base_load
     baseline_kw: 0.5
-
-reactor:
-  strategy: ramp
-  ramp_duration_s: 30
-  compliance: 1.0
-  price_low: 0.10
-  price_high: 0.35
 
 simulator:
   tick_s: 1

@@ -2,7 +2,7 @@
 ///
 /// Single responsibility: given the current plan, simulator assets, and capacity
 /// constraints, produce a HashMap<asset_id, kW> that drives the simulator tick.
-/// There is no concept of "reactor mode" here — the plan is the sole authority.
+/// The plan is the sole authority.
 use crate::assets::AssetConfig;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::Plan;
