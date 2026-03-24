@@ -126,7 +126,7 @@ mod tests {
 
     use crate::assets::{
         AssetConfig, AssetHistoryBuffer, AssetState, Battery, BatteryState, EvCharger, EvState,
-        PvInverter, PvState,
+        Grid, PvInverter, PvState,
     };
     use crate::controller::reservation::{FlexDirection, Reservation, ReservationSource};
     use crate::simulator::{energy::EnergyCounter, AssetEntry, GridMeter, SimState};
@@ -204,6 +204,7 @@ mod tests {
             asset_configs,
             assets,
             grid: GridMeter::default(),
+            grid_asset: Grid::new(),
             last_tick: Utc::now(),
         }
     }

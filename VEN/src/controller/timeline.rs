@@ -322,6 +322,7 @@ mod tests {
         FirmSummary, FlexibleSummary, PacketAllocation, Plan, PlanTimeSlot, PlanningHorizon,
         SlotType,
     };
+    use crate::assets::Grid;
     use crate::simulator::energy::EnergyCounter;
     use crate::simulator::{AssetEntry, GridMeter, SimState};
     use chrono::Utc;
@@ -409,6 +410,7 @@ mod tests {
             asset_configs: configs,
             assets,
             grid: GridMeter::default(),
+            grid_asset: Grid::new(),
             last_tick: DateTime::from_timestamp(0, 0).unwrap(),
         }
     }

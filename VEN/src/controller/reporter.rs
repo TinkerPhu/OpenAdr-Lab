@@ -549,7 +549,7 @@ pub fn build_status_report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::{AssetHistoryBuffer, BaseLoadState, EvState, HistoryPoint, PvState};
+    use crate::assets::{AssetHistoryBuffer, BaseLoadState, EvState, Grid, HistoryPoint, PvState};
     use crate::simulator::{energy::EnergyCounter, GridMeter, SimState};
     use uuid::Uuid;
 
@@ -629,6 +629,7 @@ mod tests {
             asset_configs: vec![],
             assets: entries,
             grid: GridMeter::default(),
+            grid_asset: Grid::new(),
             last_tick: Utc::now(),
         }
     }
