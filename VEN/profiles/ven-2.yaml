@@ -1,4 +1,4 @@
-# VEN-2: Commercial building (Heater + PV, delayed strategy)
+# VEN-2: Commercial building (Heater + PV)
 assets:
   - type: heater
     id: heater
@@ -12,14 +12,6 @@ assets:
   - type: base_load
     id: base_load
     baseline_kw: 2.0
-
-reactor:
-  strategy: delayed
-  delay_s: 60
-  ramp_duration_s: 120
-  compliance: 1.0
-  price_low: 0.08
-  price_high: 0.30
 
 simulator:
   tick_s: 1
