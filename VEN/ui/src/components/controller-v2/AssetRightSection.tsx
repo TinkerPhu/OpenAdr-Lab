@@ -8,15 +8,15 @@ import {
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import type { AssetId } from "./types";
-import type { SimSnapshot, UserOverrides } from "../../api/types";
+import type { SimSnapshot, SimInjectState } from "../../api/types";
 import { useSimSchema } from "../../api/hooks";
 import { DynamicControl } from "./DynamicControl";
 
 interface AssetRightSectionProps {
   assetId: AssetId;
   simSnapshot: SimSnapshot | undefined;
-  overrides: UserOverrides | undefined;
-  onOverrideChange: (patch: Partial<UserOverrides>) => void;
+  overrides: SimInjectState | undefined;
+  onOverrideChange: (patch: Partial<SimInjectState>) => void;
 }
 
 export function AssetRightSection({
@@ -32,7 +32,7 @@ export function AssetRightSection({
   const socPct = socRaw !== undefined ? socRaw * 100 : null;
 
   function handleChange(key: string, val: number | boolean) {
-    onOverrideChange({ [key]: val } as Partial<UserOverrides>);
+    onOverrideChange({ [key]: val } as Partial<SimInjectState>);
   }
 
   function getValue(key: string): number | boolean | null {

@@ -8,7 +8,7 @@ import { ASSET_COLORS } from "./types";
 import { AssetLeftSection } from "./AssetLeftSection";
 import { AssetMidSection } from "./AssetMidSection";
 import { AssetRightSection } from "./AssetRightSection";
-import type { SimSnapshot, UserOverrides } from "../../api/types";
+import type { SimSnapshot, SimInjectState } from "../../api/types";
 
 const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
 const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
@@ -17,7 +17,7 @@ interface AssetCellProps {
   assetId: AssetId;
   summary: AssetSummary;
   simSnapshot: SimSnapshot | undefined;
-  simOverrides: UserOverrides | undefined;
+  simOverrides: SimInjectState | undefined;
   collapsed: { left: boolean; right: boolean };
   /** Timeline points from the shared useAllTimelines query on the page. */
   timePoints: AssetTimelinePoint[];
@@ -28,7 +28,7 @@ interface AssetCellProps {
   pinned: boolean;
   onTogglePin: (cellId: string) => void;
   onToggleCollapse: (cellId: string, section: "left" | "right") => void;
-  onOverrideChange: (patch: Partial<UserOverrides>) => void;
+  onOverrideChange: (patch: Partial<SimInjectState>) => void;
 }
 
 export function AssetCell({
