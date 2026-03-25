@@ -7,6 +7,110 @@ parameters, API overrides, and external influences.
 
 ---
 
+## Dispatcher → Asset Call Chain
+
+This section traces exactly how a setpoint flows from the planner through to an asset's physics.
+
+### Step 1 — `dispatcher::build_setpoints()` (`controller/dispatcher.rs`)
+
+Called every sim tick from `loops::spawn_sim_tick()`. Signature:
+
+```rust
+pub fn build_setpoints(
+    plan: &Plan,
+    assets: &[AssetEntry],
+    asset_configs: &[AssetConfig],
+    capacity: &OadrCapacityState,
+    now: DateTime<Utc>,
+) -> HashMap<String, f64>
+```
+
+Returns a `HashMap<asset_id, power_kw>`. Algorithm:
+
+1. Start with each asset's `AssetConfig::default_setpoint()` (idle/hold values).
+2. Find the FIRM plan slot covering `now` — if found, overwrite the relevant asset entries with their slot allocations.
+3. If no FIRM slot, try the FLEXIBLE slot covering `now`.
+4. Enforce VTN `export_limit_kw` on the `pv` key if `OadrCapacityState` has one.
+
+**`UserOverrides` are not consulted here.** The dispatcher knows nothing about overrides.
+
+### Step 2 — `SimState::tick()` (`simulator/mod.rs`)
+
+Called immediately after `build_setpoints()` with the resulting map:
+
+```rust
+sim_guard.tick(dt_s, sp_map, now, &overrides);
+```
+
+Inside `tick()`, for each `(AssetConfig, AssetEntry)` pair:
+
+1. **Override mutations** — env params and device specs from `UserOverrides` are injected into the config *before* stepping:
+   - `AssetConfig::Pv` → `pv.irradiance = overrides.pv_irradiance.unwrap_or(auto_model)`
+   - `AssetConfig::Heater` → `h.ambient_temp_c = overrides.ambient_temp_c.unwrap_or(10.0)`, plus optional `max_kw`, `temp_min_c`, `temp_max_c`
+   - `AssetConfig::Ev` → optional `max_charge_kw`, `soc_target`, `plugged` state
+   - `AssetConfig::Pv` → optional `rated_kw`
+   - `AssetConfig::BaseLoad` → optional `baseline_kw` (from `base_load_w / 1000`)
+
+2. **Setpoint lookup** — picks the asset's value from the map, falling back to `default_setpoint()` if not present:
+   ```rust
+   let sp = setpoints.get(&entry.id).copied()
+       .unwrap_or_else(|| cfg.default_setpoint(&entry.state));
+   ```
+
+3. **Physics step** — calls `AssetConfig::step()`:
+   ```rust
+   let (new_state, actual_kw) = cfg.step(&entry.state, sp, dt);
+   ```
+
+### Step 3 — `AssetConfig::step()` (`assets/mod.rs`)
+
+Enum dispatch — routes to the concrete physics type:
+
+```rust
+match self {
+    Self::Battery(cfg)  => cfg.step(state, setpoint_kw, dt),
+    Self::Ev(cfg)       => cfg.step(state, setpoint_kw, dt),
+    Self::Heater(cfg)   => cfg.step(state, setpoint_kw, dt),
+    Self::Pv(cfg)       => cfg.step(state, setpoint_kw, dt),
+    Self::BaseLoad(cfg) => cfg.step(state, setpoint_kw, dt),
+}
+```
+
+Each concrete type implements the `Asset` trait's `step()` method. The trait signature:
+
+```rust
+fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64);
+```
+
+Returns `(new_state, actual_kw)`. `actual_kw` may differ from `setpoint_kw` because physics
+constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides, etc.).
+
+### API Overrides: What Reaches the Dispatcher vs. the Physics
+
+`POST /sim/override` stores a `UserOverrides` struct. Fields are consumed **only inside
+`SimState::tick()`**, not by `build_setpoints()`. The dispatcher sees none of them.
+
+| Override field | Where consumed | Effect |
+|---|---|---|
+| `pv_irradiance` | `tick()` — sets `pv.irradiance` before `step()` | Changes PV output |
+| `pv_rated_kw` | `tick()` — sets `pv.rated_kw` before `step()` | Changes PV peak capacity |
+| `ambient_temp_c` | `tick()` — sets `h.ambient_temp_c` before `step()` | Changes heater loss rate |
+| `heater_max_kw` | `tick()` — sets `h.max_kw` before `step()` | Changes heater ceiling |
+| `heater_temp_min_c` | `tick()` — sets `h.temp_min_c` before `step()` | Changes thermostat lower bound |
+| `heater_temp_max_c` | `tick()` — sets `h.temp_max_c` before `step()` | Changes thermostat upper bound |
+| `ev_max_charge_kw` | `tick()` — sets `ev.max_charge_kw` before `step()` | Changes EV charge ceiling |
+| `ev_soc_target` | `tick()` — sets `ev.soc_target` before `step()` | Changes EV target (used by planner) |
+| `ev_plugged` | `tick()` — sets `ev_state.plugged` before `step()` | Disconnects EV (zeroes power) |
+| `base_load_w` | `tick()` — sets `bl.baseline_kw = w/1000` before `step()` | Changes fixed consumption |
+| `ev_desired_kw` | **Not consumed** — dead field in `UserOverrides` | No effect |
+
+> **Note on `battery_force_kw`**: This key appears in `Battery::control_schema()` (exposed via
+> `GET /sim/schema`) and in the frontend `types.ts`, but it is **not a field in `UserOverrides`**
+> and is not consumed anywhere in Rust. It is an unimplemented control — sending it via
+> `POST /sim/override` is silently ignored.
+
+---
+
 ## Asset Overview
 
 | Asset | Type | Simulated | Controllable |
@@ -400,3 +504,151 @@ purposes but have no physics simulation in the `assets/` module:
 | `VEN/profiles/ven-2.yaml` | Heater + PV + Base Load | VEN-2 instance |
 | `VEN/profiles/ven-3.yaml` | EV + Heater + PV + Base Load | VEN-3 instance |
 | `VEN/profiles/policy_test.yaml` | Same as test.yaml + flexibility_policy reserve | Policy BDD tests |
+
+---
+
+## Planned: Override Redesign — Physical Plant State Injection
+
+> **Status**: Design only — not yet implemented. This chapter captures the intended behaviour
+> for a future implementation task.
+
+### Problem with current overrides
+
+`POST /sim/override` currently stores a `UserOverrides` struct whose fields are re-applied to
+the asset *config* on every sim tick. This is wrong for two reasons:
+
+1. **Config fields are device specifications** (`max_charge_kw`, `rated_kw`, thermostat bounds).
+   They describe what the hardware *can* do, not what is currently happening. Mutating them
+   from the API blurs the line between "this is a 7.4 kW charger" and "right now the EV is
+   half-full", and breaks planner assumptions about device capabilities.
+
+2. **The planner and dispatcher never see the injected condition as real state.** Because
+   overrides are applied after `build_setpoints()`, the planner still plans against stale state.
+   Injecting the SoC or temperature into the *physics state* is the only way to make the planner
+   and dispatcher reason from the correct starting point.
+
+### Correct model: Physical Plant State
+
+The simulation has three distinct layers:
+
+| Layer | Examples | Who owns it |
+|---|---|---|
+| **Device config** (static) | `max_charge_kw`, `capacity_kwh`, `max_kw`, `temp_min/max_c` | Profile YAML; never changed at runtime |
+| **Physical plant state** (dynamic) | `soc`, `temp_c`, `plugged` | Physics engine; evolves every tick |
+| **Environmental inputs** (exogenous) | `irradiance`, `ambient_temp_c` | External world; injected, then evolves naturally |
+
+In control theory, plant state + environmental inputs together form the **observable state** that
+the controller (planner + dispatcher) reasons from. Overrides should inject into these two layers
+only — never into device config.
+
+### Per-asset override semantics (redesigned)
+
+#### Battery — energy state
+
+| Field | Target layer | Semantics |
+|---|---|---|
+| `battery_soc` | Physical state (`BatteryState.soc_pct`) | One-shot injection: sets SoC once, then physics evolves freely. The planner immediately sees the corrected energy state and may replan. |
+
+No decay needed — SoC evolves through the charge/discharge physics on the next tick.
+
+#### EV Charger — energy state + availability state
+
+| Field | Target layer | Semantics |
+|---|---|---|
+| `ev_soc` | Physical state (`EvState.soc_pct`) | One-shot injection: sets SoC once, physics evolves freely. |
+| `ev_plugged` | Physical state (`EvState.plugged`) | Sustained injection: persists until cleared. Plugged=false zeroes all power and prevents the planner from scheduling any EV energy. |
+
+`ev_plugged` is a sustained condition (like a real plug event), not a one-shot. It should remain
+set until the user explicitly changes it or clears it via the API.
+
+#### Heater — thermal state + environmental disturbance
+
+| Field | Target layer | Semantics |
+|---|---|---|
+| `heater_temp_c` | Physical state (`HeaterState.temperature_c`) | One-shot injection: sets room temperature once. The thermal physics (ambient loss, thermostat) then take over. |
+| `ambient_temp_c` | Environmental input (global disturbance) | Sustained injection: persists until changed. Affects the heater's heat loss rate (`loss_kw = (temp_c − ambient_temp_c) × 0.1`). A cold ambient causes faster cool-down, increasing demand. |
+
+`ambient_temp_c` is naturally sustained — the outside temperature doesn't snap back. No decay.
+
+#### PV Inverter — environmental disturbance with decay
+
+| Field | Target layer | Semantics |
+|---|---|---|
+| `pv_irradiance` | Environmental input (`PvConfig.irradiance`) | Temporary override: sets irradiance to a specific value (e.g. 0.0 for cloud cover), then gradually decays back toward the auto sinusoidal model over a configurable decay window. |
+
+The decay behaviour models cloud cover passing over. Implementation sketch:
+
+```
+// Each tick:
+if let Some(override_irradiance) = env.irradiance_override {
+    let auto = sinusoidal_irradiance(hour);
+    let decayed = override_irradiance + (auto - override_irradiance) * decay_factor_per_tick;
+    if (decayed - auto).abs() < EPSILON {
+        env.irradiance_override = None;  // decay complete, resume auto model
+    } else {
+        env.irradiance_override = Some(decayed);
+    }
+    pv.irradiance = decayed;
+} else {
+    pv.irradiance = sinusoidal_irradiance(hour);
+}
+```
+
+Decay rate should be profile-configurable (e.g. `irradiance_decay_tau_s: 300` → τ of 5 min).
+
+### What the planner sees after injection
+
+Because plant state feeds directly into `AssetConfig::capability()`, which the planner calls
+during `run_planner()`, the planner immediately reasons from the injected state on the next
+replan cycle. No special planner changes are needed — the state change propagates automatically:
+
+```
+Inject battery soc=0.1
+    → BatteryState.soc_pct = 0.1
+    → Battery::capability_inner() returns max_export_kw = 0.0 (below min_soc)
+    → Planner sees battery can only charge, not discharge
+    → Plan is revised: discharge slots removed, charge slots added
+```
+
+Similarly for EV (unplugged → planner drops all EV charge packets), heater (cold room → planner
+schedules early heating), PV (cloud → planner reduces expected export, may add battery discharge).
+
+### API shape (proposed)
+
+Separate the two concepts that are currently conflated in `UserOverrides`:
+
+**`POST /sim/state` — physical state injection** (one-shot or sustained as noted above)
+
+```json
+{
+  "battery_soc": 0.1,
+  "ev_soc": 0.4,
+  "ev_plugged": false,
+  "heater_temp_c": 16.5
+}
+```
+
+**`POST /sim/environment` — exogenous input injection** (sustained, with decay for irradiance)
+
+```json
+{
+  "ambient_temp_c": 2.0,
+  "pv_irradiance": 0.0,
+  "pv_irradiance_decay_tau_s": 300
+}
+```
+
+The existing `POST /sim/override` (with its config-mutation semantics) should be removed or
+redirected to these two endpoints. The config-level fields (`heater_max_kw`, `ev_max_charge_kw`,
+etc.) should be dropped — device specs belong in the profile YAML.
+
+### Summary: one-shot vs. sustained
+
+| Override | Type | Reverts automatically? |
+|---|---|---|
+| `battery_soc` | One-shot state injection | Yes — physics evolves from injected value |
+| `ev_soc` | One-shot state injection | Yes — physics evolves from injected value |
+| `ev_plugged` | Sustained availability state | No — persists until explicitly changed |
+| `heater_temp_c` | One-shot state injection | Yes — thermal physics takes over |
+| `ambient_temp_c` | Sustained environmental input | No — persists until explicitly changed |
+| `pv_irradiance` | Temporary environmental input | Yes — decays back to auto solar model |
