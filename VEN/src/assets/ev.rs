@@ -137,14 +137,6 @@ impl EvCharger {
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {
         vec![
             ControlDescriptor {
-                key: "ev_desired_kw".into(),
-                label: "Charge Rate".into(),
-                kind: ControlKind::Slider,
-                min: Some(0.0),
-                max: Some(self.max_charge_kw),
-                unit: "kW".into(),
-            },
-            ControlDescriptor {
                 key: "ev_plugged".into(),
                 label: "Plugged In".into(),
                 kind: ControlKind::Switch,
@@ -153,12 +145,12 @@ impl EvCharger {
                 unit: "".into(),
             },
             ControlDescriptor {
-                key: "ev_soc_target".into(),
-                label: "SoC Target".into(),
-                kind: ControlKind::Slider,
+                key: "ev_departure_min".into(),
+                label: "Departure In".into(),
+                kind: ControlKind::NumberInput,
                 min: Some(0.0),
-                max: Some(1.0),
-                unit: "%".into(),
+                max: Some(1440.0),
+                unit: "min".into(),
             },
         ]
     }

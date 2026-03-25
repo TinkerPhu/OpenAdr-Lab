@@ -9,6 +9,76 @@ use crate::entities::asset::PlanTrigger;
 use crate::state::{SimInjectState, UserOverrides};
 use crate::AppCtx;
 
+/// Partial-merge body for POST /sim/inject.
+///
+/// Serde semantics per field:
+/// - Absent from JSON     → `None`              → no change to current state
+/// - Present as `null`   → `Some(Value::Null)`  → release override
+/// - Present as value    → `Some(Value::...)`   → activate override with that value
+#[derive(Debug, Default, Deserialize)]
+pub struct PostSimInjectBody {
+    #[serde(default)]
+    pub battery_soc: Option<serde_json::Value>,
+    #[serde(default)]
+    pub ev_soc: Option<serde_json::Value>,
+    #[serde(default)]
+    pub heater_temp_c: Option<serde_json::Value>,
+    #[serde(default)]
+    pub pv_irradiance: Option<serde_json::Value>,
+    #[serde(default)]
+    pub pv_irradiance_alpha: Option<serde_json::Value>,
+    #[serde(default)]
+    pub ev_plugged: Option<serde_json::Value>,
+    #[serde(default)]
+    pub ev_departure_min: Option<serde_json::Value>,
+    #[serde(default)]
+    pub heater_setpoint_c: Option<serde_json::Value>,
+    #[serde(default)]
+    pub ambient_temp_c: Option<serde_json::Value>,
+    #[serde(default)]
+    pub base_load_kw: Option<serde_json::Value>,
+    #[serde(default)]
+    pub grid_import_limit_kw: Option<serde_json::Value>,
+    #[serde(default)]
+    pub grid_export_limit_kw: Option<serde_json::Value>,
+}
+
+/// Apply partial-merge: absent = no change, null = release (None), value = set.
+fn merge_inject(current: &mut SimInjectState, body: PostSimInjectBody) {
+    macro_rules! merge_f64 {
+        ($field:ident) => {
+            if let Some(v) = body.$field {
+                current.$field = if v.is_null() { None } else { v.as_f64() };
+            }
+        };
+    }
+    macro_rules! merge_bool {
+        ($field:ident) => {
+            if let Some(v) = body.$field {
+                current.$field = if v.is_null() { None } else { v.as_bool() };
+            }
+        };
+    }
+    merge_f64!(battery_soc);
+    merge_f64!(ev_soc);
+    merge_f64!(heater_temp_c);
+    merge_f64!(pv_irradiance);
+    if let Some(v) = body.pv_irradiance_alpha {
+        if let Some(alpha) = v.as_f64() {
+            current.pv_irradiance_alpha = alpha;
+        } else if v.is_null() {
+            current.pv_irradiance_alpha = 0.1; // reset to default
+        }
+    }
+    merge_bool!(ev_plugged);
+    merge_f64!(ev_departure_min);
+    merge_f64!(heater_setpoint_c);
+    merge_f64!(ambient_temp_c);
+    merge_f64!(base_load_kw);
+    merge_f64!(grid_import_limit_kw);
+    merge_f64!(grid_export_limit_kw);
+}
+
 #[derive(Deserialize)]
 pub struct SocBody {
     pub soc: f64,
@@ -162,12 +232,14 @@ pub async fn get_sim_inject(State(ctx): State<AppCtx>) -> impl IntoResponse {
 }
 
 /// POST /sim/inject — partial-merge inject state.
-/// Absent fields are unchanged; present fields replace current value (use null to release).
+/// Absent fields are unchanged; `null` releases the override; a value activates it.
 pub async fn post_sim_inject(
     State(ctx): State<AppCtx>,
-    Json(body): Json<SimInjectState>,
+    Json(body): Json<PostSimInjectBody>,
 ) -> impl IntoResponse {
-    ctx.state.set_inject_state(body).await;
+    let mut current = ctx.state.inject_state().await;
+    merge_inject(&mut current, body);
+    ctx.state.set_inject_state(current).await;
     let _ = ctx.trigger_tx.send(PlanTrigger::AssetStateChange);
     axum::http::StatusCode::NO_CONTENT
 }
