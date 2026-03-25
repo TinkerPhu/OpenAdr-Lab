@@ -541,60 +541,50 @@ In control theory, plant state + environmental inputs together form the **observ
 the controller (planner + dispatcher) reasons from. Overrides should inject into these two layers
 only — never into device config.
 
-### Per-asset override semantics (redesigned)
+### Core principle: every override is a one-shot state jump
+
+An override sets the state to the given value **once**. The simulation then continues naturally
+from that new starting point — there is no sustained mode, no decay, no repeat injection on
+subsequent ticks. The override is purely a temporal shift: "pretend the state was always heading
+toward this value and has just arrived here."
+
+This means:
+- `ev_plugged = false` → EV state is now unplugged; the simulation continues with unplugged
+  physics (zero power) until something else changes it (a future override or a plug-event model).
+- `ambient_temp_c = 2.0` → the heater's loss calculation uses 2 °C from this tick onward.
+  The value persists only because there is currently no autonomous ambient model — if a
+  day/night temperature model were added, ambient would drift naturally from the injected value.
+- `pv_irradiance = 0.0` → PV output is zero for this tick. The sinusoidal auto-model resumes
+  on the very next tick; the irradiance "snaps back" because the model recalculates every tick.
+  There is no decay to manage — the model itself provides the natural recovery.
+
+### Per-asset override fields (redesigned)
 
 #### Battery — energy state
 
-| Field | Target layer | Semantics |
+| Field | Target | Effect |
 |---|---|---|
-| `battery_soc` | Physical state (`BatteryState.soc_pct`) | One-shot injection: sets SoC once, then physics evolves freely. The planner immediately sees the corrected energy state and may replan. |
-
-No decay needed — SoC evolves through the charge/discharge physics on the next tick.
+| `battery_soc` | `BatteryState.soc_pct` | Jump SoC to value; charge/discharge physics continues from there. |
 
 #### EV Charger — energy state + availability state
 
-| Field | Target layer | Semantics |
+| Field | Target | Effect |
 |---|---|---|
-| `ev_soc` | Physical state (`EvState.soc_pct`) | One-shot injection: sets SoC once, physics evolves freely. |
-| `ev_plugged` | Physical state (`EvState.plugged`) | Sustained injection: persists until cleared. Plugged=false zeroes all power and prevents the planner from scheduling any EV energy. |
+| `ev_soc` | `EvState.soc_pct` | Jump SoC; charge physics continues from there. |
+| `ev_plugged` | `EvState.plugged` | Jump plug state; power is zeroed if false, planner drops EV packets. |
 
-`ev_plugged` is a sustained condition (like a real plug event), not a one-shot. It should remain
-set until the user explicitly changes it or clears it via the API.
+#### Heater — thermal state + environmental input
 
-#### Heater — thermal state + environmental disturbance
-
-| Field | Target layer | Semantics |
+| Field | Target | Effect |
 |---|---|---|
-| `heater_temp_c` | Physical state (`HeaterState.temperature_c`) | One-shot injection: sets room temperature once. The thermal physics (ambient loss, thermostat) then take over. |
-| `ambient_temp_c` | Environmental input (global disturbance) | Sustained injection: persists until changed. Affects the heater's heat loss rate (`loss_kw = (temp_c − ambient_temp_c) × 0.1`). A cold ambient causes faster cool-down, increasing demand. |
+| `heater_temp_c` | `HeaterState.temperature_c` | Jump room temperature; thermal physics (loss, thermostat) continues from there. |
+| `ambient_temp_c` | Environment (`h.ambient_temp_c`) | Jump ambient; heater loss rate changes immediately, stays until next override. |
 
-`ambient_temp_c` is naturally sustained — the outside temperature doesn't snap back. No decay.
+#### PV Inverter — environmental input
 
-#### PV Inverter — environmental disturbance with decay
-
-| Field | Target layer | Semantics |
+| Field | Target | Effect |
 |---|---|---|
-| `pv_irradiance` | Environmental input (`PvConfig.irradiance`) | Temporary override: sets irradiance to a specific value (e.g. 0.0 for cloud cover), then gradually decays back toward the auto sinusoidal model over a configurable decay window. |
-
-The decay behaviour models cloud cover passing over. Implementation sketch:
-
-```
-// Each tick:
-if let Some(override_irradiance) = env.irradiance_override {
-    let auto = sinusoidal_irradiance(hour);
-    let decayed = override_irradiance + (auto - override_irradiance) * decay_factor_per_tick;
-    if (decayed - auto).abs() < EPSILON {
-        env.irradiance_override = None;  // decay complete, resume auto model
-    } else {
-        env.irradiance_override = Some(decayed);
-    }
-    pv.irradiance = decayed;
-} else {
-    pv.irradiance = sinusoidal_irradiance(hour);
-}
-```
-
-Decay rate should be profile-configurable (e.g. `irradiance_decay_tau_s: 300` → τ of 5 min).
+| `pv_irradiance` | Environment (`pv.irradiance`) | Jump irradiance for this tick only; auto sinusoidal model resumes next tick. |
 
 ### What the planner sees after injection
 
@@ -615,40 +605,33 @@ schedules early heating), PV (cloud → planner reduces expected export, may add
 
 ### API shape (proposed)
 
-Separate the two concepts that are currently conflated in `UserOverrides`:
+A single endpoint replaces the current `POST /sim/override`. All fields are optional; only the
+provided fields are applied. Each is a one-shot jump into simulation state or environment:
 
-**`POST /sim/state` — physical state injection** (one-shot or sustained as noted above)
+**`POST /sim/inject`**
 
 ```json
 {
   "battery_soc": 0.1,
   "ev_soc": 0.4,
   "ev_plugged": false,
-  "heater_temp_c": 16.5
-}
-```
-
-**`POST /sim/environment` — exogenous input injection** (sustained, with decay for irradiance)
-
-```json
-{
+  "heater_temp_c": 16.5,
   "ambient_temp_c": 2.0,
-  "pv_irradiance": 0.0,
-  "pv_irradiance_decay_tau_s": 300
+  "pv_irradiance": 0.0
 }
 ```
 
-The existing `POST /sim/override` (with its config-mutation semantics) should be removed or
-redirected to these two endpoints. The config-level fields (`heater_max_kw`, `ev_max_charge_kw`,
-etc.) should be dropped — device specs belong in the profile YAML.
+The existing `POST /sim/override` and its `UserOverrides` struct (which mutates config per-tick)
+should be removed. Config-level fields (`heater_max_kw`, `ev_max_charge_kw`, etc.) are dropped —
+device specs belong in the profile YAML, not the runtime API.
 
-### Summary: one-shot vs. sustained
+### Summary
 
-| Override | Type | Reverts automatically? |
+| Field | Injects into | Natural evolution after jump |
 |---|---|---|
-| `battery_soc` | One-shot state injection | Yes — physics evolves from injected value |
-| `ev_soc` | One-shot state injection | Yes — physics evolves from injected value |
-| `ev_plugged` | Sustained availability state | No — persists until explicitly changed |
-| `heater_temp_c` | One-shot state injection | Yes — thermal physics takes over |
-| `ambient_temp_c` | Sustained environmental input | No — persists until explicitly changed |
-| `pv_irradiance` | Temporary environmental input | Yes — decays back to auto solar model |
+| `battery_soc` | `BatteryState.soc_pct` | Charge/discharge physics |
+| `ev_soc` | `EvState.soc_pct` | Charge physics |
+| `ev_plugged` | `EvState.plugged` | None (no autonomous plug model yet) |
+| `heater_temp_c` | `HeaterState.temperature_c` | Thermal loss + thermostat |
+| `ambient_temp_c` | Heater environment | None (no autonomous ambient model yet) |
+| `pv_irradiance` | PV environment (one tick only) | Sinusoidal auto-model resumes next tick |
