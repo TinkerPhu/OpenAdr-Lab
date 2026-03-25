@@ -205,6 +205,7 @@ mod tests {
             assets,
             grid: GridMeter::default(),
             grid_asset: Grid::new(),
+            pv_smoothing: crate::simulator::PvSmoothingState::default(),
             last_tick: Utc::now(),
         }
     }

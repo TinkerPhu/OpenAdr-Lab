@@ -285,9 +285,9 @@ pub(crate) fn spawn_sim_tick(
             let now = Utc::now();
             let dt_s = tick_s as f64;
 
-            // Get current events and user overrides
-            let events = state.events().await;
-            let overrides = state.overrides().await;
+            // Get current events and injection state
+            let _events = state.events().await;
+            let inject = state.inject_state().await;
 
             // Pre-tick: snapshot plan/packets/capacity/tariffs for dispatcher
             let plan_snap = state.active_plan().await;
@@ -299,13 +299,56 @@ pub(crate) fn spawn_sim_tick(
             let sim_snapshot = {
                 let mut sim_guard = sim.lock().await;
 
+                // Behaviour A: apply one-shot state jumps (cleared after application).
+                {
+                    use std::collections::HashMap;
+                    if let Some(soc) = inject.battery_soc {
+                        if let Some((entry, cfg)) = sim_guard.find_asset_mut("battery") {
+                            let mut v = HashMap::new();
+                            v.insert("soc".to_string(), soc);
+                            cfg.reset(&mut entry.state, v);
+                        }
+                        state.clear_inject_field("battery_soc").await;
+                    }
+                    if let Some(soc) = inject.ev_soc {
+                        if let Some((entry, cfg)) = sim_guard.find_asset_mut("ev") {
+                            let mut v = HashMap::new();
+                            v.insert("soc".to_string(), soc);
+                            cfg.reset(&mut entry.state, v);
+                        }
+                        state.clear_inject_field("ev_soc").await;
+                    }
+                    if let Some(temp) = inject.heater_temp_c {
+                        if let Some((entry, cfg)) = sim_guard.find_asset_mut("heater") {
+                            let mut v = HashMap::new();
+                            v.insert("temp_c".to_string(), temp);
+                            cfg.reset(&mut entry.state, v);
+                        }
+                        state.clear_inject_field("heater_temp_c").await;
+                    }
+                }
+
+                // Compose effective capacity: inject grid limits only when no VTN event active.
+                let mut effective_capacity = capacity_snap.clone();
+                if effective_capacity.import_limit_event_id.is_none() {
+                    if let Some(lim) = inject.grid_import_limit_kw {
+                        effective_capacity.import_limit_kw = Some(lim);
+                    }
+                }
+                if effective_capacity.export_limit_event_id.is_none() {
+                    if let Some(lim) = inject.grid_export_limit_kw {
+                        effective_capacity.export_limit_kw = Some(lim);
+                    }
+                }
+
                 // Build setpoints from plan (single authoritative control path)
                 let sp_map: std::collections::HashMap<String, f64> = match &plan_snap {
                     Some(ref plan) => controller::dispatcher::build_setpoints(
                         plan,
                         &sim_guard.assets,
                         &sim_guard.asset_configs,
-                        &capacity_snap,
+                        &effective_capacity,
+                        inject.heater_setpoint_c,
                         now,
                     ),
                     None => sim_guard
@@ -317,7 +360,16 @@ pub(crate) fn spawn_sim_tick(
                 };
 
                 // Simulator: apply setpoints → update device states
-                sim_guard.tick(dt_s, sp_map, now, &overrides);
+                sim_guard.tick(
+                    dt_s,
+                    sp_map,
+                    now,
+                    inject.pv_irradiance,
+                    inject.pv_irradiance_alpha,
+                    inject.ambient_temp_c,
+                    inject.base_load_kw,
+                    inject.ev_plugged,
+                );
 
                 // Update sensor snapshot (backward compat)
                 let sensor = sim_guard.to_sensor_snapshot();

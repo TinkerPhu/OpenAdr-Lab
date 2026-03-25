@@ -11,6 +11,8 @@ use crate::profile::BaseLoadConfig;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseLoad {
     pub baseline_kw: f64,
+    /// Original profile value — used for snap-back when inject override is released.
+    pub baseline_kw_profile: f64,
 }
 
 /// BaseLoad mutable state.
@@ -24,6 +26,7 @@ impl BaseLoad {
     pub fn from_config(cfg: &BaseLoadConfig) -> Self {
         Self {
             baseline_kw: cfg.baseline_kw,
+            baseline_kw_profile: cfg.baseline_kw,
         }
     }
 
