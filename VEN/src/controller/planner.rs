@@ -41,6 +41,9 @@ const CO2_WEIGHT: f64 = 0.0001; // €/g ≈ €100/tonne
 /// Run the greedy per-step planning loop and return a new Plan + audit trail.
 ///
 /// The caller assigns `plan.steps = steps` after the call.
+///
+/// `ev_departure_override`: if Some, replace the active deadline on all non-terminal
+/// EV packets before planning, so urgency reflects the injected departure time.
 pub fn run_planner(
     assets: &SimState,
     tariffs: &TariffTimeSeries,
@@ -50,6 +53,7 @@ pub fn run_planner(
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
+    ev_departure_override: Option<DateTime<Utc>>,
 ) -> (Plan, Vec<PlanStep>) {
     let step_s = profile.planner.plan_step_s;
     let horizon_h = profile.planner.plan_horizon_h;
@@ -96,6 +100,17 @@ pub fn run_planner(
         packets.iter().filter(|p| p.is_terminal()).cloned().collect();
     let mut pkts: Vec<EnergyPacket> =
         packets.iter().filter(|p| !p.is_terminal()).cloned().collect();
+
+    // ev_departure_override: replace active tier deadline on all non-terminal EV packets.
+    if let Some(departure) = ev_departure_override {
+        for pkt in pkts.iter_mut() {
+            if pkt.asset_id == "ev" {
+                if let Some(tier) = pkt.value_curve.deadline_tiers.get_mut(pkt.value_curve.active_tier_index) {
+                    tier.deadline = departure;
+                }
+            }
+        }
+    }
 
     // Median import tariff for battery arbitrage threshold
     let median_tariff = {

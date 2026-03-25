@@ -120,32 +120,14 @@ impl Heater {
     }
 
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        vec![
-            ControlDescriptor {
-                key: "heater_max_kw".into(),
-                label: "Max Heating Power".into(),
-                kind: ControlKind::NumberInput,
-                min: Some(0.0),
-                max: Some(20.0),
-                unit: "kW".into(),
-            },
-            ControlDescriptor {
-                key: "heater_temp_min_c".into(),
-                label: "Min Temperature".into(),
-                kind: ControlKind::Slider,
-                min: Some(10.0),
-                max: Some(25.0),
-                unit: "°C".into(),
-            },
-            ControlDescriptor {
-                key: "heater_temp_max_c".into(),
-                label: "Max Temperature".into(),
-                kind: ControlKind::Slider,
-                min: Some(10.0),
-                max: Some(30.0),
-                unit: "°C".into(),
-            },
-        ]
+        vec![ControlDescriptor {
+            key: "heater_setpoint_c".into(),
+            label: "Temperature Setpoint".into(),
+            kind: ControlKind::Slider,
+            min: Some(self.temp_min_c),
+            max: Some(self.temp_max_c),
+            unit: "°C".into(),
+        }]
     }
 
     pub fn reset(&self, state: &mut HeaterState, values: HashMap<String, f64>) {

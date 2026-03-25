@@ -100,12 +100,12 @@ impl PvInverter {
                 unit: "".into(),
             },
             ControlDescriptor {
-                key: "pv_force_export_limit_kw".into(),
-                label: "Export Limit".into(),
-                kind: ControlKind::NumberInput,
-                min: Some(0.0),
-                max: Some(self.rated_kw * 2.0),
-                unit: "kW".into(),
+                key: "pv_irradiance_alpha".into(),
+                label: "Blend-back Speed".into(),
+                kind: ControlKind::Slider,
+                min: Some(0.01),
+                max: Some(1.0),
+                unit: "".into(),
             },
         ]
     }

@@ -2,7 +2,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{Asset, AssetCapabilities, AssetCapability, AssetState, ControlDescriptor};
+use super::{Asset, AssetCapabilities, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
 use crate::profile::BaseLoadConfig;
 
@@ -80,7 +80,14 @@ impl BaseLoad {
     }
 
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        vec![] // non-flexible, no runtime controls
+        vec![ControlDescriptor {
+            key: "base_load_kw".into(),
+            label: "Base Load Override".into(),
+            kind: ControlKind::NumberInput,
+            min: Some(0.0),
+            max: Some(20.0),
+            unit: "kW".into(),
+        }]
     }
 
     pub fn reset(&self, _state: &mut BaseLoadState, _values: HashMap<String, f64>) {}
