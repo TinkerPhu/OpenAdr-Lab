@@ -541,50 +541,72 @@ In control theory, plant state + environmental inputs together form the **observ
 the controller (planner + dispatcher) reasons from. Overrides should inject into these two layers
 only — never into device config.
 
-### Core principle: every override is a one-shot state jump
+### Two override behaviours
 
-An override sets the state to the given value **once**. The simulation then continues naturally
-from that new starting point — there is no sustained mode, no decay, no repeat injection on
-subsequent ticks. The override is purely a temporal shift: "pretend the state was always heading
-toward this value and has just arrived here."
+All overrides share one property: the state jumps immediately to the injected value. What
+differs is what happens when the override is **released** (cleared by the user):
 
-This means:
-- `ev_plugged = false` → EV state is now unplugged; the simulation continues with unplugged
-  physics (zero power) until something else changes it (a future override or a plug-event model).
-- `ambient_temp_c = 2.0` → the heater's loss calculation uses 2 °C from this tick onward.
-  The value persists only because there is currently no autonomous ambient model — if a
-  day/night temperature model were added, ambient would drift naturally from the injected value.
-- `pv_irradiance = 0.0` → PV output is zero for this tick. The sinusoidal auto-model resumes
-  on the very next tick; the irradiance "snaps back" because the model recalculates every tick.
-  There is no decay to manage — the model itself provides the natural recovery.
+| Behaviour | Description | Used for |
+|---|---|---|
+| **Jump + free evolution** | State jumps once; physics drives it from there. No override field is held between ticks. | SoC, room temperature, plug state |
+| **Frozen + exponential return** | State is held at the injected value each tick while override is active. When released, the state blends back to its model value using exponential smoothing. | PV irradiance, base load |
+| **Jump + hold** | State jumps immediately and stays at the injected value indefinitely (no autonomous model to return to). | Ambient temperature, EV departure time |
+
+### Exponential smoothing for gradual return
+
+When a frozen override is released, the resulting state follows:
+
+```
+s(n+1) = s(n) * (1 - α) + model(n+1) * α
+```
+
+where `s` is the current simulation state, `model` is the value the autonomous model would
+produce at that tick, and `α` is the smoothing factor (0 < α < 1). This is the standard
+**exponential moving average** (also called a first-order IIR low-pass filter). Low α gives a
+slow cloud-dispersal feel; high α snaps back quickly. α should be profile-configurable per asset.
 
 ### Per-asset override fields (redesigned)
 
 #### Battery — energy state
 
-| Field | Target | Effect |
-|---|---|---|
-| `battery_soc` | `BatteryState.soc_pct` | Jump SoC to value; charge/discharge physics continues from there. |
+| Field | Behaviour | Target | Effect |
+|---|---|---|---|
+| `battery_soc` | Jump + free evolution | `BatteryState.soc_pct` | Jumps SoC; charge/discharge physics continues from there. |
 
 #### EV Charger — energy state + availability state
 
-| Field | Target | Effect |
-|---|---|---|
-| `ev_soc` | `EvState.soc_pct` | Jump SoC; charge physics continues from there. |
-| `ev_plugged` | `EvState.plugged` | Jump plug state; power is zeroed if false, planner drops EV packets. |
+| Field | Behaviour | Target | Effect |
+|---|---|---|---|
+| `ev_soc` | Jump + free evolution | `EvState.soc_pct` | Jumps SoC; charge physics continues from there. |
+| `ev_plugged` | Jump + hold | `EvState.plugged` | Jumps plug state; zeroes power and prevents planner from scheduling EV energy while false. |
+| `ev_departure_min` | Jump + hold | Planning input | Sets minutes until EV must leave with `soc_target`. Raises planner urgency for charging. Stays until overridden or cleared. Currently only reachable via `POST /requests`; a direct inject is useful for demonstrations. |
 
-#### Heater — thermal state + environmental input
+#### Heater — thermal state + environmental inputs
 
-| Field | Target | Effect |
-|---|---|---|
-| `heater_temp_c` | `HeaterState.temperature_c` | Jump room temperature; thermal physics (loss, thermostat) continues from there. |
-| `ambient_temp_c` | Environment (`h.ambient_temp_c`) | Jump ambient; heater loss rate changes immediately, stays until next override. |
+| Field | Behaviour | Target | Effect |
+|---|---|---|---|
+| `heater_temp_c` | Jump + free evolution | `HeaterState.temperature_c` | Jumps room temperature; thermal loss and thermostat take over. |
+| `ambient_temp_c` | Jump + hold | Environment (`h.ambient_temp_c`) | Jumps ambient temperature; heater loss rate changes immediately. Stays until overridden — no autonomous ambient model yet. |
+| `heater_setpoint_c` | Jump + hold | Planning preference | Sets a runtime comfort target between `temp_min` and `temp_max`. Simulates occupancy changes (home/away/eco) without editing profile YAML. The thermostat hard limits still apply. |
 
 #### PV Inverter — environmental input
 
-| Field | Target | Effect |
-|---|---|---|
-| `pv_irradiance` | Environment (`pv.irradiance`) | Jump irradiance for this tick only; auto sinusoidal model resumes next tick. |
+| Field | Behaviour | Target | Effect |
+|---|---|---|---|
+| `pv_irradiance` | Frozen + exponential return | Environment (`pv.irradiance`) | Holds irradiance at the injected value while active. When released, blends back to the sinusoidal model via exponential smoothing with factor α (`pv_irradiance_alpha`, default ~0.05 per tick at 1 s = ~5 min recovery). Models cloud cover that passes gradually. |
+
+#### Base Load — power input
+
+| Field | Behaviour | Target | Effect |
+|---|---|---|---|
+| `base_load_kw` | Frozen + snap return | `BaseLoad.baseline_kw` | Holds base load at the injected value while active. When released, snaps back to the profile default immediately. Models discrete appliance events (kettle, tumble dryer, EV charger) that switch on/off abruptly. No gradual return — step changes are natural for loads. |
+
+#### Grid — capacity inputs
+
+| Field | Behaviour | Target | Effect |
+|---|---|---|---|
+| `grid_import_limit_kw` | Jump + hold | `OadrCapacityState.import_limit_kw` | Injects an import capacity limit without needing a live VTN event. Useful for testing the dispatcher's capacity enforcement path. Stays until overridden or cleared; a real VTN event takes precedence if one arrives. |
+| `grid_export_limit_kw` | Jump + hold | `OadrCapacityState.export_limit_kw` | Same, for export limit. |
 
 ### What the planner sees after injection
 
@@ -605,8 +627,9 @@ schedules early heating), PV (cloud → planner reduces expected export, may add
 
 ### API shape (proposed)
 
-A single endpoint replaces the current `POST /sim/override`. All fields are optional; only the
-provided fields are applied. Each is a one-shot jump into simulation state or environment:
+A single endpoint replaces the current `POST /sim/override`. All fields are optional; only
+provided fields are applied. Setting a field activates the override; sending `null` for a field
+releases it (triggering exponential return or snap-back as appropriate).
 
 **`POST /sim/inject`**
 
@@ -615,10 +638,22 @@ provided fields are applied. Each is a one-shot jump into simulation state or en
   "battery_soc": 0.1,
   "ev_soc": 0.4,
   "ev_plugged": false,
+  "ev_departure_min": 120,
   "heater_temp_c": 16.5,
+  "heater_setpoint_c": 19.0,
   "ambient_temp_c": 2.0,
-  "pv_irradiance": 0.0
+  "pv_irradiance": 0.0,
+  "pv_irradiance_alpha": 0.05,
+  "base_load_kw": 3.5,
+  "grid_import_limit_kw": 5.0,
+  "grid_export_limit_kw": 3.0
 }
+```
+
+To release a specific override (e.g. stop freezing PV irradiance):
+
+```json
+{ "pv_irradiance": null }
 ```
 
 The existing `POST /sim/override` and its `UserOverrides` struct (which mutates config per-tick)
@@ -627,11 +662,17 @@ device specs belong in the profile YAML, not the runtime API.
 
 ### Summary
 
-| Field | Injects into | Natural evolution after jump |
+| Field | Behaviour | Evolution when released |
 |---|---|---|
-| `battery_soc` | `BatteryState.soc_pct` | Charge/discharge physics |
-| `ev_soc` | `EvState.soc_pct` | Charge physics |
-| `ev_plugged` | `EvState.plugged` | None (no autonomous plug model yet) |
-| `heater_temp_c` | `HeaterState.temperature_c` | Thermal loss + thermostat |
-| `ambient_temp_c` | Heater environment | None (no autonomous ambient model yet) |
-| `pv_irradiance` | PV environment (one tick only) | Sinusoidal auto-model resumes next tick |
+| `battery_soc` | Jump + free evolution | Charge/discharge physics from injected value |
+| `ev_soc` | Jump + free evolution | Charge physics from injected value |
+| `ev_plugged` | Jump + hold | Stays; no autonomous plug model |
+| `ev_departure_min` | Jump + hold | Stays until cleared or overridden |
+| `heater_temp_c` | Jump + free evolution | Thermal loss + thermostat from injected value |
+| `heater_setpoint_c` | Jump + hold | Stays; no autonomous occupancy model |
+| `ambient_temp_c` | Jump + hold | Stays; no autonomous ambient model |
+| `pv_irradiance` | Frozen + exponential return | Blends back to sinusoidal model at rate α per tick |
+| `pv_irradiance_alpha` | Parameter for above | — |
+| `base_load_kw` | Frozen + snap return | Snaps back to profile default immediately |
+| `grid_import_limit_kw` | Jump + hold | Stays; real VTN event takes precedence |
+| `grid_export_limit_kw` | Jump + hold | Stays; real VTN event takes precedence |
