@@ -53,8 +53,8 @@ vi.mock("../api/hooks", () => ({
   useSim: () => ({ data: baseSim, isLoading: false, isError: false, refetch: vi.fn() }),
   useTariffs: () => ({ data: tariffsData, refetch: vi.fn() }),
   useRequests: () => ({ data: [], refetch: vi.fn() }),
-  useSimOverride: () => ({ data: {} }),
-  useSetSimOverride: () => ({ mutate: vi.fn() }),
+  useSimInject: () => ({ data: {} }),
+  useSetSimInject: () => ({ mutate: vi.fn() }),
   useAllTimelines: () => ({ data: allTimelinesData, refetch: vi.fn() }),
   useSimSchema: () => ({ data: {} }),
 }));

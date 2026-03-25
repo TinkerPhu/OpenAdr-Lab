@@ -80,23 +80,27 @@ export type Setpoints = {
   mode: string;
 };
 
-export type UserOverrides = {
-  pv_irradiance?: number;
-  ambient_temp_c?: number;
-  ev_desired_kw?: number;
-  ev_plugged?: boolean;
-  ev_force_kw?: number;
-  heater_force_kw?: number;
-  battery_force_kw?: number;
-  pv_force_export_limit_kw?: number;
-  ev_max_charge_kw?: number;
-  ev_soc_target?: number;
-  heater_max_kw?: number;
-  heater_temp_min_c?: number;
-  heater_temp_max_c?: number;
-  pv_rated_kw?: number;
-  base_load_w?: number;
+/** Simulation injection state — maps to /sim/inject backend endpoint. */
+export type SimInjectState = {
+  // Behaviour A: one-shot jumps (auto-cleared after application)
+  battery_soc?: number | null;
+  ev_soc?: number | null;
+  heater_temp_c?: number | null;
+  // Behaviour B: frozen + EMA blend-back on release
+  pv_irradiance?: number | null;
+  pv_irradiance_alpha?: number;
+  // Behaviour C: frozen while active, snap to profile on release
+  ev_plugged?: boolean | null;
+  ev_departure_min?: number | null;
+  heater_setpoint_c?: number | null;
+  ambient_temp_c?: number | null;
+  base_load_kw?: number | null;
+  grid_import_limit_kw?: number | null;
+  grid_export_limit_kw?: number | null;
 };
+
+/** @deprecated Use SimInjectState instead. Kept as alias for Simulation.tsx backward compat. */
+export type UserOverrides = SimInjectState;
 
 export type TraceEntry = {
   ts: string;

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ControllerV2Page } from "../pages/ControllerV2";
-import type { SimSnapshot, UserOverrides, TariffSnapshot } from "../api/types";
+import type { SimSnapshot, SimInjectState, TariffSnapshot } from "../api/types";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
@@ -29,14 +29,14 @@ const baseRates: TariffSnapshot[] = [
   },
 ];
 
-const baseOverrides: UserOverrides = {};
+const baseInject: SimInjectState = {};
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
 const mockSim = vi.fn(() => baseSim);
 const mockRates = vi.fn(() => baseRates);
-const mockOverrides = vi.fn(() => baseOverrides);
-const mockSetOverride = vi.fn(() => ({ mutate: vi.fn() }));
+const mockInject = vi.fn(() => baseInject);
+const mockSetInject = vi.fn(() => ({ mutate: vi.fn() }));
 
 // Minimal EV schema for testing schema-driven AssetRightSection
 const evSchema = [
@@ -49,8 +49,8 @@ vi.mock("../api/hooks", () => ({
   useTariffs: () => ({ data: mockRates(), refetch: vi.fn() }),
   useRequests: () => ({ data: [], refetch: vi.fn() }),
   useTrace: () => ({ data: [] }),
-  useSimOverride: () => ({ data: mockOverrides() }),
-  useSetSimOverride: () => mockSetOverride(),
+  useSimInject: () => ({ data: mockInject() }),
+  useSetSimInject: () => mockSetInject(),
   useTimeline: () => ({ data: [] }),
   useAllTimelines: () => ({ data: {}, refetch: vi.fn() }),
   useSimSchema: () => ({ data: { ev: evSchema } }),
@@ -77,7 +77,7 @@ describe("ControllerV2Page — layout", () => {
   beforeEach(() => {
     mockSim.mockReturnValue(baseSim);
     mockRates.mockReturnValue(baseRates);
-    mockOverrides.mockReturnValue(baseOverrides);
+    mockInject.mockReturnValue(baseInject);
   });
 
   it("renders the page root", () => {
@@ -183,7 +183,7 @@ describe("ControllerV2Page — global expand button", () => {
   beforeEach(() => {
     mockSim.mockReturnValue(baseSim);
     mockRates.mockReturnValue(baseRates);
-    mockOverrides.mockReturnValue(baseOverrides);
+    mockInject.mockReturnValue(baseInject);
   });
 
   it("renders a global expand button in the title bar", () => {
