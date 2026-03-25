@@ -44,6 +44,11 @@ pub fn build_router(ctx: AppCtx) -> Router {
             "/sim/override",
             get(sim::get_sim_override).post(sim::post_sim_override),
         )
+        .route(
+            "/sim/inject",
+            get(sim::get_sim_inject).post(sim::post_sim_inject),
+        )
+        .route("/sim/inject/reset", post(sim::post_sim_inject_reset))
         .route("/trace/events", get(trace::get_trace_events))
         .route("/trace/history", get(trace::get_trace_history))
         .route("/metrics", get(system::get_metrics))
