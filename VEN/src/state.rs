@@ -32,6 +32,49 @@ impl AssetLedgerEntry {
     }
 }
 
+/// Simulation injection state — set via POST /sim/inject.
+/// Three injection behaviours:
+/// - A (one-shot): applied once to physics state, then cleared automatically.
+/// - B (frozen + EMA return): held while active; EMA-blended back to natural model on release.
+/// - C (frozen + snap): held while active; snaps to profile default on release.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SimInjectState {
+    // Behaviour A — one-shot (cleared after application to physics state)
+    pub battery_soc: Option<f64>,
+    pub ev_soc: Option<f64>,
+    pub heater_temp_c: Option<f64>,
+    // Behaviour B — frozen + EMA return on release
+    pub pv_irradiance: Option<f64>,
+    pub pv_irradiance_alpha: f64, // default 0.1
+    // Behaviour C — frozen while active, snap to profile default on release
+    pub ev_plugged: Option<bool>,
+    pub ev_departure_min: Option<f64>,
+    pub heater_setpoint_c: Option<f64>,
+    pub ambient_temp_c: Option<f64>,
+    pub base_load_kw: Option<f64>,
+    pub grid_import_limit_kw: Option<f64>,
+    pub grid_export_limit_kw: Option<f64>,
+}
+
+impl Default for SimInjectState {
+    fn default() -> Self {
+        Self {
+            battery_soc: None,
+            ev_soc: None,
+            heater_temp_c: None,
+            pv_irradiance: None,
+            pv_irradiance_alpha: 0.1,
+            ev_plugged: None,
+            ev_departure_min: None,
+            heater_setpoint_c: None,
+            ambient_temp_c: None,
+            base_load_kw: None,
+            grid_import_limit_kw: None,
+            grid_export_limit_kw: None,
+        }
+    }
+}
+
 /// User-adjustable simulation parameters, sent via POST /sim/override.
 /// All fields are optional; None means "use profile default".
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
@@ -71,6 +114,8 @@ pub struct InnerState {
     pub controller_trace: ControllerTrace,
     #[serde(default)]
     pub overrides: UserOverrides,
+    #[serde(skip)]
+    pub inject_state: SimInjectState,
 
     // HEMS state (not persisted in simple state.json — managed by controller loops)
     #[serde(skip)]
@@ -102,6 +147,7 @@ impl AppState {
                 sim: None,
                 controller_trace: ControllerTrace::new(),
                 overrides: UserOverrides::default(),
+                inject_state: SimInjectState::default(),
                 active_packets: vec![],
                 active_plan: None,
                 planned_tariffs: vec![],
@@ -173,6 +219,25 @@ impl AppState {
 
     pub async fn set_overrides(&self, o: UserOverrides) {
         self.inner.write().await.overrides = o;
+    }
+
+    pub async fn inject_state(&self) -> SimInjectState {
+        self.inner.read().await.inject_state.clone()
+    }
+
+    pub async fn set_inject_state(&self, s: SimInjectState) {
+        self.inner.write().await.inject_state = s;
+    }
+
+    /// Clear a single Behaviour A (one-shot) field after it has been applied.
+    pub async fn clear_inject_field(&self, field: &str) {
+        let mut inner = self.inner.write().await;
+        match field {
+            "battery_soc" => inner.inject_state.battery_soc = None,
+            "ev_soc" => inner.inject_state.ev_soc = None,
+            "heater_temp_c" => inner.inject_state.heater_temp_c = None,
+            _ => {}
+        }
     }
 
     // --- HEMS accessors ---
@@ -349,6 +414,7 @@ impl Clone for InnerState {
             sim: self.sim.clone(),
             controller_trace: self.controller_trace.clone(),
             overrides: self.overrides.clone(),
+            inject_state: self.inject_state.clone(),
             active_packets: self.active_packets.clone(),
             active_plan: self.active_plan.clone(),
             planned_tariffs: self.planned_tariffs.clone(),

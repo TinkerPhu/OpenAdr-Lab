@@ -18,8 +18,16 @@ use crate::assets::{
 };
 use crate::models::SensorSnapshot;
 use crate::profile::{AssetProfile, BaseLoadConfig, Profile};
-use crate::state::UserOverrides;
 use energy::EnergyCounter;
+
+/// Tracks PV irradiance EMA state between ticks.
+/// Only active while blending back from an override (Behaviour B).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PvSmoothingState {
+    pub current_irradiance: f64,
+    /// True while blending back from a released override; False in normal operation.
+    pub override_was_active: bool,
+}
 
 /// One entry in the generic asset list.
 /// Config is NOT stored here — it lives in `SimState.asset_configs` (parallel by index).
@@ -64,6 +72,9 @@ pub struct SimState {
     /// Not part of `asset_configs` / `assets` (Grid is read-only, not dispatched).
     #[serde(skip, default)]
     pub grid_asset: Grid,
+    /// PV irradiance EMA state for Behaviour B smoothing. Ephemeral — resets on restart.
+    #[serde(skip, default)]
+    pub pv_smoothing: PvSmoothingState,
     pub last_tick: DateTime<Utc>,
 }
 
@@ -233,77 +244,85 @@ impl SimState {
             assets: entries,
             grid: GridMeter::default(),
             grid_asset: Grid::new(),
+            pv_smoothing: PvSmoothingState::default(),
             last_tick: Utc::now(),
         }
     }
 
     /// Run one simulation tick.
+    ///
+    /// Inject parameters implement Behaviour B (pv_irradiance + EMA smoothing) and
+    /// Behaviour C (frozen env/state while active, snap-back on release):
+    /// - `pv_irradiance_override`: if Some, freeze PV irradiance; if None and was active,
+    ///   EMA-blend back to natural model.
+    /// - `pv_alpha`: EMA factor for PV blend-back (0.0–1.0; default 0.1).
+    /// - `ambient_temp_c_override`: if Some, override heater ambient temp; else use 10.0°C.
+    /// - `base_load_kw_override`: if Some, override base load power; else use profile value.
+    /// - `ev_plugged_override`: if Some, hold EV plugged state; else let physics drive it.
     pub fn tick(
         &mut self,
         dt_s: f64,
         setpoints: HashMap<String, f64>,
         now: DateTime<Utc>,
-        overrides: &UserOverrides,
+        pv_irradiance_override: Option<f64>,
+        pv_alpha: f64,
+        ambient_temp_c_override: Option<f64>,
+        base_load_kw_override: Option<f64>,
+        ev_plugged_override: Option<bool>,
     ) {
         let hour = now.format("%H").to_string().parse::<f64>().unwrap_or(12.0)
             + now.format("%M").to_string().parse::<f64>().unwrap_or(0.0) / 60.0;
 
-        let irradiance = overrides.pv_irradiance.unwrap_or_else(|| {
-            if hour >= 6.0 && hour <= 18.0 {
-                let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
-                angle.sin()
-            } else {
-                0.0
+        let natural_irradiance = if hour >= 6.0 && hour <= 18.0 {
+            let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
+            angle.sin()
+        } else {
+            0.0
+        };
+
+        // Behaviour B: PV irradiance — frozen while override active; EMA blend-back on release.
+        let irradiance = if let Some(forced) = pv_irradiance_override {
+            self.pv_smoothing.current_irradiance = forced;
+            self.pv_smoothing.override_was_active = true;
+            forced
+        } else if self.pv_smoothing.override_was_active {
+            let blended = self.pv_smoothing.current_irradiance * (1.0 - pv_alpha)
+                + natural_irradiance * pv_alpha;
+            self.pv_smoothing.current_irradiance = blended;
+            if (blended - natural_irradiance).abs() < 0.005 {
+                self.pv_smoothing.override_was_active = false;
+                self.pv_smoothing.current_irradiance = natural_irradiance;
             }
-        });
+            blended
+        } else {
+            // Normal operation: track natural model directly (no lag).
+            self.pv_smoothing.current_irradiance = natural_irradiance;
+            natural_irradiance
+        };
 
         let dt = chrono::Duration::milliseconds((dt_s * 1000.0) as i64);
         let mut total_kw = 0.0;
 
         for (cfg, entry) in self.asset_configs.iter_mut().zip(self.assets.iter_mut()) {
-            // ── Set env fields in config before step() ────────────────────
+            // ── Apply environment and Behaviour C state injections ────────
             match cfg {
-                AssetConfig::Pv(pv) => pv.irradiance = irradiance,
-                AssetConfig::Heater(h) => {
-                    h.ambient_temp_c = overrides.ambient_temp_c.unwrap_or(10.0)
-                }
-                _ => {}
-            }
-
-            // ── Apply UserOverride config mutations ───────────────────────
-            match cfg {
-                AssetConfig::Ev(ev) => {
-                    if let Some(v) = overrides.ev_max_charge_kw {
-                        ev.max_charge_kw = v;
-                    }
-                    if let Some(v) = overrides.ev_soc_target {
-                        ev.soc_target = v;
-                    }
-                    if let Some(b) = overrides.ev_plugged {
-                        if let AssetState::Ev(s) = &mut entry.state {
-                            s.plugged = b;
-                        }
-                    }
-                }
-                AssetConfig::Heater(h) => {
-                    if let Some(v) = overrides.heater_max_kw {
-                        h.max_kw = v;
-                    }
-                    if let Some(v) = overrides.heater_temp_min_c {
-                        h.temp_min_c = v;
-                    }
-                    if let Some(v) = overrides.heater_temp_max_c {
-                        h.temp_max_c = v;
-                    }
-                }
                 AssetConfig::Pv(pv) => {
-                    if let Some(v) = overrides.pv_rated_kw {
-                        pv.rated_kw = v;
-                    }
+                    pv.irradiance = irradiance;
+                }
+                AssetConfig::Heater(h) => {
+                    // Behaviour C: ambient temp — hold override or use default.
+                    h.ambient_temp_c = ambient_temp_c_override.unwrap_or(10.0);
                 }
                 AssetConfig::BaseLoad(bl) => {
-                    if let Some(w) = overrides.base_load_w {
-                        bl.baseline_kw = w / 1000.0;
+                    // Behaviour C: base load — hold override or snap to profile default.
+                    bl.baseline_kw = base_load_kw_override.unwrap_or(bl.baseline_kw_profile);
+                }
+                AssetConfig::Ev(_) => {
+                    // Behaviour C: ev_plugged — hold override state each tick.
+                    if let Some(plugged) = ev_plugged_override {
+                        if let AssetState::Ev(s) = &mut entry.state {
+                            s.plugged = plugged;
+                        }
                     }
                 }
                 _ => {}

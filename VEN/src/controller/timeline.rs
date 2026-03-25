@@ -338,7 +338,7 @@ mod tests {
 
     /// Create a BaseLoad AssetEntry + AssetConfig with history rows `(offset_s, power_kw)`.
     fn make_base_entry(id: &str, rows: &[(i64, f64)]) -> (AssetEntry, AssetConfig) {
-        let cfg = AssetConfig::BaseLoad(BaseLoad { baseline_kw: 0.0 });
+        let cfg = AssetConfig::BaseLoad(BaseLoad { baseline_kw: 0.0, baseline_kw_profile: 0.0 });
         let mut entry = AssetEntry {
             id: id.to_string(),
             state: AssetState::BaseLoad(BaseLoadState {
@@ -411,6 +411,7 @@ mod tests {
             assets,
             grid: GridMeter::default(),
             grid_asset: Grid::new(),
+            pv_smoothing: crate::simulator::PvSmoothingState::default(),
             last_tick: DateTime::from_timestamp(0, 0).unwrap(),
         }
     }
