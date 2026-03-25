@@ -2,21 +2,21 @@ import { useState, useMemo, useEffect } from "react";
 import { Alert, Box, CircularProgress, IconButton, Tooltip, Typography } from "@mui/material";
 import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
 import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
-import { useSim, useTariffs, useRequests, useSimOverride, useSetSimOverride, useAllTimelines } from "../api/hooks";
+import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useAllTimelines } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller-v2/types";
 import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
 import { AssetCell } from "../components/controller-v2/AssetCell";
 import { PinnedZone } from "../components/controller-v2/PinnedZone";
 import { GridTariffCell } from "../components/controller-v2/GridTariffCell";
 import { GridAccumulatedCell } from "../components/controller-v2/GridAccumulatedCell";
-import type { UserOverrides } from "../api/types";
+import type { SimInjectState } from "../api/types";
 
 export function ControllerV2Page() {
   const { data: sim, isLoading: simLoading, isError: simError, refetch: refetchSim } = useSim({ refetchInterval: false });
   const { data: rates, refetch: refetchTariffs } = useTariffs({ refetchInterval: false });
   const { data: userRequests, refetch: refetchRequests } = useRequests({ refetchInterval: false });
-  const { data: simOverrides } = useSimOverride();
-  const { mutate: setOverride } = useSetSimOverride();
+  const { data: simInject } = useSimInject();
+  const { mutate: setSimInject } = useSetSimInject();
 
   const [pinnedCellIds, setPinnedCellIds] = useState<string[]>([]);
   const [collapseState, setCollapseState] = useState<CollapseState>({});
@@ -73,8 +73,8 @@ export function ControllerV2Page() {
     });
   }
 
-  function handleOverrideChange(patch: Partial<UserOverrides>) {
-    setOverride({ ...simOverrides, ...patch } as UserOverrides);
+  function handleOverrideChange(patch: Partial<SimInjectState>) {
+    setSimInject(patch);
   }
 
   const tariffs = rates ?? [];
@@ -121,7 +121,7 @@ export function ControllerV2Page() {
           assetId={assetId}
           summary={summary}
           simSnapshot={sim}
-          simOverrides={simOverrides}
+          simOverrides={simInject}
           collapsed={{ left: collapsed.leftCollapsed, right: collapsed.rightCollapsed }}
           timePoints={allTimelines[assetId] ?? []}
           nowMs={nowMs}
@@ -192,7 +192,7 @@ export function ControllerV2Page() {
                 assetId={summary.assetId}
                 summary={summary}
                 simSnapshot={sim}
-                simOverrides={simOverrides}
+                simOverrides={simInject}
                 collapsed={{ left: collapsed.leftCollapsed, right: collapsed.rightCollapsed }}
                 timePoints={allTimelines[summary.assetId] ?? []}
                 nowMs={nowMs}

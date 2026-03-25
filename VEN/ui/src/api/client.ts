@@ -1,7 +1,7 @@
 import type {
   VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry, UserOverrides,
-  PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger, UserRequest, FlexibilityEnvelope,
-  CreateUserRequestBody, ControlDescriptor,
+  SimInjectState, PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger, UserRequest,
+  FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller-v2/types";
 
@@ -124,15 +124,25 @@ export class VenApi {
     return r.json();
   }
 
-  async getSimOverride(): Promise<UserOverrides> {
-    const r = await this.getReq("/sim/override");
-    if (!r.ok) throw new Error(`sim override ${r.status}`);
+  async getSimInject(): Promise<SimInjectState> {
+    const r = await this.getReq("/sim/inject");
+    if (!r.ok) throw new Error(`sim inject ${r.status}`);
     return r.json();
   }
 
+  async postSimInject(patch: Partial<SimInjectState>): Promise<void> {
+    const r = await this.jsonReq("POST", "/sim/inject", patch);
+    if (!r.ok) throw new Error(`post sim inject ${r.status}`);
+  }
+
+  /** @deprecated Use getSimInject instead. Kept for Simulation.tsx backward compat. */
+  async getSimOverride(): Promise<UserOverrides> {
+    return this.getSimInject();
+  }
+
+  /** @deprecated Use postSimInject instead. Kept for Simulation.tsx backward compat. */
   async postSimOverride(overrides: UserOverrides): Promise<void> {
-    const r = await this.jsonReq("POST", "/sim/override", overrides);
-    if (!r.ok) throw new Error(`post sim override ${r.status}`);
+    return this.postSimInject(overrides);
   }
 
   async metrics(): Promise<string> {
