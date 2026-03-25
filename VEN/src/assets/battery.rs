@@ -129,14 +129,7 @@ impl Battery {
     }
 
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        vec![ControlDescriptor {
-            key: "battery_force_kw".into(),
-            label: "Force Power".into(),
-            kind: ControlKind::Slider,
-            min: Some(-self.max_discharge_kw),
-            max: Some(self.max_charge_kw),
-            unit: "kW".into(),
-        }]
+        vec![]
     }
 
     pub fn reset(&self, state: &mut BatteryState, values: HashMap<String, f64>) {
