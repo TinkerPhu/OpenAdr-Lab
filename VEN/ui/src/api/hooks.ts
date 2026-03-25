@@ -131,7 +131,12 @@ export function useSetSimInject() {
 
 /** @deprecated Use useSimInject instead. Kept for Simulation.tsx backward compat. */
 export function useSimOverride() {
-  return useSimInject();
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["simInject", api.baseUrl],
+    queryFn: () => api.getSimOverride(),
+    staleTime: Infinity,
+  });
 }
 
 /** @deprecated Use useSetSimInject instead. Kept for Simulation.tsx backward compat. */

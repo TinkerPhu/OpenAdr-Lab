@@ -137,12 +137,13 @@ export class VenApi {
 
   /** @deprecated Use getSimInject instead. Kept for Simulation.tsx backward compat. */
   async getSimOverride(): Promise<UserOverrides> {
-    return this.getSimInject();
+    const data = await this.getSimInject();
+    return data as unknown as UserOverrides;
   }
 
   /** @deprecated Use postSimInject instead. Kept for Simulation.tsx backward compat. */
   async postSimOverride(overrides: UserOverrides): Promise<void> {
-    return this.postSimInject(overrides);
+    return this.postSimInject(overrides as unknown as SimInjectState);
   }
 
   async metrics(): Promise<string> {
