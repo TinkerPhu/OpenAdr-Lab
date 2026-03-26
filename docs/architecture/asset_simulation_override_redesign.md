@@ -1,21 +1,24 @@
-# Sim Inject Redesign — Phased Implementation Plan
+# Asset Simulation — Inject API
 
-> **Status**: Design — implementation not yet started.
+> **Status**: Groups A, B, C implemented and BDD-green (207 scenarios, 1190 steps).
+> Group D (BDD migration + alias cleanup) and Phase 8 (Simulation.tsx migration) pending.
 
-## Problem
+---
 
-`POST /sim/override` currently mutates asset **config** fields (device specs such as
-`max_charge_kw`, thermostat bounds) on every sim tick. This is wrong for two reasons:
+## Why inject, not override
 
-1. **Config is device specification**, not runtime state. Mutating it at runtime pollutes the
-   planner's view of what the hardware can do.
-2. **The planner never sees the injected condition as real state.** Overrides are applied after
-   `build_setpoints()`, so the planner still plans against stale state. Injecting into *physics
-   state* is the only way to make the planner reason from the correct starting point.
+The old `POST /sim/override` mutated device **config** fields (specs such as `max_charge_kw`,
+thermostat bounds) on every sim tick. This was wrong:
 
-The existing `POST /sim/reset/:asset_id` already does the right thing for SoC — it mutates
-`entry.state` directly via `cfg.reset()`. The redesign generalises that pattern to all injectable
-state and environment fields.
+- Config is device specification, not runtime state. Mutating it at runtime pollutes the planner's
+  view of hardware capability.
+- The planner never saw the injected condition as real state — overrides were applied after
+  `build_setpoints()`, so the planner still planned against stale state.
+
+The replacement (`POST /sim/inject`) writes directly into **physics state** (`soc`, `temp_c`,
+`plugged`) and **environment inputs** (`irradiance`, `ambient_temp_c`). Physics then evolves
+naturally from the injected starting point, and the planner reasons from the corrected reality
+on the very next tick.
 
 ---
 
@@ -23,17 +26,50 @@ state and environment fields.
 
 | Behaviour | Description | Fields |
 |---|---|---|
-| **A — Jump + free evolution** | Write to physics state once; physics drives it from there. No persistent override held between ticks. | `battery_soc`, `ev_soc`, `heater_temp_c` |
-| **B — Frozen + exponential return** | Hold injected value each tick while active. On release (null), blend back to auto model via EMA: `s(n+1) = s(n)*(1−α) + model(n+1)*α`. | `pv_irradiance` |
-| **C — Frozen + snap return** | Hold injected value each tick while active. On release, snap back to profile default or no-limit immediately. | `ev_plugged`, `ev_departure_min`, `heater_setpoint_c`, `ambient_temp_c`, `base_load_kw`, `grid_import_limit_kw`, `grid_export_limit_kw` |
+| **A — Jump + free evolution** | Written to physics state once. Auto-cleared after the next tick. Physics drives freely from there. | `battery_soc`, `ev_soc`, `heater_temp_c` |
+| **B — Frozen + EMA blend-back** | Held at the injected value each tick while active. On release (`null`), blends back to the natural model via first-order IIR: `s(n+1) = s(n)*(1−α) + model(n+1)*α`. Converges when delta < 0.005. | `pv_irradiance` |
+| **C — Frozen + snap return** | Held at the injected value each tick while active. On release (`null`), snaps back to profile default or no-limit immediately. | `ev_plugged`, `ev_departure_min`, `heater_setpoint_c`, `ambient_temp_c`, `base_load_kw`, `grid_import_limit_kw`, `grid_export_limit_kw` |
 
-### New API endpoint
+**Behaviour A note — startup lag**: `pv_irradiance_alpha` EMA is only active during blend-back
+from an override. Normal operation uses the natural irradiance model directly (no ramp-up lag
+on restart). Tracked via `PvSmoothingState.override_was_active: bool`.
 
-`POST /sim/inject` replaces `POST /sim/override`. Partial-merge semantics:
-- Field **absent** → no change to current state
-- Field **set to value** → activate override
-- Field **set to null** → release override (triggers return behaviour)
+---
 
+## API Reference
+
+### `GET /sim/inject`
+
+Returns the current inject state. Fields that are not overridden are omitted (or `null`).
+
+**Response** `200 application/json`:
+```json
+{
+  "battery_soc": null,
+  "ev_soc": null,
+  "heater_temp_c": null,
+  "pv_irradiance": 0.8,
+  "pv_irradiance_alpha": 0.05,
+  "ev_plugged": null,
+  "ev_departure_min": 90.0,
+  "heater_setpoint_c": null,
+  "ambient_temp_c": null,
+  "base_load_kw": null,
+  "grid_import_limit_kw": null,
+  "grid_export_limit_kw": null
+}
+```
+
+---
+
+### `POST /sim/inject`
+
+Partial-merge update. Each field independently:
+- **Absent** → no change to current state
+- **`null`** → release override (triggers return behaviour for B/C; no-op for already-released fields)
+- **Value** → activate override
+
+**Request body** (all fields optional):
 ```json
 {
   "battery_soc": 0.1,
@@ -51,28 +87,108 @@ state and environment fields.
 }
 ```
 
-`POST /sim/inject/reset` — releases all active overrides at once (used by BDD test teardown).
+**Response** `204 No Content`.
 
-`POST /sim/override` is kept as a backward-compat alias during migration, then removed.
+Fires `PlanTrigger::AssetStateChange` after each call to trigger reactive replanning.
 
 ---
 
-## New Structs
+### `POST /sim/inject/reset`
 
-### `SimInjectState` — stored in `AppState` (`VEN/src/state.rs`)
+Releases all active overrides at once. Equivalent to `POST /sim/inject` with every field set to
+`null`. Used by BDD test teardown (`sim_ui_steps.py`).
+
+**Response** `204 No Content`.
+
+---
+
+### `GET /sim/schema`
+
+Returns `control_schema()` descriptors per asset. These define which inject fields the ControllerV2
+UI renders as interactive controls.
+
+**Response** `200 application/json`:
+```json
+{
+  "ev": [
+    { "key": "ev_plugged",       "label": "Plugged In",    "kind": "switch",       "min": null, "max": null,   "unit": "" },
+    { "key": "ev_departure_min", "label": "Departure In",  "kind": "number_input", "min": 0,    "max": 1440,   "unit": "min" }
+  ],
+  "heater": [
+    { "key": "heater_setpoint_c", "label": "Temperature Setpoint", "kind": "slider", "min": 16, "max": 24, "unit": "°C" }
+  ],
+  "pv": [
+    { "key": "pv_irradiance",       "label": "Irradiance Override", "kind": "slider", "min": 0,    "max": 1,   "unit": "" },
+    { "key": "pv_irradiance_alpha", "label": "Blend-back Speed",    "kind": "slider", "min": 0.01, "max": 1.0, "unit": "" }
+  ],
+  "base_load": [
+    { "key": "base_load_kw", "label": "Base Load Override", "kind": "number_input", "min": 0, "max": 20, "unit": "kW" }
+  ],
+  "battery": []
+}
+```
+
+---
+
+### `POST /sim/override` (deprecated alias)
+
+Kept for backward compatibility with `Simulation.tsx` and legacy BDD steps. Translates the old
+`UserOverrides` shape into `SimInjectState`:
+
+| Old field | Maps to |
+|---|---|
+| `ev_plugged` | `inject.ev_plugged` |
+| `pv_irradiance` | `inject.pv_irradiance` |
+| `ambient_temp_c` | `inject.ambient_temp_c` |
+| `base_load_w` | `inject.base_load_kw = w / 1000.0` |
+| All other old fields | Silently dropped |
+| Empty body `{}` | Releases all overrides |
+
+`GET /sim/override` translates `SimInjectState` back into the old `UserOverrides` shape
+(needed by `controller_v2_steps.py` which reads `ev_plugged` via this endpoint).
+
+**Will be removed** in Group D cleanup.
+
+---
+
+## Field Reference
+
+| Field | Type | Behaviour | Unit | Effect |
+|---|---|---|---|---|
+| `battery_soc` | `f64 \| null` | A | [0–1] | Jump battery SoC to value; cleared next tick |
+| `ev_soc` | `f64 \| null` | A | [0–1] | Jump EV SoC to value; cleared next tick |
+| `heater_temp_c` | `f64 \| null` | A | °C | Jump heater temperature to value; cleared next tick |
+| `pv_irradiance` | `f64 \| null` | B | [0–1] | Freeze PV irradiance; EMA blend-back on release |
+| `pv_irradiance_alpha` | `f64` | — | — | EMA coefficient for blend-back (default 0.1) |
+| `ev_plugged` | `bool \| null` | C | — | Override EV plugged state |
+| `ev_departure_min` | `f64 \| null` | C | min | Override departure time; replaces active EV packet tier deadline in planner |
+| `heater_setpoint_c` | `f64 \| null` | C | °C | Target temperature for heater dispatcher (ON if temp < target, OFF otherwise) |
+| `ambient_temp_c` | `f64 \| null` | C | °C | Override outdoor temperature used in heater thermal model |
+| `base_load_kw` | `f64 \| null` | C | kW | Override base load power; snaps to `baseline_kw_profile` on release |
+| `grid_import_limit_kw` | `f64 \| null` | C | kW | Override import capacity limit (ignored when a VTN event holds the limit) |
+| `grid_export_limit_kw` | `f64 \| null` | C | kW | Override export capacity limit (ignored when a VTN event holds the limit) |
+
+**Grid limit priority**: VTN event always wins. `inject.grid_import_limit_kw` only applies when
+`capacity_snap.import_limit_event_id.is_none()`.
+
+**`heater_setpoint_c` note**: Handled in the dispatcher only (binary ON/OFF vs target). Does not
+change thermostat bounds or thermal model parameters.
+
+---
+
+## Backend Architecture
+
+### State storage (`VEN/src/state.rs`)
 
 ```rust
 pub struct SimInjectState {
-    // Behaviour A (applied once then cleared)
     pub battery_soc: Option<f64>,
     pub ev_soc: Option<f64>,
     pub heater_temp_c: Option<f64>,
-    // Behaviour B (frozen + EMA return)
     pub pv_irradiance: Option<f64>,
     pub pv_irradiance_alpha: f64,          // default 0.1
-    // Behaviour C (frozen + snap)
     pub ev_plugged: Option<bool>,
-    pub ev_departure_min: Option<f64>,     // minutes from now
+    pub ev_departure_min: Option<f64>,
     pub heater_setpoint_c: Option<f64>,
     pub ambient_temp_c: Option<f64>,
     pub base_load_kw: Option<f64>,
@@ -81,224 +197,124 @@ pub struct SimInjectState {
 }
 ```
 
-### `PvSmoothingState` — stored on `SimState` (`VEN/src/simulator/mod.rs`)
+Stored as `InnerState.inject_state` with `#[serde(skip)]` — ephemeral, not persisted to disk.
+Accessors: `inject_state()`, `set_inject_state()`, `clear_inject_field(&str)`.
+
+### PV smoothing (`VEN/src/simulator/mod.rs`)
 
 ```rust
 pub struct PvSmoothingState {
-    pub current_irradiance: f64,   // tracks EMA-blended value between ticks
+    pub current_irradiance: f64,
+    pub override_was_active: bool,
 }
 ```
 
-Marked `#[serde(skip)]` — ephemeral, resets to 0.0 on restart (EMA quickly recovers to natural
-model).
+Stored on `SimState` with `#[serde(skip)]`. The `override_was_active` flag prevents startup lag:
+EMA tracking only activates when blending back from a released override.
+
+### Tick loop (`VEN/src/loops.rs` — `spawn_sim_tick`)
+
+Each tick (1 Hz):
+1. Read `inject_state` once
+2. **Behaviour A** — apply `battery_soc`, `ev_soc`, `heater_temp_c` via `cfg.reset()` +
+   `find_asset_mut()`, then `clear_inject_field()` for each applied field
+3. **Grid limits** — compose `effective_capacity`: inject overrides applied only when no VTN event holds the limit
+4. **Behaviour C env/state** — pass `ambient_temp_c`, `base_load_kw`, `ev_plugged` into `tick()` as params
+5. Call `sim.tick(...)` — PV EMA smoothing runs inside
+6. Call `build_setpoints(plan, assets, configs, &effective_capacity, inject.heater_setpoint_c, now)`
+
+### Planning loop (`VEN/src/loops.rs` — `spawn_planning`)
+
+Each planning cycle:
+- Read `inject_state().ev_departure_min`
+- Compute `ev_departure_override = now + Duration::seconds(min * 60)` if set
+- Pass `ev_departure_override` to `run_planner()`
+- Inside `run_planner()`: replace active EV packet tier deadline before the planning loop
 
 ---
 
-## Implementation Groups
+## TypeScript API (`VEN/ui/src/api/`)
 
-Work is split into four groups. Each group ends with a compilable, deployable, BDD-passing state.
-Phases 2+3 must be committed together (Phase 2 breaks BDD; Phase 3 restores it).
+### `SimInjectState` type (`types.ts`)
 
----
-
-## Group A — Backend Core (Phases 1–3)
-
-**Goal:** Replace config mutations with correct state injection. All existing BDD tests pass at
-the end of this group.
-
-### Phase 1 — New structs + stub route (zero behaviour change)
-
-Files changed:
-
-| File | Change |
-|---|---|
-| `VEN/src/state.rs` | Add `SimInjectState`; add `InnerState.inject_state` (`#[serde(skip)]`); add `inject_state()`, `set_inject_state()`, `clear_inject_field(&str)` on `AppState`; keep `UserOverrides` unchanged |
-| `VEN/src/simulator/mod.rs` | Add `PvSmoothingState` on `SimState` (`#[serde(skip)]`, init 0.0 in `from_profile()`) |
-| `VEN/src/routes/sim.rs` | Add stub `get_sim_inject` + `post_sim_inject` handlers (read/write `inject_state` only, no injection yet); keep `post_sim_override` unchanged |
-| `VEN/src/routes/mod.rs` | Register `GET /sim/inject` + `POST /sim/inject` |
-
-Test: `POST /sim/inject {}` → 204; `GET /sim/inject` → `{}`; full BDD suite passes.
-
----
-
-### Phase 2 — Remove config mutations from `tick()`; wire injections (BDD temporarily breaks)
-
-Files changed:
-
-| File | Change |
-|---|---|
-| `VEN/src/simulator/mod.rs` | Remove `overrides: &UserOverrides` param; remove "Apply UserOverride config mutations" block (lines 273–310) and "Set env fields" block (lines 264–271); add PV smoothing logic (see below); new params: `pv_irradiance_override`, `pv_alpha`, `ambient_temp_c`, `base_load_kw`, `heater_setpoint_c`, `ev_plugged` |
-| `VEN/src/loops.rs` | Read `inject_state` once per tick; apply Behaviour A one-shots via `cfg.reset()` + `find_asset_mut()` then `clear_inject_field`; compose `effective_capacity` with grid overrides; pass Behaviour C fields into `tick()`; remove old `overrides` read |
-| `VEN/src/assets/base_load.rs` | Add `baseline_kw_profile: f64` (original profile value, set in `from_config()`); `tick()` uses override if set, else `baseline_kw_profile` |
-| `VEN/src/controller/dispatcher.rs` | Add `heater_setpoint_override: Option<f64>` param; if heater has no plan allocation and override is set, insert clamped setpoint |
-
-PV smoothing logic inside `tick()`:
-```rust
-let irradiance = if let Some(forced) = pv_irradiance_override {
-    self.pv_smoothing.current_irradiance = forced;
-    forced
-} else {
-    let blended = self.pv_smoothing.current_irradiance * (1.0 - pv_alpha)
-        + natural_irradiance * pv_alpha;
-    self.pv_smoothing.current_irradiance = blended;
-    blended
+```typescript
+export type SimInjectState = {
+  battery_soc?: number | null;
+  ev_soc?: number | null;
+  heater_temp_c?: number | null;
+  pv_irradiance?: number | null;
+  pv_irradiance_alpha?: number;
+  ev_plugged?: boolean | null;
+  ev_departure_min?: number | null;
+  heater_setpoint_c?: number | null;
+  ambient_temp_c?: number | null;
+  base_load_kw?: number | null;
+  grid_import_limit_kw?: number | null;
+  grid_export_limit_kw?: number | null;
 };
 ```
 
-Grid limit composition in `spawn_sim_tick` (before `build_setpoints`):
-```rust
-let mut effective_capacity = capacity_snap.clone();
-if effective_capacity.import_limit_event_id.is_none() {
-    effective_capacity.import_limit_kw = inject.grid_import_limit_kw
-        .or(effective_capacity.import_limit_kw);
+`UserOverrides` is kept as a separate deprecated type with the old field names (used by
+`Simulation.tsx` via the `POST /sim/override` alias). Will be removed in Phase 8.
+
+### Client methods (`client.ts`)
+
+| Method | Endpoint | Notes |
+|---|---|---|
+| `getSimInject()` | `GET /sim/inject` | Returns `SimInjectState` |
+| `postSimInject(patch)` | `POST /sim/inject` | Partial-merge; sends only changed fields |
+| `getSimOverride()` ⚠️ | `GET /sim/inject` | Deprecated; casts result to `UserOverrides` |
+| `postSimOverride(o)` ⚠️ | `POST /sim/inject` | Deprecated; casts `UserOverrides` to `SimInjectState` |
+
+### Hooks (`hooks.ts`)
+
+| Hook | Purpose |
+|---|---|
+| `useSimInject()` | Fetches inject state on mount (`staleTime: Infinity`) |
+| `useSetSimInject()` | Mutation: partial-merge POST; invalidates `["simInject"]` on success |
+| `useSimOverride()` ⚠️ | Deprecated alias; returns `UserOverrides`-typed data via `getSimOverride()` |
+| `useSetSimOverride()` ⚠️ | Deprecated alias; kept for `Simulation.tsx` |
+
+### ControllerV2 usage pattern
+
+```typescript
+const { data: simInject } = useSimInject();
+const { mutate: setSimInject } = useSetSimInject();
+
+function handleOverrideChange(patch: Partial<SimInjectState>) {
+  setSimInject(patch);  // backend handles partial-merge; no client-side spread needed
 }
-// same for export
 ```
 
-Test: Unit tests for PV smoothing math. Unit test grid limit composition. BDD: override-dependent
-tests fail (known — fixed in Phase 3).
+`AssetRightSection` reads control values from `SimInjectState` via `getValue(key)`, with a
+fallback to `sim.assets.ev.plugged` for `ev_plugged` when no override is active.
 
 ---
 
-### Phase 3 — Alias bridge: `POST /sim/override` → `SimInjectState`
+## Pending Work
 
-Files changed:
+### Group D — BDD migration + alias cleanup
 
-| File | Change |
-|---|---|
-| `VEN/src/routes/sim.rs` | Rewrite `post_sim_override`: translate `UserOverrides` → `SimInjectState` (ev_plugged, pv_irradiance, ambient_temp_c, base_load_w→kw; drop removed fields); call `set_inject_state()`; send `PlanTrigger::AssetStateChange` via `trigger_tx`. Rewrite `get_sim_override`: translate `SimInjectState` back to `UserOverrides` shape for backward compat |
-| `VEN/src/main.rs` or `AppCtx` | Ensure `trigger_tx: Arc<watch::Sender<PlanTrigger>>` is on `AppCtx`; add if missing |
+BDD steps still targeting `/sim/override`:
 
-Key compat requirements:
-- Empty body `{}` → `SimInjectState::default()` → all overrides released (preserves reset behaviour
-  in `sim_ui_steps.py`)
-- `GET /sim/override` still returns `ev_plugged` (relied on by `controller_v2_steps.py`)
-
-Test: Full BDD suite passes. Commit Phases 1+2+3 as one PR.
-
----
-
-## Group B — New Inject Fields + Proper API (Phases 4–5)
-
-**Goal:** Wire `ev_departure_min` into the planner; implement proper partial-merge API with null
-semantics; clean up `control_schema()` on all assets.
-
-### Phase 4 — `ev_departure_min` → planner deadline
-
-Files changed:
-
-| File | Change |
-|---|---|
-| `VEN/src/loops.rs` | In `spawn_planning`: read `inject_state().ev_departure_min`, compute `ev_departure_override = now + Duration::seconds(min * 60)` |
-| `VEN/src/controller/planner.rs` | Add `ev_departure_override: Option<DateTime<Utc>>` to `run_planner()`; before planning loop, replace deadline on any non-terminal EV packet with the override value. Check `entities/energy_packet.rs` for exact deadline field name (`latest_end` or similar). |
-
-Test: Unit test `run_planner()` with forced near-term departure → verify EV packet gets higher
-urgency. New BDD scenario: "EV departure override shortens charge window".
-
----
-
-### Phase 5 — Proper partial-update semantics + `control_schema()` cleanup
-
-Files changed:
-
-| File | Change |
-|---|---|
-| `VEN/src/routes/sim.rs` | Implement `PostSimInjectBody` with `Option<serde_json::Value>` per field (absent = no change, null = release, value = set); add `POST /sim/inject/reset` route |
-| `VEN/src/assets/ev.rs` | `control_schema()`: remove `ev_desired_kw`, `ev_soc_target`; add `ev_departure_min` (NumberInput, 0–1440, "min") |
-| `VEN/src/assets/heater.rs` | `control_schema()`: remove `heater_max_kw`, `heater_temp_min_c`, `heater_temp_max_c`; add `heater_setpoint_c` (Slider, temp_min–temp_max, "°C") |
-| `VEN/src/assets/pv.rs` | `control_schema()`: remove `pv_force_export_limit_kw`; add `pv_irradiance_alpha` (Slider, 0.01–1.0, unitless) |
-| `VEN/src/assets/base_load.rs` | `control_schema()`: add `base_load_kw` (NumberInput, 0–20, "kW") |
-| `VEN/src/assets/battery.rs` | `control_schema()`: remove `battery_force_kw` (unimplemented) |
-
-Test: Cargo tests for partial-merge logic. `GET /sim/schema` returns updated descriptors. BDD
-still passes via alias.
-
----
-
-## Group C — UI Update (Phase 6)
-
-**Goal:** TypeScript types and ControllerV2 hooks switch to `/sim/inject`. `Simulation.tsx`
-left on alias for now.
-
-Files changed:
-
-| File | Change |
-|---|---|
-| `VEN/ui/src/api/types.ts` | Add `SimInjectState` type (all fields optional + nullable); keep `UserOverrides` as deprecated alias |
-| `VEN/ui/src/api/client.ts` | Add `getSimInject()` / `postSimInject()` |
-| `VEN/ui/src/api/hooks.ts` | Add `useSimInject()` / `useSetSimInject()` (query key `["simInject", ...]`, partial-merge mutation) |
-| `VEN/ui/src/pages/ControllerV2.tsx` | Switch to `useSimInject()` / `useSetSimInject()` |
-| `VEN/ui/src/components/controller-v2/AssetRightSection.tsx` | Switch field names to `SimInjectState`; `ev_plugged` fallback still reads from `GET /sim` |
-| `VEN/ui/src/__tests__/ControllerV2.test.tsx` | Add `useSimInject` / `useSetSimInject` mocks |
-
-Test: `npm test` from `VEN/ui/` passes. BDD controller_v2 scenarios pass.
-
----
-
-## Group D — BDD Migration + Cleanup (Phase 7)
-
-**Goal:** All BDD tests use `/sim/inject`. Alias route and `UserOverrides` removed.
-
-BDD steps to migrate:
-
-| File | Step | Change |
+| File | Step | Target |
 |---|---|---|
 | `tests/features/steps/uc_steps.py` | `ev_plugged: false/true` | → `POST /sim/inject` |
 | `tests/features/steps/uc_steps.py` | `pv_irradiance: 1.0` | → `POST /sim/inject` |
-| `tests/features/steps/uc_steps.py` | `ev_desired_kw: 0` | Remove (field was never applied) |
 | `tests/features/steps/sim_ui_steps.py` | "reset overrides" | → `POST /sim/inject/reset` |
 | `tests/features/steps/controller_v2_steps.py` | `GET /sim/override` | → `GET /sim/inject` |
 
-Backend cleanup:
+Backend to remove after migration:
+- `POST /sim/override` route + `post_sim_override` handler
+- `UserOverrides` struct and `overrides`/`set_overrides` accessors on `AppState`
 
-| File | Change |
-|---|---|
-| `VEN/src/routes/sim.rs` | Remove `post_sim_override` handler |
-| `VEN/src/state.rs` | Remove `UserOverrides` struct, `overrides` field, `overrides()` / `set_overrides()` methods |
-| `VEN/src/routes/mod.rs` | Remove `POST /sim/override` route |
+UI to remove:
+- `getSimOverride()`, `postSimOverride()` in `client.ts`
+- `useSimOverride()`, `useSetSimOverride()` in `hooks.ts`
 
-UI cleanup:
+### Phase 8 — Simulation.tsx (low priority)
 
-| File | Change |
-|---|---|
-| `VEN/ui/src/api/types.ts` | Remove `UserOverrides` type |
-| `VEN/ui/src/api/client.ts` | Remove `postSimOverride` / `getSimOverride` |
-| `VEN/ui/src/api/hooks.ts` | Remove `useSimOverride` / `useSetSimOverride` |
-
-Test: Full BDD suite passes with no references to `/sim/override`.
-
----
-
-## Phase 8 — Simulation.tsx cleanup (optional, low priority)
-
-Migrate `Simulation.tsx` `OverridableControl` usages from alias to `POST /sim/inject`. Remove
-`GET /sim/override`. Deferred — no functional impact.
-
----
-
-## Reusable Patterns
-
-| Pattern | Location | Notes |
-|---|---|---|
-| One-shot state injection | `routes/sim.rs:35-63` (`POST /sim/reset/:asset_id`) | Exact pattern: `cfg.reset()` + `find_asset_mut()` |
-| Grid limit enforcement | `loops.rs:375`, `dispatcher.rs:build_setpoints()` | Compose before passing; VTN event wins if `import_limit_event_id.is_some()` |
-| Replan trigger | `loops.rs:221` (`trigger_tx.send(PlanTrigger::RateChange)`) | Same pattern; use `PlanTrigger::AssetStateChange` |
-
-## Verification
-
-```bash
-# BDD (Pi4-Server):
-docker compose -f tests/docker-compose.test.yml run --build --rm test-runner
-
-# Rust unit tests (Pi4-Server via docker):
-docker compose run --rm cargo-test cargo test --workspace --jobs 2
-
-# UI unit tests (local):
-cd /c/DriveD/Tinker/OpenAdr-Lab/VEN/ui && npm test
-```
-
-Passing criteria per group:
-- **Group A**: all BDD passing; `POST /sim/override` behaviour unchanged
-- **Group B**: `POST /sim/inject {"pv_irradiance": 0.5}` holds value; `GET /sim/schema` updated
-- **Group C**: ControllerV2 controls update sim state without page reload; Vitest passes
-- **Group D**: zero references to `/sim/override` in tests; all BDD passing
+`Simulation.tsx` still uses `UserOverrides` and `POST /sim/override`. Many of its controls
+(`heater_max_kw`, `ev_desired_kw`, `pv_rated_kw`, etc.) map to fields that no longer exist
+in `SimInjectState` and are silently dropped by the alias bridge. Migration requires either
+removing those controls or reimplementing them against the correct new fields.
