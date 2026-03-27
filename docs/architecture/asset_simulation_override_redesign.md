@@ -102,7 +102,7 @@ Fires `PlanTrigger::AssetStateChange` after each call to trigger reactive replan
 ### `POST /sim/inject/reset`
 
 Releases all active overrides at once. Equivalent to `POST /sim/inject` with every field set to
-`null`. Used by BDD test teardown (`sim_ui_steps.py`).
+`null`. Used by BDD test teardown (`environment.py` `after_scenario`).
 
 **Response** `204 No Content`.
 
@@ -136,30 +136,6 @@ UI renders as interactive controls.
 
 ---
 
-### `POST /sim/override` (deprecated alias)
-
-Kept for backward compatibility with `Simulation.tsx` and legacy BDD steps. Translates the old
-`UserOverrides` shape into `SimInjectState`:
-
-| Old field | Maps to |
-|---|---|
-| `ev_plugged` | `inject.ev_plugged` |
-| `ev_soc_target` | `inject.ev_soc_target` |
-| `pv_irradiance` | `inject.pv_irradiance` |
-| `ambient_temp_c` | `inject.ambient_temp_c` |
-| `heater_temp_min_c` | `inject.heater_temp_min_c` |
-| `heater_temp_max_c` | `inject.heater_temp_max_c` |
-| `base_load_w` | `inject.base_load_kw = w / 1000.0` |
-| `ev_desired_kw`, `heater_max_kw`, `pv_rated_kw` | Silently dropped (profile-only) |
-| Empty body `{}` | Releases all overrides |
-
-`GET /sim/override` translates `SimInjectState` back into the old `UserOverrides` shape
-(needed by `controller_v2_steps.py` which reads `ev_plugged` via this endpoint).
-
-**Will be removed** in Group D cleanup.
-
----
-
 ## Field Reference
 
 | Field | Type | Behaviour | Unit | Effect |
@@ -169,7 +145,7 @@ Kept for backward compatibility with `Simulation.tsx` and legacy BDD steps. Tran
 | `heater_temp_c` | `f64 \| null` | A | °C | Jump heater temperature to value; cleared next tick |
 | `pv_irradiance` | `f64 \| null` | B | [0–1] | Freeze PV irradiance; EMA blend-back on release |
 | `pv_irradiance_alpha` | `f64` | — | — | EMA coefficient for blend-back (default 0.1) |
-| `ev_plugged` | `bool \| null` | C | — | Override EV plugged state |
+| `ev_plugged` | `bool \| null` | C | — | Override EV plugged state; snaps back to `true` (plugged) on release |
 | `ev_departure_min` | `f64 \| null` | C | min | Override departure time; replaces active EV packet tier deadline in planner |
 | `ev_soc_target` | `f64 \| null` | C | [0–1] | Override EV BMS charge ceiling; charging stops at this SoC. Snaps to `soc_target_profile` on release |
 | `heater_setpoint_c` | `f64 \| null` | C | °C | Target temperature for heater dispatcher (ON if temp < target, OFF otherwise) |
@@ -236,6 +212,9 @@ snap-back. Applied in `tick()` as `active = override.unwrap_or(profile_default)`
 | `Heater` | `temp_min_c` | `temp_min_c_profile` |
 | `Heater` | `temp_max_c` | `temp_max_c_profile` |
 
+`ev_plugged` snaps back to `true` via `unwrap_or(true)` in `tick()` — there is no profile field
+because the profile default is always plugged.
+
 ### PV smoothing (`VEN/src/simulator/mod.rs`)
 
 ```rust
@@ -297,17 +276,12 @@ export type SimInjectState = {
 };
 ```
 
-`UserOverrides` is kept as a separate deprecated type with the old field names (used by
-`Simulation.tsx` via the `POST /sim/override` alias). Will be removed in Group D.
-
 ### Client methods (`client.ts`)
 
 | Method | Endpoint | Notes |
 |---|---|---|
 | `getSimInject()` | `GET /sim/inject` | Returns `SimInjectState` |
 | `postSimInject(patch)` | `POST /sim/inject` | Partial-merge; sends only changed fields |
-| `getSimOverride()` ⚠️ | `GET /sim/inject` | Deprecated; casts result to `UserOverrides` |
-| `postSimOverride(o)` ⚠️ | `POST /sim/inject` | Deprecated; casts `UserOverrides` to `SimInjectState` |
 
 ### Hooks (`hooks.ts`)
 
@@ -315,8 +289,6 @@ export type SimInjectState = {
 |---|---|
 | `useSimInject()` | Fetches inject state on mount (`staleTime: Infinity`) |
 | `useSetSimInject()` | Mutation: partial-merge POST; invalidates `["simInject"]` on success |
-| `useSimOverride()` ⚠️ | Deprecated alias; returns `UserOverrides`-typed data via `getSimOverride()` |
-| `useSetSimOverride()` ⚠️ | Deprecated alias; kept for `Simulation.tsx` |
 
 ### ControllerV2 usage pattern
 
@@ -331,85 +303,3 @@ function handleOverrideChange(patch: Partial<SimInjectState>) {
 
 `AssetRightSection` reads control values from `SimInjectState` via `getValue(key)`, with a
 fallback to `sim.assets.ev.plugged` for `ev_plugged` when no override is active.
-
----
-
-## Field Classification — What Belongs Where
-
-This chapter records the reasoning behind each old `UserOverrides` field — whether it was moved,
-dropped, or retained — and identifies gaps in the current `SimInjectState`.
-
-### Decision criteria
-
-A field belongs in `SimInjectState` if it is:
-- **Runtime state** — a physics quantity that can be observed and changed during operation
-  (SoC, temperature, plugged status, irradiance reading)
-- **Environment input** — external condition that the physical model consumes each tick
-  (outdoor temperature, base load, grid limits)
-- **User preference with a physical on/off effect** — bounds that the physics enforces
-  (thermostat comfort band, BMS charge ceiling)
-
-A field belongs in **profile YAML only** if it is:
-- **Hardware specification** — a physical capability of the installed device that cannot change
-  at runtime (panel peak wattage, EVSE breaker limit, heating element rating)
-
-A field belongs in **another API** if it is:
-- **User intent / planner input** — better expressed as a scheduling request
-  (`POST /user-requests` with `target_soc`, `latest_end`, `desired_power_kw`)
-
-A field should be **dropped entirely** if it is:
-- A raw setpoint bypass that ignores the planner — these were debug tools with no physical
-  meaning in a system with an active dispatcher
-
----
-
-### Old `UserOverrides` field audit
-
-| Field | Old action | Decision | Reason |
-|---|---|---|---|
-| `pv_irradiance` | Set `PvInverter.irradiance` | **Retained** as `SimInjectState.pv_irradiance` (Behaviour B) | Valid environment input — a sensor reading, not a spec |
-| `ambient_temp_c` | Set `Heater.ambient_temp_c` | **Retained** as `SimInjectState.ambient_temp_c` (Behaviour C) | Valid environment input — outdoor temperature measured by sensor |
-| `ev_plugged` | Set `EvState.plugged` | **Retained** as `SimInjectState.ev_plugged` (Behaviour C) | Valid physical state — EV connectivity is observable and injectable |
-| `base_load_w` | Set `BaseLoad.baseline_kw` | **Retained** as `SimInjectState.base_load_kw` (Behaviour C); unit fixed to kW | Valid — simulates variable background load. See note below. |
-| `ev_soc_target` | Mutated `EvCharger.soc_target` | **Retained** as `SimInjectState.ev_soc_target` (Behaviour C) | User-adjustable BMS charge ceiling. In real EVs this is set by the user (e.g., "charge to 80% for daily use"). Physics enforces it in `step_inner()`. |
-| `heater_temp_min_c` | Mutated `Heater.temp_min_c` | **Retained** as `SimInjectState.heater_temp_min_c` (Behaviour C) | User-adjustable thermostat comfort band. Not an installer spec — a user adjusts this when e.g. switching from "home" to "away" mode. |
-| `heater_temp_max_c` | Mutated `Heater.temp_max_c` | **Retained** as `SimInjectState.heater_temp_max_c` (Behaviour C) | Same reason as `heater_temp_min_c`. |
-| `pv_rated_kw` | Mutated `PvInverter.rated_kw` | **Dropped → profile only** | Hardware spec: physical panel peak wattage. Cannot change at runtime. |
-| `ev_max_charge_kw` | Mutated `EvCharger.max_charge_kw` | **Dropped → profile only** | Hardware spec: EVSE breaker limit or on-board charger maximum. Cannot change at runtime. |
-| `heater_max_kw` | Mutated `Heater.max_kw` | **Dropped → profile only** | Hardware spec: heating element rated power. Cannot change at runtime. |
-| `ev_desired_kw` | Mutated `EvCharger.default_charge_kw` | **Dropped** | `default_charge_kw` was the idle setpoint before the planner existed. The planner now issues all setpoints. There is no "desired idle rate" separate from the active plan. |
-| `ev_force_kw` | Forced EV setpoint bypassing planner | **Dropped** | Raw setpoint bypass has no physical meaning with a dispatcher running. Force-testing a setpoint is done by pausing or cancelling the packet. |
-| `heater_force_kw` | Forced heater setpoint bypassing planner | **Dropped** | Same reason. `heater_setpoint_c` in SimInjectState replaces the intent correctly (comfort target → dispatcher translates to ON/OFF). |
-| `battery_force_kw` | Forced battery setpoint | **Dropped** | Was never implemented (no injection code existed). Battery is fully automatic. |
-| `pv_force_export_limit_kw` | Set `PvInverter.export_limit_kw` | **Dropped for now** | Per-inverter curtailment is a distinct concept from site-level `grid_export_limit_kw`. Could be re-added as `pv_export_limit_kw` (Behaviour C) if needed. See future candidates below. |
-
----
-
-### `base_load_kw` — the `Option<f64>` convention
-
-The old `base_load_w` was a bare `f64`. There was no way to express "revert to the profile
-default" — sending `0` meant "set to 0 W", not "release override". An operator would need to
-know the profile value to restore it.
-
-The new `base_load_kw: Option<f64>` in `SimInjectState` solves this cleanly:
-
-- JSON `null` → Rust `None` → `tick()` uses `bl.baseline_kw_profile` (the original profile value,
-  stored separately from the mutable `bl.baseline_kw`)
-- JSON `3.5` → Rust `Some(3.5)` → `tick()` sets `bl.baseline_kw = 3.5`
-
-This `Option<f64>` / null-means-release pattern applies to **all** Behaviour C fields. The unit
-was also corrected from watts to kilowatts to match every other field in the system.
-
----
-
-### Future candidates for `SimInjectState`
-
-| Candidate field | Behaviour | Reason |
-|---|---|---|
-| `pv_export_limit_kw: Option<f64>` | C | Per-PV-inverter export curtailment. Distinct from `grid_export_limit_kw` (site-level). Real grid operators can curtail individual inverters via DRED or export limitation signals. Useful for testing PV curtailment scenarios where the grid limit is on the inverter rather than the site meter. |
-
----
-
-## Pending Work
-
-All groups complete. No pending work.
