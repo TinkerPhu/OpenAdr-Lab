@@ -3063,3 +3063,70 @@ Three injection behaviours defined:
 - **heater_setpoint_c in dispatcher only**: Plan called for it in both `tick()` and dispatcher. Simplified to dispatcher-only (binary ON/OFF based on current temp vs target). Avoids needing profile backup fields (`temp_min_c_profile`, etc.) on Heater struct.
 - **Partial-merge vs full-replace**: The old `POST /sim/override` was full-replace. New `POST /sim/inject` is partial-merge: absent=no change, null=release. The UI `handleOverrideChange` no longer needs to spread `{...simOverrides, ...patch}` — just send the patch.
 - **`controller_v2_steps.py` reads `GET /sim/override`**: The alias bridge `get_sim_override` (translating inject_state back to UserOverrides shape) must be kept until Group D migrates those BDD steps.
+
+---
+
+### Phase 25: Sim Inject API — Group D (BDD Migration + UI Cleanup)
+
+**Status: COMPLETE — 41 features, 207 scenarios, 1190 steps, 0 failures**
+
+#### What was done
+
+**Goal**: Remove the deprecated `POST /sim/override` alias and `UserOverrides` type entirely. Migrate all BDD test steps and the Simulation.tsx UI page to use the canonical `POST /sim/inject` API.
+
+**Group D — BDD migration (5 steps files)**:
+- `uc_steps.py`: 4 steps migrated from `/sim/override` to `/sim/inject`; `step_sim_override_ev_zero` made no-op (ev_desired_kw was never applied by the backend)
+- `sim_ui_steps.py`: reset step changed from `POST /sim/override {}` to `POST /sim/inject/reset`
+- `controller_v2_steps.py`: 2 `GET /sim/override` calls migrated to `GET /sim/inject`
+- `phase_a_physics_steps.py`: `POST /sim/override` → `POST /sim/inject` for pv_irradiance (caught after first BDD run)
+- `environment.py`: `_reset_ven_sim_overrides()` migrated from `/sim/override` to `/sim/inject/reset`
+
+**Phase 8 — UI cleanup (Simulation.tsx)**:
+- `OverridableControl` component removed (~110 lines); `ev_desired_kw`, `pv_rated_kw` sliders removed
+- `baseLoadControls`: unit changed from watts to kW (`base_load_kw` field, slider 0–5 kW)
+- Hooks: `useSimOverride`/`useSetSimOverride` → `useSimInject`/`useSetSimInject`
+- Type: `UserOverrides` → `SimInjectState` throughout Simulation.tsx
+- `pendingPatchRef` pattern for correct debounce accumulation of partial patches
+- PV irradiance release: `pv_irradiance: undefined` bug → `null` (sends explicit release)
+- Test file completely rewritten: removed `OverridableControl` tests; added EV plugged switch, SOC target, PV irradiance toggle, heater ambient/thermostat, base load kW tests
+
+**Backend removal (Rust)**:
+- `UserOverrides` struct removed from `state.rs`; all related state/methods removed
+- `get_sim_override` and `post_sim_override` handlers removed from `routes/sim.rs`
+- `/sim/override` route removed from `routes/mod.rs`
+- `ev_soc_target` added to `PostSimInjectBody` and `merge_inject` (was missing — only worked via old shim)
+- `VEN/src/assets/pv.rs` comment updated
+
+#### Bug found and fixed: ev_plugged Behaviour C snap-back
+
+**Problem**: After migrating `_reset_ven_sim_overrides()` to call `POST /sim/inject/reset`, the `ev_plugged` inject was cleared to `None`. But the Behaviour C code in `simulator/mod.rs` was:
+```rust
+if let Some(plugged) = ev_plugged_override {
+    s.plugged = plugged;
+}
+```
+When the inject was `None`, the code did nothing — `s.plugged` stayed at `false` from the prior scenario. The EV remained permanently unplugged, causing the planner to see EV capability = 0 and produce no firm-slot allocations.
+
+**Root cause of 5 BDD failures** (`ven_dispatcher.feature:11`, `ven_dispatcher.feature:35`, `ven_planner.feature:36`, `plan_reasons.feature:26`, `plan_reasons.feature:33`): the `_reset_ven_sim_overrides()` in `after_scenario` was previously calling `POST /sim/override {"ev_plugged": True}` which actively set `ev_plugged = Some(true)`. After our removal of `/sim/override`, this call silently returned 404 (swallowed by `except Exception: pass`), leaving EV permanently unplugged after any scenario that called `POST /sim/inject {"ev_plugged": false}`.
+
+**Fix**: Changed Behaviour C snap-back in `simulator/mod.rs`:
+```rust
+// Before: only applied override if Some
+if let Some(plugged) = ev_plugged_override {
+    if let AssetState::Ev(s) = &mut entry.state { s.plugged = plugged; }
+}
+
+// After: always apply; snap to true (plugged) when released
+if let AssetState::Ev(s) = &mut entry.state {
+    s.plugged = ev_plugged_override.unwrap_or(true);
+}
+```
+
+This is the correct Behaviour C semantics: hold `false` while active, snap to `true` (profile default = plugged) on release.
+
+#### Key learnings
+
+- **Silent 404s in `after_scenario` hooks** can corrupt shared state for all subsequent features. The `except Exception: pass` pattern is dangerous — it masks cases where a deprecated endpoint is removed but the hook still calls it.
+- **Behaviour C must implement snap-back actively** — the simulator has no autonomous "re-plug" physics. If snap-back is left to "do nothing when override is None", the state leaks into the next scenario.
+- **`ev_desired_kw` was always a no-op** in the backend despite having a field. The dispatcher computed EV setpoints from the planner, ignoring any `ev_desired_kw` inject. Making the BDD step a no-op is correct.
+- **BDD test isolation relies on `_reset_ven_sim_overrides()`**: the `after_scenario` hook must actively reset EV inject state. When the hook fails silently, state pollution is hard to diagnose because the failing scenario is far removed from the one that set the state.
