@@ -1,7 +1,9 @@
 # Asset Simulation — Inject API
 
-> **Status**: Groups A, B, C implemented and BDD-green (207 scenarios, 1190 steps).
-> Group D (BDD migration + alias cleanup) and Phase 8 (Simulation.tsx migration) pending.
+> **Status**: Groups A, B, C implemented and tested (206 scenarios passing).
+> Group D (BDD migration + alias cleanup) pending.
+> Phase 8 (Simulation.tsx migration) partially complete — profile-only sliders removed,
+> `ev_soc_target` and heater comfort band wired to correct inject fields.
 
 ---
 
@@ -28,11 +30,11 @@ on the very next tick.
 |---|---|---|
 | **A — Jump + free evolution** | Written to physics state once. Auto-cleared after the next tick. Physics drives freely from there. | `battery_soc`, `ev_soc`, `heater_temp_c` |
 | **B — Frozen + EMA blend-back** | Held at the injected value each tick while active. On release (`null`), blends back to the natural model via first-order IIR: `s(n+1) = s(n)*(1−α) + model(n+1)*α`. Converges when delta < 0.005. | `pv_irradiance` |
-| **C — Frozen + snap return** | Held at the injected value each tick while active. On release (`null`), snaps back to profile default or no-limit immediately. | `ev_plugged`, `ev_departure_min`, `heater_setpoint_c`, `ambient_temp_c`, `base_load_kw`, `grid_import_limit_kw`, `grid_export_limit_kw` |
+| **C — Frozen + snap return** | Held at the injected value each tick while active. On release (`null`), snaps back to profile default immediately. | `ev_plugged`, `ev_departure_min`, `ev_soc_target`, `heater_setpoint_c`, `heater_temp_min_c`, `heater_temp_max_c`, `ambient_temp_c`, `base_load_kw`, `grid_import_limit_kw`, `grid_export_limit_kw` |
 
-**Behaviour A note — startup lag**: `pv_irradiance_alpha` EMA is only active during blend-back
-from an override. Normal operation uses the natural irradiance model directly (no ramp-up lag
-on restart). Tracked via `PvSmoothingState.override_was_active: bool`.
+**Behaviour B note**: `pv_irradiance_alpha` EMA is only active during blend-back from an override.
+Normal operation uses the natural irradiance model directly (no ramp-up lag on restart). Tracked
+via `PvSmoothingState.override_was_active: bool`.
 
 ---
 
@@ -52,7 +54,10 @@ Returns the current inject state. Fields that are not overridden are omitted (or
   "pv_irradiance_alpha": 0.05,
   "ev_plugged": null,
   "ev_departure_min": 90.0,
+  "ev_soc_target": 0.9,
   "heater_setpoint_c": null,
+  "heater_temp_min_c": null,
+  "heater_temp_max_c": null,
   "ambient_temp_c": null,
   "base_load_kw": null,
   "grid_import_limit_kw": null,
@@ -76,8 +81,11 @@ Partial-merge update. Each field independently:
   "ev_soc": 0.4,
   "ev_plugged": false,
   "ev_departure_min": 120,
+  "ev_soc_target": 0.8,
   "heater_temp_c": 16.5,
   "heater_setpoint_c": 19.0,
+  "heater_temp_min_c": 16.0,
+  "heater_temp_max_c": 22.0,
   "ambient_temp_c": 2.0,
   "pv_irradiance": 0.0,
   "pv_irradiance_alpha": 0.05,
@@ -138,10 +146,13 @@ Kept for backward compatibility with `Simulation.tsx` and legacy BDD steps. Tran
 | Old field | Maps to |
 |---|---|
 | `ev_plugged` | `inject.ev_plugged` |
+| `ev_soc_target` | `inject.ev_soc_target` |
 | `pv_irradiance` | `inject.pv_irradiance` |
 | `ambient_temp_c` | `inject.ambient_temp_c` |
+| `heater_temp_min_c` | `inject.heater_temp_min_c` |
+| `heater_temp_max_c` | `inject.heater_temp_max_c` |
 | `base_load_w` | `inject.base_load_kw = w / 1000.0` |
-| All other old fields | Silently dropped |
+| `ev_desired_kw`, `heater_max_kw`, `pv_rated_kw` | Silently dropped (profile-only) |
 | Empty body `{}` | Releases all overrides |
 
 `GET /sim/override` translates `SimInjectState` back into the old `UserOverrides` shape
@@ -162,7 +173,10 @@ Kept for backward compatibility with `Simulation.tsx` and legacy BDD steps. Tran
 | `pv_irradiance_alpha` | `f64` | — | — | EMA coefficient for blend-back (default 0.1) |
 | `ev_plugged` | `bool \| null` | C | — | Override EV plugged state |
 | `ev_departure_min` | `f64 \| null` | C | min | Override departure time; replaces active EV packet tier deadline in planner |
+| `ev_soc_target` | `f64 \| null` | C | [0–1] | Override EV BMS charge ceiling; charging stops at this SoC. Snaps to `soc_target_profile` on release |
 | `heater_setpoint_c` | `f64 \| null` | C | °C | Target temperature for heater dispatcher (ON if temp < target, OFF otherwise) |
+| `heater_temp_min_c` | `f64 \| null` | C | °C | Override heater comfort band lower bound; heater forces on below this temperature. Snaps to `temp_min_c_profile` on release |
+| `heater_temp_max_c` | `f64 \| null` | C | °C | Override heater comfort band upper bound; heater cuts off above this temperature. Snaps to `temp_max_c_profile` on release |
 | `ambient_temp_c` | `f64 \| null` | C | °C | Override outdoor temperature used in heater thermal model |
 | `base_load_kw` | `f64 \| null` | C | kW | Override base load power; snaps to `baseline_kw_profile` on release |
 | `grid_import_limit_kw` | `f64 \| null` | C | kW | Override import capacity limit (ignored when a VTN event holds the limit) |
@@ -171,8 +185,14 @@ Kept for backward compatibility with `Simulation.tsx` and legacy BDD steps. Tran
 **Grid limit priority**: VTN event always wins. `inject.grid_import_limit_kw` only applies when
 `capacity_snap.import_limit_event_id.is_none()`.
 
-**`heater_setpoint_c` note**: Handled in the dispatcher only (binary ON/OFF vs target). Does not
-change thermostat bounds or thermal model parameters.
+**`heater_setpoint_c` vs comfort band**: `heater_setpoint_c` is a dispatcher-level comfort target
+(binary ON/OFF). `heater_temp_min_c` / `heater_temp_max_c` are physics-level thermostat bounds —
+the heater is forced on below min and forced off above max, regardless of dispatcher setpoint.
+
+**`ev_soc_target` and physics**: `soc_target` is enforced in `EvCharger.step_inner()` — charging
+stops when `soc_pct >= soc_target`. This mirrors real BMS behaviour. The profile value is stored
+as `soc_target_profile` for snap-back. The planner also uses `soc_target` (via
+`resolve_request_target`) to size energy packets.
 
 ---
 
@@ -182,14 +202,20 @@ change thermostat bounds or thermal model parameters.
 
 ```rust
 pub struct SimInjectState {
+    // Behaviour A — one-shot
     pub battery_soc: Option<f64>,
     pub ev_soc: Option<f64>,
     pub heater_temp_c: Option<f64>,
+    // Behaviour B — frozen + EMA return on release
     pub pv_irradiance: Option<f64>,
     pub pv_irradiance_alpha: f64,          // default 0.1
+    // Behaviour C — frozen while active, snap to profile default on release
     pub ev_plugged: Option<bool>,
     pub ev_departure_min: Option<f64>,
+    pub ev_soc_target: Option<f64>,
     pub heater_setpoint_c: Option<f64>,
+    pub heater_temp_min_c: Option<f64>,
+    pub heater_temp_max_c: Option<f64>,
     pub ambient_temp_c: Option<f64>,
     pub base_load_kw: Option<f64>,
     pub grid_import_limit_kw: Option<f64>,
@@ -199,6 +225,18 @@ pub struct SimInjectState {
 
 Stored as `InnerState.inject_state` with `#[serde(skip)]` — ephemeral, not persisted to disk.
 Accessors: `inject_state()`, `set_inject_state()`, `clear_inject_field(&str)`.
+
+### Profile snap-back fields (`VEN/src/assets/`)
+
+Each Behaviour C field that overrides a profile value has a corresponding `_profile` field for
+snap-back. Applied in `tick()` as `active = override.unwrap_or(profile_default)`:
+
+| Asset | Active field | Profile field |
+|---|---|---|
+| `BaseLoad` | `baseline_kw` | `baseline_kw_profile` |
+| `EvCharger` | `soc_target` | `soc_target_profile` |
+| `Heater` | `temp_min_c` | `temp_min_c_profile` |
+| `Heater` | `temp_max_c` | `temp_max_c_profile` |
 
 ### PV smoothing (`VEN/src/simulator/mod.rs`)
 
@@ -219,8 +257,9 @@ Each tick (1 Hz):
 2. **Behaviour A** — apply `battery_soc`, `ev_soc`, `heater_temp_c` via `cfg.reset()` +
    `find_asset_mut()`, then `clear_inject_field()` for each applied field
 3. **Grid limits** — compose `effective_capacity`: inject overrides applied only when no VTN event holds the limit
-4. **Behaviour C env/state** — pass `ambient_temp_c`, `base_load_kw`, `ev_plugged` into `tick()` as params
-5. Call `sim.tick(...)` — PV EMA smoothing runs inside
+4. **Behaviour C env/state** — pass `ambient_temp_c`, `heater_temp_min_c`, `heater_temp_max_c`,
+   `base_load_kw`, `ev_plugged`, `ev_soc_target` into `tick()` as params
+5. Call `sim.tick(...)` — PV EMA smoothing + all Behaviour C applications run inside
 6. Call `build_setpoints(plan, assets, configs, &effective_capacity, inject.heater_setpoint_c, now)`
 
 ### Planning loop (`VEN/src/loops.rs` — `spawn_planning`)
@@ -239,14 +278,20 @@ Each planning cycle:
 
 ```typescript
 export type SimInjectState = {
+  // Behaviour A: one-shot jumps (auto-cleared after application)
   battery_soc?: number | null;
   ev_soc?: number | null;
   heater_temp_c?: number | null;
+  // Behaviour B: frozen + EMA blend-back on release
   pv_irradiance?: number | null;
   pv_irradiance_alpha?: number;
+  // Behaviour C: frozen while active, snap to profile on release
   ev_plugged?: boolean | null;
   ev_departure_min?: number | null;
+  ev_soc_target?: number | null;
   heater_setpoint_c?: number | null;
+  heater_temp_min_c?: number | null;
+  heater_temp_max_c?: number | null;
   ambient_temp_c?: number | null;
   base_load_kw?: number | null;
   grid_import_limit_kw?: number | null;
@@ -255,7 +300,7 @@ export type SimInjectState = {
 ```
 
 `UserOverrides` is kept as a separate deprecated type with the old field names (used by
-`Simulation.tsx` via the `POST /sim/override` alias). Will be removed in Phase 8.
+`Simulation.tsx` via the `POST /sim/override` alias). Will be removed in Group D.
 
 ### Client methods (`client.ts`)
 
@@ -303,10 +348,12 @@ A field belongs in `SimInjectState` if it is:
   (SoC, temperature, plugged status, irradiance reading)
 - **Environment input** — external condition that the physical model consumes each tick
   (outdoor temperature, base load, grid limits)
+- **User preference with a physical on/off effect** — bounds that the physics enforces
+  (thermostat comfort band, BMS charge ceiling)
 
 A field belongs in **profile YAML only** if it is:
 - **Hardware specification** — a physical capability of the installed device that cannot change
-  at runtime (panel peak wattage, inverter capacity, EVSE breaker limit, heating element rating)
+  at runtime (panel peak wattage, EVSE breaker limit, heating element rating)
 
 A field belongs in **another API** if it is:
 - **User intent / planner input** — better expressed as a scheduling request
@@ -326,16 +373,16 @@ A field should be **dropped entirely** if it is:
 | `ambient_temp_c` | Set `Heater.ambient_temp_c` | **Retained** as `SimInjectState.ambient_temp_c` (Behaviour C) | Valid environment input — outdoor temperature measured by sensor |
 | `ev_plugged` | Set `EvState.plugged` | **Retained** as `SimInjectState.ev_plugged` (Behaviour C) | Valid physical state — EV connectivity is observable and injectable |
 | `base_load_w` | Set `BaseLoad.baseline_kw` | **Retained** as `SimInjectState.base_load_kw` (Behaviour C); unit fixed to kW | Valid — simulates variable background load. See note below. |
+| `ev_soc_target` | Mutated `EvCharger.soc_target` | **Retained** as `SimInjectState.ev_soc_target` (Behaviour C) | User-adjustable BMS charge ceiling. In real EVs this is set by the user (e.g., "charge to 80% for daily use"). Physics enforces it in `step_inner()`. |
+| `heater_temp_min_c` | Mutated `Heater.temp_min_c` | **Retained** as `SimInjectState.heater_temp_min_c` (Behaviour C) | User-adjustable thermostat comfort band. Not an installer spec — a user adjusts this when e.g. switching from "home" to "away" mode. |
+| `heater_temp_max_c` | Mutated `Heater.temp_max_c` | **Retained** as `SimInjectState.heater_temp_max_c` (Behaviour C) | Same reason as `heater_temp_min_c`. |
 | `pv_rated_kw` | Mutated `PvInverter.rated_kw` | **Dropped → profile only** | Hardware spec: physical panel peak wattage. Cannot change at runtime. |
 | `ev_max_charge_kw` | Mutated `EvCharger.max_charge_kw` | **Dropped → profile only** | Hardware spec: EVSE breaker limit or on-board charger maximum. Cannot change at runtime. |
 | `heater_max_kw` | Mutated `Heater.max_kw` | **Dropped → profile only** | Hardware spec: heating element rated power. Cannot change at runtime. |
-| `heater_temp_min_c` | Mutated `Heater.temp_min_c` | **Dropped → profile only** | Installer-set thermostat safety floor. Not a runtime user action. |
-| `heater_temp_max_c` | Mutated `Heater.temp_max_c` | **Dropped → profile only** | Installer-set thermostat safety ceiling. Not a runtime user action. |
-| `ev_soc_target` | Mutated `EvCharger.soc_target` | **Dropped → `POST /user-requests`** | User intent expressed as a scheduling request with `target_soc`; planner handles it |
 | `ev_desired_kw` | Mutated `EvCharger.default_charge_kw` | **Dropped** | `default_charge_kw` was the idle setpoint before the planner existed. The planner now issues all setpoints. There is no "desired idle rate" separate from the active plan. |
 | `ev_force_kw` | Forced EV setpoint bypassing planner | **Dropped** | Raw setpoint bypass has no physical meaning with a dispatcher running. Force-testing a setpoint is done by pausing or cancelling the packet. |
 | `heater_force_kw` | Forced heater setpoint bypassing planner | **Dropped** | Same reason. `heater_setpoint_c` in SimInjectState replaces the intent correctly (comfort target → dispatcher translates to ON/OFF). |
-| `battery_force_kw` | Forced battery setpoint | **Dropped** | Was never implemented (control_schema returned it but no injection code existed). Battery is fully automatic. |
+| `battery_force_kw` | Forced battery setpoint | **Dropped** | Was never implemented (no injection code existed). Battery is fully automatic. |
 | `pv_force_export_limit_kw` | Set `PvInverter.export_limit_kw` | **Dropped for now** | Per-inverter curtailment is a distinct concept from site-level `grid_export_limit_kw`. Could be re-added as `pv_export_limit_kw` (Behaviour C) if needed. See future candidates below. |
 
 ---
@@ -357,14 +404,11 @@ was also corrected from watts to kilowatts to match every other field in the sys
 
 ---
 
-### What SHOULD be in `SimInjectState` but is not yet
+### Future candidates for `SimInjectState`
 
 | Candidate field | Behaviour | Reason |
 |---|---|---|
 | `pv_export_limit_kw: Option<f64>` | C | Per-PV-inverter export curtailment. Distinct from `grid_export_limit_kw` (site-level). Real grid operators can curtail individual inverters via DRED or export limitation signals. Useful for testing PV curtailment scenarios where the grid limit is on the inverter rather than the site meter. |
-
-No other gaps identified. The existing fields cover all meaningful runtime-injectable quantities
-for the current asset set (EV, PV, battery, heater, base load, grid).
 
 ---
 
@@ -389,9 +433,19 @@ UI to remove:
 - `getSimOverride()`, `postSimOverride()` in `client.ts`
 - `useSimOverride()`, `useSetSimOverride()` in `hooks.ts`
 
-### Phase 8 — Simulation.tsx (low priority)
+### Phase 8 — Simulation.tsx migration (remaining)
 
-`Simulation.tsx` still uses `UserOverrides` and `POST /sim/override`. Many of its controls
-(`heater_max_kw`, `ev_desired_kw`, `pv_rated_kw`, etc.) map to fields that no longer exist
-in `SimInjectState` and are silently dropped by the alias bridge. Migration requires either
-removing those controls or reimplementing them against the correct new fields.
+`Simulation.tsx` still uses `UserOverrides` / `POST /sim/override`. The following has been done:
+- Removed `ev_max_charge_kw` and `heater_max_kw` sliders (hardware specs — profile only)
+- `ev_soc_target` slider now correctly updates the BMS charge ceiling via `ev_soc_target`
+- `heater_temp_min_c` / `heater_temp_max_c` range slider now correctly adjusts the thermostat comfort band
+
+Remaining: migrate all remaining controls from `UserOverrides` + `POST /sim/override` to
+`SimInjectState` + `POST /sim/inject`, then remove the deprecated types and alias.
+
+### plan_reasons.feature:33 — test timing fix
+
+"Battery is idle when no packets and tariff is at median" fails intermittently on Pi4.
+Root cause: after event deletion the VEN needs up to 30s to re-poll VTN and clear the
+stale tariff, then re-plan. The 60s `poll_until` timeout is too tight on ARM64.
+Fix: increase the timeout for `step_wait_for_all_reason_kind` to 120s when kind == "IDLE".
