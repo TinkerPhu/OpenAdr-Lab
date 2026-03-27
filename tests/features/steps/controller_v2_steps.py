@@ -219,7 +219,7 @@ def step_ev_soc_slider_visible(context):
 def step_toggle_ev_plugged(context):
     _expand_ev_status_accordion(context.browser_page)
     # Read current state before toggle; None means "not set" → displays as True (checked)
-    r = ven_get("/sim/override")
+    r = ven_get("/sim/inject")
     r.raise_for_status()
     overrides = r.json()
     ev_plugged_raw = overrides.get("ev_plugged")
@@ -237,7 +237,7 @@ def step_ev_plugged_state_changed(context):
     expected = not context.ev_plugged_before
 
     def get_plugged():
-        r = ven_get("/sim/override")
+        r = ven_get("/sim/inject")
         r.raise_for_status()
         v = r.json().get("ev_plugged")
         return True if v is None else v

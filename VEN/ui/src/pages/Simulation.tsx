@@ -21,8 +21,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useSim, useTrace, useEvents, useSimOverride, useSetSimOverride } from "../api/hooks";
-import type { UserOverrides, SimSnapshot, VtnEvent } from "../api/types";
+import { useSim, useTrace, useEvents, useSimInject, useSetSimInject } from "../api/hooks";
+import type { SimInjectState, SimSnapshot, VtnEvent } from "../api/types";
 
 function fmtNum(v: number | undefined | null, decimals = 1): string {
   if (v == null) return "—";
@@ -459,169 +459,20 @@ function TraceChart({ sim }: { sim: SimSnapshot | undefined }) {
 
 type ControlsProps = {
   sim: SimSnapshot;
-  overrides: UserOverrides;
-  onChange: (patch: Partial<UserOverrides>) => void;
+  overrides: SimInjectState;
+  onChange: (patch: Partial<SimInjectState>) => void;
 };
 
-/**
- * Three-state override control for a VTN-commandable quantity.
- *
- * States:
- *  - VTN in control: event active, no force override → slider disabled (muted)
- *  - Idle preference: no event, no force override → slider enabled (normal)
- *  - Owner override: force override set → slider enabled (amber)
- */
-type OverridableControlProps = {
-  label: string;
-  /** Whether a VTN event is commanding this quantity right now */
-  isEventActive: boolean;
-  /** The VTN-intended value for this quantity (from planner trace) */
-  vtnIntentValue: number;
-  /** Label format for the VTN intent, e.g. "7.0 kW" */
-  formatValue: (v: number) => string;
-  /** The current force override value in UserOverrides (undefined = no override) */
-  forceValue: number | undefined;
-  /** Min slider value */
-  min: number;
-  /** Max slider value */
-  max: number;
-  step: number;
-  /** data-testid for the toggle switch */
-  toggleTestId: string;
-  /** data-testid for the slider */
-  sliderTestId: string;
-  /** data-testid for the caption */
-  captionTestId: string;
-  /** Called when toggle is turned on (forceValue set) or off (forceValue cleared) */
-  onToggle: (enabled: boolean, initialValue: number) => void;
-  /** Called when slider changes */
-  onSliderChange: (value: number) => void;
-};
-
-function OverridableControl({
-  label,
-  isEventActive,
-  vtnIntentValue,
-  formatValue,
-  forceValue,
-  min,
-  max,
-  step,
-  toggleTestId,
-  sliderTestId,
-  captionTestId,
-  onToggle,
-  onSliderChange,
-}: OverridableControlProps) {
-  // Rust serializes Option::None as JSON null; use != null to catch both null and undefined
-  const isOverriding = forceValue != null;
-  // Slider disabled when event active and owner has not chosen to override
-  const sliderDisabled = isEventActive && !isOverriding;
-  // Slider value: force value if set, otherwise VTN intent (shown for reference)
-  const sliderValue = forceValue ?? vtnIntentValue;
-
-  let captionText: string;
-  if (isOverriding) {
-    captionText = `Overriding VTN · VTN intent: ${formatValue(vtnIntentValue)}`;
-  } else if (isEventActive) {
-    captionText = `VTN commands: ${formatValue(vtnIntentValue)}`;
-  } else {
-    captionText = "No active event — sets idle default";
-  }
-
-  return (
-    <Box>
-      <Stack direction="row" alignItems="center" spacing={1} mb={0.5}>
-        <Typography variant="body2" fontWeight={500}>{label}</Typography>
-        {isEventActive && (
-          <FormControlLabel
-            data-testid={toggleTestId}
-            sx={{ ml: 0.5 }}
-            control={
-              <Switch
-                size="small"
-                checked={isOverriding}
-                onChange={(e) => onToggle(e.target.checked, vtnIntentValue)}
-              />
-            }
-            label={<Typography variant="caption">Owner override</Typography>}
-          />
-        )}
-      </Stack>
-      <Box data-testid={sliderTestId}>
-        <Slider
-          min={min}
-          max={max}
-          step={step}
-          value={sliderValue}
-          disabled={sliderDisabled}
-          onChange={(_, v) => onSliderChange(v as number)}
-          valueLabelDisplay="auto"
-          valueLabelFormat={(v) => formatValue(v)}
-          sx={isOverriding ? { color: "warning.main" } : undefined}
-        />
-      </Box>
-      <Typography
-        variant="caption"
-        color={isOverriding ? "warning.main" : isEventActive ? "primary.main" : "text.secondary"}
-        data-testid={captionTestId}
-      >
-        {captionText}
-      </Typography>
-    </Box>
-  );
-}
 
 function EvControls({ sim, overrides, onChange }: ControlsProps) {
   const evAsset = sim.assets["ev"];
   if (!evAsset) return null;
-  const simMaxKw = evAsset.max_charge_kw ?? 11;
   const simSocTarget = evAsset.soc_target ?? 0.8;
-  const maxKw = simMaxKw;
-
-  const { data: traceData = [] } = useTrace(1);
-  const latestTrace = traceData[0];
-  const isEvEventActive = latestTrace?.mode === "CHARGE_SETPOINT";
-  const vtnEvKw = isEvEventActive
-    ? (latestTrace?.setpoints?.ev_charge_kw ?? simMaxKw)
-    : (overrides.ev_desired_kw ?? simMaxKw);
 
   return (
     <Box>
       <Typography variant="subtitle2" mb={1}>EV Charger</Typography>
       <Stack spacing={2} sx={{ pl: 1 }}>
-        <OverridableControl
-          label="EV Charge Rate"
-          isEventActive={isEvEventActive}
-          vtnIntentValue={vtnEvKw}
-          formatValue={(v) => `${v.toFixed(1)} kW`}
-          forceValue={overrides.ev_force_kw}
-          min={-maxKw}
-          max={maxKw}
-          step={0.1}
-          toggleTestId="ev-charge-override-toggle"
-          sliderTestId="ev-charge-slider"
-          captionTestId="ev-charge-caption"
-          onToggle={(enabled, initialValue) => {
-            onChange({ ev_force_kw: enabled ? initialValue : undefined });
-          }}
-          onSliderChange={(v) => onChange({ ev_force_kw: v })}
-        />
-        <Box>
-          <Typography variant="body2" gutterBottom>
-            Desired idle charge rate: {fmtNum(overrides.ev_desired_kw ?? simMaxKw)} kW
-          </Typography>
-          <Typography variant="caption" color="text.secondary">Owner preference — active when no event</Typography>
-          <Slider
-            min={0}
-            max={maxKw}
-            step={0.1}
-            value={overrides.ev_desired_kw ?? simMaxKw}
-            onChange={(_, v) => onChange({ ev_desired_kw: v as number })}
-            valueLabelDisplay="auto"
-            valueLabelFormat={(v) => `${v.toFixed(1)} kW`}
-          />
-        </Box>
         <Box>
           <Typography variant="body2" gutterBottom>
             SOC target: {((overrides.ev_soc_target ?? simSocTarget) * 100).toFixed(0)}%
@@ -654,49 +505,22 @@ function EvControls({ sim, overrides, onChange }: ControlsProps) {
 function PvControls({ sim, overrides, onChange }: ControlsProps) {
   const pvAsset = sim.assets["pv"];
   if (!pvAsset) return null;
-  const simRatedKw = pvAsset.rated_kw ?? 0;
   const simIrradiance = pvAsset.irradiance ?? 0;
   const [manualIrradiance, setManualIrradiance] = useState(overrides.pv_irradiance != null);
 
   function handleManualToggle(checked: boolean) {
     setManualIrradiance(checked);
     if (!checked) {
-      onChange({ pv_irradiance: undefined });
+      onChange({ pv_irradiance: null });
     } else {
       onChange({ pv_irradiance: simIrradiance ?? 0.5 });
     }
   }
 
-  const { data: traceData = [] } = useTrace(1);
-  const latestTrace = traceData[0];
-  const isPvEventActive = latestTrace?.mode === "EXPORT_CAP";
-
-  const ratedKw = overrides.pv_rated_kw ?? simRatedKw;
-  const vtnPvLimitKw = isPvEventActive
-    ? (latestTrace?.setpoints?.pv_export_limit_kw ?? ratedKw)
-    : ratedKw;
-
   return (
     <Box>
       <Typography variant="subtitle2" mb={1}>PV Inverter</Typography>
       <Stack spacing={2} sx={{ pl: 1 }}>
-        <OverridableControl
-          label="PV Export Limit"
-          isEventActive={isPvEventActive}
-          vtnIntentValue={vtnPvLimitKw}
-          formatValue={(v) => `${v.toFixed(1)} kW`}
-          forceValue={overrides.pv_force_export_limit_kw}
-          min={0}
-          max={ratedKw}
-          step={0.1}
-          toggleTestId="pv-force-override-toggle"
-          sliderTestId="pv-force-slider"
-          captionTestId="pv-force-caption"
-          onToggle={(enabled, initialValue) => {
-            onChange({ pv_force_export_limit_kw: enabled ? initialValue : undefined });
-          }}
-          onSliderChange={(v) => onChange({ pv_force_export_limit_kw: v })}
-        />
         <FormControlLabel
           control={
             <Switch
@@ -722,20 +546,6 @@ function PvControls({ sim, overrides, onChange }: ControlsProps) {
             />
           </Box>
         )}
-        <Box>
-          <Typography variant="body2" gutterBottom>
-            Rated capacity (profile override): {fmtNum(overrides.pv_rated_kw ?? simRatedKw)} kW
-          </Typography>
-          <Slider
-            min={0}
-            max={20}
-            step={0.5}
-            value={overrides.pv_rated_kw ?? simRatedKw}
-            onChange={(_, v) => onChange({ pv_rated_kw: v as number })}
-            valueLabelDisplay="auto"
-            valueLabelFormat={(v) => `${v.toFixed(1)} kW`}
-          />
-        </Box>
       </Stack>
     </Box>
   );
@@ -746,36 +556,11 @@ function HeaterControls({ sim, overrides, onChange }: ControlsProps) {
   if (!heaterAsset) return null;
   const minC = overrides.heater_temp_min_c ?? (heaterAsset.temp_min_c ?? 18);
   const maxC = overrides.heater_temp_max_c ?? (heaterAsset.temp_max_c ?? 24);
-  const heaterMax = heaterAsset.max_kw ?? 3;
-
-  const { data: traceData = [] } = useTrace(1);
-  const latestTrace = traceData[0];
-  const isHeaterEventActive = latestTrace?.mode === "IMPORT_CAP";
-  const vtnHeaterKw = isHeaterEventActive
-    ? (latestTrace?.setpoints?.heater_kw ?? heaterMax * 0.5)
-    : heaterMax * 0.5;
 
   return (
     <Box>
       <Typography variant="subtitle2" mb={1}>Heater</Typography>
       <Stack spacing={2} sx={{ pl: 1 }}>
-        <OverridableControl
-          label="Heater Power"
-          isEventActive={isHeaterEventActive}
-          vtnIntentValue={vtnHeaterKw}
-          formatValue={(v) => `${v.toFixed(1)} kW`}
-          forceValue={overrides.heater_force_kw}
-          min={0}
-          max={heaterMax}
-          step={0.1}
-          toggleTestId="heater-force-override-toggle"
-          sliderTestId="heater-force-slider"
-          captionTestId="heater-force-caption"
-          onToggle={(enabled, initialValue) => {
-            onChange({ heater_force_kw: enabled ? initialValue : undefined });
-          }}
-          onSliderChange={(v) => onChange({ heater_force_kw: v })}
-        />
         <Box>
           <Typography variant="body2" gutterBottom>
             Ambient temperature: {fmtNum(overrides.ambient_temp_c ?? 10.0, 0)}°C
@@ -814,23 +599,23 @@ function HeaterControls({ sim, overrides, onChange }: ControlsProps) {
 }
 
 function BaseLoadControls({ overrides, onChange, sim }: ControlsProps) {
-  const baseLoadW = (sim.assets["base_load"]?.power_kw ?? 0) * 1000;
+  const baseLoadKw = sim.assets["base_load"]?.power_kw ?? 0;
   return (
     <Box>
       <Typography variant="subtitle2" mb={1}>Base Load</Typography>
       <Stack spacing={2} sx={{ pl: 1 }}>
         <Box>
           <Typography variant="body2" gutterBottom>
-            Base load (profile override): {fmtNum(overrides.base_load_w ?? baseLoadW, 0)} W
+            Base load (profile override): {fmtNum(overrides.base_load_kw ?? baseLoadKw, 2)} kW
           </Typography>
           <Slider
             min={0}
-            max={5000}
-            step={50}
-            value={overrides.base_load_w ?? baseLoadW}
-            onChange={(_, v) => onChange({ base_load_w: v as number })}
+            max={5}
+            step={0.05}
+            value={overrides.base_load_kw ?? baseLoadKw}
+            onChange={(_, v) => onChange({ base_load_kw: v as number })}
             valueLabelDisplay="auto"
-            valueLabelFormat={(v) => `${v} W`}
+            valueLabelFormat={(v) => `${v.toFixed(2)} kW`}
           />
         </Box>
       </Stack>
@@ -842,37 +627,31 @@ function BaseLoadControls({ overrides, onChange, sim }: ControlsProps) {
 
 export function SimulationPage() {
   const simQuery = useSim();
-  const overrideQuery = useSimOverride();
-  const setOverrideMutation = useSetSimOverride();
+  const injectQuery = useSimInject();
+  const setInjectMutation = useSetSimInject();
 
-  const [localOverrides, setLocalOverrides] = useState<UserOverrides>({});
+  const [localInject, setLocalInject] = useState<SimInjectState>({});
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPatchRef = useRef<Partial<SimInjectState>>({});
 
-  // Initialize local overrides from server once
+  // Initialize local inject from server once
   useEffect(() => {
-    if (overrideQuery.data && Object.keys(localOverrides).length === 0) {
-      setLocalOverrides(overrideQuery.data);
+    if (injectQuery.data && Object.keys(localInject).length === 0) {
+      setLocalInject(injectQuery.data);
     }
-  }, [overrideQuery.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [injectQuery.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const updateOverride = useCallback(
-    (patch: Partial<UserOverrides>) => {
-      setLocalOverrides((prev) => {
-        const updated = { ...prev, ...patch };
-        // Clear undefined keys
-        Object.keys(updated).forEach((k) => {
-          if ((updated as Record<string, unknown>)[k] === undefined) {
-            delete (updated as Record<string, unknown>)[k];
-          }
-        });
-        if (timerRef.current) clearTimeout(timerRef.current);
-        timerRef.current = setTimeout(() => {
-          setOverrideMutation.mutate(updated);
-        }, 500);
-        return updated;
-      });
+  const updateInject = useCallback(
+    (patch: Partial<SimInjectState>) => {
+      setLocalInject((prev) => ({ ...prev, ...patch }));
+      pendingPatchRef.current = { ...pendingPatchRef.current, ...patch };
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        setInjectMutation.mutate(pendingPatchRef.current);
+        pendingPatchRef.current = {};
+      }, 500);
     },
-    [setOverrideMutation]
+    [setInjectMutation]
   );
 
   const sim = simQuery.data;
@@ -932,23 +711,23 @@ export function SimulationPage() {
             <Stack spacing={3} divider={<Divider />}>
               <EvControls
                 sim={sim}
-                overrides={localOverrides}
-                onChange={updateOverride}
+                overrides={localInject}
+                onChange={updateInject}
               />
               <PvControls
                 sim={sim}
-                overrides={localOverrides}
-                onChange={updateOverride}
+                overrides={localInject}
+                onChange={updateInject}
               />
               <HeaterControls
                 sim={sim}
-                overrides={localOverrides}
-                onChange={updateOverride}
+                overrides={localInject}
+                onChange={updateInject}
               />
               <BaseLoadControls
                 sim={sim}
-                overrides={localOverrides}
-                onChange={updateOverride}
+                overrides={localInject}
+                onChange={updateInject}
               />
             </Stack>
           </Paper>
