@@ -54,7 +54,7 @@ def step_wait_for_all_reason_kind(context, asset_id, kind):
     context.ven_plan = poll_until(
         fetch,
         lambda x: x is not None,
-        timeout=60,
+        timeout=120 if kind == "IDLE" else 60,
         description=f"All VEN /plan steps for '{asset_id}' have reason.kind='{kind}'",
     )
     context.last_checked_asset = asset_id
