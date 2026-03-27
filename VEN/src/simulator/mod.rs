@@ -324,11 +324,12 @@ impl SimState {
                     bl.baseline_kw = base_load_kw_override.unwrap_or(bl.baseline_kw_profile);
                 }
                 AssetConfig::Ev(ev) => {
-                    // Behaviour C: ev_plugged — hold override state each tick.
-                    if let Some(plugged) = ev_plugged_override {
-                        if let AssetState::Ev(s) = &mut entry.state {
-                            s.plugged = plugged;
-                        }
+                    // Behaviour C: ev_plugged — hold override or snap back to profile default
+                    // (plugged=true) when released. Without snap-back, releasing the inject
+                    // leaves the EV permanently unplugged because there is no physics to
+                    // re-plug it.
+                    if let AssetState::Ev(s) = &mut entry.state {
+                        s.plugged = ev_plugged_override.unwrap_or(true);
                     }
                     // Behaviour C: ev_soc_target — override BMS charge ceiling.
                     ev.soc_target = ev_soc_target_override.unwrap_or(ev.soc_target_profile);

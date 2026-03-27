@@ -187,14 +187,14 @@ def _cleanup_vtn_resources(context):
 
 
 def _reset_ven_sim_overrides():
-    """POST empty UserOverrides to VEN-1 to clear any sim override bleed.
+    """Reset all sim injects on VEN-1 to clear any override bleed.
 
     Prevents overrides set in one scenario (e.g. ev_plugged=false) from
     leaking into subsequent scenarios that don't belong to the same feature.
     """
     try:
         from features.helpers.api_client import ven_post
-        ven_post("/sim/override", json={"ev_plugged": True})
+        ven_post("/sim/inject/reset", json={})
     except Exception:
         pass
 
