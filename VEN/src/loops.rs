@@ -367,8 +367,11 @@ pub(crate) fn spawn_sim_tick(
                     inject.pv_irradiance,
                     inject.pv_irradiance_alpha,
                     inject.ambient_temp_c,
+                    inject.heater_temp_min_c,
+                    inject.heater_temp_max_c,
                     inject.base_load_kw,
                     inject.ev_plugged,
+                    inject.ev_soc_target,
                 );
 
                 // Update sensor snapshot (backward compat)

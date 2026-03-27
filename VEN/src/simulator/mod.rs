@@ -267,8 +267,11 @@ impl SimState {
         pv_irradiance_override: Option<f64>,
         pv_alpha: f64,
         ambient_temp_c_override: Option<f64>,
+        heater_temp_min_override: Option<f64>,
+        heater_temp_max_override: Option<f64>,
         base_load_kw_override: Option<f64>,
         ev_plugged_override: Option<bool>,
+        ev_soc_target_override: Option<f64>,
     ) {
         let hour = now.format("%H").to_string().parse::<f64>().unwrap_or(12.0)
             + now.format("%M").to_string().parse::<f64>().unwrap_or(0.0) / 60.0;
@@ -312,18 +315,23 @@ impl SimState {
                 AssetConfig::Heater(h) => {
                     // Behaviour C: ambient temp — hold override or use default.
                     h.ambient_temp_c = ambient_temp_c_override.unwrap_or(10.0);
+                    // Behaviour C: comfort band — hold override or snap to profile defaults.
+                    h.temp_min_c = heater_temp_min_override.unwrap_or(h.temp_min_c_profile);
+                    h.temp_max_c = heater_temp_max_override.unwrap_or(h.temp_max_c_profile);
                 }
                 AssetConfig::BaseLoad(bl) => {
                     // Behaviour C: base load — hold override or snap to profile default.
                     bl.baseline_kw = base_load_kw_override.unwrap_or(bl.baseline_kw_profile);
                 }
-                AssetConfig::Ev(_) => {
+                AssetConfig::Ev(ev) => {
                     // Behaviour C: ev_plugged — hold override state each tick.
                     if let Some(plugged) = ev_plugged_override {
                         if let AssetState::Ev(s) = &mut entry.state {
                             s.plugged = plugged;
                         }
                     }
+                    // Behaviour C: ev_soc_target — override BMS charge ceiling.
+                    ev.soc_target = ev_soc_target_override.unwrap_or(ev.soc_target_profile);
                 }
                 _ => {}
             }
