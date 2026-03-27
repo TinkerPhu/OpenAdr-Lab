@@ -49,7 +49,10 @@ pub struct SimInjectState {
     // Behaviour C — frozen while active, snap to profile default on release
     pub ev_plugged: Option<bool>,
     pub ev_departure_min: Option<f64>,
+    pub ev_soc_target: Option<f64>,
     pub heater_setpoint_c: Option<f64>,
+    pub heater_temp_min_c: Option<f64>,
+    pub heater_temp_max_c: Option<f64>,
     pub ambient_temp_c: Option<f64>,
     pub base_load_kw: Option<f64>,
     pub grid_import_limit_kw: Option<f64>,
@@ -66,7 +69,10 @@ impl Default for SimInjectState {
             pv_irradiance_alpha: 0.1,
             ev_plugged: None,
             ev_departure_min: None,
+            ev_soc_target: None,
             heater_setpoint_c: None,
+            heater_temp_min_c: None,
+            heater_temp_max_c: None,
             ambient_temp_c: None,
             base_load_kw: None,
             grid_import_limit_kw: None,
@@ -87,8 +93,6 @@ pub struct UserOverrides {
     pub ev_desired_kw: Option<f64>, // idle charge rate; None = ev.max_charge_kw
     pub ev_plugged: Option<bool>,   // None = always true
 
-    // Device spec overrides (shadow profile values)
-    pub ev_max_charge_kw: Option<f64>,
     pub ev_soc_target: Option<f64>,
     pub heater_max_kw: Option<f64>,
     pub heater_temp_min_c: Option<f64>,

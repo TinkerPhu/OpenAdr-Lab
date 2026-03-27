@@ -577,7 +577,7 @@ function EvControls({ sim, overrides, onChange }: ControlsProps) {
   if (!evAsset) return null;
   const simMaxKw = evAsset.max_charge_kw ?? 11;
   const simSocTarget = evAsset.soc_target ?? 0.8;
-  const maxKw = overrides.ev_max_charge_kw ?? simMaxKw;
+  const maxKw = simMaxKw;
 
   const { data: traceData = [] } = useTrace(1);
   const latestTrace = traceData[0];
@@ -624,26 +624,11 @@ function EvControls({ sim, overrides, onChange }: ControlsProps) {
         </Box>
         <Box>
           <Typography variant="body2" gutterBottom>
-            Max charge rate: {fmtNum(overrides.ev_max_charge_kw ?? simMaxKw)} kW
-          </Typography>
-          <Typography variant="caption" color="text.secondary">Physical device limit, owner-controlled</Typography>
-          <Slider
-            min={0}
-            max={22}
-            step={0.5}
-            value={overrides.ev_max_charge_kw ?? simMaxKw}
-            onChange={(_, v) => onChange({ ev_max_charge_kw: v as number })}
-            valueLabelDisplay="auto"
-            valueLabelFormat={(v) => `${v.toFixed(1)} kW`}
-          />
-        </Box>
-        <Box>
-          <Typography variant="body2" gutterBottom>
             SOC target: {((overrides.ev_soc_target ?? simSocTarget) * 100).toFixed(0)}%
           </Typography>
-          <Typography variant="caption" color="text.secondary">Owner preference</Typography>
+          <Typography variant="caption" color="text.secondary">BMS charge ceiling — charging stops here</Typography>
           <Slider
-            min={0}
+            min={0.1}
             max={1}
             step={0.05}
             value={overrides.ev_soc_target ?? simSocTarget}
@@ -761,7 +746,7 @@ function HeaterControls({ sim, overrides, onChange }: ControlsProps) {
   if (!heaterAsset) return null;
   const minC = overrides.heater_temp_min_c ?? (heaterAsset.temp_min_c ?? 18);
   const maxC = overrides.heater_temp_max_c ?? (heaterAsset.temp_max_c ?? 24);
-  const heaterMax = overrides.heater_max_kw ?? (heaterAsset.max_kw ?? 3);
+  const heaterMax = heaterAsset.max_kw ?? 3;
 
   const { data: traceData = [] } = useTrace(1);
   const latestTrace = traceData[0];
@@ -807,24 +792,9 @@ function HeaterControls({ sim, overrides, onChange }: ControlsProps) {
         </Box>
         <Box>
           <Typography variant="body2" gutterBottom>
-            Max heating power: {fmtNum(heaterMax)} kW
-          </Typography>
-          <Typography variant="caption" color="text.secondary">Physical device limit, owner-controlled</Typography>
-          <Slider
-            min={0}
-            max={10}
-            step={0.1}
-            value={heaterMax}
-            onChange={(_, v) => onChange({ heater_max_kw: v as number })}
-            valueLabelDisplay="auto"
-            valueLabelFormat={(v) => `${v.toFixed(1)} kW`}
-          />
-        </Box>
-        <Box>
-          <Typography variant="body2" gutterBottom>
             Thermostat range: {fmtNum(minC, 0)}°C – {fmtNum(maxC, 0)}°C
           </Typography>
-          <Typography variant="caption" color="text.secondary">Owner preference</Typography>
+          <Typography variant="caption" color="text.secondary">Comfort band — heater cuts off above max, forced on below min</Typography>
           <Slider
             min={5}
             max={30}
