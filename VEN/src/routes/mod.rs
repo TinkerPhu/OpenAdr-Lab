@@ -41,10 +41,6 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/sim/reset/:asset_id", post(sim::post_sim_reset))
         .route("/sim/config/battery", put(sim::put_sim_config_battery))
         .route(
-            "/sim/override",
-            get(sim::get_sim_override).post(sim::post_sim_override),
-        )
-        .route(
             "/sim/inject",
             get(sim::get_sim_inject).post(sim::post_sim_inject),
         )

@@ -6,7 +6,7 @@ use axum::{
 use serde::Deserialize;
 
 use crate::entities::asset::PlanTrigger;
-use crate::state::{SimInjectState, UserOverrides};
+use crate::state::SimInjectState;
 use crate::AppCtx;
 
 /// Partial-merge body for POST /sim/inject.
@@ -31,6 +31,8 @@ pub struct PostSimInjectBody {
     pub ev_plugged: Option<serde_json::Value>,
     #[serde(default)]
     pub ev_departure_min: Option<serde_json::Value>,
+    #[serde(default)]
+    pub ev_soc_target: Option<serde_json::Value>,
     #[serde(default)]
     pub heater_setpoint_c: Option<serde_json::Value>,
     #[serde(default)]
@@ -72,6 +74,7 @@ fn merge_inject(current: &mut SimInjectState, body: PostSimInjectBody) {
     }
     merge_bool!(ev_plugged);
     merge_f64!(ev_departure_min);
+    merge_f64!(ev_soc_target);
     merge_f64!(heater_setpoint_c);
     merge_f64!(ambient_temp_c);
     merge_f64!(base_load_kw);
@@ -183,48 +186,6 @@ pub async fn get_sim(State(ctx): State<AppCtx>) -> impl IntoResponse {
         )
             .into_response(),
     }
-}
-
-/// GET /sim/override — backward-compat: translate inject_state back to UserOverrides shape.
-/// `ev_plugged` is read by controller_v2_steps.py.
-pub async fn get_sim_override(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    let inject = ctx.state.inject_state().await;
-    let compat = UserOverrides {
-        pv_irradiance: inject.pv_irradiance,
-        ambient_temp_c: inject.ambient_temp_c,
-        ev_plugged: inject.ev_plugged,
-        ev_soc_target: inject.ev_soc_target,
-        heater_temp_min_c: inject.heater_temp_min_c,
-        heater_temp_max_c: inject.heater_temp_max_c,
-        base_load_w: inject.base_load_kw.map(|kw| kw * 1000.0),
-        // Profile-only fields — always None
-        ev_desired_kw: None,
-        heater_max_kw: None,
-        pv_rated_kw: None,
-    };
-    Json(compat)
-}
-
-/// POST /sim/override — backward-compat alias; translates UserOverrides → SimInjectState.
-/// Empty body `{}` releases all overrides (preserves existing reset behaviour).
-pub async fn post_sim_override(
-    State(ctx): State<AppCtx>,
-    Json(body): Json<UserOverrides>,
-) -> impl IntoResponse {
-    let mut inject = SimInjectState::default();
-    inject.ev_plugged = body.ev_plugged;
-    inject.ev_soc_target = body.ev_soc_target;
-    inject.pv_irradiance = body.pv_irradiance;
-    inject.ambient_temp_c = body.ambient_temp_c;
-    inject.heater_temp_min_c = body.heater_temp_min_c;
-    inject.heater_temp_max_c = body.heater_temp_max_c;
-    if let Some(w) = body.base_load_w {
-        inject.base_load_kw = Some(w / 1000.0);
-    }
-    // Silently drop profile-only fields: ev_desired_kw, heater_max_kw, pv_rated_kw.
-    ctx.state.set_inject_state(inject).await;
-    let _ = ctx.trigger_tx.send(PlanTrigger::AssetStateChange);
-    axum::http::StatusCode::NO_CONTENT
 }
 
 /// GET /sim/inject — returns the current inject state.

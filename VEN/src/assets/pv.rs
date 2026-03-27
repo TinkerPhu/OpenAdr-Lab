@@ -14,7 +14,7 @@ pub struct PvInverter {
     pub rated_kw: f64,
     /// Active export limit in kW (≤ 0); None = no curtailment limit.
     pub export_limit_kw: Option<f64>,
-    /// [0.0, 1.0]; set each tick by sim from UserOverrides or time-based model. NOT from YAML.
+    /// [0.0, 1.0]; set each tick by sim from SimInjectState or time-based model. NOT from YAML.
     pub irradiance: f64,
 }
 

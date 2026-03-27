@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useVenContext } from "../App";
-import type { SensorSnapshot, UserOverrides, SimInjectState, CreateUserRequestBody } from "./types";
+import type { SensorSnapshot, SimInjectState, CreateUserRequestBody } from "./types";
 
 export function useHealth() {
   const { api } = useVenContext();
@@ -123,28 +123,6 @@ export function useSetSimInject() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (patch: Partial<SimInjectState>) => api.postSimInject(patch),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["simInject"] });
-    },
-  });
-}
-
-/** @deprecated Use useSimInject instead. Kept for Simulation.tsx backward compat. */
-export function useSimOverride() {
-  const { api } = useVenContext();
-  return useQuery({
-    queryKey: ["simInject", api.baseUrl],
-    queryFn: () => api.getSimOverride(),
-    staleTime: Infinity,
-  });
-}
-
-/** @deprecated Use useSetSimInject instead. Kept for Simulation.tsx backward compat. */
-export function useSetSimOverride() {
-  const { api } = useVenContext();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (overrides: UserOverrides) => api.postSimOverride(overrides),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["simInject"] });
     },
