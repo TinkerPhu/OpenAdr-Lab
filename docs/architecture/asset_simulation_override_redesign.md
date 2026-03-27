@@ -1,9 +1,7 @@
 # Asset Simulation — Inject API
 
-> **Status**: Groups A, B, C implemented and tested (206 scenarios passing).
-> Group D (BDD migration + alias cleanup) pending.
-> Phase 8 (Simulation.tsx migration) partially complete — profile-only sliders removed,
-> `ev_soc_target` and heater comfort band wired to correct inject fields.
+> **Status**: All groups complete. `POST /sim/override` alias and `UserOverrides` removed.
+> `POST /sim/inject` is the sole API. All BDD steps and Simulation.tsx migrated.
 
 ---
 
@@ -414,38 +412,4 @@ was also corrected from watts to kilowatts to match every other field in the sys
 
 ## Pending Work
 
-### Group D — BDD migration + alias cleanup
-
-BDD steps still targeting `/sim/override`:
-
-| File | Step | Target |
-|---|---|---|
-| `tests/features/steps/uc_steps.py` | `ev_plugged: false/true` | → `POST /sim/inject` |
-| `tests/features/steps/uc_steps.py` | `pv_irradiance: 1.0` | → `POST /sim/inject` |
-| `tests/features/steps/sim_ui_steps.py` | "reset overrides" | → `POST /sim/inject/reset` |
-| `tests/features/steps/controller_v2_steps.py` | `GET /sim/override` | → `GET /sim/inject` |
-
-Backend to remove after migration:
-- `POST /sim/override` route + `post_sim_override` handler
-- `UserOverrides` struct and `overrides`/`set_overrides` accessors on `AppState`
-
-UI to remove:
-- `getSimOverride()`, `postSimOverride()` in `client.ts`
-- `useSimOverride()`, `useSetSimOverride()` in `hooks.ts`
-
-### Phase 8 — Simulation.tsx migration (remaining)
-
-`Simulation.tsx` still uses `UserOverrides` / `POST /sim/override`. The following has been done:
-- Removed `ev_max_charge_kw` and `heater_max_kw` sliders (hardware specs — profile only)
-- `ev_soc_target` slider now correctly updates the BMS charge ceiling via `ev_soc_target`
-- `heater_temp_min_c` / `heater_temp_max_c` range slider now correctly adjusts the thermostat comfort band
-
-Remaining: migrate all remaining controls from `UserOverrides` + `POST /sim/override` to
-`SimInjectState` + `POST /sim/inject`, then remove the deprecated types and alias.
-
-### plan_reasons.feature:33 — test timing fix
-
-"Battery is idle when no packets and tariff is at median" fails intermittently on Pi4.
-Root cause: after event deletion the VEN needs up to 30s to re-poll VTN and clear the
-stale tariff, then re-plan. The 60s `poll_until` timeout is too tight on ARM64.
-Fix: increase the timeout for `step_wait_for_all_reason_kind` to 120s when kind == "IDLE".
+All groups complete. No pending work.
