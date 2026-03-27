@@ -81,26 +81,6 @@ impl Default for SimInjectState {
     }
 }
 
-/// User-adjustable simulation parameters, sent via POST /sim/override.
-/// All fields are optional; None means "use profile default".
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
-pub struct UserOverrides {
-    // Environment inputs
-    pub pv_irradiance: Option<f64>, // 0.0–1.0; None = auto (time-based sin model)
-    pub ambient_temp_c: Option<f64>, // None = fixed 10.0°C
-
-    // EV preference (overridden by active events)
-    pub ev_desired_kw: Option<f64>, // idle charge rate; None = ev.max_charge_kw
-    pub ev_plugged: Option<bool>,   // None = always true
-
-    pub ev_soc_target: Option<f64>,
-    pub heater_max_kw: Option<f64>,
-    pub heater_temp_min_c: Option<f64>,
-    pub heater_temp_max_c: Option<f64>,
-    pub pv_rated_kw: Option<f64>,
-    pub base_load_w: Option<f64>,
-}
-
 #[derive(Clone)]
 pub struct AppState {
     inner: Arc<RwLock<InnerState>>,
@@ -116,8 +96,6 @@ pub struct InnerState {
     pub sim: Option<SimSnapshot>,
     #[serde(skip)]
     pub controller_trace: ControllerTrace,
-    #[serde(default)]
-    pub overrides: UserOverrides,
     #[serde(skip)]
     pub inject_state: SimInjectState,
 
@@ -150,7 +128,6 @@ impl AppState {
                 sensor: SensorSnapshot::empty_now(),
                 sim: None,
                 controller_trace: ControllerTrace::new(),
-                overrides: UserOverrides::default(),
                 inject_state: SimInjectState::default(),
                 active_packets: vec![],
                 active_plan: None,
@@ -215,14 +192,6 @@ impl AppState {
 
     pub async fn push_controller_event(&self, event: crate::controller::trace::ControllerEvent) {
         self.inner.write().await.controller_trace.push_event(event);
-    }
-
-    pub async fn overrides(&self) -> UserOverrides {
-        self.inner.read().await.overrides.clone()
-    }
-
-    pub async fn set_overrides(&self, o: UserOverrides) {
-        self.inner.write().await.overrides = o;
     }
 
     pub async fn inject_state(&self) -> SimInjectState {
@@ -417,7 +386,6 @@ impl Clone for InnerState {
             sensor: self.sensor.clone(),
             sim: self.sim.clone(),
             controller_trace: self.controller_trace.clone(),
-            overrides: self.overrides.clone(),
             inject_state: self.inject_state.clone(),
             active_packets: self.active_packets.clone(),
             active_plan: self.active_plan.clone(),

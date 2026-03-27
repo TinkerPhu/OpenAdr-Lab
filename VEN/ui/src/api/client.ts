@@ -1,5 +1,5 @@
 import type {
-  VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry, UserOverrides,
+  VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry,
   SimInjectState, PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger, UserRequest,
   FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
 } from "./types";
@@ -133,17 +133,6 @@ export class VenApi {
   async postSimInject(patch: Partial<SimInjectState>): Promise<void> {
     const r = await this.jsonReq("POST", "/sim/inject", patch);
     if (!r.ok) throw new Error(`post sim inject ${r.status}`);
-  }
-
-  /** @deprecated Use getSimInject instead. Kept for Simulation.tsx backward compat. */
-  async getSimOverride(): Promise<UserOverrides> {
-    const data = await this.getSimInject();
-    return data as unknown as UserOverrides;
-  }
-
-  /** @deprecated Use postSimInject instead. Kept for Simulation.tsx backward compat. */
-  async postSimOverride(overrides: UserOverrides): Promise<void> {
-    return this.postSimInject(overrides as unknown as SimInjectState);
   }
 
   async metrics(): Promise<string> {

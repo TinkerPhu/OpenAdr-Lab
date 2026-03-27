@@ -101,22 +101,22 @@ def step_post_continue_request(context, asset_id):
 
 @when("I POST a sim override setting ev_plugged to false")
 def step_sim_override_ev_unplugged(context):
-    r = ven_post("/sim/override", json={"ev_plugged": False})
+    r = ven_post("/sim/inject", json={"ev_plugged": False})
     r.raise_for_status()
     context.last_response = r
 
 
 @when("I POST a sim override setting ev_plugged to true")
 def step_sim_override_ev_plugged(context):
-    r = ven_post("/sim/override", json={"ev_plugged": True})
+    r = ven_post("/sim/inject", json={"ev_plugged": True})
     r.raise_for_status()
     context.last_response = r
 
 
 @when("I POST a sim override with no EV charging demand")
 def step_sim_override_ev_zero(context):
-    """Set ev_desired_kw to 0 to remove self-generated EV demand."""
-    r = ven_post("/sim/override", json={"ev_desired_kw": 0.0})
+    """Unplug the EV to remove self-generated EV demand."""
+    r = ven_post("/sim/inject", json={"ev_plugged": False})
     r.raise_for_status()
     context.last_response = r
 
@@ -124,7 +124,7 @@ def step_sim_override_ev_zero(context):
 @when("I POST a sim override with full PV irradiance")
 def step_sim_override_pv_full(context):
     """Set pv_irradiance to 1.0 so PV generates at full rated power regardless of time-of-day."""
-    r = ven_post("/sim/override", json={"pv_irradiance": 1.0})
+    r = ven_post("/sim/inject", json={"pv_irradiance": 1.0})
     r.raise_for_status()
     context.last_response = r
 

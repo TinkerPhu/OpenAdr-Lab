@@ -102,27 +102,6 @@ export type SimInjectState = {
   grid_export_limit_kw?: number | null;
 };
 
-/**
- * Legacy override shape used by Simulation.tsx (hits POST /sim/override alias bridge).
- * @deprecated Migrate to SimInjectState in Phase 8.
- */
-export type UserOverrides = {
-  pv_irradiance?: number;
-  ambient_temp_c?: number;
-  ev_desired_kw?: number;
-  ev_plugged?: boolean;
-  ev_soc_target?: number;
-  ev_force_kw?: number;
-  heater_force_kw?: number;
-  battery_force_kw?: number;
-  pv_force_export_limit_kw?: number;
-  heater_max_kw?: number;
-  heater_temp_min_c?: number;
-  heater_temp_max_c?: number;
-  pv_rated_kw?: number;
-  base_load_w?: number;
-};
-
 export type TraceEntry = {
   ts: string;
   mode: string;
