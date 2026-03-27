@@ -44,7 +44,9 @@ def step_wait_for_all_reason_kind(context, asset_id, kind):
             return None
         steps = [s for s in body.get("steps", []) if s.get("asset_id") == asset_id]
         if not steps:
-            return None
+            # Empty steps for "IDLE" is the expected state — nothing to schedule.
+            # For any other kind, keep polling until the plan arrives.
+            return body if kind == "IDLE" else None
         if all(s.get("reason", {}).get("kind") == kind for s in steps):
             return body
         return None
