@@ -115,10 +115,9 @@ def step_sim_override_ev_plugged(context):
 
 @when("I POST a sim override with no EV charging demand")
 def step_sim_override_ev_zero(context):
-    """Unplug the EV to remove self-generated EV demand."""
-    r = ven_post("/sim/inject", json={"ev_plugged": False})
-    r.raise_for_status()
-    context.last_response = r
+    """No-op: ev_desired_kw was a profile-only field that the backend never applied.
+    With no active EV packet the dispatcher issues no charging setpoints regardless."""
+    pass
 
 
 @when("I POST a sim override with full PV irradiance")
