@@ -175,6 +175,7 @@ mod tests {
             max_discharge_kw: 0.0,
             battery_kwh,
             soc_target: 0.8,
+            soc_target_profile: 0.8,
             default_charge_kw: max_charge_kw,
             min_soc: 0.0,
         })

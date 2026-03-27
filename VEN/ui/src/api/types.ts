@@ -92,7 +92,10 @@ export type SimInjectState = {
   // Behaviour C: frozen while active, snap to profile on release
   ev_plugged?: boolean | null;
   ev_departure_min?: number | null;
+  ev_soc_target?: number | null;
   heater_setpoint_c?: number | null;
+  heater_temp_min_c?: number | null;
+  heater_temp_max_c?: number | null;
   ambient_temp_c?: number | null;
   base_load_kw?: number | null;
   grid_import_limit_kw?: number | null;
@@ -108,12 +111,11 @@ export type UserOverrides = {
   ambient_temp_c?: number;
   ev_desired_kw?: number;
   ev_plugged?: boolean;
+  ev_soc_target?: number;
   ev_force_kw?: number;
   heater_force_kw?: number;
   battery_force_kw?: number;
   pv_force_export_limit_kw?: number;
-  ev_max_charge_kw?: number;
-  ev_soc_target?: number;
   heater_max_kw?: number;
   heater_temp_min_c?: number;
   heater_temp_max_c?: number;

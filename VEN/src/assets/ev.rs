@@ -16,7 +16,10 @@ pub struct EvCharger {
     pub max_charge_kw: f64,
     pub max_discharge_kw: f64,
     pub battery_kwh: f64,
+    /// Active SOC ceiling — charging stops at this level (BMS limit). Overridable at runtime.
     pub soc_target: f64,
+    /// Original profile value — used for snap-back when inject override is released.
+    pub soc_target_profile: f64,
     pub default_charge_kw: f64,
     /// V2G floor; 0.0 if not specified in profile.
     pub min_soc: f64,
@@ -39,6 +42,7 @@ impl EvCharger {
             max_discharge_kw: cfg.max_discharge_kw,
             battery_kwh: cfg.battery_kwh,
             soc_target: cfg.soc_target,
+            soc_target_profile: cfg.soc_target,
             default_charge_kw: cfg.default_charge_kw,
             min_soc: 0.0,
         }
@@ -64,7 +68,7 @@ impl EvCharger {
             );
         }
         let kw = setpoint_kw.clamp(-self.max_discharge_kw, self.max_charge_kw);
-        let kw = if kw > 0.0 && state.soc_pct >= 1.0 {
+        let kw = if kw > 0.0 && state.soc_pct >= self.soc_target {
             0.0
         } else if kw < 0.0 && state.soc_pct <= self.min_soc {
             0.0
@@ -249,6 +253,7 @@ mod tests {
             max_discharge_kw: 0.0,
             battery_kwh: 40.0,
             soc_target: 0.8,
+            soc_target_profile: 0.8,
             default_charge_kw: 7.4,
             min_soc: 0.0,
         };
@@ -297,6 +302,8 @@ mod tests {
         let (ev, mut state) = make_ev(true, 0.99, 0.0);
         let ev = EvCharger {
             max_charge_kw: 10.0,
+            soc_target: 1.0,
+            soc_target_profile: 1.0,
             battery_kwh: 10.0,
             ..ev
         };
@@ -310,12 +317,30 @@ mod tests {
     }
 
     #[test]
+    fn ev_stops_charging_at_soc_target() {
+        // soc_target = 0.8 — charging must stop there, not at 1.0
+        let (ev, mut state) = make_ev(true, 0.0, 0.0);
+        for _ in 0..100_000 {
+            let (ns, _) = ev.step_inner(&state, 7.4, Duration::seconds(1));
+            state = ns;
+        }
+        assert!(
+            state.soc_pct <= 0.8 + 0.01,
+            "soc_pct should not exceed soc_target (0.8), got {}",
+            state.soc_pct
+        );
+        let (_, actual) = ev.step_inner(&state, 7.4, Duration::seconds(1));
+        assert_eq!(actual, 0.0, "charging must stop at soc_target");
+    }
+
+    #[test]
     fn ev_discharges_v2g_and_stops_at_empty() {
         let ev = EvCharger {
             max_charge_kw: 10.0,
             max_discharge_kw: 10.0,
             battery_kwh: 10.0,
             soc_target: 1.0,
+            soc_target_profile: 1.0,
             default_charge_kw: 0.0,
             min_soc: 0.0,
         };

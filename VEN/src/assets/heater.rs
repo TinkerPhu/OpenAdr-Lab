@@ -14,11 +14,17 @@ pub struct Heater {
     pub max_kw: f64,
     /// Forced-on floor power at temp_min_c (0.0 if none).
     pub min_power_kw: f64,
+    /// Active comfort band lower bound. Overridable at runtime via SimInjectState.
     pub temp_min_c: f64,
+    /// Active comfort band upper bound. Overridable at runtime via SimInjectState.
     pub temp_max_c: f64,
+    /// Original profile value — used for snap-back when inject override is released.
+    pub temp_min_c_profile: f64,
+    /// Original profile value — used for snap-back when inject override is released.
+    pub temp_max_c_profile: f64,
     /// Thermal mass in kWh/°C (hardcoded 2.0 previously — now explicit config).
     pub thermal_mass_kwh_per_c: f64,
-    /// Set each tick by sim from UserOverrides.ambient_temp_c; NOT from YAML.
+    /// Set each tick by sim from SimInjectState.ambient_temp_c; NOT from YAML.
     pub ambient_temp_c: f64,
 }
 
@@ -37,6 +43,8 @@ impl Heater {
             min_power_kw: 0.0,
             temp_min_c: cfg.temp_min_c,
             temp_max_c: cfg.temp_max_c,
+            temp_min_c_profile: cfg.temp_min_c,
+            temp_max_c_profile: cfg.temp_max_c,
             thermal_mass_kwh_per_c: 2.0,
             ambient_temp_c: 10.0,
         }
