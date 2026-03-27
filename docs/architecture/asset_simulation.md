@@ -1,9 +1,9 @@
 # Asset Simulation Reference
 
-Generated: 2026-03-24
+Updated: 2026-03-27
 
 This document describes every simulated asset in the VEN simulator — physics model, profile
-parameters, API overrides, and external influences.
+parameters, inject overrides, and external influences.
 
 ---
 
@@ -21,6 +21,7 @@ pub fn build_setpoints(
     assets: &[AssetEntry],
     asset_configs: &[AssetConfig],
     capacity: &OadrCapacityState,
+    heater_setpoint_c: Option<f64>,
     now: DateTime<Utc>,
 ) -> HashMap<String, f64>
 ```
@@ -28,86 +29,72 @@ pub fn build_setpoints(
 Returns a `HashMap<asset_id, power_kw>`. Algorithm:
 
 1. Start with each asset's `AssetConfig::default_setpoint()` (idle/hold values).
-2. Find the FIRM plan slot covering `now` — if found, overwrite the relevant asset entries with their slot allocations.
+2. Find the FIRM plan slot covering `now` — if found, overwrite the relevant asset entries with
+   their slot allocations.
 3. If no FIRM slot, try the FLEXIBLE slot covering `now`.
-4. Enforce VTN `export_limit_kw` on the `pv` key if `OadrCapacityState` has one.
+4. If `heater_setpoint_c` inject is active and the plan has no heater allocation, compute an
+   ON/OFF setpoint based on current temperature vs. the target.
+5. Enforce `export_limit_kw` on the `pv` key if `OadrCapacityState` has one.
 
-**`UserOverrides` are not consulted here.** The dispatcher knows nothing about overrides.
+`SimInjectState` fields are **not consulted here**. The dispatcher knows nothing about injects
+other than `heater_setpoint_c` which is passed explicitly.
 
-### Step 2 — `SimState::tick()` (`simulator/mod.rs`)
+### Step 2 — Behaviour A injects (`loops::spawn_sim_tick`)
 
-Called immediately after `build_setpoints()` with the resulting map:
+Before calling `tick()`, the sim loop applies one-shot Behaviour A injects from `SimInjectState`:
+
+- `battery_soc`, `ev_soc`, `heater_temp_c` — applied via `sim.find_asset_mut()` + `cfg.reset()`,
+  then `state.clear_inject_field()` clears each field immediately so it fires only once.
+
+### Step 3 — `SimState::tick()` (`simulator/mod.rs`)
+
+Called immediately after setpoints are built. Signature:
 
 ```rust
-sim_guard.tick(dt_s, sp_map, now, &overrides);
+pub fn tick(
+    &mut self,
+    dt_s: f64,
+    setpoints: HashMap<String, f64>,
+    now: DateTime<Utc>,
+    pv_irradiance_override: Option<f64>,
+    pv_alpha: f64,
+    ambient_temp_c_override: Option<f64>,
+    heater_temp_min_override: Option<f64>,
+    heater_temp_max_override: Option<f64>,
+    base_load_kw_override: Option<f64>,
+    ev_plugged_override: Option<bool>,
+    ev_soc_target_override: Option<f64>,
+)
 ```
 
 Inside `tick()`, for each `(AssetConfig, AssetEntry)` pair:
 
-1. **Override mutations** — env params and device specs from `UserOverrides` are injected into the config *before* stepping:
-   - `AssetConfig::Pv` → `pv.irradiance = overrides.pv_irradiance.unwrap_or(auto_model)`
-   - `AssetConfig::Heater` → `h.ambient_temp_c = overrides.ambient_temp_c.unwrap_or(10.0)`, plus optional `max_kw`, `temp_min_c`, `temp_max_c`
-   - `AssetConfig::Ev` → optional `max_charge_kw`, `soc_target`, `plugged` state
-   - `AssetConfig::Pv` → optional `rated_kw`
-   - `AssetConfig::BaseLoad` → optional `baseline_kw` (from `base_load_w / 1000`)
-
-2. **Setpoint lookup** — picks the asset's value from the map, falling back to `default_setpoint()` if not present:
-   ```rust
-   let sp = setpoints.get(&entry.id).copied()
-       .unwrap_or_else(|| cfg.default_setpoint(&entry.state));
-   ```
-
-3. **Physics step** — calls `AssetConfig::step()`:
+1. **PV irradiance** — compute `irradiance` via Behaviour B EMA smoothing (see PV section), then
+   set `pv.irradiance = irradiance`.
+2. **Behaviour C env/state injections** — applied per asset type:
+   - `Heater` → `h.ambient_temp_c = ambient_temp_c_override.unwrap_or(10.0)`;
+     `h.temp_min_c = heater_temp_min_override.unwrap_or(h.temp_min_c_profile)`;
+     `h.temp_max_c = heater_temp_max_override.unwrap_or(h.temp_max_c_profile)`
+   - `BaseLoad` → `bl.baseline_kw = base_load_kw_override.unwrap_or(bl.baseline_kw_profile)`
+   - `Ev` → `s.plugged = ev_plugged_override.unwrap_or(true)` (snaps back to plugged on release);
+     `ev.soc_target = ev_soc_target_override.unwrap_or(ev.soc_target_profile)`
+3. **Setpoint lookup** — picks the asset's value from the map, falling back to
+   `default_setpoint()` if absent.
+4. **Physics step** — calls `AssetConfig::step()`:
    ```rust
    let (new_state, actual_kw) = cfg.step(&entry.state, sp, dt);
    ```
 
-### Step 3 — `AssetConfig::step()` (`assets/mod.rs`)
+### Step 4 — `AssetConfig::step()` (`assets/mod.rs`)
 
-Enum dispatch — routes to the concrete physics type:
-
-```rust
-match self {
-    Self::Battery(cfg)  => cfg.step(state, setpoint_kw, dt),
-    Self::Ev(cfg)       => cfg.step(state, setpoint_kw, dt),
-    Self::Heater(cfg)   => cfg.step(state, setpoint_kw, dt),
-    Self::Pv(cfg)       => cfg.step(state, setpoint_kw, dt),
-    Self::BaseLoad(cfg) => cfg.step(state, setpoint_kw, dt),
-}
-```
-
-Each concrete type implements the `Asset` trait's `step()` method. The trait signature:
+Enum dispatch to the concrete physics type. Trait signature:
 
 ```rust
 fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64);
 ```
 
 Returns `(new_state, actual_kw)`. `actual_kw` may differ from `setpoint_kw` because physics
-constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides, etc.).
-
-### API Overrides: What Reaches the Dispatcher vs. the Physics
-
-`POST /sim/override` stores a `UserOverrides` struct. Fields are consumed **only inside
-`SimState::tick()`**, not by `build_setpoints()`. The dispatcher sees none of them.
-
-| Override field | Where consumed | Effect |
-|---|---|---|
-| `pv_irradiance` | `tick()` — sets `pv.irradiance` before `step()` | Changes PV output |
-| `pv_rated_kw` | `tick()` — sets `pv.rated_kw` before `step()` | Changes PV peak capacity |
-| `ambient_temp_c` | `tick()` — sets `h.ambient_temp_c` before `step()` | Changes heater loss rate |
-| `heater_max_kw` | `tick()` — sets `h.max_kw` before `step()` | Changes heater ceiling |
-| `heater_temp_min_c` | `tick()` — sets `h.temp_min_c` before `step()` | Changes thermostat lower bound |
-| `heater_temp_max_c` | `tick()` — sets `h.temp_max_c` before `step()` | Changes thermostat upper bound |
-| `ev_max_charge_kw` | `tick()` — sets `ev.max_charge_kw` before `step()` | Changes EV charge ceiling |
-| `ev_soc_target` | `tick()` — sets `ev.soc_target` before `step()` | Changes EV target (used by planner) |
-| `ev_plugged` | `tick()` — sets `ev_state.plugged` before `step()` | Disconnects EV (zeroes power) |
-| `base_load_w` | `tick()` — sets `bl.baseline_kw = w/1000` before `step()` | Changes fixed consumption |
-| `ev_desired_kw` | **Not consumed** — dead field in `UserOverrides` | No effect |
-
-> **Note on `battery_force_kw`**: This key appears in `Battery::control_schema()` (exposed via
-> `GET /sim/schema`) and in the frontend `types.ts`, but it is **not a field in `UserOverrides`**
-> and is not consumed anywhere in Rust. It is an unimplemented control — sending it via
-> `POST /sim/override` is silently ignored.
+constraints are applied inside `step()` (SoC ceilings, thermostat hard-stops, etc.).
 
 ---
 
@@ -130,11 +117,9 @@ constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides
 
 **Sign convention**: positive power = import from grid, negative = export to grid.
 
-> **Note on control path**: There is no reactor. The old reactor FSM was removed in Phase 24
-> (Simulator Reform). The sole control path is: VTN events → Planner (periodic, produces a Plan
-> with FIRM/FLEXIBLE slots) → Dispatcher (per-tick, reads current plan slot → per-asset setpoints)
-> → Simulator tick. The dispatcher is stateless and intentionally dumb; all scheduling intelligence
-> lives in the planner.
+**Control path**: VTN events → Planner (periodic 20 s, produces a Plan with FIRM/FLEXIBLE slots)
+→ Dispatcher (per-tick, reads current plan slot → per-asset setpoints) → Simulator tick.
+The dispatcher is stateless; all scheduling intelligence lives in the planner.
 
 ---
 
@@ -149,7 +134,7 @@ constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides
 - Hard stops: charging halts at `soc = 1.0`; discharging halts at `soc = min_soc`.
 - Efficiency applied on charge only (discharge is lossless):
   ```
-  Δsoc = (actual_kw × dt_hours × efficiency) / capacity_kwh
+  Δsoc = (actual_kw × dt_hours × round_trip_efficiency) / capacity_kwh
   ```
 
 ### Profile Parameters (YAML)
@@ -161,30 +146,31 @@ constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides
 | `max_discharge_kw` | 5.0 | kW | Max discharge rate |
 | `initial_soc` | 0.5 | [0,1] | Starting state of charge |
 | `round_trip_efficiency` | 0.92 | [0,1] | Charge efficiency (discharge = 1.0) |
-| `min_soc` | 0.1 | [0,1] | Discharge floor |
+| `min_soc` | 0.10 | [0,1] | Discharge floor |
 
-### API Overrides (`POST /sim/override`)
+### Inject Overrides (`POST /sim/inject`)
 
-| Field | Effect |
-|---|---|
-| `battery_force_kw` | Bypass dispatcher — force exact power (clamped to [−max_discharge_kw, max_charge_kw]) |
+| Field | Behaviour | Effect |
+|---|---|---|
+| `battery_soc` | A — one-shot | Jump SoC to value; cleared after next tick; charge/discharge continues from there |
+
+No Behaviour C fields. Battery scheduling is fully planner-driven.
 
 ### External Influences
 
 | Source | Influence |
 |---|---|
-| Dispatcher | Setpoint (kW) from active OpenADR events or planner |
-| Planner | May schedule charge/discharge in energy packets |
+| Dispatcher | Setpoint (kW) from active plan slot |
+| Planner (battery arbitrage) | Charge when tariff cheap, discharge when expensive |
 
 ### Output State
 
-- `soc` — current state of charge [0, 1]
-- `capacity_kwh`, `max_charge_kw`, `max_discharge_kw`, `min_soc` — config echo
+- `soc_pct` — current state of charge [0, 1]
 
 ### Capability (for planner)
 
-- `max_import_kw = 0.0` if `soc ≥ 1.0`, else `max_charge_kw`
-- `max_export_kw = 0.0` if `soc ≤ min_soc`, else `max_discharge_kw`
+- `max_import_kw = 0.0` if `soc_pct ≥ 1.0`, else `max_charge_kw`
+- `max_export_kw = 0.0` if `soc_pct ≤ min_soc`, else `−max_discharge_kw`
 
 ---
 
@@ -197,16 +183,10 @@ constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides
 - Unidirectional by default (V2G enabled only when `max_discharge_kw > 0`).
 - If not plugged: power = 0.0 regardless of setpoint.
 - Setpoint clamped to `[−max_discharge_kw, max_charge_kw]`.
-- SoC upper bound: stops charging at `soc = 1.0`.
-- SoC lower bound: `min_soc = 0.0` (hardcoded; no profile override).
-- No efficiency loss on charge (unlike Battery).
+- Charging halts when `soc_pct ≥ soc_target` (user's preferred ceiling, default 0.8).
+- Discharging halts when `soc_pct ≤ min_soc` (0.0 by default — V2G floor unset unless configured).
+- No efficiency loss (unlike Battery).
 - Default power when no dispatcher signal: `default_charge_kw`.
-
-### Hardcoded Constants
-
-| Constant | Value | Notes |
-|---|---|---|
-| `min_soc` | 0.0 | EV never blocked from discharging by SoC floor |
 
 ### Profile Parameters (YAML)
 
@@ -216,37 +196,41 @@ constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides
 | `max_discharge_kw` | 0.0 | kW | V2G discharge rate (0 = disabled) |
 | `initial_soc` | 0.5 | [0,1] | Starting SoC |
 | `battery_kwh` | 60.0 | kWh | EV battery capacity |
-| `soc_target` | 0.8 | [0,1] | User's desired departure SoC |
-| `default_charge_kw` | 0.0 | kW | Idle charge rate when no event active |
+| `soc_target` | 0.8 | [0,1] | User's desired charge ceiling |
+| `default_charge_kw` | 0.0 | kW | Idle charge rate when no plan active |
 
-### API Overrides (`POST /sim/override`)
+### Inject Overrides (`POST /sim/inject`)
 
-| Field | Effect |
-|---|---|
-| `ev_desired_kw` | Override idle charge rate |
-| `ev_plugged` | Toggle plugged/unplugged state |
-| `ev_max_charge_kw` | Override max charge rate |
-| `ev_soc_target` | Override departure SoC target |
+| Field | Behaviour | Effect |
+|---|---|---|
+| `ev_soc` | A — one-shot | Jump SoC to value; cleared after next tick |
+| `ev_plugged` | C — frozen + snap | Hold plugged/unplugged state while active; snaps back to `true` on release |
+| `ev_soc_target` | C — frozen + snap | Override BMS charge ceiling; snaps to `soc_target_profile` on release |
+| `ev_departure_min` | C — frozen | Minutes until EV must depart; replaces active EV packet tier deadline in planner |
 
 ### External Influences
 
 | Source | Influence |
 |---|---|
-| Dispatcher | Setpoint (kW) from active OpenADR events or planner |
-| User override `ev_plugged` | Disconnects EV, zeroing all power |
+| Dispatcher | Setpoint (kW) from active plan slot |
+| `ev_plugged` inject | Disconnects EV — zeroes power, capability drops to 0 |
+| `ev_soc_target` inject | Lowers BMS ceiling; planner also uses it to size energy packets |
 
 ### Output State
 
-- `soc` — current SoC [0, 1]
-- `plugged` — 1.0 / 0.0
-- `max_charge_kw`, `soc_target`, `battery_kwh` — config echo
+- `soc_pct` — current SoC [0, 1]
+- `plugged` — current plug state (bool)
+- `actual_power_kw` — last tick power
 
 ### Capability (for planner)
 
 - If unplugged: `max_import_kw = 0.0, max_export_kw = 0.0`
 - If plugged:
-  - `max_import_kw = 0.0` if `soc ≥ 1.0`, else `max_charge_kw`
-  - `max_export_kw = 0.0` if `soc ≤ 0.0`, else `max_discharge_kw`
+  - `max_import_kw = 0.0` if `soc_pct ≥ 1.0`, else `max_charge_kw`
+  - `max_export_kw = 0.0` if `soc_pct ≤ min_soc`, else `−max_discharge_kw`
+
+> Note: capability uses `soc_pct ≥ 1.0` as the ceiling, but physics halts at `soc_target`.
+> The planner schedules charging until the battery is full; the physics enforces the user's ceiling.
 
 ---
 
@@ -263,9 +247,9 @@ constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides
   net_heating = (actual_kw − loss_kw) / thermal_mass_kwh_per_c
   ΔT          = net_heating × dt_hours
   ```
-- Thermostat hard overrides (priority over setpoint):
+- Thermostat hard overrides (priority over dispatcher setpoint):
   - `temp_c ≥ temp_max_c` → force off (0.0 kW)
-  - `temp_c ≤ temp_min_c` → force on at minimum (0.0 kW minimum)
+  - `temp_c ≤ temp_min_c` → force on at `min_power_kw`
   - Otherwise → clamp setpoint to `[0.0, max_kw]`
 
 ### Hardcoded Constants
@@ -284,26 +268,27 @@ constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides
 | `temp_min_c` | 18.0 | °C | Thermostat lower bound |
 | `temp_max_c` | 23.0 | °C | Thermostat upper bound |
 
-### API Overrides (`POST /sim/override`)
+### Inject Overrides (`POST /sim/inject`)
 
-| Field | Effect |
-|---|---|
-| `ambient_temp_c` | Override ambient temperature (default 10.0 °C) |
-| `heater_max_kw` | Override max heating power |
-| `heater_temp_min_c` | Override thermostat lower bound |
-| `heater_temp_max_c` | Override thermostat upper bound |
+| Field | Behaviour | Effect |
+|---|---|---|
+| `heater_temp_c` | A — one-shot | Jump room temperature; cleared after next tick; thermal model continues from there |
+| `heater_setpoint_c` | C — frozen | Comfort target passed to dispatcher: ON if `temp_c < target`, OFF otherwise; no snap-back model |
+| `heater_temp_min_c` | C — frozen + snap | Override thermostat lower bound; snaps to `temp_min_c_profile` on release |
+| `heater_temp_max_c` | C — frozen + snap | Override thermostat upper bound; snaps to `temp_max_c_profile` on release |
+| `ambient_temp_c` | C — frozen | Override outdoor temperature (default 10.0 °C); no snap-back model |
 
 ### External Influences
 
 | Source | Influence |
 |---|---|
-| Dispatcher | Setpoint (kW) — overridden by thermostat hard limits |
-| `ambient_temp_c` override | Changes loss rate; lower ambient → more loss → faster cool-down |
+| Dispatcher | Setpoint (kW) overridden by thermostat hard limits |
+| `ambient_temp_c` inject | Changes loss rate: lower ambient → more loss → faster cool-down |
 
 ### Output State
 
-- `temp_c` — current room temperature
-- `max_kw`, `temp_min_c`, `temp_max_c` — config echo
+- `temperature_c` — current room temperature
+- `actual_power_kw` — last tick power
 
 ### Capability (for planner)
 
@@ -320,7 +305,7 @@ constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides
 
 ### Physics
 
-- Non-curtailable: ignores dispatcher setpoint in current phase.
+- Non-curtailable: ignores dispatcher setpoint.
 - Power output:
   ```
   power_kw = −(rated_kw × irradiance)   [negative = export]
@@ -332,13 +317,19 @@ constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides
   ```
   Peak irradiance = 1.0 at 12:00.
 
-### Hardcoded Constants
+### Behaviour B — EMA smoothing (`simulator/mod.rs`)
 
-| Constant | Description |
-|---|---|
-| Solar window | 06:00–18:00 |
-| Irradiance model | Sinusoidal, peaks at solar noon |
-| `export_limit_kw` | Currently unused (always `None`) |
+`pv_irradiance` uses Behaviour B (frozen + exponential blend-back). The simulator tracks a
+`PvSmoothingState { current_irradiance, override_was_active }`:
+
+- **While override active**: `irradiance = override_value` each tick.
+- **On release** (`pv_irradiance = null`): EMA blend-back activates:
+  ```
+  current = current * (1 − α) + natural_model * α
+  ```
+  Converges when `|current − natural| < 0.005`. Only activates when `override_was_active` was
+  true — prevents ramp-up lag at VEN startup.
+- **Normal operation** (no override ever set): uses `natural_model` directly.
 
 ### Profile Parameters (YAML)
 
@@ -346,28 +337,27 @@ constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides
 |---|---|---|---|
 | `rated_kw` | 5.0 | kW | Peak rated output |
 
-### API Overrides (`POST /sim/override`)
+### Inject Overrides (`POST /sim/inject`)
 
-| Field | Effect |
-|---|---|
-| `pv_irradiance` | Override irradiance directly [0.0–1.0]; disables auto model for the tick |
-| `pv_rated_kw` | Override rated capacity |
+| Field | Behaviour | Effect |
+|---|---|---|
+| `pv_irradiance` | B — frozen + EMA return | Freeze irradiance [0–1]; EMA blend-back to sinusoidal model on release |
+| `pv_irradiance_alpha` | Parameter | EMA blend-back speed (default 0.1); higher = faster snap-back |
 
 ### External Influences
 
 | Source | Influence |
 |---|---|
 | System clock (hour-of-day) | Automatic irradiance unless overridden |
+| `export_limit_kw` (OadrCapacityState) | Curtails PV output if VTN sets a limit |
 
 ### Output State
 
-- `irradiance` — current irradiance [0, 1]
-- `rated_kw` — rated capacity
+- `actual_power_kw` — current output (≤ 0, export)
 
 ### Capability (for planner)
 
-- `is_fixed() = true` (non-curtailable)
-- `max_export_kw = max_import_kw = actual_power_kw` (fixed point)
+- Fixed asset: `max_export_kw = max_import_kw = actual_power_kw`
 
 ---
 
@@ -386,54 +376,43 @@ constraints are applied inside `step()` (SoC ceilings, thermostat hard-overrides
 |---|---|---|---|
 | `baseline_kw` | 0.5 | kW | Fixed background consumption |
 
-Legacy format: `devices.base_load_w` (watts, auto-converted to kW).
+### Inject Overrides (`POST /sim/inject`)
 
-### API Overrides (`POST /sim/override`)
-
-| Field | Effect |
-|---|---|
-| `base_load_w` | Override baseline load (in watts) |
+| Field | Behaviour | Effect |
+|---|---|---|
+| `base_load_kw` | C — frozen + snap | Override baseline power (kW); snaps to `baseline_kw_profile` on release |
 
 ### External Influences
 
-None. Output is entirely determined by profile/override.
+None. Output is entirely determined by profile / active inject.
 
 ### Capability (for planner)
 
-- `is_fixed() = true`
-- `max_export_kw = max_import_kw = actual_power_kw`
+- Fixed asset: `max_export_kw = max_import_kw = actual_power_kw`
 
 ---
 
 ## 6. Grid (Virtual Asset)
 
-**Source**: `VEN/src/simulator/assets/grid.rs`
+**Source**: `VEN/src/simulator/assets/grid.rs` / `VEN/src/entities/capacity.rs`
 
 ### Physics
 
-- Read-only virtual asset — derived from the sum of all other asset powers.
-- Updated each tick by the simulator loop after all other assets step:
-  ```
-  net_power_kw   = Σ(all asset powers)
-  import_limit_kw = from active VTN CAPACITY_RESERVATION events (≥ 0)
-  export_limit_kw = from active VTN CAPACITY_RESERVATION events (≤ 0)
-  ```
+- Read-only virtual asset — derived from the sum of all other asset powers each tick.
 - Voltage is randomly sampled in [228, 232] V (cosmetic realism).
-
-### Profile Parameters
-
-None — Grid is not configurable via YAML.
-
-### API Overrides
-
-None directly.
 
 ### External Influences
 
 | Source | Influence |
 |---|---|
-| VTN OpenADR events (`IMPORT_CAPACITY_RESERVATION`, `EXPORT_CAPACITY_RESERVATION`) | Sets import/export limits |
-| All other assets | Net power is always derived |
+| All other assets | `net_power_kw = Σ(all asset powers)` |
+| VTN `IMPORT_CAPACITY_LIMIT` event | Sets `import_limit_kw` in `OadrCapacityState` |
+| VTN `EXPORT_CAPACITY_LIMIT` event | Sets `export_limit_kw` in `OadrCapacityState` |
+| `grid_import_limit_kw` inject | Overrides import limit when no VTN event is active |
+| `grid_export_limit_kw` inject | Overrides export limit when no VTN event is active |
+
+**Grid limit priority**: VTN event always wins. Inject only applies when
+`capacity_snap.import_limit_event_id.is_none()`.
 
 ### Default Limits
 
@@ -442,21 +421,50 @@ None directly.
 
 ### Output State
 
-- `net_power_w` — grid power in watts
-- `voltage_v` — sampled voltage [228, 232] V
+- `net_power_kw` — grid power (positive = import, negative = export)
 - `import_kwh`, `export_kwh` — cumulative energy counters
-- `import_limit_kw`, `export_limit_kw` — active VTN limits
 
-### Capability (for planner)
+---
 
-- `max_import_kw = import_limit_kw`
-- `max_export_kw = export_limit_kw`
+## Complete Inject Reference (`POST /sim/inject`)
 
-### Known Limitation
+| Field | Type | Behaviour | Asset | Evolution when released |
+|---|---|---|---|---|
+| `battery_soc` | f64 [0,1] | A | Battery | Physics-driven from injected value |
+| `ev_soc` | f64 [0,1] | A | EV | Physics-driven from injected value |
+| `heater_temp_c` | f64 | A | Heater | Thermal model from injected value |
+| `pv_irradiance` | f64 [0,1] | B | PV | EMA blend-back to sinusoidal model |
+| `pv_irradiance_alpha` | f64 | — | PV | EMA coefficient (default 0.1) |
+| `ev_plugged` | bool | C | EV | Snaps to `true` (plugged) |
+| `ev_departure_min` | f64 | C | EV | No snap-back — stays until cleared |
+| `ev_soc_target` | f64 [0,1] | C | EV | Snaps to `soc_target_profile` |
+| `heater_setpoint_c` | f64 | C | Heater | No snap-back — stays until cleared |
+| `heater_temp_min_c` | f64 | C | Heater | Snaps to `temp_min_c_profile` |
+| `heater_temp_max_c` | f64 | C | Heater | Snaps to `temp_max_c_profile` |
+| `ambient_temp_c` | f64 | C | Heater | No snap-back — stays until cleared |
+| `base_load_kw` | f64 | C | Base Load | Snaps to `baseline_kw_profile` |
+| `grid_import_limit_kw` | f64 | C | Grid | No snap-back; VTN event takes precedence |
+| `grid_export_limit_kw` | f64 | C | Grid | No snap-back; VTN event takes precedence |
 
-`simulate_forward()` cannot compute net multi-asset sum because the `Asset` trait only receives
-its own state and setpoint. Full predictive multi-asset simulation would require a
-`SiteSimulator` abstraction.
+Sending a field as **absent** = no change. Sending **`null`** = release override.
+See `docs/architecture/asset_simulation_override_redesign.md` → deleted; full inject API
+reference is in `VEN/src/routes/sim.rs` and `docs/architecture/` (now removed — see git history
+or `asset_simulation_override_redesign.md` at `fa70a3b~1`).
+
+> **Inject API quick reference**: `GET /sim/inject` — read state. `POST /sim/inject` — partial
+> merge. `POST /sim/inject/reset` — release all.
+
+---
+
+## Profile Files
+
+| File | Assets | Use |
+|---|---|---|
+| `VEN/profiles/test.yaml` | EV + Heater + PV + Battery + Base Load | BDD integration tests |
+| `VEN/profiles/ven-1.yaml` | EV + PV + Battery + Base Load | VEN-1 instance (residential prosumer) |
+| `VEN/profiles/ven-2.yaml` | Heater + PV + Base Load | VEN-2 instance (commercial building) |
+| `VEN/profiles/ven-3.yaml` | EV + Heater + PV + Base Load | VEN-3 instance (full mix) |
+| `VEN/profiles/policy_test.yaml` | Same as test.yaml + `flexibility_policy` reserve | Policy BDD tests |
 
 ---
 
@@ -465,214 +473,11 @@ its own state and setpoint. Full predictive multi-asset simulation would require
 These asset types are defined in `VEN/src/entities/asset.rs` for entity model / reporting
 purposes but have no physics simulation in the `assets/` module:
 
-| Asset Type | Entity Enum Variant | Notes |
-|---|---|---|
-| `HeatPump` | `AssetKind::HeatPump` | No simulator module |
-| `WashingMachine` | `AssetKind::WashingMachine` | No simulator module |
-| `CookingStove` | `AssetKind::CookingStove` | No simulator module |
-| `SiteResidual` | `AssetKind::SiteResidual` | Implicit in base load; no dedicated sim |
-| `GenericConsumer` | `AssetKind::GenericConsumer` | Placeholder |
-| `GenericProducer` | `AssetKind::GenericProducer` | Placeholder |
-
----
-
-## Complete Override Reference (`POST /sim/override`)
-
-| Field | Type | Asset | Effect |
-|---|---|---|---|
-| `pv_irradiance` | f64 [0,1] | PV | Override irradiance; bypasses auto solar model |
-| `pv_rated_kw` | f64 | PV | Override rated capacity |
-| `ambient_temp_c` | f64 | Heater | Override ambient temperature (default 10.0 °C) |
-| `heater_max_kw` | f64 | Heater | Override max heating power |
-| `heater_temp_min_c` | f64 | Heater | Override thermostat lower bound |
-| `heater_temp_max_c` | f64 | Heater | Override thermostat upper bound |
-| `ev_desired_kw` | f64 | EV | Override idle charge rate |
-| `ev_plugged` | bool | EV | Toggle plugged/unplugged state |
-| `ev_max_charge_kw` | f64 | EV | Override max charge rate |
-| `ev_soc_target` | f64 [0,1] | EV | Override departure SoC target |
-| `base_load_w` | f64 | Base Load | Override baseline load (watts) |
-| `battery_force_kw` | f64 | Battery | Force exact battery power (bypass dispatcher) |
-
----
-
-## Profile Files
-
-| File | Assets | Use |
-|---|---|---|
-| `VEN/profiles/test.yaml` | All assets | BDD integration tests |
-| `VEN/profiles/ven-1.yaml` | EV + PV + Battery + Base Load | VEN-1 instance |
-| `VEN/profiles/ven-2.yaml` | Heater + PV + Base Load | VEN-2 instance |
-| `VEN/profiles/ven-3.yaml` | EV + Heater + PV + Base Load | VEN-3 instance |
-| `VEN/profiles/policy_test.yaml` | Same as test.yaml + flexibility_policy reserve | Policy BDD tests |
-
----
-
-## Planned: Override Redesign — Physical Plant State Injection
-
-> **Status**: Design only — not yet implemented. This chapter captures the intended behaviour
-> for a future implementation task.
-
-### Problem with current overrides
-
-`POST /sim/override` currently stores a `UserOverrides` struct whose fields are re-applied to
-the asset *config* on every sim tick. This is wrong for two reasons:
-
-1. **Config fields are device specifications** (`max_charge_kw`, `rated_kw`, thermostat bounds).
-   They describe what the hardware *can* do, not what is currently happening. Mutating them
-   from the API blurs the line between "this is a 7.4 kW charger" and "right now the EV is
-   half-full", and breaks planner assumptions about device capabilities.
-
-2. **The planner and dispatcher never see the injected condition as real state.** Because
-   overrides are applied after `build_setpoints()`, the planner still plans against stale state.
-   Injecting the SoC or temperature into the *physics state* is the only way to make the planner
-   and dispatcher reason from the correct starting point.
-
-### Correct model: Physical Plant State
-
-The simulation has three distinct layers:
-
-| Layer | Examples | Who owns it |
-|---|---|---|
-| **Device config** (static) | `max_charge_kw`, `capacity_kwh`, `max_kw`, `temp_min/max_c` | Profile YAML; never changed at runtime |
-| **Physical plant state** (dynamic) | `soc`, `temp_c`, `plugged` | Physics engine; evolves every tick |
-| **Environmental inputs** (exogenous) | `irradiance`, `ambient_temp_c` | External world; injected, then evolves naturally |
-
-In control theory, plant state + environmental inputs together form the **observable state** that
-the controller (planner + dispatcher) reasons from. Overrides should inject into these two layers
-only — never into device config.
-
-### Two override behaviours
-
-All overrides share one property: the state jumps immediately to the injected value. What
-differs is what happens when the override is **released** (cleared by the user):
-
-| Behaviour | Description | Used for |
-|---|---|---|
-| **Jump + free evolution** | State jumps once; physics drives it from there. No override field is held between ticks. | SoC, room temperature, plug state |
-| **Frozen + exponential return** | State is held at the injected value each tick while override is active. When released, the state blends back to its model value using exponential smoothing. | PV irradiance, base load |
-| **Jump + hold** | State jumps immediately and stays at the injected value indefinitely (no autonomous model to return to). | Ambient temperature, EV departure time |
-
-### Exponential smoothing for gradual return
-
-When a frozen override is released, the resulting state follows:
-
-```
-s(n+1) = s(n) * (1 - α) + model(n+1) * α
-```
-
-where `s` is the current simulation state, `model` is the value the autonomous model would
-produce at that tick, and `α` is the smoothing factor (0 < α < 1). This is the standard
-**exponential moving average** (also called a first-order IIR low-pass filter). Low α gives a
-slow cloud-dispersal feel; high α snaps back quickly. α should be profile-configurable per asset.
-
-### Per-asset override fields (redesigned)
-
-#### Battery — energy state
-
-| Field | Behaviour | Target | Effect |
-|---|---|---|---|
-| `battery_soc` | Jump + free evolution | `BatteryState.soc_pct` | Jumps SoC; charge/discharge physics continues from there. |
-
-#### EV Charger — energy state + availability state
-
-| Field | Behaviour | Target | Effect |
-|---|---|---|---|
-| `ev_soc` | Jump + free evolution | `EvState.soc_pct` | Jumps SoC; charge physics continues from there. |
-| `ev_plugged` | Jump + hold | `EvState.plugged` | Jumps plug state; zeroes power and prevents planner from scheduling EV energy while false. |
-| `ev_departure_min` | Jump + hold | Planning input | Sets minutes until EV must leave with `soc_target`. Raises planner urgency for charging. Stays until overridden or cleared. Currently only reachable via `POST /requests`; a direct inject is useful for demonstrations. |
-
-#### Heater — thermal state + environmental inputs
-
-| Field | Behaviour | Target | Effect |
-|---|---|---|---|
-| `heater_temp_c` | Jump + free evolution | `HeaterState.temperature_c` | Jumps room temperature; thermal loss and thermostat take over. |
-| `ambient_temp_c` | Jump + hold | Environment (`h.ambient_temp_c`) | Jumps ambient temperature; heater loss rate changes immediately. Stays until overridden — no autonomous ambient model yet. |
-| `heater_setpoint_c` | Jump + hold | Planning preference | Sets a runtime comfort target between `temp_min` and `temp_max`. Simulates occupancy changes (home/away/eco) without editing profile YAML. The thermostat hard limits still apply. |
-
-#### PV Inverter — environmental input
-
-| Field | Behaviour | Target | Effect |
-|---|---|---|---|
-| `pv_irradiance` | Frozen + exponential return | Environment (`pv.irradiance`) | Holds irradiance at the injected value while active. When released, blends back to the sinusoidal model via exponential smoothing with factor α (`pv_irradiance_alpha`, default ~0.05 per tick at 1 s = ~5 min recovery). Models cloud cover that passes gradually. |
-
-#### Base Load — power input
-
-| Field | Behaviour | Target | Effect |
-|---|---|---|---|
-| `base_load_kw` | Frozen + snap return | `BaseLoad.baseline_kw` | Holds base load at the injected value while active. When released, snaps back to the profile default immediately. Models discrete appliance events (kettle, tumble dryer, EV charger) that switch on/off abruptly. No gradual return — step changes are natural for loads. |
-
-#### Grid — capacity inputs
-
-| Field | Behaviour | Target | Effect |
-|---|---|---|---|
-| `grid_import_limit_kw` | Jump + hold | `OadrCapacityState.import_limit_kw` | Injects an import capacity limit without needing a live VTN event. Useful for testing the dispatcher's capacity enforcement path. Stays until overridden or cleared; a real VTN event takes precedence if one arrives. |
-| `grid_export_limit_kw` | Jump + hold | `OadrCapacityState.export_limit_kw` | Same, for export limit. |
-
-### What the planner sees after injection
-
-Because plant state feeds directly into `AssetConfig::capability()`, which the planner calls
-during `run_planner()`, the planner immediately reasons from the injected state on the next
-replan cycle. No special planner changes are needed — the state change propagates automatically:
-
-```
-Inject battery soc=0.1
-    → BatteryState.soc_pct = 0.1
-    → Battery::capability_inner() returns max_export_kw = 0.0 (below min_soc)
-    → Planner sees battery can only charge, not discharge
-    → Plan is revised: discharge slots removed, charge slots added
-```
-
-Similarly for EV (unplugged → planner drops all EV charge packets), heater (cold room → planner
-schedules early heating), PV (cloud → planner reduces expected export, may add battery discharge).
-
-### API shape (proposed)
-
-A single endpoint replaces the current `POST /sim/override`. All fields are optional; only
-provided fields are applied. Setting a field activates the override; sending `null` for a field
-releases it (triggering exponential return or snap-back as appropriate).
-
-**`POST /sim/inject`**
-
-```json
-{
-  "battery_soc": 0.1,
-  "ev_soc": 0.4,
-  "ev_plugged": false,
-  "ev_departure_min": 120,
-  "heater_temp_c": 16.5,
-  "heater_setpoint_c": 19.0,
-  "ambient_temp_c": 2.0,
-  "pv_irradiance": 0.0,
-  "pv_irradiance_alpha": 0.05,
-  "base_load_kw": 3.5,
-  "grid_import_limit_kw": 5.0,
-  "grid_export_limit_kw": 3.0
-}
-```
-
-To release a specific override (e.g. stop freezing PV irradiance):
-
-```json
-{ "pv_irradiance": null }
-```
-
-The existing `POST /sim/override` and its `UserOverrides` struct (which mutates config per-tick)
-should be removed. Config-level fields (`heater_max_kw`, `ev_max_charge_kw`, etc.) are dropped —
-device specs belong in the profile YAML, not the runtime API.
-
-### Summary
-
-| Field | Behaviour | Evolution when released |
-|---|---|---|
-| `battery_soc` | Jump + free evolution | Charge/discharge physics from injected value |
-| `ev_soc` | Jump + free evolution | Charge physics from injected value |
-| `ev_plugged` | Jump + hold | Stays; no autonomous plug model |
-| `ev_departure_min` | Jump + hold | Stays until cleared or overridden |
-| `heater_temp_c` | Jump + free evolution | Thermal loss + thermostat from injected value |
-| `heater_setpoint_c` | Jump + hold | Stays; no autonomous occupancy model |
-| `ambient_temp_c` | Jump + hold | Stays; no autonomous ambient model |
-| `pv_irradiance` | Frozen + exponential return | Blends back to sinusoidal model at rate α per tick |
-| `pv_irradiance_alpha` | Parameter for above | — |
-| `base_load_kw` | Frozen + snap return | Snaps back to profile default immediately |
-| `grid_import_limit_kw` | Jump + hold | Stays; real VTN event takes precedence |
-| `grid_export_limit_kw` | Jump + hold | Stays; real VTN event takes precedence |
+| Asset Type | Entity Enum Variant |
+|---|---|
+| `HeatPump` | `AssetKind::HeatPump` |
+| `WashingMachine` | `AssetKind::WashingMachine` |
+| `CookingStove` | `AssetKind::CookingStove` |
+| `SiteResidual` | `AssetKind::SiteResidual` |
+| `GenericConsumer` | `AssetKind::GenericConsumer` |
+| `GenericProducer` | `AssetKind::GenericProducer` |
