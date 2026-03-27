@@ -3019,3 +3019,47 @@ Multiple rounds of fixes were required before all 203 scenarios passed:
 - Two-interval event design (target + reset) is required for LOCF-based tariff steps — a single interval carries forward to all subsequent slots.
 - `POST /sim/override` replaces the entire UserOverrides struct but does NOT undo direct state mutations (e.g. `EvState.plugged`). To restore state, explicitly POST the desired restored value.
 - Always add targeted polling steps (waiting for a specific reason kind) rather than generic "has steps" polls — the generic poll returns immediately with stale data.
+
+---
+
+### Override Redesign — Groups A, B, C — Complete
+
+**Status: Groups A+B fully BDD-green (207 scenarios, 1190 steps). Group C: Vitest 155/155, BDD running.**
+
+#### What was done
+
+**Architecture goal**: `POST /sim/override` was mutating device config fields on every tick (specs like `max_charge_kw`, thermostat bounds), causing the planner to reason from stale state and config pollution. The redesign injects into physical plant state and environment inputs instead — physics evolves naturally from the injected point, planner sees corrected reality immediately.
+
+Three injection behaviours defined:
+- **A (Jump + free evolution)**: Apply once; physics drives from there. Fields: `battery_soc`, `ev_soc`, `heater_temp_c`
+- **B (Frozen + EMA blend-back)**: Hold while active; exponential return on release. Fields: `pv_irradiance`
+- **C (Frozen + snap)**: Hold while active; snap to profile default on release. Fields: `ev_plugged`, `ev_departure_min`, `heater_setpoint_c`, `ambient_temp_c`, `base_load_kw`, `grid_import/export_limit_kw`
+
+**Group A (Phases 1–3 — Backend Core)**:
+- Added `SimInjectState` struct to `state.rs` with `inject_state()`, `set_inject_state()`, `clear_inject_field()` accessors
+- Added `PvSmoothingState { current_irradiance, override_was_active }` to `SimState` — EMA only activates during blend-back from override, not at startup (avoids irradiance ramp-up lag on boot)
+- Rewrote `tick()`: removed `overrides: &UserOverrides` param and all config mutation blocks; added PV EMA smoothing; added Behaviour C env/state injections
+- Added `/sim/inject` GET + POST + `/sim/inject/reset` endpoints
+- `POST /sim/override` rewritten as alias bridge → translates `UserOverrides` → `SimInjectState`
+- `GET /sim/override` translates back (backward compat for `controller_v2_steps.py`)
+- `build_setpoints()` gains `heater_setpoint_c` param: dispatcher computes binary ON/OFF from current temp vs target
+
+**Group B (Phases 4–5 — New Inject Fields)**:
+- `run_planner()` gains `ev_departure_override: Option<DateTime<Utc>>` — replaces active EV packet tier deadline before planning loop
+- `PostSimInjectBody` uses `Option<serde_json::Value>` per field: absent=no change, null=release, value=activate
+- `control_schema()` cleaned up on all assets: ev→`ev_plugged`+`ev_departure_min`, heater→`heater_setpoint_c`, pv→`pv_irradiance`+`pv_irradiance_alpha`, base_load→`base_load_kw`, battery→empty
+
+**Group C (Phase 6 — UI)**:
+- `SimInjectState` type added to `types.ts`; `UserOverrides` made deprecated alias
+- `getSimInject`/`postSimInject` added to `client.ts`; old methods delegate to new ones
+- `useSimInject`/`useSetSimInject` added to `hooks.ts`; old hooks kept as deprecated aliases
+- `ControllerV2.tsx` switched to new hooks; `handleOverrideChange` now sends partial patch directly (backend merges)
+- `AssetCell.tsx` / `AssetRightSection.tsx` prop types: `UserOverrides` → `SimInjectState`
+- All 9 test files updated; Vitest 155/155 passing
+
+#### Key learnings
+
+- **PV smoothing startup lag**: Initializing `pv_smoothing.current_irradiance = 0.0` causes PV to ramp up from zero on every restart even without any override. Fix: track `override_was_active: bool` — EMA blend-back only activates when releasing from an active override, otherwise use `natural_irradiance` directly.
+- **heater_setpoint_c in dispatcher only**: Plan called for it in both `tick()` and dispatcher. Simplified to dispatcher-only (binary ON/OFF based on current temp vs target). Avoids needing profile backup fields (`temp_min_c_profile`, etc.) on Heater struct.
+- **Partial-merge vs full-replace**: The old `POST /sim/override` was full-replace. New `POST /sim/inject` is partial-merge: absent=no change, null=release. The UI `handleOverrideChange` no longer needs to spread `{...simOverrides, ...patch}` — just send the patch.
+- **`controller_v2_steps.py` reads `GET /sim/override`**: The alias bridge `get_sim_override` (translating inject_state back to UserOverrides shape) must be kept until Group D migrates those BDD steps.

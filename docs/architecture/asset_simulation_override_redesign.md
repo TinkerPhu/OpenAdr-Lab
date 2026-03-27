@@ -291,6 +291,83 @@ fallback to `sim.assets.ev.plugged` for `ev_plugged` when no override is active.
 
 ---
 
+## Field Classification — What Belongs Where
+
+This chapter records the reasoning behind each old `UserOverrides` field — whether it was moved,
+dropped, or retained — and identifies gaps in the current `SimInjectState`.
+
+### Decision criteria
+
+A field belongs in `SimInjectState` if it is:
+- **Runtime state** — a physics quantity that can be observed and changed during operation
+  (SoC, temperature, plugged status, irradiance reading)
+- **Environment input** — external condition that the physical model consumes each tick
+  (outdoor temperature, base load, grid limits)
+
+A field belongs in **profile YAML only** if it is:
+- **Hardware specification** — a physical capability of the installed device that cannot change
+  at runtime (panel peak wattage, inverter capacity, EVSE breaker limit, heating element rating)
+
+A field belongs in **another API** if it is:
+- **User intent / planner input** — better expressed as a scheduling request
+  (`POST /user-requests` with `target_soc`, `latest_end`, `desired_power_kw`)
+
+A field should be **dropped entirely** if it is:
+- A raw setpoint bypass that ignores the planner — these were debug tools with no physical
+  meaning in a system with an active dispatcher
+
+---
+
+### Old `UserOverrides` field audit
+
+| Field | Old action | Decision | Reason |
+|---|---|---|---|
+| `pv_irradiance` | Set `PvInverter.irradiance` | **Retained** as `SimInjectState.pv_irradiance` (Behaviour B) | Valid environment input — a sensor reading, not a spec |
+| `ambient_temp_c` | Set `Heater.ambient_temp_c` | **Retained** as `SimInjectState.ambient_temp_c` (Behaviour C) | Valid environment input — outdoor temperature measured by sensor |
+| `ev_plugged` | Set `EvState.plugged` | **Retained** as `SimInjectState.ev_plugged` (Behaviour C) | Valid physical state — EV connectivity is observable and injectable |
+| `base_load_w` | Set `BaseLoad.baseline_kw` | **Retained** as `SimInjectState.base_load_kw` (Behaviour C); unit fixed to kW | Valid — simulates variable background load. See note below. |
+| `pv_rated_kw` | Mutated `PvInverter.rated_kw` | **Dropped → profile only** | Hardware spec: physical panel peak wattage. Cannot change at runtime. |
+| `ev_max_charge_kw` | Mutated `EvCharger.max_charge_kw` | **Dropped → profile only** | Hardware spec: EVSE breaker limit or on-board charger maximum. Cannot change at runtime. |
+| `heater_max_kw` | Mutated `Heater.max_kw` | **Dropped → profile only** | Hardware spec: heating element rated power. Cannot change at runtime. |
+| `heater_temp_min_c` | Mutated `Heater.temp_min_c` | **Dropped → profile only** | Installer-set thermostat safety floor. Not a runtime user action. |
+| `heater_temp_max_c` | Mutated `Heater.temp_max_c` | **Dropped → profile only** | Installer-set thermostat safety ceiling. Not a runtime user action. |
+| `ev_soc_target` | Mutated `EvCharger.soc_target` | **Dropped → `POST /user-requests`** | User intent expressed as a scheduling request with `target_soc`; planner handles it |
+| `ev_desired_kw` | Mutated `EvCharger.default_charge_kw` | **Dropped** | `default_charge_kw` was the idle setpoint before the planner existed. The planner now issues all setpoints. There is no "desired idle rate" separate from the active plan. |
+| `ev_force_kw` | Forced EV setpoint bypassing planner | **Dropped** | Raw setpoint bypass has no physical meaning with a dispatcher running. Force-testing a setpoint is done by pausing or cancelling the packet. |
+| `heater_force_kw` | Forced heater setpoint bypassing planner | **Dropped** | Same reason. `heater_setpoint_c` in SimInjectState replaces the intent correctly (comfort target → dispatcher translates to ON/OFF). |
+| `battery_force_kw` | Forced battery setpoint | **Dropped** | Was never implemented (control_schema returned it but no injection code existed). Battery is fully automatic. |
+| `pv_force_export_limit_kw` | Set `PvInverter.export_limit_kw` | **Dropped for now** | Per-inverter curtailment is a distinct concept from site-level `grid_export_limit_kw`. Could be re-added as `pv_export_limit_kw` (Behaviour C) if needed. See future candidates below. |
+
+---
+
+### `base_load_kw` — the `Option<f64>` convention
+
+The old `base_load_w` was a bare `f64`. There was no way to express "revert to the profile
+default" — sending `0` meant "set to 0 W", not "release override". An operator would need to
+know the profile value to restore it.
+
+The new `base_load_kw: Option<f64>` in `SimInjectState` solves this cleanly:
+
+- JSON `null` → Rust `None` → `tick()` uses `bl.baseline_kw_profile` (the original profile value,
+  stored separately from the mutable `bl.baseline_kw`)
+- JSON `3.5` → Rust `Some(3.5)` → `tick()` sets `bl.baseline_kw = 3.5`
+
+This `Option<f64>` / null-means-release pattern applies to **all** Behaviour C fields. The unit
+was also corrected from watts to kilowatts to match every other field in the system.
+
+---
+
+### What SHOULD be in `SimInjectState` but is not yet
+
+| Candidate field | Behaviour | Reason |
+|---|---|---|
+| `pv_export_limit_kw: Option<f64>` | C | Per-PV-inverter export curtailment. Distinct from `grid_export_limit_kw` (site-level). Real grid operators can curtail individual inverters via DRED or export limitation signals. Useful for testing PV curtailment scenarios where the grid limit is on the inverter rather than the site meter. |
+
+No other gaps identified. The existing fields cover all meaningful runtime-injectable quantities
+for the current asset set (EV, PV, battery, heater, base load, grid).
+
+---
+
 ## Pending Work
 
 ### Group D — BDD migration + alias cleanup
