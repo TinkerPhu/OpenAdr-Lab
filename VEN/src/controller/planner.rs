@@ -2,7 +2,7 @@
 ///
 /// Produces a Plan from TariffSnapshots + EnergyPackets + SimState.
 /// Phase 6 (penalty check) is deferred to Stage 4.
-use crate::assets::{AssetCapability, AssetState};
+use crate::assets::{AssetCapability, AssetConfig, AssetState};
 use crate::controller::reservation::{AssetReservation, ReservationLayer};
 use crate::entities::asset::{ComfortRate, PlanTrigger};
 use crate::entities::capacity::OadrCapacityState;
@@ -169,11 +169,16 @@ pub fn run_planner(
                     Some(l) => l,
                     None => continue,
                 };
+                let soc_ceiling_pct = match (&state, cfg) {
+                    (AssetState::Ev(_), AssetConfig::Ev(e)) => e.soc_target * 100.0,
+                    _ => 100.0,
+                };
                 rules_choose(
                     aid, phys_cap, avail_cap, &res,
                     slot.import_tariff_eur_kwh, slot, &firm_slot_windows, &pkts,
                     &allocated, &site_ctx, la, reservations,
                     median_tariff, profile.battery_config(), slot_h, now,
+                    soc_ceiling_pct,
                 )
             };
 
@@ -405,6 +410,7 @@ fn rules_choose(
     battery_cfg: Option<&BatteryConfig>,
     slot_h: f64,
     now: DateTime<Utc>,
+    soc_ceiling_pct: f64,
 ) -> (f64, PlanReason) {
     // Rule 1: reservation blocks all headroom
     if avail_cap.max_import_kw <= 1e-6 && avail_cap.max_export_kw >= -1e-6 {
@@ -415,7 +421,7 @@ fn rules_choose(
 
     // Rule 4: SoC/comfort ceiling (no import headroom left)
     if avail_cap.max_import_kw < 1e-6 {
-        return (0.0, PlanReason::SocCeiling { soc_pct: 100.0 });
+        return (0.0, PlanReason::SocCeiling { soc_pct: soc_ceiling_pct });
     }
 
     // Rule 5: SoC/comfort floor (no export headroom, but asset can generate)
