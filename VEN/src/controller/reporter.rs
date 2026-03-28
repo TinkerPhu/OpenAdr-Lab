@@ -30,8 +30,8 @@ fn points_to_power_ts(points: &[HistoryPoint], interpolation: Interpolation) -> 
 /// Extract SoC (0.0–1.0) from a `HistoryPoint`'s state, if the asset is EV or Battery.
 fn soc_from_point(p: &HistoryPoint) -> Option<f64> {
     match &p.state {
-        AssetState::Ev(s) => Some(s.soc_pct),
-        AssetState::Battery(s) => Some(s.soc_pct),
+        AssetState::Ev(s) => Some(s.soc),
+        AssetState::Battery(s) => Some(s.soc),
         _ => None,
     }
 }
@@ -154,10 +154,10 @@ pub fn build_measurement_report(event: &Value, sim: &SimState, ven_name: &str) -
     // Add EV SoC if available
     if let Some(ev_entry) = sim.asset("ev") {
         if let Some(last) = ev_entry.history.latest() {
-            if let Some(soc_pct) = soc_from_point(last) {
+            if let Some(soc) = soc_from_point(last) {
                 payloads.push(json!({
                     "type": "STORAGE_CHARGE_LEVEL",
-                    "values": [format!("{:.1}", soc_pct * 100.0)]
+                    "values": [format!("{:.1}", soc * 100.0)]
                 }));
             }
         }
@@ -598,12 +598,12 @@ mod tests {
         let now_s = DateTime::from_timestamp(Utc::now().timestamp(), 0).unwrap();
         let base = now_s - Duration::seconds(max_offset);
         let mut buf = AssetHistoryBuffer::new(3600);
-        for &(offset, power_kw, soc_pct) in rows {
+        for &(offset, power_kw, soc) in rows {
             buf.push(HistoryPoint {
                 ts: base + Duration::seconds(offset),
                 power_kw,
                 state: AssetState::Ev(EvState {
-                    soc_pct,
+                    soc,
                     plugged: true,
                     actual_power_kw: power_kw,
                 }),
@@ -612,7 +612,7 @@ mod tests {
         crate::simulator::AssetEntry {
             id: id.to_string(),
             state: AssetState::Ev(EvState {
-                soc_pct: 0.0,
+                soc: 0.0,
                 plugged: true,
                 actual_power_kw: 0.0,
             }),
@@ -694,7 +694,7 @@ mod tests {
             ts: ts(0),
             power_kw: 7.0,
             state: AssetState::Ev(EvState {
-                soc_pct: 0.4,
+                soc: 0.4,
                 plugged: true,
                 actual_power_kw: 7.0,
             }),

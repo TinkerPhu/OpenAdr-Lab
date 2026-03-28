@@ -49,7 +49,7 @@ pub fn compute_envelope(
         match config {
             AssetConfig::Battery(b) => {
                 let soc = match &entry.state {
-                    AssetState::Battery(s) => s.soc_pct,
+                    AssetState::Battery(s) => s.soc,
                     _ => continue,
                 };
                 available_discharge_kwh += (soc - b.min_soc).max(0.0) * b.capacity_kwh;
@@ -57,7 +57,7 @@ pub fn compute_envelope(
             }
             AssetConfig::Ev(e) => {
                 let (soc, plugged) = match &entry.state {
-                    AssetState::Ev(s) => (s.soc_pct, s.plugged),
+                    AssetState::Ev(s) => (s.soc, s.plugged),
                     _ => continue,
                 };
                 if plugged {
@@ -133,10 +133,10 @@ mod tests {
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    fn make_battery_entry(id: &str, soc_pct: f64, last_power_kw: f64) -> AssetEntry {
+    fn make_battery_entry(id: &str, soc: f64, last_power_kw: f64) -> AssetEntry {
         AssetEntry {
             id: id.to_string(),
-            state: AssetState::Battery(BatteryState { soc_pct, actual_power_kw: last_power_kw }),
+            state: AssetState::Battery(BatteryState { soc, actual_power_kw: last_power_kw }),
             setpoint_kw: last_power_kw,
             last_power_kw,
             energy: EnergyCounter::new(),
@@ -158,10 +158,10 @@ mod tests {
         })
     }
 
-    fn make_ev_entry(id: &str, soc_pct: f64, plugged: bool, last_power_kw: f64) -> AssetEntry {
+    fn make_ev_entry(id: &str, soc: f64, plugged: bool, last_power_kw: f64) -> AssetEntry {
         AssetEntry {
             id: id.to_string(),
-            state: AssetState::Ev(EvState { soc_pct, plugged, actual_power_kw: last_power_kw }),
+            state: AssetState::Ev(EvState { soc, plugged, actual_power_kw: last_power_kw }),
             setpoint_kw: last_power_kw,
             last_power_kw,
             energy: EnergyCounter::new(),

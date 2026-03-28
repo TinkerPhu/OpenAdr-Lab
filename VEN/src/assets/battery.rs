@@ -24,7 +24,7 @@ pub struct Battery {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatteryState {
     /// State of charge in [0.0, 1.0]. 0.0 = empty, 1.0 = full.
-    pub soc_pct: f64,
+    pub soc: f64,
     /// Actual power last tick. Positive = charging (import). Negative = discharging (export).
     pub actual_power_kw: f64,
 }
@@ -42,7 +42,7 @@ impl Battery {
 
     pub fn initial_state(cfg: &BatteryConfig) -> BatteryState {
         BatteryState {
-            soc_pct: cfg.initial_soc,
+            soc: cfg.initial_soc,
             actual_power_kw: 0.0,
         }
     }
@@ -58,9 +58,9 @@ impl Battery {
         let clamped = setpoint_kw
             .max(-self.max_discharge_kw)
             .min(self.max_charge_kw);
-        let actual = if clamped > 0.0 && state.soc_pct >= 1.0 {
+        let actual = if clamped > 0.0 && state.soc >= 1.0 {
             0.0
-        } else if clamped < 0.0 && state.soc_pct <= self.min_soc {
+        } else if clamped < 0.0 && state.soc <= self.min_soc {
             0.0
         } else {
             clamped
@@ -72,10 +72,10 @@ impl Battery {
             } else {
                 1.0
             };
-        let new_soc = (state.soc_pct + energy_kwh / self.capacity_kwh).clamp(0.0, 1.0);
+        let new_soc = (state.soc + energy_kwh / self.capacity_kwh).clamp(0.0, 1.0);
         (
             BatteryState {
-                soc_pct: new_soc,
+                soc: new_soc,
                 actual_power_kw: actual,
             },
             actual,
@@ -85,12 +85,12 @@ impl Battery {
     /// Point-in-time feasible power range.
     pub fn capability_inner(&self, state: &BatteryState) -> AssetCapability {
         AssetCapability {
-            max_export_kw: if state.soc_pct <= self.min_soc {
+            max_export_kw: if state.soc <= self.min_soc {
                 0.0
             } else {
                 -self.max_discharge_kw
             },
-            max_import_kw: if state.soc_pct >= 1.0 {
+            max_import_kw: if state.soc >= 1.0 {
                 0.0
             } else {
                 self.max_charge_kw
@@ -104,7 +104,7 @@ impl Battery {
 
     pub fn state_values(&self, state: &BatteryState) -> HashMap<String, f64> {
         let mut m = HashMap::new();
-        m.insert("soc".into(), state.soc_pct);
+        m.insert("soc".into(), state.soc);
         m.insert("capacity_kwh".into(), self.capacity_kwh);
         m.insert("max_charge_kw".into(), self.max_charge_kw);
         m.insert("max_discharge_kw".into(), self.max_discharge_kw);
@@ -120,7 +120,7 @@ impl Battery {
             max_export_kw: self.max_discharge_kw,
             is_flexible: true,
             energy_state: Some(EnergyState {
-                current_kwh: state.soc_pct * self.capacity_kwh,
+                current_kwh: state.soc * self.capacity_kwh,
                 min_kwh: self.min_soc * self.capacity_kwh,
                 max_kwh: self.capacity_kwh,
             }),
@@ -134,7 +134,7 @@ impl Battery {
 
     pub fn reset(&self, state: &mut BatteryState, values: HashMap<String, f64>) {
         if let Some(&soc) = values.get("soc") {
-            state.soc_pct = soc.clamp(0.0, 1.0);
+            state.soc = soc.clamp(0.0, 1.0);
         }
     }
 
@@ -159,7 +159,7 @@ impl Battery {
         let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
 
         let mut t = now;
-        let mut soc = state.soc_pct;
+        let mut soc = state.soc;
 
         while t < end {
             let kw = if setpoint > 0.0 && soc >= 1.0 {
@@ -225,7 +225,7 @@ impl Battery {
         desired_power_kw: Option<f64>,
     ) -> Option<(f64, f64)> {
         let target = target_soc.unwrap_or(1.0);
-        let delta = (target - state.soc_pct).max(0.0);
+        let delta = (target - state.soc).max(0.0);
         let kwh = delta * self.capacity_kwh;
         if kwh < 1e-6 {
             return None;
@@ -308,7 +308,7 @@ mod tests {
             let (ns, _) = bat.step_inner(&state, 10.0, Duration::seconds(1));
             state = ns;
         }
-        assert!((state.soc_pct - 1.0).abs() < 0.001);
+        assert!((state.soc - 1.0).abs() < 0.001);
         let (_, actual) = bat.step_inner(&state, 10.0, Duration::seconds(1));
         assert_eq!(actual, 0.0);
     }

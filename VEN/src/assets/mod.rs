@@ -553,8 +553,8 @@ impl<'a> Asset for AssetHandle<'a> {
 mod handle_tests {
     use super::*;
 
-    fn make_battery_state(soc_pct: f64, power_kw: f64) -> AssetState {
-        AssetState::Battery(BatteryState { soc_pct, actual_power_kw: power_kw })
+    fn make_battery_state(soc: f64, power_kw: f64) -> AssetState {
+        AssetState::Battery(BatteryState { soc, actual_power_kw: power_kw })
     }
 
     fn make_battery_config(capacity_kwh: f64, max_kw: f64) -> AssetConfig {
@@ -584,7 +584,7 @@ mod handle_tests {
         let handle = AssetHandle { config: &config, id: "bat", state: &state, history: &history };
         match handle.current_state() {
             AssetState::Battery(s) => {
-                assert!((s.soc_pct - 0.7).abs() < 1e-9);
+                assert!((s.soc - 0.7).abs() < 1e-9);
                 assert!((s.actual_power_kw - 2.0).abs() < 1e-9);
             }
             _ => panic!("expected Battery state"),
@@ -629,7 +629,7 @@ mod handle_tests {
         let (new_state, actual_kw) = handle.step(&state, 5.0, Duration::seconds(3600));
         // 1 hour at 5 kW on 10 kWh battery → SoC goes from 0.5 to 1.0 (full)
         match new_state {
-            AssetState::Battery(s) => assert!((s.soc_pct - 1.0).abs() < 1e-6),
+            AssetState::Battery(s) => assert!((s.soc - 1.0).abs() < 1e-6),
             _ => panic!("expected Battery state"),
         }
         assert!(actual_kw > 0.0);
