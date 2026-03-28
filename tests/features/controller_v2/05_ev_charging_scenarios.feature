@@ -11,10 +11,9 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
     And I inject ev_soc_target 0.70 via sim inject
     And I POST an EV packet with target_soc 0.85, desired_power_kw 7.0, and latest_end_h 8.0
     When I wait for a "SOC_CEILING" PlanStep for asset "ev"
-    Then at least one PlanStep for asset "ev" has reason kind "SOC_CEILING"
     When I inject ev_soc_target 0.85 via sim inject
     And I wait for a "FIRM_OBLIGATION" PlanStep for asset "ev"
-    Then at least one PlanStep for asset "ev" has reason kind "FIRM_OBLIGATION"
+    Then that PlanStep has setpoint_kw greater than 0.0
 
   # ── b) IMPORT_CAPACITY_LIMIT caps EV allocation in plan ─────────────────────
   Scenario: (b) IMPORT_CAPACITY_LIMIT event caps EV allocation in plan firm slots
@@ -46,7 +45,6 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
     And I inject ev_soc_target 0.70 via sim inject
     And I POST a user request for EV with target_soc 0.85 and latest_end in 8 hours
     When I wait for a "SOC_CEILING" PlanStep for asset "ev"
-    Then at least one PlanStep for asset "ev" has reason kind "SOC_CEILING"
 
   # ── e) User request capped by IMPORT_CAPACITY_LIMIT ─────────────────────────
   Scenario: (e) User request capped by IMPORT_CAPACITY_LIMIT event
@@ -80,8 +78,6 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
     And I create a rate-system program and save its ID
     And I create a cheap-then-expensive 2-interval PRICE event for the saved program
     When I wait for a "CHEAP_TARIFF" PlanStep for asset "battery"
-    Then at least one PlanStep for asset "battery" has reason kind "CHEAP_TARIFF"
-    And that PlanStep has setpoint_kw greater than 0.0
+    Then that PlanStep has setpoint_kw greater than 0.0
     When I wait for a "EXPENSIVE_TARIFF" PlanStep for asset "battery"
-    Then at least one PlanStep for asset "battery" has reason kind "EXPENSIVE_TARIFF"
-    And that PlanStep has setpoint_kw less than 0.0
+    Then that PlanStep has setpoint_kw less than 0.0
