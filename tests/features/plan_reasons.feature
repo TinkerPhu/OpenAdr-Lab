@@ -24,13 +24,15 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
 
   # ── Scenario 3: EV charges under deadline pressure ───────────────────────
   Scenario: EV charges under deadline pressure
-    Given I POST an EV packet with target_soc 0.8, desired_power_kw 1.0, and latest_end_h 1.0
+    Given I inject ev_soc 0.5 via sim inject
+    And I POST an EV packet with target_soc 0.8, desired_power_kw 1.0, and latest_end_h 1.0
     When I wait for the VEN /plan to have steps for asset "ev"
     Then at least one PlanStep for asset "ev" has reason kind "FIRM_OBLIGATION"
     And that PlanStep has setpoint_kw greater than 0.0
 
   # ── Scenario 4: Battery is idle with no active packets and median tariff ──
   Scenario: Battery is idle when no packets and tariff is at median
+    Given I inject pv irradiance 0.0 via sim inject
     When I wait for all PlanSteps for asset "battery" to have reason kind "IDLE"
     Then all PlanSteps for asset "battery" have reason kind "IDLE"
 

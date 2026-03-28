@@ -412,6 +412,14 @@ fn rules_choose(
     now: DateTime<Utc>,
     soc_ceiling_pct: f64,
 ) -> (f64, PlanReason) {
+    // Rule 4a: SoC ceiling — physics itself prevents import AND export is negligible.
+    // Must come before Rule 1 so that EV-at-soc-target emits SocCeiling, not FirmObligation.
+    // Condition: phys_cap (not avail_cap) prevents import, and the asset has no meaningful
+    // export capability either. Reservations cannot grant capability that physics denies.
+    if phys_cap.max_import_kw < 1e-6 && phys_cap.max_export_kw > -1e-3 {
+        return (0.0, PlanReason::SocCeiling { soc_pct: soc_ceiling_pct });
+    }
+
     // Rule 1: reservation blocks all headroom
     if avail_cap.max_import_kw <= 1e-6 && avail_cap.max_export_kw >= -1e-6 {
         let source = reservations.primary_source(asset_id, slot.start);
@@ -419,7 +427,7 @@ fn rules_choose(
         return (0.0, PlanReason::FirmObligation { source, required_kw });
     }
 
-    // Rule 4: SoC/comfort ceiling (no import headroom left)
+    // Rule 4: SoC/comfort ceiling (no import headroom left, but asset can still export)
     if avail_cap.max_import_kw < 1e-6 {
         return (0.0, PlanReason::SocCeiling { soc_pct: soc_ceiling_pct });
     }

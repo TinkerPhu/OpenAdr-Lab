@@ -31,6 +31,18 @@ def step_when_battery_soc_reset(context, soc):
     )
 
 
+@given("I inject ev_soc {soc:f} via sim inject")
+def step_given_inject_ev_soc(context, soc):
+    r = ven_post("/sim/inject", json={"ev_soc": soc})
+    r.raise_for_status()
+
+
+@given("I inject pv irradiance {irradiance:f} via sim inject")
+def step_given_inject_pv_irradiance(context, irradiance):
+    r = ven_post("/sim/inject", json={"pv_irradiance": irradiance})
+    r.raise_for_status()
+
+
 @when("I POST a sim override setting pv_irradiance to {irradiance:f}")
 def step_sim_override_pv_irradiance(context, irradiance):
     r = ven_post("/sim/inject", json={"pv_irradiance": irradiance})
