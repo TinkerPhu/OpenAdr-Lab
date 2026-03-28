@@ -364,7 +364,7 @@ mod tests {
         (entry, cfg)
     }
 
-    /// Create an EV AssetEntry + AssetConfig with history rows `(offset_s, power_kw, soc_pct)`.
+    /// Create an EV AssetEntry + AssetConfig with history rows `(offset_s, power_kw, soc)`.
     fn make_ev_entry(id: &str, rows: &[(i64, f64, f64)]) -> (AssetEntry, AssetConfig) {
         let cfg = AssetConfig::Ev(EvCharger {
             max_charge_kw: 11.0,
@@ -378,7 +378,7 @@ mod tests {
         let mut entry = AssetEntry {
             id: id.to_string(),
             state: AssetState::Ev(EvState {
-                soc_pct: 0.5,
+                soc: 0.5,
                 plugged: true,
                 actual_power_kw: 0.0,
             }),
@@ -395,7 +395,7 @@ mod tests {
                 ts: ts(*offset),
                 power_kw: *power,
                 state: AssetState::Ev(EvState {
-                    soc_pct: *soc,
+                    soc: *soc,
                     plugged: true,
                     actual_power_kw: *power,
                 }),

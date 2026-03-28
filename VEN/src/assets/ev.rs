@@ -29,7 +29,7 @@ pub struct EvCharger {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvState {
     /// State of charge in [0.0, 1.0].
-    pub soc_pct: f64,
+    pub soc: f64,
     pub plugged: bool,
     /// Actual power last tick. Positive = charging (import). Negative = V2G (export).
     pub actual_power_kw: f64,
@@ -50,7 +50,7 @@ impl EvCharger {
 
     pub fn initial_state(cfg: &EvConfig) -> EvState {
         EvState {
-            soc_pct: cfg.initial_soc,
+            soc: cfg.initial_soc,
             plugged: true,
             actual_power_kw: cfg.max_charge_kw,
         }
@@ -68,18 +68,18 @@ impl EvCharger {
             );
         }
         let kw = setpoint_kw.clamp(-self.max_discharge_kw, self.max_charge_kw);
-        let kw = if kw > 0.0 && state.soc_pct >= self.soc_target {
+        let kw = if kw > 0.0 && state.soc >= self.soc_target {
             0.0
-        } else if kw < 0.0 && state.soc_pct <= self.min_soc {
+        } else if kw < 0.0 && state.soc <= self.min_soc {
             0.0
         } else {
             kw
         };
         let dt_h = dt.num_milliseconds() as f64 / 3_600_000.0;
-        let new_soc = (state.soc_pct + (kw * dt_h) / self.battery_kwh).clamp(0.0, 1.0);
+        let new_soc = (state.soc + (kw * dt_h) / self.battery_kwh).clamp(0.0, 1.0);
         (
             EvState {
-                soc_pct: new_soc,
+                soc: new_soc,
                 plugged: state.plugged,
                 actual_power_kw: kw,
             },
@@ -96,12 +96,12 @@ impl EvCharger {
             };
         }
         AssetCapability {
-            max_export_kw: if state.soc_pct <= self.min_soc {
+            max_export_kw: if state.soc <= self.min_soc {
                 0.0
             } else {
                 -self.max_discharge_kw
             },
-            max_import_kw: if state.soc_pct >= 1.0 {
+            max_import_kw: if state.soc >= 1.0 {
                 0.0
             } else {
                 self.max_charge_kw
@@ -115,7 +115,7 @@ impl EvCharger {
 
     pub fn state_values(&self, state: &EvState) -> HashMap<String, f64> {
         let mut m = HashMap::new();
-        m.insert("soc".into(), state.soc_pct);
+        m.insert("soc".into(), state.soc);
         m.insert("plugged".into(), if state.plugged { 1.0 } else { 0.0 });
         m.insert("max_charge_kw".into(), self.max_charge_kw);
         m.insert("soc_target".into(), self.soc_target);
@@ -130,7 +130,7 @@ impl EvCharger {
             max_export_kw: self.max_discharge_kw,
             is_flexible: true,
             energy_state: Some(EnergyState {
-                current_kwh: state.soc_pct * self.battery_kwh,
+                current_kwh: state.soc * self.battery_kwh,
                 min_kwh: 0.0,
                 max_kwh: self.battery_kwh,
             }),
@@ -161,7 +161,7 @@ impl EvCharger {
 
     pub fn reset(&self, state: &mut EvState, values: HashMap<String, f64>) {
         if let Some(&soc) = values.get("soc") {
-            state.soc_pct = soc.clamp(0.0, 1.0);
+            state.soc = soc.clamp(0.0, 1.0);
         }
     }
 
@@ -217,7 +217,7 @@ impl EvCharger {
         desired_power_kw: Option<f64>,
     ) -> Option<(f64, f64)> {
         let target = target_soc.unwrap_or(self.soc_target);
-        let delta = (target - state.soc_pct).max(0.0);
+        let delta = (target - state.soc).max(0.0);
         let kwh = delta * self.battery_kwh;
         if kwh < 1e-6 {
             return None;
@@ -247,7 +247,7 @@ impl Asset for EvCharger {
 mod tests {
     use super::*;
 
-    fn make_ev(plugged: bool, soc_pct: f64, actual_power_kw: f64) -> (EvCharger, EvState) {
+    fn make_ev(plugged: bool, soc: f64, actual_power_kw: f64) -> (EvCharger, EvState) {
         let cfg = EvCharger {
             max_charge_kw: 7.4,
             max_discharge_kw: 0.0,
@@ -258,7 +258,7 @@ mod tests {
             min_soc: 0.0,
         };
         let state = EvState {
-            soc_pct,
+            soc,
             plugged,
             actual_power_kw,
         };
@@ -311,7 +311,7 @@ mod tests {
             let (ns, _) = ev.step_inner(&state, 10.0, Duration::seconds(1));
             state = ns;
         }
-        assert!((state.soc_pct - 1.0).abs() < 0.001);
+        assert!((state.soc - 1.0).abs() < 0.001);
         let (_, actual) = ev.step_inner(&state, 10.0, Duration::seconds(1));
         assert_eq!(actual, 0.0);
     }
@@ -325,9 +325,9 @@ mod tests {
             state = ns;
         }
         assert!(
-            state.soc_pct <= 0.8 + 0.01,
-            "soc_pct should not exceed soc_target (0.8), got {}",
-            state.soc_pct
+            state.soc <= 0.8 + 0.01,
+            "soc should not exceed soc_target (0.8), got {}",
+            state.soc
         );
         let (_, actual) = ev.step_inner(&state, 7.4, Duration::seconds(1));
         assert_eq!(actual, 0.0, "charging must stop at soc_target");
@@ -345,7 +345,7 @@ mod tests {
             min_soc: 0.0,
         };
         let mut state = EvState {
-            soc_pct: 0.01,
+            soc: 0.01,
             plugged: true,
             actual_power_kw: 0.0,
         };
@@ -353,7 +353,7 @@ mod tests {
             let (ns, _) = ev.step_inner(&state, -10.0, Duration::seconds(1));
             state = ns;
         }
-        assert!((state.soc_pct - 0.0).abs() < 0.001);
+        assert!((state.soc - 0.0).abs() < 0.001);
         let (_, actual) = ev.step_inner(&state, -10.0, Duration::seconds(1));
         assert_eq!(actual, 0.0);
     }
