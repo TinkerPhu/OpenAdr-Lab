@@ -87,6 +87,7 @@ impl BaseLoad {
             min: Some(0.0),
             max: Some(20.0),
             unit: "kW".into(),
+            display_scale: None,
         }]
     }
 

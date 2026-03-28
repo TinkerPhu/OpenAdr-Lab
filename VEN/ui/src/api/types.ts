@@ -125,6 +125,8 @@ export type ControlDescriptor = {
   min: number | null;
   max: number | null;
   unit: string;
+  /** Multiply raw value by this for display; divide on send. e.g. 100 renders 0.8 as "80 %" */
+  display_scale?: number;
 };
 
 // ─── HEMS Controller types ────────────────────────────────────────────────────

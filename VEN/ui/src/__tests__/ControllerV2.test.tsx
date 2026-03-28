@@ -40,8 +40,9 @@ const mockSetInject = vi.fn(() => ({ mutate: vi.fn() }));
 
 // Minimal EV schema for testing schema-driven AssetRightSection
 const evSchema = [
-  { key: "ev_plugged", label: "Plugged In", kind: "Switch", min: null, max: null, unit: "" },
-  { key: "ev_desired_kw", label: "Charge Rate", kind: "Slider", min: 0, max: 11, unit: "kW" },
+  { key: "ev_plugged", label: "Plugged In", kind: "switch", min: null, max: null, unit: "" },
+  { key: "ev_desired_kw", label: "Charge Rate", kind: "slider", min: 0, max: 11, unit: "kW" },
+  { key: "ev_soc_target", label: "Charge Target", kind: "slider", min: 0.1, max: 1.0, unit: "%", display_scale: 100 },
 ];
 
 vi.mock("../api/hooks", () => ({
@@ -331,5 +332,12 @@ describe("ControllerV2Page — simulation controls", () => {
   it("shows battery SoC slider", () => {
     renderPage();
     expect(screen.getByTestId("ctrl-battery-soc")).toBeInTheDocument();
+  });
+
+  it("shows EV Charge Target slider with % display (display_scale=100)", () => {
+    renderPage();
+    expect(screen.getByTestId("ctrl-ev-soc-target")).toBeInTheDocument();
+    // baseSim has ev.soc_target = 0.9; display_scale=100 → label shows "90 %"
+    expect(screen.getByText(/Charge Target:\s*90 %/)).toBeInTheDocument();
   });
 });

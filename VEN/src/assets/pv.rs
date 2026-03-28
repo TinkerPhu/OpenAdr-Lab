@@ -98,6 +98,7 @@ impl PvInverter {
                 min: Some(0.0),
                 max: Some(1.0),
                 unit: "".into(),
+                display_scale: None,
             },
             ControlDescriptor {
                 key: "pv_irradiance_alpha".into(),
@@ -106,6 +107,7 @@ impl PvInverter {
                 min: Some(0.01),
                 max: Some(1.0),
                 unit: "".into(),
+                display_scale: None,
             },
         ]
     }
