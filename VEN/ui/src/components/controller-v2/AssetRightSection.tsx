@@ -46,6 +46,10 @@ export function AssetRightSection({
       const p = sim?.assets?.["ev"]?.["plugged"];
       return p !== undefined ? p !== 0 : null;
     }
+    if (key === "ev_soc_target") {
+      const t = sim?.assets?.["ev"]?.["soc_target"];
+      return typeof t === "number" ? t : null;
+    }
     return null;
   }
 

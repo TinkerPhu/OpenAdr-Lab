@@ -135,6 +135,7 @@ impl Heater {
             min: Some(self.temp_min_c),
             max: Some(self.temp_max_c),
             unit: "°C".into(),
+            display_scale: None,
         }]
     }
 

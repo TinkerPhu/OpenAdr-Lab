@@ -12,7 +12,7 @@ interface DynamicControlProps {
  * data-testid uses hyphen-normalised key: ctrl-{key.replace(/_/g, '-')}
  */
 export function DynamicControl({ descriptor, value, onChange }: DynamicControlProps) {
-  const { key, label, kind, min, max, unit } = descriptor;
+  const { key, label, kind, min, max, unit, display_scale } = descriptor;
   const testId = `ctrl-${key.replace(/_/g, "-")}`;
 
   if (kind === "switch") {
@@ -32,21 +32,27 @@ export function DynamicControl({ descriptor, value, onChange }: DynamicControlPr
   }
 
   if (kind === "slider") {
+    const scale = display_scale ?? 1;
     const numVal = typeof value === "number" ? value : (min ?? 0);
+    const displayVal = numVal * scale;
+    const displayMin = (min ?? 0) * scale;
+    const displayMax = (max ?? 1) * scale;
+    const step = scale > 1 ? 1 : (max != null && min != null ? (max - min) / 100 : 1);
     return (
       <Box>
         <Typography variant="caption">
-          {label}: {unit ? `${numVal.toFixed(2)} ${unit}` : numVal.toFixed(2)}
+          {label}: {unit ? `${displayVal.toFixed(0)} ${unit}` : displayVal.toFixed(2)}
         </Typography>
         <Slider
           size="small"
-          min={min ?? 0}
-          max={max ?? 100}
-          step={(max != null && min != null) ? (max - min) / 100 : 1}
-          value={numVal}
+          min={displayMin}
+          max={displayMax}
+          step={step}
+          value={displayVal}
           data-testid={testId}
-          onChange={(_e, v) => onChange(key, v as number)}
+          onChange={(_e, v) => onChange(key, (v as number) / scale)}
           valueLabelDisplay="auto"
+          valueLabelFormat={(v) => unit ? `${v.toFixed(0)} ${unit}` : `${v.toFixed(2)}`}
         />
       </Box>
     );
