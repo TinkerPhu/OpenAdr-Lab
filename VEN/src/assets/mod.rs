@@ -63,6 +63,10 @@ pub struct ControlDescriptor {
     pub min: Option<f64>,
     pub max: Option<f64>,
     pub unit: String,
+    /// UI display multiplier: raw value × display_scale for display; divide by scale on send.
+    /// E.g. display_scale=100.0 renders SoC fraction 0.8 as "80 %".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_scale: Option<f64>,
 }
 
 // ─── Phase A new types ────────────────────────────────────────────────────────
