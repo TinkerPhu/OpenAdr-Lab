@@ -34,7 +34,8 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
   # --- Allocation ---
 
   Scenario: Plan allocates EV to firm slots given a cheap PRICE event
-    Given I have a VTN token as "any-business"
+    Given I inject ev_soc 0.5 via sim inject
+    And I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
     When I wait for the VEN /plan to have an EV allocation in firm_slots
@@ -49,7 +50,8 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
   # --- Flexible envelopes ---
 
   Scenario: Plan has flexibility envelopes for far-horizon unscheduled energy
-    Given I have a VTN token as "any-business"
+    Given I inject ev_soc 0.5 via sim inject
+    And I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
     When I wait for the VEN /plan to have envelopes
