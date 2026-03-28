@@ -101,7 +101,7 @@ impl EvCharger {
             } else {
                 -self.max_discharge_kw
             },
-            max_import_kw: if state.soc >= 1.0 {
+            max_import_kw: if state.soc >= self.soc_target {
                 0.0
             } else {
                 self.max_charge_kw
@@ -356,5 +356,22 @@ mod tests {
         assert!((state.soc - 0.0).abs() < 0.001);
         let (_, actual) = ev.step_inner(&state, -10.0, Duration::seconds(1));
         assert_eq!(actual, 0.0);
+    }
+
+    #[test]
+    fn ev_capability_zero_at_soc_target() {
+        // When soc == soc_target the BMS ceiling is hit: capability must report
+        // max_import_kw = 0 so the planner fires SocCeiling, not a phantom allocation.
+        let (ev, state) = make_ev(true, 0.8, 0.0); // soc_target = 0.8 in make_ev
+        let cap = ev.capability_inner(&state);
+        assert_eq!(cap.max_import_kw, 0.0, "capability must be 0 when soc equals soc_target");
+    }
+
+    #[test]
+    fn ev_capability_positive_below_soc_target() {
+        let (ev, state) = make_ev(true, 0.5, 0.0); // soc 0.5 < soc_target 0.8
+        let cap = ev.capability_inner(&state);
+        assert!(cap.max_import_kw > 0.0, "capability must be positive when soc < soc_target");
+        assert!((cap.max_import_kw - ev.max_charge_kw).abs() < 1e-9);
     }
 }
