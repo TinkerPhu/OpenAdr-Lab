@@ -76,7 +76,7 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
     And I inject pv irradiance 0.0 via sim inject
     And the battery SoC is reset to 0.5
     And I create a rate-system program and save its ID
-    And I create a cheap-then-expensive 2-interval PRICE event for the saved program
+    And I create a cheap-then-expensive PRICE event for the saved program
     When I wait for both "EXPENSIVE_TARIFF" and "CHEAP_TARIFF" PlanSteps for asset "battery"
     Then a "EXPENSIVE_TARIFF" PlanStep for "battery" has setpoint_kw less than 0.0
     And a "CHEAP_TARIFF" PlanStep for "battery" has setpoint_kw greater than 0.0
