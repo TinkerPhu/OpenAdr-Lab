@@ -107,7 +107,70 @@ def step_wait_for_plan_import_cap(context, limit):
     )
 
 
+# ── When: combined tariff-reason poll for scenario g ────────────────────────
+
+@when('I wait for both "EXPENSIVE_TARIFF" and "CHEAP_TARIFF" PlanSteps for asset "{asset_id}"')
+def step_wait_for_both_tariff_reasons(context, asset_id):
+    """Poll until the plan has BOTH EXPENSIVE_TARIFF and CHEAP_TARIFF for the asset
+    in the same plan snapshot.  This avoids race conditions when they occupy
+    different slots of the same plan cycle."""
+    def fetch():
+        r = ven_get("/plan")
+        if not r.ok:
+            return None
+        plan = r.json()
+        steps = plan.get("steps", [])
+        bat_steps = [s for s in steps if s.get("asset_id") == asset_id]
+        kinds = {s.get("reason", {}).get("kind") for s in bat_steps}
+        # Diagnostic: print the distribution every call for debugging
+        if bat_steps:
+            from collections import Counter
+            cnt = Counter(s.get("reason", {}).get("kind") for s in bat_steps)
+            print(f"  [debug] {asset_id} reason counts: {dict(cnt)}")
+        if "EXPENSIVE_TARIFF" in kinds and "CHEAP_TARIFF" in kinds:
+            context.bat_both_plan = plan
+            return plan
+        return None
+
+    poll_until(
+        fetch,
+        lambda x: x is not None,
+        timeout=120,
+        description=f"VEN /plan has both EXPENSIVE_TARIFF and CHEAP_TARIFF for '{asset_id}'",
+    )
+
+
 # ── Then: plan allocation assertions ─────────────────────────────────────────
+
+@then('a "{reason_kind}" PlanStep for "{asset_id}" has setpoint_kw less than 0.0')
+def step_plan_step_setpoint_lt(context, reason_kind, asset_id):
+    """Assert that context.bat_both_plan contains a step with the given reason and negative setpoint."""
+    plan = context.bat_both_plan
+    steps = [
+        s for s in plan.get("steps", [])
+        if s.get("asset_id") == asset_id and s.get("reason", {}).get("kind") == reason_kind
+    ]
+    assert steps, f"No {reason_kind} step found for asset '{asset_id}'"
+    assert any(s.get("setpoint_kw", 0.0) < -1e-6 for s in steps), (
+        f"No {reason_kind} step for '{asset_id}' has setpoint_kw < 0. "
+        f"Values: {[s.get('setpoint_kw') for s in steps]}"
+    )
+
+
+@then('a "{reason_kind}" PlanStep for "{asset_id}" has setpoint_kw greater than 0.0')
+def step_plan_step_setpoint_gt(context, reason_kind, asset_id):
+    """Assert that context.bat_both_plan contains a step with the given reason and positive setpoint."""
+    plan = context.bat_both_plan
+    steps = [
+        s for s in plan.get("steps", [])
+        if s.get("asset_id") == asset_id and s.get("reason", {}).get("kind") == reason_kind
+    ]
+    assert steps, f"No {reason_kind} step found for asset '{asset_id}'"
+    assert any(s.get("setpoint_kw", 0.0) > 1e-6 for s in steps), (
+        f"No {reason_kind} step for '{asset_id}' has setpoint_kw > 0. "
+        f"Values: {[s.get('setpoint_kw') for s in steps]}"
+    )
+
 
 @then("all EV allocations in capped firm slots are at most {kw:f} kW")
 def step_ev_alloc_in_capped_slots(context, kw):
