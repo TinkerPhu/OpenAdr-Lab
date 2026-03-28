@@ -121,8 +121,14 @@ pub fn run_planner(
     };
 
     {
-        let pv_sum: f64 = pv_kw_map.values().sum();
-        let pv_max: f64 = pv_kw_map.values().cloned().fold(0.0_f64, f64::max);
+        // pv_kw_map covers the full horizon (24h); firm slots only cover near_horizon_h.
+        // Report PV and surplus stats scoped to the firm slots for accurate diagnostics.
+        let firm_pv_sum: f64 = firm_slots.iter()
+            .map(|s| pv_kw_map.get(&s.start.timestamp()).copied().unwrap_or(0.0))
+            .sum();
+        let firm_pv_peak: f64 = firm_slots.iter()
+            .map(|s| pv_kw_map.get(&s.start.timestamp()).copied().unwrap_or(0.0))
+            .fold(0.0_f64, f64::max);
         let surplus_sum: f64 = firm_slots.iter().map(|s| s.surplus_available_kw).sum();
         let bat_cfg = profile.battery_config();
         let eff_sqrt = bat_cfg.map(|b| b.round_trip_efficiency.sqrt()).unwrap_or(1.0);
@@ -132,8 +138,8 @@ pub fn run_planner(
             tariff_max = firm_slots.iter().map(|s| s.import_tariff_eur_kwh).fold(f64::MIN, f64::max),
             cheap_threshold = median_tariff * eff_sqrt,
             expensive_threshold = median_tariff / eff_sqrt,
-            pv_total_kw = pv_sum,
-            pv_peak_kw = pv_max,
+            firm_pv_sum_kw = firm_pv_sum,
+            firm_pv_peak_kw = firm_pv_peak,
             surplus_total_kw = surplus_sum,
             firm_slots = firm_slots.len(),
             active_packets = pkts.len(),
