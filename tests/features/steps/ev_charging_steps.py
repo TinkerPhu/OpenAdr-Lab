@@ -43,14 +43,18 @@ def step_given_post_user_request_ev(context, soc, hours):
 
 # ── Given: VTN event helpers ─────────────────────────────────────────────────
 
-@given("I create a cheap-then-expensive 2-interval PRICE event for the saved program")
+@given("I create a cheap-then-expensive PRICE event for the saved program")
 def step_create_cheap_expensive_price_event(context):
-    """Two consecutive 1-hour intervals: 0.40 EUR/kWh (expensive, starts NOW) then
-    0.05 EUR/kWh (cheap, starts 1h later).
+    """Three consecutive intervals covering the full 4-hour planning horizon:
+      - NOW → +1H:  0.40 EUR/kWh (expensive)
+      - +1H → +2H:  0.05 EUR/kWh (cheap)
+      - +2H → +4H:  0.20 EUR/kWh (neutral background)
 
-    Expensive-first ensures the EXPENSIVE_TARIFF reason fires in the earliest plan slots,
-    making the poll reliable. With default background tariff ~0.20 EUR/kWh:
-      median ≈ 0.20, eff = sqrt(0.92) ≈ 0.959
+    The neutral interval prevents LOCF from carrying the cheap rate into background
+    slots, which would compress the median toward 0.05 and disable CHEAP_TARIFF.
+    With all three intervals present:
+      sorted tariffs: [0.05×12, 0.20×24, 0.40×12] → median = 0.20
+      eff = sqrt(0.92) ≈ 0.959
       cheap_threshold    = 0.20 * 0.959 = 0.192  →  0.05 < 0.192  → CHEAP_TARIFF ✓
       expensive_threshold = 0.20 / 0.959 = 0.209  →  0.40 > 0.209  → EXPENSIVE_TARIFF ✓
     """
@@ -75,6 +79,14 @@ def step_create_cheap_expensive_price_event(context):
                     "duration": "PT1H",
                 },
                 "payloads": [{"type": "PRICE", "values": [0.05]}],
+            },
+            {
+                "id": 2,
+                "intervalPeriod": {
+                    "start": (now + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "duration": "PT2H",
+                },
+                "payloads": [{"type": "PRICE", "values": [0.20]}],
             },
         ],
     })
