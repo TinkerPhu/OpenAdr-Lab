@@ -45,12 +45,14 @@ def step_given_post_user_request_ev(context, soc, hours):
 
 @given("I create a cheap-then-expensive 2-interval PRICE event for the saved program")
 def step_create_cheap_expensive_price_event(context):
-    """Two consecutive 1-hour intervals: 0.05 EUR/kWh (cheap) then 0.40 EUR/kWh (expensive).
+    """Two consecutive 1-hour intervals: 0.40 EUR/kWh (expensive, starts NOW) then
+    0.05 EUR/kWh (cheap, starts 1h later).
 
-    With a default background tariff of ~0.20 EUR/kWh, the median of the firm-horizon
-    slots lands around 0.20.  After applying efficiency scaling:
-      cheap_threshold  ≈ 0.20 * sqrt(0.85) ≈ 0.184  →  0.05 < threshold → CHEAP_TARIFF
-      expensive_threshold ≈ 0.20 / sqrt(0.85) ≈ 0.217 →  0.40 > threshold → EXPENSIVE_TARIFF
+    Expensive-first ensures the EXPENSIVE_TARIFF reason fires in the earliest plan slots,
+    making the poll reliable. With default background tariff ~0.20 EUR/kWh:
+      median ≈ 0.20, eff = sqrt(0.92) ≈ 0.959
+      cheap_threshold    = 0.20 * 0.959 = 0.192  →  0.05 < 0.192  → CHEAP_TARIFF ✓
+      expensive_threshold = 0.20 / 0.959 = 0.209  →  0.40 > 0.209  → EXPENSIVE_TARIFF ✓
     """
     now = datetime.now(timezone.utc)
     r = vtn_post("/events", context.vtn_token, json={
@@ -64,7 +66,7 @@ def step_create_cheap_expensive_price_event(context):
                     "start": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "duration": "PT1H",
                 },
-                "payloads": [{"type": "PRICE", "values": [0.05]}],
+                "payloads": [{"type": "PRICE", "values": [0.40]}],
             },
             {
                 "id": 1,
@@ -72,7 +74,7 @@ def step_create_cheap_expensive_price_event(context):
                     "start": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "duration": "PT1H",
                 },
-                "payloads": [{"type": "PRICE", "values": [0.40]}],
+                "payloads": [{"type": "PRICE", "values": [0.05]}],
             },
         ],
     })

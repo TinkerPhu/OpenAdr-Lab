@@ -70,14 +70,14 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
     When I wait for the VEN /plan to have firm slots with import_cap_kw at most 0.1
     Then all EV allocations in capped firm slots are at most 0.1 kW
 
-  # ── g) Battery uses cheap and avoids expensive tariff in one plan ────────────
-  Scenario: (g) Battery charges on cheap tariff and discharges on expensive tariff
+  # ── g) Battery discharges on expensive tariff then charges on cheap tariff ───
+  Scenario: (g) Battery discharges on expensive tariff and charges on cheap tariff
     Given I have a VTN token as "any-business"
     And I inject pv irradiance 0.0 via sim inject
     And the battery SoC is reset to 0.5
     And I create a rate-system program and save its ID
     And I create a cheap-then-expensive 2-interval PRICE event for the saved program
-    When I wait for a "CHEAP_TARIFF" PlanStep for asset "battery"
-    Then that PlanStep has setpoint_kw greater than 0.0
     When I wait for a "EXPENSIVE_TARIFF" PlanStep for asset "battery"
     Then that PlanStep has setpoint_kw less than 0.0
+    When I wait for a "CHEAP_TARIFF" PlanStep for asset "battery"
+    Then that PlanStep has setpoint_kw greater than 0.0
