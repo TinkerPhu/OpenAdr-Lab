@@ -28,6 +28,7 @@ use crate::entities::tariff_snapshot::TariffTimeSeries;
 use crate::profile::{BatteryConfig, Profile};
 use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -119,6 +120,27 @@ pub fn run_planner(
         prices.get(prices.len() / 2).copied().unwrap_or(DEFAULT_IMPORT_PRICE)
     };
 
+    {
+        let pv_sum: f64 = pv_kw_map.values().sum();
+        let pv_max: f64 = pv_kw_map.values().cloned().fold(0.0_f64, f64::max);
+        let surplus_sum: f64 = firm_slots.iter().map(|s| s.surplus_available_kw).sum();
+        let bat_cfg = profile.battery_config();
+        let eff_sqrt = bat_cfg.map(|b| b.round_trip_efficiency.sqrt()).unwrap_or(1.0);
+        info!(
+            median_tariff,
+            tariff_min = firm_slots.iter().map(|s| s.import_tariff_eur_kwh).fold(f64::MAX, f64::min),
+            tariff_max = firm_slots.iter().map(|s| s.import_tariff_eur_kwh).fold(f64::MIN, f64::max),
+            cheap_threshold = median_tariff * eff_sqrt,
+            expensive_threshold = median_tariff / eff_sqrt,
+            pv_total_kw = pv_sum,
+            pv_peak_kw = pv_max,
+            surplus_total_kw = surplus_sum,
+            firm_slots = firm_slots.len(),
+            active_packets = pkts.len(),
+            "planner: cycle inputs"
+        );
+    }
+
     // Pre-loop: lookahead context per asset
     let lookahead_window = Duration::seconds((lookahead_h * 3600.0) as i64);
     let lookaheads = precompute_lookahead(assets, tariffs, now, lookahead_window, slot_dur);
@@ -188,6 +210,26 @@ pub fn run_planner(
                 site_ctx.pv_forecast_kw = actual_kw;
             }
 
+            // Per-slot debug logging for battery (first slot only to avoid 48-line spam).
+            if aid == "battery" && slot.slot_index == 0 {
+                debug!(
+                    slot = slot.slot_index,
+                    reason = ?reason,
+                    setpoint_kw,
+                    phys_import = phys_cap.max_import_kw,
+                    phys_export = phys_cap.max_export_kw,
+                    avail_import = avail_cap.max_import_kw,
+                    avail_export = avail_cap.max_export_kw,
+                    surplus_kw = slot.surplus_available_kw,
+                    tariff = slot.import_tariff_eur_kwh,
+                    median_tariff,
+                    reserved_up = res.reserved_up_kw,
+                    reserved_down = res.reserved_down_kw,
+                    planned_others_kw = site_ctx.planned_others_kw,
+                    "battery[slot=0] decision"
+                );
+            }
+
             plan_steps.push(PlanStep {
                 ts,
                 asset_id: aid.to_string(),
@@ -205,6 +247,30 @@ pub fn run_planner(
             update_slot_from_step(slot, aid, actual_kw, &pkts, &mut allocated, slot_h);
             site_ctx.planned_others_kw += actual_kw;
             asset_states.insert(aid.to_string(), next_state);
+        }
+    }
+
+    // Post-loop: log battery reason distribution for diagnostics.
+    {
+        let bat_steps: Vec<_> = plan_steps.iter().filter(|s| s.asset_id == "battery").collect();
+        if !bat_steps.is_empty() {
+            let non_idle: Vec<_> = bat_steps.iter()
+                .filter(|s| !matches!(s.reason, PlanReason::Idle))
+                .collect();
+            if non_idle.is_empty() {
+                debug!(count = bat_steps.len(), "battery: all steps IDLE");
+            } else {
+                let reasons: Vec<String> = non_idle.iter()
+                    .map(|s| format!("slot{}={:?}", s.ts.timestamp() % 10000, s.reason))
+                    .take(5)
+                    .collect();
+                info!(
+                    total = bat_steps.len(),
+                    non_idle = non_idle.len(),
+                    samples = %reasons.join(", "),
+                    "battery: non-IDLE steps detected"
+                );
+            }
         }
     }
 
