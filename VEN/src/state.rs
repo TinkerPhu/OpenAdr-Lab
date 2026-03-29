@@ -207,6 +207,7 @@ impl AppState {
             "battery_soc" => inner.inject_state.battery_soc = None,
             "ev_soc" => inner.inject_state.ev_soc = None,
             "heater_temp_c" => inner.inject_state.heater_temp_c = None,
+            "pv_irradiance" => inner.inject_state.pv_irradiance = None,
             _ => {}
         }
     }
