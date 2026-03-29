@@ -9,7 +9,6 @@ use crate::entities::plan::Plan;
 use crate::simulator::AssetEntry;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use uuid::Uuid;
 
 /// Build a setpoints map for all known assets based on the active plan.
 ///
