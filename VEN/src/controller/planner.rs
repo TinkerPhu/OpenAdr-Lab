@@ -1321,7 +1321,7 @@ mod tests {
 
         // UTC 12:00 — peak irradiance. sin(π*(12-6)/12) = sin(π/2) = 1.0
         let noon = chrono::Utc.with_ymd_and_hms(2025, 6, 21, 12, 0, 0).unwrap();
-        let step_s: u32 = 300;
+        let step_s: u64 = 300;
         let total_steps = 4;
 
         let pv_kw_map: HashMap<i64, f64> = (0..total_steps)
