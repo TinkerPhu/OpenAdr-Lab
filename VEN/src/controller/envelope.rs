@@ -197,6 +197,8 @@ mod tests {
             rated_kw,
             export_limit_kw: None,
             irradiance: 0.5,
+            irradiance_offset: 0.0,
+            pv_alpha: 0.1,
         })
     }
 

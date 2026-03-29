@@ -183,7 +183,7 @@ mod tests {
     }
 
     fn pv_entry(last_power_kw: f64) -> (AssetEntry, AssetConfig) {
-        let cfg = PvInverter { rated_kw: 10.0, irradiance: 0.0, export_limit_kw: None };
+        let cfg = PvInverter { rated_kw: 10.0, irradiance: 0.0, irradiance_offset: 0.0, pv_alpha: 0.1, export_limit_kw: None };
         let entry = AssetEntry {
             id: "pv".to_string(),
             state: AssetState::Pv(PvState { actual_power_kw: last_power_kw }),
