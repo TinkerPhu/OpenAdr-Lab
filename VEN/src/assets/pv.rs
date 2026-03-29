@@ -158,12 +158,23 @@ impl PvInverter {
     }
 
     /// Forecast generation magnitude (kW, positive) at future time `t`.
-    /// `steps_ahead` is the number of plan steps ahead (not seconds); decay is applied
-    /// once per step so the curve is visible across the plan horizon.
-    /// When offset == 0: pure sin model. When offset != 0: sin + decayed perturbation.
-    pub fn forecast_kw_at(&self, t: DateTime<Utc>, steps_ahead: f64) -> f64 {
+    ///
+    /// `seconds_ahead` — real seconds into the future.
+    /// `tau_s`         — continuous time constant (seconds) for offset decay,
+    ///                   derived by the caller as `-step_s / ln(1 − pv_alpha)`.
+    ///                   `f64::INFINITY` = no decay; `0.0` = instant decay.
+    ///
+    /// When offset == 0: pure sin model.
+    /// When offset != 0: sin + `irradiance_offset × exp(−seconds_ahead / tau_s)`.
+    pub fn forecast_kw_at(&self, t: DateTime<Utc>, seconds_ahead: f64, tau_s: f64) -> f64 {
         let natural = Self::natural_irradiance_at(t);
-        let decayed = self.irradiance_offset * (1.0 - self.pv_alpha).powf(steps_ahead);
+        let decay_factor = if tau_s > 0.0 {
+            (-seconds_ahead / tau_s).exp()
+        } else {
+            // instant decay: full offset at t=0, zero after
+            if seconds_ahead <= 0.0 { 1.0 } else { 0.0 }
+        };
+        let decayed = self.irradiance_offset * decay_factor;
         (natural + decayed).clamp(0.0, 1.0) * self.rated_kw
     }
 
