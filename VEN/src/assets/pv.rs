@@ -437,6 +437,41 @@ mod tests {
         }
     }
 
+    /// Verifies that irradiance_offset and pv_alpha stored on PvInverter are
+    /// picked up by capability_trajectory. When alpha=0 the offset never decays,
+    /// so all slots shift by the full offset.
+    #[test]
+    fn capability_trajectory_reads_offset_from_self() {
+        let mut pv = PvInverter {
+            rated_kw: 10.0,
+            irradiance: 1.0, // flat — must NOT be used
+            irradiance_offset: 0.2,
+            pv_alpha: 0.0,   // no decay → offset constant at 0.2 everywhere
+            export_limit_kw: None,
+        };
+        // Verify offset is read from self.irradiance_offset, not from self.irradiance.
+        // With pv_alpha=0 and offset=0.2, each slot must equal sin(t)+0.2 (clamped).
+        let state = AssetState::Pv(PvState { actual_power_kw: 0.0 });
+        let traj = pv.capability_trajectory(&state, Duration::hours(4), Duration::hours(1));
+
+        for (t, cap) in &traj {
+            let natural = PvInverter::natural_irradiance_at(*t);
+            let expected_irr = (natural + 0.2).clamp(0.0, 1.0);
+            let expected_kw = -(expected_irr * 10.0);
+            assert!(
+                (cap.max_export_kw - expected_kw).abs() < 1e-9,
+                "at {t}: expected {expected_kw:.4} (sin+0.2), got {:.4}", cap.max_export_kw
+            );
+        }
+
+        // Changing offset on self must change the trajectory output.
+        pv.irradiance_offset = -0.5;
+        let traj2 = pv.capability_trajectory(&state, Duration::hours(4), Duration::hours(1));
+        let same = traj.iter().zip(traj2.iter())
+            .all(|((_, a), (_, b))| (a.max_export_kw - b.max_export_kw).abs() < 1e-9);
+        assert!(!same, "changing irradiance_offset must change trajectory output");
+    }
+
     #[test]
     fn capability_trajectory_ascending_timestamps() {
         let (pv, state_inner) = make_pv(5.0);
