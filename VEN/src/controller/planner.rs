@@ -79,11 +79,22 @@ pub fn run_planner(
         .find(|(e, _)| e.id == "pv")
         .and_then(|(_, cfg)| {
             if let AssetConfig::Pv(pv) = cfg {
+                // Convert per-tick EMA alpha to continuous time constant in seconds.
+                // tau_s = -step_s / ln(1 - alpha), so at each plan step boundary the
+                // exponential gives the same value as (1-alpha)^step_index but in real time.
+                let tau_s: f64 = if pv.pv_alpha >= 1.0 {
+                    0.0           // instant decay
+                } else if pv.pv_alpha <= 0.0 {
+                    f64::INFINITY // no decay
+                } else {
+                    -(step_s as f64) / (1.0 - pv.pv_alpha).ln()
+                };
                 Some(
                     (0..total_steps)
                         .map(|i| {
                             let t = now + Duration::seconds((i as i64) * step_s as i64);
-                            (t.timestamp(), pv.forecast_kw_at(t, i as f64))
+                            let seconds_ahead = (i as f64) * step_s as f64;
+                            (t.timestamp(), pv.forecast_kw_at(t, seconds_ahead, tau_s))
                         })
                         .collect(),
                 )
@@ -1323,10 +1334,12 @@ mod tests {
         let step_s: u64 = 300;
         let total_steps = 4;
 
+        let tau_s: f64 = -(step_s as f64) / (1.0 - pv.pv_alpha).ln();
         let pv_kw_map: HashMap<i64, f64> = (0..total_steps)
             .map(|i| {
                 let t = noon + Duration::seconds((i as i64) * step_s as i64);
-                (t.timestamp(), pv.forecast_kw_at(t, i as f64))
+                let seconds_ahead = (i as f64) * step_s as f64;
+                (t.timestamp(), pv.forecast_kw_at(t, seconds_ahead, tau_s))
             })
             .collect();
 
