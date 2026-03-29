@@ -135,6 +135,11 @@ export class VenApi {
     if (!r.ok) throw new Error(`post sim inject ${r.status}`);
   }
 
+  async postSimReset(assetId: string, soc: number): Promise<void> {
+    const r = await this.jsonReq("POST", `/sim/reset/${assetId}`, { soc });
+    if (!r.ok) throw new Error(`sim reset ${r.status}`);
+  }
+
   async metrics(): Promise<string> {
     const r = await this.getReq("/metrics");
     if (!r.ok) throw new Error(`metrics ${r.status}`);

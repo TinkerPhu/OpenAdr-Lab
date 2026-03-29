@@ -30,11 +30,13 @@ pub struct PostSimInjectBody {
     #[serde(default)]
     pub ev_plugged: Option<serde_json::Value>,
     #[serde(default)]
-    pub ev_departure_min: Option<serde_json::Value>,
-    #[serde(default)]
     pub ev_soc_target: Option<serde_json::Value>,
     #[serde(default)]
     pub heater_setpoint_c: Option<serde_json::Value>,
+    #[serde(default)]
+    pub heater_temp_min_c: Option<serde_json::Value>,
+    #[serde(default)]
+    pub heater_temp_max_c: Option<serde_json::Value>,
     #[serde(default)]
     pub ambient_temp_c: Option<serde_json::Value>,
     #[serde(default)]
@@ -73,9 +75,10 @@ fn merge_inject(current: &mut SimInjectState, body: PostSimInjectBody) {
         }
     }
     merge_bool!(ev_plugged);
-    merge_f64!(ev_departure_min);
     merge_f64!(ev_soc_target);
     merge_f64!(heater_setpoint_c);
+    merge_f64!(heater_temp_min_c);
+    merge_f64!(heater_temp_max_c);
     merge_f64!(ambient_temp_c);
     merge_f64!(base_load_kw);
     merge_f64!(grid_import_limit_kw);

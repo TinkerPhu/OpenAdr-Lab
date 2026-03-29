@@ -150,15 +150,6 @@ impl EvCharger {
                 display_scale: None,
             },
             ControlDescriptor {
-                key: "ev_departure_min".into(),
-                label: "Departure In".into(),
-                kind: ControlKind::NumberInput,
-                min: Some(0.0),
-                max: Some(1440.0),
-                unit: "min".into(),
-                display_scale: None,
-            },
-            ControlDescriptor {
                 key: "ev_soc_target".into(),
                 label: "Charge Target".into(),
                 kind: ControlKind::Slider,

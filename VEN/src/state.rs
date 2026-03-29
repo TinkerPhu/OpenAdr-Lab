@@ -48,7 +48,6 @@ pub struct SimInjectState {
     pub pv_irradiance_alpha: f64, // default 0.1
     // Behaviour C — frozen while active, snap to profile default on release
     pub ev_plugged: Option<bool>,
-    pub ev_departure_min: Option<f64>,
     pub ev_soc_target: Option<f64>,
     pub heater_setpoint_c: Option<f64>,
     pub heater_temp_min_c: Option<f64>,
@@ -68,7 +67,6 @@ impl Default for SimInjectState {
             pv_irradiance: None,
             pv_irradiance_alpha: 0.1,
             ev_plugged: None,
-            ev_departure_min: None,
             ev_soc_target: None,
             heater_setpoint_c: None,
             heater_temp_min_c: None,
