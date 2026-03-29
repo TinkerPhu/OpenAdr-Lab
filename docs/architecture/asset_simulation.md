@@ -317,19 +317,24 @@ No Behaviour C fields. Battery scheduling is fully planner-driven.
   ```
   Peak irradiance = 1.0 at 12:00.
 
-### Behaviour B — EMA smoothing (`simulator/mod.rs`)
+### Behaviour B — perturbation overlay (`simulator/mod.rs`)
 
-`pv_irradiance` uses Behaviour B (frozen + exponential blend-back). The simulator tracks a
-`PvSmoothingState { current_irradiance, override_was_active }`:
+`pv_irradiance` uses Behaviour B (perturbation overlay with exponential decay). The simulator
+tracks a `PvSmoothingState { irradiance_offset }`:
 
-- **While override active**: `irradiance = override_value` each tick.
-- **On release** (`pv_irradiance = null`): EMA blend-back activates:
+- **While override active** (`pv_irradiance = X`): the offset is set every tick as
+  `offset = X − natural_model(t)`. The sim uses `natural_model(t) + offset = X`.
+- **On release** (`pv_irradiance = null`): the offset decays each tick:
   ```
-  current = current * (1 − α) + natural_model * α
+  offset *= (1 − α)
   ```
-  Converges when `|current − natural| < 0.005`. Only activates when `override_was_active` was
-  true — prevents ramp-up lag at VEN startup.
-- **Normal operation** (no override ever set): uses `natural_model` directly.
+  Clears to zero when `|offset| < 0.005`. The sim output smoothly converges back to the
+  sin curve with no discontinuity.
+- **Normal operation** (offset = 0): `irradiance = natural_model(t)` directly.
+
+The slider UI always reflects the live simulated irradiance (`natural + offset`), making it a
+read-write control: reading shows the current value, writing adds a perturbation on top of the
+baseline. `pv_alpha` controls the half-life of the perturbation after release.
 
 ### Profile Parameters (YAML)
 
@@ -341,8 +346,8 @@ No Behaviour C fields. Battery scheduling is fully planner-driven.
 
 | Field | Behaviour | Effect |
 |---|---|---|
-| `pv_irradiance` | B — frozen + EMA return | Freeze irradiance [0–1]; EMA blend-back to sinusoidal model on release |
-| `pv_irradiance_alpha` | Parameter | EMA blend-back speed (default 0.1); higher = faster snap-back |
+| `pv_irradiance` | B — perturbation overlay | Set irradiance [0–1]; offset above/below sin model decays to zero on release |
+| `pv_irradiance_alpha` | Parameter | Decay speed (default 0.1 per tick); higher = faster return to sin model |
 
 ### External Influences
 
@@ -433,8 +438,8 @@ None. Output is entirely determined by profile / active inject.
 | `battery_soc` | f64 [0,1] | A | Battery | Physics-driven from injected value |
 | `ev_soc` | f64 [0,1] | A | EV | Physics-driven from injected value |
 | `heater_temp_c` | f64 | A | Heater | Thermal model from injected value |
-| `pv_irradiance` | f64 [0,1] | B | PV | EMA blend-back to sinusoidal model |
-| `pv_irradiance_alpha` | f64 | — | PV | EMA coefficient (default 0.1) |
+| `pv_irradiance` | f64 [0,1] | B | PV | Perturbation overlay; offset decays to zero on release |
+| `pv_irradiance_alpha` | f64 | — | PV | Perturbation decay speed per tick (default 0.1) |
 | `ev_plugged` | bool | C | EV | Snaps to `true` (plugged) |
 | `ev_departure_min` | f64 | C | EV | No snap-back — stays until cleared |
 | `ev_soc_target` | f64 [0,1] | C | EV | Snaps to `soc_target_profile` |
