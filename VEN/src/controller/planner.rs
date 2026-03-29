@@ -72,19 +72,25 @@ pub fn run_planner(
         far_horizon: horizon_end,
     };
 
-    // PV forecast for build_grid (from SimState; sign: export≤0 → negate for generation≥0)
+    // PV forecast for build_grid — built using the planner's own `now` so timestamps align
+    // exactly with slot start times. forecast_kw_at returns positive generation magnitude.
     let pv_kw_map: HashMap<i64, f64> = assets
         .iter_assets()
         .find(|(e, _)| e.id == "pv")
-        .map(|(e, cfg)| {
-            cfg.capability_trajectory(
-                &e.state,
-                Duration::seconds((horizon_h * 3600) as i64),
-                slot_dur,
-            )
-            .into_iter()
-            .map(|(ts, cap)| (ts.timestamp(), -cap.max_export_kw))
-            .collect()
+        .and_then(|(_, cfg)| {
+            if let AssetConfig::Pv(pv) = cfg {
+                Some(
+                    (0..total_steps)
+                        .map(|i| {
+                            let t = now + Duration::seconds((i as i64) * step_s as i64);
+                            let secs_ahead = (i as f64) * step_s as f64;
+                            (t.timestamp(), pv.forecast_kw_at(t, secs_ahead))
+                        })
+                        .collect(),
+                )
+            } else {
+                None
+            }
         })
         .unwrap_or_default();
 
@@ -195,17 +201,11 @@ pub fn run_planner(
                 )
             };
 
-            let (next_state, mut actual_kw) = cfg.step(&state, setpoint_kw, slot_dur);
+            let (next_state, actual_kw) = cfg.step(&state, setpoint_kw, slot_dur);
 
             if aid == "pv" {
-                // Use the sin-model + decayed-offset forecast from pv_kw_map rather than the
-                // flat self.irradiance value that cfg.step() would produce for all 48 slots.
-                // pv_kw_map stores positive generation magnitude; negate to restore
-                // export-negative convention. Slot 0 (not in map) falls back to cfg.step()
-                // which already holds the live irradiance (natural + current offset).
-                if let Some(&forecast_kw) = pv_kw_map.get(&ts.timestamp()) {
-                    actual_kw = -forecast_kw;
-                }
+                // pv_forecast_kw is already set by build_grid from pv_kw_map (sin model).
+                // Propagate to site_ctx so rules_choose sees it for surplus-aware decisions.
                 site_ctx.pv_forecast_kw = actual_kw;
             }
 
@@ -243,7 +243,12 @@ pub fn run_planner(
                 reason,
             });
 
-            update_slot_from_step(slot, aid, actual_kw, &pkts, &mut allocated, slot_h);
+            // PV is non-controllable generation already accounted for in build_grid
+            // (net_import_kw and surplus_available_kw). Skipping update_slot_from_step
+            // avoids double-subtracting PV from net_import_kw.
+            if aid != "pv" {
+                update_slot_from_step(slot, aid, actual_kw, &pkts, &mut allocated, slot_h);
+            }
             site_ctx.planned_others_kw += actual_kw;
             asset_states.insert(aid.to_string(), next_state);
         }
@@ -1294,5 +1299,74 @@ mod tests {
         assert!((out_p2.estimated_co2_g - 15.0).abs() < 1e-9);
         assert!((out_p2.estimated_completion - expected_p2_kwh / 5.0).abs() < 1e-9);
         assert_eq!(out_p2.last_estimate_at, Some(now));
+    }
+
+    // ── pv_forecast_kw uses shared `now` → sin model, not flat irradiance ─────
+
+    /// Verifies that pv_kw_map is built using the planner's `now` reference and
+    /// forecast_kw_at, so slot.pv_forecast_kw reflects the sin-model curve rather
+    /// than the flat current irradiance value.
+    #[test]
+    fn pv_forecast_kw_follows_sin_model() {
+        use crate::assets::PvInverter;
+
+        let rated_kw = 10.0_f64;
+        let pv = PvInverter {
+            rated_kw,
+            irradiance: 0.5,       // current (flat) value — should NOT appear in forecast
+            irradiance_offset: 0.0, // no perturbation
+            pv_alpha: 0.1,
+            export_limit_kw: None,
+        };
+
+        // UTC 12:00 — peak irradiance. sin(π*(12-6)/12) = sin(π/2) = 1.0
+        let noon = chrono::Utc.with_ymd_and_hms(2025, 6, 21, 12, 0, 0).unwrap();
+        let step_s: u32 = 300;
+        let total_steps = 4;
+
+        let pv_kw_map: HashMap<i64, f64> = (0..total_steps)
+            .map(|i| {
+                let t = noon + Duration::seconds((i as i64) * step_s as i64);
+                let secs_ahead = (i as f64) * step_s as f64;
+                (t.timestamp(), pv.forecast_kw_at(t, secs_ahead))
+            })
+            .collect();
+
+        let tariffs = TariffTimeSeries::from_snapshots(&[snap(
+            noon,
+            noon + Duration::hours(4),
+            Some(0.20),
+            Some(0.05),
+            Some(300.0),
+        )]);
+        let (firm, _) = build_grid(
+            &tariffs,
+            &empty_capacity(),
+            &test_profile(step_s, 1),
+            noon,
+            step_s,
+            total_steps,
+            noon + Duration::hours(4),
+            &pv_kw_map,
+        );
+
+        // Slot 0 = noon: irradiance ≈ 1.0 → pv_forecast_kw ≈ 10.0 kW
+        assert!(
+            (firm[0].pv_forecast_kw - 10.0).abs() < 0.1,
+            "noon slot: expected ≈10.0 kW, got {:.3}",
+            firm[0].pv_forecast_kw
+        );
+        // Slot 3 = 12:15: irradiance still near peak, definitely >> 5.0 (the flat value)
+        assert!(
+            firm[3].pv_forecast_kw > 5.0,
+            "12:15 slot: expected > 5.0 kW (near-peak sin), got {:.3}",
+            firm[3].pv_forecast_kw
+        );
+        // Flat irradiance (0.5) would give 5.0 kW — confirm we're NOT using that
+        assert!(
+            (firm[0].pv_forecast_kw - 5.0).abs() > 1.0,
+            "slot 0 must differ from flat irradiance value 5.0; got {:.3}",
+            firm[0].pv_forecast_kw
+        );
     }
 }
