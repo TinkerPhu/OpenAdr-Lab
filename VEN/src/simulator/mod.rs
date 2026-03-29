@@ -293,7 +293,12 @@ impl SimState {
             self.pv_smoothing.irradiance_offset = forced - natural_irradiance;
         } else {
             // Decay the offset toward zero once the slider is released.
-            self.pv_smoothing.irradiance_offset *= 1.0 - pv_alpha;
+            // pv_alpha is a per-plan-step factor (one step = 300 s).  Convert to the
+            // equivalent per-tick rate so the offset reaches (1−alpha) × original after
+            // exactly one plan step, matching the forecast formula exp(−t/tau_s).
+            const PLAN_STEP_S: f64 = 300.0;
+            let per_tick_factor = (1.0 - pv_alpha).powf(dt_s / PLAN_STEP_S);
+            self.pv_smoothing.irradiance_offset *= per_tick_factor;
             if self.pv_smoothing.irradiance_offset.abs() < 0.005 {
                 self.pv_smoothing.irradiance_offset = 0.0;
             }
