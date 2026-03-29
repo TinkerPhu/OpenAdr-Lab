@@ -955,6 +955,9 @@ mod tests {
 
         let slot = make_pv_slot(60, 5.0, now); // 60 s in future
         let plan = Plan {
+            id: Uuid::new_v4(),
+            created_at: now,
+            trigger: crate::entities::asset::PlanTrigger::Periodic,
             horizon: crate::entities::plan::PlanningHorizon {
                 start_time: now,
                 end_time: now + Duration::hours(24),
@@ -1002,6 +1005,9 @@ mod tests {
 
         let slot = make_pv_slot(60, 0.0, now);
         let plan = Plan {
+            id: Uuid::new_v4(),
+            created_at: now,
+            trigger: crate::entities::asset::PlanTrigger::Periodic,
             horizon: crate::entities::plan::PlanningHorizon {
                 start_time: now,
                 end_time: now + Duration::hours(24),
