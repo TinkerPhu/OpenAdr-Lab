@@ -14,8 +14,14 @@ pub struct PvInverter {
     pub rated_kw: f64,
     /// Active export limit in kW (≤ 0); None = no curtailment limit.
     pub export_limit_kw: Option<f64>,
-    /// [0.0, 1.0]; set each tick by sim from SimInjectState or time-based model. NOT from YAML.
+    /// [0.0, 1.0]; set each tick by sim (natural + offset, clamped). NOT from YAML.
     pub irradiance: f64,
+    /// Current perturbation offset above/below the natural sin model. Decays toward zero
+    /// each tick at rate `pv_alpha`. Set each tick from PvSmoothingState. NOT from YAML.
+    pub irradiance_offset: f64,
+    /// Per-tick decay factor for irradiance_offset (0–1). Set from pv_irradiance_alpha inject.
+    /// NOT from YAML.
+    pub pv_alpha: f64,
 }
 
 /// PV mutable state.
@@ -31,6 +37,8 @@ impl PvInverter {
             rated_kw: cfg.rated_kw,
             export_limit_kw: None,
             irradiance: 0.0,
+            irradiance_offset: 0.0,
+            pv_alpha: 0.1,
         }
     }
 
@@ -149,21 +157,27 @@ impl PvInverter {
         }
     }
 
-    fn irradiance_at(&self, ts: DateTime<Utc>) -> f64 {
+    /// Natural sin-model irradiance [0,1] at time `ts`, without any user offset.
+    pub fn natural_irradiance_at(ts: DateTime<Utc>) -> f64 {
         use chrono::Timelike;
         let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
-        let irradiance = if hour >= 6.0 && hour <= 18.0 {
+        if hour >= 6.0 && hour <= 18.0 {
             let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
-            angle.sin()
+            angle.sin().max(0.0)
         } else {
             0.0
-        };
-        let natural_kw = self.rated_kw * irradiance;
+        }
+    }
+
+    /// Power output from the sin model at `ts` (kW, negative = export).
+    /// Used by `forecast()`. Does NOT include the live irradiance_offset.
+    fn irradiance_at(&self, ts: DateTime<Utc>) -> f64 {
+        let natural_kw = self.rated_kw * Self::natural_irradiance_at(ts);
         let limited_kw = match self.export_limit_kw {
-            Some(limit) => natural_kw.min(limit.abs()), // limit stored as negative; abs for min()
+            Some(limit) => natural_kw.min(limit.abs()),
             None => natural_kw,
         };
-        -limited_kw // negative = export
+        -limited_kw
     }
 
     pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
@@ -206,8 +220,16 @@ impl Asset for PvInverter {
         self.capability_inner(s)
     }
 
-    /// Override: use time-varying irradiance_at(t) for each future step so the
-    /// planner sees a sin-curve forecast rather than the frozen current irradiance.
+    /// Forecast trajectory for the planner: sin model + decaying perturbation offset.
+    ///
+    /// For each future slot at `now + i×resolution`:
+    ///   irradiance = clamp(natural_sin(t) + offset×(1−α)^seconds_ahead, 0, 1)
+    ///   power_kw   = −(irradiance × rated_kw)
+    ///
+    /// When offset = 0 (no active inject): pure sin model.
+    /// While user drags slider: offset is non-zero → sin curve shifted by perturbation.
+    /// After release: offset decays with α in the live tick; by the time it reaches the
+    /// planner (every 20 s) the perturbation has already decayed in proportion.
     fn capability_trajectory(
         &self,
         _initial: &AssetState,
@@ -216,14 +238,19 @@ impl Asset for PvInverter {
     ) -> Vec<(DateTime<Utc>, AssetCapability)> {
         let now = Utc::now();
         let n = (duration.num_seconds() / resolution.num_seconds().max(1)) as usize;
+        let res_s = resolution.num_seconds() as f64;
         let mut result = Vec::with_capacity(n);
         for i in 1..=n {
             let t = now + resolution * i as i32;
-            // irradiance_at uses the sin model (ignores self.irradiance override)
-            let power_kw = self.irradiance_at(t); // negative = export
+            let seconds_ahead = res_s * i as f64;
+            let natural = Self::natural_irradiance_at(t);
+            let decayed_offset =
+                self.irradiance_offset * (1.0 - self.pv_alpha).powf(seconds_ahead);
+            let irradiance = (natural + decayed_offset).clamp(0.0, 1.0);
+            let power_kw = -(irradiance * self.rated_kw);
             result.push((t, AssetCapability {
                 max_export_kw: power_kw,
-                max_import_kw: power_kw, // non-curtailable: same bound in both directions
+                max_import_kw: power_kw,
             }));
         }
         result
@@ -239,11 +266,11 @@ mod tests {
             PvInverter {
                 rated_kw,
                 irradiance: 0.0,
+                irradiance_offset: 0.0,
+                pv_alpha: 0.1,
                 export_limit_kw: None,
             },
-            PvState {
-                actual_power_kw: 0.0,
-            },
+            PvState { actual_power_kw: 0.0 },
         )
     }
 
@@ -313,47 +340,84 @@ mod tests {
 
     #[test]
     fn capability_trajectory_uses_sin_model_not_flat_irradiance() {
-        // self.irradiance is frozen at 0.5 (would give −5 kW flat if used).
-        // The override returns time-varying values from irradiance_at(t).
-        let mut pv = PvInverter {
+        // self.irradiance = 0.5 (flat), offset = 0 → forecast must follow sin model, not flat.
+        let pv = PvInverter {
             rated_kw: 10.0,
             irradiance: 0.5,
+            irradiance_offset: 0.0,
+            pv_alpha: 0.1,
             export_limit_kw: None,
         };
-        // Set an obviously wrong irradiance to confirm it is NOT used.
-        pv.irradiance = 0.5;
         let state = AssetState::Pv(PvState { actual_power_kw: -5.0 });
 
-        // 24-hour trajectory at 1-hour resolution — always spans a full day cycle.
         let traj = pv.capability_trajectory(&state, Duration::hours(24), Duration::hours(1));
         assert_eq!(traj.len(), 24);
 
-        // Each point must match irradiance_at(t), not −rated_kw * self.irradiance.
-        let flat_wrong = -pv.rated_kw * pv.irradiance; // −5.0
-        for (t, cap) in &traj {
-            let expected = pv.irradiance_at(*t);
-            assert!(
-                (cap.max_export_kw - expected).abs() < 1e-9,
-                "at {t}: expected {expected:.3} (sin model), got {:.3}", cap.max_export_kw
-            );
-            // Values must not all be −5.0 (proving sin model is used, not flat override)
-            // (We check this in aggregate below.)
-            let _ = flat_wrong;
-        }
-
-        // At least some daytime points are non-zero and some night points are zero.
-        // 24 h from now always contains at least 6 daytime hours (6am-6pm UTC window).
-        let non_zero = traj.iter().filter(|(_, c)| c.max_export_kw.abs() > 1e-6).count();
-        assert!(non_zero > 0, "24-h trajectory must include some daytime generation");
-
-        // All PV values must be ≤ 0 (export only).
+        // All values ≤ 0 (export only).
         for (_, cap) in &traj {
             assert!(cap.max_export_kw <= 1e-9, "PV trajectory must be non-positive");
         }
 
-        // Not all identical to flat_wrong — proves sin model is used.
-        let all_flat = traj.iter().all(|(_, c)| (c.max_export_kw - flat_wrong).abs() < 1e-6);
-        assert!(!all_flat, "trajectory must NOT be flat at self.irradiance × rated_kw");
+        // Spans at least one daytime and one night slot → not flat.
+        let non_zero = traj.iter().filter(|(_, c)| c.max_export_kw.abs() > 1e-6).count();
+        let zero = traj.iter().filter(|(_, c)| c.max_export_kw.abs() <= 1e-6).count();
+        assert!(non_zero > 0, "24-h trajectory must include daytime generation");
+        assert!(zero > 0, "24-h trajectory must include night zeros");
+
+        // Not all identical to −5.0 (flat at self.irradiance=0.5 × 10 kW).
+        let all_flat = traj.iter().all(|(_, c)| (c.max_export_kw + 5.0).abs() < 1e-6);
+        assert!(!all_flat, "forecast must follow sin model, not flat self.irradiance");
+    }
+
+    #[test]
+    fn capability_trajectory_offset_shifts_sin_curve() {
+        // With a positive irradiance_offset = +0.2 and slow alpha, the forecast
+        // at slot 1 must be visibly higher than the pure sin model.
+        let pv = PvInverter {
+            rated_kw: 10.0,
+            irradiance: 0.0,
+            irradiance_offset: 0.3,
+            pv_alpha: 0.0, // alpha=0 → offset never decays → full offset at every slot
+            export_limit_kw: None,
+        };
+        let state = AssetState::Pv(PvState { actual_power_kw: 0.0 });
+
+        // Use a 1-hour resolution so slot timestamps are well into daytime when run near noon.
+        let traj = pv.capability_trajectory(&state, Duration::hours(4), Duration::hours(1));
+        assert_eq!(traj.len(), 4);
+
+        for (t, cap) in &traj {
+            let natural = PvInverter::natural_irradiance_at(*t);
+            let expected = -((natural + 0.3).clamp(0.0, 1.0) * 10.0);
+            assert!(
+                (cap.max_export_kw - expected).abs() < 1e-9,
+                "at {t}: expected {expected:.4} (sin+offset), got {:.4}", cap.max_export_kw
+            );
+        }
+    }
+
+    #[test]
+    fn capability_trajectory_offset_decays_across_slots() {
+        // With alpha=1.0, offset halves per second. At res=1s, slot 1 (1s ahead):
+        // decayed_offset = 0.4 × (1−1.0)^1 = 0.0 → pure sin model.
+        let pv = PvInverter {
+            rated_kw: 10.0,
+            irradiance: 0.0,
+            irradiance_offset: 0.4,
+            pv_alpha: 1.0, // full decay after 1 tick
+            export_limit_kw: None,
+        };
+        let state = AssetState::Pv(PvState { actual_power_kw: 0.0 });
+        let traj = pv.capability_trajectory(&state, Duration::seconds(3), Duration::seconds(1));
+        // Slot 1 (1 s ahead): decayed_offset = 0.4 × 0^1 = 0 → equals sin model
+        for (t, cap) in &traj {
+            let natural = PvInverter::natural_irradiance_at(*t);
+            let expected = -(natural * 10.0);
+            assert!(
+                (cap.max_export_kw - expected).abs() < 1e-9,
+                "at {t}: with alpha=1.0 offset must be fully decayed, got {:.4}", cap.max_export_kw
+            );
+        }
     }
 
     #[test]

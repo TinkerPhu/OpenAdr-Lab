@@ -308,6 +308,8 @@ impl SimState {
             match cfg {
                 AssetConfig::Pv(pv) => {
                     pv.irradiance = irradiance;
+                    pv.irradiance_offset = self.pv_smoothing.irradiance_offset;
+                    pv.pv_alpha = pv_alpha;
                 }
                 AssetConfig::Heater(h) => {
                     // Behaviour C: ambient temp — hold override or use default.
