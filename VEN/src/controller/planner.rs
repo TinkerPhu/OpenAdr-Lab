@@ -195,9 +195,17 @@ pub fn run_planner(
                 )
             };
 
-            let (next_state, actual_kw) = cfg.step(&state, setpoint_kw, slot_dur);
+            let (next_state, mut actual_kw) = cfg.step(&state, setpoint_kw, slot_dur);
 
             if aid == "pv" {
+                // Use the sin-model + decayed-offset forecast from pv_kw_map rather than the
+                // flat self.irradiance value that cfg.step() would produce for all 48 slots.
+                // pv_kw_map stores positive generation magnitude; negate to restore
+                // export-negative convention. Slot 0 (not in map) falls back to cfg.step()
+                // which already holds the live irradiance (natural + current offset).
+                if let Some(&forecast_kw) = pv_kw_map.get(&ts.timestamp()) {
+                    actual_kw = -forecast_kw;
+                }
                 site_ctx.pv_forecast_kw = actual_kw;
             }
 
