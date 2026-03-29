@@ -305,16 +305,21 @@ pub fn build_asset_timeline(
                 values.insert("import_limit_kw".into(), slot.import_cap_kw);
                 values.insert("export_limit_kw".into(), slot.export_cap_kw);
             } else {
-                // Physical asset: use its allocation for this slot, or 0 kW if absent.
+                // Physical asset: PV uses the sin-model forecast stored directly in the slot
+                // (pv_forecast_kw, positive generation magnitude → negate for export-negative).
+                // All other assets use their packet allocation, or 0 kW if absent.
                 // We always emit a point (even 0 kW) so that all assets share the same
                 // set of plan-slot timestamps. Omitting zero-allocation slots causes the
                 // stacked chart to fall back to an exact-match miss → false zero spikes.
-                let power_kw = slot
-                    .allocations
-                    .iter()
-                    .find(|a| a.asset_id == asset_id)
-                    .map(|a| a.power_kw)
-                    .unwrap_or(0.0);
+                let power_kw = if asset_id == "pv" {
+                    -slot.pv_forecast_kw
+                } else {
+                    slot.allocations
+                        .iter()
+                        .find(|a| a.asset_id == asset_id)
+                        .map(|a| a.power_kw)
+                        .unwrap_or(0.0)
+                };
                 values.insert("power_kw".into(), power_kw);
                 let cost_rate = power_kw * slot.import_tariff_eur_kwh;
                 values.insert("cost_rate_eur_h".into(), cost_rate);
@@ -910,5 +915,125 @@ mod tests {
     fn locf_fill_nones_empty_passthrough() {
         let out = locf_fill_nones(vec![], None);
         assert!(out.is_empty());
+    }
+
+    // ── PV forecast path ──────────────────────────────────────────────────────
+
+    /// Build a slot whose pv_forecast_kw is set but has no PV allocation.
+    fn make_pv_slot(start_offset_s: i64, pv_forecast_kw: f64, now: DateTime<Utc>) -> PlanTimeSlot {
+        let start = now + Duration::seconds(start_offset_s);
+        PlanTimeSlot {
+            slot_index: 0,
+            start,
+            end: start + Duration::seconds(300),
+            slot_type: SlotType::Firm,
+            import_tariff_eur_kwh: 0.20,
+            export_tariff_eur_kwh: 0.05,
+            co2_g_kwh: 300.0,
+            grid_effective_cost: 0.26,
+            rate_estimated: false,
+            import_cap_kw: 10.0,
+            export_cap_kw: 5.0,
+            baseline_kw: 0.5,
+            pv_forecast_kw,
+            surplus_available_kw: pv_forecast_kw.max(0.0),
+            allocations: vec![],   // intentionally empty — PV should not appear here
+            net_import_kw: (0.5_f64 - pv_forecast_kw).max(0.0),
+            net_export_kw: (pv_forecast_kw - 0.5_f64).max(0.0),
+            import_flexibility_kw: 0.0,
+            export_flexibility_kw: 0.0,
+        }
+    }
+
+    #[test]
+    fn pv_future_uses_pv_forecast_kw_not_allocations() {
+        // slot has pv_forecast_kw = 5.0 but NO pv allocation entry.
+        // build_asset_timeline must return power_kw = -5.0 (negative = export).
+        let now = Utc::now();
+        let known = make_known(&["pv"]);
+        let sim = make_sim(vec![]);
+
+        let slot = make_pv_slot(60, 5.0, now); // 60 s in future
+        let plan = Plan {
+            horizon: crate::entities::plan::PlanningHorizon {
+                start_time: now,
+                end_time: now + Duration::hours(24),
+                step_size_s: 300,
+                num_steps: 288,
+                near_horizon: now + Duration::hours(4),
+                far_horizon: now + Duration::hours(24),
+            },
+            firm_boundary: now + Duration::hours(4),
+            firm_slots: vec![slot],
+            firm_summary: FirmSummary::default(),
+            flexible_slots: vec![],
+            envelopes: vec![],
+            flexible_summary: FlexibleSummary::default(),
+            packets: vec![],
+            warnings: vec![],
+            steps: vec![],
+        };
+
+        let points = build_asset_timeline(
+            "pv",
+            &known,
+            &sim,
+            Some(&plan),
+            now,
+            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+        )
+        .expect("pv is a known asset");
+
+        let future: Vec<_> = points.iter().filter(|p| p.ts > now).collect();
+        assert_eq!(future.len(), 1, "expected exactly one future point");
+        let power_kw = future[0].values["power_kw"];
+        assert!(
+            (power_kw - (-5.0)).abs() < 1e-9,
+            "expected power_kw = -5.0 (pv export), got {power_kw}"
+        );
+    }
+
+    #[test]
+    fn pv_future_zero_when_forecast_zero() {
+        // Night slot: pv_forecast_kw = 0.0 → power_kw = 0.0 (no generation).
+        let now = Utc::now();
+        let known = make_known(&["pv"]);
+        let sim = make_sim(vec![]);
+
+        let slot = make_pv_slot(60, 0.0, now);
+        let plan = Plan {
+            horizon: crate::entities::plan::PlanningHorizon {
+                start_time: now,
+                end_time: now + Duration::hours(24),
+                step_size_s: 300,
+                num_steps: 288,
+                near_horizon: now + Duration::hours(4),
+                far_horizon: now + Duration::hours(24),
+            },
+            firm_boundary: now + Duration::hours(4),
+            firm_slots: vec![slot],
+            firm_summary: FirmSummary::default(),
+            flexible_slots: vec![],
+            envelopes: vec![],
+            flexible_summary: FlexibleSummary::default(),
+            packets: vec![],
+            warnings: vec![],
+            steps: vec![],
+        };
+
+        let points = build_asset_timeline(
+            "pv",
+            &known,
+            &sim,
+            Some(&plan),
+            now,
+            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+        )
+        .expect("pv is a known asset");
+
+        let future: Vec<_> = points.iter().filter(|p| p.ts > now).collect();
+        assert_eq!(future.len(), 1);
+        let power_kw = future[0].values["power_kw"];
+        assert!(power_kw.abs() < 1e-9, "expected 0.0 at night, got {power_kw}");
     }
 }
