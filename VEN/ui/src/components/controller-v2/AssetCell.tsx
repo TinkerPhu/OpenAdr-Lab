@@ -29,6 +29,7 @@ interface AssetCellProps {
   onTogglePin: (cellId: string) => void;
   onToggleCollapse: (cellId: string, section: "left" | "right") => void;
   onOverrideChange: (patch: Partial<SimInjectState>) => void;
+  onResetSoc: (assetId: string, soc: number) => void;
 }
 
 export function AssetCell({
@@ -44,6 +45,7 @@ export function AssetCell({
   onTogglePin,
   onToggleCollapse,
   onOverrideChange,
+  onResetSoc,
 }: AssetCellProps) {
   const cellId = `asset:${assetId}`;
   const color = ASSET_COLORS[assetId] ?? "#888";
@@ -112,6 +114,7 @@ export function AssetCell({
             simSnapshot={simSnapshot}
             overrides={simOverrides}
             onOverrideChange={onOverrideChange}
+            onResetSoc={onResetSoc}
           />
         </Box>
       </Collapse>

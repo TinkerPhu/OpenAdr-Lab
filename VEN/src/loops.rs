@@ -573,14 +573,6 @@ pub(crate) fn spawn_planning(
             for r in profile.flexibility_policy.generate_reservations(now, now + planning_horizon) {
                 reservation_layer.insert(r);
             }
-            // ev_departure_override: convert inject ev_departure_min → absolute deadline.
-            let ev_departure_override: Option<chrono::DateTime<Utc>> = {
-                let inject = state.inject_state().await;
-                inject.ev_departure_min.map(|min_f| {
-                    now + chrono::Duration::seconds((min_f * 60.0) as i64)
-                })
-            };
-
             let sim_guard_for_planner = sim.lock().await;
             let (mut plan, plan_steps) = controller::planner::run_planner(
                 &*sim_guard_for_planner,
@@ -591,7 +583,6 @@ pub(crate) fn spawn_planning(
                 &profile,
                 now,
                 trigger,
-                ev_departure_override,
             );
             drop(sim_guard_for_planner);
             plan.steps = plan_steps;

@@ -125,6 +125,19 @@ export function useSetSimInject() {
     mutationFn: (patch: Partial<SimInjectState>) => api.postSimInject(patch),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["simInject"] });
+      queryClient.refetchQueries({ queryKey: ["sim"] });
+    },
+  });
+}
+
+export function useResetAssetSoc() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ assetId, soc }: { assetId: string; soc: number }) =>
+      api.postSimReset(assetId, soc),
+    onSuccess: () => {
+      queryClient.refetchQueries({ queryKey: ["sim"] });
     },
   });
 }
