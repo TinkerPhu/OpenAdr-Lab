@@ -166,14 +166,22 @@ pub fn build_grid_aligned_array(
     let raw_history: Vec<_> = raw.iter().filter(|p| p.ts < now).cloned().collect();
     let raw_future: Vec<_> = raw.iter().filter(|p| p.ts >= now).cloned().collect();
 
+    // Build now-point before future resampling so we can use it as a LOCF seed.
+    // This covers the gap when the currently-active plan slot started before `now` and
+    // therefore fell into raw_history — without a seed the leading future buckets are null.
+    let now_point = build_now_point(asset_id, now, sim);
+    let fut_seed = if now_point.values.is_empty() {
+        None
+    } else {
+        Some(now_point.values.clone())
+    };
+
     // Resample onto grids.
     // Future: apply LOCF fill so plan-slot values extend across all fine-grid buckets
     // within a 5-minute slot rather than leaving sub-bucket gaps that render as needle peaks.
     let hist_resampled = resample_to_grid(&raw_history, history_grid, resolution_s);
-    let fut_resampled = locf_fill_nones(resample_to_grid(&raw_future, future_grid, resolution_s));
-
-    // Build now-point.
-    let now_point = build_now_point(asset_id, now, sim);
+    let fut_resampled =
+        locf_fill_nones(resample_to_grid(&raw_future, future_grid, resolution_s), fut_seed);
 
     // Concatenate: history_grid + now_point + future_grid.
     let mut out = serialize_grid_timeline(history_grid, &hist_resampled);
