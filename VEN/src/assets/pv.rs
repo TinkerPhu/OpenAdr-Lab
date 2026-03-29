@@ -434,6 +434,8 @@ mod tests {
         let pv = PvInverter {
             rated_kw: 8.0,
             irradiance: 0.0,
+            irradiance_offset: 0.0,
+            pv_alpha: 0.1,
             export_limit_kw: None,
         };
         let state = AssetState::Pv(PvState { actual_power_kw: 0.0 });
