@@ -20,13 +20,16 @@ use crate::models::SensorSnapshot;
 use crate::profile::{AssetProfile, BaseLoadConfig, Profile};
 use energy::EnergyCounter;
 
-/// Tracks PV irradiance EMA state between ticks.
-/// Only active while blending back from an override (Behaviour B).
+/// Tracks the user-induced irradiance perturbation between ticks.
+///
+/// While the user drags the irradiance slider, the offset is set to
+/// `slider_position − natural_irradiance`. After release the offset decays
+/// exponentially (EMA with factor `pv_alpha`) until it reaches zero, at which
+/// point the simulation resumes tracking the sin model with no lag.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PvSmoothingState {
-    pub current_irradiance: f64,
-    /// True while blending back from a released override; False in normal operation.
-    pub override_was_active: bool,
+    /// Current perturbation above (or below) the natural sin model. Zero = no override.
+    pub irradiance_offset: f64,
 }
 
 /// One entry in the generic asset list.
@@ -283,25 +286,19 @@ impl SimState {
             0.0
         };
 
-        // Behaviour B: PV irradiance — frozen while override active; EMA blend-back on release.
-        let irradiance = if let Some(forced) = pv_irradiance_override {
-            self.pv_smoothing.current_irradiance = forced;
-            self.pv_smoothing.override_was_active = true;
-            forced
-        } else if self.pv_smoothing.override_was_active {
-            let blended = self.pv_smoothing.current_irradiance * (1.0 - pv_alpha)
-                + natural_irradiance * pv_alpha;
-            self.pv_smoothing.current_irradiance = blended;
-            if (blended - natural_irradiance).abs() < 0.005 {
-                self.pv_smoothing.override_was_active = false;
-                self.pv_smoothing.current_irradiance = natural_irradiance;
-            }
-            blended
+        // Behaviour B — perturbation overlay: slider sets an offset above/below the sin model;
+        // offset decays exponentially after release until the sim resumes tracking the sin curve.
+        if let Some(forced) = pv_irradiance_override {
+            // Re-capture offset every tick while the user is dragging.
+            self.pv_smoothing.irradiance_offset = forced - natural_irradiance;
         } else {
-            // Normal operation: track natural model directly (no lag).
-            self.pv_smoothing.current_irradiance = natural_irradiance;
-            natural_irradiance
-        };
+            // Decay the offset toward zero once the slider is released.
+            self.pv_smoothing.irradiance_offset *= 1.0 - pv_alpha;
+            if self.pv_smoothing.irradiance_offset.abs() < 0.005 {
+                self.pv_smoothing.irradiance_offset = 0.0;
+            }
+        }
+        let irradiance = (natural_irradiance + self.pv_smoothing.irradiance_offset).clamp(0.0, 1.0);
 
         let dt = chrono::Duration::milliseconds((dt_s * 1000.0) as i64);
         let mut total_kw = 0.0;
