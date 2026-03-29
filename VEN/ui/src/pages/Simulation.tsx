@@ -533,13 +533,13 @@ function PvControls({ sim, overrides, onChange }: ControlsProps) {
         {manualIrradiance && (
           <Box>
             <Typography variant="body2" gutterBottom>
-              Irradiance: {((overrides.pv_irradiance ?? 0) * 100).toFixed(0)}%
+              Irradiance: {((overrides.pv_irradiance ?? simIrradiance) * 100).toFixed(0)}%
             </Typography>
             <Slider
               min={0}
               max={1}
               step={0.01}
-              value={overrides.pv_irradiance ?? 0}
+              value={overrides.pv_irradiance ?? simIrradiance}
               onChange={(_, v) => onChange({ pv_irradiance: v as number })}
               valueLabelDisplay="auto"
               valueLabelFormat={(v) => `${(v * 100).toFixed(0)}%`}
@@ -647,8 +647,17 @@ export function SimulationPage() {
       pendingPatchRef.current = { ...pendingPatchRef.current, ...patch };
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
-        setInjectMutation.mutate(pendingPatchRef.current);
+        const firing = pendingPatchRef.current;
+        setInjectMutation.mutate(firing);
         pendingPatchRef.current = {};
+        // pv_irradiance is a one-shot: backend clears it after applying.
+        // Drop it from localInject too so the slider follows the live sim value.
+        if (firing.pv_irradiance != null) {
+          setLocalInject((prev) => {
+            const { pv_irradiance: _, ...rest } = prev;
+            return rest;
+          });
+        }
       }, 500);
     },
     [setInjectMutation]
