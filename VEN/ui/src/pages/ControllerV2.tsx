@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Alert, Box, CircularProgress, IconButton, Tooltip, Typography } from "@mui/material";
 import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
 import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
-import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useAllTimelines } from "../api/hooks";
+import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useResetAssetSoc, useAllTimelines } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller-v2/types";
 import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
 import { AssetCell } from "../components/controller-v2/AssetCell";
@@ -17,6 +17,7 @@ export function ControllerV2Page() {
   const { data: userRequests, refetch: refetchRequests } = useRequests({ refetchInterval: false });
   const { data: simInject } = useSimInject();
   const { mutate: setSimInject } = useSetSimInject();
+  const { mutate: resetAssetSoc } = useResetAssetSoc();
 
   const [pinnedCellIds, setPinnedCellIds] = useState<string[]>([]);
   const [collapseState, setCollapseState] = useState<CollapseState>({});
@@ -45,7 +46,7 @@ export function ControllerV2Page() {
       refetchTariffs();
       refetchRequests();
       refetchTimelines();
-    }, 10_000);
+    }, 2_000);
     return () => clearInterval(id);
   }, [refetchSim, refetchTariffs, refetchRequests, refetchTimelines]);
 
@@ -75,6 +76,10 @@ export function ControllerV2Page() {
 
   function handleOverrideChange(patch: Partial<SimInjectState>) {
     setSimInject(patch);
+  }
+
+  function handleResetSoc(assetId: string, soc: number) {
+    resetAssetSoc({ assetId, soc });
   }
 
   const tariffs = rates ?? [];
@@ -130,6 +135,7 @@ export function ControllerV2Page() {
           onTogglePin={handleTogglePin}
           onToggleCollapse={handleToggleCollapse}
           onOverrideChange={handleOverrideChange}
+          onResetSoc={handleResetSoc}
         />
       );
     }
@@ -201,6 +207,7 @@ export function ControllerV2Page() {
                 onTogglePin={handleTogglePin}
                 onToggleCollapse={handleToggleCollapse}
                 onOverrideChange={handleOverrideChange}
+                onResetSoc={handleResetSoc}
               />
             );
           })}

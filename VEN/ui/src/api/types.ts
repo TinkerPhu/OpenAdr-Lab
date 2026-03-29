@@ -91,7 +91,6 @@ export type SimInjectState = {
   pv_irradiance_alpha?: number;
   // Behaviour C: frozen while active, snap to profile on release
   ev_plugged?: boolean | null;
-  ev_departure_min?: number | null;
   ev_soc_target?: number | null;
   heater_setpoint_c?: number | null;
   heater_temp_min_c?: number | null;

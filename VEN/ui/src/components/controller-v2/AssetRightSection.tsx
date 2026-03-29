@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import {
   Accordion,
   AccordionDetails,
@@ -17,6 +18,7 @@ interface AssetRightSectionProps {
   simSnapshot: SimSnapshot | undefined;
   overrides: SimInjectState | undefined;
   onOverrideChange: (patch: Partial<SimInjectState>) => void;
+  onResetSoc: (assetId: string, soc: number) => void;
 }
 
 export function AssetRightSection({
@@ -24,12 +26,30 @@ export function AssetRightSection({
   simSnapshot: sim,
   overrides,
   onOverrideChange,
+  onResetSoc,
 }: AssetRightSectionProps) {
   const { data: schema = {} } = useSimSchema();
   const controls = schema[assetId] ?? [];
 
   const socRaw = sim?.assets?.[assetId]?.["soc"];
-  const socPct = socRaw !== undefined ? socRaw * 100 : null;
+  const liveSocPct = socRaw !== undefined ? socRaw * 100 : null;
+
+  // Debounced SoC editing: while user is dragging, hold a local pending value
+  // and suppress the live update. 500ms after the last drag event, POST reset.
+  const [pendingSocPct, setPendingSocPct] = useState<number | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const socPct = pendingSocPct ?? liveSocPct;
+
+  function handleSocChange(_: Event, value: number | number[]) {
+    const pct = value as number;
+    setPendingSocPct(pct);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      onResetSoc(assetId, pct / 100);
+      setPendingSocPct(null);
+    }, 500);
+  }
 
   function handleChange(key: string, val: number | boolean) {
     onOverrideChange({ [key]: val } as Partial<SimInjectState>);
@@ -67,10 +87,12 @@ export function AssetRightSection({
         </AccordionSummary>
         <AccordionDetails sx={{ pt: 0, pb: 1 }}>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            {/* Read-only SoC display — rendered generically for any asset that has soc */}
+            {/* SoC slider — editable, debounced POST /sim/reset/:id on commit */}
             {socPct !== null && (
               <Box>
-                <Typography variant="caption">SoC: {socPct.toFixed(0)}%</Typography>
+                <Typography variant="caption">
+                  SoC: {socPct.toFixed(0)}%{pendingSocPct !== null ? " (setting…)" : ""}
+                </Typography>
                 <Slider
                   size="small"
                   min={0}
@@ -78,7 +100,7 @@ export function AssetRightSection({
                   step={1}
                   value={socPct}
                   data-testid={`ctrl-${assetId}-soc`}
-                  disabled
+                  onChange={handleSocChange}
                   valueLabelDisplay="auto"
                   valueLabelFormat={(v) => `${v}%`}
                 />
