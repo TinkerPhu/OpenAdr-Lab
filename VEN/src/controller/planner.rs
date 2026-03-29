@@ -89,9 +89,16 @@ pub fn run_planner(
                 } else {
                     -(step_s as f64) / (1.0 - pv.pv_alpha).ln()
                 };
-                debug!(
-                    "pv forecast: irradiance_offset={:.4} pv_alpha={:.3} tau_s={:.1}s rated_kw={}",
-                    pv.irradiance_offset, pv.pv_alpha, tau_s, pv.rated_kw
+                let map_ts0 = now.timestamp();
+                let map_ts1 = (now + Duration::seconds(step_s as i64)).timestamp();
+                info!(
+                    irradiance_offset = pv.irradiance_offset,
+                    pv_alpha = pv.pv_alpha,
+                    tau_s,
+                    rated_kw = pv.rated_kw,
+                    map_ts0,
+                    map_ts1,
+                    "pv forecast build"
                 );
                 Some(
                     (0..total_steps)
@@ -134,6 +141,11 @@ pub fn run_planner(
         let firm_pv_peak: f64 = firm_slots.iter()
             .map(|s| pv_kw_map.get(&s.start.timestamp()).copied().unwrap_or(0.0))
             .fold(0.0_f64, f64::max);
+        let pv_map_hits = firm_slots.iter()
+            .filter(|s| pv_kw_map.contains_key(&s.start.timestamp()))
+            .count();
+        let slot0_ts = firm_slots.first().map(|s| s.start.timestamp()).unwrap_or(0);
+        info!(pv_map_hits, total_firm = firm_slots.len(), slot0_ts, pv_map_size = pv_kw_map.len(), "pv map lookup");
         let surplus_sum: f64 = firm_slots.iter().map(|s| s.surplus_available_kw).sum();
         let bat_cfg = profile.battery_config();
         let eff_sqrt = bat_cfg.map(|b| b.round_trip_efficiency.sqrt()).unwrap_or(1.0);
