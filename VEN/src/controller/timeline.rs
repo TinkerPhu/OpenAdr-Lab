@@ -76,6 +76,30 @@ pub fn compute_uniform_grid(
     (history, future)
 }
 
+/// Fill `None` slots in a resampled series by carrying the last `Some` value forward.
+///
+/// Used for forecast data: plan allocations are valid for the full 5-minute slot duration,
+/// so sub-bucket nulls (caused by fine grid resolution between sparse plan points) should
+/// hold the previous slot's value rather than rendering as gaps / needle peaks.
+///
+/// History series are intentionally NOT passed through this — real data gaps must show as gaps.
+pub fn locf_fill_nones(
+    series: Vec<Option<HashMap<String, f64>>>,
+) -> Vec<Option<HashMap<String, f64>>> {
+    let mut last: Option<HashMap<String, f64>> = None;
+    series
+        .into_iter()
+        .map(|slot| {
+            if let Some(v) = slot {
+                last = Some(v.clone());
+                Some(v)
+            } else {
+                last.clone()
+            }
+        })
+        .collect()
+}
+
 /// Resample raw sorted points onto a uniform grid using LOCF time-weighted mean.
 ///
 /// For each grid timestamp, aggregates all raw points in `[grid_ts, grid_ts + resolution)`.
@@ -820,5 +844,53 @@ mod tests {
         let np = build_now_point("ev", now, &sim);
         assert_eq!(np.ts, now);
         assert!(np.values.is_empty());
+    }
+
+    // ─── LOCF fill tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn locf_fill_nones_fills_gaps() {
+        let v1: HashMap<String, f64> = [("power_kw".into(), 7.4)].into();
+        let v2: HashMap<String, f64> = [("power_kw".into(), 3.0)].into();
+        let input: Vec<Option<HashMap<String, f64>>> = vec![
+            Some(v1.clone()),
+            None,
+            None,
+            Some(v2.clone()),
+            None,
+        ];
+        let out = locf_fill_nones(input);
+        // [7.4, 7.4, 7.4, 3.0, 3.0]
+        assert!((out[0].as_ref().unwrap()["power_kw"] - 7.4).abs() < 1e-9);
+        assert!((out[1].as_ref().unwrap()["power_kw"] - 7.4).abs() < 1e-9);
+        assert!((out[2].as_ref().unwrap()["power_kw"] - 7.4).abs() < 1e-9);
+        assert!((out[3].as_ref().unwrap()["power_kw"] - 3.0).abs() < 1e-9);
+        assert!((out[4].as_ref().unwrap()["power_kw"] - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn locf_fill_nones_leading_nones_stay_none() {
+        let v: HashMap<String, f64> = [("power_kw".into(), 5.0)].into();
+        let input: Vec<Option<HashMap<String, f64>>> = vec![None, None, Some(v.clone()), None];
+        let out = locf_fill_nones(input);
+        // Leading Nones have no predecessor — remain None
+        assert!(out[0].is_none());
+        assert!(out[1].is_none());
+        assert!((out[2].as_ref().unwrap()["power_kw"] - 5.0).abs() < 1e-9);
+        assert!((out[3].as_ref().unwrap()["power_kw"] - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn locf_fill_nones_all_some_unchanged() {
+        let v: HashMap<String, f64> = [("power_kw".into(), 1.0)].into();
+        let input: Vec<Option<HashMap<String, f64>>> = vec![Some(v.clone()), Some(v.clone())];
+        let out = locf_fill_nones(input);
+        assert!(out.iter().all(|s| s.is_some()));
+    }
+
+    #[test]
+    fn locf_fill_nones_empty_passthrough() {
+        let out = locf_fill_nones(vec![]);
+        assert!(out.is_empty());
     }
 }

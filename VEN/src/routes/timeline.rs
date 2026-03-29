@@ -147,7 +147,7 @@ pub fn build_grid_aligned_array(
     resolution_s: u64,
 ) -> Option<Vec<serde_json::Value>> {
     use crate::controller::timeline::{
-        build_asset_timeline, build_now_point, resample_to_grid, TimeWindow,
+        build_asset_timeline, build_now_point, locf_fill_nones, resample_to_grid, TimeWindow,
     };
 
     let raw = build_asset_timeline(
@@ -167,8 +167,10 @@ pub fn build_grid_aligned_array(
     let raw_future: Vec<_> = raw.iter().filter(|p| p.ts >= now).cloned().collect();
 
     // Resample onto grids.
+    // Future: apply LOCF fill so plan-slot values extend across all fine-grid buckets
+    // within a 5-minute slot rather than leaving sub-bucket gaps that render as needle peaks.
     let hist_resampled = resample_to_grid(&raw_history, history_grid, resolution_s);
-    let fut_resampled = resample_to_grid(&raw_future, future_grid, resolution_s);
+    let fut_resampled = locf_fill_nones(resample_to_grid(&raw_future, future_grid, resolution_s));
 
     // Build now-point.
     let now_point = build_now_point(asset_id, now, sim);
