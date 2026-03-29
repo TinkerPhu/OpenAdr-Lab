@@ -205,6 +205,29 @@ impl Asset for PvInverter {
         };
         self.capability_inner(s)
     }
+
+    /// Override: use time-varying irradiance_at(t) for each future step so the
+    /// planner sees a sin-curve forecast rather than the frozen current irradiance.
+    fn capability_trajectory(
+        &self,
+        _initial: &AssetState,
+        duration: Duration,
+        resolution: Duration,
+    ) -> Vec<(DateTime<Utc>, AssetCapability)> {
+        let now = Utc::now();
+        let n = (duration.num_seconds() / resolution.num_seconds().max(1)) as usize;
+        let mut result = Vec::with_capacity(n);
+        for i in 1..=n {
+            let t = now + resolution * i as i32;
+            // irradiance_at uses the sin model (ignores self.irradiance override)
+            let power_kw = self.irradiance_at(t); // negative = export
+            result.push((t, AssetCapability {
+                max_export_kw: power_kw,
+                max_import_kw: power_kw, // non-curtailable: same bound in both directions
+            }));
+        }
+        result
+    }
 }
 
 #[cfg(test)]
@@ -284,5 +307,83 @@ mod tests {
             "Should export ~10 kW at full irradiance"
         );
         assert!((new_state.actual_power_kw + 10.0).abs() < 0.01);
+    }
+
+    // ── capability_trajectory tests ──────────────────────────────────────────
+
+    #[test]
+    fn capability_trajectory_uses_sin_model_not_flat_irradiance() {
+        // self.irradiance is frozen at 0.5 (would give −5 kW flat if used).
+        // The override returns time-varying values from irradiance_at(t).
+        let mut pv = PvInverter {
+            rated_kw: 10.0,
+            irradiance: 0.5,
+            export_limit_kw: None,
+        };
+        // Set an obviously wrong irradiance to confirm it is NOT used.
+        pv.irradiance = 0.5;
+        let state = AssetState::Pv(PvState { actual_power_kw: -5.0 });
+
+        // 24-hour trajectory at 1-hour resolution — always spans a full day cycle.
+        let traj = pv.capability_trajectory(&state, Duration::hours(24), Duration::hours(1));
+        assert_eq!(traj.len(), 24);
+
+        // Each point must match irradiance_at(t), not −rated_kw * self.irradiance.
+        let flat_wrong = -pv.rated_kw * pv.irradiance; // −5.0
+        for (t, cap) in &traj {
+            let expected = pv.irradiance_at(*t);
+            assert!(
+                (cap.max_export_kw - expected).abs() < 1e-9,
+                "at {t}: expected {expected:.3} (sin model), got {:.3}", cap.max_export_kw
+            );
+            // Values must not all be −5.0 (proving sin model is used, not flat override)
+            // (We check this in aggregate below.)
+            let _ = flat_wrong;
+        }
+
+        // At least some daytime points are non-zero and some night points are zero.
+        // 24 h from now always contains at least 6 daytime hours (6am-6pm UTC window).
+        let non_zero = traj.iter().filter(|(_, c)| c.max_export_kw.abs() > 1e-6).count();
+        assert!(non_zero > 0, "24-h trajectory must include some daytime generation");
+
+        // All PV values must be ≤ 0 (export only).
+        for (_, cap) in &traj {
+            assert!(cap.max_export_kw <= 1e-9, "PV trajectory must be non-positive");
+        }
+
+        // Not all identical to flat_wrong — proves sin model is used.
+        let all_flat = traj.iter().all(|(_, c)| (c.max_export_kw - flat_wrong).abs() < 1e-6);
+        assert!(!all_flat, "trajectory must NOT be flat at self.irradiance × rated_kw");
+    }
+
+    #[test]
+    fn capability_trajectory_respects_rated_kw() {
+        let pv = PvInverter {
+            rated_kw: 8.0,
+            irradiance: 0.0,
+            export_limit_kw: None,
+        };
+        let state = AssetState::Pv(PvState { actual_power_kw: 0.0 });
+        let traj = pv.capability_trajectory(&state, Duration::hours(24), Duration::hours(1));
+        for (_, cap) in &traj {
+            assert!(
+                cap.max_export_kw >= -8.0 - 1e-9,
+                "export must not exceed rated_kw=8.0, got {}", cap.max_export_kw
+            );
+        }
+    }
+
+    #[test]
+    fn capability_trajectory_ascending_timestamps() {
+        let (pv, state_inner) = make_pv(5.0);
+        let state = AssetState::Pv(state_inner);
+        let traj = pv.capability_trajectory(&state, Duration::hours(6), Duration::hours(1));
+        assert_eq!(traj.len(), 6);
+        for i in 1..traj.len() {
+            assert!(
+                traj[i].0 > traj[i - 1].0,
+                "trajectory timestamps must be strictly ascending"
+            );
+        }
     }
 }

@@ -575,19 +575,10 @@ fn rules_choose(
         }
     }
 
-    // Rule 8: surplus opportunity (no packet, avoid waste)
-    if slot.surplus_available_kw > 1e-3 && avail_cap.max_import_kw > 1e-6 {
-        let take = slot.surplus_available_kw.min(avail_cap.max_import_kw);
-        if take > 1e-6 {
-            return (
-                take,
-                PlanReason::CheapTariff {
-                    tariff_eur_per_kwh: slot.export_tariff_eur_kwh,
-                    threshold_eur_per_kwh: slot.export_tariff_eur_kwh,
-                },
-            );
-        }
-    }
+    // Rule 8 (surplus opportunity) is intentionally absent from the planner.
+    // Surplus EV charging is handled by the dispatcher as a live opportunistic
+    // overlay (current tick only, using actual PV power). This prevents phantom
+    // plan commitments based on model-forecast PV from polluting VTN reports.
 
     // Rules 9+10: battery arbitrage
     if asset_id == "battery" {

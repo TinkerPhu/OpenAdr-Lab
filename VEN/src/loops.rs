@@ -351,12 +351,22 @@ pub(crate) fn spawn_sim_tick(
                         inject.heater_setpoint_c,
                         now,
                     ),
-                    None => sim_guard
-                        .assets
-                        .iter()
-                        .zip(sim_guard.asset_configs.iter())
-                        .map(|(a, cfg)| (a.id.clone(), cfg.default_setpoint(&a.state)))
-                        .collect(),
+                    None => {
+                        // No plan yet (startup window). Apply defaults then surplus overlay.
+                        let mut m: std::collections::HashMap<String, f64> = sim_guard
+                            .assets
+                            .iter()
+                            .zip(sim_guard.asset_configs.iter())
+                            .map(|(a, cfg)| (a.id.clone(), cfg.default_setpoint(&a.state)))
+                            .collect();
+                        controller::dispatcher::apply_surplus_ev_overlay(
+                            &mut m,
+                            &sim_guard.assets,
+                            &sim_guard.asset_configs,
+                            false,
+                        );
+                        m
+                    }
                 };
 
                 // Simulator: apply setpoints → update device states
