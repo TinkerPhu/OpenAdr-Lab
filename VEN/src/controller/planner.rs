@@ -83,8 +83,7 @@ pub fn run_planner(
                     (0..total_steps)
                         .map(|i| {
                             let t = now + Duration::seconds((i as i64) * step_s as i64);
-                            let secs_ahead = (i as f64) * step_s as f64;
-                            (t.timestamp(), pv.forecast_kw_at(t, secs_ahead))
+                            (t.timestamp(), pv.forecast_kw_at(t, i as f64))
                         })
                         .collect(),
                 )
@@ -1327,8 +1326,7 @@ mod tests {
         let pv_kw_map: HashMap<i64, f64> = (0..total_steps)
             .map(|i| {
                 let t = noon + Duration::seconds((i as i64) * step_s as i64);
-                let secs_ahead = (i as f64) * step_s as f64;
-                (t.timestamp(), pv.forecast_kw_at(t, secs_ahead))
+                (t.timestamp(), pv.forecast_kw_at(t, i as f64))
             })
             .collect();
 
