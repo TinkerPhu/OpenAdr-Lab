@@ -89,6 +89,10 @@ pub fn run_planner(
                 } else {
                     -(step_s as f64) / (1.0 - pv.pv_alpha).ln()
                 };
+                debug!(
+                    "pv forecast: irradiance_offset={:.4} pv_alpha={:.3} tau_s={:.1}s rated_kw={}",
+                    pv.irradiance_offset, pv.pv_alpha, tau_s, pv.rated_kw
+                );
                 Some(
                     (0..total_steps)
                         .map(|i| {
