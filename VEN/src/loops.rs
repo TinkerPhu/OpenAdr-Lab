@@ -384,6 +384,11 @@ pub(crate) fn spawn_sim_tick(
                     inject.ev_soc_target,
                 );
 
+                // pv_irradiance is a one-shot: apply offset once then let it decay.
+                if inject.pv_irradiance.is_some() {
+                    state.clear_inject_field("pv_irradiance").await;
+                }
+
                 // Update sensor snapshot (backward compat)
                 let sensor = sim_guard.to_sensor_snapshot();
                 state.update_sensor(sensor).await;
