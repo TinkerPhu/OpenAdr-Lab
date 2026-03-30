@@ -52,6 +52,7 @@ vi.mock("../api/hooks", () => ({
   useTrace: () => ({ data: [] }),
   useSimInject: () => ({ data: mockInject() }),
   useSetSimInject: () => mockSetInject(),
+  useResetAssetSoc: () => ({ mutate: vi.fn() }),
   useTimeline: () => ({ data: [] }),
   useAllTimelines: () => ({ data: {}, refetch: vi.fn() }),
   useSimSchema: () => ({ data: { ev: evSchema } }),
