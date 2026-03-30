@@ -78,8 +78,8 @@ export function ControllerV2Page() {
     setSimInject(patch);
   }
 
-  function handleResetSoc(assetId: string, soc: number) {
-    resetAssetSoc({ assetId, soc });
+  function handleResetSoc(assetId: string, soc: number, onDone: () => void) {
+    resetAssetSoc({ assetId, soc }, { onSuccess: onDone });
   }
 
   const tariffs = rates ?? [];
