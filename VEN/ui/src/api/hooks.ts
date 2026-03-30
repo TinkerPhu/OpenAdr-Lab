@@ -136,8 +136,8 @@ export function useResetAssetSoc() {
   return useMutation({
     mutationFn: ({ assetId, soc }: { assetId: string; soc: number }) =>
       api.postSimReset(assetId, soc),
-    onSuccess: () => {
-      queryClient.refetchQueries({ queryKey: ["sim"] });
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ["sim"] });
     },
   });
 }

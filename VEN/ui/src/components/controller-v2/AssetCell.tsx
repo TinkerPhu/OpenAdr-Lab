@@ -29,7 +29,7 @@ interface AssetCellProps {
   onTogglePin: (cellId: string) => void;
   onToggleCollapse: (cellId: string, section: "left" | "right") => void;
   onOverrideChange: (patch: Partial<SimInjectState>) => void;
-  onResetSoc: (assetId: string, soc: number) => void;
+  onResetSoc: (assetId: string, soc: number, onDone: () => void) => void;
 }
 
 export function AssetCell({

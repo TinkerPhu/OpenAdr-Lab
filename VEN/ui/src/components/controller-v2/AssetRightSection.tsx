@@ -18,7 +18,7 @@ interface AssetRightSectionProps {
   simSnapshot: SimSnapshot | undefined;
   overrides: SimInjectState | undefined;
   onOverrideChange: (patch: Partial<SimInjectState>) => void;
-  onResetSoc: (assetId: string, soc: number) => void;
+  onResetSoc: (assetId: string, soc: number, onDone: () => void) => void;
 }
 
 export function AssetRightSection({
@@ -39,6 +39,14 @@ export function AssetRightSection({
   const [pendingSocPct, setPendingSocPct] = useState<number | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Local state for schema-driven slider controls: updated immediately on drag
+  // so the slider is responsive without waiting for the POST roundtrip.
+  // pv_irradiance_alpha (blend-back speed) also benefits: once set locally it
+  // never reverts to the server value, which is correct since it's a config
+  // knob rather than a live measurement.
+  const [localControlValues, setLocalControlValues] = useState<Record<string, number | boolean>>({});
+  const controlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const socPct = pendingSocPct ?? liveSocPct;
 
   function handleSocChange(_: Event, value: number | number[]) {
@@ -46,16 +54,20 @@ export function AssetRightSection({
     setPendingSocPct(pct);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      onResetSoc(assetId, pct / 100);
-      setPendingSocPct(null);
+      onResetSoc(assetId, pct / 100, () => setPendingSocPct(null));
     }, 500);
   }
 
   function handleChange(key: string, val: number | boolean) {
-    onOverrideChange({ [key]: val } as Partial<SimInjectState>);
+    setLocalControlValues(prev => ({ ...prev, [key]: val }));
+    if (controlTimerRef.current) clearTimeout(controlTimerRef.current);
+    controlTimerRef.current = setTimeout(() => {
+      onOverrideChange({ [key]: val } as Partial<SimInjectState>);
+    }, 300);
   }
 
   function getValue(key: string): number | boolean | null {
+    if (key in localControlValues) return localControlValues[key];
     if (overrides != null) {
       const v = (overrides as Record<string, unknown>)[key];
       if (typeof v === "number" || typeof v === "boolean") return v;
