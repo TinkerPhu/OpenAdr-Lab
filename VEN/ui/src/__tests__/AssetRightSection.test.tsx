@@ -38,7 +38,7 @@ const simWithPv: SimSnapshot = {
 };
 
 const pvSchema = [
-  { key: "pv_irradiance", label: "Irradiance Override", kind: "slider" as const, min: 0, max: 1, unit: "", display_scale: undefined },
+  { key: "pv_irradiance", label: "Irradiance Override", kind: "slider" as const, min: 0, max: 1, unit: "%", display_scale: 100 },
   { key: "pv_irradiance_alpha", label: "Blend-back Speed", kind: "slider" as const, min: 0.01, max: 1, unit: "", display_scale: undefined },
 ];
 
@@ -230,8 +230,8 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
       />
     );
 
-    // Should show live irradiance (0.80), not the slider min (0.00)
-    expect(screen.getByText(/Irradiance Override: 0\.80/)).toBeInTheDocument();
+    // Should show live irradiance as % (80 %), not the slider min (0 %)
+    expect(screen.getByText(/Irradiance Override: 80 %/)).toBeInTheDocument();
   });
 
   it("irradiance: label updates immediately on drag before debounce fires", () => {
@@ -247,13 +247,13 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
       />
     );
 
-    // Drag irradiance to 0.6
+    // Drag irradiance to 60 % (display units; raw = 60/100 = 0.6)
     act(() => {
-      fireEvent.change(getSchemaSliderInput("pv_irradiance"), { target: { value: "0.6" } });
+      fireEvent.change(getSchemaSliderInput("pv_irradiance"), { target: { value: "60" } });
     });
 
     // Label updates immediately — no network roundtrip needed
-    expect(screen.getByText(/Irradiance Override: 0\.60/)).toBeInTheDocument();
+    expect(screen.getByText(/Irradiance Override: 60 %/)).toBeInTheDocument();
 
     // onOverrideChange must NOT have fired yet (still in debounce window)
     expect(mockOnOverrideChange).not.toHaveBeenCalled();
@@ -273,8 +273,8 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
       />
     );
 
-    // Must show live irradiance (0.80), NOT the stale override (0.30)
-    expect(screen.getByText(/Irradiance Override: 0\.80/)).toBeInTheDocument();
+    // Must show live irradiance (80 %), NOT the stale override (30 %)
+    expect(screen.getByText(/Irradiance Override: 80 %/)).toBeInTheDocument();
   });
 
   it("irradiance: reverts to live sim irradiance after debounce fires", () => {
@@ -290,19 +290,20 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
       />
     );
 
-    // Drag to 0.6
+    // Drag to 60 % (display) = 0.6 (raw)
     act(() => {
-      fireEvent.change(getSchemaSliderInput("pv_irradiance"), { target: { value: "0.6" } });
+      fireEvent.change(getSchemaSliderInput("pv_irradiance"), { target: { value: "60" } });
     });
-    expect(screen.getByText(/Irradiance Override: 0\.60/)).toBeInTheDocument();
+    expect(screen.getByText(/Irradiance Override: 60 %/)).toBeInTheDocument();
 
     // Debounce fires: POST sent, local state released
     act(() => { vi.advanceTimersByTime(300); });
 
+    // DynamicControl divides by scale before calling onChange: 60/100 = 0.6
     expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance: 0.6 });
-    // Slider now follows live irradiance again (0.8 in test fixture;
-    // in production the sim freezes at 0.6 once the override is applied)
-    expect(screen.getByText(/Irradiance Override: 0\.80/)).toBeInTheDocument();
+    // Slider now follows live irradiance again (80 % in test fixture;
+    // in production the sim freezes at 60 % once the override is applied)
+    expect(screen.getByText(/Irradiance Override: 80 %/)).toBeInTheDocument();
   });
 
   it("irradiance: onOverrideChange debounced — fires once with final value after 300ms", () => {
@@ -320,12 +321,12 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
 
     const input = getSchemaSliderInput("pv_irradiance");
 
-    // Three rapid drags
-    act(() => { fireEvent.change(input, { target: { value: "0.3" } }); });
+    // Three rapid drags (display units: 30 %, 50 %, 70 %)
+    act(() => { fireEvent.change(input, { target: { value: "30" } }); });
     act(() => { vi.advanceTimersByTime(100); });
-    act(() => { fireEvent.change(input, { target: { value: "0.5" } }); });
+    act(() => { fireEvent.change(input, { target: { value: "50" } }); });
     act(() => { vi.advanceTimersByTime(100); });
-    act(() => { fireEvent.change(input, { target: { value: "0.7" } }); });
+    act(() => { fireEvent.change(input, { target: { value: "70" } }); });
 
     // Not called yet
     expect(mockOnOverrideChange).not.toHaveBeenCalled();
@@ -333,7 +334,7 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
     // Fire debounce
     act(() => { vi.advanceTimersByTime(300); });
 
-    // Called exactly once with the final value
+    // Called exactly once; raw value = 70/100 = 0.7
     expect(mockOnOverrideChange).toHaveBeenCalledTimes(1);
     expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance: 0.7 });
   });
@@ -432,13 +433,13 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
     );
 
     act(() => {
-      fireEvent.change(getSchemaSliderInput("pv_irradiance"), { target: { value: "0.3" } });
+      fireEvent.change(getSchemaSliderInput("pv_irradiance"), { target: { value: "30" } });
     });
-    expect(screen.getByText(/Irradiance Override: 0\.30/)).toBeInTheDocument();
+    expect(screen.getByText(/Irradiance Override: 30 %/)).toBeInTheDocument();
 
     act(() => { vi.advanceTimersByTime(300); });
 
     // Unlike blend-back, irradiance releases local hold and follows live sim
-    expect(screen.getByText(/Irradiance Override: 0\.80/)).toBeInTheDocument();
+    expect(screen.getByText(/Irradiance Override: 80 %/)).toBeInTheDocument();
   });
 });

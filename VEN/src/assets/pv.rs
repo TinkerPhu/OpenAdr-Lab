@@ -105,8 +105,8 @@ impl PvInverter {
                 kind: ControlKind::Slider,
                 min: Some(0.0),
                 max: Some(1.0),
-                unit: "".into(),
-                display_scale: None,
+                unit: "%".into(),
+                display_scale: Some(100.0),
             },
             ControlDescriptor {
                 key: "pv_irradiance_alpha".into(),
