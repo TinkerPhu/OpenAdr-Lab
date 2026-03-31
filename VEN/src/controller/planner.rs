@@ -712,9 +712,12 @@ fn update_slot_from_step(
             });
         }
     } else if actual_kw < -1e-6 {
-        // Export / discharge
+        // Export / discharge: first offset any remaining import, then overflow into export.
         let discharge_kw = -actual_kw;
-        slot.net_import_kw = (slot.net_import_kw - discharge_kw).max(0.0);
+        let import_offset = discharge_kw.min(slot.net_import_kw);
+        let export_surplus = discharge_kw - import_offset;
+        slot.net_import_kw = (slot.net_import_kw - import_offset).max(0.0);
+        slot.net_export_kw += export_surplus;
 
         slot.allocations.push(PacketAllocation {
             packet_id: Uuid::nil(),
