@@ -130,8 +130,12 @@ pub fn apply_surplus_ev_overlay(
         .find(|a| a.id == "base_load")
         .map(|a| a.last_power_kw)
         .unwrap_or(0.0);
-    // surplus_kw: generation that exceeds base consumption (positive = excess export)
-    let surplus_kw = (-(pv_kw + base_kw)).max(0.0);
+    // Also account for any battery charging that the plan has already allocated this
+    // tick (positive setpoint = charging). This prevents double-allocating PV surplus
+    // to both the battery and the EV — EV only gets what the battery leaves behind.
+    let battery_charge_kw = setpoints.get("battery").copied().unwrap_or(0.0).max(0.0);
+    // surplus_kw: net generation after base consumption and planned battery charging
+    let surplus_kw = (-(pv_kw + base_kw) - battery_charge_kw).max(0.0);
     if surplus_kw < 0.1 {
         return;
     }
@@ -284,6 +288,31 @@ mod tests {
             (ev_sp - 5.0).abs() < 1e-6,
             "plan allocation must not be overridden by surplus overlay"
         );
+    }
+
+    #[test]
+    fn battery_charging_reduces_ev_surplus() {
+        // PV 4 kW, base 0.5 kW → raw PV surplus 3.5 kW.
+        // Battery plan setpoint = 3.0 kW → EV should only get 0.5 kW.
+        let (assets, configs) = build_assets(-4.0, 0.5, 0.4, true, 0.8);
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), 3.0); // battery plan allocation
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false);
+        let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
+        assert!(
+            (ev_sp - 0.5).abs() < 1e-6,
+            "EV should receive only the remaining surplus after battery, got {ev_sp}"
+        );
+    }
+
+    #[test]
+    fn battery_claiming_full_surplus_leaves_ev_idle() {
+        // PV 4 kW, base 0.5 kW → surplus 3.5 kW; battery claims all 3.5 kW.
+        let (assets, configs) = build_assets(-4.0, 0.5, 0.4, true, 0.8);
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), 3.5);
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false);
+        assert!(sp.get("ev").is_none(), "EV must not charge when battery claims full surplus");
     }
 
     #[test]
