@@ -78,6 +78,13 @@ export function AssetRightSection({
 
   function getValue(key: string): number | boolean | null {
     if (key in localControlValues) return localControlValues[key];
+    // pv_irradiance is a one-shot: the backend applies it and auto-clears it
+    // within one sim tick. simInject may cache the pre-clear value briefly,
+    // so we must NOT read overrides for this key — go straight to live sim.
+    if (key === "pv_irradiance") {
+      const irr = sim?.assets?.["pv"]?.["irradiance"];
+      return typeof irr === "number" ? irr : null;
+    }
     if (overrides != null) {
       const v = (overrides as Record<string, unknown>)[key];
       if (typeof v === "number" || typeof v === "boolean") return v;
@@ -91,10 +98,6 @@ export function AssetRightSection({
     if (key === "ev_soc_target") {
       const t = sim?.assets?.["ev"]?.["soc_target"];
       return typeof t === "number" ? t : null;
-    }
-    if (key === "pv_irradiance") {
-      const irr = sim?.assets?.["pv"]?.["irradiance"];
-      return typeof irr === "number" ? irr : null;
     }
     return null;
   }
