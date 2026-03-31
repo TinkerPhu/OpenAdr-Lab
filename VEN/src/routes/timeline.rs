@@ -180,8 +180,21 @@ pub fn build_grid_aligned_array(
     // Future: apply LOCF fill so plan-slot values extend across all fine-grid buckets
     // within a 5-minute slot rather than leaving sub-bucket gaps that render as needle peaks.
     let hist_resampled = resample_to_grid(&raw_history, history_grid, resolution_s);
-    let fut_resampled =
-        locf_fill_nones(resample_to_grid(&raw_future, future_grid, resolution_s), fut_seed);
+
+    // Plan horizon end: last slot end across all plan slots, or None when no plan is active.
+    // Future grid points strictly after this boundary are nulled out — the LOCF seed must not
+    // fill an unbounded future with stale values beyond what the plan actually covers.
+    let plan_end_opt: Option<DateTime<Utc>> = plan.and_then(|p| p.all_slots().map(|s| s.end).max());
+
+    let fut_resampled: Vec<Option<std::collections::HashMap<String, f64>>> =
+        locf_fill_nones(resample_to_grid(&raw_future, future_grid, resolution_s), fut_seed)
+            .into_iter()
+            .zip(future_grid.iter())
+            .map(|(v, &ts)| match plan_end_opt {
+                Some(end) if ts <= end => v,
+                _ => None,
+            })
+            .collect();
 
     // Concatenate: history_grid + now_point + future_grid.
     let mut out = serialize_grid_timeline(history_grid, &hist_resampled);
