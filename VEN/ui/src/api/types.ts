@@ -57,7 +57,7 @@ export type SensorSnapshot = {
 
 export type AssetSnapshot = {
   power_kw: number;
-  [key: string]: number;
+  [key: string]: number | null;
 };
 
 export type GridSnapshot = {

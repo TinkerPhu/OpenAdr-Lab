@@ -31,8 +31,8 @@ export function AssetRightSection({
   const { data: schema = {} } = useSimSchema();
   const controls = schema[assetId] ?? [];
 
-  const socRaw = sim?.assets?.[assetId]?.["soc"];
-  const liveSocPct = socRaw !== undefined ? socRaw * 100 : null;
+  const socRaw = sim?.assets?.[assetId]?.["soc"] ?? null;
+  const liveSocPct = socRaw !== null && socRaw !== undefined ? socRaw * 100 : null;
 
   // Debounced SoC editing: while user is dragging, hold a local pending value
   // and suppress the live update. 500ms after the last drag event, POST reset.
