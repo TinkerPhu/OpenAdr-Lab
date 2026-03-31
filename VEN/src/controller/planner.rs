@@ -441,7 +441,7 @@ fn build_grid(
                 surplus_power_kw: 0.0,
                 grid_power_kw: baseline_kw,
                 marginal_value: 0.0,
-                cost_eur: baseline_kw * import_tariff * slot_h,
+                cost_eur: alloc_cost_eur(0.0, baseline_kw, export_tariff, import_tariff, slot_h),
                 co2_g: baseline_kw * co2 * slot_h,
             }],
             net_import_kw: net_import,
@@ -649,9 +649,18 @@ fn rules_choose(
         if let Some(bat) = battery_cfg {
             let eff = bat.round_trip_efficiency.sqrt();
             if tariff_t < median_tariff * eff {
-                // Rule 9: cheap — charge
+                // Rule 9: cheap — charge.
+                // Throttle to available PV surplus when present so the battery
+                // charges from free solar rather than importing from the grid.
+                // Falls back to full rate when no surplus exists (night arbitrage).
                 let site_head = (site_ctx.import_limit_kw - site_ctx.planned_others_kw).max(0.0);
-                let charge_kw = avail_cap.max_import_kw.min(site_head).max(0.0);
+                let pv_surplus_kw = slot.surplus_available_kw;
+                let max_charge_kw = if pv_surplus_kw > 0.1 {
+                    avail_cap.max_import_kw.min(pv_surplus_kw)
+                } else {
+                    avail_cap.max_import_kw
+                };
+                let charge_kw = max_charge_kw.min(site_head).max(0.0);
                 if charge_kw > 0.01 {
                     return (
                         charge_kw,
@@ -681,6 +690,22 @@ fn rules_choose(
     (0.0, PlanReason::Idle)
 }
 
+// ─── Cost helpers ────────────────────────────────────────────────────────────
+
+/// EUR cost for one plan-slot allocation, split between PV-surplus and grid portions.
+/// `surplus_kw` is the PV-covered share (opportunity cost at export tariff).
+/// `grid_kw`    is the grid-import share (actual cost at import tariff).
+/// Pass `grid_kw < 0` for discharge/export to get negative cost (revenue).
+fn alloc_cost_eur(
+    surplus_kw: f64,
+    grid_kw: f64,
+    export_tariff_eur_kwh: f64,
+    import_tariff_eur_kwh: f64,
+    slot_h: f64,
+) -> f64 {
+    surplus_kw * export_tariff_eur_kwh * slot_h + grid_kw * import_tariff_eur_kwh * slot_h
+}
+
 // ─── Slot bookkeeping helper ──────────────────────────────────────────────────
 
 fn update_slot_from_step(
@@ -699,8 +724,7 @@ fn update_slot_from_step(
             let surplus_used = slot.surplus_available_kw.min(actual_kw);
             let grid_used = (actual_kw - surplus_used).max(0.0);
             let energy_kwh = actual_kw * slot_h;
-            let cost = surplus_used * slot.export_tariff_eur_kwh * slot_h
-                + grid_used * slot.import_tariff_eur_kwh * slot_h;
+            let cost = alloc_cost_eur(surplus_used, grid_used, slot.export_tariff_eur_kwh, slot.import_tariff_eur_kwh, slot_h);
             let co2 = grid_used * slot.co2_g_kwh * slot_h;
 
             slot.surplus_available_kw -= surplus_used;
@@ -733,7 +757,7 @@ fn update_slot_from_step(
                 surplus_power_kw: surplus_used,
                 grid_power_kw: grid_used,
                 marginal_value: 0.0,
-                cost_eur: grid_used * slot.import_tariff_eur_kwh * slot_h,
+                cost_eur: alloc_cost_eur(0.0, grid_used, slot.export_tariff_eur_kwh, slot.import_tariff_eur_kwh, slot_h),
                 co2_g: grid_used * slot.co2_g_kwh * slot_h,
             });
         }
@@ -985,6 +1009,34 @@ mod tests {
     use super::*;
     use crate::entities::tariff_snapshot::TariffSnapshot;
     use chrono::TimeZone;
+
+    // ── alloc_cost_eur ────────────────────────────────────────────────────────
+
+    #[test]
+    fn alloc_cost_eur_grid_only() {
+        // No PV surplus: cost = grid_kw * import_tariff * slot_h
+        let cost = alloc_cost_eur(0.0, 3.0, 0.05, 0.25, 1.0);
+        assert!((cost - 0.75).abs() < 1e-9);
+    }
+
+    #[test]
+    fn alloc_cost_eur_surplus_and_grid() {
+        // 1 kW from PV (export tariff) + 2 kW from grid (import tariff), 1h slot
+        let cost = alloc_cost_eur(1.0, 2.0, 0.05, 0.25, 1.0);
+        assert!((cost - (1.0 * 0.05 + 2.0 * 0.25)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn alloc_cost_eur_discharge_is_negative() {
+        // Discharge 2 kW saves grid import: cost = -2 * 0.25 * 1h = -0.5
+        let cost = alloc_cost_eur(0.0, -2.0, 0.05, 0.25, 1.0);
+        assert!((cost - (-0.50)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn alloc_cost_eur_zero_power_is_zero() {
+        assert_eq!(alloc_cost_eur(0.0, 0.0, 0.05, 0.25, 1.0), 0.0);
+    }
 
     fn ts(hour: u32, min: u32, sec: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 3, 21, hour, min, sec).unwrap()
