@@ -115,9 +115,20 @@ pub fn run_planner(
         })
         .unwrap_or_default();
 
-    // Phase 1: Build planning grid (B1 fix: no site_import_reduction_kw here)
+    // Phase 1: Build planning grid.
+    // Read current effective base_load from the sim (reflects any inject override).
+    let baseline_kw = assets
+        .find_asset("base_load")
+        .and_then(|(_, cfg)| {
+            if let AssetConfig::BaseLoad(bl) = cfg {
+                Some(bl.baseline_kw)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| profile.base_load_kw());
     let (mut firm_slots, flexible_slots) =
-        build_grid(tariffs, capacity, profile, now, step_s, total_steps, firm_boundary, &pv_kw_map);
+        build_grid(tariffs, capacity, baseline_kw, now, step_s, total_steps, firm_boundary, &pv_kw_map);
 
     // Preserve terminal packets; work on non-terminal only
     let terminal_pkts: Vec<EnergyPacket> =
@@ -352,7 +363,7 @@ pub fn run_planner(
 fn build_grid(
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
-    profile: &Profile,
+    baseline_kw: f64,
     now: DateTime<Utc>,
     step_s: u64,
     total_steps: usize,
@@ -361,7 +372,6 @@ fn build_grid(
 ) -> (Vec<PlanTimeSlot>, Vec<PlanTimeSlot>) {
     let import_cap = capacity.import_limit_kw.unwrap_or(f64::MAX);
     let export_cap = capacity.export_limit_kw.unwrap_or(f64::MAX);
-    let baseline_kw = profile.base_load_kw();
     let rates_empty = tariffs.is_empty();
 
     let mut firm = Vec::new();
@@ -699,6 +709,7 @@ fn update_slot_from_step(
             let grid_used = (actual_kw - surplus_used).max(0.0);
             slot.surplus_available_kw -= surplus_used;
             slot.net_import_kw += grid_used;
+            slot.net_export_kw = (slot.net_export_kw - surplus_used).max(0.0);
 
             slot.allocations.push(PacketAllocation {
                 packet_id: Uuid::nil(),
@@ -1026,7 +1037,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &test_profile(300, 1),
+            test_profile(300, 1).base_load_kw(),
             now,
             300,
             2,
@@ -1053,7 +1064,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &test_profile(300, 1),
+            test_profile(300, 1).base_load_kw(),
             now,
             300,
             1,
@@ -1071,7 +1082,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &test_profile(300, 1),
+            test_profile(300, 1).base_load_kw(),
             now,
             300,
             2,
@@ -1101,7 +1112,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &test_profile(300, 1),
+            test_profile(300, 1).base_load_kw(),
             now,
             300,
             4,
@@ -1135,7 +1146,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &test_profile(300, 1),
+            test_profile(300, 1).base_load_kw(),
             now,
             300,
             1,
@@ -1158,7 +1169,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &test_profile(300, 1),
+            test_profile(300, 1).base_load_kw(),
             now,
             300,
             1,
@@ -1182,7 +1193,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &test_profile(300, 1),
+            test_profile(300, 1).base_load_kw(),
             now,
             300,
             1,
@@ -1372,7 +1383,7 @@ mod tests {
         let (firm, _) = build_grid(
             &tariffs,
             &empty_capacity(),
-            &test_profile(step_s, 1),
+            test_profile(step_s, 1).base_load_kw(),
             noon,
             step_s,
             total_steps,
