@@ -283,6 +283,8 @@ pub fn run_planner(
             // PV and base_load are non-controllable assets already accounted for in
             // build_grid (via pv_kw_map and baseline_kw). Calling update_slot_from_step
             // for either would double-subtract from net_import_kw / net_export_kw.
+            // base_load allocations are added by build_grid for all slots (firm + flex)
+            // so the asset timeline is populated without any dispatch-loop involvement.
             if aid != "pv" && aid != "base_load" {
                 update_slot_from_step(slot, aid, actual_kw, &pkts, &mut allocated, slot_h);
             }
@@ -372,6 +374,7 @@ fn build_grid(
 ) -> (Vec<PlanTimeSlot>, Vec<PlanTimeSlot>) {
     let import_cap = capacity.import_limit_kw.unwrap_or(f64::MAX);
     let export_cap = capacity.export_limit_kw.unwrap_or(f64::MAX);
+    let slot_h = step_s as f64 / 3600.0;
     let rates_empty = tariffs.is_empty();
 
     let mut firm = Vec::new();
@@ -428,7 +431,19 @@ fn build_grid(
             baseline_kw,
             pv_forecast_kw: pv_kw,
             surplus_available_kw: surplus,
-            allocations: vec![],
+            // base_load allocation: pre-populated here (not via update_slot_from_step)
+            // so it appears in both firm and flexible slot timelines without double-
+            // counting the net flow impact already captured in net_import_kw/net_export_kw.
+            allocations: vec![PacketAllocation {
+                packet_id: Uuid::nil(),
+                asset_id: "base_load".to_string(),
+                power_kw: baseline_kw,
+                surplus_power_kw: 0.0,
+                grid_power_kw: baseline_kw,
+                marginal_value: 0.0,
+                cost_eur: baseline_kw * import_tariff * slot_h,
+                co2_g: baseline_kw * co2 * slot_h,
+            }],
             net_import_kw: net_import,
             net_export_kw: net_export,
             import_flexibility_kw: 0.0,
