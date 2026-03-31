@@ -216,9 +216,18 @@ fn locf_weighted_mean(
 /// Uses the most recent `HistoryPoint` from the per-asset ring buffer.
 /// Returns an empty-values point if no history exists.
 pub fn build_now_point(asset_id: &str, now: DateTime<Utc>, sim: &SimState) -> AssetTimelinePoint {
+    // Regular sim assets.
     if let Some((entry, cfg)) = sim.find_asset(asset_id) {
         if let Some(last) = entry.history.latest() {
             let mut values = cfg.state_values(&last.state);
+            values.insert("power_kw".into(), last.power_kw);
+            return AssetTimelinePoint { ts: now, values };
+        }
+    }
+    // Grid is stored separately; read its history directly.
+    if asset_id == "grid" {
+        if let Some(last) = sim.grid_asset.history.latest() {
+            let mut values = HashMap::new();
             values.insert("power_kw".into(), last.power_kw);
             return AssetTimelinePoint { ts: now, values };
         }
@@ -266,8 +275,8 @@ pub fn build_asset_timeline(
 
     // ── Past: from per-asset history ring buffer ───────────────────────────────
 
+    let back_window = Duration::milliseconds((hours_back * 3_600_000.0) as i64);
     let mut points: Vec<AssetTimelinePoint> = if let Some((entry, cfg)) = sim.find_asset(asset_id) {
-        let back_window = Duration::milliseconds((hours_back * 3_600_000.0) as i64);
         entry
             .history
             .slice(back_window, now)
@@ -275,6 +284,19 @@ pub fn build_asset_timeline(
             .filter(|p| p.ts >= past_start)
             .map(|p| {
                 let mut values = cfg.state_values(&p.state);
+                values.insert("power_kw".into(), p.power_kw);
+                AssetTimelinePoint { ts: p.ts, values }
+            })
+            .collect()
+    } else if is_grid {
+        // Grid is stored separately from the sim asset list; read its history directly.
+        sim.grid_asset
+            .history
+            .slice(back_window, now)
+            .into_iter()
+            .filter(|p| p.ts >= past_start)
+            .map(|p| {
+                let mut values = HashMap::new();
                 values.insert("power_kw".into(), p.power_kw);
                 AssetTimelinePoint { ts: p.ts, values }
             })
