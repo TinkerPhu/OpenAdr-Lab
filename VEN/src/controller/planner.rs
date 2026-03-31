@@ -280,10 +280,10 @@ pub fn run_planner(
                 reason,
             });
 
-            // PV is non-controllable generation already accounted for in build_grid
-            // (net_import_kw and surplus_available_kw). Skipping update_slot_from_step
-            // avoids double-subtracting PV from net_import_kw.
-            if aid != "pv" {
+            // PV and base_load are non-controllable assets already accounted for in
+            // build_grid (via pv_kw_map and baseline_kw). Calling update_slot_from_step
+            // for either would double-subtract from net_import_kw / net_export_kw.
+            if aid != "pv" && aid != "base_load" {
                 update_slot_from_step(slot, aid, actual_kw, &pkts, &mut allocated, slot_h);
             }
             site_ctx.planned_others_kw += actual_kw;
