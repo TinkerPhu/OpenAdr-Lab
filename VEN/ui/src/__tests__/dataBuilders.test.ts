@@ -5,14 +5,21 @@
  * All tests check result[0].forecastEnergyKwh (the "ev" asset summary).
  */
 import { describe, it, expect } from "vitest";
-import { deriveAssetSummaries } from "../components/controller-v2/dataBuilders";
-import type { SimSnapshot } from "../api/types";
+import { deriveAssetSummaries, computeCostRateEurH } from "../components/controller-v2/dataBuilders";
+import type { SimSnapshot, TariffSnapshot as ApiTariffSnapshot } from "../api/types";
 import type { AssetTimelinePoint } from "../components/controller-v2/types";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 const NOW = 1_000_000_000_000; // arbitrary epoch ms anchor
 const H = 3_600_000;           // one hour in ms
+
+const TARIFF: ApiTariffSnapshot = {
+  interval_start: new Date(NOW - H).toISOString(),
+  import_tariff_eur_kwh: 0.25,
+  export_tariff_eur_kwh: 0.05,
+  co2_g_kwh: 300,
+};
 
 /** Minimal SimSnapshot with just an ev asset */
 const sim: SimSnapshot = {
@@ -33,6 +40,112 @@ function forecastFor(evPoints: AssetTimelinePoint[]): number | null {
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
+
+// ─── computeCostRateEurH ──────────────────────────────────────────────────────
+
+describe("computeCostRateEurH", () => {
+  it("import: applies import tariff to positive power", () => {
+    expect(computeCostRateEurH(4.0, TARIFF)).toBeCloseTo(4.0 * 0.25);
+  });
+
+  it("export: applies export tariff to negative power", () => {
+    expect(computeCostRateEurH(-3.0, TARIFF)).toBeCloseTo(3.0 * 0.05);
+  });
+
+  it("zero power gives zero", () => {
+    expect(computeCostRateEurH(0.0, TARIFF)).toBe(0.0);
+  });
+
+  it("null tariff gives zero regardless of power", () => {
+    expect(computeCostRateEurH(4.0, null)).toBe(0.0);
+    expect(computeCostRateEurH(-3.0, null)).toBe(0.0);
+  });
+
+  it("null import field falls back to zero", () => {
+    const t: ApiTariffSnapshot = { ...TARIFF, import_tariff_eur_kwh: null };
+    expect(computeCostRateEurH(4.0, t)).toBe(0.0);
+  });
+
+  it("null export field falls back to zero", () => {
+    const t: ApiTariffSnapshot = { ...TARIFF, export_tariff_eur_kwh: null };
+    expect(computeCostRateEurH(-3.0, t)).toBe(0.0);
+  });
+});
+
+// ─── deriveAssetSummaries — gridFraction cost allocation ──────────────────────
+
+describe("deriveAssetSummaries — gridFraction", () => {
+  it("battery charging fully from PV shows zero cost rate", () => {
+    // PV 4 kW, battery charging 3 kW, base_load 1 kW → grid net = 0
+    const pvSim: SimSnapshot = {
+      ts: new Date(NOW).toISOString(),
+      grid: { net_power_w: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
+      assets: {
+        pv:        { power_kw: -4.0, soc: null },
+        battery:   { power_kw: 3.0,  soc: 0.5  },
+        base_load: { power_kw: 1.0,  soc: null },
+      },
+    };
+    const summaries = deriveAssetSummaries(pvSim, [TARIFF], [], {}, NOW);
+    const battery = summaries.find((s) => s.assetId === "battery")!;
+    const baseLoad = summaries.find((s) => s.assetId === "base_load")!;
+    expect(battery.costRateEurH).toBeCloseTo(0.0);
+    expect(baseLoad.costRateEurH).toBeCloseTo(0.0);
+  });
+
+  it("partial PV coverage scales cost proportionally", () => {
+    // PV 2 kW, battery charging 3 kW, base_load 1 kW → grid import 2 kW
+    // gridFraction = 2 / (3+1) = 0.5
+    const pvSim: SimSnapshot = {
+      ts: new Date(NOW).toISOString(),
+      grid: { net_power_w: 2000, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
+      assets: {
+        pv:        { power_kw: -2.0, soc: null },
+        battery:   { power_kw: 3.0,  soc: 0.5  },
+        base_load: { power_kw: 1.0,  soc: null },
+      },
+    };
+    const summaries = deriveAssetSummaries(pvSim, [TARIFF], [], {}, NOW);
+    const battery = summaries.find((s) => s.assetId === "battery")!;
+    // 3 kW × 0.5 × 0.25 = 0.375 EUR/h
+    expect(battery.costRateEurH).toBeCloseTo(3.0 * 0.5 * 0.25);
+  });
+
+  it("no PV: full grid import charges at import tariff", () => {
+    const gridSim: SimSnapshot = {
+      ts: new Date(NOW).toISOString(),
+      grid: { net_power_w: 4000, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
+      assets: {
+        battery:   { power_kw: 3.0, soc: 0.5  },
+        base_load: { power_kw: 1.0, soc: null },
+      },
+    };
+    const summaries = deriveAssetSummaries(gridSim, [TARIFF], [], {}, NOW);
+    const battery = summaries.find((s) => s.assetId === "battery")!;
+    // gridFraction = 4/4 = 1 → 3 kW × 0.25 = 0.75 EUR/h
+    expect(battery.costRateEurH).toBeCloseTo(3.0 * 0.25);
+  });
+
+  it("asset cost rates sum to grid total cost rate", () => {
+    // Any scenario: sum of consuming asset cost rates must equal grid cost rate
+    const pvSim: SimSnapshot = {
+      ts: new Date(NOW).toISOString(),
+      grid: { net_power_w: 1500, voltage_v: 230, import_kwh: 0, export_kwh: 0 },
+      assets: {
+        pv:        { power_kw: -2.5, soc: null },
+        battery:   { power_kw: 2.0,  soc: 0.5  },
+        base_load: { power_kw: 2.0,  soc: null },
+      },
+    };
+    const summaries = deriveAssetSummaries(pvSim, [TARIFF], [], {}, NOW);
+    const consuming = summaries.filter((s) => s.costRateEurH >= 0 && s.assetId !== "pv");
+    const total = consuming.reduce((s, a) => s + a.costRateEurH, 0);
+    const gridCostRate = 1.5 * 0.25; // 1.5 kW import × 0.25
+    expect(total).toBeCloseTo(gridCostRate);
+  });
+});
+
+// ─── computeForecastEnergy via deriveAssetSummaries ───────────────────────────
 
 describe("computeForecastEnergy via deriveAssetSummaries", () => {
   it("returns null when allTimelines is empty (no ev key)", () => {

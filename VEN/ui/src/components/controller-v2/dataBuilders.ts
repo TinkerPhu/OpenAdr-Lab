@@ -22,6 +22,22 @@ import type {
 } from "../../api/types";
 import type { AssetTimelinePoint } from "./types";
 
+// ─── computeCostRateEurH ─────────────────────────────────────────────────────
+
+/**
+ * Cost rate in EUR/h for a given power flow and tariff interval.
+ * Positive powerKw → import cost; negative → export revenue (positive return).
+ * Pass the grid-attributed power for consuming assets (powerKw × gridFraction)
+ * so PV-covered consumption is correctly costed at zero.
+ */
+export function computeCostRateEurH(
+  powerKw: number,
+  tariff: ApiTariffSnapshot | null
+): number {
+  if (powerKw >= 0) return powerKw * (tariff?.import_tariff_eur_kwh ?? 0);
+  return Math.abs(powerKw) * (tariff?.export_tariff_eur_kwh ?? 0);
+}
+
 // ─── findCurrentTariff ────────────────────────────────────────────────────────
 
 /**
@@ -63,17 +79,28 @@ export function deriveAssetSummaries(
   const currentTariff = findCurrentTariff(tariffs, nowMs);
   const summaries: AssetSummary[] = [];
 
+  // Grid fraction: share of total consumption that is grid-sourced.
+  // Consuming assets multiply their power by this before computing cost so that
+  // PV-covered (or battery-discharge-covered) load is correctly costed at zero.
+  const gridImportKw = Math.max(0, sim.grid.net_power_w / 1000);
+  const totalConsumeKw = Object.values(sim.assets).reduce(
+    (sum, a) => sum + Math.max(0, a.power_kw),
+    0
+  );
+  const gridFraction = totalConsumeKw > 0 ? Math.min(1, gridImportKw / totalConsumeKw) : 0;
+
   function makeSummary(
     assetId: AssetId,
     label: string,
     powerKw: number,
     socPct: number | null
   ): AssetSummary {
-    const costRateEurH =
-      powerKw >= 0
-        ? powerKw * (currentTariff?.import_tariff_eur_kwh ?? 0)
-        : Math.abs(powerKw) * (currentTariff?.export_tariff_eur_kwh ?? 0);
-    const co2RateGH = powerKw * (currentTariff?.co2_g_kwh ?? 0);
+    // For consuming assets (powerKw >= 0) scale by gridFraction so only the
+    // grid-sourced portion incurs cost. Generating assets (powerKw < 0) are
+    // passed through unchanged (export revenue is always grid-facing).
+    const effectivePowerKw = powerKw >= 0 ? powerKw * gridFraction : powerKw;
+    const costRateEurH = computeCostRateEurH(effectivePowerKw, currentTariff);
+    const co2RateGH = effectivePowerKw * (currentTariff?.co2_g_kwh ?? 0);
 
     const forecastEnergyKwh = computeForecastEnergy(allTimelines[assetId] ?? [], nowMs);
 
@@ -189,10 +216,7 @@ export function deriveTariffSnapshot(
   const gridPowerKw = sim.grid.net_power_w / 1000;
   const importP = t?.import_tariff_eur_kwh ?? null;
   const exportP = t?.export_tariff_eur_kwh ?? null;
-  const totalCostRateEurH =
-    gridPowerKw >= 0
-      ? gridPowerKw * (importP ?? 0)
-      : Math.abs(gridPowerKw) * (exportP ?? 0);
+  const totalCostRateEurH = computeCostRateEurH(gridPowerKw, t);
 
   return {
     importPriceEurKwh: importP,

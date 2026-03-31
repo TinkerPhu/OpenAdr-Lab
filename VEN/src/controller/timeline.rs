@@ -343,9 +343,20 @@ pub fn build_asset_timeline(
                         .unwrap_or(0.0)
                 };
                 values.insert("power_kw".into(), power_kw);
-                let cost_rate = power_kw * slot.import_tariff_eur_kwh;
+                // Derive cost/CO2 rates from the allocation's pre-computed cost_eur / co2_g,
+                // which already account for the PV-surplus vs grid split (see alloc_cost_eur).
+                // PV has no allocation → both rates are 0 (no import cost for generation).
+                let slot_h = (slot.end - slot.start).num_seconds() as f64 / 3600.0;
+                let (cost_rate, co2_rate) = if slot_h > 0.0 {
+                    slot.allocations
+                        .iter()
+                        .find(|a| a.asset_id == asset_id)
+                        .map(|a| (a.cost_eur / slot_h, a.co2_g / slot_h))
+                        .unwrap_or((0.0, 0.0))
+                } else {
+                    (0.0, 0.0)
+                };
                 values.insert("cost_rate_eur_h".into(), cost_rate);
-                let co2_rate = power_kw * slot.co2_g_kwh;
                 values.insert("co2_rate_g_h".into(), co2_rate);
             }
 
@@ -609,8 +620,75 @@ mod tests {
         assert_eq!(result.len(), 1);
         let p = &result[0];
         assert!((p.values["power_kw"] - 3.5).abs() < 1e-9);
-        assert!(p.values.contains_key("cost_rate_eur_h"));
-        assert!(p.values.contains_key("co2_rate_g_h"));
+        // cost_rate = alloc.cost_eur / slot_h = (3.5 * 0.20 * (300/3600)) / (300/3600) = 3.5 * 0.20
+        let expected_cost_rate = 3.5 * 0.20;
+        assert!((p.values["cost_rate_eur_h"] - expected_cost_rate).abs() < 1e-9);
+        let expected_co2_rate = 3.5 * 300.0;
+        assert!((p.values["co2_rate_g_h"] - expected_co2_rate).abs() < 1e-9);
+    }
+
+    #[test]
+    fn physical_asset_cost_rate_accounts_for_pv_surplus() {
+        // Slot where EV allocation uses 1 kW from PV surplus and 2 kW from grid.
+        let now = ts(0);
+        let known = make_known(&["ev"]);
+        let sim = make_sim(vec![]);
+        let mut plan = empty_plan(now);
+        let mut slot = make_slot(60, "", 0.0, now); // no default allocation
+        let slot_h = 300.0 / 3600.0;
+        slot.allocations.push(PacketAllocation {
+            packet_id: Uuid::new_v4(),
+            asset_id: "ev".to_string(),
+            power_kw: 3.0,
+            surplus_power_kw: 1.0,
+            grid_power_kw: 2.0,
+            marginal_value: 0.0,
+            // 1 kW surplus at 0.05 + 2 kW grid at 0.20
+            cost_eur: 1.0 * 0.05 * slot_h + 2.0 * 0.20 * slot_h,
+            co2_g: 2.0 * 300.0 * slot_h,
+        });
+        plan.firm_slots.push(slot);
+        let result = build_asset_timeline(
+            "ev",
+            &known,
+            &sim,
+            Some(&plan),
+            now,
+            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+        )
+        .unwrap();
+        assert_eq!(result.len(), 1);
+        let p = &result[0];
+        let expected_cost_rate = 1.0 * 0.05 + 2.0 * 0.20; // EUR/h
+        assert!((p.values["cost_rate_eur_h"] - expected_cost_rate).abs() < 1e-9);
+        let expected_co2_rate = 2.0 * 300.0; // g/h (only grid portion)
+        assert!((p.values["co2_rate_g_h"] - expected_co2_rate).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pv_asset_cost_rate_is_zero() {
+        // PV has no allocation → cost_rate and co2_rate must be 0.
+        let now = ts(0);
+        let known = make_known(&["pv"]);
+        let sim = make_sim(vec![]);
+        let mut plan = empty_plan(now);
+        let mut slot = make_slot(60, "", 0.0, now);
+        slot.pv_forecast_kw = 4.0;
+        plan.firm_slots.push(slot);
+        let result = build_asset_timeline(
+            "pv",
+            &known,
+            &sim,
+            Some(&plan),
+            now,
+            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+        )
+        .unwrap();
+        assert_eq!(result.len(), 1);
+        let p = &result[0];
+        assert!((p.values["power_kw"] - (-4.0)).abs() < 1e-9);
+        assert_eq!(p.values["cost_rate_eur_h"], 0.0);
+        assert_eq!(p.values["co2_rate_g_h"], 0.0);
     }
 
     #[test]
