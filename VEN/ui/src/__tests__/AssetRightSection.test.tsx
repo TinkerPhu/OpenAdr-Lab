@@ -259,6 +259,24 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
     expect(mockOnOverrideChange).not.toHaveBeenCalled();
   });
 
+  it("irradiance: stale simInject cache value does not block live irradiance display", () => {
+    // Regression: getValue placed pv_irradiance AFTER the overrides check.
+    // The server refetches simInject before the backend tick clears the one-shot,
+    // so overrides.pv_irradiance = 0.7 was returned instead of the live value.
+    render(
+      <AssetRightSection
+        assetId="pv"
+        simSnapshot={simWithPv}          // irradiance = 0.8 (live)
+        overrides={{ pv_irradiance: 0.3 } as never}  // stale cached one-shot
+        onOverrideChange={vi.fn()}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    // Must show live irradiance (0.80), NOT the stale override (0.30)
+    expect(screen.getByText(/Irradiance Override: 0\.80/)).toBeInTheDocument();
+  });
+
   it("irradiance: reverts to live sim irradiance after debounce fires", () => {
     const mockOnOverrideChange = vi.fn();
 
