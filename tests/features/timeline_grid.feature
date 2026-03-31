@@ -46,7 +46,7 @@ Feature: Uniform-Grid Timeline API (RF-05c)
     And the now-point ts is identical across all assets
 
   Scenario: Empty future buckets have values null
-    When I GET /timeline/all?hours_back=0&hours_forward=6 from the VEN
+    When I GET /timeline/all?hours_back=0&hours_forward=25 from the VEN
     Then the response status is 200
     And the response JSON is an object
     And at least one future point has null values
