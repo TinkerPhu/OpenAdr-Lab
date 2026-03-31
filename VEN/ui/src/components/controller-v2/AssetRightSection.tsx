@@ -63,6 +63,16 @@ export function AssetRightSection({
     if (controlTimerRef.current) clearTimeout(controlTimerRef.current);
     controlTimerRef.current = setTimeout(() => {
       onOverrideChange({ [key]: val } as Partial<SimInjectState>);
+      // pv_irradiance tracks the live sim value when the user is not actively
+      // dragging. Release the local hold after posting so the slider follows
+      // sim.assets.pv.irradiance once the server applies the override.
+      // pv_irradiance_alpha is a config knob — it retains local state.
+      if (key === "pv_irradiance") {
+        setLocalControlValues(prev => {
+          const { pv_irradiance: _, ...rest } = prev;
+          return rest;
+        });
+      }
     }, 300);
   }
 
@@ -72,7 +82,7 @@ export function AssetRightSection({
       const v = (overrides as Record<string, unknown>)[key];
       if (typeof v === "number" || typeof v === "boolean") return v;
     }
-    // Fall back to the sim's actual current value so the switch reflects reality
+    // Fall back to the sim's actual current value so controls reflect reality
     // when no override is active (null override means "use sim default").
     if (key === "ev_plugged") {
       const p = sim?.assets?.["ev"]?.["plugged"];
@@ -81,6 +91,10 @@ export function AssetRightSection({
     if (key === "ev_soc_target") {
       const t = sim?.assets?.["ev"]?.["soc_target"];
       return typeof t === "number" ? t : null;
+    }
+    if (key === "pv_irradiance") {
+      const irr = sim?.assets?.["pv"]?.["irradiance"];
+      return typeof irr === "number" ? irr : null;
     }
     return null;
   }

@@ -219,6 +219,21 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
     vi.useRealTimers();
   });
 
+  it("irradiance: initially shows live sim irradiance when no override is active", () => {
+    render(
+      <AssetRightSection
+        assetId="pv"
+        simSnapshot={simWithPv}   // irradiance = 0.8
+        overrides={undefined}
+        onOverrideChange={vi.fn()}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    // Should show live irradiance (0.80), not the slider min (0.00)
+    expect(screen.getByText(/Irradiance Override: 0\.80/)).toBeInTheDocument();
+  });
+
   it("irradiance: label updates immediately on drag before debounce fires", () => {
     const mockOnOverrideChange = vi.fn();
 
@@ -242,6 +257,34 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
 
     // onOverrideChange must NOT have fired yet (still in debounce window)
     expect(mockOnOverrideChange).not.toHaveBeenCalled();
+  });
+
+  it("irradiance: reverts to live sim irradiance after debounce fires", () => {
+    const mockOnOverrideChange = vi.fn();
+
+    render(
+      <AssetRightSection
+        assetId="pv"
+        simSnapshot={simWithPv}   // irradiance = 0.8
+        overrides={undefined}
+        onOverrideChange={mockOnOverrideChange}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    // Drag to 0.6
+    act(() => {
+      fireEvent.change(getSchemaSliderInput("pv_irradiance"), { target: { value: "0.6" } });
+    });
+    expect(screen.getByText(/Irradiance Override: 0\.60/)).toBeInTheDocument();
+
+    // Debounce fires: POST sent, local state released
+    act(() => { vi.advanceTimersByTime(300); });
+
+    expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance: 0.6 });
+    // Slider now follows live irradiance again (0.8 in test fixture;
+    // in production the sim freezes at 0.6 once the override is applied)
+    expect(screen.getByText(/Irradiance Override: 0\.80/)).toBeInTheDocument();
   });
 
   it("irradiance: onOverrideChange debounced — fires once with final value after 300ms", () => {
@@ -316,7 +359,7 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
     vi.useRealTimers();
   });
 
-  it("local drag value persists even when overrides prop updates with server default", () => {
+  it("blend-back: local drag value persists after debounce and across prop updates", () => {
     const mockOnOverrideChange = vi.fn();
 
     const { rerender } = render(
@@ -336,6 +379,12 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
 
     expect(screen.getByText(/Blend-back Speed: 0\.50/)).toBeInTheDocument();
 
+    // Debounce fires
+    act(() => { vi.advanceTimersByTime(300); });
+
+    // Blend-back speed retains local value after debounce (unlike pv_irradiance)
+    expect(screen.getByText(/Blend-back Speed: 0\.50/)).toBeInTheDocument();
+
     // Server pushes back its default (0.1) via overrides prop update
     rerender(
       <AssetRightSection
@@ -349,5 +398,29 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
 
     // Local value must win — no revert to 0.10
     expect(screen.getByText(/Blend-back Speed: 0\.50/)).toBeInTheDocument();
+  });
+
+  it("irradiance: reverts to live sim value after debounce (contrast with blend-back)", () => {
+    const mockOnOverrideChange = vi.fn();
+
+    render(
+      <AssetRightSection
+        assetId="pv"
+        simSnapshot={simWithPv}   // irradiance = 0.8
+        overrides={undefined}
+        onOverrideChange={mockOnOverrideChange}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    act(() => {
+      fireEvent.change(getSchemaSliderInput("pv_irradiance"), { target: { value: "0.3" } });
+    });
+    expect(screen.getByText(/Irradiance Override: 0\.30/)).toBeInTheDocument();
+
+    act(() => { vi.advanceTimersByTime(300); });
+
+    // Unlike blend-back, irradiance releases local hold and follows live sim
+    expect(screen.getByText(/Irradiance Override: 0\.80/)).toBeInTheDocument();
   });
 });
