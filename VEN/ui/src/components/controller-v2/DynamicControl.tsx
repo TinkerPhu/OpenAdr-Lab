@@ -52,7 +52,7 @@ export function DynamicControl({ descriptor, value, onChange }: DynamicControlPr
           data-testid={testId}
           onChange={(_e, v) => onChange(key, (v as number) / scale)}
           valueLabelDisplay="auto"
-          valueLabelFormat={(v) => unit ? `${v.toFixed(0)} ${unit}` : `${v.toFixed(2)}`}
+          valueLabelFormat={(v) => unit ? `${v} ${unit}` : `${v.toFixed(2)}`}
         />
       </Box>
     );
