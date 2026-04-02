@@ -36,7 +36,7 @@ export function GridTariffCell({
     const pricePoints = buildTariffPricePoints(tariffsData);
     const powerPoints = buildPowerPoints(gridTimeline);
     const merged = [...pricePoints, ...powerPoints].sort((a, b) => a.ts - b.ts);
-    return fillCostRateFromTariffs(merged);
+    return fillCostRateFromTariffs(merged, tariffsData);
   }, [gridTimeline, tariffsData]);
 
   const fmt = (v: number | null, decimals = 4) =>
