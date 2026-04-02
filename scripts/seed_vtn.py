@@ -209,6 +209,59 @@ def build_events():
                     },
                 ],
             },
+            # Export tariff — 24 hourly EXPORT_PRICE intervals, repeats forever
+            # Values are ~75% of the import tariff (retailer/DSO captures the spread)
+            {
+                "eventName": "tou-export-pricing-day-ahead",
+                "priority": None,
+                "intervalPeriod": {
+                    "start": midnight.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "duration": "P9999Y",
+                },
+                "intervals": [
+                    {
+                        "id": h,
+                        "intervalPeriod": {
+                            "start": (midnight + timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "duration": "PT1H",
+                        },
+                        "payloads": [{"type": "EXPORT_PRICE", "values": [p]}],
+                    }
+                    for h, p in enumerate([
+                        0.06, 0.05, 0.04, 0.04, 0.05, 0.07,   # 00-05: off-peak
+                        0.09, 0.14, 0.19, 0.17, 0.11, 0.11,   # 06-11: morning ramp
+                        0.10, 0.11, 0.15, 0.21, 0.26, 0.30,   # 12-17: afternoon peak
+                        0.29, 0.23, 0.15, 0.11, 0.08, 0.06,   # 18-23: evening wind-down
+                    ])
+                ],
+            },
+            # GHG intensity — 24 hourly GHG intervals, repeats forever
+            # German-style diurnal carbon intensity (gCO2/kWh):
+            # night wind dip → morning gas ramp → solar noon low → evening peak high
+            {
+                "eventName": "tou-ghg-intensity-day-ahead",
+                "priority": None,
+                "intervalPeriod": {
+                    "start": midnight.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "duration": "P9999Y",
+                },
+                "intervals": [
+                    {
+                        "id": h,
+                        "intervalPeriod": {
+                            "start": (midnight + timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "duration": "PT1H",
+                        },
+                        "payloads": [{"type": "GHG", "values": [p]}],
+                    }
+                    for h, p in enumerate([
+                        280, 260, 250, 240, 250, 270,   # 00-05: wind overnight, coal baseload
+                        320, 380, 400, 370, 320, 270,   # 06-11: gas ramp-up, solar rising
+                        220, 210, 230, 290, 360, 430,   # 12-17: solar noon low, evening gas peak
+                        450, 440, 420, 390, 350, 310,   # 18-23: evening demand, wind recovering
+                    ])
+                ],
+            },
             # UC8: Cancel Demo Event — will be created then deleted with --demo-cancel
             {
                 "eventName": "cancel-demo-event",
