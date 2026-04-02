@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Box, Collapse, IconButton, Paper, Tooltip } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
@@ -9,6 +10,8 @@ import { AssetLeftSection } from "./AssetLeftSection";
 import { AssetMidSection } from "./AssetMidSection";
 import { AssetRightSection } from "./AssetRightSection";
 import type { SimSnapshot, SimInjectState } from "../../api/types";
+import { useTariffs } from "../../api/hooks";
+import { fillAssetRatesFromTariffs } from "./tariffBuilders";
 
 const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
 const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
@@ -50,6 +53,16 @@ export function AssetCell({
   const cellId = `asset:${assetId}`;
   const color = ASSET_COLORS[assetId] ?? "#888";
 
+  const { data: tariffsData = [] } = useTariffs();
+
+  // Enrich history/now-point with cost_rate_eur_h and co2_rate_g_h derived from
+  // the applicable import tariff (LOCF). The backend only emits these for future
+  // plan-slot allocations; history points carry only power_kw.
+  const enrichedTimePoints = useMemo(
+    () => fillAssetRatesFromTariffs(timePoints, tariffsData),
+    [timePoints, tariffsData]
+  );
+
   // Display window: each cell clips its chart domain independently.
   // The shared useAllTimelines query on the page always fetches the widest
   // window needed (24h if any cell is expanded), so data is always available.
@@ -87,7 +100,7 @@ export function AssetCell({
       {/* Mid section — timeline graph */}
       <AssetMidSection
         assetId={assetId}
-        timePoints={timePoints}
+        timePoints={enrichedTimePoints}
         color={color}
         nowMs={nowMs}
         hoursBack={window.hoursBack}

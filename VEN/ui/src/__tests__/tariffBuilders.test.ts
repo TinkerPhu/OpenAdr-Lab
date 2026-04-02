@@ -3,6 +3,7 @@ import {
   buildTariffPricePoints,
   buildPowerPoints,
   fillCostRateFromTariffs,
+  fillAssetRatesFromTariffs,
 } from "../components/controller-v2/tariffBuilders";
 import type { TariffSnapshot as ApiTariffSnapshot } from "../api/types";
 import type { AssetTimelinePoint } from "../components/controller-v2/types";
@@ -97,40 +98,118 @@ describe("buildPowerPoints", () => {
 
 // ─── fillCostRateFromTariffs ──────────────────────────────────────────────────
 
+function makeTariffSnapshot(
+  intervalStartMs: number,
+  importEurKwh: number | null,
+  co2GKwh: number | null = null
+): ApiTariffSnapshot {
+  return {
+    interval_start: new Date(intervalStartMs).toISOString(),
+    import_tariff_eur_kwh: importEurKwh,
+    export_tariff_eur_kwh: null,
+    co2_g_kwh: co2GKwh,
+  };
+}
+
 describe("fillCostRateFromTariffs", () => {
-  it("fills totalCostRateEurH from preceding import tariff × power_kw", () => {
-    const input = [
+  it("fills totalCostRateEurH from applicable tariff × power_kw", () => {
+    const tariffs = [makeTariffSnapshot(100, 0.20)];
+    const merged = [
       { ts: 100, importPriceEurKwh: 0.20, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
       { ts: 200, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: 3.0 },
     ];
-    const result = fillCostRateFromTariffs(input);
+    const result = fillCostRateFromTariffs(merged, tariffs);
     expect(result[1].totalCostRateEurH).toBeCloseTo(0.60);
   });
 
   it("clamps negative power to 0 (export case)", () => {
-    const input = [
+    const tariffs = [makeTariffSnapshot(100, 0.20)];
+    const merged = [
       { ts: 100, importPriceEurKwh: 0.20, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
       { ts: 200, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: -2.0 },
     ];
-    const result = fillCostRateFromTariffs(input);
+    const result = fillCostRateFromTariffs(merged, tariffs);
     expect(result[1].totalCostRateEurH).toBe(0);
   });
 
   it("does not overwrite an already-set totalCostRateEurH", () => {
-    const input = [
-      { ts: 100, importPriceEurKwh: 0.20, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
+    const tariffs = [makeTariffSnapshot(100, 0.20)];
+    const merged = [
       { ts: 200, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: 0.99, gridPowerKw: 3.0 },
     ];
-    const result = fillCostRateFromTariffs(input);
-    expect(result[1].totalCostRateEurH).toBe(0.99);
+    const result = fillCostRateFromTariffs(merged, tariffs);
+    expect(result[0].totalCostRateEurH).toBe(0.99);
   });
 
-  it("leaves totalCostRateEurH null when no preceding tariff exists", () => {
-    const input = [
+  it("leaves totalCostRateEurH null when no applicable tariff exists", () => {
+    const tariffs: ApiTariffSnapshot[] = [];
+    const merged = [
       { ts: 200, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: 3.0 },
     ];
-    const result = fillCostRateFromTariffs(input);
+    const result = fillCostRateFromTariffs(merged, tariffs);
     expect(result[0].totalCostRateEurH).toBeNull();
+  });
+});
+
+// ─── fillAssetRatesFromTariffs ────────────────────────────────────────────────
+
+describe("fillAssetRatesFromTariffs", () => {
+  it("fills cost_rate_eur_h and co2_rate_g_h from applicable tariff × power_kw", () => {
+    const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
+    const points: AssetTimelinePoint[] = [
+      { ts: 200, values: { power_kw: 4.0 } },
+    ];
+    const result = fillAssetRatesFromTariffs(points, tariffs);
+    expect(result[0].values?.["cost_rate_eur_h"]).toBeCloseTo(0.80);
+    expect(result[0].values?.["co2_rate_g_h"]).toBeCloseTo(1200);
+  });
+
+  it("clamps negative power to 0 for both rates (export/generation case)", () => {
+    const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
+    const points: AssetTimelinePoint[] = [
+      { ts: 200, values: { power_kw: -3.0 } },
+    ];
+    const result = fillAssetRatesFromTariffs(points, tariffs);
+    expect(result[0].values?.["cost_rate_eur_h"]).toBe(0);
+    expect(result[0].values?.["co2_rate_g_h"]).toBe(0);
+  });
+
+  it("does not overwrite cost_rate_eur_h already set by the backend (plan slot)", () => {
+    const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
+    const points: AssetTimelinePoint[] = [
+      { ts: 200, values: { power_kw: 4.0, cost_rate_eur_h: 0.55 } },
+    ];
+    const result = fillAssetRatesFromTariffs(points, tariffs);
+    expect(result[0].values?.["cost_rate_eur_h"]).toBe(0.55);
+  });
+
+  it("leaves rates absent when no applicable tariff exists", () => {
+    const tariffs: ApiTariffSnapshot[] = [];
+    const points: AssetTimelinePoint[] = [
+      { ts: 200, values: { power_kw: 4.0 } },
+    ];
+    const result = fillAssetRatesFromTariffs(points, tariffs);
+    expect(result[0].values?.["cost_rate_eur_h"]).toBeUndefined();
+    expect(result[0].values?.["co2_rate_g_h"]).toBeUndefined();
+  });
+
+  it("skips points with null values map", () => {
+    const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
+    const points: AssetTimelinePoint[] = [
+      { ts: 200, values: null },
+    ];
+    const result = fillAssetRatesFromTariffs(points, tariffs);
+    expect(result[0].values).toBeNull();
+  });
+
+  it("fills only co2_rate_g_h when tariff has co2 but null import (no cost fill)", () => {
+    const tariffs = [makeTariffSnapshot(100, null, 300)];
+    const points: AssetTimelinePoint[] = [
+      { ts: 200, values: { power_kw: 2.0 } },
+    ];
+    const result = fillAssetRatesFromTariffs(points, tariffs);
+    expect(result[0].values?.["cost_rate_eur_h"]).toBeUndefined();
+    expect(result[0].values?.["co2_rate_g_h"]).toBeCloseTo(600);
   });
 });
 
