@@ -57,6 +57,12 @@ export function StackedAreaChart({
           { ts: tMax, ...EMPTY_PT() },
         ];
 
+  // base_load first so it sits closest to the X axis in both stacks.
+  const renderOrder: AssetId[] = [
+    ...assetIds.filter((id) => id === "base_load"),
+    ...assetIds.filter((id) => id !== "base_load"),
+  ];
+
   return (
     <div data-testid="accumulated-area-chart" style={{ width: "100%", height: 160 }}>
       <ResponsiveContainer width="100%" height="100%">
@@ -78,7 +84,7 @@ export function StackedAreaChart({
           <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
 
           {/* For each asset: positive series (import, stacked above x-axis) */}
-          {assetIds.map((id) => (
+          {renderOrder.map((id) => (
             <Area
               key={`${id}_pos`}
               type="stepAfter"
@@ -95,7 +101,7 @@ export function StackedAreaChart({
           ))}
 
           {/* For each asset: negative series (export, stacked below x-axis) */}
-          {assetIds.map((id) => (
+          {renderOrder.map((id) => (
             <Area
               key={`${id}_neg`}
               type="stepAfter"
