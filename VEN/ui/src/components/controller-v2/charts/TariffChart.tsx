@@ -71,7 +71,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
   return (
     <div data-testid="tariff-chart" style={{ width: "100%", height: 160 }}>
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <ComposedChart data={chartData} margin={{ top: 4, right: 50, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
           <XAxis
             dataKey="ts"
@@ -81,10 +81,14 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             tickFormatter={formatTs}
             tick={{ fontSize: 10 }}
           />
-          <YAxis yAxisId="tariff" tick={{ fontSize: 10 }} width={40} />
+          <YAxis yAxisId="tariff" tick={{ fontSize: 10 }} width={40} unit=" €" />
+          <YAxis yAxisId="co2" orientation="right" tick={{ fontSize: 10 }} width={48} unit=" g" />
           <Tooltip
             labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
-            formatter={(value: number, name: string) => [value?.toFixed(4), name]}
+            formatter={(value: number, name: string) => {
+              if (name === "CO₂ intensity [g/kWh]") return [value?.toFixed(0) + " g/kWh", name];
+              return [value?.toFixed(4) + " €", name];
+            }}
           />
           <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
 
@@ -96,20 +100,6 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             name="Import tariff [€/kWh]"
             stroke="#f44336"
             strokeDasharray="5 5"
-            strokeWidth={1.5}
-            dot={false}
-            connectNulls={true}
-            isAnimationActive={false}
-          />
-
-          {/* Import CO₂eq tariff [g CO₂eq/kWh] — red dotted */}
-          <Line
-            yAxisId="tariff"
-            type="stepAfter"
-            dataKey="co2GKwh"
-            name="CO₂eq tariff [g/kWh]"
-            stroke="#f44336"
-            strokeDasharray="2 2"
             strokeWidth={1.5}
             dot={false}
             connectNulls={true}
@@ -138,6 +128,20 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             name="Cost rate [€/h]"
             stroke="#212121"
             strokeDasharray="5 5"
+            strokeWidth={1.5}
+            dot={false}
+            connectNulls={true}
+            isAnimationActive={false}
+          />
+
+          {/* CO₂ intensity [g/kWh] — orange dotted, right axis */}
+          <Line
+            yAxisId="co2"
+            type="stepAfter"
+            dataKey="co2GKwh"
+            name="CO₂ intensity [g/kWh]"
+            stroke="#ff9800"
+            strokeDasharray="2 2"
             strokeWidth={1.5}
             dot={false}
             connectNulls={true}
