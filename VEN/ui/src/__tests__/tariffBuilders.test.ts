@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildTariffPricePoints,
   buildPowerPoints,
+  fillCostRateFromTariffs,
 } from "../components/controller-v2/tariffBuilders";
 import type { TariffSnapshot as ApiTariffSnapshot } from "../api/types";
 import type { AssetTimelinePoint } from "../components/controller-v2/types";
@@ -91,6 +92,45 @@ describe("buildPowerPoints", () => {
   it("passes ts through unchanged", () => {
     const result = buildPowerPoints([makePoint({ ts: 99999 })]);
     expect(result[0].ts).toBe(99999);
+  });
+});
+
+// ─── fillCostRateFromTariffs ──────────────────────────────────────────────────
+
+describe("fillCostRateFromTariffs", () => {
+  it("fills totalCostRateEurH from preceding import tariff × power_kw", () => {
+    const input = [
+      { ts: 100, importPriceEurKwh: 0.20, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
+      { ts: 200, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: 3.0 },
+    ];
+    const result = fillCostRateFromTariffs(input);
+    expect(result[1].totalCostRateEurH).toBeCloseTo(0.60);
+  });
+
+  it("clamps negative power to 0 (export case)", () => {
+    const input = [
+      { ts: 100, importPriceEurKwh: 0.20, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
+      { ts: 200, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: -2.0 },
+    ];
+    const result = fillCostRateFromTariffs(input);
+    expect(result[1].totalCostRateEurH).toBe(0);
+  });
+
+  it("does not overwrite an already-set totalCostRateEurH", () => {
+    const input = [
+      { ts: 100, importPriceEurKwh: 0.20, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
+      { ts: 200, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: 0.99, gridPowerKw: 3.0 },
+    ];
+    const result = fillCostRateFromTariffs(input);
+    expect(result[1].totalCostRateEurH).toBe(0.99);
+  });
+
+  it("leaves totalCostRateEurH null when no preceding tariff exists", () => {
+    const input = [
+      { ts: 200, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: 3.0 },
+    ];
+    const result = fillCostRateFromTariffs(input);
+    expect(result[0].totalCostRateEurH).toBeNull();
   });
 });
 
