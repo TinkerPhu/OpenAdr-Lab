@@ -6,7 +6,7 @@ import type { TariffSnapshot } from "./types";
 import { TariffChart } from "./charts/TariffChart";
 import { useTariffs } from "../../api/hooks";
 import type { AssetTimelinePoint } from "./types";
-import { buildTariffPricePoints, buildPowerPoints } from "./tariffBuilders";
+import { buildTariffPricePoints, buildPowerPoints, fillCostRateFromTariffs } from "./tariffBuilders";
 
 const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
 const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
@@ -35,7 +35,8 @@ export function GridTariffCell({
   const tariffTimePoints = useMemo(() => {
     const pricePoints = buildTariffPricePoints(tariffsData);
     const powerPoints = buildPowerPoints(gridTimeline);
-    return [...pricePoints, ...powerPoints].sort((a, b) => a.ts - b.ts);
+    const merged = [...pricePoints, ...powerPoints].sort((a, b) => a.ts - b.ts);
+    return fillCostRateFromTariffs(merged);
   }, [gridTimeline, tariffsData]);
 
   const fmt = (v: number | null, decimals = 4) =>
