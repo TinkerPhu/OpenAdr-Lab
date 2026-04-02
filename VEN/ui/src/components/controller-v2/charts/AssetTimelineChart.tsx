@@ -46,7 +46,7 @@ export function AssetTimelineChart({
 
   return (
     <ResponsiveContainer width="100%" height={140}>
-      <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+      <ComposedChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
         <XAxis
           dataKey="ts"
@@ -56,11 +56,16 @@ export function AssetTimelineChart({
           tickFormatter={formatTs}
           tick={{ fontSize: 10 }}
         />
-        <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} />
-        <YAxis yAxisId="rates" orientation="right" tick={{ fontSize: 10 }} width={40} />
+        <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} unit=" kW" />
+        <YAxis yAxisId="cost" orientation="right" tick={{ fontSize: 10 }} width={44} unit=" €" />
+        <YAxis yAxisId="co2" orientation="right" tick={{ fontSize: 10 }} width={44} unit=" g" />
         <Tooltip
           labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
-          formatter={(value: number, name: string) => [value.toFixed(3), name]}
+          formatter={(value: number, name: string) => {
+            if (name === "CO₂eq rate [g/h]") return [value.toFixed(1) + " g/h", name];
+            if (name === "Cost rate [€/h]") return [value.toFixed(4) + " €/h", name];
+            return [value.toFixed(3) + " kW", name];
+          }}
         />
         <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
 
@@ -77,9 +82,9 @@ export function AssetTimelineChart({
           isAnimationActive={false}
         />
 
-        {/* Cost rate — dashed */}
+        {/* Cost rate — dashed, right axis */}
         <Line
-          yAxisId="rates"
+          yAxisId="cost"
           type="stepAfter"
           dataKey={(pt: AssetTimelinePoint) => pt.values?.["cost_rate_eur_h"] ?? null}
           name="Cost rate [€/h]"
@@ -91,9 +96,9 @@ export function AssetTimelineChart({
           isAnimationActive={false}
         />
 
-        {/* CO₂eq rate — dotted */}
+        {/* CO₂eq rate — dotted, second right axis */}
         <Line
-          yAxisId="rates"
+          yAxisId="co2"
           type="stepAfter"
           dataKey={(pt: AssetTimelinePoint) => pt.values?.["co2_rate_g_h"] ?? null}
           name="CO₂eq rate [g/h]"
