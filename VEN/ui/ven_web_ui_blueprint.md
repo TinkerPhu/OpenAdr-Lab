@@ -71,7 +71,7 @@ Key rule:
 
 ## Supporting Libraries
 - react-router-dom → routing
-- fetch / axios → HTTP client
+- fetch → HTTP client
 - Optional: react-json-view → JSON inspector
 
 ## Rationale
