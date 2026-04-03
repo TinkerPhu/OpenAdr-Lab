@@ -209,7 +209,7 @@ export function ControllerV2Page() {
                 simSnapshot={sim}
                 simOverrides={simInject}
                 collapsed={{ left: collapsed.leftCollapsed, right: collapsed.rightCollapsed }}
-                timePoints={allTimelines[summary.assetId] ?? []}
+                timePoints={enrichedTimelines[summary.assetId] ?? []}
                 nowMs={nowMs}
                 extended={expanded}
                 pinned={false}
