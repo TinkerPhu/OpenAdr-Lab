@@ -70,10 +70,10 @@ export function TracePage() {
                   {new Date(entry.ts).toLocaleTimeString()}
                 </TableCell>
                 <TableCell>
-                  <ModeChip mode={entry.mode} />
+                  {entry.mode != null ? <ModeChip mode={entry.mode} /> : "—"}
                 </TableCell>
                 <TableCell>
-                  <FsmChip state={entry.fsm_state} />
+                  {entry.fsm_state != null ? <FsmChip state={entry.fsm_state} /> : "—"}
                 </TableCell>
                 <TableCell sx={{ fontSize: "0.75rem" }}>
                   {(entry.active_events ?? []).length > 0
