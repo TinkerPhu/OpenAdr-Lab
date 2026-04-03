@@ -3,7 +3,7 @@ import {
   buildTariffPricePoints,
   buildPowerPoints,
   fillCostRateFromTariffs,
-  fillAssetRatesFromTariffs,
+  enrichAllAssetTimelines,
 } from "../components/controller-v2/tariffBuilders";
 import type { TariffSnapshot as ApiTariffSnapshot } from "../api/types";
 import type { AssetTimelinePoint } from "../components/controller-v2/types";
@@ -151,65 +151,89 @@ describe("fillCostRateFromTariffs", () => {
   });
 });
 
-// ─── fillAssetRatesFromTariffs ────────────────────────────────────────────────
+// ─── enrichAllAssetTimelines ──────────────────────────────────────────────────
 
-describe("fillAssetRatesFromTariffs", () => {
-  it("fills cost_rate_eur_h and co2_rate_g_h from applicable tariff × power_kw", () => {
+function makeAllTimelines(
+  evKw: number,
+  pvKw: number,
+  gridKw: number,
+  ts = 200
+): Record<string, AssetTimelinePoint[]> {
+  return {
+    ev: [{ ts, values: { power_kw: evKw } }],
+    heater: [{ ts, values: { power_kw: 0 } }],
+    pv: [{ ts, values: { power_kw: pvKw } }],
+    battery: [{ ts, values: { power_kw: 0 } }],
+    base_load: [{ ts, values: { power_kw: 0 } }],
+    grid: [{ ts, values: { power_kw: gridKw } }],
+  };
+}
+
+describe("enrichAllAssetTimelines", () => {
+  it("full grid import: EV at 100% gridFraction → cost = power × import_tariff", () => {
+    // EV draws 4 kW, all from grid (PV = 0)
     const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
-    const points: AssetTimelinePoint[] = [
-      { ts: 200, values: { power_kw: 4.0 } },
-    ];
-    const result = fillAssetRatesFromTariffs(points, tariffs);
-    expect(result[0].values?.["cost_rate_eur_h"]).toBeCloseTo(0.80);
-    expect(result[0].values?.["co2_rate_g_h"]).toBeCloseTo(1200);
+    const timelines = makeAllTimelines(4.0, 0, 4.0);
+    const result = enrichAllAssetTimelines(timelines, tariffs);
+    expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBeCloseTo(0.80); // 4 × 0.20
+    expect(result["ev"][0].values?.["co2_rate_g_h"]).toBeCloseTo(1200);    // 4 × 300
   });
 
-  it("clamps negative power to 0 for both rates (export/generation case)", () => {
+  it("PV covers EV fully: gridFraction = 0 → EV cost = 0", () => {
+    // EV draws 3 kW, PV generates 3 kW, grid import = 0
     const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
-    const points: AssetTimelinePoint[] = [
-      { ts: 200, values: { power_kw: -3.0 } },
-    ];
-    const result = fillAssetRatesFromTariffs(points, tariffs);
-    expect(result[0].values?.["cost_rate_eur_h"]).toBe(0);
-    expect(result[0].values?.["co2_rate_g_h"]).toBe(0);
+    const timelines = makeAllTimelines(3.0, -3.0, 0);
+    const result = enrichAllAssetTimelines(timelines, tariffs);
+    expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBeCloseTo(0);
+    expect(result["ev"][0].values?.["co2_rate_g_h"]).toBeCloseTo(0);
   });
 
-  it("does not overwrite cost_rate_eur_h already set by the backend (plan slot)", () => {
+  it("PV covers EV partially: gridFraction = 0.5 → EV cost halved", () => {
+    // EV draws 4 kW, PV generates 2 kW, grid import = 2 kW
     const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
-    const points: AssetTimelinePoint[] = [
-      { ts: 200, values: { power_kw: 4.0, cost_rate_eur_h: 0.55 } },
-    ];
-    const result = fillAssetRatesFromTariffs(points, tariffs);
-    expect(result[0].values?.["cost_rate_eur_h"]).toBe(0.55);
+    const timelines = makeAllTimelines(4.0, -2.0, 2.0);
+    const result = enrichAllAssetTimelines(timelines, tariffs);
+    // gridFraction = 2/4 = 0.5; effectiveKw = 4 × 0.5 = 2; cost = 2 × 0.20 = 0.40
+    expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBeCloseTo(0.40);
+  });
+
+  it("PV export: negative cost_rate (revenue) using export_tariff", () => {
+    // PV generates 5 kW → power_kw = -5; export tariff = 0.06
+    const tariffs = [{
+      interval_start: new Date(100).toISOString(),
+      import_tariff_eur_kwh: 0.20,
+      export_tariff_eur_kwh: 0.06,
+      co2_g_kwh: 300,
+    }];
+    const timelines = makeAllTimelines(0, -5.0, -5.0);
+    const result = enrichAllAssetTimelines(timelines, tariffs);
+    // pv power_kw = -5; cost = -5 × 0.06 = -0.30
+    expect(result["pv"][0].values?.["cost_rate_eur_h"]).toBeCloseTo(-0.30);
+    expect(result["pv"][0].values?.["co2_rate_g_h"]).toBeCloseTo(-1500);   // -5 × 300
+  });
+
+  it("does not overwrite cost_rate_eur_h already set by backend (plan slot)", () => {
+    const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
+    const timelines: Record<string, AssetTimelinePoint[]> = {
+      ev: [{ ts: 200, values: { power_kw: 4.0, cost_rate_eur_h: 0.55 } }],
+      heater: [], pv: [], battery: [], base_load: [], grid: [{ ts: 200, values: { power_kw: 4.0 } }],
+    };
+    const result = enrichAllAssetTimelines(timelines, tariffs);
+    expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBe(0.55);
   });
 
   it("leaves rates absent when no applicable tariff exists", () => {
-    const tariffs: ApiTariffSnapshot[] = [];
-    const points: AssetTimelinePoint[] = [
-      { ts: 200, values: { power_kw: 4.0 } },
-    ];
-    const result = fillAssetRatesFromTariffs(points, tariffs);
-    expect(result[0].values?.["cost_rate_eur_h"]).toBeUndefined();
-    expect(result[0].values?.["co2_rate_g_h"]).toBeUndefined();
+    const timelines = makeAllTimelines(4.0, 0, 4.0);
+    const result = enrichAllAssetTimelines(timelines, []);
+    expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBeUndefined();
+    expect(result["ev"][0].values?.["co2_rate_g_h"]).toBeUndefined();
   });
 
-  it("skips points with null values map", () => {
+  it("passes grid timeline through unchanged", () => {
     const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
-    const points: AssetTimelinePoint[] = [
-      { ts: 200, values: null },
-    ];
-    const result = fillAssetRatesFromTariffs(points, tariffs);
-    expect(result[0].values).toBeNull();
-  });
-
-  it("fills only co2_rate_g_h when tariff has co2 but null import (no cost fill)", () => {
-    const tariffs = [makeTariffSnapshot(100, null, 300)];
-    const points: AssetTimelinePoint[] = [
-      { ts: 200, values: { power_kw: 2.0 } },
-    ];
-    const result = fillAssetRatesFromTariffs(points, tariffs);
-    expect(result[0].values?.["cost_rate_eur_h"]).toBeUndefined();
-    expect(result[0].values?.["co2_rate_g_h"]).toBeCloseTo(600);
+    const timelines = makeAllTimelines(4.0, 0, 4.0);
+    const result = enrichAllAssetTimelines(timelines, tariffs);
+    expect(result["grid"]).toBe(timelines["grid"]); // same reference
   });
 });
 

@@ -1,11 +1,14 @@
 import type { TariffSnapshot as ApiTariffSnapshot } from "../../api/types";
 import type { AssetTimelinePoint, TariffTimePoint } from "./types";
 
+const ASSET_IDS = ["ev", "heater", "pv", "battery", "base_load"] as const;
+
 // ─── Internal LOCF tariff lookup ─────────────────────────────────────────────
 
 type TariffLookupEntry = {
   ts: number;
   importEurKwh: number | null;
+  exportEurKwh: number | null;
   co2GKwh: number | null;
 };
 
@@ -15,6 +18,7 @@ function buildTariffLookup(tariffs: ApiTariffSnapshot[]): TariffLookupEntry[] {
     .map((t) => ({
       ts: new Date(t.interval_start).getTime(),
       importEurKwh: t.import_tariff_eur_kwh ?? null,
+      exportEurKwh: t.export_tariff_eur_kwh ?? null,
       co2GKwh: t.co2_g_kwh ?? null,
     }))
     .sort((a, b) => a.ts - b.ts);
@@ -79,35 +83,101 @@ export function fillCostRateFromTariffs(
 }
 
 /**
- * Fill null cost_rate_eur_h and co2_rate_g_h on AssetTimelinePoints that have
- * power_kw, using LOCF over tariffs from /tariffs.
+ * Enrich every asset timeline in allTimelines with correct per-timestamp
+ * cost_rate_eur_h and co2_rate_g_h for history/now-point entries.
  *
- * Per-asset history points carry only power_kw (and asset-specific state fields).
- * The backend only emits cost/CO₂ rates for future plan-slot allocations.
+ * History points from the backend carry only power_kw. The backend emits
+ * cost/CO₂ rates only for future plan-slot allocations (already PV-corrected).
  *
- * Formulas: max(0, power_kw) * import_tariff  and  max(0, power_kw) * co2_g_kwh.
- * Note: this is an approximation for history — future plan rates account for PV
- * surplus credits, but for past data we use the spot import tariff directly.
+ * Import (power_kw ≥ 0):
+ *   gridFraction(t) = min(1, grid_import_kw(t) / sum_positive_asset_powers(t))
+ *   cost_rate_eur_h = power_kw × gridFraction × import_tariff   (≥ 0, cost)
+ *   co2_rate_g_h    = power_kw × gridFraction × co2_g_kwh       (≥ 0)
+ *
+ * Export (power_kw < 0):
+ *   cost_rate_eur_h = power_kw × export_tariff                   (≤ 0, revenue)
+ *   co2_rate_g_h    = power_kw × co2_g_kwh                       (≤ 0, displaced)
+ *   gridFraction does not apply — exporters are always grid-facing.
+ *
+ * Sign convention matches backend plan-slot allocations (negative = credit/revenue).
+ *
+ * Returns a new allTimelines record with enriched per-asset arrays; the grid and
+ * any other non-asset keys are passed through unchanged.
  */
-export function fillAssetRatesFromTariffs(
-  points: AssetTimelinePoint[],
+export function enrichAllAssetTimelines(
+  allTimelines: Record<string, AssetTimelinePoint[]>,
   tariffs: ApiTariffSnapshot[]
-): AssetTimelinePoint[] {
+): Record<string, AssetTimelinePoint[]> {
   const lookup = buildTariffLookup(tariffs);
-  return points.map((p) => {
-    const vals = p.values;
-    if (!vals || vals["power_kw"] == null) return p;
-    if (vals["cost_rate_eur_h"] != null) return p; // already set by backend (plan slot)
-    const entry = locfTariffAt(p.ts, lookup);
-    if (!entry) return p;
-    const powerKw = vals["power_kw"];
-    const newValues: Record<string, number> = { ...vals };
-    if (entry.importEurKwh !== null) {
-      newValues["cost_rate_eur_h"] = Math.max(0, powerKw) * entry.importEurKwh;
+
+  // Build ts → {gridKw, totalConsumeKw} for gridFraction computation.
+  // The uniform grid (RF-05c) guarantees all timelines share the same ts values.
+  type PointInfo = { gridKw: number; totalConsumeKw: number };
+  const infoByTs = new Map<number, PointInfo>();
+
+  for (const gp of allTimelines["grid"] ?? []) {
+    const gridKw = Math.max(0, gp.values?.["power_kw"] ?? 0);
+    infoByTs.set(gp.ts, { gridKw, totalConsumeKw: 0 });
+  }
+
+  for (const assetId of ASSET_IDS) {
+    for (const p of allTimelines[assetId] ?? []) {
+      const info = infoByTs.get(p.ts);
+      if (info) {
+        info.totalConsumeKw += Math.max(0, p.values?.["power_kw"] ?? 0);
+      }
     }
-    if (entry.co2GKwh !== null) {
-      newValues["co2_rate_g_h"] = Math.max(0, powerKw) * entry.co2GKwh;
+  }
+
+  // Enrich each asset's timeline.
+  const result: Record<string, AssetTimelinePoint[]> = {};
+
+  for (const assetId of ASSET_IDS) {
+    result[assetId] = (allTimelines[assetId] ?? []).map((p) => {
+      const vals = p.values;
+      if (!vals || vals["power_kw"] == null) return p;
+      if (vals["cost_rate_eur_h"] != null) return p; // plan slot — already correct
+
+      const entry = locfTariffAt(p.ts, lookup);
+      if (!entry) return p;
+
+      const powerKw = vals["power_kw"];
+      const newValues: Record<string, number> = { ...vals };
+
+      if (powerKw >= 0) {
+        // Consuming: scale by gridFraction so PV-covered load costs zero.
+        const info = infoByTs.get(p.ts);
+        const gridFraction =
+          info && info.totalConsumeKw > 0
+            ? Math.min(1, info.gridKw / info.totalConsumeKw)
+            : 0;
+        const effectiveKw = powerKw * gridFraction;
+        if (entry.importEurKwh !== null) {
+          newValues["cost_rate_eur_h"] = effectiveKw * entry.importEurKwh;
+        }
+        if (entry.co2GKwh !== null) {
+          newValues["co2_rate_g_h"] = effectiveKw * entry.co2GKwh;
+        }
+      } else {
+        // Exporting: revenue is negative (credit), gridFraction does not apply.
+        if (entry.exportEurKwh !== null) {
+          newValues["cost_rate_eur_h"] = powerKw * entry.exportEurKwh; // ≤ 0
+        }
+        if (entry.co2GKwh !== null) {
+          newValues["co2_rate_g_h"] = powerKw * entry.co2GKwh; // ≤ 0 (displaced)
+        }
+      }
+
+      return { ...p, values: newValues };
+    });
+  }
+
+  // Pass through grid and any other non-asset timelines unchanged.
+  for (const key of Object.keys(allTimelines)) {
+    if (!(ASSET_IDS as readonly string[]).includes(key)) {
+      result[key] = allTimelines[key];
     }
-    return { ...p, values: newValues };
-  });
+  }
+
+  return result;
 }
