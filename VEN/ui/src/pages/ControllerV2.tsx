@@ -5,6 +5,7 @@ import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
 import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useResetAssetSoc, useAllTimelines } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller-v2/types";
 import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
+import { enrichAllAssetTimelines } from "../components/controller-v2/tariffBuilders";
 import { AssetCell } from "../components/controller-v2/AssetCell";
 import { PinnedZone } from "../components/controller-v2/PinnedZone";
 import { GridTariffCell } from "../components/controller-v2/GridTariffCell";
@@ -85,6 +86,14 @@ export function ControllerV2Page() {
   const tariffs = rates ?? [];
   const requests = userRequests ?? [];
 
+  // Enrich asset timelines with cost_rate_eur_h / co2_rate_g_h for history/now-point.
+  // Requires allTimelines so gridFraction can be computed per timestamp — PV-covered
+  // load is correctly costed at zero, and export produces negative (revenue) rates.
+  const enrichedTimelines = useMemo(
+    () => enrichAllAssetTimelines(allTimelines, tariffs),
+    [allTimelines, tariffs]
+  );
+
   const assetSummaries = useMemo(() => {
     if (!sim) return [];
     return deriveAssetSummaries(sim, tariffs, requests, allTimelines, Date.now());
@@ -128,7 +137,7 @@ export function ControllerV2Page() {
           simSnapshot={sim}
           simOverrides={simInject}
           collapsed={{ left: collapsed.leftCollapsed, right: collapsed.rightCollapsed }}
-          timePoints={allTimelines[assetId] ?? []}
+          timePoints={enrichedTimelines[assetId] ?? []}
           nowMs={nowMs}
           extended={expanded}
           pinned
