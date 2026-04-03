@@ -76,8 +76,8 @@ export function TracePage() {
                   <FsmChip state={entry.fsm_state} />
                 </TableCell>
                 <TableCell sx={{ fontSize: "0.75rem" }}>
-                  {entry.active_events.length > 0
-                    ? entry.active_events.join(", ")
+                  {(entry.active_events ?? []).length > 0
+                    ? (entry.active_events ?? []).join(", ")
                     : "—"}
                 </TableCell>
                 <TableCell sx={{ fontSize: "0.75rem" }}>
