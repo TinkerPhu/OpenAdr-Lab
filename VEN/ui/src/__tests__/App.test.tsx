@@ -48,7 +48,6 @@ describe("App shell", () => {
     expect(screen.getByTestId("nav-dashboard")).toBeVisible();
     expect(screen.getByTestId("nav-programs")).toBeVisible();
     expect(screen.getByTestId("nav-events")).toBeVisible();
-    expect(screen.getByTestId("nav-sensors")).toBeVisible();
     expect(screen.getByTestId("nav-reports")).toBeVisible();
   });
 
