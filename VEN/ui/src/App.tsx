@@ -10,11 +10,9 @@ import { useHealth } from "./api/hooks";
 import { DashboardPage } from "./pages/Dashboard";
 import { ProgramsPage } from "./pages/Programs";
 import { EventsPage } from "./pages/Events";
-import { SensorsPage } from "./pages/Sensors";
 import { ReportsPage } from "./pages/Reports";
 import { MetricsPage } from "./pages/Metrics";
 import { TracePage } from "./pages/Trace";
-import { SimulationPage } from "./pages/Simulation";
 import { ControllerPage } from "./pages/Controller";
 import { ControllerV2Page } from "./pages/ControllerV2";
 import { UserRequestsPage } from "./pages/UserRequests";
@@ -169,13 +167,6 @@ export default function App() {
             </Button>
             <Button
               component={Link}
-              to="/simulation"
-              data-testid="nav-simulation"
-            >
-              Simulation
-            </Button>
-            <Button
-              component={Link}
               to="/controller"
               data-testid="nav-controller"
             >
@@ -211,13 +202,6 @@ export default function App() {
             </Button>
             <Button
               component={Link}
-              to="/sensors"
-              data-testid="nav-sensors"
-            >
-              Sensors
-            </Button>
-            <Button
-              component={Link}
               to="/reports"
               data-testid="nav-reports"
             >
@@ -248,13 +232,11 @@ export default function App() {
 
           <Routes>
             <Route path="/" element={<DashboardPage />} />
-            <Route path="/simulation" element={<SimulationPage />} />
             <Route path="/controller" element={<ControllerPage />} />
             <Route path="/controller-v2" element={<ControllerV2Page />} />
             <Route path="/user-requests" element={<UserRequestsPage />} />
             <Route path="/programs" element={<ProgramsPage />} />
             <Route path="/events" element={<EventsPage />} />
-            <Route path="/sensors" element={<SensorsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/trace" element={<TracePage />} />
             <Route path="/metrics" element={<MetricsPage />} />
