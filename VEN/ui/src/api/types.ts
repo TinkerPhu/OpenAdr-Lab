@@ -101,16 +101,14 @@ export type SimInjectState = {
   grid_export_limit_kw?: number | null;
 };
 
-export type TraceEntry = {
-  ts: string;
-  mode: string;
-  fsm_state: string;
-  active_events: string[];
-  winning_intent?: string | null;
-  setpoints: Setpoints;
-  constraints: string[];
-  reason: string;
-};
+export type TraceEntry =
+  | { type: "OpenAdrArrived";   ts: string; event_name: string; signal_type: string; value: number; interval: number }
+  | { type: "OpenAdrExpired";   ts: string; event_name: string }
+  | { type: "RateChange";       ts: string; interval_start: string; import_eur_kwh: number; export_eur_kwh: number }
+  | { type: "CapacityChange";   ts: string; import_limit_kw: number | null; export_limit_kw: number | null }
+  | { type: "PlanCycle";        ts: string; trigger_reason: string; firm_slots: number; flexible_slots: number }
+  | { type: "PacketTransition"; ts: string; packet_id: string; asset_id: string; from_status: string; to_status: string }
+  | { type: "RequestTransition"; ts: string; request_id: string; asset_id: string; from_status: string; to_status: string };
 
 // ─── Sim schema types ─────────────────────────────────────────────────────────
 
