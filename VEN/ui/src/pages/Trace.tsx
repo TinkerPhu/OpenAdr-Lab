@@ -11,29 +11,72 @@ import {
   Typography,
 } from "@mui/material";
 import { useTrace } from "../api/hooks";
+import type { TraceEntry } from "../api/types";
 
-function ModeChip({ mode }: { mode: string }) {
+// ─── Event type chip ──────────────────────────────────────────────────────────
+
+function TypeChip({ type: t }: { type: string }) {
   const color =
-    mode === "EXPORT_CAP"
-      ? "warning"
-      : mode === "IMPORT_CAP"
-        ? "info"
-        : mode === "PRICE"
-          ? "secondary"
-          : "default";
-  return <Chip label={mode} size="small" color={color} />;
+    t === "OpenAdrArrived"    ? "success" :
+    t === "OpenAdrExpired"    ? "warning" :
+    t === "RateChange"        ? "info"    :
+    t === "CapacityChange"    ? "secondary" :
+    t === "PlanCycle"         ? "primary" :
+    t === "PacketTransition"  ? "default" :
+    t === "RequestTransition" ? "default" : "default";
+  return <Chip label={t} size="small" color={color} />;
 }
 
-function FsmChip({ state }: { state: string }) {
-  const color = state.startsWith("Holding")
-    ? "success"
-    : state.startsWith("Ramp")
-      ? "warning"
-      : state.startsWith("Delay")
-        ? "info"
-        : "default";
-  return <Chip label={state} size="small" color={color} variant="outlined" />;
+// ─── Detail cell — one line per variant ──────────────────────────────────────
+
+function DetailCell({ entry }: { entry: TraceEntry }) {
+  switch (entry.type) {
+    case "OpenAdrArrived":
+      return (
+        <span>
+          <b>{entry.event_name}</b> · {entry.signal_type} · {entry.value} (interval {entry.interval})
+        </span>
+      );
+    case "OpenAdrExpired":
+      return <span><b>{entry.event_name}</b></span>;
+    case "RateChange":
+      return (
+        <span>
+          import {entry.import_eur_kwh.toFixed(4)} €/kWh · export {entry.export_eur_kwh.toFixed(4)} €/kWh
+          · from {new Date(entry.interval_start).toLocaleTimeString()}
+        </span>
+      );
+    case "CapacityChange":
+      return (
+        <span>
+          import {entry.import_limit_kw != null ? `${entry.import_limit_kw} kW` : "—"}
+          · export {entry.export_limit_kw != null ? `${entry.export_limit_kw} kW` : "—"}
+        </span>
+      );
+    case "PlanCycle":
+      return (
+        <span>
+          <b>{entry.trigger_reason}</b> · firm {entry.firm_slots} · flex {entry.flexible_slots}
+        </span>
+      );
+    case "PacketTransition":
+      return (
+        <span>
+          <b>{entry.asset_id}</b> · {entry.from_status} → {entry.to_status}
+          · <code style={{ fontSize: "0.7rem" }}>{entry.packet_id.slice(0, 8)}</code>
+        </span>
+      );
+    case "RequestTransition":
+      return (
+        <span>
+          <b>{entry.asset_id}</b> · {entry.from_status} → {entry.to_status}
+          · <code style={{ fontSize: "0.7rem" }}>{entry.request_id.slice(0, 8)}</code>
+        </span>
+      );
+  }
 }
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function TracePage() {
   const { data: entries, dataUpdatedAt } = useTrace();
@@ -46,7 +89,7 @@ export function TracePage() {
           Decision Trace
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Last {entries?.length ?? 0} controller decisions (newest first). Updated: {lastUpdated}
+          Last {entries?.length ?? 0} controller events (newest first). Updated: {lastUpdated}
         </Typography>
       </div>
 
@@ -55,12 +98,8 @@ export function TracePage() {
           <TableHead>
             <TableRow>
               <TableCell>Time</TableCell>
-              <TableCell>Mode</TableCell>
-              <TableCell>FSM State</TableCell>
-              <TableCell>Active Events</TableCell>
-              <TableCell>Winning Intent</TableCell>
-              <TableCell>Setpoints</TableCell>
-              <TableCell>Reason</TableCell>
+              <TableCell>Event</TableCell>
+              <TableCell>Detail</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -70,34 +109,18 @@ export function TracePage() {
                   {new Date(entry.ts).toLocaleTimeString()}
                 </TableCell>
                 <TableCell>
-                  {entry.mode != null ? <ModeChip mode={entry.mode} /> : "—"}
-                </TableCell>
-                <TableCell>
-                  {entry.fsm_state != null ? <FsmChip state={entry.fsm_state} /> : "—"}
+                  <TypeChip type={entry.type} />
                 </TableCell>
                 <TableCell sx={{ fontSize: "0.75rem" }}>
-                  {(entry.active_events ?? []).length > 0
-                    ? (entry.active_events ?? []).join(", ")
-                    : "—"}
-                </TableCell>
-                <TableCell sx={{ fontSize: "0.75rem" }}>
-                  {entry.winning_intent ?? "—"}
-                </TableCell>
-                <TableCell sx={{ fontSize: "0.75rem" }}>
-                  {entry.setpoints
-                    ? `EV: ${entry.setpoints.ev_charge_kw.toFixed(1)}kW | Heat: ${entry.setpoints.heater_kw.toFixed(1)}kW | PV limit: ${entry.setpoints.pv_export_limit_kw != null ? `${entry.setpoints.pv_export_limit_kw.toFixed(2)} kW` : "—"}`
-                    : "—"}
-                </TableCell>
-                <TableCell sx={{ fontSize: "0.75rem", maxWidth: 300 }}>
-                  {entry.reason}
+                  <DetailCell entry={entry} />
                 </TableCell>
               </TableRow>
             ))}
             {(!entries || entries.length === 0) && (
               <TableRow>
-                <TableCell colSpan={7} align="center">
+                <TableCell colSpan={3} align="center">
                   <Typography color="text.secondary">
-                    No trace entries yet
+                    No trace events yet
                   </Typography>
                 </TableCell>
               </TableRow>
