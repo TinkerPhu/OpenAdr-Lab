@@ -260,7 +260,7 @@ export function PlanDecisionMatrix({ plan }: Props) {
                             bgcolor: meta.color,
                             opacity: isFlexZone ? 0.5 : 1,
                             flexShrink: 0,
-                            border: "1px solid rgba(0,0,0,0.08)",
+                            border: isFlexZone ? "1px dashed rgba(0,0,0,0.2)" : "1px solid rgba(0,0,0,0.08)",
                             cursor: "pointer",
                             display: "flex",
                             alignItems: "center",
@@ -348,6 +348,12 @@ export function PlanDecisionMatrix({ plan }: Props) {
                   <TableCell>State before</TableCell>
                   <TableCell>{selectedStep.state_before.asset_type} @ {selectedStep.state_before.actual_power_kw.toFixed(2)} kW</TableCell>
                 </TableRow>
+                {selectedStep.state_before.soc != null && (
+                  <TableRow>
+                    <TableCell>SoC</TableCell>
+                    <TableCell>{((selectedStep.state_before.soc as number) * 100).toFixed(1)}%</TableCell>
+                  </TableRow>
+                )}
                 <TableRow>
                   <TableCell>Max import</TableCell>
                   <TableCell>{selectedStep.avail_max_import_kw} kW</TableCell>

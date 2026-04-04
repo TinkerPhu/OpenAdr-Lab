@@ -77,6 +77,18 @@ export function PlanHeaderBar({ plan }: Props) {
           {formatAge(plan.created_at)}
         </Typography>
 
+        {/* FIRM horizon */}
+        {plan.firm_slots.length > 0 && (() => {
+          const firmMs = new Date(plan.firm_slots[plan.firm_slots.length - 1].end).getTime()
+            - new Date(plan.firm_slots[0].start).getTime();
+          const firmHours = (firmMs / 3_600_000).toFixed(1);
+          return (
+            <Typography data-testid="plan-firm-horizon" variant="caption" color="text.secondary">
+              FIRM: {firmHours}h
+            </Typography>
+          );
+        })()}
+
         {/* Cost */}
         <Typography data-testid="plan-cost" variant="caption">
           €{plan.firm_summary.total_cost_eur.toFixed(2)}

@@ -19,25 +19,33 @@ function chipFor(event: TraceEntry): ChipProps {
         Event: "success",
       };
       return {
-        label: event.trigger_reason,
+        label: `● ${event.trigger_reason}`,
         color: colorMap[event.trigger_reason] ?? "default",
       };
     }
     case "RateChange":
-      return { label: `${event.import_eur_kwh.toFixed(3)} €`, color: "info" };
+      return { label: `◆ ${event.import_eur_kwh.toFixed(3)} €`, color: "info" };
     case "CapacityChange":
       return {
-        label: event.import_limit_kw != null ? `${event.import_limit_kw}kW` : "Cap",
+        label: `◆ ${event.import_limit_kw != null ? `${event.import_limit_kw}kW` : "Cap"}`,
         color: "warning",
       };
     case "OpenAdrArrived":
-      return { label: event.event_name.slice(0, 12), color: "success" };
+      return { label: `★ ${event.event_name.slice(0, 12)}`, color: "success" };
     case "OpenAdrExpired":
-      return { label: `${event.event_name.slice(0, 10)} ✗`, color: "default" };
-    case "PacketTransition":
-      return { label: `${event.asset_id}: ${event.from_status}→${event.to_status}`, color: "primary" };
+      return { label: `☆ ${event.event_name.slice(0, 10)} ✗`, color: "default" };
+    case "PacketTransition": {
+      const toColorMap: Record<string, ChipProps["color"]> = {
+        ACTIVE: "success", COMPLETED: "success", PARTIAL_COMPLETED: "warning",
+        ABANDONED: "error", FAILED: "error", SCHEDULED: "info", PENDING: "default", PAUSED: "warning",
+      };
+      return {
+        label: `→ ${event.asset_id}: ${event.from_status}→${event.to_status}`,
+        color: toColorMap[event.to_status] ?? "primary",
+      };
+    }
     case "RequestTransition":
-      return { label: `req: ${event.from_status}→${event.to_status}`, color: "secondary" };
+      return { label: `→ req: ${event.from_status}→${event.to_status}`, color: "secondary" };
   }
 }
 

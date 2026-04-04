@@ -548,8 +548,10 @@ fn rules_choose(
         return (0.0, PlanReason::FirmObligation { source, required_kw });
     }
 
-    // Rule 4: SoC/comfort ceiling (no import headroom left, but asset can still export)
-    if avail_cap.max_import_kw < 1e-6 {
+    // Rule 4: SoC/comfort ceiling — no import headroom AND no discharge headroom either.
+    // When export is still available (e.g. battery full but dischargeable), fall through
+    // to arbitrage rules so Rule 10 can discharge at expensive tariff.
+    if avail_cap.max_import_kw < 1e-6 && avail_cap.max_export_kw > -1e-6 {
         return (0.0, PlanReason::SocCeiling { soc_pct: soc_ceiling_pct });
     }
 
