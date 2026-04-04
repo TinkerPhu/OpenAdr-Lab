@@ -207,14 +207,44 @@ export type FirmSummary = {
   total_export_kwh: number;
 };
 
+// ─── Planner decision audit trail ────────────────────────────────────────────
+
+export type PlanReason =
+  | { kind: "IDLE" }
+  | { kind: "CHEAP_TARIFF";       tariff_eur_per_kwh: number; threshold_eur_per_kwh: number }
+  | { kind: "EXPENSIVE_TARIFF";   tariff_eur_per_kwh: number; threshold_eur_per_kwh: number }
+  | { kind: "FIRM_OBLIGATION";    source: unknown; required_kw: number }
+  | { kind: "USER_OVERRIDE";      request_id: string; mode: string }
+  | { kind: "SOC_CEILING";        soc_pct: number }
+  | { kind: "SOC_FLOOR";          soc_pct: number }
+  | { kind: "COMFORT_BOUND";      asset_id: string; bound_type: string }
+  | { kind: "GRID_IMPORT_LIMIT";  limit_kw: number }
+  | { kind: "GRID_EXPORT_LIMIT";  limit_kw: number }
+  | { kind: "POLICY_RESERVE";     policy_id: string }
+  | { kind: "OPPORTUNITY_MISSED"; reason: string };
+
+export type PlanStep = {
+  ts: string;
+  asset_id: string;
+  setpoint_kw: number;
+  actual_power_kw: number;
+  reason: PlanReason;
+  /** AssetState enum serialized as `{ asset_type: string; actual_power_kw: number; … }` */
+  state_before: { asset_type: string; actual_power_kw: number; [key: string]: unknown };
+  avail_max_import_kw: number;
+  avail_max_export_kw: number;
+};
+
 export type Plan = {
   id: string;
   created_at: string;
   trigger: string;
+  firm_boundary: string;
   firm_slots: PlanTimeSlot[];
   flexible_slots: PlanTimeSlot[];
   firm_summary: FirmSummary;
-  warnings: Array<{ severity: string; message: string; packet_id: string | null }>;
+  warnings: Array<{ severity: string; message: string; packet_id: string | null; suggested_action: string | null }>;
+  steps: PlanStep[];
 };
 
 export type AssetLedger = {
