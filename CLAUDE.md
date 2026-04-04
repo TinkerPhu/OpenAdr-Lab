@@ -10,6 +10,8 @@ Auto-generated from all feature plans. Last updated: 2026-03-15
 - TypeScript 5 (React 18) + React 18 + MUI v5 + TanStack React Query v5 + recharts (006-ven-raw-diagnostics)
 - N/A (read-only diagnostic view; no persistence) (006-ven-raw-diagnostics)
 - Rust (stable, 2021 edition) + chrono (timestamps), serde_json (report payloads), uuid, tokio (async runtime), axum (HTTP) (012-reporter-resampling)
+- TypeScript 5 (React 18) + MUI v5, TanStack React Query v5, React Router v6 (all existing) (014-planner-viz-page)
+- N/A — read-only diagnostic view; no persistence (014-planner-viz-page)
 
 - [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION] (004-ven-controller-reform)
 
@@ -30,9 +32,9 @@ cd src; pytest; ruff check .
 [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]: Follow standard conventions
 
 ## Recent Changes
+- 014-planner-viz-page: Added TypeScript 5 (React 18) + MUI v5, TanStack React Query v5, React Router v6 (all existing)
 - 012-reporter-resampling: Added Rust (stable, 2021 edition) + chrono (timestamps), serde_json (report payloads), uuid, tokio (async runtime), axum (HTTP)
 - 006-ven-raw-diagnostics: Added TypeScript 5 (React 18) + React 18 + MUI v5 + TanStack React Query v5 + recharts
-- 005-ven-timeline-ui: Added Rust (stable 2021) + TypeScript 5 + axum, chrono, serde_json (Rust); React 18 + MUI + TanStack React Query + recharts (TS)
 
 
 <!-- MANUAL ADDITIONS START -->

@@ -237,8 +237,8 @@ Tests are written FIRST (red), then implementation (green). BDD scenarios are wr
 
 ## Phase 9: Polish & Cross-Cutting Concerns
 
-- [ ] T058 [P] Manual smoke test on Pi4 browser: navigate to `/planner`, verify all four sections render with live data, click matrix cells, expand packet cards, interact with trigger timeline popover
-- [ ] T059 Update `docs/history/project_journal.md` with implementation notes: what was built, key decisions made (Decision Matrix as CSS grid, BDD-first approach, type extensions), any issues encountered
+- [x] T058 [P] Manual smoke test on Pi4 browser: navigate to `/planner`, verify all four sections render with live data, click matrix cells, expand packet cards, interact with trigger timeline popover
+- [x] T059 Update `docs/history/project_journal.md` with implementation notes: what was built, key decisions made (Decision Matrix as CSS grid, BDD-first approach, type extensions), any issues encountered
 
 ---
 
