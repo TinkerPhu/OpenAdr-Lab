@@ -3130,3 +3130,42 @@ This is the correct Behaviour C semantics: hold `false` while active, snap to `t
 - **Behaviour C must implement snap-back actively** — the simulator has no autonomous "re-plug" physics. If snap-back is left to "do nothing when override is None", the state leaks into the next scenario.
 - **`ev_desired_kw` was always a no-op** in the backend despite having a field. The dispatcher computed EV setpoints from the planner, ignoring any `ev_desired_kw` inject. Making the BDD step a no-op is correct.
 - **BDD test isolation relies on `_reset_ven_sim_overrides()`**: the `after_scenario` hook must actively reset EV inject state. When the hook fails silently, state pollution is hard to diagnose because the failing scenario is far removed from the one that set the state.
+
+---
+
+## Phase 27: Planner Visualization Page (014-planner-viz-page)
+
+**Goal**: Add a `/planner` tab to the VEN UI giving full transparency into HEMS planner decisions — answering "why is the battery charging right now?", "will my EV finish by 07:00?", and "what triggered this replan?".
+
+### What was built
+
+A new `/planner` tab with four integrated sections:
+
+1. **PlanHeaderBar** — trigger badge (color-coded: Periodic/RateChange/CapacityChange/UserRequest/Event), plan age, FIRM cost/kWh/CO₂, collapsible warnings list with severity chips.
+
+2. **PlanTriggerTimeline** — horizontal scrollable chip strip of `TraceEntry` events (newest-right). Color/label per type: PlanCycle→trigger_reason, RateChange→tariff value, CapacityChange→import limit, OpenAdrArrived/Expired→event name, PacketTransition/RequestTransition→status arrow. Clicking a chip opens an MUI Popover with full event detail.
+
+3. **PlanDecisionMatrix** — time×asset heatmap. Columns = time slots, rows = assets. Each cell colored by `PlanReason.kind` (12 variants: IDLE/CHEAP_TARIFF/EXPENSIVE_TARIFF/FIRM_OBLIGATION/USER_OVERRIDE/SOC_CEILING/SOC_FLOOR/COMFORT_BOUND/GRID_IMPORT_LIMIT/GRID_EXPORT_LIMIT/POLICY_RESERVE/OPPORTUNITY_MISSED). Tariff gradient header row (green→red by import tariff). FIRM/FLEX boundary divider line. Cell click opens step detail drawer with setpoint, actual, state_before, capabilities, reason detail. Collapse/expand-horizon controls.
+
+4. **PacketProgressBoard** — packet cards grouped Active/Queued/Done. Each card: fill gauge (color: >80%=success, 40-80%=warning, <40%=error), deadline countdown (T−Xh Xm / OVERDUE chip), budget bar (only when max_total_cost_eur set), expand→tiers table showing all deadline tiers.
+
+### Key discovery: backend serialization mismatch
+
+Initial types.ts used `{ type: "CheapTariff" }` but the backend uses `{ kind: "CHEAP_TARIFF" }` (`serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")`). `state_before` was typed as `string` but is actually `AssetState` tagged enum serialized as `{ asset_type: "pv"|"ev"|"battery"|..., actual_power_kw: number, ... }`. Discovered via live API inspection on Pi4 during BDD run — React error #31 ("can't render object as React child") in the drawer.
+
+Fix: Updated `PlanReason` discriminator to `kind` with SCREAMING_SNAKE_CASE values; `PlanStep.state_before` typed as `{ asset_type: string; actual_power_kw: number; [key: string]: unknown }`.
+
+### Tests
+
+- **59 vitest tests** added (PlanDecisionMatrix×15, PacketProgressBoard×16, PlanTriggerTimeline×14, PlanHeaderBar×14, PlannerPage×9, App×1 updated) — 244 total, all green.
+- **14 BDD scenarios** in `ven_ui_planner.feature` — all pass on Pi4 (3 skip gracefully when environment state doesn't match precondition).
+- TypeScript build clean.
+
+### Key learnings
+
+- **MUI Collapse renders children even when `in={false}`** — always add `unmountOnExit` when tests check `queryByTestId(...).toBeNull()` for collapsed content.
+- **`vi.useFakeTimers()` breaks `userEvent` click tests** — fake timers stall MUI animation callbacks. Use `vi.spyOn(Date, 'now')` per-test instead of global fake timers.
+- **FIRM-only view always places boundary at allSlots.length** — the expand-horizon BDD scenario must click the expand button before checking the boundary divider is visible.
+- **`nav-simulation` was removed** in a prior commit but `ui.py open()` still waited for it, breaking all `@ven-ui` BDD tests until changed to `nav-dashboard`.
+- **controller_ui.feature rate chart tests** are pre-existing failures from `d7f8d51` (removed rate charts from Controller page without updating BDD steps) — not caused by this feature.
+
