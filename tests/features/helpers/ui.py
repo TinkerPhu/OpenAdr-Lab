@@ -166,7 +166,7 @@ class VenUi:
 
     def open(self):
         self.page.goto(VEN_UI_BASE_URL)
-        self.page.wait_for_selector(tid("nav-simulation"))
+        self.page.wait_for_selector(tid("nav-dashboard"))
 
     def go_simulation(self):
         self.page.click(tid("nav-simulation"))
@@ -202,3 +202,7 @@ class VenUi:
     def go_raw_diagnostics(self):
         self.page.click(tid("nav-raw-diagnostics"))
         self.page.wait_for_selector(tid("raw-diagnostics-page"), timeout=15000)
+
+    def go_planner(self):
+        self.page.click(tid("nav-planner"))
+        self.page.wait_for_selector(tid("planner-heading"), timeout=15000)

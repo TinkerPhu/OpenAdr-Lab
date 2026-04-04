@@ -49,6 +49,7 @@ describe("App shell", () => {
     expect(screen.getByTestId("nav-programs")).toBeVisible();
     expect(screen.getByTestId("nav-events")).toBeVisible();
     expect(screen.getByTestId("nav-reports")).toBeVisible();
+    expect(screen.getByTestId("nav-planner")).toBeVisible();
   });
 
   it("renders auto-refresh toggle", () => {
