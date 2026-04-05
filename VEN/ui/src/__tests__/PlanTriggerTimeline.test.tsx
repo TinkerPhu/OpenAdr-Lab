@@ -164,6 +164,44 @@ describe("PlanTriggerTimeline", () => {
     expect(chips[0].textContent).toMatch(/0\.12|€|Rate/i);  // RateChange
   });
 
+  it("collapses consecutive identical events into one chip with a count badge", () => {
+    // Three consecutive RateChange events with the same tariff → one chip showing ×3
+    const events: TraceEntry[] = [
+      makeRateChange({ ts: "2026-04-04T10:02:00Z" }),  // newest
+      makeRateChange({ ts: "2026-04-04T10:01:00Z" }),
+      makeRateChange({ ts: "2026-04-04T10:00:00Z" }),  // oldest
+    ];
+    render(<PlanTriggerTimeline events={events} />);
+    const chips = document.querySelectorAll('[data-testid^="trigger-chip-"]');
+    expect(chips.length).toBe(1);
+    // Badge content "3" should appear somewhere in the timeline
+    expect(screen.getByTestId("trigger-timeline").textContent).toMatch(/3/);
+  });
+
+  it("does not collapse non-consecutive identical events", () => {
+    // RateChange, PlanCycle, RateChange (same tariff but not adjacent) → 3 chips
+    const events: TraceEntry[] = [
+      makeRateChange({ ts: "2026-04-04T10:02:00Z" }),
+      makePlanCycle({ ts: "2026-04-04T10:01:00Z" }),
+      makeRateChange({ ts: "2026-04-04T10:00:00Z" }),
+    ];
+    render(<PlanTriggerTimeline events={events} />);
+    const chips = document.querySelectorAll('[data-testid^="trigger-chip-"]');
+    expect(chips.length).toBe(3);
+  });
+
+  it("popover shows count and time range for grouped events", async () => {
+    const user = userEvent.setup();
+    const events: TraceEntry[] = [
+      makeRateChange({ ts: "2026-04-04T10:01:00Z" }),
+      makeRateChange({ ts: "2026-04-04T10:00:00Z" }),
+    ];
+    render(<PlanTriggerTimeline events={events} />);
+    await user.click(screen.getByTestId("trigger-chip-0"));
+    const popover = screen.getByTestId("trigger-popover");
+    expect(popover.textContent).toMatch(/×2/);
+  });
+
   it("renders all 7 event types without throwing", () => {
     const events: TraceEntry[] = [
       makePlanCycle(),
