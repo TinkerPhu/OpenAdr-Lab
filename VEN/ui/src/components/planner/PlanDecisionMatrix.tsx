@@ -6,6 +6,8 @@ import {
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import KeyboardDoubleArrowRightIcon from "@mui/icons-material/KeyboardDoubleArrowRight";
 import KeyboardDoubleArrowLeftIcon from "@mui/icons-material/KeyboardDoubleArrowLeft";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import type { Plan, PlanStep, PlanReason, PlanTimeSlot } from "../../api/types";
 
 // ─── Reason metadata ──────────────────────────────────────────────────────────
@@ -110,6 +112,7 @@ type Props = { plan: Plan | null | undefined };
 
 export function PlanDecisionMatrix({ plan }: Props) {
   const [showFlex, setShowFlex] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [selectedStep, setSelectedStep] = useState<PlanStep | null>(null);
 
   // Derive sorted unique asset IDs from steps; always include "battery" so the
@@ -187,17 +190,27 @@ export function PlanDecisionMatrix({ plan }: Props) {
         <Typography variant="subtitle1" fontWeight="medium">Decision Matrix</Typography>
         <IconButton
           size="small"
-          data-testid="matrix-expand-horizon-btn"
-          onClick={() => setShowFlex((v) => !v)}
-          title={showFlex ? "Show FIRM only" : "Show full horizon (FIRM + FLEXIBLE)"}
+          data-testid="matrix-collapse-btn"
+          onClick={() => setCollapsed((v) => !v)}
+          title={collapsed ? "Expand decision matrix" : "Collapse decision matrix"}
         >
-          {showFlex
-            ? <KeyboardDoubleArrowLeftIcon fontSize="small" />
-            : <KeyboardDoubleArrowRightIcon fontSize="small" />}
+          {collapsed ? <ExpandMoreIcon fontSize="small" /> : <ExpandLessIcon fontSize="small" />}
         </IconButton>
+        {!collapsed && (
+          <IconButton
+            size="small"
+            data-testid="matrix-expand-horizon-btn"
+            onClick={() => setShowFlex((v) => !v)}
+            title={showFlex ? "Show FIRM only" : "Show full horizon (FIRM + FLEXIBLE)"}
+          >
+            {showFlex
+              ? <KeyboardDoubleArrowLeftIcon fontSize="small" />
+              : <KeyboardDoubleArrowRightIcon fontSize="small" />}
+          </IconButton>
+        )}
       </Stack>
 
-      <Box data-testid="decision-matrix" sx={{ overflowX: "auto" }}>
+      {!collapsed && <Box data-testid="decision-matrix" sx={{ overflowX: "auto" }}>
           {/* Grid wrapper: fixed left asset column + scrollable cell columns */}
           <Box sx={{ display: "flex" }}>
             {/* Left label column */}
@@ -421,7 +434,7 @@ export function PlanDecisionMatrix({ plan }: Props) {
           </Box>
 
         <MatrixLegend />
-      </Box>
+      </Box>}
 
       {/* Step detail drawer */}
       <Drawer

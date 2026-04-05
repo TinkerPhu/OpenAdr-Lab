@@ -182,19 +182,12 @@ def _expand_ev_right_section(page):
 
 
 def _expand_ev_status_accordion(page):
-    """Expand the right section (if collapsed) then click the accordion header."""
+    """Expand the right section (if collapsed) so controls are visible.
+    The controller UI renders controls directly in the right section without an accordion.
+    """
     _expand_ev_right_section(page)
-    header = page.wait_for_selector(
-        tid("status-settings-accordion-ev"), timeout=10000
-    )
-    assert header is not None, "status-settings-accordion-ev not found"
-    # Click the accordion summary (first child div) to expand
-    header.query_selector("[role='button']").click()
-    # Wait for the MUI accordion content panel to become visible
-    page.wait_for_selector(
-        f'{tid("status-settings-accordion-ev")} [role="region"]',
-        state="visible", timeout=5000,
-    )
+    # Controls are directly visible in the right section — no accordion to expand.
+    page.wait_for_selector(tid("right-section-ev"), state="visible", timeout=5000)
 
 
 @then("the EV plugged toggle is visible in the EV cell right section")

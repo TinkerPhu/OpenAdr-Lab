@@ -41,7 +41,7 @@ export function DynamicControl({ descriptor, value, onChange }: DynamicControlPr
     return (
       <Box>
         <Typography variant="caption">
-          {label}: {unit ? `${displayVal.toFixed(0)} ${unit}` : displayVal.toFixed(2)}
+          {label}: {unit ? `${displayVal.toFixed(2)} ${unit}` : displayVal.toFixed(2)}
         </Typography>
         <Slider
           size="small"
