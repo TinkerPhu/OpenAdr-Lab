@@ -176,6 +176,7 @@ export type PlanTimeSlot = {
   net_import_kw: number;
   net_export_kw: number;
   pv_forecast_kw: number;
+  baseline_kw: number;
 };
 
 export type EnergyPacket = {
