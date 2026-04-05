@@ -10,6 +10,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../types";
 
 interface StackedAreaChartProps {
@@ -23,6 +24,58 @@ interface StackedAreaChartProps {
 
 function formatTs(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Merges _pos/_neg series back into a single net kW row per asset. */
+export function StackedAreaTooltip({
+  active,
+  payload,
+  label,
+  colorMap,
+}: TooltipProps<number, string> & { colorMap: Record<string, string> }) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  // Aggregate net kW per asset; collect grid separately.
+  const netByAsset: Record<string, number> = {};
+  let gridKw: number | null = null;
+  for (const entry of payload) {
+    const name = entry.name ?? "";
+    if (name === "Grid [kW]") {
+      gridKw = (entry.value as number) ?? null;
+      continue;
+    }
+    // name is either "${assetId} +" or "${assetId} -"
+    const assetId = name.replace(/ [+-]$/, "");
+    netByAsset[assetId] = (netByAsset[assetId] ?? 0) + ((entry.value as number) ?? 0);
+  }
+
+  const time = typeof label === "number" ? new Date(label).toLocaleTimeString() : label;
+
+  return (
+    <div
+      style={{
+        background: "rgba(255,255,255,0.95)",
+        border: "1px solid #ccc",
+        borderRadius: 4,
+        padding: "6px 10px",
+        fontSize: 12,
+      }}
+    >
+      <div style={{ marginBottom: 4, fontWeight: "bold" }}>{time}</div>
+      {Object.entries(netByAsset).map(([assetId, kw]) => (
+        <div key={assetId} style={{ color: colorMap[assetId] ?? "#888" }}>
+          {assetId}: {kw >= 0 ? "+" : ""}
+          {kw.toFixed(2)} kW
+        </div>
+      ))}
+      {gridKw !== null && (
+        <div style={{ color: "#212121", borderTop: "1px solid #eee", marginTop: 4, paddingTop: 4 }}>
+          Grid: {gridKw >= 0 ? "+" : ""}
+          {gridKw.toFixed(2)} kW
+        </div>
+      )}
+    </div>
+  );
 }
 
 const EMPTY_PT = (): Omit<StackedAreaPoint, "ts"> => ({
@@ -80,10 +133,7 @@ export function StackedAreaChart({
             tick={{ fontSize: 10 }}
           />
           <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} />
-          <Tooltip
-            labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
-            formatter={(value: number, name: string) => [value.toFixed(2), name]}
-          />
+          <Tooltip content={<StackedAreaTooltip colorMap={colorMap} />} />
           <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
 
           {/* For each asset: positive series (import, stacked above x-axis) */}
