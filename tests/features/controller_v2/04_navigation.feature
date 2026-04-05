@@ -21,11 +21,6 @@ Feature: Controller V2 — Navigation and Layout Controls
     Then the EV asset cell is not in the pinned zone
 
   @ven-ui
-  Scenario: Collapse left section hides the left panel
-    When I click the collapse left button on the EV asset cell
-    Then the EV asset cell left section is not visible
-
-  @ven-ui
   Scenario: Right section starts collapsed and can be expanded then collapsed
     Then the EV asset cell right section is not visible
     When I click the collapse right button on the EV asset cell

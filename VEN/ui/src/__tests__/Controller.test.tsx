@@ -170,11 +170,6 @@ describe("ControllerPage — pin and collapse buttons", () => {
     expect(screen.getByTestId("grid-tariff-cell-pin-btn")).toBeInTheDocument();
   });
 
-  it("shows collapse left button on EV cell", () => {
-    renderPage();
-    expect(screen.getByTestId("asset-cell-ev-collapse-left")).toBeInTheDocument();
-  });
-
   it("shows collapse right button on EV cell", () => {
     renderPage();
     expect(screen.getByTestId("asset-cell-ev-collapse-right")).toBeInTheDocument();

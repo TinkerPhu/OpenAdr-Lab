@@ -62,15 +62,12 @@ export function ControllerPage() {
   }
 
   function handleToggleCollapse(cellId: string, section: "left" | "right") {
+    if (section !== "right") return;
     setCollapseState((prev) => {
-      const current = prev[cellId] ?? { leftCollapsed: false, rightCollapsed: true };
+      const current = prev[cellId] ?? { rightCollapsed: true };
       return {
         ...prev,
-        [cellId]: {
-          ...current,
-          leftCollapsed: section === "left" ? !current.leftCollapsed : current.leftCollapsed,
-          rightCollapsed: section === "right" ? !current.rightCollapsed : current.rightCollapsed,
-        },
+        [cellId]: { rightCollapsed: !current.rightCollapsed },
       };
     });
   }
@@ -128,7 +125,7 @@ export function ControllerPage() {
       const assetId = cellId.replace("asset:", "") as AssetId;
       const summary = assetSummaries.find((s) => s.assetId === assetId);
       if (!summary) return null;
-      const collapsed = collapseState[cellId] ?? { leftCollapsed: false, rightCollapsed: true };
+      const collapsed = collapseState[cellId] ?? { rightCollapsed: true };
       return (
         <AssetCell
           key={cellId}
@@ -136,7 +133,7 @@ export function ControllerPage() {
           summary={summary}
           simSnapshot={sim}
           simOverrides={simInject}
-          collapsed={{ left: collapsed.leftCollapsed, right: collapsed.rightCollapsed }}
+          collapsed={{ right: collapsed.rightCollapsed }}
           timePoints={enrichedTimelines[assetId] ?? []}
           nowMs={nowMs}
           extended={expanded}
@@ -197,10 +194,7 @@ export function ControllerPage() {
           .filter((s) => !pinnedCellIds.includes(`asset:${s.assetId}`))
           .map((summary) => {
             const cellId = `asset:${summary.assetId}`;
-            const collapsed = collapseState[cellId] ?? {
-              leftCollapsed: false,
-              rightCollapsed: true,
-            };
+            const collapsed = collapseState[cellId] ?? { rightCollapsed: true };
             return (
               <AssetCell
                 key={summary.assetId}
@@ -208,7 +202,7 @@ export function ControllerPage() {
                 summary={summary}
                 simSnapshot={sim}
                 simOverrides={simInject}
-                collapsed={{ left: collapsed.leftCollapsed, right: collapsed.rightCollapsed }}
+                collapsed={{ right: collapsed.rightCollapsed }}
                 timePoints={enrichedTimelines[summary.assetId] ?? []}
                 nowMs={nowMs}
                 extended={expanded}
