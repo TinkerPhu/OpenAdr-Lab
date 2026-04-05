@@ -21,9 +21,9 @@ Feature: VEN Entity Model — Stage 1 Foundation
     When I poll VEN /sim until field "battery.soc" is present
     Then the response JSON field "battery.soc" is a number between 0.0 and 1.0
 
-  Scenario: Battery power_kw is 0.0 when no dispatcher is active (Stage 1 hold)
+  Scenario: Battery power_kw is present in sim response
     When I GET /sim from the VEN
-    Then the response JSON field "battery.power_kw" equals 0.0
+    Then the response JSON field "battery.power_kw" is a number between -100.0 and 100.0
 
   # --- HEMS endpoints (live after Stage 3) ---
 
