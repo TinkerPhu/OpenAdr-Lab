@@ -173,9 +173,9 @@ class VenUi:
         self.page.wait_for_selector(tid("ev-charge-caption"), timeout=15000)
 
     def go_controller_v2(self):
-        self.page.click(tid("nav-controller-v2"))
+        self.page.click(tid("nav-controller"))
         try:
-            self.page.wait_for_selector(tid("controller-v2-page"), timeout=15000)
+            self.page.wait_for_selector(tid("controller-page"), timeout=15000)
         except Exception as e:
             try:
                 print(f"\n[go_controller_v2] FAILED. URL={self.page.url}")
