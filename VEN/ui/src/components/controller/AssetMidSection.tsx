@@ -1,4 +1,5 @@
 import { Box } from "@mui/material";
+import { CELL_CHART_HEIGHT, CELL_CHART_MIN_WIDTH } from "./chartLayout";
 import type { AssetId, AssetTimelinePoint } from "./types";
 import { AssetTimelineChart } from "./charts/AssetTimelineChart";
 
@@ -22,7 +23,7 @@ export function AssetMidSection({
   return (
     <Box
       data-testid={`asset-cell-${assetId}-mid`}
-      sx={{ flex: 1, minWidth: 200, height: 140 }}
+      sx={{ flex: 1, minWidth: CELL_CHART_MIN_WIDTH, height: CELL_CHART_HEIGHT }}
     >
       <div data-testid={`asset-timeline-chart-${assetId}`} style={{ width: "100%", height: "100%" }}>
         <AssetTimelineChart

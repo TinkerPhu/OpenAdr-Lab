@@ -1,3 +1,4 @@
+import { CELL_CHART_HEIGHT } from "../chartLayout";
 import {
   ComposedChart,
   Line,
@@ -75,7 +76,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
         ];
 
   return (
-    <div data-testid="tariff-chart" style={{ width: "100%", height: 160 }}>
+    <div data-testid="tariff-chart" style={{ width: "100%", height: CELL_CHART_HEIGHT }}>
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={chartData} margin={{ top: 4, right: 40, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
