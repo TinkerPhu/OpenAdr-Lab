@@ -42,6 +42,8 @@ pub struct PostSimInjectBody {
     #[serde(default)]
     pub base_load_kw: Option<serde_json::Value>,
     #[serde(default)]
+    pub base_load_alpha: Option<serde_json::Value>,
+    #[serde(default)]
     pub grid_import_limit_kw: Option<serde_json::Value>,
     #[serde(default)]
     pub grid_export_limit_kw: Option<serde_json::Value>,
@@ -81,6 +83,13 @@ fn merge_inject(current: &mut SimInjectState, body: PostSimInjectBody) {
     merge_f64!(heater_temp_max_c);
     merge_f64!(ambient_temp_c);
     merge_f64!(base_load_kw);
+    if let Some(v) = body.base_load_alpha {
+        if let Some(alpha) = v.as_f64() {
+            current.base_load_alpha = alpha;
+        } else if v.is_null() {
+            current.base_load_alpha = 0.1; // reset to default
+        }
+    }
     merge_f64!(grid_import_limit_kw);
     merge_f64!(grid_export_limit_kw);
 }
