@@ -175,6 +175,7 @@ export type PlanTimeSlot = {
   allocations: PacketAllocation[];
   net_import_kw: number;
   net_export_kw: number;
+  pv_forecast_kw: number;
 };
 
 export type EnergyPacket = {
@@ -221,7 +222,8 @@ export type PlanReason =
   | { kind: "GRID_IMPORT_LIMIT";  limit_kw: number }
   | { kind: "GRID_EXPORT_LIMIT";  limit_kw: number }
   | { kind: "POLICY_RESERVE";     policy_id: string }
-  | { kind: "OPPORTUNITY_MISSED"; reason: string };
+  | { kind: "OPPORTUNITY_MISSED"; reason: string }
+  | { kind: "SURPLUS_ABSORPTION"; surplus_kw: number };
 
 export type PlanStep = {
   ts: string;

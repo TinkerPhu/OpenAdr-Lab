@@ -25,6 +25,7 @@ const REASON_META: Record<string, ReasonMeta> = {
   GRID_EXPORT_LIMIT:  { label: "→",   color: "#e91e63", icon: "→",  title: "Grid Export Limit" },
   POLICY_RESERVE:     { label: "P",   color: "#607d8b", icon: "P",  title: "Policy Reserve" },
   OPPORTUNITY_MISSED: { label: "✗",  color: "#b71c1c", icon: "✗", title: "Opportunity Missed" },
+  SURPLUS_ABSORPTION: { label: "☀",  color: "#cddc39", icon: "☀", title: "PV Surplus Absorption" },
 };
 
 function reasonMeta(reason: PlanReason): ReasonMeta {
@@ -75,6 +76,8 @@ function ReasonDetail({ reason }: { reason: PlanReason }) {
       return <span>{reason.kind}: policy {reason.policy_id}</span>;
     case "OPPORTUNITY_MISSED":
       return <span>{reason.kind}: {reason.reason}</span>;
+    case "SURPLUS_ABSORPTION":
+      return <span>{reason.kind}: {reason.surplus_kw.toFixed(2)} kW surplus available</span>;
     case "IDLE":
     default:
       return <span>IDLE</span>;
@@ -109,11 +112,13 @@ export function PlanDecisionMatrix({ plan }: Props) {
   const [showFlex, setShowFlex] = useState(false);
   const [selectedStep, setSelectedStep] = useState<PlanStep | null>(null);
 
-  // Derive sorted unique asset IDs from steps
+  // Derive sorted unique asset IDs from steps; always include "battery" so the
+  // row is visible even when the planner filtered all its Idle steps.
   const assetIds = useMemo(() => {
     if (!plan) return [];
-    const ids = [...new Set(plan.steps.map((s) => s.asset_id))].sort();
-    return ids;
+    const ids = new Set(plan.steps.map((s) => s.asset_id));
+    ids.add("battery");
+    return [...ids].sort();
   }, [plan]);
 
   // All slots (FIRM + optionally FLEXIBLE)
@@ -208,6 +213,13 @@ export function PlanDecisionMatrix({ plan }: Props) {
                   <Typography variant="caption" noWrap title={id}>{id}</Typography>
                 </Box>
               ))}
+              {/* PV forecast label */}
+              <Box
+                data-testid="matrix-row-pv"
+                sx={{ height: CELL_H, display: "flex", alignItems: "center" }}
+              >
+                <Typography variant="caption" noWrap>pv</Typography>
+              </Box>
             </Box>
 
             {/* Cell columns */}
@@ -297,6 +309,41 @@ export function PlanDecisionMatrix({ plan }: Props) {
                   })}
                 </Box>
               ))}
+
+              {/* PV forecast row — grey→yellow heatmap from pv_forecast_kw in slot */}
+              {(() => {
+                const pvMax = Math.max(...allSlots.map((s) => s.pv_forecast_kw), 0.01);
+                return (
+                  <Box data-testid="matrix-row-pv-cells" sx={{ display: "flex" }}>
+                    {allSlots.map((slot, ci) => {
+                      const frac = slot.pv_forecast_kw / pvMax;
+                      const r = Math.round(158 + (255 - 158) * frac);
+                      const g = Math.round(158 + (235 - 158) * frac);
+                      const b = Math.round(158 + ( 59 - 158) * frac);
+                      return (
+                        <Tooltip
+                          key={ci}
+                          title={`pv @ ${new Date(slot.start).toLocaleTimeString()}: ${slot.pv_forecast_kw.toFixed(2)} kW forecast`}
+                        >
+                          <Box
+                            data-testid={`matrix-cell-pv-${ci}`}
+                            sx={{
+                              width: CELL_W,
+                              height: CELL_H,
+                              bgcolor: `rgb(${r},${g},${b})`,
+                              opacity: ci >= firmBoundaryIdx ? 0.5 : 1,
+                              flexShrink: 0,
+                              border: ci >= firmBoundaryIdx
+                                ? "1px dashed rgba(0,0,0,0.2)"
+                                : "1px solid rgba(0,0,0,0.08)",
+                            }}
+                          />
+                        </Tooltip>
+                      );
+                    })}
+                  </Box>
+                );
+              })()}
 
               {/* FIRM/FLEX boundary divider */}
               {firmBoundaryIdx > 0 && firmBoundaryIdx < allSlots.length && (
