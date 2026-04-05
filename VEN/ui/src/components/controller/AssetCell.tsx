@@ -18,7 +18,7 @@ interface AssetCellProps {
   summary: AssetSummary;
   simSnapshot: SimSnapshot | undefined;
   simOverrides: SimInjectState | undefined;
-  collapsed: { left: boolean; right: boolean };
+  collapsed: { right: boolean };
   /** Timeline points from the shared useAllTimelines query on the page. */
   timePoints: AssetTimelinePoint[];
   /** Epoch ms — shared across all cells from the page for a consistent NOW line. */
@@ -68,21 +68,7 @@ export function AssetCell({
       }}
     >
       {/* Left section */}
-      <Collapse in={!collapsed.left} orientation="horizontal">
-        <AssetLeftSection summary={summary} />
-      </Collapse>
-
-      {/* Collapse left toggle */}
-      <Tooltip title={collapsed.left ? "Expand left" : "Collapse left"}>
-        <IconButton
-          size="small"
-          data-testid={`asset-cell-${assetId}-collapse-left`}
-          onClick={() => onToggleCollapse(cellId, "left")}
-          sx={{ alignSelf: "center", mx: 0.5 }}
-        >
-          {collapsed.left ? <ChevronRightIcon fontSize="small" /> : <ChevronLeftIcon fontSize="small" />}
-        </IconButton>
-      </Tooltip>
+      <AssetLeftSection summary={summary} />
 
       {/* Mid section — timeline graph */}
       <AssetMidSection

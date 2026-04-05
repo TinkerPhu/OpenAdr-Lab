@@ -63,7 +63,7 @@ function renderCell(timePoints: AssetTimelinePoint[]) {
         summary={makeAssetSummary("ev")}
         simSnapshot={baseSim}
         simOverrides={undefined}
-        collapsed={{ left: false, right: true }}
+        collapsed={{ right: true }}
         timePoints={timePoints}
         nowMs={Date.now()}
         extended={false}

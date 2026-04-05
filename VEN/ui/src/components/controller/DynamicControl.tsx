@@ -38,10 +38,11 @@ export function DynamicControl({ descriptor, value, onChange }: DynamicControlPr
     const displayMin = (min ?? 0) * scale;
     const displayMax = (max ?? 1) * scale;
     const step = scale > 1 ? 1 : (max != null && min != null ? (max - min) / 100 : 1);
+    const fmt = (v: number) => scale > 1 ? v.toFixed(0) : v.toFixed(2);
     return (
       <Box>
         <Typography variant="caption">
-          {label}: {unit ? `${displayVal.toFixed(2)} ${unit}` : displayVal.toFixed(2)}
+          {label}: {unit ? `${fmt(displayVal)} ${unit}` : fmt(displayVal)}
         </Typography>
         <Slider
           size="small"
@@ -52,7 +53,7 @@ export function DynamicControl({ descriptor, value, onChange }: DynamicControlPr
           data-testid={testId}
           onChange={(_e, v) => onChange(key, (v as number) / scale)}
           valueLabelDisplay="auto"
-          valueLabelFormat={(v) => unit ? `${v} ${unit}` : `${v.toFixed(2)}`}
+          valueLabelFormat={(v) => unit ? `${fmt(v)} ${unit}` : fmt(v)}
         />
       </Box>
     );
