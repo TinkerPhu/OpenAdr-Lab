@@ -11,6 +11,7 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a 1-hour PRICE event at 0.05 EUR/kWh for the saved program
+    And I inject pv irradiance 0.0 via sim inject
     When I wait for a "CHEAP_TARIFF" PlanStep for asset "battery"
     Then that PlanStep has setpoint_kw greater than 0.0
 
@@ -19,6 +20,7 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a 1-hour PRICE event at 0.40 EUR/kWh for the saved program
+    And I inject pv irradiance 0.0 via sim inject
     When I wait for a "EXPENSIVE_TARIFF" PlanStep for asset "battery"
     Then that PlanStep has setpoint_kw less than 0.0
 
@@ -34,8 +36,25 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
   Scenario: Battery is idle when no packets and tariff is at median
     Given I inject pv irradiance 0.0 via sim inject
     And the battery SoC is reset to 0.5
-    When I wait for all PlanSteps for asset "battery" to have reason kind "IDLE"
-    Then all PlanSteps for asset "battery" have reason kind "IDLE"
+    When I wait for all PlanSteps for asset "battery" to have reason kind "IDLE|SURPLUS_ABSORPTION"
+    Then all PlanSteps for asset "battery" have reason kind "IDLE|SURPLUS_ABSORPTION"
+
+  # ── Scenario 6: Battery absorbs PV surplus regardless of tariff (Rule 8b) ──
+  Scenario: Battery charges from PV surplus regardless of tariff
+    Given I inject pv irradiance 1.0 via sim inject
+    And the battery SoC is reset to 0.2
+    When I wait for a "SURPLUS_ABSORPTION" PlanStep for asset "battery"
+    Then that PlanStep has setpoint_kw greater than 0.0
+
+  # ── Scenario 7: Battery does not discharge into PV surplus (Rule 10 guard) ─
+  Scenario: Battery does not discharge when PV covers the site load
+    Given I have a VTN token as "any-business"
+    And I create a rate-system program and save its ID
+    And I create a 1-hour PRICE event at 0.40 EUR/kWh for the saved program
+    And I inject pv irradiance 1.0 via sim inject
+    And the battery SoC is reset to 0.8
+    When I wait for all PlanSteps for asset "battery" to have reason kind "SURPLUS_ABSORPTION|IDLE"
+    Then all PlanSteps for asset "battery" have reason kind "SURPLUS_ABSORPTION|IDLE"
 
   # ── Scenario 5: GET /plan?summary omits the steps array ──────────────────
   Scenario: GET /plan?summary returns plan without steps
