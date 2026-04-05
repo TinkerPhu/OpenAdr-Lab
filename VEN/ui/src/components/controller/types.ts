@@ -136,5 +136,5 @@ export type PinnedState = {
 
 export type CollapseState = Record<
   CellId,
-  { leftCollapsed: boolean; rightCollapsed: boolean }
+  { rightCollapsed: boolean }
 >;

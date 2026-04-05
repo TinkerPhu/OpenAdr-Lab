@@ -297,22 +297,6 @@ def step_ev_cell_not_in_pinned_zone(context):
     assert ev_in_pinned is None, "asset-cell-ev is still inside pinned-zone after unpin"
 
 
-@when("I click the collapse left button on the EV asset cell")
-def step_collapse_left_ev(context):
-    el = context.browser_page.wait_for_selector(
-        tid("asset-cell-ev-collapse-left"), timeout=10000
-    )
-    el.click()
-
-
-@then("the EV asset cell left section is not visible")
-def step_ev_left_not_visible(context):
-    left = context.browser_page.query_selector(tid("asset-cell-ev-left"))
-    assert left is None or not left.is_visible(), (
-        "asset-cell-ev-left is still visible after collapse"
-    )
-
-
 @when("I click the collapse right button on the EV asset cell")
 def step_collapse_right_ev(context):
     el = context.browser_page.wait_for_selector(
