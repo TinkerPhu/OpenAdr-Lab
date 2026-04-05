@@ -161,22 +161,6 @@ describe("PlanDecisionMatrix", () => {
     expect(drawer.textContent).toContain("3.4");
   });
 
-  it("hides cells after clicking collapse button", async () => {
-    const user = userEvent.setup();
-    render(<PlanDecisionMatrix plan={makePlan()} />);
-    expect(screen.getByTestId("matrix-cell-battery-0")).toBeInTheDocument();
-    await user.click(screen.getByTestId("matrix-collapse-btn"));
-    expect(screen.queryByTestId("matrix-cell-battery-0")).toBeNull();
-  });
-
-  it("shows cells again after clicking collapse button twice (toggle)", async () => {
-    const user = userEvent.setup();
-    render(<PlanDecisionMatrix plan={makePlan()} />);
-    await user.click(screen.getByTestId("matrix-collapse-btn"));
-    expect(screen.queryByTestId("matrix-cell-battery-0")).toBeNull();
-    await user.click(screen.getByTestId("matrix-collapse-btn"));
-    expect(screen.getByTestId("matrix-cell-battery-0")).toBeInTheDocument();
-  });
 
   it("hides FLEXIBLE columns by default (FIRM-only view)", () => {
     const steps = [

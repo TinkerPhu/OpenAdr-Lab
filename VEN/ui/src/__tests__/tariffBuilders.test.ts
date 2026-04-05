@@ -286,6 +286,37 @@ describe("enrichAllAssetTimelines", () => {
     expect(result["ev"][0].values?.["co2_rate_g_h"]).toBeUndefined();
   });
 
+  it("snaps sub-1W effective power to 0 (nearly-full PV coverage)", () => {
+    // EV draws 4 kW; PV nearly covers it — only 0.0008 kW imported from grid
+    // gridFraction = 0.0008/4 = 0.0002 → effectiveKw = 4 × 0.0002 = 0.0008 kW < NEAR_ZERO_KW
+    const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
+    const timelines: Record<string, AssetTimelinePoint[]> = {
+      ev:        [{ ts: 200, values: { power_kw: 4.0 } }],
+      heater:    [{ ts: 200, values: { power_kw: 0.0 } }],
+      pv:        [{ ts: 200, values: { power_kw: -4.0 } }],
+      battery:   [{ ts: 200, values: { power_kw: 0.0 } }],
+      base_load: [{ ts: 200, values: { power_kw: 0.0 } }],
+      grid:      [{ ts: 200, values: { power_kw: 0.0008 } }],
+    };
+    const result = enrichAllAssetTimelines(timelines, tariffs);
+    expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBe(0);
+    expect(result["ev"][0].values?.["co2_rate_g_h"]).toBe(0);
+  });
+
+  it("snaps sub-1W export power to 0 (tiny PV trickle)", () => {
+    // PV produces 0.0005 kW (half a watt — below snap threshold)
+    const tariffs = [{
+      interval_start: new Date(100).toISOString(),
+      import_tariff_eur_kwh: 0.20,
+      export_tariff_eur_kwh: 0.06,
+      co2_g_kwh: 300,
+    }];
+    const timelines = makeAllTimelines(0, -0.0005, -0.0005);
+    const result = enrichAllAssetTimelines(timelines, tariffs);
+    expect(result["pv"][0].values?.["cost_rate_eur_h"]).toBe(0);
+    expect(result["pv"][0].values?.["co2_rate_g_h"]).toBe(0);
+  });
+
   it("passes grid timeline through unchanged", () => {
     const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
     const timelines = makeAllTimelines(4.0, 0, 4.0);

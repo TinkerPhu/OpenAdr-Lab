@@ -104,6 +104,11 @@ export function fillCostRateFromTariffs(
   });
 }
 
+// Minimum effective power considered non-zero for cost/CO₂ attribution.
+// Values below this are display noise (< 1 W at any tariff) and would cause
+// recharts to auto-scale the Y-axis to a micro-range that looks like a bug.
+const NEAR_ZERO_KW = 0.001; // 1 W
+
 /**
  * Enrich every asset timeline in allTimelines with correct per-timestamp
  * cost_rate_eur_h and co2_rate_g_h for history/now-point entries.
@@ -113,12 +118,14 @@ export function fillCostRateFromTariffs(
  *
  * Import (power_kw ≥ 0):
  *   gridFraction(t) = min(1, grid_import_kw(t) / sum_positive_asset_powers(t))
- *   cost_rate_eur_h = power_kw × gridFraction × import_tariff   (≥ 0, cost)
- *   co2_rate_g_h    = power_kw × gridFraction × co2_g_kwh       (≥ 0)
+ *   effectiveKw     = power_kw × gridFraction, snapped to 0 if < NEAR_ZERO_KW
+ *   cost_rate_eur_h = effectiveKw × import_tariff   (≥ 0, cost)
+ *   co2_rate_g_h    = effectiveKw × co2_g_kwh       (≥ 0)
  *
  * Export (power_kw < 0):
- *   cost_rate_eur_h = power_kw × export_tariff                   (≤ 0, revenue)
- *   co2_rate_g_h    = power_kw × co2_g_kwh                       (≤ 0, displaced)
+ *   power_kw snapped to 0 if |power_kw| < NEAR_ZERO_KW
+ *   cost_rate_eur_h = power_kw × export_tariff       (≤ 0, revenue)
+ *   co2_rate_g_h    = power_kw × co2_g_kwh           (≤ 0, displaced)
  *   gridFraction does not apply — exporters are always grid-facing.
  *
  * Sign convention matches backend plan-slot allocations (negative = credit/revenue).
@@ -168,25 +175,30 @@ export function enrichAllAssetTimelines(
 
       if (powerKw >= 0) {
         // Consuming: scale by gridFraction so PV-covered load costs zero.
+        // Snap sub-1W effective power to 0 — tiny gridFraction values (near-full
+        // PV coverage) produce micro cost/CO₂ rates that distort chart auto-scale.
         const info = infoByTs.get(p.ts);
         const gridFraction =
           info && info.totalConsumeKw > 0
             ? Math.min(1, info.gridKw / info.totalConsumeKw)
             : 0;
         const effectiveKw = powerKw * gridFraction;
+        const billedKw = Math.abs(effectiveKw) < NEAR_ZERO_KW ? 0 : effectiveKw;
         if (entry.importEurKwh !== null) {
-          newValues["cost_rate_eur_h"] = effectiveKw * entry.importEurKwh;
+          newValues["cost_rate_eur_h"] = billedKw * entry.importEurKwh;
         }
         if (entry.co2GKwh !== null) {
-          newValues["co2_rate_g_h"] = effectiveKw * entry.co2GKwh;
+          newValues["co2_rate_g_h"] = billedKw * entry.co2GKwh;
         }
       } else {
         // Exporting: revenue is negative (credit), gridFraction does not apply.
+        // Snap sub-1W power to 0 for the same reason.
+        const exportKw = Math.abs(powerKw) < NEAR_ZERO_KW ? 0 : powerKw;
         if (entry.exportEurKwh !== null) {
-          newValues["cost_rate_eur_h"] = powerKw * entry.exportEurKwh; // ≤ 0
+          newValues["cost_rate_eur_h"] = exportKw * entry.exportEurKwh; // ≤ 0
         }
         if (entry.co2GKwh !== null) {
-          newValues["co2_rate_g_h"] = powerKw * entry.co2GKwh; // ≤ 0 (displaced)
+          newValues["co2_rate_g_h"] = exportKw * entry.co2GKwh; // ≤ 0 (displaced)
         }
       }
 
