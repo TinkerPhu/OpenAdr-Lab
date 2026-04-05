@@ -136,9 +136,16 @@ pub fn run_planner(
     let mut pkts: Vec<EnergyPacket> =
         packets.iter().filter(|p| !p.is_terminal()).cloned().collect();
 
-    // Median import tariff for battery arbitrage threshold
+    // Median import tariff for battery arbitrage threshold.
+    // Uses the full 24h horizon (firm + flexible) so the cheap/expensive thresholds
+    // reflect the complete daily price cycle rather than the 4h near-horizon window alone.
+    // This prevents the battery from charging to 100% on flat nighttime rates when
+    // daytime prices (and free PV) are coming within the planning horizon.
     let median_tariff = {
-        let mut prices: Vec<f64> = firm_slots.iter().map(|s| s.import_tariff_eur_kwh).collect();
+        let mut prices: Vec<f64> = firm_slots.iter()
+            .chain(flexible_slots.iter())
+            .map(|s| s.import_tariff_eur_kwh)
+            .collect();
         prices.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         prices.get(prices.len() / 2).copied().unwrap_or(DEFAULT_IMPORT_PRICE)
     };

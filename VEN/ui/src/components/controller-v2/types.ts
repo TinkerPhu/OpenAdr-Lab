@@ -93,10 +93,12 @@ export type TariffTimePoint = {
   ts: number;
   importPriceEurKwh: number | null;
   exportPriceEurKwh: number | null;
-  /** CO₂eq tariff [g CO₂eq/kWh] */
+  /** CO₂eq tariff [g CO₂eq/kWh] — static intensity, kept for LOCF lookup */
   co2GKwh: number | null;
-  /** Derived total cost rate [€/h] at this interval */
+  /** Derived total cost rate [€/h] at this interval — negative when exporting (revenue) */
   totalCostRateEurH: number | null;
+  /** Derived total CO₂ rate [g/h] at this interval — negative when exporting (displaced emissions) */
+  totalCo2RateGH: number | null;
   /** Grid power [kW] from trace (past) or plan net_import_kw (future) */
   gridPowerKw: number | null;
 };

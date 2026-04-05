@@ -52,6 +52,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
         exportPriceEurKwh: lastTariff.exportPriceEurKwh,
         co2GKwh: lastTariff.co2GKwh,
         totalCostRateEurH: null,
+        totalCo2RateGH: null,
         gridPowerKw: null,
       });
     }
@@ -64,8 +65,8 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
     clipped.length > 0
       ? clipped
       : [
-          { ts: tMin, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
-          { ts: tMax, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
+          { ts: tMin, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, totalCo2RateGH: null, gridPowerKw: null },
+          { ts: tMax, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, totalCo2RateGH: null, gridPowerKw: null },
         ];
 
   return (
@@ -82,11 +83,11 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             tick={{ fontSize: 10 }}
           />
           <YAxis yAxisId="tariff" tick={{ fontSize: 10 }} width={40} unit=" €" />
-          <YAxis yAxisId="co2" orientation="right" tick={{ fontSize: 10 }} width={48} unit=" g" />
+          <YAxis yAxisId="co2" orientation="right" tick={{ fontSize: 10 }} width={52} unit=" g/h" />
           <Tooltip
             labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
             formatter={(value: number, name: string) => {
-              if (name === "CO₂ intensity [g/kWh]") return [value?.toFixed(0) + " g/kWh", name];
+              if (name === "CO₂ rate [g/h]") return [value?.toFixed(0) + " g/h", name];
               return [value?.toFixed(4) + " €", name];
             }}
           />
@@ -134,12 +135,12 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
             isAnimationActive={false}
           />
 
-          {/* CO₂ intensity [g/kWh] — orange dotted, right axis */}
+          {/* CO₂ rate [g/h] — orange dotted, right axis; negative when exporting */}
           <Line
             yAxisId="co2"
             type="stepAfter"
-            dataKey="co2GKwh"
-            name="CO₂ intensity [g/kWh]"
+            dataKey="totalCo2RateGH"
+            name="CO₂ rate [g/h]"
             stroke="#ff9800"
             strokeDasharray="2 2"
             strokeWidth={1.5}

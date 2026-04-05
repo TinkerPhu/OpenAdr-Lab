@@ -42,12 +42,13 @@ export function buildTariffPricePoints(tariffs: ApiTariffSnapshot[]): TariffTime
     exportPriceEurKwh: t.export_tariff_eur_kwh ?? null,
     co2GKwh: t.co2_g_kwh ?? null,
     totalCostRateEurH: null,
+    totalCo2RateGH: null,
     gridPowerKw: null,
   }));
 }
 
-// 2. Power + cost points from timeline (grid history has power_kw; cost_rate_eur_h is
-//    only present for future plan slots — history and now-point lack it)
+// 2. Power + cost points from timeline (grid history has power_kw; cost_rate_eur_h and
+//    co2_rate_g_h are only present for future plan slots — history and now-point lack them)
 export function buildPowerPoints(points: AssetTimelinePoint[]): TariffTimePoint[] {
   return points.map((p) => ({
     ts: p.ts,
@@ -55,19 +56,26 @@ export function buildPowerPoints(points: AssetTimelinePoint[]): TariffTimePoint[
     exportPriceEurKwh: null,
     co2GKwh: null,
     totalCostRateEurH: p.values?.["cost_rate_eur_h"] ?? null,
+    totalCo2RateGH: p.values?.["co2_rate_g_h"] ?? null,
     gridPowerKw: p.values?.["power_kw"] ?? null,
   }));
 }
 
 /**
- * Fill null totalCostRateEurH on merged (sorted by ts) TariffTimePoints that have
- * gridPowerKw, using LOCF over tariffs from /tariffs.
+ * Fill null totalCostRateEurH and totalCo2RateGH on merged (sorted by ts)
+ * TariffTimePoints that have gridPowerKw, using LOCF over tariffs from /tariffs.
  *
  * Grid history and the now-point carry only power_kw (backend stores no tariff in
  * the history ring buffer). /tariffs includes historical intervals, so LOCF always
  * finds an applicable rate within the 1-hour history window.
  *
- * Formula matches the backend plan-slot computation: max(0, power_kw) * import_tariff.
+ * Cost rate sign convention:
+ *   import (power ≥ 0): positive  — cost to the user
+ *   export (power < 0): negative  — revenue for the user
+ *
+ * CO₂ rate sign convention:
+ *   import (power ≥ 0): positive  — grid emissions attributed to the site
+ *   export (power < 0): negative  — displaced grid emissions (clean export)
  */
 export function fillCostRateFromTariffs(
   points: TariffTimePoint[],
@@ -75,10 +83,24 @@ export function fillCostRateFromTariffs(
 ): TariffTimePoint[] {
   const lookup = buildTariffLookup(tariffs);
   return points.map((p) => {
-    if (p.totalCostRateEurH !== null || p.gridPowerKw === null) return p;
+    if (p.gridPowerKw === null) return p;
+    if (p.totalCostRateEurH !== null && p.totalCo2RateGH !== null) return p;
     const entry = locfTariffAt(p.ts, lookup);
-    if (!entry?.importEurKwh) return p;
-    return { ...p, totalCostRateEurH: Math.max(0, p.gridPowerKw) * entry.importEurKwh };
+    if (!entry) return p;
+
+    const powerKw = p.gridPowerKw;
+    const costRate: number | null =
+      p.totalCostRateEurH !== null
+        ? p.totalCostRateEurH
+        : powerKw >= 0
+          ? entry.importEurKwh !== null ? powerKw * entry.importEurKwh : null
+          : entry.exportEurKwh !== null ? powerKw * entry.exportEurKwh : null; // negative
+    const co2Rate: number | null =
+      p.totalCo2RateGH !== null
+        ? p.totalCo2RateGH
+        : entry.co2GKwh !== null ? powerKw * entry.co2GKwh : null; // negative when exporting
+
+    return { ...p, totalCostRateEurH: costRate, totalCo2RateGH: co2Rate };
   });
 }
 
