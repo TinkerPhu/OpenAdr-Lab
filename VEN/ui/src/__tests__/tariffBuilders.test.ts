@@ -317,6 +317,20 @@ describe("enrichAllAssetTimelines", () => {
     expect(result["pv"][0].values?.["co2_rate_g_h"]).toBe(0);
   });
 
+  it("snaps near-zero power plan slot rates to 0", () => {
+    // Plan slots arrive with cost_rate_eur_h already set by the backend.
+    // Sub-1W power (FP residual) must be clamped to 0 to prevent chart needles.
+    const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
+    const timelines: Record<string, AssetTimelinePoint[]> = {
+      ev:        [{ ts: 200, values: { power_kw: 4.0e-9, cost_rate_eur_h: 8.0e-10, co2_rate_g_h: 1.2e-6 } }],
+      heater:    [], pv: [], battery: [], base_load: [],
+      grid:      [{ ts: 200, values: { power_kw: 4.0e-9 } }],
+    };
+    const result = enrichAllAssetTimelines(timelines, tariffs);
+    expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBe(0);
+    expect(result["ev"][0].values?.["co2_rate_g_h"]).toBe(0);
+  });
+
   it("passes grid timeline through unchanged", () => {
     const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
     const timelines = makeAllTimelines(4.0, 0, 4.0);

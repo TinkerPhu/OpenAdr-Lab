@@ -84,11 +84,16 @@ export function fillCostRateFromTariffs(
   const lookup = buildTariffLookup(tariffs);
   return points.map((p) => {
     if (p.gridPowerKw === null) return p;
-    if (p.totalCostRateEurH !== null && p.totalCo2RateGH !== null) return p;
+    // Snap near-zero grid power before any rate computation to prevent chart needles.
+    const powerKw = Math.abs(p.gridPowerKw) < NEAR_ZERO_KW ? 0 : p.gridPowerKw;
+    if (p.totalCostRateEurH !== null && p.totalCo2RateGH !== null) {
+      // Plan slot already has rates — re-snap if power is near zero.
+      if (powerKw === 0) return { ...p, totalCostRateEurH: 0, totalCo2RateGH: 0 };
+      return p;
+    }
     const entry = locfTariffAt(p.ts, lookup);
     if (!entry) return p;
 
-    const powerKw = p.gridPowerKw;
     const costRate: number | null =
       p.totalCostRateEurH !== null
         ? p.totalCostRateEurH
@@ -165,7 +170,16 @@ export function enrichAllAssetTimelines(
     result[assetId] = (allTimelines[assetId] ?? []).map((p) => {
       const vals = p.values;
       if (!vals || vals["power_kw"] == null) return p;
-      if (vals["cost_rate_eur_h"] != null) return p; // plan slot — already correct
+      if (vals["cost_rate_eur_h"] != null) {
+        // Plan slot from backend: apply same near-zero snap as history to prevent chart needles.
+        const powerKw = vals["power_kw"] ?? 0;
+        if (Math.abs(powerKw) < NEAR_ZERO_KW) {
+          const snapped: Record<string, number> = { ...vals, "cost_rate_eur_h": 0 };
+          if ("co2_rate_g_h" in vals) snapped["co2_rate_g_h"] = 0;
+          return { ...p, values: snapped };
+        }
+        return p;
+      }
 
       const entry = locfTariffAt(p.ts, lookup);
       if (!entry) return p;
