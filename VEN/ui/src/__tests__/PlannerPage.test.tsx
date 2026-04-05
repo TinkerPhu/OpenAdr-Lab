@@ -29,6 +29,7 @@ function makeSlot(overrides: Partial<PlanTimeSlot> = {}): PlanTimeSlot {
     allocations: [],
     net_import_kw: 0,
     net_export_kw: 0,
+    pv_forecast_kw: 0,
     ...overrides,
   };
 }

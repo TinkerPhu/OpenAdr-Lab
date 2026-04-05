@@ -41,6 +41,7 @@ function makePlan(steps: PlanStep[] = [makeStep()]): Plan {
         allocations: [],
         net_import_kw: 3.5,
         net_export_kw: 0,
+        pv_forecast_kw: 2.5,
       },
     ],
     flexible_slots: [
@@ -57,6 +58,7 @@ function makePlan(steps: PlanStep[] = [makeStep()]): Plan {
         allocations: [],
         net_import_kw: 0,
         net_export_kw: 0,
+        pv_forecast_kw: 1.8,
       },
     ],
     firm_summary: { total_cost_eur: 0.50, total_co2_g: 800, total_import_kwh: 3.0, total_export_kwh: 0 },
