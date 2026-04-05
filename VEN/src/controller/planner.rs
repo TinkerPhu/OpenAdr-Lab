@@ -653,23 +653,36 @@ fn rules_choose(
     // overlay (current tick only, using actual PV power). This prevents phantom
     // plan commitments based on model-forecast PV from polluting VTN reports.
 
+    // Rule 8b: Battery absorbs PV surplus (self-consumption priority).
+    // Fires for the battery whenever PV generates more than the other site loads,
+    // regardless of tariff. Fills the battery with free solar rather than exporting
+    // it at the low export tariff. Unlike Rule 8 (absent for EV), battery surplus
+    // absorption IS planned because battery setpoints do not create VTN report entries.
+    if asset_id == "battery" && slot.surplus_available_kw > 0.1 {
+        let site_head = (site_ctx.import_limit_kw - site_ctx.planned_others_kw).max(0.0);
+        let charge_kw = avail_cap
+            .max_import_kw
+            .min(slot.surplus_available_kw)
+            .min(site_head)
+            .max(0.0);
+        if charge_kw > 0.01 {
+            return (
+                charge_kw,
+                PlanReason::SurplusAbsorption { surplus_kw: slot.surplus_available_kw },
+            );
+        }
+    }
+
     // Rules 9+10: battery arbitrage
     if asset_id == "battery" {
         if let Some(bat) = battery_cfg {
             let eff = bat.round_trip_efficiency.sqrt();
             if tariff_t < median_tariff * eff {
-                // Rule 9: cheap — charge.
-                // Throttle to available PV surplus when present so the battery
-                // charges from free solar rather than importing from the grid.
-                // Falls back to full rate when no surplus exists (night arbitrage).
+                // Rule 9: cheap tariff — charge at full available rate from grid.
+                // PV-surplus case is handled by Rule 8b above; if we reach here
+                // surplus_available_kw ≤ 0.1 kW (night arbitrage or flat tariff window).
                 let site_head = (site_ctx.import_limit_kw - site_ctx.planned_others_kw).max(0.0);
-                let pv_surplus_kw = slot.surplus_available_kw;
-                let max_charge_kw = if pv_surplus_kw > 0.1 {
-                    avail_cap.max_import_kw.min(pv_surplus_kw)
-                } else {
-                    avail_cap.max_import_kw
-                };
-                let charge_kw = max_charge_kw.min(site_head).max(0.0);
+                let charge_kw = avail_cap.max_import_kw.min(site_head).max(0.0);
                 if charge_kw > 0.01 {
                     return (
                         charge_kw,
@@ -680,8 +693,13 @@ fn rules_choose(
                     );
                 }
             } else if tariff_t > median_tariff / eff {
-                // Rule 10: expensive — discharge
-                let discharge_kw = (-avail_cap.max_export_kw).max(0.0);
+                // Rule 10: expensive tariff — discharge to offset site import only.
+                // Guard: planned_others_kw is the net grid draw from all other assets
+                // (PV, base_load, EV). If the site is already in surplus (PV covers
+                // load), discharging would only add to grid export at the low export
+                // tariff — depleting SoC for no gain.
+                let site_import_kw = site_ctx.planned_others_kw.max(0.0);
+                let discharge_kw = (-avail_cap.max_export_kw).max(0.0).min(site_import_kw);
                 if discharge_kw > 0.01 {
                     return (
                         -discharge_kw,

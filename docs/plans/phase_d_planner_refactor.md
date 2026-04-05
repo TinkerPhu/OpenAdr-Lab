@@ -575,8 +575,9 @@ The table below describes `rules_choose()` exactly as coded in
 | 5 | SoC/comfort floor | `avail_cap.max_export_kw > -1e-6 AND phys_cap.max_export_kw < -1e-3` | 0.0 | `SocFloor { soc_pct: 0.0 }` |
 | 6 | Packet — comfort bid covers cost | best eligible packet exists AND `time_pressure < 2.0` AND setpoint > 1e-6 | `desired_power_kw` (clamped, see below) | `CheapTariff { tariff_eur_per_kwh, threshold_eur_per_kwh: comfort_bid }` |
 | 7 | Packet — deadline pressure | best eligible packet exists AND `time_pressure ≥ 2.0` AND setpoint > 1e-6 | `desired_power_kw` (clamped, see below) | `FirmObligation { source: UserRequest { request_id: packet.id }, required_kw }` |
-| 9 | Battery arbitrage — charge cheap | `asset_id == "battery" AND tariff_t < median_tariff × √eff` AND `charge_kw > 0.01` | `charge_kw` (see below) | `CheapTariff { tariff_eur_per_kwh, threshold_eur_per_kwh: median × √eff }` |
-| 10 | Battery arbitrage — discharge expensive | `asset_id == "battery" AND tariff_t > median_tariff / √eff` AND `discharge_kw > 0.01` | `-discharge_kw` | `ExpensiveTariff { tariff_eur_per_kwh, threshold_eur_per_kwh: median / √eff }` |
+| 8b | Battery surplus absorption | `asset_id == "battery" AND slot.surplus_available_kw > 0.1` AND `charge_kw > 0.01` | `min(avail_cap.max_import_kw, surplus_kw, site_head)` | `SurplusAbsorption { surplus_kw }` |
+| 9 | Battery arbitrage — charge cheap | `asset_id == "battery" AND tariff_t < median_tariff × √eff` AND `charge_kw > 0.01` (surplus ≤ 0.1 at this point — handled by 8b) | `avail_cap.max_import_kw.min(site_head)` | `CheapTariff { tariff_eur_per_kwh, threshold_eur_per_kwh: median × √eff }` |
+| 10 | Battery arbitrage — discharge expensive | `asset_id == "battery" AND tariff_t > median_tariff / √eff` AND `discharge_kw > 0.01` AND `site_import_kw > 0` (guard: no discharge when PV covers load) | `-min(avail_export, site_import_kw)` | `ExpensiveTariff { tariff_eur_per_kwh, threshold_eur_per_kwh: median / √eff }` |
 | 12 | Idle | (fallthrough) | 0.0 | `Idle` |
 
 ### Divergences from the CP2 spec table
