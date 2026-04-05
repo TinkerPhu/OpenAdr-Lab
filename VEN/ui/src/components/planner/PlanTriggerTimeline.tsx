@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from "react";
 import {
-  Box, Chip, Popover, Stack, Typography,
+  Badge, Box, Chip, Popover, Stack, Typography,
 } from "@mui/material";
 import type { TraceEntry } from "../../api/types";
 
@@ -49,14 +49,39 @@ function chipFor(event: TraceEntry): ChipProps {
   }
 }
 
+// ─── Consecutive-group accumulator (like browser console) ────────────────────
+
+type Group = { events: TraceEntry[]; label: string; color: ChipProps["color"] };
+
+function groupConsecutive(ordered: TraceEntry[]): Group[] {
+  const groups: Group[] = [];
+  for (const ev of ordered) {
+    const { label, color } = chipFor(ev);
+    const last = groups[groups.length - 1];
+    if (last && last.label === label) {
+      last.events.push(ev);
+    } else {
+      groups.push({ events: [ev], label, color });
+    }
+  }
+  return groups;
+}
+
 // ─── Popover detail renderer ──────────────────────────────────────────────────
 
-function EventDetail({ event }: { event: TraceEntry }) {
+function EventDetail({ group }: { group: Group }) {
+  const event = group.events[group.events.length - 1];
   const ts = new Date(event.ts).toLocaleString();
+  const countHeader = group.events.length > 1 && (
+    <Typography variant="caption" color="text.secondary">
+      ×{group.events.length} — {new Date(group.events[0].ts).toLocaleTimeString()} → {new Date(event.ts).toLocaleTimeString()}
+    </Typography>
+  );
   switch (event.type) {
     case "PlanCycle":
       return (
         <>
+          {countHeader}
           <Typography variant="caption" fontWeight="bold">PlanCycle</Typography>
           <Typography variant="caption" display="block">ts: {ts}</Typography>
           <Typography variant="caption" display="block">trigger: {event.trigger_reason}</Typography>
@@ -67,6 +92,7 @@ function EventDetail({ event }: { event: TraceEntry }) {
     case "RateChange":
       return (
         <>
+          {countHeader}
           <Typography variant="caption" fontWeight="bold">RateChange</Typography>
           <Typography variant="caption" display="block">ts: {ts}</Typography>
           <Typography variant="caption" display="block">import: {event.import_eur_kwh.toFixed(4)} €/kWh</Typography>
@@ -76,6 +102,7 @@ function EventDetail({ event }: { event: TraceEntry }) {
     case "CapacityChange":
       return (
         <>
+          {countHeader}
           <Typography variant="caption" fontWeight="bold">CapacityChange</Typography>
           <Typography variant="caption" display="block">ts: {ts}</Typography>
           <Typography variant="caption" display="block">import limit: {event.import_limit_kw ?? "—"} kW</Typography>
@@ -85,6 +112,7 @@ function EventDetail({ event }: { event: TraceEntry }) {
     case "OpenAdrArrived":
       return (
         <>
+          {countHeader}
           <Typography variant="caption" fontWeight="bold">OpenAdrArrived</Typography>
           <Typography variant="caption" display="block">ts: {ts}</Typography>
           <Typography variant="caption" display="block">event: {event.event_name}</Typography>
@@ -94,6 +122,7 @@ function EventDetail({ event }: { event: TraceEntry }) {
     case "OpenAdrExpired":
       return (
         <>
+          {countHeader}
           <Typography variant="caption" fontWeight="bold">OpenAdrExpired</Typography>
           <Typography variant="caption" display="block">ts: {ts}</Typography>
           <Typography variant="caption" display="block">event: {event.event_name}</Typography>
@@ -102,6 +131,7 @@ function EventDetail({ event }: { event: TraceEntry }) {
     case "PacketTransition":
       return (
         <>
+          {countHeader}
           <Typography variant="caption" fontWeight="bold">PacketTransition</Typography>
           <Typography variant="caption" display="block">ts: {ts}</Typography>
           <Typography variant="caption" display="block">asset: {event.asset_id}</Typography>
@@ -112,6 +142,7 @@ function EventDetail({ event }: { event: TraceEntry }) {
     case "RequestTransition":
       return (
         <>
+          {countHeader}
           <Typography variant="caption" fontWeight="bold">RequestTransition</Typography>
           <Typography variant="caption" display="block">ts: {ts}</Typography>
           <Typography variant="caption" display="block">asset: {event.asset_id}</Typography>
@@ -129,10 +160,10 @@ type Props = { events: TraceEntry[] };
 export function PlanTriggerTimeline({ events }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<TraceEntry | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
 
-  // Input is newest-first; render oldest-left by reversing
-  const ordered = [...events].reverse();
+  // Input is newest-first; render oldest-left by reversing, then group consecutive identical events
+  const groups = groupConsecutive([...events].reverse());
 
   // Auto-scroll to right end (newest event) on mount / when events change
   useEffect(() => {
@@ -141,14 +172,14 @@ export function PlanTriggerTimeline({ events }: Props) {
     }
   }, [events]);
 
-  const handleChipClick = (event: TraceEntry, el: HTMLElement) => {
-    setSelectedEvent(event);
+  const handleChipClick = (group: Group, el: HTMLElement) => {
+    setSelectedGroup(group);
     setAnchorEl(el);
   };
 
   const handleClose = () => {
     setAnchorEl(null);
-    setSelectedEvent(null);
+    setSelectedGroup(null);
   };
 
   return (
@@ -157,24 +188,31 @@ export function PlanTriggerTimeline({ events }: Props) {
       ref={scrollRef}
       sx={{ overflowX: "auto", display: "flex", alignItems: "center", gap: 0.75, p: 1, minHeight: 40 }}
     >
-      {ordered.length === 0 ? (
+      {groups.length === 0 ? (
         <Typography variant="caption" color="text.secondary">
           No controller events recorded yet.
         </Typography>
       ) : (
-        ordered.map((ev, i) => {
-          const { label, color } = chipFor(ev);
+        groups.map((group, i) => {
+          const count = group.events.length;
+          const latest = group.events[group.events.length - 1];
           return (
-            <Chip
+            <Badge
               key={i}
-              data-testid={`trigger-chip-${i}`}
-              label={label}
-              color={color}
-              size="small"
-              onClick={(e) => handleChipClick(ev, e.currentTarget)}
-              title={`${ev.type} — ${new Date(ev.ts).toLocaleTimeString()}`}
-              sx={{ cursor: "pointer", flexShrink: 0 }}
-            />
+              badgeContent={count > 1 ? count : undefined}
+              color="default"
+              sx={{ flexShrink: 0, "& .MuiBadge-badge": { fontSize: 9, minWidth: 16, height: 16, p: "0 3px" } }}
+            >
+              <Chip
+                data-testid={`trigger-chip-${i}`}
+                label={group.label}
+                color={group.color}
+                size="small"
+                onClick={(e) => handleChipClick(group, e.currentTarget)}
+                title={`${latest.type} — ${new Date(latest.ts).toLocaleTimeString()}${count > 1 ? ` (×${count})` : ""}`}
+                sx={{ cursor: "pointer" }}
+              />
+            </Badge>
           );
         })
       )}
@@ -185,13 +223,13 @@ export function PlanTriggerTimeline({ events }: Props) {
         onClose={handleClose}
         anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
       >
-        {selectedEvent && (
+        {selectedGroup && (
           <Stack
             data-testid="trigger-popover"
             spacing={0.25}
             sx={{ p: 1.5, minWidth: 160, maxWidth: 280 }}
           >
-            <EventDetail event={selectedEvent} />
+            <EventDetail group={selectedGroup} />
             <Chip
               data-testid="trigger-popover-close"
               label="Close"
