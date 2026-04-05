@@ -66,7 +66,7 @@ export function StackedAreaChart({
   return (
     <div data-testid="accumulated-area-chart" style={{ width: "100%", height: 160 }}>
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <ComposedChart data={chartData} margin={{ top: 4, right: 40, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
           <XAxis
             dataKey="ts"
@@ -76,7 +76,8 @@ export function StackedAreaChart({
             tickFormatter={formatTs}
             tick={{ fontSize: 10 }}
           />
-          <YAxis tick={{ fontSize: 10 }} width={40} />
+          <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} />
+          <YAxis yAxisId="grid" orientation="right" tick={{ fontSize: 10 }} width={52} unit=" kW" />
           <Tooltip
             labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
             formatter={(value: number, name: string) => [value.toFixed(2), name]}
@@ -87,6 +88,7 @@ export function StackedAreaChart({
           {renderOrder.map((id) => (
             <Area
               key={`${id}_pos`}
+              yAxisId="power"
               type="stepAfter"
               dataKey={`${id}_pos`}
               name={`${id} +`}
@@ -104,6 +106,7 @@ export function StackedAreaChart({
           {renderOrder.map((id) => (
             <Area
               key={`${id}_neg`}
+              yAxisId="power"
               type="stepAfter"
               dataKey={`${id}_neg`}
               name={`${id} -`}
@@ -117,8 +120,9 @@ export function StackedAreaChart({
             />
           ))}
 
-          {/* Grid power — net import/export sum of all assets */}
+          {/* Grid power — net import/export sum of all assets, on dedicated right axis */}
           <Line
+            yAxisId="grid"
             type="stepAfter"
             dataKey="gridPowerKw"
             name="Grid [kW]"
@@ -131,6 +135,7 @@ export function StackedAreaChart({
 
           {/* NOW reference line */}
           <ReferenceLine
+            yAxisId="power"
             x={nowMs}
             stroke="#f44336"
             strokeDasharray="3 3"

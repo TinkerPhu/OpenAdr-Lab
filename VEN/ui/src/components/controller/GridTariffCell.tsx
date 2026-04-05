@@ -49,7 +49,7 @@ export function GridTariffCell({
       sx={{ display: "flex", flexDirection: "row", mb: 1, borderLeft: "4px solid #37474f" }}
     >
       {/* Left: tariff values */}
-      <Box sx={{ minWidth: 180, px: 1.5, py: 1, display: "flex", flexDirection: "column", gap: 0.5 }}>
+      <Box sx={{ minWidth: 196, px: 1.5, py: 1, display: "flex", flexDirection: "column", gap: 0.5 }}>
         <Typography variant="body2" fontWeight="bold">
           Tariff
         </Typography>
