@@ -303,23 +303,31 @@ describe("ControllerV2Page — simulation controls", () => {
     mockSim.mockReturnValue(baseSim);
   });
 
-  it("shows EV plugged toggle", () => {
+  it("shows EV plugged toggle after expanding EV right section", async () => {
+    const user = userEvent.setup();
     renderPage();
+    await user.click(screen.getByTestId("asset-cell-ev-collapse-right"));
     expect(screen.getByTestId("ctrl-ev-plugged")).toBeInTheDocument();
   });
 
-  it("shows EV SoC slider", () => {
+  it("shows EV SoC slider after expanding EV right section", async () => {
+    const user = userEvent.setup();
     renderPage();
+    await user.click(screen.getByTestId("asset-cell-ev-collapse-right"));
     expect(screen.getByTestId("ctrl-ev-soc")).toBeInTheDocument();
   });
 
-  it("shows battery SoC slider", () => {
+  it("shows battery SoC slider after expanding battery right section", async () => {
+    const user = userEvent.setup();
     renderPage();
+    await user.click(screen.getByTestId("asset-cell-battery-collapse-right"));
     expect(screen.getByTestId("ctrl-battery-soc")).toBeInTheDocument();
   });
 
-  it("shows EV Charge Target slider with % display (display_scale=100)", () => {
+  it("shows EV Charge Target slider with % display (display_scale=100)", async () => {
+    const user = userEvent.setup();
     renderPage();
+    await user.click(screen.getByTestId("asset-cell-ev-collapse-right"));
     expect(screen.getByTestId("ctrl-ev-soc-target")).toBeInTheDocument();
     // baseSim has ev.soc_target = 0.9; display_scale=100 → label shows "90 %"
     expect(screen.getByText(/Charge Target:\s*90 %/)).toBeInTheDocument();
