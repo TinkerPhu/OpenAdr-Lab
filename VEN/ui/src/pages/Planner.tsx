@@ -9,7 +9,7 @@ import { PacketProgressBoard } from "../components/planner/PacketProgressBoard";
 
 export function PlannerPage() {
   const { data: plan } = usePlan();
-  const { data: events } = useTrace(20);
+  const { data: events } = useTrace(200);
   const { data: packets } = usePackets();
 
   return (
