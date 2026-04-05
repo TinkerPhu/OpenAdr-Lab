@@ -34,7 +34,12 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
   // correct value at the left edge of the window.
   const clipped = (() => {
     const upToEnd = data.filter((p) => p.ts <= tMax);
-    const lastBefore = upToEnd.filter((p) => p.ts < tMin).slice(-1);
+    // Pin the left-anchor to tMin so recharts never sees a data point outside
+    // [tMin, tMax]. Without this, recharts expands the X-axis domain to fit the
+    // anchor's original timestamp, shifting the NOW line rightward relative to
+    // all other charts that share the same domain.
+    const lastBefore = upToEnd.filter((p) => p.ts < tMin).slice(-1)
+      .map((p) => ({ ...p, ts: tMin }));
     const inWindow = upToEnd.filter((p) => p.ts >= tMin);
     const windowed = [...lastBefore, ...inWindow];
 
