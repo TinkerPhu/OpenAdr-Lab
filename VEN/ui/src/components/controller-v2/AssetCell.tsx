@@ -95,7 +95,7 @@ export function AssetCell({
       />
 
       {/* Right section — simulation controls */}
-      <Collapse in={!collapsed.right} orientation="horizontal">
+      <Collapse in={!collapsed.right} orientation="horizontal" unmountOnExit>
         <Box data-testid={`asset-cell-${assetId}-right`}>
           <AssetRightSection
             assetId={assetId}
