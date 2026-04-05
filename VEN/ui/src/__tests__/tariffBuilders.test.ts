@@ -4,9 +4,9 @@ import {
   buildPowerPoints,
   fillCostRateFromTariffs,
   enrichAllAssetTimelines,
-} from "../components/controller-v2/tariffBuilders";
+} from "../components/controller/tariffBuilders";
 import type { TariffSnapshot as ApiTariffSnapshot } from "../api/types";
-import type { AssetTimelinePoint } from "../components/controller-v2/types";
+import type { AssetTimelinePoint } from "../components/controller/types";
 
 // ─── buildTariffPricePoints ───────────────────────────────────────────────────
 

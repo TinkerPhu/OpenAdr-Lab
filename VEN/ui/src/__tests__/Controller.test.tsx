@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ControllerV2Page } from "../pages/ControllerV2";
+import { ControllerPage } from "../pages/Controller";
 import type { SimSnapshot, SimInjectState, TariffSnapshot } from "../api/types";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
@@ -67,7 +67,7 @@ function renderPage() {
   return render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <ControllerV2Page />
+        <ControllerPage />
       </BrowserRouter>
     </QueryClientProvider>
   );
@@ -75,7 +75,7 @@ function renderPage() {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("ControllerV2Page — layout", () => {
+describe("ControllerPage — layout", () => {
   beforeEach(() => {
     mockSim.mockReturnValue(baseSim);
     mockRates.mockReturnValue(baseRates);
@@ -84,7 +84,7 @@ describe("ControllerV2Page — layout", () => {
 
   it("renders the page root", () => {
     renderPage();
-    expect(screen.getByTestId("controller-v2-page")).toBeInTheDocument();
+    expect(screen.getByTestId("controller-page")).toBeInTheDocument();
   });
 
   it("renders grid tariff cell", () => {
@@ -123,7 +123,7 @@ describe("ControllerV2Page — layout", () => {
   });
 });
 
-describe("ControllerV2Page — asset metrics", () => {
+describe("ControllerPage — asset metrics", () => {
   beforeEach(() => {
     mockSim.mockReturnValue(baseSim);
     mockRates.mockReturnValue(baseRates);
@@ -155,7 +155,7 @@ describe("ControllerV2Page — asset metrics", () => {
   });
 });
 
-describe("ControllerV2Page — pin and collapse buttons", () => {
+describe("ControllerPage — pin and collapse buttons", () => {
   beforeEach(() => {
     mockSim.mockReturnValue(baseSim);
   });
@@ -181,7 +181,7 @@ describe("ControllerV2Page — pin and collapse buttons", () => {
   });
 });
 
-describe("ControllerV2Page — global expand button", () => {
+describe("ControllerPage — global expand button", () => {
   beforeEach(() => {
     mockSim.mockReturnValue(baseSim);
     mockRates.mockReturnValue(baseRates);
@@ -201,23 +201,23 @@ describe("ControllerV2Page — global expand button", () => {
   });
 });
 
-describe("ControllerV2Page — error and loading states", () => {
+describe("ControllerPage — error and loading states", () => {
   it("shows error state when sim fails", () => {
     vi.mocked(vi.fn()).mockReturnValue(null);
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <ControllerV2Page />
+          <ControllerPage />
         </BrowserRouter>
       </QueryClientProvider>
     );
     // When sim data is not available, page still renders without crashing
-    expect(screen.getByTestId("controller-v2-page")).toBeInTheDocument();
+    expect(screen.getByTestId("controller-page")).toBeInTheDocument();
   });
 });
 
-describe("ControllerV2Page — asset cell left section line order", () => {
+describe("ControllerPage — asset cell left section line order", () => {
   beforeEach(() => {
     mockSim.mockReturnValue(baseSim);
     mockRates.mockReturnValue(baseRates);
@@ -255,7 +255,7 @@ describe("ControllerV2Page — asset cell left section line order", () => {
   });
 });
 
-describe("ControllerV2Page — right section collapsed by default", () => {
+describe("ControllerPage — right section collapsed by default", () => {
   beforeEach(() => {
     mockSim.mockReturnValue(baseSim);
     mockRates.mockReturnValue(baseRates);
@@ -282,7 +282,7 @@ describe("ControllerV2Page — right section collapsed by default", () => {
   });
 });
 
-describe("ControllerV2Page — settings panel expands with single click", () => {
+describe("ControllerPage — settings panel expands with single click", () => {
   beforeEach(() => {
     mockSim.mockReturnValue(baseSim);
     mockRates.mockReturnValue(baseRates);
@@ -298,7 +298,7 @@ describe("ControllerV2Page — settings panel expands with single click", () => 
   });
 });
 
-describe("ControllerV2Page — simulation controls", () => {
+describe("ControllerPage — simulation controls", () => {
   beforeEach(() => {
     mockSim.mockReturnValue(baseSim);
   });

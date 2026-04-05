@@ -2,20 +2,20 @@
  * AssetCell — rendering tests
  *
  * Rate enrichment (gridFraction-based cost_rate_eur_h / co2_rate_g_h) was moved to
- * ControllerV2 via enrichAllAssetTimelines so the full allTimelines context is available.
+ * ControllerPage via enrichAllAssetTimelines so the full allTimelines context is available.
  * AssetCell is now a pure display component: it renders whatever timePoints it receives.
  * Enrichment logic is tested in tariffBuilders.test.ts.
  */
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi } from "vitest";
-import { AssetCell } from "../components/controller-v2/AssetCell";
-import type { AssetSummary, AssetTimelinePoint } from "../components/controller-v2/types";
+import { AssetCell } from "../components/controller/AssetCell";
+import type { AssetSummary, AssetTimelinePoint } from "../components/controller/types";
 import type { SimSnapshot } from "../api/types";
 
 // ─── Mock AssetTimelineChart — expose the data it receives via DOM attrs ──────
 
-vi.mock("../components/controller-v2/charts/AssetTimelineChart", () => ({
+vi.mock("../components/controller/charts/AssetTimelineChart", () => ({
   AssetTimelineChart: ({ data }: { data: AssetTimelinePoint[] }) => (
     <div
       data-testid="asset-timeline-chart"
@@ -98,7 +98,7 @@ describe("AssetCell — rendering", () => {
   });
 
   it("passes pre-enriched null cost_rate through without modification", () => {
-    // Enrichment happens upstream in ControllerV2 — AssetCell does not fill in rates.
+    // Enrichment happens upstream in ControllerPage — AssetCell does not fill in rates.
     const point: AssetTimelinePoint = { ts: Date.now(), values: { power_kw: 3.0 } };
     renderCell([point]);
     const attr = screen.getByTestId("asset-timeline-chart").getAttribute("data-cost-rate-0");

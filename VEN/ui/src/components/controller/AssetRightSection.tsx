@@ -9,6 +9,24 @@ import type { SimSnapshot, SimInjectState } from "../../api/types";
 import { useSimSchema } from "../../api/hooks";
 import { DynamicControl } from "./DynamicControl";
 
+/**
+ * Controls that follow Behaviour B (one-shot inject + EMA decay):
+ * after posting the override the UI releases its local hold so the slider
+ * tracks the live sim value as it blends back to the natural baseline.
+ *
+ * Maps inject key → function that reads the live value from a SimSnapshot.
+ */
+const DECAY_CONTROLS: Record<string, (sim: SimSnapshot | undefined) => number | null> = {
+  pv_irradiance: (sim) => {
+    const v = sim?.assets?.["pv"]?.["irradiance"];
+    return typeof v === "number" ? v : null;
+  },
+  base_load_kw: (sim) => {
+    const v = sim?.assets?.["base_load"]?.["baseline_kw"];
+    return typeof v === "number" ? v : null;
+  },
+};
+
 interface AssetRightSectionProps {
   assetId: AssetId;
   simSnapshot: SimSnapshot | undefined;
@@ -37,9 +55,9 @@ export function AssetRightSection({
 
   // Local state for schema-driven slider controls: updated immediately on drag
   // so the slider is responsive without waiting for the POST roundtrip.
-  // pv_irradiance_alpha (blend-back speed) also benefits: once set locally it
-  // never reverts to the server value, which is correct since it's a config
-  // knob rather than a live measurement.
+  // Alpha (blend-back speed) knobs also benefit: once set locally they never
+  // revert to the server value, which is correct since they are config knobs
+  // rather than live measurements.
   const [localControlValues, setLocalControlValues] = useState<Record<string, number | boolean>>({});
   const controlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -59,14 +77,14 @@ export function AssetRightSection({
     if (controlTimerRef.current) clearTimeout(controlTimerRef.current);
     controlTimerRef.current = setTimeout(() => {
       onOverrideChange({ [key]: val } as Partial<SimInjectState>);
-      // pv_irradiance tracks the live sim value when the user is not actively
-      // dragging. Release the local hold after posting so the slider follows
-      // sim.assets.pv.irradiance once the server applies the override.
-      // pv_irradiance_alpha is a config knob — it retains local state.
-      if (key === "pv_irradiance") {
+      // Decay controls (Behaviour B): release the local hold after posting so
+      // the slider follows the live sim value as the backend EMA-blends back.
+      // Alpha knobs are config, not measurements — they retain local state.
+      if (key in DECAY_CONTROLS) {
         setLocalControlValues(prev => {
-          const { pv_irradiance: _, ...rest } = prev;
-          return rest;
+          const next = { ...prev };
+          delete next[key];
+          return next;
         });
       }
     }, 300);
@@ -74,13 +92,10 @@ export function AssetRightSection({
 
   function getValue(key: string): number | boolean | null {
     if (key in localControlValues) return localControlValues[key];
-    // pv_irradiance is a one-shot: the backend applies it and auto-clears it
-    // within one sim tick. simInject may cache the pre-clear value briefly,
-    // so we must NOT read overrides for this key — go straight to live sim.
-    if (key === "pv_irradiance") {
-      const irr = sim?.assets?.["pv"]?.["irradiance"];
-      return typeof irr === "number" ? irr : null;
-    }
+    // Decay controls (Behaviour B): the backend clears the inject field within
+    // one tick after applying the offset. Read from live sim so the slider
+    // follows the decaying value rather than the stale inject cache.
+    if (key in DECAY_CONTROLS) return DECAY_CONTROLS[key](sim);
     if (overrides != null) {
       const v = (overrides as Record<string, unknown>)[key];
       if (typeof v === "number" || typeof v === "boolean") return v;
