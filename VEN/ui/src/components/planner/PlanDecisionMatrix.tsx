@@ -226,11 +226,12 @@ export function PlanDecisionMatrix({ plan }: Props) {
 
             {/* Cell columns */}
             <Box sx={{ position: "relative", flexShrink: 0 }}>
-              {/* Time axis row */}
+              {/* Time axis row — label the first slot of each new hour */}
               <Box sx={{ position: "relative", height: 14, mb: 0.5 }}>
                 {allSlots.map((slot, ci) => {
                   const d = new Date(slot.start);
-                  if (d.getMinutes() !== 0 || d.getSeconds() !== 0) return null;
+                  const prevHour = ci > 0 ? new Date(allSlots[ci - 1].start).getHours() : -1;
+                  if (d.getHours() === prevHour) return null;
                   return (
                     <Typography
                       key={ci}
