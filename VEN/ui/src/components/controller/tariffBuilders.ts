@@ -1,4 +1,5 @@
 import type { TariffSnapshot as ApiTariffSnapshot } from "../../api/types";
+import { NEAR_ZERO_KW } from "../../thresholds";
 import type { AssetTimelinePoint, TariffTimePoint } from "./types";
 
 const ASSET_IDS = ["ev", "heater", "pv", "battery", "base_load"] as const;
@@ -108,11 +109,6 @@ export function fillCostRateFromTariffs(
     return { ...p, totalCostRateEurH: costRate, totalCo2RateGH: co2Rate };
   });
 }
-
-// Minimum effective power considered non-zero for cost/CO₂ attribution.
-// Values below this are display noise (< 1 W at any tariff) and would cause
-// recharts to auto-scale the Y-axis to a micro-range that looks like a bug.
-const NEAR_ZERO_KW = 0.001; // 1 W
 
 /**
  * Enrich every asset timeline in allTimelines with correct per-timestamp

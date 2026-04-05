@@ -16,5 +16,8 @@ pub mod reporter;
 // ── User requests ─────────────────────────────────────────────────────────────
 pub mod user_request;
 
+// ── Shared numeric thresholds ─────────────────────────────────────────────────
+pub mod thresholds;
+
 // ── Observability ─────────────────────────────────────────────────────────────
 pub mod trace;

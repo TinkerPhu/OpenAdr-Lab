@@ -10,6 +10,7 @@ use crate::entities::energy_packet::{EnergyPacket, EnergySnapshot, PacketStatus}
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::simulator::SimSnapshot;
 use crate::state::AssetLedgerEntry;
+use crate::controller::thresholds::{ACTIVE_THRESHOLD_KW, COMPLETION_TOL_KWH, NEAR_ZERO_KW};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
@@ -54,7 +55,7 @@ pub fn record_tick(
 
     for (asset_id, asset_snap) in &sim.assets {
         let kw = asset_snap.power_kw;
-        if kw.abs() <= 1e-6 {
+        if kw.abs() <= NEAR_ZERO_KW {
             continue;
         }
         let entry = ledger
@@ -92,7 +93,7 @@ pub fn record_tick(
         pkt.updated_at = now;
 
         // Scheduled → Active transition
-        if pkt.status == PacketStatus::Scheduled && actual_kw > 0.01 {
+        if pkt.status == PacketStatus::Scheduled && actual_kw > ACTIVE_THRESHOLD_KW {
             let from = "Scheduled".to_string();
             pkt.status = PacketStatus::Active;
             events.push(ControllerEvent::PacketTransition {
@@ -105,7 +106,7 @@ pub fn record_tick(
         }
 
         // Completion check: energy target reached
-        if pkt.target_energy_kwh > 0.0 && new_energy >= pkt.target_energy_kwh - 1e-4 {
+        if pkt.target_energy_kwh > 0.0 && new_energy >= pkt.target_energy_kwh - COMPLETION_TOL_KWH {
             let from = format!("{:?}", pkt.status);
             pkt.status = PacketStatus::Completed;
             trigger = Some(PlanTrigger::DeviceDeviation);
@@ -144,4 +145,133 @@ pub fn record_tick(
     }
 
     (trigger, events)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::controller::thresholds::{ACTIVE_THRESHOLD_KW, COMPLETION_TOL_KWH, NEAR_ZERO_KW};
+    use crate::entities::energy_packet::{EnergyPacket, EnergySnapshot, PacketStatus, ValueCurve};
+    use crate::simulator::{AssetSnapshot, GridSnapshot, SimSnapshot};
+    use chrono::Utc;
+    use std::collections::HashMap;
+
+    fn make_sim(asset_id: &str, power_kw: f64) -> SimSnapshot {
+        SimSnapshot {
+            ts: Utc::now(),
+            grid: GridSnapshot { net_power_w: 0.0, voltage_v: 230.0, import_kwh: 0.0, export_kwh: 0.0 },
+            assets: HashMap::from([(
+                asset_id.to_string(),
+                AssetSnapshot { power_kw, values: HashMap::new() },
+            )]),
+        }
+    }
+
+    fn make_scheduled_packet(asset_id: &str, target_kwh: f64) -> EnergyPacket {
+        let now = Utc::now();
+        let mut pkt = EnergyPacket::new(
+            asset_id.to_string(),
+            target_kwh,
+            1.0,
+            ValueCurve { comfort_rates: vec![], deadline_tiers: vec![], active_tier_index: 0 },
+            now,
+        );
+        pkt.status = PacketStatus::Scheduled;
+        pkt
+    }
+
+    // ── NEAR_ZERO_KW — ledger skip boundary ──────────────────────────────────
+
+    #[test]
+    fn ledger_skips_power_below_near_zero_kw() {
+        // power = 0.5 × NEAR_ZERO_KW (0.0005 kW) → below threshold → no ledger entry
+        let sub_threshold = NEAR_ZERO_KW * 0.5;
+        let sim = make_sim("ev", sub_threshold);
+        let mut ledger = HashMap::new();
+        record_tick(&mut vec![], &mut ledger, &sim, &[], 1.0, Utc::now());
+        assert!(ledger.is_empty(), "ledger must not accumulate sub-threshold power");
+    }
+
+    #[test]
+    fn ledger_accumulates_power_above_near_zero_kw() {
+        // power = 2.0 × NEAR_ZERO_KW (0.002 kW) → above threshold → entry created
+        let above_threshold = NEAR_ZERO_KW * 2.0;
+        let sim = make_sim("ev", above_threshold);
+        let mut ledger = HashMap::new();
+        record_tick(&mut vec![], &mut ledger, &sim, &[], 1.0, Utc::now());
+        let entry = ledger.get("ev").expect("ledger must have an entry for above-threshold power");
+        assert!(entry.energy_kwh > 0.0, "energy_kwh must be positive, got {}", entry.energy_kwh);
+    }
+
+    // ── ACTIVE_THRESHOLD_KW — Scheduled→Active boundary ─────────────────────
+
+    #[test]
+    fn scheduled_stays_below_active_threshold() {
+        // power = 0.9 × ACTIVE_THRESHOLD_KW → packet stays Scheduled
+        let below = ACTIVE_THRESHOLD_KW * 0.9;
+        let sim = make_sim("ev", below);
+        let mut ledger = HashMap::new();
+        // Re-fetch via record_tick result: check status via the returned packet
+        let mut packets = vec![make_scheduled_packet("ev", 10.0)];
+        record_tick(&mut packets, &mut ledger, &sim, &[], 1.0, Utc::now());
+        assert_eq!(packets[0].status, PacketStatus::Scheduled,
+            "power below ACTIVE_THRESHOLD_KW must not trigger Scheduled→Active");
+    }
+
+    #[test]
+    fn scheduled_transitions_above_active_threshold() {
+        // power = 1.1 × ACTIVE_THRESHOLD_KW → packet transitions to Active
+        let above = ACTIVE_THRESHOLD_KW * 1.1;
+        let sim = make_sim("ev", above);
+        let mut packets = vec![make_scheduled_packet("ev", 10.0)];
+        let mut ledger = HashMap::new();
+        record_tick(&mut packets, &mut ledger, &sim, &[], 1.0, Utc::now());
+        assert_eq!(packets[0].status, PacketStatus::Active,
+            "power above ACTIVE_THRESHOLD_KW must trigger Scheduled→Active");
+    }
+
+    // ── COMPLETION_TOL_KWH — packet completion boundary ──────────────────────
+
+    #[test]
+    fn packet_completes_within_completion_tolerance() {
+        // Pre-fill packet to target - 0.5 × tolerance (within tolerance window).
+        // With zero actual_kw the tick still pushes new_energy = prev_energy,
+        // which satisfies: new_energy ≥ target - COMPLETION_TOL_KWH.
+        let target = 1.0_f64;
+        let prev_energy = target - COMPLETION_TOL_KWH * 0.5;
+        let sim = make_sim("ev", 0.0);
+        let mut pkt = make_scheduled_packet("ev", target);
+        pkt.status = PacketStatus::Active;
+        pkt.past_power_profile.push(EnergySnapshot {
+            ts: Utc::now(),
+            power_kw: 0.0,
+            cumulative_energy_kwh: prev_energy,
+        });
+        let mut packets = vec![pkt];
+        let mut ledger = HashMap::new();
+        record_tick(&mut packets, &mut ledger, &sim, &[], 1.0, Utc::now());
+        assert_eq!(packets[0].status, PacketStatus::Completed,
+            "packet within COMPLETION_TOL_KWH of target must be marked Completed");
+    }
+
+    #[test]
+    fn packet_does_not_complete_outside_tolerance() {
+        // Pre-fill packet to target - 2.0 × tolerance (outside tolerance window).
+        // Even with zero actual_kw, new_energy < target - COMPLETION_TOL_KWH.
+        let target = 1.0_f64;
+        let prev_energy = target - COMPLETION_TOL_KWH * 2.0;
+        let sim = make_sim("ev", 0.0);
+        let mut pkt = make_scheduled_packet("ev", target);
+        pkt.status = PacketStatus::Active;
+        pkt.past_power_profile.push(EnergySnapshot {
+            ts: Utc::now(),
+            power_kw: 0.0,
+            cumulative_energy_kwh: prev_energy,
+        });
+        let mut packets = vec![pkt];
+        let mut ledger = HashMap::new();
+        record_tick(&mut packets, &mut ledger, &sim, &[], 1.0, Utc::now());
+        assert_eq!(packets[0].status, PacketStatus::Active,
+            "packet 2× COMPLETION_TOL_KWH from target must remain Active");
+    }
 }
