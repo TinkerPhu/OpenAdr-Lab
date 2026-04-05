@@ -41,9 +41,10 @@ describe("buildTariffPricePoints", () => {
     expect(result[0].exportPriceEurKwh).toBeNull();
   });
 
-  it("sets totalCostRateEurH and gridPowerKw to null (no power contamination)", () => {
+  it("sets totalCostRateEurH, totalCo2RateGH and gridPowerKw to null (no power contamination)", () => {
     const result = buildTariffPricePoints([makeTariff()]);
     expect(result[0].totalCostRateEurH).toBeNull();
+    expect(result[0].totalCo2RateGH).toBeNull();
     expect(result[0].gridPowerKw).toBeNull();
   });
 
@@ -83,6 +84,16 @@ describe("buildPowerPoints", () => {
     expect(result[0].totalCostRateEurH).toBeNull();
   });
 
+  it("maps co2_rate_g_h to totalCo2RateGH", () => {
+    const result = buildPowerPoints([makePoint({ values: { co2_rate_g_h: 900, power_kw: 3.0 } })]);
+    expect(result[0].totalCo2RateGH).toBe(900);
+  });
+
+  it("sets totalCo2RateGH to null when co2_rate_g_h is missing", () => {
+    const result = buildPowerPoints([makePoint({ values: { power_kw: 1.0 } })]);
+    expect(result[0].totalCo2RateGH).toBeNull();
+  });
+
   it("sets importPriceEurKwh, exportPriceEurKwh, co2GKwh to null (no price contamination)", () => {
     const result = buildPowerPoints([makePoint()]);
     expect(result[0].importPriceEurKwh).toBeNull();
@@ -101,53 +112,99 @@ describe("buildPowerPoints", () => {
 function makeTariffSnapshot(
   intervalStartMs: number,
   importEurKwh: number | null,
-  co2GKwh: number | null = null
+  co2GKwh: number | null = null,
+  exportEurKwh: number | null = null
 ): ApiTariffSnapshot {
   return {
     interval_start: new Date(intervalStartMs).toISOString(),
     import_tariff_eur_kwh: importEurKwh,
-    export_tariff_eur_kwh: null,
+    export_tariff_eur_kwh: exportEurKwh,
     co2_g_kwh: co2GKwh,
   };
 }
 
+function makePoint(ts: number, overrides: Partial<ReturnType<typeof buildTariffPricePoints>[0]> = {}) {
+  return {
+    ts,
+    importPriceEurKwh: null,
+    exportPriceEurKwh: null,
+    co2GKwh: null,
+    totalCostRateEurH: null,
+    totalCo2RateGH: null,
+    gridPowerKw: null,
+    ...overrides,
+  };
+}
+
 describe("fillCostRateFromTariffs", () => {
-  it("fills totalCostRateEurH from applicable tariff × power_kw", () => {
+  it("fills totalCostRateEurH from applicable import tariff × power_kw (import)", () => {
     const tariffs = [makeTariffSnapshot(100, 0.20)];
     const merged = [
-      { ts: 100, importPriceEurKwh: 0.20, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
-      { ts: 200, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: 3.0 },
+      makePoint(100, { importPriceEurKwh: 0.20 }),
+      makePoint(200, { gridPowerKw: 3.0 }),
     ];
     const result = fillCostRateFromTariffs(merged, tariffs);
     expect(result[1].totalCostRateEurH).toBeCloseTo(0.60);
   });
 
-  it("clamps negative power to 0 (export case)", () => {
-    const tariffs = [makeTariffSnapshot(100, 0.20)];
+  it("fills totalCostRateEurH with export tariff × power_kw (negative = revenue)", () => {
+    const tariffs = [makeTariffSnapshot(100, 0.20, null, 0.08)];
     const merged = [
-      { ts: 100, importPriceEurKwh: 0.20, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: null },
-      { ts: 200, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: -2.0 },
+      makePoint(100, { importPriceEurKwh: 0.20 }),
+      makePoint(200, { gridPowerKw: -2.0 }),
     ];
     const result = fillCostRateFromTariffs(merged, tariffs);
-    expect(result[1].totalCostRateEurH).toBe(0);
+    expect(result[1].totalCostRateEurH).toBeCloseTo(-2.0 * 0.08); // −0.16
+  });
+
+  it("fills totalCo2RateGH as power × co2 intensity (positive when importing)", () => {
+    const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
+    const merged = [
+      makePoint(100, { importPriceEurKwh: 0.20 }),
+      makePoint(200, { gridPowerKw: 4.0 }),
+    ];
+    const result = fillCostRateFromTariffs(merged, tariffs);
+    expect(result[1].totalCo2RateGH).toBeCloseTo(1200); // 4 × 300
+  });
+
+  it("fills totalCo2RateGH as negative when exporting (displaced emissions)", () => {
+    const tariffs = [makeTariffSnapshot(100, 0.20, 300, 0.08)];
+    const merged = [
+      makePoint(100, { importPriceEurKwh: 0.20 }),
+      makePoint(200, { gridPowerKw: -3.0 }),
+    ];
+    const result = fillCostRateFromTariffs(merged, tariffs);
+    expect(result[1].totalCo2RateGH).toBeCloseTo(-900); // −3 × 300
+  });
+
+  it("leaves cost rate null when no export tariff and power is negative", () => {
+    const tariffs = [makeTariffSnapshot(100, 0.20)]; // no export tariff
+    const merged = [
+      makePoint(100, { importPriceEurKwh: 0.20 }),
+      makePoint(200, { gridPowerKw: -2.0 }),
+    ];
+    const result = fillCostRateFromTariffs(merged, tariffs);
+    expect(result[1].totalCostRateEurH).toBeNull();
   });
 
   it("does not overwrite an already-set totalCostRateEurH", () => {
     const tariffs = [makeTariffSnapshot(100, 0.20)];
     const merged = [
-      { ts: 200, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: 0.99, gridPowerKw: 3.0 },
+      makePoint(200, { totalCostRateEurH: 0.99, totalCo2RateGH: 99, gridPowerKw: 3.0 }),
     ];
     const result = fillCostRateFromTariffs(merged, tariffs);
     expect(result[0].totalCostRateEurH).toBe(0.99);
+    expect(result[0].totalCo2RateGH).toBe(99);
   });
 
   it("leaves totalCostRateEurH null when no applicable tariff exists", () => {
     const tariffs: ApiTariffSnapshot[] = [];
     const merged = [
-      { ts: 200, importPriceEurKwh: null, exportPriceEurKwh: null, co2GKwh: null, totalCostRateEurH: null, gridPowerKw: 3.0 },
+      makePoint(200, { gridPowerKw: 3.0 }),
     ];
     const result = fillCostRateFromTariffs(merged, tariffs);
     expect(result[0].totalCostRateEurH).toBeNull();
+    expect(result[0].totalCo2RateGH).toBeNull();
   });
 });
 

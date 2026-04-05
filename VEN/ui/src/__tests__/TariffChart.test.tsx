@@ -2,9 +2,8 @@
  * TariffChart — dual Y-axis structure test
  *
  * Verifies that import/export/cost lines use the left "tariff" axis (€/kWh)
- * and the CO₂ line uses an independent right "co2" axis (g/kWh).
- * Without this separation the CO₂ values (200–450) compress the tariff curves
- * (0.04–0.40) into invisibility.
+ * and the CO₂ rate line uses an independent right "co2" axis (g/h).
+ * Without this separation the CO₂ values compress the tariff curves into invisibility.
  */
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -49,6 +48,7 @@ const data: TariffTimePoint[] = [
     exportPriceEurKwh: 0.15,
     co2GKwh: 300,
     totalCostRateEurH: 0.05,
+    totalCo2RateGH: 750,
     gridPowerKw: 2.5,
   },
   {
@@ -56,7 +56,8 @@ const data: TariffTimePoint[] = [
     importPriceEurKwh: 0.35,
     exportPriceEurKwh: 0.26,
     co2GKwh: 420,
-    totalCostRateEurH: 0.08,
+    totalCostRateEurH: -0.02,
+    totalCo2RateGH: -840,
     gridPowerKw: null,
   },
 ];
@@ -85,9 +86,9 @@ describe("TariffChart — dual Y-axis", () => {
     expect(right).toBeDefined();
   });
 
-  it("CO₂ line is bound to the right co2 axis — not the tariff axis", () => {
+  it("CO₂ rate line is bound to the right co2 axis — not the tariff axis", () => {
     render(<TariffChart data={data} nowMs={now} />);
-    const co2Line = lines.find((l) => l.dataKey === "co2GKwh");
+    const co2Line = lines.find((l) => l.dataKey === "totalCo2RateGH");
     expect(co2Line?.yAxisId).toBe("co2");
   });
 
@@ -100,11 +101,11 @@ describe("TariffChart — dual Y-axis", () => {
     expect(dataKeys).toContain("totalCostRateEurH");
   });
 
-  it("left axis has € unit and right axis has g unit", () => {
+  it("left axis has € unit and right axis has g/h unit", () => {
     render(<TariffChart data={data} nowMs={now} />);
     const left = axes.find((a) => a.yAxisId === "tariff");
     const right = axes.find((a) => a.yAxisId === "co2");
     expect(left?.unit).toBe(" €");
-    expect(right?.unit).toBe(" g");
+    expect(right?.unit).toBe(" g/h");
   });
 });
