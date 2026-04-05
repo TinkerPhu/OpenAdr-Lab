@@ -380,13 +380,17 @@ pub(crate) fn spawn_sim_tick(
                     inject.heater_temp_min_c,
                     inject.heater_temp_max_c,
                     inject.base_load_kw,
+                    inject.base_load_alpha,
                     inject.ev_plugged,
                     inject.ev_soc_target,
                 );
 
-                // pv_irradiance is a one-shot: apply offset once then let it decay.
+                // pv_irradiance and base_load_kw are one-shots: apply offset once then let it decay.
                 if inject.pv_irradiance.is_some() {
                     state.clear_inject_field("pv_irradiance").await;
+                }
+                if inject.base_load_kw.is_some() {
+                    state.clear_inject_field("base_load_kw").await;
                 }
 
                 // Update sensor snapshot (backward compat)
