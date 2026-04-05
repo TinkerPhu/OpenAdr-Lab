@@ -32,6 +32,17 @@ pub struct PvSmoothingState {
     pub irradiance_offset: f64,
 }
 
+/// Tracks the user-induced base load perturbation between ticks.
+///
+/// While the user drags the base load slider, the offset is set to
+/// `slider_value − baseline_kw_profile`. After release the offset decays
+/// exponentially (EMA with factor `base_load_alpha`) until it reaches zero.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BaseLoadSmoothingState {
+    /// Perturbation above (or below) the profile baseline (kW). Zero = no override.
+    pub load_offset_kw: f64,
+}
+
 /// One entry in the generic asset list.
 /// Config is NOT stored here — it lives in `SimState.asset_configs` (parallel by index).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +89,9 @@ pub struct SimState {
     /// PV irradiance EMA state for Behaviour B smoothing. Ephemeral — resets on restart.
     #[serde(skip, default)]
     pub pv_smoothing: PvSmoothingState,
+    /// Base load EMA state for Behaviour B smoothing. Ephemeral — resets on restart.
+    #[serde(skip, default)]
+    pub base_load_smoothing: BaseLoadSmoothingState,
     pub last_tick: DateTime<Utc>,
 }
 
@@ -248,6 +262,7 @@ impl SimState {
             grid: GridMeter::default(),
             grid_asset: Grid::new(),
             pv_smoothing: PvSmoothingState::default(),
+            base_load_smoothing: BaseLoadSmoothingState::default(),
             last_tick: Utc::now(),
         }
     }
@@ -260,7 +275,8 @@ impl SimState {
     ///   EMA-blend back to natural model.
     /// - `pv_alpha`: EMA factor for PV blend-back (0.0–1.0; default 0.1).
     /// - `ambient_temp_c_override`: if Some, override heater ambient temp; else use 10.0°C.
-    /// - `base_load_kw_override`: if Some, override base load power; else use profile value.
+    /// - `base_load_kw_override`: if Some, one-shot: captures offset then cleared by sim loop.
+    /// - `base_load_alpha`: EMA factor for base load blend-back (0.0–1.0; default 0.1).
     /// - `ev_plugged_override`: if Some, hold EV plugged state; else let physics drive it.
     pub fn tick(
         &mut self,
@@ -273,6 +289,7 @@ impl SimState {
         heater_temp_min_override: Option<f64>,
         heater_temp_max_override: Option<f64>,
         base_load_kw_override: Option<f64>,
+        base_load_alpha: f64,
         ev_plugged_override: Option<bool>,
         ev_soc_target_override: Option<f64>,
     ) {
@@ -286,17 +303,17 @@ impl SimState {
             0.0
         };
 
-        // Behaviour B — perturbation overlay: slider sets an offset above/below the sin model;
-        // offset decays exponentially after release until the sim resumes tracking the sin curve.
+        // Alpha decay factor shared by all Behaviour B controls.
+        // Converts per-plan-step alpha (one step = 300 s) to a per-tick factor so the
+        // offset reaches (1−alpha) × original after exactly one plan step, matching
+        // the forecast formula exp(−t/tau_s).
+        const PLAN_STEP_S: f64 = 300.0;
+
+        // Behaviour B — PV perturbation overlay.
         if let Some(forced) = pv_irradiance_override {
             // Re-capture offset every tick while the user is dragging.
             self.pv_smoothing.irradiance_offset = forced - natural_irradiance;
         } else {
-            // Decay the offset toward zero once the slider is released.
-            // pv_alpha is a per-plan-step factor (one step = 300 s).  Convert to the
-            // equivalent per-tick rate so the offset reaches (1−alpha) × original after
-            // exactly one plan step, matching the forecast formula exp(−t/tau_s).
-            const PLAN_STEP_S: f64 = 300.0;
             let per_tick_factor = (1.0 - pv_alpha).powf(dt_s / PLAN_STEP_S);
             self.pv_smoothing.irradiance_offset *= per_tick_factor;
             if self.pv_smoothing.irradiance_offset.abs() < 0.005 {
@@ -324,8 +341,21 @@ impl SimState {
                     h.temp_max_c = heater_temp_max_override.unwrap_or(h.temp_max_c_profile);
                 }
                 AssetConfig::BaseLoad(bl) => {
-                    // Behaviour C: base load — hold override or snap to profile default.
-                    bl.baseline_kw = base_load_kw_override.unwrap_or(bl.baseline_kw_profile);
+                    // Behaviour B: base load — one-shot sets offset; EMA decays it back.
+                    if let Some(forced_kw) = base_load_kw_override {
+                        self.base_load_smoothing.load_offset_kw =
+                            forced_kw - bl.baseline_kw_profile;
+                    } else {
+                        let per_tick_factor =
+                            (1.0 - base_load_alpha).powf(dt_s / PLAN_STEP_S);
+                        self.base_load_smoothing.load_offset_kw *= per_tick_factor;
+                        if self.base_load_smoothing.load_offset_kw.abs() < 0.005 {
+                            self.base_load_smoothing.load_offset_kw = 0.0;
+                        }
+                    }
+                    bl.baseline_kw =
+                        (bl.baseline_kw_profile + self.base_load_smoothing.load_offset_kw)
+                            .max(0.0);
                 }
                 AssetConfig::Ev(ev) => {
                     // Behaviour C: ev_plugged — hold override or snap back to profile default

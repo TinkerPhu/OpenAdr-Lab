@@ -65,7 +65,9 @@ impl BaseLoad {
     }
 
     pub fn state_values(&self, _state: &BaseLoadState) -> HashMap<String, f64> {
-        HashMap::new()
+        let mut m = HashMap::new();
+        m.insert("baseline_kw".into(), self.baseline_kw);
+        m
     }
 
     pub fn capabilities(&self, asset_id: &str, _state: &BaseLoadState) -> AssetCapabilities {
@@ -80,15 +82,26 @@ impl BaseLoad {
     }
 
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        vec![ControlDescriptor {
-            key: "base_load_kw".into(),
-            label: "Base Load Override".into(),
-            kind: ControlKind::NumberInput,
-            min: Some(0.0),
-            max: Some(20.0),
-            unit: "kW".into(),
-            display_scale: None,
-        }]
+        vec![
+            ControlDescriptor {
+                key: "base_load_kw".into(),
+                label: "Base Load Override".into(),
+                kind: ControlKind::Slider,
+                min: Some(0.0),
+                max: Some(6.0),
+                unit: "kW".into(),
+                display_scale: None,
+            },
+            ControlDescriptor {
+                key: "base_load_alpha".into(),
+                label: "Blend-back Speed".into(),
+                kind: ControlKind::Slider,
+                min: Some(0.01),
+                max: Some(1.0),
+                unit: "".into(),
+                display_scale: None,
+            },
+        ]
     }
 
     pub fn reset(&self, _state: &mut BaseLoadState, _values: HashMap<String, f64>) {}
