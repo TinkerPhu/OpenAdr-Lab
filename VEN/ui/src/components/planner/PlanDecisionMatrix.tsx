@@ -4,8 +4,6 @@ import {
   TableRow, Tooltip, Typography,
 } from "@mui/material";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import KeyboardDoubleArrowRightIcon from "@mui/icons-material/KeyboardDoubleArrowRight";
 import KeyboardDoubleArrowLeftIcon from "@mui/icons-material/KeyboardDoubleArrowLeft";
 import type { Plan, PlanStep, PlanReason, PlanTimeSlot } from "../../api/types";
@@ -108,7 +106,6 @@ function MatrixLegend() {
 type Props = { plan: Plan | null | undefined };
 
 export function PlanDecisionMatrix({ plan }: Props) {
-  const [collapsed, setCollapsed] = useState(false);
   const [showFlex, setShowFlex] = useState(false);
   const [selectedStep, setSelectedStep] = useState<PlanStep | null>(null);
 
@@ -180,28 +177,17 @@ export function PlanDecisionMatrix({ plan }: Props) {
         <Typography variant="subtitle1" fontWeight="medium">Decision Matrix</Typography>
         <IconButton
           size="small"
-          data-testid="matrix-collapse-btn"
-          onClick={() => setCollapsed((c) => !c)}
-          title={collapsed ? "Expand" : "Collapse"}
+          data-testid="matrix-expand-horizon-btn"
+          onClick={() => setShowFlex((v) => !v)}
+          title={showFlex ? "Show FIRM only" : "Show full horizon (FIRM + FLEXIBLE)"}
         >
-          {collapsed ? <ExpandMoreIcon fontSize="small" /> : <ExpandLessIcon fontSize="small" />}
+          {showFlex
+            ? <KeyboardDoubleArrowLeftIcon fontSize="small" />
+            : <KeyboardDoubleArrowRightIcon fontSize="small" />}
         </IconButton>
-        {!collapsed && (
-          <IconButton
-            size="small"
-            data-testid="matrix-expand-horizon-btn"
-            onClick={() => setShowFlex((v) => !v)}
-            title={showFlex ? "Show FIRM only" : "Show full horizon (FIRM + FLEXIBLE)"}
-          >
-            {showFlex
-              ? <KeyboardDoubleArrowLeftIcon fontSize="small" />
-              : <KeyboardDoubleArrowRightIcon fontSize="small" />}
-          </IconButton>
-        )}
       </Stack>
 
-      {!collapsed && (
-        <Box data-testid="decision-matrix" sx={{ overflowX: "auto" }}>
+      <Box data-testid="decision-matrix" sx={{ overflowX: "auto" }}>
           {/* Grid wrapper: fixed left asset column + scrollable cell columns */}
           <Box sx={{ display: "flex" }}>
             {/* Left label column */}
@@ -339,9 +325,8 @@ export function PlanDecisionMatrix({ plan }: Props) {
             </Box>
           </Box>
 
-          <MatrixLegend />
-        </Box>
-      )}
+        <MatrixLegend />
+      </Box>
 
       {/* Step detail drawer */}
       <Drawer
