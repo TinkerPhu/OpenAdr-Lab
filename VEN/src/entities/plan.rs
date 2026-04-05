@@ -261,6 +261,7 @@ pub enum PlanReason {
     UserOverride { request_id: Uuid, mode: UserRequestMode },
     PolicyReserve { policy_id: String },
     OpportunityMissed { reason: String },
+    SurplusAbsorption { surplus_kw: f64 },
     Idle,
 }
 

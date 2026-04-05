@@ -35,6 +35,11 @@ def step_wait_for_reason_kind(context, kind, asset_id):
 
 @when('I wait for all PlanSteps for asset "{asset_id}" to have reason kind "{kind}"')
 def step_wait_for_all_reason_kind(context, asset_id, kind):
+    # kind may be pipe-separated (e.g. "IDLE|SURPLUS_ABSORPTION") to accept
+    # multiple valid reasons — useful when different plan slots produce different
+    # reasons (e.g. daytime PV surplus vs. nighttime idle).
+    valid_kinds = {k.strip() for k in kind.split("|")}
+
     def fetch():
         resp = ven_get("/plan")
         if not resp.ok:
@@ -44,17 +49,16 @@ def step_wait_for_all_reason_kind(context, asset_id, kind):
             return None
         steps = [s for s in body.get("steps", []) if s.get("asset_id") == asset_id]
         if not steps:
-            # Empty steps for "IDLE" is the expected state — nothing to schedule.
-            # For any other kind, keep polling until the plan arrives.
-            return body if kind == "IDLE" else None
-        if all(s.get("reason", {}).get("kind") == kind for s in steps):
+            # Empty steps means nothing scheduled; valid when IDLE is acceptable.
+            return body if "IDLE" in valid_kinds else None
+        if all(s.get("reason", {}).get("kind") in valid_kinds for s in steps):
             return body
         return None
 
     context.ven_plan = poll_until(
         fetch,
         lambda x: x is not None,
-        timeout=120 if kind == "IDLE" else 60,
+        timeout=120 if "IDLE" in valid_kinds else 60,
         description=f"All VEN /plan steps for '{asset_id}' have reason.kind='{kind}'",
     )
     context.last_checked_asset = asset_id
@@ -182,13 +186,14 @@ def step_setpoint_negative(context):
 
 @then('all PlanSteps for asset "{asset_id}" have reason kind "{kind}"')
 def step_all_steps_have_reason(context, asset_id, kind):
+    valid_kinds = {k.strip() for k in kind.split("|")}
     plan = context.ven_plan
     steps = [s for s in plan.get("steps", []) if s.get("asset_id") == asset_id]
     assert steps, f"No steps found for asset '{asset_id}'"
-    bad = [s for s in steps if s.get("reason", {}).get("kind") != kind]
+    bad = [s for s in steps if s.get("reason", {}).get("kind") not in valid_kinds]
     assert not bad, (
         f"{len(bad)} step(s) for '{asset_id}' have wrong reason.kind. "
-        f"Expected all '{kind}', got: {[s.get('reason', {}).get('kind') for s in bad[:5]]}"
+        f"Expected all in '{kind}', got: {[s.get('reason', {}).get('kind') for s in bad[:5]]}"
     )
 
 
