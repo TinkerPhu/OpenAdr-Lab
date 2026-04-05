@@ -94,18 +94,6 @@ export function AssetCell({
         hoursForward={window.hoursForward}
       />
 
-      {/* Collapse right toggle */}
-      <Tooltip title={collapsed.right ? "Expand right" : "Collapse right"}>
-        <IconButton
-          size="small"
-          data-testid={`asset-cell-${assetId}-collapse-right`}
-          onClick={() => onToggleCollapse(cellId, "right")}
-          sx={{ alignSelf: "center", mx: 0.5 }}
-        >
-          {collapsed.right ? <ChevronLeftIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
-        </IconButton>
-      </Tooltip>
-
       {/* Right section — simulation controls */}
       <Collapse in={!collapsed.right} orientation="horizontal">
         <Box data-testid={`asset-cell-${assetId}-right`}>
@@ -119,7 +107,7 @@ export function AssetCell({
         </Box>
       </Collapse>
 
-      {/* Right column: pin button */}
+      {/* Right column: pin button + settings expand button */}
       <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <Tooltip title={pinned ? "Unpin cell" : "Pin cell to top"}>
           <IconButton
@@ -129,6 +117,17 @@ export function AssetCell({
             sx={{ m: 0.5 }}
           >
             {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+        <Tooltip title={collapsed.right ? "Expand settings" : "Collapse settings"}>
+          <IconButton
+            size="small"
+            data-testid={`asset-cell-${assetId}-collapse-right`}
+            aria-label={collapsed.right ? "Expand right" : "Collapse right"}
+            onClick={() => onToggleCollapse(cellId, "right")}
+            sx={{ m: 0.5 }}
+          >
+            {collapsed.right ? <ChevronLeftIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
           </IconButton>
         </Tooltip>
       </Box>

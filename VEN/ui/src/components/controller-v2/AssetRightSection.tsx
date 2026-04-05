@@ -1,13 +1,9 @@
 import { useRef, useState } from "react";
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Box,
   Slider,
   Typography,
 } from "@mui/material";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import type { AssetId } from "./types";
 import type { SimSnapshot, SimInjectState } from "../../api/types";
 import { useSimSchema } from "../../api/hooks";
@@ -105,55 +101,48 @@ export function AssetRightSection({
   return (
     <Box
       data-testid={`right-section-${assetId}`}
-      sx={{ minWidth: 200, maxWidth: 300 }}
+      sx={{ minWidth: 200, maxWidth: 300, p: 1.5 }}
     >
-      {/* Status Settings */}
-      <Accordion data-testid={`status-settings-accordion-${assetId}`}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography variant="caption" fontWeight="bold">
-            Status Settings
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails sx={{ pt: 0, pb: 1 }}>
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            {/* SoC slider — editable, debounced POST /sim/reset/:id on commit */}
-            {socPct !== null && (
-              <Box>
-                <Typography variant="caption">
-                  SoC: {socPct.toFixed(0)}%{pendingSocPct !== null ? " (setting…)" : ""}
-                </Typography>
-                <Slider
-                  size="small"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={socPct}
-                  data-testid={`ctrl-${assetId}-soc`}
-                  onChange={handleSocChange}
-                  valueLabelDisplay="auto"
-                  valueLabelFormat={(v) => `${v}%`}
-                />
-              </Box>
-            )}
-
-            {/* Schema-driven editable controls */}
-            {controls.map((d) => (
-              <DynamicControl
-                key={d.key}
-                descriptor={d}
-                value={getValue(d.key)}
-                onChange={handleChange}
-              />
-            ))}
-
-            {controls.length === 0 && socPct === null && (
-              <Typography variant="caption" color="text.secondary">
-                No controls available
-              </Typography>
-            )}
+      <Typography variant="caption" fontWeight="bold" sx={{ display: "block", mb: 1 }}>
+        Status Settings
+      </Typography>
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+        {/* SoC slider — editable, debounced POST /sim/reset/:id on commit */}
+        {socPct !== null && (
+          <Box>
+            <Typography variant="caption">
+              SoC: {socPct.toFixed(0)}%{pendingSocPct !== null ? " (setting…)" : ""}
+            </Typography>
+            <Slider
+              size="small"
+              min={0}
+              max={100}
+              step={1}
+              value={socPct}
+              data-testid={`ctrl-${assetId}-soc`}
+              onChange={handleSocChange}
+              valueLabelDisplay="auto"
+              valueLabelFormat={(v) => `${v}%`}
+            />
           </Box>
-        </AccordionDetails>
-      </Accordion>
+        )}
+
+        {/* Schema-driven editable controls */}
+        {controls.map((d) => (
+          <DynamicControl
+            key={d.key}
+            descriptor={d}
+            value={getValue(d.key)}
+            onChange={handleChange}
+          />
+        ))}
+
+        {controls.length === 0 && socPct === null && (
+          <Typography variant="caption" color="text.secondary">
+            No controls available
+          </Typography>
+        )}
+      </Box>
     </Box>
   );
 }
