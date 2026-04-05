@@ -13,7 +13,6 @@ import { EventsPage } from "./pages/Events";
 import { ReportsPage } from "./pages/Reports";
 import { MetricsPage } from "./pages/Metrics";
 import { TracePage } from "./pages/Trace";
-import { ControllerPage } from "./pages/Controller";
 import { ControllerV2Page } from "./pages/ControllerV2";
 import { UserRequestsPage } from "./pages/UserRequests";
 import { RawDiagnosticsPage } from "./pages/RawDiagnostics";
@@ -168,13 +167,6 @@ export default function App() {
             </Button>
             <Button
               component={Link}
-              to="/controller"
-              data-testid="nav-controller"
-            >
-              Controller
-            </Button>
-            <Button
-              component={Link}
               to="/controller-v2"
               data-testid="nav-controller-v2"
             >
@@ -241,7 +233,6 @@ export default function App() {
           <Routes>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/planner" element={<PlannerPage />} />
-            <Route path="/controller" element={<ControllerPage />} />
             <Route path="/controller-v2" element={<ControllerV2Page />} />
             <Route path="/user-requests" element={<UserRequestsPage />} />
             <Route path="/programs" element={<ProgramsPage />} />

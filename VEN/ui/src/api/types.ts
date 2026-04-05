@@ -255,6 +255,7 @@ export type AssetLedger = {
   cost_eur: number;
   co2_g: number;
   updated_at: string | null;
+  started_at: string | null;
 };
 
 export type UserRequestStatus = "ACTIVE" | "COMPLETED" | "CANCELLED" | "FAILED";

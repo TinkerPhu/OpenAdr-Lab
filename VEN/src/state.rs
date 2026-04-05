@@ -21,12 +21,14 @@ pub struct AssetLedgerEntry {
     pub cost_eur: f64,
     pub co2_g: f64,
     pub updated_at: Option<DateTime<Utc>>,
+    pub started_at: Option<DateTime<Utc>>,
 }
 
 impl AssetLedgerEntry {
     pub fn new(asset_id: &str) -> Self {
         Self {
             asset_id: asset_id.to_string(),
+            started_at: Some(Utc::now()),
             ..Default::default()
         }
     }
