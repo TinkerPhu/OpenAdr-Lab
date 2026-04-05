@@ -4,8 +4,10 @@ import {
   TableRow, Tooltip, Typography,
 } from "@mui/material";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
-import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
-import UnfoldLessIcon from "@mui/icons-material/UnfoldLess";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import KeyboardDoubleArrowRightIcon from "@mui/icons-material/KeyboardDoubleArrowRight";
+import KeyboardDoubleArrowLeftIcon from "@mui/icons-material/KeyboardDoubleArrowLeft";
 import type { Plan, PlanStep, PlanReason, PlanTimeSlot } from "../../api/types";
 
 // ─── Reason metadata ──────────────────────────────────────────────────────────
@@ -182,16 +184,18 @@ export function PlanDecisionMatrix({ plan }: Props) {
           onClick={() => setCollapsed((c) => !c)}
           title={collapsed ? "Expand" : "Collapse"}
         >
-          {collapsed ? <UnfoldMoreIcon fontSize="small" /> : <UnfoldLessIcon fontSize="small" />}
+          {collapsed ? <ExpandMoreIcon fontSize="small" /> : <ExpandLessIcon fontSize="small" />}
         </IconButton>
-        {!collapsed && !showFlex && (
+        {!collapsed && (
           <IconButton
             size="small"
             data-testid="matrix-expand-horizon-btn"
-            onClick={() => setShowFlex(true)}
-            title="Show full horizon (FIRM + FLEXIBLE)"
+            onClick={() => setShowFlex((v) => !v)}
+            title={showFlex ? "Show FIRM only" : "Show full horizon (FIRM + FLEXIBLE)"}
           >
-            <UnfoldMoreIcon fontSize="small" />
+            {showFlex
+              ? <KeyboardDoubleArrowLeftIcon fontSize="small" />
+              : <KeyboardDoubleArrowRightIcon fontSize="small" />}
           </IconButton>
         )}
       </Stack>
@@ -202,6 +206,8 @@ export function PlanDecisionMatrix({ plan }: Props) {
           <Box sx={{ display: "flex" }}>
             {/* Left label column */}
             <Box sx={{ flexShrink: 0, width: 72 }}>
+              {/* Spacer for time axis row */}
+              <Box sx={{ height: 14, mb: 0.5 }} />
               {/* Tariff header label */}
               <Box sx={{ height: CELL_H, display: "flex", alignItems: "center" }}>
                 <Typography variant="caption" color="text.secondary" noWrap>Tariff</Typography>
@@ -220,6 +226,32 @@ export function PlanDecisionMatrix({ plan }: Props) {
 
             {/* Cell columns */}
             <Box sx={{ position: "relative", flexShrink: 0 }}>
+              {/* Time axis row */}
+              <Box sx={{ position: "relative", height: 14, mb: 0.5 }}>
+                {allSlots.map((slot, ci) => {
+                  const d = new Date(slot.start);
+                  if (d.getMinutes() !== 0 || d.getSeconds() !== 0) return null;
+                  return (
+                    <Typography
+                      key={ci}
+                      variant="caption"
+                      sx={{
+                        position: "absolute",
+                        left: ci * CELL_W,
+                        top: 0,
+                        fontSize: 9,
+                        color: "text.secondary",
+                        whiteSpace: "nowrap",
+                        lineHeight: 1,
+                        userSelect: "none",
+                      }}
+                    >
+                      {String(d.getHours()).padStart(2, "0")}:00
+                    </Typography>
+                  );
+                })}
+              </Box>
+
               {/* Tariff header row */}
               <Box data-testid="matrix-tariff-header" sx={{ display: "flex" }}>
                 {allSlots.map((slot, ci) => (
