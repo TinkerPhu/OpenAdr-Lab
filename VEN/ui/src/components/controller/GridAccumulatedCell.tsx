@@ -1,7 +1,8 @@
 import { useMemo } from "react";
-import { Box, Divider, IconButton, Paper, Tooltip, Typography } from "@mui/material";
+import { Box, IconButton, Paper, Tooltip } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
+import { CELL_CHART_MIN_WIDTH } from "./chartLayout";
 import type { AssetId, AssetSummary, AssetTimelinePoint, StackedAreaPoint } from "./types";
 import { ASSET_COLORS } from "./types";
 import { StackedAreaChart } from "./charts/StackedAreaChart";
@@ -50,7 +51,6 @@ interface GridAccumulatedCellProps {
   /** Whether this cell's time window is expanded to 24h forward. */
   extended: boolean;
   pinned: boolean;
-  gridPowerKw: number;
   onTogglePin: () => void;
 }
 
@@ -60,7 +60,6 @@ export function GridAccumulatedCell({
   nowMs,
   extended,
   pinned,
-  gridPowerKw,
   onTogglePin,
 }: GridAccumulatedCellProps) {
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
@@ -80,30 +79,8 @@ export function GridAccumulatedCell({
       data-testid="grid-accumulated-cell"
       sx={{ display: "flex", flexDirection: "row", mb: 1, borderLeft: "4px solid #546e7a" }}
     >
-      {/* Left: per-asset current power list */}
-      <Box sx={{ minWidth: 196, px: 1.5, py: 1, display: "flex", flexDirection: "column", gap: 0.5 }}>
-        <Typography variant="body2" fontWeight="bold">
-          Accumulated Power
-        </Typography>
-        {assetSummaries.map((s) => (
-          <Typography
-            key={s.assetId}
-            variant="caption"
-            data-testid={`accumulated-power-${s.assetId}`}
-            sx={{ color: ASSET_COLORS[s.assetId] }}
-          >
-            {s.label}: {s.powerKw >= 0 ? "+" : ""}
-            {s.powerKw.toFixed(2)} kW
-          </Typography>
-        ))}
-        <Divider sx={{ my: 0.5 }} />
-        <Typography variant="caption" color="text.secondary" data-testid="accumulated-grid-power">
-          Grid: {gridPowerKw >= 0 ? "+" : ""}{gridPowerKw.toFixed(2)} kW
-        </Typography>
-      </Box>
-
-      {/* Right: stacked area chart */}
-      <Box sx={{ flex: 1, minWidth: 200 }}>
+      {/* Chart */}
+      <Box sx={{ flex: 1, minWidth: CELL_CHART_MIN_WIDTH }}>
         <StackedAreaChart
           data={stackedAreaPoints}
           assetIds={assetIds as AssetId[]}
