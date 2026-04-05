@@ -320,9 +320,15 @@ pub fn build_asset_timeline(
                 // Grid virtual asset: net site power and tariff keys.
                 let net_kw = slot.net_import_kw - slot.net_export_kw;
                 values.insert("power_kw".into(), net_kw);
-                let cost_rate = net_kw.max(0.0) * slot.import_tariff_eur_kwh;
+                // Importing: positive cost. Exporting: negative cost (revenue).
+                let cost_rate = if net_kw >= 0.0 {
+                    net_kw * slot.import_tariff_eur_kwh
+                } else {
+                    net_kw * slot.export_tariff_eur_kwh // negative = revenue
+                };
                 values.insert("cost_rate_eur_h".into(), cost_rate);
-                let co2_rate = net_kw.max(0.0) * slot.co2_g_kwh;
+                // Negative co2_rate when exporting = displaced grid emissions.
+                let co2_rate = net_kw * slot.co2_g_kwh;
                 values.insert("co2_rate_g_h".into(), co2_rate);
                 values.insert("import_limit_kw".into(), slot.import_cap_kw);
                 values.insert("export_limit_kw".into(), slot.export_cap_kw);
@@ -749,6 +755,39 @@ mod tests {
         let p = &result[0];
         assert!((p.values["power_kw"] - 2.0).abs() < 1e-9);
         assert!(p.values.contains_key("import_limit_kw"));
+    }
+
+    #[test]
+    fn grid_asset_net_export_gives_negative_cost_and_co2() {
+        // Net export: PV > load → net_kw = -3.0; cost_rate and co2_rate must be negative.
+        let now = ts(0);
+        let known = make_known(&["pv"]);
+        let sim = make_sim(vec![]);
+        let mut plan = empty_plan(now);
+        let mut slot = make_slot(60, "", 0.0, now);
+        slot.net_import_kw = 0.0;
+        slot.net_export_kw = 3.0;
+        slot.import_tariff_eur_kwh = 0.25;
+        slot.export_tariff_eur_kwh = 0.08;
+        slot.co2_g_kwh = 300.0;
+        plan.firm_slots.push(slot);
+
+        let result = build_asset_timeline(
+            "grid",
+            &known,
+            &sim,
+            Some(&plan),
+            now,
+            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+        )
+        .unwrap();
+        assert_eq!(result.len(), 1);
+        let p = &result[0];
+        assert!((p.values["power_kw"] - (-3.0)).abs() < 1e-9);
+        // Revenue: −3.0 × 0.08 = −0.24
+        assert!((p.values["cost_rate_eur_h"] - (-3.0 * 0.08)).abs() < 1e-9);
+        // Displaced emissions: −3.0 × 300.0 = −900.0
+        assert!((p.values["co2_rate_g_h"] - (-3.0 * 300.0)).abs() < 1e-9);
     }
 
     #[test]

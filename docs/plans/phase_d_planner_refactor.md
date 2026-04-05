@@ -559,3 +559,226 @@ once `AssetEntry` implements the `Asset` trait.
 - After CP2: all existing BDD scenarios pass unchanged
 - After CP3: all scenarios pass including 5 new `PlanReason` scenarios
 - Single commit per checkpoint; tag: `refactor(ven): Phase D — planner loop + PlanReason`
+
+---
+
+## As-implemented rules (current state)
+
+The table below describes `rules_choose()` exactly as coded in
+`VEN/src/controller/planner.rs`. Rules fire in priority order; first match wins.
+
+| Priority | Label | Condition | Setpoint | Reason emitted |
+|---|---|---|---|---|
+| 4a | Physics SoC ceiling (pre-reservation) | `phys_cap.max_import_kw < 1e-6 AND phys_cap.max_export_kw > -1e-3` | 0.0 | `SocCeiling { soc_pct }` |
+| 1 | Firm obligation | `avail_cap.max_import_kw ≤ 1e-6 AND avail_cap.max_export_kw ≥ -1e-6` | 0.0 | `FirmObligation { source, required_kw }` |
+| 4 | SoC/comfort ceiling (no discharge headroom) | `avail_cap.max_import_kw < 1e-6 AND avail_cap.max_export_kw > -1e-6` | 0.0 | `SocCeiling { soc_pct }` |
+| 5 | SoC/comfort floor | `avail_cap.max_export_kw > -1e-6 AND phys_cap.max_export_kw < -1e-3` | 0.0 | `SocFloor { soc_pct: 0.0 }` |
+| 6 | Packet — comfort bid covers cost | best eligible packet exists AND `time_pressure < 2.0` AND setpoint > 1e-6 | `desired_power_kw` (clamped, see below) | `CheapTariff { tariff_eur_per_kwh, threshold_eur_per_kwh: comfort_bid }` |
+| 7 | Packet — deadline pressure | best eligible packet exists AND `time_pressure ≥ 2.0` AND setpoint > 1e-6 | `desired_power_kw` (clamped, see below) | `FirmObligation { source: UserRequest { request_id: packet.id }, required_kw }` |
+| 9 | Battery arbitrage — charge cheap | `asset_id == "battery" AND tariff_t < median_tariff × √eff` AND `charge_kw > 0.01` | `charge_kw` (see below) | `CheapTariff { tariff_eur_per_kwh, threshold_eur_per_kwh: median × √eff }` |
+| 10 | Battery arbitrage — discharge expensive | `asset_id == "battery" AND tariff_t > median_tariff / √eff` AND `discharge_kw > 0.01` | `-discharge_kw` | `ExpensiveTariff { tariff_eur_per_kwh, threshold_eur_per_kwh: median / √eff }` |
+| 12 | Idle | (fallthrough) | 0.0 | `Idle` |
+
+### Divergences from the CP2 spec table
+
+| Spec rule | Status | Notes |
+|---|---|---|
+| R2 — GridImportLimit | Not emitted as a reason | Site headroom is a silent clamp inside Rules 6/7: `setpoint = desired.min(site_head).min(avail_cap.max_import_kw)` |
+| R3 — GridExportLimit | Not implemented | No export-limit clamp or reason exists in `rules_choose()` |
+| R4a — physics SoC ceiling | Added (not in spec) | Fires before Rule 1 so EV-at-soc-target emits `SocCeiling` rather than `FirmObligation` |
+| R8 — Surplus opportunity | Intentionally removed | Surplus EV charging is a live dispatcher overlay; planning it ahead would emit phantom VTN report allocations |
+| R11 — OpportunityMissed | Not implemented | Ineligible packets fall through silently to R12 `Idle` |
+| R6 condition (spec) | Differs | Spec uses `tariff_t ≤ tariff_min_ahead × eff`; code uses `comfort_bid ≥ eff_cost` where `eff_cost = tariff_t×(1−surplus_frac) + export_tariff×surplus_frac` |
+| `_lookahead` parameter | Unused | Accepted by `rules_choose()` but not read; `LookaheadContext` is computed but only used for ETA fields |
+
+### Packet eligibility detail (Rules 6 and 7)
+
+A packet is a candidate for an asset at a slot when:
+- `p.asset_id == asset_id` and packet is non-terminal
+- `undelivered_energy_kwh > 1e-6` (remaining need after already-allocated energy)
+- Budget gate: skipped if `accumulated_cost_eur ≥ max_total_cost_eur` (first deadline tier)
+
+For each candidate:
+```
+surplus_frac   = min(slot.surplus_available_kw / desired_power_kw, 1.0)
+eff_cost       = tariff_t × (1 − surplus_frac) + export_tariff × surplus_frac
+time_pressure  = clamp(slots_needed / slots_remaining, 1.0, 3.0)
+eligible       = comfort_bid ≥ eff_cost  OR  time_pressure ≥ 2.0
+```
+
+Best packet = `max_by(comfort_bid × time_pressure)` among eligible candidates.
+
+Setpoint calculation:
+```
+import_head = (slot.import_cap_kw − slot.net_import_kw).max(0)
+desired     = packet.desired_power_kw.min(import_head + surplus_available_kw)
+desired     = clamp(desired, avail_cap.max_export_kw, avail_cap.max_import_kw)
+site_head   = (site_ctx.import_limit_kw − site_ctx.planned_others_kw).max(0)
+setpoint    = desired.min(site_head).min(avail_cap.max_import_kw)
+```
+Rule 6 fires if `setpoint > 1e-6` and `time_pressure < 2.0`.
+Rule 7 fires if `setpoint > 1e-6` and `time_pressure ≥ 2.0`.
+
+### Battery arbitrage detail (Rules 9 and 10)
+
+`median_tariff` is the median import tariff across all firm + flexible slots (full 24 h horizon).
+`eff = sqrt(battery.round_trip_efficiency)`.
+
+**Rule 9 — charge:**
+```
+pv_surplus_kw  = slot.surplus_available_kw
+max_charge_kw  = if pv_surplus_kw > 0.1 { avail_cap.max_import_kw.min(pv_surplus_kw) }
+                 else                   { avail_cap.max_import_kw }
+site_head      = (site_ctx.import_limit_kw − site_ctx.planned_others_kw).max(0)
+charge_kw      = max_charge_kw.min(site_head).max(0)
+```
+Fires only if `charge_kw > 0.01`. When PV surplus is present (`> 0.1 kW`) the charge rate is
+capped to the surplus so the battery charges from free solar rather than importing from the grid.
+When no surplus exists (night), the battery charges at its full available rate.
+
+**Rule 10 — discharge:**
+```
+discharge_kw = (−avail_cap.max_export_kw).max(0)
+```
+Fires only if `discharge_kw > 0.01`.
+
+---
+
+### Rule-by-rule explanation (in fire order)
+
+The planner evaluates every controllable asset (EV, battery, heater) at each time
+slot in the planning horizon. For each asset it works down the following list and
+stops at the first rule that matches. The matched rule determines both the power
+setpoint written into the plan and the reason tag visible in the decision trace.
+
+---
+
+#### Rule 4a — Physics SoC ceiling (pre-reservation check)
+
+The asset has physically reached its upper limit — for example the EV battery is
+already at its target state of charge and the charger has cut off. No amount of
+scheduling can add more energy; this is a hard physical boundary, not a policy
+decision. The rule fires before the reservation check (Rule 1) so that the decision
+trace shows `SocCeiling` rather than `FirmObligation`, which would be misleading —
+the asset is idle because it is full, not because a grid operator reserved it.
+
+Setpoint: **0 kW**. Reason: `SocCeiling`.
+
+---
+
+#### Rule 1 — Firm obligation (reservation blocks all headroom)
+
+A reservation has consumed the asset's entire available capacity. This happens when
+a VTN FIRM event or an OpenADR capacity limit locks the asset for this time slot.
+After the reservation is subtracted from the physical capability, nothing is left
+for the planner to use — the asset must stay idle.
+
+Setpoint: **0 kW**. Reason: `FirmObligation { source, required_kw }` where `source`
+identifies whether the reservation came from a VTN event, a policy schedule, or a
+user request.
+
+---
+
+#### Rule 4 — SoC/comfort ceiling (reservation-reduced, no discharge available)
+
+The asset has reached its upper operating limit after reservations are applied — it
+cannot charge further — and it also has no discharge headroom available (either it
+cannot discharge at all, or the reserved portion covers the discharge range too).
+Unlike Rule 4a, this limit is applied after the reservation layer, so it reflects
+both the physical state and any capacity held back by policy.
+
+The key distinction from Rule 10 (battery discharge): if the battery is full but
+*can* still discharge, Rule 4 does **not** fire. The planner falls through to Rule 10
+so that a full battery at an expensive tariff still discharges as intended.
+
+Setpoint: **0 kW**. Reason: `SocCeiling { soc_pct }`.
+
+---
+
+#### Rule 5 — SoC/comfort floor
+
+The asset has reached its lower operating limit and cannot discharge further. For a
+battery this is the minimum state of charge (e.g. 10 %); for a heater it is the
+minimum comfort temperature. The planner protects the asset from going below this
+floor. Note: the rule checks that the physical capability *could* discharge (to
+distinguish a genuinely empty asset from one where reservations have simply consumed
+the export headroom — the latter is handled by Rule 1).
+
+Setpoint: **0 kW**. Reason: `SocFloor { soc_pct }`.
+
+---
+
+#### Rule 6 — Active energy packet, cost eligible
+
+The user has an active energy packet for this asset (e.g. "charge the EV to 80 %
+by 08:00") and the current tariff makes it worthwhile to run now. "Worthwhile" is
+judged by comparing the packet's comfort bid — the maximum price per kWh the user
+is implicitly willing to pay at the current fill level — against the effective slot
+cost. The effective cost blends the grid import tariff with the export tariff in
+proportion to how much of the charging power can be covered by free PV surplus:
+if the house is already exporting solar energy, using some of that surplus to charge
+the EV costs only the forgone export revenue, not the full import price.
+
+When multiple packets are eligible (rare — normally one packet per asset), the one
+with the highest product of `comfort_bid × time_pressure` wins.
+
+The setpoint is the packet's desired charging power, trimmed to the available grid
+headroom and to the site import limit already consumed by other assets scheduled
+earlier in the same slot.
+
+Setpoint: **desired_power_kw** (clamped). Reason: `CheapTariff { tariff_eur_per_kwh, threshold_eur_per_kwh: comfort_bid }`.
+
+---
+
+#### Rule 7 — Active energy packet, deadline pressure
+
+Same packet logic as Rule 6, but the planner has calculated that time is running
+out: the ratio of slots still needed to slots still available has reached or exceeded
+2.0. At this point the planner treats the packet as a firm obligation regardless of
+price — it charges even if the tariff is above the comfort bid, because missing the
+deadline is worse than paying a higher price. The reason tag switches from
+`CheapTariff` to `FirmObligation` to make this urgency visible in the trace.
+
+Setpoint: **desired_power_kw** (clamped). Reason: `FirmObligation { source: UserRequest { request_id }, required_kw }`.
+
+---
+
+#### Rule 9 — Battery arbitrage, charge at cheap tariff
+
+No user packet applies to the battery, but the current import tariff is
+meaningfully below the median tariff for the planning horizon (adjusted for
+round-trip efficiency losses). Charging now and discharging later at a higher
+tariff will save money. The threshold accounts for round-trip losses: charging is
+only worth it if the cheap price is low enough that the energy stored — after
+accounting for the charge/discharge efficiency — is still cheaper than the median
+future price.
+
+When PV is producing more energy than the site is consuming (surplus > 0.1 kW),
+the charge rate is capped to that surplus so the battery absorbs free solar rather
+than importing from the grid. Outside solar hours or when there is no surplus, the
+battery charges at its full available rate.
+
+Setpoint: **charge_kw** (PV-surplus-throttled, site-headroom-clamped). Reason: `CheapTariff { tariff_eur_per_kwh, threshold_eur_per_kwh: median × √eff }`.
+
+---
+
+#### Rule 10 — Battery arbitrage, discharge at expensive tariff
+
+The current import tariff is meaningfully above the median (adjusted for
+round-trip efficiency). It is cheaper to cover the site's load from stored battery
+energy right now than to import from the grid. The battery discharges at its full
+available rate. The threshold is the mirror of Rule 9: discharging only makes sense
+if the current price is high enough that the energy released — despite having been
+charged at some earlier cost — beats the median.
+
+Setpoint: **−discharge_kw** (negative = export from battery to site/grid). Reason: `ExpensiveTariff { tariff_eur_per_kwh, threshold_eur_per_kwh: median / √eff }`.
+
+---
+
+#### Rule 12 — Idle
+
+No rule above matched. The asset has no active packet, the tariff is neither cheap
+enough to charge nor expensive enough to discharge the battery, and no reservation
+is in force. The planner leaves the asset at zero setpoint for this slot.
+
+Setpoint: **0 kW**. Reason: `Idle`.

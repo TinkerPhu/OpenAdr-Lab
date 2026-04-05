@@ -48,8 +48,8 @@ describe("computeCostRateEurH", () => {
     expect(computeCostRateEurH(4.0, TARIFF)).toBeCloseTo(4.0 * 0.25);
   });
 
-  it("export: applies export tariff to negative power", () => {
-    expect(computeCostRateEurH(-3.0, TARIFF)).toBeCloseTo(3.0 * 0.05);
+  it("export: applies export tariff to negative power (negative = revenue)", () => {
+    expect(computeCostRateEurH(-3.0, TARIFF)).toBeCloseTo(-3.0 * 0.05);
   });
 
   it("zero power gives zero", () => {

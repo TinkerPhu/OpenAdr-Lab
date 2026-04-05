@@ -26,7 +26,7 @@ import type { AssetTimelinePoint } from "./types";
 
 /**
  * Cost rate in EUR/h for a given power flow and tariff interval.
- * Positive powerKw → import cost; negative → export revenue (positive return).
+ * Positive powerKw → import cost (positive). Negative → export revenue (negative).
  * Pass the grid-attributed power for consuming assets (powerKw × gridFraction)
  * so PV-covered consumption is correctly costed at zero.
  */
@@ -35,7 +35,9 @@ export function computeCostRateEurH(
   tariff: ApiTariffSnapshot | null
 ): number {
   if (powerKw >= 0) return powerKw * (tariff?.import_tariff_eur_kwh ?? 0);
-  return Math.abs(powerKw) * (tariff?.export_tariff_eur_kwh ?? 0);
+  const exportRate = tariff?.export_tariff_eur_kwh ?? 0;
+  if (exportRate === 0) return 0; // no export tariff → no revenue signal; avoids -0
+  return powerKw * exportRate; // negative = revenue
 }
 
 // ─── findCurrentTariff ────────────────────────────────────────────────────────
