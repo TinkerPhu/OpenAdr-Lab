@@ -1,5 +1,7 @@
-import { Chip, Grid, Paper, Stack, Typography } from "@mui/material";
-import { useHealth, usePrograms, useEvents, useSensor, useReports, useSim } from "../api/hooks";
+import { useMemo } from "react";
+import { Chip, Grid, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
+import { useHealth, usePrograms, useEvents, useSensor, useReports, useSim, useCapacity, useLedger } from "../api/hooks";
+import type { OadrCapacityState, AssetLedger } from "../api/types";
 
 function fmtNum(v: number | undefined | null, decimals = 1): string {
   if (v == null) return "—";
@@ -12,6 +14,116 @@ function ModeBadge({ mode }: { mode?: string }) {
   return <Chip label={mode} size="small" color={color} />;
 }
 
+function complianceChip(current_kw: number, limit_kw: number | null, label: string) {
+  if (limit_kw == null) return null;
+  const ratio = current_kw / limit_kw;
+  const color = ratio > 1.0 ? "error" : ratio > 0.8 ? "warning" : "success";
+  const text = ratio > 1.0 ? "Over limit" : ratio > 0.8 ? "Near limit" : "OK";
+  return (
+    <Chip
+      label={`${label}: ${text} (${current_kw.toFixed(1)} / ${limit_kw.toFixed(1)} kW)`}
+      size="small"
+      color={color}
+      sx={{ mt: 0.5 }}
+    />
+  );
+}
+
+function CapacityCard({
+  capacity,
+  netPowerW,
+}: {
+  capacity: OadrCapacityState | undefined;
+  netPowerW: number | null;
+}) {
+  const importKw = netPowerW != null && netPowerW > 0 ? netPowerW / 1000 : 0;
+  const exportKw = netPowerW != null && netPowerW < 0 ? -netPowerW / 1000 : 0;
+
+  const fmtKw = (v: number | null | undefined) => (v != null ? `${v.toFixed(1)} kW` : "—");
+  const fmtTs = (v: string | null | undefined) => {
+    if (!v) return "—";
+    return new Date(v).toLocaleTimeString();
+  };
+
+  return (
+    <Paper sx={{ p: 2, height: "100%" }} data-testid="dash-capacity-card">
+      <Typography variant="subtitle2" color="text.secondary" mb={1}>
+        OpenADR Capacity
+      </Typography>
+      <Stack spacing={0.5}>
+        <Typography variant="body2">Import limit: {fmtKw(capacity?.import_limit_kw)}</Typography>
+        <Typography variant="body2">Export limit: {fmtKw(capacity?.export_limit_kw)}</Typography>
+        <Typography variant="body2">Subscribed: {fmtKw(capacity?.import_subscription_kw)}</Typography>
+        <Typography variant="body2">Reserved: {fmtKw(capacity?.import_reservation_kw)}</Typography>
+        <Typography variant="caption" color="text.secondary">
+          Updated: {fmtTs(capacity?.last_updated)}
+        </Typography>
+        {complianceChip(importKw, capacity?.import_limit_kw ?? null, "Import")}
+        {complianceChip(exportKw, capacity?.export_limit_kw ?? null, "Export")}
+      </Stack>
+    </Paper>
+  );
+}
+
+function ledgerDuration(startedAt: string): string {
+  const elapsedMs = Date.now() - new Date(startedAt).getTime();
+  const hours = Math.floor(elapsedMs / 3_600_000);
+  const mins = Math.floor((elapsedMs % 3_600_000) / 60_000);
+  return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+}
+
+function LedgerCard({ entries }: { entries: AssetLedger[] }) {
+  const earliest = useMemo(() => {
+    return entries.reduce<string | null>((min, e) => {
+      if (!e.started_at) return min;
+      return min === null || e.started_at < min ? e.started_at : min;
+    }, null);
+  }, [entries]);
+
+  const sinceLabel = earliest
+    ? `${new Date(earliest).toLocaleTimeString()} (${ledgerDuration(earliest)})`
+    : null;
+
+  return (
+    <Paper sx={{ p: 2 }} data-testid="dash-ledger-card">
+      <Stack direction="row" alignItems="baseline" spacing={1} mb={1}>
+        <Typography variant="subtitle2" color="text.secondary">
+          Energy Ledger
+        </Typography>
+        {sinceLabel && (
+          <Typography variant="caption" color="text.secondary" data-testid="dash-ledger-since">
+            running since {sinceLabel}
+          </Typography>
+        )}
+      </Stack>
+      {entries.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">No data yet</Typography>
+      ) : (
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Asset</TableCell>
+              <TableCell align="right">Energy kWh</TableCell>
+              <TableCell align="right">Cost €</TableCell>
+              <TableCell align="right">CO₂ g</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {entries.map((l) => (
+              <TableRow key={l.asset_id}>
+                <TableCell>{l.asset_id}</TableCell>
+                <TableCell align="right">{l.energy_kwh.toFixed(3)}</TableCell>
+                <TableCell align="right">€{l.cost_eur.toFixed(4)}</TableCell>
+                <TableCell align="right">{l.co2_g.toFixed(1)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </Paper>
+  );
+}
+
 export function DashboardPage() {
   const health = useHealth();
   const programs = usePrograms();
@@ -19,8 +131,11 @@ export function DashboardPage() {
   const sensor = useSensor();
   const reports = useReports();
   const sim = useSim();
+  const capacity = useCapacity();
+  const ledger = useLedger();
 
   const healthStatus = health.isError ? "offline" : health.data ? "ok" : "unknown";
+  const netPowerW = sim.data?.grid.net_power_w ?? null;
 
   return (
     <Grid container spacing={2}>
@@ -88,6 +203,10 @@ export function DashboardPage() {
             </Typography>
           </Stack>
         </Paper>
+      </Grid>
+
+      <Grid item xs={12} md={3}>
+        <CapacityCard capacity={capacity.data} netPowerW={netPowerW} />
       </Grid>
 
       {/* Simulation card */}
@@ -160,6 +279,11 @@ export function DashboardPage() {
             <Typography color="text.secondary">Loading...</Typography>
           )}
         </Paper>
+      </Grid>
+
+      {/* Energy Ledger */}
+      <Grid item xs={12} md={6}>
+        <LedgerCard entries={ledger.data ?? []} />
       </Grid>
     </Grid>
   );
