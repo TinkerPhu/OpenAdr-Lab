@@ -486,6 +486,7 @@ mod tests {
             grid: GridMeter::default(),
             grid_asset: Grid::new(),
             pv_smoothing: crate::simulator::PvSmoothingState::default(),
+            base_load_smoothing: Default::default(),
             last_tick: DateTime::from_timestamp(0, 0).unwrap(),
         }
     }

@@ -4,6 +4,7 @@
 /// Phase 6 (penalty check) is deferred to Stage 4.
 use crate::assets::{AssetCapability, AssetConfig, AssetState};
 use crate::controller::reservation::{AssetReservation, ReservationLayer};
+use crate::controller::thresholds::{DIV_GUARD, FLEX_ENERGY_MIN_KWH, NEAR_ZERO_KW, NEAR_ZERO_KWH};
 use crate::entities::asset::{ComfortRate, PlanTrigger};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
@@ -501,10 +502,10 @@ fn precompute_lookahead(
         }
 
         let ceiling_eta = traj.iter()
-            .find(|(_, cap)| cap.max_import_kw < 1e-3)
+            .find(|(_, cap)| cap.max_import_kw < NEAR_ZERO_KW)
             .map(|(ts, _)| *ts);
         let floor_eta = traj.iter()
-            .find(|(_, cap)| cap.max_export_kw > -1e-3)
+            .find(|(_, cap)| cap.max_export_kw > -NEAR_ZERO_KW)
             .map(|(ts, _)| *ts);
 
         result.insert(entry.id.clone(), LookaheadContext {
@@ -544,12 +545,12 @@ fn rules_choose(
     // Must come before Rule 1 so that EV-at-soc-target emits SocCeiling, not FirmObligation.
     // Condition: phys_cap (not avail_cap) prevents import, and the asset has no meaningful
     // export capability either. Reservations cannot grant capability that physics denies.
-    if phys_cap.max_import_kw < 1e-6 && phys_cap.max_export_kw > -1e-3 {
+    if phys_cap.max_import_kw < NEAR_ZERO_KW && phys_cap.max_export_kw > -NEAR_ZERO_KW {
         return (0.0, PlanReason::SocCeiling { soc_pct: soc_ceiling_pct });
     }
 
     // Rule 1: reservation blocks all headroom
-    if avail_cap.max_import_kw <= 1e-6 && avail_cap.max_export_kw >= -1e-6 {
+    if avail_cap.max_import_kw <= NEAR_ZERO_KW && avail_cap.max_export_kw >= -NEAR_ZERO_KW {
         let source = reservations.primary_source(asset_id, slot.start);
         let required_kw = res.reserved_up_kw.max(res.reserved_down_kw);
         return (0.0, PlanReason::FirmObligation { source, required_kw });
@@ -558,12 +559,12 @@ fn rules_choose(
     // Rule 4: SoC/comfort ceiling — no import headroom AND no discharge headroom either.
     // When export is still available (e.g. battery full but dischargeable), fall through
     // to arbitrage rules so Rule 10 can discharge at expensive tariff.
-    if avail_cap.max_import_kw < 1e-6 && avail_cap.max_export_kw > -1e-6 {
+    if avail_cap.max_import_kw < NEAR_ZERO_KW && avail_cap.max_export_kw > -NEAR_ZERO_KW {
         return (0.0, PlanReason::SocCeiling { soc_pct: soc_ceiling_pct });
     }
 
     // Rule 5: SoC/comfort floor (no export headroom, but asset can generate)
-    if avail_cap.max_export_kw > -1e-6 && phys_cap.max_export_kw < -1e-3 {
+    if avail_cap.max_export_kw > -NEAR_ZERO_KW && phys_cap.max_export_kw < -NEAR_ZERO_KW {
         return (0.0, PlanReason::SocFloor { soc_pct: 0.0 });
     }
 
@@ -575,7 +576,7 @@ fn rules_choose(
         .filter_map(|p| {
             let already = *allocated.get(&p.id).unwrap_or(&0.0);
             let undelivered = (p.undelivered_energy_kwh() - already).max(0.0);
-            if undelivered <= 1e-6 {
+            if undelivered <= NEAR_ZERO_KWH {
                 return None;
             }
             // Budget gate (§8.4): skip packet if accumulated cost already reached the ceiling.
@@ -592,14 +593,14 @@ fn rules_choose(
                 .count()
                 .max(1);
             let slots_needed =
-                (undelivered / p.desired_power_kw.max(1e-9) / slot_h).ceil() as usize;
+                (undelivered / p.desired_power_kw.max(DIV_GUARD) / slot_h).ceil() as usize;
             let time_pressure = (slots_needed as f64 / slots_remaining as f64).clamp(1.0, 3.0);
 
-            let fill = p.fill() + already / p.target_energy_kwh.max(1e-9);
+            let fill = p.fill() + already / p.target_energy_kwh.max(DIV_GUARD);
             let comfort_bid = p.value_curve.bid_at(fill.min(1.0));
 
             let surplus_frac =
-                (slot.surplus_available_kw / p.desired_power_kw.max(1e-9)).min(1.0);
+                (slot.surplus_available_kw / p.desired_power_kw.max(DIV_GUARD)).min(1.0);
             let eff_cost = tariff_t * (1.0 - surplus_frac)
                 + slot.export_tariff_eur_kwh * surplus_frac;
 
@@ -625,7 +626,7 @@ fn rules_choose(
         let site_head = (site_ctx.import_limit_kw - site_ctx.planned_others_kw).max(0.0);
         let setpoint = desired.min(site_head).min(avail_cap.max_import_kw);
 
-        if setpoint > 1e-6 {
+        if setpoint > NEAR_ZERO_KW {
             if time_pressure >= 2.0 {
                 // Rule 7: deadline pressure — treat as firm obligation
                 return (
@@ -743,7 +744,7 @@ fn update_slot_from_step(
     allocated: &mut HashMap<Uuid, f64>,
     slot_h: f64,
 ) {
-    if actual_kw > 1e-6 {
+    if actual_kw > NEAR_ZERO_KW {
         // Import: find the active packet for this asset
         if let Some(packet) =
             packets.iter().find(|p| p.asset_id == asset_id && !p.is_terminal())
@@ -788,7 +789,7 @@ fn update_slot_from_step(
                 co2_g: grid_used * slot.co2_g_kwh * slot_h,
             });
         }
-    } else if actual_kw < -1e-6 {
+    } else if actual_kw < -NEAR_ZERO_KW {
         // Export / discharge: first offset any remaining import, then overflow into export.
         let discharge_kw = -actual_kw;
         let import_offset = discharge_kw.min(slot.net_import_kw);
@@ -834,7 +835,7 @@ fn build_envelopes(
             .sum();
 
         let energy_for_flex = (packet.undelivered_energy_kwh() - firm_kwh).max(0.0);
-        if energy_for_flex < 1e-3 {
+        if energy_for_flex < FLEX_ENERGY_MIN_KWH {
             continue;
         }
 
@@ -861,7 +862,7 @@ fn build_envelopes(
         let avg_co2 = eligible.iter().map(|s| s.co2_g_kwh).sum::<f64>() / n as f64;
 
         let fill_now = packet.fill();
-        let fill_after = (fill_now + energy_for_flex / packet.target_energy_kwh.max(1e-9)).min(1.0);
+        let fill_after = (fill_now + energy_for_flex / packet.target_energy_kwh.max(DIV_GUARD)).min(1.0);
 
         envs.push(FlexibilityEnvelope {
             packet_id: packet.id,
@@ -912,7 +913,7 @@ fn finalize_packets(
         packet.estimated_cost_eur = cost;
         packet.estimated_co2_g = co2;
         packet.estimated_completion = ((packet.past_energy_kwh() + allocated_kwh)
-            / packet.target_energy_kwh.max(1e-9))
+            / packet.target_energy_kwh.max(DIV_GUARD))
         .min(1.0);
         packet.last_estimate_at = Some(now);
     }
@@ -1336,7 +1337,6 @@ mod tests {
         }
     }
 
-    #[test]
     // ── PV allocation via update_slot_from_step ──────────────────────────────
 
     /// Verifies the export branch of update_slot_from_step: a negative actual_kw
@@ -1397,8 +1397,8 @@ mod tests {
         };
 
         // Two packets across three slots
-        let mut p1 = EnergyPacket::new("ev".to_string(), 10.0, 7.2, curve.clone(), now);
-        let mut p2 = EnergyPacket::new("heater".to_string(), 5.0, 3.0, curve, now);
+        let p1 = EnergyPacket::new("ev".to_string(), 10.0, 7.2, curve.clone(), now);
+        let p2 = EnergyPacket::new("heater".to_string(), 5.0, 3.0, curve, now);
 
         // Slot 0: p1 gets 7.2 kW (cost 0.06 €, co2 18 g), p2 gets 3.0 kW (cost 0.025 €, co2 7.5 g)
         let slot0 = make_slot(vec![
@@ -1503,5 +1503,38 @@ mod tests {
             "slot 0 must differ from flat irradiance value 5.0; got {:.3}",
             firm[0].pv_forecast_kw
         );
+    }
+
+    // ── NEAR_ZERO_KW — update_slot_from_step import/export branch boundary ───
+
+    /// Power below NEAR_ZERO_KW (0.5 × threshold) must produce no allocation entry —
+    /// the value falls in the dead band between import and export branches.
+    #[test]
+    fn sub_threshold_import_produces_no_allocation() {
+        let mut slot = make_slot(vec![]);
+        let sub_threshold = NEAR_ZERO_KW * 0.5; // 0.0005 kW — below 1 W
+        update_slot_from_step(&mut slot, "ev", sub_threshold, &[], &mut HashMap::new(), 1.0 / 12.0);
+        assert!(slot.allocations.is_empty(),
+            "power below NEAR_ZERO_KW must not create an allocation entry");
+    }
+
+    /// Negative power above -NEAR_ZERO_KW (0.5 × threshold) must produce no allocation entry.
+    #[test]
+    fn sub_threshold_export_produces_no_allocation() {
+        let mut slot = make_slot(vec![]);
+        let sub_threshold = -(NEAR_ZERO_KW * 0.5); // -0.0005 kW
+        update_slot_from_step(&mut slot, "pv", sub_threshold, &[], &mut HashMap::new(), 1.0 / 12.0);
+        assert!(slot.allocations.is_empty(),
+            "power above -NEAR_ZERO_KW must not create an allocation entry");
+    }
+
+    /// Power above NEAR_ZERO_KW (2.0 × threshold) must produce an allocation entry.
+    #[test]
+    fn above_threshold_import_produces_allocation() {
+        let mut slot = make_slot(vec![]);
+        let above_threshold = NEAR_ZERO_KW * 2.0; // 0.002 kW — above 1 W
+        update_slot_from_step(&mut slot, "ev", above_threshold, &[], &mut HashMap::new(), 1.0 / 12.0);
+        assert_eq!(slot.allocations.len(), 1,
+            "power above NEAR_ZERO_KW must create exactly one allocation entry");
     }
 }
