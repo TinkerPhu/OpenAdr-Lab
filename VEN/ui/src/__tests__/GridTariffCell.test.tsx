@@ -12,7 +12,7 @@ import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { ControllerV2Page } from "../pages/ControllerV2";
+import { ControllerPage } from "../pages/Controller";
 import type { SimSnapshot } from "../api/types";
 
 // ─── Minimal sim fixture ─────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ const baseSim: SimSnapshot = {
 
 // ─── Mock TariffChart — expose nowMs, hoursBack, hoursForward as DOM data attrs
 
-vi.mock("../components/controller-v2/charts/TariffChart", () => ({
+vi.mock("../components/controller/charts/TariffChart", () => ({
   TariffChart: ({
     nowMs,
     hoursBack,
@@ -82,7 +82,7 @@ describe("GridTariffCell — now line position", () => {
     const qc = makeQueryClient();
     const { rerender } = render(
       <QueryClientProvider client={qc}>
-        <ControllerV2Page />
+        <ControllerPage />
       </QueryClientProvider>
     );
 
@@ -101,7 +101,7 @@ describe("GridTariffCell — now line position", () => {
     act(() => {
       rerender(
         <QueryClientProvider client={qc}>
-          <ControllerV2Page />
+          <ControllerPage />
         </QueryClientProvider>
       );
     });
@@ -123,7 +123,7 @@ describe("GridTariffCell — now line position", () => {
     const qc = makeQueryClient();
     const { rerender } = render(
       <QueryClientProvider client={qc}>
-        <ControllerV2Page />
+        <ControllerPage />
       </QueryClientProvider>
     );
 
@@ -140,7 +140,7 @@ describe("GridTariffCell — now line position", () => {
     act(() => {
       rerender(
         <QueryClientProvider client={qc}>
-          <ControllerV2Page />
+          <ControllerPage />
         </QueryClientProvider>
       );
     });
@@ -161,7 +161,7 @@ describe("GridTariffCell — now line position", () => {
     const qc = makeQueryClient();
     render(
       <QueryClientProvider client={qc}>
-        <ControllerV2Page />
+        <ControllerPage />
       </QueryClientProvider>
     );
 
@@ -187,7 +187,7 @@ describe("GridTariffCell — expanded state via global button", () => {
     const qc = makeQueryClient();
     render(
       <QueryClientProvider client={qc}>
-        <ControllerV2Page />
+        <ControllerPage />
       </QueryClientProvider>
     );
 
@@ -203,7 +203,7 @@ describe("GridTariffCell — expanded state via global button", () => {
     const qc = makeQueryClient();
     render(
       <QueryClientProvider client={qc}>
-        <ControllerV2Page />
+        <ControllerPage />
       </QueryClientProvider>
     );
 

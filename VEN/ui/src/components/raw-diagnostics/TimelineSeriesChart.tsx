@@ -1,6 +1,6 @@
 import { Box, FormControl, InputLabel, MenuItem, Select, Typography } from "@mui/material";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import type { AssetTimelinePoint } from "../controller-v2/types";
+import type { AssetTimelinePoint } from "../controller/types";
 import { CHART_COLORS } from "./colors";
 
 interface TimelineSeriesChartProps {

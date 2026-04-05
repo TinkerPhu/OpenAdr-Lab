@@ -5,9 +5,9 @@
  * All tests check result[0].forecastEnergyKwh (the "ev" asset summary).
  */
 import { describe, it, expect } from "vitest";
-import { deriveAssetSummaries, computeCostRateEurH } from "../components/controller-v2/dataBuilders";
+import { deriveAssetSummaries, computeCostRateEurH } from "../components/controller/dataBuilders";
 import type { SimSnapshot, TariffSnapshot as ApiTariffSnapshot } from "../api/types";
-import type { AssetTimelinePoint } from "../components/controller-v2/types";
+import type { AssetTimelinePoint } from "../components/controller/types";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 

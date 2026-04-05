@@ -7,7 +7,7 @@
  */
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { TariffTimePoint } from "../components/controller-v2/types";
+import type { TariffTimePoint } from "../components/controller/types";
 
 // ─── Capture recharts structural props ───────────────────────────────────────
 // vi.hoisted ensures these arrays exist before the vi.mock factory runs.
@@ -35,7 +35,7 @@ vi.mock("recharts", () => ({
   ReferenceLine: () => null,
 }));
 
-import { TariffChart } from "../components/controller-v2/charts/TariffChart";
+import { TariffChart } from "../components/controller/charts/TariffChart";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
