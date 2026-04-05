@@ -3,16 +3,16 @@ import { Alert, Box, CircularProgress, IconButton, Tooltip, Typography } from "@
 import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
 import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
 import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useResetAssetSoc, useAllTimelines } from "../api/hooks";
-import type { AssetId, CollapseState } from "../components/controller-v2/types";
-import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller-v2/dataBuilders";
-import { enrichAllAssetTimelines } from "../components/controller-v2/tariffBuilders";
-import { AssetCell } from "../components/controller-v2/AssetCell";
-import { PinnedZone } from "../components/controller-v2/PinnedZone";
-import { GridTariffCell } from "../components/controller-v2/GridTariffCell";
-import { GridAccumulatedCell } from "../components/controller-v2/GridAccumulatedCell";
+import type { AssetId, CollapseState } from "../components/controller/types";
+import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller/dataBuilders";
+import { enrichAllAssetTimelines } from "../components/controller/tariffBuilders";
+import { AssetCell } from "../components/controller/AssetCell";
+import { PinnedZone } from "../components/controller/PinnedZone";
+import { GridTariffCell } from "../components/controller/GridTariffCell";
+import { GridAccumulatedCell } from "../components/controller/GridAccumulatedCell";
 import type { SimInjectState } from "../api/types";
 
-export function ControllerV2Page() {
+export function ControllerPage() {
   const { data: sim, isLoading: simLoading, isError: simError, refetch: refetchSim } = useSim({ refetchInterval: false });
   const { data: rates, refetch: refetchTariffs } = useTariffs({ refetchInterval: false });
   const { data: userRequests, refetch: refetchRequests } = useRequests({ refetchInterval: false });
@@ -106,7 +106,7 @@ export function ControllerV2Page() {
 
   if (simLoading) {
     return (
-      <Box data-testid="controller-v2-page" sx={{ p: 4, textAlign: "center" }}>
+      <Box data-testid="controller-page" sx={{ p: 4, textAlign: "center" }}>
         <CircularProgress />
       </Box>
     );
@@ -114,7 +114,7 @@ export function ControllerV2Page() {
 
   if (simError || !sim) {
     return (
-      <Box data-testid="controller-v2-page" sx={{ p: 4 }}>
+      <Box data-testid="controller-page" sx={{ p: 4 }}>
         <Alert severity="error">
           Unable to load simulation data. Check that the VEN is reachable.
         </Alert>
@@ -152,9 +152,9 @@ export function ControllerV2Page() {
   });
 
   return (
-    <Box data-testid="controller-v2-page">
+    <Box data-testid="controller-page">
       <Box sx={{ display: "flex", alignItems: "center", mb: 1, pr: 0.5 }}>
-        <Typography variant="h6">Controller V2</Typography>
+        <Typography variant="h6">Controller</Typography>
         <Box sx={{ flex: 1 }} />
         <Tooltip title={expanded ? "Collapse to ±1h view" : "Expand to 24h planning horizon"}>
           <IconButton data-testid="global-time-range-extend-btn" size="small" onClick={handleToggleExpand} sx={{ m: 0.5 }}>

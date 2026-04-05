@@ -7,7 +7,7 @@ import { SimProfileChart } from "../components/raw-diagnostics/SimProfileChart";
 import { TariffsLineChart } from "../components/raw-diagnostics/TariffsLineChart";
 import { TimelineSeriesChart } from "../components/raw-diagnostics/TimelineSeriesChart";
 import type { SimSnapshot, PlannedRates } from "../api/types";
-import type { AssetTimelinePoint } from "../components/controller-v2/types";
+import type { AssetTimelinePoint } from "../components/controller/types";
 
 export function RawDiagnosticsPage() {
   const { api } = useVenContext();

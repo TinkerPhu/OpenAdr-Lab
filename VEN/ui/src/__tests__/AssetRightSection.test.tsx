@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { AssetRightSection } from "../components/controller-v2/AssetRightSection";
+import { AssetRightSection } from "../components/controller/AssetRightSection";
 import type { SimSnapshot } from "../api/types";
 
 // Make schema configurable per-describe via a vi.fn() so individual suites can

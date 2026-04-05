@@ -6,10 +6,10 @@
 import { render, screen, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { ControllerV2Page } from "../pages/ControllerV2";
-import { buildStackedFromAllTimelines } from "../components/controller-v2/GridAccumulatedCell";
+import { ControllerPage } from "../pages/Controller";
+import { buildStackedFromAllTimelines } from "../components/controller/GridAccumulatedCell";
 import type { SimSnapshot } from "../api/types";
-import type { AssetTimelinePoint } from "../components/controller-v2/types";
+import type { AssetTimelinePoint } from "../components/controller/types";
 
 // ─── Minimal sim fixture ─────────────────────────────────────────────────────
 
@@ -21,7 +21,7 @@ const baseSim: SimSnapshot = {
 
 // ─── Mock StackedAreaChart — expose nowMs as a DOM data attribute ─────────────
 
-vi.mock("../components/controller-v2/charts/StackedAreaChart", () => ({
+vi.mock("../components/controller/charts/StackedAreaChart", () => ({
   StackedAreaChart: ({ nowMs }: { nowMs: number }) => (
     <div data-testid="stacked-area-chart" data-now-ms={String(nowMs)} />
   ),
@@ -71,7 +71,7 @@ describe("GridAccumulatedCell — now line position", () => {
     const qc = makeQueryClient();
     const { rerender } = render(
       <QueryClientProvider client={qc}>
-        <ControllerV2Page />
+        <ControllerPage />
       </QueryClientProvider>
     );
 
@@ -90,7 +90,7 @@ describe("GridAccumulatedCell — now line position", () => {
     act(() => {
       rerender(
         <QueryClientProvider client={qc}>
-          <ControllerV2Page />
+          <ControllerPage />
         </QueryClientProvider>
       );
     });

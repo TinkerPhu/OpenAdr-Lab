@@ -1,5 +1,5 @@
 /**
- * Controller V2 — pure data builder functions.
+ * Controller — pure data builder functions.
  *
  * All functions are side-effect-free and unit-testable.
  *

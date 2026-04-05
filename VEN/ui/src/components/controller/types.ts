@@ -1,5 +1,5 @@
 /**
- * Controller V2 — shared display types.
+ * Controller — shared display types.
  *
  * Nomenclature: tariff = X/kWh (unit price); rate = X/h (instantaneous flow).
  * The VEN API endpoint GET /rates and type RateSnapshot return tariff data despite the name.

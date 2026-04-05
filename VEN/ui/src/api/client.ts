@@ -3,7 +3,7 @@ import type {
   SimInjectState, PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger, UserRequest,
   FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
 } from "./types";
-import type { AssetTimelinePoint } from "../components/controller-v2/types";
+import type { AssetTimelinePoint } from "../components/controller/types";
 
 let reqCounter = 0;
 function requestId(): string {
