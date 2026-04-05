@@ -1,3 +1,4 @@
+use crate::controller::thresholds::{NEAR_ZERO_KW, NEAR_ZERO_KWH};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
@@ -79,12 +80,12 @@ pub fn compute_envelope(
         }
     }
 
-    let up_duration_s = if up_kw > 1e-6 && available_discharge_kwh > 1e-6 {
+    let up_duration_s = if up_kw > NEAR_ZERO_KW && available_discharge_kwh > NEAR_ZERO_KWH {
         Some((available_discharge_kwh / up_kw * 3600.0) as u64)
     } else {
         None
     };
-    let down_duration_s = if down_kw > 1e-6 && available_charge_kwh > 1e-6 {
+    let down_duration_s = if down_kw > NEAR_ZERO_KW && available_charge_kwh > NEAR_ZERO_KWH {
         Some((available_charge_kwh / down_kw * 3600.0) as u64)
     } else {
         None
@@ -209,6 +210,7 @@ mod tests {
             grid: GridMeter::default(),
             grid_asset: Grid::new(),
             pv_smoothing: crate::simulator::PvSmoothingState::default(),
+            base_load_smoothing: Default::default(),
             last_tick: Utc::now(),
         }
     }
@@ -307,5 +309,43 @@ mod tests {
         let env = compute_envelope(&sim, &ReservationLayer::new(), &[], Utc::now());
         assert_eq!(env.up_duration_s, Some(2880), "up_duration_s mismatch: {:?}", env.up_duration_s);
         assert_eq!(env.down_duration_s, Some(3600), "down_duration_s mismatch: {:?}", env.down_duration_s);
+    }
+
+    // ── NEAR_ZERO_KW / NEAR_ZERO_KWH — duration suppression boundary ─────────
+
+    /// Battery with max_kw below NEAR_ZERO_KW → up_kw < NEAR_ZERO_KW →
+    /// duration guard fires → up_duration_s and down_duration_s are both None.
+    #[test]
+    fn duration_suppressed_when_max_kw_below_near_zero_kw() {
+        // 0.5 × NEAR_ZERO_KW = 0.0005 kW — below the 1 W threshold.
+        // up_kw  = last_power_kw(0.0) - max_export_kw(-0.0005) = 0.0005 < NEAR_ZERO_KW
+        // down_kw = max_import_kw(0.0005) - last_power_kw(0.0) = 0.0005 < NEAR_ZERO_KW
+        let sub_threshold = NEAR_ZERO_KW * 0.5;
+        let sim = make_sim(
+            vec![make_battery_config(10.0, sub_threshold, 0.1)],
+            vec![make_battery_entry("bat", 0.5, 0.0)],
+        );
+        let env = compute_envelope(&sim, &ReservationLayer::new(), &[], Utc::now());
+        assert!(env.up_duration_s.is_none(),
+            "up_duration_s must be None when up_kw < NEAR_ZERO_KW, got {:?}", env.up_duration_s);
+        assert!(env.down_duration_s.is_none(),
+            "down_duration_s must be None when down_kw < NEAR_ZERO_KW, got {:?}", env.down_duration_s);
+    }
+
+    /// Battery with max_kw above NEAR_ZERO_KW and non-trivial SoC headroom →
+    /// both duration fields are populated.
+    #[test]
+    fn duration_present_when_max_kw_above_near_zero_kw() {
+        // 2.0 × NEAR_ZERO_KW = 0.002 kW — just above the 1 W threshold.
+        let above_threshold = NEAR_ZERO_KW * 2.0;
+        let sim = make_sim(
+            vec![make_battery_config(10.0, above_threshold, 0.1)],
+            vec![make_battery_entry("bat", 0.5, 0.0)],
+        );
+        let env = compute_envelope(&sim, &ReservationLayer::new(), &[], Utc::now());
+        assert!(env.up_duration_s.is_some(),
+            "up_duration_s must be Some when up_kw > NEAR_ZERO_KW, got {:?}", env.up_duration_s);
+        assert!(env.down_duration_s.is_some(),
+            "down_duration_s must be Some when down_kw > NEAR_ZERO_KW, got {:?}", env.down_duration_s);
     }
 }
