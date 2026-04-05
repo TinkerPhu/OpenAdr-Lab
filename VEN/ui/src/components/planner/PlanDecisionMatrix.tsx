@@ -113,10 +113,15 @@ export function PlanDecisionMatrix({ plan }: Props) {
   const [selectedStep, setSelectedStep] = useState<PlanStep | null>(null);
 
   // Derive sorted unique asset IDs from steps; always include "battery" so the
-  // row is visible even when the planner filtered all its Idle steps.
+  // row is visible even when all its steps are Idle.
+  // Exclude uncontrollable assets (pv, base_load) — they're always IDLE and are
+  // covered by the dedicated forecast reference rows below.
   const assetIds = useMemo(() => {
     if (!plan) return [];
-    const ids = new Set(plan.steps.map((s) => s.asset_id));
+    const UNCONTROLLABLE = new Set(["pv", "base_load"]);
+    const ids = new Set(
+      plan.steps.map((s) => s.asset_id).filter((id) => !UNCONTROLLABLE.has(id))
+    );
     ids.add("battery");
     return [...ids].sort();
   }, [plan]);
@@ -219,6 +224,13 @@ export function PlanDecisionMatrix({ plan }: Props) {
                 sx={{ height: CELL_H, display: "flex", alignItems: "center" }}
               >
                 <Typography variant="caption" noWrap>pv</Typography>
+              </Box>
+              {/* Baseline forecast label */}
+              <Box
+                data-testid="matrix-row-baseline"
+                sx={{ height: CELL_H, display: "flex", alignItems: "center" }}
+              >
+                <Typography variant="caption" noWrap>base</Typography>
               </Box>
             </Box>
 
@@ -327,6 +339,42 @@ export function PlanDecisionMatrix({ plan }: Props) {
                         >
                           <Box
                             data-testid={`matrix-cell-pv-${ci}`}
+                            sx={{
+                              width: CELL_W,
+                              height: CELL_H,
+                              bgcolor: `rgb(${r},${g},${b})`,
+                              opacity: ci >= firmBoundaryIdx ? 0.5 : 1,
+                              flexShrink: 0,
+                              border: ci >= firmBoundaryIdx
+                                ? "1px dashed rgba(0,0,0,0.2)"
+                                : "1px solid rgba(0,0,0,0.08)",
+                            }}
+                          />
+                        </Tooltip>
+                      );
+                    })}
+                  </Box>
+                );
+              })()}
+
+              {/* Baseline load row — grey→orange heatmap from baseline_kw in slot */}
+              {(() => {
+                const blMax = Math.max(...allSlots.map((s) => s.baseline_kw), 0.01);
+                return (
+                  <Box data-testid="matrix-row-baseline-cells" sx={{ display: "flex" }}>
+                    {allSlots.map((slot, ci) => {
+                      const frac = slot.baseline_kw / blMax;
+                      // grey (#9e9e9e) → orange (#ff9800)
+                      const r = Math.round(158 + (255 - 158) * frac);
+                      const g = Math.round(158 + (152 - 158) * frac);
+                      const b = Math.round(158 + (  0 - 158) * frac);
+                      return (
+                        <Tooltip
+                          key={ci}
+                          title={`base @ ${new Date(slot.start).toLocaleTimeString()}: ${slot.baseline_kw.toFixed(2)} kW forecast`}
+                        >
+                          <Box
+                            data-testid={`matrix-cell-baseline-${ci}`}
                             sx={{
                               width: CELL_W,
                               height: CELL_H,
