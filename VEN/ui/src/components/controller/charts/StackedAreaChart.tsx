@@ -66,7 +66,10 @@ export function StackedAreaChart({
   return (
     <div data-testid="accumulated-area-chart" style={{ width: "100%", height: 160 }}>
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={chartData} margin={{ top: 4, right: 40, left: 0, bottom: 0 }}>
+        {/* margin.right=92 provides alignment space matching the two right axes
+            (44+44 px) in AssetTimelineChart — no right axis here so the grid
+            line shares the same kW scale as the stacked areas. */}
+        <ComposedChart data={chartData} margin={{ top: 4, right: 92, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
           <XAxis
             dataKey="ts"
@@ -77,7 +80,6 @@ export function StackedAreaChart({
             tick={{ fontSize: 10 }}
           />
           <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} />
-          <YAxis yAxisId="grid" orientation="right" tick={{ fontSize: 10 }} width={52} unit=" kW" />
           <Tooltip
             labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
             formatter={(value: number, name: string) => [value.toFixed(2), name]}
@@ -120,9 +122,9 @@ export function StackedAreaChart({
             />
           ))}
 
-          {/* Grid power — net import/export sum of all assets, on dedicated right axis */}
+          {/* Grid power — shares the left kW axis so scale matches the stacked areas */}
           <Line
-            yAxisId="grid"
+            yAxisId="power"
             type="stepAfter"
             dataKey="gridPowerKw"
             name="Grid [kW]"
