@@ -1,3 +1,4 @@
+import { CELL_CHART_HEIGHT } from "../chartLayout";
 import {
   ComposedChart,
   Line,
@@ -45,7 +46,7 @@ export function AssetTimelineChart({
   const tMax = nowMs + hoursForward * 3_600_000;
 
   return (
-    <ResponsiveContainer width="100%" height={140}>
+    <ResponsiveContainer width="100%" height={CELL_CHART_HEIGHT}>
       <ComposedChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
         <XAxis
