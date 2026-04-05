@@ -81,7 +81,7 @@ export function GridAccumulatedCell({
       sx={{ display: "flex", flexDirection: "row", mb: 1, borderLeft: "4px solid #546e7a" }}
     >
       {/* Left: per-asset current power list */}
-      <Box sx={{ minWidth: 160, px: 1.5, py: 1, display: "flex", flexDirection: "column", gap: 0.5 }}>
+      <Box sx={{ minWidth: 196, px: 1.5, py: 1, display: "flex", flexDirection: "column", gap: 0.5 }}>
         <Typography variant="body2" fontWeight="bold">
           Accumulated Power
         </Typography>
