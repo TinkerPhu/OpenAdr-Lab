@@ -131,6 +131,60 @@ def step_create_price_event(context, price):
 
 
 @given(
+    "I create a cheap-then-expensive PRICE event at {cheap:f} then {expensive:f} EUR/kWh"
+    " for the saved program"
+)
+def step_create_price_event_cheap_then_expensive(context, cheap, expensive):
+    """Create a three-interval PRICE event: 1h cheap, 3h expensive, 20h neutral.
+
+    The neutral 3rd interval (0.20 EUR/kWh) prevents LOCF from carrying the
+    expensive tariff into the remaining 20h of the planning horizon, which would
+    skew the median toward 0.40 and push expensive_threshold above 0.40 EUR/kWh,
+    preventing discharge from firing in the shadow simulation.
+
+    With the reset interval the median stays at 0.20 so:
+      expensive_threshold ≈ 0.208  → 0.40 triggers discharge ✓
+      cheap_threshold     ≈ 0.192  → 0.05 is eligible for grid charge ✓
+    """
+    now = datetime.now(timezone.utc)
+    DEFAULT_IMPORT_PRICE = 0.20
+    intervals = [
+        {
+            "id": 0,
+            "intervalPeriod": {
+                "start": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "duration": "PT1H",
+            },
+            "payloads": [{"type": "PRICE", "values": [cheap]}],
+        },
+        {
+            "id": 1,
+            "intervalPeriod": {
+                "start": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "duration": "PT3H",
+            },
+            "payloads": [{"type": "PRICE", "values": [expensive]}],
+        },
+        {
+            "id": 2,
+            "intervalPeriod": {
+                "start": (now + timedelta(hours=4)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "duration": "PT20H",
+            },
+            "payloads": [{"type": "PRICE", "values": [DEFAULT_IMPORT_PRICE]}],
+        },
+    ]
+    r = vtn_post("/events", context.vtn_token, json={
+        "programID": context.saved_program_id,
+        "eventName": f"reason-test-{uuid.uuid4().hex[:8]}",
+        "priority": 1,
+        "intervals": intervals,
+    })
+    r.raise_for_status()
+    context.planner_event_id = r.json().get("id")
+
+
+@given(
     "I POST an EV packet with target_soc {soc:f}, desired_power_kw {power:f},"
     " and latest_end_h {hours:f}"
 )

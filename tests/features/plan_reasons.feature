@@ -6,14 +6,32 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
   Background:
     Given the VEN is running with profile "test"
 
-  # ── Scenario 1: Battery charges on cheap tariff ──────────────────────────
-  Scenario: Battery charges when tariff is below median
+  # ── Scenario 1: Battery charges from grid only when depletion is predicted ──
+  # The planner must see a future expensive discharge period that would drain the
+  # battery below min_soc. Only then does it schedule a grid charge at the
+  # cheapest slot before the depletion. With soc=0.20 and baseline=0.5kW, the
+  # 3h expensive period (0.40 EUR/kWh) drains ~1.5kWh leaving soc below min_soc.
+  # The preceding cheap slot (0.05 EUR/kWh) is the cheapest option → CHEAP_TARIFF.
+  Scenario: Battery charges from grid at cheap tariff before an expensive discharge period
+    Given the VEN is running with profile "no_pv_test"
+    And I have a VTN token as "any-business"
+    And I create a rate-system program and save its ID
+    And I create a cheap-then-expensive PRICE event at 0.05 then 0.40 EUR/kWh for the saved program
+    And the battery SoC is reset to 0.20
+    When I wait for a "CHEAP_TARIFF" PlanStep for asset "battery"
+    Then that PlanStep has setpoint_kw greater than 0.0
+
+  # ── Scenario 8: No grid charge when tariff is cheap but no expensive period ─
+  # Without a future expensive discharge period, the shadow sim predicts no
+  # depletion → charge_plan is empty → battery stays idle despite cheap tariff.
+  Scenario: Battery stays idle at cheap tariff when no future expensive discharge period exists
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a 1-hour PRICE event at 0.05 EUR/kWh for the saved program
     And I inject pv irradiance 0.0 via sim inject
-    When I wait for a "CHEAP_TARIFF" PlanStep for asset "battery"
-    Then that PlanStep has setpoint_kw greater than 0.0
+    And the battery SoC is reset to 0.50
+    When I wait for all PlanSteps for asset "battery" to have reason kind "IDLE|SURPLUS_ABSORPTION|SOC_CEILING|SOC_FLOOR"
+    Then all PlanSteps for asset "battery" have reason kind "IDLE|SURPLUS_ABSORPTION|SOC_CEILING|SOC_FLOOR"
 
   # ── Scenario 2: Battery discharges on expensive tariff ───────────────────
   Scenario: Battery discharges when tariff is above median

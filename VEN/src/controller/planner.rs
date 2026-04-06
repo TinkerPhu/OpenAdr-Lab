@@ -191,6 +191,33 @@ pub fn run_planner(
     let mut asset_states: HashMap<String, AssetState> =
         assets.iter_assets().map(|(e, _)| (e.id.clone(), e.state.clone())).collect();
 
+    // Needs-based battery charge planning: iterative shadow simulation finds depletion
+    // events and schedules the minimum grid charges at cheapest profitable slots.
+    // Must run after asset_states is built so we can read the current battery SoC.
+    let charge_plan: HashMap<usize, f64> = if let Some(bat) = profile.battery_config() {
+        let bat_initial_soc = asset_states
+            .get("battery")
+            .and_then(|s| if let AssetState::Battery(b) = s { Some(b.soc) } else { None })
+            .unwrap_or(bat.initial_soc);
+
+        // Combine firm + flexible slots for full-horizon depletion detection.
+        let all_slots: Vec<&PlanTimeSlot> = firm_slots.iter()
+            .chain(flexible_slots.iter())
+            .collect();
+
+        let plan = plan_battery_grid_charges(
+            bat, bat_initial_soc, &all_slots, firm_slots.len(), median_tariff, slot_h,
+        );
+        info!(
+            bat_soc = bat_initial_soc,
+            charge_plan_slots = plan.len(),
+            "battery two-pass charge plan"
+        );
+        plan
+    } else {
+        HashMap::new()
+    };
+
     // Per-plan allocated energy per packet (tracks total across all slots)
     let mut allocated: HashMap<Uuid, f64> = pkts.iter().map(|p| (p.id, 0.0_f64)).collect();
     let mut plan_steps: Vec<PlanStep> = Vec::new();
@@ -242,7 +269,7 @@ pub fn run_planner(
                     slot.import_tariff_eur_kwh, slot, &firm_slot_windows, &pkts,
                     &allocated, &site_ctx, la, reservations,
                     median_tariff, profile.battery_config(), slot_h, now,
-                    soc_ceiling_pct,
+                    soc_ceiling_pct, &charge_plan,
                 )
             };
 
@@ -519,6 +546,119 @@ fn precompute_lookahead(
     result
 }
 
+// ─── Two-pass battery charge planning ────────────────────────────────────────
+
+/// Two-pass battery charge planning.
+///
+/// Runs an iterative forward simulation (the "shadow sim") to find the earliest
+/// slot where the battery would deplete below `min_soc` under discharge-only +
+/// PV absorption, then schedules the minimum grid charge at the cheapest eligible
+/// slot before that depletion. Repeats until no depletion remains or no eligible
+/// charging slot exists.
+///
+/// The simulation is intentionally unconstrained (no min_soc floor on discharge)
+/// so that the projected SoC can drop below `min_soc`, making depletion visible.
+/// Only firm slots (index < firm_count) can be dispatched as grid charges, but
+/// the full horizon (firm + flexible) is used for depletion detection so that
+/// depletion risk caused by future expensive slots is correctly anticipated.
+///
+/// Grid charges are gated by `tariff < median × √eff` (profitability: the
+/// round-trip saving from discharging at an expensive slot covers the charge cost).
+/// PV surplus slots bypass this gate — they cost only the export tariff (~0.05).
+fn plan_battery_grid_charges(
+    bat: &BatteryConfig,
+    initial_soc: f64,
+    all_slots: &[&PlanTimeSlot],
+    firm_count: usize,
+    median_tariff: f64,
+    slot_h: f64,
+) -> HashMap<usize, f64> {
+    let cheap_threshold = median_tariff * bat.round_trip_efficiency.sqrt();
+    let expensive_threshold = median_tariff / bat.round_trip_efficiency.sqrt();
+    let mut charge_plan: HashMap<usize, f64> = HashMap::new();
+
+    // Iterative: each pass resolves the earliest remaining depletion.
+    // Capped at firm_count iterations to guarantee termination.
+    // Each iteration runs an unconstrained re-simulation (no min_soc floor on
+    // discharge, matching shadow_simulate_battery) so that depletion events in
+    // the updated trajectory are detected correctly.
+    for _ in 0..firm_count.max(1) {
+        // Re-simulate with current charge_plan to find next depletion.
+        let mut soc = initial_soc;
+        let mut depletion_slot: Option<usize> = None;
+
+        for (i, slot) in all_slots.iter().enumerate() {
+            // Apply any planned grid charge for this firm slot
+            if i < firm_count {
+                if let Some(&kw) = charge_plan.get(&i) {
+                    let delta = kw * bat.round_trip_efficiency * slot_h / bat.capacity_kwh;
+                    soc = (soc + delta).min(1.0);
+                }
+            }
+            // PV absorption (clamped at 1.0)
+            if slot.surplus_available_kw > 0.1 {
+                let kw = bat.max_charge_kw.min(slot.surplus_available_kw);
+                let delta = kw * bat.round_trip_efficiency * slot_h / bat.capacity_kwh;
+                soc = (soc + delta).min(1.0);
+            }
+            // Discharge — unconstrained, matching shadow_simulate_battery
+            if slot.import_tariff_eur_kwh > expensive_threshold {
+                let discharge_kw = bat.max_discharge_kw.min(slot.net_import_kw);
+                soc -= discharge_kw * slot_h / bat.capacity_kwh;
+            }
+
+            if soc < bat.min_soc - 1e-6 {
+                depletion_slot = Some(i);
+                break;
+            }
+        }
+
+        let dep_idx = match depletion_slot {
+            Some(i) => i,
+            None => break, // no more depletions — done
+        };
+
+        // Collect eligible firm slots before the depletion that are not yet assigned.
+        // PV surplus slots: effective cost = export_tariff (~0.05, near-zero).
+        // Grid slots: only if tariff < cheap_threshold (profitability gate).
+        let mut candidates: Vec<(usize, f64)> = all_slots[..dep_idx]
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i < firm_count && !charge_plan.contains_key(i))
+            .filter_map(|(i, slot)| {
+                if slot.surplus_available_kw > 0.1 {
+                    Some((i, slot.export_tariff_eur_kwh))
+                } else if slot.import_tariff_eur_kwh < cheap_threshold {
+                    Some((i, slot.import_tariff_eur_kwh))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            break; // no profitable charging opportunity — accept depletion
+        }
+
+        // Pick the cheapest candidate slot.
+        candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        let (best_idx, _) = candidates[0];
+
+        // Schedule just enough charge to eliminate the deficit at dep_idx.
+        // `soc` holds the re-simulation value at dep_idx after the break above;
+        // the deficit is how far below min_soc we are at that point.
+        let deficit_soc = (bat.min_soc - soc).max(0.0);
+        let energy_needed_kwh = (deficit_soc * bat.capacity_kwh) / bat.round_trip_efficiency;
+        let charge_kw = (energy_needed_kwh / slot_h)
+            .min(bat.max_charge_kw)
+            .max(0.01);
+
+        charge_plan.insert(best_idx, charge_kw);
+    }
+
+    charge_plan
+}
+
 // ─── Rules engine ─────────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -540,6 +680,7 @@ fn rules_choose(
     slot_h: f64,
     now: DateTime<Utc>,
     soc_ceiling_pct: f64,
+    charge_plan: &HashMap<usize, f64>,
 ) -> (f64, PlanReason) {
     // Rule 4a: SoC ceiling — physics itself prevents import AND export is negligible.
     // Must come before Rule 1 so that EV-at-soc-target emits SocCeiling, not FirmObligation.
@@ -678,12 +819,18 @@ fn rules_choose(
     if asset_id == "battery" {
         if let Some(bat) = battery_cfg {
             let eff = bat.round_trip_efficiency.sqrt();
-            if tariff_t < median_tariff * eff {
-                // Rule 9: cheap tariff — charge at full available rate from grid.
-                // PV-surplus case is handled by Rule 8b above; if we reach here
-                // surplus_available_kw ≤ 0.1 kW (night arbitrage or flat tariff window).
+
+            // Rule 9: grid charge — only when pre-computed charge_plan schedules it.
+            // Charging is planned by the two-pass algorithm: it is only scheduled when
+            // the shadow simulation predicts depletion AND this slot is the cheapest
+            // profitable opportunity before that depletion (tariff < median × √eff gate).
+            // This prevents midnight grid charging when PV will refill the battery free.
+            if let Some(&sched_kw) = charge_plan.get(&slot.slot_index) {
                 let site_head = (site_ctx.import_limit_kw - site_ctx.planned_others_kw).max(0.0);
-                let charge_kw = avail_cap.max_import_kw.min(site_head).max(0.0);
+                let charge_kw = sched_kw
+                    .min(site_head)
+                    .min(avail_cap.max_import_kw)
+                    .max(0.0);
                 if charge_kw > 0.01 {
                     return (
                         charge_kw,
@@ -693,7 +840,9 @@ fn rules_choose(
                         },
                     );
                 }
-            } else if tariff_t > median_tariff / eff {
+            }
+
+            if tariff_t > median_tariff / eff {
                 // Rule 10: expensive tariff — discharge to offset site import only.
                 // Guard: planned_others_kw is the net grid draw from all other assets
                 // (PV, base_load, EV). If the site is already in surplus (PV covers
