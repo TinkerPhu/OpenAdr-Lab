@@ -74,11 +74,15 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
     When I wait for the VEN /plan to have firm slots with import_cap_kw at most 0.1
     Then all EV allocations in capped firm slots are at most 0.1 kW
 
-  # ── g) Battery discharges on expensive tariff then charges on cheap tariff ───
+  # ── g) Battery charges on cheap tariff then discharges on expensive tariff ─
+  # The two-pass planner only schedules grid charging when depletion is predicted.
+  # Conditions: no_pv_test profile (zero PV forecast), SoC=0.20, 1h cheap then 3h
+  # expensive. Shadow sim: battery depletes during the expensive period → cheapest
+  # slot before depletion (slot 0, 0.05 EUR/kWh) gets a grid charge → CHEAP_TARIFF.
   Scenario: (g) Battery discharges on expensive tariff and charges on cheap tariff
-    Given I have a VTN token as "any-business"
-    And I inject pv irradiance 0.0 via sim inject
-    And the battery SoC is reset to 0.5
+    Given the VEN is running with profile "no_pv_test"
+    And I have a VTN token as "any-business"
+    And the battery SoC is reset to 0.20
     And I create a rate-system program and save its ID
     And I create a cheap-then-expensive PRICE event for the saved program
     When I wait for both "EXPENSIVE_TARIFF" and "CHEAP_TARIFF" PlanSteps for asset "battery"

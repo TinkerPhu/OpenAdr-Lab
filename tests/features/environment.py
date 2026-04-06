@@ -1,7 +1,7 @@
 """behave environment hooks — run before/after the entire test suite."""
 
 import os
-from features.helpers.api_client import VTN_BASE_URL, VEN_BASE_URL, VEN2_BASE_URL, BFF_BASE_URL
+from features.helpers.api_client import VTN_BASE_URL, VEN_BASE_URL, VEN2_BASE_URL, VEN_NO_PV_BASE_URL, BFF_BASE_URL
 from features.helpers.wait import wait_for_url
 
 UI_BASE_URL = os.environ.get("UI_BASE_URL", "http://test-ui:80")
@@ -16,6 +16,7 @@ def _check_not_live():
         "VTN_BASE_URL": VTN_BASE_URL,
         "VEN_BASE_URL": VEN_BASE_URL,
         "VEN2_BASE_URL": VEN2_BASE_URL,
+        "VEN_NO_PV_BASE_URL": VEN_NO_PV_BASE_URL,
         "BFF_BASE_URL": BFF_BASE_URL,
     }
     for name, url in urls.items():
@@ -76,6 +77,9 @@ def before_all(context):
 
     print(f"Waiting for VEN-2 at {VEN2_BASE_URL} ...")
     wait_for_url(f"{VEN2_BASE_URL}/health", timeout=120)
+
+    print(f"Waiting for VEN-no-pv at {VEN_NO_PV_BASE_URL} ...")
+    wait_for_url(f"{VEN_NO_PV_BASE_URL}/health", timeout=120)
 
     print(f"Waiting for BFF at {BFF_BASE_URL} ...")
     wait_for_url(f"{BFF_BASE_URL}/api/health", timeout=120)
@@ -201,6 +205,8 @@ def _reset_ven_sim_overrides():
 
 def after_scenario(context, scenario):
     """Close browser page after @ui/@ven-ui scenarios; restart stopped services."""
+    import features.helpers.api_client as api_client
+    api_client.VEN_BASE_URL = api_client._DEFAULT_VEN_BASE_URL
     _cleanup_vtn_resources(context)
     _reset_ven_sim_overrides()
 

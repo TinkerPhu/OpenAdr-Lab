@@ -4,6 +4,7 @@ import time
 import json
 import requests
 from behave import given, when, then
+import features.helpers.api_client as api_client
 from features.helpers.api_client import ven_get, ven_post, VEN_BASE_URL
 from features.helpers.wait import poll_until
 
@@ -30,9 +31,13 @@ def _resolve_nested(data, path):
 
 @given('the VEN is running with profile "{profile}"')
 def step_ven_running_with_profile(context, profile):
-    """Verify the VEN is reachable (profile is set at container startup)."""
+    """Route subsequent VEN calls to the container running the requested profile."""
+    profile_urls = {
+        "no_pv_test": api_client.VEN_NO_PV_BASE_URL,
+    }
+    api_client.VEN_BASE_URL = profile_urls.get(profile, api_client._DEFAULT_VEN_BASE_URL)
     r = ven_get("/health")
-    assert r.status_code == 200, f"VEN health check failed: {r.status_code}"
+    assert r.status_code == 200, f"VEN health check failed for profile '{profile}': {r.status_code}"
     context.ven_profile = profile
 
 
