@@ -55,7 +55,7 @@ impl std::fmt::Display for RequestError {
         match self {
             RequestError::UnknownAsset(id) => write!(f, "unknown asset '{id}'"),
             RequestError::NoDeadlines => write!(f, "at least one deadline is required"),
-            RequestError::ZeroEnergy => write!(f, "computed target_energy_kwh is zero or negative"),
+            RequestError::ZeroEnergy => write!(f, "computed target_energy_kwh is zero or negative (asset may already be at or above the target SoC)"),
         }
     }
 }
@@ -212,5 +212,5 @@ fn resolve_target(
     }
 
     cfg.resolve_request_target(&entry.state, body.target_soc, body.desired_power_kw)
-        .ok_or_else(|| RequestError::UnknownAsset(body.asset_id.clone()))
+        .ok_or(RequestError::ZeroEnergy)
 }
