@@ -168,6 +168,7 @@ export function ControllerPage() {
         {/* Grid-level cells */}
         {tariffSnapshot && !pinnedCellIds.includes("grid:tariff") && (
           <GridTariffCell
+            snapshot={tariffSnapshot}
             gridTimeline={allTimelines["grid"] ?? []}
             nowMs={nowMs}
             extended={expanded}
@@ -183,6 +184,7 @@ export function ControllerPage() {
             nowMs={nowMs}
             extended={expanded}
             pinned={false}
+            gridPowerKw={sim.grid.net_power_w / 1000}
             onTogglePin={() => handleTogglePin("grid:accumulated")}
           />
         )}
