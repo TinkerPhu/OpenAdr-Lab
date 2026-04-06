@@ -1,4 +1,5 @@
 import { Box, Typography } from "@mui/material";
+import { CELL_LEFT_SECTION_WIDTH } from "./chartLayout";
 import type { AssetSummary } from "./types";
 
 interface AssetLeftSectionProps {
@@ -14,7 +15,7 @@ export function AssetLeftSection({ summary }: AssetLeftSectionProps) {
   return (
     <Box
       data-testid={`asset-cell-${assetId}-left`}
-      sx={{ minWidth: 160, px: 1.5, py: 1, display: "flex", flexDirection: "column", gap: 0.5 }}
+      sx={{ minWidth: CELL_LEFT_SECTION_WIDTH, px: 1.5, py: 1, display: "flex", flexDirection: "column", gap: 0.5 }}
     >
       <Typography variant="body2" fontWeight="bold" data-testid={`asset-name-${assetId}`}>
         {summary.label}
