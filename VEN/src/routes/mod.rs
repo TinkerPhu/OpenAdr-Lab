@@ -20,7 +20,7 @@ use crate::AppCtx;
 pub fn build_router(ctx: AppCtx) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::PUT])
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(Any);
 
     Router::new()
