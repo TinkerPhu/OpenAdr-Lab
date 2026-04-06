@@ -1,0 +1,50 @@
+# no_pv_test profile: identical to test but with PV rated_kw=0.
+# Used by BDD scenarios that test battery grid-charging logic without
+# time-of-day dependency on the PV sine-model forecast.
+assets:
+  - type: ev
+    id: ev
+    max_charge_kw: 7.0
+    initial_soc: 0.05
+    battery_kwh: 60.0
+  - type: heater
+    id: heater
+    max_kw: 3.0
+    temp_initial_c: 20.0
+    temp_min_c: 18.0
+    temp_max_c: 23.0
+  - type: pv
+    id: pv
+    rated_kw: 0.0
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    max_charge_kw: 5.0
+    max_discharge_kw: 5.0
+    initial_soc: 0.50
+    round_trip_efficiency: 0.92
+    min_soc: 0.10
+  - type: base_load
+    id: base_load
+    baseline_kw: 0.5
+
+simulator:
+  tick_s: 1
+  persist_every_s: 10
+  report_interval_s: 10
+
+planner:
+  plan_step_s: 300
+  near_horizon_h: 4
+  plan_horizon_h: 24
+  replan_interval_s: 20
+
+packets:
+  - asset: ev
+    target_soc: 0.80
+    latest_end_h: 12.0
+    comfort_rates:
+      - fill: 0.0
+        bid: 0.50
+      - fill: 1.0
+        bid: 0.05

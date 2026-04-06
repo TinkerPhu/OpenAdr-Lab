@@ -45,18 +45,22 @@ def step_given_post_user_request_ev(context, soc, hours):
 
 @given("I create a cheap-then-expensive PRICE event for the saved program")
 def step_create_cheap_expensive_price_event(context):
-    """Three consecutive intervals covering the full 4-hour planning horizon:
-      - NOW → +1H:  0.40 EUR/kWh (expensive)
-      - +1H → +2H:  0.05 EUR/kWh (cheap)
-      - +2H → +4H:  0.20 EUR/kWh (neutral background)
+    """Three intervals: 1h cheap → 3h expensive → 20h neutral.
 
-    The neutral interval prevents LOCF from carrying the cheap rate into background
-    slots, which would compress the median toward 0.05 and disable CHEAP_TARIFF.
-    With all three intervals present:
-      sorted tariffs: [0.05×12, 0.20×24, 0.40×12] → median = 0.20
-      eff = sqrt(0.92) ≈ 0.959
-      cheap_threshold    = 0.20 * 0.959 = 0.192  →  0.05 < 0.192  → CHEAP_TARIFF ✓
-      expensive_threshold = 0.20 / 0.959 = 0.209  →  0.40 > 0.209  → EXPENSIVE_TARIFF ✓
+    The two-pass planner only schedules grid charging when depletion is predicted.
+    With SoC=0.20, baseline=0.5 kW, no PV:
+      - Shadow sim discharges at 0.40 EUR/kWh (slots 12-47) → depletion ~slot 37
+      - Cheapest eligible slot before depletion: slot 0 (0.05 EUR/kWh)
+      → charge_plan schedules slot 0 → CHEAP_TARIFF fires
+      → EXPENSIVE_TARIFF fires during the expensive period
+
+    The 20h neutral interval prevents LOCF from carrying 0.40 into flexible slots,
+    which would push the median toward 0.40 and raise expensive_threshold above 0.40.
+
+    sorted tariffs: [0.05×12, 0.20×(240+24), 0.40×12] → median = 0.20
+    eff = sqrt(0.92) ≈ 0.959
+    cheap_threshold     = 0.20 × 0.959 = 0.192  →  0.05 < 0.192  → CHEAP_TARIFF ✓
+    expensive_threshold = 0.20 / 0.959 = 0.209  →  0.40 > 0.209  → EXPENSIVE_TARIFF ✓
     """
     now = datetime.now(timezone.utc)
     r = vtn_post("/events", context.vtn_token, json={
@@ -70,21 +74,21 @@ def step_create_cheap_expensive_price_event(context):
                     "start": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "duration": "PT1H",
                 },
-                "payloads": [{"type": "PRICE", "values": [0.40]}],
+                "payloads": [{"type": "PRICE", "values": [0.05]}],
             },
             {
                 "id": 1,
                 "intervalPeriod": {
                     "start": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "duration": "PT1H",
+                    "duration": "PT3H",
                 },
-                "payloads": [{"type": "PRICE", "values": [0.05]}],
+                "payloads": [{"type": "PRICE", "values": [0.40]}],
             },
             {
                 "id": 2,
                 "intervalPeriod": {
-                    "start": (now + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "duration": "PT2H",
+                    "start": (now + timedelta(hours=4)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "duration": "PT20H",
                 },
                 "payloads": [{"type": "PRICE", "values": [0.20]}],
             },
