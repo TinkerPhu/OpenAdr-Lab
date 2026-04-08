@@ -5,6 +5,7 @@ pub mod openadr_interface;
 pub mod dispatcher;
 pub mod envelope;
 pub mod flexibility_policy;
+pub mod lp_planner;
 pub mod planner;
 pub mod reservation;
 pub mod timeline;

@@ -235,6 +235,17 @@ fn default_report_interval() -> u64 {
     60
 }
 
+/// Selects which battery pre-planner is used.
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PlannerMode {
+    /// Two-pass greedy algorithm (default, legacy behaviour).
+    #[default]
+    Rules,
+    /// LP-based global optimizer (Phase 1: battery only).
+    Lp,
+}
+
 /// Configuration for the HEMS Planner (Stage 3).
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlannerConfig {
@@ -253,6 +264,9 @@ pub struct PlannerConfig {
     /// Lookahead window for capability/tariff precomputation (hours, default 2.0).
     #[serde(default = "default_lookahead_h")]
     pub lookahead_h: f64,
+    /// Which battery pre-planner to use ("rules" or "lp", default "rules").
+    #[serde(default)]
+    pub mode: PlannerMode,
 }
 
 impl Default for PlannerConfig {
@@ -263,6 +277,7 @@ impl Default for PlannerConfig {
             plan_horizon_h: default_plan_horizon_h(),
             replan_interval_s: default_replan_interval(),
             lookahead_h: default_lookahead_h(),
+            mode: PlannerMode::default(),
         }
     }
 }
