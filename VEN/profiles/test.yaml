@@ -36,6 +36,7 @@ planner:
   near_horizon_h: 4
   plan_horizon_h: 24
   replan_interval_s: 20
+  mode: lp
 
 packets:
   - asset: ev

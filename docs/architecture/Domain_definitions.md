@@ -4,17 +4,17 @@
 
 In this project the directions are according to a virtual image. On the left side the Utility (external electric energy provider), on the right side the users assets. The center could be seen as the central connection board (often the breaker board), where all wires are connected to:
 
-                                             <──── Energy flows to left have neg. values
-
-                                                  ╭───────────────────────╮   ╭──────────────────────────────────────────╮
-              ╭────────────────────────╮  neg is  │                subt <-------- Generate (neg.values)                  │
-╭───────╮     │   <- Export € tariff   │  Export  │       ╭──────╮        │   │                                          │
-│Utility│<===>│ Utility Energy Counter │<===========> add │Σ(P)=0│ subt <=======> Store (pos.value) / Release (neg.value)│
-╰───────╯     │   Import € tariff ->   │  pos is  │       ╰──────╯        │   │                                          │
-              ╰────────────────────────╯  Import  │                subt --------> Consume (pos.values)                   │
-                                                  ╰───────────────────────╯   ╰──────────────────────────────────────────╯
-
-                                             Energy flows to right have pos. values ────>
+                                                 <──── Energy flows to left have neg. values
+    
+                                                      ╭───────────────────────╮   ╭──────────────────────────────────────────╮
+                  ╭────────────────────────╮  neg is  │                subt <-------- Generate (neg.values)                  │
+    ╭───────╮     │   <- Export € tariff   │  Export  │       ╭──────╮        │   │                                          │
+    │Utility│<===>│ Utility Energy Counter │<===========> add │Σ(P)=0│ subt <=======> Store (pos.value) / Release (neg.value)│
+    ╰───────╯     │   Import € tariff ->   │  pos is  │       ╰──────╯        │   │                                          │
+                  ╰────────────────────────╯  Import  │                subt --------> Consume (pos.values)                   │
+                                                      ╰───────────────────────╯   ╰──────────────────────────────────────────╯
+    
+                                                 Energy flows to right have pos. values ────>
 
 ## Sign Convention of Power and Energy values
 

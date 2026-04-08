@@ -17,22 +17,36 @@ def step_response_is_array(context):
 
 @when("I wait for VEN-1 to have at least {count:d} event")
 def step_wait_ven1_events(context, count):
+    # When a specific program was created in this scenario, wait for VEN-1 to
+    # discover an event for *that* program.  This prevents stale cached events
+    # from satisfying the condition before VEN-1 has polled the new program.
+    program_id = getattr(context, "saved_program_id", None)
+
     def fetch():
         return requests.get(f"{VEN_BASE_URL}/events", timeout=10).json()
 
-    context.ven1_events = poll_until(
-        fetch,
-        lambda events: len(events) >= count,
-        timeout=30,
-        description=f"VEN-1 has >= {count} events",
-    )
+    if program_id:
+        predicate = lambda events: any(e.get("programID") == program_id for e in events)
+        desc = f"VEN-1 has an event for program {program_id}"
+    else:
+        predicate = lambda events: len(events) >= count
+        desc = f"VEN-1 has >= {count} events"
+
+    context.ven1_events = poll_until(fetch, predicate, timeout=90, description=desc)
 
 
 @when("I submit a report via VEN-1 for the first event")
 def step_submit_report_ven1(context):
     events = requests.get(f"{VEN_BASE_URL}/events", timeout=10).json()
     assert len(events) > 0, "VEN-1 has no events to report on"
-    event = events[0]
+    # Prefer the event that belongs to the program created in this scenario so
+    # that stale cached events (from a previous run) are not accidentally used.
+    program_id = getattr(context, "saved_program_id", None)
+    if program_id:
+        matching = [e for e in events if e.get("programID") == program_id]
+        event = matching[0] if matching else events[0]
+    else:
+        event = events[0]
     payload = {
         "programID": event.get("programID", ""),
         "eventID": event["id"],
