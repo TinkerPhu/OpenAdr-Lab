@@ -46,9 +46,8 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
   Scenario: EV charges under deadline pressure
     Given I inject ev_soc 0.5 via sim inject
     And I POST an EV packet with target_soc 0.8, desired_power_kw 1.0, and latest_end_h 1.0
-    When I wait for the VEN /plan to have steps for asset "ev"
-    Then at least one PlanStep for asset "ev" has reason kind "FIRM_OBLIGATION"
-    And that PlanStep has setpoint_kw greater than 0.0
+    When I wait for a "FIRM_OBLIGATION" PlanStep for asset "ev"
+    Then that PlanStep has setpoint_kw greater than 0.0
 
   # ── Scenario 4: Battery is idle with no active packets and median tariff ──
   Scenario: Battery is idle when no packets and tariff is at median
@@ -58,8 +57,10 @@ Feature: VEN Planner — PlanReason audit trail (Phase D CP3)
     Then all PlanSteps for asset "battery" have reason kind "IDLE|SURPLUS_ABSORPTION"
 
   # ── Scenario 6: Battery absorbs PV surplus regardless of tariff (Rule 8b) ──
+  # EV must be at soc_target so it does not consume the surplus before battery.
   Scenario: Battery charges from PV surplus regardless of tariff
-    Given I inject pv irradiance 1.0 via sim inject
+    Given I inject ev_soc 0.80 via sim inject
+    And I inject pv irradiance 1.0 via sim inject
     And the battery SoC is reset to 0.2
     When I wait for a "SURPLUS_ABSORPTION" PlanStep for asset "battery"
     Then that PlanStep has setpoint_kw greater than 0.0

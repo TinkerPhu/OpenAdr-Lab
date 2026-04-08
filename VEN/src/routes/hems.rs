@@ -29,6 +29,18 @@ pub async fn get_packets(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.active_packets().await)
 }
 
+/// DELETE /packets — drop all non-terminal packets (test isolation helper).
+pub async fn delete_packets(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    use crate::entities::energy_packet::PacketStatus;
+    let before = ctx.state.active_packets().await;
+    let kept: Vec<_> = before
+        .into_iter()
+        .filter(|p| matches!(p.status, PacketStatus::Completed | PacketStatus::Abandoned))
+        .collect();
+    ctx.state.set_active_packets(kept).await;
+    StatusCode::NO_CONTENT
+}
+
 /// Query params for GET /plan.
 #[derive(Deserialize, Default)]
 pub struct PlanQuery {

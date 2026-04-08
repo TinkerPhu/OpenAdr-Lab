@@ -26,7 +26,8 @@ pub struct SiteContext {
     pub pv_forecast_kw: f64,
 }
 use crate::entities::tariff_snapshot::TariffTimeSeries;
-use crate::profile::{BatteryConfig, Profile};
+use crate::controller::lp_planner;
+use crate::profile::{BatteryConfig, PlannerMode, Profile};
 use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
 use tracing::{debug, info};
@@ -205,15 +206,27 @@ pub fn run_planner(
             .chain(flexible_slots.iter())
             .collect();
 
-        let plan = plan_battery_grid_charges(
-            bat, bat_initial_soc, &all_slots, firm_slots.len(), median_tariff, slot_h,
-        );
-        info!(
-            bat_soc = bat_initial_soc,
-            charge_plan_slots = plan.len(),
-            "battery two-pass charge plan"
-        );
-        plan
+        if profile.planner.mode == PlannerMode::Lp {
+            let p = lp_planner::plan_battery_lp(
+                bat, bat_initial_soc, &all_slots, firm_slots.len(), slot_h,
+            );
+            info!(
+                bat_soc = bat_initial_soc,
+                charge_plan_slots = p.len(),
+                "battery LP charge plan"
+            );
+            p
+        } else {
+            let p = plan_battery_grid_charges(
+                bat, bat_initial_soc, &all_slots, firm_slots.len(), median_tariff, slot_h,
+            );
+            info!(
+                bat_soc = bat_initial_soc,
+                charge_plan_slots = p.len(),
+                "battery two-pass charge plan"
+            );
+            p
+        }
     } else {
         HashMap::new()
     };

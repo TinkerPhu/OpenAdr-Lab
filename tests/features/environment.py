@@ -31,13 +31,20 @@ def _check_not_live():
 
 
 def _cleanup_all_programs():
-    """Delete every program in the test VTN before the run starts.
+    """Delete every program in the test VTN before each feature.
 
-    Programs (and their cascaded events) accumulate across runs when scenarios
-    create them with hardcoded names. With enough programs the VTN's default
-    page size causes GET /programs to miss entries, breaking _create_or_reuse_program.
-    Wiping state here ensures every run starts clean.
+    Two-phase cleanup:
+    1. API phase: delete programs the `any-business` credential can see
+       (programs with a matching business_id).
+    2. SQL phase: delete orphaned programs with business_id IS NULL — these
+       are created via the BFF/UI layer and are invisible to the API credential,
+       so they accumulate across runs and cause 409 Conflict errors.
+       Only NULL-business_id rows are removed; API-created programs (and their
+       ven_program enrollment records) are left intact.
     """
+    import subprocess
+
+    # Phase 1 — API cleanup (programs visible to any-business credential).
     try:
         from features.helpers.api_client import vtn_get, vtn_delete, get_token_value
         token = get_token_value("any-business", "any-business")
@@ -61,9 +68,33 @@ def _cleanup_all_programs():
                 break
             skip += limit
         if deleted:
-            print(f"Pre-run cleanup: deleted {deleted} programs from test VTN.")
+            print(f"Pre-run cleanup: deleted {deleted} programs (API) from test VTN.")
     except Exception as exc:
-        print(f"Warning: pre-run program cleanup failed: {exc}")
+        print(f"Warning: API program cleanup failed: {exc}")
+
+    # Phase 2 — SQL cleanup (orphaned programs with business_id IS NULL).
+    # Only removes programs/events/enrollments that have no owning business.
+    # Enrollment records (ven_program) for API-created programs are unaffected.
+    try:
+        dsn = "postgres://openadr:openadr@test-db:5432/openadr"
+        sql = (
+            "DELETE FROM report"
+            "  WHERE program_id IN (SELECT id FROM program WHERE business_id IS NULL);"
+            "DELETE FROM event"
+            "  WHERE program_id IN (SELECT id FROM program WHERE business_id IS NULL);"
+            "DELETE FROM ven_program"
+            "  WHERE program_id IN (SELECT id FROM program WHERE business_id IS NULL);"
+            "DELETE FROM program WHERE business_id IS NULL;"
+        )
+        result = subprocess.run(
+            ["psql", dsn, "-c", sql],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0 and result.stderr:
+            print(f"SQL cleanup warning: {result.stderr[:200]}")
+    except Exception as exc:
+        print(f"Warning: SQL fallback cleanup failed: {exc}")
+
 
 
 def before_all(context):
@@ -203,12 +234,26 @@ def _reset_ven_sim_overrides():
         pass
 
 
+def _reset_ven_packets():
+    """Drop all non-terminal EV packets on VEN-1 between scenarios.
+
+    Prevents packets posted in one scenario (e.g. plan_reasons FIRM_OBLIGATION
+    test) from leaking into subsequent scenarios and polluting the planner state.
+    """
+    try:
+        from features.helpers.api_client import ven_delete
+        ven_delete("/packets")
+    except Exception:
+        pass
+
+
 def after_scenario(context, scenario):
     """Close browser page after @ui/@ven-ui scenarios; restart stopped services."""
     import features.helpers.api_client as api_client
     api_client.VEN_BASE_URL = api_client._DEFAULT_VEN_BASE_URL
     _cleanup_vtn_resources(context)
     _reset_ven_sim_overrides()
+    _reset_ven_packets()
 
     if (_is_ui(scenario) or _is_ven_ui(scenario)) and hasattr(context, "browser_page"):
         context.browser_page.close()
