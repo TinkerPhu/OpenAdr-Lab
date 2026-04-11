@@ -77,31 +77,31 @@ export function PlanHeaderBar({ plan }: Props) {
           {formatAge(plan.created_at)}
         </Typography>
 
-        {/* FIRM horizon */}
-        {plan.firm_slots.length > 0 && (() => {
-          const firmMs = new Date(plan.firm_slots[plan.firm_slots.length - 1].end).getTime()
-            - new Date(plan.firm_slots[0].start).getTime();
-          const firmHours = (firmMs / 3_600_000).toFixed(1);
+        {/* Horizon */}
+        {plan.slots.length > 0 && (() => {
+          const horizonMs = new Date(plan.slots[plan.slots.length - 1].end).getTime()
+            - new Date(plan.slots[0].start).getTime();
+          const horizonHours = (horizonMs / 3_600_000).toFixed(1);
           return (
             <Typography data-testid="plan-firm-horizon" variant="caption" color="text.secondary">
-              FIRM: {firmHours}h
+              {horizonHours}h
             </Typography>
           );
         })()}
 
         {/* Cost */}
         <Typography data-testid="plan-cost" variant="caption">
-          €{plan.firm_summary.total_cost_eur.toFixed(2)}
+          €{plan.summary.total_cost_eur.toFixed(2)}
         </Typography>
 
         {/* Import kWh */}
         <Typography data-testid="plan-import-kwh" variant="caption">
-          {plan.firm_summary.total_import_kwh.toFixed(1)} kWh
+          {plan.summary.total_import_kwh.toFixed(1)} kWh
         </Typography>
 
         {/* CO₂ */}
         <Typography data-testid="plan-co2" variant="caption">
-          {(plan.firm_summary.total_co2_g / 1000).toFixed(2)} kg CO₂
+          {(plan.summary.total_co2_g / 1000).toFixed(2)} kg CO₂
         </Typography>
 
         {/* Warnings badge + expand button */}

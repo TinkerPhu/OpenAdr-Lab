@@ -12,7 +12,7 @@ Feature: UC-05..UC-07 — VTN Coordination Use Cases
   Scenario: UC-05a — Plan has slots covering the planning horizon
     When I wait for the VEN /plan endpoint to return a plan
     Then the plan has field "slots"
-    And the plan flexible_slots is a non-empty array
+    And the plan.slots is a non-empty array
 
   Scenario: UC-05b — GET /flexibility returns live site-level flexibility envelope
     Given I have a VTN token as "any-business"
@@ -53,13 +53,13 @@ Feature: UC-05..UC-07 — VTN Coordination Use Cases
     When I wait for the VEN /capacity import_limit_kw to be 3.0
     Then the VEN /capacity response has import_limit_kw equal to 3.0
 
-  Scenario: UC-06b — Plan firm slots respect an import capacity limit
+  Scenario: UC-06b — Plan slots respect an import capacity limit
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create an IMPORT_CAPACITY_LIMIT event with limit 5.0 kW for the saved program
     When I wait for the VEN /capacity import_limit_kw to be 5.0
-    And I wait for the VEN /plan to have firm slots with import_cap_kw at most 5.0
-    Then all plan firm slots have import_cap_kw of at most 5.0
+    And I wait for the VEN /plan to have slots with import_cap_kw at most 5.0
+    Then all plan slots have import_cap_kw of at most 5.0
 
   # --- UC-07: Capacity State Accessible ---
   # The VEN exposes its full capacity subscription/reservation/limit state via /capacity.

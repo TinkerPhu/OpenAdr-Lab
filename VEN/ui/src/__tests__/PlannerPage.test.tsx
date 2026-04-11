@@ -20,7 +20,6 @@ function makeSlot(overrides: Partial<PlanTimeSlot> = {}): PlanTimeSlot {
     slot_index: 0,
     start: "2026-04-04T10:00:00Z",
     end: "2026-04-04T10:05:00Z",
-    slot_type: "FIRM",
     import_tariff_eur_kwh: 0.12,
     export_tariff_eur_kwh: 0.05,
     co2_g_kwh: 200,
@@ -40,10 +39,9 @@ function makeMockPlan(): Plan {
     id: "plan-001",
     created_at: "2026-04-04T10:00:00Z",
     trigger: "Periodic",
-    firm_boundary: "2026-04-04T13:00:00Z",
-    firm_slots: [makeSlot()],
-    flexible_slots: [],
-    firm_summary: { total_cost_eur: 1.0, total_co2_g: 500, total_import_kwh: 3.0, total_export_kwh: 0 },
+    slots: [makeSlot()],
+    summary: { total_cost_eur: 1.0, total_co2_g: 500, total_import_kwh: 3.0, total_export_kwh: 0 },
+    envelopes: [],
     warnings: [],
     steps: [],
   };
@@ -74,8 +72,7 @@ const mockPlanCycle: TraceEntry = {
   type: "PlanCycle",
   ts: "2026-04-04T10:00:00Z",
   trigger_reason: "Periodic",
-  firm_slots: 12,
-  flexible_slots: 36,
+  total_slots: 48,
 };
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -128,10 +125,6 @@ describe("PlannerPage", () => {
       asset_id: "battery",
       setpoint_kw: 3.5,
       actual_power_kw: 3.4,
-      reason: { kind: "CHEAP_TARIFF", tariff_eur_per_kwh: 0.12, threshold_eur_per_kwh: 0.18 },
-      state_before: { asset_type: "battery", actual_power_kw: 0.0 },
-      avail_max_import_kw: 5.0,
-      avail_max_export_kw: 5.0,
     }];
     vi.mocked(usePlan).mockReturnValue({ data: plan } as ReturnType<typeof usePlan>);
     render(<PlannerPage />);

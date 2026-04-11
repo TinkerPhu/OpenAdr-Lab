@@ -11,9 +11,9 @@ from features.helpers.wait import poll_until
 # When: plan polling with capacity constraints
 # ---------------------------------------------------------------------------
 
-@when("I wait for the VEN /plan to have firm slots with import_cap_kw at most {cap:f}")
+@when("I wait for the VEN /plan to have slots with import_cap_kw at most {cap:f}")
 def step_wait_plan_import_cap(context, cap):
-    """Poll /plan until all firm slots reflect the expected import cap."""
+    """Poll /plan until all slots reflect the expected import cap."""
     def fetch():
         resp = ven_get("/plan")
         if not resp.ok:
@@ -39,7 +39,7 @@ def step_wait_plan_import_cap(context, cap):
         has_cap,
         timeout=60,
         interval=5,
-        description=f"VEN /plan firm slots have import_cap_kw ≤ {cap}",
+        description=f"VEN /plan slots have import_cap_kw ≤ {cap}",
     )
 
 
@@ -158,17 +158,8 @@ def step_sim_ev_field_present(context):
 # Then: plan structure assertions
 # ---------------------------------------------------------------------------
 
-@then("the plan flexible_slots is a non-empty array")
-def step_plan_flexible_slots_nonempty(context):
-    plan = context.ven_plan
-    slots = plan.get("slots", [])
-    assert isinstance(slots, list) and len(slots) > 0, (
-        f"plan slots is empty or not a list: {slots}"
-    )
-
-
-@then("the plan firm_slots have import prices populated")
-def step_plan_firm_slots_have_prices(context):
+@then("the plan slots have import prices populated")
+def step_plan_slots_have_prices(context):
     """Verify every slot has a non-zero import_tariff_eur_kwh."""
     plan = context.ven_plan
     slots = plan.get("slots", [])
@@ -178,8 +169,8 @@ def step_plan_firm_slots_have_prices(context):
         assert price is not None, f"Slot missing import_tariff_eur_kwh: {slot}"
 
 
-@then("all plan firm slots have import_cap_kw of at most {cap:f}")
-def step_plan_firm_slots_cap(context, cap):
+@then("all plan slots have import_cap_kw of at most {cap:f}")
+def step_plan_slots_cap(context, cap):
     """Verify the import_cap_kw field in each slot does not exceed cap."""
     plan = context.ven_plan
     slots = plan.get("slots", [])
@@ -193,8 +184,8 @@ def step_plan_firm_slots_cap(context, cap):
         )
 
 
-@then("all plan firm slots have net_import_kw of at most {cap:f}")
-def step_plan_firm_slots_net_import(context, cap):
+@then("all plan slots have net_import_kw of at most {cap:f}")
+def step_plan_slots_net_import(context, cap):
     """Verify planned net import per slot does not exceed the cap."""
     plan = context.ven_plan
     slots = plan.get("slots", [])

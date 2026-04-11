@@ -11,8 +11,7 @@ function makePlanCycle(overrides: Partial<Extract<TraceEntry, { type: "PlanCycle
     type: "PlanCycle",
     ts: "2026-04-04T10:00:00Z",
     trigger_reason: "Periodic",
-    firm_slots: 12,
-    flexible_slots: 36,
+    total_slots: 48,
     ...overrides,
   };
 }

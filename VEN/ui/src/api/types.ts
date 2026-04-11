@@ -107,7 +107,7 @@ export type TraceEntry =
   | { type: "OpenAdrExpired";   ts: string; event_name: string }
   | { type: "RateChange";       ts: string; interval_start: string; import_eur_kwh: number; export_eur_kwh: number }
   | { type: "CapacityChange";   ts: string; import_limit_kw: number | null; export_limit_kw: number | null }
-  | { type: "PlanCycle";        ts: string; trigger_reason: string; firm_slots: number; flexible_slots: number }
+  | { type: "PlanCycle";        ts: string; trigger_reason: string; total_slots: number }
   | { type: "PacketTransition"; ts: string; packet_id: string; asset_id: string; from_status: string; to_status: string }
   | { type: "RequestTransition"; ts: string; request_id: string; asset_id: string; from_status: string; to_status: string };
 
@@ -167,7 +167,6 @@ export type PlanTimeSlot = {
   slot_index: number;
   start: string;
   end: string;
-  slot_type: "FIRM" | "FLEXIBLE";
   import_tariff_eur_kwh: number;
   export_tariff_eur_kwh: number;
   co2_g_kwh: number;
@@ -203,50 +202,27 @@ export type EnergyPacket = {
   updated_at: string;
 };
 
-export type FirmSummary = {
+export type PlanSummary = {
   total_cost_eur: number;
   total_co2_g: number;
   total_import_kwh: number;
   total_export_kwh: number;
 };
 
-// ─── Planner decision audit trail ────────────────────────────────────────────
-
-export type PlanReason =
-  | { kind: "IDLE" }
-  | { kind: "CHEAP_TARIFF";       tariff_eur_per_kwh: number; threshold_eur_per_kwh: number }
-  | { kind: "EXPENSIVE_TARIFF";   tariff_eur_per_kwh: number; threshold_eur_per_kwh: number }
-  | { kind: "FIRM_OBLIGATION";    source: unknown; required_kw: number }
-  | { kind: "USER_OVERRIDE";      request_id: string; mode: string }
-  | { kind: "SOC_CEILING";        soc_pct: number }
-  | { kind: "SOC_FLOOR";          soc_pct: number }
-  | { kind: "COMFORT_BOUND";      asset_id: string; bound_type: string }
-  | { kind: "GRID_IMPORT_LIMIT";  limit_kw: number }
-  | { kind: "GRID_EXPORT_LIMIT";  limit_kw: number }
-  | { kind: "POLICY_RESERVE";     policy_id: string }
-  | { kind: "OPPORTUNITY_MISSED"; reason: string }
-  | { kind: "SURPLUS_ABSORPTION"; surplus_kw: number };
-
 export type PlanStep = {
   ts: string;
   asset_id: string;
   setpoint_kw: number;
   actual_power_kw: number;
-  reason: PlanReason;
-  /** AssetState enum serialized as `{ asset_type: string; actual_power_kw: number; … }` */
-  state_before: { asset_type: string; actual_power_kw: number; [key: string]: unknown };
-  avail_max_import_kw: number;
-  avail_max_export_kw: number;
 };
 
 export type Plan = {
   id: string;
   created_at: string;
   trigger: string;
-  firm_boundary: string;
-  firm_slots: PlanTimeSlot[];
-  flexible_slots: PlanTimeSlot[];
-  firm_summary: FirmSummary;
+  slots: PlanTimeSlot[];
+  summary: PlanSummary;
+  envelopes: FlexibilityEnvelope[];
   warnings: Array<{ severity: string; message: string; packet_id: string | null; suggested_action: string | null }>;
   steps: PlanStep[];
 };
