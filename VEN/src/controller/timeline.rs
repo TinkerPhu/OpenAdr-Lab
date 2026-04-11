@@ -392,7 +392,7 @@ mod tests {
     };
     use crate::entities::asset::PlanTrigger;
     use crate::entities::plan::{
-        PacketAllocation, Plan, PlanSummary, PlanTimeSlot, PlanningHorizon,
+        CostBreakdown, PacketAllocation, Plan, PlanSummary, PlanTimeSlot, PlanningHorizon,
     };
     use crate::assets::Grid;
     use crate::simulator::energy::EnergyCounter;
@@ -508,6 +508,9 @@ mod tests {
             packets: vec![],
             warnings: vec![],
             steps: vec![],
+            soc_trajectory_kwh: vec![],
+            objective_eur: 0.0,
+            cost_breakdown: CostBreakdown::default(),
         }
     }
 
@@ -550,6 +553,8 @@ mod tests {
             net_export_kw: 0.0,
             import_flexibility_kw: 0.0,
             export_flexibility_kw: 0.0,
+            bat_charge_kw: 0.0,
+            bat_discharge_kw: 0.0,
         }
     }
 
@@ -1075,6 +1080,8 @@ mod tests {
             net_export_kw: (pv_forecast_kw - 0.5_f64).max(0.0),
             import_flexibility_kw: 0.0,
             export_flexibility_kw: 0.0,
+            bat_charge_kw: 0.0,
+            bat_discharge_kw: 0.0,
         }
     }
 
@@ -1104,6 +1111,9 @@ mod tests {
             packets: vec![],
             warnings: vec![],
             steps: vec![],
+            soc_trajectory_kwh: vec![],
+            objective_eur: 0.0,
+            cost_breakdown: CostBreakdown::default(),
         };
 
         let points = build_asset_timeline(
@@ -1150,6 +1160,9 @@ mod tests {
             packets: vec![],
             warnings: vec![],
             steps: vec![],
+            soc_trajectory_kwh: vec![],
+            objective_eur: 0.0,
+            cost_breakdown: CostBreakdown::default(),
         };
 
         let points = build_asset_timeline(

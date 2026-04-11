@@ -24,7 +24,7 @@ tokio-util = "0.7"
 
 serde_yaml = "0.9"
 rand = "0.8"
-good_lp = { version = "1", features = ["microlp"], default-features = false }
+good_lp = { version = "1", features = ["highs"], default-features = false }
 
 # If you decide to use the Rust VEN library:
 # openleadr-client = "0.1"   # check repo/docs for exact version you want
