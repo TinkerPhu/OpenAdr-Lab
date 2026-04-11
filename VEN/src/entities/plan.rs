@@ -5,14 +5,6 @@ use uuid::Uuid;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::energy_packet::EnergyPacket;
 
-/// Whether a plan time slot is firm (near-horizon, dispatched) or flexible (far-horizon) (§6.2.1).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum SlotType {
-    Firm,     // within near-horizon — will be dispatched
-    Flexible, // far-horizon — capacity preserved for flexibility
-}
-
 /// Defines the temporal scope of a planning cycle (§6.1).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningHorizon {
@@ -20,12 +12,10 @@ pub struct PlanningHorizon {
     pub end_time: DateTime<Utc>,
     pub step_size_s: u64, // planning timestep in seconds (e.g. 300 = 5min)
     pub num_steps: usize,
-    pub near_horizon: DateTime<Utc>, // = now + NearHorizonDuration
-    pub far_horizon: DateTime<Utc>,  // = end_time
+    pub far_horizon: DateTime<Utc>, // = end_time
 }
 
 /// Assignment of energy to a specific packet within a time slot (§6.3).
-/// Only exists in FIRM slots.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PacketAllocation {
     pub packet_id: Uuid,
@@ -50,7 +40,6 @@ pub struct PlanTimeSlot {
     pub slot_index: usize,
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
-    pub slot_type: SlotType,
 
     // --- External Conditions (from RateSnapshot) ---
     /// Import tariff for this slot (€/kWh)
@@ -59,11 +48,11 @@ pub struct PlanTimeSlot {
     pub export_tariff_eur_kwh: f64,
     /// CO2 intensity for this slot (g/kWh)
     pub co2_g_kwh: f64,
-    /// = ImportPrice + (CO2Rate × CO2Weight); used for FLEXIBLE slot scoring and storage arbitrage
+    /// = ImportPrice + (CO2Rate × CO2Weight); used for storage arbitrage scoring
     pub grid_effective_cost: f64,
     /// True if rate was filled by StaleRatePolicy (VTN offline); used for PlanWarning generation
     pub rate_estimated: bool,
-    /// Effective import capacity limit (subscription + reservation + event limit) (kW)
+    /// Effective import capacity limit (subscription + event limit) (kW)
     pub import_cap_kw: f64,
     /// Effective export capacity limit (kW)
     pub export_cap_kw: f64,
@@ -76,7 +65,7 @@ pub struct PlanTimeSlot {
     /// = max(0, -BaselineLoad): PV surplus available above fixed loads
     pub surplus_available_kw: f64,
 
-    // --- Planned Allocations (optimizer output, FIRM slots only) ---
+    // --- Planned Allocations (optimizer output) ---
     pub allocations: Vec<PacketAllocation>,
     /// Net planned import after all allocations + PV (kW)
     pub net_import_kw: f64,
@@ -91,28 +80,28 @@ pub struct PlanTimeSlot {
 }
 
 /// Flexibility envelope offered to VTN for capacity or price optimization (§6.9).
-/// One per packet with unallocated energy in FLEXIBLE slots.
+/// One per packet with unallocated energy in the planning horizon.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlexibilityEnvelope {
     pub packet_id: Uuid,
     pub asset_id: String,
-    /// Energy still needed in flexible horizon (kWh)
+    /// Energy still needed in the horizon (kWh)
     pub energy_needed_kwh: f64,
-    /// Asset's min power (if STEPPED, smallest nonzero step) (kW)
+    /// Asset's min power (kW)
     pub power_min_kw: f64,
     /// Asset's max power (kW)
     pub power_max_kw: f64,
-    /// Earliest FLEXIBLE slot for this packet
+    /// Earliest slot for this packet
     pub window_start: DateTime<Utc>,
-    /// Latest FLEXIBLE slot (LatestEnd for STOP, open for CONTINUE)
+    /// Latest slot (LatestEnd for STOP, open for CONTINUE)
     pub window_end: DateTime<Utc>,
-    /// Number of FLEXIBLE slots in window
+    /// Number of slots in window
     pub slots_available: usize,
     /// Max rate this packet will accept (€/kWh)
     pub max_acceptable_rate: f64,
     /// Min rate at projected fill (€/kWh)
     pub min_acceptable_rate: f64,
-    /// MaxTotalCost - AccumulatedCost - FIRM slot costs (€)
+    /// MaxTotalCost - AccumulatedCost (€)
     pub budget_remaining_eur: f64,
     /// Estimated cost (EnergyNeeded × avg eligible slot GridEffectiveCost) (€)
     pub estimated_cost_eur: f64,
@@ -122,9 +111,8 @@ pub struct FlexibilityEnvelope {
 
 /// Live site-level flexibility available to the grid right now (§9).
 ///
-/// Computed directly from current asset state and active reservations —
-/// independent of the active plan. Always queryable without triggering
-/// a planning cycle.
+/// Computed directly from current asset state — independent of the active plan.
+/// Always queryable without triggering a planning cycle.
 ///
 /// up_kw:   how much the VEN can reduce grid consumption right now (kW, ≥ 0).
 /// down_kw: how much the VEN can increase grid consumption right now (kW, ≥ 0).
@@ -162,21 +150,13 @@ pub struct PlanWarning {
     pub suggested_action: Option<String>,
 }
 
-/// Firm section summary.
+/// Summary of the full plan horizon.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct FirmSummary {
+pub struct PlanSummary {
     pub total_cost_eur: f64,
     pub total_co2_g: f64,
     pub total_import_kwh: f64,
     pub total_export_kwh: f64,
-}
-
-/// Flexible section summary.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct FlexibleSummary {
-    pub total_energy_kwh: f64,
-    pub estimated_cost_eur: f64,
-    pub estimated_co2_g: f64,
 }
 
 /// A complete plan covering the planning horizon (§6.10).
@@ -186,35 +166,31 @@ pub struct Plan {
     pub created_at: DateTime<Utc>,
     pub trigger: PlanTrigger,
     pub horizon: PlanningHorizon,
-    /// Divides FIRM from FLEXIBLE sections
-    pub firm_boundary: DateTime<Utc>,
 
-    // --- FIRM section (near horizon) ---
-    pub firm_slots: Vec<PlanTimeSlot>,
-    pub firm_summary: FirmSummary,
+    // --- All time slots (uniform, full horizon) ---
+    pub slots: Vec<PlanTimeSlot>,
+    pub summary: PlanSummary,
 
-    // --- FLEXIBLE section (far horizon) ---
-    pub flexible_slots: Vec<PlanTimeSlot>,
+    // --- Flexibility offered to VTN ---
     pub envelopes: Vec<FlexibilityEnvelope>,
-    pub flexible_summary: FlexibleSummary,
 
     // --- Combined ---
     /// Snapshot of all packets considered at plan time
     pub packets: Vec<EnergyPacket>,
     pub warnings: Vec<PlanWarning>,
-    /// Full per-(ts × asset) audit trail. Populated by Phase D CP2.
+    /// Full per-(ts × asset) audit trail.
     pub steps: Vec<PlanStep>,
 }
 
 impl Plan {
-    /// All slots (firm + flexible), in order.
+    /// All slots in chronological order.
     pub fn all_slots(&self) -> impl Iterator<Item = &PlanTimeSlot> {
-        self.firm_slots.iter().chain(self.flexible_slots.iter())
+        self.slots.iter()
     }
 
     /// Return the plan slot that covers `now`, if any.
     pub fn current_slot(&self, now: DateTime<Utc>) -> Option<&PlanTimeSlot> {
-        self.all_slots().find(|s| s.start <= now && now < s.end)
+        self.slots.iter().find(|s| s.start <= now && now < s.end)
     }
 }
 

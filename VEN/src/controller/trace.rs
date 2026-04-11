@@ -44,8 +44,7 @@ pub enum ControllerEvent {
     PlanCycle {
         ts: DateTime<Utc>,
         trigger_reason: String,
-        firm_slots: usize,
-        flexible_slots: usize,
+        total_slots: usize,
     },
     PacketTransition {
         ts: DateTime<Utc>,

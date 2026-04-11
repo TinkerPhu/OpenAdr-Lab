@@ -591,8 +591,7 @@ pub(crate) fn spawn_planning(
             );
             drop(sim_guard_for_planner);
             plan.steps = plan_steps;
-            let firm_count = plan.firm_slots.len();
-            let flex_count = plan.flexible_slots.len();
+            let slot_count = plan.slots.len();
             let plan_packets = plan.packets.clone();
             state.set_active_packets(plan_packets.clone()).await;
             state.set_active_plan(Some(plan)).await;
@@ -615,8 +614,7 @@ pub(crate) fn spawn_planning(
             let plan_cycle_event = controller::trace::ControllerEvent::PlanCycle {
                 ts: now,
                 trigger_reason,
-                firm_slots: firm_count,
-                flexible_slots: flex_count,
+                total_slots: slot_count,
             };
             state.push_controller_event(plan_cycle_event.clone()).await;
 

@@ -44,10 +44,10 @@ def step_wait_for_ev_allocation(context):
     def has_ev_alloc(plan):
         if plan is None:
             return False
-        firm = plan.get("firm_slots", [])
+        slots = plan.get("slots", [])
         return any(
             any(a.get("asset_id") == "ev" for a in slot.get("allocations", []))
-            for slot in firm
+            for slot in slots
         )
 
     context.ven_plan = poll_until(
@@ -55,7 +55,7 @@ def step_wait_for_ev_allocation(context):
         has_ev_alloc,
         timeout=90,
         interval=5,
-        description="VEN /plan has EV allocation in firm_slots",
+        description="VEN /plan has EV allocation in slots",
     )
 
 
@@ -141,9 +141,9 @@ def step_plan_has_field(context, field):
 @then("the plan.firm_slots is a non-empty array")
 def step_plan_firm_slots_nonempty(context):
     plan = context.ven_plan
-    slots = plan.get("firm_slots", [])
+    slots = plan.get("slots", [])
     assert isinstance(slots, list) and len(slots) > 0, (
-        f"firm_slots is empty or not a list: {slots}"
+        f"plan slots is empty or not a list: {slots}"
     )
 
 
@@ -159,14 +159,14 @@ def step_plan_envelopes_nonempty(context):
 @then('at least one firm slot has an allocation for asset "{asset_id}"')
 def step_firm_slot_has_allocation(context, asset_id):
     plan = context.ven_plan
-    firm = plan.get("firm_slots", [])
+    slots = plan.get("slots", [])
     found = any(
         any(a.get("asset_id") == asset_id for a in slot.get("allocations", []))
-        for slot in firm
+        for slot in slots
     )
     assert found, (
-        f"No firm slot has an allocation for asset '{asset_id}'. "
-        f"Checked {len(firm)} firm slots."
+        f"No slot has an allocation for asset '{asset_id}'. "
+        f"Checked {len(slots)} slots."
     )
 
 

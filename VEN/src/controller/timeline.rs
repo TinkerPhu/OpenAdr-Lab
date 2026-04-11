@@ -392,8 +392,7 @@ mod tests {
     };
     use crate::entities::asset::PlanTrigger;
     use crate::entities::plan::{
-        FirmSummary, FlexibleSummary, PacketAllocation, Plan, PlanTimeSlot, PlanningHorizon,
-        SlotType,
+        PacketAllocation, Plan, PlanSummary, PlanTimeSlot, PlanningHorizon,
     };
     use crate::assets::Grid;
     use crate::simulator::energy::EnergyCounter;
@@ -501,15 +500,11 @@ mod tests {
                 end_time: now + Duration::hours(2),
                 step_size_s: 300,
                 num_steps: 24,
-                near_horizon: now + Duration::hours(1),
                 far_horizon: now + Duration::hours(2),
             },
-            firm_boundary: now + Duration::hours(1),
-            firm_slots: vec![],
-            firm_summary: FirmSummary::default(),
-            flexible_slots: vec![],
+            slots: vec![],
+            summary: PlanSummary::default(),
             envelopes: vec![],
-            flexible_summary: FlexibleSummary::default(),
             packets: vec![],
             warnings: vec![],
             steps: vec![],
@@ -527,7 +522,6 @@ mod tests {
             slot_index: 0,
             start,
             end: start + Duration::seconds(300),
-            slot_type: SlotType::Firm,
             import_tariff_eur_kwh: 0.20,
             export_tariff_eur_kwh: 0.05,
             co2_g_kwh: 300.0,
@@ -611,7 +605,7 @@ mod tests {
         let sim = make_sim(vec![]);
         let mut plan = empty_plan(now);
         // Slot starting 60s from now with EV allocation
-        plan.firm_slots.push(make_slot(60, "ev", 3.5, now));
+        plan.slots.push(make_slot(60, "ev", 3.5, now));
         let result = build_asset_timeline(
             "ev",
             &known,
@@ -654,7 +648,7 @@ mod tests {
             cost_eur: 1.0 * 0.05 * slot_h + 2.0 * 0.20 * slot_h,
             co2_g: 2.0 * 300.0 * slot_h,
         });
-        plan.firm_slots.push(slot);
+        plan.slots.push(slot);
         let result = build_asset_timeline(
             "ev",
             &known,
@@ -681,7 +675,7 @@ mod tests {
         let mut plan = empty_plan(now);
         let mut slot = make_slot(60, "", 0.0, now);
         slot.pv_forecast_kw = 4.0;
-        plan.firm_slots.push(slot);
+        plan.slots.push(slot);
         let result = build_asset_timeline(
             "pv",
             &known,
@@ -705,7 +699,7 @@ mod tests {
         // 2 past rows within 1h back
         let sim = make_sim(vec![make_base_entry("ev", &[(0, 1.0), (1800, 2.0)])]);
         let mut plan = empty_plan(now);
-        plan.firm_slots.push(make_slot(60, "ev", 3.0, now));
+        plan.slots.push(make_slot(60, "ev", 3.0, now));
         let result = build_asset_timeline(
             "ev",
             &known,
@@ -738,7 +732,7 @@ mod tests {
         slot.net_export_kw = 0.0;
         slot.import_tariff_eur_kwh = 0.25;
         slot.co2_g_kwh = 350.0;
-        plan.firm_slots.push(slot);
+        plan.slots.push(slot);
 
         let result = build_asset_timeline(
             "grid",
@@ -771,7 +765,7 @@ mod tests {
         slot.import_tariff_eur_kwh = 0.25;
         slot.export_tariff_eur_kwh = 0.08;
         slot.co2_g_kwh = 300.0;
-        plan.firm_slots.push(slot);
+        plan.slots.push(slot);
 
         let result = build_asset_timeline(
             "grid",
@@ -798,7 +792,7 @@ mod tests {
         let sim = make_sim(vec![]);
         let mut plan = empty_plan(now);
         // Slot only has battery allocation, no EV allocation
-        plan.firm_slots.push(make_slot(60, "battery", 2.0, now));
+        plan.slots.push(make_slot(60, "battery", 2.0, now));
         let result = build_asset_timeline(
             "ev",
             &known,
@@ -823,8 +817,8 @@ mod tests {
         let known = make_known(&["ev"]);
         let sim = make_sim(vec![make_base_entry("ev", &[(1800, 1.0), (3600, 2.0)])]);
         let mut plan = empty_plan(now);
-        plan.firm_slots.push(make_slot(300, "ev", 3.0, now));
-        plan.firm_slots.push(make_slot(600, "ev", 3.5, now));
+        plan.slots.push(make_slot(300, "ev", 3.0, now));
+        plan.slots.push(make_slot(600, "ev", 3.5, now));
         let result = build_asset_timeline(
             "ev",
             &known,
@@ -1066,7 +1060,6 @@ mod tests {
             slot_index: 0,
             start,
             end: start + Duration::seconds(300),
-            slot_type: SlotType::Firm,
             import_tariff_eur_kwh: 0.20,
             export_tariff_eur_kwh: 0.05,
             co2_g_kwh: 300.0,
@@ -1103,15 +1096,11 @@ mod tests {
                 end_time: now + Duration::hours(24),
                 step_size_s: 300,
                 num_steps: 288,
-                near_horizon: now + Duration::hours(4),
                 far_horizon: now + Duration::hours(24),
             },
-            firm_boundary: now + Duration::hours(4),
-            firm_slots: vec![slot],
-            firm_summary: FirmSummary::default(),
-            flexible_slots: vec![],
+            slots: vec![slot],
+            summary: PlanSummary::default(),
             envelopes: vec![],
-            flexible_summary: FlexibleSummary::default(),
             packets: vec![],
             warnings: vec![],
             steps: vec![],
@@ -1153,15 +1142,11 @@ mod tests {
                 end_time: now + Duration::hours(24),
                 step_size_s: 300,
                 num_steps: 288,
-                near_horizon: now + Duration::hours(4),
                 far_horizon: now + Duration::hours(24),
             },
-            firm_boundary: now + Duration::hours(4),
-            firm_slots: vec![slot],
-            firm_summary: FirmSummary::default(),
-            flexible_slots: vec![],
+            slots: vec![slot],
+            summary: PlanSummary::default(),
             envelopes: vec![],
-            flexible_summary: FlexibleSummary::default(),
             packets: vec![],
             warnings: vec![],
             steps: vec![],

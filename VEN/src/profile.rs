@@ -246,9 +246,6 @@ pub struct PlannerConfig {
     /// Planning timestep in seconds (default 300 = 5 min).
     #[serde(default = "default_plan_step")]
     pub plan_step_s: u64,
-    /// Near-horizon window in hours — slots here become FIRM (default 4).
-    #[serde(default = "default_near_horizon_h")]
-    pub near_horizon_h: u64,
     /// Total planning horizon in hours (default 24).
     #[serde(default = "default_plan_horizon_h")]
     pub plan_horizon_h: u64,
@@ -267,7 +264,6 @@ impl Default for PlannerConfig {
     fn default() -> Self {
         Self {
             plan_step_s: default_plan_step(),
-            near_horizon_h: default_near_horizon_h(),
             plan_horizon_h: default_plan_horizon_h(),
             replan_interval_s: default_replan_interval(),
             lookahead_h: default_lookahead_h(),
@@ -278,9 +274,6 @@ impl Default for PlannerConfig {
 
 fn default_plan_step() -> u64 {
     300
-}
-fn default_near_horizon_h() -> u64 {
-    4
 }
 fn default_plan_horizon_h() -> u64 {
     24

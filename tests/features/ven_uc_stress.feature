@@ -13,14 +13,14 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
   Scenario: UC-11a — Planner produces a valid plan even with no new user requests
     When I wait for the VEN /plan endpoint to return a plan
     Then the plan has field "id"
-    And the plan has field "firm_slots"
+    And the plan has field "slots"
     And the plan.firm_slots is a non-empty array
 
-  Scenario: UC-11b — Plan runs without crashing when no packets match any firm slot
+  Scenario: UC-11b — Plan runs without crashing when no packets match any slot
     When I POST a sim override with no EV charging demand
     And I wait for the VEN /plan endpoint to return a plan
     Then the plan has field "id"
-    And the plan has field "firm_slots"
+    And the plan has field "slots"
 
   Scenario: UC-11c — Asset ledger tracks energy in active assets
     When I poll VEN /ledger until field "ev" is present
