@@ -10,8 +10,11 @@ use crate::entities::energy_packet::{EnergyPacket, EnergySnapshot, PacketStatus}
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::simulator::SimSnapshot;
 use crate::state::AssetLedgerEntry;
-use crate::controller::thresholds::{ACTIVE_THRESHOLD_KW, COMPLETION_TOL_KWH, NEAR_ZERO_KW};
 use chrono::{DateTime, Utc};
+
+const NEAR_ZERO_KW: f64 = 1e-3;
+const ACTIVE_THRESHOLD_KW: f64 = 1e-2;
+const COMPLETION_TOL_KWH: f64 = 1e-4;
 use std::collections::HashMap;
 
 const DEFAULT_IMPORT_PRICE: f64 = 0.20;
@@ -150,7 +153,6 @@ pub fn record_tick(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::controller::thresholds::{ACTIVE_THRESHOLD_KW, COMPLETION_TOL_KWH, NEAR_ZERO_KW};
     use crate::entities::energy_packet::{EnergyPacket, EnergySnapshot, PacketStatus, ValueCurve};
     use crate::simulator::{AssetSnapshot, GridSnapshot, SimSnapshot};
     use chrono::Utc;

@@ -237,8 +237,8 @@ def _reset_ven_sim_overrides():
 def _reset_ven_packets():
     """Drop all non-terminal EV packets on VEN-1 between scenarios.
 
-    Prevents packets posted in one scenario (e.g. plan_reasons FIRM_OBLIGATION
-    test) from leaking into subsequent scenarios and polluting the planner state.
+    Prevents packets posted in one scenario from leaking into subsequent
+    scenarios and polluting the planner state.
     """
     try:
         from features.helpers.api_client import ven_delete
