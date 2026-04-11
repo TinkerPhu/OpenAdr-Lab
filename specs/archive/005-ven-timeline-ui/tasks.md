@@ -63,11 +63,11 @@
 - [ ] T014 [P] [US2] Add `useTimeline(assetId: string, hoursBack: number, hoursForward: number)` hook to VEN/ui/src/api/hooks.ts (calls GET /timeline/{assetId}?hours_back=&hours_forward=, staleTime 10000, queryKey ["timeline", assetId, hoursBack, hoursForward])
 - [ ] T015 [US2] Update `AssetTimelineChart` in VEN/ui/src/components/controller-v2/charts/AssetTimelineChart.tsx: change props type to `data: AssetTimelinePoint[]`; access chart series as `values.power_kw`, `values.cost_rate_eur_h`, `values.co2_rate_g_h`; use recharts accessor function `(pt) => pt.values["power_kw"] ?? null` (not dot-notation dataKey since values is a nested map); fix X-axis domain to `[nowMs - hoursBack*3_600_000, nowMs + hoursForward*3_600_000]` defaulting to ±1h; pass `hoursBack` and `hoursForward` as props (defaults 1)
 - [ ] T016 [US2] Wire `useTimeline` in AssetCell (VEN/ui/src/components/controller-v2/AssetCell.tsx or equivalent): replace `buildAssetTimeline(...)` call with `const { data: timeline = [] } = useTimeline(assetId, hoursBack, hoursForward)`; pass `timeline` to `AssetTimelineChart`; add `nowMs` prop computed at page level
-- [ ] T017 [US2] Update BDD tests in tests/features/controller_v2/02_asset_cells.feature: add scenario "Battery asset cell shows past power data" and "Base load asset cell shows past power data"; update PV scenario to assert actual power values (not setpoint); confirm NOW reference line scenario still passes
-- [ ] T018 [US2] Write step definitions for new 02_asset_cells scenarios in tests/features/steps/controller_v2_steps.py (battery timeline chart visible, base_load timeline chart visible)
-- [ ] T019 [US2] Deploy to Pi4-Server and run full BDD suite to confirm US2 scenarios pass and no regressions: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner features/controller_v2/`
+- [ ] T017 [US2] Update BDD tests in tests/features/controller/02_asset_cells.feature: add scenario "Battery asset cell shows past power data" and "Base load asset cell shows past power data"; update PV scenario to assert actual power values (not setpoint); confirm NOW reference line scenario still passes
+- [ ] T018 [US2] Write step definitions for new 02_asset_cells scenarios in tests/features/steps/controller_steps.py (battery timeline chart visible, base_load timeline chart visible)
+- [ ] T019 [US2] Deploy to Pi4-Server and run full BDD suite to confirm US2 scenarios pass and no regressions: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner features/controller/`
 
-**Checkpoint**: Battery and base_load asset cells show timeline data. PV chart shows physics-model values. NOW line visible. All existing controller_v2 scenarios still pass.
+**Checkpoint**: Battery and base_load asset cells show timeline data. PV chart shows physics-model values. NOW line visible. All existing controller scenarios still pass.
 
 ---
 
@@ -79,8 +79,8 @@
 
 - [ ] T020 [US3] Add `EXTENDED_WINDOWS` lookup table and `extended` state toggle to AssetCell in VEN/ui/src/components/controller-v2/AssetCell.tsx: `useState<boolean>(false)`; compute `hoursBack`/`hoursForward` from lookup; render icon toggle button with `data-testid="asset-cell-{assetId}-extend-btn"` only when the asset has an entry in `EXTENDED_WINDOWS`; pass computed window params to `useTimeline`
 - [ ] T021 [US3] Add extended window support to `GridTariffCell` in VEN/ui/src/components/controller-v2/GridTariffCell.tsx: replace `buildTariffTimeline(...)` call with `useTimeline("grid", hoursBack, hoursForward)`; add toggle icon for `hours_back=0, hours_forward=24` extended mode
-- [ ] T022 [US3] Add BDD scenario "Per-cell extended window toggle expands EV horizon" to tests/features/controller_v2/02_asset_cells.feature; add scenario "Tariff cell extended window shows no past"
-- [ ] T023 [US3] Write step definitions for extended window scenarios in tests/features/steps/controller_v2_steps.py; deploy and verify: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner features/controller_v2/02_asset_cells.feature`
+- [ ] T022 [US3] Add BDD scenario "Per-cell extended window toggle expands EV horizon" to tests/features/controller/02_asset_cells.feature; add scenario "Tariff cell extended window shows no past"
+- [ ] T023 [US3] Write step definitions for extended window scenarios in tests/features/steps/controller_steps.py; deploy and verify: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner features/controller/02_asset_cells.feature`
 
 **Checkpoint**: Extended window toggle works per-cell. EV → 24h forward. Tariff → no past, 24h forward. Heater/PV/BaseLoad have no toggle icon.
 
@@ -97,7 +97,7 @@
 - [ ] T026 [US4] Rewrite `AssetRightSection` in VEN/ui/src/components/controller-v2/AssetRightSection.tsx to use `useSimSchema()`: `const { data: schema } = useSimSchema(); const controls = schema?.[assetId] ?? [];`; replace all hardcoded per-asset-type conditionals with `controls.map(d => <DynamicControl .../>)`; keep existing `simOverrides` + `onOverrideChange` props interface unchanged
 - [ ] T027 [US4] Deploy to Pi4-Server and verify EV cell right section renders schema-driven controls: no `if assetId === "ev"` conditionals remain in AssetRightSection.tsx; `data-testid="ctrl-ev-plugged"` and `data-testid="ctrl-ev-soc"` still present (now from schema)
 
-**Checkpoint**: AssetRightSection has zero hardcoded asset-type conditionals. All existing simulation control BDD scenarios (`controller_v2/03_simulation_controls.feature`) still pass.
+**Checkpoint**: AssetRightSection has zero hardcoded asset-type conditionals. All existing simulation control BDD scenarios (`controller/03_simulation_controls.feature`) still pass.
 
 ---
 
