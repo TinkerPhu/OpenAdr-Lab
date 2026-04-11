@@ -20,11 +20,11 @@
 
 **⚠️ CONSTITUTION**: Feature files MUST be written and confirmed failing before Phase 2 begins.
 
-- [X] T001 [P] Write `tests/features/controller_v2/01_layout.feature` — scenarios: grid cells appear above asset cells, page is scrollable, grid cells scroll with page (not fixed)
-- [X] T002 [P] Write `tests/features/controller_v2/02_asset_cells.feature` — scenarios: left section shows power/cost/CO₂, NOW line visible, solid/dashed/dotted lines, negative power renders below x-axis
-- [X] T003 [P] Write `tests/features/controller_v2/03_simulation_controls.feature` — scenarios: EV plugged toggle visible, SoC slider visible, POST /sim/override triggered on change
-- [X] T004 [P] Write `tests/features/controller_v2/04_navigation.feature` — scenarios: pin cell → stays in viewport while scrolling, unpin → returns to position, collapse left section, collapse right section
-- [X] T005 Run test-runner on Pi4-Server to confirm all 4 feature files fail: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner features/controller_v2/`
+- [X] T001 [P] Write `tests/features/controller/01_layout.feature` — scenarios: grid cells appear above asset cells, page is scrollable, grid cells scroll with page (not fixed)
+- [X] T002 [P] Write `tests/features/controller/02_asset_cells.feature` — scenarios: left section shows power/cost/CO₂, NOW line visible, solid/dashed/dotted lines, negative power renders below x-axis
+- [X] T003 [P] Write `tests/features/controller/03_simulation_controls.feature` — scenarios: EV plugged toggle visible, SoC slider visible, POST /sim/override triggered on change
+- [X] T004 [P] Write `tests/features/controller/04_navigation.feature` — scenarios: pin cell → stays in viewport while scrolling, unpin → returns to position, collapse left section, collapse right section
+- [X] T005 Run test-runner on Pi4-Server to confirm all 4 feature files fail: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner features/controller/`
 - [X] T006 Add `/controller-v2` route and "Controller V2" nav link to `VEN/ui/src/App.tsx` — import placeholder `ControllerV2` page (stub returning `<div>Controller V2</div>`)
 
 **Checkpoint**: All 4 feature files exist and fail. Route `/controller-v2` is reachable (shows stub).

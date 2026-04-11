@@ -83,12 +83,12 @@ VEN/ui/src/
 tests/features/
 ├── ven_timeline.feature     ← new feature file (from contracts/bdd-scenarios.md)
 ├── ven_simulator.feature    ← updated assertions (assets.<id> paths)
-└── controller_v2/
+└── controller/
     └── 02_asset_cells.feature ← updated (battery/base_load/PV fixes, extended window)
 
 tests/features/steps/
 ├── ven_timeline_steps.py    ← new step definitions for timeline scenarios
-└── controller_v2_steps.py  ← updated steps for extended window, dynamic controls
+└── controller_steps.py  ← updated steps for extended window, dynamic controls
 ```
 
 ## Tech Stack Decisions
@@ -190,7 +190,7 @@ const EXTENDED_WINDOWS: Record<string, { hoursBack: number; hoursForward: number
 12. **`ControllerV2.tsx` cleanup** — `nowMs` memoization, remove dataBuilders calls
 13. **`dataBuilders.ts` cleanup** — delete the three timeline builders
 14. **BDD `ven_simulator.feature` updates** — `assets.<id>` field paths
-15. **BDD `controller_v2/02_asset_cells.feature` updates** — battery/PV/extended window
+15. **BDD `controller/02_asset_cells.feature` updates** — battery/PV/extended window
 
 ## Risks & Mitigations
 

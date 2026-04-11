@@ -17,12 +17,12 @@
 
 ### 1. Write BDD scenarios first (Principle II)
 
-Feature files live at `tests/features/controller_v2/`. Write `.feature` files before writing any implementation code. Run them to confirm they fail (red phase).
+Feature files live at `tests/features/controller/`. Write `.feature` files before writing any implementation code. Run them to confirm they fail (red phase).
 
 ```bash
 ssh Pi4-Server "cd /srv/docker/openadr_lab && \
   docker compose -f tests/docker-compose.test.yml run --build --rm test-runner \
-  features/controller_v2/01_layout.feature"
+  features/controller/01_layout.feature"
 ```
 
 ### 2. Add backend stubs (VEN/src/state.rs)
@@ -65,7 +65,7 @@ ssh Pi4-Server "cd /srv/docker/openadr_lab/VEN/ui && npm test"
 ```bash
 ssh Pi4-Server "cd /srv/docker/openadr_lab && \
   docker compose -f tests/docker-compose.test.yml run --build --rm test-runner \
-  features/controller_v2/"
+  features/controller/"
 ```
 
 `--build` is **always required** when feature files, step definitions, or VEN source changed.
@@ -90,7 +90,7 @@ Zero failures required before marking the feature complete.
 | `VEN/ui/src/components/controller-v2/dataBuilders.ts` | Data transform functions |
 | `VEN/ui/src/App.tsx` | Add route + nav tab here |
 | `VEN/src/state.rs` | Add 3 stub fields to UserOverrides |
-| `tests/features/controller_v2/` | BDD scenarios |
+| `tests/features/controller/` | BDD scenarios |
 | `VEN/ui/src/__tests__/ControllerV2.test.tsx` | Unit tests |
 
 ---

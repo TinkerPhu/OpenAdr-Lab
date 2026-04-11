@@ -61,7 +61,7 @@ These map directly to the Rust structs in `VEN/src/entities/plan.rs`. The 12 `Pl
 
 **Finding**:
 - BDD feature files at `tests/features/`, tagged `@ven-ui` for Playwright-driven UI tests
-- Step definitions in `tests/features/steps/controller_ui_steps.py`, `controller_v2_steps.py`, etc.
+- Step definitions in `tests/features/steps/controller_ui_steps.py`, `controller_steps.py`, etc.
 - UI helper uses `data-testid` selectors via `tid()` function (`helpers/ui.py`)
 - Vitest unit tests at `VEN/ui/src/__tests__/` — each page/component has a corresponding `.test.tsx`
 - Pattern: mock all hooks with `vi.mock("../api/hooks", ...)` at test module level

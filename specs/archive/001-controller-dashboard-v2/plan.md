@@ -26,7 +26,7 @@ Build a new "Controller V2" page in the VEN UI that displays all configured ener
 | Principle | Status | Notes |
 |-----------|--------|-------|
 | I. OpenADR Spec Fidelity | ✅ PASS | No OpenADR field names involved. All fields are VEN-internal API names (`power_kw`, `import_price_eur_kwh`, etc.) |
-| II. BDD-First Testing | ⚠️ REQUIRED | Feature files must be written before any implementation code. 4 feature files planned under `tests/features/controller_v2/` |
+| II. BDD-First Testing | ⚠️ REQUIRED | Feature files must be written before any implementation code. 4 feature files planned under `tests/features/controller/` |
 | III. Upstream Compatibility | ➖ N/A | No openleadr-rs submodule changes. Backend stubs are in VEN/src/state.rs only |
 | IV. Lean Architecture | ✅ PASS | Reuses all existing hooks, recharts, MUI patterns. Three new stub fields in UserOverrides. No new HTTP routes. New components scoped to `controller-v2/` subdirectory |
 | V. Infrastructure Parity | ⚠️ REQUIRED | All builds/tests on Pi4-Server via SSH. Rebuild test-runner image whenever feature files or VEN source change |
@@ -76,14 +76,14 @@ VEN/src/
 └── state.rs                                   # +3 fields: ev_initial_soc, battery_initial_soc,
                                                #  battery_capacity_kwh to UserOverrides
 
-tests/features/controller_v2/
+tests/features/controller/
 ├── 01_layout.feature                         # Page structure, cells ordering, scrollability
 ├── 02_asset_cells.feature                    # Left/mid content, graph lines, sign convention
 ├── 03_simulation_controls.feature            # Right section controls, POST /sim/override
 └── 04_navigation.feature                     # Pin, unpin, collapse, expand
 ```
 
-**Structure Decision**: Web application (frontend-only, plus minimal backend stubs). New components in dedicated `controller-v2/` subdirectory; BDD tests under `tests/features/controller_v2/` as a grouped set. Existing `/controller` page is untouched.
+**Structure Decision**: Web application (frontend-only, plus minimal backend stubs). New components in dedicated `controller-v2/` subdirectory; BDD tests under `tests/features/controller/` as a grouped set. Existing `/controller` page is untouched.
 
 ## Complexity Tracking
 

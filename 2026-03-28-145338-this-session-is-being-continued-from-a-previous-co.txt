@@ -286,7 +286,7 @@ user)
      │                                                                         │
      │ New files                                                               │
      │                                                                         │
-     │ - tests/features/controller_v2/05_ev_charging_scenarios.feature         │
+     │ - tests/features/controller/05_ev_charging_scenarios.feature         │
      │ - tests/features/steps/ev_charging_steps.py                             │
      │                                                                         │
      │ New steps in ev_charging_steps.py                                       │
@@ -375,7 +375,7 @@ user)
      │ ssh Pi4-Server "cd /srv/docker/openadr_lab && \                         │
      │   docker compose -f tests/docker-compose.test.yml run --build --rm      │
      │ test-runner \                                                           │
-     │   features/controller_v2/05_ev_charging_scenarios.feature"              │
+     │   features/controller/05_ev_charging_scenarios.feature"              │
      │ Then full suite to confirm no regressions.                              │
      │                                                                         │
      │ ---                                                                     │
