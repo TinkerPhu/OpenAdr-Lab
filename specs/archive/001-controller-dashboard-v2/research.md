@@ -209,7 +209,7 @@ If `GET /sim` itself fails (network error, VEN unreachable, HTTP error), the pag
 | `03_simulation_controls.feature` | EV plugged toggle visible; SoC slider visible; POST /sim/override triggered |
 | `04_navigation.feature` | Pin cell → stays in viewport while scrolling; unpin → returns to position; collapse left/right sections |
 
-Tests run via `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner features/controller_v2/`.
+Tests run via `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner features/controller/`.
 
 ---
 

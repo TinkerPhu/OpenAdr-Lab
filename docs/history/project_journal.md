@@ -2812,7 +2812,7 @@ Replaced per-asset stride-based `downsample()` in `GET /timeline/all` and `GET /
 
 #### Key learnings
 
-- **Backend response changes break UI silently**: Changing `values` from always-object to sometimes-null caused `TypeError: Cannot read properties of null` in 21 BDD scenarios across controller_v2 and raw_diagnostics. The UI code accessed `values.power_kw` and `values["power_kw"]` without null guards. Always check downstream consumers when changing response shapes.
+- **Backend response changes break UI silently**: Changing `values` from always-object to sometimes-null caused `TypeError: Cannot read properties of null` in 21 BDD scenarios across controller and raw_diagnostics. The UI code accessed `values.power_kw` and `values["power_kw"]` without null guards. Always check downstream consumers when changing response shapes.
 - **Never dismiss test failures as pre-existing without verifying**: Initial reaction was "those are UI tests, unrelated to backend changes." Reading the actual error message (`Cannot read properties of null (reading 'power_kw')`) immediately revealed the connection. Added CLAUDE.md rule to prevent this.
 - **Vitest must run from the real filesystem path, not from a git worktree**: The worktree has no `node_modules` and the subst drive path causes vite resolution failures. Solution: copy changed files to the main repo path, run vitest, then restore.
 - **Duplicate behave step definitions cause load-time crashes**: `@when('I GET {path} from the VEN')` was defined in both `entity_model_steps.py` and `timeline_grid_steps.py`. Behave raises `AmbiguousStep` at import time, failing ALL tests. Solution: reuse existing step definitions instead of redefining.
@@ -3041,7 +3041,7 @@ Three injection behaviours defined:
 - Rewrote `tick()`: removed `overrides: &UserOverrides` param and all config mutation blocks; added PV EMA smoothing; added Behaviour C env/state injections
 - Added `/sim/inject` GET + POST + `/sim/inject/reset` endpoints
 - `POST /sim/override` rewritten as alias bridge → translates `UserOverrides` → `SimInjectState`
-- `GET /sim/override` translates back (backward compat for `controller_v2_steps.py`)
+- `GET /sim/override` translates back (backward compat for `controller_steps.py`)
 - `build_setpoints()` gains `heater_setpoint_c` param: dispatcher computes binary ON/OFF from current temp vs target
 
 **Group B (Phases 4–5 — New Inject Fields)**:
@@ -3062,7 +3062,7 @@ Three injection behaviours defined:
 - **PV smoothing startup lag**: Initializing `pv_smoothing.current_irradiance = 0.0` causes PV to ramp up from zero on every restart even without any override. Fix: track `override_was_active: bool` — EMA blend-back only activates when releasing from an active override, otherwise use `natural_irradiance` directly.
 - **heater_setpoint_c in dispatcher only**: Plan called for it in both `tick()` and dispatcher. Simplified to dispatcher-only (binary ON/OFF based on current temp vs target). Avoids needing profile backup fields (`temp_min_c_profile`, etc.) on Heater struct.
 - **Partial-merge vs full-replace**: The old `POST /sim/override` was full-replace. New `POST /sim/inject` is partial-merge: absent=no change, null=release. The UI `handleOverrideChange` no longer needs to spread `{...simOverrides, ...patch}` — just send the patch.
-- **`controller_v2_steps.py` reads `GET /sim/override`**: The alias bridge `get_sim_override` (translating inject_state back to UserOverrides shape) must be kept until Group D migrates those BDD steps.
+- **`controller_steps.py` reads `GET /sim/override`**: The alias bridge `get_sim_override` (translating inject_state back to UserOverrides shape) must be kept until Group D migrates those BDD steps.
 
 ---
 
@@ -3077,7 +3077,7 @@ Three injection behaviours defined:
 **Group D — BDD migration (5 steps files)**:
 - `uc_steps.py`: 4 steps migrated from `/sim/override` to `/sim/inject`; `step_sim_override_ev_zero` made no-op (ev_desired_kw was never applied by the backend)
 - `sim_ui_steps.py`: reset step changed from `POST /sim/override {}` to `POST /sim/inject/reset`
-- `controller_v2_steps.py`: 2 `GET /sim/override` calls migrated to `GET /sim/inject`
+- `controller_steps.py`: 2 `GET /sim/override` calls migrated to `GET /sim/inject`
 - `phase_a_physics_steps.py`: `POST /sim/override` → `POST /sim/inject` for pv_irradiance (caught after first BDD run)
 - `environment.py`: `_reset_ven_sim_overrides()` migrated from `/sim/override` to `/sim/inject/reset`
 

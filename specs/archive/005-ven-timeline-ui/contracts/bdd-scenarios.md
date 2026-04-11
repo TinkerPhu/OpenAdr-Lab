@@ -79,7 +79,7 @@ Assertions using `sim.assets.<id>.values.<key>` path:
 
 ---
 
-## Updated Feature File: `controller_v2/02_asset_cells.feature`
+## Updated Feature File: `controller/02_asset_cells.feature`
 
 ```gherkin
   Scenario: EV timeline chart shows past power data
@@ -104,7 +104,7 @@ Assertions using `sim.assets.<id>.values.<key>` path:
 
 ## Existing Scenarios (unchanged)
 
-- `controller_v2/01_layout.feature` — no changes
-- `controller_v2/03_simulation_controls.feature` — updated to use dynamic schema-driven controls
-- `controller_v2/04_navigation.feature` — no changes
+- `controller/01_layout.feature` — no changes
+- `controller/03_simulation_controls.feature` — updated to use dynamic schema-driven controls
+- `controller/04_navigation.feature` — no changes
 - `ven_uc_normal.feature` + UC-01–UC-12 scenarios — must remain passing with zero changes
