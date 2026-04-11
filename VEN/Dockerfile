@@ -1,5 +1,5 @@
 FROM rust:1.90-alpine AS base
-RUN apk add --no-cache alpine-sdk openssl-dev openssl-libs-static
+RUN apk add --no-cache alpine-sdk openssl-dev openssl-libs-static cmake g++
 
 FROM base AS builder
 WORKDIR /app
