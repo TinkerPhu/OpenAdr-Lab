@@ -455,11 +455,9 @@ pub(crate) fn spawn_sim_tick(
                 // Refresh site envelope on every sim tick (~1s).
                 // Done inside the sim lock to avoid a second lock acquisition.
                 {
-                    let events_snap = state.events().await;
                     let packets_snap = state.active_packets().await;
-                    let env = controller::envelope::compute_envelope_from_events(
+                    let env = controller::envelope::compute_envelope(
                         &*sim_guard,
-                        &events_snap,
                         &packets_snap,
                         now,
                     );
@@ -581,31 +579,18 @@ pub(crate) fn spawn_planning(
 
             let tariff_ts =
                 crate::entities::tariff_snapshot::TariffTimeSeries::from_snapshots(&rates);
-            let events = state.events().await;
-            let mut reservation_layer = controller::reservation::ReservationLayer::new();
-            for r in controller::openadr_interface::parse_firm_reservations(&events, now) {
-                reservation_layer.insert(r);
-            }
-            // Phase C — policy reservations
-            let planning_horizon =
-                chrono::Duration::seconds((profile.planner.plan_horizon_h * 3600) as i64);
-            for r in profile.flexibility_policy.generate_reservations(now, now + planning_horizon) {
-                reservation_layer.insert(r);
-            }
             let sim_guard_for_planner = sim.lock().await;
-            let (mut plan, plan_steps) = controller::planner::run_planner(
+            let (mut plan, plan_steps) = controller::milp_planner::run_planner(
                 &*sim_guard_for_planner,
                 &tariff_ts,
                 &packets,
                 &capacity,
-                &reservation_layer,
                 &profile,
                 now,
                 trigger,
             );
             drop(sim_guard_for_planner);
             plan.steps = plan_steps;
-            // Planner may transition packet statuses (Pending→Scheduled, etc.)
             let firm_count = plan.firm_slots.len();
             let flex_count = plan.flexible_slots.len();
             let plan_packets = plan.packets.clone();
@@ -615,9 +600,8 @@ pub(crate) fn spawn_planning(
             // Refresh site envelope immediately after each plan cycle.
             {
                 let sim_guard = sim.lock().await;
-                let env = controller::envelope::compute_envelope_from_events(
+                let env = controller::envelope::compute_envelope(
                     &*sim_guard,
-                    &events,
                     &plan_packets,
                     now,
                 );

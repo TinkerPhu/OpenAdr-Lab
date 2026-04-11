@@ -2,8 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::assets::{AssetCapability, AssetState};
-use crate::entities::asset::{PlanTrigger, UserRequestMode};
+use crate::entities::asset::PlanTrigger;
 use crate::entities::energy_packet::EnergyPacket;
 
 /// Whether a plan time slot is firm (near-horizon, dispatched) or flexible (far-horizon) (§6.2.1).
@@ -37,7 +36,7 @@ pub struct PacketAllocation {
     pub surplus_power_kw: f64,
     /// Portion from grid import (cost = ImportPrice); power_kw = surplus_power_kw + grid_power_kw
     pub grid_power_kw: f64,
-    /// Effective priority at time of allocation (from CalcCache)
+    /// Effective priority at time of allocation
     pub marginal_value: f64,
     /// Cost in this slot (€): SurplusPower×ExportPrice×dt + GridPower×ImportPrice×dt
     pub cost_eur: f64,
@@ -219,89 +218,12 @@ impl Plan {
     }
 }
 
-// ─── Phase D types ────────────────────────────────────────────────────────────
-
-/// Source that created a reservation (moved from controller/reservation.rs to
-/// avoid entities → controller circular dependency).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ReservationSource {
-    /// VTN SIMPLE-type FIRM event: "reduce consumption by kw kW during window."
-    VtnFirmEvent { event_id: String },
-    /// FlexibilityPolicy scheduled window (Phase C).
-    PolicySchedule { policy_id: String },
-    /// FlexibilityPolicy default reserve (Phase C).
-    PolicyDefault,
-    /// User request (Phase F).
-    UserRequest { request_id: Uuid },
-}
-
-/// Which comfort bound was violated to produce a setpoint.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum ComfortBoundType {
-    MinTemperature,
-    MaxTemperature,
-    MinSoc,
-    MaxSoc,
-}
-
-/// The rule that fired to produce a PlanStep's setpoint.
-/// Emitted at decision time — never reconstructed after the fact.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum PlanReason {
-    FirmObligation { source: ReservationSource, required_kw: f64 },
-    CheapTariff { tariff_eur_per_kwh: f64, threshold_eur_per_kwh: f64 },
-    ExpensiveTariff { tariff_eur_per_kwh: f64, threshold_eur_per_kwh: f64 },
-    GridImportLimit { limit_kw: f64 },
-    GridExportLimit { limit_kw: f64 },
-    SocCeiling { soc_pct: f64 },
-    SocFloor { soc_pct: f64 },
-    ComfortBound { asset_id: String, bound_type: ComfortBoundType },
-    UserOverride { request_id: Uuid, mode: UserRequestMode },
-    PolicyReserve { policy_id: String },
-    OpportunityMissed { reason: String },
-    SurplusAbsorption { surplus_kw: f64 },
-    Idle,
-}
-
 /// One planning decision for one asset at one time step.
+/// Populated by the planner; steps field of Plan holds the full audit trail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStep {
     pub ts: DateTime<Utc>,
     pub asset_id: String,
-    pub state_before: AssetState,
-    pub capability: AssetCapability,
-    pub reserved_up_kw: f64,
-    pub reserved_down_kw: f64,
-    pub avail_max_export_kw: f64,
-    pub avail_max_import_kw: f64,
     pub setpoint_kw: f64,
     pub actual_power_kw: f64,
-    pub reason: PlanReason,
-}
-
-/// Pre-computed per asset before the planning loop.
-/// Internal to the planner — not serialized.
-#[derive(Debug, Clone)]
-pub struct LookaheadContext {
-    pub capability_trajectory: Vec<(DateTime<Utc>, AssetCapability)>,
-    pub tariff_min_ahead_eur_per_kwh: f64,
-    pub tariff_max_ahead_eur_per_kwh: f64,
-    pub ceiling_eta: Option<DateTime<Utc>>,
-    pub floor_eta: Option<DateTime<Utc>>,
-}
-
-/// Intermediate calculation cache used during planning per (packet × slot) (§2.10).
-/// Internal to the Planner; not persisted.
-#[derive(Debug, Clone)]
-pub struct CalcCache {
-    pub slot_index: usize,
-    pub packet_id: Uuid,
-    pub effective_cost_eur_kwh: f64,
-    pub surplus_for_packet_kw: f64,
-    pub comfort_bid_eur_kwh: f64,
-    pub time_pressure: f64,
-    pub marginal_value: f64,
-    pub eligible: bool,
 }
