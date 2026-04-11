@@ -1,10 +1,20 @@
-FROM rust:1.90-alpine AS base
-RUN apk add --no-cache alpine-sdk openssl-dev openssl-libs-static cmake g++
+# syntax=docker/dockerfile:1
 
-FROM base AS builder
+FROM rust:1.90-bookworm AS builder
 WORKDIR /app
 
-# Cache dependencies by copying manifests first
+# HiGHS bindings build native C++ code via cmake + bindgen (needs libclang).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        pkg-config \
+        libclang-dev \
+        libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Cache dependency compilation (including the slow HiGHS C++ build).
+# This layer is reused on source-only changes.
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo 'fn main() {}' > src/main.rs
 RUN cargo build --release && rm -rf src target/release/deps/ven_app*
@@ -13,15 +23,21 @@ RUN cargo build --release && rm -rf src target/release/deps/ven_app*
 COPY src ./src
 RUN cargo build --release
 
-FROM alpine:latest
-RUN apk add --no-cache ca-certificates curl
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        libgcc-s1 \
+        libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
 
 ARG user=nonroot
 ARG group=nonroot
 ARG uid=2000
 ARG gid=2000
-RUN addgroup -g ${gid} ${group} && \
-    adduser -u ${uid} -G ${group} -s /bin/sh -D ${user}
+RUN groupadd -g ${gid} ${group} && \
+    useradd -u ${uid} -g ${group} -s /bin/sh -M ${user}
 
 WORKDIR /app
 COPY --from=builder --chown=nonroot:nonroot /app/target/release/ven-app /app/ven-app
