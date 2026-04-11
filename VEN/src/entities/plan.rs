@@ -77,6 +77,14 @@ pub struct PlanTimeSlot {
     pub import_flexibility_kw: f64,
     /// How much more could be exported in this slot (kW)
     pub export_flexibility_kw: f64,
+
+    // --- Battery setpoints (MILP output) ---
+    /// Planned battery charge power in this slot (kW, ≥ 0). Set by MILP solver.
+    #[serde(default)]
+    pub bat_charge_kw: f64,
+    /// Planned battery discharge power in this slot (kW, ≥ 0). Set by MILP solver.
+    #[serde(default)]
+    pub bat_discharge_kw: f64,
 }
 
 /// Flexibility envelope offered to VTN for capacity or price optimization (§6.9).
@@ -150,6 +158,17 @@ pub struct PlanWarning {
     pub suggested_action: Option<String>,
 }
 
+/// Decomposed MILP objective cost components for diagnostics.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CostBreakdown {
+    pub c_energy_eur: f64,
+    pub c_ghg_eur: f64,
+    pub c_grid_eur: f64,
+    pub c_wear_eur: f64,
+    pub c_violations_eur: f64,
+    pub v_services_eur: f64,
+}
+
 /// Summary of the full plan horizon.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PlanSummary {
@@ -180,6 +199,18 @@ pub struct Plan {
     pub warnings: Vec<PlanWarning>,
     /// Full per-(ts × asset) audit trail.
     pub steps: Vec<PlanStep>,
+
+    // --- MILP solver output ---
+    /// Battery SoC trajectory [kWh] at the end of each planning step (length = num_steps + 1).
+    /// First entry is the initial SoC; populated by the MILP solver.
+    #[serde(default)]
+    pub soc_trajectory_kwh: Vec<f64>,
+    /// Total MILP objective value (€). Includes all cost and reward terms.
+    #[serde(default)]
+    pub objective_eur: f64,
+    /// Decomposed cost components for diagnostics.
+    #[serde(default)]
+    pub cost_breakdown: CostBreakdown,
 }
 
 impl Plan {
