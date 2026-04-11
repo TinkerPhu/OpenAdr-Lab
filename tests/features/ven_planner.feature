@@ -1,7 +1,7 @@
 Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
   The VEN planner produces a Plan from RateSnapshots and EnergyPackets seeded
-  from the device profile. The plan covers a 24-hour horizon with FIRM slots
-  in the near horizon and FLEXIBLE slots beyond.
+  from the device profile. The plan covers a 24-hour horizon as a unified
+  slot sequence.
 
   Background:
     Given the VEN is running with profile "test"
@@ -20,20 +20,19 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
   Scenario: GET /plan returns a non-null plan after VEN starts
     When I wait for the VEN /plan endpoint to return a plan
     Then the plan has field "id"
-    And the plan has field "firm_slots"
-    And the plan has field "flexible_slots"
+    And the plan has field "slots"
     And the plan has field "packets"
     And the plan has field "envelopes"
 
-  # --- Firm horizon ---
+  # --- Slots ---
 
-  Scenario: Plan firm_slots cover the near-horizon window
+  Scenario: Plan slots cover the planning horizon
     When I wait for the VEN /plan endpoint to return a plan
     Then the plan.firm_slots is a non-empty array
 
   # --- Allocation ---
 
-  Scenario: Plan allocates EV to firm slots given a cheap PRICE event
+  Scenario: Plan allocates EV to slots given a cheap PRICE event
     Given I inject ev_soc 0.5 via sim inject
     And I have a VTN token as "any-business"
     And I create a rate-system program and save its ID

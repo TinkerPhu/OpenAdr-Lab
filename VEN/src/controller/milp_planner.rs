@@ -15,7 +15,7 @@ use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::EnergyPacket;
 use crate::entities::plan::{
-    FirmSummary, FlexibleSummary, Plan, PlanStep, PlanningHorizon, PlanWarning,
+    Plan, PlanStep, PlanSummary, PlanningHorizon, PlanWarning,
 };
 use crate::entities::tariff_snapshot::TariffTimeSeries;
 use crate::profile::Profile;
@@ -36,10 +36,8 @@ pub fn run_planner(
 ) -> (Plan, Vec<PlanStep>) {
     let step_s = profile.planner.plan_step_s;
     let horizon_h = profile.planner.plan_horizon_h;
-    let near_h = profile.planner.near_horizon_h;
 
     let horizon_end = now + Duration::seconds((horizon_h as f64 * 3600.0) as i64);
-    let firm_boundary = now + Duration::seconds((near_h as f64 * 3600.0) as i64);
     let total_steps = ((horizon_h as f64 * 3600.0) / step_s as f64) as usize;
 
     let horizon = PlanningHorizon {
@@ -47,7 +45,6 @@ pub fn run_planner(
         end_time: horizon_end,
         step_size_s: step_s,
         num_steps: total_steps,
-        near_horizon: firm_boundary,
         far_horizon: horizon_end,
     };
 
@@ -63,12 +60,9 @@ pub fn run_planner(
         created_at: now,
         trigger,
         horizon,
-        firm_boundary,
-        firm_slots: vec![],
-        firm_summary: FirmSummary::default(),
-        flexible_slots: vec![],
+        slots: vec![],
+        summary: PlanSummary::default(),
         envelopes: vec![],
-        flexible_summary: FlexibleSummary::default(),
         packets: packets.to_vec(),
         warnings: vec![warning],
         steps: vec![],
