@@ -192,9 +192,7 @@
 ## Planner Tariff Lookup
 
 - **`resample_uniform` + epoch-aligned HashMap lookup never works for real-time slots** — `resample_uniform` aligns output to epoch-based grid boundaries (multiples of 5 min since Unix epoch). Planner slots start at the current second, so `import_map.get(&epoch)` always returns `None`. Use `TimeSeries::interpolate_at(slot_start)` for per-slot tariff lookup instead.
-- **Step LOCF carries values indefinitely** — `interpolate_at` with `Interpolation::Step` returns the last sample value for all times after the last sample. When testing with a single-interval event (e.g., 1h cheap tariff), add a "reset" interval at `DEFAULT_IMPORT_PRICE` after the event window, otherwise LOCF bleeds the event tariff into all planning slots and the median equals the event price (making arbitrage rules never fire).
-
 ## BDD Test Polling
 
-- **Don't poll for "any steps exist" when you need a specific plan state** — A step like `When I wait for plan to have steps for X` satisfies on the very first (stale) plan. When the scenario depends on a VTN event being reflected in the plan, poll for the specific assertion condition (e.g., the target `reason.kind`) rather than mere existence of steps.
-- **Post-scenario cleanup doesn't instantly update VEN plan** — After `after_scenario` deletes a VTN event, the VEN needs 2s (poll interval) to detect the deletion, then up to 20s for the planner to re-run. The next scenario may see the old plan if it polls for "any steps" immediately. Use a poll step that waits for the expected post-cleanup state (e.g., `IDLE` for all battery steps).
+- **Don't poll for "any steps exist" when you need a specific plan state** — A step like `When I wait for plan to have steps for X` satisfies on the very first (stale) plan. When the scenario depends on a VTN event being reflected in the plan, poll for the specific assertion condition rather than mere existence of steps.
+- **Post-scenario cleanup doesn't instantly update VEN plan** — After `after_scenario` deletes a VTN event, the VEN needs 2s (poll interval) to detect the deletion, then up to 20s for the planner to re-run. The next scenario may see the old plan if it polls immediately. Use a poll step that waits for the expected post-cleanup state.

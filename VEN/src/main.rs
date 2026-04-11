@@ -81,16 +81,6 @@ async fn main() -> anyhow::Result<()> {
         cfg.ven_name.clone(),
     );
 
-    // Seed EnergyPackets from profile (Stage 3)
-    {
-        let now = chrono::Utc::now();
-        let seeded = controller::planner::seed_packets_from_profile(&profile, now);
-        if !seeded.is_empty() {
-            info!(count = seeded.len(), "seeded EnergyPackets from profile");
-            state.set_active_packets(seeded).await;
-        }
-    }
-
     // Derive shared data_dir from persist_path
     let data_dir = cfg
         .persist_path
