@@ -13,7 +13,6 @@ function makeSlot(overrides: Partial<PlanTimeSlot> = {}): PlanTimeSlot {
     slot_index: 0,
     start: "2026-04-04T10:00:00Z",
     end: "2026-04-04T10:05:00Z",
-    slot_type: "FIRM",
     import_tariff_eur_kwh: 0.12,
     export_tariff_eur_kwh: 0.05,
     co2_g_kwh: 200,
@@ -33,15 +32,14 @@ function makePlan(overrides: Partial<Plan> = {}): Plan {
     id: "plan-001",
     created_at: new Date(now.getTime() - 45 * 1000).toISOString(), // 45s ago
     trigger: "Periodic",
-    firm_boundary: "2026-04-04T13:00:00Z",
-    firm_slots: [makeSlot()],
-    flexible_slots: [],
-    firm_summary: {
+    slots: [makeSlot()],
+    summary: {
       total_cost_eur: 1.84,
       total_co2_g: 2100,
       total_import_kwh: 8.2,
       total_export_kwh: 0,
     },
+    envelopes: [],
     warnings: [],
     steps: [],
     ...overrides,

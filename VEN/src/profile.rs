@@ -231,15 +231,6 @@ fn default_report_interval() -> u64 {
     60
 }
 
-/// Selects which planner is used.
-#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum PlannerMode {
-    /// MILP-based global optimizer (full horizon, all assets).
-    #[default]
-    Milp,
-}
-
 /// Configuration for the HEMS Planner (Stage 3).
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlannerConfig {
@@ -252,12 +243,6 @@ pub struct PlannerConfig {
     /// Seconds between periodic replanning cycles (default 300).
     #[serde(default = "default_replan_interval")]
     pub replan_interval_s: u64,
-    /// Lookahead window for capability/tariff precomputation (hours, default 2.0).
-    #[serde(default = "default_lookahead_h")]
-    pub lookahead_h: f64,
-    /// Which planner to use (default "milp").
-    #[serde(default)]
-    pub mode: PlannerMode,
 }
 
 impl Default for PlannerConfig {
@@ -266,8 +251,6 @@ impl Default for PlannerConfig {
             plan_step_s: default_plan_step(),
             plan_horizon_h: default_plan_horizon_h(),
             replan_interval_s: default_replan_interval(),
-            lookahead_h: default_lookahead_h(),
-            mode: PlannerMode::default(),
         }
     }
 }
@@ -280,9 +263,6 @@ fn default_plan_horizon_h() -> u64 {
 }
 fn default_replan_interval() -> u64 {
     300
-}
-fn default_lookahead_h() -> f64 {
-    2.0
 }
 
 /// A single comfort-rate point for a seeded packet.

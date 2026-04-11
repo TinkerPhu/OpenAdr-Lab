@@ -28,7 +28,7 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
 
   Scenario: Plan slots cover the planning horizon
     When I wait for the VEN /plan endpoint to return a plan
-    Then the plan.firm_slots is a non-empty array
+    Then the plan.slots is a non-empty array
 
   # --- Allocation ---
 
@@ -37,7 +37,7 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
     And I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
-    When I wait for the VEN /plan to have an EV allocation in firm_slots
+    When I wait for the VEN /plan to have an EV allocation in slots
     Then at least one firm slot has an allocation for asset "ev"
 
   # --- Packet status ---

@@ -43,9 +43,9 @@ def step_given_post_user_request_ev(context, soc, hours):
 
 # ── When: poll for plan import cap ───────────────────────────────────────────
 
-@when("I wait for the VEN /plan to have firm slots with import_cap_kw at most {limit:f}")
+@when("I wait for the VEN /plan to have a slot with import_cap_kw at most {limit:f}")
 def step_wait_for_plan_import_cap(context, limit):
-    """Poll /plan until at least one firm slot has import_cap_kw <= limit."""
+    """Poll /plan until at least one slot has import_cap_kw <= limit."""
     def fetch():
         r = ven_get("/plan")
         if not r.ok:
@@ -62,15 +62,15 @@ def step_wait_for_plan_import_cap(context, limit):
         fetch,
         lambda x: x is not None,
         timeout=60,
-        description=f"VEN /plan has a firm slot with import_cap_kw <= {limit}",
+        description=f"VEN /plan has a slot with import_cap_kw <= {limit}",
     )
 
 
 # ── Then: plan allocation assertions ─────────────────────────────────────────
 
-@then("all EV allocations in capped firm slots are at most {kw:f} kW")
+@then("all EV allocations in capped slots are at most {kw:f} kW")
 def step_ev_alloc_in_capped_slots(context, kw):
-    """In every firm slot where import_cap_kw <= kw+0.5, the EV allocation must be <= kw."""
+    """In every slot where import_cap_kw <= kw+0.5, the EV allocation must be <= kw."""
     r = ven_get("/plan")
     r.raise_for_status()
     plan = r.json()

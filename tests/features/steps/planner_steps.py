@@ -30,7 +30,7 @@ def step_wait_for_plan(context):
     )
 
 
-@when("I wait for the VEN /plan to have an EV allocation in firm_slots")
+@when("I wait for the VEN /plan to have an EV allocation in slots")
 def step_wait_for_ev_allocation(context):
     def fetch():
         resp = ven_get("/plan")
@@ -138,8 +138,8 @@ def step_plan_has_field(context, field):
     assert field in plan, f"Plan missing field '{field}'. Keys: {list(plan.keys())}"
 
 
-@then("the plan.firm_slots is a non-empty array")
-def step_plan_firm_slots_nonempty(context):
+@then("the plan.slots is a non-empty array")
+def step_plan_slots_nonempty(context):
     plan = context.ven_plan
     slots = plan.get("slots", [])
     assert isinstance(slots, list) and len(slots) > 0, (

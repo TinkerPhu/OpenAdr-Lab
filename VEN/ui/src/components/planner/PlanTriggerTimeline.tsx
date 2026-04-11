@@ -85,8 +85,7 @@ function EventDetail({ group }: { group: Group }) {
           <Typography variant="caption" fontWeight="bold">PlanCycle</Typography>
           <Typography variant="caption" display="block">ts: {ts}</Typography>
           <Typography variant="caption" display="block">trigger: {event.trigger_reason}</Typography>
-          <Typography variant="caption" display="block">firm slots: {event.firm_slots}</Typography>
-          <Typography variant="caption" display="block">flex slots: {event.flexible_slots}</Typography>
+          <Typography variant="caption" display="block">slots: {event.total_slots}</Typography>
         </>
       );
     case "RateChange":

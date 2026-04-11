@@ -56,7 +56,7 @@ function DetailCell({ entry }: { entry: TraceEntry }) {
     case "PlanCycle":
       return (
         <span>
-          <b>{entry.trigger_reason}</b> · firm {entry.firm_slots} · flex {entry.flexible_slots}
+          <b>{entry.trigger_reason}</b> · {entry.total_slots} slots
         </span>
       );
     case "PacketTransition":
