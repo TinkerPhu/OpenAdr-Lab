@@ -10,7 +10,7 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
   # Planner assigns FIRM charging slots; dispatcher transitions the packet to ACTIVE.
 
   Scenario: UC-01a — Profile-seeded EV packet is planned and dispatched to ACTIVE
-    When I wait for the VEN /plan to have an EV allocation in firm_slots
+    When I wait for the VEN /plan to have an EV allocation in slots
     And I poll VEN /packets until asset "ev" has status "ACTIVE"
     Then the response JSON is an array
     And at least one packet has asset_id "ev"
@@ -27,8 +27,7 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
 
   Scenario: UC-01c — EV packet estimated cost is tracked in the plan
     When I wait for the VEN /plan endpoint to return a plan
-    Then the plan has field "firm_summary"
-    And the plan has field "flexible_summary"
+    Then the plan has field "summary"
 
   # --- UC-02: CONTINUE Policy (batch/non-urgent task) ---
   # A request with CONTINUE completion_policy persists past its first deadline
@@ -68,9 +67,9 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
     When I wait for the VEN /tariffs endpoint to have at least 1 snapshot
     Then all rate snapshots have an import_tariff_eur_kwh value
 
-  Scenario: UC-04b — Plan after PRICE event has rate-priced firm slots
+  Scenario: UC-04b — Plan after PRICE event has rate-priced slots
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
-    When I wait for the VEN /plan to have an EV allocation in firm_slots
-    Then the plan firm_slots have import prices populated
+    When I wait for the VEN /plan to have an EV allocation in slots
+    Then the plan slots have import prices populated
