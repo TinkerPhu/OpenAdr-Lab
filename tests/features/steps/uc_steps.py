@@ -26,12 +26,12 @@ def step_wait_plan_import_cap(context, cap):
     def has_cap(plan):
         if plan is None:
             return False
-        firm = plan.get("firm_slots", [])
-        if not firm:
+        slots = plan.get("slots", [])
+        if not slots:
             return False
         return all(
             slot.get("import_cap_kw", float("inf")) <= cap + 0.01
-            for slot in firm
+            for slot in slots
         )
 
     context.ven_plan = poll_until(
@@ -161,30 +161,30 @@ def step_sim_ev_field_present(context):
 @then("the plan flexible_slots is a non-empty array")
 def step_plan_flexible_slots_nonempty(context):
     plan = context.ven_plan
-    slots = plan.get("flexible_slots", [])
+    slots = plan.get("slots", [])
     assert isinstance(slots, list) and len(slots) > 0, (
-        f"flexible_slots is empty or not a list: {slots}"
+        f"plan slots is empty or not a list: {slots}"
     )
 
 
 @then("the plan firm_slots have import prices populated")
 def step_plan_firm_slots_have_prices(context):
-    """Verify every FIRM slot has a non-zero import_tariff_eur_kwh."""
+    """Verify every slot has a non-zero import_tariff_eur_kwh."""
     plan = context.ven_plan
-    firm = plan.get("firm_slots", [])
-    assert firm, "No firm_slots in plan"
-    for slot in firm:
+    slots = plan.get("slots", [])
+    assert slots, "No slots in plan"
+    for slot in slots:
         price = slot.get("import_tariff_eur_kwh")
         assert price is not None, f"Slot missing import_tariff_eur_kwh: {slot}"
 
 
 @then("all plan firm slots have import_cap_kw of at most {cap:f}")
 def step_plan_firm_slots_cap(context, cap):
-    """Verify the import_cap_kw field in each FIRM slot does not exceed cap."""
+    """Verify the import_cap_kw field in each slot does not exceed cap."""
     plan = context.ven_plan
-    firm = plan.get("firm_slots", [])
-    assert firm, "No firm_slots in plan"
-    for slot in firm:
+    slots = plan.get("slots", [])
+    assert slots, "No slots in plan"
+    for slot in slots:
         slot_cap = slot.get("import_cap_kw")
         if slot_cap is None:
             continue  # uncapped slot (no event limit applied)
@@ -197,9 +197,9 @@ def step_plan_firm_slots_cap(context, cap):
 def step_plan_firm_slots_net_import(context, cap):
     """Verify planned net import per slot does not exceed the cap."""
     plan = context.ven_plan
-    firm = plan.get("firm_slots", [])
-    assert firm, "No firm_slots in plan"
-    for slot in firm:
+    slots = plan.get("slots", [])
+    assert slots, "No slots in plan"
+    for slot in slots:
         net = slot.get("net_import_kw", 0.0)
         assert net <= cap + 0.01, (
             f"net_import_kw={net:.3f} exceeds cap {cap} kW in slot {slot.get('slot_index')}"

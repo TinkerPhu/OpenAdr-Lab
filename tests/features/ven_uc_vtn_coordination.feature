@@ -7,12 +7,11 @@ Feature: UC-05..UC-07 — VTN Coordination Use Cases
     Given the VEN is running with profile "test"
 
   # --- UC-05: Far-Horizon Flexible Pricing ---
-  # Energy beyond the near-horizon (4h) is kept FLEXIBLE.
   # FlexibilityEnvelopes are generated for unscheduled packets and exposed via /flexibility.
 
-  Scenario: UC-05a — Plan has FLEXIBLE slots beyond the near-horizon boundary
+  Scenario: UC-05a — Plan has slots covering the planning horizon
     When I wait for the VEN /plan endpoint to return a plan
-    Then the plan has field "flexible_slots"
+    Then the plan has field "slots"
     And the plan flexible_slots is a non-empty array
 
   Scenario: UC-05b — GET /flexibility returns live site-level flexibility envelope

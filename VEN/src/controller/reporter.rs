@@ -499,13 +499,12 @@ pub fn build_status_report(
     let (description, asset_id_opt) = match event {
         ControllerEvent::PlanCycle {
             trigger_reason,
-            firm_slots,
-            flexible_slots,
+            total_slots,
             ..
         } => (
             format!(
-                "PlanCycle trigger={} firm={} flex={}",
-                trigger_reason, firm_slots, flexible_slots
+                "PlanCycle trigger={} slots={}",
+                trigger_reason, total_slots
             ),
             None,
         ),

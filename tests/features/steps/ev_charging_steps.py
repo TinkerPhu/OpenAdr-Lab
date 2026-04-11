@@ -51,7 +51,7 @@ def step_wait_for_plan_import_cap(context, limit):
         if not r.ok:
             return None
         plan = r.json()
-        slots = plan.get("firm_slots", [])
+        slots = plan.get("slots", [])
         if not slots:
             return None
         if any(s.get("import_cap_kw", float("inf")) <= limit + 0.1 for s in slots):
@@ -75,7 +75,7 @@ def step_ev_alloc_in_capped_slots(context, kw):
     r.raise_for_status()
     plan = r.json()
     violations = []
-    for slot in plan.get("firm_slots", []):
+    for slot in plan.get("slots", []):
         cap = slot.get("import_cap_kw", float("inf"))
         if cap > kw + 0.5:
             continue  # Slot is not import-capped; skip
