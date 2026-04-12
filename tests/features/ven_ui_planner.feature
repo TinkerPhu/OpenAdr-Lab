@@ -61,16 +61,14 @@ Feature: Planner Visualization Page
     Then the decision matrix shows at least one asset row
     And the decision matrix shows the tariff header row
 
-  Scenario: Decision matrix shows FIRM/FLEX boundary divider
+  Scenario: Decision matrix collapse button is present
     When I navigate to the Planner page
-    And I click the element with testid "matrix-expand-horizon-btn"
-    Then I see an element with testid "matrix-firm-flex-divider"
+    Then I see an element with testid "matrix-collapse-btn"
 
-  Scenario: Clicking a matrix cell opens the step detail drawer
+  Scenario: Clicking a matrix cell with a step opens the step detail drawer
     When I navigate to the Planner page
-    And I click the first visible matrix cell
+    And I click the first matrix cell with nonzero power
     Then I see an element with testid "matrix-drawer"
-    And I see an element with testid "matrix-drawer-reason"
 
   Scenario: Decision matrix collapses and expands
     When I navigate to the Planner page

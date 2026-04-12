@@ -126,6 +126,27 @@ def step_click_first_matrix_cell(context):
     cells[0].click()
 
 
+@when("I click the first matrix cell with nonzero power")
+def step_click_first_nonzero_matrix_cell(context):
+    """Click the first matrix cell that has a nonzero power value (has an associated step)."""
+    page = context.browser_page
+    page.wait_for_selector('[data-testid^="matrix-cell-"]', timeout=10000)
+    cells = page.query_selector_all('[data-testid^="matrix-cell-"]')
+    assert len(cells) > 0, "No matrix cells found"
+    # Find first cell with data-power > 0 so there is an associated PlanStep
+    clicked = False
+    for cell in cells:
+        power_str = cell.get_attribute("data-power") or "0"
+        try:
+            if float(power_str) > 0.01:
+                cell.click()
+                clicked = True
+                break
+        except ValueError:
+            pass
+    assert clicked, "No matrix cell with nonzero power found to click"
+
+
 @then("the decision matrix cells are hidden")
 def step_matrix_cells_hidden(context):
     page = context.browser_page
