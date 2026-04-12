@@ -351,12 +351,14 @@ pub struct PlannerConfig {
     #[serde(default = "default_w_viol")]
     pub w_viol: f64,
     /// Per-kWh penalty for exceeding the contractual import limit (€/kWh slack).
-    /// Default: 0.0 — see Penalty Modeling in the transition plan doc.
-    #[serde(default)]
+    /// Default: 10000.0 — large enough to keep slack near zero in feasible
+    /// problems, while still acting as a soft constraint when the cap is
+    /// physically unreachable. See Penalty Modeling in the transition plan doc.
+    #[serde(default = "default_pen_imp")]
     pub pen_imp_eur_kwh: f64,
     /// Per-kWh penalty for exceeding the contractual export limit (€/kWh slack).
-    /// Default: 0.0 — disabled.
-    #[serde(default)]
+    /// Default: 10000.0 — symmetric with `pen_imp_eur_kwh`.
+    #[serde(default = "default_pen_exp")]
     pub pen_exp_eur_kwh: f64,
     /// Reward per kWh of EV charging above the core energy requirement (€/kWh).
     /// Incentivises opportunistic top-up charging when tariffs are low.
@@ -384,8 +386,8 @@ impl Default for PlannerConfig {
             w_grid: 0.0,
             c_bat_wear_eur_kwh: default_bat_wear(),
             w_viol: default_w_viol(),
-            pen_imp_eur_kwh: 0.0,
-            pen_exp_eur_kwh: 0.0,
+            pen_imp_eur_kwh: 10000.0,
+            pen_exp_eur_kwh: 10000.0,
             v_ev_extra_eur_kwh: default_v_ev_extra(),
             v_heat_eur: default_v_heat(),
             objective: PlannerObjective::MinCost,
@@ -413,6 +415,12 @@ fn default_bat_wear() -> f64 {
 }
 fn default_w_viol() -> f64 {
     1.0
+}
+fn default_pen_imp() -> f64 {
+    10000.0
+}
+fn default_pen_exp() -> f64 {
+    10000.0
 }
 fn default_v_ev_extra() -> f64 {
     0.10

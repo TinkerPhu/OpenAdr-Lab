@@ -17,9 +17,14 @@ use crate::entities::asset::{PlanTrigger, UserRequestMode};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{EnergyPacket, PacketStatus};
 use crate::entities::plan::{
-    CostBreakdown, PacketAllocation, Plan, PlanStep, PlanSummary, PlanTimeSlot,
-    PlanningHorizon, PlanWarning, WarningSeverity,
+    CostBreakdown, FlexibilityEnvelope, PacketAllocation, Plan, PlanStep, PlanSummary,
+    PlanTimeSlot, PlanningHorizon, PlanWarning, WarningSeverity,
 };
+
+/// Sentinel emitted in `FlexibilityEnvelope.budget_remaining_eur` when the
+/// active deadline tier has no `max_total_cost_eur`. Finite (1e9 €) so that
+/// JSON consumers and downstream float math behave; semantically "no cap".
+const NO_BUDGET_CAP_SENTINEL_EUR: f64 = 1.0e9;
 use crate::entities::tariff_snapshot::TariffTimeSeries;
 use crate::profile::{PlannerObjective, Profile};
 use crate::simulator::SimState;
@@ -802,32 +807,210 @@ fn solve_milp(
 
 // ── Output translator ───────────────────────────────────────────────────────
 
+/// Build per-packet `FlexibilityEnvelope` snapshots for every non-terminal
+/// packet in `packets`. Emitted regardless of whether the MILP scheduled
+/// the packet within the horizon — the envelope describes the packet's
+/// degrees of freedom, not "unscheduled work".
+///
+/// See `FlexibilityEnvelope` rustdoc in `entities/plan.rs` for the contrast
+/// with `SiteFlexibilityEnvelope`.
+fn build_plan_envelopes(
+    packets: &[EnergyPacket],
+    inputs: &MilpInputs,
+    profile: &Profile,
+    now: DateTime<Utc>,
+) -> Vec<FlexibilityEnvelope> {
+    let step_s = profile.planner.plan_step_s as i64;
+    let horizon_end_default =
+        now + Duration::seconds((inputs.n as i64) * step_s);
+
+    let ev_id = profile.ev_config().map(|c| c.id.as_str().to_string());
+    let heater_id = profile
+        .heater_config()
+        .map(|c| c.id.as_str().to_string());
+
+    let mut envelopes = Vec::new();
+    for packet in packets {
+        if packet.is_terminal() {
+            continue;
+        }
+        let energy_needed_kwh = packet.undelivered_energy_kwh();
+        if energy_needed_kwh <= 0.0 {
+            continue;
+        }
+
+        // Asset power bounds — match by asset_id against profile configs.
+        let (power_min_kw, power_max_kw) = if Some(&packet.asset_id) == ev_id.as_ref() {
+            let c = profile
+                .ev_config()
+                .expect("ev_id matched but ev_config absent");
+            (c.min_charge_kw, c.max_charge_kw)
+        } else if Some(&packet.asset_id) == heater_id.as_ref() {
+            let c = profile
+                .heater_config()
+                .expect("heater_id matched but heater_config absent");
+            (0.0, c.max_kw)
+        } else {
+            warn!(
+                "build_plan_envelopes: unknown asset_id '{}' for packet {} — emitting zero-power envelope",
+                packet.asset_id, packet.id
+            );
+            (0.0, 0.0)
+        };
+
+        // Time window: clamp earliest_start to now; default open horizon to far end.
+        let window_start = packet.earliest_start.max(now);
+        let window_end = packet.latest_end().unwrap_or(horizon_end_default);
+        let slots_available = ((window_end - window_start).num_seconds() / step_s)
+            .max(0) as usize;
+
+        // Rate bounds from ValueCurve.
+        let max_acceptable_rate = packet.value_curve.bid_at(0.0);
+        let min_acceptable_rate = packet.value_curve.bid_at(packet.fill());
+
+        // Budget remaining: if no cap on the active tier, emit a finite sentinel
+        // (NO_BUDGET_CAP_SENTINEL_EUR) so JSON consumers don't choke on f64::MAX.
+        let budget_remaining_eur = packet
+            .value_curve
+            .active_deadline()
+            .and_then(|t| t.max_total_cost_eur)
+            .map(|max| (max - packet.accumulated_cost_eur).max(0.0))
+            .unwrap_or(NO_BUDGET_CAP_SENTINEL_EUR);
+
+        // Estimated cost / CO₂: average tariff & CO₂ rate over slots that
+        // overlap the packet's window, then multiply by energy_needed.
+        let t_start =
+            ((window_start - now).num_seconds() / step_s).max(0) as usize;
+        let t_end_signed =
+            ((window_end - now).num_seconds() / step_s).max(0) as usize;
+        let t_end = t_end_signed.min(inputs.n);
+        let (avg_tariff, avg_co2_g_kwh) = if t_end > t_start {
+            let count = (t_end - t_start) as f64;
+            let avg_tariff =
+                inputs.c_imp_eur_kwh[t_start..t_end].iter().sum::<f64>() / count;
+            // g_imp_kgco2_kwh stored in kgCO₂/kWh; envelope uses gCO₂.
+            let avg_co2 = inputs.g_imp_kgco2_kwh[t_start..t_end]
+                .iter()
+                .sum::<f64>()
+                * 1000.0
+                / count;
+            (avg_tariff, avg_co2)
+        } else {
+            (0.0, 0.0)
+        };
+        let estimated_cost_eur = energy_needed_kwh * avg_tariff;
+        let estimated_co2_g = energy_needed_kwh * avg_co2_g_kwh;
+
+        envelopes.push(FlexibilityEnvelope {
+            packet_id: packet.id,
+            asset_id: packet.asset_id.clone(),
+            energy_needed_kwh,
+            power_min_kw,
+            power_max_kw,
+            window_start,
+            window_end,
+            slots_available,
+            max_acceptable_rate,
+            min_acceptable_rate,
+            budget_remaining_eur,
+            estimated_cost_eur,
+            estimated_co2_g,
+        });
+    }
+    envelopes
+}
+
 /// Fallback plan returned when the MILP solver fails.
-/// Identical structure to the old stub but with a `Critical` warning.
+///
+/// When `inputs` is `Some`, the fallback populates `n` real slots from the
+/// MilpInputs (zero allocations, zero battery, zero net flows) and emits
+/// per-packet envelopes — so capacity-limit BDD assertions and `/flexibility`
+/// consumers continue to work even when the solver couldn't find a solution.
+/// `None` returns the legacy empty-slot fallback (used when even the input
+/// builder failed, though no caller currently exercises that path).
 fn fallback_plan(
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
     packets: &[EnergyPacket],
+    inputs: Option<&MilpInputs>,
     reason: String,
 ) -> (Plan, Vec<PlanStep>) {
     let step_s = profile.planner.plan_step_s;
+    let warning = PlanWarning {
+        severity: WarningSeverity::Critical,
+        packet_id: None,
+        message: reason,
+        suggested_action: None,
+    };
+
+    if let Some(inputs) = inputs {
+        let n = inputs.n;
+        let horizon_end = now + Duration::seconds((n as i64) * step_s as i64);
+        let horizon = PlanningHorizon {
+            start_time: now,
+            end_time: horizon_end,
+            step_size_s: step_s,
+            num_steps: n,
+            far_horizon: horizon_end,
+        };
+        let mut slots = Vec::with_capacity(n);
+        for t in 0..n {
+            let slot_start = now + Duration::seconds((t as i64) * step_s as i64);
+            let slot_end = now + Duration::seconds(((t + 1) as i64) * step_s as i64);
+            let surplus_available_kw =
+                (inputs.p_pv_kw[t] - inputs.p_base_kw[t]).max(0.0);
+            slots.push(PlanTimeSlot {
+                slot_index: t,
+                start: slot_start,
+                end: slot_end,
+                import_tariff_eur_kwh: inputs.c_imp_eur_kwh[t],
+                export_tariff_eur_kwh: inputs.c_exp_eur_kwh[t],
+                co2_g_kwh: inputs.g_imp_kgco2_kwh[t] * 1000.0,
+                grid_effective_cost: inputs.c_imp_eur_kwh[t],
+                rate_estimated: false,
+                import_cap_kw: inputs.p_imp_max_cont_kw[t],
+                export_cap_kw: inputs.p_exp_max_cont_kw[t],
+                baseline_kw: inputs.p_base_kw[t],
+                pv_forecast_kw: inputs.p_pv_kw[t],
+                surplus_available_kw,
+                allocations: vec![],
+                net_import_kw: 0.0,
+                net_export_kw: 0.0,
+                import_flexibility_kw: 0.0,
+                export_flexibility_kw: 0.0,
+                bat_charge_kw: 0.0,
+                bat_discharge_kw: 0.0,
+            });
+        }
+        let plan = Plan {
+            id: Uuid::new_v4(),
+            created_at: now,
+            trigger,
+            horizon,
+            slots,
+            summary: PlanSummary::default(),
+            envelopes: build_plan_envelopes(packets, inputs, profile, now),
+            packets: packets.to_vec(),
+            warnings: vec![warning],
+            steps: vec![],
+            soc_trajectory_kwh: vec![],
+            objective_eur: 0.0,
+            cost_breakdown: CostBreakdown::default(),
+        };
+        return (plan, vec![]);
+    }
+
+    // Legacy empty-slot fallback (no MilpInputs available).
     let horizon_h = profile.planner.plan_horizon_h;
     let horizon_end = now + Duration::seconds((horizon_h as f64 * 3600.0) as i64);
     let total_steps = ((horizon_h as f64 * 3600.0) / step_s as f64) as usize;
-
     let horizon = PlanningHorizon {
         start_time: now,
         end_time: horizon_end,
         step_size_s: step_s,
         num_steps: total_steps,
         far_horizon: horizon_end,
-    };
-    let warning = PlanWarning {
-        severity: WarningSeverity::Critical,
-        packet_id: None,
-        message: reason,
-        suggested_action: None,
     };
     let plan = Plan {
         id: Uuid::new_v4(),
@@ -1076,7 +1259,7 @@ fn translate_to_plan(
         horizon,
         slots,
         summary,
-        envelopes: vec![],
+        envelopes: build_plan_envelopes(packets, inputs, profile, now),
         packets: packets.to_vec(),
         warnings,
         steps: steps.clone(),
@@ -1106,7 +1289,14 @@ pub fn run_planner(
         Ok(sol) => translate_to_plan(&sol, &inputs, &weights, profile, now, trigger, packets),
         Err(e) => {
             warn!("MILP solver failed: {e}");
-            fallback_plan(profile, now, trigger, packets, format!("MILP solver failed: {e}"))
+            fallback_plan(
+                profile,
+                now,
+                trigger,
+                packets,
+                Some(&inputs),
+                format!("MILP solver failed: {e}"),
+            )
         }
     }
 }
