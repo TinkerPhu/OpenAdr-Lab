@@ -557,6 +557,86 @@ pub(crate) fn spawn_obligation_check(
     })
 }
 
+/// Ensure every `profile.packets` seed has a live non-terminal `EnergyPacket`.
+///
+/// For each seed, if no non-terminal packet already exists for that asset, one is
+/// created and appended. Called at the top of each planning cycle so the planner
+/// always has at least the profile-configured work to schedule.
+fn seed_missing_packets(
+    packets: &[entities::energy_packet::EnergyPacket],
+    profile: &Profile,
+    now: DateTime<Utc>,
+) -> Vec<entities::energy_packet::EnergyPacket> {
+    use chrono::Duration;
+    use entities::asset::{ComfortRate, CompletionPolicy, UserRequestMode};
+    use entities::energy_packet::{DeadlineTier, EnergyPacket, ValueCurve};
+
+    let mut result = packets.to_vec();
+    for seed in &profile.packets {
+        // Skip if a non-terminal packet already exists for this asset.
+        let has_live = result.iter().any(|p| p.asset_id == seed.asset && !p.is_terminal());
+        if has_live {
+            continue;
+        }
+
+        // Derive power from seed or profile default.
+        let desired_power_kw = seed.desired_power_kw.unwrap_or_else(|| {
+            if seed.asset == profile.ev_config().map(|c| c.id.as_str()).unwrap_or("ev") {
+                profile.ev_config().map(|c| c.max_charge_kw).unwrap_or(7.4)
+            } else if seed.asset == profile.heater_config().map(|c| c.id.as_str()).unwrap_or("heater") {
+                profile.heater_config().map(|c| c.max_kw).unwrap_or(5.0)
+            } else {
+                1.0
+            }
+        });
+
+        // Derive target_energy_kwh from target_soc and EV battery capacity when applicable.
+        let target_energy_kwh = if let Some(soc) = seed.target_soc {
+            if let Some(ev) = profile.ev_config() {
+                (soc - ev.initial_soc).clamp(0.0, 1.0) * ev.battery_kwh
+            } else {
+                desired_power_kw // 1h default
+            }
+        } else {
+            desired_power_kw // 1h default
+        };
+
+        // Deadline tier.
+        let deadline = now + Duration::seconds((seed.latest_end_h * 3600.0) as i64);
+        let deadline_tiers = vec![DeadlineTier {
+            deadline,
+            max_total_cost_eur: None,
+            max_marginal_rate_eur_kwh: None,
+            min_completion: 0.8,
+        }];
+
+        // Comfort rates from seed or defaults.
+        let comfort_rates: Vec<ComfortRate> = if seed.comfort_rates.is_empty() {
+            vec![
+                ComfortRate { fill: 0.0, max_marginal_price: 0.35, max_marginal_co2: 0.0 },
+                ComfortRate { fill: 1.0, max_marginal_price: 0.05, max_marginal_co2: 0.0 },
+            ]
+        } else {
+            seed.comfort_rates
+                .iter()
+                .map(|r| ComfortRate { fill: r.fill, max_marginal_price: r.bid, max_marginal_co2: 0.0 })
+                .collect()
+        };
+
+        let value_curve = ValueCurve { comfort_rates, deadline_tiers, active_tier_index: 0 };
+        let packet = EnergyPacket {
+            target_soc: seed.target_soc,
+            request_mode: UserRequestMode::ByDeadline,
+            completion_policy: CompletionPolicy::Stop,
+            ..EnergyPacket::new(seed.asset.clone(), target_energy_kwh, desired_power_kw, value_curve, now)
+        };
+
+        info!(asset_id = %seed.asset, packet_id = %packet.id, target_energy_kwh, "seeded missing packet from profile");
+        result.push(packet);
+    }
+    result
+}
+
 pub(crate) fn spawn_planning(
     state: AppState,
     profile: Arc<Profile>,
@@ -572,7 +652,7 @@ pub(crate) fn spawn_planning(
         loop {
             let now = Utc::now();
             let rates = state.planned_tariffs().await;
-            let packets = state.active_packets().await;
+            let packets = seed_missing_packets(&state.active_packets().await, &profile, now);
             let capacity = state.capacity_state().await;
             let trigger = trigger_rx.borrow().clone();
             let trigger_reason = format!("{:?}", trigger);

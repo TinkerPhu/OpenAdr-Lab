@@ -41,6 +41,24 @@ def step_given_post_user_request_ev(context, soc, hours):
     context.last_created_request = r.json()
 
 
+# ── Given: POST packet directly (explicit packet creation) ───────────────────
+
+@given("I POST an EV packet with target_soc {soc:f} and latest_end_h {hours:f}")
+def step_given_post_ev_packet(context, soc, hours):
+    from datetime import datetime, timedelta, timezone
+    latest_end = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    r = ven_post("/packets", json={
+        "asset_id": "ev",
+        "target_soc": soc,
+        "target_energy_kwh": None,
+        "latest_end": latest_end,
+    })
+    r.raise_for_status()
+    context.last_created_packet = r.json()
+
+
 # ── When: poll for plan import cap ───────────────────────────────────────────
 
 @when("I wait for the VEN /plan to have a slot with import_cap_kw at most {limit:f}")

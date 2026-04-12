@@ -11,7 +11,7 @@ from features.helpers.wait import poll_until
 @given("I open the VEN-1 controller V2 UI")
 def step_open_controller_v2(context):
     context.ven_ui.open()
-    context.ven_ui.go_controller_v2()
+    context.ven_ui.go_controller()
 
 
 # ── Layout: 01_layout.feature ─────────────────────────────────────────────────
