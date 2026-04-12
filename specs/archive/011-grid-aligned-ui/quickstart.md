@@ -37,8 +37,8 @@ npm test -- dataBuilders
 
 | File | What to check |
 |------|---------------|
-| `VEN/ui/src/components/controller-v2/types.ts` | `values` is `Record<string, number> \| null` |
-| `VEN/ui/src/components/controller-v2/GridAccumulatedCell.tsx` | No `findNearest`, no `TOLERANCE_MS`, positional zip |
-| `VEN/ui/src/components/controller-v2/dataBuilders.ts` | `computeForecastEnergy` skips null values |
-| `VEN/ui/src/components/controller-v2/tariffBuilders.ts` | `buildPowerPoints` handles null values |
+| `VEN/ui/src/components/controller/types.ts` | `values` is `Record<string, number> \| null` |
+| `VEN/ui/src/components/controller/GridAccumulatedCell.tsx` | No `findNearest`, no `TOLERANCE_MS`, positional zip |
+| `VEN/ui/src/components/controller/dataBuilders.ts` | `computeForecastEnergy` skips null values |
+| `VEN/ui/src/components/controller/tariffBuilders.ts` | `buildPowerPoints` handles null values |
 | `VEN/ui/src/api/client.ts` | `resolution` parameter supported |

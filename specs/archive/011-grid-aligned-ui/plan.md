@@ -53,7 +53,7 @@ VEN/ui/src/
 ├── api/
 │   ├── client.ts                          # allTimelines(): handle values:null, add resolution param
 │   └── hooks.ts                           # useAllTimelines(): pass resolution option
-├── components/controller-v2/
+├── components/controller/
 │   ├── types.ts                           # AssetTimelinePoint.values becomes nullable
 │   ├── GridAccumulatedCell.tsx             # Remove findNearest/TOLERANCE_MS, positional zip
 │   ├── dataBuilders.ts                    # computeForecastEnergy: skip null values

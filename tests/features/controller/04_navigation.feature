@@ -1,3 +1,4 @@
+@phase-controller
 Feature: Controller V2 — Navigation and Layout Controls
 
   Background:

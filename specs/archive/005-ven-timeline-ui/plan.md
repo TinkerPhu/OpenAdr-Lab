@@ -5,7 +5,7 @@
 
 ## Summary
 
-Implement the `controller/timeline.rs` backend module (currently a stub), expose `GET /timeline/{asset_id}` and `GET /timeline/all` HTTP endpoints, then rebuild the VEN controller-v2 UI to consume them. The data pipeline moves from frontend-assembled data (trace + plan + rates joined in `dataBuilders.ts`) to backend-assembled, pre-enriched timeline slices. Four frontend diagram bugs (battery/base_load missing, PV wrong data, unstable X-axis, `nowMs` not memoized) are resolved as a natural consequence. Extended per-cell time window toggles, schema-driven simulation controls, and the `useRates` → `useTariffs` rename are also delivered.
+Implement the `controller/timeline.rs` backend module (currently a stub), expose `GET /timeline/{asset_id}` and `GET /timeline/all` HTTP endpoints, then rebuild the VEN controller UI to consume them. The data pipeline moves from frontend-assembled data (trace + plan + rates joined in `dataBuilders.ts`) to backend-assembled, pre-enriched timeline slices. Four frontend diagram bugs (battery/base_load missing, PV wrong data, unstable X-axis, `nowMs` not memoized) are resolved as a natural consequence. Extended per-cell time window toggles, schema-driven simulation controls, and the `useRates` → `useTariffs` rename are also delivered.
 
 ## Technical Context
 
@@ -69,7 +69,7 @@ VEN/ui/src/
 ├── api/
 │   ├── hooks.ts             ← add useTimeline, useAllTimelines, useSimSchema; rename useRates→useTariffs
 │   └── types.ts             ← add AssetTimelinePoint, TariffSnapshot; remove RateSnapshot, PlannedRates
-├── components/controller-v2/
+├── components/controller/
 │   ├── types.ts             ← replace AssetTimePoint with AssetTimelinePoint; remove isPast
 │   ├── dataBuilders.ts      ← delete buildAssetTimeline, buildTariffTimeline, buildStackedAreaData
 │   ├── AssetCell.tsx        ← wire useTimeline + extended window toggle

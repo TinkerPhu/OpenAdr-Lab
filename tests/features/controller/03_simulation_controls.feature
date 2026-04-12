@@ -1,3 +1,4 @@
+@phase-controller
 Feature: Controller V2 — Simulation Controls
 
   Background:

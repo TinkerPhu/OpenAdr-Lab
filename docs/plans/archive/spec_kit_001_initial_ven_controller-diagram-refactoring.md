@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-15
 **Status**: Architectural decisions captured — ready for implementation planning
-**Scope**: VEN UI (controller-v2), VEN API (trace/timeline endpoints), VEN backend (simulator, reactor, controller, trace)
+**Scope**: VEN UI (controller), VEN API (trace/timeline endpoints), VEN backend (simulator, reactor, controller, trace)
 
 ---
 
@@ -365,7 +365,7 @@ The internal columnar layout is an implementation detail. The HTTP response tran
 
 ---
 
-## 12. Summary of UI Changes (VEN controller-v2)
+## 12. Summary of UI Changes (VEN controller)
 
 | Component | Change |
 |---|---|

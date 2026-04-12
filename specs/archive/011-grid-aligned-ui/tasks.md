@@ -17,7 +17,7 @@
 
 **Purpose**: Update the shared `AssetTimelinePoint` type to accept `values: null`. This unblocks all user stories.
 
-- [x] T001 Update `AssetTimelinePoint.values` type from `Record<string, number>` to `Record<string, number> | null` in `VEN/ui/src/components/controller-v2/types.ts`
+- [x] T001 Update `AssetTimelinePoint.values` type from `Record<string, number>` to `Record<string, number> | null` in `VEN/ui/src/components/controller/types.ts`
 
 **Checkpoint**: Type change compiles. All downstream files will now show TypeScript errors where `values` is accessed without null-check — these are addressed in the user story phases.
 
@@ -31,8 +31,8 @@
 
 ### Implementation for User Story 1
 
-- [x] T002 [US1] Remove `findNearest()` function (lines 17-32) and `TOLERANCE_MS` constant (line 51) from `VEN/ui/src/components/controller-v2/GridAccumulatedCell.tsx`
-- [x] T003 [US1] Replace `buildStackedFromAllTimelines()` with positional-zip implementation in `VEN/ui/src/components/controller-v2/GridAccumulatedCell.tsx` — iterate by shared index across all asset arrays, handle `values: null` as zero contribution, extract `gridPowerKw` from `allTimelines["grid"][i]`
+- [x] T002 [US1] Remove `findNearest()` function (lines 17-32) and `TOLERANCE_MS` constant (line 51) from `VEN/ui/src/components/controller/GridAccumulatedCell.tsx`
+- [x] T003 [US1] Replace `buildStackedFromAllTimelines()` with positional-zip implementation in `VEN/ui/src/components/controller/GridAccumulatedCell.tsx` — iterate by shared index across all asset arrays, handle `values: null` as zero contribution, extract `gridPowerKw` from `allTimelines["grid"][i]`
 - [x] T004 [US1] Update `VEN/ui/src/__tests__/GridAccumulatedCell.test.tsx` — update mock for `useAllTimelines` to return grid-aligned data; add test cases for positional-zip (normal data, empty data, null-values entries)
 
 **Checkpoint**: Stacked area chart uses positional indexing. `findNearest` and `TOLERANCE_MS` are gone. Tests pass.
@@ -47,8 +47,8 @@
 
 ### Implementation for User Story 2
 
-- [x] T005 [P] [US2] Add optional chaining for `values` access in all 3 `dataKey` accessors in `VEN/ui/src/components/controller-v2/charts/AssetTimelineChart.tsx` — change `pt.values["key"]` to `pt.values?.["key"]`
-- [x] T006 [P] [US2] Update `computeForecastEnergy` in `VEN/ui/src/components/controller-v2/dataBuilders.ts` to skip entries where `values` is `null` (add null-check before accessing `values["power_kw"]`)
+- [x] T005 [P] [US2] Add optional chaining for `values` access in all 3 `dataKey` accessors in `VEN/ui/src/components/controller/charts/AssetTimelineChart.tsx` — change `pt.values["key"]` to `pt.values?.["key"]`
+- [x] T006 [P] [US2] Update `computeForecastEnergy` in `VEN/ui/src/components/controller/dataBuilders.ts` to skip entries where `values` is `null` (add null-check before accessing `values["power_kw"]`)
 - [x] T007 [P] [US2] Add null-values test case to `VEN/ui/src/__tests__/dataBuilders.test.ts` — verify `forecastFor` returns correct result when timeline contains `{ts, values: null}` entries
 
 **Checkpoint**: Asset cell charts and forecast energy calculations handle null values. All asset cell tests pass.
@@ -63,7 +63,7 @@
 
 ### Implementation for User Story 3
 
-- [x] T008 [US3] Update `buildPowerPoints` in `VEN/ui/src/components/controller-v2/tariffBuilders.ts` to handle `values: null` — produce `TariffTimePoint` with `gridPowerKw: null` and `totalCostRateEurH: null` for null-values entries
+- [x] T008 [US3] Update `buildPowerPoints` in `VEN/ui/src/components/controller/tariffBuilders.ts` to handle `values: null` — produce `TariffTimePoint` with `gridPowerKw: null` and `totalCostRateEurH: null` for null-values entries
 
 **Checkpoint**: Tariff cell grid power line handles empty grid buckets.
 

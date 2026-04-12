@@ -2335,7 +2335,7 @@ Two consecutive runs (first `--build`, second without) both 0 failures.
 
 **Date**: 2026-03-14
 **Branch**: `001-controller-dashboard-v2`
-**Scope**: New `/controller-v2` React page with per-asset cells (left metrics / mid timeline / right controls), two grid-level cells (tariff + accumulated power), cell pinning/collapse, and Rust backend override stubs.
+**Scope**: New `/controller` React page with per-asset cells (left metrics / mid timeline / right controls), two grid-level cells (tariff + accumulated power), cell pinning/collapse, and Rust backend override stubs.
 
 ### What Was Built
 
@@ -2346,7 +2346,7 @@ Two consecutive runs (first `--build`, second without) both 0 failures.
 - `battery_initial_soc: Option<f64>` — one-shot SoC jump
 - `battery_capacity_kwh: Option<f64>` — persistent capacity override
 
-**Frontend components** (all under `VEN/ui/src/components/controller-v2/`):
+**Frontend components** (all under `VEN/ui/src/components/controller/`):
 - `types.ts` — `AssetId`, `AssetSummary`, `AssetTimePoint`, `TariffSnapshot`, `TariffTimePoint`, `StackedAreaPoint`, `CollapseState`
 - `dataBuilders.ts` — `deriveAssetSummaries`, `buildAssetTimeline`, `buildStackedAreaData`, `buildTariffTimeline`, `deriveTariffSnapshot`, `findCurrentTariff`
 - `AssetLeftSection.tsx` — power/cost/CO₂/SoC metrics, all `data-testid` per contracts

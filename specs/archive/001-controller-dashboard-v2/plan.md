@@ -28,7 +28,7 @@ Build a new "Controller V2" page in the VEN UI that displays all configured ener
 | I. OpenADR Spec Fidelity | ✅ PASS | No OpenADR field names involved. All fields are VEN-internal API names (`power_kw`, `import_price_eur_kwh`, etc.) |
 | II. BDD-First Testing | ⚠️ REQUIRED | Feature files must be written before any implementation code. 4 feature files planned under `tests/features/controller/` |
 | III. Upstream Compatibility | ➖ N/A | No openleadr-rs submodule changes. Backend stubs are in VEN/src/state.rs only |
-| IV. Lean Architecture | ✅ PASS | Reuses all existing hooks, recharts, MUI patterns. Three new stub fields in UserOverrides. No new HTTP routes. New components scoped to `controller-v2/` subdirectory |
+| IV. Lean Architecture | ✅ PASS | Reuses all existing hooks, recharts, MUI patterns. Three new stub fields in UserOverrides. No new HTTP routes. New components scoped to `controller/` subdirectory |
 | V. Infrastructure Parity | ⚠️ REQUIRED | All builds/tests on Pi4-Server via SSH. Rebuild test-runner image whenever feature files or VEN source change |
 
 *Post-design re-check*: All principles remain satisfied after Phase 1 design. No Complexity Tracking entries required.
@@ -53,9 +53,9 @@ specs/001-controller-dashboard-v2/
 ```text
 VEN/ui/src/
 ├── pages/
-│   └── ControllerV2.tsx                      # New page, route /controller-v2
+│   └── ControllerV2.tsx                      # New page, route /controller
 ├── components/
-│   └── controller-v2/
+│   └── controller/
 │       ├── types.ts                           # AssetId, AssetTimePoint, PinnedState, etc.
 │       ├── dataBuilders.ts                    # buildAssetTimeline(), buildStackedAreaData()
 │       ├── AssetCell.tsx                      # Full 3-section asset cell (composes left/mid/right)
@@ -83,7 +83,7 @@ tests/features/controller/
 └── 04_navigation.feature                     # Pin, unpin, collapse, expand
 ```
 
-**Structure Decision**: Web application (frontend-only, plus minimal backend stubs). New components in dedicated `controller-v2/` subdirectory; BDD tests under `tests/features/controller/` as a grouped set. Existing `/controller` page is untouched.
+**Structure Decision**: Web application (frontend-only, plus minimal backend stubs). New components in dedicated `controller/` subdirectory; BDD tests under `tests/features/controller/` as a grouped set. Existing `/controller` page is untouched.
 
 ## Complexity Tracking
 

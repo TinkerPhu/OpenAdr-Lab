@@ -35,7 +35,7 @@ All displayed values are derivable from existing VEN API endpoints. No new GET e
 | Direct SoC set (EV) | **STUB** | Add `ev_initial_soc` to UserOverrides |
 | Direct SoC set (Battery) | **STUB** | Add `battery_initial_soc` to UserOverrides |
 
-**Alternatives considered**: New dedicated `/controller-v2/assets/{id}/history` endpoints. Rejected: unnecessary complexity; existing endpoints provide all required data.
+**Alternatives considered**: New dedicated `/controller/assets/{id}/history` endpoints. Rejected: unnecessary complexity; existing endpoints provide all required data.
 
 ---
 
@@ -215,9 +215,9 @@ Tests run via `docker compose -f tests/docker-compose.test.yml run --build --rm 
 
 ## 10. Routing and Navigation
 
-### Decision: New route /controller-v2 with "Controller V2" nav tab
+### Decision: New route /controller with "Controller V2" nav tab
 
-- Add `<Route path="/controller-v2" element={<ControllerV2Page />} />` to App.tsx
+- Add `<Route path="/controller" element={<ControllerV2Page />} />` to App.tsx
 - Add nav link "Controller V2" to AppBar alongside existing tabs
 - No changes to existing `/controller` route
 

@@ -86,8 +86,8 @@ Zero failures required before marking the feature complete.
 | File | Purpose |
 |---|---|
 | `VEN/ui/src/pages/ControllerV2.tsx` | New page — top-level layout |
-| `VEN/ui/src/components/controller-v2/types.ts` | Shared TypeScript types |
-| `VEN/ui/src/components/controller-v2/dataBuilders.ts` | Data transform functions |
+| `VEN/ui/src/components/controller/types.ts` | Shared TypeScript types |
+| `VEN/ui/src/components/controller/dataBuilders.ts` | Data transform functions |
 | `VEN/ui/src/App.tsx` | Add route + nav tab here |
 | `VEN/src/state.rs` | Add 3 stub fields to UserOverrides |
 | `tests/features/controller/` | BDD scenarios |
@@ -97,7 +97,7 @@ Zero failures required before marking the feature complete.
 
 ## Viewing the Dashboard
 
-Navigate to `http://pi4server.local:8214/controller-v2` after VEN UI is running.
+Navigate to `http://pi4server.local:8214/controller` after VEN UI is running.
 
 The VEN selector dropdown (top right) switches between VEN-1 (8211), VEN-2 (8212), VEN-3 (8213).
 

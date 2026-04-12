@@ -16,7 +16,7 @@ When prompted for a feature path / name, use: `ven-timeline-ui`
 
 ## Feature Description
 
-Implement the backend timeline endpoints and rebuild the VEN controller-v2 UI to use them. This speckit delivers the complete data pipeline from backend history/plan to rendered asset cell diagrams, including dynamic simulation controls, per-cell extended time windows, and the stacked area accumulated view. The immediate diagram bugs (battery/base_load missing, PV wrong data, X-axis auto-domain, nowMs not memoized) are resolved as a natural consequence of the new data source.
+Implement the backend timeline endpoints and rebuild the VEN controller UI to use them. This speckit delivers the complete data pipeline from backend history/plan to rendered asset cell diagrams, including dynamic simulation controls, per-cell extended time windows, and the stacked area accumulated view. The immediate diagram bugs (battery/base_load missing, PV wrong data, X-axis auto-domain, nowMs not memoized) are resolved as a natural consequence of the new data source.
 
 ### Prerequisites
 
@@ -134,7 +134,7 @@ Remove from hooks: any hook that joins `/trace` + `/plan` + `/rates` data in the
 
 #### 5. UI — remove dataBuilders.ts frontend assembly
 
-Remove from `VEN/ui/src/components/controller-v2/dataBuilders.ts`:
+Remove from `VEN/ui/src/components/controller/dataBuilders.ts`:
 - `buildAssetTimeline` — replaced by `GET /timeline/{asset_id}`
 - `buildTariffTimeline` — replaced by `GET /timeline/grid`
 - `buildStackedAreaData` — replaced by `GET /timeline/all`

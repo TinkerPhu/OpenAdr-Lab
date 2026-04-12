@@ -25,8 +25,8 @@ scp <local-path> Pi4-Server:/srv/docker/openadr_lab/<same-relative-path>
 
 Example:
 ```bash
-scp VEN/ui/src/components/controller-v2/charts/TariffChart.tsx \
-    Pi4-Server:/srv/docker/openadr_lab/VEN/ui/src/components/controller-v2/charts/TariffChart.tsx
+scp VEN/ui/src/components/controller/charts/TariffChart.tsx \
+    Pi4-Server:/srv/docker/openadr_lab/VEN/ui/src/components/controller/charts/TariffChart.tsx
 ```
 
 ## Step 3 — Rebuild the affected service

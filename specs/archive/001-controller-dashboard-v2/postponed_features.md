@@ -20,7 +20,7 @@ Items explicitly deferred from this feature. Each entry references where it is d
 
 **What**: Remove the existing `/controller` route and `Controller.tsx` page once V2 has passed all acceptance tests and is approved as the primary controller view.
 
-**Why postponed**: V2 launches alongside V1 as `/controller-v2`. Replacement happens only after V2 is stable, tested, and approved. Removing V1 prematurely risks losing working functionality.
+**Why postponed**: V2 launches alongside V1 as `/controller`. Replacement happens only after V2 is stable, tested, and approved. Removing V1 prematurely risks losing working functionality.
 
 ---
 

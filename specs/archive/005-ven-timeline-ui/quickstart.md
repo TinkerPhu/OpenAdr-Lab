@@ -50,7 +50,7 @@ curl "$BASE/sim/schema" | jq 'keys'
 
 ## Smoke Test: UI Verification
 
-1. Open `http://pi4-server:8214/controller-v2`
+1. Open `http://pi4-server:8214/controller`
 2. Verify all asset cells (EV, Battery, Heater, PV, BaseLoad) show charts with no empty past section
 3. Verify PV cell shows 0 kW at night / positive during daytime (not a flat limit line)
 4. Verify NOW reference line is visible at chart centre on every cell
@@ -100,6 +100,6 @@ cd VEN && cargo test controller::timeline
 cd VEN/ui && npm test -- --run
 # Key test files:
 #   - src/api/hooks.test.ts — useTimeline, useAllTimelines, useSimSchema, useTariffs
-#   - src/components/controller-v2/AssetTimelineChart.test.tsx — new data shape
-#   - src/components/controller-v2/DynamicControl.test.tsx — Slider/Switch/NumberInput rendering
+#   - src/components/controller/AssetTimelineChart.test.tsx — new data shape
+#   - src/components/controller/DynamicControl.test.tsx — Slider/Switch/NumberInput rendering
 ```

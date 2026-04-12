@@ -151,6 +151,6 @@ build_asset_timeline(asset_id, history, plan, tariffs, window)
 
 | Type | File | Replacement |
 |------|------|-------------|
-| `AssetTimePoint` | `VEN/ui/src/components/controller-v2/types.ts` | `AssetTimelinePoint` |
+| `AssetTimePoint` | `VEN/ui/src/components/controller/types.ts` | `AssetTimelinePoint` |
 | `RateSnapshot` | `VEN/ui/src/api/hooks.ts` + `types.ts` | `TariffSnapshot` |
 | `PlannedRates` | `VEN/ui/src/api/hooks.ts` | `TariffSnapshot[]` |

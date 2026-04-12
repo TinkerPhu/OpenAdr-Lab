@@ -384,7 +384,7 @@ impl Default for PlannerConfig {
             w_grid: 0.0,
             c_bat_wear_eur_kwh: default_bat_wear(),
             w_viol: default_w_viol(),
-            pen_imp_eur_kwh: 0.0,
+            pen_imp_eur_kwh: 100.0,
             pen_exp_eur_kwh: 0.0,
             v_ev_extra_eur_kwh: default_v_ev_extra(),
             v_heat_eur: default_v_heat(),

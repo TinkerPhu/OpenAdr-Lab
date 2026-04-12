@@ -13,7 +13,7 @@
 
 | Property | Value |
 |---|---|
-| Route path | `/controller-v2` |
+| Route path | `/controller` |
 | Nav label | `Controller V2` |
 | Position in AppBar | After existing `Controller` tab |
 | Page component | `ControllerV2` (named function export from `pages/ControllerV2.tsx`) |
@@ -34,7 +34,7 @@ export function ControllerV2(): JSX.Element
 - Derives `AssetSummary[]` and `AssetTimePoint[][]` from raw API data via `dataBuilders`
 
 **data-testid values**:
-- `data-testid="controller-v2-page"` — root container
+- `data-testid="controller-page"` — root container
 - `data-testid="pinned-zone"` — pinned cell area
 - `data-testid="scrollable-content"` — scrollable area below pinned zone
 
@@ -43,7 +43,7 @@ export function ControllerV2(): JSX.Element
 ## Component: PinnedZone
 
 ```typescript
-// components/controller-v2/PinnedZone.tsx
+// components/controller/PinnedZone.tsx
 interface PinnedZoneProps {
   pinnedCellIds: string[];
   children: React.ReactNode;   // Rendered pinned cells (caller provides)
@@ -60,7 +60,7 @@ export function PinnedZone({ pinnedCellIds, children }: PinnedZoneProps): JSX.El
 ## Component: AssetCell
 
 ```typescript
-// components/controller-v2/AssetCell.tsx
+// components/controller/AssetCell.tsx
 interface AssetCellProps {
   assetId: AssetId;
   summary: AssetSummary;

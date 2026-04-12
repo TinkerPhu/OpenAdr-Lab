@@ -16,15 +16,15 @@ use good_lp::{
 };
 use uuid::Uuid;
 
-use crate::entities::asset::{PlanTrigger, UserRequestMode};
+use crate::entities::asset::{ComfortRate, PlanTrigger, UserRequestMode};
 use crate::entities::capacity::OadrCapacityState;
-use crate::entities::energy_packet::{EnergyPacket, PacketStatus};
+use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, PacketStatus, ValueCurve};
 use crate::entities::plan::{
     CostBreakdown, PacketAllocation, Plan, PlanStep, PlanSummary, PlanTimeSlot,
     PlanningHorizon, PlanWarning, WarningSeverity,
 };
 use crate::entities::tariff_snapshot::TariffTimeSeries;
-use crate::profile::{PlannerObjective, Profile};
+use crate::profile::{PacketSeed, PlannerObjective, Profile};
 use crate::simulator::SimState;
 
 // ── Internal MILP types ──────────────────────────────────────────────────────
@@ -122,6 +122,9 @@ struct MilpInputs {
     t_ev_dead_step: Option<usize>,
     /// Max charge power [kW]; 0.0 when EV absent
     p_ev_max_kw: f64,
+    /// Per-slot EV upper bound [kW]: `max(0, p_imp_cont[t] - base_kw + p_pv[t])` capped at max_charge_kw.
+    /// Empty means "no per-slot cap, use p_ev_max_kw". Set by build_milp_inputs; left empty in tests.
+    p_ev_slot_ub: Vec<f64>,
     /// Semi-continuous minimum charge power [kW] (EvConfig.min_charge_kw)
     p_ev_min_kw: f64,
     /// Core energy requirement [kWh] from active packet; 0.0 when absent
@@ -268,6 +271,30 @@ fn build_milp_inputs(
     let pv_cfg = profile.pv_config();
     let base_kw = profile.base_load_kw();
 
+    // Use live PV config from SimState (includes irradiance_offset from sim inject)
+    // instead of the profile's pure sin model, so the MILP respects sim overrides.
+    let sim_pv: Option<&crate::assets::PvInverter> = assets
+        .asset_configs
+        .iter()
+        .find_map(|c| {
+            if let crate::assets::AssetConfig::Pv(pv) = c {
+                Some(pv)
+            } else {
+                None
+            }
+        });
+    let pv_tau_s: f64 = sim_pv
+        .map(|pv| {
+            if pv.pv_alpha > 0.0 && pv.pv_alpha < 1.0 {
+                -(step_s as f64) / (1.0 - pv.pv_alpha).ln()
+            } else if pv.pv_alpha >= 1.0 {
+                0.0 // instant decay
+            } else {
+                f64::INFINITY // no decay
+            }
+        })
+        .unwrap_or(f64::INFINITY);
+
     let mut c_imp = Vec::with_capacity(n);
     let mut c_exp = Vec::with_capacity(n);
     let mut g_co2 = Vec::with_capacity(n);
@@ -300,7 +327,15 @@ fn build_milp_inputs(
                 .unwrap_or(300.0)
                 / 1000.0,
         );
-        p_pv.push(pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0));
+        // PV forecast: use live sim state (respects sim inject offsets) if available,
+        // otherwise fall back to profile sin model.
+        let pv_kw = if let Some(pv) = sim_pv {
+            let seconds_ahead = (t as f64) * step_s as f64;
+            pv.forecast_kw_at(slot_t, seconds_ahead, pv_tau_s)
+        } else {
+            pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)
+        };
+        p_pv.push(pv_kw);
         p_base.push(base_kw);
         p_imp_phys.push(phys_imp);
         p_exp_phys.push(phys_exp);
@@ -340,7 +375,7 @@ fn build_milp_inputs(
     };
 
     // ── EV ────────────────────────────────────────────────────────────────────
-    let (a_ev, ev_mode, t_ev_dead, p_ev_max, p_ev_min, e_ev_core, e_ev_extra, v_ev_extra) =
+    let (a_ev, ev_mode, t_ev_dead, p_ev_max, p_ev_min, e_ev_core, e_ev_extra, v_ev_extra, p_ev_slot_ub) =
         if let Some(ev_cfg) = profile.ev_config() {
             let plugged = assets.ev_state().map(|s| s.plugged).unwrap_or(false);
 
@@ -355,6 +390,7 @@ fn build_milp_inputs(
                     0.0,
                     ev_cfg.battery_kwh * (1.0 - ev_cfg.soc_target),
                     profile.planner.v_ev_extra_eur_kwh,
+                    vec![0.0_f64; n],
                 )
             } else {
                 let pkt = active_packet(packets, &ev_cfg.id);
@@ -364,8 +400,29 @@ fn build_milp_inputs(
                     .and_then(|p| p.value_curve.active_deadline())
                     .map(|tier| deadline_to_step(tier.deadline, now, step_s, n));
 
+                // Per-slot EV upper bound: import budget after base load, before battery.
+                // Forces EV = 0 in import-capped slots regardless of battery state, matching
+                // demand-response semantics (battery cannot "launder" import through EV).
+                // Use min(forecast_pv, current_actual_pv) so we don't rely on an optimistic
+                // forecast when PV is overridden (sim inject) or temporarily unavailable.
+                let current_pv_kw = assets
+                    .asset("pv")
+                    .map(|e| (-e.last_power_kw).max(0.0))
+                    .unwrap_or(0.0);
+                let slot_ub: Vec<f64> = (0..n)
+                    .map(|t| {
+                        let conservative_pv = p_pv[t].min(current_pv_kw);
+                        let avail = (p_imp_cont[t] - base_kw + conservative_pv).max(0.0);
+                        avail.min(ev_cfg.max_charge_kw)
+                    })
+                    .collect();
+
+                // EV availability mask: slot must be within deadline AND have import budget >= EVSE minimum.
                 let mask: Vec<bool> = (0..n)
-                    .map(|t| deadline_step.map(|d| t <= d).unwrap_or(true))
+                    .map(|t| {
+                        let deadline_ok = deadline_step.map(|d| t <= d).unwrap_or(true);
+                        deadline_ok && (slot_ub[t] >= ev_cfg.min_charge_kw)
+                    })
                     .collect();
 
                 let core_kwh = pkt.map(|p| p.target_energy_kwh).unwrap_or(0.0);
@@ -378,6 +435,7 @@ fn build_milp_inputs(
                     core_kwh,
                     ev_cfg.battery_kwh * (1.0 - ev_cfg.soc_target),
                     profile.planner.v_ev_extra_eur_kwh,
+                    slot_ub,
                 )
             }
         } else {
@@ -391,6 +449,7 @@ fn build_milp_inputs(
                 0.0,
                 0.0,
                 0.0,
+                vec![0.0_f64; n],
             )
         };
 
@@ -435,6 +494,7 @@ fn build_milp_inputs(
         ev_mode,
         t_ev_dead_step: t_ev_dead,
         p_ev_max_kw: p_ev_max,
+        p_ev_slot_ub,
         p_ev_min_kw: p_ev_min,
         e_ev_core_kwh: e_ev_core,
         e_ev_extra_max_kwh: e_ev_extra,
@@ -708,7 +768,8 @@ fn solve_milp(
         // EV semi-continuous power gate
         if inputs.ev_mode != MilpLoadMode::MustNotRun {
             let ev_ub = if inputs.a_ev[t] {
-                inputs.p_ev_max_kw
+                // Use per-slot bound if set; fall back to global max (empty in unit tests).
+                inputs.p_ev_slot_ub.get(t).copied().unwrap_or(inputs.p_ev_max_kw)
             } else {
                 0.0
             };
@@ -1060,6 +1121,27 @@ fn translate_to_plan(
         });
     }
 
+    // Collect packet IDs that received allocations — transition Pending → Scheduled
+    let scheduled_ids: std::collections::HashSet<Uuid> = slots
+        .iter()
+        .flat_map(|s| s.allocations.iter().map(|a| a.packet_id))
+        .collect();
+
+    let updated_packets: Vec<EnergyPacket> = packets
+        .iter()
+        .map(|p| {
+            if scheduled_ids.contains(&p.id)
+                && matches!(p.status, PacketStatus::Pending | PacketStatus::Scheduled)
+            {
+                let mut p = p.clone();
+                p.status = PacketStatus::Scheduled;
+                p
+            } else {
+                p.clone()
+            }
+        })
+        .collect();
+
     let plan = Plan {
         id: Uuid::new_v4(),
         created_at: now,
@@ -1068,7 +1150,7 @@ fn translate_to_plan(
         slots,
         summary,
         envelopes: vec![],
-        packets: packets.to_vec(),
+        packets: updated_packets,
         warnings,
         steps: steps.clone(),
         soc_trajectory_kwh,
@@ -1080,6 +1162,92 @@ fn translate_to_plan(
 }
 
 /// Run the MILP planner and return a new Plan + audit trail.
+/// Re-seed profile packets for assets with no active non-terminal packet.
+///
+/// Called at the start of each planning cycle so profile-configured seeds (e.g. EV target SoC)
+/// are always present in `active_packets` even after a restart or after the previous packet
+/// was completed/abandoned.
+pub fn seed_missing_packets(
+    packets: &[EnergyPacket],
+    profile: &Profile,
+    now: DateTime<Utc>,
+) -> Vec<EnergyPacket> {
+    let mut result = packets.to_vec();
+    for seed in &profile.packets {
+        let has_active = result.iter().any(|p| {
+            p.asset_id == seed.asset
+                && !matches!(
+                    p.status,
+                    PacketStatus::Completed
+                        | PacketStatus::PartialCompleted
+                        | PacketStatus::Abandoned
+                        | PacketStatus::Failed
+                )
+        });
+        if !has_active {
+            result.push(make_packet_from_seed(seed, profile, now));
+        }
+    }
+    result
+}
+
+/// Build an `EnergyPacket` from a profile `PacketSeed`.
+///
+/// For EV seeds with a `target_soc`, `target_energy_kwh` is set to `battery_kwh × target_soc`
+/// (absolute charge target). The live SoC delta is factored in by the MILP at planning time.
+pub fn make_packet_from_seed(seed: &PacketSeed, profile: &Profile, now: DateTime<Utc>) -> EnergyPacket {
+    let target_energy_kwh = match seed.target_soc {
+        Some(soc) => profile
+            .ev_config()
+            .filter(|e| e.id == seed.asset)
+            .map(|e| e.battery_kwh * soc)
+            .unwrap_or_else(|| seed.desired_power_kw.unwrap_or(1.0)),
+        None => seed.desired_power_kw.unwrap_or(1.0),
+    };
+
+    let desired_power_kw = seed
+        .desired_power_kw
+        .or_else(|| {
+            profile
+                .ev_config()
+                .filter(|e| e.id == seed.asset)
+                .map(|e| e.max_charge_kw)
+        })
+        .unwrap_or(1.0);
+
+    let comfort_rates: Vec<ComfortRate> = seed
+        .comfort_rates
+        .iter()
+        .map(|r| ComfortRate {
+            fill: r.fill,
+            max_marginal_price: r.bid,
+            max_marginal_co2: 0.0,
+        })
+        .collect();
+
+    let deadline = now + Duration::seconds((seed.latest_end_h * 3600.0) as i64);
+    let value_curve = ValueCurve {
+        comfort_rates,
+        deadline_tiers: vec![DeadlineTier {
+            deadline,
+            max_total_cost_eur: None,
+            max_marginal_rate_eur_kwh: None,
+            min_completion: 0.8,
+        }],
+        active_tier_index: 0,
+    };
+
+    let mut pkt = EnergyPacket::new(
+        seed.asset.clone(),
+        target_energy_kwh,
+        desired_power_kw,
+        value_curve,
+        now,
+    );
+    pkt.target_soc = seed.target_soc;
+    pkt
+}
+
 pub fn run_planner(
     assets: &SimState,
     tariffs: &TariffTimeSeries,
@@ -1564,6 +1732,7 @@ mod tests {
             ev_mode: MilpLoadMode::MustNotRun,
             t_ev_dead_step: None,
             p_ev_max_kw: 0.0,
+            p_ev_slot_ub: vec![],
             p_ev_min_kw: 0.0,
             e_ev_core_kwh: 0.0,
             e_ev_extra_max_kwh: 0.0,

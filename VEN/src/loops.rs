@@ -573,6 +573,8 @@ pub(crate) fn spawn_planning(
             let now = Utc::now();
             let rates = state.planned_tariffs().await;
             let packets = state.active_packets().await;
+            // Re-seed profile-configured packets for assets with no active non-terminal packet.
+            let packets = controller::milp_planner::seed_missing_packets(&packets, &profile, now);
             let capacity = state.capacity_state().await;
             let trigger = trigger_rx.borrow().clone();
             let trigger_reason = format!("{:?}", trigger);

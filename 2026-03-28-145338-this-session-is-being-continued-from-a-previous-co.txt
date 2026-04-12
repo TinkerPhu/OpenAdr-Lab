@@ -239,7 +239,7 @@ user)
      │ VEN/ui/src/api/types.ts — add display_scale?: number to                 │
      │ ControlDescriptor type.                                                 │
      │                                                                         │
-     │ VEN/ui/src/components/controller-v2/DynamicControl.tsx — slider branch  │
+     │ VEN/ui/src/components/controller/DynamicControl.tsx — slider branch  │
      │ with display_scale:                                                     │
      │ if (kind === "slider") {                                                │
      │   const scale = descriptor.display_scale ?? 1;                          │
