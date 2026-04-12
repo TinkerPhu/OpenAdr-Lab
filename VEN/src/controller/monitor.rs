@@ -95,9 +95,13 @@ pub fn record_tick(
         });
         pkt.updated_at = now;
 
-        // Scheduled → Active transition
-        if pkt.status == PacketStatus::Scheduled && actual_kw > ACTIVE_THRESHOLD_KW {
-            let from = "Scheduled".to_string();
+        // Pending/Scheduled → Active transition
+        // MILP planner keeps packets at Pending (no explicit Scheduled assignment);
+        // allow the transition from either pre-active status.
+        if (pkt.status == PacketStatus::Scheduled || pkt.status == PacketStatus::Pending)
+            && actual_kw > ACTIVE_THRESHOLD_KW
+        {
+            let from = format!("{:?}", pkt.status);
             pkt.status = PacketStatus::Active;
             events.push(ControllerEvent::PacketTransition {
                 ts: now,
