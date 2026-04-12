@@ -9,8 +9,10 @@
 //! implementation is being built.
 
 use chrono::{DateTime, Duration, Utc};
-use good_lp::{constraint, variable, variables, Expression, Variable};
 use good_lp::solvers::highs::highs;
+use good_lp::{
+    constraint, variable, variables, Expression, SolverModel, Variable, WithMipGap, WithTimeLimit,
+};
 use uuid::Uuid;
 
 use crate::entities::asset::{PlanTrigger, UserRequestMode};
