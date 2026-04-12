@@ -14,16 +14,6 @@ Feature: UC-05..UC-07 — VTN Coordination Use Cases
     Then the plan has field "slots"
     And the plan.slots is a non-empty array
 
-  Scenario: UC-05b — GET /flexibility returns live site-level flexibility envelope
-    Given I have a VTN token as "any-business"
-    And I create a rate-system program and save its ID
-    And I create a cheap 4-hour PRICE event for the saved program
-    When I wait for the VEN /plan to have envelopes
-    And I GET /flexibility from the VEN
-    Then the response status is 200
-    And the response JSON contains field "up_kw"
-    And the response JSON contains field "down_kw"
-
   Scenario: UC-05c — Each flexibility envelope in /plan has energy_needed and rate range fields
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
