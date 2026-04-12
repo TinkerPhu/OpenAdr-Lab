@@ -61,9 +61,9 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 ### BL-07: StaleRatePolicy dispatch in planner
 **Req:** UC-12, REQUIREMENTS §3.2.1
 **Problem:** `StaleRatePolicy` enum is defined (`asset.rs:109-114`) with 4 variants (LAST_KNOWN, HEURISTIC_FORECAST, DEFER_TO_FLEXIBLE, SAFE_AVERAGE), but the planner has no dispatch logic. When VTN is unreachable, slots beyond the last known tariff get no special treatment.
-**Fix:** In planner Phase 1 (`build_grid`), after populating tariff data, detect slots with no rate coverage. Apply the configured `StaleRatePolicy`: LAST_KNOWN → repeat last value; DEFER_TO_FLEXIBLE → mark those slots FLEXIBLE regardless of horizon; SAFE_AVERAGE → use configurable percentile tariff.
+**Fix:** In the MILP input builder (`build_milp_inputs`), after populating tariff data per slot, detect slots with no rate coverage. Apply the configured `StaleRatePolicy`: LAST_KNOWN → repeat last known value; DEFER_TO_FLEXIBLE → set a high fictitious tariff so the MILP defers load to unconstrained slots; SAFE_AVERAGE → use a configurable percentile tariff.
 **Complexity:** Medium (3–4 hours). Policy dispatch + per-slot fallback logic.
-**Verify:** Unit test: planner with rates covering only 2h of a 6h horizon, each policy variant produces different slot classifications and costs.
+**Verify:** Unit test: planner with rates covering only 2h of a 6h horizon, each policy variant produces different slot costs in MILP inputs.
 
 ---
 
@@ -76,18 +76,18 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 
 ---
 
-### BL-09: Phase 6 — Penalty threshold check
+### BL-09: Penalty threshold check (contractual limit violations)
 **Req:** UC-10, VEN_ARCHITECTURE §2.3
-**Problem:** Planner Phase 6 is marked "deferred to Stage 4" (`planner.rs:76`). No penalty avoidance logic exists. Peak demand penalties are not evaluated.
-**Fix:** After Phase 5, evaluate each FIRM slot against configurable penalty thresholds (e.g., MeasurementWindow peak kW). If projected peak exceeds threshold, compute penalty cost vs. avoidance cost (rescheduling allocations to stay below). Reschedule if avoidance is cheaper.
-**Complexity:** Large (5–8 hours). Needs penalty rule configuration, threshold evaluation, cost comparison, and slot reallocation.
-**Verify:** BDD test: configure 10kW penalty threshold, schedule 12kW of load in one slot, assert planner splits across two slots to stay below threshold.
+**Problem:** No penalty-cost logic exists for exceeding contractual capacity limits. Peak demand penalties are not evaluated.
+**Fix:** The MILP already models contractual limit violations via slack variables (`s_imp_viol[t]`, `s_exp_viol[t]`) and per-kWh penalty weights (`pen_imp_eur_kwh`, `pen_exp_eur_kwh` in `PlannerConfig`). These default to 0.0 (disabled). Activate by setting non-zero values in the profile. For the monthly peak-demand penalty model (step-cost binary approach), see the "Deferred" section in `docs/plans/milp_planner_transition.md`.
+**Complexity:** Small (tune profile values) or Large (true monthly demand-charge model — see milp_planner_transition.md).
+**Verify:** Integration test: set `pen_imp_eur_kwh = 1.0`, create a scenario where grid import would exceed contractual limit, assert solver shifts load rather than incurring the penalty.
 
 ---
 
 ### BL-10: FlexibilityEnvelope → VTN report
 **Req:** UC-05, UC-07
-**Problem:** Planner builds `FlexibilityEnvelope` (Phase 7) and exposes via `GET /flexibility`, but never submits them to the VTN as `IMPORT_CAPACITY_RESERVATION` / `EXPORT_CAPACITY_RESERVATION` reports. Aggregators cannot see available DR capacity.
+**Problem:** The planner populates `FlexibilityEnvelope` (post-solve pass over MILP output — see `docs/plans/milp_planner_transition.md` Phase 6) and exposes via `GET /flexibility`, but never submits them to the VTN as `IMPORT_CAPACITY_RESERVATION` / `EXPORT_CAPACITY_RESERVATION` reports. Aggregators cannot see available DR capacity.
 **Fix:** In the report submission loop, when a new plan is produced with non-empty envelopes, build report payloads of type `IMPORT_CAPACITY_RESERVATION` / `EXPORT_CAPACITY_RESERVATION` from the envelope data and submit to VTN.
 **Complexity:** Medium (3–5 hours). Report payload construction from envelope fields + submission wiring.
 **Verify:** BDD test: planner produces envelopes for FLEXIBLE packets, assert VTN receives capacity reservation report with matching power/energy values.
@@ -112,12 +112,10 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 
 ---
 
-### BL-13: Early firm-up heuristic
+### BL-13: Early firm-up heuristic — **Superseded by MILP**
 **Req:** VEN_ARCHITECTURE §2.3
-**Problem:** Spec says if rate variance across FLEXIBLE window is < 10% (flat rate), FLEXIBLE slots may firm up early. Code comment at `planner.rs:271` acknowledges this but it's not implemented.
-**Fix:** After Phase 7, compute variance of tariff across all FLEXIBLE slots. If coefficient of variation < 0.10, reclassify FLEXIBLE → FIRM and re-run allocation (Phases 2–5) for those slots.
-**Complexity:** Small (1–2 hours). Statistical check + slot reclassification.
-**Verify:** Unit test: flat-rate tariff (all €0.15) → all slots classified FIRM. Variable tariff (€0.10–€0.30) → FLEXIBLE slots remain FLEXIBLE.
+**Status:** This item is no longer applicable. The MILP planner optimizes over the full 24-hour horizon jointly; flat-rate and variable-rate periods are handled identically by the solver without any slot reclassification step. The firm/flexible tag on output slots is applied post-solve based on the `near_horizon` boundary and is informational only — it does not affect the optimization.
+~~**Problem:** Spec says if rate variance across FLEXIBLE window is < 10% (flat rate), FLEXIBLE slots may firm up early. Code comment at `planner.rs:271` acknowledges this but it's not implemented.~~
 
 ---
 

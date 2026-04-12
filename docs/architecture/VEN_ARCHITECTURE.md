@@ -193,70 +193,66 @@ The watch channel (`PlanTrigger`) decouples triggering from execution: any compo
 a trigger; the Planner processes them in order. This prevents redundant replanning while ensuring
 every relevant event causes exactly one new plan.
 
-### 2.3 Planning Algorithm (Summary)
+### 2.3 Planning Algorithm (MILP)
 
-The Planner runs an **8-phase priority-based greedy scheduler**. It is not a full LP/MILP
-optimizer — deliberate choice for residential scale (24–48 h horizon, 3–15 assets, millisecond
-runtime requirement, frequent replanning).
+The Planner solves a **Mixed-Integer Linear Program (MILP)** over the full planning horizon
+(default 24 h, configurable). It runs in an MPC (Model Predictive Control) loop: measure
+current state → update forecasts → solve → apply first step → repeat on the next trigger.
 
-For the complete algorithm see `docs/VEN_Controller/Step4_Algorithm.md` [ARCHIVED].
+For the full MILP model design see `d:/Tinker/milp_demo/ems_optimization_model_design.md`.
+For the transition from the previous greedy scheduler see `docs/plans/milp_planner_transition.md`.
+
+**Pipeline:**
 
 ```
-Phase 1 — PREPARE
-  Build planning grid (slots × tariffs × limits)
-  Classify slots: FIRM (near-horizon) vs FLEXIBLE (far-horizon)
-  Populate baseline by calling asset.forecast(horizon) for each asset — NO inline formulas
-  Classify assets and packets
-
-Phase 2 — SCORE (FIRM slots only)
-  For each (packet, slot) pair:
-    Compute CalcCache: slot cost, comfort bid, time pressure, eligibility
-
-Phase 3 — ALLOCATE CONSUMPTION (FIRM slots only)
-  Sort eligible (packet, slot) pairs by EffectivePriority
-  Greedy allocation respecting hard constraints (capacity limits, SOC bounds)
-
-Phase 4 — ALLOCATE STORAGE (FIRM slots only)
-  Identify charge/discharge opportunities
-  Apply round-trip efficiency test
-
-Phase 5 — ALLOCATE RESIDUAL PV SURPLUS (FIRM slots only)
-  Export unclaimed surplus (up to ExportCapacityLimit)
-  Handle PV curtailment if export cap is zero
-
-Phase 6 — PENALTY CHECK (FIRM slots only)
-  Evaluate discrete penalty thresholds (MeasurementWindow)
-  Reschedule if avoidance cost < penalty cost
-
-Phase 7 — BUILD FLEXIBILITY ENVELOPES (far horizon)
-  For each packet with unallocated energy:
-    Characterize flexible demand window
-    Compute rate range, budget remaining, estimated cost
-
-Phase 8 — FINALIZE
-  Write FIRM PacketAllocations
-  Write FlexibilityEnvelopes
-  Compute slot summaries and completion estimates
-  Emit PlanWarnings
+run_planner()
+  ├── build_milp_inputs()     — assemble forecasts, profiles, LoadMode per packet
+  ├── solve_milp()            — good_lp / HiGHS MILP model
+  └── translate_to_plan()     — SolveOutput → Plan + Vec<PlanStep>
 ```
 
-**Key data structure: CalcCache** (transient, per-packet-per-slot, discarded after Phase 3)
+**Key inputs (assembled by `build_milp_inputs`):**
 
-| Field | Description |
+| Input | Source |
 |---|---|
-| `EffectiveCost` | Surplus-aware cost for this packet in this slot. Pure grid: `ImportPrice + ImportCO₂ × CO₂Weight`. PV self-consumption: `ExportPrice` (opportunity cost). Blended: weighted average. |
-| `ComfortBid` | Interpolated from `ComfortRate[]` at `ProjectedFill`. Maximum the packet will pay. |
-| `TimePressure` | Urgency factor — rises as `SlotsUntilDeadline` shrinks. |
-| `WithinComfortBid` | `EffectiveCost ≤ ComfortBid` — eligibility gate. |
+| Import/export tariff per slot (`c_imp[t]`, `c_exp[t]`) | `TariffTimeSeries` sampled per slot |
+| GHG intensity per slot (`g_imp[t]`) | `TariffTimeSeries.co2_g_kwh / 1000` |
+| Grid capacity limits per slot | `OadrCapacityState` → `GridConfig` fallback |
+| PV generation forecast per slot | `PvConfig.forecast_kw(slot_start)` |
+| Baseline (non-controllable) load per slot | `BaseLoadConfig.baseline_kw` |
+| Battery parameters + current SoC | `BatteryConfig` + live `SimState` |
+| EV availability mask `a_ev[t]` + charging bounds | `EvConfig` + `SimState.ev.plugged` |
+| Load mode per asset (`must_run` / `may_run` / `must_not_run`) | Derived from active `EnergyPacket` list |
+
+**Objective function** (minimise):
+
+```
+w_energy·C_energy + w_ghg·C_GHG + w_grid·C_grid + c_bat_wear·C_wear
+  + w_viol·C_violations − w_services·V_services
+```
+
+Weights are configured via `PlannerConfig`. `PlannerObjective` presets (`min_cost`,
+`min_ghg`, `min_grid`, `max_revenue`, `custom`) select named weight configurations.
+
+**Binary model capabilities:**
+- EV: semi-continuous charging (`z_ev_on[t]`) — if charging at all, power ≥ `p_ev_min_kw`
+- Heater: two-level power (`z_mid[t]`, `z_full[t]`) — mid-power and full-power states
+- Battery: mutual exclusion (`u_bat[t]`) — no simultaneous charge/discharge
+- Grid: no simultaneous import/export (`u_grid[t]`)
 
 **Slot classification:** `FirmBoundary = now + NearHorizonDuration` (configurable, default 2 h).
-Slots within `[now, FirmBoundary]` are FIRM. Slots beyond are FLEXIBLE.
-
-**Early firm-up:** If rate variance across the FLEXIBLE window is < 10% (flat rate), FLEXIBLE
-slots may firm up early to simplify execution.
+The MILP optimizes over all slots jointly. Output slots within `[now, FirmBoundary]` are tagged
+FIRM; slots beyond are tagged FLEXIBLE. This tag is informational — it does not constrain the
+solver.
 
 **StaleRatePolicy:** When VTN is unreachable, unknown future slots are handled per
 `StaleRatePolicy` (default: `HEURISTIC_FORECAST`). See REQUIREMENTS §3.2.1.
+
+**Key output fields added by the MILP:**
+- `Plan.soc_trajectory_kwh` — battery SoC at end of each step
+- `Plan.objective_eur` — total MILP objective value
+- `Plan.cost_breakdown: CostBreakdown` — decomposed cost components
+- `PlanTimeSlot.bat_charge_kw`, `PlanTimeSlot.bat_discharge_kw` — battery setpoints per slot
 
 ### 2.4 Data Flows
 
@@ -558,7 +554,7 @@ at or before `t`. Correct for tariffs and any signal that "takes effect and stay
 
 The codebase uses three different strategies with no shared abstraction:
 
-**Planner — tariff lookup** (`planner.rs:540–560`, `tariff_import_at()`):
+**Planner — tariff lookup** (`milp_planner.rs`, `build_milp_inputs()`):
 Exact-interval containment: `interval_start ≤ ts < interval_end`. Applied at the slot
 **start timestamp only**. A planning slot that spans a tariff boundary gets the rate from
 the first half only — the boundary is invisible to the planner.
@@ -650,13 +646,17 @@ The spec defines interval structure but leaves VEN-side alignment to the impleme
 
 ## 6. Design Decisions
 
-### D-01: Greedy Planner (not LP/MILP)
+### D-01: MILP Planner
 
-**Decision:** Priority-based greedy scheduler.
-**Rationale:** 24–48 h horizon, 3–15 assets, replanning every 20 s or on event. A greedy
-approach with well-designed CalcCache produces near-optimal results and runs in milliseconds.
-A full LP/MILP solver would add 100–500 ms latency and complexity without meaningful quality
-gain at residential scale.
+**Decision:** MILP solver (`good_lp` + HiGHS).
+**Rationale:** Two earlier iterations were replaced:
+1. Greedy scheduler — myopic per-step rules; could not optimize across the full horizon.
+2. LP pre-planner — improved battery scheduling but lacked binary variables, so EV minimum charge rate and heater mid/full power levels remained greedy.
+
+The MILP solves both problems: joint 24 h horizon optimization and binary variables for
+EV semi-continuous charging (`z_ev_on[t]`) and heater two-level power (`z_mid[t]`,
+`z_full[t]`). HiGHS solves comparable instances in <100 ms — well within the 20 s
+replan budget. `good_lp` + HiGHS are already project dependencies; no new crates required.
 
 ### D-02: In-Memory Ledger
 

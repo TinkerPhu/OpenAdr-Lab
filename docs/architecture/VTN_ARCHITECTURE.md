@@ -329,8 +329,7 @@ HEMS controller:
 - `FlexibilityEnvelope` (VEN produces it; VTN aggregates it across fleet)
 - Baseline model (VEN reports it; VTN uses it for M&V)
 
-The planning algorithms themselves are **not** shared — VEN does single-site greedy
-scheduling; a VTN controller would do fleet-level dispatch optimisation across N VENs.
+The planning algorithms themselves are **not** shared — VEN does single-site MILP scheduling (joint optimisation over a 24 h horizon); a VTN controller would do fleet-level dispatch optimisation across N VENs.
 
 **Decision:** Shared abstractions are introduced as `VEN/src/common/` — a plain Rust module,
 not a separate crate. When a VTN controller is built, `common/` is extracted into a shared

@@ -325,7 +325,7 @@ The VEN excels as a **HEMS-oriented price-responsive VEN**:
 
 - **OAuth authentication** — full client credentials flow with auto-refresh and 401 retry
 - **PRICE/tariff parsing** — including looping events (P9999Y), variable intervals, ISO 8601 durations
-- **8-phase energy planning** — FIRM/FLEXIBLE horizons, battery arbitrage, comfort curves, multi-tier deadlines
+- **MILP energy planning** — joint 24 h horizon optimisation, battery arbitrage, EV semi-continuous scheduling, heater tier selection, configurable cost/GHG/comfort objectives
 - **Report submission** — upsert semantics, obligation tracking, measurement + status reports
 - **Simulation layer** — 5 physics-based asset models (EV, Battery, PV, Heater, BaseLoad) with 1s tick
 - **Controller pipeline** — OpenADR interface -> planner -> dispatcher -> monitor -> reporter (full lifecycle)

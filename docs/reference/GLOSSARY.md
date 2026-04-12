@@ -24,7 +24,7 @@
 | Term | Full Name | Explanation |
 |---|---|---|
 | **HEMS** | Home Energy Management System | Software and hardware system that monitors and controls energy flows within a home or small site. Coordinates DERs (solar, battery, EV charger, HVAC) to minimise cost, maximise self-consumption, or respond to DR signals from a VTN. In this lab, the HEMS controller runs inside the VEN. |
-| **Planner** | Energy Planner | Component of the HEMS that schedules future energy use. Given rate forecasts, device constraints, and DR obligations, it builds an optimal time-slot plan (FIRM + FLEXIBLE slots) using a greedy algorithm. |
+| **Planner** | Energy Planner | Component of the HEMS that schedules future energy use. Given rate forecasts, device constraints, and DR obligations, it builds an optimal time-slot plan (FIRM + FLEXIBLE slots) by solving a Mixed-Integer Linear Program (MILP) over a 24-hour horizon. |
 | **Dispatcher** | Setpoint Dispatcher | Real-time control loop (1 s tick) that translates the planner's slot schedule into live device setpoints and accumulates the asset ledger. |
 | **Asset Ledger** | — | Cumulative energy accounting record maintained by the Dispatcher. Tracks how much energy each asset imported/exported and the associated cost/revenue. |
 | **Energy Packet** | — | A schedulable unit of energy delivery: a fixed amount of energy (kWh) for a specific asset, with a time window and status (PENDING → ACTIVE → COMPLETED / ABANDONED). |
