@@ -16,10 +16,12 @@ use std::collections::HashMap;
 /// 1. Start with each asset's `default_setpoint()` from its current state.
 /// 2. Find the slot covering `now` in the plan.
 /// 3. Overwrite entries for assets that have an allocation in that slot.
-/// 4. If `heater_setpoint_c` override is set and the plan has no heater allocation,
+/// 4. Apply battery setpoint from `slot.bat_charge_kw - slot.bat_discharge_kw`
+///    (battery power is not in `allocations`; it has its own dedicated slot fields).
+/// 5. If `heater_setpoint_c` override is set and the plan has no heater allocation,
 ///    compute ON/OFF setpoint based on current temperature vs. target.
-/// 5. Enforce `export_limit_kw` on the `pv` key if capacity state has one.
-/// 6. Apply opportunistic surplus EV charging (see `apply_surplus_ev_overlay`).
+/// 6. Enforce `export_limit_kw` on the `pv` key if capacity state has one.
+/// 7. Apply opportunistic surplus EV charging (see `apply_surplus_ev_overlay`).
 pub fn build_setpoints(
     plan: &Plan,
     assets: &[AssetEntry],
@@ -36,21 +38,13 @@ pub fn build_setpoints(
         .collect();
 
     // Find the slot covering now
-    let slot_allocs: Option<&Vec<crate::entities::plan::PacketAllocation>> = plan
-        .slots
-        .iter()
-        .find(|s| s.start <= now && now < s.end)
-        .map(|s| &s.allocations);
+    let active_slot = plan.slots.iter().find(|s| s.start <= now && now < s.end);
 
     let mut plan_allocated_heater = false;
     let mut plan_allocated_ev = false;
-    if let Some(allocs) = slot_allocs {
-        for alloc in allocs {
-            // Battery allocations have no associated packet
-            if alloc.asset_id == "battery" {
-                setpoints.insert("battery".to_string(), alloc.power_kw);
-                continue;
-            }
+    if let Some(slot) = active_slot {
+        // Apply per-asset-class allocations (EV, heater, etc.)
+        for alloc in &slot.allocations {
             if alloc.asset_id == "heater" {
                 plan_allocated_heater = true;
             }
@@ -59,6 +53,10 @@ pub fn build_setpoints(
             }
             setpoints.insert(alloc.asset_id.clone(), alloc.power_kw);
         }
+        // Battery setpoint lives in bat_charge_kw / bat_discharge_kw, not in allocations.
+        // Positive = charging, negative = discharging.
+        let bat_kw = slot.bat_charge_kw - slot.bat_discharge_kw;
+        setpoints.insert("battery".to_string(), bat_kw);
     }
 
     // Heater setpoint override: compute ON/OFF based on current temp vs. target.

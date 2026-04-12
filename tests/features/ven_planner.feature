@@ -48,6 +48,7 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
 
   # --- Flexible envelopes ---
 
+  @phase-6
   Scenario: Plan has flexibility envelopes for far-horizon unscheduled energy
     Given I inject ev_soc 0.5 via sim inject
     And I have a VTN token as "any-business"

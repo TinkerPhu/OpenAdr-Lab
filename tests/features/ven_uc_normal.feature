@@ -15,7 +15,8 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
     Then the response JSON is an array
     And at least one packet has asset_id "ev"
     And at least one packet with asset_id "ev" has status "ACTIVE"
-
+
+  @phase-6
   Scenario: UC-01b — EV charge plan has FLEXIBLE envelopes for far-horizon energy
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
