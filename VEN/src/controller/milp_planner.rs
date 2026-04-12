@@ -1,12 +1,8 @@
 //! MILP-based HEMS planner — entry point.
 //!
-//! This module will contain the full Mixed-Integer Linear Program formulation
-//! for the HEMS energy scheduler.  See `docs/plans/milp_planner_transition.md`
-//! for the design.
-//!
-//! Currently a stub: returns an empty plan so the rest of the controller
-//! (dispatcher, monitor, timeline) compiles and runs while the MILP
-//! implementation is being built.
+//! Builds `MilpInputs` from live state, solves via HiGHS, and translates
+//! the solution into a `Plan` with per-slot allocations and `PlanStep` setpoints.
+//! See `docs/plans/milp_planner_transition.md` for the design.
 
 use chrono::{DateTime, Duration, Utc};
 use good_lp::solvers::highs::highs;
@@ -14,13 +10,15 @@ use good_lp::{
     constraint, variable, variables, Expression, Solution, SolverModel, Variable, WithMipGap,
     WithTimeLimit,
 };
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::entities::asset::{PlanTrigger, UserRequestMode};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{EnergyPacket, PacketStatus};
 use crate::entities::plan::{
-    CostBreakdown, Plan, PlanStep, PlanSummary, PlanningHorizon, PlanWarning,
+    CostBreakdown, PacketAllocation, Plan, PlanStep, PlanSummary, PlanTimeSlot,
+    PlanningHorizon, PlanWarning, WarningSeverity,
 };
 use crate::entities::tariff_snapshot::TariffTimeSeries;
 use crate::profile::{PlannerObjective, Profile};
@@ -802,24 +800,19 @@ fn solve_milp(
     Ok(out)
 }
 
-// ── Public entry point ───────────────────────────────────────────────────────
+// ── Output translator ───────────────────────────────────────────────────────
 
-/// Run the MILP planner and return a new Plan + audit trail.
-///
-/// Stub: returns an empty plan covering the configured horizon.
-/// The MILP formulation will replace this body in the next implementation phase.
-pub fn run_planner(
-    _assets: &SimState,
-    _tariffs: &TariffTimeSeries,
-    packets: &[EnergyPacket],
-    _capacity: &OadrCapacityState,
+/// Fallback plan returned when the MILP solver fails.
+/// Identical structure to the old stub but with a `Critical` warning.
+fn fallback_plan(
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
+    packets: &[EnergyPacket],
+    reason: String,
 ) -> (Plan, Vec<PlanStep>) {
     let step_s = profile.planner.plan_step_s;
     let horizon_h = profile.planner.plan_horizon_h;
-
     let horizon_end = now + Duration::seconds((horizon_h as f64 * 3600.0) as i64);
     let total_steps = ((horizon_h as f64 * 3600.0) / step_s as f64) as usize;
 
@@ -830,14 +823,12 @@ pub fn run_planner(
         num_steps: total_steps,
         far_horizon: horizon_end,
     };
-
     let warning = PlanWarning {
-        severity: crate::entities::plan::WarningSeverity::Info,
+        severity: WarningSeverity::Critical,
         packet_id: None,
-        message: "MILP planner not yet implemented — returning empty plan.".into(),
+        message: reason,
         suggested_action: None,
     };
-
     let plan = Plan {
         id: Uuid::new_v4(),
         created_at: now,
@@ -853,8 +844,271 @@ pub fn run_planner(
         objective_eur: 0.0,
         cost_breakdown: CostBreakdown::default(),
     };
-
     (plan, vec![])
+}
+
+/// Translate a MILP solution into a `Plan` with per-slot allocations and
+/// `PlanStep` setpoints for the dispatcher.
+fn translate_to_plan(
+    sol: &SolveOutput,
+    inputs: &MilpInputs,
+    weights: &MilpWeights,
+    profile: &Profile,
+    now: DateTime<Utc>,
+    trigger: PlanTrigger,
+    packets: &[EnergyPacket],
+) -> (Plan, Vec<PlanStep>) {
+    let step_s = profile.planner.plan_step_s;
+    let n = inputs.n;
+    let dt_h = inputs.dt_h;
+    let horizon_end = now + Duration::seconds((n as i64) * step_s as i64);
+    let horizon = PlanningHorizon {
+        start_time: now,
+        end_time: horizon_end,
+        step_size_s: step_s,
+        num_steps: n,
+        far_horizon: horizon_end,
+    };
+
+    let ev_id = profile.ev_config().map(|c| c.id.clone());
+    let heater_id = profile.heater_config().map(|c| c.id.clone());
+    let bat_id = profile.battery_config().map(|c| c.id.clone());
+
+    let mut slots = Vec::with_capacity(n);
+    let mut steps = Vec::new();
+    let mut violation_count: usize = 0;
+
+    for t in 0..n {
+        let slot_start = now + Duration::seconds((t as i64) * step_s as i64);
+        let slot_end = now + Duration::seconds(((t + 1) as i64) * step_s as i64);
+        let surplus_available_kw = (inputs.p_pv_kw[t] - inputs.p_base_kw[t]).max(0.0);
+        let mut surplus_remaining_kw = surplus_available_kw;
+
+        let mut allocations = Vec::new();
+
+        // ── EV allocation ───────────────────────────────────────────────
+        if inputs.ev_mode != MilpLoadMode::MustNotRun && sol.p_ev_kw[t] > 0.01 {
+            if let Some(ref eid) = ev_id {
+                if let Some(pkt) = active_packet(packets, eid) {
+                    let power_kw = sol.p_ev_kw[t];
+                    let surplus_power_kw = surplus_remaining_kw.min(power_kw);
+                    let grid_power_kw = power_kw - surplus_power_kw;
+                    surplus_remaining_kw -= surplus_power_kw;
+                    allocations.push(PacketAllocation {
+                        packet_id: pkt.id,
+                        asset_id: eid.clone(),
+                        power_kw,
+                        surplus_power_kw,
+                        grid_power_kw,
+                        marginal_value: inputs.c_imp_eur_kwh[t],
+                        cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * dt_h
+                            - surplus_power_kw * inputs.c_exp_eur_kwh[t] * dt_h,
+                        co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h,
+                    });
+                }
+            }
+        }
+
+        // ── Heater allocation ───────────────────────────────────────────
+        if inputs.heater_mode != MilpLoadMode::MustNotRun {
+            let heat_kw =
+                sol.z_heat_mid[t] * inputs.p_heat_mid_kw + sol.z_heat_full[t] * inputs.p_heat_full_kw;
+            if heat_kw > 0.01 {
+                if let Some(ref hid) = heater_id {
+                    let pkt_id = active_packet(packets, hid)
+                        .map(|p| p.id)
+                        .unwrap_or(Uuid::nil());
+                    let surplus_power_kw = surplus_remaining_kw.min(heat_kw);
+                    let grid_power_kw = heat_kw - surplus_power_kw;
+                    surplus_remaining_kw -= surplus_power_kw;
+                    allocations.push(PacketAllocation {
+                        packet_id: pkt_id,
+                        asset_id: hid.clone(),
+                        power_kw: heat_kw,
+                        surplus_power_kw,
+                        grid_power_kw,
+                        marginal_value: inputs.c_imp_eur_kwh[t],
+                        cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * dt_h
+                            - surplus_power_kw * inputs.c_exp_eur_kwh[t] * dt_h,
+                        co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h,
+                    });
+                }
+            }
+        }
+
+        // ── PlanStep entries ────────────────────────────────────────────
+        if let Some(ref eid) = ev_id {
+            if sol.p_ev_kw[t] > 0.01 {
+                steps.push(PlanStep {
+                    ts: slot_start,
+                    asset_id: eid.clone(),
+                    setpoint_kw: sol.p_ev_kw[t],
+                    actual_power_kw: 0.0,
+                });
+            }
+        }
+        if let Some(ref hid) = heater_id {
+            let heat_kw =
+                sol.z_heat_mid[t] * inputs.p_heat_mid_kw + sol.z_heat_full[t] * inputs.p_heat_full_kw;
+            if heat_kw > 0.01 {
+                steps.push(PlanStep {
+                    ts: slot_start,
+                    asset_id: hid.clone(),
+                    setpoint_kw: heat_kw,
+                    actual_power_kw: 0.0,
+                });
+            }
+        }
+        if let Some(ref bid) = bat_id {
+            let bat_net_kw = sol.p_bat_ch_kw[t] - sol.p_bat_dis_kw[t];
+            if bat_net_kw.abs() > 0.01 {
+                steps.push(PlanStep {
+                    ts: slot_start,
+                    asset_id: bid.clone(),
+                    setpoint_kw: bat_net_kw,
+                    actual_power_kw: 0.0,
+                });
+            }
+        }
+
+        // ── Track violations ────────────────────────────────────────────
+        if sol.s_imp_viol_kw[t] > 0.01 || sol.s_exp_viol_kw[t] > 0.01 {
+            violation_count += 1;
+        }
+
+        // ── Assemble slot ───────────────────────────────────────────────
+        let _ = surplus_remaining_kw; // consumed above
+        slots.push(PlanTimeSlot {
+            slot_index: t,
+            start: slot_start,
+            end: slot_end,
+            import_tariff_eur_kwh: inputs.c_imp_eur_kwh[t],
+            export_tariff_eur_kwh: inputs.c_exp_eur_kwh[t],
+            co2_g_kwh: inputs.g_imp_kgco2_kwh[t] * 1000.0,
+            grid_effective_cost: inputs.c_imp_eur_kwh[t],
+            rate_estimated: false,
+            import_cap_kw: inputs.p_imp_max_cont_kw[t],
+            export_cap_kw: inputs.p_exp_max_cont_kw[t],
+            baseline_kw: inputs.p_base_kw[t],
+            pv_forecast_kw: inputs.p_pv_kw[t],
+            surplus_available_kw,
+            allocations,
+            net_import_kw: sol.p_imp_kw[t],
+            net_export_kw: sol.p_exp_kw[t],
+            import_flexibility_kw: 0.0,
+            export_flexibility_kw: 0.0,
+            bat_charge_kw: sol.p_bat_ch_kw[t],
+            bat_discharge_kw: sol.p_bat_dis_kw[t],
+        });
+    }
+
+    // ── SoC trajectory ──────────────────────────────────────────────────
+    let soc_trajectory_kwh = sol.e_bat_kwh.clone();
+
+    // ── Summary (raw energy economics, no weights) ──────────────────────
+    let summary = PlanSummary {
+        total_cost_eur: (0..n)
+            .map(|t| {
+                (inputs.c_imp_eur_kwh[t] * sol.p_imp_kw[t]
+                    - inputs.c_exp_eur_kwh[t] * sol.p_exp_kw[t])
+                    * dt_h
+            })
+            .sum(),
+        total_co2_g: (0..n)
+            .map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0 * sol.p_imp_kw[t] * dt_h)
+            .sum(),
+        total_import_kwh: sol.p_imp_kw.iter().sum::<f64>() * dt_h,
+        total_export_kwh: sol.p_exp_kw.iter().sum::<f64>() * dt_h,
+    };
+
+    // ── Cost breakdown (post-hoc from solution × weights) ───────────────
+    let cost_breakdown = CostBreakdown {
+        c_energy_eur: (0..n)
+            .map(|t| {
+                weights.w_energy
+                    * (inputs.c_imp_eur_kwh[t] * sol.p_imp_kw[t]
+                        - inputs.c_exp_eur_kwh[t] * sol.p_exp_kw[t])
+                    * dt_h
+            })
+            .sum(),
+        c_ghg_eur: (0..n)
+            .map(|t| weights.w_ghg * inputs.g_imp_kgco2_kwh[t] * sol.p_imp_kw[t] * dt_h)
+            .sum(),
+        c_grid_eur: (0..n)
+            .map(|t| weights.w_grid * (sol.p_imp_kw[t] + sol.p_exp_kw[t]) * dt_h)
+            .sum(),
+        c_wear_eur: (0..n)
+            .map(|t| {
+                weights.c_bat_wear_eur_kwh
+                    * (sol.p_bat_ch_kw[t] + sol.p_bat_dis_kw[t])
+                    * dt_h
+            })
+            .sum(),
+        c_violations_eur: (0..n)
+            .map(|t| {
+                weights.w_viol
+                    * (inputs.pen_imp_eur_kwh * sol.s_imp_viol_kw[t]
+                        + inputs.pen_exp_eur_kwh * sol.s_exp_viol_kw[t])
+                    * dt_h
+            })
+            .sum(),
+        v_services_eur: 0.0,
+    };
+
+    // ── Warnings ────────────────────────────────────────────────────────
+    let mut warnings = Vec::new();
+    if violation_count > 0 {
+        warnings.push(PlanWarning {
+            severity: WarningSeverity::Warning,
+            packet_id: None,
+            message: format!(
+                "Grid capacity violation in {violation_count} slot(s) — solver used slack"
+            ),
+            suggested_action: None,
+        });
+    }
+
+    // ── Assemble plan ───────────────────────────────────────────────────
+    let plan = Plan {
+        id: Uuid::new_v4(),
+        created_at: now,
+        trigger,
+        horizon,
+        slots,
+        summary,
+        envelopes: vec![],
+        packets: packets.to_vec(),
+        warnings,
+        steps: steps.clone(),
+        soc_trajectory_kwh,
+        objective_eur: sol.objective_eur,
+        cost_breakdown,
+    };
+    (plan, steps)
+}
+
+// ── Public entry point ───────────────────────────────────────────────────────
+
+/// Run the MILP planner: build inputs from live state, solve via HiGHS,
+/// and translate the solution into a Plan + PlanStep setpoints.
+pub fn run_planner(
+    assets: &SimState,
+    tariffs: &TariffTimeSeries,
+    packets: &[EnergyPacket],
+    capacity: &OadrCapacityState,
+    profile: &Profile,
+    now: DateTime<Utc>,
+    trigger: PlanTrigger,
+) -> (Plan, Vec<PlanStep>) {
+    let inputs = build_milp_inputs(assets, tariffs, packets, capacity, profile, now);
+    let weights = build_milp_weights(profile);
+    match solve_milp(&inputs, &weights) {
+        Ok(sol) => translate_to_plan(&sol, &inputs, &weights, profile, now, trigger, packets),
+        Err(e) => {
+            warn!("MILP solver failed: {e}");
+            fallback_plan(profile, now, trigger, packets, format!("MILP solver failed: {e}"))
+        }
+    }
 }
 
 // ── Unit tests ───────────────────────────────────────────────────────────────
