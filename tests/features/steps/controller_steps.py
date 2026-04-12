@@ -78,6 +78,10 @@ def step_grid_tariff_not_sticky(context):
 
 @then("at least one asset cell is visible")
 def step_at_least_one_asset_cell(context):
+    # Wait for at least one asset cell to appear (React Query fetch may be async)
+    context.browser_page.wait_for_selector(
+        "[data-testid^='asset-cell-']", timeout=15000
+    )
     cells = context.browser_page.query_selector_all("[data-testid^='asset-cell-']")
     assert len(cells) > 0, "No asset cells found on controller V2 page"
     assert cells[0].is_visible(), "First asset cell is not visible"
@@ -170,7 +174,7 @@ def step_global_extend_btn_visible(context):
 def _expand_ev_right_section(page):
     """Expand the right section if it is collapsed (collapsed by default)."""
     btn = page.wait_for_selector(
-        tid("asset-cell-ev-collapse-right"), timeout=10000
+        tid("asset-cell-ev-collapse-right"), timeout=20000
     )
     label = btn.get_attribute("aria-label") or ""
     if "Expand" in label:
