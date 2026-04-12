@@ -17,8 +17,8 @@ use crate::entities::asset::{PlanTrigger, UserRequestMode};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::energy_packet::{EnergyPacket, PacketStatus};
 use crate::entities::plan::{
-    CostBreakdown, PacketAllocation, Plan, PlanStep, PlanSummary, PlanTimeSlot,
-    PlanningHorizon, PlanWarning, WarningSeverity,
+    CostBreakdown, FlexibilityEnvelope, PacketAllocation, Plan, PlanStep, PlanSummary,
+    PlanTimeSlot, PlanningHorizon, PlanWarning, WarningSeverity,
 };
 use crate::entities::tariff_snapshot::TariffTimeSeries;
 use crate::profile::{PlannerObjective, Profile};
@@ -802,13 +802,112 @@ fn solve_milp(
 
 // ── Output translator ───────────────────────────────────────────────────────
 
+/// Build per-packet schedulability metadata for every non-terminal packet.
+fn build_plan_envelopes(
+    packets: &[EnergyPacket],
+    inputs: &MilpInputs,
+    profile: &Profile,
+    now: DateTime<Utc>,
+) -> Vec<FlexibilityEnvelope> {
+    let step_s = profile.planner.plan_step_s as i64;
+    let n = inputs.n;
+
+    packets
+        .iter()
+        .filter(|p| !p.is_terminal())
+        .filter_map(|packet| {
+            let energy_needed_kwh = packet.undelivered_energy_kwh();
+            if energy_needed_kwh <= 0.0 {
+                return None;
+            }
+
+            // Asset power bounds
+            let (power_min_kw, power_max_kw) = match packet.asset_id.as_str() {
+                id if profile.ev_config().map(|c| c.id.as_str()) == Some(id) => {
+                    let c = profile.ev_config().unwrap();
+                    (c.min_charge_kw, c.max_charge_kw)
+                }
+                id if profile.heater_config().map(|c| c.id.as_str()) == Some(id) => {
+                    let c = profile.heater_config().unwrap();
+                    (0.0, c.max_kw)
+                }
+                other => {
+                    warn!(
+                        asset_id = other,
+                        packet_id = %packet.id,
+                        "build_plan_envelopes: unknown asset_id, emitting 0-power envelope",
+                    );
+                    (0.0, 0.0)
+                }
+            };
+
+            // Time window
+            let window_start = packet.earliest_start.max(now);
+            let window_end = packet
+                .latest_end()
+                .unwrap_or(now + Duration::seconds(n as i64 * step_s));
+
+            let slots_available =
+                ((window_end - window_start).num_seconds() / step_s).max(0) as usize;
+
+            // Rate bounds from ValueCurve
+            let max_acceptable_rate = packet.value_curve.bid_at(0.0);
+            let min_acceptable_rate = packet.value_curve.bid_at(packet.fill());
+
+            // Budget remaining (finite sentinel — Risk 5 mitigation)
+            const NO_BUDGET_CAP_SENTINEL_EUR: f64 = 1.0e9;
+            let budget_remaining_eur = packet
+                .value_curve
+                .active_deadline()
+                .and_then(|t| t.max_total_cost_eur)
+                .map(|max| (max - packet.accumulated_cost_eur).max(0.0))
+                .unwrap_or(NO_BUDGET_CAP_SENTINEL_EUR);
+
+            // Estimated cost/CO₂ from average eligible-slot tariffs
+            let t_start = ((window_start - now).num_seconds() / step_s).max(0) as usize;
+            let t_end = ((window_end - now).num_seconds() / step_s).min(n as i64) as usize;
+            let eligible = t_start..t_end;
+            let count = eligible.len().max(1) as f64;
+            let avg_tariff = eligible
+                .clone()
+                .map(|t| inputs.c_imp_eur_kwh[t])
+                .sum::<f64>()
+                / count;
+            let avg_co2 = eligible
+                .map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0)
+                .sum::<f64>()
+                / count;
+            let estimated_cost_eur = energy_needed_kwh * avg_tariff;
+            let estimated_co2_g = energy_needed_kwh * avg_co2;
+
+            Some(FlexibilityEnvelope {
+                packet_id: packet.id,
+                asset_id: packet.asset_id.clone(),
+                energy_needed_kwh,
+                power_min_kw,
+                power_max_kw,
+                window_start,
+                window_end,
+                slots_available,
+                max_acceptable_rate,
+                min_acceptable_rate,
+                budget_remaining_eur,
+                estimated_cost_eur,
+                estimated_co2_g,
+            })
+        })
+        .collect()
+}
+
 /// Fallback plan returned when the MILP solver fails.
-/// Identical structure to the old stub but with a `Critical` warning.
+/// When `inputs` is `Some`, emits populated slots with zero allocations
+/// so tests asserting on per-slot fields still find data.
 fn fallback_plan(
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
     packets: &[EnergyPacket],
+    inputs: Option<&MilpInputs>,
     reason: String,
 ) -> (Plan, Vec<PlanStep>) {
     let step_s = profile.planner.plan_step_s;
@@ -829,14 +928,48 @@ fn fallback_plan(
         message: reason,
         suggested_action: None,
     };
+    let slots: Vec<PlanTimeSlot> = match inputs {
+        Some(inp) => (0..inp.n)
+            .map(|t| {
+                let step_s_i64 = step_s as i64;
+                PlanTimeSlot {
+                    slot_index: t,
+                    start: now + Duration::seconds(t as i64 * step_s_i64),
+                    end: now + Duration::seconds((t as i64 + 1) * step_s_i64),
+                    import_tariff_eur_kwh: inp.c_imp_eur_kwh[t],
+                    export_tariff_eur_kwh: inp.c_exp_eur_kwh[t],
+                    co2_g_kwh: inp.g_imp_kgco2_kwh[t] * 1000.0,
+                    grid_effective_cost: inp.c_imp_eur_kwh[t],
+                    rate_estimated: false,
+                    import_cap_kw: inp.p_imp_max_cont_kw[t],
+                    export_cap_kw: inp.p_exp_max_cont_kw[t],
+                    baseline_kw: inp.p_base_kw[t],
+                    pv_forecast_kw: inp.p_pv_kw[t],
+                    surplus_available_kw: (inp.p_pv_kw[t] - inp.p_base_kw[t]).max(0.0),
+                    allocations: vec![],
+                    net_import_kw: 0.0,
+                    net_export_kw: 0.0,
+                    import_flexibility_kw: 0.0,
+                    export_flexibility_kw: 0.0,
+                    bat_charge_kw: 0.0,
+                    bat_discharge_kw: 0.0,
+                }
+            })
+            .collect(),
+        None => vec![],
+    };
+    let envelopes = match inputs {
+        Some(inp) => build_plan_envelopes(packets, inp, profile, now),
+        None => vec![],
+    };
     let plan = Plan {
         id: Uuid::new_v4(),
         created_at: now,
         trigger,
         horizon,
-        slots: vec![],
+        slots,
         summary: PlanSummary::default(),
-        envelopes: vec![],
+        envelopes,
         packets: packets.to_vec(),
         warnings: vec![warning],
         steps: vec![],
@@ -1076,7 +1209,7 @@ fn translate_to_plan(
         horizon,
         slots,
         summary,
-        envelopes: vec![],
+        envelopes: build_plan_envelopes(packets, inputs, profile, now),
         packets: packets.to_vec(),
         warnings,
         steps: steps.clone(),
@@ -1106,7 +1239,14 @@ pub fn run_planner(
         Ok(sol) => translate_to_plan(&sol, &inputs, &weights, profile, now, trigger, packets),
         Err(e) => {
             warn!("MILP solver failed: {e}");
-            fallback_plan(profile, now, trigger, packets, format!("MILP solver failed: {e}"))
+            fallback_plan(
+                profile,
+                now,
+                trigger,
+                packets,
+                Some(&inputs),
+                format!("MILP solver failed: {e}"),
+            )
         }
     }
 }
