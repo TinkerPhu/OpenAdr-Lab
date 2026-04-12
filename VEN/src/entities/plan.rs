@@ -87,8 +87,17 @@ pub struct PlanTimeSlot {
     pub bat_discharge_kw: f64,
 }
 
-/// Flexibility envelope offered to VTN for capacity or price optimization (§6.9).
-/// One per packet with unallocated energy in the planning horizon.
+/// Per-packet schedulability metadata snapshot (§6.9).
+///
+/// Emitted for **every non-terminal packet**, regardless of whether the MILP
+/// scheduled it within the horizon. Describes the packet's degrees of
+/// freedom — energy still needed, time window, asset power bounds, max
+/// acceptable rate, budget remaining — not "unscheduled work".
+///
+/// Note: this is *not* the same as `SiteFlexibilityEnvelope`, which is the
+/// live site-level headroom served by `GET /flexibility`. Per-packet
+/// envelopes only refresh at plan time; site headroom refreshes every
+/// dispatcher tick from sim state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlexibilityEnvelope {
     pub packet_id: Uuid,
