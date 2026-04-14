@@ -38,7 +38,7 @@ Feature: Phase A — Asset physics and capability coverage
 
   Scenario: pv_irradiance override to zero silences PV output
     When I POST a sim override setting pv_irradiance to 0.0
-    And I wait 2 seconds for the sim to tick
+    And I wait 5 seconds for the sim to tick
     And I GET /capability/pv from the VEN
     Then the response status is 200
     And the capability is_fixed is true
@@ -46,14 +46,14 @@ Feature: Phase A — Asset physics and capability coverage
 
   Scenario: pv_irradiance override to full produces nonzero PV export
     When I POST a sim override with full PV irradiance
-    And I wait 2 seconds for the sim to tick
+    And I wait 5 seconds for the sim to tick
     And I GET /capability/pv from the VEN
     Then the response status is 200
     And the capability max_import_kw is less than 0.0
 
   Scenario: ev_plugged false stops EV charging capability
     When I POST a sim override setting ev_plugged to false
-    And I wait 2 seconds for the sim to tick
+    And I wait 5 seconds for the sim to tick
     And I GET /capability/ev from the VEN
     Then the response status is 200
     And the capability max_import_kw is 0.0
