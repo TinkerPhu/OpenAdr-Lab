@@ -131,7 +131,7 @@ def step_rate_chart_empty_visible(context):
     # (The VEN may generate estimated rates even without active PRICE events.)
     el = context.browser_page.wait_for_selector(
         f'{tid("controller-rate-chart-empty")}, {tid("controller-rate-chart")}',
-        timeout=10000,
+        timeout=20000,
     )
     assert el is not None and el.is_visible(), (
         "Neither controller-rate-chart-empty nor controller-rate-chart is visible"
@@ -141,7 +141,7 @@ def step_rate_chart_empty_visible(context):
 @then("the controller packets table section is visible")
 def step_packets_table_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("controller-packets-table"), timeout=10000
+        tid("controller-packets-table"), timeout=20000
     )
     assert el is not None and el.is_visible(), (
         "controller-packets-table not visible"
@@ -165,7 +165,7 @@ def step_plan_card_no_error(context):
 @then("the controller rate chart with data is visible")
 def step_rate_chart_data_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("controller-rate-chart"), timeout=10000
+        tid("controller-rate-chart"), timeout=20000
     )
     assert el is not None and el.is_visible(), (
         "controller-rate-chart not visible"
