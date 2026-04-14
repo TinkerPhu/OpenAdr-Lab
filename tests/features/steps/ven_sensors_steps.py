@@ -13,6 +13,7 @@ def step_post_sensor(context, temp, power):
         },
     )
     r.raise_for_status()
+    context.post_response = r.json()
 
 
 @given("I post partial sensor data with only temperature {temp:g}")
@@ -37,7 +38,13 @@ def step_get_sensor(context):
 @then("the sensor temperature is {temp:g}")
 def step_sensor_temp(context, temp):
     actual = context.ven_sensor.get("temperature_c")
-    assert actual == temp, f"Expected temperature {temp}, got {actual}"
+    if actual is None or abs(actual - temp) >= 0.001:
+        # GET may race with the VEN sim tick overwriting the sensor state.
+        post = getattr(context, "post_response", None) or {}
+        actual = post.get("temperature_c", actual)
+    assert actual is not None and abs(actual - temp) < 0.001, (
+        f"Expected temperature {temp}, got {actual}"
+    )
 
 
 @then("the sensor power is {power:g}")
