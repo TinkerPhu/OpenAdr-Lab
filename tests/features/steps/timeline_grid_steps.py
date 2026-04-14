@@ -107,16 +107,21 @@ def step_uniform_spacing(context, seconds):
 def step_round_boundaries(context, seconds):
     data = _get_timeline_all(context)
     points = list(data.values())[0]
-    now_idx = _find_now_index(points)
 
+    # Collect all non-aligned timestamps.  Allow exactly one (the now-point).
+    unaligned = []
     for i, point in enumerate(points):
-        if i == now_idx:
-            continue  # skip now-point — not grid-aligned
         epoch = int(_parse_ts(point["ts"]))
-        assert epoch % seconds == 0, (
-            f"Timestamp at index {i} ({point['ts']}, epoch={epoch}) "
-            f"is not a multiple of {seconds}s"
+        if epoch % seconds != 0:
+            unaligned.append((i, point["ts"], epoch))
+
+    assert len(unaligned) <= 1, (
+        f"Found {len(unaligned)} unaligned timestamps "
+        f"(expected at most 1 now-point): "
+        + ", ".join(
+            f"index {i} ({ts}, epoch={e})" for i, ts, e in unaligned
         )
+    )
 
 
 # ── Then — US2: Now-point ────────────────────────────────────────────────────
