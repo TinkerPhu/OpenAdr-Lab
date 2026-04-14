@@ -581,12 +581,21 @@ Run full BDD suite. Fix assertions that break on the new plan shape
 
 **Gate:** All BDD green.
 
-### Phase 6 — Envelope Simplification
+### Phase 6 — Envelope Simplification ✅
 
-Rewrite `envelope.rs` as a post-solve pass reading `bat_charge_kw`/`bat_discharge_kw`
-and `allocations` from the solved plan. Low-risk after the solver output is stable.
+*Completed: flexibility_policy.rs (the original 429-line target) was already
+deleted in earlier cleanup. `envelope.rs` was already 88 logic lines (gate:
+< 100). The planned "post-solve pass" rewrite was superseded because
+`SiteFlexibilityEnvelope` is explicitly documented as "computed directly from
+current asset state — independent of the active plan" (`plan.rs` §9). Reading
+from MILP output would have returned stale planned headroom rather than live
+headroom, which is the wrong semantic for OpenADR flex reporting.*
 
-**Gate:** BDD still green. `envelope.rs` under 100 lines.
+*Actual change: removed dead `interruptible` packet contribution block and the
+`packets: &[EnergyPacket]` parameter from `compute_envelope()`, eliminating
+the last `EnergyPacket` coupling from this module.*
+
+**Gate:** BDD still green. `envelope.rs` at 78 logic lines (< 100). ✅
 
 ### Phase 7 — UI Extensions (can be deferred)
 
