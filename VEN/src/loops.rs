@@ -455,10 +455,8 @@ pub(crate) fn spawn_sim_tick(
                 // Refresh site envelope on every sim tick (~1s).
                 // Done inside the sim lock to avoid a second lock acquisition.
                 {
-                    let packets_snap = state.active_packets().await;
                     let env = controller::envelope::compute_envelope(
                         &*sim_guard,
-                        &packets_snap,
                         now,
                     );
                     state.set_site_envelope(env).await;
@@ -681,7 +679,6 @@ pub(crate) fn spawn_planning(
                 let sim_guard = sim.lock().await;
                 let env = controller::envelope::compute_envelope(
                     &*sim_guard,
-                    &plan_packets,
                     now,
                 );
                 drop(sim_guard);
