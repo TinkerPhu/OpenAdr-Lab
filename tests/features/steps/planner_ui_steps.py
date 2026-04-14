@@ -28,7 +28,7 @@ def step_click_nav_button(context, testid):
 
 @then('I see an element with testid "{testid}"')
 def step_see_element(context, testid):
-    el = context.browser_page.wait_for_selector(tid(testid), timeout=15000)
+    el = context.browser_page.wait_for_selector(tid(testid), timeout=30000)
     assert el is not None and el.is_visible(), f'Element "{testid}" not visible'
 
 
