@@ -86,6 +86,36 @@ def step_wait_for_plan_import_cap(context, limit):
 
 # ── Then: plan allocation assertions ─────────────────────────────────────────
 
+@then("EV allocation in all capped plan slots is at most {kw:f} kW")
+def step_ev_alloc_in_capped_slots(context, kw):
+    """In every slot where import_cap_kw <= kw+0.5, the EV allocation power_kw must be <= kw+0.1.
+
+    Used for zero-cap scenarios where base_load creates unavoidable net import
+    but EV should receive zero allocation.
+    """
+    r = ven_get("/plan")
+    r.raise_for_status()
+    plan = r.json()
+    violations = []
+    for slot in plan.get("slots", []):
+        cap = slot.get("import_cap_kw", float("inf"))
+        if cap > kw + 0.5:
+            continue  # slot is not import-capped; skip
+        ev_power = sum(
+            a.get("power_kw", 0.0)
+            for a in slot.get("allocations", [])
+            if a.get("asset_id") == "ev"
+        )
+        if ev_power > kw + 0.1:
+            violations.append(
+                f"slot {slot.get('slot_index')}: import_cap={cap:.1f} kW, ev_power={ev_power:.2f} kW"
+            )
+    assert not violations, (
+        f"EV allocation exceeded zero cap in {len(violations)} slot(s):\n"
+        + "\n".join(violations)
+    )
+
+
 @then("net import in all capped plan slots is at most {kw:f} kW")
 def step_net_import_in_capped_slots(context, kw):
     """In every slot where import_cap_kw <= kw+0.5, net_import_kw must be <= kw+0.1.

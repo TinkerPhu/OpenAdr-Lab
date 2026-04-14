@@ -17,8 +17,8 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
     When I wait for the VEN /plan to have a slot with import_cap_kw at most 5.0
     Then net import in all capped plan slots is at most 5.1 kW
 
-  # ── c) Zero import limit produces zero net import in capped slots ─────────────
-  Scenario: (c) Zero IMPORT_CAPACITY_LIMIT produces zero net import in capped slots
+  # ── c) Zero import limit produces zero EV allocation in capped slots ──────────
+  Scenario: (c) Zero IMPORT_CAPACITY_LIMIT produces zero EV allocation in capped slots
     Given I have a VTN token as "any-business"
     And I inject pv irradiance 0.0 via sim inject
     And I inject ev_soc 0.50 via sim inject
@@ -27,7 +27,7 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
     And I POST an EV packet with target_soc 0.90 and latest_end_h 6.0
     And I create an IMPORT_CAPACITY_LIMIT event with limit 0.0 kW for the saved program
     When I wait for the VEN /plan to have a slot with import_cap_kw at most 0.1
-    Then net import in all capped plan slots is at most 0.1 kW
+    Then EV allocation in all capped plan slots is at most 0.1 kW
 
   # ── e) User request capped by IMPORT_CAPACITY_LIMIT ─────────────────────────
   Scenario: (e) User request capped by IMPORT_CAPACITY_LIMIT event
@@ -51,4 +51,4 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
     And I POST a user request for EV with target_soc 0.90 and latest_end in 6 hours
     And I create an IMPORT_CAPACITY_LIMIT event with limit 0.0 kW for the saved program
     When I wait for the VEN /plan to have a slot with import_cap_kw at most 0.1
-    Then net import in all capped plan slots is at most 0.1 kW
+    Then EV allocation in all capped plan slots is at most 0.1 kW

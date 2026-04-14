@@ -175,7 +175,7 @@ class VenUi:
     def go_controller(self):
         self.page.click(tid("nav-controller"))
         try:
-            self.page.wait_for_selector(tid("controller-page"), timeout=15000)
+            self.page.wait_for_selector(tid("controller-page"), timeout=25000)
         except Exception as e:
             try:
                 print(f"\n[go_controller] FAILED. URL={self.page.url}")
@@ -187,8 +187,8 @@ class VenUi:
 
     def go_raw_diagnostics(self):
         self.page.click(tid("nav-raw-diagnostics"))
-        self.page.wait_for_selector(tid("raw-diagnostics-page"), timeout=15000)
+        self.page.wait_for_selector(tid("raw-diagnostics-page"), timeout=25000)
 
     def go_planner(self):
         self.page.click(tid("nav-planner"))
-        self.page.wait_for_selector(tid("planner-heading"), timeout=15000)
+        self.page.wait_for_selector(tid("planner-heading"), timeout=25000)

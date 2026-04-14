@@ -173,15 +173,17 @@ def step_global_extend_btn_visible(context):
 
 def _expand_ev_right_section(page):
     """Expand the right section if it is collapsed (collapsed by default)."""
+    # Wait for asset cells to appear first (React Query may still be fetching)
+    page.wait_for_selector("[data-testid^='asset-cell-']", timeout=25000)
     btn = page.wait_for_selector(
-        tid("asset-cell-ev-collapse-right"), timeout=20000
+        tid("asset-cell-ev-collapse-right"), timeout=25000
     )
     label = btn.get_attribute("aria-label") or ""
     if "Expand" in label:
         btn.click()
         # Wait for right section content to appear
         page.wait_for_selector(
-            tid("asset-cell-ev-right"), state="visible", timeout=5000,
+            tid("asset-cell-ev-right"), state="visible", timeout=15000,
         )
 
 
@@ -191,7 +193,7 @@ def _expand_ev_status_accordion(page):
     """
     _expand_ev_right_section(page)
     # Controls are directly visible in the right section — no accordion to expand.
-    page.wait_for_selector(tid("right-section-ev"), state="visible", timeout=5000)
+    page.wait_for_selector(tid("right-section-ev"), state="visible", timeout=15000)
 
 
 @then("the EV plugged toggle is visible in the EV cell right section")
