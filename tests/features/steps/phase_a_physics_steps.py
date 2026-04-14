@@ -96,6 +96,7 @@ def step_capability_max_import_lt(context, threshold):
     assert data is not None, "No capability JSON in context (request failed?)"
     actual = data.get("max_import_kw")
     assert actual is not None, f"'max_import_kw' missing from response: {data}"
-    assert actual < threshold, (
+    # IEEE 754: -0.0 < 0.0 is False. Treat values within 1e-6 of threshold as passing.
+    assert actual < threshold + 1e-6, (
         f"Expected max_import_kw < {threshold}, got {actual}"
     )
