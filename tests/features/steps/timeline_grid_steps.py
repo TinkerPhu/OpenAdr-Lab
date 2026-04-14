@@ -21,31 +21,40 @@ def _get_timeline_all(context):
     return data
 
 
-def _find_now_index(points):
+def _find_now_index(points, resolution=None):
     """Find the index of the now-point (non-grid-aligned timestamp).
 
-    The now-point is the entry whose spacing to its neighbours differs from
-    the dominant grid spacing. We detect it by finding the point where the
-    gap before AND after it are both different from the dominant step.
+    Strategy: find the single point whose epoch is NOT a multiple of
+    the grid resolution. If resolution is not provided, infer it from
+    the most common inter-point spacing.
+
+    Falls back to the gap-based heuristic when all points happen to
+    be grid-aligned (now falls exactly on a grid boundary).
     """
     if len(points) < 3:
         return None
 
-    # Compute all deltas
     ts_list = [_parse_ts(p["ts"]) for p in points]
-    deltas = [ts_list[i + 1] - ts_list[i] for i in range(len(ts_list) - 1)]
 
-    # The dominant step is the most common delta (rounded to nearest second)
-    from collections import Counter
-    rounded = [round(d) for d in deltas]
-    dominant = Counter(rounded).most_common(1)[0][0]
+    # Determine resolution
+    if resolution is None:
+        from collections import Counter
+        deltas = [round(ts_list[i + 1] - ts_list[i]) for i in range(len(ts_list) - 1)]
+        resolution = Counter(deltas).most_common(1)[0][0]
 
-    # The now-point creates two non-dominant gaps (before and after it).
-    for i in range(1, len(deltas)):
-        before = rounded[i - 1]
-        after = rounded[i]
-        if before != dominant and after != dominant:
-            return i  # index of the now-point in points array
+    # Primary: find the single non-aligned point
+    unaligned = [i for i, ts in enumerate(ts_list) if int(ts) % resolution != 0]
+    if len(unaligned) == 1:
+        return unaligned[0]
+
+    # Fallback: when now lands on a grid boundary, find the point
+    # closest to the current time.
+    import time
+    now_epoch = time.time()
+    closest_idx = min(range(len(ts_list)), key=lambda i: abs(ts_list[i] - now_epoch))
+    # Only accept if it's not at the very edges
+    if 0 < closest_idx < len(ts_list) - 1:
+        return closest_idx
 
     return None
 

@@ -77,7 +77,7 @@ def step_forecast_ascending(context):
     assert timestamps == sorted(timestamps), "Forecast samples are not in ascending timestamp order"
 
 
-@then("the last forecast sample is within {tolerance:d} second of now plus {offset_s:d} seconds")
+@then("the last forecast sample is within {tolerance:d} seconds of now plus {offset_s:d} seconds")
 def step_forecast_boundary_point(context, tolerance, offset_s):
     samples = context.forecast_json.get("samples", [])
     assert samples, "No samples to check boundary point"
