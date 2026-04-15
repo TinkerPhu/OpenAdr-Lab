@@ -2,6 +2,8 @@ import type {
   VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry,
   SimInjectState, PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger, UserRequest,
   FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
+  EvSession, CreateEvSessionBody, HeaterTarget, CreateHeaterTargetBody,
+  ShiftableLoad, CreateShiftableLoadBody, BaselineOverride, CreateBaselineOverrideBody,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
@@ -240,5 +242,90 @@ export class VenApi {
     const r = await fetch(url, { method: "DELETE", headers: { "X-Request-ID": requestId() } });
     console.log(`[VEN] DELETE ${url} → ${r.status}`);
     if (!r.ok) throw new Error((await r.text()) || `DELETE /user-requests/${id} failed: ${r.status}`);
+  }
+
+  // ── Device Sessions ───────────────────────────────────────────────────────
+
+  async evSession(): Promise<EvSession | null> {
+    const r = await this.getReq("/ev-session");
+    if (r.status === 204) return null;
+    if (!r.ok) throw new Error(`ev-session ${r.status}`);
+    return r.json();
+  }
+
+  async postEvSession(body: CreateEvSessionBody): Promise<EvSession> {
+    const r = await this.jsonReq("POST", "/ev-session", body);
+    if (!r.ok) throw new Error((await r.text()) || `POST /ev-session failed: ${r.status}`);
+    return r.json();
+  }
+
+  async deleteEvSession(): Promise<void> {
+    const url = this.url("/ev-session");
+    console.log(`[VEN] DELETE ${url}`);
+    const r = await fetch(url, { method: "DELETE", headers: { "X-Request-ID": requestId() } });
+    console.log(`[VEN] DELETE ${url} → ${r.status}`);
+    if (!r.ok) throw new Error(`DELETE /ev-session failed: ${r.status}`);
+  }
+
+  async heaterTarget(): Promise<HeaterTarget | null> {
+    const r = await this.getReq("/heater-target");
+    if (r.status === 204) return null;
+    if (!r.ok) throw new Error(`heater-target ${r.status}`);
+    return r.json();
+  }
+
+  async postHeaterTarget(body: CreateHeaterTargetBody): Promise<HeaterTarget> {
+    const r = await this.jsonReq("POST", "/heater-target", body);
+    if (!r.ok) throw new Error((await r.text()) || `POST /heater-target failed: ${r.status}`);
+    return r.json();
+  }
+
+  async deleteHeaterTarget(): Promise<void> {
+    const url = this.url("/heater-target");
+    console.log(`[VEN] DELETE ${url}`);
+    const r = await fetch(url, { method: "DELETE", headers: { "X-Request-ID": requestId() } });
+    console.log(`[VEN] DELETE ${url} → ${r.status}`);
+    if (!r.ok) throw new Error(`DELETE /heater-target failed: ${r.status}`);
+  }
+
+  async shiftableLoads(): Promise<ShiftableLoad[]> {
+    const r = await this.getReq("/shiftable-loads");
+    if (!r.ok) throw new Error(`shiftable-loads ${r.status}`);
+    return r.json();
+  }
+
+  async postShiftableLoad(body: CreateShiftableLoadBody): Promise<ShiftableLoad> {
+    const r = await this.jsonReq("POST", "/shiftable-loads", body);
+    if (!r.ok) throw new Error((await r.text()) || `POST /shiftable-loads failed: ${r.status}`);
+    return r.json();
+  }
+
+  async deleteShiftableLoad(id: string): Promise<void> {
+    const url = this.url(`/shiftable-loads/${id}`);
+    console.log(`[VEN] DELETE ${url}`);
+    const r = await fetch(url, { method: "DELETE", headers: { "X-Request-ID": requestId() } });
+    console.log(`[VEN] DELETE ${url} → ${r.status}`);
+    if (!r.ok) throw new Error((await r.text()) || `DELETE /shiftable-loads/${id} failed: ${r.status}`);
+  }
+
+  async baselineOverride(): Promise<BaselineOverride | null> {
+    const r = await this.getReq("/baseline-override");
+    if (r.status === 204) return null;
+    if (!r.ok) throw new Error(`baseline-override ${r.status}`);
+    return r.json();
+  }
+
+  async postBaselineOverride(body: CreateBaselineOverrideBody): Promise<BaselineOverride> {
+    const r = await this.jsonReq("POST", "/baseline-override", body);
+    if (!r.ok) throw new Error((await r.text()) || `POST /baseline-override failed: ${r.status}`);
+    return r.json();
+  }
+
+  async deleteBaselineOverride(): Promise<void> {
+    const url = this.url("/baseline-override");
+    console.log(`[VEN] DELETE ${url}`);
+    const r = await fetch(url, { method: "DELETE", headers: { "X-Request-ID": requestId() } });
+    console.log(`[VEN] DELETE ${url} → ${r.status}`);
+    if (!r.ok) throw new Error(`DELETE /baseline-override failed: ${r.status}`);
   }
 }

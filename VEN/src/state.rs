@@ -1,6 +1,6 @@
 use crate::controller::trace::ControllerTrace;
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
-use crate::entities::device_session::{EvSession, HeaterTarget};
+use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::energy_packet::EnergyPacket;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::tariff_snapshot::TariffSnapshot;
@@ -123,6 +123,10 @@ pub struct InnerState {
     pub ev_session: Option<EvSession>,
     #[serde(skip)]
     pub heater_target: Option<HeaterTarget>,
+    #[serde(skip)]
+    pub shiftable_loads: Vec<ShiftableLoad>,
+    #[serde(skip)]
+    pub baseline_override: Option<BaselineOverride>,
 }
 
 impl AppState {
@@ -146,6 +150,8 @@ impl AppState {
                 site_envelope: None,
                 ev_session: None,
                 heater_target: None,
+                shiftable_loads: vec![],
+                baseline_override: None,
             })),
         }
     }
@@ -390,6 +396,29 @@ impl AppState {
         self.inner.write().await.heater_target = target;
     }
 
+    pub async fn shiftable_loads(&self) -> Vec<ShiftableLoad> {
+        self.inner.read().await.shiftable_loads.clone()
+    }
+
+    pub async fn add_shiftable_load(&self, load: ShiftableLoad) {
+        self.inner.write().await.shiftable_loads.push(load);
+    }
+
+    pub async fn remove_shiftable_load(&self, id: uuid::Uuid) -> bool {
+        let mut w = self.inner.write().await;
+        let before = w.shiftable_loads.len();
+        w.shiftable_loads.retain(|l| l.id != id);
+        w.shiftable_loads.len() < before
+    }
+
+    pub async fn baseline_override(&self) -> Option<BaselineOverride> {
+        self.inner.read().await.baseline_override.clone()
+    }
+
+    pub async fn set_baseline_override(&self, ovr: Option<BaselineOverride>) {
+        self.inner.write().await.baseline_override = ovr;
+    }
+
     /// Return all unfulfilled obligations whose due_at <= now.
     pub async fn due_obligations(&self, now: DateTime<Utc>) -> Vec<OadrReportObligation> {
         self.inner
@@ -433,6 +462,8 @@ impl Clone for InnerState {
             site_envelope: self.site_envelope.clone(),
             ev_session: self.ev_session.clone(),
             heater_target: self.heater_target.clone(),
+            shiftable_loads: self.shiftable_loads.clone(),
+            baseline_override: self.baseline_override.clone(),
         }
     }
 }
