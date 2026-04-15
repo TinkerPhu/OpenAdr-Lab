@@ -67,7 +67,9 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
     Then all rate snapshots have an import_tariff_eur_kwh value
 
   Scenario: UC-04b — Plan after PRICE event has rate-priced slots
-    Given I have a VTN token as "any-business"
+    Given I inject ev_soc 0.5 via sim inject
+    And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
+    And I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
     When I wait for the VEN /plan to have an EV allocation in slots

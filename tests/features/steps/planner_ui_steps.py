@@ -1,6 +1,7 @@
 """Step definitions for Planner Visualization Page UI scenarios."""
 
 from behave import given, when, then
+from features.helpers.api_client import ven_get
 from features.helpers.ui import tid
 from features.helpers.wait import poll_until
 

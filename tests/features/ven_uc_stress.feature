@@ -32,7 +32,9 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
   # and does not over-schedule beyond the cap in any single slot.
 
   Scenario: UC-12a — Multi-asset plan with import cap allocates EV within cap
-    Given I have a VTN token as "any-business"
+    Given I inject ev_soc 0.5 via sim inject
+    And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
+    And I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create an IMPORT_CAPACITY_LIMIT event with limit 10.0 kW for the saved program
     When I wait for the VEN /capacity import_limit_kw to be 10.0
@@ -49,6 +51,8 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
     Then the plan has field "warnings"
 
   Scenario: UC-12c — Ledger accumulates energy for all active assets concurrently
+    Given I inject ev_soc 0.5 via sim inject
+    And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
     When I POST a sim override with full PV irradiance
     And I wait for the VEN /plan to have an EV allocation in slots
     And I poll VEN /ledger until field "pv" is present
