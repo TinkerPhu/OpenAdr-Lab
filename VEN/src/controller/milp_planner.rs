@@ -1311,7 +1311,6 @@ fn translate_to_plan(
     if violation_count > 0 {
         warnings.push(PlanWarning {
             severity: WarningSeverity::Warning,
-            packet_id: None,
             message: format!(
                 "Grid capacity violation in {violation_count} slot(s) — solver used slack"
             ),

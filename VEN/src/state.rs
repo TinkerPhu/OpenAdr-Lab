@@ -405,7 +405,6 @@ impl Clone for InnerState {
             sim: self.sim.clone(),
             controller_trace: self.controller_trace.clone(),
             inject_state: self.inject_state.clone(),
-            active_packets: self.active_packets.clone(),
             active_plan: self.active_plan.clone(),
             planned_tariffs: self.planned_tariffs.clone(),
             capacity_state: self.capacity_state.clone(),
