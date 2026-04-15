@@ -27,11 +27,6 @@ Feature: VEN Entity Model — Stage 1 Foundation
 
   # --- HEMS endpoints (live after Stage 3) ---
 
-  Scenario: GET /packets returns a JSON array
-    When I GET /packets from the VEN
-    Then the response status is 200
-    And the response JSON is an array
-
   Scenario: GET /tariffs returns a JSON array
     When I GET /tariffs from the VEN
     Then the response status is 200

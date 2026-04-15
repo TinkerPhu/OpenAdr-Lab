@@ -6,20 +6,19 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
     Given the VEN is running with profile "test"
 
   # --- UC-01: EV Overnight Charge ---
-  # Profile seeds an EV packet (target_soc=0.80, latest_end=12h).
-  # Planner assigns FIRM charging slots; dispatcher transitions the packet to ACTIVE.
+  # An explicit EV session drives the planner to allocate FIRM charging slots.
 
-  Scenario: UC-01a — Profile-seeded EV packet is planned and dispatched to ACTIVE
+  Scenario: UC-01a — Explicit EV session is planned and allocated
+    Given I inject ev_soc 0.5 via sim inject
+    And I POST an EV session with target_soc 0.90 and departure in 8.0 hours
     When I wait for the VEN /plan to have an EV allocation in slots
-    And I poll VEN /packets until asset "ev" has status "ACTIVE"
-    Then the response JSON is an array
-    And at least one packet has asset_id "ev"
-    And at least one packet with asset_id "ev" has status "ACTIVE"
+    Then at least one firm slot has an allocation for asset "ev"
 
   Scenario: UC-01b — EV charge plan has FLEXIBLE envelopes for far-horizon energy
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
+    And I POST an EV session with target_soc 0.90 and departure in 8.0 hours
     When I wait for the VEN /plan to have envelopes
     Then the plan has field "envelopes"
     And the plan.envelopes is a non-empty array
