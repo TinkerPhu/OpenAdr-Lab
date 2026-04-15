@@ -92,7 +92,7 @@ def step_save_request_id(context):
     req = getattr(context, "last_created_request", None)
     assert req is not None, "No user request in context to save"
     context.saved_request_id = req.get("id")
-    context.saved_packet_id = req.get("packet_id")
+    context.saved_session_id = req.get("session_id")
     assert context.saved_request_id, f"Request has no 'id' field: {req}"
 
 
@@ -117,25 +117,13 @@ def step_requests_at_least(context, count):
     assert len(data) >= count, f"Expected >= {count} requests, got {len(data)}"
 
 
-@then("the cancelled packet is in ABANDONED status")
-def step_cancelled_packet_abandoned(context):
-    """After DELETE /user-requests/:id, GET /packets and verify the packet is ABANDONED."""
-    packet_id = getattr(context, "saved_packet_id", None)
-    assert packet_id, "No saved_packet_id in context — did 'I save the request ID' run?"
-
-    r = ven_get("/packets")
-    r.raise_for_status()
-    packets = r.json()
-    assert isinstance(packets, list), f"Expected list of packets, got {type(packets)}"
-
-    matched = [p for p in packets if p.get("id") == packet_id]
-    assert matched, (
-        f"Packet {packet_id} not found in /packets. "
-        f"IDs: {[p.get('id') for p in packets]}"
-    )
-    status = matched[0].get("status")
-    assert status == "ABANDONED", (
-        f"Expected packet {packet_id} to be ABANDONED, got '{status}'"
+@then("the EV session is cleared after cancellation")
+def step_ev_session_cleared(context):
+    """After cancelling a user request, GET /ev-session must return 204 (no session)."""
+    from features.helpers.api_client import ven_get
+    r = ven_get("/ev-session")
+    assert r.status_code == 204, (
+        f"Expected 204 (EV session cleared), got {r.status_code}: {r.text}"
     )
 
 
@@ -188,9 +176,9 @@ def step_post_user_request_with_budget_eur(context, budget, asset_id):
         context.last_created_request = None
 
 
-@given("the VEN has a scheduled interruptible EV packet")
-def step_given_scheduled_interruptible_packet(context):
-    """Create an interruptible EV request and wait until its packet is SCHEDULED or ACTIVE."""
+@given("the VEN has a scheduled interruptible EV session")
+def step_given_scheduled_interruptible_ev_session(context):
+    """Create an interruptible EV request and wait until the plan has an EV allocation."""
     latest_end = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
@@ -204,21 +192,24 @@ def step_given_scheduled_interruptible_packet(context):
     }
     r = ven_post("/user-requests", json=payload)
     r.raise_for_status()
-    packet_id = r.json().get("packet_id")
-    assert packet_id, f"No packet_id in response: {r.json()}"
+    context.interruptible_session_id = r.json().get("session_id")
 
-    # Wait up to 30s for the packet to leave PENDING status
-    deadline = time.time() + 30
+    # Wait for the plan to reflect an EV allocation
+    deadline = time.time() + 60
     while time.time() < deadline:
-        rp = ven_get("/packets")
-        rp.raise_for_status()
-        matched = [p for p in rp.json() if p.get("id") == packet_id]
-        if matched and matched[0].get("status") not in ("PENDING",):
-            context.interruptible_packet_id = packet_id
-            return
-        time.sleep(1)
+        rp = ven_get("/plan")
+        if rp.status_code == 200:
+            plan = rp.json()
+            slots = plan.get("slots") if plan else None
+            if slots and any(
+                slot.get("allocations", {}).get("ev", 0) > 0
+                for slot in slots
+                if slot.get("status") == "FIRM"
+            ):
+                return
+        time.sleep(2)
 
-    context.interruptible_packet_id = packet_id  # proceed anyway; test may still pass
+    # Proceed anyway — flexibility check may still pass if plan is partial
 
 
 @then('the response JSON field "{field_path}" is true')

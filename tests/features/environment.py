@@ -234,15 +234,24 @@ def _reset_ven_sim_overrides():
         pass
 
 
-def _reset_ven_packets():
-    """Drop all non-terminal EV packets on VEN-1 between scenarios.
+def _reset_device_sessions():
+    """Clear all device sessions on VEN-1 between scenarios.
 
-    Prevents packets posted in one scenario from leaking into subsequent
-    scenarios and polluting the planner state.
+    Prevents ev-sessions, heater-targets, shiftable-loads, and user-requests
+    posted in one scenario from leaking into subsequent scenarios.
     """
     try:
-        from features.helpers.api_client import ven_delete
-        ven_delete("/packets")
+        from features.helpers.api_client import ven_get, ven_delete
+        ven_delete("/ev-session")
+        ven_delete("/heater-target")
+        r = ven_get("/shiftable-loads")
+        if r.ok:
+            for load in (r.json() or []):
+                ven_delete(f"/shiftable-loads/{load['id']}")
+        r = ven_get("/user-requests")
+        if r.ok:
+            for req in (r.json() or []):
+                ven_delete(f"/user-requests/{req['id']}")
     except Exception:
         pass
 
@@ -253,7 +262,7 @@ def after_scenario(context, scenario):
     api_client.VEN_BASE_URL = api_client._DEFAULT_VEN_BASE_URL
     _cleanup_vtn_resources(context)
     _reset_ven_sim_overrides()
-    _reset_ven_packets()
+    _reset_device_sessions()
 
     if (_is_ui(scenario) or _is_ven_ui(scenario)) and hasattr(context, "browser_page"):
         context.browser_page.close()

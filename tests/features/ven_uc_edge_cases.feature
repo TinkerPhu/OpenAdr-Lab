@@ -31,18 +31,18 @@ Feature: UC-08..UC-10 — Edge Case Use Cases
     Then the response status is 201
     And the response JSON field "tier_count" is greater than 1.0
 
-  Scenario: UC-09b — Tight budget tier-1 request still creates a valid EnergyPacket
+  Scenario: UC-09b — Tight budget tier-1 request still creates a valid EV session link
     When I POST a user request for asset "ev" with target_soc 0.85 and max_cost 3.00 EUR
     Then the response status is 201
-    And the response JSON has field "packet_id"
+    And the response JSON has field "session_id"
     And the response JSON field "max_total_cost_eur" is greater than 0.0
 
-  Scenario: UC-09c — Cancelled tier-fallback request leaves packet ABANDONED
+  Scenario: UC-09c — Cancelled request clears the linked EV session
     When I POST a multi-tier user request for asset "ev"
     And I save the request ID
     And I DELETE the saved user request
     Then the response status is 204
-    And the cancelled packet is in ABANDONED status
+    And the EV session is cleared after cancellation
 
   # --- UC-10: Import Capacity Limit Constrains Plan ---
   # When the VTN sets an IMPORT_CAPACITY_LIMIT event, the planner populates

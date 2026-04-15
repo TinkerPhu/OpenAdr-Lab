@@ -21,7 +21,6 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
     When I wait for the VEN /plan endpoint to return a plan
     Then the plan has field "id"
     And the plan has field "slots"
-    And the plan has field "packets"
     And the plan has field "envelopes"
 
   # --- Slots ---

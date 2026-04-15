@@ -82,20 +82,4 @@ Feature: Planner Visualization Page
     When I navigate to the Planner page
     Then I see an element with testid "matrix-empty"
 
-  # ── Packet Board (US2) ───────────────────────────────────────────────────────
-
-  Scenario: Packet board section is visible on Planner page
-    When I navigate to the Planner page
-    Then I see an element with testid "packet-board"
-
-  Scenario: Packet board shows empty state when no packets exist
-    Given no energy packets exist for this VEN
-    When I navigate to the Planner page
-    Then I see an element with testid "packet-board-empty"
-
-  Scenario: Packet board shows packet groups
-    Given at least one energy packet exists for this VEN
-    When I navigate to the Planner page
-    Then I see an element with testid "packet-group-active"
-    And I see an element with testid "packet-group-queued"
-    And I see an element with testid "packet-group-done"
+  # ── Device Sessions Board placeholder (PacketProgressBoard removed in Phase D) ──
