@@ -42,13 +42,6 @@ import {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function toLocalDatetime(iso: string): string {
-  const d = new Date(iso);
-  const off = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - off * 60_000);
-  return local.toISOString().slice(0, 16);
-}
-
 function defaultDeparture(): string {
   const d = new Date();
   d.setHours(d.getHours() + 8);
