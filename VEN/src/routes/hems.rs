@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::controller::user_request::CreateUserRequestBody;
 use crate::entities::asset::{ComfortRate, PlanTrigger};
-use crate::entities::device_session::{EvSession, HeaterTarget};
+use crate::entities::device_session::{BaselineOverride, BaselineSlot, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, ValueCurve};
 use crate::AppCtx;
 
@@ -335,6 +335,122 @@ pub async fn post_heater_target(
 /// DELETE /heater-target — clear the active heater target.
 pub async fn delete_heater_target(State(ctx): State<AppCtx>) -> impl IntoResponse {
     ctx.state.set_heater_target(None).await;
+    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+    StatusCode::NO_CONTENT
+}
+
+// ── Shiftable-load endpoints (Phase B) ──────────────────────────────────────
+
+/// POST /shiftable-loads body.
+#[derive(Deserialize)]
+pub struct CreateShiftableLoadBody {
+    pub asset_id: String,
+    pub power_kw: f64,
+    pub duration_min: u32,
+    pub earliest_start: chrono::DateTime<Utc>,
+    pub latest_end: chrono::DateTime<Utc>,
+}
+
+/// GET /shiftable-loads — returns all active shiftable loads.
+pub async fn get_shiftable_loads(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.shiftable_loads().await)
+}
+
+/// POST /shiftable-loads — add a new shiftable load, triggering a replan.
+pub async fn post_shiftable_load(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<CreateShiftableLoadBody>,
+) -> impl IntoResponse {
+    let now = Utc::now();
+    let load = ShiftableLoad {
+        id: Uuid::new_v4(),
+        asset_id: body.asset_id.clone(),
+        power_kw: body.power_kw,
+        duration_min: body.duration_min,
+        earliest_start: body.earliest_start,
+        latest_end: body.latest_end,
+        created_at: now,
+        updated_at: now,
+    };
+    info!(
+        load_id = %load.id,
+        asset_id = %load.asset_id,
+        power_kw = load.power_kw,
+        duration_min = load.duration_min,
+        "shiftable load added"
+    );
+    ctx.state.add_shiftable_load(load.clone()).await;
+    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+    (StatusCode::CREATED, Json(load))
+}
+
+/// DELETE /shiftable-loads/:id — remove a shiftable load by id.
+pub async fn delete_shiftable_load(
+    State(ctx): State<AppCtx>,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse {
+    if ctx.state.remove_shiftable_load(id).await {
+        let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+// ── Baseline-override endpoints (Phase B) ───────────────────────────────────
+
+/// POST /baseline-override body.
+#[derive(Deserialize)]
+pub struct CreateBaselineOverrideBody {
+    pub slots: Vec<BaselineSlotBody>,
+}
+
+#[derive(Deserialize)]
+pub struct BaselineSlotBody {
+    pub slot_start: chrono::DateTime<Utc>,
+    pub add_kw: f64,
+}
+
+/// GET /baseline-override — returns the active baseline override (204 if none).
+pub async fn get_baseline_override(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    match ctx.state.baseline_override().await {
+        Some(o) => Json(o).into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
+    }
+}
+
+/// POST /baseline-override — upsert the baseline override, triggering a replan.
+pub async fn post_baseline_override(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<CreateBaselineOverrideBody>,
+) -> impl IntoResponse {
+    let now = Utc::now();
+    let ovr = BaselineOverride {
+        id: Uuid::new_v4(),
+        slots: body
+            .slots
+            .into_iter()
+            .map(|s| BaselineSlot {
+                slot_start: s.slot_start,
+                add_kw: s.add_kw,
+            })
+            .collect(),
+        created_at: now,
+        updated_at: now,
+    };
+    info!(
+        override_id = %ovr.id,
+        slot_count = ovr.slots.len(),
+        "baseline override set"
+    );
+    ctx.state.set_baseline_override(Some(ovr.clone())).await;
+    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+    (StatusCode::CREATED, Json(ovr))
+}
+
+/// DELETE /baseline-override — clear the baseline override.
+pub async fn delete_baseline_override(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    ctx.state.set_baseline_override(None).await;
     let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
     StatusCode::NO_CONTENT
 }

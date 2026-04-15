@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::entities::asset::{PlanTrigger, UserRequestMode};
 use crate::entities::capacity::OadrCapacityState;
+use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
 use crate::entities::energy_packet::{EnergyPacket, PacketStatus};
 use crate::entities::plan::{
     CostBreakdown, FlexibilityEnvelope, PacketAllocation, Plan, PlanStep, PlanSummary,
@@ -142,7 +143,23 @@ struct MilpInputs {
     e_heat_req_kwh: f64,
     /// Comfort reward for meeting deadline (MayRun only) [€]
     v_heat_eur: f64,
-    // WM: always MustNotRun — deferred to a future phase; no WM fields added yet.
+
+    // ── Shiftable loads (Phase B) ────────────────────────────────────────────
+    /// MILP-ready shiftable load descriptors (one per ShiftableLoad that fits the horizon)
+    shiftable_loads: Vec<ShiftableLoadMilp>,
+}
+
+/// Internal MILP descriptor for one shiftable load block.
+#[derive(Debug, Clone)]
+struct ShiftableLoadMilp {
+    /// Label for allocations (e.g. "wm")
+    asset_id: String,
+    /// Fixed power level while running [kW]
+    power_kw: f64,
+    /// Duration in planning slots (ceil)
+    duration_slots: usize,
+    /// Valid start-slot indices within [0, n)
+    valid_start_slots: Vec<usize>,
 }
 
 // ── Builder functions ────────────────────────────────────────────────────────
@@ -254,6 +271,8 @@ fn build_milp_inputs(
     now: DateTime<Utc>,
     ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
+    shiftable_loads: &[ShiftableLoad],
+    baseline_override: Option<&BaselineOverride>,
 ) -> MilpInputs {
     let step_s = profile.planner.plan_step_s;
     let n = ((profile.planner.plan_horizon_h as f64 * 3600.0) / step_s as f64) as usize;
@@ -454,6 +473,47 @@ fn build_milp_inputs(
             (MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0)
         };
 
+    // ── Baseline override: additive per-slot kW adjustments ─────────────────
+    if let Some(bo) = baseline_override {
+        for slot in &bo.slots {
+            let offset_s = (slot.slot_start - now).num_seconds();
+            if offset_s < 0 { continue; }
+            let idx = (offset_s as f64 / (dt_h * 3600.0)).floor() as usize;
+            if idx < n {
+                p_base[idx] += slot.add_kw;
+            }
+        }
+    }
+
+    // ── Shiftable loads → ShiftableLoadMilp ──────────────────────────────────
+    let milp_loads: Vec<ShiftableLoadMilp> = shiftable_loads.iter().filter_map(|sl| {
+        let dur_s = (sl.duration_min as f64) * 60.0;
+        let duration_slots = (dur_s / (dt_h * 3600.0)).ceil() as usize;
+        if duration_slots == 0 { return None; }
+
+        let window_start_s = (sl.earliest_start - now).num_seconds().max(0) as f64;
+        let window_end_s = (sl.latest_end - now).num_seconds().max(0) as f64;
+
+        let first_slot = (window_start_s / (dt_h * 3600.0)).floor() as usize;
+        // Last valid start: load must finish before latest_end
+        let last_valid_s = window_end_s - dur_s;
+        if last_valid_s < 0.0 { return None; }
+        let last_slot = ((last_valid_s / (dt_h * 3600.0)).floor() as usize).min(n.saturating_sub(duration_slots));
+
+        let valid_start_slots: Vec<usize> = (first_slot..=last_slot).filter(|&s| s + duration_slots <= n).collect();
+        if valid_start_slots.is_empty() {
+            tracing::warn!(asset_id = %sl.asset_id, "shiftable load has no valid start slots in horizon — skipped");
+            return None;
+        }
+
+        Some(ShiftableLoadMilp {
+            asset_id: sl.asset_id.clone(),
+            power_kw: sl.power_kw,
+            duration_slots,
+            valid_start_slots,
+        })
+    }).collect();
+
     MilpInputs {
         n,
         dt_h,
@@ -491,6 +551,7 @@ fn build_milp_inputs(
         p_heat_full_kw: p_full,
         e_heat_req_kwh: e_heat_req,
         v_heat_eur: profile.planner.v_heat_eur,
+        shiftable_loads: milp_loads,
     }
 }
 
@@ -529,7 +590,8 @@ struct SolveOutput {
     z_ev_core: f64,
     /// 1.0 when heater energy deadline is met (MayRun only); 0.0 otherwise
     z_heat_ready: f64,
-    // WM fields omitted — deferred to a future phase
+    /// Per-shiftable-load power schedule [kW]; outer len = num loads, inner len = n
+    p_shiftable_kw: Vec<Vec<f64>>,
 }
 
 /// Run the MILP model and return the optimal schedule.
@@ -660,6 +722,12 @@ fn solve_milp(
         vars.add(variable().min(0.0).max(0.0))
     };
 
+    // ── Shiftable load variables ──────────────────────────────────────────────
+    // For each load: one binary per valid start slot, y_s[j] ∈ {0,1}
+    let y_shift: Vec<Vec<Variable>> = inputs.shiftable_loads.iter().map(|sl| {
+        sl.valid_start_slots.iter().map(|_| vars.add(variable().binary())).collect()
+    }).collect();
+
     // ── Objective + deadline energy accumulators (loop 1) ────────────────────
     let t_ev_dlim = inputs.t_ev_dead_step.unwrap_or(n.saturating_sub(1));
     let t_heat_dlim = inputs.t_heat_dead_step.unwrap_or(n.saturating_sub(1));
@@ -714,10 +782,21 @@ fn solve_milp(
         let heat_kw = inputs.p_heat_mid_kw * z_heat_mid[t]
             + inputs.p_heat_full_kw * z_heat_full[t];
 
-        // Power balance (WM term omitted)
+        // Shiftable load power at step t: sum over all loads, all valid starts
+        let mut shift_kw = Expression::from(0.0);
+        for (s, sl) in inputs.shiftable_loads.iter().enumerate() {
+            for (ji, &j) in sl.valid_start_slots.iter().enumerate() {
+                // Load s started at slot j covers slots [j, j+duration_slots)
+                if t >= j && t < j + sl.duration_slots {
+                    shift_kw += sl.power_kw * y_shift[s][ji];
+                }
+            }
+        }
+
+        // Power balance
         model = model.with(constraint!(
             p_imp[t] + inputs.p_pv_kw[t] + p_bat_dis[t]
-                == inputs.p_base_kw[t] + p_ev[t] + heat_kw + p_bat_ch[t] + p_exp[t]
+                == inputs.p_base_kw[t] + p_ev[t] + heat_kw + shift_kw + p_bat_ch[t] + p_exp[t]
         ));
 
         // Grid mutual exclusion (no simultaneous import and export)
@@ -808,6 +887,15 @@ fn solve_milp(
 
     // WM constraints omitted
 
+    // Shiftable load constraints: each must start exactly once
+    for (s, sl) in inputs.shiftable_loads.iter().enumerate() {
+        let mut sum_y = Expression::from(0.0);
+        for ji in 0..sl.valid_start_slots.len() {
+            sum_y += y_shift[s][ji];
+        }
+        model = model.with(constraint!(sum_y == 1.0));
+    }
+
     model = model.with_time_limit(60.0);
     model = model.with_mip_gap(0.02)?;
     let solution = model.solve()?;
@@ -829,6 +917,7 @@ fn solve_milp(
         e_ev_extra: solution.value(e_ev_extra),
         z_ev_core: solution.value(z_ev_core),
         z_heat_ready: solution.value(z_heat_ready),
+        p_shiftable_kw: vec![vec![0.0; n]; inputs.shiftable_loads.len()],
     };
     for t in 0..n {
         out.p_imp_kw[t] = solution.value(p_imp[t]);
@@ -841,6 +930,15 @@ fn solve_milp(
         out.s_imp_viol_kw[t] = solution.value(s_imp_viol[t]);
         out.s_exp_viol_kw[t] = solution.value(s_exp_viol[t]);
         out.z_ev_on[t] = solution.value(z_ev_on[t]);
+
+        // Reconstruct per-load power at this step from binary start vars
+        for (s, sl) in inputs.shiftable_loads.iter().enumerate() {
+            for (ji, &j) in sl.valid_start_slots.iter().enumerate() {
+                if t >= j && t < j + sl.duration_slots {
+                    out.p_shiftable_kw[s][t] += sl.power_kw * solution.value(y_shift[s][ji]);
+                }
+            }
+        }
     }
     for t in 0..=n {
         out.e_bat_kwh[t] = solution.value(e_bat[t]);
@@ -1117,6 +1215,33 @@ fn translate_to_plan(
             }
         }
 
+        // ── Shiftable load allocations + PlanSteps ────────────────────────
+        for (s, sl) in inputs.shiftable_loads.iter().enumerate() {
+            let power = sol.p_shiftable_kw[s][t];
+            if power > 0.01 {
+                let surplus_power_kw = surplus_remaining_kw.min(power);
+                let grid_power_kw = power - surplus_power_kw;
+                surplus_remaining_kw -= surplus_power_kw;
+                allocations.push(PacketAllocation {
+                    packet_id: Uuid::nil(),
+                    asset_id: sl.asset_id.clone(),
+                    power_kw: power,
+                    surplus_power_kw,
+                    grid_power_kw,
+                    marginal_value: inputs.c_imp_eur_kwh[t],
+                    cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * dt_h
+                        - surplus_power_kw * inputs.c_exp_eur_kwh[t] * dt_h,
+                    co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h,
+                });
+                steps.push(PlanStep {
+                    ts: slot_start,
+                    asset_id: sl.asset_id.clone(),
+                    setpoint_kw: power,
+                    actual_power_kw: 0.0,
+                });
+            }
+        }
+
         // ── PlanStep entries ────────────────────────────────────────────
         if let Some(ref eid) = ev_id {
             if sol.p_ev_kw[t] > 0.01 {
@@ -1282,8 +1407,10 @@ pub fn run_planner(
     trigger: PlanTrigger,
     ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
+    shiftable_loads: &[ShiftableLoad],
+    baseline_override: Option<&BaselineOverride>,
 ) -> (Plan, Vec<PlanStep>) {
-    let inputs = build_milp_inputs(assets, tariffs, packets, capacity, profile, now, ev_session, heater_target);
+    let inputs = build_milp_inputs(assets, tariffs, packets, capacity, profile, now, ev_session, heater_target, shiftable_loads, baseline_override);
     let weights = build_milp_weights(profile);
     match solve_milp(&inputs, &weights) {
         Ok(sol) => translate_to_plan(&sol, &inputs, &weights, profile, now, trigger, packets),
@@ -1470,7 +1597,7 @@ mod tests {
         let profile = make_profile();
         let tariffs = make_tariffs(0.25, 0.08, 450.0); // 450 g/kWh
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &tariffs, &[], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &tariffs, &[], &no_capacity(), &profile, now, None, None, &[], None);
         // All slots should have 0.45 kgCO₂/kWh
         assert!(inp.g_imp_kgco2_kwh.iter().all(|&v| (v - 0.45).abs() < 1e-9));
     }
@@ -1481,7 +1608,7 @@ mod tests {
         let now = fixed_now();
         let profile = make_profile(); // battery RTE = 0.9
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
         let expected = 0.9_f64.sqrt();
         assert!((inp.eff_bat_ch.unwrap() - expected).abs() < 1e-9);
         assert!((inp.eff_bat_dis.unwrap() - expected).abs() < 1e-9);
@@ -1497,7 +1624,7 @@ mod tests {
         let profile = make_profile(); // initial_soc=0.5, capacity=10.0
         let mut sim = SimState::from_profile(&profile);
         set_battery_soc(&mut sim, 0.3); // override to 0.3
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
         assert!((inp.e_bat_init_kwh.unwrap() - 3.0).abs() < 1e-9); // 0.3 × 10.0 = 3.0
     }
 
@@ -1508,7 +1635,7 @@ mod tests {
         let profile = make_profile(); // initial_soc=0.5, capacity=10.0
         let mut sim = SimState::from_profile(&profile);
         sim.assets.clear(); // remove all assets → battery_state() returns None
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
         assert!((inp.e_bat_init_kwh.unwrap() - 5.0).abs() < 1e-9); // 0.5 × 10.0 = 5.0
     }
 
@@ -1519,7 +1646,7 @@ mod tests {
         let profile = make_profile();
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
         assert!(inp.a_ev.iter().all(|&v| v));
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun); // no packet → MustNotRun (but mask is true)
         assert_eq!(inp.t_ev_dead_step, None);
@@ -1533,7 +1660,7 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 1.0); // 1h deadline
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
         // deadline = 3600s, step_s=300 → deadline_step = 3600/300 = 12
         let d = inp.t_ev_dead_step.unwrap();
         assert_eq!(d, 12);
@@ -1551,7 +1678,7 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, false);
         let pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 1.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
         assert!(inp.a_ev.iter().all(|&v| !v));
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
@@ -1563,7 +1690,7 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 2.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MustRun);
     }
 
@@ -1574,7 +1701,7 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let pkt = make_ev_packet(now, UserRequestMode::Asap, 2.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MustRun);
     }
 
@@ -1585,7 +1712,7 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let pkt = make_ev_packet(now, UserRequestMode::Opportunistic, 2.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MayRun);
     }
 
@@ -1597,7 +1724,7 @@ mod tests {
         set_ev_plugged(&mut sim, true);
         let mut pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 2.0);
         pkt.status = PacketStatus::Abandoned;
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
         // Abandoned packet is excluded by active_packet() → MustNotRun
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
@@ -1609,7 +1736,7 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         // No packets at all
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
 
@@ -1621,7 +1748,7 @@ mod tests {
         set_ev_plugged(&mut sim, true);
         let mut pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 2.0);
         pkt.status = PacketStatus::Completed;
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
 
@@ -1632,7 +1759,7 @@ mod tests {
         let profile = make_profile();
         let sim = SimState::from_profile(&profile);
         let empty_tariffs = TariffTimeSeries::from_snapshots(&[]);
-        let inp = build_milp_inputs(&sim, &empty_tariffs, &[], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &empty_tariffs, &[], &no_capacity(), &profile, now, None, None, &[], None);
         assert!(inp.c_imp_eur_kwh.iter().all(|&v| (v - 0.25).abs() < 1e-9));
         assert!(inp.c_exp_eur_kwh.iter().all(|&v| (v - 0.08).abs() < 1e-9));
         assert!(inp.g_imp_kgco2_kwh.iter().all(|&v| (v - 0.30).abs() < 1e-9));
@@ -1645,7 +1772,7 @@ mod tests {
         let profile = make_profile(); // heater max_kw=3.0, mid_kw=None
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true); // avoid EV noise
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
         assert!((inp.p_heat_mid_kw - 1.5).abs() < 1e-9); // 3.0 / 2.0
         assert!((inp.p_heat_full_kw - 3.0).abs() < 1e-9);
     }
@@ -1668,7 +1795,7 @@ mod tests {
             })
             .collect();
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
         assert!((inp.p_heat_mid_kw - 2.0).abs() < 1e-9);
     }
 
@@ -1725,7 +1852,7 @@ mod tests {
             export_limit_event_id: None,
             last_updated: None,
         };
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &capacity, &profile, now, None, None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &capacity, &profile, now, None, None, &[], None);
         // Physical limit unchanged
         assert!(inp.p_imp_max_phys_kw.iter().all(|&v| (v - 25.0).abs() < 1e-9));
         // Contractual limit uses the event value
@@ -1773,6 +1900,7 @@ mod tests {
             p_heat_full_kw: 0.0,
             e_heat_req_kwh: 0.0,
             v_heat_eur: 0.0,
+            shiftable_loads: vec![],
         }
     }
 

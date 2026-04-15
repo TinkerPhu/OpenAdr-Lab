@@ -659,6 +659,8 @@ pub(crate) fn spawn_planning(
                 crate::entities::tariff_snapshot::TariffTimeSeries::from_snapshots(&rates);
             let ev_sess = state.ev_session().await;
             let heat_tgt = state.heater_target().await;
+            let shift_loads = state.shiftable_loads().await;
+            let bl_override = state.baseline_override().await;
             let sim_guard_for_planner = sim.lock().await;
             let (mut plan, plan_steps) = controller::milp_planner::run_planner(
                 &*sim_guard_for_planner,
@@ -670,6 +672,8 @@ pub(crate) fn spawn_planning(
                 trigger,
                 ev_sess.as_ref(),
                 heat_tgt.as_ref(),
+                &shift_loads,
+                bl_override.as_ref(),
             );
             drop(sim_guard_for_planner);
             plan.steps = plan_steps;
