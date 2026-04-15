@@ -16,7 +16,7 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
     And I inject ev_soc 0.50 via sim inject
     And I inject ev_soc_target 0.90 via sim inject
     And I create a rate-system program and save its ID
-    And I POST an EV packet with target_soc 0.90 and latest_end_h 6.0
+    And I POST an EV session with target_soc 0.90 and departure in 6.0 hours
     And I create an IMPORT_CAPACITY_LIMIT event with limit 5.0 kW for the saved program
     When I wait for the VEN /plan to have a slot with import_cap_kw at most 5.0
     Then net import in all capped plan slots is at most 5.1 kW
@@ -44,7 +44,7 @@ Feature: VEN EV Charging Scenarios (Chunk 4)
     And I inject ev_soc 0.50 via sim inject
     And I inject ev_soc_target 0.90 via sim inject
     And I create a rate-system program and save its ID
-    And I POST an EV packet with target_soc 0.90 and latest_end_h 6.0
+    And I POST an EV session with target_soc 0.90 and departure in 6.0 hours
     And I create an IMPORT_CAPACITY_LIMIT event with limit 0.0 kW for the saved program
     When I wait for the VEN /plan to have a slot with import_cap_kw at most 0.1
     Then all capped plan slots have import_cap_kw at most 0.1
