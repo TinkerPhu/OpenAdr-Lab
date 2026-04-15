@@ -1,34 +1,32 @@
 Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
   Verify that the Dispatcher executes plan slot allocations: the EV sim
-  charges when planned, packets transition to ACTIVE, POST /packets creates
-  schedulable tasks, and the asset ledger accumulates energy over time.
+  charges when planned, EV sessions trigger replanning, and the asset ledger
+  accumulates energy over time.
 
   Background:
     Given the VEN is running with profile "test"
 
-  # --- Packet status lifecycle ---
+  # --- EV session drives plan allocation ---
 
-  Scenario: EV packet transitions to ACTIVE once the dispatcher starts commanding power
+  Scenario: EV session drives dispatcher to allocate power to EV
+    Given I inject ev_soc 0.50 via sim inject
+    And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
     When I wait for the VEN /plan to have an EV allocation in slots
-    And I poll VEN /packets until asset "ev" has status "ACTIVE"
-    Then the response JSON is an array
-    And at least one packet has asset_id "ev"
-    And at least one packet with asset_id "ev" has status "ACTIVE"
+    Then at least one firm slot has an allocation for asset "ev"
 
-  # --- POST /packets endpoint ---
+  # --- EV session CRUD via /ev-session ---
 
-  Scenario: POST /packets creates a new EnergyPacket
-    When I POST a new EV packet with target_soc 0.95 to /packets
+  Scenario: POST /ev-session creates a new EvSession
+    When I POST an EV session with target_soc 0.95 and departure in 12.0 hours
     Then the response status is 201
     And the response JSON has field "id"
-    And the response JSON field "asset_id" is the string "ev"
-    And the response JSON field "status" is the string "PENDING"
+    And the response JSON has field "target_soc"
 
-  Scenario: New packet appears in GET /packets after POST
-    When I POST a new EV packet with target_soc 0.95 to /packets
-    And I GET /packets from the VEN
-    Then the response JSON is an array
-    And the packets list has at least 1 item
+  Scenario: EvSession appears in GET /ev-session after POST
+    When I POST an EV session with target_soc 0.95 and departure in 12.0 hours
+    And I GET the EV session from /ev-session
+    Then the response status is 200
+    And the response JSON has field "id"
 
   # --- Asset energy ledger ---
 
