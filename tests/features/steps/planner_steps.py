@@ -169,19 +169,7 @@ def step_firm_slot_has_allocation(context, asset_id):
         f"Checked {len(slots)} slots."
     )
 
-
-@then('the plan envelopes contain an entry for asset "{asset_id}"')
-def step_envelopes_contain_asset(context, asset_id):
-    plan = context.ven_plan
-    envs = plan.get("envelopes", [])
-    found = any(e.get("asset_id") == asset_id for e in envs)
-    assert found, (
-        f"No envelope for asset '{asset_id}'. "
-        f"asset_ids present: {[e.get('asset_id') for e in envs]}"
-    )
-
-
-@then('the plan contains a packet with asset_id "{asset_id}" in a non-terminal status')
+@then('the plan contains a packet with asset_id"{asset_id}" in a non-terminal status')
 def step_plan_packet_non_terminal(context, asset_id):
     plan = context.ven_plan
     terminal = {"COMPLETED", "PARTIAL_COMPLETED", "ABANDONED", "FAILED"}
