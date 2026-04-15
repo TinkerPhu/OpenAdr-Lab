@@ -31,6 +31,8 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
   # --- Asset energy ledger ---
 
   Scenario: GET /ledger returns per-asset energy accumulation after charging
+    Given I inject ev_soc 0.5 via sim inject
+    And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
     When I wait for the VEN /plan to have an EV allocation in slots
     And I poll VEN /ledger until field "ev.energy_kwh" is greater than 0.0
     Then the response JSON has field "ev"
