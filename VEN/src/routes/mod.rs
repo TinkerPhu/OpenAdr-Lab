@@ -76,6 +76,18 @@ pub fn build_router(ctx: AppCtx) -> Router {
         )
         .route("/user-requests/:id", delete(hems::delete_request))
         .route("/flexibility", get(hems::get_flexibility))
+        .route(
+            "/ev-session",
+            get(hems::get_ev_session)
+                .post(hems::post_ev_session)
+                .delete(hems::delete_ev_session),
+        )
+        .route(
+            "/heater-target",
+            get(hems::get_heater_target)
+                .post(hems::post_heater_target)
+                .delete(hems::delete_heater_target),
+        )
         .with_state(ctx)
         .layer(TraceLayer::new_for_http())
         .layer(cors)
