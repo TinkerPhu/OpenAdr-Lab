@@ -273,6 +273,68 @@ export type CreateUserRequestBody = {
   comfort_rates: null;
 };
 
+// ─── Device Session types ─────────────────────────────────────────────────────
+
+export type EvSession = {
+  id: string;
+  target_soc: number;
+  departure_time: string;
+  opportunistic: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateEvSessionBody = {
+  target_soc: number;
+  departure_time: string;
+  opportunistic?: boolean;
+};
+
+export type HeaterTarget = {
+  id: string;
+  target_temp_c: number;
+  ready_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateHeaterTargetBody = {
+  target_temp_c: number;
+  ready_by: string;
+};
+
+export type ShiftableLoad = {
+  id: string;
+  asset_id: string;
+  power_kw: number;
+  duration_min: number;
+  earliest_start: string;
+  latest_end: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateShiftableLoadBody = {
+  asset_id: string;
+  power_kw: number;
+  duration_min: number;
+  earliest_start: string;
+  latest_end: string;
+};
+
+export type BaselineSlot = { slot_start: string; add_kw: number };
+
+export type BaselineOverride = {
+  id: string;
+  slots: BaselineSlot[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateBaselineOverrideBody = { slots: BaselineSlot[] };
+
+// ─── Flexibility Envelope ─────────────────────────────────────────────────────
+
 export type FlexibilityEnvelope = {
   packet_id: string;
   asset_id: string;

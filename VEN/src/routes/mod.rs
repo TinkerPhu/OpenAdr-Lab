@@ -88,6 +88,18 @@ pub fn build_router(ctx: AppCtx) -> Router {
                 .post(hems::post_heater_target)
                 .delete(hems::delete_heater_target),
         )
+        .route(
+            "/shiftable-loads",
+            get(hems::get_shiftable_loads)
+                .post(hems::post_shiftable_load),
+        )
+        .route("/shiftable-loads/:id", delete(hems::delete_shiftable_load))
+        .route(
+            "/baseline-override",
+            get(hems::get_baseline_override)
+                .post(hems::post_baseline_override)
+                .delete(hems::delete_baseline_override),
+        )
         .with_state(ctx)
         .layer(TraceLayer::new_for_http())
         .layer(cors)

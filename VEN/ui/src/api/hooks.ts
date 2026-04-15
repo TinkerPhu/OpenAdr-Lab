@@ -1,6 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useVenContext } from "../App";
-import type { SensorSnapshot, SimInjectState, CreateUserRequestBody } from "./types";
+import type {
+  SensorSnapshot, SimInjectState, CreateUserRequestBody,
+  CreateEvSessionBody, CreateHeaterTargetBody, CreateShiftableLoadBody, CreateBaselineOverrideBody,
+} from "./types";
 
 export function useHealth() {
   const { api } = useVenContext();
@@ -254,6 +257,140 @@ export function useDeleteRequest() {
     mutationFn: (id: string) => api.deleteRequest(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user_requests"] });
+    },
+  });
+}
+
+// ── Device Session hooks (Phase B) ──────────────────────────────────────────
+
+export function useEvSession() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["ev_session", api.baseUrl],
+    queryFn: () => api.evSession(),
+    refetchInterval: 10_000,
+  });
+}
+
+export function usePostEvSession() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateEvSessionBody) => api.postEvSession(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ev_session"] });
+      queryClient.invalidateQueries({ queryKey: ["plan"] });
+    },
+  });
+}
+
+export function useDeleteEvSession() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.deleteEvSession(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ev_session"] });
+      queryClient.invalidateQueries({ queryKey: ["plan"] });
+    },
+  });
+}
+
+export function useHeaterTarget() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["heater_target", api.baseUrl],
+    queryFn: () => api.heaterTarget(),
+    refetchInterval: 10_000,
+  });
+}
+
+export function usePostHeaterTarget() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateHeaterTargetBody) => api.postHeaterTarget(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["heater_target"] });
+      queryClient.invalidateQueries({ queryKey: ["plan"] });
+    },
+  });
+}
+
+export function useDeleteHeaterTarget() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.deleteHeaterTarget(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["heater_target"] });
+      queryClient.invalidateQueries({ queryKey: ["plan"] });
+    },
+  });
+}
+
+export function useShiftableLoads() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["shiftable_loads", api.baseUrl],
+    queryFn: () => api.shiftableLoads(),
+    refetchInterval: 10_000,
+  });
+}
+
+export function usePostShiftableLoad() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateShiftableLoadBody) => api.postShiftableLoad(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["shiftable_loads"] });
+      queryClient.invalidateQueries({ queryKey: ["plan"] });
+    },
+  });
+}
+
+export function useDeleteShiftableLoad() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteShiftableLoad(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["shiftable_loads"] });
+      queryClient.invalidateQueries({ queryKey: ["plan"] });
+    },
+  });
+}
+
+export function useBaselineOverride() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["baseline_override", api.baseUrl],
+    queryFn: () => api.baselineOverride(),
+    refetchInterval: 10_000,
+  });
+}
+
+export function usePostBaselineOverride() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateBaselineOverrideBody) => api.postBaselineOverride(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["baseline_override"] });
+      queryClient.invalidateQueries({ queryKey: ["plan"] });
+    },
+  });
+}
+
+export function useDeleteBaselineOverride() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.deleteBaselineOverride(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["baseline_override"] });
+      queryClient.invalidateQueries({ queryKey: ["plan"] });
     },
   });
 }
