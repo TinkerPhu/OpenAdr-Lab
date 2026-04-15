@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
@@ -40,9 +40,9 @@ const sampleLoads: ShiftableLoad[] = [
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
-const mockEvSession = vi.fn<[], EvSession | undefined>(() => undefined);
-const mockHeaterTarget = vi.fn<[], HeaterTarget | undefined>(() => undefined);
-const mockShiftableLoads = vi.fn<[], ShiftableLoad[]>(() => []);
+const mockEvSession = vi.fn((): EvSession | undefined => undefined);
+const mockHeaterTarget = vi.fn((): HeaterTarget | undefined => undefined);
+const mockShiftableLoads = vi.fn((): ShiftableLoad[] => []);
 
 const mockPostEvSession = vi.fn();
 const mockDeleteEvSession = vi.fn();
