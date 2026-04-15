@@ -657,6 +657,8 @@ pub(crate) fn spawn_planning(
 
             let tariff_ts =
                 crate::entities::tariff_snapshot::TariffTimeSeries::from_snapshots(&rates);
+            let ev_sess = state.ev_session().await;
+            let heat_tgt = state.heater_target().await;
             let sim_guard_for_planner = sim.lock().await;
             let (mut plan, plan_steps) = controller::milp_planner::run_planner(
                 &*sim_guard_for_planner,
@@ -666,6 +668,8 @@ pub(crate) fn spawn_planning(
                 &profile,
                 now,
                 trigger,
+                ev_sess.as_ref(),
+                heat_tgt.as_ref(),
             );
             drop(sim_guard_for_planner);
             plan.steps = plan_steps;

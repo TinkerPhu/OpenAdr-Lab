@@ -158,6 +158,28 @@ impl SimState {
         })
     }
 
+    /// Convenience accessor: returns the HeaterState if a "heater" asset exists.
+    pub fn heater_state(&self) -> Option<&crate::assets::heater::HeaterState> {
+        self.asset("heater").and_then(|e| {
+            if let AssetState::Heater(s) = &e.state {
+                Some(s)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Convenience accessor: returns the Heater config if a "heater" asset exists.
+    pub fn heater_config(&self) -> Option<&Heater> {
+        self.find_asset("heater").and_then(|(_, cfg)| {
+            if let AssetConfig::Heater(h) = cfg {
+                Some(h)
+            } else {
+                None
+            }
+        })
+    }
+
     /// Initialize from profile configuration, preferring `assets` list over legacy `devices`.
     pub fn from_profile(profile: &Profile) -> Self {
         let mut configs: Vec<AssetConfig> = Vec::new();
