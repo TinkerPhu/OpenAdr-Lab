@@ -8,11 +8,11 @@ Feature: VEN User Request Manager — Stage 5
 
   # --- POST /user-requests ---
 
-  Scenario: POST /user-requests creates a user request with a linked EV packet
+  Scenario: POST /user-requests creates a user request with a linked EV session
     When I POST a user request for asset "ev" with target_soc 0.90 and latest_end in 12 hours
     Then the response status is 201
     And the response JSON has field "id"
-    And the response JSON has field "packet_id"
+    And the response JSON has field "session_id"
     And the response JSON field "asset_id" is the string "ev"
     And the response JSON field "status" is the string "ACTIVE"
 
@@ -36,12 +36,12 @@ Feature: VEN User Request Manager — Stage 5
 
   # --- DELETE /user-requests/:id (cancel) ---
 
-  Scenario: Cancelling a user request abandons the linked packet
+  Scenario: Cancelling a user request clears the linked EV session
     When I POST a user request for asset "ev" with target_soc 0.90 and latest_end in 12 hours
     And I save the request ID
     And I DELETE the saved user request
     Then the response status is 204
-    And the cancelled packet is in ABANDONED status
+    And the EV session is cleared after cancellation
 
   # --- Non-storage asset rejection ---
 
@@ -71,8 +71,8 @@ Feature: VEN User Request Manager — Stage 5
     Then the response status is 201
     And the response JSON field "max_total_cost_eur" is greater than 0.0
 
-  Scenario: Interruptible scheduled packet contributes to up_kw in flexibility envelope
-    Given the VEN has a scheduled interruptible EV packet
+  Scenario: Interruptible scheduled EV session contributes to up_kw in flexibility envelope
+    Given the VEN has a scheduled interruptible EV session
     When I GET /flexibility from the VEN
     Then the response status is 200
     And the response JSON field "up_kw" is greater than 0.0

@@ -1,7 +1,6 @@
 """Step definitions for Planner Visualization Page UI scenarios."""
 
 from behave import given, when, then
-from features.helpers.api_client import ven_get, ven_post
 from features.helpers.ui import tid
 from features.helpers.wait import poll_until
 
@@ -49,37 +48,6 @@ def step_no_plan_yet(context):
     r = ven_get("/plan")
     if r.status_code == 200 and r.json() is not None:
         context.scenario.skip("Plan already exists; empty-state scenario skipped")
-
-
-@given("no energy packets exist for this VEN")
-def step_no_packets(context):
-    """Verify no active/pending packets exist; skip if packets are present."""
-    r = ven_get("/packets")
-    r.raise_for_status()
-    packets = r.json()
-    active = [p for p in packets if p.get("status") in ("ACTIVE", "PENDING", "SCHEDULED")]
-    if active:
-        context.scenario.skip("Active packets exist; empty-state scenario skipped")
-
-
-@given("at least one energy packet exists for this VEN")
-def step_has_packets(context):
-    """Poll /packets until at least one non-done packet exists (up to 30s)."""
-    def _has_packet():
-        r = ven_get("/packets")
-        if not r.ok:
-            return False
-        packets = r.json()
-        return any(p.get("status") in ("ACTIVE", "PENDING", "SCHEDULED") for p in packets)
-
-    poll_until(
-        _has_packet,
-        lambda result: result is True,
-        timeout=30,
-        interval=2,
-        description="VEN has at least one active/pending packet",
-    )
-
 
 # ── Trigger Timeline steps ────────────────────────────────────────────────────
 
