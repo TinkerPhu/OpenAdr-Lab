@@ -13,12 +13,11 @@ use good_lp::{
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::entities::asset::{PlanTrigger, UserRequestMode};
+use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
-use crate::entities::energy_packet::{EnergyPacket, PacketStatus};
 use crate::entities::plan::{
-    CostBreakdown, FlexibilityEnvelope, PacketAllocation, Plan, PlanStep, PlanSummary,
+    AssetAllocation, CostBreakdown, FlexibilityEnvelope, Plan, PlanStep, PlanSummary,
     PlanTimeSlot, PlanningHorizon, PlanWarning, WarningSeverity,
 };
 use crate::entities::tariff_snapshot::TariffTimeSeries;
@@ -28,17 +27,16 @@ use crate::simulator::SimState;
 // ── Internal MILP types ──────────────────────────────────────────────────────
 
 /// Internal MILP load mode for an asset (EV / heater).
-/// Derived from the active EnergyPacket state + UserRequestMode.
+/// Derived from the presence of an active device session (EvSession / HeaterTarget).
 #[derive(Debug, Clone, PartialEq)]
 enum MilpLoadMode {
-    /// Hard energy requirement — must be met within deadline. Translates from
-    /// UserRequestMode::Asap or ByDeadline on an active/pending/scheduled packet.
+    /// Hard energy requirement — must be met within deadline. Used when a
+    /// non-opportunistic EvSession or a HeaterTarget with remaining work is present.
     MustRun,
     /// Soft energy target — controlled by a reward term in the objective.
-    /// Translates from Free/MaxCost/Opportunistic modes, or asset present but no packet.
+    /// Used when an opportunistic EvSession is present.
     MayRun,
-    /// Asset absent, currently unavailable, or packet is terminal
-    /// (Abandoned / Completed / Failed / PartialCompleted).
+    /// Asset absent, currently unavailable, or no device session present.
     MustNotRun,
 }
 
@@ -212,45 +210,6 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
     }
 }
 
-/// Returns the first active-or-pending/scheduled packet for `asset_id`.
-/// Prefers Active over Pending/Scheduled when both exist.
-fn active_packet<'a>(packets: &'a [EnergyPacket], asset_id: &str) -> Option<&'a EnergyPacket> {
-    packets
-        .iter()
-        .filter(|p| p.asset_id == asset_id)
-        .find(|p| p.status == PacketStatus::Active)
-        .or_else(|| {
-            packets
-                .iter()
-                .filter(|p| p.asset_id == asset_id)
-                .find(|p| {
-                    matches!(
-                        p.status,
-                        PacketStatus::Pending | PacketStatus::Scheduled
-                    )
-                })
-        })
-}
-
-/// Translate an optional active packet into a MILP LoadMode.
-///
-/// `None` (no packet found by `active_packet`) → MustNotRun.
-/// Any remaining terminal status → MustNotRun (defensive: active_packet filters these out).
-/// Hard-commitment modes (Asap, ByDeadline) → MustRun.
-/// All other modes → MayRun.
-fn packet_load_mode(packet: Option<&EnergyPacket>) -> MilpLoadMode {
-    match packet {
-        None => MilpLoadMode::MustNotRun,
-        Some(p) => match p.request_mode {
-            UserRequestMode::Asap | UserRequestMode::ByDeadline => MilpLoadMode::MustRun,
-            UserRequestMode::AsapFree
-            | UserRequestMode::ByDeadlineFree
-            | UserRequestMode::MaxCost
-            | UserRequestMode::Opportunistic => MilpLoadMode::MayRun,
-        },
-    }
-}
-
 /// Convert a packet deadline to a planning step index, clamped to [0, n−1].
 fn deadline_to_step(deadline: DateTime<Utc>, now: DateTime<Utc>, step_s: u64, n: usize) -> usize {
     let secs = (deadline - now).num_seconds();
@@ -265,7 +224,6 @@ fn deadline_to_step(deadline: DateTime<Utc>, now: DateTime<Utc>, step_s: u64, n:
 fn build_milp_inputs(
     assets: &SimState,
     tariffs: &TariffTimeSeries,
-    packets: &[EnergyPacket],
     capacity: &OadrCapacityState,
     profile: &Profile,
     now: DateTime<Utc>,
@@ -398,26 +356,14 @@ fn build_milp_inputs(
                     profile.planner.v_ev_extra_eur_kwh,
                 )
             } else {
-                // ── Legacy packet fallback ─────────────────────────────────
-                let pkt = active_packet(packets, &ev_cfg.id);
-                let mode = packet_load_mode(pkt);
-
-                let deadline_step = pkt
-                    .and_then(|p| p.value_curve.active_deadline())
-                    .map(|tier| deadline_to_step(tier.deadline, now, step_s, n));
-
-                let mask: Vec<bool> = (0..n)
-                    .map(|t| deadline_step.map(|d| t <= d).unwrap_or(true))
-                    .collect();
-
-                let core_kwh = pkt.map(|p| p.target_energy_kwh).unwrap_or(0.0);
+                // No EvSession: EV is plugged but no charging intent
                 (
-                    mask,
-                    mode,
-                    deadline_step,
+                    vec![true; n],
+                    MilpLoadMode::MustNotRun,
+                    None,
                     ev_cfg.max_charge_kw,
                     ev_cfg.min_charge_kw,
-                    core_kwh,
+                    0.0,
                     ev_cfg.battery_kwh * (1.0 - ev_cfg.soc_target),
                     profile.planner.v_ev_extra_eur_kwh,
                 )
@@ -459,15 +405,8 @@ fn build_milp_inputs(
                 let mid = heat_cfg.mid_kw.unwrap_or(heat_cfg.max_kw / 2.0);
                 (mode, deadline_step, mid, heat_cfg.max_kw, req_kwh)
             } else {
-                // ── Legacy packet fallback ─────────────────────────────────
-                let pkt = active_packet(packets, &heat_cfg.id);
-                let mode = packet_load_mode(pkt);
-                let deadline_step = pkt
-                    .and_then(|p| p.value_curve.active_deadline())
-                    .map(|tier| deadline_to_step(tier.deadline, now, step_s, n));
-                let req_kwh = pkt.map(|p| p.target_energy_kwh).unwrap_or(0.0);
-                let mid = heat_cfg.mid_kw.unwrap_or(heat_cfg.max_kw / 2.0);
-                (mode, deadline_step, mid, heat_cfg.max_kw, req_kwh)
+                // No HeaterTarget: heater runs on thermostat defaults only
+                (MilpLoadMode::MustNotRun, None, heat_cfg.mid_kw.unwrap_or(heat_cfg.max_kw / 2.0), heat_cfg.max_kw, 0.0)
             }
         } else {
             (MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0)
@@ -948,101 +887,113 @@ fn solve_milp(
 
 // ── Output translator ───────────────────────────────────────────────────────
 
-/// Build per-packet schedulability metadata for every non-terminal packet.
+/// Build per-device schedulability metadata for all active device sessions.
 fn build_plan_envelopes(
-    packets: &[EnergyPacket],
+    ev_session: Option<&crate::entities::device_session::EvSession>,
+    heater_target: Option<&crate::entities::device_session::HeaterTarget>,
+    shiftable_loads: &[ShiftableLoad],
     inputs: &MilpInputs,
     profile: &Profile,
     now: DateTime<Utc>,
 ) -> Vec<FlexibilityEnvelope> {
     let step_s = profile.planner.plan_step_s as i64;
     let n = inputs.n;
+    let mut envelopes = Vec::new();
 
-    packets
-        .iter()
-        .filter(|p| !p.is_terminal())
-        .filter_map(|packet| {
-            let energy_needed_kwh = packet.undelivered_energy_kwh();
-            if energy_needed_kwh <= 0.0 {
-                return None;
+    // EV envelope
+    if let Some(session) = ev_session {
+        if let Some(ev_cfg) = profile.ev_config() {
+            // Remaining energy to charge
+            let energy_needed_kwh = inputs.e_ev_core_kwh;
+            if energy_needed_kwh > 0.0 {
+                let window_start = now;
+                let window_end = session.departure_time;
+                let slots_available = ((window_end - window_start).num_seconds() / step_s).max(0) as usize;
+                let t_start = 0usize;
+                let t_end = ((window_end - now).num_seconds() / step_s).min(n as i64) as usize;
+                let eligible = t_start..t_end;
+                let count = eligible.len().max(1) as f64;
+                let avg_tariff = (t_start..t_end).map(|t| inputs.c_imp_eur_kwh[t]).sum::<f64>() / count;
+                let avg_co2 = (t_start..t_end).map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0).sum::<f64>() / count;
+                envelopes.push(FlexibilityEnvelope {
+                    asset_id: ev_cfg.id.clone(),
+                    energy_needed_kwh,
+                    power_min_kw: ev_cfg.min_charge_kw,
+                    power_max_kw: ev_cfg.max_charge_kw,
+                    window_start,
+                    window_end,
+                    slots_available,
+                    max_acceptable_rate: 0.35,
+                    min_acceptable_rate: 0.05,
+                    budget_remaining_eur: 1.0e9,
+                    estimated_cost_eur: energy_needed_kwh * avg_tariff,
+                    estimated_co2_g: energy_needed_kwh * avg_co2,
+                });
             }
+        }
+    }
 
-            // Asset power bounds
-            let (power_min_kw, power_max_kw) = match packet.asset_id.as_str() {
-                id if profile.ev_config().map(|c| c.id.as_str()) == Some(id) => {
-                    let c = profile.ev_config().unwrap();
-                    (c.min_charge_kw, c.max_charge_kw)
-                }
-                id if profile.heater_config().map(|c| c.id.as_str()) == Some(id) => {
-                    let c = profile.heater_config().unwrap();
-                    (0.0, c.max_kw)
-                }
-                other => {
-                    warn!(
-                        asset_id = other,
-                        packet_id = %packet.id,
-                        "build_plan_envelopes: unknown asset_id, emitting 0-power envelope",
-                    );
-                    (0.0, 0.0)
-                }
-            };
+    // Heater envelope
+    if let Some(target) = heater_target {
+        if let Some(heat_cfg) = profile.heater_config() {
+            let energy_needed_kwh = inputs.e_heat_req_kwh;
+            if energy_needed_kwh > 0.0 {
+                let window_start = now;
+                let window_end = target.ready_by;
+                let slots_available = ((window_end - window_start).num_seconds() / step_s).max(0) as usize;
+                let t_end = ((window_end - now).num_seconds() / step_s).min(n as i64) as usize;
+                let count = t_end.max(1) as f64;
+                let avg_tariff = (0..t_end).map(|t| inputs.c_imp_eur_kwh[t]).sum::<f64>() / count;
+                let avg_co2 = (0..t_end).map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0).sum::<f64>() / count;
+                envelopes.push(FlexibilityEnvelope {
+                    asset_id: heat_cfg.id.clone(),
+                    energy_needed_kwh,
+                    power_min_kw: 0.0,
+                    power_max_kw: heat_cfg.max_kw,
+                    window_start,
+                    window_end,
+                    slots_available,
+                    max_acceptable_rate: 0.35,
+                    min_acceptable_rate: 0.05,
+                    budget_remaining_eur: 1.0e9,
+                    estimated_cost_eur: energy_needed_kwh * avg_tariff,
+                    estimated_co2_g: energy_needed_kwh * avg_co2,
+                });
+            }
+        }
+    }
 
-            // Time window
-            let window_start = packet.earliest_start.max(now);
-            let window_end = packet
-                .latest_end()
-                .unwrap_or(now + Duration::seconds(n as i64 * step_s));
+    // Shiftable load envelopes
+    for (s, sl) in shiftable_loads.iter().enumerate() {
+        if s >= inputs.shiftable_loads.len() { break; }
+        let milp_sl = &inputs.shiftable_loads[s];
+        let energy_needed_kwh = sl.power_kw * sl.duration_min as f64 / 60.0;
+        let window_start = sl.earliest_start.max(now);
+        let window_end = sl.latest_end;
+        let slots_available = ((window_end - window_start).num_seconds() / step_s).max(0) as usize;
+        let t_start = ((window_start - now).num_seconds() / step_s).max(0) as usize;
+        let t_end = ((window_end - now).num_seconds() / step_s).min(n as i64) as usize;
+        let count = (t_end.saturating_sub(t_start)).max(1) as f64;
+        let avg_tariff = (t_start..t_end).map(|t| inputs.c_imp_eur_kwh[t]).sum::<f64>() / count;
+        let avg_co2 = (t_start..t_end).map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0).sum::<f64>() / count;
+        let _ = milp_sl;
+        envelopes.push(FlexibilityEnvelope {
+            asset_id: sl.asset_id.clone(),
+            energy_needed_kwh,
+            power_min_kw: sl.power_kw,
+            power_max_kw: sl.power_kw,
+            window_start,
+            window_end,
+            slots_available,
+            max_acceptable_rate: 0.35,
+            min_acceptable_rate: 0.05,
+            budget_remaining_eur: 1.0e9,
+            estimated_cost_eur: energy_needed_kwh * avg_tariff,
+            estimated_co2_g: energy_needed_kwh * avg_co2,
+        });
+    }
 
-            let slots_available =
-                ((window_end - window_start).num_seconds() / step_s).max(0) as usize;
-
-            // Rate bounds from ValueCurve
-            let max_acceptable_rate = packet.value_curve.bid_at(0.0);
-            let min_acceptable_rate = packet.value_curve.bid_at(packet.fill());
-
-            // Budget remaining (finite sentinel — Risk 5 mitigation)
-            const NO_BUDGET_CAP_SENTINEL_EUR: f64 = 1.0e9;
-            let budget_remaining_eur = packet
-                .value_curve
-                .active_deadline()
-                .and_then(|t| t.max_total_cost_eur)
-                .map(|max| (max - packet.accumulated_cost_eur).max(0.0))
-                .unwrap_or(NO_BUDGET_CAP_SENTINEL_EUR);
-
-            // Estimated cost/CO₂ from average eligible-slot tariffs
-            let t_start = ((window_start - now).num_seconds() / step_s).max(0) as usize;
-            let t_end = ((window_end - now).num_seconds() / step_s).min(n as i64) as usize;
-            let eligible = t_start..t_end;
-            let count = eligible.len().max(1) as f64;
-            let avg_tariff = eligible
-                .clone()
-                .map(|t| inputs.c_imp_eur_kwh[t])
-                .sum::<f64>()
-                / count;
-            let avg_co2 = eligible
-                .map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0)
-                .sum::<f64>()
-                / count;
-            let estimated_cost_eur = energy_needed_kwh * avg_tariff;
-            let estimated_co2_g = energy_needed_kwh * avg_co2;
-
-            Some(FlexibilityEnvelope {
-                packet_id: packet.id,
-                asset_id: packet.asset_id.clone(),
-                energy_needed_kwh,
-                power_min_kw,
-                power_max_kw,
-                window_start,
-                window_end,
-                slots_available,
-                max_acceptable_rate,
-                min_acceptable_rate,
-                budget_remaining_eur,
-                estimated_cost_eur,
-                estimated_co2_g,
-            })
-        })
-        .collect()
+    envelopes
 }
 
 /// Fallback plan returned when the MILP solver fails.
@@ -1052,7 +1003,9 @@ fn fallback_plan(
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
-    packets: &[EnergyPacket],
+    ev_session: Option<&crate::entities::device_session::EvSession>,
+    heater_target: Option<&crate::entities::device_session::HeaterTarget>,
+    shiftable_loads: &[ShiftableLoad],
     inputs: Option<&MilpInputs>,
     reason: String,
 ) -> (Plan, Vec<PlanStep>) {
@@ -1070,7 +1023,6 @@ fn fallback_plan(
     };
     let warning = PlanWarning {
         severity: WarningSeverity::Critical,
-        packet_id: None,
         message: reason,
         suggested_action: None,
     };
@@ -1105,7 +1057,7 @@ fn fallback_plan(
         None => vec![],
     };
     let envelopes = match inputs {
-        Some(inp) => build_plan_envelopes(packets, inp, profile, now),
+        Some(inp) => build_plan_envelopes(ev_session, heater_target, shiftable_loads, inp, profile, now),
         None => vec![],
     };
     let plan = Plan {
@@ -1116,7 +1068,6 @@ fn fallback_plan(
         slots,
         summary: PlanSummary::default(),
         envelopes,
-        packets: packets.to_vec(),
         warnings: vec![warning],
         steps: vec![],
         soc_trajectory_kwh: vec![],
@@ -1135,7 +1086,9 @@ fn translate_to_plan(
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
-    packets: &[EnergyPacket],
+    ev_session: Option<&crate::entities::device_session::EvSession>,
+    heater_target: Option<&crate::entities::device_session::HeaterTarget>,
+    shiftable_loads: &[ShiftableLoad],
 ) -> (Plan, Vec<PlanStep>) {
     let step_s = profile.planner.plan_step_s;
     let n = inputs.n;
@@ -1168,23 +1121,20 @@ fn translate_to_plan(
         // ── EV allocation ───────────────────────────────────────────────
         if inputs.ev_mode != MilpLoadMode::MustNotRun && sol.p_ev_kw[t] > 0.01 {
             if let Some(ref eid) = ev_id {
-                if let Some(pkt) = active_packet(packets, eid) {
-                    let power_kw = sol.p_ev_kw[t];
-                    let surplus_power_kw = surplus_remaining_kw.min(power_kw);
-                    let grid_power_kw = power_kw - surplus_power_kw;
-                    surplus_remaining_kw -= surplus_power_kw;
-                    allocations.push(PacketAllocation {
-                        packet_id: pkt.id,
-                        asset_id: eid.clone(),
-                        power_kw,
-                        surplus_power_kw,
-                        grid_power_kw,
-                        marginal_value: inputs.c_imp_eur_kwh[t],
-                        cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * dt_h
-                            - surplus_power_kw * inputs.c_exp_eur_kwh[t] * dt_h,
-                        co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h,
-                    });
-                }
+                let power_kw = sol.p_ev_kw[t];
+                let surplus_power_kw = surplus_remaining_kw.min(power_kw);
+                let grid_power_kw = power_kw - surplus_power_kw;
+                surplus_remaining_kw -= surplus_power_kw;
+                allocations.push(AssetAllocation {
+                    asset_id: eid.clone(),
+                    power_kw,
+                    surplus_power_kw,
+                    grid_power_kw,
+                    marginal_value: inputs.c_imp_eur_kwh[t],
+                    cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * dt_h
+                        - surplus_power_kw * inputs.c_exp_eur_kwh[t] * dt_h,
+                    co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h,
+                });
             }
         }
 
@@ -1194,14 +1144,10 @@ fn translate_to_plan(
                 sol.z_heat_mid[t] * inputs.p_heat_mid_kw + sol.z_heat_full[t] * inputs.p_heat_full_kw;
             if heat_kw > 0.01 {
                 if let Some(ref hid) = heater_id {
-                    let pkt_id = active_packet(packets, hid)
-                        .map(|p| p.id)
-                        .unwrap_or(Uuid::nil());
                     let surplus_power_kw = surplus_remaining_kw.min(heat_kw);
                     let grid_power_kw = heat_kw - surplus_power_kw;
                     surplus_remaining_kw -= surplus_power_kw;
-                    allocations.push(PacketAllocation {
-                        packet_id: pkt_id,
+                    allocations.push(AssetAllocation {
                         asset_id: hid.clone(),
                         power_kw: heat_kw,
                         surplus_power_kw,
@@ -1222,8 +1168,7 @@ fn translate_to_plan(
                 let surplus_power_kw = surplus_remaining_kw.min(power);
                 let grid_power_kw = power - surplus_power_kw;
                 surplus_remaining_kw -= surplus_power_kw;
-                allocations.push(PacketAllocation {
-                    packet_id: Uuid::nil(),
+                allocations.push(AssetAllocation {
                     asset_id: sl.asset_id.clone(),
                     power_kw: power,
                     surplus_power_kw,
@@ -1382,8 +1327,7 @@ fn translate_to_plan(
         horizon,
         slots,
         summary,
-        envelopes: build_plan_envelopes(packets, inputs, profile, now),
-        packets: packets.to_vec(),
+        envelopes: build_plan_envelopes(ev_session, heater_target, shiftable_loads, inputs, profile, now),
         warnings,
         steps: steps.clone(),
         soc_trajectory_kwh,
@@ -1400,7 +1344,6 @@ fn translate_to_plan(
 pub fn run_planner(
     assets: &SimState,
     tariffs: &TariffTimeSeries,
-    packets: &[EnergyPacket],
     capacity: &OadrCapacityState,
     profile: &Profile,
     now: DateTime<Utc>,
@@ -1410,17 +1353,19 @@ pub fn run_planner(
     shiftable_loads: &[ShiftableLoad],
     baseline_override: Option<&BaselineOverride>,
 ) -> (Plan, Vec<PlanStep>) {
-    let inputs = build_milp_inputs(assets, tariffs, packets, capacity, profile, now, ev_session, heater_target, shiftable_loads, baseline_override);
+    let inputs = build_milp_inputs(assets, tariffs, capacity, profile, now, ev_session, heater_target, shiftable_loads, baseline_override);
     let weights = build_milp_weights(profile);
     match solve_milp(&inputs, &weights) {
-        Ok(sol) => translate_to_plan(&sol, &inputs, &weights, profile, now, trigger, packets),
+        Ok(sol) => translate_to_plan(&sol, &inputs, &weights, profile, now, trigger, ev_session, heater_target, shiftable_loads),
         Err(e) => {
             warn!("MILP solver failed: {e}");
             fallback_plan(
                 profile,
                 now,
                 trigger,
-                packets,
+                ev_session,
+                heater_target,
+                shiftable_loads,
                 Some(&inputs),
                 format!("MILP solver failed: {e}"),
             )
@@ -1435,8 +1380,6 @@ mod tests {
     use super::*;
 
     use crate::assets::AssetState;
-    use crate::entities::asset::CompletionPolicy;
-    use crate::entities::energy_packet::{DeadlineTier, ValueCurve};
     use crate::entities::tariff_snapshot::TariffSnapshot;
     use crate::profile::{
         AssetProfile, BaseLoadConfig, BatteryConfig, EvConfig, GridConfig, HeaterConfig,
@@ -1527,46 +1470,6 @@ mod tests {
                 max_import_kw: 25.0,
                 max_export_kw: 10.0,
             },
-            packets: vec![],
-        }
-    }
-
-    /// Build a minimal active EV packet.
-    fn make_ev_packet(now: DateTime<Utc>, mode: UserRequestMode, deadline_h: f64) -> EnergyPacket {
-        EnergyPacket {
-            id: uuid::Uuid::new_v4(),
-            asset_id: "ev".into(),
-            status: PacketStatus::Active,
-            earliest_start: now,
-            latest_start: None,
-            target_energy_kwh: 20.0,
-            target_soc: None,
-            desired_power_kw: 7.4,
-            value_curve: ValueCurve {
-                comfort_rates: vec![],
-                deadline_tiers: vec![DeadlineTier {
-                    deadline: now + Duration::seconds((deadline_h * 3600.0) as i64),
-                    max_total_cost_eur: None,
-                    max_marginal_rate_eur_kwh: None,
-                    min_completion: 1.0,
-                }],
-                active_tier_index: 0,
-            },
-            request_mode: mode,
-            completion_policy: CompletionPolicy::Stop,
-            post_deadline_comfort_bid: None,
-            planned_power_profile: vec![],
-            past_power_profile: vec![],
-            interruptible: false,
-            tolerance_min: None,
-            accumulated_cost_eur: 0.0,
-            accumulated_co2_g: 0.0,
-            estimated_cost_eur: 0.0,
-            estimated_co2_g: 0.0,
-            estimated_completion: 0.0,
-            last_estimate_at: None,
-            created_at: now,
-            updated_at: now,
         }
     }
 
@@ -1597,7 +1500,7 @@ mod tests {
         let profile = make_profile();
         let tariffs = make_tariffs(0.25, 0.08, 450.0); // 450 g/kWh
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &tariffs, &[], &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(&sim, &tariffs, &no_capacity(), &profile, now, None, None, &[], None);
         // All slots should have 0.45 kgCO₂/kWh
         assert!(inp.g_imp_kgco2_kwh.iter().all(|&v| (v - 0.45).abs() < 1e-9));
     }
@@ -1608,7 +1511,7 @@ mod tests {
         let now = fixed_now();
         let profile = make_profile(); // battery RTE = 0.9
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
         let expected = 0.9_f64.sqrt();
         assert!((inp.eff_bat_ch.unwrap() - expected).abs() < 1e-9);
         assert!((inp.eff_bat_dis.unwrap() - expected).abs() < 1e-9);
@@ -1624,7 +1527,7 @@ mod tests {
         let profile = make_profile(); // initial_soc=0.5, capacity=10.0
         let mut sim = SimState::from_profile(&profile);
         set_battery_soc(&mut sim, 0.3); // override to 0.3
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
         assert!((inp.e_bat_init_kwh.unwrap() - 3.0).abs() < 1e-9); // 0.3 × 10.0 = 3.0
     }
 
@@ -1635,33 +1538,40 @@ mod tests {
         let profile = make_profile(); // initial_soc=0.5, capacity=10.0
         let mut sim = SimState::from_profile(&profile);
         sim.assets.clear(); // remove all assets → battery_state() returns None
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
         assert!((inp.e_bat_init_kwh.unwrap() - 5.0).abs() < 1e-9); // 0.5 × 10.0 = 5.0
     }
 
     #[test]
-    fn ev_mask_plugged_no_deadline_all_true() {
-        // Plugged EV with no active packet → all slots available
+    fn ev_mask_plugged_no_session_all_true() {
+        // Plugged EV with no session → all slots available (mask true), mode MustNotRun
         let now = fixed_now();
         let profile = make_profile();
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
         assert!(inp.a_ev.iter().all(|&v| v));
-        assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun); // no packet → MustNotRun (but mask is true)
+        assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun); // no session → MustNotRun (but mask is true)
         assert_eq!(inp.t_ev_dead_step, None);
     }
 
     #[test]
-    fn ev_mask_plugged_with_deadline() {
-        // Plugged EV with deadline at 1h from now → first 12 slots true (step=300s, 12×300=3600s)
+    fn ev_mask_plugged_with_session_deadline() {
+        // Plugged EV with EvSession deadline at 1h → first 12 slots true (step=300s, 12×300=3600s)
         let now = fixed_now();
         let profile = make_profile(); // plan_step_s=300, plan_horizon_h=2 → 24 steps
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
-        let pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 1.0); // 1h deadline
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
-        // deadline = 3600s, step_s=300 → deadline_step = 3600/300 = 12
+        let session = crate::entities::device_session::EvSession {
+            id: uuid::Uuid::new_v4(),
+            target_soc: 0.9,
+            departure_time: now + Duration::hours(1),
+            opportunistic: false,
+            created_at: now,
+            updated_at: now,
+        };
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, Some(&session), None, &[], None);
+        // deadline = 3600s, step_s=300 → deadline_step = 12
         let d = inp.t_ev_dead_step.unwrap();
         assert_eq!(d, 12);
         // Slots 0..=12 true, slots 13..23 false
@@ -1672,83 +1582,68 @@ mod tests {
 
     #[test]
     fn ev_mask_unplugged_all_false() {
-        // Unplugged EV → all slots false regardless of packet
+        // Unplugged EV → all slots false regardless of session
         let now = fixed_now();
         let profile = make_profile();
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, false);
-        let pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 1.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
+        let session = crate::entities::device_session::EvSession {
+            id: uuid::Uuid::new_v4(),
+            target_soc: 0.9,
+            departure_time: now + Duration::hours(1),
+            opportunistic: false,
+            created_at: now,
+            updated_at: now,
+        };
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, Some(&session), None, &[], None);
         assert!(inp.a_ev.iter().all(|&v| !v));
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
 
     #[test]
-    fn ev_mode_must_run_for_by_deadline() {
+    fn ev_mode_must_run_for_non_opportunistic_session() {
         let now = fixed_now();
         let profile = make_profile();
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
-        let pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 2.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
+        let session = crate::entities::device_session::EvSession {
+            id: uuid::Uuid::new_v4(),
+            target_soc: 0.9,
+            departure_time: now + Duration::hours(2),
+            opportunistic: false,
+            created_at: now,
+            updated_at: now,
+        };
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, Some(&session), None, &[], None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MustRun);
     }
 
     #[test]
-    fn ev_mode_must_run_for_asap() {
+    fn ev_mode_may_run_for_opportunistic_session() {
         let now = fixed_now();
         let profile = make_profile();
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
-        let pkt = make_ev_packet(now, UserRequestMode::Asap, 2.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
-        assert_eq!(inp.ev_mode, MilpLoadMode::MustRun);
-    }
-
-    #[test]
-    fn ev_mode_may_run_for_opportunistic() {
-        let now = fixed_now();
-        let profile = make_profile();
-        let mut sim = SimState::from_profile(&profile);
-        set_ev_plugged(&mut sim, true);
-        let pkt = make_ev_packet(now, UserRequestMode::Opportunistic, 2.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
+        let session = crate::entities::device_session::EvSession {
+            id: uuid::Uuid::new_v4(),
+            target_soc: 0.9,
+            departure_time: now + Duration::hours(2),
+            opportunistic: true,
+            created_at: now,
+            updated_at: now,
+        };
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, Some(&session), None, &[], None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MayRun);
     }
 
     #[test]
-    fn ev_mode_must_not_run_for_abandoned() {
+    fn ev_mode_must_not_run_for_no_session() {
         let now = fixed_now();
         let profile = make_profile();
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
-        let mut pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 2.0);
-        pkt.status = PacketStatus::Abandoned;
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
-        // Abandoned packet is excluded by active_packet() → MustNotRun
-        assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
-    }
-
-    #[test]
-    fn ev_mode_must_not_run_for_no_packet() {
-        let now = fixed_now();
-        let profile = make_profile();
-        let mut sim = SimState::from_profile(&profile);
-        set_ev_plugged(&mut sim, true);
-        // No packets at all
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
-        assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
-    }
-
-    #[test]
-    fn load_mode_completed_is_must_not_run() {
-        let now = fixed_now();
-        let profile = make_profile();
-        let mut sim = SimState::from_profile(&profile);
-        set_ev_plugged(&mut sim, true);
-        let mut pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 2.0);
-        pkt.status = PacketStatus::Completed;
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None, &[], None);
+        // No session at all
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
 
@@ -1759,7 +1654,7 @@ mod tests {
         let profile = make_profile();
         let sim = SimState::from_profile(&profile);
         let empty_tariffs = TariffTimeSeries::from_snapshots(&[]);
-        let inp = build_milp_inputs(&sim, &empty_tariffs, &[], &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(&sim, &empty_tariffs, &no_capacity(), &profile, now, None, None, &[], None);
         assert!(inp.c_imp_eur_kwh.iter().all(|&v| (v - 0.25).abs() < 1e-9));
         assert!(inp.c_exp_eur_kwh.iter().all(|&v| (v - 0.08).abs() < 1e-9));
         assert!(inp.g_imp_kgco2_kwh.iter().all(|&v| (v - 0.30).abs() < 1e-9));
@@ -1772,7 +1667,7 @@ mod tests {
         let profile = make_profile(); // heater max_kw=3.0, mid_kw=None
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true); // avoid EV noise
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
         assert!((inp.p_heat_mid_kw - 1.5).abs() < 1e-9); // 3.0 / 2.0
         assert!((inp.p_heat_full_kw - 3.0).abs() < 1e-9);
     }
@@ -1795,7 +1690,7 @@ mod tests {
             })
             .collect();
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
         assert!((inp.p_heat_mid_kw - 2.0).abs() < 1e-9);
     }
 

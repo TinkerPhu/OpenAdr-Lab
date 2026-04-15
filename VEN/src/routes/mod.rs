@@ -49,12 +49,6 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/trace/history", get(trace::get_trace_history))
         .route("/metrics", get(system::get_metrics))
         // HEMS Stage 1–3 routes
-        .route(
-            "/packets",
-            get(hems::get_packets)
-                .post(hems::post_packets)
-                .delete(hems::delete_packets),
-        )
         .route("/plan", get(hems::get_plan))
         .route("/tariffs", get(hems::get_tariffs))
         // Timeline routes (speckit 005) — /all must precede /:asset_id
