@@ -1,5 +1,6 @@
 use crate::controller::trace::ControllerTrace;
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
+use crate::entities::device_session::{EvSession, HeaterTarget};
 use crate::entities::energy_packet::EnergyPacket;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::tariff_snapshot::TariffSnapshot;
@@ -118,6 +119,10 @@ pub struct InnerState {
     pub active_requests: Vec<UserRequest>,
     #[serde(skip)]
     pub site_envelope: Option<SiteFlexibilityEnvelope>,
+    #[serde(skip)]
+    pub ev_session: Option<EvSession>,
+    #[serde(skip)]
+    pub heater_target: Option<HeaterTarget>,
 }
 
 impl AppState {
@@ -139,6 +144,8 @@ impl AppState {
                 asset_ledger: HashMap::new(),
                 active_requests: vec![],
                 site_envelope: None,
+                ev_session: None,
+                heater_target: None,
             })),
         }
     }
@@ -367,6 +374,22 @@ impl AppState {
         self.inner.write().await.site_envelope = Some(env);
     }
 
+    pub async fn ev_session(&self) -> Option<EvSession> {
+        self.inner.read().await.ev_session.clone()
+    }
+
+    pub async fn set_ev_session(&self, session: Option<EvSession>) {
+        self.inner.write().await.ev_session = session;
+    }
+
+    pub async fn heater_target(&self) -> Option<HeaterTarget> {
+        self.inner.read().await.heater_target.clone()
+    }
+
+    pub async fn set_heater_target(&self, target: Option<HeaterTarget>) {
+        self.inner.write().await.heater_target = target;
+    }
+
     /// Return all unfulfilled obligations whose due_at <= now.
     pub async fn due_obligations(&self, now: DateTime<Utc>) -> Vec<OadrReportObligation> {
         self.inner
@@ -408,6 +431,8 @@ impl Clone for InnerState {
             asset_ledger: self.asset_ledger.clone(),
             active_requests: self.active_requests.clone(),
             site_envelope: self.site_envelope.clone(),
+            ev_session: self.ev_session.clone(),
+            heater_target: self.heater_target.clone(),
         }
     }
 }

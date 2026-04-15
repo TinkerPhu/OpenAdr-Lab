@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::controller::user_request::CreateUserRequestBody;
 use crate::entities::asset::{ComfortRate, PlanTrigger};
+use crate::entities::device_session::{EvSession, HeaterTarget};
 use crate::entities::energy_packet::{DeadlineTier, EnergyPacket, ValueCurve};
 use crate::AppCtx;
 
@@ -239,4 +240,101 @@ pub async fn get_flexibility(State(ctx): State<AppCtx>) -> impl IntoResponse {
         Some(env) => Json(env).into_response(),
         None => StatusCode::NO_CONTENT.into_response(),
     }
+}
+
+// ── Device-centric session endpoints (Phase A) ──────────────────────────────
+
+/// POST /ev-session body.
+#[derive(Deserialize)]
+pub struct CreateEvSessionBody {
+    pub target_soc: f64,
+    pub departure_time: chrono::DateTime<Utc>,
+    #[serde(default)]
+    pub opportunistic: bool,
+}
+
+/// GET /ev-session — returns the active EV session (204 if none).
+pub async fn get_ev_session(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    match ctx.state.ev_session().await {
+        Some(s) => Json(s).into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
+    }
+}
+
+/// POST /ev-session — create or replace the active EV session, triggering a replan.
+pub async fn post_ev_session(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<CreateEvSessionBody>,
+) -> impl IntoResponse {
+    let now = Utc::now();
+    let session = EvSession {
+        id: Uuid::new_v4(),
+        target_soc: body.target_soc,
+        departure_time: body.departure_time,
+        opportunistic: body.opportunistic,
+        created_at: now,
+        updated_at: now,
+    };
+    info!(
+        session_id = %session.id,
+        target_soc = session.target_soc,
+        departure = %session.departure_time,
+        "EV session created"
+    );
+    ctx.state.set_ev_session(Some(session.clone())).await;
+    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+    (StatusCode::CREATED, Json(session))
+}
+
+/// DELETE /ev-session — clear the active EV session.
+pub async fn delete_ev_session(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    ctx.state.set_ev_session(None).await;
+    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+    StatusCode::NO_CONTENT
+}
+
+/// POST /heater-target body.
+#[derive(Deserialize)]
+pub struct CreateHeaterTargetBody {
+    pub target_temp_c: f64,
+    pub ready_by: chrono::DateTime<Utc>,
+}
+
+/// GET /heater-target — returns the active heater target (204 if none).
+pub async fn get_heater_target(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    match ctx.state.heater_target().await {
+        Some(t) => Json(t).into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
+    }
+}
+
+/// POST /heater-target — create or replace the active heater target, triggering a replan.
+pub async fn post_heater_target(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<CreateHeaterTargetBody>,
+) -> impl IntoResponse {
+    let now = Utc::now();
+    let target = HeaterTarget {
+        id: Uuid::new_v4(),
+        target_temp_c: body.target_temp_c,
+        ready_by: body.ready_by,
+        created_at: now,
+        updated_at: now,
+    };
+    info!(
+        target_id = %target.id,
+        target_temp_c = target.target_temp_c,
+        ready_by = %target.ready_by,
+        "heater target created"
+    );
+    ctx.state.set_heater_target(Some(target.clone())).await;
+    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+    (StatusCode::CREATED, Json(target))
+}
+
+/// DELETE /heater-target — clear the active heater target.
+pub async fn delete_heater_target(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    ctx.state.set_heater_target(None).await;
+    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+    StatusCode::NO_CONTENT
 }

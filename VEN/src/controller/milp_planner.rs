@@ -252,6 +252,8 @@ fn build_milp_inputs(
     capacity: &OadrCapacityState,
     profile: &Profile,
     now: DateTime<Utc>,
+    ev_session: Option<&crate::entities::device_session::EvSession>,
+    heater_target: Option<&crate::entities::device_session::HeaterTarget>,
 ) -> MilpInputs {
     let step_s = profile.planner.plan_step_s;
     let n = ((profile.planner.plan_horizon_h as f64 * 3600.0) / step_s as f64) as usize;
@@ -353,7 +355,31 @@ fn build_milp_inputs(
                     ev_cfg.battery_kwh * (1.0 - ev_cfg.soc_target),
                     profile.planner.v_ev_extra_eur_kwh,
                 )
+            } else if let Some(session) = ev_session {
+                // ── Device-centric path: EvSession present ────────────────
+                let current_soc = assets.ev_state().map(|s| s.soc).unwrap_or(0.0);
+                let core_kwh = ((session.target_soc - current_soc) * ev_cfg.battery_kwh).max(0.0);
+                let mode = if session.opportunistic {
+                    MilpLoadMode::MayRun
+                } else {
+                    MilpLoadMode::MustRun
+                };
+                let deadline_step = Some(deadline_to_step(session.departure_time, now, step_s, n));
+                let mask: Vec<bool> = (0..n)
+                    .map(|t| deadline_step.map(|d| t <= d).unwrap_or(true))
+                    .collect();
+                (
+                    mask,
+                    mode,
+                    deadline_step,
+                    ev_cfg.max_charge_kw,
+                    ev_cfg.min_charge_kw,
+                    core_kwh,
+                    ev_cfg.battery_kwh * (1.0 - session.target_soc),
+                    profile.planner.v_ev_extra_eur_kwh,
+                )
             } else {
+                // ── Legacy packet fallback ─────────────────────────────────
                 let pkt = active_packet(packets, &ev_cfg.id);
                 let mode = packet_load_mode(pkt);
 
@@ -394,14 +420,36 @@ fn build_milp_inputs(
     // ── Heater ────────────────────────────────────────────────────────────────
     let (heater_mode, t_heat_dead, p_mid, p_full, e_heat_req) =
         if let Some(heat_cfg) = profile.heater_config() {
-            let pkt = active_packet(packets, &heat_cfg.id);
-            let mode = packet_load_mode(pkt);
-            let deadline_step = pkt
-                .and_then(|p| p.value_curve.active_deadline())
-                .map(|tier| deadline_to_step(tier.deadline, now, step_s, n));
-            let req_kwh = pkt.map(|p| p.target_energy_kwh).unwrap_or(0.0);
-            let mid = heat_cfg.mid_kw.unwrap_or(heat_cfg.max_kw / 2.0);
-            (mode, deadline_step, mid, heat_cfg.max_kw, req_kwh)
+            if let Some(target) = heater_target {
+                // ── Device-centric path: HeaterTarget present ─────────────
+                let current_temp = assets
+                    .heater_state()
+                    .map(|s| s.temperature_c)
+                    .unwrap_or(heat_cfg.temp_initial_c);
+                let thermal_mass = assets
+                    .heater_config()
+                    .map(|h| h.thermal_mass_kwh_per_c)
+                    .unwrap_or(2.0);
+                let req_kwh = ((target.target_temp_c - current_temp) * thermal_mass).max(0.0);
+                let mode = if req_kwh > 0.0 {
+                    MilpLoadMode::MustRun
+                } else {
+                    MilpLoadMode::MustNotRun
+                };
+                let deadline_step = Some(deadline_to_step(target.ready_by, now, step_s, n));
+                let mid = heat_cfg.mid_kw.unwrap_or(heat_cfg.max_kw / 2.0);
+                (mode, deadline_step, mid, heat_cfg.max_kw, req_kwh)
+            } else {
+                // ── Legacy packet fallback ─────────────────────────────────
+                let pkt = active_packet(packets, &heat_cfg.id);
+                let mode = packet_load_mode(pkt);
+                let deadline_step = pkt
+                    .and_then(|p| p.value_curve.active_deadline())
+                    .map(|tier| deadline_to_step(tier.deadline, now, step_s, n));
+                let req_kwh = pkt.map(|p| p.target_energy_kwh).unwrap_or(0.0);
+                let mid = heat_cfg.mid_kw.unwrap_or(heat_cfg.max_kw / 2.0);
+                (mode, deadline_step, mid, heat_cfg.max_kw, req_kwh)
+            }
         } else {
             (MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0)
         };
@@ -1232,8 +1280,10 @@ pub fn run_planner(
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
+    ev_session: Option<&crate::entities::device_session::EvSession>,
+    heater_target: Option<&crate::entities::device_session::HeaterTarget>,
 ) -> (Plan, Vec<PlanStep>) {
-    let inputs = build_milp_inputs(assets, tariffs, packets, capacity, profile, now);
+    let inputs = build_milp_inputs(assets, tariffs, packets, capacity, profile, now, ev_session, heater_target);
     let weights = build_milp_weights(profile);
     match solve_milp(&inputs, &weights) {
         Ok(sol) => translate_to_plan(&sol, &inputs, &weights, profile, now, trigger, packets),
@@ -1420,7 +1470,7 @@ mod tests {
         let profile = make_profile();
         let tariffs = make_tariffs(0.25, 0.08, 450.0); // 450 g/kWh
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &tariffs, &[], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &tariffs, &[], &no_capacity(), &profile, now, None, None);
         // All slots should have 0.45 kgCO₂/kWh
         assert!(inp.g_imp_kgco2_kwh.iter().all(|&v| (v - 0.45).abs() < 1e-9));
     }
@@ -1431,7 +1481,7 @@ mod tests {
         let now = fixed_now();
         let profile = make_profile(); // battery RTE = 0.9
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
         let expected = 0.9_f64.sqrt();
         assert!((inp.eff_bat_ch.unwrap() - expected).abs() < 1e-9);
         assert!((inp.eff_bat_dis.unwrap() - expected).abs() < 1e-9);
@@ -1447,7 +1497,7 @@ mod tests {
         let profile = make_profile(); // initial_soc=0.5, capacity=10.0
         let mut sim = SimState::from_profile(&profile);
         set_battery_soc(&mut sim, 0.3); // override to 0.3
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
         assert!((inp.e_bat_init_kwh.unwrap() - 3.0).abs() < 1e-9); // 0.3 × 10.0 = 3.0
     }
 
@@ -1458,7 +1508,7 @@ mod tests {
         let profile = make_profile(); // initial_soc=0.5, capacity=10.0
         let mut sim = SimState::from_profile(&profile);
         sim.assets.clear(); // remove all assets → battery_state() returns None
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
         assert!((inp.e_bat_init_kwh.unwrap() - 5.0).abs() < 1e-9); // 0.5 × 10.0 = 5.0
     }
 
@@ -1469,7 +1519,7 @@ mod tests {
         let profile = make_profile();
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
         assert!(inp.a_ev.iter().all(|&v| v));
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun); // no packet → MustNotRun (but mask is true)
         assert_eq!(inp.t_ev_dead_step, None);
@@ -1483,7 +1533,7 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 1.0); // 1h deadline
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
         // deadline = 3600s, step_s=300 → deadline_step = 3600/300 = 12
         let d = inp.t_ev_dead_step.unwrap();
         assert_eq!(d, 12);
@@ -1501,7 +1551,7 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, false);
         let pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 1.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
         assert!(inp.a_ev.iter().all(|&v| !v));
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
@@ -1513,7 +1563,7 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 2.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MustRun);
     }
 
@@ -1524,7 +1574,7 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let pkt = make_ev_packet(now, UserRequestMode::Asap, 2.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MustRun);
     }
 
@@ -1535,7 +1585,7 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let pkt = make_ev_packet(now, UserRequestMode::Opportunistic, 2.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MayRun);
     }
 
@@ -1547,7 +1597,7 @@ mod tests {
         set_ev_plugged(&mut sim, true);
         let mut pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 2.0);
         pkt.status = PacketStatus::Abandoned;
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
         // Abandoned packet is excluded by active_packet() → MustNotRun
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
@@ -1559,7 +1609,7 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         // No packets at all
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
 
@@ -1571,7 +1621,7 @@ mod tests {
         set_ev_plugged(&mut sim, true);
         let mut pkt = make_ev_packet(now, UserRequestMode::ByDeadline, 2.0);
         pkt.status = PacketStatus::Completed;
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[pkt], &no_capacity(), &profile, now, None, None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
 
@@ -1582,7 +1632,7 @@ mod tests {
         let profile = make_profile();
         let sim = SimState::from_profile(&profile);
         let empty_tariffs = TariffTimeSeries::from_snapshots(&[]);
-        let inp = build_milp_inputs(&sim, &empty_tariffs, &[], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &empty_tariffs, &[], &no_capacity(), &profile, now, None, None);
         assert!(inp.c_imp_eur_kwh.iter().all(|&v| (v - 0.25).abs() < 1e-9));
         assert!(inp.c_exp_eur_kwh.iter().all(|&v| (v - 0.08).abs() < 1e-9));
         assert!(inp.g_imp_kgco2_kwh.iter().all(|&v| (v - 0.30).abs() < 1e-9));
@@ -1595,7 +1645,7 @@ mod tests {
         let profile = make_profile(); // heater max_kw=3.0, mid_kw=None
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true); // avoid EV noise
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
         assert!((inp.p_heat_mid_kw - 1.5).abs() < 1e-9); // 3.0 / 2.0
         assert!((inp.p_heat_full_kw - 3.0).abs() < 1e-9);
     }
@@ -1618,7 +1668,7 @@ mod tests {
             })
             .collect();
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &no_capacity(), &profile, now, None, None);
         assert!((inp.p_heat_mid_kw - 2.0).abs() < 1e-9);
     }
 
@@ -1675,7 +1725,7 @@ mod tests {
             export_limit_event_id: None,
             last_updated: None,
         };
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &capacity, &profile, now);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &[], &capacity, &profile, now, None, None);
         // Physical limit unchanged
         assert!(inp.p_imp_max_phys_kw.iter().all(|&v| (v - 25.0).abs() < 1e-9));
         // Contractual limit uses the event value
