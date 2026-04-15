@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::entities::asset::PlanTrigger;
-use crate::entities::energy_packet::EnergyPacket;
 
 /// Defines the temporal scope of a planning cycle (§6.1).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,12 +14,11 @@ pub struct PlanningHorizon {
     pub far_horizon: DateTime<Utc>, // = end_time
 }
 
-/// Assignment of energy to a specific packet within a time slot (§6.3).
+/// Assignment of energy to a specific asset within a time slot (§6.3).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PacketAllocation {
-    pub packet_id: Uuid,
+pub struct AssetAllocation {
     pub asset_id: String,
-    /// Total power allocated to this packet in this slot (kW)
+    /// Total power allocated to this asset in this slot (kW)
     pub power_kw: f64,
     /// Portion from PV surplus (opportunity cost = ExportPrice)
     pub surplus_power_kw: f64,
@@ -66,7 +64,7 @@ pub struct PlanTimeSlot {
     pub surplus_available_kw: f64,
 
     // --- Planned Allocations (optimizer output) ---
-    pub allocations: Vec<PacketAllocation>,
+    pub allocations: Vec<AssetAllocation>,
     /// Net planned import after all allocations + PV (kW)
     pub net_import_kw: f64,
     /// Net planned export after all allocations + PV (kW)
@@ -87,20 +85,17 @@ pub struct PlanTimeSlot {
     pub bat_discharge_kw: f64,
 }
 
-/// Per-packet schedulability metadata snapshot (§6.9).
+/// Per-device schedulability metadata snapshot (§6.9).
 ///
-/// Emitted for **every non-terminal packet**, regardless of whether the MILP
-/// scheduled it within the horizon. Describes the packet's degrees of
-/// freedom — energy still needed, time window, asset power bounds, max
-/// acceptable rate, budget remaining — not "unscheduled work".
+/// Emitted for each active device session at plan time. Describes the device's
+/// degrees of freedom — energy still needed, time window, asset power bounds,
+/// max acceptable rate, budget remaining — not "unscheduled work".
 ///
 /// Note: this is *not* the same as `SiteFlexibilityEnvelope`, which is the
-/// live site-level headroom served by `GET /flexibility`. Per-packet
-/// envelopes only refresh at plan time; site headroom refreshes every
-/// dispatcher tick from sim state.
+/// live site-level headroom served by `GET /flexibility`. Per-device envelopes
+/// only refresh at plan time; site headroom refreshes every dispatcher tick.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlexibilityEnvelope {
-    pub packet_id: Uuid,
     pub asset_id: String,
     /// Energy still needed in the horizon (kWh)
     pub energy_needed_kwh: f64,
@@ -162,7 +157,6 @@ pub enum WarningSeverity {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanWarning {
     pub severity: WarningSeverity,
-    pub packet_id: Option<Uuid>, // null if system-level warning
     pub message: String,
     pub suggested_action: Option<String>,
 }
@@ -202,9 +196,7 @@ pub struct Plan {
     // --- Flexibility offered to VTN ---
     pub envelopes: Vec<FlexibilityEnvelope>,
 
-    // --- Combined ---
-    /// Snapshot of all packets considered at plan time
-    pub packets: Vec<EnergyPacket>,
+    // --- Diagnostics ---
     pub warnings: Vec<PlanWarning>,
     /// Full per-(ts × asset) audit trail.
     pub steps: Vec<PlanStep>,

@@ -36,7 +36,7 @@ pub fn build_setpoints(
         .collect();
 
     // Find the slot covering now
-    let slot_allocs: Option<&Vec<crate::entities::plan::PacketAllocation>> = plan
+    let slot_allocs: Option<&Vec<crate::entities::plan::AssetAllocation>> = plan
         .slots
         .iter()
         .find(|s| s.start <= now && now < s.end)

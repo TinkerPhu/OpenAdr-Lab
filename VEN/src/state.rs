@@ -1,7 +1,6 @@
 use crate::controller::trace::ControllerTrace;
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
-use crate::entities::energy_packet::EnergyPacket;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::entities::user_request::{UserRequest, UserRequestStatus};
@@ -104,8 +103,6 @@ pub struct InnerState {
 
     // HEMS state (not persisted in simple state.json — managed by controller loops)
     #[serde(skip)]
-    pub active_packets: Vec<EnergyPacket>,
-    #[serde(skip)]
     pub active_plan: Option<Plan>,
     #[serde(skip)]
     pub planned_tariffs: Vec<TariffSnapshot>,
@@ -140,7 +137,6 @@ impl AppState {
                 sim: None,
                 controller_trace: ControllerTrace::new(),
                 inject_state: SimInjectState::default(),
-                active_packets: vec![],
                 active_plan: None,
                 planned_tariffs: vec![],
                 capacity_state: OadrCapacityState::default(),
@@ -232,39 +228,6 @@ impl AppState {
 
     // --- HEMS accessors ---
 
-    pub async fn active_packets(&self) -> Vec<EnergyPacket> {
-        self.inner.read().await.active_packets.clone()
-    }
-
-    /// Merge planner output with current state:
-    /// 1. If a packet became terminal (e.g. ABANDONED via cancellation) since
-    ///    the planner snapshot, keep the terminal version.
-    /// 2. Preserve packets that were added to the state (via POST /packets)
-    ///    while the planner was running — the planner's snapshot didn't include
-    ///    them, so they won't be in `packets`, but they must not be dropped.
-    pub async fn set_active_packets(&self, packets: Vec<EnergyPacket>) {
-        let mut inner = self.inner.write().await;
-        let current = &inner.active_packets;
-        let mut merged: Vec<EnergyPacket> = packets
-            .iter()
-            .map(|plan_pkt| {
-                if let Some(cur) = current.iter().find(|c| c.id == plan_pkt.id) {
-                    if cur.is_terminal() && !plan_pkt.is_terminal() {
-                        return cur.clone(); // keep terminal status
-                    }
-                }
-                plan_pkt.clone()
-            })
-            .collect();
-        // Preserve newly-added packets not in the planner's output.
-        for cur in current.iter() {
-            if !packets.iter().any(|p| p.id == cur.id) {
-                merged.push(cur.clone());
-            }
-        }
-        inner.active_packets = merged;
-    }
-
     pub async fn active_plan(&self) -> Option<Plan> {
         self.inner.read().await.active_plan.clone()
     }
@@ -336,31 +299,21 @@ impl AppState {
         }
     }
 
-    /// Cancel a user request by id: mark it Cancelled and return the linked packet_id.
-    /// Cancel a user request AND abandon its linked packet atomically
-    /// (single write lock prevents the planner from seeing stale SCHEDULED status).
-    pub async fn cancel_request(&self, id: uuid::Uuid) -> Option<uuid::Uuid> {
-        use crate::entities::energy_packet::PacketStatus;
+    /// Cancel a user request by id: marks it Cancelled and clears any linked device session.
+    pub async fn cancel_request(&self, id: uuid::Uuid) -> bool {
         let mut inner = self.inner.write().await;
         if let Some(req) = inner.active_requests.iter_mut().find(|r| r.id == id) {
             req.status = UserRequestStatus::Cancelled;
-            let packet_id = req.packet_id;
-            // Abandon the linked packet in the same write lock
-            if let Some(pkt) = inner.active_packets.iter_mut().find(|p| p.id == packet_id) {
-                pkt.status = PacketStatus::Abandoned;
+            if let Some(sid) = req.session_id {
+                if inner.ev_session.as_ref().map(|s| s.id) == Some(sid) {
+                    inner.ev_session = None;
+                } else if inner.heater_target.as_ref().map(|t| t.id) == Some(sid) {
+                    inner.heater_target = None;
+                }
             }
-            Some(packet_id)
+            true
         } else {
-            None
-        }
-    }
-
-    /// Abandon a packet by id (set status to Abandoned).
-    pub async fn abandon_packet(&self, packet_id: uuid::Uuid) {
-        use crate::entities::energy_packet::PacketStatus;
-        let mut inner = self.inner.write().await;
-        if let Some(pkt) = inner.active_packets.iter_mut().find(|p| p.id == packet_id) {
-            pkt.status = PacketStatus::Abandoned;
+            false
         }
     }
 
