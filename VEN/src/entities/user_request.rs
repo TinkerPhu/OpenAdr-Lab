@@ -1,7 +1,7 @@
 /// Stage 5 — UserRequest: the user-facing representation of an energy task.
 ///
-/// A UserRequest is a higher-level object than EnergyPacket — it captures
-/// the user's intent (deadline tiers, budget) and links to the generated packet.
+/// A UserRequest captures the user's intent (deadline tiers, budget) and
+/// links to the generated device session (EvSession or HeaterTarget).
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -25,7 +25,7 @@ pub enum UserRequestStatus {
     Failed,    // packet failed
 }
 
-/// A user-originated energy task request, linking to an EnergyPacket.
+/// A user-originated energy task request, linking to a device session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserRequest {
     pub id: Uuid,
@@ -37,7 +37,7 @@ pub struct UserRequest {
     pub completion_policy: String,
     pub max_total_cost_eur: Option<f64>, // from first tier (for API convenience)
     pub tier_count: usize,               // number of deadline tiers
-    pub packet_id: Uuid,                 // linked EnergyPacket
+    pub session_id: Option<Uuid>,        // linked DeviceSession (EvSession or HeaterTarget)
     pub status: UserRequestStatus,
     pub estimated_cost_eur: f64,
     pub estimated_co2_g: f64,

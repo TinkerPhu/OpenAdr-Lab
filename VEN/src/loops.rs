@@ -289,9 +289,8 @@ pub(crate) fn spawn_sim_tick(
             let _events = state.events().await;
             let inject = state.inject_state().await;
 
-            // Pre-tick: snapshot plan/packets/capacity/tariffs for dispatcher
+            // Pre-tick: snapshot plan/capacity/tariffs for dispatcher
             let plan_snap = state.active_plan().await;
-            let packets_snap = state.active_packets().await;
             let capacity_snap = state.capacity_state().await;
             let rates_snap = state.planned_tariffs().await;
 
@@ -401,34 +400,16 @@ pub(crate) fn spawn_sim_tick(
                 let sim_snap = sim_guard.to_sim_snapshot();
                 state.update_sim(sim_snap.clone()).await;
 
-                // Post-tick: consolidated accounting — packets + ledger (T041/T043)
-                let mut updated_pkts = packets_snap.clone();
+                // Post-tick: consolidated ledger accounting
                 let mut ledger = state.asset_ledger().await;
-                let (trigger_opt, pkt_events) = controller::monitor::record_tick(
-                    &mut updated_pkts,
+                controller::monitor::record_tick(
                     &mut ledger,
                     &sim_snap,
                     &rates_snap,
                     dt_s,
                     now,
                 );
-                state.set_active_packets(updated_pkts).await;
                 state.set_asset_ledger(ledger).await;
-                // Push PacketTransition events + fire event-driven status reports (T042/T051)
-                for evt in pkt_events {
-                    state.push_controller_event(evt.clone()).await;
-                    // T051: status report for each PacketTransition
-                    if let Some(report) =
-                        controller::reporter::build_status_report(&evt, &*sim_guard, &ven_name, now)
-                    {
-                        if let Err(e) = vtn.upsert_report(report).await {
-                            error!("status report (packet transition) submission failed: {e:#}");
-                        }
-                    }
-                }
-                if let Some(t) = trigger_opt {
-                    let _ = trigger_tx.send(t);
-                }
 
                 // Post-tick: push HistoryPoint per asset into per-asset ring buffer (CP2).
                 {
@@ -555,86 +536,6 @@ pub(crate) fn spawn_obligation_check(
     })
 }
 
-/// Ensure every `profile.packets` seed has a live non-terminal `EnergyPacket`.
-///
-/// For each seed, if no non-terminal packet already exists for that asset, one is
-/// created and appended. Called at the top of each planning cycle so the planner
-/// always has at least the profile-configured work to schedule.
-fn seed_missing_packets(
-    packets: &[entities::energy_packet::EnergyPacket],
-    profile: &Profile,
-    now: DateTime<Utc>,
-) -> Vec<entities::energy_packet::EnergyPacket> {
-    use chrono::Duration;
-    use entities::asset::{ComfortRate, CompletionPolicy, UserRequestMode};
-    use entities::energy_packet::{DeadlineTier, EnergyPacket, ValueCurve};
-
-    let mut result = packets.to_vec();
-    for seed in &profile.packets {
-        // Skip if a non-terminal packet already exists for this asset.
-        let has_live = result.iter().any(|p| p.asset_id == seed.asset && !p.is_terminal());
-        if has_live {
-            continue;
-        }
-
-        // Derive power from seed or profile default.
-        let desired_power_kw = seed.desired_power_kw.unwrap_or_else(|| {
-            if seed.asset == profile.ev_config().map(|c| c.id.as_str()).unwrap_or("ev") {
-                profile.ev_config().map(|c| c.max_charge_kw).unwrap_or(7.4)
-            } else if seed.asset == profile.heater_config().map(|c| c.id.as_str()).unwrap_or("heater") {
-                profile.heater_config().map(|c| c.max_kw).unwrap_or(5.0)
-            } else {
-                1.0
-            }
-        });
-
-        // Derive target_energy_kwh from target_soc and EV battery capacity when applicable.
-        let target_energy_kwh = if let Some(soc) = seed.target_soc {
-            if let Some(ev) = profile.ev_config() {
-                (soc - ev.initial_soc).clamp(0.0, 1.0) * ev.battery_kwh
-            } else {
-                desired_power_kw // 1h default
-            }
-        } else {
-            desired_power_kw // 1h default
-        };
-
-        // Deadline tier.
-        let deadline = now + Duration::seconds((seed.latest_end_h * 3600.0) as i64);
-        let deadline_tiers = vec![DeadlineTier {
-            deadline,
-            max_total_cost_eur: None,
-            max_marginal_rate_eur_kwh: None,
-            min_completion: 0.8,
-        }];
-
-        // Comfort rates from seed or defaults.
-        let comfort_rates: Vec<ComfortRate> = if seed.comfort_rates.is_empty() {
-            vec![
-                ComfortRate { fill: 0.0, max_marginal_price: 0.35, max_marginal_co2: 0.0 },
-                ComfortRate { fill: 1.0, max_marginal_price: 0.05, max_marginal_co2: 0.0 },
-            ]
-        } else {
-            seed.comfort_rates
-                .iter()
-                .map(|r| ComfortRate { fill: r.fill, max_marginal_price: r.bid, max_marginal_co2: 0.0 })
-                .collect()
-        };
-
-        let value_curve = ValueCurve { comfort_rates, deadline_tiers, active_tier_index: 0 };
-        let packet = EnergyPacket {
-            target_soc: seed.target_soc,
-            request_mode: UserRequestMode::ByDeadline,
-            completion_policy: CompletionPolicy::Stop,
-            ..EnergyPacket::new(seed.asset.clone(), target_energy_kwh, desired_power_kw, value_curve, now)
-        };
-
-        info!(asset_id = %seed.asset, packet_id = %packet.id, target_energy_kwh, "seeded missing packet from profile");
-        result.push(packet);
-    }
-    result
-}
-
 pub(crate) fn spawn_planning(
     state: AppState,
     profile: Arc<Profile>,
@@ -650,7 +551,6 @@ pub(crate) fn spawn_planning(
         loop {
             let now = Utc::now();
             let rates = state.planned_tariffs().await;
-            let packets = seed_missing_packets(&state.active_packets().await, &profile, now);
             let capacity = state.capacity_state().await;
             let trigger = trigger_rx.borrow().clone();
             let trigger_reason = format!("{:?}", trigger);
@@ -665,7 +565,6 @@ pub(crate) fn spawn_planning(
             let (mut plan, plan_steps) = controller::milp_planner::run_planner(
                 &*sim_guard_for_planner,
                 &tariff_ts,
-                &packets,
                 &capacity,
                 &profile,
                 now,
@@ -678,8 +577,6 @@ pub(crate) fn spawn_planning(
             drop(sim_guard_for_planner);
             plan.steps = plan_steps;
             let slot_count = plan.slots.len();
-            let plan_packets = plan.packets.clone();
-            state.set_active_packets(plan_packets.clone()).await;
             state.set_active_plan(Some(plan)).await;
 
             // Refresh site envelope immediately after each plan cycle.
