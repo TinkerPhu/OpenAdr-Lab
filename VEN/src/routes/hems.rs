@@ -89,6 +89,8 @@ pub async fn post_requests(
                     target_soc,
                     departure_time: deadline,
                     opportunistic: false,
+                    created_at: now,
+                    updated_at: now,
                 };
                 user_req.session_id = Some(session.id);
                 ctx.state.set_ev_session(Some(session.clone())).await;
@@ -110,6 +112,8 @@ pub async fn post_requests(
                     id: Uuid::new_v4(),
                     target_temp_c,
                     ready_by,
+                    created_at: now,
+                    updated_at: now,
                 };
                 user_req.session_id = Some(target.id);
                 ctx.state.set_heater_target(Some(target.clone())).await;
