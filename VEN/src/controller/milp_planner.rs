@@ -1,7 +1,7 @@
 //! MILP-based HEMS planner — entry point.
 //!
 //! Builds `MilpInputs` from live state, solves via HiGHS, and translates
-//! the solution into a `Plan` with per-slot allocations and `PlanStep` setpoints.
+//! the solution into a `Plan` with per-slot allocations.
 //! See `docs/plans/milp_planner_transition.md` for the design.
 
 use chrono::{DateTime, Duration, Utc};
@@ -17,7 +17,7 @@ use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
 use crate::entities::plan::{
-    AssetAllocation, CostBreakdown, FlexibilityEnvelope, Plan, PlanStep, PlanSummary,
+    AssetAllocation, CostBreakdown, FlexibilityEnvelope, Plan, PlanSummary,
     PlanTimeSlot, PlanningHorizon, PlanWarning, WarningSeverity,
 };
 use crate::entities::tariff_snapshot::TariffTimeSeries;
@@ -1008,7 +1008,7 @@ fn fallback_plan(
     shiftable_loads: &[ShiftableLoad],
     inputs: Option<&MilpInputs>,
     reason: String,
-) -> (Plan, Vec<PlanStep>) {
+) -> Plan {
     let step_s = profile.planner.plan_step_s;
     let horizon_h = profile.planner.plan_horizon_h;
     let horizon_end = now + Duration::seconds((horizon_h as f64 * 3600.0) as i64);
@@ -1069,16 +1069,14 @@ fn fallback_plan(
         summary: PlanSummary::default(),
         envelopes,
         warnings: vec![warning],
-        steps: vec![],
         soc_trajectory_kwh: vec![],
         objective_eur: 0.0,
         cost_breakdown: CostBreakdown::default(),
     };
-    (plan, vec![])
+    plan
 }
 
-/// Translate a MILP solution into a `Plan` with per-slot allocations and
-/// `PlanStep` setpoints for the dispatcher.
+/// Translate a MILP solution into a `Plan` with per-slot allocations.
 fn translate_to_plan(
     sol: &SolveOutput,
     inputs: &MilpInputs,
@@ -1089,7 +1087,7 @@ fn translate_to_plan(
     ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     shiftable_loads: &[ShiftableLoad],
-) -> (Plan, Vec<PlanStep>) {
+) -> Plan {
     let step_s = profile.planner.plan_step_s;
     let n = inputs.n;
     let dt_h = inputs.dt_h;
@@ -1107,7 +1105,6 @@ fn translate_to_plan(
     let bat_id = profile.battery_config().map(|c| c.id.clone());
 
     let mut slots = Vec::with_capacity(n);
-    let mut steps = Vec::new();
     let mut violation_count: usize = 0;
 
     for t in 0..n {
@@ -1161,7 +1158,7 @@ fn translate_to_plan(
             }
         }
 
-        // ── Shiftable load allocations + PlanSteps ────────────────────────
+        // ── Shiftable load allocations ──────────────────────────────────
         for (s, sl) in inputs.shiftable_loads.iter().enumerate() {
             let power = sol.p_shiftable_kw[s][t];
             if power > 0.01 {
@@ -1178,46 +1175,36 @@ fn translate_to_plan(
                         - surplus_power_kw * inputs.c_exp_eur_kwh[t] * dt_h,
                     co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h,
                 });
-                steps.push(PlanStep {
-                    ts: slot_start,
-                    asset_id: sl.asset_id.clone(),
-                    setpoint_kw: power,
-                    actual_power_kw: 0.0,
-                });
             }
         }
 
-        // ── PlanStep entries ────────────────────────────────────────────
-        if let Some(ref eid) = ev_id {
-            if sol.p_ev_kw[t] > 0.01 {
-                steps.push(PlanStep {
-                    ts: slot_start,
-                    asset_id: eid.clone(),
-                    setpoint_kw: sol.p_ev_kw[t],
-                    actual_power_kw: 0.0,
-                });
-            }
-        }
-        if let Some(ref hid) = heater_id {
-            let heat_kw =
-                sol.z_heat_mid[t] * inputs.p_heat_mid_kw + sol.z_heat_full[t] * inputs.p_heat_full_kw;
-            if heat_kw > 0.01 {
-                steps.push(PlanStep {
-                    ts: slot_start,
-                    asset_id: hid.clone(),
-                    setpoint_kw: heat_kw,
-                    actual_power_kw: 0.0,
-                });
-            }
-        }
+        // ── Battery allocation ────────────────────────────────────────────
         if let Some(ref bid) = bat_id {
             let bat_net_kw = sol.p_bat_ch_kw[t] - sol.p_bat_dis_kw[t];
             if bat_net_kw.abs() > 0.01 {
-                steps.push(PlanStep {
-                    ts: slot_start,
+                let (surplus_power_kw, grid_power_kw, cost_eur, co2_g) = if bat_net_kw > 0.0 {
+                    // Charging: consume PV surplus first, then grid
+                    let sp = surplus_remaining_kw.min(bat_net_kw);
+                    let gp = bat_net_kw - sp;
+                    surplus_remaining_kw -= sp;
+                    (sp, gp,
+                     gp * inputs.c_imp_eur_kwh[t] * dt_h - sp * inputs.c_exp_eur_kwh[t] * dt_h,
+                     gp * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h)
+                } else {
+                    // Discharging: negative power_kw = net injection; revenue = negative cost
+                    let dis_kw = sol.p_bat_dis_kw[t];
+                    (0.0, bat_net_kw,
+                     -(dis_kw * inputs.c_exp_eur_kwh[t] * dt_h),
+                     -(dis_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h))
+                };
+                allocations.push(AssetAllocation {
                     asset_id: bid.clone(),
-                    setpoint_kw: bat_net_kw,
-                    actual_power_kw: 0.0,
+                    power_kw: bat_net_kw,
+                    surplus_power_kw,
+                    grid_power_kw,
+                    marginal_value: inputs.c_exp_eur_kwh[t],
+                    cost_eur,
+                    co2_g,
                 });
             }
         }
@@ -1228,7 +1215,6 @@ fn translate_to_plan(
         }
 
         // ── Assemble slot ───────────────────────────────────────────────
-        let _ = surplus_remaining_kw; // consumed above
         slots.push(PlanTimeSlot {
             slot_index: t,
             start: slot_start,
@@ -1328,18 +1314,17 @@ fn translate_to_plan(
         summary,
         envelopes: build_plan_envelopes(ev_session, heater_target, shiftable_loads, inputs, profile, now),
         warnings,
-        steps: steps.clone(),
         soc_trajectory_kwh,
         objective_eur: sol.objective_eur,
         cost_breakdown,
     };
-    (plan, steps)
+    plan
 }
 
 // ── Public entry point ───────────────────────────────────────────────────────
 
 /// Run the MILP planner: build inputs from live state, solve via HiGHS,
-/// and translate the solution into a Plan + PlanStep setpoints.
+/// and translate the solution into a Plan.
 pub fn run_planner(
     assets: &SimState,
     tariffs: &TariffTimeSeries,
@@ -1351,7 +1336,7 @@ pub fn run_planner(
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     shiftable_loads: &[ShiftableLoad],
     baseline_override: Option<&BaselineOverride>,
-) -> (Plan, Vec<PlanStep>) {
+) -> Plan {
     let inputs = build_milp_inputs(assets, tariffs, capacity, profile, now, ev_session, heater_target, shiftable_loads, baseline_override);
     let weights = build_milp_weights(profile);
     match solve_milp(&inputs, &weights) {

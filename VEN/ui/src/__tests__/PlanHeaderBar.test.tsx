@@ -41,7 +41,6 @@ function makePlan(overrides: Partial<Plan> = {}): Plan {
     },
     envelopes: [],
     warnings: [],
-    steps: [],
     ...overrides,
   };
 }
@@ -120,8 +119,8 @@ describe("PlanHeaderBar", () => {
   it("renders warnings badge showing count when warnings exist", () => {
     const plan = makePlan({
       warnings: [
-        { severity: "WARNING", message: "Packet infeasible", packet_id: null, suggested_action: null },
-        { severity: "CRITICAL", message: "Grid limit exceeded", packet_id: "pkt-001", suggested_action: "Reduce load" },
+        { severity: "WARNING", message: "Packet infeasible", suggested_action: null },
+        { severity: "CRITICAL", message: "Grid limit exceeded", suggested_action: "Reduce load" },
       ],
     });
     render(<PlanHeaderBar plan={plan} />);
@@ -133,7 +132,7 @@ describe("PlanHeaderBar", () => {
     const user = userEvent.setup({});
     const plan = makePlan({
       warnings: [
-        { severity: "WARNING", message: "Something wrong", packet_id: null, suggested_action: null },
+        { severity: "WARNING", message: "Something wrong", suggested_action: null },
       ],
     });
     render(<PlanHeaderBar plan={plan} />);
@@ -147,7 +146,7 @@ describe("PlanHeaderBar", () => {
     const user = userEvent.setup({});
     const plan = makePlan({
       warnings: [
-        { severity: "WARNING", message: "A warning", packet_id: null, suggested_action: null },
+        { severity: "WARNING", message: "A warning", suggested_action: null },
       ],
     });
     render(<PlanHeaderBar plan={plan} />);
@@ -161,7 +160,7 @@ describe("PlanHeaderBar", () => {
     const user = userEvent.setup({});
     const plan = makePlan({
       warnings: [
-        { severity: "CRITICAL", message: "Overload", packet_id: null, suggested_action: "Curtail load immediately" },
+        { severity: "CRITICAL", message: "Overload", suggested_action: "Curtail load immediately" },
       ],
     });
     render(<PlanHeaderBar plan={plan} />);

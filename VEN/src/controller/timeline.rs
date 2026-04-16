@@ -392,7 +392,7 @@ mod tests {
     };
     use crate::entities::asset::PlanTrigger;
     use crate::entities::plan::{
-        CostBreakdown, PacketAllocation, Plan, PlanSummary, PlanTimeSlot, PlanningHorizon,
+        AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanningHorizon,
     };
     use crate::assets::Grid;
     use crate::simulator::energy::EnergyCounter;
@@ -505,9 +505,7 @@ mod tests {
             slots: vec![],
             summary: PlanSummary::default(),
             envelopes: vec![],
-            packets: vec![],
             warnings: vec![],
-            steps: vec![],
             soc_trajectory_kwh: vec![],
             objective_eur: 0.0,
             cost_breakdown: CostBreakdown::default(),
@@ -538,8 +536,7 @@ mod tests {
             allocations: if asset_id.is_empty() {
                 vec![]
             } else {
-                vec![PacketAllocation {
-                    packet_id: Uuid::new_v4(),
+                vec![AssetAllocation {
                     asset_id: asset_id.to_string(),
                     power_kw,
                     surplus_power_kw: 0.0,
@@ -642,8 +639,7 @@ mod tests {
         let mut plan = empty_plan(now);
         let mut slot = make_slot(60, "", 0.0, now); // no default allocation
         let slot_h = 300.0 / 3600.0;
-        slot.allocations.push(PacketAllocation {
-            packet_id: Uuid::new_v4(),
+        slot.allocations.push(AssetAllocation {
             asset_id: "ev".to_string(),
             power_kw: 3.0,
             surplus_power_kw: 1.0,
@@ -1108,9 +1104,7 @@ mod tests {
             slots: vec![slot],
             summary: PlanSummary::default(),
             envelopes: vec![],
-            packets: vec![],
             warnings: vec![],
-            steps: vec![],
             soc_trajectory_kwh: vec![],
             objective_eur: 0.0,
             cost_breakdown: CostBreakdown::default(),
@@ -1157,9 +1151,7 @@ mod tests {
             slots: vec![slot],
             summary: PlanSummary::default(),
             envelopes: vec![],
-            packets: vec![],
             warnings: vec![],
-            steps: vec![],
             soc_trajectory_kwh: vec![],
             objective_eur: 0.0,
             cost_breakdown: CostBreakdown::default(),
