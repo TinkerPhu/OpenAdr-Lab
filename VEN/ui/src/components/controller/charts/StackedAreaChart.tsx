@@ -155,7 +155,7 @@ export function StackedAreaChart({
             />
           ))}
 
-          {/* For each asset: negative series (export, stacked below x-axis) */}
+          {/* For each asset: negative series (export/generation, stacked below x-axis) */}
           {renderOrder.map((id) => (
             <Area
               key={`${id}_neg`}
@@ -166,7 +166,7 @@ export function StackedAreaChart({
               stackId="negative"
               fill={colorMap[id] ?? "#888"}
               stroke={colorMap[id] ?? "#888"}
-              fillOpacity={0.3}
+              fillOpacity={0.6}
               dot={false}
               connectNulls={false}
               isAnimationActive={false}
