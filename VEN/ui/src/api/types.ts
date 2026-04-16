@@ -155,10 +155,12 @@ export type PacketStatus =
   | "PENDING" | "SCHEDULED" | "ACTIVE" | "PAUSED"
   | "COMPLETED" | "PARTIAL_COMPLETED" | "ABANDONED" | "FAILED";
 
-export type PacketAllocation = {
-  packet_id: string;
+export type AssetAllocation = {
   asset_id: string;
   power_kw: number;
+  surplus_power_kw: number;
+  grid_power_kw: number;
+  marginal_value: number;
   cost_eur: number;
   co2_g: number;
 };
@@ -172,7 +174,7 @@ export type PlanTimeSlot = {
   co2_g_kwh: number;
   import_cap_kw: number;
   export_cap_kw: number;
-  allocations: PacketAllocation[];
+  allocations: AssetAllocation[];
   net_import_kw: number;
   net_export_kw: number;
   pv_forecast_kw: number;
@@ -209,13 +211,6 @@ export type PlanSummary = {
   total_export_kwh: number;
 };
 
-export type PlanStep = {
-  ts: string;
-  asset_id: string;
-  setpoint_kw: number;
-  actual_power_kw: number;
-};
-
 export type Plan = {
   id: string;
   created_at: string;
@@ -223,8 +218,7 @@ export type Plan = {
   slots: PlanTimeSlot[];
   summary: PlanSummary;
   envelopes: FlexibilityEnvelope[];
-  warnings: Array<{ severity: string; message: string; packet_id: string | null; suggested_action: string | null }>;
-  steps: PlanStep[];
+  warnings: Array<{ severity: string; message: string; suggested_action: string | null }>;
 };
 
 export type AssetLedger = {

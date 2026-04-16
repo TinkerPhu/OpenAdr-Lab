@@ -6,7 +6,7 @@ import {
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
-import type { Plan, PlanStep, PlanTimeSlot } from "../../api/types";
+import type { AssetAllocation, Plan, PlanTimeSlot } from "../../api/types";
 
 // ─── Tariff → color (green → yellow → red) ───────────────────────────────────
 
@@ -51,16 +51,16 @@ type Props = { plan: Plan | null | undefined };
 
 export function PlanDecisionMatrix({ plan }: Props) {
   const [collapsed, setCollapsed] = useState(false);
-  const [selectedStep, setSelectedStep] = useState<PlanStep | null>(null);
+  const [selectedAlloc, setSelectedAlloc] = useState<{ alloc: AssetAllocation; slotStart: string } | null>(null);
 
-  // Derive sorted unique asset IDs from steps; always include "battery" so the
-  // row is visible even when all its steps are idle.
+  // Derive sorted unique asset IDs from allocations; always include "battery" so the
+  // row is visible even when all its allocations are idle.
   // Exclude uncontrollable assets (pv, base_load) — covered by forecast rows below.
   const assetIds = useMemo(() => {
     if (!plan) return [];
     const UNCONTROLLABLE = new Set(["pv", "base_load"]);
     const ids = new Set(
-      plan.steps.map((s) => s.asset_id).filter((id) => !UNCONTROLLABLE.has(id))
+      plan.slots.flatMap((s) => s.allocations).map((a) => a.asset_id).filter((id) => !UNCONTROLLABLE.has(id))
     );
     ids.add("battery");
     return [...ids].sort();
@@ -71,25 +71,18 @@ export function PlanDecisionMatrix({ plan }: Props) {
     return plan.slots;
   }, [plan]);
 
-  // Map ts → slot index for step lookup
-  const slotIndexByTs = useMemo(() => {
-    const map = new Map<string, number>();
-    allSlots.forEach((s, i) => map.set(s.start, i));
-    return map;
-  }, [allSlots]);
-
-  // Map (assetId, slotIndex) → step
-  const stepMap = useMemo(() => {
-    const map = new Map<string, PlanStep>();
+  // Map (assetId, slotIndex) → allocation + slot start for drawer
+  const allocLookup = useMemo(() => {
+    const map = new Map<string, { alloc: AssetAllocation; slotStart: string }>();
     if (!plan) return map;
-    for (const step of plan.steps) {
-      const slotIdx = slotIndexByTs.get(step.ts);
-      if (slotIdx !== undefined) {
-        map.set(`${step.asset_id}:${slotIdx}`, step);
+    for (let i = 0; i < plan.slots.length; i++) {
+      const slot = plan.slots[i];
+      for (const alloc of slot.allocations) {
+        map.set(`${alloc.asset_id}:${i}`, { alloc, slotStart: slot.start });
       }
     }
     return map;
-  }, [plan, slotIndexByTs]);
+  }, [plan]);
 
   // Max allocated power across all slots (for color scaling)
   const maxAllocPower = useMemo(() => {
@@ -238,7 +231,7 @@ export function PlanDecisionMatrix({ plan }: Props) {
               {assetIds.map((assetId) => (
                 <Box key={assetId} sx={{ display: "flex" }}>
                   {allSlots.map((slot, ci) => {
-                    const step = stepMap.get(`${assetId}:${ci}`);
+                    const entry = allocLookup.get(`${assetId}:${ci}`);
                     const power_kw = allocMap.get(`${assetId}:${ci}`) ?? 0;
                     const color = allocationColor(power_kw, maxAllocPower);
                     return (
@@ -249,7 +242,7 @@ export function PlanDecisionMatrix({ plan }: Props) {
                         <Box
                           data-testid={`matrix-cell-${assetId}-${ci}`}
                           data-power={power_kw.toFixed(2)}
-                          onClick={() => setSelectedStep(step ?? null)}
+                          onClick={() => setSelectedAlloc(entry ?? null)}
                           sx={{
                             width: CELL_W,
                             height: CELL_H,
@@ -337,44 +330,56 @@ export function PlanDecisionMatrix({ plan }: Props) {
         <MatrixLegend />
       </Box>}
 
-      {/* Step detail drawer */}
+      {/* Allocation detail drawer */}
       <Drawer
         anchor="right"
-        open={selectedStep !== null}
-        onClose={() => setSelectedStep(null)}
+        open={selectedAlloc !== null}
+        onClose={() => setSelectedAlloc(null)}
         PaperProps={{ sx: { width: 340, p: 2 } }}
       >
         <Box data-testid="matrix-drawer">
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-            <Typography variant="h6">Step Detail</Typography>
-            <IconButton onClick={() => setSelectedStep(null)}>
+            <Typography variant="h6">Allocation Detail</Typography>
+            <IconButton onClick={() => setSelectedAlloc(null)}>
               <ChevronLeftIcon />
             </IconButton>
           </Stack>
 
-          {selectedStep ? (
+          {selectedAlloc ? (
             <Table size="small">
               <TableBody>
                 <TableRow>
                   <TableCell>Time</TableCell>
-                  <TableCell>{new Date(selectedStep.ts).toLocaleString()}</TableCell>
+                  <TableCell>{new Date(selectedAlloc.slotStart).toLocaleString()}</TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell>Asset</TableCell>
-                  <TableCell>{selectedStep.asset_id}</TableCell>
+                  <TableCell>{selectedAlloc.alloc.asset_id}</TableCell>
                 </TableRow>
                 <TableRow>
-                  <TableCell>Setpoint</TableCell>
-                  <TableCell>{selectedStep.setpoint_kw} kW</TableCell>
+                  <TableCell>Power</TableCell>
+                  <TableCell>{selectedAlloc.alloc.power_kw.toFixed(2)} kW</TableCell>
                 </TableRow>
                 <TableRow>
-                  <TableCell>Actual</TableCell>
-                  <TableCell>{selectedStep.actual_power_kw} kW</TableCell>
+                  <TableCell>Surplus</TableCell>
+                  <TableCell>{selectedAlloc.alloc.surplus_power_kw.toFixed(2)} kW</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Grid</TableCell>
+                  <TableCell>{selectedAlloc.alloc.grid_power_kw.toFixed(2)} kW</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Cost</TableCell>
+                  <TableCell>{selectedAlloc.alloc.cost_eur.toFixed(4)} €</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>CO₂</TableCell>
+                  <TableCell>{selectedAlloc.alloc.co2_g.toFixed(1)} g</TableCell>
                 </TableRow>
               </TableBody>
             </Table>
           ) : (
-            <Typography color="text.secondary">No step selected</Typography>
+            <Typography color="text.secondary">No allocation selected</Typography>
           )}
         </Box>
       </Drawer>

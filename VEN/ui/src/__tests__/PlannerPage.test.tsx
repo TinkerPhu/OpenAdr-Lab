@@ -43,7 +43,6 @@ function makeMockPlan(): Plan {
     summary: { total_cost_eur: 1.0, total_co2_g: 500, total_import_kwh: 3.0, total_export_kwh: 0 },
     envelopes: [],
     warnings: [],
-    steps: [],
   };
 }
 
@@ -118,13 +117,16 @@ describe("PlannerPage", () => {
     expect(screen.getByTestId("plan-trigger-badge")).toBeInTheDocument();
   });
 
-  it("renders decision matrix when plan has steps", () => {
+  it("renders decision matrix when plan has allocations", () => {
     const plan = makeMockPlan();
-    plan.steps = [{
-      ts: "2026-04-04T10:00:00Z",
+    plan.slots[0].allocations = [{
       asset_id: "battery",
-      setpoint_kw: 3.5,
-      actual_power_kw: 3.4,
+      power_kw: 3.5,
+      surplus_power_kw: 0,
+      grid_power_kw: 3.5,
+      marginal_value: 0.12,
+      cost_eur: 0.029,
+      co2_g: 58.3,
     }];
     vi.mocked(usePlan).mockReturnValue({ data: plan } as ReturnType<typeof usePlan>);
     render(<PlannerPage />);

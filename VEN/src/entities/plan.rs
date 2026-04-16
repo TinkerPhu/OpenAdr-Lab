@@ -198,9 +198,6 @@ pub struct Plan {
 
     // --- Diagnostics ---
     pub warnings: Vec<PlanWarning>,
-    /// Full per-(ts × asset) audit trail.
-    pub steps: Vec<PlanStep>,
-
     // --- MILP solver output ---
     /// Battery SoC trajectory [kWh] at the end of each planning step (length = num_steps + 1).
     /// First entry is the initial SoC; populated by the MILP solver.
@@ -226,12 +223,4 @@ impl Plan {
     }
 }
 
-/// One planning decision for one asset at one time step.
-/// Populated by the planner; steps field of Plan holds the full audit trail.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanStep {
-    pub ts: DateTime<Utc>,
-    pub asset_id: String,
-    pub setpoint_kw: f64,
-    pub actual_power_kw: f64,
-}
+
