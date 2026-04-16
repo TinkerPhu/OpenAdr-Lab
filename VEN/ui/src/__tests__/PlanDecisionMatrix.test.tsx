@@ -2,22 +2,24 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect } from "vitest";
 import { PlanDecisionMatrix } from "../components/planner/PlanDecisionMatrix";
-import type { Plan, PlanStep } from "../api/types";
+import type { AssetAllocation, Plan } from "../api/types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function makeStep(overrides: Partial<PlanStep> = {}): PlanStep {
+function makeAlloc(overrides: Partial<AssetAllocation> = {}): AssetAllocation {
   return {
-    ts: "2026-04-04T10:00:00Z",
     asset_id: "battery",
-    setpoint_kw: 3.5,
-    actual_power_kw: 3.4,
+    power_kw: 3.5,
+    surplus_power_kw: 0,
+    grid_power_kw: 3.5,
+    marginal_value: 0.12,
+    cost_eur: 0.029,
+    co2_g: 58.3,
     ...overrides,
   };
 }
 
-function makePlan(steps: PlanStep[] = [makeStep()]): Plan {
-  const slotStart = "2026-04-04T10:00:00Z";
+function makePlan(slot0Allocs: AssetAllocation[] = [makeAlloc()]): Plan {
   return {
     id: "plan-001",
     created_at: "2026-04-04T10:00:00Z",
@@ -25,14 +27,14 @@ function makePlan(steps: PlanStep[] = [makeStep()]): Plan {
     slots: [
       {
         slot_index: 0,
-        start: slotStart,
+        start: "2026-04-04T10:00:00Z",
         end: "2026-04-04T10:05:00Z",
         import_tariff_eur_kwh: 0.12,
         export_tariff_eur_kwh: 0.05,
         co2_g_kwh: 200,
         import_cap_kw: 10,
         export_cap_kw: 10,
-        allocations: [],
+        allocations: slot0Allocs,
         net_import_kw: 3.5,
         net_export_kw: 0,
         pv_forecast_kw: 2.5,
@@ -57,7 +59,6 @@ function makePlan(steps: PlanStep[] = [makeStep()]): Plan {
     summary: { total_cost_eur: 0.50, total_co2_g: 800, total_import_kwh: 3.0, total_export_kwh: 0 },
     envelopes: [],
     warnings: [],
-    steps,
   };
 }
 
@@ -75,28 +76,23 @@ describe("PlanDecisionMatrix", () => {
     expect(screen.getByTestId("matrix-empty")).toBeInTheDocument();
   });
 
-  it("renders the decision matrix section when plan has steps", () => {
+  it("renders the decision matrix section when plan has allocations", () => {
     render(<PlanDecisionMatrix plan={makePlan()} />);
     expect(screen.getByTestId("decision-matrix")).toBeInTheDocument();
   });
 
-  it("renders one row per unique asset_id in steps", () => {
-    const steps = [
-      makeStep({ asset_id: "battery", ts: "2026-04-04T10:00:00Z" }),
-      makeStep({ asset_id: "ev", ts: "2026-04-04T10:00:00Z" }),
-      makeStep({ asset_id: "battery", ts: "2026-04-04T10:05:00Z" }),
+  it("renders one row per unique asset_id in allocations", () => {
+    const allocs = [
+      makeAlloc({ asset_id: "battery" }),
+      makeAlloc({ asset_id: "ev" }),
     ];
-    render(<PlanDecisionMatrix plan={makePlan(steps)} />);
-    // Two unique assets → two row labels
+    render(<PlanDecisionMatrix plan={makePlan(allocs)} />);
     expect(screen.getByTestId("matrix-row-battery")).toBeInTheDocument();
     expect(screen.getByTestId("matrix-row-ev")).toBeInTheDocument();
   });
 
-  it("renders matrix cell for each step", () => {
-    const steps = [
-      makeStep({ asset_id: "battery", ts: "2026-04-04T10:00:00Z" }),
-    ];
-    render(<PlanDecisionMatrix plan={makePlan(steps)} />);
+  it("renders matrix cell for each allocation", () => {
+    render(<PlanDecisionMatrix plan={makePlan([makeAlloc({ asset_id: "battery" })])} />);
     expect(screen.getByTestId("matrix-cell-battery-0")).toBeInTheDocument();
   });
 
@@ -105,7 +101,7 @@ describe("PlanDecisionMatrix", () => {
     expect(screen.getByTestId("matrix-tariff-header")).toBeInTheDocument();
   });
 
-  it("opens step detail drawer on cell click", async () => {
+  it("opens allocation detail drawer on cell click", async () => {
     const user = userEvent.setup();
     render(<PlanDecisionMatrix plan={makePlan()} />);
     const cell = screen.getByTestId("matrix-cell-battery-0");
@@ -113,13 +109,13 @@ describe("PlanDecisionMatrix", () => {
     expect(screen.getByTestId("matrix-drawer")).toBeInTheDocument();
   });
 
-  it("shows setpoint_kw and actual_power_kw in drawer", async () => {
+  it("shows power_kw and cost_eur in drawer", async () => {
     const user = userEvent.setup();
-    render(<PlanDecisionMatrix plan={makePlan([makeStep({ setpoint_kw: 3.5, actual_power_kw: 3.4 })])} />);
+    render(<PlanDecisionMatrix plan={makePlan([makeAlloc({ power_kw: 3.50, cost_eur: 0.029 })])} />);
     await user.click(screen.getByTestId("matrix-cell-battery-0"));
     const drawer = screen.getByTestId("matrix-drawer");
-    expect(drawer.textContent).toContain("3.5");
-    expect(drawer.textContent).toContain("3.4");
+    expect(drawer.textContent).toContain("3.50");
+    expect(drawer.textContent).toContain("0.0290");
   });
 
   it("renders the legend", () => {
@@ -148,8 +144,7 @@ describe("PlanDecisionMatrix", () => {
   });
 
   it("shows non-zero data-power on allocated cells, zero on idle cells", () => {
-    const plan = makePlan();
-    plan.slots[0].allocations = [{ packet_id: "pkt-1", asset_id: "battery", power_kw: 5.0, cost_eur: 0.1, co2_g: 100 }];
+    const plan = makePlan([makeAlloc({ asset_id: "battery", power_kw: 5.0 })]);
     render(<PlanDecisionMatrix plan={plan} />);
     const cell0 = screen.getByTestId("matrix-cell-battery-0");
     const cell1 = screen.getByTestId("matrix-cell-battery-1");

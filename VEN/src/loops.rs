@@ -562,7 +562,7 @@ pub(crate) fn spawn_planning(
             let shift_loads = state.shiftable_loads().await;
             let bl_override = state.baseline_override().await;
             let sim_guard_for_planner = sim.lock().await;
-            let (mut plan, plan_steps) = controller::milp_planner::run_planner(
+            let plan = controller::milp_planner::run_planner(
                 &*sim_guard_for_planner,
                 &tariff_ts,
                 &capacity,
@@ -575,7 +575,6 @@ pub(crate) fn spawn_planning(
                 bl_override.as_ref(),
             );
             drop(sim_guard_for_planner);
-            plan.steps = plan_steps;
             let slot_count = plan.slots.len();
             state.set_active_plan(Some(plan)).await;
 
