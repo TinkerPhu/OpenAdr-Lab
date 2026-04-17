@@ -1387,6 +1387,9 @@ fn translate_to_plan(
             baseline_kw: inputs.p_base_kw[t],
             pv_forecast_kw: inputs.p_pv_kw[t],
             surplus_available_kw,
+            planned_kw_by_asset: allocations.iter()
+                .map(|a| (a.asset_id.clone(), a.power_kw))
+                .collect(),
             allocations,
             net_import_kw: sol.p_imp_kw[t],
             net_export_kw: sol.p_exp_kw[t],
@@ -1394,9 +1397,6 @@ fn translate_to_plan(
             export_flexibility_kw: 0.0,
             bat_charge_kw: sol.p_bat_ch_kw[t],
             bat_discharge_kw: sol.p_bat_dis_kw[t],
-            planned_kw_by_asset: allocations.iter()
-                .map(|a| (a.asset_id.clone(), a.power_kw))
-                .collect(),
         });
     }
 
