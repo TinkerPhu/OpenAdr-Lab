@@ -5,6 +5,7 @@ import { usePackets } from "../api/hooks";
 import { PlanHeaderBar } from "../components/planner/PlanHeaderBar";
 import { PlanTriggerTimeline } from "../components/planner/PlanTriggerTimeline";
 import { PlanDecisionMatrix } from "../components/planner/PlanDecisionMatrix";
+import { PlanPowerStack } from "../components/planner/PlanPowerStack";
 import { PacketProgressBoard } from "../components/planner/PacketProgressBoard";
 
 export function PlannerPage() {
@@ -19,6 +20,9 @@ export function PlannerPage() {
       <Stack spacing={3} divider={<Divider />}>
         {/* Plan Header */}
         <PlanHeaderBar plan={plan} />
+
+        {/* Power Stack Chart */}
+        <PlanPowerStack plan={plan} />
 
         {/* Trigger Timeline */}
         <Box>

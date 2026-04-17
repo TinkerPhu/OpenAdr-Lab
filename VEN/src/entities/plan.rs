@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -83,6 +85,13 @@ pub struct PlanTimeSlot {
     /// Planned battery discharge power in this slot (kW, ≥ 0). Set by MILP solver.
     #[serde(default)]
     pub bat_discharge_kw: f64,
+
+    // --- Normalized plan output ---
+    /// Power allocated to each asset in this slot (kW), keyed by asset_id.
+    /// Positive = consumption/charging, negative = discharge/generation.
+    /// Built from `allocations` for easy lookup without iteration.
+    #[serde(default)]
+    pub planned_kw_by_asset: HashMap<String, f64>,
 }
 
 /// Per-device schedulability metadata snapshot (§6.9).
