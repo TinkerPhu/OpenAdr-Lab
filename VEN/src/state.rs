@@ -1,6 +1,6 @@
 use crate::controller::trace::ControllerTrace;
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
-use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
+use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime};
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::entities::user_request::{UserRequest, UserRequestStatus};
@@ -123,6 +123,8 @@ pub struct InnerState {
     #[serde(skip)]
     pub shiftable_loads: Vec<ShiftableLoad>,
     #[serde(skip)]
+    pub shiftable_runtimes: Vec<ShiftableLoadRuntime>,
+    #[serde(skip)]
     pub baseline_override: Option<BaselineOverride>,
 }
 
@@ -147,6 +149,7 @@ impl AppState {
                 ev_session: None,
                 heater_target: None,
                 shiftable_loads: vec![],
+                shiftable_runtimes: vec![],
                 baseline_override: None,
             })),
         }
@@ -353,15 +356,35 @@ impl AppState {
         self.inner.read().await.shiftable_loads.clone()
     }
 
-    pub async fn add_shiftable_load(&self, load: ShiftableLoad) {
-        self.inner.write().await.shiftable_loads.push(load);
+    pub async fn add_shiftable_load(&self, load: ShiftableLoad) -> Result<(), &'static str> {
+        let mut w = self.inner.write().await;
+        if w.shiftable_loads.iter().any(|l| l.asset_id == load.asset_id) {
+            return Err("duplicate asset_id");
+        }
+        w.shiftable_loads.push(load);
+        Ok(())
     }
 
     pub async fn remove_shiftable_load(&self, id: uuid::Uuid) -> bool {
         let mut w = self.inner.write().await;
         let before = w.shiftable_loads.len();
         w.shiftable_loads.retain(|l| l.id != id);
+        w.shiftable_runtimes.retain(|r| r.load_id != id);
         w.shiftable_loads.len() < before
+    }
+
+    pub async fn shiftable_runtimes(&self) -> Vec<ShiftableLoadRuntime> {
+        self.inner.read().await.shiftable_runtimes.clone()
+    }
+
+    pub async fn start_shiftable(&self, runtime: ShiftableLoadRuntime) {
+        self.inner.write().await.shiftable_runtimes.push(runtime);
+    }
+
+    pub async fn complete_shiftable(&self, load_id: uuid::Uuid) {
+        let mut w = self.inner.write().await;
+        w.shiftable_runtimes.retain(|r| r.load_id != load_id);
+        w.shiftable_loads.retain(|l| l.id != load_id);
     }
 
     pub async fn baseline_override(&self) -> Option<BaselineOverride> {
@@ -415,6 +438,7 @@ impl Clone for InnerState {
             ev_session: self.ev_session.clone(),
             heater_target: self.heater_target.clone(),
             shiftable_loads: self.shiftable_loads.clone(),
+            shiftable_runtimes: self.shiftable_runtimes.clone(),
             baseline_override: self.baseline_override.clone(),
         }
     }

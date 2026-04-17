@@ -396,8 +396,72 @@ pub(crate) fn spawn_sim_tick(
                 let sensor = sim_guard.to_sensor_snapshot();
                 state.update_sensor(sensor).await;
 
-                // Update sim in app state
-                let sim_snap = sim_guard.to_sim_snapshot();
+                // Update sim in app state — augmented with shiftable runtimes
+                let mut sim_snap = sim_guard.to_sim_snapshot();
+
+                // ── Shiftable load runtime: start / complete / augment ──────
+
+                // Collect physics asset IDs so we skip them when scanning allocations.
+                let known_sim_ids: std::collections::HashSet<&str> =
+                    sim_guard.assets.iter().map(|a| a.id.as_str()).collect();
+
+                // Start: detect shiftable loads that the current plan slot wants
+                // to run but that have no runtime yet.
+                if let Some(ref plan) = plan_snap {
+                    if let Some(slot) = plan.slots.iter().find(|s| s.start <= now && now < s.end) {
+                        let runtimes = state.shiftable_runtimes().await;
+                        let loads = state.shiftable_loads().await;
+                        for alloc in &slot.allocations {
+                            if known_sim_ids.contains(alloc.asset_id.as_str()) { continue; }
+                            let already_running = runtimes.iter().any(|r| r.asset_id == alloc.asset_id);
+                            if !already_running {
+                                if let Some(load) = loads.iter().find(|l| l.asset_id == alloc.asset_id) {
+                                    let ends_at = now + chrono::Duration::minutes(load.duration_min as i64);
+                                    state.start_shiftable(entities::device_session::ShiftableLoadRuntime {
+                                        load_id: load.id,
+                                        asset_id: load.asset_id.clone(),
+                                        power_kw: load.power_kw,
+                                        started_at: now,
+                                        ends_at,
+                                    }).await;
+                                    info!(asset_id = %load.asset_id, ends_at = %ends_at, "shiftable load started");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Complete: remove expired runtimes and trigger replan.
+                {
+                    let runtimes = state.shiftable_runtimes().await;
+                    for rt in &runtimes {
+                        if now >= rt.ends_at {
+                            info!(asset_id = %rt.asset_id, "shiftable load completed");
+                            state.complete_shiftable(rt.load_id).await;
+                            let _ = trigger_tx.send(PlanTrigger::UserRequest);
+                        }
+                    }
+                }
+
+                // Augment SimSnapshot with running shiftable runtimes so they
+                // appear in GET /sim and ledger accounting.
+                {
+                    let runtimes = state.shiftable_runtimes().await;
+                    for rt in &runtimes {
+                        if rt.is_running(now) {
+                            sim_snap.assets.insert(rt.asset_id.clone(), crate::simulator::AssetSnapshot {
+                                power_kw: rt.power_kw,
+                                values: {
+                                    let mut m = std::collections::HashMap::new();
+                                    m.insert("running".into(), 1.0);
+                                    m.insert("ends_at_unix".into(), rt.ends_at.timestamp() as f64);
+                                    m
+                                },
+                            });
+                        }
+                    }
+                }
+
                 state.update_sim(sim_snap.clone()).await;
 
                 // Post-tick: consolidated ledger accounting
