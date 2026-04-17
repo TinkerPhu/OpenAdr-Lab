@@ -1208,6 +1208,7 @@ fn fallback_plan(
                     export_flexibility_kw: 0.0,
                     bat_charge_kw: 0.0,
                     bat_discharge_kw: 0.0,
+                    planned_kw_by_asset: std::collections::HashMap::new(),
                 }
             })
             .collect(),
@@ -1393,6 +1394,9 @@ fn translate_to_plan(
             export_flexibility_kw: 0.0,
             bat_charge_kw: sol.p_bat_ch_kw[t],
             bat_discharge_kw: sol.p_bat_dis_kw[t],
+            planned_kw_by_asset: allocations.iter()
+                .map(|a| (a.asset_id.clone(), a.power_kw))
+                .collect(),
         });
     }
 
