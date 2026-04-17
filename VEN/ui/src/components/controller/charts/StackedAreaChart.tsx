@@ -79,14 +79,15 @@ export function StackedAreaTooltip({
   );
 }
 
-const EMPTY_PT = (): Omit<StackedAreaPoint, "ts"> => ({
-  ev_pos: 0, ev_neg: 0,
-  heater_pos: 0, heater_neg: 0,
-  pv_pos: 0, pv_neg: 0,
-  battery_pos: 0, battery_neg: 0,
-  base_load_pos: 0, base_load_neg: 0,
-  gridPowerKw: null,
-});
+/** Creates a zero-valued point for all assets (including dynamic shiftable loads). */
+const emptyPt = (assetIds: AssetId[]): Omit<StackedAreaPoint, "ts"> => {
+  const pt: Record<string, number | null> = { gridPowerKw: null };
+  for (const id of assetIds) {
+    pt[`${id}_pos`] = 0;
+    pt[`${id}_neg`] = 0;
+  }
+  return pt as Omit<StackedAreaPoint, "ts">;
+};
 
 export function StackedAreaChart({
   data,
@@ -107,8 +108,8 @@ export function StackedAreaChart({
     data.length > 0
       ? data
       : [
-          { ts: tMin, ...EMPTY_PT() },
-          { ts: tMax, ...EMPTY_PT() },
+          { ts: tMin, ...emptyPt(assetIds) } as StackedAreaPoint,
+          { ts: tMax, ...emptyPt(assetIds) } as StackedAreaPoint,
         ];
 
   // base_load first so it sits closest to the X axis in both stacks.
