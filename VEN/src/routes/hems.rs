@@ -323,9 +323,20 @@ pub async fn post_shiftable_load(
         duration_min = load.duration_min,
         "shiftable load added"
     );
-    ctx.state.add_shiftable_load(load.clone()).await;
-    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
-    (StatusCode::CREATED, Json(load))
+    match ctx.state.add_shiftable_load(load.clone()).await {
+        Ok(()) => {
+            let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+            (StatusCode::CREATED, Json(load)).into_response()
+        }
+        Err(_) => {
+            warn!(asset_id = %load.asset_id, "duplicate shiftable load asset_id");
+            (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({"error": "duplicate asset_id"})),
+            )
+                .into_response()
+        }
+    }
 }
 
 /// DELETE /shiftable-loads/:id — remove a shiftable load by id.
