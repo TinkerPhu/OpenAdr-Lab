@@ -58,6 +58,30 @@ pub struct ShiftableLoad {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Runtime state for an active shiftable load (e.g. washing machine running).
+///
+/// Created when the dispatcher detects a plan-slot allocation for a shiftable
+/// load. Tracks countdown until the load finishes; NOT a physics sim asset.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShiftableLoadRuntime {
+    /// FK → ShiftableLoad.id
+    pub load_id: Uuid,
+    /// Asset identifier (e.g. "wm").
+    pub asset_id: String,
+    /// Fixed power level while running [kW].
+    pub power_kw: f64,
+    /// When the load was started.
+    pub started_at: DateTime<Utc>,
+    /// When the load will finish (started_at + duration_min).
+    pub ends_at: DateTime<Utc>,
+}
+
+impl ShiftableLoadRuntime {
+    pub fn is_running(&self, now: DateTime<Utc>) -> bool {
+        now >= self.started_at && now < self.ends_at
+    }
+}
+
 /// A single slot in a baseline override.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaselineSlot {
