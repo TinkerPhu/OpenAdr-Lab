@@ -119,7 +119,7 @@ function EvSessionSection() {
       {session ? (
         <Paper sx={{ p: 2, mb: 1 }} data-testid="ev-session-card">
           <Stack direction="row" spacing={2} alignItems="center">
-            <Chip label="EV Plugged" color="success" data-testid="ev-status" />
+            <Chip label="EV Planned" color="success" data-testid="ev-status" />
             <Typography data-testid="ev-target-soc">
               Target SoC: {(session.target_soc * 100).toFixed(0)}%
             </Typography>
@@ -135,9 +135,9 @@ function EvSessionSection() {
               size="small"
               onClick={handleUnplug}
               disabled={deleteMut.isPending}
-              data-testid="ev-unplug-btn"
+              data-testid="ev-unplan-btn"
             >
-              Unplug
+              Unplan
             </Button>
           </Stack>
         </Paper>
@@ -149,16 +149,16 @@ function EvSessionSection() {
               variant="contained"
               size="small"
               onClick={() => setDialogOpen(true)}
-              data-testid="ev-plugin-btn"
+              data-testid="ev-planning-btn"
             >
-              Plug In
+              Plan EV Charging
             </Button>
           </Stack>
         </Paper>
       )}
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} data-testid="ev-dialog">
-        <DialogTitle>Plug In EV</DialogTitle>
+        <DialogTitle>Plan EV Charging</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1, minWidth: 300 }}>
             <Typography>Target SoC: {targetSoc}%</Typography>
@@ -196,7 +196,7 @@ function EvSessionSection() {
             disabled={postMut.isPending}
             data-testid="ev-dialog-confirm"
           >
-            Plug In
+            Confirm Plan
           </Button>
         </DialogActions>
       </Dialog>

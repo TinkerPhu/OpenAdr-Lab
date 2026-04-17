@@ -139,7 +139,7 @@ describe("DeviceSessionsPage", () => {
   it("shows 'No active EV session' when no session exists", () => {
     renderPage();
     expect(screen.getByTestId("ev-no-session")).toBeInTheDocument();
-    expect(screen.getByTestId("ev-plugin-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("ev-planning-btn")).toBeInTheDocument();
   });
 
   it("shows EV session card when session exists", () => {
@@ -147,13 +147,13 @@ describe("DeviceSessionsPage", () => {
     renderPage();
     expect(screen.getByTestId("ev-session-card")).toBeInTheDocument();
     expect(screen.getByTestId("ev-target-soc")).toHaveTextContent("80%");
-    expect(screen.getByTestId("ev-unplug-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("ev-unplan-btn")).toBeInTheDocument();
   });
 
-  it("opens Plug In dialog when button clicked", async () => {
+  it("opens EV Planning dialog when button clicked", async () => {
     const user = userEvent.setup();
     renderPage();
-    await user.click(screen.getByTestId("ev-plugin-btn"));
+    await user.click(screen.getByTestId("ev-planning-btn"));
     expect(screen.getByTestId("ev-dialog")).toBeInTheDocument();
     expect(screen.getByTestId("ev-dialog-confirm")).toBeInTheDocument();
   });
@@ -162,7 +162,7 @@ describe("DeviceSessionsPage", () => {
     mockEvSession.mockReturnValue(sampleEvSession);
     const user = userEvent.setup();
     renderPage();
-    await user.click(screen.getByTestId("ev-unplug-btn"));
+    await user.click(screen.getByTestId("ev-unplan-btn"));
     expect(mockDeleteEvSession).toHaveBeenCalled();
   });
 
