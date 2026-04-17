@@ -20,7 +20,7 @@ The API evolved organically:
 | `POST /shiftable-loads` | Phase B | Direct WM scheduling; no lifecycle |
 | `POST /user-requests` | Later phase | EV+heater wrapper with lifecycle — but WM is missing |
 
-`POST /user-requests` already handles EV and heater (routes/hems.rs:54–139):
+`POST /user-requests` already handles EV and heater (routes/hems.rs:55–150):
 - EV: creates `EvSession`, links it via `session_id` field on `UserRequest`
 - Heater: creates `HeaterTarget`, links it the same way
 - WM / other: falls through to a bare `UserRequest` with no linked session (lines 115–121)
@@ -50,14 +50,15 @@ invisible to `GET /user-requests` because it was created via `/ev-session`).
   - `status: UserRequestStatus`, `estimated_cost_eur`, `estimated_co2_g`
   - `interruptible`, `tolerance_min`, `budget_eur`
   - `created_at`, `updated_at`
-- `UserRequestStatus` enum: `VEN/src/entities/user_request.rs:21–26`
+- `UserRequestStatus` enum: `VEN/src/entities/user_request.rs:19–26`
   - variants: `Active`, `Completed`, `Cancelled`, `Failed`
+  - serialised as `SCREAMING_SNAKE_CASE` (e.g. `"ACTIVE"`)
 - `EvSession` struct: `VEN/src/entities/device_session.rs:11–22`
   - `id`, `target_soc`, `departure_time`, `opportunistic`, `created_at`, `updated_at`
 - `HeaterTarget` struct: `VEN/src/entities/device_session.rs:30–38`
   - `id`, `target_temp_c`, `ready_by`, `created_at`, `updated_at`
-- `ShiftableLoad` struct: `VEN/src/entities/device_session.rs:45–59`
-  - `id`, `asset_id`, `power_kw`, `duration_min`, `earliest_start`, `latest_end`
+- `ShiftableLoad` struct: `VEN/src/entities/device_session.rs:44–59`
+  - `id`, `asset_id`, `power_kw`, `duration_min`, `earliest_start`, `latest_end`, `created_at`, `updated_at`
 
 ### Backend — user_request controller
 - `CreateUserRequestBody`: `VEN/src/controller/user_request.rs:15–27`
@@ -65,25 +66,32 @@ invisible to `GET /user-requests` because it was created via `/ev-session`).
   - `deadlines`, `completion_policy`, `comfort_rates`, `budget_eur`
   - `interruptible`, `tolerance_min`
   - **Missing**: `power_kw`, `duration_min`, `earliest_start`, `latest_end` (WM-specific fields)
+- `create_from_body`: `VEN/src/controller/user_request.rs:65–157`
+  - Looks up asset in `sim.assets` by `asset_id` — **fails for WM** (WM has no sim profile entry).
+  - WM requests must be detected and handled **before** calling this function.
 
 ### Backend — routes
-- `POST /user-requests` handler: `VEN/src/routes/hems.rs:54–139`
-  - EV branch (lines 68–91): creates EvSession, calls `state.set_ev_session()`
-  - Heater branch (lines 92–114): creates HeaterTarget, calls `state.set_heater_target()`
+- `POST /user-requests` handler: `VEN/src/routes/hems.rs:55–150`
+  - EV branch (lines 68–91): detects `asset_id == "ev"`, creates EvSession, calls `state.set_ev_session()`
+  - Heater branch (lines 92–114): detects `asset_id == "heater"` or `"boiler"`, creates HeaterTarget
   - Other/fallthrough (lines 115–121): stores bare UserRequest, no linked session
-- `DELETE /user-requests/:id`: `VEN/src/routes/hems.rs:152–176`
+  - Detection is hardcoded string matching on `asset_id` — there is no profile API for this.
+- `DELETE /user-requests/:id`: `VEN/src/routes/hems.rs:153–176`
   - Calls `state.cancel_request(id)` which clears linked `ev_session` or `heater_target`
   - Does NOT clear a linked `shiftable_load`
 
-### Backend — AppState (state.rs:87–127)
+### Backend — InnerState (state.rs:91–127)
+All HEMS fields live on `InnerState`, accessed through `AppState`'s async wrapper methods.
+`AppState` itself (line 87) holds only `inner: Arc<RwLock<InnerState>>`.
 - `active_requests: Vec<UserRequest>` — `#[serde(skip)]`
 - `ev_session: Option<EvSession>` — `#[serde(skip)]`
 - `heater_target: Option<HeaterTarget>` — `#[serde(skip)]`
 - `shiftable_loads: Vec<ShiftableLoad>` — `#[serde(skip)]`
-- `cancel_request()` at line ~303: removes request, clears linked session — currently handles EV/heater only
+- `cancel_request()` at line 303: acquires write lock on `inner`, marks request Cancelled,
+  clears linked ev_session or heater_target — does not yet handle ShiftableLoad
 
 ### Backend — route registration
-- `VEN/src/routes/mod.rs:66–96`
+- `VEN/src/routes/mod.rs:67–100`
   - User-requests: GET/POST `user-requests`, DELETE `user-requests/:id`
   - EV-session: GET/POST/DELETE `ev-session`
   - Heater-target: GET/POST/DELETE `heater-target`
@@ -100,6 +108,7 @@ which type. Add `session_type` to make lookups unambiguous:
 
 ```rust
 // entities/user_request.rs — add to UserRequest
+#[serde(default)]
 pub session_type: Option<SessionType>,
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -107,48 +116,35 @@ pub session_type: Option<SessionType>,
 pub enum SessionType { Ev, Heater, ShiftableLoad }
 ```
 
+`#[serde(default)]` is required so that existing serialised state (which has no `session_type`
+key) deserialises cleanly to `None`.
+
 ### WM fields in CreateUserRequestBody
 
 WM-specific fields are already on `ShiftableLoad`. Add them as optional to the body:
 
 ```rust
 // controller/user_request.rs — add to CreateUserRequestBody
-pub power_kw: Option<f64>,           // WM: fixed run power
-pub duration_min: Option<u32>,       // WM: run duration
-pub earliest_start: Option<DateTime<Utc>>,  // WM: window open
-pub latest_end: Option<DateTime<Utc>>,      // WM / heater deadline (replaces deadlines[] for simple cases)
+pub power_kw: Option<f64>,                    // WM: fixed run power
+pub duration_min: Option<u32>,                // WM: run duration
+pub earliest_start: Option<DateTime<Utc>>,    // WM: window open (default: now)
+pub latest_end: Option<DateTime<Utc>>,        // WM: window close (required for WM)
 ```
 
-For WM, `earliest_start` + `latest_end` replace the multi-tier `deadlines` system used for EV
-(which is more complex — EV has ASAP vs BY_DEADLINE tiers). Keep both; for WM, if `deadlines`
-is empty and `earliest_start`/`latest_end` are provided, derive a single deadline from them.
+For WM, `earliest_start` + `latest_end` replace the multi-tier `deadlines` system used for EV.
+The WM path validates that `latest_end` is present; if absent it returns 422.
 
 ### Asset type detection
 
-The `POST /user-requests` handler currently detects EV vs heater by matching `asset_id` against
-the profile. Extend this logic:
+The actual detection order in `post_requests` is:
 
-```rust
-// In the POST handler:
-let asset_profile = profile.asset_by_id(&body.asset_id);
-match asset_profile {
-    Some(AssetProfile::Ev(_))      => { /* existing EV branch */ }
-    Some(AssetProfile::Heater(_))  => { /* existing heater branch */ }
-    Some(AssetProfile::Battery(_)) => { /* future */ }
-    None | Some(_)                 => {
-        // Unknown asset — treat as shiftable load if power_kw + duration_min present
-        if body.power_kw.is_some() && body.duration_min.is_some() {
-            /* new WM branch */
-        } else {
-            return (StatusCode::BAD_REQUEST, "unknown asset type").into_response();
-        }
-    }
-}
-```
+1. **WM fast-path** (checked first, before `create_from_body`): `body.power_kw.is_some() && body.duration_min.is_some()` → shiftable load. WM has no simulator asset profile entry (`AssetProfile` has variants `Ev | Heater | Pv | Battery | BaseLoad` — no `ShiftableLoad`). `create_from_body` would reject it with `UnknownAsset`. WM must be handled in a separate early-exit path that does not call `create_from_body`.
 
-For WM detection: either check the profile for `AssetProfile::BaseLoad` (WM is not base load)
-or simply accept any `asset_id` with WM fields — the profile is optional for shiftable loads
-since WM doesn't need a sim profile.
+2. **EV**: `asset_id == "ev"` — goes through `create_from_body` (EV is a sim asset).
+
+3. **Heater**: `asset_id == "heater"` or `"boiler"` — goes through `create_from_body` (heater is a sim asset).
+
+4. **Other**: unknown `asset_id` without WM fields → 422.
 
 ---
 
@@ -167,6 +163,11 @@ pub enum SessionType { Ev, Heater, ShiftableLoad }
 pub session_type: Option<SessionType>,
 ```
 
+Also update the comment on `session_id` to include ShiftableLoad:
+```rust
+pub session_id: Option<Uuid>, // linked DeviceSession (EvSession, HeaterTarget, or ShiftableLoad)
+```
+
 ### Step 2 — Add WM fields to `CreateUserRequestBody`
 
 `VEN/src/controller/user_request.rs`:
@@ -177,46 +178,121 @@ pub earliest_start: Option<DateTime<Utc>>,
 pub latest_end: Option<DateTime<Utc>>,
 ```
 
+These fields are only read by the WM early-exit path in the handler; `create_from_body` ignores them.
+
 ### Step 3 — Add WM branch in POST handler
 
-`VEN/src/routes/hems.rs`, in the `post_requests` handler after the heater branch (around line 115):
+`VEN/src/routes/hems.rs` — restructure `post_requests` to handle WM before the `create_from_body`
+call. WM has no sim asset entry, so it must bypass `create_from_body` entirely:
 
 ```rust
-// WM / shiftable load branch
-} else if body.power_kw.is_some() && body.duration_min.is_some() {
-    let earliest = body.earliest_start.unwrap_or(now);
-    let latest = body.latest_end
-        .ok_or_else(|| (StatusCode::UNPROCESSABLE_ENTITY, "latest_end required for shiftable load"))?;
-    let load = ShiftableLoad {
-        id: Uuid::new_v4(),
-        asset_id: body.asset_id.clone(),
-        power_kw: body.power_kw.unwrap(),
-        duration_min: body.duration_min.unwrap(),
-        earliest_start: earliest,
-        latest_end: latest,
-        created_at: now,
-        updated_at: now,
+pub async fn post_requests(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<CreateUserRequestBody>,
+) -> impl IntoResponse {
+    let now = Utc::now();
+
+    // WM fast-path: must run before create_from_body; WM has no sim-asset profile entry
+    // and create_from_body would return UnknownAsset for it.
+    if body.power_kw.is_some() && body.duration_min.is_some() {
+        let earliest = body.earliest_start.unwrap_or(now);
+        let latest = match body.latest_end {
+            Some(t) => t,
+            None => return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(serde_json::json!({"error": "latest_end required for shiftable load"})),
+            ).into_response(),
+        };
+        let load = ShiftableLoad {
+            id: Uuid::new_v4(),
+            asset_id: body.asset_id.clone(),
+            power_kw: body.power_kw.unwrap(),
+            duration_min: body.duration_min.unwrap(),
+            earliest_start: earliest,
+            latest_end: latest,
+            created_at: now,
+            updated_at: now,
+        };
+        let user_req = UserRequest {
+            id: Uuid::new_v4(),
+            asset_id: body.asset_id.clone(),
+            target_soc: None,
+            target_energy_kwh: (body.power_kw.unwrap() * body.duration_min.unwrap() as f64) / 60.0,
+            desired_power_kw: body.power_kw.unwrap(),
+            deadlines: vec![],
+            completion_policy: "STOP".to_string(),
+            max_total_cost_eur: None,
+            tier_count: 0,
+            session_id: Some(load.id),
+            session_type: Some(SessionType::ShiftableLoad),
+            status: UserRequestStatus::Active,
+            estimated_cost_eur: 0.0,
+            estimated_co2_g: 0.0,
+            interruptible: false,
+            tolerance_min: None,
+            budget_eur: body.budget_eur,
+            created_at: now,
+            updated_at: now,
+        };
+        ctx.state.add_shiftable_load(load).await;
+        ctx.state.upsert_request(user_req.clone()).await;
+        let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+        return (StatusCode::CREATED, Json(serde_json::to_value(user_req).unwrap_or_default()))
+            .into_response();
+    }
+
+    // EV / heater path — requires sim-asset lookup
+    let (assets, asset_configs) = {
+        let sim = ctx.sim.lock().await;
+        (sim.assets.clone(), sim.asset_configs.clone())
     };
-    request.session_id = Some(load.id);
-    request.session_type = Some(SessionType::ShiftableLoad);
-    ctx.state.add_shiftable_load(load).await;
+    match crate::controller::user_request::create_from_body(body, &assets, &asset_configs, now) {
+        Ok(mut user_req) => {
+            if user_req.asset_id == "ev" {
+                // ... existing EV branch — set session_type = Some(SessionType::Ev)
+                user_req.session_type = Some(SessionType::Ev);
+            } else if user_req.asset_id == "heater" || user_req.asset_id == "boiler" {
+                // ... existing heater branch — set session_type = Some(SessionType::Heater)
+                user_req.session_type = Some(SessionType::Heater);
+            }
+            // ... rest of existing Ok branch unchanged
+        }
+        Err(e) => { /* 422 */ }
+    }
+}
 ```
+
+Also add `session_type` assignment to the existing EV and heater branches in the `Ok` arm.
 
 ### Step 4 — Update `cancel_request` in state.rs
 
-Current `cancel_request()` (line ~303) clears `ev_session` or `heater_target` based on which is
-linked. Extend:
+Replace the body of `cancel_request` (state.rs:303–318) to handle ShiftableLoad. All field access
+must go through the acquired write lock `inner` — the current implementation already uses this
+pattern and the new match must follow the same pattern:
 
 ```rust
-match request.session_type {
-    Some(SessionType::Ev)           => { self.ev_session = None; }
-    Some(SessionType::Heater)       => { self.heater_target = None; }
-    Some(SessionType::ShiftableLoad) => {
-        if let Some(sid) = request.session_id {
-            self.shiftable_loads.retain(|l| l.id != sid);
+pub async fn cancel_request(&self, id: uuid::Uuid) -> bool {
+    let mut inner = self.inner.write().await;
+    if let Some(req) = inner.active_requests.iter_mut().find(|r| r.id == id) {
+        req.status = UserRequestStatus::Cancelled;
+        // Clone these out before the match: req borrows inner mutably and we
+        // need inner.shiftable_loads below.
+        let session_type = req.session_type.clone();
+        let session_id = req.session_id;
+        match session_type {
+            Some(SessionType::Ev) => { inner.ev_session = None; }
+            Some(SessionType::Heater) => { inner.heater_target = None; }
+            Some(SessionType::ShiftableLoad) => {
+                if let Some(sid) = session_id {
+                    inner.shiftable_loads.retain(|l| l.id != sid);
+                }
+            }
+            None => {}
         }
+        true
+    } else {
+        false
     }
-    None => {}
 }
 ```
 
@@ -260,6 +336,52 @@ pub enum SessionDetail {
 
 Build this in the `get_requests` handler by joining each request with its session from state.
 
+**TypeScript — fix `UserRequest` base type first.** The existing `UserRequest` in `types.ts`
+has a `packet_id` field that does not exist on the backend, and is missing `session_id`,
+`interruptible`, `tolerance_min`, `budget_eur`, `max_total_cost_eur`, and `tier_count`. Fix the
+base type as part of this step before layering `UserRequestWithSession` on top:
+
+```typescript
+export type SessionType = "ev" | "heater" | "shiftable_load";
+
+export type UserRequest = {
+  id: string;
+  asset_id: string;
+  target_energy_kwh: number;
+  target_soc: number | null;
+  desired_power_kw: number;
+  completion_policy: string;
+  max_total_cost_eur: number | null;
+  tier_count: number;
+  deadlines: Array<{
+    latest_end: string;
+    max_total_cost_eur: number | null;
+    min_completion: number;
+  }>;
+  session_id: string | null;        // replaces non-existent packet_id
+  session_type?: SessionType | null; // optional: absent in responses predating Step 1
+  status: UserRequestStatus;
+  estimated_cost_eur: number;
+  estimated_co2_g: number;
+  interruptible: boolean;
+  tolerance_min: number | null;
+  budget_eur: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SessionDetail =
+  | ({ type: "ev" } & EvSession)
+  | ({ type: "heater" } & HeaterTarget)
+  | ({ type: "shiftable_load" } & ShiftableLoad);
+
+export type UserRequestWithSession = UserRequest & {
+  session: SessionDetail | null;
+};
+```
+
+Search for `packet_id` in the UI codebase and remove any reads of that field before committing.
+
 ### Step 7 — Update UI Device Sessions page
 
 `VEN/ui/src/pages/DeviceSessions.tsx` currently shows EV session, heater target, and shiftable
@@ -270,19 +392,31 @@ or removing them from the UI entirely.
 Update the "New Request" form to POST to `/user-requests` with asset-specific fields, instead
 of the direct session endpoints.
 
+The component currently imports `useEvSession`, `usePostEvSession`, `useDeleteEvSession`,
+`useHeaterTarget`, `usePostHeaterTarget`, `useDeleteHeaterTarget`, `useShiftableLoads`,
+`usePostShiftableLoad`, `useDeleteShiftableLoad` from `../api/hooks`. Step 7 replaces these
+with `useRequests`, `usePostRequest`, `useDeleteRequest`. **The test file
+`DeviceSessions.test.tsx` mocks all of the old hooks explicitly — it must be rewritten in the
+same commit to mock the new hooks, otherwise all tests in that file break.**
+
 ---
 
 ## Files to Modify
 
-| File | Change |
-|---|---|
-| `VEN/src/entities/user_request.rs` | Add `SessionType` enum + `session_type` field |
-| `VEN/src/controller/user_request.rs` | Add WM fields to `CreateUserRequestBody` |
-| `VEN/src/routes/hems.rs` | Add WM branch; update `get_requests` to embed sessions; deprecate direct POSTs |
-| `VEN/src/state.rs` | Extend `cancel_request` for `ShiftableLoad` session type |
-| `VEN/ui/src/api/types.ts` | Add `UserRequestWithSession`, `SessionType`, `SessionDetail` |
-| `VEN/ui/src/api/client.ts` | Update `userRequests()` to return `UserRequestWithSession[]` |
-| `VEN/ui/src/pages/DeviceSessions.tsx` | Drive from `GET /user-requests`; update new-request form |
+| File | Change | Notes |
+|---|---|---|
+| `VEN/src/entities/user_request.rs` | Add `SessionType` enum + `session_type` field | `#[serde(default)]` required; update `session_id` comment |
+| `VEN/src/controller/user_request.rs` | Add WM fields to `CreateUserRequestBody` | Fields unused by `create_from_body`; consumed by the WM early-exit path in the handler |
+| `VEN/src/routes/hems.rs` | Add WM early-exit path before `create_from_body`; set `session_type` in EV/heater branches; extend `get_requests` to embed sessions; deprecate direct POSTs | WM must be handled before `create_from_body` — see Step 3 |
+| `VEN/src/state.rs` | Replace `cancel_request` body to handle `ShiftableLoad` | All field mutations go through `inner`, not `self` — see Step 4 |
+| `VEN/ui/src/api/types.ts` | Fix `UserRequest` base type (remove `packet_id`; add `session_id`, `interruptible`, `tolerance_min`, `budget_eur`, `max_total_cost_eur`, `tier_count`); add `SessionType`, `SessionDetail`, `UserRequestWithSession` | Fix base type first; search for `packet_id` usages before committing |
+| `VEN/ui/src/api/client.ts` | Update `userRequests()` to return `UserRequestWithSession[]` | — |
+| `VEN/ui/src/api/hooks.ts` | Verify `useRequests` type inference after client return type change; update `CreateUserRequestBody` import if WM fields added | No new hooks needed; existing `useRequests`/`usePostRequest`/`useDeleteRequest` cover all cases |
+| `VEN/ui/src/pages/DeviceSessions.tsx` | Drive from `GET /user-requests`; update new-request form; remove old per-endpoint hook imports | — |
+| `VEN/ui/src/__tests__/DeviceSessions.test.tsx` | Rewrite `vi.mock("../api/hooks", ...)` to mock `useRequests`, `usePostRequest`, `useDeleteRequest` instead of the nine per-endpoint hooks | Must be done in the same commit as Step 7; old mocks become stale the moment the component imports change |
+
+**Do NOT modify**: `VEN/src/routes/mod.rs` — route registration is already complete and does not
+change (direct POST endpoints are kept per the migration policy).
 
 ---
 
