@@ -10,15 +10,19 @@ import { StackedAreaChart } from "./charts/StackedAreaChart";
 const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
 const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
 
-const KNOWN_ASSETS: AssetId[] = ["ev", "heater", "pv", "battery", "base_load"];
+/** Discover all asset IDs present in the timelines (everything except "grid"). */
+function discoverAssetIds(allTimelines: Record<string, AssetTimelinePoint[]>): AssetId[] {
+  return Object.keys(allTimelines).filter((id) => id !== "grid");
+}
 
 /** Build stacked-area data by positional zip across grid-aligned asset arrays. */
 export function buildStackedFromAllTimelines(
   allTimelines: Record<string, AssetTimelinePoint[]>
 ): StackedAreaPoint[] {
-  // Use the first known asset's array to determine length and timestamps.
+  const assetIds = discoverAssetIds(allTimelines);
+  // Use the first non-empty asset's array to determine length and timestamps.
   // RF-05c guarantees all assets share the same ts at each index.
-  const refAsset = KNOWN_ASSETS.find((id) => (allTimelines[id]?.length ?? 0) > 0);
+  const refAsset = assetIds.find((id) => (allTimelines[id]?.length ?? 0) > 0);
   const refPoints = refAsset ? allTimelines[refAsset] : [];
   if (!refPoints || refPoints.length === 0) return [];
 
@@ -32,10 +36,10 @@ export function buildStackedFromAllTimelines(
       base_load_pos: 0, base_load_neg: 0,
       gridPowerKw: null,
     };
-    for (const assetId of KNOWN_ASSETS) {
+    for (const assetId of assetIds) {
       const kw = allTimelines[assetId]?.[i]?.values?.["power_kw"] ?? 0;
-      pt[`${assetId}_pos` as keyof StackedAreaPoint] = Math.max(0, kw) as never;
-      pt[`${assetId}_neg` as keyof StackedAreaPoint] = Math.min(0, kw) as never;
+      pt[`${assetId}_pos`] = Math.max(0, kw);
+      pt[`${assetId}_neg`] = Math.min(0, kw);
     }
     pt.gridPowerKw = allTimelines["grid"]?.[i]?.values?.["power_kw"] ?? null;
     return pt;
@@ -91,7 +95,7 @@ export function GridAccumulatedCell({
             key={s.assetId}
             variant="caption"
             data-testid={`accumulated-power-${s.assetId}`}
-            sx={{ color: ASSET_COLORS[s.assetId] }}
+            sx={{ color: ASSET_COLORS[s.assetId] ?? "#888" }}
           >
             {s.label}: {s.powerKw >= 0 ? "+" : ""}
             {s.powerKw.toFixed(2)} kW
