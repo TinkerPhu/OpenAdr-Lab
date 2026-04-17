@@ -61,6 +61,9 @@ struct MilpWeights {
     c_ev_ramp_eur_kw: f64,
     /// Penalty per kW of battery net-power change between consecutive slots [€/kW]
     c_bat_ramp_eur_kw: f64,
+    /// Penalty per kWh of battery discharge co-occurring with EV charging when
+    /// PV surplus ≥ ev_min_kw [€/kWh]. 0.0 = disabled.
+    c_bat_ev_coexist_eur_kwh: f64,
     /// Scales service reward terms; always 1.0 until grid-services are modelled
     w_services: f64,
 }
@@ -185,6 +188,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_bat_startup_eur: p.c_bat_startup_eur,
             c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
             c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
+            c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             w_services: 1.0,
         },
         PlannerObjective::MinGhg => MilpWeights {
@@ -197,6 +201,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_bat_startup_eur: p.c_bat_startup_eur,
             c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
             c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
+            c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             w_services: 1.0,
         },
         PlannerObjective::MinGrid => MilpWeights {
@@ -209,6 +214,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_bat_startup_eur: p.c_bat_startup_eur,
             c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
             c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
+            c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             w_services: 1.0,
         },
         PlannerObjective::MaxRevenue => MilpWeights {
@@ -221,6 +227,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_bat_startup_eur: p.c_bat_startup_eur,
             c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
             c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
+            c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             w_services: 1.0,
         },
         PlannerObjective::Custom => MilpWeights {
@@ -233,6 +240,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_bat_startup_eur: p.c_bat_startup_eur,
             c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
             c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
+            c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             w_services: 1.0,
         },
     }
@@ -735,6 +743,28 @@ fn solve_milp(
         } else {
             vec![]
         };
+    // ev_has_pv_surplus[t]: precomputed mask — true when PV surplus ≥ ev_min_kw.
+    // x_coexist[t] linearises the product p_bat_dis[t] × z_ev_on[t] for those slots.
+    let ev_has_pv_surplus: Vec<bool> =
+        if inputs.ev_mode != MilpLoadMode::MustNotRun
+            && bat_present
+            && weights.c_bat_ev_coexist_eur_kwh > 0.0
+        {
+            (0..n)
+                .map(|t| inputs.p_pv_kw[t] - inputs.p_base_kw[t] >= inputs.p_ev_min_kw)
+                .collect()
+        } else {
+            vec![false; n]
+        };
+    let x_coexist: Vec<Option<Variable>> = (0..n)
+        .map(|t| {
+            if ev_has_pv_surplus[t] {
+                Some(vars.add(variable().min(0.0).max(bat_dis_max)))
+            } else {
+                None
+            }
+        })
+        .collect();
 
     // ── Objective + deadline energy accumulators (loop 1) ────────────────────
     let t_ev_dlim = inputs.t_ev_dead_step.unwrap_or(n.saturating_sub(1));
@@ -773,6 +803,10 @@ fn solve_milp(
             if let Some(&d) = delta_bat_ramp.get(t - 1) {
                 objective += weights.c_bat_ramp_eur_kw * d;
             }
+        }
+        // C_coexist: penalise battery discharge co-occurring with EV charging in PV-surplus slots
+        if let Some(x) = x_coexist[t] {
+            objective += (weights.c_bat_ev_coexist_eur_kwh * dt_h) * x;
         }
 
         // Deadline-gated energy accumulators
@@ -938,6 +972,15 @@ fn solve_milp(
         model = model.with(constraint!(
             delta_bat_ramp[i] >= (p_bat_ch[t - 1] - p_bat_dis[t - 1]) - (p_bat_ch[t] - p_bat_dis[t])
         ));
+    }
+
+    // x_coexist linearisation: x[t] = p_bat_dis[t] · z_ev_on[t] (McCormick envelope)
+    for t in 0..n {
+        if let Some(x) = x_coexist[t] {
+            model = model.with(constraint!(x <= p_bat_dis[t]));
+            model = model.with(constraint!(x <= bat_dis_max * z_ev_on[t]));
+            model = model.with(constraint!(x >= p_bat_dis[t] - bat_dis_max * (1.0 - z_ev_on[t])));
+        }
     }
 
     // Shiftable load constraints: each must start exactly once
@@ -1909,6 +1952,7 @@ mod tests {
             c_bat_startup_eur: 0.0,
             c_ev_ramp_eur_kw: 0.0,
             c_bat_ramp_eur_kw: 0.0,
+            c_bat_ev_coexist_eur_kwh: 0.0,
             w_services: 1.0,
         }
     }
@@ -2162,6 +2206,47 @@ mod tests {
                 assert!(
                     (p - first).abs() < 0.15,
                     "battery discharge power varies across active slots: {dis_power:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn battery_does_not_discharge_during_ev_charging_with_pv_surplus() {
+        // 4 slots, flat tariff, PV surplus exceeds ev_min in every slot.
+        // Battery has stored energy. EV must charge.
+        // High c_bat_ev_coexist → battery should not discharge during EV-on slots.
+        let n = 4;
+        let mut inputs = make_solver_inputs(n, 0.5);
+        inputs.p_pv_kw = vec![5.0; n]; // surplus = 5.0 - 0.5 = 4.5 kW ≥ ev_min
+
+        inputs.e_bat_nom_kwh = Some(10.0);
+        inputs.e_bat_init_kwh = Some(8.0);
+        inputs.e_bat_min_kwh = Some(0.0);
+        inputs.e_bat_max_kwh = Some(10.0);
+        inputs.p_bat_ch_max_kw = Some(3.0);
+        inputs.p_bat_dis_max_kw = Some(3.0);
+        inputs.eff_bat_ch = Some(1.0);
+        inputs.eff_bat_dis = Some(1.0);
+
+        inputs.ev_mode = MilpLoadMode::MustRun;
+        inputs.a_ev = vec![true; n];
+        inputs.t_ev_dead_step = Some(n - 1);
+        inputs.p_ev_max_kw = 7.4;
+        inputs.p_ev_min_kw = 1.4;
+        inputs.e_ev_core_kwh = 4.0 * 1.4; // 5.6 kWh — easily met by PV alone
+
+        let mut weights = make_solver_weights();
+        weights.c_bat_ev_coexist_eur_kwh = 10.0;
+
+        let out = solve_milp(&inputs, &weights).expect("solver failed");
+
+        for t in 0..n {
+            if out.z_ev_on[t] > 0.5 {
+                assert!(
+                    out.p_bat_dis_kw[t] < 0.1,
+                    "slot {t}: battery discharged {:.3} kW while EV charging with PV surplus",
+                    out.p_bat_dis_kw[t]
                 );
             }
         }

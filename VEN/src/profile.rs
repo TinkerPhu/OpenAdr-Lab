@@ -363,6 +363,12 @@ pub struct PlannerConfig {
     /// Penalises |(p_ch[t]−p_dis[t]) − (p_ch[t−1]−p_dis[t−1])|; smooths battery power.
     #[serde(default = "default_bat_ramp")]
     pub c_bat_ramp_eur_kw: f64,
+    /// Penalty per kWh of battery discharge co-occurring with EV charging in slots where
+    /// PV surplus (p_pv − p_base) ≥ p_ev_min_kw [€/kWh]. Discourages unnecessary battery
+    /// cycling when free PV power is available to cover the EV load.
+    /// Set to 0.0 to disable. Default: 0.5.
+    #[serde(default = "default_bat_ev_coexist")]
+    pub c_bat_ev_coexist_eur_kwh: f64,
     /// Scales contractual limit violation penalties. 1.0 = normal; 0.0 = disabled.
     #[serde(default = "default_w_viol")]
     pub w_viol: f64,
@@ -403,6 +409,7 @@ impl Default for PlannerConfig {
             c_bat_startup_eur: default_bat_startup(),
             c_ev_ramp_eur_kw: default_ev_ramp(),
             c_bat_ramp_eur_kw: default_bat_ramp(),
+            c_bat_ev_coexist_eur_kwh: default_bat_ev_coexist(),
             w_viol: default_w_viol(),
             pen_imp_eur_kwh: default_pen_imp(),
             pen_exp_eur_kwh: default_pen_exp(),
@@ -442,6 +449,9 @@ fn default_ev_ramp() -> f64 {
 }
 fn default_bat_ramp() -> f64 {
     0.005
+}
+fn default_bat_ev_coexist() -> f64 {
+    0.5
 }
 fn default_w_viol() -> f64 {
     1.0
