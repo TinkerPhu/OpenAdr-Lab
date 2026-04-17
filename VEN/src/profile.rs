@@ -422,10 +422,10 @@ fn default_bat_wear() -> f64 {
     0.03
 }
 fn default_ev_startup() -> f64 {
-    0.001
+    0.01
 }
 fn default_bat_startup() -> f64 {
-    0.001
+    0.01
 }
 fn default_w_viol() -> f64 {
     1.0
