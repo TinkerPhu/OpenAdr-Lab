@@ -7,7 +7,8 @@
 
 // ─── Asset identifiers ────────────────────────────────────────────────────────
 
-export type AssetId = "ev" | "heater" | "pv" | "battery" | "base_load";
+/** Known physics assets. Dynamic shiftable loads (e.g. "wm") are also valid. */
+export type AssetId = "ev" | "heater" | "pv" | "battery" | "base_load" | (string & {});
 
 // ─── Asset color palette (fixed per asset type) ───────────────────────────────
 
@@ -17,6 +18,19 @@ export const ASSET_COLORS: Record<string, string> = {
   pv: "#FFC107",
   battery: "#9C27B0",
   base_load: "#607D8B",
+  wm: "#FF9800",
+  dw: "#795548",
+};
+
+/** Human-readable labels for known asset IDs. */
+export const ASSET_LABELS: Record<string, string> = {
+  ev: "EV",
+  heater: "Heater",
+  pv: "PV",
+  battery: "Battery",
+  base_load: "Base Load",
+  wm: "Washing Machine",
+  dw: "Dishwasher",
 };
 
 // ─── Summary (left section of each asset cell) ───────────────────────────────
@@ -123,6 +137,8 @@ export type StackedAreaPoint = {
   base_load_pos: number;
   base_load_neg: number;
   gridPowerKw: number | null;
+  /** Dynamic shiftable load pos/neg keys (e.g. wm_pos, wm_neg). */
+  [key: string]: number | null;
 };
 
 // ─── UI state ────────────────────────────────────────────────────────────────

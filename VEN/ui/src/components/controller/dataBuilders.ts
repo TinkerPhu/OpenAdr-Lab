@@ -14,7 +14,7 @@ import type {
   AssetSummary,
   TariffSnapshot,
 } from "./types";
-import { ASSET_COLORS } from "./types";
+import { ASSET_COLORS, ASSET_LABELS } from "./types";
 import type {
   TariffSnapshot as ApiTariffSnapshot,
   SimSnapshot,
@@ -150,6 +150,14 @@ export function deriveAssetSummaries(
   summaries.push(
     makeSummary("base_load", "Base Load", (baseLoadAsset?.power_kw ?? 0), null)
   );
+
+  // Dynamic assets (shiftable loads: wm, dw, etc.) — anything not in the hardcoded set
+  const HARDCODED_IDS = new Set(["ev", "heater", "pv", "battery", "base_load"]);
+  for (const [assetId, assetData] of Object.entries(sim.assets)) {
+    if (HARDCODED_IDS.has(assetId)) continue;
+    const label = ASSET_LABELS[assetId] ?? assetId.toUpperCase();
+    summaries.push(makeSummary(assetId, label, assetData.power_kw, null));
+  }
 
   return summaries;
 }
