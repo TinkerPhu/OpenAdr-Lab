@@ -57,6 +57,8 @@ struct MilpWeights {
     c_ev_startup_eur: f64,
     /// Penalty per battery charge/discharge mode transition [€/transition]
     c_bat_startup_eur: f64,
+    /// Penalty per kW of EV power change between consecutive slots [€/kW]
+    c_ev_ramp_eur_kw: f64,
     /// Scales service reward terms; always 1.0 until grid-services are modelled
     w_services: f64,
 }
@@ -179,6 +181,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_bat_wear_eur_kwh: 0.03,
             c_ev_startup_eur: p.c_ev_startup_eur,
             c_bat_startup_eur: p.c_bat_startup_eur,
+            c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
             w_services: 1.0,
         },
         PlannerObjective::MinGhg => MilpWeights {
@@ -189,6 +192,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_bat_wear_eur_kwh: 0.0,
             c_ev_startup_eur: p.c_ev_startup_eur,
             c_bat_startup_eur: p.c_bat_startup_eur,
+            c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
             w_services: 1.0,
         },
         PlannerObjective::MinGrid => MilpWeights {
@@ -199,6 +203,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_bat_wear_eur_kwh: 0.0,
             c_ev_startup_eur: p.c_ev_startup_eur,
             c_bat_startup_eur: p.c_bat_startup_eur,
+            c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
             w_services: 1.0,
         },
         PlannerObjective::MaxRevenue => MilpWeights {
@@ -209,6 +214,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_bat_wear_eur_kwh: 0.03,
             c_ev_startup_eur: p.c_ev_startup_eur,
             c_bat_startup_eur: p.c_bat_startup_eur,
+            c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
             w_services: 1.0,
         },
         PlannerObjective::Custom => MilpWeights {
@@ -219,6 +225,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_bat_wear_eur_kwh: p.c_bat_wear_eur_kwh,
             c_ev_startup_eur: p.c_ev_startup_eur,
             c_bat_startup_eur: p.c_bat_startup_eur,
+            c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
             w_services: 1.0,
         },
     }
@@ -697,6 +704,14 @@ fn solve_milp(
         } else {
             vec![]
         };
+    // delta_ev_ramp[i] = |p_ev[t] - p_ev[t-1]| via two-sided continuous relaxation.
+    // Continuous variable ≥ 0; no binary needed.
+    let delta_ev_ramp: Vec<Variable> =
+        if inputs.ev_mode != MilpLoadMode::MustNotRun && n > 1 && weights.c_ev_ramp_eur_kw > 0.0 {
+            (0..n - 1).map(|_| vars.add(variable().min(0.0))).collect()
+        } else {
+            vec![]
+        };
 
     // ── Objective + deadline energy accumulators (loop 1) ────────────────────
     let t_ev_dlim = inputs.t_ev_dead_step.unwrap_or(n.saturating_sub(1));
@@ -728,6 +743,9 @@ fn solve_milp(
             }
             if let Some(&d) = delta_bat_mode.get(t - 1) {
                 objective += weights.c_bat_startup_eur * d;
+            }
+            if let Some(&d) = delta_ev_ramp.get(t - 1) {
+                objective += weights.c_ev_ramp_eur_kw * d;
             }
         }
 
@@ -875,6 +893,11 @@ fn solve_milp(
         let t = i + 1;
         model = model.with(constraint!(delta_bat_mode[i] >= u_bat[t] - u_bat[t - 1]));
         model = model.with(constraint!(delta_bat_mode[i] >= u_bat[t - 1] - u_bat[t]));
+    }
+    for i in 0..delta_ev_ramp.len() {
+        let t = i + 1;
+        model = model.with(constraint!(delta_ev_ramp[i] >= p_ev[t] - p_ev[t - 1]));
+        model = model.with(constraint!(delta_ev_ramp[i] >= p_ev[t - 1] - p_ev[t]));
     }
 
     // Shiftable load constraints: each must start exactly once
@@ -1844,6 +1867,7 @@ mod tests {
             c_bat_wear_eur_kwh: 0.0,
             c_ev_startup_eur: 0.0,
             c_bat_startup_eur: 0.0,
+            c_ev_ramp_eur_kw: 0.0,
             w_services: 1.0,
         }
     }
@@ -2024,6 +2048,38 @@ mod tests {
                 residual.abs() < 1e-4,
                 "power balance violated at t={t}: residual={residual:.6}"
             );
+        }
+    }
+
+    #[test]
+    fn ev_ramp_penalty_produces_flat_charging_power() {
+        // 6 slots, flat tariff → solver is indifferent between e.g. [7.4,1.4,7.4,…] and [4.0,4.0,…].
+        // High ramp penalty forces the solver to keep p_ev constant across slots.
+        let n = 6;
+        let mut inputs = make_solver_inputs(n, 0.0);
+        inputs.a_ev = vec![true; n];
+        inputs.ev_mode = MilpLoadMode::MustRun;
+        inputs.t_ev_dead_step = Some(n - 1);
+        inputs.p_ev_max_kw = 7.4;
+        inputs.p_ev_min_kw = 1.4;
+        inputs.e_ev_core_kwh = 3.0 * 7.4; // needs ~3 full slots at max
+
+        let mut weights = make_solver_weights();
+        weights.c_ev_startup_eur = 0.5; // also penalise startups so EV is one block
+        weights.c_ev_ramp_eur_kw = 1.0; // 1 EUR per kW change — very high
+
+        let out = solve_milp(&inputs, &weights).expect("solver failed");
+
+        let active_power: Vec<f64> = out.p_ev_kw.iter().copied().filter(|&v| v > 0.05).collect();
+        // All active slots must have the same power (within 0.1 kW rounding)
+        if active_power.len() > 1 {
+            let first = active_power[0];
+            for &p in &active_power[1..] {
+                assert!(
+                    (p - first).abs() < 0.1,
+                    "EV power varies across active slots: {active_power:?}"
+                );
+            }
         }
     }
 }
