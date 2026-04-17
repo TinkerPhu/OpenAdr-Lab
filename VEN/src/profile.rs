@@ -355,6 +355,10 @@ pub struct PlannerConfig {
     /// Encourages contiguous charge and discharge blocks rather than scattered spikes.
     #[serde(default = "default_bat_startup")]
     pub c_bat_startup_eur: f64,
+    /// Ramp penalty per kW of EV power change between consecutive slots [€/kW].
+    /// Penalises |p_ev[t] - p_ev[t-1]|; keeps charging at a stable power level.
+    #[serde(default = "default_ev_ramp")]
+    pub c_ev_ramp_eur_kw: f64,
     /// Scales contractual limit violation penalties. 1.0 = normal; 0.0 = disabled.
     #[serde(default = "default_w_viol")]
     pub w_viol: f64,
@@ -393,6 +397,7 @@ impl Default for PlannerConfig {
             c_bat_wear_eur_kwh: default_bat_wear(),
             c_ev_startup_eur: default_ev_startup(),
             c_bat_startup_eur: default_bat_startup(),
+            c_ev_ramp_eur_kw: default_ev_ramp(),
             w_viol: default_w_viol(),
             pen_imp_eur_kwh: default_pen_imp(),
             pen_exp_eur_kwh: default_pen_exp(),
@@ -426,6 +431,9 @@ fn default_ev_startup() -> f64 {
 }
 fn default_bat_startup() -> f64 {
     0.01
+}
+fn default_ev_ramp() -> f64 {
+    0.005
 }
 fn default_w_viol() -> f64 {
     1.0
