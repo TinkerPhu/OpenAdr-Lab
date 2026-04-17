@@ -552,6 +552,7 @@ mod tests {
             export_flexibility_kw: 0.0,
             bat_charge_kw: 0.0,
             bat_discharge_kw: 0.0,
+            planned_kw_by_asset: std::collections::HashMap::from([(asset_id.to_string(), power_kw)]),
         }
     }
 
@@ -1078,6 +1079,7 @@ mod tests {
             export_flexibility_kw: 0.0,
             bat_charge_kw: 0.0,
             bat_discharge_kw: 0.0,
+            planned_kw_by_asset: std::collections::HashMap::new(),
         }
     }
 
