@@ -59,6 +59,8 @@ struct MilpWeights {
     c_bat_startup_eur: f64,
     /// Penalty per kW of EV power change between consecutive slots [€/kW]
     c_ev_ramp_eur_kw: f64,
+    /// Penalty per kW of battery net-power change between consecutive slots [€/kW]
+    c_bat_ramp_eur_kw: f64,
     /// Scales service reward terms; always 1.0 until grid-services are modelled
     w_services: f64,
 }
@@ -182,6 +184,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_ev_startup_eur: p.c_ev_startup_eur,
             c_bat_startup_eur: p.c_bat_startup_eur,
             c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
+            c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
             w_services: 1.0,
         },
         PlannerObjective::MinGhg => MilpWeights {
@@ -193,6 +196,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_ev_startup_eur: p.c_ev_startup_eur,
             c_bat_startup_eur: p.c_bat_startup_eur,
             c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
+            c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
             w_services: 1.0,
         },
         PlannerObjective::MinGrid => MilpWeights {
@@ -204,6 +208,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_ev_startup_eur: p.c_ev_startup_eur,
             c_bat_startup_eur: p.c_bat_startup_eur,
             c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
+            c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
             w_services: 1.0,
         },
         PlannerObjective::MaxRevenue => MilpWeights {
@@ -215,6 +220,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_ev_startup_eur: p.c_ev_startup_eur,
             c_bat_startup_eur: p.c_bat_startup_eur,
             c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
+            c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
             w_services: 1.0,
         },
         PlannerObjective::Custom => MilpWeights {
@@ -226,6 +232,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             c_ev_startup_eur: p.c_ev_startup_eur,
             c_bat_startup_eur: p.c_bat_startup_eur,
             c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
+            c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
             w_services: 1.0,
         },
     }
@@ -697,8 +704,16 @@ fn solve_milp(
         } else {
             vec![]
         };
-    // delta_bat_mode[i] = 1 when u_bat changes between slot i and i+1 (either direction).
-    let delta_bat_mode: Vec<Variable> =
+    // z_bat_active[t] = 1 when battery is charging or discharging at slot t.
+    // Linked to power via: p_bat_ch[t] + p_bat_dis[t] <= big_M × z_bat_active[t].
+    let z_bat_active: Vec<Variable> =
+        if bat_present && n > 1 && weights.c_bat_startup_eur > 0.0 {
+            (0..n).map(|_| vars.add(variable().binary())).collect()
+        } else {
+            vec![]
+        };
+    // delta_bat_active[i] = 1 when battery goes idle→active between slot i and i+1.
+    let delta_bat_active: Vec<Variable> =
         if bat_present && n > 1 && weights.c_bat_startup_eur > 0.0 {
             (0..n - 1).map(|_| vars.add(variable().binary())).collect()
         } else {
@@ -708,6 +723,14 @@ fn solve_milp(
     // Continuous variable ≥ 0; no binary needed.
     let delta_ev_ramp: Vec<Variable> =
         if inputs.ev_mode != MilpLoadMode::MustNotRun && n > 1 && weights.c_ev_ramp_eur_kw > 0.0 {
+            (0..n - 1).map(|_| vars.add(variable().min(0.0))).collect()
+        } else {
+            vec![]
+        };
+    // delta_bat_ramp[i] = |net_bat[t] - net_bat[t-1]| where net_bat = p_bat_ch - p_bat_dis.
+    // Continuous variable ≥ 0; no binary needed.
+    let delta_bat_ramp: Vec<Variable> =
+        if bat_present && n > 1 && weights.c_bat_ramp_eur_kw > 0.0 {
             (0..n - 1).map(|_| vars.add(variable().min(0.0))).collect()
         } else {
             vec![]
@@ -741,11 +764,14 @@ fn solve_milp(
             if let Some(&d) = delta_ev.get(t - 1) {
                 objective += weights.c_ev_startup_eur * d;
             }
-            if let Some(&d) = delta_bat_mode.get(t - 1) {
+            if let Some(&d) = delta_bat_active.get(t - 1) {
                 objective += weights.c_bat_startup_eur * d;
             }
             if let Some(&d) = delta_ev_ramp.get(t - 1) {
                 objective += weights.c_ev_ramp_eur_kw * d;
+            }
+            if let Some(&d) = delta_bat_ramp.get(t - 1) {
+                objective += weights.c_bat_ramp_eur_kw * d;
             }
         }
 
@@ -822,6 +848,11 @@ fn solve_milp(
                     + dt_h * eff_ch * p_bat_ch[t]
                     - dt_h * (1.0 / eff_dis) * p_bat_dis[t]
         ));
+        // Battery activity indicator: z_bat_active links to total battery power
+        if let Some(&z) = z_bat_active.get(t) {
+            let big_m = bat_ch_max + bat_dis_max;
+            model = model.with(constraint!(p_bat_ch[t] + p_bat_dis[t] <= big_m * z));
+        }
 
         // Heater: at most one active level per step
         model = model.with(constraint!(z_heat_mid[t] + z_heat_full[t] <= 1.0));
@@ -889,15 +920,24 @@ fn solve_milp(
         let t = i + 1;
         model = model.with(constraint!(delta_ev[i] >= z_ev_on[t] - z_ev_on[t - 1]));
     }
-    for i in 0..delta_bat_mode.len() {
+    for i in 0..delta_bat_active.len() {
         let t = i + 1;
-        model = model.with(constraint!(delta_bat_mode[i] >= u_bat[t] - u_bat[t - 1]));
-        model = model.with(constraint!(delta_bat_mode[i] >= u_bat[t - 1] - u_bat[t]));
+        model = model.with(constraint!(delta_bat_active[i] >= z_bat_active[t] - z_bat_active[t - 1]));
     }
     for i in 0..delta_ev_ramp.len() {
         let t = i + 1;
         model = model.with(constraint!(delta_ev_ramp[i] >= p_ev[t] - p_ev[t - 1]));
         model = model.with(constraint!(delta_ev_ramp[i] >= p_ev[t - 1] - p_ev[t]));
+    }
+    for i in 0..delta_bat_ramp.len() {
+        let t = i + 1;
+        // net_bat[t] = p_bat_ch[t] - p_bat_dis[t]
+        model = model.with(constraint!(
+            delta_bat_ramp[i] >= (p_bat_ch[t] - p_bat_dis[t]) - (p_bat_ch[t - 1] - p_bat_dis[t - 1])
+        ));
+        model = model.with(constraint!(
+            delta_bat_ramp[i] >= (p_bat_ch[t - 1] - p_bat_dis[t - 1]) - (p_bat_ch[t] - p_bat_dis[t])
+        ));
     }
 
     // Shiftable load constraints: each must start exactly once
@@ -1868,6 +1908,7 @@ mod tests {
             c_ev_startup_eur: 0.0,
             c_bat_startup_eur: 0.0,
             c_ev_ramp_eur_kw: 0.0,
+            c_bat_ramp_eur_kw: 0.0,
             w_services: 1.0,
         }
     }
@@ -1982,17 +2023,18 @@ mod tests {
     }
 
     #[test]
-    fn battery_startup_penalty_minimises_mode_changes() {
-        // Flat tariff for slots 0-1, then a higher tariff for slots 2-3.
-        // Without penalty: solver might toggle u_bat arbitrarily.
-        // With high penalty: u_bat should change at most once (cheap→discharge).
-        let n = 4;
+    fn battery_startup_penalty_minimises_active_restarts() {
+        // 6 slots with cheap→expensive tariff pattern.
+        // Without penalty: solver may fragment battery into scattered charge/discharge bursts.
+        // With high startup penalty: battery should activate in contiguous blocks (≤2 startups:
+        // one for charging, one for discharging).
+        let n = 6;
         let mut inputs = make_solver_inputs(n, 0.0);
-        inputs.c_imp_eur_kwh = vec![0.10, 0.10, 0.30, 0.30];
-        inputs.e_bat_nom_kwh = Some(4.0);
-        inputs.e_bat_init_kwh = Some(2.0);
-        inputs.e_bat_min_kwh = Some(0.4);
-        inputs.e_bat_max_kwh = Some(4.0);
+        inputs.c_imp_eur_kwh = vec![0.10, 0.10, 0.10, 0.30, 0.30, 0.30];
+        inputs.e_bat_nom_kwh = Some(6.0);
+        inputs.e_bat_init_kwh = Some(3.0);
+        inputs.e_bat_min_kwh = Some(0.6);
+        inputs.e_bat_max_kwh = Some(6.0);
         inputs.p_bat_ch_max_kw = Some(2.0);
         inputs.p_bat_dis_max_kw = Some(2.0);
         inputs.eff_bat_ch = Some(1.0);
@@ -2003,21 +2045,16 @@ mod tests {
 
         let out = solve_milp(&inputs, &weights).expect("solver failed");
 
-        // Count charge→discharge or discharge→charge transitions in solution
-        let mode_changes = (0..n - 1)
-            .filter(|&t| {
-                let ch_t = out.p_bat_ch_kw[t] > 1e-3;
-                let dis_t = out.p_bat_dis_kw[t] > 1e-3;
-                let ch_t1 = out.p_bat_ch_kw[t + 1] > 1e-3;
-                let dis_t1 = out.p_bat_dis_kw[t + 1] > 1e-3;
-                (ch_t && dis_t1) || (dis_t && ch_t1)
-            })
-            .count();
+        // Count idle→active transitions (mirrors EV startup test logic)
+        let active: Vec<bool> = (0..n)
+            .map(|t| out.p_bat_ch_kw[t] > 1e-3 || out.p_bat_dis_kw[t] > 1e-3)
+            .collect();
+        let startups = active.windows(2).filter(|w| !w[0] && w[1]).count()
+            + if active[0] { 1 } else { 0 }; // count slot-0 active as a startup
         assert!(
-            mode_changes <= 1,
-            "expected ≤1 battery mode change, got {mode_changes}; ch={:?} dis={:?}",
-            out.p_bat_ch_kw,
-            out.p_bat_dis_kw,
+            startups <= 2,
+            "expected ≤2 battery startups (charge block + discharge block), got {startups}; active={active:?} ch={:?} dis={:?}",
+            out.p_bat_ch_kw, out.p_bat_dis_kw,
         );
     }
 
@@ -2078,6 +2115,53 @@ mod tests {
                 assert!(
                     (p - first).abs() < 0.1,
                     "EV power varies across active slots: {active_power:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn battery_ramp_penalty_produces_smooth_power() {
+        // 6 slots, cheap→expensive tariff. Battery should charge in cheap slots, discharge
+        // in expensive slots. With high ramp penalty the solver should keep charge and
+        // discharge power levels constant across their respective blocks.
+        let n = 6;
+        let mut inputs = make_solver_inputs(n, 1.0); // 1 kW base load
+        inputs.c_imp_eur_kwh = vec![0.08, 0.08, 0.08, 0.30, 0.30, 0.30];
+        inputs.e_bat_nom_kwh = Some(6.0);
+        inputs.e_bat_init_kwh = Some(3.0);
+        inputs.e_bat_min_kwh = Some(0.6);
+        inputs.e_bat_max_kwh = Some(6.0);
+        inputs.p_bat_ch_max_kw = Some(3.0);
+        inputs.p_bat_dis_max_kw = Some(3.0);
+        inputs.eff_bat_ch = Some(1.0);
+        inputs.eff_bat_dis = Some(1.0);
+
+        let mut weights = make_solver_weights();
+        weights.c_bat_startup_eur = 0.5;   // keep blocks contiguous
+        weights.c_bat_ramp_eur_kw = 1.0;   // very high — force flat power
+
+        let out = solve_milp(&inputs, &weights).expect("solver failed");
+
+        // Check charging slots are at uniform power
+        let ch_power: Vec<f64> = out.p_bat_ch_kw.iter().copied().filter(|&v| v > 0.05).collect();
+        if ch_power.len() > 1 {
+            let first = ch_power[0];
+            for &p in &ch_power[1..] {
+                assert!(
+                    (p - first).abs() < 0.15,
+                    "battery charge power varies across active slots: {ch_power:?}"
+                );
+            }
+        }
+        // Check discharging slots are at uniform power
+        let dis_power: Vec<f64> = out.p_bat_dis_kw.iter().copied().filter(|&v| v > 0.05).collect();
+        if dis_power.len() > 1 {
+            let first = dis_power[0];
+            for &p in &dis_power[1..] {
+                assert!(
+                    (p - first).abs() < 0.15,
+                    "battery discharge power varies across active slots: {dis_power:?}"
                 );
             }
         }
