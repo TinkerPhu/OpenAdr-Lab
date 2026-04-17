@@ -347,6 +347,14 @@ pub struct PlannerConfig {
     /// Prevents excessive cycling when arbitrage margin is thin.
     #[serde(default = "default_bat_wear")]
     pub c_bat_wear_eur_kwh: f64,
+    /// Startup penalty per EV charging run [€/run].
+    /// Breaks degeneracy: encourages one contiguous charging block rather than fragmented slots.
+    #[serde(default = "default_ev_startup")]
+    pub c_ev_startup_eur: f64,
+    /// Startup penalty per battery charge/discharge mode transition [€/transition].
+    /// Encourages contiguous charge and discharge blocks rather than scattered spikes.
+    #[serde(default = "default_bat_startup")]
+    pub c_bat_startup_eur: f64,
     /// Scales contractual limit violation penalties. 1.0 = normal; 0.0 = disabled.
     #[serde(default = "default_w_viol")]
     pub w_viol: f64,
@@ -383,6 +391,8 @@ impl Default for PlannerConfig {
             w_ghg: default_w_ghg(),
             w_grid: 0.0,
             c_bat_wear_eur_kwh: default_bat_wear(),
+            c_ev_startup_eur: default_ev_startup(),
+            c_bat_startup_eur: default_bat_startup(),
             w_viol: default_w_viol(),
             pen_imp_eur_kwh: default_pen_imp(),
             pen_exp_eur_kwh: default_pen_exp(),
@@ -410,6 +420,12 @@ fn default_w_ghg() -> f64 {
 }
 fn default_bat_wear() -> f64 {
     0.03
+}
+fn default_ev_startup() -> f64 {
+    0.001
+}
+fn default_bat_startup() -> f64 {
+    0.001
 }
 fn default_w_viol() -> f64 {
     1.0
