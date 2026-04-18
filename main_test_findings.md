@@ -1,7 +1,7 @@
 # Main Branch Test Findings
 
-**Date:** 2026-04-18  
-**Branch:** `main` @ `65bf800`  
+**Date:** 2026-04-18 (updated 2026-04-19)  
+**Branch:** `main` @ `bbf67d5`  
 **Target:** Pi4-Server (Raspberry Pi 4, ARM64, /srv/docker/openadr_lab)
 
 ---
@@ -17,11 +17,52 @@
 
 ### Progression
 
-| Run | Branch | Passed | Failed | Root cause |
-|---|---|---|---|---|
-| Initial | `main` @ `29833f0` (24h horizon) | 170 | 47 | MILP lock contention (10-24s solve) |
-| After horizon reduction | `main` @ `d928b11` (2h horizon) | 206 | 11 | EV SoC target infeasible in 2h window |
-| **Final** | **`main` @ `65bf800`** | **217** | **0** | — |
+| Run | Branch | Config | Passed | Failed | Root cause |
+|---|---|---|---|---|---|
+| Initial | `main` @ `29833f0` | 24h/300s (n=288) | 170 | 47 | MILP lock contention (10-24s solve) |
+| Horizon reduction | `main` @ `d928b11` | 2h/300s (n=24) | 206 | 11 | EV SoC target infeasible in 2h window |
+| SoC target fix | `main` @ `65bf800` | 2h/300s (n=24) | 217 | 0 | — |
+| 24h restore (1800s) | `main` @ `6038dc5` | 24h/1800s (n=48) | 194 | 23 | Behave `{:f}` pattern vs integer hours |
+| **Final** | **`main` @ `bbf67d5`** | **24h/1800s (n=48)** | **217** | **0** | — |
+
+---
+
+## Architecture: plan_step_s Decoupling (Final Fix)
+
+### Problem
+The original test config (`plan_step_s=300, plan_horizon_h=24`) produced `n=288` MILP slots
+(~2700 binary variables), taking 10-24s to solve on Pi4 ARM64. The intermediate fix
+(`plan_horizon_h=2`) reduced complexity but lost the realistic 24h planning horizon.
+
+### Solution: Coarser MILP Resolution
+Changed `plan_step_s: 300 → 1800` (30-minute slots) while keeping `plan_horizon_h: 24`:
+
+| Config | plan_step_s | plan_horizon_h | n (slots) | Binary vars (est.) | Pi4 solve time |
+|---|---|---|---|---|---|
+| Original | 300s | 24h | 288 | ~2700 | 10-24s |
+| Intermediate | 300s | 2h | 24 | ~225 | <1s |
+| **Final** | **1800s** | **24h** | **48** | **~450** | **1-3s** |
+
+### Key Finding: No Rust Changes Required
+The dispatcher (`dispatcher.rs:39-43`) uses wall-clock slot lookup:
+`plan.slots.iter().find(|s| s.start <= now && now < s.end)`.
+It never reads `plan_step_s`. Changing the MILP resolution is a YAML-only change.
+
+### Files Changed
+- `VEN/profiles/test.yaml` — `plan_step_s: 1800`, `plan_horizon_h: 24`, `latest_end_h: 12.0`
+- `VEN/profiles/no_pv_test.yaml` — same
+- 8 feature files — restored to original 24h-scale timings (departures, target_soc, windows)
+- 3 step definitions — restored `timedelta` values to original 24h scale
+
+### EV Feasibility at 1800s
+- Energy per slot: 7 kW × 0.5h = 3.5 kWh
+- Max charge needed: 24 kWh (SoC 0.50→0.90 @ 60 kWh battery)
+- Minimum slots required: 7 (3.5h)
+- Tightest test window: 4h = 8 slots → feasible ✓
+
+### Behave Pattern Lesson
+Step definitions using `{hours:f}` (float parser) require decimal points in feature files.
+`departure in 8 hours` → undefined; `departure in 8.0 hours` → matches correctly.
 
 ---
 
@@ -473,4 +514,4 @@ The complete solver is in `VEN/src/controller/milp_planner.rs`. Key code locatio
 | Shiftable load constraints | 987-993 | Start-once binary sum |
 | Solver config | 995-996 | `time_limit(60)`, `mip_gap(0.02)` |
 | `PlannerConfig` | `profile.rs:322-396` | All configurable parameters |
-| Test profile | `VEN/profiles/test.yaml` | `plan_step_s: 300`, `plan_horizon_h: 24` |
+| Test profile | `VEN/profiles/test.yaml` | `plan_step_s: 1800`, `plan_horizon_h: 24` |
