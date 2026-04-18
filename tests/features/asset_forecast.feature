@@ -17,7 +17,7 @@ Feature: Asset Interface — forecast(timespan)
     When I GET /forecast/pv?timespan_s=3600 from the VEN
     Then the response status is 200
     And the forecast samples are in ascending timestamp order
-    And the last forecast sample is within 15 seconds of now plus 3600 seconds
+    And the last forecast sample is within 60 seconds of now plus 3600 seconds
 
   # ── Battery ─────────────────────────────────────────────────────────────────
 

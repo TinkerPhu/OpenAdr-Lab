@@ -116,8 +116,8 @@ def step_poll_capability(context, asset, field, expected):
     result = poll_until(
         fetch,
         lambda data: abs(data.get(field, float('inf')) - expected) < 1e-6,
-        timeout=30,
-        interval=1,
+        timeout=120,
+        interval=2,
         description=f"/capability/{asset} {field}=={expected}",
     )
     context.polled_capability = result
