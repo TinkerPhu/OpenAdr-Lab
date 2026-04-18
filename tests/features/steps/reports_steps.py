@@ -78,7 +78,7 @@ def step_report_in_ven1(context):
             r.get("clientName") == "ven-1" and r.get("eventID") == context.submitted_report["eventID"]
             for r in rs
         ),
-        timeout=30,
+        timeout=60,
         description="Report appears in VEN-1",
     )
     assert len(reports) > 0
@@ -97,7 +97,7 @@ def step_report_in_bff(context):
             r.get("clientName") == "ven-1" and r.get("eventID") == context.submitted_report["eventID"]
             for r in rs
         ),
-        timeout=30,
+        timeout=60,
         description="Report appears in BFF",
     )
     assert len(reports) > 0

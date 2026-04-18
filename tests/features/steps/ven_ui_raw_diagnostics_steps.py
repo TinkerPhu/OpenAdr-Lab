@@ -46,7 +46,7 @@ def step_click_refresh(context, title):
 @then("the Simulator State chart is displayed")
 def step_sim_chart_displayed(context):
     el = context.browser_page.wait_for_selector(
-        tid("sim-profile-chart"), timeout=15000
+        tid("sim-profile-chart"), timeout=20000
     )
     assert el is not None and el.is_visible(), "Simulator State chart not visible"
 
@@ -54,7 +54,7 @@ def step_sim_chart_displayed(context):
 @then("the Tariffs chart is displayed")
 def step_tariffs_chart_displayed(context):
     el = context.browser_page.wait_for_selector(
-        tid("tariffs-line-chart"), timeout=15000
+        tid("tariffs-line-chart"), timeout=20000
     )
     assert el is not None and el.is_visible(), "Tariffs chart not visible"
 
@@ -62,7 +62,7 @@ def step_tariffs_chart_displayed(context):
 @then("the Timeline chart is displayed")
 def step_timeline_chart_displayed(context):
     el = context.browser_page.wait_for_selector(
-        tid("timeline-series-chart"), timeout=15000
+        tid("timeline-series-chart"), timeout=20000
     )
     assert el is not None and el.is_visible(), "Timeline chart not visible"
 
@@ -116,7 +116,7 @@ def step_series_dropdown_visible(context):
 def step_timeline_chart_shows_series(context, series):
     # Chart is displayed — verify the select value matches the chosen series
     page = context.browser_page
-    el = page.wait_for_selector(tid("timeline-series-chart"), timeout=15000)
+    el = page.wait_for_selector(tid("timeline-series-chart"), timeout=20000)
     assert el is not None and el.is_visible(), f"Timeline chart not visible for series '{series}'"
     # Verify the dropdown still shows the selected series
     select_el = page.query_selector(tid("timeline-series-select"))

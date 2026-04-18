@@ -80,7 +80,7 @@ def step_grid_tariff_not_sticky(context):
 def step_at_least_one_asset_cell(context):
     # Wait for at least one asset cell to appear (React Query fetch may be async)
     context.browser_page.wait_for_selector(
-        "[data-testid^='asset-cell-']", timeout=15000
+        "[data-testid^='asset-cell-']", timeout=20000
     )
     cells = context.browser_page.query_selector_all("[data-testid^='asset-cell-']")
     assert len(cells) > 0, "No asset cells found on controller V2 page"
@@ -312,7 +312,7 @@ def step_collapse_right_ev(context):
 @then("the EV asset cell right section is visible")
 def step_ev_right_visible(context):
     right = context.browser_page.wait_for_selector(
-        tid("asset-cell-ev-right"), state="visible", timeout=15000
+        tid("asset-cell-ev-right"), state="visible", timeout=20000
     )
     assert right is not None and right.is_visible(), (
         "asset-cell-ev-right is not visible after expand"

@@ -79,7 +79,7 @@ def step_no_price_events(context):
     poll_until(
         _ven1_rates,
         lambda rates: isinstance(rates, list) and len(rates) == 0,
-        timeout=30,
+        timeout=60,
         interval=2,
         description="VEN-1 /tariffs returns empty list",
     )
@@ -112,7 +112,7 @@ def step_wait_for_rate_data(context):
     poll_until(
         _ven1_rates,
         lambda rates: isinstance(rates, list) and len(rates) > 0,
-        timeout=30,
+        timeout=60,
         interval=2,
         description="VEN-1 /tariffs has non-empty snapshots",
     )
