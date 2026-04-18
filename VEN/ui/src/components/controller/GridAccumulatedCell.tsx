@@ -1,8 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Box, Divider, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
-import { CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW } from "./chartLayout";
+import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
+import UnfoldLessIcon from "@mui/icons-material/UnfoldLess";
+import { CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW, CELL_CHART_HEIGHT_TALL } from "./chartLayout";
 import type { AssetId, AssetSummary, AssetTimelinePoint, StackedAreaPoint } from "./types";
 import { ASSET_COLORS } from "./types";
 import { StackedAreaChart } from "./charts/StackedAreaChart";
@@ -65,6 +67,7 @@ export function GridAccumulatedCell({
   gridPowerKw,
   onTogglePin,
 }: GridAccumulatedCellProps) {
+  const [tall, setTall] = useState(false);
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
   const tMin = nowMs - window.hoursBack * 3_600_000;
   const tMax = nowMs + window.hoursForward * 3_600_000;
@@ -113,10 +116,11 @@ export function GridAccumulatedCell({
           nowMs={nowMs}
           hoursBack={window.hoursBack}
           hoursForward={window.hoursForward}
+          height={tall ? CELL_CHART_HEIGHT_TALL : undefined}
         />
       </Box>
 
-      {/* Right column: pin button */}
+      {/* Right column: pin button + vertical expand button */}
       <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <Tooltip title={pinned ? "Unpin" : "Pin to top"}>
           <IconButton
@@ -126,6 +130,16 @@ export function GridAccumulatedCell({
             sx={{ m: 0.5 }}
           >
             {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+        <Tooltip title={tall ? "Collapse chart" : "Expand chart"}>
+          <IconButton
+            size="small"
+            data-testid="grid-accumulated-cell-tall-expand-btn"
+            onClick={() => setTall((v) => !v)}
+            sx={{ m: 0.5 }}
+          >
+            {tall ? <UnfoldLessIcon fontSize="small" /> : <UnfoldMoreIcon fontSize="small" />}
           </IconButton>
         </Tooltip>
       </Box>

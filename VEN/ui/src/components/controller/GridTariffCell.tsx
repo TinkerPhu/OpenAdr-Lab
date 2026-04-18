@@ -1,8 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Box, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
-import { CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW } from "./chartLayout";
+import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
+import UnfoldLessIcon from "@mui/icons-material/UnfoldLess";
+import { CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW, CELL_CHART_HEIGHT_TALL } from "./chartLayout";
 import type { TariffSnapshot, AssetTimelinePoint } from "./types";
 import { TariffChart } from "./charts/TariffChart";
 import { useTariffs } from "../../api/hooks";
@@ -25,6 +27,7 @@ export function GridTariffCell({
   pinned,
   onTogglePin,
 }: GridTariffCellProps) {
+  const [tall, setTall] = useState(false);
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
 
   const { data: tariffsData = [] } = useTariffs();
@@ -71,10 +74,11 @@ export function GridTariffCell({
           nowMs={nowMs}
           hoursBack={window.hoursBack}
           hoursForward={window.hoursForward}
+          height={tall ? CELL_CHART_HEIGHT_TALL : undefined}
         />
       </Box>
 
-      {/* Right column: pin button */}
+      {/* Right column: pin button + vertical expand button */}
       <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <Tooltip title={pinned ? "Unpin" : "Pin to top"}>
           <IconButton
@@ -84,6 +88,16 @@ export function GridTariffCell({
             sx={{ m: 0.5 }}
           >
             {pinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+        <Tooltip title={tall ? "Collapse chart" : "Expand chart"}>
+          <IconButton
+            size="small"
+            data-testid="grid-tariff-cell-tall-expand-btn"
+            onClick={() => setTall((v) => !v)}
+            sx={{ m: 0.5 }}
+          >
+            {tall ? <UnfoldLessIcon fontSize="small" /> : <UnfoldMoreIcon fontSize="small" />}
           </IconButton>
         </Tooltip>
       </Box>
