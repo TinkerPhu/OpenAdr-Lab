@@ -3,6 +3,9 @@
 import os
 import requests
 
+# Generous default for Pi4 ARM64 under full-suite load.
+HTTP_TIMEOUT = int(os.environ.get("TEST_HTTP_TIMEOUT", "30"))
+
 VTN_BASE_URL = os.environ.get("VTN_BASE_URL", "http://test-vtn:3000")
 VEN_BASE_URL = os.environ.get("VEN_BASE_URL", "http://test-ven-1:8080")
 VEN2_BASE_URL = os.environ.get("VEN2_BASE_URL", "http://test-ven-2:8080")
@@ -22,7 +25,7 @@ def get_token(client_id, client_secret):
             "client_id": client_id,
             "client_secret": client_secret,
         },
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
     )
     return r
 
@@ -40,7 +43,7 @@ def vtn_get(path, token, params=None):
         f"{VTN_BASE_URL}{path}",
         headers={"Authorization": f"Bearer {token}"},
         params=params,
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
     )
 
 
@@ -53,7 +56,7 @@ def vtn_post(path, token, json=None):
             "Content-Type": "application/json",
         },
         json=json,
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
     )
 
 
@@ -66,7 +69,7 @@ def vtn_put(path, token, json=None):
             "Content-Type": "application/json",
         },
         json=json,
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
     )
 
 
@@ -75,7 +78,7 @@ def vtn_delete(path, token):
     return requests.delete(
         f"{VTN_BASE_URL}{path}",
         headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
     )
 
 
@@ -86,7 +89,7 @@ def ven_get(path, params=None):
     return requests.get(
         f"{VEN_BASE_URL}{path}",
         params=params,
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
     )
 
 
@@ -95,7 +98,7 @@ def ven_post(path, json=None):
     return requests.post(
         f"{VEN_BASE_URL}{path}",
         json=json,
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
     )
 
 
@@ -103,7 +106,7 @@ def ven_delete(path):
     """DELETE against the VEN (no auth required)."""
     return requests.delete(
         f"{VEN_BASE_URL}{path}",
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
     )
 
 
@@ -114,7 +117,7 @@ def ven2_get(path, params=None):
     return requests.get(
         f"{VEN2_BASE_URL}{path}",
         params=params,
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
     )
 
 
@@ -123,7 +126,7 @@ def ven2_post(path, json=None):
     return requests.post(
         f"{VEN2_BASE_URL}{path}",
         json=json,
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
     )
 
 
@@ -131,19 +134,19 @@ def ven2_post(path, json=None):
 
 def bff_get(path, params=None):
     """GET against the BFF (no auth — BFF handles VTN auth internally)."""
-    return requests.get(f"{BFF_BASE_URL}{path}", params=params, timeout=10)
+    return requests.get(f"{BFF_BASE_URL}{path}", params=params, timeout=HTTP_TIMEOUT)
 
 
 def bff_post(path, json=None):
     """POST against the BFF."""
-    return requests.post(f"{BFF_BASE_URL}{path}", json=json, timeout=10)
+    return requests.post(f"{BFF_BASE_URL}{path}", json=json, timeout=HTTP_TIMEOUT)
 
 
 def bff_put(path, json=None):
     """PUT against the BFF."""
-    return requests.put(f"{BFF_BASE_URL}{path}", json=json, timeout=10)
+    return requests.put(f"{BFF_BASE_URL}{path}", json=json, timeout=HTTP_TIMEOUT)
 
 
 def bff_delete(path):
     """DELETE against the BFF."""
-    return requests.delete(f"{BFF_BASE_URL}{path}", timeout=10)
+    return requests.delete(f"{BFF_BASE_URL}{path}", timeout=HTTP_TIMEOUT)

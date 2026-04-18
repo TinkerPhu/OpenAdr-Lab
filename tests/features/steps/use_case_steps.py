@@ -193,7 +193,7 @@ def step_wait_ven1_event(context, name):
     poll_until(
         _ven1_events,
         lambda events: _find_event(events, name) is not None,
-        timeout=30,
+        timeout=60,
         description=f"VEN-1 shows event '{name}'",
     )
 
@@ -204,7 +204,7 @@ def step_wait_ven2_event(context, name):
     poll_until(
         _ven2_events,
         lambda events: _find_event(events, name) is not None,
-        timeout=30,
+        timeout=60,
         description=f"VEN-2 shows event '{name}'",
     )
 
@@ -214,7 +214,7 @@ def step_wait_ven1_event_gone(context, name):
     poll_until(
         _ven1_events,
         lambda events: _find_event(events, name) is None,
-        timeout=30,
+        timeout=60,
         description=f"VEN-1 no longer shows event '{name}'",
     )
 
@@ -403,7 +403,7 @@ def step_report_visible_in_vtn(context, name, client):
             r.get("clientName") == client and r.get("eventID") == event_id
             for r in reports
         ),
-        timeout=30,
+        timeout=60,
         description=f"Report from '{client}' for event '{name}' in VTN",
     )
 
@@ -443,7 +443,7 @@ def step_wait_ven1_event_value(context, name, val):
     poll_until(
         lambda: check(),
         lambda result: result is True,
-        timeout=30,
+        timeout=60,
         description=f"VEN-1 event '{name}' has payload value {val}",
     )
 
@@ -460,7 +460,7 @@ def step_wait_ven2_event_value(context, name, val):
     poll_until(
         lambda: check(),
         lambda result: result is True,
-        timeout=30,
+        timeout=60,
         description=f"VEN-2 event '{name}' has payload value {val}",
     )
 

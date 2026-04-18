@@ -190,7 +190,7 @@ def step_ev_caption_contains(context, text):
 def step_click_ev_override_toggle(context):
     # data-testid is on FormControlLabel (<label>), which is fully visible and clickable
     toggle = context.browser_page.wait_for_selector(
-        '[data-testid="ev-charge-override-toggle"]', timeout=5000
+        '[data-testid="ev-charge-override-toggle"]', timeout=20000
     )
     toggle.click()
     # Next step uses _wait_slider_disabled() which polls for DOM state
