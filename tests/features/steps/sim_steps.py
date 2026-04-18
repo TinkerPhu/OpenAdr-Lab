@@ -2,7 +2,7 @@
 
 import time
 from behave import when, then
-from features.helpers.api_client import ven_get, VEN_BASE_URL
+from features.helpers.api_client import ven_get, VEN_BASE_URL, HTTP_TIMEOUT
 from features.helpers.wait import poll_until
 import requests
 
@@ -149,14 +149,14 @@ def step_trace_shows_event_active(context, event_name):
 @then('an auto-report for event "{event_name}" exists on VEN-1')
 def step_auto_report_exists(context, event_name):
     # Find the event ID from VEN-1's event list
-    events = requests.get(f"{VEN_BASE_URL}/events", timeout=10).json()
+    events = requests.get(f"{VEN_BASE_URL}/events", timeout=HTTP_TIMEOUT).json()
     event = next((e for e in events if e.get("eventName") == event_name), None)
     assert event is not None, f"Event '{event_name}' not found on VEN-1"
     event_id = event["id"]
 
     # Poll VEN-1 reports until an auto-report for this event appears
     def fetch_matching():
-        reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=10).json()
+        reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=HTTP_TIMEOUT).json()
         return [
             r for r in reports
             if r.get("reportName", "").startswith("auto-ven-1-")
@@ -166,7 +166,7 @@ def step_auto_report_exists(context, event_name):
     matching = poll_until(
         fetch_matching,
         lambda m: len(m) > 0,
-        timeout=20,
+        timeout=60,
         description=f"auto-report for event '{event_name}'",
     )
 

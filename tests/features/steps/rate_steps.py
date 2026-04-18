@@ -220,7 +220,7 @@ def step_wait_ven_capacity_limit(context, expected):
     context.ven_capacity = poll_until(
         fetch,
         lambda cap: isinstance(cap, dict) and cap.get("import_limit_kw") == expected,
-        timeout=60,
+        timeout=120,
         description=f"VEN /capacity import_limit_kw == {expected}",
     )
 

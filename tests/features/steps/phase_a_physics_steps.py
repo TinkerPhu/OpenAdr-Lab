@@ -6,7 +6,8 @@ and UserOverrides paths (pv_irradiance, ev_plugged).
 
 import time
 from behave import given, when, then
-from features.helpers.api_client import ven_post
+from features.helpers.api_client import ven_post, ven_get
+from features.helpers.wait import poll_until
 
 
 # ── Given: setup helpers ──────────────────────────────────────────────────────
@@ -100,3 +101,28 @@ def step_capability_max_import_lt(context, threshold):
     assert actual < threshold + 1e-6, (
         f"Expected max_import_kw < {threshold}, got {actual}"
     )
+
+
+# ── Polling capability steps ──────────────────────────────────────────────────
+
+@when('I wait for the VEN /capability/{asset} {field} to equal {expected:f}')
+def step_poll_capability(context, asset, field, expected):
+    """Poll GET /capability/{asset} until `field` matches `expected` (±1e-6)."""
+    def fetch():
+        r = ven_get(f"/capability/{asset}")
+        r.raise_for_status()
+        return r.json()
+
+    result = poll_until(
+        fetch,
+        lambda data: abs(data.get(field, float('inf')) - expected) < 1e-6,
+        timeout=30,
+        interval=1,
+        description=f"/capability/{asset} {field}=={expected}",
+    )
+    context.polled_capability = result
+
+
+@then("the polled capability matched")
+def step_polled_capability_matched(context):
+    assert context.polled_capability is not None, "No polled capability result"

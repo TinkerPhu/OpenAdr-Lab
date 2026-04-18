@@ -1,6 +1,6 @@
 import requests
 from behave import when, then
-from features.helpers.api_client import bff_get, VEN_BASE_URL
+from features.helpers.api_client import bff_get, VEN_BASE_URL, HTTP_TIMEOUT
 from features.helpers.wait import poll_until
 
 
@@ -23,7 +23,7 @@ def step_wait_ven1_events(context, count):
     program_id = getattr(context, "saved_program_id", None)
 
     def fetch():
-        return requests.get(f"{VEN_BASE_URL}/events", timeout=10).json()
+        return requests.get(f"{VEN_BASE_URL}/events", timeout=HTTP_TIMEOUT).json()
 
     if program_id:
         predicate = lambda events: any(e.get("programID") == program_id for e in events)
@@ -37,7 +37,7 @@ def step_wait_ven1_events(context, count):
 
 @when("I submit a report via VEN-1 for the first event")
 def step_submit_report_ven1(context):
-    events = requests.get(f"{VEN_BASE_URL}/events", timeout=10).json()
+    events = requests.get(f"{VEN_BASE_URL}/events", timeout=HTTP_TIMEOUT).json()
     assert len(events) > 0, "VEN-1 has no events to report on"
     # Prefer the event that belongs to the program created in this scenario so
     # that stale cached events (from a previous run) are not accidentally used.
@@ -54,7 +54,7 @@ def step_submit_report_ven1(context):
         "resources": [],
     }
     context.report_response = requests.post(
-        f"{VEN_BASE_URL}/reports", json=payload, timeout=10
+        f"{VEN_BASE_URL}/reports", json=payload, timeout=HTTP_TIMEOUT
     )
     context.submitted_report = payload
 
@@ -70,7 +70,7 @@ def step_report_status(context, status):
 @then("the report appears in VEN-1 report list")
 def step_report_in_ven1(context):
     def fetch():
-        return requests.get(f"{VEN_BASE_URL}/reports", timeout=10).json()
+        return requests.get(f"{VEN_BASE_URL}/reports", timeout=HTTP_TIMEOUT).json()
 
     reports = poll_until(
         fetch,

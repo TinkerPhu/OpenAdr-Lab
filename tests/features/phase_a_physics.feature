@@ -11,9 +11,8 @@ Feature: Phase A — Asset physics and capability coverage
 
   Scenario: Battery at full SoC reports zero import capability
     Given the battery SoC is reset to 1.0
-    When I GET /capability/battery from the VEN
-    Then the response status is 200
-    And the capability max_import_kw is 0.0
+    When I wait for the VEN /capability/battery max_import_kw to equal 0.0
+    Then the polled capability matched
 
   Scenario: Battery at empty SoC reports zero export capability
     Given the battery SoC is reset to 0.0
@@ -23,11 +22,9 @@ Feature: Phase A — Asset physics and capability coverage
 
   Scenario: EV unplugged reports zero capability in both directions
     When I POST a sim override setting ev_plugged to false
-    And I wait 2 seconds for the sim to tick
-    And I GET /capability/ev from the VEN
-    Then the response status is 200
-    And the capability max_import_kw is 0.0
-    And the capability max_export_kw is 0.0
+    And I wait for the VEN /capability/ev max_import_kw to equal 0.0
+    And I wait for the VEN /capability/ev max_export_kw to equal 0.0
+    Then the polled capability matched
 
   Scenario: PV always reports fixed (non-curtailable) capability
     When I GET /capability/pv from the VEN
@@ -53,7 +50,5 @@ Feature: Phase A — Asset physics and capability coverage
 
   Scenario: ev_plugged false stops EV charging capability
     When I POST a sim override setting ev_plugged to false
-    And I wait 5 seconds for the sim to tick
-    And I GET /capability/ev from the VEN
-    Then the response status is 200
-    And the capability max_import_kw is 0.0
+    And I wait for the VEN /capability/ev max_import_kw to equal 0.0
+    Then the polled capability matched

@@ -1,11 +1,11 @@
 import requests
 from behave import when, then
-from features.helpers.api_client import vtn_post, VEN_BASE_URL, VEN2_BASE_URL
+from features.helpers.api_client import vtn_post, VEN_BASE_URL, VEN2_BASE_URL, HTTP_TIMEOUT
 from features.helpers.wait import poll_until
 
 
 def _ven_programs(ven_url):
-    return requests.get(f"{ven_url}/programs", timeout=10).json()
+    return requests.get(f"{ven_url}/programs", timeout=HTTP_TIMEOUT).json()
 
 
 @when('I create an open program named "{name}"')
