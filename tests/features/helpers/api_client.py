@@ -4,7 +4,7 @@ import os
 import requests
 
 # Generous default for Pi4 ARM64 under full-suite load.
-HTTP_TIMEOUT = int(os.environ.get("TEST_HTTP_TIMEOUT", "30"))
+HTTP_TIMEOUT = int(os.environ.get("TEST_HTTP_TIMEOUT", "60"))
 
 VTN_BASE_URL = os.environ.get("VTN_BASE_URL", "http://test-vtn:3000")
 VEN_BASE_URL = os.environ.get("VEN_BASE_URL", "http://test-ven-1:8080")
