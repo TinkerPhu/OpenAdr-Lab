@@ -14,9 +14,10 @@ pub struct EvSession {
     pub target_soc: f64,
     /// When the EV must be ready (departure time).
     pub departure_time: DateTime<Utc>,
-    /// If true, MILP treats as MayRun (soft reward); if false, MustRun (hard constraint).
+    /// If true, MILP treats as MayRun (soft reward, best-effort by departure).
+    /// If false (default), MustRun (hard constraint, must reach target SoC by departure).
     #[serde(default)]
-    pub opportunistic: bool,
+    pub soft_deadline: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

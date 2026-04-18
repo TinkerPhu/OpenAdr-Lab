@@ -10,6 +10,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControlLabel,
   IconButton,
   Paper,
   Slider,
@@ -32,6 +33,8 @@ import {
   useEvSession,
   usePostEvSession,
   useDeleteEvSession,
+  useEvSettings,
+  usePutEvSettings,
   useHeaterTarget,
   usePostHeaterTarget,
   useDeleteHeaterTarget,
@@ -51,6 +54,43 @@ function defaultDateTime(hoursOffset: number): string {
   return local.toISOString().slice(0, 16);
 }
 
+// ── EV Settings Section ──────────────────────────────────────────────────────
+
+function EvSettingsSection() {
+  const { data: settings, isLoading } = useEvSettings();
+  const putMut = usePutEvSettings();
+
+  const handleToggle = (enabled: boolean) => {
+    putMut.mutate({ opportunistic_charging_enabled: enabled });
+  };
+
+  if (isLoading) return <CircularProgress size={20} data-testid="ev-settings-loading" />;
+
+  return (
+    <Stack direction="row" alignItems="center" spacing={1} data-testid="ev-settings-section">
+      <FormControlLabel
+        control={
+          <Switch
+            checked={settings?.opportunistic_charging_enabled ?? true}
+            onChange={(e) => handleToggle(e.target.checked)}
+            disabled={putMut.isPending || !!settings?.paused_by_active_session}
+            data-testid="ev-opportunistic-charging-switch"
+          />
+        }
+        label="Opportunistic PV Charging"
+      />
+      {settings?.paused_by_active_session && (
+        <Chip
+          label="Paused — active plan"
+          size="small"
+          color="warning"
+          data-testid="ev-opportunistic-paused-chip"
+        />
+      )}
+    </Stack>
+  );
+}
+
 // ── EV Session Section ───────────────────────────────────────────────────────
 
 function EvSessionSection() {
@@ -61,7 +101,7 @@ function EvSessionSection() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [targetSoc, setTargetSoc] = useState(80);
   const [departure, setDeparture] = useState(() => defaultDateTime(8));
-  const [opportunistic, setOpportunistic] = useState(false);
+  const [softDeadline, setSoftDeadline] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handlePlugIn = async () => {
@@ -70,7 +110,7 @@ function EvSessionSection() {
       await postMut.mutateAsync({
         target_soc: targetSoc / 100,
         departure_time: new Date(departure).toISOString(),
-        opportunistic,
+        soft_deadline: softDeadline,
       });
       setDialogOpen(false);
     } catch (e: unknown) {
@@ -104,8 +144,8 @@ function EvSessionSection() {
             <Typography data-testid="ev-departure">
               Departure: {new Date(session.departure_time).toLocaleString()}
             </Typography>
-            {session.opportunistic && (
-              <Chip label="Opportunistic" size="small" data-testid="ev-opportunistic" />
+            {session.soft_deadline && (
+              <Chip label="Soft Deadline" size="small" data-testid="ev-soft-deadline-chip" />
             )}
             <Button
               variant="outlined"
@@ -156,14 +196,16 @@ function EvSessionSection() {
               InputLabelProps={{ shrink: true }}
               data-testid="ev-departure-input"
             />
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <Typography>Opportunistic</Typography>
-              <Switch
-                checked={opportunistic}
-                onChange={(e) => setOpportunistic(e.target.checked)}
-                data-testid="ev-opportunistic-switch"
-              />
-            </Stack>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={softDeadline}
+                  onChange={(e) => setSoftDeadline(e.target.checked)}
+                  data-testid="ev-soft-deadline-switch"
+                />
+              }
+              label="Soft Deadline"
+            />
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -494,6 +536,9 @@ export function DeviceSessionsPage() {
         </Stack>
         <Collapse in={evOpen}>
           <Box sx={{ p: 2 }}>
+            <Box sx={{ mb: 2 }}>
+              <EvSettingsSection />
+            </Box>
             <EvSessionSection />
           </Box>
         </Collapse>

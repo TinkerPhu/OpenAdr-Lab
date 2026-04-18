@@ -2,7 +2,8 @@ import type {
   VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry,
   SimInjectState, PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger,
   UserRequestWithSession, FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
-  EvSession, CreateEvSessionBody, HeaterTarget, CreateHeaterTargetBody,
+  EvSession, CreateEvSessionBody, EvSettings, UpdateEvSettingsBody,
+  HeaterTarget, CreateHeaterTargetBody,
   ShiftableLoad, CreateShiftableLoadBody, BaselineOverride, CreateBaselineOverrideBody,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
@@ -265,6 +266,18 @@ export class VenApi {
     const r = await fetch(url, { method: "DELETE", headers: { "X-Request-ID": requestId() } });
     console.log(`[VEN] DELETE ${url} → ${r.status}`);
     if (!r.ok) throw new Error(`DELETE /ev-session failed: ${r.status}`);
+  }
+
+  async evSettings(): Promise<EvSettings> {
+    const r = await this.getReq("/ev-settings");
+    if (!r.ok) throw new Error(`ev-settings ${r.status}`);
+    return r.json();
+  }
+
+  async putEvSettings(body: UpdateEvSettingsBody): Promise<EvSettings> {
+    const r = await this.jsonReq("PUT", "/ev-settings", body);
+    if (!r.ok) throw new Error(`PUT /ev-settings ${r.status}`);
+    return r.json();
   }
 
   async heaterTarget(): Promise<HeaterTarget | null> {
