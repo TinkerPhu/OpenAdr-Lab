@@ -32,14 +32,14 @@ simulator:
   report_interval_s: 10
 
 planner:
-  plan_step_s: 300
-  plan_horizon_h: 2
+  plan_step_s: 1800
+  plan_horizon_h: 24
   replan_interval_s: 20
 
 packets:
   - asset: ev
     target_soc: 0.80
-    latest_end_h: 1.5
+    latest_end_h: 12.0
     comfort_rates:
       - fill: 0.0
         bid: 0.50
