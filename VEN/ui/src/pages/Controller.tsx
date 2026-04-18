@@ -121,6 +121,34 @@ export function ControllerPage() {
 
   // Build pinned cells React elements
   const pinnedElements = pinnedCellIds.map((cellId) => {
+    if (cellId === "grid:tariff") {
+      if (!tariffSnapshot) return null;
+      return (
+        <GridTariffCell
+          key={cellId}
+          snapshot={tariffSnapshot}
+          gridTimeline={allTimelines["grid"] ?? []}
+          nowMs={nowMs}
+          extended={expanded}
+          pinned
+          onTogglePin={() => handleTogglePin("grid:tariff")}
+        />
+      );
+    }
+    if (cellId === "grid:accumulated") {
+      return (
+        <GridAccumulatedCell
+          key={cellId}
+          assetSummaries={assetSummaries}
+          allTimelines={allTimelines}
+          nowMs={nowMs}
+          extended={expanded}
+          pinned
+          gridPowerKw={sim.grid.net_power_w / 1000}
+          onTogglePin={() => handleTogglePin("grid:accumulated")}
+        />
+      );
+    }
     if (cellId.startsWith("asset:")) {
       const assetId = cellId.replace("asset:", "") as AssetId;
       const summary = assetSummaries.find((s) => s.assetId === assetId);

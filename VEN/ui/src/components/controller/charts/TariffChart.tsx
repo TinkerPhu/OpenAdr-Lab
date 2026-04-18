@@ -17,13 +17,14 @@ interface TariffChartProps {
   nowMs: number;
   hoursBack?: number;
   hoursForward?: number;
+  height?: number;
 }
 
 function formatTs(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }: TariffChartProps) {
+export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, height }: TariffChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable and ensures the
   // NOW reference line is always visible even when past tariff data is absent.
   const tMin = nowMs - hoursBack * 3_600_000;
@@ -76,7 +77,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0 }
         ];
 
   return (
-    <div data-testid="tariff-chart" style={{ width: "100%", height: CELL_CHART_HEIGHT }}>
+    <div data-testid="tariff-chart" style={{ width: "100%", height: height ?? CELL_CHART_HEIGHT }}>
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={chartData} margin={{ top: 4, right: 40, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
