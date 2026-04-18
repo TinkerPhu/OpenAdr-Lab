@@ -27,6 +27,7 @@ pub fn build_setpoints(
     capacity: &OadrCapacityState,
     heater_setpoint_c: Option<f64>,
     now: DateTime<Utc>,
+    overlay_enabled: bool,
 ) -> HashMap<String, f64> {
     // Start with defaults from current asset state
     let mut setpoints: HashMap<String, f64> = assets
@@ -91,7 +92,7 @@ pub fn build_setpoints(
 
     // Opportunistic surplus EV charging: redirect live PV export to EV when no
     // plan-level EV allocation is active.
-    apply_surplus_ev_overlay(&mut setpoints, assets, asset_configs, plan_allocated_ev);
+    apply_surplus_ev_overlay(&mut setpoints, assets, asset_configs, plan_allocated_ev, overlay_enabled);
 
     setpoints
 }
@@ -103,6 +104,7 @@ pub fn build_setpoints(
 /// dispatcher-only and does not appear in the plan or VTN reports.
 ///
 /// Does nothing when:
+/// - `overlay_enabled` is false (user disabled or auto-paused by active EvSession)
 /// - `plan_has_ev_allocation` is true (plan-level commitment takes priority)
 /// - EV is unplugged
 /// - EV SoC has reached its target
@@ -112,8 +114,9 @@ pub fn apply_surplus_ev_overlay(
     assets: &[AssetEntry],
     asset_configs: &[AssetConfig],
     plan_has_ev_allocation: bool,
+    overlay_enabled: bool,
 ) {
-    if plan_has_ev_allocation {
+    if plan_has_ev_allocation || !overlay_enabled {
         return;
     }
     // Live PV power (negative = export) and base load (positive = import).
@@ -228,7 +231,7 @@ mod tests {
         // PV exports 3 kW, base consumes 1 kW → surplus = 2 kW
         let (assets, configs) = build_assets(-3.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false);
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 2.0).abs() < 1e-6,
@@ -241,7 +244,7 @@ mod tests {
         // PV exports 10 kW, base 0 kW → surplus 10 kW, but EV max is 7.4 kW
         let (assets, configs) = build_assets(-10.0, 0.0, 0.1, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false);
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 7.4).abs() < 1e-6,
@@ -254,7 +257,7 @@ mod tests {
         // EV already at target — must not charge even with surplus
         let (assets, configs) = build_assets(-3.0, 1.0, 0.8, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false);
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
         assert!(
             sp.get("ev").is_none(),
             "must not charge EV when soc >= soc_target"
@@ -265,7 +268,7 @@ mod tests {
     fn surplus_not_applied_when_ev_unplugged() {
         let (assets, configs) = build_assets(-3.0, 1.0, 0.4, false, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false);
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
         assert!(sp.get("ev").is_none(), "must not charge unplugged EV");
     }
 
@@ -274,7 +277,7 @@ mod tests {
         let (assets, configs) = build_assets(-3.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("ev".to_string(), 5.0); // plan allocation already present
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, true);
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, true, true);
         // Plan's 5.0 kW must be preserved, not overwritten
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
@@ -290,7 +293,7 @@ mod tests {
         let (assets, configs) = build_assets(-4.0, 0.5, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 3.0); // battery plan allocation
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false);
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 0.5).abs() < 1e-6,
@@ -304,7 +307,7 @@ mod tests {
         let (assets, configs) = build_assets(-4.0, 0.5, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 3.5);
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false);
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
         assert!(sp.get("ev").is_none(), "EV must not charge when battery claims full surplus");
     }
 
@@ -313,7 +316,7 @@ mod tests {
         // PV exports 1 kW, base consumes 2 kW → net import, no surplus
         let (assets, configs) = build_assets(-1.0, 2.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false);
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
         assert!(sp.get("ev").is_none(), "no surplus when base_load > pv");
     }
 
@@ -322,7 +325,20 @@ mod tests {
         // PV at 0 kW (night), base consumes 1 kW
         let (assets, configs) = build_assets(0.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false);
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
         assert!(sp.get("ev").is_none(), "no surplus when PV is not generating");
+    }
+
+    #[test]
+    fn overlay_disabled_suppresses_ev_even_with_surplus() {
+        // PV exports 3 kW, base 1 kW → surplus 2 kW; EV plugged and below target.
+        // overlay_enabled=false means nothing is written regardless.
+        let (assets, configs) = build_assets(-3.0, 1.0, 0.4, true, 0.8);
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, false);
+        assert!(
+            sp.get("ev").is_none(),
+            "overlay must not fire when overlay_enabled=false"
+        );
     }
 }
