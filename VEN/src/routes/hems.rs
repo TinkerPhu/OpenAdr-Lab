@@ -5,14 +5,32 @@ use axum::{
     Json,
 };
 use chrono::Utc;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::controller::user_request::CreateUserRequestBody;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::device_session::{BaselineOverride, BaselineSlot, EvSession, HeaterTarget, ShiftableLoad};
+use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::AppCtx;
+
+/// Embedded session detail for GET /user-requests response.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionDetail {
+    Ev(EvSession),
+    Heater(HeaterTarget),
+    ShiftableLoad(ShiftableLoad),
+}
+
+/// Enriched user request with embedded session details.
+#[derive(Debug, Clone, Serialize)]
+pub struct UserRequestWithSession {
+    #[serde(flatten)]
+    pub request: UserRequest,
+    pub session: Option<SessionDetail>,
+}
 
 /// GET /plan — returns the active Plan (null until Stage 3).
 pub async fn get_plan(
@@ -46,17 +64,157 @@ pub async fn get_ledger(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.asset_ledger().await)
 }
 
-/// GET /user-requests — list all user requests.
+/// GET /user-requests — list all user requests with embedded session details.
 pub async fn get_requests(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.active_requests().await)
+    let requests = ctx.state.active_requests().await;
+    let ev = ctx.state.ev_session().await;
+    let heater = ctx.state.heater_target().await;
+    let loads = ctx.state.shiftable_loads().await;
+
+    let enriched: Vec<UserRequestWithSession> = requests
+        .into_iter()
+        .map(|req| {
+            let session = req.session_id.and_then(|sid| {
+                match req.session_type {
+                    Some(SessionType::Ev) => {
+                        ev.as_ref()
+                            .filter(|s| s.id == sid)
+                            .cloned()
+                            .map(SessionDetail::Ev)
+                    }
+                    Some(SessionType::Heater) => {
+                        heater
+                            .as_ref()
+                            .filter(|t| t.id == sid)
+                            .cloned()
+                            .map(SessionDetail::Heater)
+                    }
+                    Some(SessionType::ShiftableLoad) => {
+                        loads
+                            .iter()
+                            .find(|l| l.id == sid)
+                            .cloned()
+                            .map(SessionDetail::ShiftableLoad)
+                    }
+                    None => {
+                        // Legacy: try all session types by id match
+                        if let Some(s) = ev.as_ref().filter(|s| s.id == sid) {
+                            return Some(SessionDetail::Ev(s.clone()));
+                        }
+                        if let Some(t) = heater.as_ref().filter(|t| t.id == sid) {
+                            return Some(SessionDetail::Heater(t.clone()));
+                        }
+                        loads
+                            .iter()
+                            .find(|l| l.id == sid)
+                            .cloned()
+                            .map(SessionDetail::ShiftableLoad)
+                    }
+                }
+            });
+            UserRequestWithSession { request: req, session }
+        })
+        .collect();
+
+    Json(enriched)
 }
 
 /// POST /user-requests — create a user energy task request (Stage 5).
+///
+/// Handles three asset types:
+/// - Shiftable loads (WM etc.): detected by `power_kw + duration_min` fields; fast-path
+///   that bypasses `create_from_body` (WM has no sim-asset profile entry).
+/// - EV: `asset_id == "ev"` — goes through `create_from_body`.
+/// - Heater: `asset_id == "heater" | "boiler"` — goes through `create_from_body`.
 pub async fn post_requests(
     State(ctx): State<AppCtx>,
     Json(body): Json<CreateUserRequestBody>,
 ) -> impl IntoResponse {
     let now = Utc::now();
+
+    // ── Shiftable-load fast-path (Plan C) ───────────────────────────────────
+    // WM has no sim-asset profile entry; create_from_body would return UnknownAsset.
+    if body.power_kw.is_some() && body.duration_min.is_some() {
+        let earliest = body.earliest_start.unwrap_or(now);
+        let latest = match body.latest_end {
+            Some(t) => t,
+            None => {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(serde_json::json!({"error": "latest_end required for shiftable load"})),
+                )
+                    .into_response()
+            }
+        };
+        let power = body.power_kw.unwrap();
+        let duration = body.duration_min.unwrap();
+        let load = ShiftableLoad {
+            id: Uuid::new_v4(),
+            asset_id: body.asset_id.clone(),
+            power_kw: power,
+            duration_min: duration,
+            earliest_start: earliest,
+            latest_end: latest,
+            created_at: now,
+            updated_at: now,
+        };
+        let user_req = UserRequest {
+            id: Uuid::new_v4(),
+            asset_id: body.asset_id.clone(),
+            target_soc: None,
+            target_energy_kwh: (power * duration as f64) / 60.0,
+            desired_power_kw: power,
+            deadlines: vec![],
+            completion_policy: "STOP".to_string(),
+            max_total_cost_eur: None,
+            tier_count: 0,
+            session_id: Some(load.id),
+            session_type: Some(SessionType::ShiftableLoad),
+            status: UserRequestStatus::Active,
+            estimated_cost_eur: 0.0,
+            estimated_co2_g: 0.0,
+            interruptible: body.interruptible.unwrap_or(false),
+            tolerance_min: body.tolerance_min,
+            budget_eur: body.budget_eur,
+            created_at: now,
+            updated_at: now,
+        };
+        if let Err(msg) = ctx.state.add_shiftable_load(load).await {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({"error": msg})),
+            )
+                .into_response();
+        }
+        ctx.state.upsert_request(user_req.clone()).await;
+        ctx.state
+            .push_controller_event(
+                crate::controller::trace::ControllerEvent::RequestTransition {
+                    ts: now,
+                    request_id: user_req.id,
+                    asset_id: user_req.asset_id.clone(),
+                    from_status: "None".to_string(),
+                    to_status: format!("{:?}", user_req.status),
+                },
+            )
+            .await;
+        let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+        info!(
+            request_id = %user_req.id,
+            session_id = ?user_req.session_id,
+            asset_id = %user_req.asset_id,
+            power_kw = power,
+            duration_min = duration,
+            "user request created (shiftable load)"
+        );
+        return (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(user_req).unwrap_or_default()),
+        )
+            .into_response();
+    }
+
+    // ── EV / heater path — requires sim-asset lookup ────────────────────────
     let (assets, asset_configs) = {
         let sim = ctx.sim.lock().await;
         (sim.assets.clone(), sim.asset_configs.clone())
@@ -64,7 +222,6 @@ pub async fn post_requests(
 
     match crate::controller::user_request::create_from_body(body, &assets, &asset_configs, now) {
         Ok(mut user_req) => {
-            // Create the appropriate device session based on asset_id
             if user_req.asset_id == "ev" {
                 let deadline = user_req
                     .deadlines
@@ -81,6 +238,7 @@ pub async fn post_requests(
                     updated_at: now,
                 };
                 user_req.session_id = Some(session.id);
+                user_req.session_type = Some(SessionType::Ev);
                 ctx.state.set_ev_session(Some(session.clone())).await;
                 info!(
                     request_id = %user_req.id,
@@ -95,7 +253,7 @@ pub async fn post_requests(
                     .first()
                     .map(|d| d.latest_end)
                     .unwrap_or_else(|| now + chrono::Duration::hours(4));
-                let target_temp_c = 55.0_f64; // default heater target; use /hems/heater-target for custom temp
+                let target_temp_c = 55.0_f64;
                 let target = HeaterTarget {
                     id: Uuid::new_v4(),
                     target_temp_c,
@@ -104,6 +262,7 @@ pub async fn post_requests(
                     updated_at: now,
                 };
                 user_req.session_id = Some(target.id);
+                user_req.session_type = Some(SessionType::Heater);
                 ctx.state.set_heater_target(Some(target.clone())).await;
                 info!(
                     request_id = %user_req.id,
@@ -133,7 +292,7 @@ pub async fn post_requests(
                 .await;
             let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
             (
-                axum::http::StatusCode::CREATED,
+                StatusCode::CREATED,
                 Json(serde_json::to_value(user_req).unwrap_or_default()),
             )
                 .into_response()
@@ -141,7 +300,7 @@ pub async fn post_requests(
         Err(e) => {
             warn!("POST /user-requests rejected: {e}");
             (
-                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                StatusCode::UNPROCESSABLE_ENTITY,
                 Json(serde_json::json!({"error": e.to_string()})),
             )
                 .into_response()

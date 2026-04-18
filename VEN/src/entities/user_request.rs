@@ -1,7 +1,7 @@
 /// Stage 5 — UserRequest: the user-facing representation of an energy task.
 ///
 /// A UserRequest captures the user's intent (deadline tiers, budget) and
-/// links to the generated device session (EvSession or HeaterTarget).
+/// links to the generated device session (EvSession, HeaterTarget, or ShiftableLoad).
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -25,6 +25,15 @@ pub enum UserRequestStatus {
     Failed,    // packet failed
 }
 
+/// Discriminator for the linked device session type.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionType {
+    Ev,
+    Heater,
+    ShiftableLoad,
+}
+
 /// A user-originated energy task request, linking to a device session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserRequest {
@@ -37,7 +46,9 @@ pub struct UserRequest {
     pub completion_policy: String,
     pub max_total_cost_eur: Option<f64>, // from first tier (for API convenience)
     pub tier_count: usize,               // number of deadline tiers
-    pub session_id: Option<Uuid>,        // linked DeviceSession (EvSession or HeaterTarget)
+    pub session_id: Option<Uuid>,        // linked DeviceSession (EvSession, HeaterTarget, or ShiftableLoad)
+    #[serde(default)]
+    pub session_type: Option<SessionType>,
     pub status: UserRequestStatus,
     pub estimated_cost_eur: f64,
     pub estimated_co2_g: f64,
