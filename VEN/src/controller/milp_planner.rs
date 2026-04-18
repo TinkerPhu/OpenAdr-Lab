@@ -30,11 +30,11 @@ use crate::simulator::SimState;
 /// Derived from the presence of an active device session (EvSession / HeaterTarget).
 #[derive(Debug, Clone, PartialEq)]
 enum MilpLoadMode {
-    /// Hard energy requirement — must be met within deadline. Used when a
-    /// non-opportunistic EvSession or a HeaterTarget with remaining work is present.
+    /// Hard energy requirement — must be met within deadline. Used when
+    /// EvSession.soft_deadline=false, or a HeaterTarget with remaining work is present.
     MustRun,
     /// Soft energy target — controlled by a reward term in the objective.
-    /// Used when an opportunistic EvSession is present.
+    /// Used when EvSession.soft_deadline=true.
     MayRun,
     /// Asset absent, currently unavailable, or no device session present.
     MustNotRun,
@@ -372,7 +372,7 @@ fn build_milp_inputs(
                 // ── Device-centric path: EvSession present ────────────────
                 let current_soc = assets.ev_state().map(|s| s.soc).unwrap_or(0.0);
                 let core_kwh = ((session.target_soc - current_soc) * ev_cfg.battery_kwh).max(0.0);
-                let mode = if session.opportunistic {
+                let mode = if session.soft_deadline {
                     MilpLoadMode::MayRun
                 } else {
                     MilpLoadMode::MustRun
@@ -1712,7 +1712,7 @@ mod tests {
             id: uuid::Uuid::new_v4(),
             target_soc: 0.9,
             departure_time: now + Duration::hours(1),
-            opportunistic: false,
+            soft_deadline: false,
             created_at: now,
             updated_at: now,
         };
@@ -1737,7 +1737,7 @@ mod tests {
             id: uuid::Uuid::new_v4(),
             target_soc: 0.9,
             departure_time: now + Duration::hours(1),
-            opportunistic: false,
+            soft_deadline: false,
             created_at: now,
             updated_at: now,
         };
@@ -1747,7 +1747,7 @@ mod tests {
     }
 
     #[test]
-    fn ev_mode_must_run_for_non_opportunistic_session() {
+    fn ev_mode_must_run_for_firm_deadline_session() {
         let now = fixed_now();
         let profile = make_profile();
         let mut sim = SimState::from_profile(&profile);
@@ -1756,7 +1756,7 @@ mod tests {
             id: uuid::Uuid::new_v4(),
             target_soc: 0.9,
             departure_time: now + Duration::hours(2),
-            opportunistic: false,
+            soft_deadline: false,
             created_at: now,
             updated_at: now,
         };
@@ -1765,7 +1765,7 @@ mod tests {
     }
 
     #[test]
-    fn ev_mode_may_run_for_opportunistic_session() {
+    fn ev_mode_may_run_for_soft_deadline_session() {
         let now = fixed_now();
         let profile = make_profile();
         let mut sim = SimState::from_profile(&profile);
@@ -1774,7 +1774,7 @@ mod tests {
             id: uuid::Uuid::new_v4(),
             target_soc: 0.9,
             departure_time: now + Duration::hours(2),
-            opportunistic: true,
+            soft_deadline: true,
             created_at: now,
             updated_at: now,
         };

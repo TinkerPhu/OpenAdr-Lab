@@ -2,7 +2,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useVenContext } from "../App";
 import type {
   SensorSnapshot, SimInjectState, CreateUserRequestBody,
-  CreateEvSessionBody, CreateHeaterTargetBody, CreateShiftableLoadBody, CreateBaselineOverrideBody,
+  CreateEvSessionBody, UpdateEvSettingsBody,
+  CreateHeaterTargetBody, CreateShiftableLoadBody, CreateBaselineOverrideBody,
 } from "./types";
 
 export function useHealth() {
@@ -292,6 +293,26 @@ export function useDeleteEvSession() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ev_session"] });
       queryClient.invalidateQueries({ queryKey: ["plan"] });
+    },
+  });
+}
+
+export function useEvSettings() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["ev_settings", api.baseUrl],
+    queryFn: () => api.evSettings(),
+    refetchInterval: 10_000,
+  });
+}
+
+export function usePutEvSettings() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateEvSettingsBody) => api.putEvSettings(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ev_settings"] });
     },
   });
 }

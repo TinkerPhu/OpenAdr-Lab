@@ -83,6 +83,20 @@ impl Default for SimInjectState {
     }
 }
 
+/// User-controllable settings for the opportunistic EV charging overlay.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EvSettings {
+    /// When true (default), the dispatcher routes live PV surplus to the EV when
+    /// no EvSession is active. Automatically paused while an EvSession exists.
+    #[serde(default = "bool_true")]
+    pub opportunistic_charging_enabled: bool,
+    /// Derived: true while any EvSession is active. Set by tick loop, not user-settable.
+    #[serde(default)]
+    pub paused_by_active_session: bool,
+}
+
+fn bool_true() -> bool { true }
+
 #[derive(Clone)]
 pub struct AppState {
     inner: Arc<RwLock<InnerState>>,
@@ -124,6 +138,8 @@ pub struct InnerState {
     pub shiftable_loads: Vec<ShiftableLoad>,
     #[serde(skip)]
     pub baseline_override: Option<BaselineOverride>,
+    #[serde(skip)]
+    pub ev_settings: EvSettings,
 }
 
 impl AppState {
@@ -148,6 +164,7 @@ impl AppState {
                 heater_target: None,
                 shiftable_loads: vec![],
                 baseline_override: None,
+                ev_settings: EvSettings { opportunistic_charging_enabled: true, paused_by_active_session: false },
             })),
         }
     }
@@ -372,6 +389,14 @@ impl AppState {
         self.inner.write().await.baseline_override = ovr;
     }
 
+    pub async fn ev_settings(&self) -> EvSettings {
+        self.inner.read().await.ev_settings.clone()
+    }
+
+    pub async fn set_ev_settings(&self, s: EvSettings) {
+        self.inner.write().await.ev_settings = s;
+    }
+
     /// Return all unfulfilled obligations whose due_at <= now.
     pub async fn due_obligations(&self, now: DateTime<Utc>) -> Vec<OadrReportObligation> {
         self.inner
@@ -416,6 +441,7 @@ impl Clone for InnerState {
             heater_target: self.heater_target.clone(),
             shiftable_loads: self.shiftable_loads.clone(),
             baseline_override: self.baseline_override.clone(),
+            ev_settings: self.ev_settings.clone(),
         }
     }
 }

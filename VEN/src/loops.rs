@@ -9,7 +9,7 @@ use crate::entities;
 use crate::entities::asset::PlanTrigger;
 use crate::profile::Profile;
 use crate::simulator::SimState;
-use crate::state::AppState;
+use crate::state::{AppState, EvSettings};
 use crate::vtn::VtnClient;
 
 // ─── Event poll change detection (RF-B08) ─────────────────────────────────────
@@ -294,6 +294,18 @@ pub(crate) fn spawn_sim_tick(
             let capacity_snap = state.capacity_state().await;
             let rates_snap = state.planned_tariffs().await;
 
+            // Compute overlay_enabled: user toggle AND no active EvSession.
+            let ev_sess_tick = state.ev_session().await;
+            let ev_settings_tick = state.ev_settings().await;
+            let session_active = ev_sess_tick.is_some();
+            let overlay_enabled = ev_settings_tick.opportunistic_charging_enabled && !session_active;
+            if ev_settings_tick.paused_by_active_session != session_active {
+                state.set_ev_settings(EvSettings {
+                    paused_by_active_session: session_active,
+                    ..ev_settings_tick
+                }).await;
+            }
+
             // Tick loop: build_setpoints → sim.tick → update_sim → accounting
             let sim_snapshot = {
                 let mut sim_guard = sim.lock().await;
@@ -349,6 +361,7 @@ pub(crate) fn spawn_sim_tick(
                         &effective_capacity,
                         inject.heater_setpoint_c,
                         now,
+                        overlay_enabled,
                     ),
                     None => {
                         // No plan yet (startup window). Apply defaults then surplus overlay.
@@ -363,6 +376,7 @@ pub(crate) fn spawn_sim_tick(
                             &sim_guard.assets,
                             &sim_guard.asset_configs,
                             false,
+                            overlay_enabled,
                         );
                         m
                     }
