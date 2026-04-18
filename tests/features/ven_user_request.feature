@@ -9,7 +9,7 @@ Feature: VEN User Request Manager — Stage 5
   # --- POST /user-requests ---
 
   Scenario: POST /user-requests creates a user request with a linked EV session
-    When I POST a user request for asset "ev" with target_soc 0.90 and latest_end in 1 hours
+    When I POST a user request for asset "ev" with target_soc 0.90 and latest_end in 12 hours
     Then the response status is 201
     And the response JSON has field "id"
     And the response JSON has field "session_id"
@@ -17,7 +17,7 @@ Feature: VEN User Request Manager — Stage 5
     And the response JSON field "status" is the string "ACTIVE"
 
   Scenario: User request appears in GET /user-requests
-    When I POST a user request for asset "ev" with target_soc 0.90 and latest_end in 1 hours
+    When I POST a user request for asset "ev" with target_soc 0.90 and latest_end in 12 hours
     And I GET /user-requests from the VEN
     Then the response JSON is an array
     And the requests list has at least 1 item
@@ -37,7 +37,7 @@ Feature: VEN User Request Manager — Stage 5
   # --- DELETE /user-requests/:id (cancel) ---
 
   Scenario: Cancelling a user request clears the linked EV session
-    When I POST a user request for asset "ev" with target_soc 0.90 and latest_end in 1 hours
+    When I POST a user request for asset "ev" with target_soc 0.90 and latest_end in 12 hours
     And I save the request ID
     And I DELETE the saved user request
     Then the response status is 204
@@ -46,7 +46,7 @@ Feature: VEN User Request Manager — Stage 5
   # --- Non-storage asset rejection ---
 
   Scenario: Request for a non-storage asset is rejected
-    When I POST a user request for asset "pv" with target_soc 0.90 and latest_end in 1 hours
+    When I POST a user request for asset "pv" with target_soc 0.90 and latest_end in 12 hours
     Then the response status is 422
     And the response JSON has field "error"
 

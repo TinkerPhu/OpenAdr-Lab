@@ -38,7 +38,7 @@ def step_post_user_request(context, asset_id, soc, hours):
 
 @when('I POST a user request for asset "{asset_id}" with target_soc {soc:f} and max_cost {cost:f} EUR')
 def step_post_user_request_with_budget(context, asset_id, soc, cost):
-    latest_end = (datetime.now(timezone.utc) + timedelta(minutes=90)).strftime(
+    latest_end = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
     payload = {
@@ -66,8 +66,8 @@ def step_post_user_request_with_budget(context, asset_id, soc, cost):
 @when('I POST a multi-tier user request for asset "{asset_id}"')
 def step_post_multi_tier_request(context, asset_id):
     """Two deadline tiers: cheap (tonight) then fallback (tomorrow)."""
-    tier1 = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    tier2 = (datetime.now(timezone.utc) + timedelta(minutes=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tier1 = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tier2 = (datetime.now(timezone.utc) + timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
     payload = {
         "asset_id": asset_id,
         "target_soc": 0.80,
@@ -133,7 +133,7 @@ def step_ev_session_cleared(context):
 
 @when('I POST a user request with interruptible true and tolerance_min {tolerance:d} for asset "{asset_id}"')
 def step_post_user_request_with_leeway(context, tolerance, asset_id):
-    latest_end = (datetime.now(timezone.utc) + timedelta(minutes=90)).strftime(
+    latest_end = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
     payload = {
@@ -156,7 +156,7 @@ def step_post_user_request_with_leeway(context, tolerance, asset_id):
 
 @when('I POST a user request with budget_eur {budget:f} for asset "{asset_id}"')
 def step_post_user_request_with_budget_eur(context, budget, asset_id):
-    latest_end = (datetime.now(timezone.utc) + timedelta(minutes=90)).strftime(
+    latest_end = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
     payload = {
@@ -179,7 +179,7 @@ def step_post_user_request_with_budget_eur(context, budget, asset_id):
 @given("the VEN has a scheduled interruptible EV session")
 def step_given_scheduled_interruptible_ev_session(context):
     """Create an interruptible EV request and wait until the plan has an EV allocation."""
-    latest_end = (datetime.now(timezone.utc) + timedelta(minutes=90)).strftime(
+    latest_end = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
     payload = {
