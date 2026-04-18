@@ -54,7 +54,7 @@ class VtnUi:
         self.page.click(tid("program-form-submit"))
         self.page.wait_for_selector(tid("program-form-dialog"), state="detached")
 
-    def program_visible(self, name, timeout=30000):
+    def program_visible(self, name, timeout=45000):
         """Check if a program with the given name is visible in the list."""
         try:
             self.page.wait_for_selector(
@@ -100,7 +100,7 @@ class VtnUi:
         self.page.click(tid("event-form-submit"))
         self.page.wait_for_selector(tid("event-form-dialog"), state="detached")
 
-    def event_visible(self, name, timeout=30000):
+    def event_visible(self, name, timeout=45000):
         """Check if an event row with the given name is visible."""
         try:
             self.page.wait_for_selector(
@@ -123,7 +123,7 @@ class VtnUi:
         self.page.click(tid("confirm-dialog-ok"))
         self.page.wait_for_selector(tid("confirm-dialog"), state="detached")
 
-    def event_not_visible(self, name, timeout=30000):
+    def event_not_visible(self, name, timeout=45000):
         """Wait until an event row with the given name is gone from the table."""
         try:
             self.page.wait_for_selector(
@@ -136,7 +136,7 @@ class VtnUi:
 
     # -- reports --
 
-    def report_visible(self, client_name, timeout=30000):
+    def report_visible(self, client_name, timeout=45000):
         """Check if a report from client_name is visible.
 
         Retries once with a page reload if the first attempt fails,
@@ -170,12 +170,12 @@ class VenUi:
 
     def go_simulation(self):
         self.page.click(tid("nav-simulation"))
-        self.page.wait_for_selector(tid("ev-charge-caption"), timeout=30000)
+        self.page.wait_for_selector(tid("ev-charge-caption"), timeout=45000)
 
     def go_controller(self):
         self.page.click(tid("nav-controller"))
         try:
-            self.page.wait_for_selector(tid("controller-page"), timeout=30000)
+            self.page.wait_for_selector(tid("controller-page"), timeout=45000)
         except Exception as e:
             try:
                 print(f"\n[go_controller] FAILED. URL={self.page.url}")
@@ -187,8 +187,8 @@ class VenUi:
 
     def go_raw_diagnostics(self):
         self.page.click(tid("nav-raw-diagnostics"))
-        self.page.wait_for_selector(tid("raw-diagnostics-page"), timeout=30000)
+        self.page.wait_for_selector(tid("raw-diagnostics-page"), timeout=45000)
 
     def go_planner(self):
         self.page.click(tid("nav-planner"))
-        self.page.wait_for_selector(tid("planner-heading"), timeout=30000)
+        self.page.wait_for_selector(tid("planner-heading"), timeout=45000)

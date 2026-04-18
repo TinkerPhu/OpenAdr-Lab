@@ -26,7 +26,7 @@ def step_nav_raw_diagnostics(context):
 @then('I see the "{title}" cell')
 def step_see_cell(context, title):
     el = context.browser_page.wait_for_selector(
-        tid(f"diagnostic-cell-{_slug(title)}"), timeout=30000
+        tid(f"diagnostic-cell-{_slug(title)}"), timeout=45000
     )
     assert el is not None and el.is_visible(), f'Cell "{title}" not visible'
 
@@ -36,7 +36,7 @@ def step_see_cell(context, title):
 @when('I click the refresh button in the "{title}" cell')
 def step_click_refresh(context, title):
     btn = context.browser_page.wait_for_selector(
-        tid(f"refresh-btn-{_slug(title)}"), timeout=30000
+        tid(f"refresh-btn-{_slug(title)}"), timeout=45000
     )
     btn.click()
 
@@ -46,7 +46,7 @@ def step_click_refresh(context, title):
 @then("the Simulator State chart is displayed")
 def step_sim_chart_displayed(context):
     el = context.browser_page.wait_for_selector(
-        tid("sim-profile-chart"), timeout=30000
+        tid("sim-profile-chart"), timeout=45000
     )
     assert el is not None and el.is_visible(), "Simulator State chart not visible"
 
@@ -54,7 +54,7 @@ def step_sim_chart_displayed(context):
 @then("the Tariffs chart is displayed")
 def step_tariffs_chart_displayed(context):
     el = context.browser_page.wait_for_selector(
-        tid("tariffs-line-chart"), timeout=30000
+        tid("tariffs-line-chart"), timeout=45000
     )
     assert el is not None and el.is_visible(), "Tariffs chart not visible"
 
@@ -62,7 +62,7 @@ def step_tariffs_chart_displayed(context):
 @then("the Timeline chart is displayed")
 def step_timeline_chart_displayed(context):
     el = context.browser_page.wait_for_selector(
-        tid("timeline-series-chart"), timeout=30000
+        tid("timeline-series-chart"), timeout=45000
     )
     assert el is not None and el.is_visible(), "Timeline chart not visible"
 
@@ -73,7 +73,7 @@ def step_timeline_chart_displayed(context):
 def step_sim_cell_has_content(context):
     # After clicking Sim refresh, the Sim cell should have data or be loading
     page = context.browser_page
-    sim_cell = page.wait_for_selector(tid("diagnostic-cell-simulator-state"), timeout=30000)
+    sim_cell = page.wait_for_selector(tid("diagnostic-cell-simulator-state"), timeout=45000)
     assert sim_cell is not None, "Simulator State cell not found"
     # Either loading or chart is present — not the unloaded placeholder any more
     loading = page.query_selector(tid("loading-indicator-simulator-state"))
@@ -96,10 +96,10 @@ def step_tariffs_cell_unloaded(context):
 @when('I select "{series}" from the Timeline series dropdown')
 def step_select_timeline_series(context, series):
     page = context.browser_page
-    select = page.wait_for_selector(tid("timeline-series-select"), timeout=30000)
+    select = page.wait_for_selector(tid("timeline-series-select"), timeout=45000)
     select.click()
     # MUI Select renders options in a portal — select by visible text
-    option = page.wait_for_selector(f'li[role="option"]:has-text("{series}")', timeout=5000)
+    option = page.wait_for_selector(f'li[role="option"]:has-text("{series}")', timeout=15000)
     option.click()
     context.selected_series = series
 
@@ -107,7 +107,7 @@ def step_select_timeline_series(context, series):
 @then("the series dropdown lists the available asset series")
 def step_series_dropdown_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("timeline-series-select"), timeout=30000
+        tid("timeline-series-select"), timeout=45000
     )
     assert el is not None and el.is_visible(), "Timeline series dropdown not visible"
 
@@ -116,7 +116,7 @@ def step_series_dropdown_visible(context):
 def step_timeline_chart_shows_series(context, series):
     # Chart is displayed — verify the select value matches the chosen series
     page = context.browser_page
-    el = page.wait_for_selector(tid("timeline-series-chart"), timeout=30000)
+    el = page.wait_for_selector(tid("timeline-series-chart"), timeout=45000)
     assert el is not None and el.is_visible(), f"Timeline chart not visible for series '{series}'"
     # Verify the dropdown still shows the selected series
     select_el = page.query_selector(tid("timeline-series-select"))

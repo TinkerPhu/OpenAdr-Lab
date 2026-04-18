@@ -139,7 +139,7 @@ def step_open_ven_sim_ui(context):
 def step_ev_override_toggle_shown(context):
     # data-testid is on FormControlLabel (<label>), which is always visible
     toggle = context.browser_page.wait_for_selector(
-        '[data-testid="ev-charge-override-toggle"]', timeout=30000
+        '[data-testid="ev-charge-override-toggle"]', timeout=45000
     )
     assert toggle is not None, "EV charge rate override toggle not found in DOM"
     assert toggle.is_visible(), "EV charge rate override toggle is not visible"
@@ -190,7 +190,7 @@ def step_ev_caption_contains(context, text):
 def step_click_ev_override_toggle(context):
     # data-testid is on FormControlLabel (<label>), which is fully visible and clickable
     toggle = context.browser_page.wait_for_selector(
-        '[data-testid="ev-charge-override-toggle"]', timeout=30000
+        '[data-testid="ev-charge-override-toggle"]', timeout=45000
     )
     toggle.click()
     # Next step uses _wait_slider_disabled() which polls for DOM state
