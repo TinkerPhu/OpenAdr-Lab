@@ -13,7 +13,7 @@ from features.helpers.wait import poll_until
 @when("I POST a new EV packet with target_soc {soc:f} to /packets")
 def step_post_ev_packet(context, soc):
     """Create a new EV EnergyPacket via POST /packets."""
-    latest_end = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
+    latest_end = (datetime.now(timezone.utc) + timedelta(minutes=90)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
     payload = {
