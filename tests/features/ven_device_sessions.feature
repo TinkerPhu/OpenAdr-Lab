@@ -31,7 +31,7 @@ Feature: Device Sessions API — EV, Heater, Shiftable Loads
 
   Scenario: EV session drives the planner to allocate EV charging power
     Given I inject ev_soc 0.50 via sim inject
-    And I POST an EV session with target_soc 0.90 and departure in 1.5 hours
+    And I POST an EV session with target_soc 0.60 and departure in 1.5 hours
     When I wait for the VEN /plan to have an EV allocation in slots
     Then at least one firm slot has an allocation for asset "ev"
 
