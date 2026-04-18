@@ -10,15 +10,15 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
 
   Scenario: UC-01a — Explicit EV session is planned and allocated
     Given I inject ev_soc 0.5 via sim inject
-    And I POST an EV session with target_soc 0.90 and departure in 8.0 hours
+    And I POST an EV session with target_soc 0.90 and departure in 1.5 hours
     When I wait for the VEN /plan to have an EV allocation in slots
     Then at least one firm slot has an allocation for asset "ev"
 
-  Scenario: UC-01b — EV charge plan has FLEXIBLE envelopes for far-horizon energy
+  Scenario: UC-01b— EV charge plan has FLEXIBLE envelopes for far-horizon energy
     Given I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
-    And I POST an EV session with target_soc 0.90 and departure in 8.0 hours
+    And I POST an EV session with target_soc 0.90 and departure in 1.5 hours
     When I wait for the VEN /plan to have envelopes
     Then the plan has field "envelopes"
     And the plan.envelopes is a non-empty array
@@ -68,7 +68,7 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
 
   Scenario: UC-04b — Plan after PRICE event has rate-priced slots
     Given I inject ev_soc 0.5 via sim inject
-    And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
+    And I POST an EV session with target_soc 0.90 and departure in 1.5 hours
     And I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
