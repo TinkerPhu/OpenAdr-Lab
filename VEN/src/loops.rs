@@ -625,9 +625,12 @@ pub(crate) fn spawn_planning(
             let heat_tgt = state.heater_target().await;
             let shift_loads = state.shiftable_loads().await;
             let bl_override = state.baseline_override().await;
-            let sim_guard_for_planner = sim.lock().await;
+            // Clone SimState snapshot so the Mutex is released immediately.
+            // MILP solving takes 18-60s on Pi4 ARM64; holding the lock would
+            // block sim ticks and /capability reads for the entire duration.
+            let sim_snap = sim.lock().await.clone();
             let plan = controller::milp_planner::run_planner(
-                &*sim_guard_for_planner,
+                &sim_snap,
                 &tariff_ts,
                 &capacity,
                 &profile,
@@ -638,18 +641,16 @@ pub(crate) fn spawn_planning(
                 &shift_loads,
                 bl_override.as_ref(),
             );
-            drop(sim_guard_for_planner);
             let slot_count = plan.slots.len();
             state.set_active_plan(Some(plan)).await;
 
             // Refresh site envelope immediately after each plan cycle.
             {
-                let sim_guard = sim.lock().await;
+                let sim_snap = sim.lock().await.clone();
                 let env = controller::envelope::compute_envelope(
-                    &*sim_guard,
+                    &sim_snap,
                     now,
                 );
-                drop(sim_guard);
                 state.set_site_envelope(env).await;
             }
 
@@ -665,15 +666,13 @@ pub(crate) fn spawn_planning(
 
             // Event-driven status report on PlanCycle (T050)
             {
-                let report_opt = {
-                    let sim_guard = sim.lock().await;
-                    controller::reporter::build_status_report(
-                        &plan_cycle_event,
-                        &*sim_guard,
-                        &ven_name,
-                        now,
-                    )
-                };
+                let sim_snap = sim.lock().await.clone();
+                let report_opt = controller::reporter::build_status_report(
+                    &plan_cycle_event,
+                    &sim_snap,
+                    &ven_name,
+                    now,
+                );
                 if let Some(report) = report_opt {
                     if let Err(e) = vtn.upsert_report(report).await {
                         error!("status report (plan cycle) submission failed: {e:#}");

@@ -258,6 +258,8 @@ def _reset_device_sessions():
 
 def after_scenario(context, scenario):
     """Close browser page after @ui/@ven-ui scenarios; restart stopped services."""
+    if scenario.status == 'skipped':
+        return
     import features.helpers.api_client as api_client
     api_client.VEN_BASE_URL = api_client._DEFAULT_VEN_BASE_URL
     _cleanup_vtn_resources(context)
