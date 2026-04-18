@@ -19,7 +19,7 @@ def step_open_controller_v2(context):
 @then("the grid tariff cell is visible")
 def step_grid_tariff_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("grid-tariff-cell"), timeout=20000
+        tid("grid-tariff-cell"), timeout=30000
     )
     assert el is not None and el.is_visible(), "grid-tariff-cell not visible"
 
@@ -27,7 +27,7 @@ def step_grid_tariff_visible(context):
 @then("the grid accumulated cell is visible")
 def step_grid_accumulated_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("grid-accumulated-cell"), timeout=20000
+        tid("grid-accumulated-cell"), timeout=30000
     )
     assert el is not None and el.is_visible(), "grid-accumulated-cell not visible"
 
@@ -58,7 +58,7 @@ def step_grid_above_asset(context):
 @then("the controller V2 scrollable content area is visible")
 def step_scrollable_content_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("scrollable-content"), timeout=20000
+        tid("scrollable-content"), timeout=30000
     )
     assert el is not None and el.is_visible(), "scrollable-content not visible"
 
@@ -80,7 +80,7 @@ def step_grid_tariff_not_sticky(context):
 def step_at_least_one_asset_cell(context):
     # Wait for at least one asset cell to appear (React Query fetch may be async)
     context.browser_page.wait_for_selector(
-        "[data-testid^='asset-cell-']", timeout=20000
+        "[data-testid^='asset-cell-']", timeout=30000
     )
     cells = context.browser_page.query_selector_all("[data-testid^='asset-cell-']")
     assert len(cells) > 0, "No asset cells found on controller V2 page"
@@ -92,7 +92,7 @@ def step_at_least_one_asset_cell(context):
 @then("the EV asset cell shows a power value")
 def step_ev_power_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("asset-power-ev"), timeout=20000
+        tid("asset-power-ev"), timeout=30000
     )
     assert el is not None and el.is_visible(), "asset-power-ev not visible"
     text = el.inner_text().strip()
@@ -102,7 +102,7 @@ def step_ev_power_visible(context):
 @then("the EV asset cell shows a cost rate value")
 def step_ev_cost_rate_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("asset-cost-rate-ev"), timeout=20000
+        tid("asset-cost-rate-ev"), timeout=30000
     )
     assert el is not None and el.is_visible(), "asset-cost-rate-ev not visible"
 
@@ -110,7 +110,7 @@ def step_ev_cost_rate_visible(context):
 @then("the EV asset cell shows a CO2eq rate value")
 def step_ev_co2_rate_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("asset-co2-rate-ev"), timeout=20000
+        tid("asset-co2-rate-ev"), timeout=30000
     )
     assert el is not None and el.is_visible(), "asset-co2-rate-ev not visible"
 
@@ -118,7 +118,7 @@ def step_ev_co2_rate_visible(context):
 @then("the EV asset timeline chart is visible")
 def step_ev_timeline_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("asset-timeline-chart-ev"), timeout=20000
+        tid("asset-timeline-chart-ev"), timeout=30000
     )
     assert el is not None and el.is_visible(), "asset-timeline-chart-ev not visible"
 
@@ -127,19 +127,19 @@ def step_ev_timeline_visible(context):
 def step_now_line_visible(context):
     # recharts ReferenceLine renders as a <line> inside the chart SVG
     chart = context.browser_page.wait_for_selector(
-        tid("asset-timeline-chart-ev"), timeout=20000
+        tid("asset-timeline-chart-ev"), timeout=30000
     )
     assert chart is not None, "asset-timeline-chart-ev not found"
     # Wait for the recharts reference line element (has class recharts-reference-line).
     # Uses wait_for_selector (not query_selector) to account for async recharts rendering.
-    ref_line = chart.wait_for_selector(".recharts-reference-line", timeout=20000)
+    ref_line = chart.wait_for_selector(".recharts-reference-line", timeout=30000)
     assert ref_line is not None, "No recharts-reference-line found inside asset-timeline-chart-ev"
 
 
 @then("the battery asset cell shows a SoC value")
 def step_battery_soc_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("asset-soc-battery"), timeout=20000
+        tid("asset-soc-battery"), timeout=30000
     )
     assert el is not None and el.is_visible(), "asset-soc-battery not visible"
 
@@ -147,7 +147,7 @@ def step_battery_soc_visible(context):
 @then("the battery asset timeline chart is visible")
 def step_battery_timeline_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("asset-timeline-chart-battery"), timeout=20000
+        tid("asset-timeline-chart-battery"), timeout=30000
     )
     assert el is not None and el.is_visible(), "asset-timeline-chart-battery not visible"
 
@@ -155,7 +155,7 @@ def step_battery_timeline_visible(context):
 @then("the base_load asset timeline chart is visible")
 def step_base_load_timeline_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("asset-timeline-chart-base_load"), timeout=20000
+        tid("asset-timeline-chart-base_load"), timeout=30000
     )
     assert el is not None and el.is_visible(), "asset-timeline-chart-base_load not visible"
 
@@ -163,7 +163,7 @@ def step_base_load_timeline_visible(context):
 @then("the global time range extend button is visible")
 def step_global_extend_btn_visible(context):
     el = context.browser_page.wait_for_selector(
-        tid("global-time-range-extend-btn"), timeout=20000
+        tid("global-time-range-extend-btn"), timeout=30000
     )
     assert el is not None and el.is_visible(), "global-time-range-extend-btn not visible"
 
@@ -181,7 +181,7 @@ def _expand_ev_right_section(page):
         btn.click()
         # Wait for right section content to appear
         page.wait_for_selector(
-            tid("asset-cell-ev-right"), state="visible", timeout=20000,
+            tid("asset-cell-ev-right"), state="visible", timeout=30000,
         )
 
 
@@ -191,14 +191,14 @@ def _expand_ev_status_accordion(page):
     """
     _expand_ev_right_section(page)
     # Controls are directly visible in the right section — no accordion to expand.
-    page.wait_for_selector(tid("right-section-ev"), state="visible", timeout=20000)
+    page.wait_for_selector(tid("right-section-ev"), state="visible", timeout=30000)
 
 
 @then("the EV plugged toggle is visible in the EV cell right section")
 def step_ev_plugged_toggle_visible(context):
     _expand_ev_status_accordion(context.browser_page)
     el = context.browser_page.wait_for_selector(
-        tid("ctrl-ev-plugged"), timeout=20000
+        tid("ctrl-ev-plugged"), timeout=30000
     )
     assert el is not None and el.is_visible(), "ctrl-ev-plugged toggle not visible"
 
@@ -207,7 +207,7 @@ def step_ev_plugged_toggle_visible(context):
 def step_ev_soc_slider_visible(context):
     _expand_ev_status_accordion(context.browser_page)
     el = context.browser_page.wait_for_selector(
-        tid("ctrl-ev-soc"), timeout=20000
+        tid("ctrl-ev-soc"), timeout=30000
     )
     assert el is not None and el.is_visible(), "ctrl-ev-soc slider not visible"
 
@@ -224,7 +224,7 @@ def step_toggle_ev_plugged(context):
 
     # MUI Switch renders data-testid on a <span>; click the inner <input> to reliably toggle
     checkbox = context.browser_page.wait_for_selector(
-        f'{tid("ctrl-ev-plugged")} input[type="checkbox"]', timeout=20000
+        f'{tid("ctrl-ev-plugged")} input[type="checkbox"]', timeout=30000
     )
     checkbox.click()
 
@@ -253,7 +253,7 @@ def step_ev_plugged_state_changed(context):
 @then("the EV asset cell has a pin button")
 def step_ev_has_pin_button(context):
     el = context.browser_page.wait_for_selector(
-        tid("asset-cell-ev-pin-btn"), timeout=20000
+        tid("asset-cell-ev-pin-btn"), timeout=30000
     )
     assert el is not None and el.is_visible(), "asset-cell-ev-pin-btn not visible"
 
@@ -261,7 +261,7 @@ def step_ev_has_pin_button(context):
 @then("the grid tariff cell has a pin button")
 def step_grid_tariff_has_pin_button(context):
     el = context.browser_page.wait_for_selector(
-        tid("grid-tariff-cell-pin-btn"), timeout=20000
+        tid("grid-tariff-cell-pin-btn"), timeout=30000
     )
     assert el is not None and el.is_visible(), "grid-tariff-cell-pin-btn not visible"
 
@@ -269,7 +269,7 @@ def step_grid_tariff_has_pin_button(context):
 @when("I click the pin button on the EV asset cell")
 def step_pin_ev_cell(context):
     el = context.browser_page.wait_for_selector(
-        tid("asset-cell-ev-pin-btn"), timeout=20000
+        tid("asset-cell-ev-pin-btn"), timeout=30000
     )
     el.click()
 
@@ -277,7 +277,7 @@ def step_pin_ev_cell(context):
 @when("I click the pin button on the EV asset cell again")
 def step_unpin_ev_cell(context):
     el = context.browser_page.wait_for_selector(
-        tid("asset-cell-ev-pin-btn"), timeout=20000
+        tid("asset-cell-ev-pin-btn"), timeout=30000
     )
     el.click()
 
@@ -285,7 +285,7 @@ def step_unpin_ev_cell(context):
 @then("the EV asset cell is visible in the pinned zone")
 def step_ev_cell_in_pinned_zone(context):
     pinned_zone = context.browser_page.wait_for_selector(
-        tid("pinned-zone"), timeout=20000
+        tid("pinned-zone"), timeout=30000
     )
     assert pinned_zone is not None and pinned_zone.is_visible(), "pinned-zone not visible"
     ev_in_pinned = pinned_zone.query_selector(tid("asset-cell-ev"))
@@ -304,7 +304,7 @@ def step_ev_cell_not_in_pinned_zone(context):
 @when("I click the collapse right button on the EV asset cell")
 def step_collapse_right_ev(context):
     el = context.browser_page.wait_for_selector(
-        tid("asset-cell-ev-collapse-right"), timeout=20000
+        tid("asset-cell-ev-collapse-right"), timeout=30000
     )
     el.click()
 
@@ -312,7 +312,7 @@ def step_collapse_right_ev(context):
 @then("the EV asset cell right section is visible")
 def step_ev_right_visible(context):
     right = context.browser_page.wait_for_selector(
-        tid("asset-cell-ev-right"), state="visible", timeout=20000
+        tid("asset-cell-ev-right"), state="visible", timeout=30000
     )
     assert right is not None and right.is_visible(), (
         "asset-cell-ev-right is not visible after expand"

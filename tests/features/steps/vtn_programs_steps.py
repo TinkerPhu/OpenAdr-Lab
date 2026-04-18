@@ -5,6 +5,7 @@ from features.helpers.api_client import (
     vtn_get,
     vtn_post,
     VTN_BASE_URL,
+    HTTP_TIMEOUT,
 )
 
 
@@ -47,4 +48,4 @@ def step_response_field_equals(context, field, value):
 
 @when('I GET "{path}" without authentication')
 def step_get_without_auth(context, path):
-    context.response = requests.get(f"{VTN_BASE_URL}{path}", timeout=10)
+    context.response = requests.get(f"{VTN_BASE_URL}{path}", timeout=HTTP_TIMEOUT)

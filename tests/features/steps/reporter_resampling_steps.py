@@ -2,7 +2,7 @@
 
 import requests
 from behave import given, when, then
-from features.helpers.api_client import vtn_post, VEN_BASE_URL
+from features.helpers.api_client import vtn_post, VEN_BASE_URL, HTTP_TIMEOUT
 from features.helpers.wait import poll_until
 
 
@@ -58,7 +58,7 @@ def step_wait_ven1_history(context, secs):
 @when("I wait for VEN-1 to have at least {count:d} fulfilled obligations")
 def step_wait_ven1_obligations_fulfilled(context, count):
     def fetch():
-        return requests.get(f"{VEN_BASE_URL}/obligations", timeout=10).json()
+        return requests.get(f"{VEN_BASE_URL}/obligations", timeout=HTTP_TIMEOUT).json()
 
     obligations = poll_until(
         fetch,
@@ -76,7 +76,7 @@ def step_wait_ven1_timer_reports_for_event(context, count):
     event_id = context.saved_event_id
 
     def fetch():
-        reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=10).json()
+        reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=HTTP_TIMEOUT).json()
         return [r for r in reports if r.get("eventID") == event_id]
 
     matching = poll_until(
@@ -91,7 +91,7 @@ def step_wait_ven1_timer_reports_for_event(context, count):
 
 @then("the latest VEN-1 report for the event has multiple intervals")
 def step_report_has_multiple_intervals(context):
-    reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=10).json()
+    reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=HTTP_TIMEOUT).json()
     event_id = context.saved_event_id
 
     matching = [r for r in reports if r.get("eventID") == event_id]
@@ -111,7 +111,7 @@ def step_report_has_multiple_intervals(context):
 @then("the latest VEN-1 report for the event has exactly {count:d} interval")
 @then("the latest VEN-1 report for the event has exactly {count:d} intervals")
 def step_report_has_exact_intervals(context, count):
-    reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=10).json()
+    reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=HTTP_TIMEOUT).json()
     event_id = context.saved_event_id
 
     matching = [r for r in reports if r.get("eventID") == event_id]

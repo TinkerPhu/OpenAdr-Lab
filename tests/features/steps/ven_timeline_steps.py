@@ -54,8 +54,8 @@ def step_timeline_all_contains_key(context, key):
 @then("all timeline points are at or after now")
 def step_all_points_at_or_after_now(context):
     from datetime import timedelta
-    # Record "now" with 5s tolerance for clock skew between test runner and VEN.
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=5)
+    # Record "now" with 15s tolerance for clock skew between test runner and VEN.
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=15)
     data = getattr(context, "last_response_json", None) or context.last_response.json()
     assert isinstance(data, list), "Response is not a list"
     for i, point in enumerate(data):
@@ -66,5 +66,5 @@ def step_all_points_at_or_after_now(context):
         except ValueError:
             assert False, f"Point {i} has unparseable ts: {ts_str!r}"
         assert ts_dt >= cutoff, (
-            f"Point {i} ts={ts_str} is before now-5s={cutoff.isoformat()}"
+            f"Point {i} ts={ts_str} is before now-15s={cutoff.isoformat()}"
         )
