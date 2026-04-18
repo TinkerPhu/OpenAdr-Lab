@@ -16,7 +16,7 @@ Feature: UC-05..UC-07 — VTN Coordination Use Cases
 
   Scenario: UC-05c — Each flexibility envelope in /plan has energy_needed and rate range fields
     Given I inject ev_soc 0.5 via sim inject
-    And I POST an EV session with target_soc 0.90 and departure in 12 hours
+    And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
     And I have a VTN token as "any-business"
     And I create a rate-system program and save its ID
     And I create a cheap 4-hour PRICE event for the saved program
