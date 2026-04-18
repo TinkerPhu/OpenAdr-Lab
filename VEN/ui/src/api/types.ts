@@ -297,7 +297,8 @@ export type EvSession = {
   id: string;
   target_soc: number;
   departure_time: string;
-  opportunistic: boolean;
+  /** When true, MILP treats charging as a soft reward (best-effort). Default false = must reach target by departure. */
+  soft_deadline: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -305,7 +306,17 @@ export type EvSession = {
 export type CreateEvSessionBody = {
   target_soc: number;
   departure_time: string;
-  opportunistic?: boolean;
+  soft_deadline?: boolean;
+};
+
+export type EvSettings = {
+  opportunistic_charging_enabled: boolean;
+  /** Derived: true while any EvSession is active (auto-pause). */
+  paused_by_active_session: boolean;
+};
+
+export type UpdateEvSettingsBody = {
+  opportunistic_charging_enabled: boolean;
 };
 
 export type HeaterTarget = {

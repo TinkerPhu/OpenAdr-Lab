@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DeviceSessionsPage } from "../pages/DeviceSessions";
-import type { EvSession, HeaterTarget, ShiftableLoad } from "../api/types";
+import type { EvSession, EvSettings, HeaterTarget, ShiftableLoad } from "../api/types";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
@@ -12,7 +12,7 @@ const sampleEvSession: EvSession = {
   id: "ev-001",
   target_soc: 0.8,
   departure_time: "2026-04-11T14:00:00Z",
-  opportunistic: false,
+  soft_deadline: false,
   created_at: "2026-04-11T06:00:00Z",
   updated_at: "2026-04-11T06:00:00Z",
 };
@@ -41,11 +41,16 @@ const sampleLoads: ShiftableLoad[] = [
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
 const mockEvSession = vi.fn((): EvSession | undefined => undefined);
+const mockEvSettings = vi.fn((): EvSettings => ({
+  opportunistic_charging_enabled: true,
+  paused_by_active_session: false,
+}));
 const mockHeaterTarget = vi.fn((): HeaterTarget | undefined => undefined);
 const mockShiftableLoads = vi.fn((): ShiftableLoad[] => []);
 
 const mockPostEvSession = vi.fn();
 const mockDeleteEvSession = vi.fn();
+const mockPutEvSettings = vi.fn();
 const mockPostHeaterTarget = vi.fn();
 const mockDeleteHeaterTarget = vi.fn();
 const mockPostShiftableLoad = vi.fn();
@@ -63,6 +68,15 @@ vi.mock("../api/hooks", () => ({
   }),
   useDeleteEvSession: () => ({
     mutateAsync: mockDeleteEvSession,
+    isPending: false,
+  }),
+  useEvSettings: () => ({
+    data: mockEvSettings(),
+    isLoading: false,
+    isError: false,
+  }),
+  usePutEvSettings: () => ({
+    mutate: mockPutEvSettings,
     isPending: false,
   }),
   useHeaterTarget: () => ({
@@ -125,6 +139,7 @@ describe("DeviceSessionsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEvSession.mockReturnValue(undefined);
+    mockEvSettings.mockReturnValue({ opportunistic_charging_enabled: true, paused_by_active_session: false });
     mockHeaterTarget.mockReturnValue(undefined);
     mockShiftableLoads.mockReturnValue([]);
   });
@@ -218,5 +233,33 @@ describe("DeviceSessionsPage", () => {
     renderPage();
     await user.click(screen.getByTestId("shiftable-delete-sl-001"));
     expect(mockDeleteShiftableLoad).toHaveBeenCalledWith("sl-001");
+  });
+
+  // ── EV Settings ────────────────────────────────────────────────────────────
+
+  it("renders EV settings section with opportunistic charging switch", () => {
+    renderPage();
+    expect(screen.getByTestId("ev-settings-section")).toBeInTheDocument();
+    expect(screen.getByTestId("ev-opportunistic-charging-switch")).toBeInTheDocument();
+  });
+
+  it("switch is enabled when not paused", () => {
+    renderPage();
+    expect(screen.getByTestId("ev-opportunistic-charging-switch")).not.toBeDisabled();
+    expect(screen.queryByTestId("ev-opportunistic-paused-chip")).not.toBeInTheDocument();
+  });
+
+  it("shows paused chip and disables switch when paused_by_active_session is true", () => {
+    mockEvSettings.mockReturnValue({ opportunistic_charging_enabled: true, paused_by_active_session: true });
+    renderPage();
+    expect(screen.getByTestId("ev-opportunistic-paused-chip")).toBeInTheDocument();
+    expect(screen.getByTestId("ev-opportunistic-charging-switch")).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("calls putEvSettings when switch is toggled", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("ev-opportunistic-charging-switch"));
+    expect(mockPutEvSettings).toHaveBeenCalledWith({ opportunistic_charging_enabled: false });
   });
 });
