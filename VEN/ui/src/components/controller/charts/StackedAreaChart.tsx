@@ -21,6 +21,7 @@ interface StackedAreaChartProps {
   nowMs: number;
   hoursBack?: number;
   hoursForward?: number;
+  height?: number;
 }
 
 function formatTs(ts: number) {
@@ -96,6 +97,7 @@ export function StackedAreaChart({
   nowMs,
   hoursBack = 1.0,
   hoursForward = 1.0,
+  height,
 }: StackedAreaChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes
   // and ensures the NOW reference line is always within the visible range.
@@ -119,7 +121,7 @@ export function StackedAreaChart({
   ];
 
   return (
-    <div data-testid="accumulated-area-chart" style={{ width: "100%", height: CELL_CHART_HEIGHT }}>
+    <div data-testid="accumulated-area-chart" style={{ width: "100%", height: height ?? CELL_CHART_HEIGHT }}>
       <ResponsiveContainer width="100%" height="100%">
         {/* margin.right=92 provides alignment space matching the two right axes
             (44+44 px) in AssetTimelineChart — no right axis here so the grid
