@@ -67,7 +67,7 @@ Feature: Planner Visualization Page
 
   Scenario: Clicking a matrix cell with a step opens the step detail drawer
     Given I inject ev_soc 0.5 via sim inject
-    And I POST an EV session with target_soc 0.60 and departure in 1.5 hours
+    And I POST an EV session with target_soc 0.90 and departure in 12 hours
     When I wait for the VEN /plan to have an EV allocation in slots
     And I navigate to the Planner page
     And I click the first matrix cell with nonzero power

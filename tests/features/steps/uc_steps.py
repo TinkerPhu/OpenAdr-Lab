@@ -54,7 +54,7 @@ def step_create_fresh_ev_packet(context):
     Always works regardless of current SoC (even after 0.80 completion),
     since 0.99 > any completed target in the test profile.
     """
-    latest_end = (datetime.now(timezone.utc) + timedelta(minutes=90)).strftime(
+    latest_end = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
     r = ven_post("/packets", json={
@@ -74,8 +74,8 @@ def step_post_continue_request(context, asset_id):
     Uses target_soc=0.99 so the request succeeds even when EV has completed
     a prior 0.80-target packet and SoC is now ~0.80.
     """
-    tier1 = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    tier2 = (datetime.now(timezone.utc) + timedelta(minutes=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tier1 = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tier2 = (datetime.now(timezone.utc) + timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
     payload = {
         "asset_id": asset_id,
         "target_soc": 0.99,
