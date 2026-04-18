@@ -443,3 +443,108 @@ impl Clone for InnerState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entities::device_session::{ShiftableLoad, ShiftableLoadRuntime};
+    use chrono::{Duration, Utc};
+    use uuid::Uuid;
+
+    fn make_load(asset_id: &str) -> ShiftableLoad {
+        let now = Utc::now();
+        ShiftableLoad {
+            id: Uuid::new_v4(),
+            asset_id: asset_id.to_string(),
+            power_kw: 2.0,
+            duration_min: 60,
+            earliest_start: now,
+            latest_end: now + Duration::hours(6),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn make_runtime(load: &ShiftableLoad) -> ShiftableLoadRuntime {
+        let now = Utc::now();
+        ShiftableLoadRuntime {
+            load_id: load.id,
+            asset_id: load.asset_id.clone(),
+            power_kw: load.power_kw,
+            started_at: now,
+            ends_at: now + Duration::minutes(load.duration_min as i64),
+        }
+    }
+
+    #[test]
+    fn shiftable_runtime_is_running() {
+        let now = Utc::now();
+        let rt = ShiftableLoadRuntime {
+            load_id: Uuid::new_v4(),
+            asset_id: "wm-1".to_string(),
+            power_kw: 2.0,
+            started_at: now,
+            ends_at: now + Duration::minutes(60),
+        };
+        assert!(rt.is_running(now), "should be running at start");
+        assert!(rt.is_running(now + Duration::minutes(30)), "should be running mid-way");
+        assert!(!rt.is_running(now + Duration::minutes(60)), "half-open: not running at ends_at");
+        assert!(!rt.is_running(now - Duration::seconds(1)), "not running before start");
+    }
+
+    #[tokio::test]
+    async fn add_shiftable_load_rejects_duplicate() {
+        let state = AppState::new();
+        let load1 = make_load("wm-1");
+        let mut load2 = make_load("wm-1");
+        load2.id = Uuid::new_v4(); // different id, same asset_id
+
+        assert!(state.add_shiftable_load(load1).await.is_ok());
+        assert!(state.add_shiftable_load(load2).await.is_err(), "duplicate asset_id rejected");
+        assert_eq!(state.shiftable_loads().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn start_and_read_runtime() {
+        let state = AppState::new();
+        let load = make_load("wm-1");
+        state.add_shiftable_load(load.clone()).await.unwrap();
+
+        let rt = make_runtime(&load);
+        state.start_shiftable(rt.clone()).await;
+
+        let runtimes = state.shiftable_runtimes().await;
+        assert_eq!(runtimes.len(), 1);
+        assert_eq!(runtimes[0].load_id, load.id);
+        assert_eq!(runtimes[0].asset_id, "wm-1");
+    }
+
+    #[tokio::test]
+    async fn complete_removes_both_collections() {
+        let state = AppState::new();
+        let load = make_load("wm-1");
+        let load_id = load.id;
+        state.add_shiftable_load(load.clone()).await.unwrap();
+        state.start_shiftable(make_runtime(&load)).await;
+
+        state.complete_shiftable(load_id).await;
+
+        assert!(state.shiftable_loads().await.is_empty(), "load removed");
+        assert!(state.shiftable_runtimes().await.is_empty(), "runtime removed");
+    }
+
+    #[tokio::test]
+    async fn remove_load_removes_runtime() {
+        let state = AppState::new();
+        let load = make_load("wm-1");
+        let load_id = load.id;
+        state.add_shiftable_load(load.clone()).await.unwrap();
+        state.start_shiftable(make_runtime(&load)).await;
+
+        let removed = state.remove_shiftable_load(load_id).await;
+
+        assert!(removed, "remove should return true");
+        assert!(state.shiftable_loads().await.is_empty(), "load removed");
+        assert!(state.shiftable_runtimes().await.is_empty(), "runtime also removed");
+    }
+}
