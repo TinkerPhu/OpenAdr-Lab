@@ -24,6 +24,11 @@ pub struct CreateUserRequestBody {
     pub budget_eur: Option<f64>,     // top-level cost ceiling shorthand
     pub interruptible: Option<bool>, // planner may pause/resume
     pub tolerance_min: Option<i64>,  // ±N minutes around deadline acceptable
+    // ── Shiftable-load fields (Plan C) ──────────────────────────────────────
+    pub power_kw: Option<f64>,
+    pub duration_min: Option<u32>,
+    pub earliest_start: Option<DateTime<Utc>>,
+    pub latest_end: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -143,6 +148,7 @@ pub fn create_from_body(
         max_total_cost_eur,
         tier_count,
         session_id: None, // set by caller after device session is created
+        session_type: None, // set by caller (Ev, Heater, etc.)
         status: UserRequestStatus::Active,
         estimated_cost_eur: 0.0,
         estimated_co2_g: 0.0,

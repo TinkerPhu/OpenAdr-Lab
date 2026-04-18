@@ -233,6 +233,8 @@ export type AssetLedger = {
 
 export type UserRequestStatus = "ACTIVE" | "COMPLETED" | "CANCELLED" | "FAILED";
 
+export type SessionType = "ev" | "heater" | "shiftable_load";
+
 export type UserRequest = {
   id: string;
   asset_id: string;
@@ -243,14 +245,30 @@ export type UserRequest = {
   deadlines: Array<{
     latest_end: string;
     max_total_cost_eur: number | null;
+    max_marginal_rate_eur_kwh: number | null;
     min_completion: number;
   }>;
-  packet_id: string;
+  max_total_cost_eur: number | null;
+  tier_count: number;
+  session_id: string | null;
+  session_type: SessionType | null;
   status: UserRequestStatus;
   estimated_cost_eur: number;
   estimated_co2_g: number;
+  interruptible: boolean;
+  tolerance_min: number | null;
+  budget_eur: number | null;
   created_at: string;
   updated_at: string;
+};
+
+export type SessionDetail =
+  | { type: "ev" } & EvSession
+  | { type: "heater" } & HeaterTarget
+  | { type: "shiftable_load" } & ShiftableLoad;
+
+export type UserRequestWithSession = UserRequest & {
+  session: SessionDetail | null;
 };
 
 export type CreateUserRequestBody = {
@@ -266,6 +284,11 @@ export type CreateUserRequestBody = {
     min_completion: number | null;
   }>;
   comfort_rates: null;
+  // WM shiftable-load fields (optional)
+  power_kw?: number;
+  duration_min?: number;
+  earliest_start?: string;
+  latest_end?: string;
 };
 
 // ─── Device Session types ─────────────────────────────────────────────────────
