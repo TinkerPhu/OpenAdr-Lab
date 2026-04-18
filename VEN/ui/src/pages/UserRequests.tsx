@@ -23,7 +23,7 @@ import {
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import { useRequests, usePostRequest, useDeleteRequest } from "../api/hooks";
-import type { CreateUserRequestBody, UserRequest, UserRequestStatus } from "../api/types";
+import type { CreateUserRequestBody, UserRequestWithSession, UserRequestStatus } from "../api/types";
 
 function evExample(): string {
   const tomorrow = new Date();
@@ -137,7 +137,7 @@ function CancelUserRequestDialog({
   userRequest,
   onClose,
 }: {
-  userRequest: UserRequest | null;
+  userRequest: UserRequestWithSession | null;
   onClose: () => void;
 }) {
   const deleteMut = useDeleteRequest();
@@ -187,7 +187,7 @@ function CancelUserRequestDialog({
 export function UserRequestsPage() {
   const { data: userRequests, isLoading, isError, error } = useRequests();
   const [createOpen, setCreateOpen] = useState(false);
-  const [cancelTarget, setCancelTarget] = useState<UserRequest | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<UserRequestWithSession | null>(null);
 
   return (
     <Box>

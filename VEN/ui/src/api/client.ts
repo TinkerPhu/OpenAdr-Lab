@@ -1,7 +1,7 @@
 import type {
   VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry,
-  SimInjectState, PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger, UserRequest,
-  FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
+  SimInjectState, PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger,
+  UserRequestWithSession, FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
   EvSession, CreateEvSessionBody, HeaterTarget, CreateHeaterTargetBody,
   ShiftableLoad, CreateShiftableLoadBody, BaselineOverride, CreateBaselineOverrideBody,
 } from "./types";
@@ -183,7 +183,7 @@ export class VenApi {
     return Object.values(data) as AssetLedger[];
   }
 
-  async userRequests(): Promise<UserRequest[]> {
+  async userRequests(): Promise<UserRequestWithSession[]> {
     const r = await this.getReq("/user-requests");
     if (!r.ok) throw new Error(`user-requests ${r.status}`);
     return r.json();
@@ -230,7 +230,7 @@ export class VenApi {
     return r.json();
   }
 
-  async postRequest(body: CreateUserRequestBody): Promise<UserRequest> {
+  async postRequest(body: CreateUserRequestBody): Promise<UserRequestWithSession> {
     const r = await this.jsonReq("POST", "/user-requests", body);
     if (!r.ok) throw new Error((await r.text()) || `POST /user-requests failed: ${r.status}`);
     return r.json();

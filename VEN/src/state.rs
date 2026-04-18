@@ -3,7 +3,7 @@ use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime};
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::tariff_snapshot::TariffSnapshot;
-use crate::entities::user_request::{UserRequest, UserRequestStatus};
+use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::models::SensorSnapshot;
 use crate::simulator::SimSnapshot;
 use chrono::DateTime;
@@ -307,11 +307,31 @@ impl AppState {
         let mut inner = self.inner.write().await;
         if let Some(req) = inner.active_requests.iter_mut().find(|r| r.id == id) {
             req.status = UserRequestStatus::Cancelled;
-            if let Some(sid) = req.session_id {
-                if inner.ev_session.as_ref().map(|s| s.id) == Some(sid) {
+            let session_type = req.session_type.clone();
+            let session_id = req.session_id;
+            match session_type {
+                Some(SessionType::Ev) => {
                     inner.ev_session = None;
-                } else if inner.heater_target.as_ref().map(|t| t.id) == Some(sid) {
+                }
+                Some(SessionType::Heater) => {
                     inner.heater_target = None;
+                }
+                Some(SessionType::ShiftableLoad) => {
+                    if let Some(sid) = session_id {
+                        inner.shiftable_loads.retain(|l| l.id != sid);
+                        inner.shiftable_runtimes.retain(|r| r.load_id != sid);
+                    }
+                }
+                None => {
+                    // Legacy path: match session_id against ev/heater for requests
+                    // created before Plan C added session_type.
+                    if let Some(sid) = session_id {
+                        if inner.ev_session.as_ref().map(|s| s.id) == Some(sid) {
+                            inner.ev_session = None;
+                        } else if inner.heater_target.as_ref().map(|t| t.id) == Some(sid) {
+                            inner.heater_target = None;
+                        }
+                    }
                 }
             }
             true
@@ -385,6 +405,15 @@ impl AppState {
         let mut w = self.inner.write().await;
         w.shiftable_runtimes.retain(|r| r.load_id != load_id);
         w.shiftable_loads.retain(|l| l.id != load_id);
+        // Also mark linked UserRequest as Completed.
+        if let Some(req) = w
+            .active_requests
+            .iter_mut()
+            .find(|r| r.session_id == Some(load_id) && r.status == UserRequestStatus::Active)
+        {
+            req.status = UserRequestStatus::Completed;
+            req.updated_at = Utc::now();
+        }
     }
 
     pub async fn baseline_override(&self) -> Option<BaselineOverride> {
