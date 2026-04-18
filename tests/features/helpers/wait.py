@@ -26,11 +26,18 @@ def poll_until(fn, predicate, timeout=60, interval=1, description="condition"):
 
     Returns the first result that satisfies the predicate.
     Raises TimeoutError if the deadline passes.
+    Transient HTTP errors (ReadTimeout, ConnectionError) are swallowed so
+    the loop keeps retrying until the deadline.
     """
     deadline = time.time() + timeout
     last_result = None
     while time.time() < deadline:
-        last_result = fn()
+        try:
+            last_result = fn()
+        except (requests.exceptions.ReadTimeout,
+                requests.exceptions.ConnectionError):
+            time.sleep(interval)
+            continue
         if predicate(last_result):
             return last_result
         time.sleep(interval)
