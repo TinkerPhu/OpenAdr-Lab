@@ -19,13 +19,103 @@ const OBJECTIVE_OPTIONS: {
   value: PlannerObjective;
   label: string;
   tooltip: string;
+  detail: string;
+  weights: { label: string; value: string }[];
 }[] = [
-  { value: "min_cost",    label: "Cost",    tooltip: "Minimize energy cost" },
-  { value: "min_ghg",     label: "GHG",     tooltip: "Minimize CO₂ emissions" },
-  { value: "min_grid",    label: "Grid",    tooltip: "Minimize total grid exchange (import + export)" },
-  { value: "min_import",  label: "Autarky", tooltip: "Minimize grid import only (export OK)" },
-  { value: "max_revenue", label: "Revenue", tooltip: "Maximize export revenue" },
+  {
+    value: "min_cost",
+    label: "Cost",
+    tooltip: "Minimize energy cost",
+    detail: "Shift flexible loads to the cheapest tariff windows. A light CO₂ penalty acts as a tiebreaker; a tiny grid-exchange penalty discourages unnecessary round-trips.",
+    weights: [
+      { label: "Energy cost", value: "×1.0 (primary)" },
+      { label: "CO₂ intensity", value: "×0.20 (nudge)" },
+      { label: "Grid exchange", value: "×0.02 (rounding)" },
+      { label: "Battery wear", value: "0.03 €/kWh" },
+    ],
+  },
+  {
+    value: "min_ghg",
+    label: "GHG",
+    tooltip: "Minimize CO₂ emissions",
+    detail: "Carbon reduction takes absolute priority. Energy cost and grid flows are ignored — the planner will charge from renewable surplus even if it is financially suboptimal.",
+    weights: [
+      { label: "CO₂ intensity", value: "×10.0 (dominant)" },
+      { label: "Energy cost", value: "0 (ignored)" },
+      { label: "Grid exchange", value: "0 (ignored)" },
+    ],
+  },
+  {
+    value: "min_grid",
+    label: "Grid",
+    tooltip: "Minimize total grid exchange (import + export)",
+    detail: "Maximise local self-consumption by penalising every kWh that crosses the meter — in either direction. Good for grid-congestion zones or flat-rate tariffs.",
+    weights: [
+      { label: "Grid exchange (import + export)", value: "×1.0 (primary)" },
+      { label: "Energy cost", value: "0 (ignored)" },
+      { label: "CO₂ intensity", value: "0 (ignored)" },
+    ],
+  },
+  {
+    value: "min_import",
+    label: "Autarky",
+    tooltip: "Minimize grid import only (export OK)",
+    detail: "Reduce how much you draw from the grid. Exporting surplus PV or battery power is not penalised and can happen freely — ideal when export is revenue-neutral.",
+    weights: [
+      { label: "Grid import", value: "×1.0 (primary)" },
+      { label: "Grid export", value: "0 (allowed)" },
+      { label: "Energy cost / CO₂", value: "0 (ignored)" },
+    ],
+  },
+  {
+    value: "max_revenue",
+    label: "Revenue",
+    tooltip: "Maximize export revenue",
+    detail: "Discharge battery and curtail loads to maximise export income at peak export prices and shifts flexible loads to the cheapest tariff windows. Battery wear cost is included so the planner avoids excessive cycling.",
+    weights: [
+      { label: "Energy cost", value: "×1.0 (primary)" },
+      { label: "Battery wear", value: "0.03 €/kWh" },
+      { label: "CO₂ / grid", value: "0 (ignored)" },
+    ],
+  },
 ];
+
+// ─── Objective legend ─────────────────────────────────────────────────────────
+
+function ObjectiveLegend() {
+  return (
+    <Accordion
+      defaultExpanded={false}
+      data-testid="objective-legend"
+      disableGutters
+      elevation={0}
+      sx={{ border: 1, borderColor: "divider", borderRadius: 1, mb: 2 }}
+    >
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Typography variant="body2" color="text.secondary">
+          Optimization Objective — weight reference
+        </Typography>
+      </AccordionSummary>
+      <AccordionDetails>
+        <Stack spacing={1.5}>
+          {OBJECTIVE_OPTIONS.map((opt) => (
+            <Box key={opt.value}>
+              <Typography variant="body2" fontWeight="bold">{opt.label}</Typography>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                {opt.detail}
+              </Typography>
+              <Stack direction="row" flexWrap="wrap" gap={0.5}>
+                {opt.weights.map((w) => (
+                  <Chip key={w.label} size="small" label={`${w.label}: ${w.value}`} variant="outlined" />
+                ))}
+              </Stack>
+            </Box>
+          ))}
+        </Stack>
+      </AccordionDetails>
+    </Accordion>
+  );
+}
 
 // ─── Planner status (Plan E: SSE feedback) ────────────────────────────────────
 
@@ -107,10 +197,10 @@ export function PlannerPage() {
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
         <Typography variant="h5">Planner</Typography>
         <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel>Optimization focus</InputLabel>
+          <InputLabel>Optimization objective</InputLabel>
           <Select
             value={objective}
-            label="Optimization focus"
+            label="Optimization objective"
             data-testid="objective-select"
             onChange={(e) => {
               const val = e.target.value as PlannerObjective;
@@ -128,6 +218,8 @@ export function PlannerPage() {
           </Select>
         </FormControl>
       </Stack>
+
+      <ObjectiveLegend />
 
       <Stack spacing={3} divider={<Divider />}>
         {/* Planner Status (Plan E) */}
