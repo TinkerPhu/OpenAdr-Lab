@@ -297,6 +297,9 @@ export type CreateUserRequestBody = {
   duration_min?: number;
   earliest_start?: string;
   latest_end?: string;
+  // Per-device overrides (Plan D)
+  soft_deadline?: boolean;
+  target_temp_c?: number;
 };
 
 // ─── Device Session types ─────────────────────────────────────────────────────
