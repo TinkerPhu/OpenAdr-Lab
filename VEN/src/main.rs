@@ -5,6 +5,7 @@ mod controller;
 mod entities;
 mod loops;
 mod models;
+mod planner_events;
 mod profile;
 mod routes;
 mod simulator;
@@ -14,6 +15,7 @@ mod vtn;
 use config::Config;
 use entities::asset::PlanTrigger;
 use metrics_exporter_prometheus::PrometheusBuilder;
+use planner_events::{PlannerEvent, PlannerEventTx};
 use profile::{Profile, PlannerObjective};
 use simulator::SimState;
 use state::AppState;
@@ -31,6 +33,7 @@ pub struct AppCtx {
     pub profile: Arc<Profile>,
     pub sim: Arc<Mutex<SimState>>,
     pub active_objective: Arc<RwLock<PlannerObjective>>,
+    pub planner_event_tx: PlannerEventTx,
 }
 
 #[tokio::main]
@@ -123,6 +126,8 @@ async fn main() -> anyhow::Result<()> {
         cfg.ven_name.clone(),
     );
     let active_objective = Arc::new(RwLock::new(profile.planner.objective));
+    let (planner_event_tx, _) = tokio::sync::broadcast::channel::<PlannerEvent>(128);
+    let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx);
     loops::spawn_planning(
         state.clone(),
         profile.clone(),
@@ -131,6 +136,7 @@ async fn main() -> anyhow::Result<()> {
         trigger_rx,
         sim_state.clone(),
         active_objective.clone(),
+        planner_event_tx.clone(),
     );
     if let Some(path) = cfg.persist_path.clone() {
         loops::spawn_state_persist(state.clone(), path);
@@ -145,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
         profile,
         sim: sim_state.clone(),
         active_objective,
+        planner_event_tx,
     };
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;

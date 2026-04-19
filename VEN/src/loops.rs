@@ -7,6 +7,7 @@ use tracing::{debug, error, info};
 use crate::controller;
 use crate::entities;
 use crate::entities::asset::PlanTrigger;
+use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::profile::{Profile, PlannerObjective};
 use crate::simulator::SimState;
 use crate::state::{AppState, EvSettings};
@@ -622,6 +623,7 @@ pub(crate) fn spawn_planning(
     mut trigger_rx: tokio::sync::watch::Receiver<PlanTrigger>,
     sim: Arc<Mutex<SimState>>,
     active_objective: Arc<RwLock<PlannerObjective>>,
+    event_tx: PlannerEventTx,
 ) -> tokio::task::JoinHandle<()> {
     let replan_s = profile.planner.replan_interval_s;
     tokio::spawn(async move {
@@ -645,19 +647,73 @@ pub(crate) fn spawn_planning(
             // MILP solving takes 18-60s on Pi4 ARM64; holding the lock would
             // block sim ticks and /capability reads for the entire duration.
             let sim_snap = sim.lock().await.clone();
-            let plan = controller::milp_planner::run_planner(
-                &sim_snap,
-                &tariff_ts,
-                &capacity,
-                &profile,
-                now,
-                trigger,
-                ev_sess.as_ref(),
-                heat_tgt.as_ref(),
-                &shift_loads,
-                bl_override.as_ref(),
-                Some(obj),
-            );
+
+            // ── Emit solving_started ──────────────────────────────────────
+            let num_slots = profile.planner.plan_horizon_h as usize
+                * 3600
+                / profile.planner.plan_step_s as usize;
+            let _ = event_tx.send(PlannerEvent::SolvingStarted {
+                objective: obj,
+                num_slots,
+                triggered_at: now,
+            });
+
+            // ── Spawn 1 s progress ticker ─────────────────────────────────
+            let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+            let progress_tx = event_tx.clone();
+            let ticker_task = tokio::spawn(async move {
+                let start = std::time::Instant::now();
+                let mut ticker = tokio::time::interval(std::time::Duration::from_secs(1));
+                ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                let mut iteration: u32 = 0;
+                let mut cancel_rx = cancel_rx;
+                loop {
+                    tokio::select! {
+                        _ = ticker.tick() => {
+                            iteration += 1;
+                            let _ = progress_tx.send(PlannerEvent::SolvingProgress {
+                                elapsed_ms: start.elapsed().as_millis() as u64,
+                                iteration,
+                            });
+                        }
+                        _ = &mut cancel_rx => break,
+                    }
+                }
+            });
+
+            // ── Run blocking HiGHS solve off the async runtime ────────────
+            let solve_start = std::time::Instant::now();
+            let profile_clone = profile.clone(); // Arc<Profile>, cheap
+            let plan = tokio::task::spawn_blocking(move || {
+                controller::milp_planner::run_planner(
+                    &sim_snap,
+                    &tariff_ts,
+                    &capacity,
+                    &profile_clone,
+                    now,
+                    trigger,
+                    ev_sess.as_ref(),
+                    heat_tgt.as_ref(),
+                    &shift_loads,
+                    bl_override.as_ref(),
+                    Some(obj),
+                )
+            })
+            .await
+            .expect("planner task panicked");
+            let solver_ms = solve_start.elapsed().as_millis() as u64;
+
+            // ── Cancel ticker, emit plan_ready ────────────────────────────
+            let _ = cancel_tx.send(());
+            ticker_task.await.ok();
+            let _ = event_tx.send(PlannerEvent::PlanReady {
+                plan_id: plan.id,
+                objective: obj,
+                solver_ms,
+                objective_eur: plan.objective_eur,
+                slot_count: plan.slots.len(),
+            });
+
             let slot_count = plan.slots.len();
             state.set_active_plan(Some(plan)).await;
 

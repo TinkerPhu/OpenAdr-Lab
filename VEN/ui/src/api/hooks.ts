@@ -1,10 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRef, useEffect } from "react";
 import { useVenContext } from "../App";
 import type {
   SensorSnapshot, SimInjectState, CreateUserRequestBody,
   CreateEvSessionBody, UpdateEvSettingsBody,
   CreateHeaterTargetBody, CreateShiftableLoadBody, CreateBaselineOverrideBody,
-  PlannerObjective,
+  PlannerObjective, PlannerEvent,
 } from "./types";
 
 export function useHealth() {
@@ -421,4 +422,26 @@ export function useDeleteBaselineOverride() {
       queryClient.invalidateQueries({ queryKey: ["plan"] });
     },
   });
+}
+
+// ── Planner SSE events (Plan E) ─────────────────────────────────────────────
+
+/** Subscribe to planner progress via Server-Sent Events at GET /plan/events. */
+export function usePlannerEvents(onEvent: (event: PlannerEvent) => void): void {
+  const { api } = useVenContext();
+  // Ref keeps callback stable so EventSource isn't re-created on every render
+  const cbRef = useRef(onEvent);
+  cbRef.current = onEvent;
+
+  useEffect(() => {
+    const es = new EventSource(`${api.baseUrl}/plan/events`);
+    es.onmessage = (e) => {
+      try {
+        cbRef.current(JSON.parse(e.data) as PlannerEvent);
+      } catch {
+        /* ignore malformed events */
+      }
+    };
+    return () => es.close();
+  }, [api.baseUrl]); // reconnect only when VEN URL changes
 }
