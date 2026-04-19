@@ -14,11 +14,11 @@ Feature: Shiftable Load Lifecycle (Plan B)
     Then the polled plan has an allocation for asset "wm-1"
 
   # ── AC#2: Running load appears in GET /sim ──────────────────────────────
-  # Window must force slot-0 scheduling: duration fills entire window
-  # so the MILP has exactly one valid start slot (the current one).
+  # Window must exceed duration to survive planner delay (window=80m > duration=60m),
+  # but stay below duration + plan_step_s (60m + 30m = 90m) so MILP has only slot 0.
 
   Scenario: Running shiftable load appears in GET /sim
-    Given I POST a shiftable load for asset "wm-2" at 2.0 kW for 60 minutes within 1 hours
+    Given I POST a shiftable load for asset "wm-2" at 2.0 kW for 60 minutes within 80 minutes
     When I poll the VEN /sim until asset "wm-2" appears
     Then the polled sim has asset "wm-2" with power_kw > 0
 
@@ -35,7 +35,7 @@ Feature: Shiftable Load Lifecycle (Plan B)
   # ── AC#5: Delete mid-run removes from /sim ──────────────────────────────
 
   Scenario: Deleting a running shiftable load removes it from GET /sim
-    Given I POST a shiftable load for asset "wm-4" at 2.0 kW for 60 minutes within 1 hours
+    Given I POST a shiftable load for asset "wm-4" at 2.0 kW for 60 minutes within 80 minutes
     And I poll the VEN /sim until asset "wm-4" appears
     When I DELETE shiftable load with saved id
     And I poll the VEN /sim until asset "wm-4" disappears
