@@ -3,6 +3,34 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { AssetRightSection } from "../components/controller/AssetRightSection";
 import type { SimSnapshot } from "../api/types";
 
+// Minimal MUI Slider mock:
+// - onChange  fires on fireEvent.change   → live drag, updates local state
+// - onChangeCommitted fires on fireEvent.mouseUp → commit, triggers POST
+// The span wrapper preserves the existing helper pattern (root.querySelector('input[type="range"]')).
+vi.mock("@mui/material", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@mui/material")>();
+  return {
+    ...actual,
+    Slider: (props: any) => {
+      const { onChange, onChangeCommitted, value, min, max, step, "data-testid": testId } = props;
+      return (
+        <span data-testid={testId}>
+          <input
+            type="range"
+            value={value ?? 0}
+            min={min}
+            max={max}
+            step={step}
+            onChange={(e) => onChange?.(e, Number(e.target.value))}
+            onMouseUp={(e) => onChangeCommitted?.(e, Number((e.target as HTMLInputElement).value))}
+            readOnly={!onChange}
+          />
+        </span>
+      );
+    },
+  };
+});
+
 // Make schema configurable per-describe via a vi.fn() so individual suites can
 // inject the PV control descriptors without affecting the SoC suite (empty schema).
 const mockSchemaData = vi.fn(() => ({} as Record<string, unknown>));
@@ -59,19 +87,14 @@ function getSchemaSliderInput(key: string): HTMLInputElement {
   return input;
 }
 
-// ─── SoC slider — no snap-back ───────────────────────────────────────────────
+// ─── SoC slider — commit on mouse-up, no snap-back ───────────────────────────
 
-describe("AssetRightSection — SoC slider no snap-back", () => {
+describe("AssetRightSection — SoC slider commit on mouse-up", () => {
   beforeEach(() => {
     mockSchemaData.mockReturnValue({});
-    vi.useFakeTimers();
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("battery: slider holds pending value after debounce fires, releases only when onDone called", () => {
+  it("battery: drag updates label immediately; POST fires on mouse-up; no snap-back before onDone", () => {
     let capturedOnDone: (() => void) | undefined;
     const mockOnResetSoc = vi.fn((_assetId: string, _soc: number, onDone: () => void) => {
       capturedOnDone = onDone;
@@ -90,36 +113,27 @@ describe("AssetRightSection — SoC slider no snap-back", () => {
     // Initial: shows live SoC (60%)
     expect(screen.getByText("SoC: 60%")).toBeInTheDocument();
 
-    // Drag slider to 80%
-    act(() => {
-      fireEvent.change(getSocSliderInput("battery"), { target: { value: "80" } });
-    });
+    const input = getSocSliderInput("battery");
 
-    // pendingSocPct set immediately — label updates
+    // Drag slider to 80% — label updates immediately, no POST yet
+    act(() => { fireEvent.change(input, { target: { value: "80" } }); });
     expect(screen.getByText(/SoC: 80%/)).toBeInTheDocument();
+    expect(mockOnResetSoc).not.toHaveBeenCalled();
 
-    // Fire the 500ms debounce
-    act(() => {
-      vi.advanceTimersByTime(500);
-    });
-
-    // POST was issued with the right args
+    // Mouse-up commits — POST fires immediately
+    act(() => { fireEvent.mouseUp(input); });
     expect(mockOnResetSoc).toHaveBeenCalledWith("battery", 0.8, expect.any(Function));
     expect(capturedOnDone).toBeDefined();
 
     // KEY: slider must NOT snap back to 60% before onDone is called
     expect(screen.getByText(/SoC: 80%/)).toBeInTheDocument();
 
-    // onDone fires (mutation success + refetch complete in production)
-    act(() => {
-      capturedOnDone!();
-    });
-
-    // pendingSocPct cleared → reverts to live value
+    // onDone fires (mutation success in production) — reverts to live value
+    act(() => { capturedOnDone!(); });
     expect(screen.getByText("SoC: 60%")).toBeInTheDocument();
   });
 
-  it("ev: slider holds pending value after debounce fires, releases only when onDone called", () => {
+  it("ev: drag updates label immediately; POST fires on mouse-up; no snap-back before onDone", () => {
     let capturedOnDone: (() => void) | undefined;
     const mockOnResetSoc = vi.fn((_assetId: string, _soc: number, onDone: () => void) => {
       capturedOnDone = onDone;
@@ -135,34 +149,25 @@ describe("AssetRightSection — SoC slider no snap-back", () => {
       />
     );
 
-    // Initial: shows live SoC (50%)
     expect(screen.getByText("SoC: 50%")).toBeInTheDocument();
 
-    // Drag slider to 90%
-    act(() => {
-      fireEvent.change(getSocSliderInput("ev"), { target: { value: "90" } });
-    });
+    const input = getSocSliderInput("ev");
 
+    act(() => { fireEvent.change(input, { target: { value: "90" } }); });
     expect(screen.getByText(/SoC: 90%/)).toBeInTheDocument();
+    expect(mockOnResetSoc).not.toHaveBeenCalled();
 
-    act(() => {
-      vi.advanceTimersByTime(500);
-    });
-
+    act(() => { fireEvent.mouseUp(input); });
     expect(mockOnResetSoc).toHaveBeenCalledWith("ev", 0.9, expect.any(Function));
     expect(capturedOnDone).toBeDefined();
 
-    // KEY: no snap-back before onDone
     expect(screen.getByText(/SoC: 90%/)).toBeInTheDocument();
 
-    act(() => {
-      capturedOnDone!();
-    });
-
+    act(() => { capturedOnDone!(); });
     expect(screen.getByText("SoC: 50%")).toBeInTheDocument();
   });
 
-  it("battery: multiple rapid drags only POST the final value", () => {
+  it("battery: multiple drags in one gesture POST the final value only", () => {
     const mockOnResetSoc = vi.fn();
 
     render(
@@ -177,30 +182,14 @@ describe("AssetRightSection — SoC slider no snap-back", () => {
 
     const input = getSocSliderInput("battery");
 
-    act(() => {
-      fireEvent.change(input, { target: { value: "70" } });
-    });
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
-    act(() => {
-      fireEvent.change(input, { target: { value: "80" } });
-    });
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
-    act(() => {
-      fireEvent.change(input, { target: { value: "90" } });
-    });
-
-    // No POST yet — all within the debounce window
+    // Simulate drag through multiple values — no POST during drag
+    act(() => { fireEvent.change(input, { target: { value: "70" } }); });
+    act(() => { fireEvent.change(input, { target: { value: "80" } }); });
+    act(() => { fireEvent.change(input, { target: { value: "90" } }); });
     expect(mockOnResetSoc).not.toHaveBeenCalled();
 
-    act(() => {
-      vi.advanceTimersByTime(500);
-    });
-
-    // Only the final value fires
+    // Mouse-up commits — exactly one POST with the final value
+    act(() => { fireEvent.mouseUp(input); });
     expect(mockOnResetSoc).toHaveBeenCalledTimes(1);
     expect(mockOnResetSoc).toHaveBeenCalledWith("battery", 0.9, expect.any(Function));
   });
@@ -211,12 +200,10 @@ describe("AssetRightSection — SoC slider no snap-back", () => {
 describe("AssetRightSection — schema-driven sliders instant response", () => {
   beforeEach(() => {
     mockSchemaData.mockReturnValue({ pv: pvSchema });
-    vi.useFakeTimers();
   });
 
   afterEach(() => {
     mockSchemaData.mockReturnValue({});
-    vi.useRealTimers();
   });
 
   it("irradiance: initially shows live sim irradiance when no override is active", () => {
@@ -234,7 +221,7 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
     expect(screen.getByText(/Irradiance Override: 80 %/)).toBeInTheDocument();
   });
 
-  it("irradiance: label updates immediately on drag before debounce fires", () => {
+  it("irradiance: label updates immediately on drag; no POST until mouse-up", () => {
     const mockOnOverrideChange = vi.fn();
 
     render(
@@ -255,7 +242,7 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
     // Label updates immediately — no network roundtrip needed
     expect(screen.getByText(/Irradiance Override: 60 %/)).toBeInTheDocument();
 
-    // onOverrideChange must NOT have fired yet (still in debounce window)
+    // onOverrideChange must NOT have fired yet (no mouse-up)
     expect(mockOnOverrideChange).not.toHaveBeenCalled();
   });
 
@@ -277,7 +264,7 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
     expect(screen.getByText(/Irradiance Override: 80 %/)).toBeInTheDocument();
   });
 
-  it("irradiance: reverts to live sim irradiance after debounce fires", () => {
+  it("irradiance: reverts to live sim irradiance after mouse-up commit", () => {
     const mockOnOverrideChange = vi.fn();
 
     render(
@@ -290,23 +277,22 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
       />
     );
 
+    const input = getSchemaSliderInput("pv_irradiance");
+
     // Drag to 60 % (display) = 0.6 (raw)
-    act(() => {
-      fireEvent.change(getSchemaSliderInput("pv_irradiance"), { target: { value: "60" } });
-    });
+    act(() => { fireEvent.change(input, { target: { value: "60" } }); });
     expect(screen.getByText(/Irradiance Override: 60 %/)).toBeInTheDocument();
 
-    // Debounce fires: POST sent, local state released
-    act(() => { vi.advanceTimersByTime(300); });
+    // Mouse-up: POST sent, local state released
+    act(() => { fireEvent.mouseUp(input); });
 
-    // DynamicControl divides by scale before calling onChange: 60/100 = 0.6
+    // DynamicControl divides by scale: 60/100 = 0.6
     expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance: 0.6 });
-    // Slider now follows live irradiance again (80 % in test fixture;
-    // in production the sim freezes at 60 % once the override is applied)
+    // Slider now follows live irradiance again (80 % from fixture)
     expect(screen.getByText(/Irradiance Override: 80 %/)).toBeInTheDocument();
   });
 
-  it("irradiance: onOverrideChange debounced — fires once with final value after 300ms", () => {
+  it("irradiance: POST fires once on mouse-up with final drag value", () => {
     const mockOnOverrideChange = vi.fn();
 
     render(
@@ -321,25 +307,19 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
 
     const input = getSchemaSliderInput("pv_irradiance");
 
-    // Three rapid drags (display units: 30 %, 50 %, 70 %)
+    // Simulate drag through multiple values (30 %, 50 %, 70 %)
     act(() => { fireEvent.change(input, { target: { value: "30" } }); });
-    act(() => { vi.advanceTimersByTime(100); });
     act(() => { fireEvent.change(input, { target: { value: "50" } }); });
-    act(() => { vi.advanceTimersByTime(100); });
     act(() => { fireEvent.change(input, { target: { value: "70" } }); });
-
-    // Not called yet
     expect(mockOnOverrideChange).not.toHaveBeenCalled();
 
-    // Fire debounce
-    act(() => { vi.advanceTimersByTime(300); });
-
-    // Called exactly once; raw value = 70/100 = 0.7
+    // One mouse-up → one POST with the final value
+    act(() => { fireEvent.mouseUp(input); });
     expect(mockOnOverrideChange).toHaveBeenCalledTimes(1);
     expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance: 0.7 });
   });
 
-  it("blend-back speed: label updates immediately on drag before debounce fires", () => {
+  it("blend-back speed: label updates immediately on drag; no POST until mouse-up", () => {
     const mockOnOverrideChange = vi.fn();
 
     render(
@@ -360,7 +340,7 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
     // Label updates immediately
     expect(screen.getByText(/Blend-back Speed: 0\.50/)).toBeInTheDocument();
 
-    // Not yet sent to server
+    // Not sent to server yet
     expect(mockOnOverrideChange).not.toHaveBeenCalled();
   });
 });
@@ -370,15 +350,13 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
 describe("AssetRightSection — blend-back speed holds local value across prop updates", () => {
   beforeEach(() => {
     mockSchemaData.mockReturnValue({ pv: pvSchema });
-    vi.useFakeTimers();
   });
 
   afterEach(() => {
     mockSchemaData.mockReturnValue({});
-    vi.useRealTimers();
   });
 
-  it("blend-back: local drag value persists after debounce and across prop updates", () => {
+  it("blend-back: local drag value persists after commit and across server prop updates", () => {
     const mockOnOverrideChange = vi.fn();
 
     const { rerender } = render(
@@ -391,17 +369,16 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
       />
     );
 
-    // User drags blend-back speed to 0.5
-    act(() => {
-      fireEvent.change(getSchemaSliderInput("pv_irradiance_alpha"), { target: { value: "0.5" } });
-    });
+    const input = getSchemaSliderInput("pv_irradiance_alpha");
 
+    // User drags blend-back speed to 0.5 and commits
+    act(() => { fireEvent.change(input, { target: { value: "0.5" } }); });
     expect(screen.getByText(/Blend-back Speed: 0\.50/)).toBeInTheDocument();
 
-    // Debounce fires
-    act(() => { vi.advanceTimersByTime(300); });
+    act(() => { fireEvent.mouseUp(input); });
+    expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance_alpha: 0.5 });
 
-    // Blend-back speed retains local value after debounce (unlike pv_irradiance)
+    // Blend-back speed retains local value after commit (unlike pv_irradiance)
     expect(screen.getByText(/Blend-back Speed: 0\.50/)).toBeInTheDocument();
 
     // Server pushes back its default (0.1) via overrides prop update
@@ -419,7 +396,7 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
     expect(screen.getByText(/Blend-back Speed: 0\.50/)).toBeInTheDocument();
   });
 
-  it("irradiance: reverts to live sim value after debounce (contrast with blend-back)", () => {
+  it("irradiance: reverts to live sim value after commit (contrast with blend-back)", () => {
     const mockOnOverrideChange = vi.fn();
 
     render(
@@ -432,14 +409,49 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
       />
     );
 
-    act(() => {
-      fireEvent.change(getSchemaSliderInput("pv_irradiance"), { target: { value: "30" } });
-    });
+    const input = getSchemaSliderInput("pv_irradiance");
+
+    act(() => { fireEvent.change(input, { target: { value: "30" } }); });
     expect(screen.getByText(/Irradiance Override: 30 %/)).toBeInTheDocument();
 
-    act(() => { vi.advanceTimersByTime(300); });
+    act(() => { fireEvent.mouseUp(input); });
 
     // Unlike blend-back, irradiance releases local hold and follows live sim
     expect(screen.getByText(/Irradiance Override: 80 %/)).toBeInTheDocument();
+  });
+
+  it("alpha and irradiance commits are independent — no shared cancellation", () => {
+    // Regression test for the shared-timer bug: adjusting irradiance used to
+    // cancel a pending alpha POST within the 300ms debounce window.
+    // With per-event commits (onChangeCommitted), each control fires its own
+    // POST independently on mouse-up.
+    const mockOnOverrideChange = vi.fn();
+
+    render(
+      <AssetRightSection
+        assetId="pv"
+        simSnapshot={simWithPv}
+        overrides={undefined}
+        onOverrideChange={mockOnOverrideChange}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    // Set alpha and commit
+    act(() => {
+      fireEvent.change(getSchemaSliderInput("pv_irradiance_alpha"), { target: { value: "0.99" } });
+    });
+    act(() => { fireEvent.mouseUp(getSchemaSliderInput("pv_irradiance_alpha")); });
+
+    // Set irradiance and commit
+    act(() => {
+      fireEvent.change(getSchemaSliderInput("pv_irradiance"), { target: { value: "70" } });
+    });
+    act(() => { fireEvent.mouseUp(getSchemaSliderInput("pv_irradiance")); });
+
+    // Both POSTs must have fired independently
+    expect(mockOnOverrideChange).toHaveBeenCalledTimes(2);
+    expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance_alpha: 0.99 });
+    expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance: 0.7 });
   });
 });
