@@ -11,20 +11,22 @@ import {
   ReferenceLine,
 } from "recharts";
 import type { TooltipProps } from "recharts";
+import { useRef, useState, useEffect } from "react";
 import type { Plan } from "../../api/types";
 import { Box, Typography } from "@mui/material";
+import { ASSET_COLORS } from "../controller/types";
 
-// ─── Color palette ──────────────────────────────────────────────────────────
+// ─── Color palette — uses canonical asset colors ─────────────────────────────
 
 const COLORS: Record<string, string> = {
-  baseline: "#9e9e9e",   // grey — forecast
-  ev: "#1976d2",         // blue — planned
-  wm: "#ff9800",         // orange — planned
-  heater: "#d32f2f",     // red — planned
-  bat_charge: "#4caf50", // green — planned (charging)
-  bat_dis: "#009688",    // teal — planned (discharging)
-  pv: "#fdd835",         // yellow — forecast
-  net_import: "#212121", // dark — net line
+  baseline: ASSET_COLORS.base_load,  // blue-grey — forecast base load
+  ev: ASSET_COLORS.ev,               // blue — planned
+  wm: ASSET_COLORS.wm,               // orange — planned
+  heater: ASSET_COLORS.heater,       // deep-orange — planned
+  bat_charge: ASSET_COLORS.battery,  // purple — planned (charging)
+  bat_dis: "#CE93D8",                // light purple — planned (discharging)
+  pv: ASSET_COLORS.pv,               // amber — forecast
+  net_import: "#212121",             // dark — net line
 };
 
 const LABELS: Record<string, string> = {
@@ -120,6 +122,21 @@ interface PlanPowerStackProps {
 }
 
 export function PlanPowerStack({ plan }: PlanPowerStackProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [barSize, setBarSize] = useState<number>(3);
+
+  const slotCount = plan?.slots.length ?? 0;
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || slotCount === 0) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width;
+      setBarSize(Math.max(1, Math.floor(w / slotCount)));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [slotCount]);
+
   if (!plan || plan.slots.length === 0) {
     return (
       <Box sx={{ py: 2 }}>
@@ -139,7 +156,7 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
   const genKeys = ["pv", "bat_dis"] as const;
 
   return (
-    <Box data-testid="plan-power-stack" sx={{ width: "100%", height: 340 }}>
+    <Box ref={containerRef} data-testid="plan-power-stack" sx={{ width: "100%", height: 340 }}>
       <Typography variant="subtitle2" color="text.secondary" gutterBottom>
         Power Stack — Forecast vs Plan
       </Typography>
@@ -166,7 +183,8 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
               name={LABELS[key]}
               stackId="load"
               fill={COLORS[key]}
-              fillOpacity={0.75}
+              fillOpacity={0.85}
+              barSize={barSize}
               isAnimationActive={false}
             />
           ))}
@@ -179,7 +197,8 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
               name={LABELS[key]}
               stackId="gen"
               fill={COLORS[key]}
-              fillOpacity={0.75}
+              fillOpacity={0.85}
+              barSize={barSize}
               isAnimationActive={false}
             />
           ))}
