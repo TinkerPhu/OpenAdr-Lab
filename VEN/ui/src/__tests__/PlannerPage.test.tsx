@@ -1,4 +1,5 @@
 import { render, screen, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PlannerPage } from "../pages/Planner";
 import type { Plan, EnergyPacket, TraceEntry, PlanTimeSlot, PlannerEvent } from "../api/types";
@@ -84,6 +85,17 @@ const mockPlanCycle: TraceEntry = {
   trigger_reason: "Periodic",
   total_slots: 48,
 };
+
+const mockTraceEntries: TraceEntry[] = [
+  mockPlanCycle,
+  {
+    type: "RateChange",
+    ts: "2026-04-04T09:55:00Z",
+    interval_start: "2026-04-04T10:00:00Z",
+    import_eur_kwh: 0.3012,
+    export_eur_kwh: 0.0821,
+  },
+];
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -217,5 +229,43 @@ describe("PlannerPage", () => {
     expect(screen.getByTestId("planner-status-updated")).toBeInTheDocument();
     expect(screen.getByText(/23\.4 s/)).toBeInTheDocument();
     expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["plan"] });
+  });
+
+  // ── Embedded trace accordion tests ──────────────────────────────────────────
+
+  it("renders trace accordion collapsed by default", () => {
+    render(<PlannerPage />);
+    const accordion = screen.getByTestId("trace-accordion");
+    expect(accordion).toBeInTheDocument();
+    // Table should not be visible when collapsed
+    expect(screen.queryByTestId("trace-table")).not.toBeVisible();
+  });
+
+  it("expands trace accordion to show table", async () => {
+    vi.mocked(useTrace).mockReturnValue({ data: mockTraceEntries } as unknown as ReturnType<typeof useTrace>);
+    const user = userEvent.setup();
+    render(<PlannerPage />);
+
+    const summary = screen.getByText(/Decision Trace/);
+    await user.click(summary);
+
+    expect(screen.getByTestId("trace-table")).toBeVisible();
+    expect(screen.getByTestId("trace-row-0")).toBeInTheDocument();
+    expect(screen.getByTestId("trace-row-1")).toBeInTheDocument();
+  });
+
+  it("shows event count in accordion summary", () => {
+    vi.mocked(useTrace).mockReturnValue({ data: mockTraceEntries } as unknown as ReturnType<typeof useTrace>);
+    render(<PlannerPage />);
+    expect(screen.getByText(/2 events/)).toBeInTheDocument();
+  });
+
+  it("shows empty state in trace table when no events", async () => {
+    vi.mocked(useTrace).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useTrace>);
+    const user = userEvent.setup();
+    render(<PlannerPage />);
+
+    await user.click(screen.getByText(/Decision Trace/));
+    expect(screen.getByText("No trace events yet")).toBeInTheDocument();
   });
 });
