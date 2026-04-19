@@ -2,13 +2,10 @@ import { useMemo } from "react";
 import { Box, Divider, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
-import { CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH } from "./chartLayout";
+import { CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW } from "./chartLayout";
 import type { AssetId, AssetSummary, AssetTimelinePoint, StackedAreaPoint } from "./types";
 import { ASSET_COLORS } from "./types";
 import { StackedAreaChart } from "./charts/StackedAreaChart";
-
-const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
-const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
 
 /** Discover all asset IDs present in the timelines (everything except "grid"). */
 function discoverAssetIds(allTimelines: Record<string, AssetTimelinePoint[]>): AssetId[] {

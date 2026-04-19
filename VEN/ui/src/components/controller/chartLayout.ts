@@ -6,3 +6,8 @@ export const CELL_CHART_MIN_WIDTH = 200; // px
 /** Fixed width of the left info panel in every cell row (asset, tariff, accumulated).
  * Keeping this identical across all rows aligns the chart left edges (y-axes). */
 export const CELL_LEFT_SECTION_WIDTH = 196; // px
+
+/** Default time window: 1 h back, 1 h forward from now. */
+export const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
+/** Extended time window: 1 h back, 24 h forward (full plan horizon). */
+export const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
