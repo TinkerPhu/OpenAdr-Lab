@@ -29,6 +29,9 @@ pub struct CreateUserRequestBody {
     pub duration_min: Option<u32>,
     pub earliest_start: Option<DateTime<Utc>>,
     pub latest_end: Option<DateTime<Utc>>,
+    // ── Per-device overrides (Plan D) ────────────────────────────────────────
+    pub soft_deadline: Option<bool>,
+    pub target_temp_c: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
