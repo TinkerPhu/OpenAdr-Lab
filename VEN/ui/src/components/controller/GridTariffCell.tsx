@@ -2,14 +2,11 @@ import { useMemo } from "react";
 import { Box, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
-import { CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH } from "./chartLayout";
+import { CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW } from "./chartLayout";
 import type { TariffSnapshot, AssetTimelinePoint } from "./types";
 import { TariffChart } from "./charts/TariffChart";
 import { useTariffs } from "../../api/hooks";
 import { buildTariffPricePoints, buildPowerPoints, fillCostRateFromTariffs } from "./tariffBuilders";
-
-const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
-const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
 
 interface GridTariffCellProps {
   snapshot: TariffSnapshot;

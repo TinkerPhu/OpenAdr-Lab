@@ -1344,7 +1344,6 @@ fn translate_to_plan(
                     // Charging: consume PV surplus first, then grid
                     let sp = surplus_remaining_kw.min(bat_net_kw);
                     let gp = bat_net_kw - sp;
-                    surplus_remaining_kw -= sp;
                     (sp, gp,
                      gp * inputs.c_imp_eur_kwh[t] * dt_h - sp * inputs.c_exp_eur_kwh[t] * dt_h,
                      gp * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h)

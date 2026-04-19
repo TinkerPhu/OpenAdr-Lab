@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::{
-    Asset, AssetCapabilities, AssetCapability, AssetState, ControlDescriptor, ControlKind,
+    Asset, AssetCapabilities, AssetCapability, AssetState, ControlDescriptor,
     EnergyState,
 };
 use crate::common::{Interpolation, TimeSeries};

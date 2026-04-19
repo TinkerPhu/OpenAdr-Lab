@@ -42,32 +42,10 @@ import {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function defaultDeparture(): string {
+/** Return a local datetime-local string offset from now by `hoursOffset` hours. */
+function defaultDateTime(hoursOffset: number): string {
   const d = new Date();
-  d.setHours(d.getHours() + 8);
-  const off = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - off * 60_000);
-  return local.toISOString().slice(0, 16);
-}
-
-function defaultReadyBy(): string {
-  const d = new Date();
-  d.setHours(d.getHours() + 2);
-  const off = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - off * 60_000);
-  return local.toISOString().slice(0, 16);
-}
-
-function defaultEarliestStart(): string {
-  const d = new Date();
-  const off = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - off * 60_000);
-  return local.toISOString().slice(0, 16);
-}
-
-function defaultLatestEnd(): string {
-  const d = new Date();
-  d.setHours(d.getHours() + 4);
+  d.setHours(d.getHours() + hoursOffset);
   const off = d.getTimezoneOffset();
   const local = new Date(d.getTime() - off * 60_000);
   return local.toISOString().slice(0, 16);
@@ -82,7 +60,7 @@ function EvSessionSection() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [targetSoc, setTargetSoc] = useState(80);
-  const [departure, setDeparture] = useState(defaultDeparture);
+  const [departure, setDeparture] = useState(() => defaultDateTime(8));
   const [opportunistic, setOpportunistic] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -213,7 +191,7 @@ function HeaterTargetSection() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [tempC, setTempC] = useState("55");
-  const [readyBy, setReadyBy] = useState(defaultReadyBy);
+  const [readyBy, setReadyBy] = useState(() => defaultDateTime(2));
   const [error, setError] = useState<string | null>(null);
 
   const handleSet = async () => {
@@ -332,8 +310,8 @@ function ShiftableLoadsSection() {
   const [assetId, setAssetId] = useState("wm");
   const [powerKw, setPowerKw] = useState("2.0");
   const [durationMin, setDurationMin] = useState("60");
-  const [earliestStart, setEarliestStart] = useState(defaultEarliestStart);
-  const [latestEnd, setLatestEnd] = useState(defaultLatestEnd);
+  const [earliestStart, setEarliestStart] = useState(() => defaultDateTime(0));
+  const [latestEnd, setLatestEnd] = useState(() => defaultDateTime(4));
   const [error, setError] = useState<string | null>(null);
 
   const handleAdd = async () => {
