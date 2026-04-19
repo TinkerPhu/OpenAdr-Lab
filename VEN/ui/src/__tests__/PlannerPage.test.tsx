@@ -1,18 +1,28 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PlannerPage } from "../pages/Planner";
-import type { Plan, EnergyPacket, TraceEntry, PlanTimeSlot } from "../api/types";
+import type { Plan, EnergyPacket, TraceEntry, PlanTimeSlot, PlannerEvent } from "../api/types";
 
 // ─── Mock hooks ───────────────────────────────────────────────────────────────
+
+const mockInvalidateQueries = vi.fn();
+vi.mock("@tanstack/react-query", async () => {
+  const actual = await vi.importActual("@tanstack/react-query");
+  return { ...actual, useQueryClient: () => ({ invalidateQueries: mockInvalidateQueries }) };
+});
 
 vi.mock("../api/hooks", () => ({
   usePlan: vi.fn(),
   useTrace: vi.fn(),
   usePackets: vi.fn(),
   useSetObjective: vi.fn(),
+  usePlannerEvents: vi.fn(),
 }));
 
-import { usePlan, useTrace, usePackets, useSetObjective } from "../api/hooks";
+import { usePlan, useTrace, usePackets, useSetObjective, usePlannerEvents } from "../api/hooks";
+
+/** Captured SSE callback from the most recent usePlannerEvents call. */
+let capturedOnEvent: ((event: PlannerEvent) => void) | null = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -80,10 +90,14 @@ const mockPlanCycle: TraceEntry = {
 describe("PlannerPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    capturedOnEvent = null;
     vi.mocked(usePlan).mockReturnValue({ data: undefined } as ReturnType<typeof usePlan>);
     vi.mocked(useTrace).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useTrace>);
     vi.mocked(usePackets).mockReturnValue({ data: [] } as unknown as ReturnType<typeof usePackets>);
     vi.mocked(useSetObjective).mockReturnValue({ mutate: vi.fn() } as unknown as ReturnType<typeof useSetObjective>);
+    vi.mocked(usePlannerEvents).mockImplementation((cb: (e: PlannerEvent) => void) => {
+      capturedOnEvent = cb;
+    });
   });
 
   it("renders the planner heading", () => {
@@ -146,5 +160,62 @@ describe("PlannerPage", () => {
     render(<PlannerPage />);
     expect(screen.getByTestId("packet-board")).toBeInTheDocument();
     expect(screen.getByTestId("packet-group-active")).toBeInTheDocument();
+  });
+
+  // ── Plan E: Planner status SSE tests ──────────────────────────────────────
+
+  it("does not render status bar when idle", () => {
+    render(<PlannerPage />);
+    expect(screen.queryByTestId("planner-status-solving")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("planner-status-updated")).not.toBeInTheDocument();
+  });
+
+  it("shows solving status when solving_started event fires", () => {
+    render(<PlannerPage />);
+    expect(capturedOnEvent).toBeTruthy();
+    act(() => {
+      capturedOnEvent!({
+        type: "solving_started",
+        objective: "min_cost",
+        num_slots: 288,
+        triggered_at: "2026-04-04T10:00:00Z",
+      });
+    });
+    expect(screen.getByTestId("planner-status-solving")).toBeInTheDocument();
+    expect(screen.getByText(/Solving/)).toBeInTheDocument();
+  });
+
+  it("updates elapsed time on solving_progress events", () => {
+    render(<PlannerPage />);
+    act(() => {
+      capturedOnEvent!({
+        type: "solving_started",
+        objective: "min_ghg",
+        num_slots: 288,
+        triggered_at: "2026-04-04T10:00:00Z",
+      });
+    });
+    act(() => {
+      capturedOnEvent!({ type: "solving_progress", elapsed_ms: 5000, iteration: 5 });
+    });
+    expect(screen.getByText(/5 s/)).toBeInTheDocument();
+    expect(screen.getByText(/tick 5/)).toBeInTheDocument();
+  });
+
+  it("shows updated chip when plan_ready fires", () => {
+    render(<PlannerPage />);
+    act(() => {
+      capturedOnEvent!({
+        type: "plan_ready",
+        plan_id: "abc-123",
+        objective: "min_cost",
+        solver_ms: 23400,
+        objective_eur: 1.5,
+        slot_count: 288,
+      });
+    });
+    expect(screen.getByTestId("planner-status-updated")).toBeInTheDocument();
+    expect(screen.getByText(/23\.4 s/)).toBeInTheDocument();
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["plan"] });
   });
 });

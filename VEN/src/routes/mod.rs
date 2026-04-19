@@ -51,6 +51,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
         // HEMS Stage 1–3 routes
         .route("/plan", get(hems::get_plan))
         .route("/plan/objective", put(hems::put_plan_objective))
+        .route("/plan/events", get(hems::get_plan_events))
         .route("/tariffs", get(hems::get_tariffs))
         // Timeline routes (speckit 005) — /all must precede /:asset_id
         .route("/timeline/all", get(timeline::get_timeline_all))

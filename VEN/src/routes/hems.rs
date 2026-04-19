@@ -1,11 +1,16 @@
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse,
+    },
     Json,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -614,4 +619,35 @@ pub async fn delete_baseline_override(State(ctx): State<AppCtx>) -> impl IntoRes
     ctx.state.set_baseline_override(None).await;
     let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
     StatusCode::NO_CONTENT
+}
+
+// ── SSE: Planner status stream (Plan E) ─────────────────────────────────────
+
+/// GET /plan/events — Server-Sent Events stream of planner progress.
+///
+/// Pushes `solving_started`, `solving_progress` (1 s ticks), and `plan_ready`
+/// events so the UI can show live solver feedback.
+pub async fn get_plan_events(
+    State(ctx): State<AppCtx>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let mut bcast_rx = ctx.planner_event_tx.subscribe();
+    // Bridge broadcast → mpsc so lagged clients don't poison the broadcast sender.
+    let (fwd_tx, fwd_rx) = tokio::sync::mpsc::channel::<Event>(32);
+    tokio::spawn(async move {
+        loop {
+            match bcast_rx.recv().await {
+                Ok(evt) => {
+                    if let Ok(data) = serde_json::to_string(&evt) {
+                        if fwd_tx.send(Event::default().data(data)).await.is_err() {
+                            break; // client disconnected
+                        }
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+    let stream = ReceiverStream::new(fwd_rx).map(Ok::<_, std::convert::Infallible>);
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }

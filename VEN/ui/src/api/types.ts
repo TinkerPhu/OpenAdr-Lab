@@ -386,3 +386,10 @@ export type FlexibilityEnvelope = {
   max_acceptable_rate: number;
   estimated_cost_eur: number;
 };
+
+// ─── Planner SSE events (Plan E) ──────────────────────────────────────────────
+
+export type PlannerEvent =
+  | { type: "solving_started"; objective: PlannerObjective; num_slots: number; triggered_at: string }
+  | { type: "solving_progress"; elapsed_ms: number; iteration: number }
+  | { type: "plan_ready"; plan_id: string; objective: PlannerObjective; solver_ms: number; objective_eur: number; slot_count: number };
