@@ -49,6 +49,8 @@ struct MilpWeights {
     w_ghg: f64,
     /// Penalty per kWh of total grid exchange (import + export)
     w_grid: f64,
+    /// Penalty per kWh of grid import only (autarky objective)
+    w_import: f64,
     /// Scales contractual violation penalties
     w_viol: f64,
     /// Battery cycling wear cost [€/kWh charged or discharged]
@@ -174,14 +176,16 @@ struct ShiftableLoadMilp {
 // ── Builder functions ────────────────────────────────────────────────────────
 
 /// Build the MILP objective weights from the profile's planner configuration.
-/// When `objective != Custom`, the preset overrides the individual weight fields.
-fn build_milp_weights(profile: &Profile) -> MilpWeights {
+/// `objective` overrides `profile.planner.objective`; pass `profile.planner.objective`
+/// to use the profile default.
+fn build_milp_weights(profile: &Profile, objective: PlannerObjective) -> MilpWeights {
     let p = &profile.planner;
-    match p.objective {
+    match objective {
         PlannerObjective::MinCost => MilpWeights {
             w_energy: 1.0,
             w_ghg: 0.20,
             w_grid: 0.02,
+            w_import: 0.0,
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.03,
             c_ev_startup_eur: p.c_ev_startup_eur,
@@ -195,6 +199,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             w_energy: 0.0,
             w_ghg: 10.0,
             w_grid: 0.0,
+            w_import: 0.0,
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.0,
             c_ev_startup_eur: p.c_ev_startup_eur,
@@ -208,6 +213,21 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             w_energy: 0.0,
             w_ghg: 0.0,
             w_grid: 1.0,
+            w_import: 0.0,
+            w_viol: p.w_viol,
+            c_bat_wear_eur_kwh: 0.0,
+            c_ev_startup_eur: p.c_ev_startup_eur,
+            c_bat_startup_eur: p.c_bat_startup_eur,
+            c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
+            c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
+            c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
+            w_services: 1.0,
+        },
+        PlannerObjective::MinImport => MilpWeights {
+            w_energy: 0.0,
+            w_ghg: 0.0,
+            w_grid: 0.0,
+            w_import: 1.0,
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.0,
             c_ev_startup_eur: p.c_ev_startup_eur,
@@ -221,6 +241,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             w_energy: 1.0,
             w_ghg: 0.0,
             w_grid: 0.0,
+            w_import: 0.0,
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.03,
             c_ev_startup_eur: p.c_ev_startup_eur,
@@ -234,6 +255,7 @@ fn build_milp_weights(profile: &Profile) -> MilpWeights {
             w_energy: p.w_energy,
             w_ghg: p.w_ghg,
             w_grid: p.w_grid,
+            w_import: 0.0,
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: p.c_bat_wear_eur_kwh,
             c_ev_startup_eur: p.c_ev_startup_eur,
@@ -791,6 +813,8 @@ fn solve_milp(
         // C_grid: penalise total exchange volume (import + export)
         objective += (weights.w_grid * dt_h) * p_imp[t];
         objective += (weights.w_grid * dt_h) * p_exp[t];
+        // C_import: penalise grid import only (autarky objective)
+        objective += (weights.w_import * dt_h) * p_imp[t];
         // C_wear: battery cycling cost
         objective += (weights.c_bat_wear_eur_kwh * dt_h) * p_bat_ch[t];
         objective += (weights.c_bat_wear_eur_kwh * dt_h) * p_bat_dis[t];
@@ -1173,6 +1197,7 @@ fn fallback_plan(
     shiftable_loads: &[ShiftableLoad],
     inputs: Option<&MilpInputs>,
     reason: String,
+    objective: PlannerObjective,
 ) -> Plan {
     let step_s = profile.planner.plan_step_s;
     let horizon_h = profile.planner.plan_horizon_h;
@@ -1235,6 +1260,7 @@ fn fallback_plan(
         summary: PlanSummary::default(),
         envelopes,
         warnings: vec![warning],
+        objective,
         soc_trajectory_kwh: vec![],
         objective_eur: 0.0,
         cost_breakdown: CostBreakdown::default(),
@@ -1253,6 +1279,7 @@ fn translate_to_plan(
     ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     shiftable_loads: &[ShiftableLoad],
+    objective: PlannerObjective,
 ) -> Plan {
     let step_s = profile.planner.plan_step_s;
     let n = inputs.n;
@@ -1482,6 +1509,7 @@ fn translate_to_plan(
         summary,
         envelopes: build_plan_envelopes(ev_session, heater_target, shiftable_loads, inputs, profile, now),
         warnings,
+        objective,
         soc_trajectory_kwh,
         objective_eur: sol.objective_eur,
         cost_breakdown,
@@ -1493,6 +1521,7 @@ fn translate_to_plan(
 
 /// Run the MILP planner: build inputs from live state, solve via HiGHS,
 /// and translate the solution into a Plan.
+/// `objective_override` — when `Some`, overrides the profile's default objective.
 pub fn run_planner(
     assets: &SimState,
     tariffs: &TariffTimeSeries,
@@ -1504,11 +1533,13 @@ pub fn run_planner(
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     shiftable_loads: &[ShiftableLoad],
     baseline_override: Option<&BaselineOverride>,
+    objective_override: Option<PlannerObjective>,
 ) -> Plan {
+    let objective = objective_override.unwrap_or(profile.planner.objective);
     let inputs = build_milp_inputs(assets, tariffs, capacity, profile, now, ev_session, heater_target, shiftable_loads, baseline_override);
-    let weights = build_milp_weights(profile);
+    let weights = build_milp_weights(profile, objective);
     match solve_milp(&inputs, &weights) {
-        Ok(sol) => translate_to_plan(&sol, &inputs, &weights, profile, now, trigger, ev_session, heater_target, shiftable_loads),
+        Ok(sol) => translate_to_plan(&sol, &inputs, &weights, profile, now, trigger, ev_session, heater_target, shiftable_loads, objective),
         Err(e) => {
             warn!("MILP solver failed: {e}");
             fallback_plan(
@@ -1520,6 +1551,7 @@ pub fn run_planner(
                 shiftable_loads,
                 Some(&inputs),
                 format!("MILP solver failed: {e}"),
+                objective,
             )
         }
     }
@@ -1850,10 +1882,9 @@ mod tests {
     #[test]
     fn weights_preset_min_cost() {
         let mut profile = make_profile();
-        profile.planner.objective = PlannerObjective::MinCost;
         profile.planner.w_energy = 99.0; // should be overridden by preset
         profile.planner.w_ghg = 99.0;
-        let w = build_milp_weights(&profile);
+        let w = build_milp_weights(&profile, PlannerObjective::MinCost);
         assert!((w.w_energy - 1.0).abs() < 1e-9);
         assert!((w.w_ghg - 0.20).abs() < 1e-9);
         assert!((w.w_grid - 0.02).abs() < 1e-9);
@@ -1862,9 +1893,8 @@ mod tests {
 
     #[test]
     fn weights_preset_min_ghg() {
-        let mut profile = make_profile();
-        profile.planner.objective = PlannerObjective::MinGhg;
-        let w = build_milp_weights(&profile);
+        let profile = make_profile();
+        let w = build_milp_weights(&profile, PlannerObjective::MinGhg);
         assert!((w.w_energy - 0.0).abs() < 1e-9);
         assert!((w.w_ghg - 10.0).abs() < 1e-9);
         assert!((w.c_bat_wear_eur_kwh - 0.0).abs() < 1e-9);
@@ -1873,12 +1903,11 @@ mod tests {
     #[test]
     fn weights_preset_custom_uses_fields() {
         let mut profile = make_profile();
-        profile.planner.objective = PlannerObjective::Custom;
         profile.planner.w_energy = 0.5;
         profile.planner.w_ghg = 0.001;
         profile.planner.w_grid = 0.1;
         profile.planner.c_bat_wear_eur_kwh = 0.02;
-        let w = build_milp_weights(&profile);
+        let w = build_milp_weights(&profile, PlannerObjective::Custom);
         assert!((w.w_energy - 0.5).abs() < 1e-9);
         assert!((w.w_ghg - 0.001).abs() < 1e-9);
         assert!((w.w_grid - 0.1).abs() < 1e-9);

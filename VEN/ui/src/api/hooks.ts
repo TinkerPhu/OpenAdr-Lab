@@ -4,6 +4,7 @@ import type {
   SensorSnapshot, SimInjectState, CreateUserRequestBody,
   CreateEvSessionBody, UpdateEvSettingsBody,
   CreateHeaterTargetBody, CreateShiftableLoadBody, CreateBaselineOverrideBody,
+  PlannerObjective,
 } from "./types";
 
 export function useHealth() {
@@ -170,6 +171,15 @@ export function usePlan(options?: { refetchInterval?: number | false }) {
     queryKey: ["plan", api.baseUrl],
     queryFn: () => api.plan(),
     refetchInterval: options?.refetchInterval ?? 10_000,
+  });
+}
+
+export function useSetObjective() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (objective: PlannerObjective) => api.setObjective(objective),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["plan"] }),
   });
 }
 
