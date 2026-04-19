@@ -262,6 +262,7 @@ pub(crate) fn spawn_sim_tick(
     vtn: VtnClient,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
     data_dir: String,
+    event_tx: PlannerEventTx,
 ) -> tokio::task::JoinHandle<()> {
     let tick_s = profile.simulator.tick_s;
     let persist_every_s = profile.simulator.persist_every_s;
@@ -280,6 +281,11 @@ pub(crate) fn spawn_sim_tick(
         } else {
             0
         };
+
+        // Plan F: Layer 1/2 deviation state
+        let mut deviation_ticks: u32 = 0;
+        let mut last_correction_kw: f64 = 0.0;
+        let mut correction_is_active = false;
 
         loop {
             tick_interval.tick().await;
@@ -354,7 +360,14 @@ pub(crate) fn spawn_sim_tick(
                 }
 
                 // Build setpoints from plan (single authoritative control path)
-                let sp_map: std::collections::HashMap<String, f64> = match &plan_snap {
+                // Plan F: capture prev tick net import for Layer 1 correction
+                let prev_actual_net_kw = sim_guard.grid.net_power_w / 1000.0;
+                let plan_net_kw = plan_snap.as_ref()
+                    .and_then(|p| p.current_slot(now))
+                    .map(|s| s.net_import_kw)
+                    .unwrap_or(0.0);
+
+                let mut sp_map: std::collections::HashMap<String, f64> = match &plan_snap {
                     Some(ref plan) => controller::dispatcher::build_setpoints(
                         plan,
                         &sim_guard.assets,
@@ -382,6 +395,52 @@ pub(crate) fn spawn_sim_tick(
                         m
                     }
                 };
+
+                // Plan F Layer 1: battery correction overlay (goal-aware reactive compensation)
+                let correction_kw = if plan_snap.is_some() {
+                    controller::dispatcher::apply_battery_correction_overlay(
+                        &mut sp_map,
+                        &sim_guard.assets,
+                        &sim_guard.asset_configs,
+                        plan_net_kw,
+                        prev_actual_net_kw,
+                        plan_snap.as_ref().unwrap().objective,
+                        profile.planner.deviation_threshold_kw,
+                        profile.planner.correction_min_kw,
+                    )
+                } else {
+                    0.0
+                };
+
+                // Emit CorrectionActive/CorrectionCleared SSE on significant state change
+                if (correction_kw - last_correction_kw).abs() > 0.2 {
+                    if correction_kw.abs() > profile.planner.correction_min_kw {
+                        let reason = if (prev_actual_net_kw - plan_net_kw) > 0.0 {
+                            "import_excess"
+                        } else {
+                            "export_excess"
+                        };
+                        let obj = plan_snap.as_ref().map(|p| p.objective).unwrap_or_default();
+                        let _ = event_tx.send(PlannerEvent::CorrectionActive {
+                            ts: now,
+                            asset_id: "battery".to_string(),
+                            reason: reason.to_string(),
+                            planned_net_kw: plan_net_kw,
+                            actual_net_kw: prev_actual_net_kw,
+                            deviation_kw: prev_actual_net_kw - plan_net_kw,
+                            correction_kw,
+                            objective: obj,
+                        });
+                        correction_is_active = true;
+                    } else if correction_is_active {
+                        let _ = event_tx.send(PlannerEvent::CorrectionCleared {
+                            ts: now,
+                            reason: "within_threshold".to_string(),
+                        });
+                        correction_is_active = false;
+                    }
+                    last_correction_kw = correction_kw;
+                }
 
                 // Simulator: apply setpoints → update device states
                 sim_guard.tick(
@@ -525,7 +584,22 @@ pub(crate) fn spawn_sim_tick(
                 sim_guard.clone()
             };
 
-            let _ = sim_snapshot; // used by reporting in Phase 6
+            // Plan F Layer 2: accumulate sustained deviation → DeviceDeviation trigger
+            if let Some(ref plan) = plan_snap {
+                if let Some(slot) = plan.current_slot(now) {
+                    let post_net_kw = sim_snapshot.grid.net_power_w / 1000.0;
+                    let post_error_kw = (post_net_kw - slot.net_import_kw).abs();
+                    if post_error_kw > profile.planner.deviation_threshold_kw {
+                        deviation_ticks = deviation_ticks.saturating_add(1);
+                        if deviation_ticks >= profile.planner.deviation_trigger_ticks {
+                            deviation_ticks = 0;
+                            let _ = trigger_tx.send(PlanTrigger::DeviceDeviation);
+                        }
+                    } else {
+                        deviation_ticks = 0;
+                    }
+                }
+            }
 
             // Periodic measurement reports (T049)
             if report_every_ticks > 0 {
@@ -712,6 +786,12 @@ pub(crate) fn spawn_planning(
                 solver_ms,
                 objective_eur: plan.objective_eur,
                 slot_count: plan.slots.len(),
+                trigger: trigger_reason.clone(),
+            });
+            // Replan supersedes any active correction
+            let _ = event_tx.send(PlannerEvent::CorrectionCleared {
+                ts: now,
+                reason: "superseded_by_replan".to_string(),
             });
 
             let slot_count = plan.slots.len();

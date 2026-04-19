@@ -6,6 +6,7 @@
 use crate::assets::{AssetConfig, AssetState};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::Plan;
+use crate::profile::PlannerObjective;
 use crate::simulator::AssetEntry;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -150,16 +151,96 @@ pub fn apply_surplus_ev_overlay(
     setpoints.insert("ev".to_string(), charge_kw);
 }
 
+/// Layer 1 reactive correction: adjust battery setpoint when actual grid import
+/// deviates from the plan's expectation by more than `threshold_kw`.
+///
+/// Sign convention: positive setpoint = battery charging (importing), negative = discharging.
+/// Returns the correction delta applied to the battery setpoint (0.0 if no correction).
+pub fn apply_battery_correction_overlay(
+    setpoints: &mut HashMap<String, f64>,
+    assets: &[AssetEntry],
+    asset_configs: &[AssetConfig],
+    plan_net_import_kw: f64,
+    actual_net_kw: f64,
+    objective: PlannerObjective,
+    threshold_kw: f64,
+    min_correction_kw: f64,
+) -> f64 {
+    let deviation_kw = actual_net_kw - plan_net_import_kw;
+    if deviation_kw.abs() <= threshold_kw {
+        return 0.0;
+    }
+
+    // Objective gate: MaxRevenue suppresses discharge corrections (preserve for export)
+    if objective == PlannerObjective::MaxRevenue && deviation_kw > 0.0 {
+        return 0.0;
+    }
+
+    // Find battery asset and config
+    let Some(idx) = assets.iter().position(|a| a.id == "battery") else {
+        return 0.0;
+    };
+    let (AssetState::Battery(bs), AssetConfig::Battery(bcfg)) =
+        (&assets[idx].state, &asset_configs[idx])
+    else {
+        return 0.0;
+    };
+
+    let current_sp = setpoints.get("battery").copied().unwrap_or(0.0);
+    // Correction direction: importing more than planned → discharge more (negative delta)
+    let raw_target = current_sp - deviation_kw;
+
+    // Clamp to power limits
+    let clamped = raw_target.clamp(-bcfg.max_discharge_kw, bcfg.max_charge_kw);
+
+    // SoC feasibility: don't discharge below min_soc, don't charge above 1.0
+    let clamped = if clamped < 0.0 && bs.soc <= bcfg.min_soc + 0.01 {
+        current_sp.max(0.0) // already at floor, suppress discharge
+    } else if clamped > 0.0 && bs.soc >= 1.0 - 0.01 {
+        current_sp.min(0.0) // already at ceiling, suppress charge
+    } else {
+        clamped
+    };
+
+    let delta = clamped - current_sp;
+    if delta.abs() < min_correction_kw {
+        return 0.0;
+    }
+
+    setpoints.insert("battery".to_string(), clamped);
+    delta
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::assets::{
-        AssetConfig, AssetState, BaseLoad, BaseLoadState, EvCharger, EvState, PvInverter, PvState,
+        AssetConfig, AssetState, BaseLoad, BaseLoadState, Battery, BatteryState,
+        EvCharger, EvState, PvInverter, PvState,
     };
     use crate::simulator::{energy::EnergyCounter, AssetEntry};
     use crate::assets::AssetHistoryBuffer;
+
+    fn battery_entry(soc: f64) -> (AssetEntry, AssetConfig) {
+        let cfg = Battery {
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            round_trip_efficiency: 0.95,
+            min_soc: 0.1,
+        };
+        let entry = AssetEntry {
+            id: "battery".to_string(),
+            state: AssetState::Battery(BatteryState { soc, actual_power_kw: 0.0 }),
+            setpoint_kw: 0.0,
+            last_power_kw: 0.0,
+            energy: EnergyCounter::new(),
+            history: AssetHistoryBuffer::new(0),
+        };
+        (entry, AssetConfig::Battery(cfg))
+    }
 
     fn ev_entry(soc: f64, plugged: bool, soc_target: f64) -> (AssetEntry, AssetConfig) {
         let cfg = EvCharger {
@@ -340,5 +421,100 @@ mod tests {
             sp.get("ev").is_none(),
             "overlay must not fire when overlay_enabled=false"
         );
+    }
+
+    // ── battery correction overlay tests ──────────────────────────────────────
+
+    #[test]
+    fn correction_discharges_battery_on_pv_shortfall() {
+        // actual_net=3.0, planned_net=0.0, threshold=1.0 → deviation=3.0
+        // Battery should discharge (negative delta) to compensate
+        let (bat_e, bat_c) = battery_entry(0.5);
+        let assets = vec![bat_e];
+        let configs = vec![bat_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), 0.0);
+        let delta = apply_battery_correction_overlay(
+            &mut sp, &assets, &configs,
+            0.0, 3.0, PlannerObjective::MinCost, 1.0, 0.2,
+        );
+        assert!(delta < 0.0, "expected negative delta (discharge), got {delta}");
+        let bat_sp = sp.get("battery").copied().unwrap();
+        assert!(bat_sp < 0.0, "battery setpoint should be negative (discharge), got {bat_sp}");
+    }
+
+    #[test]
+    fn correction_suppressed_below_threshold() {
+        let (bat_e, bat_c) = battery_entry(0.5);
+        let assets = vec![bat_e];
+        let configs = vec![bat_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), 0.0);
+        let delta = apply_battery_correction_overlay(
+            &mut sp, &assets, &configs,
+            0.0, 0.5, PlannerObjective::MinCost, 1.0, 0.2,
+        );
+        assert_eq!(delta, 0.0, "deviation 0.5 below threshold 1.0 must return 0");
+    }
+
+    #[test]
+    fn correction_suppressed_when_battery_at_min_soc() {
+        // soc at min_soc + 0.005 → discharge correction should be suppressed
+        let (bat_e, bat_c) = battery_entry(0.105);
+        let assets = vec![bat_e];
+        let configs = vec![bat_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), 0.0);
+        let delta = apply_battery_correction_overlay(
+            &mut sp, &assets, &configs,
+            0.0, 3.0, PlannerObjective::MinCost, 1.0, 0.2,
+        );
+        assert_eq!(delta, 0.0, "discharge must be suppressed near min_soc");
+    }
+
+    #[test]
+    fn correction_suppressed_for_maxrevenue_discharge() {
+        // MaxRevenue + positive deviation (importing more) → suppress discharge
+        let (bat_e, bat_c) = battery_entry(0.5);
+        let assets = vec![bat_e];
+        let configs = vec![bat_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), 0.0);
+        let delta = apply_battery_correction_overlay(
+            &mut sp, &assets, &configs,
+            0.0, 3.0, PlannerObjective::MaxRevenue, 1.0, 0.2,
+        );
+        assert_eq!(delta, 0.0, "MaxRevenue must suppress discharge corrections");
+    }
+
+    #[test]
+    fn correction_allows_maxrevenue_on_export_excess() {
+        // MaxRevenue + negative deviation (exporting more than planned) → charge more
+        let (bat_e, bat_c) = battery_entry(0.5);
+        let assets = vec![bat_e];
+        let configs = vec![bat_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), 0.0);
+        let delta = apply_battery_correction_overlay(
+            &mut sp, &assets, &configs,
+            0.0, -3.0, PlannerObjective::MaxRevenue, 1.0, 0.2,
+        );
+        assert!(delta > 0.0, "MaxRevenue should allow charge corrections on export excess, got {delta}");
+    }
+
+    #[test]
+    fn correction_clamped_to_max_discharge_kw() {
+        // Large deviation → setpoint must not exceed -max_discharge_kw (5.0)
+        let (bat_e, bat_c) = battery_entry(0.5);
+        let assets = vec![bat_e];
+        let configs = vec![bat_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), 0.0);
+        let _delta = apply_battery_correction_overlay(
+            &mut sp, &assets, &configs,
+            0.0, 20.0, PlannerObjective::MinCost, 1.0, 0.2,
+        );
+        let bat_sp = sp.get("battery").copied().unwrap();
+        assert!(bat_sp >= -5.0, "battery setpoint must not go below -max_discharge_kw, got {bat_sp}");
     }
 }
