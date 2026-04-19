@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tracing::{info, warn};
 
@@ -267,7 +267,7 @@ fn default_report_interval() -> u64 {
 
 /// Optimization objective preset. Selects a named weight configuration for the MILP solver.
 /// Individual weight fields in `PlannerConfig` can be tuned further with `Custom`.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PlannerObjective {
     /// Minimize energy bill. Balanced weights: energy cost + light GHG + light grid + wear.
@@ -277,9 +277,12 @@ pub enum PlannerObjective {
     /// Minimize carbon emissions above all else.
     /// (w_energy=0, w_ghg=10, w_grid=0, c_bat_wear=0)
     MinGhg,
-    /// Minimize grid exchange volume (maximize self-consumption).
+    /// Minimize grid exchange volume (import + export equally penalised).
     /// (w_energy=0, w_ghg=0, w_grid=1, c_bat_wear=0)
     MinGrid,
+    /// Minimize grid import only — export is allowed/encouraged (energy autarky).
+    /// (w_import=1, w_energy=0, w_ghg=0, w_grid=0, c_bat_wear=0)
+    MinImport,
     /// Maximize revenue from export and grid services.
     /// (w_energy=1, w_ghg=0, w_grid=0, c_bat_wear=0.03)
     MaxRevenue,

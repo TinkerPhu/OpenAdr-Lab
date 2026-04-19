@@ -14,11 +14,11 @@ mod vtn;
 use config::Config;
 use entities::asset::PlanTrigger;
 use metrics_exporter_prometheus::PrometheusBuilder;
-use profile::Profile;
+use profile::{Profile, PlannerObjective};
 use simulator::SimState;
 use state::AppState;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
 use vtn::VtnClient;
 
@@ -30,6 +30,7 @@ pub struct AppCtx {
     pub trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
     pub profile: Arc<Profile>,
     pub sim: Arc<Mutex<SimState>>,
+    pub active_objective: Arc<RwLock<PlannerObjective>>,
 }
 
 #[tokio::main]
@@ -121,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
         vtn.clone(),
         cfg.ven_name.clone(),
     );
+    let active_objective = Arc::new(RwLock::new(profile.planner.objective));
     loops::spawn_planning(
         state.clone(),
         profile.clone(),
@@ -128,6 +130,7 @@ async fn main() -> anyhow::Result<()> {
         cfg.ven_name.clone(),
         trigger_rx,
         sim_state.clone(),
+        active_objective.clone(),
     );
     if let Some(path) = cfg.persist_path.clone() {
         loops::spawn_state_persist(state.clone(), path);
@@ -141,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
         trigger_tx,
         profile,
         sim: sim_state.clone(),
+        active_objective,
     };
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;
