@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import {
   Box,
   Slider,
@@ -48,10 +48,9 @@ export function AssetRightSection({
   const socRaw = sim?.assets?.[assetId]?.["soc"] ?? null;
   const liveSocPct = socRaw !== null && socRaw !== undefined ? socRaw * 100 : null;
 
-  // Debounced SoC editing: while user is dragging, hold a local pending value
-  // and suppress the live update. 500ms after the last drag event, POST reset.
+  // SoC drag: hold a local pending value while the user is dragging so the
+  // slider is responsive. Cleared after POST /sim/reset/:id succeeds.
   const [pendingSocPct, setPendingSocPct] = useState<number | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Local state for schema-driven slider controls: updated immediately on drag
   // so the slider is responsive without waiting for the POST roundtrip.
@@ -59,35 +58,37 @@ export function AssetRightSection({
   // revert to the server value, which is correct since they are config knobs
   // rather than live measurements.
   const [localControlValues, setLocalControlValues] = useState<Record<string, number | boolean>>({});
-  const controlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const socPct = pendingSocPct ?? liveSocPct;
 
-  function handleSocChange(_: Event, value: number | number[]) {
-    const pct = value as number;
-    setPendingSocPct(pct);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      onResetSoc(assetId, pct / 100, () => setPendingSocPct(null));
-    }, 500);
+  function handleSocDrag(_: Event, value: number | number[]) {
+    setPendingSocPct(value as number);
   }
 
+  function handleSocCommit(_: Event | React.SyntheticEvent, value: number | number[]) {
+    const pct = value as number;
+    setPendingSocPct(pct);
+    onResetSoc(assetId, pct / 100, () => setPendingSocPct(null));
+  }
+
+  // Live drag: update local display only — no POST yet.
   function handleChange(key: string, val: number | boolean) {
     setLocalControlValues(prev => ({ ...prev, [key]: val }));
-    if (controlTimerRef.current) clearTimeout(controlTimerRef.current);
-    controlTimerRef.current = setTimeout(() => {
-      onOverrideChange({ [key]: val } as Partial<SimInjectState>);
-      // Decay controls (Behaviour B): release the local hold after posting so
-      // the slider follows the live sim value as the backend EMA-blends back.
-      // Alpha knobs are config, not measurements — they retain local state.
-      if (key in DECAY_CONTROLS) {
-        setLocalControlValues(prev => {
-          const next = { ...prev };
-          delete next[key];
-          return next;
-        });
-      }
-    }, 300);
+  }
+
+  // Mouse-up commit: POST the value; release local hold for Behaviour B controls.
+  function handleCommit(key: string, val: number | boolean) {
+    onOverrideChange({ [key]: val } as Partial<SimInjectState>);
+    // Decay controls (Behaviour B): release the local hold after posting so
+    // the slider follows the live sim value as the backend EMA-blends back.
+    // Alpha knobs are config, not measurements — they retain local state.
+    if (key in DECAY_CONTROLS) {
+      setLocalControlValues(prev => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
   }
 
   function getValue(key: string): number | boolean | null {
@@ -122,7 +123,7 @@ export function AssetRightSection({
         Status Settings
       </Typography>
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-        {/* SoC slider — editable, debounced POST /sim/reset/:id on commit */}
+        {/* SoC slider — POST /sim/reset/:id fires on mouse-up */}
         {socPct !== null && (
           <Box>
             <Typography variant="caption">
@@ -135,7 +136,8 @@ export function AssetRightSection({
               step={1}
               value={socPct}
               data-testid={`ctrl-${assetId}-soc`}
-              onChange={handleSocChange}
+              onChange={handleSocDrag}
+              onChangeCommitted={handleSocCommit}
               valueLabelDisplay="auto"
               valueLabelFormat={(v) => `${v}%`}
             />
@@ -149,6 +151,7 @@ export function AssetRightSection({
             descriptor={d}
             value={getValue(d.key)}
             onChange={handleChange}
+            onCommit={handleCommit}
           />
         ))}
 
