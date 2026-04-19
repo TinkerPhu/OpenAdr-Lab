@@ -11,7 +11,6 @@ import {
   ReferenceLine,
 } from "recharts";
 import type { TooltipProps } from "recharts";
-import { useRef, useState, useEffect } from "react";
 import type { Plan } from "../../api/types";
 import { Box, Typography } from "@mui/material";
 import { ASSET_COLORS } from "../controller/types";
@@ -122,24 +121,6 @@ interface PlanPowerStackProps {
 }
 
 export function PlanPowerStack({ plan }: PlanPowerStackProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [barSize, setBarSize] = useState<number>(3);
-
-  const slotCount = plan?.slots.length ?? 0;
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el || slotCount === 0) return;
-    // Subtract YAxis width (44) + right margin (16) so bars fill the actual plot area.
-    // Use ceil so bars slightly overlap rather than leave a gap.
-    const PLOT_OFFSET_PX = 60;
-    const observer = new ResizeObserver(([entry]) => {
-      const plotW = Math.max(1, entry.contentRect.width - PLOT_OFFSET_PX);
-      setBarSize(Math.ceil(plotW / slotCount));
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [slotCount]);
-
   if (!plan || plan.slots.length === 0) {
     return (
       <Box sx={{ py: 2 }}>
@@ -152,6 +133,9 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
 
   const rows = buildRows(plan);
   const nowMs = Date.now();
+  const nowLabel = rows.reduce((c, r) =>
+    Math.abs(r.ts - nowMs) < Math.abs(c.ts - nowMs) ? r : c
+  ).time;
 
   // Positive-side stacked bars (load / charging)
   const loadKeys = ["baseline", "ev", "wm", "heater", "bat_charge"] as const;
@@ -159,20 +143,17 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
   const genKeys = ["pv", "bat_dis"] as const;
 
   return (
-    <Box ref={containerRef} data-testid="plan-power-stack" sx={{ width: "100%", height: 340 }}>
+    <Box data-testid="plan-power-stack" sx={{ width: "100%", height: 340 }}>
       <Typography variant="subtitle2" color="text.secondary" gutterBottom>
         Power Stack — Forecast vs Plan
       </Typography>
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={rows} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+        <ComposedChart data={rows} margin={{ top: 4, right: 16, left: 0, bottom: 0 }} barCategoryGap={0} barGap={0}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
           <XAxis
-            dataKey="ts"
-            scale="time"
-            type="number"
-            domain={["dataMin", "dataMax"]}
-            tickFormatter={formatTime}
+            dataKey="time"
             tick={{ fontSize: 10 }}
+            interval="preserveStartEnd"
           />
           <YAxis tick={{ fontSize: 10 }} width={44} label={{ value: "kW", angle: -90, position: "insideLeft", style: { fontSize: 10 } }} />
           <Tooltip content={<PowerStackTooltip />} />
@@ -187,7 +168,6 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
               stackId="load"
               fill={COLORS[key]}
               fillOpacity={0.85}
-              barSize={barSize}
               isAnimationActive={false}
             />
           ))}
@@ -201,7 +181,6 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
               stackId="gen"
               fill={COLORS[key]}
               fillOpacity={0.85}
-              barSize={barSize}
               isAnimationActive={false}
             />
           ))}
@@ -219,7 +198,7 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
 
           {/* NOW marker */}
           <ReferenceLine
-            x={nowMs}
+            x={nowLabel}
             stroke="#f44336"
             strokeDasharray="3 3"
             label={{ value: "NOW", position: "top", fontSize: 9, fill: "#f44336" }}
