@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Accordion, AccordionDetails, AccordionSummary,
   Alert, Box, Chip, CircularProgress, Divider, FormControl, InputLabel,
-  LinearProgress, MenuItem, Select, Stack, Tooltip, Typography,
+  LinearProgress, MenuItem, Select, Snackbar, Stack, Tooltip, Typography,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import BoltIcon from "@mui/icons-material/Bolt";
@@ -161,23 +161,34 @@ function PlannerStatusBar({ status }: { status: PlannerStatus }) {
 // ─── Correction Banner (Plan F: Layer 1 reactive correction) ──────────────────
 
 function CorrectionBanner({ status }: { status: CorrectionStatus }) {
-  if (!status.active) return null;
-  const directionLabel = status.deviation_kw > 0 ? "import excess" : "export excess";
-  const corrLabel = status.correction_kw < 0
-    ? `discharge +${Math.abs(status.correction_kw).toFixed(1)} kW`
-    : `charge reduced ${status.correction_kw.toFixed(1)} kW`;
+  // Rendered as a Snackbar overlay so it never causes layout shifts that
+  // destabilise Playwright element-stability checks on elements below.
+  const directionLabel = status.active && status.deviation_kw > 0 ? "import excess" : "export excess";
+  const corrLabel = status.active
+    ? status.correction_kw < 0
+      ? `discharge +${Math.abs(status.correction_kw).toFixed(1)} kW`
+      : `charge reduced ${status.correction_kw.toFixed(1)} kW`
+    : "";
   return (
-    <Alert
-      data-testid="correction-banner"
-      severity="info"
-      icon={<BoltIcon fontSize="small" />}
-      sx={{ mb: 1 }}
+    <Snackbar
+      open={status.active}
+      anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
     >
-      <strong>Reactive correction active — {status.asset_id}</strong>
-      {" "}Grid {directionLabel}: {Math.abs(status.deviation_kw).toFixed(1)} kW above plan
-      (planned {status.planned_net_kw.toFixed(1)} kW, actual {status.actual_net_kw.toFixed(1)} kW).
-      Battery {corrLabel}. Objective: {status.objective}.
-    </Alert>
+      <Alert
+        data-testid="correction-banner"
+        severity="info"
+        icon={<BoltIcon fontSize="small" />}
+      >
+        {status.active && (
+          <>
+            <strong>Reactive correction active — {status.asset_id}</strong>
+            {" "}Grid {directionLabel}: {Math.abs(status.deviation_kw).toFixed(1)} kW above plan
+            (planned {status.planned_net_kw.toFixed(1)} kW, actual {status.actual_net_kw.toFixed(1)} kW).
+            Battery {corrLabel}. Objective: {status.objective}.
+          </>
+        )}
+      </Alert>
+    </Snackbar>
   );
 }
 
@@ -268,8 +279,6 @@ export function PlannerPage() {
       <ObjectiveLegend />
 
       <Stack spacing={3} divider={<Divider />}>
-        {/* Correction Banner (Plan F: Layer 1) */}
-        <CorrectionBanner status={correctionStatus} />
         {/* Planner Status (Plan E) */}
         <PlannerStatusBar status={plannerStatus} />
 
@@ -310,6 +319,9 @@ export function PlannerPage() {
           </AccordionDetails>
         </Accordion>
       </Stack>
+
+      {/* Correction Banner (Plan F: Layer 1) — Snackbar overlay, no layout shift */}
+      <CorrectionBanner status={correctionStatus} />
     </Box>
   );
 }
