@@ -47,11 +47,11 @@ describe("StackedAreaTooltip", () => {
     );
 
     // One row per asset, not two
-    expect(screen.getByText(/^ev:/)).toBeInTheDocument();
-    expect(screen.getByText(/^battery:/)).toBeInTheDocument();
-    expect(screen.getByText(/^base_load:/)).toBeInTheDocument();
-    expect(screen.queryAllByText(/ev/).length).toBe(1);
-    expect(screen.queryAllByText(/battery/).length).toBe(1);
+    expect(screen.getByText(/^EV \(planned\):/)).toBeInTheDocument();
+    expect(screen.getByText(/^Battery \(planned\):/)).toBeInTheDocument();
+    expect(screen.getByText(/^Base Load \(forecast\):/)).toBeInTheDocument();
+    expect(screen.queryAllByText(/EV \(planned\)/).length).toBe(1);
+    expect(screen.queryAllByText(/Battery \(planned\)/).length).toBe(1);
   });
 
   it("shows net kW for unidirectional import asset", () => {
@@ -119,7 +119,7 @@ describe("StackedAreaTooltip", () => {
     );
     expect(screen.getByText(/Grid:/)).toBeInTheDocument();
     // Grid should NOT appear in asset rows
-    expect(screen.queryAllByText(/^ev:/).length).toBe(1);
+    expect(screen.queryAllByText(/^EV \(planned\):/).length).toBe(1);
     expect(screen.queryAllByText(/Grid/).length).toBe(1);
   });
 });
