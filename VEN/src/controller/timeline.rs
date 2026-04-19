@@ -333,14 +333,16 @@ pub fn build_asset_timeline(
                 values.insert("import_limit_kw".into(), slot.import_cap_kw);
                 values.insert("export_limit_kw".into(), slot.export_cap_kw);
             } else {
-                // Physical asset: PV uses the sin-model forecast stored directly in the slot
-                // (pv_forecast_kw, positive generation magnitude → negate for export-negative).
+                // Physical asset: PV uses pv_forecast_kw (negate: generation is export-negative).
+                // Base load uses baseline_kw — non-controllable, so no allocation is ever created.
                 // All other assets use their packet allocation, or 0 kW if absent.
                 // We always emit a point (even 0 kW) so that all assets share the same
                 // set of plan-slot timestamps. Omitting zero-allocation slots causes the
                 // stacked chart to fall back to an exact-match miss → false zero spikes.
                 let power_kw = if asset_id == "pv" {
                     -slot.pv_forecast_kw
+                } else if asset_id == "base_load" {
+                    slot.baseline_kw
                 } else {
                     slot.allocations
                         .iter()
