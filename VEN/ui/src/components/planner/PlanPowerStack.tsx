@@ -129,9 +129,12 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
   useEffect(() => {
     const el = containerRef.current;
     if (!el || slotCount === 0) return;
+    // Subtract YAxis width (44) + right margin (16) so bars fill the actual plot area.
+    // Use ceil so bars slightly overlap rather than leave a gap.
+    const PLOT_OFFSET_PX = 60;
     const observer = new ResizeObserver(([entry]) => {
-      const w = entry.contentRect.width;
-      setBarSize(Math.max(1, Math.floor(w / slotCount)));
+      const plotW = Math.max(1, entry.contentRect.width - PLOT_OFFSET_PX);
+      setBarSize(Math.ceil(plotW / slotCount));
     });
     observer.observe(el);
     return () => observer.disconnect();
