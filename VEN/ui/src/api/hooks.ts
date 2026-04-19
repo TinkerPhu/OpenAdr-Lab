@@ -207,9 +207,6 @@ export function useTariffs(options?: { refetchInterval?: number | false }) {
   });
 }
 
-/** @deprecated Use useTariffs instead. Alias kept for legacy Controller page. */
-export const useRates = useTariffs;
-
 export function useCapacity() {
   const { api } = useVenContext();
   return useQuery({

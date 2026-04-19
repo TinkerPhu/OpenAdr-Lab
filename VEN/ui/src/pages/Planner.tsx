@@ -1,7 +1,5 @@
 import { Box, Divider, Stack, Typography } from "@mui/material";
-import { usePlan } from "../api/hooks";
-import { useTrace } from "../api/hooks";
-import { usePackets } from "../api/hooks";
+import { usePlan, useTrace, usePackets } from "../api/hooks";
 import { PlanHeaderBar } from "../components/planner/PlanHeaderBar";
 import { PlanTriggerTimeline } from "../components/planner/PlanTriggerTimeline";
 import { PlanDecisionMatrix } from "../components/planner/PlanDecisionMatrix";

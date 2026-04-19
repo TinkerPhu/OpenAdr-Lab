@@ -9,9 +9,7 @@ import { AssetLeftSection } from "./AssetLeftSection";
 import { AssetMidSection } from "./AssetMidSection";
 import { AssetRightSection } from "./AssetRightSection";
 import type { SimSnapshot, SimInjectState } from "../../api/types";
-
-const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
-const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
+import { DEFAULT_WINDOW, EXTENDED_WINDOW } from "./chartLayout";
 
 interface AssetCellProps {
   assetId: AssetId;
