@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  Accordion, AccordionDetails, AccordionSummary,
   Box, Chip, CircularProgress, Divider, FormControl, InputLabel,
   LinearProgress, MenuItem, Select, Stack, Tooltip, Typography,
 } from "@mui/material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePlan, usePlannerEvents, useSetObjective, useTrace, usePackets } from "../api/hooks";
 import type { PlannerEvent, PlannerObjective } from "../api/types";
@@ -11,6 +13,7 @@ import { PlanTriggerTimeline } from "../components/planner/PlanTriggerTimeline";
 import { PlanDecisionMatrix } from "../components/planner/PlanDecisionMatrix";
 import { PlanPowerStack } from "../components/planner/PlanPowerStack";
 import { PacketProgressBoard } from "../components/planner/PacketProgressBoard";
+import { TraceTable } from "../components/planner/TraceTable";
 
 const OBJECTIVE_OPTIONS: {
   value: PlannerObjective;
@@ -154,6 +157,18 @@ export function PlannerPage() {
           </Typography>
           <PacketProgressBoard packets={packets ?? []} />
         </Box>
+
+        {/* Decision Trace (collapsible) */}
+        <Accordion defaultExpanded={false} data-testid="trace-accordion">
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Decision Trace ({events?.length ?? 0} events)
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails sx={{ p: 0 }}>
+            <TraceTable entries={events ?? []} />
+          </AccordionDetails>
+        </Accordion>
       </Stack>
     </Box>
   );
