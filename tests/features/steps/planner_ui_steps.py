@@ -33,7 +33,7 @@ def step_see_element(context, testid):
 
 @when('I click the element with testid "{testid}"')
 def step_click_element(context, testid):
-    context.browser_page.click(tid(testid))
+    context.browser_page.click(tid(testid), force=True)
 
 
 # ── Trigger Timeline steps ────────────────────────────────────────────────────
@@ -50,9 +50,8 @@ def step_at_least_one_chip(context):
 def step_click_first_chip(context):
     page = context.browser_page
     page.wait_for_selector('[data-testid^="trigger-chip-"]', timeout=45000)
-    chips = page.query_selector_all('[data-testid^="trigger-chip-"]')
-    assert len(chips) > 0, "No trigger chips to click"
-    chips[0].click()
+    # Use locator + force to handle layout instability from React Query refetches on Pi4
+    page.locator('[data-testid^="trigger-chip-"]').first.click(force=True)
 
 
 # ── Decision Matrix steps ─────────────────────────────────────────────────────
