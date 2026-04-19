@@ -236,6 +236,10 @@ pub async fn post_requests(
         (sim.assets.clone(), sim.asset_configs.clone())
     };
 
+    // Extract optional overrides before body is moved into create_from_body
+    let soft_deadline = body.soft_deadline;
+    let target_temp_c = body.target_temp_c;
+
     match crate::controller::user_request::create_from_body(body, &assets, &asset_configs, now) {
         Ok(mut user_req) => {
             if user_req.asset_id == "ev" {
@@ -249,7 +253,7 @@ pub async fn post_requests(
                     id: Uuid::new_v4(),
                     target_soc,
                     departure_time: deadline,
-                    soft_deadline: body.soft_deadline.unwrap_or(false),
+                    soft_deadline: soft_deadline.unwrap_or(false),
                     created_at: now,
                     updated_at: now,
                 };
@@ -269,7 +273,7 @@ pub async fn post_requests(
                     .first()
                     .map(|d| d.latest_end)
                     .unwrap_or_else(|| now + chrono::Duration::hours(4));
-                let target_temp_c = body.target_temp_c.unwrap_or(55.0);
+                let target_temp_c = target_temp_c.unwrap_or(55.0);
                 let target = HeaterTarget {
                     id: Uuid::new_v4(),
                     target_temp_c,
