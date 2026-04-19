@@ -33,6 +33,17 @@ export const ASSET_LABELS: Record<string, string> = {
   dw: "Dishwasher",
 };
 
+/**
+ * Planning role per asset type.
+ * "forecast" = physics-predicted, non-controllable (pv, base_load).
+ * "planned"  = MILP-assigned, controllable (ev, battery, heater, shiftable loads).
+ * Unknown assets default to "planned" at call site.
+ */
+export const ASSET_PLANNING_ROLE: Record<string, "forecast" | "planned"> = {
+  pv: "forecast",
+  base_load: "forecast",
+};
+
 // ─── Summary (left section of each asset cell) ───────────────────────────────
 
 export type UserRequestSummary = {

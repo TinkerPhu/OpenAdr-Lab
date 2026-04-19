@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../types";
+import { ASSET_LABELS, ASSET_PLANNING_ROLE } from "../types";
 
 interface StackedAreaChartProps {
   data: StackedAreaPoint[];
@@ -26,6 +27,12 @@ interface StackedAreaChartProps {
 
 function formatTs(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function assetLabel(id: string): string {
+  const label = ASSET_LABELS[id] ?? id;
+  const role = ASSET_PLANNING_ROLE[id] ?? "planned";
+  return `${label} (${role})`;
 }
 
 /** Merges _pos/_neg series back into a single net kW row per asset. */
@@ -66,7 +73,7 @@ export function StackedAreaTooltip({
       <div style={{ marginBottom: 4, fontWeight: "bold" }}>{time}</div>
       {Object.entries(netByAsset).map(([assetId, kw]) => (
         <div key={assetId} style={{ color: colorMap[assetId] ?? "#888" }}>
-          {assetId}: {kw >= 0 ? "+" : ""}
+          {assetLabel(assetId)}: {kw >= 0 ? "+" : ""}
           {kw.toFixed(2)} kW
         </div>
       ))}
@@ -138,7 +145,15 @@ export function StackedAreaChart({
           />
           <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} />
           <Tooltip content={<StackedAreaTooltip colorMap={colorMap} />} />
-          <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
+          <Legend
+            iconSize={10}
+            wrapperStyle={{ fontSize: 10 }}
+            formatter={(value: string) => {
+              const id = value.replace(/ [+-]$/, "");
+              const suffix = value.endsWith(" +") ? " +" : " -";
+              return `${assetLabel(id)}${suffix}`;
+            }}
+          />
 
           {/* For each asset: positive series (import, stacked above x-axis) */}
           {renderOrder.map((id) => (
