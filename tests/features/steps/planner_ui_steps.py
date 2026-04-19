@@ -1,7 +1,6 @@
 """Step definitions for Planner Visualization Page UI scenarios."""
 
-from behave import given, when, then
-from features.helpers.api_client import ven_get
+from behave import when, then
 from features.helpers.ui import tid
 from features.helpers.wait import poll_until
 
@@ -36,19 +35,6 @@ def step_see_element(context, testid):
 def step_click_element(context, testid):
     context.browser_page.click(tid(testid))
 
-
-# ── State preconditions ───────────────────────────────────────────────────────
-
-@given("the planner has not yet generated a plan")
-def step_no_plan_yet(context):
-    """
-    This step is satisfied when the VEN has been freshly restarted and no plan exists.
-    In practice, we cannot guarantee this in the test environment — this scenario is
-    better exercised via unit tests. Skip gracefully if a plan already exists.
-    """
-    r = ven_get("/plan")
-    if r.status_code == 200 and r.json() is not None:
-        context.scenario.skip("Plan already exists; empty-state scenario skipped")
 
 # ── Trigger Timeline steps ────────────────────────────────────────────────────
 

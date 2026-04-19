@@ -30,11 +30,6 @@ Feature: Planner Visualization Page
     And I see an element with testid "plan-import-kwh"
     And I see an element with testid "plan-co2"
 
-  Scenario: Plan header shows no-plan state when planner has not run
-    Given the planner has not yet generated a plan
-    When I navigate to the Planner page
-    Then I see an element with testid "plan-no-plan"
-
   # ── Trigger Timeline (US3) ───────────────────────────────────────────────────
 
   Scenario: Trigger timeline section is visible on Planner page
@@ -79,10 +74,5 @@ Feature: Planner Visualization Page
     Then the decision matrix cells are hidden
     When I click the element with testid "matrix-collapse-btn"
     Then the decision matrix cells are visible
-
-  Scenario: Decision matrix shows empty state when no plan available
-    Given the planner has not yet generated a plan
-    When I navigate to the Planner page
-    Then I see an element with testid "matrix-empty"
 
   # ── Device Sessions Board placeholder (PacketProgressBoard removed in Phase D) ──

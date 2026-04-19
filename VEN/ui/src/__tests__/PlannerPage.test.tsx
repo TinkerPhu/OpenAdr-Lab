@@ -117,6 +117,11 @@ describe("PlannerPage", () => {
     expect(screen.getByTestId("planner-heading")).toBeInTheDocument();
   });
 
+  it("renders objective legend accordion", () => {
+    render(<PlannerPage />);
+    expect(screen.getByTestId("objective-legend")).toBeInTheDocument();
+  });
+
   it("renders plan-header section root", () => {
     render(<PlannerPage />);
     // Empty state — no-plan shown
