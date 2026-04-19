@@ -231,6 +231,7 @@ describe("PlannerPage", () => {
         solver_ms: 23400,
         objective_eur: 1.5,
         slot_count: 288,
+        trigger: "Periodic",
       });
     });
     expect(screen.getByTestId("planner-status-updated")).toBeInTheDocument();

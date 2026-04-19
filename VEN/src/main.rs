@@ -110,6 +110,11 @@ async fn main() -> anyhow::Result<()> {
         trigger_tx.clone(),
     );
     loops::spawn_report_poll(state.clone(), vtn.clone(), cfg.poll_reports_secs);
+
+    // Plan F: planner_event_tx must exist before spawn_sim_tick (correction SSE)
+    let (planner_event_tx_inner, _) = tokio::sync::broadcast::channel::<PlannerEvent>(128);
+    let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
+
     loops::spawn_sim_tick(
         state.clone(),
         sim_state.clone(),
@@ -118,6 +123,7 @@ async fn main() -> anyhow::Result<()> {
         vtn.clone(),
         trigger_tx.clone(),
         data_dir.clone(),
+        planner_event_tx.clone(),
     );
     loops::spawn_obligation_check(
         state.clone(),
@@ -126,8 +132,6 @@ async fn main() -> anyhow::Result<()> {
         cfg.ven_name.clone(),
     );
     let active_objective = Arc::new(RwLock::new(profile.planner.objective));
-    let (planner_event_tx, _) = tokio::sync::broadcast::channel::<PlannerEvent>(128);
-    let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx);
     loops::spawn_planning(
         state.clone(),
         profile.clone(),

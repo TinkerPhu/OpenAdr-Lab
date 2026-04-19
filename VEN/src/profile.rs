@@ -334,6 +334,22 @@ pub struct PlannerConfig {
     #[serde(default = "default_replan_interval")]
     pub replan_interval_s: u64,
 
+    /// Minimum absolute grid import error (kW) that activates battery correction.
+    /// Layer 1 fires when |actual_net_kw − planned_net_kw| exceeds this value.
+    /// Set to 0.0 to disable Layer 1 correction entirely. Default: 1.0 kW.
+    #[serde(default = "default_deviation_threshold_kw")]
+    pub deviation_threshold_kw: f64,
+
+    /// Consecutive 1-second ticks of sustained deviation before a DeviceDeviation
+    /// replan is triggered (Layer 2). Default: 30 (= 30 seconds).
+    #[serde(default = "default_deviation_trigger_ticks")]
+    pub deviation_trigger_ticks: u32,
+
+    /// Minimum battery setpoint change to apply (noise floor). Corrections smaller
+    /// than this are suppressed to avoid chattering. Default: 0.2 kW.
+    #[serde(default = "default_correction_min_kw")]
+    pub correction_min_kw: f64,
+
     /// Scales the energy cost term (import tariff cost − export revenue).
     /// 1.0 = full economic optimization. 0.0 = ignore energy cost (e.g. pure GHG mode).
     #[serde(default = "default_w_energy")]
@@ -404,6 +420,9 @@ impl Default for PlannerConfig {
             plan_step_s: default_plan_step(),
             plan_horizon_h: default_plan_horizon_h(),
             replan_interval_s: default_replan_interval(),
+            deviation_threshold_kw: default_deviation_threshold_kw(),
+            deviation_trigger_ticks: default_deviation_trigger_ticks(),
+            correction_min_kw: default_correction_min_kw(),
             w_energy: default_w_energy(),
             w_ghg: default_w_ghg(),
             w_grid: 0.0,
@@ -431,6 +450,15 @@ fn default_plan_horizon_h() -> u64 {
 }
 fn default_replan_interval() -> u64 {
     300
+}
+fn default_deviation_threshold_kw() -> f64 {
+    1.0
+}
+fn default_deviation_trigger_ticks() -> u32 {
+    30
+}
+fn default_correction_min_kw() -> f64 {
+    0.2
 }
 fn default_w_energy() -> f64 {
     1.0

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Accordion, AccordionDetails, AccordionSummary,
-  Box, Chip, CircularProgress, Divider, FormControl, InputLabel,
+  Alert, Box, Chip, CircularProgress, Divider, FormControl, InputLabel,
   LinearProgress, MenuItem, Select, Stack, Tooltip, Typography,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import BoltIcon from "@mui/icons-material/Bolt";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePlan, usePlannerEvents, useSetObjective, useTrace, usePackets } from "../api/hooks";
 import type { PlannerEvent, PlannerObjective } from "../api/types";
@@ -122,7 +123,13 @@ function ObjectiveLegend() {
 type PlannerStatus =
   | { phase: "idle" }
   | { phase: "solving"; elapsed_ms: number; iteration: number; objective: PlannerObjective }
-  | { phase: "updated"; solver_ms: number };
+  | { phase: "updated"; solver_ms: number; trigger: string };
+
+type CorrectionStatus =
+  | { active: false }
+  | { active: true; asset_id: string; reason: string;
+      planned_net_kw: number; actual_net_kw: number;
+      deviation_kw: number; correction_kw: number; objective: PlannerObjective };
 
 function PlannerStatusBar({ status }: { status: PlannerStatus }) {
   // Always render a fixed-height wrapper so that showing/hiding the status
@@ -143,11 +150,34 @@ function PlannerStatusBar({ status }: { status: PlannerStatus }) {
         <Chip
           data-testid="planner-status-updated"
           size="small"
-          color="success"
-          label={`Plan updated — solved in ${(status.solver_ms / 1000).toFixed(1)} s`}
+          color={status.trigger === "DeviceDeviation" ? "warning" : "success"}
+          label={`Plan updated (${status.trigger}) — solved in ${(status.solver_ms / 1000).toFixed(1)} s`}
         />
       )}
     </Box>
+  );
+}
+
+// ─── Correction Banner (Plan F: Layer 1 reactive correction) ──────────────────
+
+function CorrectionBanner({ status }: { status: CorrectionStatus }) {
+  if (!status.active) return null;
+  const directionLabel = status.deviation_kw > 0 ? "import excess" : "export excess";
+  const corrLabel = status.correction_kw < 0
+    ? `discharge +${Math.abs(status.correction_kw).toFixed(1)} kW`
+    : `charge reduced ${status.correction_kw.toFixed(1)} kW`;
+  return (
+    <Alert
+      data-testid="correction-banner"
+      severity="info"
+      icon={<BoltIcon fontSize="small" />}
+      sx={{ mb: 1 }}
+    >
+      <strong>Reactive correction active — {status.asset_id}</strong>
+      {" "}Grid {directionLabel}: {Math.abs(status.deviation_kw).toFixed(1)} kW above plan
+      (planned {status.planned_net_kw.toFixed(1)} kW, actual {status.actual_net_kw.toFixed(1)} kW).
+      Battery {corrLabel}. Objective: {status.objective}.
+    </Alert>
   );
 }
 
@@ -162,6 +192,7 @@ export function PlannerPage() {
 
   const [objective, setObjective] = useState<PlannerObjective>("min_cost");
   const [plannerStatus, setPlannerStatus] = useState<PlannerStatus>({ phase: "idle" });
+  const [correctionStatus, setCorrectionStatus] = useState<CorrectionStatus>({ active: false });
 
   useEffect(() => {
     if (plan?.objective) setObjective(plan.objective);
@@ -184,10 +215,23 @@ export function PlannerPage() {
               : prev,
           );
         } else if (event.type === "plan_ready") {
-          setPlannerStatus({ phase: "updated", solver_ms: event.solver_ms });
+          setPlannerStatus({ phase: "updated", solver_ms: event.solver_ms, trigger: event.trigger });
           queryClient.invalidateQueries({ queryKey: ["plan"] });
           // Fade back to idle after 3 s
           setTimeout(() => setPlannerStatus({ phase: "idle" }), 3000);
+        } else if (event.type === "correction_active") {
+          setCorrectionStatus({
+            active: true,
+            asset_id: event.asset_id,
+            reason: event.reason,
+            planned_net_kw: event.planned_net_kw,
+            actual_net_kw: event.actual_net_kw,
+            deviation_kw: event.deviation_kw,
+            correction_kw: event.correction_kw,
+            objective: event.objective,
+          });
+        } else if (event.type === "correction_cleared") {
+          setCorrectionStatus({ active: false });
         }
       },
       [queryClient],
@@ -224,6 +268,8 @@ export function PlannerPage() {
       <ObjectiveLegend />
 
       <Stack spacing={3} divider={<Divider />}>
+        {/* Correction Banner (Plan F: Layer 1) */}
+        <CorrectionBanner status={correctionStatus} />
         {/* Planner Status (Plan E) */}
         <PlannerStatusBar status={plannerStatus} />
 
