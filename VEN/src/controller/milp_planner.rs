@@ -472,7 +472,15 @@ fn build_milp_inputs(
         let first_slot = (window_start_s / (dt_h * 3600.0)).floor() as usize;
         // Last valid start: load must finish before latest_end
         let last_valid_s = window_end_s - dur_s;
-        if last_valid_s < 0.0 { return None; }
+        if last_valid_s < 0.0 {
+            tracing::warn!(
+                asset_id = %sl.asset_id,
+                window_end_s,
+                dur_s,
+                "shiftable load window expired before planner ran — skipped"
+            );
+            return None;
+        }
         let last_slot = ((last_valid_s / (dt_h * 3600.0)).floor() as usize).min(n.saturating_sub(duration_slots));
 
         let valid_start_slots: Vec<usize> = (first_slot..=last_slot).filter(|&s| s + duration_slots <= n).collect();
