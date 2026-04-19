@@ -27,6 +27,23 @@ pub enum PlannerEvent {
         solver_ms: u64,
         objective_eur: f64,
         slot_count: usize,
+        trigger: String,
+    },
+    /// Layer 1 reactive correction is active: battery setpoint adjusted.
+    CorrectionActive {
+        ts: DateTime<Utc>,
+        asset_id: String,
+        reason: String,
+        planned_net_kw: f64,
+        actual_net_kw: f64,
+        deviation_kw: f64,
+        correction_kw: f64,
+        objective: PlannerObjective,
+    },
+    /// Layer 1 correction cleared (deviation within threshold or superseded by replan).
+    CorrectionCleared {
+        ts: DateTime<Utc>,
+        reason: String,
     },
 }
 
