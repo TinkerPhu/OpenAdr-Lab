@@ -249,7 +249,7 @@ pub async fn post_requests(
                     id: Uuid::new_v4(),
                     target_soc,
                     departure_time: deadline,
-                    soft_deadline: false,
+                    soft_deadline: body.soft_deadline.unwrap_or(false),
                     created_at: now,
                     updated_at: now,
                 };
@@ -269,7 +269,7 @@ pub async fn post_requests(
                     .first()
                     .map(|d| d.latest_end)
                     .unwrap_or_else(|| now + chrono::Duration::hours(4));
-                let target_temp_c = 55.0_f64;
+                let target_temp_c = body.target_temp_c.unwrap_or(55.0);
                 let target = HeaterTarget {
                     id: Uuid::new_v4(),
                     target_temp_c,
