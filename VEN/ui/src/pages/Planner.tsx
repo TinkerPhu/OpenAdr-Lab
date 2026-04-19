@@ -125,27 +125,29 @@ type PlannerStatus =
   | { phase: "updated"; solver_ms: number };
 
 function PlannerStatusBar({ status }: { status: PlannerStatus }) {
-  if (status.phase === "idle") return null;
-  if (status.phase === "solving")
-    return (
-      <Box data-testid="planner-status-solving" sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-        <CircularProgress size={16} />
-        <Typography variant="body2" color="text.secondary">
-          Solving ({OBJECTIVE_OPTIONS.find((o) => o.value === status.objective)?.label ?? status.objective})
-          — {(status.elapsed_ms / 1000).toFixed(0)} s, tick {status.iteration}
-        </Typography>
-        <LinearProgress sx={{ flex: 1 }} />
-      </Box>
-    );
-  // phase === "updated"
+  // Always render a fixed-height wrapper so that showing/hiding the status
+  // bar doesn't cause layout shifts (which break Playwright click stability).
   return (
-    <Chip
-      data-testid="planner-status-updated"
-      size="small"
-      color="success"
-      label={`Plan updated — solved in ${(status.solver_ms / 1000).toFixed(1)} s`}
-      sx={{ mb: 1 }}
-    />
+    <Box data-testid="planner-status" sx={{ minHeight: 32, mb: 1, display: "flex", alignItems: "center" }}>
+      {status.phase === "solving" && (
+        <Box data-testid="planner-status-solving" sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
+          <CircularProgress size={16} />
+          <Typography variant="body2" color="text.secondary">
+            Solving ({OBJECTIVE_OPTIONS.find((o) => o.value === status.objective)?.label ?? status.objective})
+            — {(status.elapsed_ms / 1000).toFixed(0)} s, tick {status.iteration}
+          </Typography>
+          <LinearProgress sx={{ flex: 1 }} />
+        </Box>
+      )}
+      {status.phase === "updated" && (
+        <Chip
+          data-testid="planner-status-updated"
+          size="small"
+          color="success"
+          label={`Plan updated — solved in ${(status.solver_ms / 1000).toFixed(1)} s`}
+        />
+      )}
+    </Box>
   );
 }
 
