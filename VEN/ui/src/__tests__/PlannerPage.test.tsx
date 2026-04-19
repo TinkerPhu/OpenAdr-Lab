@@ -181,8 +181,10 @@ describe("PlannerPage", () => {
 
   // ── Plan E: Planner status SSE tests ──────────────────────────────────────
 
-  it("does not render status bar when idle", () => {
+  it("does not render status bar content when idle", () => {
     render(<PlannerPage />);
+    // Wrapper always present for layout stability; inner states absent when idle
+    expect(screen.getByTestId("planner-status")).toBeInTheDocument();
     expect(screen.queryByTestId("planner-status-solving")).not.toBeInTheDocument();
     expect(screen.queryByTestId("planner-status-updated")).not.toBeInTheDocument();
   });
