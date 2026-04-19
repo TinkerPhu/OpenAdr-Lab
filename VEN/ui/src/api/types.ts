@@ -212,10 +212,18 @@ export type PlanSummary = {
   total_export_kwh: number;
 };
 
+export type PlannerObjective =
+  | "min_cost"
+  | "min_ghg"
+  | "min_grid"
+  | "min_import"
+  | "max_revenue";
+
 export type Plan = {
   id: string;
   created_at: string;
   trigger: string;
+  objective?: PlannerObjective;
   slots: PlanTimeSlot[];
   summary: PlanSummary;
   envelopes: FlexibilityEnvelope[];

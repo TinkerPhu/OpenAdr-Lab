@@ -9,9 +9,10 @@ vi.mock("../api/hooks", () => ({
   usePlan: vi.fn(),
   useTrace: vi.fn(),
   usePackets: vi.fn(),
+  useSetObjective: vi.fn(),
 }));
 
-import { usePlan, useTrace, usePackets } from "../api/hooks";
+import { usePlan, useTrace, usePackets, useSetObjective } from "../api/hooks";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,7 @@ describe("PlannerPage", () => {
     vi.mocked(usePlan).mockReturnValue({ data: undefined } as ReturnType<typeof usePlan>);
     vi.mocked(useTrace).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useTrace>);
     vi.mocked(usePackets).mockReturnValue({ data: [] } as unknown as ReturnType<typeof usePackets>);
+    vi.mocked(useSetObjective).mockReturnValue({ mutate: vi.fn() } as unknown as ReturnType<typeof useSetObjective>);
   });
 
   it("renders the planner heading", () => {

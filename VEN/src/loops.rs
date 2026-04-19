@@ -1,13 +1,13 @@
 use chrono::{DateTime, Utc};
 use metrics::counter;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info};
 
 use crate::controller;
 use crate::entities;
 use crate::entities::asset::PlanTrigger;
-use crate::profile::Profile;
+use crate::profile::{Profile, PlannerObjective};
 use crate::simulator::SimState;
 use crate::state::{AppState, EvSettings};
 use crate::vtn::VtnClient;
@@ -621,6 +621,7 @@ pub(crate) fn spawn_planning(
     ven_name: String,
     mut trigger_rx: tokio::sync::watch::Receiver<PlanTrigger>,
     sim: Arc<Mutex<SimState>>,
+    active_objective: Arc<RwLock<PlannerObjective>>,
 ) -> tokio::task::JoinHandle<()> {
     let replan_s = profile.planner.replan_interval_s;
     tokio::spawn(async move {
@@ -639,6 +640,7 @@ pub(crate) fn spawn_planning(
             let heat_tgt = state.heater_target().await;
             let shift_loads = state.shiftable_loads().await;
             let bl_override = state.baseline_override().await;
+            let obj = *active_objective.read().await;
             // Clone SimState snapshot so the Mutex is released immediately.
             // MILP solving takes 18-60s on Pi4 ARM64; holding the lock would
             // block sim ticks and /capability reads for the entire duration.
@@ -654,6 +656,7 @@ pub(crate) fn spawn_planning(
                 heat_tgt.as_ref(),
                 &shift_loads,
                 bl_override.as_ref(),
+                Some(obj),
             );
             let slot_count = plan.slots.len();
             state.set_active_plan(Some(plan)).await;

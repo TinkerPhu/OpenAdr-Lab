@@ -1,6 +1,6 @@
 import type {
   VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry,
-  SimInjectState, PlannedRates, OadrCapacityState, EnergyPacket, Plan, AssetLedger,
+  SimInjectState, PlannedRates, OadrCapacityState, EnergyPacket, Plan, PlannerObjective, AssetLedger,
   UserRequestWithSession, FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
   EvSession, CreateEvSessionBody, EvSettings, UpdateEvSettingsBody,
   HeaterTarget, CreateHeaterTargetBody,
@@ -161,6 +161,11 @@ export class VenApi {
     const data = await r.json();
     if (data === null) return null;
     return data as Plan;
+  }
+
+  async setObjective(objective: PlannerObjective): Promise<void> {
+    const r = await this.jsonReq("PUT", "/plan/objective", { objective });
+    if (!r.ok) throw new Error(`setObjective failed: ${r.status}`);
   }
 
   async rates(): Promise<PlannedRates> {

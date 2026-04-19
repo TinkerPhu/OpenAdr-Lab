@@ -13,6 +13,7 @@ use crate::controller::user_request::CreateUserRequestBody;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::device_session::{BaselineOverride, BaselineSlot, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
+use crate::profile::PlannerObjective;
 use crate::AppCtx;
 
 /// Embedded session detail for GET /user-requests response.
@@ -42,6 +43,21 @@ pub async fn get_plan(
         }
         None => Json(serde_json::Value::Null).into_response(),
     }
+}
+
+/// PUT /plan/objective — change the active optimization objective and trigger an immediate replan.
+#[derive(Debug, Deserialize)]
+pub struct SetObjectiveBody {
+    pub objective: PlannerObjective,
+}
+
+pub async fn put_plan_objective(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<SetObjectiveBody>,
+) -> impl IntoResponse {
+    *ctx.active_objective.write().await = body.objective;
+    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+    StatusCode::NO_CONTENT
 }
 
 /// GET /tariffs — returns planned tariff snapshots parsed from active events.

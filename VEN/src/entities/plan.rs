@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::entities::asset::PlanTrigger;
+use crate::profile::PlannerObjective;
 
 /// Defines the temporal scope of a planning cycle (§6.1).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,6 +213,9 @@ pub struct Plan {
     /// First entry is the initial SoC; populated by the MILP solver.
     #[serde(default)]
     pub soc_trajectory_kwh: Vec<f64>,
+    /// Optimization objective used for this planning cycle.
+    #[serde(default)]
+    pub objective: PlannerObjective,
     /// Total MILP objective value (€). Includes all cost and reward terms.
     #[serde(default)]
     pub objective_eur: f64,
