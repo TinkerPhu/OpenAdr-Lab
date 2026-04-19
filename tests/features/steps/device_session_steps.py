@@ -160,6 +160,43 @@ def step_given_post_shiftable_load(context, asset_id, kw, minutes, window):
     context.last_shiftable_load_id = r.json().get("id")
 
 
+@when('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes within {window_min:d} minutes')
+def step_when_post_shiftable_load_min_window(context, asset_id, kw, minutes, window_min):
+    now = datetime.now(timezone.utc)
+    earliest_start = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    latest_end = (now + timedelta(minutes=window_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    r = ven_post("/shiftable-loads", json={
+        "asset_id": asset_id,
+        "power_kw": kw,
+        "duration_min": minutes,
+        "earliest_start": earliest_start,
+        "latest_end": latest_end,
+    })
+    context.last_response = r
+    try:
+        context.last_response_json = r.json()
+    except Exception:
+        context.last_response_json = None
+
+
+@given('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes within {window_min:d} minutes')
+def step_given_post_shiftable_load_min_window(context, asset_id, kw, minutes, window_min):
+    now = datetime.now(timezone.utc)
+    earliest_start = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    latest_end = (now + timedelta(minutes=window_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    r = ven_post("/shiftable-loads", json={
+        "asset_id": asset_id,
+        "power_kw": kw,
+        "duration_min": minutes,
+        "earliest_start": earliest_start,
+        "latest_end": latest_end,
+    })
+    r.raise_for_status()
+    context.last_response = r
+    context.last_response_json = r.json()
+    context.last_shiftable_load_id = r.json().get("id")
+
+
 @when("I GET the shiftable loads from /shiftable-loads")
 def step_when_get_shiftable_loads(context):
     r = ven_get("/shiftable-loads")
