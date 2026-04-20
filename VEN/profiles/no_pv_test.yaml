@@ -37,6 +37,7 @@ planner:
   plan_step_s: 1800
   plan_horizon_h: 24
   replan_interval_s: 20
+  deviation_trigger_ticks: 10
 
 packets:
   - asset: ev
