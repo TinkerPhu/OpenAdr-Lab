@@ -211,6 +211,9 @@ services:
         VITE_VEN_1_URL: "http://test-ven-1:8080"
         VITE_VEN_2_URL: "http://test-ven-2:8080"
         VITE_VEN_3_URL: "http://test-ven-1:8080"
+    volumes:
+      # Override the baked-in nginx.conf so upstream hostnames match the test stack
+      - ./ven-ui-nginx.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:80/ || exit 1
       interval: 5s
