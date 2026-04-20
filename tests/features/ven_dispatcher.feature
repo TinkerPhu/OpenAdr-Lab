@@ -45,8 +45,8 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
   # the grid deviates beyond the threshold, and holds the corrected setpoint.
 
   Scenario: Layer 1 corrects grid deviation immediately using battery
-    Given I wait for the VEN /plan endpoint to return a plan
-    When I inject base_load_kw 10.0 with alpha 0.0 via sim inject
+    When I wait for the VEN /plan endpoint to return a plan
+    And I inject base_load_kw 10.0 with alpha 0.0 via sim inject
     Then within 5 seconds the VEN sim battery power_kw is less than -1.0
 
   # --- Layer 2: DeviceDeviation replan ---
@@ -56,7 +56,7 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
   # replan) and base_load_alpha=0.0 keeps the load high between ticks.
 
   Scenario: Layer 2 triggers a DeviceDeviation replan after sustained grid deviation
-    Given I wait for the VEN /plan endpoint to return a plan
-    When I inject base_load_kw 10.0 with alpha 0.0 via sim inject
+    When I wait for the VEN /plan endpoint to return a plan
+    And I inject base_load_kw 10.0 with alpha 0.0 via sim inject
     And I poll VEN trace until a PlanCycle with trigger "DeviceDeviation" appears
     Then a PlanCycle with trigger "DeviceDeviation" was found in the trace
