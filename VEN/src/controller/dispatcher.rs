@@ -151,11 +151,33 @@ pub fn apply_surplus_ev_overlay(
     setpoints.insert("ev".to_string(), charge_kw);
 }
 
-/// Layer 1 reactive correction: adjust battery setpoint when actual grid import
-/// deviates from the plan's expectation by more than `threshold_kw`.
+/// Layer 1 reactive correction: adjust battery setpoint when actual grid
+/// power deviates from the plan's expectation by more than `threshold_kw`.
 ///
-/// Sign convention: positive setpoint = battery charging (importing), negative = discharging.
-/// Returns the correction delta applied to the battery setpoint (0.0 if no correction).
+/// Uses the previously applied setpoint (`assets[idx].setpoint_kw`, stored
+/// by `SimState::tick` after each `cfg.step()`) as the integrator state,
+/// NOT the plan allocation. This gives a dead-beat (P-gain = 1.0) controller:
+///
+///   new_sp = prev_applied_sp − deviation_kw
+///
+/// which eliminates tracking error in one tick for a stationary disturbance.
+/// Using the plan allocation instead would reset the integrator every tick
+/// and cause a ±max-discharge limit cycle.
+///
+/// **Correction hold**: when deviation falls within threshold (because the
+/// correction just worked), this function inserts the previous corrected
+/// setpoint back into `sp_map` to prevent `build_setpoints`'s plan allocation
+/// from reverting it. Without this hold, the plan's value (e.g. -0.5 kW)
+/// would overwrite the correction (e.g. -4.98 kW), recreating the large
+/// deviation on the very next tick. The hold releases naturally once the
+/// disturbance is gone (dead-beat formula walks the setpoint back toward the
+/// plan allocation) or when SoC is exhausted (SoC guard → Layer 2 replan).
+///
+/// For sustained deviations, Layer 2 fires `DeviceDeviation` after
+/// `deviation_trigger_ticks` consecutive ticks, triggering a full MILP replan.
+///
+/// Sign: positive setpoint = charging (import), negative = discharging (export).
+/// Returns the delta applied (0.0 if below threshold, SoC-limited, or < min_correction_kw).
 pub fn apply_battery_correction_overlay(
     setpoints: &mut HashMap<String, f64>,
     assets: &[AssetEntry],
@@ -167,16 +189,8 @@ pub fn apply_battery_correction_overlay(
     min_correction_kw: f64,
 ) -> f64 {
     let deviation_kw = actual_net_kw - plan_net_import_kw;
-    if deviation_kw.abs() <= threshold_kw {
-        return 0.0;
-    }
 
-    // Objective gate: MaxRevenue suppresses discharge corrections (preserve for export)
-    if objective == PlannerObjective::MaxRevenue && deviation_kw > 0.0 {
-        return 0.0;
-    }
-
-    // Find battery asset and config
+    // Find battery asset and config (needed before threshold check to read setpoint_kw).
     let Some(idx) = assets.iter().position(|a| a.id == "battery") else {
         return 0.0;
     };
@@ -186,8 +200,27 @@ pub fn apply_battery_correction_overlay(
         return 0.0;
     };
 
-    let current_sp = setpoints.get("battery").copied().unwrap_or(0.0);
-    // Correction direction: importing more than planned → discharge more (negative delta)
+    let current_sp = assets[idx].setpoint_kw;
+    let plan_sp = setpoints.get("battery").copied().unwrap_or(0.0);
+    // True when a correction was applied last tick (setpoint differs from plan allocation).
+    let correction_was_active = (current_sp - plan_sp).abs() > min_correction_kw;
+
+    if deviation_kw.abs() <= threshold_kw {
+        // Deviation cleared (or never large). If a correction was active last tick,
+        // hold the corrected setpoint in sp_map so the plan allocation does not
+        // overwrite it and restart the limit cycle on the next tick.
+        if correction_was_active {
+            setpoints.insert("battery".to_string(), current_sp);
+        }
+        return 0.0;
+    }
+
+    // Objective gate: MaxRevenue suppresses discharge corrections (preserve for export)
+    if objective == PlannerObjective::MaxRevenue && deviation_kw > 0.0 {
+        return 0.0;
+    }
+
+    // Dead-beat: new_sp = prev_applied_sp − deviation eliminates error in one tick.
     let raw_target = current_sp - deviation_kw;
 
     // Clamp to power limits
@@ -516,5 +549,104 @@ mod tests {
         );
         let bat_sp = sp.get("battery").copied().unwrap();
         assert!(bat_sp >= -5.0, "battery setpoint must not go below -max_discharge_kw, got {bat_sp}");
+    }
+
+    fn battery_entry_with_setpoint(soc: f64, setpoint_kw: f64) -> (AssetEntry, AssetConfig) {
+        let (mut entry, cfg) = battery_entry(soc);
+        entry.setpoint_kw = setpoint_kw;
+        (entry, cfg)
+    }
+
+    #[test]
+    fn correction_converges_not_oscillates_using_prev_setpoint() {
+        // Regression: previous tick applied +4.17 kW correction (battery charging).
+        // sp_map["battery"] = -0.5 (plan allocation, as build_setpoints would set it).
+        // Actual grid = -4.5 kW (still exporting heavily, deviation = -4.5).
+        //
+        // With the fix (uses setpoint_kw = +4.17 as baseline):
+        //   raw = 4.17 - (-4.5) = -0.33 kW → small discharge, converges to plan.
+        //
+        // With the old bug (uses sp_map["battery"] = -0.5 as baseline):
+        //   raw = -0.5 - (-4.5) = +4.0 kW → oscillates back to large positive charge.
+        let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, 4.17);
+        let assets = vec![bat_e];
+        let configs = vec![bat_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), -0.5); // plan allocation
+        let _delta = apply_battery_correction_overlay(
+            &mut sp, &assets, &configs,
+            0.0, -4.5, PlannerObjective::MinCost, 1.0, 0.2,
+        );
+        let bat_sp = sp.get("battery").copied().unwrap();
+        assert!(
+            bat_sp < 0.0 && bat_sp > -1.0,
+            "expected convergence near plan (-0.33 kW), got {bat_sp} — likely oscillation bug"
+        );
+    }
+
+    #[test]
+    fn correction_at_startup_uses_zero_setpoint_kw() {
+        // On the first tick, setpoint_kw = 0.0 (SimState not yet ticked).
+        // sp_map["battery"] = -0.5 (plan allocation).
+        // actual_net = 3.0 kW (import excess), deviation = 3.0.
+        // raw = 0.0 - 3.0 = -3.0 kW → discharges to compensate. Direction correct.
+        let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, 0.0);
+        let assets = vec![bat_e];
+        let configs = vec![bat_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), -0.5);
+        let delta = apply_battery_correction_overlay(
+            &mut sp, &assets, &configs,
+            0.0, 3.0, PlannerObjective::MinCost, 1.0, 0.2,
+        );
+        let bat_sp = sp.get("battery").copied().unwrap();
+        assert!(delta < 0.0 && bat_sp < 0.0, "discharge direction correct at startup, got delta={delta} sp={bat_sp}");
+        assert!(bat_sp >= -5.0, "clamped to max_discharge_kw, got {bat_sp}");
+    }
+
+    #[test]
+    fn correction_holds_setpoint_when_deviation_clears() {
+        // Regression: after a large correction set battery to -4.98 kW (tick A),
+        // the next tick (B) sees deviation = 0.02 kW (within threshold 1.0).
+        // Without the hold fix, the function returns 0 without inserting into sp_map,
+        // so build_setpoints' plan allocation (-0.5) would overwrite the correction,
+        // recreating the 4.5 kW deviation on tick C → limit cycle.
+        // With the fix: correction_was_active = true → sp_map["battery"] is held at -4.98.
+        let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, -4.98);
+        let assets = vec![bat_e];
+        let configs = vec![bat_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), -0.5); // plan allocation
+        let delta = apply_battery_correction_overlay(
+            &mut sp, &assets, &configs,
+            0.0, 0.02, PlannerObjective::MinCost, 1.0, 0.2,
+        );
+        let bat_sp = sp.get("battery").copied().unwrap();
+        assert_eq!(delta, 0.0, "no new delta when holding — deviation within threshold");
+        assert!(
+            (bat_sp - (-4.98)).abs() < 1e-9,
+            "corrected setpoint must be held at -4.98, not reverted to plan -0.5; got {bat_sp}"
+        );
+    }
+
+    #[test]
+    fn correction_no_hold_when_at_plan() {
+        // When the previous setpoint equals the plan allocation (no active correction),
+        // the hold must NOT fire — the plan value should remain unchanged.
+        let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, -0.5); // setpoint_kw == plan_sp
+        let assets = vec![bat_e];
+        let configs = vec![bat_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), -0.5); // plan allocation == setpoint_kw
+        let delta = apply_battery_correction_overlay(
+            &mut sp, &assets, &configs,
+            0.0, 0.5, PlannerObjective::MinCost, 1.0, 0.2, // deviation 0.5 < threshold 1.0
+        );
+        let bat_sp = sp.get("battery").copied().unwrap();
+        assert_eq!(delta, 0.0, "no delta, deviation within threshold");
+        assert!(
+            (bat_sp - (-0.5)).abs() < 1e-9,
+            "plan allocation must be unchanged when no correction was active; got {bat_sp}"
+        );
     }
 }
