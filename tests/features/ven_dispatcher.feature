@@ -2,6 +2,8 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
   Verify that the Dispatcher executes plan slot allocations: the EV sim
   charges when planned, EV sessions trigger replanning, and the asset ledger
   accumulates energy over time.
+  Verify that the two-layer reactive control (Layer 1: battery correction,
+  Layer 2: DeviceDeviation replan) is active and functional.
 
   Background:
     Given the VEN is running with profile "test"
@@ -37,3 +39,24 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
     And I poll VEN /ledger until field "ev.energy_kwh" is greater than 0.0
     Then the response JSON has field "ev"
     And the response JSON field "ev.energy_kwh" is greater than 0.0
+
+  # --- Layer 1: reactive battery correction ---
+  # Verifies that apply_battery_correction_overlay reacts within one tick when
+  # the grid deviates beyond the threshold, and holds the corrected setpoint.
+
+  Scenario: Layer 1 corrects grid deviation immediately using battery
+    Given I wait for the VEN /plan endpoint to return a plan
+    When I inject base_load_kw 10.0 with alpha 0.0 via sim inject
+    Then within 5 seconds the VEN sim battery power_kw is less than -1.0
+
+  # --- Layer 2: DeviceDeviation replan ---
+  # Verifies that a sustained grid deviation (> threshold for deviation_trigger_ticks
+  # consecutive ticks) fires a PlanTrigger::DeviceDeviation, causing a MILP replan.
+  # The test profile sets deviation_trigger_ticks=10 (fires before the 20s periodic
+  # replan) and base_load_alpha=0.0 keeps the load high between ticks.
+
+  Scenario: Layer 2 triggers a DeviceDeviation replan after sustained grid deviation
+    Given I wait for the VEN /plan endpoint to return a plan
+    When I inject base_load_kw 10.0 with alpha 0.0 via sim inject
+    And I poll VEN trace until a PlanCycle with trigger "DeviceDeviation" appears
+    Then a PlanCycle with trigger "DeviceDeviation" was found in the trace
