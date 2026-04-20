@@ -286,6 +286,12 @@ pub(crate) fn spawn_sim_tick(
         let mut deviation_ticks: u32 = 0;
         let mut last_correction_kw: f64 = 0.0;
         let mut correction_is_active = false;
+        // Plan G: track previous tick's correction delta to implement hold.
+        // When correction fires (delta≠0) and then clears next tick (delta=0),
+        // the plan allocation would overwrite the corrected setpoint and restart
+        // the limit cycle. prev_correction_kw lets us detect this "just cleared"
+        // state and re-insert the held setpoint before sim.tick runs.
+        let mut prev_correction_kw: f64 = 0.0;
 
         loop {
             tick_interval.tick().await;
@@ -411,6 +417,24 @@ pub(crate) fn spawn_sim_tick(
                 } else {
                     0.0
                 };
+
+                // Plan G correction hold: when correction just cleared (returned 0.0 this tick
+                // but was active last tick), re-insert the battery's previously-applied
+                // setpoint into sp_map. Without this, build_setpoints' plan allocation reverts
+                // the battery and recreates the deviation on the very next tick (limit cycle).
+                // Only fires when prev_correction_kw was meaningful (> correction_min_kw).
+                if correction_kw == 0.0
+                    && prev_correction_kw.abs() > profile.planner.correction_min_kw
+                {
+                    if let Some(bat) = sim_guard.assets.iter().find(|a| a.id == "battery") {
+                        let plan_sp = sp_map.get("battery").copied().unwrap_or(0.0);
+                        let held_sp = bat.setpoint_kw;
+                        if (held_sp - plan_sp).abs() > profile.planner.correction_min_kw {
+                            sp_map.insert("battery".to_string(), held_sp);
+                        }
+                    }
+                }
+                prev_correction_kw = correction_kw;
 
                 // Emit CorrectionActive/CorrectionCleared SSE on significant state change
                 if (correction_kw - last_correction_kw).abs() > 0.2 {
