@@ -18,9 +18,9 @@ import { PlannerPage } from "./pages/Planner";
 import { DevicesPage } from "./pages/Devices";
 
 const DEFAULT_VENS = [
-  { label: "VEN1", url: import.meta.env.VITE_VEN_1_URL || "http://pi4server.local:8211", venName: "ven-1" },
-  { label: "VEN2", url: import.meta.env.VITE_VEN_2_URL || "http://pi4server.local:8212", venName: "ven-2" },
-  { label: "VEN3", url: import.meta.env.VITE_VEN_3_URL || "http://pi4server.local:8213", venName: "ven-3" },
+  { label: "VEN1", url: import.meta.env.VITE_VEN_1_URL || "/api/ven-1", venName: "ven-1" },
+  { label: "VEN2", url: import.meta.env.VITE_VEN_2_URL || "/api/ven-2", venName: "ven-2" },
+  { label: "VEN3", url: import.meta.env.VITE_VEN_3_URL || "/api/ven-3", venName: "ven-3" },
 ];
 
 type VenContextType = {
