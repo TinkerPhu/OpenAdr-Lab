@@ -1,7 +1,8 @@
 """Step definitions for VEN Dispatcher (Stage 4) BDD tests."""
 
+import time
 from datetime import datetime, timedelta, timezone
-from behave import when, then
+from behave import given, when, then
 from features.helpers.api_client import ven_get, ven_post, VEN_BASE_URL
 from features.helpers.wait import poll_until
 
@@ -114,4 +115,83 @@ def step_response_json_field_is_string(context, field_path, expected):
     val = resolve(data, field_path)
     assert val == expected, (
         f"Field '{field_path}' = {val!r}, expected string '{expected}'"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Layer 1 — reactive battery correction
+# ---------------------------------------------------------------------------
+
+@when("I inject base_load_kw {kw:f} with alpha {alpha:f} via sim inject")
+def step_inject_base_load(context, kw, alpha):
+    """Inject a persistent base-load offset into the VEN sim."""
+    r = ven_post("/sim/inject", json={"base_load_kw": kw, "base_load_alpha": alpha})
+    r.raise_for_status()
+
+
+@then("within {seconds:d} seconds the VEN sim battery power_kw is less than {threshold:f}")
+def step_battery_power_below(context, seconds, threshold):
+    """Poll /sim until battery.power_kw < threshold, then reset the inject."""
+    def fetch():
+        r = ven_get("/sim")
+        r.raise_for_status()
+        return r.json()
+
+    def check(data):
+        battery = data.get("assets", {}).get("battery", {})
+        power = battery.get("power_kw")
+        return isinstance(power, (int, float)) and power < threshold
+
+    try:
+        poll_until(
+            fetch, check, timeout=seconds,
+            description=f"battery.power_kw < {threshold}",
+        )
+    finally:
+        # Reset inject so subsequent scenarios start clean
+        try:
+            ven_post("/sim/inject", json={"base_load_kw": 0.0, "base_load_alpha": None})
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Layer 2 — DeviceDeviation replan
+# ---------------------------------------------------------------------------
+
+@when('I poll VEN trace until a PlanCycle with trigger "{trigger}" appears')
+def step_poll_trace_for_trigger(context, trigger):
+    """Poll GET /trace/events until a PlanCycle event with the given trigger_reason appears."""
+    def fetch():
+        r = ven_get("/trace/events")
+        r.raise_for_status()
+        return r.json()
+
+    def check(events):
+        return any(
+            e.get("type") == "PlanCycle" and e.get("trigger_reason") == trigger
+            for e in events
+        )
+
+    try:
+        context.trace_events = poll_until(
+            fetch, check, timeout=45,
+            description=f"PlanCycle with trigger_reason={trigger!r}",
+        )
+    finally:
+        try:
+            ven_post("/sim/inject", json={"base_load_kw": 0.0, "base_load_alpha": None})
+        except Exception:
+            pass
+
+
+@then('a PlanCycle with trigger "{trigger}" was found in the trace')
+def step_assert_trigger_found(context, trigger):
+    events = getattr(context, "trace_events", [])
+    assert any(
+        e.get("type") == "PlanCycle" and e.get("trigger_reason") == trigger
+        for e in events
+    ), (
+        f"No PlanCycle with trigger_reason={trigger!r}. "
+        f"Events: {[e.get('trigger_reason') for e in events if e.get('type') == 'PlanCycle']}"
     )

@@ -434,7 +434,14 @@ pub(crate) fn spawn_sim_tick(
                         }
                     }
                 }
-                prev_correction_kw = correction_kw;
+                // Only update prev_correction_kw when a real correction fired.
+                // Keeping the last non-zero value active ensures the hold persists
+                // across subsequent ticks where the battery is maxed out (correction
+                // returns 0.0 due to delta < min_correction_kw), preventing the
+                // 3-tick oscillation: correct → hold → revert → correct → ...
+                if correction_kw != 0.0 {
+                    prev_correction_kw = correction_kw;
+                }
 
                 // Emit CorrectionActive/CorrectionCleared SSE on significant state change
                 if (correction_kw - last_correction_kw).abs() > 0.2 {
