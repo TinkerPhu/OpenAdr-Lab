@@ -164,14 +164,11 @@ pub fn apply_surplus_ev_overlay(
 /// Using the plan allocation instead would reset the integrator every tick
 /// and cause a ±max-discharge limit cycle.
 ///
-/// **Correction hold**: when deviation falls within threshold (because the
-/// correction just worked), this function inserts the previous corrected
-/// setpoint back into `sp_map` to prevent `build_setpoints`'s plan allocation
-/// from reverting it. Without this hold, the plan's value (e.g. -0.5 kW)
-/// would overwrite the correction (e.g. -4.98 kW), recreating the large
-/// deviation on the very next tick. The hold releases naturally once the
-/// disturbance is gone (dead-beat formula walks the setpoint back toward the
-/// plan allocation) or when SoC is exhausted (SoC guard → Layer 2 replan).
+/// Returns a non-zero delta when a correction is applied. When the deviation
+/// falls back within threshold, returns 0.0. The caller (`spawn_sim_tick` in
+/// loops.rs) is responsible for "holding" the previous corrected setpoint in
+/// that case to prevent the plan allocation from reverting the battery and
+/// restarting the limit cycle (see `prev_correction_kw` in loops.rs).
 ///
 /// For sustained deviations, Layer 2 fires `DeviceDeviation` after
 /// `deviation_trigger_ticks` consecutive ticks, triggering a full MILP replan.
@@ -201,17 +198,8 @@ pub fn apply_battery_correction_overlay(
     };
 
     let current_sp = assets[idx].setpoint_kw;
-    let plan_sp = setpoints.get("battery").copied().unwrap_or(0.0);
-    // True when a correction was applied last tick (setpoint differs from plan allocation).
-    let correction_was_active = (current_sp - plan_sp).abs() > min_correction_kw;
 
     if deviation_kw.abs() <= threshold_kw {
-        // Deviation cleared (or never large). If a correction was active last tick,
-        // hold the corrected setpoint in sp_map so the plan allocation does not
-        // overwrite it and restart the limit cycle on the next tick.
-        if correction_was_active {
-            setpoints.insert("battery".to_string(), current_sp);
-        }
         return 0.0;
     }
 
@@ -605,14 +593,12 @@ mod tests {
     }
 
     #[test]
-    fn correction_holds_setpoint_when_deviation_clears() {
-        // Regression: after a large correction set battery to -4.98 kW (tick A),
-        // the next tick (B) sees deviation = 0.02 kW (within threshold 1.0).
-        // Without the hold fix, the function returns 0 without inserting into sp_map,
-        // so build_setpoints' plan allocation (-0.5) would overwrite the correction,
-        // recreating the 4.5 kW deviation on tick C → limit cycle.
-        // With the fix: correction_was_active = true → sp_map["battery"] is held at -4.98.
-        let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, -4.98);
+    fn correction_returns_zero_without_modifying_sp_when_within_threshold() {
+        // When deviation falls within threshold after a correction was active,
+        // apply_battery_correction_overlay returns 0.0 and does NOT modify sp_map.
+        // The "hold" (preventing plan reversion) is the caller's responsibility
+        // via prev_correction_kw tracking in loops.rs (spawn_sim_tick).
+        let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, -4.98); // previous correction
         let assets = vec![bat_e];
         let configs = vec![bat_c];
         let mut sp: HashMap<String, f64> = HashMap::new();
@@ -622,31 +608,33 @@ mod tests {
             0.0, 0.02, PlannerObjective::MinCost, 1.0, 0.2,
         );
         let bat_sp = sp.get("battery").copied().unwrap();
-        assert_eq!(delta, 0.0, "no new delta when holding — deviation within threshold");
+        assert_eq!(delta, 0.0, "no delta when deviation is within threshold");
         assert!(
-            (bat_sp - (-4.98)).abs() < 1e-9,
-            "corrected setpoint must be held at -4.98, not reverted to plan -0.5; got {bat_sp}"
+            (bat_sp - (-0.5)).abs() < 1e-9,
+            "sp_map must not be modified when within threshold; hold is handled by loops.rs, got {bat_sp}"
         );
     }
 
     #[test]
-    fn correction_no_hold_when_at_plan() {
-        // When the previous setpoint equals the plan allocation (no active correction),
-        // the hold must NOT fire — the plan value should remain unchanged.
-        let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, -0.5); // setpoint_kw == plan_sp
+    fn correction_converges_after_deviation_clears_using_dead_beat() {
+        // Verify that when deviation is outside threshold with a previously-corrected
+        // setpoint, the dead-beat formula uses that setpoint (not the plan allocation)
+        // to prevent oscillation. This is the Plan F fix.
+        // setpoint_kw=-4.98 (held by loops.rs from previous tick), deviation now +4.48
+        // raw = -4.98 - 4.48 = -9.46 → clamped to -5.0 (max discharge ≈ -4.98 profile)
+        // In the real profile max_discharge_kw=5.0, so clamped = -5.0
+        let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, -4.98);
         let assets = vec![bat_e];
         let configs = vec![bat_c];
         let mut sp: HashMap<String, f64> = HashMap::new();
-        sp.insert("battery".to_string(), -0.5); // plan allocation == setpoint_kw
+        sp.insert("battery".to_string(), -0.5); // plan allocation
         let delta = apply_battery_correction_overlay(
             &mut sp, &assets, &configs,
-            0.0, 0.5, PlannerObjective::MinCost, 1.0, 0.2, // deviation 0.5 < threshold 1.0
+            0.0, 4.48, PlannerObjective::MinCost, 1.0, 0.2,
         );
         let bat_sp = sp.get("battery").copied().unwrap();
-        assert_eq!(delta, 0.0, "no delta, deviation within threshold");
-        assert!(
-            (bat_sp - (-0.5)).abs() < 1e-9,
-            "plan allocation must be unchanged when no correction was active; got {bat_sp}"
-        );
+        assert!(delta < 0.0, "correction direction correct, got {delta}");
+        assert!(bat_sp <= -4.98, "setpoint clamped to max discharge, got {bat_sp}");
+        assert!(bat_sp >= -5.0, "must not exceed max_discharge_kw, got {bat_sp}");
     }
 }
