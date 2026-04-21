@@ -509,6 +509,7 @@ mod tests {
             envelopes: vec![],
             warnings: vec![],
             soc_trajectory_kwh: vec![],
+            objective: Default::default(),
             objective_eur: 0.0,
             cost_breakdown: CostBreakdown::default(),
         }
@@ -1110,6 +1111,7 @@ mod tests {
             envelopes: vec![],
             warnings: vec![],
             soc_trajectory_kwh: vec![],
+            objective: Default::default(),
             objective_eur: 0.0,
             cost_breakdown: CostBreakdown::default(),
         };
@@ -1157,6 +1159,7 @@ mod tests {
             envelopes: vec![],
             warnings: vec![],
             soc_trajectory_kwh: vec![],
+            objective: Default::default(),
             objective_eur: 0.0,
             cost_breakdown: CostBreakdown::default(),
         };
