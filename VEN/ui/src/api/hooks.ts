@@ -132,6 +132,7 @@ export function useSetSimInject() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["simInject"] });
       queryClient.refetchQueries({ queryKey: ["sim"] });
+      queryClient.refetchQueries({ queryKey: ["timeline/all"] });
     },
   });
 }
