@@ -751,7 +751,25 @@ pub(crate) fn spawn_planning(
             // Clone SimState snapshot so the Mutex is released immediately.
             // MILP solving takes 18-60s on Pi4 ARM64; holding the lock would
             // block sim ticks and /capability reads for the entire duration.
-            let sim_snap = sim.lock().await.clone();
+            let mut sim_snap = sim.lock().await.clone();
+
+            // The inject API stores pv_irradiance as a one-shot and then the sim tick
+            // applies it to pv.irradiance_offset inside the mutex. If the planner wakes
+            // (via AssetStateChange) before the next tick, the cloned sim still has the
+            // old offset. Patch the clone here so the planner always sees the current value.
+            {
+                let inject_snap = state.inject_state().await;
+                if let Some(forced) = inject_snap.pv_irradiance {
+                    use crate::assets::{AssetConfig, PvInverter};
+                    let natural = PvInverter::natural_irradiance_at(now);
+                    if let Some((_, cfg)) = sim_snap.find_asset_mut("pv") {
+                        if let AssetConfig::Pv(pv) = cfg {
+                            pv.irradiance_offset = forced - natural;
+                            pv.pv_alpha = inject_snap.pv_irradiance_alpha;
+                        }
+                    }
+                }
+            }
 
             // ── Emit solving_started ──────────────────────────────────────
             let num_slots = profile.planner.plan_horizon_h as usize

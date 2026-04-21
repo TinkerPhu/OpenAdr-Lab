@@ -460,16 +460,18 @@ fn build_milp_inputs(
     // ── Heater ────────────────────────────────────────────────────────────────
     let (heater_mode, t_heat_dead, p_mid, p_full, e_heat_req) =
         if let Some(heat_cfg) = profile.heater_config() {
+            let current_temp = assets
+                .heater_state()
+                .map(|s| s.temperature_c)
+                .unwrap_or(heat_cfg.temp_initial_c);
+            let thermal_mass = assets
+                .heater_config()
+                .map(|h| h.thermal_mass_kwh_per_c)
+                .unwrap_or_else(|| heat_cfg.effective_thermal_mass());
+            let mid = heat_cfg.mid_kw.unwrap_or(heat_cfg.max_kw / 2.0);
+
             if let Some(target) = heater_target {
                 // ── Device-centric path: HeaterTarget present ─────────────
-                let current_temp = assets
-                    .heater_state()
-                    .map(|s| s.temperature_c)
-                    .unwrap_or(heat_cfg.temp_initial_c);
-                let thermal_mass = assets
-                    .heater_config()
-                    .map(|h| h.thermal_mass_kwh_per_c)
-                    .unwrap_or(2.0);
                 let req_kwh = ((target.target_temp_c - current_temp) * thermal_mass).max(0.0);
                 let mode = if req_kwh > 0.0 {
                     MilpLoadMode::MustRun
@@ -477,11 +479,31 @@ fn build_milp_inputs(
                     MilpLoadMode::MustNotRun
                 };
                 let deadline_step = Some(deadline_to_step(target.ready_by, now, step_s, n));
-                let mid = heat_cfg.mid_kw.unwrap_or(heat_cfg.max_kw / 2.0);
                 (mode, deadline_step, mid, heat_cfg.max_kw, req_kwh)
             } else {
-                // No HeaterTarget: heater runs on thermostat defaults only
-                (MilpLoadMode::MustNotRun, None, heat_cfg.mid_kw.unwrap_or(heat_cfg.max_kw / 2.0), heat_cfg.max_kw, 0.0)
+                // ── Autonomous maintenance mode (no HeaterTarget) ─────────
+                // Treat the heater like a battery: MustRun when below the comfort
+                // floor (emergency), MayRun when below the comfort ceiling
+                // (opportunistic heating during cheap / PV-surplus slots),
+                // MustNotRun when already at max (tank full).
+                let energy_to_max =
+                    ((heat_cfg.temp_max_c - current_temp) * thermal_mass).max(0.0);
+                let energy_to_min =
+                    ((heat_cfg.temp_min_c - current_temp) * thermal_mass).max(0.0);
+
+                let (mode, e_req) = if energy_to_min > 0.0 {
+                    // Below comfort floor: must heat immediately.
+                    (MilpLoadMode::MustRun, energy_to_max)
+                } else if energy_to_max > 0.0 {
+                    // In comfort band: schedule opportunistically across horizon.
+                    (MilpLoadMode::MayRun, energy_to_max)
+                } else {
+                    // At or above temp_max: no heating needed.
+                    (MilpLoadMode::MustNotRun, 0.0)
+                };
+
+                // No hard deadline — distribute heating freely across horizon.
+                (mode, None, mid, heat_cfg.max_kw, e_req)
             }
         } else {
             (MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0)
@@ -1651,6 +1673,10 @@ mod tests {
                     temp_min_c: 18.0,
                     temp_max_c: 23.0,
                     mid_kw: None,
+                    volume_l: None,
+                    thermal_mass_kwh_per_c: None,
+                    k_loss_kw_per_c: None,
+                    draw_kw: None,
                 }),
                 AssetProfile::Pv(PvConfig {
                     id: "pv".into(),
