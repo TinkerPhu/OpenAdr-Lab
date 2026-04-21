@@ -97,6 +97,17 @@ def step_forecast_all_zero(context):
         assert s["value"] == 0.0, f"Sample {i} has non-zero value: {s['value']}"
 
 
+@then("the average forecast sample value is positive")
+def step_forecast_average_positive(context):
+    samples = context.forecast_json.get("samples", [])
+    assert samples, "No forecast samples to compute average"
+    avg = sum(s["value"] for s in samples) / len(samples)
+    assert avg > 0.0, (
+        f"Expected positive average forecast power, got {avg:.4f} kW "
+        f"(samples: {[round(s['value'], 3) for s in samples[:5]]}...)"
+    )
+
+
 @then("all forecast sample values are equal")
 def step_forecast_all_equal(context):
     samples = context.forecast_json.get("samples", [])

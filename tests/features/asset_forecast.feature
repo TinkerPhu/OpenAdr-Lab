@@ -53,6 +53,11 @@ Feature: Asset Interface — forecast(timespan)
     And the forecast response has a non-empty samples list
     And the forecast interpolation is "linear"
 
+  Scenario: Heater forecast has non-zero average power
+    When I GET /forecast/heater?timespan_s=3600 from the VEN
+    Then the response status is 200
+    And the average forecast sample value is positive
+
   # ── Edge cases ───────────────────────────────────────────────────────────────
 
   Scenario: Zero timespan returns empty series
