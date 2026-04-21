@@ -1,11 +1,14 @@
-# VEN-2: Commercial building (Heater + PV)
+# VEN-2: Commercial building (Hot Water Tank + PV)
 assets:
   - type: heater
     id: heater
-    max_kw: 5.0
-    temp_initial_c: 20.0
-    temp_min_c: 19.0
-    temp_max_c: 23.0
+    max_kw: 3.0
+    temp_initial_c: 60.0
+    temp_min_c: 40.0
+    temp_max_c: 80.0
+    volume_l: 200.0
+    k_loss_kw_per_c: 0.003
+    draw_kw: 0.5
   - type: pv
     id: pv
     rated_kw: 12.0

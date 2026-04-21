@@ -22,8 +22,12 @@ pub struct Heater {
     pub temp_min_c_profile: f64,
     /// Original profile value — used for snap-back when inject override is released.
     pub temp_max_c_profile: f64,
-    /// Thermal mass in kWh/°C (hardcoded 2.0 previously — now explicit config).
+    /// Thermal mass in kWh/°C. Derived from volume_l (water tank) or explicit config.
     pub thermal_mass_kwh_per_c: f64,
+    /// Newton cooling coefficient (kW/°C). Loss = k_loss × (temp − ambient).
+    pub k_loss_kw_per_c: f64,
+    /// Constant simulated hot water draw (kW thermal). Defaults to 0.0.
+    pub draw_kw: f64,
     /// Set each tick by sim from SimInjectState.ambient_temp_c; NOT from YAML.
     pub ambient_temp_c: f64,
 }
@@ -45,7 +49,9 @@ impl Heater {
             temp_max_c: cfg.temp_max_c,
             temp_min_c_profile: cfg.temp_min_c,
             temp_max_c_profile: cfg.temp_max_c,
-            thermal_mass_kwh_per_c: 2.0,
+            thermal_mass_kwh_per_c: cfg.effective_thermal_mass(),
+            k_loss_kw_per_c: cfg.effective_k_loss(),
+            draw_kw: cfg.effective_draw_kw(),
             ambient_temp_c: 10.0,
         }
     }
@@ -75,9 +81,9 @@ impl Heater {
         } else {
             clamped
         };
-        // Thermal model: loss = 0.1 kW/°C
-        let loss_kw = (state.temperature_c - self.ambient_temp_c) * 0.1;
-        let delta_c = (actual - loss_kw) / self.thermal_mass_kwh_per_c * dt_h;
+        // Thermal model: Newton cooling + simulated draw
+        let loss_kw = (state.temperature_c - self.ambient_temp_c) * self.k_loss_kw_per_c;
+        let delta_c = (actual - loss_kw - self.draw_kw) / self.thermal_mass_kwh_per_c * dt_h;
         let new_temp = state.temperature_c + delta_c;
         (
             HeaterState {
@@ -163,7 +169,7 @@ impl Heater {
                 label: "Comfort Band Max".into(),
                 kind: ControlKind::Slider,
                 min: Some(self.temp_min_c_profile + 1.0),
-                max: Some(35.0),
+                max: Some(self.temp_max_c_profile + 10.0),
                 unit: "°C".into(),
                 display_scale: None,
             },
@@ -199,7 +205,7 @@ impl Heater {
 
         while t < end {
             let dt_h = 1.0 / 60.0;
-            let loss_kw = (temp - self.ambient_temp_c) * 0.1;
+            let loss_kw = (temp - self.ambient_temp_c) * self.k_loss_kw_per_c;
             let kw = if temp < self.temp_min_c {
                 self.max_kw
             } else if temp > self.temp_max_c {
@@ -208,7 +214,7 @@ impl Heater {
                 setpoint
             };
             samples.push((t, kw));
-            let net_kwh = (kw - loss_kw) * dt_h;
+            let net_kwh = (kw - loss_kw - self.draw_kw) * dt_h;
             temp += net_kwh / self.thermal_mass_kwh_per_c;
             t = t + Duration::seconds(60);
         }
@@ -281,7 +287,25 @@ mod tests {
             temp_min_c_profile: 20.0,
             temp_max_c_profile: 23.0,
             thermal_mass_kwh_per_c: 2.0,
+            k_loss_kw_per_c: 0.1,
+            draw_kw: 0.0,
             ambient_temp_c: 10.0,
+        }
+    }
+
+    /// Hot water tank fixture: 200 L, 40–80 °C comfort band, low heat loss, 0.5 kW draw.
+    fn hot_water_heater() -> Heater {
+        Heater {
+            max_kw: 3.0,
+            min_power_kw: 0.0,
+            temp_min_c: 40.0,
+            temp_max_c: 80.0,
+            temp_min_c_profile: 40.0,
+            temp_max_c_profile: 80.0,
+            thermal_mass_kwh_per_c: 200.0 * 4.186 / 3600.0, // ≈ 0.233 kWh/°C
+            k_loss_kw_per_c: 0.003,
+            draw_kw: 0.5,
+            ambient_temp_c: 20.0,
         }
     }
 
@@ -386,5 +410,73 @@ mod tests {
         let setpoint = 1.5;
         let (_ns, power) = heater.step_inner(&state, setpoint, Duration::seconds(1));
         assert!((power - setpoint).abs() < 1e-9, "heater should follow setpoint");
+    }
+
+    // ── hot water tank physics ────────────────────────────────────────────────
+
+    #[test]
+    fn hwt_uses_configurable_k_loss() {
+        // k_loss = 0.003 kW/°C; at 60°C ambient=20°C → loss = (60-20)*0.003 = 0.12 kW
+        let heater = hot_water_heater();
+        let state = state_at(60.0, 0.0);
+        // setpoint = 0 → heater off (in comfort band 40–80°C)
+        let (new_state, power) = heater.step_inner(&state, 0.0, Duration::seconds(3600));
+        assert_eq!(power, 0.0);
+        // In 1 h at 0 kW, 0.12 kW draw subtracted: net = 0 - 0.12 - 0.5 = -0.62 kW
+        // delta_c = -0.62 / 0.233 = -2.66 °C  (roughly)
+        let expected_loss = (60.0 - 20.0) * 0.003 + 0.5; // loss + draw
+        let expected_delta = -expected_loss / (200.0 * 4.186 / 3600.0);
+        let actual_delta = new_state.temperature_c - 60.0;
+        assert!(
+            (actual_delta - expected_delta).abs() < 0.01,
+            "k_loss or draw physics wrong: got Δ{:.3}°C, expected Δ{:.3}°C",
+            actual_delta, expected_delta
+        );
+    }
+
+    #[test]
+    fn hwt_draw_drains_tank_when_off() {
+        // With 0.5 kW draw and no heater, tank should cool faster than without draw.
+        let heater = hot_water_heater();
+        let no_draw = Heater { draw_kw: 0.0, ..hot_water_heater() };
+        let state = state_at(60.0, 0.0);
+        let dt = Duration::seconds(3600);
+        let (s_with_draw, _) = heater.step_inner(&state, 0.0, dt);
+        let (s_no_draw, _) = no_draw.step_inner(&state, 0.0, dt);
+        assert!(
+            s_with_draw.temperature_c < s_no_draw.temperature_c,
+            "draw should cause faster cooling"
+        );
+    }
+
+    #[test]
+    fn hwt_heats_slowly_with_low_k_loss() {
+        // With k_loss=0.003, a 3 kW heater at 60°C and 20°C ambient
+        // should heat the 0.233 kWh/°C tank by ~ (3 - 0.12 - 0.5) * 1h / 0.233 ≈ 10.2°C/h
+        let heater = hot_water_heater();
+        let state = state_at(60.0, 3.0);
+        let (new_state, _) = heater.step_inner(&state, 3.0, Duration::seconds(3600));
+        let delta = new_state.temperature_c - 60.0;
+        assert!(
+            delta > 5.0 && delta < 20.0,
+            "tank should heat 5–20°C in 1h with 3kW; got {:.2}°C",
+            delta
+        );
+    }
+
+    #[test]
+    fn hwt_emergency_on_below_temp_min() {
+        let heater = hot_water_heater();
+        let state = state_at(39.9, 0.0); // just below min (40°C)
+        let (_ns, power) = heater.step_inner(&state, 0.0, Duration::seconds(1));
+        assert_eq!(power, heater.max_kw, "emergency: must run at max below temp_min");
+    }
+
+    #[test]
+    fn hwt_forced_off_above_temp_max() {
+        let heater = hot_water_heater();
+        let state = state_at(80.1, 3.0);
+        let (_ns, power) = heater.step_inner(&state, 3.0, Duration::seconds(1));
+        assert_eq!(power, 0.0, "must be forced off above temp_max");
     }
 }

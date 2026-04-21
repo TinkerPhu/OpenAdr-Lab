@@ -125,6 +125,47 @@ pub struct HeaterConfig {
     /// Set `mid_kw = max_kw` to model an on/off heater with a single power level.
     #[serde(default)]
     pub mid_kw: Option<f64>,
+    /// Tank volume in litres. If set, thermal mass = `volume_l × 4.186 / 3600` kWh/°C.
+    /// Takes precedence over `thermal_mass_kwh_per_c`. For a 200 L water tank: ~0.233 kWh/°C.
+    #[serde(default)]
+    pub volume_l: Option<f64>,
+    /// Explicit thermal mass (kWh/°C). Used when `volume_l` is not set.
+    /// Defaults to 2.0 kWh/°C (legacy space-heater value) for backward compatibility.
+    #[serde(default)]
+    pub thermal_mass_kwh_per_c: Option<f64>,
+    /// Newton cooling coefficient (kW/°C). Determines heat loss rate:
+    /// `loss_kw = k_loss_kw_per_c × (temp_c − ambient_temp_c)`.
+    /// Defaults to 0.1 kW/°C (legacy space-heater value).
+    /// For a well-insulated 200 L hot water tank, a typical value is 0.003–0.005 kW/°C.
+    #[serde(default)]
+    pub k_loss_kw_per_c: Option<f64>,
+    /// Constant simulated hot water draw (kW thermal). Models daily usage by removing
+    /// thermal energy from the tank at a steady rate.
+    /// Defaults to 0.0 (no draw — backward compatible).
+    #[serde(default)]
+    pub draw_kw: Option<f64>,
+}
+
+impl HeaterConfig {
+    /// Effective thermal mass (kWh/°C).
+    /// Priority: `volume_l` → `thermal_mass_kwh_per_c` → 2.0 (legacy default).
+    pub fn effective_thermal_mass(&self) -> f64 {
+        if let Some(v) = self.volume_l {
+            v * 4.186 / 3600.0
+        } else {
+            self.thermal_mass_kwh_per_c.unwrap_or(2.0)
+        }
+    }
+
+    /// Effective Newton cooling coefficient (kW/°C).
+    pub fn effective_k_loss(&self) -> f64 {
+        self.k_loss_kw_per_c.unwrap_or(0.1)
+    }
+
+    /// Effective constant hot water draw (kW thermal).
+    pub fn effective_draw_kw(&self) -> f64 {
+        self.draw_kw.unwrap_or(0.0)
+    }
 }
 
 fn default_asset_id_heater() -> String {
