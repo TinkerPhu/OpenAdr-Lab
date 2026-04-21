@@ -25,6 +25,12 @@ const DECAY_CONTROLS: Record<string, (sim: SimSnapshot | undefined) => number | 
     const v = sim?.assets?.["base_load"]?.["baseline_kw"];
     return typeof v === "number" ? v : null;
   },
+  // One-shot temperature reset: backend clears it after one tick so the slider
+  // must track the live sim temperature after posting (Behaviour B).
+  heater_temp_c: (sim) => {
+    const v = sim?.assets?.["heater"]?.["temp_c"];
+    return typeof v === "number" ? v : null;
+  },
 };
 
 interface AssetRightSectionProps {
@@ -110,6 +116,15 @@ export function AssetRightSection({
     if (key === "ev_soc_target") {
       const t = sim?.assets?.["ev"]?.["soc_target"];
       return typeof t === "number" ? t : null;
+    }
+    // Persistent heater comfort-band overrides: fall back to live sim values.
+    if (key === "heater_temp_min_c") {
+      const v = sim?.assets?.["heater"]?.["temp_min_c"];
+      return typeof v === "number" ? v : null;
+    }
+    if (key === "heater_temp_max_c") {
+      const v = sim?.assets?.["heater"]?.["temp_max_c"];
+      return typeof v === "number" ? v : null;
     }
     return null;
   }
