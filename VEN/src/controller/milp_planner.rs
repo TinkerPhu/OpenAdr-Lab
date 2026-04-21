@@ -13,6 +13,7 @@ use good_lp::{
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::assets::{AssetConfig, PvInverter};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
@@ -334,7 +335,23 @@ fn build_milp_inputs(
                 .unwrap_or(300.0)
                 / 1000.0,
         );
-        p_pv.push(pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0));
+        // Use live PvInverter when available so that irradiance_offset (irradiance
+        // slider) and pv_alpha (blend-back speed slider) both project into the
+        // forecast. Falls back to the static sin model if no "pv" asset exists.
+        let pv_kw = if let Some((_, cfg)) = assets.find_asset("pv") {
+            if let AssetConfig::Pv(pv) = cfg {
+                let seconds_ahead = t as f64 * step_s as f64;
+                let natural = PvInverter::natural_irradiance_at(slot_t);
+                let decayed_offset =
+                    pv.irradiance_offset * (1.0 - pv.pv_alpha).powf(seconds_ahead);
+                (natural + decayed_offset).clamp(0.0, 1.0) * pv.rated_kw
+            } else {
+                pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)
+            }
+        } else {
+            pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)
+        };
+        p_pv.push(pv_kw);
         p_base.push(base_kw);
         p_imp_phys.push(phys_imp);
         p_exp_phys.push(phys_exp);
@@ -1986,6 +2003,7 @@ mod tests {
             w_energy: 1.0,
             w_ghg: 0.0,
             w_grid: 0.0,
+            w_import: 0.0,
             w_viol: 1.0,
             c_bat_wear_eur_kwh: 0.0,
             c_ev_startup_eur: 0.0,
@@ -2289,6 +2307,118 @@ mod tests {
                     out.p_bat_dis_kw[t]
                 );
             }
+        }
+    }
+
+    // ── PV forecast reflects live irradiance_offset and pv_alpha ─────────────
+
+    /// Return midnight so natural_irradiance_at() = 0, isolating the offset term.
+    fn fixed_midnight() -> DateTime<Utc> {
+        use chrono::TimeZone;
+        Utc.with_ymd_and_hms(2026, 4, 12, 0, 0, 0).unwrap()
+    }
+
+    /// Set irradiance_offset and pv_alpha on the PV asset in an existing SimState.
+    fn set_pv_inject(sim: &mut SimState, offset: f64, alpha: f64) {
+        if let Some((_, cfg)) = sim.find_asset_mut("pv") {
+            if let AssetConfig::Pv(pv) = cfg {
+                pv.irradiance_offset = offset;
+                pv.pv_alpha = alpha;
+            } else {
+                panic!("pv asset has unexpected config type");
+            }
+        } else {
+            panic!("no pv asset in sim");
+        }
+    }
+
+    #[test]
+    fn pv_irradiance_offset_in_forecast() {
+        // Regression: irradiance_offset must project into p_pv_kw.
+        // At midnight, natural irradiance = 0. With offset=0.5 and very slow
+        // alpha (≈no decay over the horizon), slot 0 must be ≈ 0.5 × rated_kw.
+        let now = fixed_midnight();
+        let profile = make_profile(); // rated_kw=5.0
+        let mut sim = SimState::from_profile(&profile);
+        set_pv_inject(&mut sim, 0.5, 0.001); // slow alpha → offset barely decays
+
+        let inp = build_milp_inputs(
+            &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(),
+            &profile, now, None, None, &[], None,
+        );
+
+        // slot 0: seconds_ahead=0 → decayed_offset = 0.5×(0.999)^0 = 0.5
+        // p_pv[0] = (0.0 + 0.5).clamp(0,1) × 5.0 = 2.5 kW
+        assert!(
+            inp.p_pv_kw[0] > 1.0,
+            "p_pv_kw[0] should reflect irradiance_offset (got {:.4})",
+            inp.p_pv_kw[0]
+        );
+    }
+
+    #[test]
+    fn pv_alpha_faster_decay_in_forecast() {
+        // Regression: higher pv_alpha (blend-back speed) must produce lower p_pv_kw
+        // at later forecast slots because the offset decays faster.
+        // At midnight natural=0, so all forecast power comes from the decaying offset.
+        let now = fixed_midnight();
+        let profile = make_profile(); // rated_kw=5.0, step_s=300s, 24 slots
+
+        let mut sim_slow = SimState::from_profile(&profile);
+        set_pv_inject(&mut sim_slow, 0.5, 0.001); // slow: 0.1 % per second
+
+        let mut sim_fast = SimState::from_profile(&profile);
+        set_pv_inject(&mut sim_fast, 0.5, 0.05); // fast: 5 % per second
+
+        let inp_slow = build_milp_inputs(
+            &sim_slow, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(),
+            &profile, now, None, None, &[], None,
+        );
+        let inp_fast = build_milp_inputs(
+            &sim_fast, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(),
+            &profile, now, None, None, &[], None,
+        );
+
+        // At slot 3 (900 s ahead at midnight, natural=0):
+        //   slow: 0.5 × (0.999)^900 ≈ 0.5 × 0.41 ≈ 2.0 kW
+        //   fast: 0.5 × (0.95)^900  ≈ 0.5 × ~0   ≈ 0.0 kW
+        let t = 3;
+        assert!(
+            inp_fast.p_pv_kw[t] < inp_slow.p_pv_kw[t],
+            "higher alpha should produce lower p_pv_kw at later slots: \
+             fast={:.4} >= slow={:.4}",
+            inp_fast.p_pv_kw[t],
+            inp_slow.p_pv_kw[t]
+        );
+    }
+
+    #[test]
+    fn pv_zero_offset_matches_sin_model() {
+        // Backward compat: when irradiance_offset=0, p_pv_kw must equal the
+        // profile's pure sin model (PvConfig::forecast_kw).
+        let now = fixed_now(); // 06:00 → natural = 0 at slot 0
+        let profile = make_profile(); // rated_kw=5.0, step_s=300s
+
+        // from_profile initialises irradiance_offset=0, pv_alpha=0.1
+        let sim = SimState::from_profile(&profile);
+
+        let inp = build_milp_inputs(
+            &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(),
+            &profile, now, None, None, &[], None,
+        );
+
+        // Compare every slot against the profile's sin model
+        let pv_cfg = profile.pv_config().unwrap();
+        for t in 0..inp.n {
+            let slot_t = now + Duration::seconds(t as i64 * 300);
+            let expected = pv_cfg.forecast_kw(slot_t);
+            assert!(
+                (inp.p_pv_kw[t] - expected).abs() < 1e-9,
+                "slot {t}: zero-offset p_pv_kw should match sin model \
+                 (got {:.6}, expected {:.6})",
+                inp.p_pv_kw[t],
+                expected
+            );
         }
     }
 }
