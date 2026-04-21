@@ -59,6 +59,35 @@ def step_wait_for_ev_allocation(context):
     )
 
 
+@when("I wait for the VEN /plan to have a heater allocation in slots")
+def step_wait_for_heater_allocation(context):
+    def fetch():
+        resp = ven_get("/plan")
+        if not resp.ok:
+            return None
+        body = resp.json()
+        if not isinstance(body, dict):
+            return None
+        return body
+
+    def has_heater_alloc(plan):
+        if plan is None:
+            return False
+        slots = plan.get("slots", [])
+        return any(
+            any(a.get("asset_id") == "heater" for a in slot.get("allocations", []))
+            for slot in slots
+        )
+
+    context.ven_plan = poll_until(
+        fetch,
+        has_heater_alloc,
+        timeout=180,
+        interval=5,
+        description="VEN /plan has heater allocation in slots",
+    )
+
+
 @when("I wait for the VEN /plan to have envelopes")
 def step_wait_for_envelopes(context):
     def fetch():
