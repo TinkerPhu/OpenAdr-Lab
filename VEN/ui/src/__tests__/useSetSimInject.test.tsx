@@ -10,7 +10,7 @@
 import React from "react";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type MockInstance } from "vitest";
 
 // Mock VenContext so the hook can be rendered without the full app tree.
 vi.mock("../App", () => ({
@@ -37,8 +37,10 @@ function makeWrapper(queryClient: QueryClient) {
 
 describe("useSetSimInject — onSuccess refetches forecast", () => {
   let queryClient: QueryClient;
-  let refetchSpy: ReturnType<typeof vi.spyOn>;
-  let invalidateSpy: ReturnType<typeof vi.spyOn>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let refetchSpy: MockInstance<(...args: any[]) => any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let invalidateSpy: MockInstance<(...args: any[]) => any>;
 
   beforeEach(() => {
     queryClient = new QueryClient({
