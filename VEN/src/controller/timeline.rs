@@ -214,13 +214,23 @@ fn locf_weighted_mean(
 /// Build the now-point for an asset: instantaneous values at exact `now`.
 ///
 /// Uses the most recent `HistoryPoint` from the per-asset ring buffer.
+/// For `power_kw`, a 60-second time-weighted average is used so that rapidly
+/// oscillating assets (e.g. thermostat bang-bang) produce a smooth transition
+/// from averaged history into the forecast, rather than a raw spike at NOW.
 /// Returns an empty-values point if no history exists.
 pub fn build_now_point(asset_id: &str, now: DateTime<Utc>, sim: &SimState) -> AssetTimelinePoint {
     // Regular sim assets.
     if let Some((entry, cfg)) = sim.find_asset(asset_id) {
         if let Some(last) = entry.history.latest() {
             let mut values = cfg.state_values(&last.state);
-            values.insert("power_kw".into(), last.power_kw);
+            // Use a short rolling average for power so oscillating assets
+            // (e.g. heater thermostat) show the same ~equilibrium value that
+            // the LOCF-averaged history buckets already display.
+            let power_kw = entry
+                .history
+                .recent_avg_power(Duration::seconds(60), now)
+                .unwrap_or(last.power_kw);
+            values.insert("power_kw".into(), power_kw);
             return AssetTimelinePoint { ts: now, values };
         }
     }
@@ -976,14 +986,53 @@ mod tests {
     }
 
     #[test]
-    fn build_now_point_uses_last_history_row() {
+    fn build_now_point_uses_recent_average_for_power() {
         let now = ts(100);
-        let sim = make_sim(vec![make_ev_entry("ev", &[(50, 1.0, 0.5), (99, 2.0, 0.6)])]);
-
+        // Single point in window — average equals the single reading.
+        let sim = make_sim(vec![make_ev_entry("ev", &[(99, 2.0, 0.6)])]);
         let np = build_now_point("ev", now, &sim);
         assert_eq!(np.ts, now);
         assert!((np.values["power_kw"] - 2.0).abs() < 1e-9);
         assert!((np.values["soc"] - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn build_now_point_smooths_oscillating_power() {
+        // Simulate a heater oscillating between 0 kW and 2.5 kW at ~1-second intervals.
+        // Average should be close to 1.25 kW — NOT the raw latest reading.
+        let base = 1_700_000_000i64;
+        let now = DateTime::from_timestamp(base + 60, 0).unwrap();
+
+        // Build a BaseLoad entry whose history alternates 0 / 2.5 kW.
+        let cfg = AssetConfig::BaseLoad(BaseLoad { baseline_kw: 0.0, baseline_kw_profile: 0.0 });
+        let mut entry = AssetEntry {
+            id: "osc".into(),
+            state: AssetState::BaseLoad(BaseLoadState { actual_power_kw: 0.0 }),
+            setpoint_kw: 0.0,
+            last_power_kw: 0.0,
+            energy: crate::simulator::energy::EnergyCounter { import_kwh: 0.0, export_kwh: 0.0 },
+            history: AssetHistoryBuffer::new(3600),
+        };
+        for i in 0i64..60 {
+            let power = if i % 2 == 0 { 0.0 } else { 2.5 };
+            entry.history.push(HistoryPoint {
+                ts: DateTime::from_timestamp(base + i, 0).unwrap(),
+                power_kw: power,
+                state: AssetState::BaseLoad(BaseLoadState { actual_power_kw: power }),
+            });
+        }
+
+        let sim = make_sim(vec![(entry, cfg)]);
+        let known = make_known(&["osc"]);
+        let np = build_now_point("osc", now, &sim);
+
+        // Time-weighted average over 60 alternating points should be ~1.25 kW.
+        let power = np.values["power_kw"];
+        assert!(power > 0.5 && power < 2.0,
+            "expected smoothed power ~1.25 kW, got {power:.3} kW");
+        // The raw latest would be 2.5 kW (last point is odd index 59 → 2.5 kW).
+        // Confirm we are NOT just returning the raw latest.
+        assert!(power < 2.4, "got raw-latest spike ({power:.3} kW) — smoothing not applied");
     }
 
     #[test]

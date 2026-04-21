@@ -65,6 +65,21 @@ const simWithPv: SimSnapshot = {
   },
 };
 
+const simWithHeater: SimSnapshot = {
+  ts: "2026-03-14T10:00:00Z",
+  grid: { net_power_w: 1500, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 },
+  assets: {
+    heater: { power_kw: 1.3, temp_c: 22.5, temp_min_c: 20.0, temp_max_c: 23.0, max_kw: 2.5 },
+  },
+};
+
+const heaterSchema = [
+  { key: "heater_setpoint_c", label: "Temperature Setpoint", kind: "slider" as const, min: 20, max: 23, unit: "°C", display_scale: undefined },
+  { key: "heater_temp_c", label: "Current Temperature", kind: "slider" as const, min: 10, max: 33, unit: "°C", display_scale: undefined },
+  { key: "heater_temp_min_c", label: "Comfort Band Min", kind: "slider" as const, min: 0, max: 22, unit: "°C", display_scale: undefined },
+  { key: "heater_temp_max_c", label: "Comfort Band Max", kind: "slider" as const, min: 21, max: 35, unit: "°C", display_scale: undefined },
+];
+
 const pvSchema = [
   { key: "pv_irradiance", label: "Irradiance Override", kind: "slider" as const, min: 0, max: 1, unit: "%", display_scale: 100 },
   { key: "pv_irradiance_alpha", label: "Blend-back Speed", kind: "slider" as const, min: 0.01, max: 1, unit: "", display_scale: undefined },
@@ -453,5 +468,123 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
     expect(mockOnOverrideChange).toHaveBeenCalledTimes(2);
     expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance_alpha: 0.99 });
     expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance: 0.7 });
+  });
+});
+
+// ─── Heater controls ──────────────────────────────────────────────────────────
+
+describe("AssetRightSection — heater controls", () => {
+  beforeEach(() => {
+    mockSchemaData.mockReturnValue({ heater: heaterSchema });
+  });
+
+  afterEach(() => {
+    mockSchemaData.mockReturnValue({});
+  });
+
+  it("renders all four heater control sliders", () => {
+    render(
+      <AssetRightSection
+        assetId="heater"
+        simSnapshot={simWithHeater}
+        overrides={undefined}
+        onOverrideChange={vi.fn()}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId("ctrl-heater-setpoint-c")).toBeInTheDocument();
+    expect(screen.getByTestId("ctrl-heater-temp-c")).toBeInTheDocument();
+    expect(screen.getByTestId("ctrl-heater-temp-min-c")).toBeInTheDocument();
+    expect(screen.getByTestId("ctrl-heater-temp-max-c")).toBeInTheDocument();
+  });
+
+  it("heater_temp_c: shows live temp from sim when no override is active", () => {
+    render(
+      <AssetRightSection
+        assetId="heater"
+        simSnapshot={simWithHeater}   // temp_c = 22.5
+        overrides={undefined}
+        onOverrideChange={vi.fn()}
+        onResetSoc={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/Current Temperature: 22\.5/)).toBeInTheDocument();
+  });
+
+  it("heater_temp_c: reverts to live sim temperature after mouse-up (one-shot behavior)", () => {
+    const mockOnOverrideChange = vi.fn();
+
+    render(
+      <AssetRightSection
+        assetId="heater"
+        simSnapshot={simWithHeater}   // temp_c = 22.5
+        overrides={undefined}
+        onOverrideChange={mockOnOverrideChange}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    const input = getSchemaSliderInput("heater_temp_c");
+
+    // Drag to 18°C
+    act(() => { fireEvent.change(input, { target: { value: "18" } }); });
+    expect(screen.getByText(/Current Temperature: 18/)).toBeInTheDocument();
+
+    // Mouse-up: POST fires and local hold is released
+    act(() => { fireEvent.mouseUp(input); });
+    expect(mockOnOverrideChange).toHaveBeenCalledWith({ heater_temp_c: 18 });
+
+    // Slider must revert to live sim temp (22.5) — not stay at 18 (persistent behavior)
+    expect(screen.getByText(/Current Temperature: 22\.5/)).toBeInTheDocument();
+  });
+
+  it("heater_temp_min_c: shows live sim temp_min_c when no override", () => {
+    render(
+      <AssetRightSection
+        assetId="heater"
+        simSnapshot={simWithHeater}   // temp_min_c = 20.0
+        overrides={undefined}
+        onOverrideChange={vi.fn()}
+        onResetSoc={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/Comfort Band Min: 20/)).toBeInTheDocument();
+  });
+
+  it("heater_temp_max_c: shows live sim temp_max_c when no override", () => {
+    render(
+      <AssetRightSection
+        assetId="heater"
+        simSnapshot={simWithHeater}   // temp_max_c = 23.0
+        overrides={undefined}
+        onOverrideChange={vi.fn()}
+        onResetSoc={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/Comfort Band Max: 23/)).toBeInTheDocument();
+  });
+
+  it("heater_temp_min_c: retains local value after commit (persistent behavior)", () => {
+    const mockOnOverrideChange = vi.fn();
+
+    render(
+      <AssetRightSection
+        assetId="heater"
+        simSnapshot={simWithHeater}   // temp_min_c = 20.0
+        overrides={undefined}
+        onOverrideChange={mockOnOverrideChange}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    const input = getSchemaSliderInput("heater_temp_min_c");
+
+    act(() => { fireEvent.change(input, { target: { value: "18" } }); });
+    act(() => { fireEvent.mouseUp(input); });
+
+    expect(mockOnOverrideChange).toHaveBeenCalledWith({ heater_temp_min_c: 18 });
+    // Persistent: slider should hold the locally-set value, not revert to sim
+    expect(screen.getByText(/Comfort Band Min: 18/)).toBeInTheDocument();
   });
 });
