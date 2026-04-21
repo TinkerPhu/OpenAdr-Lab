@@ -38,6 +38,13 @@ def step_given_inject_ev_soc(context, soc):
     r.raise_for_status()
 
 
+@given("I inject heater_temp_c {temp:f} via sim inject")
+def step_given_inject_heater_temp_c(context, temp):
+    """One-shot reset of the heater's current temperature via POST /sim/inject."""
+    r = ven_post("/sim/inject", json={"heater_temp_c": temp})
+    r.raise_for_status()
+
+
 @given("I inject pv irradiance {irradiance:f} via sim inject")
 def step_given_inject_pv_irradiance(context, irradiance):
     r = ven_post("/sim/inject", json={"pv_irradiance": irradiance})

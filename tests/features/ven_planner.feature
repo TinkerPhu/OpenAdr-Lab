@@ -48,7 +48,14 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
     When I wait for the VEN /plan to have an EV allocation in slots
     Then at least one firm slot has an allocation for asset "ev"
 
-  # --- Flexible envelopes ---
+  # --- Heater autonomous scheduling ---
+
+  Scenario: Heater is scheduled autonomously when below comfort floor (no HeaterTarget needed)
+    # When temperature is below temp_min, the planner sets MustRun mode and MUST
+    # allocate heater power without requiring an explicit HeaterTarget session.
+    Given I inject heater_temp_c 15.0 via sim inject
+    When I wait for the VEN /plan to have a heater allocation in slots
+    Then at least one firm slot has an allocation for asset "heater"
 
   Scenario: Plan has flexibility envelopes for far-horizon unscheduled energy
     Given I inject ev_soc 0.5 via sim inject
