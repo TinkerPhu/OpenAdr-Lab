@@ -72,6 +72,13 @@ Feature: VEN Simulator
     And I GET the VEN sensor snapshot
     Then the sensor raw source is "simulator"
 
+  Scenario: Heater sim schema exposes all four controls
+    When I query the VEN-1 sim schema
+    Then the schema for "heater" has control key "heater_setpoint_c"
+    And the schema for "heater" has control key "heater_temp_c"
+    And the schema for "heater" has control key "heater_temp_min_c"
+    And the schema for "heater" has control key "heater_temp_max_c"
+
   Scenario: Auto-report submitted for active event
     Given I have a VTN token as "any-business"
     And I create a program "auto-report-test" targeting "ven-1-name" and save its ID

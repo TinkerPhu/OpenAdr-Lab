@@ -14,6 +14,26 @@ def step_query_sim(context):
     context.sim_response = r.json()
 
 
+@when("I query the VEN-1 sim schema")
+def step_query_sim_schema(context):
+    r = ven_get("/sim/schema")
+    r.raise_for_status()
+    context.sim_schema = r.json()
+
+
+@then('the schema for "{asset}" has control key "{key}"')
+def step_schema_has_control_key(context, asset, key):
+    schema = context.sim_schema
+    assert asset in schema, (
+        f"Asset '{asset}' not found in sim schema. Available: {list(schema.keys())}"
+    )
+    controls = schema[asset]
+    keys = [c.get("key") for c in controls]
+    assert key in keys, (
+        f"Control key '{key}' not found for asset '{asset}'. Found: {keys}"
+    )
+
+
 @when("I query VEN-1 decision trace")
 def step_query_trace(context):
     r = ven_get("/trace/events")
