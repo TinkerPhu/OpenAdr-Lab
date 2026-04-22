@@ -489,13 +489,17 @@ fn format_iso8601_duration(secs: u64) -> String {
 /// Build a TELEMETRY_STATUS report triggered by a `ControllerEvent`.
 ///
 /// Only emits for `PlanCycle` and `PacketTransition` variants.
-/// Returns None for all other event types.
+/// Returns None when no active OpenADR event provides a `programID` (VTN requires it)
+/// or for unhandled event types.
 pub fn build_status_report(
     event: &ControllerEvent,
     sim: &SimState,
     ven_name: &str,
+    program_id: Option<&str>,
     _now: DateTime<Utc>,
 ) -> Option<Value> {
+    let program_id = program_id?;
+
     let (description, asset_id_opt) = match event {
         ControllerEvent::PlanCycle {
             trigger_reason,
@@ -528,6 +532,7 @@ pub fn build_status_report(
         .unwrap_or_else(|| format!("{}-site", ven_name));
 
     let report = json!({
+        "programID": program_id,
         "clientName": ven_name,
         "reportName": format!("status-{}", ven_name),
         "resources": [{

@@ -340,10 +340,11 @@ fn build_milp_inputs(
         // forecast. Falls back to the static sin model if no "pv" asset exists.
         let pv_kw = if let Some((_, cfg)) = assets.find_asset("pv") {
             if let AssetConfig::Pv(pv) = cfg {
-                let seconds_ahead = t as f64 * step_s as f64;
                 let natural = PvInverter::natural_irradiance_at(slot_t);
+                // pv_alpha is "fraction removed per plan step (300 s)".
+                // Exponent is the number of plan steps ahead, not raw seconds.
                 let decayed_offset =
-                    pv.irradiance_offset * (1.0 - pv.pv_alpha).powf(seconds_ahead);
+                    pv.irradiance_offset * (1.0 - pv.pv_alpha).powf(t as f64);
                 (natural + decayed_offset).clamp(0.0, 1.0) * pv.rated_kw
             } else {
                 pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)
@@ -2379,6 +2380,42 @@ mod tests {
             inp.p_pv_kw[0] > 1.0,
             "p_pv_kw[0] should reflect irradiance_offset (got {:.4})",
             inp.p_pv_kw[0]
+        );
+    }
+
+    #[test]
+    fn pv_irradiance_offset_decays_per_step_not_per_second() {
+        // Regression guard: with alpha=0.1 (typical), the decay exponent must be
+        // the plan-step count (t), NOT raw seconds (t * 300).
+        // Buggy formula: 0.9^(1×300) ≈ 5e-14  → slot 1 ≈ 0 kW  (WRONG)
+        // Correct formula: 0.9^1 = 0.9         → slot 1 ≈ 2.25 kW (RIGHT)
+        let now = fixed_midnight(); // natural=0, isolates offset
+        let profile = make_profile(); // rated_kw=5.0, step_s=300
+        let mut sim = SimState::from_profile(&profile);
+        set_pv_inject(&mut sim, 0.5, 0.1); // typical alpha=0.1
+
+        let inp = build_milp_inputs(
+            &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(),
+            &profile, now, None, None, &[], None,
+        );
+
+        // slot 0: 0.5 × 0.9^0 × 5.0 = 2.5 kW
+        // slot 1: 0.5 × 0.9^1 × 5.0 = 2.25 kW (must be clearly non-zero)
+        assert!(
+            inp.p_pv_kw[1] > 1.0,
+            "slot 1 must retain offset with alpha=0.1 (decay per step, not per second), got {:.6}",
+            inp.p_pv_kw[1]
+        );
+        // slot 5: 0.5 × 0.9^5 × 5.0 ≈ 1.476 kW
+        assert!(
+            inp.p_pv_kw[5] > 0.5,
+            "slot 5 must still show partial offset, got {:.6}",
+            inp.p_pv_kw[5]
+        );
+        // Decay is monotonically decreasing (offset fades over horizon)
+        assert!(
+            inp.p_pv_kw[1] < inp.p_pv_kw[0],
+            "slot 1 must be less than slot 0 (offset decaying)"
         );
     }
 
