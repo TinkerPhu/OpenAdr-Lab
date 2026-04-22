@@ -748,25 +748,28 @@ pub(crate) fn spawn_planning(
             let shift_loads = state.shiftable_loads().await;
             let bl_override = state.baseline_override().await;
             let obj = *active_objective.read().await;
+            // Read inject state BEFORE cloning the sim. The pv_irradiance inject is a
+            // one-shot: the sim tick applies it to pv.irradiance_offset and then clears
+            // inject.pv_irradiance. If we read inject_state after the clone, the tick
+            // can race in between: it clears the inject flag but we already have a stale
+            // clone with offset=0. Reading first guarantees we always capture the pending
+            // value before the tick has a chance to clear it.
+            let inject_snap = state.inject_state().await;
             // Clone SimState snapshot so the Mutex is released immediately.
             // MILP solving takes 18-60s on Pi4 ARM64; holding the lock would
             // block sim ticks and /capability reads for the entire duration.
             let mut sim_snap = sim.lock().await.clone();
 
-            // The inject API stores pv_irradiance as a one-shot and then the sim tick
-            // applies it to pv.irradiance_offset inside the mutex. If the planner wakes
-            // (via AssetStateChange) before the next tick, the cloned sim still has the
-            // old offset. Patch the clone here so the planner always sees the current value.
-            {
-                let inject_snap = state.inject_state().await;
-                if let Some(forced) = inject_snap.pv_irradiance {
-                    use crate::assets::{AssetConfig, PvInverter};
-                    let natural = PvInverter::natural_irradiance_at(now);
-                    if let Some((_, cfg)) = sim_snap.find_asset_mut("pv") {
-                        if let AssetConfig::Pv(pv) = cfg {
-                            pv.irradiance_offset = forced - natural;
-                            pv.pv_alpha = inject_snap.pv_irradiance_alpha;
-                        }
+            // Patch the clone when pv_irradiance inject is pending and the tick hasn't
+            // applied it yet. When the tick runs first, the clone already has the correct
+            // offset and this block is a no-op (inject_snap.pv_irradiance is None).
+            if let Some(forced) = inject_snap.pv_irradiance {
+                use crate::assets::{AssetConfig, PvInverter};
+                let natural = PvInverter::natural_irradiance_at(now);
+                if let Some((_, cfg)) = sim_snap.find_asset_mut("pv") {
+                    if let AssetConfig::Pv(pv) = cfg {
+                        pv.irradiance_offset = forced - natural;
+                        pv.pv_alpha = inject_snap.pv_irradiance_alpha;
                     }
                 }
             }
@@ -869,10 +872,16 @@ pub(crate) fn spawn_planning(
             // Event-driven status report on PlanCycle (T050)
             {
                 let sim_snap = sim.lock().await.clone();
+                let events = state.events().await;
+                let program_id = events
+                    .iter()
+                    .find_map(|e| e.get("programID").and_then(|v| v.as_str()))
+                    .map(|s| s.to_string());
                 let report_opt = controller::reporter::build_status_report(
                     &plan_cycle_event,
                     &sim_snap,
                     &ven_name,
+                    program_id.as_deref(),
                     now,
                 );
                 if let Some(report) = report_opt {

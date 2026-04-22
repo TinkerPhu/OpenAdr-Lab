@@ -260,13 +260,15 @@ impl Asset for PvInverter {
         let now = Utc::now();
         let n = (duration.num_seconds() / resolution.num_seconds().max(1)) as usize;
         let res_s = resolution.num_seconds() as f64;
+        // pv_alpha is "fraction removed per plan step (300 s)".
+        const PLAN_STEP_S: f64 = 300.0;
         let mut result = Vec::with_capacity(n);
         for i in 1..=n {
             let t = now + resolution * i as i32;
             let seconds_ahead = res_s * i as f64;
             let natural = Self::natural_irradiance_at(t);
             let decayed_offset =
-                self.irradiance_offset * (1.0 - self.pv_alpha).powf(seconds_ahead);
+                self.irradiance_offset * (1.0 - self.pv_alpha).powf(seconds_ahead / PLAN_STEP_S);
             let irradiance = (natural + decayed_offset).clamp(0.0, 1.0);
             let power_kw = -(irradiance * self.rated_kw);
             result.push((t, AssetCapability {
@@ -439,6 +441,40 @@ mod tests {
                 "at {t}: with alpha=1.0 offset must be fully decayed, got {:.4}", cap.max_export_kw
             );
         }
+    }
+
+    #[test]
+    fn capability_trajectory_offset_decays_per_step_not_per_second() {
+        // Regression guard: with alpha=0.1 and resolution=300s (1 plan step),
+        // slot 1 (300s ahead) must use exponent=300/300=1, NOT raw seconds=300.
+        // Correct: 0.4 × 0.9^1 = 0.36  →  offset still visible
+        // Buggy:   0.4 × 0.9^300 ≈ 0   →  offset gone after slot 0
+        let pv = PvInverter {
+            rated_kw: 10.0,
+            irradiance: 0.0,
+            irradiance_offset: 0.4,
+            pv_alpha: 0.1,
+            export_limit_kw: None,
+        };
+        let state = AssetState::Pv(PvState { actual_power_kw: 0.0 });
+        let traj = pv.capability_trajectory(
+            &state,
+            Duration::seconds(900), // 3 plan steps
+            Duration::seconds(300), // 1 plan step per slot
+        );
+        assert_eq!(traj.len(), 3);
+        // With correct formula: slot 1 gains 0.4 × 0.9 × 10 = 3.6 kW from offset.
+        // With buggy formula:   0.4 × 0.9^300 ≈ 0 — no offset contribution.
+        // Compare against pure natural irradiance to be time-of-day independent.
+        let (t1, cap1) = &traj[0];
+        let natural = Self::natural_irradiance_at(*t1);
+        let natural_only_kw = -(natural * 10.0);
+        assert!(
+            cap1.max_export_kw < natural_only_kw - 1.0,
+            "slot 1 must export >1 kW more than natural-only (offset 0.4, alpha=0.1): \
+             got {:.4}, natural-only {:.4}",
+            cap1.max_export_kw, natural_only_kw
+        );
     }
 
     #[test]
