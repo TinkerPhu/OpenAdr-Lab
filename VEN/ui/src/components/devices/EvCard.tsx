@@ -41,6 +41,7 @@ function fmtDate(iso: string): string {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   });
 }
 
@@ -176,6 +177,7 @@ export function EvCard(props: EvCardProps) {
             value={departure}
             onChange={(e) => setDeparture(e.target.value)}
             InputLabelProps={{ shrink: true }}
+            inputProps={{ lang: "de" }}
             data-testid="ev-departure-input"
           />
           <FormControlLabel

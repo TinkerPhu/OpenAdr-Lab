@@ -34,6 +34,7 @@ function fmtDate(iso: string): string {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   });
 }
 
@@ -156,6 +157,7 @@ export function ShiftableLoadsCard(props: ShiftableLoadsCardProps) {
             value={earliestStart}
             onChange={(e) => setEarliestStart(e.target.value)}
             InputLabelProps={{ shrink: true }}
+            inputProps={{ lang: "de" }}
             data-testid="shiftable-earliest-input"
           />
           <TextField
@@ -164,6 +166,7 @@ export function ShiftableLoadsCard(props: ShiftableLoadsCardProps) {
             value={latestEnd}
             onChange={(e) => setLatestEnd(e.target.value)}
             InputLabelProps={{ shrink: true }}
+            inputProps={{ lang: "de" }}
             data-testid="shiftable-latest-input"
           />
         </DialogContent>

@@ -31,6 +31,7 @@ function fmtDate(iso: string): string {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   });
 }
 
@@ -138,6 +139,7 @@ export function HeaterCard(props: HeaterCardProps) {
             value={readyBy}
             onChange={(e) => setReadyBy(e.target.value)}
             InputLabelProps={{ shrink: true }}
+            inputProps={{ lang: "de" }}
             data-testid="heater-readyby-input"
           />
         </DialogContent>
