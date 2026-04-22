@@ -365,6 +365,45 @@ describe("DevicesPage", () => {
     expect(screen.getByTestId("all-requests-cancel-ur-done")).toBeDisabled();
   });
 
+  // 24h format: displayed departure must not contain AM/PM
+  it("displays EV departure time in 24-hour format (no AM/PM)", () => {
+    // "2026-04-12T22:00:00Z" = 10 PM UTC — would show "10:00 PM" without hour12:false
+    const req = makeEvRequest();
+    if (req.session?.type === "ev") req.session.departure_time = "2026-04-12T22:00:00Z";
+    mockRequestsData.mockReturnValue([req]);
+    renderPage();
+    expect(screen.getByTestId("ev-departure").textContent).not.toMatch(/[AP]M/i);
+  });
+
+  // 24h format: datetime-local inputs carry lang="de" for browser picker
+  it("ev departure input has lang=de for 24-hour browser picker", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    const inputRoot = screen.getByTestId("ev-departure-input");
+    const nativeInput = inputRoot.querySelector("input")!;
+    expect(nativeInput).toHaveAttribute("lang", "de");
+  });
+
+  it("heater ready-by input has lang=de for 24-hour browser picker", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("heater-set-btn"));
+    const inputRoot = screen.getByTestId("heater-readyby-input");
+    const nativeInput = inputRoot.querySelector("input")!;
+    expect(nativeInput).toHaveAttribute("lang", "de");
+  });
+
+  it("shiftable load time inputs have lang=de for 24-hour browser picker", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("shiftable-add-btn"));
+    const earliest = screen.getByTestId("shiftable-earliest-input").querySelector("input")!;
+    const latest = screen.getByTestId("shiftable-latest-input").querySelector("input")!;
+    expect(earliest).toHaveAttribute("lang", "de");
+    expect(latest).toHaveAttribute("lang", "de");
+  });
+
   // Additional: EV soft_deadline chip
   it("shows soft deadline chip when EV session has soft_deadline", () => {
     const evReq = makeEvRequest();
