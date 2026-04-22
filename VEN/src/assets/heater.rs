@@ -14,9 +14,9 @@ pub struct Heater {
     pub max_kw: f64,
     /// Forced-on floor power at temp_min_c (0.0 if none).
     pub min_power_kw: f64,
-    /// Active comfort band lower bound. Overridable at runtime via SimInjectState.
+    /// Tank hysteresis lower bound. Overridable at runtime via SimInjectState.
     pub temp_min_c: f64,
-    /// Active comfort band upper bound. Overridable at runtime via SimInjectState.
+    /// Tank hysteresis upper bound. Overridable at runtime via SimInjectState.
     pub temp_max_c: f64,
     /// Original profile value — used for snap-back when inject override is released.
     pub temp_min_c_profile: f64,
@@ -157,7 +157,7 @@ impl Heater {
             },
             ControlDescriptor {
                 key: "heater_temp_min_c".into(),
-                label: "Comfort Band Min".into(),
+                label: "Hysteresis Min".into(),
                 kind: ControlKind::Slider,
                 min: Some(0.0),
                 max: Some(self.temp_max_c_profile - 1.0),
@@ -166,7 +166,7 @@ impl Heater {
             },
             ControlDescriptor {
                 key: "heater_temp_max_c".into(),
-                label: "Comfort Band Max".into(),
+                label: "Hysteresis Max".into(),
                 kind: ControlKind::Slider,
                 min: Some(self.temp_min_c_profile + 1.0),
                 max: Some(self.temp_max_c_profile + 10.0),

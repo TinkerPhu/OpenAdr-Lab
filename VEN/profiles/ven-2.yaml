@@ -2,10 +2,11 @@
 assets:
   - type: heater
     id: heater
-    max_kw: 3.0
+    max_kw: 6.0           # full tier (0 / 3 / 6 kW hardware steps)
+    mid_kw: 3.0           # mid tier
     temp_initial_c: 60.0
-    temp_min_c: 40.0
-    temp_max_c: 80.0
+    temp_min_c: 40.0      # tank hysteresis lower bound
+    temp_max_c: 80.0      # tank hysteresis upper bound
     volume_l: 200.0
     k_loss_kw_per_c: 0.003
     draw_kw: 0.5
