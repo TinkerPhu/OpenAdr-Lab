@@ -467,7 +467,7 @@ mod tests {
         // With buggy formula:   0.4 × 0.9^300 ≈ 0 — no offset contribution.
         // Compare against pure natural irradiance to be time-of-day independent.
         let (t1, cap1) = &traj[0];
-        let natural = Self::natural_irradiance_at(*t1);
+        let natural = PvInverter::natural_irradiance_at(*t1);
         let natural_only_kw = -(natural * 10.0);
         assert!(
             cap1.max_export_kw < natural_only_kw - 1.0,

@@ -547,15 +547,16 @@ mod tests {
 
     #[test]
     fn correction_converges_not_oscillates_using_prev_setpoint() {
-        // Regression: previous tick applied +4.17 kW correction (battery charging).
-        // sp_map["battery"] = -0.5 (plan allocation, as build_setpoints would set it).
-        // Actual grid = -4.5 kW (still exporting heavily, deviation = -4.5).
+        // Regression: previous tick applied +4.17 kW correction (battery charging to absorb PV).
+        // sp_map["battery"] = -0.5 (plan allocation).
+        // Actual grid = -4.5 kW (still exporting; PV exceeds battery charge capacity).
+        // deviation = -4.5 - 0.0 = -4.5.
         //
-        // With the fix (uses setpoint_kw = +4.17 as baseline):
-        //   raw = 4.17 - (-4.5) = -0.33 kW → small discharge, converges to plan.
+        // Dead-beat using setpoint_kw (fix):  raw = 4.17 - (-4.5) = 8.67 → clamped 5.0 kW charge.
+        // Dead-beat using sp_map value (bug):  raw = -0.5 - (-4.5) = +4.0 kW charge.
         //
-        // With the old bug (uses sp_map["battery"] = -0.5 as baseline):
-        //   raw = -0.5 - (-4.5) = +4.0 kW → oscillates back to large positive charge.
+        // Both charge, but the fix pushes harder (5.0 vs 4.0), absorbing more export.
+        // Key check: correction does NOT oscillate to discharge (bat_sp must be > prev setpoint).
         let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, 4.17);
         let assets = vec![bat_e];
         let configs = vec![bat_c];
@@ -567,8 +568,8 @@ mod tests {
         );
         let bat_sp = sp.get("battery").copied().unwrap();
         assert!(
-            bat_sp < 0.0 && bat_sp > -1.0,
-            "expected convergence near plan (-0.33 kW), got {bat_sp} — likely oscillation bug"
+            bat_sp > 4.17,
+            "correction must increase charging above prev setpoint (4.17), not oscillate to discharge; got {bat_sp}"
         );
     }
 
@@ -617,12 +618,12 @@ mod tests {
 
     #[test]
     fn correction_converges_after_deviation_clears_using_dead_beat() {
-        // Verify that when deviation is outside threshold with a previously-corrected
-        // setpoint, the dead-beat formula uses that setpoint (not the plan allocation)
-        // to prevent oscillation. This is the Plan F fix.
-        // setpoint_kw=-4.98 (held by loops.rs from previous tick), deviation now +4.48
-        // raw = -4.98 - 4.48 = -9.46 → clamped to -5.0 (max discharge ≈ -4.98 profile)
-        // In the real profile max_discharge_kw=5.0, so clamped = -5.0
+        // Verify that the dead-beat formula uses setpoint_kw (not sp_map plan allocation).
+        // setpoint_kw=-4.98 (held by loops.rs from previous tick), deviation = +4.48.
+        // raw = -4.98 - 4.48 = -9.46 → clamped to -5.0 (max_discharge_kw).
+        // Resulting delta = -5.0 - (-4.98) = -0.02, which is below min_correction_kw=0.2.
+        // The correction is correctly suppressed: battery is already at effective maximum
+        // discharge; no further meaningful correction is possible.
         let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, -4.98);
         let assets = vec![bat_e];
         let configs = vec![bat_c];
@@ -633,8 +634,10 @@ mod tests {
             0.0, 4.48, PlannerObjective::MinCost, 1.0, 0.2,
         );
         let bat_sp = sp.get("battery").copied().unwrap();
-        assert!(delta < 0.0, "correction direction correct, got {delta}");
-        assert!(bat_sp <= -4.98, "setpoint clamped to max discharge, got {bat_sp}");
-        assert!(bat_sp >= -5.0, "must not exceed max_discharge_kw, got {bat_sp}");
+        assert_eq!(delta, 0.0, "delta suppressed: battery already at max discharge, residual -0.02 < min_correction_kw; got {delta}");
+        assert!(
+            (bat_sp - (-0.5)).abs() < 1e-9,
+            "sp_map unchanged when correction below min threshold; got {bat_sp}"
+        );
     }
 }

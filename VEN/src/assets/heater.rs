@@ -77,7 +77,8 @@ impl Heater {
         let actual = if state.temperature_c >= self.temp_max_c {
             0.0
         } else if state.temperature_c <= self.temp_min_c {
-            clamped.max(self.min_power_kw)
+            // Emergency: ignore setpoint and run at max to recover temperature.
+            self.max_kw
         } else {
             clamped
         };
