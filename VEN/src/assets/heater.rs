@@ -323,17 +323,12 @@ pub struct HeaterSolOutput {
     pub z_heat_ready: f64,
 }
 
-impl Heater {
-    /// Declare all LP variables for this heater into `vars`.
-    pub fn declare_milp_vars(
-        &self,
-        ctx: &HeaterMilpContext,
-        n: usize,
-        vars: &mut ProblemVariables,
-    ) -> HeaterMilpVars {
+impl HeaterMilpContext {
+    /// Declare all LP variables for this heater. Context-side canonical implementation.
+    pub fn declare_vars(&self, n: usize, vars: &mut ProblemVariables) -> HeaterMilpVars {
         let z_heat_mid = (0..n)
             .map(|_| {
-                if ctx.mode == HeaterMilpMode::MustNotRun {
+                if self.mode == HeaterMilpMode::MustNotRun {
                     vars.add(variable().min(0.0).max(0.0))
                 } else {
                     vars.add(variable().binary())
@@ -342,14 +337,14 @@ impl Heater {
             .collect();
         let z_heat_full = (0..n)
             .map(|_| {
-                if ctx.mode == HeaterMilpMode::MustNotRun {
+                if self.mode == HeaterMilpMode::MustNotRun {
                     vars.add(variable().min(0.0).max(0.0))
                 } else {
                     vars.add(variable().binary())
                 }
             })
             .collect();
-        let z_heat_ready = if ctx.mode == HeaterMilpMode::MayRun {
+        let z_heat_ready = if self.mode == HeaterMilpMode::MayRun {
             vars.add(variable().binary())
         } else {
             vars.add(variable().min(0.0).max(0.0))
@@ -358,6 +353,76 @@ impl Heater {
     }
 
     /// Build the energy accumulator expression up to the deadline step.
+    pub fn energy_expr(&self, v: &HeaterMilpVars, n: usize, dt_h: f64) -> Expression {
+        let t_dlim = self.t_dead_step.unwrap_or(n.saturating_sub(1));
+        let mut expr = Expression::from(0.0);
+        for t in 0..n {
+            if t <= t_dlim {
+                expr += (dt_h * self.p_mid_kw) * v.z_heat_mid[t];
+                expr += (dt_h * self.p_full_kw) * v.z_heat_full[t];
+            }
+        }
+        expr
+    }
+
+    /// Instantaneous heater power expression at slot `t` (for power balance).
+    pub fn power_expr(&self, v: &HeaterMilpVars, t: usize) -> Expression {
+        self.p_mid_kw * v.z_heat_mid[t] + self.p_full_kw * v.z_heat_full[t]
+    }
+
+    /// Generate all MILP constraints for this heater. Context-side canonical implementation.
+    pub fn constraints(&self, v: &HeaterMilpVars, n: usize, dt_h: f64) -> Vec<Constraint> {
+        let mut cs: Vec<Constraint> = Vec::new();
+        let heat_energy = self.energy_expr(v, n, dt_h);
+
+        for t in 0..n {
+            cs.push(constraint!(v.z_heat_mid[t] + v.z_heat_full[t] <= 1.0));
+        }
+        match self.mode {
+            HeaterMilpMode::MustRun => {
+                cs.push(constraint!(heat_energy >= self.e_req_kwh));
+            }
+            HeaterMilpMode::MayRun => {
+                cs.push(constraint!(heat_energy >= self.e_req_kwh * v.z_heat_ready));
+            }
+            HeaterMilpMode::MustNotRun => {}
+        }
+        cs
+    }
+
+    /// Heater objective contribution. Context-side canonical implementation.
+    pub fn objective(&self, v: &HeaterMilpVars, w_tier_penalty_eur: f64, n: usize) -> Expression {
+        let mut obj = Expression::from(0.0);
+        for t in 0..n {
+            if self.mode != HeaterMilpMode::MustNotRun {
+                obj += w_tier_penalty_eur * v.z_heat_full[t];
+            }
+        }
+        obj
+    }
+
+    /// Read back the heater solution. Associated function (no `self` needed).
+    pub fn read_solution(sol: &impl Solution, v: &HeaterMilpVars, n: usize) -> HeaterSolOutput {
+        HeaterSolOutput {
+            z_heat_mid: (0..n).map(|t| sol.value(v.z_heat_mid[t])).collect(),
+            z_heat_full: (0..n).map(|t| sol.value(v.z_heat_full[t])).collect(),
+            z_heat_ready: sol.value(v.z_heat_ready),
+        }
+    }
+}
+
+impl Heater {
+    /// Declare all LP variables for this heater into `vars`. Delegates to `HeaterMilpContext::declare_vars`.
+    pub fn declare_milp_vars(
+        &self,
+        ctx: &HeaterMilpContext,
+        n: usize,
+        vars: &mut ProblemVariables,
+    ) -> HeaterMilpVars {
+        ctx.declare_vars(n, vars)
+    }
+
+    /// Build the energy accumulator expression up to the deadline step. Delegates to `HeaterMilpContext::energy_expr`.
     pub fn milp_energy_expr(
         &self,
         ctx: &HeaterMilpContext,
@@ -365,23 +430,20 @@ impl Heater {
         n: usize,
         dt_h: f64,
     ) -> Expression {
-        let t_dlim = ctx.t_dead_step.unwrap_or(n.saturating_sub(1));
-        let mut expr = Expression::from(0.0);
-        for t in 0..n {
-            if t <= t_dlim {
-                expr += (dt_h * ctx.p_mid_kw) * v.z_heat_mid[t];
-                expr += (dt_h * ctx.p_full_kw) * v.z_heat_full[t];
-            }
-        }
-        expr
+        ctx.energy_expr(v, n, dt_h)
     }
 
-    /// Instantaneous heater power expression at slot `t` (for power balance).
-    pub fn milp_power_expr(&self, ctx: &HeaterMilpContext, v: &HeaterMilpVars, t: usize) -> Expression {
-        ctx.p_mid_kw * v.z_heat_mid[t] + ctx.p_full_kw * v.z_heat_full[t]
+    /// Instantaneous heater power expression at slot `t`. Delegates to `HeaterMilpContext::power_expr`.
+    pub fn milp_power_expr(
+        &self,
+        ctx: &HeaterMilpContext,
+        v: &HeaterMilpVars,
+        t: usize,
+    ) -> Expression {
+        ctx.power_expr(v, t)
     }
 
-    /// Generate all MILP constraints for this heater.
+    /// Generate all MILP constraints for this heater. Delegates to `HeaterMilpContext::constraints`.
     pub fn milp_constraints(
         &self,
         ctx: &HeaterMilpContext,
@@ -389,27 +451,10 @@ impl Heater {
         n: usize,
         dt_h: f64,
     ) -> Vec<Constraint> {
-        let mut cs: Vec<Constraint> = Vec::new();
-        let heat_energy = self.milp_energy_expr(ctx, v, n, dt_h);
-
-        for t in 0..n {
-            // At most one tier active per slot.
-            cs.push(constraint!(v.z_heat_mid[t] + v.z_heat_full[t] <= 1.0));
-        }
-        match ctx.mode {
-            HeaterMilpMode::MustRun => {
-                cs.push(constraint!(heat_energy >= ctx.e_req_kwh));
-            }
-            HeaterMilpMode::MayRun => {
-                cs.push(constraint!(heat_energy >= ctx.e_req_kwh * v.z_heat_ready));
-            }
-            HeaterMilpMode::MustNotRun => {}
-        }
-        cs
+        ctx.constraints(v, n, dt_h)
     }
 
-    /// Heater objective contribution: soft per-slot penalty for using the full power tier
-    /// over the mid tier when tariff savings are equal.
+    /// Heater objective contribution. Delegates to `HeaterMilpContext::objective`.
     pub fn milp_objective(
         &self,
         ctx: &HeaterMilpContext,
@@ -417,27 +462,17 @@ impl Heater {
         w_tier_penalty_eur: f64,
         n: usize,
     ) -> Expression {
-        let mut obj = Expression::from(0.0);
-        for t in 0..n {
-            if ctx.mode != HeaterMilpMode::MustNotRun {
-                obj += w_tier_penalty_eur * v.z_heat_full[t];
-            }
-        }
-        obj
+        ctx.objective(v, w_tier_penalty_eur, n)
     }
 
-    /// Read back the heater solution from the solved model.
+    /// Read back the heater solution from the solved model. Delegates to `HeaterMilpContext::read_solution`.
     pub fn read_milp_solution(
         &self,
         sol: &impl Solution,
         v: &HeaterMilpVars,
         n: usize,
     ) -> HeaterSolOutput {
-        HeaterSolOutput {
-            z_heat_mid: (0..n).map(|t| sol.value(v.z_heat_mid[t])).collect(),
-            z_heat_full: (0..n).map(|t| sol.value(v.z_heat_full[t])).collect(),
-            z_heat_ready: sol.value(v.z_heat_ready),
-        }
+        HeaterMilpContext::read_solution(sol, v, n)
     }
 }
 

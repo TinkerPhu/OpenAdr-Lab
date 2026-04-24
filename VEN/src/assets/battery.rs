@@ -284,47 +284,29 @@ pub struct BatterySolOutput {
     pub e_kwh: Vec<f64>,
 }
 
-impl Battery {
-    /// Build the MILP context from the live SoC (not the profile initial_soc).
-    pub fn build_milp_context(&self, live_soc: f64) -> BatteryMilpContext {
-        let cap = self.capacity_kwh;
-        let eff = self.round_trip_efficiency.sqrt();
-        BatteryMilpContext {
-            e_nom_kwh: cap,
-            e_init_kwh: live_soc * cap,
-            e_min_kwh: self.min_soc * cap,
-            e_max_kwh: cap,
-            p_ch_max_kw: self.max_charge_kw,
-            p_dis_max_kw: self.max_discharge_kw,
-            eff_ch: eff,
-            eff_dis: eff,
-        }
-    }
-
-    /// Declare all LP variables for this battery into `vars`.
-    /// `c_startup_eur` and `c_ramp_eur_kw` gate the optional penalty variables;
-    /// pass 0.0 to disable and get empty vecs in the returned struct.
-    pub fn declare_milp_vars(
+impl BatteryMilpContext {
+    /// Declare all LP variables for this battery. Context-side canonical implementation;
+    /// `Battery::declare_milp_vars` delegates here.
+    pub fn declare_vars(
         &self,
-        ctx: &BatteryMilpContext,
         n: usize,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
         vars: &mut ProblemVariables,
     ) -> BatteryMilpVars {
         let p_ch = (0..n)
-            .map(|_| vars.add(variable().min(0.0).max(ctx.p_ch_max_kw)))
+            .map(|_| vars.add(variable().min(0.0).max(self.p_ch_max_kw)))
             .collect();
         let p_dis = (0..n)
-            .map(|_| vars.add(variable().min(0.0).max(ctx.p_dis_max_kw)))
+            .map(|_| vars.add(variable().min(0.0).max(self.p_dis_max_kw)))
             .collect();
         let u_bat = (0..n).map(|_| vars.add(variable().binary())).collect();
         let e_bat = (0..=n)
             .map(|i| {
                 if i == 0 {
-                    vars.add(variable().min(ctx.e_init_kwh).max(ctx.e_init_kwh))
+                    vars.add(variable().min(self.e_init_kwh).max(self.e_init_kwh))
                 } else {
-                    vars.add(variable().min(ctx.e_min_kwh).max(ctx.e_max_kwh))
+                    vars.add(variable().min(self.e_min_kwh).max(self.e_max_kwh))
                 }
             })
             .collect();
@@ -343,30 +325,32 @@ impl Battery {
         } else {
             vec![]
         };
-        BatteryMilpVars { p_ch, p_dis, u_bat, e_bat, z_active, delta_active, delta_ramp, dis_max_kw: ctx.p_dis_max_kw }
+        BatteryMilpVars {
+            p_ch,
+            p_dis,
+            u_bat,
+            e_bat,
+            z_active,
+            delta_active,
+            delta_ramp,
+            dis_max_kw: self.p_dis_max_kw,
+        }
     }
 
-    /// Generate all MILP constraints for this battery (charge/discharge mutual exclusion,
-    /// SoC dynamics, activity indicator, startup transitions, ramp bounds, terminal SoC).
-    pub fn milp_constraints(
-        &self,
-        ctx: &BatteryMilpContext,
-        v: &BatteryMilpVars,
-        n: usize,
-        dt_h: f64,
-    ) -> Vec<Constraint> {
+    /// Generate all MILP constraints for this battery. Context-side canonical implementation.
+    pub fn constraints(&self, v: &BatteryMilpVars, n: usize, dt_h: f64) -> Vec<Constraint> {
         let mut cs: Vec<Constraint> = Vec::new();
         for t in 0..n {
-            cs.push(constraint!(v.p_ch[t] <= ctx.p_ch_max_kw * v.u_bat[t]));
-            cs.push(constraint!(v.p_dis[t] <= ctx.p_dis_max_kw * (1.0 - v.u_bat[t])));
+            cs.push(constraint!(v.p_ch[t] <= self.p_ch_max_kw * v.u_bat[t]));
+            cs.push(constraint!(v.p_dis[t] <= self.p_dis_max_kw * (1.0 - v.u_bat[t])));
             cs.push(constraint!(
                 v.e_bat[t + 1]
                     == v.e_bat[t]
-                        + dt_h * ctx.eff_ch * v.p_ch[t]
-                        - dt_h * (1.0 / ctx.eff_dis) * v.p_dis[t]
+                        + dt_h * self.eff_ch * v.p_ch[t]
+                        - dt_h * (1.0 / self.eff_dis) * v.p_dis[t]
             ));
             if let Some(&z) = v.z_active.get(t) {
-                let big_m = ctx.p_ch_max_kw + ctx.p_dis_max_kw;
+                let big_m = self.p_ch_max_kw + self.p_dis_max_kw;
                 cs.push(constraint!(v.p_ch[t] + v.p_dis[t] <= big_m * z));
             }
         }
@@ -377,15 +361,91 @@ impl Battery {
         for i in 0..v.delta_ramp.len() {
             let t = i + 1;
             cs.push(constraint!(
-                v.delta_ramp[i] >= (v.p_ch[t] - v.p_dis[t]) - (v.p_ch[t - 1] - v.p_dis[t - 1])
+                v.delta_ramp[i]
+                    >= (v.p_ch[t] - v.p_dis[t]) - (v.p_ch[t - 1] - v.p_dis[t - 1])
             ));
             cs.push(constraint!(
-                v.delta_ramp[i] >= (v.p_ch[t - 1] - v.p_dis[t - 1]) - (v.p_ch[t] - v.p_dis[t])
+                v.delta_ramp[i]
+                    >= (v.p_ch[t - 1] - v.p_dis[t - 1]) - (v.p_ch[t] - v.p_dis[t])
             ));
         }
-        // Terminal: don't deplete below initial SoC at end of horizon.
-        cs.push(constraint!(v.e_bat[n] >= ctx.e_init_kwh));
+        cs.push(constraint!(v.e_bat[n] >= self.e_init_kwh));
         cs
+    }
+
+    /// Battery objective contribution. Associated function (no `self` needed — no ctx params used).
+    pub fn objective(
+        v: &BatteryMilpVars,
+        c_wear_eur_kwh: f64,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
+        n: usize,
+        dt_h: f64,
+    ) -> Expression {
+        let mut obj = Expression::from(0.0);
+        for t in 0..n {
+            obj += (c_wear_eur_kwh * dt_h) * v.p_ch[t];
+            obj += (c_wear_eur_kwh * dt_h) * v.p_dis[t];
+            if t >= 1 {
+                if let Some(&d) = v.delta_active.get(t - 1) {
+                    obj += c_startup_eur * d;
+                }
+                if let Some(&d) = v.delta_ramp.get(t - 1) {
+                    obj += c_ramp_eur_kw * d;
+                }
+            }
+        }
+        obj
+    }
+
+    /// Read back the battery solution. Associated function (no `self` needed).
+    pub fn read_solution(sol: &impl Solution, v: &BatteryMilpVars, n: usize) -> BatterySolOutput {
+        BatterySolOutput {
+            p_ch_kw: (0..n).map(|t| sol.value(v.p_ch[t])).collect(),
+            p_dis_kw: (0..n).map(|t| sol.value(v.p_dis[t])).collect(),
+            e_kwh: (0..=n).map(|t| sol.value(v.e_bat[t])).collect(),
+        }
+    }
+}
+
+impl Battery {
+    /// Build the MILP context from the live SoC (not the profile initial_soc).
+    pub fn build_milp_context(&self, live_soc: f64) -> BatteryMilpContext {
+        let cap = self.capacity_kwh;
+        let eff = self.round_trip_efficiency.sqrt();
+        BatteryMilpContext {
+            e_nom_kwh: cap,
+            e_init_kwh: live_soc * cap,
+            e_min_kwh: self.min_soc * cap,
+            e_max_kwh: cap,
+            p_ch_max_kw: self.max_charge_kw,
+            p_dis_max_kw: self.max_discharge_kw,
+            eff_ch: eff,
+            eff_dis: eff,
+        }
+    }
+
+    /// Declare all LP variables for this battery into `vars`. Delegates to `BatteryMilpContext::declare_vars`.
+    pub fn declare_milp_vars(
+        &self,
+        ctx: &BatteryMilpContext,
+        n: usize,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
+        vars: &mut ProblemVariables,
+    ) -> BatteryMilpVars {
+        ctx.declare_vars(n, c_startup_eur, c_ramp_eur_kw, vars)
+    }
+
+    /// Generate all MILP constraints for this battery. Delegates to `BatteryMilpContext::constraints`.
+    pub fn milp_constraints(
+        &self,
+        ctx: &BatteryMilpContext,
+        v: &BatteryMilpVars,
+        n: usize,
+        dt_h: f64,
+    ) -> Vec<Constraint> {
+        ctx.constraints(v, n, dt_h)
     }
 
     /// Battery objective contribution: cycle wear + startup penalty + ramp penalty.
@@ -398,20 +458,7 @@ impl Battery {
         n: usize,
         dt_h: f64,
     ) -> Expression {
-        let mut obj = Expression::from(0.0);
-        for t in 0..n {
-            obj += (wear_eur_kwh * dt_h) * v.p_ch[t];
-            obj += (wear_eur_kwh * dt_h) * v.p_dis[t];
-            if t >= 1 {
-                if let Some(&d) = v.delta_active.get(t - 1) {
-                    obj += startup_eur * d;
-                }
-                if let Some(&d) = v.delta_ramp.get(t - 1) {
-                    obj += ramp_eur_kw * d;
-                }
-            }
-        }
-        obj
+        BatteryMilpContext::objective(v, wear_eur_kwh, startup_eur, ramp_eur_kw, n, dt_h)
     }
 
     /// Net battery contribution to the power balance at slot `t`.
@@ -420,18 +467,14 @@ impl Battery {
         Expression::from(v.p_dis[t]) - Expression::from(v.p_ch[t])
     }
 
-    /// Read back the battery solution from the solved model.
+    /// Read back the battery solution from the solved model. Delegates to `BatteryMilpContext::read_solution`.
     pub fn read_milp_solution(
         &self,
         sol: &impl Solution,
         v: &BatteryMilpVars,
         n: usize,
     ) -> BatterySolOutput {
-        BatterySolOutput {
-            p_ch_kw: (0..n).map(|t| sol.value(v.p_ch[t])).collect(),
-            p_dis_kw: (0..n).map(|t| sol.value(v.p_dis[t])).collect(),
-            e_kwh: (0..=n).map(|t| sol.value(v.e_bat[t])).collect(),
-        }
+        BatteryMilpContext::read_solution(sol, v, n)
     }
 }
 
