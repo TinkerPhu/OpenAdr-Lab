@@ -306,11 +306,10 @@ pub struct EvSolOutput {
     pub z_ev_core: f64,
 }
 
-impl EvCharger {
-    /// Declare all LP variables for this EV charger into `vars`.
-    pub fn declare_milp_vars(
+impl EvMilpContext {
+    /// Declare all LP variables for this EV charger. Context-side canonical implementation.
+    pub fn declare_vars(
         &self,
-        ctx: &EvMilpContext,
         n: usize,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
@@ -318,55 +317,58 @@ impl EvCharger {
     ) -> EvMilpVars {
         let p_ev = (0..n)
             .map(|_| {
-                if ctx.mode == EvMilpMode::MustNotRun {
+                if self.mode == EvMilpMode::MustNotRun {
                     vars.add(variable().min(0.0).max(0.0))
                 } else {
-                    vars.add(variable().min(0.0).max(ctx.p_max_kw))
+                    vars.add(variable().min(0.0).max(self.p_max_kw))
                 }
             })
             .collect();
         let z_ev_on = (0..n)
             .map(|t| {
-                if ctx.mode == EvMilpMode::MustNotRun {
+                if self.mode == EvMilpMode::MustNotRun {
                     vars.add(variable().min(0.0).max(0.0))
                 } else {
-                    let ub = if ctx.a_ev[t] { 1.0 } else { 0.0 };
+                    let ub = if self.a_ev[t] { 1.0 } else { 0.0 };
                     vars.add(variable().max(ub).binary())
                 }
             })
             .collect();
-        let z_ev_core = if ctx.mode == EvMilpMode::MayRun {
+        let z_ev_core = if self.mode == EvMilpMode::MayRun {
             vars.add(variable().binary())
         } else {
             vars.add(variable().min(0.0).max(0.0))
         };
-        let e_ev_extra = if ctx.mode == EvMilpMode::MustNotRun {
+        let e_ev_extra = if self.mode == EvMilpMode::MustNotRun {
             vars.add(variable().min(0.0).max(0.0))
         } else {
-            vars.add(variable().min(0.0).max(ctx.e_extra_max_kwh))
+            vars.add(variable().min(0.0).max(self.e_extra_max_kwh))
         };
-        let delta_ev = if ctx.mode != EvMilpMode::MustNotRun && n > 1 && c_startup_eur > 0.0 {
+        let delta_ev = if self.mode != EvMilpMode::MustNotRun && n > 1 && c_startup_eur > 0.0 {
             (0..n - 1).map(|_| vars.add(variable().binary())).collect()
         } else {
             vec![]
         };
-        let delta_ev_ramp = if ctx.mode != EvMilpMode::MustNotRun && n > 1 && c_ramp_eur_kw > 0.0 {
-            (0..n - 1).map(|_| vars.add(variable().min(0.0))).collect()
-        } else {
-            vec![]
-        };
-        EvMilpVars { p_ev, z_ev_on, z_ev_core, e_ev_extra, delta_ev, delta_ev_ramp, p_min_kw: ctx.p_min_kw }
+        let delta_ev_ramp =
+            if self.mode != EvMilpMode::MustNotRun && n > 1 && c_ramp_eur_kw > 0.0 {
+                (0..n - 1).map(|_| vars.add(variable().min(0.0))).collect()
+            } else {
+                vec![]
+            };
+        EvMilpVars {
+            p_ev,
+            z_ev_on,
+            z_ev_core,
+            e_ev_extra,
+            delta_ev,
+            delta_ev_ramp,
+            p_min_kw: self.p_min_kw,
+        }
     }
 
     /// Build the energy accumulator expression up to the deadline step.
-    pub fn milp_energy_expr(
-        &self,
-        ctx: &EvMilpContext,
-        v: &EvMilpVars,
-        n: usize,
-        dt_h: f64,
-    ) -> Expression {
-        let t_dlim = ctx.t_dead_step.unwrap_or(n.saturating_sub(1));
+    pub fn energy_expr(&self, v: &EvMilpVars, n: usize, dt_h: f64) -> Expression {
+        let t_dlim = self.t_dead_step.unwrap_or(n.saturating_sub(1));
         let mut expr = Expression::from(0.0);
         for t in 0..n {
             if t <= t_dlim {
@@ -376,35 +378,29 @@ impl EvCharger {
         expr
     }
 
-    /// Generate all MILP constraints for this EV charger.
-    pub fn milp_constraints(
-        &self,
-        ctx: &EvMilpContext,
-        v: &EvMilpVars,
-        n: usize,
-        dt_h: f64,
-    ) -> Vec<Constraint> {
+    /// Generate all MILP constraints for this EV charger. Context-side canonical implementation.
+    pub fn constraints(&self, v: &EvMilpVars, n: usize, dt_h: f64) -> Vec<Constraint> {
         let mut cs: Vec<Constraint> = Vec::new();
-        let ev_energy = self.milp_energy_expr(ctx, v, n, dt_h);
+        let ev_energy = self.energy_expr(v, n, dt_h);
 
         for t in 0..n {
-            if ctx.mode != EvMilpMode::MustNotRun {
-                let ev_ub = if ctx.a_ev[t] { ctx.p_max_kw } else { 0.0 };
-                cs.push(constraint!(v.p_ev[t] >= ctx.p_min_kw * v.z_ev_on[t]));
+            if self.mode != EvMilpMode::MustNotRun {
+                let ev_ub = if self.a_ev[t] { self.p_max_kw } else { 0.0 };
+                cs.push(constraint!(v.p_ev[t] >= self.p_min_kw * v.z_ev_on[t]));
                 cs.push(constraint!(v.p_ev[t] <= ev_ub * v.z_ev_on[t]));
             }
         }
-        match ctx.mode {
+        match self.mode {
             EvMilpMode::MustRun => {
-                cs.push(constraint!(ev_energy.clone() >= ctx.e_core_kwh));
-                cs.push(constraint!(ev_energy <= ctx.e_core_kwh + v.e_ev_extra));
+                cs.push(constraint!(ev_energy.clone() >= self.e_core_kwh));
+                cs.push(constraint!(ev_energy <= self.e_core_kwh + v.e_ev_extra));
             }
             EvMilpMode::MayRun => {
-                cs.push(constraint!(ev_energy.clone() >= ctx.e_core_kwh * v.z_ev_core));
+                cs.push(constraint!(ev_energy.clone() >= self.e_core_kwh * v.z_ev_core));
                 cs.push(constraint!(
-                    ev_energy <= ctx.e_core_kwh * v.z_ev_core + v.e_ev_extra
+                    ev_energy <= self.e_core_kwh * v.z_ev_core + v.e_ev_extra
                 ));
-                cs.push(constraint!(v.e_ev_extra <= ctx.e_extra_max_kwh * v.z_ev_core));
+                cs.push(constraint!(v.e_ev_extra <= self.e_extra_max_kwh * v.z_ev_core));
             }
             EvMilpMode::MustNotRun => {}
         }
@@ -420,11 +416,9 @@ impl EvCharger {
         cs
     }
 
-    /// EV objective contribution: startup penalty + ramp penalty + extra-charge reward.
-    /// The reward sign is negative (subtracted from the minimised objective).
-    pub fn milp_objective(
+    /// EV objective contribution. Context-side canonical implementation.
+    pub fn objective(
         &self,
-        ctx: &EvMilpContext,
         v: &EvMilpVars,
         startup_eur: f64,
         ramp_eur_kw: f64,
@@ -440,25 +434,79 @@ impl EvCharger {
                 obj += ramp_eur_kw * d;
             }
         }
-        if ctx.mode != EvMilpMode::MustNotRun {
-            obj += -(w_services * ctx.v_extra_eur_kwh) * v.e_ev_extra;
+        if self.mode != EvMilpMode::MustNotRun {
+            obj += -(w_services * self.v_extra_eur_kwh) * v.e_ev_extra;
         }
         obj
     }
 
-    /// Read back the EV solution from the solved model.
-    pub fn read_milp_solution(
-        &self,
-        sol: &impl Solution,
-        v: &EvMilpVars,
-        n: usize,
-    ) -> EvSolOutput {
+    /// Read back the EV solution. Associated function (no `self` needed).
+    pub fn read_solution(sol: &impl Solution, v: &EvMilpVars, n: usize) -> EvSolOutput {
         EvSolOutput {
             p_ev_kw: (0..n).map(|t| sol.value(v.p_ev[t])).collect(),
             z_ev_on: (0..n).map(|t| sol.value(v.z_ev_on[t])).collect(),
             e_ev_extra_kwh: sol.value(v.e_ev_extra),
             z_ev_core: sol.value(v.z_ev_core),
         }
+    }
+}
+
+impl EvCharger {
+    /// Declare all LP variables for this EV charger into `vars`. Delegates to `EvMilpContext::declare_vars`.
+    pub fn declare_milp_vars(
+        &self,
+        ctx: &EvMilpContext,
+        n: usize,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
+        vars: &mut ProblemVariables,
+    ) -> EvMilpVars {
+        ctx.declare_vars(n, c_startup_eur, c_ramp_eur_kw, vars)
+    }
+
+    /// Build the energy accumulator expression up to the deadline step. Delegates to `EvMilpContext::energy_expr`.
+    pub fn milp_energy_expr(
+        &self,
+        ctx: &EvMilpContext,
+        v: &EvMilpVars,
+        n: usize,
+        dt_h: f64,
+    ) -> Expression {
+        ctx.energy_expr(v, n, dt_h)
+    }
+
+    /// Generate all MILP constraints for this EV charger. Delegates to `EvMilpContext::constraints`.
+    pub fn milp_constraints(
+        &self,
+        ctx: &EvMilpContext,
+        v: &EvMilpVars,
+        n: usize,
+        dt_h: f64,
+    ) -> Vec<Constraint> {
+        ctx.constraints(v, n, dt_h)
+    }
+
+    /// EV objective contribution. Delegates to `EvMilpContext::objective`.
+    pub fn milp_objective(
+        &self,
+        ctx: &EvMilpContext,
+        v: &EvMilpVars,
+        startup_eur: f64,
+        ramp_eur_kw: f64,
+        w_services: f64,
+        n: usize,
+    ) -> Expression {
+        ctx.objective(v, startup_eur, ramp_eur_kw, w_services, n)
+    }
+
+    /// Read back the EV solution from the solved model. Delegates to `EvMilpContext::read_solution`.
+    pub fn read_milp_solution(
+        &self,
+        sol: &impl Solution,
+        v: &EvMilpVars,
+        n: usize,
+    ) -> EvSolOutput {
+        EvMilpContext::read_solution(sol, v, n)
     }
 }
 

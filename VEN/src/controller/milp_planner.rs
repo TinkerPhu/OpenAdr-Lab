@@ -14,6 +14,12 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::assets::{AssetConfig, PvInverter};
+use crate::assets::battery::BatteryMilpContext;
+use crate::assets::ev::{EvMilpContext, EvMilpMode};
+use crate::assets::heater::{HeaterMilpContext, HeaterMilpMode};
+use crate::controller::milp_interactions::{
+    build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
+};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
@@ -642,10 +648,10 @@ struct SolveOutput {
 
 /// Run the MILP model and return the optimal schedule.
 ///
-/// Ported from `d:/Tinker/milp_demo/src/main.rs` with the following adaptations:
-/// - Fixed-size arrays `[f64; N]` replaced by dynamic `Vec<f64>` (N = `inputs.n`)
-/// - Battery/EV/heater presence handled via Option unwrap with zero fallbacks
-/// - Washing machine block disabled (no WM asset in current profile)
+/// Uses per-asset context types from the assets module (`BatteryMilpContext`,
+/// `EvMilpContext`, `HeaterMilpContext`) and the `MilpVarPool` / `AssetInteraction`
+/// framework from `milp_interactions.rs`. The `MilpInputs` signature is preserved
+/// so all existing unit tests continue to compile without modification.
 fn solve_milp(
     inputs: &MilpInputs,
     weights: &MilpWeights,
@@ -653,15 +659,72 @@ fn solve_milp(
     let n = inputs.n;
     let dt_h = inputs.dt_h;
 
-    // ── Unwrap optional battery params (zero = absent → vars fixed to 0) ─────
-    let bat_present = inputs.e_bat_nom_kwh.is_some();
-    let bat_init = inputs.e_bat_init_kwh.unwrap_or(0.0);
-    let bat_min = inputs.e_bat_min_kwh.unwrap_or(0.0);
-    let bat_max = inputs.e_bat_max_kwh.unwrap_or(0.0);
-    let bat_ch_max = inputs.p_bat_ch_max_kw.unwrap_or(0.0);
-    let bat_dis_max = inputs.p_bat_dis_max_kw.unwrap_or(0.0);
-    let eff_ch = inputs.eff_bat_ch.unwrap_or(1.0);
-    let eff_dis = inputs.eff_bat_dis.unwrap_or(1.0);
+    // ── Build per-asset contexts from the flat MilpInputs fields ─────────────
+
+    let bat_ctx: Option<BatteryMilpContext> = inputs.e_bat_nom_kwh.map(|e_nom| BatteryMilpContext {
+        e_nom_kwh:    e_nom,
+        e_init_kwh:   inputs.e_bat_init_kwh.unwrap_or(0.0),
+        e_min_kwh:    inputs.e_bat_min_kwh.unwrap_or(0.0),
+        e_max_kwh:    inputs.e_bat_max_kwh.unwrap_or(e_nom),
+        p_ch_max_kw:  inputs.p_bat_ch_max_kw.unwrap_or(0.0),
+        p_dis_max_kw: inputs.p_bat_dis_max_kw.unwrap_or(0.0),
+        eff_ch:       inputs.eff_bat_ch.unwrap_or(1.0),
+        eff_dis:      inputs.eff_bat_dis.unwrap_or(1.0),
+    });
+
+    let ev_ctx: Option<EvMilpContext> = if inputs.p_ev_max_kw > 0.0 {
+        let ev_mode = match inputs.ev_mode {
+            MilpLoadMode::MustRun => EvMilpMode::MustRun,
+            MilpLoadMode::MayRun => EvMilpMode::MayRun,
+            MilpLoadMode::MustNotRun => EvMilpMode::MustNotRun,
+        };
+        Some(EvMilpContext {
+            mode: ev_mode,
+            a_ev: inputs.a_ev.clone(),
+            t_dead_step: inputs.t_ev_dead_step,
+            p_max_kw: inputs.p_ev_max_kw,
+            p_min_kw: inputs.p_ev_min_kw,
+            e_core_kwh: inputs.e_ev_core_kwh,
+            e_extra_max_kwh: inputs.e_ev_extra_max_kwh,
+            v_extra_eur_kwh: inputs.v_ev_extra_eur_kwh,
+        })
+    } else {
+        None
+    };
+
+    let heat_ctx: Option<HeaterMilpContext> = if inputs.p_heat_full_kw > 0.0 {
+        let heat_mode = match inputs.heater_mode {
+            MilpLoadMode::MustRun => HeaterMilpMode::MustRun,
+            MilpLoadMode::MayRun => HeaterMilpMode::MayRun,
+            MilpLoadMode::MustNotRun => HeaterMilpMode::MustNotRun,
+        };
+        Some(HeaterMilpContext {
+            mode: heat_mode,
+            t_dead_step: inputs.t_heat_dead_step,
+            p_mid_kw: inputs.p_heat_mid_kw,
+            p_full_kw: inputs.p_heat_full_kw,
+            e_req_kwh: inputs.e_heat_req_kwh,
+        })
+    } else {
+        None
+    };
+
+    // ── Build GlobalMilpInputs (grid arrays — needed by interaction framework) ─
+    let global = GlobalMilpInputs {
+        n,
+        dt_h,
+        c_imp_eur_kwh: inputs.c_imp_eur_kwh.clone(),
+        c_exp_eur_kwh: inputs.c_exp_eur_kwh.clone(),
+        g_imp_kgco2_kwh: inputs.g_imp_kgco2_kwh.clone(),
+        p_pv_kw: inputs.p_pv_kw.clone(),
+        p_base_kw: inputs.p_base_kw.clone(),
+        p_imp_max_phys_kw: inputs.p_imp_max_phys_kw.clone(),
+        p_exp_max_phys_kw: inputs.p_exp_max_phys_kw.clone(),
+        p_imp_max_cont_kw: inputs.p_imp_max_cont_kw.clone(),
+        p_exp_max_cont_kw: inputs.p_exp_max_cont_kw.clone(),
+        pen_imp_eur_kwh: inputs.pen_imp_eur_kwh,
+        pen_exp_eur_kwh: inputs.pen_exp_eur_kwh,
+    };
 
     let mut vars = variables!();
 
@@ -672,398 +735,171 @@ fn solve_milp(
     let s_imp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
     let s_exp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
 
-    // ── Battery variables (fixed to 0 when no battery) ────────────────────────
-    let p_bat_ch: Vec<Variable> = (0..n)
-        .map(|_| {
-            if bat_present {
-                vars.add(variable().min(0.0).max(bat_ch_max))
-            } else {
-                vars.add(variable().min(0.0).max(0.0))
-            }
-        })
-        .collect();
-    let p_bat_dis: Vec<Variable> = (0..n)
-        .map(|_| {
-            if bat_present {
-                vars.add(variable().min(0.0).max(bat_dis_max))
-            } else {
-                vars.add(variable().min(0.0).max(0.0))
-            }
-        })
-        .collect();
-    let u_bat: Vec<Variable> = (0..n)
-        .map(|_| {
-            if bat_present {
-                vars.add(variable().binary())
-            } else {
-                vars.add(variable().min(0.0).max(0.0))
-            }
-        })
-        .collect();
-    let e_bat: Vec<Variable> = (0..=n)
-        .map(|i| {
-            if !bat_present {
-                vars.add(variable().min(0.0).max(0.0))
-            } else if i == 0 {
-                vars.add(variable().min(bat_init).max(bat_init))
-            } else {
-                vars.add(variable().min(bat_min).max(bat_max))
-            }
-        })
-        .collect();
-
-    // ── EV variables ──────────────────────────────────────────────────────────
-    let p_ev: Vec<Variable> = (0..n)
-        .map(|_| {
-            if inputs.ev_mode == MilpLoadMode::MustNotRun {
-                vars.add(variable().min(0.0).max(0.0))
-            } else {
-                vars.add(variable().min(0.0).max(inputs.p_ev_max_kw))
-            }
-        })
-        .collect();
-    let z_ev_on: Vec<Variable> = (0..n)
-        .map(|t| {
-            if inputs.ev_mode == MilpLoadMode::MustNotRun {
-                vars.add(variable().min(0.0).max(0.0))
-            } else {
-                let ub = if inputs.a_ev[t] { 1.0 } else { 0.0 };
-                vars.add(variable().max(ub).binary())
-            }
-        })
-        .collect();
-    let z_ev_core = if inputs.ev_mode == MilpLoadMode::MayRun {
-        vars.add(variable().binary())
-    } else {
-        vars.add(variable().min(0.0).max(0.0))
-    };
-    let e_ev_extra = if inputs.ev_mode == MilpLoadMode::MustNotRun {
-        vars.add(variable().min(0.0).max(0.0))
-    } else {
-        vars.add(variable().min(0.0).max(inputs.e_ev_extra_max_kwh))
+    let grid_vars = GridMilpVars {
+        p_imp: p_imp.clone(),
+        p_exp: p_exp.clone(),
+        u_grid: u_grid.clone(),
+        s_imp_viol: s_imp_viol.clone(),
+        s_exp_viol: s_exp_viol.clone(),
     };
 
-    // ── Heater variables ──────────────────────────────────────────────────────
-    let z_heat_mid: Vec<Variable> = (0..n)
-        .map(|_| {
-            if inputs.heater_mode == MilpLoadMode::MustNotRun {
-                vars.add(variable().min(0.0).max(0.0))
-            } else {
-                vars.add(variable().binary())
-            }
-        })
-        .collect();
-    let z_heat_full: Vec<Variable> = (0..n)
-        .map(|_| {
-            if inputs.heater_mode == MilpLoadMode::MustNotRun {
-                vars.add(variable().min(0.0).max(0.0))
-            } else {
-                vars.add(variable().binary())
-            }
-        })
-        .collect();
-    let z_heat_ready = if inputs.heater_mode == MilpLoadMode::MayRun {
-        vars.add(variable().binary())
-    } else {
-        vars.add(variable().min(0.0).max(0.0))
-    };
+    // ── Per-asset variables via context methods ───────────────────────────────
+    let bat_vars = bat_ctx.as_ref().map(|ctx| {
+        ctx.declare_vars(n, weights.c_bat_startup_eur, weights.c_bat_ramp_eur_kw, &mut vars)
+    });
+    let ev_vars = ev_ctx.as_ref().map(|ctx| {
+        ctx.declare_vars(n, weights.c_ev_startup_eur, weights.c_ev_ramp_eur_kw, &mut vars)
+    });
+    let heat_vars = heat_ctx.as_ref().map(|ctx| ctx.declare_vars(n, &mut vars));
 
     // ── Shiftable load variables ──────────────────────────────────────────────
-    // For each load: one binary per valid start slot, y_s[j] ∈ {0,1}
-    let y_shift: Vec<Vec<Variable>> = inputs.shiftable_loads.iter().map(|sl| {
-        sl.valid_start_slots.iter().map(|_| vars.add(variable().binary())).collect()
+    let shift_vars: Vec<ShiftableLoadMilpVars> = inputs.shiftable_loads.iter().map(|sl| {
+        let y_shift = sl.valid_start_slots.iter().map(|_| vars.add(variable().binary())).collect();
+        ShiftableLoadMilpVars {
+            asset_id: sl.asset_id.clone(),
+            power_kw: sl.power_kw,
+            duration_slots: sl.duration_slots,
+            valid_start_slots: sl.valid_start_slots.clone(),
+            y_shift,
+        }
     }).collect();
 
-    // ── Startup / transition variables ────────────────────────────────────────
-    // delta_ev[i] = 1 when EV switches from off→on between slot i and i+1.
-    // Indexed 0..n−2, corresponding to the transition at t = i+1.
-    let delta_ev: Vec<Variable> =
-        if inputs.ev_mode != MilpLoadMode::MustNotRun && n > 1 && weights.c_ev_startup_eur > 0.0 {
-            (0..n - 1).map(|_| vars.add(variable().binary())).collect()
-        } else {
-            vec![]
-        };
-    // z_bat_active[t] = 1 when battery is charging or discharging at slot t.
-    // Linked to power via: p_bat_ch[t] + p_bat_dis[t] <= big_M × z_bat_active[t].
-    let z_bat_active: Vec<Variable> =
-        if bat_present && n > 1 && weights.c_bat_startup_eur > 0.0 {
-            (0..n).map(|_| vars.add(variable().binary())).collect()
-        } else {
-            vec![]
-        };
-    // delta_bat_active[i] = 1 when battery goes idle→active between slot i and i+1.
-    let delta_bat_active: Vec<Variable> =
-        if bat_present && n > 1 && weights.c_bat_startup_eur > 0.0 {
-            (0..n - 1).map(|_| vars.add(variable().binary())).collect()
-        } else {
-            vec![]
-        };
-    // delta_ev_ramp[i] = |p_ev[t] - p_ev[t-1]| via two-sided continuous relaxation.
-    // Continuous variable ≥ 0; no binary needed.
-    let delta_ev_ramp: Vec<Variable> =
-        if inputs.ev_mode != MilpLoadMode::MustNotRun && n > 1 && weights.c_ev_ramp_eur_kw > 0.0 {
-            (0..n - 1).map(|_| vars.add(variable().min(0.0))).collect()
-        } else {
-            vec![]
-        };
-    // delta_bat_ramp[i] = |net_bat[t] - net_bat[t-1]| where net_bat = p_bat_ch - p_bat_dis.
-    // Continuous variable ≥ 0; no binary needed.
-    let delta_bat_ramp: Vec<Variable> =
-        if bat_present && n > 1 && weights.c_bat_ramp_eur_kw > 0.0 {
-            (0..n - 1).map(|_| vars.add(variable().min(0.0))).collect()
-        } else {
-            vec![]
-        };
-    // ev_has_pv_surplus[t]: precomputed mask — true when PV surplus ≥ ev_min_kw.
-    // x_coexist[t] linearises the product p_bat_dis[t] × z_ev_on[t] for those slots.
-    let ev_has_pv_surplus: Vec<bool> =
-        if inputs.ev_mode != MilpLoadMode::MustNotRun
-            && bat_present
-            && weights.c_bat_ev_coexist_eur_kwh > 0.0
-        {
-            (0..n)
-                .map(|t| inputs.p_pv_kw[t] - inputs.p_base_kw[t] >= inputs.p_ev_min_kw)
-                .collect()
-        } else {
-            vec![false; n]
-        };
-    let x_coexist: Vec<Option<Variable>> = (0..n)
-        .map(|t| {
-            if ev_has_pv_surplus[t] {
-                Some(vars.add(variable().min(0.0).max(bat_dis_max)))
-            } else {
-                None
-            }
-        })
-        .collect();
+    // ── Build variable pool ───────────────────────────────────────────────────
+    let pool = MilpVarPool {
+        grid: grid_vars,
+        bat: bat_vars,
+        ev: ev_vars,
+        heater: heat_vars,
+        shiftable: shift_vars,
+    };
 
-    // ── Objective + deadline energy accumulators (loop 1) ────────────────────
-    let t_ev_dlim = inputs.t_ev_dead_step.unwrap_or(n.saturating_sub(1));
-    let t_heat_dlim = inputs.t_heat_dead_step.unwrap_or(n.saturating_sub(1));
+    // ── Declare interaction variables (needs pool + global, mutates vars) ─────
+    // Only applicable interactions get variable declarations; keep (interaction, vars) pairs
+    // to avoid index misalignment when iterating for constraints / objective.
+    let interactions = build_interactions(weights.c_bat_ev_coexist_eur_kwh);
+    let mut active_interactions: Vec<&Box<dyn crate::controller::milp_interactions::AssetInteraction>> = Vec::new();
+    let mut iv_list: Vec<crate::controller::milp_interactions::InteractionVars> = Vec::new();
+    for interaction in &interactions {
+        if interaction.applicable(&pool) {
+            let iv = interaction.declare_vars(&pool, &global, &mut vars);
+            active_interactions.push(interaction);
+            iv_list.push(iv);
+        }
+    }
 
+    // ── Objective ─────────────────────────────────────────────────────────────
     let mut objective = Expression::from(0.0);
-    let mut ev_energy_expr = Expression::from(0.0);
-    let mut heat_energy_expr = Expression::from(0.0);
 
+    // Grid terms (import cost, export revenue, GHG, violations)
     for t in 0..n {
-        // C_energy: import cost minus export revenue
         objective += (weights.w_energy * dt_h * inputs.c_imp_eur_kwh[t]) * p_imp[t];
         objective += -(weights.w_energy * dt_h * inputs.c_exp_eur_kwh[t]) * p_exp[t];
-        // C_GHG: emissions cost
         objective += (weights.w_ghg * dt_h * inputs.g_imp_kgco2_kwh[t]) * p_imp[t];
-        // C_grid: penalise total exchange volume (import + export)
         objective += (weights.w_grid * dt_h) * p_imp[t];
         objective += (weights.w_grid * dt_h) * p_exp[t];
-        // C_import: penalise grid import only (autarky objective)
         objective += (weights.w_import * dt_h) * p_imp[t];
-        // C_wear: battery cycling cost
-        objective += (weights.c_bat_wear_eur_kwh * dt_h) * p_bat_ch[t];
-        objective += (weights.c_bat_wear_eur_kwh * dt_h) * p_bat_dis[t];
-        // C_violations: contractual limit breaches
         objective += (weights.w_viol * inputs.pen_imp_eur_kwh * dt_h) * s_imp_viol[t];
         objective += (weights.w_viol * inputs.pen_exp_eur_kwh * dt_h) * s_exp_viol[t];
-        // C_startup: penalise fragmented runs — delta vars are indexed at t−1 for t≥1
-        if t >= 1 {
-            if let Some(&d) = delta_ev.get(t - 1) {
-                objective += weights.c_ev_startup_eur * d;
-            }
-            if let Some(&d) = delta_bat_active.get(t - 1) {
-                objective += weights.c_bat_startup_eur * d;
-            }
-            if let Some(&d) = delta_ev_ramp.get(t - 1) {
-                objective += weights.c_ev_ramp_eur_kw * d;
-            }
-            if let Some(&d) = delta_bat_ramp.get(t - 1) {
-                objective += weights.c_bat_ramp_eur_kw * d;
-            }
-        }
-        // C_coexist: penalise battery discharge co-occurring with EV charging in PV-surplus slots
-        if let Some(x) = x_coexist[t] {
-            objective += (weights.c_bat_ev_coexist_eur_kwh * dt_h) * x;
-        }
-        // C_tier: soft preference for mid over full heater tier when tariffs are equal
-        if inputs.heater_mode != MilpLoadMode::MustNotRun {
-            objective += inputs.w_tier_penalty_eur * z_heat_full[t];
-        }
-
-        // Deadline-gated energy accumulators
-        if t <= t_ev_dlim {
-            ev_energy_expr += dt_h * p_ev[t];
-        }
-        if t <= t_heat_dlim {
-            heat_energy_expr += (dt_h * inputs.p_heat_mid_kw) * z_heat_mid[t];
-            heat_energy_expr += (dt_h * inputs.p_heat_full_kw) * z_heat_full[t];
-        }
     }
 
-    // V_services rewards (subtracted from objective → incentives)
-    if inputs.ev_mode == MilpLoadMode::MayRun {
-        objective += -(weights.w_services * inputs.v_ev_core_eur) * z_ev_core;
+    // Battery objective (wear + startup + ramp)
+    if let Some(v) = &pool.bat {
+        objective += BatteryMilpContext::objective(
+            v,
+            weights.c_bat_wear_eur_kwh,
+            weights.c_bat_startup_eur,
+            weights.c_bat_ramp_eur_kw,
+            n,
+            dt_h,
+        );
     }
-    if inputs.ev_mode != MilpLoadMode::MustNotRun {
-        objective += -(weights.w_services * inputs.v_ev_extra_eur_kwh) * e_ev_extra;
+
+    // EV objective (startup + ramp + extra-charge reward)
+    if let (Some(ctx), Some(v)) = (&ev_ctx, &pool.ev) {
+        objective += ctx.objective(v, weights.c_ev_startup_eur, weights.c_ev_ramp_eur_kw, weights.w_services, n);
     }
-    // WM reward omitted
+
+    // Heater objective (tier preference penalty)
+    if let (Some(ctx), Some(v)) = (&heat_ctx, &pool.heater) {
+        objective += ctx.objective(v, inputs.w_tier_penalty_eur, n);
+    }
+
+    // Interaction objectives (e.g. bat-EV coexistence penalty)
+    for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
+        objective += interaction.objective(iv, dt_h);
+    }
 
     let mut model = vars.minimise(&objective).using(highs);
 
-    // ── Constraints (loop 2) ─────────────────────────────────────────────────
+    // ── Power balance per slot ────────────────────────────────────────────────
     for t in 0..n {
-        // Heater power expression
-        let heat_kw = inputs.p_heat_mid_kw * z_heat_mid[t]
-            + inputs.p_heat_full_kw * z_heat_full[t];
-
-        // Shiftable load power at step t: sum over all loads, all valid starts
+        // Shiftable load power at this slot
         let mut shift_kw = Expression::from(0.0);
-        for (s, sl) in inputs.shiftable_loads.iter().enumerate() {
-            for (ji, &j) in sl.valid_start_slots.iter().enumerate() {
-                // Load s started at slot j covers slots [j, j+duration_slots)
-                if t >= j && t < j + sl.duration_slots {
-                    shift_kw += sl.power_kw * y_shift[s][ji];
+        for sv in &pool.shiftable {
+            for (ji, &j) in sv.valid_start_slots.iter().enumerate() {
+                if t >= j && t < j + sv.duration_slots {
+                    shift_kw += sv.power_kw * sv.y_shift[ji];
                 }
             }
         }
 
-        // Power balance
+        // Optional asset contributions to power balance
+        let bat_dis: Expression = pool.bat.as_ref()
+            .map(|v| Expression::from(v.p_dis[t]))
+            .unwrap_or_else(|| Expression::from(0.0));
+        let bat_ch: Expression = pool.bat.as_ref()
+            .map(|v| Expression::from(v.p_ch[t]))
+            .unwrap_or_else(|| Expression::from(0.0));
+        let ev_kw: Expression = pool.ev.as_ref()
+            .map(|v| Expression::from(v.p_ev[t]))
+            .unwrap_or_else(|| Expression::from(0.0));
+        let heat_kw: Expression = heat_ctx.as_ref().zip(pool.heater.as_ref())
+            .map(|(ctx, v)| ctx.power_expr(v, t))
+            .unwrap_or_else(|| Expression::from(0.0));
+
         model = model.with(constraint!(
-            p_imp[t] + inputs.p_pv_kw[t] + p_bat_dis[t]
-                == inputs.p_base_kw[t] + p_ev[t] + heat_kw + shift_kw + p_bat_ch[t] + p_exp[t]
+            p_imp[t] + inputs.p_pv_kw[t] + bat_dis
+                == inputs.p_base_kw[t] + ev_kw + heat_kw + shift_kw + bat_ch + p_exp[t]
         ));
 
-        // Grid mutual exclusion (no simultaneous import and export)
-        model = model.with(constraint!(
-            p_imp[t] <= inputs.p_imp_max_phys_kw[t] * u_grid[t]
-        ));
-        model = model.with(constraint!(
-            p_exp[t] <= inputs.p_exp_max_phys_kw[t] * (1.0 - u_grid[t])
-        ));
-        // Contractual limits with slack
-        model = model.with(constraint!(
-            p_imp[t] <= inputs.p_imp_max_cont_kw[t] + s_imp_viol[t]
-        ));
-        model = model.with(constraint!(
-            p_exp[t] <= inputs.p_exp_max_cont_kw[t] + s_exp_viol[t]
-        ));
+        // Grid mutual exclusion and contractual limits
+        model = model.with(constraint!(p_imp[t] <= inputs.p_imp_max_phys_kw[t] * u_grid[t]));
+        model = model.with(constraint!(p_exp[t] <= inputs.p_exp_max_phys_kw[t] * (1.0 - u_grid[t])));
+        model = model.with(constraint!(p_imp[t] <= inputs.p_imp_max_cont_kw[t] + s_imp_viol[t]));
+        model = model.with(constraint!(p_exp[t] <= inputs.p_exp_max_cont_kw[t] + s_exp_viol[t]));
+    }
 
-        // Battery charge/discharge mutual exclusion + SoC dynamics
-        model = model.with(constraint!(p_bat_ch[t] <= bat_ch_max * u_bat[t]));
-        model = model.with(constraint!(
-            p_bat_dis[t] <= bat_dis_max * (1.0 - u_bat[t])
-        ));
-        model = model.with(constraint!(
-            e_bat[t + 1]
-                == e_bat[t]
-                    + dt_h * eff_ch * p_bat_ch[t]
-                    - dt_h * (1.0 / eff_dis) * p_bat_dis[t]
-        ));
-        // Battery activity indicator: z_bat_active links to total battery power
-        if let Some(&z) = z_bat_active.get(t) {
-            let big_m = bat_ch_max + bat_dis_max;
-            model = model.with(constraint!(p_bat_ch[t] + p_bat_dis[t] <= big_m * z));
+    // ── Per-asset constraints ─────────────────────────────────────────────────
+    if let (Some(ctx), Some(v)) = (&bat_ctx, &pool.bat) {
+        for c in ctx.constraints(v, n, dt_h) {
+            model = model.with(c);
         }
-
-        // Heater: at most one active level per step
-        model = model.with(constraint!(z_heat_mid[t] + z_heat_full[t] <= 1.0));
-
-        // EV semi-continuous power gate
-        if inputs.ev_mode != MilpLoadMode::MustNotRun {
-            let ev_ub = if inputs.a_ev[t] {
-                inputs.p_ev_max_kw
-            } else {
-                0.0
-            };
-            model = model.with(constraint!(
-                p_ev[t] >= inputs.p_ev_min_kw * z_ev_on[t]
-            ));
-            model = model.with(constraint!(p_ev[t] <= ev_ub * z_ev_on[t]));
+    }
+    if let (Some(ctx), Some(v)) = (&ev_ctx, &pool.ev) {
+        for c in ctx.constraints(v, n, dt_h) {
+            model = model.with(c);
+        }
+    }
+    if let (Some(ctx), Some(v)) = (&heat_ctx, &pool.heater) {
+        for c in ctx.constraints(v, n, dt_h) {
+            model = model.with(c);
         }
     }
 
-    // Terminal battery constraint: prevent end-of-horizon depletion
-    if bat_present {
-        model = model.with(constraint!(e_bat[n] >= bat_init));
-    }
-
-    // EV mode-conditional energy constraints
-    match inputs.ev_mode {
-        MilpLoadMode::MustRun => {
-            model = model.with(constraint!(
-                ev_energy_expr.clone() >= inputs.e_ev_core_kwh
-            ));
-            model = model.with(constraint!(
-                ev_energy_expr <= inputs.e_ev_core_kwh + e_ev_extra
-            ));
-        }
-        MilpLoadMode::MayRun => {
-            model = model.with(constraint!(
-                ev_energy_expr.clone() >= inputs.e_ev_core_kwh * z_ev_core
-            ));
-            model = model.with(constraint!(
-                ev_energy_expr <= inputs.e_ev_core_kwh * z_ev_core + e_ev_extra
-            ));
-            model = model.with(constraint!(
-                e_ev_extra <= inputs.e_ev_extra_max_kwh * z_ev_core
-            ));
-        }
-        MilpLoadMode::MustNotRun => {} // p_ev fixed to 0 via variable bounds
-    }
-
-    // Heater mode-conditional energy constraints
-    match inputs.heater_mode {
-        MilpLoadMode::MustRun => {
-            model = model.with(constraint!(heat_energy_expr >= inputs.e_heat_req_kwh));
-        }
-        MilpLoadMode::MayRun => {
-            model = model.with(constraint!(
-                heat_energy_expr >= inputs.e_heat_req_kwh * z_heat_ready
-            ));
-        }
-        MilpLoadMode::MustNotRun => {} // z_heat_mid/full fixed to 0 via variable bounds
-    }
-
-    // WM constraints omitted
-
-    // Startup / transition constraints
-    for i in 0..delta_ev.len() {
-        let t = i + 1;
-        model = model.with(constraint!(delta_ev[i] >= z_ev_on[t] - z_ev_on[t - 1]));
-    }
-    for i in 0..delta_bat_active.len() {
-        let t = i + 1;
-        model = model.with(constraint!(delta_bat_active[i] >= z_bat_active[t] - z_bat_active[t - 1]));
-    }
-    for i in 0..delta_ev_ramp.len() {
-        let t = i + 1;
-        model = model.with(constraint!(delta_ev_ramp[i] >= p_ev[t] - p_ev[t - 1]));
-        model = model.with(constraint!(delta_ev_ramp[i] >= p_ev[t - 1] - p_ev[t]));
-    }
-    for i in 0..delta_bat_ramp.len() {
-        let t = i + 1;
-        // net_bat[t] = p_bat_ch[t] - p_bat_dis[t]
-        model = model.with(constraint!(
-            delta_bat_ramp[i] >= (p_bat_ch[t] - p_bat_dis[t]) - (p_bat_ch[t - 1] - p_bat_dis[t - 1])
-        ));
-        model = model.with(constraint!(
-            delta_bat_ramp[i] >= (p_bat_ch[t - 1] - p_bat_dis[t - 1]) - (p_bat_ch[t] - p_bat_dis[t])
-        ));
-    }
-
-    // x_coexist linearisation: x[t] = p_bat_dis[t] · z_ev_on[t] (McCormick envelope)
-    for t in 0..n {
-        if let Some(x) = x_coexist[t] {
-            model = model.with(constraint!(x <= p_bat_dis[t]));
-            model = model.with(constraint!(x <= bat_dis_max * z_ev_on[t]));
-            model = model.with(constraint!(x >= p_bat_dis[t] - bat_dis_max * (1.0 - z_ev_on[t])));
-        }
-    }
-
-    // Shiftable load constraints: each must start exactly once
-    for (s, sl) in inputs.shiftable_loads.iter().enumerate() {
+    // Shiftable load constraints: each load must start exactly once
+    for sv in &pool.shiftable {
         let mut sum_y = Expression::from(0.0);
-        for ji in 0..sl.valid_start_slots.len() {
-            sum_y += y_shift[s][ji];
+        for &y in &sv.y_shift {
+            sum_y += y;
         }
         model = model.with(constraint!(sum_y == 1.0));
+    }
+
+    // ── Interaction constraints (e.g. McCormick envelope for bat-EV coexist) ──
+    for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
+        for c in interaction.constraints(&pool, iv, &global) {
+            model = model.with(c);
+        }
     }
 
     model = model.with_time_limit(60.0);
@@ -1071,48 +907,58 @@ fn solve_milp(
     let solution = model.solve()?;
 
     // ── Populate output ───────────────────────────────────────────────────────
-    let mut out = SolveOutput {
-        objective_eur: solution.eval(&objective),
-        p_imp_kw: vec![0.0; n],
-        p_exp_kw: vec![0.0; n],
-        p_bat_ch_kw: vec![0.0; n],
-        p_bat_dis_kw: vec![0.0; n],
-        p_ev_kw: vec![0.0; n],
-        z_heat_mid: vec![0.0; n],
-        z_heat_full: vec![0.0; n],
-        e_bat_kwh: vec![0.0; n + 1],
-        s_imp_viol_kw: vec![0.0; n],
-        s_exp_viol_kw: vec![0.0; n],
-        z_ev_on: vec![0.0; n],
-        e_ev_extra: solution.value(e_ev_extra),
-        z_ev_core: solution.value(z_ev_core),
-        z_heat_ready: solution.value(z_heat_ready),
-        p_shiftable_kw: vec![vec![0.0; n]; inputs.shiftable_loads.len()],
+    let (bat_ch_kw, bat_dis_kw, e_bat_kwh) = if let Some(v) = &pool.bat {
+        let sol = BatteryMilpContext::read_solution(&solution, v, n);
+        (sol.p_ch_kw, sol.p_dis_kw, sol.e_kwh)
+    } else {
+        (vec![0.0; n], vec![0.0; n], vec![0.0; n + 1])
     };
-    for t in 0..n {
-        out.p_imp_kw[t] = solution.value(p_imp[t]);
-        out.p_exp_kw[t] = solution.value(p_exp[t]);
-        out.p_bat_ch_kw[t] = solution.value(p_bat_ch[t]);
-        out.p_bat_dis_kw[t] = solution.value(p_bat_dis[t]);
-        out.p_ev_kw[t] = solution.value(p_ev[t]);
-        out.z_heat_mid[t] = solution.value(z_heat_mid[t]);
-        out.z_heat_full[t] = solution.value(z_heat_full[t]);
-        out.s_imp_viol_kw[t] = solution.value(s_imp_viol[t]);
-        out.s_exp_viol_kw[t] = solution.value(s_exp_viol[t]);
-        out.z_ev_on[t] = solution.value(z_ev_on[t]);
 
-        // Reconstruct per-load power at this step from binary start vars
-        for (s, sl) in inputs.shiftable_loads.iter().enumerate() {
-            for (ji, &j) in sl.valid_start_slots.iter().enumerate() {
-                if t >= j && t < j + sl.duration_slots {
-                    out.p_shiftable_kw[s][t] += sl.power_kw * solution.value(y_shift[s][ji]);
+    let (ev_kw_out, z_ev_on_out, e_ev_extra_out, z_ev_core_out) =
+        if let Some(v) = &pool.ev {
+            let sol = EvMilpContext::read_solution(&solution, v, n);
+            (sol.p_ev_kw, sol.z_ev_on, sol.e_ev_extra_kwh, sol.z_ev_core)
+        } else {
+            (vec![0.0; n], vec![0.0; n], 0.0, 0.0)
+        };
+
+    let (z_heat_mid_out, z_heat_full_out, z_heat_ready_out) =
+        if let Some(v) = &pool.heater {
+            let sol = HeaterMilpContext::read_solution(&solution, v, n);
+            (sol.z_heat_mid, sol.z_heat_full, sol.z_heat_ready)
+        } else {
+            (vec![0.0; n], vec![0.0; n], 0.0)
+        };
+
+    let mut p_shiftable_kw = vec![vec![0.0; n]; inputs.shiftable_loads.len()];
+    for (s, sv) in pool.shiftable.iter().enumerate() {
+        for t in 0..n {
+            for (ji, &j) in sv.valid_start_slots.iter().enumerate() {
+                if t >= j && t < j + sv.duration_slots {
+                    p_shiftable_kw[s][t] += sv.power_kw * solution.value(sv.y_shift[ji]);
                 }
             }
         }
     }
-    for t in 0..=n {
-        out.e_bat_kwh[t] = solution.value(e_bat[t]);
-    }
+
+    let out = SolveOutput {
+        objective_eur: solution.eval(&objective),
+        p_imp_kw: (0..n).map(|t| solution.value(p_imp[t])).collect(),
+        p_exp_kw: (0..n).map(|t| solution.value(p_exp[t])).collect(),
+        p_bat_ch_kw: bat_ch_kw,
+        p_bat_dis_kw: bat_dis_kw,
+        p_ev_kw: ev_kw_out,
+        z_heat_mid: z_heat_mid_out,
+        z_heat_full: z_heat_full_out,
+        e_bat_kwh,
+        s_imp_viol_kw: (0..n).map(|t| solution.value(s_imp_viol[t])).collect(),
+        s_exp_viol_kw: (0..n).map(|t| solution.value(s_exp_viol[t])).collect(),
+        z_ev_on: z_ev_on_out,
+        e_ev_extra: e_ev_extra_out,
+        z_ev_core: z_ev_core_out,
+        z_heat_ready: z_heat_ready_out,
+        p_shiftable_kw,
+    };
     Ok(out)
 }
 

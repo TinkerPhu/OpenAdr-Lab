@@ -872,16 +872,10 @@ pub(crate) fn spawn_planning(
             // Event-driven status report on PlanCycle (T050)
             {
                 let sim_snap = sim.lock().await.clone();
-                let events = state.events().await;
-                let program_id = events
-                    .iter()
-                    .find_map(|e| e.get("programID").and_then(|v| v.as_str()))
-                    .map(|s| s.to_string());
                 let report_opt = controller::reporter::build_status_report(
                     &plan_cycle_event,
                     &sim_snap,
                     &ven_name,
-                    program_id.as_deref(),
                     now,
                 );
                 if let Some(report) = report_opt {
