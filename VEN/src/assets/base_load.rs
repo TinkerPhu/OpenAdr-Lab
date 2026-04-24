@@ -163,3 +163,24 @@ impl Asset for BaseLoad {
         self.capability_inner(s)
     }
 }
+
+// ── BaseLoad MILP plugin types ────────────────────────────────────────────────
+
+/// Pre-computed baseline load contribution for one planning cycle.
+/// BaseLoad has no LP decision variables — it contributes a constant demand
+/// to the power balance at each slot.
+#[derive(Debug, Clone)]
+pub struct BaseLoadMilpContext {
+    /// Background consumption [kW] per slot (positive = import demand).
+    pub p_base_kw: Vec<f64>,
+}
+
+impl BaseLoad {
+    /// Build the BaseLoad MILP context: `n` slots of constant baseline_kw.
+    /// Callers may add per-slot `BaselineOverride` adjustments to the returned vec.
+    pub fn build_milp_context(&self, n: usize) -> BaseLoadMilpContext {
+        BaseLoadMilpContext {
+            p_base_kw: vec![self.baseline_kw; n],
+        }
+    }
+}
