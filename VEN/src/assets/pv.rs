@@ -280,6 +280,41 @@ impl Asset for PvInverter {
     }
 }
 
+// ── PV MILP plugin types ──────────────────────────────────────────────────────
+
+/// Pre-computed PV contribution for one planning cycle.
+/// PV has no LP decision variables — it contributes a constant forecast to the
+/// power balance at each slot. The planner reads `p_pv_kw[t]` directly.
+#[derive(Debug, Clone)]
+pub struct PvMilpContext {
+    /// Forecast generation [kW] per slot (positive = generating, sign: supply to bus).
+    pub p_pv_kw: Vec<f64>,
+}
+
+impl PvInverter {
+    /// Build the PV MILP context: forecast `n` slots starting at `now`,
+    /// each of width `step_s` seconds, using the sin model + decaying offset.
+    pub fn build_milp_context(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+        n: usize,
+        step_s: i64,
+    ) -> PvMilpContext {
+        let dt_h = step_s as f64 / 3_600.0;
+        let _ = dt_h; // retained for caller symmetry; value used indirectly via slot_t
+        let p_pv_kw: Vec<f64> = (0..n)
+            .map(|t| {
+                let slot_t = now + chrono::Duration::seconds(step_s * t as i64);
+                let natural = Self::natural_irradiance_at(slot_t);
+                let decayed_offset =
+                    self.irradiance_offset * (1.0 - self.pv_alpha).powf(t as f64);
+                (natural + decayed_offset).clamp(0.0, 1.0) * self.rated_kw
+            })
+            .collect();
+        PvMilpContext { p_pv_kw }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

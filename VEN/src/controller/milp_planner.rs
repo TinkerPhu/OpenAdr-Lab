@@ -153,8 +153,9 @@ struct MilpInputs {
     p_heat_full_kw: f64,
     /// Energy requirement from active packet [kWh]; 0.0 when absent
     e_heat_req_kwh: f64,
-    /// Comfort reward for meeting deadline (MayRun only) [€]
-    v_heat_eur: f64,
+    /// Soft penalty per slot for using the full power tier over mid tier [€/slot].
+    /// Small value that breaks ties in favour of mid tier without affecting tariff-driven decisions.
+    w_tier_penalty_eur: f64,
 
     // ── Shiftable loads (Phase B) ────────────────────────────────────────────
     /// MILP-ready shiftable load descriptors (one per ShiftableLoad that fits the horizon)
@@ -595,7 +596,7 @@ fn build_milp_inputs(
         p_heat_mid_kw: p_mid,
         p_heat_full_kw: p_full,
         e_heat_req_kwh: e_heat_req,
-        v_heat_eur: profile.planner.v_heat_eur,
+        w_tier_penalty_eur: profile.planner.w_tier_penalty_eur,
         shiftable_loads: milp_loads,
     }
 }
@@ -880,6 +881,10 @@ fn solve_milp(
         if let Some(x) = x_coexist[t] {
             objective += (weights.c_bat_ev_coexist_eur_kwh * dt_h) * x;
         }
+        // C_tier: soft preference for mid over full heater tier when tariffs are equal
+        if inputs.heater_mode != MilpLoadMode::MustNotRun {
+            objective += inputs.w_tier_penalty_eur * z_heat_full[t];
+        }
 
         // Deadline-gated energy accumulators
         if t <= t_ev_dlim {
@@ -897,9 +902,6 @@ fn solve_milp(
     }
     if inputs.ev_mode != MilpLoadMode::MustNotRun {
         objective += -(weights.w_services * inputs.v_ev_extra_eur_kwh) * e_ev_extra;
-    }
-    if inputs.heater_mode == MilpLoadMode::MayRun {
-        objective += -(weights.w_services * inputs.v_heat_eur) * z_heat_ready;
     }
     // WM reward omitted
 
@@ -2020,7 +2022,7 @@ mod tests {
             p_heat_mid_kw: 0.0,
             p_heat_full_kw: 0.0,
             e_heat_req_kwh: 0.0,
-            v_heat_eur: 0.0,
+            w_tier_penalty_eur: 0.0,
             shiftable_loads: vec![],
         }
     }

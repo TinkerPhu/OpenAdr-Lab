@@ -1,4 +1,5 @@
 use chrono::{Duration, Utc};
+use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, Solution, Variable};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -242,6 +243,222 @@ impl Asset for EvCharger {
             unreachable!()
         };
         self.capability_inner(s)
+    }
+}
+
+// ── EV MILP plugin types ──────────────────────────────────────────────────────
+
+/// Scheduling mode for the EV in the MILP model.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EvMilpMode {
+    /// Hard energy requirement — must be met within the deadline.
+    MustRun,
+    /// Soft energy target — controlled by a reward term in the objective.
+    MayRun,
+    /// EV absent, unplugged, or no charging session — power fixed to zero.
+    MustNotRun,
+}
+
+/// Pre-computed MILP parameters for one EV charger and planning cycle.
+#[derive(Debug, Clone)]
+pub struct EvMilpContext {
+    pub mode: EvMilpMode,
+    /// Per-step availability mask (false forces p_ev[t] = 0).
+    pub a_ev: Vec<bool>,
+    /// Last step index that counts toward the core energy sum (None = open horizon).
+    pub t_dead_step: Option<usize>,
+    /// Maximum charge power [kW].
+    pub p_max_kw: f64,
+    /// Semi-continuous minimum charge power [kW] (prevents trickle charging).
+    pub p_min_kw: f64,
+    /// Core energy requirement [kWh] from the active session.
+    pub e_core_kwh: f64,
+    /// Opportunistic headroom = battery_kwh × (1 − soc_target) [kWh].
+    pub e_extra_max_kwh: f64,
+    /// Reward per kWh of extra opportunistic charging above core [€/kWh].
+    pub v_extra_eur_kwh: f64,
+}
+
+/// Typed LP variable handles for one EV charger in the MILP model.
+#[derive(Debug, Clone)]
+pub struct EvMilpVars {
+    pub p_ev: Vec<Variable>,
+    /// Binary on/off flag per slot (respects availability mask).
+    pub z_ev_on: Vec<Variable>,
+    /// Binary: 1 when EV core target is met (MayRun only; fixed 0 otherwise).
+    pub z_ev_core: Variable,
+    /// Total extra energy above core requirement [kWh].
+    pub e_ev_extra: Variable,
+    /// Startup transition binaries (empty when startup penalty disabled).
+    pub delta_ev: Vec<Variable>,
+    /// Ramp variables |p_ev[t] − p_ev[t−1]| (empty when ramp penalty disabled).
+    pub delta_ev_ramp: Vec<Variable>,
+    /// Semi-continuous minimum charge power [kW] — cached for cross-asset interactions.
+    pub p_min_kw: f64,
+}
+
+/// Per-EV MILP solution readback.
+#[derive(Debug, Clone)]
+pub struct EvSolOutput {
+    pub p_ev_kw: Vec<f64>,
+    pub z_ev_on: Vec<f64>,
+    pub e_ev_extra_kwh: f64,
+    pub z_ev_core: f64,
+}
+
+impl EvCharger {
+    /// Declare all LP variables for this EV charger into `vars`.
+    pub fn declare_milp_vars(
+        &self,
+        ctx: &EvMilpContext,
+        n: usize,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
+        vars: &mut ProblemVariables,
+    ) -> EvMilpVars {
+        let p_ev = (0..n)
+            .map(|_| {
+                if ctx.mode == EvMilpMode::MustNotRun {
+                    vars.add(variable().min(0.0).max(0.0))
+                } else {
+                    vars.add(variable().min(0.0).max(ctx.p_max_kw))
+                }
+            })
+            .collect();
+        let z_ev_on = (0..n)
+            .map(|t| {
+                if ctx.mode == EvMilpMode::MustNotRun {
+                    vars.add(variable().min(0.0).max(0.0))
+                } else {
+                    let ub = if ctx.a_ev[t] { 1.0 } else { 0.0 };
+                    vars.add(variable().max(ub).binary())
+                }
+            })
+            .collect();
+        let z_ev_core = if ctx.mode == EvMilpMode::MayRun {
+            vars.add(variable().binary())
+        } else {
+            vars.add(variable().min(0.0).max(0.0))
+        };
+        let e_ev_extra = if ctx.mode == EvMilpMode::MustNotRun {
+            vars.add(variable().min(0.0).max(0.0))
+        } else {
+            vars.add(variable().min(0.0).max(ctx.e_extra_max_kwh))
+        };
+        let delta_ev = if ctx.mode != EvMilpMode::MustNotRun && n > 1 && c_startup_eur > 0.0 {
+            (0..n - 1).map(|_| vars.add(variable().binary())).collect()
+        } else {
+            vec![]
+        };
+        let delta_ev_ramp = if ctx.mode != EvMilpMode::MustNotRun && n > 1 && c_ramp_eur_kw > 0.0 {
+            (0..n - 1).map(|_| vars.add(variable().min(0.0))).collect()
+        } else {
+            vec![]
+        };
+        EvMilpVars { p_ev, z_ev_on, z_ev_core, e_ev_extra, delta_ev, delta_ev_ramp, p_min_kw: ctx.p_min_kw }
+    }
+
+    /// Build the energy accumulator expression up to the deadline step.
+    pub fn milp_energy_expr(
+        &self,
+        ctx: &EvMilpContext,
+        v: &EvMilpVars,
+        n: usize,
+        dt_h: f64,
+    ) -> Expression {
+        let t_dlim = ctx.t_dead_step.unwrap_or(n.saturating_sub(1));
+        let mut expr = Expression::from(0.0);
+        for t in 0..n {
+            if t <= t_dlim {
+                expr += dt_h * v.p_ev[t];
+            }
+        }
+        expr
+    }
+
+    /// Generate all MILP constraints for this EV charger.
+    pub fn milp_constraints(
+        &self,
+        ctx: &EvMilpContext,
+        v: &EvMilpVars,
+        n: usize,
+        dt_h: f64,
+    ) -> Vec<Constraint> {
+        let mut cs: Vec<Constraint> = Vec::new();
+        let ev_energy = self.milp_energy_expr(ctx, v, n, dt_h);
+
+        for t in 0..n {
+            if ctx.mode != EvMilpMode::MustNotRun {
+                let ev_ub = if ctx.a_ev[t] { ctx.p_max_kw } else { 0.0 };
+                cs.push(constraint!(v.p_ev[t] >= ctx.p_min_kw * v.z_ev_on[t]));
+                cs.push(constraint!(v.p_ev[t] <= ev_ub * v.z_ev_on[t]));
+            }
+        }
+        match ctx.mode {
+            EvMilpMode::MustRun => {
+                cs.push(constraint!(ev_energy.clone() >= ctx.e_core_kwh));
+                cs.push(constraint!(ev_energy <= ctx.e_core_kwh + v.e_ev_extra));
+            }
+            EvMilpMode::MayRun => {
+                cs.push(constraint!(ev_energy.clone() >= ctx.e_core_kwh * v.z_ev_core));
+                cs.push(constraint!(
+                    ev_energy <= ctx.e_core_kwh * v.z_ev_core + v.e_ev_extra
+                ));
+                cs.push(constraint!(v.e_ev_extra <= ctx.e_extra_max_kwh * v.z_ev_core));
+            }
+            EvMilpMode::MustNotRun => {}
+        }
+        for i in 0..v.delta_ev.len() {
+            let t = i + 1;
+            cs.push(constraint!(v.delta_ev[i] >= v.z_ev_on[t] - v.z_ev_on[t - 1]));
+        }
+        for i in 0..v.delta_ev_ramp.len() {
+            let t = i + 1;
+            cs.push(constraint!(v.delta_ev_ramp[i] >= v.p_ev[t] - v.p_ev[t - 1]));
+            cs.push(constraint!(v.delta_ev_ramp[i] >= v.p_ev[t - 1] - v.p_ev[t]));
+        }
+        cs
+    }
+
+    /// EV objective contribution: startup penalty + ramp penalty + extra-charge reward.
+    /// The reward sign is negative (subtracted from the minimised objective).
+    pub fn milp_objective(
+        &self,
+        ctx: &EvMilpContext,
+        v: &EvMilpVars,
+        startup_eur: f64,
+        ramp_eur_kw: f64,
+        w_services: f64,
+        n: usize,
+    ) -> Expression {
+        let mut obj = Expression::from(0.0);
+        for t in 1..n {
+            if let Some(&d) = v.delta_ev.get(t - 1) {
+                obj += startup_eur * d;
+            }
+            if let Some(&d) = v.delta_ev_ramp.get(t - 1) {
+                obj += ramp_eur_kw * d;
+            }
+        }
+        if ctx.mode != EvMilpMode::MustNotRun {
+            obj += -(w_services * ctx.v_extra_eur_kwh) * v.e_ev_extra;
+        }
+        obj
+    }
+
+    /// Read back the EV solution from the solved model.
+    pub fn read_milp_solution(
+        &self,
+        sol: &impl Solution,
+        v: &EvMilpVars,
+        n: usize,
+    ) -> EvSolOutput {
+        EvSolOutput {
+            p_ev_kw: (0..n).map(|t| sol.value(v.p_ev[t])).collect(),
+            z_ev_on: (0..n).map(|t| sol.value(v.z_ev_on[t])).collect(),
+            e_ev_extra_kwh: sol.value(v.e_ev_extra),
+            z_ev_core: sol.value(v.z_ev_core),
+        }
     }
 }
 

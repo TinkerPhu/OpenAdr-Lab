@@ -4,6 +4,7 @@ pub mod openadr_interface;
 // ── Planning & dispatch ───────────────────────────────────────────────────────
 pub mod dispatcher;
 pub mod envelope;
+pub mod milp_interactions;
 pub mod milp_planner;
 pub mod timeline;
 

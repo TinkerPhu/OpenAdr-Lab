@@ -444,11 +444,12 @@ pub struct PlannerConfig {
     /// Incentivises opportunistic top-up charging when tariffs are low.
     #[serde(default = "default_v_ev_extra")]
     pub v_ev_extra_eur_kwh: f64,
-    /// Comfort reward for meeting the heater energy deadline (€, MayRun mode only).
-    /// Acts as a comfort preference knob: higher → heat regardless of tariff.
-    /// At typical 3 kW heating the threshold is ~€1.50 / session — a reasonable default.
-    #[serde(default = "default_v_heat")]
-    pub v_heat_eur: f64,
+    /// Soft penalty per slot for using the heater's full power tier over mid tier [€/slot].
+    /// Breaks ties in favour of mid tier (e.g. 3 kW) over full tier (e.g. 6 kW) when tariff
+    /// savings are equal. Must be small relative to actual energy cost differences.
+    /// Default: 0.001 EUR/slot.
+    #[serde(default = "default_w_tier_penalty")]
+    pub w_tier_penalty_eur: f64,
     /// Optimization objective preset. Selects weight ratios for the MILP solver.
     /// Set to `custom` to use the individual weight fields above directly.
     #[serde(default)]
@@ -477,7 +478,7 @@ impl Default for PlannerConfig {
             pen_imp_eur_kwh: default_pen_imp(),
             pen_exp_eur_kwh: default_pen_exp(),
             v_ev_extra_eur_kwh: default_v_ev_extra(),
-            v_heat_eur: default_v_heat(),
+            w_tier_penalty_eur: default_w_tier_penalty(),
             objective: PlannerObjective::MinCost,
         }
     }
@@ -531,8 +532,8 @@ fn default_w_viol() -> f64 {
 fn default_v_ev_extra() -> f64 {
     0.10
 }
-fn default_v_heat() -> f64 {
-    1.50
+fn default_w_tier_penalty() -> f64 {
+    0.001
 }
 fn default_pen_imp() -> f64 {
     10_000.0
