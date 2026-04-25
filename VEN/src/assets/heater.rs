@@ -90,11 +90,16 @@ impl Heater {
         } else {
             self.max_kw
         };
-        // Thermostat overrides
+        // Thermostat overrides with hysteresis: once emergency fires at T_min,
+        // keep running until T_min + 3 °C to prevent rapid relay cycling.
+        // actual_power_kw from the previous tick is the implicit thermostat state.
+        const EMERGENCY_HYSTERESIS_C: f64 = 3.0;
+        let emergency_active = state.temperature_c <= self.temp_min_c
+            || (state.actual_power_kw >= self.max_kw
+                && state.temperature_c < self.temp_min_c + EMERGENCY_HYSTERESIS_C);
         let actual = if state.temperature_c >= self.temp_max_c {
             0.0
-        } else if state.temperature_c <= self.temp_min_c {
-            // Emergency: ignore setpoint and run at max to recover temperature.
+        } else if emergency_active {
             self.max_kw
         } else {
             tier
