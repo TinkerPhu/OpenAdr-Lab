@@ -136,42 +136,24 @@ impl Heater {
     }
 
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {
+        // heater_temp_c (T_tank one-shot reset) and heater_setpoint_c (kW power
+        // override) are handled by dedicated UI elements, not schema-driven controls.
         vec![
             ControlDescriptor {
-                key: "heater_setpoint_c".into(),
-                label: "Temperature Setpoint".into(),
-                kind: ControlKind::Slider,
-                min: Some(self.temp_min_c),
-                max: Some(self.temp_max_c),
-                unit: "°C".into(),
-                display_scale: None,
-            },
-            // One-shot reset: fires inject, backend clears after one tick.
-            // UI tracks live temp_c from sim after commit (like pv_irradiance).
-            ControlDescriptor {
-                key: "heater_temp_c".into(),
-                label: "Current Temperature".into(),
-                kind: ControlKind::Slider,
-                min: Some((self.temp_min_c - 10.0).max(0.0)),
-                max: Some(self.temp_max_c + 10.0),
-                unit: "°C".into(),
-                display_scale: None,
-            },
-            ControlDescriptor {
                 key: "heater_temp_min_c".into(),
-                label: "Hysteresis Min".into(),
+                label: "T_tank_min".into(),
                 kind: ControlKind::Slider,
-                min: Some(0.0),
-                max: Some(self.temp_max_c_profile - 1.0),
+                min: Some(18.0),
+                max: Some(94.0),
                 unit: "°C".into(),
                 display_scale: None,
             },
             ControlDescriptor {
                 key: "heater_temp_max_c".into(),
-                label: "Hysteresis Max".into(),
+                label: "T_tank_max".into(),
                 kind: ControlKind::Slider,
-                min: Some(self.temp_min_c_profile + 1.0),
-                max: Some(self.temp_max_c_profile + 10.0),
+                min: Some(19.0),
+                max: Some(95.0),
                 unit: "°C".into(),
                 display_scale: None,
             },
@@ -611,26 +593,27 @@ mod tests {
     // ── control_schema ────────────────────────────────────────────────────────
 
     #[test]
-    fn control_schema_returns_four_descriptors() {
+    fn control_schema_returns_two_descriptors() {
         let heater = default_heater();
         let schema = heater.control_schema();
         let keys: Vec<_> = schema.iter().map(|d| d.key.as_str()).collect();
-        assert!(keys.contains(&"heater_setpoint_c"), "missing heater_setpoint_c");
-        assert!(keys.contains(&"heater_temp_c"), "missing heater_temp_c");
         assert!(keys.contains(&"heater_temp_min_c"), "missing heater_temp_min_c");
         assert!(keys.contains(&"heater_temp_max_c"), "missing heater_temp_max_c");
-        assert_eq!(schema.len(), 4, "expected exactly 4 control descriptors");
+        assert_eq!(schema.len(), 2, "expected exactly 2 control descriptors");
     }
 
     #[test]
-    fn control_schema_heater_temp_c_range_covers_comfort_band() {
+    fn control_schema_t_tank_bounds_are_18_to_95() {
         let heater = default_heater();
         let schema = heater.control_schema();
-        let td = schema.iter().find(|d| d.key == "heater_temp_c").unwrap();
-        // min should be at most temp_min (may be clamped to 0)
-        assert!(td.min.unwrap() <= heater.temp_min_c);
-        // max should exceed temp_max
-        assert!(td.max.unwrap() > heater.temp_max_c);
+        let min_d = schema.iter().find(|d| d.key == "heater_temp_min_c").unwrap();
+        let max_d = schema.iter().find(|d| d.key == "heater_temp_max_c").unwrap();
+        assert_eq!(min_d.min.unwrap(), 18.0);
+        assert_eq!(min_d.max.unwrap(), 94.0);
+        assert_eq!(max_d.min.unwrap(), 19.0);
+        assert_eq!(max_d.max.unwrap(), 95.0);
+        assert_eq!(min_d.label, "T_tank_min");
+        assert_eq!(max_d.label, "T_tank_max");
     }
 
     // ── forecast ─────────────────────────────────────────────────────────────
