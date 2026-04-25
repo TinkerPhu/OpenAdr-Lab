@@ -132,7 +132,7 @@ export function AssetRightSection({
   // T_tank: live tank temperature for heater assets. Uses the existing
   // DECAY_CONTROLS["heater_temp_c"] path via getValue so the slider tracks
   // the live sim value at rest and the drag value while moving.
-  const tankC = getValue("heater_temp_c");
+  const tankC = assetId === "heater" ? getValue("heater_temp_c") : null;
   const hasTank = typeof tankC === "number";
 
   return (
