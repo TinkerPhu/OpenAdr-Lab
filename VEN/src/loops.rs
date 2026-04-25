@@ -876,6 +876,7 @@ pub(crate) fn spawn_planning(
                     &plan_cycle_event,
                     &sim_snap,
                     &ven_name,
+                    None, // no single program_id in planning loop context
                     now,
                 );
                 if let Some(report) = report_opt {

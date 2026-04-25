@@ -281,38 +281,52 @@ impl Asset for Heater {
 /// Scheduling mode for the heater in the MILP model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HeaterMilpMode {
-    /// Hard energy requirement — must be met within the deadline.
+    /// Hard energy target — E[t_dead] ≥ e_target_kwh must hold at the deadline.
     MustRun,
-    /// Opportunistic — scheduled when cheap/PV-surplus; rewarded for meeting energy target.
+    /// Opportunistic — scheduled by tariffs; soft deadline reward via z_heat_ready.
     MayRun,
-    /// Heater absent or tank already at temp_max — power fixed to zero.
+    /// Heater absent — all power variables fixed to zero.
     MustNotRun,
 }
 
 /// Pre-computed MILP parameters for one heater and planning cycle.
+/// Uses a per-step tank energy state trajectory (E[t]) instead of a global energy budget.
 #[derive(Debug, Clone)]
 pub struct HeaterMilpContext {
     pub mode: HeaterMilpMode,
-    /// Last step index that counts toward energy sum (None = open horizon).
+    /// Deadline step index (None = no hard deadline; autonomous MayRun path).
     pub t_dead_step: Option<usize>,
-    /// Mid power level [kW] (optional lower tier; defaults to max_kw / 2).
+    /// Mid power level [kW].
     pub p_mid_kw: f64,
     /// Full power level [kW] = max_kw.
     pub p_full_kw: f64,
-    /// Energy requirement [kWh] (from HeaterTarget or autonomous maintenance).
-    pub e_req_kwh: f64,
+    /// Initial tank energy above T_min [kWh]. May be negative when tank is below T_min.
+    pub e_init_kwh: f64,
+    /// Maximum usable tank energy above T_min [kWh] = (T_max − T_min) × thermal_mass.
+    pub e_max_kwh: f64,
+    /// Constant per-step thermal demand [kW]: draw_kw + k_loss × (T_mid − ambient).
+    pub q_dem_kw: f64,
+    /// Target tank energy at deadline [kWh above T_min]. = e_max_kwh in autonomous mode.
+    pub e_target_kwh: f64,
+    /// Relay switching penalty [EUR/switch event] added to the objective.
+    pub lambda_sw_eur: f64,
 }
 
 /// Typed LP variable handles for one heater in the MILP model.
-/// The heater uses binary variables for each power tier (mid and full).
 #[derive(Debug, Clone)]
 pub struct HeaterMilpVars {
-    /// Binary: 1 = mid power tier active at slot t.
+    /// Binary: 1 = mid power tier active at slot t. len = n.
     pub z_heat_mid: Vec<Variable>,
-    /// Binary: 1 = full power tier active at slot t.
+    /// Binary: 1 = full power tier active at slot t. len = n.
     pub z_heat_full: Vec<Variable>,
-    /// Binary: 1 when heater energy deadline is met (MayRun only; fixed 0 otherwise).
+    /// Binary: 1 when deadline is met (MayRun only; fixed 0 in MustRun / autonomous).
     pub z_heat_ready: Variable,
+    /// Continuous: tank energy above T_min [kWh] at slot t. Domain [−e_max, e_max]. len = n.
+    pub e_tank: Vec<Variable>,
+    /// Continuous ≥ 0: below-minimum soft-violation slack [kWh] at slot t. len = n.
+    pub s_low: Vec<Variable>,
+    /// Continuous ≥ 0: switching indicator per step (sw[0] fixed at 0). len = n.
+    pub sw: Vec<Variable>,
 }
 
 /// Per-heater MILP solution readback.
@@ -321,48 +335,60 @@ pub struct HeaterSolOutput {
     pub z_heat_mid: Vec<f64>,
     pub z_heat_full: Vec<f64>,
     pub z_heat_ready: f64,
+    /// Tank energy above T_min [kWh] per slot. len = n.
+    pub e_tank_kwh: Vec<f64>,
+    /// Below-min slack [kWh] per slot. len = n.
+    pub s_low_kwh: Vec<f64>,
+    /// Switching cost contribution per step. len = n.
+    pub sw: Vec<f64>,
 }
 
 impl HeaterMilpContext {
-    /// Declare all LP variables for this heater. Context-side canonical implementation.
+    /// Declare all LP variables for this heater.
     pub fn declare_vars(&self, n: usize, vars: &mut ProblemVariables) -> HeaterMilpVars {
+        let must_not = self.mode == HeaterMilpMode::MustNotRun;
+
         let z_heat_mid = (0..n)
             .map(|_| {
-                if self.mode == HeaterMilpMode::MustNotRun {
-                    vars.add(variable().min(0.0).max(0.0))
-                } else {
-                    vars.add(variable().binary())
-                }
+                if must_not { vars.add(variable().min(0.0).max(0.0)) }
+                else { vars.add(variable().binary()) }
             })
             .collect();
         let z_heat_full = (0..n)
             .map(|_| {
-                if self.mode == HeaterMilpMode::MustNotRun {
-                    vars.add(variable().min(0.0).max(0.0))
-                } else {
-                    vars.add(variable().binary())
-                }
+                if must_not { vars.add(variable().min(0.0).max(0.0)) }
+                else { vars.add(variable().binary()) }
             })
             .collect();
-        let z_heat_ready = if self.mode == HeaterMilpMode::MayRun {
+
+        // z_heat_ready: binary reward flag for MayRun with deadline; fixed 0 otherwise.
+        let z_heat_ready = if self.mode == HeaterMilpMode::MayRun && self.t_dead_step.is_some() {
             vars.add(variable().binary())
         } else {
             vars.add(variable().min(0.0).max(0.0))
         };
-        HeaterMilpVars { z_heat_mid, z_heat_full, z_heat_ready }
-    }
 
-    /// Build the energy accumulator expression up to the deadline step.
-    pub fn energy_expr(&self, v: &HeaterMilpVars, n: usize, dt_h: f64) -> Expression {
-        let t_dlim = self.t_dead_step.unwrap_or(n.saturating_sub(1));
-        let mut expr = Expression::from(0.0);
-        for t in 0..n {
-            if t <= t_dlim {
-                expr += (dt_h * self.p_mid_kw) * v.z_heat_mid[t];
-                expr += (dt_h * self.p_full_kw) * v.z_heat_full[t];
-            }
-        }
-        expr
+        // e_tank[t]: continuous tank energy above T_min [kWh], domain [−e_max, e_max].
+        let e_lo = -self.e_max_kwh.max(1.0); // allow negative (below T_min)
+        let e_hi = self.e_max_kwh.max(1.0);
+        let e_tank = (0..n)
+            .map(|_| vars.add(variable().min(e_lo).max(e_hi)))
+            .collect();
+
+        // s_low[t]: non-negative below-min slack.
+        let s_low = (0..n)
+            .map(|_| vars.add(variable().min(0.0)))
+            .collect();
+
+        // sw[0]: fixed at 0 (no previous slot); sw[t>0]: continuous ≥ 0.
+        let sw = (0..n)
+            .map(|t| {
+                if t == 0 { vars.add(variable().min(0.0).max(0.0)) }
+                else { vars.add(variable().min(0.0)) }
+            })
+            .collect();
+
+        HeaterMilpVars { z_heat_mid, z_heat_full, z_heat_ready, e_tank, s_low, sw }
     }
 
     /// Instantaneous heater power expression at slot `t` (for power balance).
@@ -370,48 +396,122 @@ impl HeaterMilpContext {
         self.p_mid_kw * v.z_heat_mid[t] + self.p_full_kw * v.z_heat_full[t]
     }
 
-    /// Generate all MILP constraints for this heater. Context-side canonical implementation.
+    /// Generate all MILP constraints for this heater.
     pub fn constraints(&self, v: &HeaterMilpVars, n: usize, dt_h: f64) -> Vec<Constraint> {
         let mut cs: Vec<Constraint> = Vec::new();
-        let heat_energy = self.energy_expr(v, n, dt_h);
 
+        // C0: mutual exclusion — mid and full are alternative modes.
         for t in 0..n {
             cs.push(constraint!(v.z_heat_mid[t] + v.z_heat_full[t] <= 1.0));
         }
-        match self.mode {
-            HeaterMilpMode::MustRun => {
-                cs.push(constraint!(heat_energy >= self.e_req_kwh));
-            }
-            HeaterMilpMode::MayRun => {
-                cs.push(constraint!(heat_energy >= self.e_req_kwh * v.z_heat_ready));
-            }
-            HeaterMilpMode::MustNotRun => {}
+
+        if self.mode == HeaterMilpMode::MustNotRun {
+            return cs; // all power vars already fixed to 0; no trajectory needed
         }
+
+        // C1: pin initial tank energy.
+        let e_init = self.e_init_kwh;
+        cs.push(constraint!(v.e_tank[0] >= e_init));
+        cs.push(constraint!(v.e_tank[0] <= e_init));
+
+        // C2: tank dynamics — E[t+1] = E[t] + (P_heat[t] − q_dem) × dt_h.
+        // Expressed as two inequalities (== is not directly supported).
+        let net_const = -self.q_dem_kw * dt_h;
+        for t in 0..(n.saturating_sub(1)) {
+            let p_mid_dt = self.p_mid_kw * dt_h;
+            let p_full_dt = self.p_full_kw * dt_h;
+            // LHS = e_tank[t+1] − e_tank[t] − p_mid_dt×z_mid[t] − p_full_dt×z_full[t]
+            let lhs_ge = Expression::from(v.e_tank[t + 1])
+                - Expression::from(v.e_tank[t])
+                - p_mid_dt * v.z_heat_mid[t]
+                - p_full_dt * v.z_heat_full[t];
+            cs.push(constraint!(lhs_ge >= net_const));
+            let lhs_le = Expression::from(v.e_tank[t + 1])
+                - Expression::from(v.e_tank[t])
+                - p_mid_dt * v.z_heat_mid[t]
+                - p_full_dt * v.z_heat_full[t];
+            cs.push(constraint!(lhs_le <= net_const));
+        }
+
+        // C3: upper bound — no overheating.
+        for t in 0..n {
+            cs.push(constraint!(v.e_tank[t] <= self.e_max_kwh));
+        }
+
+        // C4: soft lower bound — penalise going below T_min.
+        for t in 0..n {
+            cs.push(constraint!(v.e_tank[t] + v.s_low[t] >= 0.0));
+        }
+
+        // C5: switching indicators — sw[t] ≥ |z_x[t] − z_x[t−1]| for each binary.
+        for t in 1..n {
+            cs.push(constraint!(v.sw[t] >= v.z_heat_mid[t] - v.z_heat_mid[t - 1]));
+            cs.push(constraint!(v.sw[t] >= v.z_heat_mid[t - 1] - v.z_heat_mid[t]));
+            cs.push(constraint!(v.sw[t] >= v.z_heat_full[t] - v.z_heat_full[t - 1]));
+            cs.push(constraint!(v.sw[t] >= v.z_heat_full[t - 1] - v.z_heat_full[t]));
+        }
+
+        // C6: deadline constraint.
+        if let Some(td) = self.t_dead_step {
+            let td = td.min(n.saturating_sub(1));
+            match self.mode {
+                HeaterMilpMode::MustRun => {
+                    cs.push(constraint!(v.e_tank[td] >= self.e_target_kwh));
+                }
+                HeaterMilpMode::MayRun => {
+                    // e_tank[td] ≥ e_target × z_heat_ready (linear: e_target is a scalar)
+                    let rhs = self.e_target_kwh * v.z_heat_ready;
+                    cs.push(constraint!(v.e_tank[td] >= rhs));
+                }
+                HeaterMilpMode::MustNotRun => {}
+            }
+        }
+
         cs
     }
 
-    /// Heater objective contribution. Context-side canonical implementation.
-    pub fn objective(&self, v: &HeaterMilpVars, w_tier_penalty_eur: f64, n: usize) -> Expression {
+    /// Heater objective contribution (penalty terms only; energy cost enters via power balance).
+    pub fn objective(
+        &self,
+        v: &HeaterMilpVars,
+        w_tier_penalty_eur: f64,
+        m_low_eur_kwh: f64,
+        n: usize,
+    ) -> Expression {
         let mut obj = Expression::from(0.0);
+        if self.mode == HeaterMilpMode::MustNotRun {
+            return obj;
+        }
         for t in 0..n {
-            if self.mode != HeaterMilpMode::MustNotRun {
-                obj += w_tier_penalty_eur * v.z_heat_full[t];
-            }
+            obj += w_tier_penalty_eur * v.z_heat_full[t]; // prefer mid over full when equal cost
+            obj += m_low_eur_kwh * v.s_low[t];            // penalise below-min violations
+            obj += self.lambda_sw_eur * v.sw[t];           // penalise relay switches
         }
         obj
     }
 
-    /// Read back the heater solution. Associated function (no `self` needed).
+    /// Read back the heater solution from the solved model.
     pub fn read_solution(sol: &impl Solution, v: &HeaterMilpVars, n: usize) -> HeaterSolOutput {
         HeaterSolOutput {
             z_heat_mid: (0..n).map(|t| sol.value(v.z_heat_mid[t])).collect(),
             z_heat_full: (0..n).map(|t| sol.value(v.z_heat_full[t])).collect(),
             z_heat_ready: sol.value(v.z_heat_ready),
+            e_tank_kwh: (0..n).map(|t| sol.value(v.e_tank[t])).collect(),
+            s_low_kwh: (0..n).map(|t| sol.value(v.s_low[t])).collect(),
+            sw: (0..n).map(|t| sol.value(v.sw[t])).collect(),
         }
     }
 }
 
 impl Heater {
+    /// Constant per-step thermal demand forecast [kW].
+    /// Uses the midpoint of the comfort band as the representative tank temperature.
+    /// `Q_dem = draw_kw + k_loss × (T_mid − ambient_temp_c)`
+    pub fn forecast_demand_kw(&self, ambient_temp_c: f64) -> f64 {
+        let t_mid = (self.temp_min_c + self.temp_max_c) / 2.0;
+        (self.draw_kw + self.k_loss_kw_per_c * (t_mid - ambient_temp_c)).max(0.0)
+    }
+
     /// Declare all LP variables for this heater into `vars`. Delegates to `HeaterMilpContext::declare_vars`.
     pub fn declare_milp_vars(
         &self,
@@ -420,17 +520,6 @@ impl Heater {
         vars: &mut ProblemVariables,
     ) -> HeaterMilpVars {
         ctx.declare_vars(n, vars)
-    }
-
-    /// Build the energy accumulator expression up to the deadline step. Delegates to `HeaterMilpContext::energy_expr`.
-    pub fn milp_energy_expr(
-        &self,
-        ctx: &HeaterMilpContext,
-        v: &HeaterMilpVars,
-        n: usize,
-        dt_h: f64,
-    ) -> Expression {
-        ctx.energy_expr(v, n, dt_h)
     }
 
     /// Instantaneous heater power expression at slot `t`. Delegates to `HeaterMilpContext::power_expr`.
@@ -460,9 +549,10 @@ impl Heater {
         ctx: &HeaterMilpContext,
         v: &HeaterMilpVars,
         w_tier_penalty_eur: f64,
+        m_low_eur_kwh: f64,
         n: usize,
     ) -> Expression {
-        ctx.objective(v, w_tier_penalty_eur, n)
+        ctx.objective(v, w_tier_penalty_eur, m_low_eur_kwh, n)
     }
 
     /// Read back the heater solution from the solved model. Delegates to `HeaterMilpContext::read_solution`.
@@ -680,5 +770,82 @@ mod tests {
         let state = state_at(80.1, 3.0);
         let (_ns, power) = heater.step_inner(&state, 3.0, Duration::seconds(1));
         assert_eq!(power, 0.0, "must be forced off above temp_max");
+    }
+
+    // ── HeaterMilpContext trajectory model unit tests ─────────────────────────
+
+    #[test]
+    fn forecast_demand_kw_equals_draw_plus_loss_at_midpoint() {
+        // forecast_demand_kw(ambient) = draw_kw + k_loss × (T_mid − ambient)
+        // T_mid = (40+80)/2 = 60; ambient = 20; draw = 0.5; k_loss = 0.003
+        // expected: 0.5 + 0.003 × (60 − 20) = 0.62 kW
+        let heater = hot_water_heater();
+        let q_dem = heater.forecast_demand_kw(20.0);
+        assert!((q_dem - 0.62).abs() < 1e-6, "q_dem={q_dem:.4} != 0.62");
+    }
+
+    #[test]
+    fn forecast_demand_kw_clamped_at_zero_when_ambient_above_tank() {
+        // If ambient > T_mid, loss is negative; result must not go negative.
+        let heater = hot_water_heater(); // draw=0.5, k_loss=0.003, T_mid=60
+        let q_dem = heater.forecast_demand_kw(80.0); // ambient well above T_mid
+        // draw 0.5 + 0.003×(60-80) = 0.5 - 0.06 = 0.44 → positive; still ≥ 0
+        assert!(q_dem >= 0.0, "q_dem must be non-negative, got {q_dem}");
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 4"]
+    fn heater_milp_context_declares_e_tank_s_low_sw() {
+        // declare_vars() must produce e_tank, s_low, sw vectors each of length n.
+        todo!("implement after HeaterMilpContext redesign")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 4"]
+    fn heater_milp_sw0_fixed_at_zero() {
+        // sw[0] must be declared with min=0.0 max=0.0 (no switching at t=0).
+        todo!("implement after HeaterMilpContext redesign")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 4"]
+    fn heater_milp_must_not_run_all_vars_zero() {
+        // MustNotRun: z_heat_mid, z_heat_full fixed at 0; e_tank, s_low, sw ≥ 0.
+        todo!("implement after HeaterMilpContext redesign")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 4"]
+    fn heater_milp_constraints_initial_energy_pin() {
+        // constraints() must include two inequalities pinning e_tank[0] = e_init_kwh.
+        todo!("implement after HeaterMilpContext redesign")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 4"]
+    fn heater_milp_constraints_dynamics_count() {
+        // For n=4: C2 contributes 2×3 = 6 dynamics inequalities.
+        todo!("implement after HeaterMilpContext redesign")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 4"]
+    fn heater_milp_constraints_upper_bound() {
+        // C3: n upper-bound constraints e_tank[t] ≤ e_max_kwh.
+        todo!("implement after HeaterMilpContext redesign")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 4"]
+    fn heater_milp_constraints_soft_low() {
+        // C4: n soft-lower constraints e_tank[t] + s_low[t] ≥ 0.
+        todo!("implement after HeaterMilpContext redesign")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 4"]
+    fn heater_milp_constraints_switching_four_per_step() {
+        // C5: 4×(n−1) switching constraints for n > 1.
+        todo!("implement after HeaterMilpContext redesign")
     }
 }

@@ -151,16 +151,23 @@ struct MilpInputs {
 
     // ── Heater (MustNotRun when heater absent) ────────────────────────────────
     heater_mode: MilpLoadMode,
-    /// Last step index that counts toward the heater energy sum. None = open horizon.
+    /// Deadline step index. None = no hard deadline (autonomous MayRun path).
     t_heat_dead_step: Option<usize>,
     /// Mid power level [kW] = mid_kw.unwrap_or(max_kw / 2.0)
     p_heat_mid_kw: f64,
     /// Full power level [kW] = max_kw
     p_heat_full_kw: f64,
-    /// Energy requirement from active packet [kWh]; 0.0 when absent
-    e_heat_req_kwh: f64,
+    /// Initial tank energy above T_min [kWh]. May be negative when tank is below T_min.
+    e_heat_init_kwh: f64,
+    /// Maximum usable tank energy above T_min [kWh] = (T_max − T_min) × thermal_mass.
+    e_heat_max_kwh: f64,
+    /// Constant per-step thermal demand [kW]: draw_kw + k_loss × (T_mid − ambient).
+    q_heat_dem_kw: f64,
+    /// Target tank energy at deadline [kWh above T_min]. = e_heat_max_kwh in autonomous mode.
+    e_heat_target_kwh: f64,
+    /// Relay switching penalty [EUR/switch event].
+    lambda_heat_sw_eur: f64,
     /// Soft penalty per slot for using the full power tier over mid tier [€/slot].
-    /// Small value that breaks ties in favour of mid tier without affecting tariff-driven decisions.
     w_tier_penalty_eur: f64,
 
     // ── Shiftable loads (Phase B) ────────────────────────────────────────────
@@ -466,7 +473,7 @@ fn build_milp_inputs(
         };
 
     // ── Heater ────────────────────────────────────────────────────────────────
-    let (heater_mode, t_heat_dead, p_mid, p_full, e_heat_req) =
+    let (heater_mode, t_heat_dead, p_mid, p_full, e_heat_init, e_heat_max, q_heat_dem, e_heat_target, lambda_sw) =
         if let Some(heat_cfg) = profile.heater_config() {
             let current_temp = assets
                 .heater_state()
@@ -476,45 +483,42 @@ fn build_milp_inputs(
                 .heater_config()
                 .map(|h| h.thermal_mass_kwh_per_c)
                 .unwrap_or_else(|| heat_cfg.effective_thermal_mass());
+            let ambient = assets
+                .heater_config()
+                .map(|h| h.ambient_temp_c)
+                .unwrap_or(10.0);
             let mid = heat_cfg.mid_kw.unwrap_or(heat_cfg.max_kw / 2.0);
 
+            // Tank energy state parameters.
+            let e_init = (current_temp - heat_cfg.temp_min_c) * thermal_mass;
+            let e_max = ((heat_cfg.temp_max_c - heat_cfg.temp_min_c) * thermal_mass).max(0.0);
+            let q_dem = assets
+                .heater_config()
+                .map(|h| h.forecast_demand_kw(ambient))
+                .unwrap_or_else(|| {
+                    let t_mid = (heat_cfg.temp_min_c + heat_cfg.temp_max_c) / 2.0;
+                    (heat_cfg.effective_draw_kw()
+                        + heat_cfg.effective_k_loss() * (t_mid - ambient))
+                        .max(0.0)
+                });
+            let lambda_sw = heat_cfg.effective_switching_penalty();
+
             if let Some(target) = heater_target {
-                // ── Device-centric path: HeaterTarget present ─────────────
-                let req_kwh = ((target.target_temp_c - current_temp) * thermal_mass).max(0.0);
-                let mode = if req_kwh > 0.0 {
-                    MilpLoadMode::MustRun
-                } else {
-                    MilpLoadMode::MustNotRun
-                };
+                // ── Device-centric path: HeaterTarget present → MustRun ──────
+                let e_target = ((target.target_temp_c - heat_cfg.temp_min_c) * thermal_mass)
+                    .clamp(0.0, e_max);
+                let mode = MilpLoadMode::MustRun;
                 let deadline_step = Some(deadline_to_step(target.ready_by, now, step_s, n));
-                (mode, deadline_step, mid, heat_cfg.max_kw, req_kwh)
+                (mode, deadline_step, mid, heat_cfg.max_kw, e_init, e_max, q_dem, e_target, lambda_sw)
             } else {
-                // ── Autonomous maintenance mode (no HeaterTarget) ─────────
-                // Treat the heater like a battery: MustRun when below the comfort
-                // floor (emergency), MayRun when below the comfort ceiling
-                // (opportunistic heating during cheap / PV-surplus slots),
-                // MustNotRun when already at max (tank full).
-                let energy_to_max =
-                    ((heat_cfg.temp_max_c - current_temp) * thermal_mass).max(0.0);
-                let energy_to_min =
-                    ((heat_cfg.temp_min_c - current_temp) * thermal_mass).max(0.0);
-
-                let (mode, e_req) = if energy_to_min > 0.0 {
-                    // Below comfort floor: must heat immediately.
-                    (MilpLoadMode::MustRun, energy_to_max)
-                } else if energy_to_max > 0.0 {
-                    // In comfort band: schedule opportunistically across horizon.
-                    (MilpLoadMode::MayRun, energy_to_max)
-                } else {
-                    // At or above temp_max: no heating needed.
-                    (MilpLoadMode::MustNotRun, 0.0)
-                };
-
-                // No hard deadline — distribute heating freely across horizon.
-                (mode, None, mid, heat_cfg.max_kw, e_req)
+                // ── Autonomous maintenance mode (no HeaterTarget) → MayRun ───
+                // The trajectory model + soft-violation penalty handles emergency
+                // recovery automatically; no hard MustRun deadline needed.
+                let e_target = e_max;
+                (MilpLoadMode::MayRun, None, mid, heat_cfg.max_kw, e_init, e_max, q_dem, e_target, lambda_sw)
             }
         } else {
-            (MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0)
+            (MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         };
 
     // ── Baseline override: additive per-slot kW adjustments ─────────────────
@@ -601,7 +605,11 @@ fn build_milp_inputs(
         t_heat_dead_step: t_heat_dead,
         p_heat_mid_kw: p_mid,
         p_heat_full_kw: p_full,
-        e_heat_req_kwh: e_heat_req,
+        e_heat_init_kwh: e_heat_init,
+        e_heat_max_kwh: e_heat_max,
+        q_heat_dem_kw: q_heat_dem,
+        e_heat_target_kwh: e_heat_target,
+        lambda_heat_sw_eur: lambda_sw,
         w_tier_penalty_eur: profile.planner.w_tier_penalty_eur,
         shiftable_loads: milp_loads,
     }
@@ -642,6 +650,8 @@ struct SolveOutput {
     z_ev_core: f64,
     /// 1.0 when heater energy deadline is met (MayRun only); 0.0 otherwise
     z_heat_ready: f64,
+    /// Tank energy above T_min [kWh] per slot; empty when heater absent
+    e_heat_tank_kwh: Vec<f64>,
     /// Per-shiftable-load power schedule [kW]; outer len = num loads, inner len = n
     p_shiftable_kw: Vec<Vec<f64>>,
 }
@@ -703,7 +713,11 @@ fn solve_milp(
             t_dead_step: inputs.t_heat_dead_step,
             p_mid_kw: inputs.p_heat_mid_kw,
             p_full_kw: inputs.p_heat_full_kw,
-            e_req_kwh: inputs.e_heat_req_kwh,
+            e_init_kwh: inputs.e_heat_init_kwh,
+            e_max_kwh: inputs.e_heat_max_kwh,
+            q_dem_kw: inputs.q_heat_dem_kw,
+            e_target_kwh: inputs.e_heat_target_kwh,
+            lambda_sw_eur: inputs.lambda_heat_sw_eur,
         })
     } else {
         None
@@ -819,9 +833,10 @@ fn solve_milp(
         objective += ctx.objective(v, weights.c_ev_startup_eur, weights.c_ev_ramp_eur_kw, weights.w_services, n);
     }
 
-    // Heater objective (tier preference penalty)
+    // Heater objective (tier penalty + soft violation + switching penalty)
+    const M_LOW_EUR_PER_KWH: f64 = 10.0;
     if let (Some(ctx), Some(v)) = (&heat_ctx, &pool.heater) {
-        objective += ctx.objective(v, inputs.w_tier_penalty_eur, n);
+        objective += ctx.objective(v, inputs.w_tier_penalty_eur, M_LOW_EUR_PER_KWH, n);
     }
 
     // Interaction objectives (e.g. bat-EV coexistence penalty)
@@ -922,12 +937,12 @@ fn solve_milp(
             (vec![0.0; n], vec![0.0; n], 0.0, 0.0)
         };
 
-    let (z_heat_mid_out, z_heat_full_out, z_heat_ready_out) =
+    let (z_heat_mid_out, z_heat_full_out, z_heat_ready_out, e_heat_tank_out) =
         if let Some(v) = &pool.heater {
             let sol = HeaterMilpContext::read_solution(&solution, v, n);
-            (sol.z_heat_mid, sol.z_heat_full, sol.z_heat_ready)
+            (sol.z_heat_mid, sol.z_heat_full, sol.z_heat_ready, sol.e_tank_kwh)
         } else {
-            (vec![0.0; n], vec![0.0; n], 0.0)
+            (vec![0.0; n], vec![0.0; n], 0.0, vec![])
         };
 
     let mut p_shiftable_kw = vec![vec![0.0; n]; inputs.shiftable_loads.len()];
@@ -957,6 +972,7 @@ fn solve_milp(
         e_ev_extra: e_ev_extra_out,
         z_ev_core: z_ev_core_out,
         z_heat_ready: z_heat_ready_out,
+        e_heat_tank_kwh: e_heat_tank_out,
         p_shiftable_kw,
     };
     Ok(out)
@@ -1013,7 +1029,7 @@ fn build_plan_envelopes(
     // Heater envelope
     if let Some(target) = heater_target {
         if let Some(heat_cfg) = profile.heater_config() {
-            let energy_needed_kwh = inputs.e_heat_req_kwh;
+            let energy_needed_kwh = inputs.e_heat_target_kwh;
             if energy_needed_kwh > 0.0 {
                 let window_start = now;
                 let window_end = target.ready_by;
@@ -1867,7 +1883,11 @@ mod tests {
             t_heat_dead_step: None,
             p_heat_mid_kw: 0.0,
             p_heat_full_kw: 0.0,
-            e_heat_req_kwh: 0.0,
+            e_heat_init_kwh: 0.0,
+            e_heat_max_kwh: 0.0,
+            q_heat_dem_kw: 0.0,
+            e_heat_target_kwh: 0.0,
+            lambda_heat_sw_eur: 0.0,
             w_tier_penalty_eur: 0.0,
             shiftable_loads: vec![],
         }
@@ -2532,5 +2552,98 @@ mod tests {
             plan.soc_trajectory_kwh.is_empty() || plan.soc_trajectory_kwh.iter().all(|&v| v < 1e-3),
             "no battery → soc_trajectory_kwh empty or all-zero"
         );
+    }
+
+    // ── Heater trajectory model unit tests ────────────────────────────────────
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn heater_inputs_e_init_positive_above_min() {
+        // T_current=60, T_min=40, thermal_mass=0.233 → e_init ≈ 4.65 kWh
+        todo!("implement after build_milp_inputs() heater block update")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn heater_inputs_e_init_negative_below_min() {
+        // T_current=35, T_min=40 → e_init < 0
+        todo!("implement after build_milp_inputs() heater block update")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn heater_inputs_e_max_formula() {
+        // e_max = (T_max − T_min) × thermal_mass = (80−40) × 0.233 ≈ 9.32 kWh
+        todo!("implement after build_milp_inputs() heater block update")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn heater_inputs_q_dem_scalar() {
+        // q_dem = draw + k_loss × ((T_min+T_max)/2 − ambient)
+        todo!("implement after build_milp_inputs() heater block update")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn heater_inputs_e_target_from_heater_target() {
+        // e_target = (target_temp_c − T_min) × thermal_mass, clamped to [0, e_max]
+        todo!("implement after build_milp_inputs() heater block update")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn heater_inputs_autonomous_e_target_is_e_max() {
+        // Without HeaterTarget, e_heat_target_kwh == e_heat_max_kwh
+        todo!("implement after build_milp_inputs() heater block update")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn heater_inputs_autonomous_mode_is_may_run() {
+        // Without HeaterTarget, heater_mode == MilpLoadMode::MayRun
+        todo!("implement after build_milp_inputs() heater block update")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn heater_inputs_switching_penalty_defaults() {
+        // With no switching_penalty_eur in profile → lambda_heat_sw_eur == 0.01
+        todo!("implement after build_milp_inputs() heater block update")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn solve_heater_dynamics_respected() {
+        // After solve: e_tank[t+1] ≈ e_tank[t] + (p_heat[t] − q_dem) × dt_h ± 1e-3
+        todo!("implement after solve_milp() heater trajectory integration")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn solve_heater_must_run_meets_e_target() {
+        // MustRun with deadline: e_tank[t_dead] ≥ e_target − 1e-3
+        todo!("implement after solve_milp() heater trajectory integration")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn solve_heater_soft_low_positive_when_below_min() {
+        // e_init < 0: s_low[0] > 0 in solution
+        todo!("implement after solve_milp() heater trajectory integration")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn solve_heater_switching_reduces_with_penalty() {
+        // High lambda_sw → fewer mode changes than lambda_sw = 0
+        todo!("implement after solve_milp() heater trajectory integration")
+    }
+
+    #[test]
+    #[ignore = "implemented in Step 5"]
+    fn solve_heater_upper_bound_not_exceeded() {
+        // e_tank[t] ≤ e_max + 1e-6 for all t in solution
+        todo!("implement after solve_milp() heater trajectory integration")
     }
 }
