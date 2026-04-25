@@ -129,6 +129,12 @@ export function AssetRightSection({
     return null;
   }
 
+  // T_tank: live tank temperature for heater assets. Uses the existing
+  // DECAY_CONTROLS["heater_temp_c"] path via getValue so the slider tracks
+  // the live sim value at rest and the drag value while moving.
+  const tankC = getValue("heater_temp_c");
+  const hasTank = typeof tankC === "number";
+
   return (
     <Box
       data-testid={`right-section-${assetId}`}
@@ -155,6 +161,29 @@ export function AssetRightSection({
               onChangeCommitted={handleSocCommit}
               valueLabelDisplay="auto"
               valueLabelFormat={(v) => `${v}%`}
+            />
+          </Box>
+        )}
+
+        {/* T_tank lever — heater assets only. Tooltip shows full precision for
+            observing thermal dynamics. One-shot inject (Behaviour A): slider
+            follows live sim temp_c after commit via DECAY_CONTROLS. */}
+        {hasTank && (
+          <Box>
+            <Typography variant="caption">
+              T_tank: {(tankC as number).toFixed(2)} °C
+            </Typography>
+            <Slider
+              size="small"
+              min={18}
+              max={95}
+              step={0.1}
+              value={tankC as number}
+              data-testid={`ctrl-${assetId}-t-tank`}
+              onChange={(_e, v) => handleChange("heater_temp_c", v as number)}
+              onChangeCommitted={(_e, v) => handleCommit("heater_temp_c", v as number)}
+              valueLabelDisplay="auto"
+              valueLabelFormat={(v) => `${v.toFixed(6)} °C`}
             />
           </Box>
         )}
