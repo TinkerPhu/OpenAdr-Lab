@@ -10,6 +10,7 @@ assets:
     volume_l: 200.0
     k_loss_kw_per_c: 0.003
     draw_kw: 0.5
+    switching_penalty_eur: 0.50
   - type: pv
     id: pv
     rated_kw: 12.0
