@@ -13,6 +13,11 @@ use crate::profile::HeaterConfig;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Heater {
     pub max_kw: f64,
+    /// Mid-tier power level [kW]. Hardware relay step: 0 / mid_kw / max_kw are the only
+    /// valid states. Setpoints are quantized to the nearest tier in step_inner().
+    /// Default 0.0 means "use max_kw / 2.0" — handles old persisted JSON without this field.
+    #[serde(default)]
+    pub mid_kw: f64,
     /// Forced-on floor power at temp_min_c (0.0 if none).
     pub min_power_kw: f64,
     /// Tank hysteresis lower bound. Overridable at runtime via SimInjectState.
@@ -45,6 +50,7 @@ impl Heater {
     pub fn from_config(cfg: &HeaterConfig) -> Self {
         Self {
             max_kw: cfg.max_kw,
+            mid_kw: cfg.mid_kw.unwrap_or(cfg.max_kw / 2.0),
             min_power_kw: 0.0,
             temp_min_c: cfg.temp_min_c,
             temp_max_c: cfg.temp_max_c,
@@ -73,7 +79,17 @@ impl Heater {
         dt: Duration,
     ) -> (HeaterState, f64) {
         let dt_h = dt.num_milliseconds() as f64 / 3_600_000.0;
-        let clamped = setpoint_kw.clamp(0.0, self.max_kw);
+        // Quantize to the nearest valid hardware tier: 0 / mid_kw / max_kw.
+        // The heater has two physical relays; intermediate values are impossible.
+        // mid_kw = 0.0 means "not set" (old persisted JSON); fall back to max_kw / 2.0.
+        let mid = if self.mid_kw > 0.0 { self.mid_kw } else { self.max_kw / 2.0 };
+        let tier = if setpoint_kw < mid / 2.0 {
+            0.0
+        } else if setpoint_kw < (mid + self.max_kw) / 2.0 {
+            mid
+        } else {
+            self.max_kw
+        };
         // Thermostat overrides
         let actual = if state.temperature_c >= self.temp_max_c {
             0.0
@@ -81,7 +97,7 @@ impl Heater {
             // Emergency: ignore setpoint and run at max to recover temperature.
             self.max_kw
         } else {
-            clamped
+            tier
         };
         // Thermal model: Newton cooling + simulated draw
         let loss_kw = (state.temperature_c - self.ambient_temp_c) * self.k_loss_kw_per_c;
@@ -112,7 +128,8 @@ impl Heater {
     }
 
     pub fn default_setpoint(&self) -> f64 {
-        self.max_kw * 0.5
+        // Off between plan slots; thermostat emergency and plan allocations turn it on.
+        0.0
     }
 
     pub fn state_values(&self, state: &HeaterState) -> HashMap<String, f64> {
@@ -178,9 +195,9 @@ impl Heater {
         }
         let now = Utc::now();
         let end = now + timespan;
-        // Use the design setpoint (max_kw * 0.5) so the forecast reflects the
-        // thermostat's long-run equilibrium (~1.3 kW at nominal ambient), not the
-        // instantaneous actual_power_kw which is 0 whenever the thermostat forces off.
+        // Simulate uncontrolled thermostat operation (no plan overlay, setpoint = 0).
+        // The thermostat emergency fires when temp ≤ T_min, so the forecast still
+        // captures long-run thermal cycling rather than a flat-zero line.
         let setpoint = self.default_setpoint();
         let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
 
@@ -555,6 +572,7 @@ mod tests {
     fn default_heater() -> Heater {
         Heater {
             max_kw: 2.5,
+            mid_kw: 1.25,
             min_power_kw: 0.0,
             temp_min_c: 20.0,
             temp_max_c: 23.0,
@@ -570,7 +588,8 @@ mod tests {
     /// Hot water tank fixture: 200 L, 40–80 °C comfort band, low heat loss, 0.5 kW draw.
     fn hot_water_heater() -> Heater {
         Heater {
-            max_kw: 3.0,
+            max_kw: 6.0,
+            mid_kw: 3.0,
             min_power_kw: 0.0,
             temp_min_c: 40.0,
             temp_max_c: 80.0,
@@ -618,14 +637,12 @@ mod tests {
 
     // ── forecast ─────────────────────────────────────────────────────────────
 
-    /// When the heater is at temp_max (thermostat forced off), actual_power_kw=0.
-    /// The OLD code would use 0 as the setpoint, producing ~0 kW average forecast.
-    /// The NEW code uses default_setpoint() = max_kw * 0.5 = 1.25 kW, giving a
-    /// realistic oscillating forecast converging to the thermal equilibrium.
+    /// When the heater is at temp_max (thermostat forced off), the forecast simulates
+    /// thermostat-only operation (setpoint=0). The tank cools to T_min, the emergency
+    /// fires at max_kw, and the cycle repeats — average power ≈ heat loss at T_min.
     #[test]
     fn forecast_at_temp_max_gives_non_zero_average_power() {
         let heater = default_heater();
-        // Heater at ceiling: old code → forecast setpoint = 0 → ~0 kW average.
         let state = state_at(23.0, 0.0);
         let ts = heater.forecast(&state, Duration::hours(2));
 
@@ -634,7 +651,7 @@ mod tests {
         assert!(n > 0.0, "forecast produced no samples");
         let mean: f64 = ts.samples.iter().map(|(_, kw)| kw).sum::<f64>() / n;
 
-        // Thermal equilibrium at ambient=10°C, temp_max=23°C → loss = 1.3 kW.
+        // Thermostat cycles near T_min=20°C → heat loss ≈ 0.1×(20-10) = 1.0 kW.
         // Allow ±0.5 kW tolerance for simulation step error.
         assert!(
             mean > 0.5,

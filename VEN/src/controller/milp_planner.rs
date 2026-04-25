@@ -487,16 +487,35 @@ fn build_milp_inputs(
                 .heater_config()
                 .map(|h| h.ambient_temp_c)
                 .unwrap_or(10.0);
-            let mid = heat_cfg.mid_kw.unwrap_or(heat_cfg.max_kw / 2.0);
+            // Use live sim values so the MILP plan matches what the sim can actually deliver.
+            // profile heat_cfg is only the fallback when the sim has no heater entry yet.
+            let live_max_kw = assets
+                .heater_config()
+                .map(|h| h.max_kw)
+                .unwrap_or(heat_cfg.max_kw);
+            let live_t_min = assets
+                .heater_config()
+                .map(|h| h.temp_min_c)
+                .unwrap_or(heat_cfg.temp_min_c);
+            let live_t_max = assets
+                .heater_config()
+                .map(|h| h.temp_max_c)
+                .unwrap_or(heat_cfg.temp_max_c);
+            // Read mid_kw from live sim (Heater struct, now persisted); fall back to profile.
+            let live_mid_kw = assets
+                .heater_config()
+                .map(|h| if h.mid_kw > 0.0 { h.mid_kw } else { h.max_kw / 2.0 })
+                .unwrap_or_else(|| heat_cfg.mid_kw.unwrap_or(live_max_kw / 2.0));
+            let mid = live_mid_kw;
 
-            // Tank energy state parameters.
-            let e_init = (current_temp - heat_cfg.temp_min_c) * thermal_mass;
-            let e_max = ((heat_cfg.temp_max_c - heat_cfg.temp_min_c) * thermal_mass).max(0.0);
+            // Tank energy state parameters derived from live sim bounds.
+            let e_init = (current_temp - live_t_min) * thermal_mass;
+            let e_max = ((live_t_max - live_t_min) * thermal_mass).max(0.0);
             let q_dem = assets
                 .heater_config()
                 .map(|h| h.forecast_demand_kw(ambient))
                 .unwrap_or_else(|| {
-                    let t_mid = (heat_cfg.temp_min_c + heat_cfg.temp_max_c) / 2.0;
+                    let t_mid = (live_t_min + live_t_max) / 2.0;
                     (heat_cfg.effective_draw_kw()
                         + heat_cfg.effective_k_loss() * (t_mid - ambient))
                         .max(0.0)
@@ -505,17 +524,17 @@ fn build_milp_inputs(
 
             if let Some(target) = heater_target {
                 // ── Device-centric path: HeaterTarget present → MustRun ──────
-                let e_target = ((target.target_temp_c - heat_cfg.temp_min_c) * thermal_mass)
+                let e_target = ((target.target_temp_c - live_t_min) * thermal_mass)
                     .clamp(0.0, e_max);
                 let mode = MilpLoadMode::MustRun;
                 let deadline_step = Some(deadline_to_step(target.ready_by, now, step_s, n));
-                (mode, deadline_step, mid, heat_cfg.max_kw, e_init, e_max, q_dem, e_target, lambda_sw)
+                (mode, deadline_step, mid, live_max_kw, e_init, e_max, q_dem, e_target, lambda_sw)
             } else {
                 // ── Autonomous maintenance mode (no HeaterTarget) → MayRun ───
                 // The trajectory model + soft-violation penalty handles emergency
                 // recovery automatically; no hard MustRun deadline needed.
                 let e_target = e_max;
-                (MilpLoadMode::MayRun, None, mid, heat_cfg.max_kw, e_init, e_max, q_dem, e_target, lambda_sw)
+                (MilpLoadMode::MayRun, None, mid, live_max_kw, e_init, e_max, q_dem, e_target, lambda_sw)
             }
         } else {
             (MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -1042,7 +1061,7 @@ fn build_plan_envelopes(
                     asset_id: heat_cfg.id.clone(),
                     energy_needed_kwh,
                     power_min_kw: 0.0,
-                    power_max_kw: heat_cfg.max_kw,
+                    power_max_kw: inputs.p_heat_full_kw,
                     window_start,
                     window_end,
                     slots_available,
