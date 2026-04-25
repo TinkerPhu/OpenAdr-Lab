@@ -144,6 +144,11 @@ pub struct HeaterConfig {
     /// Defaults to 0.0 (no draw — backward compatible).
     #[serde(default)]
     pub draw_kw: Option<f64>,
+    /// Relay switching penalty coefficient [EUR/switch event] used in the MILP objective.
+    /// Penalises each mode change to reduce relay wear.
+    /// Defaults to 0.01 EUR/switch when absent.
+    #[serde(default)]
+    pub switching_penalty_eur: Option<f64>,
 }
 
 impl HeaterConfig {
@@ -165,6 +170,11 @@ impl HeaterConfig {
     /// Effective constant hot water draw (kW thermal).
     pub fn effective_draw_kw(&self) -> f64 {
         self.draw_kw.unwrap_or(0.0)
+    }
+
+    /// Relay switching penalty coefficient [EUR/switch event] for the MILP objective.
+    pub fn effective_switching_penalty(&self) -> f64 {
+        self.switching_penalty_eur.unwrap_or(0.01)
     }
 }
 
@@ -664,5 +674,61 @@ impl Profile {
             grid: GridConfig::default(),
             packets: vec![],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn heater_config_switching_penalty_default() {
+        let cfg = HeaterConfig {
+            id: "heater".into(),
+            max_kw: 3.0,
+            temp_initial_c: 20.0,
+            temp_min_c: 18.0,
+            temp_max_c: 23.0,
+            mid_kw: None,
+            volume_l: None,
+            thermal_mass_kwh_per_c: None,
+            k_loss_kw_per_c: None,
+            draw_kw: None,
+            switching_penalty_eur: None,
+        };
+        assert!((cfg.effective_switching_penalty() - 0.01).abs() < 1e-9);
+    }
+
+    #[test]
+    fn heater_config_switching_penalty_explicit() {
+        let cfg = HeaterConfig {
+            id: "heater".into(),
+            max_kw: 3.0,
+            temp_initial_c: 20.0,
+            temp_min_c: 18.0,
+            temp_max_c: 23.0,
+            mid_kw: None,
+            volume_l: None,
+            thermal_mass_kwh_per_c: None,
+            k_loss_kw_per_c: None,
+            draw_kw: None,
+            switching_penalty_eur: Some(0.05),
+        };
+        assert!((cfg.effective_switching_penalty() - 0.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn heater_config_yaml_without_penalty_field() {
+        let yaml = r#"
+type: heater
+id: heater
+max_kw: 3.0
+temp_initial_c: 20.0
+temp_min_c: 18.0
+temp_max_c: 23.0
+"#;
+        let cfg: HeaterConfig = serde_yaml::from_str(yaml).expect("should parse");
+        assert!(cfg.switching_penalty_eur.is_none());
+        assert!((cfg.effective_switching_penalty() - 0.01).abs() < 1e-9);
     }
 }
