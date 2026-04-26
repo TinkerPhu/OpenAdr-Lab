@@ -1109,8 +1109,8 @@ fn add_model_constraints<S: SolverModel>(
 }
 
 /// Extract a `SolveOutput` from a solved `good_lp::Solution`.
-fn read_solve_output(
-    solution: &dyn Solution,
+fn read_solve_output<S: Solution>(
+    solution: &S,
     objective: &Expression,
     pool: &MilpVarPool,
     inputs: &MilpInputs,
