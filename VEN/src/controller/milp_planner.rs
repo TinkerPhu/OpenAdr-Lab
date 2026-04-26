@@ -1536,6 +1536,7 @@ mod tests {
                     thermal_mass_kwh_per_c: None,
                     k_loss_kw_per_c: None,
                     draw_kw: None,
+                    switching_penalty_eur: None,
                 }),
                 AssetProfile::Pv(PvConfig {
                     id: "pv".into(),
@@ -1607,6 +1608,7 @@ mod tests {
                 thermal_mass_kwh_per_c: None,
                 k_loss_kw_per_c: None,
                 draw_kw: None,
+                switching_penalty_eur: None,
             })],
             simulator: SimulatorConfig::default(),
             planner: PlannerConfig {
