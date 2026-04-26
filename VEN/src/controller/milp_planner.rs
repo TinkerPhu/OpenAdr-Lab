@@ -385,21 +385,33 @@ fn build_milp_inputs(
         eff_ch,
         eff_dis,
     ) = if let Some(bat_cfg) = profile.battery_config() {
-        let live_soc = assets
-            .battery_state()
-            .map(|s| s.soc)
-            .unwrap_or(bat_cfg.initial_soc);
-        let cap = bat_cfg.capacity_kwh;
-        let eff = bat_cfg.round_trip_efficiency.sqrt();
+        let ctx = match assets.find_asset("battery") {
+            Some((entry, AssetConfig::Battery(b))) => BatteryMilpContext::from_state(&entry.state, b),
+            _ => {
+                // No live battery in sim (e.g. cleared in test): fall back to profile initial_soc
+                let cap = bat_cfg.capacity_kwh;
+                let eff = bat_cfg.round_trip_efficiency.sqrt();
+                BatteryMilpContext {
+                    e_nom_kwh: cap,
+                    e_init_kwh: bat_cfg.initial_soc * cap,
+                    e_min_kwh: bat_cfg.min_soc * cap,
+                    e_max_kwh: cap,
+                    p_ch_max_kw: bat_cfg.max_charge_kw,
+                    p_dis_max_kw: bat_cfg.max_discharge_kw,
+                    eff_ch: eff,
+                    eff_dis: eff,
+                }
+            }
+        };
         (
-            Some(cap),
-            Some(live_soc * cap),
-            Some(bat_cfg.min_soc * cap),
-            Some(cap),
-            Some(bat_cfg.max_charge_kw),
-            Some(bat_cfg.max_discharge_kw),
-            Some(eff),
-            Some(eff),
+            Some(ctx.e_nom_kwh),
+            Some(ctx.e_init_kwh),
+            Some(ctx.e_min_kwh),
+            Some(ctx.e_max_kwh),
+            Some(ctx.p_ch_max_kw),
+            Some(ctx.p_dis_max_kw),
+            Some(ctx.eff_ch),
+            Some(ctx.eff_dis),
         )
     } else {
         (None, None, None, None, None, None, None, None)
@@ -408,134 +420,96 @@ fn build_milp_inputs(
     // ── EV ────────────────────────────────────────────────────────────────────
     let (a_ev, ev_mode, t_ev_dead, p_ev_max, p_ev_min, e_ev_core, e_ev_extra, v_ev_extra) =
         if let Some(ev_cfg) = profile.ev_config() {
-            let plugged = assets.ev_state().map(|s| s.plugged).unwrap_or(false);
-
-            if !plugged {
-                // EV present in profile but currently unplugged — cannot schedule
-                (
-                    vec![false; n],
-                    MilpLoadMode::MustNotRun,
-                    None,
-                    ev_cfg.max_charge_kw,
-                    ev_cfg.min_charge_kw,
-                    0.0,
-                    ev_cfg.battery_kwh * (1.0 - ev_cfg.soc_target),
-                    profile.planner.v_ev_extra_eur_kwh,
-                )
-            } else if let Some(session) = ev_session {
-                // ── Device-centric path: EvSession present ────────────────
-                let current_soc = assets.ev_state().map(|s| s.soc).unwrap_or(0.0);
-                let core_kwh = ((session.target_soc - current_soc) * ev_cfg.battery_kwh).max(0.0);
-                let mode = if session.soft_deadline {
-                    MilpLoadMode::MayRun
-                } else {
-                    MilpLoadMode::MustRun
-                };
-                let deadline_step = Some(deadline_to_step(session.departure_time, now, step_s, n));
-                let mask: Vec<bool> = (0..n)
-                    .map(|t| deadline_step.map(|d| t <= d).unwrap_or(true))
-                    .collect();
-                (
-                    mask,
-                    mode,
-                    deadline_step,
-                    ev_cfg.max_charge_kw,
-                    ev_cfg.min_charge_kw,
-                    core_kwh,
-                    ev_cfg.battery_kwh * (1.0 - session.target_soc),
-                    profile.planner.v_ev_extra_eur_kwh,
-                )
-            } else {
-                // No EvSession: EV is plugged but no charging intent
-                (
-                    vec![true; n],
-                    MilpLoadMode::MustNotRun,
-                    None,
-                    ev_cfg.max_charge_kw,
-                    ev_cfg.min_charge_kw,
-                    0.0,
-                    ev_cfg.battery_kwh * (1.0 - ev_cfg.soc_target),
-                    profile.planner.v_ev_extra_eur_kwh,
-                )
-            }
+            let ctx = match assets.find_asset("ev") {
+                Some((entry, AssetConfig::Ev(e))) => EvMilpContext::from_state(
+                    &entry.state, e, n, step_s, now, ev_session,
+                    ev_cfg.min_charge_kw, profile.planner.v_ev_extra_eur_kwh,
+                ),
+                _ => EvMilpContext {
+                    mode: EvMilpMode::MustNotRun,
+                    a_ev: vec![false; n],
+                    t_dead_step: None,
+                    p_max_kw: ev_cfg.max_charge_kw,
+                    p_min_kw: ev_cfg.min_charge_kw,
+                    e_core_kwh: 0.0,
+                    e_extra_max_kwh: ev_cfg.battery_kwh * (1.0 - ev_cfg.soc_target),
+                    v_extra_eur_kwh: profile.planner.v_ev_extra_eur_kwh,
+                },
+            };
+            let ev_mode = match ctx.mode {
+                EvMilpMode::MustRun => MilpLoadMode::MustRun,
+                EvMilpMode::MayRun => MilpLoadMode::MayRun,
+                EvMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
+            };
+            (ctx.a_ev, ev_mode, ctx.t_dead_step, ctx.p_max_kw, ctx.p_min_kw,
+             ctx.e_core_kwh, ctx.e_extra_max_kwh, ctx.v_extra_eur_kwh)
         } else {
             // No EV asset in profile
-            (
-                vec![false; n],
-                MilpLoadMode::MustNotRun,
-                None,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-            )
+            (vec![false; n], MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0, 0.0, 0.0)
         };
 
     // ── Heater ────────────────────────────────────────────────────────────────
     let (heater_mode, t_heat_dead, p_mid, p_full, e_heat_init, e_heat_max, q_heat_dem, e_heat_target, lambda_sw) =
         if let Some(heat_cfg) = profile.heater_config() {
-            let current_temp = assets
-                .heater_state()
-                .map(|s| s.temperature_c)
-                .unwrap_or(heat_cfg.temp_initial_c);
-            let thermal_mass = assets
-                .heater_config()
-                .map(|h| h.thermal_mass_kwh_per_c)
-                .unwrap_or_else(|| heat_cfg.effective_thermal_mass());
-            let ambient = assets
-                .heater_config()
-                .map(|h| h.ambient_temp_c)
-                .unwrap_or(10.0);
-            // Use live sim values so the MILP plan matches what the sim can actually deliver.
-            // profile heat_cfg is only the fallback when the sim has no heater entry yet.
-            let live_max_kw = assets
-                .heater_config()
-                .map(|h| h.max_kw)
-                .unwrap_or(heat_cfg.max_kw);
-            let live_t_min = assets
-                .heater_config()
-                .map(|h| h.temp_min_c)
-                .unwrap_or(heat_cfg.temp_min_c);
-            let live_t_max = assets
-                .heater_config()
-                .map(|h| h.temp_max_c)
-                .unwrap_or(heat_cfg.temp_max_c);
-            // Read mid_kw from live sim (Heater struct, now persisted); fall back to profile.
-            let live_mid_kw = assets
-                .heater_config()
-                .map(|h| if h.mid_kw > 0.0 { h.mid_kw } else { h.max_kw / 2.0 })
-                .unwrap_or_else(|| heat_cfg.mid_kw.unwrap_or(live_max_kw / 2.0));
-            let mid = live_mid_kw;
-
-            // Tank energy state parameters derived from live sim bounds.
-            let e_init = (current_temp - live_t_min) * thermal_mass;
-            let e_max = ((live_t_max - live_t_min) * thermal_mass).max(0.0);
-            let q_dem = assets
-                .heater_config()
-                .map(|h| h.forecast_demand_kw(ambient))
-                .unwrap_or_else(|| {
+            let lambda = heat_cfg.effective_switching_penalty();
+            let ctx = match assets.find_asset("heater") {
+                Some((entry, AssetConfig::Heater(h))) => HeaterMilpContext::from_state(
+                    &entry.state, h, n, step_s, now, heater_target, lambda,
+                ),
+                _ => {
+                    // No live heater in sim: reconstruct from profile config
+                    let thermal_mass = heat_cfg.effective_thermal_mass();
+                    let ambient = 10.0;
+                    let live_t_min = heat_cfg.temp_min_c;
+                    let live_t_max = heat_cfg.temp_max_c;
+                    let live_max_kw = heat_cfg.max_kw;
+                    let live_mid_kw = heat_cfg.mid_kw.unwrap_or(live_max_kw / 2.0);
+                    let current_temp = heat_cfg.temp_initial_c;
+                    let e_init = (current_temp - live_t_min) * thermal_mass;
+                    let e_max = ((live_t_max - live_t_min) * thermal_mass).max(0.0);
                     let t_mid = (live_t_min + live_t_max) / 2.0;
-                    (heat_cfg.effective_draw_kw()
+                    let q_dem = (heat_cfg.effective_draw_kw()
                         + heat_cfg.effective_k_loss() * (t_mid - ambient))
-                        .max(0.0)
-                });
-            let lambda_sw = heat_cfg.effective_switching_penalty();
-
-            if let Some(target) = heater_target {
-                // ── Device-centric path: HeaterTarget present → MustRun ──────
-                let e_target = ((target.target_temp_c - live_t_min) * thermal_mass)
-                    .clamp(0.0, e_max);
-                let mode = MilpLoadMode::MustRun;
-                let deadline_step = Some(deadline_to_step(target.ready_by, now, step_s, n));
-                (mode, deadline_step, mid, live_max_kw, e_init, e_max, q_dem, e_target, lambda_sw)
-            } else {
-                // ── Autonomous maintenance mode (no HeaterTarget) → MayRun ───
-                // The trajectory model + soft-violation penalty handles emergency
-                // recovery automatically; no hard MustRun deadline needed.
-                let e_target = e_max;
-                (MilpLoadMode::MayRun, None, mid, live_max_kw, e_init, e_max, q_dem, e_target, lambda_sw)
-            }
+                        .max(0.0);
+                    if let Some(target) = heater_target {
+                        let e_target = ((target.target_temp_c - live_t_min) * thermal_mass)
+                            .clamp(0.0, e_max);
+                        let secs = (target.ready_by - now).num_seconds();
+                        let t_dead = (secs / step_s as i64)
+                            .clamp(0, (n.saturating_sub(1)) as i64) as usize;
+                        HeaterMilpContext {
+                            mode: HeaterMilpMode::MustRun,
+                            t_dead_step: Some(t_dead),
+                            p_mid_kw: live_mid_kw,
+                            p_full_kw: live_max_kw,
+                            e_init_kwh: e_init,
+                            e_max_kwh: e_max,
+                            q_dem_kw: q_dem,
+                            e_target_kwh: e_target,
+                            lambda_sw_eur: lambda,
+                        }
+                    } else {
+                        HeaterMilpContext {
+                            mode: HeaterMilpMode::MayRun,
+                            t_dead_step: None,
+                            p_mid_kw: live_mid_kw,
+                            p_full_kw: live_max_kw,
+                            e_init_kwh: e_init,
+                            e_max_kwh: e_max,
+                            q_dem_kw: q_dem,
+                            e_target_kwh: e_max,
+                            lambda_sw_eur: lambda,
+                        }
+                    }
+                }
+            };
+            let heater_mode = match ctx.mode {
+                HeaterMilpMode::MustRun => MilpLoadMode::MustRun,
+                HeaterMilpMode::MayRun => MilpLoadMode::MayRun,
+                HeaterMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
+            };
+            (heater_mode, ctx.t_dead_step, ctx.p_mid_kw, ctx.p_full_kw,
+             ctx.e_init_kwh, ctx.e_max_kwh, ctx.q_dem_kw, ctx.e_target_kwh, ctx.lambda_sw_eur)
         } else {
             (MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         };
@@ -1487,6 +1461,7 @@ mod tests {
     use super::*;
 
     use crate::assets::AssetState;
+    use crate::entities::device_session::HeaterTarget;
     use crate::entities::tariff_snapshot::TariffSnapshot;
     use crate::profile::{
         AssetProfile, BaseLoadConfig, BatteryConfig, EvConfig, GridConfig, HeaterConfig,
@@ -1600,6 +1575,50 @@ mod tests {
             if let AssetState::Battery(ref mut bat) = entry.state {
                 bat.soc = soc;
             }
+        }
+    }
+
+    /// Set heater temperature on the heater in an existing SimState.
+    fn set_heater_temp(sim: &mut SimState, temp_c: f64) {
+        for entry in &mut sim.assets {
+            if let AssetState::Heater(ref mut h) = entry.state {
+                h.temperature_c = temp_c;
+            }
+        }
+    }
+
+    /// Build a Profile with only a heater (no battery, EV, PV, base_load).
+    fn make_heater_only_profile(
+        volume_l: Option<f64>,
+        temp_min_c: f64,
+        temp_max_c: f64,
+        temp_initial_c: f64,
+    ) -> Profile {
+        Profile {
+            devices: Default::default(),
+            assets: vec![AssetProfile::Heater(HeaterConfig {
+                id: "heater".into(),
+                max_kw: 3.0,
+                temp_initial_c,
+                temp_min_c,
+                temp_max_c,
+                mid_kw: None,
+                volume_l,
+                thermal_mass_kwh_per_c: None,
+                k_loss_kw_per_c: None,
+                draw_kw: None,
+            })],
+            simulator: SimulatorConfig::default(),
+            planner: PlannerConfig {
+                plan_step_s: 300,
+                plan_horizon_h: 2,
+                ..PlannerConfig::default()
+            },
+            grid: GridConfig {
+                max_import_kw: 25.0,
+                max_export_kw: 10.0,
+            },
+            packets: vec![],
         }
     }
 
@@ -2576,59 +2595,105 @@ mod tests {
     // ── Heater trajectory model unit tests ────────────────────────────────────
 
     #[test]
-    #[ignore = "implemented in Step 5"]
     fn heater_inputs_e_init_positive_above_min() {
-        // T_current=60, T_min=40, thermal_mass=0.233 → e_init ≈ 4.65 kWh
-        todo!("implement after build_milp_inputs() heater block update")
+        // volume_l=200 → thermal_mass = 200×4.186/3600 ≈ 0.23256 kWh/°C
+        // T_current=60, T_min=40 → e_init = (60−40) × 0.23256 ≈ 4.65 kWh
+        let now = fixed_now();
+        let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
+        let sim = SimState::from_profile(&profile);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        let expected = 20.0 * 200.0 * 4.186 / 3600.0;
+        assert!((inp.e_heat_init_kwh - expected).abs() < 0.01,
+            "e_init={:.4} expected≈{:.4}", inp.e_heat_init_kwh, expected);
     }
 
     #[test]
-    #[ignore = "implemented in Step 5"]
     fn heater_inputs_e_init_negative_below_min() {
-        // T_current=35, T_min=40 → e_init < 0
-        todo!("implement after build_milp_inputs() heater block update")
+        // T_current=35 < T_min=40 → e_init < 0
+        let now = fixed_now();
+        let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 40.0);
+        let mut sim = SimState::from_profile(&profile);
+        set_heater_temp(&mut sim, 35.0);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        assert!(inp.e_heat_init_kwh < 0.0,
+            "e_init {} should be negative when temp < T_min", inp.e_heat_init_kwh);
     }
 
     #[test]
-    #[ignore = "implemented in Step 5"]
     fn heater_inputs_e_max_formula() {
-        // e_max = (T_max − T_min) × thermal_mass = (80−40) × 0.233 ≈ 9.32 kWh
-        todo!("implement after build_milp_inputs() heater block update")
+        // e_max = (T_max − T_min) × thermal_mass = (80−40) × 200×4.186/3600 ≈ 9.30 kWh
+        let now = fixed_now();
+        let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 40.0);
+        let sim = SimState::from_profile(&profile);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        let expected = 40.0 * 200.0 * 4.186 / 3600.0;
+        assert!((inp.e_heat_max_kwh - expected).abs() < 0.01,
+            "e_max={:.4} expected≈{:.4}", inp.e_heat_max_kwh, expected);
     }
 
     #[test]
-    #[ignore = "implemented in Step 5"]
     fn heater_inputs_q_dem_scalar() {
-        // q_dem = draw + k_loss × ((T_min+T_max)/2 − ambient)
-        todo!("implement after build_milp_inputs() heater block update")
+        // q_dem = draw_kw + k_loss × ((T_min+T_max)/2 − ambient)
+        // With defaults: draw=0, k_loss=0.1, t_mid=(40+80)/2=60, ambient=10
+        // → q_dem = 0 + 0.1 × (60−10) = 5.0 kW
+        let now = fixed_now();
+        let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
+        let sim = SimState::from_profile(&profile);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        assert!((inp.q_heat_dem_kw - 5.0).abs() < 0.01,
+            "q_dem={:.4} expected 5.0", inp.q_heat_dem_kw);
     }
 
     #[test]
-    #[ignore = "implemented in Step 5"]
     fn heater_inputs_e_target_from_heater_target() {
         // e_target = (target_temp_c − T_min) × thermal_mass, clamped to [0, e_max]
-        todo!("implement after build_milp_inputs() heater block update")
+        // target=70, T_min=40 → (70−40) × 200×4.186/3600 ≈ 6.98 kWh
+        let now = fixed_now();
+        let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
+        let sim = SimState::from_profile(&profile);
+        let target = HeaterTarget {
+            id: uuid::Uuid::new_v4(),
+            target_temp_c: 70.0,
+            ready_by: now + Duration::hours(1),
+            created_at: now,
+            updated_at: now,
+        };
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, Some(&target), &[], None);
+        let expected = 30.0 * 200.0 * 4.186 / 3600.0;
+        assert!((inp.e_heat_target_kwh - expected).abs() < 0.01,
+            "e_target={:.4} expected≈{:.4}", inp.e_heat_target_kwh, expected);
     }
 
     #[test]
-    #[ignore = "implemented in Step 5"]
     fn heater_inputs_autonomous_e_target_is_e_max() {
         // Without HeaterTarget, e_heat_target_kwh == e_heat_max_kwh
-        todo!("implement after build_milp_inputs() heater block update")
+        let now = fixed_now();
+        let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
+        let sim = SimState::from_profile(&profile);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        assert!((inp.e_heat_target_kwh - inp.e_heat_max_kwh).abs() < 1e-9,
+            "autonomous: e_target {} should equal e_max {}", inp.e_heat_target_kwh, inp.e_heat_max_kwh);
     }
 
     #[test]
-    #[ignore = "implemented in Step 5"]
     fn heater_inputs_autonomous_mode_is_may_run() {
         // Without HeaterTarget, heater_mode == MilpLoadMode::MayRun
-        todo!("implement after build_milp_inputs() heater block update")
+        let now = fixed_now();
+        let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
+        let sim = SimState::from_profile(&profile);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        assert_eq!(inp.heater_mode, MilpLoadMode::MayRun);
     }
 
     #[test]
-    #[ignore = "implemented in Step 5"]
     fn heater_inputs_switching_penalty_defaults() {
-        // With no switching_penalty_eur in profile → lambda_heat_sw_eur == 0.01
-        todo!("implement after build_milp_inputs() heater block update")
+        // HeaterConfig with no switching_penalty_eur → lambda_heat_sw_eur == 0.01
+        let now = fixed_now();
+        let profile = make_profile(); // heater has no switching_penalty_eur set
+        let sim = SimState::from_profile(&profile);
+        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        assert!((inp.lambda_heat_sw_eur - 0.01).abs() < 1e-9,
+            "lambda_sw={} expected 0.01", inp.lambda_heat_sw_eur);
     }
 
     #[test]

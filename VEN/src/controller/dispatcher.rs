@@ -67,15 +67,11 @@ pub fn build_setpoints(
     // Only applies when the plan has no heater allocation for the current slot.
     if let Some(target_c) = heater_setpoint_c {
         if !plan_allocated_heater {
-            if let Some(idx) = assets.iter().position(|a| a.id == "heater") {
-                if let (AssetState::Heater(hs), AssetConfig::Heater(hcfg)) =
-                    (&assets[idx].state, &asset_configs[idx])
-                {
-                    let power_kw = if hs.temperature_c < target_c {
-                        hcfg.max_kw
-                    } else {
-                        0.0
-                    };
+            if let Some((entry, cfg)) = assets.iter()
+                .zip(asset_configs.iter())
+                .find(|(a, _)| a.id == "heater")
+            {
+                if let Some(power_kw) = cfg.thermostat_setpoint_kw(&entry.state, target_c) {
                     setpoints.insert("heater".to_string(), power_kw);
                 }
             }
@@ -136,19 +132,12 @@ pub fn apply_surplus_ev_overlay(
     if surplus_kw < 0.1 {
         return;
     }
-    let Some(idx) = assets.iter().position(|a| a.id == "ev") else {
-        return;
-    };
-    let (AssetState::Ev(es), AssetConfig::Ev(ecfg)) =
-        (&assets[idx].state, &asset_configs[idx])
-    else {
-        return;
-    };
-    if !es.plugged || es.soc >= ecfg.soc_target {
-        return;
+    for (entry, cfg) in assets.iter().zip(asset_configs.iter()) {
+        if let Some(charge_kw) = cfg.surplus_charge_kw(&entry.state, surplus_kw) {
+            setpoints.insert(entry.id.clone(), charge_kw);
+            break;
+        }
     }
-    let charge_kw = surplus_kw.min(ecfg.max_charge_kw);
-    setpoints.insert("ev".to_string(), charge_kw);
 }
 
 /// Layer 1 reactive correction: adjust battery setpoint when actual grid
@@ -179,13 +168,13 @@ pub fn apply_battery_correction_overlay(
     setpoints: &mut HashMap<String, f64>,
     assets: &[AssetEntry],
     asset_configs: &[AssetConfig],
-    plan_net_import_kw: f64,
+    plan_signed_net_kw: f64,
     actual_net_kw: f64,
     objective: PlannerObjective,
     threshold_kw: f64,
     min_correction_kw: f64,
 ) -> f64 {
-    let deviation_kw = actual_net_kw - plan_net_import_kw;
+    let deviation_kw = actual_net_kw - plan_signed_net_kw;
 
     // Find battery asset and config (needed before threshold check to read setpoint_kw).
     let Some(idx) = assets.iter().position(|a| a.id == "battery") else {

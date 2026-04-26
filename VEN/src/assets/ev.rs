@@ -1,4 +1,4 @@
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, Solution, Variable};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -447,6 +447,61 @@ impl EvMilpContext {
             z_ev_on: (0..n).map(|t| sol.value(v.z_ev_on[t])).collect(),
             e_ev_extra_kwh: sol.value(v.e_ev_extra),
             z_ev_core: sol.value(v.z_ev_core),
+        }
+    }
+
+    /// Construct from a live `AssetState`, sim `EvCharger` config, and optional session data.
+    pub fn from_state(
+        state: &super::AssetState,
+        cfg: &EvCharger,
+        n: usize,
+        step_s: u64,
+        now: DateTime<Utc>,
+        ev_session: Option<&crate::entities::device_session::EvSession>,
+        min_charge_kw: f64,
+        v_ev_extra_eur_kwh: f64,
+    ) -> Self {
+        let plugged = if let super::AssetState::Ev(s) = state { s.plugged } else { false };
+        if !plugged {
+            return Self {
+                mode: EvMilpMode::MustNotRun,
+                a_ev: vec![false; n],
+                t_dead_step: None,
+                p_max_kw: cfg.max_charge_kw,
+                p_min_kw: min_charge_kw,
+                e_core_kwh: 0.0,
+                e_extra_max_kwh: cfg.battery_kwh * (1.0 - cfg.soc_target),
+                v_extra_eur_kwh: v_ev_extra_eur_kwh,
+            };
+        }
+        if let Some(session) = ev_session {
+            let current_soc = if let super::AssetState::Ev(s) = state { s.soc } else { 0.0 };
+            let core_kwh = ((session.target_soc - current_soc) * cfg.battery_kwh).max(0.0);
+            let mode = if session.soft_deadline { EvMilpMode::MayRun } else { EvMilpMode::MustRun };
+            let secs = (session.departure_time - now).num_seconds();
+            let t_dead = (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize;
+            Self {
+                mode,
+                a_ev: (0..n).map(|t| t <= t_dead).collect(),
+                t_dead_step: Some(t_dead),
+                p_max_kw: cfg.max_charge_kw,
+                p_min_kw: min_charge_kw,
+                e_core_kwh: core_kwh,
+                e_extra_max_kwh: cfg.battery_kwh * (1.0 - session.target_soc),
+                v_extra_eur_kwh: v_ev_extra_eur_kwh,
+            }
+        } else {
+            // Plugged, no session: slots available but no charging obligation
+            Self {
+                mode: EvMilpMode::MustNotRun,
+                a_ev: vec![true; n],
+                t_dead_step: None,
+                p_max_kw: cfg.max_charge_kw,
+                p_min_kw: min_charge_kw,
+                e_core_kwh: 0.0,
+                e_extra_max_kwh: cfg.battery_kwh * (1.0 - cfg.soc_target),
+                v_extra_eur_kwh: v_ev_extra_eur_kwh,
+            }
         }
     }
 }

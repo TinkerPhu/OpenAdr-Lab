@@ -406,6 +406,12 @@ impl BatteryMilpContext {
             e_kwh: (0..=n).map(|t| sol.value(v.e_bat[t])).collect(),
         }
     }
+
+    /// Construct from a live `AssetState` and the current sim `Battery` config.
+    pub fn from_state(state: &super::AssetState, cfg: &Battery) -> Self {
+        let live_soc = if let super::AssetState::Battery(s) = state { s.soc } else { 0.5 };
+        cfg.build_milp_context(live_soc)
+    }
 }
 
 impl Battery {
