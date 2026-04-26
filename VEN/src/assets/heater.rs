@@ -314,6 +314,10 @@ pub struct HeaterMilpContext {
     pub e_target_kwh: f64,
     /// Relay switching penalty [EUR/switch event] added to the objective.
     pub lambda_sw_eur: f64,
+    /// Initial heater mid-power binary (1.0 if heater was at mid power last tick).
+    pub initial_z_mid: f64,
+    /// Initial heater full-power binary (1.0 if heater was at full power last tick).
+    pub initial_z_full: f64,
 }
 
 /// Typed LP variable handles for one heater in the MILP model.
@@ -417,6 +421,10 @@ impl HeaterMilpContext {
         let e_init = self.e_init_kwh;
         cs.push(constraint!(v.e_tank[0] >= e_init));
         cs.push(constraint!(v.e_tank[0] <= e_init));
+
+        // C1b: pin initial heater tier to the last observed hardware state.
+        cs.push(constraint!(v.z_heat_mid[0] == self.initial_z_mid));
+        cs.push(constraint!(v.z_heat_full[0] == self.initial_z_full));
 
         // C2: tank dynamics — E[t+1] = E[t] + (P_heat[t] − q_dem) × dt_h.
         // Expressed as two inequalities (== is not directly supported).
@@ -525,6 +533,10 @@ impl HeaterMilpContext {
         let e_init = (current_temp - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c;
         let e_max = ((cfg.temp_max_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c).max(0.0);
         let q_dem = cfg.forecast_demand_kw(cfg.ambient_temp_c);
+        // Initial mode detection from last observed hardware tier.
+        let actual_kw = if let super::AssetState::Heater(s) = state { s.actual_power_kw } else { 0.0 };
+        let initial_z_mid = if (actual_kw - live_mid_kw).abs() < 0.1 { 1.0 } else { 0.0 };
+        let initial_z_full = if (actual_kw - cfg.max_kw).abs() < 0.1 { 1.0 } else { 0.0 };
         if let Some(target) = heater_target {
             let e_target = ((target.target_temp_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c)
                 .clamp(0.0, e_max);
@@ -540,6 +552,8 @@ impl HeaterMilpContext {
                 q_dem_kw: q_dem,
                 e_target_kwh: e_target,
                 lambda_sw_eur: lambda_sw,
+                initial_z_mid,
+                initial_z_full,
             }
         } else {
             Self {
@@ -552,6 +566,8 @@ impl HeaterMilpContext {
                 q_dem_kw: q_dem,
                 e_target_kwh: e_max,
                 lambda_sw_eur: lambda_sw,
+                initial_z_mid,
+                initial_z_full,
             }
         }
     }

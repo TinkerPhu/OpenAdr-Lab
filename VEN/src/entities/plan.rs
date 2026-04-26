@@ -216,9 +216,14 @@ pub struct Plan {
     /// Optimization objective used for this planning cycle.
     #[serde(default)]
     pub objective: PlannerObjective,
-    /// Total MILP objective value (€). Includes all cost and reward terms.
+    /// Total MILP objective value (€). Phase 1 (economic cost) only — does not include
+    /// Phase 2 friction terms.
     #[serde(default)]
     pub objective_eur: f64,
+    /// Phase 2 friction objective value [EUR]. Sum of switching/startup/ramp/tier penalties.
+    /// 0.0 when Phase 2 is disabled (phase2_epsilon_eur == 0.0) or on fallback.
+    #[serde(default)]
+    pub friction_eur: f64,
     /// Decomposed cost components for diagnostics.
     #[serde(default)]
     pub cost_breakdown: CostBreakdown,

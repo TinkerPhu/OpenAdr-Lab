@@ -842,25 +842,38 @@ pub(crate) fn spawn_planning(
                 objective: obj,
                 solver_ms,
                 objective_eur: plan.objective_eur,
+                friction_eur: plan.friction_eur,
                 slot_count: plan.slots.len(),
                 trigger: trigger_reason.clone(),
             });
             // Acceptance gate: for Periodic replans, only adopt the new plan when it
-            // improves the objective by more than plan_adoption_threshold_eur. Hard
-            // triggers always force adoption so the controller stays responsive to
-            // real-world events even if the plan only changes slightly.
+            // improves the objective (Phase 1 cost) by more than the effective threshold.
+            // The threshold decays linearly with plan age so that changing circumstances
+            // are never permanently blocked — after plan_adoption_decay_s seconds, any
+            // new plan is accepted. Hard triggers always force adoption.
             let threshold = profile.planner.plan_adoption_threshold_eur;
+            let decay_s = profile.planner.plan_adoption_decay_s;
             let is_hard_trigger = !matches!(trigger, PlanTrigger::Periodic);
             let adopt = if is_hard_trigger || threshold == 0.0 {
                 true
             } else if let Some(ref current) = state.active_plan().await {
+                let elapsed_s = (now - current.created_at).num_seconds().max(0) as f64;
+                let decay_factor = if decay_s > 0.0 {
+                    (1.0 - elapsed_s / decay_s).max(0.0)
+                } else {
+                    1.0
+                };
+                let effective_threshold = threshold * decay_factor;
                 let improvement = current.objective_eur - plan.objective_eur;
-                if improvement > threshold {
+                if improvement > effective_threshold {
                     true
                 } else {
                     info!(
                         improvement_eur = improvement,
+                        effective_threshold_eur = effective_threshold,
                         threshold_eur = threshold,
+                        elapsed_s = elapsed_s,
+                        decay_factor = decay_factor,
                         "periodic plan rejected: improvement below threshold"
                     );
                     false
