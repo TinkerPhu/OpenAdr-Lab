@@ -41,3 +41,4 @@ __pycache__/
 # Git worktrees
 .claude/worktrees/
 docs/plans/notes.json
+.claude/scheduled_tasks.lock
