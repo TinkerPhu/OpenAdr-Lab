@@ -699,7 +699,9 @@ mod tests {
     fn forecast_at_temp_max_gives_non_zero_average_power() {
         let heater = default_heater();
         let state = state_at(23.0, 0.0);
-        let ts = heater.forecast(&state, Duration::hours(2));
+        // thermal_mass=2.0 kWh/°C → τ=20h; T drops from 23→20°C in ~5h.
+        // Use 24h to ensure full thermostat cycling is captured.
+        let ts = heater.forecast(&state, Duration::hours(24));
 
         // Compute mean power over the forecast samples
         let n = ts.samples.len() as f64;
@@ -724,7 +726,9 @@ mod tests {
     fn forecast_at_mid_temp_gives_reasonable_oscillation() {
         let heater = default_heater();
         let state = state_at(21.5, 1.3);
-        let ts = heater.forecast(&state, Duration::hours(1));
+        // thermal_mass=2.0 kWh/°C → T drops from 21.5→20°C (T_min) in ~2.8h.
+        // Use 12h to ensure cycling is captured in the mean.
+        let ts = heater.forecast(&state, Duration::hours(12));
         let n = ts.samples.len() as f64;
         assert!(n > 0.0);
         let mean: f64 = ts.samples.iter().map(|(_, kw)| kw).sum::<f64>() / n;
@@ -756,7 +760,13 @@ mod tests {
         let state = state_at(21.5, 0.0);
         let setpoint = 1.5;
         let (_ns, power) = heater.step_inner(&state, setpoint, Duration::seconds(1));
-        assert!((power - setpoint).abs() < 1e-9, "heater should follow setpoint");
+        // Relay quantization: 1.5 kW falls between mid/2=0.625 and (mid+max)/2=1.875,
+        // so it snaps to the mid tier (1.25 kW). Exact passthrough is no longer possible.
+        assert!(
+            (power - heater.mid_kw).abs() < 1e-9,
+            "heater should snap setpoint 1.5 to mid tier {}, got {power}",
+            heater.mid_kw
+        );
     }
 
     // ── hot water tank physics ────────────────────────────────────────────────
