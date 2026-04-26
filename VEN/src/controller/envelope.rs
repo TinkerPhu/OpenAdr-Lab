@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::assets::{AssetConfig, AssetState};
+use crate::assets::AssetConfig;
 use crate::entities::plan::SiteFlexibilityEnvelope;
 use crate::simulator::SimState;
 
@@ -38,26 +38,9 @@ pub fn compute_envelope(
         up_kw   += (entry.last_power_kw - phys_cap.max_export_kw).max(0.0);
         down_kw += (phys_cap.max_import_kw - entry.last_power_kw).max(0.0);
 
-        match config {
-            AssetConfig::Battery(b) => {
-                let soc = match &entry.state {
-                    AssetState::Battery(s) => s.soc,
-                    _ => continue,
-                };
-                available_discharge_kwh += (soc - b.min_soc).max(0.0) * b.capacity_kwh;
-                available_charge_kwh    += (1.0_f64 - soc).max(0.0) * b.capacity_kwh;
-            }
-            AssetConfig::Ev(e) => {
-                let (soc, plugged) = match &entry.state {
-                    AssetState::Ev(s) => (s.soc, s.plugged),
-                    _ => continue,
-                };
-                if plugged {
-                    available_discharge_kwh += (soc - e.min_soc).max(0.0) * e.battery_kwh;
-                    available_charge_kwh    += (1.0_f64 - soc).max(0.0) * e.battery_kwh;
-                }
-            }
-            _ => {}
+        if let Some((dis, ch)) = config.available_storage_kwh(&entry.state) {
+            available_discharge_kwh += dis;
+            available_charge_kwh    += ch;
         }
     }
 

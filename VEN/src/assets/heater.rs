@@ -505,6 +505,56 @@ impl HeaterMilpContext {
             sw: (0..n).map(|t| sol.value(v.sw[t])).collect(),
         }
     }
+
+    /// Construct from a live `AssetState`, sim `Heater` config, and optional target data.
+    pub fn from_state(
+        state: &super::AssetState,
+        cfg: &Heater,
+        n: usize,
+        step_s: u64,
+        now: DateTime<Utc>,
+        heater_target: Option<&crate::entities::device_session::HeaterTarget>,
+        lambda_sw: f64,
+    ) -> Self {
+        let current_temp = if let super::AssetState::Heater(s) = state {
+            s.temperature_c
+        } else {
+            (cfg.temp_min_c + cfg.temp_max_c) / 2.0
+        };
+        let live_mid_kw = if cfg.mid_kw > 0.0 { cfg.mid_kw } else { cfg.max_kw / 2.0 };
+        let e_init = (current_temp - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c;
+        let e_max = ((cfg.temp_max_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c).max(0.0);
+        let q_dem = cfg.forecast_demand_kw(cfg.ambient_temp_c);
+        if let Some(target) = heater_target {
+            let e_target = ((target.target_temp_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c)
+                .clamp(0.0, e_max);
+            let secs = (target.ready_by - now).num_seconds();
+            let t_dead = (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize;
+            Self {
+                mode: HeaterMilpMode::MustRun,
+                t_dead_step: Some(t_dead),
+                p_mid_kw: live_mid_kw,
+                p_full_kw: cfg.max_kw,
+                e_init_kwh: e_init,
+                e_max_kwh: e_max,
+                q_dem_kw: q_dem,
+                e_target_kwh: e_target,
+                lambda_sw_eur: lambda_sw,
+            }
+        } else {
+            Self {
+                mode: HeaterMilpMode::MayRun,
+                t_dead_step: None,
+                p_mid_kw: live_mid_kw,
+                p_full_kw: cfg.max_kw,
+                e_init_kwh: e_init,
+                e_max_kwh: e_max,
+                q_dem_kw: q_dem,
+                e_target_kwh: e_max,
+                lambda_sw_eur: lambda_sw,
+            }
+        }
+    }
 }
 
 impl Heater {
