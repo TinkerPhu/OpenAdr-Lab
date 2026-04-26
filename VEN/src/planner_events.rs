@@ -26,6 +26,7 @@ pub enum PlannerEvent {
         objective: PlannerObjective,
         solver_ms: u64,
         objective_eur: f64,
+        friction_eur: f64,
         slot_count: usize,
         trigger: String,
     },

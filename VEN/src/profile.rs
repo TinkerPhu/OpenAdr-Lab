@@ -472,6 +472,23 @@ pub struct PlannerConfig {
     /// suppress plan churn when the new solution is only marginally better.
     #[serde(default)]
     pub plan_adoption_threshold_eur: f64,
+
+    /// Time constant (seconds) for linear decay of `plan_adoption_threshold_eur`.
+    /// As time flows the rolling planning window shifts, so a new plan cannot always
+    /// beat the old one in absolute EUR even when it is genuinely optimal for current
+    /// conditions. The effective threshold at the adoption gate is:
+    ///   effective = threshold × max(0, 1 − elapsed_s / decay_s)
+    /// After `decay_s` seconds the effective threshold reaches 0.0 and any new plan
+    /// is accepted. 0.0 = no decay (default — full threshold always applied).
+    /// Suggested: 5–10× `replan_interval_s`.
+    #[serde(default)]
+    pub plan_adoption_decay_s: f64,
+    /// Cost cap slack for Phase 2 lexicographic solve [EUR]. Phase 2 minimises
+    /// operational friction (startup/ramp/switching/tier) subject to:
+    ///   phase1_cost ≤ c_star + phase2_epsilon_eur
+    /// Set to 0.0 to disable Phase 2 (single-phase solve). Default: 0.02.
+    #[serde(default = "default_phase2_epsilon")]
+    pub phase2_epsilon_eur: f64,
 }
 
 impl Default for PlannerConfig {
@@ -499,8 +516,14 @@ impl Default for PlannerConfig {
             w_tier_penalty_eur: default_w_tier_penalty(),
             objective: PlannerObjective::MinCost,
             plan_adoption_threshold_eur: 0.0,
+            plan_adoption_decay_s: 0.0,
+            phase2_epsilon_eur: default_phase2_epsilon(),
         }
     }
+}
+
+fn default_phase2_epsilon() -> f64 {
+    0.02
 }
 
 fn default_plan_step() -> u64 {

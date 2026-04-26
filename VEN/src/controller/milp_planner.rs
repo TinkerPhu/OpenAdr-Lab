@@ -47,9 +47,9 @@ enum MilpLoadMode {
     MustNotRun,
 }
 
-/// Objective function coefficients, derived from PlannerConfig / PlannerObjective preset.
+/// Phase 1 objective coefficients (economic cost). Derived from PlannerConfig / PlannerObjective.
 #[derive(Debug, Clone)]
-struct MilpWeights {
+struct Phase1Weights {
     /// Scales C_energy = Σ(c_imp·p_imp − c_exp·p_exp)·Δt
     w_energy: f64,
     /// Monetises GHG emissions [€/kgCO₂]
@@ -62,14 +62,6 @@ struct MilpWeights {
     w_viol: f64,
     /// Battery cycling wear cost [€/kWh charged or discharged]
     c_bat_wear_eur_kwh: f64,
-    /// Penalty per EV charging run startup [€/run]
-    c_ev_startup_eur: f64,
-    /// Penalty per battery charge/discharge mode transition [€/transition]
-    c_bat_startup_eur: f64,
-    /// Penalty per kW of EV power change between consecutive slots [€/kW]
-    c_ev_ramp_eur_kw: f64,
-    /// Penalty per kW of battery net-power change between consecutive slots [€/kW]
-    c_bat_ramp_eur_kw: f64,
     /// Penalty per kWh of battery discharge co-occurring with EV charging when
     /// PV surplus ≥ ev_min_kw [€/kWh]. 0.0 = disabled.
     c_bat_ev_coexist_eur_kwh: f64,
@@ -77,8 +69,27 @@ struct MilpWeights {
     w_services: f64,
 }
 
+/// Phase 2 objective coefficients (operational friction). Used only when
+/// `phase2_epsilon_eur > 0.0`. Phase 2 minimises startup/ramp/switching/tier
+/// cost subject to a Phase 1 cost cap.
+#[derive(Debug, Clone)]
+struct Phase2Weights {
+    /// Penalty per battery charge/discharge mode transition [€/transition]
+    c_bat_startup_eur: f64,
+    /// Penalty per kW of battery net-power change between consecutive slots [€/kW]
+    c_bat_ramp_eur_kw: f64,
+    /// Penalty per EV charging run startup [€/run]
+    c_ev_startup_eur: f64,
+    /// Penalty per kW of EV power change between consecutive slots [€/kW]
+    c_ev_ramp_eur_kw: f64,
+    /// Heater relay switching penalty [EUR/switch event]
+    lambda_heat_sw_eur: f64,
+    /// Soft penalty per slot for using the full power tier over mid tier [€/slot]
+    w_tier_penalty_eur: f64,
+}
+
 /// Fully-resolved MILP input parameters for one planning cycle.
-/// Created by `build_milp_inputs()`; consumed by `solve_milp()` (Phase 3).
+/// Created by `build_milp_inputs()`; consumed by `solve_milp_two_phase()` (Phase 3).
 /// All per-step `Vec<f64>` fields have length `n`.
 #[derive(Debug, Clone)]
 struct MilpInputs {
@@ -169,6 +180,10 @@ struct MilpInputs {
     lambda_heat_sw_eur: f64,
     /// Soft penalty per slot for using the full power tier over mid tier [€/slot].
     w_tier_penalty_eur: f64,
+    /// Initial heater mid-power binary (1.0 if heater was at mid power last tick).
+    heat_initial_z_mid: f64,
+    /// Initial heater full-power binary (1.0 if heater was at full power last tick).
+    heat_initial_z_full: f64,
 
     // ── Shiftable loads (Phase B) ────────────────────────────────────────────
     /// MILP-ready shiftable load descriptors (one per ShiftableLoad that fits the horizon)
@@ -193,93 +208,81 @@ struct ShiftableLoadMilp {
 /// Build the MILP objective weights from the profile's planner configuration.
 /// `objective` overrides `profile.planner.objective`; pass `profile.planner.objective`
 /// to use the profile default.
-fn build_milp_weights(profile: &Profile, objective: PlannerObjective) -> MilpWeights {
+fn build_phase1_weights(profile: &Profile, objective: PlannerObjective) -> Phase1Weights {
     let p = &profile.planner;
     match objective {
-        PlannerObjective::MinCost => MilpWeights {
+        PlannerObjective::MinCost => Phase1Weights {
             w_energy: 1.0,
             w_ghg: 0.20,
             w_grid: 0.02,
             w_import: 0.0,
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.03,
-            c_ev_startup_eur: p.c_ev_startup_eur,
-            c_bat_startup_eur: p.c_bat_startup_eur,
-            c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
-            c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             w_services: 1.0,
         },
-        PlannerObjective::MinGhg => MilpWeights {
+        PlannerObjective::MinGhg => Phase1Weights {
             w_energy: 0.0,
             w_ghg: 10.0,
             w_grid: 0.0,
             w_import: 0.0,
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.0,
-            c_ev_startup_eur: p.c_ev_startup_eur,
-            c_bat_startup_eur: p.c_bat_startup_eur,
-            c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
-            c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             w_services: 1.0,
         },
-        PlannerObjective::MinGrid => MilpWeights {
+        PlannerObjective::MinGrid => Phase1Weights {
             w_energy: 0.0,
             w_ghg: 0.0,
             w_grid: 1.0,
             w_import: 0.0,
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.0,
-            c_ev_startup_eur: p.c_ev_startup_eur,
-            c_bat_startup_eur: p.c_bat_startup_eur,
-            c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
-            c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             w_services: 1.0,
         },
-        PlannerObjective::MinImport => MilpWeights {
+        PlannerObjective::MinImport => Phase1Weights {
             w_energy: 0.0,
             w_ghg: 0.0,
             w_grid: 0.0,
             w_import: 1.0,
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.0,
-            c_ev_startup_eur: p.c_ev_startup_eur,
-            c_bat_startup_eur: p.c_bat_startup_eur,
-            c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
-            c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             w_services: 1.0,
         },
-        PlannerObjective::MaxRevenue => MilpWeights {
+        PlannerObjective::MaxRevenue => Phase1Weights {
             w_energy: 1.0,
             w_ghg: 0.0,
             w_grid: 0.0,
             w_import: 0.0,
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.03,
-            c_ev_startup_eur: p.c_ev_startup_eur,
-            c_bat_startup_eur: p.c_bat_startup_eur,
-            c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
-            c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             w_services: 1.0,
         },
-        PlannerObjective::Custom => MilpWeights {
+        PlannerObjective::Custom => Phase1Weights {
             w_energy: p.w_energy,
             w_ghg: p.w_ghg,
             w_grid: p.w_grid,
             w_import: 0.0,
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: p.c_bat_wear_eur_kwh,
-            c_ev_startup_eur: p.c_ev_startup_eur,
-            c_bat_startup_eur: p.c_bat_startup_eur,
-            c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
-            c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             w_services: 1.0,
         },
+    }
+}
+
+fn build_phase2_weights(inputs: &MilpInputs, profile: &Profile) -> Phase2Weights {
+    let p = &profile.planner;
+    Phase2Weights {
+        c_bat_startup_eur: p.c_bat_startup_eur,
+        c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,
+        c_ev_startup_eur: p.c_ev_startup_eur,
+        c_ev_ramp_eur_kw: p.c_ev_ramp_eur_kw,
+        lambda_heat_sw_eur: inputs.lambda_heat_sw_eur,
+        w_tier_penalty_eur: inputs.w_tier_penalty_eur,
     }
 }
 
@@ -293,7 +296,7 @@ fn deadline_to_step(deadline: DateTime<Utc>, now: DateTime<Utc>, step_s: u64, n:
 ///
 /// All transformations — CO₂ unit conversion (g→kg), √RTE efficiency split,
 /// live battery SoC, EV horizon mask, and LoadMode translation — happen here.
-/// The resulting `MilpInputs` is ready to pass directly to `solve_milp()`.
+/// The resulting `MilpInputs` is ready to pass directly to `solve_milp_two_phase()`.
 fn build_milp_inputs(
     assets: &SimState,
     tariffs: &TariffTimeSeries,
@@ -449,7 +452,7 @@ fn build_milp_inputs(
         };
 
     // ── Heater ────────────────────────────────────────────────────────────────
-    let (heater_mode, t_heat_dead, p_mid, p_full, e_heat_init, e_heat_max, q_heat_dem, e_heat_target, lambda_sw) =
+    let (heater_mode, t_heat_dead, p_mid, p_full, e_heat_init, e_heat_max, q_heat_dem, e_heat_target, lambda_sw, heat_iz_mid, heat_iz_full) =
         if let Some(heat_cfg) = profile.heater_config() {
             let lambda = heat_cfg.effective_switching_penalty();
             let ctx = match assets.find_asset("heater") {
@@ -487,6 +490,8 @@ fn build_milp_inputs(
                             q_dem_kw: q_dem,
                             e_target_kwh: e_target,
                             lambda_sw_eur: lambda,
+                            initial_z_mid: 0.0,
+                            initial_z_full: 0.0,
                         }
                     } else {
                         HeaterMilpContext {
@@ -499,6 +504,8 @@ fn build_milp_inputs(
                             q_dem_kw: q_dem,
                             e_target_kwh: e_max,
                             lambda_sw_eur: lambda,
+                            initial_z_mid: 0.0,
+                            initial_z_full: 0.0,
                         }
                     }
                 }
@@ -509,9 +516,10 @@ fn build_milp_inputs(
                 HeaterMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
             };
             (heater_mode, ctx.t_dead_step, ctx.p_mid_kw, ctx.p_full_kw,
-             ctx.e_init_kwh, ctx.e_max_kwh, ctx.q_dem_kw, ctx.e_target_kwh, ctx.lambda_sw_eur)
+             ctx.e_init_kwh, ctx.e_max_kwh, ctx.q_dem_kw, ctx.e_target_kwh, ctx.lambda_sw_eur,
+             ctx.initial_z_mid, ctx.initial_z_full)
         } else {
-            (MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            (MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         };
 
     // ── Baseline override: additive per-slot kW adjustments ─────────────────
@@ -604,6 +612,8 @@ fn build_milp_inputs(
         e_heat_target_kwh: e_heat_target,
         lambda_heat_sw_eur: lambda_sw,
         w_tier_penalty_eur: profile.planner.w_tier_penalty_eur,
+        heat_initial_z_mid: heat_iz_mid,
+        heat_initial_z_full: heat_iz_full,
         shiftable_loads: milp_loads,
     }
 }
@@ -655,14 +665,17 @@ struct SolveOutput {
 /// `EvMilpContext`, `HeaterMilpContext`) and the `MilpVarPool` / `AssetInteraction`
 /// framework from `milp_interactions.rs`. The `MilpInputs` signature is preserved
 /// so all existing unit tests continue to compile without modification.
-fn solve_milp(
+
+const M_LOW_EUR_PER_KWH: f64 = 10.0;
+
+/// Phase 1: minimise economic cost only. Battery and EV are declared without
+/// startup/ramp aux vars (0.0 passed to `declare_vars`). Heater lambda_sw is 0.0.
+fn solve_phase1(
     inputs: &MilpInputs,
-    weights: &MilpWeights,
+    p1w: &Phase1Weights,
 ) -> Result<SolveOutput, Box<dyn std::error::Error>> {
     let n = inputs.n;
     let dt_h = inputs.dt_h;
-
-    // ── Build per-asset contexts from the flat MilpInputs fields ─────────────
 
     let bat_ctx: Option<BatteryMilpContext> = inputs.e_bat_nom_kwh.map(|e_nom| BatteryMilpContext {
         e_nom_kwh:    e_nom,
@@ -695,6 +708,7 @@ fn solve_milp(
         None
     };
 
+    // Phase 1: lambda_sw_eur = 0.0 (switching penalty moves entirely to Phase 2).
     let heat_ctx: Option<HeaterMilpContext> = if inputs.p_heat_full_kw > 0.0 {
         let heat_mode = match inputs.heater_mode {
             MilpLoadMode::MustRun => HeaterMilpMode::MustRun,
@@ -710,13 +724,14 @@ fn solve_milp(
             e_max_kwh: inputs.e_heat_max_kwh,
             q_dem_kw: inputs.q_heat_dem_kw,
             e_target_kwh: inputs.e_heat_target_kwh,
-            lambda_sw_eur: inputs.lambda_heat_sw_eur,
+            lambda_sw_eur: 0.0,
+            initial_z_mid: inputs.heat_initial_z_mid,
+            initial_z_full: inputs.heat_initial_z_full,
         })
     } else {
         None
     };
 
-    // ── Build GlobalMilpInputs (grid arrays — needed by interaction framework) ─
     let global = GlobalMilpInputs {
         n,
         dt_h,
@@ -735,13 +750,11 @@ fn solve_milp(
 
     let mut vars = variables!();
 
-    // ── Grid variables ────────────────────────────────────────────────────────
     let p_imp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
     let p_exp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
     let u_grid: Vec<Variable> = (0..n).map(|_| vars.add(variable().binary())).collect();
     let s_imp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
     let s_exp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-
     let grid_vars = GridMilpVars {
         p_imp: p_imp.clone(),
         p_exp: p_exp.clone(),
@@ -750,16 +763,11 @@ fn solve_milp(
         s_exp_viol: s_exp_viol.clone(),
     };
 
-    // ── Per-asset variables via context methods ───────────────────────────────
-    let bat_vars = bat_ctx.as_ref().map(|ctx| {
-        ctx.declare_vars(n, weights.c_bat_startup_eur, weights.c_bat_ramp_eur_kw, &mut vars)
-    });
-    let ev_vars = ev_ctx.as_ref().map(|ctx| {
-        ctx.declare_vars(n, weights.c_ev_startup_eur, weights.c_ev_ramp_eur_kw, &mut vars)
-    });
+    // Phase 1: no startup/ramp aux vars.
+    let bat_vars = bat_ctx.as_ref().map(|ctx| ctx.declare_vars(n, 0.0, 0.0, &mut vars));
+    let ev_vars  = ev_ctx.as_ref().map(|ctx| ctx.declare_vars(n, 0.0, 0.0, &mut vars));
     let heat_vars = heat_ctx.as_ref().map(|ctx| ctx.declare_vars(n, &mut vars));
 
-    // ── Shiftable load variables ──────────────────────────────────────────────
     let shift_vars: Vec<ShiftableLoadMilpVars> = inputs.shiftable_loads.iter().map(|sl| {
         let y_shift = sl.valid_start_slots.iter().map(|_| vars.add(variable().binary())).collect();
         ShiftableLoadMilpVars {
@@ -771,19 +779,9 @@ fn solve_milp(
         }
     }).collect();
 
-    // ── Build variable pool ───────────────────────────────────────────────────
-    let pool = MilpVarPool {
-        grid: grid_vars,
-        bat: bat_vars,
-        ev: ev_vars,
-        heater: heat_vars,
-        shiftable: shift_vars,
-    };
+    let pool = MilpVarPool { grid: grid_vars, bat: bat_vars, ev: ev_vars, heater: heat_vars, shiftable: shift_vars };
 
-    // ── Declare interaction variables (needs pool + global, mutates vars) ─────
-    // Only applicable interactions get variable declarations; keep (interaction, vars) pairs
-    // to avoid index misalignment when iterating for constraints / objective.
-    let interactions = build_interactions(weights.c_bat_ev_coexist_eur_kwh);
+    let interactions = build_interactions(p1w.c_bat_ev_coexist_eur_kwh);
     let mut active_interactions: Vec<&Box<dyn crate::controller::milp_interactions::AssetInteraction>> = Vec::new();
     let mut iv_list: Vec<crate::controller::milp_interactions::InteractionVars> = Vec::new();
     for interaction in &interactions {
@@ -794,54 +792,268 @@ fn solve_milp(
         }
     }
 
-    // ── Objective ─────────────────────────────────────────────────────────────
+    // Phase 1 objective: economic + m_low; no startup/ramp/switching/tier friction.
     let mut objective = Expression::from(0.0);
-
-    // Grid terms (import cost, export revenue, GHG, violations)
     for t in 0..n {
-        objective += (weights.w_energy * dt_h * inputs.c_imp_eur_kwh[t]) * p_imp[t];
-        objective += -(weights.w_energy * dt_h * inputs.c_exp_eur_kwh[t]) * p_exp[t];
-        objective += (weights.w_ghg * dt_h * inputs.g_imp_kgco2_kwh[t]) * p_imp[t];
-        objective += (weights.w_grid * dt_h) * p_imp[t];
-        objective += (weights.w_grid * dt_h) * p_exp[t];
-        objective += (weights.w_import * dt_h) * p_imp[t];
-        objective += (weights.w_viol * inputs.pen_imp_eur_kwh * dt_h) * s_imp_viol[t];
-        objective += (weights.w_viol * inputs.pen_exp_eur_kwh * dt_h) * s_exp_viol[t];
+        objective += (p1w.w_energy * dt_h * inputs.c_imp_eur_kwh[t]) * p_imp[t];
+        objective += -(p1w.w_energy * dt_h * inputs.c_exp_eur_kwh[t]) * p_exp[t];
+        objective += (p1w.w_ghg * dt_h * inputs.g_imp_kgco2_kwh[t]) * p_imp[t];
+        objective += (p1w.w_grid * dt_h) * p_imp[t];
+        objective += (p1w.w_grid * dt_h) * p_exp[t];
+        objective += (p1w.w_import * dt_h) * p_imp[t];
+        objective += (p1w.w_viol * inputs.pen_imp_eur_kwh * dt_h) * s_imp_viol[t];
+        objective += (p1w.w_viol * inputs.pen_exp_eur_kwh * dt_h) * s_exp_viol[t];
     }
-
-    // Battery objective (wear + startup + ramp)
     if let Some(v) = &pool.bat {
-        objective += BatteryMilpContext::objective(
-            v,
-            weights.c_bat_wear_eur_kwh,
-            weights.c_bat_startup_eur,
-            weights.c_bat_ramp_eur_kw,
-            n,
-            dt_h,
-        );
+        objective += BatteryMilpContext::objective(v, p1w.c_bat_wear_eur_kwh, 0.0, 0.0, n, dt_h);
     }
-
-    // EV objective (startup + ramp + extra-charge reward)
     if let (Some(ctx), Some(v)) = (&ev_ctx, &pool.ev) {
-        objective += ctx.objective(v, weights.c_ev_startup_eur, weights.c_ev_ramp_eur_kw, weights.w_services, n);
+        objective += ctx.objective(v, 0.0, 0.0, p1w.w_services, n);
     }
-
-    // Heater objective (tier penalty + soft violation + switching penalty)
-    const M_LOW_EUR_PER_KWH: f64 = 10.0;
     if let (Some(ctx), Some(v)) = (&heat_ctx, &pool.heater) {
-        objective += ctx.objective(v, inputs.w_tier_penalty_eur, M_LOW_EUR_PER_KWH, n);
+        // Phase 1 heater: m_low penalty only (tier=0, lambda_sw=0 on ctx).
+        objective += ctx.objective(v, 0.0, M_LOW_EUR_PER_KWH, n);
     }
-
-    // Interaction objectives (e.g. bat-EV coexistence penalty)
     for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
         objective += interaction.objective(iv, dt_h);
     }
 
     let mut model = vars.minimise(&objective).using(highs);
+    model = add_model_constraints(model, inputs, &pool, &heat_ctx, &bat_ctx, &ev_ctx,
+        &p_imp, &p_exp, &u_grid, &s_imp_viol, &s_exp_viol, &active_interactions, &iv_list, &global, n);
+    model = model.with_time_limit(60.0);
+    model = model.with_mip_gap(0.02)?;
+    let solution = model.solve()?;
 
-    // ── Power balance per slot ────────────────────────────────────────────────
+    Ok(read_solve_output(&solution, &objective, &pool, inputs, n))
+}
+
+/// Phase 2: minimise operational friction subject to phase1_cost(p2_vars) ≤ c_star + epsilon.
+/// All variables are declared fresh. Battery/EV get startup/ramp aux vars.
+fn solve_phase2(
+    inputs: &MilpInputs,
+    p1w: &Phase1Weights,
+    p2w: &Phase2Weights,
+    c_star: f64,
+    epsilon: f64,
+) -> Result<(SolveOutput, f64), Box<dyn std::error::Error>> {
+    let n = inputs.n;
+    let dt_h = inputs.dt_h;
+
+    let bat_ctx: Option<BatteryMilpContext> = inputs.e_bat_nom_kwh.map(|e_nom| BatteryMilpContext {
+        e_nom_kwh:    e_nom,
+        e_init_kwh:   inputs.e_bat_init_kwh.unwrap_or(0.0),
+        e_min_kwh:    inputs.e_bat_min_kwh.unwrap_or(0.0),
+        e_max_kwh:    inputs.e_bat_max_kwh.unwrap_or(e_nom),
+        p_ch_max_kw:  inputs.p_bat_ch_max_kw.unwrap_or(0.0),
+        p_dis_max_kw: inputs.p_bat_dis_max_kw.unwrap_or(0.0),
+        eff_ch:       inputs.eff_bat_ch.unwrap_or(1.0),
+        eff_dis:      inputs.eff_bat_dis.unwrap_or(1.0),
+    });
+
+    let ev_ctx: Option<EvMilpContext> = if inputs.p_ev_max_kw > 0.0 {
+        let ev_mode = match inputs.ev_mode {
+            MilpLoadMode::MustRun => EvMilpMode::MustRun,
+            MilpLoadMode::MayRun => EvMilpMode::MayRun,
+            MilpLoadMode::MustNotRun => EvMilpMode::MustNotRun,
+        };
+        Some(EvMilpContext {
+            mode: ev_mode,
+            a_ev: inputs.a_ev.clone(),
+            t_dead_step: inputs.t_ev_dead_step,
+            p_max_kw: inputs.p_ev_max_kw,
+            p_min_kw: inputs.p_ev_min_kw,
+            e_core_kwh: inputs.e_ev_core_kwh,
+            e_extra_max_kwh: inputs.e_ev_extra_max_kwh,
+            v_extra_eur_kwh: inputs.v_ev_extra_eur_kwh,
+        })
+    } else {
+        None
+    };
+
+    // Phase 2: heater carries switching penalty and tier penalty.
+    let heat_ctx: Option<HeaterMilpContext> = if inputs.p_heat_full_kw > 0.0 {
+        let heat_mode = match inputs.heater_mode {
+            MilpLoadMode::MustRun => HeaterMilpMode::MustRun,
+            MilpLoadMode::MayRun => HeaterMilpMode::MayRun,
+            MilpLoadMode::MustNotRun => HeaterMilpMode::MustNotRun,
+        };
+        Some(HeaterMilpContext {
+            mode: heat_mode,
+            t_dead_step: inputs.t_heat_dead_step,
+            p_mid_kw: inputs.p_heat_mid_kw,
+            p_full_kw: inputs.p_heat_full_kw,
+            e_init_kwh: inputs.e_heat_init_kwh,
+            e_max_kwh: inputs.e_heat_max_kwh,
+            q_dem_kw: inputs.q_heat_dem_kw,
+            e_target_kwh: inputs.e_heat_target_kwh,
+            lambda_sw_eur: p2w.lambda_heat_sw_eur,
+            initial_z_mid: inputs.heat_initial_z_mid,
+            initial_z_full: inputs.heat_initial_z_full,
+        })
+    } else {
+        None
+    };
+
+    let global = GlobalMilpInputs {
+        n,
+        dt_h,
+        c_imp_eur_kwh: inputs.c_imp_eur_kwh.clone(),
+        c_exp_eur_kwh: inputs.c_exp_eur_kwh.clone(),
+        g_imp_kgco2_kwh: inputs.g_imp_kgco2_kwh.clone(),
+        p_pv_kw: inputs.p_pv_kw.clone(),
+        p_base_kw: inputs.p_base_kw.clone(),
+        p_imp_max_phys_kw: inputs.p_imp_max_phys_kw.clone(),
+        p_exp_max_phys_kw: inputs.p_exp_max_phys_kw.clone(),
+        p_imp_max_cont_kw: inputs.p_imp_max_cont_kw.clone(),
+        p_exp_max_cont_kw: inputs.p_exp_max_cont_kw.clone(),
+        pen_imp_eur_kwh: inputs.pen_imp_eur_kwh,
+        pen_exp_eur_kwh: inputs.pen_exp_eur_kwh,
+    };
+
+    let mut vars = variables!();
+
+    let p_imp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
+    let p_exp: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
+    let u_grid: Vec<Variable> = (0..n).map(|_| vars.add(variable().binary())).collect();
+    let s_imp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
+    let s_exp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
+    let grid_vars = GridMilpVars {
+        p_imp: p_imp.clone(),
+        p_exp: p_exp.clone(),
+        u_grid: u_grid.clone(),
+        s_imp_viol: s_imp_viol.clone(),
+        s_exp_viol: s_exp_viol.clone(),
+    };
+
+    // Phase 2: startup/ramp aux vars are declared with real cost values.
+    let bat_vars  = bat_ctx.as_ref().map(|ctx| ctx.declare_vars(n, p2w.c_bat_startup_eur, p2w.c_bat_ramp_eur_kw, &mut vars));
+    let ev_vars   = ev_ctx.as_ref().map(|ctx| ctx.declare_vars(n, p2w.c_ev_startup_eur, p2w.c_ev_ramp_eur_kw, &mut vars));
+    let heat_vars = heat_ctx.as_ref().map(|ctx| ctx.declare_vars(n, &mut vars));
+
+    let shift_vars: Vec<ShiftableLoadMilpVars> = inputs.shiftable_loads.iter().map(|sl| {
+        let y_shift = sl.valid_start_slots.iter().map(|_| vars.add(variable().binary())).collect();
+        ShiftableLoadMilpVars {
+            asset_id: sl.asset_id.clone(),
+            power_kw: sl.power_kw,
+            duration_slots: sl.duration_slots,
+            valid_start_slots: sl.valid_start_slots.clone(),
+            y_shift,
+        }
+    }).collect();
+
+    let pool = MilpVarPool { grid: grid_vars, bat: bat_vars, ev: ev_vars, heater: heat_vars, shiftable: shift_vars };
+
+    let interactions = build_interactions(p1w.c_bat_ev_coexist_eur_kwh);
+    let mut active_interactions: Vec<&Box<dyn crate::controller::milp_interactions::AssetInteraction>> = Vec::new();
+    let mut iv_list: Vec<crate::controller::milp_interactions::InteractionVars> = Vec::new();
+    for interaction in &interactions {
+        if interaction.applicable(&pool) {
+            let iv = interaction.declare_vars(&pool, &global, &mut vars);
+            active_interactions.push(interaction);
+            iv_list.push(iv);
+        }
+    }
+
+    // Phase 1 cost cap expression, rebuilt using Phase 2 variables.
+    let mut phase1_cap_expr = Expression::from(0.0);
     for t in 0..n {
-        // Shiftable load power at this slot
+        phase1_cap_expr += (p1w.w_energy * dt_h * inputs.c_imp_eur_kwh[t]) * p_imp[t];
+        phase1_cap_expr += -(p1w.w_energy * dt_h * inputs.c_exp_eur_kwh[t]) * p_exp[t];
+        phase1_cap_expr += (p1w.w_ghg * dt_h * inputs.g_imp_kgco2_kwh[t]) * p_imp[t];
+        phase1_cap_expr += (p1w.w_grid * dt_h) * p_imp[t];
+        phase1_cap_expr += (p1w.w_grid * dt_h) * p_exp[t];
+        phase1_cap_expr += (p1w.w_import * dt_h) * p_imp[t];
+        phase1_cap_expr += (p1w.w_viol * inputs.pen_imp_eur_kwh * dt_h) * s_imp_viol[t];
+        phase1_cap_expr += (p1w.w_viol * inputs.pen_exp_eur_kwh * dt_h) * s_exp_viol[t];
+    }
+    if let Some(v) = &pool.bat {
+        // Battery wear only (0.0 startup/ramp in cost cap expression).
+        phase1_cap_expr += BatteryMilpContext::objective(v, p1w.c_bat_wear_eur_kwh, 0.0, 0.0, n, dt_h);
+    }
+    if let (Some(ctx), Some(v)) = (&ev_ctx, &pool.ev) {
+        // EV reward only (0.0 startup/ramp in cost cap expression).
+        phase1_cap_expr += ctx.objective(v, 0.0, 0.0, p1w.w_services, n);
+    }
+    if let Some(v) = &pool.heater {
+        // m_low heater term manually (bypass ctx.objective to exclude tier/switching).
+        for t in 0..n {
+            phase1_cap_expr += M_LOW_EUR_PER_KWH * v.s_low[t];
+        }
+    }
+    for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
+        phase1_cap_expr += interaction.objective(iv, dt_h);
+    }
+
+    // Phase 2 friction objective: startup/ramp/switching/tier; no economic terms.
+    let mut friction_obj = Expression::from(0.0);
+    if let Some(v) = &pool.bat {
+        friction_obj += BatteryMilpContext::objective(v, 0.0, p2w.c_bat_startup_eur, p2w.c_bat_ramp_eur_kw, n, dt_h);
+    }
+    if let (Some(ctx), Some(v)) = (&ev_ctx, &pool.ev) {
+        friction_obj += ctx.objective(v, p2w.c_ev_startup_eur, p2w.c_ev_ramp_eur_kw, 0.0, n);
+    }
+    if let (Some(ctx), Some(v)) = (&heat_ctx, &pool.heater) {
+        // Tier + switching (lambda_sw_eur on ctx), no m_low.
+        friction_obj += ctx.objective(v, p2w.w_tier_penalty_eur, 0.0, n);
+    }
+
+    let mut model = vars.minimise(&friction_obj).using(highs);
+    model = model.with(constraint!(phase1_cap_expr <= c_star + epsilon));
+    model = add_model_constraints(model, inputs, &pool, &heat_ctx, &bat_ctx, &ev_ctx,
+        &p_imp, &p_exp, &u_grid, &s_imp_viol, &s_exp_viol, &active_interactions, &iv_list, &global, n);
+    model = model.with_time_limit(60.0);
+    model = model.with_mip_gap(0.02)?;
+    let solution = model.solve()?;
+
+    let friction_value = solution.eval(&friction_obj);
+    let out = read_solve_output(&solution, &friction_obj, &pool, inputs, n);
+    Ok((out, friction_value))
+}
+
+/// Lexicographic two-phase wrapper. Phase 1 always runs.
+/// Phase 2 runs when `epsilon > 0`; on Phase 2 failure, Phase 1 solution is returned.
+/// Returns `(solution, phase1_cost_eur, friction_eur)`.
+fn solve_milp_two_phase(
+    inputs: &MilpInputs,
+    p1w: &Phase1Weights,
+    p2w: &Phase2Weights,
+    epsilon: f64,
+) -> Result<(SolveOutput, f64, f64), Box<dyn std::error::Error>> {
+    let phase1_sol = solve_phase1(inputs, p1w)?;
+    let c_star = phase1_sol.objective_eur;
+    if epsilon == 0.0 {
+        return Ok((phase1_sol, c_star, 0.0));
+    }
+    match solve_phase2(inputs, p1w, p2w, c_star, epsilon) {
+        Ok((sol, friction_eur)) => Ok((sol, c_star, friction_eur)),
+        Err(e) => {
+            tracing::warn!("Phase 2 MILP infeasible, using Phase 1 solution: {e}");
+            Ok((phase1_sol, c_star, 0.0))
+        }
+    }
+}
+
+/// Helper: add power-balance and per-asset constraints to the model.
+#[allow(clippy::too_many_arguments)]
+fn add_model_constraints<S: SolverModel>(
+    mut model: S,
+    inputs: &MilpInputs,
+    pool: &MilpVarPool,
+    heat_ctx: &Option<HeaterMilpContext>,
+    bat_ctx: &Option<BatteryMilpContext>,
+    ev_ctx: &Option<EvMilpContext>,
+    p_imp: &[Variable],
+    p_exp: &[Variable],
+    u_grid: &[Variable],
+    s_imp_viol: &[Variable],
+    s_exp_viol: &[Variable],
+    active_interactions: &[&Box<dyn crate::controller::milp_interactions::AssetInteraction>],
+    iv_list: &[crate::controller::milp_interactions::InteractionVars],
+    global: &GlobalMilpInputs,
+    n: usize,
+) -> S {
+    for t in 0..n {
         let mut shift_kw = Expression::from(0.0);
         for sv in &pool.shiftable {
             for (ji, &j) in sv.valid_start_slots.iter().enumerate() {
@@ -851,7 +1063,6 @@ fn solve_milp(
             }
         }
 
-        // Optional asset contributions to power balance
         let bat_dis: Expression = pool.bat.as_ref()
             .map(|v| Expression::from(v.p_dis[t]))
             .unwrap_or_else(|| Expression::from(0.0));
@@ -869,54 +1080,49 @@ fn solve_milp(
             p_imp[t] + inputs.p_pv_kw[t] + bat_dis
                 == inputs.p_base_kw[t] + ev_kw + heat_kw + shift_kw + bat_ch + p_exp[t]
         ));
-
-        // Grid mutual exclusion and contractual limits
         model = model.with(constraint!(p_imp[t] <= inputs.p_imp_max_phys_kw[t] * u_grid[t]));
         model = model.with(constraint!(p_exp[t] <= inputs.p_exp_max_phys_kw[t] * (1.0 - u_grid[t])));
         model = model.with(constraint!(p_imp[t] <= inputs.p_imp_max_cont_kw[t] + s_imp_viol[t]));
         model = model.with(constraint!(p_exp[t] <= inputs.p_exp_max_cont_kw[t] + s_exp_viol[t]));
     }
 
-    // ── Per-asset constraints ─────────────────────────────────────────────────
-    if let (Some(ctx), Some(v)) = (&bat_ctx, &pool.bat) {
-        for c in ctx.constraints(v, n, dt_h) {
-            model = model.with(c);
-        }
+    if let (Some(ctx), Some(v)) = (bat_ctx, &pool.bat) {
+        for c in ctx.constraints(v, n, global.dt_h) { model = model.with(c); }
     }
-    if let (Some(ctx), Some(v)) = (&ev_ctx, &pool.ev) {
-        for c in ctx.constraints(v, n, dt_h) {
-            model = model.with(c);
-        }
+    if let (Some(ctx), Some(v)) = (ev_ctx, &pool.ev) {
+        for c in ctx.constraints(v, n, global.dt_h) { model = model.with(c); }
     }
-    if let (Some(ctx), Some(v)) = (&heat_ctx, &pool.heater) {
-        for c in ctx.constraints(v, n, dt_h) {
-            model = model.with(c);
-        }
+    if let (Some(ctx), Some(v)) = (heat_ctx, &pool.heater) {
+        for c in ctx.constraints(v, n, global.dt_h) { model = model.with(c); }
     }
 
-    // Shiftable load constraints: each load must start exactly once
     for sv in &pool.shiftable {
         let mut sum_y = Expression::from(0.0);
-        for &y in &sv.y_shift {
-            sum_y += y;
-        }
+        for &y in &sv.y_shift { sum_y += y; }
         model = model.with(constraint!(sum_y == 1.0));
     }
 
-    // ── Interaction constraints (e.g. McCormick envelope for bat-EV coexist) ──
     for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
-        for c in interaction.constraints(&pool, iv, &global) {
-            model = model.with(c);
-        }
+        for c in interaction.constraints(pool, iv, global) { model = model.with(c); }
     }
+    model
+}
 
-    model = model.with_time_limit(60.0);
-    model = model.with_mip_gap(0.02)?;
-    let solution = model.solve()?;
+/// Extract a `SolveOutput` from a solved `good_lp::Solution`.
+fn read_solve_output(
+    solution: &dyn Solution,
+    objective: &Expression,
+    pool: &MilpVarPool,
+    inputs: &MilpInputs,
+    n: usize,
+) -> SolveOutput {
+    let p_imp_ref = &pool.grid.p_imp;
+    let p_exp_ref = &pool.grid.p_exp;
+    let s_imp_ref = &pool.grid.s_imp_viol;
+    let s_exp_ref = &pool.grid.s_exp_viol;
 
-    // ── Populate output ───────────────────────────────────────────────────────
     let (bat_ch_kw, bat_dis_kw, e_bat_kwh) = if let Some(v) = &pool.bat {
-        let sol = BatteryMilpContext::read_solution(&solution, v, n);
+        let sol = BatteryMilpContext::read_solution(solution, v, n);
         (sol.p_ch_kw, sol.p_dis_kw, sol.e_kwh)
     } else {
         (vec![0.0; n], vec![0.0; n], vec![0.0; n + 1])
@@ -924,7 +1130,7 @@ fn solve_milp(
 
     let (ev_kw_out, z_ev_on_out, e_ev_extra_out, z_ev_core_out) =
         if let Some(v) = &pool.ev {
-            let sol = EvMilpContext::read_solution(&solution, v, n);
+            let sol = EvMilpContext::read_solution(solution, v, n);
             (sol.p_ev_kw, sol.z_ev_on, sol.e_ev_extra_kwh, sol.z_ev_core)
         } else {
             (vec![0.0; n], vec![0.0; n], 0.0, 0.0)
@@ -932,7 +1138,7 @@ fn solve_milp(
 
     let (z_heat_mid_out, z_heat_full_out, z_heat_ready_out, e_heat_tank_out) =
         if let Some(v) = &pool.heater {
-            let sol = HeaterMilpContext::read_solution(&solution, v, n);
+            let sol = HeaterMilpContext::read_solution(solution, v, n);
             (sol.z_heat_mid, sol.z_heat_full, sol.z_heat_ready, sol.e_tank_kwh)
         } else {
             (vec![0.0; n], vec![0.0; n], 0.0, vec![])
@@ -949,26 +1155,25 @@ fn solve_milp(
         }
     }
 
-    let out = SolveOutput {
-        objective_eur: solution.eval(&objective),
-        p_imp_kw: (0..n).map(|t| solution.value(p_imp[t])).collect(),
-        p_exp_kw: (0..n).map(|t| solution.value(p_exp[t])).collect(),
+    SolveOutput {
+        objective_eur: solution.eval(objective),
+        p_imp_kw: (0..n).map(|t| solution.value(p_imp_ref[t])).collect(),
+        p_exp_kw: (0..n).map(|t| solution.value(p_exp_ref[t])).collect(),
         p_bat_ch_kw: bat_ch_kw,
         p_bat_dis_kw: bat_dis_kw,
         p_ev_kw: ev_kw_out,
         z_heat_mid: z_heat_mid_out,
         z_heat_full: z_heat_full_out,
         e_bat_kwh,
-        s_imp_viol_kw: (0..n).map(|t| solution.value(s_imp_viol[t])).collect(),
-        s_exp_viol_kw: (0..n).map(|t| solution.value(s_exp_viol[t])).collect(),
+        s_imp_viol_kw: (0..n).map(|t| solution.value(s_imp_ref[t])).collect(),
+        s_exp_viol_kw: (0..n).map(|t| solution.value(s_exp_ref[t])).collect(),
         z_ev_on: z_ev_on_out,
         e_ev_extra: e_ev_extra_out,
         z_ev_core: z_ev_core_out,
         z_heat_ready: z_heat_ready_out,
         e_heat_tank_kwh: e_heat_tank_out,
         p_shiftable_kw,
-    };
-    Ok(out)
+    }
 }
 
 // ── Output translator ───────────────────────────────────────────────────────
@@ -1160,6 +1365,7 @@ fn fallback_plan(
         objective,
         soc_trajectory_kwh: vec![],
         objective_eur: 0.0,
+        friction_eur: 0.0,
         cost_breakdown: CostBreakdown::default(),
     };
     plan
@@ -1169,7 +1375,7 @@ fn fallback_plan(
 fn translate_to_plan(
     sol: &SolveOutput,
     inputs: &MilpInputs,
-    weights: &MilpWeights,
+    weights: &Phase1Weights,
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
@@ -1177,6 +1383,8 @@ fn translate_to_plan(
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     shiftable_loads: &[ShiftableLoad],
     objective: PlannerObjective,
+    phase1_cost_eur: f64,
+    friction_eur: f64,
 ) -> Plan {
     let step_s = profile.planner.plan_step_s;
     let n = inputs.n;
@@ -1408,7 +1616,8 @@ fn translate_to_plan(
         warnings,
         objective,
         soc_trajectory_kwh,
-        objective_eur: sol.objective_eur,
+        objective_eur: phase1_cost_eur,
+        friction_eur,
         cost_breakdown,
     };
     plan
@@ -1434,9 +1643,10 @@ pub fn run_planner(
 ) -> Plan {
     let objective = objective_override.unwrap_or(profile.planner.objective);
     let inputs = build_milp_inputs(assets, tariffs, capacity, profile, now, ev_session, heater_target, shiftable_loads, baseline_override);
-    let weights = build_milp_weights(profile, objective);
-    match solve_milp(&inputs, &weights) {
-        Ok(sol) => translate_to_plan(&sol, &inputs, &weights, profile, now, trigger, ev_session, heater_target, shiftable_loads, objective),
+    let p1w = build_phase1_weights(profile, objective);
+    let p2w = build_phase2_weights(&inputs, profile);
+    match solve_milp_two_phase(&inputs, &p1w, &p2w, profile.planner.phase2_epsilon_eur) {
+        Ok((sol, phase1_cost_eur, friction_eur)) => translate_to_plan(&sol, &inputs, &p1w, profile, now, trigger, ev_session, heater_target, shiftable_loads, objective, phase1_cost_eur, friction_eur),
         Err(e) => {
             warn!("MILP solver failed: {e}");
             fallback_plan(
@@ -1832,7 +2042,7 @@ mod tests {
         let mut profile = make_profile();
         profile.planner.w_energy = 99.0; // should be overridden by preset
         profile.planner.w_ghg = 99.0;
-        let w = build_milp_weights(&profile, PlannerObjective::MinCost);
+        let w = build_phase1_weights(&profile, PlannerObjective::MinCost);
         assert!((w.w_energy - 1.0).abs() < 1e-9);
         assert!((w.w_ghg - 0.20).abs() < 1e-9);
         assert!((w.w_grid - 0.02).abs() < 1e-9);
@@ -1842,7 +2052,7 @@ mod tests {
     #[test]
     fn weights_preset_min_ghg() {
         let profile = make_profile();
-        let w = build_milp_weights(&profile, PlannerObjective::MinGhg);
+        let w = build_phase1_weights(&profile, PlannerObjective::MinGhg);
         assert!((w.w_energy - 0.0).abs() < 1e-9);
         assert!((w.w_ghg - 10.0).abs() < 1e-9);
         assert!((w.c_bat_wear_eur_kwh - 0.0).abs() < 1e-9);
@@ -1855,7 +2065,7 @@ mod tests {
         profile.planner.w_ghg = 0.001;
         profile.planner.w_grid = 0.1;
         profile.planner.c_bat_wear_eur_kwh = 0.02;
-        let w = build_milp_weights(&profile, PlannerObjective::Custom);
+        let w = build_phase1_weights(&profile, PlannerObjective::Custom);
         assert!((w.w_energy - 0.5).abs() < 1e-9);
         assert!((w.w_ghg - 0.001).abs() < 1e-9);
         assert!((w.w_grid - 0.1).abs() < 1e-9);
@@ -1929,24 +2139,33 @@ mod tests {
             e_heat_target_kwh: 0.0,
             lambda_heat_sw_eur: 0.0,
             w_tier_penalty_eur: 0.0,
+            heat_initial_z_mid: 0.0,
+            heat_initial_z_full: 0.0,
             shiftable_loads: vec![],
         }
     }
 
-    fn make_solver_weights() -> MilpWeights {
-        MilpWeights {
+    fn make_phase1_weights() -> Phase1Weights {
+        Phase1Weights {
             w_energy: 1.0,
             w_ghg: 0.0,
             w_grid: 0.0,
             w_import: 0.0,
             w_viol: 1.0,
             c_bat_wear_eur_kwh: 0.0,
-            c_ev_startup_eur: 0.0,
-            c_bat_startup_eur: 0.0,
-            c_ev_ramp_eur_kw: 0.0,
-            c_bat_ramp_eur_kw: 0.0,
             c_bat_ev_coexist_eur_kwh: 0.0,
             w_services: 1.0,
+        }
+    }
+
+    fn make_phase2_weights() -> Phase2Weights {
+        Phase2Weights {
+            c_bat_startup_eur: 0.0,
+            c_bat_ramp_eur_kw: 0.0,
+            c_ev_startup_eur: 0.0,
+            c_ev_ramp_eur_kw: 0.0,
+            lambda_heat_sw_eur: 0.0,
+            w_tier_penalty_eur: 0.0,
         }
     }
 
@@ -1954,8 +2173,7 @@ mod tests {
     fn solve_feasible_no_optional_assets() {
         // Minimal case: no battery, no EV, no heater. Import exactly covers base load.
         let inputs = make_solver_inputs(4, 0.5); // base = 0.5 kW
-        let weights = make_solver_weights();
-        let result = solve_milp(&inputs, &weights);
+        let result = solve_phase1(&inputs, &make_phase1_weights());
         assert!(result.is_ok(), "solver failed: {:?}", result.err());
         let out = result.unwrap();
         for t in 0..4 {
@@ -1980,7 +2198,7 @@ mod tests {
         inputs.e_ev_core_kwh = 4.0;
         inputs.e_ev_extra_max_kwh = 20.0;
 
-        let result = solve_milp(&inputs, &make_solver_weights());
+        let result = solve_phase1(&inputs, &make_phase1_weights());
         assert!(result.is_ok(), "solver failed: {:?}", result.err());
         let out = result.unwrap();
 
@@ -2007,11 +2225,11 @@ mod tests {
         inputs.eff_bat_ch = Some(1.0);
         inputs.eff_bat_dis = Some(1.0);
 
-        let result = solve_milp(&inputs, &make_solver_weights());
+        let result = solve_phase1(&inputs, &make_phase1_weights());
         assert!(result.is_ok(), "solver failed: {:?}", result.err());
         let out = result.unwrap();
 
-        // Both charge patterns are degenerate-optimal at 0.40 EUR. Verify objective value only.
+        // Both charge patterns are degenerate-optimalat 0.40 EUR. Verify objective value only.
         let dt_h = inputs.dt_h;
         let obj: f64 = (0..4)
             .map(|t| {
@@ -2046,10 +2264,11 @@ mod tests {
         inputs.p_ev_min_kw = 1.4; // semi-continuous: z_ev_on=1 forces p_ev >= 1.4
         inputs.e_ev_core_kwh = 3.0 * 7.4; // needs 3 full slots at 1 h each
 
-        let mut weights = make_solver_weights();
+        let mut weights = make_phase2_weights();
         weights.c_ev_startup_eur = 0.5; // high penalty — one startup costs 0.5 EUR
 
-        let out = solve_milp(&inputs, &weights).expect("solver failed");
+        let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0)
+            .expect("solver failed").0;
 
         // Identify active slots (z_ev_on > 0.5 means EV charging committed)
         let active: Vec<bool> = out.z_ev_on.iter().map(|&v| v > 0.5).collect();
@@ -2077,10 +2296,11 @@ mod tests {
         inputs.eff_bat_ch = Some(1.0);
         inputs.eff_bat_dis = Some(1.0);
 
-        let mut weights = make_solver_weights();
+        let mut weights = make_phase2_weights();
         weights.c_bat_startup_eur = 0.5; // high penalty
 
-        let out = solve_milp(&inputs, &weights).expect("solver failed");
+        let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0)
+            .expect("solver failed").0;
 
         // Count idle→active transitions (mirrors EV startup test logic)
         let active: Vec<bool> = (0..n)
@@ -2110,7 +2330,7 @@ mod tests {
         inputs.eff_bat_ch = Some(1.0);
         inputs.eff_bat_dis = Some(1.0);
 
-        let out = solve_milp(&inputs, &make_solver_weights()).expect("solver failed");
+        let out = solve_phase1(&inputs, &make_phase1_weights()).expect("solver failed");
 
         for t in 0..4 {
             // p_imp + p_pv + p_bat_dis = p_base + p_bat_ch + p_exp (EV=0, heater=0)
@@ -2138,11 +2358,12 @@ mod tests {
         inputs.p_ev_min_kw = 1.4;
         inputs.e_ev_core_kwh = 3.0 * 7.4; // needs ~3 full slots at max
 
-        let mut weights = make_solver_weights();
+        let mut weights = make_phase2_weights();
         weights.c_ev_startup_eur = 0.5; // also penalise startups so EV is one block
         weights.c_ev_ramp_eur_kw = 1.0; // 1 EUR per kW change — very high
 
-        let out = solve_milp(&inputs, &weights).expect("solver failed");
+        let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0)
+            .expect("solver failed").0;
 
         let active_power: Vec<f64> = out.p_ev_kw.iter().copied().filter(|&v| v > 0.05).collect();
         // All active slots must have the same power (within 0.1 kW rounding)
@@ -2174,11 +2395,12 @@ mod tests {
         inputs.eff_bat_ch = Some(1.0);
         inputs.eff_bat_dis = Some(1.0);
 
-        let mut weights = make_solver_weights();
+        let mut weights = make_phase2_weights();
         weights.c_bat_startup_eur = 0.5;   // keep blocks contiguous
         weights.c_bat_ramp_eur_kw = 1.0;   // very high — force flat power
 
-        let out = solve_milp(&inputs, &weights).expect("solver failed");
+        let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0)
+            .expect("solver failed").0;
 
         // Check charging slots are at uniform power
         let ch_power: Vec<f64> = out.p_bat_ch_kw.iter().copied().filter(|&v| v > 0.05).collect();
@@ -2229,10 +2451,7 @@ mod tests {
         inputs.p_ev_min_kw = 1.4;
         inputs.e_ev_core_kwh = 4.0 * 1.4; // 5.6 kWh — easily met by PV alone
 
-        let mut weights = make_solver_weights();
-        weights.c_bat_ev_coexist_eur_kwh = 10.0;
-
-        let out = solve_milp(&inputs, &weights).expect("solver failed");
+        let out = solve_phase1(&inputs, &Phase1Weights { c_bat_ev_coexist_eur_kwh: 10.0, ..make_phase1_weights() }).expect("solver failed");
 
         for t in 0..n {
             if out.z_ev_on[t] > 0.5 {
