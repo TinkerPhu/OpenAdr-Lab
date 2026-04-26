@@ -116,6 +116,15 @@ impl AssetState {
             Self::Grid(s) => s.net_power_kw,
         }
     }
+
+    /// State of charge in [0.0, 1.0] for storage assets; None for all others.
+    pub fn soc(&self) -> Option<f64> {
+        match self {
+            Self::Battery(s) => Some(s.soc),
+            Self::Ev(s) => Some(s.soc),
+            _ => None,
+        }
+    }
 }
 
 /// Grid virtual state. Not controllable; derived from sum of all other assets.
@@ -464,6 +473,80 @@ impl AssetConfig {
             Self::BaseLoad(cfg) => cfg.capability_trajectory(state, duration, resolution),
         }
     }
+
+    /// Available storage energy. Returns `(discharge_kwh, charge_kwh)`.
+    /// Returns `None` for non-storage assets or an unplugged EV.
+    pub fn available_storage_kwh(&self, state: &AssetState) -> Option<(f64, f64)> {
+        match (self, state) {
+            (Self::Battery(b), AssetState::Battery(s)) => Some((
+                (s.soc - b.min_soc).max(0.0) * b.capacity_kwh,
+                (1.0 - s.soc).max(0.0) * b.capacity_kwh,
+            )),
+            (Self::Ev(e), AssetState::Ev(s)) if s.plugged => Some((
+                (s.soc - e.min_soc).max(0.0) * e.battery_kwh,
+                (1.0 - s.soc).max(0.0) * e.battery_kwh,
+            )),
+            _ => None,
+        }
+    }
+
+    /// Thermostat ON/OFF setpoint [kW] for heating assets given a target temperature.
+    /// Returns `None` for non-thermostat assets.
+    pub fn thermostat_setpoint_kw(&self, state: &AssetState, target_c: f64) -> Option<f64> {
+        match (self, state) {
+            (Self::Heater(hcfg), AssetState::Heater(hs)) => {
+                Some(if hs.temperature_c < target_c { hcfg.max_kw } else { 0.0 })
+            }
+            _ => None,
+        }
+    }
+
+    /// Surplus-charge absorption [kW] for assets that can opportunistically consume excess PV.
+    /// Returns `None` when the asset cannot absorb surplus right now.
+    pub fn surplus_charge_kw(&self, state: &AssetState, surplus_kw: f64) -> Option<f64> {
+        match (self, state) {
+            (Self::Ev(ecfg), AssetState::Ev(es)) if es.plugged && es.soc < ecfg.soc_target => {
+                Some(surplus_kw.min(ecfg.max_charge_kw))
+            }
+            _ => None,
+        }
+    }
+
+    /// Build the MILP context for this asset, or `None` for non-MILP assets (PV, base load, grid).
+    pub fn build_milp_context(
+        &self,
+        state: &AssetState,
+        n: usize,
+        step_s: u64,
+        now: DateTime<Utc>,
+        ev_session: Option<&crate::entities::device_session::EvSession>,
+        heater_target: Option<&crate::entities::device_session::HeaterTarget>,
+        ev_min_charge_kw: f64,
+        v_ev_extra_eur_kwh: f64,
+        lambda_sw: f64,
+    ) -> Option<AnyMilpContext> {
+        match self {
+            Self::Battery(cfg) => Some(AnyMilpContext::Battery(
+                battery::BatteryMilpContext::from_state(state, cfg),
+            )),
+            Self::Ev(cfg) => Some(AnyMilpContext::Ev(ev::EvMilpContext::from_state(
+                state, cfg, n, step_s, now, ev_session, ev_min_charge_kw, v_ev_extra_eur_kwh,
+            ))),
+            Self::Heater(cfg) => Some(AnyMilpContext::Heater(
+                heater::HeaterMilpContext::from_state(state, cfg, n, step_s, now, heater_target, lambda_sw),
+            )),
+            _ => None,
+        }
+    }
+}
+
+/// Unified MILP context for one asset and planning cycle.
+/// One variant per MILP-capable asset type; non-MILP assets produce `None` from
+/// `AssetConfig::build_milp_context()`.
+pub enum AnyMilpContext {
+    Battery(battery::BatteryMilpContext),
+    Ev(ev::EvMilpContext),
+    Heater(heater::HeaterMilpContext),
 }
 
 /// Full Asset trait. Combines the physics interface (Phase A) with the identity and

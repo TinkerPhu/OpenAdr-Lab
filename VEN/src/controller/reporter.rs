@@ -29,11 +29,7 @@ fn points_to_power_ts(points: &[HistoryPoint], interpolation: Interpolation) -> 
 
 /// Extract SoC (0.0–1.0) from a `HistoryPoint`'s state, if the asset is EV or Battery.
 fn soc_from_point(p: &HistoryPoint) -> Option<f64> {
-    match &p.state {
-        AssetState::Ev(s) => Some(s.soc),
-        AssetState::Battery(s) => Some(s.soc),
-        _ => None,
-    }
+    p.state.soc()
 }
 
 // ---------------------------------------------------------------------------

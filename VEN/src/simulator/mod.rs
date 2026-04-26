@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::assets::{
-    AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, Battery, BatteryState, EvCharger,
-    EvState, Grid, Heater, PvInverter,
+    AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, Battery, EvCharger, Grid, Heater,
+    PvInverter,
 };
 use crate::models::SensorSnapshot;
 use crate::profile::{AssetProfile, BaseLoadConfig, Profile};
@@ -123,61 +123,6 @@ impl SimState {
     /// Iterator over (entry, config) pairs — parallel by index.
     pub fn iter_assets(&self) -> impl Iterator<Item = (&AssetEntry, &AssetConfig)> {
         self.assets.iter().zip(self.asset_configs.iter())
-    }
-
-    /// Convenience accessor: returns the EvState if an "ev" asset exists.
-    pub fn ev_state(&self) -> Option<&EvState> {
-        self.asset("ev").and_then(|e| {
-            if let AssetState::Ev(s) = &e.state {
-                Some(s)
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Convenience accessor: returns the BatteryState if a "battery" asset exists.
-    pub fn battery_state(&self) -> Option<&BatteryState> {
-        self.asset("battery").and_then(|e| {
-            if let AssetState::Battery(s) = &e.state {
-                Some(s)
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Convenience accessor: returns the Battery config if a "battery" asset exists.
-    pub fn battery_config(&self) -> Option<&Battery> {
-        self.find_asset("battery").and_then(|(_, cfg)| {
-            if let AssetConfig::Battery(b) = cfg {
-                Some(b)
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Convenience accessor: returns the HeaterState if a "heater" asset exists.
-    pub fn heater_state(&self) -> Option<&crate::assets::heater::HeaterState> {
-        self.asset("heater").and_then(|e| {
-            if let AssetState::Heater(s) = &e.state {
-                Some(s)
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Convenience accessor: returns the Heater config if a "heater" asset exists.
-    pub fn heater_config(&self) -> Option<&Heater> {
-        self.find_asset("heater").and_then(|(_, cfg)| {
-            if let AssetConfig::Heater(h) = cfg {
-                Some(h)
-            } else {
-                None
-            }
-        })
     }
 
     /// Initialize from profile configuration, preferring `assets` list over legacy `devices`.
