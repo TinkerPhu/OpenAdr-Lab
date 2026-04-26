@@ -464,6 +464,14 @@ pub struct PlannerConfig {
     /// Set to `custom` to use the individual weight fields above directly.
     #[serde(default)]
     pub objective: PlannerObjective,
+
+    /// Minimum objective improvement (EUR) required to replace the current plan on a
+    /// Periodic replan trigger. Hard triggers (RateChange, CapacityChange, Alert,
+    /// UserRequest, DeviceDeviation, AssetStateChange) always force adoption.
+    /// 0.0 = always adopt (default — unchanged behaviour). Raise to e.g. 0.20 to
+    /// suppress plan churn when the new solution is only marginally better.
+    #[serde(default)]
+    pub plan_adoption_threshold_eur: f64,
 }
 
 impl Default for PlannerConfig {
@@ -490,6 +498,7 @@ impl Default for PlannerConfig {
             v_ev_extra_eur_kwh: default_v_ev_extra(),
             w_tier_penalty_eur: default_w_tier_penalty(),
             objective: PlannerObjective::MinCost,
+            plan_adoption_threshold_eur: 0.0,
         }
     }
 }

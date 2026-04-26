@@ -366,11 +366,15 @@ pub(crate) fn spawn_sim_tick(
                 }
 
                 // Build setpoints from plan (single authoritative control path)
-                // Plan F: capture prev tick net import for Layer 1 correction
+                // Plan F: capture prev tick net grid for Layer 1 correction.
+                // Use signed net: positive = import, negative = export. The plan
+                // stores import and export as separate non-negative fields; combining
+                // them into a signed value prevents false corrections when the plan
+                // intentionally expects export (net_import_kw=0, net_export_kw>0).
                 let prev_actual_net_kw = sim_guard.grid.net_power_w / 1000.0;
-                let plan_net_kw = plan_snap.as_ref()
+                let plan_signed_net_kw = plan_snap.as_ref()
                     .and_then(|p| p.current_slot(now))
-                    .map(|s| s.net_import_kw)
+                    .map(|s| s.net_import_kw - s.net_export_kw)
                     .unwrap_or(0.0);
 
                 let mut sp_map: std::collections::HashMap<String, f64> = match &plan_snap {
@@ -408,7 +412,7 @@ pub(crate) fn spawn_sim_tick(
                         &mut sp_map,
                         &sim_guard.assets,
                         &sim_guard.asset_configs,
-                        plan_net_kw,
+                        plan_signed_net_kw,
                         prev_actual_net_kw,
                         plan_snap.as_ref().unwrap().objective,
                         profile.planner.deviation_threshold_kw,
@@ -446,7 +450,7 @@ pub(crate) fn spawn_sim_tick(
                 // Emit CorrectionActive/CorrectionCleared SSE on significant state change
                 if (correction_kw - last_correction_kw).abs() > 0.2 {
                     if correction_kw.abs() > profile.planner.correction_min_kw {
-                        let reason = if (prev_actual_net_kw - plan_net_kw) > 0.0 {
+                        let reason = if (prev_actual_net_kw - plan_signed_net_kw) > 0.0 {
                             "import_excess"
                         } else {
                             "export_excess"
@@ -456,9 +460,9 @@ pub(crate) fn spawn_sim_tick(
                             ts: now,
                             asset_id: "battery".to_string(),
                             reason: reason.to_string(),
-                            planned_net_kw: plan_net_kw,
+                            planned_net_kw: plan_signed_net_kw,
                             actual_net_kw: prev_actual_net_kw,
-                            deviation_kw: prev_actual_net_kw - plan_net_kw,
+                            deviation_kw: prev_actual_net_kw - plan_signed_net_kw,
                             correction_kw,
                             objective: obj,
                         });
@@ -619,7 +623,7 @@ pub(crate) fn spawn_sim_tick(
             if let Some(ref plan) = plan_snap {
                 if let Some(slot) = plan.current_slot(now) {
                     let post_net_kw = sim_snapshot.grid.net_power_w / 1000.0;
-                    let post_error_kw = (post_net_kw - slot.net_import_kw).abs();
+                    let post_error_kw = (post_net_kw - (slot.net_import_kw - slot.net_export_kw)).abs();
                     if post_error_kw > profile.planner.deviation_threshold_kw {
                         deviation_ticks = deviation_ticks.saturating_add(1);
                         if deviation_ticks >= profile.planner.deviation_trigger_ticks {
@@ -810,6 +814,7 @@ pub(crate) fn spawn_planning(
             // ── Run blocking HiGHS solve off the async runtime ────────────
             let solve_start = std::time::Instant::now();
             let profile_clone = profile.clone(); // Arc<Profile>, cheap
+            let trigger_for_planner = trigger.clone(); // keep `trigger` for acceptance gate below
             let plan = tokio::task::spawn_blocking(move || {
                 controller::milp_planner::run_planner(
                     &sim_snap,
@@ -817,7 +822,7 @@ pub(crate) fn spawn_planning(
                     &capacity,
                     &profile_clone,
                     now,
-                    trigger,
+                    trigger_for_planner,
                     ev_sess.as_ref(),
                     heat_tgt.as_ref(),
                     &shift_loads,
@@ -840,14 +845,39 @@ pub(crate) fn spawn_planning(
                 slot_count: plan.slots.len(),
                 trigger: trigger_reason.clone(),
             });
-            // Replan supersedes any active correction
-            let _ = event_tx.send(PlannerEvent::CorrectionCleared {
-                ts: now,
-                reason: "superseded_by_replan".to_string(),
-            });
+            // Acceptance gate: for Periodic replans, only adopt the new plan when it
+            // improves the objective by more than plan_adoption_threshold_eur. Hard
+            // triggers always force adoption so the controller stays responsive to
+            // real-world events even if the plan only changes slightly.
+            let threshold = profile.planner.plan_adoption_threshold_eur;
+            let is_hard_trigger = !matches!(trigger, PlanTrigger::Periodic);
+            let adopt = if is_hard_trigger || threshold == 0.0 {
+                true
+            } else if let Some(ref current) = state.active_plan().await {
+                let improvement = current.objective_eur - plan.objective_eur;
+                if improvement > threshold {
+                    true
+                } else {
+                    info!(
+                        improvement_eur = improvement,
+                        threshold_eur = threshold,
+                        "periodic plan rejected: improvement below threshold"
+                    );
+                    false
+                }
+            } else {
+                true // no existing plan → always adopt
+            };
 
             let slot_count = plan.slots.len();
-            state.set_active_plan(Some(plan)).await;
+            if adopt {
+                // Replan supersedes any active correction
+                let _ = event_tx.send(PlannerEvent::CorrectionCleared {
+                    ts: now,
+                    reason: "superseded_by_replan".to_string(),
+                });
+                state.set_active_plan(Some(plan)).await;
+            }
 
             // Refresh site envelope immediately after each plan cycle.
             {
