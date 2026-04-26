@@ -606,6 +606,26 @@ mod tests {
     }
 
     #[test]
+    fn correction_suppressed_when_plan_expects_export_and_actual_matches() {
+        // Regression test for Issue A: when the plan expects export (net_import=0, net_export=3.1),
+        // plan_signed_net_kw = 0 - 3.1 = -3.1. If actual_net_kw is also -3.1 (matching the plan),
+        // deviation = actual - plan = -3.1 - (-3.1) = 0.0 → no correction must fire.
+        // Before the fix, plan_signed_net_kw was wrongly taken as net_import_kw (= 0.0),
+        // giving deviation = -3.1 which triggered a charge correction that cancelled the export.
+        let (bat_e, bat_c) = battery_entry(0.5);
+        let assets = vec![bat_e];
+        let configs = vec![bat_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("battery".to_string(), 0.0);
+        let delta = apply_battery_correction_overlay(
+            &mut sp, &assets, &configs,
+            -3.1, -3.1, PlannerObjective::MinCost, 1.0, 0.2,
+        );
+        assert_eq!(delta, 0.0,
+            "no correction when actual matches planned export (deviation = 0); got {delta}");
+    }
+
+    #[test]
     fn correction_converges_after_deviation_clears_using_dead_beat() {
         // Verify that the dead-beat formula uses setpoint_kw (not sp_map plan allocation).
         // setpoint_kw=-4.98 (held by loops.rs from previous tick), deviation = +4.48.
