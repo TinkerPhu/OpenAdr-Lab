@@ -36,7 +36,7 @@ export function AssetTimelineChart({
 }: AssetTimelineChartProps) {
   // Ensure at least a 2-point range so recharts can compute the X scale and render the
   // NOW reference line even when there are no data points yet.
-  const chartData: AssetTimelinePoint[] =
+  const rawData: AssetTimelinePoint[] =
     data.length > 0
       ? data
       : [
@@ -47,6 +47,20 @@ export function AssetTimelineChart({
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes.
   const tMin = nowMs - hoursBack * 3_600_000;
   const tMax = nowMs + hoursForward * 3_600_000;
+
+  // LOCF: carry the last known state value (soc / temp_c) into future slots where
+  // the backend emits no state — ensures the tooltip always shows the current state.
+  const chartData: AssetTimelinePoint[] = stateKey
+    ? (() => {
+        let last: number | null = null;
+        return rawData.map((pt) => {
+          const v = pt.values?.[stateKey] ?? null;
+          if (v !== null) { last = v; return pt; }
+          if (last === null) return pt;
+          return { ...pt, values: { ...(pt.values ?? {}), [stateKey]: last } };
+        });
+      })()
+    : rawData;
 
   return (
     <ResponsiveContainer width="100%" height={CELL_CHART_HEIGHT}>
@@ -64,7 +78,14 @@ export function AssetTimelineChart({
         <YAxis yAxisId="cost" orientation="right" tick={{ fontSize: 10 }} width={44} unit=" €" />
         <YAxis yAxisId="co2" orientation="right" tick={{ fontSize: 10 }} width={44} unit=" g" />
         {stateKey && (
-          <YAxis yAxisId="state" hide={true} domain={stateKey === "soc" ? [0, 1] : [0, 100]} />
+          <YAxis
+            yAxisId="state"
+            axisLine={false}
+            tickLine={false}
+            tick={false}
+            width={0}
+            domain={stateKey === "soc" ? [0, 1] : [0, 100]}
+          />
         )}
         <Tooltip
           labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
