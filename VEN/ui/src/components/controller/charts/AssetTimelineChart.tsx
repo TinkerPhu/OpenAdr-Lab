@@ -18,6 +18,7 @@ interface AssetTimelineChartProps {
   nowMs: number;
   hoursBack?: number;
   hoursForward?: number;
+  stateKey?: "soc" | "temp_c";
 }
 
 function formatTs(ts: number) {
@@ -30,6 +31,7 @@ export function AssetTimelineChart({
   nowMs,
   hoursBack = 1.0,
   hoursForward = 1.0,
+  stateKey,
 }: AssetTimelineChartProps) {
   // Ensure at least a 2-point range so recharts can compute the X scale and render the
   // NOW reference line even when there are no data points yet.
@@ -60,11 +62,14 @@ export function AssetTimelineChart({
         <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} unit=" kW" />
         <YAxis yAxisId="cost" orientation="right" tick={{ fontSize: 10 }} width={44} unit=" €" />
         <YAxis yAxisId="co2" orientation="right" tick={{ fontSize: 10 }} width={44} unit=" g" />
+        {stateKey && <YAxis yAxisId="state" hide={true} domain={["auto", "auto"]} />}
         <Tooltip
           labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
           formatter={(value: number, name: string) => {
             if (name === "CO₂eq rate [g/h]") return [value.toFixed(1) + " g/h", name];
             if (name === "Cost rate [€/h]") return [value.toFixed(4) + " €/h", name];
+            if (name === "SoC [%]") return [(value * 100).toFixed(1) + " %", name];
+            if (name === "T_tank [°C]") return [value.toFixed(1) + " °C", name];
             return [value.toFixed(3) + " kW", name];
           }}
         />
@@ -110,6 +115,22 @@ export function AssetTimelineChart({
           connectNulls={false}
           isAnimationActive={false}
         />
+
+        {/* State line: SoC (EV/battery) or T_tank (heater) — hidden axis, tooltip-only values */}
+        {stateKey && (
+          <Line
+            yAxisId="state"
+            type="monotone"
+            dataKey={(pt: AssetTimelinePoint) => pt.values?.[stateKey] ?? null}
+            name={stateKey === "soc" ? "SoC [%]" : "T_tank [°C]"}
+            stroke={stateKey === "soc" ? "#9c27b0" : "#ff9800"}
+            strokeWidth={1.5}
+            strokeDasharray="4 2"
+            dot={false}
+            connectNulls={false}
+            isAnimationActive={false}
+          />
+        )}
 
         {/* NOW reference line */}
         <ReferenceLine
