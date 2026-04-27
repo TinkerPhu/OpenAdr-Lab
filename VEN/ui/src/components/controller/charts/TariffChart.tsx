@@ -11,6 +11,12 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { TariffTimePoint } from "../types";
+import { COLOR_NOW } from "../types";
+
+const COLOR_IMPORT_TARIFF = "#f44336";
+const COLOR_EXPORT_TARIFF = "#4caf50";
+const COLOR_COST_RATE     = "#212121";
+const COLOR_CO2_RATE      = "#ff9800";
 
 interface TariffChartProps {
   data: TariffTimePoint[];
@@ -106,7 +112,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, 
             type="stepAfter"
             dataKey="importPriceEurKwh"
             name="Import tariff [€/kWh]"
-            stroke="#f44336"
+            stroke={COLOR_IMPORT_TARIFF}
             strokeDasharray="5 5"
             strokeWidth={1.5}
             dot={false}
@@ -120,7 +126,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, 
             type="stepAfter"
             dataKey="exportPriceEurKwh"
             name="Export tariff [€/kWh]"
-            stroke="#4caf50"
+            stroke={COLOR_EXPORT_TARIFF}
             strokeDasharray="5 5"
             strokeWidth={1.5}
             dot={false}
@@ -128,13 +134,13 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, 
             isAnimationActive={false}
           />
 
-          {/* Total cost rate [€/h] — black dashed */}
+          {/* Total cost rate [€/h] — near-black dashed */}
           <Line
             yAxisId="tariff"
             type="stepAfter"
             dataKey="totalCostRateEurH"
             name="Cost rate [€/h]"
-            stroke="#212121"
+            stroke={COLOR_COST_RATE}
             strokeDasharray="5 5"
             strokeWidth={1.5}
             dot={false}
@@ -148,7 +154,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, 
             type="stepAfter"
             dataKey="totalCo2RateGH"
             name="CO₂ rate [g/h]"
-            stroke="#ff9800"
+            stroke={COLOR_CO2_RATE}
             strokeDasharray="2 2"
             strokeWidth={1.5}
             dot={false}
@@ -160,9 +166,9 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, 
           <ReferenceLine
             yAxisId="tariff"
             x={nowMs}
-            stroke="#f44336"
+            stroke={COLOR_NOW}
             strokeDasharray="3 3"
-            label={{ value: "NOW", position: "top", fontSize: 9, fill: "#f44336" }}
+            label={{ value: "NOW", position: "top", fontSize: 9, fill: COLOR_NOW }}
           />
         </ComposedChart>
       </ResponsiveContainer>
