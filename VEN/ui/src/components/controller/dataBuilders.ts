@@ -14,7 +14,7 @@ import type {
   AssetSummary,
   TariffSnapshot,
 } from "./types";
-import { ASSET_COLORS, ASSET_LABELS } from "./types";
+import { ASSET_COLORS, ASSET_LABELS, COLOR_ASSET_FALLBACK } from "./types";
 import type {
   TariffSnapshot as ApiTariffSnapshot,
   SimSnapshot,
@@ -111,7 +111,7 @@ export function deriveAssetSummaries(
     return {
       assetId,
       label,
-      color: ASSET_COLORS[assetId] ?? "#888",
+      color: ASSET_COLORS[assetId] ?? COLOR_ASSET_FALLBACK,
       powerKw,
       costRateEurH,
       co2RateGH,

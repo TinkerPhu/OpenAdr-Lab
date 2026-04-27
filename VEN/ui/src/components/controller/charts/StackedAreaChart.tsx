@@ -13,7 +13,9 @@ import {
 } from "recharts";
 import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../types";
-import { ASSET_LABELS, ASSET_PLANNING_ROLE } from "../types";
+import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_NOW, COLOR_ASSET_FALLBACK } from "../types";
+
+const COLOR_GRID_LINE = "#212121";
 
 interface StackedAreaChartProps {
   data: StackedAreaPoint[];
@@ -72,13 +74,13 @@ export function StackedAreaTooltip({
     >
       <div style={{ marginBottom: 4, fontWeight: "bold" }}>{time}</div>
       {Object.entries(netByAsset).map(([assetId, kw]) => (
-        <div key={assetId} style={{ color: colorMap[assetId] ?? "#888" }}>
+        <div key={assetId} style={{ color: colorMap[assetId] ?? COLOR_ASSET_FALLBACK }}>
           {assetLabel(assetId)}: {kw >= 0 ? "+" : ""}
           {kw.toFixed(2)} kW
         </div>
       ))}
       {gridKw !== null && (
-        <div style={{ color: "#212121", borderTop: "1px solid #eee", marginTop: 4, paddingTop: 4 }}>
+        <div style={{ color: COLOR_GRID_LINE, borderTop: "1px solid #eee", marginTop: 4, paddingTop: 4 }}>
           Grid: {gridKw >= 0 ? "+" : ""}
           {gridKw.toFixed(2)} kW
         </div>
@@ -164,8 +166,8 @@ export function StackedAreaChart({
               dataKey={`${id}_pos`}
               name={`${id} +`}
               stackId="positive"
-              fill={colorMap[id] ?? "#888"}
-              stroke={colorMap[id] ?? "#888"}
+              fill={colorMap[id] ?? COLOR_ASSET_FALLBACK}
+              stroke={colorMap[id] ?? COLOR_ASSET_FALLBACK}
               fillOpacity={0.6}
               dot={false}
               connectNulls={false}
@@ -182,8 +184,8 @@ export function StackedAreaChart({
               dataKey={`${id}_neg`}
               name={`${id} -`}
               stackId="negative"
-              fill={colorMap[id] ?? "#888"}
-              stroke={colorMap[id] ?? "#888"}
+              fill={colorMap[id] ?? COLOR_ASSET_FALLBACK}
+              stroke={colorMap[id] ?? COLOR_ASSET_FALLBACK}
               fillOpacity={0.6}
               dot={false}
               connectNulls={false}
@@ -197,7 +199,7 @@ export function StackedAreaChart({
             type="stepAfter"
             dataKey="gridPowerKw"
             name="Grid [kW]"
-            stroke="#212121"
+            stroke={COLOR_GRID_LINE}
             strokeWidth={2}
             dot={false}
             connectNulls={false}
@@ -208,9 +210,9 @@ export function StackedAreaChart({
           <ReferenceLine
             yAxisId="power"
             x={nowMs}
-            stroke="#f44336"
+            stroke={COLOR_NOW}
             strokeDasharray="3 3"
-            label={{ value: "NOW", position: "top", fontSize: 9, fill: "#f44336" }}
+            label={{ value: "NOW", position: "top", fontSize: 9, fill: COLOR_NOW }}
           />
         </ComposedChart>
       </ResponsiveContainer>

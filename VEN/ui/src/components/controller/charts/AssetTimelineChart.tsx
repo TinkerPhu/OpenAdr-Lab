@@ -11,6 +11,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { AssetTimelinePoint } from "../types";
+import { COLOR_NOW } from "../types";
 
 interface AssetTimelineChartProps {
   data: AssetTimelinePoint[];
@@ -62,7 +63,9 @@ export function AssetTimelineChart({
         <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} unit=" kW" />
         <YAxis yAxisId="cost" orientation="right" tick={{ fontSize: 10 }} width={44} unit=" €" />
         <YAxis yAxisId="co2" orientation="right" tick={{ fontSize: 10 }} width={44} unit=" g" />
-        {stateKey && <YAxis yAxisId="state" hide={true} domain={["auto", "auto"]} />}
+        {stateKey && (
+          <YAxis yAxisId="state" hide={true} domain={stateKey === "soc" ? [0, 1] : [0, 100]} />
+        )}
         <Tooltip
           labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
           formatter={(value: number, name: string) => {
@@ -123,7 +126,7 @@ export function AssetTimelineChart({
             type="monotone"
             dataKey={(pt: AssetTimelinePoint) => pt.values?.[stateKey] ?? null}
             name={stateKey === "soc" ? "SoC [%]" : "T_tank [°C]"}
-            stroke={stateKey === "soc" ? "#9c27b0" : "#ff9800"}
+            stroke={color}
             strokeWidth={1.5}
             strokeDasharray="4 2"
             dot={false}
@@ -136,9 +139,9 @@ export function AssetTimelineChart({
         <ReferenceLine
           yAxisId="power"
           x={nowMs}
-          stroke="#f44336"
+          stroke={COLOR_NOW}
           strokeDasharray="3 3"
-          label={{ value: "NOW", position: "top", fontSize: 9, fill: "#f44336" }}
+          label={{ value: "NOW", position: "top", fontSize: 9, fill: COLOR_NOW }}
         />
       </ComposedChart>
     </ResponsiveContainer>
