@@ -7,8 +7,8 @@
 use chrono::{DateTime, Duration, Utc};
 use good_lp::solvers::highs::highs;
 use good_lp::{
-    constraint, variable, variables, Expression, Solution, SolverModel, Variable, WithMipGap,
-    WithTimeLimit,
+    constraint, variable, variables, Expression, Solution, SolverModel, Variable, WithInitialSolution,
+    WithMipGap, WithTimeLimit,
 };
 use tracing::warn;
 use uuid::Uuid;
@@ -830,12 +830,99 @@ fn solve_phase1(
 
 /// Phase 2: minimise operational friction subject to phase1_cost(p2_vars) ≤ c_star + epsilon.
 /// All variables are declared fresh. Battery/EV get startup/ramp aux vars.
+/// Warm-start vector: Phase 1 solution values provided as initial MIP incumbent for Phase 2.
+/// This ensures HiGHS immediately has a feasible integer point (the Phase 1 solution satisfies
+/// all Phase 2 constraints), avoiding the NoSolutionFound timeout on Pi4 ARM.
+fn build_phase2_warm_start(
+    inputs: &MilpInputs,
+    p1: &SolveOutput,
+    p_imp: &[Variable],
+    p_exp: &[Variable],
+    u_grid: &[Variable],
+    s_imp_viol: &[Variable],
+    s_exp_viol: &[Variable],
+    pool: &MilpVarPool,
+    n: usize,
+) -> Vec<(Variable, f64)> {
+    let mut iv: Vec<(Variable, f64)> = Vec::with_capacity(n * 12);
+    for t in 0..n {
+        iv.push((p_imp[t], p1.p_imp_kw[t].max(0.0)));
+        iv.push((p_exp[t], p1.p_exp_kw[t].max(0.0)));
+        iv.push((u_grid[t], if p1.p_imp_kw[t] > 1e-6 { 1.0 } else { 0.0 }));
+        iv.push((s_imp_viol[t], p1.s_imp_viol_kw[t].max(0.0)));
+        iv.push((s_exp_viol[t], p1.s_exp_viol_kw[t].max(0.0)));
+    }
+    if let Some(v) = &pool.heater {
+        let iz_mid = inputs.heat_initial_z_mid;
+        let iz_full = inputs.heat_initial_z_full;
+        for t in 0..n {
+            let zm = p1.z_heat_mid[t];
+            let zf = p1.z_heat_full[t];
+            iv.push((v.z_heat_mid[t], zm));
+            iv.push((v.z_heat_full[t], zf));
+            let e = p1.e_heat_tank_kwh.get(t).copied().unwrap_or(0.0);
+            iv.push((v.e_tank[t], e));
+            iv.push((v.s_low[t], (-e).max(0.0)));
+            let zm_prev = if t == 0 { iz_mid } else { p1.z_heat_mid[t - 1] };
+            let zf_prev = if t == 0 { iz_full } else { p1.z_heat_full[t - 1] };
+            let sw = (zm - zm_prev).abs().max((zf - zf_prev).abs());
+            iv.push((v.sw[t], sw));
+        }
+        iv.push((v.z_heat_ready, p1.z_heat_ready));
+    }
+    if let Some(v) = &pool.bat {
+        for t in 0..=n {
+            if let (Some(&e_var), Some(&e_val)) = (v.e_bat.get(t), p1.e_bat_kwh.get(t)) {
+                iv.push((e_var, e_val));
+            }
+        }
+        for t in 0..n {
+            iv.push((v.p_ch[t], p1.p_bat_ch_kw[t].max(0.0)));
+            iv.push((v.p_dis[t], p1.p_bat_dis_kw[t].max(0.0)));
+            let active = if p1.p_bat_ch_kw[t] + p1.p_bat_dis_kw[t] > 1e-6 { 1.0 } else { 0.0 };
+            iv.push((v.u_bat[t], active));
+            if let Some(&za) = v.z_active.get(t) { iv.push((za, active)); }
+        }
+        for i in 0..v.delta_active.len() {
+            let t = i + 1;
+            let z_prev = if p1.p_bat_ch_kw[i] + p1.p_bat_dis_kw[i] > 1e-6 { 1.0_f64 } else { 0.0 };
+            let z_curr = if p1.p_bat_ch_kw[t] + p1.p_bat_dis_kw[t] > 1e-6 { 1.0_f64 } else { 0.0 };
+            iv.push((v.delta_active[i], (z_curr - z_prev).max(0.0)));
+        }
+        for i in 0..v.delta_ramp.len() {
+            let t = i + 1;
+            let net_prev = p1.p_bat_ch_kw[i] - p1.p_bat_dis_kw[i];
+            let net_curr = p1.p_bat_ch_kw[t] - p1.p_bat_dis_kw[t];
+            iv.push((v.delta_ramp[i], (net_curr - net_prev).abs()));
+        }
+    }
+    if let Some(v) = &pool.ev {
+        for t in 0..n {
+            iv.push((v.p_ev[t], p1.p_ev_kw[t].max(0.0)));
+            iv.push((v.z_ev_on[t], p1.z_ev_on[t]));
+        }
+        for i in 0..v.delta_ev.len() {
+            let t = i + 1;
+            let delta = (p1.z_ev_on[t] - p1.z_ev_on[i]).max(0.0);
+            iv.push((v.delta_ev[i], delta));
+        }
+        for i in 0..v.delta_ev_ramp.len() {
+            let t = i + 1;
+            iv.push((v.delta_ev_ramp[i], (p1.p_ev_kw[t] - p1.p_ev_kw[i]).abs()));
+        }
+        iv.push((v.e_ev_extra, p1.e_ev_extra.max(0.0)));
+        iv.push((v.z_ev_core, p1.z_ev_core));
+    }
+    iv
+}
+
 fn solve_phase2(
     inputs: &MilpInputs,
     p1w: &Phase1Weights,
     p2w: &Phase2Weights,
     c_star: f64,
     epsilon: f64,
+    phase1_sol: &SolveOutput,
 ) -> Result<(SolveOutput, f64), Box<dyn std::error::Error>> {
     let n = inputs.n;
     let dt_h = inputs.dt_h;
@@ -998,7 +1085,12 @@ fn solve_phase2(
         friction_obj += ctx.objective(v, p2w.w_tier_penalty_eur, 0.0, n);
     }
 
+    let warm_start = build_phase2_warm_start(
+        inputs, phase1_sol, &p_imp, &p_exp, &u_grid, &s_imp_viol, &s_exp_viol, &pool, n,
+    );
+
     let mut model = vars.minimise(&friction_obj).using(highs);
+    model = model.with_initial_solution(warm_start);
     model = model.with(constraint!(phase1_cap_expr <= c_star + epsilon));
     model = add_model_constraints(model, inputs, &pool, &heat_ctx, &bat_ctx, &ev_ctx,
         &p_imp, &p_exp, &u_grid, &s_imp_viol, &s_exp_viol, &active_interactions, &iv_list, &global, n);
@@ -1025,10 +1117,11 @@ fn solve_milp_two_phase(
     if epsilon == 0.0 {
         return Ok((phase1_sol, c_star, 0.0));
     }
-    match solve_phase2(inputs, p1w, p2w, c_star, epsilon) {
+    tracing::debug!(c_star, epsilon, "Phase 2 starting");
+    match solve_phase2(inputs, p1w, p2w, c_star, epsilon, &phase1_sol) {
         Ok((sol, friction_eur)) => Ok((sol, c_star, friction_eur)),
         Err(e) => {
-            tracing::warn!("Phase 2 MILP infeasible, using Phase 1 solution: {e}");
+            tracing::warn!(c_star, epsilon, "Phase 2 failed (warm-start provided), using Phase 1: {e}");
             Ok((phase1_sol, c_star, 0.0))
         }
     }
