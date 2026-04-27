@@ -23,7 +23,7 @@ An operator opens the VEN dashboard and looks at the battery asset's timeline ch
 
 **Acceptance Scenarios**:
 
-1. **Given** the MILP planner has produced a plan with a battery charge schedule, **When** the timeline API is queried with a forward window, **Then** future battery points include a `soc` value (0.0–1.0) that reflects the end-of-slot state of charge after applying the planned power.
+1. **Given** the MILP planner has produced a plan with a battery charge schedule, **When** the timeline API is queried with a forward window, **Then** future battery points include a `soc` value (0.0–1.0) that reflects the start-of-slot state of charge entering the slot (before the slot's planned power is applied).
 2. **Given** the battery is at 80% SoC and the plan charges it to 95% over two hours, **When** the timeline is fetched, **Then** the future `soc` values rise monotonically across charging slots from ~0.80 toward ~0.95.
 3. **Given** no plan is active (planner has not yet run), **When** the timeline is queried, **Then** future battery points have `power_kw` only — no `soc` key — and the response is still valid.
 

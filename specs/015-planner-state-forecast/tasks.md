@@ -20,6 +20,20 @@
 
 ---
 
+## Phase 1.5: BDD Scenarios — Red Phase *(Constitution Principle II gate)*
+
+**Purpose**: Write the BDD scenarios and step definitions *before* any implementation code is written. These must be committed as failing tests to satisfy the BDD-First constitution requirement. The step implementations will call the VEN timeline API and assert on response keys; they will fail (key absent) until Phase 3–5 implementation is complete.
+
+**⚠️ CONSTITUTION GATE**: This phase MUST complete before Phase 3–5 implementation begins.
+
+- [ ] T019 [P] Add BDD scenario `@planner-state` for future battery `soc` key to `tests/features/ven_timeline.feature`: "Given the VEN is running / When I GET /timeline/battery?hours_forward=4 / Then the future battery points include a soc key"
+- [ ] T020 [P] Add BDD scenario `@planner-state` for future heater `temp_c` key to `tests/features/ven_timeline.feature`: "Given the VEN is running / When I GET /timeline/heater?hours_forward=4 / Then the future heater points include a temp_c key"
+- [ ] T021 Add BDD step definitions for `@planner-state` scenarios in `tests/features/steps/ven_timeline_steps.py`: steps `"future {asset} points include a {key} key"` — GET the timeline, filter to future points (ts > now), assert at least one has `values[key]` present
+
+**Checkpoint**: BDD scenarios exist and FAIL (key absent from future points) — red phase confirmed.
+
+---
+
 ## Phase 2: Foundational (Blocking Prerequisites)
 
 **Purpose**: Data-model and wiring changes that must compile cleanly before any user story can add behavior.
@@ -39,12 +53,12 @@
 
 **Goal**: Future battery timeline points include a `soc` key (0.0–1.0) derived from the MILP energy trajectory.
 
-**Independent Test**: `GET /timeline/battery?hours_forward=4` returns future points that each contain `"soc"` in their `values` map, with values consistent with the MILP plan. Verify with `cargo test` unit tests; BDD smoke check in Phase 6.
+**Independent Test**: `GET /timeline/battery?hours_forward=4` returns future points that each contain `"soc"` in their `values` map, with values consistent with the MILP plan. Verify with `cargo test` unit tests; BDD scenario written in Phase 1.5 should now pass.
 
 - [ ] T006 [P] [US1] Add `Battery::future_state_values(&self, e_kwh: f64) -> HashMap<String, f64>` method near `state_values()` in `VEN/src/assets/battery.rs`: compute `soc = (e_kwh / self.capacity_kwh).clamp(0.0, 1.0)`, return `[("soc".to_string(), soc)].into()`
 - [ ] T007 [US1] Add unit tests for `Battery::future_state_values` in `VEN/src/assets/battery.rs`: `battery_future_state_mid_soc` (e_kwh = 5.0, capacity = 10.0 → soc = 0.5), `battery_future_state_clamp_over` (e_kwh > capacity → soc = 1.0), `battery_future_state_clamp_under` (e_kwh < 0 → soc = 0.0) (depends on T006)
 - [ ] T008 [US1] Populate `planned_state_by_asset` for battery in `translate_to_plan` in `VEN/src/controller/milp_planner.rs`: build `Battery::from_config(battery_cfg)`, iterate slots, for each slot `t` call `battery.future_state_values(sol.e_bat_kwh[t])` and insert into `slot.planned_state_by_asset` under key `battery_id` (depends on T002, T006)
-- [ ] T009 [US1] Add unit test `translate_to_plan_battery_slot_has_soc` in `VEN/src/controller/milp_planner.rs`: run a minimal solve with battery enabled, call `translate_to_plan`, assert every slot's `planned_state_by_asset["battery"]["soc"]` is in [0.0, 1.0] (depends on T008)
+- [ ] T009 [US1] Add unit test `translate_to_plan_battery_slot_has_soc` in `VEN/src/controller/milp_planner.rs`: run a minimal solve with battery enabled, call `translate_to_plan`, assert every slot's `planned_state_by_asset["battery"]["soc"]` is in [0.0, 1.0]; also assert that for any slot t where `sol.p_bat_ch_kw[t] > 0.01`, the soc at slot t+1 is ≥ soc at slot t (charging increases SoC, verifying FR-008 consistency between power and state) (depends on T008)
 - [ ] T010 [US1] Add unit test `future_battery_point_includes_soc` in `VEN/src/controller/timeline.rs`: construct a `Plan` with battery slots that have `planned_state_by_asset["battery"]["soc"] = 0.75`, call `build_asset_timeline`, assert the future battery point has `values["soc"] == 0.75` (depends on T005, T008)
 
 **Checkpoint**: `cargo test --workspace` passes — battery future points carry `soc` values
@@ -83,11 +97,8 @@
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-**Purpose**: BDD coverage, final verification, documentation.
+**Purpose**: Final regression validation and documentation. BDD scenarios already written (Phase 1.5); this phase confirms they now pass.
 
-- [ ] T019 [P] Add BDD scenario `@planner-state` for future battery `soc` key to `tests/features/ven_timeline.feature`: "Given the VEN is running / When I GET /timeline/battery?hours_forward=4 / Then the future battery points include a soc key"
-- [ ] T020 [P] Add BDD scenario `@planner-state` for future heater `temp_c` key to `tests/features/ven_timeline.feature`: "Given the VEN is running / When I GET /timeline/heater?hours_forward=4 / Then the future heater points include a temp_c key"
-- [ ] T021 Add BDD step definitions for `@planner-state` scenarios in `tests/features/steps/ven_timeline_steps.py`: steps `"future {asset} points include a {key} key"` — GET the timeline, filter to future points (ts > now), assert at least one has `values[key]` present
 - [ ] T022 Run `cargo test --workspace` in `VEN/` and confirm no regressions (full green before merge)
 - [ ] T023 [P] Append feature entry `015 Planner State Forecast in Timeline API` to `docs/history/project_journal.md`
 
@@ -98,11 +109,12 @@
 ### Phase Dependencies
 
 - **Setup (Phase 1)**: No dependencies — start immediately
+- **BDD Red Phase (Phase 1.5)**: Depends on Phase 1. MUST complete before Phase 3–5 (constitution gate)
 - **Foundational (Phase 2)**: Depends on Phase 1 baseline. Blocks all user story phases
-- **US1 Battery (Phase 3)**: Depends on Phase 2 (T002, T005). No dependency on US2 or US3
+- **US1 Battery (Phase 3)**: Depends on Phase 2 (T002, T005) and Phase 1.5 (T019–T021 written). No dependency on US2 or US3
 - **US2 EV (Phase 4)**: Depends on Phase 2 (T002, T003, T004). No dependency on US1 or US3
 - **US3 Heater (Phase 5)**: Depends on Phase 2 (T002). No dependency on US1 or US2
-- **Polish (Phase 6)**: Depends on all user story phases desired for release
+- **Polish (Phase 6)**: Depends on all user story phases; confirms BDD scenarios now pass
 
 ### User Story Dependencies
 
