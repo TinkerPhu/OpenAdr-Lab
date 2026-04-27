@@ -20,6 +20,11 @@ export function AssetMidSection({
   hoursBack = 1.0,
   hoursForward = 1.0,
 }: AssetMidSectionProps) {
+  const stateKey =
+    assetId === "ev" || assetId === "battery" ? "soc" :
+    assetId === "heater" ? "temp_c" :
+    undefined;
+
   return (
     <Box
       data-testid={`asset-cell-${assetId}-mid`}
@@ -32,6 +37,7 @@ export function AssetMidSection({
           nowMs={nowMs}
           hoursBack={hoursBack}
           hoursForward={hoursForward}
+          stateKey={stateKey}
         />
       </div>
     </Box>
