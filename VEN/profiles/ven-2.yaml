@@ -7,7 +7,7 @@ assets:
     temp_initial_c: 60.0
     temp_min_c: 40.0      # tank hysteresis lower bound
     temp_max_c: 80.0      # tank hysteresis upper bound
-    volume_l: 200.0
+    volume_l: 2000.0
     k_loss_kw_per_c: 0.003
     draw_kw: 0.5
     switching_penalty_eur: 0.50
@@ -22,3 +22,6 @@ simulator:
   tick_s: 1
   persist_every_s: 15
   report_interval_s: 60
+
+planner:
+  phase2_epsilon_eur: 0.10  # allow 10 ct slack so Phase 2 can smooth switching
