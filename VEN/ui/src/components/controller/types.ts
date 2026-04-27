@@ -10,6 +10,14 @@
 /** Known physics assets. Dynamic shiftable loads (e.g. "wm") are also valid. */
 export type AssetId = "ev" | "heater" | "pv" | "battery" | "base_load" | (string & {});
 
+// ─── Shared UI colors ─────────────────────────────────────────────────────────
+
+/** NOW reference line / label across all timeline charts. */
+export const COLOR_NOW = "#f44336";
+
+/** Fallback color for unknown/unregistered asset IDs. */
+export const COLOR_ASSET_FALLBACK = "#888";
+
 // ─── Asset color palette (fixed per asset type) ───────────────────────────────
 
 export const ASSET_COLORS: Record<string, string> = {

@@ -6,7 +6,7 @@ import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
 import UnfoldLessIcon from "@mui/icons-material/UnfoldLess";
 import { CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW, CELL_CHART_HEIGHT_TALL } from "./chartLayout";
 import type { AssetId, AssetSummary, AssetTimelinePoint, StackedAreaPoint } from "./types";
-import { ASSET_COLORS } from "./types";
+import { ASSET_COLORS, COLOR_ASSET_FALLBACK } from "./types";
 import { StackedAreaChart } from "./charts/StackedAreaChart";
 
 /** Discover all asset IDs present in the timelines (everything except "grid"). */
@@ -95,7 +95,7 @@ export function GridAccumulatedCell({
             key={s.assetId}
             variant="caption"
             data-testid={`accumulated-power-${s.assetId}`}
-            sx={{ color: ASSET_COLORS[s.assetId] ?? "#888" }}
+            sx={{ color: ASSET_COLORS[s.assetId] ?? COLOR_ASSET_FALLBACK }}
           >
             {s.label}: {s.powerKw >= 0 ? "+" : ""}
             {s.powerKw.toFixed(2)} kW
