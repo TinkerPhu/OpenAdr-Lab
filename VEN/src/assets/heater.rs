@@ -333,7 +333,7 @@ pub struct HeaterMilpVars {
     pub e_tank: Vec<Variable>,
     /// Continuous ≥ 0: below-minimum soft-violation slack [kWh] at slot t. len = n.
     pub s_low: Vec<Variable>,
-    /// Continuous ≥ 0: switching indicator per step (sw[0] fixed at 0). len = n.
+    /// Continuous ≥ 0: switching indicator per step. sw[0] measures switch from initial hardware state. len = n.
     pub sw: Vec<Variable>,
 }
 
@@ -388,12 +388,10 @@ impl HeaterMilpContext {
             .map(|_| vars.add(variable().min(0.0)))
             .collect();
 
-        // sw[0]: fixed at 0 (no previous slot); sw[t>0]: continuous ≥ 0.
+        // sw[t]: switching indicator ≥ 0 for all slots including t=0.
+        // t=0 measures the switch relative to the last observed hardware state (initial_z_*).
         let sw = (0..n)
-            .map(|t| {
-                if t == 0 { vars.add(variable().min(0.0).max(0.0)) }
-                else { vars.add(variable().min(0.0)) }
-            })
+            .map(|_| vars.add(variable().min(0.0)))
             .collect();
 
         HeaterMilpVars { z_heat_mid, z_heat_full, z_heat_ready, e_tank, s_low, sw }
@@ -421,10 +419,6 @@ impl HeaterMilpContext {
         let e_init = self.e_init_kwh;
         cs.push(constraint!(v.e_tank[0] >= e_init));
         cs.push(constraint!(v.e_tank[0] <= e_init));
-
-        // C1b: pin initial heater tier to the last observed hardware state.
-        cs.push(constraint!(v.z_heat_mid[0] == self.initial_z_mid));
-        cs.push(constraint!(v.z_heat_full[0] == self.initial_z_full));
 
         // C2: tank dynamics — E[t+1] = E[t] + (P_heat[t] − q_dem) × dt_h.
         // Expressed as two inequalities (== is not directly supported).
@@ -456,6 +450,12 @@ impl HeaterMilpContext {
         }
 
         // C5: switching indicators — sw[t] ≥ |z_x[t] − z_x[t−1]| for each binary.
+        // t=0 uses initial_z_* (last observed hardware state) as the previous slot,
+        // so switching at t=0 is allowed but incurs the relay penalty.
+        cs.push(constraint!(v.sw[0] >= v.z_heat_mid[0] - self.initial_z_mid));
+        cs.push(constraint!(v.sw[0] >= self.initial_z_mid - v.z_heat_mid[0]));
+        cs.push(constraint!(v.sw[0] >= v.z_heat_full[0] - self.initial_z_full));
+        cs.push(constraint!(v.sw[0] >= self.initial_z_full - v.z_heat_full[0]));
         for t in 1..n {
             cs.push(constraint!(v.sw[t] >= v.z_heat_mid[t] - v.z_heat_mid[t - 1]));
             cs.push(constraint!(v.sw[t] >= v.z_heat_mid[t - 1] - v.z_heat_mid[t]));
