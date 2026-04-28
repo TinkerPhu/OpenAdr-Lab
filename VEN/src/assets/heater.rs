@@ -146,6 +146,14 @@ impl Heater {
         m
     }
 
+    /// State values for a future MILP time slot, given the thermal energy stored
+    /// above `temp_min_c` at the start of that slot (kWh).
+    /// Returns `{"temp_c": <temperature>}`.
+    pub fn future_state_values(&self, e_tank_kwh: f64) -> HashMap<String, f64> {
+        let temp_c = self.temp_min_c + e_tank_kwh / self.thermal_mass_kwh_per_c;
+        HashMap::from([("temp_c".into(), temp_c)])
+    }
+
     pub fn capabilities(&self, asset_id: &str, _state: &HeaterState) -> AssetCapabilities {
         AssetCapabilities {
             asset_id: asset_id.to_string(),
@@ -928,5 +936,30 @@ mod tests {
     fn heater_milp_constraints_switching_four_per_step() {
         // C5: 4×(n−1) switching constraints for n > 1.
         todo!("implement after HeaterMilpContext redesign")
+    }
+
+    // T016: Heater::future_state_values returns correct temp_c.
+    #[test]
+    fn future_state_values_mid_energy() {
+        let h = default_heater(); // thermal_mass_kwh_per_c = 2.0, temp_min_c = 20.0
+        // 2.0 kWh stored → temp = 20.0 + 2.0 / 2.0 = 21.0 °C
+        let vals = h.future_state_values(2.0);
+        let temp_c = vals["temp_c"];
+        assert!((temp_c - 21.0).abs() < 1e-9, "expected temp_c=21.0, got {temp_c}");
+    }
+
+    #[test]
+    fn future_state_values_zero_energy() {
+        let h = default_heater();
+        let vals = h.future_state_values(0.0);
+        assert!((vals["temp_c"] - h.temp_min_c).abs() < 1e-9);
+    }
+
+    #[test]
+    fn future_state_values_returns_only_temp_c() {
+        let h = default_heater();
+        let vals = h.future_state_values(1.0);
+        assert_eq!(vals.len(), 1, "expected exactly one key");
+        assert!(vals.contains_key("temp_c"));
     }
 }
