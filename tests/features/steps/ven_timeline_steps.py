@@ -89,6 +89,7 @@ def step_poll_timeline_future_key(context, asset_id, key, timeout):
     """
     from features.helpers.wait import poll_until
     now_ts = datetime.now(timezone.utc).timestamp()
+    context.poll_now_ts = now_ts
 
     def fetch():
         return ven_get(f"/timeline/{asset_id}?hours_back=0&hours_forward=4").json()
@@ -96,10 +97,14 @@ def step_poll_timeline_future_key(context, asset_id, key, timeout):
     def has_future_with_key(points):
         if not isinstance(points, list):
             return False
+        # Use a 30-second margin to exclude the now-point (ts ≈ now_ts + latency).
+        # This ensures only real future grid buckets are accepted, and forces the
+        # poll to wait until the planner has run and LOCF has propagated planned
+        # state values into the future grid.
         return any(
             p.get("values") and key in p["values"]
             for p in points
-            if _parse_ts(p.get("ts", "1970-01-01T00:00:00+00:00")) > now_ts
+            if _parse_ts(p.get("ts", "1970-01-01T00:00:00+00:00")) > now_ts + 30
         )
 
     context.last_response_json = poll_until(
@@ -114,13 +119,15 @@ def step_poll_timeline_future_key(context, asset_id, key, timeout):
 def step_response_has_future_point_with_key(context, key):
     data = context.last_response_json
     assert isinstance(data, list), f"Expected list, got {type(data).__name__}"
-    now_ts = datetime.now(timezone.utc).timestamp()
+    # Reuse the now_ts captured at @when time to avoid a timestamp race
+    # (the "future" point may become "past" by the time @then runs).
+    now_ts = getattr(context, "poll_now_ts", datetime.now(timezone.utc).timestamp())
     future_with_key = [
         p for p in data
-        if _parse_ts(p.get("ts", "1970-01-01T00:00:00+00:00")) > now_ts
+        if _parse_ts(p.get("ts", "1970-01-01T00:00:00+00:00")) > now_ts + 30
         and p.get("values") and key in p["values"]
     ]
     assert future_with_key, (
-        f"No future timeline point has values['{key}']. "
+        f"No future timeline point (>30s ahead) has values['{key}']. "
         f"Sample points: {data[:3]}"
     )
