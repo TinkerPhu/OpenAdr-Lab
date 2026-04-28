@@ -124,6 +124,29 @@ impl EvCharger {
         m
     }
 
+    /// Compute EV SoC trajectory from MILP charge-power schedule.
+    ///
+    /// Returns a `Vec<f64>` of length `n + 1` where index `t` is the SoC at the
+    /// **start** of slot `t` (index `n` is the SoC at the end of the last slot).
+    /// `p_ev_kw[t]` is net charge power (kW) during slot `t`, `dt_h` is slot
+    /// duration in hours.  Values are clamped to `[0.0, 1.0]`.
+    pub fn soc_trajectory(p_ev_kw: &[f64], soc_init: f64, battery_kwh: f64, dt_h: f64) -> Vec<f64> {
+        let n = p_ev_kw.len();
+        let mut traj = Vec::with_capacity(n + 1);
+        traj.push(soc_init.clamp(0.0, 1.0));
+        for t in 0..n {
+            let next = traj[t] + p_ev_kw[t] * dt_h / battery_kwh;
+            traj.push(next.clamp(0.0, 1.0));
+        }
+        traj
+    }
+
+    /// State values for a future MILP time slot given the SoC at the start of
+    /// that slot. Returns `{"soc": <0..1>}`.
+    pub fn future_state_values_at(soc: f64) -> HashMap<String, f64> {
+        HashMap::from([("soc".into(), soc.clamp(0.0, 1.0))])
+    }
+
     pub fn capabilities(&self, asset_id: &str, state: &EvState) -> AssetCapabilities {
         AssetCapabilities {
             asset_id: asset_id.to_string(),
@@ -695,5 +718,39 @@ mod tests {
         let cap = ev.capability_inner(&state);
         assert!(cap.max_import_kw > 0.0, "capability must be positive when soc < soc_target");
         assert!((cap.max_import_kw - ev.max_charge_kw).abs() < 1e-9);
+    }
+
+    // T012: EvCharger::soc_trajectory and future_state_values_at.
+    #[test]
+    fn soc_trajectory_charges_monotonically() {
+        // 5 slots of 1 kW charging, 10 kWh battery, dt_h = 1h → each slot +0.1 SoC
+        let p_ev = vec![1.0_f64; 5];
+        let traj = EvCharger::soc_trajectory(&p_ev, 0.0, 10.0, 1.0);
+        assert_eq!(traj.len(), 6);
+        for i in 1..=5 {
+            assert!(traj[i] > traj[i - 1], "SoC must increase during charging");
+        }
+        assert!((traj[5] - 0.5).abs() < 1e-9, "expected final soc=0.5, got {}", traj[5]);
+    }
+
+    #[test]
+    fn soc_trajectory_clamps_at_one() {
+        // Over-charge scenario: 1000 slots of 10 kW charging
+        let p_ev = vec![10.0_f64; 1000];
+        let traj = EvCharger::soc_trajectory(&p_ev, 0.5, 10.0, 1.0);
+        assert_eq!(*traj.last().unwrap(), 1.0);
+    }
+
+    #[test]
+    fn future_state_values_at_returns_soc() {
+        let vals = EvCharger::future_state_values_at(0.65);
+        let soc = vals["soc"];
+        assert!((soc - 0.65).abs() < 1e-9, "expected soc=0.65, got {soc}");
+    }
+
+    #[test]
+    fn future_state_values_at_clamps() {
+        assert_eq!(EvCharger::future_state_values_at(-0.1)["soc"], 0.0);
+        assert_eq!(EvCharger::future_state_values_at(1.5)["soc"], 1.0);
     }
 }

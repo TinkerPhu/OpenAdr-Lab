@@ -113,6 +113,13 @@ impl Battery {
         m
     }
 
+    /// State values for a future MILP time slot, given the battery energy stored
+    /// at the start of that slot (kWh). Returns `{"soc": <0..1>}`.
+    pub fn future_state_values(&self, e_kwh: f64) -> HashMap<String, f64> {
+        let soc = (e_kwh / self.capacity_kwh).clamp(0.0, 1.0);
+        HashMap::from([("soc".into(), soc)])
+    }
+
     pub fn capabilities(&self, asset_id: &str, state: &BatteryState) -> AssetCapabilities {
         let cap = self.capability_inner(state);
         AssetCapabilities {
@@ -561,5 +568,46 @@ mod tests {
         assert!((state.soc - 1.0).abs() < 0.001);
         let (_, actual) = bat.step_inner(&state, 10.0, Duration::seconds(1));
         assert_eq!(actual, 0.0);
+    }
+
+    // T007: Battery::future_state_values returns correct soc.
+    #[test]
+    fn future_state_values_mid_charge() {
+        let bat = Battery {
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            round_trip_efficiency: 0.9,
+            min_soc: 0.1,
+        };
+        let vals = bat.future_state_values(5.0); // 5 kWh of 10 kWh capacity → SoC = 0.5
+        let soc = vals["soc"];
+        assert!((soc - 0.5).abs() < 1e-9, "expected soc=0.5, got {soc}");
+    }
+
+    #[test]
+    fn future_state_values_clamps_to_zero() {
+        let bat = Battery {
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            round_trip_efficiency: 0.9,
+            min_soc: 0.1,
+        };
+        let vals = bat.future_state_values(-1.0);
+        assert_eq!(vals["soc"], 0.0);
+    }
+
+    #[test]
+    fn future_state_values_clamps_to_one() {
+        let bat = Battery {
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            round_trip_efficiency: 0.9,
+            min_soc: 0.1,
+        };
+        let vals = bat.future_state_values(15.0);
+        assert_eq!(vals["soc"], 1.0);
     }
 }

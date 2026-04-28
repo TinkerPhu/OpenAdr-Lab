@@ -1,8 +1,16 @@
 """Step definitions for VEN Asset Timeline Endpoints (speckit 005)."""
 
 from datetime import datetime, timezone
-from behave import given, then
+from behave import given, then, when
 from features.helpers.api_client import ven_get
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _parse_ts(ts_str):
+    """Parse ISO 8601 timestamp string to epoch seconds (float)."""
+    clean = ts_str.replace("Z", "+00:00")
+    return datetime.fromisoformat(clean).timestamp()
 
 
 # ── Given ────────────────────────────────────────────────────────────────────
@@ -68,3 +76,51 @@ def step_all_points_at_or_after_now(context):
         assert ts_dt >= cutoff, (
             f"Point {i} ts={ts_str} is before now-30s={cutoff.isoformat()}"
         )
+
+
+# ── T019-T021: planned_state_by_asset forecast keys ──────────────────────────
+
+@when('I poll /timeline/{asset_id} for future points with "{key}" key within {timeout:d}s')
+def step_poll_timeline_future_key(context, asset_id, key, timeout):
+    """Poll the asset timeline until at least one future point has *key* in values.
+
+    Stores the final point list in ``context.last_response_json``.
+    Raises TimeoutError if the planner has not populated the key within *timeout* seconds.
+    """
+    from features.helpers.wait import poll_until
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    def fetch():
+        return ven_get(f"/timeline/{asset_id}?hours_back=0&hours_forward=4").json()
+
+    def has_future_with_key(points):
+        if not isinstance(points, list):
+            return False
+        return any(
+            p.get("values") and key in p["values"]
+            for p in points
+            if _parse_ts(p.get("ts", "1970-01-01T00:00:00+00:00")) > now_ts
+        )
+
+    context.last_response_json = poll_until(
+        fetch,
+        has_future_with_key,
+        timeout=timeout,
+        description=f"future /timeline/{asset_id} points with '{key}' key",
+    )
+
+
+@then('the response has at least one future point with values key "{key}"')
+def step_response_has_future_point_with_key(context, key):
+    data = context.last_response_json
+    assert isinstance(data, list), f"Expected list, got {type(data).__name__}"
+    now_ts = datetime.now(timezone.utc).timestamp()
+    future_with_key = [
+        p for p in data
+        if _parse_ts(p.get("ts", "1970-01-01T00:00:00+00:00")) > now_ts
+        and p.get("values") and key in p["values"]
+    ]
+    assert future_with_key, (
+        f"No future timeline point has values['{key}']. "
+        f"Sample points: {data[:3]}"
+    )

@@ -14,9 +14,9 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::assets::{AssetConfig, PvInverter};
-use crate::assets::battery::BatteryMilpContext;
-use crate::assets::ev::{EvMilpContext, EvMilpMode};
-use crate::assets::heater::{HeaterMilpContext, HeaterMilpMode};
+use crate::assets::battery::{Battery, BatteryMilpContext};
+use crate::assets::ev::{EvCharger, EvMilpContext, EvMilpMode};
+use crate::assets::heater::{Heater, HeaterMilpContext, HeaterMilpMode};
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
@@ -188,6 +188,11 @@ struct MilpInputs {
     // ── Shiftable loads (Phase B) ────────────────────────────────────────────
     /// MILP-ready shiftable load descriptors (one per ShiftableLoad that fits the horizon)
     shiftable_loads: Vec<ShiftableLoadMilp>,
+
+    /// Live SoC of the EV at plan-build time [0.0..1.0].
+    /// Used to integrate the planned EV charge power into a SoC trajectory for
+    /// the timeline API. None when no EV asset is present or EV state is unavailable.
+    soc_ev_init: Option<f64>,
 }
 
 /// Internal MILP descriptor for one shiftable load block.
@@ -421,14 +426,17 @@ fn build_milp_inputs(
     };
 
     // ── EV ────────────────────────────────────────────────────────────────────
-    let (a_ev, ev_mode, t_ev_dead, p_ev_max, p_ev_min, e_ev_core, e_ev_extra, v_ev_extra) =
+    let (a_ev, ev_mode, t_ev_dead, p_ev_max, p_ev_min, e_ev_core, e_ev_extra, v_ev_extra, soc_ev_init) =
         if let Some(ev_cfg) = profile.ev_config() {
-            let ctx = match assets.find_asset("ev") {
-                Some((entry, AssetConfig::Ev(e))) => EvMilpContext::from_state(
-                    &entry.state, e, n, step_s, now, ev_session,
-                    ev_cfg.min_charge_kw, profile.planner.v_ev_extra_eur_kwh,
-                ),
-                _ => EvMilpContext {
+            let (ctx, soc_init) = match assets.find_asset("ev") {
+                Some((entry, AssetConfig::Ev(e))) => {
+                    let soc = if let AssetState::Ev(s) = &entry.state { Some(s.soc) } else { None };
+                    (EvMilpContext::from_state(
+                        &entry.state, e, n, step_s, now, ev_session,
+                        ev_cfg.min_charge_kw, profile.planner.v_ev_extra_eur_kwh,
+                    ), soc)
+                },
+                _ => (EvMilpContext {
                     mode: EvMilpMode::MustNotRun,
                     a_ev: vec![false; n],
                     t_dead_step: None,
@@ -437,7 +445,7 @@ fn build_milp_inputs(
                     e_core_kwh: 0.0,
                     e_extra_max_kwh: ev_cfg.battery_kwh * (1.0 - ev_cfg.soc_target),
                     v_extra_eur_kwh: profile.planner.v_ev_extra_eur_kwh,
-                },
+                }, None),
             };
             let ev_mode = match ctx.mode {
                 EvMilpMode::MustRun => MilpLoadMode::MustRun,
@@ -445,10 +453,10 @@ fn build_milp_inputs(
                 EvMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
             };
             (ctx.a_ev, ev_mode, ctx.t_dead_step, ctx.p_max_kw, ctx.p_min_kw,
-             ctx.e_core_kwh, ctx.e_extra_max_kwh, ctx.v_extra_eur_kwh)
+             ctx.e_core_kwh, ctx.e_extra_max_kwh, ctx.v_extra_eur_kwh, soc_init)
         } else {
             // No EV asset in profile
-            (vec![false; n], MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0, 0.0, 0.0)
+            (vec![false; n], MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0, 0.0, 0.0, None)
         };
 
     // ── Heater ────────────────────────────────────────────────────────────────
@@ -615,6 +623,7 @@ fn build_milp_inputs(
         heat_initial_z_mid: heat_iz_mid,
         heat_initial_z_full: heat_iz_full,
         shiftable_loads: milp_loads,
+        soc_ev_init,
     }
 }
 
@@ -1437,6 +1446,7 @@ fn fallback_plan(
                     bat_charge_kw: 0.0,
                     bat_discharge_kw: 0.0,
                     planned_kw_by_asset: std::collections::HashMap::new(),
+                    planned_state_by_asset: std::collections::HashMap::new(),
                 }
             })
             .collect(),
@@ -1629,11 +1639,44 @@ fn translate_to_plan(
             export_flexibility_kw: 0.0,
             bat_charge_kw: sol.p_bat_ch_kw[t],
             bat_discharge_kw: sol.p_bat_dis_kw[t],
+            planned_state_by_asset: std::collections::HashMap::new(),
         });
     }
 
     // ── SoC trajectory ──────────────────────────────────────────────────
     let soc_trajectory_kwh = sol.e_bat_kwh.clone();
+
+    // ── Planned state by asset (T008/T013/T017) ──────────────────────────
+    // Battery SoC forecast — e_bat_kwh[t] is start-of-slot stored energy.
+    if let (Some(ref bid), Some(bat_cfg)) = (&bat_id, profile.battery_config()) {
+        let battery = Battery::from_config(bat_cfg);
+        for t in 0..n {
+            slots[t].planned_state_by_asset
+                .insert(bid.clone(), battery.future_state_values(sol.e_bat_kwh[t]));
+        }
+    }
+    // EV SoC forecast — requires soc_ev_init captured in MilpInputs.
+    if let (Some(ref eid), Some(soc_init)) = (&ev_id, inputs.soc_ev_init) {
+        if let Some(ev_cfg) = profile.ev_config() {
+            let traj = EvCharger::soc_trajectory(&sol.p_ev_kw, soc_init, ev_cfg.battery_kwh, dt_h);
+            for t in 0..n {
+                slots[t].planned_state_by_asset
+                    .insert(eid.clone(), EvCharger::future_state_values_at(traj[t]));
+            }
+        }
+    }
+    // Heater T_tank forecast — e_heat_tank_kwh[t] is stored energy above temp_min_c.
+    if let Some(ref hid) = heater_id {
+        if !sol.e_heat_tank_kwh.is_empty() {
+            if let Some(heat_cfg) = profile.heater_config() {
+                let heater = Heater::from_config(heat_cfg);
+                for t in 0..n {
+                    slots[t].planned_state_by_asset
+                        .insert(hid.clone(), heater.future_state_values(sol.e_heat_tank_kwh[t]));
+                }
+            }
+        }
+    }
 
     // ── Summary (raw energy economics, no weights) ──────────────────────
     let summary = PlanSummary {
@@ -2235,6 +2278,7 @@ mod tests {
             heat_initial_z_mid: 0.0,
             heat_initial_z_full: 0.0,
             shiftable_loads: vec![],
+            soc_ev_init: None,
         }
     }
 
@@ -3043,5 +3087,111 @@ mod tests {
     fn solve_heater_upper_bound_not_exceeded() {
         // e_tank[t] ≤ e_max + 1e-6 for all t in solution
         todo!("implement after solve_milp() heater trajectory integration")
+    }
+
+    // T009: Battery soc trajectory is populated in planned_state_by_asset.
+    // SoC key must exist in every slot; in charging slots SoC must be non-decreasing.
+    #[test]
+    fn battery_planned_state_soc_populated_and_non_decreasing_in_charging_slots() {
+        let now = fixed_now();
+        let mut profile = make_profile_1800s();
+        // Battery-only + base load to keep the problem simple
+        profile.assets.retain(|a| matches!(a, AssetProfile::Battery(_) | AssetProfile::BaseLoad(_)));
+        let mut sim = SimState::from_profile(&profile);
+        set_battery_soc(&mut sim, 0.1); // low SoC → planner will charge on cheap slots
+        let plan = run_planner(
+            &sim, &make_two_zone_tariffs(0.05, 0.40), &no_capacity(), &profile, now,
+            crate::entities::asset::PlanTrigger::Periodic, None, None, &[], None, None,
+        );
+        // Every slot must have the "soc" key for the battery asset.
+        for (t, slot) in plan.slots.iter().enumerate() {
+            let state = slot.planned_state_by_asset.get("battery")
+                .unwrap_or_else(|| panic!("slot {t}: planned_state_by_asset missing battery key"));
+            assert!(
+                state.contains_key("soc"),
+                "slot {t}: missing 'soc' key in battery state map"
+            );
+        }
+        // FR-008: in slots where the battery is charging, SoC must be non-decreasing.
+        let socs: Vec<f64> = plan.slots.iter().map(|s| s.planned_state_by_asset["battery"]["soc"]).collect();
+        for t in 1..socs.len() {
+            if plan.slots[t - 1].bat_charge_kw > 0.01 {
+                assert!(
+                    socs[t] >= socs[t - 1] - 1e-6,
+                    "SoC must be non-decreasing in charging slot: slot {t} soc={:.4} < slot {} soc={:.4}",
+                    socs[t], t - 1, socs[t - 1]
+                );
+            }
+        }
+    }
+
+    // T014: EV soc trajectory is populated in planned_state_by_asset.
+    #[test]
+    fn ev_planned_state_soc_populated() {
+        let now = fixed_now();
+        let mut profile = make_profile_1800s();
+        // EV + base load only (no battery, no heater, no PV)
+        profile.assets.retain(|a| matches!(a, AssetProfile::Ev(_) | AssetProfile::BaseLoad(_)));
+        profile.assets = profile.assets.into_iter().map(|a| match a {
+            AssetProfile::Ev(mut ev) => { ev.battery_kwh = 10.0; AssetProfile::Ev(ev) }
+            other => other,
+        }).collect();
+        let mut sim = SimState::from_profile(&profile);
+        set_ev_plugged(&mut sim, true);
+        for entry in &mut sim.assets {
+            if let AssetState::Ev(ref mut ev) = entry.state { ev.soc = 0.2; }
+        }
+        let session = crate::entities::device_session::EvSession {
+            id: uuid::Uuid::new_v4(),
+            target_soc: 0.8,
+            departure_time: now + Duration::hours(2),
+            soft_deadline: false,
+            created_at: now,
+            updated_at: now,
+        };
+        let plan = run_planner(
+            &sim, &make_tariffs(0.25, 0.08, 300.0), &no_capacity(), &profile, now,
+            crate::entities::asset::PlanTrigger::Periodic, Some(&session), None, &[], None, None,
+        );
+        // Every slot must have the "soc" key for the ev asset.
+        for (t, slot) in plan.slots.iter().enumerate() {
+            let state = slot.planned_state_by_asset.get("ev")
+                .unwrap_or_else(|| panic!("slot {t}: planned_state_by_asset missing ev key"));
+            assert!(
+                state.contains_key("soc"),
+                "slot {t}: missing 'soc' key in ev state map"
+            );
+            let soc = state["soc"];
+            assert!((0.0..=1.0).contains(&soc), "slot {t}: soc={soc} out of [0,1]");
+        }
+        // First slot SoC must match the initial SoC (0.2)
+        let first_soc = plan.slots[0].planned_state_by_asset["ev"]["soc"];
+        assert!((first_soc - 0.2).abs() < 1e-9, "expected first-slot soc=0.2, got {first_soc}");
+    }
+
+    // T018: Heater T_tank trajectory is populated in planned_state_by_asset.
+    #[test]
+    fn heater_planned_state_temp_c_populated() {
+        let now = fixed_now();
+        let profile = make_heater_only_profile(None, 18.0, 23.0, 20.0);
+        let sim = SimState::from_profile(&profile);
+        let plan = run_planner(
+            &sim, &make_tariffs(0.25, 0.08, 300.0), &no_capacity(), &profile, now,
+            crate::entities::asset::PlanTrigger::Periodic, None, None, &[], None, None,
+        );
+        // Every slot must have the "temp_c" key for the heater asset.
+        for (t, slot) in plan.slots.iter().enumerate() {
+            let state = slot.planned_state_by_asset.get("heater")
+                .unwrap_or_else(|| panic!("slot {t}: planned_state_by_asset missing heater key"));
+            assert!(
+                state.contains_key("temp_c"),
+                "slot {t}: missing 'temp_c' key in heater state map"
+            );
+            let temp_c = state["temp_c"];
+            assert!(
+                temp_c >= 18.0 - 1e-6,
+                "slot {t}: temp_c={temp_c:.2} below temp_min_c=18.0"
+            );
+        }
     }
 }

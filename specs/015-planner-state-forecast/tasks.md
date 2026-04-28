@@ -16,7 +16,7 @@
 
 **Purpose**: Confirm starting state before any code changes.
 
-- [ ] T001 Run `cargo test --workspace` in `VEN/` and confirm all tests pass (establishes regression baseline)
+- [X] T001 Run `cargo test --workspace` in `VEN/` and confirm all tests pass (establishes regression baseline)
 
 ---
 
@@ -26,9 +26,9 @@
 
 **⚠️ CONSTITUTION GATE**: This phase MUST complete before Phase 3–5 implementation begins.
 
-- [ ] T019 [P] Add BDD scenario `@planner-state` for future battery `soc` key to `tests/features/ven_timeline.feature`: "Given the VEN is running / When I GET /timeline/battery?hours_forward=4 / Then the future battery points include a soc key"
-- [ ] T020 [P] Add BDD scenario `@planner-state` for future heater `temp_c` key to `tests/features/ven_timeline.feature`: "Given the VEN is running / When I GET /timeline/heater?hours_forward=4 / Then the future heater points include a temp_c key"
-- [ ] T021 Add BDD step definitions for `@planner-state` scenarios in `tests/features/steps/ven_timeline_steps.py`: steps `"future {asset} points include a {key} key"` — GET the timeline, filter to future points (ts > now), assert at least one has `values[key]` present
+- [X] T019 [P] Add BDD scenario `@planner-state` for future battery `soc` key to `tests/features/ven_timeline.feature`: "Given the VEN is running / When I GET /timeline/battery?hours_forward=4 / Then the future battery points include a soc key"
+- [X] T020 [P] Add BDD scenario `@planner-state` for future heater `temp_c` key to `tests/features/ven_timeline.feature`: "Given the VEN is running / When I GET /timeline/heater?hours_forward=4 / Then the future heater points include a temp_c key"
+- [X] T021 Add BDD step definitions for `@planner-state` scenarios in `tests/features/steps/ven_timeline_steps.py`: steps `"future {asset} points include a {key} key"` — GET the timeline, filter to future points (ts > now), assert at least one has `values[key]` present
 
 **Checkpoint**: BDD scenarios exist and FAIL (key absent from future points) — red phase confirmed.
 
@@ -40,10 +40,10 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete. After this phase, `cargo test` must still pass with no behavior change.
 
-- [ ] T002 [P] Add `planned_state_by_asset: HashMap<String, HashMap<String, f64>>` field (with `#[serde(default)]`) to `PlanTimeSlot` struct in `VEN/src/entities/plan.rs`
-- [ ] T003 [P] Add `soc_ev_init: Option<f64>` field to `MilpInputs` struct in `VEN/src/controller/milp_planner.rs` and update the `make_solver_inputs` test helper struct literal with `soc_ev_init: None` so it compiles
-- [ ] T004 Populate `soc_ev_init` from the live EV asset state in `build_milp_inputs` in `VEN/src/controller/milp_planner.rs`: extract `AssetState::Ev(s).soc` when an EV asset entry exists in `sim`, store as `Some(soc)`; `None` when absent (depends on T003)
-- [ ] T005 Merge `planned_state_by_asset` into future point values in `build_asset_timeline` in `VEN/src/controller/timeline.rs`: after the existing `values.insert("power_kw", ...)` block, add `if let Some(state_map) = slot.planned_state_by_asset.get(asset_id) { values.extend(...) }` (depends on T002)
+- [X] T002 [P] Add `planned_state_by_asset: HashMap<String, HashMap<String, f64>>` field (with `#[serde(default)]`) to `PlanTimeSlot` struct in `VEN/src/entities/plan.rs`
+- [X] T003 [P] Add `soc_ev_init: Option<f64>` field to `MilpInputs` struct in `VEN/src/controller/milp_planner.rs` and update the `make_solver_inputs` test helper struct literal with `soc_ev_init: None` so it compiles
+- [X] T004 Populate `soc_ev_init` from the live EV asset state in `build_milp_inputs` in `VEN/src/controller/milp_planner.rs`: extract `AssetState::Ev(s).soc` when an EV asset entry exists in `sim`, store as `Some(soc)`; `None` when absent (depends on T003)
+- [X] T005 Merge `planned_state_by_asset` into future point values in `build_asset_timeline` in `VEN/src/controller/timeline.rs`: after the existing `values.insert("power_kw", ...)` block, add `if let Some(state_map) = slot.planned_state_by_asset.get(asset_id) { values.extend(...) }` (depends on T002)
 
 **Checkpoint**: `cargo test --workspace` passes — all tests green, no behavior change yet
 
@@ -55,11 +55,11 @@
 
 **Independent Test**: `GET /timeline/battery?hours_forward=4` returns future points that each contain `"soc"` in their `values` map, with values consistent with the MILP plan. Verify with `cargo test` unit tests; BDD scenario written in Phase 1.5 should now pass.
 
-- [ ] T006 [P] [US1] Add `Battery::future_state_values(&self, e_kwh: f64) -> HashMap<String, f64>` method near `state_values()` in `VEN/src/assets/battery.rs`: compute `soc = (e_kwh / self.capacity_kwh).clamp(0.0, 1.0)`, return `[("soc".to_string(), soc)].into()`
-- [ ] T007 [US1] Add unit tests for `Battery::future_state_values` in `VEN/src/assets/battery.rs`: `battery_future_state_mid_soc` (e_kwh = 5.0, capacity = 10.0 → soc = 0.5), `battery_future_state_clamp_over` (e_kwh > capacity → soc = 1.0), `battery_future_state_clamp_under` (e_kwh < 0 → soc = 0.0) (depends on T006)
-- [ ] T008 [US1] Populate `planned_state_by_asset` for battery in `translate_to_plan` in `VEN/src/controller/milp_planner.rs`: build `Battery::from_config(battery_cfg)`, iterate slots, for each slot `t` call `battery.future_state_values(sol.e_bat_kwh[t])` and insert into `slot.planned_state_by_asset` under key `battery_id` (depends on T002, T006)
-- [ ] T009 [US1] Add unit test `translate_to_plan_battery_slot_has_soc` in `VEN/src/controller/milp_planner.rs`: run a minimal solve with battery enabled, call `translate_to_plan`, assert every slot's `planned_state_by_asset["battery"]["soc"]` is in [0.0, 1.0]; also assert that for any slot t where `sol.p_bat_ch_kw[t] > 0.01`, the soc at slot t+1 is ≥ soc at slot t (charging increases SoC, verifying FR-008 consistency between power and state) (depends on T008)
-- [ ] T010 [US1] Add unit test `future_battery_point_includes_soc` in `VEN/src/controller/timeline.rs`: construct a `Plan` with battery slots that have `planned_state_by_asset["battery"]["soc"] = 0.75`, call `build_asset_timeline`, assert the future battery point has `values["soc"] == 0.75` (depends on T005, T008)
+- [X] T006 [P] [US1] Add `Battery::future_state_values(&self, e_kwh: f64) -> HashMap<String, f64>` method near `state_values()` in `VEN/src/assets/battery.rs`: compute `soc = (e_kwh / self.capacity_kwh).clamp(0.0, 1.0)`, return `[("soc".to_string(), soc)].into()`
+- [X] T007 [US1] Add unit tests for `Battery::future_state_values` in `VEN/src/assets/battery.rs`: `battery_future_state_mid_soc` (e_kwh = 5.0, capacity = 10.0 → soc = 0.5), `battery_future_state_clamp_over` (e_kwh > capacity → soc = 1.0), `battery_future_state_clamp_under` (e_kwh < 0 → soc = 0.0) (depends on T006)
+- [X] T008 [US1] Populate `planned_state_by_asset` for battery in `translate_to_plan` in `VEN/src/controller/milp_planner.rs`: build `Battery::from_config(battery_cfg)`, iterate slots, for each slot `t` call `battery.future_state_values(sol.e_bat_kwh[t])` and insert into `slot.planned_state_by_asset` under key `battery_id` (depends on T002, T006)
+- [X] T009 [US1] Add unit test `translate_to_plan_battery_slot_has_soc` in `VEN/src/controller/milp_planner.rs`: run a minimal solve with battery enabled, call `translate_to_plan`, assert every slot's `planned_state_by_asset["battery"]["soc"]` is in [0.0, 1.0]; also assert that for any slot t where `sol.p_bat_ch_kw[t] > 0.01`, the soc at slot t+1 is ≥ soc at slot t (charging increases SoC, verifying FR-008 consistency between power and state) (depends on T008)
+- [X] T010 [US1] Add unit test `future_battery_point_includes_soc` in `VEN/src/controller/timeline.rs`: construct a `Plan` with battery slots that have `planned_state_by_asset["battery"]["soc"] = 0.75`, call `build_asset_timeline`, assert the future battery point has `values["soc"] == 0.75` (depends on T005, T008)
 
 **Checkpoint**: `cargo test --workspace` passes — battery future points carry `soc` values
 
@@ -71,10 +71,10 @@
 
 **Independent Test**: `GET /timeline/ev?hours_forward=4` with an active EV session returns future points with `"soc"` in `values`, starting from the current EV SoC and rising through charging slots. Verify with `cargo test` unit tests.
 
-- [ ] T011 [P] [US2] Add `EvCharger::soc_trajectory(p_ev_kw: &[f64], soc_init: f64, battery_kwh: f64, dt_h: f64) -> Vec<f64>` (returns `Vec` of length `n+1`, index 0 = `soc_init`, `soc[t+1] = (soc[t] + p_ev_kw[t] * dt_h / battery_kwh).clamp(0.0, 1.0)`) and `EvCharger::future_state_values_at(soc: f64) -> HashMap<String, f64>` (returns `{"soc": soc.clamp(0.0, 1.0)}`) near `state_values()` in `VEN/src/assets/ev.rs`
-- [ ] T012 [US2] Add unit tests in `VEN/src/assets/ev.rs`: `soc_trajectory_charging` (verify SoC rises correctly over 4 charging slots), `soc_trajectory_clamp_at_full` (charging past 100% clamped to 1.0), `soc_trajectory_empty_input` (empty `p_ev_kw` → `Vec` of length 1 = `[soc_init]`), `future_state_values_at_mid` (soc = 0.6 → map has `"soc" = 0.6`) (depends on T011)
-- [ ] T013 [US2] Populate `planned_state_by_asset` for EV in `translate_to_plan` in `VEN/src/controller/milp_planner.rs`: when `inputs.soc_ev_init` is `Some(soc_init)`, call `EvCharger::soc_trajectory(&sol.p_ev_kw, soc_init, ev_cfg.battery_kwh, dt_h)` and for each slot `t` call `EvCharger::future_state_values_at(traj[t])` and insert into `slot.planned_state_by_asset` under the EV asset ID; skip entirely when `soc_ev_init` is `None` (depends on T002, T004, T011)
-- [ ] T014 [US2] Add unit test `translate_to_plan_ev_slot_has_soc` in `VEN/src/controller/milp_planner.rs`: run a minimal solve with EV MustRun mode, set `soc_ev_init = Some(0.5)` on the `MilpInputs`, call `translate_to_plan`, assert charging slots have `planned_state_by_asset["ev"]["soc"] > 0.5` and SoC is monotonically non-decreasing across charging slots (depends on T013)
+- [X] T011 [P] [US2] Add `EvCharger::soc_trajectory(p_ev_kw: &[f64], soc_init: f64, battery_kwh: f64, dt_h: f64) -> Vec<f64>` (returns `Vec` of length `n+1`, index 0 = `soc_init`, `soc[t+1] = (soc[t] + p_ev_kw[t] * dt_h / battery_kwh).clamp(0.0, 1.0)`) and `EvCharger::future_state_values_at(soc: f64) -> HashMap<String, f64>` (returns `{"soc": soc.clamp(0.0, 1.0)}`) near `state_values()` in `VEN/src/assets/ev.rs`
+- [X] T012 [US2] Add unit tests in `VEN/src/assets/ev.rs`: `soc_trajectory_charging` (verify SoC rises correctly over 4 charging slots), `soc_trajectory_clamp_at_full` (charging past 100% clamped to 1.0), `soc_trajectory_empty_input` (empty `p_ev_kw` → `Vec` of length 1 = `[soc_init]`), `future_state_values_at_mid` (soc = 0.6 → map has `"soc" = 0.6`) (depends on T011)
+- [X] T013 [US2] Populate `planned_state_by_asset` for EV in `translate_to_plan` in `VEN/src/controller/milp_planner.rs`: when `inputs.soc_ev_init` is `Some(soc_init)`, call `EvCharger::soc_trajectory(&sol.p_ev_kw, soc_init, ev_cfg.battery_kwh, dt_h)` and for each slot `t` call `EvCharger::future_state_values_at(traj[t])` and insert into `slot.planned_state_by_asset` under the EV asset ID; skip entirely when `soc_ev_init` is `None` (depends on T002, T004, T011)
+- [X] T014 [US2] Add unit test `translate_to_plan_ev_slot_has_soc` in `VEN/src/controller/milp_planner.rs`: run a minimal solve with EV MustRun mode, set `soc_ev_init = Some(0.5)` on the `MilpInputs`, call `translate_to_plan`, assert charging slots have `planned_state_by_asset["ev"]["soc"] > 0.5` and SoC is monotonically non-decreasing across charging slots (depends on T013)
 
 **Checkpoint**: `cargo test --workspace` passes — EV future points carry `soc` trajectory
 
@@ -86,10 +86,10 @@
 
 **Independent Test**: `GET /timeline/heater?hours_forward=4` returns future points with `"temp_c"` in `values`. Values are within the configured `[temp_min_c, temp_max_c]` band (or a small tolerance). Verify with `cargo test` unit tests.
 
-- [ ] T015 [P] [US3] Add `Heater::future_state_values(&self, e_tank_kwh: f64) -> HashMap<String, f64>` method near `state_values()` in `VEN/src/assets/heater.rs`: compute `temp_c = self.temp_min_c + e_tank_kwh / self.thermal_mass_kwh_per_c`, return `[("temp_c".to_string(), temp_c)].into()`
-- [ ] T016 [US3] Add unit tests in `VEN/src/assets/heater.rs`: `heater_future_state_at_min` (e_tank_kwh = 0.0 → temp_c == temp_min_c), `heater_future_state_above_min` (e_tank_kwh > 0 → temp_c > temp_min_c, verify arithmetic) (depends on T015)
-- [ ] T017 [US3] Populate `planned_state_by_asset` for heater in `translate_to_plan` in `VEN/src/controller/milp_planner.rs`: build `Heater::from_config(heater_cfg)`, guard on `!sol.e_heat_tank_kwh.is_empty()`, for each slot `t` call `heater.future_state_values(sol.e_heat_tank_kwh[t])` and insert into `slot.planned_state_by_asset` under the heater asset ID (depends on T002, T015)
-- [ ] T018 [US3] Add unit test `translate_to_plan_heater_slot_has_temp_c` in `VEN/src/controller/milp_planner.rs`: run a minimal solve with heater MustRun mode, call `translate_to_plan`, assert every slot's `planned_state_by_asset["heater"]["temp_c"]` is `>= heater_cfg.temp_min_c` (depends on T017)
+- [X] T015 [P] [US3] Add `Heater::future_state_values(&self, e_tank_kwh: f64) -> HashMap<String, f64>` method near `state_values()` in `VEN/src/assets/heater.rs`: compute `temp_c = self.temp_min_c + e_tank_kwh / self.thermal_mass_kwh_per_c`, return `[("temp_c".to_string(), temp_c)].into()`
+- [X] T016 [US3] Add unit tests in `VEN/src/assets/heater.rs`: `heater_future_state_at_min` (e_tank_kwh = 0.0 → temp_c == temp_min_c), `heater_future_state_above_min` (e_tank_kwh > 0 → temp_c > temp_min_c, verify arithmetic) (depends on T015)
+- [X] T017 [US3] Populate `planned_state_by_asset` for heater in `translate_to_plan` in `VEN/src/controller/milp_planner.rs`: build `Heater::from_config(heater_cfg)`, guard on `!sol.e_heat_tank_kwh.is_empty()`, for each slot `t` call `heater.future_state_values(sol.e_heat_tank_kwh[t])` and insert into `slot.planned_state_by_asset` under the heater asset ID (depends on T002, T015)
+- [X] T018 [US3] Add unit test `translate_to_plan_heater_slot_has_temp_c` in `VEN/src/controller/milp_planner.rs`: run a minimal solve with heater MustRun mode, call `translate_to_plan`, assert every slot's `planned_state_by_asset["heater"]["temp_c"]` is `>= heater_cfg.temp_min_c` (depends on T017)
 
 **Checkpoint**: `cargo test --workspace` passes — all three assets emit future state values
 

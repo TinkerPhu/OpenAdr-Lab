@@ -41,3 +41,18 @@ Feature: VEN Asset Timeline Endpoints
   Scenario: GET /timeline/unknown_asset_xyz returns 404
     When I GET /timeline/unknown_asset_xyz from the VEN
     Then the response status is 404
+
+  # T019: Future battery timeline points carry planner SoC forecast.
+  Scenario: Future battery timeline points carry planner SoC forecast
+    When I poll /timeline/battery for future points with "soc" key within 90s
+    Then the response has at least one future point with values key "soc"
+
+  # T020: Future EV timeline points carry planner SoC forecast.
+  Scenario: Future EV timeline points carry planner SoC forecast
+    When I poll /timeline/ev for future points with "soc" key within 90s
+    Then the response has at least one future point with values key "soc"
+
+  # T021: Future heater timeline points carry planner T_tank forecast.
+  Scenario: Future heater timeline points carry planner T_tank forecast
+    When I poll /timeline/heater for future points with "temp_c" key within 90s
+    Then the response has at least one future point with values key "temp_c"
