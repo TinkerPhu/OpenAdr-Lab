@@ -376,6 +376,12 @@ pub fn build_asset_timeline(
                 };
                 values.insert("cost_rate_eur_h".into(), cost_rate);
                 values.insert("co2_rate_g_h".into(), co2_rate);
+
+                // Merge per-asset state values computed by the MILP planner
+                // (e.g. "soc" for battery/EV, "temp_c" for heater).
+                if let Some(state_map) = slot.planned_state_by_asset.get(asset_id) {
+                    values.extend(state_map.iter().map(|(k, v)| (k.clone(), *v)));
+                }
             }
 
             points.push(AssetTimelinePoint {
@@ -567,6 +573,7 @@ mod tests {
             bat_charge_kw: 0.0,
             bat_discharge_kw: 0.0,
             planned_kw_by_asset: std::collections::HashMap::from([(asset_id.to_string(), power_kw)]),
+            planned_state_by_asset: std::collections::HashMap::new(),
         }
     }
 
@@ -1230,5 +1237,41 @@ mod tests {
         assert_eq!(future.len(), 1);
         let power_kw = future[0].values["power_kw"];
         assert!(power_kw.abs() < 1e-9, "expected 0.0 at night, got {power_kw}");
+    }
+
+    // T010: planned_state_by_asset values are merged into future timeline points.
+    #[test]
+    fn planned_state_merged_into_future_point_values() {
+        let now = ts(0);
+        let known = make_known(&["battery-1"]);
+        let sim = make_sim(vec![]);
+        let mut plan = empty_plan(now);
+        let mut slot = make_slot(60, "battery-1", 2.0, now);
+        slot.planned_state_by_asset.insert(
+            "battery-1".to_string(),
+            std::collections::HashMap::from([("soc".to_string(), 0.75_f64)]),
+        );
+        plan.slots.push(slot);
+
+        let result = build_asset_timeline(
+            "battery-1",
+            &known,
+            &sim,
+            Some(&plan),
+            now,
+            TimeWindow {
+                hours_back: 0.0,
+                hours_forward: 1.0,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        let p = &result[0];
+        assert!(p.ts > now);
+        let soc = p.values.get("soc").copied().expect("soc key missing");
+        assert!((soc - 0.75).abs() < 1e-9, "expected soc=0.75, got {soc}");
+        // power_kw must also still be present
+        assert!(p.values.contains_key("power_kw"), "power_kw key missing");
     }
 }

@@ -93,6 +93,13 @@ pub struct PlanTimeSlot {
     /// Built from `allocations` for easy lookup without iteration.
     #[serde(default)]
     pub planned_kw_by_asset: HashMap<String, f64>,
+
+    /// Per-asset state values at the start of this slot (e.g. SoC, temperature),
+    /// computed from the MILP solution at plan assembly time by each asset module.
+    /// Key: asset_id → (metric_key → value), e.g. `"battery" → {"soc": 0.82}`.
+    /// Empty for non-storage assets and when no plan state is available.
+    #[serde(default)]
+    pub planned_state_by_asset: HashMap<String, HashMap<String, f64>>,
 }
 
 /// Per-device schedulability metadata snapshot (§6.9).
