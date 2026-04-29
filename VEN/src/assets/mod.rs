@@ -17,33 +17,7 @@ pub use grid::Grid;
 pub use heater::{Heater, HeaterState};
 pub use pv::{PvInverter, PvState};
 
-// ─── Legacy types (still used by planner / dispatcher / routes) ───────────────
-
-/// Planning capability descriptor for a single asset (legacy — kept for planner compat).
-#[derive(Debug, Clone)]
-pub struct AssetCapabilities {
-    pub asset_id: String,
-    pub max_import_kw: f64,
-    pub max_export_kw: f64,
-    pub is_flexible: bool,
-    pub energy_state: Option<EnergyState>,
-    pub availability: Option<TimeWindow>,
-}
-
-/// Storage state for flexible energy assets.
-#[derive(Debug, Clone)]
-pub struct EnergyState {
-    pub current_kwh: f64,
-    pub min_kwh: f64,
-    pub max_kwh: f64,
-}
-
-/// Time window for asset availability.
-#[derive(Debug, Clone)]
-pub struct TimeWindow {
-    pub start: DateTime<Utc>,
-    pub end: DateTime<Utc>,
-}
+// ─── Input type for a runtime-controllable parameter ─────────────────────────
 
 /// Input type for a runtime-controllable parameter.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -337,24 +311,6 @@ impl AssetConfig {
             (Self::Pv(cfg), AssetState::Pv(s)) => cfg.state_values(s),
             (Self::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.state_values(s),
             _ => HashMap::new(),
-        }
-    }
-
-    pub fn capabilities(&self, asset_id: &str, state: &AssetState) -> AssetCapabilities {
-        match (self, state) {
-            (Self::Battery(cfg), AssetState::Battery(s)) => cfg.capabilities(asset_id, s),
-            (Self::Ev(cfg), AssetState::Ev(s)) => cfg.capabilities(asset_id, s),
-            (Self::Heater(cfg), AssetState::Heater(s)) => cfg.capabilities(asset_id, s),
-            (Self::Pv(cfg), AssetState::Pv(s)) => cfg.capabilities(asset_id, s),
-            (Self::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.capabilities(asset_id, s),
-            _ => AssetCapabilities {
-                asset_id: asset_id.to_string(),
-                max_import_kw: 0.0,
-                max_export_kw: 0.0,
-                is_flexible: false,
-                energy_state: None,
-                availability: None,
-            },
         }
     }
 

@@ -97,151 +97,152 @@ pub struct EvSettings {
 
 fn bool_true() -> bool { true }
 
-#[derive(Clone)]
-pub struct AppState {
-    inner: Arc<RwLock<InnerState>>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InnerState {
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PollingState {
     pub programs: Vec<serde_json::Value>,
     pub events: Vec<serde_json::Value>,
     pub reports: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControllerSimState {
     pub sensor: SensorSnapshot,
     #[serde(skip)]
     pub sim: Option<SimSnapshot>,
     #[serde(skip)]
-    pub controller_trace: ControllerTrace,
-    #[serde(skip)]
     pub inject_state: SimInjectState,
+    #[serde(skip)]
+    pub controller_trace: ControllerTrace,
+}
 
-    // HEMS state (not persisted in simple state.json — managed by controller loops)
-    #[serde(skip)]
+impl Default for ControllerSimState {
+    fn default() -> Self {
+        Self {
+            sensor: SensorSnapshot::empty_now(),
+            sim: None,
+            inject_state: SimInjectState::default(),
+            controller_trace: ControllerTrace::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct HemsState {
     pub active_plan: Option<Plan>,
-    #[serde(skip)]
     pub planned_tariffs: Vec<TariffSnapshot>,
-    #[serde(skip)]
     pub capacity_state: OadrCapacityState,
-    #[serde(skip)]
     pub report_obligations: Vec<OadrReportObligation>,
-    #[serde(skip)]
     pub asset_ledger: HashMap<String, AssetLedgerEntry>,
-    #[serde(skip)]
     pub active_requests: Vec<UserRequest>,
-    #[serde(skip)]
     pub site_envelope: Option<SiteFlexibilityEnvelope>,
-    #[serde(skip)]
     pub ev_session: Option<EvSession>,
-    #[serde(skip)]
     pub heater_target: Option<HeaterTarget>,
-    #[serde(skip)]
     pub shiftable_loads: Vec<ShiftableLoad>,
-    #[serde(skip)]
     pub shiftable_runtimes: Vec<ShiftableLoadRuntime>,
-    #[serde(skip)]
     pub baseline_override: Option<BaselineOverride>,
-    #[serde(skip)]
     pub ev_settings: EvSettings,
 }
 
+#[derive(Clone)]
+pub struct AppState {
+    pub polling: Arc<RwLock<PollingState>>,
+    pub ctrl_sim: Arc<RwLock<ControllerSimState>>,
+    pub hems: Arc<RwLock<HemsState>>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PersistedVenState {
+    programs: Vec<serde_json::Value>,
+    events: Vec<serde_json::Value>,
+    reports: Vec<serde_json::Value>,
+    sensor: SensorSnapshot,
+}
+
 impl AppState {
+    // INVARIANT: No function may acquire more than one lock simultaneously. Always
+    // snapshot-and-release: acquire → clone needed fields → drop guard → work on snapshot.
+    // No guard may cross an .await point or a second lock acquisition.
+
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(RwLock::new(InnerState {
-                programs: vec![],
-                events: vec![],
-                reports: vec![],
-                sensor: SensorSnapshot::empty_now(),
-                sim: None,
-                controller_trace: ControllerTrace::new(),
-                inject_state: SimInjectState::default(),
-                active_plan: None,
-                planned_tariffs: vec![],
-                capacity_state: OadrCapacityState::default(),
-                report_obligations: vec![],
-                asset_ledger: HashMap::new(),
-                active_requests: vec![],
-                site_envelope: None,
-                ev_session: None,
-                heater_target: None,
-                shiftable_loads: vec![],
-                shiftable_runtimes: vec![],
-                baseline_override: None,
-                ev_settings: EvSettings { opportunistic_charging_enabled: true, paused_by_active_session: false },
+            polling: Arc::new(RwLock::new(PollingState::default())),
+            ctrl_sim: Arc::new(RwLock::new(ControllerSimState::default())),
+            hems: Arc::new(RwLock::new(HemsState {
+                ev_settings: EvSettings {
+                    opportunistic_charging_enabled: true,
+                    paused_by_active_session: false,
+                },
+                ..HemsState::default()
             })),
         }
     }
 
     pub async fn set_programs(&self, programs: Vec<serde_json::Value>) {
-        self.inner.write().await.programs = programs;
+        self.polling.write().await.programs = programs;
     }
 
     pub async fn set_events(&self, mut events: Vec<serde_json::Value>, max_keep: usize) {
         events.truncate(max_keep);
-        self.inner.write().await.events = events;
+        self.polling.write().await.events = events;
     }
 
     pub async fn set_reports(&self, reports: Vec<serde_json::Value>) {
-        self.inner.write().await.reports = reports;
+        self.polling.write().await.reports = reports;
     }
 
     pub async fn update_sensor(&self, sensor: SensorSnapshot) {
-        self.inner.write().await.sensor = sensor;
+        self.ctrl_sim.write().await.sensor = sensor;
     }
 
     pub async fn update_sim(&self, sim: SimSnapshot) {
-        self.inner.write().await.sim = Some(sim);
-    }
-
-    pub async fn snapshot(&self) -> InnerState {
-        self.inner.read().await.clone()
+        self.ctrl_sim.write().await.sim = Some(sim);
     }
 
     pub async fn programs(&self) -> Vec<serde_json::Value> {
-        self.inner.read().await.programs.clone()
+        self.polling.read().await.programs.clone()
     }
 
     pub async fn events(&self) -> Vec<serde_json::Value> {
-        self.inner.read().await.events.clone()
+        self.polling.read().await.events.clone()
     }
 
     pub async fn reports(&self) -> Vec<serde_json::Value> {
-        self.inner.read().await.reports.clone()
+        self.polling.read().await.reports.clone()
     }
 
     pub async fn sensor(&self) -> SensorSnapshot {
-        self.inner.read().await.sensor.clone()
+        self.ctrl_sim.read().await.sensor.clone()
     }
 
     pub async fn sim(&self) -> Option<SimSnapshot> {
-        self.inner.read().await.sim.clone()
+        self.ctrl_sim.read().await.sim.clone()
     }
 
     pub async fn controller_trace(&self) -> ControllerTrace {
-        self.inner.read().await.controller_trace.clone()
+        self.ctrl_sim.read().await.controller_trace.clone()
     }
 
     pub async fn push_controller_event(&self, event: crate::controller::trace::ControllerEvent) {
-        self.inner.write().await.controller_trace.push_event(event);
+        self.ctrl_sim.write().await.controller_trace.push_event(event);
     }
 
     pub async fn inject_state(&self) -> SimInjectState {
-        self.inner.read().await.inject_state.clone()
+        self.ctrl_sim.read().await.inject_state.clone()
     }
 
     pub async fn set_inject_state(&self, s: SimInjectState) {
-        self.inner.write().await.inject_state = s;
+        self.ctrl_sim.write().await.inject_state = s;
     }
 
     /// Clear a single Behaviour A (one-shot) field after it has been applied.
     pub async fn clear_inject_field(&self, field: &str) {
-        let mut inner = self.inner.write().await;
+        let mut cs = self.ctrl_sim.write().await;
         match field {
-            "battery_soc" => inner.inject_state.battery_soc = None,
-            "ev_soc" => inner.inject_state.ev_soc = None,
-            "heater_temp_c" => inner.inject_state.heater_temp_c = None,
-            "pv_irradiance" => inner.inject_state.pv_irradiance = None,
-            "base_load_kw" => inner.inject_state.base_load_kw = None,
+            "battery_soc" => cs.inject_state.battery_soc = None,
+            "ev_soc" => cs.inject_state.ev_soc = None,
+            "heater_temp_c" => cs.inject_state.heater_temp_c = None,
+            "pv_irradiance" => cs.inject_state.pv_irradiance = None,
+            "base_load_kw" => cs.inject_state.base_load_kw = None,
             _ => {}
         }
     }
@@ -249,35 +250,35 @@ impl AppState {
     // --- HEMS accessors ---
 
     pub async fn active_plan(&self) -> Option<Plan> {
-        self.inner.read().await.active_plan.clone()
+        self.hems.read().await.active_plan.clone()
     }
 
     pub async fn set_active_plan(&self, plan: Option<Plan>) {
-        self.inner.write().await.active_plan = plan;
+        self.hems.write().await.active_plan = plan;
     }
 
     pub async fn planned_tariffs(&self) -> Vec<TariffSnapshot> {
-        self.inner.read().await.planned_tariffs.clone()
+        self.hems.read().await.planned_tariffs.clone()
     }
 
     pub async fn set_planned_tariffs(&self, tariffs: Vec<TariffSnapshot>) {
-        self.inner.write().await.planned_tariffs = tariffs;
+        self.hems.write().await.planned_tariffs = tariffs;
     }
 
     pub async fn capacity_state(&self) -> OadrCapacityState {
-        self.inner.read().await.capacity_state.clone()
+        self.hems.read().await.capacity_state.clone()
     }
 
     pub async fn set_capacity_state(&self, state: OadrCapacityState) {
-        self.inner.write().await.capacity_state = state;
+        self.hems.write().await.capacity_state = state;
     }
 
     pub async fn report_obligations(&self) -> Vec<OadrReportObligation> {
-        self.inner.read().await.report_obligations.clone()
+        self.hems.read().await.report_obligations.clone()
     }
 
     pub async fn set_report_obligations(&self, obligations: Vec<OadrReportObligation>) {
-        self.inner.write().await.report_obligations = obligations;
+        self.hems.write().await.report_obligations = obligations;
     }
 
     /// Append new obligations without duplicating existing ones (keyed by id).
@@ -285,70 +286,62 @@ impl AppState {
         if new_obs.is_empty() {
             return;
         }
-        let mut inner = self.inner.write().await;
+        let mut hems = self.hems.write().await;
         for ob in new_obs {
-            if !inner.report_obligations.iter().any(|e| e.id == ob.id) {
-                inner.report_obligations.push(ob);
+            if !hems.report_obligations.iter().any(|e| e.id == ob.id) {
+                hems.report_obligations.push(ob);
             }
         }
     }
 
     /// Mark an obligation as fulfilled by its UUID.
     pub async fn mark_obligation_fulfilled(&self, id: uuid::Uuid) {
-        let mut inner = self.inner.write().await;
-        if let Some(ob) = inner.report_obligations.iter_mut().find(|o| o.id == id) {
+        let mut hems = self.hems.write().await;
+        if let Some(ob) = hems.report_obligations.iter_mut().find(|o| o.id == id) {
             ob.fulfilled = true;
         }
     }
 
     pub async fn active_requests(&self) -> Vec<UserRequest> {
-        self.inner.read().await.active_requests.clone()
+        self.hems.read().await.active_requests.clone()
     }
 
     pub async fn set_active_requests(&self, requests: Vec<UserRequest>) {
-        self.inner.write().await.active_requests = requests;
+        self.hems.write().await.active_requests = requests;
     }
 
     /// Add a user request; replace if same id already exists.
     pub async fn upsert_request(&self, req: UserRequest) {
-        let mut inner = self.inner.write().await;
-        if let Some(pos) = inner.active_requests.iter().position(|r| r.id == req.id) {
-            inner.active_requests[pos] = req;
+        let mut hems = self.hems.write().await;
+        if let Some(pos) = hems.active_requests.iter().position(|r| r.id == req.id) {
+            hems.active_requests[pos] = req;
         } else {
-            inner.active_requests.push(req);
+            hems.active_requests.push(req);
         }
     }
 
     /// Cancel a user request by id: marks it Cancelled and clears any linked device session.
     pub async fn cancel_request(&self, id: uuid::Uuid) -> bool {
-        let mut inner = self.inner.write().await;
-        if let Some(req) = inner.active_requests.iter_mut().find(|r| r.id == id) {
+        let mut hems = self.hems.write().await;
+        if let Some(req) = hems.active_requests.iter_mut().find(|r| r.id == id) {
             req.status = UserRequestStatus::Cancelled;
             let session_type = req.session_type.clone();
             let session_id = req.session_id;
             match session_type {
                 Some(SessionType::Ev) => {
-                    inner.ev_session = None;
+                    hems.ev_session = None;
                 }
                 Some(SessionType::Heater) => {
-                    inner.heater_target = None;
+                    hems.heater_target = None;
                 }
                 Some(SessionType::ShiftableLoad) => {
                     if let Some(sid) = session_id {
-                        inner.shiftable_loads.retain(|l| l.id != sid);
-                        inner.shiftable_runtimes.retain(|r| r.load_id != sid);
+                        hems.shiftable_loads.retain(|l| l.id != sid);
+                        hems.shiftable_runtimes.retain(|r| r.load_id != sid);
                     }
                 }
                 None => {
-                    // Legacy path: match session_id against ev/heater for requests
-                    // created before Plan C added session_type.
-                    if let Some(sid) = session_id {
-                        if inner.ev_session.as_ref().map(|s| s.id) == Some(sid) {
-                            inner.ev_session = None;
-                        } else if inner.heater_target.as_ref().map(|t| t.id) == Some(sid) {
-                            inner.heater_target = None;
-                        }
-                    }
+                    tracing::warn!(request_id = %id, "cancel_request: unexpected session_type: None for request {}", id);
                 }
             }
             true
@@ -358,43 +351,43 @@ impl AppState {
     }
 
     pub async fn asset_ledger(&self) -> HashMap<String, AssetLedgerEntry> {
-        self.inner.read().await.asset_ledger.clone()
+        self.hems.read().await.asset_ledger.clone()
     }
 
     pub async fn set_asset_ledger(&self, ledger: HashMap<String, AssetLedgerEntry>) {
-        self.inner.write().await.asset_ledger = ledger;
+        self.hems.write().await.asset_ledger = ledger;
     }
 
     pub async fn site_envelope(&self) -> Option<SiteFlexibilityEnvelope> {
-        self.inner.read().await.site_envelope.clone()
+        self.hems.read().await.site_envelope.clone()
     }
 
     pub async fn set_site_envelope(&self, env: SiteFlexibilityEnvelope) {
-        self.inner.write().await.site_envelope = Some(env);
+        self.hems.write().await.site_envelope = Some(env);
     }
 
     pub async fn ev_session(&self) -> Option<EvSession> {
-        self.inner.read().await.ev_session.clone()
+        self.hems.read().await.ev_session.clone()
     }
 
     pub async fn set_ev_session(&self, session: Option<EvSession>) {
-        self.inner.write().await.ev_session = session;
+        self.hems.write().await.ev_session = session;
     }
 
     pub async fn heater_target(&self) -> Option<HeaterTarget> {
-        self.inner.read().await.heater_target.clone()
+        self.hems.read().await.heater_target.clone()
     }
 
     pub async fn set_heater_target(&self, target: Option<HeaterTarget>) {
-        self.inner.write().await.heater_target = target;
+        self.hems.write().await.heater_target = target;
     }
 
     pub async fn shiftable_loads(&self) -> Vec<ShiftableLoad> {
-        self.inner.read().await.shiftable_loads.clone()
+        self.hems.read().await.shiftable_loads.clone()
     }
 
     pub async fn add_shiftable_load(&self, load: ShiftableLoad) -> Result<(), &'static str> {
-        let mut w = self.inner.write().await;
+        let mut w = self.hems.write().await;
         if w.shiftable_loads.iter().any(|l| l.asset_id == load.asset_id) {
             return Err("duplicate asset_id");
         }
@@ -403,7 +396,7 @@ impl AppState {
     }
 
     pub async fn remove_shiftable_load(&self, id: uuid::Uuid) -> bool {
-        let mut w = self.inner.write().await;
+        let mut w = self.hems.write().await;
         let before = w.shiftable_loads.len();
         w.shiftable_loads.retain(|l| l.id != id);
         w.shiftable_runtimes.retain(|r| r.load_id != id);
@@ -411,15 +404,15 @@ impl AppState {
     }
 
     pub async fn shiftable_runtimes(&self) -> Vec<ShiftableLoadRuntime> {
-        self.inner.read().await.shiftable_runtimes.clone()
+        self.hems.read().await.shiftable_runtimes.clone()
     }
 
     pub async fn start_shiftable(&self, runtime: ShiftableLoadRuntime) {
-        self.inner.write().await.shiftable_runtimes.push(runtime);
+        self.hems.write().await.shiftable_runtimes.push(runtime);
     }
 
     pub async fn complete_shiftable(&self, load_id: uuid::Uuid) {
-        let mut w = self.inner.write().await;
+        let mut w = self.hems.write().await;
         w.shiftable_runtimes.retain(|r| r.load_id != load_id);
         w.shiftable_loads.retain(|l| l.id != load_id);
         // Also mark linked UserRequest as Completed.
@@ -434,24 +427,24 @@ impl AppState {
     }
 
     pub async fn baseline_override(&self) -> Option<BaselineOverride> {
-        self.inner.read().await.baseline_override.clone()
+        self.hems.read().await.baseline_override.clone()
     }
 
     pub async fn set_baseline_override(&self, ovr: Option<BaselineOverride>) {
-        self.inner.write().await.baseline_override = ovr;
+        self.hems.write().await.baseline_override = ovr;
     }
 
     pub async fn ev_settings(&self) -> EvSettings {
-        self.inner.read().await.ev_settings.clone()
+        self.hems.read().await.ev_settings.clone()
     }
 
     pub async fn set_ev_settings(&self, s: EvSettings) {
-        self.inner.write().await.ev_settings = s;
+        self.hems.write().await.ev_settings = s;
     }
 
     /// Return all unfulfilled obligations whose due_at <= now.
     pub async fn due_obligations(&self, now: DateTime<Utc>) -> Vec<OadrReportObligation> {
-        self.inner
+        self.hems
             .read()
             .await
             .report_obligations
@@ -462,40 +455,29 @@ impl AppState {
     }
 
     pub async fn load_from_json(&self, json: &str) -> anyhow::Result<()> {
-        let parsed: InnerState = serde_json::from_str(json)?;
-        *self.inner.write().await = parsed;
+        let parsed: PersistedVenState = serde_json::from_str(json)?;
+        {
+            let mut p = self.polling.write().await;
+            p.programs = parsed.programs;
+            p.events = parsed.events;
+            p.reports = parsed.reports;
+        }
+        {
+            let mut cs = self.ctrl_sim.write().await;
+            cs.sensor = parsed.sensor;
+        }
         Ok(())
     }
 
     pub async fn to_json(&self) -> anyhow::Result<String> {
-        Ok(serde_json::to_string_pretty(&*self.inner.read().await)?)
-    }
-}
-
-impl Clone for InnerState {
-    fn clone(&self) -> Self {
-        Self {
-            programs: self.programs.clone(),
-            events: self.events.clone(),
-            reports: self.reports.clone(),
-            sensor: self.sensor.clone(),
-            sim: self.sim.clone(),
-            controller_trace: self.controller_trace.clone(),
-            inject_state: self.inject_state.clone(),
-            active_plan: self.active_plan.clone(),
-            planned_tariffs: self.planned_tariffs.clone(),
-            capacity_state: self.capacity_state.clone(),
-            report_obligations: self.report_obligations.clone(),
-            asset_ledger: self.asset_ledger.clone(),
-            active_requests: self.active_requests.clone(),
-            site_envelope: self.site_envelope.clone(),
-            ev_session: self.ev_session.clone(),
-            heater_target: self.heater_target.clone(),
-            shiftable_loads: self.shiftable_loads.clone(),
-            shiftable_runtimes: self.shiftable_runtimes.clone(),
-            baseline_override: self.baseline_override.clone(),
-            ev_settings: self.ev_settings.clone(),
-        }
+        // Acquire each lock separately (INVARIANT: no guard held across a second lock acquisition).
+        let (programs, events, reports) = {
+            let p = self.polling.read().await;
+            (p.programs.clone(), p.events.clone(), p.reports.clone())
+        };
+        let sensor = self.ctrl_sim.read().await.sensor.clone();
+        let state = PersistedVenState { programs, events, reports, sensor };
+        Ok(serde_json::to_string_pretty(&state)?)
     }
 }
 
@@ -601,5 +583,112 @@ mod tests {
         assert!(removed, "remove should return true");
         assert!(state.shiftable_loads().await.is_empty(), "load removed");
         assert!(state.shiftable_runtimes().await.is_empty(), "runtime also removed");
+    }
+
+    fn make_request(session_type: Option<SessionType>, session_id: Option<uuid::Uuid>) -> UserRequest {
+        let now = Utc::now();
+        UserRequest {
+            id: Uuid::new_v4(),
+            asset_id: "test".to_string(),
+            target_soc: None,
+            target_energy_kwh: 0.0,
+            desired_power_kw: 0.0,
+            deadlines: vec![],
+            completion_policy: "best_effort".to_string(),
+            max_total_cost_eur: None,
+            tier_count: 0,
+            session_id,
+            session_type,
+            status: UserRequestStatus::Active,
+            estimated_cost_eur: 0.0,
+            estimated_co2_g: 0.0,
+            interruptible: false,
+            tolerance_min: None,
+            budget_eur: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_request_ev_clears_session() {
+        use crate::entities::device_session::EvSession;
+        let state = AppState::new();
+        let session_id = Uuid::new_v4();
+        let req = make_request(Some(SessionType::Ev), Some(session_id));
+        let req_id = req.id;
+        state.upsert_request(req).await;
+        state.set_ev_session(Some(EvSession {
+            id: session_id,
+            target_soc: 0.8,
+            departure_time: Utc::now() + chrono::Duration::hours(2),
+            soft_deadline: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })).await;
+
+        let found = state.cancel_request(req_id).await;
+        assert!(found, "cancel should return true");
+        assert!(state.ev_session().await.is_none(), "ev_session cleared");
+        let requests = state.active_requests().await;
+        assert_eq!(requests[0].status, UserRequestStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn cancel_request_heater_clears_target() {
+        use crate::entities::device_session::HeaterTarget;
+        let state = AppState::new();
+        let session_id = Uuid::new_v4();
+        let req = make_request(Some(SessionType::Heater), Some(session_id));
+        let req_id = req.id;
+        state.upsert_request(req).await;
+        state.set_heater_target(Some(HeaterTarget {
+            id: session_id,
+            target_temp_c: 21.0,
+            ready_by: Utc::now() + chrono::Duration::hours(1),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })).await;
+
+        let found = state.cancel_request(req_id).await;
+        assert!(found, "cancel should return true");
+        assert!(state.heater_target().await.is_none(), "heater_target cleared");
+        let requests = state.active_requests().await;
+        assert_eq!(requests[0].status, UserRequestStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn cancel_request_shiftable_removes_load_and_runtime() {
+        let state = AppState::new();
+        let load = make_load("wm-1");
+        let load_id = load.id;
+        state.add_shiftable_load(load.clone()).await.unwrap();
+        state.start_shiftable(make_runtime(&load)).await;
+
+        let req = make_request(Some(SessionType::ShiftableLoad), Some(load_id));
+        let req_id = req.id;
+        state.upsert_request(req).await;
+
+        let found = state.cancel_request(req_id).await;
+        assert!(found, "cancel should return true");
+        assert!(state.shiftable_loads().await.is_empty(), "load removed");
+        assert!(state.shiftable_runtimes().await.is_empty(), "runtime removed");
+        let requests = state.active_requests().await;
+        assert_eq!(requests[0].status, UserRequestStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn test_state_persistence_roundtrip() {
+        use serde_json::json;
+        let state = AppState::new();
+        // Set programs via polling lock
+        state.set_programs(vec![json!({"id": "p1"})]).await;
+        // The sensor default has power_kw = 0.0; we'll just verify programs survive roundtrip
+        let json_str = state.to_json().await.unwrap();
+        let state2 = AppState::new();
+        state2.load_from_json(&json_str).await.unwrap();
+        let programs = state2.programs().await;
+        assert_eq!(programs.len(), 1);
+        assert_eq!(programs[0]["id"], "p1");
     }
 }

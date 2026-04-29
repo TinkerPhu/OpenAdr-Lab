@@ -32,9 +32,6 @@ impl AssetProfile {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Profile {
-    /// Legacy named-device format (old YAML). Used during transition.
-    #[serde(default)]
-    pub devices: DeviceConfig,
     /// New typed asset list format.
     #[serde(default)]
     pub assets: Vec<AssetProfile>,
@@ -48,19 +45,6 @@ pub struct Profile {
     pub packets: Vec<PacketSeed>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct DeviceConfig {
-    pub ev: Option<EvConfig>,
-    pub heater: Option<HeaterConfig>,
-    pub pv: Option<PvConfig>,
-    pub battery: Option<BatteryConfig>,
-    #[serde(default = "default_base_load")]
-    pub base_load_w: f64,
-}
-
-fn default_base_load() -> f64 {
-    500.0
-}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct EvConfig {
@@ -86,7 +70,7 @@ pub struct EvConfig {
 }
 
 fn default_asset_id_ev() -> String {
-    "ev".into()
+    crate::ids::ASSET_EV.to_string()
 }
 
 fn default_ev_max_charge() -> f64 {
@@ -179,7 +163,7 @@ impl HeaterConfig {
 }
 
 fn default_asset_id_heater() -> String {
-    "heater".into()
+    crate::ids::ASSET_HEATER.to_string()
 }
 
 fn default_heater_max() -> f64 {
@@ -204,7 +188,7 @@ pub struct PvConfig {
 }
 
 fn default_asset_id_pv() -> String {
-    "pv".into()
+    crate::ids::ASSET_PV.to_string()
 }
 fn default_pv_rated() -> f64 {
     5.0
@@ -247,7 +231,7 @@ pub struct BatteryConfig {
 }
 
 fn default_asset_id_battery() -> String {
-    "battery".into()
+    crate::ids::ASSET_BATTERY.to_string()
 }
 
 fn default_battery_capacity() -> f64 {
@@ -279,7 +263,7 @@ pub struct BaseLoadConfig {
 }
 
 fn default_asset_id_base_load() -> String {
-    "base_load".into()
+    crate::ids::ASSET_BASE_LOAD.to_string()
 }
 fn default_base_load_kw() -> f64 {
     0.5
@@ -608,74 +592,42 @@ pub struct PacketSeed {
 }
 
 impl Profile {
-    /// Returns the EV config: checks `assets` list first, falls back to legacy `devices`.
+    /// Returns the EV config from the `assets` list.
     pub fn ev_config(&self) -> Option<&EvConfig> {
-        self.assets
-            .iter()
-            .find_map(|a| {
-                if let AssetProfile::Ev(c) = a {
-                    Some(c)
-                } else {
-                    None
-                }
-            })
-            .or(self.devices.ev.as_ref())
+        self.assets.iter().find_map(|a| {
+            if let AssetProfile::Ev(c) = a { Some(c) } else { None }
+        })
     }
 
-    /// Returns the Heater config: checks `assets` list first, falls back to legacy `devices`.
+    /// Returns the Heater config from the `assets` list.
     pub fn heater_config(&self) -> Option<&HeaterConfig> {
-        self.assets
-            .iter()
-            .find_map(|a| {
-                if let AssetProfile::Heater(c) = a {
-                    Some(c)
-                } else {
-                    None
-                }
-            })
-            .or(self.devices.heater.as_ref())
+        self.assets.iter().find_map(|a| {
+            if let AssetProfile::Heater(c) = a { Some(c) } else { None }
+        })
     }
 
-    /// Returns the PV config: checks `assets` list first, falls back to legacy `devices`.
+    /// Returns the PV config from the `assets` list.
     pub fn pv_config(&self) -> Option<&PvConfig> {
-        self.assets
-            .iter()
-            .find_map(|a| {
-                if let AssetProfile::Pv(c) = a {
-                    Some(c)
-                } else {
-                    None
-                }
-            })
-            .or(self.devices.pv.as_ref())
+        self.assets.iter().find_map(|a| {
+            if let AssetProfile::Pv(c) = a { Some(c) } else { None }
+        })
     }
 
-    /// Returns the Battery config: checks `assets` list first, falls back to legacy `devices`.
+    /// Returns the Battery config from the `assets` list.
     pub fn battery_config(&self) -> Option<&BatteryConfig> {
-        self.assets
-            .iter()
-            .find_map(|a| {
-                if let AssetProfile::Battery(c) = a {
-                    Some(c)
-                } else {
-                    None
-                }
-            })
-            .or(self.devices.battery.as_ref())
+        self.assets.iter().find_map(|a| {
+            if let AssetProfile::Battery(c) = a { Some(c) } else { None }
+        })
     }
 
-    /// Returns the base load in kW: checks `assets` list first, falls back to legacy `devices.base_load_w`.
+    /// Returns the base load in kW from the `assets` list.
     pub fn base_load_kw(&self) -> f64 {
         self.assets
             .iter()
             .find_map(|a| {
-                if let AssetProfile::BaseLoad(c) = a {
-                    Some(c.baseline_kw)
-                } else {
-                    None
-                }
+                if let AssetProfile::BaseLoad(c) = a { Some(c.baseline_kw) } else { None }
             })
-            .unwrap_or(self.devices.base_load_w / 1000.0)
+            .unwrap_or_else(default_base_load_kw)
     }
 
     pub async fn load(path: &str) -> Self {
@@ -691,15 +643,17 @@ impl Profile {
         }
     }
 
-    async fn try_load(path: &str) -> anyhow::Result<Self> {
+    pub async fn try_load(path: &str) -> anyhow::Result<Self> {
         let contents = tokio::fs::read_to_string(Path::new(path)).await?;
         let profile: Profile = serde_yaml::from_str(&contents)?;
+        if profile.assets.is_empty() {
+            anyhow::bail!("profile at '{}' has no assets — check the YAML 'assets:' list", path);
+        }
         Ok(profile)
     }
 
     pub fn default() -> Self {
         Self {
-            devices: DeviceConfig::default(),
             assets: vec![],
             simulator: SimulatorConfig::default(),
             planner: PlannerConfig::default(),
@@ -759,8 +713,16 @@ temp_initial_c: 20.0
 temp_min_c: 18.0
 temp_max_c: 23.0
 "#;
-        let cfg: HeaterConfig = serde_yaml::from_str(yaml).expect("should parse");
-        assert!(cfg.switching_penalty_eur.is_none());
-        assert!((cfg.effective_switching_penalty() - 0.01).abs() < 1e-9);
+    #[tokio::test]
+    async fn profile_empty_assets_guard() {
+        // try_load must reject a YAML that parses but has no assets.
+        let dir = std::env::temp_dir();
+        let path = dir.join("empty_assets_profile_test.yaml");
+        tokio::fs::write(&path, "simulator:\n  tick_s: 1\n").await.unwrap();
+        let result = Profile::try_load(path.to_str().unwrap()).await;
+        assert!(result.is_err(), "try_load must return Err for empty assets list");
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("no assets"), "error message should mention 'no assets': {msg}");
+        let _ = tokio::fs::remove_file(path).await;
     }
 }

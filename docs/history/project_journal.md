@@ -3169,6 +3169,55 @@ Fix: Updated `PlanReason` discriminator to `kind` with SCREAMING_SNAKE_CASE valu
 - **`nav-simulation` was removed** in a prior commit but `ui.py open()` still waited for it, breaking all `@ven-ui` BDD tests until changed to `nav-dashboard`.
 - **controller_ui.feature rate chart tests** are pre-existing failures from `d7f8d51` (removed rate charts from Controller page without updating BDD steps) — not caused by this feature.
 
+## Phase 29: VEN Backend Structural Refactor (016-refactor-ven-backend)
+
+**Goal**: Pure behaviour-preserving structural refactor of `VEN/src/` eliminating 7 technical debts (R-01 through R-07). No new features, no new API surface.
+
+### What was changed
+
+**R-01 — Delete phantom dead file**: `VEN/src/controller/profile.rs` (22 KB, never compiled — no `mod profile;` declaration) deleted via `git rm`.
+
+**R-02 — Remove `cancel_request` legacy None fallback**: The dead `None =>` arm in `AppState::cancel_request` (which silently no-oped) was replaced with a `tracing::warn!()` arm. Three unit tests added: EV cancel clears `ev_session`, Heater cancel clears `heater_target`, ShiftableLoad cancel removes load+runtime.
+
+**R-03 — Remove `AssetCapabilities` dead code**: Deleted `struct AssetCapabilities`, `struct EnergyState`, `struct TimeWindow` (the one in `assets/mod.rs`), and all five `fn capabilities(&self) -> AssetCapabilities` implementations across Battery/Ev/Pv/Heater/BaseLoad. `GET /capability` uses `AssetCapability` (singular) and is unaffected.
+
+**R-04 — Remove legacy `DeviceConfig`**: Deleted `struct DeviceConfig` and its `Default` impl from `profile.rs`. Removed the `devices` field from `struct Profile`. Simplified all 5 asset accessors (removed `.or(devices.X)` fallbacks). Added startup guard in `try_load()`: if `profile.assets.is_empty()` after YAML parse, bail with a human-readable error message. Updated `main.rs` to propagate with `?`. Added unit test `profile_empty_assets_guard`.
+
+**R-05 — Centralize asset ID constants**: Created `VEN/src/ids.rs` with 6 `pub const ASSET_*: &str` constants (EV, BATTERY, PV, HEATER, BOILER, BASE_LOAD). All production asset-ID string literals in non-test, non-serde-rename code replaced with `crate::ids::*`. Test assertion literals and serde rename attributes left unchanged. Added boiler gap comment in `routes/hems.rs`.
+
+**R-06 — Decompose `spawn_sim_tick`**: The ~290-line monolithic `spawn_sim_tick` body was decomposed into 5 named helper functions:
+- `apply_sim_injections` — Behaviour A one-shot state overrides (~30 lines)
+- `build_tick_setpoints` — effective-capacity composition + dispatcher call (~50 lines)
+- `apply_deviation_correction` — Layer 1/G correction state machine (~94 lines)
+- `publish_sim_tick_result` — post-tick sensor/sim/ledger/history/envelope update (~127 lines)
+- `DeviationState` — stack-local struct for the three deviation counters
+
+`spawn_sim_tick` rewritten as a clean orchestrator. Unit test `test_build_setpoints_no_plan` added — calls `build_tick_setpoints` with `plan: None` and a synthetic profile without needing `AppCtx`.
+
+> Note: `apply_deviation_correction` (~94 lines) and `publish_sim_tick_result` (~127 lines) exceed the SC-005 60-line target. Both are correct but remain candidates for further decomposition in a future feature.
+
+**R-07 — Split `InnerState` into three independent locks**: `AppState`'s single `Arc<RwLock<InnerState>>` replaced with three independent locks:
+- `polling: Arc<RwLock<PollingState>>` — programs/events/reports (persisted)
+- `ctrl_sim: Arc<RwLock<ControllerSimState>>` — sensor, sim snapshot, inject overrides, controller trace
+- `hems: Arc<RwLock<HemsState>>` — all 13 HEMS runtime fields (not persisted)
+
+`InnerState` struct and its manual `Clone` impl deleted. INVARIANT comment added at top of `impl AppState`: "No function may acquire more than one lock simultaneously."
+
+`PersistedVenState` private helper struct introduced to keep `state.json` format identical (`programs`, `events`, `reports`, `sensor` as top-level keys) — no migration needed for existing Pi4 state files.
+
+`AppState::new()` explicitly sets `ev_settings.opportunistic_charging_enabled = true` (struct-update syntax) since Rust's `Default` derive ignores `#[serde(default = "bool_true")]`.
+
+### Key decisions
+
+- **`PersistedVenState` for JSON backward-compat**: The original `InnerState` serialised only 4 fields (rest were `#[serde(skip)]`). Replicating exactly those 4 fields in `PersistedVenState` means all Pi4 `state.json` files load without modification.
+- **`ControllerSimState` naming**: Chosen to avoid collision with `crate::simulator::SimState`. Has explicit `impl Default` (not `#[derive(Default)]`) because `SensorSnapshot::empty_now()` requires a constructor call.
+- **`to_json` INVARIANT compliance**: Initial implementation held `polling.read()` and `ctrl_sim.read()` simultaneously (read guards are safe from deadlock, but violate the written INVARIANT). Fixed to acquire-clone-drop each lock separately.
+- **Startup guard placement**: Guard in `try_load()` (not `load()`), so the public `Profile::load()` method remains available for tests that construct test profiles directly.
+
+### Phase 29 SC-002 verification note
+
+`grep -rn "DeviceConfig\|AssetCapabilities\|EnergyState\|TimeWindow\|fn capabilities" VEN/src/ --include='*.rs'` returns hits in `controller/timeline.rs` and `routes/timeline.rs` for `TimeWindow`. These are hits in a *different* `TimeWindow` struct used by the timeline feature — NOT the dead `TimeWindow` from `assets/mod.rs` which was deleted in R-03. SC-002 is satisfied.
+
 ## Phase 28: Planner State Forecast in Timeline API (015-planner-state-forecast)
 
 **Goal**: Expose the MILP planner's computed future state trajectories (battery/EV SoC, heater T_tank) through the VEN timeline API, so the `/timeline/battery`, `/timeline/ev`, and `/timeline/heater` responses include the planner's view of where each asset is heading — not just its current state.

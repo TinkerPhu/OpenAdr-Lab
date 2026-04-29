@@ -247,7 +247,7 @@ pub async fn post_requests(
 
     match crate::controller::user_request::create_from_body(body, &assets, &asset_configs, now) {
         Ok(mut user_req) => {
-            if user_req.asset_id == "ev" {
+            if user_req.asset_id == crate::ids::ASSET_EV {
                 let deadline = user_req
                     .deadlines
                     .first()
@@ -272,7 +272,8 @@ pub async fn post_requests(
                     target_soc,
                     "user request created (EV session)"
                 );
-            } else if user_req.asset_id == "heater" || user_req.asset_id == "boiler" {
+            } else if user_req.asset_id == crate::ids::ASSET_HEATER || user_req.asset_id == crate::ids::ASSET_BOILER {
+                // TODO: use separate HeaterTarget / BoilerTarget once boiler asset is implemented
                 let ready_by = user_req
                     .deadlines
                     .first()

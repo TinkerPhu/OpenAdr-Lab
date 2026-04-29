@@ -3,6 +3,7 @@ mod common;
 mod config;
 mod controller;
 mod entities;
+mod ids;
 mod loops;
 mod models;
 mod planner_events;
@@ -71,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Load simulator profile
     let profile = if let Some(ref path) = cfg.profile_path {
-        Profile::load(path).await
+        Profile::try_load(path).await?
     } else {
         warn!("PROFILE_PATH not set, using default profile");
         Profile::default()

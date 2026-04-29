@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::{
-    Asset, AssetCapabilities, AssetCapability, AssetState, ControlDescriptor, ControlKind,
+    Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind,
 };
 use crate::common::{Interpolation, TimeSeries};
 use crate::profile::PvConfig;
@@ -84,17 +84,6 @@ impl PvInverter {
             m.insert("export_limit_kw".into(), lim);
         }
         m
-    }
-
-    pub fn capabilities(&self, asset_id: &str, _state: &PvState) -> AssetCapabilities {
-        AssetCapabilities {
-            asset_id: asset_id.to_string(),
-            max_import_kw: 0.0,
-            max_export_kw: self.rated_kw,
-            is_flexible: false,
-            energy_state: None,
-            availability: None,
-        }
     }
 
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {

@@ -168,7 +168,7 @@ pub async fn put_sim_config_battery(
         }
     }
     let mut sim = ctx.sim.lock().await;
-    match sim.find_asset_mut("battery") {
+    match sim.find_asset_mut(crate::ids::ASSET_BATTERY) {
         Some((_entry, cfg)) => {
             let mut values = std::collections::HashMap::new();
             values.insert("capacity_kwh".to_string(), body.capacity_kwh);
