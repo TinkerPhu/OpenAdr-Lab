@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
+use tracing::{debug, warn};
 
 use crate::entities::asset::PlanTrigger;
 use crate::state::SimInjectState;
@@ -107,7 +108,17 @@ pub struct BatteryConfigBody {
 
 /// GET /sim/schema — returns control descriptors for all configured assets.
 pub async fn get_sim_schema(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    let lock_start = std::time::Instant::now();
     let sim = ctx.sim.lock().await;
+    let lock_ms = lock_start.elapsed().as_millis();
+    if lock_ms > 100 {
+        warn!(
+            lock_wait_ms = lock_ms,
+            "GET /sim/schema: sim mutex wait was long (planner may be running)"
+        );
+    } else {
+        debug!(lock_wait_ms = lock_ms, "GET /sim/schema: sim mutex acquired");
+    }
     let schema: std::collections::HashMap<
         String,
         Vec<crate::simulator::assets::ControlDescriptor>,
