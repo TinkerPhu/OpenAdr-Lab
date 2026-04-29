@@ -487,18 +487,29 @@ mod tests {
             Duration::seconds(300), // 1 plan step per slot
         );
         assert_eq!(traj.len(), 3);
-        // With correct formula: slot 1 gains 0.4 × 0.9 × 10 = 3.6 kW from offset.
-        // With buggy formula:   0.4 × 0.9^300 ≈ 0 — no offset contribution.
-        // Compare against pure natural irradiance to be time-of-day independent.
+        // With correct per-STEP decay: slot 1 exponent = 300/300 = 1  → offset = 0.4 × 0.9 = 0.36
+        // With buggy per-second decay: slot 1 exponent = 300          → offset = 0.4 × 0.9^300 ≈ 0
+        // Verify the implementation matches the correct formula exactly.
         let (t1, cap1) = &traj[0];
         let natural = PvInverter::natural_irradiance_at(*t1);
-        let natural_only_kw = -(natural * 10.0);
+        let correct_offset = 0.4_f64 * (1.0_f64 - 0.1_f64).powf(1.0); // per-step exponent = 1
+        let correct_kw = -((natural + correct_offset).clamp(0.0, 1.0) * 10.0);
         assert!(
-            cap1.max_export_kw < natural_only_kw - 1.0,
-            "slot 1 must export >1 kW more than natural-only (offset 0.4, alpha=0.1): \
-             got {:.4}, natural-only {:.4}",
-            cap1.max_export_kw, natural_only_kw
+            (cap1.max_export_kw - correct_kw).abs() < 0.01,
+            "slot 1 must match per-step decay formula: expected {:.4}, got {:.4}",
+            correct_kw, cap1.max_export_kw
         );
+        // When not saturated (natural < 0.64), the offset is fully visible and must exceed
+        // the buggy near-zero contribution by >1 kW.
+        let natural_only_kw = -(natural * 10.0);
+        if cap1.max_export_kw < natural_only_kw {
+            assert!(
+                cap1.max_export_kw < natural_only_kw - 1.0,
+                "slot 1 must export >1 kW more than natural-only when not saturated: \
+                 got {:.4}, natural-only {:.4}",
+                cap1.max_export_kw, natural_only_kw
+            );
+        }
     }
 
     #[test]
