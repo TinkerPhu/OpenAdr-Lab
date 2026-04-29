@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use metrics::counter;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::controller;
 use crate::entities;
@@ -408,7 +408,7 @@ pub(crate) fn spawn_sim_tick(
 
                 // Plan F Layer 1: battery correction overlay (goal-aware reactive compensation)
                 let correction_kw = if plan_snap.is_some() {
-                    controller::dispatcher::apply_battery_correction_overlay(
+                    let c = controller::dispatcher::apply_battery_correction_overlay(
                         &mut sp_map,
                         &sim_guard.assets,
                         &sim_guard.asset_configs,
@@ -417,7 +417,17 @@ pub(crate) fn spawn_sim_tick(
                         plan_snap.as_ref().unwrap().objective,
                         profile.planner.deviation_threshold_kw,
                         profile.planner.correction_min_kw,
-                    )
+                    );
+                    if c != 0.0 {
+                        debug!(
+                            correction_kw = c,
+                            plan_signed_net_kw,
+                            actual_net_kw = prev_actual_net_kw,
+                            deviation_kw = prev_actual_net_kw - plan_signed_net_kw,
+                            "layer1: battery correction applied"
+                        );
+                    }
+                    c
                 } else {
                     0.0
                 };
@@ -623,16 +633,49 @@ pub(crate) fn spawn_sim_tick(
             if let Some(ref plan) = plan_snap {
                 if let Some(slot) = plan.current_slot(now) {
                     let post_net_kw = sim_snapshot.grid.net_power_w / 1000.0;
-                    let post_error_kw = (post_net_kw - (slot.net_import_kw - slot.net_export_kw)).abs();
+                    let planned_net_kw = slot.net_import_kw - slot.net_export_kw;
+                    let post_error_kw = (post_net_kw - planned_net_kw).abs();
                     if post_error_kw > profile.planner.deviation_threshold_kw {
                         deviation_ticks = deviation_ticks.saturating_add(1);
+                        debug!(
+                            post_net_kw,
+                            planned_net_kw,
+                            post_error_kw,
+                            threshold_kw = profile.planner.deviation_threshold_kw,
+                            deviation_ticks,
+                            trigger_ticks = profile.planner.deviation_trigger_ticks,
+                            "layer2: sustained deviation tick"
+                        );
                         if deviation_ticks >= profile.planner.deviation_trigger_ticks {
                             deviation_ticks = 0;
+                            warn!(
+                                post_net_kw,
+                                planned_net_kw,
+                                post_error_kw,
+                                trigger_ticks = profile.planner.deviation_trigger_ticks,
+                                "layer2: DeviceDeviation trigger fired"
+                            );
                             let _ = trigger_tx.send(PlanTrigger::DeviceDeviation);
                         }
                     } else {
+                        if deviation_ticks > 0 {
+                            debug!(
+                                deviation_ticks,
+                                post_net_kw,
+                                planned_net_kw,
+                                post_error_kw,
+                                "layer2: deviation cleared, resetting tick counter"
+                            );
+                        }
                         deviation_ticks = 0;
                     }
+                } else {
+                    debug!("layer2: plan exists but no current_slot — skipping deviation check");
+                }
+            } else {
+                // Only log occasionally to avoid spam when no plan exists at startup
+                if deviation_ticks == 0 {
+                    debug!("layer2: no active plan — deviation check skipped");
                 }
             }
 
@@ -745,6 +788,8 @@ pub(crate) fn spawn_planning(
             let trigger = trigger_rx.borrow().clone();
             let trigger_reason = format!("{:?}", trigger);
 
+            info!(trigger = %trigger_reason, "planner loop: starting plan cycle");
+
             let tariff_ts =
                 crate::entities::tariff_snapshot::TariffTimeSeries::from_snapshots(&rates);
             let ev_sess = state.ev_session().await;
@@ -762,7 +807,14 @@ pub(crate) fn spawn_planning(
             // Clone SimState snapshot so the Mutex is released immediately.
             // MILP solving takes 18-60s on Pi4 ARM64; holding the lock would
             // block sim ticks and /capability reads for the entire duration.
+            let lock_start = std::time::Instant::now();
             let mut sim_snap = sim.lock().await.clone();
+            let lock_ms = lock_start.elapsed().as_millis();
+            if lock_ms > 500 {
+                warn!(lock_wait_ms = lock_ms, trigger = %trigger_reason, "planner: sim lock wait was long");
+            } else {
+                debug!(lock_wait_ms = lock_ms, "planner: sim lock acquired");
+            }
 
             // Patch the clone when pv_irradiance inject is pending and the tick hasn't
             // applied it yet. When the tick runs first, the clone already has the correct
@@ -833,6 +885,13 @@ pub(crate) fn spawn_planning(
             .await
             .expect("planner task panicked");
             let solver_ms = solve_start.elapsed().as_millis() as u64;
+            info!(
+                solver_ms,
+                trigger = %trigger_reason,
+                slots = plan.slots.len(),
+                objective_eur = plan.objective_eur,
+                "planner: solve complete"
+            );
 
             // ── Cancel ticker, emit plan_ready ────────────────────────────
             let _ = cancel_tx.send(());
@@ -884,12 +943,15 @@ pub(crate) fn spawn_planning(
 
             let slot_count = plan.slots.len();
             if adopt {
+                info!(trigger = %trigger_reason, slot_count, "planner: plan adopted");
                 // Replan supersedes any active correction
                 let _ = event_tx.send(PlannerEvent::CorrectionCleared {
                     ts: now,
                     reason: "superseded_by_replan".to_string(),
                 });
                 state.set_active_plan(Some(plan)).await;
+            } else {
+                info!(trigger = %trigger_reason, slot_count, "planner: plan NOT adopted (periodic below threshold)");
             }
 
             // Refresh site envelope immediately after each plan cycle.
@@ -902,7 +964,7 @@ pub(crate) fn spawn_planning(
                 state.set_site_envelope(env).await;
             }
 
-            info!("plan cycle complete");
+            info!(trigger = %trigger_reason, slot_count, "plan cycle complete");
 
             // Emit PlanCycle controller event (T029)
             let plan_cycle_event = controller::trace::ControllerEvent::PlanCycle {
