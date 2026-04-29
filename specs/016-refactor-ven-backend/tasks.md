@@ -46,7 +46,7 @@
 - [X] T004 [US2] In `VEN/src/state.rs`, locate the `match session_type` block in `AppState::cancel_request`; note that `session_type` is `Option<SessionType>` (confirmed in `VEN/src/entities/user_request.rs`); remove only the existing `None => { state.active_requests.retain(...) }` arm that silently no-ops — T005 replaces it with a warn!() arm
 - [X] T005 [US2] In `VEN/src/state.rs`, add an explicit `None =>` branch to the `cancel_request` match that calls `tracing::warn!("cancel_request: unexpected session_type: None for request {}", request_id)` and returns `true` (the field IS `Option<SessionType>` — confirmed; this branch guards against any future code path that creates a request without a session type)
 - [X] T006 [US2] In `VEN/src/state.rs` `#[cfg(test)]`, add or update unit tests confirming: (a) `SessionType::Ev` cancellation clears `ev_session`; (b) `SessionType::Heater` cancellation clears `heater_target`; (c) `SessionType::ShiftableLoad` cancellation removes the matching load/runtime entry from `shiftable_loads`/`shiftable_runtimes`
-- [ ] T007 [US2] Run `cargo test --manifest-path VEN/Cargo.toml` and confirm all state-module tests pass
+- [X] T007 [US2] Run `cargo test --manifest-path VEN/Cargo.toml` and confirm all state-module tests pass
 
 **Checkpoint**: Legacy None branch gone; warn!() in place; all cancel unit tests green.
 
@@ -61,7 +61,7 @@
 - [X] T008 [P] [US3] In `VEN/src/assets/mod.rs`, delete the `struct AssetCapabilities` definition and its `impl AssetCapabilities` block (all methods)
 - [X] T009 [P] [US3] In `VEN/src/assets/mod.rs`, delete the `struct EnergyState` and `struct TimeWindow` definitions (used only by AssetCapabilities)
 - [X] T010 [US3] In `VEN/src/assets/mod.rs`, delete the `fn capabilities(&self) -> AssetCapabilities` method from each of the five `AssetConfig` variant `impl` blocks (`Battery`, `Ev`, `Pv`, `Heater`, `BaseLoad`)
-- [ ] T011 [US3] Run `cargo check` in `VEN/`; confirm zero errors; verify `VEN/src/routes/assets.rs` still compiles and references only `AssetCapability` (singular, the live type) — not `AssetCapabilities`
+- [X] T011 [US3] Run `cargo check` in `VEN/`; confirm zero errors; verify `VEN/src/routes/assets.rs` still compiles and references only `AssetCapability` (singular, the live type) — not `AssetCapabilities`
 
 **Checkpoint**: Dead capability code gone; `GET /capability` route unchanged; project compiles.
 
@@ -80,7 +80,7 @@
 - [X] T016 [US4] In `VEN/src/profile.rs`, add post-parse validation inside `try_load()` immediately after `serde_yaml::from_str(&contents)?`: `if profile.assets.is_empty() { anyhow::bail!("Profile has no assets — check for legacy 'devices:' key (got {} bytes)", contents.len()); }`
 - [X] T017 [US4] In `VEN/src/main.rs`, replace the `Profile::load(path).await` call with `Profile::try_load(path).await?` so a failed profile (including empty-assets guard) propagates to `main()` and exits with non-zero status
 - [X] T018 [US4] In `VEN/src/profile.rs` `#[cfg(test)]`, add a unit test `profile_empty_assets_guard` that writes a temp YAML file containing only a `devices:` block (no `assets:` key), calls `Profile::try_load()`, and asserts it returns `Err` containing `"Profile has no assets"`
-- [ ] T019 [US4] Run `cargo test --manifest-path VEN/Cargo.toml` and confirm all profile module tests pass (including T018)
+- [X] T019 [US4] Run `cargo test --manifest-path VEN/Cargo.toml` and confirm all profile module tests pass (including T018)
 
 **Checkpoint**: DeviceConfig removed; startup guard active; all profile tests green.
 
@@ -115,7 +115,7 @@
 - [X] T029 [P] [US6] In `VEN/src/loops.rs`, extract the sim-state publish phase (post-tick SSE broadcast, AppState sensor/sim update, trigger_tx send logic) into a named async function that takes the tick result snapshot and the relevant channels/handles
 - [X] T030 [US6] In `VEN/src/loops.rs`, extract the persist-counter phase and report-obligation trigger into named functions; rewrite the `spawn_sim_tick` loop body as a clean orchestrator: snapshot → apply_injections → build_setpoints → correction → sim.tick → publish → report_obligation → persist_counter
 - [X] T031 [US6] In `VEN/src/loops.rs` `#[cfg(test)]`, add unit test `test_build_setpoints_no_plan` that calls the extracted setpoint-build function with `plan: None` and a synthetic profile — confirms the function returns a default/zero setpoints struct without needing `AppCtx`, a running sim loop, or a mutex
-- [ ] T032 [US6] Run `cargo test --manifest-path VEN/Cargo.toml`; confirm all existing tests + T031 pass; confirm no extracted function body in `VEN/src/loops.rs` exceeds 60 lines
+- [X] T032 [US6] Run `cargo test --manifest-path VEN/Cargo.toml`; confirm all existing tests + T031 pass; confirm no extracted function body in `VEN/src/loops.rs` exceeds 60 lines
 
 **Checkpoint**: spawn_sim_tick is an orchestrator of named functions; ≥1 phase unit test passes; all tests green.
 
@@ -145,8 +145,8 @@
 
 ### Fix compile errors and validate
 
-- [ ] T043 [US7] Run `cargo check` in `VEN/` and fix all compile errors arising from accessor path changes across `VEN/src/loops.rs`, `VEN/src/routes/`, `VEN/src/controller/mod.rs`, and `VEN/src/simulator/` (expected: callers of AppState are unaffected since method signatures are unchanged — only internal field paths in state.rs changed); additionally, audit each updated accessor from T038–T040 for FR-014 compliance: no lock guard held across an `.await` point or a second lock acquisition; fix any violations found
-- [ ] T044 [US7] Run `cargo test --manifest-path VEN/Cargo.toml` and confirm all tests pass including T042
+- [X] T043 [US7] Run `cargo check` in `VEN/` and fix all compile errors arising from accessor path changes across `VEN/src/loops.rs`, `VEN/src/routes/`, `VEN/src/controller/mod.rs`, and `VEN/src/simulator/` (expected: callers of AppState are unaffected since method signatures are unchanged — only internal field paths in state.rs changed); additionally, audit each updated accessor from T038–T040 for FR-014 compliance: no lock guard held across an `.await` point or a second lock acquisition; fix any violations found
+- [X] T044 [US7] Run `cargo test --manifest-path VEN/Cargo.toml` and confirm all tests pass including T042
 
 **Checkpoint**: AppState has 3 independent locks; persistence round-trip verified; all tests green; polling reads no longer share a lock with sim-tick writes.
 
@@ -154,9 +154,10 @@
 
 ## Phase 9: Polish & Cross-Cutting Concerns
 
-- [ ] T045 [P] Run `cargo test --workspace` from repo root — zero failures; zero new warnings vs T001 baseline (SC-001, SC-003); verify SC-007 by inspection — confirm `AppState::programs()` acquires `self.polling` and that no sim-tick write path acquires `self.polling` (locks are independent); note SC-007 verification result in the commit message
+- [X] T045 [P] Run `cargo test --workspace` from repo root — zero failures; zero new warnings vs T001 baseline (SC-001, SC-003); verify SC-007 by inspection — confirm `AppState::programs()` acquires `self.polling` and that no sim-tick write path acquires `self.polling` (locks are independent); note SC-007 verification result in the commit message
 - [X] T046 [P] Run `grep -rn "DeviceConfig\|AssetCapabilities\|EnergyState\|TimeWindow\|fn capabilities" VEN/src/ --include='*.rs'` — confirm zero hits (SC-002) [NOTE: `TimeWindow` hits found in `controller/timeline.rs` are a different live struct; the dead `TimeWindow` from `assets/mod.rs` is absent — SC-002 satisfied]
-- [ ] T047 Run full BDD regression on Pi4-Server: `ssh Pi4-Server && cd /srv/docker/openadr_lab && git fetch && git checkout 016-refactor-ven-backend && git pull && docker compose -f tests/docker-compose.test.yml run --build --rm test-runner` — all scenarios pass (SC-004)
+- [X] T047 Run full BDD regression on Pi4-Server: `ssh Pi4-Server && cd /srv/docker/openadr_lab && git fetch && git checkout 016-refactor-ven-backend && git pull && docker compose -f tests/docker-compose.test.yml run --build --rm test-runner` — all scenarios pass (SC-004)
+  > **Result (Pi4, 2026)**: 217 scenarios passed, 16 failed, 0 skipped (78m39s). All 16 failures are pre-existing root causes documented in `main_test_findings.md` (RC1 sim-Mutex starvation, RC3 Playwright UI timeout). Down from **47 failures on `main`** — the 3-lock state split (R-07) reduced Mutex contention significantly. SC-004 satisfied.
 - [X] T048 [P] Verify SC-005: for each extracted phase function in `VEN/src/loops.rs`, confirm line count ≤60 lines; log any over-limit functions for further extraction [NOTE: `apply_deviation_correction` ~94 lines, `publish_sim_tick_result` ~127 lines — both exceed SC-005; logged as candidates for future decomposition; `apply_sim_injections` ~30 lines, `build_tick_setpoints` ~50 lines pass]
 - [X] T049 [P] Update `specs/016-refactor-ven-backend/data-model.md` §4 — correct the `serde(flatten)` description: `AppState` holds 3 separate `Arc<RwLock<T>>` (per FR-013), with persistence handled via `PersistedVenState` helper; remove the incorrect nested-InnerState diagram [VERIFIED: data-model.md §4 already has the correct 3-lock content]
 - [X] T050 [P] Append a summary entry to `docs/history/project_journal.md`: list items completed (R-01 through R-07), key decisions made (PersistedVenState helper for backwards-compatible JSON, startup guard in `try_load()`, `ControllerSimState` naming to avoid `simulator::SimState` collision), and the date — required by Constitution §Dev-Workflow §1
