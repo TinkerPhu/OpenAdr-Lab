@@ -442,6 +442,53 @@ fn asset_config_and_state_from_profile(ap: &AssetProfile) -> (AssetConfig, Asset
     }
 }
 
+/// Build the sim control schema from profile config — no mutex required.
+///
+/// The schema is static: it depends only on the profile YAML, not on runtime
+/// simulator state. This allows `GET /sim/schema` to respond without blocking
+/// on the sim mutex during MILP solving.
+pub(crate) fn schema_from_profile(
+    profile: &Profile,
+) -> HashMap<String, Vec<crate::assets::ControlDescriptor>> {
+    let mut out = HashMap::new();
+
+    if !profile.assets.is_empty() {
+        for ap in &profile.assets {
+            let (cfg, _) = asset_config_and_state_from_profile(ap);
+            out.insert(ap.id().to_string(), cfg.control_schema());
+        }
+    } else {
+        // Legacy devices format
+        let dev = &profile.devices;
+        if let Some(c) = &dev.ev {
+            let cfg = AssetConfig::Ev(EvCharger::from_config(c));
+            out.insert(c.id.clone(), cfg.control_schema());
+        }
+        if let Some(c) = &dev.heater {
+            let cfg = AssetConfig::Heater(Heater::from_config(c));
+            out.insert(c.id.clone(), cfg.control_schema());
+        }
+        if let Some(c) = &dev.pv {
+            let cfg = AssetConfig::Pv(PvInverter::from_config(c));
+            out.insert(c.id.clone(), cfg.control_schema());
+        }
+        if let Some(c) = &dev.battery {
+            let cfg = AssetConfig::Battery(Battery::from_config(c));
+            out.insert(c.id.clone(), cfg.control_schema());
+        }
+        if dev.base_load_w > 0.0 {
+            let c = crate::profile::BaseLoadConfig {
+                id: "base_load".to_string(),
+                baseline_kw: dev.base_load_w / 1000.0,
+            };
+            let cfg = AssetConfig::BaseLoad(BaseLoad::from_config(&c));
+            out.insert(c.id.clone(), cfg.control_schema());
+        }
+    }
+
+    out
+}
+
 fn default_history_buffer() -> AssetHistoryBuffer {
     AssetHistoryBuffer::new(3600)
 }

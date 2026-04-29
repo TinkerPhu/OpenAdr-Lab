@@ -166,9 +166,25 @@ impl Heater {
     }
 
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        // heater_temp_c (T_tank one-shot reset) and heater_setpoint_c (kW power
-        // override) are handled by dedicated UI elements, not schema-driven controls.
         vec![
+            ControlDescriptor {
+                key: "heater_temp_c".into(),
+                label: "T_tank".into(),
+                kind: ControlKind::Slider,
+                min: Some(18.0),
+                max: Some(95.0),
+                unit: "°C".into(),
+                display_scale: None,
+            },
+            ControlDescriptor {
+                key: "heater_setpoint_c".into(),
+                label: "Power setpoint".into(),
+                kind: ControlKind::Slider,
+                min: Some(0.0),
+                max: Some(self.max_kw),
+                unit: "kW".into(),
+                display_scale: None,
+            },
             ControlDescriptor {
                 key: "heater_temp_min_c".into(),
                 label: "T_tank_min".into(),
@@ -691,13 +707,27 @@ mod tests {
     // ── control_schema ────────────────────────────────────────────────────────
 
     #[test]
-    fn control_schema_returns_two_descriptors() {
+    fn control_schema_returns_four_descriptors() {
         let heater = default_heater();
         let schema = heater.control_schema();
         let keys: Vec<_> = schema.iter().map(|d| d.key.as_str()).collect();
+        assert!(keys.contains(&"heater_temp_c"), "missing heater_temp_c");
+        assert!(keys.contains(&"heater_setpoint_c"), "missing heater_setpoint_c");
         assert!(keys.contains(&"heater_temp_min_c"), "missing heater_temp_min_c");
         assert!(keys.contains(&"heater_temp_max_c"), "missing heater_temp_max_c");
-        assert_eq!(schema.len(), 2, "expected exactly 2 control descriptors");
+        assert_eq!(schema.len(), 4, "expected exactly 4 control descriptors");
+    }
+
+    #[test]
+    fn control_schema_heater_setpoint_bounds() {
+        let heater = default_heater();
+        let schema = heater.control_schema();
+        let sp_d = schema.iter().find(|d| d.key == "heater_setpoint_c").unwrap();
+        let temp_d = schema.iter().find(|d| d.key == "heater_temp_c").unwrap();
+        assert_eq!(sp_d.min.unwrap(), 0.0);
+        assert_eq!(sp_d.max.unwrap(), heater.max_kw);
+        assert_eq!(temp_d.min.unwrap(), 18.0);
+        assert_eq!(temp_d.max.unwrap(), 95.0);
     }
 
     #[test]
