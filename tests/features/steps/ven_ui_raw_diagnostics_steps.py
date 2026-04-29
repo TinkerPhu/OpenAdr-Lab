@@ -35,10 +35,9 @@ def step_see_cell(context, title):
 
 @when('I click the refresh button in the "{title}" cell')
 def step_click_refresh(context, title):
-    btn = context.browser_page.wait_for_selector(
-        tid(f"refresh-btn-{_slug(title)}"), timeout=45000
-    )
-    btn.click()
+    sel = tid(f"refresh-btn-{_slug(title)}")
+    context.browser_page.wait_for_selector(sel, timeout=45000)
+    context.browser_page.click(sel)
 
 
 # ── Chart assertions ──────────────────────────────────────────────────────────
