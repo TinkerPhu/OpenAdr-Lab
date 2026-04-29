@@ -178,7 +178,7 @@ def _expand_ev_right_section(page):
     )
     label = btn.get_attribute("aria-label") or ""
     if "Expand" in label:
-        btn.click()
+        page.click(tid("asset-cell-ev-collapse-right"))
         # Wait for right section content to appear
         page.wait_for_selector(
             tid("asset-cell-ev-right"), state="visible", timeout=45000,
@@ -223,10 +223,9 @@ def step_toggle_ev_plugged(context):
     context.ev_plugged_before = True if ev_plugged_raw is None else ev_plugged_raw
 
     # MUI Switch renders data-testid on a <span>; click the inner <input> to reliably toggle
-    checkbox = context.browser_page.wait_for_selector(
-        f'{tid("ctrl-ev-plugged")} input[type="checkbox"]', timeout=45000
-    )
-    checkbox.click()
+    checkbox_sel = f'{tid("ctrl-ev-plugged")} input[type="checkbox"]'
+    context.browser_page.wait_for_selector(checkbox_sel, timeout=45000)
+    context.browser_page.click(checkbox_sel)
 
 
 @then("the EV plugged state changes in VEN-1 sim override")
@@ -268,10 +267,10 @@ def step_grid_tariff_has_pin_button(context):
 
 @when("I click the pin button on the EV asset cell")
 def step_pin_ev_cell(context):
-    el = context.browser_page.wait_for_selector(
+    context.browser_page.wait_for_selector(
         tid("asset-cell-ev-pin-btn"), timeout=45000
     )
-    el.click()
+    context.browser_page.click(tid("asset-cell-ev-pin-btn"))
 
 
 @when("I click the pin button on the EV asset cell again")
@@ -303,10 +302,10 @@ def step_ev_cell_not_in_pinned_zone(context):
 
 @when("I click the collapse right button on the EV asset cell")
 def step_collapse_right_ev(context):
-    el = context.browser_page.wait_for_selector(
+    context.browser_page.wait_for_selector(
         tid("asset-cell-ev-collapse-right"), timeout=45000
     )
-    el.click()
+    context.browser_page.click(tid("asset-cell-ev-collapse-right"))
 
 
 @then("the EV asset cell right section is visible")
