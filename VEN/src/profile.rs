@@ -713,6 +713,15 @@ temp_initial_c: 20.0
 temp_min_c: 18.0
 temp_max_c: 23.0
 "#;
+        let asset: AssetProfile = serde_yaml::from_str(yaml).expect("should parse heater yaml");
+        if let AssetProfile::Heater(cfg) = asset {
+            assert!(cfg.switching_penalty_eur.is_none(), "penalty should default to None");
+            assert!((cfg.effective_switching_penalty() - 0.01).abs() < 1e-9);
+        } else {
+            panic!("expected AssetProfile::Heater");
+        }
+    }
+
     #[tokio::test]
     async fn profile_empty_assets_guard() {
         // try_load must reject a YAML that parses but has no assets.
