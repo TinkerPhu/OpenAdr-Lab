@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
+use tracing::{debug, warn};
 
 use crate::AppCtx;
 
@@ -26,8 +27,19 @@ pub async fn get_trace_events(
     let limit = q.limit.unwrap_or(50);
     let ct = ctx.state.controller_trace().await;
     let mut events = ct.events();
+    let total = events.len();
     events.reverse();
     events.truncate(limit);
+    let plan_cycle_count = events
+        .iter()
+        .filter(|e| matches!(e, crate::controller::trace::ControllerEvent::PlanCycle { .. }))
+        .count();
+    debug!(
+        total_events = total,
+        returned = events.len(),
+        plan_cycle_count,
+        "GET /trace/events"
+    );
     Json(events)
 }
 
@@ -42,7 +54,19 @@ pub async fn get_trace_history(
     // Slice up to 24 h of history (buffer holds ~1 h at 1 s tick; 24 h is a safe ceiling).
     let window = Duration::hours(24);
 
+    let lock_start = std::time::Instant::now();
     let sim = ctx.sim.lock().await;
+    let lock_ms = lock_start.elapsed().as_millis();
+    if lock_ms > 100 {
+        warn!(
+            lock_wait_ms = lock_ms,
+            asset = %q.asset,
+            "GET /trace/history: sim mutex wait was long (planner may be running)"
+        );
+    } else {
+        debug!(lock_wait_ms = lock_ms, asset = %q.asset, "GET /trace/history: sim mutex acquired");
+    }
+
     let mut json: Vec<serde_json::Value> = match sim.find_asset(&q.asset) {
         None => vec![],
         Some((entry, cfg)) => entry
