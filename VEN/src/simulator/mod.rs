@@ -2,11 +2,6 @@ pub mod energy;
 pub mod persist;
 pub mod power_model;
 
-// Re-export asset types so existing call sites using `simulator::assets::*` still compile.
-pub mod assets {
-    pub use crate::assets::*;
-}
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -17,7 +12,7 @@ use crate::assets::{
     PvInverter,
 };
 use crate::models::SensorSnapshot;
-use crate::profile::{AssetProfile, BaseLoadConfig, Profile};
+use crate::profile::{AssetProfile, Profile};
 use energy::EnergyCounter;
 
 /// Tracks the user-induced irradiance perturbation between ticks.
