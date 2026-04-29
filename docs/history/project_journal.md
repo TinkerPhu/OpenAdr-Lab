@@ -3169,3 +3169,48 @@ Fix: Updated `PlanReason` discriminator to `kind` with SCREAMING_SNAKE_CASE valu
 - **`nav-simulation` was removed** in a prior commit but `ui.py open()` still waited for it, breaking all `@ven-ui` BDD tests until changed to `nav-dashboard`.
 - **controller_ui.feature rate chart tests** are pre-existing failures from `d7f8d51` (removed rate charts from Controller page without updating BDD steps) — not caused by this feature.
 
+## Phase 28: Planner State Forecast in Timeline API (015-planner-state-forecast)
+
+**Goal**: Expose the MILP planner's computed future state trajectories (battery/EV SoC, heater T_tank) through the VEN timeline API, so the `/timeline/battery`, `/timeline/ev`, and `/timeline/heater` responses include the planner's view of where each asset is heading — not just its current state.
+
+### What was built
+
+Three asset modules gained new methods for translating MILP solution variables into timeline values:
+
+- **`Battery::future_state_values(e_kwh: f64) → HashMap<String, f64>`** — converts start-of-slot stored energy (kWh) to `{"soc": <0..1>}`.
+- **`EvCharger::soc_trajectory(p_ev_kw, soc_init, battery_kwh, dt_h) → Vec<f64>`** and `future_state_values_at(soc) → HashMap<String, f64>` — cumulative SoC integration over the charging schedule.
+- **`Heater::future_state_values(e_tank_kwh: f64) → HashMap<String, f64>`** — converts stored thermal energy (kWh above T_min) to `{"temp_c": <T_min..T_max>}`.
+
+A new field was added to `PlanTimeSlot`:
+
+```rust
+pub planned_state_by_asset: HashMap<String, HashMap<String, f64>>,
+```
+
+`#[serde(default)]` ensures backward compatibility with any persisted or serialized plan data. The field is populated in `translate_to_plan` (in `milp_planner.rs`) immediately after the main slot-building loop, using the MILP solution vectors (`e_bat_kwh[t]`, `p_ev_kw[t]`, `e_heat_tank_kwh[t]`). The EV trajectory also required capturing `soc_ev_init` in `MilpInputs` from the live EV asset state.
+
+In `controller/timeline.rs`, the `build_asset_timeline` function merges `planned_state_by_asset` into each future slot's values dict. Combined with the existing LOCF (last-observation-carried-forward) fill seeded from the now-point, every future grid bucket displays the planned state trajectory without null gaps.
+
+### BDD fix: timestamp race in polling steps
+
+The new BDD scenarios (`T019`/`T020`/`T021`) initially failed due to a timing race:
+
+- `@when` captures `now_ts` just before the first fetch. The now-point (built server-side at request time, ts ≈ `now_ts + latency`) satisfies `ts > now_ts`, so `poll_until` returns immediately — before the planner has run.
+- `@then` re-captures `now_ts` fresh (a few hundred ms later). The now-point (with soc from sim state) is now "past". Plan-slot future points with soc had not yet been found.
+
+Fix applied in `ven_timeline_steps.py`:
+1. `context.poll_now_ts = now_ts` saved in `@when` and reused in `@then` (eliminates the stale `now_ts` problem).
+2. Both the `@when` predicate and `@then` assertion use a **30-second margin** (`ts > now_ts + 30`) to exclude the now-point (network latency << 30s) and require a proper future grid bucket. This forces the poll to wait until the planner has actually run and set an active plan, after which LOCF propagates planned state into the future grid.
+
+### Tests
+
+- **12 Rust unit tests** added across `battery.rs` (T007/T008), `ev.rs` (T009/T011/T012), `heater.rs` (T015/T016/T018), `milp_planner.rs` (T013/T014/T017), `controller/timeline.rs` (T010) — all pass locally.
+- **3 new BDD scenarios** in `ven_timeline.feature` (T019/T020/T021) — all pass on Pi4.
+- **Full BDD suite**: 225 scenarios pass, 8 pre-existing failures (unchanged from `main`).
+
+### Key learnings
+
+- **LOCF seeded from now-point can mask missing planned_state_by_asset**: The LOCF fill in `build_grid_aligned_array` seeds from `now_point.values` (current sim state, always includes soc). Before the first plan-slot timestamp (~30 min out for 1800s steps), all future grid buckets carry the now-point's soc via LOCF — regardless of whether `planned_state_by_asset` is populated. BDD polling steps that don't enforce a minimum future margin will give false positives.
+- **`plan_end_opt = None` nulls all future grid buckets**: When no active plan exists, the `ts <= plan_end` filter in `build_grid_aligned_array` maps to `_ => None`, rendering all future grid points null. The now-point is emitted separately (not via the grid) so it always has values. A BDD predicate with no margin would pass on the now-point even when the planner hasn't run.
+- **`AssetState` import path**: `crate::assets::AssetState` (defined in `VEN/src/assets/mod.rs`). NOT `crate::entities::asset::AssetState` — the latter is a different, legacy struct not used in the planner.
+
