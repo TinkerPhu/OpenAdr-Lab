@@ -125,102 +125,23 @@ impl SimState {
         self.assets.iter().zip(self.asset_configs.iter())
     }
 
-    /// Initialize from profile configuration, preferring `assets` list over legacy `devices`.
+    /// Initialize from profile configuration.
     pub fn from_profile(profile: &Profile) -> Self {
         let mut configs: Vec<AssetConfig> = Vec::new();
         let mut entries: Vec<AssetEntry> = Vec::new();
 
-        if !profile.assets.is_empty() {
-            for ap in &profile.assets {
-                let (cfg, state) = asset_config_and_state_from_profile(ap);
-                let setpoint_kw = cfg.default_setpoint(&state);
-                entries.push(AssetEntry {
-                    id: ap.id().to_string(),
-                    state,
-                    setpoint_kw,
-                    last_power_kw: 0.0,
-                    energy: EnergyCounter::new(),
-                    history: AssetHistoryBuffer::new(3600),
-                });
-                configs.push(cfg);
-            }
-        } else {
-            // Fall back to legacy `devices` format
-            let dev = &profile.devices;
-            if let Some(c) = &dev.ev {
-                let cfg = AssetConfig::Ev(EvCharger::from_config(c));
-                let state = AssetState::Ev(EvCharger::initial_state(c));
-                let sp = cfg.default_setpoint(&state);
-                entries.push(AssetEntry {
-                    id: c.id.clone(),
-                    state,
-                    setpoint_kw: sp,
-                    last_power_kw: 0.0,
-                    energy: EnergyCounter::new(),
-                    history: AssetHistoryBuffer::new(3600),
-                });
-                configs.push(cfg);
-            }
-            if let Some(c) = &dev.heater {
-                let cfg = AssetConfig::Heater(Heater::from_config(c));
-                let state = AssetState::Heater(Heater::initial_state(c));
-                let sp = cfg.default_setpoint(&state);
-                entries.push(AssetEntry {
-                    id: c.id.clone(),
-                    state,
-                    setpoint_kw: sp,
-                    last_power_kw: 0.0,
-                    energy: EnergyCounter::new(),
-                    history: AssetHistoryBuffer::new(3600),
-                });
-                configs.push(cfg);
-            }
-            if let Some(c) = &dev.pv {
-                let cfg = AssetConfig::Pv(PvInverter::from_config(c));
-                let state = AssetState::Pv(PvInverter::initial_state(c));
-                let sp = cfg.default_setpoint(&state);
-                entries.push(AssetEntry {
-                    id: c.id.clone(),
-                    state,
-                    setpoint_kw: sp,
-                    last_power_kw: 0.0,
-                    energy: EnergyCounter::new(),
-                    history: AssetHistoryBuffer::new(3600),
-                });
-                configs.push(cfg);
-            }
-            if let Some(c) = &dev.battery {
-                let cfg = AssetConfig::Battery(Battery::from_config(c));
-                let state = AssetState::Battery(Battery::initial_state(c));
-                let sp = cfg.default_setpoint(&state);
-                entries.push(AssetEntry {
-                    id: c.id.clone(),
-                    state,
-                    setpoint_kw: sp,
-                    last_power_kw: 0.0,
-                    energy: EnergyCounter::new(),
-                    history: AssetHistoryBuffer::new(3600),
-                });
-                configs.push(cfg);
-            }
-            if dev.base_load_w > 0.0 {
-                let c = BaseLoadConfig {
-                    id: crate::ids::ASSET_BASE_LOAD.to_string(),
-                    baseline_kw: dev.base_load_w / 1000.0,
-                };
-                let cfg = AssetConfig::BaseLoad(BaseLoad::from_config(&c));
-                let state = AssetState::BaseLoad(BaseLoad::initial_state(&c));
-                let sp = cfg.default_setpoint(&state);
-                entries.push(AssetEntry {
-                    id: c.id.clone(),
-                    state,
-                    setpoint_kw: sp,
-                    last_power_kw: 0.0,
-                    energy: EnergyCounter::new(),
-                    history: AssetHistoryBuffer::new(3600),
-                });
-                configs.push(cfg);
-            }
+        for ap in &profile.assets {
+            let (cfg, state) = asset_config_and_state_from_profile(ap);
+            let setpoint_kw = cfg.default_setpoint(&state);
+            entries.push(AssetEntry {
+                id: ap.id().to_string(),
+                state,
+                setpoint_kw,
+                last_power_kw: 0.0,
+                energy: EnergyCounter::new(),
+                history: AssetHistoryBuffer::new(3600),
+            });
+            configs.push(cfg);
         }
 
         Self {
@@ -451,41 +372,10 @@ pub(crate) fn schema_from_profile(
     profile: &Profile,
 ) -> HashMap<String, Vec<crate::assets::ControlDescriptor>> {
     let mut out = HashMap::new();
-
-    if !profile.assets.is_empty() {
-        for ap in &profile.assets {
-            let (cfg, _) = asset_config_and_state_from_profile(ap);
-            out.insert(ap.id().to_string(), cfg.control_schema());
-        }
-    } else {
-        // Legacy devices format
-        let dev = &profile.devices;
-        if let Some(c) = &dev.ev {
-            let cfg = AssetConfig::Ev(EvCharger::from_config(c));
-            out.insert(c.id.clone(), cfg.control_schema());
-        }
-        if let Some(c) = &dev.heater {
-            let cfg = AssetConfig::Heater(Heater::from_config(c));
-            out.insert(c.id.clone(), cfg.control_schema());
-        }
-        if let Some(c) = &dev.pv {
-            let cfg = AssetConfig::Pv(PvInverter::from_config(c));
-            out.insert(c.id.clone(), cfg.control_schema());
-        }
-        if let Some(c) = &dev.battery {
-            let cfg = AssetConfig::Battery(Battery::from_config(c));
-            out.insert(c.id.clone(), cfg.control_schema());
-        }
-        if dev.base_load_w > 0.0 {
-            let c = crate::profile::BaseLoadConfig {
-                id: crate::ids::ASSET_BASE_LOAD.to_string(),
-                baseline_kw: dev.base_load_w / 1000.0,
-            };
-            let cfg = AssetConfig::BaseLoad(BaseLoad::from_config(&c));
-            out.insert(c.id.clone(), cfg.control_schema());
-        }
+    for ap in &profile.assets {
+        let (cfg, _) = asset_config_and_state_from_profile(ap);
+        out.insert(ap.id().to_string(), cfg.control_schema());
     }
-
     out
 }
 
