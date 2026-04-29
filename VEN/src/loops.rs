@@ -17,6 +17,8 @@ use crate::entities::plan::Plan;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::simulator::{AssetEntry, SimSnapshot};
+use crate::models::SensorSnapshot;
+use crate::entities::plan::SiteFlexibilityEnvelope;
 use crate::assets::AssetConfig;
 
 // ─── Event poll change detection (RF-B08) ─────────────────────────────────────
@@ -461,31 +463,27 @@ fn apply_deviation_correction(
     correction_kw
 }
 
-/// PHASE 5: Publish post-tick simulator state — sensor, sim snapshot, shiftable logic,
-/// ledger, history ring buffers, grid virtual asset, and site envelope.
+/// PHASE 5 (post-lock): Publish post-tick simulator state — sensor, sim snapshot, shiftable
+/// logic, ledger, and site envelope. Called after the sim Mutex is released, so HTTP handlers
+/// are never blocked by this async work.
 /// Returns the augmented SimSnapshot.
 async fn publish_sim_tick_result(
-    sim_guard: &mut SimState,
+    sensor: SensorSnapshot,
+    mut sim_snap: SimSnapshot,
+    envelope: SiteFlexibilityEnvelope,
     plan_snap: Option<&Plan>,
     state: &AppState,
     trigger_tx: &tokio::sync::watch::Sender<PlanTrigger>,
     rates_snap: &[TariffSnapshot],
-    capacity_snap: &OadrCapacityState,
     dt_s: f64,
     now: DateTime<Utc>,
 ) -> SimSnapshot {
     // Update sensor snapshot (backward compat)
-    let sensor = sim_guard.to_sensor_snapshot();
     state.update_sensor(sensor).await;
 
     // Update sim in app state — augmented with shiftable runtimes
-    let mut sim_snap = sim_guard.to_sim_snapshot();
 
     // ── Shiftable load runtime: start / complete / augment ──────
-
-    // Collect physics asset IDs so we skip them when scanning allocations.
-    let known_sim_ids: std::collections::HashSet<&str> =
-        sim_guard.assets.iter().map(|a| a.id.as_str()).collect();
 
     // Start: detect shiftable loads that the current plan slot wants
     // to run but that have no runtime yet.
@@ -494,7 +492,7 @@ async fn publish_sim_tick_result(
             let runtimes = state.shiftable_runtimes().await;
             let loads = state.shiftable_loads().await;
             for alloc in &slot.allocations {
-                if known_sim_ids.contains(alloc.asset_id.as_str()) { continue; }
+                if sim_snap.assets.contains_key(alloc.asset_id.as_str()) { continue; }
                 let already_running = runtimes.iter().any(|r| r.asset_id == alloc.asset_id);
                 if !already_running {
                     if let Some(load) = loads.iter().find(|l| l.asset_id == alloc.asset_id) {
@@ -557,37 +555,8 @@ async fn publish_sim_tick_result(
     );
     state.set_asset_ledger(ledger).await;
 
-    // Post-tick: push HistoryPoint per asset into per-asset ring buffer (CP2).
-    {
-        use crate::assets::HistoryPoint;
-        for entry in &mut sim_guard.assets {
-            entry.history.push(HistoryPoint {
-                ts: now,
-                power_kw: entry.last_power_kw,
-                state: entry.state.clone(),
-            });
-        }
-    }
-
-    // Update Grid virtual asset with net power + VTN capacity limits.
-    // Done here (not inside tick()) so capacity_snap is available.
-    {
-        let net_power_kw = sim_guard.grid.net_power_w / 1000.0;
-        let import_limit_kw = capacity_snap.import_limit_kw.unwrap_or(f64::MAX);
-        // OadrCapacityState.export_limit_kw is a positive magnitude; negate for sign convention.
-        let export_limit_kw_signed = -(capacity_snap.export_limit_kw.unwrap_or(f64::MAX));
-        sim_guard.grid_asset.update(net_power_kw, import_limit_kw, export_limit_kw_signed, now);
-    }
-
-    // Refresh site envelope on every sim tick (~1s).
-    // Done inside the sim lock to avoid a second lock acquisition.
-    {
-        let env = controller::envelope::compute_envelope(
-            &*sim_guard,
-            now,
-        );
-        state.set_site_envelope(env).await;
-    }
+    // Refresh site envelope (computed in-lock from final sim state).
+    state.set_site_envelope(envelope).await;
 
     sim_snap
 }
@@ -649,15 +618,16 @@ pub(crate) fn spawn_sim_tick(
                 }).await;
             }
 
-            // Lock sim; all physics and accounting phases run inside.
-            let sim_snapshot = {
+            // Lock sim for physics only — no .await inside the block.
+            // All async state publishes happen after the lock is released,
+            // preventing HTTP handlers from blocking for the full tick cycle.
+            let (tick_sensor, tick_sim_snap, tick_envelope, cleared_fields, pv_clear, base_clear) = {
                 let mut sim_guard = sim.lock().await;
 
-                // PHASE 1: Apply Behaviour A one-shot injections; clear returned fields.
+                // PHASE 1: Apply Behaviour A one-shot injections; collect fields to clear.
                 let cleared_fields = apply_sim_injections(&inject, &mut *sim_guard);
-                for field in cleared_fields {
-                    state.clear_inject_field(field).await;
-                }
+                let pv_clear = inject.pv_irradiance.is_some();
+                let base_clear = inject.base_load_kw.is_some();
 
                 // PHASE 2: Build setpoints (prev grid for Layer 1; effective capacity; dispatcher)
                 // Plan F: capture prev tick net grid for Layer 1 correction.
@@ -710,26 +680,64 @@ pub(crate) fn spawn_sim_tick(
                     inject.ev_soc_target,
                 );
 
-                // pv_irradiance and base_load_kw are one-shots: apply offset once then let it decay.
-                if inject.pv_irradiance.is_some() {
-                    state.clear_inject_field("pv_irradiance").await;
-                }
-                if inject.base_load_kw.is_some() {
-                    state.clear_inject_field("base_load_kw").await;
+                // PHASE 5 (in-lock): extract snapshots and mutate history/grid/envelope.
+                // All ops are sync — no .await. Lock released at end of this block.
+                let tick_sensor = sim_guard.to_sensor_snapshot();
+                let tick_sim_snap = sim_guard.to_sim_snapshot();
+
+                // Push HistoryPoint per asset into per-asset ring buffer (CP2).
+                {
+                    use crate::assets::HistoryPoint;
+                    for entry in &mut sim_guard.assets {
+                        entry.history.push(HistoryPoint {
+                            ts: now,
+                            power_kw: entry.last_power_kw,
+                            state: entry.state.clone(),
+                        });
+                    }
                 }
 
-                // PHASE 5: Publish — sensor, sim snapshot, shiftable logic, ledger, grid, envelope.
-                publish_sim_tick_result(
-                    &mut *sim_guard,
-                    plan_snap.as_ref(),
-                    &state,
-                    &*trigger_tx,
-                    &rates_snap,
-                    &capacity_snap,
-                    dt_s,
-                    now,
-                ).await
+                // Update Grid virtual asset with net power + VTN capacity limits.
+                // Done here (not inside tick()) so capacity_snap is available.
+                {
+                    let net_power_kw = sim_guard.grid.net_power_w / 1000.0;
+                    let import_limit_kw = capacity_snap.import_limit_kw.unwrap_or(f64::MAX);
+                    // OadrCapacityState.export_limit_kw is a positive magnitude; negate for sign convention.
+                    let export_limit_kw_signed = -(capacity_snap.export_limit_kw.unwrap_or(f64::MAX));
+                    sim_guard.grid_asset.update(net_power_kw, import_limit_kw, export_limit_kw_signed, now);
+                }
+
+                // Compute site envelope (pure math — reads sim, returns owned value).
+                let tick_envelope = controller::envelope::compute_envelope(&*sim_guard, now);
+
+                (tick_sensor, tick_sim_snap, tick_envelope, cleared_fields, pv_clear, base_clear)
+                // ← sim_guard DROPPED HERE — lock released
             };
+
+            // PHASE 1 (post-lock): clear one-shot inject fields.
+            for field in cleared_fields {
+                state.clear_inject_field(field).await;
+            }
+            // pv_irradiance and base_load_kw are one-shots: apply offset once then let it decay.
+            if pv_clear {
+                state.clear_inject_field("pv_irradiance").await;
+            }
+            if base_clear {
+                state.clear_inject_field("base_load_kw").await;
+            }
+
+            // PHASE 5 (post-lock): async state publishes — sensor, shiftable, ledger, envelope.
+            let sim_snapshot = publish_sim_tick_result(
+                tick_sensor,
+                tick_sim_snap,
+                tick_envelope,
+                plan_snap.as_ref(),
+                &state,
+                &*trigger_tx,
+                &rates_snap,
+                dt_s,
+                now,
+            ).await;
 
             // PHASE 6: Layer 2 — accumulate sustained deviation → DeviceDeviation trigger.
             if let Some(ref plan) = plan_snap {
@@ -807,8 +815,8 @@ pub(crate) fn spawn_sim_tick(
             persist_counter += 1;
             if persist_counter >= persist_every_ticks {
                 persist_counter = 0;
-                let sim_guard = sim.lock().await;
-                if let Err(e) = crate::simulator::persist::save(&sim_guard, &data_dir).await {
+                let sim_clone = { sim.lock().await.clone() };
+                if let Err(e) = crate::simulator::persist::save(&sim_clone, &data_dir).await {
                     error!("sim persist failed: {e:#}");
                 }
             }
