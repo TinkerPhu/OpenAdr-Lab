@@ -49,14 +49,14 @@ pub fn build_setpoints(
     if let Some(allocs) = slot_allocs {
         for alloc in allocs {
             // Battery allocations have no associated packet
-            if alloc.asset_id == "battery" {
-                setpoints.insert("battery".to_string(), alloc.power_kw);
+            if alloc.asset_id == crate::ids::ASSET_BATTERY {
+                setpoints.insert(crate::ids::ASSET_BATTERY.to_string(), alloc.power_kw);
                 continue;
             }
-            if alloc.asset_id == "heater" {
+            if alloc.asset_id == crate::ids::ASSET_HEATER {
                 plan_allocated_heater = true;
             }
-            if alloc.asset_id == "ev" {
+            if alloc.asset_id == crate::ids::ASSET_EV {
                 plan_allocated_ev = true;
             }
             setpoints.insert(alloc.asset_id.clone(), alloc.power_kw);
@@ -69,10 +69,10 @@ pub fn build_setpoints(
         if !plan_allocated_heater {
             if let Some((entry, cfg)) = assets.iter()
                 .zip(asset_configs.iter())
-                .find(|(a, _)| a.id == "heater")
+                .find(|(a, _)| a.id == crate::ids::ASSET_HEATER)
             {
                 if let Some(power_kw) = cfg.thermostat_setpoint_kw(&entry.state, target_c) {
-                    setpoints.insert("heater".to_string(), power_kw);
+                    setpoints.insert(crate::ids::ASSET_HEATER.to_string(), power_kw);
                 }
             }
         }
@@ -80,7 +80,7 @@ pub fn build_setpoints(
 
     // Enforce export capacity limit on PV
     if let Some(export_cap) = capacity.export_limit_kw {
-        let pv_sp = setpoints.entry("pv".to_string()).or_insert(0.0);
+        let pv_sp = setpoints.entry(crate::ids::ASSET_PV.to_string()).or_insert(0.0);
         // PV export is negative in sign convention; cap absolute value
         if *pv_sp < -export_cap {
             *pv_sp = -export_cap;
@@ -117,16 +117,16 @@ pub fn apply_surplus_ev_overlay(
         return;
     }
     // Live PV power (negative = export) and base load (positive = import).
-    let pv_kw = assets.iter().find(|a| a.id == "pv").map(|a| a.last_power_kw).unwrap_or(0.0);
+    let pv_kw = assets.iter().find(|a| a.id == crate::ids::ASSET_PV).map(|a| a.last_power_kw).unwrap_or(0.0);
     let base_kw = assets
         .iter()
-        .find(|a| a.id == "base_load")
+        .find(|a| a.id == crate::ids::ASSET_BASE_LOAD)
         .map(|a| a.last_power_kw)
         .unwrap_or(0.0);
     // Also account for any battery charging that the plan has already allocated this
     // tick (positive setpoint = charging). This prevents double-allocating PV surplus
     // to both the battery and the EV — EV only gets what the battery leaves behind.
-    let battery_charge_kw = setpoints.get("battery").copied().unwrap_or(0.0).max(0.0);
+    let battery_charge_kw = setpoints.get(crate::ids::ASSET_BATTERY).copied().unwrap_or(0.0).max(0.0);
     // surplus_kw: net generation after base consumption and planned battery charging
     let surplus_kw = (-(pv_kw + base_kw) - battery_charge_kw).max(0.0);
     if surplus_kw < 0.1 {
@@ -177,7 +177,7 @@ pub fn apply_battery_correction_overlay(
     let deviation_kw = actual_net_kw - plan_signed_net_kw;
 
     // Find battery asset and config (needed before threshold check to read setpoint_kw).
-    let Some(idx) = assets.iter().position(|a| a.id == "battery") else {
+    let Some(idx) = assets.iter().position(|a| a.id == crate::ids::ASSET_BATTERY) else {
         return 0.0;
     };
     let (AssetState::Battery(bs), AssetConfig::Battery(bcfg)) =
@@ -217,7 +217,7 @@ pub fn apply_battery_correction_overlay(
         return 0.0;
     }
 
-    setpoints.insert("battery".to_string(), clamped);
+    setpoints.insert(crate::ids::ASSET_BATTERY.to_string(), clamped);
     delta
 }
 

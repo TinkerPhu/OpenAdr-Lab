@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::{
-    Asset, AssetCapabilities, AssetCapability, AssetState, ControlDescriptor,
-    EnergyState,
+    Asset, AssetCapability, AssetState, ControlDescriptor,
 };
 use crate::common::{Interpolation, TimeSeries};
 use crate::profile::BatteryConfig;
@@ -118,22 +117,6 @@ impl Battery {
     pub fn future_state_values(&self, e_kwh: f64) -> HashMap<String, f64> {
         let soc = (e_kwh / self.capacity_kwh).clamp(0.0, 1.0);
         HashMap::from([("soc".into(), soc)])
-    }
-
-    pub fn capabilities(&self, asset_id: &str, state: &BatteryState) -> AssetCapabilities {
-        let cap = self.capability_inner(state);
-        AssetCapabilities {
-            asset_id: asset_id.to_string(),
-            max_import_kw: cap.max_import_kw,
-            max_export_kw: self.max_discharge_kw,
-            is_flexible: true,
-            energy_state: Some(EnergyState {
-                current_kwh: state.soc * self.capacity_kwh,
-                min_kwh: self.min_soc * self.capacity_kwh,
-                max_kwh: self.capacity_kwh,
-            }),
-            availability: None,
-        }
     }
 
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {

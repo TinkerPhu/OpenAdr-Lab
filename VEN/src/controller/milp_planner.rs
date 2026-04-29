@@ -360,7 +360,7 @@ fn build_milp_inputs(
         // Use live PvInverter when available so that irradiance_offset (irradiance
         // slider) and pv_alpha (blend-back speed slider) both project into the
         // forecast. Falls back to the static sin model if no "pv" asset exists.
-        let pv_kw = if let Some((_, cfg)) = assets.find_asset("pv") {
+        let pv_kw = if let Some((_, cfg)) = assets.find_asset(crate::ids::ASSET_PV) {
             if let AssetConfig::Pv(pv) = cfg {
                 let natural = PvInverter::natural_irradiance_at(slot_t);
                 // pv_alpha is "fraction removed per plan step (300 s)".
@@ -393,7 +393,7 @@ fn build_milp_inputs(
         eff_ch,
         eff_dis,
     ) = if let Some(bat_cfg) = profile.battery_config() {
-        let ctx = match assets.find_asset("battery") {
+        let ctx = match assets.find_asset(crate::ids::ASSET_BATTERY) {
             Some((entry, AssetConfig::Battery(b))) => BatteryMilpContext::from_state(&entry.state, b),
             _ => {
                 // No live battery in sim (e.g. cleared in test): fall back to profile initial_soc
@@ -428,7 +428,7 @@ fn build_milp_inputs(
     // ── EV ────────────────────────────────────────────────────────────────────
     let (a_ev, ev_mode, t_ev_dead, p_ev_max, p_ev_min, e_ev_core, e_ev_extra, v_ev_extra, soc_ev_init) =
         if let Some(ev_cfg) = profile.ev_config() {
-            let (ctx, soc_init) = match assets.find_asset("ev") {
+            let (ctx, soc_init) = match assets.find_asset(crate::ids::ASSET_EV) {
                 Some((entry, AssetConfig::Ev(e))) => {
                     let soc = if let AssetState::Ev(s) = &entry.state { Some(s.soc) } else { None };
                     (EvMilpContext::from_state(
@@ -463,7 +463,7 @@ fn build_milp_inputs(
     let (heater_mode, t_heat_dead, p_mid, p_full, e_heat_init, e_heat_max, q_heat_dem, e_heat_target, lambda_sw, heat_iz_mid, heat_iz_full) =
         if let Some(heat_cfg) = profile.heater_config() {
             let lambda = heat_cfg.effective_switching_penalty();
-            let ctx = match assets.find_asset("heater") {
+            let ctx = match assets.find_asset(crate::ids::ASSET_HEATER) {
                 Some((entry, AssetConfig::Heater(h))) => HeaterMilpContext::from_state(
                     &entry.state, h, n, step_s, now, heater_target, lambda,
                 ),
@@ -1850,7 +1850,6 @@ mod tests {
     /// Build a Profile with battery + EV + heater + PV + base_load.
     fn make_profile() -> Profile {
         Profile {
-            devices: Default::default(),
             assets: vec![
                 AssetProfile::Battery(BatteryConfig {
                     id: "battery".into(),
@@ -1942,7 +1941,6 @@ mod tests {
         temp_initial_c: f64,
     ) -> Profile {
         Profile {
-            devices: Default::default(),
             assets: vec![AssetProfile::Heater(HeaterConfig {
                 id: "heater".into(),
                 max_kw: 3.0,
@@ -2784,7 +2782,6 @@ mod tests {
     fn run_planner_no_assets_covers_base_load() {
         let now = fixed_now();
         let profile = Profile {
-            devices: Default::default(),
             assets: vec![AssetProfile::BaseLoad(BaseLoadConfig {
                 id: "base_load".into(),
                 baseline_kw: 1.0,

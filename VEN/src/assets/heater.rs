@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::{
-    Asset, AssetCapabilities, AssetCapability, AssetState, ControlDescriptor, ControlKind,
+    Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind,
 };
 use crate::common::{Interpolation, TimeSeries};
 use crate::profile::HeaterConfig;
@@ -152,17 +152,6 @@ impl Heater {
     pub fn future_state_values(&self, e_tank_kwh: f64) -> HashMap<String, f64> {
         let temp_c = self.temp_min_c + e_tank_kwh / self.thermal_mass_kwh_per_c;
         HashMap::from([("temp_c".into(), temp_c)])
-    }
-
-    pub fn capabilities(&self, asset_id: &str, _state: &HeaterState) -> AssetCapabilities {
-        AssetCapabilities {
-            asset_id: asset_id.to_string(),
-            max_import_kw: self.max_kw,
-            max_export_kw: 0.0,
-            is_flexible: true,
-            energy_state: None,
-            availability: None,
-        }
     }
 
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {

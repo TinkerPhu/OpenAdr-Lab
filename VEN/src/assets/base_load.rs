@@ -2,7 +2,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{Asset, AssetCapabilities, AssetCapability, AssetState, ControlDescriptor, ControlKind};
+use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
 use crate::profile::BaseLoadConfig;
 
@@ -68,17 +68,6 @@ impl BaseLoad {
         let mut m = HashMap::new();
         m.insert("baseline_kw".into(), self.baseline_kw);
         m
-    }
-
-    pub fn capabilities(&self, asset_id: &str, _state: &BaseLoadState) -> AssetCapabilities {
-        AssetCapabilities {
-            asset_id: asset_id.to_string(),
-            max_import_kw: self.baseline_kw,
-            max_export_kw: 0.0,
-            is_flexible: false,
-            energy_state: None,
-            availability: None,
-        }
     }
 
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {

@@ -10,8 +10,14 @@ use crate::entities::asset::PlanTrigger;
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::profile::{Profile, PlannerObjective};
 use crate::simulator::SimState;
-use crate::state::{AppState, EvSettings};
+use crate::state::{AppState, EvSettings, SimInjectState};
 use crate::vtn::VtnClient;
+use std::collections::HashMap;
+use crate::entities::plan::Plan;
+use crate::entities::capacity::OadrCapacityState;
+use crate::entities::tariff_snapshot::TariffSnapshot;
+use crate::simulator::{AssetEntry, SimSnapshot};
+use crate::assets::AssetConfig;
 
 // ─── Event poll change detection (RF-B08) ─────────────────────────────────────
 
@@ -254,6 +260,338 @@ pub(crate) fn spawn_report_poll(
     })
 }
 
+// ─── Helpers for spawn_sim_tick ───────────────────────────────────────────────
+
+/// Deviation tracking state for Layer 1 (reactive correction) and Layer 2 (sustained deviation).
+pub(crate) struct DeviationState {
+    pub deviation_ticks: u32,
+    pub last_correction_kw: f64,
+    pub correction_is_active: bool,
+    pub prev_correction_kw: f64,
+}
+
+impl Default for DeviationState {
+    fn default() -> Self {
+        Self {
+            deviation_ticks: 0,
+            last_correction_kw: 0.0,
+            correction_is_active: false,
+            prev_correction_kw: 0.0,
+        }
+    }
+}
+
+/// PHASE 1: Apply Behaviour A one-shot state injections to the simulator.
+/// Returns a list of field names that were applied and should be cleared.
+fn apply_sim_injections(inject: &SimInjectState, sim: &mut SimState) -> Vec<&'static str> {
+    let mut cleared = Vec::new();
+    if let Some(soc) = inject.battery_soc {
+        if let Some((entry, cfg)) = sim.find_asset_mut(crate::ids::ASSET_BATTERY) {
+            let mut v = HashMap::new();
+            v.insert("soc".to_string(), soc);
+            cfg.reset(&mut entry.state, v);
+        }
+        cleared.push("battery_soc");
+    }
+    if let Some(soc) = inject.ev_soc {
+        if let Some((entry, cfg)) = sim.find_asset_mut(crate::ids::ASSET_EV) {
+            let mut v = HashMap::new();
+            v.insert("soc".to_string(), soc);
+            cfg.reset(&mut entry.state, v);
+        }
+        cleared.push("ev_soc");
+    }
+    if let Some(temp) = inject.heater_temp_c {
+        if let Some((entry, cfg)) = sim.find_asset_mut(crate::ids::ASSET_HEATER) {
+            let mut v = HashMap::new();
+            v.insert("temp_c".to_string(), temp);
+            cfg.reset(&mut entry.state, v);
+        }
+        cleared.push("heater_temp_c");
+    }
+    cleared
+}
+
+/// PHASE 2: Compose effective capacity and build per-asset setpoints.
+fn build_tick_setpoints(
+    sim: &SimState,
+    plan_snap: Option<&Plan>,
+    capacity_snap: &OadrCapacityState,
+    inject: &SimInjectState,
+    overlay_enabled: bool,
+    now: DateTime<Utc>,
+) -> HashMap<String, f64> {
+    // Compose effective capacity: inject grid limits only when no VTN event active.
+    let mut effective_capacity = capacity_snap.clone();
+    if effective_capacity.import_limit_event_id.is_none() {
+        if let Some(lim) = inject.grid_import_limit_kw {
+            effective_capacity.import_limit_kw = Some(lim);
+        }
+    }
+    if effective_capacity.export_limit_event_id.is_none() {
+        if let Some(lim) = inject.grid_export_limit_kw {
+            effective_capacity.export_limit_kw = Some(lim);
+        }
+    }
+    match plan_snap {
+        Some(plan) => controller::dispatcher::build_setpoints(
+            plan,
+            &sim.assets,
+            &sim.asset_configs,
+            &effective_capacity,
+            inject.heater_setpoint_c,
+            now,
+            overlay_enabled,
+        ),
+        None => {
+            // No plan yet (startup window). Apply defaults then surplus overlay.
+            let mut m: HashMap<String, f64> = sim
+                .assets
+                .iter()
+                .zip(sim.asset_configs.iter())
+                .map(|(a, cfg)| (a.id.clone(), cfg.default_setpoint(&a.state)))
+                .collect();
+            controller::dispatcher::apply_surplus_ev_overlay(
+                &mut m,
+                &sim.assets,
+                &sim.asset_configs,
+                false,
+                overlay_enabled,
+            );
+            m
+        }
+    }
+}
+
+/// PHASE 3: Apply Layer 1 battery correction overlay (goal-aware reactive compensation),
+/// correction hold (Plan G), and emit SSE events for correction state changes.
+/// Returns the applied correction_kw.
+fn apply_deviation_correction(
+    dev_state: &mut DeviationState,
+    setpoints: &mut HashMap<String, f64>,
+    assets: &[AssetEntry],
+    asset_configs: &[AssetConfig],
+    plan_snap: Option<&Plan>,
+    plan_signed_net_kw: f64,
+    prev_actual_net_kw: f64,
+    profile: &Profile,
+    event_tx: &PlannerEventTx,
+    now: DateTime<Utc>,
+) -> f64 {
+    let correction_kw = if plan_snap.is_some() {
+        let c = controller::dispatcher::apply_battery_correction_overlay(
+            setpoints,
+            assets,
+            asset_configs,
+            plan_signed_net_kw,
+            prev_actual_net_kw,
+            plan_snap.unwrap().objective,
+            profile.planner.deviation_threshold_kw,
+            profile.planner.correction_min_kw,
+        );
+        if c != 0.0 {
+            debug!(
+                correction_kw = c,
+                plan_signed_net_kw,
+                actual_net_kw = prev_actual_net_kw,
+                deviation_kw = prev_actual_net_kw - plan_signed_net_kw,
+                "layer1: battery correction applied"
+            );
+        }
+        c
+    } else {
+        0.0
+    };
+
+    // Plan G correction hold: when correction just cleared (returned 0.0 this tick
+    // but was active last tick), re-insert the battery's previously-applied
+    // setpoint into setpoints. Without this, build_setpoints' plan allocation reverts
+    // the battery and recreates the deviation on the very next tick (limit cycle).
+    // Only fires when prev_correction_kw was meaningful (> correction_min_kw).
+    if correction_kw == 0.0
+        && dev_state.prev_correction_kw.abs() > profile.planner.correction_min_kw
+    {
+        if let Some(bat) = assets.iter().find(|a| a.id == crate::ids::ASSET_BATTERY) {
+            let plan_sp = setpoints.get(crate::ids::ASSET_BATTERY).copied().unwrap_or(0.0);
+            let held_sp = bat.setpoint_kw;
+            if (held_sp - plan_sp).abs() > profile.planner.correction_min_kw {
+                setpoints.insert(crate::ids::ASSET_BATTERY.to_string(), held_sp);
+            }
+        }
+    }
+    // Only update prev_correction_kw when a real correction fired.
+    // Keeping the last non-zero value active ensures the hold persists
+    // across subsequent ticks where the battery is maxed out (correction
+    // returns 0.0 due to delta < min_correction_kw), preventing the
+    // 3-tick oscillation: correct → hold → revert → correct → ...
+    if correction_kw != 0.0 {
+        dev_state.prev_correction_kw = correction_kw;
+    }
+
+    // Emit CorrectionActive/CorrectionCleared SSE on significant state change
+    if (correction_kw - dev_state.last_correction_kw).abs() > 0.2 {
+        if correction_kw.abs() > profile.planner.correction_min_kw {
+            let reason = if (prev_actual_net_kw - plan_signed_net_kw) > 0.0 {
+                "import_excess"
+            } else {
+                "export_excess"
+            };
+            let obj = plan_snap.map(|p| p.objective).unwrap_or_default();
+            let _ = event_tx.send(PlannerEvent::CorrectionActive {
+                ts: now,
+                asset_id: crate::ids::ASSET_BATTERY.to_string(),
+                reason: reason.to_string(),
+                planned_net_kw: plan_signed_net_kw,
+                actual_net_kw: prev_actual_net_kw,
+                deviation_kw: prev_actual_net_kw - plan_signed_net_kw,
+                correction_kw,
+                objective: obj,
+            });
+            dev_state.correction_is_active = true;
+        } else if dev_state.correction_is_active {
+            let _ = event_tx.send(PlannerEvent::CorrectionCleared {
+                ts: now,
+                reason: "within_threshold".to_string(),
+            });
+            dev_state.correction_is_active = false;
+        }
+        dev_state.last_correction_kw = correction_kw;
+    }
+
+    correction_kw
+}
+
+/// PHASE 5: Publish post-tick simulator state — sensor, sim snapshot, shiftable logic,
+/// ledger, history ring buffers, grid virtual asset, and site envelope.
+/// Returns the augmented SimSnapshot.
+async fn publish_sim_tick_result(
+    sim_guard: &mut SimState,
+    plan_snap: Option<&Plan>,
+    state: &AppState,
+    trigger_tx: &tokio::sync::watch::Sender<PlanTrigger>,
+    rates_snap: &[TariffSnapshot],
+    capacity_snap: &OadrCapacityState,
+    dt_s: f64,
+    now: DateTime<Utc>,
+) -> SimSnapshot {
+    // Update sensor snapshot (backward compat)
+    let sensor = sim_guard.to_sensor_snapshot();
+    state.update_sensor(sensor).await;
+
+    // Update sim in app state — augmented with shiftable runtimes
+    let mut sim_snap = sim_guard.to_sim_snapshot();
+
+    // ── Shiftable load runtime: start / complete / augment ──────
+
+    // Collect physics asset IDs so we skip them when scanning allocations.
+    let known_sim_ids: std::collections::HashSet<&str> =
+        sim_guard.assets.iter().map(|a| a.id.as_str()).collect();
+
+    // Start: detect shiftable loads that the current plan slot wants
+    // to run but that have no runtime yet.
+    if let Some(plan) = plan_snap {
+        if let Some(slot) = plan.slots.iter().find(|s| s.start <= now && now < s.end) {
+            let runtimes = state.shiftable_runtimes().await;
+            let loads = state.shiftable_loads().await;
+            for alloc in &slot.allocations {
+                if known_sim_ids.contains(alloc.asset_id.as_str()) { continue; }
+                let already_running = runtimes.iter().any(|r| r.asset_id == alloc.asset_id);
+                if !already_running {
+                    if let Some(load) = loads.iter().find(|l| l.asset_id == alloc.asset_id) {
+                        let ends_at = now + chrono::Duration::minutes(load.duration_min as i64);
+                        state.start_shiftable(entities::device_session::ShiftableLoadRuntime {
+                            load_id: load.id,
+                            asset_id: load.asset_id.clone(),
+                            power_kw: load.power_kw,
+                            started_at: now,
+                            ends_at,
+                        }).await;
+                        info!(asset_id = %load.asset_id, ends_at = %ends_at, "shiftable load started");
+                    }
+                }
+            }
+        }
+    }
+
+    // Complete: remove expired runtimes and trigger replan.
+    {
+        let runtimes = state.shiftable_runtimes().await;
+        for rt in &runtimes {
+            if now >= rt.ends_at {
+                info!(asset_id = %rt.asset_id, "shiftable load completed");
+                state.complete_shiftable(rt.load_id).await;
+                let _ = trigger_tx.send(PlanTrigger::UserRequest);
+            }
+        }
+    }
+
+    // Augment SimSnapshot with running shiftable runtimes so they
+    // appear in GET /sim and ledger accounting.
+    {
+        let runtimes = state.shiftable_runtimes().await;
+        for rt in &runtimes {
+            if rt.is_running(now) {
+                sim_snap.assets.insert(rt.asset_id.clone(), crate::simulator::AssetSnapshot {
+                    power_kw: rt.power_kw,
+                    values: {
+                        let mut m = std::collections::HashMap::new();
+                        m.insert("running".into(), 1.0);
+                        m.insert("ends_at_unix".into(), rt.ends_at.timestamp() as f64);
+                        m
+                    },
+                });
+            }
+        }
+    }
+
+    state.update_sim(sim_snap.clone()).await;
+
+    // Post-tick: consolidated ledger accounting
+    let mut ledger = state.asset_ledger().await;
+    controller::monitor::record_tick(
+        &mut ledger,
+        &sim_snap,
+        rates_snap,
+        dt_s,
+        now,
+    );
+    state.set_asset_ledger(ledger).await;
+
+    // Post-tick: push HistoryPoint per asset into per-asset ring buffer (CP2).
+    {
+        use crate::assets::HistoryPoint;
+        for entry in &mut sim_guard.assets {
+            entry.history.push(HistoryPoint {
+                ts: now,
+                power_kw: entry.last_power_kw,
+                state: entry.state.clone(),
+            });
+        }
+    }
+
+    // Update Grid virtual asset with net power + VTN capacity limits.
+    // Done here (not inside tick()) so capacity_snap is available.
+    {
+        let net_power_kw = sim_guard.grid.net_power_w / 1000.0;
+        let import_limit_kw = capacity_snap.import_limit_kw.unwrap_or(f64::MAX);
+        // OadrCapacityState.export_limit_kw is a positive magnitude; negate for sign convention.
+        let export_limit_kw_signed = -(capacity_snap.export_limit_kw.unwrap_or(f64::MAX));
+        sim_guard.grid_asset.update(net_power_kw, import_limit_kw, export_limit_kw_signed, now);
+    }
+
+    // Refresh site envelope on every sim tick (~1s).
+    // Done inside the sim lock to avoid a second lock acquisition.
+    {
+        let env = controller::envelope::compute_envelope(
+            &*sim_guard,
+            now,
+        );
+        state.set_site_envelope(env).await;
+    }
+
+    sim_snap
+}
+
 pub(crate) fn spawn_sim_tick(
     state: AppState,
     sim: Arc<Mutex<SimState>>,
@@ -282,23 +620,15 @@ pub(crate) fn spawn_sim_tick(
             0
         };
 
-        // Plan F: Layer 1/2 deviation state
-        let mut deviation_ticks: u32 = 0;
-        let mut last_correction_kw: f64 = 0.0;
-        let mut correction_is_active = false;
-        // Plan G: track previous tick's correction delta to implement hold.
-        // When correction fires (delta≠0) and then clears next tick (delta=0),
-        // the plan allocation would overwrite the corrected setpoint and restart
-        // the limit cycle. prev_correction_kw lets us detect this "just cleared"
-        // state and re-insert the held setpoint before sim.tick runs.
-        let mut prev_correction_kw: f64 = 0.0;
+        // Plan F/G: Layer 1/2 deviation state (T028)
+        let mut dev_state = DeviationState::default();
 
         loop {
             tick_interval.tick().await;
             let now = Utc::now();
             let dt_s = tick_s as f64;
 
-            // Get current events and injection state
+            // PHASE 0: Snapshot — events, inject, plan, capacity, tariffs, overlay flag
             let _events = state.events().await;
             let inject = state.inject_state().await;
 
@@ -319,53 +649,17 @@ pub(crate) fn spawn_sim_tick(
                 }).await;
             }
 
-            // Tick loop: build_setpoints → sim.tick → update_sim → accounting
+            // Lock sim; all physics and accounting phases run inside.
             let sim_snapshot = {
                 let mut sim_guard = sim.lock().await;
 
-                // Behaviour A: apply one-shot state jumps (cleared after application).
-                {
-                    use std::collections::HashMap;
-                    if let Some(soc) = inject.battery_soc {
-                        if let Some((entry, cfg)) = sim_guard.find_asset_mut("battery") {
-                            let mut v = HashMap::new();
-                            v.insert("soc".to_string(), soc);
-                            cfg.reset(&mut entry.state, v);
-                        }
-                        state.clear_inject_field("battery_soc").await;
-                    }
-                    if let Some(soc) = inject.ev_soc {
-                        if let Some((entry, cfg)) = sim_guard.find_asset_mut("ev") {
-                            let mut v = HashMap::new();
-                            v.insert("soc".to_string(), soc);
-                            cfg.reset(&mut entry.state, v);
-                        }
-                        state.clear_inject_field("ev_soc").await;
-                    }
-                    if let Some(temp) = inject.heater_temp_c {
-                        if let Some((entry, cfg)) = sim_guard.find_asset_mut("heater") {
-                            let mut v = HashMap::new();
-                            v.insert("temp_c".to_string(), temp);
-                            cfg.reset(&mut entry.state, v);
-                        }
-                        state.clear_inject_field("heater_temp_c").await;
-                    }
+                // PHASE 1: Apply Behaviour A one-shot injections; clear returned fields.
+                let cleared_fields = apply_sim_injections(&inject, &mut *sim_guard);
+                for field in cleared_fields {
+                    state.clear_inject_field(field).await;
                 }
 
-                // Compose effective capacity: inject grid limits only when no VTN event active.
-                let mut effective_capacity = capacity_snap.clone();
-                if effective_capacity.import_limit_event_id.is_none() {
-                    if let Some(lim) = inject.grid_import_limit_kw {
-                        effective_capacity.import_limit_kw = Some(lim);
-                    }
-                }
-                if effective_capacity.export_limit_event_id.is_none() {
-                    if let Some(lim) = inject.grid_export_limit_kw {
-                        effective_capacity.export_limit_kw = Some(lim);
-                    }
-                }
-
-                // Build setpoints from plan (single authoritative control path)
+                // PHASE 2: Build setpoints (prev grid for Layer 1; effective capacity; dispatcher)
                 // Plan F: capture prev tick net grid for Layer 1 correction.
                 // Use signed net: positive = import, negative = export. The plan
                 // stores import and export as separate non-negative fields; combining
@@ -377,117 +671,30 @@ pub(crate) fn spawn_sim_tick(
                     .map(|s| s.net_import_kw - s.net_export_kw)
                     .unwrap_or(0.0);
 
-                let mut sp_map: std::collections::HashMap<String, f64> = match &plan_snap {
-                    Some(ref plan) => controller::dispatcher::build_setpoints(
-                        plan,
-                        &sim_guard.assets,
-                        &sim_guard.asset_configs,
-                        &effective_capacity,
-                        inject.heater_setpoint_c,
-                        now,
-                        overlay_enabled,
-                    ),
-                    None => {
-                        // No plan yet (startup window). Apply defaults then surplus overlay.
-                        let mut m: std::collections::HashMap<String, f64> = sim_guard
-                            .assets
-                            .iter()
-                            .zip(sim_guard.asset_configs.iter())
-                            .map(|(a, cfg)| (a.id.clone(), cfg.default_setpoint(&a.state)))
-                            .collect();
-                        controller::dispatcher::apply_surplus_ev_overlay(
-                            &mut m,
-                            &sim_guard.assets,
-                            &sim_guard.asset_configs,
-                            false,
-                            overlay_enabled,
-                        );
-                        m
-                    }
-                };
+                let mut sp_map = build_tick_setpoints(
+                    &*sim_guard,
+                    plan_snap.as_ref(),
+                    &capacity_snap,
+                    &inject,
+                    overlay_enabled,
+                    now,
+                );
 
-                // Plan F Layer 1: battery correction overlay (goal-aware reactive compensation)
-                let correction_kw = if plan_snap.is_some() {
-                    let c = controller::dispatcher::apply_battery_correction_overlay(
-                        &mut sp_map,
-                        &sim_guard.assets,
-                        &sim_guard.asset_configs,
-                        plan_signed_net_kw,
-                        prev_actual_net_kw,
-                        plan_snap.as_ref().unwrap().objective,
-                        profile.planner.deviation_threshold_kw,
-                        profile.planner.correction_min_kw,
-                    );
-                    if c != 0.0 {
-                        debug!(
-                            correction_kw = c,
-                            plan_signed_net_kw,
-                            actual_net_kw = prev_actual_net_kw,
-                            deviation_kw = prev_actual_net_kw - plan_signed_net_kw,
-                            "layer1: battery correction applied"
-                        );
-                    }
-                    c
-                } else {
-                    0.0
-                };
+                // PHASE 3: Layer 1 battery correction overlay + hold + SSE.
+                apply_deviation_correction(
+                    &mut dev_state,
+                    &mut sp_map,
+                    &sim_guard.assets,
+                    &sim_guard.asset_configs,
+                    plan_snap.as_ref(),
+                    plan_signed_net_kw,
+                    prev_actual_net_kw,
+                    &profile,
+                    &event_tx,
+                    now,
+                );
 
-                // Plan G correction hold: when correction just cleared (returned 0.0 this tick
-                // but was active last tick), re-insert the battery's previously-applied
-                // setpoint into sp_map. Without this, build_setpoints' plan allocation reverts
-                // the battery and recreates the deviation on the very next tick (limit cycle).
-                // Only fires when prev_correction_kw was meaningful (> correction_min_kw).
-                if correction_kw == 0.0
-                    && prev_correction_kw.abs() > profile.planner.correction_min_kw
-                {
-                    if let Some(bat) = sim_guard.assets.iter().find(|a| a.id == "battery") {
-                        let plan_sp = sp_map.get("battery").copied().unwrap_or(0.0);
-                        let held_sp = bat.setpoint_kw;
-                        if (held_sp - plan_sp).abs() > profile.planner.correction_min_kw {
-                            sp_map.insert("battery".to_string(), held_sp);
-                        }
-                    }
-                }
-                // Only update prev_correction_kw when a real correction fired.
-                // Keeping the last non-zero value active ensures the hold persists
-                // across subsequent ticks where the battery is maxed out (correction
-                // returns 0.0 due to delta < min_correction_kw), preventing the
-                // 3-tick oscillation: correct → hold → revert → correct → ...
-                if correction_kw != 0.0 {
-                    prev_correction_kw = correction_kw;
-                }
-
-                // Emit CorrectionActive/CorrectionCleared SSE on significant state change
-                if (correction_kw - last_correction_kw).abs() > 0.2 {
-                    if correction_kw.abs() > profile.planner.correction_min_kw {
-                        let reason = if (prev_actual_net_kw - plan_signed_net_kw) > 0.0 {
-                            "import_excess"
-                        } else {
-                            "export_excess"
-                        };
-                        let obj = plan_snap.as_ref().map(|p| p.objective).unwrap_or_default();
-                        let _ = event_tx.send(PlannerEvent::CorrectionActive {
-                            ts: now,
-                            asset_id: "battery".to_string(),
-                            reason: reason.to_string(),
-                            planned_net_kw: plan_signed_net_kw,
-                            actual_net_kw: prev_actual_net_kw,
-                            deviation_kw: prev_actual_net_kw - plan_signed_net_kw,
-                            correction_kw,
-                            objective: obj,
-                        });
-                        correction_is_active = true;
-                    } else if correction_is_active {
-                        let _ = event_tx.send(PlannerEvent::CorrectionCleared {
-                            ts: now,
-                            reason: "within_threshold".to_string(),
-                        });
-                        correction_is_active = false;
-                    }
-                    last_correction_kw = correction_kw;
-                }
-
-                // Simulator: apply setpoints → update device states
+                // PHASE 4: Simulator tick — apply setpoints → update device states.
                 sim_guard.tick(
                     dt_s,
                     sp_map,
@@ -511,143 +718,38 @@ pub(crate) fn spawn_sim_tick(
                     state.clear_inject_field("base_load_kw").await;
                 }
 
-                // Update sensor snapshot (backward compat)
-                let sensor = sim_guard.to_sensor_snapshot();
-                state.update_sensor(sensor).await;
-
-                // Update sim in app state — augmented with shiftable runtimes
-                let mut sim_snap = sim_guard.to_sim_snapshot();
-
-                // ── Shiftable load runtime: start / complete / augment ──────
-
-                // Collect physics asset IDs so we skip them when scanning allocations.
-                let known_sim_ids: std::collections::HashSet<&str> =
-                    sim_guard.assets.iter().map(|a| a.id.as_str()).collect();
-
-                // Start: detect shiftable loads that the current plan slot wants
-                // to run but that have no runtime yet.
-                if let Some(ref plan) = plan_snap {
-                    if let Some(slot) = plan.slots.iter().find(|s| s.start <= now && now < s.end) {
-                        let runtimes = state.shiftable_runtimes().await;
-                        let loads = state.shiftable_loads().await;
-                        for alloc in &slot.allocations {
-                            if known_sim_ids.contains(alloc.asset_id.as_str()) { continue; }
-                            let already_running = runtimes.iter().any(|r| r.asset_id == alloc.asset_id);
-                            if !already_running {
-                                if let Some(load) = loads.iter().find(|l| l.asset_id == alloc.asset_id) {
-                                    let ends_at = now + chrono::Duration::minutes(load.duration_min as i64);
-                                    state.start_shiftable(entities::device_session::ShiftableLoadRuntime {
-                                        load_id: load.id,
-                                        asset_id: load.asset_id.clone(),
-                                        power_kw: load.power_kw,
-                                        started_at: now,
-                                        ends_at,
-                                    }).await;
-                                    info!(asset_id = %load.asset_id, ends_at = %ends_at, "shiftable load started");
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Complete: remove expired runtimes and trigger replan.
-                {
-                    let runtimes = state.shiftable_runtimes().await;
-                    for rt in &runtimes {
-                        if now >= rt.ends_at {
-                            info!(asset_id = %rt.asset_id, "shiftable load completed");
-                            state.complete_shiftable(rt.load_id).await;
-                            let _ = trigger_tx.send(PlanTrigger::UserRequest);
-                        }
-                    }
-                }
-
-                // Augment SimSnapshot with running shiftable runtimes so they
-                // appear in GET /sim and ledger accounting.
-                {
-                    let runtimes = state.shiftable_runtimes().await;
-                    for rt in &runtimes {
-                        if rt.is_running(now) {
-                            sim_snap.assets.insert(rt.asset_id.clone(), crate::simulator::AssetSnapshot {
-                                power_kw: rt.power_kw,
-                                values: {
-                                    let mut m = std::collections::HashMap::new();
-                                    m.insert("running".into(), 1.0);
-                                    m.insert("ends_at_unix".into(), rt.ends_at.timestamp() as f64);
-                                    m
-                                },
-                            });
-                        }
-                    }
-                }
-
-                state.update_sim(sim_snap.clone()).await;
-
-                // Post-tick: consolidated ledger accounting
-                let mut ledger = state.asset_ledger().await;
-                controller::monitor::record_tick(
-                    &mut ledger,
-                    &sim_snap,
+                // PHASE 5: Publish — sensor, sim snapshot, shiftable logic, ledger, grid, envelope.
+                publish_sim_tick_result(
+                    &mut *sim_guard,
+                    plan_snap.as_ref(),
+                    &state,
+                    &*trigger_tx,
                     &rates_snap,
+                    &capacity_snap,
                     dt_s,
                     now,
-                );
-                state.set_asset_ledger(ledger).await;
-
-                // Post-tick: push HistoryPoint per asset into per-asset ring buffer (CP2).
-                {
-                    use crate::assets::HistoryPoint;
-                    for entry in &mut sim_guard.assets {
-                        entry.history.push(HistoryPoint {
-                            ts: now,
-                            power_kw: entry.last_power_kw,
-                            state: entry.state.clone(),
-                        });
-                    }
-                }
-
-                // Update Grid virtual asset with net power + VTN capacity limits.
-                // Done here (not inside tick()) so capacity_snap is available.
-                {
-                    let net_power_kw = sim_guard.grid.net_power_w / 1000.0;
-                    let import_limit_kw = capacity_snap.import_limit_kw.unwrap_or(f64::MAX);
-                    // OadrCapacityState.export_limit_kw is a positive magnitude; negate for sign convention.
-                    let export_limit_kw_signed = -(capacity_snap.export_limit_kw.unwrap_or(f64::MAX));
-                    sim_guard.grid_asset.update(net_power_kw, import_limit_kw, export_limit_kw_signed, now);
-                }
-
-                // Refresh site envelope on every sim tick (~1s).
-                // Done inside the sim lock to avoid a second lock acquisition.
-                {
-                    let env = controller::envelope::compute_envelope(
-                        &*sim_guard,
-                        now,
-                    );
-                    state.set_site_envelope(env).await;
-                }
-
-                sim_guard.clone()
+                ).await
             };
 
-            // Plan F Layer 2: accumulate sustained deviation → DeviceDeviation trigger
+            // PHASE 6: Layer 2 — accumulate sustained deviation → DeviceDeviation trigger.
             if let Some(ref plan) = plan_snap {
                 if let Some(slot) = plan.current_slot(now) {
                     let post_net_kw = sim_snapshot.grid.net_power_w / 1000.0;
                     let planned_net_kw = slot.net_import_kw - slot.net_export_kw;
                     let post_error_kw = (post_net_kw - planned_net_kw).abs();
                     if post_error_kw > profile.planner.deviation_threshold_kw {
-                        deviation_ticks = deviation_ticks.saturating_add(1);
+                        dev_state.deviation_ticks = dev_state.deviation_ticks.saturating_add(1);
                         debug!(
                             post_net_kw,
                             planned_net_kw,
                             post_error_kw,
                             threshold_kw = profile.planner.deviation_threshold_kw,
-                            deviation_ticks,
+                            deviation_ticks = dev_state.deviation_ticks,
                             trigger_ticks = profile.planner.deviation_trigger_ticks,
                             "layer2: sustained deviation tick"
                         );
-                        if deviation_ticks >= profile.planner.deviation_trigger_ticks {
-                            deviation_ticks = 0;
+                        if dev_state.deviation_ticks >= profile.planner.deviation_trigger_ticks {
+                            dev_state.deviation_ticks = 0;
                             warn!(
                                 post_net_kw,
                                 planned_net_kw,
@@ -658,28 +760,28 @@ pub(crate) fn spawn_sim_tick(
                             let _ = trigger_tx.send(PlanTrigger::DeviceDeviation);
                         }
                     } else {
-                        if deviation_ticks > 0 {
+                        if dev_state.deviation_ticks > 0 {
                             debug!(
-                                deviation_ticks,
+                                deviation_ticks = dev_state.deviation_ticks,
                                 post_net_kw,
                                 planned_net_kw,
                                 post_error_kw,
                                 "layer2: deviation cleared, resetting tick counter"
                             );
                         }
-                        deviation_ticks = 0;
+                        dev_state.deviation_ticks = 0;
                     }
                 } else {
                     debug!("layer2: plan exists but no current_slot — skipping deviation check");
                 }
             } else {
                 // Only log occasionally to avoid spam when no plan exists at startup
-                if deviation_ticks == 0 {
+                if dev_state.deviation_ticks == 0 {
                     debug!("layer2: no active plan — deviation check skipped");
                 }
             }
 
-            // Periodic measurement reports (T049)
+            // PHASE 7: Periodic measurement reports (T049)
             if report_every_ticks > 0 {
                 report_counter += 1;
                 if report_counter >= report_every_ticks {
@@ -701,7 +803,7 @@ pub(crate) fn spawn_sim_tick(
                 }
             }
 
-            // Periodic persist
+            // PHASE 8: Periodic persist
             persist_counter += 1;
             if persist_counter >= persist_every_ticks {
                 persist_counter = 0;
@@ -822,7 +924,7 @@ pub(crate) fn spawn_planning(
             if let Some(forced) = inject_snap.pv_irradiance {
                 use crate::assets::{AssetConfig, PvInverter};
                 let natural = PvInverter::natural_irradiance_at(now);
-                if let Some((_, cfg)) = sim_snap.find_asset_mut("pv") {
+                if let Some((_, cfg)) = sim_snap.find_asset_mut(crate::ids::ASSET_PV) {
                     if let AssetConfig::Pv(pv) = cfg {
                         pv.irradiance_offset = forced - natural;
                         pv.pv_alpha = inject_snap.pv_irradiance_alpha;
@@ -1157,5 +1259,33 @@ mod event_poll_tests {
         assert!(no_arrived, "expected no OpenAdrArrived");
         assert!(no_expired, "expected no OpenAdrExpired");
         assert!(no_capacity, "expected no CapacityChange");
+    }
+}
+
+#[cfg(test)]
+mod sim_tick_tests {
+    use super::*;
+    use chrono::Utc;
+    use crate::entities::capacity::OadrCapacityState;
+    use crate::state::SimInjectState;
+
+    #[tokio::test]
+    async fn test_build_setpoints_no_plan() {
+        // Creates a minimal SimState and calls build_tick_setpoints with plan=None.
+        // Confirms function returns without panic and all values are finite.
+        let profile = crate::profile::Profile::default();
+        // Build a minimal SimState from the profile
+        let sim = crate::simulator::SimState::from_profile(&profile);
+        let capacity = OadrCapacityState::default();
+        let inject = SimInjectState::default();
+        let now = Utc::now();
+
+        let setpoints = build_tick_setpoints(&sim, None, &capacity, &inject, false, now);
+
+        // With no plan, should return defaults (one per asset)
+        assert!(!setpoints.is_empty() || profile.assets.is_empty());
+        for (_, v) in &setpoints {
+            assert!(v.is_finite(), "setpoint must be finite");
+        }
     }
 }

@@ -349,9 +349,9 @@ pub fn build_asset_timeline(
                 // We always emit a point (even 0 kW) so that all assets share the same
                 // set of plan-slot timestamps. Omitting zero-allocation slots causes the
                 // stacked chart to fall back to an exact-match miss → false zero spikes.
-                let power_kw = if asset_id == "pv" {
+                let power_kw = if asset_id == crate::ids::ASSET_PV {
                     -slot.pv_forecast_kw
-                } else if asset_id == "base_load" {
+                } else if asset_id == crate::ids::ASSET_BASE_LOAD {
                     slot.baseline_kw
                 } else {
                     slot.allocations

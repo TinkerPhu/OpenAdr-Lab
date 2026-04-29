@@ -205,7 +205,7 @@ impl SimState {
             }
             if dev.base_load_w > 0.0 {
                 let c = BaseLoadConfig {
-                    id: "base_load".to_string(),
+                    id: crate::ids::ASSET_BASE_LOAD.to_string(),
                     baseline_kw: dev.base_load_w / 1000.0,
                 };
                 let cfg = AssetConfig::BaseLoad(BaseLoad::from_config(&c));
@@ -368,7 +368,7 @@ impl SimState {
 
     /// Build a SensorSnapshot for backward compatibility with /sensors endpoint.
     pub fn to_sensor_snapshot(&self) -> SensorSnapshot {
-        let temp_c = self.asset("heater").and_then(|e| {
+        let temp_c = self.asset(crate::ids::ASSET_HEATER).and_then(|e| {
             if let AssetState::Heater(s) = &e.state {
                 Some(s.temperature_c)
             } else {
@@ -478,7 +478,7 @@ pub(crate) fn schema_from_profile(
         }
         if dev.base_load_w > 0.0 {
             let c = crate::profile::BaseLoadConfig {
-                id: "base_load".to_string(),
+                id: crate::ids::ASSET_BASE_LOAD.to_string(),
                 baseline_kw: dev.base_load_w / 1000.0,
             };
             let cfg = AssetConfig::BaseLoad(BaseLoad::from_config(&c));
