@@ -1140,6 +1140,7 @@ mod tests {
             bat_charge_kw: 0.0,
             bat_discharge_kw: 0.0,
             planned_kw_by_asset: std::collections::HashMap::new(),
+            planned_state_by_asset: std::collections::HashMap::new(),
         }
     }
 
