@@ -196,3 +196,15 @@
 
 - **Don't poll for "any steps exist" when you need a specific plan state** — A step like `When I wait for plan to have steps for X` satisfies on the very first (stale) plan. When the scenario depends on a VTN event being reflected in the plan, poll for the specific assertion condition rather than mere existence of steps.
 - **Post-scenario cleanup doesn't instantly update VEN plan** — After `after_scenario` deletes a VTN event, the VEN needs 2s (poll interval) to detect the deletion, then up to 20s for the planner to re-run. The next scenario may see the old plan if it polls immediately. Use a poll step that waits for the expected post-cleanup state.
+
+## VEN State Architecture (016-refactor-ven-backend)
+
+- **InnerState → 3-lock split requires `PersistedVenState` helper for JSON compat**: When splitting a single `Arc<RwLock<InnerState>>` into `polling`, `ctrl_sim`, and `hems` sub-locks, the existing `state.json` format is preserved by introducing a private `PersistedVenState` struct that contains only the fields that were actually serialised (non-`#[serde(skip)]`) in the old `InnerState`. `to_json` assembles this struct from the two relevant locks; `load_from_json` distributes back. No migration needed for existing state files.
+
+- **`ControllerSimState` naming avoids collision with `simulator::SimState`**: When adding a controller-side state struct in a crate that already has `crate::simulator::SimState`, use a distinct name. `ControllerSimState` is unambiguous. Note: it requires explicit `impl Default` (not `#[derive(Default)]`) because `SensorSnapshot::empty_now()` is not the unit constructor.
+
+- **Startup guard belongs in `try_load()` not `load()`**: The `Profile::try_load()` path is called by `main.rs` for production use; `Profile::load()` is used in tests that build synthetic profiles. Adding `if profile.assets.is_empty() { bail!(...) }` in `try_load()` keeps the test entry point clean.
+
+- **Dead `TimeWindow` in `assets/mod.rs` coexists with live `TimeWindow` in `controller/timeline.rs`**: SC-002 verification grep for `TimeWindow` produces hits in the timeline module — these are a completely different struct used by the `/timeline` route feature. Only the dead `TimeWindow` in `assets/mod.rs` (used solely by `AssetCapabilities`) is removed. The grep pattern is correct but results require human triage.
+
+- **INVARIANT: no RwLock guard held across a second lock acquisition** — even read guards. While two simultaneous `read()` calls can't deadlock, holding a guard across an `.await` of a second lock violates the stated INVARIANT and makes the code harder to audit. Always use the acquire-clone-drop pattern: `let val = { lock.read().await.field.clone() };` before acquiring the next lock.

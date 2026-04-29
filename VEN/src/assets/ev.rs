@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::{
-    Asset, AssetCapabilities, AssetCapability, AssetState, ControlDescriptor, ControlKind,
-    EnergyState,
+    Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind,
 };
 use crate::common::{Interpolation, TimeSeries};
 
@@ -145,21 +144,6 @@ impl EvCharger {
     /// that slot. Returns `{"soc": <0..1>}`.
     pub fn future_state_values_at(soc: f64) -> HashMap<String, f64> {
         HashMap::from([("soc".into(), soc.clamp(0.0, 1.0))])
-    }
-
-    pub fn capabilities(&self, asset_id: &str, state: &EvState) -> AssetCapabilities {
-        AssetCapabilities {
-            asset_id: asset_id.to_string(),
-            max_import_kw: self.max_charge_kw,
-            max_export_kw: self.max_discharge_kw,
-            is_flexible: true,
-            energy_state: Some(EnergyState {
-                current_kwh: state.soc * self.battery_kwh,
-                min_kwh: 0.0,
-                max_kwh: self.battery_kwh,
-            }),
-            availability: None,
-        }
     }
 
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {
