@@ -49,7 +49,11 @@ export function AssetRightSection({
   onResetSoc,
 }: AssetRightSectionProps) {
   const { data: schema = {} } = useSimSchema();
-  const controls = schema[assetId] ?? [];
+  // heater_temp_c is rendered by the dedicated T_tank hardcoded slider below;
+  // exclude it from schema-driven DynamicControl to avoid a duplicate.
+  const controls = (schema[assetId] ?? []).filter(
+    (d) => !(assetId === "heater" && d.key === "heater_temp_c")
+  );
 
   const socRaw = sim?.assets?.[assetId]?.["soc"] ?? null;
   const liveSocPct = socRaw !== null && socRaw !== undefined ? socRaw * 100 : null;
