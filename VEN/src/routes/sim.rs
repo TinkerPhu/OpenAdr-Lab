@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::entities::asset::PlanTrigger;
 use crate::state::SimInjectState;
@@ -107,25 +107,12 @@ pub struct BatteryConfigBody {
 }
 
 /// GET /sim/schema — returns control descriptors for all configured assets.
+///
+/// Reads from profile config only — does NOT acquire the sim mutex, so it
+/// remains responsive even while the MILP planner is running (10-24s on Pi4).
 pub async fn get_sim_schema(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    let lock_start = std::time::Instant::now();
-    let sim = ctx.sim.lock().await;
-    let lock_ms = lock_start.elapsed().as_millis();
-    if lock_ms > 100 {
-        warn!(
-            lock_wait_ms = lock_ms,
-            "GET /sim/schema: sim mutex wait was long (planner may be running)"
-        );
-    } else {
-        debug!(lock_wait_ms = lock_ms, "GET /sim/schema: sim mutex acquired");
-    }
-    let schema: std::collections::HashMap<
-        String,
-        Vec<crate::simulator::assets::ControlDescriptor>,
-    > = sim
-        .iter_assets()
-        .map(|(entry, cfg)| (entry.id.clone(), cfg.control_schema()))
-        .collect();
+    debug!("GET /sim/schema: building schema from profile (no sim lock)");
+    let schema = crate::simulator::schema_from_profile(&ctx.profile);
     Json(schema)
 }
 
