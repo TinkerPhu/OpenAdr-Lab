@@ -570,6 +570,7 @@ pub(crate) fn spawn_sim_tick(
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
     data_dir: String,
     event_tx: PlannerEventTx,
+    deviation_pending: Arc<std::sync::atomic::AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
     let tick_s = profile.simulator.tick_s;
     let persist_every_s = profile.simulator.persist_every_s;
@@ -766,6 +767,7 @@ pub(crate) fn spawn_sim_tick(
                                 "layer2: DeviceDeviation trigger fired"
                             );
                             let _ = trigger_tx.send(PlanTrigger::DeviceDeviation);
+                            deviation_pending.store(true, std::sync::atomic::Ordering::Release);
                         }
                     } else {
                         if dev_state.deviation_ticks > 0 {
@@ -886,6 +888,7 @@ pub(crate) fn spawn_planning(
     sim: Arc<Mutex<SimState>>,
     active_objective: Arc<RwLock<PlannerObjective>>,
     event_tx: PlannerEventTx,
+    deviation_pending: Arc<std::sync::atomic::AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
     let replan_s = profile.planner.replan_interval_s;
     tokio::spawn(async move {
@@ -896,6 +899,13 @@ pub(crate) fn spawn_planning(
             let rates = state.planned_tariffs().await;
             let capacity = state.capacity_state().await;
             let trigger = trigger_rx.borrow().clone();
+            // If DeviceDeviation was latched (fired while we were solving and possibly
+            // overwritten by a subsequent RateChange), honour it over the channel value.
+            let trigger = if deviation_pending.swap(false, std::sync::atomic::Ordering::AcqRel) {
+                PlanTrigger::DeviceDeviation
+            } else {
+                trigger
+            };
             let trigger_reason = format!("{:?}", trigger);
 
             info!(trigger = %trigger_reason, "planner loop: starting plan cycle");

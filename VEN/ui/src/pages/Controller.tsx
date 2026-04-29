@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Alert, Box, CircularProgress, IconButton, Tooltip, Typography } from "@mui/material";
 import ZoomOutMapIcon from "@mui/icons-material/ZoomOutMap";
 import ZoomInMapIcon from "@mui/icons-material/ZoomInMap";
-import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useResetAssetSoc, useAllTimelines } from "../api/hooks";
+import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useResetAssetSoc, useAllTimelines, useSimSchema } from "../api/hooks";
 import type { AssetId, CollapseState } from "../components/controller/types";
 import { deriveAssetSummaries, deriveTariffSnapshot } from "../components/controller/dataBuilders";
 import { enrichAllAssetTimelines } from "../components/controller/tariffBuilders";
@@ -19,6 +19,8 @@ export function ControllerPage() {
   const { data: simInject } = useSimInject();
   const { mutate: setSimInject } = useSetSimInject();
   const { mutate: resetAssetSoc } = useResetAssetSoc();
+  // Prefetch sim schema so controls are available instantly when right sections expand.
+  useSimSchema();
 
   const [pinnedCellIds, setPinnedCellIds] = useState<string[]>([]);
   const [collapseState, setCollapseState] = useState<CollapseState>({});
