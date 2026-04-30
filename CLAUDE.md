@@ -14,6 +14,8 @@ Auto-generated from all feature plans. Last updated: 2026-03-15
 - N/A — read-only diagnostic view; no persistence (014-planner-viz-page)
 - Rust stable 2021 (VEN backend) + `axum`, `tokio`, `serde`, `uuid`, `chrono`, `good_lp`/HiGHS (015-planner-state-forecast)
 - In-memory only — `HashMap` per `PlanTimeSlot`; no DB changes (015-planner-state-forecast)
+- Rust stable (2021 edition) + tokio, axum, serde/serde_json, serde_yaml, uuid, chrono, (016-refactor-ven-backend)
+- N/A — no new storage; JSON persistence via `state.json` is unchanged (016-refactor-ven-backend)
 
 - [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION] (004-ven-controller-reform)
 
@@ -34,9 +36,9 @@ cd src; pytest; ruff check .
 [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]: Follow standard conventions
 
 ## Recent Changes
+- 016-refactor-ven-backend: Added Rust stable (2021 edition) + tokio, axum, serde/serde_json, serde_yaml, uuid, chrono,
 - 015-planner-state-forecast: Added Rust stable 2021 (VEN backend) + `axum`, `tokio`, `serde`, `uuid`, `chrono`, `good_lp`/HiGHS
 - 014-planner-viz-page: Added TypeScript 5 (React 18) + MUI v5, TanStack React Query v5, React Router v6 (all existing)
-- 012-reporter-resampling: Added Rust (stable, 2021 edition) + chrono (timestamps), serde_json (report payloads), uuid, tokio (async runtime), axum (HTTP)
 
 
 <!-- MANUAL ADDITIONS START -->
