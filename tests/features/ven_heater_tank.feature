@@ -16,7 +16,7 @@ Feature: Heater tank MILP trajectory model
     # The trajectory upper bound E[t] ≤ E_max blocks full-tier scheduling near T_max,
     # so all heater slots must use mid-tier (1.5 kW) or be idle.
     Given I inject heater_temp_c 22.5 via sim inject
-    When I wait for the VEN /plan endpoint to return a plan
+    When I wait for the VEN /plan to be recomputed after the sim inject
     Then the plan has no heater allocations at full power in the first 12 slots
 
   # --- Recovery: tank below T_min triggers heater scheduling ---
