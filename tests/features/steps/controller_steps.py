@@ -270,7 +270,7 @@ def step_pin_ev_cell(context):
     context.browser_page.wait_for_selector(
         tid("asset-cell-ev-pin-btn"), timeout=45000
     )
-    context.browser_page.click(tid("asset-cell-ev-pin-btn"))
+    context.browser_page.dispatch_event(tid("asset-cell-ev-pin-btn"), "click")
 
 
 @when("I click the pin button on the EV asset cell again")
@@ -278,7 +278,7 @@ def step_unpin_ev_cell(context):
     context.browser_page.wait_for_selector(
         tid("asset-cell-ev-pin-btn"), timeout=45000
     )
-    context.browser_page.click(tid("asset-cell-ev-pin-btn"))
+    context.browser_page.dispatch_event(tid("asset-cell-ev-pin-btn"), "click")
 
 
 @then("the EV asset cell is visible in the pinned zone")
