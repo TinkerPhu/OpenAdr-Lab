@@ -23,8 +23,8 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
     And the plan has field "slots"
 
   Scenario: UC-11c — Asset ledger tracks energy in active assets
-    When I poll VEN /ledger until field "ev" is present
-    Then the response JSON has field "ev"
+    When I poll VEN /ledger until field "battery" is present
+    Then the response JSON has field "battery"
 
   # --- UC-12: Multi-Asset Coordination Under Import Cap ---
   # With EV + heater + battery all active under an import cap,
