@@ -30,6 +30,46 @@ def step_wait_for_plan(context):
     )
 
 
+@when("I wait for the VEN /plan to be recomputed after the sim inject")
+def step_wait_for_fresh_plan(context):
+    """Wait for a plan whose created_at is strictly after the current time.
+
+    Use this instead of the generic wait step whenever a sim inject
+    precedes the assertion — the inject changes sim state but does not
+    trigger a replan, so the existing plan may reflect a different state.
+    Waiting for a fresh created_at ensures the MILP ran with the injected
+    value as its starting point.
+    """
+    cutoff = datetime.now(timezone.utc)
+
+    def fetch():
+        resp = ven_get("/plan")
+        if not resp.ok:
+            return None
+        body = resp.json()
+        if not isinstance(body, dict):
+            return None
+        return body
+
+    def is_fresh(plan):
+        if plan is None or "id" not in plan:
+            return False
+        raw = plan.get("created_at", "")
+        if not raw:
+            return False
+        try:
+            plan_ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return plan_ts > cutoff
+        except ValueError:
+            return False
+
+    context.ven_plan = poll_until(
+        fetch, is_fresh,
+        timeout=300,
+        description="VEN /plan recomputed after sim inject",
+    )
+
+
 @when("I wait for the VEN /plan to have an EV allocation in slots")
 def step_wait_for_ev_allocation(context):
     def fetch():
