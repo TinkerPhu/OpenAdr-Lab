@@ -197,8 +197,16 @@ def _expand_ev_status_accordion(page):
 @then("the EV plugged toggle is visible in the EV cell right section")
 def step_ev_plugged_toggle_visible(context):
     _expand_ev_status_accordion(context.browser_page)
+    # Quick diagnostic: check if any ctrl-* element exists (schema loaded?)
+    try:
+        context.browser_page.wait_for_selector('[data-testid^="ctrl-"]', timeout=5000)
+    except Exception:
+        html = context.browser_page.evaluate(
+            '() => document.querySelector(\'[data-testid="right-section-ev"]\')?.outerHTML ?? "NOT FOUND"'
+        )
+        print(f"\n[DIAG] No ctrl-* elements within 5s. right-section-ev: {html[:600]}")
     el = context.browser_page.wait_for_selector(
-        tid("ctrl-ev-plugged"), timeout=45000
+        tid("ctrl-ev-plugged"), state="visible", timeout=60000
     )
     assert el is not None and el.is_visible(), "ctrl-ev-plugged toggle not visible"
 

@@ -110,8 +110,18 @@ export function useSimSchema() {
   const { api } = useVenContext();
   return useQuery({
     queryKey: ["sim", "schema", api.baseUrl],
-    queryFn: () => api.simSchema(),
+    queryFn: async () => {
+      try {
+        const data = await api.simSchema();
+        console.warn("[simSchema] loaded keys:", Object.keys(data).join(","));
+        return data;
+      } catch (err) {
+        console.error("[simSchema] fetch failed:", String(err));
+        throw err;
+      }
+    },
     staleTime: Infinity, // schema doesn't change at runtime
+    retry: 3,
   });
 }
 
