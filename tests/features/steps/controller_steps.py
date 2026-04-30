@@ -178,7 +178,7 @@ def _expand_ev_right_section(page):
     )
     label = btn.get_attribute("aria-label") or ""
     if "Expand" in label:
-        page.click(tid("asset-cell-ev-collapse-right"))
+        page.dispatch_event(tid("asset-cell-ev-collapse-right"), "click")
         # Wait for right section content to appear
         page.wait_for_selector(
             tid("asset-cell-ev-right"), state="visible", timeout=45000,
