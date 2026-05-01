@@ -340,8 +340,8 @@ impl AppState {
                         hems.shiftable_runtimes.retain(|r| r.load_id != sid);
                     }
                 }
-                None => {
-                    tracing::warn!(request_id = %id, "cancel_request: unexpected session_type: None for request {}", id);
+                _ => {
+                    tracing::warn!(request_id = %id, "cancel_request: unexpected session_type {:?} for request {}", session_type, id);
                 }
             }
             true
