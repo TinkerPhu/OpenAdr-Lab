@@ -313,7 +313,7 @@ def step_collapse_right_ev(context):
     context.browser_page.wait_for_selector(
         tid("asset-cell-ev-collapse-right"), timeout=45000
     )
-    context.browser_page.click(tid("asset-cell-ev-collapse-right"))
+    context.browser_page.dispatch_event(tid("asset-cell-ev-collapse-right"), "click")
 
 
 @then("the EV asset cell right section is visible")
