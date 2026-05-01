@@ -644,7 +644,7 @@ pub(crate) fn spawn_sim_tick(
             // Lock sim for physics only — no .await inside the block.
             // All async state publishes happen after the lock is released,
             // preventing HTTP handlers from blocking for the full tick cycle.
-            let (tick_sensor, tick_sim_snap, tick_envelope, cleared_fields, pv_clear, base_clear) = {
+            let (tick_sensor, tick_sim_snap, tick_envelope, cleared_fields, pv_clear, base_clear, residual_kw) = {
                 let mut sim_guard = sim.lock().await;
 
                 // PHASE 1: Apply Behaviour A one-shot injections; collect fields to clear.
@@ -706,7 +706,7 @@ pub(crate) fn spawn_sim_tick(
                 let (tick_sensor, tick_sim_snap, tick_envelope) =
                     finalize_tick_outputs(&mut *sim_guard, &capacity_snap, now);
 
-                (tick_sensor, tick_sim_snap, tick_envelope, cleared_fields, pv_clear, base_clear)
+                (tick_sensor, tick_sim_snap, tick_envelope, cleared_fields, pv_clear, base_clear, residual_kw)
                 // ← sim_guard DROPPED HERE — lock released
             };
 
