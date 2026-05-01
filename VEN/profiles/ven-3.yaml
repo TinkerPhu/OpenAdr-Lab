@@ -16,7 +16,7 @@ assets:
     rated_kw: 6.0
   - type: base_load
     id: base_load
-    baseline_kw: 0.8
+    baseline_kw: 0.6
 
 simulator:
   tick_s: 1
