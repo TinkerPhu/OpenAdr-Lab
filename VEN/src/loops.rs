@@ -265,23 +265,8 @@ pub(crate) fn spawn_report_poll(
 // ─── Helpers for spawn_sim_tick ───────────────────────────────────────────────
 
 /// Deviation tracking state for Layer 1 (reactive correction) and Layer 2 (sustained deviation).
-pub(crate) struct DeviationState {
-    pub deviation_ticks: u32,
-    pub last_correction_kw: f64,
-    pub correction_is_active: bool,
-    pub prev_correction_kw: f64,
-}
-
-impl Default for DeviationState {
-    fn default() -> Self {
-        Self {
-            deviation_ticks: 0,
-            last_correction_kw: 0.0,
-            correction_is_active: false,
-            prev_correction_kw: 0.0,
-        }
-    }
-}
+// AbsorberState is now imported from controller::absorber
+use crate::controller::absorber::AbsorberState;
 
 /// PHASE 1: Apply Behaviour A one-shot state injections to the simulator.
 /// Returns a list of field names that were applied and should be cleared.
@@ -368,100 +353,11 @@ fn build_tick_setpoints(
 /// PHASE 3: Apply Layer 1 battery correction overlay (goal-aware reactive compensation),
 /// correction hold (Plan G), and emit SSE events for correction state changes.
 /// Returns the applied correction_kw.
-fn apply_deviation_correction(
-    dev_state: &mut DeviationState,
-    setpoints: &mut HashMap<String, f64>,
-    assets: &[AssetEntry],
-    asset_configs: &[AssetConfig],
-    plan_snap: Option<&Plan>,
-    plan_signed_net_kw: f64,
-    prev_actual_net_kw: f64,
-    profile: &Profile,
-    event_tx: &PlannerEventTx,
-    now: DateTime<Utc>,
-) -> f64 {
-    let correction_kw = if plan_snap.is_some() {
-        let c = controller::dispatcher::apply_battery_correction_overlay(
-            setpoints,
-            assets,
-            asset_configs,
-            plan_signed_net_kw,
-            prev_actual_net_kw,
-            plan_snap.unwrap().objective,
-            profile.planner.deviation_threshold_kw,
-            profile.planner.correction_min_kw,
-        );
-        if c != 0.0 {
-            debug!(
-                correction_kw = c,
-                plan_signed_net_kw,
-                actual_net_kw = prev_actual_net_kw,
-                deviation_kw = prev_actual_net_kw - plan_signed_net_kw,
-                "layer1: battery correction applied"
-            );
-        }
-        c
-    } else {
-        0.0
-    };
-
-    // Plan G correction hold: when correction just cleared (returned 0.0 this tick
-    // but was active last tick), re-insert the battery's previously-applied
-    // setpoint into setpoints. Without this, build_setpoints' plan allocation reverts
-    // the battery and recreates the deviation on the very next tick (limit cycle).
-    // Only fires when prev_correction_kw was meaningful (> correction_min_kw).
-    if correction_kw == 0.0
-        && dev_state.prev_correction_kw.abs() > profile.planner.correction_min_kw
-    {
-        if let Some(bat) = assets.iter().find(|a| a.id == crate::ids::ASSET_BATTERY) {
-            let plan_sp = setpoints.get(crate::ids::ASSET_BATTERY).copied().unwrap_or(0.0);
-            let held_sp = bat.setpoint_kw;
-            if (held_sp - plan_sp).abs() > profile.planner.correction_min_kw {
-                setpoints.insert(crate::ids::ASSET_BATTERY.to_string(), held_sp);
-            }
-        }
-    }
-    // Only update prev_correction_kw when a real correction fired.
-    // Keeping the last non-zero value active ensures the hold persists
-    // across subsequent ticks where the battery is maxed out (correction
-    // returns 0.0 due to delta < min_correction_kw), preventing the
-    // 3-tick oscillation: correct → hold → revert → correct → ...
-    if correction_kw != 0.0 {
-        dev_state.prev_correction_kw = correction_kw;
-    }
-
-    // Emit CorrectionActive/CorrectionCleared SSE on significant state change
-    if (correction_kw - dev_state.last_correction_kw).abs() > 0.2 {
-        if correction_kw.abs() > profile.planner.correction_min_kw {
-            let reason = if (prev_actual_net_kw - plan_signed_net_kw) > 0.0 {
-                "import_excess"
-            } else {
-                "export_excess"
-            };
-            let obj = plan_snap.map(|p| p.objective).unwrap_or_default();
-            let _ = event_tx.send(PlannerEvent::CorrectionActive {
-                ts: now,
-                asset_id: crate::ids::ASSET_BATTERY.to_string(),
-                reason: reason.to_string(),
-                planned_net_kw: plan_signed_net_kw,
-                actual_net_kw: prev_actual_net_kw,
-                deviation_kw: prev_actual_net_kw - plan_signed_net_kw,
-                correction_kw,
-                objective: obj,
-            });
-            dev_state.correction_is_active = true;
-        } else if dev_state.correction_is_active {
-            let _ = event_tx.send(PlannerEvent::CorrectionCleared {
-                ts: now,
-                reason: "within_threshold".to_string(),
-            });
-            dev_state.correction_is_active = false;
-        }
-        dev_state.last_correction_kw = correction_kw;
-    }
-
-    correction_kw
-}
+// NOTE: Old apply_deviation_correction() function removed (T027).
+// Replaced by controller::absorber::apply_deviation_absorption() which implements
+// multi-asset absorption (battery, EV, heater) sequentially in priority order.
+// Old battery-only logic consolidated into absorber module.
+// Old tests using apply_deviation_correction() need updating to use absorber module.
 
 /// PHASE 5 (post-lock): Publish post-tick simulator state — sensor, sim snapshot, shiftable
 /// logic, ledger, and site envelope. Called after the sim Mutex is released, so HTTP handlers
@@ -599,63 +495,49 @@ fn finalize_tick_outputs(
     (tick_sensor, tick_sim_snap, tick_envelope)
 }
 
-/// PHASE 6: Layer 2 — accumulate sustained deviation → DeviceDeviation trigger.
+/// PHASE 6: Layer 2 — accumulate absorbed residual deviation → DeviceDeviation trigger.
+/// Tier 2 escalates to MILP replanning when Tier 1 (absorber) cannot fully cover the grid deviation
+/// for a sustained duration (deviation_trigger_ticks). Uses residual_kw (uncovered after absorption)
+/// instead of raw post_net_kw to avoid triggering replans for transient deviations that the
+/// absorber can handle.
 fn accumulate_deviation(
-    dev_state: &mut DeviationState,
-    post_net_kw: f64,
-    plan_snap: Option<&Plan>,
+    absorber_state: &mut AbsorberState,
+    residual_kw: f64,
     profile: &Profile,
     trigger_tx: &tokio::sync::watch::Sender<PlanTrigger>,
     deviation_pending: &std::sync::atomic::AtomicBool,
     now: DateTime<Utc>,
 ) {
-    if let Some(ref plan) = plan_snap {
-        if let Some(slot) = plan.current_slot(now) {
-            let planned_net_kw = slot.net_import_kw - slot.net_export_kw;
-            let post_error_kw = (post_net_kw - planned_net_kw).abs();
-            if post_error_kw > profile.planner.deviation_threshold_kw {
-                dev_state.deviation_ticks = dev_state.deviation_ticks.saturating_add(1);
-                debug!(
-                    post_net_kw,
-                    planned_net_kw,
-                    post_error_kw,
-                    threshold_kw = profile.planner.deviation_threshold_kw,
-                    deviation_ticks = dev_state.deviation_ticks,
-                    trigger_ticks = profile.planner.deviation_trigger_ticks,
-                    "layer2: sustained deviation tick"
-                );
-                if dev_state.deviation_ticks >= profile.planner.deviation_trigger_ticks {
-                    dev_state.deviation_ticks = 0;
-                    warn!(
-                        post_net_kw,
-                        planned_net_kw,
-                        post_error_kw,
-                        trigger_ticks = profile.planner.deviation_trigger_ticks,
-                        "layer2: DeviceDeviation trigger fired"
-                    );
-                    let _ = trigger_tx.send(PlanTrigger::DeviceDeviation);
-                    deviation_pending.store(true, std::sync::atomic::Ordering::Release);
-                }
-            } else {
-                if dev_state.deviation_ticks > 0 {
-                    debug!(
-                        deviation_ticks = dev_state.deviation_ticks,
-                        post_net_kw,
-                        planned_net_kw,
-                        post_error_kw,
-                        "layer2: deviation cleared, resetting tick counter"
-                    );
-                }
-                dev_state.deviation_ticks = 0;
-            }
-        } else {
-            debug!("layer2: plan exists but no current_slot — skipping deviation check");
+    // Residual exceeds dead-band: increment sustained deviation counter
+    if residual_kw.abs() > profile.absorber.dead_band_kw {
+        absorber_state.residual_ticks = absorber_state.residual_ticks.saturating_add(1);
+        debug!(
+            residual_kw,
+            dead_band_kw = profile.absorber.dead_band_kw,
+            residual_ticks = absorber_state.residual_ticks,
+            trigger_ticks = profile.planner.deviation_trigger_ticks,
+            "layer2: sustained residual deviation tick"
+        );
+        if absorber_state.residual_ticks >= profile.planner.deviation_trigger_ticks {
+            absorber_state.residual_ticks = 0;
+            warn!(
+                residual_kw,
+                dead_band_kw = profile.absorber.dead_band_kw,
+                trigger_ticks = profile.planner.deviation_trigger_ticks,
+                "layer2: DeviceDeviation trigger fired (absorber exhausted)"
+            );
+            let _ = trigger_tx.send(PlanTrigger::DeviceDeviation);
+            deviation_pending.store(true, std::sync::atomic::Ordering::Release);
         }
     } else {
-        // Only log occasionally to avoid spam when no plan exists at startup
-        if dev_state.deviation_ticks == 0 {
-            debug!("layer2: no active plan — deviation check skipped");
+        if absorber_state.residual_ticks > 0 {
+            debug!(
+                residual_ticks = absorber_state.residual_ticks,
+                residual_kw,
+                "layer2: residual deviation cleared, resetting counter"
+            );
         }
+        absorber_state.residual_ticks = 0;
     }
 }
 
@@ -723,8 +605,15 @@ pub(crate) fn spawn_sim_tick(
             0
         };
 
-        // Plan F/G: Layer 1/2 deviation state (T028)
-        let mut dev_state = DeviationState::default();
+        // Plan F/G: Layer 1/2 absorber state (multi-asset deviation absorption + Tier 2 escalation)
+        let mut absorber_state = AbsorberState {
+            residual_ticks: 0,
+            last_state_change_ts: HashMap::new(),
+            settling_ticks: HashMap::new(),
+            active_overlay_kw: HashMap::new(),
+            correction_is_active: false,
+            last_emitted_correction_kw: 0.0,
+        };
 
         loop {
             tick_interval.tick().await;
@@ -784,17 +673,15 @@ pub(crate) fn spawn_sim_tick(
                     now,
                 );
 
-                // PHASE 3: Layer 1 battery correction overlay + hold + SSE.
-                apply_deviation_correction(
-                    &mut dev_state,
+                // PHASE 3: Layer 1 multi-asset deviation absorber (Tier 1 real-time control).
+                let deviation_kw = prev_actual_net_kw - plan_signed_net_kw;
+                let residual_kw = controller::absorber::apply_deviation_absorption(
+                    &mut absorber_state,
+                    deviation_kw,
                     &mut sp_map,
-                    &sim_guard.assets,
-                    &sim_guard.asset_configs,
+                    &*sim_guard,
                     plan_snap.as_ref(),
-                    plan_signed_net_kw,
-                    prev_actual_net_kw,
                     &profile,
-                    &event_tx,
                     now,
                 );
 
@@ -848,12 +735,10 @@ pub(crate) fn spawn_sim_tick(
                 now,
             ).await;
 
-            // PHASE 6: Layer 2 — accumulate sustained deviation → DeviceDeviation trigger.
-            let post_net_kw = sim_snapshot.grid.net_power_w / 1000.0;
+            // PHASE 6: Layer 2 — accumulate absorbed residual deviation → DeviceDeviation trigger.
             accumulate_deviation(
-                &mut dev_state,
-                post_net_kw,
-                plan_snap.as_ref(),
+                &mut absorber_state,
+                residual_kw,
                 &profile,
                 &*trigger_tx,
                 &deviation_pending,
