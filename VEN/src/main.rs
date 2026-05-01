@@ -106,6 +106,12 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(Mutex::new(sim))
     };
 
+    // Validate absorber configuration at startup
+    {
+        let sim_guard = sim_state.lock().await;
+        controller::absorber::validate_startup(&profile, &sim_guard)?;
+    }
+
     // Spawn background loops
     loops::spawn_program_poll(state.clone(), vtn.clone(), cfg.poll_programs_secs);
     loops::spawn_event_poll(
