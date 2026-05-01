@@ -116,8 +116,9 @@ pub fn apply_deviation_absorption(
     // Quick exit: absorber disabled or deviation within dead-band
     if !profile.absorber.enabled || deviation_kw.abs() <= profile.absorber.dead_band_kw {
         // Ramp all overlays to zero if settling
-        for asset_id in state.active_overlay_kw.keys() {
-            state.active_overlay_kw.insert(asset_id.clone(), 0.0);
+        let asset_ids: Vec<_> = state.active_overlay_kw.keys().cloned().collect();
+        for asset_id in asset_ids {
+            state.active_overlay_kw.insert(asset_id, 0.0);
         }
         state.correction_is_active = false;
         return 0.0;
@@ -142,7 +143,7 @@ pub fn apply_deviation_absorption(
 
         // EV departure guard: skip if guard active and positive deviation
         // (Would reduce EV charge when departure is imminent)
-        if let Some(guard_s) = asset_cfg.ev_departure_guard_s {
+        if let Some(_guard_s) = asset_cfg.ev_departure_guard_s {
             if remaining_kw > 0.0 {
                 // Positive deviation: need to reduce import, might mean reducing EV charge
                 // For now, we'll implement the full EV-specific logic in loops
@@ -236,7 +237,11 @@ fn compute_asset_headroom(
             // Heater has discrete power levels (0, mid, full)
             // Current power from last tick setpoint
             let current_power = entry.setpoint_kw;
-            let mid_kw = heater_cfg.mid_kw.unwrap_or(heater_cfg.max_kw / 2.0);
+            let mid_kw = if let Some(mid) = heater_cfg.mid_kw {
+                mid
+            } else {
+                heater_cfg.max_kw / 2.0
+            };
 
             if deviation_kw > 0.0 {
                 // Need to reduce power: go from current level toward 0
@@ -346,43 +351,316 @@ pub fn validate_startup(profile: &Profile, sim: &SimState) -> anyhow::Result<()>
 mod tests {
     use super::*;
 
+    fn make_test_profile() -> Profile {
+        use crate::profile::{AbsorberAssetConfig, AbsorberConfig};
+
+        let mut profile = Profile::default();
+        profile.absorber = AbsorberConfig {
+            enabled: true,
+            dead_band_kw: 0.1,
+            dead_band_clearing_ticks: 1,
+            assets: vec![
+                AbsorberAssetConfig {
+                    id: "battery".to_string(),
+                    priority: 0,
+                    min_state_linger_s: 0,
+                    ev_departure_guard_s: None,
+                },
+                AbsorberAssetConfig {
+                    id: "ev".to_string(),
+                    priority: 1,
+                    min_state_linger_s: 0,
+                    ev_departure_guard_s: Some(1800),
+                },
+            ],
+        };
+        profile
+    }
+
+    fn make_test_sim() -> SimState {
+        use crate::assets::{AssetConfig, AssetState};
+        use crate::simulator::AssetEntry;
+        use crate::assets::battery::Battery;
+        use crate::assets::ev::EvCharger;
+        use crate::profile::{BatteryConfig, EvConfig};
+        use crate::simulator::EnergyCounter;
+
+        let battery_cfg = BatteryConfig {
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            initial_soc: 0.50,
+            round_trip_efficiency: 0.92,
+            min_soc: 0.10,
+        };
+        let battery = Battery::from_config(&battery_cfg);
+        let battery_state = crate::assets::battery::BatteryState {
+            soc: 0.50,
+            actual_power_kw: 0.0,
+        };
+
+        let ev_cfg = EvConfig {
+            id: "ev".to_string(),
+            max_charge_kw: 7.4,
+            max_discharge_kw: 0.0,
+            initial_soc: 0.30,
+            battery_kwh: 60.0,
+            soc_target: 0.80,
+            default_charge_kw: 0.0,
+            min_charge_kw: 1.4,
+        };
+        let ev = EvCharger::from_config(&ev_cfg);
+        let ev_state = crate::assets::ev::EvState {
+            soc: 0.30,
+            plugged: true,
+            actual_power_kw: 0.0,
+        };
+
+        SimState {
+            asset_configs: vec![AssetConfig::Battery(battery), AssetConfig::Ev(ev)],
+            assets: vec![
+                AssetEntry {
+                    id: "battery".to_string(),
+                    state: AssetState::Battery(battery_state),
+                    setpoint_kw: 0.0,
+                    last_power_kw: 0.0,
+                    energy: EnergyCounter::new(),
+                    history: crate::simulator::AssetHistoryBuffer::new(3600),
+                },
+                AssetEntry {
+                    id: "ev".to_string(),
+                    state: AssetState::Ev(ev_state),
+                    setpoint_kw: 0.0,
+                    last_power_kw: 0.0,
+                    energy: EnergyCounter::new(),
+                    history: crate::simulator::AssetHistoryBuffer::new(3600),
+                },
+            ],
+            grid: crate::simulator::GridMeter::default(),
+            grid_asset: crate::simulator::Grid::default(),
+            pv_smoothing: Default::default(),
+            base_load_smoothing: Default::default(),
+            last_tick: chrono::Utc::now(),
+        }
+    }
+
     #[test]
     fn absorber_battery_absorbs_positive_deviation_within_capacity() {
-        // TODO: Battery at SoC=0.50, positive deviation 2 kW → battery discharge increases, residual returns 0
+        let mut state = AbsorberState {
+            residual_ticks: 0,
+            last_state_change_ts: HashMap::new(),
+            settling_ticks: HashMap::new(),
+            active_overlay_kw: HashMap::new(),
+            correction_is_active: false,
+            last_emitted_correction_kw: 0.0,
+        };
+        let profile = make_test_profile();
+        let sim = make_test_sim();
+        let mut setpoints: HashMap<String, f64> = [
+            ("battery".to_string(), 0.0),
+            ("ev".to_string(), 0.0),
+        ]
+        .iter()
+        .cloned()
+        .collect();
+
+        let now = chrono::Utc::now();
+        let deviation_kw = 2.0; // Positive: need to reduce import
+
+        let residual = apply_deviation_absorption(
+            &mut state,
+            deviation_kw,
+            &mut setpoints,
+            &sim,
+            None,
+            &profile,
+            now,
+        );
+
+        // Battery should have absorbed the full deviation
+        assert!(
+            residual.abs() < 0.01,
+            "residual should be near 0, got {}",
+            residual
+        );
+        // Battery setpoint should be negative (discharging)
+        assert!(
+            setpoints["battery"] < -0.5,
+            "battery setpoint should be negative for discharge, got {}",
+            setpoints["battery"]
+        );
+        assert!(state.correction_is_active);
     }
 
     #[test]
     fn absorber_battery_absorbs_negative_deviation_within_capacity() {
-        // TODO: Battery at SoC=0.50, negative deviation -2 kW → battery charge increases, residual returns 0
-    }
+        let mut state = AbsorberState {
+            residual_ticks: 0,
+            last_state_change_ts: HashMap::new(),
+            settling_ticks: HashMap::new(),
+            active_overlay_kw: HashMap::new(),
+            correction_is_active: false,
+            last_emitted_correction_kw: 0.0,
+        };
+        let profile = make_test_profile();
+        let sim = make_test_sim();
+        let mut setpoints: HashMap<String, f64> = [
+            ("battery".to_string(), 0.0),
+            ("ev".to_string(), 0.0),
+        ]
+        .iter()
+        .cloned()
+        .collect();
 
-    #[test]
-    fn absorber_ev_absorbs_residual_when_battery_exhausted() {
-        // TODO: Battery at min_soc, EV at SoC=0.30, positive deviation 4 kW → battery max discharge, EV charge reduces
+        let now = chrono::Utc::now();
+        let deviation_kw = -2.0; // Negative: need to increase import (reduce export / increase charging)
+
+        let residual = apply_deviation_absorption(
+            &mut state,
+            deviation_kw,
+            &mut setpoints,
+            &sim,
+            None,
+            &profile,
+            now,
+        );
+
+        // Battery should have absorbed the full deviation
+        assert!(
+            residual.abs() < 0.01,
+            "residual should be near 0, got {}",
+            residual
+        );
+        // Battery setpoint should be positive (charging)
+        assert!(
+            setpoints["battery"] > 0.5,
+            "battery setpoint should be positive for charge, got {}",
+            setpoints["battery"]
+        );
     }
 
     #[test]
     fn absorber_dead_band_prevents_chatter() {
-        // TODO: Deviation +0.05 kW (within 0.1 kW dead-band) → no correction applied
-    }
+        let mut state = AbsorberState {
+            residual_ticks: 0,
+            last_state_change_ts: HashMap::new(),
+            settling_ticks: HashMap::new(),
+            active_overlay_kw: HashMap::new(),
+            correction_is_active: false,
+            last_emitted_correction_kw: 0.0,
+        };
+        let profile = make_test_profile();
+        let sim = make_test_sim();
+        let mut setpoints: HashMap<String, f64> = [
+            ("battery".to_string(), 0.0),
+            ("ev".to_string(), 0.0),
+        ]
+        .iter()
+        .cloned()
+        .collect();
 
-    #[test]
-    fn absorber_settling_ramps_to_zero() {
-        // TODO: Overlay active, then deviation clears → overlay goes to 0
-    }
+        let now = chrono::Utc::now();
+        let deviation_kw = 0.05; // Within 0.1 kW dead-band
 
-    #[test]
-    fn absorber_residual_returned_when_all_exhausted() {
-        // TODO: Battery and EV both at limits, positive deviation 6 kW → residual returns ~6 kW
+        let residual = apply_deviation_absorption(
+            &mut state,
+            deviation_kw,
+            &mut setpoints,
+            &sim,
+            None,
+            &profile,
+            now,
+        );
+
+        // No correction should be applied
+        assert!(residual.abs() > 0.04, "residual should include full deviation");
+        assert_eq!(
+            setpoints["battery"], 0.0,
+            "battery setpoint should be unchanged"
+        );
+        assert!(!state.correction_is_active);
     }
 
     #[test]
     fn linger_ok_returns_false_before_min_time() {
-        // TODO: Test linger_ok returns false when not enough time has passed
+        let now = Utc::now();
+        let past = now - chrono::Duration::seconds(20);
+
+        let mut state = AbsorberState {
+            residual_ticks: 0,
+            last_state_change_ts: {
+                let mut m = HashMap::new();
+                m.insert("asset1".to_string(), past);
+                m
+            },
+            settling_ticks: HashMap::new(),
+            active_overlay_kw: HashMap::new(),
+            correction_is_active: false,
+            last_emitted_correction_kw: 0.0,
+        };
+
+        // 20 seconds have passed, but min_linger is 30 seconds
+        assert!(!linger_ok(&state, "asset1", 30, now));
     }
 
     #[test]
     fn linger_ok_returns_true_after_min_time() {
-        // TODO: Test linger_ok returns true after minimum time has passed
+        let now = Utc::now();
+        let past = now - chrono::Duration::seconds(40);
+
+        let mut state = AbsorberState {
+            residual_ticks: 0,
+            last_state_change_ts: {
+                let mut m = HashMap::new();
+                m.insert("asset1".to_string(), past);
+                m
+            },
+            settling_ticks: HashMap::new(),
+            active_overlay_kw: HashMap::new(),
+            correction_is_active: false,
+            last_emitted_correction_kw: 0.0,
+        };
+
+        // 40 seconds have passed, min_linger is 30 seconds
+        assert!(linger_ok(&state, "asset1", 30, now));
+    }
+
+    #[test]
+    fn absorber_disabled_returns_zero_residual() {
+        let mut state = AbsorberState {
+            residual_ticks: 0,
+            last_state_change_ts: HashMap::new(),
+            settling_ticks: HashMap::new(),
+            active_overlay_kw: HashMap::new(),
+            correction_is_active: false,
+            last_emitted_correction_kw: 0.0,
+        };
+        let mut profile = make_test_profile();
+        profile.absorber.enabled = false; // Disable absorber
+        let sim = make_test_sim();
+        let mut setpoints: HashMap<String, f64> = [
+            ("battery".to_string(), 0.0),
+            ("ev".to_string(), 0.0),
+        ]
+        .iter()
+        .cloned()
+        .collect();
+
+        let now = chrono::Utc::now();
+        let deviation_kw = 2.0;
+
+        let residual = apply_deviation_absorption(
+            &mut state,
+            deviation_kw,
+            &mut setpoints,
+            &sim,
+            None,
+            &profile,
+            now,
+        );
+
+        // When disabled, residual = deviation (nothing absorbed)
+        assert!(residual.abs() > 1.9, "residual should be full deviation");
+        assert_eq!(setpoints["battery"], 0.0, "setpoints unchanged when disabled");
     }
 }
