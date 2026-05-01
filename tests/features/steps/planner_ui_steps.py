@@ -22,7 +22,7 @@ def step_see_nav_button(context, testid):
 
 @when('I click the nav button "{testid}"')
 def step_click_nav_button(context, testid):
-    context.browser_page.click(tid(testid))
+    context.browser_page.dispatch_event(tid(testid), "click")
 
 
 @then('I see an element with testid "{testid}"')
@@ -33,7 +33,7 @@ def step_see_element(context, testid):
 
 @when('I click the element with testid "{testid}"')
 def step_click_element(context, testid):
-    context.browser_page.click(tid(testid), force=True)
+    context.browser_page.dispatch_event(tid(testid), "click")
 
 
 # ── Trigger Timeline steps ────────────────────────────────────────────────────

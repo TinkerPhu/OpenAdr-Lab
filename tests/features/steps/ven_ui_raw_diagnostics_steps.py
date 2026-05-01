@@ -37,7 +37,7 @@ def step_see_cell(context, title):
 def step_click_refresh(context, title):
     sel = tid(f"refresh-btn-{_slug(title)}")
     context.browser_page.wait_for_selector(sel, timeout=45000)
-    context.browser_page.click(sel)
+    context.browser_page.dispatch_event(sel, "click")
 
 
 # ── Chart assertions ──────────────────────────────────────────────────────────
@@ -96,10 +96,10 @@ def step_tariffs_cell_unloaded(context):
 def step_select_timeline_series(context, series):
     page = context.browser_page
     select = page.wait_for_selector(tid("timeline-series-select"), timeout=45000)
-    select.click()
+    page.dispatch_event(select, "click")
     # MUI Select renders options in a portal — select by visible text
     option = page.wait_for_selector(f'li[role="option"]:has-text("{series}")', timeout=15000)
-    option.click()
+    page.dispatch_event(option, "click")
     context.selected_series = series
 
 
