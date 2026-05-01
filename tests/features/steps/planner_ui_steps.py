@@ -50,8 +50,8 @@ def step_at_least_one_chip(context):
 def step_click_first_chip(context):
     page = context.browser_page
     page.wait_for_selector('[data-testid^="trigger-chip-"]', timeout=45000)
-    # Use locator + force to handle layout instability from React Query refetches on Pi4
-    page.locator('[data-testid^="trigger-chip-"]').first.click(force=True)
+    # Use dispatch_event to handle MUI Tooltip wrapping around chip buttons
+    page.dispatch_event('[data-testid^="trigger-chip-"]', "click")
 
 
 # ── Decision Matrix steps ─────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ def step_click_first_matrix_cell(context):
     page.wait_for_selector('[data-testid^="matrix-cell-"]', timeout=45000)
     cells = page.query_selector_all('[data-testid^="matrix-cell-"]')
     assert len(cells) > 0, "No matrix cells to click"
-    cells[0].click()
+    page.dispatch_event(cells[0], "click")
 
 
 @when("I click the first matrix cell with nonzero power")
@@ -93,7 +93,7 @@ def step_click_first_nonzero_matrix_cell(context):
         power_str = cell.get_attribute("data-power") or "0"
         try:
             if float(power_str) > 0.01:
-                cell.click()
+                page.dispatch_event(cell, "click")
                 clicked = True
                 break
         except ValueError:
