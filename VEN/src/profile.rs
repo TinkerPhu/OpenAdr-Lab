@@ -1,7 +1,49 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 use tracing::{info, warn};
+
+/// Multi-asset deviation absorber configuration.
+/// Tier 1 real-time controller for transient grid deviations.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AbsorberConfig {
+    /// Enable/disable absorber globally (default: false).
+    pub enabled: bool,
+    /// Magnitude threshold below which deviation is ignored, prevents chatter (default: 0.1 kW).
+    pub dead_band_kw: f64,
+    /// Ticks within dead-band before settling begins (default: 1).
+    pub dead_band_clearing_ticks: usize,
+    /// List of absorber-eligible assets with per-asset settings.
+    pub assets: Vec<AbsorberAssetConfig>,
+}
+
+impl Default for AbsorberConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            dead_band_kw: 0.1,
+            dead_band_clearing_ticks: 1,
+            assets: Vec::new(),
+        }
+    }
+}
+
+/// Per-asset configuration for the absorber.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AbsorberAssetConfig {
+    /// Asset ID — must match an asset in SimState.assets.
+    pub id: String,
+    /// Priority order (0 = first/battery, higher = later); should be unique.
+    pub priority: u8,
+    /// Minimum seconds between state changes (0 for electronics, 30–60 for relays).
+    pub min_state_linger_s: u64,
+    /// (EV only) Refuse charging reduction if departure < N seconds away.
+    /// If unset (None), no guard applies. Typical: 1800 (30 minutes).
+    #[serde(default)]
+    pub ev_departure_guard_s: Option<u64>,
+}
 
 /// YAML-loaded asset profile tagged enum for the `assets:` list format.
 /// Each entry has a `type` discriminator plus type-specific fields.
@@ -43,6 +85,9 @@ pub struct Profile {
     pub grid: GridConfig,
     #[serde(default)]
     pub packets: Vec<PacketSeed>,
+    /// Multi-asset deviation absorber configuration (Tier 1).
+    #[serde(default)]
+    pub absorber: AbsorberConfig,
 }
 
 
@@ -659,6 +704,7 @@ impl Profile {
             planner: PlannerConfig::default(),
             grid: GridConfig::default(),
             packets: vec![],
+            absorber: AbsorberConfig::default(),
         }
     }
 }
@@ -733,5 +779,79 @@ temp_max_c: 23.0
         let msg = format!("{}", result.unwrap_err());
         assert!(msg.contains("no assets"), "error message should mention 'no assets': {msg}");
         let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[test]
+    fn absorber_config_with_all_fields() {
+        let yaml = r#"
+absorber:
+  enabled: true
+  dead_band_kw: 0.1
+  dead_band_clearing_ticks: 1
+  assets:
+    - id: battery
+      priority: 0
+      min_state_linger_s: 0
+    - id: ev
+      priority: 1
+      min_state_linger_s: 0
+      ev_departure_guard_s: 1800
+    - id: heater
+      priority: 2
+      min_state_linger_s: 30
+"#;
+        let profile: Profile = serde_yaml::from_str(yaml).expect("should parse absorber yaml");
+        assert!(profile.absorber.enabled, "enabled should be true");
+        assert!((profile.absorber.dead_band_kw - 0.1).abs() < 1e-9, "dead_band_kw should be 0.1");
+        assert_eq!(profile.absorber.dead_band_clearing_ticks, 1, "dead_band_clearing_ticks should be 1");
+        assert_eq!(profile.absorber.assets.len(), 3, "should have 3 assets");
+        assert_eq!(profile.absorber.assets[0].id, "battery");
+        assert_eq!(profile.absorber.assets[0].priority, 0);
+        assert_eq!(profile.absorber.assets[1].id, "ev");
+        assert_eq!(profile.absorber.assets[1].ev_departure_guard_s, Some(1800));
+        assert_eq!(profile.absorber.assets[2].id, "heater");
+        assert_eq!(profile.absorber.assets[2].min_state_linger_s, 30);
+    }
+
+    #[test]
+    fn absorber_config_without_section_defaults_to_disabled() {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    battery_kwh: 60
+"#;
+        let profile: Profile = serde_yaml::from_str(yaml).expect("should parse yaml without absorber");
+        assert!(!profile.absorber.enabled, "enabled should default to false");
+        assert!((profile.absorber.dead_band_kw - 0.1).abs() < 1e-9, "dead_band_kw should default to 0.1");
+        assert_eq!(profile.absorber.assets.len(), 0, "absorber assets should be empty");
+    }
+
+    #[test]
+    fn absorber_asset_config_defaults_when_fields_omitted() {
+        let yaml = r#"
+absorber:
+  enabled: true
+  assets:
+    - id: battery
+      priority: 0
+"#;
+        let profile: Profile = serde_yaml::from_str(yaml).expect("should parse with partial fields");
+        assert_eq!(profile.absorber.assets.len(), 1);
+        assert_eq!(profile.absorber.assets[0].id, "battery");
+        assert_eq!(profile.absorber.assets[0].priority, 0);
+        assert_eq!(profile.absorber.assets[0].min_state_linger_s, 0, "min_state_linger_s should default to 0");
+        assert!(profile.absorber.assets[0].ev_departure_guard_s.is_none(), "ev_departure_guard_s should default to None");
+    }
+
+    #[test]
+    fn absorber_config_dead_band_clearing_ticks_default() {
+        let yaml = r#"
+absorber:
+  enabled: true
+  assets: []
+"#;
+        let profile: Profile = serde_yaml::from_str(yaml).expect("should parse without dead_band_clearing_ticks");
+        assert_eq!(profile.absorber.dead_band_clearing_ticks, 1, "dead_band_clearing_ticks should default to 1");
     }
 }
