@@ -192,5 +192,5 @@ def step_click_ev_override_toggle(context):
     toggle = context.browser_page.wait_for_selector(
         '[data-testid="ev-charge-override-toggle"]', timeout=45000
     )
-    toggle.click()
+    context.browser_page.dispatch_event(toggle, "click")
     # Next step uses _wait_slider_disabled() which polls for DOM state
