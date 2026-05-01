@@ -237,11 +237,7 @@ fn compute_asset_headroom(
             // Heater has discrete power levels (0, mid, full)
             // Current power from last tick setpoint
             let current_power = entry.setpoint_kw;
-            let mid_kw = if let Some(mid) = heater_cfg.mid_kw {
-                mid
-            } else {
-                heater_cfg.max_kw / 2.0
-            };
+            let mid_kw = heater_cfg.mid_kw;
 
             if deviation_kw > 0.0 {
                 // Need to reduce power: go from current level toward 0
