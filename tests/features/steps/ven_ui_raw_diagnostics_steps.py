@@ -96,10 +96,10 @@ def step_tariffs_cell_unloaded(context):
 def step_select_timeline_series(context, series):
     page = context.browser_page
     select = page.wait_for_selector(tid("timeline-series-select"), timeout=45000)
-    page.dispatch_event(select, "click")
+    select.dispatch_event("click")
     # MUI Select renders options in a portal — select by visible text
     option = page.wait_for_selector(f'li[role="option"]:has-text("{series}")', timeout=15000)
-    page.dispatch_event(option, "click")
+    option.dispatch_event("click")
     context.selected_series = series
 
 
