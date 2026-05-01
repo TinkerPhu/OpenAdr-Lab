@@ -19,7 +19,7 @@ assets:
     min_soc: 0.10
   - type: base_load
     id: base_load
-    baseline_kw: 0.5
+    baseline_kw: 0.4
 
 simulator:
   tick_s: 1
