@@ -150,7 +150,7 @@ pub fn create_from_body(
         completion_policy: completion_policy_str,
         max_total_cost_eur,
         tier_count,
-        session_id: None, // set by caller after device session is created
+        session_id: None,   // set by caller after device session is created
         session_type: None, // set by caller (Ev, Heater, etc.)
         status: UserRequestStatus::Active,
         estimated_cost_eur: 0.0,

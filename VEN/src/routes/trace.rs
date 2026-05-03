@@ -32,7 +32,12 @@ pub async fn get_trace_events(
     events.truncate(limit);
     let plan_cycle_count = events
         .iter()
-        .filter(|e| matches!(e, crate::controller::trace::ControllerEvent::PlanCycle { .. }))
+        .filter(|e| {
+            matches!(
+                e,
+                crate::controller::trace::ControllerEvent::PlanCycle { .. }
+            )
+        })
         .count();
     debug!(
         total_events = total,

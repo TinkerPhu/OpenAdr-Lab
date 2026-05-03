@@ -3,9 +3,7 @@ use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, So
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{
-    Asset, AssetCapability, AssetState, ControlDescriptor,
-};
+use super::{Asset, AssetCapability, AssetState, ControlDescriptor};
 use crate::common::{Interpolation, TimeSeries};
 use crate::profile::BatteryConfig;
 
@@ -332,11 +330,12 @@ impl BatteryMilpContext {
         let mut cs: Vec<Constraint> = Vec::new();
         for t in 0..n {
             cs.push(constraint!(v.p_ch[t] <= self.p_ch_max_kw * v.u_bat[t]));
-            cs.push(constraint!(v.p_dis[t] <= self.p_dis_max_kw * (1.0 - v.u_bat[t])));
+            cs.push(constraint!(
+                v.p_dis[t] <= self.p_dis_max_kw * (1.0 - v.u_bat[t])
+            ));
             cs.push(constraint!(
                 v.e_bat[t + 1]
-                    == v.e_bat[t]
-                        + dt_h * self.eff_ch * v.p_ch[t]
+                    == v.e_bat[t] + dt_h * self.eff_ch * v.p_ch[t]
                         - dt_h * (1.0 / self.eff_dis) * v.p_dis[t]
             ));
             if let Some(&z) = v.z_active.get(t) {
@@ -346,17 +345,17 @@ impl BatteryMilpContext {
         }
         for i in 0..v.delta_active.len() {
             let t = i + 1;
-            cs.push(constraint!(v.delta_active[i] >= v.z_active[t] - v.z_active[t - 1]));
+            cs.push(constraint!(
+                v.delta_active[i] >= v.z_active[t] - v.z_active[t - 1]
+            ));
         }
         for i in 0..v.delta_ramp.len() {
             let t = i + 1;
             cs.push(constraint!(
-                v.delta_ramp[i]
-                    >= (v.p_ch[t] - v.p_dis[t]) - (v.p_ch[t - 1] - v.p_dis[t - 1])
+                v.delta_ramp[i] >= (v.p_ch[t] - v.p_dis[t]) - (v.p_ch[t - 1] - v.p_dis[t - 1])
             ));
             cs.push(constraint!(
-                v.delta_ramp[i]
-                    >= (v.p_ch[t - 1] - v.p_dis[t - 1]) - (v.p_ch[t] - v.p_dis[t])
+                v.delta_ramp[i] >= (v.p_ch[t - 1] - v.p_dis[t - 1]) - (v.p_ch[t] - v.p_dis[t])
             ));
         }
         cs.push(constraint!(v.e_bat[n] >= self.e_init_kwh));
@@ -399,7 +398,11 @@ impl BatteryMilpContext {
 
     /// Construct from a live `AssetState` and the current sim `Battery` config.
     pub fn from_state(state: &super::AssetState, cfg: &Battery) -> Self {
-        let live_soc = if let super::AssetState::Battery(s) = state { s.soc } else { 0.5 };
+        let live_soc = if let super::AssetState::Battery(s) = state {
+            s.soc
+        } else {
+            0.5
+        };
         cfg.build_milp_context(live_soc)
     }
 }
