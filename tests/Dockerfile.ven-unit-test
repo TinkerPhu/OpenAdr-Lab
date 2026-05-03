@@ -25,8 +25,7 @@ RUN apt-get update \
         libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN rustup component add rustfmt clippy \
-    && cargo install cargo-audit --locked
+RUN rustup component add rustfmt clippy
 
 WORKDIR /app
 
