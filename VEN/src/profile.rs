@@ -91,7 +91,6 @@ pub struct Profile {
     pub absorber: AbsorberConfig,
 }
 
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct EvConfig {
     #[serde(default = "default_asset_id_ev")]
@@ -314,7 +313,6 @@ fn default_asset_id_base_load() -> String {
 fn default_base_load_kw() -> f64 {
     0.5
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SimulatorConfig {
@@ -641,28 +639,44 @@ impl Profile {
     /// Returns the EV config from the `assets` list.
     pub fn ev_config(&self) -> Option<&EvConfig> {
         self.assets.iter().find_map(|a| {
-            if let AssetProfile::Ev(c) = a { Some(c) } else { None }
+            if let AssetProfile::Ev(c) = a {
+                Some(c)
+            } else {
+                None
+            }
         })
     }
 
     /// Returns the Heater config from the `assets` list.
     pub fn heater_config(&self) -> Option<&HeaterConfig> {
         self.assets.iter().find_map(|a| {
-            if let AssetProfile::Heater(c) = a { Some(c) } else { None }
+            if let AssetProfile::Heater(c) = a {
+                Some(c)
+            } else {
+                None
+            }
         })
     }
 
     /// Returns the PV config from the `assets` list.
     pub fn pv_config(&self) -> Option<&PvConfig> {
         self.assets.iter().find_map(|a| {
-            if let AssetProfile::Pv(c) = a { Some(c) } else { None }
+            if let AssetProfile::Pv(c) = a {
+                Some(c)
+            } else {
+                None
+            }
         })
     }
 
     /// Returns the Battery config from the `assets` list.
     pub fn battery_config(&self) -> Option<&BatteryConfig> {
         self.assets.iter().find_map(|a| {
-            if let AssetProfile::Battery(c) = a { Some(c) } else { None }
+            if let AssetProfile::Battery(c) = a {
+                Some(c)
+            } else {
+                None
+            }
         })
     }
 
@@ -671,7 +685,11 @@ impl Profile {
         self.assets
             .iter()
             .find_map(|a| {
-                if let AssetProfile::BaseLoad(c) = a { Some(c.baseline_kw) } else { None }
+                if let AssetProfile::BaseLoad(c) = a {
+                    Some(c.baseline_kw)
+                } else {
+                    None
+                }
             })
             .unwrap_or_else(default_base_load_kw)
     }
@@ -693,7 +711,10 @@ impl Profile {
         let contents = tokio::fs::read_to_string(Path::new(path)).await?;
         let profile: Profile = serde_yaml::from_str(&contents)?;
         if profile.assets.is_empty() {
-            anyhow::bail!("profile at '{}' has no assets — check the YAML 'assets:' list", path);
+            anyhow::bail!(
+                "profile at '{}' has no assets — check the YAML 'assets:' list",
+                path
+            );
         }
         Ok(profile)
     }
@@ -762,7 +783,10 @@ temp_max_c: 23.0
 "#;
         let asset: AssetProfile = serde_yaml::from_str(yaml).expect("should parse heater yaml");
         if let AssetProfile::Heater(cfg) = asset {
-            assert!(cfg.switching_penalty_eur.is_none(), "penalty should default to None");
+            assert!(
+                cfg.switching_penalty_eur.is_none(),
+                "penalty should default to None"
+            );
             assert!((cfg.effective_switching_penalty() - 0.01).abs() < 1e-9);
         } else {
             panic!("expected AssetProfile::Heater");
@@ -774,11 +798,19 @@ temp_max_c: 23.0
         // try_load must reject a YAML that parses but has no assets.
         let dir = std::env::temp_dir();
         let path = dir.join("empty_assets_profile_test.yaml");
-        tokio::fs::write(&path, "simulator:\n  tick_s: 1\n").await.unwrap();
+        tokio::fs::write(&path, "simulator:\n  tick_s: 1\n")
+            .await
+            .unwrap();
         let result = Profile::try_load(path.to_str().unwrap()).await;
-        assert!(result.is_err(), "try_load must return Err for empty assets list");
+        assert!(
+            result.is_err(),
+            "try_load must return Err for empty assets list"
+        );
         let msg = format!("{}", result.unwrap_err());
-        assert!(msg.contains("no assets"), "error message should mention 'no assets': {msg}");
+        assert!(
+            msg.contains("no assets"),
+            "error message should mention 'no assets': {msg}"
+        );
         let _ = tokio::fs::remove_file(path).await;
     }
 
@@ -803,8 +835,14 @@ absorber:
 "#;
         let profile: Profile = serde_yaml::from_str(yaml).expect("should parse absorber yaml");
         assert!(profile.absorber.enabled, "enabled should be true");
-        assert!((profile.absorber.dead_band_kw - 0.1).abs() < 1e-9, "dead_band_kw should be 0.1");
-        assert_eq!(profile.absorber.dead_band_clearing_ticks, 1, "dead_band_clearing_ticks should be 1");
+        assert!(
+            (profile.absorber.dead_band_kw - 0.1).abs() < 1e-9,
+            "dead_band_kw should be 0.1"
+        );
+        assert_eq!(
+            profile.absorber.dead_band_clearing_ticks, 1,
+            "dead_band_clearing_ticks should be 1"
+        );
         assert_eq!(profile.absorber.assets.len(), 3, "should have 3 assets");
         assert_eq!(profile.absorber.assets[0].id, "battery");
         assert_eq!(profile.absorber.assets[0].priority, 0);
@@ -822,10 +860,18 @@ assets:
     id: battery
     battery_kwh: 60
 "#;
-        let profile: Profile = serde_yaml::from_str(yaml).expect("should parse yaml without absorber");
+        let profile: Profile =
+            serde_yaml::from_str(yaml).expect("should parse yaml without absorber");
         assert!(!profile.absorber.enabled, "enabled should default to false");
-        assert!((profile.absorber.dead_band_kw - 0.1).abs() < 1e-9, "dead_band_kw should default to 0.1");
-        assert_eq!(profile.absorber.assets.len(), 0, "absorber assets should be empty");
+        assert!(
+            (profile.absorber.dead_band_kw - 0.1).abs() < 1e-9,
+            "dead_band_kw should default to 0.1"
+        );
+        assert_eq!(
+            profile.absorber.assets.len(),
+            0,
+            "absorber assets should be empty"
+        );
     }
 
     #[test]
@@ -837,12 +883,19 @@ absorber:
     - id: battery
       priority: 0
 "#;
-        let profile: Profile = serde_yaml::from_str(yaml).expect("should parse with partial fields");
+        let profile: Profile =
+            serde_yaml::from_str(yaml).expect("should parse with partial fields");
         assert_eq!(profile.absorber.assets.len(), 1);
         assert_eq!(profile.absorber.assets[0].id, "battery");
         assert_eq!(profile.absorber.assets[0].priority, 0);
-        assert_eq!(profile.absorber.assets[0].min_state_linger_s, 0, "min_state_linger_s should default to 0");
-        assert!(profile.absorber.assets[0].ev_departure_guard_s.is_none(), "ev_departure_guard_s should default to None");
+        assert_eq!(
+            profile.absorber.assets[0].min_state_linger_s, 0,
+            "min_state_linger_s should default to 0"
+        );
+        assert!(
+            profile.absorber.assets[0].ev_departure_guard_s.is_none(),
+            "ev_departure_guard_s should default to None"
+        );
     }
 
     #[test]
@@ -852,7 +905,11 @@ absorber:
   enabled: true
   assets: []
 "#;
-        let profile: Profile = serde_yaml::from_str(yaml).expect("should parse without dead_band_clearing_ticks");
-        assert_eq!(profile.absorber.dead_band_clearing_ticks, 1, "dead_band_clearing_ticks should default to 1");
+        let profile: Profile =
+            serde_yaml::from_str(yaml).expect("should parse without dead_band_clearing_ticks");
+        assert_eq!(
+            profile.absorber.dead_band_clearing_ticks, 1,
+            "dead_band_clearing_ticks should default to 1"
+        );
     }
 }

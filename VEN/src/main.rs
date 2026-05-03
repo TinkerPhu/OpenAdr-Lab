@@ -17,7 +17,7 @@ use config::Config;
 use entities::asset::PlanTrigger;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use planner_events::{PlannerEvent, PlannerEventTx};
-use profile::{Profile, PlannerObjective};
+use profile::{PlannerObjective, Profile};
 use simulator::SimState;
 use state::AppState;
 use std::sync::{atomic::AtomicBool, Arc};

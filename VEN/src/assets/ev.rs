@@ -3,9 +3,7 @@ use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, So
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{
-    Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind,
-};
+use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
 
 use crate::profile::EvConfig;
@@ -356,12 +354,11 @@ impl EvMilpContext {
         } else {
             vec![]
         };
-        let delta_ev_ramp =
-            if self.mode != EvMilpMode::MustNotRun && n > 1 && c_ramp_eur_kw > 0.0 {
-                (0..n - 1).map(|_| vars.add(variable().min(0.0))).collect()
-            } else {
-                vec![]
-            };
+        let delta_ev_ramp = if self.mode != EvMilpMode::MustNotRun && n > 1 && c_ramp_eur_kw > 0.0 {
+            (0..n - 1).map(|_| vars.add(variable().min(0.0))).collect()
+        } else {
+            vec![]
+        };
         EvMilpVars {
             p_ev,
             z_ev_on,
@@ -403,17 +400,23 @@ impl EvMilpContext {
                 cs.push(constraint!(ev_energy <= self.e_core_kwh + v.e_ev_extra));
             }
             EvMilpMode::MayRun => {
-                cs.push(constraint!(ev_energy.clone() >= self.e_core_kwh * v.z_ev_core));
+                cs.push(constraint!(
+                    ev_energy.clone() >= self.e_core_kwh * v.z_ev_core
+                ));
                 cs.push(constraint!(
                     ev_energy <= self.e_core_kwh * v.z_ev_core + v.e_ev_extra
                 ));
-                cs.push(constraint!(v.e_ev_extra <= self.e_extra_max_kwh * v.z_ev_core));
+                cs.push(constraint!(
+                    v.e_ev_extra <= self.e_extra_max_kwh * v.z_ev_core
+                ));
             }
             EvMilpMode::MustNotRun => {}
         }
         for i in 0..v.delta_ev.len() {
             let t = i + 1;
-            cs.push(constraint!(v.delta_ev[i] >= v.z_ev_on[t] - v.z_ev_on[t - 1]));
+            cs.push(constraint!(
+                v.delta_ev[i] >= v.z_ev_on[t] - v.z_ev_on[t - 1]
+            ));
         }
         for i in 0..v.delta_ev_ramp.len() {
             let t = i + 1;
@@ -468,7 +471,11 @@ impl EvMilpContext {
         min_charge_kw: f64,
         v_ev_extra_eur_kwh: f64,
     ) -> Self {
-        let plugged = if let super::AssetState::Ev(s) = state { s.plugged } else { false };
+        let plugged = if let super::AssetState::Ev(s) = state {
+            s.plugged
+        } else {
+            false
+        };
         if !plugged {
             return Self {
                 mode: EvMilpMode::MustNotRun,
@@ -482,9 +489,17 @@ impl EvMilpContext {
             };
         }
         if let Some(session) = ev_session {
-            let current_soc = if let super::AssetState::Ev(s) = state { s.soc } else { 0.0 };
+            let current_soc = if let super::AssetState::Ev(s) = state {
+                s.soc
+            } else {
+                0.0
+            };
             let core_kwh = ((session.target_soc - current_soc) * cfg.battery_kwh).max(0.0);
-            let mode = if session.soft_deadline { EvMilpMode::MayRun } else { EvMilpMode::MustRun };
+            let mode = if session.soft_deadline {
+                EvMilpMode::MayRun
+            } else {
+                EvMilpMode::MustRun
+            };
             let secs = (session.departure_time - now).num_seconds();
             let t_dead = (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize;
             Self {
@@ -562,12 +577,7 @@ impl EvCharger {
     }
 
     /// Read back the EV solution from the solved model. Delegates to `EvMilpContext::read_solution`.
-    pub fn read_milp_solution(
-        &self,
-        sol: &impl Solution,
-        v: &EvMilpVars,
-        n: usize,
-    ) -> EvSolOutput {
+    pub fn read_milp_solution(&self, sol: &impl Solution, v: &EvMilpVars, n: usize) -> EvSolOutput {
         EvMilpContext::read_solution(sol, v, n)
     }
 }
@@ -693,14 +703,20 @@ mod tests {
         // max_import_kw = 0 so the planner fires SocCeiling, not a phantom allocation.
         let (ev, state) = make_ev(true, 0.8, 0.0); // soc_target = 0.8 in make_ev
         let cap = ev.capability_inner(&state);
-        assert_eq!(cap.max_import_kw, 0.0, "capability must be 0 when soc equals soc_target");
+        assert_eq!(
+            cap.max_import_kw, 0.0,
+            "capability must be 0 when soc equals soc_target"
+        );
     }
 
     #[test]
     fn ev_capability_positive_below_soc_target() {
         let (ev, state) = make_ev(true, 0.5, 0.0); // soc 0.5 < soc_target 0.8
         let cap = ev.capability_inner(&state);
-        assert!(cap.max_import_kw > 0.0, "capability must be positive when soc < soc_target");
+        assert!(
+            cap.max_import_kw > 0.0,
+            "capability must be positive when soc < soc_target"
+        );
         assert!((cap.max_import_kw - ev.max_charge_kw).abs() < 1e-9);
     }
 
@@ -714,7 +730,11 @@ mod tests {
         for i in 1..=5 {
             assert!(traj[i] > traj[i - 1], "SoC must increase during charging");
         }
-        assert!((traj[5] - 0.5).abs() < 1e-9, "expected final soc=0.5, got {}", traj[5]);
+        assert!(
+            (traj[5] - 0.5).abs() < 1e-9,
+            "expected final soc=0.5, got {}",
+            traj[5]
+        );
     }
 
     #[test]

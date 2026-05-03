@@ -450,9 +450,11 @@ impl AssetConfig {
     /// Returns `None` for non-thermostat assets.
     pub fn thermostat_setpoint_kw(&self, state: &AssetState, target_c: f64) -> Option<f64> {
         match (self, state) {
-            (Self::Heater(hcfg), AssetState::Heater(hs)) => {
-                Some(if hs.temperature_c < target_c { hcfg.max_kw } else { 0.0 })
-            }
+            (Self::Heater(hcfg), AssetState::Heater(hs)) => Some(if hs.temperature_c < target_c {
+                hcfg.max_kw
+            } else {
+                0.0
+            }),
             _ => None,
         }
     }
@@ -486,10 +488,25 @@ impl AssetConfig {
                 battery::BatteryMilpContext::from_state(state, cfg),
             )),
             Self::Ev(cfg) => Some(AnyMilpContext::Ev(ev::EvMilpContext::from_state(
-                state, cfg, n, step_s, now, ev_session, ev_min_charge_kw, v_ev_extra_eur_kwh,
+                state,
+                cfg,
+                n,
+                step_s,
+                now,
+                ev_session,
+                ev_min_charge_kw,
+                v_ev_extra_eur_kwh,
             ))),
             Self::Heater(cfg) => Some(AnyMilpContext::Heater(
-                heater::HeaterMilpContext::from_state(state, cfg, n, step_s, now, heater_target, lambda_sw),
+                heater::HeaterMilpContext::from_state(
+                    state,
+                    cfg,
+                    n,
+                    step_s,
+                    now,
+                    heater_target,
+                    lambda_sw,
+                ),
             )),
             _ => None,
         }
@@ -523,7 +540,9 @@ pub trait Asset: Send + Sync {
     /// Current live state snapshot. Positive = import from grid, negative = export.
     /// Default panics — call via `AssetHandle`, not a bare physics type.
     fn current_state(&self) -> AssetState {
-        unimplemented!("Asset::current_state() must be called via AssetHandle, not a bare physics type")
+        unimplemented!(
+            "Asset::current_state() must be called via AssetHandle, not a bare physics type"
+        )
     }
 
     /// Slice of this asset's own ring buffer over [now − window, now].
@@ -655,7 +674,10 @@ mod handle_tests {
     use super::*;
 
     fn make_battery_state(soc: f64, power_kw: f64) -> AssetState {
-        AssetState::Battery(BatteryState { soc, actual_power_kw: power_kw })
+        AssetState::Battery(BatteryState {
+            soc,
+            actual_power_kw: power_kw,
+        })
     }
 
     fn make_battery_config(capacity_kwh: f64, max_kw: f64) -> AssetConfig {
@@ -673,7 +695,12 @@ mod handle_tests {
         let state = make_battery_state(0.5, 0.0);
         let config = make_battery_config(10.0, 5.0);
         let history = AssetHistoryBuffer::new(3600);
-        let handle = AssetHandle { config: &config, id: "bat-01", state: &state, history: &history };
+        let handle = AssetHandle {
+            config: &config,
+            id: "bat-01",
+            state: &state,
+            history: &history,
+        };
         assert_eq!(handle.id(), "bat-01");
     }
 
@@ -682,7 +709,12 @@ mod handle_tests {
         let state = make_battery_state(0.7, 2.0);
         let config = make_battery_config(10.0, 5.0);
         let history = AssetHistoryBuffer::new(3600);
-        let handle = AssetHandle { config: &config, id: "bat", state: &state, history: &history };
+        let handle = AssetHandle {
+            config: &config,
+            id: "bat",
+            state: &state,
+            history: &history,
+        };
         match handle.current_state() {
             AssetState::Battery(s) => {
                 assert!((s.soc - 0.7).abs() < 1e-9);
@@ -703,7 +735,12 @@ mod handle_tests {
             power_kw: 3.0,
             state: make_battery_state(0.5, 3.0),
         });
-        let handle = AssetHandle { config: &config, id: "bat", state: &state, history: &history };
+        let handle = AssetHandle {
+            config: &config,
+            id: "bat",
+            state: &state,
+            history: &history,
+        };
         let hist = handle.history(Duration::seconds(60));
         assert_eq!(hist.len(), 1);
         assert!((hist[0].power_kw - 3.0).abs() < 1e-9);
@@ -714,7 +751,12 @@ mod handle_tests {
         let state = make_battery_state(0.5, 0.0);
         let config = make_battery_config(10.0, 5.0);
         let history = AssetHistoryBuffer::new(3600);
-        let handle = AssetHandle { config: &config, id: "bat", state: &state, history: &history };
+        let handle = AssetHandle {
+            config: &config,
+            id: "bat",
+            state: &state,
+            history: &history,
+        };
         let cap = handle.capability(&state);
         // mid-SoC battery (soc=0.5, min_soc=0.1): can charge up to 5 kW and discharge up to 5 kW
         assert!((cap.max_import_kw - 5.0).abs() < 1e-9);
@@ -726,7 +768,12 @@ mod handle_tests {
         let state = make_battery_state(0.5, 0.0);
         let config = make_battery_config(10.0, 5.0);
         let history = AssetHistoryBuffer::new(3600);
-        let handle = AssetHandle { config: &config, id: "bat", state: &state, history: &history };
+        let handle = AssetHandle {
+            config: &config,
+            id: "bat",
+            state: &state,
+            history: &history,
+        };
         let (new_state, actual_kw) = handle.step(&state, 5.0, Duration::seconds(3600));
         // 1 hour at 5 kW on 10 kWh battery → SoC goes from 0.5 to 1.0 (full)
         match new_state {

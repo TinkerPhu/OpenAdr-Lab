@@ -502,10 +502,7 @@ pub fn build_status_report(
             total_slots,
             ..
         } => (
-            format!(
-                "PlanCycle trigger={} slots={}",
-                trigger_reason, total_slots
-            ),
+            format!("PlanCycle trigger={} slots={}", trigger_reason, total_slots),
             None,
         ),
         ControllerEvent::PacketTransition {
@@ -932,9 +929,8 @@ mod tests {
             down_duration_s: None,
         };
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
-        let report =
-            build_measurement_report_for_obligation(&ob, &sim, "ven-test", Some(&env))
-                .expect("should return Some");
+        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-test", Some(&env))
+            .expect("should return Some");
         let val = report["resources"][0]["intervals"][0]["payloads"][0]["values"][0]
             .as_f64()
             .unwrap();
@@ -952,9 +948,8 @@ mod tests {
             down_duration_s: None,
         };
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_RESERVATION", 900);
-        let report =
-            build_measurement_report_for_obligation(&ob, &sim, "ven-test", Some(&env))
-                .expect("should return Some");
+        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-test", Some(&env))
+            .expect("should return Some");
         let val = report["resources"][0]["intervals"][0]["payloads"][0]["values"][0]
             .as_f64()
             .unwrap();
