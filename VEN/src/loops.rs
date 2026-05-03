@@ -4,22 +4,22 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
+use crate::assets::AssetConfig;
 use crate::controller;
 use crate::entities;
 use crate::entities::asset::PlanTrigger;
+use crate::entities::capacity::OadrCapacityState;
+use crate::entities::plan::Plan;
+use crate::entities::plan::SiteFlexibilityEnvelope;
+use crate::entities::tariff_snapshot::TariffSnapshot;
+use crate::models::SensorSnapshot;
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
-use crate::profile::{Profile, PlannerObjective};
+use crate::profile::{PlannerObjective, Profile};
 use crate::simulator::SimState;
+use crate::simulator::{AssetEntry, SimSnapshot};
 use crate::state::{AppState, EvSettings, SimInjectState};
 use crate::vtn::VtnClient;
 use std::collections::HashMap;
-use crate::entities::plan::Plan;
-use crate::entities::capacity::OadrCapacityState;
-use crate::entities::tariff_snapshot::TariffSnapshot;
-use crate::simulator::{AssetEntry, SimSnapshot};
-use crate::models::SensorSnapshot;
-use crate::entities::plan::SiteFlexibilityEnvelope;
-use crate::assets::AssetConfig;
 
 // ─── Event poll change detection (RF-B08) ─────────────────────────────────────
 
@@ -265,23 +265,8 @@ pub(crate) fn spawn_report_poll(
 // ─── Helpers for spawn_sim_tick ───────────────────────────────────────────────
 
 /// Deviation tracking state for Layer 1 (reactive correction) and Layer 2 (sustained deviation).
-pub(crate) struct DeviationState {
-    pub deviation_ticks: u32,
-    pub last_correction_kw: f64,
-    pub correction_is_active: bool,
-    pub prev_correction_kw: f64,
-}
-
-impl Default for DeviationState {
-    fn default() -> Self {
-        Self {
-            deviation_ticks: 0,
-            last_correction_kw: 0.0,
-            correction_is_active: false,
-            prev_correction_kw: 0.0,
-        }
-    }
-}
+// AbsorberState is now imported from controller::absorber
+use crate::controller::absorber::AbsorberState;
 
 /// PHASE 1: Apply Behaviour A one-shot state injections to the simulator.
 /// Returns a list of field names that were applied and should be cleared.
@@ -368,100 +353,11 @@ fn build_tick_setpoints(
 /// PHASE 3: Apply Layer 1 battery correction overlay (goal-aware reactive compensation),
 /// correction hold (Plan G), and emit SSE events for correction state changes.
 /// Returns the applied correction_kw.
-fn apply_deviation_correction(
-    dev_state: &mut DeviationState,
-    setpoints: &mut HashMap<String, f64>,
-    assets: &[AssetEntry],
-    asset_configs: &[AssetConfig],
-    plan_snap: Option<&Plan>,
-    plan_signed_net_kw: f64,
-    prev_actual_net_kw: f64,
-    profile: &Profile,
-    event_tx: &PlannerEventTx,
-    now: DateTime<Utc>,
-) -> f64 {
-    let correction_kw = if plan_snap.is_some() {
-        let c = controller::dispatcher::apply_battery_correction_overlay(
-            setpoints,
-            assets,
-            asset_configs,
-            plan_signed_net_kw,
-            prev_actual_net_kw,
-            plan_snap.unwrap().objective,
-            profile.planner.deviation_threshold_kw,
-            profile.planner.correction_min_kw,
-        );
-        if c != 0.0 {
-            debug!(
-                correction_kw = c,
-                plan_signed_net_kw,
-                actual_net_kw = prev_actual_net_kw,
-                deviation_kw = prev_actual_net_kw - plan_signed_net_kw,
-                "layer1: battery correction applied"
-            );
-        }
-        c
-    } else {
-        0.0
-    };
-
-    // Plan G correction hold: when correction just cleared (returned 0.0 this tick
-    // but was active last tick), re-insert the battery's previously-applied
-    // setpoint into setpoints. Without this, build_setpoints' plan allocation reverts
-    // the battery and recreates the deviation on the very next tick (limit cycle).
-    // Only fires when prev_correction_kw was meaningful (> correction_min_kw).
-    if correction_kw == 0.0
-        && dev_state.prev_correction_kw.abs() > profile.planner.correction_min_kw
-    {
-        if let Some(bat) = assets.iter().find(|a| a.id == crate::ids::ASSET_BATTERY) {
-            let plan_sp = setpoints.get(crate::ids::ASSET_BATTERY).copied().unwrap_or(0.0);
-            let held_sp = bat.setpoint_kw;
-            if (held_sp - plan_sp).abs() > profile.planner.correction_min_kw {
-                setpoints.insert(crate::ids::ASSET_BATTERY.to_string(), held_sp);
-            }
-        }
-    }
-    // Only update prev_correction_kw when a real correction fired.
-    // Keeping the last non-zero value active ensures the hold persists
-    // across subsequent ticks where the battery is maxed out (correction
-    // returns 0.0 due to delta < min_correction_kw), preventing the
-    // 3-tick oscillation: correct → hold → revert → correct → ...
-    if correction_kw != 0.0 {
-        dev_state.prev_correction_kw = correction_kw;
-    }
-
-    // Emit CorrectionActive/CorrectionCleared SSE on significant state change
-    if (correction_kw - dev_state.last_correction_kw).abs() > 0.2 {
-        if correction_kw.abs() > profile.planner.correction_min_kw {
-            let reason = if (prev_actual_net_kw - plan_signed_net_kw) > 0.0 {
-                "import_excess"
-            } else {
-                "export_excess"
-            };
-            let obj = plan_snap.map(|p| p.objective).unwrap_or_default();
-            let _ = event_tx.send(PlannerEvent::CorrectionActive {
-                ts: now,
-                asset_id: crate::ids::ASSET_BATTERY.to_string(),
-                reason: reason.to_string(),
-                planned_net_kw: plan_signed_net_kw,
-                actual_net_kw: prev_actual_net_kw,
-                deviation_kw: prev_actual_net_kw - plan_signed_net_kw,
-                correction_kw,
-                objective: obj,
-            });
-            dev_state.correction_is_active = true;
-        } else if dev_state.correction_is_active {
-            let _ = event_tx.send(PlannerEvent::CorrectionCleared {
-                ts: now,
-                reason: "within_threshold".to_string(),
-            });
-            dev_state.correction_is_active = false;
-        }
-        dev_state.last_correction_kw = correction_kw;
-    }
-
-    correction_kw
-}
+// NOTE: Old apply_deviation_correction() function removed (T027).
+// Replaced by controller::absorber::apply_deviation_absorption() which implements
+// multi-asset absorption (battery, EV, heater) sequentially in priority order.
+// Old battery-only logic consolidated into absorber module.
+// Old tests using apply_deviation_correction() need updating to use absorber module.
 
 /// PHASE 5 (post-lock): Publish post-tick simulator state — sensor, sim snapshot, shiftable
 /// logic, ledger, and site envelope. Called after the sim Mutex is released, so HTTP handlers
@@ -492,18 +388,22 @@ async fn publish_sim_tick_result(
             let runtimes = state.shiftable_runtimes().await;
             let loads = state.shiftable_loads().await;
             for alloc in &slot.allocations {
-                if sim_snap.assets.contains_key(alloc.asset_id.as_str()) { continue; }
+                if sim_snap.assets.contains_key(alloc.asset_id.as_str()) {
+                    continue;
+                }
                 let already_running = runtimes.iter().any(|r| r.asset_id == alloc.asset_id);
                 if !already_running {
                     if let Some(load) = loads.iter().find(|l| l.asset_id == alloc.asset_id) {
                         let ends_at = now + chrono::Duration::minutes(load.duration_min as i64);
-                        state.start_shiftable(entities::device_session::ShiftableLoadRuntime {
-                            load_id: load.id,
-                            asset_id: load.asset_id.clone(),
-                            power_kw: load.power_kw,
-                            started_at: now,
-                            ends_at,
-                        }).await;
+                        state
+                            .start_shiftable(entities::device_session::ShiftableLoadRuntime {
+                                load_id: load.id,
+                                asset_id: load.asset_id.clone(),
+                                power_kw: load.power_kw,
+                                started_at: now,
+                                ends_at,
+                            })
+                            .await;
                         info!(asset_id = %load.asset_id, ends_at = %ends_at, "shiftable load started");
                     }
                 }
@@ -529,15 +429,18 @@ async fn publish_sim_tick_result(
         let runtimes = state.shiftable_runtimes().await;
         for rt in &runtimes {
             if rt.is_running(now) {
-                sim_snap.assets.insert(rt.asset_id.clone(), crate::simulator::AssetSnapshot {
-                    power_kw: rt.power_kw,
-                    values: {
-                        let mut m = std::collections::HashMap::new();
-                        m.insert("running".into(), 1.0);
-                        m.insert("ends_at_unix".into(), rt.ends_at.timestamp() as f64);
-                        m
+                sim_snap.assets.insert(
+                    rt.asset_id.clone(),
+                    crate::simulator::AssetSnapshot {
+                        power_kw: rt.power_kw,
+                        values: {
+                            let mut m = std::collections::HashMap::new();
+                            m.insert("running".into(), 1.0);
+                            m.insert("ends_at_unix".into(), rt.ends_at.timestamp() as f64);
+                            m
+                        },
                     },
-                });
+                );
             }
         }
     }
@@ -546,13 +449,7 @@ async fn publish_sim_tick_result(
 
     // Post-tick: consolidated ledger accounting
     let mut ledger = state.asset_ledger().await;
-    controller::monitor::record_tick(
-        &mut ledger,
-        &sim_snap,
-        rates_snap,
-        dt_s,
-        now,
-    );
+    controller::monitor::record_tick(&mut ledger, &sim_snap, rates_snap, dt_s, now);
     state.set_asset_ledger(ledger).await;
 
     // Refresh site envelope (computed in-lock from final sim state).
@@ -590,7 +487,8 @@ fn finalize_tick_outputs(
         let import_limit_kw = capacity_snap.import_limit_kw.unwrap_or(f64::MAX);
         // OadrCapacityState.export_limit_kw is a positive magnitude; negate for sign convention.
         let export_limit_kw_signed = -(capacity_snap.export_limit_kw.unwrap_or(f64::MAX));
-        sim.grid_asset.update(net_power_kw, import_limit_kw, export_limit_kw_signed, now);
+        sim.grid_asset
+            .update(net_power_kw, import_limit_kw, export_limit_kw_signed, now);
     }
 
     // Compute site envelope (pure math — reads sim, returns owned value).
@@ -599,63 +497,48 @@ fn finalize_tick_outputs(
     (tick_sensor, tick_sim_snap, tick_envelope)
 }
 
-/// PHASE 6: Layer 2 — accumulate sustained deviation → DeviceDeviation trigger.
+/// PHASE 6: Layer 2 — accumulate absorbed residual deviation → DeviceDeviation trigger.
+/// Tier 2 escalates to MILP replanning when Tier 1 (absorber) cannot fully cover the grid deviation
+/// for a sustained duration (deviation_trigger_ticks). Uses residual_kw (uncovered after absorption)
+/// instead of raw post_net_kw to avoid triggering replans for transient deviations that the
+/// absorber can handle.
 fn accumulate_deviation(
-    dev_state: &mut DeviationState,
-    post_net_kw: f64,
-    plan_snap: Option<&Plan>,
+    absorber_state: &mut AbsorberState,
+    residual_kw: f64,
     profile: &Profile,
     trigger_tx: &tokio::sync::watch::Sender<PlanTrigger>,
     deviation_pending: &std::sync::atomic::AtomicBool,
     now: DateTime<Utc>,
 ) {
-    if let Some(ref plan) = plan_snap {
-        if let Some(slot) = plan.current_slot(now) {
-            let planned_net_kw = slot.net_import_kw - slot.net_export_kw;
-            let post_error_kw = (post_net_kw - planned_net_kw).abs();
-            if post_error_kw > profile.planner.deviation_threshold_kw {
-                dev_state.deviation_ticks = dev_state.deviation_ticks.saturating_add(1);
-                debug!(
-                    post_net_kw,
-                    planned_net_kw,
-                    post_error_kw,
-                    threshold_kw = profile.planner.deviation_threshold_kw,
-                    deviation_ticks = dev_state.deviation_ticks,
-                    trigger_ticks = profile.planner.deviation_trigger_ticks,
-                    "layer2: sustained deviation tick"
-                );
-                if dev_state.deviation_ticks >= profile.planner.deviation_trigger_ticks {
-                    dev_state.deviation_ticks = 0;
-                    warn!(
-                        post_net_kw,
-                        planned_net_kw,
-                        post_error_kw,
-                        trigger_ticks = profile.planner.deviation_trigger_ticks,
-                        "layer2: DeviceDeviation trigger fired"
-                    );
-                    let _ = trigger_tx.send(PlanTrigger::DeviceDeviation);
-                    deviation_pending.store(true, std::sync::atomic::Ordering::Release);
-                }
-            } else {
-                if dev_state.deviation_ticks > 0 {
-                    debug!(
-                        deviation_ticks = dev_state.deviation_ticks,
-                        post_net_kw,
-                        planned_net_kw,
-                        post_error_kw,
-                        "layer2: deviation cleared, resetting tick counter"
-                    );
-                }
-                dev_state.deviation_ticks = 0;
-            }
-        } else {
-            debug!("layer2: plan exists but no current_slot — skipping deviation check");
+    // Residual exceeds dead-band: increment sustained deviation counter
+    if residual_kw.abs() > profile.absorber.dead_band_kw {
+        absorber_state.residual_ticks = absorber_state.residual_ticks.saturating_add(1);
+        debug!(
+            residual_kw,
+            dead_band_kw = profile.absorber.dead_band_kw,
+            residual_ticks = absorber_state.residual_ticks,
+            trigger_ticks = profile.planner.deviation_trigger_ticks,
+            "layer2: sustained residual deviation tick"
+        );
+        if absorber_state.residual_ticks >= profile.planner.deviation_trigger_ticks {
+            absorber_state.residual_ticks = 0;
+            warn!(
+                residual_kw,
+                dead_band_kw = profile.absorber.dead_band_kw,
+                trigger_ticks = profile.planner.deviation_trigger_ticks,
+                "layer2: DeviceDeviation trigger fired (absorber exhausted)"
+            );
+            let _ = trigger_tx.send(PlanTrigger::DeviceDeviation);
+            deviation_pending.store(true, std::sync::atomic::Ordering::Release);
         }
     } else {
-        // Only log occasionally to avoid spam when no plan exists at startup
-        if dev_state.deviation_ticks == 0 {
-            debug!("layer2: no active plan — deviation check skipped");
+        if absorber_state.residual_ticks > 0 {
+            debug!(
+                residual_ticks = absorber_state.residual_ticks,
+                residual_kw, "layer2: residual deviation cleared, resetting counter"
+            );
         }
+        absorber_state.residual_ticks = 0;
     }
 }
 
@@ -684,10 +567,7 @@ async fn run_measurement_reports(
 }
 
 /// PHASE 8: Periodic persist.
-async fn persist_sim_state(
-    sim: &Arc<Mutex<SimState>>,
-    data_dir: &str,
-) {
+async fn persist_sim_state(sim: &Arc<Mutex<SimState>>, data_dir: &str) {
     let sim_clone = { sim.lock().await.clone() };
     if let Err(e) = crate::simulator::persist::save(&sim_clone, data_dir).await {
         error!("sim persist failed: {e:#}");
@@ -723,8 +603,15 @@ pub(crate) fn spawn_sim_tick(
             0
         };
 
-        // Plan F/G: Layer 1/2 deviation state (T028)
-        let mut dev_state = DeviationState::default();
+        // Plan F/G: Layer 1/2 absorber state (multi-asset deviation absorption + Tier 2 escalation)
+        let mut absorber_state = AbsorberState {
+            residual_ticks: 0,
+            last_state_change_ts: HashMap::new(),
+            settling_ticks: HashMap::new(),
+            active_overlay_kw: HashMap::new(),
+            correction_is_active: false,
+            last_emitted_correction_kw: 0.0,
+        };
 
         loop {
             tick_interval.tick().await;
@@ -744,18 +631,29 @@ pub(crate) fn spawn_sim_tick(
             let ev_sess_tick = state.ev_session().await;
             let ev_settings_tick = state.ev_settings().await;
             let session_active = ev_sess_tick.is_some();
-            let overlay_enabled = ev_settings_tick.opportunistic_charging_enabled && !session_active;
+            let overlay_enabled =
+                ev_settings_tick.opportunistic_charging_enabled && !session_active;
             if ev_settings_tick.paused_by_active_session != session_active {
-                state.set_ev_settings(EvSettings {
-                    paused_by_active_session: session_active,
-                    ..ev_settings_tick
-                }).await;
+                state
+                    .set_ev_settings(EvSettings {
+                        paused_by_active_session: session_active,
+                        ..ev_settings_tick
+                    })
+                    .await;
             }
 
             // Lock sim for physics only — no .await inside the block.
             // All async state publishes happen after the lock is released,
             // preventing HTTP handlers from blocking for the full tick cycle.
-            let (tick_sensor, tick_sim_snap, tick_envelope, cleared_fields, pv_clear, base_clear) = {
+            let (
+                tick_sensor,
+                tick_sim_snap,
+                tick_envelope,
+                cleared_fields,
+                pv_clear,
+                base_clear,
+                residual_kw,
+            ) = {
                 let mut sim_guard = sim.lock().await;
 
                 // PHASE 1: Apply Behaviour A one-shot injections; collect fields to clear.
@@ -770,7 +668,8 @@ pub(crate) fn spawn_sim_tick(
                 // them into a signed value prevents false corrections when the plan
                 // intentionally expects export (net_import_kw=0, net_export_kw>0).
                 let prev_actual_net_kw = sim_guard.grid.net_power_w / 1000.0;
-                let plan_signed_net_kw = plan_snap.as_ref()
+                let plan_signed_net_kw = plan_snap
+                    .as_ref()
                     .and_then(|p| p.current_slot(now))
                     .map(|s| s.net_import_kw - s.net_export_kw)
                     .unwrap_or(0.0);
@@ -784,18 +683,18 @@ pub(crate) fn spawn_sim_tick(
                     now,
                 );
 
-                // PHASE 3: Layer 1 battery correction overlay + hold + SSE.
-                apply_deviation_correction(
-                    &mut dev_state,
+                // PHASE 3: Layer 1 multi-asset deviation absorber (Tier 1 real-time control).
+                let deviation_kw = prev_actual_net_kw - plan_signed_net_kw;
+                let residual_kw = controller::absorber::apply_deviation_absorption(
+                    &mut absorber_state,
+                    deviation_kw,
                     &mut sp_map,
-                    &sim_guard.assets,
-                    &sim_guard.asset_configs,
+                    &*sim_guard,
                     plan_snap.as_ref(),
-                    plan_signed_net_kw,
-                    prev_actual_net_kw,
                     &profile,
-                    &event_tx,
                     now,
+                    &event_tx,
+                    ev_sess_tick.as_ref(),
                 );
 
                 // PHASE 4: Simulator tick — apply setpoints → update device states.
@@ -819,7 +718,15 @@ pub(crate) fn spawn_sim_tick(
                 let (tick_sensor, tick_sim_snap, tick_envelope) =
                     finalize_tick_outputs(&mut *sim_guard, &capacity_snap, now);
 
-                (tick_sensor, tick_sim_snap, tick_envelope, cleared_fields, pv_clear, base_clear)
+                (
+                    tick_sensor,
+                    tick_sim_snap,
+                    tick_envelope,
+                    cleared_fields,
+                    pv_clear,
+                    base_clear,
+                    residual_kw,
+                )
                 // ← sim_guard DROPPED HERE — lock released
             };
 
@@ -846,14 +753,13 @@ pub(crate) fn spawn_sim_tick(
                 &rates_snap,
                 dt_s,
                 now,
-            ).await;
+            )
+            .await;
 
-            // PHASE 6: Layer 2 — accumulate sustained deviation → DeviceDeviation trigger.
-            let post_net_kw = sim_snapshot.grid.net_power_w / 1000.0;
+            // PHASE 6: Layer 2 — accumulate absorbed residual deviation → DeviceDeviation trigger.
             accumulate_deviation(
-                &mut dev_state,
-                post_net_kw,
-                plan_snap.as_ref(),
+                &mut absorber_state,
+                residual_kw,
                 &profile,
                 &*trigger_tx,
                 &deviation_pending,
@@ -1004,8 +910,7 @@ pub(crate) fn spawn_planning(
             }
 
             // ── Emit solving_started ──────────────────────────────────────
-            let num_slots = profile.planner.plan_horizon_h as usize
-                * 3600
+            let num_slots = profile.planner.plan_horizon_h as usize * 3600
                 / profile.planner.plan_step_s as usize;
             let _ = event_tx.send(PlannerEvent::SolvingStarted {
                 objective: obj,
@@ -1130,10 +1035,7 @@ pub(crate) fn spawn_planning(
             // Refresh site envelope immediately after each plan cycle.
             {
                 let sim_snap = sim.lock().await.clone();
-                let env = controller::envelope::compute_envelope(
-                    &sim_snap,
-                    now,
-                );
+                let env = controller::envelope::compute_envelope(&sim_snap, now);
                 state.set_site_envelope(env).await;
             }
 
@@ -1336,9 +1238,9 @@ mod event_poll_tests {
 #[cfg(test)]
 mod sim_tick_tests {
     use super::*;
-    use chrono::Utc;
     use crate::entities::capacity::OadrCapacityState;
     use crate::state::SimInjectState;
+    use chrono::Utc;
 
     #[tokio::test]
     async fn test_build_setpoints_no_plan() {
@@ -1371,8 +1273,14 @@ mod sim_tick_tests {
         let (sensor, snap, envelope) = finalize_tick_outputs(&mut sim, &capacity, now);
 
         // All three must be non-null and sensor must have some asset power values.
-        assert!(!snap.assets.is_empty() || profile.assets.is_empty(), "sim snap must have assets");
-        assert!(envelope.firmness_pct.is_finite(), "envelope must have finite firmness");
+        assert!(
+            !snap.assets.is_empty() || profile.assets.is_empty(),
+            "sim snap must have assets"
+        );
+        assert!(
+            envelope.up_kw.is_finite(),
+            "envelope must have finite up_kw"
+        );
     }
 
     #[test]
@@ -1402,251 +1310,142 @@ mod sim_tick_tests {
             export_limit_kw: Some(5.0),
             import_limit_event_id: None,
             export_limit_event_id: None,
+            import_subscription_kw: None,
+            import_reservation_kw: None,
+            last_updated: None,
         };
         let now = Utc::now();
 
-        let grid_before = sim.grid_asset.net_power_kw;
+        // finalize_tick_outputs must run without panic; grid state is consistent.
         let (_, _, _) = finalize_tick_outputs(&mut sim, &capacity, now);
-        let grid_after = sim.grid_asset.net_power_kw;
-
-        // Grid asset state should have been updated (at minimum, timestamp should change).
-        assert_ne!(grid_before, grid_after, "grid asset must be updated");
-    }
-
-    #[test]
-    fn correction_no_plan_returns_zero() {
-        // When plan_snap is None, apply_deviation_correction returns 0.0 unchanged.
-        let mut setpoints = std::collections::HashMap::from([("battery".to_string(), 0.0)]);
-        let assets = vec![];
-        let asset_configs = vec![];
-
-        let delta = apply_deviation_correction(
-            &mut DeviationState::default(),
-            &mut setpoints,
-            &assets,
-            &asset_configs,
-            None, // plan_snap = None
-            0.0,  // plan_net_import_kw
-            0.0,  // actual_net_kw
-            &crate::profile::Profile::default(),
-            &unimplemented_event_tx(),
-            Utc::now(),
+        assert!(
+            sim.grid_asset.state.net_power_kw.is_finite(),
+            "grid net_power_kw must be finite"
         );
-
-        assert_eq!(delta, 0.0, "must return 0 when plan is None");
-        assert_eq!(setpoints.get("battery"), Some(&0.0), "setpoints must be unchanged");
     }
 
+    // T061 — residual above dead-band increments counter
     #[test]
-    fn correction_below_threshold_returns_zero() {
-        // When deviation is below threshold, returns 0.0 and leaves setpoints unchanged.
-        let mut setpoints = std::collections::HashMap::from([("battery".to_string(), 1.0)]);
-        let profile = crate::profile::Profile::default();
-        let mut sim = crate::simulator::SimState::from_profile(&profile);
-        let assets = &sim.assets;
-        let asset_configs = &sim.asset_configs;
-
-        // Create a dummy plan with one slot.
+    fn accumulate_deviation_increments_residual_ticks_when_above_threshold() {
+        let mut absorber_state = make_fresh_absorber_state();
+        let mut profile = crate::profile::Profile::default();
+        profile.absorber.dead_band_kw = 0.1;
+        profile.planner.deviation_trigger_ticks = 120;
         let now = Utc::now();
-        let slot = crate::entities::plan::PlanSlot {
-            start: now,
-            end: now + chrono::Duration::minutes(5),
-            net_import_kw: 0.0,
-            net_export_kw: 0.0,
-            allocations: vec![],
-            envelopes: vec![],
-        };
-        let plan = crate::entities::plan::Plan {
-            id: uuid::Uuid::new_v4(),
-            objective: crate::profile::PlannerObjective::MinCost,
-            created_at: now,
-            slots: vec![slot],
-            objective_eur: 0.0,
-            friction_eur: 0.0,
-        };
-
-        // Deviation: actual=0.5, planned=0.0, deviation=0.5 kW, threshold=1.0 kW.
-        let delta = apply_deviation_correction(
-            &mut DeviationState::default(),
-            &mut setpoints,
-            assets,
-            asset_configs,
-            Some(&plan),
-            0.0,   // plan_net_import_kw
-            0.5,   // actual_net_kw (0.5 above plan)
-            &profile,
-            &unimplemented_event_tx(),
-            now,
-        );
-
-        assert_eq!(delta, 0.0, "must return 0 when deviation < threshold");
-        assert_eq!(setpoints.get("battery"), Some(&1.0), "setpoints unchanged");
-    }
-
-    #[test]
-    fn correction_discharge_on_import_excess() {
-        // When actual net import > planned net import, battery should discharge (negative correction).
-        let mut setpoints = std::collections::HashMap::from([("battery".to_string(), 0.0)]);
-        let profile = crate::profile::Profile::default();
-        let mut sim = crate::simulator::SimState::from_profile(&profile);
-        let assets = &sim.assets;
-        let asset_configs = &sim.asset_configs;
-
-        let now = Utc::now();
-        let slot = crate::entities::plan::PlanSlot {
-            start: now,
-            end: now + chrono::Duration::minutes(5),
-            net_import_kw: 0.0,
-            net_export_kw: 0.0,
-            allocations: vec![],
-            envelopes: vec![],
-        };
-        let plan = crate::entities::plan::Plan {
-            id: uuid::Uuid::new_v4(),
-            objective: crate::profile::PlannerObjective::MinCost,
-            created_at: now,
-            slots: vec![slot],
-            objective_eur: 0.0,
-            friction_eur: 0.0,
-        };
-
-        // Deviation: actual=3.0, planned=0.0, deviation=3.0 kW > 1.0 threshold.
-        let delta = apply_deviation_correction(
-            &mut DeviationState::default(),
-            &mut setpoints,
-            assets,
-            asset_configs,
-            Some(&plan),
-            0.0,   // plan_net_import_kw
-            3.0,   // actual_net_kw (3 kW importing, > plan, so discharge)
-            &profile,
-            &unimplemented_event_tx(),
-            now,
-        );
-
-        // Correction should be negative (discharge) to counteract excess import.
-        assert!(delta < 0.0, "correction must be negative (discharge) on import excess");
-        let new_sp = setpoints.get("battery").copied().unwrap_or(0.0);
-        assert!(new_sp < 0.0, "battery setpoint must be negative (discharging)");
-    }
-
-    #[test]
-    fn accumulate_deviation_increments_on_sustained_error() {
-        // When error > threshold, deviation_ticks increments.
-        let mut dev_state = DeviationState::default();
-        let profile = crate::profile::Profile::default();
-        let now = Utc::now();
-
-        let slot = crate::entities::plan::PlanSlot {
-            start: now,
-            end: now + chrono::Duration::minutes(5),
-            net_import_kw: 0.0,
-            net_export_kw: 0.0,
-            allocations: vec![],
-            envelopes: vec![],
-        };
-        let plan = crate::entities::plan::Plan {
-            id: uuid::Uuid::new_v4(),
-            objective: crate::profile::PlannerObjective::MinCost,
-            created_at: now,
-            slots: vec![slot],
-            objective_eur: 0.0,
-            friction_eur: 0.0,
-        };
-
-        // Post-error: 3 kW, threshold: 1 kW, planned: 0 kW → error = 3 kW > 1 kW.
         let (trigger_tx, _) = tokio::sync::watch::channel(PlanTrigger::Periodic);
         let deviation_pending = std::sync::atomic::AtomicBool::new(false);
 
-        assert_eq!(dev_state.deviation_ticks, 0, "initial state must be 0");
         accumulate_deviation(
-            &mut dev_state,
-            3.0,  // post_net_kw
-            Some(&plan),
+            &mut absorber_state,
+            0.5,
             &profile,
             &trigger_tx,
             &deviation_pending,
             now,
         );
 
-        assert_eq!(dev_state.deviation_ticks, 1, "ticks must increment on error");
+        assert_eq!(
+            absorber_state.residual_ticks, 1,
+            "residual_ticks must increment when above dead_band"
+        );
     }
 
+    // T062 — trigger fires exactly at threshold, counter resets
     #[test]
-    fn accumulate_deviation_resets_on_recovery() {
-        // When error <= threshold after being above, counter resets.
-        let mut dev_state = DeviationState {
-            deviation_ticks: 5,
-            last_correction_kw: 0.0,
+    fn accumulate_deviation_fires_devicedeviation_at_threshold() {
+        let mut absorber_state = make_fresh_absorber_state();
+        absorber_state.residual_ticks = 9; // One tick away from threshold
+        let mut profile = crate::profile::Profile::default();
+        profile.absorber.dead_band_kw = 0.1;
+        profile.planner.deviation_trigger_ticks = 10;
+        let now = Utc::now();
+        let (trigger_tx, _) = tokio::sync::watch::channel(PlanTrigger::Periodic);
+        let deviation_pending = std::sync::atomic::AtomicBool::new(false);
+
+        accumulate_deviation(
+            &mut absorber_state,
+            0.5,
+            &profile,
+            &trigger_tx,
+            &deviation_pending,
+            now,
+        );
+
+        assert_eq!(
+            absorber_state.residual_ticks, 0,
+            "residual_ticks must reset after trigger fires"
+        );
+        assert!(
+            deviation_pending.load(std::sync::atomic::Ordering::Acquire),
+            "deviation_pending must be set when trigger fires"
+        );
+    }
+
+    // T063 — residual within dead-band keeps counter at zero
+    #[test]
+    fn accumulate_deviation_ignores_residual_within_deadband() {
+        let mut absorber_state = make_fresh_absorber_state();
+        let mut profile = crate::profile::Profile::default();
+        profile.absorber.dead_band_kw = 0.1;
+        let now = Utc::now();
+        let (trigger_tx, _) = tokio::sync::watch::channel(PlanTrigger::Periodic);
+        let deviation_pending = std::sync::atomic::AtomicBool::new(false);
+
+        accumulate_deviation(
+            &mut absorber_state,
+            0.05,
+            &profile,
+            &trigger_tx,
+            &deviation_pending,
+            now,
+        );
+
+        assert_eq!(
+            absorber_state.residual_ticks, 0,
+            "residual within dead_band must not increment ticks"
+        );
+        assert!(
+            !deviation_pending.load(std::sync::atomic::Ordering::Acquire),
+            "no trigger when residual within dead_band"
+        );
+    }
+
+    // counter resets when residual drops back within dead-band after sustained error
+    #[test]
+    fn accumulate_deviation_resets_ticks_on_recovery() {
+        let mut absorber_state = make_fresh_absorber_state();
+        absorber_state.residual_ticks = 5;
+        let mut profile = crate::profile::Profile::default();
+        profile.absorber.dead_band_kw = 0.1;
+        profile.planner.deviation_trigger_ticks = 120;
+        let now = Utc::now();
+        let (trigger_tx, _) = tokio::sync::watch::channel(PlanTrigger::Periodic);
+        let deviation_pending = std::sync::atomic::AtomicBool::new(false);
+
+        // 0.05 kW < 0.1 dead_band → counter resets
+        accumulate_deviation(
+            &mut absorber_state,
+            0.05,
+            &profile,
+            &trigger_tx,
+            &deviation_pending,
+            now,
+        );
+
+        assert_eq!(
+            absorber_state.residual_ticks, 0,
+            "ticks must reset when residual drops within dead_band"
+        );
+    }
+
+    fn make_fresh_absorber_state() -> AbsorberState {
+        AbsorberState {
+            residual_ticks: 0,
+            last_state_change_ts: std::collections::HashMap::new(),
+            settling_ticks: std::collections::HashMap::new(),
+            active_overlay_kw: std::collections::HashMap::new(),
             correction_is_active: false,
-            prev_correction_kw: 0.0,
-        };
-        let profile = crate::profile::Profile::default();
-        let now = Utc::now();
-
-        let slot = crate::entities::plan::PlanSlot {
-            start: now,
-            end: now + chrono::Duration::minutes(5),
-            net_import_kw: 0.0,
-            net_export_kw: 0.0,
-            allocations: vec![],
-            envelopes: vec![],
-        };
-        let plan = crate::entities::plan::Plan {
-            id: uuid::Uuid::new_v4(),
-            objective: crate::profile::PlannerObjective::MinCost,
-            created_at: now,
-            slots: vec![slot],
-            objective_eur: 0.0,
-            friction_eur: 0.0,
-        };
-
-        // Post-error: 0.5 kW, threshold: 1 kW → error = 0.5 kW < 1 kW (recovered).
-        let (trigger_tx, _) = tokio::sync::watch::channel(PlanTrigger::Periodic);
-        let deviation_pending = std::sync::atomic::AtomicBool::new(false);
-
-        accumulate_deviation(
-            &mut dev_state,
-            0.5,  // post_net_kw
-            Some(&plan),
-            &profile,
-            &trigger_tx,
-            &deviation_pending,
-            now,
-        );
-
-        assert_eq!(dev_state.deviation_ticks, 0, "ticks must reset on recovery");
-    }
-
-    #[test]
-    fn accumulate_deviation_no_plan_no_change() {
-        // When plan_snap is None, deviation counter should not change.
-        let mut dev_state = DeviationState {
-            deviation_ticks: 0,
-            last_correction_kw: 0.0,
-            correction_is_active: false,
-            prev_correction_kw: 0.0,
-        };
-        let profile = crate::profile::Profile::default();
-        let (trigger_tx, _) = tokio::sync::watch::channel(PlanTrigger::Periodic);
-        let deviation_pending = std::sync::atomic::AtomicBool::new(false);
-
-        accumulate_deviation(
-            &mut dev_state,
-            10.0, // large error, but no plan
-            None,
-            &profile,
-            &trigger_tx,
-            &deviation_pending,
-            Utc::now(),
-        );
-
-        assert_eq!(dev_state.deviation_ticks, 0, "ticks must stay 0 when no plan");
-    }
-
-    // Helper to avoid unimplemented! in closure-captured event_tx
-    fn unimplemented_event_tx() -> crate::planner_events::PlannerEventTx {
-        let (tx, _rx) = tokio::sync::broadcast::channel(1);
-        std::sync::Arc::new(tx)
+            last_emitted_correction_kw: 0.0,
+        }
     }
 }

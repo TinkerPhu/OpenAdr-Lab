@@ -150,13 +150,13 @@ pub struct FlexibilityEnvelope {
 /// on available storage energy. None if no storage assets are present.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SiteFlexibilityEnvelope {
-    pub ts:              DateTime<Utc>,
+    pub ts: DateTime<Utc>,
     /// Consumption-reduction headroom available right now (kW). Always ≥ 0.
-    pub up_kw:           f64,
+    pub up_kw: f64,
     /// Consumption-increase headroom available right now (kW). Always ≥ 0.
-    pub down_kw:         f64,
+    pub down_kw: f64,
     /// Estimated duration up_kw can be sustained, in seconds. None = no storage.
-    pub up_duration_s:   Option<u64>,
+    pub up_duration_s: Option<u64>,
     /// Estimated duration down_kw can be sustained, in seconds. None = no storage.
     pub down_duration_s: Option<u64>,
 }
@@ -247,5 +247,3 @@ impl Plan {
         self.slots.iter().find(|s| s.start <= now && now < s.end)
     }
 }
-
-

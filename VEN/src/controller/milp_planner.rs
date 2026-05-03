@@ -7,16 +7,16 @@
 use chrono::{DateTime, Duration, Utc};
 use good_lp::solvers::highs::highs;
 use good_lp::{
-    constraint, variable, variables, Expression, Solution, SolverModel, Variable, WithInitialSolution,
-    WithMipGap, WithTimeLimit,
+    constraint, variable, variables, Expression, Solution, SolverModel, Variable,
+    WithInitialSolution, WithMipGap, WithTimeLimit,
 };
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::assets::{AssetConfig, AssetState, PvInverter};
 use crate::assets::battery::{Battery, BatteryMilpContext};
 use crate::assets::ev::{EvCharger, EvMilpContext, EvMilpMode};
 use crate::assets::heater::{Heater, HeaterMilpContext, HeaterMilpMode};
+use crate::assets::{AssetConfig, AssetState, PvInverter};
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
@@ -24,8 +24,8 @@ use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
 use crate::entities::plan::{
-    AssetAllocation, CostBreakdown, FlexibilityEnvelope, Plan, PlanSummary,
-    PlanTimeSlot, PlanningHorizon, PlanWarning, WarningSeverity,
+    AssetAllocation, CostBreakdown, FlexibilityEnvelope, Plan, PlanSummary, PlanTimeSlot,
+    PlanWarning, PlanningHorizon, WarningSeverity,
 };
 use crate::entities::tariff_snapshot::TariffTimeSeries;
 use crate::profile::{PlannerObjective, Profile};
@@ -350,13 +350,7 @@ fn build_milp_inputs(
                 .unwrap_or(0.08),
         );
         // CO₂ stored as g/kWh → MILP uses kgCO₂/kWh
-        g_co2.push(
-            tariffs
-                .co2_g_kwh
-                .interpolate_at(slot_t)
-                .unwrap_or(300.0)
-                / 1000.0,
-        );
+        g_co2.push(tariffs.co2_g_kwh.interpolate_at(slot_t).unwrap_or(300.0) / 1000.0);
         // Use live PvInverter when available so that irradiance_offset (irradiance
         // slider) and pv_alpha (blend-back speed slider) both project into the
         // forecast. Falls back to the static sin model if no "pv" asset exists.
@@ -365,8 +359,7 @@ fn build_milp_inputs(
                 let natural = PvInverter::natural_irradiance_at(slot_t);
                 // pv_alpha is "fraction removed per plan step (300 s)".
                 // Exponent is the number of plan steps ahead, not raw seconds.
-                let decayed_offset =
-                    pv.irradiance_offset * (1.0 - pv.pv_alpha).powf(t as f64);
+                let decayed_offset = pv.irradiance_offset * (1.0 - pv.pv_alpha).powf(t as f64);
                 (natural + decayed_offset).clamp(0.0, 1.0) * pv.rated_kw
             } else {
                 pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)
@@ -383,60 +376,77 @@ fn build_milp_inputs(
     }
 
     // ── Battery ───────────────────────────────────────────────────────────────
-    let (
-        e_bat_nom,
-        e_bat_init,
-        e_bat_min,
-        e_bat_max,
-        p_bat_ch_max,
-        p_bat_dis_max,
-        eff_ch,
-        eff_dis,
-    ) = if let Some(bat_cfg) = profile.battery_config() {
-        let ctx = match assets.find_asset(crate::ids::ASSET_BATTERY) {
-            Some((entry, AssetConfig::Battery(b))) => BatteryMilpContext::from_state(&entry.state, b),
-            _ => {
-                // No live battery in sim (e.g. cleared in test): fall back to profile initial_soc
-                let cap = bat_cfg.capacity_kwh;
-                let eff = bat_cfg.round_trip_efficiency.sqrt();
-                BatteryMilpContext {
-                    e_nom_kwh: cap,
-                    e_init_kwh: bat_cfg.initial_soc * cap,
-                    e_min_kwh: bat_cfg.min_soc * cap,
-                    e_max_kwh: cap,
-                    p_ch_max_kw: bat_cfg.max_charge_kw,
-                    p_dis_max_kw: bat_cfg.max_discharge_kw,
-                    eff_ch: eff,
-                    eff_dis: eff,
+    let (e_bat_nom, e_bat_init, e_bat_min, e_bat_max, p_bat_ch_max, p_bat_dis_max, eff_ch, eff_dis) =
+        if let Some(bat_cfg) = profile.battery_config() {
+            let ctx = match assets.find_asset(crate::ids::ASSET_BATTERY) {
+                Some((entry, AssetConfig::Battery(b))) => {
+                    BatteryMilpContext::from_state(&entry.state, b)
                 }
-            }
+                _ => {
+                    // No live battery in sim (e.g. cleared in test): fall back to profile initial_soc
+                    let cap = bat_cfg.capacity_kwh;
+                    let eff = bat_cfg.round_trip_efficiency.sqrt();
+                    BatteryMilpContext {
+                        e_nom_kwh: cap,
+                        e_init_kwh: bat_cfg.initial_soc * cap,
+                        e_min_kwh: bat_cfg.min_soc * cap,
+                        e_max_kwh: cap,
+                        p_ch_max_kw: bat_cfg.max_charge_kw,
+                        p_dis_max_kw: bat_cfg.max_discharge_kw,
+                        eff_ch: eff,
+                        eff_dis: eff,
+                    }
+                }
+            };
+            (
+                Some(ctx.e_nom_kwh),
+                Some(ctx.e_init_kwh),
+                Some(ctx.e_min_kwh),
+                Some(ctx.e_max_kwh),
+                Some(ctx.p_ch_max_kw),
+                Some(ctx.p_dis_max_kw),
+                Some(ctx.eff_ch),
+                Some(ctx.eff_dis),
+            )
+        } else {
+            (None, None, None, None, None, None, None, None)
         };
-        (
-            Some(ctx.e_nom_kwh),
-            Some(ctx.e_init_kwh),
-            Some(ctx.e_min_kwh),
-            Some(ctx.e_max_kwh),
-            Some(ctx.p_ch_max_kw),
-            Some(ctx.p_dis_max_kw),
-            Some(ctx.eff_ch),
-            Some(ctx.eff_dis),
-        )
-    } else {
-        (None, None, None, None, None, None, None, None)
-    };
 
     // ── EV ────────────────────────────────────────────────────────────────────
-    let (a_ev, ev_mode, t_ev_dead, p_ev_max, p_ev_min, e_ev_core, e_ev_extra, v_ev_extra, soc_ev_init) =
-        if let Some(ev_cfg) = profile.ev_config() {
-            let (ctx, soc_init) = match assets.find_asset(crate::ids::ASSET_EV) {
-                Some((entry, AssetConfig::Ev(e))) => {
-                    let soc = if let AssetState::Ev(s) = &entry.state { Some(s.soc) } else { None };
-                    (EvMilpContext::from_state(
-                        &entry.state, e, n, step_s, now, ev_session,
-                        ev_cfg.min_charge_kw, profile.planner.v_ev_extra_eur_kwh,
-                    ), soc)
-                },
-                _ => (EvMilpContext {
+    let (
+        a_ev,
+        ev_mode,
+        t_ev_dead,
+        p_ev_max,
+        p_ev_min,
+        e_ev_core,
+        e_ev_extra,
+        v_ev_extra,
+        soc_ev_init,
+    ) = if let Some(ev_cfg) = profile.ev_config() {
+        let (ctx, soc_init) = match assets.find_asset(crate::ids::ASSET_EV) {
+            Some((entry, AssetConfig::Ev(e))) => {
+                let soc = if let AssetState::Ev(s) = &entry.state {
+                    Some(s.soc)
+                } else {
+                    None
+                };
+                (
+                    EvMilpContext::from_state(
+                        &entry.state,
+                        e,
+                        n,
+                        step_s,
+                        now,
+                        ev_session,
+                        ev_cfg.min_charge_kw,
+                        profile.planner.v_ev_extra_eur_kwh,
+                    ),
+                    soc,
+                )
+            }
+            _ => (
+                EvMilpContext {
                     mode: EvMilpMode::MustNotRun,
                     a_ev: vec![false; n],
                     t_dead_step: None,
@@ -445,96 +455,158 @@ fn build_milp_inputs(
                     e_core_kwh: 0.0,
                     e_extra_max_kwh: ev_cfg.battery_kwh * (1.0 - ev_cfg.soc_target),
                     v_extra_eur_kwh: profile.planner.v_ev_extra_eur_kwh,
-                }, None),
-            };
-            let ev_mode = match ctx.mode {
-                EvMilpMode::MustRun => MilpLoadMode::MustRun,
-                EvMilpMode::MayRun => MilpLoadMode::MayRun,
-                EvMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
-            };
-            (ctx.a_ev, ev_mode, ctx.t_dead_step, ctx.p_max_kw, ctx.p_min_kw,
-             ctx.e_core_kwh, ctx.e_extra_max_kwh, ctx.v_extra_eur_kwh, soc_init)
-        } else {
-            // No EV asset in profile
-            (vec![false; n], MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0, 0.0, 0.0, None)
+                },
+                None,
+            ),
         };
+        let ev_mode = match ctx.mode {
+            EvMilpMode::MustRun => MilpLoadMode::MustRun,
+            EvMilpMode::MayRun => MilpLoadMode::MayRun,
+            EvMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
+        };
+        (
+            ctx.a_ev,
+            ev_mode,
+            ctx.t_dead_step,
+            ctx.p_max_kw,
+            ctx.p_min_kw,
+            ctx.e_core_kwh,
+            ctx.e_extra_max_kwh,
+            ctx.v_extra_eur_kwh,
+            soc_init,
+        )
+    } else {
+        // No EV asset in profile
+        (
+            vec![false; n],
+            MilpLoadMode::MustNotRun,
+            None,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            None,
+        )
+    };
 
     // ── Heater ────────────────────────────────────────────────────────────────
-    let (heater_mode, t_heat_dead, p_mid, p_full, e_heat_init, e_heat_max, q_heat_dem, e_heat_target, lambda_sw, heat_iz_mid, heat_iz_full) =
-        if let Some(heat_cfg) = profile.heater_config() {
-            let lambda = heat_cfg.effective_switching_penalty();
-            let ctx = match assets.find_asset(crate::ids::ASSET_HEATER) {
-                Some((entry, AssetConfig::Heater(h))) => HeaterMilpContext::from_state(
-                    &entry.state, h, n, step_s, now, heater_target, lambda,
-                ),
-                _ => {
-                    // No live heater in sim: reconstruct from profile config
-                    let thermal_mass = heat_cfg.effective_thermal_mass();
-                    let ambient = 10.0;
-                    let live_t_min = heat_cfg.temp_min_c;
-                    let live_t_max = heat_cfg.temp_max_c;
-                    let live_max_kw = heat_cfg.max_kw;
-                    let live_mid_kw = heat_cfg.mid_kw.unwrap_or(live_max_kw / 2.0);
-                    let current_temp = heat_cfg.temp_initial_c;
-                    let e_init = (current_temp - live_t_min) * thermal_mass;
-                    let e_max = ((live_t_max - live_t_min) * thermal_mass).max(0.0);
-                    let t_mid = (live_t_min + live_t_max) / 2.0;
-                    let q_dem = (heat_cfg.effective_draw_kw()
-                        + heat_cfg.effective_k_loss() * (t_mid - ambient))
-                        .max(0.0);
-                    if let Some(target) = heater_target {
-                        let e_target = ((target.target_temp_c - live_t_min) * thermal_mass)
-                            .clamp(0.0, e_max);
-                        let secs = (target.ready_by - now).num_seconds();
-                        let t_dead = (secs / step_s as i64)
-                            .clamp(0, (n.saturating_sub(1)) as i64) as usize;
-                        HeaterMilpContext {
-                            mode: HeaterMilpMode::MustRun,
-                            t_dead_step: Some(t_dead),
-                            p_mid_kw: live_mid_kw,
-                            p_full_kw: live_max_kw,
-                            e_init_kwh: e_init,
-                            e_max_kwh: e_max,
-                            q_dem_kw: q_dem,
-                            e_target_kwh: e_target,
-                            lambda_sw_eur: lambda,
-                            initial_z_mid: 0.0,
-                            initial_z_full: 0.0,
-                        }
-                    } else {
-                        HeaterMilpContext {
-                            mode: HeaterMilpMode::MayRun,
-                            t_dead_step: None,
-                            p_mid_kw: live_mid_kw,
-                            p_full_kw: live_max_kw,
-                            e_init_kwh: e_init,
-                            e_max_kwh: e_max,
-                            q_dem_kw: q_dem,
-                            e_target_kwh: e_max,
-                            lambda_sw_eur: lambda,
-                            initial_z_mid: 0.0,
-                            initial_z_full: 0.0,
-                        }
+    let (
+        heater_mode,
+        t_heat_dead,
+        p_mid,
+        p_full,
+        e_heat_init,
+        e_heat_max,
+        q_heat_dem,
+        e_heat_target,
+        lambda_sw,
+        heat_iz_mid,
+        heat_iz_full,
+    ) = if let Some(heat_cfg) = profile.heater_config() {
+        let lambda = heat_cfg.effective_switching_penalty();
+        let ctx = match assets.find_asset(crate::ids::ASSET_HEATER) {
+            Some((entry, AssetConfig::Heater(h))) => HeaterMilpContext::from_state(
+                &entry.state,
+                h,
+                n,
+                step_s,
+                now,
+                heater_target,
+                lambda,
+            ),
+            _ => {
+                // No live heater in sim: reconstruct from profile config
+                let thermal_mass = heat_cfg.effective_thermal_mass();
+                let ambient = 10.0;
+                let live_t_min = heat_cfg.temp_min_c;
+                let live_t_max = heat_cfg.temp_max_c;
+                let live_max_kw = heat_cfg.max_kw;
+                let live_mid_kw = heat_cfg.mid_kw.unwrap_or(live_max_kw / 2.0);
+                let current_temp = heat_cfg.temp_initial_c;
+                let e_init = (current_temp - live_t_min) * thermal_mass;
+                let e_max = ((live_t_max - live_t_min) * thermal_mass).max(0.0);
+                let t_mid = (live_t_min + live_t_max) / 2.0;
+                let q_dem = (heat_cfg.effective_draw_kw()
+                    + heat_cfg.effective_k_loss() * (t_mid - ambient))
+                    .max(0.0);
+                if let Some(target) = heater_target {
+                    let e_target =
+                        ((target.target_temp_c - live_t_min) * thermal_mass).clamp(0.0, e_max);
+                    let secs = (target.ready_by - now).num_seconds();
+                    let t_dead =
+                        (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize;
+                    HeaterMilpContext {
+                        mode: HeaterMilpMode::MustRun,
+                        t_dead_step: Some(t_dead),
+                        p_mid_kw: live_mid_kw,
+                        p_full_kw: live_max_kw,
+                        e_init_kwh: e_init,
+                        e_max_kwh: e_max,
+                        q_dem_kw: q_dem,
+                        e_target_kwh: e_target,
+                        lambda_sw_eur: lambda,
+                        initial_z_mid: 0.0,
+                        initial_z_full: 0.0,
+                    }
+                } else {
+                    HeaterMilpContext {
+                        mode: HeaterMilpMode::MayRun,
+                        t_dead_step: None,
+                        p_mid_kw: live_mid_kw,
+                        p_full_kw: live_max_kw,
+                        e_init_kwh: e_init,
+                        e_max_kwh: e_max,
+                        q_dem_kw: q_dem,
+                        e_target_kwh: e_max,
+                        lambda_sw_eur: lambda,
+                        initial_z_mid: 0.0,
+                        initial_z_full: 0.0,
                     }
                 }
-            };
-            let heater_mode = match ctx.mode {
-                HeaterMilpMode::MustRun => MilpLoadMode::MustRun,
-                HeaterMilpMode::MayRun => MilpLoadMode::MayRun,
-                HeaterMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
-            };
-            (heater_mode, ctx.t_dead_step, ctx.p_mid_kw, ctx.p_full_kw,
-             ctx.e_init_kwh, ctx.e_max_kwh, ctx.q_dem_kw, ctx.e_target_kwh, ctx.lambda_sw_eur,
-             ctx.initial_z_mid, ctx.initial_z_full)
-        } else {
-            (MilpLoadMode::MustNotRun, None, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            }
         };
+        let heater_mode = match ctx.mode {
+            HeaterMilpMode::MustRun => MilpLoadMode::MustRun,
+            HeaterMilpMode::MayRun => MilpLoadMode::MayRun,
+            HeaterMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
+        };
+        (
+            heater_mode,
+            ctx.t_dead_step,
+            ctx.p_mid_kw,
+            ctx.p_full_kw,
+            ctx.e_init_kwh,
+            ctx.e_max_kwh,
+            ctx.q_dem_kw,
+            ctx.e_target_kwh,
+            ctx.lambda_sw_eur,
+            ctx.initial_z_mid,
+            ctx.initial_z_full,
+        )
+    } else {
+        (
+            MilpLoadMode::MustNotRun,
+            None,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        )
+    };
 
     // ── Baseline override: additive per-slot kW adjustments ─────────────────
     if let Some(bo) = baseline_override {
         for slot in &bo.slots {
             let offset_s = (slot.slot_start - now).num_seconds();
-            if offset_s < 0 { continue; }
+            if offset_s < 0 {
+                continue;
+            }
             let idx = (offset_s as f64 / (dt_h * 3600.0)).floor() as usize;
             if idx < n {
                 p_base[idx] += slot.add_kw;
@@ -686,16 +758,17 @@ fn solve_phase1(
     let n = inputs.n;
     let dt_h = inputs.dt_h;
 
-    let bat_ctx: Option<BatteryMilpContext> = inputs.e_bat_nom_kwh.map(|e_nom| BatteryMilpContext {
-        e_nom_kwh:    e_nom,
-        e_init_kwh:   inputs.e_bat_init_kwh.unwrap_or(0.0),
-        e_min_kwh:    inputs.e_bat_min_kwh.unwrap_or(0.0),
-        e_max_kwh:    inputs.e_bat_max_kwh.unwrap_or(e_nom),
-        p_ch_max_kw:  inputs.p_bat_ch_max_kw.unwrap_or(0.0),
-        p_dis_max_kw: inputs.p_bat_dis_max_kw.unwrap_or(0.0),
-        eff_ch:       inputs.eff_bat_ch.unwrap_or(1.0),
-        eff_dis:      inputs.eff_bat_dis.unwrap_or(1.0),
-    });
+    let bat_ctx: Option<BatteryMilpContext> =
+        inputs.e_bat_nom_kwh.map(|e_nom| BatteryMilpContext {
+            e_nom_kwh: e_nom,
+            e_init_kwh: inputs.e_bat_init_kwh.unwrap_or(0.0),
+            e_min_kwh: inputs.e_bat_min_kwh.unwrap_or(0.0),
+            e_max_kwh: inputs.e_bat_max_kwh.unwrap_or(e_nom),
+            p_ch_max_kw: inputs.p_bat_ch_max_kw.unwrap_or(0.0),
+            p_dis_max_kw: inputs.p_bat_dis_max_kw.unwrap_or(0.0),
+            eff_ch: inputs.eff_bat_ch.unwrap_or(1.0),
+            eff_dis: inputs.eff_bat_dis.unwrap_or(1.0),
+        });
 
     let ev_ctx: Option<EvMilpContext> = if inputs.p_ev_max_kw > 0.0 {
         let ev_mode = match inputs.ev_mode {
@@ -773,25 +846,45 @@ fn solve_phase1(
     };
 
     // Phase 1: no startup/ramp aux vars.
-    let bat_vars = bat_ctx.as_ref().map(|ctx| ctx.declare_vars(n, 0.0, 0.0, &mut vars));
-    let ev_vars  = ev_ctx.as_ref().map(|ctx| ctx.declare_vars(n, 0.0, 0.0, &mut vars));
+    let bat_vars = bat_ctx
+        .as_ref()
+        .map(|ctx| ctx.declare_vars(n, 0.0, 0.0, &mut vars));
+    let ev_vars = ev_ctx
+        .as_ref()
+        .map(|ctx| ctx.declare_vars(n, 0.0, 0.0, &mut vars));
     let heat_vars = heat_ctx.as_ref().map(|ctx| ctx.declare_vars(n, &mut vars));
 
-    let shift_vars: Vec<ShiftableLoadMilpVars> = inputs.shiftable_loads.iter().map(|sl| {
-        let y_shift = sl.valid_start_slots.iter().map(|_| vars.add(variable().binary())).collect();
-        ShiftableLoadMilpVars {
-            asset_id: sl.asset_id.clone(),
-            power_kw: sl.power_kw,
-            duration_slots: sl.duration_slots,
-            valid_start_slots: sl.valid_start_slots.clone(),
-            y_shift,
-        }
-    }).collect();
+    let shift_vars: Vec<ShiftableLoadMilpVars> = inputs
+        .shiftable_loads
+        .iter()
+        .map(|sl| {
+            let y_shift = sl
+                .valid_start_slots
+                .iter()
+                .map(|_| vars.add(variable().binary()))
+                .collect();
+            ShiftableLoadMilpVars {
+                asset_id: sl.asset_id.clone(),
+                power_kw: sl.power_kw,
+                duration_slots: sl.duration_slots,
+                valid_start_slots: sl.valid_start_slots.clone(),
+                y_shift,
+            }
+        })
+        .collect();
 
-    let pool = MilpVarPool { grid: grid_vars, bat: bat_vars, ev: ev_vars, heater: heat_vars, shiftable: shift_vars };
+    let pool = MilpVarPool {
+        grid: grid_vars,
+        bat: bat_vars,
+        ev: ev_vars,
+        heater: heat_vars,
+        shiftable: shift_vars,
+    };
 
     let interactions = build_interactions(p1w.c_bat_ev_coexist_eur_kwh);
-    let mut active_interactions: Vec<&Box<dyn crate::controller::milp_interactions::AssetInteraction>> = Vec::new();
+    let mut active_interactions: Vec<
+        &Box<dyn crate::controller::milp_interactions::AssetInteraction>,
+    > = Vec::new();
     let mut iv_list: Vec<crate::controller::milp_interactions::InteractionVars> = Vec::new();
     for interaction in &interactions {
         if interaction.applicable(&pool) {
@@ -828,8 +921,23 @@ fn solve_phase1(
     }
 
     let mut model = vars.minimise(&objective).using(highs);
-    model = add_model_constraints(model, inputs, &pool, &heat_ctx, &bat_ctx, &ev_ctx,
-        &p_imp, &p_exp, &u_grid, &s_imp_viol, &s_exp_viol, &active_interactions, &iv_list, &global, n);
+    model = add_model_constraints(
+        model,
+        inputs,
+        &pool,
+        &heat_ctx,
+        &bat_ctx,
+        &ev_ctx,
+        &p_imp,
+        &p_exp,
+        &u_grid,
+        &s_imp_viol,
+        &s_exp_viol,
+        &active_interactions,
+        &iv_list,
+        &global,
+        n,
+    );
     model = model.with_time_limit(60.0);
     model = model.with_mip_gap(0.02)?;
     let solution = model.solve()?;
@@ -873,7 +981,11 @@ fn build_phase2_warm_start(
             iv.push((v.e_tank[t], e));
             iv.push((v.s_low[t], (-e).max(0.0)));
             let zm_prev = if t == 0 { iz_mid } else { p1.z_heat_mid[t - 1] };
-            let zf_prev = if t == 0 { iz_full } else { p1.z_heat_full[t - 1] };
+            let zf_prev = if t == 0 {
+                iz_full
+            } else {
+                p1.z_heat_full[t - 1]
+            };
             let sw = (zm - zm_prev).abs().max((zf - zf_prev).abs());
             iv.push((v.sw[t], sw));
         }
@@ -888,14 +1000,28 @@ fn build_phase2_warm_start(
         for t in 0..n {
             iv.push((v.p_ch[t], p1.p_bat_ch_kw[t].max(0.0)));
             iv.push((v.p_dis[t], p1.p_bat_dis_kw[t].max(0.0)));
-            let active = if p1.p_bat_ch_kw[t] + p1.p_bat_dis_kw[t] > 1e-6 { 1.0 } else { 0.0 };
+            let active = if p1.p_bat_ch_kw[t] + p1.p_bat_dis_kw[t] > 1e-6 {
+                1.0
+            } else {
+                0.0
+            };
             iv.push((v.u_bat[t], active));
-            if let Some(&za) = v.z_active.get(t) { iv.push((za, active)); }
+            if let Some(&za) = v.z_active.get(t) {
+                iv.push((za, active));
+            }
         }
         for i in 0..v.delta_active.len() {
             let t = i + 1;
-            let z_prev = if p1.p_bat_ch_kw[i] + p1.p_bat_dis_kw[i] > 1e-6 { 1.0_f64 } else { 0.0 };
-            let z_curr = if p1.p_bat_ch_kw[t] + p1.p_bat_dis_kw[t] > 1e-6 { 1.0_f64 } else { 0.0 };
+            let z_prev = if p1.p_bat_ch_kw[i] + p1.p_bat_dis_kw[i] > 1e-6 {
+                1.0_f64
+            } else {
+                0.0
+            };
+            let z_curr = if p1.p_bat_ch_kw[t] + p1.p_bat_dis_kw[t] > 1e-6 {
+                1.0_f64
+            } else {
+                0.0
+            };
             iv.push((v.delta_active[i], (z_curr - z_prev).max(0.0)));
         }
         for i in 0..v.delta_ramp.len() {
@@ -936,16 +1062,17 @@ fn solve_phase2(
     let n = inputs.n;
     let dt_h = inputs.dt_h;
 
-    let bat_ctx: Option<BatteryMilpContext> = inputs.e_bat_nom_kwh.map(|e_nom| BatteryMilpContext {
-        e_nom_kwh:    e_nom,
-        e_init_kwh:   inputs.e_bat_init_kwh.unwrap_or(0.0),
-        e_min_kwh:    inputs.e_bat_min_kwh.unwrap_or(0.0),
-        e_max_kwh:    inputs.e_bat_max_kwh.unwrap_or(e_nom),
-        p_ch_max_kw:  inputs.p_bat_ch_max_kw.unwrap_or(0.0),
-        p_dis_max_kw: inputs.p_bat_dis_max_kw.unwrap_or(0.0),
-        eff_ch:       inputs.eff_bat_ch.unwrap_or(1.0),
-        eff_dis:      inputs.eff_bat_dis.unwrap_or(1.0),
-    });
+    let bat_ctx: Option<BatteryMilpContext> =
+        inputs.e_bat_nom_kwh.map(|e_nom| BatteryMilpContext {
+            e_nom_kwh: e_nom,
+            e_init_kwh: inputs.e_bat_init_kwh.unwrap_or(0.0),
+            e_min_kwh: inputs.e_bat_min_kwh.unwrap_or(0.0),
+            e_max_kwh: inputs.e_bat_max_kwh.unwrap_or(e_nom),
+            p_ch_max_kw: inputs.p_bat_ch_max_kw.unwrap_or(0.0),
+            p_dis_max_kw: inputs.p_bat_dis_max_kw.unwrap_or(0.0),
+            eff_ch: inputs.eff_bat_ch.unwrap_or(1.0),
+            eff_dis: inputs.eff_bat_dis.unwrap_or(1.0),
+        });
 
     let ev_ctx: Option<EvMilpContext> = if inputs.p_ev_max_kw > 0.0 {
         let ev_mode = match inputs.ev_mode {
@@ -1023,25 +1150,45 @@ fn solve_phase2(
     };
 
     // Phase 2: startup/ramp aux vars are declared with real cost values.
-    let bat_vars  = bat_ctx.as_ref().map(|ctx| ctx.declare_vars(n, p2w.c_bat_startup_eur, p2w.c_bat_ramp_eur_kw, &mut vars));
-    let ev_vars   = ev_ctx.as_ref().map(|ctx| ctx.declare_vars(n, p2w.c_ev_startup_eur, p2w.c_ev_ramp_eur_kw, &mut vars));
+    let bat_vars = bat_ctx
+        .as_ref()
+        .map(|ctx| ctx.declare_vars(n, p2w.c_bat_startup_eur, p2w.c_bat_ramp_eur_kw, &mut vars));
+    let ev_vars = ev_ctx
+        .as_ref()
+        .map(|ctx| ctx.declare_vars(n, p2w.c_ev_startup_eur, p2w.c_ev_ramp_eur_kw, &mut vars));
     let heat_vars = heat_ctx.as_ref().map(|ctx| ctx.declare_vars(n, &mut vars));
 
-    let shift_vars: Vec<ShiftableLoadMilpVars> = inputs.shiftable_loads.iter().map(|sl| {
-        let y_shift = sl.valid_start_slots.iter().map(|_| vars.add(variable().binary())).collect();
-        ShiftableLoadMilpVars {
-            asset_id: sl.asset_id.clone(),
-            power_kw: sl.power_kw,
-            duration_slots: sl.duration_slots,
-            valid_start_slots: sl.valid_start_slots.clone(),
-            y_shift,
-        }
-    }).collect();
+    let shift_vars: Vec<ShiftableLoadMilpVars> = inputs
+        .shiftable_loads
+        .iter()
+        .map(|sl| {
+            let y_shift = sl
+                .valid_start_slots
+                .iter()
+                .map(|_| vars.add(variable().binary()))
+                .collect();
+            ShiftableLoadMilpVars {
+                asset_id: sl.asset_id.clone(),
+                power_kw: sl.power_kw,
+                duration_slots: sl.duration_slots,
+                valid_start_slots: sl.valid_start_slots.clone(),
+                y_shift,
+            }
+        })
+        .collect();
 
-    let pool = MilpVarPool { grid: grid_vars, bat: bat_vars, ev: ev_vars, heater: heat_vars, shiftable: shift_vars };
+    let pool = MilpVarPool {
+        grid: grid_vars,
+        bat: bat_vars,
+        ev: ev_vars,
+        heater: heat_vars,
+        shiftable: shift_vars,
+    };
 
     let interactions = build_interactions(p1w.c_bat_ev_coexist_eur_kwh);
-    let mut active_interactions: Vec<&Box<dyn crate::controller::milp_interactions::AssetInteraction>> = Vec::new();
+    let mut active_interactions: Vec<
+        &Box<dyn crate::controller::milp_interactions::AssetInteraction>,
+    > = Vec::new();
     let mut iv_list: Vec<crate::controller::milp_interactions::InteractionVars> = Vec::new();
     for interaction in &interactions {
         if interaction.applicable(&pool) {
@@ -1065,7 +1212,8 @@ fn solve_phase2(
     }
     if let Some(v) = &pool.bat {
         // Battery wear only (0.0 startup/ramp in cost cap expression).
-        phase1_cap_expr += BatteryMilpContext::objective(v, p1w.c_bat_wear_eur_kwh, 0.0, 0.0, n, dt_h);
+        phase1_cap_expr +=
+            BatteryMilpContext::objective(v, p1w.c_bat_wear_eur_kwh, 0.0, 0.0, n, dt_h);
     }
     if let (Some(ctx), Some(v)) = (&ev_ctx, &pool.ev) {
         // EV reward only (0.0 startup/ramp in cost cap expression).
@@ -1084,7 +1232,14 @@ fn solve_phase2(
     // Phase 2 friction objective: startup/ramp/switching/tier; no economic terms.
     let mut friction_obj = Expression::from(0.0);
     if let Some(v) = &pool.bat {
-        friction_obj += BatteryMilpContext::objective(v, 0.0, p2w.c_bat_startup_eur, p2w.c_bat_ramp_eur_kw, n, dt_h);
+        friction_obj += BatteryMilpContext::objective(
+            v,
+            0.0,
+            p2w.c_bat_startup_eur,
+            p2w.c_bat_ramp_eur_kw,
+            n,
+            dt_h,
+        );
     }
     if let (Some(ctx), Some(v)) = (&ev_ctx, &pool.ev) {
         friction_obj += ctx.objective(v, p2w.c_ev_startup_eur, p2w.c_ev_ramp_eur_kw, 0.0, n);
@@ -1095,14 +1250,37 @@ fn solve_phase2(
     }
 
     let warm_start = build_phase2_warm_start(
-        inputs, phase1_sol, &p_imp, &p_exp, &u_grid, &s_imp_viol, &s_exp_viol, &pool, n,
+        inputs,
+        phase1_sol,
+        &p_imp,
+        &p_exp,
+        &u_grid,
+        &s_imp_viol,
+        &s_exp_viol,
+        &pool,
+        n,
     );
 
     let mut model = vars.minimise(&friction_obj).using(highs);
     model = model.with_initial_solution(warm_start);
     model = model.with(constraint!(phase1_cap_expr <= c_star + epsilon));
-    model = add_model_constraints(model, inputs, &pool, &heat_ctx, &bat_ctx, &ev_ctx,
-        &p_imp, &p_exp, &u_grid, &s_imp_viol, &s_exp_viol, &active_interactions, &iv_list, &global, n);
+    model = add_model_constraints(
+        model,
+        inputs,
+        &pool,
+        &heat_ctx,
+        &bat_ctx,
+        &ev_ctx,
+        &p_imp,
+        &p_exp,
+        &u_grid,
+        &s_imp_viol,
+        &s_exp_viol,
+        &active_interactions,
+        &iv_list,
+        &global,
+        n,
+    );
     model = model.with_time_limit(60.0);
     model = model.with_mip_gap(0.02)?;
     let solution = model.solve()?;
@@ -1130,7 +1308,11 @@ fn solve_milp_two_phase(
     match solve_phase2(inputs, p1w, p2w, c_star, epsilon, &phase1_sol) {
         Ok((sol, friction_eur)) => Ok((sol, c_star, friction_eur)),
         Err(e) => {
-            tracing::warn!(c_star, epsilon, "Phase 2 failed (warm-start provided), using Phase 1: {e}");
+            tracing::warn!(
+                c_star,
+                epsilon,
+                "Phase 2 failed (warm-start provided), using Phase 1: {e}"
+            );
             Ok((phase1_sol, c_star, 0.0))
         }
     }
@@ -1165,16 +1347,24 @@ fn add_model_constraints<S: SolverModel>(
             }
         }
 
-        let bat_dis: Expression = pool.bat.as_ref()
+        let bat_dis: Expression = pool
+            .bat
+            .as_ref()
             .map(|v| Expression::from(v.p_dis[t]))
             .unwrap_or_else(|| Expression::from(0.0));
-        let bat_ch: Expression = pool.bat.as_ref()
+        let bat_ch: Expression = pool
+            .bat
+            .as_ref()
             .map(|v| Expression::from(v.p_ch[t]))
             .unwrap_or_else(|| Expression::from(0.0));
-        let ev_kw: Expression = pool.ev.as_ref()
+        let ev_kw: Expression = pool
+            .ev
+            .as_ref()
             .map(|v| Expression::from(v.p_ev[t]))
             .unwrap_or_else(|| Expression::from(0.0));
-        let heat_kw: Expression = heat_ctx.as_ref().zip(pool.heater.as_ref())
+        let heat_kw: Expression = heat_ctx
+            .as_ref()
+            .zip(pool.heater.as_ref())
             .map(|(ctx, v)| ctx.power_expr(v, t))
             .unwrap_or_else(|| Expression::from(0.0));
 
@@ -1182,30 +1372,48 @@ fn add_model_constraints<S: SolverModel>(
             p_imp[t] + inputs.p_pv_kw[t] + bat_dis
                 == inputs.p_base_kw[t] + ev_kw + heat_kw + shift_kw + bat_ch + p_exp[t]
         ));
-        model = model.with(constraint!(p_imp[t] <= inputs.p_imp_max_phys_kw[t] * u_grid[t]));
-        model = model.with(constraint!(p_exp[t] <= inputs.p_exp_max_phys_kw[t] * (1.0 - u_grid[t])));
-        model = model.with(constraint!(p_imp[t] <= inputs.p_imp_max_cont_kw[t] + s_imp_viol[t]));
-        model = model.with(constraint!(p_exp[t] <= inputs.p_exp_max_cont_kw[t] + s_exp_viol[t]));
+        model = model.with(constraint!(
+            p_imp[t] <= inputs.p_imp_max_phys_kw[t] * u_grid[t]
+        ));
+        model = model.with(constraint!(
+            p_exp[t] <= inputs.p_exp_max_phys_kw[t] * (1.0 - u_grid[t])
+        ));
+        model = model.with(constraint!(
+            p_imp[t] <= inputs.p_imp_max_cont_kw[t] + s_imp_viol[t]
+        ));
+        model = model.with(constraint!(
+            p_exp[t] <= inputs.p_exp_max_cont_kw[t] + s_exp_viol[t]
+        ));
     }
 
     if let (Some(ctx), Some(v)) = (bat_ctx, &pool.bat) {
-        for c in ctx.constraints(v, n, global.dt_h) { model = model.with(c); }
+        for c in ctx.constraints(v, n, global.dt_h) {
+            model = model.with(c);
+        }
     }
     if let (Some(ctx), Some(v)) = (ev_ctx, &pool.ev) {
-        for c in ctx.constraints(v, n, global.dt_h) { model = model.with(c); }
+        for c in ctx.constraints(v, n, global.dt_h) {
+            model = model.with(c);
+        }
     }
     if let (Some(ctx), Some(v)) = (heat_ctx, &pool.heater) {
-        for c in ctx.constraints(v, n, global.dt_h) { model = model.with(c); }
+        for c in ctx.constraints(v, n, global.dt_h) {
+            model = model.with(c);
+        }
     }
 
     for sv in &pool.shiftable {
         let mut sum_y = Expression::from(0.0);
-        for &y in &sv.y_shift { sum_y += y; }
+        for &y in &sv.y_shift {
+            sum_y += y;
+        }
         model = model.with(constraint!(sum_y == 1.0));
     }
 
     for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
-        for c in interaction.constraints(pool, iv, global) { model = model.with(c); }
+        for c in interaction.constraints(pool, iv, global) {
+            model = model.with(c);
+        }
     }
     model
 }
@@ -1230,18 +1438,22 @@ fn read_solve_output<S: Solution>(
         (vec![0.0; n], vec![0.0; n], vec![0.0; n + 1])
     };
 
-    let (ev_kw_out, z_ev_on_out, e_ev_extra_out, z_ev_core_out) =
-        if let Some(v) = &pool.ev {
-            let sol = EvMilpContext::read_solution(solution, v, n);
-            (sol.p_ev_kw, sol.z_ev_on, sol.e_ev_extra_kwh, sol.z_ev_core)
-        } else {
-            (vec![0.0; n], vec![0.0; n], 0.0, 0.0)
-        };
+    let (ev_kw_out, z_ev_on_out, e_ev_extra_out, z_ev_core_out) = if let Some(v) = &pool.ev {
+        let sol = EvMilpContext::read_solution(solution, v, n);
+        (sol.p_ev_kw, sol.z_ev_on, sol.e_ev_extra_kwh, sol.z_ev_core)
+    } else {
+        (vec![0.0; n], vec![0.0; n], 0.0, 0.0)
+    };
 
     let (z_heat_mid_out, z_heat_full_out, z_heat_ready_out, e_heat_tank_out) =
         if let Some(v) = &pool.heater {
             let sol = HeaterMilpContext::read_solution(solution, v, n);
-            (sol.z_heat_mid, sol.z_heat_full, sol.z_heat_ready, sol.e_tank_kwh)
+            (
+                sol.z_heat_mid,
+                sol.z_heat_full,
+                sol.z_heat_ready,
+                sol.e_tank_kwh,
+            )
         } else {
             (vec![0.0; n], vec![0.0; n], 0.0, vec![])
         };
@@ -1301,13 +1513,20 @@ fn build_plan_envelopes(
             if energy_needed_kwh > 0.0 {
                 let window_start = now;
                 let window_end = session.departure_time;
-                let slots_available = ((window_end - window_start).num_seconds() / step_s).max(0) as usize;
+                let slots_available =
+                    ((window_end - window_start).num_seconds() / step_s).max(0) as usize;
                 let t_start = 0usize;
                 let t_end = ((window_end - now).num_seconds() / step_s).min(n as i64) as usize;
                 let eligible = t_start..t_end;
                 let count = eligible.len().max(1) as f64;
-                let avg_tariff = (t_start..t_end).map(|t| inputs.c_imp_eur_kwh[t]).sum::<f64>() / count;
-                let avg_co2 = (t_start..t_end).map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0).sum::<f64>() / count;
+                let avg_tariff = (t_start..t_end)
+                    .map(|t| inputs.c_imp_eur_kwh[t])
+                    .sum::<f64>()
+                    / count;
+                let avg_co2 = (t_start..t_end)
+                    .map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0)
+                    .sum::<f64>()
+                    / count;
                 envelopes.push(FlexibilityEnvelope {
                     asset_id: ev_cfg.id.clone(),
                     energy_needed_kwh,
@@ -1333,11 +1552,15 @@ fn build_plan_envelopes(
             if energy_needed_kwh > 0.0 {
                 let window_start = now;
                 let window_end = target.ready_by;
-                let slots_available = ((window_end - window_start).num_seconds() / step_s).max(0) as usize;
+                let slots_available =
+                    ((window_end - window_start).num_seconds() / step_s).max(0) as usize;
                 let t_end = ((window_end - now).num_seconds() / step_s).min(n as i64) as usize;
                 let count = t_end.max(1) as f64;
                 let avg_tariff = (0..t_end).map(|t| inputs.c_imp_eur_kwh[t]).sum::<f64>() / count;
-                let avg_co2 = (0..t_end).map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0).sum::<f64>() / count;
+                let avg_co2 = (0..t_end)
+                    .map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0)
+                    .sum::<f64>()
+                    / count;
                 envelopes.push(FlexibilityEnvelope {
                     asset_id: heat_cfg.id.clone(),
                     energy_needed_kwh,
@@ -1358,7 +1581,9 @@ fn build_plan_envelopes(
 
     // Shiftable load envelopes
     for (s, sl) in shiftable_loads.iter().enumerate() {
-        if s >= inputs.shiftable_loads.len() { break; }
+        if s >= inputs.shiftable_loads.len() {
+            break;
+        }
         let milp_sl = &inputs.shiftable_loads[s];
         let energy_needed_kwh = sl.power_kw * sl.duration_min as f64 / 60.0;
         let window_start = sl.earliest_start.max(now);
@@ -1367,8 +1592,14 @@ fn build_plan_envelopes(
         let t_start = ((window_start - now).num_seconds() / step_s).max(0) as usize;
         let t_end = ((window_end - now).num_seconds() / step_s).min(n as i64) as usize;
         let count = (t_end.saturating_sub(t_start)).max(1) as f64;
-        let avg_tariff = (t_start..t_end).map(|t| inputs.c_imp_eur_kwh[t]).sum::<f64>() / count;
-        let avg_co2 = (t_start..t_end).map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0).sum::<f64>() / count;
+        let avg_tariff = (t_start..t_end)
+            .map(|t| inputs.c_imp_eur_kwh[t])
+            .sum::<f64>()
+            / count;
+        let avg_co2 = (t_start..t_end)
+            .map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0)
+            .sum::<f64>()
+            / count;
         let _ = milp_sl;
         envelopes.push(FlexibilityEnvelope {
             asset_id: sl.asset_id.clone(),
@@ -1453,7 +1684,14 @@ fn fallback_plan(
         None => vec![],
     };
     let envelopes = match inputs {
-        Some(inp) => build_plan_envelopes(ev_session, heater_target, shiftable_loads, inp, profile, now),
+        Some(inp) => build_plan_envelopes(
+            ev_session,
+            heater_target,
+            shiftable_loads,
+            inp,
+            profile,
+            now,
+        ),
         None => vec![],
     };
     let plan = Plan {
@@ -1538,8 +1776,8 @@ fn translate_to_plan(
 
         // ── Heater allocation ───────────────────────────────────────────
         if inputs.heater_mode != MilpLoadMode::MustNotRun {
-            let heat_kw =
-                sol.z_heat_mid[t] * inputs.p_heat_mid_kw + sol.z_heat_full[t] * inputs.p_heat_full_kw;
+            let heat_kw = sol.z_heat_mid[t] * inputs.p_heat_mid_kw
+                + sol.z_heat_full[t] * inputs.p_heat_full_kw;
             if heat_kw > 0.01 {
                 if let Some(ref hid) = heater_id {
                     let surplus_power_kw = surplus_remaining_kw.min(heat_kw);
@@ -1587,15 +1825,21 @@ fn translate_to_plan(
                     // Charging: consume PV surplus first, then grid
                     let sp = surplus_remaining_kw.min(bat_net_kw);
                     let gp = bat_net_kw - sp;
-                    (sp, gp,
-                     gp * inputs.c_imp_eur_kwh[t] * dt_h - sp * inputs.c_exp_eur_kwh[t] * dt_h,
-                     gp * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h)
+                    (
+                        sp,
+                        gp,
+                        gp * inputs.c_imp_eur_kwh[t] * dt_h - sp * inputs.c_exp_eur_kwh[t] * dt_h,
+                        gp * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h,
+                    )
                 } else {
                     // Discharging: negative power_kw = net injection; revenue = negative cost
                     let dis_kw = sol.p_bat_dis_kw[t];
-                    (0.0, bat_net_kw,
-                     -(dis_kw * inputs.c_exp_eur_kwh[t] * dt_h),
-                     -(dis_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h))
+                    (
+                        0.0,
+                        bat_net_kw,
+                        -(dis_kw * inputs.c_exp_eur_kwh[t] * dt_h),
+                        -(dis_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h),
+                    )
                 };
                 allocations.push(AssetAllocation {
                     asset_id: bid.clone(),
@@ -1629,7 +1873,8 @@ fn translate_to_plan(
             baseline_kw: inputs.p_base_kw[t],
             pv_forecast_kw: inputs.p_pv_kw[t],
             surplus_available_kw,
-            planned_kw_by_asset: allocations.iter()
+            planned_kw_by_asset: allocations
+                .iter()
                 .map(|a| (a.asset_id.clone(), a.power_kw))
                 .collect(),
             allocations,
@@ -1651,7 +1896,8 @@ fn translate_to_plan(
     if let (Some(ref bid), Some(bat_cfg)) = (&bat_id, profile.battery_config()) {
         let battery = Battery::from_config(bat_cfg);
         for t in 0..n {
-            slots[t].planned_state_by_asset
+            slots[t]
+                .planned_state_by_asset
                 .insert(bid.clone(), battery.future_state_values(sol.e_bat_kwh[t]));
         }
     }
@@ -1660,7 +1906,8 @@ fn translate_to_plan(
         if let Some(ev_cfg) = profile.ev_config() {
             let traj = EvCharger::soc_trajectory(&sol.p_ev_kw, soc_init, ev_cfg.battery_kwh, dt_h);
             for t in 0..n {
-                slots[t].planned_state_by_asset
+                slots[t]
+                    .planned_state_by_asset
                     .insert(eid.clone(), EvCharger::future_state_values_at(traj[t]));
             }
         }
@@ -1671,8 +1918,10 @@ fn translate_to_plan(
             if let Some(heat_cfg) = profile.heater_config() {
                 let heater = Heater::from_config(heat_cfg);
                 for t in 0..n {
-                    slots[t].planned_state_by_asset
-                        .insert(hid.clone(), heater.future_state_values(sol.e_heat_tank_kwh[t]));
+                    slots[t].planned_state_by_asset.insert(
+                        hid.clone(),
+                        heater.future_state_values(sol.e_heat_tank_kwh[t]),
+                    );
                 }
             }
         }
@@ -1711,11 +1960,7 @@ fn translate_to_plan(
             .map(|t| weights.w_grid * (sol.p_imp_kw[t] + sol.p_exp_kw[t]) * dt_h)
             .sum(),
         c_wear_eur: (0..n)
-            .map(|t| {
-                weights.c_bat_wear_eur_kwh
-                    * (sol.p_bat_ch_kw[t] + sol.p_bat_dis_kw[t])
-                    * dt_h
-            })
+            .map(|t| weights.c_bat_wear_eur_kwh * (sol.p_bat_ch_kw[t] + sol.p_bat_dis_kw[t]) * dt_h)
             .sum(),
         c_violations_eur: (0..n)
             .map(|t| {
@@ -1748,7 +1993,14 @@ fn translate_to_plan(
         horizon,
         slots,
         summary,
-        envelopes: build_plan_envelopes(ev_session, heater_target, shiftable_loads, inputs, profile, now),
+        envelopes: build_plan_envelopes(
+            ev_session,
+            heater_target,
+            shiftable_loads,
+            inputs,
+            profile,
+            now,
+        ),
         warnings,
         objective,
         soc_trajectory_kwh,
@@ -1778,11 +2030,34 @@ pub fn run_planner(
     objective_override: Option<PlannerObjective>,
 ) -> Plan {
     let objective = objective_override.unwrap_or(profile.planner.objective);
-    let inputs = build_milp_inputs(assets, tariffs, capacity, profile, now, ev_session, heater_target, shiftable_loads, baseline_override);
+    let inputs = build_milp_inputs(
+        assets,
+        tariffs,
+        capacity,
+        profile,
+        now,
+        ev_session,
+        heater_target,
+        shiftable_loads,
+        baseline_override,
+    );
     let p1w = build_phase1_weights(profile, objective);
     let p2w = build_phase2_weights(&inputs, profile);
     match solve_milp_two_phase(&inputs, &p1w, &p2w, profile.planner.phase2_epsilon_eur) {
-        Ok((sol, phase1_cost_eur, friction_eur)) => translate_to_plan(&sol, &inputs, &p1w, profile, now, trigger, ev_session, heater_target, shiftable_loads, objective, phase1_cost_eur, friction_eur),
+        Ok((sol, phase1_cost_eur, friction_eur)) => translate_to_plan(
+            &sol,
+            &inputs,
+            &p1w,
+            profile,
+            now,
+            trigger,
+            ev_session,
+            heater_target,
+            shiftable_loads,
+            objective,
+            phase1_cost_eur,
+            friction_eur,
+        ),
         Err(e) => {
             warn!("MILP solver failed: {e}");
             fallback_plan(
@@ -1894,8 +2169,8 @@ mod tests {
             ],
             simulator: SimulatorConfig::default(),
             planner: PlannerConfig {
-                plan_step_s: 300,   // 5 min steps
-                plan_horizon_h: 2,  // 2-hour horizon → 24 steps
+                plan_step_s: 300,  // 5 min steps
+                plan_horizon_h: 2, // 2-hour horizon → 24 steps
                 ..PlannerConfig::default()
             },
             grid: GridConfig {
@@ -1903,6 +2178,7 @@ mod tests {
                 max_export_kw: 10.0,
             },
             packets: vec![],
+            absorber: Default::default(),
         }
     }
 
@@ -1965,6 +2241,7 @@ mod tests {
                 max_export_kw: 10.0,
             },
             packets: vec![],
+            absorber: Default::default(),
         }
     }
 
@@ -1977,7 +2254,17 @@ mod tests {
         let profile = make_profile();
         let tariffs = make_tariffs(0.25, 0.08, 450.0); // 450 g/kWh
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &tariffs, &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &tariffs,
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         // All slots should have 0.45 kgCO₂/kWh
         assert!(inp.g_imp_kgco2_kwh.iter().all(|&v| (v - 0.45).abs() < 1e-9));
     }
@@ -1988,7 +2275,17 @@ mod tests {
         let now = fixed_now();
         let profile = make_profile(); // battery RTE = 0.9
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         let expected = 0.9_f64.sqrt();
         assert!((inp.eff_bat_ch.unwrap() - expected).abs() < 1e-9);
         assert!((inp.eff_bat_dis.unwrap() - expected).abs() < 1e-9);
@@ -2004,7 +2301,17 @@ mod tests {
         let profile = make_profile(); // initial_soc=0.5, capacity=10.0
         let mut sim = SimState::from_profile(&profile);
         set_battery_soc(&mut sim, 0.3); // override to 0.3
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         assert!((inp.e_bat_init_kwh.unwrap() - 3.0).abs() < 1e-9); // 0.3 × 10.0 = 3.0
     }
 
@@ -2015,7 +2322,17 @@ mod tests {
         let profile = make_profile(); // initial_soc=0.5, capacity=10.0
         let mut sim = SimState::from_profile(&profile);
         sim.assets.clear(); // remove all assets → battery_state() returns None
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         assert!((inp.e_bat_init_kwh.unwrap() - 5.0).abs() < 1e-9); // 0.5 × 10.0 = 5.0
     }
 
@@ -2026,7 +2343,17 @@ mod tests {
         let profile = make_profile();
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         assert!(inp.a_ev.iter().all(|&v| v));
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun); // no session → MustNotRun (but mask is true)
         assert_eq!(inp.t_ev_dead_step, None);
@@ -2047,7 +2374,17 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, Some(&session), None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            Some(&session),
+            None,
+            &[],
+            None,
+        );
         // deadline = 3600s, step_s=300 → deadline_step = 12
         let d = inp.t_ev_dead_step.unwrap();
         assert_eq!(d, 12);
@@ -2072,7 +2409,17 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, Some(&session), None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            Some(&session),
+            None,
+            &[],
+            None,
+        );
         assert!(inp.a_ev.iter().all(|&v| !v));
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
@@ -2091,7 +2438,17 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, Some(&session), None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            Some(&session),
+            None,
+            &[],
+            None,
+        );
         assert_eq!(inp.ev_mode, MilpLoadMode::MustRun);
     }
 
@@ -2109,7 +2466,17 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, Some(&session), None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            Some(&session),
+            None,
+            &[],
+            None,
+        );
         assert_eq!(inp.ev_mode, MilpLoadMode::MayRun);
     }
 
@@ -2120,7 +2487,17 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         // No session at all
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
 
@@ -2131,7 +2508,17 @@ mod tests {
         let profile = make_profile();
         let sim = SimState::from_profile(&profile);
         let empty_tariffs = TariffTimeSeries::from_snapshots(&[]);
-        let inp = build_milp_inputs(&sim, &empty_tariffs, &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &empty_tariffs,
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         assert!(inp.c_imp_eur_kwh.iter().all(|&v| (v - 0.25).abs() < 1e-9));
         assert!(inp.c_exp_eur_kwh.iter().all(|&v| (v - 0.08).abs() < 1e-9));
         assert!(inp.g_imp_kgco2_kwh.iter().all(|&v| (v - 0.30).abs() < 1e-9));
@@ -2144,7 +2531,17 @@ mod tests {
         let profile = make_profile(); // heater max_kw=3.0, mid_kw=None
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true); // avoid EV noise
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         assert!((inp.p_heat_mid_kw - 1.5).abs() < 1e-9); // 3.0 / 2.0
         assert!((inp.p_heat_full_kw - 3.0).abs() < 1e-9);
     }
@@ -2167,7 +2564,17 @@ mod tests {
             })
             .collect();
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         assert!((inp.p_heat_mid_kw - 2.0).abs() < 1e-9);
     }
 
@@ -2221,11 +2628,27 @@ mod tests {
             export_limit_event_id: None,
             last_updated: None,
         };
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &capacity, &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &capacity,
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         // Physical limit unchanged
-        assert!(inp.p_imp_max_phys_kw.iter().all(|&v| (v - 25.0).abs() < 1e-9));
+        assert!(inp
+            .p_imp_max_phys_kw
+            .iter()
+            .all(|&v| (v - 25.0).abs() < 1e-9));
         // Contractual limit uses the event value
-        assert!(inp.p_imp_max_cont_kw.iter().all(|&v| (v - 5.0).abs() < 1e-9));
+        assert!(inp
+            .p_imp_max_cont_kw
+            .iter()
+            .all(|&v| (v - 5.0).abs() < 1e-9));
     }
 
     // ── Solver tests (run actual HiGHS on synthetic inputs) ──────────────────
@@ -2318,7 +2741,10 @@ mod tests {
                 out.p_imp_kw[t]
             );
         }
-        assert!(out.s_imp_viol_kw.iter().all(|&v| v < 1e-6), "unexpected violations");
+        assert!(
+            out.s_imp_viol_kw.iter().all(|&v| v < 1e-6),
+            "unexpected violations"
+        );
     }
 
     #[test]
@@ -2348,7 +2774,7 @@ mod tests {
     fn solve_battery_arbitrage() {
         // Battery should charge at cheap tariff (t=0,1) and discharge at expensive (t=2,3).
         let mut inputs = make_solver_inputs(4, 1.0); // base = 1.0 kW
-        // Cheap then expensive tariff
+                                                     // Cheap then expensive tariff
         inputs.c_imp_eur_kwh = vec![0.10, 0.10, 0.30, 0.30];
         // Add battery: init=0, can hold 5 kWh, eff=1
         inputs.e_bat_nom_kwh = Some(5.0);
@@ -2403,14 +2829,18 @@ mod tests {
         weights.c_ev_startup_eur = 0.5; // high penalty — one startup costs 0.5 EUR
 
         let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0)
-            .expect("solver failed").0;
+            .expect("solver failed")
+            .0;
 
         // Identify active slots (z_ev_on > 0.5 means EV charging committed)
         let active: Vec<bool> = out.z_ev_on.iter().map(|&v| v > 0.5).collect();
         // Count off→on switches; with startup penalty, expect at most 1 (contiguous block).
         // Starting at slot 0 (0 startups) is also a valid contiguous block.
         let startups = active.windows(2).filter(|w| !w[0] && w[1]).count();
-        assert!(startups <= 1, "expected at most 1 EV startup (contiguous block), got {startups}; active={active:?}");
+        assert!(
+            startups <= 1,
+            "expected at most 1 EV startup (contiguous block), got {startups}; active={active:?}"
+        );
     }
 
     #[test]
@@ -2435,14 +2865,15 @@ mod tests {
         weights.c_bat_startup_eur = 0.5; // high penalty
 
         let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0)
-            .expect("solver failed").0;
+            .expect("solver failed")
+            .0;
 
         // Count idle→active transitions (mirrors EV startup test logic)
         let active: Vec<bool> = (0..n)
             .map(|t| out.p_bat_ch_kw[t] > 1e-3 || out.p_bat_dis_kw[t] > 1e-3)
             .collect();
-        let startups = active.windows(2).filter(|w| !w[0] && w[1]).count()
-            + if active[0] { 1 } else { 0 }; // count slot-0 active as a startup
+        let startups =
+            active.windows(2).filter(|w| !w[0] && w[1]).count() + if active[0] { 1 } else { 0 }; // count slot-0 active as a startup
         assert!(
             startups <= 2,
             "expected ≤2 battery startups (charge block + discharge block), got {startups}; active={active:?} ch={:?} dis={:?}",
@@ -2455,7 +2886,7 @@ mod tests {
         // For every step the power balance constraint must hold in the solution.
         let mut inputs = make_solver_inputs(4, 1.5);
         inputs.p_pv_kw = vec![2.0; 4]; // PV exceeds base, forces export
-        // Add battery so there are non-trivial flows to check
+                                       // Add battery so there are non-trivial flows to check
         inputs.e_bat_nom_kwh = Some(5.0);
         inputs.e_bat_init_kwh = Some(2.5);
         inputs.e_bat_min_kwh = Some(0.5);
@@ -2498,7 +2929,8 @@ mod tests {
         weights.c_ev_ramp_eur_kw = 1.0; // 1 EUR per kW change — very high
 
         let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0)
-            .expect("solver failed").0;
+            .expect("solver failed")
+            .0;
 
         let active_power: Vec<f64> = out.p_ev_kw.iter().copied().filter(|&v| v > 0.05).collect();
         // All active slots must have the same power (within 0.1 kW rounding)
@@ -2531,14 +2963,20 @@ mod tests {
         inputs.eff_bat_dis = Some(1.0);
 
         let mut weights = make_phase2_weights();
-        weights.c_bat_startup_eur = 0.5;   // keep blocks contiguous
-        weights.c_bat_ramp_eur_kw = 1.0;   // very high — force flat power
+        weights.c_bat_startup_eur = 0.5; // keep blocks contiguous
+        weights.c_bat_ramp_eur_kw = 1.0; // very high — force flat power
 
         let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0)
-            .expect("solver failed").0;
+            .expect("solver failed")
+            .0;
 
         // Check charging slots are at uniform power
-        let ch_power: Vec<f64> = out.p_bat_ch_kw.iter().copied().filter(|&v| v > 0.05).collect();
+        let ch_power: Vec<f64> = out
+            .p_bat_ch_kw
+            .iter()
+            .copied()
+            .filter(|&v| v > 0.05)
+            .collect();
         if ch_power.len() > 1 {
             let first = ch_power[0];
             for &p in &ch_power[1..] {
@@ -2549,7 +2987,12 @@ mod tests {
             }
         }
         // Check discharging slots are at uniform power
-        let dis_power: Vec<f64> = out.p_bat_dis_kw.iter().copied().filter(|&v| v > 0.05).collect();
+        let dis_power: Vec<f64> = out
+            .p_bat_dis_kw
+            .iter()
+            .copied()
+            .filter(|&v| v > 0.05)
+            .collect();
         if dis_power.len() > 1 {
             let first = dis_power[0];
             for &p in &dis_power[1..] {
@@ -2586,7 +3029,14 @@ mod tests {
         inputs.p_ev_min_kw = 1.4;
         inputs.e_ev_core_kwh = 4.0 * 1.4; // 5.6 kWh — easily met by PV alone
 
-        let out = solve_phase1(&inputs, &Phase1Weights { c_bat_ev_coexist_eur_kwh: 10.0, ..make_phase1_weights() }).expect("solver failed");
+        let out = solve_phase1(
+            &inputs,
+            &Phase1Weights {
+                c_bat_ev_coexist_eur_kwh: 10.0,
+                ..make_phase1_weights()
+            },
+        )
+        .expect("solver failed");
 
         for t in 0..n {
             if out.z_ev_on[t] > 0.5 {
@@ -2632,8 +3082,15 @@ mod tests {
         set_pv_inject(&mut sim, 0.5, 0.001); // slow alpha → offset barely decays
 
         let inp = build_milp_inputs(
-            &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(),
-            &profile, now, None, None, &[], None,
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
         );
 
         // slot 0: seconds_ahead=0 → decayed_offset = 0.5×(0.999)^0 = 0.5
@@ -2657,8 +3114,15 @@ mod tests {
         set_pv_inject(&mut sim, 0.5, 0.1); // typical alpha=0.1
 
         let inp = build_milp_inputs(
-            &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(),
-            &profile, now, None, None, &[], None,
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
         );
 
         // slot 0: 0.5 × 0.9^0 × 5.0 = 2.5 kW
@@ -2696,12 +3160,26 @@ mod tests {
         set_pv_inject(&mut sim_fast, 0.5, 0.05); // fast: 5 % per second
 
         let inp_slow = build_milp_inputs(
-            &sim_slow, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(),
-            &profile, now, None, None, &[], None,
+            &sim_slow,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
         );
         let inp_fast = build_milp_inputs(
-            &sim_fast, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(),
-            &profile, now, None, None, &[], None,
+            &sim_fast,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
         );
 
         // At slot 3 (900 s ahead at midnight, natural=0):
@@ -2728,8 +3206,15 @@ mod tests {
         let sim = SimState::from_profile(&profile);
 
         let inp = build_milp_inputs(
-            &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(),
-            &profile, now, None, None, &[], None,
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
         );
 
         // Compare every slot against the profile's sin model
@@ -2787,19 +3272,39 @@ mod tests {
                 baseline_kw: 1.0,
             })],
             simulator: SimulatorConfig::default(),
-            planner: PlannerConfig { plan_step_s: 1800, plan_horizon_h: 2, ..PlannerConfig::default() },
-            grid: crate::profile::GridConfig { max_import_kw: 25.0, max_export_kw: 10.0 },
+            planner: PlannerConfig {
+                plan_step_s: 1800,
+                plan_horizon_h: 2,
+                ..PlannerConfig::default()
+            },
+            grid: crate::profile::GridConfig {
+                max_import_kw: 25.0,
+                max_export_kw: 10.0,
+            },
             packets: vec![],
+            absorber: Default::default(),
         };
         let sim = SimState::from_profile(&profile);
         let plan = run_planner(
-            &sim, &make_tariffs(0.25, 0.08, 300.0), &no_capacity(), &profile, now,
-            crate::entities::asset::PlanTrigger::Periodic, None, None, &[], None, None,
+            &sim,
+            &make_tariffs(0.25, 0.08, 300.0),
+            &no_capacity(),
+            &profile,
+            now,
+            crate::entities::asset::PlanTrigger::Periodic,
+            None,
+            None,
+            &[],
+            None,
+            None,
         );
         assert_eq!(plan.slots.len(), 4);
         for slot in &plan.slots {
-            assert!((slot.net_import_kw - 1.0).abs() < 0.05,
-                "expected net_import ≈ 1.0 kW, got {:.4}", slot.net_import_kw);
+            assert!(
+                (slot.net_import_kw - 1.0).abs() < 0.05,
+                "expected net_import ≈ 1.0 kW, got {:.4}",
+                slot.net_import_kw
+            );
             assert!(slot.bat_charge_kw < 1e-3);
             assert!(slot.bat_discharge_kw < 1e-3);
             assert!(!slot.allocations.iter().any(|a| a.asset_id == "ev"));
@@ -2810,7 +3315,9 @@ mod tests {
     fn run_planner_battery_absent_no_bat_allocation() {
         let now = fixed_now();
         let mut profile = make_profile_1800s();
-        profile.assets.retain(|a| !matches!(a, AssetProfile::Battery(_)));
+        profile
+            .assets
+            .retain(|a| !matches!(a, AssetProfile::Battery(_)));
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let session = crate::entities::device_session::EvSession {
@@ -2822,17 +3329,34 @@ mod tests {
             updated_at: now,
         };
         let plan = run_planner(
-            &sim, &make_tariffs(0.25, 0.08, 300.0), &no_capacity(), &profile, now,
-            crate::entities::asset::PlanTrigger::Periodic, Some(&session), None, &[], None, None,
+            &sim,
+            &make_tariffs(0.25, 0.08, 300.0),
+            &no_capacity(),
+            &profile,
+            now,
+            crate::entities::asset::PlanTrigger::Periodic,
+            Some(&session),
+            None,
+            &[],
+            None,
+            None,
         );
         for slot in &plan.slots {
-            assert!(slot.bat_charge_kw < 1e-3,
-                "battery absent → bat_charge_kw=0, got {:.4}", slot.bat_charge_kw);
-            assert!(slot.bat_discharge_kw < 1e-3,
-                "battery absent → bat_discharge_kw=0, got {:.4}", slot.bat_discharge_kw);
+            assert!(
+                slot.bat_charge_kw < 1e-3,
+                "battery absent → bat_charge_kw=0, got {:.4}",
+                slot.bat_charge_kw
+            );
+            assert!(
+                slot.bat_discharge_kw < 1e-3,
+                "battery absent → bat_discharge_kw=0, got {:.4}",
+                slot.bat_discharge_kw
+            );
         }
-        assert!(plan.soc_trajectory_kwh.is_empty() || plan.soc_trajectory_kwh.iter().all(|&v| v < 1e-3),
-            "no battery → soc_trajectory_kwh empty or all-zero");
+        assert!(
+            plan.soc_trajectory_kwh.is_empty() || plan.soc_trajectory_kwh.iter().all(|&v| v < 1e-3),
+            "no battery → soc_trajectory_kwh empty or all-zero"
+        );
     }
 
     #[test]
@@ -2842,12 +3366,23 @@ mod tests {
         profile.assets.retain(|a| !matches!(a, AssetProfile::Ev(_)));
         let sim = SimState::from_profile(&profile);
         let plan = run_planner(
-            &sim, &make_tariffs(0.25, 0.08, 300.0), &no_capacity(), &profile, now,
-            crate::entities::asset::PlanTrigger::Periodic, None, None, &[], None, None,
+            &sim,
+            &make_tariffs(0.25, 0.08, 300.0),
+            &no_capacity(),
+            &profile,
+            now,
+            crate::entities::asset::PlanTrigger::Periodic,
+            None,
+            None,
+            &[],
+            None,
+            None,
         );
         for slot in &plan.slots {
-            assert!(!slot.allocations.iter().any(|a| a.asset_id == "ev"),
-                "EV absent → no EV allocation");
+            assert!(
+                !slot.allocations.iter().any(|a| a.asset_id == "ev"),
+                "EV absent → no EV allocation"
+            );
         }
     }
 
@@ -2855,19 +3390,32 @@ mod tests {
     fn run_planner_battery_charges_on_cheap_tariff() {
         let now = fixed_now();
         let mut profile = make_profile_1800s();
-        profile.assets.retain(|a| matches!(a, AssetProfile::Battery(_) | AssetProfile::BaseLoad(_)));
+        profile
+            .assets
+            .retain(|a| matches!(a, AssetProfile::Battery(_) | AssetProfile::BaseLoad(_)));
         let mut sim = SimState::from_profile(&profile);
         set_battery_soc(&mut sim, 0.1); // low SoC → wants to charge
         let plan = run_planner(
-            &sim, &make_two_zone_tariffs(0.05, 0.40), &no_capacity(), &profile, now,
-            crate::entities::asset::PlanTrigger::Periodic, None, None, &[], None, None,
+            &sim,
+            &make_two_zone_tariffs(0.05, 0.40),
+            &no_capacity(),
+            &profile,
+            now,
+            crate::entities::asset::PlanTrigger::Periodic,
+            None,
+            None,
+            &[],
+            None,
+            None,
         );
         let cheap_charge: f64 = plan.slots[0..2].iter().map(|s| s.bat_charge_kw).sum();
         let exp_dis: f64 = plan.slots[2..4].iter().map(|s| s.bat_discharge_kw).sum();
         assert!(
             cheap_charge > 0.1 || exp_dis > 0.1,
             "expected charging in cheap slots or discharging in expensive slots; \
-             cheap_charge={:.3}, exp_dis={:.3}", cheap_charge, exp_dis
+             cheap_charge={:.3}, exp_dis={:.3}",
+            cheap_charge,
+            exp_dis
         );
     }
 
@@ -2875,16 +3423,27 @@ mod tests {
     fn run_planner_ev_must_run_energy_met() {
         let now = fixed_now();
         let mut profile = make_profile_1800s();
-        profile.assets.retain(|a| !matches!(a, AssetProfile::Heater(_) | AssetProfile::Pv(_)));
+        profile
+            .assets
+            .retain(|a| !matches!(a, AssetProfile::Heater(_) | AssetProfile::Pv(_)));
         // Shrink EV battery so 7 kWh is feasible in 2h at 7.4 kW
-        profile.assets = profile.assets.into_iter().map(|a| match a {
-            AssetProfile::Ev(mut ev) => { ev.battery_kwh = 10.0; AssetProfile::Ev(ev) }
-            other => other,
-        }).collect();
+        profile.assets = profile
+            .assets
+            .into_iter()
+            .map(|a| match a {
+                AssetProfile::Ev(mut ev) => {
+                    ev.battery_kwh = 10.0;
+                    AssetProfile::Ev(ev)
+                }
+                other => other,
+            })
+            .collect();
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         for entry in &mut sim.assets {
-            if let AssetState::Ev(ref mut ev) = entry.state { ev.soc = 0.1; }
+            if let AssetState::Ev(ref mut ev) = entry.state {
+                ev.soc = 0.1;
+            }
         }
         let e_core_kwh = (0.8 - 0.1) * 10.0; // 7.0 kWh
         let session = crate::entities::device_session::EvSession {
@@ -2896,15 +3455,30 @@ mod tests {
             updated_at: now,
         };
         let plan = run_planner(
-            &sim, &make_tariffs(0.25, 0.08, 300.0), &no_capacity(), &profile, now,
-            crate::entities::asset::PlanTrigger::Periodic, Some(&session), None, &[], None, None,
+            &sim,
+            &make_tariffs(0.25, 0.08, 300.0),
+            &no_capacity(),
+            &profile,
+            now,
+            crate::entities::asset::PlanTrigger::Periodic,
+            Some(&session),
+            None,
+            &[],
+            None,
+            None,
         );
         let dt_h = 1800.0 / 3600.0;
-        let ev_energy: f64 = plan.slots.iter()
+        let ev_energy: f64 = plan
+            .slots
+            .iter()
             .map(|s| s.planned_kw_by_asset.get("ev").copied().unwrap_or(0.0) * dt_h)
             .sum();
-        assert!(ev_energy >= e_core_kwh - 0.1,
-            "MustRun EV should meet {:.1} kWh core, got {:.4}", e_core_kwh, ev_energy);
+        assert!(
+            ev_energy >= e_core_kwh - 0.1,
+            "MustRun EV should meet {:.1} kWh core, got {:.4}",
+            e_core_kwh,
+            ev_energy
+        );
     }
 
     #[test]
@@ -2916,17 +3490,34 @@ mod tests {
         let mut sim = SimState::from_profile(&profile);
         set_battery_soc(&mut sim, 0.5);
         let plan = run_planner(
-            &sim, &make_two_zone_tariffs(0.05, 0.40), &no_capacity(), &profile, now,
-            crate::entities::asset::PlanTrigger::Periodic, None, None, &[], None, None,
+            &sim,
+            &make_two_zone_tariffs(0.05, 0.40),
+            &no_capacity(),
+            &profile,
+            now,
+            crate::entities::asset::PlanTrigger::Periodic,
+            None,
+            None,
+            &[],
+            None,
+            None,
         );
         for (t, slot) in plan.slots.iter().enumerate() {
             let ev_kw = slot.planned_kw_by_asset.get("ev").copied().unwrap_or(0.0);
-            let heat_kw = slot.planned_kw_by_asset.get("heater").copied().unwrap_or(0.0);
+            let heat_kw = slot
+                .planned_kw_by_asset
+                .get("heater")
+                .copied()
+                .unwrap_or(0.0);
             // p_imp + p_pv + p_dis = p_base + p_ev + p_heat + p_ch + p_exp
             let lhs = slot.net_import_kw + slot.pv_forecast_kw + slot.bat_discharge_kw;
             let rhs = slot.baseline_kw + ev_kw + heat_kw + slot.bat_charge_kw + slot.net_export_kw;
-            assert!((lhs - rhs).abs() < 0.1,
-                "power balance violated at slot {t}: lhs={:.4} rhs={:.4}", lhs, rhs);
+            assert!(
+                (lhs - rhs).abs() < 0.1,
+                "power balance violated at slot {t}: lhs={:.4} rhs={:.4}",
+                lhs,
+                rhs
+            );
         }
     }
 
@@ -2934,11 +3525,22 @@ mod tests {
     fn run_planner_absent_battery_no_panic() {
         let now = fixed_now();
         let mut profile = make_profile_1800s();
-        profile.assets.retain(|a| !matches!(a, AssetProfile::Battery(_)));
+        profile
+            .assets
+            .retain(|a| !matches!(a, AssetProfile::Battery(_)));
         let sim = SimState::from_profile(&profile);
         let plan = run_planner(
-            &sim, &make_tariffs(0.25, 0.08, 300.0), &no_capacity(), &profile, now,
-            crate::entities::asset::PlanTrigger::Periodic, None, None, &[], None, None,
+            &sim,
+            &make_tariffs(0.25, 0.08, 300.0),
+            &no_capacity(),
+            &profile,
+            now,
+            crate::entities::asset::PlanTrigger::Periodic,
+            None,
+            None,
+            &[],
+            None,
+            None,
         );
         assert_eq!(plan.slots.len(), 4, "plan must have 4 slots");
         assert!(
@@ -2956,10 +3558,24 @@ mod tests {
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         let expected = 20.0 * 200.0 * 4.186 / 3600.0;
-        assert!((inp.e_heat_init_kwh - expected).abs() < 0.01,
-            "e_init={:.4} expected≈{:.4}", inp.e_heat_init_kwh, expected);
+        assert!(
+            (inp.e_heat_init_kwh - expected).abs() < 0.01,
+            "e_init={:.4} expected≈{:.4}",
+            inp.e_heat_init_kwh,
+            expected
+        );
     }
 
     #[test]
@@ -2969,9 +3585,22 @@ mod tests {
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 40.0);
         let mut sim = SimState::from_profile(&profile);
         set_heater_temp(&mut sim, 35.0);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
-        assert!(inp.e_heat_init_kwh < 0.0,
-            "e_init {} should be negative when temp < T_min", inp.e_heat_init_kwh);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
+        assert!(
+            inp.e_heat_init_kwh < 0.0,
+            "e_init {} should be negative when temp < T_min",
+            inp.e_heat_init_kwh
+        );
     }
 
     #[test]
@@ -2980,10 +3609,24 @@ mod tests {
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 40.0);
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         let expected = 40.0 * 200.0 * 4.186 / 3600.0;
-        assert!((inp.e_heat_max_kwh - expected).abs() < 0.01,
-            "e_max={:.4} expected≈{:.4}", inp.e_heat_max_kwh, expected);
+        assert!(
+            (inp.e_heat_max_kwh - expected).abs() < 0.01,
+            "e_max={:.4} expected≈{:.4}",
+            inp.e_heat_max_kwh,
+            expected
+        );
     }
 
     #[test]
@@ -2994,9 +3637,22 @@ mod tests {
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
-        assert!((inp.q_heat_dem_kw - 5.0).abs() < 0.01,
-            "q_dem={:.4} expected 5.0", inp.q_heat_dem_kw);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
+        assert!(
+            (inp.q_heat_dem_kw - 5.0).abs() < 0.01,
+            "q_dem={:.4} expected 5.0",
+            inp.q_heat_dem_kw
+        );
     }
 
     #[test]
@@ -3013,10 +3669,24 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, Some(&target), &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            Some(&target),
+            &[],
+            None,
+        );
         let expected = 30.0 * 200.0 * 4.186 / 3600.0;
-        assert!((inp.e_heat_target_kwh - expected).abs() < 0.01,
-            "e_target={:.4} expected≈{:.4}", inp.e_heat_target_kwh, expected);
+        assert!(
+            (inp.e_heat_target_kwh - expected).abs() < 0.01,
+            "e_target={:.4} expected≈{:.4}",
+            inp.e_heat_target_kwh,
+            expected
+        );
     }
 
     #[test]
@@ -3025,9 +3695,23 @@ mod tests {
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
-        assert!((inp.e_heat_target_kwh - inp.e_heat_max_kwh).abs() < 1e-9,
-            "autonomous: e_target {} should equal e_max {}", inp.e_heat_target_kwh, inp.e_heat_max_kwh);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
+        assert!(
+            (inp.e_heat_target_kwh - inp.e_heat_max_kwh).abs() < 1e-9,
+            "autonomous: e_target {} should equal e_max {}",
+            inp.e_heat_target_kwh,
+            inp.e_heat_max_kwh
+        );
     }
 
     #[test]
@@ -3036,7 +3720,17 @@ mod tests {
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
         assert_eq!(inp.heater_mode, MilpLoadMode::MayRun);
     }
 
@@ -3046,9 +3740,22 @@ mod tests {
         let now = fixed_now();
         let profile = make_profile(); // heater has no switching_penalty_eur set
         let sim = SimState::from_profile(&profile);
-        let inp = build_milp_inputs(&sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), &profile, now, None, None, &[], None);
-        assert!((inp.lambda_heat_sw_eur - 0.01).abs() < 1e-9,
-            "lambda_sw={} expected 0.01", inp.lambda_heat_sw_eur);
+        let inp = build_milp_inputs(
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            None,
+            None,
+            &[],
+            None,
+        );
+        assert!(
+            (inp.lambda_heat_sw_eur - 0.01).abs() < 1e-9,
+            "lambda_sw={} expected 0.01",
+            inp.lambda_heat_sw_eur
+        );
     }
 
     #[test]
@@ -3093,16 +3800,29 @@ mod tests {
         let now = fixed_now();
         let mut profile = make_profile_1800s();
         // Battery-only + base load to keep the problem simple
-        profile.assets.retain(|a| matches!(a, AssetProfile::Battery(_) | AssetProfile::BaseLoad(_)));
+        profile
+            .assets
+            .retain(|a| matches!(a, AssetProfile::Battery(_) | AssetProfile::BaseLoad(_)));
         let mut sim = SimState::from_profile(&profile);
         set_battery_soc(&mut sim, 0.1); // low SoC → planner will charge on cheap slots
         let plan = run_planner(
-            &sim, &make_two_zone_tariffs(0.05, 0.40), &no_capacity(), &profile, now,
-            crate::entities::asset::PlanTrigger::Periodic, None, None, &[], None, None,
+            &sim,
+            &make_two_zone_tariffs(0.05, 0.40),
+            &no_capacity(),
+            &profile,
+            now,
+            crate::entities::asset::PlanTrigger::Periodic,
+            None,
+            None,
+            &[],
+            None,
+            None,
         );
         // Every slot must have the "soc" key for the battery asset.
         for (t, slot) in plan.slots.iter().enumerate() {
-            let state = slot.planned_state_by_asset.get("battery")
+            let state = slot
+                .planned_state_by_asset
+                .get("battery")
                 .unwrap_or_else(|| panic!("slot {t}: planned_state_by_asset missing battery key"));
             assert!(
                 state.contains_key("soc"),
@@ -3110,7 +3830,11 @@ mod tests {
             );
         }
         // FR-008: in slots where the battery is charging, SoC must be non-decreasing.
-        let socs: Vec<f64> = plan.slots.iter().map(|s| s.planned_state_by_asset["battery"]["soc"]).collect();
+        let socs: Vec<f64> = plan
+            .slots
+            .iter()
+            .map(|s| s.planned_state_by_asset["battery"]["soc"])
+            .collect();
         for t in 1..socs.len() {
             if plan.slots[t - 1].bat_charge_kw > 0.01 {
                 assert!(
@@ -3128,15 +3852,26 @@ mod tests {
         let now = fixed_now();
         let mut profile = make_profile_1800s();
         // EV + base load only (no battery, no heater, no PV)
-        profile.assets.retain(|a| matches!(a, AssetProfile::Ev(_) | AssetProfile::BaseLoad(_)));
-        profile.assets = profile.assets.into_iter().map(|a| match a {
-            AssetProfile::Ev(mut ev) => { ev.battery_kwh = 10.0; AssetProfile::Ev(ev) }
-            other => other,
-        }).collect();
+        profile
+            .assets
+            .retain(|a| matches!(a, AssetProfile::Ev(_) | AssetProfile::BaseLoad(_)));
+        profile.assets = profile
+            .assets
+            .into_iter()
+            .map(|a| match a {
+                AssetProfile::Ev(mut ev) => {
+                    ev.battery_kwh = 10.0;
+                    AssetProfile::Ev(ev)
+                }
+                other => other,
+            })
+            .collect();
         let mut sim = SimState::from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         for entry in &mut sim.assets {
-            if let AssetState::Ev(ref mut ev) = entry.state { ev.soc = 0.2; }
+            if let AssetState::Ev(ref mut ev) = entry.state {
+                ev.soc = 0.2;
+            }
         }
         let session = crate::entities::device_session::EvSession {
             id: uuid::Uuid::new_v4(),
@@ -3147,23 +3882,40 @@ mod tests {
             updated_at: now,
         };
         let plan = run_planner(
-            &sim, &make_tariffs(0.25, 0.08, 300.0), &no_capacity(), &profile, now,
-            crate::entities::asset::PlanTrigger::Periodic, Some(&session), None, &[], None, None,
+            &sim,
+            &make_tariffs(0.25, 0.08, 300.0),
+            &no_capacity(),
+            &profile,
+            now,
+            crate::entities::asset::PlanTrigger::Periodic,
+            Some(&session),
+            None,
+            &[],
+            None,
+            None,
         );
         // Every slot must have the "soc" key for the ev asset.
         for (t, slot) in plan.slots.iter().enumerate() {
-            let state = slot.planned_state_by_asset.get("ev")
+            let state = slot
+                .planned_state_by_asset
+                .get("ev")
                 .unwrap_or_else(|| panic!("slot {t}: planned_state_by_asset missing ev key"));
             assert!(
                 state.contains_key("soc"),
                 "slot {t}: missing 'soc' key in ev state map"
             );
             let soc = state["soc"];
-            assert!((0.0..=1.0).contains(&soc), "slot {t}: soc={soc} out of [0,1]");
+            assert!(
+                (0.0..=1.0).contains(&soc),
+                "slot {t}: soc={soc} out of [0,1]"
+            );
         }
         // First slot SoC must match the initial SoC (0.2)
         let first_soc = plan.slots[0].planned_state_by_asset["ev"]["soc"];
-        assert!((first_soc - 0.2).abs() < 1e-9, "expected first-slot soc=0.2, got {first_soc}");
+        assert!(
+            (first_soc - 0.2).abs() < 1e-9,
+            "expected first-slot soc=0.2, got {first_soc}"
+        );
     }
 
     // T018: Heater T_tank trajectory is populated in planned_state_by_asset.
@@ -3173,12 +3925,23 @@ mod tests {
         let profile = make_heater_only_profile(None, 18.0, 23.0, 20.0);
         let sim = SimState::from_profile(&profile);
         let plan = run_planner(
-            &sim, &make_tariffs(0.25, 0.08, 300.0), &no_capacity(), &profile, now,
-            crate::entities::asset::PlanTrigger::Periodic, None, None, &[], None, None,
+            &sim,
+            &make_tariffs(0.25, 0.08, 300.0),
+            &no_capacity(),
+            &profile,
+            now,
+            crate::entities::asset::PlanTrigger::Periodic,
+            None,
+            None,
+            &[],
+            None,
+            None,
         );
         // Every slot must have the "temp_c" key for the heater asset.
         for (t, slot) in plan.slots.iter().enumerate() {
-            let state = slot.planned_state_by_asset.get("heater")
+            let state = slot
+                .planned_state_by_asset
+                .get("heater")
                 .unwrap_or_else(|| panic!("slot {t}: planned_state_by_asset missing heater key"));
             assert!(
                 state.contains_key("temp_c"),

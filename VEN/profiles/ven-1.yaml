@@ -19,7 +19,7 @@ assets:
     min_soc: 0.10
   - type: base_load
     id: base_load
-    baseline_kw: 0.5
+    baseline_kw: 0.4
 
 simulator:
   tick_s: 1
@@ -28,3 +28,18 @@ simulator:
 
 planner:
   plan_adoption_threshold_eur: 0.20
+  replan_interval_s: 300
+  deviation_trigger_ticks: 120
+
+absorber:
+  enabled: true
+  dead_band_kw: 0.1
+  dead_band_clearing_ticks: 1
+  assets:
+    - id: battery
+      priority: 0
+      min_state_linger_s: 0
+    - id: ev
+      priority: 1
+      min_state_linger_s: 0
+      ev_departure_guard_s: 1800

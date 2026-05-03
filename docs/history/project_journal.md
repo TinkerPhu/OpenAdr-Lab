@@ -3292,3 +3292,71 @@ A secondary amplifier: `deviation_trigger_ticks=10` causes DeviceDeviation to fi
 - **Cross-scenario ledger state**: The UC-11c test relied on EV being dispatched in a prior scenario. Under load, the MILP finishes after the EV session is cleaned up, so EV never charges and the ledger never accumulates EV energy. Tests that implicitly depend on cross-scenario state break under load. Fixed by checking `battery` (always active) instead of `ev`.
 - **Cleanup trigger races the new POST**: `after_scenario` deletes the previous load → sends UserRequest trigger → planner wakes and starts a solve with empty shiftable_loads. The new scenario's POST arrives seconds later, but the planner is already 10s into a 120s solve. Only the next solve (after the first finishes) includes the new load.
 
+---
+
+## Phase 30 — Deviation Absorber (Feature 017)
+
+**Status: COMPLETE (cargo tests) / Pending Pi4 BDD validation**
+
+**Branch**: `017-add-deviation-absorber`
+
+### What was built
+
+Feature 017 adds a **two-tier grid deviation control system** to the VEN HEMS controller:
+
+- **Tier 1 (real-time, Absorber)**: `VEN/src/controller/absorber.rs` — applies transient setpoint corrections (deltas from MILP baseline) across battery, EV, and heater, sequentially by priority, without triggering a replan.
+- **Tier 2 (sustained, Escalation)**: `accumulate_deviation()` in `loops.rs` — if absorber residual persists beyond `deviation_trigger_ticks`, fires `PlanTrigger::DeviceDeviation` to kick off a full MILP replan.
+
+The absorber runs every sim tick (1 s) and keeps corrections out of the planner loop for transient deviations. The MILP planner is only bothered when the absorber is truly exhausted for a sustained period.
+
+### Key design decisions
+
+**Residual vs. raw deviation for Tier 2**: Tier 2 accumulates `residual_kw` (what the absorber couldn't cover), not raw `deviation_kw`. This prevents phantom replanning for deviations the absorber handles in real-time. The signal is cleaner and more meaningful: "Tier 1 is exhausted" rather than "grid is slightly off plan."
+
+**1-tick settling ramp**: When deviation clears (drops into dead-band), overlays are zeroed in exactly 1 tick — no multi-tick ramp. Rationale: faster return to clean MILP setpoints avoids stale overlays coupling the absorber's timing to the MILP schedule. The absorber's job is transient correction, not smooth ramping; the MILP handles steady-state.
+
+**EV departure guard**: The absorber skips EV charging curtailment when departure is imminent (within `ev_departure_guard_s`) and EV SoC < target. The guard does NOT block increasing EV charge (absorbing surplus PV) — only reducing it. When no active session exists, the guard is off (unknown departure = conservative assumption: prioritize absorption).
+
+**SSE deduplication threshold (0.2 kW)**: `CorrectionActive` events are suppressed if the total correction changed by < 0.2 kW since the last emission. Prevents SSE flood during small oscillations. `CorrectionCleared` is always emitted (state transition, not magnitude change).
+
+**`AbsorberState` naming**: The state struct was called `DeviationState` in the spec but renamed to `AbsorberState` to better reflect scope. The name matches the module (`controller::absorber`) and is unambiguous in context (`loops.rs` mixes absorber state with multiple other concepts).
+
+### Implementation sequence and issues
+
+**Speckit audit first**: Before implementing, we audited `tasks.md` against the codebase and found ~30% of tasks already done from earlier commits (absorber.rs skeleton, profile structs, BDD scenarios). Marking those done first prevented duplicate work.
+
+**Compile errors from stale test code**: Several existing tests in `loops.rs` referenced removed types (`DeviationState`, `apply_deviation_correction`) and non-existent fields (`firmness_pct`, `net_power_kw` on `GridMeter`). These were pre-existing bugs that had never been caught because VEN unit tests had never been run in CI. Fixed by replacing the 6 stale tests with 4 new `accumulate_deviation` tests.
+
+**`EnergyCounter` private re-export**: `crate::simulator::EnergyCounter` is private because `simulator/mod.rs` uses `use energy::EnergyCounter` (not `pub use`). The fix was `use crate::simulator::energy::EnergyCounter` directly — `pub mod energy` is public, but the re-export at the `simulator` level is not.
+
+**`Profile::default()` is an associated function, not `impl Default`**: Three struct literals in `milp_planner.rs` used `..Default::default()` to fill in the new `absorber` field. This compiles only if `Profile: Default`, but `Profile` has `pub fn default() -> Self` as an associated function, not an implementation of the `Default` trait. Fix: explicit `absorber: Default::default()` (which uses `AbsorberConfig`'s real `impl Default`).
+
+**`#[serde(default)]` on nested fields**: `AbsorberAssetConfig.min_state_linger_s` was required in YAML (no default). Profiles that omitted it caused a deserialization error. Fixed by adding `#[serde(default)]` — the field defaults to 0 (no linger), which is correct for electronics.
+
+**Docker build context (2.1 GB)**: First Pi4 builds of the unit test Docker image were slow because VEN/target/ (2.1 GB) was being sent as build context. Fixed by adding `VEN/.dockerignore` with `target/` excluded.
+
+**Named volume for Pi4 unit tests**: Introduced `tests/docker-compose.ven-unit-test.yml` with named volumes for cargo registry, git, and target directories. First run seeds the volume with all compiled artifacts; subsequent runs take ~2-3 min (incremental only). HiGHS compiles once and stays cached.
+
+### Test coverage
+
+19 new unit tests in `absorber.rs`:
+- Battery absorbs positive/negative deviation within capacity
+- EV absorbs residual when battery exhausted (T021)
+- Dead-band prevents chatter
+- Settling ramps to zero after deviation clears (T023)
+- Full residual returned when all assets exhausted (T024)
+- `linger_ok`: first change, before/after min_linger_s (T041/T042)
+- EV departure guard: active, inactive, surplus absorption, no session (T049–T052)
+- Absorber disabled passthrough
+
+4 updated unit tests in `loops.rs`:
+- `accumulate_deviation`: increments on residual, fires trigger at threshold, resets on clear, recovery cycle (T061–T063 + recovery)
+
+Final result: **307 passed, 0 failed** (Pi4 Pi4 `docker compose run`), confirmed by WSL2 first build.
+
+### Key learnings
+
+- VEN unit tests had never been run in CI — the first run revealed multiple stale tests referencing removed types. Always run unit tests as part of every feature spec validation.
+- `impl Default` vs. `pub fn default()` is a subtle Rust distinction. Struct spread `..Default::default()` requires the trait to be implemented; an associated function of the same name does not satisfy the trait bound.
+- The `--build` flag on `docker compose run` rebuilds the test runner image; without it, changed source files are silently ignored (baked in at build time via `COPY`).
+
