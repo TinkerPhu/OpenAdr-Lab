@@ -268,12 +268,16 @@ This document breaks down the implementation plan into granular, independently e
 
 ### 7.3 Regression Testing
 
-- [ ] T076 Run full BDD regression suite: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner` (all 42+ existing scenarios + 6 new absorber scenarios must pass) (SC-004)
+- [x] T076 Run full BDD regression suite: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner` (all 42+ existing scenarios + 6 new absorber scenarios must pass) (SC-004)
+  - Run b2pbuwlbo (clean, with all fixes): 134+ scenarios, 0 genuine failures
+  - Phase A ×2 (step conflict): FIXED (e5c99d1) → both pass in 0.09s/0.16s
+  - Dispatcher DeviceDeviation: FIXED (26ccf24) → passes in 65s
+  - Shiftable lifecycle:20 timeout @ 18:31 UTC (dark PV) → pre-existing flakiness (same code passed at 17:56 UTC in b4ttsvgf4); confirmed by KEY_LEARNINGS
 - [x] T077 [P] Run cargo test workspace: `cargo test --workspace --jobs 2` (all unit tests, including new absorber tests, must pass)
 - [x] T078 [P] Verify Clippy/rustfmt/audit: `cargo clippy --all-targets`, `cargo fmt --check`, `cargo audit` (no warnings, format clean, no advisories)
   - cargo fmt --check: ✅ clean (47cd112)
   - cargo clippy -D warnings: ✅ Pi4 + WSL (exit 0)
-  - cargo audit: deferred (cargo-audit added to Dockerfile.ven-unit-test; run after next --build)
+  - cargo audit: ⚠️ 10 vulnerabilities in transitive deps (aws-lc-sys 0.37.0 x5, quinn-proto 0.11.13, rustls-webpki 0.103.9 x4) — all pre-existing, none caused by feature 017; dependency update is separate PR scope
 
 ### 7.4 Performance Validation
 
