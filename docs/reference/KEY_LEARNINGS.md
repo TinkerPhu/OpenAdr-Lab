@@ -208,3 +208,20 @@
 - **Dead `TimeWindow` in `assets/mod.rs` coexists with live `TimeWindow` in `controller/timeline.rs`**: SC-002 verification grep for `TimeWindow` produces hits in the timeline module — these are a completely different struct used by the `/timeline` route feature. Only the dead `TimeWindow` in `assets/mod.rs` (used solely by `AssetCapabilities`) is removed. The grep pattern is correct but results require human triage.
 
 - **INVARIANT: no RwLock guard held across a second lock acquisition** — even read guards. While two simultaneous `read()` calls can't deadlock, holding a guard across an `.await` of a second lock violates the stated INVARIANT and makes the code harder to audit. Always use the acquire-clone-drop pattern: `let val = { lock.read().await.field.clone() };` before acquiring the next lock.
+
+## Deviation Absorber (017-add-deviation-absorber)
+
+- **`impl Default` vs. `pub fn default()` is a Rust trait bound distinction**: A struct with `pub fn default() -> Self` as an associated function does NOT satisfy `T: Default`. Struct spread `..Default::default()` requires the `Default` trait to be implemented. When adding a new field to such a struct in test literals, you must write the field explicitly (e.g., `absorber: Default::default()` using the nested struct's real trait impl) rather than relying on spread syntax.
+
+- **Private re-export at module boundary**: `crate::simulator::EnergyCounter` is not available because `simulator/mod.rs` uses `use energy::EnergyCounter` (private), not `pub use`. To use it from outside `simulator`, import through the public sub-module: `use crate::simulator::energy::EnergyCounter`. Before assuming a re-export exists, check whether the mod.rs line is `pub use` or just `use`.
+
+- **VEN unit tests were never run in CI**: The first `cargo test` run on Pi4 revealed multiple stale tests referencing removed types (`DeviationState`, `apply_deviation_correction`) and non-existent fields. New features should ensure unit tests run in the BDD pipeline (or a parallel cargo-test job). Test infrastructure gaps accumulate silently.
+
+- **Residual vs. raw deviation for Tier 2 triggers**: Accumulating the raw grid deviation (post-net) into a Tier 2 counter causes spurious MILP replans for transient deviations the absorber handles in real-time. Accumulate `residual_kw` (what the absorber could NOT cover) instead. The trigger becomes "absorber exhausted for N consecutive ticks" — a semantically meaningful and less noisy escalation signal.
+
+- **SSE deduplication by magnitude delta**: Emitting a `CorrectionActive` event every tick floods SSE subscribers with near-identical messages. A threshold (0.2 kW change since last emission) suppresses noise during steady-state correction. State-transition events (`CorrectionCleared`) should always be emitted regardless of magnitude — they signal a discrete change in control state.
+
+- **Docker build context includes `target/` by default**: On a Pi4 with 2.1 GB in VEN/target/, every `docker compose run --build` spent 3 minutes just sending the build context before compilation started. Fix: add `VEN/.dockerignore` with `target/`. Named volumes (`ven-cargo-target`) then keep the compiled artifacts across runs without re-sending them through the Docker socket.
+
+- **EV departure guard: skipping charge curtailment, not charge addition**: The guard blocks the absorber from reducing EV charge when departure is imminent and SoC < target. It does NOT block increasing EV charge to absorb surplus. When no session exists (unknown departure), the guard is disabled — conservative assumption is that absorption takes priority. Guard only triggers for positive deviation (import excess → curtail load).
+
