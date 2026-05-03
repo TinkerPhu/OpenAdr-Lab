@@ -487,6 +487,7 @@ mod tests {
         use crate::simulator::{AssetEntry, EnergyCounter};
 
         let battery_cfg = BatteryConfig {
+            id: "battery".to_string(),
             capacity_kwh: 10.0,
             max_charge_kw: 5.0,
             max_discharge_kw: 5.0,
@@ -526,7 +527,7 @@ mod tests {
                     setpoint_kw: 0.0,
                     last_power_kw: 0.0,
                     energy: EnergyCounter::new(),
-                    history: crate::simulator::AssetHistoryBuffer::new(3600),
+                    history: crate::assets::AssetHistoryBuffer::new(3600),
                 },
                 AssetEntry {
                     id: "ev".to_string(),
@@ -534,11 +535,11 @@ mod tests {
                     setpoint_kw: 0.0,
                     last_power_kw: 0.0,
                     energy: EnergyCounter::new(),
-                    history: crate::simulator::AssetHistoryBuffer::new(3600),
+                    history: crate::assets::AssetHistoryBuffer::new(3600),
                 },
             ],
             grid: crate::simulator::GridMeter::default(),
-            grid_asset: crate::simulator::Grid::default(),
+            grid_asset: crate::assets::Grid::default(),
             pv_smoothing: Default::default(),
             base_load_smoothing: Default::default(),
             last_tick: chrono::Utc::now(),
