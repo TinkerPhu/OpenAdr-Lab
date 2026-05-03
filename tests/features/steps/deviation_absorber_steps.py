@@ -5,6 +5,10 @@ import time
 from datetime import datetime
 from features.helpers.api_client import ven_get, ven_post
 
+# Note: "@given the battery SoC is reset to {soc:f}" is defined in
+# phase_a_physics_steps.py (uses POST /sim/reset/battery). Do NOT redefine it
+# here — duplicate @given causes behave to use an unpredictable version.
+
 
 def _inject(payload, label):
     """POST /sim/inject — endpoint returns 204 No Content."""
@@ -46,15 +50,14 @@ def step_absorber_enabled(context):
 
 # ─── Given: asset state setup ────────────────────────────────────────────────
 
-@given("the battery SoC is reset to {soc:f}")
-def step_battery_soc_reset(context, soc):
-    _inject({"battery_soc": soc}, "Failed to set battery SoC")
-    context.battery_initial_soc = soc
-
-
 @given("the battery SoC is reset to min_soc")
 def step_battery_soc_min(context):
-    step_battery_soc_reset(context, 0.10)
+    # Use POST /sim/reset/battery (from phase_a_physics_steps.py) for SoC reset.
+    # This step only covers the "min_soc" alias — the generic {soc:f} step is
+    # defined in phase_a_physics_steps.py to avoid duplicate registration.
+    r = ven_post("/sim/reset/battery", json={"soc": 0.10})
+    assert r.status_code == 204, f"Failed to reset battery to min_soc: {r.status_code} {r.text}"
+    context.battery_initial_soc = 0.10
     context.battery_at_min = True
 
 
