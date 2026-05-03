@@ -484,7 +484,8 @@ mod tests {
         use crate::assets::battery::Battery;
         use crate::assets::ev::EvCharger;
         use crate::profile::{BatteryConfig, EvConfig};
-        use crate::simulator::{AssetEntry, EnergyCounter};
+        use crate::simulator::AssetEntry;
+        use crate::simulator::energy::EnergyCounter;
 
         let battery_cfg = BatteryConfig {
             id: "battery".to_string(),

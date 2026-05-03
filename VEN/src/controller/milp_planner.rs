@@ -1903,7 +1903,7 @@ mod tests {
                 max_export_kw: 10.0,
             },
             packets: vec![],
-            ..Default::default()
+            absorber: Default::default(),
         }
     }
 
@@ -1966,7 +1966,7 @@ mod tests {
                 max_export_kw: 10.0,
             },
             packets: vec![],
-            ..Default::default()
+            absorber: Default::default(),
         }
     }
 
@@ -2792,7 +2792,7 @@ mod tests {
             planner: PlannerConfig { plan_step_s: 1800, plan_horizon_h: 2, ..PlannerConfig::default() },
             grid: crate::profile::GridConfig { max_import_kw: 25.0, max_export_kw: 10.0 },
             packets: vec![],
-            ..Default::default()
+            absorber: Default::default(),
         };
         let sim = SimState::from_profile(&profile);
         let plan = run_planner(
