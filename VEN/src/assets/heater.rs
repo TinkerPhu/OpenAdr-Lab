@@ -3,9 +3,7 @@ use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, So
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{
-    Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind,
-};
+use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
 use crate::profile::HeaterConfig;
 
@@ -82,7 +80,11 @@ impl Heater {
         // Quantize to the nearest valid hardware tier: 0 / mid_kw / max_kw.
         // The heater has two physical relays; intermediate values are impossible.
         // mid_kw = 0.0 means "not set" (old persisted JSON); fall back to max_kw / 2.0.
-        let mid = if self.mid_kw > 0.0 { self.mid_kw } else { self.max_kw / 2.0 };
+        let mid = if self.mid_kw > 0.0 {
+            self.mid_kw
+        } else {
+            self.max_kw / 2.0
+        };
         let tier = if setpoint_kw < mid / 2.0 {
             0.0
         } else if setpoint_kw < (mid + self.max_kw) / 2.0 {
@@ -371,14 +373,20 @@ impl HeaterMilpContext {
 
         let z_heat_mid = (0..n)
             .map(|_| {
-                if must_not { vars.add(variable().min(0.0).max(0.0)) }
-                else { vars.add(variable().binary()) }
+                if must_not {
+                    vars.add(variable().min(0.0).max(0.0))
+                } else {
+                    vars.add(variable().binary())
+                }
             })
             .collect();
         let z_heat_full = (0..n)
             .map(|_| {
-                if must_not { vars.add(variable().min(0.0).max(0.0)) }
-                else { vars.add(variable().binary()) }
+                if must_not {
+                    vars.add(variable().min(0.0).max(0.0))
+                } else {
+                    vars.add(variable().binary())
+                }
             })
             .collect();
 
@@ -397,17 +405,20 @@ impl HeaterMilpContext {
             .collect();
 
         // s_low[t]: non-negative below-min slack.
-        let s_low = (0..n)
-            .map(|_| vars.add(variable().min(0.0)))
-            .collect();
+        let s_low = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
 
         // sw[t]: switching indicator ≥ 0 for all slots including t=0.
         // t=0 measures the switch relative to the last observed hardware state (initial_z_*).
-        let sw = (0..n)
-            .map(|_| vars.add(variable().min(0.0)))
-            .collect();
+        let sw = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
 
-        HeaterMilpVars { z_heat_mid, z_heat_full, z_heat_ready, e_tank, s_low, sw }
+        HeaterMilpVars {
+            z_heat_mid,
+            z_heat_full,
+            z_heat_ready,
+            e_tank,
+            s_low,
+            sw,
+        }
     }
 
     /// Instantaneous heater power expression at slot `t` (for power balance).
@@ -467,13 +478,25 @@ impl HeaterMilpContext {
         // so switching at t=0 is allowed but incurs the relay penalty.
         cs.push(constraint!(v.sw[0] >= v.z_heat_mid[0] - self.initial_z_mid));
         cs.push(constraint!(v.sw[0] >= self.initial_z_mid - v.z_heat_mid[0]));
-        cs.push(constraint!(v.sw[0] >= v.z_heat_full[0] - self.initial_z_full));
-        cs.push(constraint!(v.sw[0] >= self.initial_z_full - v.z_heat_full[0]));
+        cs.push(constraint!(
+            v.sw[0] >= v.z_heat_full[0] - self.initial_z_full
+        ));
+        cs.push(constraint!(
+            v.sw[0] >= self.initial_z_full - v.z_heat_full[0]
+        ));
         for t in 1..n {
-            cs.push(constraint!(v.sw[t] >= v.z_heat_mid[t] - v.z_heat_mid[t - 1]));
-            cs.push(constraint!(v.sw[t] >= v.z_heat_mid[t - 1] - v.z_heat_mid[t]));
-            cs.push(constraint!(v.sw[t] >= v.z_heat_full[t] - v.z_heat_full[t - 1]));
-            cs.push(constraint!(v.sw[t] >= v.z_heat_full[t - 1] - v.z_heat_full[t]));
+            cs.push(constraint!(
+                v.sw[t] >= v.z_heat_mid[t] - v.z_heat_mid[t - 1]
+            ));
+            cs.push(constraint!(
+                v.sw[t] >= v.z_heat_mid[t - 1] - v.z_heat_mid[t]
+            ));
+            cs.push(constraint!(
+                v.sw[t] >= v.z_heat_full[t] - v.z_heat_full[t - 1]
+            ));
+            cs.push(constraint!(
+                v.sw[t] >= v.z_heat_full[t - 1] - v.z_heat_full[t]
+            ));
         }
 
         // C6: deadline constraint.
@@ -509,8 +532,8 @@ impl HeaterMilpContext {
         }
         for t in 0..n {
             obj += w_tier_penalty_eur * v.z_heat_full[t]; // prefer mid over full when equal cost
-            obj += m_low_eur_kwh * v.s_low[t];            // penalise below-min violations
-            obj += self.lambda_sw_eur * v.sw[t];           // penalise relay switches
+            obj += m_low_eur_kwh * v.s_low[t]; // penalise below-min violations
+            obj += self.lambda_sw_eur * v.sw[t]; // penalise relay switches
         }
         obj
     }
@@ -542,14 +565,30 @@ impl HeaterMilpContext {
         } else {
             (cfg.temp_min_c + cfg.temp_max_c) / 2.0
         };
-        let live_mid_kw = if cfg.mid_kw > 0.0 { cfg.mid_kw } else { cfg.max_kw / 2.0 };
+        let live_mid_kw = if cfg.mid_kw > 0.0 {
+            cfg.mid_kw
+        } else {
+            cfg.max_kw / 2.0
+        };
         let e_init = (current_temp - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c;
         let e_max = ((cfg.temp_max_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c).max(0.0);
         let q_dem = cfg.forecast_demand_kw(cfg.ambient_temp_c);
         // Initial mode detection from last observed hardware tier.
-        let actual_kw = if let super::AssetState::Heater(s) = state { s.actual_power_kw } else { 0.0 };
-        let initial_z_mid = if (actual_kw - live_mid_kw).abs() < 0.1 { 1.0 } else { 0.0 };
-        let initial_z_full = if (actual_kw - cfg.max_kw).abs() < 0.1 { 1.0 } else { 0.0 };
+        let actual_kw = if let super::AssetState::Heater(s) = state {
+            s.actual_power_kw
+        } else {
+            0.0
+        };
+        let initial_z_mid = if (actual_kw - live_mid_kw).abs() < 0.1 {
+            1.0
+        } else {
+            0.0
+        };
+        let initial_z_full = if (actual_kw - cfg.max_kw).abs() < 0.1 {
+            1.0
+        } else {
+            0.0
+        };
         if let Some(target) = heater_target {
             let e_target = ((target.target_temp_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c)
                 .clamp(0.0, e_max);
@@ -701,9 +740,18 @@ mod tests {
         let schema = heater.control_schema();
         let keys: Vec<_> = schema.iter().map(|d| d.key.as_str()).collect();
         assert!(keys.contains(&"heater_temp_c"), "missing heater_temp_c");
-        assert!(keys.contains(&"heater_setpoint_c"), "missing heater_setpoint_c");
-        assert!(keys.contains(&"heater_temp_min_c"), "missing heater_temp_min_c");
-        assert!(keys.contains(&"heater_temp_max_c"), "missing heater_temp_max_c");
+        assert!(
+            keys.contains(&"heater_setpoint_c"),
+            "missing heater_setpoint_c"
+        );
+        assert!(
+            keys.contains(&"heater_temp_min_c"),
+            "missing heater_temp_min_c"
+        );
+        assert!(
+            keys.contains(&"heater_temp_max_c"),
+            "missing heater_temp_max_c"
+        );
         assert_eq!(schema.len(), 4, "expected exactly 4 control descriptors");
     }
 
@@ -711,7 +759,10 @@ mod tests {
     fn control_schema_heater_setpoint_bounds() {
         let heater = default_heater();
         let schema = heater.control_schema();
-        let sp_d = schema.iter().find(|d| d.key == "heater_setpoint_c").unwrap();
+        let sp_d = schema
+            .iter()
+            .find(|d| d.key == "heater_setpoint_c")
+            .unwrap();
         let temp_d = schema.iter().find(|d| d.key == "heater_temp_c").unwrap();
         assert_eq!(sp_d.min.unwrap(), 0.0);
         assert_eq!(sp_d.max.unwrap(), heater.max_kw);
@@ -723,8 +774,14 @@ mod tests {
     fn control_schema_t_tank_bounds_are_18_to_95() {
         let heater = default_heater();
         let schema = heater.control_schema();
-        let min_d = schema.iter().find(|d| d.key == "heater_temp_min_c").unwrap();
-        let max_d = schema.iter().find(|d| d.key == "heater_temp_max_c").unwrap();
+        let min_d = schema
+            .iter()
+            .find(|d| d.key == "heater_temp_min_c")
+            .unwrap();
+        let max_d = schema
+            .iter()
+            .find(|d| d.key == "heater_temp_max_c")
+            .unwrap();
         assert_eq!(min_d.min.unwrap(), 18.0);
         assert_eq!(min_d.max.unwrap(), 94.0);
         assert_eq!(max_d.min.unwrap(), 19.0);
@@ -776,7 +833,10 @@ mod tests {
         assert!(n > 0.0);
         let mean: f64 = ts.samples.iter().map(|(_, kw)| kw).sum::<f64>() / n;
         // Expect long-run equilibrium in reasonable range
-        assert!((0.5..=2.5).contains(&mean), "mean {mean:.3} kW out of range");
+        assert!(
+            (0.5..=2.5).contains(&mean),
+            "mean {mean:.3} kW out of range"
+        );
     }
 
     // ── step_inner physics ────────────────────────────────────────────────────
@@ -794,7 +854,10 @@ mod tests {
         let heater = default_heater();
         let state = state_at(19.9, 0.0);
         let (_ns, power) = heater.step_inner(&state, 1.0, Duration::seconds(1));
-        assert_eq!(power, heater.max_kw, "heater must run at max_kw below temp_min");
+        assert_eq!(
+            power, heater.max_kw,
+            "heater must run at max_kw below temp_min"
+        );
     }
 
     #[test]
@@ -830,7 +893,8 @@ mod tests {
         assert!(
             (actual_delta - expected_delta).abs() < 0.01,
             "k_loss or draw physics wrong: got Δ{:.3}°C, expected Δ{:.3}°C",
-            actual_delta, expected_delta
+            actual_delta,
+            expected_delta
         );
     }
 
@@ -838,7 +902,10 @@ mod tests {
     fn hwt_draw_drains_tank_when_off() {
         // With 0.5 kW draw and no heater, tank should cool faster than without draw.
         let heater = hot_water_heater();
-        let no_draw = Heater { draw_kw: 0.0, ..hot_water_heater() };
+        let no_draw = Heater {
+            draw_kw: 0.0,
+            ..hot_water_heater()
+        };
         let state = state_at(60.0, 0.0);
         let dt = Duration::seconds(3600);
         let (s_with_draw, _) = heater.step_inner(&state, 0.0, dt);
@@ -869,7 +936,10 @@ mod tests {
         let heater = hot_water_heater();
         let state = state_at(39.9, 0.0); // just below min (40°C)
         let (_ns, power) = heater.step_inner(&state, 0.0, Duration::seconds(1));
-        assert_eq!(power, heater.max_kw, "emergency: must run at max below temp_min");
+        assert_eq!(
+            power, heater.max_kw,
+            "emergency: must run at max below temp_min"
+        );
     }
 
     #[test]
@@ -897,7 +967,7 @@ mod tests {
         // If ambient > T_mid, loss is negative; result must not go negative.
         let heater = hot_water_heater(); // draw=0.5, k_loss=0.003, T_mid=60
         let q_dem = heater.forecast_demand_kw(80.0); // ambient well above T_mid
-        // draw 0.5 + 0.003×(60-80) = 0.5 - 0.06 = 0.44 → positive; still ≥ 0
+                                                     // draw 0.5 + 0.003×(60-80) = 0.5 - 0.06 = 0.44 → positive; still ≥ 0
         assert!(q_dem >= 0.0, "q_dem must be non-negative, got {q_dem}");
     }
 
@@ -961,10 +1031,13 @@ mod tests {
     #[test]
     fn future_state_values_mid_energy() {
         let h = default_heater(); // thermal_mass_kwh_per_c = 2.0, temp_min_c = 20.0
-        // 2.0 kWh stored → temp = 20.0 + 2.0 / 2.0 = 21.0 °C
+                                  // 2.0 kWh stored → temp = 20.0 + 2.0 / 2.0 = 21.0 °C
         let vals = h.future_state_values(2.0);
         let temp_c = vals["temp_c"];
-        assert!((temp_c - 21.0).abs() < 1e-9, "expected temp_c=21.0, got {temp_c}");
+        assert!(
+            (temp_c - 21.0).abs() < 1e-9,
+            "expected temp_c=21.0, got {temp_c}"
+        );
     }
 
     #[test]

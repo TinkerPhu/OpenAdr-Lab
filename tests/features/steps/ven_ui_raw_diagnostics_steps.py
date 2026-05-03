@@ -97,18 +97,32 @@ def step_select_timeline_series(context, series):
     page = context.browser_page
     select = page.wait_for_selector(tid("timeline-series-select"), timeout=45000)
     select.dispatch_event("click")
-    # MUI Select renders options in a portal — select by visible text
-    option = page.wait_for_selector(f'li[role="option"]:has-text("{series}")', timeout=15000)
-    option.dispatch_event("click")
+    # MUI Select renders options in a portal — find option by text content
+    options = page.query_selector_all('li[role="option"]')
+    option_found = None
+    for opt in options:
+        if series in opt.inner_text():
+            option_found = opt
+            break
+    assert option_found is not None, f'Timeline option "{series}" not found in dropdown'
+    option_found.dispatch_event("click")
+    # Wait for dropdown to close and selection to be applied
+    page.wait_for_timeout(500)
     context.selected_series = series
 
 
 @then("the series dropdown lists the available asset series")
 def step_series_dropdown_visible(context):
-    el = context.browser_page.wait_for_selector(
+    page = context.browser_page
+    el = page.wait_for_selector(
         tid("timeline-series-select"), timeout=45000
     )
     assert el is not None and el.is_visible(), "Timeline series dropdown not visible"
+    # Optionally click to verify it opens and shows options
+    el.dispatch_event("click")
+    page.wait_for_timeout(500)  # Wait for MUI portal to render
+    options = page.query_selector_all('li[role="option"]')
+    assert len(options) > 0, "Timeline dropdown has no options"
 
 
 @then('the Timeline chart displays data for "{series}"')

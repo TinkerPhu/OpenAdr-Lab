@@ -17,7 +17,7 @@ use config::Config;
 use entities::asset::PlanTrigger;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use planner_events::{PlannerEvent, PlannerEventTx};
-use profile::{Profile, PlannerObjective};
+use profile::{PlannerObjective, Profile};
 use simulator::SimState;
 use state::AppState;
 use std::sync::{atomic::AtomicBool, Arc};
@@ -105,6 +105,12 @@ async fn main() -> anyhow::Result<()> {
         let sim = loaded.unwrap_or_else(|| SimState::from_profile(&profile));
         Arc::new(Mutex::new(sim))
     };
+
+    // Validate absorber configuration at startup
+    {
+        let sim_guard = sim_state.lock().await;
+        controller::absorber::validate_startup(&profile, &sim_guard)?;
+    }
 
     // Spawn background loops
     loops::spawn_program_poll(state.clone(), vtn.clone(), cfg.poll_programs_secs);

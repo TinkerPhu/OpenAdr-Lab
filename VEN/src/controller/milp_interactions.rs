@@ -167,7 +167,9 @@ impl AssetInteraction for BatEvCoexistInteraction {
                 // McCormick envelope for x = p_bat_dis[t] × z_ev_on[t]
                 cs.push(constraint!(x <= bat.p_dis[t]));
                 cs.push(constraint!(x <= dis_max * ev.z_ev_on[t]));
-                cs.push(constraint!(x >= bat.p_dis[t] - dis_max * (1.0 - ev.z_ev_on[t])));
+                cs.push(constraint!(
+                    x >= bat.p_dis[t] - dis_max * (1.0 - ev.z_ev_on[t])
+                ));
             }
         }
         cs

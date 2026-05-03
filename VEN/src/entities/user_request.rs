@@ -46,7 +46,7 @@ pub struct UserRequest {
     pub completion_policy: String,
     pub max_total_cost_eur: Option<f64>, // from first tier (for API convenience)
     pub tier_count: usize,               // number of deadline tiers
-    pub session_id: Option<Uuid>,        // linked DeviceSession (EvSession, HeaterTarget, or ShiftableLoad)
+    pub session_id: Option<Uuid>, // linked DeviceSession (EvSession, HeaterTarget, or ShiftableLoad)
     #[serde(default)]
     pub session_type: Option<SessionType>,
     pub status: UserRequestStatus,

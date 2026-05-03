@@ -229,16 +229,14 @@ impl SimState {
                         self.base_load_smoothing.load_offset_kw =
                             forced_kw - bl.baseline_kw_profile;
                     } else {
-                        let per_tick_factor =
-                            (1.0 - base_load_alpha).powf(dt_s / PLAN_STEP_S);
+                        let per_tick_factor = (1.0 - base_load_alpha).powf(dt_s / PLAN_STEP_S);
                         self.base_load_smoothing.load_offset_kw *= per_tick_factor;
                         if self.base_load_smoothing.load_offset_kw.abs() < 0.005 {
                             self.base_load_smoothing.load_offset_kw = 0.0;
                         }
                     }
                     bl.baseline_kw =
-                        (bl.baseline_kw_profile + self.base_load_smoothing.load_offset_kw)
-                            .max(0.0);
+                        (bl.baseline_kw_profile + self.base_load_smoothing.load_offset_kw).max(0.0);
                 }
                 AssetConfig::Ev(ev) => {
                     // Behaviour C: ev_plugged — hold override or snap back to profile default
