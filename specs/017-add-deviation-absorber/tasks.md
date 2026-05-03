@@ -256,7 +256,7 @@ This document breaks down the implementation plan into granular, independently e
 - [x] T070 [P] Add `absorber:` section to `VEN/profiles/ven-1.yaml` with same structure as test.yaml, but `min_state_linger_s: 30` for heater; set planner `deviation_trigger_ticks: 120`, `replan_interval_s: 300` (production baseline)
 - [x] T071 [P] Add `absorber:` section to `VEN/profiles/ven-2.yaml` (same as ven-1.yaml)
 - [x] T072 [P] Add `absorber:` section to `VEN/profiles/ven-3.yaml` (same as ven-1.yaml)
-- [ ] T073 Verify all 4 profile YAML files load successfully: `cargo test profile` (FR-009, FR-010, SC-008)
+- [x] T073 Verify all 4 profile YAML files load successfully: `cargo test profile` (FR-009, FR-010, SC-008)
 
 ### 7.2 BDD: Settling Behavior
 
@@ -269,7 +269,7 @@ This document breaks down the implementation plan into granular, independently e
 ### 7.3 Regression Testing
 
 - [ ] T076 Run full BDD regression suite: `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner` (all 42+ existing scenarios + 6 new absorber scenarios must pass) (SC-004)
-- [ ] T077 [P] Run cargo test workspace: `cargo test --workspace --jobs 2` (all unit tests, including new absorber tests, must pass)
+- [x] T077 [P] Run cargo test workspace: `cargo test --workspace --jobs 2` (all unit tests, including new absorber tests, must pass)
 - [ ] T078 [P] Verify Clippy/rustfmt/audit: `cargo clippy --all-targets`, `cargo fmt --check`, `cargo audit` (no warnings, format clean, no advisories)
 
 ### 7.4 Performance Validation
@@ -283,17 +283,17 @@ This document breaks down the implementation plan into granular, independently e
 
 ### 7.5 Manual Integration & Code Review
 
-- [ ] T085 Verify all profile startup validations pass: absorber asset IDs match SimState assets, priorities are unique (log warnings for duplicates), linger times reasonable (warn if > 300s)
-- [ ] T086 Review absorber module (`VEN/src/controller/absorber.rs`): code clarity, comment coverage (only WHY, not WHAT), helper function separation
-- [ ] T087 Review loops.rs integration: Phase 3 and Phase 6 changes clean, DeviationState → AbsorberState rename complete, no stray references
-- [ ] T088 Review profile.rs changes: struct definitions, serde defaults, backward compatibility test coverage
-- [ ] T089 Code review checklist: all files comply with CLAUDE.md conventions (naming with units: `*_kw`, `*_s`, `*_c`), no security issues (no injection, bounds checking in headroom), no unwrap() on fallible operations
+- [x] T085 Verify all profile startup validations pass: absorber asset IDs match SimState assets, priorities are unique (log warnings for duplicates), linger times reasonable (warn if > 300s)
+- [x] T086 Review absorber module (`VEN/src/controller/absorber.rs`): code clarity, comment coverage (only WHY, not WHAT), helper function separation
+- [x] T087 Review loops.rs integration: Phase 3 and Phase 6 changes clean, DeviationState → AbsorberState rename complete, no stray references
+- [x] T088 Review profile.rs changes: struct definitions, serde defaults, backward compatibility test coverage
+- [x] T089 Code review checklist: all files comply with CLAUDE.md conventions (naming with units: `*_kw`, `*_s`, `*_c`), no security issues (no injection, bounds checking in headroom), no unwrap() on fallible operations
 - [x] T089b Unit test SSE event deduplication and payload structure in `VEN/src/controller/absorber.rs`: (1) verify `CorrectionActive` event emitted only when total correction changes by > 0.2 kW (deduplication threshold from FR-012), (2) validate event payload includes `deviation_kw`, `correction_kw`, `asset_id`. Confirm alignment with Plan F SSE infrastructure.
 
 ### 7.6 Documentation
 
-- [ ] T090 Update `docs/history/project_journal.md` with Phase 30 entry: absorber implementation summary, key decisions, issues encountered
-- [ ] T091 [P] Update `docs/reference/KEY_LEARNINGS.md` with absorber-specific lessons (e.g., linger state machine patterns, residual vs. raw deviation tracking, SSE deduplication)
+- [x] T090 Update `docs/history/project_journal.md` with Phase 30 entry: absorber implementation summary, key decisions, issues encountered
+- [x] T091 [P] Update `docs/reference/KEY_LEARNINGS.md` with absorber-specific lessons (e.g., linger state machine patterns, residual vs. raw deviation tracking, SSE deduplication)
 - [x] T092 [P] Add inline code comments to absorber.rs for non-obvious logic (e.g., settling 1-tick ramp reason, headroom SoC bound rationale)
 
 ### 7.7 Final Validation Checklist
