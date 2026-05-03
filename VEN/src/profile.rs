@@ -38,6 +38,7 @@ pub struct AbsorberAssetConfig {
     /// Priority order (0 = first/battery, higher = later); should be unique.
     pub priority: u8,
     /// Minimum seconds between state changes (0 for electronics, 30–60 for relays).
+    #[serde(default)]
     pub min_state_linger_s: u64,
     /// (EV only) Refuse charging reduction if departure < N seconds away.
     /// If unset (None), no guard applies. Typical: 1800 (30 minutes).
