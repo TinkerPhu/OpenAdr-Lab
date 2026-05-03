@@ -82,16 +82,16 @@ This document breaks down the implementation plan into granular, independently e
 - [x] T015 [P] Implement dead-band check in `apply_deviation_absorption()`: skip correction if `|deviation_kw| <= dead_band_kw` (FR-006)
 - [x] T016 Implement sequential asset iteration logic in `apply_deviation_absorption()`: loop through `profile.absorber.assets` in priority order, apply corrections within headroom bounds, accumulate uncovered deviation (FR-002, FR-004)
 - [x] T017 Implement settling logic in `apply_deviation_absorption()`: when `|deviation_kw| <= dead_band_kw` for `dead_band_clearing_ticks`, ramp all active overlays to zero over 1 tick (FR-007)
-- [ ] T018 Implement SSE event bookkeeping in `apply_deviation_absorption()`: emit `CorrectionActive` when overlay becomes non-zero, `CorrectionCleared` when overlay goes to zero, deduplicate on threshold (e.g., 0.2 kW change) (FR-012)
+- [x] T018 Implement SSE event bookkeeping in `apply_deviation_absorption()`: emit `CorrectionActive` when overlay becomes non-zero, `CorrectionCleared` when overlay goes to zero, deduplicate on threshold (e.g., 0.2 kW change) (FR-012)
 
 ### 3.2 Unit Tests for Absorber Logic
 
 - [x] T019 [P] Unit test: `absorber_battery_absorbs_positive_deviation_within_capacity` — battery at SoC=0.50, positive deviation 2 kW → battery discharge increases, residual returns 0
 - [x] T020 [P] Unit test: `absorber_battery_absorbs_negative_deviation_within_capacity` — battery at SoC=0.50, negative deviation -2 kW → battery charge increases, residual returns 0
-- [ ] T021 [P] Unit test: `absorber_ev_absorbs_residual_when_battery_exhausted` — battery at min_soc, EV at SoC=0.30, positive deviation 4 kW → battery max discharge, EV charge reduces, residual < 1 kW
+- [x] T021 [P] Unit test: `absorber_ev_absorbs_residual_when_battery_exhausted` — battery at min_soc, EV at SoC=0.30, positive deviation 4 kW → battery max discharge, EV charge reduces, residual < 1 kW
 - [x] T022 [P] Unit test: `absorber_dead_band_prevents_chatter` — deviation +0.05 kW (within 0.1 kW dead-band) → no correction applied, residual returns full deviation
-- [ ] T023 [P] Unit test: `absorber_settling_ramps_to_zero` — overlay active, then deviation clears → overlay goes to 0, settling_ticks resets
-- [ ] T024 [P] Unit test: `absorber_residual_returned_when_all_exhausted` — battery and EV both at limits, positive deviation 6 kW → residual returns ~6 kW
+- [x] T023 [P] Unit test: `absorber_settling_ramps_to_zero` — overlay active, then deviation clears → overlay goes to 0, settling_ticks resets
+- [x] T024 [P] Unit test: `absorber_residual_returned_when_all_exhausted` — battery and EV both at limits, positive deviation 6 kW → residual returns ~6 kW
 
 ### 3.3 Integration in Main Loop
 
@@ -148,8 +148,8 @@ This document breaks down the implementation plan into granular, independently e
 
 - [x] T039 [P] Unit test: `linger_ok_returns_false_before_min_time` — last change 5s ago, min_linger=10s → returns false
 - [x] T040 [P] Unit test: `linger_ok_returns_true_after_min_time` — last change 15s ago, min_linger=10s → returns true
-- [ ] T041 [P] Unit test: `linger_ok_returns_true_on_first_change` — no prior state change → returns true
-- [ ] T042 [P] Unit test: `absorber_heater_skipped_when_linger_active` — heater linger blocks, battery at limit, positive deviation → residual returns unabsorbed, heater not touched
+- [x] T041 [P] Unit test: `linger_ok_returns_true_on_first_change` — no prior state change → returns true
+- [x] T042 [P] Unit test: `absorber_heater_skipped_when_linger_active` — heater linger blocks, battery at limit, positive deviation → residual returns unabsorbed, heater not touched
 
 ### 4.3 BDD Scenario: Heater Linger Enforcement
 
@@ -180,15 +180,15 @@ This document breaks down the implementation plan into granular, independently e
 
 ### 5.1 Departure Guard Logic
 
-- [ ] T047 Implement departure guard check in `apply_deviation_absorption()`: before applying correction to EV, check if `(time_to_departure < ev_departure_guard_s) && (SoC < soc_target) && (deviation_kw > 0)` → skip EV, continue to next asset (FR-008)
-- [ ] T048 Handle unknown departure time case in EV guard logic: treat missing/unknown departure as "no guard" (allow absorber to adjust EV charging freely) (FR-008)
+- [x] T047 Implement departure guard check in `apply_deviation_absorption()`: before applying correction to EV, check if `(time_to_departure < ev_departure_guard_s) && (SoC < soc_target) && (deviation_kw > 0)` → skip EV, continue to next asset (FR-008)
+- [x] T048 Handle unknown departure time case in EV guard logic: treat missing/unknown departure as "no guard" (allow absorber to adjust EV charging freely) (FR-008)
 
 ### 5.2 Unit Tests for Departure Guard
 
-- [ ] T049 [P] Unit test: `absorber_ev_skipped_when_departure_guard_active` — EV departure 20 min away, SoC=0.30, positive deviation → absorber skips EV, battery handles deviation, residual < battery headroom
-- [ ] T050 [P] Unit test: `absorber_ev_allowed_when_departure_far_away` — EV departure 40 min away, same conditions → absorber is allowed to reduce EV charge
-- [ ] T051 [P] Unit test: `absorber_ev_allowed_to_absorb_surplus_near_departure` — EV departure 20 min away, SoC=0.30, negative deviation -2 kW → absorber allowed to increase EV charging (boost to target)
-- [ ] T052 [P] Unit test: `absorber_ev_guard_ignored_on_unknown_departure` — EV departure unknown, positive deviation, SoC=0.30 → absorber allowed to reduce EV charge
+- [x] T049 [P] Unit test: `absorber_ev_skipped_when_departure_guard_active` — EV departure 20 min away, SoC=0.30, positive deviation → absorber skips EV, battery handles deviation, residual < battery headroom
+- [x] T050 [P] Unit test: `absorber_ev_allowed_when_departure_far_away` — EV departure 40 min away, same conditions → absorber is allowed to reduce EV charge
+- [x] T051 [P] Unit test: `absorber_ev_allowed_to_absorb_surplus_near_departure` — EV departure 20 min away, SoC=0.30, negative deviation -2 kW → absorber allowed to increase EV charging (boost to target)
+- [x] T052 [P] Unit test: `absorber_ev_guard_ignored_on_unknown_departure` — EV departure unknown, positive deviation, SoC=0.30 → absorber allowed to reduce EV charge
 
 ### 5.3 BDD Scenario: EV Departure Guard
 
@@ -226,10 +226,10 @@ This document breaks down the implementation plan into granular, independently e
 
 ### 6.2 Unit Tests for Tier 2 Escalation
 
-- [ ] T061 [P] Unit test: `accumulate_deviation_increments_residual_ticks_when_above_threshold` — pass residual=0.5 kW (above 0.1 default) → residual_ticks increments; repeat 120 times → DeviceDeviation fires
-- [ ] T062 [P] Unit test: `accumulate_deviation_fires_devicedeviation_at_threshold` — accumulate residual_ticks to 119, then one more tick → trigger fires, residual_ticks resets
-- [ ] T063 [P] Unit test: `accumulate_deviation_ignores_residual_within_deadband` — pass residual=0.05 kW (within 0.1 dead-band) → residual_ticks remains 0, no escalation
-- [ ] T064 [P] Unit test: `absorber_residual_returned_when_all_exhausted` — (duplicate of T024, confirms residual contract)
+- [x] T061 [P] Unit test: `accumulate_deviation_increments_residual_ticks_when_above_threshold` — pass residual=0.5 kW (above 0.1 default) → residual_ticks increments; repeat 120 times → DeviceDeviation fires
+- [x] T062 [P] Unit test: `accumulate_deviation_fires_devicedeviation_at_threshold` — accumulate residual_ticks to 119, then one more tick → trigger fires, residual_ticks resets
+- [x] T063 [P] Unit test: `accumulate_deviation_ignores_residual_within_deadband` — pass residual=0.05 kW (within 0.1 dead-band) → residual_ticks remains 0, no escalation
+- [x] T064 [P] Unit test: `absorber_residual_returned_when_all_exhausted` — (duplicate of T024, confirms residual contract)
 
 ### 6.3 BDD Scenario: Residual Escalation
 
@@ -288,7 +288,7 @@ This document breaks down the implementation plan into granular, independently e
 - [ ] T087 Review loops.rs integration: Phase 3 and Phase 6 changes clean, DeviationState → AbsorberState rename complete, no stray references
 - [ ] T088 Review profile.rs changes: struct definitions, serde defaults, backward compatibility test coverage
 - [ ] T089 Code review checklist: all files comply with CLAUDE.md conventions (naming with units: `*_kw`, `*_s`, `*_c`), no security issues (no injection, bounds checking in headroom), no unwrap() on fallible operations
-- [ ] T089b Unit test SSE event deduplication and payload structure in `VEN/src/controller/absorber.rs`: (1) verify `CorrectionActive` event emitted only when total correction changes by > 0.2 kW (deduplication threshold from FR-012), (2) validate event payload includes `deviation_kw`, `correction_kw`, `asset_id`. Confirm alignment with Plan F SSE infrastructure.
+- [x] T089b Unit test SSE event deduplication and payload structure in `VEN/src/controller/absorber.rs`: (1) verify `CorrectionActive` event emitted only when total correction changes by > 0.2 kW (deduplication threshold from FR-012), (2) validate event payload includes `deviation_kw`, `correction_kw`, `asset_id`. Confirm alignment with Plan F SSE infrastructure.
 
 ### 7.6 Documentation
 

@@ -1,0 +1,37 @@
+###############################################################################
+# Dockerfile for running VEN (Rust backend) cargo unit tests.
+#
+# Build context: ../VEN  (the VEN directory)
+# Used by: tests/docker-compose.ven-unit-test.yml
+#
+# Compiled artifacts live in named Docker volumes (see compose file), so
+# only changed files are recompiled on each run. First run is slow (~20 min
+# on Pi4 ARM64 — HiGHS + aws-lc-rs C++ builds); subsequent runs are ~1-2 min.
+#
+# Usage (on Pi4-Server):
+#   cd /srv/docker/openadr_lab
+#   docker compose -f tests/docker-compose.ven-unit-test.yml run --build --rm ven-unit-test
+###############################################################################
+
+FROM rust:1.90-bookworm
+
+# HiGHS and aws-lc-rs need cmake + clang; bookworm provides them.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        pkg-config \
+        libclang-dev \
+        libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY . .
+
+# Keep parallelism low to avoid OOM linker failures on Pi4
+# (linking HiGHS + aws-lc-rs simultaneously exceeds 1500 MiB).
+ENV CARGO_BUILD_JOBS=2
+ENV RUST_BACKTRACE=1
+
+CMD ["cargo", "test", "--jobs", "2"]
