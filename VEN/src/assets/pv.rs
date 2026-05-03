@@ -2,9 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{
-    Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind,
-};
+use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
 use crate::profile::PvConfig;
 
@@ -161,7 +159,11 @@ impl PvInverter {
             (-seconds_ahead / tau_s).exp()
         } else {
             // instant decay: full offset at t=0, zero after
-            if seconds_ahead <= 0.0 { 1.0 } else { 0.0 }
+            if seconds_ahead <= 0.0 {
+                1.0
+            } else {
+                0.0
+            }
         };
         let decayed = self.irradiance_offset * decay_factor;
         (natural + decayed).clamp(0.0, 1.0) * self.rated_kw
@@ -260,10 +262,13 @@ impl Asset for PvInverter {
                 self.irradiance_offset * (1.0 - self.pv_alpha).powf(seconds_ahead / PLAN_STEP_S);
             let irradiance = (natural + decayed_offset).clamp(0.0, 1.0);
             let power_kw = -(irradiance * self.rated_kw);
-            result.push((t, AssetCapability {
-                max_export_kw: power_kw,
-                max_import_kw: power_kw,
-            }));
+            result.push((
+                t,
+                AssetCapability {
+                    max_export_kw: power_kw,
+                    max_import_kw: power_kw,
+                },
+            ));
         }
         result
     }
@@ -295,8 +300,7 @@ impl PvInverter {
             .map(|t| {
                 let slot_t = now + chrono::Duration::seconds(step_s * t as i64);
                 let natural = Self::natural_irradiance_at(slot_t);
-                let decayed_offset =
-                    self.irradiance_offset * (1.0 - self.pv_alpha).powf(t as f64);
+                let decayed_offset = self.irradiance_offset * (1.0 - self.pv_alpha).powf(t as f64);
                 (natural + decayed_offset).clamp(0.0, 1.0) * self.rated_kw
             })
             .collect();
@@ -317,7 +321,9 @@ mod tests {
                 pv_alpha: 0.1,
                 export_limit_kw: None,
             },
-            PvState { actual_power_kw: 0.0 },
+            PvState {
+                actual_power_kw: 0.0,
+            },
         )
     }
 
@@ -395,25 +401,44 @@ mod tests {
             pv_alpha: 0.1,
             export_limit_kw: None,
         };
-        let state = AssetState::Pv(PvState { actual_power_kw: -5.0 });
+        let state = AssetState::Pv(PvState {
+            actual_power_kw: -5.0,
+        });
 
         let traj = pv.capability_trajectory(&state, Duration::hours(24), Duration::hours(1));
         assert_eq!(traj.len(), 24);
 
         // All values ≤ 0 (export only).
         for (_, cap) in &traj {
-            assert!(cap.max_export_kw <= 1e-9, "PV trajectory must be non-positive");
+            assert!(
+                cap.max_export_kw <= 1e-9,
+                "PV trajectory must be non-positive"
+            );
         }
 
         // Spans at least one daytime and one night slot → not flat.
-        let non_zero = traj.iter().filter(|(_, c)| c.max_export_kw.abs() > 1e-6).count();
-        let zero = traj.iter().filter(|(_, c)| c.max_export_kw.abs() <= 1e-6).count();
-        assert!(non_zero > 0, "24-h trajectory must include daytime generation");
+        let non_zero = traj
+            .iter()
+            .filter(|(_, c)| c.max_export_kw.abs() > 1e-6)
+            .count();
+        let zero = traj
+            .iter()
+            .filter(|(_, c)| c.max_export_kw.abs() <= 1e-6)
+            .count();
+        assert!(
+            non_zero > 0,
+            "24-h trajectory must include daytime generation"
+        );
         assert!(zero > 0, "24-h trajectory must include night zeros");
 
         // Not all identical to −5.0 (flat at self.irradiance=0.5 × 10 kW).
-        let all_flat = traj.iter().all(|(_, c)| (c.max_export_kw + 5.0).abs() < 1e-6);
-        assert!(!all_flat, "forecast must follow sin model, not flat self.irradiance");
+        let all_flat = traj
+            .iter()
+            .all(|(_, c)| (c.max_export_kw + 5.0).abs() < 1e-6);
+        assert!(
+            !all_flat,
+            "forecast must follow sin model, not flat self.irradiance"
+        );
     }
 
     #[test]
@@ -427,7 +452,9 @@ mod tests {
             pv_alpha: 0.0, // alpha=0 → offset never decays → full offset at every slot
             export_limit_kw: None,
         };
-        let state = AssetState::Pv(PvState { actual_power_kw: 0.0 });
+        let state = AssetState::Pv(PvState {
+            actual_power_kw: 0.0,
+        });
 
         // Use a 1-hour resolution so slot timestamps are well into daytime when run near noon.
         let traj = pv.capability_trajectory(&state, Duration::hours(4), Duration::hours(1));
@@ -438,7 +465,8 @@ mod tests {
             let expected = -((natural + 0.3).clamp(0.0, 1.0) * 10.0);
             assert!(
                 (cap.max_export_kw - expected).abs() < 1e-9,
-                "at {t}: expected {expected:.4} (sin+offset), got {:.4}", cap.max_export_kw
+                "at {t}: expected {expected:.4} (sin+offset), got {:.4}",
+                cap.max_export_kw
             );
         }
     }
@@ -454,7 +482,9 @@ mod tests {
             pv_alpha: 1.0, // full decay after 1 tick
             export_limit_kw: None,
         };
-        let state = AssetState::Pv(PvState { actual_power_kw: 0.0 });
+        let state = AssetState::Pv(PvState {
+            actual_power_kw: 0.0,
+        });
         let traj = pv.capability_trajectory(&state, Duration::seconds(3), Duration::seconds(1));
         // Slot 1 (1 s ahead): decayed_offset = 0.4 × 0^1 = 0 → equals sin model
         for (t, cap) in &traj {
@@ -462,7 +492,8 @@ mod tests {
             let expected = -(natural * 10.0);
             assert!(
                 (cap.max_export_kw - expected).abs() < 1e-9,
-                "at {t}: with alpha=1.0 offset must be fully decayed, got {:.4}", cap.max_export_kw
+                "at {t}: with alpha=1.0 offset must be fully decayed, got {:.4}",
+                cap.max_export_kw
             );
         }
     }
@@ -480,7 +511,9 @@ mod tests {
             pv_alpha: 0.1,
             export_limit_kw: None,
         };
-        let state = AssetState::Pv(PvState { actual_power_kw: 0.0 });
+        let state = AssetState::Pv(PvState {
+            actual_power_kw: 0.0,
+        });
         let traj = pv.capability_trajectory(
             &state,
             Duration::seconds(900), // 3 plan steps
@@ -497,7 +530,8 @@ mod tests {
         assert!(
             (cap1.max_export_kw - correct_kw).abs() < 0.01,
             "slot 1 must match per-step decay formula: expected {:.4}, got {:.4}",
-            correct_kw, cap1.max_export_kw
+            correct_kw,
+            cap1.max_export_kw
         );
         // When not saturated (natural < 0.64), the offset is fully visible and must exceed
         // the buggy near-zero contribution by >1 kW.
@@ -507,7 +541,8 @@ mod tests {
                 cap1.max_export_kw < natural_only_kw - 1.0,
                 "slot 1 must export >1 kW more than natural-only when not saturated: \
                  got {:.4}, natural-only {:.4}",
-                cap1.max_export_kw, natural_only_kw
+                cap1.max_export_kw,
+                natural_only_kw
             );
         }
     }
@@ -521,12 +556,15 @@ mod tests {
             pv_alpha: 0.1,
             export_limit_kw: None,
         };
-        let state = AssetState::Pv(PvState { actual_power_kw: 0.0 });
+        let state = AssetState::Pv(PvState {
+            actual_power_kw: 0.0,
+        });
         let traj = pv.capability_trajectory(&state, Duration::hours(24), Duration::hours(1));
         for (_, cap) in &traj {
             assert!(
                 cap.max_export_kw >= -8.0 - 1e-9,
-                "export must not exceed rated_kw=8.0, got {}", cap.max_export_kw
+                "export must not exceed rated_kw=8.0, got {}",
+                cap.max_export_kw
             );
         }
     }
@@ -540,12 +578,14 @@ mod tests {
             rated_kw: 10.0,
             irradiance: 1.0, // flat — must NOT be used
             irradiance_offset: 0.2,
-            pv_alpha: 0.0,   // no decay → offset constant at 0.2 everywhere
+            pv_alpha: 0.0, // no decay → offset constant at 0.2 everywhere
             export_limit_kw: None,
         };
         // Verify offset is read from self.irradiance_offset, not from self.irradiance.
         // With pv_alpha=0 and offset=0.2, each slot must equal sin(t)+0.2 (clamped).
-        let state = AssetState::Pv(PvState { actual_power_kw: 0.0 });
+        let state = AssetState::Pv(PvState {
+            actual_power_kw: 0.0,
+        });
         let traj = pv.capability_trajectory(&state, Duration::hours(4), Duration::hours(1));
 
         for (t, cap) in &traj {
@@ -554,16 +594,22 @@ mod tests {
             let expected_kw = -(expected_irr * 10.0);
             assert!(
                 (cap.max_export_kw - expected_kw).abs() < 1e-9,
-                "at {t}: expected {expected_kw:.4} (sin+0.2), got {:.4}", cap.max_export_kw
+                "at {t}: expected {expected_kw:.4} (sin+0.2), got {:.4}",
+                cap.max_export_kw
             );
         }
 
         // Changing offset on self must change the trajectory output.
         pv.irradiance_offset = -0.5;
         let traj2 = pv.capability_trajectory(&state, Duration::hours(4), Duration::hours(1));
-        let same = traj.iter().zip(traj2.iter())
+        let same = traj
+            .iter()
+            .zip(traj2.iter())
             .all(|((_, a), (_, b))| (a.max_export_kw - b.max_export_kw).abs() < 1e-9);
-        assert!(!same, "changing irradiance_offset must change trajectory output");
+        assert!(
+            !same,
+            "changing irradiance_offset must change trajectory output"
+        );
     }
 
     #[test]

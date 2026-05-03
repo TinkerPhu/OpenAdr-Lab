@@ -404,6 +404,7 @@ pub fn build_asset_timeline(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assets::Grid;
     use crate::assets::{
         AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, BaseLoadState, EvCharger, EvState,
         HistoryPoint,
@@ -412,7 +413,6 @@ mod tests {
     use crate::entities::plan::{
         AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanningHorizon,
     };
-    use crate::assets::Grid;
     use crate::simulator::energy::EnergyCounter;
     use crate::simulator::{AssetEntry, GridMeter, SimState};
     use chrono::Utc;
@@ -428,7 +428,10 @@ mod tests {
 
     /// Create a BaseLoad AssetEntry + AssetConfig with history rows `(offset_s, power_kw)`.
     fn make_base_entry(id: &str, rows: &[(i64, f64)]) -> (AssetEntry, AssetConfig) {
-        let cfg = AssetConfig::BaseLoad(BaseLoad { baseline_kw: 0.0, baseline_kw_profile: 0.0 });
+        let cfg = AssetConfig::BaseLoad(BaseLoad {
+            baseline_kw: 0.0,
+            baseline_kw_profile: 0.0,
+        });
         let mut entry = AssetEntry {
             id: id.to_string(),
             state: AssetState::BaseLoad(BaseLoadState {
@@ -572,7 +575,10 @@ mod tests {
             export_flexibility_kw: 0.0,
             bat_charge_kw: 0.0,
             bat_discharge_kw: 0.0,
-            planned_kw_by_asset: std::collections::HashMap::from([(asset_id.to_string(), power_kw)]),
+            planned_kw_by_asset: std::collections::HashMap::from([(
+                asset_id.to_string(),
+                power_kw,
+            )]),
             planned_state_by_asset: std::collections::HashMap::new(),
         }
     }
@@ -678,7 +684,10 @@ mod tests {
             &sim,
             Some(&plan),
             now,
-            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+            TimeWindow {
+                hours_back: 0.0,
+                hours_forward: 1.0,
+            },
         )
         .unwrap();
         assert_eq!(result.len(), 1);
@@ -705,7 +714,10 @@ mod tests {
             &sim,
             Some(&plan),
             now,
-            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+            TimeWindow {
+                hours_back: 0.0,
+                hours_forward: 1.0,
+            },
         )
         .unwrap();
         assert_eq!(result.len(), 1);
@@ -796,7 +808,10 @@ mod tests {
             &sim,
             Some(&plan),
             now,
-            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+            TimeWindow {
+                hours_back: 0.0,
+                hours_forward: 1.0,
+            },
         )
         .unwrap();
         assert_eq!(result.len(), 1);
@@ -1012,13 +1027,21 @@ mod tests {
         let now = DateTime::from_timestamp(base + 60, 0).unwrap();
 
         // Build a BaseLoad entry whose history alternates 0 / 2.5 kW.
-        let cfg = AssetConfig::BaseLoad(BaseLoad { baseline_kw: 0.0, baseline_kw_profile: 0.0 });
+        let cfg = AssetConfig::BaseLoad(BaseLoad {
+            baseline_kw: 0.0,
+            baseline_kw_profile: 0.0,
+        });
         let mut entry = AssetEntry {
             id: "osc".into(),
-            state: AssetState::BaseLoad(BaseLoadState { actual_power_kw: 0.0 }),
+            state: AssetState::BaseLoad(BaseLoadState {
+                actual_power_kw: 0.0,
+            }),
             setpoint_kw: 0.0,
             last_power_kw: 0.0,
-            energy: crate::simulator::energy::EnergyCounter { import_kwh: 0.0, export_kwh: 0.0 },
+            energy: crate::simulator::energy::EnergyCounter {
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+            },
             history: AssetHistoryBuffer::new(3600),
         };
         for i in 0i64..60 {
@@ -1026,7 +1049,9 @@ mod tests {
             entry.history.push(HistoryPoint {
                 ts: DateTime::from_timestamp(base + i, 0).unwrap(),
                 power_kw: power,
-                state: AssetState::BaseLoad(BaseLoadState { actual_power_kw: power }),
+                state: AssetState::BaseLoad(BaseLoadState {
+                    actual_power_kw: power,
+                }),
             });
         }
 
@@ -1036,11 +1061,16 @@ mod tests {
 
         // Time-weighted average over 60 alternating points should be ~1.25 kW.
         let power = np.values["power_kw"];
-        assert!(power > 0.5 && power < 2.0,
-            "expected smoothed power ~1.25 kW, got {power:.3} kW");
+        assert!(
+            power > 0.5 && power < 2.0,
+            "expected smoothed power ~1.25 kW, got {power:.3} kW"
+        );
         // The raw latest would be 2.5 kW (last point is odd index 59 → 2.5 kW).
         // Confirm we are NOT just returning the raw latest.
-        assert!(power < 2.4, "got raw-latest spike ({power:.3} kW) — smoothing not applied");
+        assert!(
+            power < 2.4,
+            "got raw-latest spike ({power:.3} kW) — smoothing not applied"
+        );
     }
 
     #[test]
@@ -1058,13 +1088,8 @@ mod tests {
     fn locf_fill_nones_fills_gaps() {
         let v1: HashMap<String, f64> = [("power_kw".into(), 7.4)].into();
         let v2: HashMap<String, f64> = [("power_kw".into(), 3.0)].into();
-        let input: Vec<Option<HashMap<String, f64>>> = vec![
-            Some(v1.clone()),
-            None,
-            None,
-            Some(v2.clone()),
-            None,
-        ];
+        let input: Vec<Option<HashMap<String, f64>>> =
+            vec![Some(v1.clone()), None, None, Some(v2.clone()), None];
         let out = locf_fill_nones(input, None);
         // [7.4, 7.4, 7.4, 3.0, 3.0]
         assert!((out[0].as_ref().unwrap()["power_kw"] - 7.4).abs() < 1e-9);
@@ -1132,7 +1157,7 @@ mod tests {
             baseline_kw: 0.5,
             pv_forecast_kw,
             surplus_available_kw: pv_forecast_kw.max(0.0),
-            allocations: vec![],   // intentionally empty — PV should not appear here
+            allocations: vec![], // intentionally empty — PV should not appear here
             net_import_kw: (0.5_f64 - pv_forecast_kw).max(0.0),
             net_export_kw: (pv_forecast_kw - 0.5_f64).max(0.0),
             import_flexibility_kw: 0.0,
@@ -1181,7 +1206,10 @@ mod tests {
             &sim,
             Some(&plan),
             now,
-            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+            TimeWindow {
+                hours_back: 0.0,
+                hours_forward: 1.0,
+            },
         )
         .expect("pv is a known asset");
 
@@ -1230,14 +1258,20 @@ mod tests {
             &sim,
             Some(&plan),
             now,
-            TimeWindow { hours_back: 0.0, hours_forward: 1.0 },
+            TimeWindow {
+                hours_back: 0.0,
+                hours_forward: 1.0,
+            },
         )
         .expect("pv is a known asset");
 
         let future: Vec<_> = points.iter().filter(|p| p.ts > now).collect();
         assert_eq!(future.len(), 1);
         let power_kw = future[0].values["power_kw"];
-        assert!(power_kw.abs() < 1e-9, "expected 0.0 at night, got {power_kw}");
+        assert!(
+            power_kw.abs() < 1e-9,
+            "expected 0.0 at night, got {power_kw}"
+        );
     }
 
     // T010: planned_state_by_asset values are merged into future timeline points.

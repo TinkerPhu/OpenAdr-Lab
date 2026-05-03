@@ -1,6 +1,8 @@
 use crate::controller::trace::ControllerTrace;
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
-use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime};
+use crate::entities::device_session::{
+    BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime,
+};
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
@@ -95,7 +97,9 @@ pub struct EvSettings {
     pub paused_by_active_session: bool,
 }
 
-fn bool_true() -> bool { true }
+fn bool_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PollingState {
@@ -223,7 +227,11 @@ impl AppState {
     }
 
     pub async fn push_controller_event(&self, event: crate::controller::trace::ControllerEvent) {
-        self.ctrl_sim.write().await.controller_trace.push_event(event);
+        self.ctrl_sim
+            .write()
+            .await
+            .controller_trace
+            .push_event(event);
     }
 
     pub async fn inject_state(&self) -> SimInjectState {
@@ -388,7 +396,10 @@ impl AppState {
 
     pub async fn add_shiftable_load(&self, load: ShiftableLoad) -> Result<(), &'static str> {
         let mut w = self.hems.write().await;
-        if w.shiftable_loads.iter().any(|l| l.asset_id == load.asset_id) {
+        if w.shiftable_loads
+            .iter()
+            .any(|l| l.asset_id == load.asset_id)
+        {
             return Err("duplicate asset_id");
         }
         w.shiftable_loads.push(load);
@@ -476,7 +487,12 @@ impl AppState {
             (p.programs.clone(), p.events.clone(), p.reports.clone())
         };
         let sensor = self.ctrl_sim.read().await.sensor.clone();
-        let state = PersistedVenState { programs, events, reports, sensor };
+        let state = PersistedVenState {
+            programs,
+            events,
+            reports,
+            sensor,
+        };
         Ok(serde_json::to_string_pretty(&state)?)
     }
 }
@@ -524,9 +540,18 @@ mod tests {
             ends_at: now + Duration::minutes(60),
         };
         assert!(rt.is_running(now), "should be running at start");
-        assert!(rt.is_running(now + Duration::minutes(30)), "should be running mid-way");
-        assert!(!rt.is_running(now + Duration::minutes(60)), "half-open: not running at ends_at");
-        assert!(!rt.is_running(now - Duration::seconds(1)), "not running before start");
+        assert!(
+            rt.is_running(now + Duration::minutes(30)),
+            "should be running mid-way"
+        );
+        assert!(
+            !rt.is_running(now + Duration::minutes(60)),
+            "half-open: not running at ends_at"
+        );
+        assert!(
+            !rt.is_running(now - Duration::seconds(1)),
+            "not running before start"
+        );
     }
 
     #[tokio::test]
@@ -537,7 +562,10 @@ mod tests {
         load2.id = Uuid::new_v4(); // different id, same asset_id
 
         assert!(state.add_shiftable_load(load1).await.is_ok());
-        assert!(state.add_shiftable_load(load2).await.is_err(), "duplicate asset_id rejected");
+        assert!(
+            state.add_shiftable_load(load2).await.is_err(),
+            "duplicate asset_id rejected"
+        );
         assert_eq!(state.shiftable_loads().await.len(), 1);
     }
 
@@ -567,7 +595,10 @@ mod tests {
         state.complete_shiftable(load_id).await;
 
         assert!(state.shiftable_loads().await.is_empty(), "load removed");
-        assert!(state.shiftable_runtimes().await.is_empty(), "runtime removed");
+        assert!(
+            state.shiftable_runtimes().await.is_empty(),
+            "runtime removed"
+        );
     }
 
     #[tokio::test]
@@ -582,10 +613,16 @@ mod tests {
 
         assert!(removed, "remove should return true");
         assert!(state.shiftable_loads().await.is_empty(), "load removed");
-        assert!(state.shiftable_runtimes().await.is_empty(), "runtime also removed");
+        assert!(
+            state.shiftable_runtimes().await.is_empty(),
+            "runtime also removed"
+        );
     }
 
-    fn make_request(session_type: Option<SessionType>, session_id: Option<uuid::Uuid>) -> UserRequest {
+    fn make_request(
+        session_type: Option<SessionType>,
+        session_id: Option<uuid::Uuid>,
+    ) -> UserRequest {
         let now = Utc::now();
         UserRequest {
             id: Uuid::new_v4(),
@@ -618,14 +655,16 @@ mod tests {
         let req = make_request(Some(SessionType::Ev), Some(session_id));
         let req_id = req.id;
         state.upsert_request(req).await;
-        state.set_ev_session(Some(EvSession {
-            id: session_id,
-            target_soc: 0.8,
-            departure_time: Utc::now() + chrono::Duration::hours(2),
-            soft_deadline: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        })).await;
+        state
+            .set_ev_session(Some(EvSession {
+                id: session_id,
+                target_soc: 0.8,
+                departure_time: Utc::now() + chrono::Duration::hours(2),
+                soft_deadline: false,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }))
+            .await;
 
         let found = state.cancel_request(req_id).await;
         assert!(found, "cancel should return true");
@@ -642,17 +681,22 @@ mod tests {
         let req = make_request(Some(SessionType::Heater), Some(session_id));
         let req_id = req.id;
         state.upsert_request(req).await;
-        state.set_heater_target(Some(HeaterTarget {
-            id: session_id,
-            target_temp_c: 21.0,
-            ready_by: Utc::now() + chrono::Duration::hours(1),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        })).await;
+        state
+            .set_heater_target(Some(HeaterTarget {
+                id: session_id,
+                target_temp_c: 21.0,
+                ready_by: Utc::now() + chrono::Duration::hours(1),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }))
+            .await;
 
         let found = state.cancel_request(req_id).await;
         assert!(found, "cancel should return true");
-        assert!(state.heater_target().await.is_none(), "heater_target cleared");
+        assert!(
+            state.heater_target().await.is_none(),
+            "heater_target cleared"
+        );
         let requests = state.active_requests().await;
         assert_eq!(requests[0].status, UserRequestStatus::Cancelled);
     }
@@ -672,7 +716,10 @@ mod tests {
         let found = state.cancel_request(req_id).await;
         assert!(found, "cancel should return true");
         assert!(state.shiftable_loads().await.is_empty(), "load removed");
-        assert!(state.shiftable_runtimes().await.is_empty(), "runtime removed");
+        assert!(
+            state.shiftable_runtimes().await.is_empty(),
+            "runtime removed"
+        );
         let requests = state.active_requests().await;
         assert_eq!(requests[0].status, UserRequestStatus::Cancelled);
     }

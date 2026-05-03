@@ -96,7 +96,10 @@ impl Asset for Grid {
                 max_export_kw: g.export_limit_kw, // ≤ 0
                 max_import_kw: g.import_limit_kw, // ≥ 0
             },
-            _ => AssetCapability { max_export_kw: 0.0, max_import_kw: 0.0 },
+            _ => AssetCapability {
+                max_export_kw: 0.0,
+                max_import_kw: 0.0,
+            },
         }
     }
 
@@ -163,7 +166,10 @@ mod tests {
     #[test]
     fn capability_non_grid_state_returns_zero() {
         let g = Grid::new();
-        let state = AssetState::Battery(super::super::BatteryState { soc: 0.5, actual_power_kw: 0.0 });
+        let state = AssetState::Battery(super::super::BatteryState {
+            soc: 0.5,
+            actual_power_kw: 0.0,
+        });
         let cap = g.capability(&state);
         assert_eq!(cap.max_import_kw, 0.0);
         assert_eq!(cap.max_export_kw, 0.0);

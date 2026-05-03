@@ -62,10 +62,18 @@ mod tests {
     fn make_sim(asset_id: &str, power_kw: f64) -> SimSnapshot {
         SimSnapshot {
             ts: Utc::now(),
-            grid: GridSnapshot { net_power_w: 0.0, voltage_v: 230.0, import_kwh: 0.0, export_kwh: 0.0 },
+            grid: GridSnapshot {
+                net_power_w: 0.0,
+                voltage_v: 230.0,
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+            },
             assets: HashMap::from([(
                 asset_id.to_string(),
-                AssetSnapshot { power_kw, values: HashMap::new() },
+                AssetSnapshot {
+                    power_kw,
+                    values: HashMap::new(),
+                },
             )]),
         }
     }
@@ -76,7 +84,10 @@ mod tests {
         let sim = make_sim("ev", sub_threshold);
         let mut ledger = HashMap::new();
         record_tick(&mut ledger, &sim, &[], 1.0, Utc::now());
-        assert!(ledger.is_empty(), "ledger must not accumulate sub-threshold power");
+        assert!(
+            ledger.is_empty(),
+            "ledger must not accumulate sub-threshold power"
+        );
     }
 
     #[test]
@@ -85,7 +96,13 @@ mod tests {
         let sim = make_sim("ev", above_threshold);
         let mut ledger = HashMap::new();
         record_tick(&mut ledger, &sim, &[], 1.0, Utc::now());
-        let entry = ledger.get("ev").expect("ledger must have an entry for above-threshold power");
-        assert!(entry.energy_kwh > 0.0, "energy_kwh must be positive, got {}", entry.energy_kwh);
+        let entry = ledger
+            .get("ev")
+            .expect("ledger must have an entry for above-threshold power");
+        assert!(
+            entry.energy_kwh > 0.0,
+            "energy_kwh must be positive, got {}",
+            entry.energy_kwh
+        );
     }
 }
