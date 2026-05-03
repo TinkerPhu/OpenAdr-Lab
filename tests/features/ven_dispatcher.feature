@@ -54,9 +54,14 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
   # consecutive ticks) fires a PlanTrigger::DeviceDeviation, causing a MILP replan.
   # The test profile sets deviation_trigger_ticks=10 (fires before the 20s periodic
   # replan) and base_load_alpha=0.0 keeps the load high between ticks.
+  #
+  # With the deviation absorber active, Tier 2 only fires when the absorber is
+  # EXHAUSTED. We exhaust all absorber assets first so the full 15 kW extra load
+  # appears as residual (> dead_band) and escalates to Tier 2.
 
   Scenario: Layer 2 triggers a DeviceDeviation replan after sustained grid deviation
     When I wait for the VEN /plan endpoint to return a plan
-    And I inject base_load_kw 10.0 with alpha 0.0 via sim inject
+    And the battery SoC is reset to 0.10
+    And I inject base_load_kw 15.0 with alpha 0.0 via sim inject
     And I poll VEN trace until a PlanCycle with trigger "DeviceDeviation" appears
     Then a PlanCycle with trigger "DeviceDeviation" was found in the trace

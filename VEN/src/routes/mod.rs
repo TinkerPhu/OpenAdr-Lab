@@ -90,8 +90,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
         )
         .route(
             "/shiftable-loads",
-            get(hems::get_shiftable_loads)
-                .post(hems::post_shiftable_load),
+            get(hems::get_shiftable_loads).post(hems::post_shiftable_load),
         )
         .route("/shiftable-loads/:id", delete(hems::delete_shiftable_load))
         .route(

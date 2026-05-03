@@ -22,10 +22,7 @@ const NEAR_ZERO_KWH: f64 = 1e-6;
 /// Duration is estimated from available storage energy:
 ///   up_duration_s   = available_discharge_kwh / up_kw × 3600
 ///   down_duration_s = available_charge_kwh    / down_kw × 3600
-pub fn compute_envelope(
-    sim: &SimState,
-    now: DateTime<Utc>,
-) -> SiteFlexibilityEnvelope {
+pub fn compute_envelope(sim: &SimState, now: DateTime<Utc>) -> SiteFlexibilityEnvelope {
     let mut up_kw = 0.0_f64;
     let mut down_kw = 0.0_f64;
     let mut available_discharge_kwh = 0.0_f64;
@@ -34,12 +31,12 @@ pub fn compute_envelope(
     for (entry, config) in sim.iter_assets() {
         let phys_cap = config.capability(&entry.state);
 
-        up_kw   += (entry.last_power_kw - phys_cap.max_export_kw).max(0.0);
+        up_kw += (entry.last_power_kw - phys_cap.max_export_kw).max(0.0);
         down_kw += (phys_cap.max_import_kw - entry.last_power_kw).max(0.0);
 
         if let Some((dis, ch)) = config.available_storage_kwh(&entry.state) {
             available_discharge_kwh += dis;
-            available_charge_kwh    += ch;
+            available_charge_kwh += ch;
         }
     }
 
@@ -54,7 +51,13 @@ pub fn compute_envelope(
         None
     };
 
-    SiteFlexibilityEnvelope { ts: now, up_kw, down_kw, up_duration_s, down_duration_s }
+    SiteFlexibilityEnvelope {
+        ts: now,
+        up_kw,
+        down_kw,
+        up_duration_s,
+        down_duration_s,
+    }
 }
 
 #[cfg(test)]
@@ -71,7 +74,10 @@ mod tests {
     fn make_battery_entry(id: &str, soc: f64, last_power_kw: f64) -> AssetEntry {
         AssetEntry {
             id: id.to_string(),
-            state: AssetState::Battery(BatteryState { soc, actual_power_kw: last_power_kw }),
+            state: AssetState::Battery(BatteryState {
+                soc,
+                actual_power_kw: last_power_kw,
+            }),
             setpoint_kw: last_power_kw,
             last_power_kw,
             energy: EnergyCounter::new(),
@@ -92,7 +98,11 @@ mod tests {
     fn make_ev_entry(id: &str, soc: f64, plugged: bool, last_power_kw: f64) -> AssetEntry {
         AssetEntry {
             id: id.to_string(),
-            state: AssetState::Ev(EvState { soc, plugged, actual_power_kw: last_power_kw }),
+            state: AssetState::Ev(EvState {
+                soc,
+                plugged,
+                actual_power_kw: last_power_kw,
+            }),
             setpoint_kw: last_power_kw,
             last_power_kw,
             energy: EnergyCounter::new(),
@@ -162,8 +172,16 @@ mod tests {
             vec![make_ev_entry("ev", 0.5, true, 7.0)],
         );
         let env = compute_envelope(&sim, Utc::now());
-        assert!((env.up_kw - 7.0).abs() < 1e-6, "up_kw should be 7.0, got {}", env.up_kw);
-        assert!((env.down_kw).abs() < 1e-6, "down_kw should be 0.0, got {}", env.down_kw);
+        assert!(
+            (env.up_kw - 7.0).abs() < 1e-6,
+            "up_kw should be 7.0, got {}",
+            env.up_kw
+        );
+        assert!(
+            (env.down_kw).abs() < 1e-6,
+            "down_kw should be 0.0, got {}",
+            env.down_kw
+        );
     }
 
     #[test]
@@ -173,19 +191,32 @@ mod tests {
             vec![make_battery_entry("bat", 0.5, 0.0)],
         );
         let env = compute_envelope(&sim, Utc::now());
-        assert!((env.up_kw - 5.0).abs() < 1e-6, "up_kw should be 5.0, got {}", env.up_kw);
-        assert!((env.down_kw - 5.0).abs() < 1e-6, "down_kw should be 5.0, got {}", env.down_kw);
+        assert!(
+            (env.up_kw - 5.0).abs() < 1e-6,
+            "up_kw should be 5.0, got {}",
+            env.up_kw
+        );
+        assert!(
+            (env.down_kw - 5.0).abs() < 1e-6,
+            "down_kw should be 5.0, got {}",
+            env.down_kw
+        );
     }
 
     #[test]
     fn test_compute_envelope_pv_contributes_nothing() {
-        let sim = make_sim(
-            vec![make_pv_config(5.0)],
-            vec![make_pv_entry("pv", -2.0)],
-        );
+        let sim = make_sim(vec![make_pv_config(5.0)], vec![make_pv_entry("pv", -2.0)]);
         let env = compute_envelope(&sim, Utc::now());
-        assert!((env.up_kw).abs() < 1e-6, "PV up_kw should be 0, got {}", env.up_kw);
-        assert!((env.down_kw).abs() < 1e-6, "PV down_kw should be 0, got {}", env.down_kw);
+        assert!(
+            (env.up_kw).abs() < 1e-6,
+            "PV up_kw should be 0, got {}",
+            env.up_kw
+        );
+        assert!(
+            (env.down_kw).abs() < 1e-6,
+            "PV down_kw should be 0, got {}",
+            env.down_kw
+        );
     }
 
     #[test]

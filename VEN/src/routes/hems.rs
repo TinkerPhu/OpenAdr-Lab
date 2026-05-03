@@ -16,7 +16,9 @@ use uuid::Uuid;
 
 use crate::controller::user_request::CreateUserRequestBody;
 use crate::entities::asset::PlanTrigger;
-use crate::entities::device_session::{BaselineOverride, BaselineSlot, EvSession, HeaterTarget, ShiftableLoad};
+use crate::entities::device_session::{
+    BaselineOverride, BaselineSlot, EvSession, HeaterTarget, ShiftableLoad,
+};
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::profile::PlannerObjective;
 use crate::AppCtx;
@@ -39,13 +41,9 @@ pub struct UserRequestWithSession {
 }
 
 /// GET /plan — returns the active Plan (null until Stage 3).
-pub async fn get_plan(
-    State(ctx): State<AppCtx>,
-) -> impl IntoResponse {
+pub async fn get_plan(State(ctx): State<AppCtx>) -> impl IntoResponse {
     match ctx.state.active_plan().await {
-        Some(plan) => {
-            Json(serde_json::to_value(plan).unwrap_or_default()).into_response()
-        }
+        Some(plan) => Json(serde_json::to_value(plan).unwrap_or_default()).into_response(),
         None => Json(serde_json::Value::Null).into_response(),
     }
 }
@@ -97,26 +95,21 @@ pub async fn get_requests(State(ctx): State<AppCtx>) -> impl IntoResponse {
         .map(|req| {
             let session = req.session_id.and_then(|sid| {
                 match req.session_type {
-                    Some(SessionType::Ev) => {
-                        ev.as_ref()
-                            .filter(|s| s.id == sid)
-                            .cloned()
-                            .map(SessionDetail::Ev)
-                    }
-                    Some(SessionType::Heater) => {
-                        heater
-                            .as_ref()
-                            .filter(|t| t.id == sid)
-                            .cloned()
-                            .map(SessionDetail::Heater)
-                    }
-                    Some(SessionType::ShiftableLoad) => {
-                        loads
-                            .iter()
-                            .find(|l| l.id == sid)
-                            .cloned()
-                            .map(SessionDetail::ShiftableLoad)
-                    }
+                    Some(SessionType::Ev) => ev
+                        .as_ref()
+                        .filter(|s| s.id == sid)
+                        .cloned()
+                        .map(SessionDetail::Ev),
+                    Some(SessionType::Heater) => heater
+                        .as_ref()
+                        .filter(|t| t.id == sid)
+                        .cloned()
+                        .map(SessionDetail::Heater),
+                    Some(SessionType::ShiftableLoad) => loads
+                        .iter()
+                        .find(|l| l.id == sid)
+                        .cloned()
+                        .map(SessionDetail::ShiftableLoad),
                     None => {
                         // Legacy: try all session types by id match
                         if let Some(s) = ev.as_ref().filter(|s| s.id == sid) {
@@ -133,7 +126,10 @@ pub async fn get_requests(State(ctx): State<AppCtx>) -> impl IntoResponse {
                     }
                 }
             });
-            UserRequestWithSession { request: req, session }
+            UserRequestWithSession {
+                request: req,
+                session,
+            }
         })
         .collect();
 
@@ -272,7 +268,9 @@ pub async fn post_requests(
                     target_soc,
                     "user request created (EV session)"
                 );
-            } else if user_req.asset_id == crate::ids::ASSET_HEATER || user_req.asset_id == crate::ids::ASSET_BOILER {
+            } else if user_req.asset_id == crate::ids::ASSET_HEATER
+                || user_req.asset_id == crate::ids::ASSET_BOILER
+            {
                 // TODO: use separate HeaterTarget / BoilerTarget once boiler asset is implemented
                 let ready_by = user_req
                     .deadlines

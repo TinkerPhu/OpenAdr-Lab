@@ -42,10 +42,7 @@ pub enum PlannerEvent {
         objective: PlannerObjective,
     },
     /// Layer 1 correction cleared (deviation within threshold or superseded by replan).
-    CorrectionCleared {
-        ts: DateTime<Utc>,
-        reason: String,
-    },
+    CorrectionCleared { ts: DateTime<Utc>, reason: String },
 }
 
 pub type PlannerEventTx = Arc<tokio::sync::broadcast::Sender<PlannerEvent>>;

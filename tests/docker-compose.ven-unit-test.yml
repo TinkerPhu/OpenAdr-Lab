@@ -1,0 +1,41 @@
+###############################################################################
+# Cargo unit-test stack for the VEN backend (Rust).
+#
+# Named volumes (ven-cargo-registry, ven-cargo-git, ven-cargo-target) cache
+# compiled artifacts between runs. First run compiles everything from scratch
+# (~20 min on Pi4 ARM64 due to HiGHS + aws-lc-rs C++ builds); subsequent
+# runs only recompile changed files (~1-2 min).
+#
+# Usage (on Pi4-Server):
+#   cd /srv/docker/openadr_lab
+#   docker compose -f tests/docker-compose.ven-unit-test.yml run --build --rm ven-unit-test
+#   docker compose -f tests/docker-compose.ven-unit-test.yml down
+#
+# --build ensures the image is rebuilt when VEN source changes.
+# --rm removes the container but keeps the named volumes (cache survives).
+#
+# To wipe the cache and force a full recompile:
+#   docker compose -f tests/docker-compose.ven-unit-test.yml down -v
+###############################################################################
+
+name: ven-unit-test
+
+services:
+  ven-unit-test:
+    build:
+      context: ../VEN
+      dockerfile: ../tests/Dockerfile.ven-unit-test
+    volumes:
+      - ven-cargo-registry:/usr/local/cargo/registry
+      - ven-cargo-git:/usr/local/cargo/git
+      - ven-cargo-target:/app/target
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1500M
+
+volumes:
+  ven-cargo-registry:
+  ven-cargo-git:
+  ven-cargo-target:

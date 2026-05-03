@@ -186,15 +186,17 @@ pub fn build_grid_aligned_array(
     // fill an unbounded future with stale values beyond what the plan actually covers.
     let plan_end_opt: Option<DateTime<Utc>> = plan.and_then(|p| p.all_slots().map(|s| s.end).max());
 
-    let fut_resampled: Vec<Option<std::collections::HashMap<String, f64>>> =
-        locf_fill_nones(resample_to_grid(&raw_future, future_grid, resolution_s), fut_seed)
-            .into_iter()
-            .zip(future_grid.iter())
-            .map(|(v, &ts)| match plan_end_opt {
-                Some(end) if ts <= end => v,
-                _ => None,
-            })
-            .collect();
+    let fut_resampled: Vec<Option<std::collections::HashMap<String, f64>>> = locf_fill_nones(
+        resample_to_grid(&raw_future, future_grid, resolution_s),
+        fut_seed,
+    )
+    .into_iter()
+    .zip(future_grid.iter())
+    .map(|(v, &ts)| match plan_end_opt {
+        Some(end) if ts <= end => v,
+        _ => None,
+    })
+    .collect();
 
     // Concatenate: history_grid + now_point + future_grid.
     let mut out = serialize_grid_timeline(history_grid, &hist_resampled);

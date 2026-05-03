@@ -16,9 +16,26 @@ assets:
     rated_kw: 6.0
   - type: base_load
     id: base_load
-    baseline_kw: 0.8
+    baseline_kw: 0.6
 
 simulator:
   tick_s: 1
   persist_every_s: 15
   report_interval_s: 60
+
+planner:
+  replan_interval_s: 300
+  deviation_trigger_ticks: 120
+
+absorber:
+  enabled: true
+  dead_band_kw: 0.1
+  dead_band_clearing_ticks: 1
+  assets:
+    - id: ev
+      priority: 0
+      min_state_linger_s: 0
+      ev_departure_guard_s: 1800
+    - id: heater
+      priority: 1
+      min_state_linger_s: 30

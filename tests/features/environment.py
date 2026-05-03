@@ -1,8 +1,14 @@
 """behave environment hooks — run before/after the entire test suite."""
 
 import os
+import time
+import json
+from datetime import datetime
 from features.helpers.api_client import VTN_BASE_URL, VEN_BASE_URL, VEN2_BASE_URL, VEN_NO_PV_BASE_URL, BFF_BASE_URL
 from features.helpers.wait import wait_for_url
+
+# Timing instrumentation
+TIMING_LOG = "/tmp/test-timing.jsonl"
 
 UI_BASE_URL = os.environ.get("UI_BASE_URL", "http://test-ui:80")
 VEN_UI_BASE_URL = os.environ.get("VEN_UI_BASE_URL", "http://test-ven-ui:80")
@@ -139,7 +145,17 @@ def before_feature(context, feature):
     - Deletions are small (a handful from the previous feature), so VTN is
       never hit with a 100-item bulk delete that could cause BFF 502 errors.
     """
+    t0 = time.time()
     _cleanup_all_programs()
+    elapsed = round(time.time() - t0, 2)
+    entry = {"type": "feature_cleanup", "feature": feature.name, "elapsed_s": elapsed}
+    line = json.dumps(entry)
+    print(f"[TIMING] {line}", flush=True)
+    try:
+        with open(TIMING_LOG, "a") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 
 
 def _is_ui(scenario):
@@ -152,8 +168,41 @@ def _is_ven_ui(scenario):
     return "ven-ui" in scenario.tags or "ven-ui" in scenario.feature.tags
 
 
+def _log_timing(scenario, steps_s, cleanup_s, start_iso=""):
+    """Write one timing entry to stdout and to TIMING_LOG.
+
+    steps_s   — time from start of before_scenario to end of last step
+    cleanup_s — time for after_scenario cleanup (VTN, sim reset, browser close)
+    Both values survive container exit because they are printed to stdout,
+    which is captured by the external `tee` command.
+    """
+    tags = list(set(list(scenario.tags) + list(scenario.feature.tags)))
+    entry = {
+        "type": "scenario",
+        "feature": scenario.feature.name,
+        "scenario": scenario.name,
+        "status": str(scenario.status),
+        "start_iso": start_iso,
+        "steps_s": steps_s,
+        "cleanup_s": cleanup_s,
+        "total_s": round(steps_s + cleanup_s, 2),
+        "tags": tags,
+    }
+    line = json.dumps(entry)
+    # Print to stdout so it survives the ephemeral --rm container
+    print(f"[TIMING] {line}", flush=True)
+    try:
+        with open(TIMING_LOG, "a") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
 def before_scenario(context, scenario):
-    """Launch browser page for @ui and @ven-ui scenarios."""
+    """Record scenario start time and launch browser page for @ui and @ven-ui scenarios."""
+    context._scenario_start_time = time.time()
+    context._scenario_start_iso = datetime.utcnow().isoformat() + "Z"
+
     if _is_ui(scenario):
         if context._pw is None:
             from playwright.sync_api import sync_playwright
@@ -257,9 +306,16 @@ def _reset_device_sessions():
 
 
 def after_scenario(context, scenario):
-    """Close browser page after @ui/@ven-ui scenarios; restart stopped services."""
+    """Record scenario timing, close browser page, and clean up."""
+    # Capture scenario-steps time (before cleanup)
+    steps_end = time.time()
+    steps_s = round(steps_end - context._scenario_start_time, 2) if hasattr(context, '_scenario_start_time') else 0.0
+
+    start_iso = context._scenario_start_iso if hasattr(context, '_scenario_start_iso') else ""
     if scenario.status == 'skipped':
+        _log_timing(scenario, steps_s, 0.0, start_iso)
         return
+
     import features.helpers.api_client as api_client
     api_client.VEN_BASE_URL = api_client._DEFAULT_VEN_BASE_URL
     _cleanup_vtn_resources(context)
@@ -286,9 +342,57 @@ def after_scenario(context, scenario):
         from features.helpers.wait import wait_for_url
         wait_for_url(f"{VTN_BASE_URL}/health", timeout=60)
 
+    # Capture cleanup time separately
+    cleanup_s = round(time.time() - steps_end, 2)
+    _log_timing(scenario, steps_s, cleanup_s, start_iso)
+
 
 def after_all(context):
-    """Shut down Playwright."""
+    """Print timing summary and shut down Playwright."""
+    try:
+        timings = []
+        cleanups = []
+        if os.path.exists(TIMING_LOG):
+            with open(TIMING_LOG, "r") as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                        if entry.get("type") == "scenario":
+                            timings.append(entry)
+                        elif entry.get("type") == "feature_cleanup":
+                            cleanups.append(entry)
+                    except json.JSONDecodeError:
+                        pass
+
+        timings.sort(key=lambda x: x.get("total_s", 0), reverse=True)
+
+        print("\n" + "=" * 100)
+        print("TEST TIMING SUMMARY — ALL SCENARIOS (slowest first)")
+        print("=" * 100)
+        print(f"{'#':>3}  {'steps_s':>8}  {'cleanup_s':>9}  {'total_s':>8}  {'st':>2}  {'feature :: scenario'}")
+        print("-" * 100)
+        for i, t in enumerate(timings, 1):
+            st = "✓" if t['status'] == 'passed' else ("✗" if t['status'] == 'failed' else "⊘")
+            tags_str = " [" + ",".join(t['tags']) + "]" if t['tags'] else ""
+            label = f"{t['feature']} :: {t['scenario']}{tags_str}"
+            print(f"{i:>3}  {t['steps_s']:>8.1f}  {t['cleanup_s']:>9.1f}  {t['total_s']:>8.1f}  {st:>2}  {label}")
+
+        if timings:
+            total_steps = sum(t.get("steps_s", 0) for t in timings)
+            total_cleanup = sum(t.get("cleanup_s", 0) for t in timings)
+            total_feature_cleanup = sum(c.get("elapsed_s", 0) for c in cleanups)
+            total_accounted = total_steps + total_cleanup + total_feature_cleanup
+            avg_total = (total_steps + total_cleanup) / len(timings)
+            print("-" * 100)
+            print(f"\nSCENARIO STEPS:         {total_steps:7.1f}s")
+            print(f"AFTER-SCENARIO CLEANUP: {total_cleanup:7.1f}s")
+            print(f"BEFORE-FEATURE CLEANUP: {total_feature_cleanup:7.1f}s  (across {len(cleanups)} features)")
+            print(f"TOTAL ACCOUNTED:        {total_accounted:7.1f}s")
+            print(f"Scenarios: {len(timings)} | Avg total per scenario: {avg_total:.1f}s")
+    except Exception as e:
+        print(f"Warning: failed to print timing summary: {e}")
+
+    # Shut down Playwright
     if context._browser:
         context._browser.close()
     if context._pw:

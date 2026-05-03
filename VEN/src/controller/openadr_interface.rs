@@ -729,5 +729,4 @@ mod tests {
         assert_eq!(obligations[0].interval_duration_s, 900);
         assert_eq!(obligations[0].due_at, now + Duration::seconds(900));
     }
-
 }
