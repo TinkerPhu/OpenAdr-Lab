@@ -1259,7 +1259,7 @@ mod sim_tick_tests {
 
         // All three must be non-null and sensor must have some asset power values.
         assert!(!snap.assets.is_empty() || profile.assets.is_empty(), "sim snap must have assets");
-        assert!(envelope.firmness_pct.is_finite(), "envelope must have finite firmness");
+        assert!(envelope.up_kw.is_finite(), "envelope must have finite up_kw");
     }
 
     #[test]
@@ -1289,12 +1289,15 @@ mod sim_tick_tests {
             export_limit_kw: Some(5.0),
             import_limit_event_id: None,
             export_limit_event_id: None,
+            import_subscription_kw: None,
+            import_reservation_kw: None,
+            last_updated: None,
         };
         let now = Utc::now();
 
-        let grid_before = sim.grid_asset.net_power_kw;
+        let grid_before = sim.grid_asset.state.net_power_kw;
         let (_, _, _) = finalize_tick_outputs(&mut sim, &capacity, now);
-        let grid_after = sim.grid_asset.net_power_kw;
+        let grid_after = sim.grid_asset.state.net_power_kw;
 
         // Grid asset state should have been updated (at minimum, timestamp should change).
         assert_ne!(grid_before, grid_after, "grid asset must be updated");
