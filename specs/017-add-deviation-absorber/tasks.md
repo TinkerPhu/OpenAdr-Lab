@@ -4,7 +4,7 @@
 **Branch**: `017-add-deviation-absorber`  
 **Status**: Ready for implementation (improved with remediation tasks T010b + T089b)  
 **Estimated Total Effort**: 12–16 hours core + 2 hours remediation  
-**Last Updated**: 2026-05-01 (post-analysis improvements)
+**Last Updated**: 2026-05-03 (checkboxes updated post-audit — partial implementation detected)
 
 ---
 
@@ -30,7 +30,7 @@ This document breaks down the implementation plan into granular, independently e
 
 *No story-specific tasks; all setup is foundational*
 
-- [ ] T001 Verify branch `017-add-deviation-absorber` is checked out and synced with main
+- [x] T001 Verify branch `017-add-deviation-absorber` is checked out and synced with main
 
 ---
 
@@ -40,22 +40,22 @@ This document breaks down the implementation plan into granular, independently e
 
 ### 2.1 Profile Schema Extension
 
-- [ ] T002 Add `AbsorberConfig` struct to `VEN/src/profile.rs` with fields: `enabled: bool` (default false), `dead_band_kw: f64` (default 0.1), `dead_band_clearing_ticks: usize` (default 1), `assets: Vec<AbsorberAssetConfig>`
-- [ ] T003 Add `AbsorberAssetConfig` struct to `VEN/src/profile.rs` with fields: `id: String`, `priority: u8`, `min_state_linger_s: u64`, `ev_departure_guard_s: Option<u64>`
-- [ ] T004 Add `absorber: AbsorberConfig` field to `Profile` struct in `VEN/src/profile.rs` (parallel to `planner`, `simulator`)
-- [ ] T005 Implement serde defaults for `AbsorberConfig` and `AbsorberAssetConfig` for backward compatibility (profiles without absorber section default to `enabled: false`)
-- [ ] T006 Add unit tests to `VEN/src/profile.rs` for YAML deserialization: (1) test profile with absorber section deserializes correctly, (2) test profile without absorber section defaults to `enabled: false` (backward compat), (3) **test serde default `dead_band_clearing_ticks: 1` when YAML omits field** (FR-007 assumption validation)
+- [x] T002 Add `AbsorberConfig` struct to `VEN/src/profile.rs` with fields: `enabled: bool` (default false), `dead_band_kw: f64` (default 0.1), `dead_band_clearing_ticks: usize` (default 1), `assets: Vec<AbsorberAssetConfig>`
+- [x] T003 Add `AbsorberAssetConfig` struct to `VEN/src/profile.rs` with fields: `id: String`, `priority: u8`, `min_state_linger_s: u64`, `ev_departure_guard_s: Option<u64>`
+- [x] T004 Add `absorber: AbsorberConfig` field to `Profile` struct in `VEN/src/profile.rs` (parallel to `planner`, `simulator`)
+- [x] T005 Implement serde defaults for `AbsorberConfig` and `AbsorberAssetConfig` for backward compatibility (profiles without absorber section default to `enabled: false`)
+- [x] T006 Add unit tests to `VEN/src/profile.rs` for YAML deserialization: (1) test profile with absorber section deserializes correctly, (2) test profile without absorber section defaults to `enabled: false` (backward compat), (3) **test serde default `dead_band_clearing_ticks: 1` when YAML omits field** (FR-007 assumption validation)
 
 ### 2.2 Absorber Module Scaffold
 
-- [ ] T007 Create `VEN/src/controller/absorber.rs` with module skeleton (no logic yet; just public functions and AbsorberState struct outline)
-- [ ] T008 Add `pub mod absorber;` to `VEN/src/controller/mod.rs`
-- [ ] T009 Define `AbsorberState` struct in `VEN/src/controller/absorber.rs` with fields: `residual_ticks: u32`, `last_state_change_ts: HashMap<String, DateTime<Utc>>`, `settling_ticks: HashMap<String, u32>`, `active_overlay_kw: HashMap<String, f64>`, `correction_is_active: bool`, `last_emitted_correction_kw: f64`
+- [x] T007 Create `VEN/src/controller/absorber.rs` with module skeleton (no logic yet; just public functions and AbsorberState struct outline)
+- [x] T008 Add `pub mod absorber;` to `VEN/src/controller/mod.rs`
+- [x] T009 Define `AbsorberState` struct in `VEN/src/controller/absorber.rs` with fields: `residual_ticks: u32`, `last_state_change_ts: HashMap<String, DateTime<Utc>>`, `settling_ticks: HashMap<String, u32>`, `active_overlay_kw: HashMap<String, f64>`, `correction_is_active: bool`, `last_emitted_correction_kw: f64`
 
 ### 2.3 Profile Startup Validation
 
-- [ ] T010 Implement startup validation in `VEN/src/` (likely in main loop or profile loader) for FR-013: (1) **verify all `AbsorberAssetConfig.id` values match actual asset IDs in `SimState.assets`** — log ERROR and refuse startup if mismatch, (2) **log WARN if `AbsorberAssetConfig.priority` values are not unique** (optional but recommended), (3) **log WARN if any `min_state_linger_s` > 300s** (likely configuration error)
-- [ ] T010b Document settling state machine design in `VEN/src/controller/absorber.rs` (before `apply_deviation_absorption()` function): add comment block explaining the per-asset `settling_ticks` counter FSM (Idle → Active → Ramping → Idle), why 1-tick ramp (quick return to clean MILP setpoint), and the role of `active_overlay_kw` per asset. Include ASCII FSM diagram if helpful. *(Design documentation; no code logic yet)*
+- [x] T010 Implement startup validation in `VEN/src/` (likely in main loop or profile loader) for FR-013: (1) **verify all `AbsorberAssetConfig.id` values match actual asset IDs in `SimState.assets`** — log ERROR and refuse startup if mismatch, (2) **log WARN if `AbsorberAssetConfig.priority` values are not unique** (optional but recommended), (3) **log WARN if any `min_state_linger_s` > 300s** (likely configuration error)
+- [x] T010b Document settling state machine design in `VEN/src/controller/absorber.rs` (before `apply_deviation_absorption()` function): add comment block explaining the per-asset `settling_ticks` counter FSM (Idle → Active → Ramping → Idle), why 1-tick ramp (quick return to clean MILP setpoint), and the role of `active_overlay_kw` per asset. Include ASCII FSM diagram if helpful. *(Design documentation; no code logic yet)*
 
 ---
 
@@ -75,46 +75,46 @@ This document breaks down the implementation plan into granular, independently e
 
 ### 3.1 Core Absorber Logic
 
-- [ ] T011 [P] Implement `compute_asset_headroom()` helper function in `VEN/src/controller/absorber.rs` for battery: compute discharge headroom (min(SoC - min_soc, max_discharge_kw)), charge headroom (min(1.0 - SoC, max_charge_kw)) (FR-011)
-- [ ] T012 [P] Implement `compute_asset_headroom()` helper for EV: compute charge headroom (min(soc_target - SoC, max_charge_kw)) (FR-011)
-- [ ] T013 [P] Implement `compute_asset_headroom()` helper for heater: compute power step differences (0, mid, full tiers) based on current state and temp bounds (FR-011)
-- [ ] T014 Implement main `apply_deviation_absorption()` function in `VEN/src/controller/absorber.rs` with signature: `pub fn apply_deviation_absorption(state: &mut AbsorberState, deviation_kw: f64, setpoints: &mut HashMap<String, f64>, sim: &SimState, plan_snap: Option<&Plan>, profile: &Profile, now: DateTime<Utc>, event_tx: &PlannerEventTx) -> f64` (FR-001, FR-002, FR-004)
-- [ ] T015 [P] Implement dead-band check in `apply_deviation_absorption()`: skip correction if `|deviation_kw| <= dead_band_kw` (FR-006)
-- [ ] T016 Implement sequential asset iteration logic in `apply_deviation_absorption()`: loop through `profile.absorber.assets` in priority order, apply corrections within headroom bounds, accumulate uncovered deviation (FR-002, FR-004)
-- [ ] T017 Implement settling logic in `apply_deviation_absorption()`: when `|deviation_kw| <= dead_band_kw` for `dead_band_clearing_ticks`, ramp all active overlays to zero over 1 tick (FR-007)
+- [x] T011 [P] Implement `compute_asset_headroom()` helper function in `VEN/src/controller/absorber.rs` for battery: compute discharge headroom (min(SoC - min_soc, max_discharge_kw)), charge headroom (min(1.0 - SoC, max_charge_kw)) (FR-011)
+- [x] T012 [P] Implement `compute_asset_headroom()` helper for EV: compute charge headroom (min(soc_target - SoC, max_charge_kw)) (FR-011)
+- [x] T013 [P] Implement `compute_asset_headroom()` helper for heater: compute power step differences (0, mid, full tiers) based on current state and temp bounds (FR-011)
+- [x] T014 Implement main `apply_deviation_absorption()` function in `VEN/src/controller/absorber.rs` with signature: `pub fn apply_deviation_absorption(state: &mut AbsorberState, deviation_kw: f64, setpoints: &mut HashMap<String, f64>, sim: &SimState, plan_snap: Option<&Plan>, profile: &Profile, now: DateTime<Utc>, event_tx: &PlannerEventTx) -> f64` (FR-001, FR-002, FR-004)
+- [x] T015 [P] Implement dead-band check in `apply_deviation_absorption()`: skip correction if `|deviation_kw| <= dead_band_kw` (FR-006)
+- [x] T016 Implement sequential asset iteration logic in `apply_deviation_absorption()`: loop through `profile.absorber.assets` in priority order, apply corrections within headroom bounds, accumulate uncovered deviation (FR-002, FR-004)
+- [x] T017 Implement settling logic in `apply_deviation_absorption()`: when `|deviation_kw| <= dead_band_kw` for `dead_band_clearing_ticks`, ramp all active overlays to zero over 1 tick (FR-007)
 - [ ] T018 Implement SSE event bookkeeping in `apply_deviation_absorption()`: emit `CorrectionActive` when overlay becomes non-zero, `CorrectionCleared` when overlay goes to zero, deduplicate on threshold (e.g., 0.2 kW change) (FR-012)
 
 ### 3.2 Unit Tests for Absorber Logic
 
-- [ ] T019 [P] Unit test: `absorber_battery_absorbs_positive_deviation_within_capacity` — battery at SoC=0.50, positive deviation 2 kW → battery discharge increases, residual returns 0
-- [ ] T020 [P] Unit test: `absorber_battery_absorbs_negative_deviation_within_capacity` — battery at SoC=0.50, negative deviation -2 kW → battery charge increases, residual returns 0
+- [x] T019 [P] Unit test: `absorber_battery_absorbs_positive_deviation_within_capacity` — battery at SoC=0.50, positive deviation 2 kW → battery discharge increases, residual returns 0
+- [x] T020 [P] Unit test: `absorber_battery_absorbs_negative_deviation_within_capacity` — battery at SoC=0.50, negative deviation -2 kW → battery charge increases, residual returns 0
 - [ ] T021 [P] Unit test: `absorber_ev_absorbs_residual_when_battery_exhausted` — battery at min_soc, EV at SoC=0.30, positive deviation 4 kW → battery max discharge, EV charge reduces, residual < 1 kW
-- [ ] T022 [P] Unit test: `absorber_dead_band_prevents_chatter` — deviation +0.05 kW (within 0.1 kW dead-band) → no correction applied, residual returns full deviation
+- [x] T022 [P] Unit test: `absorber_dead_band_prevents_chatter` — deviation +0.05 kW (within 0.1 kW dead-band) → no correction applied, residual returns full deviation
 - [ ] T023 [P] Unit test: `absorber_settling_ramps_to_zero` — overlay active, then deviation clears → overlay goes to 0, settling_ticks resets
 - [ ] T024 [P] Unit test: `absorber_residual_returned_when_all_exhausted` — battery and EV both at limits, positive deviation 6 kW → residual returns ~6 kW
 
 ### 3.3 Integration in Main Loop
 
-- [ ] T025 Update `VEN/src/loops.rs` PHASE 3 (line ~788): Replace `let correction_kw = apply_deviation_correction(...)` with `let residual_kw = controller::absorber::apply_deviation_absorption(...)` (FR-001)
-- [ ] T026 Rename `DeviationState` → `AbsorberState` in `VEN/src/loops.rs` (all usages, imports)
-- [ ] T027 Rename and update `apply_deviation_correction()` wrapper (if exists) or remove it; consolidate into absorber module
+- [x] T025 Update `VEN/src/loops.rs` PHASE 3 (line ~788): Replace `let correction_kw = apply_deviation_correction(...)` with `let residual_kw = controller::absorber::apply_deviation_absorption(...)` (FR-001)
+- [x] T026 Rename `DeviationState` → `AbsorberState` in `VEN/src/loops.rs` (all usages, imports)
+- [x] T027 Rename and update `apply_deviation_correction()` wrapper (if exists) or remove it; consolidate into absorber module
 
 ### 3.4 BDD Scenario: Baseline Deviation Absorption
 
-- [ ] T028 [US1] Add BDD scenario to `tests/features/deviation_absorber.feature`: "Battery absorbs positive deviation within capacity"
+- [x] T028 [US1] Add BDD scenario to `tests/features/deviation_absorber.feature`: "Battery absorbs positive deviation within capacity"
   - Setup: battery SoC=0.50, plan expects 0.0 kW net import, absorber enabled
   - Action: inject PV drop → +2 kW deviation
   - Assert: battery setpoint decreases by ~2 kW within 2 ticks, no DeviceDeviation fires within 30 ticks
-- [ ] T029 [P] [US1] Add step implementations to `tests/steps/deviation_absorber_steps.py` for battery SoC setup and PV injection
-- [ ] T030 [P] [US1] Add step implementations for setpoint assertion and DeviceDeviation non-firing assertion
+- [x] T029 [P] [US1] Add step implementations to `tests/steps/deviation_absorber_steps.py` for battery SoC setup and PV injection
+- [x] T030 [P] [US1] Add step implementations for setpoint assertion and DeviceDeviation non-firing assertion
 
 ### 3.5 BDD Scenario: Multi-Asset Fallback
 
-- [ ] T031 [US1] Add BDD scenario to `tests/features/deviation_absorber.feature`: "EV absorbs residual when battery hits floor"
+- [x] T031 [US1] Add BDD scenario to `tests/features/deviation_absorber.feature`: "EV absorbs residual when battery hits floor"
   - Setup: battery at min_soc, EV plugged SoC=0.30, plan expects 0.0 kW net import
   - Action: inject PV drop → +4 kW deviation
   - Assert: battery at max discharge, EV charge setpoint reduces to cover residual, no DeviceDeviation fires within 30 ticks
-- [ ] T032 [P] [US1] Reuse step implementations from T029–T030
+- [x] T032 [P] [US1] Reuse step implementations from T029–T030
 
 ### 3.6 Manual Pi4 Validation (User Story 1)
 
@@ -140,24 +140,24 @@ This document breaks down the implementation plan into granular, independently e
 
 ### 4.1 Linger Enforcement
 
-- [ ] T036 Implement `linger_ok()` helper function in `VEN/src/controller/absorber.rs`: check if `(now - last_state_change_ts).num_seconds() >= min_state_linger_s` for a given asset (FR-003)
-- [ ] T037 Update `apply_deviation_absorption()` to call `linger_ok()` before applying correction to each asset; skip asset if linger blocks, continue to next priority asset (FR-003)
-- [ ] T038 Update `apply_deviation_absorption()` to record `last_state_change_ts` in `AbsorberState` when a setpoint change is made (FR-003)
+- [x] T036 Implement `linger_ok()` helper function in `VEN/src/controller/absorber.rs`: check if `(now - last_state_change_ts).num_seconds() >= min_state_linger_s` for a given asset (FR-003)
+- [x] T037 Update `apply_deviation_absorption()` to call `linger_ok()` before applying correction to each asset; skip asset if linger blocks, continue to next priority asset (FR-003)
+- [x] T038 Update `apply_deviation_absorption()` to record `last_state_change_ts` in `AbsorberState` when a setpoint change is made (FR-003)
 
 ### 4.2 Unit Tests for Linger
 
-- [ ] T039 [P] Unit test: `linger_ok_returns_false_before_min_time` — last change 5s ago, min_linger=10s → returns false
-- [ ] T040 [P] Unit test: `linger_ok_returns_true_after_min_time` — last change 15s ago, min_linger=10s → returns true
+- [x] T039 [P] Unit test: `linger_ok_returns_false_before_min_time` — last change 5s ago, min_linger=10s → returns false
+- [x] T040 [P] Unit test: `linger_ok_returns_true_after_min_time` — last change 15s ago, min_linger=10s → returns true
 - [ ] T041 [P] Unit test: `linger_ok_returns_true_on_first_change` — no prior state change → returns true
 - [ ] T042 [P] Unit test: `absorber_heater_skipped_when_linger_active` — heater linger blocks, battery at limit, positive deviation → residual returns unabsorbed, heater not touched
 
 ### 4.3 BDD Scenario: Heater Linger Enforcement
 
-- [ ] T043 [US2] Add BDD scenario to `tests/features/deviation_absorber.feature`: "Heater linger prevents rapid relay switching"
+- [x] T043 [US2] Add BDD scenario to `tests/features/deviation_absorber.feature`: "Heater linger prevents rapid relay switching"
   - Setup: heater min_state_linger_s=5s, absorber enabled, battery/EV at limits
   - Action: trigger absorption, heater changes; then immediately trigger again
   - Assert: heater does not change within 5 seconds; residual propagates to Tier 2 after 5s elapsed
-- [ ] T044 [P] [US2] Add step implementations for heater state tracking and linger clock verification
+- [x] T044 [P] [US2] Add step implementations for heater state tracking and linger clock verification
 
 ### 4.4 Manual Pi4 Validation (User Story 2)
 
@@ -192,11 +192,11 @@ This document breaks down the implementation plan into granular, independently e
 
 ### 5.3 BDD Scenario: EV Departure Guard
 
-- [ ] T053 [US3] Add BDD scenario to `tests/features/deviation_absorber.feature`: "EV departure guard prevents reduction near departure"
+- [x] T053 [US3] Add BDD scenario to `tests/features/deviation_absorber.feature`: "EV departure guard prevents reduction near departure"
   - Setup: EV departure in 20 min, SoC=0.30 (below target), ev_departure_guard_s=1800 (30 min), absorber enabled
   - Action: inject positive deviation (reduce import)
   - Assert: absorber skips EV and uses battery instead; EV setpoint unchanged
-- [ ] T054 [P] [US3] Add step implementations for EV session setup (departure time) and charge setpoint assertion
+- [x] T054 [P] [US3] Add step implementations for EV session setup (departure time) and charge setpoint assertion
 
 ### 5.4 Manual Pi4 Validation (User Story 3)
 
@@ -219,10 +219,10 @@ This document breaks down the implementation plan into granular, independently e
 
 ### 6.1 Tier 2 Escalation Logic
 
-- [ ] T057 Update signature of `accumulate_deviation()` in `VEN/src/loops.rs` to accept `residual_kw: f64` (instead of `post_net_kw` or raw deviation) (FR-004, FR-005)
-- [ ] T058 Update logic in `accumulate_deviation()`: increment `absorber_state.residual_ticks` only when `|residual_kw| > dead_band_kw` (use value from profile, default 0.1 kW); fire `DeviceDeviation` trigger when `residual_ticks >= deviation_trigger_ticks` (default 120 for production, 10 for test) (FR-005)
-- [ ] T059 Update `accumulate_deviation()` to reset `residual_ticks` to 0 when `|residual_kw| <= dead_band_kw` (FR-005)
-- [ ] T060 Update PHASE 6 call in `VEN/src/loops.rs` (line ~853) to pass `residual_kw` from `apply_deviation_absorption()` instead of raw grid power
+- [x] T057 Update signature of `accumulate_deviation()` in `VEN/src/loops.rs` to accept `residual_kw: f64` (instead of `post_net_kw` or raw deviation) (FR-004, FR-005)
+- [x] T058 Update logic in `accumulate_deviation()`: increment `absorber_state.residual_ticks` only when `|residual_kw| > dead_band_kw` (use value from profile, default 0.1 kW); fire `DeviceDeviation` trigger when `residual_ticks >= deviation_trigger_ticks` (default 120 for production, 10 for test) (FR-005)
+- [x] T059 Update `accumulate_deviation()` to reset `residual_ticks` to 0 when `|residual_kw| <= dead_band_kw` (FR-005)
+- [x] T060 Update PHASE 6 call in `VEN/src/loops.rs` (line ~853) to pass `residual_kw` from `apply_deviation_absorption()` instead of raw grid power
 
 ### 6.2 Unit Tests for Tier 2 Escalation
 
@@ -233,11 +233,11 @@ This document breaks down the implementation plan into granular, independently e
 
 ### 6.3 BDD Scenario: Residual Escalation
 
-- [ ] T065 [US4] Add BDD scenario to `tests/features/deviation_absorber.feature`: "DeviceDeviation fires when all absorbers exhausted"
+- [x] T065 [US4] Add BDD scenario to `tests/features/deviation_absorber.feature`: "DeviceDeviation fires when all absorbers exhausted"
   - Setup: battery at min_soc, EV at soc_target, heater at max, absorber enabled with deviation_trigger_ticks=10 (test profile)
   - Action: inject sustained 5 kW positive deviation for 12 ticks
   - Assert: first 9 ticks → no DeviceDeviation; at tick 10 → DeviceDeviation fires; planner wakes
-- [ ] T066 [P] [US4] Add step implementations for sustained deviation application and DeviceDeviation trigger assertion
+- [x] T066 [P] [US4] Add step implementations for sustained deviation application and DeviceDeviation trigger assertion
 
 ### 6.4 Manual Pi4 Validation (User Story 4)
 
@@ -252,19 +252,19 @@ This document breaks down the implementation plan into granular, independently e
 
 ### 7.1 Profile YAML Updates
 
-- [ ] T069 Add `absorber:` section to `VEN/profiles/test.yaml` with: `enabled: true`, `dead_band_kw: 0.1`, `dead_band_clearing_ticks: 1`, `assets: [{id: battery, priority: 0, min_state_linger_s: 0}, {id: ev, priority: 1, min_state_linger_s: 0, ev_departure_guard_s: 1800}, {id: heater, priority: 2, min_state_linger_s: 0}]`; set planner `deviation_trigger_ticks: 10`
-- [ ] T070 [P] Add `absorber:` section to `VEN/profiles/ven-1.yaml` with same structure as test.yaml, but `min_state_linger_s: 30` for heater; set planner `deviation_trigger_ticks: 120`, `replan_interval_s: 300` (production baseline)
-- [ ] T071 [P] Add `absorber:` section to `VEN/profiles/ven-2.yaml` (same as ven-1.yaml)
-- [ ] T072 [P] Add `absorber:` section to `VEN/profiles/ven-3.yaml` (same as ven-1.yaml)
+- [x] T069 Add `absorber:` section to `VEN/profiles/test.yaml` with: `enabled: true`, `dead_band_kw: 0.1`, `dead_band_clearing_ticks: 1`, `assets: [{id: battery, priority: 0, min_state_linger_s: 0}, {id: ev, priority: 1, min_state_linger_s: 0, ev_departure_guard_s: 1800}, {id: heater, priority: 2, min_state_linger_s: 0}]`; set planner `deviation_trigger_ticks: 10`
+- [x] T070 [P] Add `absorber:` section to `VEN/profiles/ven-1.yaml` with same structure as test.yaml, but `min_state_linger_s: 30` for heater; set planner `deviation_trigger_ticks: 120`, `replan_interval_s: 300` (production baseline)
+- [x] T071 [P] Add `absorber:` section to `VEN/profiles/ven-2.yaml` (same as ven-1.yaml)
+- [x] T072 [P] Add `absorber:` section to `VEN/profiles/ven-3.yaml` (same as ven-1.yaml)
 - [ ] T073 Verify all 4 profile YAML files load successfully: `cargo test profile` (FR-009, FR-010, SC-008)
 
 ### 7.2 BDD: Settling Behavior
 
-- [ ] T074 [US1] Add BDD scenario to `tests/features/deviation_absorber.feature`: "Settling behavior ramps overlay to zero"
+- [x] T074 [US1] Add BDD scenario to `tests/features/deviation_absorber.feature`: "Settling behavior ramps overlay to zero"
   - Setup: absorber enabled, battery with active overlay
   - Action: deviation clears (drops below dead-band)
   - Assert: overlay ramps to 0 over 1 tick, setpoint returns to clean MILP allocation
-- [ ] T075 [P] Add step implementations for overlay state assertion and settling validation
+- [x] T075 [P] Add step implementations for overlay state assertion and settling validation
 
 ### 7.3 Regression Testing
 
@@ -294,7 +294,7 @@ This document breaks down the implementation plan into granular, independently e
 
 - [ ] T090 Update `docs/history/project_journal.md` with Phase 30 entry: absorber implementation summary, key decisions, issues encountered
 - [ ] T091 [P] Update `docs/reference/KEY_LEARNINGS.md` with absorber-specific lessons (e.g., linger state machine patterns, residual vs. raw deviation tracking, SSE deduplication)
-- [ ] T092 [P] Add inline code comments to absorber.rs for non-obvious logic (e.g., settling 1-tick ramp reason, headroom SoC bound rationale)
+- [x] T092 [P] Add inline code comments to absorber.rs for non-obvious logic (e.g., settling 1-tick ramp reason, headroom SoC bound rationale)
 
 ### 7.7 Final Validation Checklist
 
