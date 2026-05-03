@@ -75,7 +75,10 @@ pub struct AbsorberState {
     /// Per-asset: timestamp of last state change (used for linger enforcement).
     pub last_state_change_ts: HashMap<String, DateTime<Utc>>,
 
-    /// Per-asset: counter of ticks during settling phase (ramps overlay to zero).
+    /// Per-asset: consecutive ticks this asset's deviation has been inside the dead-band.
+    /// Used as the wait-gate counter for `dead_band_clearing_ticks` chatter suppression.
+    /// Resets to 0 when deviation returns above dead-band.
+    /// When counter reaches the threshold, the overlay is zeroed on that same tick.
     pub settling_ticks: HashMap<String, u32>,
 
     /// Per-asset: current correction overlay (delta from MILP setpoint); 0.0 = no correction.
@@ -139,21 +142,49 @@ pub fn apply_deviation_absorption(
         return deviation_kw;
     }
 
-    // Within dead-band: settle overlays, don't apply any correction.
-    // Return deviation as-is (small enough that Tier 2 dead-band will also absorb it).
+    // Within dead-band: apply wait-gate before clearing overlays (FR-007).
+    //
+    // Each asset's `settling_ticks` counter increments per tick deviation stays
+    // inside the dead-band.  Only when the counter reaches `dead_band_clearing_ticks`
+    // is the overlay zeroed.  If deviation returns above the dead-band first, the
+    // counter resets (see correction-application block below).
+    //
+    // With the default `dead_band_clearing_ticks = 1` an asset's counter reaches
+    // threshold on the very first in-band tick — identical to the previous behaviour.
     if deviation_kw.abs() <= profile.absorber.dead_band_kw {
-        let asset_ids: Vec<_> = state.active_overlay_kw.keys().cloned().collect();
-        for id in asset_ids {
-            state.active_overlay_kw.insert(id, 0.0);
+        let threshold = profile.absorber.dead_band_clearing_ticks as u32;
+
+        // Only assets with a live overlay participate in the wait gate.
+        let active_ids: Vec<String> = state
+            .active_overlay_kw
+            .iter()
+            .filter(|(_, &v)| v.abs() > 0.01)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        for id in &active_ids {
+            let ticks = state.settling_ticks.entry(id.clone()).or_insert(0);
+            *ticks += 1;
+            if *ticks >= threshold {
+                // Gate passed: zero overlay and reset counter.
+                state.active_overlay_kw.insert(id.clone(), 0.0);
+                state.settling_ticks.insert(id.clone(), 0);
+            }
+            // else: gate not yet passed — keep overlay, stay in Correcting.
         }
-        if was_active {
-            let _ = event_tx.send(PlannerEvent::CorrectionCleared {
-                ts: now,
-                reason: "deviation_cleared".to_string(),
-            });
-            state.last_emitted_correction_kw = 0.0;
+
+        // Fire CorrectionCleared and clear correction_is_active only when ALL overlays gone.
+        let any_overlay_remaining = state.active_overlay_kw.values().any(|&v| v.abs() > 0.01);
+        if !any_overlay_remaining {
+            if was_active {
+                let _ = event_tx.send(PlannerEvent::CorrectionCleared {
+                    ts: now,
+                    reason: "deviation_cleared".to_string(),
+                });
+                state.last_emitted_correction_kw = 0.0;
+            }
+            state.correction_is_active = false;
         }
-        state.correction_is_active = false;
         return deviation_kw;
     }
 
@@ -223,6 +254,8 @@ pub fn apply_deviation_absorption(
                 .active_overlay_kw
                 .insert(asset_cfg.id.clone(), delta_kw);
             state.last_state_change_ts.insert(asset_cfg.id.clone(), now);
+            // Reset in-band counter: deviation is above dead-band, gate restarts from zero.
+            state.settling_ticks.insert(asset_cfg.id.clone(), 0);
 
             remaining_kw -= delta_kw;
         }
@@ -1076,5 +1109,69 @@ mod tests {
             setpoints["battery"], 0.0,
             "setpoints unchanged when disabled"
         );
+    }
+
+    // ── dead_band_clearing_ticks wait gate ────────────────────────────────────
+
+    fn make_test_profile_clearing_ticks(n: usize) -> Profile {
+        let mut p = make_test_profile();
+        p.absorber.dead_band_clearing_ticks = n;
+        p
+    }
+
+    #[test]
+    fn absorber_wait_gate_holds_for_multiple_ticks() {
+        let profile = make_test_profile_clearing_ticks(3);
+        let sim = make_test_sim();
+        let event_tx = make_test_event_tx();
+        let mut state = make_fresh_state();
+        let mut setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
+        let now = Utc::now();
+
+        // Tick 0: apply correction (above dead-band)
+        apply_deviation_absorption(&mut state, 2.0, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
+        assert!(state.correction_is_active, "should be active after correction");
+
+        // Ticks 1 and 2: in-band but gate not yet reached (threshold=3)
+        for expected_ticks in 1u32..=2 {
+            apply_deviation_absorption(&mut state, 0.05, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
+            assert!(state.correction_is_active, "tick {}: correction should still be active (gate not fired)", expected_ticks);
+            let ticks = *state.settling_ticks.get("battery").unwrap_or(&0);
+            assert_eq!(ticks, expected_ticks, "tick {}: settling counter mismatch", expected_ticks);
+        }
+
+        // Tick 3: gate fires (counter reaches threshold), overlay cleared
+        apply_deviation_absorption(&mut state, 0.05, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
+        assert!(!state.correction_is_active, "tick 3: correction should clear after gate fires");
+        assert!(
+            state.active_overlay_kw.values().all(|&v| v.abs() < 0.01),
+            "all overlays should be zero after gate"
+        );
+    }
+
+    #[test]
+    fn absorber_wait_gate_resets_on_chatter() {
+        let profile = make_test_profile_clearing_ticks(3);
+        let sim = make_test_sim();
+        let event_tx = make_test_event_tx();
+        let mut state = make_fresh_state();
+        let mut setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
+        let now = Utc::now();
+
+        // Tick 0: apply correction
+        apply_deviation_absorption(&mut state, 2.0, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
+
+        // Tick 1: in-band, counter = 1
+        apply_deviation_absorption(&mut state, 0.05, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
+        assert_eq!(*state.settling_ticks.get("battery").unwrap_or(&0), 1, "counter should be 1 after first in-band tick");
+
+        // Tick 2: deviation returns above dead-band → counter resets to 0
+        apply_deviation_absorption(&mut state, 2.0, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
+        assert_eq!(*state.settling_ticks.get("battery").unwrap_or(&0), 0, "counter should reset when deviation returns above dead-band");
+
+        // Tick 3: back in-band → counter = 1 (not 2, because it reset from chatter)
+        apply_deviation_absorption(&mut state, 0.05, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
+        assert!(state.correction_is_active, "gate not yet reached after reset (need 3 ticks, only have 1)");
+        assert_eq!(*state.settling_ticks.get("battery").unwrap_or(&0), 1, "counter should restart from 1 after chatter reset");
     }
 }
