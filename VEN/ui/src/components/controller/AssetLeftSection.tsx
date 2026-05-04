@@ -7,7 +7,7 @@ interface AssetLeftSectionProps {
 }
 
 export function AssetLeftSection({ summary }: AssetLeftSectionProps) {
-  const { assetId, powerKw, costRateEurH, co2RateGH, socPct, forecastEnergyKwh, activeRequest } =
+  const { assetId, powerKw, costRateEurH, co2RateGH, socPct, tempC, forecastEnergyKwh, activeRequest } =
     summary;
 
   const sign = (n: number) => (n >= 0 ? "+" : "");
@@ -36,6 +36,12 @@ export function AssetLeftSection({ summary }: AssetLeftSectionProps) {
       {socPct !== null && (
         <Typography variant="caption" color="text.secondary" data-testid={`asset-soc-${assetId}`}>
           SoC: {socPct.toFixed(1)}%
+        </Typography>
+      )}
+
+      {tempC !== null && (
+        <Typography variant="caption" color="text.secondary" data-testid={`asset-temp-${assetId}`}>
+          T_tank: {tempC.toFixed(1)} °C
         </Typography>
       )}
 

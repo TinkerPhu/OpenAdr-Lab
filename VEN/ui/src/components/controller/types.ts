@@ -71,6 +71,8 @@ export type AssetSummary = {
   co2RateGH: number;
   /** State of charge [0–100], null for non-SoC assets */
   socPct: number | null;
+  /** Tank temperature [°C], null for non-thermal assets */
+  tempC: number | null;
   /** Sum of plan allocations for visible window [kWh], null if no plan */
   forecastEnergyKwh: number | null;
   /** Closest active user request, null if none */
