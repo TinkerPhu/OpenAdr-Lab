@@ -46,6 +46,7 @@ function makeAssetSummary(assetId: "ev"): AssetSummary {
     costRateEurH: 0.6,
     co2RateGH: 900,
     socPct: 50,
+    tempC: null,
     forecastEnergyKwh: null,
     activeRequest: null,
   };

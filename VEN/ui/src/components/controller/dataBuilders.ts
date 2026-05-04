@@ -95,7 +95,8 @@ export function deriveAssetSummaries(
     assetId: AssetId,
     label: string,
     powerKw: number,
-    socPct: number | null
+    socPct: number | null,
+    tempC: number | null = null
   ): AssetSummary {
     // For consuming assets (powerKw >= 0) scale by gridFraction so only the
     // grid-sourced portion incurs cost. Generating assets (powerKw < 0) are
@@ -116,6 +117,7 @@ export function deriveAssetSummaries(
       costRateEurH,
       co2RateGH,
       socPct,
+      tempC,
       forecastEnergyKwh,
       activeRequest,
     };
@@ -129,8 +131,9 @@ export function deriveAssetSummaries(
   }
   const heaterAsset = sim.assets["heater"];
   if (heaterAsset) {
+    const tempC = typeof heaterAsset["temp_c"] === "number" ? heaterAsset["temp_c"] : null;
     summaries.push(
-      makeSummary("heater", "Heater", heaterAsset.power_kw, null)
+      makeSummary("heater", "Heater", heaterAsset.power_kw, null, tempC)
     );
   }
   const pvAsset = sim.assets["pv"];
