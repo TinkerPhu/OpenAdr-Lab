@@ -35,9 +35,23 @@ def step_see_cell(context, title):
 
 @when('I click the refresh button in the "{title}" cell')
 def step_click_refresh(context, title):
-    sel = tid(f"refresh-btn-{_slug(title)}")
+    slug = _slug(title)
+    sel = tid(f"refresh-btn-{slug}")
     context.browser_page.wait_for_selector(sel, timeout=45000)
     context.browser_page.dispatch_event(sel, "click")
+    # Wait for the loading cycle to complete so downstream "Then" steps always
+    # see post-load state. Some cells (Timeline) render with empty initial data,
+    # so waiting here avoids the race where wait_for_selector finds the element
+    # in its pre-load state before the fetch returns.
+    try:
+        context.browser_page.wait_for_selector(
+            tid(f"loading-indicator-{slug}"), timeout=5000
+        )
+        context.browser_page.wait_for_selector(
+            tid(f"loading-indicator-{slug}"), state="hidden", timeout=30000
+        )
+    except Exception:
+        pass  # loading completed before we could observe it — proceed
 
 
 # ── Chart assertions ──────────────────────────────────────────────────────────
@@ -119,9 +133,9 @@ def step_series_dropdown_visible(context):
     )
     assert el is not None and el.is_visible(), "Timeline series dropdown not visible"
     el.dispatch_event("click")
-    # Wait for MUI portal options to appear — 500ms was too short on Pi4 ARM64.
-    # This blocks until at least one option exists or 15s elapses.
-    page.wait_for_selector('li[role="option"]', timeout=15000)
+    # By the time we reach here the loading cycle has already completed (see
+    # step_click_refresh). The dropdown must open with options immediately.
+    page.wait_for_selector('li[role="option"]', timeout=5000)
     options = page.query_selector_all('li[role="option"]')
     assert len(options) > 0, "Timeline dropdown has no options"
 
