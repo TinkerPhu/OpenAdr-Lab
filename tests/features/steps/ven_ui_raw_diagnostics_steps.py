@@ -118,9 +118,10 @@ def step_series_dropdown_visible(context):
         tid("timeline-series-select"), timeout=45000
     )
     assert el is not None and el.is_visible(), "Timeline series dropdown not visible"
-    # Optionally click to verify it opens and shows options
     el.dispatch_event("click")
-    page.wait_for_timeout(500)  # Wait for MUI portal to render
+    # Wait for MUI portal options to appear — 500ms was too short on Pi4 ARM64.
+    # This blocks until at least one option exists or 15s elapses.
+    page.wait_for_selector('li[role="option"]', timeout=15000)
     options = page.query_selector_all('li[role="option"]')
     assert len(options) > 0, "Timeline dropdown has no options"
 
