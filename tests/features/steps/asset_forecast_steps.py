@@ -1,19 +1,26 @@
 """Step definitions for asset forecast() and history() BDD tests (speckit 007)."""
 
-import time
 from datetime import datetime, timezone, timedelta
 from behave import given, when, then
 from features.helpers.api_client import ven_get
+from features.helpers.wait import poll_until
 
 
 # ── Given ─────────────────────────────────────────────────────────────────────
 
 @given("the VEN has been running for at least {seconds:d} seconds")
 def step_ven_running_for(context, seconds):
-    """Poll until the VEN has been running long enough for history to accumulate."""
     r = ven_get("/health")
     assert r.status_code == 200, f"VEN not healthy: {r.status_code}"
-    time.sleep(max(0, seconds))
+    # Poll until the ring buffer has at least one sample — avoids a flat sleep.
+    # A 5-second window is sufficient; samples appear within 1-2 sim ticks.
+    poll_until(
+        lambda: ven_get("/history/pv", params={"timespan_s": 5}),
+        lambda resp: resp.ok and len(resp.json().get("samples", [])) > 0,
+        timeout=60,
+        interval=2,
+        description=f"VEN history ring buffer has samples (warm-up for {seconds}s window)",
+    )
 
 
 # ── When ──────────────────────────────────────────────────────────────────────
