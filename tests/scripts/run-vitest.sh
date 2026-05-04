@@ -3,7 +3,7 @@ echo "=== VITEST TESTS: VEN/ui and VTN/ui ==="
 cd /srv/docker/openadr_lab
 
 for UI_DIR in VEN/ui VTN/ui; do
-  NAME=$(echo "$UI_DIR" | tr '/' '-' | tr 'A-Z' 'a-z')
+  NAME=$(echo "$UI_DIR" | tr '/.-' '_' | tr 'A-Z' 'a-z')
   echo ""
   echo "--- $UI_DIR ---"
 
