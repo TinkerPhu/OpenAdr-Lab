@@ -175,7 +175,7 @@ def step_poll_trace_for_trigger(context, trigger):
 
     try:
         context.trace_events = poll_until(
-            fetch, check, timeout=150,
+            fetch, check, timeout=60,
             description=f"PlanCycle with trigger_reason={trigger!r}",
         )
     finally:
