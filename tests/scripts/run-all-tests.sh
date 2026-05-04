@@ -42,10 +42,10 @@ bash "$SCRIPT_DIR/run-vitest.sh" 2>&1 | tee /tmp/vitest.log || VITEST_EXIT=$?
 
 # Extract timing vars printed by run-vitest.sh
 eval "$(grep -E '^VITEST_(BUILD|CONTAINER|EXIT)_' /tmp/vitest.log || true)"
-VITEST_BUILD_VEN_UI_S="${VITEST_BUILD_VEN_UI_S:-0}"
-VITEST_CONTAINER_VEN_UI_S="${VITEST_CONTAINER_VEN_UI_S:-0}"
-VITEST_BUILD_VTN_UI_S="${VITEST_BUILD_VTN_UI_S:-0}"
-VITEST_CONTAINER_VTN_UI_S="${VITEST_CONTAINER_VTN_UI_S:-0}"
+VITEST_BUILD_ven_ui_S="${VITEST_BUILD_ven_ui_S:-0}"
+VITEST_CONTAINER_ven_ui_S="${VITEST_CONTAINER_ven_ui_S:-0}"
+VITEST_BUILD_vtn_ui_S="${VITEST_BUILD_vtn_ui_S:-0}"
+VITEST_CONTAINER_vtn_ui_S="${VITEST_CONTAINER_vtn_ui_S:-0}"
 
 if [ $VITEST_EXIT -ne 0 ]; then
   FAILURES="$FAILURES Vitest"
@@ -94,9 +94,9 @@ echo "========================================================================"
 printf "%-28s  %s\n" "Rust unit tests:" \
   "build=${RUST_BUILD_TIME_S}s  tests=${RUST_TEST_S}s  container=${RUST_TEST_CONTAINER_TIME_S}s"
 printf "%-28s  %s\n" "VEN/ui vitest:" \
-  "build=${VITEST_BUILD_VEN_UI_S}s  tests=${VITEST_CONTAINER_VEN_UI_S}s"
+  "build=${VITEST_BUILD_ven_ui_S}s  tests=${VITEST_CONTAINER_ven_ui_S}s"
 printf "%-28s  %s\n" "VTN/ui vitest:" \
-  "build=${VITEST_BUILD_VTN_UI_S}s  tests=${VITEST_CONTAINER_VTN_UI_S}s"
+  "build=${VITEST_BUILD_vtn_ui_S}s  tests=${VITEST_CONTAINER_vtn_ui_S}s"
 printf "%-28s  %s\n" "BDD integration (wall):" \
   "${BDD_WALL_S}s$([ -n "$BDD_ACCOUNTED_S" ] && echo "  accounted=${BDD_ACCOUNTED_S}s")$([ -n "$BDD_SCENARIO_COUNT" ] && echo "  scenarios=${BDD_SCENARIO_COUNT}")"
 [ -n "$BDD_SUMMARY" ] && echo "  Behave: $BDD_SUMMARY"

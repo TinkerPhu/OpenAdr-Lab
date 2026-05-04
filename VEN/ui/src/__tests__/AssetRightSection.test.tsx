@@ -494,7 +494,7 @@ describe("AssetRightSection — heater controls", () => {
     );
 
     expect(screen.getByTestId("ctrl-heater-setpoint-c")).toBeInTheDocument();
-    expect(screen.getByTestId("ctrl-heater-temp-c")).toBeInTheDocument();
+    expect(screen.getByTestId("ctrl-heater-t-tank")).toBeInTheDocument();
     expect(screen.getByTestId("ctrl-heater-temp-min-c")).toBeInTheDocument();
     expect(screen.getByTestId("ctrl-heater-temp-max-c")).toBeInTheDocument();
   });
@@ -509,7 +509,7 @@ describe("AssetRightSection — heater controls", () => {
         onResetSoc={vi.fn()}
       />
     );
-    expect(screen.getByText(/Current Temperature: 22\.5/)).toBeInTheDocument();
+    expect(screen.getByText(/T_tank: 22\.50/)).toBeInTheDocument();
   });
 
   it("heater_temp_c: reverts to live sim temperature after mouse-up (one-shot behavior)", () => {
@@ -525,18 +525,19 @@ describe("AssetRightSection — heater controls", () => {
       />
     );
 
-    const input = getSchemaSliderInput("heater_temp_c");
+    const tankRoot = screen.getByTestId("ctrl-heater-t-tank");
+    const input = tankRoot.querySelector('input[type="range"]') as HTMLInputElement;
 
     // Drag to 18°C
     act(() => { fireEvent.change(input, { target: { value: "18" } }); });
-    expect(screen.getByText(/Current Temperature: 18/)).toBeInTheDocument();
+    expect(screen.getByText(/T_tank: 18\.00/)).toBeInTheDocument();
 
     // Mouse-up: POST fires and local hold is released
     act(() => { fireEvent.mouseUp(input); });
     expect(mockOnOverrideChange).toHaveBeenCalledWith({ heater_temp_c: 18 });
 
-    // Slider must revert to live sim temp (22.5) — not stay at 18 (persistent behavior)
-    expect(screen.getByText(/Current Temperature: 22\.5/)).toBeInTheDocument();
+    // Slider must revert to live sim temp (22.5) — not stay at 18 (one-shot behavior)
+    expect(screen.getByText(/T_tank: 22\.50/)).toBeInTheDocument();
   });
 
   it("heater_temp_min_c: shows live sim temp_min_c when no override", () => {
