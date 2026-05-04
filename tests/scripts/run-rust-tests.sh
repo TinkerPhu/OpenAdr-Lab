@@ -15,7 +15,7 @@ TEST_START=$(date +%s)
 docker run --rm ven-test-builder bash -c '
   cd /app
   COMPILE_START=$(date +%s%3N)
-  cargo test --workspace -- --test-output immediate 2>&1
+  cargo test --workspace 2>&1
   RC=$?
   RUN_END=$(date +%s%3N)
   echo ""
