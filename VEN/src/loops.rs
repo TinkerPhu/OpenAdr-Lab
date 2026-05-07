@@ -206,6 +206,9 @@ pub(crate) fn spawn_event_poll(
                         now,
                     );
 
+                    // Check before the trace_events vec is consumed by the for loop.
+                    let any_change = !changes.trace_events.is_empty();
+
                     for evt in changes.trace_events {
                         state.push_controller_event(evt).await;
                     }
@@ -226,8 +229,13 @@ pub(crate) fn spawn_event_poll(
 
                     state.set_events(events, 500).await;
 
-                    // Signal planner: rates may have changed
-                    let _ = trigger_tx.send(PlanTrigger::RateChange);
+                    // Signal planner only when something actually changed (new/expired event,
+                    // tariff count change, or capacity change). Firing on every poll caused
+                    // continuous replanning at the poll interval (~30s) regardless of whether
+                    // rates changed, which destabilised the plan.
+                    if any_change {
+                        let _ = trigger_tx.send(PlanTrigger::RateChange);
+                    }
                 }
                 Err(e) => {
                     counter!("poll_error_total", "resource" => "events").increment(1);
@@ -853,17 +861,22 @@ pub(crate) fn spawn_planning(
     tokio::spawn(async move {
         // Initial delay: let event poll populate rates before first plan
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        // First cycle is always Periodic; subsequent cycles are set by the select! below.
+        // Using a local variable instead of borrow()ing the watch channel prevents stale
+        // retained values (e.g. AssetStateChange set once and never cleared) from
+        // mis-classifying every subsequent timeout-driven cycle as a hard trigger and
+        // bypassing the plan acceptance gate.
+        let mut wake_trigger = PlanTrigger::Periodic;
         loop {
             let now = Utc::now();
             let rates = state.planned_tariffs().await;
             let capacity = state.capacity_state().await;
-            let trigger = trigger_rx.borrow().clone();
             // If DeviceDeviation was latched (fired while we were solving and possibly
-            // overwritten by a subsequent RateChange), honour it over the channel value.
+            // overwritten by a subsequent trigger), honour it over wake_trigger.
             let trigger = if deviation_pending.swap(false, std::sync::atomic::Ordering::AcqRel) {
                 PlanTrigger::DeviceDeviation
             } else {
-                trigger
+                wake_trigger.clone()
             };
             let trigger_reason = format!("{:?}", trigger);
 
@@ -984,13 +997,24 @@ pub(crate) fn spawn_planning(
                 trigger: trigger_reason.clone(),
             });
             // Acceptance gate: for Periodic replans, only adopt the new plan when it
-            // improves the objective (Phase 1 cost) by more than the effective threshold.
+            // improves the total cost (Phase 1 + Phase 2 friction) by more than the
+            // effective threshold. Using total cost prevents a fragmented plan with low
+            // Phase 1 cost but high switching friction from displacing a smooth plan.
             // The threshold decays linearly with plan age so that changing circumstances
             // are never permanently blocked — after plan_adoption_decay_s seconds, any
             // new plan is accepted. Hard triggers always force adoption.
             let threshold = profile.planner.plan_adoption_threshold_eur;
             let decay_s = profile.planner.plan_adoption_decay_s;
             let is_hard_trigger = !matches!(trigger, PlanTrigger::Periodic);
+            debug!(
+                trigger = %trigger_reason,
+                is_hard_trigger,
+                objective_eur = plan.objective_eur,
+                friction_eur = plan.friction_eur,
+                total_eur = plan.objective_eur + plan.friction_eur,
+                threshold_eur = threshold,
+                "acceptance gate eval"
+            );
             let adopt = if is_hard_trigger || threshold == 0.0 {
                 true
             } else if let Some(ref current) = state.active_plan().await {
@@ -1001,7 +1025,9 @@ pub(crate) fn spawn_planning(
                     1.0
                 };
                 let effective_threshold = threshold * decay_factor;
-                let improvement = current.objective_eur - plan.objective_eur;
+                let current_total = current.objective_eur + current.friction_eur;
+                let new_total = plan.objective_eur + plan.friction_eur;
+                let improvement = current_total - new_total;
                 if improvement > effective_threshold {
                     true
                 } else {
@@ -1011,6 +1037,8 @@ pub(crate) fn spawn_planning(
                         threshold_eur = threshold,
                         elapsed_s = elapsed_s,
                         decay_factor = decay_factor,
+                        current_total_eur = current_total,
+                        new_total_eur = new_total,
                         "periodic plan rejected: improvement below threshold"
                     );
                     false
@@ -1066,11 +1094,14 @@ pub(crate) fn spawn_planning(
                 }
             }
 
-            // Wait for next trigger OR periodic timeout (whichever comes first)
-            tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_secs(replan_s)) => {}
-                _ = trigger_rx.changed() => {}
-            }
+            // Wait for next trigger OR periodic timeout.
+            // Record what woke us: timeout → Periodic, channel change → that trigger.
+            // This ensures the acceptance gate sees Periodic for routine replans
+            // and is only bypassed for genuine event-driven triggers.
+            wake_trigger = tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(replan_s)) => PlanTrigger::Periodic,
+                _ = trigger_rx.changed() => trigger_rx.borrow().clone(),
+            };
         }
     })
 }
