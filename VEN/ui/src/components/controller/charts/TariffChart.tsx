@@ -98,6 +98,9 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, 
           <YAxis yAxisId="tariff" tick={{ fontSize: 10 }} width={40} unit=" €" />
           <YAxis yAxisId="co2" orientation="right" tick={{ fontSize: 10 }} width={52} unit=" g/h" />
           <Tooltip
+            contentStyle={{ fontSize: 9, padding: "1px 5px" }}
+            itemStyle={{ padding: "0" }}
+            labelStyle={{ fontSize: 9, marginBottom: 1 }}
             labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
             formatter={(value: number, name: string) => {
               if (name === "CO₂ rate [g/h]") return [value?.toFixed(0) + " g/h", name];

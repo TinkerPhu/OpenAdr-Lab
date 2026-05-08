@@ -35,6 +35,7 @@
 
 ## Docker & Compose
 
+- **nginx caches upstream hostnames at startup** — `proxy_pass http://hostname/` resolves the hostname once when nginx starts, not per-request. If upstream containers are rebuilt and get new IPs, nginx still routes to the old IP (now stale or pointing to a different container). Fix: restart the nginx container after rebuilding any upstream service. In this project: always restart `ven-ui-1` after rebuilding `ven-1`, `ven-2`, or `ven-3`. Symptom: wrong data served (e.g. ven-1 proxy returning heater data from ven-2).
 - Docker Compose project name = directory name; don't duplicate in service names
 - Docker Compose `.env` files silently override `${VAR:-default}` in YAML — always check for stale `.env` values after changing defaults
 - `--abort-on-container-exit` kills everything when ANY container exits — don't use one-shot containers alongside it
