@@ -1,0 +1,24 @@
+name: Pre-PR checks (fmt/clippy/audit & DCO)
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Install cargo-audit
+        run: cargo install cargo-audit || true
+      - name: Check DCO
+        uses: dawidd6/action-dco@v2
+      - name: cargo fmt check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: cargo audit
+        run: cargo audit

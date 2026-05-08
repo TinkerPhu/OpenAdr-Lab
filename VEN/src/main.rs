@@ -4,6 +4,7 @@ mod config;
 mod controller;
 mod entities;
 mod ids;
+mod tasks;
 mod loops;
 mod models;
 mod planner_events;

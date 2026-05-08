@@ -389,3 +389,9 @@ This eliminates the repetition without changing the dispatch model.
   in a single flat struct. The clearing/decay logic for each behaviour is scattered across
   `state.rs` (`clear_inject_field`) and `simulator/mod.rs` (tick). A small `InjectBehaviour`
   tagged enum per field would make the intent self-documenting.
+
+
+
+
+
+- Implement snapshot-and-release pattern for sim mutex now (may change timing)
