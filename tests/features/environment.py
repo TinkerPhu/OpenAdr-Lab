@@ -227,6 +227,10 @@ def before_scenario(context, scenario):
             "requestfailed",
             lambda req: print(f"[REQUEST FAILED] {req.method} {req.url} — {req.failure}"),
         )
+        context.browser_page.on(
+            "response",
+            lambda resp: print(f"[HTTP {resp.status}] {resp.url}") if resp.status >= 400 else None,
+        )
         from features.helpers.ui import VtnUi
         context.ui = VtnUi(context.browser_page)
         context.ui.open()
