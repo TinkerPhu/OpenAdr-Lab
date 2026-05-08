@@ -99,10 +99,10 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or("/data")
         .to_string();
 
-    // Initialize simulator state (load from disk or seed from profile)
+    // Initialize simulator state — asset configs always rebuilt from profile so that
+    // profile changes (k_loss, thermal_mass, etc.) take effect on every restart.
     let sim_state = {
-        let loaded = simulator::persist::load(&data_dir).await;
-        let sim = loaded.unwrap_or_else(|| SimState::from_profile(&profile));
+        let sim = simulator::persist::load_with_profile(&data_dir, &profile).await;
         Arc::new(Mutex::new(sim))
     };
 
