@@ -49,6 +49,8 @@ class VtnUi:
         if description_url:
             self.page.fill(tid("program-description-url-input"), description_url)
         if ven_targets:
+            # Wait for the VEN list to load before clicking individual checkboxes.
+            self.page.wait_for_selector(tid("program-ven-checkboxes"), timeout=30000)
             for ven in ven_targets:
                 self.page.click(tid(f"ven-checkbox-{ven}"))
         self.page.click(tid("program-form-submit"))

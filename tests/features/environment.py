@@ -78,19 +78,24 @@ def _cleanup_all_programs():
     except Exception as exc:
         print(f"Warning: API program cleanup failed: {exc}")
 
-    # Phase 2 — SQL cleanup (orphaned programs with business_id IS NULL).
-    # Only removes programs/events/enrollments that have no owning business.
-    # Enrollment records (ven_program) for API-created programs are unaffected.
+    # Phase 2 — SQL cleanup.
+    # Two passes:
+    # a) Programs with business_id IS NULL (created via BFF/UI layer, invisible to API credentials).
+    # b) Programs whose names match the ui_use_cases.feature hardcoded names — belt-and-suspenders
+    #    for runs where the UI credential gave the programs a non-null business_id.
     try:
         dsn = "postgres://openadr:openadr@test-db:5432/openadr"
         sql = (
             "DELETE FROM report"
-            "  WHERE program_id IN (SELECT id FROM program WHERE business_id IS NULL);"
+            "  WHERE program_id IN (SELECT id FROM program WHERE business_id IS NULL"
+            "    OR program_name LIKE 'ui-uc%');"
             "DELETE FROM event"
-            "  WHERE program_id IN (SELECT id FROM program WHERE business_id IS NULL);"
+            "  WHERE program_id IN (SELECT id FROM program WHERE business_id IS NULL"
+            "    OR program_name LIKE 'ui-uc%');"
             "DELETE FROM ven_program"
-            "  WHERE program_id IN (SELECT id FROM program WHERE business_id IS NULL);"
-            "DELETE FROM program WHERE business_id IS NULL;"
+            "  WHERE program_id IN (SELECT id FROM program WHERE business_id IS NULL"
+            "    OR program_name LIKE 'ui-uc%');"
+            "DELETE FROM program WHERE business_id IS NULL OR program_name LIKE 'ui-uc%';"
         )
         result = subprocess.run(
             ["psql", dsn, "-c", sql],
