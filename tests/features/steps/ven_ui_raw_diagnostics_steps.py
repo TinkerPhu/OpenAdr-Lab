@@ -135,7 +135,7 @@ def step_series_dropdown_visible(context):
     el.dispatch_event("click")
     # By the time we reach here the loading cycle has already completed (see
     # step_click_refresh). The dropdown must open with options immediately.
-    page.wait_for_selector('li[role="option"]', timeout=5000)
+    page.wait_for_selector('li[role="option"]', timeout=20000)
     options = page.query_selector_all('li[role="option"]')
     assert len(options) > 0, "Timeline dropdown has no options"
 

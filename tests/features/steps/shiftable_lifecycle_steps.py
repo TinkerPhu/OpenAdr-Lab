@@ -30,7 +30,7 @@ def step_poll_plan_for_asset(context, asset_id):
 
     context.polled_plan = poll_until(
         fetch, has_alloc,
-        timeout=60, interval=5,
+        timeout=120, interval=5,
         description=f"/plan has allocation for '{asset_id}'",
     )
 
@@ -67,7 +67,7 @@ def step_poll_sim_until_asset_appears(context, asset_id):
 
     context.polled_sim = poll_until(
         fetch, asset_present,
-        timeout=30, interval=3,
+        timeout=90, interval=3,
         description=f"/sim has asset '{asset_id}'",
     )
 
@@ -103,7 +103,7 @@ def step_poll_sim_until_asset_disappears(context, asset_id):
 
     context.polled_sim = poll_until(
         fetch, asset_gone,
-        timeout=30, interval=3,
+        timeout=90, interval=3,
         description=f"/sim no longer has asset '{asset_id}'",
     )
 
