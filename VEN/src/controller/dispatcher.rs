@@ -105,9 +105,11 @@ pub fn build_setpoints(
 
 /// Opportunistic surplus EV charging overlay.
 ///
-/// When PV is exporting more power than base load consumes, offer the surplus
-/// to the EV (up to its max charge rate). No EnergyPacket is created — this is
-/// dispatcher-only and does not appear in the plan or VTN reports.
+/// When generation exceeds all other active loads, offer the surplus to the EV
+/// (up to its max charge rate). All non-EV, non-battery assets are included in
+/// the surplus calculation so the EV charge targets zero net grid power.
+/// No EnergyPacket is created — this is dispatcher-only and does not appear in
+/// the plan or VTN reports.
 ///
 /// Does nothing when:
 /// - `overlay_enabled` is false (user disabled or auto-paused by active EvSession)
@@ -125,17 +127,15 @@ pub fn apply_surplus_ev_overlay(
     if plan_has_ev_allocation || !overlay_enabled {
         return;
     }
-    // Live PV power (negative = export) and base load (positive = import).
-    let pv_kw = assets
+    // Sum last_power_kw for all non-EV, non-battery assets.
+    // PV contributes negative (export); loads (base_load, heater, …) contribute
+    // positive (import). Including all loads ensures the surplus formula targets
+    // zero net grid power, not just PV minus base_load.
+    let net_other_kw: f64 = assets
         .iter()
-        .find(|a| a.id == crate::ids::ASSET_PV)
+        .filter(|a| a.id != crate::ids::ASSET_EV && a.id != crate::ids::ASSET_BATTERY)
         .map(|a| a.last_power_kw)
-        .unwrap_or(0.0);
-    let base_kw = assets
-        .iter()
-        .find(|a| a.id == crate::ids::ASSET_BASE_LOAD)
-        .map(|a| a.last_power_kw)
-        .unwrap_or(0.0);
+        .sum();
     // Also account for any battery charging that the plan has already allocated this
     // tick (positive setpoint = charging). This prevents double-allocating PV surplus
     // to both the battery and the EV — EV only gets what the battery leaves behind.
@@ -144,8 +144,8 @@ pub fn apply_surplus_ev_overlay(
         .copied()
         .unwrap_or(0.0)
         .max(0.0);
-    // surplus_kw: net generation after base consumption and planned battery charging
-    let surplus_kw = (-(pv_kw + base_kw) - battery_charge_kw).max(0.0);
+    // surplus_kw: net generation after all non-EV loads and planned battery charging.
+    let surplus_kw = (-net_other_kw - battery_charge_kw).max(0.0);
     if surplus_kw < 0.1 {
         return;
     }
@@ -249,7 +249,7 @@ mod tests {
     use crate::assets::AssetHistoryBuffer;
     use crate::assets::{
         AssetConfig, AssetState, BaseLoad, BaseLoadState, Battery, BatteryState, EvCharger,
-        EvState, PvInverter, PvState,
+        EvState, Heater, HeaterState, PvInverter, PvState,
     };
     use crate::simulator::{energy::EnergyCounter, AssetEntry};
 
@@ -337,6 +337,34 @@ mod tests {
             history: AssetHistoryBuffer::new(0),
         };
         (entry, AssetConfig::BaseLoad(cfg))
+    }
+
+    fn heater_entry(last_power_kw: f64) -> (AssetEntry, AssetConfig) {
+        let cfg = Heater {
+            max_kw: 6.0,
+            mid_kw: 3.0,
+            min_power_kw: 0.0,
+            temp_min_c: 45.0,
+            temp_max_c: 60.0,
+            temp_min_c_profile: 45.0,
+            temp_max_c_profile: 60.0,
+            thermal_mass_kwh_per_c: 0.232,
+            k_loss_kw_per_c: 0.005,
+            draw_kw: 0.3,
+            ambient_temp_c: 10.0,
+        };
+        let entry = AssetEntry {
+            id: "heater".to_string(),
+            state: AssetState::Heater(HeaterState {
+                temperature_c: 50.0,
+                actual_power_kw: last_power_kw,
+            }),
+            setpoint_kw: last_power_kw,
+            last_power_kw,
+            energy: EnergyCounter::new(),
+            history: AssetHistoryBuffer::new(0),
+        };
+        (entry, AssetConfig::Heater(cfg))
     }
 
     fn build_assets(
@@ -473,6 +501,41 @@ mod tests {
         assert!(
             sp.get("ev").is_none(),
             "overlay must not fire when overlay_enabled=false"
+        );
+    }
+
+    #[test]
+    fn surplus_accounts_for_heater_load() {
+        // PV 5 kW export, base 0.6 kW, heater full (6 kW) → net_other = 1.6 kW → no surplus
+        let (pv_e, pv_c) = pv_entry(-5.0);
+        let (base_e, base_c) = base_entry(0.6);
+        let (heater_e, heater_c) = heater_entry(6.0);
+        let (ev_e, ev_c) = ev_entry(0.4, true, 0.8);
+        let assets = vec![pv_e, base_e, heater_e, ev_e];
+        let configs = vec![pv_c, base_c, heater_c, ev_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
+        assert!(
+            sp.get("ev").is_none(),
+            "must not charge EV when heater consumes all PV surplus"
+        );
+    }
+
+    #[test]
+    fn surplus_ev_charges_pv_minus_heater_partial() {
+        // PV 5 kW export, base 0.6 kW, heater mid (3 kW) → surplus = 1.4 kW for EV
+        let (pv_e, pv_c) = pv_entry(-5.0);
+        let (base_e, base_c) = base_entry(0.6);
+        let (heater_e, heater_c) = heater_entry(3.0);
+        let (ev_e, ev_c) = ev_entry(0.4, true, 0.8);
+        let assets = vec![pv_e, base_e, heater_e, ev_e];
+        let configs = vec![pv_c, base_c, heater_c, ev_c];
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
+        let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
+        assert!(
+            (ev_sp - 1.4).abs() < 1e-6,
+            "EV should charge at PV minus heater minus base, expected 1.4 kW, got {ev_sp}"
         );
     }
 
