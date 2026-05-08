@@ -390,7 +390,8 @@ pub fn build_asset_timeline(
                 // (battery SoC, EV SoC — replanned frequently enough to stay current).
                 if let Some(ref mut traj) = plan_traj {
                     let dt_h = (slot.end - slot.start).num_seconds() as f64 / 3600.0;
-                    let p_heat_kw = slot.allocations
+                    let p_heat_kw = slot
+                        .allocations
                         .iter()
                         .find(|a| a.asset_id == asset_id)
                         .map(|a| a.power_kw)
