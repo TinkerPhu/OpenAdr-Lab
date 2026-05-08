@@ -34,19 +34,14 @@ export function AssetTimelineChart({
   hoursForward = 1.0,
   stateKey,
 }: AssetTimelineChartProps) {
-  // Ensure at least a 2-point range so recharts can compute the X scale and render the
-  // NOW reference line even when there are no data points yet.
-  const rawData: AssetTimelinePoint[] =
-    data.length > 0
-      ? data
-      : [
-          { ts: nowMs - hoursBack * 3_600_000, values: {} },
-          { ts: nowMs + hoursForward * 3_600_000, values: {} },
-        ];
-
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes.
   const tMin = nowMs - hoursBack * 3_600_000;
   const tMax = nowMs + hoursForward * 3_600_000;
+
+  // Ensure at least a 2-point range so recharts can compute the X scale and render the
+  // NOW reference line even when there are no data points yet.
+  const rawData: AssetTimelinePoint[] =
+    data.length > 0 ? data : [{ ts: tMin, values: {} }, { ts: tMax, values: {} }];
 
   // LOCF: carry the last known state value (soc / temp_c) into future slots where
   // the backend emits no state — ensures the tooltip always shows the current state.
@@ -88,6 +83,9 @@ export function AssetTimelineChart({
           />
         )}
         <Tooltip
+          contentStyle={{ fontSize: 9, padding: "1px 5px" }}
+          itemStyle={{ padding: "0" }}
+          labelStyle={{ fontSize: 9, marginBottom: 1 }}
           labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
           formatter={(value: number, name: string) => {
             if (name === "CO₂eq rate [g/h]") return [value.toFixed(1) + " g/h", name];

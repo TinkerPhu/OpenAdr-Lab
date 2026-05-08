@@ -68,11 +68,11 @@ export function StackedAreaTooltip({
         background: "rgba(255,255,255,0.95)",
         border: "1px solid #ccc",
         borderRadius: 4,
-        padding: "6px 10px",
-        fontSize: 12,
+        padding: "1px 5px",
+        fontSize: 9,
       }}
     >
-      <div style={{ marginBottom: 4, fontWeight: "bold" }}>{time}</div>
+      <div style={{ marginBottom: 1, fontWeight: "bold" }}>{time}</div>
       {Object.entries(netByAsset).map(([assetId, kw]) => (
         <div key={assetId} style={{ color: colorMap[assetId] ?? COLOR_ASSET_FALLBACK }}>
           {assetLabel(assetId)}: {kw >= 0 ? "+" : ""}
@@ -80,7 +80,7 @@ export function StackedAreaTooltip({
         </div>
       ))}
       {gridKw !== null && (
-        <div style={{ color: COLOR_GRID_LINE, borderTop: "1px solid #eee", marginTop: 4, paddingTop: 4 }}>
+        <div style={{ color: COLOR_GRID_LINE, borderTop: "1px solid #eee", marginTop: 2, paddingTop: 2 }}>
           Grid: {gridKw >= 0 ? "+" : ""}
           {gridKw.toFixed(2)} kW
         </div>
