@@ -158,7 +158,10 @@ impl Heater {
 
     /// Create a plan trajectory starting from the current live state.
     /// Returns `None` if `live_state` is not a heater state.
-    pub fn plan_trajectory(cfg: &Self, live_state: &super::AssetState) -> Option<HeaterPlanTrajectory> {
+    pub fn plan_trajectory(
+        cfg: &Self,
+        live_state: &super::AssetState,
+    ) -> Option<HeaterPlanTrajectory> {
         if let super::AssetState::Heater(s) = live_state {
             Some(HeaterPlanTrajectory::new(cfg, s.temperature_c))
         } else {
@@ -302,8 +305,8 @@ pub struct HeaterPlanTrajectory {
 impl HeaterPlanTrajectory {
     pub fn new(cfg: &Heater, live_temp_c: f64) -> Self {
         let e_max_kwh = (cfg.temp_max_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c;
-        let e_kwh = ((live_temp_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c)
-            .clamp(0.0, e_max_kwh);
+        let e_kwh =
+            ((live_temp_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c).clamp(0.0, e_max_kwh);
         Self {
             e_kwh,
             temp_min_c: cfg.temp_min_c,
@@ -316,8 +319,7 @@ impl HeaterPlanTrajectory {
     /// Returns state values for the start of this slot, then advances internal energy.
     pub fn next_slot(&mut self, p_heat_kw: f64, dt_h: f64) -> HashMap<String, f64> {
         let temp_c = self.temp_min_c + self.e_kwh / self.thermal_mass;
-        self.e_kwh = (self.e_kwh + (p_heat_kw - self.q_dem_kw) * dt_h)
-            .clamp(0.0, self.e_max_kwh);
+        self.e_kwh = (self.e_kwh + (p_heat_kw - self.q_dem_kw) * dt_h).clamp(0.0, self.e_max_kwh);
         HashMap::from([("temp_c".into(), temp_c)])
     }
 }

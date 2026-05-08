@@ -1129,20 +1129,64 @@ mod tests {
         let now = Utc::now();
 
         // Tick 0: apply correction (above dead-band)
-        apply_deviation_absorption(&mut state, 2.0, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
-        assert!(state.correction_is_active, "should be active after correction");
+        apply_deviation_absorption(
+            &mut state,
+            2.0,
+            &mut setpoints,
+            &sim,
+            None,
+            &profile,
+            now,
+            &event_tx,
+            None,
+        );
+        assert!(
+            state.correction_is_active,
+            "should be active after correction"
+        );
 
         // Ticks 1 and 2: in-band but gate not yet reached (threshold=3)
         for expected_ticks in 1u32..=2 {
-            apply_deviation_absorption(&mut state, 0.05, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
-            assert!(state.correction_is_active, "tick {}: correction should still be active (gate not fired)", expected_ticks);
+            apply_deviation_absorption(
+                &mut state,
+                0.05,
+                &mut setpoints,
+                &sim,
+                None,
+                &profile,
+                now,
+                &event_tx,
+                None,
+            );
+            assert!(
+                state.correction_is_active,
+                "tick {}: correction should still be active (gate not fired)",
+                expected_ticks
+            );
             let ticks = *state.settling_ticks.get("battery").unwrap_or(&0);
-            assert_eq!(ticks, expected_ticks, "tick {}: settling counter mismatch", expected_ticks);
+            assert_eq!(
+                ticks, expected_ticks,
+                "tick {}: settling counter mismatch",
+                expected_ticks
+            );
         }
 
         // Tick 3: gate fires (counter reaches threshold), overlay cleared
-        apply_deviation_absorption(&mut state, 0.05, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
-        assert!(!state.correction_is_active, "tick 3: correction should clear after gate fires");
+        apply_deviation_absorption(
+            &mut state,
+            0.05,
+            &mut setpoints,
+            &sim,
+            None,
+            &profile,
+            now,
+            &event_tx,
+            None,
+        );
+        assert!(
+            !state.correction_is_active,
+            "tick 3: correction should clear after gate fires"
+        );
         assert!(
             state.active_overlay_kw.values().all(|&v| v.abs() < 0.01),
             "all overlays should be zero after gate"
@@ -1159,19 +1203,74 @@ mod tests {
         let now = Utc::now();
 
         // Tick 0: apply correction
-        apply_deviation_absorption(&mut state, 2.0, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
+        apply_deviation_absorption(
+            &mut state,
+            2.0,
+            &mut setpoints,
+            &sim,
+            None,
+            &profile,
+            now,
+            &event_tx,
+            None,
+        );
 
         // Tick 1: in-band, counter = 1
-        apply_deviation_absorption(&mut state, 0.05, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
-        assert_eq!(*state.settling_ticks.get("battery").unwrap_or(&0), 1, "counter should be 1 after first in-band tick");
+        apply_deviation_absorption(
+            &mut state,
+            0.05,
+            &mut setpoints,
+            &sim,
+            None,
+            &profile,
+            now,
+            &event_tx,
+            None,
+        );
+        assert_eq!(
+            *state.settling_ticks.get("battery").unwrap_or(&0),
+            1,
+            "counter should be 1 after first in-band tick"
+        );
 
         // Tick 2: deviation returns above dead-band → counter resets to 0
-        apply_deviation_absorption(&mut state, 2.0, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
-        assert_eq!(*state.settling_ticks.get("battery").unwrap_or(&0), 0, "counter should reset when deviation returns above dead-band");
+        apply_deviation_absorption(
+            &mut state,
+            2.0,
+            &mut setpoints,
+            &sim,
+            None,
+            &profile,
+            now,
+            &event_tx,
+            None,
+        );
+        assert_eq!(
+            *state.settling_ticks.get("battery").unwrap_or(&0),
+            0,
+            "counter should reset when deviation returns above dead-band"
+        );
 
         // Tick 3: back in-band → counter = 1 (not 2, because it reset from chatter)
-        apply_deviation_absorption(&mut state, 0.05, &mut setpoints, &sim, None, &profile, now, &event_tx, None);
-        assert!(state.correction_is_active, "gate not yet reached after reset (need 3 ticks, only have 1)");
-        assert_eq!(*state.settling_ticks.get("battery").unwrap_or(&0), 1, "counter should restart from 1 after chatter reset");
+        apply_deviation_absorption(
+            &mut state,
+            0.05,
+            &mut setpoints,
+            &sim,
+            None,
+            &profile,
+            now,
+            &event_tx,
+            None,
+        );
+        assert!(
+            state.correction_is_active,
+            "gate not yet reached after reset (need 3 ticks, only have 1)"
+        );
+        assert_eq!(
+            *state.settling_ticks.get("battery").unwrap_or(&0),
+            1,
+            "counter should restart from 1 after chatter reset"
+        );
     }
 }
