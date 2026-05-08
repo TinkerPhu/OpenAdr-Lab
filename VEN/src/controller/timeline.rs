@@ -317,6 +317,14 @@ pub fn build_asset_timeline(
 
     // ── Future: from plan slots ────────────────────────────────────────────────
 
+    // Recompute planned state trajectory from current live state (e.g. heater temp_c).
+    // Delegated to each asset type via AssetConfig::plan_trajectory; returns None for
+    // assets that have no live-state correction (battery/EV SoC are replanned on every
+    // deviation trigger so staleness is negligible for those).
+    let mut plan_traj = sim
+        .find_asset(asset_id)
+        .and_then(|(entry, cfg)| cfg.plan_trajectory(&entry.state));
+
     if let Some(plan) = plan {
         for slot in plan.all_slots() {
             // Only include slots whose start falls in [now, future_end).
@@ -377,9 +385,18 @@ pub fn build_asset_timeline(
                 values.insert("cost_rate_eur_h".into(), cost_rate);
                 values.insert("co2_rate_g_h".into(), co2_rate);
 
-                // Merge per-asset state values computed by the MILP planner
-                // (e.g. "soc" for battery/EV, "temp_c" for heater).
-                if let Some(state_map) = slot.planned_state_by_asset.get(asset_id) {
+                // Planned state values: recompute from live initial state when a
+                // trajectory is available (heater), otherwise use stored MILP values
+                // (battery SoC, EV SoC — replanned frequently enough to stay current).
+                if let Some(ref mut traj) = plan_traj {
+                    let dt_h = (slot.end - slot.start).num_seconds() as f64 / 3600.0;
+                    let p_heat_kw = slot.allocations
+                        .iter()
+                        .find(|a| a.asset_id == asset_id)
+                        .map(|a| a.power_kw)
+                        .unwrap_or(0.0);
+                    values.extend(traj.next_slot(p_heat_kw, dt_h));
+                } else if let Some(state_map) = slot.planned_state_by_asset.get(asset_id) {
                     values.extend(state_map.iter().map(|(k, v)| (k.clone(), *v)));
                 }
             }
