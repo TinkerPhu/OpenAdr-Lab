@@ -214,6 +214,19 @@ def before_scenario(context, scenario):
             context._pw = sync_playwright().start()
             context._browser = context._pw.chromium.launch(headless=True)
         context.browser_page = context._browser.new_page()
+        # Capture browser console errors and network failures for diagnosis
+        context.browser_page.on(
+            "console",
+            lambda msg: print(f"[BROWSER:{msg.type}] {msg.text}") if msg.type in ("error", "warning") else None,
+        )
+        context.browser_page.on(
+            "pageerror",
+            lambda exc: print(f"[PAGE ERROR] {exc}"),
+        )
+        context.browser_page.on(
+            "requestfailed",
+            lambda req: print(f"[REQUEST FAILED] {req.method} {req.url} — {req.failure}"),
+        )
         from features.helpers.ui import VtnUi
         context.ui = VtnUi(context.browser_page)
         context.ui.open()
