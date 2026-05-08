@@ -7,10 +7,15 @@ assets:
     battery_kwh: 75.0
   - type: heater
     id: heater
-    max_kw: 3.0
-    temp_initial_c: 21.0
-    temp_min_c: 18.0
-    temp_max_c: 22.0
+    max_kw: 6.0           # full tier (0 / 3 / 6 kW hardware steps)
+    mid_kw: 3.0           # mid tier
+    temp_initial_c: 50.0
+    temp_min_c: 45.0
+    temp_max_c: 60.0
+    volume_l: 200.0
+    k_loss_kw_per_c: 0.005
+    draw_kw: 0.3
+    switching_penalty_eur: 0.50
   - type: pv
     id: pv
     rated_kw: 6.0
@@ -24,8 +29,11 @@ simulator:
   report_interval_s: 60
 
 planner:
+  phase2_epsilon_eur: 0.10
   replan_interval_s: 300
   deviation_trigger_ticks: 120
+  plan_adoption_threshold_eur: 0.20
+  plan_adoption_decay_s: 1200
 
 absorber:
   enabled: true
