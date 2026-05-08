@@ -1,7 +1,41 @@
 """Step definitions for UI-driven scenarios."""
 
 import json
+import subprocess
 from behave import given, when, then, register_type, use_step_matcher
+
+
+# -- cleanup --
+
+@given("previous UI test programs are cleaned up")
+def step_cleanup_ui_programs(context):
+    """Delete any lingering ui-uc* programs before each UI UC scenario.
+
+    Belt-and-suspenders: _cleanup_all_programs() in before_feature handles
+    bulk cleanup, but if the VTN UI created programs under a non-null business_id
+    that is invisible to the any-business API token, they accumulate and cause
+    409 Conflict errors on the next run.  This step runs a targeted SQL delete
+    before each scenario so each scenario always starts with a clean slate.
+    """
+    dsn = "postgres://openadr:openadr@test-db:5432/openadr"
+    sql = (
+        "DELETE FROM report"
+        "  WHERE program_id IN (SELECT id FROM program WHERE program_name LIKE 'ui-uc%');"
+        "DELETE FROM event"
+        "  WHERE program_id IN (SELECT id FROM program WHERE program_name LIKE 'ui-uc%');"
+        "DELETE FROM ven_program"
+        "  WHERE program_id IN (SELECT id FROM program WHERE program_name LIKE 'ui-uc%');"
+        "DELETE FROM program WHERE program_name LIKE 'ui-uc%';"
+    )
+    try:
+        result = subprocess.run(
+            ["psql", dsn, "-c", sql],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0 and result.stderr.strip():
+            print(f"[ui-cleanup] SQL warning: {result.stderr[:200]}")
+    except Exception as exc:
+        print(f"[ui-cleanup] cleanup skipped: {exc}")
 
 
 # -- navigation --

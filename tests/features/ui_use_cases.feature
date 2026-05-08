@@ -4,6 +4,9 @@ Feature: UI Use Cases — Full End-to-End via Browser
   create programs and events via the UI, verify VEN reception via API,
   submit reports via VEN API, verify in UI.
 
+  Background:
+    Given previous UI test programs are cleaned up
+
   Scenario: UI-UC7 - Connectivity Check (open, round-trip)
     Given I open the VTN UI
     When I navigate to the Programs page
