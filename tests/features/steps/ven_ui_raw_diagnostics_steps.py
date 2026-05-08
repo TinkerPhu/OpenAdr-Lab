@@ -132,9 +132,11 @@ def step_series_dropdown_visible(context):
         tid("timeline-series-select"), timeout=45000
     )
     assert el is not None and el.is_visible(), "Timeline series dropdown not visible"
-    el.dispatch_event("click")
-    # By the time we reach here the loading cycle has already completed (see
-    # step_click_refresh). The dropdown must open with options immediately.
+
+# MUI Select opens on mousedown, not a bare click event.  dispatch_event("click")
+    # does not fire mousedown and leaves the popup closed. Use page.click() which
+    # properly simulates the full pointer-event sequence.
+    page.click(tid("timeline-series-select"))
     page.wait_for_selector('li[role="option"]', timeout=20000)
     options = page.query_selector_all('li[role="option"]')
     assert len(options) > 0, "Timeline dropdown has no options"
