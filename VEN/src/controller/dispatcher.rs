@@ -127,14 +127,15 @@ pub fn apply_surplus_ev_overlay(
     if plan_has_ev_allocation || !overlay_enabled {
         return;
     }
-    // Sum last_power_kw for all non-EV, non-battery assets.
-    // PV contributes negative (export); loads (base_load, heater, …) contribute
-    // positive (import). Including all loads ensures the surplus formula targets
-    // zero net grid power, not just PV minus base_load.
+    // Sum this tick's setpoint for all non-EV, non-battery assets (prefer setpoints
+    // map over last_power_kw so the heater's thermostat switch is visible immediately,
+    // not one tick late). Falls back to last_power_kw for assets with no setpoint
+    // (e.g. PV, which is physics-driven and has its setpoint set from the default).
+    // PV contributes negative (export); loads (base_load, heater, …) positive (import).
     let net_other_kw: f64 = assets
         .iter()
         .filter(|a| a.id != crate::ids::ASSET_EV && a.id != crate::ids::ASSET_BATTERY)
-        .map(|a| a.last_power_kw)
+        .map(|a| setpoints.get(&a.id).copied().unwrap_or(a.last_power_kw))
         .sum();
     // Also account for any battery charging that the plan has already allocated this
     // tick (positive setpoint = charging). This prevents double-allocating PV surplus
