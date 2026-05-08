@@ -29,10 +29,10 @@ simulator:
   report_interval_s: 60
 
 planner:
-  phase2_epsilon_eur: 0.10
+  phase2_epsilon_eur: 5.0
   replan_interval_s: 300
   deviation_trigger_ticks: 120
-  plan_adoption_threshold_eur: 0.20
+  plan_adoption_threshold_eur: 0.05
   plan_adoption_decay_s: 1200
 
 absorber:
