@@ -253,6 +253,14 @@ def before_scenario(context, scenario):
             "pageerror",
             lambda exc: print(f"[PAGE ERROR] {exc}"),
         )
+        context.browser_page.on(
+            "requestfailed",
+            lambda req: print(f"[REQUEST FAILED] {req.method} {req.url} — {req.failure}"),
+        )
+        context.browser_page.on(
+            "response",
+            lambda resp: print(f"[HTTP {resp.status}] {resp.url}") if resp.status >= 400 else None,
+        )
         from features.helpers.ui import VenUi
         context.ven_ui = VenUi(context.browser_page)
         from features.helpers.api_client import get_token_value
