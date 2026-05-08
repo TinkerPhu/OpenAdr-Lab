@@ -35,7 +35,7 @@ planner:
   plan_step_s: 3600
   plan_horizon_h: 24
   replan_interval_s: 20
-  deviation_trigger_ticks: 30
+  deviation_trigger_ticks: 20
 
 absorber:
   enabled: true
