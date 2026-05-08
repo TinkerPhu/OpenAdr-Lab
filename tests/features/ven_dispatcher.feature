@@ -45,6 +45,7 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
   # the grid deviates beyond the threshold, and holds the corrected setpoint.
 
   Scenario: Layer 1 corrects grid deviation immediately using battery
+    Given the battery SoC is reset to 0.5
     When I wait for the VEN /plan endpoint to return a plan
     And I inject base_load_kw 10.0 with alpha 0.0 via sim inject
     Then within 5 seconds the VEN sim battery power_kw is less than -1.0
@@ -52,8 +53,8 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
   # --- Layer 2: DeviceDeviation replan ---
   # Verifies that a sustained grid deviation (> threshold for deviation_trigger_ticks
   # consecutive ticks) fires a PlanTrigger::DeviceDeviation, causing a MILP replan.
-  # The test profile sets deviation_trigger_ticks=10 (fires before the 20s periodic
-  # replan) and base_load_alpha=0.0 keeps the load high between ticks.
+  # The test profile sets deviation_trigger_ticks=30 (fires within the 60s timeout)
+  # and base_load_alpha=0.0 keeps the load high between ticks.
   #
   # With the deviation absorber active, Tier 2 only fires when the absorber is
   # EXHAUSTED. We exhaust all absorber assets first so the full 15 kW extra load
