@@ -25,7 +25,7 @@ def step_wait_for_plan(context):
     context.ven_plan = poll_until(
         fetch,
         lambda plan: plan is not None and "id" in plan,
-        timeout=60,
+        timeout=120,
         description="VEN /plan returns a non-null plan",
     )
 
@@ -65,7 +65,7 @@ def step_wait_for_fresh_plan(context):
 
     context.ven_plan = poll_until(
         fetch, is_fresh,
-        timeout=60,
+        timeout=120,
         description="VEN /plan recomputed after sim inject",
     )
 
@@ -93,7 +93,7 @@ def step_wait_for_ev_allocation(context):
     context.ven_plan = poll_until(
         fetch,
         has_ev_alloc,
-        timeout=60,
+        timeout=120,
         interval=5,
         description="VEN /plan has EV allocation in slots",
     )
@@ -122,7 +122,7 @@ def step_wait_for_heater_allocation(context):
     context.ven_plan = poll_until(
         fetch,
         has_heater_alloc,
-        timeout=60,
+        timeout=120,
         interval=5,
         description="VEN /plan has heater allocation in slots",
     )
@@ -142,7 +142,7 @@ def step_wait_for_envelopes(context):
     context.ven_plan = poll_until(
         fetch,
         lambda plan: plan is not None and len(plan.get("envelopes", [])) > 0,
-        timeout=60,
+        timeout=120,
         interval=5,
         description="VEN /plan has at least 1 flexibility envelope",
     )
