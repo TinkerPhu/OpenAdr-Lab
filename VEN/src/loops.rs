@@ -31,6 +31,8 @@ pub(crate) use crate::tasks::poll_events::spawn_event_poll;
 
 pub(crate) use crate::tasks::poll_reports::spawn_report_poll;
 
+pub(crate) use crate::tasks::planning::spawn_planning;
+
 // ─── Helpers for spawn_sim_tick ───────────────────────────────────────────────
 
 /// Deviation tracking state for Layer 1 (reactive correction) and Layer 2 (sustained deviation).
@@ -556,7 +558,7 @@ pub(crate) fn spawn_sim_tick(
 
 pub(crate) use crate::tasks::obligation::spawn_obligation_check;
 
-pub(crate) fn spawn_planning(
+pub(crate) fn spawn_planning_old(
     state: AppState,
     profile: Arc<Profile>,
     vtn: VtnClient,
