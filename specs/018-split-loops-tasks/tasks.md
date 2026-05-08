@@ -32,7 +32,8 @@ User Story Phases (P1 first)
     - Status: verified (cargo test passed for VEN unit tests)
     - Action: Extract spawn_program_poll and exclusive helpers into `VEN/src/tasks/poll_programs.rs`. Move tests. Update `tasks/mod.rs`. Run `cargo test` and BDD subset.
 
-- [ ] T006 [US1] [FR-002, FR-007] Move report polling (spawn_report_poll) into `VEN/src/tasks/poll_reports.rs`
+- [X] T006 [US1] [FR-002, FR-007] Move report polling (spawn_report_poll) into `VEN/src/tasks/poll_reports.rs`
+    - Status: verified (cargo test passed for VEN unit tests)
     - Action: Extract spawn_report_poll and exclusive helpers into `VEN/src/tasks/poll_reports.rs`. Move tests. Update `tasks/mod.rs`. Run `cargo test` and BDD subset.
 
 - [ ] T007 [US2] [FR-002, FR-007] Move obligation check (spawn_obligation_check) into `VEN/src/tasks/obligation.rs`
