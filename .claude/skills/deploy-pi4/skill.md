@@ -44,6 +44,12 @@ Determine which Docker service needs rebuilding from the file paths:
 ssh Pi4-Server "cd /srv/docker/openadr_lab/<compose-dir> && docker compose build <service> && docker compose up -d <service>"
 ```
 
+**Important:** nginx caches upstream hostnames at startup. After rebuilding any `ven-*` backend service, **always restart `ui`** so nginx re-resolves the new container IPs — otherwise the proxy may route requests to the wrong container:
+
+```bash
+ssh Pi4-Server "cd /srv/docker/openadr_lab/VEN && docker compose restart ui"
+```
+
 ## Step 4 — Verify
 
 ```bash
