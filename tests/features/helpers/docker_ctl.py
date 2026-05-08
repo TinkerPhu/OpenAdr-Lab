@@ -1,16 +1,15 @@
 """Helper to manage Docker containers from within the test-runner container.
 
-Uses raw `docker stop/start` for stop/start (avoids Docker Compose aborting the
-entire stack on container exit) but `docker compose restart` for restarts so the
-service is always found by its logical name regardless of the exact container name
-(which varies between `docker compose up` and `docker compose run` invocations).
+Uses raw `docker stop/start/restart` to avoid Docker Compose aborting the entire
+stack on container exit.  For restart, the service is resolved by its Docker
+Compose label (com.docker.compose.service) so it is found regardless of whether
+the container was started via `docker compose up` or `docker compose run`.
 """
 
 import subprocess
 import time
 
 PROJECT_NAME = "openadr-test"
-COMPOSE_FILE = "/tests/docker-compose.test.yml"
 
 
 def _container_name(service):
@@ -24,10 +23,19 @@ def _docker(*args):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
 
-def _compose(*args):
-    """Run a docker compose command against the test compose file."""
-    cmd = ["docker", "compose", "-f", COMPOSE_FILE, *args]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+def _find_container(service):
+    """Return the container ID for a running service by compose labels.
+
+    Falls back to the standard name pattern if label lookup returns nothing.
+    """
+    result = _docker(
+        "ps", "-q",
+        "--filter", f"label=com.docker.compose.service={service}",
+        "--filter", f"label=com.docker.compose.project={PROJECT_NAME}",
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip().split("\n")[0]
+    return _container_name(service)
 
 
 def stop_service(service):
@@ -47,8 +55,9 @@ def start_service(service):
 
 
 def restart_service(service):
-    """Restart a service via docker compose (robust to container naming variations)."""
-    result = _compose("restart", "-t", "5", service)
+    """Restart a container, resolving it by compose service label if needed."""
+    container = _find_container(service)
+    result = _docker("restart", "-t", "5", container)
     if result.returncode != 0:
         raise RuntimeError(f"Failed to restart {service}: {result.stderr}")
 
