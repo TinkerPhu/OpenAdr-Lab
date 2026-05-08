@@ -303,6 +303,18 @@ impl AssetConfig {
         }
     }
 
+    /// Returns a stateful trajectory computer seeded from the current live state,
+    /// or `None` for assets without planned state to recompute (battery, EV, PV, etc.).
+    pub fn plan_trajectory(
+        &self,
+        live_state: &AssetState,
+    ) -> Option<heater::HeaterPlanTrajectory> {
+        match self {
+            Self::Heater(cfg) => Heater::plan_trajectory(cfg, live_state),
+            _ => None,
+        }
+    }
+
     pub fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
         match (self, state) {
             (Self::Battery(cfg), AssetState::Battery(s)) => cfg.state_values(s),
