@@ -25,6 +25,7 @@ Phase 2: Foundational (blocking prerequisites)
 User Story Phases (P1 first)
 
 - [X] T004 [US1] [FR-002, FR-007, FR-001] Move event polling (spawn_event_poll) into `VEN/src/tasks/poll_events.rs`
+    - Status: verified (cargo test passed for VEN unit tests)
     - Action: Extract spawn_event_poll and exclusive helpers from `VEN/src/loops.rs` into `VEN/src/tasks/poll_events.rs`. Move corresponding `#[cfg(test)]` module into the file. Update `tasks/mod.rs` re-exports. Run `cargo test` and a small BDD subset. If tests fail, revert and debug.
 
 - [ ] T005 [US1] [FR-002, FR-007] Move program polling (spawn_program_poll) into `VEN/src/tasks/poll_programs.rs`

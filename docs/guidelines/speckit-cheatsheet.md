@@ -18,8 +18,8 @@
 3. /speckit.clarify (optional, here)
 4. /speckit.plan
 5. /speckit.tasks
-7. /speckit.checklist (optional, can be run once you have a spec/plan/tasks)
 6. /speckit.analyze (optional, here)
+7. /speckit.checklist (optional, can be run once you have a spec/plan/tasks)
 8. /speckit.implement
 
 That matches the “Available slash commands” section you linked to.
