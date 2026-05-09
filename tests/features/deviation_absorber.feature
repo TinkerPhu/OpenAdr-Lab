@@ -25,8 +25,9 @@ Feature: Multi-asset deviation absorber (Tier 1 real-time control)
   Scenario: Battery absorbs positive deviation within capacity
     Given the battery SoC is reset to 0.50
     And the plan state is initialized with net import 0.0 kW
+    And I wait for a fresh plan
     When I create a positive deviation of 2.0 kW via base load injection
-    And I wait 2 ticks for the sim to process
+    And I wait for the battery setpoint to change from baseline
     Then the battery setpoint moved negative by at least 1.5 kW
     And no DeviceDeviation trigger has fired within 30 ticks
 
@@ -100,7 +101,7 @@ Feature: Multi-asset deviation absorber (Tier 1 real-time control)
     And the plan state is initialized with net import 0.0 kW
     And I wait for a fresh plan
     When I create a positive deviation of 3.0 kW via base load injection
-    And I wait 2 ticks for the sim to process
+    And I wait for the battery setpoint to change from baseline
     Then the absorber skips the EV asset
     And the battery setpoint moved negative by at least 1.0 kW
     And the EV charge setpoint is unchanged from baseline
@@ -140,7 +141,7 @@ Feature: Multi-asset deviation absorber (Tier 1 real-time control)
     And the plan state is initialized with net import 0.0 kW
     And I wait for a fresh plan
     When I create a positive deviation of 2.0 kW via base load injection
-    And I wait 2 ticks for the sim to process
+    And I wait for the battery setpoint to change from baseline
     Then the battery setpoint moved negative by at least 1.5 kW
     And no DeviceDeviation trigger fires within 120 ticks
     And the MILP planner does not execute a replan
