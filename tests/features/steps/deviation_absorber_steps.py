@@ -292,6 +292,31 @@ def step_wait_for_deviation_trigger(context):
     time.sleep(10 * 1.1)  # test profile: deviation_trigger_ticks=10
 
 
+@when("I wait for the battery setpoint to change from baseline")
+def step_wait_battery_setpoint_change(context):
+    """Poll to catch the 1-tick absorber correction window for battery.
+
+    Absorber correction for battery lasts exactly 1 tick (clears when deviation
+    returns to dead-band). Polling at 0.2s intervals over 8s catches the ~1s
+    correction window and stores the observed battery power for assertion steps.
+    """
+    baseline = getattr(context, "battery_power_before", 0.0)
+    deadline = time.time() + 8.0
+    best_low = baseline
+    best_high = baseline
+    while time.time() < deadline:
+        power = _asset("battery").get("power_kw", 0.0)
+        if power < best_low:
+            best_low = power
+        if power > best_high:
+            best_high = power
+        if abs(power - baseline) > 0.5:
+            break
+        time.sleep(0.2)
+    context.battery_observed_low = best_low
+    context.battery_observed_high = best_high
+
+
 @when("I wait for the EV setpoint to change from baseline")
 def step_wait_ev_setpoint_change(context):
     """Poll at short intervals to catch the 1-tick absorber correction window.
@@ -381,9 +406,12 @@ def step_battery_returns_to_setpoint(context, kw):
 
 @then("the battery setpoint is negative")
 def step_battery_setpoint_negative(context):
+    # Use observed_low from the polling step if available (catches the 1-tick window).
     power = _asset("battery").get("power_kw", 0.0)
-    assert power < -0.1, f"Battery not discharging: power_kw={power}"
-    context.battery_power_kw = power
+    observed_low = getattr(context, "battery_observed_low", power)
+    actual = min(power, observed_low)
+    assert actual < -0.1, f"Battery not discharging: power_kw={actual}"
+    context.battery_power_kw = actual
 
 
 # ─── Then: EV ────────────────────────────────────────────────────────────────
@@ -463,15 +491,17 @@ def step_absorber_residual_equals_deviation(context):
 
 @then("the absorber is active with an overlay")
 def step_absorber_active(context):
-    # Absorber active = battery power changed relative to pre-injection baseline.
+    # Use observed_low from polling step if available (catches the 1-tick window).
     power = _asset("battery").get("power_kw", 0.0)
     baseline = getattr(context, "battery_power_before", power)
-    delta = abs(power - baseline)
+    observed_low = getattr(context, "battery_observed_low", power)
+    actual = min(power, observed_low)
+    delta = abs(actual - baseline)
     assert delta > 0.1, (
         f"Absorber not active: battery delta={delta:.3f} kW "
-        f"(before={baseline:.3f}, after={power:.3f})"
+        f"(before={baseline:.3f}, observed_low={observed_low:.3f})"
     )
-    context.active_overlay = baseline - power  # negative = more discharge
+    context.active_overlay = baseline - actual
 
 
 @then("the absorber settling counter increments")
