@@ -251,4 +251,60 @@ mod tests {
         assert!(env.up_duration_s.is_some());
         assert!(env.down_duration_s.is_some());
     }
+
+    // ── T015: hand-built SimSnapshot test (no SimState) ──────────────────────
+
+    /// Build SimSnapshot directly (not via SimState) to demonstrate trait decoupling.
+    /// Battery at 0 kW with 5 kW import/export caps → up_kw=5.0, down_kw=5.0.
+    #[test]
+    fn compute_envelope_hand_built_snapshot_battery_idle() {
+        use crate::controller::{AssetSnapshot, GridSnapshot, SimSnapshot};
+        use std::collections::HashMap as HM;
+
+        // Battery idle at 0 kW; cap_max_export_kw is negative (export = negative convention)
+        let mut assets = HM::new();
+        assets.insert(
+            "battery".to_string(),
+            AssetSnapshot {
+                power_kw: 0.0,
+                asset_type: "battery".to_string(),
+                cap_max_import_kw: 5.0,   // max charging power
+                cap_max_export_kw: -5.0,  // max discharging power (negative = export)
+                available_discharge_kwh: Some(4.0),
+                available_charge_kwh: Some(6.0),
+                default_setpoint_kw: 0.0,
+                setpoint_kw: 0.0,
+                values: HM::new(),
+            },
+        );
+        let sim = SimSnapshot {
+            ts: Utc::now(),
+            grid: GridSnapshot {
+                net_power_w: 0.0,
+                voltage_v: 230.0,
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+            },
+            assets,
+        };
+
+        let env = compute_envelope(&sim, Utc::now());
+
+        // up_kw = (0.0 − (−5.0)).max(0) = 5.0
+        assert!(
+            (env.up_kw - 5.0).abs() < 1e-6,
+            "up_kw: expected 5.0, got {}",
+            env.up_kw
+        );
+        // down_kw = (5.0 − 0.0).max(0) = 5.0
+        assert!(
+            (env.down_kw - 5.0).abs() < 1e-6,
+            "down_kw: expected 5.0, got {}",
+            env.down_kw
+        );
+        // up_duration = 4.0 / 5.0 * 3600 = 2880 s
+        assert_eq!(env.up_duration_s, Some(2880));
+        // down_duration = 6.0 / 5.0 * 3600 = 4320 s
+        assert_eq!(env.down_duration_s, Some(4320));
+    }
 }

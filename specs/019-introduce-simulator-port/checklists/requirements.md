@@ -33,9 +33,9 @@
 ## Feature Readiness
 
 - [x] CHK018 Specification is complete enough to generate tasks.md with `/speckit.tasks`
-- [ ] CHK019 `tasks.md` generated (pending `/speckit.tasks` run)
-- [ ] CHK020 All unit tests for FR-005 functions written and passing
-- [ ] CHK021 Integration tests still green after refactor (SC-003)
+- [x] CHK019 `tasks.md` generated (pending `/speckit.tasks` run)
+- [x] CHK020 All unit tests for FR-005 functions written and passing (T012–T015: 8 new tests, 319 total passing)
+- [x] CHK021 Integration tests still green after refactor (SC-003): `cargo test` 319 passed, 0 failed
 - [ ] CHK022 `grep -r "use crate::simulator" VEN/src/controller` returns empty (SC-004)
 
 ## Notes
