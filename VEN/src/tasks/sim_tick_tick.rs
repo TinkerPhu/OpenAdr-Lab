@@ -156,7 +156,7 @@ pub(crate) async fn tick_once(
     }
 
     // PHASE 5 (post-lock): async state publishes — sensor, shiftable, ledger, envelope.
-    let sim_snapshot = crate::tasks::sim_tick_publish::publish_sim_tick_result(
+    let _sim_snapshot = crate::tasks::sim_tick_publish::publish_sim_tick_result(
         tick_sensor,
         tick_sim_snap,
         tick_envelope,
