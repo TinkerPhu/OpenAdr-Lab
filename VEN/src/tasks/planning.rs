@@ -1,27 +1,15 @@
-// Extracted from VEN/src/loops.rs — planning loop (spawn_planning)
-
-use chrono::{DateTime, Utc};
-use metrics::counter;
+use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
-use crate::assets::AssetConfig;
 use crate::controller;
-use crate::entities;
 use crate::entities::asset::PlanTrigger;
-use crate::entities::capacity::OadrCapacityState;
-use crate::entities::plan::Plan;
-use crate::entities::plan::SiteFlexibilityEnvelope;
-use crate::entities::tariff_snapshot::TariffSnapshot;
-use crate::models::SensorSnapshot;
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::profile::{PlannerObjective, Profile};
 use crate::simulator::SimState;
-use crate::simulator::{AssetEntry, SimSnapshot};
-use crate::state::{AppState, EvSettings, SimInjectState};
+use crate::state::AppState;
 use crate::vtn::VtnClient;
-use std::collections::HashMap;
 
 pub(crate) fn spawn_planning(
     state: AppState,
@@ -203,10 +191,13 @@ pub(crate) fn spawn_planning(
                     1.0
                 };
                 let effective_threshold = threshold * decay_factor;
+                // When decay window has fully elapsed, refresh unconditionally so the
+                // rolling 24h window never becomes stale regardless of cost delta.
+                let fully_decayed = decay_s > 0.0 && elapsed_s >= decay_s;
                 let current_total = current.objective_eur + current.friction_eur;
                 let new_total = plan.objective_eur + plan.friction_eur;
                 let improvement = current_total - new_total;
-                if improvement > effective_threshold {
+                if fully_decayed || improvement > effective_threshold {
                     true
                 } else {
                     info!(
@@ -215,6 +206,7 @@ pub(crate) fn spawn_planning(
                         threshold_eur = threshold,
                         elapsed_s = elapsed_s,
                         decay_factor = decay_factor,
+                        fully_decayed,
                         current_total_eur = current_total,
                         new_total_eur = new_total,
                         "periodic plan rejected: improvement below threshold"

@@ -1,25 +1,13 @@
 use chrono::{DateTime, Utc};
 use metrics::counter;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 
-use crate::assets::AssetConfig;
 use crate::controller;
 use crate::entities;
 use crate::entities::asset::PlanTrigger;
-use crate::entities::capacity::OadrCapacityState;
-use crate::entities::plan::Plan;
-use crate::entities::plan::SiteFlexibilityEnvelope;
-use crate::entities::tariff_snapshot::TariffSnapshot;
-use crate::models::SensorSnapshot;
-use crate::planner_events::{PlannerEvent, PlannerEventTx};
-use crate::profile::{PlannerObjective, Profile};
-use crate::simulator::SimState;
-use crate::simulator::{AssetEntry, SimSnapshot};
-use crate::state::{AppState, EvSettings, SimInjectState};
+use crate::state::AppState;
 use crate::vtn::VtnClient;
-use std::collections::HashMap;
 
 // ─── Event poll change detection (RF-B08) ─────────────────────────────────────
 

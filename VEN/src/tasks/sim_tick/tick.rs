@@ -1,26 +1,18 @@
-// tick_once moved out of spawn_sim_tick loop to reduce file size
+// Simulator tick loop body, extracted to keep sim_tick/mod.rs under 200 lines.
 
 use chrono::Utc;
-use chrono::{DateTime, Utc as _Utc};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 use crate::controller;
-use crate::entities;
 use crate::entities::asset::PlanTrigger;
-use crate::entities::capacity::OadrCapacityState;
-use crate::entities::plan::Plan;
-use crate::entities::plan::SiteFlexibilityEnvelope;
-use crate::entities::tariff_snapshot::TariffSnapshot;
-use crate::models::SensorSnapshot;
-use crate::simulator::SimState;
-use crate::simulator::SimSnapshot;
-use crate::state::{AppState, EvSettings, SimInjectState};
-use crate::vtn::VtnClient;
-use crate::profile::Profile;
-use crate::controller::absorber::AbsorberState;
 use crate::planner_events::PlannerEventTx;
+use crate::profile::Profile;
+use crate::simulator::SimState;
+use crate::state::{AppState, EvSettings};
+use crate::vtn::VtnClient;
+use crate::controller::absorber::AbsorberState;
 
 pub(crate) async fn tick_once(
     mut absorber_state: AbsorberState,
@@ -78,7 +70,7 @@ pub(crate) async fn tick_once(
         let mut sim_guard = sim.lock().await;
 
         // PHASE 1: Apply Behaviour A one-shot injections; collect fields to clear.
-        let cleared_fields = crate::tasks::sim_tick_helpers::apply_sim_injections(&inject, &mut *sim_guard);
+        let cleared_fields = super::helpers::apply_sim_injections(&inject, &mut *sim_guard);
         let pv_clear = inject.pv_irradiance.is_some();
         let base_clear = inject.base_load_kw.is_some();
 
@@ -90,7 +82,7 @@ pub(crate) async fn tick_once(
             .map(|s| s.net_import_kw - s.net_export_kw)
             .unwrap_or(0.0);
 
-        let mut sp_map = crate::tasks::sim_tick_helpers::build_tick_setpoints(
+        let mut sp_map = super::helpers::build_tick_setpoints(
             &*sim_guard,
             plan_snap.as_ref(),
             &capacity_snap,
@@ -131,7 +123,7 @@ pub(crate) async fn tick_once(
 
         // PHASE 5 (in-lock): extract snapshots and mutate history/grid/envelope.
         let (tick_sensor, tick_sim_snap, tick_envelope) =
-            crate::tasks::sim_tick_helpers::finalize_tick_outputs(&mut *sim_guard, &capacity_snap, now);
+            super::helpers::finalize_tick_outputs(&mut *sim_guard, &capacity_snap, now);
 
         (
             tick_sensor,
@@ -156,7 +148,7 @@ pub(crate) async fn tick_once(
     }
 
     // PHASE 5 (post-lock): async state publishes — sensor, shiftable, ledger, envelope.
-    let _sim_snapshot = crate::tasks::sim_tick_publish::publish_sim_tick_result(
+    let _sim_snapshot = super::publish::publish_sim_tick_result(
         tick_sensor,
         tick_sim_snap,
         tick_envelope,
@@ -170,7 +162,7 @@ pub(crate) async fn tick_once(
     .await;
 
     // PHASE 6: Layer 2 — accumulate absorbed residual deviation → DeviceDeviation trigger.
-    crate::tasks::sim_tick_helpers::accumulate_deviation(
+    super::helpers::accumulate_deviation(
         &mut absorber_state,
         residual_kw,
         &profile,
@@ -184,7 +176,7 @@ pub(crate) async fn tick_once(
         report_counter += 1;
         if report_counter >= report_every_ticks {
             report_counter = 0;
-            crate::tasks::sim_tick_publish::run_measurement_reports(&state, &sim, &vtn, &ven_name, now).await;
+            super::publish::run_measurement_reports(&state, &sim, &vtn, &ven_name, now).await;
         }
     }
 
@@ -192,7 +184,7 @@ pub(crate) async fn tick_once(
     persist_counter += 1;
     if persist_counter >= persist_every_ticks {
         persist_counter = 0;
-        crate::tasks::sim_tick_publish::persist_sim_state(&sim, &data_dir).await;
+        super::publish::persist_sim_state(&sim, &data_dir).await;
     }
 
     (absorber_state, persist_counter, report_counter)

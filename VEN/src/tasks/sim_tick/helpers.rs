@@ -1,21 +1,18 @@
-// Helpers extracted from VEN/src/tasks/sim_tick.rs
+// Synchronous helper functions for the simulator tick.
 
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use crate::assets::AssetConfig;
+use tracing::{debug, warn};
+
 use crate::controller;
+use crate::controller::absorber::AbsorberState;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity::OadrCapacityState;
-use crate::entities::plan::Plan;
-use crate::entities::plan::SiteFlexibilityEnvelope;
-use crate::entities::tariff_snapshot::TariffSnapshot;
+use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::models::SensorSnapshot;
-use crate::simulator::SimState;
-use crate::simulator::{AssetEntry, SimSnapshot};
-use crate::state::{AppState, EvSettings, SimInjectState};
 use crate::profile::Profile;
-use tracing::{debug, info, warn, error};
-use crate::controller::absorber::AbsorberState;
+use crate::simulator::{SimSnapshot, SimState};
+use crate::state::SimInjectState;
 
 /// PHASE 1: Apply Behaviour A one-shot state injections to the simulator.
 /// Returns a list of field names that were applied and should be cleared.
