@@ -14,6 +14,7 @@ use crate::simulator::SimState;
 use crate::simulator::{AssetEntry, SimSnapshot};
 use crate::state::{AppState, EvSettings, SimInjectState};
 use crate::profile::Profile;
+use tracing::{debug, info, warn, error};
 use crate::controller::absorber::AbsorberState;
 
 /// PHASE 1: Apply Behaviour A one-shot state injections to the simulator.
