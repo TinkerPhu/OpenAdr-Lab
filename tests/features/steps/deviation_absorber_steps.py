@@ -74,6 +74,10 @@ def step_wait_fresh_plan_given(context):
             return False
 
     poll_until(fetch, is_fresh, timeout=60, description="fresh MILP plan after now")
+    # Wait for physics to apply the new plan setpoints (≤1 tick = 1s; 2s is safe).
+    # Without this, baselines captured immediately after plan detection reflect the
+    # old plan's setpoints — the new plan setpoints take effect on the NEXT tick.
+    time.sleep(2.0)
     context.plan_stable_cutoff = datetime.now(timezone.utc)
 
 
@@ -186,7 +190,7 @@ def _capture_baselines(context):
     context.battery_power_before = _asset("battery").get("power_kw", 0.0)
     context.ev_power_before = _asset("ev").get("power_kw", 0.0)
     context.heater_power_before = _asset("heater").get("power_kw", 0.0)
-    context.deviation_start_time = datetime.now()
+    context.deviation_start_time = datetime.now(timezone.utc)
 
 
 @when("I create a positive deviation of {kw:f} kW via base load injection")
@@ -359,15 +363,18 @@ def step_deviation_absorbed_by_battery(context):
 
 @then("the battery setpoint moved negative by at least {kw:f} kW")
 def step_battery_setpoint_moved_negative(context, kw):
-    # Absorber pushed battery toward discharge: compare to pre-injection baseline.
+    # Absorber pushed battery toward discharge: use observed_low from polling step
+    # to catch the 1-tick correction window (overlay clears on tick N+2).
     power = _asset("battery").get("power_kw", 0.0)
     baseline = getattr(context, "battery_power_before", power)
-    delta = baseline - power  # positive = moved in discharge direction
+    observed_low = getattr(context, "battery_observed_low", power)
+    actual = min(power, observed_low)
+    delta = baseline - actual  # positive = moved in discharge direction
     assert delta >= kw, (
-        f"Battery delta={delta:.3f} kW (before={baseline:.3f}, after={power:.3f}), "
-        f"needed>={kw}"
+        f"Battery delta={delta:.3f} kW (before={baseline:.3f}, after={power:.3f}, "
+        f"observed_low={observed_low:.3f}), needed>={kw}"
     )
-    context.battery_power_kw = power
+    context.battery_power_kw = actual
 
 
 @then("the battery setpoint is more negative than {kw:f} kW")
@@ -579,11 +586,22 @@ def step_absorber_adjusts_ev(context):
 @then("no DeviceDeviation trigger has fired within {ticks:d} ticks")
 def step_no_device_deviation(context, ticks):
     # ControllerEvent trace: DeviceDeviation appears as a PlanCycle with
-    # trigger_reason="DeviceDeviation". Check that no such entry is recent.
+    # trigger_reason="DeviceDeviation". Only check events that occurred AFTER
+    # the deviation injection to avoid false failures from prior test runs.
+    injection_time = getattr(context, "deviation_start_time", None)
     events = _trace_events(100)
     for entry in events:
         if (entry.get("type") == "PlanCycle" and
                 "DeviceDeviation" in entry.get("trigger_reason", "")):
+            if injection_time is not None:
+                try:
+                    event_ts = datetime.fromisoformat(
+                        entry.get("ts", "").replace("Z", "+00:00")
+                    )
+                    if event_ts < injection_time:
+                        continue  # Pre-dates this scenario's injection
+                except (ValueError, AttributeError):
+                    pass
             raise AssertionError(f"DeviceDeviation replan fired unexpectedly: {entry}")
     context.no_device_deviation_fired = True
 
@@ -626,11 +644,7 @@ def step_no_replan_chattering(context):
 
 @then("the MILP planner does not execute a replan")
 def step_no_planner_replan(context):
-    events = _trace_events(200)
-    for entry in events:
-        if (entry.get("type") == "PlanCycle" and
-                "DeviceDeviation" in entry.get("trigger_reason", "")):
-            raise AssertionError("Planner replanned for transient deviation")
+    step_no_device_deviation(context, 200)
     context.no_replan_for_transient = True
 
 
