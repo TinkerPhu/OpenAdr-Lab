@@ -1,33 +1,81 @@
 # research.md
 
-## Unknowns extracted from spec
+## Phase 0 — Unknowns from spec
 
-1. SimSnapshot shape: which fields are required vs optional; units and ranges.
-2. Snapshot error semantics: what error details are needed (transient vs fatal).
-3. Concurrency model for SimulatorPort: synchronous borrowing or interior mutability? How to handle multi-threaded callers.
-4. Placement and interface of MockSimulatorPort: where to put shared test support and how to structure it for reuse.
-5. Fast unit-test harness patterns used in repo (existing test support modules).
+| # | Unknown | Status |
+|---|---------|--------|
+| 1 | SimSnapshot shape: which fields are required vs optional; units and ranges | ✅ Resolved |
+| 2 | Snapshot error semantics: what error details are needed (transient vs fatal) | ✅ Resolved |
+| 3 | Concurrency model for SimulatorPort: synchronous borrowing or interior mutability? | ✅ Resolved |
+| 4 | Placement and interface of MockSimulatorPort | ✅ Resolved |
+| 5 | Fast unit-test harness patterns used in repo | ✅ Resolved |
 
-## Research tasks and decisions
+---
 
-- Task: Determine canonical SimSnapshot fields by inspecting simulator/mod.rs and assets types.
-- Task: Decide on SnapshotError enum variants (e.g., PartialData, Uninitialized, IoError).
-- Task: Review existing test_support modules for placement of mocks (repo uses services/test_support guidance in plan doc).
-- Task: Decide on concurrency model: prefer Send+Sync trait with &dyn reference and interior mutability on the implementor where needed.
+## Decisions
 
-## Decisions (initial suggestions)
+### D-001: `snapshot()` return type
 
-- Decision: Use Result<SimSnapshot, SnapshotError> for snapshot() (explicit error handling).
-  - Rationale: Matches Rust idioms; allows propagating clear error reasons to callers.
-  - Alternatives: Option<SimSnapshot> (loses error details); SimSnapshot with Option fields (forces consumers to check many fields).
+**Decision**: `Result<SimSnapshot, SnapshotError>`
 
-- Decision: Place shared mocks under `VEN/src/services/test_support/` as described in the plan and docs; expose a `MockSimulatorPort` there for reuse.
-  - Rationale: Matches existing repository conventions referenced in the plan doc.
+**Rationale**: Allows callers to distinguish uninitialized (no tick yet), transient (sim locked), and fatal states. Rust idioms prefer `Result` over sentinel values. Plain `SimSnapshot` forces callers to check individual Option fields with no structured error path.
 
-- Decision: Keep SimulatorPort trait as Send+Sync; implementations may use interior mutability (Mutex/MutexGuard) internally to manage state safely.
-  - Rationale: Encourages concurrent test harnesses and aligns with existing AppCtx sharing patterns.
+**Alternatives considered**:
+- `Option<SimSnapshot>` — loses error detail; callers cannot distinguish "not ready" from "broken"
+- `SimSnapshot` with all-Option fields — forces consumers to check many fields; no error path
 
-## Next steps
+---
 
-- Inspect `VEN/src/simulator/mod.rs` and `VEN/src/assets/` to extract exact SimSnapshot fields and types.
-- Draft `data-model.md` with SimSnapshot shape and SimInjectState fields.
+### D-002: `inject()` return type
+
+**Decision**: `()` — fire-and-forget
+
+**Rationale**: Injection is a best-effort sim override (UI control). The caller has no recovery path if it fails — the simulator self-corrects on the next tick. If the simulator is uninitialized, the inject is silently dropped. A `Result` return would encourage callers to write error handling for a case that cannot be meaningfully handled.
+
+**Alternatives considered**:
+- `Result<(), InjectError>` — adds burden without benefit; callers cannot recover
+
+---
+
+### D-003: SimSnapshot field set
+
+**Decision**: `ts: DateTime<Utc>`, `grid: GridSnapshot`, `assets: HashMap<String, AssetSnapshot>`. History buffers explicitly excluded.
+
+**Rationale**: Derived from `VEN/src/simulator/mod.rs` (authoritative source). `AssetHistoryBuffer` has been moved to `VEN/src/assets/mod.rs` — history is a read-only query concern, not a snapshot concern. Including history in the snapshot would couple controller logic to history buffer lifetimes.
+
+**Alternatives considered**:
+- Include history in snapshot — rejected; violates clean port boundary and increases snapshot size
+
+---
+
+### D-004: SnapshotError variants
+
+**Decision**: Three variants — `Uninitialized`, `Transient`, `Fatal`
+
+**Rationale**: Covers all practical failure modes: not started yet (wait), temporarily blocked (retry), and broken (abort). Avoids over-engineering a detailed error hierarchy for a simple port.
+
+**Alternatives considered**:
+- Single `SnapshotFailed` variant — insufficient; callers need to distinguish retry vs abort
+
+---
+
+### D-005: Concurrency model
+
+**Decision**: Trait is `Send + Sync`; implementations use interior mutability (`Mutex`/`RwLock`) internally; callers receive `&dyn SimulatorPort` or `Arc<dyn SimulatorPort>`
+
+**Rationale**: Matches existing `AppCtx` sharing patterns in the VEN. Trait object-safety is preserved. Callers are not burdened with lock management — the implementation owns its synchronisation strategy.
+
+**Alternatives considered**:
+- `&mut self` trait methods — breaks object safety; not compatible with `Arc<dyn Trait>` sharing
+
+---
+
+### D-006: MockSimulatorPort placement
+
+**Decision**: `VEN/src/services/test_support/mock_simulator_port.rs` (compiled in all builds, not `#[cfg(test)]`)
+
+**Rationale**: Matches constitution Principle VI verbatim: "Mock adapters live in `VEN/src/services/test_support/`". Compiling outside `#[cfg(test)]` makes the mock shareable across service test modules, not just the crate defining it.
+
+**Alternatives considered**:
+- `#[cfg(test)]` module in `controller/simulator_port.rs` — not shareable across crates/modules
+
