@@ -128,16 +128,43 @@ def step_plan_net_import(context, kwh):
 
 # ─── When: deviation injection ───────────────────────────────────────────────
 
-@when("I inject a PV drop of {drop_kw:f} kW (positive deviation)")
-def step_inject_pv_drop(context, drop_kw):
-    payload = {"pv_irradiance": max(0.0, 1.0 - (drop_kw / 6.0))}
-    _inject(payload, "Failed to inject PV drop")
-    context.last_injection = payload
-    context.deviation_start_time = datetime.now()
-    # Capture baseline power before absorber acts
+def _capture_baselines(context):
+    """Snapshot asset power before absorber acts."""
     context.battery_power_before = _asset("battery").get("power_kw", 0.0)
     context.ev_power_before = _asset("ev").get("power_kw", 0.0)
     context.heater_power_before = _asset("heater").get("power_kw", 0.0)
+    context.deviation_start_time = datetime.now()
+
+
+@when("I create a positive deviation of {kw:f} kW via base load injection")
+def step_create_positive_deviation(context, kw):
+    # Use alpha=1.0 for instant application (no smoothing decay). The field is
+    # one-shot: applied for one tick then cleared. The absorber sees the spike as
+    # a transient shortage deviation.
+    _capture_baselines(context)
+    payload = {"base_load_kw": kw, "base_load_alpha": 1.0}
+    _inject(payload, "Failed to inject base load")
+    context.last_injection = payload
+
+
+@when("I create a PV surplus to produce negative deviation of {kw:f} kW")
+def step_create_pv_surplus(context, kw):
+    # Inject full irradiance. PV generation is not in the MILP plan, so any PV
+    # output appears as a negative deviation (surplus) from the grid's perspective.
+    _capture_baselines(context)
+    payload = {"pv_irradiance": 1.0}
+    _inject(payload, "Failed to inject PV surplus")
+    context.last_injection = payload
+    context.is_surplus = True
+
+
+@when("I inject a PV drop of {drop_kw:f} kW (positive deviation)")
+def step_inject_pv_drop(context, drop_kw):
+    # Legacy step kept for backward compat; new scenarios use base_load injection.
+    payload = {"pv_irradiance": max(0.0, 1.0 - (drop_kw / 6.0))}
+    _inject(payload, "Failed to inject PV drop")
+    context.last_injection = payload
+    _capture_baselines(context)
 
 
 @when("I inject a PV drop of {drop_kw:f} kW (small positive deviation within dead-band)")
@@ -148,7 +175,7 @@ def step_inject_small_pv_drop(context, drop_kw):
 
 @when("I inject a sustained negative deviation of {surplus_kw:f} kW (surplus absorption)")
 def step_inject_surplus(context, surplus_kw):
-    payload = {"pv_irradiance": min(1.0, (6.0 + surplus_kw) / 6.0)}
+    payload = {"pv_irradiance": 1.0}
     _inject(payload, "Failed to inject surplus")
     context.last_injection = payload
     context.is_surplus = True
@@ -180,12 +207,12 @@ def step_clear_deviation(context):
 
 @when("I inject a positive deviation of {kwh:f} kW")
 def step_inject_positive_deviation(context, kwh):
-    step_inject_pv_drop(context, kwh)
+    step_create_positive_deviation(context, kwh)
 
 
 @when("I inject a sustained positive deviation of {kwh:f} kW")
 def step_inject_sustained_positive_deviation(context, kwh):
-    step_inject_pv_drop(context, kwh)
+    step_create_positive_deviation(context, kwh)
     context.sustained_deviation = kwh
     context.sustained_start_time = datetime.now()
 
