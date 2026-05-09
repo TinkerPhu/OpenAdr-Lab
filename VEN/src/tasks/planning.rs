@@ -123,9 +123,10 @@ pub(crate) fn spawn_planning(
             let solve_start = std::time::Instant::now();
             let profile_clone = profile.clone(); // Arc<Profile>, cheap
             let trigger_for_planner = trigger.clone(); // keep `trigger` for acceptance gate below
+            let snap = sim_snap.to_sim_snapshot();
             let plan = tokio::task::spawn_blocking(move || {
                 controller::milp_planner::run_planner(
-                    &sim_snap,
+                    &snap,
                     &tariff_ts,
                     &capacity,
                     &profile_clone,

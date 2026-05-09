@@ -242,146 +242,149 @@ pub fn apply_battery_correction_overlay(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::AssetHistoryBuffer;
-    use crate::assets::{
-        AssetConfig, AssetState, BaseLoad, BaseLoadState, Battery, BatteryState, EvCharger,
-        EvState, Heater, HeaterState, PvInverter, PvState,
-    };
     use crate::controller::{AssetSnapshot, GridSnapshot, SimSnapshot};
-    use crate::simulator::{energy::EnergyCounter, AssetEntry, SimState};
+    use std::collections::HashMap as StdHashMap;
 
-    fn battery_entry(soc: f64) -> (AssetEntry, AssetConfig) {
-        let cfg = Battery {
-            capacity_kwh: 10.0,
-            max_charge_kw: 5.0,
-            max_discharge_kw: 5.0,
-            round_trip_efficiency: 0.95,
-            min_soc: 0.1,
-        };
-        let entry = AssetEntry {
-            id: "battery".to_string(),
-            state: AssetState::Battery(BatteryState {
-                soc,
-                actual_power_kw: 0.0,
-            }),
-            setpoint_kw: 0.0,
-            last_power_kw: 0.0,
-            energy: EnergyCounter::new(),
-            history: AssetHistoryBuffer::new(0),
-        };
-        (entry, AssetConfig::Battery(cfg))
+    fn battery_entry(soc: f64) -> (String, AssetSnapshot) {
+        let cap_max_export_kw = if soc <= 0.1 { 0.0 } else { -5.0 };
+        let cap_max_import_kw = if soc >= 1.0 { 0.0 } else { 5.0 };
+        let available_discharge_kwh = Some((soc - 0.1).max(0.0) * 10.0);
+        let available_charge_kwh = Some((1.0 - soc).max(0.0) * 10.0);
+        let mut values = StdHashMap::new();
+        values.insert("soc".into(), soc);
+        values.insert("capacity_kwh".into(), 10.0);
+        values.insert("max_charge_kw".into(), 5.0);
+        values.insert("max_discharge_kw".into(), 5.0);
+        values.insert("min_soc".into(), 0.1);
+        (
+            "battery".to_string(),
+            AssetSnapshot {
+                power_kw: 0.0,
+                asset_type: "battery".to_string(),
+                cap_max_import_kw,
+                cap_max_export_kw,
+                available_discharge_kwh,
+                available_charge_kwh,
+                default_setpoint_kw: 0.0,
+                setpoint_kw: 0.0,
+                values,
+            },
+        )
     }
 
-    fn ev_entry(soc: f64, plugged: bool, soc_target: f64) -> (AssetEntry, AssetConfig) {
-        let cfg = EvCharger {
-            max_charge_kw: 7.4,
-            max_discharge_kw: 0.0,
-            battery_kwh: 60.0,
-            soc_target,
-            soc_target_profile: soc_target,
-            default_charge_kw: 0.0,
-            min_soc: 0.0,
+    fn ev_entry(soc: f64, plugged: bool, soc_target: f64) -> (String, AssetSnapshot) {
+        let max_ch = 7.4_f64;
+        let bat_kwh = 60.0_f64;
+        let (cap_max_import_kw, cap_max_export_kw, avail_dis, avail_ch) = if plugged {
+            let import = if soc >= soc_target { 0.0 } else { max_ch };
+            (import, 0.0_f64, Some(soc * bat_kwh), Some((1.0 - soc) * bat_kwh))
+        } else {
+            (0.0, 0.0, None, None)
         };
-        let entry = AssetEntry {
-            id: "ev".to_string(),
-            state: AssetState::Ev(EvState {
-                soc,
-                plugged,
-                actual_power_kw: 0.0,
-            }),
-            setpoint_kw: 0.0,
-            last_power_kw: 0.0,
-            energy: EnergyCounter::new(),
-            history: AssetHistoryBuffer::new(0),
-        };
-        (entry, AssetConfig::Ev(cfg))
+        let mut values = StdHashMap::new();
+        values.insert("soc".into(), soc);
+        values.insert("plugged".into(), if plugged { 1.0 } else { 0.0 });
+        values.insert("max_charge_kw".into(), max_ch);
+        values.insert("soc_target".into(), soc_target);
+        values.insert("battery_kwh".into(), bat_kwh);
+        (
+            "ev".to_string(),
+            AssetSnapshot {
+                power_kw: 0.0,
+                asset_type: "ev".to_string(),
+                cap_max_import_kw,
+                cap_max_export_kw,
+                available_discharge_kwh: avail_dis,
+                available_charge_kwh: avail_ch,
+                default_setpoint_kw: 0.0,
+                setpoint_kw: 0.0,
+                values,
+            },
+        )
     }
 
-    fn pv_entry(last_power_kw: f64) -> (AssetEntry, AssetConfig) {
-        let cfg = PvInverter {
-            rated_kw: 10.0,
-            irradiance: 0.0,
-            irradiance_offset: 0.0,
-            pv_alpha: 0.1,
-            export_limit_kw: None,
-        };
-        let entry = AssetEntry {
-            id: "pv".to_string(),
-            state: AssetState::Pv(PvState {
-                actual_power_kw: last_power_kw,
-            }),
-            setpoint_kw: 0.0,
-            last_power_kw,
-            energy: EnergyCounter::new(),
-            history: AssetHistoryBuffer::new(0),
-        };
-        (entry, AssetConfig::Pv(cfg))
+    fn pv_entry(last_power_kw: f64) -> (String, AssetSnapshot) {
+        let mut values = StdHashMap::new();
+        values.insert("irradiance".into(), 0.0);
+        values.insert("rated_kw".into(), 10.0);
+        values.insert("irradiance_offset".into(), 0.0);
+        values.insert("pv_alpha".into(), 0.1);
+        (
+            "pv".to_string(),
+            AssetSnapshot {
+                power_kw: last_power_kw,
+                asset_type: "pv".to_string(),
+                cap_max_import_kw: last_power_kw,
+                cap_max_export_kw: last_power_kw,
+                available_discharge_kwh: None,
+                available_charge_kwh: None,
+                default_setpoint_kw: 0.0,
+                setpoint_kw: 0.0,
+                values,
+            },
+        )
     }
 
-    fn base_entry(last_power_kw: f64) -> (AssetEntry, AssetConfig) {
-        let cfg = BaseLoad {
-            baseline_kw: last_power_kw.max(0.0),
-            baseline_kw_profile: last_power_kw.max(0.0),
-        };
-        let entry = AssetEntry {
-            id: "base_load".to_string(),
-            state: AssetState::BaseLoad(BaseLoadState {
-                actual_power_kw: last_power_kw,
-            }),
-            setpoint_kw: 0.0,
-            last_power_kw,
-            energy: EnergyCounter::new(),
-            history: AssetHistoryBuffer::new(0),
-        };
-        (entry, AssetConfig::BaseLoad(cfg))
+    fn base_entry(last_power_kw: f64) -> (String, AssetSnapshot) {
+        let mut values = StdHashMap::new();
+        values.insert("baseline_kw".into(), last_power_kw.max(0.0));
+        (
+            "base_load".to_string(),
+            AssetSnapshot {
+                power_kw: last_power_kw,
+                asset_type: "base_load".to_string(),
+                cap_max_import_kw: last_power_kw,
+                cap_max_export_kw: last_power_kw,
+                available_discharge_kwh: None,
+                available_charge_kwh: None,
+                default_setpoint_kw: last_power_kw.max(0.0),
+                setpoint_kw: 0.0,
+                values,
+            },
+        )
     }
 
-    fn heater_entry(last_power_kw: f64) -> (AssetEntry, AssetConfig) {
-        let cfg = Heater {
-            max_kw: 6.0,
-            mid_kw: 3.0,
-            min_power_kw: 0.0,
-            temp_min_c: 45.0,
-            temp_max_c: 60.0,
-            temp_min_c_profile: 45.0,
-            temp_max_c_profile: 60.0,
-            thermal_mass_kwh_per_c: 0.232,
-            k_loss_kw_per_c: 0.005,
-            draw_kw: 0.3,
-            ambient_temp_c: 10.0,
-        };
-        let entry = AssetEntry {
-            id: "heater".to_string(),
-            state: AssetState::Heater(HeaterState {
-                temperature_c: 50.0,
-                actual_power_kw: last_power_kw,
-            }),
-            setpoint_kw: last_power_kw,
-            last_power_kw,
-            energy: EnergyCounter::new(),
-            history: AssetHistoryBuffer::new(0),
-        };
-        (entry, AssetConfig::Heater(cfg))
+    fn heater_entry(last_power_kw: f64) -> (String, AssetSnapshot) {
+        let mut values = StdHashMap::new();
+        values.insert("temp_c".into(), 50.0);
+        values.insert("max_kw".into(), 6.0);
+        values.insert("mid_kw".into(), 3.0);
+        values.insert("temp_min_c".into(), 45.0);
+        values.insert("temp_max_c".into(), 60.0);
+        (
+            "heater".to_string(),
+            AssetSnapshot {
+                power_kw: last_power_kw,
+                asset_type: "heater".to_string(),
+                cap_max_import_kw: 6.0,
+                cap_max_export_kw: 0.0,
+                available_discharge_kwh: None,
+                available_charge_kwh: None,
+                default_setpoint_kw: 0.0,
+                setpoint_kw: last_power_kw,
+                values,
+            },
+        )
     }
 
-    fn battery_entry_with_setpoint(soc: f64, setpoint_kw: f64) -> (AssetEntry, AssetConfig) {
-        let (mut entry, cfg) = battery_entry(soc);
-        entry.setpoint_kw = setpoint_kw;
-        (entry, cfg)
+    fn battery_entry_with_setpoint(soc: f64, setpoint_kw: f64) -> (String, AssetSnapshot) {
+        let (id, mut snap) = battery_entry(soc);
+        snap.setpoint_kw = setpoint_kw;
+        (id, snap)
     }
 
-    fn make_sim_snap(pairs: Vec<(AssetEntry, AssetConfig)>) -> SimSnapshot {
-        let (entries, configs): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
-        let sim = SimState {
-            assets: entries,
-            asset_configs: configs,
-            grid: crate::simulator::GridMeter::default(),
-            grid_asset: crate::assets::Grid::default(),
-            pv_smoothing: Default::default(),
-            base_load_smoothing: Default::default(),
-            last_tick: chrono::Utc::now(),
-        };
-        sim.to_sim_snapshot()
+    fn make_sim_snap(pairs: Vec<(String, AssetSnapshot)>) -> SimSnapshot {
+        let assets = pairs.into_iter().collect();
+        SimSnapshot {
+            ts: chrono::Utc::now(),
+            grid: GridSnapshot {
+                net_power_w: 0.0,
+                voltage_v: 230.0,
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+            },
+            assets,
+        }
     }
 
     fn build_sim_snap(
