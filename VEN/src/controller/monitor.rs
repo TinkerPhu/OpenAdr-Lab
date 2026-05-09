@@ -112,4 +112,45 @@ mod tests {
             entry.energy_kwh
         );
     }
+
+    // ── T014: cost and CO₂ accumulation with an active tariff snapshot ────────
+
+    #[test]
+    fn ledger_accumulates_cost_and_co2_with_tariff() {
+        use crate::entities::tariff_snapshot::TariffSnapshot;
+        use chrono::Duration;
+
+        let now = Utc::now();
+        // Asset importing 5 kW for 1 hour → 5 kWh
+        let sim = make_sim("battery", 5.0);
+        let tariff = TariffSnapshot {
+            interval_start: now - Duration::seconds(60),
+            interval_end: now + Duration::seconds(3600),
+            import_tariff_eur_kwh: Some(0.30),
+            export_tariff_eur_kwh: Some(0.10),
+            co2_g_kwh: Some(400.0),
+        };
+        let mut ledger = HashMap::new();
+        record_tick(&mut ledger, &sim, &[tariff], 3600.0, now);
+
+        let entry = ledger.get("battery").expect("battery ledger entry");
+        // energy = 5 kW * 1 h = 5 kWh
+        assert!(
+            (entry.energy_kwh - 5.0).abs() < 1e-6,
+            "energy_kwh: expected 5.0, got {}",
+            entry.energy_kwh
+        );
+        // cost = 5 kW * 1 h * 0.30 €/kWh = 1.50 €
+        assert!(
+            (entry.cost_eur - 1.5).abs() < 1e-6,
+            "cost_eur: expected 1.50, got {}",
+            entry.cost_eur
+        );
+        // co2 = 5 kW * 1 h * 400 g/kWh = 2000 g
+        assert!(
+            (entry.co2_g - 2000.0).abs() < 1e-6,
+            "co2_g: expected 2000.0, got {}",
+            entry.co2_g
+        );
+    }
 }
