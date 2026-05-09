@@ -4,7 +4,7 @@
 /// current simulation snapshot. Packet attribution has been removed;
 /// device sessions (EvSession, HeaterTarget) are managed directly.
 use crate::entities::tariff_snapshot::TariffSnapshot;
-use crate::simulator::SimSnapshot;
+use crate::controller::SimSnapshot;
 use crate::state::AssetLedgerEntry;
 use chrono::{DateTime, Utc};
 
@@ -55,7 +55,7 @@ pub fn record_tick(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulator::{AssetSnapshot, GridSnapshot, SimSnapshot};
+    use crate::controller::{AssetSnapshot, GridSnapshot, SimSnapshot};
     use chrono::Utc;
     use std::collections::HashMap;
 
@@ -72,6 +72,13 @@ mod tests {
                 asset_id.to_string(),
                 AssetSnapshot {
                     power_kw,
+                    asset_type: "ev".to_string(),
+                    cap_max_import_kw: 0.0,
+                    cap_max_export_kw: 0.0,
+                    available_discharge_kwh: None,
+                    available_charge_kwh: None,
+                    default_setpoint_kw: power_kw,
+                    setpoint_kw: power_kw,
                     values: HashMap::new(),
                 },
             )]),

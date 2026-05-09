@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::entities::plan::SiteFlexibilityEnvelope;
-use crate::simulator::SimState;
+use crate::controller::SimSnapshot;
 
 const NEAR_ZERO_KW: f64 = 1e-3;
 const NEAR_ZERO_KWH: f64 = 1e-6;
@@ -22,19 +22,17 @@ const NEAR_ZERO_KWH: f64 = 1e-6;
 /// Duration is estimated from available storage energy:
 ///   up_duration_s   = available_discharge_kwh / up_kw × 3600
 ///   down_duration_s = available_charge_kwh    / down_kw × 3600
-pub fn compute_envelope(sim: &SimState, now: DateTime<Utc>) -> SiteFlexibilityEnvelope {
+pub fn compute_envelope(sim: &SimSnapshot, now: DateTime<Utc>) -> SiteFlexibilityEnvelope {
     let mut up_kw = 0.0_f64;
     let mut down_kw = 0.0_f64;
     let mut available_discharge_kwh = 0.0_f64;
     let mut available_charge_kwh = 0.0_f64;
 
-    for (entry, config) in sim.iter_assets() {
-        let phys_cap = config.capability(&entry.state);
+    for (_id, snap) in &sim.assets {
+        up_kw += (snap.power_kw - snap.cap_max_export_kw).max(0.0);
+        down_kw += (snap.cap_max_import_kw - snap.power_kw).max(0.0);
 
-        up_kw += (entry.last_power_kw - phys_cap.max_export_kw).max(0.0);
-        down_kw += (phys_cap.max_import_kw - entry.last_power_kw).max(0.0);
-
-        if let Some((dis, ch)) = config.available_storage_kwh(&entry.state) {
+        if let (Some(dis), Some(ch)) = (snap.available_discharge_kwh, snap.available_charge_kwh) {
             available_discharge_kwh += dis;
             available_charge_kwh += ch;
         }
@@ -158,7 +156,7 @@ mod tests {
     #[test]
     fn test_compute_envelope_no_assets_returns_zero() {
         let sim = make_sim(vec![], vec![]);
-        let env = compute_envelope(&sim, Utc::now());
+        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
         assert_eq!(env.up_kw, 0.0);
         assert_eq!(env.down_kw, 0.0);
         assert!(env.up_duration_s.is_none());
@@ -171,7 +169,7 @@ mod tests {
             vec![make_ev_config(7.0, 40.0)],
             vec![make_ev_entry("ev", 0.5, true, 7.0)],
         );
-        let env = compute_envelope(&sim, Utc::now());
+        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
         assert!(
             (env.up_kw - 7.0).abs() < 1e-6,
             "up_kw should be 7.0, got {}",
@@ -190,7 +188,7 @@ mod tests {
             vec![make_battery_config(10.0, 5.0, 0.1)],
             vec![make_battery_entry("bat", 0.5, 0.0)],
         );
-        let env = compute_envelope(&sim, Utc::now());
+        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
         assert!(
             (env.up_kw - 5.0).abs() < 1e-6,
             "up_kw should be 5.0, got {}",
@@ -206,7 +204,7 @@ mod tests {
     #[test]
     fn test_compute_envelope_pv_contributes_nothing() {
         let sim = make_sim(vec![make_pv_config(5.0)], vec![make_pv_entry("pv", -2.0)]);
-        let env = compute_envelope(&sim, Utc::now());
+        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
         assert!(
             (env.up_kw).abs() < 1e-6,
             "PV up_kw should be 0, got {}",
@@ -225,7 +223,7 @@ mod tests {
             vec![make_battery_config(10.0, 5.0, 0.1)],
             vec![make_battery_entry("bat", 0.5, 0.0)],
         );
-        let env = compute_envelope(&sim, Utc::now());
+        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
         assert_eq!(env.up_duration_s, Some(2880));
         assert_eq!(env.down_duration_s, Some(3600));
     }
@@ -237,7 +235,7 @@ mod tests {
             vec![make_battery_config(10.0, sub_threshold, 0.1)],
             vec![make_battery_entry("bat", 0.5, 0.0)],
         );
-        let env = compute_envelope(&sim, Utc::now());
+        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
         assert!(env.up_duration_s.is_none());
         assert!(env.down_duration_s.is_none());
     }
@@ -249,7 +247,7 @@ mod tests {
             vec![make_battery_config(10.0, above_threshold, 0.1)],
             vec![make_battery_entry("bat", 0.5, 0.0)],
         );
-        let env = compute_envelope(&sim, Utc::now());
+        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
         assert!(env.up_duration_s.is_some());
         assert!(env.down_duration_s.is_some());
     }

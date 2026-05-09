@@ -3,18 +3,17 @@
 /// Single responsibility: given the current plan, simulator assets, and capacity
 /// constraints, produce a HashMap<asset_id, kW> that drives the simulator tick.
 /// The plan is the sole authority.
-use crate::assets::{AssetConfig, AssetState};
+use crate::controller::SimSnapshot;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::Plan;
 use crate::profile::PlannerObjective;
-use crate::simulator::AssetEntry;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
 /// Build a setpoints map for all known assets based on the active plan.
 ///
 /// Algorithm:
-/// 1. Start with each asset's `default_setpoint()` from its current state.
+/// 1. Start with each asset's `default_setpoint_kw` from the snapshot.
 /// 2. Find the slot covering `now` in the plan.
 /// 3. Overwrite entries for assets that have an allocation in that slot.
 /// 4. If `heater_setpoint_c` override is set and the plan has no heater allocation,
@@ -23,18 +22,17 @@ use std::collections::HashMap;
 /// 6. Apply opportunistic surplus EV charging (see `apply_surplus_ev_overlay`).
 pub fn build_setpoints(
     plan: &Plan,
-    assets: &[AssetEntry],
-    asset_configs: &[AssetConfig],
+    sim: &SimSnapshot,
     capacity: &OadrCapacityState,
     heater_setpoint_c: Option<f64>,
     now: DateTime<Utc>,
     overlay_enabled: bool,
 ) -> HashMap<String, f64> {
-    // Start with defaults from current asset state
-    let mut setpoints: HashMap<String, f64> = assets
+    // Start with defaults from snapshot
+    let mut setpoints: HashMap<String, f64> = sim
+        .assets
         .iter()
-        .zip(asset_configs.iter())
-        .map(|(a, cfg)| (a.id.clone(), cfg.default_setpoint(&a.state)))
+        .map(|(id, snap)| (id.clone(), snap.default_setpoint_kw))
         .collect();
 
     // Find the slot covering now
@@ -67,14 +65,11 @@ pub fn build_setpoints(
     // Only applies when the plan has no heater allocation for the current slot.
     if let Some(target_c) = heater_setpoint_c {
         if !plan_allocated_heater {
-            if let Some((entry, cfg)) = assets
-                .iter()
-                .zip(asset_configs.iter())
-                .find(|(a, _)| a.id == crate::ids::ASSET_HEATER)
-            {
-                if let Some(power_kw) = cfg.thermostat_setpoint_kw(&entry.state, target_c) {
-                    setpoints.insert(crate::ids::ASSET_HEATER.to_string(), power_kw);
-                }
+            if let Some(snap) = sim.assets.get(crate::ids::ASSET_HEATER) {
+                let temp_c = snap.val("temp_c").unwrap_or(20.0);
+                let max_kw = snap.values.get("max_kw").copied().unwrap_or(0.0);
+                let power_kw = if temp_c < target_c { max_kw } else { 0.0 };
+                setpoints.insert(crate::ids::ASSET_HEATER.to_string(), power_kw);
             }
         }
     }
@@ -94,8 +89,7 @@ pub fn build_setpoints(
     // plan-level EV allocation is active.
     apply_surplus_ev_overlay(
         &mut setpoints,
-        assets,
-        asset_configs,
+        sim,
         plan_allocated_ev,
         overlay_enabled,
     );
@@ -119,8 +113,7 @@ pub fn build_setpoints(
 /// - Surplus is below the 100 W noise floor
 pub fn apply_surplus_ev_overlay(
     setpoints: &mut HashMap<String, f64>,
-    assets: &[AssetEntry],
-    asset_configs: &[AssetConfig],
+    sim: &SimSnapshot,
     plan_has_ev_allocation: bool,
     overlay_enabled: bool,
 ) {
@@ -128,14 +121,17 @@ pub fn apply_surplus_ev_overlay(
         return;
     }
     // Sum this tick's setpoint for all non-EV, non-battery assets (prefer setpoints
-    // map over last_power_kw so the heater's thermostat switch is visible immediately,
-    // not one tick late). Falls back to last_power_kw for assets with no setpoint
+    // map over power_kw so the heater's thermostat switch is visible immediately,
+    // not one tick late). Falls back to power_kw for assets with no setpoint
     // (e.g. PV, which is physics-driven and has its setpoint set from the default).
     // PV contributes negative (export); loads (base_load, heater, …) positive (import).
-    let net_other_kw: f64 = assets
+    let net_other_kw: f64 = sim
+        .assets
         .iter()
-        .filter(|a| a.id != crate::ids::ASSET_EV && a.id != crate::ids::ASSET_BATTERY)
-        .map(|a| setpoints.get(&a.id).copied().unwrap_or(a.last_power_kw))
+        .filter(|(id, _)| {
+            id.as_str() != crate::ids::ASSET_EV && id.as_str() != crate::ids::ASSET_BATTERY
+        })
+        .map(|(id, snap)| setpoints.get(id).copied().unwrap_or(snap.power_kw))
         .sum();
     // Also account for any battery charging that the plan has already allocated this
     // tick (positive setpoint = charging). This prevents double-allocating PV surplus
@@ -150,10 +146,14 @@ pub fn apply_surplus_ev_overlay(
     if surplus_kw < 0.1 {
         return;
     }
-    for (entry, cfg) in assets.iter().zip(asset_configs.iter()) {
-        if let Some(charge_kw) = cfg.surplus_charge_kw(&entry.state, surplus_kw) {
-            setpoints.insert(entry.id.clone(), charge_kw);
-            break;
+    if let Some(snap) = sim.assets.get(crate::ids::ASSET_EV) {
+        let plugged = snap.val("plugged").unwrap_or(0.0) > 0.5;
+        let soc = snap.val("soc").unwrap_or(0.0);
+        let soc_target = snap.val("soc_target").unwrap_or(1.0);
+        if plugged && soc < soc_target {
+            let max_charge_kw = snap.values.get("max_charge_kw").copied().unwrap_or(0.0);
+            let charge_kw = surplus_kw.min(max_charge_kw);
+            setpoints.insert(crate::ids::ASSET_EV.to_string(), charge_kw);
         }
     }
 }
@@ -184,8 +184,7 @@ pub fn apply_surplus_ev_overlay(
 /// Returns the delta applied (0.0 if below threshold, SoC-limited, or < min_correction_kw).
 pub fn apply_battery_correction_overlay(
     setpoints: &mut HashMap<String, f64>,
-    assets: &[AssetEntry],
-    asset_configs: &[AssetConfig],
+    sim: &SimSnapshot,
     plan_signed_net_kw: f64,
     actual_net_kw: f64,
     objective: PlannerObjective,
@@ -194,20 +193,16 @@ pub fn apply_battery_correction_overlay(
 ) -> f64 {
     let deviation_kw = actual_net_kw - plan_signed_net_kw;
 
-    // Find battery asset and config (needed before threshold check to read setpoint_kw).
-    let Some(idx) = assets
-        .iter()
-        .position(|a| a.id == crate::ids::ASSET_BATTERY)
-    else {
-        return 0.0;
-    };
-    let (AssetState::Battery(bs), AssetConfig::Battery(bcfg)) =
-        (&assets[idx].state, &asset_configs[idx])
-    else {
+    // Find battery snapshot
+    let Some(snap) = sim.assets.get(crate::ids::ASSET_BATTERY) else {
         return 0.0;
     };
 
-    let current_sp = assets[idx].setpoint_kw;
+    let soc = snap.val("soc").unwrap_or(0.0);
+    let min_soc = snap.val("min_soc").unwrap_or(0.0);
+    let max_discharge_kw = snap.values.get("max_discharge_kw").copied().unwrap_or(0.0);
+    let max_charge_kw = snap.values.get("max_charge_kw").copied().unwrap_or(0.0);
+    let current_sp = snap.setpoint_kw;
 
     if deviation_kw.abs() <= threshold_kw {
         return 0.0;
@@ -222,12 +217,12 @@ pub fn apply_battery_correction_overlay(
     let raw_target = current_sp - deviation_kw;
 
     // Clamp to power limits
-    let clamped = raw_target.clamp(-bcfg.max_discharge_kw, bcfg.max_charge_kw);
+    let clamped = raw_target.clamp(-max_discharge_kw, max_charge_kw);
 
     // SoC feasibility: don't discharge below min_soc, don't charge above 1.0
-    let clamped = if clamped < 0.0 && bs.soc <= bcfg.min_soc + 0.01 {
+    let clamped = if clamped < 0.0 && soc <= min_soc + 0.01 {
         current_sp.max(0.0) // already at floor, suppress discharge
-    } else if clamped > 0.0 && bs.soc >= 1.0 - 0.01 {
+    } else if clamped > 0.0 && soc >= 1.0 - 0.01 {
         current_sp.min(0.0) // already at ceiling, suppress charge
     } else {
         clamped
@@ -252,7 +247,8 @@ mod tests {
         AssetConfig, AssetState, BaseLoad, BaseLoadState, Battery, BatteryState, EvCharger,
         EvState, Heater, HeaterState, PvInverter, PvState,
     };
-    use crate::simulator::{energy::EnergyCounter, AssetEntry};
+    use crate::controller::{AssetSnapshot, GridSnapshot, SimSnapshot};
+    use crate::simulator::{energy::EnergyCounter, AssetEntry, SimState};
 
     fn battery_entry(soc: f64) -> (AssetEntry, AssetConfig) {
         let cfg = Battery {
@@ -368,17 +364,38 @@ mod tests {
         (entry, AssetConfig::Heater(cfg))
     }
 
-    fn build_assets(
+    fn battery_entry_with_setpoint(soc: f64, setpoint_kw: f64) -> (AssetEntry, AssetConfig) {
+        let (mut entry, cfg) = battery_entry(soc);
+        entry.setpoint_kw = setpoint_kw;
+        (entry, cfg)
+    }
+
+    fn make_sim_snap(pairs: Vec<(AssetEntry, AssetConfig)>) -> SimSnapshot {
+        let (entries, configs): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
+        let sim = SimState {
+            assets: entries,
+            asset_configs: configs,
+            grid: crate::simulator::GridMeter::default(),
+            grid_asset: crate::assets::Grid::default(),
+            pv_smoothing: Default::default(),
+            base_load_smoothing: Default::default(),
+            last_tick: chrono::Utc::now(),
+        };
+        sim.to_sim_snapshot()
+    }
+
+    fn build_sim_snap(
         pv_kw: f64,
         base_kw: f64,
         ev_soc: f64,
         ev_plugged: bool,
         ev_target: f64,
-    ) -> (Vec<AssetEntry>, Vec<AssetConfig>) {
-        let (pv_e, pv_c) = pv_entry(pv_kw);
-        let (base_e, base_c) = base_entry(base_kw);
-        let (ev_e, ev_c) = ev_entry(ev_soc, ev_plugged, ev_target);
-        (vec![pv_e, base_e, ev_e], vec![pv_c, base_c, ev_c])
+    ) -> SimSnapshot {
+        make_sim_snap(vec![
+            pv_entry(pv_kw),
+            base_entry(base_kw),
+            ev_entry(ev_soc, ev_plugged, ev_target),
+        ])
     }
 
     // ── surplus_ev_overlay tests ──────────────────────────────────────────────
@@ -386,9 +403,9 @@ mod tests {
     #[test]
     fn surplus_charges_ev_when_pv_exceeds_base() {
         // PV exports 3 kW, base consumes 1 kW → surplus = 2 kW
-        let (assets, configs) = build_assets(-3.0, 1.0, 0.4, true, 0.8);
+        let sim = build_sim_snap(-3.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 2.0).abs() < 1e-6,
@@ -399,9 +416,9 @@ mod tests {
     #[test]
     fn surplus_capped_at_ev_max_charge_kw() {
         // PV exports 10 kW, base 0 kW → surplus 10 kW, but EV max is 7.4 kW
-        let (assets, configs) = build_assets(-10.0, 0.0, 0.1, true, 0.8);
+        let sim = build_sim_snap(-10.0, 0.0, 0.1, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 7.4).abs() < 1e-6,
@@ -412,9 +429,9 @@ mod tests {
     #[test]
     fn surplus_not_applied_when_ev_at_target_soc() {
         // EV already at target — must not charge even with surplus
-        let (assets, configs) = build_assets(-3.0, 1.0, 0.8, true, 0.8);
+        let sim = build_sim_snap(-3.0, 1.0, 0.8, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         assert!(
             sp.get("ev").is_none(),
             "must not charge EV when soc >= soc_target"
@@ -423,18 +440,18 @@ mod tests {
 
     #[test]
     fn surplus_not_applied_when_ev_unplugged() {
-        let (assets, configs) = build_assets(-3.0, 1.0, 0.4, false, 0.8);
+        let sim = build_sim_snap(-3.0, 1.0, 0.4, false, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         assert!(sp.get("ev").is_none(), "must not charge unplugged EV");
     }
 
     #[test]
     fn surplus_not_applied_when_plan_has_ev_allocation() {
-        let (assets, configs) = build_assets(-3.0, 1.0, 0.4, true, 0.8);
+        let sim = build_sim_snap(-3.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("ev".to_string(), 5.0); // plan allocation already present
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, true, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, true, true);
         // Plan's 5.0 kW must be preserved, not overwritten
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
@@ -447,10 +464,10 @@ mod tests {
     fn battery_charging_reduces_ev_surplus() {
         // PV 4 kW, base 0.5 kW → raw PV surplus 3.5 kW.
         // Battery plan setpoint = 3.0 kW → EV should only get 0.5 kW.
-        let (assets, configs) = build_assets(-4.0, 0.5, 0.4, true, 0.8);
+        let sim = build_sim_snap(-4.0, 0.5, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 3.0); // battery plan allocation
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 0.5).abs() < 1e-6,
@@ -461,10 +478,10 @@ mod tests {
     #[test]
     fn battery_claiming_full_surplus_leaves_ev_idle() {
         // PV 4 kW, base 0.5 kW → surplus 3.5 kW; battery claims all 3.5 kW.
-        let (assets, configs) = build_assets(-4.0, 0.5, 0.4, true, 0.8);
+        let sim = build_sim_snap(-4.0, 0.5, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 3.5);
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         assert!(
             sp.get("ev").is_none(),
             "EV must not charge when battery claims full surplus"
@@ -474,18 +491,18 @@ mod tests {
     #[test]
     fn no_surplus_when_base_load_exceeds_pv() {
         // PV exports 1 kW, base consumes 2 kW → net import, no surplus
-        let (assets, configs) = build_assets(-1.0, 2.0, 0.4, true, 0.8);
+        let sim = build_sim_snap(-1.0, 2.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         assert!(sp.get("ev").is_none(), "no surplus when base_load > pv");
     }
 
     #[test]
     fn no_surplus_when_pv_not_generating() {
         // PV at 0 kW (night), base consumes 1 kW
-        let (assets, configs) = build_assets(0.0, 1.0, 0.4, true, 0.8);
+        let sim = build_sim_snap(0.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         assert!(
             sp.get("ev").is_none(),
             "no surplus when PV is not generating"
@@ -496,9 +513,9 @@ mod tests {
     fn overlay_disabled_suppresses_ev_even_with_surplus() {
         // PV exports 3 kW, base 1 kW → surplus 2 kW; EV plugged and below target.
         // overlay_enabled=false means nothing is written regardless.
-        let (assets, configs) = build_assets(-3.0, 1.0, 0.4, true, 0.8);
+        let sim = build_sim_snap(-3.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, false);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, false);
         assert!(
             sp.get("ev").is_none(),
             "overlay must not fire when overlay_enabled=false"
@@ -508,14 +525,14 @@ mod tests {
     #[test]
     fn surplus_accounts_for_heater_load() {
         // PV 5 kW export, base 0.6 kW, heater full (6 kW) → net_other = 1.6 kW → no surplus
-        let (pv_e, pv_c) = pv_entry(-5.0);
-        let (base_e, base_c) = base_entry(0.6);
-        let (heater_e, heater_c) = heater_entry(6.0);
-        let (ev_e, ev_c) = ev_entry(0.4, true, 0.8);
-        let assets = vec![pv_e, base_e, heater_e, ev_e];
-        let configs = vec![pv_c, base_c, heater_c, ev_c];
+        let sim = make_sim_snap(vec![
+            pv_entry(-5.0),
+            base_entry(0.6),
+            heater_entry(6.0),
+            ev_entry(0.4, true, 0.8),
+        ]);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         assert!(
             sp.get("ev").is_none(),
             "must not charge EV when heater consumes all PV surplus"
@@ -525,14 +542,14 @@ mod tests {
     #[test]
     fn surplus_ev_charges_pv_minus_heater_partial() {
         // PV 5 kW export, base 0.6 kW, heater mid (3 kW) → surplus = 1.4 kW for EV
-        let (pv_e, pv_c) = pv_entry(-5.0);
-        let (base_e, base_c) = base_entry(0.6);
-        let (heater_e, heater_c) = heater_entry(3.0);
-        let (ev_e, ev_c) = ev_entry(0.4, true, 0.8);
-        let assets = vec![pv_e, base_e, heater_e, ev_e];
-        let configs = vec![pv_c, base_c, heater_c, ev_c];
+        let sim = make_sim_snap(vec![
+            pv_entry(-5.0),
+            base_entry(0.6),
+            heater_entry(3.0),
+            ev_entry(0.4, true, 0.8),
+        ]);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &assets, &configs, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 1.4).abs() < 1e-6,
@@ -546,15 +563,12 @@ mod tests {
     fn correction_discharges_battery_on_pv_shortfall() {
         // actual_net=3.0, planned_net=0.0, threshold=1.0 → deviation=3.0
         // Battery should discharge (negative delta) to compensate
-        let (bat_e, bat_c) = battery_entry(0.5);
-        let assets = vec![bat_e];
-        let configs = vec![bat_c];
+        let sim = make_sim_snap(vec![battery_entry(0.5)]);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 0.0);
         let delta = apply_battery_correction_overlay(
             &mut sp,
-            &assets,
-            &configs,
+            &sim,
             0.0,
             3.0,
             PlannerObjective::MinCost,
@@ -574,15 +588,12 @@ mod tests {
 
     #[test]
     fn correction_suppressed_below_threshold() {
-        let (bat_e, bat_c) = battery_entry(0.5);
-        let assets = vec![bat_e];
-        let configs = vec![bat_c];
+        let sim = make_sim_snap(vec![battery_entry(0.5)]);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 0.0);
         let delta = apply_battery_correction_overlay(
             &mut sp,
-            &assets,
-            &configs,
+            &sim,
             0.0,
             0.5,
             PlannerObjective::MinCost,
@@ -598,15 +609,12 @@ mod tests {
     #[test]
     fn correction_suppressed_when_battery_at_min_soc() {
         // soc at min_soc + 0.005 → discharge correction should be suppressed
-        let (bat_e, bat_c) = battery_entry(0.105);
-        let assets = vec![bat_e];
-        let configs = vec![bat_c];
+        let sim = make_sim_snap(vec![battery_entry(0.105)]);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 0.0);
         let delta = apply_battery_correction_overlay(
             &mut sp,
-            &assets,
-            &configs,
+            &sim,
             0.0,
             3.0,
             PlannerObjective::MinCost,
@@ -619,15 +627,12 @@ mod tests {
     #[test]
     fn correction_suppressed_for_maxrevenue_discharge() {
         // MaxRevenue + positive deviation (importing more) → suppress discharge
-        let (bat_e, bat_c) = battery_entry(0.5);
-        let assets = vec![bat_e];
-        let configs = vec![bat_c];
+        let sim = make_sim_snap(vec![battery_entry(0.5)]);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 0.0);
         let delta = apply_battery_correction_overlay(
             &mut sp,
-            &assets,
-            &configs,
+            &sim,
             0.0,
             3.0,
             PlannerObjective::MaxRevenue,
@@ -640,15 +645,12 @@ mod tests {
     #[test]
     fn correction_allows_maxrevenue_on_export_excess() {
         // MaxRevenue + negative deviation (exporting more than planned) → charge more
-        let (bat_e, bat_c) = battery_entry(0.5);
-        let assets = vec![bat_e];
-        let configs = vec![bat_c];
+        let sim = make_sim_snap(vec![battery_entry(0.5)]);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 0.0);
         let delta = apply_battery_correction_overlay(
             &mut sp,
-            &assets,
-            &configs,
+            &sim,
             0.0,
             -3.0,
             PlannerObjective::MaxRevenue,
@@ -664,15 +666,12 @@ mod tests {
     #[test]
     fn correction_clamped_to_max_discharge_kw() {
         // Large deviation → setpoint must not exceed -max_discharge_kw (5.0)
-        let (bat_e, bat_c) = battery_entry(0.5);
-        let assets = vec![bat_e];
-        let configs = vec![bat_c];
+        let sim = make_sim_snap(vec![battery_entry(0.5)]);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 0.0);
         let _delta = apply_battery_correction_overlay(
             &mut sp,
-            &assets,
-            &configs,
+            &sim,
             0.0,
             20.0,
             PlannerObjective::MinCost,
@@ -684,12 +683,6 @@ mod tests {
             bat_sp >= -5.0,
             "battery setpoint must not go below -max_discharge_kw, got {bat_sp}"
         );
-    }
-
-    fn battery_entry_with_setpoint(soc: f64, setpoint_kw: f64) -> (AssetEntry, AssetConfig) {
-        let (mut entry, cfg) = battery_entry(soc);
-        entry.setpoint_kw = setpoint_kw;
-        (entry, cfg)
     }
 
     #[test]
@@ -704,15 +697,12 @@ mod tests {
         //
         // Both charge, but the fix pushes harder (5.0 vs 4.0), absorbing more export.
         // Key check: correction does NOT oscillate to discharge (bat_sp must be > prev setpoint).
-        let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, 4.17);
-        let assets = vec![bat_e];
-        let configs = vec![bat_c];
+        let sim = make_sim_snap(vec![battery_entry_with_setpoint(0.5, 4.17)]);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), -0.5); // plan allocation
         let _delta = apply_battery_correction_overlay(
             &mut sp,
-            &assets,
-            &configs,
+            &sim,
             0.0,
             -4.5,
             PlannerObjective::MinCost,
@@ -732,15 +722,12 @@ mod tests {
         // sp_map["battery"] = -0.5 (plan allocation).
         // actual_net = 3.0 kW (import excess), deviation = 3.0.
         // raw = 0.0 - 3.0 = -3.0 kW → discharges to compensate. Direction correct.
-        let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, 0.0);
-        let assets = vec![bat_e];
-        let configs = vec![bat_c];
+        let sim = make_sim_snap(vec![battery_entry_with_setpoint(0.5, 0.0)]);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), -0.5);
         let delta = apply_battery_correction_overlay(
             &mut sp,
-            &assets,
-            &configs,
+            &sim,
             0.0,
             3.0,
             PlannerObjective::MinCost,
@@ -761,15 +748,12 @@ mod tests {
         // apply_battery_correction_overlay returns 0.0 and does NOT modify sp_map.
         // The "hold" (preventing plan reversion) is the caller's responsibility
         // via prev_correction_kw tracking in loops.rs (spawn_sim_tick).
-        let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, -4.98); // previous correction
-        let assets = vec![bat_e];
-        let configs = vec![bat_c];
+        let sim = make_sim_snap(vec![battery_entry_with_setpoint(0.5, -4.98)]);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), -0.5); // plan allocation
         let delta = apply_battery_correction_overlay(
             &mut sp,
-            &assets,
-            &configs,
+            &sim,
             0.0,
             0.02,
             PlannerObjective::MinCost,
@@ -789,17 +773,12 @@ mod tests {
         // Regression test for Issue A: when the plan expects export (net_import=0, net_export=3.1),
         // plan_signed_net_kw = 0 - 3.1 = -3.1. If actual_net_kw is also -3.1 (matching the plan),
         // deviation = actual - plan = -3.1 - (-3.1) = 0.0 → no correction must fire.
-        // Before the fix, plan_signed_net_kw was wrongly taken as net_import_kw (= 0.0),
-        // giving deviation = -3.1 which triggered a charge correction that cancelled the export.
-        let (bat_e, bat_c) = battery_entry(0.5);
-        let assets = vec![bat_e];
-        let configs = vec![bat_c];
+        let sim = make_sim_snap(vec![battery_entry(0.5)]);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 0.0);
         let delta = apply_battery_correction_overlay(
             &mut sp,
-            &assets,
-            &configs,
+            &sim,
             -3.1,
             -3.1,
             PlannerObjective::MinCost,
@@ -820,15 +799,12 @@ mod tests {
         // Resulting delta = -5.0 - (-4.98) = -0.02, which is below min_correction_kw=0.2.
         // The correction is correctly suppressed: battery is already at effective maximum
         // discharge; no further meaningful correction is possible.
-        let (bat_e, bat_c) = battery_entry_with_setpoint(0.5, -4.98);
-        let assets = vec![bat_e];
-        let configs = vec![bat_c];
+        let sim = make_sim_snap(vec![battery_entry_with_setpoint(0.5, -4.98)]);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), -0.5); // plan allocation
         let delta = apply_battery_correction_overlay(
             &mut sp,
-            &assets,
-            &configs,
+            &sim,
             0.0,
             4.48,
             PlannerObjective::MinCost,

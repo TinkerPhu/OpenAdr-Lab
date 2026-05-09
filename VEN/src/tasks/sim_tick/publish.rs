@@ -84,6 +84,13 @@ pub(crate) async fn publish_sim_tick_result(
                     rt.asset_id.clone(),
                     crate::simulator::AssetSnapshot {
                         power_kw: rt.power_kw,
+                        asset_type: "base_load".into(),
+                        cap_max_import_kw: rt.power_kw,
+                        cap_max_export_kw: 0.0,
+                        available_discharge_kwh: None,
+                        available_charge_kwh: None,
+                        default_setpoint_kw: rt.power_kw,
+                        setpoint_kw: rt.power_kw,
                         values: {
                             let mut m = std::collections::HashMap::new();
                             m.insert("running".into(), 1.0);
