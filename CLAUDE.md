@@ -18,6 +18,7 @@ Auto-generated from all feature plans. Last updated: 2026-03-15
 - N/A — no new storage; JSON persistence via `state.json` is unchanged (016-refactor-ven-backend)
 - Rust (stable, 2021 edition) + tokio, axum, serde, serde_json, serde_yaml, uuid, chrono, good_lp (HiGHS), sqlx (openleadr-rs) (018-split-loops-tasks)
 - None (VEN persists state to JSON in /data/state.json) (018-split-loops-tasks)
+- [if applicable, e.g., PostgreSQL, CoreData, files or N/A] (019-introduce-simulator-port)
 
 - [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION] (004-ven-controller-reform)
 
@@ -38,9 +39,9 @@ cd src; pytest; ruff check .
 [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]: Follow standard conventions
 
 ## Recent Changes
+- 019-introduce-simulator-port: Added [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]
 - 018-split-loops-tasks: Added Rust (stable, 2021 edition) + tokio, axum, serde, serde_json, serde_yaml, uuid, chrono, good_lp (HiGHS), sqlx (openleadr-rs)
 - 016-refactor-ven-backend: Added Rust stable (2021 edition) + tokio, axum, serde/serde_json, serde_yaml, uuid, chrono,
-- 015-planner-state-forecast: Added Rust stable 2021 (VEN backend) + `axum`, `tokio`, `serde`, `uuid`, `chrono`, `good_lp`/HiGHS
 
 
 <!-- MANUAL ADDITIONS START -->
