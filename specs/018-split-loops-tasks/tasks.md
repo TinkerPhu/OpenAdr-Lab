@@ -46,7 +46,8 @@ User Story Phases (P1 first)
     - Status: verified (cargo test passed for VEN unit tests)
     - Action: Extract spawn_planning and exclusive helpers, ensure solver invocation and context references preserved. Moved file created at `VEN/src/tasks/planning.rs`; added re-export in `VEN/src/tasks/mod.rs` and compatibility alias in `VEN/src/loops.rs`. Run `cargo test` (316 passed) and small BDD subset recommended.
 
-- [ ] T009 [US3] [FR-002, FR-005, FR-007, FR-006] Move sim tick (spawn_sim_tick) into `VEN/src/tasks/sim_tick.rs` or `tasks/sim_tick/mod.rs` if exceeds 200 lines
+- [X] T009 [US3] [FR-002, FR-005, FR-007, FR-006] Move sim tick (spawn_sim_tick) into `VEN/src/tasks/sim_tick.rs` or `tasks/sim_tick/mod.rs` if exceeds 200 lines
+    - Status: verified (cargo test passed for VEN unit tests)
     - Action: Extract spawn_sim_tick and its 8 phases into `VEN/src/tasks/sim_tick.rs`, convert absorber correction and deviation escalation into named functions. If production code >200 lines, create `tasks/sim_tick/mod.rs` and move helpers into `tasks/sim_tick/`. Move tests. Update `tasks/mod.rs`. Run `cargo test` and BDD subset.
 
 - [X] T010 [US3] [FR-002, FR-007] Move state persistence (spawn_state_persist) into `VEN/src/tasks/state_persist.rs`
