@@ -35,6 +35,8 @@ pub(crate) use crate::tasks::planning::spawn_planning;
 
 pub(crate) use crate::tasks::sim_tick::spawn_sim_tick;
 
+pub(crate) use crate::tasks::state_persist::spawn_state_persist;
+
 // ─── Helpers for spawn_sim_tick ───────────────────────────────────────────────
 
 /// Deviation tracking state for Layer 1 (reactive correction) and Layer 2 (sustained deviation).
@@ -820,7 +822,7 @@ pub(crate) fn spawn_planning_old(
     })
 }
 
-pub(crate) fn spawn_state_persist(state: AppState, path: String) -> tokio::task::JoinHandle<()> {
+pub(crate) fn spawn_state_persist_old(state: AppState, path: String) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
         loop {
