@@ -57,7 +57,7 @@ Feature: Multi-asset deviation absorber (Tier 1 real-time control)
     And the plan state is initialized with net import 0.0 kW
     And I wait for a fresh plan
     When I create a positive deviation of 1.0 kW via base load injection
-    And I wait 2 ticks for the sim to process
+    And I wait for the battery setpoint to change from baseline
     Then the battery setpoint is negative
     And the absorber is active with an overlay
     When I clear the deviation injection
@@ -109,7 +109,7 @@ Feature: Multi-asset deviation absorber (Tier 1 real-time control)
     Given I DELETE the EV session
     And I POST an EV session with target_soc 0.90 and departure in 0.33 hours
     And the EV is plugged with SoC at 0.30 (below target)
-    And the battery SoC is reset to 0.50
+    And the battery SoC is reset to 1.0
     And the plan state is initialized with net import 0.0 kW
     When I create a PV surplus to produce negative deviation of 2.0 kW
     And I wait for the EV setpoint to change from baseline
