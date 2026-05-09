@@ -38,7 +38,7 @@ This phase resolves architecture breach AB-03 and is the prerequisite for Phase 
 | III. Upstream Compatibility | ✅ Pass | Changes are VEN-only, not in `openleadr-rs` submodule |
 | IV. Lean Architecture | ✅ Pass | Trait introduced only because it resolves a concrete testability breach (AB-03); no hypothetical flexibility |
 | V. Infrastructure Parity | ✅ Pass | No Docker, CI, or deploy changes; purely source-level refactor |
-| VI. VEN Backend Hexagonal | ✅ Pass | This phase directly implements the `SimulatorPort` entry in the constitution's port table; mock lives at `services/test_support/` as specified |
+| VI. VEN Backend Hexagonal | ⚠️ Exception — see CX-001 | This phase directly implements the `SimulatorPort` port table entry; mock lives at `services/test_support/` as specified. Pre-existing 500-line breach in `milp_planner.rs` mitigated by T011a split (see Complexity Tracking CX-001). |
 
 **Post-design re-check**: After Phase 1 design, `routes/sim.rs` and `routes/timeline.rs` temporarily consume `SimulatorPort` directly. This is an accepted intermediate state documented in FR-003 — Phase 5 will move them to the service layer.
 
