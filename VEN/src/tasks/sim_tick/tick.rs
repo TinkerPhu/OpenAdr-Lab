@@ -6,7 +6,6 @@ use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::entities::asset::PlanTrigger;
-use crate::planner_events::PlannerEventTx;
 use crate::profile::Profile;
 use crate::simulator::SimState;
 use crate::state::{AppState, EvSettings};
@@ -20,7 +19,6 @@ pub(crate) async fn tick_once(
     vtn: VtnClient,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
     data_dir: String,
-    event_tx: PlannerEventTx,
     mut persist_counter: u64,
     persist_every_ticks: u64,
     mut report_counter: u64,

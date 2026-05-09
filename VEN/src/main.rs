@@ -112,7 +112,6 @@ async fn main() -> anyhow::Result<()> {
     );
     tasks::spawn_report_poll(state.clone(), vtn.clone(), cfg.poll_reports_secs);
 
-    // Plan F: planner_event_tx must exist before spawn_sim_tick (correction SSE)
     let (planner_event_tx_inner, _) = tokio::sync::broadcast::channel::<PlannerEvent>(128);
     let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
@@ -124,7 +123,6 @@ async fn main() -> anyhow::Result<()> {
         vtn.clone(),
         trigger_tx.clone(),
         data_dir.clone(),
-        planner_event_tx.clone(),
     );
     tasks::spawn_obligation_check(
         state.clone(),

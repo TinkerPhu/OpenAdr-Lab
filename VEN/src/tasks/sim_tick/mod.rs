@@ -8,7 +8,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::entities::asset::PlanTrigger;
-use crate::planner_events::PlannerEventTx;
 use crate::profile::Profile;
 use crate::simulator::SimState;
 use crate::state::AppState;
@@ -22,7 +21,6 @@ pub(crate) fn spawn_sim_tick(
     vtn: VtnClient,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
     data_dir: String,
-    event_tx: PlannerEventTx,
 ) -> tokio::task::JoinHandle<()> {
     let tick_s = profile.simulator.tick_s;
     let persist_every_s = profile.simulator.persist_every_s;
@@ -53,7 +51,6 @@ pub(crate) fn spawn_sim_tick(
                     vtn.clone(),
                     trigger_tx.clone(),
                     data_dir.clone(),
-                    event_tx.clone(),
                     persist_counter,
                     persist_every_ticks,
                     report_counter,
