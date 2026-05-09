@@ -648,6 +648,76 @@ mod tests {
         }
     }
 
+    // ── T013: zero deviation and empty-assets edge cases ─────────────────────
+
+    #[test]
+    fn absorber_zero_deviation_has_zero_residual() {
+        let mut state = make_fresh_state();
+        let profile = make_test_profile();
+        let sim = make_test_snap();
+        let event_tx = make_test_event_tx();
+        let mut setpoints =
+            HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
+        let now = Utc::now();
+
+        // 0.0 kW is within dead-band (0.1 kW) → no correction applied
+        let residual = apply_deviation_absorption(
+            &mut state,
+            0.0,
+            &mut setpoints,
+            &sim,
+            None,
+            &profile,
+            now,
+            &event_tx,
+            None,
+        );
+
+        assert_eq!(residual, 0.0, "zero deviation → zero residual; got {residual}");
+        assert!(!state.correction_is_active, "no correction active for zero deviation");
+        assert_eq!(setpoints["battery"], 0.0, "battery setpoint unchanged");
+        assert_eq!(setpoints["ev"], 0.0, "ev setpoint unchanged");
+    }
+
+    #[test]
+    fn absorber_empty_snapshot_does_not_panic() {
+        use crate::controller::{GridSnapshot, SimSnapshot};
+        let mut state = make_fresh_state();
+        let profile = make_test_profile(); // has battery + ev in absorber config
+        let sim = SimSnapshot {
+            ts: Utc::now(),
+            grid: GridSnapshot {
+                net_power_w: 0.0,
+                voltage_v: 230.0,
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+            },
+            assets: HashMap::new(), // no assets
+        };
+        let event_tx = make_test_event_tx();
+        let mut setpoints = HashMap::new();
+        let now = Utc::now();
+
+        // All asset headroom = 0 (not found in empty sim) → residual == full deviation
+        let residual = apply_deviation_absorption(
+            &mut state,
+            3.0,
+            &mut setpoints,
+            &sim,
+            None,
+            &profile,
+            now,
+            &event_tx,
+            None,
+        );
+
+        assert!(
+            (residual - 3.0).abs() < 1e-9,
+            "full deviation returned as residual when assets empty; got {residual}"
+        );
+        assert!(!state.correction_is_active, "no correction active with empty assets");
+    }
+
     // ── User Story 1: Transient Deviation Absorption ──────────────────────────
 
     #[test]

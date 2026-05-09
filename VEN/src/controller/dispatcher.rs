@@ -818,4 +818,149 @@ mod tests {
             "sp_map unchanged when correction below min threshold; got {bat_sp}"
         );
     }
+
+    // ── T012: build_setpoints & overlay edge-case tests ──────────────────────
+
+    /// Build a minimal Plan with one slot covering `now` allocating `battery_kw` to battery.
+    fn make_test_plan(battery_kw: f64, now: chrono::DateTime<Utc>) -> crate::entities::plan::Plan {
+        use crate::entities::asset::PlanTrigger;
+        use crate::entities::plan::{
+            AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanningHorizon,
+        };
+        use chrono::Duration;
+        use uuid::Uuid;
+
+        let slot = PlanTimeSlot {
+            slot_index: 0,
+            start: now - Duration::seconds(1),
+            end: now + Duration::seconds(300),
+            import_tariff_eur_kwh: 0.20,
+            export_tariff_eur_kwh: 0.05,
+            co2_g_kwh: 300.0,
+            grid_effective_cost: 0.26,
+            rate_estimated: false,
+            import_cap_kw: 10.0,
+            export_cap_kw: 5.0,
+            baseline_kw: 0.5,
+            pv_forecast_kw: 0.0,
+            surplus_available_kw: 0.0,
+            allocations: vec![AssetAllocation {
+                asset_id: "battery".to_string(),
+                power_kw: battery_kw,
+                surplus_power_kw: 0.0,
+                grid_power_kw: battery_kw,
+                marginal_value: 1.0,
+                cost_eur: 0.0,
+                co2_g: 0.0,
+            }],
+            net_import_kw: battery_kw,
+            net_export_kw: 0.0,
+            import_flexibility_kw: 0.0,
+            export_flexibility_kw: 0.0,
+            bat_charge_kw: 0.0,
+            bat_discharge_kw: battery_kw.abs(),
+            planned_kw_by_asset: HashMap::from([("battery".to_string(), battery_kw)]),
+            planned_state_by_asset: HashMap::new(),
+        };
+
+        Plan {
+            id: Uuid::new_v4(),
+            created_at: now,
+            trigger: PlanTrigger::Periodic,
+            horizon: PlanningHorizon {
+                start_time: now,
+                end_time: now + Duration::seconds(300),
+                step_size_s: 300,
+                num_steps: 1,
+                far_horizon: now + Duration::seconds(300),
+            },
+            slots: vec![slot],
+            summary: PlanSummary::default(),
+            envelopes: vec![],
+            warnings: vec![],
+            soc_trajectory_kwh: vec![],
+            objective: crate::profile::PlannerObjective::MinCost,
+            objective_eur: 0.0,
+            friction_eur: 0.0,
+            cost_breakdown: CostBreakdown::default(),
+        }
+    }
+
+    #[test]
+    fn build_setpoints_follows_plan_battery_allocation() {
+        let now = Utc::now();
+        let sim = make_sim_snap(vec![battery_entry(0.5)]);
+        let plan = make_test_plan(-3.0, now);
+        let capacity = crate::entities::capacity::OadrCapacityState::default();
+        let sp = build_setpoints(&plan, &sim, &capacity, None, now, false);
+        let bat = sp.get("battery").copied().unwrap_or(999.0);
+        assert!(
+            (bat - (-3.0)).abs() < 0.01,
+            "battery setpoint should follow plan allocation -3.0 kW, got {bat}"
+        );
+    }
+
+    #[test]
+    fn build_setpoints_empty_assets_returns_empty_map() {
+        let now = Utc::now();
+        let sim = make_sim_snap(vec![]);
+        // Plan with no slots → no allocations → setpoints come only from snapshot defaults
+        let plan = {
+            use crate::entities::asset::PlanTrigger;
+            use crate::entities::plan::{
+                CostBreakdown, Plan, PlanSummary, PlanningHorizon,
+            };
+            use chrono::Duration;
+            use uuid::Uuid;
+            Plan {
+                id: Uuid::new_v4(),
+                created_at: now,
+                trigger: PlanTrigger::Periodic,
+                horizon: PlanningHorizon {
+                    start_time: now,
+                    end_time: now + Duration::seconds(300),
+                    step_size_s: 300,
+                    num_steps: 1,
+                    far_horizon: now + Duration::seconds(300),
+                },
+                slots: vec![], // no slots → no allocations
+                summary: PlanSummary::default(),
+                envelopes: vec![],
+                warnings: vec![],
+                soc_trajectory_kwh: vec![],
+                objective: crate::profile::PlannerObjective::MinCost,
+                objective_eur: 0.0,
+                friction_eur: 0.0,
+                cost_breakdown: CostBreakdown::default(),
+            }
+        };
+        let capacity = crate::entities::capacity::OadrCapacityState::default();
+        let sp = build_setpoints(&plan, &sim, &capacity, None, now, false);
+        assert!(sp.is_empty(), "empty snapshot + no plan slots → empty setpoints map");
+    }
+
+    #[test]
+    fn surplus_overlay_empty_assets_no_panic() {
+        let sim = make_sim_snap(vec![]);
+        let mut sp = HashMap::new();
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        assert!(sp.is_empty(), "empty snapshot → overlay is a no-op");
+    }
+
+    #[test]
+    fn battery_correction_empty_assets_no_panic() {
+        let sim = make_sim_snap(vec![]);
+        let mut sp = HashMap::new();
+        let delta = apply_battery_correction_overlay(
+            &mut sp,
+            &sim,
+            0.5,
+            2.0,
+            PlannerObjective::MinCost,
+            1.0,
+            0.1,
+        );
+        assert_eq!(delta, 0.0, "no battery asset → correction delta must be 0.0");
+        assert!(sp.is_empty(), "no battery asset → setpoints map unchanged");
+    }
 }
