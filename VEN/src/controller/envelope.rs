@@ -63,100 +63,119 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
-    use crate::assets::{
-        AssetConfig, AssetHistoryBuffer, AssetState, Battery, BatteryState, EvCharger, EvState,
-        Grid, PvInverter, PvState,
-    };
-    use crate::simulator::{energy::EnergyCounter, AssetEntry, GridMeter, SimState};
+    use crate::controller::{AssetSnapshot, GridSnapshot, SimSnapshot};
+    use std::collections::HashMap as HM;
 
-    fn make_battery_entry(id: &str, soc: f64, last_power_kw: f64) -> AssetEntry {
-        AssetEntry {
-            id: id.to_string(),
-            state: AssetState::Battery(BatteryState {
-                soc,
-                actual_power_kw: last_power_kw,
-            }),
-            setpoint_kw: last_power_kw,
-            last_power_kw,
-            energy: EnergyCounter::new(),
-            history: AssetHistoryBuffer::new(3600),
-        }
+    fn make_battery_entry(
+        id: &str,
+        soc: f64,
+        last_power_kw: f64,
+        capacity_kwh: f64,
+        max_kw: f64,
+        min_soc: f64,
+    ) -> (String, AssetSnapshot) {
+        let cap_max_export_kw = if soc <= min_soc { 0.0 } else { -max_kw };
+        let cap_max_import_kw = if soc >= 1.0 { 0.0 } else { max_kw };
+        let available_discharge_kwh = Some((soc - min_soc).max(0.0) * capacity_kwh);
+        let available_charge_kwh = Some((1.0 - soc).max(0.0) * capacity_kwh);
+        let mut values = HM::new();
+        values.insert("soc".into(), soc);
+        values.insert("capacity_kwh".into(), capacity_kwh);
+        values.insert("max_charge_kw".into(), max_kw);
+        values.insert("max_discharge_kw".into(), max_kw);
+        values.insert("min_soc".into(), min_soc);
+        (
+            id.to_string(),
+            AssetSnapshot {
+                power_kw: last_power_kw,
+                asset_type: "battery".to_string(),
+                cap_max_import_kw,
+                cap_max_export_kw,
+                available_discharge_kwh,
+                available_charge_kwh,
+                default_setpoint_kw: 0.0,
+                setpoint_kw: last_power_kw,
+                values,
+            },
+        )
     }
 
-    fn make_battery_config(capacity_kwh: f64, max_kw: f64, min_soc: f64) -> AssetConfig {
-        AssetConfig::Battery(Battery {
-            capacity_kwh,
-            max_charge_kw: max_kw,
-            max_discharge_kw: max_kw,
-            round_trip_efficiency: 1.0,
-            min_soc,
-        })
+    fn make_ev_entry(
+        id: &str,
+        soc: f64,
+        plugged: bool,
+        last_power_kw: f64,
+        max_charge_kw: f64,
+        battery_kwh: f64,
+    ) -> (String, AssetSnapshot) {
+        let soc_target = 0.8;
+        let (cap_max_import_kw, cap_max_export_kw, avail_dis, avail_ch) = if plugged {
+            let import = if soc >= soc_target { 0.0 } else { max_charge_kw };
+            (import, 0.0_f64, Some(soc * battery_kwh), Some((1.0 - soc) * battery_kwh))
+        } else {
+            (0.0, 0.0, None, None)
+        };
+        let mut values = HM::new();
+        values.insert("soc".into(), soc);
+        values.insert("plugged".into(), if plugged { 1.0 } else { 0.0 });
+        values.insert("max_charge_kw".into(), max_charge_kw);
+        values.insert("soc_target".into(), soc_target);
+        values.insert("battery_kwh".into(), battery_kwh);
+        (
+            id.to_string(),
+            AssetSnapshot {
+                power_kw: last_power_kw,
+                asset_type: "ev".to_string(),
+                cap_max_import_kw,
+                cap_max_export_kw,
+                available_discharge_kwh: avail_dis,
+                available_charge_kwh: avail_ch,
+                default_setpoint_kw: max_charge_kw,
+                setpoint_kw: last_power_kw,
+                values,
+            },
+        )
     }
 
-    fn make_ev_entry(id: &str, soc: f64, plugged: bool, last_power_kw: f64) -> AssetEntry {
-        AssetEntry {
-            id: id.to_string(),
-            state: AssetState::Ev(EvState {
-                soc,
-                plugged,
-                actual_power_kw: last_power_kw,
-            }),
-            setpoint_kw: last_power_kw,
-            last_power_kw,
-            energy: EnergyCounter::new(),
-            history: AssetHistoryBuffer::new(3600),
-        }
+    fn make_pv_entry(id: &str, actual_power_kw: f64, rated_kw: f64) -> (String, AssetSnapshot) {
+        let mut values = HM::new();
+        values.insert("irradiance".into(), 0.5);
+        values.insert("rated_kw".into(), rated_kw);
+        values.insert("irradiance_offset".into(), 0.0);
+        values.insert("pv_alpha".into(), 0.1);
+        (
+            id.to_string(),
+            AssetSnapshot {
+                power_kw: actual_power_kw,
+                asset_type: "pv".to_string(),
+                cap_max_import_kw: actual_power_kw,
+                cap_max_export_kw: actual_power_kw,
+                available_discharge_kwh: None,
+                available_charge_kwh: None,
+                default_setpoint_kw: 0.0,
+                setpoint_kw: 0.0,
+                values,
+            },
+        )
     }
 
-    fn make_ev_config(max_charge_kw: f64, battery_kwh: f64) -> AssetConfig {
-        AssetConfig::Ev(EvCharger {
-            max_charge_kw,
-            max_discharge_kw: 0.0,
-            battery_kwh,
-            soc_target: 0.8,
-            soc_target_profile: 0.8,
-            default_charge_kw: max_charge_kw,
-            min_soc: 0.0,
-        })
-    }
-
-    fn make_pv_entry(id: &str, actual_power_kw: f64) -> AssetEntry {
-        AssetEntry {
-            id: id.to_string(),
-            state: AssetState::Pv(PvState { actual_power_kw }),
-            setpoint_kw: 0.0,
-            last_power_kw: actual_power_kw,
-            energy: EnergyCounter::new(),
-            history: AssetHistoryBuffer::new(3600),
-        }
-    }
-
-    fn make_pv_config(rated_kw: f64) -> AssetConfig {
-        AssetConfig::Pv(PvInverter {
-            rated_kw,
-            export_limit_kw: None,
-            irradiance: 0.5,
-            irradiance_offset: 0.0,
-            pv_alpha: 0.1,
-        })
-    }
-
-    fn make_sim(asset_configs: Vec<AssetConfig>, assets: Vec<AssetEntry>) -> SimState {
-        SimState {
-            asset_configs,
-            assets,
-            grid: GridMeter::default(),
-            grid_asset: Grid::new(),
-            pv_smoothing: crate::simulator::PvSmoothingState::default(),
-            base_load_smoothing: Default::default(),
-            last_tick: Utc::now(),
+    fn make_sim(assets: Vec<(String, AssetSnapshot)>) -> SimSnapshot {
+        SimSnapshot {
+            ts: Utc::now(),
+            grid: GridSnapshot {
+                net_power_w: 0.0,
+                voltage_v: 230.0,
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+            },
+            assets: assets.into_iter().collect(),
         }
     }
 
     #[test]
     fn test_compute_envelope_no_assets_returns_zero() {
-        let sim = make_sim(vec![], vec![]);
-        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
+        let sim = make_sim(vec![]);
+        let env = compute_envelope(&sim, Utc::now());
         assert_eq!(env.up_kw, 0.0);
         assert_eq!(env.down_kw, 0.0);
         assert!(env.up_duration_s.is_none());
@@ -165,11 +184,8 @@ mod tests {
 
     #[test]
     fn test_compute_envelope_ev_charging_contributes_up() {
-        let sim = make_sim(
-            vec![make_ev_config(7.0, 40.0)],
-            vec![make_ev_entry("ev", 0.5, true, 7.0)],
-        );
-        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
+        let sim = make_sim(vec![make_ev_entry("ev", 0.5, true, 7.0, 7.0, 40.0)]);
+        let env = compute_envelope(&sim, Utc::now());
         assert!(
             (env.up_kw - 7.0).abs() < 1e-6,
             "up_kw should be 7.0, got {}",
@@ -184,11 +200,8 @@ mod tests {
 
     #[test]
     fn test_compute_envelope_battery_idle_contributes_both() {
-        let sim = make_sim(
-            vec![make_battery_config(10.0, 5.0, 0.1)],
-            vec![make_battery_entry("bat", 0.5, 0.0)],
-        );
-        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
+        let sim = make_sim(vec![make_battery_entry("bat", 0.5, 0.0, 10.0, 5.0, 0.1)]);
+        let env = compute_envelope(&sim, Utc::now());
         assert!(
             (env.up_kw - 5.0).abs() < 1e-6,
             "up_kw should be 5.0, got {}",
@@ -203,8 +216,8 @@ mod tests {
 
     #[test]
     fn test_compute_envelope_pv_contributes_nothing() {
-        let sim = make_sim(vec![make_pv_config(5.0)], vec![make_pv_entry("pv", -2.0)]);
-        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
+        let sim = make_sim(vec![make_pv_entry("pv", -2.0, 5.0)]);
+        let env = compute_envelope(&sim, Utc::now());
         assert!(
             (env.up_kw).abs() < 1e-6,
             "PV up_kw should be 0, got {}",
@@ -219,11 +232,8 @@ mod tests {
 
     #[test]
     fn test_compute_envelope_duration_from_battery_soc() {
-        let sim = make_sim(
-            vec![make_battery_config(10.0, 5.0, 0.1)],
-            vec![make_battery_entry("bat", 0.5, 0.0)],
-        );
-        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
+        let sim = make_sim(vec![make_battery_entry("bat", 0.5, 0.0, 10.0, 5.0, 0.1)]);
+        let env = compute_envelope(&sim, Utc::now());
         assert_eq!(env.up_duration_s, Some(2880));
         assert_eq!(env.down_duration_s, Some(3600));
     }
@@ -231,11 +241,8 @@ mod tests {
     #[test]
     fn duration_suppressed_when_max_kw_below_near_zero_kw() {
         let sub_threshold = NEAR_ZERO_KW * 0.5;
-        let sim = make_sim(
-            vec![make_battery_config(10.0, sub_threshold, 0.1)],
-            vec![make_battery_entry("bat", 0.5, 0.0)],
-        );
-        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
+        let sim = make_sim(vec![make_battery_entry("bat", 0.5, 0.0, 10.0, sub_threshold, 0.1)]);
+        let env = compute_envelope(&sim, Utc::now());
         assert!(env.up_duration_s.is_none());
         assert!(env.down_duration_s.is_none());
     }
@@ -243,11 +250,8 @@ mod tests {
     #[test]
     fn duration_present_when_max_kw_above_near_zero_kw() {
         let above_threshold = NEAR_ZERO_KW * 2.0;
-        let sim = make_sim(
-            vec![make_battery_config(10.0, above_threshold, 0.1)],
-            vec![make_battery_entry("bat", 0.5, 0.0)],
-        );
-        let env = compute_envelope(&sim.to_sim_snapshot(), Utc::now());
+        let sim = make_sim(vec![make_battery_entry("bat", 0.5, 0.0, 10.0, above_threshold, 0.1)]);
+        let env = compute_envelope(&sim, Utc::now());
         assert!(env.up_duration_s.is_some());
         assert!(env.down_duration_s.is_some());
     }
@@ -258,9 +262,6 @@ mod tests {
     /// Battery at 0 kW with 5 kW import/export caps → up_kw=5.0, down_kw=5.0.
     #[test]
     fn compute_envelope_hand_built_snapshot_battery_idle() {
-        use crate::controller::{AssetSnapshot, GridSnapshot, SimSnapshot};
-        use std::collections::HashMap as HM;
-
         // Battery idle at 0 kW; cap_max_export_kw is negative (export = negative convention)
         let mut assets = HM::new();
         assets.insert(

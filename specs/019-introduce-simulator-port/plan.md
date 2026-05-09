@@ -104,3 +104,12 @@ VEN/src/
 **Justification**: The 4 acceptance scenarios in this spec test **internal Rust function contracts** (`dispatcher::build_setpoints`, `absorber::apply_deviation_absorption`, etc.) — these are not observable behaviors at the HTTP/VEN adapter boundary and do not map naturally to Gherkin steps. Existing BDD feature files exercise the full controller path end-to-end; the new unit tests supplement that coverage by isolating the business logic.
 
 **Commitment**: Task `T001b` in `tasks.md` requires reviewing existing BDD `.feature` files to confirm at least one scenario exercises each of the 6 named functions indirectly, OR adding a new scenario to `tests/features/controller.feature` if coverage is absent.
+
+## Known Deferred
+
+The following files still import `crate::simulator` types and are explicitly deferred to Phase 5 of the overall refactor. They cannot be migrated in this phase because they require access to history ring buffers (`AssetHistoryBuffer`) or the typed `AssetState` enum — neither of which is part of `SimSnapshot`.
+
+- **`VEN/src/controller/reporter.rs`** — uses `sim.assets.iter()` with `.history.latest()` and `.history.slice()`; ring buffer access is not yet in SimSnapshot — fix in Phase 5
+- **`VEN/src/controller/timeline.rs`** — uses `sim.find_asset()` and `sim.grid_asset.history.slice()`; history access — fix in Phase 5
+- **`VEN/src/routes/timeline.rs`** — passes `sim: &SimState` to `controller/timeline.rs` functions; blocked by the above — fix in Phase 5
+- **`VEN/src/controller/user_request.rs`** — uses typed `AssetState` enum variants for `resolve_request_target`; requires a richer typed snapshot — fix in Phase 5

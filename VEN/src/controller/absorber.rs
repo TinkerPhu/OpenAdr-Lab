@@ -468,8 +468,6 @@ pub fn validate_startup(profile: &Profile, sim: &SimSnapshot) -> anyhow::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::{AssetConfig, AssetState};
-    use crate::simulator::SimState;
 
     // ── Test helpers ──────────────────────────────────────────────────────────
 
@@ -517,108 +515,130 @@ mod tests {
         profile
     }
 
-    fn make_test_sim() -> SimState {
-        use crate::assets::battery::Battery;
-        use crate::assets::ev::EvCharger;
-        use crate::profile::{BatteryConfig, EvConfig};
-        use crate::simulator::energy::EnergyCounter;
-        use crate::simulator::AssetEntry;
-
-        let battery_cfg = BatteryConfig {
-            id: "battery".to_string(),
-            capacity_kwh: 10.0,
-            max_charge_kw: 5.0,
-            max_discharge_kw: 5.0,
-            initial_soc: 0.50,
-            round_trip_efficiency: 0.92,
-            min_soc: 0.10,
-        };
-        let battery = Battery::from_config(&battery_cfg);
-        let battery_state = crate::assets::battery::BatteryState {
-            soc: 0.50,
-            actual_power_kw: 0.0,
-        };
-
-        let ev_cfg = EvConfig {
-            id: "ev".to_string(),
-            max_charge_kw: 7.4,
-            max_discharge_kw: 0.0,
-            initial_soc: 0.30,
-            battery_kwh: 60.0,
-            soc_target: 0.80,
-            default_charge_kw: 0.0,
-            min_charge_kw: 1.4,
-        };
-        let ev = EvCharger::from_config(&ev_cfg);
-        let ev_state = crate::assets::ev::EvState {
-            soc: 0.30,
-            plugged: true,
-            actual_power_kw: 0.0,
-        };
-
-        SimState {
-            asset_configs: vec![AssetConfig::Battery(battery), AssetConfig::Ev(ev)],
-            assets: vec![
-                AssetEntry {
-                    id: "battery".to_string(),
-                    state: AssetState::Battery(battery_state),
-                    setpoint_kw: 0.0,
-                    last_power_kw: 0.0,
-                    energy: EnergyCounter::new(),
-                    history: crate::assets::AssetHistoryBuffer::new(3600),
-                },
-                AssetEntry {
-                    id: "ev".to_string(),
-                    state: AssetState::Ev(ev_state),
-                    setpoint_kw: 0.0,
-                    last_power_kw: 0.0,
-                    energy: EnergyCounter::new(),
-                    history: crate::assets::AssetHistoryBuffer::new(3600),
-                },
-            ],
-            grid: crate::simulator::GridMeter::default(),
-            grid_asset: crate::assets::Grid::default(),
-            pv_smoothing: Default::default(),
-            base_load_smoothing: Default::default(),
-            last_tick: chrono::Utc::now(),
-        }
-    }
-
     fn make_test_snap() -> SimSnapshot {
-        make_test_sim().to_sim_snapshot()
+        use crate::controller::{AssetSnapshot, GridSnapshot};
+        use std::collections::HashMap;
+
+        // Battery: soc=0.50, cap=10, max_ch/dis=5, min_soc=0.10
+        // cap_max_export_kw = -5.0, cap_max_import_kw = 5.0
+        // available_discharge = (0.50-0.10)*10 = 4.0, available_charge = (1.0-0.50)*10 = 5.0
+        let mut bat_values = HashMap::new();
+        bat_values.insert("soc".into(), 0.50_f64);
+        bat_values.insert("capacity_kwh".into(), 10.0);
+        bat_values.insert("max_charge_kw".into(), 5.0);
+        bat_values.insert("max_discharge_kw".into(), 5.0);
+        bat_values.insert("min_soc".into(), 0.10);
+
+        // EV: soc=0.30, plugged=true, max_ch=7.4, battery=60, soc_target=0.80
+        // cap_max_import_kw = 7.4, cap_max_export_kw = 0.0 (no V2G)
+        // available_discharge = 0.30*60 = 18.0, available_charge = (1.0-0.30)*60 = 42.0
+        let mut ev_values = HashMap::new();
+        ev_values.insert("soc".into(), 0.30_f64);
+        ev_values.insert("plugged".into(), 1.0);
+        ev_values.insert("max_charge_kw".into(), 7.4);
+        ev_values.insert("soc_target".into(), 0.80);
+        ev_values.insert("battery_kwh".into(), 60.0);
+
+        let mut assets = HashMap::new();
+        assets.insert(
+            "battery".to_string(),
+            AssetSnapshot {
+                power_kw: 0.0,
+                asset_type: "battery".to_string(),
+                cap_max_import_kw: 5.0,
+                cap_max_export_kw: -5.0,
+                available_discharge_kwh: Some(4.0),
+                available_charge_kwh: Some(5.0),
+                default_setpoint_kw: 0.0,
+                setpoint_kw: 0.0,
+                values: bat_values,
+            },
+        );
+        assets.insert(
+            "ev".to_string(),
+            AssetSnapshot {
+                power_kw: 0.0,
+                asset_type: "ev".to_string(),
+                cap_max_import_kw: 7.4,
+                cap_max_export_kw: 0.0,
+                available_discharge_kwh: Some(18.0),
+                available_charge_kwh: Some(42.0),
+                default_setpoint_kw: 0.0,
+                setpoint_kw: 0.0,
+                values: ev_values,
+            },
+        );
+
+        SimSnapshot {
+            ts: chrono::Utc::now(),
+            grid: GridSnapshot {
+                net_power_w: 0.0,
+                voltage_v: 230.0,
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+            },
+            assets,
+        }
     }
 
     /// Battery at min_soc (no discharge headroom), EV charging at 7.4 kW.
     fn make_test_sim_battery_floor_ev_charging() -> (SimSnapshot, HashMap<String, f64>) {
-        let mut sim = make_test_sim();
-        if let AssetState::Battery(ref mut s) = sim.assets[0].state {
-            s.soc = 0.10; // At min_soc → 0 discharge headroom
+        let mut snap = make_test_snap();
+        // Battery at min_soc: cap_max_export_kw=0.0, available_discharge=0.0
+        {
+            let bat = snap.assets.get_mut("battery").unwrap();
+            bat.values.insert("soc".into(), 0.10);
+            bat.cap_max_export_kw = 0.0;
+            bat.available_discharge_kwh = Some(0.0);
+            bat.available_charge_kwh = Some(9.0); // (1.0-0.10)*10
         }
-        sim.assets[1].setpoint_kw = 7.4; // EV charging at max rate
+        // EV charging at max rate
+        {
+            let ev = snap.assets.get_mut("ev").unwrap();
+            ev.setpoint_kw = 7.4;
+        }
         let setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 7.4)]);
-        (sim.to_sim_snapshot(), setpoints)
+        (snap, setpoints)
     }
 
     /// Battery at min_soc, EV idle (setpoint 0) — both have 0 positive-deviation headroom.
     fn make_test_sim_all_exhausted_positive() -> (SimSnapshot, HashMap<String, f64>) {
-        let mut sim = make_test_sim();
-        if let AssetState::Battery(ref mut s) = sim.assets[0].state {
-            s.soc = 0.10;
+        let mut snap = make_test_snap();
+        // Battery at min_soc
+        {
+            let bat = snap.assets.get_mut("battery").unwrap();
+            bat.values.insert("soc".into(), 0.10);
+            bat.cap_max_export_kw = 0.0;
+            bat.available_discharge_kwh = Some(0.0);
+            bat.available_charge_kwh = Some(9.0);
         }
-        sim.assets[1].setpoint_kw = 0.0; // EV idle → 0 curtailment headroom
+        // EV idle → 0 curtailment headroom
+        {
+            let ev = snap.assets.get_mut("ev").unwrap();
+            ev.setpoint_kw = 0.0;
+        }
         let setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
-        (sim.to_sim_snapshot(), setpoints)
+        (snap, setpoints)
     }
 
     /// Battery fully charged (no charge headroom), EV idle — for negative deviation tests.
     fn make_test_sim_battery_full_ev_idle() -> (SimSnapshot, HashMap<String, f64>) {
-        let mut sim = make_test_sim();
-        if let AssetState::Battery(ref mut s) = sim.assets[0].state {
-            s.soc = 1.0; // Full → 0 charge headroom for negative deviation
+        let mut snap = make_test_snap();
+        // Battery full: cap_max_import_kw=0.0, available_charge=0.0
+        {
+            let bat = snap.assets.get_mut("battery").unwrap();
+            bat.values.insert("soc".into(), 1.0);
+            bat.cap_max_import_kw = 0.0;
+            bat.available_discharge_kwh = Some(9.0); // (1.0-0.10)*10
+            bat.available_charge_kwh = Some(0.0);
         }
-        sim.assets[1].setpoint_kw = 0.0;
+        // EV idle
+        {
+            let ev = snap.assets.get_mut("ev").unwrap();
+            ev.setpoint_kw = 0.0;
+        }
         let setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
-        (sim.to_sim_snapshot(), setpoints)
+        (snap, setpoints)
     }
 
     fn make_test_event_tx() -> PlannerEventTx {
