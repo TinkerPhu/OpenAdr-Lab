@@ -3360,3 +3360,55 @@ Final result: **307 passed, 0 failed** (Pi4 Pi4 `docker compose run`), confirmed
 - `impl Default` vs. `pub fn default()` is a subtle Rust distinction. Struct spread `..Default::default()` requires the trait to be implemented; an associated function of the same name does not satisfy the trait bound.
 - The `--build` flag on `docker compose run` rebuilds the test runner image; without it, changed source files are silently ignored (baked in at build time via `COPY`).
 
+
+
+## Phase 29: 019-introduce-simulator-port — AB-03 Complete (2026-03-15)
+
+**Branch**: `019-introduce-simulator-port` (worktree `refactor-phase2`)  
+**Spec**: `specs/019-introduce-simulator-port/`  
+**Commit**: `c7c280a`
+
+### What Was Done
+
+Completed Phase 2 (AB-03) of the VEN backend architecture refactoring plan. All controller modules
+and call sites now use `SimSnapshot` instead of `SimState`. The `SimulatorPort` trait and `SimSnapshot`
+type (introduced in prior sessions) are now the sole interface between the controller layer and the simulator.
+
+**Files changed:**
+- `VEN/src/controller/milp_planner.rs` — production signatures changed to `&SimSnapshot`;
+  PV/Battery/EV/Heater sections use `snapshot.assets.get(id)` + `val()`; all ~50 test
+  `SimState::from_profile` calls replaced with `make_snap_from_profile()`; mutation helpers
+  `set_ev_plugged`, `set_battery_soc`, `set_heater_temp`, `set_pv_inject` rewritten to operate on `SimSnapshot`
+- `VEN/src/controller/absorber.rs` — test module: `make_test_sim()` deleted; `make_test_snap()` and variants
+  rewritten as direct `SimSnapshot` builders
+- `VEN/src/controller/dispatcher.rs` — test module: all entry helpers return `(String, AssetSnapshot)`;
+  `make_sim_snap()` builds `SimSnapshot` directly
+- `VEN/src/controller/envelope.rs` — test module: complete rewrite; no SimState; entry helpers merged with config params
+- `VEN/src/assets/pv.rs` — `state_values()` now includes `irradiance_offset` and `pv_alpha`
+- `VEN/src/tasks/planning.rs` — added `to_sim_snapshot()` call before `run_planner()` invocation
+- `specs/019-introduce-simulator-port/plan.md` — "Known Deferred" section added
+- `specs/019-introduce-simulator-port/checklists/requirements.md` — CHK022 marked done
+
+### SC-004 Status
+
+`grep -r "use crate::simulator" VEN/src/controller VEN/src/routes/sim.rs VEN/src/routes/timeline.rs`
+returns only 4 deferred files:
+- `controller/reporter.rs` — history ring buffer access not in SimSnapshot
+- `controller/timeline.rs` — history access, `sim.find_asset()`
+- `routes/timeline.rs` — blocked by controller/timeline.rs
+- `controller/user_request.rs` — typed AssetState dispatch
+
+### Test Result
+
+**319 passed, 0 failed, 13 ignored** (332 total) — `SQLX_OFFLINE=true cargo test` in WSL2.
+
+### Key Learnings
+
+- **Extra closing brace**: When replacing `if let Some(x) = find_asset(id) { ... }` with direct snapshot
+  access, it's easy to leave behind the closing `}` of the old `if let`. The Rust brace-mismatch error
+  message (`unexpected closing delimiter` with inconsistent indentation note) pinpoints this reliably.
+- **Bulk sed misses type annotations**: A `SimState`-typed mutation helper (`set_pv_inject`) was not caught
+  by the `SimState::from_profile` bulk `sed` replacement because it used `SimState` as a type annotation
+  (not a constructor call). Always run `cargo test` immediately after bulk sed operations.
+- **T011a deferred**: `milp_planner.rs` (~3960 lines) was migrated in-place rather than split first.
+  The split remains deferred to Phase 5 as a standalone no-functional-change refactor.
