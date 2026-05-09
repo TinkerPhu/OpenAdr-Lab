@@ -7,11 +7,13 @@ Phase 1: Setup
 
 Phase 2: Foundational (blocking prerequisites)
 
-- [ ] T002 [P] [FR-004, FR-001] Create `VEN/src/tasks/mod.rs` with module skeleton and re-export placeholders
-    - Action: Add `mod poll_events; mod poll_programs; mod poll_reports; mod obligation; mod planning; mod sim_tick; mod state_persist; mod shared;` and `pub use` placeholders for spawn_* names. File: VEN/src/tasks/mod.rs
+- [X] T002 [P] [FR-004, FR-001] Create `VEN/src/tasks/mod.rs` with module skeleton and re-export placeholders
+    - Status: verified (file exists at VEN/src/tasks/mod.rs)
+    - Action: Added `mod poll_events; mod poll_programs; mod poll_reports; mod obligation; mod planning; mod sim_tick; mod state_persist; mod shared;` and re-exports. Run `cargo test` to verify.
 
-- [ ] T003 [P] [FR-003a] Add `VEN/src/tasks/shared.rs` for shared helpers (pub(crate))
-    - Action: Create file with module doc and placeholder helper functions. File: VEN/src/tasks/shared.rs
+- [X] T003 [P] [FR-003a] Add `VEN/src/tasks/shared.rs` for shared helpers (pub(crate))
+    - Status: verified (file created at VEN/src/tasks/shared.rs)
+    - Action: Created small shared helpers module (pub(crate)) at VEN/src/tasks/shared.rs. Run `cargo test` to verify.
 
 - [X] T013 [P] [FR-006] Add file-size audit job and CI check to enforce 200-line production-code limit
     - Action: Add a CI job (e.g., .github/workflows/file_size_audit.yml) that runs a script measuring production code lines under VEN/src/tasks/ and fails if any file >200 lines excluding #[cfg(test)]. Add local script `scripts/check_task_file_sizes.sh`. File: .github/workflows/file_size_audit.yml
