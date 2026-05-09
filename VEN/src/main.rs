@@ -5,7 +5,6 @@ mod controller;
 mod entities;
 mod ids;
 mod tasks;
-mod loops;
 mod models;
 mod planner_events;
 mod profile;
@@ -114,20 +113,20 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Spawn background loops
-    loops::spawn_program_poll(state.clone(), vtn.clone(), cfg.poll_programs_secs);
-    loops::spawn_event_poll(
+    tasks::spawn_program_poll(state.clone(), vtn.clone(), cfg.poll_programs_secs);
+    tasks::spawn_event_poll(
         state.clone(),
         vtn.clone(),
         cfg.poll_events_secs,
         trigger_tx.clone(),
     );
-    loops::spawn_report_poll(state.clone(), vtn.clone(), cfg.poll_reports_secs);
+    tasks::spawn_report_poll(state.clone(), vtn.clone(), cfg.poll_reports_secs);
 
     // Plan F: planner_event_tx must exist before spawn_sim_tick (correction SSE)
     let (planner_event_tx_inner, _) = tokio::sync::broadcast::channel::<PlannerEvent>(128);
     let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
-    loops::spawn_sim_tick(
+    tasks::spawn_sim_tick(
         state.clone(),
         sim_state.clone(),
         profile.clone(),
@@ -138,14 +137,14 @@ async fn main() -> anyhow::Result<()> {
         planner_event_tx.clone(),
         deviation_pending.clone(),
     );
-    loops::spawn_obligation_check(
+    tasks::spawn_obligation_check(
         state.clone(),
         sim_state.clone(),
         vtn.clone(),
         cfg.ven_name.clone(),
     );
     let active_objective = Arc::new(RwLock::new(profile.planner.objective));
-    loops::spawn_planning(
+    tasks::spawn_planning(
         state.clone(),
         profile.clone(),
         vtn.clone(),
@@ -157,7 +156,7 @@ async fn main() -> anyhow::Result<()> {
         deviation_pending.clone(),
     );
     if let Some(path) = cfg.persist_path.clone() {
-        loops::spawn_state_persist(state.clone(), path);
+        tasks::spawn_state_persist(state.clone(), path);
     }
 
     // Build HTTP app and serve
