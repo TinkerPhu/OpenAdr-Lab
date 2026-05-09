@@ -2178,7 +2178,6 @@ mod tests {
                 max_export_kw: 10.0,
             },
             packets: vec![],
-            absorber: Default::default(),
         }
     }
 
@@ -2241,7 +2240,6 @@ mod tests {
                 max_export_kw: 10.0,
             },
             packets: vec![],
-            absorber: Default::default(),
         }
     }
 
@@ -3282,7 +3280,6 @@ mod tests {
                 max_export_kw: 10.0,
             },
             packets: vec![],
-            absorber: Default::default(),
         };
         let sim = SimState::from_profile(&profile);
         let plan = run_planner(

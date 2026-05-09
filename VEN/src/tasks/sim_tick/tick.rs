@@ -3,19 +3,16 @@
 use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::info;
 
-use crate::controller;
 use crate::entities::asset::PlanTrigger;
 use crate::planner_events::PlannerEventTx;
 use crate::profile::Profile;
 use crate::simulator::SimState;
 use crate::state::{AppState, EvSettings};
 use crate::vtn::VtnClient;
-use crate::controller::absorber::AbsorberState;
 
 pub(crate) async fn tick_once(
-    mut absorber_state: AbsorberState,
     state: AppState,
     sim: Arc<Mutex<SimState>>,
     profile: Arc<Profile>,
@@ -24,13 +21,12 @@ pub(crate) async fn tick_once(
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
     data_dir: String,
     event_tx: PlannerEventTx,
-    deviation_pending: Arc<std::sync::atomic::AtomicBool>,
     mut persist_counter: u64,
     persist_every_ticks: u64,
     mut report_counter: u64,
     report_every_ticks: u64,
     tick_s: u64,
-) -> (AbsorberState, u64, u64) {
+) -> (u64, u64) {
     let now = chrono::Utc::now();
     let dt_s = tick_s as f64;
 
@@ -65,7 +61,6 @@ pub(crate) async fn tick_once(
         cleared_fields,
         pv_clear,
         base_clear,
-        residual_kw,
     ) = {
         let mut sim_guard = sim.lock().await;
 
@@ -74,15 +69,8 @@ pub(crate) async fn tick_once(
         let pv_clear = inject.pv_irradiance.is_some();
         let base_clear = inject.base_load_kw.is_some();
 
-        // PHASE 2: Build setpoints (prev grid for Layer 1; effective capacity; dispatcher)
-        let prev_actual_net_kw = sim_guard.grid.net_power_w / 1000.0;
-        let plan_signed_net_kw = plan_snap
-            .as_ref()
-            .and_then(|p| p.current_slot(now))
-            .map(|s| s.net_import_kw - s.net_export_kw)
-            .unwrap_or(0.0);
-
-        let mut sp_map = super::helpers::build_tick_setpoints(
+        // PHASE 2: Build setpoints (effective capacity; dispatcher)
+        let sp_map = super::helpers::build_tick_setpoints(
             &*sim_guard,
             plan_snap.as_ref(),
             &capacity_snap,
@@ -91,21 +79,7 @@ pub(crate) async fn tick_once(
             now,
         );
 
-        // PHASE 3: Layer 1 multi-asset deviation absorber (Tier 1 real-time control).
-        let deviation_kw = prev_actual_net_kw - plan_signed_net_kw;
-        let residual_kw = controller::absorber::apply_deviation_absorption(
-            &mut absorber_state,
-            deviation_kw,
-            &mut sp_map,
-            &*sim_guard,
-            plan_snap.as_ref(),
-            &profile,
-            now,
-            &event_tx,
-            ev_sess_tick.as_ref(),
-        );
-
-        // PHASE 4: Simulator tick — apply setpoints → update device states.
+        // PHASE 3: Simulator tick — apply setpoints → update device states.
         sim_guard.tick(
             dt_s,
             sp_map,
@@ -121,7 +95,7 @@ pub(crate) async fn tick_once(
             inject.ev_soc_target,
         );
 
-        // PHASE 5 (in-lock): extract snapshots and mutate history/grid/envelope.
+        // PHASE 4 (in-lock): extract snapshots and mutate history/grid/envelope.
         let (tick_sensor, tick_sim_snap, tick_envelope) =
             super::helpers::finalize_tick_outputs(&mut *sim_guard, &capacity_snap, now);
 
@@ -132,7 +106,6 @@ pub(crate) async fn tick_once(
             cleared_fields,
             pv_clear,
             base_clear,
-            residual_kw,
         )
     };
 
@@ -161,17 +134,7 @@ pub(crate) async fn tick_once(
     )
     .await;
 
-    // PHASE 6: Layer 2 — accumulate absorbed residual deviation → DeviceDeviation trigger.
-    super::helpers::accumulate_deviation(
-        &mut absorber_state,
-        residual_kw,
-        &profile,
-        &*trigger_tx,
-        &deviation_pending,
-        now,
-    );
-
-    // PHASE 7: Periodic measurement reports (T049)
+    // PHASE 6: Periodic measurement reports (T049)
     if report_every_ticks > 0 {
         report_counter += 1;
         if report_counter >= report_every_ticks {
@@ -180,12 +143,12 @@ pub(crate) async fn tick_once(
         }
     }
 
-    // PHASE 8: Periodic persist
+    // PHASE 7: Periodic persist
     persist_counter += 1;
     if persist_counter >= persist_every_ticks {
         persist_counter = 0;
         super::publish::persist_sim_state(&sim, &data_dir).await;
     }
 
-    (absorber_state, persist_counter, report_counter)
+    (persist_counter, report_counter)
 }

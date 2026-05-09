@@ -172,13 +172,7 @@ pub fn apply_surplus_ev_overlay(
 /// and cause a ±max-discharge limit cycle.
 ///
 /// Returns a non-zero delta when a correction is applied. When the deviation
-/// falls back within threshold, returns 0.0. The caller (`spawn_sim_tick` in
-/// loops.rs) is responsible for "holding" the previous corrected setpoint in
-/// that case to prevent the plan allocation from reverting the battery and
-/// restarting the limit cycle (see `prev_correction_kw` in loops.rs).
-///
-/// For sustained deviations, Layer 2 fires `DeviceDeviation` after
-/// `deviation_trigger_ticks` consecutive ticks, triggering a full MILP replan.
+/// falls back within threshold, returns 0.0.
 ///
 /// Sign: positive setpoint = charging (import), negative = discharging (export).
 /// Returns the delta applied (0.0 if below threshold, SoC-limited, or < min_correction_kw).

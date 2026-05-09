@@ -156,7 +156,7 @@ def step_battery_power_below(context, seconds, threshold):
 
 
 # ---------------------------------------------------------------------------
-# Layer 2 — DeviceDeviation replan
+# Replan trigger polling
 # ---------------------------------------------------------------------------
 
 @when('I poll VEN trace until a PlanCycle with trigger "{trigger}" appears')

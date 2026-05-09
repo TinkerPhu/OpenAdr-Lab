@@ -20,7 +20,6 @@ pub(crate) fn spawn_planning(
     sim: Arc<Mutex<SimState>>,
     active_objective: Arc<RwLock<PlannerObjective>>,
     event_tx: PlannerEventTx,
-    deviation_pending: Arc<std::sync::atomic::AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
     let replan_s = profile.planner.replan_interval_s;
     tokio::spawn(async move {
@@ -36,13 +35,7 @@ pub(crate) fn spawn_planning(
             let now = Utc::now();
             let rates = state.planned_tariffs().await;
             let capacity = state.capacity_state().await;
-            // If DeviceDeviation was latched (fired while we were solving and possibly
-            // overwritten by a subsequent trigger), honour it over wake_trigger.
-            let trigger = if deviation_pending.swap(false, std::sync::atomic::Ordering::AcqRel) {
-                PlanTrigger::DeviceDeviation
-            } else {
-                wake_trigger.clone()
-            };
+            let trigger = wake_trigger.clone();
             let trigger_reason = format!("{:?}", trigger);
 
             info!(trigger = %trigger_reason, "planner loop: starting plan cycle");
@@ -220,11 +213,6 @@ pub(crate) fn spawn_planning(
             let slot_count = plan.slots.len();
             if adopt {
                 info!(trigger = %trigger_reason, slot_count, "planner: plan adopted");
-                // Replan supersedes any active correction
-                let _ = event_tx.send(PlannerEvent::CorrectionCleared {
-                    ts: now,
-                    reason: "superseded_by_replan".to_string(),
-                });
                 state.set_active_plan(Some(plan)).await;
             } else {
                 info!(trigger = %trigger_reason, slot_count, "planner: plan NOT adopted (periodic below threshold)");

@@ -20,7 +20,7 @@ use planner_events::{PlannerEvent, PlannerEventTx};
 use profile::{PlannerObjective, Profile};
 use simulator::SimState;
 use state::AppState;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
 use vtn::VtnClient;
@@ -58,10 +58,6 @@ async fn main() -> anyhow::Result<()> {
     // planning loop receives them for reactive replanning.
     let (trigger_tx, trigger_rx) = tokio::sync::watch::channel(PlanTrigger::Periodic);
     let trigger_tx = Arc::new(trigger_tx);
-
-    // Latch for DeviceDeviation: prevents RateChange (sent every 2s) from
-    // overwriting DeviceDeviation in the watch channel before the planner reads it.
-    let deviation_pending = Arc::new(AtomicBool::new(false));
 
     // Optional: load persisted state
     if let Some(path) = cfg.persist_path.clone() {
@@ -106,12 +102,6 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(Mutex::new(sim))
     };
 
-    // Validate absorber configuration at startup
-    {
-        let sim_guard = sim_state.lock().await;
-        controller::absorber::validate_startup(&profile, &sim_guard)?;
-    }
-
     // Spawn background loops
     tasks::spawn_program_poll(state.clone(), vtn.clone(), cfg.poll_programs_secs);
     tasks::spawn_event_poll(
@@ -135,7 +125,6 @@ async fn main() -> anyhow::Result<()> {
         trigger_tx.clone(),
         data_dir.clone(),
         planner_event_tx.clone(),
-        deviation_pending.clone(),
     );
     tasks::spawn_obligation_check(
         state.clone(),
@@ -153,7 +142,6 @@ async fn main() -> anyhow::Result<()> {
         sim_state.clone(),
         active_objective.clone(),
         planner_event_tx.clone(),
-        deviation_pending.clone(),
     );
     if let Some(path) = cfg.persist_path.clone() {
         tasks::spawn_state_persist(state.clone(), path);

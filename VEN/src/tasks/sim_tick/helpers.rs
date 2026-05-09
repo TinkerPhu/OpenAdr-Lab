@@ -2,11 +2,6 @@
 
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use tracing::{debug, warn};
-
-use crate::controller;
-use crate::controller::absorber::AbsorberState;
-use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::models::SensorSnapshot;
@@ -135,43 +130,3 @@ pub(crate) fn finalize_tick_outputs(
     (tick_sensor, tick_sim_snap, tick_envelope)
 }
 
-/// PHASE 6: Layer 2 — accumulate absorbed residual deviation → DeviceDeviation trigger.
-pub(crate) fn accumulate_deviation(
-    absorber_state: &mut AbsorberState,
-    residual_kw: f64,
-    profile: &Profile,
-    trigger_tx: &tokio::sync::watch::Sender<PlanTrigger>,
-    deviation_pending: &std::sync::atomic::AtomicBool,
-    now: DateTime<Utc>,
-) {
-    // Residual exceeds dead-band: increment sustained deviation counter
-    if residual_kw.abs() > profile.absorber.dead_band_kw {
-        absorber_state.residual_ticks = absorber_state.residual_ticks.saturating_add(1);
-        debug!(
-            residual_kw,
-            dead_band_kw = profile.absorber.dead_band_kw,
-            residual_ticks = absorber_state.residual_ticks,
-            trigger_ticks = profile.planner.deviation_trigger_ticks,
-            "layer2: sustained residual deviation tick"
-        );
-        if absorber_state.residual_ticks >= profile.planner.deviation_trigger_ticks {
-            absorber_state.residual_ticks = 0;
-            warn!(
-                residual_kw,
-                dead_band_kw = profile.absorber.dead_band_kw,
-                trigger_ticks = profile.planner.deviation_trigger_ticks,
-                "layer2: DeviceDeviation trigger fired (absorber exhausted)"
-            );
-            let _ = trigger_tx.send(PlanTrigger::DeviceDeviation);
-            deviation_pending.store(true, std::sync::atomic::Ordering::Release);
-        }
-    } else {
-        if absorber_state.residual_ticks > 0 {
-            debug!(
-                residual_ticks = absorber_state.residual_ticks,
-                residual_kw, "layer2: residual deviation cleared, resetting counter"
-            );
-        }
-        absorber_state.residual_ticks = 0;
-    }
-}

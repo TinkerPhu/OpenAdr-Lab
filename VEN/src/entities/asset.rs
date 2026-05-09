@@ -70,7 +70,6 @@ pub enum PlanTrigger {
     CapacityChange,   // new capacity limit/reservation from VTN
     Alert,            // emergency/flex alert from VTN
     UserRequest,      // new or modified EnergyPacket from user
-    DeviceDeviation,  // significant actual vs. planned deviation detected
     AssetStateChange, // device connected/disconnected/failed
 }
 

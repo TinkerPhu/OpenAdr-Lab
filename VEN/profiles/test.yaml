@@ -35,23 +35,6 @@ planner:
   plan_step_s: 3600
   plan_horizon_h: 24
   replan_interval_s: 20
-  deviation_trigger_ticks: 20
-
-absorber:
-  enabled: true
-  dead_band_kw: 0.1
-  dead_band_clearing_ticks: 1
-  assets:
-    - id: battery
-      priority: 0
-      min_state_linger_s: 0
-    - id: ev
-      priority: 1
-      min_state_linger_s: 0
-      ev_departure_guard_s: 1800
-    - id: heater
-      priority: 2
-      min_state_linger_s: 0
 
 packets:
   - asset: ev
