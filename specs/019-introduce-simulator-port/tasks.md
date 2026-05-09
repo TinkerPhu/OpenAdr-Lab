@@ -58,7 +58,7 @@
 
 - [ ] T009 [P] [US1] Edit `VEN/src/controller/absorber.rs` — change `use crate::simulator::SimState` (line 64) to `use crate::controller::SimSnapshot`. Change function signatures of `apply_deviation_absorption` (line 119) and `validate_startup` (line 417) from `sim: &SimState` to `sim: &SimSnapshot`. Update function bodies to access `sim.assets` (same field name on `SimSnapshot`). Update existing `make_test_sim()` helpers to build `SimSnapshot` instead of `SimState`. Verify `cargo test controller::absorber` passes.
 
-- [ ] T010 [US1] Edit `VEN/src/controller/dispatcher.rs` — change `use crate::simulator::AssetEntry` (line 10) to `use crate::controller::SimSnapshot`. Change the signatures of `build_setpoints`, `apply_surplus_ev_overlay`, and `apply_battery_correction_overlay` to accept `sim: &SimSnapshot` instead of accessing `SimState`/`AssetEntry` internals directly. Update function bodies to read asset power and values from `sim.assets` via `AssetSnapshot.power_kw` and `AssetSnapshot.values`. Update existing test helpers to build `SimSnapshot` directly. Verify `cargo test controller::dispatcher` passes.
+- [ ] T010 [P] [US1] Edit `VEN/src/controller/dispatcher.rs` — change `use crate::simulator::AssetEntry` (line 10) to `use crate::controller::SimSnapshot`. Change the signatures of `build_setpoints`, `apply_surplus_ev_overlay`, and `apply_battery_correction_overlay` to accept `sim: &SimSnapshot` instead of accessing `SimState`/`AssetEntry` internals directly. Update function bodies to read asset power and values from `sim.assets` via `AssetSnapshot.power_kw` and `AssetSnapshot.values`. Update existing test helpers to build `SimSnapshot` directly. Verify `cargo test controller::dispatcher` passes.
 
 - [ ] T011a [US1] Split `VEN/src/controller/milp_planner.rs` into ≤500-line sub-modules to satisfy Constitution Principle VI (current size ~3500 lines). Create `VEN/src/controller/milp_planner/` directory and extract cohesive units: (a) `inputs.rs` — `build_milp_inputs`, `build_now_assets`, asset snapshot helpers; (b) `assets.rs` — per-asset MILP context builders (EV, battery, heater, PV, base load); (c) `interactions.rs` — asset interaction / cross-asset constraint builders; (d) `mod.rs` — top-level `run_planner`, LP solve call, result extraction. Update `controller/mod.rs` to reflect the new sub-module path. Verify `cargo test controller::milp_planner` still passes before proceeding to T011. *(See CX-001 in plan.md.)*
 
@@ -94,7 +94,7 @@
 
 - [ ] T019 [US2] Edit `VEN/src/tasks/sim_tick.rs` (Phase 1 split output) — update the call sites for `absorber::apply_deviation_absorption` and `controller::dispatch` to pass a `SimSnapshot` obtained via `sim.lock().snapshot()` rather than passing `&*sim.lock()` directly. This is the AB-03 integration point: the tick now reads state through the port.
 
-- [ ] T020 [US2] Edit `VEN/src/main.rs` (or `AppCtx` construction) — **chosen wiring strategy**: keep `Arc<Mutex<SimState>>` as-is in `AppCtx`; do NOT add a separate `Arc<dyn SimulatorPort>` field. At every call-site that now requires `&SimSnapshot`, obtain the snapshot by calling `ctx.sim.lock().await.snapshot()` (or `ctx.sim.lock().snapshot()` for synchronous contexts), then pass the owned `SimSnapshot` to the controller function. Add a one-line comment at each call-site: `// SimulatorPort: snapshot acquired outside lock, passed by value`. This keeps lock hold time minimal (constitution contracts requirement) and avoids introducing a new `AppCtx` field. *(See CX-001 in plan.md for the rationale against adding Arc<dyn SimulatorPort>.)*
+- [ ] T020 [US2] Edit `VEN/src/main.rs` (or `AppCtx` construction) — **chosen wiring strategy**: keep `Arc<Mutex<SimState>>` as-is in `AppCtx`; do NOT add a separate `Arc<dyn SimulatorPort>` field. At every call-site that now requires `&SimSnapshot`, obtain the snapshot by calling `ctx.sim.lock().await.snapshot()` (or `ctx.sim.lock().snapshot()` for synchronous contexts), then pass the owned `SimSnapshot` to the controller function. Add a one-line comment at each call-site: `// SimulatorPort: snapshot acquired outside lock, passed by value`. This keeps lock hold time minimal (constitution contracts requirement) and avoids introducing a new `AppCtx` field. *(Constitution Principle IV: lean wiring — no new AppCtx field without a concrete need today.)*
 
 - [ ] T021 [US2] Add integration smoke test in `VEN/src/tasks/sim_tick.rs` `#[cfg(test)]` — build a minimal `SimState` from a test profile, call `snapshot()` on it, assert `snapshot()` returns `Ok(...)` with non-empty assets map. This confirms the `SimulatorPort` impl on `SimState` works end-to-end.
 
@@ -112,7 +112,7 @@
 
 - [ ] T023 [P] Remove dead code — first run `grep -r "use crate::simulator::SimSnapshot\|use crate::simulator::AssetSnapshot\|use crate::simulator::GridSnapshot" VEN/src` and confirm output is empty (no downstream code uses the old path). If empty, delete the three `pub use crate::controller::simulator_port::...` re-export aliases added in T005 from `VEN/src/simulator/mod.rs`, then verify `cargo build` passes. If any usages remain, fix them first before removing the aliases.
 
-- [ ] T024 [P] Verify `controller/timeline.rs` — it also imports `use crate::simulator::SimState` (out of FR-003 scope but a related breach). File a note in `specs/019-introduce-simulator-port/plan.md` under a "Known Deferred" section for cleanup in Phase 5 of the overall refactor, or fix here if trivial.
+- [ ] T024 [P] Verify `controller/timeline.rs` — it also imports `use crate::simulator::SimState` (out of FR-003 scope but a related breach). File a note in `specs/019-introduce-simulator-port/plan.md` under a "Known Deferred" section for cleanup in Phase 5 of the overall refactor, or fix here if trivial. (Create the "Known Deferred" section if absent; use format: `[DEFERRED] controller/timeline.rs still imports SimState — fix in Phase 5 of overall refactor`.)
 
 - [ ] T025 Update `specs/019-introduce-simulator-port/checklists/requirements.md` — mark CHK019 (`tasks.md` generated), CHK020–CHK022 (unit tests passing, integration tests green, grep assertion passing) as done.
 
@@ -126,7 +126,7 @@
 
 - **Phase 1 (Setup)**: No dependencies — start immediately. T001, T001b, T002, T003, T004 can all run in parallel.
 - **Phase 2 (Foundational)**: Depends on Phase 1 completion (T001, T002 must exist). T005 and T006 must both complete before any Phase 3/4 work.
-- **Phase 3 (US1)**: Depends on Phase 2. **T011a must complete before T011**. T007, T008, T009, T011a can run in parallel (different files). T010 and T011 after T011a. T012–T015 can run in parallel after their corresponding refactor tasks.
+- **Phase 3 (US1)**: Depends on Phase 2. **T011a must complete before T011**. T007, T008, T009, T010, T011a can run in parallel (different files). T011 after T011a. T012–T015 can run in parallel after their corresponding refactor tasks.
 - **Phase 4 (US2)**: Depends on Phase 2. T016 depends on T011a (same file split). T017–T020 can run in parallel. T021 depends on T019/T020. T021b can run immediately after T003/T004.
 - **Phase 5 (Polish)**: Depends on Phase 3 + Phase 4 completion.
 
@@ -139,8 +139,8 @@ T003 ──► T004                       │
                                      ├──► T007 (parallel)
                                      ├──► T008 (parallel)
                                      ├──► T009 (parallel)
-                                     ├──► T011a ──► T010
-                                     │          └──► T011 (requires T011a)
+                                     ├──► T010 (parallel)
+                                     ├──► T011a ──► T011 (requires T011a)
                                      │                    │
                                      │          ┌─────────┴──────────┐
                                      │          T012     T013     T014/T015
@@ -153,7 +153,7 @@ T006 ──► T017 ──► T018 ──► T019 ──► T020 ──► T021
 ### Parallel Opportunities
 
 - T001, T001b, T002, T003, T004 — all Phase 1 setup tasks (different files)
-- T007, T008, T009, T011a — independent refactors / splits (different files)
+- T007, T008, T009, T010, T011a — independent refactors / splits (different files)
 - T012, T013, T014, T015 — independent unit test additions (different files)
 - T016, T017, T018, T021b — independent route/test fixes
 
@@ -166,11 +166,11 @@ T006 ──► T017 ──► T018 ──► T019 ──► T020 ──► T021
 Agent A: T007 — monitor.rs (trivial: import path only)
 Agent B: T008 — envelope.rs (function signature change)
 Agent C: T009 — absorber.rs (function signature change)
-Agent D: T011a — split milp_planner.rs into sub-modules (C1 remediation — must finish before T011)
+Agent D: T010 — dispatcher.rs (AssetEntry → SimSnapshot)
+Agent E: T011a — split milp_planner.rs into sub-modules (C1 remediation — must finish before T011)
 
 # After T011a complete:
-Agent A: T010 — dispatcher.rs (AssetEntry → SimSnapshot)
-Agent B: T011 — milp_planner/inputs.rs (heaviest; last)
+Agent A: T011 — milp_planner/inputs.rs (heaviest; last)
 
 # After T009/T010/T011 complete:
 Agent A: T012 — dispatcher unit tests (with error-path)
