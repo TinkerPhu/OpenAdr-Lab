@@ -1,12 +1,13 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: [unversioned template] → 1.0.0 (initial adoption)
-Modified principles: N/A — first-time fill of blank template
+Version change: 1.0.0 → 1.1.0
+Modified principles: Added: Principle VI (VEN Backend Hexagonal Architecture)
 Added sections: Core Principles (×5), Technology Constraints, Development Workflow, Governance
 Removed sections: None
 Templates requiring updates:
   ✅ plan-template.md — "Constitution Check" gate already present; principles align
+  ⚠️  plan-template.md — Constitution Check gate should reference Principle VI for any VEN-backend feature
   ✅ spec-template.md — no constitution-specific references; no changes needed
   ✅ tasks-template.md — task categorization compatible with all five principles
   ✅ agent-file-template.md — generic template; no updates required
@@ -120,6 +121,43 @@ Concrete rules:
 failed on Pi4. All test and deployment commands are defined once and run through
 SSH to eliminate drift.
 
+### VI. VEN Backend — Hexagonal + Clean Architecture
+
+The VEN backend (`VEN/src/`) MUST follow Hexagonal Architecture (Ports & Adapters) with a Clean
+Architecture use-case ring. The dependency rule is absolute: **inner rings never import outer rings**.
+
+Ring definitions (outer → inner):
+1. **Adapters** (driving): `routes/`, `tasks/`
+2. **Application**: `services/` — one service per bounded subdomain
+3. **Domain Core**: `entities/`, `controller/` — pure Rust, zero I/O, zero config imports
+4. **Adapters** (driven) / infra: `simulator/`, `vtn.rs`, `controller/milp/`
+
+Concrete rules:
+- All cross-ring traffic MUST cross a named port (Rust trait). Current ports: `SimulatorPort`,
+  `SolverPort`, `VtnPort`, `AssetMilpContext`. Bypassing a port is a hard violation.
+- Domain code (`entities/`, `controller/`) MUST NOT import `PROFILE` (raw YAML config).
+  Profile values must be injected as typed parameter structs constructed in the application layer.
+- `milp_planner` and `milp_interactions` MUST accept `Vec<Box<dyn AssetMilpContext>>`;
+  direct imports of `A_BAT`, `A_EV`, `A_HTR` in those files are prohibited.
+- No `VEN/src/` file may exceed **500 lines**; `tasks/` files must stay under **200 lines**.
+- Every refactoring phase MUST ship with tests that exercise the newly exposed test surface
+  (see `docs/plans/ven_backend_architecture_refactoring.md §6`).
+- Mock adapters live in `VEN/src/services/test_support/` (compiled in all builds, not `#[cfg(test)]`),
+  making them shareable across service test modules.
+
+Verifiable invariants (must pass before any VEN PR merges to main):
+
+```
+grep -r "use crate::profile" VEN/src/entities VEN/src/controller VEN/src/routes  → empty
+grep -r "use crate::assets::" VEN/src/controller/milp                             → empty
+grep "serde_json::Value" VEN/src/vtn.rs                                           → empty or internal
+```
+
+**Rationale**: Architecture review identified six structural breaches (AB-01..AB-06) that made
+planning, dispatch, and timeline logic untestable without a live simulator or profile file.
+Without encoded rules every new feature deepens the coupling further.
+Full context: `docs/plans/ven_backend_architecture_refactoring.md`.
+
 ## Technology Constraints
 
 **VTN backend**: Rust (openleadr-rs, axum) — git submodule at `openleadr-rs/`.
@@ -188,4 +226,4 @@ Violations require an entry in the plan's Complexity Tracking table.
 Runtime development guidance is available in `CLAUDE.md` (project root) and
 `docs/reference/KEY_LEARNINGS.md`.
 
-**Version**: 1.0.0 | **Ratified**: 2026-03-13 | **Last Amended**: 2026-03-13
+**Version**: 1.1.0 | **Ratified**: 2026-03-13 | **Last Amended**: 2026-05-09

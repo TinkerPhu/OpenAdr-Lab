@@ -185,3 +185,35 @@ tests/
 | test-bff | BFF app | Dual-credential API proxy |
 | test-ui | VTN UI (nginx) | React frontend |
 | test-runner | Python test image | Runs behave + playwright |
+
+---
+
+## 5. VEN Rust — 4-Layer Test Pyramid
+
+Required by Constitution Principle VI. All four layers must stay green after every VEN refactoring
+phase. They complement the BDD suite — BDD is the safety net; these layers are the test surface that
+each refactoring phase *creates*.
+
+| Layer | Location | Framework | What it tests | Speed |
+|-------|----------|-----------|---------------|-------|
+| 1 — Domain | `#[cfg(test)]` in `entities/`, `controller/` | cargo test | Pure transformations — no I/O, no profile, no simulator | ms |
+| 2 — Use case | `#[cfg(test)]` in `services/` + `MockSimulator`/`MockSolver` | cargo test | Service orchestration, trigger conditions, error paths, state transitions | ms |
+| 3 — Adapter contract | `#[cfg(test)]` in `simulator/`, `vtn.rs`, `controller/milp/` | cargo test | Real adapter satisfies its port contract (no network — uses fixture JSON) | ms |
+| 4 — Integration | `VEN/tests/*.rs` | cargo test / axum `oneshot` | Full HTTP roundtrip with real router, driven adapters real or doubled | s |
+
+**Mock placement rule**: Shared mock adapters live in `VEN/src/services/test_support/`
+(not `#[cfg(test)]` — Rust cannot import `cfg(test)` types across module boundaries).
+
+**Test naming convention**: `test_<function>_<scenario>`, e.g. `test_build_setpoints_ev_plugged`.
+
+**Run all four layers**: `cargo test -p ven`
+
+New test surface unlocked per refactoring phase:
+
+| Phase | Functions that become testable |
+|-------|-------------------------------|
+| 1 — `tasks/` split | `detect_event_changes()` as a pure function; each tick phase in isolation |
+| 2 — `SimulatorPort` | `dispatcher::build_setpoints()`, `apply_surplus_ev_overlay()`, `absorber::apply_deviation_absorption()`, `monitor::record_tick()`, `envelope::compute_envelope()` |
+| 3 — `AssetMilpContext` + `milp/` split | `build_milp_inputs()`, `translate_solution()`, per-phase constraint builders |
+| 4 — Profile decoupled | All domain tests stop loading YAML; `BatteryParams::default()` replaces profile fixture wiring |
+| 5 — Services | Full use case suite per service (`PlanningService`, `UserRequestService`, `ObligationService`, `HvacService`) |

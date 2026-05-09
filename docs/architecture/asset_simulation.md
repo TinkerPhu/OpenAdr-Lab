@@ -13,7 +13,7 @@ This section traces exactly how a setpoint flows from the planner through to an 
 
 ### Step 1 — `dispatcher::build_setpoints()` (`controller/dispatcher.rs`)
 
-Called every sim tick from `loops::spawn_sim_tick()`. Signature:
+Called every sim tick from `tasks::spawn_sim_tick()`. Signature:
 
 ```rust
 pub fn build_setpoints(
@@ -39,7 +39,7 @@ Returns a `HashMap<asset_id, power_kw>`. Algorithm:
 `SimInjectState` fields are **not consulted here**. The dispatcher knows nothing about injects
 other than `heater_setpoint_c` which is passed explicitly.
 
-### Step 2 — Behaviour A injects (`loops::spawn_sim_tick`)
+### Step 2 — Behaviour A injects (`tasks::spawn_sim_tick`)
 
 Before calling `tick()`, the sim loop applies one-shot Behaviour A injects from `SimInjectState`:
 
