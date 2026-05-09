@@ -20,11 +20,17 @@ Note: `AssetHistoryBuffer` has moved from `simulator/mod.rs` to `assets/mod.rs` 
 
 Estimated effort: **2–3 days"
 
+## Prerequisites
+
+Phase 1 (splitting `loops.rs` into `tasks/`) should be complete before implementing Phase 2. The plan explicitly states that `sim_tick.rs` calling `absorber::apply(...)` and `controller::escalate_if_needed(...)` as named function calls is the AB-03 prerequisite. Implementing Phase 2 inside the monolithic `loops.rs` is significantly harder.
+
 ## Clarifications
 
 ### Session 2026-05-09
 
-- Q: Should SimulatorPort::snapshot return Result<SimSnapshot, SnapshotError>, SimSnapshot with Option fields, or Option<SimSnapshot>? → A: Option A (Return Result<SimSnapshot, SnapshotError>).
+- Q: Should `SimulatorPort::snapshot` return `Result<SimSnapshot, SnapshotError>`, `SimSnapshot` with Option fields, or `Option<SimSnapshot>`? → A: Return `Result<SimSnapshot, SnapshotError>`. **Note**: The architecture plan shows a plain `SimSnapshot` return — this is a deliberate upgrade to allow callers to distinguish uninitialized / transient / fatal failures without panicking.
+
+- Q: Should `SimulatorPort::inject` return `Result<(), InjectError>` or be fire-and-forget (`()`)? → A: Fire-and-forget (`()`). Rationale: injection is a best-effort override (sim override UI); the caller cannot meaningfully recover from a failed inject and the simulator will self-correct on the next tick. If the simulator is uninitialized, the inject is silently dropped.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -77,8 +83,8 @@ As a tester, be able to run a small end-to-end tick with the real `SimState` wir
   - `controller/milp_planner.rs`
   - `controller/monitor.rs`
   - `controller/envelope.rs`
-  - `routes/sim.rs`
-  - `routes/timeline.rs`
+  - `routes/sim.rs` *(temporary — will move to a service in Phase 5)*
+  - `routes/timeline.rs` *(temporary — will move to a service in Phase 5)*
 
 - **FR-004**: Move `AssetHistoryBuffer` from `simulator/mod.rs` to `assets/mod.rs`. Ensure the `SimSnapshot` returned by the port does not include history; history remains a read-only query concern handled by assets routes.
 
