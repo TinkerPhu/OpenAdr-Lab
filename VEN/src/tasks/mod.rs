@@ -6,6 +6,9 @@ pub mod poll_reports;
 pub mod obligation;
 pub mod planning;
 pub mod sim_tick;
+pub mod sim_tick_helpers;
+pub mod sim_tick_publish;
+pub mod sim_tick_tick;
 pub mod state_persist;
 
 pub(crate) use poll_events::{detect_event_changes, spawn_event_poll};
