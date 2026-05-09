@@ -82,8 +82,10 @@ pub(crate) async fn tick_once(
             .map(|s| s.net_import_kw - s.net_export_kw)
             .unwrap_or(0.0);
 
+        let pre_snap = sim_guard.to_sim_snapshot();
+
         let mut sp_map = super::helpers::build_tick_setpoints(
-            &*sim_guard,
+            &pre_snap,
             plan_snap.as_ref(),
             &capacity_snap,
             &inject,
@@ -97,7 +99,7 @@ pub(crate) async fn tick_once(
             &mut absorber_state,
             deviation_kw,
             &mut sp_map,
-            &*sim_guard,
+            &pre_snap,
             plan_snap.as_ref(),
             &profile,
             now,

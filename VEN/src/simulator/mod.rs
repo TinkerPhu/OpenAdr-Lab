@@ -11,9 +11,13 @@ use crate::assets::{
     AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, Battery, EvCharger, Grid, Heater,
     PvInverter,
 };
+use crate::controller::simulator_port::{SimulatorPort, SimInjectState, SnapshotError};
 use crate::models::SensorSnapshot;
 use crate::profile::{AssetProfile, Profile};
 use energy::EnergyCounter;
+
+// Re-export so existing `use crate::simulator::{SimSnapshot, AssetSnapshot, GridSnapshot}` keeps compiling.
+pub use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot};
 
 /// Tracks the user-induced irradiance perturbation between ticks.
 ///
@@ -303,15 +307,39 @@ impl SimState {
         }
     }
 
-    /// Build a SimSnapshot for the /sim endpoint.
+    /// Build a SimSnapshot for the /sim endpoint and for controller functions.
+    ///
+    /// Extended fields (cap_max_import_kw, cap_max_export_kw, etc.) are precomputed here
+    /// so that controller logic never needs to import `SimState` or `AssetConfig`.
     pub fn to_sim_snapshot(&self) -> SimSnapshot {
         let mut assets_map = HashMap::new();
         for (entry, cfg) in self.iter_assets() {
             let values = cfg.state_values(&entry.state);
+            let cap = cfg.capability(&entry.state);
+            let (available_discharge_kwh, available_charge_kwh) =
+                match cfg.available_storage_kwh(&entry.state) {
+                    Some((dis, ch)) => (Some(dis), Some(ch)),
+                    None => (None, None),
+                };
+            let asset_type = match cfg {
+                AssetConfig::Battery(_) => "battery",
+                AssetConfig::Ev(_) => "ev",
+                AssetConfig::Heater(_) => "heater",
+                AssetConfig::Pv(_) => "pv",
+                AssetConfig::BaseLoad(_) => "base_load",
+            }
+            .to_string();
             assets_map.insert(
                 entry.id.clone(),
                 AssetSnapshot {
                     power_kw: entry.last_power_kw,
+                    asset_type,
+                    cap_max_import_kw: cap.max_import_kw,
+                    cap_max_export_kw: cap.max_export_kw,
+                    available_discharge_kwh,
+                    available_charge_kwh,
+                    default_setpoint_kw: cfg.default_setpoint(&entry.state),
+                    setpoint_kw: entry.setpoint_kw,
                     values,
                 },
             );
@@ -376,29 +404,37 @@ fn default_history_buffer() -> AssetHistoryBuffer {
     AssetHistoryBuffer::new(3600)
 }
 
-/// Per-asset snapshot in the /sim response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AssetSnapshot {
-    /// Actual power from the last tick (kW). Positive = import, negative = export.
-    pub power_kw: f64,
-    /// Asset-specific state values flattened into the same JSON object as power_kw.
-    #[serde(flatten)]
-    pub values: HashMap<String, f64>,
+impl SimulatorPort for SimState {
+    fn snapshot(&self) -> Result<SimSnapshot, SnapshotError> {
+        Ok(self.to_sim_snapshot())
+    }
+
+    fn inject(&self, _state: SimInjectState) {
+        // Injection is applied via the tick loop's inject_state mechanism (state::SimInjectState).
+        // This impl satisfies the trait for test wiring; in production the tick loop reads
+        // state::SimInjectState and applies it via sim.tick() arguments.
+    }
 }
 
-/// Grid meter snapshot in the /sim response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GridSnapshot {
-    pub net_power_w: f64,
-    pub voltage_v: f64,
-    pub import_kwh: f64,
-    pub export_kwh: f64,
-}
+#[cfg(test)]
+mod port_tests {
+    use super::*;
 
-/// API response for GET /sim
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimSnapshot {
-    pub ts: DateTime<Utc>,
-    pub grid: GridSnapshot,
-    pub assets: HashMap<String, AssetSnapshot>,
+    fn _assert_send_sync<T: Send + Sync>() {}
+
+    #[test]
+    fn sim_state_is_send_sync() {
+        _assert_send_sync::<SimState>();
+    }
+
+    #[test]
+    fn snapshot_returns_ok_for_empty_state() {
+        let profile = Profile::default();
+        let sim = SimState::from_profile(&profile);
+        let result = SimulatorPort::snapshot(&sim);
+        assert!(result.is_ok(), "snapshot() must succeed for a valid SimState");
+        let snap = result.unwrap();
+        // Grid defaults are zero
+        assert_eq!(snap.grid.net_power_w, 0.0);
+    }
 }

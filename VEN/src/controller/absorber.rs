@@ -56,12 +56,11 @@
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
-use crate::assets::{AssetConfig, AssetState};
+use crate::controller::SimSnapshot;
 use crate::entities::device_session::EvSession;
 use crate::entities::plan::Plan;
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::profile::{PlannerObjective, Profile};
-use crate::simulator::SimState;
 use tracing::{error, warn};
 
 /// Runtime state for the multi-asset absorber.
@@ -116,7 +115,7 @@ pub fn apply_deviation_absorption(
     state: &mut AbsorberState,
     deviation_kw: f64,
     setpoints: &mut HashMap<String, f64>,
-    sim: &SimState,
+    sim: &SimSnapshot,
     plan_snap: Option<&Plan>,
     profile: &Profile,
     now: DateTime<Utc>,
@@ -209,23 +208,22 @@ pub fn apply_deviation_absorption(
         if let Some(guard_s) = asset_cfg.ev_departure_guard_s {
             if remaining_kw > 0.0 {
                 // Positive deviation would reduce EV charge — check guard
-                if let Some((entry, cfg)) = sim.find_asset(&asset_cfg.id) {
-                    if let (AssetConfig::Ev(ev_cfg), AssetState::Ev(ev_state)) = (cfg, &entry.state)
-                    {
-                        if ev_state.soc < ev_cfg.soc_target {
-                            // SoC below target: guard only applies when we'd curtail needed charging
-                            match ev_session {
-                                Some(session) => {
-                                    let secs_remaining =
-                                        (session.departure_time - now).num_seconds();
-                                    // Guard triggers when departure is within guard window
-                                    if secs_remaining >= 0 && (secs_remaining as u64) < guard_s {
-                                        continue; // Skip EV: departure imminent
-                                    }
+                if let Some(snap) = sim.assets.get(&asset_cfg.id) {
+                    let soc = snap.val("soc").unwrap_or(0.0);
+                    let soc_target = snap.val("soc_target").unwrap_or(1.0);
+                    if soc < soc_target {
+                        // SoC below target: guard only applies when we'd curtail needed charging
+                        match ev_session {
+                            Some(session) => {
+                                let secs_remaining =
+                                    (session.departure_time - now).num_seconds();
+                                // Guard triggers when departure is within guard window
+                                if secs_remaining >= 0 && (secs_remaining as u64) < guard_s {
+                                    continue; // Skip EV: departure imminent
                                 }
-                                // No active session → unknown departure → no guard (T048)
-                                None => {}
                             }
+                            // No active session → unknown departure → no guard (T048)
+                            None => {}
                         }
                     }
                 }
@@ -325,46 +323,55 @@ pub fn apply_deviation_absorption(
 fn compute_asset_headroom(
     asset_id: &str,
     deviation_kw: f64,
-    sim: &SimState,
+    sim: &SimSnapshot,
     _plan_snap: Option<&Plan>,
     current_setpoint_kw: f64,
 ) -> f64 {
-    let (entry, cfg) = match sim.find_asset(asset_id) {
-        Some(pair) => pair,
+    let snap = match sim.assets.get(asset_id) {
+        Some(s) => s,
         None => {
             warn!("absorber: asset {} not found in sim state", asset_id);
             return 0.0;
         }
     };
 
-    match (cfg, &entry.state) {
-        (AssetConfig::Battery(bat_cfg), AssetState::Battery(bat_state)) => {
+    match snap.asset_type.as_str() {
+        "battery" => {
             if deviation_kw > 0.0 {
-                // Discharge headroom: limited by (SoC - min_soc) and max_discharge_kw
-                let soc_headroom_kw = (bat_state.soc - bat_cfg.min_soc) * bat_cfg.capacity_kwh;
-                soc_headroom_kw.max(0.0).min(bat_cfg.max_discharge_kw)
+                let soc = snap.val("soc").unwrap_or(0.0);
+                let min_soc = snap.val("min_soc").unwrap_or(0.0);
+                let capacity_kwh = snap.val("capacity_kwh").unwrap_or(0.0);
+                let max_discharge_kw = snap.val("max_discharge_kw").unwrap_or(0.0);
+                let headroom = (soc - min_soc) * capacity_kwh;
+                headroom.max(0.0).min(max_discharge_kw)
             } else {
-                // Charge headroom: limited by (1.0 - SoC) and max_charge_kw
-                let soc_headroom_kw = (1.0 - bat_state.soc) * bat_cfg.capacity_kwh;
-                soc_headroom_kw.max(0.0).min(bat_cfg.max_charge_kw)
+                let soc = snap.val("soc").unwrap_or(0.0);
+                let capacity_kwh = snap.val("capacity_kwh").unwrap_or(0.0);
+                let max_charge_kw = snap.val("max_charge_kw").unwrap_or(0.0);
+                let headroom = (1.0 - soc) * capacity_kwh;
+                headroom.max(0.0).min(max_charge_kw)
             }
         }
-        (AssetConfig::Ev(ev_cfg), AssetState::Ev(ev_state)) => {
+        "ev" => {
             if deviation_kw > 0.0 {
                 // Curtail EV charging (load reduction, not V2G discharge).
                 // Headroom = current charge setpoint (how much rate we can reduce, down to 0).
                 current_setpoint_kw.max(0.0)
             } else {
                 // Increase EV charging to absorb surplus.
-                // Headroom limited by remaining SoC capacity and max charge rate.
-                let soc_headroom_kw = (ev_cfg.soc_target - ev_state.soc) * ev_cfg.battery_kwh;
-                soc_headroom_kw.max(0.0).min(ev_cfg.max_charge_kw)
+                let soc = snap.val("soc").unwrap_or(0.0);
+                let soc_target = snap.val("soc_target").unwrap_or(1.0);
+                let battery_kwh = snap.val("battery_kwh").unwrap_or(0.0);
+                let max_charge_kw = snap.val("max_charge_kw").unwrap_or(0.0);
+                let headroom = (soc_target - soc) * battery_kwh;
+                headroom.max(0.0).min(max_charge_kw)
             }
         }
-        (AssetConfig::Heater(heater_cfg), AssetState::Heater(_heater_state)) => {
+        "heater" => {
             // Heater has discrete power levels (0, mid, full)
-            let current_power = entry.setpoint_kw;
-            let mid_kw = heater_cfg.mid_kw;
+            let current_power = snap.setpoint_kw;
+            let mid_kw = snap.val("mid_kw").unwrap_or(0.0);
+            let max_kw = snap.val("max_kw").unwrap_or(0.0);
 
             if deviation_kw > 0.0 {
                 // Need to reduce power: go from current level toward 0
@@ -379,8 +386,8 @@ fn compute_asset_headroom(
                 // Need to increase power: go from current level toward full
                 if current_power < mid_kw {
                     mid_kw - current_power
-                } else if current_power < heater_cfg.max_kw {
-                    heater_cfg.max_kw - current_power
+                } else if current_power < max_kw {
+                    max_kw - current_power
                 } else {
                     0.0
                 }
@@ -414,13 +421,13 @@ pub(crate) fn linger_ok(
 /// 1. Asset ID Matching: all `AbsorberAssetConfig.id` must exist in `SimState.assets`
 /// 2. Priority Uniqueness: logs WARN if duplicates detected
 /// 3. Linger Bounds: logs WARN if min_state_linger_s > 300s
-pub fn validate_startup(profile: &Profile, sim: &SimState) -> anyhow::Result<()> {
+pub fn validate_startup(profile: &Profile, sim: &SimSnapshot) -> anyhow::Result<()> {
     if !profile.absorber.enabled {
         return Ok(());
     }
 
     let sim_asset_ids: std::collections::HashSet<&str> =
-        sim.assets.iter().map(|a| a.id.as_str()).collect();
+        sim.assets.keys().map(|s| s.as_str()).collect();
 
     for asset_cfg in &profile.absorber.assets {
         if !sim_asset_ids.contains(asset_cfg.id.as_str()) {
@@ -461,6 +468,8 @@ pub fn validate_startup(profile: &Profile, sim: &SimState) -> anyhow::Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assets::{AssetConfig, AssetState};
+    use crate::simulator::SimState;
 
     // ── Test helpers ──────────────────────────────────────────────────────────
 
@@ -575,37 +584,41 @@ mod tests {
         }
     }
 
+    fn make_test_snap() -> SimSnapshot {
+        make_test_sim().to_sim_snapshot()
+    }
+
     /// Battery at min_soc (no discharge headroom), EV charging at 7.4 kW.
-    fn make_test_sim_battery_floor_ev_charging() -> (SimState, HashMap<String, f64>) {
+    fn make_test_sim_battery_floor_ev_charging() -> (SimSnapshot, HashMap<String, f64>) {
         let mut sim = make_test_sim();
         if let AssetState::Battery(ref mut s) = sim.assets[0].state {
             s.soc = 0.10; // At min_soc → 0 discharge headroom
         }
         sim.assets[1].setpoint_kw = 7.4; // EV charging at max rate
         let setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 7.4)]);
-        (sim, setpoints)
+        (sim.to_sim_snapshot(), setpoints)
     }
 
     /// Battery at min_soc, EV idle (setpoint 0) — both have 0 positive-deviation headroom.
-    fn make_test_sim_all_exhausted_positive() -> (SimState, HashMap<String, f64>) {
+    fn make_test_sim_all_exhausted_positive() -> (SimSnapshot, HashMap<String, f64>) {
         let mut sim = make_test_sim();
         if let AssetState::Battery(ref mut s) = sim.assets[0].state {
             s.soc = 0.10;
         }
         sim.assets[1].setpoint_kw = 0.0; // EV idle → 0 curtailment headroom
         let setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
-        (sim, setpoints)
+        (sim.to_sim_snapshot(), setpoints)
     }
 
     /// Battery fully charged (no charge headroom), EV idle — for negative deviation tests.
-    fn make_test_sim_battery_full_ev_idle() -> (SimState, HashMap<String, f64>) {
+    fn make_test_sim_battery_full_ev_idle() -> (SimSnapshot, HashMap<String, f64>) {
         let mut sim = make_test_sim();
         if let AssetState::Battery(ref mut s) = sim.assets[0].state {
             s.soc = 1.0; // Full → 0 charge headroom for negative deviation
         }
         sim.assets[1].setpoint_kw = 0.0;
         let setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
-        (sim, setpoints)
+        (sim.to_sim_snapshot(), setpoints)
     }
 
     fn make_test_event_tx() -> PlannerEventTx {
@@ -641,7 +654,7 @@ mod tests {
     fn absorber_battery_absorbs_positive_deviation_within_capacity() {
         let mut state = make_fresh_state();
         let profile = make_test_profile();
-        let sim = make_test_sim();
+        let sim = make_test_snap();
         let event_tx = make_test_event_tx();
         let mut setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
         let now = Utc::now();
@@ -675,7 +688,7 @@ mod tests {
     fn absorber_battery_absorbs_negative_deviation_within_capacity() {
         let mut state = make_fresh_state();
         let profile = make_test_profile();
-        let sim = make_test_sim();
+        let sim = make_test_snap();
         let event_tx = make_test_event_tx();
         let mut setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
         let now = Utc::now();
@@ -742,7 +755,7 @@ mod tests {
     fn absorber_dead_band_prevents_chatter() {
         let mut state = make_fresh_state();
         let profile = make_test_profile();
-        let sim = make_test_sim();
+        let sim = make_test_snap();
         let event_tx = make_test_event_tx();
         let mut setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
         let now = Utc::now();
@@ -774,7 +787,7 @@ mod tests {
     fn absorber_settling_ramps_to_zero() {
         let mut state = make_fresh_state();
         let profile = make_test_profile();
-        let sim = make_test_sim();
+        let sim = make_test_snap();
         let event_tx = make_test_event_tx();
         let mut setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
         let now = Utc::now();
@@ -900,7 +913,7 @@ mod tests {
             .insert("battery".to_string(), recent_change);
 
         let profile = make_test_profile_battery_linger(); // battery has 30 s linger
-        let sim = make_test_sim(); // battery at SoC 0.50 — has headroom
+        let sim = make_test_snap(); // battery at SoC 0.50 — has headroom
         let event_tx = make_test_event_tx();
         let mut setpoints = HashMap::from([("battery".to_string(), 0.0)]);
 
@@ -1082,7 +1095,7 @@ mod tests {
         let mut state = make_fresh_state();
         let mut profile = make_test_profile();
         profile.absorber.enabled = false;
-        let sim = make_test_sim();
+        let sim = make_test_snap();
         let event_tx = make_test_event_tx();
         let mut setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
         let now = Utc::now();
@@ -1122,7 +1135,7 @@ mod tests {
     #[test]
     fn absorber_wait_gate_holds_for_multiple_ticks() {
         let profile = make_test_profile_clearing_ticks(3);
-        let sim = make_test_sim();
+        let sim = make_test_snap();
         let event_tx = make_test_event_tx();
         let mut state = make_fresh_state();
         let mut setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
@@ -1196,7 +1209,7 @@ mod tests {
     #[test]
     fn absorber_wait_gate_resets_on_chatter() {
         let profile = make_test_profile_clearing_ticks(3);
-        let sim = make_test_sim();
+        let sim = make_test_snap();
         let event_tx = make_test_event_tx();
         let mut state = make_fresh_state();
         let mut setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
