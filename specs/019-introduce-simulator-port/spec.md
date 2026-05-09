@@ -9,7 +9,7 @@ Define a trait in `controller/`:
 
 ```rust
 pub trait SimulatorPort: Send + Sync {
-    fn snapshot(&self) -> SimSnapshot;
+    fn snapshot(&self) -> Result<SimSnapshot, SnapshotError>;
     fn inject(&self, state: SimInjectState);
 }
 ```
@@ -19,6 +19,12 @@ pub trait SimulatorPort: Send + Sync {
 Note: `AssetHistoryBuffer` has moved from `simulator/mod.rs` to `assets/mod.rs` — the `SimSnapshot` returned through this port does not carry history; history is a read-only query concern handled separately by the route layer via `assets/mod.rs`. The port trait stays clean.
 
 Estimated effort: **2–3 days"
+
+## Clarifications
+
+### Session 2026-05-09
+
+- Q: Should SimulatorPort::snapshot return Result<SimSnapshot, SnapshotError>, SimSnapshot with Option fields, or Option<SimSnapshot>? → A: Option A (Return Result<SimSnapshot, SnapshotError>).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -60,7 +66,7 @@ As a tester, be able to run a small end-to-end tick with the real `SimState` wir
 ### Functional Requirements
 
 - **FR-001**: Define a `SimulatorPort` trait in `controller/` with methods:
-  - `snapshot() -> SimSnapshot`
+  - `snapshot() -> Result<SimSnapshot, SnapshotError>`
   - `inject(state: SimInjectState)`
 
 - **FR-002**: Ensure `SimState` in `simulator/mod.rs` implements `SimulatorPort`.
