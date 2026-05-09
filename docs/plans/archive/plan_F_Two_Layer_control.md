@@ -354,7 +354,7 @@
  let (planner_event_tx_inner, _) = tokio::sync::broadcast::channel::<PlannerEvent>(128);
  let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
- loops::spawn_sim_tick(
+ tasks::spawn_sim_tick(
      state.clone(),
      sim_state.clone(),
      profile.clone(),

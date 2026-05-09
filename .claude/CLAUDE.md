@@ -19,3 +19,29 @@ test failures: NEVER dismiss test failures as "pre-existing" or "unrelated" with
 docs/specs/pdf/: do not read, search, or reference any files under this directory. Use the markdown versions in docs/specs/ instead.
 
 naming: variables and function names for physical quantities must include the unit as suffix (e.g. `power_kw`, `energy_kwh`, `temperature_c`, `tariff_eur_per_kwh`, `soc_pct`). When adding new code, check nearby code or nearby source files for existing suffixes to stay consistent.
+
+ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency rule: inner rings NEVER import outer rings.
+
+  Ring map (outer → inner):
+    Adapters   : routes/, tasks/
+    Application: services/
+    Domain     : entities/, controller/
+    Infra      : simulator/, vtn.rs, controller/milp/
+
+  Port obligations — use traits, never bypass with concrete types:
+    SimulatorPort    : domain/services → simulator (snapshot, inject)
+    SolverPort       : services → controller/milp (solve)
+    VtnPort          : services → vtn.rs (fetch programs/events/obligations)
+    AssetMilpContext : milp_planner accepts Vec<Box<dyn AssetMilpContext>> — NEVER import A_BAT/A_EV/A_HTR directly
+
+  Profile rule: no `use crate::profile` in entities/, controller/, or routes/. Profile values are
+  injected as typed parameter structs (e.g. BatteryParams) constructed in the application/infra layer.
+
+  File size: no VEN/src/ file > 500 lines. tasks/ files must stay < 200 lines.
+
+  Verifiable invariants — run before any VEN PR:
+    grep -r "use crate::profile" VEN/src/entities VEN/src/controller VEN/src/routes  → must be empty
+    grep -r "use crate::assets::" VEN/src/controller/milp                             → must be empty
+    grep "serde_json::Value" VEN/src/vtn.rs                                           → must be empty or internal only
+
+  Reference: docs/plans/ven_backend_architecture_refactoring.md
