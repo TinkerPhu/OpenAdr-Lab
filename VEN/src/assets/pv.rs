@@ -78,6 +78,8 @@ impl PvInverter {
         let mut m = HashMap::new();
         m.insert("irradiance".into(), self.irradiance);
         m.insert("rated_kw".into(), self.rated_kw);
+        m.insert("irradiance_offset".into(), self.irradiance_offset);
+        m.insert("pv_alpha".into(), self.pv_alpha);
         if let Some(lim) = self.export_limit_kw {
             m.insert("export_limit_kw".into(), lim);
         }

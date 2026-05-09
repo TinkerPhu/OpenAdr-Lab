@@ -14,12 +14,13 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::assets::battery::{Battery, BatteryMilpContext};
-use crate::assets::ev::{EvCharger, EvMilpContext, EvMilpMode};
-use crate::assets::heater::{Heater, HeaterMilpContext, HeaterMilpMode};
-use crate::assets::{AssetConfig, AssetState, PvInverter};
+use crate::assets::ev::{EvCharger, EvMilpContext, EvMilpMode, EvState};
+use crate::assets::heater::{Heater, HeaterMilpContext, HeaterMilpMode, HeaterState};
+use crate::assets::{AssetState, PvInverter};
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
+use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
@@ -29,7 +30,6 @@ use crate::entities::plan::{
 };
 use crate::entities::tariff_snapshot::TariffTimeSeries;
 use crate::profile::{PlannerObjective, Profile};
-use crate::simulator::SimState;
 
 // ── Internal MILP types ──────────────────────────────────────────────────────
 
@@ -303,7 +303,7 @@ fn deadline_to_step(deadline: DateTime<Utc>, now: DateTime<Utc>, step_s: u64, n:
 /// live battery SoC, EV horizon mask, and LoadMode translation — happen here.
 /// The resulting `MilpInputs` is ready to pass directly to `solve_milp_two_phase()`.
 fn build_milp_inputs(
-    assets: &SimState,
+    assets: &SimSnapshot,
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
     profile: &Profile,
@@ -351,19 +351,18 @@ fn build_milp_inputs(
         );
         // CO₂ stored as g/kWh → MILP uses kgCO₂/kWh
         g_co2.push(tariffs.co2_g_kwh.interpolate_at(slot_t).unwrap_or(300.0) / 1000.0);
-        // Use live PvInverter when available so that irradiance_offset (irradiance
+        // Use live PvInverter snapshot when available so that irradiance_offset (irradiance
         // slider) and pv_alpha (blend-back speed slider) both project into the
         // forecast. Falls back to the static sin model if no "pv" asset exists.
-        let pv_kw = if let Some((_, cfg)) = assets.find_asset(crate::ids::ASSET_PV) {
-            if let AssetConfig::Pv(pv) = cfg {
-                let natural = PvInverter::natural_irradiance_at(slot_t);
-                // pv_alpha is "fraction removed per plan step (300 s)".
-                // Exponent is the number of plan steps ahead, not raw seconds.
-                let decayed_offset = pv.irradiance_offset * (1.0 - pv.pv_alpha).powf(t as f64);
-                (natural + decayed_offset).clamp(0.0, 1.0) * pv.rated_kw
-            } else {
-                pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)
-            }
+        let pv_kw = if let Some(pv_snap) = assets.assets.get("pv") {
+            let natural = PvInverter::natural_irradiance_at(slot_t);
+            let irradiance_offset = pv_snap.val("irradiance_offset").unwrap_or(0.0);
+            let pv_alpha = pv_snap.val("pv_alpha").unwrap_or(0.1);
+            let rated_kw = pv_snap.val("rated_kw").unwrap_or(0.0);
+            // pv_alpha is "fraction removed per plan step (300 s)".
+            // Exponent is the number of plan steps ahead, not raw seconds.
+            let decayed_offset = irradiance_offset * (1.0 - pv_alpha).powf(t as f64);
+            (natural + decayed_offset).clamp(0.0, 1.0) * rated_kw
         } else {
             pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)
         };
@@ -378,24 +377,22 @@ fn build_milp_inputs(
     // ── Battery ───────────────────────────────────────────────────────────────
     let (e_bat_nom, e_bat_init, e_bat_min, e_bat_max, p_bat_ch_max, p_bat_dis_max, eff_ch, eff_dis) =
         if let Some(bat_cfg) = profile.battery_config() {
-            let ctx = match assets.find_asset(crate::ids::ASSET_BATTERY) {
-                Some((entry, AssetConfig::Battery(b))) => {
-                    BatteryMilpContext::from_state(&entry.state, b)
-                }
-                _ => {
-                    // No live battery in sim (e.g. cleared in test): fall back to profile initial_soc
-                    let cap = bat_cfg.capacity_kwh;
-                    let eff = bat_cfg.round_trip_efficiency.sqrt();
-                    BatteryMilpContext {
-                        e_nom_kwh: cap,
-                        e_init_kwh: bat_cfg.initial_soc * cap,
-                        e_min_kwh: bat_cfg.min_soc * cap,
-                        e_max_kwh: cap,
-                        p_ch_max_kw: bat_cfg.max_charge_kw,
-                        p_dis_max_kw: bat_cfg.max_discharge_kw,
-                        eff_ch: eff,
-                        eff_dis: eff,
-                    }
+            let ctx = if let Some(bat_snap) = assets.assets.get("battery") {
+                let soc = bat_snap.val("soc").unwrap_or(bat_cfg.initial_soc);
+                Battery::from_config(bat_cfg).build_milp_context(soc)
+            } else {
+                // No live battery in sim (e.g. cleared in test): fall back to profile initial_soc
+                let cap = bat_cfg.capacity_kwh;
+                let eff = bat_cfg.round_trip_efficiency.sqrt();
+                BatteryMilpContext {
+                    e_nom_kwh: cap,
+                    e_init_kwh: bat_cfg.initial_soc * cap,
+                    e_min_kwh: bat_cfg.min_soc * cap,
+                    e_max_kwh: cap,
+                    p_ch_max_kw: bat_cfg.max_charge_kw,
+                    p_dis_max_kw: bat_cfg.max_discharge_kw,
+                    eff_ch: eff,
+                    eff_dis: eff,
                 }
             };
             (
@@ -424,28 +421,30 @@ fn build_milp_inputs(
         v_ev_extra,
         soc_ev_init,
     ) = if let Some(ev_cfg) = profile.ev_config() {
-        let (ctx, soc_init) = match assets.find_asset(crate::ids::ASSET_EV) {
-            Some((entry, AssetConfig::Ev(e))) => {
-                let soc = if let AssetState::Ev(s) = &entry.state {
-                    Some(s.soc)
-                } else {
-                    None
-                };
-                (
-                    EvMilpContext::from_state(
-                        &entry.state,
-                        e,
-                        n,
-                        step_s,
-                        now,
-                        ev_session,
-                        ev_cfg.min_charge_kw,
-                        profile.planner.v_ev_extra_eur_kwh,
-                    ),
-                    soc,
-                )
-            }
-            _ => (
+        let (ctx, soc_init) = if let Some(ev_snap) = assets.assets.get("ev") {
+            let plugged = ev_snap.val("plugged").map(|v| v > 0.5).unwrap_or(false);
+            let soc = ev_snap.val("soc").unwrap_or(ev_cfg.initial_soc);
+            let fake_state = AssetState::Ev(EvState {
+                soc,
+                plugged,
+                actual_power_kw: ev_snap.power_kw,
+            });
+            let ev_struct = EvCharger::from_config(ev_cfg);
+            (
+                EvMilpContext::from_state(
+                    &fake_state,
+                    &ev_struct,
+                    n,
+                    step_s,
+                    now,
+                    ev_session,
+                    ev_cfg.min_charge_kw,
+                    profile.planner.v_ev_extra_eur_kwh,
+                ),
+                Some(soc),
+            )
+        } else {
+            (
                 EvMilpContext {
                     mode: EvMilpMode::MustNotRun,
                     a_ev: vec![false; n],
@@ -457,7 +456,7 @@ fn build_milp_inputs(
                     v_extra_eur_kwh: profile.planner.v_ev_extra_eur_kwh,
                 },
                 None,
-            ),
+            )
         };
         let ev_mode = match ctx.mode {
             EvMilpMode::MustRun => MilpLoadMode::MustRun,
@@ -505,18 +504,25 @@ fn build_milp_inputs(
         heat_iz_full,
     ) = if let Some(heat_cfg) = profile.heater_config() {
         let lambda = heat_cfg.effective_switching_penalty();
-        let ctx = match assets.find_asset(crate::ids::ASSET_HEATER) {
-            Some((entry, AssetConfig::Heater(h))) => HeaterMilpContext::from_state(
-                &entry.state,
-                h,
+        let heat_struct = Heater::from_config(heat_cfg);
+        let ctx = if let Some(h_snap) = assets.assets.get("heater") {
+            let temp_c = h_snap.val("temp_c")
+                .unwrap_or((heat_cfg.temp_min_c + heat_cfg.temp_max_c) / 2.0);
+            let fake_state = AssetState::Heater(HeaterState {
+                temperature_c: temp_c,
+                actual_power_kw: h_snap.power_kw,
+            });
+            HeaterMilpContext::from_state(
+                &fake_state,
+                &heat_struct,
                 n,
                 step_s,
                 now,
                 heater_target,
                 lambda,
-            ),
-            _ => {
-                // No live heater in sim: reconstruct from profile config
+            )
+        } else {
+            // No live heater in sim: reconstruct from profile config
                 let thermal_mass = heat_cfg.effective_thermal_mass();
                 let ambient = 10.0;
                 let live_t_min = heat_cfg.temp_min_c;
@@ -564,7 +570,6 @@ fn build_milp_inputs(
                         initial_z_full: 0.0,
                     }
                 }
-            }
         };
         let heater_mode = match ctx.mode {
             HeaterMilpMode::MustRun => MilpLoadMode::MustRun,
@@ -2017,7 +2022,7 @@ fn translate_to_plan(
 /// and translate the solution into a Plan.
 /// `objective_override` — when `Some`, overrides the profile's default objective.
 pub fn run_planner(
-    assets: &SimState,
+    assets: &SimSnapshot,
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
     profile: &Profile,
@@ -2081,14 +2086,13 @@ pub fn run_planner(
 mod tests {
     use super::*;
 
-    use crate::assets::AssetState;
+    use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot};
     use crate::entities::device_session::HeaterTarget;
     use crate::entities::tariff_snapshot::TariffSnapshot;
     use crate::profile::{
         AssetProfile, BaseLoadConfig, BatteryConfig, EvConfig, GridConfig, HeaterConfig,
         PlannerConfig, PlannerObjective, PvConfig, SimulatorConfig,
     };
-    use crate::simulator::SimState;
 
     // ── Test helpers ─────────────────────────────────────────────────────────
 
@@ -2182,30 +2186,200 @@ mod tests {
         }
     }
 
-    /// Set plugged state on the EV in an existing SimState.
-    fn set_ev_plugged(sim: &mut SimState, plugged: bool) {
-        for entry in &mut sim.assets {
-            if let AssetState::Ev(ref mut ev) = entry.state {
-                ev.plugged = plugged;
+    /// Build a SimSnapshot from profile initial state (mirrors SimState::from_profile).
+    fn make_snap_from_profile(profile: &Profile) -> SimSnapshot {
+        use std::collections::HashMap as HM;
+
+        let mut assets: HM<String, AssetSnapshot> = HM::new();
+
+        for asset in &profile.assets {
+            match asset {
+                AssetProfile::Battery(cfg) => {
+                    let soc = cfg.initial_soc;
+                    let cap = cfg.capacity_kwh;
+                    let min_soc = cfg.min_soc;
+                    let max_ch = cfg.max_charge_kw;
+                    let max_dis = cfg.max_discharge_kw;
+                    let eff = cfg.round_trip_efficiency;
+                    let cap_max_export_kw = if soc <= min_soc { 0.0 } else { -max_dis };
+                    let cap_max_import_kw = if soc >= 1.0 { 0.0 } else { max_ch };
+                    let mut values = HM::new();
+                    values.insert("soc".into(), soc);
+                    values.insert("capacity_kwh".into(), cap);
+                    values.insert("max_charge_kw".into(), max_ch);
+                    values.insert("max_discharge_kw".into(), max_dis);
+                    values.insert("min_soc".into(), min_soc);
+                    values.insert("round_trip_efficiency".into(), eff);
+                    assets.insert(
+                        "battery".to_string(),
+                        AssetSnapshot {
+                            power_kw: 0.0,
+                            asset_type: "battery".to_string(),
+                            cap_max_import_kw,
+                            cap_max_export_kw,
+                            available_discharge_kwh: Some((soc - min_soc).max(0.0) * cap),
+                            available_charge_kwh: Some((1.0 - soc).max(0.0) * cap),
+                            default_setpoint_kw: 0.0,
+                            setpoint_kw: 0.0,
+                            values,
+                        },
+                    );
+                }
+                AssetProfile::Ev(cfg) => {
+                    let soc = cfg.initial_soc;
+                    let bat_kwh = cfg.battery_kwh;
+                    let max_ch = cfg.max_charge_kw;
+                    let soc_target = cfg.soc_target;
+                    // initial_state starts plugged=true
+                    let plugged = true;
+                    let cap_max_import_kw = if soc >= soc_target { 0.0 } else { max_ch };
+                    let mut values = HM::new();
+                    values.insert("soc".into(), soc);
+                    values.insert("plugged".into(), 1.0); // plugged
+                    values.insert("max_charge_kw".into(), max_ch);
+                    values.insert("soc_target".into(), soc_target);
+                    values.insert("battery_kwh".into(), bat_kwh);
+                    assets.insert(
+                        "ev".to_string(),
+                        AssetSnapshot {
+                            power_kw: 0.0,
+                            asset_type: "ev".to_string(),
+                            cap_max_import_kw,
+                            cap_max_export_kw: 0.0,
+                            available_discharge_kwh: Some(soc * bat_kwh),
+                            available_charge_kwh: Some((1.0 - soc) * bat_kwh),
+                            default_setpoint_kw: cfg.default_charge_kw,
+                            setpoint_kw: 0.0,
+                            values,
+                        },
+                    );
+                    let _ = plugged; // suppress warning; used above
+                }
+                AssetProfile::Heater(cfg) => {
+                    let temp_c = cfg.temp_initial_c;
+                    let max_kw = cfg.max_kw;
+                    let mid_kw = cfg.mid_kw.unwrap_or(max_kw / 2.0);
+                    let mut values = HM::new();
+                    values.insert("temp_c".into(), temp_c);
+                    values.insert("max_kw".into(), max_kw);
+                    values.insert("mid_kw".into(), mid_kw);
+                    values.insert("temp_min_c".into(), cfg.temp_min_c);
+                    values.insert("temp_max_c".into(), cfg.temp_max_c);
+                    let cap_max_import_kw = if temp_c >= cfg.temp_max_c {
+                        0.0
+                    } else {
+                        max_kw
+                    };
+                    assets.insert(
+                        "heater".to_string(),
+                        AssetSnapshot {
+                            power_kw: 0.0,
+                            asset_type: "heater".to_string(),
+                            cap_max_import_kw,
+                            cap_max_export_kw: 0.0,
+                            available_discharge_kwh: None,
+                            available_charge_kwh: None,
+                            default_setpoint_kw: 0.0,
+                            setpoint_kw: 0.0,
+                            values,
+                        },
+                    );
+                }
+                AssetProfile::Pv(cfg) => {
+                    let mut values = HM::new();
+                    values.insert("irradiance".into(), 0.0);
+                    values.insert("rated_kw".into(), cfg.rated_kw);
+                    values.insert("irradiance_offset".into(), 0.0);
+                    values.insert("pv_alpha".into(), 0.1);
+                    assets.insert(
+                        "pv".to_string(),
+                        AssetSnapshot {
+                            power_kw: 0.0,
+                            asset_type: "pv".to_string(),
+                            cap_max_import_kw: 0.0,
+                            cap_max_export_kw: 0.0,
+                            available_discharge_kwh: None,
+                            available_charge_kwh: None,
+                            default_setpoint_kw: 0.0,
+                            setpoint_kw: 0.0,
+                            values,
+                        },
+                    );
+                }
+                AssetProfile::BaseLoad(cfg) => {
+                    let mut values = HM::new();
+                    values.insert("baseline_kw".into(), cfg.baseline_kw);
+                    assets.insert(
+                        "base_load".to_string(),
+                        AssetSnapshot {
+                            power_kw: 0.0,
+                            asset_type: "base_load".to_string(),
+                            cap_max_import_kw: cfg.baseline_kw,
+                            cap_max_export_kw: cfg.baseline_kw,
+                            available_discharge_kwh: None,
+                            available_charge_kwh: None,
+                            default_setpoint_kw: cfg.baseline_kw,
+                            setpoint_kw: 0.0,
+                            values,
+                        },
+                    );
+                }
+            }
+        }
+
+        SimSnapshot {
+            ts: chrono::Utc::now(),
+            grid: GridSnapshot {
+                net_power_w: 0.0,
+                voltage_v: 230.0,
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+            },
+            assets,
+        }
+    }
+
+    /// Set plugged state on the EV in an existing SimSnapshot.
+    fn set_ev_plugged(snap: &mut SimSnapshot, plugged: bool) {
+        if let Some(ev) = snap.assets.get_mut("ev") {
+            let soc = ev.val("soc").unwrap_or(0.0);
+            let max_ch = ev.val("max_charge_kw").unwrap_or(0.0);
+            let soc_target = ev.val("soc_target").unwrap_or(1.0);
+            let bat_kwh = ev.val("battery_kwh").unwrap_or(0.0);
+            ev.values.insert("plugged".into(), if plugged { 1.0 } else { 0.0 });
+            if plugged {
+                ev.cap_max_import_kw = if soc >= soc_target { 0.0 } else { max_ch };
+                ev.cap_max_export_kw = 0.0;
+                ev.available_discharge_kwh = Some(soc * bat_kwh);
+                ev.available_charge_kwh = Some((1.0 - soc) * bat_kwh);
+            } else {
+                ev.cap_max_import_kw = 0.0;
+                ev.cap_max_export_kw = 0.0;
+                ev.available_discharge_kwh = None;
+                ev.available_charge_kwh = None;
             }
         }
     }
 
-    /// Set battery SoC on the battery in an existing SimState.
-    fn set_battery_soc(sim: &mut SimState, soc: f64) {
-        for entry in &mut sim.assets {
-            if let AssetState::Battery(ref mut bat) = entry.state {
-                bat.soc = soc;
-            }
+    /// Set battery SoC on the battery in an existing SimSnapshot.
+    fn set_battery_soc(snap: &mut SimSnapshot, soc: f64) {
+        if let Some(bat) = snap.assets.get_mut("battery") {
+            let cap = bat.val("capacity_kwh").unwrap_or(0.0);
+            let max_ch = bat.val("max_charge_kw").unwrap_or(0.0);
+            let max_dis = bat.val("max_discharge_kw").unwrap_or(0.0);
+            let min_soc = bat.val("min_soc").unwrap_or(0.0);
+            bat.values.insert("soc".into(), soc);
+            bat.cap_max_import_kw = if soc >= 1.0 { 0.0 } else { max_ch };
+            bat.cap_max_export_kw = if soc <= min_soc { 0.0 } else { -max_dis };
+            bat.available_discharge_kwh = Some((soc - min_soc).max(0.0) * cap);
+            bat.available_charge_kwh = Some((1.0 - soc).max(0.0) * cap);
         }
     }
 
-    /// Set heater temperature on the heater in an existing SimState.
-    fn set_heater_temp(sim: &mut SimState, temp_c: f64) {
-        for entry in &mut sim.assets {
-            if let AssetState::Heater(ref mut h) = entry.state {
-                h.temperature_c = temp_c;
-            }
+    /// Set heater temperature on the heater in an existing SimSnapshot.
+    fn set_heater_temp(snap: &mut SimSnapshot, temp_c: f64) {
+        if let Some(h) = snap.assets.get_mut("heater") {
+            h.values.insert("temp_c".into(), temp_c);
         }
     }
 
@@ -2253,7 +2427,7 @@ mod tests {
         let now = fixed_now();
         let profile = make_profile();
         let tariffs = make_tariffs(0.25, 0.08, 450.0); // 450 g/kWh
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let inp = build_milp_inputs(
             &sim,
             &tariffs,
@@ -2274,7 +2448,7 @@ mod tests {
         // Each direction gets √(round_trip_efficiency), not the full RTE
         let now = fixed_now();
         let profile = make_profile(); // battery RTE = 0.9
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let inp = build_milp_inputs(
             &sim,
             &TariffTimeSeries::from_snapshots(&[]),
@@ -2299,7 +2473,7 @@ mod tests {
         // not the profile's initial_soc=0.5.
         let now = fixed_now();
         let profile = make_profile(); // initial_soc=0.5, capacity=10.0
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_battery_soc(&mut sim, 0.3); // override to 0.3
         let inp = build_milp_inputs(
             &sim,
@@ -2320,7 +2494,7 @@ mod tests {
         // When SimState has no battery asset, fall back to profile.battery_config().initial_soc
         let now = fixed_now();
         let profile = make_profile(); // initial_soc=0.5, capacity=10.0
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         sim.assets.clear(); // remove all assets → battery_state() returns None
         let inp = build_milp_inputs(
             &sim,
@@ -2341,7 +2515,7 @@ mod tests {
         // Plugged EV with no session → all slots available (mask true), mode MustNotRun
         let now = fixed_now();
         let profile = make_profile();
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let inp = build_milp_inputs(
             &sim,
@@ -2364,7 +2538,7 @@ mod tests {
         // Plugged EV with EvSession deadline at 1h → first 12 slots true (step=300s, 12×300=3600s)
         let now = fixed_now();
         let profile = make_profile(); // plan_step_s=300, plan_horizon_h=2 → 24 steps
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let session = crate::entities::device_session::EvSession {
             id: uuid::Uuid::new_v4(),
@@ -2399,7 +2573,7 @@ mod tests {
         // Unplugged EV → all slots false regardless of session
         let now = fixed_now();
         let profile = make_profile();
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, false);
         let session = crate::entities::device_session::EvSession {
             id: uuid::Uuid::new_v4(),
@@ -2428,7 +2602,7 @@ mod tests {
     fn ev_mode_must_run_for_firm_deadline_session() {
         let now = fixed_now();
         let profile = make_profile();
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let session = crate::entities::device_session::EvSession {
             id: uuid::Uuid::new_v4(),
@@ -2456,7 +2630,7 @@ mod tests {
     fn ev_mode_may_run_for_soft_deadline_session() {
         let now = fixed_now();
         let profile = make_profile();
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let session = crate::entities::device_session::EvSession {
             id: uuid::Uuid::new_v4(),
@@ -2484,7 +2658,7 @@ mod tests {
     fn ev_mode_must_not_run_for_no_session() {
         let now = fixed_now();
         let profile = make_profile();
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         // No session at all
         let inp = build_milp_inputs(
@@ -2506,7 +2680,7 @@ mod tests {
         // Empty TariffTimeSeries → defaults: imp=0.25, exp=0.08, co2=300g→0.30kg
         let now = fixed_now();
         let profile = make_profile();
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let empty_tariffs = TariffTimeSeries::from_snapshots(&[]);
         let inp = build_milp_inputs(
             &sim,
@@ -2529,7 +2703,7 @@ mod tests {
         // HeaterConfig.mid_kw = None → p_heat_mid_kw = max_kw / 2.0
         let now = fixed_now();
         let profile = make_profile(); // heater max_kw=3.0, mid_kw=None
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, true); // avoid EV noise
         let inp = build_milp_inputs(
             &sim,
@@ -2563,7 +2737,7 @@ mod tests {
                 other => other,
             })
             .collect();
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let inp = build_milp_inputs(
             &sim,
             &TariffTimeSeries::from_snapshots(&[]),
@@ -2618,7 +2792,7 @@ mod tests {
         // When OadrCapacityState has an active limit, p_imp_max_cont_kw should use it
         let now = fixed_now();
         let profile = make_profile(); // grid.max_import_kw = 25.0
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let capacity = OadrCapacityState {
             import_limit_kw: Some(5.0), // OpenADR event limit
             export_limit_kw: None,
@@ -3057,18 +3231,11 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 4, 12, 0, 0, 0).unwrap()
     }
 
-    /// Set irradiance_offset and pv_alpha on the PV asset in an existing SimState.
-    fn set_pv_inject(sim: &mut SimState, offset: f64, alpha: f64) {
-        if let Some((_, cfg)) = sim.find_asset_mut("pv") {
-            if let AssetConfig::Pv(pv) = cfg {
-                pv.irradiance_offset = offset;
-                pv.pv_alpha = alpha;
-            } else {
-                panic!("pv asset has unexpected config type");
-            }
-        } else {
-            panic!("no pv asset in sim");
-        }
+    /// Set irradiance_offset and pv_alpha on the PV asset in an existing SimSnapshot.
+    fn set_pv_inject(sim: &mut SimSnapshot, offset: f64, alpha: f64) {
+        let snap = sim.assets.get_mut("pv").expect("no pv asset in sim");
+        snap.values.insert("irradiance_offset".to_string(), offset);
+        snap.values.insert("pv_alpha".to_string(), alpha);
     }
 
     #[test]
@@ -3078,7 +3245,7 @@ mod tests {
         // alpha (≈no decay over the horizon), slot 0 must be ≈ 0.5 × rated_kw.
         let now = fixed_midnight();
         let profile = make_profile(); // rated_kw=5.0
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_pv_inject(&mut sim, 0.5, 0.001); // slow alpha → offset barely decays
 
         let inp = build_milp_inputs(
@@ -3110,7 +3277,7 @@ mod tests {
         // Correct formula: 0.9^1 = 0.9         → slot 1 ≈ 2.25 kW (RIGHT)
         let now = fixed_midnight(); // natural=0, isolates offset
         let profile = make_profile(); // rated_kw=5.0, step_s=300
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_pv_inject(&mut sim, 0.5, 0.1); // typical alpha=0.1
 
         let inp = build_milp_inputs(
@@ -3153,10 +3320,10 @@ mod tests {
         let now = fixed_midnight();
         let profile = make_profile(); // rated_kw=5.0, step_s=300s, 24 slots
 
-        let mut sim_slow = SimState::from_profile(&profile);
+        let mut sim_slow = make_snap_from_profile(&profile);
         set_pv_inject(&mut sim_slow, 0.5, 0.001); // slow: 0.1 % per second
 
-        let mut sim_fast = SimState::from_profile(&profile);
+        let mut sim_fast = make_snap_from_profile(&profile);
         set_pv_inject(&mut sim_fast, 0.5, 0.05); // fast: 5 % per second
 
         let inp_slow = build_milp_inputs(
@@ -3203,7 +3370,7 @@ mod tests {
         let profile = make_profile(); // rated_kw=5.0, step_s=300s
 
         // from_profile initialises irradiance_offset=0, pv_alpha=0.1
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
 
         let inp = build_milp_inputs(
             &sim,
@@ -3284,7 +3451,7 @@ mod tests {
             packets: vec![],
             absorber: Default::default(),
         };
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let plan = run_planner(
             &sim,
             &make_tariffs(0.25, 0.08, 300.0),
@@ -3318,7 +3485,7 @@ mod tests {
         profile
             .assets
             .retain(|a| !matches!(a, AssetProfile::Battery(_)));
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         let session = crate::entities::device_session::EvSession {
             id: uuid::Uuid::new_v4(),
@@ -3364,7 +3531,7 @@ mod tests {
         let now = fixed_now();
         let mut profile = make_profile_1800s();
         profile.assets.retain(|a| !matches!(a, AssetProfile::Ev(_)));
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let plan = run_planner(
             &sim,
             &make_tariffs(0.25, 0.08, 300.0),
@@ -3393,7 +3560,7 @@ mod tests {
         profile
             .assets
             .retain(|a| matches!(a, AssetProfile::Battery(_) | AssetProfile::BaseLoad(_)));
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_battery_soc(&mut sim, 0.1); // low SoC → wants to charge
         let plan = run_planner(
             &sim,
@@ -3438,12 +3605,17 @@ mod tests {
                 other => other,
             })
             .collect();
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, true);
-        for entry in &mut sim.assets {
-            if let AssetState::Ev(ref mut ev) = entry.state {
-                ev.soc = 0.1;
-            }
+        // Set EV soc to 0.1
+        if let Some(ev) = sim.assets.get_mut("ev") {
+            let bat_kwh = ev.val("battery_kwh").unwrap_or(60.0);
+            let soc_target = ev.val("soc_target").unwrap_or(0.8);
+            let max_ch = ev.val("max_charge_kw").unwrap_or(7.4);
+            ev.values.insert("soc".into(), 0.1);
+            ev.cap_max_import_kw = if 0.1_f64 >= soc_target { 0.0 } else { max_ch };
+            ev.available_discharge_kwh = Some(0.1 * bat_kwh);
+            ev.available_charge_kwh = Some(0.9 * bat_kwh);
         }
         let e_core_kwh = (0.8 - 0.1) * 10.0; // 7.0 kWh
         let session = crate::entities::device_session::EvSession {
@@ -3487,7 +3659,7 @@ mod tests {
         // Battery + heater + PV (MayRun) is sufficient to exercise the balance.
         let now = fixed_now();
         let profile = make_profile_1800s();
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_battery_soc(&mut sim, 0.5);
         let plan = run_planner(
             &sim,
@@ -3528,7 +3700,7 @@ mod tests {
         profile
             .assets
             .retain(|a| !matches!(a, AssetProfile::Battery(_)));
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let plan = run_planner(
             &sim,
             &make_tariffs(0.25, 0.08, 300.0),
@@ -3557,7 +3729,7 @@ mod tests {
         // T_current=60, T_min=40 → e_init = (60−40) × 0.23256 ≈ 4.65 kWh
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let inp = build_milp_inputs(
             &sim,
             &TariffTimeSeries::from_snapshots(&[]),
@@ -3583,7 +3755,7 @@ mod tests {
         // T_current=35 < T_min=40 → e_init < 0
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 40.0);
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_heater_temp(&mut sim, 35.0);
         let inp = build_milp_inputs(
             &sim,
@@ -3608,7 +3780,7 @@ mod tests {
         // e_max = (T_max − T_min) × thermal_mass = (80−40) × 200×4.186/3600 ≈ 9.30 kWh
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 40.0);
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let inp = build_milp_inputs(
             &sim,
             &TariffTimeSeries::from_snapshots(&[]),
@@ -3636,7 +3808,7 @@ mod tests {
         // → q_dem = 0 + 0.1 × (60−10) = 5.0 kW
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let inp = build_milp_inputs(
             &sim,
             &TariffTimeSeries::from_snapshots(&[]),
@@ -3661,7 +3833,7 @@ mod tests {
         // target=70, T_min=40 → (70−40) × 200×4.186/3600 ≈ 6.98 kWh
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let target = HeaterTarget {
             id: uuid::Uuid::new_v4(),
             target_temp_c: 70.0,
@@ -3694,7 +3866,7 @@ mod tests {
         // Without HeaterTarget, e_heat_target_kwh == e_heat_max_kwh
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let inp = build_milp_inputs(
             &sim,
             &TariffTimeSeries::from_snapshots(&[]),
@@ -3719,7 +3891,7 @@ mod tests {
         // Without HeaterTarget, heater_mode == MilpLoadMode::MayRun
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let inp = build_milp_inputs(
             &sim,
             &TariffTimeSeries::from_snapshots(&[]),
@@ -3739,7 +3911,7 @@ mod tests {
         // HeaterConfig with no switching_penalty_eur → lambda_heat_sw_eur == 0.01
         let now = fixed_now();
         let profile = make_profile(); // heater has no switching_penalty_eur set
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let inp = build_milp_inputs(
             &sim,
             &TariffTimeSeries::from_snapshots(&[]),
@@ -3803,7 +3975,7 @@ mod tests {
         profile
             .assets
             .retain(|a| matches!(a, AssetProfile::Battery(_) | AssetProfile::BaseLoad(_)));
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_battery_soc(&mut sim, 0.1); // low SoC → planner will charge on cheap slots
         let plan = run_planner(
             &sim,
@@ -3866,12 +4038,17 @@ mod tests {
                 other => other,
             })
             .collect();
-        let mut sim = SimState::from_profile(&profile);
+        let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, true);
-        for entry in &mut sim.assets {
-            if let AssetState::Ev(ref mut ev) = entry.state {
-                ev.soc = 0.2;
-            }
+        // Set EV soc to 0.2
+        if let Some(ev) = sim.assets.get_mut("ev") {
+            let bat_kwh = ev.val("battery_kwh").unwrap_or(60.0);
+            let soc_target = ev.val("soc_target").unwrap_or(0.8);
+            let max_ch = ev.val("max_charge_kw").unwrap_or(7.4);
+            ev.values.insert("soc".into(), 0.2);
+            ev.cap_max_import_kw = if 0.2_f64 >= soc_target { 0.0 } else { max_ch };
+            ev.available_discharge_kwh = Some(0.2 * bat_kwh);
+            ev.available_charge_kwh = Some(0.8 * bat_kwh);
         }
         let session = crate::entities::device_session::EvSession {
             id: uuid::Uuid::new_v4(),
@@ -3923,7 +4100,7 @@ mod tests {
     fn heater_planned_state_temp_c_populated() {
         let now = fixed_now();
         let profile = make_heater_only_profile(None, 18.0, 23.0, 20.0);
-        let sim = SimState::from_profile(&profile);
+        let sim = make_snap_from_profile(&profile);
         let plan = run_planner(
             &sim,
             &make_tariffs(0.25, 0.08, 300.0),
