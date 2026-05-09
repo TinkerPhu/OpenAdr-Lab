@@ -1,104 +1,90 @@
-# Implementation Plan: [FEATURE]
+# Implementation Plan: Introduce SimulatorPort trait (Phase 2 — AB-03)
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
-
-**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
+**Branch**: `019-introduce-simulator-port` | **Date**: 2026-05-09 | **Spec**: [spec.md](spec.md)  
+**Input**: Feature specification from `specs/019-introduce-simulator-port/spec.md`
 
 ## Summary
 
-[Extract from feature spec: primary requirement + technical approach from research]
+Introduce a `SimulatorPort` trait in `VEN/src/controller/` to decouple the simulator infrastructure
+(`SimState`) from the controller domain logic. All seven modules that currently import `S_MOD` directly
+will be refactored to accept `&dyn SimulatorPort`, making planning, dispatch, envelope and monitor logic
+unit-testable with a deterministic mock simulator — without running the full physics simulation.
+
+`SimState` becomes the production implementation of the trait. A shared `MockSimulatorPort` in
+`VEN/src/services/test_support/` enables isolated unit tests for the named functions in FR-005.
+
+This phase resolves architecture breach AB-03 and is the prerequisite for Phase 5 (service layer).
 
 ## Technical Context
 
-<!--
-  ACTION REQUIRED: Replace the content in this section with the technical details
-  for the project. The structure here is presented in advisory capacity to guide
-  the iteration process.
--->
-
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
-**Project Type**: [e.g., library/cli/web-service/mobile-app/compiler/desktop-app or NEEDS CLARIFICATION]  
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**Language/Version**: Rust stable (2021 edition)  
+**Primary Dependencies**: tokio (async runtime), axum (HTTP), serde/serde_json, chrono, uuid  
+**Storage**: N/A — no new persistence; existing `/data/state.json` JSON persistence is unchanged  
+**Testing**: `cargo test` — unit tests using `MockSimulatorPort`; existing integration tests must remain green  
+**Target Platform**: Linux ARM64 (Raspberry Pi 4), Docker Compose v2  
+**Project Type**: Library/service (VEN Rust backend)  
+**Performance Goals**: Unit tests for the 6 named functions must complete in under 30 seconds (SC-002)  
+**Constraints**: No new external dependencies; `SimulatorPort` implementations must be `Send + Sync`  
+**Scale/Scope**: 7 modules refactored; 6 new unit test functions; 1 new trait; 1 mock adapter
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+| Principle | Status | Notes |
+|-----------|--------|-------|
+| I. OpenADR Spec Fidelity | ✅ Pass | No OpenADR field names involved; pure internal Rust refactor |
+| II. BDD-First Testing | ✅ Pass | Existing BDD scenarios exercise controller behaviour end-to-end; new unit tests supplement, not replace, BDD |
+| III. Upstream Compatibility | ✅ Pass | Changes are VEN-only, not in `openleadr-rs` submodule |
+| IV. Lean Architecture | ✅ Pass | Trait introduced only because it resolves a concrete testability breach (AB-03); no hypothetical flexibility |
+| V. Infrastructure Parity | ✅ Pass | No Docker, CI, or deploy changes; purely source-level refactor |
+| VI. VEN Backend Hexagonal | ✅ Pass | This phase directly implements the `SimulatorPort` entry in the constitution's port table; mock lives at `services/test_support/` as specified |
+
+**Post-design re-check**: After Phase 1 design, `routes/sim.rs` and `routes/timeline.rs` temporarily consume `SimulatorPort` directly. This is an accepted intermediate state documented in FR-003 — Phase 5 will move them to the service layer.
 
 ## Project Structure
 
 ### Documentation (this feature)
 
 ```text
-specs/[###-feature]/
-├── plan.md              # This file (/speckit.plan command output)
-├── research.md          # Phase 0 output (/speckit.plan command)
-├── data-model.md        # Phase 1 output (/speckit.plan command)
-├── quickstart.md        # Phase 1 output (/speckit.plan command)
-├── contracts/           # Phase 1 output (/speckit.plan command)
-└── tasks.md             # Phase 2 output (/speckit.tasks command - NOT created by /speckit.plan)
+specs/019-introduce-simulator-port/
+├── plan.md              # This file
+├── research.md          # Phase 0 output
+├── data-model.md        # Phase 1 output
+├── quickstart.md        # Phase 1 output
+├── contracts/
+│   └── simulator-port.md
+└── tasks.md             # Generated by /speckit.tasks (not yet created)
 ```
 
-### Source Code (repository root)
-<!--
-  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
-  real paths (e.g., apps/admin, packages/something). The delivered plan must
-  not include Option labels.
--->
+### Source Code
 
 ```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
-
-tests/
-├── contract/
-├── integration/
-└── unit/
-
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
-backend/
-├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
-
-frontend/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
-
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
+VEN/src/
+├── controller/
+│   ├── mod.rs                  # Export SimulatorPort trait (new)
+│   ├── simulator_port.rs       # Trait + SnapshotError definition (new)
+│   ├── dispatcher.rs           # S_MOD → &dyn SimulatorPort
+│   ├── absorber.rs             # S_MOD → &dyn SimulatorPort
+│   ├── milp_planner.rs         # S_MOD → &dyn SimulatorPort
+│   ├── monitor.rs              # S_MOD → &dyn SimulatorPort
+│   └── envelope.rs             # S_MOD → &dyn SimulatorPort
+├── simulator/
+│   └── mod.rs                  # SimState implements SimulatorPort (new impl block)
+├── assets/
+│   └── mod.rs                  # AssetHistoryBuffer moved here (from simulator/mod.rs)
+├── routes/
+│   ├── sim.rs                  # S_MOD → &dyn SimulatorPort (temporary)
+│   └── timeline.rs             # S_MOD → &dyn SimulatorPort (temporary)
+└── services/
+    └── test_support/
+        └── mock_simulator_port.rs  # MockSimulatorPort (new)
 ```
 
-**Structure Decision**: [Document the selected structure and reference the real
-directories captured above]
+**Structure Decision**: Single Rust workspace (`VEN/`). Trait file placed in `controller/simulator_port.rs` per the hexagonal rule that ports live in the domain core. Mock placed in `services/test_support/` per constitution Principle VI.
 
 ## Complexity Tracking
 
 > **Fill ONLY if Constitution Check has violations that must be justified**
 
-| Violation | Why Needed | Simpler Alternative Rejected Because |
-|-----------|------------|-------------------------------------|
-| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
-| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
+No violations — this plan is fully compliant with all six constitution principles.
