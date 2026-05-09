@@ -33,6 +33,8 @@ pub(crate) use crate::tasks::poll_reports::spawn_report_poll;
 
 pub(crate) use crate::tasks::planning::spawn_planning;
 
+pub(crate) use crate::tasks::sim_tick::spawn_sim_tick;
+
 // ─── Helpers for spawn_sim_tick ───────────────────────────────────────────────
 
 /// Deviation tracking state for Layer 1 (reactive correction) and Layer 2 (sustained deviation).
@@ -345,7 +347,7 @@ async fn persist_sim_state(sim: &Arc<Mutex<SimState>>, data_dir: &str) {
     }
 }
 
-pub(crate) fn spawn_sim_tick(
+pub(crate) fn spawn_sim_tick_old(
     state: AppState,
     sim: Arc<Mutex<SimState>>,
     profile: Arc<Profile>,
