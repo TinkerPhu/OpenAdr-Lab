@@ -143,6 +143,7 @@ impl Heater {
         let mut m = HashMap::new();
         m.insert("temp_c".into(), state.temperature_c);
         m.insert("max_kw".into(), self.max_kw);
+        m.insert("mid_kw".into(), self.mid_kw);
         m.insert("temp_min_c".into(), self.temp_min_c);
         m.insert("temp_max_c".into(), self.temp_max_c);
         m

@@ -47,7 +47,7 @@ pub(crate) fn apply_sim_injections(inject: &SimInjectState, sim: &mut SimState) 
 
 /// PHASE 2: Compose effective capacity and build per-asset setpoints.
 pub(crate) fn build_tick_setpoints(
-    sim: &SimState,
+    sim_snap: &SimSnapshot,
     plan_snap: Option<&Plan>,
     capacity_snap: &OadrCapacityState,
     inject: &SimInjectState,
@@ -69,8 +69,7 @@ pub(crate) fn build_tick_setpoints(
     match plan_snap {
         Some(plan) => controller::dispatcher::build_setpoints(
             plan,
-            &sim.assets,
-            &sim.asset_configs,
+            sim_snap,
             &effective_capacity,
             inject.heater_setpoint_c,
             now,
@@ -78,16 +77,14 @@ pub(crate) fn build_tick_setpoints(
         ),
         None => {
             // No plan yet (startup window). Apply defaults then surplus overlay.
-            let mut m: HashMap<String, f64> = sim
+            let mut m: HashMap<String, f64> = sim_snap
                 .assets
                 .iter()
-                .zip(sim.asset_configs.iter())
-                .map(|(a, cfg)| (a.id.clone(), cfg.default_setpoint(&a.state)))
+                .map(|(id, snap)| (id.clone(), snap.default_setpoint_kw))
                 .collect();
             controller::dispatcher::apply_surplus_ev_overlay(
                 &mut m,
-                &sim.assets,
-                &sim.asset_configs,
+                sim_snap,
                 false,
                 overlay_enabled,
             );
@@ -129,8 +126,8 @@ pub(crate) fn finalize_tick_outputs(
             .update(net_power_kw, import_limit_kw, export_limit_kw_signed, now);
     }
 
-    // Compute site envelope (pure math — reads sim, returns owned value).
-    let tick_envelope = controller::envelope::compute_envelope(&*sim, now);
+    // Compute site envelope (pure math — reads snapshot taken above).
+    let tick_envelope = controller::envelope::compute_envelope(&tick_sim_snap, now);
 
     (tick_sensor, tick_sim_snap, tick_envelope)
 }

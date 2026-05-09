@@ -232,7 +232,7 @@ pub(crate) fn spawn_planning(
 
             // Refresh site envelope immediately after each plan cycle.
             {
-                let sim_snap = sim.lock().await.clone();
+                let sim_snap = sim.lock().await.to_sim_snapshot();
                 let env = controller::envelope::compute_envelope(&sim_snap, now);
                 state.set_site_envelope(env).await;
             }

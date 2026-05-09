@@ -4,6 +4,7 @@ mod config;
 mod controller;
 mod entities;
 mod ids;
+mod services;
 mod tasks;
 mod models;
 mod planner_events;
@@ -109,7 +110,8 @@ async fn main() -> anyhow::Result<()> {
     // Validate absorber configuration at startup
     {
         let sim_guard = sim_state.lock().await;
-        controller::absorber::validate_startup(&profile, &sim_guard)?;
+        let sim_snap = sim_guard.to_sim_snapshot();
+        controller::absorber::validate_startup(&profile, &sim_snap)?;
     }
 
     // Spawn background loops
