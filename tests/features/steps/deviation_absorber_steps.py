@@ -68,8 +68,15 @@ def step_wait_fresh_plan_given(context):
         if not plan or "created_at" not in plan:
             return False
         try:
-            ts = datetime.fromisoformat(plan["created_at"].replace("Z", "+00:00"))
-            return ts > cutoff
+            ts_str = plan["created_at"].replace("Z", "+00:00")
+            # Rust serialises DateTime<Utc> with nanoseconds (9 decimal digits);
+            # Python fromisoformat only accepts ≤6. Truncate to microseconds.
+            if "." in ts_str:
+                dot = ts_str.rindex(".")
+                plus = ts_str.index("+", dot)
+                if plus - dot > 7:
+                    ts_str = ts_str[:dot + 7] + ts_str[plus:]
+            return datetime.fromisoformat(ts_str) > cutoff
         except ValueError:
             return False
 
