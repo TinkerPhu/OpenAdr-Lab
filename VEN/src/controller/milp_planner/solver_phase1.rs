@@ -7,6 +7,7 @@ use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
+use super::asset_port::{BatteryMilpContext, EvMilpContext, HeaterMilpContext};
 
 use super::types::*;
 
