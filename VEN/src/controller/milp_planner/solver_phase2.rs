@@ -9,7 +9,7 @@ use crate::controller::milp_interactions::{
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
-use super::solver_phase1::{add_model_constraints, read_solve_output, solve_phase1, M_LOW_EUR_PER_KWH};
+use super::solver_phase1::{add_model_constraints, read_solve_output, solve_phase1};
 use super::types::*;
 
 /// Phase 2: minimise operational friction subject to phase1_cost(p2_vars) ≤ c_star + epsilon.
