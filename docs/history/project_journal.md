@@ -3412,3 +3412,52 @@ returns only 4 deferred files:
   (not a constructor call). Always run `cargo test` immediately after bulk sed operations.
 - **T011a deferred**: `milp_planner.rs` (~3960 lines) was migrated in-place rather than split first.
   The split remains deferred to Phase 5 as a standalone no-functional-change refactor.
+
+## Phase 30: SimulatorPort Compliance Review + Cleanup (019-introduce-simulator-port — final)
+
+**Goal**: Complete spec compliance review for feature 019, remove dead `crate::simulator` snapshot re-exports (T023), and audit BDD coverage of the 6 named controller functions (T001b).
+
+### Compliance Review Findings
+
+All 6 functional requirements verified:
+
+| FR | Status | Notes |
+|---|---|---|
+| FR-001 `SimulatorPort` trait | ✅ | Signature exact match with spec/contracts |
+| FR-002 `SimState` implements trait | ✅ | `inject()` is intentional no-op; production inject goes through tick-loop `SimInjectState` mechanism (explained in comment) |
+| FR-003 Modules decoupled from SimState | ✅ | Functions accept `&SimSnapshot` (T020 design choice) — achieves same decoupling as `&dyn SimulatorPort` with simpler test API |
+| FR-004 `AssetHistoryBuffer` in `assets/` | ✅ | Defined in `assets/mod.rs`; `simulator/mod.rs` imports it from there |
+| FR-005 Unit tests for 6 functions | ✅ | All 6 have unit tests (T012–T015) |
+| FR-006 `MockSimulatorPort` | ✅ | `services/test_support/mock_simulator_port.rs` with all required capabilities |
+
+### T023 — Remove dead snapshot re-exports
+
+The migration aliases added in T005 (`pub use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot}` in `simulator/mod.rs`) were removed. Three files that used the old paths were updated to import directly from `crate::controller`:
+
+- `VEN/src/state.rs`: `use crate::simulator::SimSnapshot` → `use crate::controller::SimSnapshot`
+- `VEN/src/tasks/sim_tick/helpers.rs`: same
+- `VEN/src/tasks/sim_tick/publish.rs`: `SimSnapshot` → `crate::controller::SimSnapshot`; inline `crate::simulator::AssetSnapshot { ... }` → `crate::controller::AssetSnapshot { ... }`
+- `VEN/src/simulator/mod.rs`: added `AssetSnapshot, GridSnapshot, SimSnapshot` to its direct import from `crate::controller::simulator_port` (needed for `to_sim_snapshot()`)
+
+### T001b — BDD Coverage Audit
+
+All 6 functions have adequate BDD coverage via existing feature files. No new scenarios needed:
+
+| Function | BDD Coverage | Feature file |
+|---|---|---|
+| `build_setpoints` | ✅ implicit | `ven_dispatcher.feature` (all scenarios drive tick loop) |
+| `apply_surplus_ev_overlay` | ✅ implicit | `ven_uc_normal.feature` UC-03 PV surplus |
+| `apply_battery_correction_overlay` | ✅ **explicit** | `ven_dispatcher.feature` "Layer 1 corrects grid deviation immediately" |
+| `apply_deviation_absorption` | ✅ implicit | All integration scenarios with running tick loop |
+| `record_tick` | ✅ **explicit** | `ven_dispatcher.feature` "GET /ledger returns per-asset energy accumulation" |
+| `compute_envelope` | ✅ **explicit** | `ven_uc_normal.feature` UC-01b "EV charge plan has FLEXIBLE envelopes" |
+
+### Remaining Deferred Items
+
+- **T017 / T011a**: T017 (`routes/timeline.rs` migration) is blocked by `controller/timeline.rs` which uses `sim.find_asset()` and history ring buffers not available in `SimSnapshot`. Both are in the accepted SC-004 deferred set (same as reporter.rs and user_request.rs). T011a (milp_planner.rs split) deferred to Phase 5 as standalone structural refactor.
+
+### Test Result
+
+**319 passed, 0 failed, 13 ignored** (332 total) — unchanged after cleanup.
+
+Commits: `25dff11` — T023 re-export removal + T001b audit.
