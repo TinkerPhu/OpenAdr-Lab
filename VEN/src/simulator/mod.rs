@@ -11,13 +11,11 @@ use crate::assets::{
     AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, Battery, EvCharger, Grid, Heater,
     PvInverter,
 };
-use crate::controller::simulator_port::{SimulatorPort, SimInjectState, SnapshotError};
+use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot, SimulatorPort, SimInjectState, SnapshotError};
 use crate::models::SensorSnapshot;
 use crate::profile::{AssetProfile, Profile};
 use energy::EnergyCounter;
 
-// Re-export so existing `use crate::simulator::{SimSnapshot, AssetSnapshot, GridSnapshot}` keeps compiling.
-pub use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot};
 
 /// Tracks the user-induced irradiance perturbation between ticks.
 ///
