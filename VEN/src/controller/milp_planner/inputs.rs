@@ -1,6 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 
-use super::asset_port::{BatteryMilpContext, EvMilpContext, EvMilpMode, HeaterMilpContext, HeaterMilpMode};
+use super::asset_port::AssetMilpParams;
+use crate::controller::milp_planner::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
@@ -22,19 +23,17 @@ fn pv_natural_irradiance(ts: DateTime<Utc>) -> f64 {
     }
 }
 
-/// Build the full MILP input parameter set from the current runtime state.
+/// Build the full MILP input parameter set from asset contexts and current runtime state.
 ///
-/// All transformations — CO₂ unit conversion (g→kg), √RTE efficiency split,
-/// live battery SoC, EV horizon mask, and LoadMode translation — happen here.
-/// The resulting `MilpInputs` is ready to pass directly to `solve_milp_two_phase()`.
+/// Asset-specific parameters (battery, EV, heater) are extracted via the `AssetMilpContext`
+/// trait; grid, PV, and baseline parameters are still read from `profile` and `assets`.
 pub(crate) fn build_milp_inputs(
+    asset_contexts: &[Box<dyn AssetMilpContext>],
     assets: &SimSnapshot,
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
     profile: &Profile,
     now: DateTime<Utc>,
-    ev_session: Option<&crate::entities::device_session::EvSession>,
-    heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     shiftable_loads: &[ShiftableLoad],
     baseline_override: Option<&BaselineOverride>,
 ) -> MilpInputs {
@@ -99,251 +98,77 @@ pub(crate) fn build_milp_inputs(
         p_exp_cont.push(cont_exp);
     }
 
-    // ── Battery ───────────────────────────────────────────────────────────────
-    let (e_bat_nom, e_bat_init, e_bat_min, e_bat_max, p_bat_ch_max, p_bat_dis_max, eff_ch, eff_dis) =
-        if let Some(bat_cfg) = profile.battery_config() {
-            let ctx = if let Some(bat_snap) = assets.assets.get("battery") {
-                let soc = bat_snap.val("soc").unwrap_or(bat_cfg.initial_soc);
-                let cap = bat_cfg.capacity_kwh;
-                let eff = bat_cfg.round_trip_efficiency.sqrt();
-                BatteryMilpContext {
-                    e_nom_kwh: cap,
-                    e_init_kwh: soc * cap,
-                    e_min_kwh: bat_cfg.min_soc * cap,
-                    e_max_kwh: cap,
-                    p_ch_max_kw: bat_cfg.max_charge_kw,
-                    p_dis_max_kw: bat_cfg.max_discharge_kw,
-                    eff_ch: eff,
-                    eff_dis: eff,
-                }
-            } else {
-                // No live battery in sim (e.g. cleared in test): fall back to profile initial_soc
-                let cap = bat_cfg.capacity_kwh;
-                let eff = bat_cfg.round_trip_efficiency.sqrt();
-                BatteryMilpContext {
-                    e_nom_kwh: cap,
-                    e_init_kwh: bat_cfg.initial_soc * cap,
-                    e_min_kwh: bat_cfg.min_soc * cap,
-                    e_max_kwh: cap,
-                    p_ch_max_kw: bat_cfg.max_charge_kw,
-                    p_dis_max_kw: bat_cfg.max_discharge_kw,
-                    eff_ch: eff,
-                    eff_dis: eff,
-                }
-            };
-            (
-                Some(ctx.e_nom_kwh),
-                Some(ctx.e_init_kwh),
-                Some(ctx.e_min_kwh),
-                Some(ctx.e_max_kwh),
-                Some(ctx.p_ch_max_kw),
-                Some(ctx.p_dis_max_kw),
-                Some(ctx.eff_ch),
-                Some(ctx.eff_dis),
-            )
-        } else {
-            (None, None, None, None, None, None, None, None)
-        };
+    // ── Asset-context dispatch: battery / EV / heater scalars ────────────────
+    let mut e_bat_nom: Option<f64> = None;
+    let mut e_bat_init: Option<f64> = None;
+    let mut e_bat_min: Option<f64> = None;
+    let mut e_bat_max: Option<f64> = None;
+    let mut p_bat_ch_max: Option<f64> = None;
+    let mut p_bat_dis_max: Option<f64> = None;
+    let mut eff_ch: Option<f64> = None;
+    let mut eff_dis: Option<f64> = None;
 
-    // ── EV ────────────────────────────────────────────────────────────────────
-    let (
-        a_ev,
-        ev_mode,
-        t_ev_dead,
-        p_ev_max,
-        p_ev_min,
-        e_ev_core,
-        e_ev_extra,
-        v_ev_extra,
-        soc_ev_init,
-    ) = if let Some(ev_cfg) = profile.ev_config() {
-        let (ctx, soc_init) = if let Some(ev_snap) = assets.assets.get("ev") {
-            let plugged = ev_snap.val("plugged").map(|v| v > 0.5).unwrap_or(false);
-            let soc = ev_snap.val("soc").unwrap_or(ev_cfg.initial_soc);
-            (
-                EvMilpContext::from_live(
-                    plugged,
-                    soc,
-                    ev_cfg.max_charge_kw,
-                    ev_cfg.battery_kwh,
-                    ev_cfg.soc_target,
-                    ev_cfg.min_charge_kw,
-                    profile.planner.v_ev_extra_eur_kwh,
-                    n,
-                    step_s,
-                    now,
-                    ev_session,
-                ),
-                Some(soc),
-            )
-        } else {
-            (
-                EvMilpContext {
-                    mode: EvMilpMode::MustNotRun,
-                    a_ev: vec![false; n],
-                    t_dead_step: None,
-                    p_max_kw: ev_cfg.max_charge_kw,
-                    p_min_kw: ev_cfg.min_charge_kw,
-                    e_core_kwh: 0.0,
-                    e_extra_max_kwh: ev_cfg.battery_kwh * (1.0 - ev_cfg.soc_target),
-                    v_extra_eur_kwh: profile.planner.v_ev_extra_eur_kwh,
-                },
-                None,
-            )
-        };
-        let ev_mode = match ctx.mode {
-            EvMilpMode::MustRun => MilpLoadMode::MustRun,
-            EvMilpMode::MayRun => MilpLoadMode::MayRun,
-            EvMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
-        };
-        (
-            ctx.a_ev,
-            ev_mode,
-            ctx.t_dead_step,
-            ctx.p_max_kw,
-            ctx.p_min_kw,
-            ctx.e_core_kwh,
-            ctx.e_extra_max_kwh,
-            ctx.v_extra_eur_kwh,
-            soc_init,
-        )
-    } else {
-        // No EV asset in profile
-        (
-            vec![false; n],
-            MilpLoadMode::MustNotRun,
-            None,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            None,
-        )
-    };
+    let mut a_ev = vec![false; n];
+    let mut ev_mode = MilpLoadMode::MustNotRun;
+    let mut t_ev_dead: Option<usize> = None;
+    let mut p_ev_max = 0.0_f64;
+    let mut p_ev_min = 0.0_f64;
+    let mut e_ev_core = 0.0_f64;
+    let mut e_ev_extra = 0.0_f64;
+    let mut v_ev_extra = 0.0_f64;
+    let mut soc_ev_init: Option<f64> = None;
 
-    // ── Heater ────────────────────────────────────────────────────────────────
-    let (
-        heater_mode,
-        t_heat_dead,
-        p_mid,
-        p_full,
-        e_heat_init,
-        e_heat_max,
-        q_heat_dem,
-        e_heat_target,
-        lambda_sw,
-        heat_iz_mid,
-        heat_iz_full,
-    ) = if let Some(heat_cfg) = profile.heater_config() {
-        let lambda = heat_cfg.effective_switching_penalty();
-        let ctx = if let Some(h_snap) = assets.assets.get("heater") {
-            let temp_c = h_snap.val("temp_c")
-                .unwrap_or((heat_cfg.temp_min_c + heat_cfg.temp_max_c) / 2.0);
-            let thermal_mass = heat_cfg.effective_thermal_mass();
-            let t_mid = (heat_cfg.temp_min_c + heat_cfg.temp_max_c) / 2.0;
-            let ambient = 10.0;
-            let q_dem = (heat_cfg.effective_draw_kw()
-                + heat_cfg.effective_k_loss() * (t_mid - ambient))
-                .max(0.0);
-            HeaterMilpContext::from_live(
-                temp_c,
-                h_snap.power_kw,
-                heat_cfg.temp_min_c,
-                heat_cfg.temp_max_c,
-                heat_cfg.mid_kw.unwrap_or(0.0),
-                heat_cfg.max_kw,
-                thermal_mass,
-                q_dem,
-                lambda,
-                n,
-                step_s,
-                now,
-                heater_target,
-            )
-        } else {
-            // No live heater in sim: reconstruct from profile config
-                let thermal_mass = heat_cfg.effective_thermal_mass();
-                let ambient = 10.0;
-                let live_t_min = heat_cfg.temp_min_c;
-                let live_t_max = heat_cfg.temp_max_c;
-                let live_max_kw = heat_cfg.max_kw;
-                let live_mid_kw = heat_cfg.mid_kw.unwrap_or(live_max_kw / 2.0);
-                let current_temp = heat_cfg.temp_initial_c;
-                let e_init = (current_temp - live_t_min) * thermal_mass;
-                let e_max = ((live_t_max - live_t_min) * thermal_mass).max(0.0);
-                let t_mid = (live_t_min + live_t_max) / 2.0;
-                let q_dem = (heat_cfg.effective_draw_kw()
-                    + heat_cfg.effective_k_loss() * (t_mid - ambient))
-                    .max(0.0);
-                if let Some(target) = heater_target {
-                    let e_target =
-                        ((target.target_temp_c - live_t_min) * thermal_mass).clamp(0.0, e_max);
-                    let secs = (target.ready_by - now).num_seconds();
-                    let t_dead =
-                        (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize;
-                    HeaterMilpContext {
-                        mode: HeaterMilpMode::MustRun,
-                        t_dead_step: Some(t_dead),
-                        p_mid_kw: live_mid_kw,
-                        p_full_kw: live_max_kw,
-                        e_init_kwh: e_init,
-                        e_max_kwh: e_max,
-                        q_dem_kw: q_dem,
-                        e_target_kwh: e_target,
-                        lambda_sw_eur: lambda,
-                        initial_z_mid: 0.0,
-                        initial_z_full: 0.0,
-                    }
-                } else {
-                    HeaterMilpContext {
-                        mode: HeaterMilpMode::MayRun,
-                        t_dead_step: None,
-                        p_mid_kw: live_mid_kw,
-                        p_full_kw: live_max_kw,
-                        e_init_kwh: e_init,
-                        e_max_kwh: e_max,
-                        q_dem_kw: q_dem,
-                        e_target_kwh: e_max,
-                        lambda_sw_eur: lambda,
-                        initial_z_mid: 0.0,
-                        initial_z_full: 0.0,
-                    }
-                }
-        };
-        let heater_mode = match ctx.mode {
-            HeaterMilpMode::MustRun => MilpLoadMode::MustRun,
-            HeaterMilpMode::MayRun => MilpLoadMode::MayRun,
-            HeaterMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
-        };
-        (
-            heater_mode,
-            ctx.t_dead_step,
-            ctx.p_mid_kw,
-            ctx.p_full_kw,
-            ctx.e_init_kwh,
-            ctx.e_max_kwh,
-            ctx.q_dem_kw,
-            ctx.e_target_kwh,
-            ctx.lambda_sw_eur,
-            ctx.initial_z_mid,
-            ctx.initial_z_full,
-        )
-    } else {
-        (
-            MilpLoadMode::MustNotRun,
-            None,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        )
-    };
+    let mut heater_mode = MilpLoadMode::MustNotRun;
+    let mut t_heat_dead: Option<usize> = None;
+    let mut p_mid = 0.0_f64;
+    let mut p_full = 0.0_f64;
+    let mut e_heat_init = 0.0_f64;
+    let mut e_heat_max = 0.0_f64;
+    let mut q_heat_dem = 0.0_f64;
+    let mut e_heat_target = 0.0_f64;
+    let mut lambda_sw = 0.0_f64;
+    let mut heat_iz_mid = 0.0_f64;
+    let mut heat_iz_full = 0.0_f64;
+
+    for ctx in asset_contexts {
+        match ctx.milp_params(n, step_s, now) {
+            AssetMilpParams::Battery(b) => {
+                e_bat_nom = Some(b.e_nom_kwh);
+                e_bat_init = Some(b.e_init_kwh);
+                e_bat_min = Some(b.e_min_kwh);
+                e_bat_max = Some(b.e_max_kwh);
+                p_bat_ch_max = Some(b.p_ch_max_kw);
+                p_bat_dis_max = Some(b.p_dis_max_kw);
+                eff_ch = Some(b.eff_ch);
+                eff_dis = Some(b.eff_dis);
+            }
+            AssetMilpParams::Ev(e) => {
+                a_ev = e.a_ev;
+                ev_mode = e.mode;
+                t_ev_dead = e.t_dead_step;
+                p_ev_max = e.p_max_kw;
+                p_ev_min = e.p_min_kw;
+                e_ev_core = e.e_core_kwh;
+                e_ev_extra = e.e_extra_max_kwh;
+                v_ev_extra = e.v_extra_eur_kwh;
+                soc_ev_init = assets.assets.get("ev").and_then(|s| s.val("soc"));
+            }
+            AssetMilpParams::Heater(h) => {
+                heater_mode = h.mode;
+                t_heat_dead = h.t_dead_step;
+                p_mid = h.p_mid_kw;
+                p_full = h.p_full_kw;
+                e_heat_init = h.e_init_kwh;
+                e_heat_max = h.e_max_kwh;
+                q_heat_dem = h.q_dem_kw;
+                e_heat_target = h.e_target_kwh;
+                lambda_sw = h.lambda_sw_eur;
+                heat_iz_mid = h.initial_z_mid;
+                heat_iz_full = h.initial_z_full;
+            }
+            AssetMilpParams::Unknown => {}
+        }
+    }
 
     // ── Baseline override: additive per-slot kW adjustments ─────────────────
     if let Some(bo) = baseline_override {

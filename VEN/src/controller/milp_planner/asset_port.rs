@@ -337,8 +337,7 @@ impl HeaterMilpContext {
 // ── AssetKind and helper parameter types ─────────────────────────────────────
 
 /// Discriminant for the MILP-capable asset types.
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AssetKind {
     Battery,
     Ev,
@@ -346,7 +345,6 @@ pub enum AssetKind {
 }
 
 /// Pre-computed scalar parameters for a battery instance in one planning cycle.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct BatteryScalars {
     pub e_nom_kwh: f64,
@@ -360,9 +358,12 @@ pub struct BatteryScalars {
 }
 
 /// Pre-computed scalar parameters for an EV charger in one planning cycle.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EvScalars {
+    pub mode: MilpLoadMode,
+    /// Per-step availability mask (false forces p_ev[t] = 0). len = n.
+    pub a_ev: Vec<bool>,
+    pub t_dead_step: Option<usize>,
     pub p_max_kw: f64,
     pub p_min_kw: f64,
     pub e_core_kwh: f64,
@@ -371,9 +372,10 @@ pub struct EvScalars {
 }
 
 /// Pre-computed scalar parameters for a heater in one planning cycle.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct HeaterScalars {
+    pub mode: MilpLoadMode,
+    pub t_dead_step: Option<usize>,
     pub p_mid_kw: f64,
     pub p_full_kw: f64,
     pub e_init_kwh: f64,
@@ -381,90 +383,88 @@ pub struct HeaterScalars {
     pub q_dem_kw: f64,
     pub e_target_kwh: f64,
     pub lambda_sw_eur: f64,
+    /// 1.0 if heater was at mid power on the last real tick; 0.0 otherwise.
+    pub initial_z_mid: f64,
+    /// 1.0 if heater was at full power on the last real tick; 0.0 otherwise.
+    pub initial_z_full: f64,
 }
 
 /// Unified asset MILP parameters — one variant per MILP-capable asset type.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum AssetMilpParams {
     Battery(BatteryScalars),
     Ev(EvScalars),
     Heater(HeaterScalars),
+    Unknown,
 }
+
+/// Below-minimum tank violation penalty [€/kWh]. Used by heater objective (Phase 1).
+pub const M_LOW_EUR_PER_KWH: f64 = 10.0;
 
 // ── AssetMilpContext trait ────────────────────────────────────────────────────
 
-/// Trait implemented by each concrete MILP context type, enabling future
-/// trait-object dispatch in the solver phases. Currently used for `AssetKind`
-/// discrimination; the `declare_vars`/`constraints`/`objective`/`read_solution`
-/// methods forward to the inherent impl methods in the respective assets files.
-#[allow(dead_code)]
+/// Port trait for MILP-capable assets. Enables trait-object dispatch in solver phases,
+/// eliminating direct imports of concrete asset types from `controller/milp_planner/`.
+///
+/// **Call order invariant**: `declare_vars_into_pool()` MUST be called before
+/// `constraints()` and `objective()`.
 pub trait AssetMilpContext: Send + Sync {
-    fn kind(&self) -> AssetKind;
-    fn declare_vars_battery(
-        &self,
-        _n: usize,
-        _c_startup: f64,
-        _c_ramp: f64,
-        _vars: &mut ProblemVariables,
-    ) -> Option<BatteryMilpVars> {
-        None
-    }
-    fn declare_vars_ev(
-        &self,
-        _n: usize,
-        _c_startup: f64,
-        _c_ramp: f64,
-        _vars: &mut ProblemVariables,
-    ) -> Option<EvMilpVars> {
-        None
-    }
-    fn declare_vars_heater(
-        &self,
-        _n: usize,
-        _vars: &mut ProblemVariables,
-    ) -> Option<HeaterMilpVars> {
-        None
-    }
-}
+    /// Stable identifier matching the SimSnapshot asset map key.
+    fn asset_id(&self) -> &str;
 
-impl AssetMilpContext for BatteryMilpContext {
-    fn kind(&self) -> AssetKind {
-        AssetKind::Battery
-    }
-    fn declare_vars_battery(
+    /// Discriminant used for pool-slot dispatch and logging.
+    fn asset_kind(&self) -> AssetKind;
+
+    /// Phase A — scalar extraction: return all MILP parameters for this asset,
+    /// pre-computed for a planning cycle of `n` slots starting at `now`.
+    fn milp_params(
         &self,
         n: usize,
-        c_startup: f64,
-        c_ramp: f64,
-        vars: &mut ProblemVariables,
-    ) -> Option<BatteryMilpVars> {
-        Some(self.declare_vars(n, c_startup, c_ramp, vars))
-    }
-}
+        step_s: u64,
+        now: DateTime<Utc>,
+    ) -> AssetMilpParams;
 
-impl AssetMilpContext for EvMilpContext {
-    fn kind(&self) -> AssetKind {
-        AssetKind::Ev
-    }
-    fn declare_vars_ev(
+    /// Phase B — LP variable declaration: add LP variables for this asset to
+    /// `vars` and store the resulting typed handles in the appropriate slot of
+    /// `pool`. Called once per planning cycle, before constraint/objective building.
+    fn declare_vars_into_pool(
         &self,
         n: usize,
-        c_startup: f64,
-        c_ramp: f64,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
         vars: &mut ProblemVariables,
-    ) -> Option<EvMilpVars> {
-        Some(self.declare_vars(n, c_startup, c_ramp, vars))
-    }
+        pool: &mut crate::controller::milp_interactions::MilpVarPool,
+    );
+
+    /// Phase B — constraints: generate all LP constraints for this asset,
+    /// reading its typed vars from `pool`.
+    fn constraints(
+        &self,
+        pool: &crate::controller::milp_interactions::MilpVarPool,
+        n: usize,
+        dt_h: f64,
+    ) -> Vec<good_lp::Constraint>;
+
+    /// Phase B — objective contribution: return the cost/comfort expression
+    /// for this asset's variables.
+    fn objective(
+        &self,
+        pool: &crate::controller::milp_interactions::MilpVarPool,
+        n: usize,
+        dt_h: f64,
+        c_wear_eur_kwh: f64,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
+    ) -> good_lp::Expression;
 }
 
-impl AssetMilpContext for HeaterMilpContext {
-    fn kind(&self) -> AssetKind {
-        AssetKind::Heater
-    }
-    fn declare_vars_heater(&self, n: usize, vars: &mut ProblemVariables) -> Option<HeaterMilpVars> {
-        Some(self.declare_vars(n, vars))
-    }
+/// MilpLoadMode: scheduling mode shared across EV and heater scalars.
+/// Mirrors the per-asset mode enums but decoupled from concrete asset types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MilpLoadMode {
+    MustRun,
+    MayRun,
+    MustNotRun,
 }
 
 // ── Plan-result helper free functions ─────────────────────────────────────────

@@ -365,6 +365,75 @@ impl BatteryMilpContext {
     }
 }
 
+impl crate::controller::milp_planner::AssetMilpContext for BatteryMilpContext {
+    fn asset_id(&self) -> &str {
+        "battery"
+    }
+
+    fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {
+        crate::controller::milp_planner::AssetKind::Battery
+    }
+
+    fn milp_params(
+        &self,
+        _n: usize,
+        _step_s: u64,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> crate::controller::milp_planner::AssetMilpParams {
+        crate::controller::milp_planner::AssetMilpParams::Battery(
+            crate::controller::milp_planner::BatteryScalars {
+                e_nom_kwh: self.e_nom_kwh,
+                e_init_kwh: self.e_init_kwh,
+                e_min_kwh: self.e_min_kwh,
+                e_max_kwh: self.e_max_kwh,
+                p_ch_max_kw: self.p_ch_max_kw,
+                p_dis_max_kw: self.p_dis_max_kw,
+                eff_ch: self.eff_ch,
+                eff_dis: self.eff_dis,
+            },
+        )
+    }
+
+    fn declare_vars_into_pool(
+        &self,
+        n: usize,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
+        vars: &mut ProblemVariables,
+        pool: &mut crate::controller::milp_interactions::MilpVarPool,
+    ) {
+        pool.bat = Some(self.declare_vars(n, c_startup_eur, c_ramp_eur_kw, vars));
+    }
+
+    fn constraints(
+        &self,
+        pool: &crate::controller::milp_interactions::MilpVarPool,
+        n: usize,
+        dt_h: f64,
+    ) -> Vec<Constraint> {
+        BatteryMilpContext::constraints(self, pool.bat.as_ref().unwrap(), n, dt_h)
+    }
+
+    fn objective(
+        &self,
+        pool: &crate::controller::milp_interactions::MilpVarPool,
+        n: usize,
+        dt_h: f64,
+        c_wear_eur_kwh: f64,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
+    ) -> Expression {
+        BatteryMilpContext::objective(
+            pool.bat.as_ref().unwrap(),
+            c_wear_eur_kwh,
+            c_startup_eur,
+            c_ramp_eur_kw,
+            n,
+            dt_h,
+        )
+    }
+}
+
 impl Battery {
     /// Build the MILP context from the live SoC (not the profile initial_soc).
     pub fn build_milp_context(&self, live_soc: f64) -> BatteryMilpContext {

@@ -474,6 +474,81 @@ impl EvMilpContext {
     }
 }
 
+impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
+    fn asset_id(&self) -> &str {
+        "ev"
+    }
+
+    fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {
+        crate::controller::milp_planner::AssetKind::Ev
+    }
+
+    fn milp_params(
+        &self,
+        _n: usize,
+        _step_s: u64,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> crate::controller::milp_planner::AssetMilpParams {
+        use crate::controller::milp_planner::MilpLoadMode;
+        let mode = match self.mode {
+            EvMilpMode::MustRun => MilpLoadMode::MustRun,
+            EvMilpMode::MayRun => MilpLoadMode::MayRun,
+            EvMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
+        };
+        crate::controller::milp_planner::AssetMilpParams::Ev(
+            crate::controller::milp_planner::EvScalars {
+                mode,
+                a_ev: self.a_ev.clone(),
+                t_dead_step: self.t_dead_step,
+                p_max_kw: self.p_max_kw,
+                p_min_kw: self.p_min_kw,
+                e_core_kwh: self.e_core_kwh,
+                e_extra_max_kwh: self.e_extra_max_kwh,
+                v_extra_eur_kwh: self.v_extra_eur_kwh,
+            },
+        )
+    }
+
+    fn declare_vars_into_pool(
+        &self,
+        n: usize,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
+        vars: &mut ProblemVariables,
+        pool: &mut crate::controller::milp_interactions::MilpVarPool,
+    ) {
+        pool.ev = Some(self.declare_vars(n, c_startup_eur, c_ramp_eur_kw, vars));
+    }
+
+    fn constraints(
+        &self,
+        pool: &crate::controller::milp_interactions::MilpVarPool,
+        n: usize,
+        dt_h: f64,
+    ) -> Vec<Constraint> {
+        EvMilpContext::constraints(self, pool.ev.as_ref().unwrap(), n, dt_h)
+    }
+
+    fn objective(
+        &self,
+        pool: &crate::controller::milp_interactions::MilpVarPool,
+        n: usize,
+        _dt_h: f64,
+        _c_wear_eur_kwh: f64,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
+    ) -> Expression {
+        // Phase 1 (c_startup=0): no friction, service reward active (w_services=1.0).
+        // Phase 2 friction (c_startup>0): startup+ramp active, service reward off.
+        let (startup, ramp, w_services) = if c_startup_eur == 0.0 {
+            (0.0_f64, 0.0_f64, 1.0_f64)
+        } else {
+            (c_startup_eur, c_ramp_eur_kw, 0.0_f64)
+        };
+        EvMilpContext::objective(self, pool.ev.as_ref().unwrap(), startup, ramp, w_services, n)
+    }
+}
+
 impl EvCharger {
     /// Declare all LP variables for this EV charger into `vars`. Delegates to `EvMilpContext::declare_vars`.
     pub fn declare_milp_vars(

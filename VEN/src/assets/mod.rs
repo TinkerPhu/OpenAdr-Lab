@@ -491,12 +491,12 @@ impl AssetConfig {
         ev_min_charge_kw: f64,
         v_ev_extra_eur_kwh: f64,
         lambda_sw: f64,
-    ) -> Option<AnyMilpContext> {
+    ) -> Option<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
         match self {
-            Self::Battery(cfg) => Some(AnyMilpContext::Battery(
+            Self::Battery(cfg) => Some(Box::new(
                 battery::BatteryMilpContext::from_state(state, cfg),
             )),
-            Self::Ev(cfg) => Some(AnyMilpContext::Ev(ev::EvMilpContext::from_state(
+            Self::Ev(cfg) => Some(Box::new(ev::EvMilpContext::from_state(
                 state,
                 cfg,
                 n,
@@ -506,29 +506,18 @@ impl AssetConfig {
                 ev_min_charge_kw,
                 v_ev_extra_eur_kwh,
             ))),
-            Self::Heater(cfg) => Some(AnyMilpContext::Heater(
-                heater::HeaterMilpContext::from_state(
-                    state,
-                    cfg,
-                    n,
-                    step_s,
-                    now,
-                    heater_target,
-                    lambda_sw,
-                ),
-            )),
+            Self::Heater(cfg) => Some(Box::new(heater::HeaterMilpContext::from_state(
+                state,
+                cfg,
+                n,
+                step_s,
+                now,
+                heater_target,
+                lambda_sw,
+            ))),
             _ => None,
         }
     }
-}
-
-/// Unified MILP context for one asset and planning cycle.
-/// One variant per MILP-capable asset type; non-MILP assets produce `None` from
-/// `AssetConfig::build_milp_context()`.
-pub enum AnyMilpContext {
-    Battery(battery::BatteryMilpContext),
-    Ev(ev::EvMilpContext),
-    Heater(heater::HeaterMilpContext),
 }
 
 /// Full Asset trait. Combines the physics interface (Phase A) with the identity and

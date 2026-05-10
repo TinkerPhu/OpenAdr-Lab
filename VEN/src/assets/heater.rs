@@ -609,6 +609,90 @@ impl HeaterMilpContext {
     }
 }
 
+impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
+    fn asset_id(&self) -> &str {
+        "heater"
+    }
+
+    fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {
+        crate::controller::milp_planner::AssetKind::Heater
+    }
+
+    fn milp_params(
+        &self,
+        _n: usize,
+        _step_s: u64,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> crate::controller::milp_planner::AssetMilpParams {
+        use crate::controller::milp_planner::MilpLoadMode;
+        let mode = match self.mode {
+            HeaterMilpMode::MustRun => MilpLoadMode::MustRun,
+            HeaterMilpMode::MayRun => MilpLoadMode::MayRun,
+            HeaterMilpMode::MustNotRun => MilpLoadMode::MustNotRun,
+        };
+        crate::controller::milp_planner::AssetMilpParams::Heater(
+            crate::controller::milp_planner::HeaterScalars {
+                mode,
+                t_dead_step: self.t_dead_step,
+                p_mid_kw: self.p_mid_kw,
+                p_full_kw: self.p_full_kw,
+                e_init_kwh: self.e_init_kwh,
+                e_max_kwh: self.e_max_kwh,
+                q_dem_kw: self.q_dem_kw,
+                e_target_kwh: self.e_target_kwh,
+                lambda_sw_eur: self.lambda_sw_eur,
+                initial_z_mid: self.initial_z_mid,
+                initial_z_full: self.initial_z_full,
+            },
+        )
+    }
+
+    fn declare_vars_into_pool(
+        &self,
+        n: usize,
+        _c_startup_eur: f64,
+        _c_ramp_eur_kw: f64,
+        vars: &mut ProblemVariables,
+        pool: &mut crate::controller::milp_interactions::MilpVarPool,
+    ) {
+        pool.heater = Some(self.declare_vars(n, vars));
+    }
+
+    fn constraints(
+        &self,
+        pool: &crate::controller::milp_interactions::MilpVarPool,
+        n: usize,
+        dt_h: f64,
+    ) -> Vec<Constraint> {
+        HeaterMilpContext::constraints(self, pool.heater.as_ref().unwrap(), n, dt_h)
+    }
+
+    fn objective(
+        &self,
+        pool: &crate::controller::milp_interactions::MilpVarPool,
+        n: usize,
+        _dt_h: f64,
+        _c_wear_eur_kwh: f64,
+        c_startup_eur: f64,
+        c_ramp_eur_kw: f64,
+    ) -> Expression {
+        let v = pool.heater.as_ref().unwrap();
+        if c_startup_eur == 0.0 {
+            // Phase 1: below-min penalty only; tier=0, lambda=0 (lambda stored but not applied).
+            HeaterMilpContext::objective(
+                self,
+                v,
+                0.0,
+                crate::controller::milp_planner::asset_port::M_LOW_EUR_PER_KWH,
+                n,
+            )
+        } else {
+            // Phase 2 friction: tier penalty (c_ramp_eur_kw carries w_tier) + self.lambda_sw_eur.
+            HeaterMilpContext::objective(self, v, c_ramp_eur_kw, 0.0, n)
+        }
+    }
+}
+
 impl Heater {
     /// Constant per-step thermal demand forecast [kW].
     /// Uses the midpoint of the comfort band as the representative tank temperature.
