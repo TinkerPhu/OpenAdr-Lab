@@ -6,7 +6,7 @@
 
 ## New Types (to be created)
 
-### `AssetKind` enum — `controller/milp/asset_port.rs`
+### `AssetKind` enum — `controller/milp_planner/asset_port.rs`
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -18,11 +18,11 @@ pub enum AssetKind {
 ```
 
 **Purpose**: Allows `declare_vars_into_pool()` dispatch and structured logging without concrete type imports.  
-**Location**: `VEN/src/controller/milp/asset_port.rs`, re-exported from `controller/milp/mod.rs`.
+**Location**: `VEN/src/controller/milp_planner/asset_port.rs`, re-exported from `controller/milp_planner/mod.rs`.
 
 ---
 
-### `BatteryScalars`, `EvScalars`, `HeaterScalars` — `controller/milp/asset_port.rs`
+### `BatteryScalars`, `EvScalars`, `HeaterScalars` — `controller/milp_planner/asset_port.rs`
 
 Lightweight scalar parameter bundles returned by `AssetMilpContext::milp_params()`.
 
@@ -56,9 +56,19 @@ pub struct HeaterScalars {
     pub p_full_kw: f64,
     pub e_init_kwh: f64,
     pub e_max_kwh: f64,
-    pub q_dem_kw: Vec<f64>,          // len = n
-    pub e_target_kwh: Option<f64>,
+    /// Constant per-step thermal demand [kW]: draw_kw + k_loss × (T_mid − ambient).
+    /// Scalar, not a Vec — the heater model uses a fixed demand every slot.
+    pub q_dem_kw: f64,
+    /// Target tank energy at deadline [kWh above T_min].
+    /// In MustRun mode: derived from target temperature. In MayRun/autonomous: equals e_max_kwh.
+    /// Always Some after construction — never None.
+    pub e_target_kwh: f64,
     pub lambda_sw_eur: f64,
+    /// 1.0 if heater was at mid power on the last real tick; 0.0 otherwise.
+    /// Used to anchor the switching penalty constraint at t=0.
+    pub initial_z_mid: f64,
+    /// 1.0 if heater was at full power on the last real tick; 0.0 otherwise.
+    pub initial_z_full: f64,
 }
 
 pub enum AssetMilpParams {
@@ -70,13 +80,13 @@ pub enum AssetMilpParams {
 ```
 
 **Purpose**: Carry the scalar parameters that `build_milp_inputs()` currently extracts by directly constructing concrete `*MilpContext` objects. After Phase 3, `inputs.rs` pattern-matches on `AssetMilpParams` variants instead.  
-**Location**: `VEN/src/controller/milp/asset_port.rs`.
+**Location**: `VEN/src/controller/milp_planner/asset_port.rs`.
 
 > **Note on `soc_init`**: The `soc_init` field was removed from `EvScalars` and `HeaterScalars`. Solution-reading (initial SoC readback for `SolveOutput`) is handled by `results.rs` directly via the `MilpVarPool` typed slots — this path is already architecturally compliant and does not go through `AssetMilpParams`. Adding a solution-reading field to the scalar structs would be dead code in this phase (see FR-003 scope note in spec.md).
 
 ---
 
-### `AssetMilpContext` trait — `controller/milp/asset_port.rs`
+### `AssetMilpContext` trait — `controller/milp_planner/asset_port.rs`
 
 ```rust
 pub trait AssetMilpContext: Send + Sync {
@@ -140,25 +150,25 @@ pub trait AssetMilpContext: Send + Sync {
 
 > **Note on `milp_params` parameters**: The `n`, `step_s`, and `now` arguments allow implementations to lazily compute per-slot vectors (e.g., EV availability mask from a calendar). Implementations that pre-compute all fields at construction time (e.g., `BatteryMilpContext`) may ignore these parameters. The signature is forward-compatible — do not simplify it to zero-arg.
 
-**Location**: `VEN/src/controller/milp/asset_port.rs`.
+**Location**: `VEN/src/controller/milp_planner/asset_port.rs`.
 
 ---
 
 ## Moved Types
 
-### `BatteryMilpVars` — moves from `assets/battery.rs` → `controller/milp_interactions.rs`
+### `BatteryMilpVars` — moves from `assets/battery.rs` → `controller/milp_planner/asset_port.rs`
 
-No field changes. All existing usages in `solver_phase1.rs`, `solver_phase2.rs` remain valid via re-export or direct import from `milp_interactions`.
+No field changes. Placed in `asset_port.rs` alongside `BatteryMilpContext` — context and vars for the same asset stay in the same file. `milp_interactions.rs` imports them from `crate::controller::milp_planner::asset_port`.
 
-### `EvMilpVars` — moves from `assets/ev.rs` → `controller/milp_interactions.rs`
-
-No field changes.
-
-### `HeaterMilpVars` — moves from `assets/heater.rs` → `controller/milp_interactions.rs`
+### `EvMilpVars` — moves from `assets/ev.rs` → `controller/milp_planner/asset_port.rs`
 
 No field changes.
 
-**Dependency reversal**: After the move, `assets/battery.rs` gains `use crate::controller::milp_interactions::BatteryMilpVars;` (outer ring → inner ring — permitted in hexagonal architecture). `milp_interactions.rs` loses its three `use crate::assets::*` imports.
+### `HeaterMilpVars` — moves from `assets/heater.rs` → `controller/milp_planner/asset_port.rs`
+
+No field changes.
+
+**Dependency reversal**: After the move, `assets/battery.rs` gains `use crate::controller::milp_planner::asset_port::BatteryMilpVars;` (outer ring → inner ring — permitted in hexagonal architecture). `milp_interactions.rs` loses its three `use crate::assets::*` imports and instead imports from `crate::controller::milp_planner::asset_port`.
 
 ---
 
@@ -176,9 +186,9 @@ pub struct MilpVarPool {
 }
 ```
 
-**Change**: The `BatteryMilpVars` / `EvMilpVars` / `HeaterMilpVars` types are now defined in this file rather than imported from `assets/`. No structural change to the pool itself.
+**Change**: `BatteryMilpVars` / `EvMilpVars` / `HeaterMilpVars` are no longer imported from `assets/`; they are now imported from `crate::controller::milp_planner::asset_port`. No structural change to the pool itself.
 
-### `build_milp_inputs()` signature — `controller/milp/inputs.rs`
+### `build_milp_inputs()` signature — `controller/milp_planner/inputs.rs`
 
 **Before**:
 ```rust
@@ -210,7 +220,7 @@ pub(crate) fn build_milp_inputs(
 
 **Note**: `ev_session` and `heater_target` session data moves into the asset context objects — the `EvMilpContext::from_state()` / `HeaterMilpContext` construction that currently uses them happens in `EvMilpContext::milp_params()` instead. The `SimSnapshot` (`assets` parameter) is no longer needed in `inputs.rs` because each context object was constructed with live state already baked in. `profile` remains for grid parameters (PV config, base load, grid limits).
 
-### `solve_phase1()` / `solve_phase2()` signatures — `controller/milp/solver_phase1.rs`, `solver_phase2.rs`
+### `solve_phase1()` / `solve_phase2()` signatures — `controller/milp_planner/solver_phase1.rs`, `solver_phase2.rs`
 
 **Added parameter**: `asset_contexts: &[Box<dyn AssetMilpContext>]`
 
@@ -259,7 +269,7 @@ tasks/planning.rs (or loops.rs)
 
 ## Test Profile — n=48 (new)
 
-**Location**: `VEN/src/controller/milp/tests/profiles/test48.yaml`  
+**Location**: `VEN/src/controller/milp_planner/tests/profiles/test48.yaml`  
 **Parameters**:
 
 ```yaml
