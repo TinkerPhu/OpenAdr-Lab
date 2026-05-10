@@ -12,6 +12,7 @@ use crate::assets::{
     PvInverter,
 };
 use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot, SimulatorPort, SimInjectState, SnapshotError};
+use crate::controller::timeline::{TimelineAssetData, TimelineSnapshot};
 use crate::models::SensorSnapshot;
 use crate::profile::{AssetProfile, Profile};
 use energy::EnergyCounter;
@@ -352,6 +353,29 @@ impl SimState {
                 export_kwh: self.grid.export_kwh,
             },
             assets: assets_map,
+        }
+    }
+    /// Build a `TimelineSnapshot` for rendering asset timelines.
+    ///
+    /// Clones each asset's history buffer, config, and current state so that
+    /// the sim lock can be released before the (potentially slow) timeline render.
+    pub fn to_timeline_snapshot(&self) -> TimelineSnapshot {
+        let assets = self
+            .iter_assets()
+            .map(|(entry, cfg)| {
+                (
+                    entry.id.clone(),
+                    TimelineAssetData {
+                        history: entry.history.clone(),
+                        config: cfg.clone(),
+                        current_state: entry.state.clone(),
+                    },
+                )
+            })
+            .collect();
+        TimelineSnapshot {
+            assets,
+            grid_history: self.grid_asset.history.clone(),
         }
     }
 }

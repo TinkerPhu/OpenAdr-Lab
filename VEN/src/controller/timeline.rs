@@ -10,9 +10,25 @@
 use chrono::{DateTime, Duration, Utc};
 use std::collections::{HashMap, HashSet};
 
+use crate::assets::{AssetConfig, AssetHistoryBuffer, AssetState};
 use crate::controller::trace::AssetTimelinePoint;
 use crate::entities::plan::Plan;
-use crate::simulator::SimState;
+
+/// Per-asset data needed to render timelines — decoupled from live `SimState`.
+pub struct TimelineAssetData {
+    pub history: AssetHistoryBuffer,
+    pub config: AssetConfig,
+    pub current_state: AssetState,
+}
+
+/// A decoupled snapshot of all data needed to render asset timelines.
+///
+/// Created by `SimState::to_timeline_snapshot()` while holding the sim lock;
+/// the lock is then released before the (potentially slow) timeline rendering.
+pub struct TimelineSnapshot {
+    pub assets: HashMap<String, TimelineAssetData>,
+    pub grid_history: AssetHistoryBuffer,
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Uniform grid resampling (RF-05c)
@@ -218,15 +234,19 @@ fn locf_weighted_mean(
 /// oscillating assets (e.g. thermostat bang-bang) produce a smooth transition
 /// from averaged history into the forecast, rather than a raw spike at NOW.
 /// Returns an empty-values point if no history exists.
-pub fn build_now_point(asset_id: &str, now: DateTime<Utc>, sim: &SimState) -> AssetTimelinePoint {
+pub fn build_now_point(
+    asset_id: &str,
+    now: DateTime<Utc>,
+    snap: &TimelineSnapshot,
+) -> AssetTimelinePoint {
     // Regular sim assets.
-    if let Some((entry, cfg)) = sim.find_asset(asset_id) {
-        if let Some(last) = entry.history.latest() {
-            let mut values = cfg.state_values(&last.state);
+    if let Some(data) = snap.assets.get(asset_id) {
+        if let Some(last) = data.history.latest() {
+            let mut values = data.config.state_values(&last.state);
             // Use a short rolling average for power so oscillating assets
             // (e.g. heater thermostat) show the same ~equilibrium value that
             // the LOCF-averaged history buckets already display.
-            let power_kw = entry
+            let power_kw = data
                 .history
                 .recent_avg_power(Duration::seconds(60), now)
                 .unwrap_or(last.power_kw);
@@ -236,7 +256,7 @@ pub fn build_now_point(asset_id: &str, now: DateTime<Utc>, sim: &SimState) -> As
     }
     // Grid is stored separately; read its history directly.
     if asset_id == "grid" {
-        if let Some(last) = sim.grid_asset.history.latest() {
+        if let Some(last) = snap.grid_history.latest() {
             let mut values = HashMap::new();
             values.insert("power_kw".into(), last.power_kw);
             return AssetTimelinePoint { ts: now, values };
@@ -265,7 +285,7 @@ pub struct TimeWindow {
 pub fn build_asset_timeline(
     asset_id: &str,
     known_assets: &HashSet<String>,
-    sim: &SimState,
+    snap: &TimelineSnapshot,
     plan: Option<&Plan>,
     now: DateTime<Utc>,
     window: TimeWindow,
@@ -286,22 +306,20 @@ pub fn build_asset_timeline(
     // ── Past: from per-asset history ring buffer ───────────────────────────────
 
     let back_window = Duration::milliseconds((hours_back * 3_600_000.0) as i64);
-    let mut points: Vec<AssetTimelinePoint> = if let Some((entry, cfg)) = sim.find_asset(asset_id) {
-        entry
-            .history
+    let mut points: Vec<AssetTimelinePoint> = if let Some(data) = snap.assets.get(asset_id) {
+        data.history
             .slice(back_window, now)
             .into_iter()
             .filter(|p| p.ts >= past_start)
             .map(|p| {
-                let mut values = cfg.state_values(&p.state);
+                let mut values = data.config.state_values(&p.state);
                 values.insert("power_kw".into(), p.power_kw);
                 AssetTimelinePoint { ts: p.ts, values }
             })
             .collect()
     } else if is_grid {
         // Grid is stored separately from the sim asset list; read its history directly.
-        sim.grid_asset
-            .history
+        snap.grid_history
             .slice(back_window, now)
             .into_iter()
             .filter(|p| p.ts >= past_start)
@@ -321,9 +339,10 @@ pub fn build_asset_timeline(
     // Delegated to each asset type via AssetConfig::plan_trajectory; returns None for
     // assets that have no live-state correction (battery/EV SoC are replanned on every
     // deviation trigger so staleness is negligible for those).
-    let mut plan_traj = sim
-        .find_asset(asset_id)
-        .and_then(|(entry, cfg)| cfg.plan_trajectory(&entry.state));
+    let mut plan_traj = snap
+        .assets
+        .get(asset_id)
+        .and_then(|d| d.config.plan_trajectory(&d.current_state));
 
     if let Some(plan) = plan {
         for slot in plan.all_slots() {
@@ -422,7 +441,6 @@ pub fn build_asset_timeline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::Grid;
     use crate::assets::{
         AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, BaseLoadState, EvCharger, EvState,
         HistoryPoint,
@@ -431,8 +449,6 @@ mod tests {
     use crate::entities::plan::{
         AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanningHorizon,
     };
-    use crate::simulator::energy::EnergyCounter;
-    use crate::simulator::{AssetEntry, GridMeter, SimState};
     use chrono::Utc;
     use uuid::Uuid;
 
@@ -444,27 +460,15 @@ mod tests {
         ids.iter().map(|s| s.to_string()).collect()
     }
 
-    /// Create a BaseLoad AssetEntry + AssetConfig with history rows `(offset_s, power_kw)`.
-    fn make_base_entry(id: &str, rows: &[(i64, f64)]) -> (AssetEntry, AssetConfig) {
+    /// Create a BaseLoad `TimelineAssetData` with history rows `(offset_s, power_kw)`.
+    fn make_base_snap(id: &str, rows: &[(i64, f64)]) -> (String, TimelineAssetData) {
         let cfg = AssetConfig::BaseLoad(BaseLoad {
             baseline_kw: 0.0,
             baseline_kw_profile: 0.0,
         });
-        let mut entry = AssetEntry {
-            id: id.to_string(),
-            state: AssetState::BaseLoad(BaseLoadState {
-                actual_power_kw: 0.0,
-            }),
-            setpoint_kw: 0.0,
-            last_power_kw: 0.0,
-            energy: EnergyCounter {
-                import_kwh: 0.0,
-                export_kwh: 0.0,
-            },
-            history: AssetHistoryBuffer::new(3600),
-        };
+        let mut history = AssetHistoryBuffer::new(3600);
         for (offset, power) in rows {
-            entry.history.push(HistoryPoint {
+            history.push(HistoryPoint {
                 ts: ts(*offset),
                 power_kw: *power,
                 state: AssetState::BaseLoad(BaseLoadState {
@@ -472,11 +476,15 @@ mod tests {
                 }),
             });
         }
-        (entry, cfg)
+        let current_state = AssetState::BaseLoad(BaseLoadState { actual_power_kw: 0.0 });
+        (
+            id.to_string(),
+            TimelineAssetData { history, config: cfg, current_state },
+        )
     }
 
-    /// Create an EV AssetEntry + AssetConfig with history rows `(offset_s, power_kw, soc)`.
-    fn make_ev_entry(id: &str, rows: &[(i64, f64, f64)]) -> (AssetEntry, AssetConfig) {
+    /// Create an EV `TimelineAssetData` with history rows `(offset_s, power_kw, soc)`.
+    fn make_ev_snap(id: &str, rows: &[(i64, f64, f64)]) -> (String, TimelineAssetData) {
         let cfg = AssetConfig::Ev(EvCharger {
             max_charge_kw: 11.0,
             max_discharge_kw: 0.0,
@@ -486,23 +494,9 @@ mod tests {
             default_charge_kw: 7.4,
             min_soc: 0.1,
         });
-        let mut entry = AssetEntry {
-            id: id.to_string(),
-            state: AssetState::Ev(EvState {
-                soc: 0.5,
-                plugged: true,
-                actual_power_kw: 0.0,
-            }),
-            setpoint_kw: 0.0,
-            last_power_kw: 0.0,
-            energy: EnergyCounter {
-                import_kwh: 0.0,
-                export_kwh: 0.0,
-            },
-            history: AssetHistoryBuffer::new(3600),
-        };
+        let mut history = AssetHistoryBuffer::new(3600);
         for (offset, power, soc) in rows {
-            entry.history.push(HistoryPoint {
+            history.push(HistoryPoint {
                 ts: ts(*offset),
                 power_kw: *power,
                 state: AssetState::Ev(EvState {
@@ -512,20 +506,18 @@ mod tests {
                 }),
             });
         }
-        (entry, cfg)
+        let current_state = AssetState::Ev(EvState { soc: 0.5, plugged: true, actual_power_kw: 0.0 });
+        (
+            id.to_string(),
+            TimelineAssetData { history, config: cfg, current_state },
+        )
     }
 
-    /// Build a SimState from (AssetEntry, AssetConfig) pairs.
-    fn make_sim(entries: Vec<(AssetEntry, AssetConfig)>) -> SimState {
-        let (assets, configs): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
-        SimState {
-            asset_configs: configs,
-            assets,
-            grid: GridMeter::default(),
-            grid_asset: Grid::new(),
-            pv_smoothing: crate::simulator::PvSmoothingState::default(),
-            base_load_smoothing: Default::default(),
-            last_tick: DateTime::from_timestamp(0, 0).unwrap(),
+    /// Build a `TimelineSnapshot` from `(id, TimelineAssetData)` pairs.
+    fn make_timeline_snap(entries: Vec<(String, TimelineAssetData)>) -> TimelineSnapshot {
+        TimelineSnapshot {
+            assets: entries.into_iter().collect(),
+            grid_history: AssetHistoryBuffer::new(3600),
         }
     }
 
@@ -604,12 +596,12 @@ mod tests {
     #[test]
     fn unknown_asset_returns_none() {
         let known = make_known(&["ev"]);
-        let sim = make_sim(vec![]);
+        let snap = make_timeline_snap(vec![]);
         let now = Utc::now();
         let result = build_asset_timeline(
             "xyz",
             &known,
-            &sim,
+            &snap,
             None,
             now,
             TimeWindow {
@@ -625,14 +617,14 @@ mod tests {
         let now = ts(100);
         let known = make_known(&["ev"]);
         // 3 rows: ts(0), ts(50), ts(100) — all within 1h back from ts(100)
-        let sim = make_sim(vec![make_base_entry(
+        let snap = make_timeline_snap(vec![make_base_snap(
             "ev",
             &[(0, 1.0), (50, 2.0), (100, 3.0)],
         )]);
         let result = build_asset_timeline(
             "ev",
             &known,
-            &sim,
+            &snap,
             None,
             now,
             TimeWindow {
@@ -650,14 +642,14 @@ mod tests {
     fn future_only_window_returns_plan_points() {
         let now = ts(0);
         let known = make_known(&["ev"]);
-        let sim = make_sim(vec![]);
+        let snap = make_timeline_snap(vec![]);
         let mut plan = empty_plan(now);
         // Slot starting 60s from now with EV allocation
         plan.slots.push(make_slot(60, "ev", 3.5, now));
         let result = build_asset_timeline(
             "ev",
             &known,
-            &sim,
+            &snap,
             Some(&plan),
             now,
             TimeWindow {
@@ -681,7 +673,7 @@ mod tests {
         // Slot where EV allocation uses 1 kW from PV surplus and 2 kW from grid.
         let now = ts(0);
         let known = make_known(&["ev"]);
-        let sim = make_sim(vec![]);
+        let snap = make_timeline_snap(vec![]);
         let mut plan = empty_plan(now);
         let mut slot = make_slot(60, "", 0.0, now); // no default allocation
         let slot_h = 300.0 / 3600.0;
@@ -699,7 +691,7 @@ mod tests {
         let result = build_asset_timeline(
             "ev",
             &known,
-            &sim,
+            &snap,
             Some(&plan),
             now,
             TimeWindow {
@@ -721,7 +713,7 @@ mod tests {
         // PV has no allocation → cost_rate and co2_rate must be 0.
         let now = ts(0);
         let known = make_known(&["pv"]);
-        let sim = make_sim(vec![]);
+        let snap = make_timeline_snap(vec![]);
         let mut plan = empty_plan(now);
         let mut slot = make_slot(60, "", 0.0, now);
         slot.pv_forecast_kw = 4.0;
@@ -729,7 +721,7 @@ mod tests {
         let result = build_asset_timeline(
             "pv",
             &known,
-            &sim,
+            &snap,
             Some(&plan),
             now,
             TimeWindow {
@@ -750,13 +742,13 @@ mod tests {
         let now = ts(3600); // 1 hour into epoch
         let known = make_known(&["ev"]);
         // 2 past rows within 1h back
-        let sim = make_sim(vec![make_base_entry("ev", &[(0, 1.0), (1800, 2.0)])]);
+        let snap = make_timeline_snap(vec![make_base_snap("ev", &[(0, 1.0), (1800, 2.0)])]);
         let mut plan = empty_plan(now);
         plan.slots.push(make_slot(60, "ev", 3.0, now));
         let result = build_asset_timeline(
             "ev",
             &known,
-            &sim,
+            &snap,
             Some(&plan),
             now,
             TimeWindow {
@@ -777,7 +769,7 @@ mod tests {
     fn grid_asset_returns_net_power_and_tariff_keys() {
         let now = ts(0);
         let known = make_known(&["ev"]);
-        let sim = make_sim(vec![]);
+        let snap = make_timeline_snap(vec![]);
         let mut plan = empty_plan(now);
         // Grid slot: net_import_kw = 2.0
         let mut slot = make_slot(60, "", 0.0, now);
@@ -790,7 +782,7 @@ mod tests {
         let result = build_asset_timeline(
             "grid",
             &known,
-            &sim,
+            &snap,
             Some(&plan),
             now,
             TimeWindow {
@@ -810,7 +802,7 @@ mod tests {
         // Net export: PV > load → net_kw = -3.0; cost_rate and co2_rate must be negative.
         let now = ts(0);
         let known = make_known(&["pv"]);
-        let sim = make_sim(vec![]);
+        let snap = make_timeline_snap(vec![]);
         let mut plan = empty_plan(now);
         let mut slot = make_slot(60, "", 0.0, now);
         slot.net_import_kw = 0.0;
@@ -823,7 +815,7 @@ mod tests {
         let result = build_asset_timeline(
             "grid",
             &known,
-            &sim,
+            &snap,
             Some(&plan),
             now,
             TimeWindow {
@@ -845,14 +837,14 @@ mod tests {
     fn slot_without_asset_allocation_emits_zero_kw() {
         let now = ts(0);
         let known = make_known(&["ev", "battery"]);
-        let sim = make_sim(vec![]);
+        let snap = make_timeline_snap(vec![]);
         let mut plan = empty_plan(now);
         // Slot only has battery allocation, no EV allocation
         plan.slots.push(make_slot(60, "battery", 2.0, now));
         let result = build_asset_timeline(
             "ev",
             &known,
-            &sim,
+            &snap,
             Some(&plan),
             now,
             TimeWindow {
@@ -871,14 +863,14 @@ mod tests {
     fn result_is_sorted_ascending() {
         let now = ts(3600);
         let known = make_known(&["ev"]);
-        let sim = make_sim(vec![make_base_entry("ev", &[(1800, 1.0), (3600, 2.0)])]);
+        let snap = make_timeline_snap(vec![make_base_snap("ev", &[(1800, 1.0), (3600, 2.0)])]);
         let mut plan = empty_plan(now);
         plan.slots.push(make_slot(300, "ev", 3.0, now));
         plan.slots.push(make_slot(600, "ev", 3.5, now));
         let result = build_asset_timeline(
             "ev",
             &known,
-            &sim,
+            &snap,
             Some(&plan),
             now,
             TimeWindow {
@@ -1030,8 +1022,8 @@ mod tests {
     fn build_now_point_uses_recent_average_for_power() {
         let now = ts(100);
         // Single point in window — average equals the single reading.
-        let sim = make_sim(vec![make_ev_entry("ev", &[(99, 2.0, 0.6)])]);
-        let np = build_now_point("ev", now, &sim);
+        let snap = make_timeline_snap(vec![make_ev_snap("ev", &[(99, 2.0, 0.6)])]);
+        let np = build_now_point("ev", now, &snap);
         assert_eq!(np.ts, now);
         assert!((np.values["power_kw"] - 2.0).abs() < 1e-9);
         assert!((np.values["soc"] - 0.6).abs() < 1e-9);
@@ -1044,27 +1036,15 @@ mod tests {
         let base = 1_700_000_000i64;
         let now = DateTime::from_timestamp(base + 60, 0).unwrap();
 
-        // Build a BaseLoad entry whose history alternates 0 / 2.5 kW.
+        // Build a BaseLoad `TimelineAssetData` whose history alternates 0 / 2.5 kW.
         let cfg = AssetConfig::BaseLoad(BaseLoad {
             baseline_kw: 0.0,
             baseline_kw_profile: 0.0,
         });
-        let mut entry = AssetEntry {
-            id: "osc".into(),
-            state: AssetState::BaseLoad(BaseLoadState {
-                actual_power_kw: 0.0,
-            }),
-            setpoint_kw: 0.0,
-            last_power_kw: 0.0,
-            energy: crate::simulator::energy::EnergyCounter {
-                import_kwh: 0.0,
-                export_kwh: 0.0,
-            },
-            history: AssetHistoryBuffer::new(3600),
-        };
+        let mut history = AssetHistoryBuffer::new(3600);
         for i in 0i64..60 {
             let power = if i % 2 == 0 { 0.0 } else { 2.5 };
-            entry.history.push(HistoryPoint {
+            history.push(HistoryPoint {
                 ts: DateTime::from_timestamp(base + i, 0).unwrap(),
                 power_kw: power,
                 state: AssetState::BaseLoad(BaseLoadState {
@@ -1072,10 +1052,16 @@ mod tests {
                 }),
             });
         }
-
-        let sim = make_sim(vec![(entry, cfg)]);
+        let snap = make_timeline_snap(vec![(
+            "osc".to_string(),
+            TimelineAssetData {
+                history,
+                config: cfg,
+                current_state: AssetState::BaseLoad(BaseLoadState { actual_power_kw: 0.0 }),
+            },
+        )]);
         let known = make_known(&["osc"]);
-        let np = build_now_point("osc", now, &sim);
+        let np = build_now_point("osc", now, &snap);
 
         // Time-weighted average over 60 alternating points should be ~1.25 kW.
         let power = np.values["power_kw"];
@@ -1094,8 +1080,8 @@ mod tests {
     #[test]
     fn build_now_point_empty_history() {
         let now = ts(100);
-        let sim = make_sim(vec![]);
-        let np = build_now_point("ev", now, &sim);
+        let snap = make_timeline_snap(vec![]);
+        let np = build_now_point("ev", now, &snap);
         assert_eq!(np.ts, now);
         assert!(np.values.is_empty());
     }
@@ -1193,7 +1179,7 @@ mod tests {
         // build_asset_timeline must return power_kw = -5.0 (negative = export).
         let now = Utc::now();
         let known = make_known(&["pv"]);
-        let sim = make_sim(vec![]);
+        let snap = make_timeline_snap(vec![]);
 
         let slot = make_pv_slot(60, 5.0, now); // 60 s in future
         let plan = Plan {
@@ -1221,7 +1207,7 @@ mod tests {
         let points = build_asset_timeline(
             "pv",
             &known,
-            &sim,
+            &snap,
             Some(&plan),
             now,
             TimeWindow {
@@ -1245,7 +1231,7 @@ mod tests {
         // Night slot: pv_forecast_kw = 0.0 → power_kw = 0.0 (no generation).
         let now = Utc::now();
         let known = make_known(&["pv"]);
-        let sim = make_sim(vec![]);
+        let snap = make_timeline_snap(vec![]);
 
         let slot = make_pv_slot(60, 0.0, now);
         let plan = Plan {
@@ -1273,7 +1259,7 @@ mod tests {
         let points = build_asset_timeline(
             "pv",
             &known,
-            &sim,
+            &snap,
             Some(&plan),
             now,
             TimeWindow {
@@ -1297,7 +1283,7 @@ mod tests {
     fn planned_state_merged_into_future_point_values() {
         let now = ts(0);
         let known = make_known(&["battery-1"]);
-        let sim = make_sim(vec![]);
+        let snap = make_timeline_snap(vec![]);
         let mut plan = empty_plan(now);
         let mut slot = make_slot(60, "battery-1", 2.0, now);
         slot.planned_state_by_asset.insert(
@@ -1309,7 +1295,7 @@ mod tests {
         let result = build_asset_timeline(
             "battery-1",
             &known,
-            &sim,
+            &snap,
             Some(&plan),
             now,
             TimeWindow {
