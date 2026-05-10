@@ -11,7 +11,7 @@ use crate::assets::{
     AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, Battery, EvCharger, Grid, Heater,
     PvInverter,
 };
-use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot, SimulatorPort, SimInjectState, SnapshotError};
+use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot, SimulatorPort, SnapshotError};
 use crate::controller::timeline::{TimelineAssetData, TimelineSnapshot};
 use crate::models::SensorSnapshot;
 use crate::profile::{AssetProfile, Profile};
@@ -429,12 +429,6 @@ fn default_history_buffer() -> AssetHistoryBuffer {
 impl SimulatorPort for SimState {
     fn snapshot(&self) -> Result<SimSnapshot, SnapshotError> {
         Ok(self.to_sim_snapshot())
-    }
-
-    fn inject(&self, _state: SimInjectState) {
-        // Injection is applied via the tick loop's inject_state mechanism (state::SimInjectState).
-        // This impl satisfies the trait for test wiring; in production the tick loop reads
-        // state::SimInjectState and applies it via sim.tick() arguments.
     }
 }
 

@@ -1,3 +1,4 @@
+#![allow(dead_code)] // infrastructure types used by milp_planner submodules via use super::*
 //! Cross-asset MILP interaction infrastructure.
 //!
 //! Defines [`AssetInteraction`], a trait that encapsulates LP variables,

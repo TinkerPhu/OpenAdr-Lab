@@ -1,29 +1,15 @@
-use chrono::{DateTime, Duration, Utc};
 use good_lp::solvers::highs::highs;
 use good_lp::{
     constraint, variable, variables, Expression, Solution, SolverModel, Variable,
     WithInitialSolution, WithMipGap, WithTimeLimit,
 };
-use tracing::warn;
-use uuid::Uuid;
 
-use crate::assets::battery::{Battery, BatteryMilpContext};
-use crate::assets::ev::{EvCharger, EvMilpContext, EvMilpMode, EvState};
-use crate::assets::heater::{Heater, HeaterMilpContext, HeaterMilpMode, HeaterState};
-use crate::assets::{AssetState, PvInverter};
+use crate::assets::battery::BatteryMilpContext;
+use crate::assets::ev::{EvMilpContext, EvMilpMode};
+use crate::assets::heater::{HeaterMilpContext, HeaterMilpMode};
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
-use crate::controller::simulator_port::SimSnapshot;
-use crate::entities::asset::PlanTrigger;
-use crate::entities::capacity::OadrCapacityState;
-use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
-use crate::entities::plan::{
-    AssetAllocation, CostBreakdown, FlexibilityEnvelope, Plan, PlanSummary, PlanTimeSlot,
-    PlanWarning, PlanningHorizon, WarningSeverity,
-};
-use crate::entities::tariff_snapshot::TariffTimeSeries;
-use crate::profile::{PlannerObjective, Profile};
 
 use super::solver_phase1::{add_model_constraints, read_solve_output, solve_phase1, M_LOW_EUR_PER_KWH};
 use super::types::*;

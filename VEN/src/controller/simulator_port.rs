@@ -10,11 +10,12 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Abstraction over the physics simulator for controller logic.
+///
+/// Snapshot-only: production injection flows through the tick loop, not this port.
+/// `MockSimulatorPort` exposes a standalone `inject()` method for test assertions.
 pub trait SimulatorPort: Send + Sync {
     /// Take a point-in-time snapshot of simulator state.
     fn snapshot(&self) -> Result<SimSnapshot, SnapshotError>;
-    /// Push override state into the simulator (e.g., from UI injections).
-    fn inject(&self, state: SimInjectState);
 }
 
 /// Point-in-time snapshot of all simulator state needed by controller logic.
@@ -82,6 +83,7 @@ impl AssetSnapshot {
 /// This is the controller-side inject state type. The UI layer uses the richer
 /// `crate::state::SimInjectState` which is mapped to this type before calling `inject()`.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // fields read only in mock test assertions
 pub struct SimInjectState {
     pub ambient_temp_c_override: Option<f64>,
     pub pv_irradiance_override: Option<f64>,
@@ -94,6 +96,7 @@ pub struct SimInjectState {
 
 /// Error returned by `SimulatorPort::snapshot()`.
 #[derive(Debug, Clone, thiserror::Error)]
+#[allow(dead_code)] // Transient/Fatal reserved for future SimulatorPort implementations
 pub enum SnapshotError {
     #[error("simulator not yet initialized")]
     Uninitialized,

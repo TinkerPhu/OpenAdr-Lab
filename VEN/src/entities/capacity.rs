@@ -1,3 +1,4 @@
+#![allow(dead_code)] // types constructed via serde deserialization, not direct instantiation
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

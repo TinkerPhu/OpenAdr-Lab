@@ -140,7 +140,7 @@ pub(crate) fn accumulate_deviation(
     profile: &Profile,
     trigger_tx: &tokio::sync::watch::Sender<PlanTrigger>,
     deviation_pending: &std::sync::atomic::AtomicBool,
-    now: DateTime<Utc>,
+    _now: DateTime<Utc>,
 ) {
     // Residual exceeds dead-band: increment sustained deviation counter
     if residual_kw.abs() > profile.absorber.dead_band_kw {
