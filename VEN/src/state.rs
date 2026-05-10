@@ -7,7 +7,7 @@ use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::models::SensorSnapshot;
-use crate::simulator::SimSnapshot;
+use crate::controller::SimSnapshot;
 use chrono::DateTime;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
