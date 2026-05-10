@@ -1060,7 +1060,7 @@ mod tests {
                 current_state: AssetState::BaseLoad(BaseLoadState { actual_power_kw: 0.0 }),
             },
         )]);
-        let known = make_known(&["osc"]);
+        let _known = make_known(&["osc"]);
         let np = build_now_point("osc", now, &snap);
 
         // Time-weighted average over 60 alternating points should be ~1.25 kW.

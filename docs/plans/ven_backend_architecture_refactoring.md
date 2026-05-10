@@ -217,6 +217,8 @@ The updated diagram makes the service boundaries explicit: `AppState` now contai
 
 Estimated effort: **3–5 days** (largest phase; schedule alongside a new HEMS feature, not as standalone cleanup)
 
+> **Constraint — `tasks/sim_tick/tick.rs` line limit**: As of 2026-05, `tick.rs` is 193/200 lines (7 lines of headroom). Do not add logic to `tick.rs` during Phase 5. New tick-path behaviour must go into `helpers.rs` or a new `tasks/sim_tick/` sub-file. If `tick.rs` must grow, split it first.
+
 ### Phase 6 — Remove `PROFILE` from routes (AB-06)
 
 `R_HEMS` currently imports `profile.rs` directly. Profile values needed by route handlers must be extracted into the application service layer (Phase 5) so that `routes/` has zero config imports.

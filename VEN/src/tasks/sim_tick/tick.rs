@@ -1,11 +1,10 @@
 // Simulator tick loop body, extracted to keep sim_tick/mod.rs under 200 lines.
 
-use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
 
 use crate::controller;
+use crate::controller::SimulatorPort;
 use crate::entities::asset::PlanTrigger;
 use crate::planner_events::PlannerEventTx;
 use crate::profile::Profile;
@@ -82,7 +81,7 @@ pub(crate) async fn tick_once(
             .map(|s| s.net_import_kw - s.net_export_kw)
             .unwrap_or(0.0);
 
-        let pre_snap = sim_guard.to_sim_snapshot();
+        let pre_snap = sim_guard.snapshot().expect("SimState::snapshot is infallible");
 
         let mut sp_map = super::helpers::build_tick_setpoints(
             &pre_snap,

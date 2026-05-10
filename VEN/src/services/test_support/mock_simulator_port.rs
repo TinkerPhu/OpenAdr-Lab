@@ -55,6 +55,7 @@ impl MockSimulatorPort {
     }
 
     /// Build a single-asset `SimSnapshot` for tests needing one asset.
+    #[allow(dead_code)]
     pub fn snapshot_with_asset(id: &str, snap: AssetSnapshot) -> SimSnapshot {
         use chrono::Utc;
         use std::collections::HashMap;
@@ -77,8 +78,12 @@ impl SimulatorPort for MockSimulatorPort {
     fn snapshot(&self) -> Result<SimSnapshot, SnapshotError> {
         self.snapshot.clone()
     }
+}
 
-    fn inject(&self, state: SimInjectState) {
+impl MockSimulatorPort {
+    /// Record an inject call — not part of the trait; used only in tests to assert
+    /// that inject was called with expected values.
+    pub fn inject(&self, state: SimInjectState) {
         self.injected.lock().unwrap().push(state);
     }
 }
