@@ -124,8 +124,36 @@ pub(crate) fn spawn_planning(
             let profile_clone = profile.clone(); // Arc<Profile>, cheap
             let trigger_for_planner = trigger.clone(); // keep `trigger` for acceptance gate below
             let snap = sim_snap.to_sim_snapshot();
+
+            // Build per-asset MILP contexts from live simulator state.
+            // This happens before spawn_blocking so asset states are captured at this instant.
+            let step_s = profile.planner.plan_step_s;
+            let n_slots = (profile.planner.plan_horizon_h as f64 * 3600.0 / step_s as f64) as usize;
+            let lambda_sw = profile
+                .heater_config()
+                .map(|h| h.effective_switching_penalty())
+                .unwrap_or(0.0);
+            let asset_contexts: Vec<Box<dyn controller::milp_planner::asset_port::AssetMilpContext>> =
+                sim_snap
+                    .iter_assets()
+                    .filter_map(|(entry, cfg)| {
+                        cfg.build_milp_context(
+                            &entry.state,
+                            n_slots,
+                            step_s,
+                            now,
+                            ev_sess.as_ref(),
+                            heat_tgt.as_ref(),
+                            profile.ev_config().map(|e| e.min_charge_kw).unwrap_or(0.0),
+                            profile.planner.v_ev_extra_eur_kwh,
+                            lambda_sw,
+                        )
+                    })
+                    .collect();
+
             let plan = tokio::task::spawn_blocking(move || {
                 controller::milp_planner::run_planner(
+                    asset_contexts,
                     &snap,
                     &tariff_ts,
                     &capacity,

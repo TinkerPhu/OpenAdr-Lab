@@ -5,19 +5,9 @@ use crate::profile::{PlannerObjective, Profile};
 
 // ── Internal MILP types ──────────────────────────────────────────────────────
 
-/// Internal MILP load mode for an asset (EV / heater).
-/// Derived from the presence of an active device session (EvSession / HeaterTarget).
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum MilpLoadMode {
-    /// Hard energy requirement — must be met within deadline. Used when
-    /// EvSession.soft_deadline=false, or a HeaterTarget with remaining work is present.
-    MustRun,
-    /// Soft energy target — controlled by a reward term in the objective.
-    /// Used when EvSession.soft_deadline=true.
-    MayRun,
-    /// Asset absent, currently unavailable, or no device session present.
-    MustNotRun,
-}
+// MilpLoadMode is defined in asset_port.rs (the port module) and re-exported here
+// so all existing `use super::types::*` callers still resolve it.
+pub use super::asset_port::MilpLoadMode;
 
 /// Phase 1 objective coefficients (economic cost). Derived from PlannerConfig / PlannerObjective.
 #[derive(Debug, Clone)]
