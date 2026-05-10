@@ -337,6 +337,7 @@ impl HeaterMilpContext {
 // ── AssetKind and helper parameter types ─────────────────────────────────────
 
 /// Discriminant for the MILP-capable asset types.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetKind {
     Battery,
@@ -345,6 +346,7 @@ pub enum AssetKind {
 }
 
 /// Pre-computed scalar parameters for a battery instance in one planning cycle.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct BatteryScalars {
     pub e_nom_kwh: f64,
@@ -358,6 +360,7 @@ pub struct BatteryScalars {
 }
 
 /// Pre-computed scalar parameters for an EV charger in one planning cycle.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EvScalars {
     pub p_max_kw: f64,
@@ -368,6 +371,7 @@ pub struct EvScalars {
 }
 
 /// Pre-computed scalar parameters for a heater in one planning cycle.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct HeaterScalars {
     pub p_mid_kw: f64,
@@ -380,6 +384,7 @@ pub struct HeaterScalars {
 }
 
 /// Unified asset MILP parameters — one variant per MILP-capable asset type.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum AssetMilpParams {
     Battery(BatteryScalars),
@@ -393,6 +398,7 @@ pub enum AssetMilpParams {
 /// trait-object dispatch in the solver phases. Currently used for `AssetKind`
 /// discrimination; the `declare_vars`/`constraints`/`objective`/`read_solution`
 /// methods forward to the inherent impl methods in the respective assets files.
+#[allow(dead_code)]
 pub trait AssetMilpContext: Send + Sync {
     fn kind(&self) -> AssetKind;
     fn declare_vars_battery(
