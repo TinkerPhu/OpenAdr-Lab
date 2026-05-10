@@ -11,7 +11,8 @@ use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::models::SensorSnapshot;
 use crate::profile::Profile;
-use crate::simulator::{SimSnapshot, SimState};
+use crate::controller::SimSnapshot;
+use crate::simulator::SimState;
 use crate::state::SimInjectState;
 
 /// PHASE 1: Apply Behaviour A one-shot state injections to the simulator.

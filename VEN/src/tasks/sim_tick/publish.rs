@@ -10,7 +10,8 @@ use crate::entities::asset::PlanTrigger;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::models::SensorSnapshot;
-use crate::simulator::{SimSnapshot, SimState};
+use crate::controller::SimSnapshot;
+use crate::simulator::SimState;
 use crate::state::AppState;
 use crate::vtn::VtnClient;
 
@@ -82,7 +83,7 @@ pub(crate) async fn publish_sim_tick_result(
             if rt.is_running(now) {
                 sim_snap.assets.insert(
                     rt.asset_id.clone(),
-                    crate::simulator::AssetSnapshot {
+                    crate::controller::AssetSnapshot {
                         power_kw: rt.power_kw,
                         asset_type: "base_load".into(),
                         cap_max_import_kw: rt.power_kw,
