@@ -1,5 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
-use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, Solution, Variable};
+use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, Solution};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
