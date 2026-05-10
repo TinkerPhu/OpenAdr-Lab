@@ -209,10 +209,26 @@ pub async fn post_sim_inject(
     State(ctx): State<AppCtx>,
     Json(body): Json<PostSimInjectBody>,
 ) -> impl IntoResponse {
+    // Trigger a replan only for fields the MILP planner uses as inputs.
+    // base_load_kw / base_load_alpha are one-shot physics overrides for test deviation
+    // simulation — triggering a replan on them would corrupt the absorber's assertion
+    // window by adopting a new plan mid-test.
+    let should_replan = body.pv_irradiance.is_some()
+        || body.battery_soc.is_some()
+        || body.ev_soc.is_some()
+        || body.ev_plugged.is_some()
+        || body.ev_soc_target.is_some()
+        || body.heater_temp_c.is_some()
+        || body.heater_setpoint_c.is_some()
+        || body.ambient_temp_c.is_some()
+        || body.grid_import_limit_kw.is_some()
+        || body.grid_export_limit_kw.is_some();
     let mut current = ctx.state.inject_state().await;
     merge_inject(&mut current, body);
     ctx.state.set_inject_state(current).await;
-    let _ = ctx.trigger_tx.send(PlanTrigger::AssetStateChange);
+    if should_replan {
+        let _ = ctx.trigger_tx.send(PlanTrigger::AssetStateChange);
+    }
     axum::http::StatusCode::NO_CONTENT
 }
 
