@@ -20,6 +20,8 @@ Auto-generated from all feature plans. Last updated: 2026-03-15
 - None (VEN persists state to JSON in /data/state.json) (018-split-loops-tasks)
 - Rust stable (2021 edition) + tokio (async runtime), axum (HTTP), serde/serde_json, chrono, uuid (019-introduce-simulator-port)
 - N/A — no new persistence; existing `/data/state.json` JSON persistence is unchanged (019-introduce-simulator-port)
+- Rust stable (2021 edition) + `good_lp` (HiGHS MILP solver), `tokio`, `axum`, `serde`, `chrono` (020-milp-asset-port)
+- N/A — no persistence changes (020-milp-asset-port)
 
 - [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION] (004-ven-controller-reform)
 
@@ -40,6 +42,7 @@ cd src; pytest; ruff check .
 [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]: Follow standard conventions
 
 ## Recent Changes
+- 020-milp-asset-port: Added Rust stable (2021 edition) + `good_lp` (HiGHS MILP solver), `tokio`, `axum`, `serde`, `chrono`
 - 019-introduce-simulator-port: Added Rust stable (2021 edition) + tokio (async runtime), axum (HTTP), serde/serde_json, chrono, uuid
 - 018-split-loops-tasks: Added Rust (stable, 2021 edition) + tokio, axum, serde, serde_json, serde_yaml, uuid, chrono, good_lp (HiGHS), sqlx (openleadr-rs)
 

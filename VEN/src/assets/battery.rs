@@ -7,6 +7,8 @@ use super::{Asset, AssetCapability, AssetState, ControlDescriptor};
 use crate::common::{Interpolation, TimeSeries};
 use crate::profile::BatteryConfig;
 
+pub use crate::controller::milp_planner::asset_port::{BatteryMilpContext, BatteryMilpVars, BatterySolOutput};
+
 /// Battery storage config. Bidirectional.
 /// Positive setpoint = charge (import), negative = discharge (export).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -224,53 +226,9 @@ impl Battery {
 }
 
 // ── Battery MILP plugin types ─────────────────────────────────────────────────
-
-/// Pre-computed MILP parameters for one battery instance and planning cycle.
-/// Built from live state; consumed by `declare_milp_vars` and the constraint/
-/// objective methods. Avoids repeated field accesses inside tight solver loops.
-#[derive(Debug, Clone)]
-pub struct BatteryMilpContext {
-    pub e_nom_kwh: f64,
-    /// Live SoC × capacity — NOT the profile's initial_soc.
-    pub e_init_kwh: f64,
-    pub e_min_kwh: f64,
-    pub e_max_kwh: f64,
-    pub p_ch_max_kw: f64,
-    pub p_dis_max_kw: f64,
-    /// One-way charge efficiency = √(round_trip_efficiency)
-    pub eff_ch: f64,
-    /// One-way discharge efficiency = √(round_trip_efficiency)
-    pub eff_dis: f64,
-}
-
-/// Typed LP variable handles for one battery in the MILP model.
-/// `z_active`, `delta_active`, and `delta_ramp` are empty vecs when the
-/// corresponding penalty coefficients are zero (feature disabled).
-#[derive(Debug, Clone)]
-pub struct BatteryMilpVars {
-    pub p_ch: Vec<Variable>,
-    pub p_dis: Vec<Variable>,
-    pub u_bat: Vec<Variable>,
-    /// SoC trajectory, len = n + 1 (index 0 = initial SoC, fixed).
-    pub e_bat: Vec<Variable>,
-    /// Activity indicator per slot (1 = charging or discharging). Empty if startup penalty disabled.
-    pub z_active: Vec<Variable>,
-    /// Idle→active transition binary per slot boundary. Empty if startup penalty disabled.
-    pub delta_active: Vec<Variable>,
-    /// |net_bat[t] − net_bat[t−1]| ramp variable. Empty if ramp penalty disabled.
-    pub delta_ramp: Vec<Variable>,
-    /// Maximum discharge power [kW] — cached from context for cross-asset interactions.
-    pub dis_max_kw: f64,
-}
-
-/// Per-battery MILP solution readback.
-#[derive(Debug, Clone)]
-pub struct BatterySolOutput {
-    pub p_ch_kw: Vec<f64>,
-    pub p_dis_kw: Vec<f64>,
-    /// SoC trajectory [kWh], len = n + 1.
-    pub e_kwh: Vec<f64>,
-}
+// Struct definitions live in `controller::milp_planner::asset_port`.
+// Method implementations (declare_vars, constraints, objective, read_solution, from_state)
+// are in the `impl` blocks below (cross-file inherent impl — valid Rust).
 
 impl BatteryMilpContext {
     /// Declare all LP variables for this battery. Context-side canonical implementation;

@@ -4,9 +4,7 @@ use good_lp::{
     WithInitialSolution, WithMipGap, WithTimeLimit,
 };
 
-use crate::assets::battery::BatteryMilpContext;
-use crate::assets::ev::{EvMilpContext, EvMilpMode};
-use crate::assets::heater::{HeaterMilpContext, HeaterMilpMode};
+use super::asset_port::{BatteryMilpContext, EvMilpContext, EvMilpMode, HeaterMilpContext, HeaterMilpMode};
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
