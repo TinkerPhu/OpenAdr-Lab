@@ -3461,3 +3461,59 @@ All 6 functions have adequate BDD coverage via existing feature files. No new sc
 **319 passed, 0 failed, 13 ignored** (332 total) — unchanged after cleanup.
 
 Commits: `25dff11` — T023 re-export removal + T001b audit.
+
+
+---
+
+## Phase 31 — T017 Timeline Snapshot + T011a milp_planner Split
+
+**Branch**: `019-introduce-simulator-port`
+**Scope**: Two deferred items from feature 019 completed — SC-004 compliance for timeline module (T017) and Constitution Principle VI compliance for `milp_planner.rs` (T011a).
+
+### T017 — `routes/timeline.rs` SC-004 Migration
+
+**Problem**: `controller/timeline.rs` and `routes/timeline.rs` held direct `SimState` imports — the last two SC-004 violations. These were deferred because timeline functions needed history ring buffers and asset configs not available in `SimSnapshot`.
+
+**Solution**: Created a purpose-built `TimelineSnapshot` struct in `controller/timeline.rs`:
+- `TimelineAssetData` — clones `AssetHistoryBuffer`, `AssetConfig`, and `AssetState` per asset
+- `TimelineSnapshot` — wraps the per-asset map + grid history buffer
+- `SimState::to_timeline_snapshot()` added in `simulator/mod.rs` — snapshot-and-release pattern
+
+Route handlers in `routes/timeline.rs` now call `ctx.sim.lock().await.to_timeline_snapshot()` and immediately drop the lock before rendering. This fixes the latency concern (lock released before expensive JSON serialisation).
+
+Test module in `controller/timeline.rs` rewritten to build `TimelineSnapshot` directly — zero `SimState`/`AssetEntry`/`EnergyCounter` imports in test code.
+
+**Files changed**:
+- `VEN/src/controller/timeline.rs` — Added `TimelineAssetData` + `TimelineSnapshot`; migrated `build_now_point` and `build_asset_timeline` signatures
+- `VEN/src/simulator/mod.rs` — Added `to_timeline_snapshot()` method to `SimState`
+- `VEN/src/routes/timeline.rs` — Removed `SimState` import; lock-release before render
+
+### T011a — Split `milp_planner.rs` into Sub-Modules
+
+**Problem**: `milp_planner.rs` was 4134 lines — a direct Constitution Principle VI violation (≤500 lines per file). The single file contained type definitions, 8 builder/solver functions, and 2048 lines of tests.
+
+**Solution**: Converted to `controller/milp_planner/` directory module:
+
+| File | Contents | Lines |
+|------|----------|-------|
+| `mod.rs` | module root, imports, `run_planner`, sub-mod declarations | ~110 |
+| `types.rs` | `MilpLoadMode`, `Phase1/2Weights`, `MilpInputs`, `ShiftableLoadMilp`, `SolveOutput`, weight builders | ~360 |
+| `inputs.rs` | `build_milp_inputs` | ~430 |
+| `solver_phase1.rs` | `solve_phase1`, `add_model_constraints`, `read_solve_output` | ~380 |
+| `solver_phase2.rs` | `build_phase2_warm_start`, `solve_phase2`, `solve_milp_two_phase` | ~380 |
+| `envelopes.rs` | `build_plan_envelopes` | ~140 |
+| `results.rs` | `fallback_plan`, `translate_to_plan` | ~420 |
+| `tests/mod.rs` | test helpers + `mod` declarations | ~360 |
+| `tests/basic.rs` | basic run_planner tests | ~410 |
+| `tests/solver.rs` | solver input tests | ~400 |
+| `tests/pv.rs` | PV forecast tests | ~180 |
+| `tests/planner.rs` | regression guard tests | ~325 |
+| `tests/heater.rs` | heater trajectory tests | ~415 |
+
+Internal functions made `pub(crate)` where sibling-module access required; `run_planner` remains the only `pub` item in the module.
+
+### Test Result
+
+**319 passed, 0 failed, 13 ignored** (332 total) — unchanged.
+
+SC-004 now fully satisfied across all modules.

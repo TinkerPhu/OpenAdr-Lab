@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::collections::HashMap;
 
-use crate::simulator::SimState;
+use crate::controller::timeline::TimelineSnapshot;
 
 use crate::AppCtx;
 
@@ -93,7 +93,6 @@ pub async fn get_timeline(
 ) -> impl IntoResponse {
     use crate::controller::timeline::compute_uniform_grid;
     use axum::http::StatusCode;
-    use std::collections::HashSet;
 
     let now = Utc::now();
     let hours_back = params.hours_back.unwrap_or(1.0);
@@ -108,13 +107,14 @@ pub async fn get_timeline(
         compute_uniform_grid(window_start, window_end, now, resolution_s);
 
     let plan = ctx.state.active_plan().await;
-    let sim_guard = ctx.sim.lock().await;
-    let known_assets: HashSet<String> = sim_guard.assets.iter().map(|e| e.id.clone()).collect();
+    let snap = ctx.sim.lock().await.to_timeline_snapshot();
+    let known_assets: std::collections::HashSet<String> =
+        snap.assets.keys().cloned().collect();
 
     match build_grid_aligned_array(
         &asset_id,
         &known_assets,
-        &*sim_guard,
+        &snap,
         plan.as_ref(),
         now,
         hours_back,
@@ -137,7 +137,7 @@ pub async fn get_timeline(
 pub fn build_grid_aligned_array(
     asset_id: &str,
     known_assets: &std::collections::HashSet<String>,
-    sim: &SimState,
+    snap: &TimelineSnapshot,
     plan: Option<&crate::entities::plan::Plan>,
     now: DateTime<Utc>,
     hours_back: f64,
@@ -153,7 +153,7 @@ pub fn build_grid_aligned_array(
     let raw = build_asset_timeline(
         asset_id,
         known_assets,
-        sim,
+        snap,
         plan,
         now,
         TimeWindow {
@@ -169,7 +169,7 @@ pub fn build_grid_aligned_array(
     // Build now-point before future resampling so we can use it as a LOCF seed.
     // This covers the gap when the currently-active plan slot started before `now` and
     // therefore fell into raw_history — without a seed the leading future buckets are null.
-    let now_point = build_now_point(asset_id, now, sim);
+    let now_point = build_now_point(asset_id, now, snap);
     let fut_seed = if now_point.values.is_empty() {
         None
     } else {
@@ -212,7 +212,6 @@ pub async fn get_timeline_all(
     Query(params): Query<TimelineParams>,
 ) -> impl IntoResponse {
     use crate::controller::timeline::compute_uniform_grid;
-    use std::collections::HashSet;
 
     let now = Utc::now();
     let hours_back = params.hours_back.unwrap_or(1.0);
@@ -227,8 +226,9 @@ pub async fn get_timeline_all(
         compute_uniform_grid(window_start, window_end, now, resolution_s);
 
     let plan = ctx.state.active_plan().await;
-    let sim_guard = ctx.sim.lock().await;
-    let known_assets: HashSet<String> = sim_guard.assets.iter().map(|e| e.id.clone()).collect();
+    let snap = ctx.sim.lock().await.to_timeline_snapshot();
+    let known_assets: std::collections::HashSet<String> =
+        snap.assets.keys().cloned().collect();
 
     let mut result: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
 
@@ -237,7 +237,7 @@ pub async fn get_timeline_all(
         if let Some(arr) = build_grid_aligned_array(
             asset_id,
             &known_assets,
-            &*sim_guard,
+            &snap,
             plan.as_ref(),
             now,
             hours_back,
@@ -254,7 +254,7 @@ pub async fn get_timeline_all(
     if let Some(arr) = build_grid_aligned_array(
         "grid",
         &known_assets,
-        &*sim_guard,
+        &snap,
         plan.as_ref(),
         now,
         hours_back,
