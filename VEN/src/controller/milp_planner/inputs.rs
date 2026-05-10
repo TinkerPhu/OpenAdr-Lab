@@ -1,9 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 
-use crate::assets::battery::{Battery, BatteryMilpContext};
-use crate::assets::ev::{EvCharger, EvMilpContext, EvMilpMode, EvState};
-use crate::assets::heater::{Heater, HeaterMilpContext, HeaterMilpMode, HeaterState};
-use crate::assets::{AssetState, PvInverter};
+use super::asset_port::{BatteryMilpContext, EvMilpContext, EvMilpMode, HeaterMilpContext, HeaterMilpMode};
 use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
@@ -11,6 +8,19 @@ use crate::entities::tariff_snapshot::TariffTimeSeries;
 use crate::profile::Profile;
 
 use super::types::*;
+
+/// Natural sin-model irradiance [0,1] at time `ts`, without any user offset.
+/// Mirrors `PvInverter::natural_irradiance_at()` from `assets/pv.rs`.
+fn pv_natural_irradiance(ts: DateTime<Utc>) -> f64 {
+    use chrono::Timelike;
+    let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
+    if hour >= 6.0 && hour <= 18.0 {
+        let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
+        angle.sin().max(0.0)
+    } else {
+        0.0
+    }
+}
 
 /// Build the full MILP input parameter set from the current runtime state.
 ///
@@ -70,7 +80,7 @@ pub(crate) fn build_milp_inputs(
         // slider) and pv_alpha (blend-back speed slider) both project into the
         // forecast. Falls back to the static sin model if no "pv" asset exists.
         let pv_kw = if let Some(pv_snap) = assets.assets.get("pv") {
-            let natural = PvInverter::natural_irradiance_at(slot_t);
+            let natural = pv_natural_irradiance(slot_t);
             let irradiance_offset = pv_snap.val("irradiance_offset").unwrap_or(0.0);
             let pv_alpha = pv_snap.val("pv_alpha").unwrap_or(0.1);
             let rated_kw = pv_snap.val("rated_kw").unwrap_or(0.0);
@@ -94,7 +104,18 @@ pub(crate) fn build_milp_inputs(
         if let Some(bat_cfg) = profile.battery_config() {
             let ctx = if let Some(bat_snap) = assets.assets.get("battery") {
                 let soc = bat_snap.val("soc").unwrap_or(bat_cfg.initial_soc);
-                Battery::from_config(bat_cfg).build_milp_context(soc)
+                let cap = bat_cfg.capacity_kwh;
+                let eff = bat_cfg.round_trip_efficiency.sqrt();
+                BatteryMilpContext {
+                    e_nom_kwh: cap,
+                    e_init_kwh: soc * cap,
+                    e_min_kwh: bat_cfg.min_soc * cap,
+                    e_max_kwh: cap,
+                    p_ch_max_kw: bat_cfg.max_charge_kw,
+                    p_dis_max_kw: bat_cfg.max_discharge_kw,
+                    eff_ch: eff,
+                    eff_dis: eff,
+                }
             } else {
                 // No live battery in sim (e.g. cleared in test): fall back to profile initial_soc
                 let cap = bat_cfg.capacity_kwh;
@@ -139,22 +160,19 @@ pub(crate) fn build_milp_inputs(
         let (ctx, soc_init) = if let Some(ev_snap) = assets.assets.get("ev") {
             let plugged = ev_snap.val("plugged").map(|v| v > 0.5).unwrap_or(false);
             let soc = ev_snap.val("soc").unwrap_or(ev_cfg.initial_soc);
-            let fake_state = AssetState::Ev(EvState {
-                soc,
-                plugged,
-                actual_power_kw: ev_snap.power_kw,
-            });
-            let ev_struct = EvCharger::from_config(ev_cfg);
             (
-                EvMilpContext::from_state(
-                    &fake_state,
-                    &ev_struct,
+                EvMilpContext::from_live(
+                    plugged,
+                    soc,
+                    ev_cfg.max_charge_kw,
+                    ev_cfg.battery_kwh,
+                    ev_cfg.soc_target,
+                    ev_cfg.min_charge_kw,
+                    profile.planner.v_ev_extra_eur_kwh,
                     n,
                     step_s,
                     now,
                     ev_session,
-                    ev_cfg.min_charge_kw,
-                    profile.planner.v_ev_extra_eur_kwh,
                 ),
                 Some(soc),
             )
@@ -219,22 +237,29 @@ pub(crate) fn build_milp_inputs(
         heat_iz_full,
     ) = if let Some(heat_cfg) = profile.heater_config() {
         let lambda = heat_cfg.effective_switching_penalty();
-        let heat_struct = Heater::from_config(heat_cfg);
         let ctx = if let Some(h_snap) = assets.assets.get("heater") {
             let temp_c = h_snap.val("temp_c")
                 .unwrap_or((heat_cfg.temp_min_c + heat_cfg.temp_max_c) / 2.0);
-            let fake_state = AssetState::Heater(HeaterState {
-                temperature_c: temp_c,
-                actual_power_kw: h_snap.power_kw,
-            });
-            HeaterMilpContext::from_state(
-                &fake_state,
-                &heat_struct,
+            let thermal_mass = heat_cfg.effective_thermal_mass();
+            let t_mid = (heat_cfg.temp_min_c + heat_cfg.temp_max_c) / 2.0;
+            let ambient = 10.0;
+            let q_dem = (heat_cfg.effective_draw_kw()
+                + heat_cfg.effective_k_loss() * (t_mid - ambient))
+                .max(0.0);
+            HeaterMilpContext::from_live(
+                temp_c,
+                h_snap.power_kw,
+                heat_cfg.temp_min_c,
+                heat_cfg.temp_max_c,
+                heat_cfg.mid_kw.unwrap_or(0.0),
+                heat_cfg.max_kw,
+                thermal_mass,
+                q_dem,
+                lambda,
                 n,
                 step_s,
                 now,
                 heater_target,
-                lambda,
             )
         } else {
             // No live heater in sim: reconstruct from profile config

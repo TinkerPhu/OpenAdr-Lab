@@ -22,13 +22,11 @@ use tracing::warn;
 use uuid::Uuid;
 
 #[allow(unused_imports)]
-use crate::assets::battery::{Battery, BatteryMilpContext};
-#[allow(unused_imports)]
-use crate::assets::ev::{EvCharger, EvMilpContext, EvMilpMode, EvState};
-#[allow(unused_imports)]
-use crate::assets::heater::{Heater, HeaterMilpContext, HeaterMilpMode, HeaterState};
-#[allow(unused_imports)]
-use crate::assets::{AssetState, PvInverter};
+use self::asset_port::{
+    BatteryMilpContext, BatteryMilpVars, BatterySolOutput,
+    EvMilpContext, EvMilpMode, EvMilpVars, EvSolOutput,
+    HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput,
+};
 #[allow(unused_imports)]
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
@@ -55,6 +53,7 @@ mod solver_phase1;
 mod solver_phase2;
 mod envelopes;
 mod results;
+pub mod asset_port;
 
 use self::inputs::*;
 use self::results::*;
