@@ -10,9 +10,7 @@
 
 use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, Variable};
 
-use crate::assets::battery::BatteryMilpVars;
-use crate::assets::ev::EvMilpVars;
-use crate::assets::heater::HeaterMilpVars;
+use crate::controller::milp_planner::asset_port::{BatteryMilpVars, EvMilpVars, HeaterMilpVars};
 
 // ── Grid-level MILP inputs ───────────────────────────────────────────────────
 

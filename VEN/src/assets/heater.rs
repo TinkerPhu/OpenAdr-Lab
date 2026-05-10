@@ -7,6 +7,8 @@ use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
 use crate::profile::HeaterConfig;
 
+pub use crate::controller::milp_planner::asset_port::{HeaterMilpMode, HeaterMilpContext, HeaterMilpVars, HeaterSolOutput};
+
 /// Heater config. Consumes power for space heating (positive = import).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Heater {
@@ -343,75 +345,8 @@ impl Asset for Heater {
 }
 
 // ── Heater MILP plugin types ──────────────────────────────────────────────────
-
-/// Scheduling mode for the heater in the MILP model.
-#[derive(Debug, Clone, PartialEq)]
-pub enum HeaterMilpMode {
-    /// Hard energy target — E[t_dead] ≥ e_target_kwh must hold at the deadline.
-    MustRun,
-    /// Opportunistic — scheduled by tariffs; soft deadline reward via z_heat_ready.
-    MayRun,
-    /// Heater absent — all power variables fixed to zero.
-    MustNotRun,
-}
-
-/// Pre-computed MILP parameters for one heater and planning cycle.
-/// Uses a per-step tank energy state trajectory (E[t]) instead of a global energy budget.
-#[derive(Debug, Clone)]
-pub struct HeaterMilpContext {
-    pub mode: HeaterMilpMode,
-    /// Deadline step index (None = no hard deadline; autonomous MayRun path).
-    pub t_dead_step: Option<usize>,
-    /// Mid power level [kW].
-    pub p_mid_kw: f64,
-    /// Full power level [kW] = max_kw.
-    pub p_full_kw: f64,
-    /// Initial tank energy above T_min [kWh]. May be negative when tank is below T_min.
-    pub e_init_kwh: f64,
-    /// Maximum usable tank energy above T_min [kWh] = (T_max − T_min) × thermal_mass.
-    pub e_max_kwh: f64,
-    /// Constant per-step thermal demand [kW]: draw_kw + k_loss × (T_mid − ambient).
-    pub q_dem_kw: f64,
-    /// Target tank energy at deadline [kWh above T_min]. = e_max_kwh in autonomous mode.
-    pub e_target_kwh: f64,
-    /// Relay switching penalty [EUR/switch event] added to the objective.
-    pub lambda_sw_eur: f64,
-    /// Initial heater mid-power binary (1.0 if heater was at mid power last tick).
-    pub initial_z_mid: f64,
-    /// Initial heater full-power binary (1.0 if heater was at full power last tick).
-    pub initial_z_full: f64,
-}
-
-/// Typed LP variable handles for one heater in the MILP model.
-#[derive(Debug, Clone)]
-pub struct HeaterMilpVars {
-    /// Binary: 1 = mid power tier active at slot t. len = n.
-    pub z_heat_mid: Vec<Variable>,
-    /// Binary: 1 = full power tier active at slot t. len = n.
-    pub z_heat_full: Vec<Variable>,
-    /// Binary: 1 when deadline is met (MayRun only; fixed 0 in MustRun / autonomous).
-    pub z_heat_ready: Variable,
-    /// Continuous: tank energy above T_min [kWh] at slot t. Domain [−e_max, e_max]. len = n.
-    pub e_tank: Vec<Variable>,
-    /// Continuous ≥ 0: below-minimum soft-violation slack [kWh] at slot t. len = n.
-    pub s_low: Vec<Variable>,
-    /// Continuous ≥ 0: switching indicator per step. sw[0] measures switch from initial hardware state. len = n.
-    pub sw: Vec<Variable>,
-}
-
-/// Per-heater MILP solution readback.
-#[derive(Debug, Clone)]
-pub struct HeaterSolOutput {
-    pub z_heat_mid: Vec<f64>,
-    pub z_heat_full: Vec<f64>,
-    pub z_heat_ready: f64,
-    /// Tank energy above T_min [kWh] per slot. len = n.
-    pub e_tank_kwh: Vec<f64>,
-    /// Below-min slack [kWh] per slot. len = n.
-    pub s_low_kwh: Vec<f64>,
-    /// Switching cost contribution per step. len = n.
-    pub sw: Vec<f64>,
-}
+// Struct/enum definitions live in `controller::milp_planner::asset_port`.
+// Method implementations below are cross-file inherent impl blocks — valid Rust.
 
 impl HeaterMilpContext {
     /// Declare all LP variables for this heater.
@@ -465,6 +400,8 @@ impl HeaterMilpContext {
             e_tank,
             s_low,
             sw,
+            p_mid_kw: self.p_mid_kw,
+            p_full_kw: self.p_full_kw,
         }
     }
 

@@ -1,9 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
-use crate::assets::battery::Battery;
-use crate::assets::ev::EvCharger;
-use crate::assets::heater::Heater;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::{
@@ -12,6 +9,7 @@ use crate::entities::plan::{
 };
 use crate::profile::{PlannerObjective, Profile};
 
+use super::asset_port::{battery_future_state, ev_future_state_at, ev_soc_trajectory, heater_future_state};
 use super::envelopes::build_plan_envelopes;
 use super::types::*;
 
@@ -289,21 +287,21 @@ pub(crate) fn translate_to_plan(
     // ── Planned state by asset (T008/T013/T017) ──────────────────────────
     // Battery SoC forecast — e_bat_kwh[t] is start-of-slot stored energy.
     if let (Some(ref bid), Some(bat_cfg)) = (&bat_id, profile.battery_config()) {
-        let battery = Battery::from_config(bat_cfg);
+        let capacity_kwh = bat_cfg.capacity_kwh;
         for t in 0..n {
             slots[t]
                 .planned_state_by_asset
-                .insert(bid.clone(), battery.future_state_values(sol.e_bat_kwh[t]));
+                .insert(bid.clone(), battery_future_state(sol.e_bat_kwh[t], capacity_kwh));
         }
     }
     // EV SoC forecast — requires soc_ev_init captured in MilpInputs.
     if let (Some(ref eid), Some(soc_init)) = (&ev_id, inputs.soc_ev_init) {
         if let Some(ev_cfg) = profile.ev_config() {
-            let traj = EvCharger::soc_trajectory(&sol.p_ev_kw, soc_init, ev_cfg.battery_kwh, dt_h);
+            let traj = ev_soc_trajectory(&sol.p_ev_kw, soc_init, ev_cfg.battery_kwh, dt_h);
             for t in 0..n {
                 slots[t]
                     .planned_state_by_asset
-                    .insert(eid.clone(), EvCharger::future_state_values_at(traj[t]));
+                    .insert(eid.clone(), ev_future_state_at(traj[t]));
             }
         }
     }
@@ -311,11 +309,12 @@ pub(crate) fn translate_to_plan(
     if let Some(ref hid) = heater_id {
         if !sol.e_heat_tank_kwh.is_empty() {
             if let Some(heat_cfg) = profile.heater_config() {
-                let heater = Heater::from_config(heat_cfg);
+                let thermal_mass = heat_cfg.effective_thermal_mass();
+                let temp_min = heat_cfg.temp_min_c;
                 for t in 0..n {
                     slots[t].planned_state_by_asset.insert(
                         hid.clone(),
-                        heater.future_state_values(sol.e_heat_tank_kwh[t]),
+                        heater_future_state(sol.e_heat_tank_kwh[t], temp_min, thermal_mass),
                     );
                 }
             }

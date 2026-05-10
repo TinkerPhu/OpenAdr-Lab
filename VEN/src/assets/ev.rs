@@ -8,6 +8,8 @@ use crate::common::{Interpolation, TimeSeries};
 
 use crate::profile::EvConfig;
 
+pub use crate::controller::milp_planner::asset_port::{EvMilpMode, EvMilpContext, EvMilpVars, EvSolOutput};
+
 /// EV Charger config. Positive = charge (import), negative = V2G discharge (export).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvCharger {
@@ -252,64 +254,8 @@ impl Asset for EvCharger {
 }
 
 // ── EV MILP plugin types ──────────────────────────────────────────────────────
-
-/// Scheduling mode for the EV in the MILP model.
-#[derive(Debug, Clone, PartialEq)]
-pub enum EvMilpMode {
-    /// Hard energy requirement — must be met within the deadline.
-    MustRun,
-    /// Soft energy target — controlled by a reward term in the objective.
-    MayRun,
-    /// EV absent, unplugged, or no charging session — power fixed to zero.
-    MustNotRun,
-}
-
-/// Pre-computed MILP parameters for one EV charger and planning cycle.
-#[derive(Debug, Clone)]
-pub struct EvMilpContext {
-    pub mode: EvMilpMode,
-    /// Per-step availability mask (false forces p_ev[t] = 0).
-    pub a_ev: Vec<bool>,
-    /// Last step index that counts toward the core energy sum (None = open horizon).
-    pub t_dead_step: Option<usize>,
-    /// Maximum charge power [kW].
-    pub p_max_kw: f64,
-    /// Semi-continuous minimum charge power [kW] (prevents trickle charging).
-    pub p_min_kw: f64,
-    /// Core energy requirement [kWh] from the active session.
-    pub e_core_kwh: f64,
-    /// Opportunistic headroom = battery_kwh × (1 − soc_target) [kWh].
-    pub e_extra_max_kwh: f64,
-    /// Reward per kWh of extra opportunistic charging above core [€/kWh].
-    pub v_extra_eur_kwh: f64,
-}
-
-/// Typed LP variable handles for one EV charger in the MILP model.
-#[derive(Debug, Clone)]
-pub struct EvMilpVars {
-    pub p_ev: Vec<Variable>,
-    /// Binary on/off flag per slot (respects availability mask).
-    pub z_ev_on: Vec<Variable>,
-    /// Binary: 1 when EV core target is met (MayRun only; fixed 0 otherwise).
-    pub z_ev_core: Variable,
-    /// Total extra energy above core requirement [kWh].
-    pub e_ev_extra: Variable,
-    /// Startup transition binaries (empty when startup penalty disabled).
-    pub delta_ev: Vec<Variable>,
-    /// Ramp variables |p_ev[t] − p_ev[t−1]| (empty when ramp penalty disabled).
-    pub delta_ev_ramp: Vec<Variable>,
-    /// Semi-continuous minimum charge power [kW] — cached for cross-asset interactions.
-    pub p_min_kw: f64,
-}
-
-/// Per-EV MILP solution readback.
-#[derive(Debug, Clone)]
-pub struct EvSolOutput {
-    pub p_ev_kw: Vec<f64>,
-    pub z_ev_on: Vec<f64>,
-    pub e_ev_extra_kwh: f64,
-    pub z_ev_core: f64,
-}
+// Struct/enum definitions live in `controller::milp_planner::asset_port`.
+// Method implementations below are cross-file inherent impl blocks — valid Rust.
 
 impl EvMilpContext {
     /// Declare all LP variables for this EV charger. Context-side canonical implementation.
