@@ -6,17 +6,17 @@
 
 ## D1 — Trait location: where does `AssetMilpContext` live?
 
-**Decision**: New file `VEN/src/controller/milp/asset_port.rs`, re-exported from `controller/milp/mod.rs`.
+**Decision**: New file `VEN/src/controller/milp_planner/asset_port.rs`, re-exported from `controller/milp_planner/mod.rs`.
 
 **Rationale**: 
-- The trait is a *port* definition, owned by the domain controller layer. Placing it inside `controller/milp/` makes it immediately visible to all solver sub-modules without extra import paths.
+- The trait is a *port* definition, owned by the domain controller layer. Placing it inside `controller/milp_planner/` makes it immediately visible to all solver sub-modules without extra import paths.
 - Keeping it in a dedicated file (not tacked onto `types.rs`) preserves the 500-line file limit and makes the abstraction boundary explicit.
 - `mod.rs` re-exports (`pub use asset_port::{AssetKind, AssetMilpContext, AssetMilpParams}`) so callers outside the module only need one import path.
 
 **Alternatives considered**:
 - *Extend `milp_interactions.rs`*: Rejected — that file is already complex; mixing port definitions with interaction logic worsens cohesion.
 - *Extend `types.rs`*: Rejected — `types.rs` contains MILP numeric types; the trait is an architectural boundary, not a data type.
-- *Top-level `controller/asset_milp_port.rs`*: Rejected — unnecessarily broad visibility; the trait is consumed only by `milp/` sub-modules.
+- *Top-level `controller/asset_milp_port.rs`*: Rejected — unnecessarily broad visibility; the trait is consumed only by `milp_planner/` sub-modules.
 
 ---
 
@@ -28,12 +28,12 @@
 - `MilpInputs` (flat scalar struct) must remain unchanged to avoid breaking the 20+ existing unit tests.  
 - The scalar parameter structs (`BatteryScalars`, `EvScalars`, `HeaterScalars`) are lightweight data containers defined in `asset_port.rs` alongside the trait — they carry no LP-variable handles.
 - The match in `build_milp_inputs()` replaces the per-asset `if let Some(cfg) = profile.battery_config()` blocks with `if let AssetMilpParams::Battery(b) = asset.milp_params(…)`. The algorithmic content (mode resolution, EV horizon mask, heater target energy) moves into each asset's `milp_params()` implementation.
-- This approach passes the constitution invariant (`grep -r "use crate::assets::" VEN/src/controller/milp → empty`) without altering `MilpInputs`.
+- This approach passes the constitution invariant (`grep -r "use crate::assets::" VEN/src/controller/milp_planner → empty`) without altering `MilpInputs`.
 
 **Alternatives considered**:
 - *Pass `MilpInputs` by mutable reference into a trait method `fn populate_milp_inputs(&self, inputs: &mut MilpInputs, …)`*: Rejected — couples the trait contract tightly to `MilpInputs` layout; any future MilpInputs field change forces trait changes.
 - *Remove per-asset scalar fields from `MilpInputs` and pass assets directly into the solver*: Rejected — would break all 20+ existing unit tests that construct `MilpInputs` directly; Phase 4 is the right time for that deeper restructuring.
-- *Keep `build_milp_inputs()` with concrete imports but move it out of `controller/milp/`*: Rejected — the constitution invariant target is `VEN/src/controller/milp/`, which includes `inputs.rs`.
+- *Keep `build_milp_inputs()` with concrete imports but move it out of `controller/milp_planner/`*: Rejected — the constitution invariant target is `VEN/src/controller/milp_planner/`, which includes `inputs.rs`.
 
 ---
 
@@ -54,17 +54,18 @@
 
 ## D4 — Where do `*MilpVars` types live after the move?
 
-**Decision**: `BatteryMilpVars`, `EvMilpVars`, `HeaterMilpVars` move from `assets/battery.rs`, `assets/ev.rs`, `assets/heater.rs` to **`controller/milp_interactions.rs`**, where `MilpVarPool` already references them. Assets import them back via `use crate::controller::milp_interactions::{BatteryMilpVars, …}`. This reverses the dependency: `assets/ → controller/` instead of `controller/ → assets/`.
+**Decision**: `BatteryMilpVars`, `EvMilpVars`, `HeaterMilpVars` move from `assets/battery.rs`, `assets/ev.rs`, `assets/heater.rs` to **`controller/milp_planner/asset_port.rs`**, alongside their corresponding `*MilpContext` structs. `milp_interactions.rs` imports them from `crate::controller::milp_planner::asset_port`. Assets import them back via `use crate::controller::milp_planner::asset_port::{BatteryMilpVars, …}`.
 
 **Rationale**:
-- `MilpVarPool` in `milp_interactions.rs` has typed named slots (`bat: Option<BatteryMilpVars>`, etc.). Co-locating the types with the struct that holds them is the most cohesive placement.
-- `milp_interactions.rs` is in `controller/` (not `controller/milp/`), so no constitution invariant is violated for that file.
-- The dependency reversal (`assets/ → controller/`) is explicitly permitted in hexagonal architecture: the outer adapter ring is allowed to import from the inner domain port ring.
-- `milp_interactions.rs` currently imports `BatteryMilpVars` FROM `assets/`. After the move, those imports disappear — the types are defined right there.
+- `BatteryMilpContext` and `BatteryMilpVars` are a natural pair — the context produces the vars, and the constraint methods read back from them. Co-locating them in `asset_port.rs` means a reader of that file sees the complete per-asset MILP type contract in one place.
+- `milp_interactions.rs` is not the right owner: it defines cross-asset infrastructure (`MilpVarPool`, `AssetInteraction`), not per-asset types. Adding three unrelated type definitions there would weaken its cohesion.
+- The dependency reversal (`assets/ → controller/milp_planner/`) is explicitly permitted in hexagonal architecture: the outer adapter ring is allowed to import from the inner domain port ring.
+- `milp_interactions.rs` currently imports `BatteryMilpVars` FROM `assets/`. After the move, those imports are replaced with imports from `milp_planner::asset_port` — the assets dependency is gone.
 
 **Alternatives considered**:
-- *Move `*MilpVars` to `controller/milp/types.rs`*: Viable, but then `milp_interactions.rs` imports from `controller/milp/`, adding a lateral dependency between two controller sub-modules. Co-locating with `MilpVarPool` is cleaner.
-- *Keep `*MilpVars` in `assets/` and add an import from `controller/milp_interactions.rs` to `assets/`*: Would leave `controller/milp_interactions.rs` still importing from `assets/`, which contradicts the AB-02 fix intent.
+- *Move `*MilpVars` to `controller/milp_interactions.rs`*: Rejected — `milp_interactions.rs` defines cross-asset infrastructure; mixing in per-asset type definitions adds unrelated content. `asset_port.rs` is the more cohesive owner since both the context and vars for each asset belong together.
+- *Move `*MilpVars` to `controller/milp_planner/types.rs`*: Viable, but splits the per-asset type contract across two files without benefit. `asset_port.rs` already handles per-asset types; `types.rs` should remain grid- and solver-level numeric types.
+- *Keep `*MilpVars` in `assets/`*: Would leave `milp_interactions.rs` and `milp_planner/` still importing from `crate::assets::`, which contradicts the AB-02 fix intent.
 
 ---
 
@@ -74,7 +75,7 @@
 
 **Rationale**:
 - The solver grid-balance constraint and the cross-asset interactions both access pool slots by name (e.g., `pool.bat.as_ref().map(|v| v.p_ch[t])…`). Replacing named fields with a `HashMap<AssetKind, Box<dyn AssetVarHandle>>` would require pervasive solver-code changes — out of Phase 3 scope.
-- `asset_kind()` discriminant enables the dispatch in `declare_vars_into_pool()` without concrete type imports: `match ctx.asset_kind() { AssetKind::Battery => { pool.bat = Some(ctx.declare_battery_vars(…)) }, … }`. This matching lives in `asset_port.rs` as a blanket dispatch helper, not in the solver files.
+- Each asset's `declare_vars_into_pool()` implementation knows its own kind and writes directly to the correct pool slot (e.g., `pool.bat = Some(self.declare_vars(…))` in `BatteryMilpContext`'s impl). No dispatch helper is needed in the solver — each trait impl owns its slot assignment.
 - Typed slots allow existing `applicable()` / constraint code to remain unchanged (the Phase 3 regression baseline).
 
 **Alternatives considered**:
@@ -95,7 +96,7 @@
 
 ## D7 — n=48 regression profile
 
-**Decision**: New YAML profile at `VEN/src/controller/milp/tests/profiles/test48.yaml` (or embedded inline in `tests/planner.rs` as a `const` string). Specs: `plan_horizon_h: 24`, `plan_step_s: 1800` → n = 48. Includes battery (10 kWh, 5 kW), EV (plugged, must-run, 50 % SoC, 7.2 kW), heater (2 kW full / 1 kW mid), PV (6 kWp). Regression assertion: `SolveOutput::net_grid_kwh` stays within 5 % of the v2.x baseline captured during development.
+**Decision**: New YAML profile at `VEN/src/controller/milp_planner/tests/profiles/test48.yaml` (or embedded inline in `tests/planner.rs` as a `const` string). Specs: `plan_horizon_h: 24`, `plan_step_s: 1800` → n = 48. Includes battery (10 kWh, 5 kW), EV (plugged, must-run, 50 % SoC, 7.2 kW), heater (2 kW full / 1 kW mid), PV (6 kWp). Regression assertion: `SolveOutput::net_grid_kwh` stays within 5 % of the v2.x baseline captured during development.
 
 **Rationale**:
 - 24h horizon covers a full PV irradiance cycle (zero at night, peak at noon) and overnight storage discharge — the regime where battery + PV interaction matters most.
@@ -125,11 +126,11 @@
 
 | Item | Status |
 |------|--------|
-| Trait location | `controller/milp/asset_port.rs` |
+| Trait location | `controller/milp_planner/asset_port.rs` |
 | Scalar extraction from `inputs.rs` | `milp_params()` returning `AssetMilpParams` enum |
 | LP var declaration in solvers | `declare_vars_into_pool()` on the trait |
-| `*MilpVars` relocation | → `controller/milp_interactions.rs` |
-| `MilpVarPool` structure | Unchanged (typed slots retained) |
+| `*MilpVars` relocation | → `controller/milp_planner/asset_port.rs` (alongside `*MilpContext`) |
+| `MilpVarPool` structure | Unchanged (typed slots retained); imports `*MilpVars` from `milp_planner::asset_port` |
 | `AnyMilpContext` fate | Retained as `pub(crate)` internal helper in `assets/mod.rs` |
-| n=48 profile location | `VEN/src/controller/milp/tests/profiles/test48.yaml` (embedded or YAML) |
+| n=48 profile location | `VEN/src/controller/milp_planner/tests/profiles/test48.yaml` (embedded or YAML) |
 | `applicable()` in interactions | Unchanged (pool-based check) |

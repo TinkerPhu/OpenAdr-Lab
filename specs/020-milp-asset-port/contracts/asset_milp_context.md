@@ -1,7 +1,7 @@
 # Contract: `AssetMilpContext` Port
 
 **Feature**: 020-milp-asset-port  
-**Module**: `VEN/src/controller/milp/asset_port.rs`  
+**Module**: `VEN/src/controller/milp_planner/asset_port.rs`  
 **Type**: Rust trait (hexagonal port — inner domain ring)
 
 ---
@@ -128,7 +128,7 @@ A new asset type (e.g. `ElectricVehicleFleet`) implements `AssetMilpContext` as 
    - `declare_vars_into_pool()` → adds LP variables, stores in `pool.ev_fleet`
    - `constraints()` / `objective()` → read from `pool.ev_fleet`
 5. **Extend** `AssetConfig::build_milp_context()` in `assets/mod.rs` to handle the new asset.
-6. **Verify**: `grep -r "use crate::assets::" VEN/src/controller/milp → empty` still passes.
+6. **Verify**: `grep -r "use crate::assets::" VEN/src/controller/milp_planner → empty` still passes.
 7. **Test**: Add a `#[cfg(test)]` block in `assets/ev_fleet.rs` that exercises `milp_params()` and `declare_vars_into_pool()` in isolation (no planner needed).
 
 ---
@@ -160,7 +160,7 @@ A new asset type (e.g. `ElectricVehicleFleet`) implements `AssetMilpContext` as 
 After Phase 3:
 ```sh
 # Must return empty
-grep -r "use crate::assets::" VEN/src/controller/milp
+grep -r "use crate::assets::" VEN/src/controller/milp_planner
 
 # Must return empty (for Battery, EvCharger, Heater — not BatteryMilpContext which lives in assets/)
 grep -n "crate::assets::battery::Battery\b\|crate::assets::ev::EvCharger\b\|crate::assets::heater::Heater\b" \
