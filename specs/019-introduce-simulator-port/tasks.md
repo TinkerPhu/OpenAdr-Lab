@@ -88,7 +88,7 @@
 
 - [x] T016 [P] [US2] Migrated per-asset test mutation helpers in `VEN/src/controller/milp_planner.rs` (in-place) — `set_ev_plugged`, `set_battery_soc`, `set_heater_temp`, `set_pv_inject` all rewritten to operate on `SimSnapshot.assets` HashMap. Verify `cargo test controller::milp_planner` remains green. ✅ 319 tests pass.
 
-- [ ] T017 [P] [US2] Edit `VEN/src/routes/timeline.rs` — change `use crate::simulator::SimState` (line 10). Inspect how `SimState` is accessed in route handlers; replace direct `sim` access with a call to `ctx.sim.lock().snapshot()` (or equivalent) to obtain a `SimSnapshot`, then pass the snapshot to `controller::timeline` functions. Verify `cargo build`.
+- [ ] T017 [P] [US2] Edit `VEN/src/routes/timeline.rs` — change `use crate::simulator::SimState` (line 10). Inspect how `SimState` is accessed in route handlers; replace direct `sim` access with a call to `ctx.sim.lock().snapshot()` (or equivalent) to obtain a `SimSnapshot`, then pass the snapshot to `controller::timeline` functions. Verify `cargo build`. **DEFERRED (Phase 5)**: `controller/timeline.rs` uses `sim.find_asset()` + history ring buffers not available in `SimSnapshot`. Both `controller/timeline.rs` and `routes/timeline.rs` are in the 4 accepted SC-004 deferred files (see T022 note). Migration requires a history port or adding history to SimSnapshot — Phase 5 concern.
 
 - [x] T018 [US2] Inspect `VEN/src/routes/sim.rs` — verify no direct `SimState` import; confirm the route reads simulator state through `AppCtx` only. If a direct import exists, replace with `SimulatorPort` access. Document findings in a code comment. Verify `cargo build`. ✅ Confirmed clean: no `SimState` import in routes/sim.rs.
 
