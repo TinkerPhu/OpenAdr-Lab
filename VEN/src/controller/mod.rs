@@ -1,8 +1,8 @@
 // ── SimulatorPort trait and snapshot types ────────────────────────────────────
 pub mod simulator_port;
-pub use simulator_port::{
-    AssetSnapshot, GridSnapshot, SimInjectState, SimSnapshot, SimulatorPort, SnapshotError,
-};
+pub use simulator_port::{AssetSnapshot, SimSnapshot, SimulatorPort};
+#[cfg(test)]
+pub use simulator_port::GridSnapshot;
 
 // ── OpenADR interface ─────────────────────────────────────────────────────────
 pub mod openadr_interface;

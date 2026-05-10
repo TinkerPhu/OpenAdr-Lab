@@ -7,7 +7,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde_json::{json, Value};
 use tracing::debug;
 
-use crate::assets::{AssetState, HistoryPoint};
+use crate::assets::HistoryPoint;
 use crate::common::{parse_iso8601_duration_secs, Aggregation, Interpolation, TimeSeries};
 use crate::controller::trace::ControllerEvent;
 use crate::entities::capacity::OadrReportObligation;
@@ -546,7 +546,7 @@ pub fn build_status_report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::{AssetHistoryBuffer, BaseLoadState, EvState, Grid, HistoryPoint, PvState};
+    use crate::assets::{AssetHistoryBuffer, AssetState, BaseLoadState, EvState, Grid, HistoryPoint, PvState};
     use crate::simulator::{energy::EnergyCounter, GridMeter, SimState};
     use uuid::Uuid;
 

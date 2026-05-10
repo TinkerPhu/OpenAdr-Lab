@@ -4,31 +4,48 @@
 //! the solution into a `Plan` with per-slot allocations.
 //! See `docs/plans/milp_planner_transition.md` for the design.
 
+// These imports are consumed by `use super::*` in the test submodules (tests/).
+// They appear unused in non-test compilation but are the implicit re-export mechanism
+// for the wildcard test imports. #[allow] is narrowly scoped to this file.
+#[allow(unused_imports)]
 use chrono::{DateTime, Duration, Utc};
+#[allow(unused_imports)]
 use good_lp::solvers::highs::highs;
+#[allow(unused_imports)]
 use good_lp::{
     constraint, variable, variables, Expression, Solution, SolverModel, Variable,
     WithInitialSolution, WithMipGap, WithTimeLimit,
 };
+#[allow(unused_imports)]
 use tracing::warn;
+#[allow(unused_imports)]
 use uuid::Uuid;
 
+#[allow(unused_imports)]
 use crate::assets::battery::{Battery, BatteryMilpContext};
+#[allow(unused_imports)]
 use crate::assets::ev::{EvCharger, EvMilpContext, EvMilpMode, EvState};
+#[allow(unused_imports)]
 use crate::assets::heater::{Heater, HeaterMilpContext, HeaterMilpMode, HeaterState};
+#[allow(unused_imports)]
 use crate::assets::{AssetState, PvInverter};
+#[allow(unused_imports)]
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
 use crate::controller::simulator_port::SimSnapshot;
+#[allow(unused_imports)]
 use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity::OadrCapacityState;
+#[allow(unused_imports)]
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
+#[allow(unused_imports)]
 use crate::entities::plan::{
     AssetAllocation, CostBreakdown, FlexibilityEnvelope, Plan, PlanSummary, PlanTimeSlot,
     PlanWarning, PlanningHorizon, WarningSeverity,
 };
 use crate::entities::tariff_snapshot::TariffTimeSeries;
+#[allow(unused_imports)]
 use crate::profile::{PlannerObjective, Profile};
 
 
