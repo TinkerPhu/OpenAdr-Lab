@@ -1281,7 +1281,7 @@ mod milp_context_trait_tests {
         let mut vars = variables!();
         let mut pool = empty_pool(&mut vars, n);
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-        let cs = ctx.constraints(&pool, n, 300.0 / 3600.0);
+        let cs = AssetMilpContext::constraints(&ctx, &pool, n, 300.0 / 3600.0);
         assert_eq!(cs.len(), 36, "n=4 MayRun no-deadline: expected 36 constraints");
     }
 }

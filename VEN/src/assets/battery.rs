@@ -705,8 +705,7 @@ mod milp_context_trait_tests {
         let mut vars = variables!();
         let mut pool = empty_pool(&mut vars, n);
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-        let cs = ctx.constraints(&pool, n, dt_h);
-        // 3×n (charge, discharge, SoC dynamics) + 1 terminal SoC constraint
+        let cs = AssetMilpContext::constraints(&ctx, &pool, n, dt_h);
         assert!(cs.len() >= n * 3 + 1, "expected at least {} constraints, got {}", n * 3 + 1, cs.len());
     }
 }
