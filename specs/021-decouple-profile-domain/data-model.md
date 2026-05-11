@@ -190,14 +190,24 @@ HeaterParams {
 
 ---
 
-## `AssetParams` — application-layer enum (assembled in `main.rs`)
+## `AssetParams` — domain enum in `entities/asset_params.rs`
 
 The `simulator` and `persist` functions need to iterate over all configured assets heterogeneously.
-`AssetParams` is a **sum type (enum)** defined in `main.rs` (application layer) — not in the domain ring — because it is the assembly glue, not a domain concept.
+`AssetParams` is a **sum type (enum)** defined in `entities/asset_params.rs` — a proper domain type,
+alongside `PlannerObjective` and the other cross-cutting entities.
+
+This placement is required by the dependency rule: `simulator/mod.rs` and `simulator/persist.rs`
+accept `&[AssetParams]` in their function signatures, so the type must be importable from the domain
+ring. Defining it in `main.rs` would force `simulator/` to import from the composition root
+(application layer → inner ring), which inverts the dependency direction.
 
 ```rust
-// VEN/src/main.rs (private, application-layer only)
-enum AssetParams {
+// VEN/src/entities/asset_params.rs
+use crate::assets::{battery::BatteryParams, ev::EvParams, heater::HeaterParams,
+                    pv::PvParams, base_load::BaseLoadParams};
+
+#[derive(Debug, Clone)]
+pub enum AssetParams {
     Battery(BatteryParams),
     Ev(EvParams),
     Heater(HeaterParams),
@@ -215,11 +225,18 @@ enum AssetParams {
 | `BaseLoad(BaseLoadParams)` | `BaseLoadParams` from `assets/base_load.rs` |
 
 **Design rationale**: An enum (not `Box<dyn Trait>`) keeps dispatch static, requires no heap
-allocations, and avoids introducing a new trait into the domain ring. The enum lives only in
-`main.rs` — `simulator/mod.rs` and `simulator/persist.rs` accept `&[AssetParams]` as a slice.
+allocations, and avoids a new trait. Living in `entities/` means both `main.rs` (assembles the vec)
+and `simulator/` (accepts the slice) import from the domain ring — no direction violation.
+
+**Note on creation order**: `entities/asset_params.rs` imports the five asset Params types, so the
+file's enum body can only be filled after T008–T012 define those structs. Create the file with a
+stub in T007 (add `pub mod asset_params;` to `entities/mod.rs`) and complete the enum body as a
+follow-up step within T007's scope once T008–T012 are done (or in a single batch after T012).
 
 **Assembly** (`main.rs`):
 ```rust
+use crate::entities::asset_params::AssetParams;
+
 let asset_params: Vec<AssetParams> = profile.assets.iter().map(|cfg| match cfg {
     AssetConfig::Battery(c)  => AssetParams::Battery(BatteryParams { id: c.id.clone(), .. }),
     AssetConfig::Ev(c)       => AssetParams::Ev(EvParams { id: c.id.clone(), .. }),
