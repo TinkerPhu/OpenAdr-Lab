@@ -65,8 +65,8 @@ All tasks in this group depend on T007–T012.
 - [ ] T018 [P] [US1] In `VEN/src/controller/milp_planner/inputs.rs` — replace `use crate::profile::Profile` with asset Params imports; update function signatures and field accesses to use the new param structs; verify `cargo check`
 - [ ] T019 [P] [US1] In `VEN/src/controller/milp_planner/mod.rs` — replace `use crate::profile::{PlannerObjective, Profile}` with imports from `crate::entities` and asset Params; update public API signatures (e.g. `run_planner(...)`) to accept `&PlannerParams` and asset Params rather than `&Profile`; verify `cargo check`
 - [ ] T020 [P] [US1] In `VEN/src/controller/milp_planner/results.rs` — replace `use crate::profile::PlannerObjective` with import from `crate::entities`; verify `cargo check`
-- [ ] T021 [US1] In `VEN/src/simulator/mod.rs` — replace `from_profile(profile: &Profile)` constructor with `from_params(asset_params: &[AssetParams])` (or equivalent typed enum/struct accepting the domain asset param structs); remove `use crate::profile` import; update all internal usages; verify `cargo check` (FR-011)
-- [ ] T022 [US1] In `VEN/src/simulator/persist.rs` — replace `use crate::profile::Profile` with `use crate::entities::planner_params::SimulatorParams`; update `load_with_profile(data_dir, profile: &Profile)` signature to `load_with_params(data_dir, sim_params: &SimulatorParams, asset_params: &[...])` — keep the asset-ID-mismatch guard (uses asset IDs, not Profile); verify `cargo check` (FR-012)
+- [ ] T021 [US1] In `VEN/src/simulator/mod.rs` — replace `from_profile(profile: &Profile)` constructor with `from_params(asset_params: &[AssetParams])` where `AssetParams` is the application-layer enum defined in `main.rs` (see data-model.md §AssetParams); remove `use crate::profile` import; update all internal usages; verify `cargo check` (FR-011)
+- [ ] T022 [US1] In `VEN/src/simulator/persist.rs` — replace `use crate::profile::Profile` with `use crate::entities::planner_params::SimulatorParams`; update `load_with_profile(data_dir, profile: &Profile)` signature to `load_with_params(data_dir, sim_params: &SimulatorParams, asset_params: &[AssetParams])` — keep the asset-ID-mismatch guard (uses asset IDs, not Profile); verify `cargo check` (FR-012)
 
 ### New Per-Asset Unit Tests (parallel — FR-008)
 
@@ -76,13 +76,14 @@ All tasks in this group depend on T008–T012.
 - [ ] T024 [P] [US1] In `VEN/src/assets/ev.rs` — add `#[cfg(test)] mod tests`; add tests `ev_params_default_values` and `ev_params_min_charge_enforced` using inline `EvParams` construction; no file I/O
 - [ ] T025 [P] [US1] In `VEN/src/assets/heater.rs` — add `#[cfg(test)] mod tests`; add tests covering `HeaterParams` defaults and `mid_kw` presence/absence (one-level vs two-level model); use inline construction only
 - [ ] T026 [P] [US1] In `VEN/src/assets/pv.rs` — add `#[cfg(test)] mod tests`; add tests for `PvParams::forecast_kw()` at solar noon (rated output) and midnight (zero); use inline `PvParams { rated_kw: 5.0, .. }` construction
-- [ ] T027 [P] [US1] In `VEN/src/assets/base_load.rs` — add `#[cfg(test)] mod tests`; add a test `base_load_params_baseline` that constructs `BaseLoadParams` inline and asserts `baseline_kw` is used correctly
+- [ ] T027 [P] [US1] In `VEN/src/assets/base_load.rs` — add `#[cfg(test)] mod tests`; add a test `base_load_params_baseline` that constructs `BaseLoadParams { baseline_kw: 1.5, .. }` inline (no file I/O, no Profile) and asserts `params.baseline_kw == 1.5`; the minimum bar for FR-008 is: struct constructed inline + at least one field value used in an assertion
 
 ### Rewrite Existing YAML-Loading Tests (FR-007, FR-009)
 
 - [ ] T028 [US1] In `VEN/src/controller/milp_planner/tests/mod.rs` — replace profile fixture loading (any `Profile::load(...)`, `Profile::default()`, or YAML string parsing) with inline `PlannerParams::default()` + concrete asset Params construction; keep all existing assertions intact; run `cargo test controller::milp_planner` and confirm all tests pass
 - [ ] T029 [US1] In `VEN/src/controller/milp_planner/tests/basic.rs`, `heater.rs`, `planner.rs`, `pv.rs`, `solver.rs` — update any remaining profile fixture references in test helpers (`make_test_profile()` or similar) to use inline param struct construction; run `cargo test` and confirm test count unchanged
 - [ ] T030 [US1] In `VEN/src/controller/absorber.rs` tests — rewrite any `#[cfg(test)]` blocks that construct `AbsorberConfig` / `Profile` to use inline `AbsorberParams` construction; run `cargo test controller::absorber` and confirm all tests pass
+- [ ] T030b [US1] In `VEN/src/controller/dispatcher.rs` — check for any `#[cfg(test)]` blocks referencing `profile::PlannerObjective` or `Profile`; rewrite any found to use `crate::entities::planner_params::PlannerObjective` directly; run `cargo test controller::dispatcher` and confirm all tests pass (SC-003 coverage — dispatcher gap E1)
 
 **Checkpoint (US1)**: Run `grep -r "use crate::profile" VEN/src/entities VEN/src/assets VEN/src/controller VEN/src/simulator` → zero matches. Run `cargo test --workspace` → all tests pass, count ≥ Phase 3 baseline.
 
@@ -94,8 +95,8 @@ All tasks in this group depend on T008–T012.
 
 **Independent Test**: Add a new dummy `f64` field to `SimulatorConfig` in `profile.rs` (e.g. `dummy_field: f64`) and verify that zero files in `entities/`, `assets/`, `controller/`, or `simulator/` require changes to compile.
 
-- [ ] T031 [US2] In `VEN/src/main.rs` — add private `fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, AbsorberParams, Vec<AssetParam>)` (or equivalent named bundle); implement by field-copying from `profile.simulator`, `profile.planner`, `profile.absorber`, and iterating `profile.assets` to build each typed asset param struct; for `HeaterParams`, call `effective_*()` helper methods at assembly time
-- [ ] T032 [US2] In `VEN/src/main.rs` — update all call sites to use assembled params: `simulator::persist::load_with_params(...)`, `SimState::from_params(...)`, `controller::absorber::validate_startup(absorber_params, ...)`, `tasks::spawn_sim_tick(... sim_params ...)`, `tasks::spawn_planning(... planner_params ...)`; ensure `active_objective` is initialised from `planner_params.objective` (not `profile.planner.objective` directly)
+- [ ] T031 [US2] In `VEN/src/main.rs` — add private `fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, AbsorberParams, Vec<AssetParams>)` where `AssetParams` is the application-layer enum (see data-model.md §AssetParams); implement by field-copying from `profile.simulator`, `profile.planner`, `profile.absorber`, and iterating `profile.assets` to build each typed variant; for `HeaterParams`, call `effective_*()` helper methods at assembly time
+- [ ] T032 [US2] In `VEN/src/main.rs` — update all call sites to use assembled params: `simulator::persist::load_with_params(...)`, `SimState::from_params(...)`, `controller::absorber::validate_startup(absorber_params, ...)`; ensure `active_objective` is initialised from `planner_params.objective` (not `profile.planner.objective` directly); **note**: `tasks::spawn_sim_tick` and `tasks::spawn_planning` call-site signature changes are optional cleanup beyond FR-001's minimum scope — document the decision in the commit message if you change them
 - [ ] T033 [US2] In `VEN/src/profile.rs` — remove the bridge re-export `pub use crate::entities::planner_params::PlannerObjective;` added in T005; confirm `PlannerObjective` no longer accessible via `crate::profile::PlannerObjective` by running `cargo check` — only `main.rs` may use `Profile` types directly; verify `cargo check` passes
 - [ ] T034 [US2] Run `cargo check` + `cargo test --workspace` in `VEN/` — all tests pass; confirm `grep "use crate::profile" VEN/src/entities VEN/src/assets VEN/src/controller VEN/src/simulator` returns zero matches (SC-001)
 
@@ -111,7 +112,7 @@ All tasks in this group depend on T008–T012.
 
 - [ ] T035 [US3] Build VEN Docker image locally: `cd VEN && docker compose build ven-1`; confirm build succeeds with no compile errors in logs
 - [ ] T036 [US3] Deploy to Pi4-Server and run full BDD suite: `ssh Pi4-Server "cd /srv/docker/openadr_lab && git pull && docker compose -f tests/docker-compose.test.yml run --build --rm test-runner"` — all scenarios must pass; record pass count (SC-004, FR-010)
-- [ ] T037 [US3] Verify all five success criteria: SC-001 (zero profile imports in domain), SC-002 (≥1 unit test per asset using inline params), SC-003 (milp_planner test count ≥ baseline), SC-004 (BDD fully green), SC-005 (`PlannerObjective` importable from `crate::entities` path); document results in a commit message
+- [ ] T037 [US3] Verify all five success criteria: SC-001 (zero profile imports in domain), SC-002 (≥1 unit test per asset using inline params), SC-003 (milp_planner test count ≥ baseline), SC-004 (BDD fully green), SC-005 (`PlannerObjective` importable from `crate::entities` path); document results in a commit message; **note**: SC-001 greps `entities/`, `assets/`, `controller/`, `simulator/` only — the full constitution Principle VI invariant (which also includes `routes/`) is NOT yet satisfied; full invariant satisfaction is deferred to Phase 6 (routes/ scope)
 
 **Checkpoint (US3)**: All 5 success criteria pass. Phase 4 is functionally complete.
 
@@ -120,7 +121,7 @@ All tasks in this group depend on T008–T012.
 ## Phase 6: Polish & Cross-Cutting Concerns
 
 - [ ] T038 [P] Update `docs/history/project_journal.md` — record Phase 4 completion: what changed, why, key decisions (PlannerObjective relocation, HeaterParams pre-resolution, bridge re-export strategy), and any issues encountered
-- [ ] T039 [P] Run quickstart.md verification steps manually: structural grep check, `cargo test`, Docker smoke test (`docker compose logs ven-1 | grep error`), confirm `active_objective` initialised from assembled params
+- [ ] T039 [P] Run the quickstart.md verification steps not already covered by T034/T037: (a) Docker smoke test — `docker compose logs ven-1 | grep -i error` returns no errors after a fresh `docker compose up -d --build`; (b) confirm `active_objective` is initialised from `planner_params.objective` (grep `main.rs` for `active_objective` and verify it references assembled params, not `profile.planner.objective` directly); (c) note any Phase 6 remaining work (bridge re-export permanently removed, `routes/hems.rs` profile import cleared)
 - [ ] T040 Review line counts in all new/modified files: run `wc -l VEN/src/entities/planner_params.rs` and verify all touched files remain under 500 lines (constitution Principle VI)
 
 ---
