@@ -9,17 +9,7 @@ use super::*;
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
         let sim = make_snap_from_profile(&profile);
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         let expected = 20.0 * 200.0 * 4.186 / 3600.0;
         assert!(
             (inp.e_heat_init_kwh - expected).abs() < 0.01,
@@ -36,17 +26,7 @@ use super::*;
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 40.0);
         let mut sim = make_snap_from_profile(&profile);
         set_heater_temp(&mut sim, 35.0);
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         assert!(
             inp.e_heat_init_kwh < 0.0,
             "e_init {} should be negative when temp < T_min",
@@ -60,17 +40,7 @@ use super::*;
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 40.0);
         let sim = make_snap_from_profile(&profile);
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         let expected = 40.0 * 200.0 * 4.186 / 3600.0;
         assert!(
             (inp.e_heat_max_kwh - expected).abs() < 0.01,
@@ -88,17 +58,7 @@ use super::*;
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
         let sim = make_snap_from_profile(&profile);
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         assert!(
             (inp.q_heat_dem_kw - 5.0).abs() < 0.01,
             "q_dem={:.4} expected 5.0",
@@ -120,17 +80,7 @@ use super::*;
             created_at: now,
             updated_at: now,
         };
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            Some(&target),
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, Some(&target));
         let expected = 30.0 * 200.0 * 4.186 / 3600.0;
         assert!(
             (inp.e_heat_target_kwh - expected).abs() < 0.01,
@@ -146,17 +96,7 @@ use super::*;
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
         let sim = make_snap_from_profile(&profile);
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         assert!(
             (inp.e_heat_target_kwh - inp.e_heat_max_kwh).abs() < 1e-9,
             "autonomous: e_target {} should equal e_max {}",
@@ -171,17 +111,7 @@ use super::*;
         let now = fixed_now();
         let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
         let sim = make_snap_from_profile(&profile);
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         assert_eq!(inp.heater_mode, MilpLoadMode::MayRun);
     }
 
@@ -191,17 +121,7 @@ use super::*;
         let now = fixed_now();
         let profile = make_profile(); // heater has no switching_penalty_eur set
         let sim = make_snap_from_profile(&profile);
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         assert!(
             (inp.lambda_heat_sw_eur - 0.01).abs() < 1e-9,
             "lambda_sw={} expected 0.01",
