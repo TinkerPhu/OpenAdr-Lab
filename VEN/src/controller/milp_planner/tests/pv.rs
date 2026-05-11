@@ -83,25 +83,24 @@ use super::*;
         let mut sim_fast = make_snap_from_profile(&profile);
         set_pv_inject(&mut sim_fast, 0.5, 0.05); // fast: 5 % per second
 
+        let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
         let inp_slow = build_milp_inputs(
+            &ctxs,
             &sim_slow,
             &TariffTimeSeries::from_snapshots(&[]),
             &no_capacity(),
             &profile,
             now,
-            None,
-            None,
             &[],
             None,
         );
         let inp_fast = build_milp_inputs(
+            &ctxs,
             &sim_fast,
             &TariffTimeSeries::from_snapshots(&[]),
             &no_capacity(),
             &profile,
             now,
-            None,
-            None,
             &[],
             None,
         );

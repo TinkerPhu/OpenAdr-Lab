@@ -139,7 +139,7 @@ This makes the entire planning/dispatch path unit-testable with a mock simulator
 
 Estimated effort: **2–3 days**
 
-### Phase 3 — Introduce `AssetMilpContext` trait (AB-02)
+### Phase 3 — Introduce `AssetMilpContext` trait (AB-02) ✅ COMPLETE
 
 Replace the direct imports `C_MILP → A_BAT, A_EV, A_HTR` with a trait:
 
@@ -158,7 +158,11 @@ Each asset implements it. Both `milp_planner.rs` and `milp_interactions.rs` rece
 
 Simultaneously split `milp_planner.rs` into `controller/milp/` sub-modules (see AB-02 fix in the review doc).
 
-Estimated effort: **2–3 days**
+**Completed as feature `020-milp-asset-port` (worktree `refactoring_phase_3`).** Invariant verification:
+- `grep -r "use crate::assets::" VEN/src/controller/milp_planner` → 0 matches in production code ✓
+- `impl.*AssetMilpContext` exists only in `assets/battery.rs`, `ev.rs`, `heater.rs` ✓
+- `asset_port.rs` ≤ 500 lines ✓
+- 350 cargo tests pass (including 5 new n=48 regression tests) ✓
 
 ### Phase 4 — Decouple `PROFILE` from domain (AB-04)
 
