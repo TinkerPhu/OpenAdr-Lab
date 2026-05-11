@@ -53,12 +53,18 @@ def step_absorber_enabled(context):
 
 @given("I wait for a fresh plan")
 def step_wait_fresh_plan_given(context):
-    """Wait for a MILP plan that was computed AFTER now.
+    """Request a MILP replan and wait for the fresh plan to arrive.
 
-    Adds ~20s of MILP stability (replan_interval_s=20) before baseline capture,
-    preventing MILP replanning from corrupting the 2-tick assertion window.
+    Calls POST /plan/trigger (sends AssetStateChange without touching sim state)
+    so the planner starts a new solve immediately. With replan_interval_s=300 in
+    the test profile, no timer-based solve fires during the assertion window
+    (~30–70 s per scenario), preventing mid-scenario plan updates from corrupting
+    the absorber baseline capture.
     """
     cutoff = datetime.now(timezone.utc)
+    # Kick off a fresh MILP solve. Returns 204; ignore failure (VEN may not have
+    # started yet, in which case the first periodic solve supplies the plan).
+    ven_post("/plan/trigger", json={})
 
     def fetch():
         resp = ven_get("/plan")
@@ -80,7 +86,7 @@ def step_wait_fresh_plan_given(context):
         except ValueError:
             return False
 
-    poll_until(fetch, is_fresh, timeout=60, description="fresh MILP plan after now")
+    poll_until(fetch, is_fresh, timeout=90, description="fresh MILP plan after now")
     # Wait for physics to apply the new plan setpoints (≤1 tick = 1s; 2s is safe).
     # Without this, baselines captured immediately after plan detection reflect the
     # old plan's setpoints — the new plan setpoints take effect on the NEXT tick.
