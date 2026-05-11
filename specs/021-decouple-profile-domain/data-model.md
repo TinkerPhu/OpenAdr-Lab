@@ -190,6 +190,49 @@ HeaterParams {
 
 ---
 
+## `AssetParams` — application-layer enum (assembled in `main.rs`)
+
+The `simulator` and `persist` functions need to iterate over all configured assets heterogeneously.
+`AssetParams` is a **sum type (enum)** defined in `main.rs` (application layer) — not in the domain ring — because it is the assembly glue, not a domain concept.
+
+```rust
+// VEN/src/main.rs (private, application-layer only)
+enum AssetParams {
+    Battery(BatteryParams),
+    Ev(EvParams),
+    Heater(HeaterParams),
+    Pv(PvParams),
+    BaseLoad(BaseLoadParams),
+}
+```
+
+| Variant | Inner type |
+|---------|-----------|
+| `Battery(BatteryParams)` | `BatteryParams` from `assets/battery.rs` |
+| `Ev(EvParams)` | `EvParams` from `assets/ev.rs` |
+| `Heater(HeaterParams)` | `HeaterParams` from `assets/heater.rs` |
+| `Pv(PvParams)` | `PvParams` from `assets/pv.rs` |
+| `BaseLoad(BaseLoadParams)` | `BaseLoadParams` from `assets/base_load.rs` |
+
+**Design rationale**: An enum (not `Box<dyn Trait>`) keeps dispatch static, requires no heap
+allocations, and avoids introducing a new trait into the domain ring. The enum lives only in
+`main.rs` — `simulator/mod.rs` and `simulator/persist.rs` accept `&[AssetParams]` as a slice.
+
+**Assembly** (`main.rs`):
+```rust
+let asset_params: Vec<AssetParams> = profile.assets.iter().map(|cfg| match cfg {
+    AssetConfig::Battery(c)  => AssetParams::Battery(BatteryParams { id: c.id.clone(), .. }),
+    AssetConfig::Ev(c)       => AssetParams::Ev(EvParams { id: c.id.clone(), .. }),
+    AssetConfig::Heater(c)   => AssetParams::Heater(HeaterParams {
+        thermal_mass_kwh_per_c: c.effective_thermal_mass(), ..
+    }),
+    AssetConfig::Pv(c)       => AssetParams::Pv(PvParams { rated_kw: c.rated_kw, .. }),
+    AssetConfig::BaseLoad(c) => AssetParams::BaseLoad(BaseLoadParams { baseline_kw: c.baseline_kw, .. }),
+}).collect();
+```
+
+---
+
 ## Assembly — `main.rs` helper
 
 A private function `fn domain_params_from_profile(profile: &Profile)` constructs all domain param
