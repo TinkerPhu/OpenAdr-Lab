@@ -73,7 +73,7 @@ VEN/src/
 │   ├── battery.rs              # add BatteryParams; update from_config() / constructor
 │   ├── ev.rs                   # add EvParams; update constructor
 │   ├── heater.rs               # add HeaterParams (pre-resolved effective fields);
-│   │                           #   update constructor; move forecast helper to PvParams
+│   │                           #   update constructor
 │   ├── pv.rs                   # add PvParams; move forecast_kw() here from PvConfig
 │   └── base_load.rs            # add BaseLoadParams; update constructor
 │
