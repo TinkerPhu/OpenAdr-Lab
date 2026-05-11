@@ -14,6 +14,14 @@ This phase cuts that coupling. The YAML profile stays in the infrastructure ring
 
 After this phase, every domain component is independently testable with a few lines of construction code and no YAML at all.
 
+## Clarifications
+
+### Session 2026-05-11
+
+- Q: Where should domain parameter structs live — all in `entities/`, co-located in `assets/`, or a new `params/` module? → A: Asset-specific params (`BatteryParams`, `EvParams`, `HeaterParams`, `PvParams`, `BaseLoadParams`) are co-located in their respective `assets/` files alongside the physics model and `AssetMilpContext` impl. Cross-cutting params with no single-asset home (`PlannerObjective`, `PlannerParams`, `AbsorberParams`, `SimulatorParams`) live in `entities/`.
+- Q: Should `PlannerParams` be a single flat struct or split into timing + weight sub-structs? → A: Single `PlannerParams` carrying all fields from `PlannerConfig` (horizon, step, objective, and all solver weight fields). The existing `Phase1Weights` / `Phase2Weights` internal derivation in `milp_planner/types.rs` is unchanged — `PlannerParams` is purely the application-layer injection contract.
+- Q: How should `simulator/persist.rs`'s `Profile` import be resolved — introduce `SimulatorParams`, remove outright, or defer? → A: Introduce `SimulatorParams` in `entities/` and thread it into `persist.rs`, consistent with every other domain module in this phase. No deferred branches in the plan.
+
 ## Readiness Review — Phases 1–3
 
 Before implementing Phase 4, the following invariants from prior phases must hold. Each can be verified with a targeted search on the `refactoring_phase_3` branch.
@@ -127,11 +135,11 @@ An operator running the VEN after Phase 4 is deployed observes identical plannin
 - **FR-009**: The planner's existing unit test suite MUST continue to pass after the profile fixture loading in test setup is replaced with inline parameter construction.
 - **FR-010**: The BDD suite MUST remain fully green after Phase 4 — no scenario changes, no tag exclusions.
 - **FR-011**: The `simulator/mod.rs` `from_profile()` constructor MUST be replaced by a constructor that accepts assembled domain parameter structs rather than a raw `Profile` reference.
-- **FR-012**: `simulator/persist.rs` MUST NOT import `Profile` — any values it currently reads from the profile at persist time must be supplied as parameters or eliminated.
+- **FR-012**: `simulator/persist.rs` MUST NOT import `Profile` — a `SimulatorParams` struct is introduced in `entities/` and threaded into `persist.rs`, consistent with all other domain modules in this phase.
 
 ### Key Entities
 
-- **Domain Parameter Structs**: Plain typed structs carrying exactly the values each domain component needs — e.g. `BatteryParams`, `EvParams`, `HeaterParams`, `PvParams`, `BaseLoadParams`, `PlannerParams`, `AbsorberParams`. These live in the domain ring and have no knowledge of the YAML format. Each provides a `Default` implementation.
+- **Domain Parameter Structs**: Plain typed structs carrying exactly the values each domain component needs. Asset-specific params (`BatteryParams`, `EvParams`, `HeaterParams`, `PvParams`, `BaseLoadParams`) are co-located in their respective `assets/` files alongside the physics model and `AssetMilpContext` impl. Cross-cutting params (`PlannerParams`, `AbsorberParams`, `SimulatorParams`) and `PlannerObjective` live in `entities/`. `PlannerParams` is a single flat struct carrying all fields from `PlannerConfig` (horizon, step, objective, all solver weight fields). None carry YAML schema types, `serde` attributes, or profile-format concerns. Each provides a `Default` implementation.
 - **`PlannerObjective`**: The domain enum controlling which optimisation objective the planner uses (`MinCost`, `MaxRevenue`, `MinGhg`, `Custom`). After Phase 4 it lives in the domain ring, not in `profile.rs`.
 - **Application-Layer Assembly**: The code in `main.rs` (or an equivalent startup module) that reads a `Profile` and constructs the domain parameter structs. This is the only place in the codebase where `Profile` is transformed into domain types.
 - **`Profile`**: The YAML-deserialisable configuration struct. After Phase 4 it remains in the infrastructure ring and is never imported by domain code.
@@ -152,4 +160,4 @@ An operator running the VEN after Phase 4 is deployed observes identical plannin
 - `PlannerObjective` values injected via OpenADR event overrides at runtime continue to flow through the existing watch-channel mechanism — the relocation of `PlannerObjective` to the domain ring does not change the runtime injection path, only the type's home module.
 - No logic changes are made in any file touched during this phase. Phase 4 is a purely structural extraction.
 - The `Profile` struct itself is not deleted or modified — it remains the YAML deserialisation target. Only its reach into the domain ring is cut.
-- `simulator/persist.rs` currently imports `Profile` — inspection during implementation may reveal that the import is unused or can be trivially substituted with a stored copy of a primitive value already available in `SimState`. If not, a minimal domain param struct is introduced.
+- `simulator/persist.rs` currently imports `Profile` — a `SimulatorParams` struct will be introduced in `entities/` and threaded into `persist.rs`, the same pattern used for every other domain module in this phase.
