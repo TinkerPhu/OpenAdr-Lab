@@ -9,17 +9,7 @@ use super::*;
         let profile = make_profile();
         let tariffs = make_tariffs(0.25, 0.08, 450.0); // 450 g/kWh
         let sim = make_snap_from_profile(&profile);
-        let inp = build_milp_inputs(
-            &sim,
-            &tariffs,
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &tariffs, &no_capacity(), now, None, None);
         // All slots should have 0.45 kgCO₂/kWh
         assert!(inp.g_imp_kgco2_kwh.iter().all(|&v| (v - 0.45).abs() < 1e-9));
     }
@@ -30,17 +20,7 @@ use super::*;
         let now = fixed_now();
         let profile = make_profile(); // battery RTE = 0.9
         let sim = make_snap_from_profile(&profile);
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         let expected = 0.9_f64.sqrt();
         assert!((inp.eff_bat_ch.unwrap() - expected).abs() < 1e-9);
         assert!((inp.eff_bat_dis.unwrap() - expected).abs() < 1e-9);
@@ -56,17 +36,7 @@ use super::*;
         let profile = make_profile(); // initial_soc=0.5, capacity=10.0
         let mut sim = make_snap_from_profile(&profile);
         set_battery_soc(&mut sim, 0.3); // override to 0.3
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         assert!((inp.e_bat_init_kwh.unwrap() - 3.0).abs() < 1e-9); // 0.3 × 10.0 = 3.0
     }
 
@@ -77,17 +47,7 @@ use super::*;
         let profile = make_profile(); // initial_soc=0.5, capacity=10.0
         let mut sim = make_snap_from_profile(&profile);
         sim.assets.clear(); // remove all assets → battery_state() returns None
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         assert!((inp.e_bat_init_kwh.unwrap() - 5.0).abs() < 1e-9); // 0.5 × 10.0 = 5.0
     }
 
@@ -98,17 +58,7 @@ use super::*;
         let profile = make_profile();
         let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, true);
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         assert!(inp.a_ev.iter().all(|&v| v));
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun); // no session → MustNotRun (but mask is true)
         assert_eq!(inp.t_ev_dead_step, None);
@@ -129,17 +79,7 @@ use super::*;
             created_at: now,
             updated_at: now,
         };
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            Some(&session),
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, Some(&session), None);
         // deadline = 3600s, step_s=300 → deadline_step = 12
         let d = inp.t_ev_dead_step.unwrap();
         assert_eq!(d, 12);
@@ -164,17 +104,7 @@ use super::*;
             created_at: now,
             updated_at: now,
         };
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            Some(&session),
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, Some(&session), None);
         assert!(inp.a_ev.iter().all(|&v| !v));
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
@@ -193,17 +123,7 @@ use super::*;
             created_at: now,
             updated_at: now,
         };
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            Some(&session),
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, Some(&session), None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MustRun);
     }
 
@@ -221,17 +141,7 @@ use super::*;
             created_at: now,
             updated_at: now,
         };
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            Some(&session),
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, Some(&session), None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MayRun);
     }
 
@@ -242,17 +152,7 @@ use super::*;
         let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, true);
         // No session at all
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         assert_eq!(inp.ev_mode, MilpLoadMode::MustNotRun);
     }
 
@@ -263,17 +163,7 @@ use super::*;
         let profile = make_profile();
         let sim = make_snap_from_profile(&profile);
         let empty_tariffs = TariffTimeSeries::from_snapshots(&[]);
-        let inp = build_milp_inputs(
-            &sim,
-            &empty_tariffs,
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &empty_tariffs, &no_capacity(), now, None, None);
         assert!(inp.c_imp_eur_kwh.iter().all(|&v| (v - 0.25).abs() < 1e-9));
         assert!(inp.c_exp_eur_kwh.iter().all(|&v| (v - 0.08).abs() < 1e-9));
         assert!(inp.g_imp_kgco2_kwh.iter().all(|&v| (v - 0.30).abs() < 1e-9));
@@ -286,17 +176,7 @@ use super::*;
         let profile = make_profile(); // heater max_kw=3.0, mid_kw=None
         let mut sim = make_snap_from_profile(&profile);
         set_ev_plugged(&mut sim, true); // avoid EV noise
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         assert!((inp.p_heat_mid_kw - 1.5).abs() < 1e-9); // 3.0 / 2.0
         assert!((inp.p_heat_full_kw - 3.0).abs() < 1e-9);
     }
@@ -319,17 +199,7 @@ use super::*;
             })
             .collect();
         let sim = make_snap_from_profile(&profile);
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
         assert!((inp.p_heat_mid_kw - 2.0).abs() < 1e-9);
     }
 
@@ -383,17 +253,7 @@ use super::*;
             export_limit_event_id: None,
             last_updated: None,
         };
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &capacity,
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &capacity, now, None, None);
         // Physical limit unchanged
         assert!(inp
             .p_imp_max_phys_kw

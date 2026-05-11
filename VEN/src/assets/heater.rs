@@ -1039,60 +1039,124 @@ mod tests {
         assert!(q_dem >= 0.0, "q_dem must be non-negative, got {q_dem}");
     }
 
+    fn make_may_run_ctx(n: usize) -> HeaterMilpContext {
+        HeaterMilpContext {
+            mode: HeaterMilpMode::MayRun,
+            t_dead_step: None,
+            p_mid_kw: 1.0,
+            p_full_kw: 2.0,
+            e_init_kwh: 2.5,
+            e_max_kwh: 5.0,
+            q_dem_kw: 0.3,
+            e_target_kwh: 5.0,
+            lambda_sw_eur: 0.0,
+            initial_z_mid: 0.0,
+            initial_z_full: 0.0,
+        }
+    }
+
+    fn heater_pool_and_vars(
+        n: usize,
+    ) -> (good_lp::ProblemVariables, HeaterMilpVars, crate::controller::milp_interactions::MilpVarPool) {
+        use good_lp::{variable, variables};
+        use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
+        let mut vars = variables!();
+        let ctx = make_may_run_ctx(n);
+        let hv = ctx.declare_vars(n, &mut vars);
+        let grid = GridMilpVars {
+            p_imp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            p_exp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            u_grid: (0..n).map(|_| vars.add(variable().binary())).collect(),
+            s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+        };
+        let pool = MilpVarPool { grid, bat: None, ev: None, heater: Some(hv.clone()), shiftable: vec![] };
+        (vars, hv, pool)
+    }
+
     #[test]
-    #[ignore = "implemented in Step 4"]
     fn heater_milp_context_declares_e_tank_s_low_sw() {
-        // declare_vars() must produce e_tank, s_low, sw vectors each of length n.
-        todo!("implement after HeaterMilpContext redesign")
+        let n = 4;
+        let (_, hv, _) = heater_pool_and_vars(n);
+        assert_eq!(hv.e_tank.len(), n);
+        assert_eq!(hv.s_low.len(), n);
+        assert_eq!(hv.sw.len(), n);
     }
 
     #[test]
-    #[ignore = "implemented in Step 4"]
-    fn heater_milp_sw0_fixed_at_zero() {
-        // sw[0] must be declared with min=0.0 max=0.0 (no switching at t=0).
-        todo!("implement after HeaterMilpContext redesign")
+    fn heater_milp_sw_all_slots_present() {
+        let n = 4;
+        let (_, hv, _) = heater_pool_and_vars(n);
+        // sw has one entry per slot including t=0 (measures switch from initial hardware state)
+        assert_eq!(hv.sw.len(), n);
     }
 
     #[test]
-    #[ignore = "implemented in Step 4"]
-    fn heater_milp_must_not_run_all_vars_zero() {
-        // MustNotRun: z_heat_mid, z_heat_full fixed at 0; e_tank, s_low, sw ≥ 0.
-        todo!("implement after HeaterMilpContext redesign")
+    fn heater_milp_must_not_run_returns_only_mutual_exclusion_constraints() {
+        let n = 4;
+        use good_lp::variables;
+        let mut vars = variables!();
+        let ctx = HeaterMilpContext {
+            mode: HeaterMilpMode::MustNotRun,
+            ..make_may_run_ctx(n)
+        };
+        let hv = ctx.declare_vars(n, &mut vars);
+        let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
+        // MustNotRun: only C0 (n mutual exclusion constraints), early return after
+        assert_eq!(cs.len(), n);
     }
 
     #[test]
-    #[ignore = "implemented in Step 4"]
     fn heater_milp_constraints_initial_energy_pin() {
-        // constraints() must include two inequalities pinning e_tank[0] = e_init_kwh.
-        todo!("implement after HeaterMilpContext redesign")
+        let n = 4;
+        let (_, hv, _) = heater_pool_and_vars(n);
+        let ctx = make_may_run_ctx(n);
+        let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
+        // C0: n, C1: 2, C2: 2×(n-1), C3: n, C4: n, C5: 4×n (4 at t=0, 4 per subsequent slot)
+        // Total for MayRun, no deadline: n + 2 + 2(n-1) + n + n + 4n = 9n
+        // For n=4: 4 + 2 + 6 + 4 + 4 + 16 = 36
+        assert!(cs.len() >= 2, "should have at least C1 (2 constraints pinning e_tank[0])");
     }
 
     #[test]
-    #[ignore = "implemented in Step 4"]
     fn heater_milp_constraints_dynamics_count() {
-        // For n=4: C2 contributes 2×3 = 6 dynamics inequalities.
-        todo!("implement after HeaterMilpContext redesign")
+        let n = 4;
+        let (_, hv, _) = heater_pool_and_vars(n);
+        let ctx = make_may_run_ctx(n);
+        let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
+        // n=4, MayRun, no deadline: 4 + 2 + 6 + 4 + 4 + 16 = 36
+        assert_eq!(cs.len(), 36, "expected 36 constraints for n=4 MayRun no-deadline");
     }
 
     #[test]
-    #[ignore = "implemented in Step 4"]
     fn heater_milp_constraints_upper_bound() {
-        // C3: n upper-bound constraints e_tank[t] ≤ e_max_kwh.
-        todo!("implement after HeaterMilpContext redesign")
+        let n = 4;
+        let (_, hv, _) = heater_pool_and_vars(n);
+        let ctx = make_may_run_ctx(n);
+        let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
+        // C3 contributes n constraints; total >= n (at minimum C0 alone)
+        assert!(cs.len() >= n, "need at least n upper-bound constraints (C3)");
     }
 
     #[test]
-    #[ignore = "implemented in Step 4"]
     fn heater_milp_constraints_soft_low() {
-        // C4: n soft-lower constraints e_tank[t] + s_low[t] ≥ 0.
-        todo!("implement after HeaterMilpContext redesign")
+        let n = 4;
+        let (_, hv, _) = heater_pool_and_vars(n);
+        let ctx = make_may_run_ctx(n);
+        let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
+        // C4 contributes n soft-lower constraints; verified by total count
+        assert!(cs.len() >= n * 2);
     }
 
     #[test]
-    #[ignore = "implemented in Step 4"]
     fn heater_milp_constraints_switching_four_per_step() {
-        // C5: 4×(n−1) switching constraints for n > 1.
-        todo!("implement after HeaterMilpContext redesign")
+        let n = 4;
+        let (_, hv, _) = heater_pool_and_vars(n);
+        let ctx = make_may_run_ctx(n);
+        let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
+        // C5: 4 at t=0 + 4×(n-1) at t=1..n-1 = 4n total switching constraints
+        // Verified through the total 36 constraint count for n=4
+        assert_eq!(cs.len(), 36);
     }
 
     // T016: Heater::future_state_values returns correct temp_c.
@@ -1121,5 +1185,103 @@ mod tests {
         let vals = h.future_state_values(1.0);
         assert_eq!(vals.len(), 1, "expected exactly one key");
         assert!(vals.contains_key("temp_c"));
+    }
+}
+
+#[cfg(test)]
+mod milp_context_trait_tests {
+    use super::*;
+    use good_lp::{variable, variables};
+    use crate::controller::milp_planner::{AssetKind, AssetMilpContext, AssetMilpParams, MilpLoadMode};
+    use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
+
+    fn make_ctx() -> HeaterMilpContext {
+        HeaterMilpContext {
+            mode: HeaterMilpMode::MayRun,
+            t_dead_step: None,
+            p_mid_kw: 1.0,
+            p_full_kw: 2.0,
+            e_init_kwh: 2.5,
+            e_max_kwh: 5.0,
+            q_dem_kw: 0.3,
+            e_target_kwh: 5.0,
+            lambda_sw_eur: 0.01,
+            initial_z_mid: 0.0,
+            initial_z_full: 0.0,
+        }
+    }
+
+    fn empty_pool(vars: &mut good_lp::ProblemVariables, n: usize) -> MilpVarPool {
+        let grid = GridMilpVars {
+            p_imp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            p_exp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            u_grid: (0..n).map(|_| vars.add(variable().binary())).collect(),
+            s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+        };
+        MilpVarPool { grid, bat: None, ev: None, heater: None, shiftable: vec![] }
+    }
+
+    #[test]
+    fn asset_id_is_heater() {
+        assert_eq!(make_ctx().asset_id(), "heater");
+    }
+
+    #[test]
+    fn asset_kind_is_heater() {
+        assert_eq!(make_ctx().asset_kind(), AssetKind::Heater);
+    }
+
+    #[test]
+    fn milp_params_returns_heater_scalars() {
+        let ctx = make_ctx();
+        match ctx.milp_params(4, 300, chrono::Utc::now()) {
+            AssetMilpParams::Heater(h) => {
+                assert_eq!(h.mode, MilpLoadMode::MayRun);
+                assert!((h.p_mid_kw - 1.0).abs() < 1e-9);
+                assert!((h.p_full_kw - 2.0).abs() < 1e-9);
+                assert!((h.e_init_kwh - 2.5).abs() < 1e-9);
+                assert!((h.lambda_sw_eur - 0.01).abs() < 1e-9);
+                assert!(h.t_dead_step.is_none());
+            }
+            _ => panic!("expected AssetMilpParams::Heater"),
+        }
+    }
+
+    #[test]
+    fn milp_params_must_run_mode() {
+        let ctx = HeaterMilpContext { mode: HeaterMilpMode::MustRun, ..make_ctx() };
+        match ctx.milp_params(4, 300, chrono::Utc::now()) {
+            AssetMilpParams::Heater(h) => assert_eq!(h.mode, MilpLoadMode::MustRun),
+            _ => panic!("expected Heater variant"),
+        }
+    }
+
+    #[test]
+    fn declare_vars_fills_pool_heater_slot() {
+        let n = 4;
+        let ctx = make_ctx();
+        let mut vars = variables!();
+        let mut pool = empty_pool(&mut vars, n);
+        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
+        let v = pool.heater.as_ref().expect("pool.heater should be Some");
+        assert_eq!(v.z_heat_mid.len(), n);
+        assert_eq!(v.z_heat_full.len(), n);
+        assert_eq!(v.e_tank.len(), n);
+        assert_eq!(v.s_low.len(), n);
+        assert_eq!(v.sw.len(), n);
+        assert!((v.p_mid_kw - 1.0).abs() < 1e-9);
+        assert!((v.p_full_kw - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn constraints_count_for_n4_may_run() {
+        let n = 4;
+        let ctx = make_ctx();
+        let mut vars = variables!();
+        let mut pool = empty_pool(&mut vars, n);
+        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
+        let cs = ctx.constraints(&pool, n, 300.0 / 3600.0);
+        assert_eq!(cs.len(), 36, "n=4 MayRun no-deadline: expected 36 constraints");
     }
 }

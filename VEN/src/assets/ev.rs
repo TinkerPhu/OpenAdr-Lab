@@ -779,3 +779,123 @@ mod tests {
         assert_eq!(EvCharger::future_state_values_at(1.5)["soc"], 1.0);
     }
 }
+
+#[cfg(test)]
+mod milp_context_trait_tests {
+    use super::*;
+    use good_lp::{variable, variables};
+    use crate::controller::milp_planner::{AssetKind, AssetMilpContext, AssetMilpParams, MilpLoadMode};
+    use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
+
+    fn empty_pool(vars: &mut good_lp::ProblemVariables, n: usize) -> MilpVarPool {
+        let grid = GridMilpVars {
+            p_imp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            p_exp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            u_grid: (0..n).map(|_| vars.add(variable().binary())).collect(),
+            s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+        };
+        MilpVarPool { grid, bat: None, ev: None, heater: None, shiftable: vec![] }
+    }
+
+    fn make_must_run(n: usize) -> EvMilpContext {
+        EvMilpContext {
+            mode: EvMilpMode::MustRun,
+            a_ev: vec![true; n],
+            t_dead_step: Some(n - 1),
+            p_max_kw: 7.2,
+            p_min_kw: 0.0,
+            e_core_kwh: 10.0,
+            e_extra_max_kwh: 5.0,
+            v_extra_eur_kwh: 0.05,
+        }
+    }
+
+    #[test]
+    fn asset_id_is_ev() {
+        assert_eq!(make_must_run(4).asset_id(), "ev");
+    }
+
+    #[test]
+    fn asset_kind_is_ev() {
+        assert_eq!(make_must_run(4).asset_kind(), AssetKind::Ev);
+    }
+
+    #[test]
+    fn milp_params_must_run_mode() {
+        let ctx = make_must_run(4);
+        match ctx.milp_params(4, 300, chrono::Utc::now()) {
+            AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MustRun),
+            _ => panic!("expected Ev variant"),
+        }
+    }
+
+    #[test]
+    fn milp_params_may_run_mode() {
+        let ctx = EvMilpContext {
+            mode: EvMilpMode::MayRun,
+            a_ev: vec![true; 4],
+            t_dead_step: None,
+            p_max_kw: 7.2,
+            p_min_kw: 0.0,
+            e_core_kwh: 0.0,
+            e_extra_max_kwh: 5.0,
+            v_extra_eur_kwh: 0.05,
+        };
+        match ctx.milp_params(4, 300, chrono::Utc::now()) {
+            AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MayRun),
+            _ => panic!("expected Ev variant"),
+        }
+    }
+
+    #[test]
+    fn milp_params_must_not_run_mode() {
+        let ctx = EvMilpContext {
+            mode: EvMilpMode::MustNotRun,
+            a_ev: vec![false; 4],
+            t_dead_step: None,
+            p_max_kw: 7.2,
+            p_min_kw: 0.0,
+            e_core_kwh: 0.0,
+            e_extra_max_kwh: 5.0,
+            v_extra_eur_kwh: 0.05,
+        };
+        match ctx.milp_params(4, 300, chrono::Utc::now()) {
+            AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MustNotRun),
+            _ => panic!("expected Ev variant"),
+        }
+    }
+
+    #[test]
+    fn milp_params_propagates_a_ev() {
+        let n = 4;
+        let a_ev = vec![true, false, true, false];
+        let ctx = EvMilpContext {
+            mode: EvMilpMode::MayRun,
+            a_ev: a_ev.clone(),
+            t_dead_step: None,
+            p_max_kw: 7.2,
+            p_min_kw: 0.0,
+            e_core_kwh: 0.0,
+            e_extra_max_kwh: 5.0,
+            v_extra_eur_kwh: 0.05,
+        };
+        match ctx.milp_params(n, 300, chrono::Utc::now()) {
+            AssetMilpParams::Ev(e) => assert_eq!(e.a_ev, a_ev),
+            _ => panic!("expected Ev variant"),
+        }
+    }
+
+    #[test]
+    fn declare_vars_fills_pool_ev_slot() {
+        let n = 4;
+        let ctx = make_must_run(n);
+        let mut vars = variables!();
+        let mut pool = empty_pool(&mut vars, n);
+        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
+        let v = pool.ev.as_ref().expect("pool.ev should be Some after declare");
+        assert_eq!(v.p_ev.len(), n);
+        assert_eq!(v.z_ev_on.len(), n);
+        assert!(v.delta_ev.is_empty()); // no startup vars when c_startup=0
+    }
+}

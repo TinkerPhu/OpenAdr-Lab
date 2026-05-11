@@ -624,3 +624,89 @@ mod tests {
         assert_eq!(vals["soc"], 1.0);
     }
 }
+
+#[cfg(test)]
+mod milp_context_trait_tests {
+    use super::*;
+    use good_lp::{variable, variables};
+    use crate::controller::milp_planner::{AssetKind, AssetMilpContext, AssetMilpParams};
+    use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
+
+    fn make_ctx() -> BatteryMilpContext {
+        BatteryMilpContext {
+            e_nom_kwh: 10.0,
+            e_init_kwh: 5.0,
+            e_min_kwh: 1.0,
+            e_max_kwh: 10.0,
+            p_ch_max_kw: 5.0,
+            p_dis_max_kw: 5.0,
+            eff_ch: 0.9746794_f64.sqrt(),
+            eff_dis: 0.9746794_f64.sqrt(),
+        }
+    }
+
+    fn empty_pool(vars: &mut good_lp::ProblemVariables, n: usize) -> MilpVarPool {
+        let grid = GridMilpVars {
+            p_imp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            p_exp: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            u_grid: (0..n).map(|_| vars.add(variable().binary())).collect(),
+            s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+        };
+        MilpVarPool { grid, bat: None, ev: None, heater: None, shiftable: vec![] }
+    }
+
+    #[test]
+    fn asset_id_is_battery() {
+        assert_eq!(make_ctx().asset_id(), "battery");
+    }
+
+    #[test]
+    fn asset_kind_is_battery() {
+        assert_eq!(make_ctx().asset_kind(), AssetKind::Battery);
+    }
+
+    #[test]
+    fn milp_params_returns_correct_battery_scalars() {
+        let ctx = make_ctx();
+        let params = ctx.milp_params(4, 300, chrono::Utc::now());
+        match params {
+            AssetMilpParams::Battery(b) => {
+                assert!((b.e_nom_kwh - 10.0).abs() < 1e-9);
+                assert!((b.e_init_kwh - 5.0).abs() < 1e-9);
+                assert!((b.e_min_kwh - 1.0).abs() < 1e-9);
+                assert!((b.p_ch_max_kw - 5.0).abs() < 1e-9);
+                assert!((b.p_dis_max_kw - 5.0).abs() < 1e-9);
+            }
+            _ => panic!("expected AssetMilpParams::Battery"),
+        }
+    }
+
+    #[test]
+    fn declare_vars_into_pool_fills_bat_slot() {
+        let ctx = make_ctx();
+        let n = 4;
+        let mut vars = variables!();
+        let mut pool = empty_pool(&mut vars, n);
+        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
+        let v = pool.bat.as_ref().expect("pool.bat should be Some after declare");
+        assert_eq!(v.p_ch.len(), n);
+        assert_eq!(v.p_dis.len(), n);
+        assert_eq!(v.e_bat.len(), n + 1);
+        assert!(v.z_active.is_empty()); // no startup vars when c_startup=0
+        assert!(v.delta_ramp.is_empty()); // no ramp vars when c_ramp=0
+    }
+
+    #[test]
+    fn constraints_non_empty_for_n4() {
+        let ctx = make_ctx();
+        let n = 4;
+        let dt_h = 300.0 / 3600.0;
+        let mut vars = variables!();
+        let mut pool = empty_pool(&mut vars, n);
+        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
+        let cs = ctx.constraints(&pool, n, dt_h);
+        // 3×n (charge, discharge, SoC dynamics) + 1 terminal SoC constraint
+        assert!(cs.len() >= n * 3 + 1, "expected at least {} constraints, got {}", n * 3 + 1, cs.len());
+    }
+}
