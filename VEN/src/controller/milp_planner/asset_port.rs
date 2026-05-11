@@ -8,13 +8,17 @@
 //! `assets/*.rs` re-export these types via `pub use` for backward compatibility.
 //! All code in `controller/milp_planner` imports from `super::asset_port::*` instead
 //! of from `crate::assets::*`, which is the architectural invariant enforced by Phase 3.
+//!
+//! ## Constitution VI verification (T023, 2026-phase-3)
+//! - `impl AssetMilpContext`: Battery, Ev, Heater only (assets/battery.rs, ev.rs, heater.rs)
+//! - `use crate::assets::` in milp_planner/: none in production code (test fixture only)
+//! - `use crate::assets::` in milp_interactions.rs: none
+//! - Line counts: asset_port.rs ≤ 500 ✓; battery.rs/ev.rs/heater.rs exceed 500 (pre-existing complexity)
 
 use chrono::{DateTime, Utc};
 use good_lp::{ProblemVariables, Variable};
 use std::collections::HashMap;
-
 // ── Battery MILP types ────────────────────────────────────────────────────────
-
 /// Pre-computed MILP parameters for one battery instance and planning cycle.
 /// Built from live state; consumed by `declare_milp_vars` and the constraint/
 /// objective methods. Avoids repeated field accesses inside tight solver loops.
@@ -61,7 +65,6 @@ pub struct BatterySolOutput {
     /// SoC trajectory [kWh], len = n + 1.
     pub e_kwh: Vec<f64>,
 }
-
 // ── EV MILP types ─────────────────────────────────────────────────────────────
 
 /// Scheduling mode for the EV in the MILP model.
@@ -186,7 +189,6 @@ impl EvMilpContext {
         }
     }
 }
-
 // ── Heater MILP types ─────────────────────────────────────────────────────────
 
 /// Scheduling mode for the heater in the MILP model.
@@ -287,16 +289,8 @@ impl HeaterMilpContext {
         let live_mid_kw = if mid_kw > 0.0 { mid_kw } else { max_kw / 2.0 };
         let e_init = (current_temp_c - temp_min_c) * thermal_mass_kwh_per_c;
         let e_max = ((temp_max_c - temp_min_c) * thermal_mass_kwh_per_c).max(0.0);
-        let initial_z_mid = if (actual_power_kw - live_mid_kw).abs() < 0.1 {
-            1.0
-        } else {
-            0.0
-        };
-        let initial_z_full = if (actual_power_kw - max_kw).abs() < 0.1 {
-            1.0
-        } else {
-            0.0
-        };
+        let initial_z_mid = if (actual_power_kw - live_mid_kw).abs() < 0.1 { 1.0 } else { 0.0 };
+        let initial_z_full = if (actual_power_kw - max_kw).abs() < 0.1 { 1.0 } else { 0.0 };
         if let Some(target) = heater_target {
             let e_target =
                 ((target.target_temp_c - temp_min_c) * thermal_mass_kwh_per_c).clamp(0.0, e_max);
@@ -333,7 +327,6 @@ impl HeaterMilpContext {
         }
     }
 }
-
 // ── AssetKind and helper parameter types ─────────────────────────────────────
 
 /// Discriminant for the MILP-capable asset types.
@@ -400,10 +393,8 @@ pub enum AssetMilpParams {
 
 /// Below-minimum tank violation penalty [€/kWh]. Used by heater objective (Phase 1).
 pub const M_LOW_EUR_PER_KWH: f64 = 10.0;
-
 // ── AssetMilpContext trait ────────────────────────────────────────────────────
-
-/// Port trait for MILP-capable assets. Enables trait-object dispatch in solver phases,
+/// Port trait for MILP-capable assets.Enables trait-object dispatch in solver phases,
 /// eliminating direct imports of concrete asset types from `controller/milp_planner/`.
 ///
 /// **Call order invariant**: `declare_vars_into_pool()` MUST be called before
@@ -466,7 +457,6 @@ pub enum MilpLoadMode {
     MayRun,
     MustNotRun,
 }
-
 // ── Plan-result helper free functions ─────────────────────────────────────────
 // These replace direct calls to Battery/EvCharger/Heater methods in results.rs,
 // eliminating the need to import `crate::assets::*` from within milp_planner.

@@ -177,6 +177,7 @@ use super::*;
         let mut sim = make_snap_from_profile(&profile);
         set_battery_soc(&mut sim, 0.1); // low SoC → planner will charge on cheap slots
         let plan = run_planner(
+            build_asset_contexts(&profile, &sim, now, None, None),
             &sim,
             &make_two_zone_tariffs(0.05, 0.40),
             &no_capacity(),
@@ -258,6 +259,7 @@ use super::*;
             updated_at: now,
         };
         let plan = run_planner(
+            build_asset_contexts(&profile, &sim, now, Some(&session), None),
             &sim,
             &make_tariffs(0.25, 0.08, 300.0),
             &no_capacity(),
@@ -301,6 +303,7 @@ use super::*;
         let profile = make_heater_only_profile(None, 18.0, 23.0, 20.0);
         let sim = make_snap_from_profile(&profile);
         let plan = run_planner(
+            build_asset_contexts(&profile, &sim, now, None, None),
             &sim,
             &make_tariffs(0.25, 0.08, 300.0),
             &no_capacity(),

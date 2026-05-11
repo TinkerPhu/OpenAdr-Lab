@@ -7,6 +7,13 @@
 //!
 //! Also defines the shared LP variable pool types ([`MilpVarPool`],
 //! [`GlobalMilpInputs`]) used by Step 6 of the asset-plugin refactor.
+//!
+//! ## Type-relocation note (Phase 3 refactor)
+//!
+//! `BatteryMilpVars`, `EvMilpVars`, and `HeaterMilpVars` were relocated from
+//! `crate::assets::battery`, `crate::assets::ev`, and `crate::assets::heater`
+//! into `crate::controller::milp_planner::asset_port`. This file imports them
+//! from there; it no longer imports from `crate::assets::*`.
 
 use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, Variable};
 
