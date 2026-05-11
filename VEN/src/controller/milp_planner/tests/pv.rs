@@ -25,17 +25,7 @@ use super::*;
         let mut sim = make_snap_from_profile(&profile);
         set_pv_inject(&mut sim, 0.5, 0.001); // slow alpha → offset barely decays
 
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
 
         // slot 0: seconds_ahead=0 → decayed_offset = 0.5×(0.999)^0 = 0.5
         // p_pv[0] = (0.0 + 0.5).clamp(0,1) × 5.0 = 2.5 kW
@@ -57,17 +47,7 @@ use super::*;
         let mut sim = make_snap_from_profile(&profile);
         set_pv_inject(&mut sim, 0.5, 0.1); // typical alpha=0.1
 
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
 
         // slot 0: 0.5 × 0.9^0 × 5.0 = 2.5 kW
         // slot 1: 0.5 × 0.9^1 × 5.0 = 2.25 kW (must be clearly non-zero)
@@ -149,17 +129,7 @@ use super::*;
         // from_profile initialises irradiance_offset=0, pv_alpha=0.1
         let sim = make_snap_from_profile(&profile);
 
-        let inp = build_milp_inputs(
-            &sim,
-            &TariffTimeSeries::from_snapshots(&[]),
-            &no_capacity(),
-            &profile,
-            now,
-            None,
-            None,
-            &[],
-            None,
-        );
+        let inp = bmi(&profile, &sim, &TariffTimeSeries::from_snapshots(&[]), &no_capacity(), now, None, None);
 
         // Compare every slot against the profile's sin model
         let pv_cfg = profile.pv_config().unwrap();

@@ -359,6 +359,134 @@
         ])
     }
 
+    // ── Test helpers: asset context construction ─────────────────────────────
+
+    /// Build asset contexts from a Profile + SimSnapshot for use in test calls to
+    /// `build_milp_inputs()`, `solve_milp_two_phase()`, and `run_planner()`.
+    /// Mirrors what `tasks/planning.rs` does at runtime.
+    fn build_asset_contexts(
+        profile: &Profile,
+        snap: &SimSnapshot,
+        now: DateTime<Utc>,
+        ev_session: Option<&crate::entities::device_session::EvSession>,
+        heater_target: Option<&crate::entities::device_session::HeaterTarget>,
+    ) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
+        use crate::assets::{
+            battery::{Battery, BatteryState},
+            ev::{EvCharger, EvState},
+            heater::{Heater, HeaterState},
+            AssetConfig, AssetState,
+        };
+        let step_s = profile.planner.plan_step_s;
+        let n = (profile.planner.plan_horizon_h as f64 * 3600.0 / step_s as f64) as usize;
+        let lambda_sw = profile.heater_config().map(|h| h.effective_switching_penalty()).unwrap_or(0.0);
+        let v_ev_extra = profile.planner.v_ev_extra_eur_kwh;
+        let ev_min_kw = profile.ev_config().map(|e| e.min_charge_kw).unwrap_or(0.0);
+
+        let mut ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = Vec::new();
+        for ap in &profile.assets {
+            match ap {
+                AssetProfile::Battery(cfg) => {
+                    let soc = snap.assets.get("battery").and_then(|s| s.val("soc")).unwrap_or(cfg.initial_soc);
+                    let state = AssetState::Battery(BatteryState { soc, actual_power_kw: 0.0 });
+                    let ac = AssetConfig::Battery(Battery::from_config(cfg));
+                    if let Some(ctx) = ac.build_milp_context(&state, n, step_s, now, ev_session, heater_target, ev_min_kw, v_ev_extra, lambda_sw) {
+                        ctxs.push(ctx);
+                    }
+                }
+                AssetProfile::Ev(cfg) => {
+                    let soc = snap.assets.get("ev").and_then(|s| s.val("soc")).unwrap_or(cfg.initial_soc);
+                    let plugged = snap.assets.get("ev").and_then(|s| s.val("plugged")).map(|v| v > 0.5).unwrap_or(true);
+                    let state = AssetState::Ev(EvState { soc, actual_power_kw: 0.0, plugged });
+                    let ac = AssetConfig::Ev(EvCharger::from_config(cfg));
+                    if let Some(ctx) = ac.build_milp_context(&state, n, step_s, now, ev_session, heater_target, ev_min_kw, v_ev_extra, lambda_sw) {
+                        ctxs.push(ctx);
+                    }
+                }
+                AssetProfile::Heater(cfg) => {
+                    let temp_c = snap.assets.get("heater").and_then(|s| s.val("temp_c")).unwrap_or(cfg.temp_initial_c);
+                    let state = AssetState::Heater(HeaterState { temperature_c: temp_c, actual_power_kw: 0.0 });
+                    let ac = AssetConfig::Heater(Heater::from_config(cfg));
+                    if let Some(ctx) = ac.build_milp_context(&state, n, step_s, now, ev_session, heater_target, ev_min_kw, v_ev_extra, lambda_sw) {
+                        ctxs.push(ctx);
+                    }
+                }
+                _ => {}
+            }
+        }
+        ctxs
+    }
+
+    /// Build asset contexts from a pre-built MilpInputs (for solver-level unit tests that
+    /// construct MilpInputs manually and need matching contexts for the new solver API).
+    fn contexts_from_inputs(inputs: &MilpInputs) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
+        use crate::services::test_support::milp_mocks::{MockBatteryCtx, MockEvCtx, MockHeaterCtx};
+        use crate::controller::milp_planner::asset_port::{EvMilpContext, EvMilpMode, HeaterMilpContext, HeaterMilpMode};
+        let mut v: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = Vec::new();
+        if let Some(e_nom) = inputs.e_bat_nom_kwh {
+            v.push(Box::new(MockBatteryCtx::new(
+                e_nom,
+                inputs.e_bat_init_kwh.unwrap_or(0.0),
+                inputs.e_bat_min_kwh.unwrap_or(0.0),
+                inputs.p_bat_ch_max_kw.unwrap_or(0.0).max(inputs.p_bat_dis_max_kw.unwrap_or(0.0)),
+                inputs.eff_bat_ch.unwrap_or(1.0),
+            )));
+        }
+        if inputs.p_ev_max_kw > 0.0 {
+            let mode = match inputs.ev_mode {
+                MilpLoadMode::MustRun => EvMilpMode::MustRun,
+                MilpLoadMode::MayRun => EvMilpMode::MayRun,
+                MilpLoadMode::MustNotRun => EvMilpMode::MustNotRun,
+            };
+            v.push(Box::new(MockEvCtx { ctx: EvMilpContext {
+                mode,
+                a_ev: inputs.a_ev.clone(),
+                t_dead_step: inputs.t_ev_dead_step,
+                p_max_kw: inputs.p_ev_max_kw,
+                p_min_kw: inputs.p_ev_min_kw,
+                e_core_kwh: inputs.e_ev_core_kwh,
+                e_extra_max_kwh: inputs.e_ev_extra_max_kwh,
+                v_extra_eur_kwh: inputs.v_ev_extra_eur_kwh,
+            }}));
+        }
+        if inputs.p_heat_full_kw > 0.0 {
+            let mode = match inputs.heater_mode {
+                MilpLoadMode::MustRun => HeaterMilpMode::MustRun,
+                MilpLoadMode::MayRun => HeaterMilpMode::MayRun,
+                MilpLoadMode::MustNotRun => HeaterMilpMode::MustNotRun,
+            };
+            v.push(Box::new(MockHeaterCtx { ctx: HeaterMilpContext {
+                mode,
+                t_dead_step: inputs.t_heat_dead_step,
+                p_mid_kw: inputs.p_heat_mid_kw,
+                p_full_kw: inputs.p_heat_full_kw,
+                e_init_kwh: inputs.e_heat_init_kwh,
+                e_max_kwh: inputs.e_heat_max_kwh,
+                q_dem_kw: inputs.q_heat_dem_kw,
+                e_target_kwh: inputs.e_heat_target_kwh,
+                lambda_sw_eur: inputs.lambda_heat_sw_eur,
+                initial_z_mid: inputs.heat_initial_z_mid,
+                initial_z_full: inputs.heat_initial_z_full,
+            }}));
+        }
+        v
+    }
+
+    /// Convenience wrapper: build contexts then call build_milp_inputs.
+    /// Allows existing tests to use a familiar signature without restructuring.
+    fn bmi(
+        profile: &Profile,
+        sim: &SimSnapshot,
+        tariffs: &TariffTimeSeries,
+        cap: &OadrCapacityState,
+        now: DateTime<Utc>,
+        ev_session: Option<&crate::entities::device_session::EvSession>,
+        heater_target: Option<&crate::entities::device_session::HeaterTarget>,
+    ) -> MilpInputs {
+        let ctxs = build_asset_contexts(profile, sim, now, ev_session, heater_target);
+        build_milp_inputs(&ctxs, sim, tariffs, cap, profile, now, &[], None)
+    }
+
 mod basic;
 mod solver;
 mod pv;
