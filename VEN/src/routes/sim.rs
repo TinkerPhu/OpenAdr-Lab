@@ -232,6 +232,16 @@ pub async fn post_sim_inject(
     axum::http::StatusCode::NO_CONTENT
 }
 
+/// POST /plan/trigger — force an immediate MILP replan.
+///
+/// Sends `PlanTrigger::AssetStateChange` without modifying any sim state.
+/// Useful in tests to request a fresh plan without side-effecting physics
+/// (e.g., after calling `POST /sim/reset` or adjusting an EV session).
+pub async fn post_plan_trigger(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    let _ = ctx.trigger_tx.send(PlanTrigger::AssetStateChange);
+    axum::http::StatusCode::NO_CONTENT
+}
+
 /// POST /sim/inject/reset — release all active overrides at once.
 pub async fn post_sim_inject_reset(State(ctx): State<AppCtx>) -> impl IntoResponse {
     ctx.state.set_inject_state(SimInjectState::default()).await;
