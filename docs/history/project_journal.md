@@ -3598,3 +3598,69 @@ Four BDD runs were needed to reach a green suite. The investigation uncovered tw
 
 New files (`planner_params.rs` 165 lines, `asset_params.rs` 13 lines) are well within the 500-line constitution limit.  
 Pre-existing files `heater.rs` (1339), `absorber.rs` (1371), `ev.rs` (945), `battery.rs` (753), `pv.rs` (670), and `simulator/mod.rs` (513) already exceeded the 500-line limit before Phase 4. Phase 4 contributed only 29–80 additional lines to each. These are pre-existing Principle VI violations deferred from earlier phases — not introduced by Phase 4.
+
+## Feature 022 — Deterministic Test Environment ( 22-deterministic-test-env)
+
+**Branch**:  22-deterministic-test-env (off  21-decouple-profile-domain)
+**Status**: COMPLETE — local code changes committed (2026-05-12); Pi4 validation pending
+
+### What changed
+
+A pv_plan_kw: Option<f64> field was added to the POST /sim/inject API.  When
+set, it pins every slot in the MILP 24-hour planning horizon to a fixed kW value,
+eliminating the time-of-day variance produced by the sin-model PV forecast.
+
+**5-file call chain (infra ring → domain ring)**:
+
+`
+SimInjectState.pv_plan_kw        (state.rs)
+  └─ PostSimInjectBody.pv_plan_kw  (routes/sim.rs — merge + NOT in should_replan)
+       └─ tasks/planning.rs: let pv_forecast_override = inject_snap.pv_plan_kw
+            └─ run_planner(…, pv_forecast_override)      (milp_planner/mod.rs)
+                 └─ build_milp_inputs(…, pv_forecast_override)  (milp_planner/inputs.rs)
+`
+
+Architecture boundary: pv_plan_kw appears in exactly 3 infra-ring files; the
+domain ring uses the renamed parameter pv_forecast_override to stay decoupled
+from infrastructure field names.
+
+**Feature files updated**: deviation_absorber.feature, en_planner.feature,
+en_dispatcher.feature, en_uc_normal.feature, en_uc_stress.feature.
+All Backgrounds now inject pv_plan_kw=0.0 so plans are identical regardless of
+when on Pi4 the BDD suite runs.
+
+**New BDD scenario**: "PV forecast override does not trigger a replan" in
+en_planner.feature — verifies the no-replan contract using context.idle_plan_ts
+(set by Given the system is idle) compared against plan created_at after 2 s.
+
+### Key design decisions
+
+1. **should_replan exclusion**: pv_plan_kw deliberately excluded from the
+   should_replan guard in outes/sim.rs.  Adding it would trigger a T1+T2
+   double-solve race (same root cause as ase_load_kw exclusion), corrupting
+   the absorber's assertion window in timing-sensitive BDD steps.
+
+2. **Inject snapshot read-before-spawn_blocking**: pv_plan_kw is read from
+   inject_snap (captured BEFORE the spawn_blocking closure) to match the
+   pattern of all other inject fields.  Reading after clone risks a stale
+   one-shot value being consumed by the sim tick before the planner reads it.
+
+3. **pv_forecast_override rename at domain boundary**: The domain ring
+   (milp_planner/) does not import from crate::state or crate::routes.
+   Renaming the parameter at the boundary keeps the domain ring clean and
+   makes the distinction from pv_irradiance (physics tick) self-documenting.
+
+4. **Clamping negative values**: pv_forecast_override.max(0.0) prevents a
+   negative kW inject from creating unphysical negative generation in the MILP.
+
+### Success criteria (local verification)
+
+| Criterion | Result |
+|-----------|--------|
+| pv_plan_kw in exactly 3 infra files | ✅ verified by grep |
+| pv_plan_kw absent from domain ring | ✅ no hits in ntities/ or controller/ |
+| pv_plan_kw absent from should_replan | ✅ code-reviewed |
+| @wip removed from deviation_absorber.feature:149 | ✅ |
+| New unit tests compile and pass (SQLX_OFFLINE) | ⏳ Pi4 pending |
+| BDD deviation_absorber.feature green | ⏳ Pi4 pending |
+| Full BDD suite green | ⏳ Pi4 pending |
