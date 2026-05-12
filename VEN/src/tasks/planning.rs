@@ -315,7 +315,7 @@ pub(crate) fn spawn_planning(
             // and is only bypassed for genuine event-driven triggers.
             wake_trigger = tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_secs(replan_s)) => PlanTrigger::Periodic,
-                _ = trigger_rx.changed() => trigger_rx.borrow().clone(),
+                _ = trigger_rx.changed() => trigger_rx.borrow_and_update().clone(),
             };
         }
     })
