@@ -5,7 +5,37 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
-use crate::profile::HeaterConfig;
+
+#[derive(Debug, Clone)]
+pub struct HeaterParams {
+    pub id: String,
+    pub max_kw: f64,
+    pub temp_initial_c: f64,
+    pub temp_min_c: f64,
+    pub temp_max_c: f64,
+    pub mid_kw: Option<f64>,
+    pub thermal_mass_kwh_per_c: f64,
+    pub k_loss_kw_per_c: f64,
+    pub draw_kw: f64,
+    pub switching_penalty_eur: f64,
+}
+
+impl Default for HeaterParams {
+    fn default() -> Self {
+        Self {
+            id: crate::ids::ASSET_HEATER.to_string(),
+            max_kw: 5.0,
+            temp_initial_c: 20.0,
+            temp_min_c: 18.0,
+            temp_max_c: 23.0,
+            mid_kw: None,
+            thermal_mass_kwh_per_c: 2.0,
+            k_loss_kw_per_c: 0.1,
+            draw_kw: 0.0,
+            switching_penalty_eur: 0.01,
+        }
+    }
+}
 
 pub use crate::controller::milp_planner::asset_port::{HeaterMilpMode, HeaterMilpContext, HeaterMilpVars, HeaterSolOutput};
 
@@ -47,7 +77,7 @@ pub struct HeaterState {
 }
 
 impl Heater {
-    pub fn from_config(cfg: &HeaterConfig) -> Self {
+    pub fn from_params(cfg: &HeaterParams) -> Self {
         Self {
             max_kw: cfg.max_kw,
             mid_kw: cfg.mid_kw.unwrap_or(cfg.max_kw / 2.0),
@@ -56,14 +86,14 @@ impl Heater {
             temp_max_c: cfg.temp_max_c,
             temp_min_c_profile: cfg.temp_min_c,
             temp_max_c_profile: cfg.temp_max_c,
-            thermal_mass_kwh_per_c: cfg.effective_thermal_mass(),
-            k_loss_kw_per_c: cfg.effective_k_loss(),
-            draw_kw: cfg.effective_draw_kw(),
+            thermal_mass_kwh_per_c: cfg.thermal_mass_kwh_per_c,
+            k_loss_kw_per_c: cfg.k_loss_kw_per_c,
+            draw_kw: cfg.draw_kw,
             ambient_temp_c: 10.0,
         }
     }
 
-    pub fn initial_state(cfg: &HeaterConfig) -> HeaterState {
+    pub fn initial_state(cfg: &HeaterParams) -> HeaterState {
         HeaterState {
             temperature_c: cfg.temp_initial_c,
             actual_power_kw: 0.0,
@@ -1185,6 +1215,28 @@ mod tests {
         let vals = h.future_state_values(1.0);
         assert_eq!(vals.len(), 1, "expected exactly one key");
         assert!(vals.contains_key("temp_c"));
+    }
+}
+
+#[cfg(test)]
+mod param_tests {
+    use super::*;
+
+    #[test]
+    fn heater_params_defaults() {
+        let params = HeaterParams::default();
+        assert!((params.max_kw - 5.0).abs() < f64::EPSILON);
+        assert_eq!(params.mid_kw, None);
+    }
+
+    #[test]
+    fn heater_params_mid_kw_some_none() {
+        assert_eq!(HeaterParams::default().mid_kw, None);
+        let params = HeaterParams {
+            mid_kw: Some(2.5),
+            ..HeaterParams::default()
+        };
+        assert_eq!(params.mid_kw, Some(2.5));
     }
 }
 

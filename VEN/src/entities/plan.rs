@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::entities::asset::PlanTrigger;
-use crate::profile::PlannerObjective;
+use crate::entities::planner_params::PlannerObjective;
 
 /// Defines the temporal scope of a planning cycle (§6.1).
 #[derive(Debug, Clone, Serialize, Deserialize)]

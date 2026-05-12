@@ -59,8 +59,8 @@ use std::collections::HashMap;
 use crate::controller::SimSnapshot;
 use crate::entities::device_session::EvSession;
 use crate::entities::plan::Plan;
+use crate::entities::planner_params::{AbsorberAssetParams, AbsorberParams, PlannerObjective};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
-use crate::profile::{PlannerObjective, Profile};
 use tracing::{error, warn};
 
 /// Runtime state for the multi-asset absorber.
@@ -117,7 +117,7 @@ pub fn apply_deviation_absorption(
     setpoints: &mut HashMap<String, f64>,
     sim: &SimSnapshot,
     plan_snap: Option<&Plan>,
-    profile: &Profile,
+    params: &AbsorberParams,
     now: DateTime<Utc>,
     event_tx: &PlannerEventTx,
     ev_session: Option<&EvSession>,
@@ -125,7 +125,7 @@ pub fn apply_deviation_absorption(
     let was_active = state.correction_is_active;
 
     // Early exit: absorber disabled — passthrough full deviation to Tier 2.
-    if !profile.absorber.enabled {
+    if !params.enabled {
         let asset_ids: Vec<_> = state.active_overlay_kw.keys().cloned().collect();
         for id in asset_ids {
             state.active_overlay_kw.insert(id, 0.0);
@@ -150,8 +150,8 @@ pub fn apply_deviation_absorption(
     //
     // With the default `dead_band_clearing_ticks = 1` an asset's counter reaches
     // threshold on the very first in-band tick — identical to the previous behaviour.
-    if deviation_kw.abs() <= profile.absorber.dead_band_kw {
-        let threshold = profile.absorber.dead_band_clearing_ticks as u32;
+    if deviation_kw.abs() <= params.dead_band_kw {
+        let threshold = params.dead_band_clearing_ticks as u32;
 
         // Only assets with a live overlay participate in the wait gate.
         let active_ids: Vec<String> = state
@@ -190,12 +190,12 @@ pub fn apply_deviation_absorption(
     let mut remaining_kw = deviation_kw;
 
     // Sequential asset iteration by priority (FR-002)
-    let mut assets_by_priority = profile.absorber.assets.clone();
+    let mut assets_by_priority = params.assets.clone();
     assets_by_priority.sort_by_key(|a| a.priority);
 
     for asset_cfg in &assets_by_priority {
         // Stop if residual is within dead-band
-        if remaining_kw.abs() <= profile.absorber.dead_band_kw {
+        if remaining_kw.abs() <= params.dead_band_kw {
             break;
         }
 
@@ -421,15 +421,15 @@ pub(crate) fn linger_ok(
 /// 1. Asset ID Matching: all `AbsorberAssetConfig.id` must exist in `SimState.assets`
 /// 2. Priority Uniqueness: logs WARN if duplicates detected
 /// 3. Linger Bounds: logs WARN if min_state_linger_s > 300s
-pub fn validate_startup(profile: &Profile, sim: &SimSnapshot) -> anyhow::Result<()> {
-    if !profile.absorber.enabled {
+pub fn validate_startup(params: &AbsorberParams, sim: &SimSnapshot) -> anyhow::Result<()> {
+    if !params.enabled {
         return Ok(());
     }
 
     let sim_asset_ids: std::collections::HashSet<&str> =
         sim.assets.keys().map(|s| s.as_str()).collect();
 
-    for asset_cfg in &profile.absorber.assets {
+    for asset_cfg in &params.assets {
         if !sim_asset_ids.contains(asset_cfg.id.as_str()) {
             error!(
                 absorber_asset_id = &asset_cfg.id,
@@ -443,7 +443,7 @@ pub fn validate_startup(profile: &Profile, sim: &SimSnapshot) -> anyhow::Result<
     }
 
     let mut priorities = std::collections::HashSet::new();
-    for asset_cfg in &profile.absorber.assets {
+    for asset_cfg in &params.assets {
         if !priorities.insert(asset_cfg.priority) {
             warn!(
                 priority = asset_cfg.priority,
@@ -452,7 +452,7 @@ pub fn validate_startup(profile: &Profile, sim: &SimSnapshot) -> anyhow::Result<
         }
     }
 
-    for asset_cfg in &profile.absorber.assets {
+    for asset_cfg in &params.assets {
         if asset_cfg.min_state_linger_s > 300 {
             warn!(
                 asset_id = &asset_cfg.id,
@@ -471,48 +471,40 @@ mod tests {
 
     // ── Test helpers ──────────────────────────────────────────────────────────
 
-    fn make_test_profile() -> Profile {
-        use crate::profile::{AbsorberAssetConfig, AbsorberConfig};
-
-        let mut profile = Profile::default();
-        profile.absorber = AbsorberConfig {
+    fn make_test_profile() -> AbsorberParams {
+        AbsorberParams {
             enabled: true,
             dead_band_kw: 0.1,
             dead_band_clearing_ticks: 1,
             assets: vec![
-                AbsorberAssetConfig {
+                AbsorberAssetParams {
                     id: "battery".to_string(),
                     priority: 0,
                     min_state_linger_s: 0,
                     ev_departure_guard_s: None,
                 },
-                AbsorberAssetConfig {
+                AbsorberAssetParams {
                     id: "ev".to_string(),
                     priority: 1,
                     min_state_linger_s: 0,
                     ev_departure_guard_s: Some(1800),
                 },
             ],
-        };
-        profile
+        }
     }
 
-    fn make_test_profile_battery_linger() -> Profile {
-        use crate::profile::{AbsorberAssetConfig, AbsorberConfig};
-
-        let mut profile = Profile::default();
-        profile.absorber = AbsorberConfig {
+    fn make_test_profile_battery_linger() -> AbsorberParams {
+        AbsorberParams {
             enabled: true,
             dead_band_kw: 0.1,
             dead_band_clearing_ticks: 1,
-            assets: vec![AbsorberAssetConfig {
+            assets: vec![AbsorberAssetParams {
                 id: "battery".to_string(),
                 priority: 0,
-                min_state_linger_s: 30, // 30 s linger for relay wear test
+                min_state_linger_s: 30,
                 ev_departure_guard_s: None,
             }],
-        };
-        profile
+        }
     }
 
     fn make_test_snap() -> SimSnapshot {
@@ -1002,7 +994,7 @@ mod tests {
             .last_state_change_ts
             .insert("battery".to_string(), recent_change);
 
-        let profile = make_test_profile_battery_linger(); // battery has 30 s linger
+        let params = make_test_profile_battery_linger(); // battery has 30 s linger
         let sim = make_test_snap(); // battery at SoC 0.50 — has headroom
         let event_tx = make_test_event_tx();
         let mut setpoints = HashMap::from([("battery".to_string(), 0.0)]);
@@ -1014,7 +1006,7 @@ mod tests {
             &mut setpoints,
             &sim,
             None,
-            &profile,
+            &params,
             now,
             &event_tx,
             None,
@@ -1183,8 +1175,8 @@ mod tests {
     #[test]
     fn absorber_disabled_returns_full_deviation_as_residual() {
         let mut state = make_fresh_state();
-        let mut profile = make_test_profile();
-        profile.absorber.enabled = false;
+        let mut params = make_test_profile();
+        params.enabled = false;
         let sim = make_test_snap();
         let event_tx = make_test_event_tx();
         let mut setpoints = HashMap::from([("battery".to_string(), 0.0), ("ev".to_string(), 0.0)]);
@@ -1196,7 +1188,7 @@ mod tests {
             &mut setpoints,
             &sim,
             None,
-            &profile,
+            &params,
             now,
             &event_tx,
             None,
@@ -1216,9 +1208,9 @@ mod tests {
 
     // ── dead_band_clearing_ticks wait gate ────────────────────────────────────
 
-    fn make_test_profile_clearing_ticks(n: usize) -> Profile {
+    fn make_test_profile_clearing_ticks(n: usize) -> AbsorberParams {
         let mut p = make_test_profile();
-        p.absorber.dead_band_clearing_ticks = n;
+        p.dead_band_clearing_ticks = n;
         p
     }
 

@@ -36,9 +36,14 @@ pub use self::asset_port::{
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
+use crate::assets::{
+    base_load::BaseLoadParams, battery::BatteryParams, ev::EvParams, heater::HeaterParams,
+    pv::PvParams,
+};
 use crate::controller::simulator_port::SimSnapshot;
 #[allow(unused_imports)]
 use crate::entities::asset::PlanTrigger;
+use crate::entities::asset_params::AssetParams;
 use crate::entities::capacity::OadrCapacityState;
 #[allow(unused_imports)]
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
@@ -47,9 +52,8 @@ use crate::entities::plan::{
     AssetAllocation, CostBreakdown, FlexibilityEnvelope, Plan, PlanSummary, PlanTimeSlot,
     PlanWarning, PlanningHorizon, WarningSeverity,
 };
+use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::entities::tariff_snapshot::TariffTimeSeries;
-#[allow(unused_imports)]
-use crate::profile::{PlannerObjective, Profile};
 
 
 mod types;
@@ -67,15 +71,53 @@ use self::types::*;
 #[cfg(test)]
 use self::solver_phase1::*;
 
+fn battery_params(asset_params: &[AssetParams]) -> Option<&BatteryParams> {
+    asset_params.iter().find_map(|p| match p {
+        AssetParams::Battery(v) => Some(v),
+        _ => None,
+    })
+}
+
+fn ev_params(asset_params: &[AssetParams]) -> Option<&EvParams> {
+    asset_params.iter().find_map(|p| match p {
+        AssetParams::Ev(v) => Some(v),
+        _ => None,
+    })
+}
+
+fn heater_params(asset_params: &[AssetParams]) -> Option<&HeaterParams> {
+    asset_params.iter().find_map(|p| match p {
+        AssetParams::Heater(v) => Some(v),
+        _ => None,
+    })
+}
+
+fn pv_params(asset_params: &[AssetParams]) -> Option<&PvParams> {
+    asset_params.iter().find_map(|p| match p {
+        AssetParams::Pv(v) => Some(v),
+        _ => None,
+    })
+}
+
+fn base_load_params(asset_params: &[AssetParams]) -> Option<&BaseLoadParams> {
+    asset_params.iter().find_map(|p| match p {
+        AssetParams::BaseLoad(v) => Some(v),
+        _ => None,
+    })
+}
+
 /// Run the MILP planner: build inputs from asset contexts and live state, solve via HiGHS,
 /// and translate the solution into a Plan.
-/// `objective_override` — when `Some`, overrides the profile's default objective.
+/// `objective_override` — when `Some`, overrides the planner default objective.
 pub fn run_planner(
     asset_contexts: Vec<Box<dyn self::asset_port::AssetMilpContext>>,
     assets: &SimSnapshot,
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
-    profile: &Profile,
+    planner: &PlannerParams,
+    grid_max_import_kw: f64,
+    grid_max_export_kw: f64,
+    asset_params: &[AssetParams],
     now: DateTime<Utc>,
     trigger: PlanTrigger,
     ev_session: Option<&crate::entities::device_session::EvSession>,
@@ -95,31 +137,40 @@ pub fn run_planner(
         "run_planner: duplicate AssetKind in asset_contexts — each kind may appear at most once"
     );
 
-    let objective = objective_override.unwrap_or(profile.planner.objective);
+    let objective = objective_override.unwrap_or(planner.objective);
+    let battery = battery_params(asset_params);
+    let ev = ev_params(asset_params);
+    let heater = heater_params(asset_params);
+    let pv = pv_params(asset_params);
+    let base_load = base_load_params(asset_params);
     let inputs = build_milp_inputs(
         &asset_contexts,
         assets,
         tariffs,
         capacity,
-        profile,
+        planner,
+        grid_max_import_kw,
+        grid_max_export_kw,
+        pv,
+        base_load,
         now,
         shiftable_loads,
         baseline_override,
     );
-    let p1w = build_phase1_weights(profile, objective);
-    let p2w = build_phase2_weights(&inputs, profile);
+    let p1w = build_phase1_weights(planner, objective);
+    let p2w = build_phase2_weights(&inputs, planner);
     match solve_milp_two_phase(
         &inputs,
         &p1w,
         &p2w,
-        profile.planner.phase2_epsilon_eur,
+        planner.phase2_epsilon_eur,
         &asset_contexts,
     ) {
         Ok((sol, phase1_cost_eur, friction_eur)) => translate_to_plan(
             &sol,
             &inputs,
             &p1w,
-            profile,
+            planner,
             now,
             trigger,
             ev_session,
@@ -128,11 +179,14 @@ pub fn run_planner(
             objective,
             phase1_cost_eur,
             friction_eur,
+            battery,
+            ev,
+            heater,
         ),
         Err(e) => {
             warn!("MILP solver failed: {e}");
             fallback_plan(
-                profile,
+                planner,
                 now,
                 trigger,
                 ev_session,
@@ -141,6 +195,8 @@ pub fn run_planner(
                 Some(&inputs),
                 format!("MILP solver failed: {e}"),
                 objective,
+                ev,
+                heater,
             )
         }
     }

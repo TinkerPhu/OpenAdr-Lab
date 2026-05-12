@@ -13,8 +13,8 @@ use crate::assets::{
 };
 use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot, SimulatorPort, SnapshotError};
 use crate::controller::timeline::{TimelineAssetData, TimelineSnapshot};
+use crate::entities::asset_params::AssetParams;
 use crate::models::SensorSnapshot;
-use crate::profile::{AssetProfile, Profile};
 use energy::EnergyCounter;
 
 
@@ -123,16 +123,16 @@ impl SimState {
         self.assets.iter().zip(self.asset_configs.iter())
     }
 
-    /// Initialize from profile configuration.
-    pub fn from_profile(profile: &Profile) -> Self {
+    /// Initialize from domain asset parameters.
+    pub fn from_params(params: &[AssetParams]) -> Self {
         let mut configs: Vec<AssetConfig> = Vec::new();
         let mut entries: Vec<AssetEntry> = Vec::new();
 
-        for ap in &profile.assets {
-            let (cfg, state) = asset_config_and_state_from_profile(ap);
+        for ap in params {
+            let (id, cfg, state) = asset_config_and_state_from_params(ap);
             let setpoint_kw = cfg.default_setpoint(&state);
             entries.push(AssetEntry {
-                id: ap.id().to_string(),
+                id,
                 state,
                 setpoint_kw,
                 last_power_kw: 0.0,
@@ -380,27 +380,32 @@ impl SimState {
     }
 }
 
-/// Convert a profile AssetProfile entry into (AssetConfig, initial AssetState).
-fn asset_config_and_state_from_profile(ap: &AssetProfile) -> (AssetConfig, AssetState) {
+/// Convert domain asset parameters into (asset_id, AssetConfig, initial AssetState).
+fn asset_config_and_state_from_params(ap: &AssetParams) -> (String, AssetConfig, AssetState) {
     match ap {
-        AssetProfile::Battery(c) => (
-            AssetConfig::Battery(Battery::from_config(c)),
+        AssetParams::Battery(c) => (
+            c.id.clone(),
+            AssetConfig::Battery(Battery::from_params(c)),
             AssetState::Battery(Battery::initial_state(c)),
         ),
-        AssetProfile::Ev(c) => (
-            AssetConfig::Ev(EvCharger::from_config(c)),
+        AssetParams::Ev(c) => (
+            c.id.clone(),
+            AssetConfig::Ev(EvCharger::from_params(c)),
             AssetState::Ev(EvCharger::initial_state(c)),
         ),
-        AssetProfile::Heater(c) => (
-            AssetConfig::Heater(Heater::from_config(c)),
+        AssetParams::Heater(c) => (
+            c.id.clone(),
+            AssetConfig::Heater(Heater::from_params(c)),
             AssetState::Heater(Heater::initial_state(c)),
         ),
-        AssetProfile::Pv(c) => (
-            AssetConfig::Pv(PvInverter::from_config(c)),
+        AssetParams::Pv(c) => (
+            c.id.clone(),
+            AssetConfig::Pv(PvInverter::from_params(c)),
             AssetState::Pv(PvInverter::initial_state(c)),
         ),
-        AssetProfile::BaseLoad(c) => (
-            AssetConfig::BaseLoad(BaseLoad::from_config(c)),
+        AssetParams::BaseLoad(c) => (
+            c.id.clone(),
+            AssetConfig::BaseLoad(BaseLoad::from_params(c)),
             AssetState::BaseLoad(BaseLoad::initial_state(c)),
         ),
     }
@@ -412,12 +417,65 @@ fn asset_config_and_state_from_profile(ap: &AssetProfile) -> (AssetConfig, Asset
 /// simulator state. This allows `GET /sim/schema` to respond without blocking
 /// on the sim mutex during MILP solving.
 pub(crate) fn schema_from_profile(
-    profile: &Profile,
+    profile: &crate::profile::Profile,
 ) -> HashMap<String, Vec<crate::assets::ControlDescriptor>> {
     let mut out = HashMap::new();
     for ap in &profile.assets {
-        let (cfg, _) = asset_config_and_state_from_profile(ap);
-        out.insert(ap.id().to_string(), cfg.control_schema());
+        let (id, cfg, _) = match ap {
+            crate::profile::AssetProfile::Battery(c) => {
+                let params = crate::assets::battery::BatteryParams {
+                    id: c.id.clone(),
+                    capacity_kwh: c.capacity_kwh,
+                    max_charge_kw: c.max_charge_kw,
+                    max_discharge_kw: c.max_discharge_kw,
+                    initial_soc: c.initial_soc,
+                    round_trip_efficiency: c.round_trip_efficiency,
+                    min_soc: c.min_soc,
+                };
+                asset_config_and_state_from_params(&AssetParams::Battery(params))
+            }
+            crate::profile::AssetProfile::Ev(c) => {
+                let params = crate::assets::ev::EvParams {
+                    id: c.id.clone(),
+                    max_charge_kw: c.max_charge_kw,
+                    max_discharge_kw: c.max_discharge_kw,
+                    initial_soc: c.initial_soc,
+                    battery_kwh: c.battery_kwh,
+                    soc_target: c.soc_target,
+                    default_charge_kw: c.default_charge_kw,
+                    min_charge_kw: c.min_charge_kw,
+                };
+                asset_config_and_state_from_params(&AssetParams::Ev(params))
+            }
+            crate::profile::AssetProfile::Heater(c) => {
+                let params = crate::assets::heater::HeaterParams {
+                    id: c.id.clone(),
+                    max_kw: c.max_kw,
+                    temp_initial_c: c.temp_initial_c,
+                    temp_min_c: c.temp_min_c,
+                    temp_max_c: c.temp_max_c,
+                    mid_kw: c.mid_kw,
+                    thermal_mass_kwh_per_c: c.effective_thermal_mass(),
+                    k_loss_kw_per_c: c.effective_k_loss(),
+                    draw_kw: c.effective_draw_kw(),
+                    switching_penalty_eur: c.effective_switching_penalty(),
+                };
+                asset_config_and_state_from_params(&AssetParams::Heater(params))
+            }
+            crate::profile::AssetProfile::Pv(c) => {
+                asset_config_and_state_from_params(&AssetParams::Pv(crate::assets::pv::PvParams {
+                    id: c.id.clone(),
+                    rated_kw: c.rated_kw,
+                }))
+            }
+            crate::profile::AssetProfile::BaseLoad(c) => asset_config_and_state_from_params(
+                &AssetParams::BaseLoad(crate::assets::base_load::BaseLoadParams {
+                    id: c.id.clone(),
+                    baseline_kw: c.baseline_kw,
+                }),
+            ),
+        };
+        out.insert(id, cfg.control_schema());
     }
     out
 }
@@ -445,8 +503,7 @@ mod port_tests {
 
     #[test]
     fn snapshot_returns_ok_for_empty_state() {
-        let profile = Profile::default();
-        let sim = SimState::from_profile(&profile);
+        let sim = SimState::from_params(&[]);
         let result = SimulatorPort::snapshot(&sim);
         assert!(result.is_ok(), "snapshot() must succeed for a valid SimState");
         let snap = result.unwrap();

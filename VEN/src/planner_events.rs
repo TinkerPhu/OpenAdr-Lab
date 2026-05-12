@@ -1,4 +1,4 @@
-use crate::profile::PlannerObjective;
+use crate::entities::PlannerObjective;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::sync::Arc;

@@ -20,28 +20,32 @@ pub async fn save(state: &SimState, data_dir: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Load persisted sim state and replace asset configs from the current profile.
+/// Load persisted sim state and replace asset configs from the current params.
 ///
 /// Only mutable runtime state (temperatures, SoCs, energy counters, last_tick) is
 /// restored from disk. Asset configs (thermal_mass, k_loss, max_kw, etc.) are always
-/// rebuilt from the profile so that profile changes take effect on every restart.
+/// rebuilt from the current params so that configuration changes take effect on restart.
 ///
-/// Falls back to a fresh profile-based state when the file is missing, corrupt, or
-/// when the persisted asset IDs don't match the profile (assets were added/removed).
-pub async fn load_with_profile(data_dir: &str, profile: &crate::profile::Profile) -> SimState {
-    let fresh = SimState::from_profile(profile);
+/// Falls back to a fresh params-based state when the file is missing, corrupt, or
+/// when the persisted asset IDs don't match the current asset list.
+pub async fn load_with_params(
+    data_dir: &str,
+    _sim_params: &crate::entities::planner_params::SimulatorParams,
+    asset_params: &[crate::entities::asset_params::AssetParams],
+) -> SimState {
+    let fresh = SimState::from_params(asset_params);
 
     let Some(mut loaded) = load(data_dir).await else {
         return fresh;
     };
 
-    let profile_ids: Vec<&str> = fresh.assets.iter().map(|e| e.id.as_str()).collect();
+    let current_ids: Vec<&str> = fresh.assets.iter().map(|e| e.id.as_str()).collect();
     let loaded_ids: Vec<&str> = loaded.assets.iter().map(|e| e.id.as_str()).collect();
-    if profile_ids != loaded_ids {
+    if current_ids != loaded_ids {
         warn!(
-            ?profile_ids,
+            ?current_ids,
             ?loaded_ids,
-            "asset list changed since last persist — starting fresh from profile"
+            "asset list changed since last persist — starting fresh from params"
         );
         return fresh;
     }
