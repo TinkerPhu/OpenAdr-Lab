@@ -53,23 +53,13 @@ def step_absorber_enabled(context):
 
 @given("I wait for a fresh plan")
 def step_wait_fresh_plan_given(context):
-    """Request a MILP replan and wait for the fresh plan to be stable.
+    """Request a MILP replan and wait for the fresh plan to arrive.
 
     Calls POST /plan/trigger (sends AssetStateChange without touching sim state)
     so the planner starts a new solve immediately. With replan_interval_s=300 in
     the test profile, no timer-based solve fires during the assertion window
     (~30–70 s per scenario), preventing mid-scenario plan updates from corrupting
     the absorber baseline capture.
-
-    Stability window: the Background's `I inject pv irradiance 0.0` sends its own
-    AssetStateChange trigger (T1) before this step fires its trigger (T2). T1's MILP
-    solve may complete while this step is waiting, producing a plan that looks fresh.
-    T2 then starts immediately, causing a back-to-back solve that would corrupt the
-    absorber assertion window. To prevent this, after detecting the first fresh plan
-    this step waits an additional 10 s and checks whether the plan changed again. If
-    it did, it waits another 10 s (and so on) until the plan is stable for 10 s.
-    Since MILP solves on Pi4 take 20–60 s, a 10 s stability window is sufficient to
-    detect any immediately-following second solve before the baselines are captured.
     """
     cutoff = datetime.now(timezone.utc)
     # Kick off a fresh MILP solve. Returns 204; ignore failure (VEN may not have
@@ -79,9 +69,6 @@ def step_wait_fresh_plan_given(context):
     def fetch():
         resp = ven_get("/plan")
         return resp.json() if resp.ok else None
-
-    def plan_id(plan):
-        return (plan or {}).get("id")
 
     def is_fresh(plan):
         if not plan or "created_at" not in plan:
@@ -100,20 +87,6 @@ def step_wait_fresh_plan_given(context):
             return False
 
     poll_until(fetch, is_fresh, timeout=90, description="fresh MILP plan after now")
-
-    # Stability window: wait 10 s; if the plan ID changed, reset and wait again.
-    # This catches any back-to-back MILP solve (e.g. stale T2 pending in channel)
-    # before baselines are captured for the absorber assertion.
-    stability_s = 10.0
-    last_id = plan_id(fetch())
-    stable_until = time.time() + stability_s
-    while time.time() < stable_until:
-        time.sleep(1.0)
-        current_id = plan_id(fetch())
-        if current_id != last_id:
-            last_id = current_id
-            stable_until = time.time() + stability_s
-
     # Wait for physics to apply the new plan setpoints (≤1 tick = 1s; 2s is safe).
     # Without this, baselines captured immediately after plan detection reflect the
     # old plan's setpoints — the new plan setpoints take effect on the NEXT tick.
