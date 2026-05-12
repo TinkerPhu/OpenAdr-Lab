@@ -210,11 +210,13 @@ pub async fn post_sim_inject(
     Json(body): Json<PostSimInjectBody>,
 ) -> impl IntoResponse {
     // Trigger a replan only for fields the MILP planner uses as inputs.
-    // base_load_kw / base_load_alpha are one-shot physics overrides for test deviation
-    // simulation — triggering a replan on them would corrupt the absorber's assertion
-    // window by adopting a new plan mid-test.
-    let should_replan = body.pv_irradiance.is_some()
-        || body.battery_soc.is_some()
+    // base_load_kw / base_load_alpha: one-shot physics overrides — triggering a replan
+    // on them would corrupt the absorber's assertion window by adopting a new plan mid-test.
+    // pv_irradiance: test-only physics override; the planner patches its snapshot with the
+    // injected value at solve time, so an immediate trigger is not needed. Omitting it
+    // prevents a stale trigger from causing a spurious back-to-back MILP solve when the
+    // background inject races with an explicit POST /plan/trigger (deviation_absorber tests).
+    let should_replan = body.battery_soc.is_some()
         || body.ev_soc.is_some()
         || body.ev_plugged.is_some()
         || body.ev_soc_target.is_some()
