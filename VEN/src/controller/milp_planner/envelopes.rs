@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
 
+use crate::assets::{ev::EvParams, heater::HeaterParams};
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::FlexibilityEnvelope;
-use crate::profile::Profile;
+use crate::entities::planner_params::PlannerParams;
 
 use super::types::*;
 
@@ -12,16 +13,18 @@ pub(crate) fn build_plan_envelopes(
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     shiftable_loads: &[ShiftableLoad],
     inputs: &MilpInputs,
-    profile: &Profile,
+    planner: &PlannerParams,
+    ev_cfg: Option<&EvParams>,
+    heat_cfg: Option<&HeaterParams>,
     now: DateTime<Utc>,
 ) -> Vec<FlexibilityEnvelope> {
-    let step_s = profile.planner.plan_step_s as i64;
+    let step_s = planner.plan_step_s as i64;
     let n = inputs.n;
     let mut envelopes = Vec::new();
 
     // EV envelope
     if let Some(session) = ev_session {
-        if let Some(ev_cfg) = profile.ev_config() {
+        if let Some(ev_cfg) = ev_cfg {
             // Remaining energy to charge
             let energy_needed_kwh = inputs.e_ev_core_kwh;
             if energy_needed_kwh > 0.0 {
@@ -61,7 +64,7 @@ pub(crate) fn build_plan_envelopes(
 
     // Heater envelope
     if let Some(target) = heater_target {
-        if let Some(heat_cfg) = profile.heater_config() {
+        if let Some(heat_cfg) = heat_cfg {
             let energy_needed_kwh = inputs.e_heat_target_kwh;
             if energy_needed_kwh > 0.0 {
                 let window_start = now;

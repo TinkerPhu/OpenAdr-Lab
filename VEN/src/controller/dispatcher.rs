@@ -6,7 +6,7 @@
 use crate::controller::SimSnapshot;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::Plan;
-use crate::profile::PlannerObjective;
+use crate::entities::planner_params::PlannerObjective;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
@@ -882,7 +882,7 @@ mod tests {
             envelopes: vec![],
             warnings: vec![],
             soc_trajectory_kwh: vec![],
-            objective: crate::profile::PlannerObjective::MinCost,
+            objective: crate::entities::PlannerObjective::MinCost,
             objective_eur: 0.0,
             friction_eur: 0.0,
             cost_breakdown: CostBreakdown::default(),
@@ -931,7 +931,7 @@ mod tests {
                 envelopes: vec![],
                 warnings: vec![],
                 soc_trajectory_kwh: vec![],
-                objective: crate::profile::PlannerObjective::MinCost,
+                objective: crate::entities::PlannerObjective::MinCost,
                 objective_eur: 0.0,
                 friction_eur: 0.0,
                 cost_breakdown: CostBreakdown::default(),

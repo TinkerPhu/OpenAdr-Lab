@@ -5,7 +5,31 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor};
 use crate::common::{Interpolation, TimeSeries};
-use crate::profile::BatteryConfig;
+
+#[derive(Debug, Clone)]
+pub struct BatteryParams {
+    pub id: String,
+    pub capacity_kwh: f64,
+    pub max_charge_kw: f64,
+    pub max_discharge_kw: f64,
+    pub initial_soc: f64,
+    pub round_trip_efficiency: f64,
+    pub min_soc: f64,
+}
+
+impl Default for BatteryParams {
+    fn default() -> Self {
+        Self {
+            id: crate::ids::ASSET_BATTERY.to_string(),
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            initial_soc: 0.5,
+            round_trip_efficiency: 0.92,
+            min_soc: 0.10,
+        }
+    }
+}
 
 pub use crate::controller::milp_planner::asset_port::{BatteryMilpContext, BatteryMilpVars, BatterySolOutput};
 
@@ -30,7 +54,7 @@ pub struct BatteryState {
 }
 
 impl Battery {
-    pub fn from_config(cfg: &BatteryConfig) -> Self {
+    pub fn from_params(cfg: &BatteryParams) -> Self {
         Self {
             capacity_kwh: cfg.capacity_kwh,
             max_charge_kw: cfg.max_charge_kw,
@@ -40,7 +64,7 @@ impl Battery {
         }
     }
 
-    pub fn initial_state(cfg: &BatteryConfig) -> BatteryState {
+    pub fn initial_state(cfg: &BatteryParams) -> BatteryState {
         BatteryState {
             soc: cfg.initial_soc,
             actual_power_kw: 0.0,
@@ -524,10 +548,9 @@ impl Asset for Battery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profile::BatteryConfig;
 
     fn make_battery_cfg(initial_soc: f64) -> (Battery, BatteryState) {
-        let cfg = BatteryConfig {
+        let cfg = BatteryParams {
             id: "battery".to_string(),
             capacity_kwh: 10.0,
             max_charge_kw: 5.0,
@@ -536,7 +559,7 @@ mod tests {
             min_soc: 0.1,
             initial_soc,
         };
-        (Battery::from_config(&cfg), Battery::initial_state(&cfg))
+        (Battery::from_params(&cfg), Battery::initial_state(&cfg))
     }
 
     #[test]
@@ -622,6 +645,25 @@ mod tests {
         };
         let vals = bat.future_state_values(15.0);
         assert_eq!(vals["soc"], 1.0);
+    }
+}
+
+#[cfg(test)]
+mod param_tests {
+    use super::*;
+
+    #[test]
+    fn battery_params_default_soc() {
+        assert!((BatteryParams::default().initial_soc - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn battery_params_custom_capacity() {
+        let params = BatteryParams {
+            capacity_kwh: 20.0,
+            ..BatteryParams::default()
+        };
+        assert!((params.capacity_kwh - 20.0).abs() < f64::EPSILON);
     }
 }
 

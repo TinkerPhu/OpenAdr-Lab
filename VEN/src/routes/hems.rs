@@ -20,7 +20,7 @@ use crate::entities::device_session::{
     BaselineOverride, BaselineSlot, EvSession, HeaterTarget, ShiftableLoad,
 };
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
-use crate::profile::PlannerObjective;
+use crate::entities::PlannerObjective;
 use crate::AppCtx;
 
 /// Embedded session detail for GET /user-requests response.

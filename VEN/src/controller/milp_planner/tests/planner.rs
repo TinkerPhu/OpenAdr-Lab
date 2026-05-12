@@ -45,7 +45,7 @@ use super::*;
                 plan_horizon_h: 2,
                 ..PlannerConfig::default()
             },
-            grid: crate::profile::GridConfig {
+            grid: GridConfig {
                 max_import_kw: 25.0,
                 max_export_kw: 10.0,
             },
@@ -360,11 +360,10 @@ use super::*;
                     temp_min_c: 18.0,
                     temp_max_c: 23.0,
                     mid_kw: Some(1.0),
-                    volume_l: None,
-                    thermal_mass_kwh_per_c: None,
-                    k_loss_kw_per_c: None,
-                    draw_kw: None,
-                    switching_penalty_eur: None,
+                    thermal_mass_kwh_per_c: 2.0,
+                    k_loss_kw_per_c: 0.1,
+                    draw_kw: 0.0,
+                    switching_penalty_eur: 0.01,
                 }),
                 AssetProfile::Pv(PvConfig { id: "pv".into(), rated_kw: 6.0 }),
                 AssetProfile::BaseLoad(BaseLoadConfig { id: "base_load".into(), baseline_kw: 0.5 }),
@@ -375,7 +374,7 @@ use super::*;
                 plan_horizon_h: 24,
                 ..PlannerConfig::default()
             },
-            grid: crate::profile::GridConfig { max_import_kw: 25.0, max_export_kw: 10.0 },
+            grid: GridConfig { max_import_kw: 25.0, max_export_kw: 10.0 },
             packets: vec![],
             absorber: Default::default(),
         }

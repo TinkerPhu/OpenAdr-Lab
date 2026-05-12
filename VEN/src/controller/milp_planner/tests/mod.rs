@@ -1,21 +1,91 @@
     use super::*;
 
-    use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot};
-    use crate::entities::device_session::HeaterTarget;
-    use crate::entities::tariff_snapshot::TariffSnapshot;
-    use crate::profile::{
-        AssetProfile, BaseLoadConfig, BatteryConfig, EvConfig, GridConfig, HeaterConfig,
-        PlannerConfig, PlannerObjective, PvConfig, SimulatorConfig,
+    use crate::assets::{
+        base_load::BaseLoadParams, battery::{Battery, BatteryParams, BatteryState},
+        ev::{EvCharger, EvParams, EvState}, heater::{Heater, HeaterParams, HeaterState},
+        pv::PvParams, AssetConfig, AssetState,
     };
+    use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot};
+    use crate::entities::asset_params::AssetParams;
+    use crate::entities::device_session::HeaterTarget;
+    use crate::entities::planner_params::{PlannerObjective, PlannerParams};
+    use crate::entities::tariff_snapshot::TariffSnapshot;
 
-    // ── Test helpers ─────────────────────────────────────────────────────────
+    type AssetProfile = AssetParams;
+    type BatteryConfig = BatteryParams;
+    type EvConfig = EvParams;
+    type HeaterConfig = HeaterParams;
+    type PvConfig = PvParams;
+    type BaseLoadConfig = BaseLoadParams;
+    type PlannerConfig = PlannerParams;
+
+    #[derive(Debug, Clone, Default)]
+    struct SimulatorConfig;
+
+    #[derive(Debug, Clone, Default)]
+    struct AbsorberConfig;
+
+    #[derive(Debug, Clone)]
+    struct GridConfig {
+        max_import_kw: f64,
+        max_export_kw: f64,
+    }
+
+    #[derive(Debug, Clone)]
+    struct Profile {
+        assets: Vec<AssetProfile>,
+        simulator: SimulatorConfig,
+        planner: PlannerConfig,
+        grid: GridConfig,
+        packets: Vec<()>,
+        absorber: AbsorberConfig,
+    }
+
+    impl Profile {
+        fn ev_config(&self) -> Option<&EvParams> {
+            self.assets.iter().find_map(|a| match a {
+                AssetProfile::Ev(v) => Some(v),
+                _ => None,
+            })
+        }
+
+        fn heater_config(&self) -> Option<&HeaterParams> {
+            self.assets.iter().find_map(|a| match a {
+                AssetProfile::Heater(v) => Some(v),
+                _ => None,
+            })
+        }
+
+        fn pv_config(&self) -> Option<&PvParams> {
+            self.assets.iter().find_map(|a| match a {
+                AssetProfile::Pv(v) => Some(v),
+                _ => None,
+            })
+        }
+
+        fn battery_config(&self) -> Option<&BatteryParams> {
+            self.assets.iter().find_map(|a| match a {
+                AssetProfile::Battery(v) => Some(v),
+                _ => None,
+            })
+        }
+
+        fn base_load_kw(&self) -> f64 {
+            self.assets
+                .iter()
+                .find_map(|a| match a {
+                    AssetProfile::BaseLoad(v) => Some(v.baseline_kw),
+                    _ => None,
+                })
+                .unwrap_or(0.0)
+        }
+    }
 
     fn fixed_now() -> DateTime<Utc> {
         use chrono::TimeZone;
         Utc.with_ymd_and_hms(2026, 4, 11, 6, 0, 0).unwrap()
     }
 
-    /// Build a TariffTimeSeries with a single constant interval covering the full horizon.
     fn make_tariffs(imp: f64, exp: f64, co2_g: f64) -> TariffTimeSeries {
         let now = fixed_now();
         let snap = TariffSnapshot {
@@ -40,7 +110,6 @@
         }
     }
 
-    /// Build a Profile with battery + EV + heater + PV + base_load.
     fn make_profile() -> Profile {
         Profile {
             assets: vec![
@@ -70,11 +139,10 @@
                     temp_min_c: 18.0,
                     temp_max_c: 23.0,
                     mid_kw: None,
-                    volume_l: None,
-                    thermal_mass_kwh_per_c: None,
-                    k_loss_kw_per_c: None,
-                    draw_kw: None,
-                    switching_penalty_eur: None,
+                    thermal_mass_kwh_per_c: 2.0,
+                    k_loss_kw_per_c: 0.1,
+                    draw_kw: 0.0,
+                    switching_penalty_eur: 0.01,
                 }),
                 AssetProfile::Pv(PvConfig {
                     id: "pv".into(),
@@ -87,8 +155,8 @@
             ],
             simulator: SimulatorConfig::default(),
             planner: PlannerConfig {
-                plan_step_s: 300,  // 5 min steps
-                plan_horizon_h: 2, // 2-hour horizon → 24 steps
+                plan_step_s: 300,
+                plan_horizon_h: 2,
                 ..PlannerConfig::default()
             },
             grid: GridConfig {
@@ -96,11 +164,10 @@
                 max_export_kw: 10.0,
             },
             packets: vec![],
-            absorber: Default::default(),
+            absorber: AbsorberConfig::default(),
         }
     }
 
-    /// Build a SimSnapshot from profile initial state (mirrors SimState::from_profile).
     fn make_snap_from_profile(profile: &Profile) -> SimSnapshot {
         use std::collections::HashMap as HM;
 
@@ -144,12 +211,10 @@
                     let bat_kwh = cfg.battery_kwh;
                     let max_ch = cfg.max_charge_kw;
                     let soc_target = cfg.soc_target;
-                    // initial_state starts plugged=true
-                    let plugged = true;
                     let cap_max_import_kw = if soc >= soc_target { 0.0 } else { max_ch };
                     let mut values = HM::new();
                     values.insert("soc".into(), soc);
-                    values.insert("plugged".into(), 1.0); // plugged
+                    values.insert("plugged".into(), 1.0);
                     values.insert("max_charge_kw".into(), max_ch);
                     values.insert("soc_target".into(), soc_target);
                     values.insert("battery_kwh".into(), bat_kwh);
@@ -167,7 +232,6 @@
                             values,
                         },
                     );
-                    let _ = plugged; // suppress warning; used above
                 }
                 AssetProfile::Heater(cfg) => {
                     let temp_c = cfg.temp_initial_c;
@@ -179,11 +243,7 @@
                     values.insert("mid_kw".into(), mid_kw);
                     values.insert("temp_min_c".into(), cfg.temp_min_c);
                     values.insert("temp_max_c".into(), cfg.temp_max_c);
-                    let cap_max_import_kw = if temp_c >= cfg.temp_max_c {
-                        0.0
-                    } else {
-                        max_kw
-                    };
+                    let cap_max_import_kw = if temp_c >= cfg.temp_max_c { 0.0 } else { max_kw };
                     assets.insert(
                         "heater".to_string(),
                         AssetSnapshot {
@@ -253,7 +313,6 @@
         }
     }
 
-    /// Set plugged state on the EV in an existing SimSnapshot.
     fn set_ev_plugged(snap: &mut SimSnapshot, plugged: bool) {
         if let Some(ev) = snap.assets.get_mut("ev") {
             let soc = ev.val("soc").unwrap_or(0.0);
@@ -275,7 +334,6 @@
         }
     }
 
-    /// Set battery SoC on the battery in an existing SimSnapshot.
     fn set_battery_soc(snap: &mut SimSnapshot, soc: f64) {
         if let Some(bat) = snap.assets.get_mut("battery") {
             let cap = bat.val("capacity_kwh").unwrap_or(0.0);
@@ -290,20 +348,19 @@
         }
     }
 
-    /// Set heater temperature on the heater in an existing SimSnapshot.
     fn set_heater_temp(snap: &mut SimSnapshot, temp_c: f64) {
         if let Some(h) = snap.assets.get_mut("heater") {
             h.values.insert("temp_c".into(), temp_c);
         }
     }
 
-    /// Build a Profile with only a heater (no battery, EV, PV, base_load).
     fn make_heater_only_profile(
         volume_l: Option<f64>,
         temp_min_c: f64,
         temp_max_c: f64,
         temp_initial_c: f64,
     ) -> Profile {
+        let thermal_mass = volume_l.map(|v| v * 4.186 / 3600.0).unwrap_or(2.0);
         Profile {
             assets: vec![AssetProfile::Heater(HeaterConfig {
                 id: "heater".into(),
@@ -312,11 +369,10 @@
                 temp_min_c,
                 temp_max_c,
                 mid_kw: None,
-                volume_l,
-                thermal_mass_kwh_per_c: None,
-                k_loss_kw_per_c: None,
-                draw_kw: None,
-                switching_penalty_eur: None,
+                thermal_mass_kwh_per_c: thermal_mass,
+                k_loss_kw_per_c: 0.1,
+                draw_kw: 0.0,
+                switching_penalty_eur: 0.01,
             })],
             simulator: SimulatorConfig::default(),
             planner: PlannerConfig {
@@ -324,12 +380,9 @@
                 plan_horizon_h: 2,
                 ..PlannerConfig::default()
             },
-            grid: GridConfig {
-                max_import_kw: 25.0,
-                max_export_kw: 10.0,
-            },
+            grid: GridConfig { max_import_kw: 25.0, max_export_kw: 10.0 },
             packets: vec![],
-            absorber: Default::default(),
+            absorber: AbsorberConfig::default(),
         }
     }
 
@@ -359,11 +412,6 @@
         ])
     }
 
-    // ── Test helpers: asset context construction ─────────────────────────────
-
-    /// Build asset contexts from a Profile + SimSnapshot for use in test calls to
-    /// `build_milp_inputs()`, `solve_milp_two_phase()`, and `run_planner()`.
-    /// Mirrors what `tasks/planning.rs` does at runtime.
     fn build_asset_contexts(
         profile: &Profile,
         snap: &SimSnapshot,
@@ -371,15 +419,12 @@
         ev_session: Option<&crate::entities::device_session::EvSession>,
         heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     ) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
-        use crate::assets::{
-            battery::{Battery, BatteryState},
-            ev::{EvCharger, EvState},
-            heater::{Heater, HeaterState},
-            AssetConfig, AssetState,
-        };
         let step_s = profile.planner.plan_step_s;
         let n = (profile.planner.plan_horizon_h as f64 * 3600.0 / step_s as f64) as usize;
-        let lambda_sw = profile.heater_config().map(|h| h.effective_switching_penalty()).unwrap_or(0.0);
+        let lambda_sw = profile
+            .heater_config()
+            .map(|h| h.switching_penalty_eur)
+            .unwrap_or(0.0);
         let v_ev_extra = profile.planner.v_ev_extra_eur_kwh;
         let ev_min_kw = profile.ev_config().map(|e| e.min_charge_kw).unwrap_or(0.0);
 
@@ -389,7 +434,7 @@
                 AssetProfile::Battery(cfg) => {
                     let soc = snap.assets.get("battery").and_then(|s| s.val("soc")).unwrap_or(cfg.initial_soc);
                     let state = AssetState::Battery(BatteryState { soc, actual_power_kw: 0.0 });
-                    let ac = AssetConfig::Battery(Battery::from_config(cfg));
+                    let ac = AssetConfig::Battery(Battery::from_params(cfg));
                     if let Some(ctx) = ac.build_milp_context(&state, n, step_s, now, ev_session, heater_target, ev_min_kw, v_ev_extra, lambda_sw) {
                         ctxs.push(ctx);
                     }
@@ -398,7 +443,7 @@
                     let soc = snap.assets.get("ev").and_then(|s| s.val("soc")).unwrap_or(cfg.initial_soc);
                     let plugged = snap.assets.get("ev").and_then(|s| s.val("plugged")).map(|v| v > 0.5).unwrap_or(true);
                     let state = AssetState::Ev(EvState { soc, actual_power_kw: 0.0, plugged });
-                    let ac = AssetConfig::Ev(EvCharger::from_config(cfg));
+                    let ac = AssetConfig::Ev(EvCharger::from_params(cfg));
                     if let Some(ctx) = ac.build_milp_context(&state, n, step_s, now, ev_session, heater_target, ev_min_kw, v_ev_extra, lambda_sw) {
                         ctxs.push(ctx);
                     }
@@ -406,7 +451,7 @@
                 AssetProfile::Heater(cfg) => {
                     let temp_c = snap.assets.get("heater").and_then(|s| s.val("temp_c")).unwrap_or(cfg.temp_initial_c);
                     let state = AssetState::Heater(HeaterState { temperature_c: temp_c, actual_power_kw: 0.0 });
-                    let ac = AssetConfig::Heater(Heater::from_config(cfg));
+                    let ac = AssetConfig::Heater(Heater::from_params(cfg));
                     if let Some(ctx) = ac.build_milp_context(&state, n, step_s, now, ev_session, heater_target, ev_min_kw, v_ev_extra, lambda_sw) {
                         ctxs.push(ctx);
                     }
@@ -417,11 +462,9 @@
         ctxs
     }
 
-    /// Build asset contexts from a pre-built MilpInputs (for solver-level unit tests that
-    /// construct MilpInputs manually and need matching contexts for the new solver API).
     fn contexts_from_inputs(inputs: &MilpInputs) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
-        use crate::services::test_support::milp_mocks::{MockBatteryCtx, MockEvCtx, MockHeaterCtx};
         use crate::controller::milp_planner::asset_port::{EvMilpContext, EvMilpMode, HeaterMilpContext, HeaterMilpMode};
+        use crate::services::test_support::milp_mocks::{MockBatteryCtx, MockEvCtx, MockHeaterCtx};
         let mut v: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = Vec::new();
         if let Some(e_nom) = inputs.e_bat_nom_kwh {
             v.push(Box::new(MockBatteryCtx::new(
@@ -472,8 +515,72 @@
         v
     }
 
-    /// Convenience wrapper: build contexts then call build_milp_inputs.
-    /// Allows existing tests to use a familiar signature without restructuring.
+    fn build_phase1_weights(profile: &Profile, objective: PlannerObjective) -> Phase1Weights {
+        super::build_phase1_weights(&profile.planner, objective)
+    }
+
+    fn build_milp_inputs(
+        ctxs: &[Box<dyn crate::controller::milp_planner::AssetMilpContext>],
+        sim: &SimSnapshot,
+        tariffs: &TariffTimeSeries,
+        cap: &OadrCapacityState,
+        profile: &Profile,
+        now: DateTime<Utc>,
+        shiftable_loads: &[crate::entities::device_session::ShiftableLoad],
+        baseline_override: Option<&crate::entities::device_session::BaselineOverride>,
+    ) -> MilpInputs {
+        super::build_milp_inputs(
+            ctxs,
+            sim,
+            tariffs,
+            cap,
+            &profile.planner,
+            profile.grid.max_import_kw,
+            profile.grid.max_export_kw,
+            profile.pv_config(),
+            profile.assets.iter().find_map(|a| match a {
+                AssetProfile::BaseLoad(v) => Some(v),
+                _ => None,
+            }),
+            now,
+            shiftable_loads,
+            baseline_override,
+        )
+    }
+
+    fn run_planner(
+        asset_contexts: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
+        assets: &SimSnapshot,
+        tariffs: &TariffTimeSeries,
+        capacity: &OadrCapacityState,
+        profile: &Profile,
+        now: DateTime<Utc>,
+        trigger: PlanTrigger,
+        ev_session: Option<&crate::entities::device_session::EvSession>,
+        heater_target: Option<&crate::entities::device_session::HeaterTarget>,
+        shiftable_loads: &[crate::entities::device_session::ShiftableLoad],
+        baseline_override: Option<&crate::entities::device_session::BaselineOverride>,
+        objective_override: Option<PlannerObjective>,
+    ) -> Plan {
+        super::run_planner(
+            asset_contexts,
+            assets,
+            tariffs,
+            capacity,
+            &profile.planner,
+            profile.grid.max_import_kw,
+            profile.grid.max_export_kw,
+            &profile.assets,
+            now,
+            trigger,
+            ev_session,
+            heater_target,
+            shiftable_loads,
+            baseline_override,
+            objective_override,
+        )
+    }
+
     fn bmi(
         profile: &Profile,
         sim: &SimSnapshot,
@@ -487,8 +594,8 @@
         build_milp_inputs(&ctxs, sim, tariffs, cap, profile, now, &[], None)
     }
 
-mod basic;
-mod solver;
-mod pv;
-mod planner;
-mod heater;
+    mod basic;
+    mod solver;
+    mod pv;
+    mod planner;
+    mod heater;

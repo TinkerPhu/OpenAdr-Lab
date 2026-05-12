@@ -1,7 +1,7 @@
 #![allow(dead_code)] // types used by milp_planner submodules via use super::*
 use chrono::{DateTime, Utc};
 
-use crate::profile::{PlannerObjective, Profile};
+use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
 // ── Internal MILP types ──────────────────────────────────────────────────────
 
@@ -172,11 +172,11 @@ pub(crate) struct ShiftableLoadMilp {
 
 // ── Builder functions ────────────────────────────────────────────────────────
 
-/// Build the MILP objective weights from the profile's planner configuration.
-/// `objective` overrides `profile.planner.objective`; pass `profile.planner.objective`
-/// to use the profile default.
-pub(crate) fn build_phase1_weights(profile: &Profile, objective: PlannerObjective) -> Phase1Weights {
-    let p = &profile.planner;
+/// Build the MILP objective weights from the planner configuration.
+/// `objective` overrides `planner.objective`; pass `planner.objective`
+/// to use the configured default.
+pub(crate) fn build_phase1_weights(planner: &PlannerParams, objective: PlannerObjective) -> Phase1Weights {
+    let p = planner;
     match objective {
         PlannerObjective::MinCost => Phase1Weights {
             w_energy: 1.0,
@@ -241,8 +241,8 @@ pub(crate) fn build_phase1_weights(profile: &Profile, objective: PlannerObjectiv
     }
 }
 
-pub(crate) fn build_phase2_weights(inputs: &MilpInputs, profile: &Profile) -> Phase2Weights {
-    let p = &profile.planner;
+pub(crate) fn build_phase2_weights(inputs: &MilpInputs, planner: &PlannerParams) -> Phase2Weights {
+    let p = planner;
     Phase2Weights {
         c_bat_startup_eur: p.c_bat_startup_eur,
         c_bat_ramp_eur_kw: p.c_bat_ramp_eur_kw,

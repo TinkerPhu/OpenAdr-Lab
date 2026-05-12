@@ -93,6 +93,22 @@ pub(crate) async fn tick_once(
         );
 
         // PHASE 3: Layer 1 multi-asset deviation absorber (Tier 1 real-time control).
+        let absorber_params = crate::entities::planner_params::AbsorberParams {
+            enabled: profile.absorber.enabled,
+            dead_band_kw: profile.absorber.dead_band_kw,
+            dead_band_clearing_ticks: profile.absorber.dead_band_clearing_ticks,
+            assets: profile
+                .absorber
+                .assets
+                .iter()
+                .map(|a| crate::entities::planner_params::AbsorberAssetParams {
+                    id: a.id.clone(),
+                    priority: a.priority,
+                    min_state_linger_s: a.min_state_linger_s,
+                    ev_departure_guard_s: a.ev_departure_guard_s,
+                })
+                .collect(),
+        };
         let deviation_kw = prev_actual_net_kw - plan_signed_net_kw;
         let residual_kw = controller::absorber::apply_deviation_absorption(
             &mut absorber_state,
@@ -100,7 +116,7 @@ pub(crate) async fn tick_once(
             &mut sp_map,
             &pre_snap,
             plan_snap.as_ref(),
-            &profile,
+            &absorber_params,
             now,
             &event_tx,
             ev_sess_tick.as_ref(),

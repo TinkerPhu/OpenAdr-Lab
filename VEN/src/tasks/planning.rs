@@ -5,15 +5,19 @@ use tracing::{debug, error, info, warn};
 
 use crate::controller;
 use crate::entities::asset::PlanTrigger;
+use crate::entities::asset_params::AssetParams;
+use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
-use crate::profile::{PlannerObjective, Profile};
 use crate::simulator::SimState;
 use crate::state::AppState;
 use crate::vtn::VtnClient;
 
 pub(crate) fn spawn_planning(
     state: AppState,
-    profile: Arc<Profile>,
+    planner: PlannerParams,
+    grid_max_import_kw: f64,
+    grid_max_export_kw: f64,
+    asset_params: Vec<AssetParams>,
     vtn: VtnClient,
     ven_name: String,
     mut trigger_rx: tokio::sync::watch::Receiver<PlanTrigger>,
@@ -22,7 +26,7 @@ pub(crate) fn spawn_planning(
     event_tx: PlannerEventTx,
     deviation_pending: Arc<std::sync::atomic::AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
-    let replan_s = profile.planner.replan_interval_s;
+    let replan_s = planner.replan_interval_s;
     tokio::spawn(async move {
         // Initial delay: let event poll populate rates before first plan
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -88,8 +92,7 @@ pub(crate) fn spawn_planning(
             }
 
             // ── Emit solving_started ──────────────────────────────────────
-            let num_slots = profile.planner.plan_horizon_h as usize * 3600
-                / profile.planner.plan_step_s as usize;
+            let num_slots = planner.plan_horizon_h as usize * 3600 / planner.plan_step_s as usize;
             let _ = event_tx.send(PlannerEvent::SolvingStarted {
                 objective: obj,
                 num_slots,
@@ -121,17 +124,21 @@ pub(crate) fn spawn_planning(
 
             // ── Run blocking HiGHS solve off the async runtime ────────────
             let solve_start = std::time::Instant::now();
-            let profile_clone = profile.clone(); // Arc<Profile>, cheap
-            let trigger_for_planner = trigger.clone(); // keep `trigger` for acceptance gate below
+            let planner_clone = planner.clone();
+            let asset_params_clone = asset_params.clone();
+            let trigger_for_planner = trigger.clone();
             let snap = sim_snap.to_sim_snapshot();
 
             // Build per-asset MILP contexts from live simulator state.
             // This happens before spawn_blocking so asset states are captured at this instant.
-            let step_s = profile.planner.plan_step_s;
-            let n_slots = (profile.planner.plan_horizon_h as f64 * 3600.0 / step_s as f64) as usize;
-            let lambda_sw = profile
-                .heater_config()
-                .map(|h| h.effective_switching_penalty())
+            let step_s = planner.plan_step_s;
+            let n_slots = (planner.plan_horizon_h as f64 * 3600.0 / step_s as f64) as usize;
+            let lambda_sw = asset_params
+                .iter()
+                .find_map(|p| match p {
+                    AssetParams::Heater(h) => Some(h.switching_penalty_eur),
+                    _ => None,
+                })
                 .unwrap_or(0.0);
             let asset_contexts: Vec<Box<dyn controller::milp_planner::asset_port::AssetMilpContext>> =
                 sim_snap
@@ -144,8 +151,14 @@ pub(crate) fn spawn_planning(
                             now,
                             ev_sess.as_ref(),
                             heat_tgt.as_ref(),
-                            profile.ev_config().map(|e| e.min_charge_kw).unwrap_or(0.0),
-                            profile.planner.v_ev_extra_eur_kwh,
+                            asset_params
+                                .iter()
+                                .find_map(|p| match p {
+                                    AssetParams::Ev(e) => Some(e.min_charge_kw),
+                                    _ => None,
+                                })
+                                .unwrap_or(0.0),
+                            planner.v_ev_extra_eur_kwh,
                             lambda_sw,
                         )
                     })
@@ -157,7 +170,10 @@ pub(crate) fn spawn_planning(
                     &snap,
                     &tariff_ts,
                     &capacity,
-                    &profile_clone,
+                    &planner_clone,
+                    grid_max_import_kw,
+                    grid_max_export_kw,
+                    &asset_params_clone,
                     now,
                     trigger_for_planner,
                     ev_sess.as_ref(),
@@ -197,8 +213,8 @@ pub(crate) fn spawn_planning(
             // The threshold decays linearly with plan age so that changing circumstances
             // are never permanently blocked — after plan_adoption_decay_s seconds, any
             // new plan is accepted. Hard triggers always force adoption.
-            let threshold = profile.planner.plan_adoption_threshold_eur;
-            let decay_s = profile.planner.plan_adoption_decay_s;
+            let threshold = planner.plan_adoption_threshold_eur;
+            let decay_s = planner.plan_adoption_decay_s;
             let is_hard_trigger = !matches!(trigger, PlanTrigger::Periodic);
             debug!(
                 trigger = %trigger_reason,

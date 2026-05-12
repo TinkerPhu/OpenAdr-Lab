@@ -6,7 +6,32 @@ use std::collections::HashMap;
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
 
-use crate::profile::EvConfig;
+#[derive(Debug, Clone)]
+pub struct EvParams {
+    pub id: String,
+    pub max_charge_kw: f64,
+    pub max_discharge_kw: f64,
+    pub initial_soc: f64,
+    pub battery_kwh: f64,
+    pub soc_target: f64,
+    pub default_charge_kw: f64,
+    pub min_charge_kw: f64,
+}
+
+impl Default for EvParams {
+    fn default() -> Self {
+        Self {
+            id: crate::ids::ASSET_EV.to_string(),
+            max_charge_kw: 7.4,
+            max_discharge_kw: 0.0,
+            initial_soc: 0.5,
+            battery_kwh: 60.0,
+            soc_target: 0.8,
+            default_charge_kw: 0.0,
+            min_charge_kw: 1.4,
+        }
+    }
+}
 
 pub use crate::controller::milp_planner::asset_port::{EvMilpMode, EvMilpContext, EvMilpVars, EvSolOutput};
 
@@ -36,7 +61,7 @@ pub struct EvState {
 }
 
 impl EvCharger {
-    pub fn from_config(cfg: &EvConfig) -> Self {
+    pub fn from_params(cfg: &EvParams) -> Self {
         Self {
             max_charge_kw: cfg.max_charge_kw,
             max_discharge_kw: cfg.max_discharge_kw,
@@ -48,7 +73,7 @@ impl EvCharger {
         }
     }
 
-    pub fn initial_state(cfg: &EvConfig) -> EvState {
+    pub fn initial_state(cfg: &EvParams) -> EvState {
         EvState {
             soc: cfg.initial_soc,
             plugged: true,
@@ -777,6 +802,25 @@ mod tests {
     fn future_state_values_at_clamps() {
         assert_eq!(EvCharger::future_state_values_at(-0.1)["soc"], 0.0);
         assert_eq!(EvCharger::future_state_values_at(1.5)["soc"], 1.0);
+    }
+}
+
+#[cfg(test)]
+mod param_tests {
+    use super::*;
+
+    #[test]
+    fn ev_params_default_values() {
+        assert!((EvParams::default().max_charge_kw - 7.4).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn ev_params_min_charge_enforced() {
+        let params = EvParams {
+            min_charge_kw: 2.0,
+            ..EvParams::default()
+        };
+        assert!((params.min_charge_kw - 2.0).abs() < f64::EPSILON);
     }
 }
 
