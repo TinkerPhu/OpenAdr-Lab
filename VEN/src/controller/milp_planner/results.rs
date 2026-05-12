@@ -1,13 +1,14 @@
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
+use crate::assets::{battery::BatteryParams, ev::EvParams, heater::HeaterParams};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::{
     AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot,
     PlanWarning, PlanningHorizon, WarningSeverity,
 };
-use crate::profile::{PlannerObjective, Profile};
+use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
 use super::asset_port::{battery_future_state, ev_future_state_at, ev_soc_trajectory, heater_future_state};
 use super::envelopes::build_plan_envelopes;
@@ -17,7 +18,7 @@ use super::types::*;
 /// When `inputs` is `Some`, emits populated slots with zero allocations
 /// so tests asserting on per-slot fields still find data.
 pub(crate) fn fallback_plan(
-    profile: &Profile,
+    planner: &PlannerParams,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
     ev_session: Option<&crate::entities::device_session::EvSession>,
@@ -26,9 +27,11 @@ pub(crate) fn fallback_plan(
     inputs: Option<&MilpInputs>,
     reason: String,
     objective: PlannerObjective,
+    ev_cfg: Option<&EvParams>,
+    heat_cfg: Option<&HeaterParams>,
 ) -> Plan {
-    let step_s = profile.planner.plan_step_s;
-    let horizon_h = profile.planner.plan_horizon_h;
+    let step_s = planner.plan_step_s;
+    let horizon_h = planner.plan_horizon_h;
     let horizon_end = now + Duration::seconds((horizon_h as f64 * 3600.0) as i64);
     let total_steps = ((horizon_h as f64 * 3600.0) / step_s as f64) as usize;
 
@@ -82,7 +85,9 @@ pub(crate) fn fallback_plan(
             heater_target,
             shiftable_loads,
             inp,
-            profile,
+            planner,
+            ev_cfg,
+            heat_cfg,
             now,
         ),
         None => vec![],
@@ -110,7 +115,7 @@ pub(crate) fn translate_to_plan(
     sol: &SolveOutput,
     inputs: &MilpInputs,
     weights: &Phase1Weights,
-    profile: &Profile,
+    planner: &PlannerParams,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
     ev_session: Option<&crate::entities::device_session::EvSession>,
@@ -119,8 +124,11 @@ pub(crate) fn translate_to_plan(
     objective: PlannerObjective,
     phase1_cost_eur: f64,
     friction_eur: f64,
+    battery_cfg: Option<&BatteryParams>,
+    ev_cfg: Option<&EvParams>,
+    heat_cfg: Option<&HeaterParams>,
 ) -> Plan {
-    let step_s = profile.planner.plan_step_s;
+    let step_s = planner.plan_step_s;
     let n = inputs.n;
     let dt_h = inputs.dt_h;
     let horizon_end = now + Duration::seconds((n as i64) * step_s as i64);
@@ -132,9 +140,9 @@ pub(crate) fn translate_to_plan(
         far_horizon: horizon_end,
     };
 
-    let ev_id = profile.ev_config().map(|c| c.id.clone());
-    let heater_id = profile.heater_config().map(|c| c.id.clone());
-    let bat_id = profile.battery_config().map(|c| c.id.clone());
+    let ev_id = ev_cfg.map(|c| c.id.clone());
+    let heater_id = heat_cfg.map(|c| c.id.clone());
+    let bat_id = battery_cfg.map(|c| c.id.clone());
 
     let mut slots = Vec::with_capacity(n);
     let mut violation_count: usize = 0;
@@ -286,7 +294,7 @@ pub(crate) fn translate_to_plan(
 
     // ── Planned state by asset (T008/T013/T017) ──────────────────────────
     // Battery SoC forecast — e_bat_kwh[t] is start-of-slot stored energy.
-    if let (Some(ref bid), Some(bat_cfg)) = (&bat_id, profile.battery_config()) {
+    if let (Some(ref bid), Some(bat_cfg)) = (&bat_id, battery_cfg) {
         let capacity_kwh = bat_cfg.capacity_kwh;
         for t in 0..n {
             slots[t]
@@ -295,28 +303,24 @@ pub(crate) fn translate_to_plan(
         }
     }
     // EV SoC forecast — requires soc_ev_init captured in MilpInputs.
-    if let (Some(ref eid), Some(soc_init)) = (&ev_id, inputs.soc_ev_init) {
-        if let Some(ev_cfg) = profile.ev_config() {
-            let traj = ev_soc_trajectory(&sol.p_ev_kw, soc_init, ev_cfg.battery_kwh, dt_h);
-            for t in 0..n {
-                slots[t]
-                    .planned_state_by_asset
-                    .insert(eid.clone(), ev_future_state_at(traj[t]));
-            }
+    if let (Some(ref eid), Some(soc_init), Some(ev_cfg)) = (&ev_id, inputs.soc_ev_init, ev_cfg) {
+        let traj = ev_soc_trajectory(&sol.p_ev_kw, soc_init, ev_cfg.battery_kwh, dt_h);
+        for t in 0..n {
+            slots[t]
+                .planned_state_by_asset
+                .insert(eid.clone(), ev_future_state_at(traj[t]));
         }
     }
     // Heater T_tank forecast — e_heat_tank_kwh[t] is stored energy above temp_min_c.
-    if let Some(ref hid) = heater_id {
+    if let (Some(ref hid), Some(heat_cfg)) = (&heater_id, heat_cfg) {
         if !sol.e_heat_tank_kwh.is_empty() {
-            if let Some(heat_cfg) = profile.heater_config() {
-                let thermal_mass = heat_cfg.effective_thermal_mass();
-                let temp_min = heat_cfg.temp_min_c;
-                for t in 0..n {
-                    slots[t].planned_state_by_asset.insert(
-                        hid.clone(),
-                        heater_future_state(sol.e_heat_tank_kwh[t], temp_min, thermal_mass),
-                    );
-                }
+            let thermal_mass = heat_cfg.thermal_mass_kwh_per_c;
+            let temp_min = heat_cfg.temp_min_c;
+            for t in 0..n {
+                slots[t].planned_state_by_asset.insert(
+                    hid.clone(),
+                    heater_future_state(sol.e_heat_tank_kwh[t], temp_min, thermal_mass),
+                );
             }
         }
     }
@@ -392,7 +396,9 @@ pub(crate) fn translate_to_plan(
             heater_target,
             shiftable_loads,
             inputs,
-            profile,
+            planner,
+            ev_cfg,
+            heat_cfg,
             now,
         ),
         warnings,

@@ -4,7 +4,21 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
-use crate::profile::BaseLoadConfig;
+
+#[derive(Debug, Clone)]
+pub struct BaseLoadParams {
+    pub id: String,
+    pub baseline_kw: f64,
+}
+
+impl Default for BaseLoadParams {
+    fn default() -> Self {
+        Self {
+            id: crate::ids::ASSET_BASE_LOAD.to_string(),
+            baseline_kw: 0.5,
+        }
+    }
+}
 
 /// Base load config. Fixed background consumption (positive = import).
 /// Non-flexible — planner never schedules allocations for this asset.
@@ -23,14 +37,14 @@ pub struct BaseLoadState {
 }
 
 impl BaseLoad {
-    pub fn from_config(cfg: &BaseLoadConfig) -> Self {
+    pub fn from_params(cfg: &BaseLoadParams) -> Self {
         Self {
             baseline_kw: cfg.baseline_kw,
             baseline_kw_profile: cfg.baseline_kw,
         }
     }
 
-    pub fn initial_state(cfg: &BaseLoadConfig) -> BaseLoadState {
+    pub fn initial_state(cfg: &BaseLoadParams) -> BaseLoadState {
         BaseLoadState {
             actual_power_kw: cfg.baseline_kw,
         }
@@ -171,5 +185,19 @@ impl BaseLoad {
         BaseLoadMilpContext {
             p_base_kw: vec![self.baseline_kw; n],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base_load_params_baseline() {
+        let params = BaseLoadParams {
+            baseline_kw: 1.5,
+            ..BaseLoadParams::default()
+        };
+        assert!((params.baseline_kw - 1.5).abs() < f64::EPSILON);
     }
 }

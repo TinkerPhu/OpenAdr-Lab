@@ -1,12 +1,13 @@
 use chrono::{DateTime, Duration, Utc};
 
 use super::asset_port::AssetMilpParams;
+use crate::assets::{base_load::BaseLoadParams, pv::PvParams};
 use crate::controller::milp_planner::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
+use crate::entities::planner_params::PlannerParams;
 use crate::entities::tariff_snapshot::TariffTimeSeries;
-use crate::profile::Profile;
 
 use super::types::*;
 
@@ -32,22 +33,23 @@ pub(crate) fn build_milp_inputs(
     assets: &SimSnapshot,
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
-    profile: &Profile,
+    planner: &PlannerParams,
+    phys_imp: f64,
+    phys_exp: f64,
+    pv_cfg: Option<&PvParams>,
+    base_load: Option<&BaseLoadParams>,
     now: DateTime<Utc>,
     shiftable_loads: &[ShiftableLoad],
     baseline_override: Option<&BaselineOverride>,
 ) -> MilpInputs {
-    let step_s = profile.planner.plan_step_s;
-    let n = ((profile.planner.plan_horizon_h as f64 * 3600.0) / step_s as f64) as usize;
+    let step_s = planner.plan_step_s;
+    let n = ((planner.plan_horizon_h as f64 * 3600.0) / step_s as f64) as usize;
     let dt_h = step_s as f64 / 3600.0;
 
     // ── Per-step grid arrays ──────────────────────────────────────────────────
-    let phys_imp = profile.grid.max_import_kw;
-    let phys_exp = profile.grid.max_export_kw;
     let cont_imp = capacity.import_limit_kw.unwrap_or(phys_imp);
     let cont_exp = capacity.export_limit_kw.unwrap_or(phys_exp);
-    let pv_cfg = profile.pv_config();
-    let base_kw = profile.base_load_kw();
+    let base_kw = base_load.map(|c| c.baseline_kw).unwrap_or(0.0);
 
     let mut c_imp = Vec::with_capacity(n);
     let mut c_exp = Vec::with_capacity(n);
@@ -233,8 +235,8 @@ pub(crate) fn build_milp_inputs(
         p_exp_max_phys_kw: p_exp_phys,
         p_imp_max_cont_kw: p_imp_cont,
         p_exp_max_cont_kw: p_exp_cont,
-        pen_imp_eur_kwh: profile.planner.pen_imp_eur_kwh,
-        pen_exp_eur_kwh: profile.planner.pen_exp_eur_kwh,
+        pen_imp_eur_kwh: planner.pen_imp_eur_kwh,
+        pen_exp_eur_kwh: planner.pen_exp_eur_kwh,
         e_bat_nom_kwh: e_bat_nom,
         e_bat_init_kwh: e_bat_init,
         e_bat_min_kwh: e_bat_min,
@@ -261,7 +263,7 @@ pub(crate) fn build_milp_inputs(
         q_heat_dem_kw: q_heat_dem,
         e_heat_target_kwh: e_heat_target,
         lambda_heat_sw_eur: lambda_sw,
-        w_tier_penalty_eur: profile.planner.w_tier_penalty_eur,
+        w_tier_penalty_eur: planner.w_tier_penalty_eur,
         heat_initial_z_mid: heat_iz_mid,
         heat_initial_z_full: heat_iz_full,
         shiftable_loads: milp_loads,

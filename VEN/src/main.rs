@@ -18,8 +18,17 @@ use config::Config;
 use entities::asset::PlanTrigger;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use planner_events::{PlannerEvent, PlannerEventTx};
-use profile::{PlannerObjective, Profile};
+use profile::Profile;
 use simulator::SimState;
+
+use crate::assets::{
+    base_load::BaseLoadParams, battery::BatteryParams, ev::EvParams, heater::HeaterParams,
+    pv::PvParams,
+};
+use crate::entities::asset_params::AssetParams;
+use crate::entities::planner_params::{
+    AbsorberAssetParams, AbsorberParams, PlannerObjective, PlannerParams, SimulatorParams,
+};
 use state::AppState;
 use std::sync::{atomic::AtomicBool, Arc};
 use tokio::sync::{Mutex, RwLock};
@@ -36,6 +45,104 @@ pub struct AppCtx {
     pub sim: Arc<Mutex<SimState>>,
     pub active_objective: Arc<RwLock<PlannerObjective>>,
     pub planner_event_tx: PlannerEventTx,
+}
+
+fn build_domain_params(
+    profile: &Profile,
+) -> (SimulatorParams, PlannerParams, AbsorberParams, Vec<AssetParams>) {
+    let sim_params = SimulatorParams {
+        tick_s: profile.simulator.tick_s,
+        persist_every_s: profile.simulator.persist_every_s,
+        report_interval_s: profile.simulator.report_interval_s,
+    };
+    let planner_params = PlannerParams {
+        plan_step_s: profile.planner.plan_step_s,
+        plan_horizon_h: profile.planner.plan_horizon_h,
+        replan_interval_s: profile.planner.replan_interval_s,
+        deviation_threshold_kw: profile.planner.deviation_threshold_kw,
+        deviation_trigger_ticks: profile.planner.deviation_trigger_ticks,
+        correction_min_kw: profile.planner.correction_min_kw,
+        w_energy: profile.planner.w_energy,
+        w_ghg: profile.planner.w_ghg,
+        w_grid: profile.planner.w_grid,
+        c_bat_wear_eur_kwh: profile.planner.c_bat_wear_eur_kwh,
+        c_ev_startup_eur: profile.planner.c_ev_startup_eur,
+        c_bat_startup_eur: profile.planner.c_bat_startup_eur,
+        c_ev_ramp_eur_kw: profile.planner.c_ev_ramp_eur_kw,
+        c_bat_ramp_eur_kw: profile.planner.c_bat_ramp_eur_kw,
+        c_bat_ev_coexist_eur_kwh: profile.planner.c_bat_ev_coexist_eur_kwh,
+        w_viol: profile.planner.w_viol,
+        pen_imp_eur_kwh: profile.planner.pen_imp_eur_kwh,
+        pen_exp_eur_kwh: profile.planner.pen_exp_eur_kwh,
+        v_ev_extra_eur_kwh: profile.planner.v_ev_extra_eur_kwh,
+        w_tier_penalty_eur: profile.planner.w_tier_penalty_eur,
+        objective: profile.planner.objective,
+        plan_adoption_threshold_eur: profile.planner.plan_adoption_threshold_eur,
+        plan_adoption_decay_s: profile.planner.plan_adoption_decay_s,
+        phase2_epsilon_eur: profile.planner.phase2_epsilon_eur,
+    };
+    let absorber_params = AbsorberParams {
+        enabled: profile.absorber.enabled,
+        dead_band_kw: profile.absorber.dead_band_kw,
+        dead_band_clearing_ticks: profile.absorber.dead_band_clearing_ticks,
+        assets: profile
+            .absorber
+            .assets
+            .iter()
+            .map(|a| AbsorberAssetParams {
+                id: a.id.clone(),
+                priority: a.priority,
+                min_state_linger_s: a.min_state_linger_s,
+                ev_departure_guard_s: a.ev_departure_guard_s,
+            })
+            .collect(),
+    };
+    let asset_params: Vec<AssetParams> = profile
+        .assets
+        .iter()
+        .map(|ap| match ap {
+            crate::profile::AssetProfile::Battery(c) => AssetParams::Battery(BatteryParams {
+                id: c.id.clone(),
+                capacity_kwh: c.capacity_kwh,
+                max_charge_kw: c.max_charge_kw,
+                max_discharge_kw: c.max_discharge_kw,
+                initial_soc: c.initial_soc,
+                round_trip_efficiency: c.round_trip_efficiency,
+                min_soc: c.min_soc,
+            }),
+            crate::profile::AssetProfile::Ev(c) => AssetParams::Ev(EvParams {
+                id: c.id.clone(),
+                max_charge_kw: c.max_charge_kw,
+                max_discharge_kw: c.max_discharge_kw,
+                initial_soc: c.initial_soc,
+                battery_kwh: c.battery_kwh,
+                soc_target: c.soc_target,
+                default_charge_kw: c.default_charge_kw,
+                min_charge_kw: c.min_charge_kw,
+            }),
+            crate::profile::AssetProfile::Heater(c) => AssetParams::Heater(HeaterParams {
+                id: c.id.clone(),
+                max_kw: c.max_kw,
+                temp_initial_c: c.temp_initial_c,
+                temp_min_c: c.temp_min_c,
+                temp_max_c: c.temp_max_c,
+                mid_kw: c.mid_kw,
+                thermal_mass_kwh_per_c: c.effective_thermal_mass(),
+                k_loss_kw_per_c: c.effective_k_loss(),
+                draw_kw: c.effective_draw_kw(),
+                switching_penalty_eur: c.effective_switching_penalty(),
+            }),
+            crate::profile::AssetProfile::Pv(c) => AssetParams::Pv(PvParams {
+                id: c.id.clone(),
+                rated_kw: c.rated_kw,
+            }),
+            crate::profile::AssetProfile::BaseLoad(c) => AssetParams::BaseLoad(BaseLoadParams {
+                id: c.id.clone(),
+                baseline_kw: c.baseline_kw,
+            }),
+        })
+        .collect();
+    (sim_params, planner_params, absorber_params, asset_params)
 }
 
 #[tokio::main]
@@ -83,6 +190,9 @@ async fn main() -> anyhow::Result<()> {
         Profile::default()
     };
     let profile = Arc::new(profile);
+    let (sim_params, planner_params, absorber_params, asset_params) = build_domain_params(&profile);
+    let grid_max_import_kw = profile.grid.max_import_kw;
+    let grid_max_export_kw = profile.grid.max_export_kw;
 
     let vtn = VtnClient::new(
         cfg.vtn_base_url.clone(),
@@ -103,7 +213,7 @@ async fn main() -> anyhow::Result<()> {
     // Initialize simulator state — asset configs always rebuilt from profile so that
     // profile changes (k_loss, thermal_mass, etc.) take effect on every restart.
     let sim_state = {
-        let sim = simulator::persist::load_with_profile(&data_dir, &profile).await;
+        let sim = simulator::persist::load_with_params(&data_dir, &sim_params, &asset_params).await;
         Arc::new(Mutex::new(sim))
     };
 
@@ -111,7 +221,7 @@ async fn main() -> anyhow::Result<()> {
     {
         let sim_guard = sim_state.lock().await;
         let sim_snap = sim_guard.to_sim_snapshot();
-        controller::absorber::validate_startup(&profile, &sim_snap)?;
+        controller::absorber::validate_startup(&absorber_params, &sim_snap)?;
     }
 
     // Spawn background loops
@@ -145,10 +255,13 @@ async fn main() -> anyhow::Result<()> {
         vtn.clone(),
         cfg.ven_name.clone(),
     );
-    let active_objective = Arc::new(RwLock::new(profile.planner.objective));
+    let active_objective = Arc::new(RwLock::new(planner_params.objective));
     tasks::spawn_planning(
         state.clone(),
-        profile.clone(),
+        planner_params.clone(),
+        grid_max_import_kw,
+        grid_max_export_kw,
+        asset_params.clone(),
         vtn.clone(),
         cfg.ven_name.clone(),
         trigger_rx,

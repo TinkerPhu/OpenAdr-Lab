@@ -4,7 +4,34 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
-use crate::profile::PvConfig;
+
+#[derive(Debug, Clone)]
+pub struct PvParams {
+    pub id: String,
+    pub rated_kw: f64,
+}
+
+impl Default for PvParams {
+    fn default() -> Self {
+        Self {
+            id: crate::ids::ASSET_PV.to_string(),
+            rated_kw: 5.0,
+        }
+    }
+}
+
+impl PvParams {
+    pub fn forecast_kw(&self, ts: chrono::DateTime<chrono::Utc>) -> f64 {
+        use chrono::Timelike;
+        let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
+        if hour >= 6.0 && hour <= 18.0 {
+            let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
+            (angle.sin().max(0.0) * self.rated_kw).max(0.0)
+        } else {
+            0.0
+        }
+    }
+}
 
 /// PV Inverter config. Generates power (export = negative).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +57,7 @@ pub struct PvState {
 }
 
 impl PvInverter {
-    pub fn from_config(cfg: &PvConfig) -> Self {
+    pub fn from_params(cfg: &PvParams) -> Self {
         Self {
             rated_kw: cfg.rated_kw,
             export_limit_kw: None,
@@ -40,7 +67,7 @@ impl PvInverter {
         }
     }
 
-    pub fn initial_state(_cfg: &PvConfig) -> PvState {
+    pub fn initial_state(_cfg: &PvParams) -> PvState {
         PvState {
             actual_power_kw: 0.0,
         }
@@ -313,6 +340,7 @@ impl PvInverter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     fn make_pv(rated_kw: f64) -> (PvInverter, PvState) {
         (
@@ -377,6 +405,18 @@ mod tests {
         for (_, v) in &series.samples {
             assert_eq!(*v, 0.0, "Zero-rated PV must produce all-zero series");
         }
+    }
+
+    #[test]
+    fn pv_params_forecast_kw_noon() {
+        let ts = Utc.with_ymd_and_hms(2026, 4, 11, 12, 0, 0).unwrap();
+        assert!(PvParams::default().forecast_kw(ts) > 0.0);
+    }
+
+    #[test]
+    fn pv_params_forecast_kw_midnight() {
+        let ts = Utc.with_ymd_and_hms(2026, 4, 11, 0, 0, 0).unwrap();
+        assert_eq!(PvParams::default().forecast_kw(ts), 0.0);
     }
 
     #[test]
