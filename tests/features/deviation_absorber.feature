@@ -146,7 +146,25 @@ Feature: Multi-asset deviation absorber (Tier 1 real-time control)
     And a new MILP plan is produced
     And the replanning is triggered only once (no chattering)
 
+  @wip
   Scenario: DeviceDeviation does not fire for transient deviations
+    # @wip: two intertwined non-determinism problems block this scenario.
+    # (1) Race condition — the Background's pv_irradiance inject sends trigger T1;
+    #     'I wait for a fresh plan' sends T2 while T1's MILP is running. T1's plan
+    #     is detected as fresh and the step exits, but T2's solve is still in
+    #     progress. T2's plan is adopted during or just after the 8 s assertion
+    #     window, changing the battery setpoint and invalidating the delta check.
+    #     A step-level stability window cannot reliably span Pi4 MILP solve times
+    #     (20–60 s); a window large enough to be safe would unacceptably slow the suite.
+    # (2) Time-of-day headroom — the MILP pre-discharges the battery to make room
+    #     for tomorrow's PV (offset decays back to the natural irradiance model across
+    #     the 24 h horizon). At peak solar-prep hours the plan sets battery near
+    #     max discharge (e.g. −4.175 kW), leaving < 1.5 kW of absorber headroom.
+    #     The assertion requires a ≥ 1.5 kW delta; achieving it is physically
+    #     impossible when the plan already consumes most of the discharge capacity.
+    # Root fix: introduce pv_plan_kw inject (022-deterministic-test-env) so the
+    # MILP forecast is zeroed for all 24 horizon slots, making plans deterministic
+    # and ensuring sufficient battery headroom regardless of time of day.
     Given the battery SoC is reset to 0.50
     And the plan state is initialized with net import 0.0 kW
     And I wait for a fresh plan
