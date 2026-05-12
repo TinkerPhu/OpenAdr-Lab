@@ -67,9 +67,7 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
 
   # --- PV forecast override (022-deterministic-test-env) ---
 
-  @wip
   Scenario: PV forecast override does not trigger a replan
-    # @wip: step implementations pending (022-deterministic-test-env phase 4).
     # Setting pv_plan_kw must NOT send a PlanTrigger::AssetStateChange; the
     # planning loop must remain idle for at least 2 seconds after the inject.
     Given the system is idle

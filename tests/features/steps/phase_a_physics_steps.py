@@ -21,6 +21,33 @@ def step_given_battery_soc_reset(context, soc):
     )
 
 
+@given("the system is idle")
+def step_given_system_idle(context):
+    """Wait until the VEN has produced at least one plan, then pause briefly
+    so the planner loop is idle before the next step injects state.
+
+    Stores the current plan's created_at in context.idle_plan_ts so that
+    the 'no plan cycle' assertion can detect any subsequent solve.
+    """
+    def fetch():
+        resp = ven_get("/plan")
+        if not resp.ok:
+            return None
+        body = resp.json()
+        return body if (body and "created_at" in body) else None
+
+    plan = poll_until(
+        fetch,
+        lambda p: p is not None,
+        timeout=150,
+        description="VEN /plan returns a plan with created_at",
+    )
+    # Record the solve timestamp before the inject so the Then step can detect change.
+    context.idle_plan_ts = plan["created_at"]
+    # Brief pause to ensure the planner loop has fully settled.
+    time.sleep(3)
+
+
 # ── When: SoC reset and override helpers ─────────────────────────────────────
 
 @when("the battery SoC is reset to {soc:f}")
@@ -72,6 +99,38 @@ def step_sim_override_pv_irradiance(context, irradiance):
 @when("I wait {seconds:d} seconds for the sim to tick")
 def step_wait_sim_tick(context, seconds):
     time.sleep(seconds)
+
+
+# ── Then: no-replan assertion ─────────────────────────────────────────────────
+
+@then("no plan cycle is triggered within {sec:d} seconds")
+def step_no_plan_cycle(context, sec):
+    """Assert the MILP planner does not start a new solve for `sec` seconds.
+
+    Polls GET /plan every 500 ms for `sec` seconds.  If the plan's created_at
+    advances beyond the value captured in context.idle_plan_ts (set by 'Given
+    the system is idle'), a new solve fired and the assertion fails.
+
+    Uses 500 ms poll interval so a spurious solve firing within the window is
+    reliably detected even on Pi4 ARM64.
+    """
+    baseline_ts = getattr(context, "idle_plan_ts", None)
+    assert baseline_ts is not None, (
+        "'Given the system is idle' must precede this step to record baseline plan timestamp"
+    )
+
+    deadline = time.time() + sec
+    while time.time() < deadline:
+        resp = ven_get("/plan")
+        if resp.ok:
+            body = resp.json()
+            current_ts = body.get("created_at") if body else None
+            if current_ts and current_ts != baseline_ts:
+                raise AssertionError(
+                    f"Unexpected plan cycle fired within {sec}s of pv_plan_kw inject. "
+                    f"Baseline created_at={baseline_ts!r}, new created_at={current_ts!r}"
+                )
+        time.sleep(0.5)
 
 
 # ── Then: capability assertions ───────────────────────────────────────────────
@@ -144,3 +203,4 @@ def step_poll_capability(context, asset, field, expected):
 @then("the polled capability matched")
 def step_polled_capability_matched(context):
     assert context.polled_capability is not None, "No polled capability result"
+
