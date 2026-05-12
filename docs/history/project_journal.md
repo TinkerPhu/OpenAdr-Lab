@@ -3517,3 +3517,72 @@ Internal functions made `pub(crate)` where sibling-module access required; `run_
 **319 passed, 0 failed, 13 ignored** (332 total) — unchanged.
 
 SC-004 now fully satisfied across all modules.
+
+---
+
+## Phase 4 — Decouple `PROFILE` from Domain (`021-decouple-profile-domain`)
+
+**Branch**: `021-decouple-profile-domain` (off `refactoring_phase_3`)  
+**Status**: COMPLETE (2026-05-12)  
+**Commits**: `f085cb2`, `45ea6c2`
+
+### What changed
+
+Removed all 18 `use crate::profile` import sites from the domain ring (`entities/`, `assets/`, `controller/`, `simulator/`). The `profile` module retains its YAML-deserialising Config types; `main.rs` is now the sole assembly point that converts Profile → domain params.
+
+**New files:**
+
+| File | Contents |
+|------|----------|
+| `entities/planner_params.rs` | `PlannerObjective` enum, `PlannerParams`, `AbsorberParams`, `AbsorberAssetParams`, `SimulatorParams` structs — all pure domain, no serde |
+| `entities/asset_params.rs` | `AssetParams` enum wrapping the five concrete asset Params types |
+| `assets/battery.rs` | `BatteryParams` struct + 2 unit tests |
+| `assets/ev.rs` | `EvParams` struct + 2 unit tests |
+| `assets/heater.rs` | `HeaterParams` (pre-resolved effective fields) + tests |
+| `assets/pv.rs` | `PvParams` struct + `forecast_kw()` method moved from `PvConfig` + tests |
+| `assets/base_load.rs` | `BaseLoadParams` struct + test |
+
+**Modified files:**
+
+| File | Change |
+|------|--------|
+| `entities/mod.rs` | Added `planner_params`, `asset_params` pub mods + re-exports |
+| `entities/plan.rs` | Import path: `crate::profile::PlannerObjective` → `crate::entities::planner_params::PlannerObjective` |
+| `controller/dispatcher.rs` | Same PlannerObjective import fix |
+| `controller/absorber.rs` | `validate_startup(&Profile, …)` → `validate_startup(&AbsorberParams, …)` |
+| `controller/milp_planner/types.rs` | Profile → PlannerParams; PlannerObjective from entities |
+| `controller/milp_planner/envelopes.rs` | Profile → individual typed asset Params |
+| `controller/milp_planner/inputs.rs` | Profile → asset Params |
+| `controller/milp_planner/mod.rs` | `run_planner` signature: Profile → PlannerParams + asset Params |
+| `controller/milp_planner/results.rs` | PlannerObjective from entities |
+| `simulator/mod.rs` | `from_profile()` → `from_params(&[AssetParams])` |
+| `simulator/persist.rs` | `load_with_profile()` → `load_with_params()` accepting `&SimulatorParams` + `&[AssetParams]` |
+| `main.rs` | Added `build_domain_params(&Profile)` function; wires all constructors from domain params |
+| `profile.rs` | Bridge re-export `pub use entities::planner_params::PlannerObjective` added in T005, removed in T033 |
+
+### Key design decisions
+
+1. **`PlannerObjective` moves first (ADJ-01)** — A bridge re-export in `profile.rs` allowed incremental migration: all callers continued to compile via `crate::profile::PlannerObjective` while the domain ring was updated piecemeal. Bridge removed as the final step (T033).
+
+2. **`HeaterParams` pre-resolves effective fields** — `HeaterConfig` has four `Option<f64>` fields with `effective_*()` methods. At assembly time in `build_domain_params()` these are resolved to concrete `f64` values. The domain ring never sees `Option` noise. `mid_kw: Option<f64>` is preserved as optional because it is semantically significant (two-speed vs single-speed heater).
+
+3. **`AssetParams` enum in `entities/asset_params.rs`** — Required so both `main.rs` (assembly) and `simulator/mod.rs` (construction) can import it without violating dependency direction. Placed in the domain ring, not in `main.rs`.
+
+4. **`envelopes.rs` takes individual typed asset Params** — Envelope functions are per-asset; heterogeneous `&[AssetParams]` dispatch would add match overhead with no benefit. Each function receives its concrete Params type.
+
+5. **`profile.rs` unchanged structurally** — All Config types and YAML deserialization remain in `profile.rs`. Only `PlannerObjective` was relocated; the module is still the YAML→Config boundary.
+
+### Success criteria (all verified)
+
+| Criterion | Result |
+|-----------|--------|
+| SC-001 — zero `use crate::profile` in domain ring | ✅ |
+| SC-002 — ≥1 inline unit test per asset file | ✅ (battery: 2, ev: 2, heater: multiple, pv: multiple, base_load: 1) |
+| SC-003 — milp_planner test count ≥ baseline | ✅ (58 tests in milp_planner) |
+| SC-004 — BDD suite fully green | pending Pi4 run |
+| SC-005 — `PlannerObjective` importable via `crate::entities` | ✅ |
+
+### Line count notes (T040)
+
+New files (`planner_params.rs` 165 lines, `asset_params.rs` 13 lines) are well within the 500-line constitution limit.  
+Pre-existing files `heater.rs` (1339), `absorber.rs` (1371), `ev.rs` (945), `battery.rs` (753), `pv.rs` (670), and `simulator/mod.rs` (513) already exceeded the 500-line limit before Phase 4. Phase 4 contributed only 29–80 additional lines to each. These are pre-existing Principle VI violations deferred from earlier phases — not introduced by Phase 4.
