@@ -48,6 +48,8 @@ pub struct PostSimInjectBody {
     pub grid_import_limit_kw: Option<serde_json::Value>,
     #[serde(default)]
     pub grid_export_limit_kw: Option<serde_json::Value>,
+    #[serde(default)]
+    pub pv_plan_kw: Option<serde_json::Value>,
 }
 
 /// Apply partial-merge: absent = no change, null = release (None), value = set.
@@ -93,6 +95,7 @@ fn merge_inject(current: &mut SimInjectState, body: PostSimInjectBody) {
     }
     merge_f64!(grid_import_limit_kw);
     merge_f64!(grid_export_limit_kw);
+    merge_f64!(pv_plan_kw);
 }
 
 #[derive(Deserialize)]

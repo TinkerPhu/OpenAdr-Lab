@@ -18,6 +18,7 @@ Feature: Multi-asset deviation absorber (Tier 1 real-time control)
     Given the VEN is running with the test profile
     And the absorber is enabled
     And I inject pv irradiance 0.0 via sim inject
+    And I set pv plan forecast to 0.0 kW
 
   # User Story 1: Absorber Absorbs Transient Deviations
   # =====================================================
@@ -146,7 +147,6 @@ Feature: Multi-asset deviation absorber (Tier 1 real-time control)
     And a new MILP plan is produced
     And the replanning is triggered only once (no chattering)
 
-  @wip
   Scenario: DeviceDeviation does not fire for transient deviations
     # @wip: two intertwined non-determinism problems block this scenario.
     # (1) Race condition — the Background's pv_irradiance inject sends trigger T1;

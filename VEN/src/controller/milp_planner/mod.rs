@@ -125,6 +125,7 @@ pub fn run_planner(
     shiftable_loads: &[ShiftableLoad],
     baseline_override: Option<&BaselineOverride>,
     objective_override: Option<PlannerObjective>,
+    pv_forecast_override: Option<f64>,
 ) -> Plan {
     // Guard: MilpVarPool has one named slot per kind; silently overwrites on duplicates.
     debug_assert!(
@@ -156,6 +157,7 @@ pub fn run_planner(
         now,
         shiftable_loads,
         baseline_override,
+        pv_forecast_override,
     );
     let p1w = build_phase1_weights(planner, objective);
     let p2w = build_phase2_weights(&inputs, planner);

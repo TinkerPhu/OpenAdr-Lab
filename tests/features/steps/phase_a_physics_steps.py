@@ -51,6 +51,17 @@ def step_given_inject_pv_irradiance(context, irradiance):
     r.raise_for_status()
 
 
+@given("I set pv plan forecast to {kw:f} kW")
+def step_given_set_pv_plan_forecast(context, kw):
+    """Set the MILP planning-horizon PV forecast to a fixed value via POST /sim/inject.
+    This overrides all 24h forecast slots; does NOT trigger a replan.
+    """
+    r = ven_post("/sim/inject", json={"pv_plan_kw": kw})
+    assert r.status_code == 204, (
+        f"Expected 204 from POST /sim/inject with pv_plan_kw={kw}, got {r.status_code}: {r.text}"
+    )
+
+
 @when("I POST a sim override setting pv_irradiance to {irradiance:f}")
 def step_sim_override_pv_irradiance(context, irradiance):
     r = ven_post("/sim/inject", json={"pv_irradiance": irradiance})
