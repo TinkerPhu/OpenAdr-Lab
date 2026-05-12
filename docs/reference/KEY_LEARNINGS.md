@@ -230,3 +230,41 @@
 
 - **`AssetSnapshot` exposes `power_kw` (actual delivered), not `setpoint_kw` (commanded)**: The `/sim` response under `assets.<id>` contains `power_kw` (from `AssetEntry.last_power_kw`) plus flattened state values (`soc`, `plugged`, etc.). The commanded setpoint is internal to the dispatcher loop and not exposed in the API. BDD assertions on absorber behavior must use `power_kw` with relative-change semantics (delta from baseline), not absolute setpoint comparisons.
 
+
+## Deterministic MILP BDD Tests (022-deterministic-test-env)
+
+- **pv_irradiance vs pv_plan_kw are two separate overrides**: pv_irradiance
+  is a physics-tick inject — it affects what PV produces NOW and lets the EMA decay
+  model forward-extrapolate into the horizon.  pv_plan_kw is a MILP-forecast
+  inject — it pins every slot in the 24h horizon to a constant kW, completely
+  replacing the sin-model forecast.  Tests that need deterministic planner output
+  (e.g., stable battery headroom) must use pv_plan_kw, not pv_irradiance.
+
+- **MILP planning-only overrides must NOT trigger a replan**: Including pv_plan_kw
+  in the should_replan guard in outes/sim.rs causes a T1+T2 double-solve race:
+  the Background step fires T1 (replan), the subsequent absorber step fires T2, and
+  the second plan is adopted during the 8 s assertion window.  Overrides that only
+  affect future planning (not current device state) must be excluded from
+  should_replan — same rationale as ase_load_kw.
+
+- **Read inject snapshot before spawn_blocking**: pv_plan_kw (like all inject
+  fields) must be captured from inject_snap BEFORE the spawn_blocking call in
+  planning.rs.  The one-shot fields (pv_irradiance, ase_load_kw) are cleared
+  by the sim tick; reading them inside the closure risks a stale zero value.
+
+- **Architecture ring naming at domain boundary**: The infra ring calls the field
+  pv_plan_kw; the domain ring calls the parameter pv_forecast_override.  This
+  rename at the boundary is intentional: it preserves the domain ring's independence
+  from infrastructure field names and makes the distinction from pv_irradiance
+  self-documenting in the function signature.
+
+- **Clamp planning overrides at the point of use**: pv_forecast_override.max(0.0)
+  in uild_milp_inputs prevents a BDD test injecting a negative value (e.g., by
+  mistake) from producing unphysical negative PV generation in the MILP model.
+  Validate at the boundary, not in the route handler.
+
+- **No-replan BDD assertion pattern**: To verify an inject does NOT trigger a solve,
+  capture plan["created_at"] BEFORE the inject (via Given the system is idle),
+  then poll GET /plan for N seconds after the inject and assert created_at does
+  not change.  This is more reliable than log-string matching and works across both
+  the replan_interval-based periodic solve and the watch-channel-based reactive solve.
