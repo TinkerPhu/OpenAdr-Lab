@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tracing::{info, warn};
 
+pub use crate::entities::planner_params::PlannerObjective;
+
 /// Multi-asset deviation absorber configuration.
 /// Tier 1 real-time controller for transient grid deviations.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -345,28 +347,6 @@ fn default_report_interval() -> u64 {
 
 /// Optimization objective preset. Selects a named weight configuration for the MILP solver.
 /// Individual weight fields in `PlannerConfig` can be tuned further with `Custom`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum PlannerObjective {
-    /// Minimize energy bill. Balanced weights: energy cost + light GHG + light grid + wear.
-    /// (w_energy=1, w_ghg=0.20, w_grid=0.02, c_bat_wear=0.03)
-    #[default]
-    MinCost,
-    /// Minimize carbon emissions above all else.
-    /// (w_energy=0, w_ghg=10, w_grid=0, c_bat_wear=0)
-    MinGhg,
-    /// Minimize grid exchange volume (import + export equally penalised).
-    /// (w_energy=0, w_ghg=0, w_grid=1, c_bat_wear=0)
-    MinGrid,
-    /// Minimize grid import only — export is allowed/encouraged (energy autarky).
-    /// (w_import=1, w_energy=0, w_ghg=0, w_grid=0, c_bat_wear=0)
-    MinImport,
-    /// Maximize revenue from export and grid services.
-    /// (w_energy=1, w_ghg=0, w_grid=0, c_bat_wear=0.03)
-    MaxRevenue,
-    /// Use the individual weight fields below directly, without any preset override.
-    Custom,
-}
 
 /// Physical grid connection limits — meter / main breaker hard ceiling.
 /// The MILP uses these as `p_imp_max_phys_kw` / `p_exp_max_phys_kw`.

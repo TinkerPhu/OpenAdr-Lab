@@ -18,8 +18,8 @@
 
 **Purpose**: Confirm the Phase 3 branch is present and the invariant baseline is known before any changes.
 
-- [ ] T001 Confirm working branch is `021-decouple-profile-domain` (branched off `refactoring_phase_3`) — run `git log --oneline -5` to verify
-- [ ] T002 Record Phase 3 grep baseline: run `grep -rn "use crate::profile" VEN/src/entities VEN/src/assets VEN/src/controller VEN/src/simulator` and note all 14 matches for comparison at end
+- [X] T001 Confirm working branch is `021-decouple-profile-domain` (branched off `refactoring_phase_3`) — run `git log --oneline -5` to verify
+- [X] T002 Record Phase 3 grep baseline: run `grep -rn "use crate::profile" VEN/src/entities VEN/src/assets VEN/src/controller VEN/src/simulator` and note all 14 matches for comparison at end
 
 ---
 
@@ -29,10 +29,10 @@
 
 **⚠️ CRITICAL**: No domain file profile-import removals can begin until this phase is complete.
 
-- [ ] T003 Create `VEN/src/entities/planner_params.rs` — add `PlannerObjective` enum (`MinCost`, `MinGhg`, `MinGrid`, `MinImport`, `MaxRevenue`, `Custom`) with `#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]`; NO serde attributes; add `impl Default` with `MinCost` as default
-- [ ] T004 In `VEN/src/entities/mod.rs` — add `pub mod planner_params;` and `pub use planner_params::PlannerObjective;`
-- [ ] T005 In `VEN/src/profile.rs` — add bridge re-export `pub use crate::entities::planner_params::PlannerObjective;` directly after the existing `PlannerObjective` enum definition, then delete the old enum body (keep only the re-export); verify `cargo check` passes
-- [ ] T006 Verify compile: run `cargo check` in `VEN/` — zero errors confirm the bridge re-export works and all existing callers are unbroken
+- [X] T003 Create `VEN/src/entities/planner_params.rs` — add `PlannerObjective` enum (`MinCost`, `MinGhg`, `MinGrid`, `MinImport`, `MaxRevenue`, `Custom`) with `#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]`; NO serde attributes; add `impl Default` with `MinCost` as default
+- [X] T004 In `VEN/src/entities/mod.rs` — add `pub mod planner_params;` and `pub use planner_params::PlannerObjective;`
+- [X] T005 In `VEN/src/profile.rs` — add bridge re-export `pub use crate::entities::planner_params::PlannerObjective;` directly after the existing `PlannerObjective` enum definition, then delete the old enum body (keep only the re-export); verify `cargo check` passes
+- [X] T006 Verify compile: run `cargo check` in `VEN/` — zero errors confirm the bridge re-export works and all existing callers are unbroken
 
 **Checkpoint**: `PlannerObjective` is now a domain type. All 10+ callers still see it via `profile::PlannerObjective` through the bridge. Phase 3 can begin.
 
