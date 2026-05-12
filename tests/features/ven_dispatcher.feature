@@ -7,8 +7,7 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
 
   Background:
     Given the VEN is running with profile "test"
-
-  # --- EV session drives plan allocation ---
+    And I set pv plan forecast to 0.0 kW
 
   Scenario: EV session drives dispatcher to allocate power to EV
     Given I inject ev_soc 0.50 via sim inject

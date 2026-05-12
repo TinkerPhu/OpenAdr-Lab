@@ -4,8 +4,7 @@ Feature: UC-01..UC-04 — Normal Operation Use Cases
 
   Background:
     Given the VEN is running with profile "test"
-
-  # --- UC-01: EV Overnight Charge ---
+    And I set pv plan forecast to 0.0 kW
   # An explicit EV session drives the planner to allocate FIRM charging slots.
 
   Scenario: UC-01a — Explicit EV session is planned and allocated

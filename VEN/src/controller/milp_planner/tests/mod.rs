@@ -529,6 +529,20 @@
         shiftable_loads: &[crate::entities::device_session::ShiftableLoad],
         baseline_override: Option<&crate::entities::device_session::BaselineOverride>,
     ) -> MilpInputs {
+        build_milp_inputs_with_override(ctxs, sim, tariffs, cap, profile, now, shiftable_loads, baseline_override, None)
+    }
+
+    fn build_milp_inputs_with_override(
+        ctxs: &[Box<dyn crate::controller::milp_planner::AssetMilpContext>],
+        sim: &SimSnapshot,
+        tariffs: &TariffTimeSeries,
+        cap: &OadrCapacityState,
+        profile: &Profile,
+        now: DateTime<Utc>,
+        shiftable_loads: &[crate::entities::device_session::ShiftableLoad],
+        baseline_override: Option<&crate::entities::device_session::BaselineOverride>,
+        pv_forecast_override: Option<f64>,
+    ) -> MilpInputs {
         super::build_milp_inputs(
             ctxs,
             sim,
@@ -545,6 +559,7 @@
             now,
             shiftable_loads,
             baseline_override,
+            pv_forecast_override,
         )
     }
 
@@ -578,6 +593,7 @@
             shiftable_loads,
             baseline_override,
             objective_override,
+            None,
         )
     }
 

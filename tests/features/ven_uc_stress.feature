@@ -4,8 +4,7 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
 
   Background:
     Given the VEN is running with profile "test"
-
-  # --- UC-11: Planning with No Consumption Packets ---
+    And I set pv plan forecast to 0.0 kW
   # After cancelling all user-created packets (the profile EV packet may still exist),
   # the planner still produces a valid plan covering base load and battery arbitrage.
   # This simulates a consumption-only site where no scheduled tasks are pending.

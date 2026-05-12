@@ -65,6 +65,7 @@ pub(crate) fn spawn_planning(
             // clone with offset=0. Reading first guarantees we always capture the pending
             // value before the tick has a chance to clear it.
             let inject_snap = state.inject_state().await;
+            let pv_forecast_override = inject_snap.pv_plan_kw;
             // Clone SimState snapshot so the Mutex is released immediately.
             // MILP solving takes 18-60s on Pi4 ARM64; holding the lock would
             // block sim ticks and /capability reads for the entire duration.
@@ -181,6 +182,7 @@ pub(crate) fn spawn_planning(
                     &shift_loads,
                     bl_override.as_ref(),
                     Some(obj),
+                    pv_forecast_override,
                 )
             })
             .await

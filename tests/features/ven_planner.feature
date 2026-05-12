@@ -5,8 +5,7 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
 
   Background:
     Given the VEN is running with profile "test"
-
-  # --- EV session drives planning ---
+    And I set pv plan forecast to 0.0 kW
 
   Scenario: EV session appears in /ev-session after POST
     When I POST an EV session with target_soc 0.90 and departure in 12.0 hours
@@ -65,3 +64,14 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
     And I create a cheap 4-hour PRICE event for the saved program
     When I wait for the VEN /plan to have envelopes
     Then the plan.envelopes is a non-empty array
+
+  # --- PV forecast override (022-deterministic-test-env) ---
+
+  @wip
+  Scenario: PV forecast override does not trigger a replan
+    # @wip: step implementations pending (022-deterministic-test-env phase 4).
+    # Setting pv_plan_kw must NOT send a PlanTrigger::AssetStateChange; the
+    # planning loop must remain idle for at least 2 seconds after the inject.
+    Given the system is idle
+    When I set pv plan forecast to 0.0 kW
+    Then no plan cycle is triggered within 2 seconds

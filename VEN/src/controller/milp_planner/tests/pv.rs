@@ -145,3 +145,90 @@ use super::*;
         }
     }
 
+    // ── pv_forecast_override (022-deterministic-test-env) ─────────────────────
+
+    #[test]
+    fn pv_forecast_override_zeros_all_slots() {
+        // US1-AC-2: build_milp_inputs with pv_forecast_override=Some(0.0) must
+        // produce p_pv_kw[t]=0 for every slot regardless of time-of-day or
+        // irradiance_offset. Called twice → outputs are identical (deterministic).
+        let now = fixed_now(); // 06:00 → non-zero natural irradiance during day
+        let profile = make_profile(); // rated_kw=5.0, plan_horizon_h=2, plan_step_s=300
+        let mut sim = make_snap_from_profile(&profile);
+        set_pv_inject(&mut sim, 0.5, 0.1); // non-zero offset to ensure override wins
+
+        let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
+
+        let inp1 = build_milp_inputs_with_override(
+            &ctxs,
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            &[],
+            None,
+            Some(0.0),
+        );
+
+        // All horizon slots must be 0.0
+        for (t, &pv) in inp1.p_pv_kw.iter().enumerate() {
+            assert!(
+                pv.abs() < 1e-9,
+                "slot {t}: expected p_pv_kw=0.0 with override=Some(0.0), got {pv:.6}"
+            );
+        }
+
+        // Second call with same inputs must produce identical p_pv values (US1-AC-2)
+        let inp2 = build_milp_inputs_with_override(
+            &ctxs,
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            now,
+            &[],
+            None,
+            Some(0.0),
+        );
+        assert_eq!(
+            inp1.n, inp2.n,
+            "two identical calls must produce same n"
+        );
+        for t in 0..inp1.n {
+            assert!(
+                (inp1.p_pv_kw[t] - inp2.p_pv_kw[t]).abs() < 1e-9,
+                "slot {t}: second call differs: inp1={:.6} inp2={:.6}",
+                inp1.p_pv_kw[t],
+                inp2.p_pv_kw[t]
+            );
+        }
+    }
+
+    #[test]
+    fn pv_forecast_override_none_is_non_zero_during_day() {
+        // Sanity: without override, p_pv at noon must be non-zero (natural irradiance).
+        use chrono::TimeZone;
+        let noon = Utc.with_ymd_and_hms(2026, 4, 11, 12, 0, 0).unwrap();
+        let profile = make_profile(); // rated_kw=5.0
+        let sim = make_snap_from_profile(&profile);
+        let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
+
+        let inp = build_milp_inputs_with_override(
+            &ctxs,
+            &sim,
+            &TariffTimeSeries::from_snapshots(&[]),
+            &no_capacity(),
+            &profile,
+            noon,
+            &[],
+            None,
+            None,
+        );
+        assert!(
+            inp.p_pv_kw[0] > 0.0,
+            "at noon with override=None, p_pv_kw[0] must be > 0 (got {:.4})",
+            inp.p_pv_kw[0]
+        );
+    }
+

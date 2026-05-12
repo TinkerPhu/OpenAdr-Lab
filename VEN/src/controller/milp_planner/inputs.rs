@@ -41,6 +41,7 @@ pub(crate) fn build_milp_inputs(
     now: DateTime<Utc>,
     shiftable_loads: &[ShiftableLoad],
     baseline_override: Option<&BaselineOverride>,
+    pv_forecast_override: Option<f64>,
 ) -> MilpInputs {
     let step_s = planner.plan_step_s;
     let n = ((planner.plan_horizon_h as f64 * 3600.0) / step_s as f64) as usize;
@@ -80,7 +81,11 @@ pub(crate) fn build_milp_inputs(
         // Use live PvInverter snapshot when available so that irradiance_offset (irradiance
         // slider) and pv_alpha (blend-back speed slider) both project into the
         // forecast. Falls back to the static sin model if no "pv" asset exists.
-        let pv_kw = if let Some(pv_snap) = assets.assets.get("pv") {
+        // pv_forecast_override pins all horizon slots to a fixed kW,
+        // making plans deterministic regardless of time-of-day.
+        let pv_kw = if let Some(forced_kw) = pv_forecast_override {
+            forced_kw.max(0.0)
+        } else if let Some(pv_snap) = assets.assets.get("pv") {
             let natural = pv_natural_irradiance(slot_t);
             let irradiance_offset = pv_snap.val("irradiance_offset").unwrap_or(0.0);
             let pv_alpha = pv_snap.val("pv_alpha").unwrap_or(0.1);

@@ -18,3 +18,5 @@
 
 - Review planning for missing details, duplication, contradictions, concisivness
 
+- Ensure tests are deterministically reproducable. Any daytime dependent behaviour needs to be time adjustable.
+
