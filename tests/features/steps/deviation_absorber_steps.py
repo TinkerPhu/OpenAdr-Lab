@@ -1,6 +1,6 @@
 """Step implementations for deviation absorber BDD scenarios."""
 
-from behave import given, when, then
+from behave import given, when, then, step
 import time
 from datetime import datetime, timezone
 from features.helpers.api_client import ven_get, ven_post
@@ -619,7 +619,7 @@ def step_no_device_deviation(context, ticks):
     context.no_device_deviation_fired = True
 
 
-@then("no DeviceDeviation trigger fires within 120 ticks")
+@step("no DeviceDeviation trigger fires within 120 ticks")
 def step_no_device_deviation_120(context):
     step_no_device_deviation(context, 120)
 
@@ -655,7 +655,7 @@ def step_no_replan_chattering(context):
     assert count <= 1, f"Replanner triggered {count} times (chattering)"
 
 
-@then("the MILP planner does not execute a replan")
+@step("the MILP planner does not execute a replan")
 def step_no_planner_replan(context):
     step_no_device_deviation(context, 200)
     context.no_replan_for_transient = True
