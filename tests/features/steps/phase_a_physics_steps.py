@@ -5,7 +5,7 @@ and UserOverrides paths (pv_irradiance, ev_plugged).
 """
 
 import time
-from behave import given, when, then
+from behave import given, when, then, step
 from features.helpers.api_client import ven_post, ven_get
 from features.helpers.wait import poll_until
 
@@ -78,7 +78,7 @@ def step_given_inject_pv_irradiance(context, irradiance):
     r.raise_for_status()
 
 
-@given("I set pv plan forecast to {kw:f} kW")
+@step("I set pv plan forecast to {kw:f} kW")
 def step_given_set_pv_plan_forecast(context, kw):
     """Set the MILP planning-horizon PV forecast to a fixed value via POST /sim/inject.
     This overrides all 24h forecast slots; does NOT trigger a replan.
