@@ -19,6 +19,8 @@ use entities::asset::PlanTrigger;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use planner_events::{PlannerEvent, PlannerEventTx};
 use profile::Profile;
+use std::collections::HashMap;
+use crate::assets::ControlDescriptor;
 use simulator::SimState;
 
 use crate::assets::{
@@ -41,7 +43,13 @@ pub struct AppCtx {
     pub vtn: VtnClient,
     pub metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
     pub trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
+    /// Retained for use by the sim_tick task. Removal from AppCtx is deferred
+    /// to Phase 4/5 of the VEN backend refactoring.
     pub profile: Arc<Profile>,
+    /// Pre-computed simulator schema (asset → control descriptors).
+    /// Built once at startup from `profile`; route handlers access it without
+    /// touching the raw `Profile` type or acquiring any lock.
+    pub sim_schema: Arc<HashMap<String, Vec<ControlDescriptor>>>,
     pub sim: Arc<Mutex<SimState>>,
     pub active_objective: Arc<RwLock<PlannerObjective>>,
     pub planner_event_tx: PlannerEventTx,
@@ -275,12 +283,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build HTTP app and serve
+    let sim_schema = Arc::new(simulator::schema_from_profile(&profile));
     let ctx = AppCtx {
         state,
         vtn,
         metrics_handle: Arc::new(metrics_handle),
         trigger_tx,
         profile,
+        sim_schema,
         sim: sim_state.clone(),
         active_objective,
         planner_event_tx,
