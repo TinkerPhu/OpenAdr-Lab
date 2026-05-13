@@ -1,0 +1,59 @@
+{
+  "base_load": [
+    {
+      "key": "base_load_kw",
+      "label": "Base Load Override",
+      "kind": "slider",
+      "min": 0.0,
+      "max": 6.0,
+      "unit": "kW"
+    },
+    {
+      "key": "base_load_alpha",
+      "label": "Blend-back Speed",
+      "kind": "slider",
+      "min": 0.01,
+      "max": 1.0,
+      "unit": ""
+    }
+  ],
+  "battery": [],
+  "ev": [
+    {
+      "key": "ev_plugged",
+      "label": "Plugged In",
+      "kind": "switch",
+      "min": null,
+      "max": null,
+      "unit": ""
+    },
+    {
+      "key": "ev_soc_target",
+      "label": "Charge Target",
+      "kind": "slider",
+      "min": 0.1,
+      "max": 1.0,
+      "unit": "%",
+      "display_scale": 100.0
+    }
+  ],
+  "pv": [
+    {
+      "key": "pv_irradiance",
+      "label": "Irradiance Override",
+      "kind": "slider",
+      "min": 0.0,
+      "max": 1.0,
+      "unit": "%",
+      "display_scale": 100.0
+    },
+    {
+      "key": "pv_irradiance_alpha",
+      "label": "Blend-back Speed",
+      "kind": "slider",
+      "min": 0.01,
+      "max": 1.0,
+      "unit": ""
+    }
+  ]
+}
