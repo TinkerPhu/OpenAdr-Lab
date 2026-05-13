@@ -49,7 +49,7 @@ Feature: Multi-asset deviation absorber (Tier 1 real-time control)
     And I wait for the plan to include EV charging
     When I create a positive deviation of 4.0 kW via base load injection
     And I wait for the EV setpoint to change from baseline
-    And the EV charge setpoint is more negative than baseline
+    Then the EV charge setpoint is more negative than baseline
     And no DeviceDeviation trigger has fired within 30 ticks
 
   @wip
