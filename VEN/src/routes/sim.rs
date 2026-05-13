@@ -111,11 +111,12 @@ pub struct BatteryConfigBody {
 
 /// GET /sim/schema — returns control descriptors for all configured assets.
 ///
-/// Reads from profile config only — does NOT acquire the sim mutex, so it
-/// remains responsive even while the MILP planner is running (10-24s on Pi4).
+/// Reads the pre-computed schema from `AppCtx.sim_schema`. Does NOT acquire
+/// the sim mutex, so it remains responsive even while the MILP planner is
+/// running (10-24s on Pi4).
 pub async fn get_sim_schema(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    debug!("GET /sim/schema: building schema from profile (no sim lock)");
-    let schema = crate::simulator::schema_from_profile(&ctx.profile);
+    debug!("GET /sim/schema: returning pre-computed schema");
+    let schema = (*ctx.sim_schema).clone();
     Json(schema)
 }
 
