@@ -36,11 +36,15 @@ Feature: Multi-asset deviation absorber (Tier 1 real-time control)
     Then the battery setpoint moved negative by at least 1.5 kW
     And no DeviceDeviation trigger has fired within 30 ticks
 
+  @wip
   Scenario: EV absorbs residual when battery at floor
-    # pv_plan_kw=0 (from Background) causes MILP to charge the battery at min_soc
-    # from grid rather than holding it at zero. Battery setpoint is therefore not
-    # near zero, so we skip the battery-power assertion and focus on the key
-    # observable: the EV absorbs the residual the absorber cannot handle via battery.
+    # @wip: pv_plan_kw=0 in Background causes the MILP to plan battery charging
+    # from grid even at min_soc (no PV recharge expected → charge now is optimal).
+    # This gives the absorber ~7.4 kW of battery headroom (+2.37 kW baseline →
+    # -5.0 kW max discharge), so the entire 4 kW deviation is absorbed by the
+    # battery alone — the EV is never needed. The "battery at floor" premise only
+    # holds with a battery_plan_kw=0 override to neutralise the MILP charging bias.
+    # Re-enable when a battery_plan_kw inject override is implemented.
     Given I DELETE the EV session
     And I POST an EV session with target_soc 0.80 and departure in 6.0 hours
     And the battery SoC is reset to min_soc
