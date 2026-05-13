@@ -22,7 +22,7 @@
 - [x] T000 [BDD-First / US3] Write a `@wip` stub scenario in `tests/features/ven_planner.feature` BEFORE writing any Phase 1 Rust code — satisfies Constitution Prin II for US3: `Scenario: PV forecast override does not trigger a replan` with step skeleton `When I set pv plan forecast to 0.0 kW` / `Then no plan cycle is triggered within 2 seconds`. Tag it `@wip`. Step definitions need not exist yet. Commit the stub so the red test pre-dates all implementation (T019+T021 will make it green).
 - [x] T001 Add `pub pv_plan_kw: Option<f64>` to `SimInjectState` struct and `pv_plan_kw: None` to its `Default` impl in `VEN/src/state.rs`
 - [x] T002 [P] Add `pub pv_plan_kw: Option<serde_json::Value>` with `#[serde(default)]` to `PostSimInjectBody` in `VEN/src/routes/sim.rs`; add `merge_f64!(pv_plan_kw)` in `merge_inject`; do NOT add `pv_plan_kw` to the `should_replan` guard *(note: [P] means write concurrently with T001; compile only after both T001+T002 edits are applied — T003 performs the build check)*
-- [ ] T003 Run `SQLX_OFFLINE=true cargo build` from `VEN/` to confirm both struct changes compile cleanly
+- [x] T003 Run `SQLX_OFFLINE=true cargo build` from `VEN/` to confirm both struct changes compile cleanly
 
 **Checkpoint**: `SimInjectState` carries `pv_plan_kw`; `POST /sim/inject` accepts and merges it; setting `pv_plan_kw` does not trigger a replan. All downstream work can now proceed.
 
@@ -45,8 +45,8 @@
 ### Verification for User Story 1
 
 - [x] T026 [US1] Write a cargo unit test for `build_milp_inputs` (add to its `#[cfg(test)]` block in `VEN/src/controller/milp_planner/inputs.rs` or a neighbouring test module): **(a)** call with `pv_forecast_override=Some(0.0)`, `n=24` — assert all 24 `p_pv` slots equal `0.0`; **(b)** call again immediately — assert output is bitwise-identical (covers **US1-AC-2**: race-condition second solve produces identical plan); **(c)** call with `pv_forecast_override=None` — assert slots are non-zero (natural model active). Depends on T005 (function signature must exist first).
-- [ ] T009 [US1] Run `SQLX_OFFLINE=true cargo test --workspace` from `VEN/` — expect zero failures; T026 unit test is included in this run
-- [ ] T010 [US1] On Pi4-Server: run `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner features/deviation_absorber.feature` — confirm the previously-`@wip` scenario now passes and all other deviation-absorber scenarios remain passing
+- [x] T009 [US1] Run `SQLX_OFFLINE=true cargo test --workspace` from `VEN/` — expect zero failures; T026 unit test is included in this run
+- [x] T010 [US1] On Pi4-Server: run `docker compose -f tests/docker-compose.test.yml run --build --rm test-runner features/deviation_absorber.feature` — confirm the previously-`@wip` scenario now passes and all other deviation-absorber scenarios remain passing
 
 **Checkpoint**: `pv_plan_kw` override active end-to-end; `deviation_absorber.feature:149` passes at any time of day; cargo tests clean.
 
@@ -67,7 +67,7 @@
 - [x] T015 [P] [US2] Audit `tests/features/ven_uc_stress.feature` — UC-12c uses per-scenario pv_irradiance override; added `And I set pv plan forecast to 0.0 kW` to Background for all other scenarios
 - [x] T016 [P] [US2] Audit `tests/features/asset_forecast.feature` — tests forecast API structure only; no battery dispatch headroom assertions; pv_plan_kw not needed
 - [x] T017 [P] [US2] Audit `tests/features/ven_timeline.feature` — tests timeline API structure only; no battery dispatch headroom assertions; pv_plan_kw not needed
-- [ ] T018 [US2] On Pi4-Server: run the full BDD suite (`bash run_all_tests.sh --e2e` or equivalent) with `--build` flag; confirm zero regressions across all previously-passing scenarios
+- [x] T018 [US2] On Pi4-Server: run the full BDD suite (`bash run_all_tests.sh --e2e` or equivalent) with `--build` flag; confirm zero regressions across all previously-passing scenarios
 
 **Checkpoint**: All seven MILP-backed BDD feature files are audited; `pv_plan_kw` applied wherever battery dispatch headroom is asserted; full suite green.
 
@@ -81,9 +81,9 @@
 
 ### Implementation for User Story 3
 
-- [ ] T019 [US3] Remove the `@wip` tag from the stub scenario added in T000; complete the scenario body in `tests/features/ven_planner.feature` covering US3 AC-1: `Given the system is idle, When I set pv plan forecast to 0.0 kW, Then no plan cycle is triggered within 2 seconds`; add a corresponding step definition `@then("no plan cycle is triggered within {sec:d} seconds")` in `tests/features/steps/phase_a_physics_steps.py` that calls `GET /plan` (or equivalent plan-status endpoint) via `ctx.ven_api` every 200 ms for `sec` seconds and asserts the plan's solve timestamp does not advance — confirming no `planner loop: starting plan cycle` event fired (note: asserting `AssetStateChange` absence would be incorrect; the replan indicator is the log string at `tasks/planning.rs:52` which correlates with a plan-timestamp change) *(US3 AC-2 — "tariff event fires → solve uses override" — is covered implicitly by Phase 3 suite-wide adoption)*
-- [ ] T020 [US3] Code review: open `VEN/src/routes/sim.rs` and confirm `pv_plan_kw` is absent from the `should_replan` boolean expression (lines around `let should_replan = body.pv_irradiance.is_some() || ...`); add a clarifying inline comment in `merge_inject` if the no-replan exclusion is not already evident
-- [ ] T021 [US3] On Pi4-Server: run the new US3 BDD scenario (T019) with `--build` flag — confirm it passes; cross-check by running with `pv_irradiance` inject instead (which triggers a plan cycle, confirming the contrast)
+- [x] T019 [US3] Remove the `@wip` tag from the stub scenario added in T000; complete the scenario body in `tests/features/ven_planner.feature` covering US3 AC-1: `Given the system is idle, When I set pv plan forecast to 0.0 kW, Then no plan cycle is triggered within 2 seconds`; add a corresponding step definition `@then("no plan cycle is triggered within {sec:d} seconds")` in `tests/features/steps/phase_a_physics_steps.py` that calls `GET /plan` (or equivalent plan-status endpoint) via `ctx.ven_api` every 200 ms for `sec` seconds and asserts the plan's solve timestamp does not advance — confirming no `planner loop: starting plan cycle` event fired (note: asserting `AssetStateChange` absence would be incorrect; the replan indicator is the log string at `tasks/planning.rs:52` which correlates with a plan-timestamp change) *(US3 AC-2 — "tariff event fires → solve uses override" — is covered implicitly by Phase 3 suite-wide adoption)*
+- [x] T020 [US3] Code review: open `VEN/src/routes/sim.rs` and confirm `pv_plan_kw` is absent from the `should_replan` boolean expression (lines around `let should_replan = body.pv_irradiance.is_some() || ...`); add a clarifying inline comment in `merge_inject` if the no-replan exclusion is not already evident
+- [x] T021 [US3] On Pi4-Server: run the new US3 BDD scenario (T019) with `--build` flag — confirm it passes; cross-check by running with `pv_irradiance` inject instead (which triggers a plan cycle, confirming the contrast)
 
 **Checkpoint**: US3 BDD scenario green on Pi4; code-review confirmation documented; no-replan contract verifiable and tested via BDD.
 
@@ -93,9 +93,9 @@
 
 **Purpose**: Final validation, documentation, and commit hygiene.
 
-- [ ] T022 [P] Run the full quickstart.md acceptance checklist (`specs/022-deterministic-test-env/quickstart.md`) — all 7 verification steps pass; quickstart Step 5 (`cargo test`) can be skipped if T009 already passed cleanly in the same build
-- [ ] T023 [P] Verify architecture boundary: **(a)** `grep -r "pv_plan_kw" VEN/src/` finds exactly 3 files (`state.rs`, `routes/sim.rs`, `tasks/planning.rs`); **(b)** `grep -r "pv_plan_kw" VEN/src/entities/ VEN/src/controller/` returns empty (domain ring stays clean — `controller/milp_planner/` uses the parameter name `pv_forecast_override`, not `pv_plan_kw`); **(c)** `wc -l VEN/src/tasks/planning.rs` → assert < 200 (Constitution Prin VI tasks-file line limit)
-- [ ] T024 Update `docs/history/project_journal.md` AND `docs/reference/KEY_LEARNINGS.md` with implementation notes (Constitution Development Workflow §1 and §2): what was changed, why, key learnings — e.g., inject snapshot read-before-`spawn_blocking` in `planning.rs`, clamping negative values, `pv_forecast_override` rename at the domain boundary, and the `AssetStateChange`-vs-plan-timestamp distinction for US3 step implementation
+- [x] T022 [P] Run the full quickstart.md acceptance checklist (`specs/022-deterministic-test-env/quickstart.md`) — all 7 verification steps pass; quickstart Step 5 (`cargo test`) can be skipped if T009 already passed cleanly in the same build
+- [x] T023 [P] Verify architecture boundary: **(a)** `grep -r "pv_plan_kw" VEN/src/` finds exactly 3 files (`state.rs`, `routes/sim.rs`, `tasks/planning.rs`); **(b)** `grep -r "pv_plan_kw" VEN/src/entities/ VEN/src/controller/` returns empty (domain ring stays clean — `controller/milp_planner/` uses the parameter name `pv_forecast_override`, not `pv_plan_kw`); **(c)** `wc -l VEN/src/tasks/planning.rs` → assert < 200 (Constitution Prin VI tasks-file line limit)
+- [x] T024 Update `docs/history/project_journal.md` AND `docs/reference/KEY_LEARNINGS.md` with implementation notes (Constitution Development Workflow §1 and §2): what was changed, why, key learnings — e.g., inject snapshot read-before-`spawn_blocking` in `planning.rs`, clamping negative values, `pv_forecast_override` rename at the domain boundary, and the `AssetStateChange`-vs-plan-timestamp distinction for US3 step implementation
 - [ ] T025 Commit all changes on branch `022-deterministic-test-env` with message: `feat(ven): add pv_plan_kw planning forecast override for deterministic BDD tests`
 
 ---
