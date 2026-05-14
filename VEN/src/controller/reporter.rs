@@ -10,6 +10,7 @@ use tracing::debug;
 use crate::assets::HistoryPoint;
 use crate::common::{parse_iso8601_duration_secs, Aggregation, Interpolation, TimeSeries};
 use crate::controller::trace::ControllerEvent;
+use crate::controller::vtn_port::OadrEvent;
 use crate::entities::capacity::OadrReportObligation;
 use crate::entities::plan::SiteFlexibilityEnvelope;
 use crate::simulator::SimState;
@@ -37,34 +38,26 @@ fn soc_from_point(p: &HistoryPoint) -> Option<f64> {
 // ---------------------------------------------------------------------------
 
 /// Returns true if `event` has at least one interval that is currently active.
-///
-/// An interval is active when:
-///   - It has no `intervalPeriod` field (treat as always-active), OR
-///   - Its `intervalPeriod.start` is absent (treat as always-active), OR
-///   - `start <= now < start + duration`
-fn event_is_active(event: &Value, now: DateTime<Utc>) -> bool {
-    let intervals = match event.get("intervals").and_then(|v| v.as_array()) {
-        Some(arr) if !arr.is_empty() => arr,
-        _ => return false,
-    };
-
-    intervals.iter().any(|interval| {
-        let ip = match interval.get("intervalPeriod") {
+fn event_is_active(event: &OadrEvent, now: DateTime<Utc>) -> bool {
+    if event.intervals.is_empty() {
+        return false;
+    }
+    event.intervals.iter().any(|interval| {
+        let ip = match interval.intervalPeriod.as_ref() {
             Some(ip) => ip,
-            None => return true, // no intervalPeriod = always-active
+            None => return true,
         };
-        let start_str = match ip.get("start").and_then(|v| v.as_str()) {
+        let start_str = match ip.start.as_deref() {
             Some(s) => s,
-            None => return true, // no start = always-active
+            None => return true,
         };
         let interval_start: DateTime<Utc> = match start_str.parse() {
             Ok(dt) => dt,
-            Err(_) => return true, // unparseable = treat as active
+            Err(_) => return true,
         };
-        // If no duration, use a very long window (1 year)
         let duration_secs = ip
-            .get("duration")
-            .and_then(|v| v.as_str())
+            .duration
+            .as_deref()
             .map(parse_iso8601_duration_secs)
             .unwrap_or(365 * 24 * 3_600);
         let interval_end = interval_start + Duration::seconds(duration_secs);
@@ -109,9 +102,9 @@ fn latest_net_export_kw(sim: &SimState) -> f64 {
 ///   - STORAGE_CHARGE_LEVEL (EV SoC %) if EV history is available.
 ///
 /// Returns None if the event has no id or programID.
-pub fn build_measurement_report(event: &Value, sim: &SimState, ven_name: &str) -> Option<Value> {
-    let event_id = event.get("id").and_then(|v| v.as_str())?;
-    let program_id = event.get("programID").and_then(|v| v.as_str())?;
+pub fn build_measurement_report(event: &OadrEvent, sim: &SimState, ven_name: &str) -> Option<Value> {
+    let event_id = &event.id;
+    let program_id = &event.programID;
 
     let report_name = format!("auto-{}-{}", ven_name, event_id);
     let resource_name = format!("{}-meter", ven_name);
@@ -121,14 +114,10 @@ pub fn build_measurement_report(event: &Value, sim: &SimState, ven_name: &str) -
 
     // Extract the primary payload type from the event's first interval
     let payload_type = event
-        .get("intervals")
-        .and_then(|v| v.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|iv| iv.get("payloads"))
-        .and_then(|v| v.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|p| p.get("type"))
-        .and_then(|v| v.as_str())
+        .intervals
+        .first()
+        .and_then(|iv| iv.payloads.first())
+        .map(|p| p.r#type.as_str())
         .unwrap_or("SIMPLE");
 
     let (report_type, report_value) = match payload_type {
@@ -179,7 +168,7 @@ pub fn build_measurement_report(event: &Value, sim: &SimState, ven_name: &str) -
 
 /// Build measurement reports for all currently active events (timer-driven entry point).
 pub fn build_measurement_reports_for_active_events(
-    events: &[Value],
+    events: &[OadrEvent],
     sim: &SimState,
     ven_name: &str,
     now: DateTime<Utc>,
@@ -192,22 +181,21 @@ pub fn build_measurement_reports_for_active_events(
             continue;
         }
         // Skip events with reportDescriptors — those are handled by the obligation loop
-        let descriptors = event.get("reportDescriptors").and_then(|v| v.as_array());
-        let has_descriptors = descriptors.map_or(false, |arr| !arr.is_empty());
+        let has_descriptors = event
+            .reportDescriptors
+            .as_ref()
+            .map_or(false, |arr| !arr.is_empty());
         if has_descriptors {
-            let event_id = event.get("id").and_then(|v| v.as_str()).unwrap_or("?");
             debug!(
-                event_id,
+                event_id = %event.id,
                 "timer-driven: skipping event with reportDescriptors"
             );
             continue;
         }
-        if let Some(event_id) = event.get("id").and_then(|v| v.as_str()) {
-            if seen.insert(event_id.to_string()) {
-                debug!(event_id, "timer-driven: building single-interval report");
-                if let Some(report) = build_measurement_report(event, sim, ven_name) {
-                    reports.push(report);
-                }
+        if seen.insert(event.id.clone()) {
+            debug!(event_id = %event.id, "timer-driven: building single-interval report");
+            if let Some(report) = build_measurement_report(event, sim, ven_name) {
+                reports.push(report);
             }
         }
     }

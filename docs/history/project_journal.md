@@ -3664,3 +3664,42 @@ when on Pi4 the BDD suite runs.
 | New unit tests compile and pass (SQLX_OFFLINE) | ⏳ Pi4 pending |
 | BDD deviation_absorber.feature green | ⏳ Pi4 pending |
 | Full BDD suite green | ⏳ Pi4 pending |
+
+
+---
+
+## 024 - Complete VEN Architecture Gaps (Phase 5 + 7 + tick.rs fix)
+
+**Date**: 2026-05-14
+**Branch**: `024-arch-gaps-complete`
+**Spec**: `specs/024-arch-gaps-complete/`
+
+### What was done
+
+Closed three remaining gaps in the 7-phase VEN architecture refactoring.
+
+**Gap 3 - tick.rs line count**: Extracted `build_absorber_params(profile)` into `tasks/sim_tick/helpers.rs`. tick.rs: 208 -> 193 lines.
+
+**Gap 2 - Typed VTN client (Phase 7)**: Defined VtnPort trait + OadrEvent/OadrProgram/OadrReport in `controller/vtn_port.rs`. Added `async_trait = "0.1"` (needed for dyn VtnPort). Updated VtnClient to implement VtnPort. Cascaded typed access through openadr_interface.rs, poll_events.rs, poll_programs.rs, poll_reports.rs, reporter.rs, state.rs (PollingState). Created MockVtn in `services/test_support/mock_vtn.rs`.
+
+**Gap 1 - Application services layer (Phase 5)**: Created four service modules: planning.rs (evaluate_acceptance_gate pure function + PlanningService), user_request.rs (UserRequestService), hems.rs (EvSessionService + HvacService), obligation.rs (ObligationService). Tasks and routes delegate to services. 19 new unit tests all pass.
+
+### Key learnings
+
+1. Plan struct needs explicit summary fields in test JSON (PlanSummary fields have no #[serde(default)])
+2. active_objective lives in AppCtx not AppState - must be passed explicitly to service methods
+3. CRLF/LF fixture mismatch: tests/fixtures/schema_snapshot.json was saved on Windows. Fix: convert to LF.
+4. PV capability test had saturation case bug: assertion did not guard against natural+offset >= 1.0 clipping. Fixed the if-condition.
+5. frequency in OadrReportDescriptor is Option<i64> (seconds as integer), not Option<String>
+6. VtnPort::upsert_report keeps serde_json::Value for the body because reporter.rs builds report bodies dynamically as JSON literals
+7. Test failures should be investigated and fixed regardless of origin - see updated CLAUDE.md policy
+
+### Invariants after 024
+
+```
+use crate::profile in domain rings -> EMPTY
+A_BAT/A_EV/A_HTR in milp_planner -> EMPTY
+public serde_json::Value in vtn.rs -> none (write-path methods are pub(crate))
+tick.rs line count -> 193 (< 200)
+cargo test -> 387 passed, 0 failed
+```

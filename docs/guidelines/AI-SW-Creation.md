@@ -1,3 +1,7 @@
+- highest goal - make it right in the first attempt - correction is expensive. therefore planning is everything. Remember - Rules exist in our head, not in AI Agents. Write everything down as instructions.
+
+- make basic settings: pre-existing is not an excuse to ignore, create key-learnings, know the infrastructure (wsl, servers, tools), install speckit, maybe superpowers
+
 - Start with Requirements and UserStories
 
 - Research Technology and Toppology

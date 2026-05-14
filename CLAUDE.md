@@ -28,6 +28,7 @@ Auto-generated from all feature plans. Last updated: 2026-03-15
 - N/A — no persistence schema changes; `pv_plan_kw` is in-memory only (022-deterministic-test-env)
 - Rust stable 2021 + axum, tokio, serde_json (no new deps) (023-remove-profile-routes)
 - N/A — pre-computed value lives in memory; no persistence changes (023-remove-profile-routes)
+- Rust stable 2021 edition + axum, tokio, serde_json, async_trait (new — required for `dyn VtnPort`) (024-arch-gaps-complete)
 
 - [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION] (004-ven-controller-reform)
 
@@ -48,9 +49,9 @@ cd src; pytest; ruff check .
 [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]: Follow standard conventions
 
 ## Recent Changes
+- 024-arch-gaps-complete: Added Rust stable 2021 edition + axum, tokio, serde_json, async_trait (new — required for `dyn VtnPort`)
 - 023-remove-profile-routes: Added Rust stable 2021 + axum, tokio, serde_json (no new deps)
 - 022-deterministic-test-env: Added Rust stable 2021 edition + tokio (async runtime), axum (HTTP), serde/serde_json (inject body), good_lp / HiGHS (MILP solver — unchanged)
-- 021-decouple-profile-domain: Added Rust stable 2021 edition + tokio (async runtime), axum (HTTP), serde/serde_yaml (infra ring only after Phase 4), good_lp / HiGHS (MILP solver — unchanged)
 
 
 <!-- MANUAL ADDITIONS START -->

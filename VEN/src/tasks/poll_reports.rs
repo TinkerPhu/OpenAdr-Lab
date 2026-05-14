@@ -2,6 +2,7 @@
 
 use metrics::counter;
 use tracing::{info, error};
+use crate::controller::VtnPort;
 use crate::state::AppState;
 use crate::vtn::VtnClient;
 
@@ -15,7 +16,8 @@ pub(crate) fn spawn_report_poll(
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(secs));
         loop {
             interval.tick().await;
-            match vtn.fetch_reports().await {
+            let vtn_port: &dyn VtnPort = &vtn;
+            match vtn_port.fetch_reports().await {
                 Ok(reports) => {
                     counter!("poll_success_total", "resource" => "reports").increment(1);
                     info!(resource = "reports", count = reports.len(), "poll success");

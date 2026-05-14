@@ -3,6 +3,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::common::parse_iso8601_duration_secs;
+use crate::controller::vtn_port::OadrEvent;
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 
@@ -18,26 +19,24 @@ use crate::entities::tariff_snapshot::TariffSnapshot;
 /// span of all intervals, the interval set is repeated (offset by one cycle each time)
 /// to cover [now − 1 cycle … now + 3 days]. This implements the OpenADR 3 spec's
 /// "persistent daily prices" pattern (`event.intervalPeriod.duration = "P9999Y"`).
-pub fn parse_rate_snapshots(events: &[Value], now: DateTime<Utc>) -> Vec<TariffSnapshot> {
+pub fn parse_rate_snapshots(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<TariffSnapshot> {
     let mut map: std::collections::BTreeMap<(i64, i64), TariffSnapshot> =
         std::collections::BTreeMap::new();
 
     for event in events {
-        let intervals = match event.get("intervals").and_then(|v| v.as_array()) {
-            Some(arr) => arr,
-            None => continue,
-        };
+        if event.intervals.is_empty() {
+            continue;
+        }
 
         // ── Collect base intervals ────────────────────────────────────────────
-        // Each entry: (start, duration_secs, payloads: Vec<(type, value)>)
         let mut base: Vec<(DateTime<Utc>, i64, Vec<(String, f64)>)> = Vec::new();
 
-        for interval in intervals {
-            let interval_period = match interval.get("intervalPeriod") {
+        for interval in &event.intervals {
+            let ip = match interval.intervalPeriod.as_ref() {
                 Some(ip) => ip,
                 None => continue,
             };
-            let start_str = match interval_period.get("start").and_then(|v| v.as_str()) {
+            let start_str = match ip.start.as_deref() {
                 Some(s) => s,
                 None => continue,
             };
@@ -46,25 +45,16 @@ pub fn parse_rate_snapshots(events: &[Value], now: DateTime<Utc>) -> Vec<TariffS
                 Err(_) => continue,
             };
             let duration_secs = parse_iso8601_duration_secs(
-                interval_period
-                    .get("duration")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("PT1H"),
+                ip.duration.as_deref().unwrap_or("PT1H"),
             );
 
             let mut payloads: Vec<(String, f64)> = Vec::new();
-            if let Some(ps) = interval.get("payloads").and_then(|v| v.as_array()) {
-                for p in ps {
-                    let t = p.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                    let v = p
-                        .get("values")
-                        .and_then(|v| v.as_array())
-                        .and_then(|arr| arr.first())
-                        .and_then(|v| v.as_f64());
-                    if matches!(t, "PRICE" | "EXPORT_PRICE" | "GHG") {
-                        if let Some(val) = v {
-                            payloads.push((t.to_string(), val));
-                        }
+            for p in &interval.payloads {
+                let t = p.r#type.as_str();
+                let v = p.values.first().and_then(|v| v.as_f64());
+                if matches!(t, "PRICE" | "EXPORT_PRICE" | "GHG") {
+                    if let Some(val) = v {
+                        payloads.push((t.to_string(), val));
                     }
                 }
             }
@@ -86,10 +76,10 @@ pub fn parse_rate_snapshots(events: &[Value], now: DateTime<Utc>) -> Vec<TariffS
         let cycle_secs = (last_end - first_start).num_seconds();
 
         let event_dur_secs = event
-            .get("intervalPeriod")
-            .and_then(|ip| ip.get("duration"))
-            .and_then(|v| v.as_str())
-            .map(|s| parse_iso8601_duration_secs(s))
+            .intervalPeriod
+            .as_ref()
+            .and_then(|ip| ip.duration.as_deref())
+            .map(parse_iso8601_duration_secs)
             .unwrap_or(cycle_secs);
 
         let offsets: Vec<i64> = if cycle_secs > 0 && event_dur_secs > cycle_secs {
@@ -160,7 +150,7 @@ pub fn parse_rate_snapshots(events: &[Value], now: DateTime<Utc>) -> Vec<TariffS
 /// Parse capacity limits from the CURRENT set of active events.
 /// Computed from scratch on each call — reflects the live VTN state.
 /// Strictest limit wins (lowest value when multiple events specify same field).
-pub fn parse_capacity_state(events: &[Value]) -> OadrCapacityState {
+pub fn parse_capacity_state(events: &[OadrEvent]) -> OadrCapacityState {
     let mut existing = OadrCapacityState::default();
     let mut import_limit: Option<(f64, String)> = None;
     let mut export_limit: Option<(f64, String)> = None;
@@ -169,33 +159,12 @@ pub fn parse_capacity_state(events: &[Value]) -> OadrCapacityState {
     let mut found_any = false;
 
     for event in events {
-        let event_id = event
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let event_id = event.id.clone();
 
-        let intervals = match event.get("intervals").and_then(|v| v.as_array()) {
-            Some(arr) => arr,
-            None => continue,
-        };
-
-        for interval in intervals {
-            let payloads = match interval.get("payloads").and_then(|v| v.as_array()) {
-                Some(arr) => arr,
-                None => continue,
-            };
-
-            for payload in payloads {
-                let payload_type = match payload.get("type").and_then(|v| v.as_str()) {
-                    Some(t) => t,
-                    None => continue,
-                };
-                let value = payload
-                    .get("values")
-                    .and_then(|v| v.as_array())
-                    .and_then(|arr| arr.first())
-                    .and_then(|v| v.as_f64());
+        for interval in &event.intervals {
+            for payload in &interval.payloads {
+                let payload_type = payload.r#type.as_str();
+                let value = payload.values.first().and_then(|v| v.as_f64());
 
                 match payload_type {
                     "IMPORT_CAPACITY_LIMIT" => {
@@ -272,32 +241,23 @@ pub fn parse_capacity_state(events: &[Value]) -> OadrCapacityState {
 /// Extract report obligations from event reportDescriptors.
 /// Deduplicates by (event_id, payload_type).
 pub fn extract_report_obligations(
-    events: &[Value],
+    events: &[OadrEvent],
     now: DateTime<Utc>,
     existing: &[OadrReportObligation],
 ) -> Vec<OadrReportObligation> {
     let mut result: Vec<OadrReportObligation> = Vec::new();
 
     for event in events {
-        let event_id = match event.get("id").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => continue,
-        };
-        let program_id = event
-            .get("programID")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        let event_id = event.id.clone();
+        let program_id = Some(event.programID.clone());
 
-        let descriptors = match event.get("reportDescriptors").and_then(|v| v.as_array()) {
-            Some(arr) => arr,
-            None => continue,
+        let descriptors = match event.reportDescriptors.as_ref() {
+            Some(arr) if !arr.is_empty() => arr,
+            _ => continue,
         };
 
         for descriptor in descriptors {
-            let payload_type = match descriptor.get("payloadType").and_then(|v| v.as_str()) {
-                Some(t) => t.to_string(),
-                None => continue,
-            };
+            let payload_type = descriptor.payloadType.clone();
 
             // Skip if already tracked
             let already_exists = existing
@@ -312,15 +272,14 @@ pub fn extract_report_obligations(
             }
 
             let reading_type = descriptor
-                .get("readingType")
-                .and_then(|v| v.as_str())
+                .readingType
+                .as_deref()
                 .unwrap_or("DIRECT_READ")
                 .to_string();
 
             // interval duration: from descriptor.frequency (seconds) or default 3600
             let interval_duration_s: u64 = descriptor
-                .get("frequency")
-                .and_then(|v| v.as_i64())
+                .frequency
                 .filter(|&f| f > 0)
                 .map(|f| f as u64)
                 .unwrap_or(3600);
@@ -352,6 +311,7 @@ pub fn extract_report_obligations(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::controller::vtn_port::OadrEvent;
     use serde_json::json;
 
     #[test]
@@ -395,7 +355,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), Utc::now());
+        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), Utc::now());
         assert_eq!(snapshots.len(), 3);
         assert_eq!(snapshots[0].import_tariff_eur_kwh, Some(0.25));
         assert_eq!(snapshots[1].import_tariff_eur_kwh, Some(0.30));
@@ -422,7 +382,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), Utc::now());
+        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), Utc::now());
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].co2_g_kwh, Some(200.0));
     }
@@ -447,7 +407,7 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), Utc::now());
+        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), Utc::now());
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].export_tariff_eur_kwh, Some(0.10));
     }
@@ -472,7 +432,7 @@ mod tests {
                 ]
             }
         ]);
-        let cap = parse_capacity_state(events.as_array().unwrap());
+        let cap = parse_capacity_state(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert_eq!(cap.import_limit_kw, Some(5.0));
         assert_eq!(cap.import_limit_event_id, Some("evt-cap".to_string()));
     }
@@ -499,7 +459,7 @@ mod tests {
                 }]
             }
         ]);
-        let cap = parse_capacity_state(events.as_array().unwrap());
+        let cap = parse_capacity_state(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert_eq!(cap.import_limit_kw, Some(3.0));
         assert_eq!(cap.import_limit_event_id, Some("evt-b".to_string()));
     }
@@ -514,7 +474,7 @@ mod tests {
             }
         ]);
         let now = Utc::now();
-        let obligations = extract_report_obligations(events.as_array().unwrap(), now, &[]);
+        let obligations = extract_report_obligations(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now, &[]);
         assert!(obligations.is_empty());
     }
 
@@ -534,7 +494,7 @@ mod tests {
             }
         ]);
         let now = Utc::now();
-        let obligations = extract_report_obligations(events.as_array().unwrap(), now, &[]);
+        let obligations = extract_report_obligations(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now, &[]);
         assert_eq!(obligations.len(), 1);
         assert_eq!(obligations[0].payload_type, "USAGE");
         assert_eq!(obligations[0].reading_type, "DIRECT_READ");
@@ -565,7 +525,7 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), now);
+        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now);
         assert_eq!(
             snapshots.len(),
             2,
@@ -595,7 +555,7 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), now);
+        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now);
 
         // More than 2 intervals: looping occurred
         assert!(
@@ -632,7 +592,7 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), now);
+        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now);
         assert!(
             snapshots.iter().any(|s| s.interval_start > now),
             "expected at least one future interval"
@@ -664,7 +624,7 @@ mod tests {
             "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "P9999Y"},
             "intervals": intervals
         }]);
-        let snapshots = parse_rate_snapshots(events.as_array().unwrap(), now);
+        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now);
 
         assert!(
             snapshots.len() > 24,
@@ -706,7 +666,7 @@ mod tests {
             fulfilled: false,
             created_at: now,
         }];
-        let obligations = extract_report_obligations(events.as_array().unwrap(), now, &existing);
+        let obligations = extract_report_obligations(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now, &existing);
         // Should not add a duplicate
         assert!(obligations.is_empty());
     }
@@ -724,7 +684,7 @@ mod tests {
             }
         ]);
         let now = Utc::now();
-        let obligations = extract_report_obligations(events.as_array().unwrap(), now, &[]);
+        let obligations = extract_report_obligations(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now, &[]);
         assert_eq!(obligations.len(), 1);
         assert_eq!(obligations[0].interval_duration_s, 900);
         assert_eq!(obligations[0].due_at, now + Duration::seconds(900));

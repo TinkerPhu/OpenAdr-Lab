@@ -575,10 +575,12 @@ mod tests {
             correct_kw,
             cap1.max_export_kw
         );
-        // When not saturated (natural < 0.64), the offset is fully visible and must exceed
-        // the buggy near-zero contribution by >1 kW.
+        // When not saturated (natural + decayed_offset < 1.0, i.e. natural < 0.64),
+        // the offset is fully visible and must contribute >1 kW over natural-only.
+        // Skip when saturated: the offset is clipped and the visible difference is smaller.
         let natural_only_kw = -(natural * 10.0);
-        if cap1.max_export_kw < natural_only_kw {
+        let decayed_offset_slot1 = 0.4_f64 * (1.0_f64 - 0.1_f64); // exponent=1 per step
+        if natural + decayed_offset_slot1 < 1.0 {
             assert!(
                 cap1.max_export_kw < natural_only_kw - 1.0,
                 "slot 1 must export >1 kW more than natural-only when not saturated: \
