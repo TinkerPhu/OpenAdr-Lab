@@ -9,6 +9,7 @@ use crate::controller::absorber::AbsorberState;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
+use crate::entities::planner_params::{AbsorberAssetParams, AbsorberParams};
 use crate::models::SensorSnapshot;
 use crate::profile::Profile;
 use crate::controller::SimSnapshot;
@@ -171,5 +172,26 @@ pub(crate) fn accumulate_deviation(
             );
         }
         absorber_state.residual_ticks = 0;
+    }
+}
+
+/// Build AbsorberParams from the profile config.
+/// Extracted from tick.rs to keep that file under the 200-line module limit.
+pub(crate) fn build_absorber_params(profile: &Profile) -> AbsorberParams {
+    AbsorberParams {
+        enabled: profile.absorber.enabled,
+        dead_band_kw: profile.absorber.dead_band_kw,
+        dead_band_clearing_ticks: profile.absorber.dead_band_clearing_ticks,
+        assets: profile
+            .absorber
+            .assets
+            .iter()
+            .map(|a| AbsorberAssetParams {
+                id: a.id.clone(),
+                priority: a.priority,
+                min_state_linger_s: a.min_state_linger_s,
+                ev_departure_guard_s: a.ev_departure_guard_s,
+            })
+            .collect(),
     }
 }

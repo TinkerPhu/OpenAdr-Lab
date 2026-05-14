@@ -1,8 +1,11 @@
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
+
+use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport, VtnPort};
 
 #[derive(Clone)]
 pub struct VtnClient {
@@ -253,33 +256,16 @@ impl VtnClient {
         Ok((status, text))
     }
 
-    pub async fn fetch_programs(&self) -> Result<Vec<serde_json::Value>> {
-        let raw = self.get_json("/programs").await?;
-        Ok(raw.as_array().cloned().unwrap_or_default())
-    }
-
-    pub async fn fetch_events(&self) -> Result<Vec<serde_json::Value>> {
-        let raw = self.get_json("/events?active=true").await?;
-        Ok(raw.as_array().cloned().unwrap_or_default())
-    }
-
-    pub async fn fetch_reports(&self) -> Result<Vec<serde_json::Value>> {
-        let path = format!("/reports?clientName={}", self.ven_name);
-        let raw = self.get_json(&path).await?;
-        Ok(raw.as_array().cloned().unwrap_or_default())
-    }
-
-    pub async fn submit_report(&self, body: serde_json::Value) -> Result<serde_json::Value> {
+    pub(crate) async fn submit_report(&self, body: serde_json::Value) -> Result<serde_json::Value> {
         self.post_json("/reports", body).await
     }
 
     /// Submit a report with upsert semantics: on 409 Conflict, find the existing
     /// report by name and update it instead.
-    pub async fn upsert_report(&self, body: serde_json::Value) -> Result<serde_json::Value> {
+    pub(crate) async fn upsert_report(&self, body: serde_json::Value) -> Result<serde_json::Value> {
         let (status, text) = self.post_json_raw("/reports", &body).await?;
 
         if status == StatusCode::CONFLICT {
-            // Extract reportName from the request body
             let report_name = body
                 .get("reportName")
                 .and_then(|v| v.as_str())
@@ -296,7 +282,7 @@ impl VtnClient {
         serde_json::from_str(&text).context("parse report response")
     }
 
-    pub async fn update_report(
+    pub(crate) async fn update_report(
         &self,
         id: &str,
         body: serde_json::Value,
@@ -305,16 +291,53 @@ impl VtnClient {
         self.put_json(&path, body).await
     }
 
-    /// Search own reports (already filtered by client_name) for a matching reportName.
+    /// Search own reports (filtered by client_name) for a matching reportName.
+    /// Uses typed VtnPort::fetch_reports() so only id + reportName are accessed.
     async fn find_report_by_name(&self, report_name: &str) -> Result<String> {
-        let reports = self.fetch_reports().await?;
+        let reports = VtnPort::fetch_reports(self).await?;
         for r in &reports {
-            if r.get("reportName").and_then(|v| v.as_str()) == Some(report_name) {
-                if let Some(id) = r.get("id").and_then(|v| v.as_str()) {
-                    return Ok(id.to_string());
-                }
+            if r.reportName == report_name {
+                return Ok(r.id.clone());
             }
         }
         anyhow::bail!("no report found with name '{report_name}'")
+    }
+}
+
+// ── VtnPort implementation ────────────────────────────────────────────────────
+
+#[async_trait]
+impl VtnPort for VtnClient {
+    async fn fetch_programs(&self) -> Result<Vec<OadrProgram>> {
+        let raw = self.get_json("/programs").await?;
+        let items = raw.as_array().cloned().unwrap_or_default();
+        items
+            .iter()
+            .map(|v| serde_json::from_value(v.clone()).map_err(anyhow::Error::from))
+            .collect()
+    }
+
+    async fn fetch_events(&self) -> Result<Vec<OadrEvent>> {
+        let raw = self.get_json("/events?active=true").await?;
+        let items = raw.as_array().cloned().unwrap_or_default();
+        items
+            .iter()
+            .map(|v| serde_json::from_value(v.clone()).map_err(anyhow::Error::from))
+            .collect()
+    }
+
+    async fn fetch_reports(&self) -> Result<Vec<OadrReport>> {
+        let path = format!("/reports?clientName={}", self.ven_name);
+        let raw = self.get_json(&path).await?;
+        let items = raw.as_array().cloned().unwrap_or_default();
+        items
+            .iter()
+            .map(|v| serde_json::from_value(v.clone()).map_err(anyhow::Error::from))
+            .collect()
+    }
+
+    async fn upsert_report(&self, body: serde_json::Value) -> Result<serde_json::Value> {
+        // Delegates to the inherent method which handles 409 upsert semantics.
+        self.upsert_report(body).await
     }
 }

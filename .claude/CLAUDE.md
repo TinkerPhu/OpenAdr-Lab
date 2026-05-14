@@ -1,5 +1,7 @@
 docker: docker runs on ssh Pi4-Server. run all tasks with docker on Pi4-Server via ssh in directory /srv/docker/openadr_lab.
 
+local-rust: WSL is installed on this Windows machine. Use `wsl cargo check` (or `wsl cargo test`) inside the VEN directory for local Rust compilation instead of native Windows cargo, which lacks cmake/HiGHS. For a full test run including HiGHS, use the Pi4-Server docker stack.
+
 dto: avoid DTO normalization. pass through upstream field names (e.g. OpenADR spec names) across all layers — backend, BFF, UI. one vocabulary everywhere reduces boilerplate and debugging friction.
 
 workflow: 1. always keep a project_journal.md in projects where you write for each large step what you did, why you did it and what issues/key-learnings you had. it shall explain, how the project was implemented. The journal lives at docs/history/project_journal.md.
@@ -14,7 +16,9 @@ Do not add co-authoring footers to commit messages or PR descriptions. they migh
 Only consider upstream PR and commits after the code is tested completely without failure and the commits are ready for the upstream CI acceptance tests.
 After creating upstream PR, wait for the CI to actually run and report before drawing any conclusions about main branch being pre-broken. If anything fails, we investigate it properly rather than writing it off.
 
-test failures: NEVER dismiss test failures as "pre-existing" or "unrelated" without verifying. Always read the actual error message and check whether our changes could have caused it (e.g. a backend response shape change breaking UI code). Only classify as pre-existing after confirming the same failure exists on the base branch. The cost of investigating a real regression is far lower than the cost of shipping one.
+test failures: Do NOT distinguish between "pre-existing" and "new" failures — that distinction is an excuse to not fix things. When a test fails, read the error and focus on what can be done: fix the code, fix the test, or fix the fixture. If a fixture has stale data (e.g. CRLF line endings, outdated snapshot), update it. If a test exercises a real invariant, make the code satisfy it. Passing tests are the goal, not categorizing blame.
+
+It is also legitimate to question whether a test's purpose or form is still correct — requirements change, and a test's expectations can become wrong. It is also valid to ask whether a test could be done more cleanly in a different setup. However, this is NOT a free pass to delete or weaken a failing test. Any change to test purpose, form, or expectations must be explained to the user with the reasoning and the alternatives considered. Never silently change test expectations to make failures go away.
 
 docs/specs/pdf/: do not read, search, or reference any files under this directory. Use the markdown versions in docs/specs/ instead.
 

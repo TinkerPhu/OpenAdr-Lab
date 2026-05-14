@@ -1,4 +1,5 @@
 use crate::controller::trace::ControllerTrace;
+use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport};
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
 use crate::entities::device_session::{
     BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime,
@@ -106,9 +107,9 @@ fn bool_true() -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PollingState {
-    pub programs: Vec<serde_json::Value>,
-    pub events: Vec<serde_json::Value>,
-    pub reports: Vec<serde_json::Value>,
+    pub programs: Vec<OadrProgram>,
+    pub events: Vec<OadrEvent>,
+    pub reports: Vec<OadrReport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,9 +160,9 @@ pub struct AppState {
 
 #[derive(Serialize, Deserialize)]
 struct PersistedVenState {
-    programs: Vec<serde_json::Value>,
-    events: Vec<serde_json::Value>,
-    reports: Vec<serde_json::Value>,
+    programs: Vec<OadrProgram>,
+    events: Vec<OadrEvent>,
+    reports: Vec<OadrReport>,
     sensor: SensorSnapshot,
 }
 
@@ -184,16 +185,16 @@ impl AppState {
         }
     }
 
-    pub async fn set_programs(&self, programs: Vec<serde_json::Value>) {
+    pub async fn set_programs(&self, programs: Vec<OadrProgram>) {
         self.polling.write().await.programs = programs;
     }
 
-    pub async fn set_events(&self, mut events: Vec<serde_json::Value>, max_keep: usize) {
+    pub async fn set_events(&self, mut events: Vec<OadrEvent>, max_keep: usize) {
         events.truncate(max_keep);
         self.polling.write().await.events = events;
     }
 
-    pub async fn set_reports(&self, reports: Vec<serde_json::Value>) {
+    pub async fn set_reports(&self, reports: Vec<OadrReport>) {
         self.polling.write().await.reports = reports;
     }
 
@@ -205,15 +206,15 @@ impl AppState {
         self.ctrl_sim.write().await.sim = Some(sim);
     }
 
-    pub async fn programs(&self) -> Vec<serde_json::Value> {
+    pub async fn programs(&self) -> Vec<OadrProgram> {
         self.polling.read().await.programs.clone()
     }
 
-    pub async fn events(&self) -> Vec<serde_json::Value> {
+    pub async fn events(&self) -> Vec<OadrEvent> {
         self.polling.read().await.events.clone()
     }
 
-    pub async fn reports(&self) -> Vec<serde_json::Value> {
+    pub async fn reports(&self) -> Vec<OadrReport> {
         self.polling.read().await.reports.clone()
     }
 
@@ -729,16 +730,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_state_persistence_roundtrip() {
-        use serde_json::json;
+        use crate::controller::vtn_port::OadrProgram;
         let state = AppState::new();
-        // Set programs via polling lock
-        state.set_programs(vec![json!({"id": "p1"})]).await;
-        // The sensor default has power_kw = 0.0; we'll just verify programs survive roundtrip
+        let prog = OadrProgram { id: "p1".to_string(), programName: "TestProgram".to_string() };
+        state.set_programs(vec![prog]).await;
         let json_str = state.to_json().await.unwrap();
         let state2 = AppState::new();
         state2.load_from_json(&json_str).await.unwrap();
         let programs = state2.programs().await;
         assert_eq!(programs.len(), 1);
-        assert_eq!(programs[0]["id"], "p1");
+        assert_eq!(programs[0].id, "p1");
     }
 }
