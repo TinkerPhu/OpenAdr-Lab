@@ -411,70 +411,17 @@ fn asset_config_and_state_from_params(ap: &AssetParams) -> (String, AssetConfig,
     }
 }
 
-/// Build the sim control schema from profile config — no mutex required.
+/// Build the sim control schema from domain asset params — no mutex required.
 ///
-/// The schema is static: it depends only on the profile YAML, not on runtime
+/// The schema is static: it depends only on startup configuration, not on runtime
 /// simulator state. This allows `GET /sim/schema` to respond without blocking
 /// on the sim mutex during MILP solving.
-pub fn schema_from_profile(
-    profile: &crate::profile::Profile,
+pub fn schema_from_params(
+    params: &[AssetParams],
 ) -> HashMap<String, Vec<crate::assets::ControlDescriptor>> {
     let mut out = HashMap::new();
-    for ap in &profile.assets {
-        let (id, cfg, _) = match ap {
-            crate::profile::AssetProfile::Battery(c) => {
-                let params = crate::assets::battery::BatteryParams {
-                    id: c.id.clone(),
-                    capacity_kwh: c.capacity_kwh,
-                    max_charge_kw: c.max_charge_kw,
-                    max_discharge_kw: c.max_discharge_kw,
-                    initial_soc: c.initial_soc,
-                    round_trip_efficiency: c.round_trip_efficiency,
-                    min_soc: c.min_soc,
-                };
-                asset_config_and_state_from_params(&AssetParams::Battery(params))
-            }
-            crate::profile::AssetProfile::Ev(c) => {
-                let params = crate::assets::ev::EvParams {
-                    id: c.id.clone(),
-                    max_charge_kw: c.max_charge_kw,
-                    max_discharge_kw: c.max_discharge_kw,
-                    initial_soc: c.initial_soc,
-                    battery_kwh: c.battery_kwh,
-                    soc_target: c.soc_target,
-                    default_charge_kw: c.default_charge_kw,
-                    min_charge_kw: c.min_charge_kw,
-                };
-                asset_config_and_state_from_params(&AssetParams::Ev(params))
-            }
-            crate::profile::AssetProfile::Heater(c) => {
-                let params = crate::assets::heater::HeaterParams {
-                    id: c.id.clone(),
-                    max_kw: c.max_kw,
-                    temp_initial_c: c.temp_initial_c,
-                    temp_min_c: c.temp_min_c,
-                    temp_max_c: c.temp_max_c,
-                    mid_kw: c.mid_kw,
-                    thermal_mass_kwh_per_c: c.effective_thermal_mass(),
-                    k_loss_kw_per_c: c.effective_k_loss(),
-                    draw_kw: c.effective_draw_kw(),
-                    switching_penalty_eur: c.effective_switching_penalty(),
-                };
-                asset_config_and_state_from_params(&AssetParams::Heater(params))
-            }
-            crate::profile::AssetProfile::Pv(c) => {
-                asset_config_and_state_from_params(&AssetParams::Pv(crate::assets::pv::PvParams {
-                    id: c.id.clone(),
-                    rated_kw: c.rated_kw,
-                }))
-            }
-            crate::profile::AssetProfile::BaseLoad(c) => asset_config_and_state_from_params(
-                &AssetParams::BaseLoad(crate::assets::base_load::BaseLoadParams {
-                    id: c.id.clone(),
-                    baseline_kw: c.baseline_kw,
-                }),
-            ),
-        };
+    for ap in params {
+        let (id, cfg, _) = asset_config_and_state_from_params(ap);
         out.insert(id, cfg.control_schema());
     }
     out
@@ -491,84 +438,4 @@ impl SimulatorPort for SimState {
 }
 
 #[cfg(test)]
-mod port_tests {
-    use super::*;
-
-    fn _assert_send_sync<T: Send + Sync>() {}
-
-    #[test]
-    fn sim_state_is_send_sync() {
-        _assert_send_sync::<SimState>();
-    }
-
-    #[test]
-    fn snapshot_returns_ok_for_empty_state() {
-        let sim = SimState::from_params(&[]);
-        let result = SimulatorPort::snapshot(&sim);
-        assert!(result.is_ok(), "snapshot() must succeed for a valid SimState");
-        let snap = result.unwrap();
-        // Grid defaults are zero
-        assert_eq!(snap.grid.net_power_w, 0.0);
-    }
-}
-
-/// SC-002: Verify `GET /sim/schema` response is identical before and after the
-/// pre-computation refactor.
-///
-/// Golden-file test: if `VEN/tests/fixtures/schema_snapshot.json` does not yet
-/// exist the test creates it (first run = fixture generation) and passes.
-/// On every subsequent run the test asserts byte-equality against the fixture.
-#[cfg(test)]
-mod schema_snapshot_tests {
-    use super::schema_from_profile;
-    use std::path::PathBuf;
-
-    fn fixture_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join("fixtures")
-            .join("schema_snapshot.json")
-    }
-
-    fn profile_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("profiles")
-            .join("ven-1.yaml")
-    }
-
-    #[test]
-    fn schema_snapshot_matches_fixture() {
-        let profile_yaml = std::fs::read_to_string(profile_path())
-            .expect("ven-1.yaml must be readable for schema snapshot test");
-        let profile: crate::profile::Profile =
-            serde_yaml::from_str(&profile_yaml)
-                .expect("ven-1.yaml must parse as a valid Profile");
-
-        let schema = schema_from_profile(&profile);
-        // Sort keys for deterministic JSON output
-        let mut keys: Vec<_> = schema.keys().cloned().collect();
-        keys.sort();
-        let ordered: std::collections::BTreeMap<_, _> =
-            keys.iter().map(|k| (k.clone(), schema[k].clone())).collect();
-        let actual_json = serde_json::to_string_pretty(&ordered)
-            .expect("schema must be JSON-serialisable");
-
-        let fixture = fixture_path();
-        if !fixture.exists() {
-            // First run: write the golden file and pass
-            std::fs::create_dir_all(fixture.parent().unwrap())
-                .expect("fixtures dir must be creatable");
-            std::fs::write(&fixture, &actual_json)
-                .expect("fixture file must be writable");
-            println!("schema_snapshot: fixture created at {}", fixture.display());
-            return;
-        }
-
-        let expected_json = std::fs::read_to_string(&fixture)
-            .expect("fixture file must be readable");
-        assert_eq!(
-            actual_json, expected_json,
-            "GET /sim/schema JSON has changed — update the fixture if the change is intentional"
-        );
-    }
-}
+mod tests;

@@ -1,4 +1,9 @@
 use chrono::{DateTime, Utc};
+use crate::assets::{
+    base_load::BaseLoadParams, battery::BatteryParams, ev::EvParams, heater::HeaterParams,
+    pv::PvParams,
+};
+use crate::entities::asset_params::AssetParams;
 use crate::entities::PlannerObjective;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -70,6 +75,59 @@ impl AssetProfile {
             Self::Battery(c) => &c.id,
             Self::BaseLoad(c) => &c.id,
         }
+    }
+
+    /// Convert this config variant into the domain-level `AssetParams`.
+    /// Called at startup only — not on the hot path.
+    pub fn to_params(&self) -> AssetParams {
+        match self {
+            AssetProfile::Battery(c) => AssetParams::Battery(BatteryParams {
+                id: c.id.clone(),
+                capacity_kwh: c.capacity_kwh,
+                max_charge_kw: c.max_charge_kw,
+                max_discharge_kw: c.max_discharge_kw,
+                initial_soc: c.initial_soc,
+                round_trip_efficiency: c.round_trip_efficiency,
+                min_soc: c.min_soc,
+            }),
+            AssetProfile::Ev(c) => AssetParams::Ev(EvParams {
+                id: c.id.clone(),
+                max_charge_kw: c.max_charge_kw,
+                max_discharge_kw: c.max_discharge_kw,
+                initial_soc: c.initial_soc,
+                battery_kwh: c.battery_kwh,
+                soc_target: c.soc_target,
+                default_charge_kw: c.default_charge_kw,
+                min_charge_kw: c.min_charge_kw,
+            }),
+            AssetProfile::Heater(c) => AssetParams::Heater(HeaterParams {
+                id: c.id.clone(),
+                max_kw: c.max_kw,
+                temp_initial_c: c.temp_initial_c,
+                temp_min_c: c.temp_min_c,
+                temp_max_c: c.temp_max_c,
+                mid_kw: c.mid_kw,
+                thermal_mass_kwh_per_c: c.effective_thermal_mass(),
+                k_loss_kw_per_c: c.effective_k_loss(),
+                draw_kw: c.effective_draw_kw(),
+                switching_penalty_eur: c.effective_switching_penalty(),
+            }),
+            AssetProfile::Pv(c) => AssetParams::Pv(PvParams {
+                id: c.id.clone(),
+                rated_kw: c.rated_kw,
+            }),
+            AssetProfile::BaseLoad(c) => AssetParams::BaseLoad(BaseLoadParams {
+                id: c.id.clone(),
+                baseline_kw: c.baseline_kw,
+            }),
+        }
+    }
+}
+
+impl Profile {
+    /// Convert all asset profiles to domain `AssetParams` (one allocation at startup).
+    pub fn asset_params(&self) -> Vec<AssetParams> {
+        self.assets.iter().map(|ap| ap.to_params()).collect()
     }
 }
 
