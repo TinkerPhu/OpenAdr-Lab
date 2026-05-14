@@ -1,0 +1,2 @@
+# Force LF for generated snapshot fixtures so Windows CRLF checkout never breaks the golden-file tests.
+VEN/tests/fixtures/*.json text eol=lf

@@ -116,8 +116,16 @@ mod tests {
     #[tokio::test]
     async fn test_mock_vtn_error_propagated_when_upsert_called() {
         // Directly verify MockVtn error propagation via the VtnPort trait.
+        use crate::controller::vtn_port::OadrReportBody;
         let vtn = MockVtn::new().with_upsert_error("network error");
-        let result = vtn.upsert_report(serde_json::json!({"reportName": "x"})).await;
+        let body = OadrReportBody {
+            programID: "p1".to_string(),
+            eventID: None,
+            clientName: "ven-1".to_string(),
+            reportName: "x".to_string(),
+            resources: vec![],
+        };
+        let result = vtn.upsert_report(body).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("network error"));
     }

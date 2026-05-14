@@ -10,3 +10,14 @@ Feature: VEN Reports
     Then the VEN report submission response status is 201
     And the report appears in VEN-1 report list
     And the report appears in BFF report list
+
+  @ven-unit
+  Scenario: POST /reports with valid OadrReportBody returns 201 with echo body
+    When I POST to VEN-1 reports with a valid OadrReportBody
+    Then the VEN report submission response status is 201
+    And the response body echoes back the submitted report fields
+
+  @ven-unit
+  Scenario: POST /reports with missing programID returns 422
+    When I POST to VEN-1 reports with a body missing programID
+    Then the VEN report submission response status is 422

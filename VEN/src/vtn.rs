@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport, VtnPort};
+use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport, OadrReportBody, VtnPort};
 
 #[derive(Clone)]
 pub struct VtnClient {
@@ -256,30 +256,23 @@ impl VtnClient {
         Ok((status, text))
     }
 
-    pub(crate) async fn submit_report(&self, body: serde_json::Value) -> Result<serde_json::Value> {
-        self.post_json("/reports", body).await
-    }
-
     /// Submit a report with upsert semantics: on 409 Conflict, find the existing
     /// report by name and update it instead.
-    pub(crate) async fn upsert_report(&self, body: serde_json::Value) -> Result<serde_json::Value> {
-        let (status, text) = self.post_json_raw("/reports", &body).await?;
+    pub(crate) async fn upsert_report(&self, body: crate::controller::vtn_port::OadrReportBody) -> Result<()> {
+        let value = serde_json::to_value(&body).context("serialize report body")?;
+        let (status, text) = self.post_json_raw("/reports", &value).await?;
 
         if status == StatusCode::CONFLICT {
-            let report_name = body
-                .get("reportName")
-                .and_then(|v| v.as_str())
-                .context("409 Conflict but no reportName in body")?;
-
-            let id = self.find_report_by_name(report_name).await?;
-            return self.update_report(&id, body).await;
+            let id = self.find_report_by_name(&body.reportName).await?;
+            self.update_report(&id, value).await?;
+            return Ok(());
         }
 
         if !status.is_success() {
             anyhow::bail!("/reports returned {status}: {text}");
         }
 
-        serde_json::from_str(&text).context("parse report response")
+        Ok(())
     }
 
     pub(crate) async fn update_report(
@@ -336,7 +329,7 @@ impl VtnPort for VtnClient {
             .collect()
     }
 
-    async fn upsert_report(&self, body: serde_json::Value) -> Result<serde_json::Value> {
+    async fn upsert_report(&self, body: OadrReportBody) -> Result<()> {
         // Delegates to the inherent method which handles 409 upsert semantics.
         self.upsert_report(body).await
     }

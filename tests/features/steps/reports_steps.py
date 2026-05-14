@@ -51,20 +51,13 @@ def step_submit_report_ven1(context):
         "programID": event.get("programID", ""),
         "eventID": event["id"],
         "clientName": "ven-1",
+        "reportName": "TELEMETRY_USAGE",
         "resources": [],
     }
     context.report_response = requests.post(
         f"{VEN_BASE_URL}/reports", json=payload, timeout=HTTP_TIMEOUT
     )
     context.submitted_report = payload
-
-
-@then("the VEN report submission response status is {status:d}")
-def step_report_status(context, status):
-    assert context.report_response.status_code == status, (
-        f"Expected {status}, got {context.report_response.status_code}: "
-        f"{context.report_response.text[:200]}"
-    )
 
 
 @then("the report appears in VEN-1 report list")
@@ -101,3 +94,47 @@ def step_report_in_bff(context):
         description="Report appears in BFF",
     )
     assert len(reports) > 0
+
+
+@when("I POST to VEN-1 reports with a valid OadrReportBody")
+def step_post_valid_report_body(context):
+    payload = {
+        "programID": "test-prog",
+        "eventID": "test-evt",
+        "clientName": "ven-1",
+        "reportName": "TELEMETRY_USAGE",
+        "resources": [],
+    }
+    context.report_response = requests.post(
+        f"{VEN_BASE_URL}/reports", json=payload, timeout=HTTP_TIMEOUT
+    )
+    context.submitted_report = payload
+
+
+@then("the response body echoes back the submitted report fields")
+def step_response_echoes_report(context):
+    body = context.report_response.json()
+    submitted = context.submitted_report
+    assert body.get("programID") == submitted["programID"], f"programID mismatch: {body}"
+    assert body.get("clientName") == submitted["clientName"], f"clientName mismatch: {body}"
+    assert body.get("reportName") == submitted["reportName"], f"reportName mismatch: {body}"
+
+
+@when("I POST to VEN-1 reports with a body missing programID")
+def step_post_missing_program_id(context):
+    payload = {
+        "clientName": "ven-1",
+        "reportName": "TELEMETRY_USAGE",
+        "resources": [],
+    }
+    context.report_response = requests.post(
+        f"{VEN_BASE_URL}/reports", json=payload, timeout=HTTP_TIMEOUT
+    )
+
+
+@then("the VEN report submission response status is {status:d}")
+def step_report_status(context, status):
+    assert context.report_response.status_code == status, (
+        f"Expected {status}, got {context.report_response.status_code}: "
+        f"{context.report_response.text[:200]}"
+    )
