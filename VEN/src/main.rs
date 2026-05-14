@@ -23,10 +23,6 @@ use std::collections::HashMap;
 use crate::assets::ControlDescriptor;
 use simulator::SimState;
 
-use crate::assets::{
-    base_load::BaseLoadParams, battery::BatteryParams, ev::EvParams, heater::HeaterParams,
-    pv::PvParams,
-};
 use crate::entities::asset_params::AssetParams;
 use crate::entities::planner_params::{
     AbsorberAssetParams, AbsorberParams, PlannerObjective, PlannerParams, SimulatorParams,
@@ -43,9 +39,6 @@ pub struct AppCtx {
     pub vtn: VtnClient,
     pub metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
     pub trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
-    /// Retained for use by the sim_tick task. Removal from AppCtx is deferred
-    /// to Phase 4/5 of the VEN backend refactoring.
-    pub profile: Arc<Profile>,
     /// Pre-computed simulator schema (asset → control descriptors).
     /// Built once at startup from `profile`; route handlers access it without
     /// touching the raw `Profile` type or acquiring any lock.
@@ -105,51 +98,7 @@ fn build_domain_params(
             })
             .collect(),
     };
-    let asset_params: Vec<AssetParams> = profile
-        .assets
-        .iter()
-        .map(|ap| match ap {
-            crate::profile::AssetProfile::Battery(c) => AssetParams::Battery(BatteryParams {
-                id: c.id.clone(),
-                capacity_kwh: c.capacity_kwh,
-                max_charge_kw: c.max_charge_kw,
-                max_discharge_kw: c.max_discharge_kw,
-                initial_soc: c.initial_soc,
-                round_trip_efficiency: c.round_trip_efficiency,
-                min_soc: c.min_soc,
-            }),
-            crate::profile::AssetProfile::Ev(c) => AssetParams::Ev(EvParams {
-                id: c.id.clone(),
-                max_charge_kw: c.max_charge_kw,
-                max_discharge_kw: c.max_discharge_kw,
-                initial_soc: c.initial_soc,
-                battery_kwh: c.battery_kwh,
-                soc_target: c.soc_target,
-                default_charge_kw: c.default_charge_kw,
-                min_charge_kw: c.min_charge_kw,
-            }),
-            crate::profile::AssetProfile::Heater(c) => AssetParams::Heater(HeaterParams {
-                id: c.id.clone(),
-                max_kw: c.max_kw,
-                temp_initial_c: c.temp_initial_c,
-                temp_min_c: c.temp_min_c,
-                temp_max_c: c.temp_max_c,
-                mid_kw: c.mid_kw,
-                thermal_mass_kwh_per_c: c.effective_thermal_mass(),
-                k_loss_kw_per_c: c.effective_k_loss(),
-                draw_kw: c.effective_draw_kw(),
-                switching_penalty_eur: c.effective_switching_penalty(),
-            }),
-            crate::profile::AssetProfile::Pv(c) => AssetParams::Pv(PvParams {
-                id: c.id.clone(),
-                rated_kw: c.rated_kw,
-            }),
-            crate::profile::AssetProfile::BaseLoad(c) => AssetParams::BaseLoad(BaseLoadParams {
-                id: c.id.clone(),
-                baseline_kw: c.baseline_kw,
-            }),
-        })
-        .collect();
+    let asset_params = profile.asset_params();
     (sim_params, planner_params, absorber_params, asset_params)
 }
 
@@ -283,13 +232,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build HTTP app and serve
-    let sim_schema = Arc::new(simulator::schema_from_profile(&profile));
+    let sim_schema = Arc::new(simulator::schema_from_params(&asset_params));
     let ctx = AppCtx {
         state,
         vtn,
         metrics_handle: Arc::new(metrics_handle),
         trigger_tx,
-        profile,
         sim_schema,
         sim: sim_state.clone(),
         active_objective,
