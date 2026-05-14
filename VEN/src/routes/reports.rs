@@ -6,6 +6,7 @@ use axum::{
 use metrics::counter;
 use tracing::error;
 
+use crate::controller::vtn_port::OadrReportBody;
 use crate::AppCtx;
 
 pub async fn get_reports(State(ctx): State<AppCtx>) -> impl IntoResponse {
@@ -14,12 +15,13 @@ pub async fn get_reports(State(ctx): State<AppCtx>) -> impl IntoResponse {
 
 pub async fn post_reports(
     State(ctx): State<AppCtx>,
-    Json(body): Json<serde_json::Value>,
+    Json(body): Json<OadrReportBody>,
 ) -> impl IntoResponse {
+    let echo = body.clone();
     match ctx.vtn.upsert_report(body).await {
-        Ok(result) => {
+        Ok(()) => {
             counter!("reports_sent_total").increment(1);
-            (axum::http::StatusCode::CREATED, Json(result)).into_response()
+            (axum::http::StatusCode::CREATED, Json(echo)).into_response()
         }
         Err(e) => {
             error!("report submission failed: {e:#}");

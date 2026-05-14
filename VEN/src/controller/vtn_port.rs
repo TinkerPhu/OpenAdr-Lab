@@ -17,9 +17,9 @@ pub trait VtnPort: Send + Sync {
     async fn fetch_programs(&self) -> Result<Vec<OadrProgram>>;
     async fn fetch_events(&self) -> Result<Vec<OadrEvent>>;
     async fn fetch_reports(&self) -> Result<Vec<OadrReport>>;
-    /// Submit or upsert a report. Body and response stay as raw JSON because the
-    /// full report shape is constructed by controller/reporter.rs and is not typed here.
-    async fn upsert_report(&self, body: serde_json::Value) -> Result<serde_json::Value>;
+    /// Submit or upsert a typed report body. Returns Ok(()) on success; errors are
+    /// propagated from the VTN HTTP response.
+    async fn upsert_report(&self, body: OadrReportBody) -> Result<()>;
 }
 
 // ── OadrProgram ───────────────────────────────────────────────────────────────
@@ -87,11 +87,48 @@ pub struct OadrReportDescriptor {
 // ── OadrReport ────────────────────────────────────────────────────────────────
 
 /// Minimal typed report — only `id` and `reportName` are accessed by field.
-/// Full report bodies are passed as `serde_json::Value` through `upsert_report`.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OadrReport {
     pub id: String,
     pub reportName: String,
+}
+
+// ── OadrReportBody and nested types ──────────────────────────────────────────
+
+/// Top-level envelope for a report submission to the VTN.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OadrReportBody {
+    pub programID: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eventID: Option<String>,
+    pub clientName: String,
+    pub reportName: String,
+    pub resources: Vec<OadrReportResource>,
+}
+
+/// A named resource (site meter, individual asset) within a report.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OadrReportResource {
+    pub resourceName: String,
+    pub intervals: Vec<OadrReportInterval>,
+}
+
+/// A single measurement interval with an optional time window and one or more payload values.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OadrReportInterval {
+    pub id: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intervalPeriod: Option<OadrIntervalPeriod>,
+    pub payloads: Vec<OadrReportPayload>,
+}
+
+/// A single typed value (or set of values) within an interval.
+/// `values` is intentionally `Vec<serde_json::Value>` — OpenADR 3 defines it as a
+/// heterogeneous array (numbers for power, strings for state/SoC).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OadrReportPayload {
+    pub r#type: String,
+    pub values: Vec<serde_json::Value>,
 }
 
 // ── Contract tests ────────────────────────────────────────────────────────────
@@ -173,5 +210,77 @@ mod tests {
         let report: OadrReport = serde_json::from_str(json).expect("deserialization failed");
         assert_eq!(report.id, "rep-001");
         assert_eq!(report.reportName, "ven-status");
+    }
+
+    #[test]
+    fn test_oadr_report_body_round_trips_with_event_id() {
+        let body = OadrReportBody {
+            programID: "prog-001".to_string(),
+            eventID: Some("evt-abc".to_string()),
+            clientName: "ven-1".to_string(),
+            reportName: "auto-ven-1-evt-abc".to_string(),
+            resources: vec![OadrReportResource {
+                resourceName: "ven-1-meter".to_string(),
+                intervals: vec![OadrReportInterval {
+                    id: 0,
+                    intervalPeriod: None,
+                    payloads: vec![
+                        OadrReportPayload {
+                            r#type: "USAGE".to_string(),
+                            values: vec![serde_json::json!(4500.0)],
+                        },
+                        OadrReportPayload {
+                            r#type: "OPERATING_STATE".to_string(),
+                            values: vec![serde_json::json!("ACTIVE")],
+                        },
+                    ],
+                }],
+            }],
+        };
+
+        let value = serde_json::to_value(&body).expect("serialize failed");
+        assert_eq!(value["programID"], "prog-001");
+        assert_eq!(value["eventID"], "evt-abc");
+        assert_eq!(value["clientName"], "ven-1");
+        assert_eq!(value["reportName"], "auto-ven-1-evt-abc");
+        assert_eq!(value["resources"][0]["resourceName"], "ven-1-meter");
+        assert_eq!(value["resources"][0]["intervals"][0]["id"], 0);
+        assert!(value["resources"][0]["intervals"][0].get("intervalPeriod").is_none());
+        assert_eq!(value["resources"][0]["intervals"][0]["payloads"][0]["type"], "USAGE");
+        assert!((value["resources"][0]["intervals"][0]["payloads"][0]["values"][0].as_f64().unwrap() - 4500.0).abs() < 1e-9);
+
+        let restored: OadrReportBody = serde_json::from_value(value).expect("deserialize failed");
+        assert_eq!(restored.programID, "prog-001");
+        assert_eq!(restored.eventID.as_deref(), Some("evt-abc"));
+        assert_eq!(restored.resources[0].intervals[0].payloads[0].r#type, "USAGE");
+    }
+
+    #[test]
+    fn test_oadr_report_body_absent_event_id_not_serialized() {
+        let body = OadrReportBody {
+            programID: "prog-001".to_string(),
+            eventID: None,
+            clientName: "ven-1".to_string(),
+            reportName: "status-ven-1".to_string(),
+            resources: vec![],
+        };
+        let value = serde_json::to_value(&body).expect("serialize failed");
+        // eventID must be absent (not null) when None
+        assert!(value.get("eventID").is_none(), "eventID must be absent when None");
+    }
+
+    #[test]
+    fn test_oadr_report_interval_period_serialized_when_some() {
+        let interval = OadrReportInterval {
+            id: 0,
+            intervalPeriod: Some(OadrIntervalPeriod {
+                start: Some("2026-01-01T10:00:00Z".to_string()),
+                duration: Some("PT15M".to_string()),
+            }),
+            payloads: vec![],
+        };
+        let value = serde_json::to_value(&interval).expect("serialize failed");
+        assert_eq!(value["intervalPeriod"]["start"], "2026-01-01T10:00:00Z");
+        assert_eq!(value["intervalPeriod"]["duration"], "PT15M");
     }
 }

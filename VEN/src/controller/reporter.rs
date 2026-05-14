@@ -4,13 +4,15 @@
 ///   - Measurement reports (timer-driven): one TELEMETRY_USAGE report per active event.
 ///   - Status reports (event-driven): TELEMETRY_STATUS triggered by PlanCycle/PacketTransition.
 use chrono::{DateTime, Duration, Utc};
-use serde_json::{json, Value};
 use tracing::debug;
 
 use crate::assets::HistoryPoint;
 use crate::common::{parse_iso8601_duration_secs, Aggregation, Interpolation, TimeSeries};
 use crate::controller::trace::ControllerEvent;
-use crate::controller::vtn_port::OadrEvent;
+use crate::controller::vtn_port::{
+    OadrEvent, OadrIntervalPeriod, OadrReportBody, OadrReportInterval, OadrReportPayload,
+    OadrReportResource,
+};
 use crate::entities::capacity::OadrReportObligation;
 use crate::entities::plan::SiteFlexibilityEnvelope;
 use crate::simulator::SimState;
@@ -102,7 +104,11 @@ fn latest_net_export_kw(sim: &SimState) -> f64 {
 ///   - STORAGE_CHARGE_LEVEL (EV SoC %) if EV history is available.
 ///
 /// Returns None if the event has no id or programID.
-pub fn build_measurement_report(event: &OadrEvent, sim: &SimState, ven_name: &str) -> Option<Value> {
+pub fn build_measurement_report(
+    event: &OadrEvent,
+    sim: &SimState,
+    ven_name: &str,
+) -> Option<OadrReportBody> {
     let event_id = &event.id;
     let program_id = &event.programID;
 
@@ -132,35 +138,45 @@ pub fn build_measurement_report(event: &OadrEvent, sim: &SimState, ven_name: &st
     };
 
     let mut payloads = vec![
-        json!({ "type": report_type, "values": [report_value] }),
-        json!({ "type": "OPERATING_STATE", "values": ["ACTIVE"] }),
+        OadrReportPayload {
+            r#type: report_type.to_string(),
+            values: vec![serde_json::Value::from(report_value)],
+        },
+        OadrReportPayload {
+            r#type: "OPERATING_STATE".to_string(),
+            values: vec![serde_json::Value::from("ACTIVE")],
+        },
     ];
 
     // Add EV SoC if available
     if let Some(ev_entry) = sim.asset("ev") {
         if let Some(last) = ev_entry.history.latest() {
             if let Some(soc) = soc_from_point(last) {
-                payloads.push(json!({
-                    "type": "STORAGE_CHARGE_LEVEL",
-                    "values": [format!("{:.1}", soc * 100.0)]
-                }));
+                payloads.push(OadrReportPayload {
+                    r#type: "STORAGE_CHARGE_LEVEL".to_string(),
+                    values: vec![serde_json::Value::from(format!("{:.1}", soc * 100.0))],
+                });
             }
         }
     }
 
-    let report = json!({
-        "programID": program_id,
-        "eventID": event_id,
-        "clientName": ven_name,
-        "reportName": report_name,
-        "resources": [{
-            "resourceName": resource_name,
-            "intervals": [{"id": 0, "payloads": payloads}]
-        }]
-    });
+    let report = OadrReportBody {
+        programID: program_id.clone(),
+        eventID: Some(event_id.clone()),
+        clientName: ven_name.to_string(),
+        reportName: report_name,
+        resources: vec![OadrReportResource {
+            resourceName: resource_name,
+            intervals: vec![OadrReportInterval {
+                id: 0,
+                intervalPeriod: None,
+                payloads,
+            }],
+        }],
+    };
 
     debug!(
-        report_name,
+        report_name = %report.reportName,
         event_id, report_type, report_value, "built measurement report"
     );
     Some(report)
@@ -172,7 +188,7 @@ pub fn build_measurement_reports_for_active_events(
     sim: &SimState,
     ven_name: &str,
     now: DateTime<Utc>,
-) -> Vec<Value> {
+) -> Vec<OadrReportBody> {
     let mut seen = std::collections::HashSet::new();
     let mut reports = Vec::new();
 
@@ -224,7 +240,7 @@ pub fn build_measurement_report_for_obligation(
     sim: &SimState,
     ven_name: &str,
     site_envelope: Option<&SiteFlexibilityEnvelope>,
-) -> Option<Value> {
+) -> Option<OadrReportBody> {
     let program_id = obligation.program_id.as_deref()?;
     let event_id = &obligation.event_id;
 
@@ -238,29 +254,43 @@ pub fn build_measurement_report_for_obligation(
 
     let payload_type = &obligation.payload_type;
 
-    let intervals: Vec<Value> = match payload_type.as_str() {
+    let intervals: Vec<OadrReportInterval> = match payload_type.as_str() {
         "STORAGE_CHARGE_STATE" | "STORAGE_CHARGE_LEVEL" => {
             build_soc_intervals(sim, interval_width, &duration_iso)
         }
         "IMPORT_CAPACITY_RESERVATION" => {
             let up_w = site_envelope.map(|e| e.up_kw * 1000.0).unwrap_or(0.0);
-            vec![json!({
-                "id": 0,
-                "payloads": [
-                    {"type": "IMPORT_CAPACITY_RESERVATION", "values": [up_w]},
-                    {"type": "OPERATING_STATE", "values": ["ACTIVE"]}
-                ]
-            })]
+            vec![OadrReportInterval {
+                id: 0,
+                intervalPeriod: None,
+                payloads: vec![
+                    OadrReportPayload {
+                        r#type: "IMPORT_CAPACITY_RESERVATION".to_string(),
+                        values: vec![serde_json::Value::from(up_w)],
+                    },
+                    OadrReportPayload {
+                        r#type: "OPERATING_STATE".to_string(),
+                        values: vec![serde_json::Value::from("ACTIVE")],
+                    },
+                ],
+            }]
         }
         "EXPORT_CAPACITY_RESERVATION" => {
             let down_w = site_envelope.map(|e| e.down_kw * 1000.0).unwrap_or(0.0);
-            vec![json!({
-                "id": 0,
-                "payloads": [
-                    {"type": "EXPORT_CAPACITY_RESERVATION", "values": [down_w]},
-                    {"type": "OPERATING_STATE", "values": ["ACTIVE"]}
-                ]
-            })]
+            vec![OadrReportInterval {
+                id: 0,
+                intervalPeriod: None,
+                payloads: vec![
+                    OadrReportPayload {
+                        r#type: "EXPORT_CAPACITY_RESERVATION".to_string(),
+                        values: vec![serde_json::Value::from(down_w)],
+                    },
+                    OadrReportPayload {
+                        r#type: "OPERATING_STATE".to_string(),
+                        values: vec![serde_json::Value::from("ACTIVE")],
+                    },
+                ],
+            }]
         }
         _ => {
             let resampled = net_power_ts.resample_uniform(interval_width, Aggregation::Mean);
@@ -279,17 +309,23 @@ pub fn build_measurement_report_for_obligation(
                     } else {
                         "USAGE"
                     };
-                    json!({
-                        "id": i,
-                        "intervalPeriod": {
-                            "start": ts.to_rfc3339(),
-                            "duration": duration_iso
-                        },
-                        "payloads": [
-                            {"type": report_type, "values": [value_w]},
-                            {"type": "OPERATING_STATE", "values": ["ACTIVE"]}
-                        ]
-                    })
+                    OadrReportInterval {
+                        id: i,
+                        intervalPeriod: Some(OadrIntervalPeriod {
+                            start: Some(ts.to_rfc3339()),
+                            duration: Some(duration_iso.clone()),
+                        }),
+                        payloads: vec![
+                            OadrReportPayload {
+                                r#type: report_type.to_string(),
+                                values: vec![serde_json::Value::from(value_w)],
+                            },
+                            OadrReportPayload {
+                                r#type: "OPERATING_STATE".to_string(),
+                                values: vec![serde_json::Value::from("ACTIVE")],
+                            },
+                        ],
+                    }
                 })
                 .collect()
         }
@@ -299,21 +335,22 @@ pub fn build_measurement_report_for_obligation(
         return None;
     }
 
-    let report = json!({
-        "programID": program_id,
-        "eventID": event_id,
-        "clientName": ven_name,
-        "reportName": report_name,
-        "resources": [{
-            "resourceName": resource_name,
-            "intervals": intervals
-        }]
-    });
+    let interval_count = intervals.len();
+    let report = OadrReportBody {
+        programID: program_id.to_string(),
+        eventID: Some(event_id.clone()),
+        clientName: ven_name.to_string(),
+        reportName: report_name,
+        resources: vec![OadrReportResource {
+            resourceName: resource_name,
+            intervals,
+        }],
+    };
 
     debug!(
-        report_name,
+        report_name = %report.reportName,
         event_id,
-        interval_count = intervals.len(),
+        interval_count,
         "built obligation measurement report"
     );
     Some(report)
@@ -367,7 +404,11 @@ fn build_net_site_power_ts(sim: &SimState) -> TimeSeries {
 }
 
 /// Build SoC intervals using point-in-time sampling at interval ends.
-fn build_soc_intervals(sim: &SimState, interval_width: Duration, duration_iso: &str) -> Vec<Value> {
+fn build_soc_intervals(
+    sim: &SimState,
+    interval_width: Duration,
+    duration_iso: &str,
+) -> Vec<OadrReportInterval> {
     let now = Utc::now();
     let full_window = Duration::hours(2);
 
@@ -430,20 +471,26 @@ fn build_soc_intervals(sim: &SimState, interval_width: Duration, duration_iso: &
                 .map(|(_, v)| *v)
                 .unwrap_or(0.0);
 
-            json!({
-                "id": i,
-                "intervalPeriod": {
-                    "start": ts.to_rfc3339(),
-                    "duration": duration_iso
-                },
-                "payloads": [
-                    {
-                        "type": "STORAGE_CHARGE_LEVEL",
-                        "values": [format!("{:.1}", soc_value * 100.0)]
+            OadrReportInterval {
+                id: i,
+                intervalPeriod: Some(OadrIntervalPeriod {
+                    start: Some(ts.to_rfc3339()),
+                    duration: Some(duration_iso.to_string()),
+                }),
+                payloads: vec![
+                    OadrReportPayload {
+                        r#type: "STORAGE_CHARGE_LEVEL".to_string(),
+                        values: vec![serde_json::Value::from(format!(
+                            "{:.1}",
+                            soc_value * 100.0
+                        ))],
                     },
-                    {"type": "OPERATING_STATE", "values": ["ACTIVE"]}
-                ]
-            })
+                    OadrReportPayload {
+                        r#type: "OPERATING_STATE".to_string(),
+                        values: vec![serde_json::Value::from("ACTIVE")],
+                    },
+                ],
+            }
         })
         .collect()
 }
@@ -481,7 +528,7 @@ pub fn build_status_report(
     ven_name: &str,
     program_id: Option<&str>,
     _now: DateTime<Utc>,
-) -> Option<Value> {
+) -> Option<OadrReportBody> {
     let program_id = program_id?;
 
     let (description, asset_id_opt) = match event {
@@ -512,21 +559,29 @@ pub fn build_status_report(
         .map(|id| format!("{}-{}", ven_name, id))
         .unwrap_or_else(|| format!("{}-site", ven_name));
 
-    let report = json!({
-        "programID": program_id,
-        "clientName": ven_name,
-        "reportName": format!("status-{}", ven_name),
-        "resources": [{
-            "resourceName": resource_name,
-            "intervals": [{
-                "id": 0,
-                "payloads": [
-                    {"type": "TELEMETRY_STATUS", "values": [description]},
-                    {"type": "USAGE", "values": [net_import_kw * 1000.0]}
-                ]
-            }]
-        }]
-    });
+    let report = OadrReportBody {
+        programID: program_id.to_string(),
+        eventID: None,
+        clientName: ven_name.to_string(),
+        reportName: format!("status-{}", ven_name),
+        resources: vec![OadrReportResource {
+            resourceName: resource_name,
+            intervals: vec![OadrReportInterval {
+                id: 0,
+                intervalPeriod: None,
+                payloads: vec![
+                    OadrReportPayload {
+                        r#type: "TELEMETRY_STATUS".to_string(),
+                        values: vec![serde_json::Value::from(description)],
+                    },
+                    OadrReportPayload {
+                        r#type: "USAGE".to_string(),
+                        values: vec![serde_json::Value::from(net_import_kw * 1000.0)],
+                    },
+                ],
+            }],
+        }],
+    };
 
     Some(report)
 }
@@ -734,20 +789,23 @@ mod tests {
         let ob = make_obligation("ev1", "prog1", "USAGE", 900);
         let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).unwrap();
 
-        let intervals = report["resources"][0]["intervals"].as_array().unwrap();
+        let intervals = &report.resources[0].intervals;
         assert!(
             intervals.len() >= 2,
             "expected multiple intervals, got {}",
             intervals.len()
         );
         for (i, iv) in intervals.iter().enumerate() {
-            assert_eq!(iv["id"], i as u64);
-            assert!(iv["intervalPeriod"]["start"].is_string());
-            assert_eq!(iv["intervalPeriod"]["duration"], "PT15M");
+            assert_eq!(iv.id, i);
+            assert!(iv.intervalPeriod.as_ref().unwrap().start.is_some());
+            assert_eq!(
+                iv.intervalPeriod.as_ref().unwrap().duration.as_deref(),
+                Some("PT15M")
+            );
         }
-        let payloads = intervals[0]["payloads"].as_array().unwrap();
-        assert!(payloads.iter().any(|p| p["type"] == "USAGE"));
-        assert!(payloads.iter().any(|p| p["type"] == "OPERATING_STATE"));
+        let payloads = &intervals[0].payloads;
+        assert!(payloads.iter().any(|p| p.r#type == "USAGE"));
+        assert!(payloads.iter().any(|p| p.r#type == "OPERATING_STATE"));
     }
 
     #[test]
@@ -782,15 +840,14 @@ mod tests {
         let sim = make_sim(vec![make_entry("pv", &[(0, -5.0), (900, -5.0)])]);
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_LIMIT", 900);
         let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).unwrap();
-        let intervals = report["resources"][0]["intervals"].as_array().unwrap();
+        let intervals = &report.resources[0].intervals;
         for iv in intervals {
-            let usage = iv["payloads"]
-                .as_array()
-                .unwrap()
+            let usage = iv
+                .payloads
                 .iter()
-                .find(|p| p["type"] == "USAGE")
+                .find(|p| p.r#type == "USAGE")
                 .unwrap();
-            let val = usage["values"][0].as_f64().unwrap();
+            let val = usage.values[0].as_f64().unwrap();
             assert!(
                 (val - 0.0).abs() < 1e-9,
                 "import should be 0 for export power, got {val}"
@@ -803,15 +860,14 @@ mod tests {
         let sim = make_sim(vec![make_entry("pv", &[(0, -3.0), (900, -3.0)])]);
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_LIMIT", 900);
         let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).unwrap();
-        let intervals = report["resources"][0]["intervals"].as_array().unwrap();
+        let intervals = &report.resources[0].intervals;
         for iv in intervals {
-            let usage = iv["payloads"]
-                .as_array()
-                .unwrap()
+            let usage = iv
+                .payloads
                 .iter()
-                .find(|p| p["type"] == "USAGE")
+                .find(|p| p.r#type == "USAGE")
                 .unwrap();
-            let val = usage["values"][0].as_f64().unwrap();
+            let val = usage.values[0].as_f64().unwrap();
             assert!(
                 (val - 3000.0).abs() < 1.0,
                 "export should be ~3000 W, got {val}"
@@ -834,16 +890,15 @@ mod tests {
         )]);
         let ob = make_obligation("e1", "p1", "STORAGE_CHARGE_LEVEL", 900);
         let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).unwrap();
-        let intervals = report["resources"][0]["intervals"].as_array().unwrap();
+        let intervals = &report.resources[0].intervals;
         assert!(!intervals.is_empty());
         for iv in intervals {
-            let soc_payload = iv["payloads"]
-                .as_array()
-                .unwrap()
+            let soc_payload = iv
+                .payloads
                 .iter()
-                .find(|p| p["type"] == "STORAGE_CHARGE_LEVEL")
+                .find(|p| p.r#type == "STORAGE_CHARGE_LEVEL")
                 .unwrap();
-            let soc_pct: f64 = soc_payload["values"][0].as_str().unwrap().parse().unwrap();
+            let soc_pct: f64 = soc_payload.values[0].as_str().unwrap().parse().unwrap();
             assert!(
                 soc_pct >= 20.0 && soc_pct <= 80.0,
                 "SoC {soc_pct} out of range"
@@ -919,10 +974,10 @@ mod tests {
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
         let report = build_measurement_report_for_obligation(&ob, &sim, "ven-test", Some(&env))
             .expect("should return Some");
-        let val = report["resources"][0]["intervals"][0]["payloads"][0]["values"][0]
-            .as_f64()
-            .unwrap();
+        let iv = &report.resources[0].intervals[0];
+        let val = iv.payloads[0].values[0].as_f64().unwrap();
         assert!((val - 5000.0).abs() < 1.0, "expected 5000 W, got {val}");
+        assert_eq!(iv.payloads[0].r#type, "IMPORT_CAPACITY_RESERVATION");
     }
 
     #[test]
@@ -938,10 +993,10 @@ mod tests {
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_RESERVATION", 900);
         let report = build_measurement_report_for_obligation(&ob, &sim, "ven-test", Some(&env))
             .expect("should return Some");
-        let val = report["resources"][0]["intervals"][0]["payloads"][0]["values"][0]
-            .as_f64()
-            .unwrap();
+        let iv = &report.resources[0].intervals[0];
+        let val = iv.payloads[0].values[0].as_f64().unwrap();
         assert!((val - 3000.0).abs() < 1.0, "expected 3000 W, got {val}");
+        assert_eq!(iv.payloads[0].r#type, "EXPORT_CAPACITY_RESERVATION");
     }
 
     #[test]
@@ -951,9 +1006,148 @@ mod tests {
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
         let report = build_measurement_report_for_obligation(&ob, &sim, "ven-test", None)
             .expect("should return Some even with no envelope");
-        let val = report["resources"][0]["intervals"][0]["payloads"][0]["values"][0]
+        let val = report.resources[0].intervals[0].payloads[0].values[0]
             .as_f64()
             .unwrap();
         assert_eq!(val, 0.0, "expected 0.0 W when no envelope");
+    }
+
+    // ── build_measurement_report ────────────────────────────────────
+
+    #[test]
+    fn measurement_report_fields_match_event() {
+        use crate::controller::vtn_port::{OadrInterval, OadrPayload};
+        let event = OadrEvent {
+            id: "evt-001".to_string(),
+            programID: "prog-001".to_string(),
+            eventName: None,
+            intervalPeriod: None,
+            intervals: vec![OadrInterval {
+                intervalPeriod: None,
+                payloads: vec![OadrPayload {
+                    r#type: "USAGE".to_string(),
+                    values: vec![],
+                }],
+            }],
+            reportDescriptors: None,
+        };
+        let sim = make_sim(vec![make_entry("site", &[(0, 3.0)])]);
+        let report = build_measurement_report(&event, &sim, "ven-1").unwrap();
+        assert_eq!(report.programID, "prog-001");
+        assert_eq!(report.eventID.as_deref(), Some("evt-001"));
+        assert_eq!(report.clientName, "ven-1");
+        assert_eq!(report.reportName, "auto-ven-1-evt-001");
+        assert_eq!(report.resources[0].resourceName, "ven-1-meter");
+        let iv = &report.resources[0].intervals[0];
+        assert_eq!(iv.id, 0);
+        assert!(iv.intervalPeriod.is_none());
+        let usage = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
+        let val = usage.values[0].as_f64().unwrap();
+        assert!((val - 3000.0).abs() < 1.0, "expected 3000 W, got {val}");
+        assert!(iv.payloads.iter().any(|p| p.r#type == "OPERATING_STATE"));
+    }
+
+    #[test]
+    fn measurement_report_includes_ev_soc_when_available() {
+        use crate::controller::vtn_port::{OadrInterval, OadrPayload};
+        let event = OadrEvent {
+            id: "evt-002".to_string(),
+            programID: "prog-001".to_string(),
+            eventName: None,
+            intervalPeriod: None,
+            intervals: vec![OadrInterval {
+                intervalPeriod: None,
+                payloads: vec![OadrPayload {
+                    r#type: "USAGE".to_string(),
+                    values: vec![],
+                }],
+            }],
+            reportDescriptors: None,
+        };
+        let sim = make_sim(vec![make_ev_entry("ev", &[(0, 7.0, 0.5)])]);
+        let report = build_measurement_report(&event, &sim, "ven-1").unwrap();
+        let iv = &report.resources[0].intervals[0];
+        let soc_payload = iv.payloads.iter().find(|p| p.r#type == "STORAGE_CHARGE_LEVEL");
+        assert!(soc_payload.is_some(), "expected SoC payload for EV");
+        let soc_str = soc_payload.unwrap().values[0].as_str().unwrap();
+        let soc_pct: f64 = soc_str.parse().unwrap();
+        assert!((soc_pct - 50.0).abs() < 0.2, "expected ~50%, got {soc_pct}");
+    }
+
+    // ── build_measurement_reports_for_active_events ────────────────
+
+    #[test]
+    fn active_events_returns_empty_for_no_events() {
+        let sim = make_sim(vec![make_entry("site", &[(0, 1.0)])]);
+        let reports = build_measurement_reports_for_active_events(&[], &sim, "ven-1", Utc::now());
+        assert!(reports.is_empty());
+    }
+
+    #[test]
+    fn active_events_skips_events_with_report_descriptors() {
+        use crate::controller::vtn_port::{OadrInterval, OadrPayload, OadrReportDescriptor};
+        let event = OadrEvent {
+            id: "evt-003".to_string(),
+            programID: "prog-001".to_string(),
+            eventName: None,
+            intervalPeriod: None,
+            intervals: vec![OadrInterval {
+                intervalPeriod: None,
+                payloads: vec![OadrPayload {
+                    r#type: "USAGE".to_string(),
+                    values: vec![],
+                }],
+            }],
+            reportDescriptors: Some(vec![OadrReportDescriptor {
+                payloadType: "USAGE".to_string(),
+                readingType: None,
+                frequency: Some(900),
+            }]),
+        };
+        let sim = make_sim(vec![make_entry("site", &[(0, 1.0)])]);
+        let reports =
+            build_measurement_reports_for_active_events(&[event], &sim, "ven-1", Utc::now());
+        assert!(
+            reports.is_empty(),
+            "events with reportDescriptors should be skipped"
+        );
+    }
+
+    // ── build_status_report ────────────────────────────────────────
+
+    #[test]
+    fn status_report_plan_cycle_fields() {
+        use crate::controller::trace::ControllerEvent;
+        let event = ControllerEvent::PlanCycle {
+            ts: Utc::now(),
+            trigger_reason: "Periodic".to_string(),
+            total_slots: 288,
+        };
+        let sim = make_sim(vec![make_entry("site", &[(0, 2.0)])]);
+        let report =
+            build_status_report(&event, &sim, "ven-1", Some("prog-001"), Utc::now()).unwrap();
+        assert_eq!(report.programID, "prog-001");
+        assert!(report.eventID.is_none(), "status report must omit eventID");
+        assert_eq!(report.clientName, "ven-1");
+        assert_eq!(report.reportName, "status-ven-1");
+        assert_eq!(report.resources[0].resourceName, "ven-1-site");
+        let iv = &report.resources[0].intervals[0];
+        assert_eq!(iv.id, 0);
+        let status_payload = iv.payloads.iter().find(|p| p.r#type == "TELEMETRY_STATUS").unwrap();
+        let desc = status_payload.values[0].as_str().unwrap();
+        assert!(desc.contains("PlanCycle"), "expected PlanCycle in description, got: {desc}");
+        assert!(iv.payloads.iter().any(|p| p.r#type == "USAGE"));
+    }
+
+    #[test]
+    fn status_report_no_program_id_returns_none() {
+        use crate::controller::trace::ControllerEvent;
+        let event = ControllerEvent::PlanCycle {
+            ts: Utc::now(),
+            trigger_reason: "Periodic".to_string(),
+            total_slots: 288,
+        };
+        let sim = make_sim(vec![]);
+        assert!(build_status_report(&event, &sim, "ven-1", None, Utc::now()).is_none());
     }
 }
