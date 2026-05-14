@@ -196,86 +196,23 @@ pub(crate) fn spawn_planning(
                 "planner: solve complete"
             );
 
-            // ── Cancel ticker, emit plan_ready ────────────────────────────
+            // ── Cancel ticker, delegate adoption + events to PlanningService ──
             let _ = cancel_tx.send(());
             ticker_task.await.ok();
-            let _ = event_tx.send(PlannerEvent::PlanReady {
-                plan_id: plan.id,
-                objective: obj,
+
+            let cycle = crate::services::PlanningService::adopt_if_warranted(
+                plan,
+                &trigger,
+                &trigger_reason,
+                planner.plan_adoption_threshold_eur,
+                planner.plan_adoption_decay_s,
                 solver_ms,
-                objective_eur: plan.objective_eur,
-                friction_eur: plan.friction_eur,
-                slot_count: plan.slots.len(),
-                trigger: trigger_reason.clone(),
-            });
-            // Acceptance gate: for Periodic replans, only adopt the new plan when it
-            // improves the total cost (Phase 1 + Phase 2 friction) by more than the
-            // effective threshold. Using total cost prevents a fragmented plan with low
-            // Phase 1 cost but high switching friction from displacing a smooth plan.
-            // The threshold decays linearly with plan age so that changing circumstances
-            // are never permanently blocked — after plan_adoption_decay_s seconds, any
-            // new plan is accepted. Hard triggers always force adoption.
-            let threshold = planner.plan_adoption_threshold_eur;
-            let decay_s = planner.plan_adoption_decay_s;
-            let is_hard_trigger = !matches!(trigger, PlanTrigger::Periodic);
-            debug!(
-                trigger = %trigger_reason,
-                is_hard_trigger,
-                objective_eur = plan.objective_eur,
-                friction_eur = plan.friction_eur,
-                total_eur = plan.objective_eur + plan.friction_eur,
-                threshold_eur = threshold,
-                "acceptance gate eval"
-            );
-
-            let adopt = if is_hard_trigger || threshold == 0.0 {
-                true
-            } else if let Some(ref current) = state.active_plan().await {
-                let elapsed_s = (now - current.created_at).num_seconds().max(0) as f64;
-                let decay_factor = if decay_s > 0.0 {
-                    (1.0 - elapsed_s / decay_s).max(0.0)
-                } else {
-                    1.0
-                };
-                let effective_threshold = threshold * decay_factor;
-                // When decay window has fully elapsed, refresh unconditionally so the
-                // rolling 24h window never becomes stale regardless of cost delta.
-                let fully_decayed = decay_s > 0.0 && elapsed_s >= decay_s;
-                let current_total = current.objective_eur + current.friction_eur;
-                let new_total = plan.objective_eur + plan.friction_eur;
-                let improvement = current_total - new_total;
-                if fully_decayed || improvement > effective_threshold {
-                    true
-                } else {
-                    info!(
-                        improvement_eur = improvement,
-                        effective_threshold_eur = effective_threshold,
-                        threshold_eur = threshold,
-                        elapsed_s = elapsed_s,
-                        decay_factor = decay_factor,
-                        fully_decayed,
-                        current_total_eur = current_total,
-                        new_total_eur = new_total,
-                        "periodic plan rejected: improvement below threshold"
-                    );
-                    false
-                }
-            } else {
-                true // no existing plan → always adopt
-            };
-
-            let slot_count = plan.slots.len();
-            if adopt {
-                info!(trigger = %trigger_reason, slot_count, "planner: plan adopted");
-                // Replan supersedes any active correction
-                let _ = event_tx.send(PlannerEvent::CorrectionCleared {
-                    ts: now,
-                    reason: "superseded_by_replan".to_string(),
-                });
-                state.set_active_plan(Some(plan)).await;
-            } else {
-                info!(trigger = %trigger_reason, slot_count, "planner: plan NOT adopted (periodic below threshold)");
-            }
+                obj,
+                &state,
+                &event_tx,
+                now,
+            )
+            .await;
 
             // Refresh site envelope immediately after each plan cycle.
             {
@@ -284,24 +221,21 @@ pub(crate) fn spawn_planning(
                 state.set_site_envelope(env).await;
             }
 
-            info!(trigger = %trigger_reason, slot_count, "plan cycle complete");
-
-            // Emit PlanCycle controller event (T029)
-            let plan_cycle_event = controller::trace::ControllerEvent::PlanCycle {
-                ts: now,
-                trigger_reason,
-                total_slots: slot_count,
-            };
-            state.push_controller_event(plan_cycle_event.clone()).await;
+            info!(
+                trigger = %trigger_reason,
+                slot_count = cycle.plan.slots.len(),
+                adopted = cycle.adopted,
+                "plan cycle complete"
+            );
 
             // Event-driven status report on PlanCycle (T050)
             {
                 let sim_snap = sim.lock().await.clone();
                 let report_opt = controller::reporter::build_status_report(
-                    &plan_cycle_event,
+                    &cycle.plan_cycle_event,
                     &sim_snap,
                     &ven_name,
-                    None, // no single program_id in planning loop context
+                    None,
                     now,
                 );
                 if let Some(report) = report_opt {
