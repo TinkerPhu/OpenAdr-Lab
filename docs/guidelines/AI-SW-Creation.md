@@ -1,6 +1,6 @@
 - highest goal - make it right in the first attempt - correction is expensive. therefore planning is everything. Remember - Rules exist in our head, not in AI Agents. Write everything down as instructions.
 
-- make basic settings: pre-existing is not an excuse to ignore, create key-learnings, know the infrastructure (wsl, servers, tools), install speckit, maybe superpowers
+- make basic settings: pre-existing is not an excuse to ignore, create key-learnings, know the infrastructure (wsl, servers, tools), install speckit, maybe superpowers, git commit and merge strategies, test procedures and categories, linter, code-coverage tools - and the processing of its findings, build pipelines, issue trackings, backlog handling
 
 - Start with Requirements and UserStories
 

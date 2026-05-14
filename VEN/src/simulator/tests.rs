@@ -72,7 +72,8 @@ mod schema_snapshot_tests {
         }
 
         let expected_json = std::fs::read_to_string(&fixture)
-            .expect("fixture file must be readable");
+            .expect("fixture file must be readable")
+            .replace("\r\n", "\n");
         assert_eq!(
             actual_json, expected_json,
             "GET /sim/schema JSON has changed — update the fixture if the change is intentional"

@@ -2,7 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 
-use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport, VtnPort};
+use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport, OadrReportBody, VtnPort};
 
 /// Test double for VtnPort. Configurable responses; records upsert calls for assertions.
 pub struct MockVtn {
@@ -10,7 +10,7 @@ pub struct MockVtn {
     pub events: Vec<OadrEvent>,
     pub reports: Vec<OadrReport>,
     /// Captures every body passed to upsert_report; inspect in test assertions.
-    pub submitted_reports: Arc<Mutex<Vec<serde_json::Value>>>,
+    pub submitted_reports: Arc<Mutex<Vec<OadrReportBody>>>,
     /// When Some(msg), upsert_report returns Err with this message.
     pub upsert_error: Option<String>,
 }
@@ -37,7 +37,7 @@ impl MockVtn {
     }
 
     /// Return a clone of all submitted report bodies for assertion.
-    pub fn submitted(&self) -> Vec<serde_json::Value> {
+    pub fn submitted(&self) -> Vec<OadrReportBody> {
         self.submitted_reports.lock().unwrap().clone()
     }
 }
@@ -56,12 +56,12 @@ impl VtnPort for MockVtn {
         Ok(self.reports.clone())
     }
 
-    async fn upsert_report(&self, body: serde_json::Value) -> Result<serde_json::Value> {
+    async fn upsert_report(&self, body: OadrReportBody) -> Result<()> {
         if let Some(ref msg) = self.upsert_error {
             anyhow::bail!("{}", msg);
         }
-        self.submitted_reports.lock().unwrap().push(body.clone());
-        Ok(body)
+        self.submitted_reports.lock().unwrap().push(body);
+        Ok(())
     }
 }
 
@@ -72,16 +72,29 @@ mod tests {
     #[tokio::test]
     async fn test_mock_vtn_records_submitted_report() {
         let mock = MockVtn::new();
-        let body = serde_json::json!({ "reportName": "ven-status" });
-        mock.upsert_report(body.clone()).await.unwrap();
+        let body = OadrReportBody {
+            programID: "prog-1".to_string(),
+            eventID: None,
+            clientName: "ven-1".to_string(),
+            reportName: "ven-status".to_string(),
+            resources: vec![],
+        };
+        mock.upsert_report(body).await.unwrap();
         assert_eq!(mock.submitted().len(), 1);
-        assert_eq!(mock.submitted()[0]["reportName"], "ven-status");
+        assert_eq!(mock.submitted()[0].reportName, "ven-status");
     }
 
     #[tokio::test]
     async fn test_mock_vtn_returns_configured_error() {
         let mock = MockVtn::new().with_upsert_error("vtn unavailable");
-        let result = mock.upsert_report(serde_json::json!({})).await;
+        let body = OadrReportBody {
+            programID: "prog-1".to_string(),
+            eventID: None,
+            clientName: "ven-1".to_string(),
+            reportName: "test".to_string(),
+            resources: vec![],
+        };
+        let result = mock.upsert_report(body).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("vtn unavailable"));
     }
