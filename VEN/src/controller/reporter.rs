@@ -6,8 +6,8 @@
 use chrono::{DateTime, Duration, Utc};
 use tracing::debug;
 
-use crate::assets::HistoryPoint;
 use crate::common::{parse_iso8601_duration_secs, Aggregation, Interpolation, TimeSeries};
+use crate::controller::simulator_port::SimSnapshot;
 use crate::controller::trace::ControllerEvent;
 use crate::controller::vtn_port::{
     OadrEvent, OadrIntervalPeriod, OadrReportBody, OadrReportInterval, OadrReportPayload,
@@ -15,24 +15,31 @@ use crate::controller::vtn_port::{
 };
 use crate::entities::capacity::OadrReportObligation;
 use crate::entities::plan::SiteFlexibilityEnvelope;
-use crate::simulator::SimState;
 
 // ---------------------------------------------------------------------------
-// HistoryPoint → TimeSeries conversion helpers
+// Domain-side sample type — extracted at the infra boundary by callers.
+// No infra types here; callers map HistoryPoint → AssetReportSample.
 // ---------------------------------------------------------------------------
 
-/// Build a `TimeSeries` of `power_kw` from a slice of `HistoryPoint`.
-fn points_to_power_ts(points: &[HistoryPoint], interpolation: Interpolation) -> TimeSeries {
-    let samples: Vec<(DateTime<Utc>, f64)> = points.iter().map(|p| (p.ts, p.power_kw)).collect();
-    TimeSeries {
-        samples,
-        interpolation,
-    }
+/// One per-asset history point, pre-extracted at the infra boundary.
+pub struct AssetReportSample {
+    pub ts: DateTime<Utc>,
+    pub power_kw: f64,
+    /// State of charge as fraction 0.0–1.0. None for non-storage assets.
+    pub soc: Option<f64>,
 }
 
-/// Extract SoC (0.0–1.0) from a `HistoryPoint`'s state, if the asset is EV or Battery.
-fn soc_from_point(p: &HistoryPoint) -> Option<f64> {
-    p.state.soc()
+// ---------------------------------------------------------------------------
+// TimeSeries conversion helpers
+// ---------------------------------------------------------------------------
+
+/// Build a `TimeSeries` of `power_kw` from a slice of `AssetReportSample`.
+fn samples_to_power_ts(samples: &[AssetReportSample], interpolation: Interpolation) -> TimeSeries {
+    let pts: Vec<(DateTime<Utc>, f64)> = samples.iter().map(|s| (s.ts, s.power_kw)).collect();
+    TimeSeries {
+        samples: pts,
+        interpolation,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -76,37 +83,24 @@ fn event_is_active(event: &OadrEvent, now: DateTime<Utc>) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Sum the most-recent `power_kw` across all assets that are currently importing
-/// (positive power). Returns 0.0 if history is empty or all assets are exporting.
-fn latest_net_import_kw(sim: &SimState) -> f64 {
-    sim.assets
-        .iter()
-        .filter_map(|e| e.history.latest().map(|p| p.power_kw))
-        .filter(|&kw| kw > 0.0)
-        .sum()
-}
-
-/// Sum the most-recent `power_kw` across all assets that are currently exporting
-/// (negative power), returned as a positive magnitude.
-fn latest_net_export_kw(sim: &SimState) -> f64 {
-    sim.assets
-        .iter()
-        .filter_map(|e| e.history.latest().map(|p| p.power_kw))
-        .filter(|&kw| kw < 0.0)
-        .map(|kw| -kw)
-        .sum()
+/// (positive power). Returns 0.0 if no assets are importing.
+fn latest_net_import_kw(snap: &SimSnapshot) -> f64 {
+    snap.assets.values().map(|a| a.power_kw).filter(|&kw| kw > 0.0).sum()
 }
 
 /// Build a TELEMETRY_USAGE measurement report for a single active OpenADR event.
 ///
 /// The report includes:
-///   - Net site import power (sum of positive asset power_kw from latest history row).
+///   - Net site import power (grid_net_import_kw, pre-computed by the caller).
 ///   - OPERATING_STATE = "ACTIVE".
-///   - STORAGE_CHARGE_LEVEL (EV SoC %) if EV history is available.
+///   - STORAGE_CHARGE_LEVEL (EV SoC %) if EV samples are available.
 ///
 /// Returns None if the event has no id or programID.
 pub fn build_measurement_report(
     event: &OadrEvent,
-    sim: &SimState,
+    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
+    grid_net_import_kw: f64,
+    grid_net_export_kw: f64,
     ven_name: &str,
 ) -> Option<OadrReportBody> {
     let event_id = &event.id;
@@ -115,8 +109,7 @@ pub fn build_measurement_report(
     let report_name = format!("auto-{}-{}", ven_name, event_id);
     let resource_name = format!("{}-meter", ven_name);
 
-    let net_import_kw = latest_net_import_kw(sim);
-    let net_import_w = net_import_kw * 1000.0;
+    let net_import_w = grid_net_import_kw * 1000.0;
 
     // Extract the primary payload type from the event's first interval
     let payload_type = event
@@ -129,8 +122,8 @@ pub fn build_measurement_report(
     let (report_type, report_value) = match payload_type {
         "IMPORT_CAPACITY_LIMIT" => ("USAGE", net_import_w),
         "EXPORT_CAPACITY_LIMIT" => {
-            let export_kw = latest_net_export_kw(sim);
-            ("USAGE", export_kw * 1000.0)
+            // grid_net_export_kw is only consumed in this arm
+            ("USAGE", grid_net_export_kw * 1000.0)
         }
         "PRICE" => ("USAGE", net_import_w),
         "SIMPLE" => ("SIMPLE", 1.0),
@@ -149,15 +142,15 @@ pub fn build_measurement_report(
     ];
 
     // Add EV SoC if available
-    if let Some(ev_entry) = sim.asset("ev") {
-        if let Some(last) = ev_entry.history.latest() {
-            if let Some(soc) = soc_from_point(last) {
-                payloads.push(OadrReportPayload {
-                    r#type: "STORAGE_CHARGE_LEVEL".to_string(),
-                    values: vec![serde_json::Value::from(format!("{:.1}", soc * 100.0))],
-                });
-            }
-        }
+    if let Some(soc) = asset_samples
+        .get("ev")
+        .and_then(|v| v.last())
+        .and_then(|s| s.soc)
+    {
+        payloads.push(OadrReportPayload {
+            r#type: "STORAGE_CHARGE_LEVEL".to_string(),
+            values: vec![serde_json::Value::from(format!("{:.1}", soc * 100.0))],
+        });
     }
 
     let report = OadrReportBody {
@@ -185,7 +178,9 @@ pub fn build_measurement_report(
 /// Build measurement reports for all currently active events (timer-driven entry point).
 pub fn build_measurement_reports_for_active_events(
     events: &[OadrEvent],
-    sim: &SimState,
+    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
+    grid_net_import_kw: f64,
+    grid_net_export_kw: f64,
     ven_name: &str,
     now: DateTime<Utc>,
 ) -> Vec<OadrReportBody> {
@@ -210,7 +205,13 @@ pub fn build_measurement_reports_for_active_events(
         }
         if seen.insert(event.id.clone()) {
             debug!(event_id = %event.id, "timer-driven: building single-interval report");
-            if let Some(report) = build_measurement_report(event, sim, ven_name) {
+            if let Some(report) = build_measurement_report(
+                event,
+                asset_samples,
+                grid_net_import_kw,
+                grid_net_export_kw,
+                ven_name,
+            ) {
                 reports.push(report);
             }
         }
@@ -237,7 +238,7 @@ pub fn build_measurement_reports_for_active_events(
 /// Returns None if the obligation has no event_id or program_id.
 pub fn build_measurement_report_for_obligation(
     obligation: &OadrReportObligation,
-    sim: &SimState,
+    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
     ven_name: &str,
     site_envelope: Option<&SiteFlexibilityEnvelope>,
 ) -> Option<OadrReportBody> {
@@ -250,13 +251,13 @@ pub fn build_measurement_report_for_obligation(
     let duration_iso = format_iso8601_duration(obligation.interval_duration_s);
 
     // Build net site power TimeSeries (sum all assets' power_kw)
-    let net_power_ts = build_net_site_power_ts(sim);
+    let net_power_ts = build_net_site_power_ts(asset_samples);
 
     let payload_type = &obligation.payload_type;
 
     let intervals: Vec<OadrReportInterval> = match payload_type.as_str() {
         "STORAGE_CHARGE_STATE" | "STORAGE_CHARGE_LEVEL" => {
-            build_soc_intervals(sim, interval_width, &duration_iso)
+            build_soc_intervals(asset_samples, interval_width, &duration_iso)
         }
         "IMPORT_CAPACITY_RESERVATION" => {
             let up_w = site_envelope.map(|e| e.up_kw * 1000.0).unwrap_or(0.0);
@@ -359,18 +360,13 @@ pub fn build_measurement_report_for_obligation(
 /// Sum all assets' `power_kw` into a single net site power `TimeSeries`.
 ///
 /// Uses LOCF cross-asset aggregation: for each unique timestamp across all
-/// asset histories, sums each asset's `power_at(t)`.
-fn build_net_site_power_ts(sim: &SimState) -> TimeSeries {
-    let now = Utc::now();
-    let full_window = Duration::hours(2); // wide enough to cover any reporting interval
-
-    let mut per_asset: Vec<TimeSeries> = sim
-        .assets
-        .iter()
-        .map(|e| {
-            let points = e.history.slice(full_window, now);
-            points_to_power_ts(&points, Interpolation::Step)
-        })
+/// asset sample vecs, sums each asset's `power_at(t)`.
+fn build_net_site_power_ts(
+    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
+) -> TimeSeries {
+    let mut per_asset: Vec<TimeSeries> = asset_samples
+        .values()
+        .map(|samples| samples_to_power_ts(samples, Interpolation::Step))
         .filter(|ts| !ts.samples.is_empty())
         .collect();
 
@@ -405,43 +401,28 @@ fn build_net_site_power_ts(sim: &SimState) -> TimeSeries {
 
 /// Build SoC intervals using point-in-time sampling at interval ends.
 fn build_soc_intervals(
-    sim: &SimState,
+    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
     interval_width: Duration,
     duration_iso: &str,
 ) -> Vec<OadrReportInterval> {
-    let now = Utc::now();
-    let full_window = Duration::hours(2);
+    // Build SoC TimeSeries from the "ev" or "battery" sample vec.
+    let make_soc_ts = |key: &str| -> Option<TimeSeries> {
+        let samples = asset_samples.get(key)?;
+        let pts: Vec<(DateTime<Utc>, f64)> = samples
+            .iter()
+            .filter_map(|s| s.soc.map(|soc| (s.ts, soc)))
+            .collect();
+        if pts.is_empty() {
+            return None;
+        }
+        Some(TimeSeries {
+            samples: pts,
+            interpolation: Interpolation::Step,
+        })
+    };
 
     // Look for EV or battery SoC timeseries
-    let soc_ts = sim
-        .asset("ev")
-        .map(|e| {
-            let points = e.history.slice(full_window, now);
-            let samples: Vec<(DateTime<Utc>, f64)> = points
-                .iter()
-                .filter_map(|p| soc_from_point(p).map(|soc| (p.ts, soc)))
-                .collect();
-            TimeSeries {
-                samples,
-                interpolation: Interpolation::Step,
-            }
-        })
-        .filter(|ts| !ts.samples.is_empty())
-        .or_else(|| {
-            sim.asset("battery")
-                .map(|e| {
-                    let points = e.history.slice(full_window, now);
-                    let samples: Vec<(DateTime<Utc>, f64)> = points
-                        .iter()
-                        .filter_map(|p| soc_from_point(p).map(|soc| (p.ts, soc)))
-                        .collect();
-                    TimeSeries {
-                        samples,
-                        interpolation: Interpolation::Step,
-                    }
-                })
-                .filter(|ts| !ts.samples.is_empty())
-        });
+    let soc_ts = make_soc_ts("ev").or_else(|| make_soc_ts("battery"));
 
     let soc_ts = match soc_ts {
         Some(ts) => ts,
@@ -524,7 +505,7 @@ fn format_iso8601_duration(secs: u64) -> String {
 /// or for unhandled event types.
 pub fn build_status_report(
     event: &ControllerEvent,
-    sim: &SimState,
+    snap: &SimSnapshot,
     ven_name: &str,
     program_id: Option<&str>,
     _now: DateTime<Utc>,
@@ -552,7 +533,7 @@ pub fn build_status_report(
         _ => return None,
     };
 
-    let net_import_kw = latest_net_import_kw(sim);
+    let net_import_kw = latest_net_import_kw(snap);
 
     let resource_name = asset_id_opt
         .as_deref()
@@ -589,90 +570,70 @@ pub fn build_status_report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::{AssetHistoryBuffer, AssetState, BaseLoadState, EvState, Grid, HistoryPoint, PvState};
-    use crate::simulator::{energy::EnergyCounter, GridMeter, SimState};
+    use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot};
+    use std::collections::HashMap;
     use uuid::Uuid;
 
+    // Fixed-epoch timestamp helper for deterministic tests.
     fn ts(offset_s: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(1_700_000_000 + offset_s, 0).unwrap()
     }
 
-    /// Build an `AssetEntry` with BaseLoad history (power-only).
-    ///
-    /// Offsets are treated as seconds from oldest→newest. The most recent row
-    /// is pinned to just before Utc::now() so `build_net_site_power_ts` (which
-    /// slices [now-2h, now]) can see the data.
-    fn make_entry(id: &str, rows: &[(i64, f64)]) -> crate::simulator::AssetEntry {
-        let max_offset = rows.iter().map(|r| r.0).max().unwrap_or(0);
-        // Truncate to second precision so concurrent make_entry calls within the same
-        // second produce identical timestamps, making cross-asset LOCF aggregation deterministic.
-        let now_s = DateTime::from_timestamp(Utc::now().timestamp(), 0).unwrap();
-        let base = now_s - Duration::seconds(max_offset);
-        let mut buf = AssetHistoryBuffer::new(3600);
-        for &(offset, power_kw) in rows {
-            buf.push(HistoryPoint {
-                ts: base + Duration::seconds(offset),
+    /// Build `(id, Vec<AssetReportSample>)` from `(offset_s, power_kw)` pairs.
+    fn make_samples(id: &str, rows: &[(i64, f64)]) -> (String, Vec<AssetReportSample>) {
+        let samples = rows
+            .iter()
+            .map(|&(offset_s, power_kw)| AssetReportSample {
+                ts: ts(offset_s),
                 power_kw,
-                state: AssetState::BaseLoad(BaseLoadState {
-                    actual_power_kw: power_kw,
-                }),
-            });
-        }
-        crate::simulator::AssetEntry {
-            id: id.to_string(),
-            state: AssetState::BaseLoad(BaseLoadState {
-                actual_power_kw: 0.0,
-            }),
-            setpoint_kw: 0.0,
-            last_power_kw: rows.last().map(|r| r.1).unwrap_or(0.0),
-            energy: EnergyCounter::new(),
-            history: buf,
-        }
+                soc: None,
+            })
+            .collect();
+        (id.to_string(), samples)
     }
 
-    /// Build an `AssetEntry` with EV history (power + SoC).
-    ///
-    /// Same timestamp anchoring as `make_entry`.
-    fn make_ev_entry(id: &str, rows: &[(i64, f64, f64)]) -> crate::simulator::AssetEntry {
-        let max_offset = rows.iter().map(|r| r.0).max().unwrap_or(0);
-        let now_s = DateTime::from_timestamp(Utc::now().timestamp(), 0).unwrap();
-        let base = now_s - Duration::seconds(max_offset);
-        let mut buf = AssetHistoryBuffer::new(3600);
-        for &(offset, power_kw, soc) in rows {
-            buf.push(HistoryPoint {
-                ts: base + Duration::seconds(offset),
+    /// Build `(id, Vec<AssetReportSample>)` from `(offset_s, power_kw, soc)` triples.
+    fn make_ev_samples(id: &str, rows: &[(i64, f64, f64)]) -> (String, Vec<AssetReportSample>) {
+        let samples = rows
+            .iter()
+            .map(|&(offset_s, power_kw, soc)| AssetReportSample {
+                ts: ts(offset_s),
                 power_kw,
-                state: AssetState::Ev(EvState {
-                    soc,
-                    plugged: true,
-                    actual_power_kw: power_kw,
-                }),
-            });
-        }
-        crate::simulator::AssetEntry {
-            id: id.to_string(),
-            state: AssetState::Ev(EvState {
-                soc: 0.0,
-                plugged: true,
-                actual_power_kw: 0.0,
-            }),
-            setpoint_kw: 0.0,
-            last_power_kw: rows.last().map(|r| r.1).unwrap_or(0.0),
-            energy: EnergyCounter::new(),
-            history: buf,
-        }
+                soc: Some(soc),
+            })
+            .collect();
+        (id.to_string(), samples)
     }
 
-    /// Build a minimal `SimState` from a list of entries.
-    fn make_sim(entries: Vec<crate::simulator::AssetEntry>) -> SimState {
-        SimState {
-            asset_configs: vec![],
-            assets: entries,
-            grid: GridMeter::default(),
-            grid_asset: Grid::new(),
-            pv_smoothing: crate::simulator::PvSmoothingState::default(),
-            base_load_smoothing: Default::default(),
-            last_tick: Utc::now(),
+    /// Build a `SimSnapshot` with given `(id, power_kw)` asset pairs.
+    fn make_snap(assets: &[(&str, f64)]) -> SimSnapshot {
+        SimSnapshot {
+            ts: Utc::now(),
+            grid: GridSnapshot {
+                net_power_w: 0.0,
+                voltage_v: 0.0,
+                import_kwh: 0.0,
+                export_kwh: 0.0,
+            },
+            assets: assets
+                .iter()
+                .map(|&(id, power_kw)| {
+                    (
+                        id.to_string(),
+                        AssetSnapshot {
+                            power_kw,
+                            asset_type: "base_load".to_string(),
+                            cap_max_import_kw: power_kw.max(0.0),
+                            cap_max_export_kw: (-power_kw).max(0.0),
+                            available_discharge_kwh: None,
+                            available_charge_kwh: None,
+                            default_setpoint_kw: power_kw,
+                            setpoint_kw: power_kw,
+                            values: HashMap::new(),
+                        },
+                    )
+                })
+                .collect(),
         }
     }
 
@@ -696,63 +657,15 @@ mod tests {
         }
     }
 
-    // ── points_to_power_ts ────────────────────────────────────────
+    // ── samples_to_power_ts ───────────────────────────────────────
 
     #[test]
-    fn points_to_power_ts_basic() {
-        let pts = vec![
-            HistoryPoint {
-                ts: ts(0),
-                power_kw: 1.0,
-                state: AssetState::BaseLoad(BaseLoadState {
-                    actual_power_kw: 1.0,
-                }),
-            },
-            HistoryPoint {
-                ts: ts(60),
-                power_kw: 2.0,
-                state: AssetState::BaseLoad(BaseLoadState {
-                    actual_power_kw: 2.0,
-                }),
-            },
-            HistoryPoint {
-                ts: ts(120),
-                power_kw: 3.0,
-                state: AssetState::BaseLoad(BaseLoadState {
-                    actual_power_kw: 3.0,
-                }),
-            },
-        ];
-        let series = points_to_power_ts(&pts, Interpolation::Step);
+    fn samples_to_power_ts_basic() {
+        let (_, samples) = make_samples("site", &[(0, 1.0), (60, 2.0), (120, 3.0)]);
+        let series = samples_to_power_ts(&samples, Interpolation::Step);
         assert_eq!(series.samples.len(), 3);
         assert!((series.samples[0].1 - 1.0).abs() < 1e-9);
         assert!((series.samples[2].1 - 3.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn soc_from_point_ev() {
-        let p = HistoryPoint {
-            ts: ts(0),
-            power_kw: 7.0,
-            state: AssetState::Ev(EvState {
-                soc: 0.4,
-                plugged: true,
-                actual_power_kw: 7.0,
-            }),
-        };
-        assert!((soc_from_point(&p).unwrap() - 0.4).abs() < 1e-9);
-    }
-
-    #[test]
-    fn soc_from_point_non_storage_is_none() {
-        let p = HistoryPoint {
-            ts: ts(0),
-            power_kw: -2.0,
-            state: AssetState::Pv(PvState {
-                actual_power_kw: -2.0,
-            }),
-        };
-        assert!(soc_from_point(&p).is_none());
     }
 
     // ── format_iso8601_duration ────────────────────────────────────
@@ -781,13 +694,16 @@ mod tests {
 
     #[test]
     fn obligation_report_multi_interval() {
-        let sim = make_sim(vec![make_entry(
+        let asset_samples: HashMap<_, _> = [make_samples(
             "site",
             &[(0, 2.0), (900, 3.0), (1800, 4.0), (2700, 5.0)],
-        )]);
+        )]
+        .into_iter()
+        .collect();
 
         let ob = make_obligation("ev1", "prog1", "USAGE", 900);
-        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).unwrap();
+        let report =
+            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None).unwrap();
 
         let intervals = &report.resources[0].intervals;
         assert!(
@@ -822,31 +738,33 @@ mod tests {
             fulfilled: false,
             created_at: Utc::now(),
         };
-        let sim = make_sim(vec![]);
-        assert!(build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).is_none());
+        let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
+        assert!(
+            build_measurement_report_for_obligation(&ob, &empty, "ven-1", None).is_none()
+        );
     }
 
     #[test]
     fn obligation_report_empty_history_returns_none() {
         let ob = make_obligation("e1", "p1", "USAGE", 900);
-        let sim = make_sim(vec![]);
-        assert!(build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).is_none());
+        let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
+        assert!(
+            build_measurement_report_for_obligation(&ob, &empty, "ven-1", None).is_none()
+        );
     }
 
     // ── import/export split ────────────────────────────────────────
 
     #[test]
     fn obligation_report_import_clamps_negative_to_zero() {
-        let sim = make_sim(vec![make_entry("pv", &[(0, -5.0), (900, -5.0)])]);
+        let asset_samples: HashMap<_, _> =
+            [make_samples("pv", &[(0, -5.0), (900, -5.0)])].into_iter().collect();
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_LIMIT", 900);
-        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).unwrap();
+        let report =
+            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None).unwrap();
         let intervals = &report.resources[0].intervals;
         for iv in intervals {
-            let usage = iv
-                .payloads
-                .iter()
-                .find(|p| p.r#type == "USAGE")
-                .unwrap();
+            let usage = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
             let val = usage.values[0].as_f64().unwrap();
             assert!(
                 (val - 0.0).abs() < 1e-9,
@@ -857,16 +775,14 @@ mod tests {
 
     #[test]
     fn obligation_report_export_uses_absolute_negative() {
-        let sim = make_sim(vec![make_entry("pv", &[(0, -3.0), (900, -3.0)])]);
+        let asset_samples: HashMap<_, _> =
+            [make_samples("pv", &[(0, -3.0), (900, -3.0)])].into_iter().collect();
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_LIMIT", 900);
-        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).unwrap();
+        let report =
+            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None).unwrap();
         let intervals = &report.resources[0].intervals;
         for iv in intervals {
-            let usage = iv
-                .payloads
-                .iter()
-                .find(|p| p.r#type == "USAGE")
-                .unwrap();
+            let usage = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
             let val = usage.values[0].as_f64().unwrap();
             assert!(
                 (val - 3000.0).abs() < 1.0,
@@ -879,17 +795,15 @@ mod tests {
 
     #[test]
     fn obligation_report_soc_point_in_time() {
-        let sim = make_sim(vec![make_ev_entry(
+        let asset_samples: HashMap<_, _> = [make_ev_samples(
             "ev",
-            &[
-                (0, 7.0, 0.2),
-                (900, 7.0, 0.4),
-                (1800, 7.0, 0.6),
-                (2700, 7.0, 0.8),
-            ],
-        )]);
+            &[(0, 7.0, 0.2), (900, 7.0, 0.4), (1800, 7.0, 0.6), (2700, 7.0, 0.8)],
+        )]
+        .into_iter()
+        .collect();
         let ob = make_obligation("e1", "p1", "STORAGE_CHARGE_LEVEL", 900);
-        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-1", None).unwrap();
+        let report =
+            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None).unwrap();
         let intervals = &report.resources[0].intervals;
         assert!(!intervals.is_empty());
         for iv in intervals {
@@ -910,11 +824,13 @@ mod tests {
 
     #[test]
     fn net_site_power_sums_assets() {
-        let sim = make_sim(vec![
-            make_entry("ev", &[(0, 2.0), (60, 3.0)]),
-            make_entry("pv", &[(0, -1.0), (60, 1.0)]),
-        ]);
-        let net = build_net_site_power_ts(&sim);
+        let asset_samples: HashMap<_, _> = [
+            make_samples("ev", &[(0, 2.0), (60, 3.0)]),
+            make_samples("pv", &[(0, -1.0), (60, 1.0)]),
+        ]
+        .into_iter()
+        .collect();
+        let net = build_net_site_power_ts(&asset_samples);
         assert_eq!(net.samples.len(), 2);
         assert!((net.samples[0].1 - 1.0).abs() < 1e-9); // 2 + (-1) = 1
         assert!((net.samples[1].1 - 4.0).abs() < 1e-9); // 3 + 1 = 4
@@ -922,49 +838,37 @@ mod tests {
 
     #[test]
     fn net_site_power_empty_history() {
-        let sim = make_sim(vec![]);
-        let net = build_net_site_power_ts(&sim);
+        let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
+        let net = build_net_site_power_ts(&empty);
         assert!(net.samples.is_empty());
     }
 
-    // ── latest_net_import_kw / latest_net_export_kw ───────────────
+    // ── latest_net_import_kw ───────────────────────────────────────
 
     #[test]
     fn latest_net_import_kw_sums_positive_assets() {
-        let sim = make_sim(vec![
-            make_entry("a", &[(0, 3.0)]),
-            make_entry("b", &[(0, -2.0)]), // export — ignored
-        ]);
-        assert!((latest_net_import_kw(&sim) - 3.0).abs() < 1e-9);
+        let snap = make_snap(&[("a", 3.0), ("b", -2.0)]);
+        assert!((latest_net_import_kw(&snap) - 3.0).abs() < 1e-9);
     }
 
     #[test]
     fn latest_net_import_kw_empty_history_returns_zero() {
-        let sim = make_sim(vec![]);
-        assert_eq!(latest_net_import_kw(&sim), 0.0);
+        let snap = make_snap(&[]);
+        assert_eq!(latest_net_import_kw(&snap), 0.0);
     }
 
     #[test]
     fn latest_net_import_kw_all_exporting_returns_zero() {
-        let sim = make_sim(vec![make_entry("pv", &[(0, -5.0)])]);
-        assert_eq!(latest_net_import_kw(&sim), 0.0);
-    }
-
-    #[test]
-    fn latest_net_export_kw_sums_negative_assets_as_positive() {
-        let sim = make_sim(vec![
-            make_entry("pv", &[(0, -2.5)]),
-            make_entry("load", &[(0, 1.0)]), // import — ignored
-        ]);
-        assert!((latest_net_export_kw(&sim) - 2.5).abs() < 1e-9);
+        let snap = make_snap(&[("pv", -5.0)]);
+        assert_eq!(latest_net_import_kw(&snap), 0.0);
     }
 
     // ── IMPORT/EXPORT_CAPACITY_RESERVATION ────────────────────────
 
     #[test]
     fn test_reporter_import_capacity_reservation_from_envelope() {
-        let sim = make_sim(vec![]);
-        let env = SiteFlexibilityEnvelope {
+        let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
+        let env = crate::entities::plan::SiteFlexibilityEnvelope {
             ts: Utc::now(),
             up_kw: 5.0,
             down_kw: 3.0,
@@ -972,7 +876,7 @@ mod tests {
             down_duration_s: None,
         };
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
-        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-test", Some(&env))
+        let report = build_measurement_report_for_obligation(&ob, &empty, "ven-test", Some(&env))
             .expect("should return Some");
         let iv = &report.resources[0].intervals[0];
         let val = iv.payloads[0].values[0].as_f64().unwrap();
@@ -982,8 +886,8 @@ mod tests {
 
     #[test]
     fn test_reporter_export_capacity_reservation_from_envelope() {
-        let sim = make_sim(vec![]);
-        let env = SiteFlexibilityEnvelope {
+        let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
+        let env = crate::entities::plan::SiteFlexibilityEnvelope {
             ts: Utc::now(),
             up_kw: 5.0,
             down_kw: 3.0,
@@ -991,7 +895,7 @@ mod tests {
             down_duration_s: None,
         };
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_RESERVATION", 900);
-        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-test", Some(&env))
+        let report = build_measurement_report_for_obligation(&ob, &empty, "ven-test", Some(&env))
             .expect("should return Some");
         let iv = &report.resources[0].intervals[0];
         let val = iv.payloads[0].values[0].as_f64().unwrap();
@@ -1001,10 +905,9 @@ mod tests {
 
     #[test]
     fn test_reporter_capacity_reservation_no_envelope_returns_zero() {
-        // When site_envelope is None (VEN just started), report 0 W — do NOT return None.
-        let sim = make_sim(vec![]);
+        let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
-        let report = build_measurement_report_for_obligation(&ob, &sim, "ven-test", None)
+        let report = build_measurement_report_for_obligation(&ob, &empty, "ven-test", None)
             .expect("should return Some even with no envelope");
         let val = report.resources[0].intervals[0].payloads[0].values[0]
             .as_f64()
@@ -1032,8 +935,9 @@ mod tests {
             }],
             reportDescriptors: None,
         };
-        let sim = make_sim(vec![make_entry("site", &[(0, 3.0)])]);
-        let report = build_measurement_report(&event, &sim, "ven-1").unwrap();
+        let asset_samples: HashMap<_, _> =
+            [make_samples("site", &[(0, 3.0)])].into_iter().collect();
+        let report = build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1").unwrap();
         assert_eq!(report.programID, "prog-001");
         assert_eq!(report.eventID.as_deref(), Some("evt-001"));
         assert_eq!(report.clientName, "ven-1");
@@ -1066,8 +970,9 @@ mod tests {
             }],
             reportDescriptors: None,
         };
-        let sim = make_sim(vec![make_ev_entry("ev", &[(0, 7.0, 0.5)])]);
-        let report = build_measurement_report(&event, &sim, "ven-1").unwrap();
+        let asset_samples: HashMap<_, _> =
+            [make_ev_samples("ev", &[(0, 7.0, 0.5)])].into_iter().collect();
+        let report = build_measurement_report(&event, &asset_samples, 0.0, 0.0, "ven-1").unwrap();
         let iv = &report.resources[0].intervals[0];
         let soc_payload = iv.payloads.iter().find(|p| p.r#type == "STORAGE_CHARGE_LEVEL");
         assert!(soc_payload.is_some(), "expected SoC payload for EV");
@@ -1080,8 +985,9 @@ mod tests {
 
     #[test]
     fn active_events_returns_empty_for_no_events() {
-        let sim = make_sim(vec![make_entry("site", &[(0, 1.0)])]);
-        let reports = build_measurement_reports_for_active_events(&[], &sim, "ven-1", Utc::now());
+        let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
+        let reports =
+            build_measurement_reports_for_active_events(&[], &empty, 0.0, 0.0, "ven-1", Utc::now());
         assert!(reports.is_empty());
     }
 
@@ -1107,9 +1013,15 @@ mod tests {
                 frequency: Some(900),
             }]),
         };
-        let sim = make_sim(vec![make_entry("site", &[(0, 1.0)])]);
-        let reports =
-            build_measurement_reports_for_active_events(&[event], &sim, "ven-1", Utc::now());
+        let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
+        let reports = build_measurement_reports_for_active_events(
+            &[event],
+            &empty,
+            0.0,
+            0.0,
+            "ven-1",
+            Utc::now(),
+        );
         assert!(
             reports.is_empty(),
             "events with reportDescriptors should be skipped"
@@ -1126,9 +1038,9 @@ mod tests {
             trigger_reason: "Periodic".to_string(),
             total_slots: 288,
         };
-        let sim = make_sim(vec![make_entry("site", &[(0, 2.0)])]);
+        let snap = make_snap(&[("site", 2.0)]);
         let report =
-            build_status_report(&event, &sim, "ven-1", Some("prog-001"), Utc::now()).unwrap();
+            build_status_report(&event, &snap, "ven-1", Some("prog-001"), Utc::now()).unwrap();
         assert_eq!(report.programID, "prog-001");
         assert!(report.eventID.is_none(), "status report must omit eventID");
         assert_eq!(report.clientName, "ven-1");
@@ -1136,9 +1048,16 @@ mod tests {
         assert_eq!(report.resources[0].resourceName, "ven-1-site");
         let iv = &report.resources[0].intervals[0];
         assert_eq!(iv.id, 0);
-        let status_payload = iv.payloads.iter().find(|p| p.r#type == "TELEMETRY_STATUS").unwrap();
+        let status_payload = iv
+            .payloads
+            .iter()
+            .find(|p| p.r#type == "TELEMETRY_STATUS")
+            .unwrap();
         let desc = status_payload.values[0].as_str().unwrap();
-        assert!(desc.contains("PlanCycle"), "expected PlanCycle in description, got: {desc}");
+        assert!(
+            desc.contains("PlanCycle"),
+            "expected PlanCycle in description, got: {desc}"
+        );
         assert!(iv.payloads.iter().any(|p| p.r#type == "USAGE"));
     }
 
@@ -1150,7 +1069,74 @@ mod tests {
             trigger_reason: "Periodic".to_string(),
             total_slots: 288,
         };
-        let sim = make_sim(vec![]);
-        assert!(build_status_report(&event, &sim, "ven-1", None, Utc::now()).is_none());
+        let snap = make_snap(&[]);
+        assert!(build_status_report(&event, &snap, "ven-1", None, Utc::now()).is_none());
+    }
+
+    // ── SC-004: build_measurement_report callable without SimState ─
+
+    #[test]
+    fn build_measurement_report_domain_only() {
+        use crate::controller::vtn_port::{OadrInterval, OadrPayload};
+        let event = OadrEvent {
+            id: "evt-sc004".to_string(),
+            programID: "prog-001".to_string(),
+            eventName: None,
+            priority: None,
+            intervalPeriod: None,
+            intervals: vec![OadrInterval {
+                intervalPeriod: None,
+                payloads: vec![OadrPayload {
+                    r#type: "USAGE".to_string(),
+                    values: vec![],
+                }],
+            }],
+            reportDescriptors: None,
+        };
+        let asset_samples: HashMap<_, _> =
+            [make_samples("site", &[(0, 1.0), (60, 3.0)])].into_iter().collect();
+        let report = build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1");
+        assert!(report.is_some(), "expected Some(report)");
+        let report = report.unwrap();
+        assert_eq!(report.programID, "prog-001");
+        assert_eq!(report.clientName, "ven-1");
+        let usage = report.resources[0].intervals[0]
+            .payloads
+            .iter()
+            .find(|p| p.r#type == "USAGE")
+            .unwrap();
+        let val = usage.values[0].as_f64().unwrap();
+        assert!((val - 3000.0).abs() < 1.0, "expected 3000 W, got {val}");
+    }
+
+    // ── SC-005: build_status_report callable without SimState ─────
+
+    #[test]
+    fn build_status_report_domain_only() {
+        use crate::controller::trace::ControllerEvent;
+        let event = ControllerEvent::PlanCycle {
+            ts: Utc::now(),
+            trigger_reason: "Periodic".to_string(),
+            total_slots: 288,
+        };
+        let snap = make_snap(&[("site", 2.0)]);
+        let report = build_status_report(&event, &snap, "ven-1", Some("prog-001"), Utc::now());
+        assert!(report.is_some(), "expected Some(report)");
+        let report = report.unwrap();
+        assert_eq!(report.programID, "prog-001");
+        assert_eq!(report.clientName, "ven-1");
+        let iv = &report.resources[0].intervals[0];
+        let status_payload = iv
+            .payloads
+            .iter()
+            .find(|p| p.r#type == "TELEMETRY_STATUS")
+            .unwrap();
+        assert!(
+            status_payload.values[0].as_str().unwrap().contains("PlanCycle"),
+            "expected PlanCycle in status description"
+        );
+        let usage_payload = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
+        let val = usage_payload.values[0].as_f64().unwrap();
+        assert!((val - 2000.0).abs() < 1.0, "expected 2000 W, got {val}");
     }
 }
