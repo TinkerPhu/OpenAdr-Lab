@@ -150,6 +150,7 @@ pub(crate) async fn tick_once(
     }
 
     // PHASE 5 (post-lock): async state publishes — sensor, shiftable, ledger, envelope.
+    let snap_for_reports = tick_sim_snap.clone();
     let _sim_snapshot = super::publish::publish_sim_tick_result(
         tick_sensor,
         tick_sim_snap,
@@ -178,7 +179,7 @@ pub(crate) async fn tick_once(
         report_counter += 1;
         if report_counter >= report_every_ticks {
             report_counter = 0;
-            super::publish::run_measurement_reports(&state, &sim, &vtn, &ven_name, now).await;
+            super::publish::run_measurement_reports(&state, &snap_for_reports, &vtn, &ven_name, now).await;
         }
     }
 
