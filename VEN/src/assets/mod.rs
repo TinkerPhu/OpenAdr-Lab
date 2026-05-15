@@ -305,7 +305,7 @@ impl AssetConfig {
 
     /// Returns a stateful trajectory computer seeded from the current live state,
     /// or `None` for assets without planned state to recompute (battery, EV, PV, etc.).
-    pub fn plan_trajectory(&self, live_state: &AssetState) -> Option<heater::HeaterPlanTrajectory> {
+    pub fn plan_trajectory(&self, live_state: &AssetState) -> Option<crate::controller::timeline::HeaterPlanTrajectory> {
         match self {
             Self::Heater(cfg) => Heater::plan_trajectory(cfg, live_state),
             _ => None,

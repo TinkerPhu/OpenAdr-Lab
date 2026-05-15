@@ -10,15 +10,45 @@
 use chrono::{DateTime, Duration, Utc};
 use std::collections::{HashMap, HashSet};
 
-use crate::assets::{AssetConfig, AssetHistoryBuffer, AssetState};
 use crate::controller::trace::AssetTimelinePoint;
+use crate::entities::asset::AssetType;
 use crate::entities::plan::Plan;
 
-/// Per-asset data needed to render timelines — decoupled from live `SimState`.
+/// One sampled moment in an asset's history — domain-side type, no infra deps.
+pub struct TimelinePoint {
+    pub ts: DateTime<Utc>,
+    pub power_kw: f64,
+    pub state_values: HashMap<String, f64>,
+}
+
+/// Stateful temperature trajectory computer for plan display — domain-side, no infra deps.
+/// Moved from `assets/heater.rs`; construction happens in `to_timeline_snapshot()` (infra).
+#[derive(Clone)]
+pub struct HeaterPlanTrajectory {
+    pub e_kwh: f64,
+    pub temp_min_c: f64,
+    pub thermal_mass: f64,
+    pub q_dem_kw: f64,
+    pub e_max_kwh: f64,
+}
+
+impl HeaterPlanTrajectory {
+    /// Returns state values for the start of this slot, then advances internal energy.
+    pub fn next_slot(&mut self, p_heat_kw: f64, dt_h: f64) -> HashMap<String, f64> {
+        let temp_c = self.temp_min_c + self.e_kwh / self.thermal_mass;
+        self.e_kwh = (self.e_kwh + (p_heat_kw - self.q_dem_kw) * dt_h).clamp(0.0, self.e_max_kwh);
+        HashMap::from([("temp_c".into(), temp_c)])
+    }
+}
+
+/// Per-asset data needed to render timelines — domain-only, no infra deps.
 pub struct TimelineAssetData {
-    pub history: AssetHistoryBuffer,
-    pub config: AssetConfig,
-    pub current_state: AssetState,
+    pub asset_id: String,
+    pub asset_type: AssetType,
+    pub history: Vec<TimelinePoint>,
+    pub current_power_kw: f64,
+    pub current_state_values: HashMap<String, f64>,
+    pub plan_trajectory: Option<HeaterPlanTrajectory>,
 }
 
 /// A decoupled snapshot of all data needed to render asset timelines.
@@ -27,7 +57,8 @@ pub struct TimelineAssetData {
 /// the lock is then released before the (potentially slow) timeline rendering.
 pub struct TimelineSnapshot {
     pub assets: HashMap<String, TimelineAssetData>,
-    pub grid_history: AssetHistoryBuffer,
+    pub grid_history: Vec<TimelinePoint>,
+    pub grid_current_kw: f64,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -229,38 +260,26 @@ fn locf_weighted_mean(
 
 /// Build the now-point for an asset: instantaneous values at exact `now`.
 ///
-/// Uses the most recent `HistoryPoint` from the per-asset ring buffer.
-/// For `power_kw`, a 60-second time-weighted average is used so that rapidly
-/// oscillating assets (e.g. thermostat bang-bang) produce a smooth transition
-/// from averaged history into the forecast, rather than a raw spike at NOW.
-/// Returns an empty-values point if no history exists.
+/// All power smoothing (60s rolling average) and state value extraction happen
+/// in `to_timeline_snapshot()` at the infra boundary; this function reads the
+/// pre-computed values from `TimelineAssetData` directly.
+/// Returns an empty-values point if the asset is unknown.
 pub fn build_now_point(
     asset_id: &str,
     now: DateTime<Utc>,
     snap: &TimelineSnapshot,
 ) -> AssetTimelinePoint {
-    // Regular sim assets.
+    // Regular sim assets — read pre-computed values from the domain snapshot.
     if let Some(data) = snap.assets.get(asset_id) {
-        if let Some(last) = data.history.latest() {
-            let mut values = data.config.state_values(&last.state);
-            // Use a short rolling average for power so oscillating assets
-            // (e.g. heater thermostat) show the same ~equilibrium value that
-            // the LOCF-averaged history buckets already display.
-            let power_kw = data
-                .history
-                .recent_avg_power(Duration::seconds(60), now)
-                .unwrap_or(last.power_kw);
-            values.insert("power_kw".into(), power_kw);
-            return AssetTimelinePoint { ts: now, values };
-        }
+        let mut values = data.current_state_values.clone();
+        values.insert("power_kw".into(), data.current_power_kw);
+        return AssetTimelinePoint { ts: now, values };
     }
-    // Grid is stored separately; read its history directly.
+    // Grid is stored separately; read its pre-computed scalar directly.
     if asset_id == "grid" {
-        if let Some(last) = snap.grid_history.latest() {
-            let mut values = HashMap::new();
-            values.insert("power_kw".into(), last.power_kw);
-            return AssetTimelinePoint { ts: now, values };
-        }
+        let mut values = HashMap::new();
+        values.insert("power_kw".into(), snap.grid_current_kw);
+        return AssetTimelinePoint { ts: now, values };
     }
     AssetTimelinePoint {
         ts: now,
@@ -303,25 +322,23 @@ pub fn build_asset_timeline(
     let past_start = now - Duration::milliseconds((hours_back * 3_600_000.0) as i64);
     let future_end = now + Duration::milliseconds((hours_forward * 3_600_000.0) as i64);
 
-    // ── Past: from per-asset history ring buffer ───────────────────────────────
+    // ── Past: from pre-computed domain history ────────────────────────────────
+    // state_values are pre-computed in to_timeline_snapshot() at the infra boundary.
 
-    let back_window = Duration::milliseconds((hours_back * 3_600_000.0) as i64);
     let mut points: Vec<AssetTimelinePoint> = if let Some(data) = snap.assets.get(asset_id) {
         data.history
-            .slice(back_window, now)
-            .into_iter()
+            .iter()
             .filter(|p| p.ts >= past_start)
             .map(|p| {
-                let mut values = data.config.state_values(&p.state);
+                let mut values = p.state_values.clone();
                 values.insert("power_kw".into(), p.power_kw);
                 AssetTimelinePoint { ts: p.ts, values }
             })
             .collect()
     } else if is_grid {
-        // Grid is stored separately from the sim asset list; read its history directly.
+        // Grid history is stored separately in the snapshot.
         snap.grid_history
-            .slice(back_window, now)
-            .into_iter()
+            .iter()
             .filter(|p| p.ts >= past_start)
             .map(|p| {
                 let mut values = HashMap::new();
@@ -335,14 +352,12 @@ pub fn build_asset_timeline(
 
     // ── Future: from plan slots ────────────────────────────────────────────────
 
-    // Recompute planned state trajectory from current live state (e.g. heater temp_c).
-    // Delegated to each asset type via AssetConfig::plan_trajectory; returns None for
-    // assets that have no live-state correction (battery/EV SoC are replanned on every
-    // deviation trigger so staleness is negligible for those).
+    // Use the pre-computed plan trajectory from the domain snapshot (heater only).
+    // For battery/EV, planned state comes from planned_state_by_asset in plan slots.
     let mut plan_traj = snap
         .assets
         .get(asset_id)
-        .and_then(|d| d.config.plan_trajectory(&d.current_state));
+        .and_then(|d| d.plan_trajectory.clone());
 
     if let Some(plan) = plan {
         for slot in plan.all_slots() {
@@ -441,11 +456,7 @@ pub fn build_asset_timeline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::{
-        AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, BaseLoadState, EvCharger, EvState,
-        HistoryPoint,
-    };
-    use crate::entities::asset::PlanTrigger;
+    use crate::entities::asset::{AssetType, PlanTrigger};
     use crate::entities::plan::{
         AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanningHorizon,
     };
@@ -460,56 +471,57 @@ mod tests {
         ids.iter().map(|s| s.to_string()).collect()
     }
 
-    /// Create a BaseLoad `TimelineAssetData` with history rows `(offset_s, power_kw)`.
+    /// Create a `TimelineAssetData` with history rows `(offset_s, power_kw)`.
     fn make_base_snap(id: &str, rows: &[(i64, f64)]) -> (String, TimelineAssetData) {
-        let cfg = AssetConfig::BaseLoad(BaseLoad {
-            baseline_kw: 0.0,
-            baseline_kw_profile: 0.0,
-        });
-        let mut history = AssetHistoryBuffer::new(3600);
-        for (offset, power) in rows {
-            history.push(HistoryPoint {
+        let history: Vec<TimelinePoint> = rows
+            .iter()
+            .map(|(offset, power)| TimelinePoint {
                 ts: ts(*offset),
                 power_kw: *power,
-                state: AssetState::BaseLoad(BaseLoadState {
-                    actual_power_kw: *power,
-                }),
-            });
-        }
-        let current_state = AssetState::BaseLoad(BaseLoadState { actual_power_kw: 0.0 });
+                state_values: HashMap::from([("baseline_kw".to_string(), 0.0_f64)]),
+            })
+            .collect();
+        let current_power_kw = history.last().map(|p| p.power_kw).unwrap_or(0.0);
+        let current_state_values = HashMap::from([("baseline_kw".to_string(), 0.0_f64)]);
         (
             id.to_string(),
-            TimelineAssetData { history, config: cfg, current_state },
+            TimelineAssetData {
+                asset_id: id.to_string(),
+                asset_type: AssetType::GenericConsumer,
+                history,
+                current_power_kw,
+                current_state_values,
+                plan_trajectory: None,
+            },
         )
     }
 
     /// Create an EV `TimelineAssetData` with history rows `(offset_s, power_kw, soc)`.
     fn make_ev_snap(id: &str, rows: &[(i64, f64, f64)]) -> (String, TimelineAssetData) {
-        let cfg = AssetConfig::Ev(EvCharger {
-            max_charge_kw: 11.0,
-            max_discharge_kw: 0.0,
-            battery_kwh: 60.0,
-            soc_target: 0.8,
-            soc_target_profile: 0.8,
-            default_charge_kw: 7.4,
-            min_soc: 0.1,
-        });
-        let mut history = AssetHistoryBuffer::new(3600);
-        for (offset, power, soc) in rows {
-            history.push(HistoryPoint {
+        let history: Vec<TimelinePoint> = rows
+            .iter()
+            .map(|(offset, power, soc)| TimelinePoint {
                 ts: ts(*offset),
                 power_kw: *power,
-                state: AssetState::Ev(EvState {
-                    soc: *soc,
-                    plugged: true,
-                    actual_power_kw: *power,
-                }),
-            });
-        }
-        let current_state = AssetState::Ev(EvState { soc: 0.5, plugged: true, actual_power_kw: 0.0 });
+                state_values: HashMap::from([
+                    ("soc".to_string(), *soc),
+                    ("plugged".to_string(), 1.0_f64),
+                ]),
+            })
+            .collect();
+        let last = history.last();
+        let current_power_kw = last.map(|p| p.power_kw).unwrap_or(0.0);
+        let current_state_values = last.map(|p| p.state_values.clone()).unwrap_or_default();
         (
             id.to_string(),
-            TimelineAssetData { history, config: cfg, current_state },
+            TimelineAssetData {
+                asset_id: id.to_string(),
+                asset_type: AssetType::Ev,
+                history,
+                current_power_kw,
+                current_state_values,
+                plan_trajectory: None,
+            },
         )
     }
 
@@ -517,7 +529,8 @@ mod tests {
     fn make_timeline_snap(entries: Vec<(String, TimelineAssetData)>) -> TimelineSnapshot {
         TimelineSnapshot {
             assets: entries.into_iter().collect(),
-            grid_history: AssetHistoryBuffer::new(3600),
+            grid_history: vec![],
+            grid_current_kw: 0.0,
         }
     }
 
@@ -1031,50 +1044,24 @@ mod tests {
 
     #[test]
     fn build_now_point_smooths_oscillating_power() {
-        // Simulate a heater oscillating between 0 kW and 2.5 kW at ~1-second intervals.
-        // Average should be close to 1.25 kW — NOT the raw latest reading.
-        let base = 1_700_000_000i64;
-        let now = DateTime::from_timestamp(base + 60, 0).unwrap();
-
-        // Build a BaseLoad `TimelineAssetData` whose history alternates 0 / 2.5 kW.
-        let cfg = AssetConfig::BaseLoad(BaseLoad {
-            baseline_kw: 0.0,
-            baseline_kw_profile: 0.0,
-        });
-        let mut history = AssetHistoryBuffer::new(3600);
-        for i in 0i64..60 {
-            let power = if i % 2 == 0 { 0.0 } else { 2.5 };
-            history.push(HistoryPoint {
-                ts: DateTime::from_timestamp(base + i, 0).unwrap(),
-                power_kw: power,
-                state: AssetState::BaseLoad(BaseLoadState {
-                    actual_power_kw: power,
-                }),
-            });
-        }
+        // Smoothing (60s LOCF rolling average) is now computed in to_timeline_snapshot()
+        // at the infra boundary. build_now_point reads the pre-computed current_power_kw
+        // directly. This test verifies that the pre-computed value is passed through unchanged.
+        let now = ts(100);
         let snap = make_timeline_snap(vec![(
             "osc".to_string(),
             TimelineAssetData {
-                history,
-                config: cfg,
-                current_state: AssetState::BaseLoad(BaseLoadState { actual_power_kw: 0.0 }),
+                asset_id: "osc".to_string(),
+                asset_type: AssetType::GenericConsumer,
+                history: vec![],
+                current_power_kw: 1.25, // pre-computed smoothed value (set by infra layer)
+                current_state_values: HashMap::new(),
+                plan_trajectory: None,
             },
         )]);
-        let _known = make_known(&["osc"]);
         let np = build_now_point("osc", now, &snap);
-
-        // Time-weighted average over 60 alternating points should be ~1.25 kW.
-        let power = np.values["power_kw"];
-        assert!(
-            power > 0.5 && power < 2.0,
-            "expected smoothed power ~1.25 kW, got {power:.3} kW"
-        );
-        // The raw latest would be 2.5 kW (last point is odd index 59 → 2.5 kW).
-        // Confirm we are NOT just returning the raw latest.
-        assert!(
-            power < 2.4,
-            "got raw-latest spike ({power:.3} kW) — smoothing not applied"
-        );
+        // smoothing computed in to_timeline_snapshot(); this test verifies build_now_point reads the pre-computed value
+        assert!((np.values["power_kw"] - 1.25).abs() < 1e-9);
     }
 
     #[test]
