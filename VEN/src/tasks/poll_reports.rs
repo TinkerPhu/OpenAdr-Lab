@@ -17,7 +17,7 @@ pub(crate) fn spawn_report_poll(
         loop {
             interval.tick().await;
             let vtn_port: &dyn VtnPort = &vtn;
-            match vtn_port.fetch_reports().await {
+            match vtn_port.fetch_reports_raw().await {
                 Ok(reports) => {
                     counter!("poll_success_total", "resource" => "reports").increment(1);
                     info!(resource = "reports", count = reports.len(), "poll success");

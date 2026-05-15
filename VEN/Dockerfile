@@ -21,6 +21,7 @@ RUN cargo build --release && rm -rf src target/release/deps/ven_app*
 
 # Build the actual application
 COPY src ./src
+COPY profiles ./profiles
 RUN cargo build --release
 
 FROM debian:bookworm-slim

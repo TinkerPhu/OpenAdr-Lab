@@ -16,7 +16,19 @@ use serde::{Deserialize, Serialize};
 pub trait VtnPort: Send + Sync {
     async fn fetch_programs(&self) -> Result<Vec<OadrProgram>>;
     async fn fetch_events(&self) -> Result<Vec<OadrEvent>>;
+    /// Returns minimal typed reports (id + reportName only). Used internally for
+    /// 409 conflict resolution. Skips reports with absent reportName.
     async fn fetch_reports(&self) -> Result<Vec<OadrReport>>;
+    /// Returns full report JSON from the VTN — pass-through for state storage and
+    /// the GET /reports route. Default delegates to fetch_reports (minimal fields only);
+    /// VtnClient overrides this to return the unmodified VTN response.
+    async fn fetch_reports_raw(&self) -> Result<Vec<serde_json::Value>> {
+        let reports = self.fetch_reports().await?;
+        Ok(reports
+            .iter()
+            .map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null))
+            .collect())
+    }
     /// Submit or upsert a typed report body. Returns Ok(()) on success; errors are
     /// propagated from the VTN HTTP response.
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()>;
@@ -96,13 +108,15 @@ pub struct OadrReport {
 // ── OadrReportBody and nested types ──────────────────────────────────────────
 
 /// Top-level envelope for a report submission to the VTN.
+/// `reportName` is optional per the OpenADR 3 spec (VTN field `report_name: Option<String>`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OadrReportBody {
     pub programID: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub eventID: Option<String>,
     pub clientName: String,
-    pub reportName: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reportName: Option<String>,
     pub resources: Vec<OadrReportResource>,
 }
 
@@ -218,7 +232,7 @@ mod tests {
             programID: "prog-001".to_string(),
             eventID: Some("evt-abc".to_string()),
             clientName: "ven-1".to_string(),
-            reportName: "auto-ven-1-evt-abc".to_string(),
+            reportName: Some("auto-ven-1-evt-abc".to_string()),
             resources: vec![OadrReportResource {
                 resourceName: "ven-1-meter".to_string(),
                 intervals: vec![OadrReportInterval {
@@ -243,6 +257,7 @@ mod tests {
         assert_eq!(value["eventID"], "evt-abc");
         assert_eq!(value["clientName"], "ven-1");
         assert_eq!(value["reportName"], "auto-ven-1-evt-abc");
+        // Verify round-trip preserves reportName as Some
         assert_eq!(value["resources"][0]["resourceName"], "ven-1-meter");
         assert_eq!(value["resources"][0]["intervals"][0]["id"], 0);
         assert!(value["resources"][0]["intervals"][0].get("intervalPeriod").is_none());
@@ -252,6 +267,7 @@ mod tests {
         let restored: OadrReportBody = serde_json::from_value(value).expect("deserialize failed");
         assert_eq!(restored.programID, "prog-001");
         assert_eq!(restored.eventID.as_deref(), Some("evt-abc"));
+        assert_eq!(restored.reportName.as_deref(), Some("auto-ven-1-evt-abc"));
         assert_eq!(restored.resources[0].intervals[0].payloads[0].r#type, "USAGE");
     }
 
@@ -261,12 +277,25 @@ mod tests {
             programID: "prog-001".to_string(),
             eventID: None,
             clientName: "ven-1".to_string(),
-            reportName: "status-ven-1".to_string(),
+            reportName: Some("status-ven-1".to_string()),
             resources: vec![],
         };
         let value = serde_json::to_value(&body).expect("serialize failed");
         // eventID must be absent (not null) when None
         assert!(value.get("eventID").is_none(), "eventID must be absent when None");
+    }
+
+    #[test]
+    fn test_oadr_report_body_absent_report_name_not_serialized() {
+        let body = OadrReportBody {
+            programID: "prog-001".to_string(),
+            eventID: Some("evt-1".to_string()),
+            clientName: "ven-1".to_string(),
+            reportName: None,
+            resources: vec![],
+        };
+        let value = serde_json::to_value(&body).expect("serialize failed");
+        assert!(value.get("reportName").is_none(), "reportName must be absent when None");
     }
 
     #[test]

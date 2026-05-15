@@ -122,7 +122,7 @@ mod tests {
             programID: "p1".to_string(),
             eventID: None,
             clientName: "ven-1".to_string(),
-            reportName: "x".to_string(),
+            reportName: Some("x".to_string()),
             resources: vec![],
         };
         let result = vtn.upsert_report(body).await;
