@@ -50,6 +50,9 @@ pub struct OadrEvent {
     pub programID: String,
     #[serde(default)]
     pub eventName: Option<String>,
+    /// OpenADR 3 priority — lower numbers are higher priority (0 = highest). Optional.
+    #[serde(default)]
+    pub priority: Option<i64>,
     /// Event-level interval period — used for looping price events (e.g. duration = "P9999Y").
     #[serde(default)]
     pub intervalPeriod: Option<OadrIntervalPeriod>,
