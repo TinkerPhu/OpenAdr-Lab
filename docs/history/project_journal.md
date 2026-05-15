@@ -3883,5 +3883,5 @@ grep "use crate::simulator" VEN/src/controller/timeline.rs -> EMPTY (SC-002)
 cargo check -> 0 errors
 cargo test -> 396 passed, 0 failed (SC-003)
 simulator/mod.rs -> 481 lines (≤ 500)
-BDD full suite -> pending Pi4-Server run (T025)
+BDD full suite -> 44 features passed, 0 failed / 238 scenarios passed, 0 failed (SC-004)
 ```
