@@ -3779,3 +3779,109 @@ BDD targeted run -> 29/29 passed, 0 failed (SC-007)
   Features tested: ven_planner, ven_uc_vtn_coordination, ven_uc_edge_cases,
                    ven_shiftable_lifecycle, deviation_absorber
 ```
+
+---
+
+## Feature 027 — Clean Timeline Infra Imports (VG-03)
+
+**Commit:** 2050373 (feat)
+**Branch:** 027-clean-timeline-infra
+**Date:** 2026-05-15
+
+### What changed
+
+Closed VG-03 from `docs/plans/ven_backend_architecture_refactoring_v2.md` Phase 2:
+`controller/timeline.rs` previously imported three infra-ring types
+(`AssetConfig`, `AssetHistoryBuffer`, `AssetState` from `crate::assets`), making
+`build_asset_timeline` and `build_now_point` untestable without a live simulator.
+
+#### controller/timeline.rs (Domain layer)
+- Added `pub struct TimelinePoint { ts, power_kw, state_values: HashMap<String, f64> }` —
+  domain-side history record with state overlay values pre-computed at the infra boundary.
+- Moved `HeaterPlanTrajectory` struct + `next_slot()` impl here from `assets/heater.rs`.
+  Added `#[derive(Clone)]`. Construction logic inlined into `to_timeline_snapshot()`.
+- Replaced `TimelineAssetData { history: AssetHistoryBuffer, config: AssetConfig, current_state: AssetState }`
+  with `{ asset_id, asset_type: AssetType, history: Vec<TimelinePoint>, current_power_kw,
+  current_state_values, plan_trajectory: Option<HeaterPlanTrajectory> }`.
+- Replaced `TimelineSnapshot.grid_history: AssetHistoryBuffer` with `Vec<TimelinePoint>` +
+  `grid_current_kw: f64`.
+- Removed `use crate::assets::{AssetConfig, AssetHistoryBuffer, AssetState}` — the VG-03
+  violation is now closed.
+- Rewrote `build_now_point`: reads `data.current_power_kw` and `data.current_state_values`
+  directly — no ring buffer access, no `state_values()` call.
+- Rewrote history section of `build_asset_timeline`: `data.history.iter().filter(...)` over
+  `Vec<TimelinePoint>` instead of `AssetHistoryBuffer::slice()`.
+- Rewrote plan_trajectory section: `d.plan_trajectory.clone()` instead of
+  `d.config.plan_trajectory(&d.current_state)`.
+- Rewrote test fixtures (`make_base_snap`, `make_ev_snap`, `make_timeline_snap`) using
+  domain-only types. Removed `use crate::assets::*` from test module entirely.
+- Updated `build_now_point_smooths_oscillating_power` test: now verifies that
+  `current_power_kw` is passed through unchanged (smoothing moved to infra layer).
+
+#### assets/heater.rs (Infra layer)
+- Removed `HeaterPlanTrajectory` struct + `new()` + `next_slot()` (moved to domain).
+- Added `use crate::controller::timeline::HeaterPlanTrajectory` re-import.
+- Inlined `HeaterPlanTrajectory::new()` construction directly in `plan_trajectory()`.
+
+#### assets/mod.rs (Infra layer)
+- Updated `plan_trajectory()` return type to use full crate path
+  `crate::controller::timeline::HeaterPlanTrajectory` (the imported re-export was private).
+
+#### simulator/mod.rs (Infra layer)
+- Rewrote `to_timeline_snapshot()`: now pre-computes all infra→domain conversions before
+  returning the snapshot. For each asset entry:
+  - Maps `AssetHistoryBuffer` → `Vec<TimelinePoint>` calling `cfg.state_values(&p.state)` per point.
+  - Computes `current_power_kw` via `recent_avg_power(60s, now)` (fallback to latest).
+  - Computes `current_state_values` from `cfg.state_values(&entry.state)`.
+  - Builds `HeaterPlanTrajectory` inline for the heater case via a `match` on
+    `(AssetConfig::Heater, AssetState::Heater)`.
+  - Derives `asset_type: AssetType` from `AssetConfig` variant.
+  - Maps `grid_asset.history` → `Vec<TimelinePoint>` + `grid_current_kw: f64`.
+
+### Why
+
+VG-03 (architecture violation): `controller/timeline.rs` is in the domain ring but was
+importing from `assets/` (infra ring). The domain→infra dependency made
+`build_asset_timeline` untestable without constructing `AssetHistoryBuffer`, `AssetConfig`,
+and `AssetState` — all infra types requiring physics configuration. Closing VG-03 completes
+the domain-core purity goal for `controller/`.
+
+### Key learnings
+
+1. **HeaterPlanTrajectory is pure math — moves cleanly to domain**: The struct holds 5 plain
+   `f64` fields and one arithmetic method. Moving it to the domain ring required zero refactoring
+   of the logic itself; only the construction (`new()`) was inlined into the infra-side
+   `to_timeline_snapshot()` where the config/state types are still available.
+
+2. **`plan_trajectory()` return type visibility pitfall**: When `HeaterPlanTrajectory` was a
+   re-import in `heater.rs` via `use crate::controller::timeline::HeaterPlanTrajectory`,
+   `assets/mod.rs` could not expose it as a public return type using the `heater::` path
+   (the import is private). Fix: use the full `crate::controller::timeline::HeaterPlanTrajectory`
+   path in the `pub fn plan_trajectory()` return type signature in `mod.rs`.
+
+3. **Test semantics shift is explicit, not a regression**: `build_now_point_smooths_oscillating_power`
+   previously tested that the domain function applies a 60s rolling average. After the refactoring,
+   that computation is in `to_timeline_snapshot()` (infra). The domain test now verifies
+   "pre-computed value is passed through unchanged" — a weaker but correct domain invariant.
+   The smoothing invariant is still exercised via `to_timeline_snapshot()` tests and BDD.
+
+4. **Line count estimation error**: The refactored `to_timeline_snapshot()` added 65 lines
+   (estimated 30), pushing `simulator/mod.rs` to 506 lines. Compacting the function (inline
+   some chained calls, remove verbose comments) brought it to 481 lines. Always verify line
+   counts after writing the actual code, not just the estimate.
+
+5. **`assets/mod.rs` also needed editing**: The `plan_trajectory()` method in `assets/mod.rs`
+   referenced `heater::HeaterPlanTrajectory` as the return type. After moving the struct,
+   the path broke. The fix — using the full crate path — was one line but not anticipated in
+   the plan. Pre-flight grep for all references to a moved type before starting avoids surprises.
+
+### Invariants after 027
+
+```
+grep "use crate::assets" VEN/src/controller/timeline.rs   -> EMPTY (SC-001)
+grep "use crate::simulator" VEN/src/controller/timeline.rs -> EMPTY (SC-002)
+cargo check -> 0 errors
+cargo test -> 396 passed, 0 failed (SC-003)
+simulator/mod.rs -> 481 lines (≤ 500)
+BDD full suite -> pending Pi4-Server run (T025)
+```
