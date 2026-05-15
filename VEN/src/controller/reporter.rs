@@ -164,7 +164,7 @@ pub fn build_measurement_report(
         programID: program_id.clone(),
         eventID: Some(event_id.clone()),
         clientName: ven_name.to_string(),
-        reportName: report_name,
+        reportName: Some(report_name),
         resources: vec![OadrReportResource {
             resourceName: resource_name,
             intervals: vec![OadrReportInterval {
@@ -176,7 +176,7 @@ pub fn build_measurement_report(
     };
 
     debug!(
-        report_name = %report.reportName,
+        report_name = report.reportName.as_deref().unwrap_or(""),
         event_id, report_type, report_value, "built measurement report"
     );
     Some(report)
@@ -340,7 +340,7 @@ pub fn build_measurement_report_for_obligation(
         programID: program_id.to_string(),
         eventID: Some(event_id.clone()),
         clientName: ven_name.to_string(),
-        reportName: report_name,
+        reportName: Some(report_name),
         resources: vec![OadrReportResource {
             resourceName: resource_name,
             intervals,
@@ -348,7 +348,7 @@ pub fn build_measurement_report_for_obligation(
     };
 
     debug!(
-        report_name = %report.reportName,
+        report_name = report.reportName.as_deref().unwrap_or(""),
         event_id,
         interval_count,
         "built obligation measurement report"
@@ -563,7 +563,7 @@ pub fn build_status_report(
         programID: program_id.to_string(),
         eventID: None,
         clientName: ven_name.to_string(),
-        reportName: format!("status-{}", ven_name),
+        reportName: Some(format!("status-{}", ven_name)),
         resources: vec![OadrReportResource {
             resourceName: resource_name,
             intervals: vec![OadrReportInterval {
@@ -1036,7 +1036,7 @@ mod tests {
         assert_eq!(report.programID, "prog-001");
         assert_eq!(report.eventID.as_deref(), Some("evt-001"));
         assert_eq!(report.clientName, "ven-1");
-        assert_eq!(report.reportName, "auto-ven-1-evt-001");
+        assert_eq!(report.reportName.as_deref(), Some("auto-ven-1-evt-001"));
         assert_eq!(report.resources[0].resourceName, "ven-1-meter");
         let iv = &report.resources[0].intervals[0];
         assert_eq!(iv.id, 0);
@@ -1129,7 +1129,7 @@ mod tests {
         assert_eq!(report.programID, "prog-001");
         assert!(report.eventID.is_none(), "status report must omit eventID");
         assert_eq!(report.clientName, "ven-1");
-        assert_eq!(report.reportName, "status-ven-1");
+        assert_eq!(report.reportName.as_deref(), Some("status-ven-1"));
         assert_eq!(report.resources[0].resourceName, "ven-1-site");
         let iv = &report.resources[0].intervals[0];
         assert_eq!(iv.id, 0);

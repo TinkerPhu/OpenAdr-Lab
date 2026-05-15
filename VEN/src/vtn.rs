@@ -263,9 +263,12 @@ impl VtnClient {
         let (status, text) = self.post_json_raw("/reports", &value).await?;
 
         if status == StatusCode::CONFLICT {
-            let id = self.find_report_by_name(&body.reportName).await?;
-            self.update_report(&id, value).await?;
-            return Ok(());
+            if let Some(name) = body.reportName.as_deref() {
+                let id = self.find_report_by_name(name).await?;
+                self.update_report(&id, value).await?;
+                return Ok(());
+            }
+            anyhow::bail!("409 Conflict but reportName is absent — cannot upsert");
         }
 
         if !status.is_success() {
@@ -323,10 +326,18 @@ impl VtnPort for VtnClient {
         let path = format!("/reports?clientName={}", self.ven_name);
         let raw = self.get_json(&path).await?;
         let items = raw.as_array().cloned().unwrap_or_default();
-        items
+        // Skip reports that can't deserialize (e.g. absent reportName) — they are
+        // irrelevant to find_report_by_name which requires a non-null name.
+        Ok(items
             .iter()
-            .map(|v| serde_json::from_value(v.clone()).map_err(anyhow::Error::from))
-            .collect()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect())
+    }
+
+    async fn fetch_reports_raw(&self) -> Result<Vec<serde_json::Value>> {
+        let path = format!("/reports?clientName={}", self.ven_name);
+        let raw = self.get_json(&path).await?;
+        Ok(raw.as_array().cloned().unwrap_or_default())
     }
 
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()> {

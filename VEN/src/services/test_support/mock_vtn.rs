@@ -76,12 +76,12 @@ mod tests {
             programID: "prog-1".to_string(),
             eventID: None,
             clientName: "ven-1".to_string(),
-            reportName: "ven-status".to_string(),
+            reportName: Some("ven-status".to_string()),
             resources: vec![],
         };
         mock.upsert_report(body).await.unwrap();
         assert_eq!(mock.submitted().len(), 1);
-        assert_eq!(mock.submitted()[0].reportName, "ven-status");
+        assert_eq!(mock.submitted()[0].reportName.as_deref(), Some("ven-status"));
     }
 
     #[tokio::test]
@@ -91,7 +91,7 @@ mod tests {
             programID: "prog-1".to_string(),
             eventID: None,
             clientName: "ven-1".to_string(),
-            reportName: "test".to_string(),
+            reportName: Some("test".to_string()),
             resources: vec![],
         };
         let result = mock.upsert_report(body).await;
