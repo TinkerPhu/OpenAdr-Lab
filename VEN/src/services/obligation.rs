@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
@@ -25,15 +25,34 @@ impl ObligationService {
         let due = state.due_obligations(now).await;
         for ob in due {
             let env = state.site_envelope().await;
-            let report_opt = {
+            let asset_samples: std::collections::HashMap<
+                String,
+                Vec<crate::controller::reporter::AssetReportSample>,
+            > = {
                 let sim_guard = sim.lock().await;
-                crate::controller::reporter::build_measurement_report_for_obligation(
-                    &ob,
-                    &*sim_guard,
-                    ven_name,
-                    env.as_ref(),
-                )
+                sim_guard
+                    .assets
+                    .iter()
+                    .map(|entry| {
+                        let history = entry.history.slice(Duration::seconds(3600), now);
+                        let samples = history
+                            .iter()
+                            .map(|p| crate::controller::reporter::AssetReportSample {
+                                ts: p.ts,
+                                power_kw: p.power_kw,
+                                soc: p.state.soc(),
+                            })
+                            .collect();
+                        (entry.id.clone(), samples)
+                    })
+                    .collect()
             };
+            let report_opt = crate::controller::reporter::build_measurement_report_for_obligation(
+                &ob,
+                &asset_samples,
+                ven_name,
+                env.as_ref(),
+            );
             if let Some(report) = report_opt {
                 vtn.upsert_report(report).await.map_err(|e| {
                     error!(

@@ -230,7 +230,7 @@ pub(crate) fn spawn_planning(
 
             // Event-driven status report on PlanCycle (T050)
             {
-                let sim_snap = sim.lock().await.clone();
+                let sim_snap = sim.lock().await.to_sim_snapshot();
                 let report_opt = controller::reporter::build_status_report(
                     &cycle.plan_cycle_event,
                     &sim_snap,

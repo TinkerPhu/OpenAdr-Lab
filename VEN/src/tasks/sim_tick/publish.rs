@@ -119,20 +119,38 @@ pub(crate) async fn publish_sim_tick_result(
 
 pub(crate) async fn run_measurement_reports(
     state: &AppState,
-    sim: &Arc<Mutex<SimState>>,
+    sim_snap: &SimSnapshot,
     vtn: &VtnClient,
     ven_name: &str,
     now: DateTime<Utc>,
 ) {
+    use crate::controller::reporter::AssetReportSample;
     let events = state.events().await;
-    let sim_guard = sim.lock().await;
+
+    let asset_samples: std::collections::HashMap<String, Vec<AssetReportSample>> = sim_snap
+        .assets
+        .iter()
+        .map(|(id, asset)| {
+            let sample = AssetReportSample {
+                ts: sim_snap.ts,
+                power_kw: asset.power_kw,
+                soc: asset.values.get("soc").copied(),
+            };
+            (id.clone(), vec![sample])
+        })
+        .collect();
+
+    let grid_net_import_kw = sim_snap.grid.net_power_w.max(0.0) / 1000.0;
+    let grid_net_export_kw = (-sim_snap.grid.net_power_w).max(0.0) / 1000.0;
+
     let reports = controller::reporter::build_measurement_reports_for_active_events(
         &events,
-        &*sim_guard,
+        &asset_samples,
+        grid_net_import_kw,
+        grid_net_export_kw,
         ven_name,
         now,
     );
-    drop(sim_guard);
     for report in reports {
         if let Err(e) = vtn.upsert_report(report).await {
             error!("measurement report submission failed: {e:#}");
