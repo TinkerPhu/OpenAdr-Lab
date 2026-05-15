@@ -1,5 +1,5 @@
 use crate::controller::trace::ControllerTrace;
-use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport};
+use crate::controller::vtn_port::{OadrEvent, OadrProgram};
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
 use crate::entities::device_session::{
     BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime,
@@ -109,7 +109,8 @@ fn bool_true() -> bool {
 pub struct PollingState {
     pub programs: Vec<OadrProgram>,
     pub events: Vec<OadrEvent>,
-    pub reports: Vec<OadrReport>,
+    /// Full report JSON from VTN — pass-through for GET /reports and BDD assertions.
+    pub reports: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,7 +163,7 @@ pub struct AppState {
 struct PersistedVenState {
     programs: Vec<OadrProgram>,
     events: Vec<OadrEvent>,
-    reports: Vec<OadrReport>,
+    reports: Vec<serde_json::Value>,
     sensor: SensorSnapshot,
 }
 
@@ -194,7 +195,7 @@ impl AppState {
         self.polling.write().await.events = events;
     }
 
-    pub async fn set_reports(&self, reports: Vec<OadrReport>) {
+    pub async fn set_reports(&self, reports: Vec<serde_json::Value>) {
         self.polling.write().await.reports = reports;
     }
 
@@ -214,7 +215,7 @@ impl AppState {
         self.polling.read().await.events.clone()
     }
 
-    pub async fn reports(&self) -> Vec<OadrReport> {
+    pub async fn reports(&self) -> Vec<serde_json::Value> {
         self.polling.read().await.reports.clone()
     }
 
