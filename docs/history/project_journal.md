@@ -3703,3 +3703,79 @@ public serde_json::Value in vtn.rs -> none (write-path methods are pub(crate))
 tick.rs line count -> 193 (< 200)
 cargo test -> 387 passed, 0 failed
 ```
+
+---
+
+## Feature 025 — Type VTN Report Interface (OadrReportBody)
+
+**Commit:** 4ead54b (feat) + 9944537 (fix), 1ec10a5 (fix), 72448d7 (fix)
+
+### What changed
+
+Replaced `serde_json::Value` in `VtnPort::upsert_report` with a typed `OadrReportBody` struct defined in `controller/vtn_port.rs`. All four public fields use OpenADR upstream naming (`programID`, `eventID`, `clientName`, `reportName`, `resources`). The `reporter.rs` already produced structured data; this change propagates the domain type to the port boundary and to `vtn.rs`.
+
+Fixed a parallel BDD issue: `OadrEvent` was missing the `priority` field added by 024, causing struct initialiser failures in test code and mock_vtn.rs.
+
+### Why
+
+AB-05: `reporter.rs` was importing infra types (`SimState`, `HistoryPoint`) in violation of the Clean Architecture dependency rule. This PR typed the VTN boundary (the output side) as a prerequisite for 026.
+
+### Invariants after 025
+
+```
+cargo test -> 396 passed, 0 failed
+OadrReportBody typed at VtnPort boundary
+```
+
+---
+
+## Feature 026 — Reporter Domain Types (AssetReportSample replaces &SimState)
+
+**Commits:** 6b31253 (feat)
+**Branch:** 026-reporter-domain-types
+**Date:** 2026-05-15
+
+### What changed
+
+#### reporter.rs (Domain layer — controller/)
+- Added `pub struct AssetReportSample { ts, power_kw, soc: Option<f64> }` — the domain-side per-tick sample type. No infra imports.
+- All public functions now accept `&HashMap<String, Vec<AssetReportSample>>` + scalar grid params instead of `&SimState` or `&SimSnapshot` from infra.
+- `build_measurement_report`: takes `grid_net_import_kw: f64` and `grid_net_export_kw: f64` scalars pre-extracted by callers.
+- `build_measurement_report_for_obligation`: takes `asset_samples` map instead of `&SimState`.
+- `build_measurement_reports_for_active_events`: same.
+- `build_status_report`: takes `&SimSnapshot` (domain-side view) instead of `&SimState`.
+- Removed `use crate::simulator::SimState` and `use crate::assets::HistoryPoint` — the two infra imports that violated AB-05.
+- Test module completely rewritten with `make_samples`, `make_ev_samples`, `make_snap` domain-only helpers. Added SC-004 and SC-005 regression tests.
+
+#### Callers (infra boundary)
+- **obligation.rs**: locks `sim`, extracts `HashMap<String, Vec<AssetReportSample>>` via `entry.history.slice(Duration::seconds(3600), now)`, releases lock, then calls reporter without holding the lock.
+- **planning.rs** (status report block): changed `sim.lock().await.clone()` → `sim.lock().await.to_sim_snapshot()` — avoids deep-cloning the full SimState (including 3600-entry history buffers) just for a status report.
+- **publish.rs** (`run_measurement_reports`): parameter changed from `&Arc<Mutex<SimState>>` to `&SimSnapshot`. Builds a single-point `asset_samples` map from the snapshot's current values (sufficient for timer-driven single-interval reports). Grid scalars derived from `sim_snap.grid.net_power_w`.
+- **tick.rs**: `let snap_for_reports = tick_sim_snap.clone()` before moving `tick_sim_snap` into `publish_sim_tick_result`; passes `&snap_for_reports` to `run_measurement_reports`.
+
+### Why
+
+Architecture violation AB-05 (raised in 023): `reporter.rs` imported `SimState` and `HistoryPoint` from infra rings (`simulator/`, `assets/`). Domain code must never import infra. The fix extracts history at the infra boundary (callers) and passes only domain types into the reporter.
+
+### Key learnings
+
+1. **BDD failures from CPU contention, not code**: The initial full BDD run showed 9 failures. A concurrent second test-runner container was competing for the ARM64 Pi4's cores, causing MILP solver timeouts (18–60s per solve × 2 competitors). A targeted clean re-run of the same 5 features (no concurrent load) passed 29/29 scenarios — confirming the failures were environmental, not regressions.
+
+2. **Targeted BDD re-run as the correct verification tool**: When a full-suite run shows timing failures, the right response is a targeted clean run of the specific features, not to dismiss them as pre-existing or search for a code root cause that doesn't exist.
+
+3. **`to_sim_snapshot()` vs `.clone()` on SimState**: `clone()` deep-copies all 3600-entry history buffers per asset (expensive). `to_sim_snapshot()` produces only a slim HashMap of current asset values (cheap). Always prefer the snapshot when only current state is needed.
+
+4. **Single sample is sufficient for timer-driven reports**: `build_measurement_report` (timer path) only uses `asset_samples.get("ev").last()` for SoC — a single current-state sample is enough. Full 2h history is only needed by `build_measurement_report_for_obligation` (obligation path in obligation.rs).
+
+5. **Lock discipline**: All infra-boundary callers now extract history synchronously while holding the sim lock, then release before any `.await` — satisfying SC-006. The reporter itself never holds any lock.
+
+### Invariants after 026
+
+```
+grep "use crate::simulator\|use crate::assets" VEN/src/controller/reporter.rs -> EMPTY (SC-001)
+cargo check -> 0 errors
+cargo test -> 396 passed, 0 failed (SC-003/SC-004/SC-005)
+BDD targeted run -> 29/29 passed, 0 failed (SC-007)
+  Features tested: ven_planner, ven_uc_vtn_coordination, ven_uc_edge_cases,
+                   ven_shiftable_lifecycle, deviation_absorber
+```
