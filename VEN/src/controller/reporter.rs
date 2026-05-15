@@ -1021,6 +1021,7 @@ mod tests {
             id: "evt-001".to_string(),
             programID: "prog-001".to_string(),
             eventName: None,
+            priority: None,
             intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
@@ -1054,6 +1055,7 @@ mod tests {
             id: "evt-002".to_string(),
             programID: "prog-001".to_string(),
             eventName: None,
+            priority: None,
             intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
@@ -1090,6 +1092,7 @@ mod tests {
             id: "evt-003".to_string(),
             programID: "prog-001".to_string(),
             eventName: None,
+            priority: None,
             intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
