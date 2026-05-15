@@ -12,7 +12,8 @@ use crate::assets::{
     PvInverter,
 };
 use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot, SimulatorPort, SnapshotError};
-use crate::controller::timeline::{TimelineAssetData, TimelineSnapshot};
+use crate::controller::timeline::{HeaterPlanTrajectory, TimelineAssetData, TimelinePoint, TimelineSnapshot};
+use crate::entities::asset::AssetType;
 use crate::entities::asset_params::AssetParams;
 use crate::models::SensorSnapshot;
 use energy::EnergyCounter;
@@ -355,28 +356,67 @@ impl SimState {
             assets: assets_map,
         }
     }
-    /// Build a `TimelineSnapshot` for rendering asset timelines.
-    ///
-    /// Clones each asset's history buffer, config, and current state so that
-    /// the sim lock can be released before the (potentially slow) timeline render.
+    /// Build a domain-only `TimelineSnapshot`. All infra→domain conversions happen here
+    /// before the sim lock is released; no `AssetHistoryBuffer`/`AssetConfig`/`AssetState`
+    /// escapes to the domain layer.
     pub fn to_timeline_snapshot(&self) -> TimelineSnapshot {
+        let now = Utc::now();
+        let w = chrono::Duration::seconds(3600);
         let assets = self
             .iter_assets()
             .map(|(entry, cfg)| {
-                (
-                    entry.id.clone(),
-                    TimelineAssetData {
-                        history: entry.history.clone(),
-                        config: cfg.clone(),
-                        current_state: entry.state.clone(),
-                    },
-                )
+                let history: Vec<TimelinePoint> = entry
+                    .history
+                    .slice(w, now)
+                    .into_iter()
+                    .map(|p| TimelinePoint { ts: p.ts, power_kw: p.power_kw, state_values: cfg.state_values(&p.state) })
+                    .collect();
+                let current_power_kw = entry
+                    .history
+                    .recent_avg_power(chrono::Duration::seconds(60), now)
+                    .unwrap_or_else(|| entry.history.latest().map(|p| p.power_kw).unwrap_or(0.0));
+                let current_state_values = cfg.state_values(&entry.state);
+                let asset_type = match cfg {
+                    AssetConfig::Battery(_) => AssetType::Battery,
+                    AssetConfig::Ev(_) => AssetType::Ev,
+                    AssetConfig::Heater(_) => AssetType::Heater,
+                    AssetConfig::Pv(_) => AssetType::Pv,
+                    AssetConfig::BaseLoad(_) => AssetType::GenericConsumer,
+                };
+                let plan_trajectory = match (cfg, &entry.state) {
+                    (AssetConfig::Heater(h), AssetState::Heater(s)) => {
+                        let e_max_kwh = (h.temp_max_c - h.temp_min_c) * h.thermal_mass_kwh_per_c;
+                        let e_kwh = ((s.temperature_c - h.temp_min_c) * h.thermal_mass_kwh_per_c)
+                            .clamp(0.0, e_max_kwh);
+                        Some(HeaterPlanTrajectory {
+                            e_kwh,
+                            temp_min_c: h.temp_min_c,
+                            thermal_mass: h.thermal_mass_kwh_per_c,
+                            q_dem_kw: h.forecast_demand_kw(h.ambient_temp_c),
+                            e_max_kwh,
+                        })
+                    }
+                    _ => None,
+                };
+                (entry.id.clone(), TimelineAssetData {
+                    asset_id: entry.id.clone(),
+                    asset_type,
+                    history,
+                    current_power_kw,
+                    current_state_values,
+                    plan_trajectory,
+                })
             })
             .collect();
-        TimelineSnapshot {
-            assets,
-            grid_history: self.grid_asset.history.clone(),
-        }
+        let grid_history: Vec<TimelinePoint> = self
+            .grid_asset
+            .history
+            .slice(w, now)
+            .into_iter()
+            .map(|p| TimelinePoint { ts: p.ts, power_kw: p.power_kw, state_values: HashMap::new() })
+            .collect();
+        let grid_current_kw = self.grid_asset.history.latest().map(|p| p.power_kw).unwrap_or(0.0);
+        TimelineSnapshot { assets, grid_history, grid_current_kw }
     }
 }
 

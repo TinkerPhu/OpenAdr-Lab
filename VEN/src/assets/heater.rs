@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
+use crate::controller::timeline::HeaterPlanTrajectory;
 
 #[derive(Debug, Clone)]
 pub struct HeaterParams {
@@ -196,7 +197,16 @@ impl Heater {
         live_state: &super::AssetState,
     ) -> Option<HeaterPlanTrajectory> {
         if let super::AssetState::Heater(s) = live_state {
-            Some(HeaterPlanTrajectory::new(cfg, s.temperature_c))
+            let e_max_kwh = (cfg.temp_max_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c;
+            let e_kwh = ((s.temperature_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c)
+                .clamp(0.0, e_max_kwh);
+            Some(HeaterPlanTrajectory {
+                e_kwh,
+                temp_min_c: cfg.temp_min_c,
+                thermal_mass: cfg.thermal_mass_kwh_per_c,
+                q_dem_kw: cfg.forecast_demand_kw(cfg.ambient_temp_c),
+                e_max_kwh,
+            })
         } else {
             None
         }
@@ -324,38 +334,6 @@ impl Heater {
     }
 }
 
-/// Stateful temperature trajectory computer for plan display.
-/// Recomputes T_tank per slot from the current live energy rather than the stored
-/// replan-time trajectory, so the displayed curve always starts from live state.
-pub struct HeaterPlanTrajectory {
-    e_kwh: f64,
-    temp_min_c: f64,
-    thermal_mass: f64,
-    q_dem_kw: f64,
-    e_max_kwh: f64,
-}
-
-impl HeaterPlanTrajectory {
-    pub fn new(cfg: &Heater, live_temp_c: f64) -> Self {
-        let e_max_kwh = (cfg.temp_max_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c;
-        let e_kwh =
-            ((live_temp_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c).clamp(0.0, e_max_kwh);
-        Self {
-            e_kwh,
-            temp_min_c: cfg.temp_min_c,
-            thermal_mass: cfg.thermal_mass_kwh_per_c,
-            q_dem_kw: cfg.forecast_demand_kw(cfg.ambient_temp_c),
-            e_max_kwh,
-        }
-    }
-
-    /// Returns state values for the start of this slot, then advances internal energy.
-    pub fn next_slot(&mut self, p_heat_kw: f64, dt_h: f64) -> HashMap<String, f64> {
-        let temp_c = self.temp_min_c + self.e_kwh / self.thermal_mass;
-        self.e_kwh = (self.e_kwh + (p_heat_kw - self.q_dem_kw) * dt_h).clamp(0.0, self.e_max_kwh);
-        HashMap::from([("temp_c".into(), temp_c)])
-    }
-}
 
 impl Asset for Heater {
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
