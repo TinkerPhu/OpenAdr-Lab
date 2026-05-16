@@ -18,4 +18,16 @@ echo "Provisioning ven-2 via API..."
 python provision_ven2.py
 echo "Provisioning done."
 
-exec python -m behave "$@"
+# Run main suite first, excluding timing-sensitive @isolated scenarios.
+# Then run @isolated scenarios in a second pass so each gets a fresh VEN
+# state and is not affected by Pi4 resource contention from prior scenarios.
+set +e
+python -m behave --tags=~@isolated "$@"
+MAIN_EXIT=$?
+
+echo ""
+echo "=== Running @isolated scenarios (fresh VEN state) ==="
+python -m behave --tags=@isolated "$@"
+ISOLATED_EXIT=$?
+
+exit $((MAIN_EXIT | ISOLATED_EXIT))
