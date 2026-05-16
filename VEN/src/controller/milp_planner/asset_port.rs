@@ -1,19 +1,14 @@
-//! Asset-port types: MILP context/variable/solution structs that cross the boundary
-//! between the `assets` module and the `controller::milp_planner` module.
+//! Asset-port types: MILP context/variable/solution structs for the planner boundary.
 //!
 //! **Struct definitions live here.** Method implementations (declare_vars, constraints,
 //! objective, read_solution, from_state) remain in `assets/battery.rs`, `assets/ev.rs`,
 //! and `assets/heater.rs` as cross-file inherent impl blocks — valid Rust.
 //!
-//! `assets/*.rs` re-export these types via `pub use` for backward compatibility.
-//! All code in `controller/milp_planner` imports from `super::asset_port::*` instead
-//! of from `crate::assets::*`, which is the architectural invariant enforced by Phase 3.
-//!
-//! ## Constitution VI verification (T023, 2026-phase-3)
-//! - `impl AssetMilpContext`: Battery, Ev, Heater only (assets/battery.rs, ev.rs, heater.rs)
-//! - `use crate::assets::` in milp_planner/: none in production code (test fixture only)
-//! - `use crate::assets::` in milp_interactions.rs: none
-//! - Line counts: asset_port.rs ≤ 500 ✓; battery.rs/ev.rs/heater.rs exceed 500 (pre-existing complexity)
+//! ## Architectural invariants (verified by fix-arch-layer-violations, 2026)
+//! - `use crate::assets::` in milp_planner/ production code: NONE (invariant holds)
+//! - `use crate::assets::` in milp_interactions.rs: NONE
+//! - `*Params` structs (`BatteryParams`, `EvParams`, etc.) live in `entities/asset_params`
+//! - `assets/*.rs` no longer re-export types from `milp_planner/`; callers import directly
 
 use chrono::{DateTime, Utc};
 use good_lp::{ProblemVariables, Variable};

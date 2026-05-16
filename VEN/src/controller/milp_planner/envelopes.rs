@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::assets::{ev::EvParams, heater::HeaterParams};
+use crate::entities::asset_params::{EvParams, HeaterParams};
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::FlexibilityEnvelope;
 use crate::entities::planner_params::PlannerParams;

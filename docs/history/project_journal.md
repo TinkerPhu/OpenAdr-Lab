@@ -4158,4 +4158,46 @@ All five architecture invariant greps return empty. Full unit test suite: **403 
 
 - `AbsorberState::Default` is safe to derive — all fields (`HashMap`, `u32`, `bool`, `f64`) have natural zero defaults. No logic change, purely enabling test construction.
 - When `tick.rs` (a non-directory module file inside `sim_tick/`) declares `mod tick_tests;`, Rust looks for the file at `sim_tick/tick/tick_tests.rs` — use `#[path = "tick_tests.rs"]` to keep it alongside `tick.rs` at `sim_tick/tick_tests.rs`.
+
+---
+
+## Step 30 — Fix Architectural Layer Violations (fix-arch-layer-violations)
+
+**Status: COMPLETE (local cargo check passes; Pi4 deploy + BDD pending)**
+
+### Motivation
+
+A structured Mermaid-based architectural review against the `CLAUDE.md` Hexagonal + Clean Architecture rules found five confirmed violations in the VEN backend:
+
+| # | Violation | Root cause |
+|---|---|---|
+| ❶ | `entities/asset_params.rs` → `assets/` | `AssetParams` enum wrapped concrete `*Params` structs defined in Infra |
+| ❷ | `assets/battery·ev·heater` → `controller/milp_planner` | `pub use` re-exports of MILP types smuggled in Infra→Domain imports |
+| ❸ | `milp_planner/envelopes·inputs·results·mod` → `assets/` | Direct `*Params` imports — invariant claim in comment was false |
+| ❹ | `assets/heater.rs` → `controller/timeline` | `HeaterPlanTrajectory` lived in controller but heater physics needed it |
+| ❺ | `simulator/mod.rs` → `controller/timeline` | Timeline data-carrier types lived in controller, not entities |
+
+### What Was Done
+
+**Track A — move `*Params` structs to `entities/`**
+
+Moved `BatteryParams`, `EvParams`, `HeaterParams`, `PvParams`, `BaseLoadParams` from `assets/<asset>.rs` into `entities/asset_params.rs` as pure data structs (no physics logic). The `AssetParams` enum and `AssetRequestSlice` remain in the same file. Updated `profile.rs`, `assets/mod.rs`, `milp_planner/envelopes.rs`, `inputs.rs`, `results.rs`, `mod.rs` to import from `entities::asset_params`.
+
+Also removed the `pub use crate::controller::milp_planner::asset_port::*` re-exports from `assets/battery.rs`, `ev.rs`, `heater.rs`. Updated `assets/mod.rs` to import `BatteryMilpContext`, `EvMilpContext`, `HeaterMilpContext` directly from `milp_planner::asset_port`, and added private direct imports in each asset file for its own impl blocks.
+
+**Track B — move timeline data-carrier types to `entities/`**
+
+Created `entities/timeline.rs` with `TimelinePoint`, `HeaterPlanTrajectory`, `TimelineAssetData`, `TimelineSnapshot`, `TimeWindow`. Added `pub mod timeline;` to `entities/mod.rs`. Updated `controller/timeline.rs` to import from `entities::timeline` and re-export `HeaterPlanTrajectory`, `TimelineSnapshot`, `TimeWindow` for backward compatibility (routes/timeline.rs continues to work). Updated `assets/heater.rs` and `simulator/mod.rs` to import `HeaterPlanTrajectory` and timeline types from `entities::timeline` directly.
+
+**Documentation**
+
+Updated `asset_port.rs` header comment to accurately state the invariant now holds. Updated `.claude/CLAUDE.md` to add `assets/` to the Infra ring map and added a fourth invariant check (`no use crate::assets:: in entities/`).
+
+### Issues / Key Learnings
+
+- `*Params` structs had `impl` blocks (e.g. `PvParams::forecast_kw`) that moved to `entities/` — this is fine, Rust allows `impl` blocks in any file within the same crate as the struct definition. Keeping the `from_state` / `initial_state` methods in `assets/<asset>.rs` also works cleanly.
+- Removing `pub use` re-exports from `assets/battery·ev·heater` broke `assets/mod.rs` callers that used `battery::BatteryMilpContext::from_state(...)` — fixed by importing the types directly in `assets/mod.rs`.
+- `profile.rs` was an unexpected secondary caller of `*Params` from `assets/` — caught by the first cargo check error batch.
+- `controller/timeline.rs` had `TimeWindow` defined both locally AND in the re-export shim — caught at second cargo check; removed the local definition.
+- `TimelineAssetData` and `TimelinePoint` are used in `controller/timeline.rs` tests (via `super::*`) but not by name in production code. Wrapping their imports in `#[cfg(test)]` eliminates the unused-import warning cleanly.
 - The rustc 1.95.0 ICE on the binary target (triggered by incremental compilation over Windows NTFS via WSL) is a pre-existing compiler bug. `cargo test` and `cargo check --tests` both work correctly. The ICE does not affect correctness — it only affects the specific `cargo check` (without `--tests`) command on the binary target.

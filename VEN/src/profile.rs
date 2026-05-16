@@ -1,8 +1,6 @@
-use crate::assets::{
-    base_load::BaseLoadParams, battery::BatteryParams, ev::EvParams, heater::HeaterParams,
-    pv::PvParams,
+use crate::entities::asset_params::{
+    AssetParams, BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
 };
-use crate::entities::asset_params::AssetParams;
 use crate::entities::PlannerObjective;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
