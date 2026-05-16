@@ -476,6 +476,7 @@ mod tests {
             enabled: true,
             dead_band_kw: 0.1,
             dead_band_clearing_ticks: 1,
+            deviation_trigger_ticks: 30,
             assets: vec![
                 AbsorberAssetParams {
                     id: "battery".to_string(),
@@ -498,6 +499,7 @@ mod tests {
             enabled: true,
             dead_band_kw: 0.1,
             dead_band_clearing_ticks: 1,
+            deviation_trigger_ticks: 30,
             assets: vec![AbsorberAssetParams {
                 id: "battery".to_string(),
                 priority: 0,

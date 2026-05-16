@@ -6,8 +6,8 @@ use tokio::sync::Mutex;
 use crate::controller;
 use crate::controller::SimulatorPort;
 use crate::entities::asset::PlanTrigger;
+use crate::entities::planner_params::AbsorberParams;
 use crate::planner_events::PlannerEventTx;
-use crate::profile::Profile;
 use crate::simulator::SimState;
 use crate::state::{AppState, EvSettings};
 use crate::vtn::VtnClient;
@@ -17,7 +17,7 @@ pub(crate) async fn tick_once(
     mut absorber_state: AbsorberState,
     state: AppState,
     sim: Arc<Mutex<SimState>>,
-    profile: Arc<Profile>,
+    absorber_params: AbsorberParams,
     ven_name: String,
     vtn: VtnClient,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
@@ -93,7 +93,6 @@ pub(crate) async fn tick_once(
         );
 
         // PHASE 3: Layer 1 multi-asset deviation absorber (Tier 1 real-time control).
-        let absorber_params = super::helpers::build_absorber_params(&profile);
         let deviation_kw = prev_actual_net_kw - plan_signed_net_kw;
         let residual_kw = controller::absorber::apply_deviation_absorption(
             &mut absorber_state,
@@ -168,7 +167,7 @@ pub(crate) async fn tick_once(
     super::helpers::accumulate_deviation(
         &mut absorber_state,
         residual_kw,
-        &profile,
+        &absorber_params,
         &*trigger_tx,
         &deviation_pending,
         now,
