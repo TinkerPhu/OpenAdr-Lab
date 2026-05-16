@@ -4047,3 +4047,83 @@ cargo check -> 0 errors
 cargo test -> 398 passed, 0 failed
 BDD full suite -> 44 features passed, 0 failed / 238 scenarios passed, 0 failed
 ```
+
+---
+
+## Feature 028 (speckit) — Fix VtnClient in Remaining Task Files (Invariant 4)
+
+**Branch:** 028-fix-vtnclient-tasks
+**Date:** 2026-05-16
+**Plan:** `docs/plans/post_refactoring_fixes.md` — Item 1
+
+### What changed
+
+Closed Invariant 4 from `docs/plans/ven_backend_architecture_refactoring_v2.md`:
+`grep -r "use crate::vtn::VtnClient" VEN/src/tasks` must be empty.
+The VG-05/06 phase (029) had fixed `planning.rs` and `sim_tick/`, but four polling/obligation
+tasks were not in scope. This phase completes the invariant across the entire tasks layer.
+
+#### tasks/poll_programs.rs
+- Removed `use crate::vtn::VtnClient`.
+- Added `use std::sync::Arc`.
+- Changed `spawn_program_poll` parameter: `vtn: VtnClient` → `vtn: Arc<dyn VtnPort>`.
+- Removed intermediate cast `let vtn_port: &dyn VtnPort = &vtn;`.
+- Call site: `vtn_port.fetch_programs()` → `vtn.fetch_programs()` (direct on Arc).
+
+#### tasks/poll_reports.rs
+- Same pattern as poll_programs.rs.
+- Changed `spawn_report_poll` parameter; removed cast; direct `vtn.fetch_reports_raw()`.
+
+#### tasks/poll_events.rs
+- Removed `use crate::vtn::VtnClient` (Arc and VtnPort already imported).
+- Changed `spawn_event_poll` parameter: `vtn: VtnClient` → `vtn: Arc<dyn VtnPort>`.
+- Removed cast `let vtn_port: &dyn VtnPort = &vtn;`.
+- Direct `vtn.fetch_events()` in loop body.
+
+#### tasks/obligation.rs
+- Removed `use crate::vtn::VtnClient`.
+- Added `use crate::controller::VtnPort` (this file had no prior VtnPort import).
+- Changed `spawn_obligation_check` parameter: `vtn: VtnClient` → `vtn: Arc<dyn VtnPort>`.
+- Changed call argument: `&vtn` → `vtn.as_ref()` (ObligationService expects `&dyn VtnPort`).
+
+#### main.rs
+- Four spawn call sites changed from `vtn.clone()` to `vtn_port.clone()` for
+  `spawn_program_poll`, `spawn_event_poll`, `spawn_report_poll`, `spawn_obligation_check`.
+- `vtn` (VtnClient) remains in scope: still used at `AppCtx { vtn, ... }` for the routes layer.
+- No import changes needed — `vtn_port: Arc<dyn VtnPort>` already existed (added in 029).
+
+### Why
+
+The four polling tasks were excluded from the 029 scope note:
+> "Polling tasks continue to receive the concrete `VtnClient`"
+
+Post-implementation verification of `ven_backend_architecture_refactoring_v2.md` chapters 6 & 7
+confirmed these 4 files still violated Invariant 4. This phase makes the invariant grep truly
+empty across all of `VEN/src/tasks/`.
+
+### Key learnings
+
+1. **obligation.rs task had no VtnPort import**: Unlike the other three files (which already
+   imported `VtnPort` for the now-removed intermediate cast), `obligation.rs` task never imported
+   `VtnPort` at all — it previously used `VtnClient` directly. Must add the import explicitly;
+   a pre-flight grep for existing imports prevents this surprise.
+
+2. **Intermediate cast variable naming**: The cast variable was named `vtn_port` in poll_programs.rs
+   — the same identifier we want to use for the new parameter. Removing the cast line and renaming
+   the parameter are done together; the intent is clear since both changes are mechanical.
+
+3. **Transient rustc ICE in WSL diagnostic renderer**: The first `cargo check` run panicked in
+   `annotate_snippets::renderer`. Re-running with `--message-format=short` bypassed the snippet
+   renderer and completed cleanly (0 errors). Not related to our code changes.
+
+### Invariants after speckit 028
+
+```
+grep -r "use crate::vtn::VtnClient" VEN/src/tasks  -> EMPTY (Invariant 4 ✓)
+grep "use crate::simulator|use crate::assets" VEN/src/controller/reporter.rs -> EMPTY
+grep "use crate::assets" VEN/src/controller/timeline.rs -> EMPTY
+grep -r "use crate::profile" VEN/src/tasks -> EMPTY
+grep -r "use crate::assets|use crate::simulator" VEN/src/services -> FAIL (services/obligation.rs — Item 2, addressed separately)
+cargo check -> 0 errors (42 pre-existing warnings)
+BDD suite -> pending Pi4-Server run
+```
