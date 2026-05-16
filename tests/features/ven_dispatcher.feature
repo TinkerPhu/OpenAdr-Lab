@@ -58,6 +58,8 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
   # With the deviation absorber active, Tier 2 only fires when the absorber is
   # EXHAUSTED. We exhaust all absorber assets first so the full 15 kW extra load
   # appears as residual (> dead_band) and escalates to Tier 2.
+  # Timing note: polls VEN trace for DeviceDeviation PlanCycle (~39s in isolation).
+  # Can hit poll_until timeout at suite end on Pi4 under resource contention.
 
   Scenario: Layer 2 triggers a DeviceDeviation replan after sustained grid deviation
     When I wait for the VEN /plan endpoint to return a plan

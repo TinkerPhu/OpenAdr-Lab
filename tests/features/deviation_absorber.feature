@@ -110,6 +110,9 @@ Feature: Multi-asset deviation absorber (Tier 1 real-time control)
 
   # User Story 3: EV Departure Guard
   # ================================
+  # Timing note: requires a fresh plan after EV session and deviation injection.
+  # Passes in isolation (~19s) but can exceed poll_until timeouts at the end of
+  # the full suite on Pi4 when preceding scenarios leave the planner backlogged.
 
   Scenario: EV departure guard prevents reduction near departure
     Given I DELETE the EV session
