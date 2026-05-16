@@ -84,7 +84,7 @@
   - `wsl bash -c "grep -r 'use crate::vtn::VtnClient' VEN/src/tasks"`
   - `wsl bash -c "grep -r 'use crate::assets\|use crate::simulator' VEN/src/services"`
 - [x] T015 [P] Run full unit test suite: `wsl bash -c "cd VEN && cargo test 2>&1 | tail -30"` — confirm zero failures including the two new tests (`tick_once_runs_without_profile`, `spawn_planning_constructs_without_panic`); this fulfils the Phase 3 and Phase 4 test deliverables mandated by `docs/plans/ven_backend_architecture_refactoring.md` §6
-- [ ] T016 Push branch to remote and deploy to Pi4-Server: `git push origin 029-fix-arch-invariants-tests` then `ssh Pi4-Server "cd /srv/docker/openadr_lab && git pull && git checkout 029-fix-arch-invariants-tests"` then `ssh Pi4-Server "cd /srv/docker/openadr_lab && docker compose run --rm ven-test 2>&1 | tail -30"` — confirm 44 features, 238 scenarios, 0 failures
+- [x] T016 Push branch to remote and deploy to Pi4-Server: `git push origin 029-fix-arch-invariants-tests` then `ssh Pi4-Server "cd /srv/docker/openadr_lab && git pull && git checkout 029-fix-arch-invariants-tests"` then `ssh Pi4-Server "cd /srv/docker/openadr_lab && docker compose run --rm ven-test 2>&1 | tail -30"` — confirm 44 features, 238 scenarios, 0 failures
 - [x] T017 [P] Update `docs/history/project_journal.md` with what was done, why, and any key learnings from this feature
 
 ---

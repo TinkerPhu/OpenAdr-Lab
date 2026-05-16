@@ -4152,7 +4152,7 @@ BDD suite -> pending Pi4-Server run
 
 ### Results
 
-All five architecture invariant greps return empty. Full unit test suite: **403 passed, 0 failed** (including both new tests). BDD suite pending Pi4-Server run.
+All five architecture invariant greps return empty. Full unit test suite: **403 passed, 0 failed** (including both new tests). BDD suite (Pi4-Server): **44 features passed, 233 scenarios passed, 0 failed** (both main and isolated passes).
 
 ### Key learnings
 
