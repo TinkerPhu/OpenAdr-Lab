@@ -5,15 +5,15 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::error;
 
+use crate::controller::VtnPort;
 use crate::services::ObligationService;
 use crate::simulator::SimState;
 use crate::state::AppState;
-use crate::vtn::VtnClient;
 
 pub(crate) fn spawn_obligation_check(
     state: AppState,
     sim: Arc<Mutex<SimState>>,
-    vtn: VtnClient,
+    vtn: Arc<dyn VtnPort>,
     ven_name: String,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -22,7 +22,7 @@ pub(crate) fn spawn_obligation_check(
             interval.tick().await;
             let now = Utc::now();
             if let Err(e) =
-                ObligationService::check_and_report(&state, &sim, &vtn, &ven_name, now).await
+                ObligationService::check_and_report(&state, &sim, vtn.as_ref(), &ven_name, now).await
             {
                 error!("obligation check failed: {e:#}");
             }
