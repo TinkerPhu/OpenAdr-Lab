@@ -17,6 +17,7 @@ Feature: Shiftable Load Lifecycle (Plan B)
   # Window must exceed duration to survive planner delay (window=80m > duration=60m),
   # but stay below duration + plan_step_s (60m + 30m = 90m) so MILP has only slot 0.
 
+  @isolated
   Scenario: Running shiftable load appears in GET /sim
     Given I POST a shiftable load for asset "wm-2" at 2.0 kW for 60 minutes within 80 minutes
     When I poll the VEN /sim until asset "wm-2" appears
@@ -30,7 +31,7 @@ Feature: Shiftable Load Lifecycle (Plan B)
   # poll_until timeout when run at the end of the full suite under Pi4 resource
   # contention (prior scenarios leave the VEN planner slower). Not a code bug.
 
-  @slow
+  @slow @isolated
   Scenario: Shiftable load auto-completes and disappears from GET /sim
     Given I POST a shiftable load for asset "wm-3" at 2.0 kW for 1 minutes within 30 minutes
     And I poll the VEN /sim until asset "wm-3" appears
@@ -39,6 +40,7 @@ Feature: Shiftable Load Lifecycle (Plan B)
 
   # ── AC#5: Delete mid-run removes from /sim ──────────────────────────────
 
+  @isolated
   Scenario: Deleting a running shiftable load removes it from GET /sim
     Given I POST a shiftable load for asset "wm-4" at 2.0 kW for 60 minutes within 80 minutes
     And I poll the VEN /sim until asset "wm-4" appears
