@@ -7,10 +7,10 @@ use crate::controller;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
+use crate::controller::VtnPort;
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::simulator::SimState;
 use crate::state::AppState;
-use crate::vtn::VtnClient;
 
 pub(crate) fn spawn_planning(
     state: AppState,
@@ -18,7 +18,7 @@ pub(crate) fn spawn_planning(
     grid_max_import_kw: f64,
     grid_max_export_kw: f64,
     asset_params: Vec<AssetParams>,
-    vtn: VtnClient,
+    vtn: Arc<dyn VtnPort>,
     ven_name: String,
     mut trigger_rx: tokio::sync::watch::Receiver<PlanTrigger>,
     sim: Arc<Mutex<SimState>>,

@@ -3885,3 +3885,85 @@ cargo test -> 396 passed, 0 failed (SC-003)
 simulator/mod.rs -> 481 lines (≤ 500)
 BDD full suite -> 44 features passed, 0 failed / 238 scenarios passed, 0 failed (SC-004)
 ```
+
+---
+
+## Feature 028 — Profile Decoupling in sim_tick (VG-04)
+
+**Commit:** 5042f05 (feat)
+**Branch:** 027-clean-timeline-infra
+**Date:** 2026-05-16
+
+### What changed
+
+Closed VG-04 from `docs/plans/ven_backend_architecture_refactoring_v2.md` Phase 3:
+`tasks/sim_tick/` still received `Arc<Profile>` (raw infra config) on every tick cycle,
+violating the profile rule. The fix wires the already-extracted domain params through
+`spawn_sim_tick` instead of the raw profile.
+
+#### entities/planner_params.rs
+- Added `pub deviation_trigger_ticks: u32` to `AbsorberParams` struct.
+  This field was previously read from `profile.planner.deviation_trigger_ticks` inside
+  `accumulate_deviation`. Moving it here completes AbsorberParams as the single source of
+  absorber trigger config.
+- Added `deviation_trigger_ticks: 30` to `AbsorberParams::default()`.
+
+#### main.rs
+- `build_domain_params()`: added `deviation_trigger_ticks: profile.planner.deviation_trigger_ticks`
+  when constructing AbsorberParams.
+- `spawn_sim_tick` call: replaced `profile.clone()` with `sim_params, absorber_params`.
+  Both were already extracted at line 150 and used for `load_with_params` and `validate_startup`.
+
+#### tasks/sim_tick/mod.rs
+- Replaced `profile: Arc<Profile>` with `sim_params: SimulatorParams, absorber_params: AbsorberParams`.
+- Reads `tick_s / persist_every_s / report_interval_s` from `sim_params` instead of profile.
+- Passes `absorber_params.clone()` to `tick_once()`.
+
+#### tasks/sim_tick/tick.rs
+- Replaced `profile: Arc<Profile>` with `absorber_params: AbsorberParams`.
+- Removed `let absorber_params = super::helpers::build_absorber_params(&profile)` call
+  (saved 1 line; was rebuilding AbsorberParams on every tick from profile).
+- Passes `&absorber_params` to `accumulate_deviation` instead of `&profile`.
+
+#### tasks/sim_tick/helpers.rs
+- Changed `accumulate_deviation` signature from `profile: &Profile` to `absorber_params: &AbsorberParams`.
+- Body: `profile.absorber.dead_band_kw` → `absorber_params.dead_band_kw` (3×),
+  `profile.planner.deviation_trigger_ticks` → `absorber_params.deviation_trigger_ticks` (2×).
+- Deleted `build_absorber_params(profile: &Profile) -> AbsorberParams` (~18 lines) —
+  its sole caller (tick.rs) now receives AbsorberParams pre-built from main.rs.
+- Added 2 unit tests for `accumulate_deviation` with no Profile/YAML setup.
+
+#### controller/absorber.rs
+- Updated 2 test helpers (`make_test_profile`, `make_test_profile_battery_linger`) to include
+  `deviation_trigger_ticks: 30` after adding the new field to AbsorberParams.
+
+### Why
+
+VG-04: `tasks/sim_tick/` was importing `use crate::profile::Profile` in violation of the
+profile rule (domain/adapter code must receive injected parameter structs, not raw profile).
+`build_domain_params()` already extracted `AbsorberParams` and `SimulatorParams` at startup,
+but these weren't passed to `spawn_sim_tick`. The refactoring closes the last remaining
+profile import in the tasks layer.
+
+### Key learnings
+
+1. **`build_absorber_params` was rebuilt on every tick**: It was called once per simulator tick
+   (1 Hz) from `tick_once`. This created a new `AbsorberParams` every second from profile fields
+   that never change at runtime. Pre-building in `main.rs` eliminates this redundancy.
+
+2. **`deviation_trigger_ticks` straddles two profile sections**: The field lives in
+   `profile.planner` but semantically belongs to absorber behavior (controls when the absorber
+   fires a replan). Adding it to `AbsorberParams` makes `accumulate_deviation` fully self-contained.
+
+3. **Additive struct field, not a breaking change — except in tests**: Adding a new public field
+   to `AbsorberParams` broke two struct-literal initializers in `controller/absorber.rs` tests.
+   The compiler error was immediate and clear. Pre-flight grep of struct literal sites (`AbsorberParams {`) would have caught these before the first compile.
+
+### Invariants after 028
+
+```
+grep -r "use crate::profile" VEN/src/tasks -> EMPTY
+cargo check -> 0 errors
+cargo test -> 398 passed, 0 failed (2 new tests in helpers.rs)
+BDD full suite -> 44 features passed, 0 failed / 238 scenarios passed, 0 failed
+```

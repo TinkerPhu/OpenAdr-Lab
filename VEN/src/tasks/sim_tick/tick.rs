@@ -6,11 +6,11 @@ use tokio::sync::Mutex;
 use crate::controller;
 use crate::controller::SimulatorPort;
 use crate::entities::asset::PlanTrigger;
+use crate::controller::VtnPort;
 use crate::entities::planner_params::AbsorberParams;
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
 use crate::state::{AppState, EvSettings};
-use crate::vtn::VtnClient;
 use crate::controller::absorber::AbsorberState;
 
 pub(crate) async fn tick_once(
@@ -19,7 +19,7 @@ pub(crate) async fn tick_once(
     sim: Arc<Mutex<SimState>>,
     absorber_params: AbsorberParams,
     ven_name: String,
-    vtn: VtnClient,
+    vtn: Arc<dyn VtnPort>,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
     data_dir: String,
     event_tx: PlannerEventTx,
@@ -178,7 +178,7 @@ pub(crate) async fn tick_once(
         report_counter += 1;
         if report_counter >= report_every_ticks {
             report_counter = 0;
-            super::publish::run_measurement_reports(&state, &snap_for_reports, &vtn, &ven_name, now).await;
+            super::publish::run_measurement_reports(&state, &snap_for_reports, vtn.as_ref(), &ven_name, now).await;
         }
     }
 
