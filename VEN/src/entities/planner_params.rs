@@ -83,6 +83,7 @@ pub struct AbsorberParams {
     pub enabled: bool,
     pub dead_band_kw: f64,
     pub dead_band_clearing_ticks: usize,
+    pub deviation_trigger_ticks: u32,
     pub assets: Vec<AbsorberAssetParams>,
 }
 
@@ -92,6 +93,7 @@ impl Default for AbsorberParams {
             enabled: false,
             dead_band_kw: 0.1,
             dead_band_clearing_ticks: 1,
+            deviation_trigger_ticks: 30,
             assets: Vec::new(),
         }
     }

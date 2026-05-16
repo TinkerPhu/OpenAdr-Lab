@@ -86,6 +86,7 @@ fn build_domain_params(
         enabled: profile.absorber.enabled,
         dead_band_kw: profile.absorber.dead_band_kw,
         dead_band_clearing_ticks: profile.absorber.dead_band_clearing_ticks,
+        deviation_trigger_ticks: profile.planner.deviation_trigger_ticks,
         assets: profile
             .absorber
             .assets
@@ -198,7 +199,8 @@ async fn main() -> anyhow::Result<()> {
     tasks::spawn_sim_tick(
         state.clone(),
         sim_state.clone(),
-        profile.clone(),
+        sim_params,
+        absorber_params,
         cfg.ven_name.clone(),
         vtn.clone(),
         trigger_tx.clone(),

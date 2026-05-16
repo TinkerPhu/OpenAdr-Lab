@@ -10,8 +10,8 @@ use tokio::sync::Mutex;
 
 use crate::controller::absorber::AbsorberState;
 use crate::entities::asset::PlanTrigger;
+use crate::entities::planner_params::{AbsorberParams, SimulatorParams};
 use crate::planner_events::PlannerEventTx;
-use crate::profile::Profile;
 use crate::simulator::SimState;
 use crate::state::AppState;
 use crate::vtn::VtnClient;
@@ -19,7 +19,8 @@ use crate::vtn::VtnClient;
 pub(crate) fn spawn_sim_tick(
     state: AppState,
     sim: Arc<Mutex<SimState>>,
-    profile: Arc<Profile>,
+    sim_params: SimulatorParams,
+    absorber_params: AbsorberParams,
     ven_name: String,
     vtn: VtnClient,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
@@ -27,9 +28,9 @@ pub(crate) fn spawn_sim_tick(
     event_tx: PlannerEventTx,
     deviation_pending: Arc<std::sync::atomic::AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
-    let tick_s = profile.simulator.tick_s;
-    let persist_every_s = profile.simulator.persist_every_s;
-    let report_interval_s = profile.simulator.report_interval_s;
+    let tick_s = sim_params.tick_s;
+    let persist_every_s = sim_params.persist_every_s;
+    let report_interval_s = sim_params.report_interval_s;
     tokio::spawn(async move {
         let mut tick_interval = tokio::time::interval(std::time::Duration::from_secs(tick_s));
         let mut persist_counter: u64 = 0;
@@ -61,7 +62,7 @@ pub(crate) fn spawn_sim_tick(
                     absorber_state,
                     state.clone(),
                     sim.clone(),
-                    profile.clone(),
+                    absorber_params.clone(),
                     ven_name.clone(),
                     vtn.clone(),
                     trigger_tx.clone(),
