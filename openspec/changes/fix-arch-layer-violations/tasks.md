@@ -56,4 +56,4 @@
 
 - [ ] 7.1 SSH to Pi4-Server: `git pull` in `/srv/docker/openadr_lab`, then `docker compose up --build -d ven-ven-1-1 ven-ven-2-1 ven-ven-3-1` to rebuild and restart VEN containers.
 - [ ] 7.2 Run the BDD cucumber suite on Pi4-Server and confirm all scenarios pass (zero failures).
-- [ ] 7.3 Commit with message `refactor(030): fix arch layer violations — move *Params and timeline types to entities`.
+- [x] 7.3 Commit with message `refactor(030): fix arch layer violations — move *Params and timeline types to entities`.
