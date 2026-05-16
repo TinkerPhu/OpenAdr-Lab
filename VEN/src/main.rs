@@ -185,14 +185,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Spawn background loops
-    tasks::spawn_program_poll(state.clone(), vtn.clone(), cfg.poll_programs_secs);
+    tasks::spawn_program_poll(state.clone(), vtn_port.clone(), cfg.poll_programs_secs);
     tasks::spawn_event_poll(
         state.clone(),
-        vtn.clone(),
+        vtn_port.clone(),
         cfg.poll_events_secs,
         trigger_tx.clone(),
     );
-    tasks::spawn_report_poll(state.clone(), vtn.clone(), cfg.poll_reports_secs);
+    tasks::spawn_report_poll(state.clone(), vtn_port.clone(), cfg.poll_reports_secs);
 
     // Plan F: planner_event_tx must exist before spawn_sim_tick (correction SSE)
     let (planner_event_tx_inner, _) = tokio::sync::broadcast::channel::<PlannerEvent>(128);
@@ -213,7 +213,7 @@ async fn main() -> anyhow::Result<()> {
     tasks::spawn_obligation_check(
         state.clone(),
         sim_state.clone(),
-        vtn.clone(),
+        vtn_port.clone(),
         cfg.ven_name.clone(),
     );
     let active_objective = Arc::new(RwLock::new(planner_params.objective));

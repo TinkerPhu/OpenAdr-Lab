@@ -9,7 +9,6 @@ use crate::controller::VtnPort;
 use crate::entities;
 use crate::entities::asset::PlanTrigger;
 use crate::state::AppState;
-use crate::vtn::VtnClient;
 
 // ─── Event poll change detection (RF-B08) ─────────────────────────────────────
 
@@ -116,7 +115,7 @@ pub(crate) fn detect_event_changes(
 
 pub(crate) fn spawn_event_poll(
     state: AppState,
-    vtn: VtnClient,
+    vtn: Arc<dyn VtnPort>,
     secs: u64,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
 ) -> tokio::task::JoinHandle<()> {
@@ -129,8 +128,7 @@ pub(crate) fn spawn_event_poll(
         let mut prev_import_limit: Option<f64> = None;
         loop {
             interval.tick().await;
-            let vtn_port: &dyn VtnPort = &vtn;
-            match vtn_port.fetch_events().await {
+            match vtn.fetch_events().await {
                 Ok(events) => {
                     counter!("poll_success_total", "resource" => "events").increment(1);
                     info!(resource = "events", count = events.len(), "poll success");

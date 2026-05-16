@@ -33,6 +33,7 @@ Auto-generated from all feature plans. Last updated: 2026-03-15
 - [if applicable, e.g., PostgreSQL, CoreData, files or N/A] (026-reporter-domain-types)
 - Rust stable (2021 edition) + `chrono`, `serde_json`, `std::collections::HashMap` (all existing — no new Cargo.toml entries) (026-reporter-domain-types)
 - Rust stable 2021 edition + `chrono`, `std::collections::HashMap` (all existing — no new Cargo.toml entries) (027-clean-timeline-infra)
+- Rust stable 2021 edition + `tokio`, `axum`, `std::sync::Arc` (all existing — no new Cargo.toml entries) (028-fix-vtnclient-tasks)
 
 - [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION] (004-ven-controller-reform)
 
@@ -53,9 +54,9 @@ cd src; pytest; ruff check .
 [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]: Follow standard conventions
 
 ## Recent Changes
+- 028-fix-vtnclient-tasks: Added Rust stable 2021 edition + `tokio`, `axum`, `std::sync::Arc` (all existing — no new Cargo.toml entries)
 - 027-clean-timeline-infra: Added Rust stable 2021 edition + `chrono`, `std::collections::HashMap` (all existing — no new Cargo.toml entries)
 - 026-reporter-domain-types: Added Rust stable (2021 edition) + `chrono`, `serde_json`, `std::collections::HashMap` (all existing — no new Cargo.toml entries)
-- 026-reporter-domain-types: Added [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]
 
 
 <!-- MANUAL ADDITIONS START -->
