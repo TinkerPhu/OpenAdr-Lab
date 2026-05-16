@@ -66,7 +66,7 @@ use tracing::{error, warn};
 /// Runtime state for the multi-asset absorber.
 ///
 /// Persists across ticks within a single VEN process. Reset on process restart.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AbsorberState {
     /// Counter of consecutive ticks where residual > dead_band_kw (used for Tier 2 escalation).
     pub residual_ticks: u32,
