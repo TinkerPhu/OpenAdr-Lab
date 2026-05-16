@@ -13,10 +13,10 @@ use std::collections::{HashMap, HashSet};
 use crate::controller::trace::AssetTimelinePoint;
 use crate::entities::plan::Plan;
 
-// Data-carrier types now live in entities/timeline — re-exported for backward compatibility.
-pub use crate::entities::timeline::{HeaterPlanTrajectory, TimelineSnapshot, TimeWindow};
+// Data-carrier types live in entities/timeline.
+use crate::entities::timeline::{TimelineSnapshot, TimeWindow};
 #[cfg(test)]
-use crate::entities::timeline::{TimelineAssetData, TimelinePoint};
+use crate::entities::timeline::{HeaterPlanTrajectory, TimelineAssetData, TimelinePoint};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Uniform grid resampling (RF-05c)
