@@ -32,6 +32,7 @@ use std::sync::{atomic::AtomicBool, Arc};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
 use vtn::VtnClient;
+use crate::controller::VtnPort;
 
 #[derive(Clone)]
 pub struct AppCtx {
@@ -158,6 +159,7 @@ async fn main() -> anyhow::Result<()> {
         cfg.client_secret.clone(),
         cfg.ven_name.clone(),
     );
+    let vtn_port: Arc<dyn VtnPort> = Arc::new(vtn.clone());
 
     // Derive shared data_dir from persist_path
     let data_dir = cfg
@@ -202,7 +204,7 @@ async fn main() -> anyhow::Result<()> {
         sim_params,
         absorber_params,
         cfg.ven_name.clone(),
-        vtn.clone(),
+        vtn_port.clone(),
         trigger_tx.clone(),
         data_dir.clone(),
         planner_event_tx.clone(),
@@ -221,7 +223,7 @@ async fn main() -> anyhow::Result<()> {
         grid_max_import_kw,
         grid_max_export_kw,
         asset_params.clone(),
-        vtn.clone(),
+        vtn_port.clone(),
         cfg.ven_name.clone(),
         trigger_rx,
         sim_state.clone(),
