@@ -5,35 +5,8 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
-
-#[derive(Debug, Clone)]
-pub struct EvParams {
-    pub id: String,
-    pub max_charge_kw: f64,
-    pub max_discharge_kw: f64,
-    pub initial_soc: f64,
-    pub battery_kwh: f64,
-    pub soc_target: f64,
-    pub default_charge_kw: f64,
-    pub min_charge_kw: f64,
-}
-
-impl Default for EvParams {
-    fn default() -> Self {
-        Self {
-            id: crate::ids::ASSET_EV.to_string(),
-            max_charge_kw: 7.4,
-            max_discharge_kw: 0.0,
-            initial_soc: 0.5,
-            battery_kwh: 60.0,
-            soc_target: 0.8,
-            default_charge_kw: 0.0,
-            min_charge_kw: 1.4,
-        }
-    }
-}
-
-pub use crate::controller::milp_planner::asset_port::{EvMilpMode, EvMilpContext, EvMilpVars, EvSolOutput};
+use crate::controller::milp_planner::asset_port::{EvMilpContext, EvMilpMode, EvMilpVars, EvSolOutput};
+use crate::entities::asset_params::EvParams;
 
 /// EV Charger config. Positive = charge (import), negative = V2G discharge (export).
 #[derive(Debug, Clone, Serialize, Deserialize)]

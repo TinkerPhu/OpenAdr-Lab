@@ -5,40 +5,9 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
-use crate::controller::timeline::HeaterPlanTrajectory;
-
-#[derive(Debug, Clone)]
-pub struct HeaterParams {
-    pub id: String,
-    pub max_kw: f64,
-    pub temp_initial_c: f64,
-    pub temp_min_c: f64,
-    pub temp_max_c: f64,
-    pub mid_kw: Option<f64>,
-    pub thermal_mass_kwh_per_c: f64,
-    pub k_loss_kw_per_c: f64,
-    pub draw_kw: f64,
-    pub switching_penalty_eur: f64,
-}
-
-impl Default for HeaterParams {
-    fn default() -> Self {
-        Self {
-            id: crate::ids::ASSET_HEATER.to_string(),
-            max_kw: 5.0,
-            temp_initial_c: 20.0,
-            temp_min_c: 18.0,
-            temp_max_c: 23.0,
-            mid_kw: None,
-            thermal_mass_kwh_per_c: 2.0,
-            k_loss_kw_per_c: 0.1,
-            draw_kw: 0.0,
-            switching_penalty_eur: 0.01,
-        }
-    }
-}
-
-pub use crate::controller::milp_planner::asset_port::{HeaterMilpMode, HeaterMilpContext, HeaterMilpVars, HeaterSolOutput};
+use crate::controller::milp_planner::asset_port::{HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput};
+use crate::entities::asset_params::HeaterParams;
+use crate::entities::timeline::HeaterPlanTrajectory;
 
 /// Heater config. Consumes power for space heating (positive = import).
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,8 +1,142 @@
-use crate::assets::{
-    base_load::BaseLoadParams, battery::BatteryParams, ev::EvParams, heater::HeaterParams,
-    pv::PvParams,
-};
 use crate::entities::asset::{ComfortRate, CompletionPolicy};
+
+// ── Battery ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct BatteryParams {
+    pub id: String,
+    pub capacity_kwh: f64,
+    pub max_charge_kw: f64,
+    pub max_discharge_kw: f64,
+    pub initial_soc: f64,
+    pub round_trip_efficiency: f64,
+    pub min_soc: f64,
+}
+
+impl Default for BatteryParams {
+    fn default() -> Self {
+        Self {
+            id: crate::ids::ASSET_BATTERY.to_string(),
+            capacity_kwh: 10.0,
+            max_charge_kw: 5.0,
+            max_discharge_kw: 5.0,
+            initial_soc: 0.5,
+            round_trip_efficiency: 0.92,
+            min_soc: 0.10,
+        }
+    }
+}
+
+// ── EV ───────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct EvParams {
+    pub id: String,
+    pub max_charge_kw: f64,
+    pub max_discharge_kw: f64,
+    pub initial_soc: f64,
+    pub battery_kwh: f64,
+    pub soc_target: f64,
+    pub default_charge_kw: f64,
+    pub min_charge_kw: f64,
+}
+
+impl Default for EvParams {
+    fn default() -> Self {
+        Self {
+            id: crate::ids::ASSET_EV.to_string(),
+            max_charge_kw: 7.4,
+            max_discharge_kw: 0.0,
+            initial_soc: 0.5,
+            battery_kwh: 60.0,
+            soc_target: 0.8,
+            default_charge_kw: 0.0,
+            min_charge_kw: 1.4,
+        }
+    }
+}
+
+// ── Heater ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct HeaterParams {
+    pub id: String,
+    pub max_kw: f64,
+    pub temp_initial_c: f64,
+    pub temp_min_c: f64,
+    pub temp_max_c: f64,
+    pub mid_kw: Option<f64>,
+    pub thermal_mass_kwh_per_c: f64,
+    pub k_loss_kw_per_c: f64,
+    pub draw_kw: f64,
+    pub switching_penalty_eur: f64,
+}
+
+impl Default for HeaterParams {
+    fn default() -> Self {
+        Self {
+            id: crate::ids::ASSET_HEATER.to_string(),
+            max_kw: 5.0,
+            temp_initial_c: 20.0,
+            temp_min_c: 18.0,
+            temp_max_c: 23.0,
+            mid_kw: None,
+            thermal_mass_kwh_per_c: 2.0,
+            k_loss_kw_per_c: 0.1,
+            draw_kw: 0.0,
+            switching_penalty_eur: 0.01,
+        }
+    }
+}
+
+// ── PV ───────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct PvParams {
+    pub id: String,
+    pub rated_kw: f64,
+}
+
+impl Default for PvParams {
+    fn default() -> Self {
+        Self {
+            id: crate::ids::ASSET_PV.to_string(),
+            rated_kw: 5.0,
+        }
+    }
+}
+
+impl PvParams {
+    pub fn forecast_kw(&self, ts: chrono::DateTime<chrono::Utc>) -> f64 {
+        use chrono::Timelike;
+        let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
+        if hour >= 6.0 && hour <= 18.0 {
+            let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
+            (angle.sin().max(0.0) * self.rated_kw).max(0.0)
+        } else {
+            0.0
+        }
+    }
+}
+
+// ── BaseLoad ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct BaseLoadParams {
+    pub id: String,
+    pub baseline_kw: f64,
+}
+
+impl Default for BaseLoadParams {
+    fn default() -> Self {
+        Self {
+            id: crate::ids::ASSET_BASE_LOAD.to_string(),
+            baseline_kw: 0.5,
+        }
+    }
+}
+
+// ── Dispatch enum ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub enum AssetParams {

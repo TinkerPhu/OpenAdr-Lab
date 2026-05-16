@@ -36,10 +36,7 @@ pub use self::asset_port::{
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
-use crate::assets::{
-    base_load::BaseLoadParams, battery::BatteryParams, ev::EvParams, heater::HeaterParams,
-    pv::PvParams,
-};
+use crate::entities::asset_params::{BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams};
 use crate::controller::simulator_port::SimSnapshot;
 #[allow(unused_imports)]
 use crate::entities::asset::PlanTrigger;

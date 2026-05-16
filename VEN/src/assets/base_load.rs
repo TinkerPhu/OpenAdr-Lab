@@ -4,21 +4,7 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
-
-#[derive(Debug, Clone)]
-pub struct BaseLoadParams {
-    pub id: String,
-    pub baseline_kw: f64,
-}
-
-impl Default for BaseLoadParams {
-    fn default() -> Self {
-        Self {
-            id: crate::ids::ASSET_BASE_LOAD.to_string(),
-            baseline_kw: 0.5,
-        }
-    }
-}
+use crate::entities::asset_params::BaseLoadParams;
 
 /// Base load config. Fixed background consumption (positive = import).
 /// Non-flexible — planner never schedules allocations for this asset.

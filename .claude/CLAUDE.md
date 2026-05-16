@@ -30,7 +30,7 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     Adapters   : routes/, tasks/
     Application: services/
     Domain     : entities/, controller/
-    Infra      : simulator/, vtn.rs, controller/milp_planner/
+    Infra      : assets/, simulator/, vtn.rs, controller/milp_planner/
 
   Port obligations — use traits, never bypass with concrete types:
     SimulatorPort    : domain/services → simulator (snapshot, inject)
@@ -45,7 +45,8 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
 
   Verifiable invariants — run before any VEN PR:
     grep -r "use crate::profile" VEN/src/entities VEN/src/controller VEN/src/routes  → must be empty
-    grep -r "use crate::assets::" VEN/src/controller/milp_planner                     → must be empty
+    grep -r "use crate::assets::" VEN/src/controller/milp_planner --include="*.rs" | grep -v "cfg(test)\|tests/"  → must be empty
     grep "serde_json::Value" VEN/src/vtn.rs                                           → must be empty or internal only
+    grep -r "use crate::assets::" VEN/src/entities                                   → must be empty
 
   Reference: docs/plans/ven_backend_architecture_refactoring.md

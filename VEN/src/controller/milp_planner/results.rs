@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
-use crate::assets::{battery::BatteryParams, ev::EvParams, heater::HeaterParams};
+use crate::entities::asset_params::{BatteryParams, EvParams, HeaterParams};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::{
