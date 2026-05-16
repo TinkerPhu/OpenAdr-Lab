@@ -12,8 +12,8 @@ use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::models::SensorSnapshot;
 use crate::controller::SimSnapshot;
 use crate::simulator::SimState;
+use crate::controller::VtnPort;
 use crate::state::AppState;
-use crate::vtn::VtnClient;
 
 pub(crate) async fn publish_sim_tick_result(
     sensor: SensorSnapshot,
@@ -120,7 +120,7 @@ pub(crate) async fn publish_sim_tick_result(
 pub(crate) async fn run_measurement_reports(
     state: &AppState,
     sim_snap: &SimSnapshot,
-    vtn: &VtnClient,
+    vtn: &dyn VtnPort,
     ven_name: &str,
     now: DateTime<Utc>,
 ) {

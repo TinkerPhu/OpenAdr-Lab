@@ -9,12 +9,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::controller::absorber::AbsorberState;
+use crate::controller::VtnPort;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::planner_params::{AbsorberParams, SimulatorParams};
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
 use crate::state::AppState;
-use crate::vtn::VtnClient;
 
 pub(crate) fn spawn_sim_tick(
     state: AppState,
@@ -22,7 +22,7 @@ pub(crate) fn spawn_sim_tick(
     sim_params: SimulatorParams,
     absorber_params: AbsorberParams,
     ven_name: String,
-    vtn: VtnClient,
+    vtn: Arc<dyn VtnPort>,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
     data_dir: String,
     event_tx: PlannerEventTx,
