@@ -2,12 +2,11 @@ use chrono::{DateTime, Utc};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::assets::AssetConfig;
 use crate::controller::user_request::{create_from_body, CreateUserRequestBody, RequestError};
+use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::device_session::{EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::user_request::{UserRequest, UserRequestStatus};
 use crate::ids;
-use crate::simulator::AssetEntry;
 use crate::state::AppState;
 
 /// Error type for UserRequestService cancel operations.
@@ -35,12 +34,11 @@ impl UserRequestService {
     /// Returns both objects; the caller stores them in state.
     pub fn create_ev(
         body: CreateUserRequestBody,
-        assets: &[AssetEntry],
-        asset_configs: &[AssetConfig],
+        asset_data: &[AssetRequestSlice],
         now: DateTime<Utc>,
     ) -> Result<(UserRequest, EvSession), RequestError> {
         let soft_deadline = body.soft_deadline;
-        let mut req = create_from_body(body, assets, asset_configs, now)?;
+        let mut req = create_from_body(body, asset_data, now)?;
 
         let departure = req
             .deadlines
@@ -73,12 +71,11 @@ impl UserRequestService {
     /// Create a user request for the heater/boiler asset: creates a HeaterTarget linked to the request.
     pub fn create_heater(
         body: CreateUserRequestBody,
-        assets: &[AssetEntry],
-        asset_configs: &[AssetConfig],
+        asset_data: &[AssetRequestSlice],
         now: DateTime<Utc>,
     ) -> Result<(UserRequest, HeaterTarget), RequestError> {
         let target_temp_c = body.target_temp_c;
-        let mut req = create_from_body(body, assets, asset_configs, now)?;
+        let mut req = create_from_body(body, asset_data, now)?;
 
         let ready_by = req
             .deadlines
@@ -327,6 +324,129 @@ mod tests {
         assert_eq!(cancelled.status, UserRequestStatus::Cancelled);
         // EV session must be cleared.
         assert!(state.ev_session().await.is_none());
+    }
+
+    fn ev_slice(soc: f64) -> AssetRequestSlice {
+        use crate::entities::asset::{ComfortRate, CompletionPolicy};
+        AssetRequestSlice {
+            id: ids::ASSET_EV.to_string(),
+            current_soc: Some(soc),
+            default_soc_target: Some(0.8),
+            capacity_kwh: Some(60.0),
+            max_charge_kw: Some(7.4),
+            completion_policy: CompletionPolicy::Stop,
+            comfort_rates: vec![ComfortRate { fill: 0.8, max_marginal_price: 0.3, max_marginal_co2: 0.0 }],
+        }
+    }
+
+    fn heater_slice() -> AssetRequestSlice {
+        use crate::entities::asset::{ComfortRate, CompletionPolicy};
+        AssetRequestSlice {
+            id: ids::ASSET_HEATER.to_string(),
+            current_soc: None,
+            default_soc_target: None,
+            capacity_kwh: None,
+            max_charge_kw: None,
+            completion_policy: CompletionPolicy::Stop,
+            comfort_rates: vec![ComfortRate { fill: 0.0, max_marginal_price: 0.0, max_marginal_co2: 0.0 }],
+        }
+    }
+
+    #[test]
+    fn test_create_ev_builds_session() {
+        let now = Utc::now();
+        let body = CreateUserRequestBody {
+            asset_id: ids::ASSET_EV.to_string(),
+            target_soc: Some(0.9),
+            target_energy_kwh: None,
+            desired_power_kw: None,
+            deadlines: vec![crate::controller::user_request::RequestDeadlineInput {
+                latest_end: now + chrono::Duration::hours(6),
+                max_total_cost_eur: None,
+                max_marginal_rate_eur_kwh: None,
+                min_completion: None,
+            }],
+            completion_policy: None,
+            comfort_rates: None,
+            budget_eur: None,
+            interruptible: None,
+            tolerance_min: None,
+            power_kw: None,
+            duration_min: None,
+            earliest_start: None,
+            latest_end: None,
+            soft_deadline: None,
+            target_temp_c: None,
+        };
+        let (req, session) = UserRequestService::create_ev(body, &[ev_slice(0.5)], now).unwrap();
+        assert_eq!(req.asset_id, ids::ASSET_EV);
+        // soc 0.5 → target 0.9: (0.9-0.5)*60 = 24 kWh
+        assert!((req.target_energy_kwh - 24.0).abs() < 0.01);
+        assert_eq!(req.session_id, Some(session.id));
+        assert!((session.target_soc - 0.9).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_create_ev_unknown_asset_returns_err() {
+        let now = Utc::now();
+        let body = CreateUserRequestBody {
+            asset_id: "nonexistent".to_string(),
+            target_soc: Some(0.9),
+            target_energy_kwh: None,
+            desired_power_kw: None,
+            deadlines: vec![crate::controller::user_request::RequestDeadlineInput {
+                latest_end: now + chrono::Duration::hours(6),
+                max_total_cost_eur: None,
+                max_marginal_rate_eur_kwh: None,
+                min_completion: None,
+            }],
+            completion_policy: None,
+            comfort_rates: None,
+            budget_eur: None,
+            interruptible: None,
+            tolerance_min: None,
+            power_kw: None,
+            duration_min: None,
+            earliest_start: None,
+            latest_end: None,
+            soft_deadline: None,
+            target_temp_c: None,
+        };
+        let result = UserRequestService::create_ev(body, &[ev_slice(0.5)], now);
+        assert!(matches!(result, Err(crate::controller::user_request::RequestError::UnknownAsset(_))));
+    }
+
+    #[test]
+    fn test_create_heater_builds_target() {
+        let now = Utc::now();
+        let body = CreateUserRequestBody {
+            asset_id: ids::ASSET_HEATER.to_string(),
+            target_soc: None,
+            target_energy_kwh: Some(5.0),
+            desired_power_kw: Some(2.0),
+            deadlines: vec![crate::controller::user_request::RequestDeadlineInput {
+                latest_end: now + chrono::Duration::hours(4),
+                max_total_cost_eur: None,
+                max_marginal_rate_eur_kwh: None,
+                min_completion: None,
+            }],
+            completion_policy: None,
+            comfort_rates: None,
+            budget_eur: None,
+            interruptible: None,
+            tolerance_min: None,
+            power_kw: None,
+            duration_min: None,
+            earliest_start: None,
+            latest_end: None,
+            soft_deadline: None,
+            target_temp_c: Some(55.0),
+        };
+        let (req, target) = UserRequestService::create_heater(body, &[heater_slice()], now).unwrap();
+        assert_eq!(req.asset_id, ids::ASSET_HEATER);
+        assert!((req.target_energy_kwh - 5.0).abs() < 0.01);
+        assert_eq!(req.session_id, Some(target.id));
+        assert!((target.target_temp_c - 55.0).abs() < 0.01);
     }
 
     /// Discriminator helpers correctly categorise request bodies.

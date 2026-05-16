@@ -16,11 +16,13 @@ use uuid::Uuid;
 
 use crate::controller::user_request::CreateUserRequestBody;
 use crate::entities::asset::PlanTrigger;
+use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::device_session::{
     BaselineOverride, BaselineSlot, EvSession, HeaterTarget, ShiftableLoad,
 };
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::entities::PlannerObjective;
+use crate::services::user_request::UserRequestService;
 use crate::AppCtx;
 
 /// Embedded session detail for GET /user-requests response.
@@ -232,103 +234,107 @@ pub async fn post_requests(
     }
 
     // ── EV / heater path — requires sim-asset lookup ────────────────────────
-    let (assets, asset_configs) = {
+    let asset_data: Vec<AssetRequestSlice> = {
+        use crate::assets::{AssetConfig as AC, AssetState as AS};
         let sim = ctx.sim.lock().await;
-        (sim.assets.clone(), sim.asset_configs.clone())
+        sim.assets
+            .iter()
+            .zip(sim.asset_configs.iter())
+            .map(|(entry, cfg)| {
+                let (current_soc, default_soc_target, capacity_kwh, max_charge_kw) =
+                    match (&entry.state, cfg) {
+                        (AS::Ev(s), AC::Ev(c)) => {
+                            (Some(s.soc), Some(c.soc_target), Some(c.battery_kwh), Some(c.max_charge_kw))
+                        }
+                        (AS::Battery(s), AC::Battery(c)) => {
+                            (Some(s.soc), Some(1.0), Some(c.capacity_kwh), Some(c.max_charge_kw))
+                        }
+                        _ => (None, None, None, None),
+                    };
+                AssetRequestSlice {
+                    id: entry.id.clone(),
+                    current_soc,
+                    default_soc_target,
+                    capacity_kwh,
+                    max_charge_kw,
+                    completion_policy: cfg.default_completion_policy(),
+                    comfort_rates: cfg.default_comfort_rates(),
+                }
+            })
+            .collect()
     };
 
-    // Extract optional overrides before body is moved into create_from_body
-    let soft_deadline = body.soft_deadline;
-    let target_temp_c = body.target_temp_c;
-
-    match crate::controller::user_request::create_from_body(body, &assets, &asset_configs, now) {
-        Ok(mut user_req) => {
-            if user_req.asset_id == crate::ids::ASSET_EV {
-                let deadline = user_req
-                    .deadlines
-                    .first()
-                    .map(|d| d.latest_end)
-                    .unwrap_or_else(|| now + chrono::Duration::hours(8));
-                let target_soc = user_req.target_soc.unwrap_or(0.9);
-                let session = EvSession {
-                    id: Uuid::new_v4(),
-                    target_soc,
-                    departure_time: deadline,
-                    soft_deadline: soft_deadline.unwrap_or(false),
-                    created_at: now,
-                    updated_at: now,
-                };
-                user_req.session_id = Some(session.id);
-                user_req.session_type = Some(SessionType::Ev);
+    if UserRequestService::is_ev(&body) {
+        match UserRequestService::create_ev(body, &asset_data, now) {
+            Ok((user_req, session)) => {
                 ctx.state.set_ev_session(Some(session.clone())).await;
-                info!(
-                    request_id = %user_req.id,
-                    session_id = %session.id,
-                    asset_id = %user_req.asset_id,
-                    target_soc,
-                    "user request created (EV session)"
-                );
-            } else if user_req.asset_id == crate::ids::ASSET_HEATER
-                || user_req.asset_id == crate::ids::ASSET_BOILER
-            {
-                // TODO: use separate HeaterTarget / BoilerTarget once boiler asset is implemented
-                let ready_by = user_req
-                    .deadlines
-                    .first()
-                    .map(|d| d.latest_end)
-                    .unwrap_or_else(|| now + chrono::Duration::hours(4));
-                let target_temp_c = target_temp_c.unwrap_or(55.0);
-                let target = HeaterTarget {
-                    id: Uuid::new_v4(),
-                    target_temp_c,
-                    ready_by,
-                    created_at: now,
-                    updated_at: now,
-                };
-                user_req.session_id = Some(target.id);
-                user_req.session_type = Some(SessionType::Heater);
-                ctx.state.set_heater_target(Some(target.clone())).await;
-                info!(
-                    request_id = %user_req.id,
-                    session_id = %target.id,
-                    asset_id = %user_req.asset_id,
-                    target_temp_c,
-                    "user request created (heater target)"
-                );
-            } else {
-                info!(
-                    request_id = %user_req.id,
-                    asset_id = %user_req.asset_id,
-                    "user request created"
-                );
-            }
-            ctx.state.upsert_request(user_req.clone()).await;
-            ctx.state
-                .push_controller_event(
-                    crate::controller::trace::ControllerEvent::RequestTransition {
-                        ts: now,
-                        request_id: user_req.id,
-                        asset_id: user_req.asset_id.clone(),
-                        from_status: "None".to_string(),
-                        to_status: format!("{:?}", user_req.status),
-                    },
+                ctx.state.upsert_request(user_req.clone()).await;
+                ctx.state
+                    .push_controller_event(
+                        crate::controller::trace::ControllerEvent::RequestTransition {
+                            ts: now,
+                            request_id: user_req.id,
+                            asset_id: user_req.asset_id.clone(),
+                            from_status: "None".to_string(),
+                            to_status: format!("{:?}", user_req.status),
+                        },
+                    )
+                    .await;
+                let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+                (
+                    StatusCode::CREATED,
+                    Json(serde_json::to_value(user_req).unwrap_or_default()),
                 )
-                .await;
-            let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
-            (
-                StatusCode::CREATED,
-                Json(serde_json::to_value(user_req).unwrap_or_default()),
-            )
-                .into_response()
+                    .into_response()
+            }
+            Err(e) => {
+                warn!("POST /user-requests (EV) rejected: {e}");
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(serde_json::json!({"error": e.to_string()})),
+                )
+                    .into_response()
+            }
         }
-        Err(e) => {
-            warn!("POST /user-requests rejected: {e}");
-            (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(serde_json::json!({"error": e.to_string()})),
-            )
-                .into_response()
+    } else if UserRequestService::is_heater(&body) {
+        match UserRequestService::create_heater(body, &asset_data, now) {
+            Ok((user_req, target)) => {
+                ctx.state.set_heater_target(Some(target.clone())).await;
+                ctx.state.upsert_request(user_req.clone()).await;
+                ctx.state
+                    .push_controller_event(
+                        crate::controller::trace::ControllerEvent::RequestTransition {
+                            ts: now,
+                            request_id: user_req.id,
+                            asset_id: user_req.asset_id.clone(),
+                            from_status: "None".to_string(),
+                            to_status: format!("{:?}", user_req.status),
+                        },
+                    )
+                    .await;
+                let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+                (
+                    StatusCode::CREATED,
+                    Json(serde_json::to_value(user_req).unwrap_or_default()),
+                )
+                    .into_response()
+            }
+            Err(e) => {
+                warn!("POST /user-requests (heater) rejected: {e}");
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(serde_json::json!({"error": e.to_string()})),
+                )
+                    .into_response()
+            }
         }
+    } else {
+        warn!("POST /user-requests: unrecognised asset_id for EV/heater path");
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({"error": "unrecognised asset type for EV/heater path"})),
+        )
+            .into_response()
     }
 }
 
