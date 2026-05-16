@@ -191,3 +191,7 @@ pub(crate) async fn tick_once(
 
     (absorber_state, persist_counter, report_counter)
 }
+
+#[cfg(test)]
+#[path = "tick_tests.rs"]
+mod tick_tests;

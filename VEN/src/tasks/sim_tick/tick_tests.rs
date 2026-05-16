@@ -1,0 +1,61 @@
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+    use tokio::sync::{broadcast, watch, Mutex};
+
+    use crate::controller::absorber::AbsorberState;
+    use crate::controller::VtnPort;
+    use crate::entities::asset::PlanTrigger;
+    use crate::entities::planner_params::AbsorberParams;
+    use crate::planner_events::PlannerEvent;
+    use crate::services::test_support::mock_vtn::MockVtn;
+    use crate::simulator::SimState;
+    use crate::state::AppState;
+    use crate::tasks::sim_tick::tick::tick_once;
+
+    fn minimal_sim() -> Arc<Mutex<SimState>> {
+        let s: SimState = serde_json::from_value(serde_json::json!({
+            "asset_configs": [],
+            "assets": [],
+            "grid": {
+                "net_power_w": 0.0, "import_w": 0.0, "export_w": 0.0,
+                "voltage_v": 0.0, "import_kwh": 0.0, "export_kwh": 0.0
+            },
+            "last_tick": chrono::Utc::now().to_rfc3339()
+        }))
+        .expect("minimal SimState must deserialize");
+        Arc::new(Mutex::new(s))
+    }
+
+    #[tokio::test]
+    async fn tick_once_runs_without_profile() {
+        let sim = minimal_sim();
+        let (trigger_tx, _trigger_rx) = watch::channel(PlanTrigger::Periodic);
+        let trigger_tx = Arc::new(trigger_tx);
+        let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(1);
+        let event_tx = Arc::new(event_bcast_tx);
+        let deviation_pending = Arc::new(AtomicBool::new(false));
+        let vtn: Arc<dyn VtnPort> = Arc::new(MockVtn::new());
+
+        let (_abs, _pc, _rc) = tick_once(
+            AbsorberState::default(),
+            AppState::new(),
+            sim,
+            AbsorberParams::default(),
+            "test-ven".to_string(),
+            vtn,
+            trigger_tx,
+            "/tmp".to_string(),
+            event_tx,
+            deviation_pending,
+            0,   // persist_counter
+            100, // persist_every_ticks — no persist this tick
+            0,   // report_counter
+            100, // report_every_ticks — no report this tick
+            1,   // tick_s
+        )
+        .await;
+        // passes if no panic
+    }
+}

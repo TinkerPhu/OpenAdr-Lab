@@ -381,7 +381,7 @@ Each refactoring phase must ship with tests, not just structural changes:
 | Criterion | How to verify |
 |-----------|--------------|
 | No `use crate::profile` in `entities/`, `controller/`, or `routes/` | `grep -r "use crate::profile" VEN/src/entities VEN/src/controller VEN/src/routes` returns empty |
-| No concrete asset imports in `milp_planner` | `grep -r "use crate::assets::" VEN/src/controller/milp` returns empty |
+| No concrete asset imports in `milp_planner` | `grep -r "use crate::assets::" VEN/src/controller/milp_planner` returns empty (note: `*Params` struct imports are permitted — the invariant guards only against concrete asset types `A_BAT`, `A_EV`, `A_HTR`) |
 | No `serde_json::Value` in `vtn.rs` public returns | `grep "Value" VEN/src/vtn.rs` returns empty or only internal use |
 | `SimulatorPort` mock exists and used in at least one unit test | `cargo test -p ven controller::` passes with mock impl |
 | `loops.rs` replaced by `tasks/` with no file exceeding 200 lines | `wc -l VEN/src/tasks/*.rs` all under 200 |
