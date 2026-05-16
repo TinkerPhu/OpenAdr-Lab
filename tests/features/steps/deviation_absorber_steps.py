@@ -53,24 +53,27 @@ def step_absorber_enabled(context):
 
 @given("I wait for a fresh plan")
 def step_wait_fresh_plan_given(context):
-    """Request a MILP replan and wait for the fresh plan to arrive.
+    """Request a MILP replan and wait for the ASSET_STATE_CHANGE plan to arrive.
 
-    Calls POST /plan/trigger (sends AssetStateChange without touching sim state)
-    so the planner starts a new solve immediately. With replan_interval_s=300 in
-    the test profile, no timer-based solve fires during the assertion window
-    (~30–70 s per scenario), preventing mid-scenario plan updates from corrupting
-    the absorber baseline capture.
+    Calls POST /plan/trigger (sends AssetStateChange) so the planner starts a
+    new solve immediately. We wait specifically for a plan with
+    trigger == "ASSET_STATE_CHANGE" to avoid accepting an earlier UserRequest-
+    triggered plan (e.g. from a preceding DELETE/POST /ev-session call).  That
+    earlier plan may have been produced while a second MILP solve — the one we
+    actually want — is still running.  Accepting it early causes plan setpoints
+    to change mid-scenario when the second solve completes.
+
+    With replan_interval_s=300 in the test profile, no timer-based solve fires
+    during the assertion window (~30–70 s per scenario).
     """
     cutoff = datetime.now(timezone.utc)
-    # Kick off a fresh MILP solve. Returns 204; ignore failure (VEN may not have
-    # started yet, in which case the first periodic solve supplies the plan).
     ven_post("/plan/trigger", json={})
 
     def fetch():
         resp = ven_get("/plan")
         return resp.json() if resp.ok else None
 
-    def is_fresh(plan):
+    def is_fresh_asset_state_change(plan):
         if not plan or "created_at" not in plan:
             return False
         try:
@@ -82,14 +85,16 @@ def step_wait_fresh_plan_given(context):
                 plus = ts_str.index("+", dot)
                 if plus - dot > 7:
                     ts_str = ts_str[:dot + 7] + ts_str[plus:]
-            return datetime.fromisoformat(ts_str) > cutoff
+            if not datetime.fromisoformat(ts_str) > cutoff:
+                return False
         except ValueError:
             return False
+        # Require ASSET_STATE_CHANGE trigger to skip any preceding UserRequest plan.
+        return plan.get("trigger") == "ASSET_STATE_CHANGE"
 
-    poll_until(fetch, is_fresh, timeout=90, description="fresh MILP plan after now")
+    poll_until(fetch, is_fresh_asset_state_change, timeout=90,
+               description="fresh ASSET_STATE_CHANGE plan after now")
     # Wait for physics to apply the new plan setpoints (≤1 tick = 1s; 2s is safe).
-    # Without this, baselines captured immediately after plan detection reflect the
-    # old plan's setpoints — the new plan setpoints take effect on the NEXT tick.
     time.sleep(2.0)
     context.plan_stable_cutoff = datetime.now(timezone.utc)
 
