@@ -5,33 +5,8 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor};
 use crate::common::{Interpolation, TimeSeries};
-
-#[derive(Debug, Clone)]
-pub struct BatteryParams {
-    pub id: String,
-    pub capacity_kwh: f64,
-    pub max_charge_kw: f64,
-    pub max_discharge_kw: f64,
-    pub initial_soc: f64,
-    pub round_trip_efficiency: f64,
-    pub min_soc: f64,
-}
-
-impl Default for BatteryParams {
-    fn default() -> Self {
-        Self {
-            id: crate::ids::ASSET_BATTERY.to_string(),
-            capacity_kwh: 10.0,
-            max_charge_kw: 5.0,
-            max_discharge_kw: 5.0,
-            initial_soc: 0.5,
-            round_trip_efficiency: 0.92,
-            min_soc: 0.10,
-        }
-    }
-}
-
-pub use crate::controller::milp_planner::asset_port::{BatteryMilpContext, BatteryMilpVars, BatterySolOutput};
+use crate::controller::milp_planner::asset_port::{BatteryMilpContext, BatteryMilpVars, BatterySolOutput};
+use crate::entities::asset_params::BatteryParams;
 
 /// Battery storage config. Bidirectional.
 /// Positive setpoint = charge (import), negative = discharge (export).

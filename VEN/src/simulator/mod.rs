@@ -12,7 +12,7 @@ use crate::assets::{
     PvInverter,
 };
 use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot, SimulatorPort, SnapshotError};
-use crate::controller::timeline::{HeaterPlanTrajectory, TimelineAssetData, TimelinePoint, TimelineSnapshot};
+use crate::entities::timeline::{HeaterPlanTrajectory, TimelineAssetData, TimelinePoint, TimelineSnapshot};
 use crate::entities::asset::AssetType;
 use crate::entities::asset_params::AssetParams;
 use crate::models::SensorSnapshot;

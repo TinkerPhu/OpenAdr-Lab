@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 
 use super::asset_port::AssetMilpParams;
-use crate::assets::{base_load::BaseLoadParams, pv::PvParams};
+use crate::entities::asset_params::{BaseLoadParams, PvParams};
 use crate::controller::milp_planner::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::capacity::OadrCapacityState;

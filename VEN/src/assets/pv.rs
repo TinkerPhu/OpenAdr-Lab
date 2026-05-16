@@ -4,34 +4,7 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
-
-#[derive(Debug, Clone)]
-pub struct PvParams {
-    pub id: String,
-    pub rated_kw: f64,
-}
-
-impl Default for PvParams {
-    fn default() -> Self {
-        Self {
-            id: crate::ids::ASSET_PV.to_string(),
-            rated_kw: 5.0,
-        }
-    }
-}
-
-impl PvParams {
-    pub fn forecast_kw(&self, ts: chrono::DateTime<chrono::Utc>) -> f64 {
-        use chrono::Timelike;
-        let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
-        if hour >= 6.0 && hour <= 18.0 {
-            let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
-            (angle.sin().max(0.0) * self.rated_kw).max(0.0)
-        } else {
-            0.0
-        }
-    }
-}
+use crate::entities::asset_params::PvParams;
 
 /// PV Inverter config. Generates power (export = negative).
 #[derive(Debug, Clone, Serialize, Deserialize)]

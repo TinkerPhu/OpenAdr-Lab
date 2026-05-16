@@ -2,6 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use std::collections::{HashMap, VecDeque};
 
 use crate::common::{Interpolation, TimeSeries};
+use crate::controller::milp_planner::asset_port::{BatteryMilpContext, EvMilpContext, HeaterMilpContext};
 
 pub mod base_load;
 pub mod battery;
@@ -494,9 +495,9 @@ impl AssetConfig {
     ) -> Option<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
         match self {
             Self::Battery(cfg) => Some(Box::new(
-                battery::BatteryMilpContext::from_state(state, cfg),
+                BatteryMilpContext::from_state(state, cfg),
             )),
-            Self::Ev(cfg) => Some(Box::new(ev::EvMilpContext::from_state(
+            Self::Ev(cfg) => Some(Box::new(EvMilpContext::from_state(
                 state,
                 cfg,
                 n,
@@ -506,7 +507,7 @@ impl AssetConfig {
                 ev_min_charge_kw,
                 v_ev_extra_eur_kwh,
             ))),
-            Self::Heater(cfg) => Some(Box::new(heater::HeaterMilpContext::from_state(
+            Self::Heater(cfg) => Some(Box::new(HeaterMilpContext::from_state(
                 state,
                 cfg,
                 n,
