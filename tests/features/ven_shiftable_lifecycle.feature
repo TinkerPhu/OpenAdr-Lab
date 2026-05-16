@@ -24,6 +24,11 @@ Feature: Shiftable Load Lifecycle (Plan B)
 
   # ── AC#3: Load auto-completes after duration ────────────────────────────
   # 1-minute load in 30-minute window ⇒ only slot 0 valid with 1800s steps.
+  #
+  # Timing note: this scenario takes ~145s on Pi4 (plan cycle + 1-min dispatch +
+  # auto-complete detection). It passes reliably in isolation but can hit the
+  # poll_until timeout when run at the end of the full suite under Pi4 resource
+  # contention (prior scenarios leave the VEN planner slower). Not a code bug.
 
   @slow
   Scenario: Shiftable load auto-completes and disappears from GET /sim
