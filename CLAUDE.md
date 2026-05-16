@@ -30,6 +30,9 @@ Auto-generated from all feature plans. Last updated: 2026-03-15
 - N/A — pre-computed value lives in memory; no persistence changes (023-remove-profile-routes)
 - Rust stable 2021 edition + axum, tokio, serde_json, async_trait (new — required for `dyn VtnPort`) (024-arch-gaps-complete)
 - Rust stable (2021 edition) + `serde`, `serde_json`, `axum`, `async_trait`, `anyhow`, `tokio` (025-type-vtn-report)
+- [if applicable, e.g., PostgreSQL, CoreData, files or N/A] (026-reporter-domain-types)
+- Rust stable (2021 edition) + `chrono`, `serde_json`, `std::collections::HashMap` (all existing — no new Cargo.toml entries) (026-reporter-domain-types)
+- Rust stable 2021 edition + `chrono`, `std::collections::HashMap` (all existing — no new Cargo.toml entries) (027-clean-timeline-infra)
 
 - [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION] (004-ven-controller-reform)
 
@@ -50,9 +53,9 @@ cd src; pytest; ruff check .
 [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]: Follow standard conventions
 
 ## Recent Changes
-- 025-type-vtn-report: Added Rust stable (2021 edition) + `serde`, `serde_json`, `axum`, `async_trait`, `anyhow`, `tokio`
-- 024-arch-gaps-complete: Added Rust stable 2021 edition + axum, tokio, serde_json, async_trait (new — required for `dyn VtnPort`)
-- 023-remove-profile-routes: Added Rust stable 2021 + axum, tokio, serde_json (no new deps)
+- 027-clean-timeline-infra: Added Rust stable 2021 edition + `chrono`, `std::collections::HashMap` (all existing — no new Cargo.toml entries)
+- 026-reporter-domain-types: Added Rust stable (2021 edition) + `chrono`, `serde_json`, `std::collections::HashMap` (all existing — no new Cargo.toml entries)
+- 026-reporter-domain-types: Added [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION] + [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]
 
 
 <!-- MANUAL ADDITIONS START -->

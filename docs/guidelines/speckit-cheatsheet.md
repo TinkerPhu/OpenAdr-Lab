@@ -23,3 +23,8 @@
 8. /speckit.implement
 
 That matches the “Available slash commands” section you linked to.
+
+
+
+# Claude
+claude --permission-mode bypassPermissions
