@@ -61,6 +61,7 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
   # Timing note: polls VEN trace for DeviceDeviation PlanCycle (~39s in isolation).
   # Can hit poll_until timeout at suite end on Pi4 under resource contention.
 
+  @isolated
   Scenario: Layer 2 triggers a DeviceDeviation replan after sustained grid deviation
     When I wait for the VEN /plan endpoint to return a plan
     And the battery SoC is reset to 0.10
