@@ -147,49 +147,6 @@ impl VtnClient {
         Ok(resp.json().await?)
     }
 
-    /// POST JSON to a VTN endpoint with automatic 401-retry.
-    async fn post_json(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value> {
-        let token = self.ensure_token().await?;
-        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
-
-        let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(&token)
-            .json(&body)
-            .send()
-            .await
-            .context(format!("POST {path} failed"))?;
-
-        if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
-            self.invalidate_token().await;
-            let new_token = self.ensure_token().await?;
-            let resp = self
-                .http
-                .post(&url)
-                .bearer_auth(&new_token)
-                .json(&body)
-                .send()
-                .await
-                .context(format!("POST {path} retry failed"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("{path} returned {status}: {body}");
-            }
-            return Ok(resp.json().await?);
-        }
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("{path} returned {status}: {body}");
-        }
-
-        Ok(resp.json().await?)
-    }
-
     /// PUT JSON to a VTN endpoint with automatic 401-retry.
     async fn put_json(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value> {
         let token = self.ensure_token().await?;

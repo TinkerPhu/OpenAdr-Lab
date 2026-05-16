@@ -14,7 +14,6 @@ pub struct PlanningService;
 pub struct PlanCycleResult {
     pub adopted: bool,
     pub plan: Plan,
-    pub solver_ms: u64,
     /// The PlanCycle controller event pushed during this cycle (reuse for status reports).
     pub plan_cycle_event: ControllerEvent,
 }
@@ -129,7 +128,7 @@ impl PlanningService {
         };
         state.push_controller_event(plan_cycle_event.clone()).await;
 
-        PlanCycleResult { adopted, plan, solver_ms, plan_cycle_event }
+        PlanCycleResult { adopted, plan, plan_cycle_event }
     }
 }
 
