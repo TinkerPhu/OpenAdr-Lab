@@ -59,13 +59,31 @@ Each VEN hosts a physics engine that advances asset states every simulation tick
 | Asset | Physical model | Controllable |
 |-------|---------------|--------------|
 | Battery | SoC rate = `setpoint_kw / capacity_kwh`; round-trip efficiency losses | Yes — continuous setpoint (kW) |
-| EV | SoC rate while plugged; V2G-capable `REM: NEW to me, make it optional in profile`; departure guard enforces target SoC | Yes — charge/discharge kW |
-| Heat pump / Heater | Thermal mass ODE: `dT/dt = (T_amb − T) / τ + Q / C`; switching penalty `REM: not only for these assets` | Yes — ON/OFF duty cycle |
+| EV | SoC rate while plugged; V2G-capable (bidirectional); departure guard enforces target SoC | Yes — charge/discharge kW |
+| Heat pump / Heater | Thermal mass ODE: `dT/dt = (T_amb − T) / τ + Q / C`; multi-tier (off/mid/full) | Yes — discrete tiers (off → mid → full) |
 | PV | Irradiance-driven sinusoidal model with EMA smoothing; non-curtailable | No (read-only) |
 | Base load | Fixed consumption profile; non-controllable | No (read-only) |
 | Grid (virtual) | Aggregates all asset powers; clamps to VTN import/export limits | Via VTN limits |
 
-`TODO: add a chapter for Assets and a table with extended properties, additional: simulation state manipulation api, forecast possibility, controllable tiers in detail, settings in profile, etc. especially document the shared physics between simulated forecast and planning with physics simulation`
+**V2G note:** V2G (vehicle-to-grid discharge) is controlled by `max_discharge_kw` in the EV profile section. The code default is `0.0` (V2G disabled). Set it to the EV's discharge capability (e.g., `7.4`) to enable bidirectional operation. The ven-1 profile does not set `max_discharge_kw`, so it uses the default of 0.0 (charge-only).
+
+**Switching / startup penalties:** Phase 2 of the MILP applies operational friction costs to all controllable assets, not only the heater. Battery cycling has a configurable wear cost (`c_bat_wear_eur_kwh`). EV charging has a `v_ev_extra_eur_kwh` reward and tier penalty coefficients. Heater uses startup cost `c_startup_eur` and the Phase 2 objective coefficient. The heater column in the table above notes "multi-tier" because its discrete control (off/mid/full) makes the switching cost especially visible, but the friction mechanism is common to all assets.
+
+**Asset detail reference:**
+
+| Asset | Profile section | Key parameters | Forecast | History |
+|-------|----------------|----------------|----------|---------|
+| Battery | `assets: - type: battery` | `capacity_kwh`, `max_charge_kw`, `max_discharge_kw`, `round_trip_efficiency`, `min_soc` | `GET /forecast/battery` | `GET /history/battery` |
+| EV | `assets: - type: ev` | `battery_kwh`, `max_charge_kw`, `max_discharge_kw` (0 = charge-only), `soc_target` | `GET /forecast/ev` | `GET /history/ev` |
+| Heater | `assets: - type: heater` | `max_kw`, `thermal_mass_kwh_per_c`, `k_loss_kw_per_c`, `temp_min_c`, `temp_max_c` | `GET /forecast/heater` | `GET /history/heater` |
+| PV | `assets: - type: pv` | `rated_kw`, `peak_hour` (solar noon), `ema_alpha` (smoothing) | `GET /forecast/pv` | `GET /history/pv` |
+| Base load | `assets: - type: base_load` | `baseline_kw` | `GET /forecast/base_load` | `GET /history/base_load` |
+
+**Shared physics between simulation and planning:** Every asset type implements two separate forward-step paths using the same underlying ODE:
+- *Simulation step* (`step()`) — called each tick with the actual setpoint; updates the live `AssetState`.
+- *Forecast* (`forecast()`) — called by the MILP result translator and timeline API; runs the same ODE forward in time from current state to project e.g. battery SoC trajectory or heater temperature trajectory over the plan horizon.
+
+This means the forecast shown in the timeline is guaranteed to be consistent with what the simulator would produce under the planned setpoints.
 
 The simulation can run in **headless mode** (pure physics) or with **sensor injection** (see §2.8) to override individual parameters.
 
@@ -87,7 +105,30 @@ A mixed-integer linear program (MILP) solved by **HiGHS** computes a 24-hour opt
 - Plan warnings (infeasibility, capacity breaches)
 - Flexibility envelope per slot (how much more or less can be offered to the grid)
 
-`TODO: add detailed explanation how to keep a plan a) as unfragmented as possible, b) as stable over time as possible for a reliable forecast report. State clearly if this goal is not implemented yet.`
+**Plan stability and defragmentation — current implementation:**
+
+Two mechanisms address plan quality beyond raw cost:
+
+- **Defragmentation (implemented — Phase 2):** Phase 2 of the two-phase MILP minimises operational friction (startup penalties, switching costs, ramp costs) subject to keeping the total economic cost within `phase2_epsilon_eur` of the Phase 1 optimum. This consolidates short on/off bursts into longer contiguous blocks and avoids unnecessary mode switches, which produces more stable, less fragmented schedules and more reliable forecast reports.
+
+**Independence of objectives:** Yes, the two objectives are fully independent and the guarantee is structurally enforced. `c_star` is determined by Phase 1 and frozen as a hard constraint for Phase 2: `phase1_cost ≤ c_star + epsilon`. Phase 2 has an entirely separate objective function (friction only) and operates on its own copy of the model. It cannot "compensate" by reducing Phase 1's economic cost — Phase 1's optimal solution is a floor, not a variable. The warm-start hint passes Phase 1's solution to Phase 2 as an initial incumbent, which improves solve speed, but the hard constraint still holds. Setting epsilon = 0 makes the constraint equality (`phase1_cost = c_star`), making Phase 2 strictly Pareto-optimal in both dimensions simultaneously.
+
+- **Stability (implemented — acceptance gate):** Periodic replans are only adopted if the new plan's total cost (economic + friction) improves by more than an `effective_threshold`. The effective threshold decays linearly with plan age, so older plans are progressively more likely to be replaced. This prevents constant churning on minor cost oscillations while still allowing stale plans to be updated.
+
+**Design note — post-report plan protection:**
+
+The suggestion is to add a protection score to adopted+reported plans so that future periodic replans face a higher cost-improvement bar. Analysis:
+
+| | Detail |
+|---|---|
+| **Pro** | Prevents VTN forecast oscillation: once a consumption trajectory is reported, changing it without DR justification erodes forecast reliability. |
+| **Pro** | Aligns VEN behaviour with VTN expectations: the VTN is tracking what the VEN committed to; frequent re-commitments reduce trust. |
+| **Pro** | Low conceptual complexity: can be approximated by resetting the acceptance-gate decay timer on report submission rather than on plan adoption. |
+| **Con** | No per-slot granularity in current reporting — reports submit *averages* over intervals, not full plan trajectories. Protecting per-slot allocations would require tracking which slots were reported. |
+| **Con** | Risk of stale lock-in if hard triggers are under-specified (e.g., EV disconnect mid-plan must bypass the gate, or the plan never adapts). |
+| **Con** | A full "protection grade vector" (varying protection per slot) is considerably more complex and may be premature given the current reporting model. |
+
+**Recommendation:** The simplest effective approach is to record the last-report timestamp and use it as the reference for decay, instead of plan adoption time. A freshly reported plan gets a full decay window, giving it natural protection without adding a new data structure. A full per-slot protection vector should only be considered once per-slot reporting to the VTN is implemented.
 
 **Two-phase lexicographic solve:**
 1. **Phase 1 (MIP — cost minimisation)** — minimises economic cost only (import tariff, export revenue, battery cycling). No startup/ramp auxiliary variables; finds the optimal cost floor `c_star`.
@@ -95,11 +136,15 @@ A mixed-integer linear program (MILP) solved by **HiGHS** computes a 24-hour opt
 
 The planner runs in a blocking Tokio thread to avoid starving the async runtime.
 
-`explain how to configure phase 2. and how/why the optimization of phase 1 is kept untouched while defragmenting in phase 2. clearly state in case this goal in not implemented yet.`
+**Configuring Phase 2:** Set `phase2_epsilon_eur` in the `planner:` section of the profile YAML (default: `0.02`). This is the maximum extra cost (in €) that Phase 2 may spend while defragmenting. Increasing it allows more aggressive defragmentation at a small cost premium. Setting it to `0.0` disables Phase 2 entirely (single-phase solve — purely cost-optimal, potentially fragmented). Phase 1's cost optimum is protected by the hard constraint `phase1_cost ≤ c_star + phase2_epsilon_eur`; Phase 2 can only minimise friction within that budget, never worsen the economic result beyond ε.
 
 **Acceptance gate:** A new plan is adopted only if its total cost is below a threshold relative to the current plan. Hard triggers (VTN rate change, capacity alert, user request, device deviation) bypass the gate.
 
-`Explain the threshold decay.`
+**Threshold decay:** The effective threshold decays linearly with plan age:
+```
+effective_threshold = plan_adoption_threshold_eur × max(0, 1 − elapsed_s / plan_adoption_decay_s)
+```
+When `elapsed_s ≥ plan_adoption_decay_s` the plan is considered fully decayed and any periodic replan replaces it unconditionally — even at equal cost. This prevents stale plans from persisting indefinitely. Example: `threshold = 0.20 €`, `decay_s = 3600` — after 30 minutes the effective threshold drops to `0.10 €`; after 1 hour the plan is force-replaced.
 
 ### 2.3 Real-time Deviation Absorption
 
@@ -116,7 +161,7 @@ deviation_kw = actual_net_kw − planned_net_kw
 Positive = site is importing more than planned; correction must reduce import (reduce heater, curtail EV, discharge battery).  
 Negative = site is importing less than planned (e.g. PV spike); correction must increase import (charge battery, ramp EV up).
 
-`Todo: curtail PV is not implemented yet but will be required for some openADR signals`
+**Note — PV curtailment not yet implemented:** The absorber and dispatcher currently treat PV as non-curtailable (read-only). Some OpenADR `LOAD_DISPATCH` signals may require export curtailment; this would need a controllable PV inverter model and a curtailment setpoint path.
 
 **Per-asset correction state machine:**
 
@@ -137,7 +182,11 @@ Idle  ─── |deviation| > dead_band ──►  Correcting
 
 The `dead_band_clearing_ticks` wait-gate prevents chattering: if the deviation momentarily dips inside the dead-band but then rises again, the settling counter resets to zero and the overlay is held.
 
-`TODO: explain in more detail and with examples.`
+**Worked example:** `dead_band_kw = 0.1`, `dead_band_clearing_ticks = 1`.
+
+- *Tick 1:* Plan = 2.0 kW grid import. Actual = 2.3 kW. `deviation_kw = +0.3` (exceeds dead-band). Battery is Idle → transitions to Correcting; absorber applies –0.3 kW overlay (battery discharges 0.3 kW extra).
+- *Tick 2:* Battery discharge covers the gap. Actual = 2.05 kW. `deviation_kw = +0.05` (< dead-band). Battery enters Settling; `dead_band_clearing_ticks = 1` → satisfied in one tick → transitions to Idle. Overlay cleared, battery returns to MILP setpoint.
+- *If at Tick 2 the deviation spiked again (0.2 kW):* The settling counter resets to zero and the battery remains in Correcting until the deviation stays below dead-band for the full clearing count.
 
 **Constraints applied before each asset correction:**
 
@@ -151,7 +200,10 @@ The `dead_band_clearing_ticks` wait-gate prevents chattering: if the deviation m
 
 **SSE telemetry:** When a correction is applied the absorber broadcasts a `PlannerEvent::CorrectionActive` SSE event with planned vs. actual net power and the correction magnitude. When the correction clears it emits `PlannerEvent::CorrectionCleared`. Events are deduplicated: a new SSE fires only when the total correction changes by > 0.2 kW.
 
-`TODO: explain the purpose/use case of those events`
+**Use cases for correction SSE events:**
+- **UI status indicator:** The frontend can show a live "absorber active" indicator (e.g., yellow badge) when `CorrectionActive` is received, returning to green on `CorrectionCleared`. This gives the operator real-time visibility of how much the site deviates from plan.
+- **DR compliance monitoring:** A client subscribing to the SSE stream can log correction magnitude and duration; sustained corrections are a signal that the MILP plan needs re-tuning or the asset is degraded.
+- **Tier-2 trigger transparency:** The SSE shows the residual being accumulated toward Tier-2 escalation, making it auditable when a full replan was triggered and why.
 
 #### Tier 2 — DeviceDeviation escalation
 
@@ -171,14 +223,51 @@ Users can request energy services with deadline constraints:
 | **Shiftable load** | Schedule a fixed-energy task (e.g., dishwasher) within a window |
 | **Baseline override** | Manually shift the expected base load profile for a period |
 
-`TODO: heat pump and air condition should be appended to the shiftable loads. if you disagree, explain why.`
+**On heat pump / AC as shiftable loads:**
+
+The compressor minimum-run-time constraint is real hardware behaviour — once started, the compressor must run for a minimum block (typically 5–20 min) to avoid damage. A washing machine has the same structural property: once started, it must run for its full cycle. So the analogy has merit on the surface.
+
+The problem is that a shiftable load model encodes **a fixed energy block with a variable start time** — the only degree of freedom is *when* the block begins. This is correct for a washing machine (1.0 kWh, always 60 min, run it anywhere in the 8-hour window). It breaks down for a heat pump because:
+
+1. **The block size is not fixed.** The energy needed to heat a tank from current temperature to target depends on instantaneous thermal state, ambient temperature, and heat loss during the run itself. At planning time (5 min ahead), the block size is knowable; at 6-hour-ahead planning it is not, because thermal drift between now and the planned start slot changes it continuously.
+
+2. **The comfort constraint persists between jobs.** A dishwasher has no comfort constraint between cycles. A heat pump must keep the space/tank within `[temp_min, temp_max]` at all times — including during the off-periods between compressor runs. If the thermal mass cools below `temp_min` before the scheduled start, the compressor must turn on regardless of the plan. The shiftable model has no mechanism to express this; the continuous ODE + per-slot temperature bounds does.
+
+3. **Minimum run time is a constraint on the ODE model, not a reason to replace it.** The correct way to add compressor protection is a minimum-on MILP constraint: if `z_heat[t] = 1`, then `z_heat[t+1 .. t+k] = 1`. This is a small addition to the existing heater MILP formulation. It does not require discarding the thermal state variable.
+
+**Conclusion:** Add `min_run_slots` (and `min_off_slots`) as configurable parameters on the heater MILP asset. For a **resistive heater or electric boiler** (no compressor), set both to `0` — the constraint is a no-op and the model is unconstrained on switching. For a **heat pump** (compressor), set `min_run_slots` to the compressor's minimum on-time (e.g., `3` for a 5-min slot = 15 min) and `min_off_slots` to the restart lockout time. One unified continuous model with configurable timing constraints handles both device types correctly. The shiftable load category remains appropriate only for truly job-oriented loads (dishwasher, washing machine, EV charge session) where a fixed energy block per activation is the correct model.
 
 Requests are tracked through states: `Pending → Scheduled → Active → Completed / Failed`.  
 The planner integrates user requests as hard constraints (must-meet) or soft constraints (best-effort) depending on configuration.
 
 **Opportunistic EV charging** can be toggled independently: when on, any surplus generation charges the EV even without an explicit user request.
 
-`TODO: Explain in process schematic how they are competing/not competing with deviation absorber. TODO add opportunistic load to Heater and Boiler as well and create a priority list or use the one from the deviation absorber, if that makes sense` 
+**Interaction between user requests and the deviation absorber:**
+
+User requests (EV session, heater target, shiftable load) are inputs to the MILP planner — they translate into hard or soft constraints on the resulting `Plan`. The absorber then operates on deviations from that plan. They do not compete:
+
+```
+User request (POST /ev-session)
+        │
+        ▼ (on hard trigger)
+MILP planner incorporates request as plan constraint
+        │
+        ▼
+New Plan adopted (EV charging slot already included)
+        │
+        ▼
+sim_tick Phase 2: dispatcher reads plan → setpoints include EV charging
+        │
+        ▼
+sim_tick Phase 3: absorber compares actual vs planned grid import
+                  EV departure guard prevents cutting EV if soc < target
+```
+
+The absorber respects user intent through the departure guard and through the plan itself (which already scheduled the request). There is no priority conflict because the plan is the single source of truth for all asset targets.
+
+**Opportunistic loading — current state:** Only the EV has an opportunistic surplus-charging overlay (`apply_surplus_ev_overlay` in `dispatcher.rs`). It activates when no EV session is active, the EV is plugged and below its SoC target, and PV is generating a surplus. This is an explicit opt-in toggle (`PUT /ev-settings`).
+
+**Opportunistic heating / boiler — not yet implemented.** Extending the surplus overlay to the heater (pre-heat when PV surplus is available) would follow the same pattern: a dispatcher-level overlay that fires when no HeaterTarget session is active. The absorber priority list could naturally govern the order (battery → EV → heater), reusing the existing `priority` field in the absorber asset config.
 
 ### 2.5 VTN Integration (OpenADR 3)
 
@@ -192,11 +281,11 @@ The VEN polls the VTN continuously over authenticated HTTPS.
 | Events | 30 s | Price, GHG, curtailment, and alert signals |
 | Reports | 60 s | Confirmation of received reports |
 
-`REM: I assume programs will hardly change, is this correct? in any case, make those interval configurable in config files`
+**On program polling frequency:** Programs are indeed long-lived — a VTN program defines the pricing structure and reporting obligations for an entire DR campaign (days to weeks). They change rarely compared to events (which carry the actual hourly price signals). The 30 s code default is conservative; the Docker Compose override of 300 s (5 min) reflects this. All polling intervals are already configurable via environment variables: `POLL_PROGRAMS_SECS`, `POLL_EVENTS_SECS`, `POLL_REPORTS_SECS` (see §5).
 
 **Authentication:** OAuth 2.0 client-credentials flow. The token is cached with a 60-second safety margin and automatically refreshed on expiry or a 401 response.
 
-`TODO: in order to reduce VEN to VTN traffic, make the token update interval configurable or even add possibility to disable and fetch on 401.`
+**Token refresh — current behaviour and enhancement path:** The token is cached and re-fetched only when within 60 seconds of expiry or on a 401 response. The 60-second safety margin is hardcoded in `vtn.rs`. Making it configurable (or disabling proactive refresh in favour of pure 401-driven refresh) is a small enhancement not yet implemented. For most lab use, the current behaviour is negligible traffic — one token fetch per ~hour.
 
 **Signal parsing:**
 - `PRICE` signals → import/export tariff time series
@@ -206,7 +295,22 @@ The VEN polls the VTN continuously over authenticated HTTPS.
 
 A rate-change event (new pricing) immediately triggers a plan recomputation via a `tokio::sync::watch` channel, without waiting for the next periodic interval.
 
-`TODO: Explain in detail the grade of implementation of those signals and their function.`
+**Signal implementation status:**
+
+| Signal / payload type | Parsed? | Effect |
+|----------------------|---------|--------|
+| `PRICE` | Yes | Sets import tariff time series → feeds MILP cost minimisation |
+| `EXPORT_PRICE` | Yes | Sets export tariff time series → feeds MILP export revenue |
+| `GHG` | Yes | Sets CO₂ intensity series → feeds multi-objective (emissions mode) planner |
+| `IMPORT_CAPACITY_LIMIT` | Yes | Hard import ceiling per interval; MILP enforces as soft constraint with penalty; strictest of concurrent events wins |
+| `EXPORT_CAPACITY_LIMIT` | Yes | Same for export |
+| `IMPORT_CAPACITY_SUBSCRIPTION` | Yes | Parsed and stored; available to MILP capacity layer |
+| `IMPORT_CAPACITY_RESERVATION` | Yes | Parsed and stored; available to MILP capacity layer |
+| `SIMPLE` | Partially | No dedicated parser; a new event carrying a `SIMPLE` payload triggers a replan (any event arrival is a hard trigger), but the numeric value is not translated into a curtailment setpoint |
+| `LOAD_DISPATCH` | Partially | Same as SIMPLE — triggers replan but payload value is not mapped to a target |
+| `ALERT` | Partially | No dedicated `ALERT` payload type is parsed; the effective mechanism is that any new or expired event triggers a `RateChange` watch signal which wakes the planning loop immediately |
+
+**Note:** The VEN always triggers an immediate replan on any event arrival or departure — regardless of payload type. This provides a functional fallback for unrecognised signal types. Full `SIMPLE` / `LOAD_DISPATCH` curtailment target handling (mapping the payload value to a capacity constraint) is not yet implemented.
 
 ### 2.6 Report Obligations
 
@@ -232,7 +336,23 @@ At any moment the VEN can report its site-level flexibility to the VTN:
 
 This is used by the VTN operator to understand available DR capacity across VENs.
 
-`TODO: explain in detail, how those numbers are calculated and where they are calculated.`
+**How the flexibility envelope is calculated** (`controller/envelope.rs`, `compute_envelope()`):
+
+For each controllable asset snapshot in `SimSnapshot`:
+```
+up_kw   += max(asset.power_kw − asset.cap_max_export_kw, 0)
+down_kw += max(asset.cap_max_import_kw − asset.power_kw, 0)
+```
+- `up_kw` is how much current import can be *reduced* (asset has headroom to discharge / reduce draw).
+- `down_kw` is how much current import can be *increased* (asset has headroom to charge more).
+- PV and base load have a point-range capability (`cap_max_import_kw = cap_max_export_kw = current_power_kw`), so they contribute 0 to both directions.
+
+Duration estimates use stored energy:
+```
+up_duration_s   = available_discharge_kwh / up_kw × 3600
+down_duration_s = available_charge_kwh    / down_kw × 3600
+```
+Both are `None` when the corresponding `kw` value is below a near-zero threshold. The envelope is recomputed each tick in Phase 5 and served via `GET /flexibility`.
 
 ### 2.8 Simulation Injection & Overrides
 
@@ -245,8 +365,9 @@ For experimentation, any simulated physics parameter can be overridden via the A
 | **C — frozen + snap** | `ev_plugged`, `ev_soc_target`, `heater_setpoint_c`, `heater_temp_min/max_c`, `ambient_temp_c`, `grid_import/export_limit_kw` | Value is held constant while active; on release snaps immediately to the profile default |
 | **D — planning only** | `pv_plan_kw` | Seen by the MILP planner only; has no effect on the physics simulator |
 
-`TODO: explain why C is needed or could be dropped and explain whether it is used in UI and how`
-`TODO: explain why pv_plan_kw is only for milp planner. will it not show up on the ui forecast timeline? if so, why?`
+**Mode C — frozen + snap — rationale:** Mode C applies to fields that have no meaningful "natural return trajectory". For example, `ev_soc_target` is a configuration value, not a physics state — there is no EMA blend-back to a natural value. Similarly, `ev_plugged` is a discrete boolean, `ambient_temp_c` is an external boundary condition, and grid limits are VTN-imposed thresholds. Releasing any of these with EMA blending (Mode B) would produce nonsensical intermediate values. Mode C simply holds the overridden value until explicitly released, then snaps to the profile default. In the UI, Mode C fields appear as persistent override inputs that stay active until the user clears them — they are not self-resetting.
+
+**Why `pv_plan_kw` is planning-only (Mode D):** The MILP planner needs a PV forecast (what will PV generate over the next 24 hours?) to optimise battery and EV charging schedules. `pv_plan_kw` overrides this forecast *inside the solver* without touching the physics simulation. The real PV simulator continues running its irradiance model and its output continues to appear in `GET /history/pv` and the real-time grid balance. The timeline (`GET /timeline/pv`) shows the *planned* PV trajectory, which will reflect the override; `GET /history/pv` shows actual simulated output. This separation is intentional: you can test "what if PV generates flat 5 kW?" in the planner without corrupting the physics state, which matters for absorption/deviation calculations.
 
 Supported overrides include: PV irradiance, base-load power, battery SoC, EV SoC, ambient temperature, grid import/export limits, and asset setpoints.
 
@@ -261,7 +382,7 @@ VEN state is persisted in two separate mechanisms:
 
 On restart, the physics state is reloaded and simulation resumes from where it left off. Profile parameters (physics constants, planner weights) are recomputed from the YAML profile file and merged back into the loaded state, so config changes take effect cleanly without manual state migration.
 
-`TODO: a required feature is to also persist plans in for restart to have reliable VTN forcast reports.`
+**Plan persistence — not yet implemented.** On restart the VEN recomputes a fresh plan from current sim state. This means `GET /timeline/*` is unavailable until the first plan is computed (typically within seconds), and any pending report obligations that reference the pre-restart plan's trajectory are approximated from the new plan. For production DR deployments where continuous VTN forecast reporting is required, plan serialisation to `/data/state.json` on plan adoption (and reload on startup) is a necessary future enhancement.
 ### 2.10 Observability
 
 | Signal | Endpoint / mechanism |
@@ -272,7 +393,7 @@ On restart, the physics state is reloaded and simulation resumes from where it l
 | Structured logs | JSON tracing output via `tracing-subscriber`; level controlled by `RUST_LOG` |
 | Planner progress SSE | Server-Sent Events pushed during MILP solve (solving started, phase progress, plan adopted) |
 
-`TODO: also plan a asset power log with configurable window size and window agregation (mean) and length.`
+**Asset power log — current capability:** Each asset maintains a 3600-entry ring buffer of per-second history (`AssetHistoryBuffer` in `simulator/`), accessible via `GET /history/:asset_id`. This provides ~1 hour of 1-second resolution power, SoC, and temperature traces. Configurable aggregation window (e.g., 5-minute means) and longer retention beyond 3600 seconds are not yet implemented. For reporting purposes the reporter computes time-weighted means over report intervals directly from the ring buffer.
 
 ---
 
@@ -487,7 +608,15 @@ One file per asset type. Each implements `capability()` (current kW bounds) and 
 #### `src/simulator/` — Simulation engine
 Manages the collection of `AssetEntry` objects; advances physics each tick; maintains 3600-row per-asset history ring buffers (`VecDeque`); persists state to disk.
 
-`REM: History (like forecast) should not be part of simulator but should be part of asset. correct me if you think otherwise. There might be two types of simulator needed: device state simulator, instead of real actors and sensors (purpose: replace real devices) and device forecast simulator, which is required by planning (purpose: accurate planning). the two simulations should be separated as they have different purpose.`
+**On history / forecast ownership and the dual-simulator idea:**
+
+The observation is architecturally sound. Currently `simulator/` owns both the physics step (state update) and the history ring buffers. The `forecast()` method lives on each asset type in `assets/`, which is the right location — it reuses the same ODE but runs forward in time without side effects. The history buffer placement in `simulator/` is a pragmatic colocation choice (the simulator already holds `AssetEntry` per asset, which is the natural place to accumulate history), not a clean domain boundary.
+
+The two-simulator split you describe maps to:
+- **Device state simulator** — the current `simulator/` + `assets/*/step()`: advances physics, tracks live state, persists to disk. Replaces real hardware sensors and actuators in the lab context.
+- **Device forecast simulator** — the current `assets/*/forecast()` + `controller/timeline.rs`: projects asset state forward under planned setpoints. Required by the MILP planner and the timeline API.
+
+These are already separated at the *code* level (different functions, no shared mutable state). They are not separated at the *module* level — the history buffer lives in the state simulator even though it is read by the forecast path indirectly via snapshots. A future refactor could move `AssetHistoryBuffer` into `assets/` alongside `forecast()`, making the boundary explicit. This would be a clean improvement but is low-priority as long as the current architecture correctly enforces the dependency rule (simulator/ does not import controller/).
 
 #### `src/controller/` — Control domain
 The largest domain package. Sub-modules:
@@ -505,7 +634,7 @@ The largest domain package. Sub-modules:
 | `vtn_port.rs` | `VtnPort` trait |
 | `simulator_port.rs` | `SimulatorPort` trait + `SimSnapshot` / `GridSnapshot` types |
 
-`REM: I miss the opportunistic load. I assume, it is in the asset since currently only EV is implemented. Maybe it needs common functionality in a separate source file.`
+**Opportunistic load location:** The opportunistic EV surplus-charging overlay lives in `controller/dispatcher.rs` as `apply_surplus_ev_overlay()`, not in `assets/ev.rs`. This is intentional: the surplus calculation requires knowledge of the full site balance (PV output, base load, existing setpoints) which the dispatcher already computes. The `assets/mod.rs` trait defines a `surplus_charge_kw()` method as a per-asset capability hook, but the orchestration belongs in the dispatcher where the site-level surplus is known. For a heater opportunistic pre-heat overlay, the same pattern applies: add a `surplus_heat_kw()` hook to the heater asset and call it from `dispatcher.rs` after the EV overlay. A separate `surplus_orchestrator` module would only make sense if the logic grows complex (e.g., cross-asset surplus arbitration with priority weights), which at that point could reuse the absorber's priority configuration.
 
 #### `src/services/` — Application services
 Stateless orchestration; calls ports, updates state.
