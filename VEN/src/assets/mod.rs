@@ -526,6 +526,7 @@ impl AssetConfig {
 /// Physics types (`Battery`, `EvCharger`, etc.) implement only `step()` and `capability()`.
 /// They inherit the three identity/history methods with panicking defaults — those methods
 /// must only be called via `AssetHandle`, which properly implements them.
+#[allow(dead_code)]
 pub trait Asset: Send + Sync {
     // ── Identity / observability (Phase B/C) ──────────────────────────────────
 
@@ -636,6 +637,8 @@ pub trait Asset: Send + Sync {
 ///     history: &entry.history,
 /// };
 /// ```
+// AssetHandle is used in tests and serves as the intended path for dyn Asset dispatch.
+#[allow(dead_code)]
 pub struct AssetHandle<'a> {
     pub config: &'a AssetConfig,
     pub id: &'a str,

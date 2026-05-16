@@ -11,14 +11,6 @@ use super::asset_port::{BatteryMilpContext, EvMilpContext, HeaterMilpContext};
 
 use super::types::*;
 
-/// Run the MILP model and return the optimal schedule.
-///
-/// Uses per-asset context types from the assets module (`BatteryMilpContext`,
-/// `EvMilpContext`, `HeaterMilpContext`) and the `MilpVarPool` / `AssetInteraction`
-/// framework from `milp_interactions.rs`. The `MilpInputs` signature is preserved
-/// so all existing unit tests continue to compile without modification.
-
-pub(crate) use super::asset_port::M_LOW_EUR_PER_KWH;
 
 /// Phase 1: minimise economic cost only. Battery and EV declared without startup/ramp aux vars.
 /// Heater objective uses m_low penalty only (lambda_sw=0 via c_startup_eur=0.0 convention).

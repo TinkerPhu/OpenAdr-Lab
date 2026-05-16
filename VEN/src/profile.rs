@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use crate::assets::{
     base_load::BaseLoadParams, battery::BatteryParams, ev::EvParams, heater::HeaterParams,
     pv::PvParams,
@@ -7,7 +6,6 @@ use crate::entities::asset_params::AssetParams;
 use crate::entities::PlannerObjective;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tracing::{info, warn};
 
 /// Multi-asset deviation absorber configuration.
 /// Tier 1 real-time controller for transient grid deviations.
@@ -66,17 +64,6 @@ pub enum AssetProfile {
 }
 
 impl AssetProfile {
-    /// Asset identifier — must be present in every YAML entry.
-    pub fn id(&self) -> &str {
-        match self {
-            Self::Ev(c) => &c.id,
-            Self::Heater(c) => &c.id,
-            Self::Pv(c) => &c.id,
-            Self::Battery(c) => &c.id,
-            Self::BaseLoad(c) => &c.id,
-        }
-    }
-
     /// Convert this config variant into the domain-level `AssetParams`.
     /// Called at startup only — not on the hot path.
     pub fn to_params(&self) -> AssetParams {
@@ -142,6 +129,8 @@ pub struct Profile {
     pub planner: PlannerConfig,
     #[serde(default)]
     pub grid: GridConfig,
+    // Packet-based scheduling — not yet implemented.
+    #[allow(dead_code)]
     #[serde(default)]
     pub packets: Vec<PacketSeed>,
     /// Multi-asset deviation absorber configuration (Tier 1).
@@ -295,24 +284,6 @@ fn default_asset_id_pv() -> String {
 }
 fn default_pv_rated() -> f64 {
     5.0
-}
-
-impl PvConfig {
-    /// Forecast PV generation at a future time slot (kW, positive = generation).
-    ///
-    /// Uses the sin model: `rated_kw × sin(π × (hour − 6) / 12)` for hours 6–18,
-    /// 0 otherwise. This is the same physics model used by `PvInverter::capability_trajectory`.
-    /// When a real PV forecast API is integrated, only this method needs to change.
-    pub fn forecast_kw(&self, ts: DateTime<Utc>) -> f64 {
-        use chrono::Timelike;
-        let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
-        if hour >= 6.0 && hour <= 18.0 {
-            let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
-            (angle.sin().max(0.0) * self.rated_kw).max(0.0)
-        } else {
-            0.0
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -649,6 +620,8 @@ fn default_pen_exp() -> f64 {
 }
 
 /// A single comfort-rate point for a seeded packet.
+// Packet-based scheduling — not yet implemented.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct ComfortRateSeed {
     pub fill: f64,
@@ -656,6 +629,8 @@ pub struct ComfortRateSeed {
 }
 
 /// An EnergyPacket pre-configured in the device profile (seeded at startup).
+// Packet-based scheduling — not yet implemented.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct PacketSeed {
     /// Asset id this packet targets: "ev", "heater", etc.
@@ -672,77 +647,6 @@ pub struct PacketSeed {
 }
 
 impl Profile {
-    /// Returns the EV config from the `assets` list.
-    pub fn ev_config(&self) -> Option<&EvConfig> {
-        self.assets.iter().find_map(|a| {
-            if let AssetProfile::Ev(c) = a {
-                Some(c)
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Returns the Heater config from the `assets` list.
-    pub fn heater_config(&self) -> Option<&HeaterConfig> {
-        self.assets.iter().find_map(|a| {
-            if let AssetProfile::Heater(c) = a {
-                Some(c)
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Returns the PV config from the `assets` list.
-    pub fn pv_config(&self) -> Option<&PvConfig> {
-        self.assets.iter().find_map(|a| {
-            if let AssetProfile::Pv(c) = a {
-                Some(c)
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Returns the Battery config from the `assets` list.
-    pub fn battery_config(&self) -> Option<&BatteryConfig> {
-        self.assets.iter().find_map(|a| {
-            if let AssetProfile::Battery(c) = a {
-                Some(c)
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Returns the base load in kW from the `assets` list.
-    pub fn base_load_kw(&self) -> f64 {
-        self.assets
-            .iter()
-            .find_map(|a| {
-                if let AssetProfile::BaseLoad(c) = a {
-                    Some(c.baseline_kw)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(default_base_load_kw)
-    }
-
-    pub async fn load(path: &str) -> Self {
-        match Self::try_load(path).await {
-            Ok(p) => {
-                info!(path, "loaded simulator profile");
-                p
-            }
-            Err(e) => {
-                warn!(path, error = %e, "failed to load profile, using defaults");
-                Self::default()
-            }
-        }
-    }
-
     pub async fn try_load(path: &str) -> anyhow::Result<Self> {
         let contents = tokio::fs::read_to_string(Path::new(path)).await?;
         let profile: Profile = serde_yaml::from_str(&contents)?;

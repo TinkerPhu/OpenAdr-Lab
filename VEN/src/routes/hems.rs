@@ -22,6 +22,7 @@ use crate::entities::device_session::{
 };
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::entities::PlannerObjective;
+use crate::services::hems::EvSessionService;
 use crate::services::user_request::UserRequestService;
 use crate::AppCtx;
 
@@ -421,9 +422,9 @@ pub async fn post_ev_session(
     (StatusCode::CREATED, Json(session))
 }
 
-/// DELETE /ev-session — clear the active EV session.
+/// DELETE /ev-session — clear the active EV session and complete any linked UserRequests.
 pub async fn delete_ev_session(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    ctx.state.set_ev_session(None).await;
+    EvSessionService::end(&ctx.state).await.unwrap_or_default();
     let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
     StatusCode::NO_CONTENT
 }

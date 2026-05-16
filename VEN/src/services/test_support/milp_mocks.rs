@@ -3,7 +3,7 @@
 //! Use these in planner unit tests to avoid a dependency on full asset physics.
 
 use chrono::{DateTime, Utc};
-use good_lp::{variable, Constraint, Expression, ProblemVariables};
+use good_lp::{Constraint, Expression, ProblemVariables};
 
 use crate::controller::milp_interactions::MilpVarPool;
 use crate::controller::milp_planner::{
@@ -11,8 +11,8 @@ use crate::controller::milp_planner::{
     MilpLoadMode,
 };
 use crate::controller::milp_planner::asset_port::{
-    BatteryMilpContext, BatteryMilpVars, EvMilpContext, EvMilpMode, EvMilpVars,
-    HeaterMilpContext, HeaterMilpMode, HeaterMilpVars,
+    BatteryMilpContext, EvMilpContext, EvMilpMode,
+    HeaterMilpContext, HeaterMilpMode,
 };
 
 // ── MockBatteryCtx ───────────────────────────────────────────────────────────

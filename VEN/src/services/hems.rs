@@ -7,6 +7,8 @@ use crate::entities::user_request::UserRequestStatus;
 use crate::state::AppState;
 
 pub struct EvSessionService;
+// Not yet wired to route; heater target is set directly in post_heater_target.
+#[allow(dead_code)]
 pub struct HvacService;
 
 impl EvSessionService {
@@ -37,6 +39,7 @@ impl EvSessionService {
     }
 }
 
+#[allow(dead_code)]
 impl HvacService {
     pub async fn set_heater_target(target: HeaterTarget, state: &AppState) {
         state.set_heater_target(Some(target)).await;
