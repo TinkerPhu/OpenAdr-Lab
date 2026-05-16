@@ -4127,3 +4127,35 @@ grep -r "use crate::assets|use crate::simulator" VEN/src/services -> FAIL (servi
 cargo check -> 0 errors (42 pre-existing warnings)
 BDD suite -> pending Pi4-Server run
 ```
+
+---
+
+## Phase 029: Fix Architecture Invariant Gaps and Missing Tests
+
+**Date**: 2026-05-16
+**Branch**: `029-fix-arch-invariants-tests`
+**Scope**: Close the four remaining gaps from the architecture refactoring post-verification: SimState boundary violation in ObligationService, two missing unit tests (tick_once, spawn_planning), and a stale directory path in the architecture doc.
+
+### What was done
+
+**Item 5 (doc fix)**: The invariant grep in `docs/plans/ven_backend_architecture_refactoring.md` §8 referenced `VEN/src/controller/milp` which does not exist (the directory was renamed to `milp_planner` in feature 020). Fixed both the refactoring plan doc and `.claude/CLAUDE.md` ven-architecture section. Also updated the `SolverPort` description in CLAUDE.md to match the correct directory name.
+
+**Item 2 (SimState boundary)**:  `services/obligation.rs` still imported `crate::simulator::SimState` as a function parameter and locked it internally to extract asset samples. This violated Invariant 5 (services must not import simulator/assets). Fixed by:
+- Changing `check_and_report` to accept `HashMap<String, Vec<AssetReportSample>>` (already the domain type used internally)
+- Moving the sim lock + extraction to `tasks/obligation.rs` (the adapter layer where it belongs)
+- Removing `use crate::simulator::SimState` from both the production code and the test module
+- Deleting the `make_sim()` test helper — tests now pass `HashMap::new()`
+
+**Item 3 (tick_once test)**: Added `#[derive(Default)]` to `AbsorberState` (all fields are zero/empty by nature). Created `VEN/src/tasks/sim_tick/tick_tests.rs` with `tick_once_runs_without_profile` test — uses a serde_json-constructed minimal SimState, no profile YAML required. Used `#[path = "tick_tests.rs"]` attribute in the `mod` declaration because `tick.rs` is a non-directory module file (submodule lookup would otherwise go to `tick/tick_tests.rs`). tick.rs is now 197 lines (within 200 limit).
+
+**Item 4 (spawn_planning smoke test)**: Added `#[cfg(test)] mod tests` to `planning.rs`. Test constructs all required channels and params from defaults, calls `spawn_planning`, then immediately aborts the handle — the task starts with a 5-second sleep before doing any real work, so abort is clean. planning.rs is now 317 lines (well within 500).
+
+### Results
+
+All five architecture invariant greps return empty. Full unit test suite: **403 passed, 0 failed** (including both new tests). BDD suite pending Pi4-Server run.
+
+### Key learnings
+
+- `AbsorberState::Default` is safe to derive — all fields (`HashMap`, `u32`, `bool`, `f64`) have natural zero defaults. No logic change, purely enabling test construction.
+- When `tick.rs` (a non-directory module file inside `sim_tick/`) declares `mod tick_tests;`, Rust looks for the file at `sim_tick/tick/tick_tests.rs` — use `#[path = "tick_tests.rs"]` to keep it alongside `tick.rs` at `sim_tick/tick_tests.rs`.
+- The rustc 1.95.0 ICE on the binary target (triggered by incremental compilation over Windows NTFS via WSL) is a pre-existing compiler bug. `cargo test` and `cargo check --tests` both work correctly. The ICE does not affect correctness — it only affects the specific `cargo check` (without `--tests`) command on the binary target.

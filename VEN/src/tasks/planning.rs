@@ -256,3 +256,62 @@ pub(crate) fn spawn_planning(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+    use tokio::sync::{broadcast, watch, Mutex, RwLock};
+
+    use crate::entities::asset::PlanTrigger;
+    use crate::entities::planner_params::{PlannerObjective, PlannerParams};
+    use crate::planner_events::PlannerEvent;
+    use crate::services::test_support::mock_vtn::MockVtn;
+    use crate::simulator::SimState;
+    use crate::state::AppState;
+
+    use super::spawn_planning;
+
+    fn minimal_sim() -> Arc<Mutex<SimState>> {
+        let s: SimState = serde_json::from_value(serde_json::json!({
+            "asset_configs": [],
+            "assets": [],
+            "grid": {
+                "net_power_w": 0.0, "import_w": 0.0, "export_w": 0.0,
+                "voltage_v": 0.0, "import_kwh": 0.0, "export_kwh": 0.0
+            },
+            "last_tick": chrono::Utc::now().to_rfc3339()
+        }))
+        .expect("minimal SimState must deserialize");
+        Arc::new(Mutex::new(s))
+    }
+
+    #[tokio::test]
+    async fn spawn_planning_constructs_without_panic() {
+        let (trigger_tx, trigger_rx) = watch::channel(PlanTrigger::Periodic);
+        let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(1);
+        let event_tx = Arc::new(event_bcast_tx);
+        let vtn = Arc::new(MockVtn::new());
+        let sim = minimal_sim();
+        let active_objective = Arc::new(RwLock::new(PlannerObjective::default()));
+        let deviation_pending = Arc::new(AtomicBool::new(false));
+
+        let handle = spawn_planning(
+            AppState::new(),
+            PlannerParams::default(),
+            10.0,
+            10.0,
+            vec![],
+            vtn,
+            "test-ven".to_string(),
+            trigger_rx,
+            sim,
+            active_objective,
+            event_tx,
+            deviation_pending,
+        );
+        handle.abort();
+        let _ = trigger_tx; // keep alive until abort
+        // passes if no panic during construction and abort
+    }
+}
