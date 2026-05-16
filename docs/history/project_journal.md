@@ -3967,3 +3967,83 @@ cargo check -> 0 errors
 cargo test -> 398 passed, 0 failed (2 new tests in helpers.rs)
 BDD full suite -> 44 features passed, 0 failed / 238 scenarios passed, 0 failed
 ```
+
+---
+
+## Feature 029 — Wire VtnPort in planning and sim_tick tasks (VG-05, VG-06)
+
+**Commit:** 20ca281 (feat)
+**Branch:** 027-clean-timeline-infra
+**Date:** 2026-05-16
+
+### What changed
+
+Closed VG-05 and VG-06 from `docs/plans/ven_backend_architecture_refactoring_v2.md` Phase 4:
+`tasks/planning.rs` and `tasks/sim_tick/{mod,tick,publish}.rs` still held concrete `VtnClient`
+instead of the `VtnPort` trait. All cross-ring traffic must cross a named port (trait).
+`VtnPort` was already defined in `controller/vtn_port.rs` and `VtnClient` already implemented it.
+This phase is a mechanical type substitution — no behavior changes.
+
+#### tasks/planning.rs
+- Removed `use crate::vtn::VtnClient`.
+- Added `use crate::controller::VtnPort`.
+- Changed `spawn_planning` parameter: `vtn: VtnClient` → `vtn: Arc<dyn VtnPort>`.
+- Call site `vtn.upsert_report(...)` unchanged (auto-deref through Arc works with dyn trait).
+
+#### tasks/sim_tick/mod.rs
+- Removed `use crate::vtn::VtnClient`.
+- Added `use crate::controller::VtnPort`.
+- Changed `spawn_sim_tick` parameter: `vtn: VtnClient` → `vtn: Arc<dyn VtnPort>`.
+
+#### tasks/sim_tick/tick.rs
+- Removed `use crate::vtn::VtnClient`.
+- Added `use crate::controller::VtnPort`.
+- Changed `tick_once` parameter: `vtn: VtnClient` → `vtn: Arc<dyn VtnPort>`.
+- Changed pass to `publish::run_measurement_reports`: `&vtn` → `vtn.as_ref()`.
+
+#### tasks/sim_tick/publish.rs
+- Removed `use crate::vtn::VtnClient`.
+- Added `use crate::controller::VtnPort`.
+- Changed `run_measurement_reports` parameter: `vtn: &VtnClient` → `vtn: &dyn VtnPort`.
+
+#### main.rs
+- Added `use crate::controller::VtnPort`.
+- Created `let vtn_port: Arc<dyn VtnPort> = Arc::new(vtn.clone())` after VtnClient construction.
+- Passed `vtn_port.clone()` to `spawn_sim_tick` and `spawn_planning` instead of `vtn.clone()`.
+- Polling tasks (`spawn_program_poll`, `spawn_event_poll`, `spawn_report_poll`,
+  `spawn_obligation_check`) continue to receive the concrete `VtnClient` — they are not
+  listed as VG-05/06 violations and are out of scope for this phase.
+
+### Why
+
+VG-05/06: `tasks/planning.rs` and `tasks/sim_tick/` bypassed the `VtnPort` trait by holding
+the concrete `VtnClient`. The port rule requires all infra dependencies to cross a named
+trait boundary. With `Arc<dyn VtnPort>`, these tasks are now testable via `MockVtn` without
+any HTTP infrastructure.
+
+### Key learnings
+
+1. **`Arc<dyn VtnPort>` auto-derefs at call sites**: `vtn.upsert_report(...)` on
+   `Arc<dyn VtnPort>` works without explicit dereferencing because Rust auto-derefs `Arc<T>`
+   to `T` when dispatching method calls. Only the pass-by-reference call in publish.rs required
+   an explicit `vtn.as_ref()` (since the callee expects `&dyn VtnPort`, not an owned Arc).
+
+2. **`async_trait` dyn dispatch is transparent to callers**: The `#[async_trait]` macro
+   transforms the trait methods to return `Pin<Box<dyn Future>>`. Callers using
+   `Arc<dyn VtnPort>` get this automatically through dyn dispatch — no `async_trait`
+   import needed at call sites.
+
+3. **Polling tasks are a separate concern**: The plan's aspirational invariant
+   (`grep -r "use crate::vtn::VtnClient" VEN/src/tasks → empty`) is not yet satisfied
+   because `obligation.rs`, `poll_events.rs`, `poll_programs.rs`, and `poll_reports.rs`
+   are not VG-05/06 violations. They should be addressed in a future cleanup phase once
+   all structural violations are closed.
+
+### Invariants after 029
+
+```
+grep "use crate::vtn::VtnClient" tasks/planning.rs tasks/sim_tick/* -> EMPTY (VG-05/06)
+cargo check -> 0 errors
+cargo test -> 398 passed, 0 failed
+BDD full suite -> 44 features passed, 0 failed / 238 scenarios passed, 0 failed
+```
