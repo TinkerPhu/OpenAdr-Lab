@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::collections::HashMap;
 
-use crate::controller::timeline::TimelineSnapshot;
+use crate::entities::timeline::TimelineSnapshot;
 
 use crate::AppCtx;
 
@@ -147,8 +147,9 @@ pub fn build_grid_aligned_array(
     resolution_s: u64,
 ) -> Option<Vec<serde_json::Value>> {
     use crate::controller::timeline::{
-        build_asset_timeline, build_now_point, locf_fill_nones, resample_to_grid, TimeWindow,
+        build_asset_timeline, build_now_point, locf_fill_nones, resample_to_grid,
     };
+    use crate::entities::timeline::TimeWindow;
 
     let raw = build_asset_timeline(
         asset_id,
