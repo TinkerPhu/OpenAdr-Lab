@@ -90,7 +90,7 @@ impl TariffTimeSeries {
         }
     }
 
-    /// Returns true if all three series are empty (no rate data available).
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.import_eur_kwh.samples.is_empty()
             && self.export_eur_kwh.samples.is_empty()

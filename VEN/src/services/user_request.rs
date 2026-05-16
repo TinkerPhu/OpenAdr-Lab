@@ -10,6 +10,8 @@ use crate::ids;
 use crate::state::AppState;
 
 /// Error type for UserRequestService cancel operations.
+// Not yet wired to a route — cancel is performed directly in state.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum CancelError {
     NotFound(Uuid),
@@ -105,6 +107,8 @@ impl UserRequestService {
     }
 
     /// Create a user request for a shiftable load. No sim-asset lookup required.
+    // Not yet wired to a route — shiftable loads are created inline in routes/hems.rs.
+    #[allow(dead_code)]
     pub fn create_shiftable(
         body: CreateUserRequestBody,
         now: DateTime<Utc>,
@@ -157,6 +161,8 @@ impl UserRequestService {
     /// Returns the cancelled request on success, or:
     /// - `CancelError::NotFound` if no request with that id exists.
     /// - `CancelError::AlreadyTerminal` if the request is already Cancelled or Completed.
+    // Not yet wired to a route — DELETE /user-requests/:id calls state.cancel_request() directly.
+    #[allow(dead_code)]
     pub async fn cancel(id: Uuid, state: &AppState) -> Result<UserRequest, CancelError> {
         // Check existence and terminal state before calling the state method.
         let requests = state.active_requests().await;
@@ -187,6 +193,8 @@ impl UserRequestService {
     }
 
     /// Determine which creation path to use based on the request body.
+    // Not yet wired to a route — shiftable detection is done inline in routes/hems.rs.
+    #[allow(dead_code)]
     pub fn is_shiftable(body: &CreateUserRequestBody) -> bool {
         body.power_kw.is_some() && body.duration_min.is_some()
     }

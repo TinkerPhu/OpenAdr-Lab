@@ -16,8 +16,12 @@ pub struct PlannerParams {
     pub plan_step_s: u64,
     pub plan_horizon_h: u64,
     pub replan_interval_s: u64,
+    // Reserved for apply_battery_correction_overlay integration — not yet read in production.
+    #[allow(dead_code)]
     pub deviation_threshold_kw: f64,
+    #[allow(dead_code)]
     pub deviation_trigger_ticks: u32,
+    #[allow(dead_code)]
     pub correction_min_kw: f64,
     pub w_energy: f64,
     pub w_ghg: f64,

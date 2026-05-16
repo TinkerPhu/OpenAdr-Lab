@@ -1,14 +1,13 @@
 /// Test support utilities for VEN controller unit tests.
+#[cfg(test)]
 pub mod test_support;
 
 pub mod planning;
-pub use planning::{evaluate_acceptance_gate, PlanCycleResult, PlanningService};
+pub use planning::PlanningService;
 
 pub mod user_request;
-pub use user_request::{CancelError, UserRequestService};
 
 pub mod obligation;
 pub use obligation::ObligationService;
 
 pub mod hems;
-pub use hems::{EvSessionService, HvacService};

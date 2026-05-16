@@ -59,7 +59,7 @@ use std::collections::HashMap;
 use crate::controller::SimSnapshot;
 use crate::entities::device_session::EvSession;
 use crate::entities::plan::Plan;
-use crate::entities::planner_params::{AbsorberAssetParams, AbsorberParams, PlannerObjective};
+use crate::entities::planner_params::{AbsorberParams, PlannerObjective};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use tracing::{error, warn};
 
@@ -468,6 +468,7 @@ pub fn validate_startup(params: &AbsorberParams, sim: &SimSnapshot) -> anyhow::R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entities::planner_params::AbsorberAssetParams;
 
     // ── Test helpers ──────────────────────────────────────────────────────────
 

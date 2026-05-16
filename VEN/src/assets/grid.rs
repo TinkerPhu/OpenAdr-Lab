@@ -20,7 +20,6 @@ use super::{Asset, AssetCapability, AssetHistoryBuffer, AssetState, GridState, H
 /// is used. Full multi-asset net simulation would require a `SiteSimulator` abstraction.
 #[derive(Debug, Clone)]
 pub struct Grid {
-    id: String,
     /// Current live state: net power + VTN capacity limits.
     pub state: GridState,
     /// Per-tick history ring buffer. Capacity = 3600 entries ≈ 1 h at 1 s tick rate.
@@ -34,7 +33,6 @@ impl Grid {
     /// `export_limit_kw` defaults to `-f64::MAX` (unlimited export).
     pub fn new() -> Self {
         Self {
-            id: "grid".to_string(),
             state: GridState {
                 net_power_kw: 0.0,
                 import_limit_kw: f64::MAX,
@@ -77,7 +75,7 @@ impl Default for Grid {
 
 impl Asset for Grid {
     fn id(&self) -> &str {
-        &self.id
+        "grid"
     }
 
     fn current_state(&self) -> AssetState {
