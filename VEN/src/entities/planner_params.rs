@@ -37,6 +37,10 @@ pub struct PlannerParams {
     pub pen_exp_eur_kwh: f64,
     pub v_ev_extra_eur_kwh: f64,
     pub w_tier_penalty_eur: f64,
+    /// Penalty [€/kWh] on controllable-asset import exceeding free PV surplus.
+    /// Applies to all assets (heater + EV + net battery + shiftables) as a group.
+    /// Set to ~0.20 to make the planner prefer staying within free PV. Default: 0.0 (disabled).
+    pub c_ctrl_imp_malus_eur_kwh: f64,
     pub objective: PlannerObjective,
     pub plan_adoption_threshold_eur: f64,
     pub plan_adoption_decay_s: f64,
@@ -68,6 +72,7 @@ impl Default for PlannerParams {
             pen_exp_eur_kwh: 10_000.0,
             v_ev_extra_eur_kwh: 0.10,
             w_tier_penalty_eur: 0.001,
+            c_ctrl_imp_malus_eur_kwh: 0.0,
             objective: PlannerObjective::MinCost,
             plan_adoption_threshold_eur: 0.0,
             plan_adoption_decay_s: 0.0,

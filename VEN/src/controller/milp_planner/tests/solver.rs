@@ -61,6 +61,7 @@ use super::*;
             w_viol: 1.0,
             c_bat_wear_eur_kwh: 0.0,
             c_bat_ev_coexist_eur_kwh: 0.0,
+            c_ctrl_imp_malus_eur_kwh: 0.0,
             w_services: 1.0,
         }
     }
@@ -397,6 +398,118 @@ use super::*;
                     out.p_bat_dis_kw[t]
                 );
             }
+        }
+    }
+
+    #[test]
+    fn ctrl_import_malus_forces_mid_tier_when_pv_covers_mid() {
+        // PV surplus = 3 kW exactly matches heater mid tier.
+        // With a high malus, importing 3 kW extra for full tier is penalised → planner picks mid.
+        let n = 4;
+        let mut inputs = make_solver_inputs(n, 2.0); // base = 2 kW
+        inputs.p_pv_kw = vec![5.0; n]; // surplus = 5 - 2 = 3 kW
+        inputs.c_imp_eur_kwh = vec![0.0; n]; // free energy — removes tariff signal, malus must do the work
+        inputs.heater_mode = MilpLoadMode::MayRun;
+        inputs.p_heat_mid_kw = 3.0;
+        inputs.p_heat_full_kw = 6.0;
+        inputs.e_heat_init_kwh = 2.0; // warm tank, not in thermal emergency
+        inputs.e_heat_max_kwh = 10.0;
+        inputs.e_heat_target_kwh = 10.0;
+        inputs.q_heat_dem_kw = 0.1;
+
+        let out = solve_phase1(
+            &inputs,
+            &Phase1Weights {
+                c_ctrl_imp_malus_eur_kwh: 0.25,
+                ..make_phase1_weights()
+            },
+            &contexts_from_inputs(&inputs),
+            60.0,
+        )
+        .expect("solver failed");
+
+        for t in 0..n {
+            assert!(
+                out.z_heat_full[t] < 0.5,
+                "slot {t}: planner chose full tier despite PV exactly covering mid — import malus should prevent this"
+            );
+            assert!(
+                out.p_imp_kw[t] < 0.1,
+                "slot {t}: unexpected grid import {:.3} kW with import malus active",
+                out.p_imp_kw[t]
+            );
+        }
+    }
+
+    #[test]
+    fn ctrl_import_malus_disabled_allows_full_tier() {
+        // Mixed tariff: first 2 slots free (c_imp=0, PV surplus=3kW), last 2 slots expensive
+        // (c_imp=0.40, no PV). Tank starts cold and needs heating.
+        // Without malus the planner should run full tier in free slots to pre-store,
+        // avoiding expensive grid heating later.
+        let n = 4;
+        let mut inputs = make_solver_inputs(n, 2.0);
+        inputs.p_pv_kw = vec![5.0, 5.0, 0.0, 0.0]; // surplus=3 kW in first 2 slots only
+        inputs.c_imp_eur_kwh = vec![0.0, 0.0, 0.40, 0.40];
+        inputs.heater_mode = MilpLoadMode::MustRun;
+        inputs.t_heat_dead_step = Some(n - 1);
+        inputs.p_heat_mid_kw = 3.0;
+        inputs.p_heat_full_kw = 6.0;
+        inputs.e_heat_init_kwh = 0.0; // cold tank — must heat
+        inputs.e_heat_max_kwh = 10.0;
+        inputs.e_heat_target_kwh = 6.0; // reachable in free slots at full tier
+        inputs.q_heat_dem_kw = 0.1;
+
+        let out = solve_phase1(
+            &inputs,
+            &make_phase1_weights(), // c_ctrl_imp_malus_eur_kwh = 0.0
+            &contexts_from_inputs(&inputs),
+            60.0,
+        )
+        .expect("solver failed");
+
+        // Without malus, full tier in the free slots is cheaper than paying 0.40 later.
+        let used_full = out.z_heat_full.iter().any(|&z| z > 0.5);
+        assert!(
+            used_full,
+            "without malus the planner should pre-store at full tier during free slots; z_full={:?}",
+            out.z_heat_full
+        );
+    }
+
+    #[test]
+    fn ctrl_import_malus_zero_when_pv_covers_full_tier() {
+        // PV surplus > full tier — no import needed regardless. Malus slack = 0, both tiers are free.
+        let n = 4;
+        let mut inputs = make_solver_inputs(n, 2.0);
+        inputs.p_pv_kw = vec![10.0; n]; // surplus = 10 - 2 = 8 kW > full tier (6 kW)
+        inputs.c_imp_eur_kwh = vec![0.0; n];
+        inputs.heater_mode = MilpLoadMode::MayRun;
+        inputs.p_heat_mid_kw = 3.0;
+        inputs.p_heat_full_kw = 6.0;
+        inputs.e_heat_init_kwh = 0.0;
+        inputs.e_heat_max_kwh = 10.0;
+        inputs.e_heat_target_kwh = 10.0;
+        inputs.q_heat_dem_kw = 0.1;
+
+        let out = solve_phase1(
+            &inputs,
+            &Phase1Weights {
+                c_ctrl_imp_malus_eur_kwh: 0.25,
+                ..make_phase1_weights()
+            },
+            &contexts_from_inputs(&inputs),
+            60.0,
+        )
+        .expect("solver failed");
+
+        // No import should occur (PV covers all), and malus must not block full tier use.
+        for t in 0..n {
+            assert!(
+                out.p_imp_kw[t] < 0.1,
+                "slot {t}: unexpected import {:.3} kW when PV covers full tier",
+                out.p_imp_kw[t]
+            );
         }
     }
 

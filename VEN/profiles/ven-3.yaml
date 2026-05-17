@@ -36,6 +36,7 @@ planner:
   plan_adoption_decay_s: 1200
   solver_timeout_s: 60
   planning_initial_delay_s: 5
+  c_ctrl_imp_malus_eur_kwh: 0.22
 
 absorber:
   enabled: true
