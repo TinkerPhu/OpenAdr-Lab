@@ -82,6 +82,8 @@ fn build_domain_params(
         plan_adoption_threshold_eur: profile.planner.plan_adoption_threshold_eur,
         plan_adoption_decay_s: profile.planner.plan_adoption_decay_s,
         phase2_epsilon_eur: profile.planner.phase2_epsilon_eur,
+        solver_timeout_s: profile.planner.solver_timeout_s,
+        planning_initial_delay_s: profile.planner.planning_initial_delay_s,
     };
     let absorber_params = AbsorberParams {
         enabled: profile.absorber.enabled,
@@ -148,6 +150,12 @@ async fn main() -> anyhow::Result<()> {
         warn!("PROFILE_PATH not set, using default profile");
         Profile::default()
     };
+    if let Err(violations) = profile.validate() {
+        for v in &violations {
+            eprintln!("profile error: {v}");
+        }
+        std::process::exit(1);
+    }
     let profile = Arc::new(profile);
     let (sim_params, planner_params, absorber_params, asset_params) = build_domain_params(&profile);
     let grid_max_import_kw = profile.grid.max_import_kw;
@@ -184,55 +192,66 @@ async fn main() -> anyhow::Result<()> {
         controller::absorber::validate_startup(&absorber_params, &sim_snap)?;
     }
 
-    // Spawn background loops
-    tasks::spawn_program_poll(state.clone(), vtn_port.clone(), cfg.poll_programs_secs);
-    tasks::spawn_event_poll(
-        state.clone(),
-        vtn_port.clone(),
-        cfg.poll_events_secs,
-        trigger_tx.clone(),
-    );
-    tasks::spawn_report_poll(state.clone(), vtn_port.clone(), cfg.poll_reports_secs);
+    // Spawn background loops — each wrapped in supervised_spawn for automatic restart.
+    const TASK_COOLDOWN_S: u64 = 5;
+
+    {
+        let (s, v, secs) = (state.clone(), vtn_port.clone(), cfg.poll_programs_secs);
+        tasks::supervised_spawn("poll_programs", TASK_COOLDOWN_S, move || {
+            tasks::spawn_program_poll(s.clone(), v.clone(), secs)
+        });
+    }
+    {
+        let (s, v, secs, tx) = (state.clone(), vtn_port.clone(), cfg.poll_events_secs, trigger_tx.clone());
+        tasks::supervised_spawn("poll_events", TASK_COOLDOWN_S, move || {
+            tasks::spawn_event_poll(s.clone(), v.clone(), secs, tx.clone())
+        });
+    }
+    {
+        let (s, v, secs) = (state.clone(), vtn_port.clone(), cfg.poll_reports_secs);
+        tasks::supervised_spawn("poll_reports", TASK_COOLDOWN_S, move || {
+            tasks::spawn_report_poll(s.clone(), v.clone(), secs)
+        });
+    }
 
     // Plan F: planner_event_tx must exist before spawn_sim_tick (correction SSE)
     let (planner_event_tx_inner, _) = tokio::sync::broadcast::channel::<PlannerEvent>(128);
     let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
-    tasks::spawn_sim_tick(
-        state.clone(),
-        sim_state.clone(),
-        sim_params,
-        absorber_params,
-        cfg.ven_name.clone(),
-        vtn_port.clone(),
-        trigger_tx.clone(),
-        data_dir.clone(),
-        planner_event_tx.clone(),
-        deviation_pending.clone(),
-    );
-    tasks::spawn_obligation_check(
-        state.clone(),
-        sim_state.clone(),
-        vtn_port.clone(),
-        cfg.ven_name.clone(),
-    );
+    {
+        let (s, sim, sp, ap, vn, v, tx, dd, etx, dp) = (
+            state.clone(), sim_state.clone(), sim_params.clone(), absorber_params.clone(),
+            cfg.ven_name.clone(), vtn_port.clone(), trigger_tx.clone(),
+            data_dir.clone(), planner_event_tx.clone(), deviation_pending.clone(),
+        );
+        tasks::supervised_spawn("sim_tick", TASK_COOLDOWN_S, move || {
+            tasks::spawn_sim_tick(s.clone(), sim.clone(), sp.clone(), ap.clone(),
+                vn.clone(), v.clone(), tx.clone(), dd.clone(), etx.clone(), dp.clone())
+        });
+    }
+    {
+        let (s, sim, v, vn) = (state.clone(), sim_state.clone(), vtn_port.clone(), cfg.ven_name.clone());
+        tasks::supervised_spawn("obligation_check", TASK_COOLDOWN_S, move || {
+            tasks::spawn_obligation_check(s.clone(), sim.clone(), v.clone(), vn.clone())
+        });
+    }
     let active_objective = Arc::new(RwLock::new(planner_params.objective));
-    tasks::spawn_planning(
-        state.clone(),
-        planner_params.clone(),
-        grid_max_import_kw,
-        grid_max_export_kw,
-        asset_params.clone(),
-        vtn_port.clone(),
-        cfg.ven_name.clone(),
-        trigger_rx,
-        sim_state.clone(),
-        active_objective.clone(),
-        planner_event_tx.clone(),
-        deviation_pending.clone(),
-    );
+    {
+        let (s, pp, gmax_i, gmax_e, ap, v, vn, rx, sim, ao, etx, dp) = (
+            state.clone(), planner_params.clone(), grid_max_import_kw, grid_max_export_kw,
+            asset_params.clone(), vtn_port.clone(), cfg.ven_name.clone(), trigger_rx,
+            sim_state.clone(), active_objective.clone(), planner_event_tx.clone(), deviation_pending.clone(),
+        );
+        tasks::supervised_spawn("planning", TASK_COOLDOWN_S, move || {
+            tasks::spawn_planning(s.clone(), pp.clone(), gmax_i, gmax_e, ap.clone(),
+                v.clone(), vn.clone(), rx.clone(), sim.clone(), ao.clone(), etx.clone(), dp.clone())
+        });
+    }
     if let Some(path) = cfg.persist_path.clone() {
-        tasks::spawn_state_persist(state.clone(), path);
+        let s = state.clone();
+        tasks::supervised_spawn("state_persist", TASK_COOLDOWN_S, move || {
+            tasks::spawn_state_persist(s.clone(), path.clone())
+        });
     }
 
     // Build HTTP app and serve

@@ -62,6 +62,16 @@ pub enum AssetProfile {
 }
 
 impl AssetProfile {
+    pub fn id(&self) -> &str {
+        match self {
+            AssetProfile::Ev(c) => &c.id,
+            AssetProfile::Heater(c) => &c.id,
+            AssetProfile::Pv(c) => &c.id,
+            AssetProfile::Battery(c) => &c.id,
+            AssetProfile::BaseLoad(c) => &c.id,
+        }
+    }
+
     /// Convert this config variant into the domain-level `AssetParams`.
     /// Called at startup only — not on the hot path.
     pub fn to_params(&self) -> AssetParams {
@@ -522,6 +532,15 @@ pub struct PlannerConfig {
     /// Set to 0.0 to disable Phase 2 (single-phase solve). Default: 0.02.
     #[serde(default = "default_phase2_epsilon")]
     pub phase2_epsilon_eur: f64,
+
+    /// HiGHS solver time limit per phase in seconds. Default: 60.
+    #[serde(default = "default_solver_timeout_s")]
+    pub solver_timeout_s: u64,
+
+    /// Seconds the planning loop sleeps after startup before the first plan.
+    /// Allows event polling to populate tariff rates first. Default: 5.
+    #[serde(default = "default_planning_initial_delay_s")]
+    pub planning_initial_delay_s: u64,
 }
 
 impl Default for PlannerConfig {
@@ -551,12 +570,20 @@ impl Default for PlannerConfig {
             plan_adoption_threshold_eur: 0.0,
             plan_adoption_decay_s: 0.0,
             phase2_epsilon_eur: default_phase2_epsilon(),
+            solver_timeout_s: default_solver_timeout_s(),
+            planning_initial_delay_s: default_planning_initial_delay_s(),
         }
     }
 }
 
 fn default_phase2_epsilon() -> f64 {
     0.02
+}
+fn default_solver_timeout_s() -> u64 {
+    60
+}
+fn default_planning_initial_delay_s() -> u64 {
+    5
 }
 
 fn default_plan_step() -> u64 {
@@ -655,6 +682,89 @@ impl Profile {
             );
         }
         Ok(profile)
+    }
+
+    /// Validate profile invariants. Returns all violations at once so the user
+    /// can fix all problems in a single startup attempt.
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors: Vec<String> = Vec::new();
+
+        // At least one asset declared.
+        if self.assets.is_empty() {
+            errors.push("profile must declare at least one asset".into());
+        }
+
+        // Absorber asset IDs must reference declared assets.
+        let asset_ids: std::collections::HashSet<&str> =
+            self.assets.iter().map(|a| a.id()).collect();
+        for abs in &self.absorber.assets {
+            if !asset_ids.contains(abs.id.as_str()) {
+                errors.push(format!(
+                    "absorber asset \"{}\" not found in assets",
+                    abs.id
+                ));
+            }
+        }
+
+        // Absorber numeric bounds.
+        if self.absorber.dead_band_kw < 0.0 {
+            errors.push(format!(
+                "absorber.dead_band_kw must be ≥ 0.0, got {}",
+                self.absorber.dead_band_kw
+            ));
+        }
+
+        // Planner numeric bounds.
+        if self.planner.replan_interval_s == 0 {
+            errors.push("planner.replan_interval_s must be > 0".into());
+        }
+        if self.planner.phase2_epsilon_eur < 0.0 {
+            errors.push(format!(
+                "planner.phase2_epsilon_eur must be ≥ 0.0, got {}",
+                self.planner.phase2_epsilon_eur
+            ));
+        }
+
+        // Per-asset numeric bounds.
+        for asset in &self.assets {
+            match asset {
+                AssetProfile::Ev(c) => {
+                    if !(0.0..=1.0).contains(&c.soc_target) {
+                        errors.push(format!(
+                            "ev.soc_target must be in [0.0, 1.0], got {}",
+                            c.soc_target
+                        ));
+                    }
+                    if c.max_discharge_kw < 0.0 {
+                        errors.push(format!(
+                            "ev.max_discharge_kw must be ≥ 0.0, got {}",
+                            c.max_discharge_kw
+                        ));
+                    }
+                }
+                AssetProfile::Battery(c) => {
+                    if !(0.0..1.0).contains(&c.min_soc) {
+                        errors.push(format!(
+                            "battery.min_soc must be in [0.0, 1.0), got {}",
+                            c.min_soc
+                        ));
+                    }
+                    if c.round_trip_efficiency <= 0.0 || c.round_trip_efficiency > 1.0 {
+                        errors.push(format!(
+                            "battery.round_trip_efficiency must be in (0.0, 1.0], got {}",
+                            c.round_trip_efficiency
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 
     pub fn default() -> Self {
@@ -849,5 +959,88 @@ absorber:
             profile.absorber.dead_band_clearing_ticks, 1,
             "dead_band_clearing_ticks should default to 1"
         );
+    }
+
+    fn make_valid_profile() -> Profile {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+  - type: ev
+    id: ev
+    soc_target: 0.80
+    max_discharge_kw: 0.0
+"#;
+        serde_yaml::from_str(yaml).unwrap()
+    }
+
+    #[test]
+    fn validate_passes_for_valid_profile() {
+        let p = make_valid_profile();
+        assert!(p.validate().is_ok(), "valid profile must pass validation");
+    }
+
+    #[test]
+    fn validate_fails_for_empty_assets() {
+        let mut p = make_valid_profile();
+        p.assets.clear();
+        let errs = p.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("at least one asset")));
+    }
+
+    #[test]
+    fn validate_fails_for_absorber_unknown_asset() {
+        let mut p = make_valid_profile();
+        p.absorber.assets.push(AbsorberAssetConfig {
+            id: "nonexistent".into(),
+            priority: 0,
+            min_state_linger_s: 0,
+            ev_departure_guard_s: None,
+        });
+        let errs = p.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("nonexistent")));
+    }
+
+    #[test]
+    fn validate_fails_for_soc_target_out_of_range() {
+        let yaml = r#"
+assets:
+  - type: ev
+    id: ev
+    soc_target: 1.5
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("soc_target")));
+    }
+
+    #[test]
+    fn validate_fails_for_round_trip_efficiency_zero() {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    round_trip_efficiency: 0.0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("round_trip_efficiency")));
+    }
+
+    #[test]
+    fn validate_reports_multiple_violations_at_once() {
+        let yaml = r#"
+assets:
+  - type: ev
+    id: ev
+    soc_target: 1.5
+    max_discharge_kw: -1.0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p.validate().unwrap_err();
+        assert!(errs.len() >= 2, "expected ≥ 2 errors, got {}: {:?}", errs.len(), errs);
     }
 }

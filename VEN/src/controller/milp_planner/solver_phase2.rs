@@ -126,6 +126,7 @@ pub(crate) fn solve_phase2(
     epsilon: f64,
     phase1_sol: &SolveOutput,
     asset_contexts: &[Box<dyn AssetMilpContext>],
+    timeout_s: f64,
 ) -> Result<(SolveOutput, f64), Box<dyn std::error::Error>> {
     let n = inputs.n;
     let dt_h = inputs.dt_h;
@@ -312,7 +313,7 @@ pub(crate) fn solve_phase2(
         asset_contexts,
         n,
     );
-    model = model.with_time_limit(60.0);
+    model = model.with_time_limit(timeout_s);
     model = model.with_mip_gap(0.02)?;
     let solution = model.solve()?;
 
@@ -330,14 +331,15 @@ pub(crate) fn solve_milp_two_phase(
     p2w: &Phase2Weights,
     epsilon: f64,
     asset_contexts: &[Box<dyn AssetMilpContext>],
+    timeout_s: f64,
 ) -> Result<(SolveOutput, f64, f64), Box<dyn std::error::Error>> {
-    let phase1_sol = solve_phase1(inputs, p1w, asset_contexts)?;
+    let phase1_sol = solve_phase1(inputs, p1w, asset_contexts, timeout_s)?;
     let c_star = phase1_sol.objective_eur;
     if epsilon == 0.0 {
         return Ok((phase1_sol, c_star, 0.0));
     }
     tracing::debug!(c_star, epsilon, "Phase 2 starting");
-    match solve_phase2(inputs, p1w, p2w, c_star, epsilon, &phase1_sol, asset_contexts) {
+    match solve_phase2(inputs, p1w, p2w, c_star, epsilon, &phase1_sol, asset_contexts, timeout_s) {
         Ok((sol, friction_eur)) => Ok((sol, c_star, friction_eur)),
         Err(e) => {
             tracing::warn!(
