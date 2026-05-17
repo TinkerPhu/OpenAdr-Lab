@@ -27,7 +27,10 @@ MAIN_EXIT=$?
 
 echo ""
 echo "=== Running @isolated scenarios (fresh VEN state) ==="
-python -m behave --tags=@isolated "$@"
+# Only load feature files that actually contain @isolated scenarios so that
+# the other ~240 scenarios are never loaded and never counted as skipped.
+ISOLATED_FILES=$(grep -rl "@isolated" features/ | tr '\n' ' ')
+python -m behave $ISOLATED_FILES --tags=@isolated "$@"
 ISOLATED_EXIT=$?
 
 exit $((MAIN_EXIT | ISOLATED_EXIT))
