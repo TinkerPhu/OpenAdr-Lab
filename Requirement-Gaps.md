@@ -259,8 +259,7 @@ Ranked by impact on a new reader's ability to understand, contribute to, or oper
 
 1. **Add a §0 Glossary** to DOCUMENTATION.md sourced from REQUIREMENTS.md §2 — domain terms and sign convention (5 min, high value).
 2. **Add a §2.11 Time-Series Architecture** section explaining `TimeSeries<T>`, `Interpolation`, tariff alignment, and capacity slot flattening — sourced from VEN_ARCHITECTURE.md §5.
-3. **Add a §4.8 Known Technical Debt** section listing the AB-0x findings with current status (resolved / open).
-4. **Clarify packet role** in §2 or §4 — one paragraph stating packets are intent/reporting metadata, not MILP scheduling variables.
-5. **Add a reference table to FR codes** in §2 feature sections — just `(FR-SIM-03)` inline anchors are enough to make the document traceable.
-6. **Expand §5 config reference** to include `min_run_slots` / `min_off_slots` for the heater profile once those parameters are implemented.
-7. **Link to reference docs** at the end of each major section rather than duplicating content — DOCUMENTATION.md is the operational guide; the architecture docs remain the design source of truth.
+3. **Clarify packet role** in §2 or §4 — one paragraph stating packets are intent/reporting metadata, not MILP scheduling variables.
+4. **Add a reference table to FR codes** in §2 feature sections — just `(FR-SIM-03)` inline anchors are enough to make the document traceable.
+5. **Expand §5 config reference** to include `min_run_slots` / `min_off_slots` for the heater profile once those parameters are implemented.
+6. **Link to reference docs** at the end of each major section rather than duplicating content — DOCUMENTATION.md is the operational guide; the architecture docs remain the design source of truth.
