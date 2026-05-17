@@ -503,6 +503,14 @@ pub struct PlannerConfig {
     /// Default: 0.001 EUR/slot.
     #[serde(default = "default_w_tier_penalty")]
     pub w_tier_penalty_eur: f64,
+    /// Phase 1 penalty [€/kWh] on controllable-asset import exceeding free PV surplus.
+    /// Covers all controllable assets as a group (heater + EV + net battery + shiftables).
+    /// When the total controllable load exceeds `max(0, p_pv − p_base)` the excess kWh
+    /// is penalised at this rate, discouraging pre-storage arbitrage beyond what PV provides.
+    /// Set to ~0.20–0.25 to prefer mid-tier when PV exactly covers it.
+    /// Default: 0.0 (disabled — existing behaviour preserved).
+    #[serde(default = "default_c_ctrl_imp_malus")]
+    pub c_ctrl_imp_malus_eur_kwh: f64,
     /// Optimization objective preset. Selects weight ratios for the MILP solver.
     /// Set to `custom` to use the individual weight fields above directly.
     #[serde(default)]
@@ -566,6 +574,7 @@ impl Default for PlannerConfig {
             pen_exp_eur_kwh: default_pen_exp(),
             v_ev_extra_eur_kwh: default_v_ev_extra(),
             w_tier_penalty_eur: default_w_tier_penalty(),
+            c_ctrl_imp_malus_eur_kwh: default_c_ctrl_imp_malus(),
             objective: PlannerObjective::MinCost,
             plan_adoption_threshold_eur: 0.0,
             plan_adoption_decay_s: 0.0,
@@ -636,6 +645,9 @@ fn default_v_ev_extra() -> f64 {
 }
 fn default_w_tier_penalty() -> f64 {
     0.001
+}
+fn default_c_ctrl_imp_malus() -> f64 {
+    0.0
 }
 fn default_pen_imp() -> f64 {
     10_000.0

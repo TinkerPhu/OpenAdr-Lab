@@ -78,6 +78,7 @@ fn build_domain_params(
         pen_exp_eur_kwh: profile.planner.pen_exp_eur_kwh,
         v_ev_extra_eur_kwh: profile.planner.v_ev_extra_eur_kwh,
         w_tier_penalty_eur: profile.planner.w_tier_penalty_eur,
+        c_ctrl_imp_malus_eur_kwh: profile.planner.c_ctrl_imp_malus_eur_kwh,
         objective: profile.planner.objective,
         plan_adoption_threshold_eur: profile.planner.plan_adoption_threshold_eur,
         plan_adoption_decay_s: profile.planner.plan_adoption_decay_s,

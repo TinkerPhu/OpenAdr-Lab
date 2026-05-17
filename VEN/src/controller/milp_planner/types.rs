@@ -27,6 +27,9 @@ pub(crate) struct Phase1Weights {
     /// Penalty per kWh of battery discharge co-occurring with EV charging when
     /// PV surplus ≥ ev_min_kw [€/kWh]. 0.0 = disabled.
     pub(crate) c_bat_ev_coexist_eur_kwh: f64,
+    /// Penalty [€/kWh] on controllable-asset import exceeding free PV surplus.
+    /// Covers all assets as a group. 0.0 = disabled.
+    pub(crate) c_ctrl_imp_malus_eur_kwh: f64,
     /// Scales service reward terms; always 1.0 until grid-services are modelled
     pub(crate) w_services: f64,
 }
@@ -186,6 +189,7 @@ pub(crate) fn build_phase1_weights(planner: &PlannerParams, objective: PlannerOb
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.03,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
+            c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
             w_services: 1.0,
         },
         PlannerObjective::MinGhg => Phase1Weights {
@@ -196,6 +200,7 @@ pub(crate) fn build_phase1_weights(planner: &PlannerParams, objective: PlannerOb
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.0,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
+            c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
             w_services: 1.0,
         },
         PlannerObjective::MinGrid => Phase1Weights {
@@ -206,6 +211,7 @@ pub(crate) fn build_phase1_weights(planner: &PlannerParams, objective: PlannerOb
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.0,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
+            c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
             w_services: 1.0,
         },
         PlannerObjective::MinImport => Phase1Weights {
@@ -216,6 +222,7 @@ pub(crate) fn build_phase1_weights(planner: &PlannerParams, objective: PlannerOb
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.0,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
+            c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
             w_services: 1.0,
         },
         PlannerObjective::MaxRevenue => Phase1Weights {
@@ -226,6 +233,7 @@ pub(crate) fn build_phase1_weights(planner: &PlannerParams, objective: PlannerOb
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: 0.03,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
+            c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
             w_services: 1.0,
         },
         PlannerObjective::Custom => Phase1Weights {
@@ -236,6 +244,7 @@ pub(crate) fn build_phase1_weights(planner: &PlannerParams, objective: PlannerOb
             w_viol: p.w_viol,
             c_bat_wear_eur_kwh: p.c_bat_wear_eur_kwh,
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
+            c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
             w_services: 1.0,
         },
     }

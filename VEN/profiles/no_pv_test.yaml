@@ -38,6 +38,7 @@ planner:
   plan_horizon_h: 24
   replan_interval_s: 20
   deviation_trigger_ticks: 10
+  c_ctrl_imp_malus_eur_kwh: 0.22
 
 packets:
   - asset: ev

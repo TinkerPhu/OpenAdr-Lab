@@ -36,6 +36,7 @@ planner:
   plan_horizon_h: 24
   replan_interval_s: 300
   deviation_trigger_ticks: 20
+  c_ctrl_imp_malus_eur_kwh: 0.22
 
 absorber:
   enabled: true
