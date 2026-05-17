@@ -208,7 +208,7 @@ pub(crate) fn solve_phase2(
         }
     }
 
-    let interactions = build_interactions(p1w.c_bat_ev_coexist_eur_kwh);
+    let interactions = build_interactions(p1w.c_bat_ev_coexist_eur_kwh, p1w.c_ctrl_imp_malus_eur_kwh);
     let mut active_interactions: Vec<
         &Box<dyn crate::controller::milp_interactions::AssetInteraction>,
     > = Vec::new();

@@ -86,7 +86,7 @@ pub(crate) fn solve_phase1(
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
     }
 
-    let interactions = build_interactions(p1w.c_bat_ev_coexist_eur_kwh);
+    let interactions = build_interactions(p1w.c_bat_ev_coexist_eur_kwh, p1w.c_ctrl_imp_malus_eur_kwh);
     let mut active_interactions: Vec<
         &Box<dyn crate::controller::milp_interactions::AssetInteraction>,
     > = Vec::new();

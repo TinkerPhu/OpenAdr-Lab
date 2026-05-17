@@ -110,52 +110,6 @@ A **Priority Gaps** section at the end ranks the most important missing topics.
 
 ---
 
-## `docs/architecture/archive/ven_backend_review.md`
-
-Review dated 2026-05-03. The following is the current verified status of each finding against live code.
-
-### Architecture findings
-
-| Finding | Status | Evidence |
-|---------|--------|----------|
-| **AB-01** `loops.rs` God Module (63 KB, 1077 lines) | ✅ Resolved | Split into `tasks/` with separate files: `planning.rs`, `poll_events.rs`, `poll_programs.rs`, `poll_reports.rs`, `obligation.rs`, `state_persist.rs`, `sim_tick/` |
-| **AB-02** `milp_planner.rs` monolith (142 KB) | ✅ Resolved | Split into `controller/milp_planner/`: `solver_phase1.rs`, `solver_phase2.rs`, `inputs.rs`, `results.rs`, `types.rs`, `asset_port.rs`, `envelopes.rs` |
-| **AB-03** Physics tick embeds absorber/escalation logic | ⚠️ Partial | `sim_tick/tick.rs` is 197 lines (within the 200-line task limit). Phases 3 and 6 (absorber, escalation) still inline rather than explicit controller calls, but within architectural bounds |
-| **AB-04** `AppState` catch-all (90+ methods) | ⚠️ Partial | `state.rs` is 745 lines; still large. A `services/` layer now exists but `state.rs` retains many accessors |
-| **AB-05** Routes reach into state directly | ✅ Resolved | `routes/hems.rs` imports `services::hems::EvSessionService` and `services::user_request::UserRequestService`; routes call services |
-| **AB-06** `vtn.rs` returns untyped `serde_json::Value` | ✅ Resolved | Public methods (`fetch_events`, `fetch_programs`) return typed structs. Internal HTTP transport uses `Value`, satisfying the CLAUDE.md invariant ("must be empty or internal only") |
-
-### Quality findings
-
-| Finding | Status | Evidence |
-|---------|--------|----------|
-| **5.1** No panic recovery in background loops | 🔴 Open | No supervisor/restart wrapper in `main.rs`; a panic kills the task silently |
-| **5.2** Profile validation absent on startup | 🔴 Open | No `Profile::validate()` found; invalid profiles cause silent wrong behaviour or runtime panics |
-| **5.3** Non-atomic state persistence | ✅ Resolved | `simulator/persist.rs`: `write(&tmp_path)` → `rename(&tmp_path, &path)` |
-| **5.4** `thiserror` declared but unused; `anyhow` everywhere | 🔴 Open | `thiserror = "1"` in `Cargo.toml`; no `DomainError` enum found anywhere |
-| **5.5** No unit tests on control path | ✅ Substantially resolved | `dispatcher.rs` has 27 tests; `absorber.rs` has extensive departure-guard and dead-band tests; `services/planning.rs` has acceptance-gate tests |
-| **5.6** EV departure guard not implemented | ✅ Resolved | Fully implemented in `absorber.rs` with 4 named test cases |
-
-### Magic numbers — remaining open items
-
-| Location | Value | Config path? |
-|----------|-------|-------------|
-| `tasks/planning.rs:32` | `5 s` initial planning delay | No — hardcoded `from_secs(5)` |
-| `tasks/obligation.rs:22` | `5 s` obligation check interval | No — hardcoded `from_secs(5)` |
-| `milp_planner/solver_phase1.rs:149` | `60 s` HiGHS solver timeout | No — hardcoded `with_time_limit(60.0)` |
-| `vtn.rs` | `60 s` OAuth token expiry margin | No — hardcoded `elapsed + 60` |
-
-`persist_every_s` (15 s) is now configurable via profile YAML — resolved.
-
-### Code duplication — open items
-
-- **CD-01** Per-asset config accessor pattern (`ev_config`, `heater_config`, etc.) — 4 identical `find_map` methods in `profile.rs`, still open
-- **CD-02** 401-retry inline in 3 HTTP methods in `vtn.rs` — still open
-- **CD-03** Energy counter accumulation per asset — not re-verified; marked unknown
-- **CD-04** Setpoint clamping duplicated in dispatcher and absorber — not re-verified; marked unknown
-
----
-
 ## `docs/architecture/concept_vtn_ven_demand_response_simulation.md`
 
 **GAPS:**
@@ -177,8 +131,7 @@ Review dated 2026-05-03. The following is the current verified status of each fi
 - Device simulator state model (quantities to persist, dynamic limits, properties) — DOCUMENTATION.md describes assets but not the formal state model
 - Dynamic limits vs. static limits distinction not explained
 
-**CONFLICTS:**
-- Reactor design proposed here was superseded by the decision to remove the reactor (spec kit 001). DOCUMENTATION.md correctly reflects current state; this doc is partially obsolete.
+**NOTE:** The reactor design section of this doc is obsolete — the reactor was removed (spec kit 001). Only the device simulator state model sections remain relevant.
 
 **COVERED:** Asset physics simulation.
 
@@ -248,10 +201,9 @@ Ranked by impact on a new reader's ability to understand, contribute to, or oper
 | # | Gap | Source doc | Why it matters |
 |---|-----|-----------|----------------|
 | 10 | **Deployment topology detail** | VTN_ARCHITECTURE.md §6 | Docker bridge names, internal DNS, port mapping table needed for network troubleshooting. |
-| 11 | **Hardcoded magic numbers** | ven_backend_review.md §3.3 | Values like 5 s, 15 s, 60 s are configurable or could be; their locations are not centralised. |
-| 12 | **Test counts and run-time** | testing_landscape.md | DOCUMENTATION.md §7 describes what is tested but not how much or how long. |
-| 13 | **Thermal model layer separation** | heater_tank_milp_planning_model.md | Layer A (forecast ODE) vs Layer B (MILP planning variables) distinction aids contributors adding new thermal assets (AC, floor heating). |
-| 14 | **VTN internal architecture** | VTN_ARCHITECTURE.md | Entirely absent; matters when extending the VTN side or debugging event/report flows. |
+| 11 | **Test counts and run-time** | testing_landscape.md | DOCUMENTATION.md §7 describes what is tested but not how much or how long. |
+| 12 | **Thermal model layer separation** | heater_tank_milp_planning_model.md | Layer A (forecast ODE) vs Layer B (MILP planning variables) distinction aids contributors adding new thermal assets (AC, floor heating). |
+| 13 | **VTN internal architecture** | VTN_ARCHITECTURE.md | Entirely absent; matters when extending the VTN side or debugging event/report flows. |
 
 ---
 

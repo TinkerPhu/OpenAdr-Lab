@@ -118,6 +118,8 @@ pub enum InteractionVars {
     /// McCormick auxiliary variables for battery-EV coexistence penalty.
     /// `x_coexist[t]` is `None` for slots without PV surplus ≥ ev_min_kw.
     BatEvCoexist { x_coexist: Vec<Option<Variable>> },
+    /// One continuous slack per slot: excess controllable load beyond free PV surplus.
+    CtrlImportMalus { p_ctrl_imp: Vec<Variable> },
 }
 
 // ── Battery-EV coexistence interaction ───────────────────────────────────────
@@ -163,7 +165,7 @@ impl AssetInteraction for BatEvCoexistInteraction {
         iv: &InteractionVars,
         global: &GlobalMilpInputs,
     ) -> Vec<Constraint> {
-        let InteractionVars::BatEvCoexist { x_coexist } = iv;
+        let InteractionVars::BatEvCoexist { x_coexist } = iv else { return vec![]; };
         let bat = pool.bat.as_ref().unwrap();
         let ev = pool.ev.as_ref().unwrap();
         let dis_max = bat.dis_max_kw;
@@ -182,7 +184,7 @@ impl AssetInteraction for BatEvCoexistInteraction {
     }
 
     fn objective(&self, iv: &InteractionVars, dt_h: f64) -> Expression {
-        let InteractionVars::BatEvCoexist { x_coexist } = iv;
+        let InteractionVars::BatEvCoexist { x_coexist } = iv else { return Expression::from(0.0); };
         let mut obj = Expression::from(0.0);
         for x_opt in x_coexist {
             if let Some(x) = x_opt {
@@ -193,15 +195,107 @@ impl AssetInteraction for BatEvCoexistInteraction {
     }
 }
 
+// ── Controllable-asset import malus interaction ──────────────────────────────
+
+/// Penalises any controllable-asset import that exceeds the free PV surplus.
+///
+/// For each slot `t`, computes `p_ctrl[t] = heat[t] + ev[t] + bat_ch[t] − bat_dis[t] + shift[t]`
+/// and enforces a continuous slack `p_ctrl_imp[t] ≥ p_ctrl[t] − surplus_pv[t]` (≥ 0).
+/// `surplus_pv[t] = max(0, p_pv[t] − p_base[t])` is a per-slot constant.
+/// The slack is penalised at `c_eur_kwh` in the Phase 1 objective, discouraging assets
+/// from importing beyond what PV provides for free — without disabling thermal pre-storage
+/// when the future-heating saving genuinely exceeds the malus.
+pub struct CtrlImportMalusInteraction {
+    pub c_eur_kwh: f64,
+}
+
+/// Build the total controllable power expression at slot `t` from all asset variables.
+fn controllable_power_expr(pool: &MilpVarPool, t: usize) -> Expression {
+    let mut e = Expression::from(0.0);
+    if let Some(v) = &pool.heater {
+        e += v.p_mid_kw * v.z_heat_mid[t] + v.p_full_kw * v.z_heat_full[t];
+    }
+    if let Some(v) = &pool.ev {
+        e = e + v.p_ev[t];
+    }
+    if let Some(v) = &pool.bat {
+        e = e + v.p_ch[t] - v.p_dis[t];
+    }
+    for sv in &pool.shiftable {
+        for (ji, &j) in sv.valid_start_slots.iter().enumerate() {
+            if t >= j && t < j + sv.duration_slots {
+                e += sv.power_kw * sv.y_shift[ji];
+            }
+        }
+    }
+    e
+}
+
+impl AssetInteraction for CtrlImportMalusInteraction {
+    fn applicable(&self, _pool: &MilpVarPool) -> bool {
+        true
+    }
+
+    fn declare_vars(
+        &self,
+        _pool: &MilpVarPool,
+        global: &GlobalMilpInputs,
+        vars: &mut ProblemVariables,
+    ) -> InteractionVars {
+        let p_ctrl_imp = (0..global.n)
+            .map(|_| vars.add(variable().min(0.0)))
+            .collect();
+        InteractionVars::CtrlImportMalus { p_ctrl_imp }
+    }
+
+    fn constraints(
+        &self,
+        pool: &MilpVarPool,
+        iv: &InteractionVars,
+        global: &GlobalMilpInputs,
+    ) -> Vec<Constraint> {
+        let InteractionVars::CtrlImportMalus { p_ctrl_imp } = iv else {
+            return vec![];
+        };
+        let mut cs = Vec::new();
+        for t in 0..global.n {
+            let surplus = (global.p_pv_kw[t] - global.p_base_kw[t]).max(0.0);
+            let p_ctrl_t = controllable_power_expr(pool, t);
+            // p_ctrl_imp[t] ≥ p_ctrl[t] − surplus_pv[t], combined with min(0.0) bound
+            cs.push(constraint!(p_ctrl_imp[t] >= p_ctrl_t - surplus));
+        }
+        cs
+    }
+
+    fn objective(&self, iv: &InteractionVars, dt_h: f64) -> Expression {
+        let InteractionVars::CtrlImportMalus { p_ctrl_imp } = iv else {
+            return Expression::from(0.0);
+        };
+        let mut obj = Expression::from(0.0);
+        for &x in p_ctrl_imp {
+            obj += (self.c_eur_kwh * dt_h) * x;
+        }
+        obj
+    }
+}
+
 // ── Factory ──────────────────────────────────────────────────────────────────
 
 /// Build the list of active cross-asset interactions for one planning cycle.
 /// An interaction is only included when its penalty coefficient is non-zero.
-pub fn build_interactions(c_bat_ev_coexist_eur_kwh: f64) -> Vec<Box<dyn AssetInteraction>> {
+pub fn build_interactions(
+    c_bat_ev_coexist_eur_kwh: f64,
+    c_ctrl_imp_malus_eur_kwh: f64,
+) -> Vec<Box<dyn AssetInteraction>> {
     let mut v: Vec<Box<dyn AssetInteraction>> = Vec::new();
     if c_bat_ev_coexist_eur_kwh > 0.0 {
         v.push(Box::new(BatEvCoexistInteraction {
             c_eur_kwh: c_bat_ev_coexist_eur_kwh,
+        }));
+    }
+    if c_ctrl_imp_malus_eur_kwh > 0.0 {
+        v.push(Box::new(CtrlImportMalusInteraction {
+            c_eur_kwh: c_ctrl_imp_malus_eur_kwh,
         }));
     }
     v
