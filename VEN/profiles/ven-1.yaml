@@ -30,6 +30,8 @@ planner:
   plan_adoption_threshold_eur: 0.20
   replan_interval_s: 300
   deviation_trigger_ticks: 120
+  solver_timeout_s: 60
+  planning_initial_delay_s: 5
 
 absorber:
   enabled: true

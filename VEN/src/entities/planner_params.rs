@@ -41,6 +41,8 @@ pub struct PlannerParams {
     pub plan_adoption_threshold_eur: f64,
     pub plan_adoption_decay_s: f64,
     pub phase2_epsilon_eur: f64,
+    pub solver_timeout_s: u64,
+    pub planning_initial_delay_s: u64,
 }
 
 impl Default for PlannerParams {
@@ -70,6 +72,8 @@ impl Default for PlannerParams {
             plan_adoption_threshold_eur: 0.0,
             plan_adoption_decay_s: 0.0,
             phase2_epsilon_eur: 0.02,
+            solver_timeout_s: 60,
+            planning_initial_delay_s: 5,
         }
     }
 }

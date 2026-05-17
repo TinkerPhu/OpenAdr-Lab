@@ -1,9 +1,12 @@
     use super::*;
 
     use crate::assets::{
-        base_load::BaseLoadParams, battery::{Battery, BatteryParams, BatteryState},
-        ev::{EvCharger, EvParams, EvState}, heater::{Heater, HeaterParams, HeaterState},
-        pv::PvParams, AssetConfig, AssetState,
+        battery::{Battery, BatteryState},
+        ev::{EvCharger, EvState}, heater::{Heater, HeaterState},
+        AssetConfig, AssetState,
+    };
+    use crate::entities::asset_params::{
+        BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
     };
     use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot};
     use crate::entities::asset_params::AssetParams;

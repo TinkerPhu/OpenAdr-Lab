@@ -34,6 +34,8 @@ planner:
   deviation_trigger_ticks: 120
   plan_adoption_threshold_eur: 0.05
   plan_adoption_decay_s: 1200
+  solver_timeout_s: 60
+  planning_initial_delay_s: 5
 
 absorber:
   enabled: true

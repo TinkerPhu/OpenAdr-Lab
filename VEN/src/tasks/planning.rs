@@ -27,9 +27,10 @@ pub(crate) fn spawn_planning(
     deviation_pending: Arc<std::sync::atomic::AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
     let replan_s = planner.replan_interval_s;
+    let initial_delay_s = planner.planning_initial_delay_s;
     tokio::spawn(async move {
         // Initial delay: let event poll populate rates before first plan
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(initial_delay_s)).await;
         // First cycle is always Periodic; subsequent cycles are set by the select! below.
         // Using a local variable instead of borrow()ing the watch channel prevents stale
         // retained values (e.g. AssetStateChange set once and never cleared) from

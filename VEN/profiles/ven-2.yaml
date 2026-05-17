@@ -27,6 +27,8 @@ planner:
   phase2_epsilon_eur: 0.10  # allow 10 ct slack so Phase 2 can smooth switching
   replan_interval_s: 300
   deviation_trigger_ticks: 120
+  solver_timeout_s: 60
+  planning_initial_delay_s: 5
 
 absorber:
   enabled: true
