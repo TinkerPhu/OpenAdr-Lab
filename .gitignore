@@ -44,3 +44,4 @@ docs/plans/notes.json
 .claude/scheduled_tasks.lock
 
 openspec/changes/pv-self-consumption-reward/*
+**/.openspec.yaml
