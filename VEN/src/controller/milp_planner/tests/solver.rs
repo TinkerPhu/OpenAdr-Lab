@@ -80,7 +80,7 @@ use super::*;
     fn solve_feasible_no_optional_assets() {
         // Minimal case: no battery, no EV, no heater. Import exactly covers base load.
         let inputs = make_solver_inputs(4, 0.5); // base = 0.5 kW
-        let result = solve_phase1(&inputs, &make_phase1_weights(), &contexts_from_inputs(&inputs));
+        let result = solve_phase1(&inputs, &make_phase1_weights(), &contexts_from_inputs(&inputs), 60.0);
         assert!(result.is_ok(), "solver failed: {:?}", result.err());
         let out = result.unwrap();
         for t in 0..4 {
@@ -108,7 +108,7 @@ use super::*;
         inputs.e_ev_core_kwh = 4.0;
         inputs.e_ev_extra_max_kwh = 20.0;
 
-        let result = solve_phase1(&inputs, &make_phase1_weights(), &contexts_from_inputs(&inputs));
+        let result = solve_phase1(&inputs, &make_phase1_weights(), &contexts_from_inputs(&inputs), 60.0);
         assert!(result.is_ok(), "solver failed: {:?}", result.err());
         let out = result.unwrap();
 
@@ -135,7 +135,7 @@ use super::*;
         inputs.eff_bat_ch = Some(1.0);
         inputs.eff_bat_dis = Some(1.0);
 
-        let result = solve_phase1(&inputs, &make_phase1_weights(), &contexts_from_inputs(&inputs));
+        let result = solve_phase1(&inputs, &make_phase1_weights(), &contexts_from_inputs(&inputs), 60.0);
         assert!(result.is_ok(), "solver failed: {:?}", result.err());
         let out = result.unwrap();
 
@@ -177,7 +177,7 @@ use super::*;
         let mut weights = make_phase2_weights();
         weights.c_ev_startup_eur = 0.5; // high penalty — one startup costs 0.5 EUR
 
-        let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0, &contexts_from_inputs(&inputs))
+        let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0, &contexts_from_inputs(&inputs), 60.0)
             .expect("solver failed")
             .0;
 
@@ -213,7 +213,7 @@ use super::*;
         let mut weights = make_phase2_weights();
         weights.c_bat_startup_eur = 0.5; // high penalty
 
-        let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0, &contexts_from_inputs(&inputs))
+        let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0, &contexts_from_inputs(&inputs), 60.0)
             .expect("solver failed")
             .0;
 
@@ -245,7 +245,7 @@ use super::*;
         inputs.eff_bat_ch = Some(1.0);
         inputs.eff_bat_dis = Some(1.0);
 
-        let out = solve_phase1(&inputs, &make_phase1_weights(), &contexts_from_inputs(&inputs)).expect("solver failed");
+        let out = solve_phase1(&inputs, &make_phase1_weights(), &contexts_from_inputs(&inputs), 60.0).expect("solver failed");
 
         for t in 0..4 {
             // p_imp + p_pv + p_bat_dis = p_base + p_bat_ch + p_exp (EV=0, heater=0)
@@ -277,7 +277,7 @@ use super::*;
         weights.c_ev_startup_eur = 0.5; // also penalise startups so EV is one block
         weights.c_ev_ramp_eur_kw = 1.0; // 1 EUR per kW change — very high
 
-        let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0, &contexts_from_inputs(&inputs))
+        let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0, &contexts_from_inputs(&inputs), 60.0)
             .expect("solver failed")
             .0;
 
@@ -315,7 +315,7 @@ use super::*;
         weights.c_bat_startup_eur = 0.5; // keep blocks contiguous
         weights.c_bat_ramp_eur_kw = 1.0; // very high — force flat power
 
-        let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0, &contexts_from_inputs(&inputs))
+        let out = solve_milp_two_phase(&inputs, &make_phase1_weights(), &weights, 1.0, &contexts_from_inputs(&inputs), 60.0)
             .expect("solver failed")
             .0;
 
@@ -385,6 +385,7 @@ use super::*;
                 ..make_phase1_weights()
             },
             &contexts_from_inputs(&inputs),
+            60.0,
         )
         .expect("solver failed");
 

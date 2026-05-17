@@ -1,5 +1,7 @@
 // Obligation check task — delegates to ObligationService.
 
+const OBLIGATION_CHECK_INTERVAL_S: u64 = 5;
+
 use chrono::{Duration, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -19,7 +21,7 @@ pub(crate) fn spawn_obligation_check(
     ven_name: String,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(OBLIGATION_CHECK_INTERVAL_S));
         loop {
             interval.tick().await;
             let now = Utc::now();

@@ -5,29 +5,10 @@ use uuid::Uuid;
 use crate::controller::user_request::{create_from_body, CreateUserRequestBody, RequestError};
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::device_session::{EvSession, HeaterTarget, ShiftableLoad};
+use crate::entities::DomainError;
 use crate::entities::user_request::{UserRequest, UserRequestStatus};
 use crate::ids;
 use crate::state::AppState;
-
-/// Error type for UserRequestService cancel operations.
-// Not yet wired to a route — cancel is performed directly in state.
-#[allow(dead_code)]
-#[derive(Debug)]
-pub enum CancelError {
-    NotFound(Uuid),
-    AlreadyTerminal(Uuid),
-}
-
-impl std::fmt::Display for CancelError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CancelError::NotFound(id) => write!(f, "user request '{id}' not found"),
-            CancelError::AlreadyTerminal(id) => {
-                write!(f, "user request '{id}' is already in a terminal state")
-            }
-        }
-    }
-}
 
 pub struct UserRequestService;
 
@@ -159,23 +140,23 @@ impl UserRequestService {
     /// Cancel a user request by id.
     ///
     /// Returns the cancelled request on success, or:
-    /// - `CancelError::NotFound` if no request with that id exists.
-    /// - `CancelError::AlreadyTerminal` if the request is already Cancelled or Completed.
-    // Not yet wired to a route — DELETE /user-requests/:id calls state.cancel_request() directly.
-    #[allow(dead_code)]
-    pub async fn cancel(id: Uuid, state: &AppState) -> Result<UserRequest, CancelError> {
+    /// - `DomainError::NotFound` if no request with that id exists.
+    /// - `DomainError::SessionConflict` if the request is already in a terminal state.
+    pub async fn cancel(id: Uuid, state: &AppState) -> Result<UserRequest, DomainError> {
         // Check existence and terminal state before calling the state method.
         let requests = state.active_requests().await;
         let req = requests
             .iter()
             .find(|r| r.id == id)
-            .ok_or(CancelError::NotFound(id))?;
+            .ok_or(DomainError::NotFound { id })?;
 
         if matches!(
             req.status,
             UserRequestStatus::Cancelled | UserRequestStatus::Completed
         ) {
-            return Err(CancelError::AlreadyTerminal(id));
+            return Err(DomainError::SessionConflict(format!(
+                "user request '{id}' is already in a terminal state"
+            )));
         }
 
         // Delegate to AppState which handles session clearing atomically.
@@ -187,7 +168,7 @@ impl UserRequestService {
             .await
             .into_iter()
             .find(|r| r.id == id)
-            .ok_or(CancelError::NotFound(id))?;
+            .ok_or(DomainError::NotFound { id })?;
 
         Ok(updated)
     }
@@ -213,6 +194,7 @@ impl UserRequestService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entities::DomainError;
     use crate::entities::user_request::UserRequestStatus;
 
     /// Check shiftable request creation from a minimal body.
@@ -253,7 +235,7 @@ mod tests {
         let state = AppState::new();
         let unknown = Uuid::new_v4();
         let result = UserRequestService::cancel(unknown, &state).await;
-        assert!(matches!(result, Err(CancelError::NotFound(_))));
+        assert!(matches!(result, Err(DomainError::NotFound { .. })));
     }
 
     /// Cancelling a request that is already Cancelled returns AlreadyTerminal.
@@ -286,7 +268,7 @@ mod tests {
         state.upsert_request(req).await;
 
         let result = UserRequestService::cancel(id, &state).await;
-        assert!(matches!(result, Err(CancelError::AlreadyTerminal(_))));
+        assert!(matches!(result, Err(DomainError::SessionConflict(_))));
     }
 
     /// Cancelling an active EV request sets status to Cancelled.

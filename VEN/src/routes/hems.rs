@@ -341,27 +341,27 @@ pub async fn post_requests(
 
 /// DELETE /user-requests/:id — cancel a user request and clear any linked device session.
 pub async fn delete_request(State(ctx): State<AppCtx>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    if ctx.state.cancel_request(id).await {
-        ctx.state
-            .push_controller_event(
-                crate::controller::trace::ControllerEvent::RequestTransition {
-                    ts: Utc::now(),
-                    request_id: id,
-                    asset_id: String::new(),
-                    from_status: "Active".to_string(),
-                    to_status: "Cancelled".to_string(),
-                },
-            )
-            .await;
-        let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
-        info!(request_id = %id, "user request cancelled");
-        axum::http::StatusCode::NO_CONTENT.into_response()
-    } else {
-        (
-            axum::http::StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "request not found"})),
-        )
-            .into_response()
+    match UserRequestService::cancel(id, &ctx.state).await {
+        Ok(req) => {
+            ctx.state
+                .push_controller_event(
+                    crate::controller::trace::ControllerEvent::RequestTransition {
+                        ts: Utc::now(),
+                        request_id: id,
+                        asset_id: req.asset_id.clone(),
+                        from_status: "Active".to_string(),
+                        to_status: "Cancelled".to_string(),
+                    },
+                )
+                .await;
+            let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+            info!(request_id = %id, "user request cancelled");
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
+        Err(e) => {
+            let (status, body) = e.into();
+            (status, body).into_response()
+        }
     }
 }
 
@@ -397,7 +397,7 @@ pub async fn get_ev_session(State(ctx): State<AppCtx>) -> impl IntoResponse {
     }
 }
 
-/// POST /ev-session — create or replace the active EV session, triggering a replan.
+/// POST /ev-session — create a new EV session, triggering a replan. Returns 409 if one already exists.
 pub async fn post_ev_session(
     State(ctx): State<AppCtx>,
     Json(body): Json<CreateEvSessionBody>,
@@ -417,16 +417,30 @@ pub async fn post_ev_session(
         departure = %session.departure_time,
         "EV session created"
     );
-    ctx.state.set_ev_session(Some(session.clone())).await;
-    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
-    (StatusCode::CREATED, Json(session))
+    match EvSessionService::start(session.clone(), &ctx.state).await {
+        Ok(()) => {
+            let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+            (StatusCode::CREATED, Json(session)).into_response()
+        }
+        Err(e) => {
+            let (status, body) = e.into();
+            (status, body).into_response()
+        }
+    }
 }
 
 /// DELETE /ev-session — clear the active EV session and complete any linked UserRequests.
 pub async fn delete_ev_session(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    EvSessionService::end(&ctx.state).await.unwrap_or_default();
-    let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
-    StatusCode::NO_CONTENT
+    match EvSessionService::end(&ctx.state).await {
+        Ok(()) | Err(crate::entities::error::DomainError::NotFound { .. }) => {
+            let _ = ctx.trigger_tx.send(PlanTrigger::UserRequest);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(e) => {
+            let (status, body) = e.into();
+            (status, body).into_response()
+        }
+    }
 }
 
 /// GET /ev-settings — returns the current EV overlay settings.

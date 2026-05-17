@@ -164,6 +164,7 @@ pub fn run_planner(
         &p2w,
         planner.phase2_epsilon_eur,
         &asset_contexts,
+        planner.solver_timeout_s as f64,
     ) {
         Ok((sol, phase1_cost_eur, friction_eur)) => translate_to_plan(
             &sol,

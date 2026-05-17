@@ -18,6 +18,7 @@ pub(crate) fn solve_phase1(
     inputs: &MilpInputs,
     p1w: &Phase1Weights,
     asset_contexts: &[Box<dyn AssetMilpContext>],
+    timeout_s: f64,
 ) -> Result<SolveOutput, Box<dyn std::error::Error>> {
     let n = inputs.n;
     let dt_h = inputs.dt_h;
@@ -146,7 +147,7 @@ pub(crate) fn solve_phase1(
         asset_contexts,
         n,
     );
-    model = model.with_time_limit(60.0);
+    model = model.with_time_limit(timeout_s);
     model = model.with_mip_gap(0.02)?;
     let solution = model.solve()?;
 

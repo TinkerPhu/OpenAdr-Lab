@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::StatusCode;
+
+const TOKEN_EXPIRY_MARGIN_S: u64 = 60;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
@@ -53,7 +55,7 @@ impl VtnClient {
         // Return cached token if still valid (with 60s safety margin)
         if let Some(t) = self.token.read().await.as_ref() {
             let elapsed = t.acquired_at.elapsed().as_secs();
-            if elapsed + 60 < t.expires_in_secs {
+            if elapsed + TOKEN_EXPIRY_MARGIN_S < t.expires_in_secs {
                 return Ok(t.access_token.clone());
             }
         }
