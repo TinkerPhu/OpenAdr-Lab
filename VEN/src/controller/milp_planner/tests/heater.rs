@@ -151,10 +151,87 @@ use super::*;
     }
 
     #[test]
-    #[ignore = "implemented in Step 5"]
     fn solve_heater_switching_reduces_with_penalty() {
-        // High lambda_sw → fewer mode changes than lambda_sw = 0
-        todo!("implement after solve_milp() heater trajectory integration")
+        // After the Phase 1/Phase 2 separation fix, lambda_sw_eur must NOT appear in Phase 1.
+        // Verifies two properties:
+        //   1. Phase 1 cost is identical regardless of lambda_sw_eur.
+        //   2. Phase 2 with high lambda_sw produces fewer heater on/off transitions.
+        //
+        // Setup: tank at T_min + 0.5°C (1.0 kWh buffer, thermal_mass=2.0 kWh/°C).
+        // Tariff alternates cheap(0.05)/expensive(0.40) every 5-min slot for 2 hours.
+        // With lambda=0.0: Phase 2 has no switching objective → fragmented (cheap-only) plan.
+        // With lambda=1.0: switching cost exceeds energy savings → Phase 2 consolidates.
+        let now = fixed_now();
+        let n_slots: usize = 24; // 2h at 5min steps
+        let step_s: u64 = 300;
+
+        let snaps: Vec<_> = (0..n_slots)
+            .map(|t| {
+                let tariff = if t % 2 == 0 { 0.05_f64 } else { 0.40_f64 };
+                TariffSnapshot {
+                    interval_start: now + Duration::seconds(t as i64 * step_s as i64),
+                    interval_end: now + Duration::seconds((t as i64 + 1) * step_s as i64),
+                    import_tariff_eur_kwh: Some(tariff),
+                    export_tariff_eur_kwh: Some(0.04),
+                    co2_g_kwh: Some(300.0),
+                }
+            })
+            .collect();
+        let tariffs = TariffTimeSeries::from_snapshots(&snaps);
+
+        // temp_initial_c=18.5: e_init = 0.5°C × 2.0 = 1.0 kWh above T_min.
+        // Net gain per [on,off] pair ≈ +0.075 kWh → alternating schedule is feasible.
+        let make_profile_lambda = |lambda: f64| -> Profile {
+            let mut p = make_heater_only_profile(None, 18.0, 23.0, 18.5);
+            if let Some(AssetProfile::Heater(ref mut h)) = p.assets.get_mut(0) {
+                h.switching_penalty_eur = lambda;
+            }
+            // epsilon=2.0 gives Phase 2 enough room to consolidate 12 expensive slots
+            // (12 × 0.10€ = 1.20€ extra energy) to eliminate ~23 switches (saving 23 × lambda).
+            p.planner.phase2_epsilon_eur = 2.0;
+            p
+        };
+
+        let profile_no = make_profile_lambda(0.0);
+        let profile_high = make_profile_lambda(1.0);
+        let sim_no = make_snap_from_profile(&profile_no);
+        let sim_high = make_snap_from_profile(&profile_high);
+
+        let plan_no = run_planner(
+            build_asset_contexts(&profile_no, &sim_no, now, None, None),
+            &sim_no, &tariffs, &no_capacity(), &profile_no, now,
+            PlanTrigger::Periodic, None, None, &[], None, None,
+        );
+        let plan_high = run_planner(
+            build_asset_contexts(&profile_high, &sim_high, now, None, None),
+            &sim_high, &tariffs, &no_capacity(), &profile_high, now,
+            PlanTrigger::Periodic, None, None, &[], None, None,
+        );
+
+        // Phase 1 cost must not depend on lambda_sw_eur after the fix.
+        assert!(
+            (plan_no.objective_eur - plan_high.objective_eur).abs() < 1e-3,
+            "Phase 1 cost must be lambda-independent: no_lambda={:.4} high_lambda={:.4}",
+            plan_no.objective_eur,
+            plan_high.objective_eur
+        );
+
+        // Count heater on/off transitions between consecutive slots.
+        let count_transitions = |plan: &Plan| -> usize {
+            let powers: Vec<f64> = plan
+                .slots
+                .iter()
+                .map(|s| s.planned_kw_by_asset.get("heater").copied().unwrap_or(0.0))
+                .collect();
+            powers.windows(2).filter(|w| (w[0] > 0.1) != (w[1] > 0.1)).count()
+        };
+
+        let tr_no = count_transitions(&plan_no);
+        let tr_high = count_transitions(&plan_high);
+        assert!(
+            tr_high < tr_no,
+            "high lambda_sw should consolidate heater (fewer transitions): high={tr_high} no_lambda={tr_no}"
+        );
     }
 
     #[test]

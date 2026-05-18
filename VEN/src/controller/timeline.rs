@@ -16,7 +16,7 @@ use crate::entities::plan::Plan;
 // Data-carrier types live in entities/timeline.
 use crate::entities::timeline::{TimelineSnapshot, TimeWindow};
 #[cfg(test)]
-use crate::entities::timeline::{HeaterPlanTrajectory, TimelineAssetData, TimelinePoint};
+use crate::entities::timeline::{TimelineAssetData, TimelinePoint};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Uniform grid resampling (RF-05c)
