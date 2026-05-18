@@ -22,7 +22,7 @@ echo "Provisioning done."
 # Then run @isolated scenarios in a second pass so each gets a fresh VEN
 # state and is not affected by Pi4 resource contention from prior scenarios.
 set +e
-python -m behave --tags=~@isolated "$@"
+python -m behave --tags=~@isolated --exclude "isolated" "$@"
 MAIN_EXIT=$?
 
 echo ""
