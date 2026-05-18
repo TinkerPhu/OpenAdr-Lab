@@ -279,9 +279,9 @@ impl AssetMilpContext for MockHeaterCtx {
         use crate::controller::milp_planner::asset_port::M_LOW_EUR_PER_KWH;
         let v = pool.heater.as_ref().unwrap();
         if c_startup_eur == 0.0 {
-            HeaterMilpContext::objective(&self.ctx, v, 0.0, M_LOW_EUR_PER_KWH, n)
+            HeaterMilpContext::objective(&self.ctx, v, 0.0, M_LOW_EUR_PER_KWH, 0.0, n)
         } else {
-            HeaterMilpContext::objective(&self.ctx, v, c_ramp_eur_kw, 0.0, n)
+            HeaterMilpContext::objective(&self.ctx, v, c_ramp_eur_kw, 0.0, self.ctx.lambda_sw_eur, n)
         }
     }
 }
