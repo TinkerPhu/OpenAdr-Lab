@@ -1,7 +1,7 @@
 # Requirement Gaps — DOCUMENTATION.md vs. Reference Docs
 
 Comparison of `DOCUMENTATION.md` against all files in `docs/architecture/` and `docs/REQUIREMENTS.md`.  
-Date: 2026-05-16
+Date: 2026-05-17 (updated after documentation improvement pass)
 
 ---
 
@@ -20,32 +20,26 @@ A **Priority Gaps** section at the end ranks the most important missing topics.
 ## `docs/REQUIREMENTS.md`
 
 **GAPS:**
-- No domain glossary (Utility, DSO, TSO, Aggregator, Prosumer, VEN, VTN, BFF) — REQUIREMENTS §2.1 is the authoritative source; DOCUMENTATION.md assumes readers already know these terms
-- Sign convention not formally stated — REQUIREMENTS §2.5 defines positive = import; DOCUMENTATION.md uses the convention correctly but never defines it
-- Domain entity definitions absent — `EnergyPacket`, `OadrEventSnapshot`, `FlexibilityEnvelope`, `UserRequest`, `AssetLedger`, and all enumerations (`AssetType`, `PowerAdjustability`, `PlanTrigger`, `UserRequestMode`, `CompletionPolicy`, `StaleRatePolicy`) are defined in REQUIREMENTS §3.2.1 but not in DOCUMENTATION.md
-- Grid as virtual site boundary not explained — REQUIREMENTS §3.3 defines the power balance model; DOCUMENTATION.md says "aggregates all asset powers" without the formal equation
-- Functional requirements (FR-OA-01…FR-OA-08, FR-ASSET-01…FR-ASSET-05, FR-SIM-01…FR-SIM-10) entirely absent — DOCUMENTATION.md describes features but does not cross-reference the FR codes that motivated them
+- Domain entity enumerations absent — `AssetType`, `PowerAdjustability`, `PlanTrigger`, `UserRequestMode`, `CompletionPolicy`, `StaleRatePolicy` are defined in REQUIREMENTS §3.2.1 but not in DOCUMENTATION.md (the core domain actors and named entities like `EnergyPacket`, `FlexibilityEnvelope`, `UserRequest`, `AssetLedger` were added to §0 Glossary)
+- Grid as virtual site boundary power balance — REQUIREMENTS §3.3 defines the formal Kirchhoff equation with all sign-convention implications; DOCUMENTATION.md §0 shows the sign convention diagram but does not reproduce the formal balance equation
+- Functional requirements cross-reference — inline FR code anchors (e.g. `FR-OA-01`, `FR-SIM-03`) were added to §2 feature sections; a full reference table mapping each FR code to its full text still does not exist in DOCUMENTATION.md (readers must look up REQUIREMENTS.md §4 for the text)
 
 **CONFLICTS:** None — DOCUMENTATION.md is consistent with REQUIREMENTS conventions.
 
-**COVERED:** OpenADR 3.0 overview; tariff vs. rate distinction; VEN/VTN topology.
+**COVERED:** OpenADR 3.0 overview; tariff vs. rate distinction; VEN/VTN topology; domain glossary (§0); sign convention with diagram (§0); EnergyPacket, FlexibilityEnvelope, UserRequest, AssetLedger definitions (§0); FR code anchors in §2 sections.
 
 ---
 
 ## `docs/architecture/VEN_ARCHITECTURE.md`
 
 **GAPS:**
-- Time-series alignment problem not documented — VEN_ARCHITECTURE §5 defines how tariff boundaries, per-interval capacity flattening, and last-write-wins event merging work; DOCUMENTATION.md has no equivalent section
-- `TimeSeries<T>` abstraction and `Interpolation` enum (`Step` / `Linear`) not mentioned — these govern how tariff and capacity data are queried across slot boundaries
-- Slot classification (`FIRM` vs `FLEXIBLE`, near-horizon boundary, early firm-up on flat rates) missing — relevant for plan stability guarantees
 - Design Decisions D-01…D-07 not referenced — architectural rationale (why snapshot-and-release, why two-phase MIP, why per-asset ports) is not traceable to decisions in DOCUMENTATION.md
-- Report generation alignment problem (§5.2–5.3) described in more detail than DOCUMENTATION.md §2.6 — obligation-based structure and interval boundary handling missing
+- Report generation interval alignment (§5.2–5.3) — §2.11 addresses the target architecture (`TimeSeries<T>`, `bucket()` with payload-type-driven aggregators), but §2.6 Report Obligations itself still lacks detail on obligation-based interval structure and boundary handling
 - `CalcCache` struct and scoring strategy not mentioned
 
-**CONFLICTS:**
-- DOCUMENTATION.md §2.2 states Phase 2 optimises "friction" without initially clarifying Phase 1 cost is frozen. This was corrected in the latest edits (the "Independence of objectives" paragraph now states `c_star` is a hard constraint for Phase 2). No remaining conflict.
+**CONFLICTS:** None.
 
-**COVERED:** Component overview; HEMS controller; asset abstraction; API contract; two-phase MIP structure; locking protocol.
+**COVERED:** Component overview; HEMS controller; asset abstraction; API contract; two-phase MIP structure; locking protocol; time-series alignment (§2.11 — `TimeSeries<T>`, `Interpolation` enum, tariff boundary alignment, capacity flattening, slot classification `FIRM`/`FLEXIBLE`).
 
 ---
 
@@ -98,15 +92,12 @@ A **Priority Gaps** section at the end ranks the most important missing topics.
 ## `docs/architecture/heater_tank_milp_planning_model.md`
 
 **GAPS:**
-- Two-layer heater control architecture (Layer A: physical heat-flow forecast; Layer B: MILP planning) not separated this explicitly in DOCUMENTATION.md
-- Relay schema constraints and switching penalty structure (delta schema, two-relay on/off, 20% penalty for `0↔6` transitions) not in DOCUMENTATION.md
-- Time discretisation rationale (5-minute step, 288 slots, 24-hour horizon) stated in DOCUMENTATION.md as defaults but not justified
-- `min_run_slots` / `min_off_slots` parameters mentioned in DOCUMENTATION.md §2.4 conclusion but not yet in the profile YAML reference (§5) or heater MILP description
-- Stale rate policy (`HEURISTIC_FORECAST` default) not mentioned in DOCUMENTATION.md
+- Two-layer heater control architecture (Layer A: physical heat-flow forecast; Layer B: MILP planning) not separated this explicitly in DOCUMENTATION.md — §2.12 covers the MILP (Layer B) in detail but Layer A (thermal forecast ODE inputs) is not described
+- Time discretisation rationale — 5-minute step and 288-slot horizon are now documented in §2.12; the hardware motivation (heater mode stability) is not yet stated
 
 **CONFLICTS:** None.
 
-**COVERED:** Heater thermal ODE; multi-tier control (off/mid/full); Phase 2 friction for switching.
+**COVERED:** Heater thermal ODE; multi-tier control (off/mid/full); Phase 2 friction for switching; relay schema (delta schema, two-relay, 20% penalty for 0↔6 transitions — §2.12); `min_run_slots` / `min_off_slots` in §5 config table (documented as planned parameters); `StaleRatePolicy` default `HEURISTIC_FORECAST` (§2.11).
 
 ---
 
@@ -139,14 +130,7 @@ A **Priority Gaps** section at the end ranks the most important missing topics.
 
 ## `docs/architecture/packet_explanation.md`
 
-**GAPS:**
-- Packet semantic shift not documented — packets were originally the scheduling unit; they are now demoted to an intent/reporting metadata layer. DOCUMENTATION.md references packets but does not explain this demotion
-- `FlexibilityEnvelope` as the primary per-packet output (not scheduling driver) not clarified
-
-**CONFLICTS:**
-- DOCUMENTATION.md implies energy packets participate in scheduling. This doc clarifies they do not — the MILP variables are the scheduling mechanism; packets track intent and feed reporting. Minor semantic conflict.
-
-**COVERED:** Packet lifecycle states.
+**COVERED:** Packet role clarification added — §2 now explicitly states that energy packets are intent-tracking and reporting metadata, not MILP scheduling variables. The MILP decision variables (`p_ev[t]`, `z_heat_mid[t]`, etc.) drive the schedule; packets contribute their `request_mode`, `deadline`, and `target_energy_kwh` as constraints/reward terms only. Packet lifecycle states serve the dispatcher and reporting layers independently of the solver.
 
 ---
 
@@ -166,11 +150,10 @@ A **Priority Gaps** section at the end ranks the most important missing topics.
 ## `docs/architecture/Domain_definitions.md` and `system_design.md` (both archived)
 
 **GAPS (still relevant despite archived status):**
-- Energy flow direction diagram with sign conventions — useful visual missing from DOCUMENTATION.md
 - Time & clock management (NTP, ISO-8601 duration parsing) — not mentioned in DOCUMENTATION.md
 - Security model details (OAuth scope, TLS optional) — DOCUMENTATION.md has minimal security content
 
-**CONFLICTS:** None (archived reference material).
+**COVERED:** Energy flow direction diagram with sign conventions — ASCII diagram and sign convention added to §0 Glossary.
 
 ---
 
@@ -180,21 +163,16 @@ Ranked by impact on a new reader's ability to understand, contribute to, or oper
 
 ### Tier 1 — Critical for Correctness and Onboarding
 
-| # | Gap | Source doc | Why it matters |
-|---|-----|-----------|----------------|
-| 1 | **Formal domain glossary and sign convention** | REQUIREMENTS.md §2 | Readers cannot interpret power values, costs, or API fields without the sign convention. Foundational for everything else. |
-| 2 | **Time-series alignment architecture** | VEN_ARCHITECTURE.md §5 | Governs how tariff and capacity data is queried across slot boundaries in the MILP. Misunderstanding this leads to incorrect cost calculations and broken report intervals. |
-| 3 | **Packet model semantic shift** | packet_explanation.md | DOCUMENTATION.md implies packets are scheduling units; they are not. Contributors building new features may build against the wrong abstraction. |
+*(All Tier 1 gaps resolved in the May 2026 documentation improvement pass.)*
 
 ### Tier 2 — Important for Implementation Completeness
 
 | # | Gap | Source doc | Why it matters |
 |---|-----|-----------|----------------|
-| 5 | **Functional requirements (FR-* codes)** | REQUIREMENTS.md §4 | No traceability between features and requirements. Cannot verify compliance or scope changes against a baseline. |
+| 5 | **FR code full reference table** | REQUIREMENTS.md §4 | Inline FR anchors (e.g. `FR-OA-01`) were added to §2 feature sections, but the full text of each requirement is only in REQUIREMENTS.md. A cross-reference table in DOCUMENTATION.md would make compliance auditing self-contained. |
 | 6 | **VEN provisioning sequence** | VTN_ARCHITECTURE.md §5 | Anyone setting up a new VEN instance has no documented procedure. |
 | 7 | **Full OpenADR 3.0 signal taxonomy** | concept doc | Implementation only handles 7 of 17+ signal types. The gap between spec and implementation is invisible without a full taxonomy. |
 | 8 | **Asset trait Rust type signatures** | ven_asset_interface_spec.md | Contributors adding new asset types have no formal interface contract to implement against. |
-| 9 | **`min_run_slots` / `min_off_slots` in profile YAML** | heater_tank_milp_planning_model.md | Recently added to the conclusion in DOCUMENTATION.md §2.4 but not yet in the §5 config reference or the MILP description. |
 
 ### Tier 3 — Operational and Quality
 
@@ -207,11 +185,8 @@ Ranked by impact on a new reader's ability to understand, contribute to, or oper
 
 ---
 
-## Recommended Actions
+## Remaining Recommended Actions
 
-1. **Add a §0 Glossary** to DOCUMENTATION.md sourced from REQUIREMENTS.md §2 — domain terms and sign convention (5 min, high value).
-2. **Add a §2.11 Time-Series Architecture** section explaining `TimeSeries<T>`, `Interpolation`, tariff alignment, and capacity slot flattening — sourced from VEN_ARCHITECTURE.md §5.
-3. **Clarify packet role** in §2 or §4 — one paragraph stating packets are intent/reporting metadata, not MILP scheduling variables.
-4. **Add a reference table to FR codes** in §2 feature sections — just `(FR-SIM-03)` inline anchors are enough to make the document traceable.
-5. **Expand §5 config reference** to include `min_run_slots` / `min_off_slots` for the heater profile once those parameters are implemented.
-6. **Link to reference docs** at the end of each major section rather than duplicating content — DOCUMENTATION.md is the operational guide; the architecture docs remain the design source of truth.
+1. **Add a cross-reference table for FR codes** — a table mapping each `FR-OA-xx`, `FR-ASSET-xx`, `FR-SIM-xx` code to its one-line description, linked from the relevant §2 sections. The full text stays in REQUIREMENTS.md; the table makes DOCUMENTATION.md self-contained for compliance checks.
+2. **Document the VEN provisioning sequence** in §6 Deployment — the four steps (user → OAuth2 credential → VEN entity → program/role assignment).
+3. **Add §4.8 VTN Internal Architecture** — PostgreSQL schema overview, openleadr-rs module breakdown, BFF dual-credential pattern, and Docker network topology details.

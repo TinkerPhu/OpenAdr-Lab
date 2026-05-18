@@ -185,6 +185,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_ev_session_end_only_completes_active_linked_requests() {
+        let state = AppState::new();
+        let session = make_ev_session();
+        let session_id = session.id;
+
+        // Active + matching session → should become Completed
+        let active_linked = make_active_request(session_id);
+        let active_linked_id = active_linked.id;
+
+        // Cancelled + matching session → must stay Cancelled
+        let mut cancelled_linked = make_active_request(session_id);
+        cancelled_linked.status = UserRequestStatus::Cancelled;
+        let cancelled_linked_id = cancelled_linked.id;
+
+        // Active + different session → must stay Active
+        let other_session_id = Uuid::new_v4();
+        let active_other = make_active_request(other_session_id);
+        let active_other_id = active_other.id;
+
+        state.set_ev_session(Some(session)).await;
+        state.upsert_request(active_linked).await;
+        state.upsert_request(cancelled_linked).await;
+        state.upsert_request(active_other).await;
+
+        EvSessionService::end(&state).await.unwrap();
+
+        let requests = state.active_requests().await;
+        let find = |id: Uuid| requests.iter().find(|r| r.id == id).unwrap().status.clone();
+
+        assert_eq!(find(active_linked_id), UserRequestStatus::Completed);
+        assert_eq!(find(cancelled_linked_id), UserRequestStatus::Cancelled);
+        assert_eq!(find(active_other_id), UserRequestStatus::Active);
+        assert!(state.ev_session().await.is_none());
+    }
+
+    #[tokio::test]
     async fn test_heater_clear_removes_target() {
         let state = AppState::new();
         let target = HeaterTarget {
