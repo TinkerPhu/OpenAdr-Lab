@@ -6,6 +6,7 @@
 
 ## Table of Contents
 
+0. [Glossary](#0-glossary)
 1. [Purpose & Overview](#1-purpose--overview)
 2. [Feature Reference](#2-feature-reference)
    - 2.1 [Simulation Engine](#21-simulation-engine)
@@ -18,6 +19,8 @@
    - 2.8 [Simulation Injection & Overrides](#28-simulation-injection--overrides)
    - 2.9 [Persistence & Recovery](#29-persistence--recovery)
    - 2.10 [Observability](#210-observability)
+   - 2.11 [Time-Series Architecture](#211-time-series-architecture)
+   - 2.12 [MILP Formulation](#212-milp-formulation)
 3. [HTTP API Reference](#3-http-api-reference)
 4. [Architecture](#4-architecture)
    - 4.1 [Philosophy](#41-philosophy)
@@ -30,6 +33,60 @@
 5. [Configuration Reference](#5-configuration-reference)
 6. [Deployment](#6-deployment)
 7. [Testing](#7-testing)
+
+---
+
+## 0. Glossary
+
+### Organisations & Roles
+
+| Term | Definition |
+|------|-----------|
+| **Utility** | Electric company that generates, transmits, and/or distributes electricity. Operates the grid and runs DR programs. |
+| **DSO** | Distribution System Operator — entity responsible for the local distribution network (e.g. EWZ, Enedis, Bayernwerk Netz). |
+| **TSO** | Transmission System Operator — entity responsible for the high-voltage transmission grid (e.g. Swissgrid, TenneT, RTE). |
+| **Aggregator** | Company that bundles many small DER/load resources into a portfolio large enough to participate in wholesale markets or utility DR programs. |
+| **Prosumer** | End customer that both consumes and produces electricity (e.g. home with solar and battery). |
+
+### OpenADR Protocol
+
+| Term | Definition |
+|------|-----------|
+| **OpenADR** | Open Automated Demand Response — open standard protocol for communicating DR signals between utilities/aggregators and customer energy management systems. This project uses OpenADR 3. |
+| **VTN** | Virtual Top Node — the server side of OpenADR. Creates programs, sends events to VENs, receives reports. |
+| **VEN** | Virtual End Node — the client side of OpenADR. Receives events, controls local devices, reports telemetry. |
+| **BFF** | Backend For Frontend — API proxy between the VTN UI and the VTN server. Not part of the OpenADR spec; an architectural pattern used in this lab. |
+
+### HEMS Domain Entities
+
+| Term | Definition |
+|------|-----------|
+| **HEMS** | Home Energy Management System — software that monitors and controls energy flows within a site to minimise cost or respond to DR signals. |
+| **EnergyPacket** | A schedulable unit of energy delivery: fixed kWh for a specific asset, with a time window and lifecycle status (`PENDING → ACTIVE → COMPLETED / ABANDONED`). Packets are intent-tracking and reporting metadata — see §2 for the important note on their role in MILP planning. |
+| **FlexibilityEnvelope** | The range of power the HEMS can flex (increase or decrease) per time slot, as seen from the grid — exposed to aggregators to estimate available DR capacity. |
+| **UserRequest** | An explicit energy delivery request by the occupant (e.g. "charge EV to 80% by 07:00"). The planner honours these as FIRM or soft constraints. Modes: `ASAP`, `BY_DEADLINE`, `MAX_COST`, `OPPORTUNISTIC`. |
+| **AssetLedger** | Cumulative energy accounting per asset: total kWh imported/exported, associated cost, and CO₂. In-memory only; resets on VEN restart. |
+| **OadrEventSnapshot** | A point-in-time capture of all time-varying OpenADR event data at one poll tick: import tariff, export tariff, CO₂ intensity, import/export capacity limits. |
+
+### Sign Convention
+
+**Positive = power imported from grid. Negative = power exported to grid.**
+
+This convention applies uniformly at the site boundary (utility meter) to setpoints, ledger entries, reports, and all power values in this project.
+
+```
+                                     <──── negative (export) ────
+                                          ╭─────────────────────────╮
+╭───────╮     ╭────────────────────╮      │  central connection     │
+│Utility│<===>│  Utility Meter     │<====>│  board (Σ P = 0)        │<====> Assets
+╰───────╯     ╰────────────────────╯      ╰─────────────────────────╯
+               import tariff →                 ──── positive (import) ────>
+               ← export tariff
+```
+
+Within the site: `Σ P = P_util − (P_consume + P_generate + P_store + P_release) = 0`. Generation (`P_pv`) and battery discharge are negative by definition; they result in net export **only if** their total magnitude exceeds simultaneous consumption.
+
+> **Reference:** [docs/REQUIREMENTS.md §2](docs/REQUIREMENTS.md)
 
 ---
 
@@ -51,6 +108,7 @@ Three independent VEN instances run simultaneously (ven-1, ven-2, ven-3), each w
 ## 2. Feature Reference
 
 ### 2.1 Simulation Engine
+*(FR-SIM-01, FR-SIM-02, FR-SIM-07, FR-SIM-08)*
 
 Each VEN hosts a physics engine that advances asset states every simulation tick (default: 1 second).
 
@@ -87,7 +145,10 @@ This means the forecast shown in the timeline is guaranteed to be consistent wit
 
 The simulation can run in **headless mode** (pure physics) or with **sensor injection** (see §2.8) to override individual parameters.
 
+> **Reference:** [asset_simulation.md](docs/architecture/asset_simulation.md) · [ven_asset_interface_spec.md](docs/architecture/ven_asset_interface_spec.md)
+
 ### 2.2 Energy Planning (MILP)
+*(UC-03, UC-04, UC-05, UC-07, UC-10; FR-ASSET-02)*
 
 A mixed-integer linear program (MILP) solved by **HiGHS** computes a 24-hour optimal energy schedule every planning interval (default: 5 minutes) or on demand.
 
@@ -115,7 +176,7 @@ Two mechanisms address plan quality beyond raw cost:
 
 - **Stability (implemented — acceptance gate):** Periodic replans are only adopted if the new plan's total cost (economic + friction) improves by more than an `effective_threshold`. The effective threshold decays linearly with plan age, so older plans are progressively more likely to be replaced. This prevents constant churning on minor cost oscillations while still allowing stale plans to be updated.
 
-**Design note — post-report plan protection:**
+**Design note — post-report plan protection (not implemented):**
 
 The suggestion is to add a protection score to adopted+reported plans so that future periodic replans face a higher cost-improvement bar. Analysis:
 
@@ -134,7 +195,7 @@ The suggestion is to add a protection score to adopted+reported plans so that fu
 1. **Phase 1 (MIP — cost minimisation)** — minimises economic cost only (import tariff, export revenue, battery cycling). No startup/ramp auxiliary variables; finds the optimal cost floor `c_star`.
 2. **Phase 2 (MIP — friction minimisation)** — minimises operational friction (startup penalties, ramp costs, switching penalties, tier penalties) subject to the constraint `phase1_cost ≤ c_star + phase2_epsilon_eur` (default ε = 0.02 €). Phase 1's solution is used as the warm-start incumbent so Phase 2 immediately has a feasible integer point. Setting `phase2_epsilon_eur = 0` collapses to a single-phase solve.
 
-The planner runs in a blocking Tokio thread to avoid starving the async runtime.
+The planner runs in a blocking Tokio thread to avoid starving the async runtime. See §2.12 for the full MILP formulation.
 
 **Configuring Phase 2:** Set `phase2_epsilon_eur` in the `planner:` section of the profile YAML (default: `0.02`). This is the maximum extra cost (in €) that Phase 2 may spend while defragmenting. Increasing it allows more aggressive defragmentation at a small cost premium. Setting it to `0.0` disables Phase 2 entirely (single-phase solve — purely cost-optimal, potentially fragmented). Phase 1's cost optimum is protected by the hard constraint `phase1_cost ≤ c_star + phase2_epsilon_eur`; Phase 2 can only minimise friction within that budget, never worsen the economic result beyond ε.
 
@@ -146,7 +207,10 @@ effective_threshold = plan_adoption_threshold_eur × max(0, 1 − elapsed_s / pl
 ```
 When `elapsed_s ≥ plan_adoption_decay_s` the plan is considered fully decayed and any periodic replan replaces it unconditionally — even at equal cost. This prevents stale plans from persisting indefinitely. Example: `threshold = 0.20 €`, `decay_s = 3600` — after 30 minutes the effective threshold drops to `0.10 €`; after 1 hour the plan is force-replaced.
 
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md) · [heater_tank_milp_planning_model.md](docs/architecture/heater_tank_milp_planning_model.md)
+
 ### 2.3 Real-time Deviation Absorption
+*(UC-08, UC-09; FR-ASSET-01, FR-ASSET-04)*
 
 Between planning cycles, a **two-tier control architecture** keeps the site on its MILP plan:
 
@@ -211,7 +275,10 @@ After the absorber runs, the uncovered `residual_kw` (what could not be absorbed
 
 **Summary:** Tier 1 handles fast, transient deviations within seconds at zero planning cost. Tier 2 escalates only when Tier 1 is genuinely exhausted over multiple ticks.
 
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
+
 ### 2.4 User Energy Requests
+*(UC-01, UC-02, UC-06, UC-09; FR-ASSET-04, FR-OA-04)*
 
 Users can request energy services with deadline constraints:
 
@@ -269,7 +336,12 @@ The absorber respects user intent through the departure guard and through the pl
 
 **Opportunistic heating / boiler — not yet implemented.** Extending the surplus overlay to the heater (pre-heat when PV surplus is available) would follow the same pattern: a dispatcher-level overlay that fires when no HeaterTarget session is active. The absorber priority list could naturally govern the order (battery → EV → heater), reusing the existing `priority` field in the absorber asset config.
 
+> **Reference:** [heater_tank_milp_planning_model.md](docs/architecture/heater_tank_milp_planning_model.md) · [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
+
+**Energy packets and MILP scheduling — important distinction:** Energy packets (§0 Glossary) are an intent-tracking and reporting layer, not MILP scheduling variables. The MILP decision variables (`p_ev[t]`, `z_heat_mid[t]`, `p_bat_ch[t]`, etc.) drive the actual schedule. A packet contributes its `request_mode`, `deadline`, and `target_energy_kwh` as constraints or reward terms to the MILP, but the per-slot schedule lives in `PlanTimeSlot.allocations` — not on the packet. Packet lifecycle states (`PENDING → ACTIVE → COMPLETED`) serve the dispatcher and reporting layers and are independent of the solver.
+
 ### 2.5 VTN Integration (OpenADR 3)
+*(FR-OA-01, FR-OA-02, FR-OA-03, FR-OA-07, FR-OA-08, OA-01 through OA-08)*
 
 The VEN polls the VTN continuously over authenticated HTTPS.
 
@@ -312,7 +384,10 @@ A rate-change event (new pricing) immediately triggers a plan recomputation via 
 
 **Note:** The VEN always triggers an immediate replan on any event arrival or departure — regardless of payload type. This provides a functional fallback for unrecognised signal types. Full `SIMPLE` / `LOAD_DISPATCH` curtailment target handling (mapping the payload value to a capacity constraint) is not yet implemented.
 
+> **Reference:** [VTN_ARCHITECTURE.md](docs/architecture/VTN_ARCHITECTURE.md)
+
 ### 2.6 Report Obligations
+*(FR-OA-04)*
 
 When a VTN program specifies reporting requirements, the VEN fulfils them automatically.
 
@@ -326,7 +401,10 @@ When a VTN program specifies reporting requirements, the VEN fulfils them automa
 4. The report is POSTed to the VTN `/reports` endpoint
 5. The obligation is marked fulfilled
 
+> **Reference:** [VTN_ARCHITECTURE.md](docs/architecture/VTN_ARCHITECTURE.md) · [VEN_ARCHITECTURE.md §5.2](docs/architecture/VEN_ARCHITECTURE.md)
+
 ### 2.7 Flexibility Envelope
+*(FR-ASSET-01, FR-ASSET-02, UC-05, UC-07)*
 
 At any moment the VEN can report its site-level flexibility to the VTN:
 
@@ -354,7 +432,10 @@ down_duration_s = available_charge_kwh    / down_kw × 3600
 ```
 Both are `None` when the corresponding `kw` value is below a near-zero threshold. The envelope is recomputed each tick in Phase 5 and served via `GET /flexibility`.
 
+> **Reference:** [ven_asset_interface_spec.md](docs/architecture/ven_asset_interface_spec.md)
+
 ### 2.8 Simulation Injection & Overrides
+*(FR-SIM-03, FR-SIM-09)*
 
 For experimentation, any simulated physics parameter can be overridden via the API without restarting:
 
@@ -373,7 +454,10 @@ Supported overrides include: PV irradiance, base-load power, battery SoC, EV SoC
 
 A `POST /sim/inject/reset` clears all active overrides simultaneously.
 
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md) · [ven_asset_interface_spec.md](docs/architecture/ven_asset_interface_spec.md)
+
 ### 2.9 Persistence & Recovery
+*(FR-SIM-07)*
 
 VEN state is persisted in two separate mechanisms:
 
@@ -383,7 +467,11 @@ VEN state is persisted in two separate mechanisms:
 On restart, the physics state is reloaded and simulation resumes from where it left off. Profile parameters (physics constants, planner weights) are recomputed from the YAML profile file and merged back into the loaded state, so config changes take effect cleanly without manual state migration.
 
 **Plan persistence — not yet implemented.** On restart the VEN recomputes a fresh plan from current sim state. This means `GET /timeline/*` is unavailable until the first plan is computed (typically within seconds), and any pending report obligations that reference the pre-restart plan's trajectory are approximated from the new plan. For production DR deployments where continuous VTN forecast reporting is required, plan serialisation to `/data/state.json` on plan adoption (and reload on startup) is a necessary future enhancement.
+
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
+
 ### 2.10 Observability
+*(FR-SIM-10, FR-OA-06)*
 
 | Signal | Endpoint / mechanism |
 |--------|---------------------|
@@ -394,6 +482,193 @@ On restart, the physics state is reloaded and simulation resumes from where it l
 | Planner progress SSE | Server-Sent Events pushed during MILP solve (solving started, phase progress, plan adopted) |
 
 **Asset power log — current capability:** Each asset maintains a 3600-entry ring buffer of per-second history (`AssetHistoryBuffer` in `simulator/`), accessible via `GET /history/:asset_id`. This provides ~1 hour of 1-second resolution power, SoC, and temperature traces. Configurable aggregation window (e.g., 5-minute means) and longer retention beyond 3600 seconds are not yet implemented. For reporting purposes the reporter computes time-weighted means over report intervals directly from the ring buffer.
+
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
+
+### 2.11 Time-Series Architecture
+
+The system deals with multiple time series from different sources with different natural periods (1-second sim ticks, 5-minute planning slots, 1-hour day-ahead tariffs, 3–6-hour capacity events). Handling them correctly requires explicit interpolation rules.
+
+#### Interpolation semantics
+
+| Signal class | Examples | Rule | Notes |
+|---|---|---|---|
+| **Piecewise-constant** | Tariff (€/kWh), capacity limit (kW), `SIMPLE` level | **Step / LOCF** — value holds from breakpoint until the next | Linear interpolation is wrong here (implies a ramp, which is false) |
+| **Continuous physical** | Power (kW), temperature (°C), SoC (%) | **Linear** — interpolate between measured points | Carrying last value flat is wrong here |
+| **Cumulative** | Energy (kWh), cost (€) | **Sum within bucket** — never interpolate | Use bucket aggregation only |
+
+**LOCF** = Last Observation Carried Forward: the value at time `t` is the most recent value at or before `t`. Correct for tariffs and any "signal that takes effect and stays in effect" until the next event.
+
+#### Target abstraction — `TimeSeries<T>`
+
+The target architecture (tracked in BACKLOG RF-05 and RF-06) replaces all ad-hoc lookups with one reusable type:
+
+```rust
+TimeSeries<T> {
+    points:        Vec<(DateTime<Utc>, T)>,
+    interpolation: Interpolation,  // Step | Linear | None
+}
+
+enum Interpolation {
+    Step,    // LOCF — correct for tariffs, capacity limits, discrete states
+    Linear,  // correct for power, temperature, SoC
+    None,    // cumulative values — aggregate only, never interpolate
+}
+```
+
+Key methods:
+- `at(ts)` — evaluate at any timestamp using the declared interpolation rule
+- `resample(grid)` — project onto an arbitrary timestamp grid
+- `merge(series[])` — union-of-breakpoints merge across multiple series
+- `bucket(width, agg)` — downsample with `mean` (power), `last` (states), or `sum` (energy)
+
+#### Tariff boundary alignment
+
+The MILP planning grid uses a fixed 5-minute slot width. A planning slot may straddle a tariff boundary (e.g., a slot from 10:55 to 11:00 spans a €0.20→€0.15 transition at 11:00). The target behaviour is a time-weighted average:
+
+```
+effective_tariff(slot) = Σ( tariff_i × overlap(slot, interval_i) ) / slot.duration
+```
+
+The current implementation samples the tariff at `slot.start` only, which assigns the wrong rate to the tail of any slot that crosses a boundary.
+
+#### Capacity flattening
+
+When multiple VTN events define overlapping import or export capacity limits, the effective constraint is the minimum (most restrictive) across all overlapping intervals:
+
+```
+effective_limit(slot) = min(capacity_i for all intervals overlapping slot)
+```
+
+#### Slot classification
+
+Each planning slot is classified at plan-build time:
+
+| Class | Definition | Effect |
+|---|---|---|
+| **FIRM** | Within `now + NearHorizonDuration` (default 2 h) | Must be executed; dispatcher reads these |
+| **FLEXIBLE** | Beyond the near-horizon boundary | Can be revised at next replan |
+
+**Early firm-up:** If rate variance across the FLEXIBLE window is < 10% (flat tariff), FLEXIBLE slots may firm up early to simplify execution.
+
+**StaleRatePolicy:** When the VTN is unreachable and no tariff data is available for future slots, the policy (default: `HEURISTIC_FORECAST`) governs how the planner fills those slots. See `docs/REQUIREMENTS.md §3.2.1` for all policy options.
+
+> **Reference:** [VEN_ARCHITECTURE.md §5](docs/architecture/VEN_ARCHITECTURE.md)
+
+---
+
+### 2.12 MILP Formulation
+
+The planner uses a two-phase Mixed-Integer Linear Program (MILP) solved by HiGHS. This section defines the mathematical structure. For configuration, see §5 and §2.2.
+
+#### Decision variables
+
+| Symbol | Description | Unit | Bounds |
+|---|---|---|---|
+| `p_imp[t]` | Grid import power at slot `t` | kW | ≥ 0 |
+| `p_exp[t]` | Grid export power at slot `t` | kW | ≥ 0 |
+| `u_grid[t]` | Binary: site is net importing at slot `t` | — | {0, 1} |
+| `s_imp_viol[t]` | Import capacity violation slack | kW | ≥ 0 |
+| `s_exp_viol[t]` | Export capacity violation slack | kW | ≥ 0 |
+| `p_ch[t]` | Battery charge power | kW | [0, `p_ch_max`] |
+| `p_dis[t]` | Battery discharge power | kW | [0, `p_dis_max`] |
+| `u_bat[t]` | Binary: battery is active (charging or discharging) | — | {0, 1} |
+| `e_bat[t]` | Battery stored energy at slot `t` | kWh | [`e_min`, `e_max`] |
+| `delta_active[t]` | Battery idle→active transition (startup) | — | {0, 1}, Phase 2 only |
+| `delta_ramp[t]` | Battery net-power ramp magnitude | kW, Phase 2 only | ≥ 0 |
+| `p_ev[t]` | EV charge power | kW | [0, `p_ev_max`] |
+| `z_ev_on[t]` | Binary: EV charger is active | — | {0, 1} |
+| `delta_ev[t]` | EV off→on transition (startup) | — | {0, 1}, Phase 2 only |
+| `z_heat_mid[t]` | Binary: heater at mid tier (3 kW) | — | {0, 1} |
+| `z_heat_full[t]` | Binary: heater at full tier (6 kW) | — | {0, 1} |
+| `sw[t]` | Heater relay switch event magnitude | — | ≥ 0 |
+| `e_tank[t]` | Heater tank stored thermal energy | kWh | [`e_tank_min`, `e_tank_max`] |
+| `y_shift[j]` | Binary: shiftable load starts at valid slot `j` | — | {0, 1} |
+
+`dt_h` = slot width in hours (default: 5 min = 1/12 h). `n` = number of planning slots (default: 288 for a 24-hour horizon).
+
+#### Phase 1 — cost minimisation
+
+Phase 1 minimises the total economic cost over the planning horizon. No startup, ramp, or switching auxiliary variables are included; they are zero-cost in this phase.
+
+```
+minimise Σ_{t=0}^{n-1} [
+    w_energy · dt_h · c_imp[t] · p_imp[t]     (grid import cost)
+  − w_energy · dt_h · c_exp[t] · p_exp[t]     (grid export revenue)
+  + w_ghg    · dt_h · g_co2[t] · p_imp[t]     (CO₂ penalty)
+  + w_grid   · dt_h · (p_imp[t] + p_exp[t])   (grid stress penalty)
+  + w_import · dt_h · p_imp[t]                 (import minimisation bias)
+  + w_viol   · dt_h · pen_imp · s_imp_viol[t]  (capacity violation)
+  + w_viol   · dt_h · pen_exp · s_exp_viol[t]
+  + c_bat_wear · dt_h · (p_ch[t] + p_dis[t])  (battery wear)
+]
+```
+
+where `c_imp[t]` = import tariff (€/kWh), `c_exp[t]` = export tariff (€/kWh), `g_co2[t]` = CO₂ intensity (kg/kWh), and weights `w_*` are configurable in the profile YAML.
+
+The result of Phase 1 is stored as `c_star` (the optimal economic cost floor).
+
+#### Phase 2 — friction minimisation
+
+Phase 2 re-runs the MILP with a separate objective: minimise operational friction. It adds startup, ramp, and switching auxiliary variables (`delta_active`, `delta_ramp`, `delta_ev`, `sw`). The Phase 1 cost is enforced as a hard upper bound:
+
+```
+minimise Σ_{t=0}^{n-1} [
+    c_bat_startup · delta_active[t]   (battery startup penalty)
+  + c_bat_ramp   · delta_ramp[t]     (battery ramp penalty)
+  + c_ev_startup · delta_ev[t]       (EV startup penalty)
+  + c_ev_ramp    · delta_ev_ramp[t]  (EV ramp penalty)
+  + c_heater_sw  · sw[t]             (heater relay switching penalty)
+]
+
+subject to: phase1_cost_expr(Phase2_vars) ≤ c_star + phase2_epsilon_eur
+```
+
+The warm-start hint provides Phase 1's solution as the initial MIP incumbent, so Phase 2 immediately has a feasible integer point (important for solving in time on the Pi4's ARM CPU).
+
+#### Independence of objectives
+
+`c_star` is determined by Phase 1 and frozen as a hard constraint for Phase 2. Phase 2 has its own copy of all decision variables and cannot "trade" economic cost for friction reduction — it can only stay within the cost budget while finding a less fragmented schedule. Setting `phase2_epsilon_eur = 0.0` makes the constraint exact equality (`phase1_cost = c_star`), making the result simultaneously Pareto-optimal on both dimensions.
+
+#### Objective profiles
+
+Each `PlannerObjective` preset selects a fixed Phase 1 weight vector. The objective can be changed at runtime via `PUT /plan/objective` (triggers an immediate replan) or set statically in the profile YAML under `planner: objective:`.
+
+| Preset | Purpose | Active weights | Zeroed |
+|--------|---------|---------------|--------|
+| `min_cost` **(default)** | Minimise electricity cost with light environmental nudges | `w_energy=1.0`, `w_ghg=0.20` (≈€200/tonne CO₂), `w_grid=0.02` €/kWh exchange, `c_bat_wear=0.03` €/kWh | `w_import` |
+| `min_ghg` | Minimise grid carbon emissions; ignore monetary cost | `w_ghg=10.0` €/kgCO₂ | `w_energy`, `w_grid`, `w_import`, `c_bat_wear` |
+| `min_grid` | Minimise total grid exchange (self-consumption / peak-shaving) | `w_grid=1.0` €/kWh on `p_imp + p_exp` | `w_energy`, `w_ghg`, `w_import`, `c_bat_wear` |
+| `min_import` | Minimise grid import volume (autarky objective) | `w_import=1.0` €/kWh on `p_imp` only | `w_energy`, `w_ghg`, `w_grid`, `c_bat_wear` |
+| `max_revenue` | Maximise export revenue minus import cost; pure tariff arbitrage | `w_energy=1.0`, `c_bat_wear=0.03` €/kWh | `w_ghg`, `w_grid`, `w_import` |
+| `custom` | Use the individual weight fields from the profile YAML directly | All of `w_energy`, `w_ghg`, `w_grid`, `c_bat_wear_eur_kwh` from YAML | `w_import` (not a YAML-exposed field) |
+
+**`min_cost` vs `max_revenue`:** Both use full energy-cost weighting (`w_energy=1.0`) and identical battery-wear cost. The only difference is that `min_cost` adds a CO₂ nudge (`w_ghg=0.20`) and a grid-stress nudge (`w_grid=0.02`), which can shift a small fraction of load toward cleaner or lower-exchange slots when the tariff saving is otherwise a tie. `max_revenue` disables these nudges entirely — it is purely financial.
+
+**`min_ghg`:** Battery wear cost is zeroed to allow the battery to time-shift freely between high- and low-CO₂ windows without a monetary penalty overriding the carbon signal.
+
+**`min_grid`:** Penalises the sum `p_imp[t] + p_exp[t]` every slot. This pushes the planner toward keeping all generation and consumption on-site (PV → battery → loads) and avoids round-tripping power through the grid even when tariffs would otherwise make export-then-reimport profitable.
+
+**`min_import`:** Penalises import volume only, not export. Use when the goal is near-zero grid draw (e.g. island-mode simulation or a flat-rate import contract where volume matters more than price timing).
+
+#### Constraint families
+
+| Family | What it enforces |
+|---|---|
+| **Power balance (Kirchhoff)** | `p_imp[t] + p_pv[t] + p_dis[t] = p_base[t] + p_ev[t] + p_heat[t] + p_shift[t] + p_ch[t] + p_exp[t]` — site net power sums to zero each slot |
+| **Import/export mutual exclusion** | `p_imp[t] ≤ p_imp_max · u_grid[t]` and `p_exp[t] ≤ p_exp_max · (1 − u_grid[t])` — prevents simultaneous import and export |
+| **VTN capacity limits** | `p_imp[t] ≤ p_imp_max_cont[t] + s_imp_viol[t]` with penalty on slack — soft capacity ceiling from VTN events |
+| **Battery SoC continuity** | `e_bat[t+1] = e_bat[t] + dt_h · (eff_ch · p_ch[t] − p_dis[t] / eff_dis)` — round-trip efficiency applied separately to charge/discharge |
+| **Battery mutual exclusion** | `u_bat[t]` binary; charge and discharge cannot occur in the same slot above a threshold |
+| **EV charger bounds** | `p_ev[t] ≤ p_ev_max · z_ev_on[t]`; availability mask forces `p_ev[t] = 0` when EV is absent or outside departure window |
+| **EV energy requirement** | Cumulative `p_ev[t] · dt_h` over the horizon meets the session energy target (hard if `MustRun`, reward-weighted if `MayRun`) |
+| **Heater relay schema** | `z_heat_mid[t] + z_heat_full[t] ≤ 1`; power = `p_mid · z_heat_mid[t] + p_full · z_heat_full[t]` — mutual exclusivity of mid/full tiers |
+| **Heater thermal continuity** | `e_tank[t+1] = e_tank[t] + dt_h · (p_heat[t] − Q_dem[t])` with temperature bounds enforced via `e_tank_min/max` |
+| **Heater switching** | `sw[t] ≥ |z_heat_mid[t] − z_heat_mid[t−1]|` and `|z_heat_full[t] − z_heat_full[t−1]|`; 0↔6 kW transitions incur 20% higher penalty (two relays switch) |
+| **Shiftable load** | Each shiftable load must start exactly once in its valid window: `Σ_j y_shift[j] = 1` |
+| **Cost lock (Phase 2)** | `phase1_cost_expr(vars) ≤ c_star + phase2_epsilon_eur` — the hard bound that makes Phase 2 Pareto-safe |
+
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md) · [heater_tank_milp_planning_model.md](docs/architecture/heater_tank_milp_planning_model.md)
 
 ---
 
@@ -514,6 +789,8 @@ This keeps domain logic free of infrastructure concerns and makes all external d
 - **Unit suffixes on physical quantities**: Every variable or field representing a physical quantity carries its unit as a suffix (e.g., `power_kw`, `energy_kwh`, `soc_pct`, `temperature_c`). This is a hard convention.
 - **File size limits**: No `VEN/src/` file exceeds 500 lines; `tasks/` files must stay below 200 lines. This enforces single-responsibility at the file level.
 
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
+
 ### 4.2 Deployment Topology
 
 ```
@@ -539,6 +816,8 @@ This keeps domain logic free of infrastructure concerns and makes all external d
 ```
 
 Network: a shared Docker bridge `vtn_openadr-net` connects all containers. State files are volume-mounted at `/data/state.json` per VEN.
+
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
 
 ### 4.3 Ring Map (Hexagonal Architecture)
 
@@ -573,6 +852,8 @@ grep -r "use crate::profile" VEN/src/entities VEN/src/controller VEN/src/routes
 grep -r "use crate::assets::" VEN/src/controller/milp_planner
 grep "serde_json::Value" VEN/src/vtn.rs
 ```
+
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
 
 ### 4.4 Module Responsibilities
 
@@ -662,6 +943,8 @@ Each loop is a `tokio::spawn`'d future that runs forever:
 #### `src/routes/` — HTTP adapters
 Axum handlers. Extract state from `AppCtx`, delegate to services or state accessors, return JSON. No business logic. Modules mirror the API surface (system, events, sim, hems, assets, timeline, reports, trace).
 
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
+
 #### `src/vtn.rs` — VTN HTTP client
 OAuth2 bearer-authenticated `reqwest` client. Implements `VtnPort`. Token cached in `Arc<RwLock<Option<Token>>>` with auto-refresh.
 
@@ -716,6 +999,8 @@ Seven `tokio::spawn` loops run concurrently:
 
 Note: `state_persist` is only spawned when `PERSIST_PATH` is set. Sim physics state is persisted inside the tick loop (Phase 8), using the same directory.
 
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
+
 ### 4.6 State Management & Locking
 
 `AppState` wraps three `Arc<RwLock<…>>` sections. The locking protocol is strict:
@@ -730,6 +1015,8 @@ Note: `state_persist` is only spawned when `PERSIST_PATH` is set. Sim physics st
    expensive_compute(snapshot);
    ```
 3. **Read-heavy** — `RwLock` allows many concurrent readers; writers are rare (plan adoption, tick update)
+
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
 
 ### 4.7 Control Flow End-to-End
 
@@ -770,6 +1057,8 @@ poll_events detects rate change
         obligation loop:
           due obligations → reporter.compute() → POST /reports to VTN
 ```
+
+> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
 
 ---
 
@@ -844,7 +1133,36 @@ absorber:
       ev_departure_guard_s: 1800
 ```
 
-Note: not all VENs carry all asset types. VEN-1 has EV + PV + battery + base load (no heater). Other VEN profiles vary. Assets not present in the profile are simply absent from the simulation.
+Note: not all VENs carry all asset types. VEN-1 has EV + PV + battery + base load (no heater). VEN-2 has heater + PV. Assets not present in the profile are simply absent from the simulation.
+
+**Heater asset profile parameters** (ven-2.yaml):
+
+```yaml
+assets:
+  - type: heater
+    id: heater
+    max_kw: 6.0          # full power tier
+    mid_kw: 3.0          # mid power tier (0 / mid / max are the three discrete levels)
+    temp_initial_c: 60.0
+    temp_min_c: 40.0     # tank hysteresis lower bound
+    temp_max_c: 80.0     # tank hysteresis upper bound
+    thermal_mass_kwh_per_c: 2.3   # thermal capacity of the tank
+    k_loss_kw_per_c: 0.05         # standby heat loss rate
+```
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `max_kw` | Full-tier electrical power (kW) | required |
+| `mid_kw` | Mid-tier electrical power (kW) | required |
+| `temp_min_c` | Minimum tank temperature — comfort lower bound (°C) | required |
+| `temp_max_c` | Maximum tank temperature — safety upper bound (°C) | required |
+| `temp_initial_c` | Initial tank temperature at sim start (°C) | required |
+| `thermal_mass_kwh_per_c` | Tank thermal capacity (kWh/°C) | required |
+| `k_loss_kw_per_c` | Standby heat loss rate (kW/°C) | required |
+| `min_run_slots` | Minimum consecutive 5-min slots heater must stay ON after a switch | planned — not yet a YAML parameter; hardcoded default = 0 (no minimum) |
+| `min_off_slots` | Minimum consecutive 5-min slots heater must stay OFF after a switch | planned — not yet a YAML parameter; hardcoded default = 0 (no minimum) |
+
+`min_run_slots` and `min_off_slots` model compressor protection for heat-pump assets — once started, a compressor must run for a minimum block (e.g., `3` slots = 15 min) to avoid damage. For a purely resistive heater or boiler, set both to `0`. These parameters are described in §2.4; implementation as YAML-configurable fields is planned.
 
 ---
 
