@@ -485,6 +485,7 @@ impl HeaterMilpContext {
         v: &HeaterMilpVars,
         w_tier_penalty_eur: f64,
         m_low_eur_kwh: f64,
+        lambda_sw_eur: f64,
         n: usize,
     ) -> Expression {
         let mut obj = Expression::from(0.0);
@@ -494,7 +495,7 @@ impl HeaterMilpContext {
         for t in 0..n {
             obj += w_tier_penalty_eur * v.z_heat_full[t]; // prefer mid over full when equal cost
             obj += m_low_eur_kwh * v.s_low[t]; // penalise below-min violations
-            obj += self.lambda_sw_eur * v.sw[t]; // penalise relay switches
+            obj += lambda_sw_eur * v.sw[t]; // penalise relay switches
         }
         obj
     }
@@ -655,17 +656,18 @@ impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
     ) -> Expression {
         let v = pool.heater.as_ref().unwrap();
         if c_startup_eur == 0.0 {
-            // Phase 1: below-min penalty only; tier=0, lambda=0 (lambda stored but not applied).
+            // Phase 1: below-min penalty only; tier=0, lambda_sw=0 (switching handled by Phase 2).
             HeaterMilpContext::objective(
                 self,
                 v,
                 0.0,
                 crate::controller::milp_planner::asset_port::M_LOW_EUR_PER_KWH,
+                0.0,
                 n,
             )
         } else {
-            // Phase 2 friction: tier penalty (c_ramp_eur_kw carries w_tier) + self.lambda_sw_eur.
-            HeaterMilpContext::objective(self, v, c_ramp_eur_kw, 0.0, n)
+            // Phase 2 friction: tier penalty + relay switching penalty.
+            HeaterMilpContext::objective(self, v, c_ramp_eur_kw, 0.0, self.lambda_sw_eur, n)
         }
     }
 }
@@ -717,9 +719,10 @@ impl Heater {
         v: &HeaterMilpVars,
         w_tier_penalty_eur: f64,
         m_low_eur_kwh: f64,
+        lambda_sw_eur: f64,
         n: usize,
     ) -> Expression {
-        ctx.objective(v, w_tier_penalty_eur, m_low_eur_kwh, n)
+        ctx.objective(v, w_tier_penalty_eur, m_low_eur_kwh, lambda_sw_eur, n)
     }
 
     /// Read back the heater solution from the solved model. Delegates to `HeaterMilpContext::read_solution`.
@@ -1016,7 +1019,7 @@ mod tests {
         assert!(q_dem >= 0.0, "q_dem must be non-negative, got {q_dem}");
     }
 
-    fn make_may_run_ctx(n: usize) -> HeaterMilpContext {
+    fn make_may_run_ctx(_n: usize) -> HeaterMilpContext {
         HeaterMilpContext {
             mode: HeaterMilpMode::MayRun,
             t_dead_step: None,
