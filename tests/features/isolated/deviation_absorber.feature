@@ -10,6 +10,19 @@ Feature: Multi-asset deviation absorber — isolated scenarios
     And I set pv plan forecast to 0.0 kW
 
   @isolated
+  Scenario: EV allowed to absorb surplus near departure
+    Given I DELETE the EV session
+    And I POST an EV session with target_soc 0.90 and departure in 0.33 hours
+    And the EV is plugged with SoC at 0.30 (below target)
+    And the battery SoC is reset to 1.0
+    And the plan state is initialized with net import 0.0 kW
+    When I create a PV surplus to produce negative deviation of 2.0 kW
+    And I wait for the EV setpoint to change from baseline
+    Then the absorber can adjust the EV charging
+    And the EV charge setpoint is more positive than baseline
+    And the EV moves closer to soc_target
+
+  @isolated
   Scenario: EV departure guard prevents reduction near departure
     Given I DELETE the EV session
     And I POST an EV session with target_soc 0.90 and departure in 0.33 hours
