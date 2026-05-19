@@ -145,6 +145,42 @@ This means the forecast shown in the timeline is guaranteed to be consistent wit
 
 The simulation can run in **headless mode** (pure physics) or with **sensor injection** (see §2.8) to override individual parameters.
 
+**Grid virtual asset (`AssetState::Grid`):** The Grid is not a physical device; it is a derived accounting view recomputed each tick from the sum of all other asset powers:
+
+```rust
+pub struct GridState {
+    pub net_power_kw: f64,     // positive = importing from grid, negative = exporting
+    pub import_limit_kw: f64,  // from active VTN IMPORT_CAPACITY_LIMIT events; always ≥ 0
+    pub export_limit_kw: f64,  // from active VTN EXPORT_CAPACITY_LIMIT events; always ≤ 0
+}
+```
+
+The Grid asset has no setpoint and is never controllable directly; it reflects the site's instantaneous balance.
+
+**Static vs. dynamic asset limits:**
+
+*Static limits* are constants in the YAML profile (e.g., `max_charge_kw`, `temp_max_c`, `rated_kw`). They are loaded at startup and do not change during a run.
+
+*Dynamic limits* are derived each tick from the current `AssetState`. They are never persisted — always recomputed:
+
+| Asset | Dynamic limit | Condition |
+|-------|--------------|-----------|
+| Battery | max discharge → 0 kW | `soc ≤ min_soc` |
+| Battery | max charge → 0 kW | `soc ≥ 1.0` |
+| EV | max charge/discharge → 0 kW | `plugged = false` |
+| Heater | available power quantised | thermostat state (off / mid / full) |
+| Site | import/export ceiling | active VTN capacity events (30 s poll) |
+
+**Clamp formulas** (sign convention: positive = import/charge, negative = export/discharge):
+
+| Asset | Expression |
+|-------|-----------|
+| Battery charge/discharge | `setpoint_kw.clamp(-max_discharge_kw, max_charge_kw)` |
+| EV charge/discharge | `setpoint_kw.clamp(-max_discharge_kw, max_charge_kw)` |
+| PV export curtailment | `raw_kw.max(export_limit_kw)` when limit ≤ 0 (prevents export beyond limit) |
+| Heater thermal energy | `e_kwh.clamp(0.0, (temp_max_c − temp_min_c) × thermal_mass_kwh_per_c)` |
+| Deviation absorber correction | `delta_kw.clamp(-headroom_kw, headroom_kw)` |
+
 > **Reference:** [asset_simulation.md](docs/architecture/asset_simulation.md) · [ven_asset_interface_spec.md](docs/architecture/ven_asset_interface_spec.md)
 
 ### 2.2 Energy Planning (MILP)
@@ -359,14 +395,6 @@ The VEN polls the VTN continuously over authenticated HTTPS.
 
 **Token refresh — current behaviour and enhancement path:** The token is cached and re-fetched only when within 60 seconds of expiry or on a 401 response. The 60-second safety margin is hardcoded in `vtn.rs`. Making it configurable (or disabling proactive refresh in favour of pure 401-driven refresh) is a small enhancement not yet implemented. For most lab use, the current behaviour is negligible traffic — one token fetch per ~hour.
 
-**Signal parsing:**
-- `PRICE` signals → import/export tariff time series
-- `GHG` signals → CO₂ intensity series (feeds multi-objective planner)
-- `SIMPLE` / `LOAD_DISPATCH` → curtailment targets
-- `ALERT` → triggers an immediate replan
-
-A rate-change event (new pricing) immediately triggers a plan recomputation via a `tokio::sync::watch` channel, without waiting for the next periodic interval.
-
 **Signal implementation status:**
 
 | Signal / payload type | Parsed? | Effect |
@@ -376,15 +404,82 @@ A rate-change event (new pricing) immediately triggers a plan recomputation via 
 | `GHG` | Yes | Sets CO₂ intensity series → feeds multi-objective (emissions mode) planner |
 | `IMPORT_CAPACITY_LIMIT` | Yes | Hard import ceiling per interval; MILP enforces as soft constraint with penalty; strictest of concurrent events wins |
 | `EXPORT_CAPACITY_LIMIT` | Yes | Same for export |
-| `IMPORT_CAPACITY_SUBSCRIPTION` | Yes | Parsed and stored; available to MILP capacity layer |
-| `IMPORT_CAPACITY_RESERVATION` | Yes | Parsed and stored; available to MILP capacity layer |
-| `SIMPLE` | Partially | No dedicated parser; a new event carrying a `SIMPLE` payload triggers a replan (any event arrival is a hard trigger), but the numeric value is not translated into a curtailment setpoint |
-| `LOAD_DISPATCH` | Partially | Same as SIMPLE — triggers replan but payload value is not mapped to a target |
-| `ALERT` | Partially | No dedicated `ALERT` payload type is parsed; the effective mechanism is that any new or expired event triggers a `RateChange` watch signal which wakes the planning loop immediately |
+| `IMPORT_CAPACITY_SUBSCRIPTION` | Yes | Parsed and stored in `OadrCapacityState`; available to MILP capacity layer |
+| `IMPORT_CAPACITY_RESERVATION` | Yes | Parsed and stored in `OadrCapacityState`; reported back to VTN |
+| `SIMPLE` | No — triggers replan only | Any new/expired event fires a `RateChange` watch signal → planning loop wakes; the numeric level (0–3) is not translated into a curtailment setpoint |
+| `LOAD_DISPATCH` | No — triggers replan only | Same mechanism as `SIMPLE` |
+| `ALERT_*` (all variants) | No — triggers replan only | No dedicated parser; event arrival/departure is the trigger |
+| All other types | Not implemented | See full taxonomy below |
 
-**Note:** The VEN always triggers an immediate replan on any event arrival or departure — regardless of payload type. This provides a functional fallback for unrecognised signal types. Full `SIMPLE` / `LOAD_DISPATCH` curtailment target handling (mapping the payload value to a capacity constraint) is not yet implemented.
+**The VEN always triggers an immediate replan on any event arrival or departure**, regardless of payload type. This provides a functional fallback for unrecognised signal types.
 
-> **Reference:** [VTN_ARCHITECTURE.md](docs/architecture/VTN_ARCHITECTURE.md)
+**Full OpenADR 3.0 signal taxonomy** (source: `openleadr-wire/src/event.rs`):
+
+*Price signals:*
+
+| Type | Value | Description | Implemented |
+|------|-------|-------------|-------------|
+| `PRICE` | float (EUR/kWh) | Import electricity price; drives MILP cost minimisation | Yes |
+| `EXPORT_PRICE` | float (EUR/kWh) | Export electricity price; sets MILP export revenue | Yes |
+
+*Environmental:*
+
+| Type | Value | Description | Implemented |
+|------|-------|-------------|-------------|
+| `GHG` | float (g CO₂/kWh) | Grid carbon intensity; feeds multi-objective CO₂-weighted planning | Yes |
+
+*Capacity management (Dynamic Operating Envelopes):*
+
+| Type | Value | Description | Implemented |
+|------|-------|-------------|-------------|
+| `IMPORT_CAPACITY_LIMIT` | float (kW) | Hard ceiling on site import power; MILP soft constraint | Yes |
+| `EXPORT_CAPACITY_LIMIT` | float (kW) | Hard ceiling on site export power; MILP soft constraint | Yes |
+| `IMPORT_CAPACITY_SUBSCRIPTION` | float (kW) | Subscribed import capacity; parsed and stored | Parsed only |
+| `IMPORT_CAPACITY_RESERVATION` | float (kW) | Reserved import capacity; parsed, stored, reported | Parsed only |
+| `IMPORT_CAPACITY_RESERVATION_FEE` | float | Fee for import capacity reservation | Not implemented |
+| `IMPORT_CAPACITY_AVAILABLE` | float (kW) | Available import capacity from grid operator | Not implemented |
+| `IMPORT_CAPACITY_AVAILABLE_PRICE` | float | Price for available import capacity | Not implemented |
+| `EXPORT_CAPACITY_SUBSCRIPTION` | float (kW) | Subscribed export capacity | Not implemented |
+| `EXPORT_CAPACITY_RESERVATION` | float (kW) | Reserved export capacity | Not implemented |
+| `EXPORT_CAPACITY_RESERVATION_FEE` | float | Fee for export capacity reservation | Not implemented |
+| `EXPORT_CAPACITY_AVAILABLE` | float (kW) | Available export capacity from grid operator | Not implemented |
+| `EXPORT_CAPACITY_AVAILABLE_PRICE` | float | Price for available export capacity | Not implemented |
+
+*Control signals:*
+
+| Type | Value | Description | Implemented |
+|------|-------|-------------|-------------|
+| `SIMPLE` | integer 0–3 | Level-based DR: 0=normal, 1=moderate, 2=high, 3=emergency | Not implemented (triggers replan only) |
+| `DISPATCH_SETPOINT` | float (W) | Absolute power setpoint for site or asset | Not implemented |
+| `DISPATCH_SETPOINT_RELATIVE` | float (W) | Relative power change (signed) | Not implemented |
+| `CHARGE_STATE_SETPOINT` | float (%) | Target state of charge for battery/EV | Not implemented |
+| `OLS` | float 0.0–1.0 | Operating Limit Setpoint — fraction of rated power | Not implemented |
+| `CURVE` | point pairs | Volt-var or other characteristic curves | Not implemented |
+| `CONTROL_SETPOINT` | depends | Generic control setpoint | Not implemented |
+
+*Alert signals* (all trigger replan via event arrival; payload not parsed):
+
+| Type | Description |
+|------|-------------|
+| `ALERT_GRID_EMERGENCY` | Grid emergency — requires immediate load shed |
+| `ALERT_BLACK_START` | Black start event — grid restoration sequence |
+| `ALERT_POSSIBLE_OUTAGE` | Outage warning — pre-emptive load reduction |
+| `ALERT_FLEX_ALERT` | Flexibility shortfall — voluntary DR requested |
+| `ALERT_FIRE`, `ALERT_FREEZING`, `ALERT_WIND`, `ALERT_TSUNAMI`, `ALERT_AIR_QUALITY`, `ALERT_OTHER` | Environmental/safety alerts |
+
+*Device-specific:*
+
+| Type | Value | Description | Implemented |
+|------|-------|-------------|-------------|
+| `CTA2045_REBOOT` | 0=soft, 1=hard | CTA-2045 device reboot command | Not implemented |
+| `CTA2045_SET_OVERRIDE_STATUS` | 0/1 | CTA-2045 override flag | Not implemented |
+| `Private(String)` | any | Custom private event types | Not implemented |
+
+**VEN-initiated capacity requests — not implemented.** The struct `OadrCapacityRequest` exists in the codebase but has no callers. The VEN currently only receives capacity constraints from the VTN; it cannot initiate a reservation request (e.g., "I need 11 kW for 2 hours"). The VEN-to-VTN request model is defined in the OpenADR 3.0 spec but is not implemented in this lab.
+
+**Operator motivation profiles — not implemented.** The VEN is hardcoded to minimise import cost (weighted by tariff and CO₂ intensity). The OpenADR concept doc defines operator profiles (cost-optimiser, compliance-driven, comfort-priority, EV fleet, DSO-contracted), but no profile selection mechanism exists in the VEN configuration. All three VEN instances use the same MILP objective structure.
+
+> **Reference:** [VTN_ARCHITECTURE.md](docs/architecture/VTN_ARCHITECTURE.md) · [concept_vtn_ven_demand_response_simulation.md](docs/architecture/concept_vtn_ven_demand_response_simulation.md)
 
 ### 2.6 Report Obligations
 *(FR-OA-04)*
@@ -466,6 +561,24 @@ VEN state is persisted in two separate mechanisms:
 
 On restart, the physics state is reloaded and simulation resumes from where it left off. Profile parameters (physics constants, planner weights) are recomputed from the YAML profile file and merged back into the loaded state, so config changes take effect cleanly without manual state migration.
 
+**What is persisted per asset (`sim_state.json`):**
+
+| Asset | Persisted fields |
+|-------|-----------------|
+| Battery | `soc` (0–1), `actual_power_kw`, `setpoint_kw`, cumulative `energy_kwh` |
+| EV | `soc` (0–1), `plugged` (bool), `actual_power_kw`, `setpoint_kw`, cumulative `energy_kwh` |
+| Heater | `temperature_c`, `actual_power_kw`, `setpoint_kw`, cumulative `energy_kwh` |
+| PV | `actual_power_kw`, `setpoint_kw`, cumulative `energy_kwh` |
+| Base load | `actual_power_kw`, `setpoint_kw`, cumulative `energy_kwh` |
+| Grid | net / import / export power and cumulative energy totals (`GridMeter`) |
+| Tick timestamp | `last_tick: DateTime<Utc>` — used to advance time on restart |
+
+**What is NOT persisted (cleared on restart):**
+
+- `AssetHistoryBuffer` (3600-entry power history ring buffer) — starts empty on each boot
+- PV and base-load EMA smoothing state — reset to zero
+- Active plan and MILP schedule — recomputed on first planning cycle
+
 **Plan persistence — not yet implemented.** On restart the VEN recomputes a fresh plan from current sim state. This means `GET /timeline/*` is unavailable until the first plan is computed (typically within seconds), and any pending report obligations that reference the pre-restart plan's trajectory are approximated from the new plan. For production DR deployments where continuous VTN forecast reporting is required, plan serialisation to `/data/state.json` on plan adoption (and reload on startup) is a necessary future enhancement.
 
 > **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
@@ -481,7 +594,28 @@ On restart, the physics state is reloaded and simulation resumes from where it l
 | Structured logs | JSON tracing output via `tracing-subscriber`; level controlled by `RUST_LOG` |
 | Planner progress SSE | Server-Sent Events pushed during MILP solve (solving started, phase progress, plan adopted) |
 
-**Asset power log — current capability:** Each asset maintains a 3600-entry ring buffer of per-second history (`AssetHistoryBuffer` in `simulator/`), accessible via `GET /history/:asset_id`. This provides ~1 hour of 1-second resolution power, SoC, and temperature traces. Configurable aggregation window (e.g., 5-minute means) and longer retention beyond 3600 seconds are not yet implemented. For reporting purposes the reporter computes time-weighted means over report intervals directly from the ring buffer.
+**Asset power log — `AssetHistoryBuffer`:** Each asset maintains a 3600-entry ring buffer of per-second history, accessible via `GET /history/:asset_id`. This provides ~1 hour of 1-second resolution power, SoC, and temperature traces.
+
+Each entry (`HistoryPoint`) stores:
+```rust
+pub struct HistoryPoint {
+    pub ts:       DateTime<Utc>,
+    pub power_kw: f64,        // signed: positive = import, negative = export
+    pub state:    AssetState, // full state snapshot (SoC, temperature, etc.)
+}
+```
+
+Public ring-buffer API (`assets/mod.rs`):
+
+| Method | Description |
+|--------|-------------|
+| `push(point)` | Appends a point; evicts oldest when buffer is full (capacity 3600) |
+| `slice(window)` | Returns all points in `[now − window, now]`, ordered ascending |
+| `latest()` | Most recent `HistoryPoint` |
+| `power_at(t)` | Last-observation-carried-forward power at or before time `t` |
+| `recent_avg_power(window)` | Time-weighted average power over window (LOCF between points) |
+
+Configurable aggregation windows and retention beyond 3600 seconds are not yet implemented. For reporting, the reporter calls `recent_avg_power()` over the obligation interval directly from the ring buffer. The history buffer is cleared on restart (not persisted).
 
 > **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
 
@@ -669,6 +803,57 @@ Each `PlannerObjective` preset selects a fixed Phase 1 weight vector. The object
 | **Cost lock (Phase 2)** | `phase1_cost_expr(vars) ≤ c_star + phase2_epsilon_eur` — the hard bound that makes Phase 2 Pareto-safe |
 
 > **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md) · [heater_tank_milp_planning_model.md](docs/architecture/heater_tank_milp_planning_model.md)
+
+---
+
+### 2.13 Functional Requirements Cross-Reference
+
+Quick-reference table mapping every FR code to its one-line description. Full requirement text lives in [`docs/REQUIREMENTS.md §4`](docs/REQUIREMENTS.md).
+
+#### OpenADR Integration (FR-OA / OA)
+
+| Code | Description |
+|------|-------------|
+| [FR-OA-01](#25-vtn-integration-openadr-3) | VEN MUST poll `/events` at 30 s fixed interval to detect new, updated, or deleted events |
+| [FR-OA-02](#25-vtn-integration-openadr-3) | VEN MUST obtain and refresh OAuth2 token before calling any VTN endpoint |
+| [FR-OA-03](#25-vtn-integration-openadr-3) | VEN MUST detect event deletion and treat it as cancellation; roll back active DR response |
+| [FR-OA-04](#26-report-obligations) | VEN MUST submit reports for any active `reportDescriptor` obligation from event payloads |
+| [FR-OA-06](#210-observability) | All timestamps MUST be UTC, ISO 8601 / RFC 3339 format |
+| [FR-OA-07](#25-vtn-integration-openadr-3) | On VTN communication failure, VEN MUST back off exponentially (1–15 min) and continue on last-known state |
+| [FR-OA-08](#25-vtn-integration-openadr-3) | Event priority: lower number = higher priority; newer event breaks ties |
+| [OA-01](#25-vtn-integration-openadr-3) | Emergency Load Shed — respond within one poll cycle (30 s); acknowledge event; correct timing |
+| [OA-02](#25-vtn-integration-openadr-3) | Renewable Export Limitation — enforce `EXPORT_CAPACITY_LIMIT` per interval |
+| [OA-03](#25-vtn-integration-openadr-3) | Time-of-Use / Dynamic Price — handle multi-interval uniform pricing; update on late VTN corrections |
+| [OA-04](#25-vtn-integration-openadr-3) | Planned Peak Shaving — track event lifecycle; handle modifications |
+| [OA-05](#25-vtn-integration-openadr-3) | EV Charging Management — resolve overlapping events by priority; apply group membership |
+| [OA-06](#25-vtn-integration-openadr-3) | Battery Dispatch Window — honour directional control (charge vs. discharge) per interval |
+| [OA-07](#25-vtn-integration-openadr-3) | Program Enrollment / Connectivity — acknowledge no-op events; send telemetry on schedule |
+| [OA-08](#25-vtn-integration-openadr-3) | Event Cancellation — detect event deletion on poll; perform clean rollback; maintain state consistency |
+
+#### Asset Interface (FR-ASSET)
+
+| Code | Description |
+|------|-------------|
+| [FR-ASSET-01](#27-flexibility-envelope) | Every asset MUST implement `current() → f64` — present power in kW |
+| [FR-ASSET-02](#27-flexibility-envelope) | Every asset MUST implement `forecast(horizon) → Vec<(DateTime, f64)>` — predicted power over horizon |
+| [FR-ASSET-03](#27-flexibility-envelope) | Every asset MUST implement `history(window) → Vec<(DateTime, f64)>` — recorded power history |
+| [FR-ASSET-04](#23-real-time-deviation-absorption) | Asset simulation backend MUST be encapsulated; controller accesses only via three-window interface |
+| [FR-ASSET-05](#23-real-time-deviation-absorption) | Simulated and measured assets of same type MUST be interchangeable from controller's perspective |
+
+#### Simulator (FR-SIM)
+
+| Code | Description |
+|------|-------------|
+| [FR-SIM-01](#21-simulation-engine) | Simulator MUST model at minimum: PV, battery, EV, heater, base load |
+| [FR-SIM-02](#21-simulation-engine) | Asset model MUST be generic (`Vec<AssetEntry>`) — adding new type requires no core loop changes |
+| [FR-SIM-03](#28-simulation-injection--overrides) | PV generation MUST be derived from irradiation: `P_pv = P_max × (irradiance_W_m2 / irradiance_stc)` |
+| [FR-SIM-04](#21-simulation-engine) | Battery MUST support bidirectional power, round-trip efficiency, SOC bounds |
+| [FR-SIM-05](#21-simulation-engine) | EV MUST support minimum charge rate (1.5 kW), stepless adjustment, 10 s response delay model |
+| [FR-SIM-06](#21-simulation-engine) | Heater MUST implement thermal model: `dT/dt = (P_heater × efficiency − ambient_loss) / thermal_mass` |
+| [FR-SIM-07](#29-persistence--recovery) | Simulator state MUST persist to `/data/sim_state.json` and survive VEN restart |
+| [FR-SIM-08](#21-simulation-engine) | Profile configuration MUST be loaded from `VEN/profiles/<ven-id>.yaml` via `PROFILE_PATH` env var |
+| [FR-SIM-09](#28-simulation-injection--overrides) | `POST /sim/override` MUST be a full-replace operation (not a patch) |
+| [FR-SIM-10](#210-observability) | `GET /sim/schema` MUST return JSON schema for profile YAML to support tooling |
 
 ---
 
@@ -1058,7 +1243,144 @@ poll_events detects rate change
           due obligations → reporter.compute() → POST /reports to VTN
 ```
 
+**Per-tick Dispatcher → Asset call chain** (`tasks/sim_tick/`, `controller/dispatcher.rs`, `simulator/mod.rs`):
+
+```
+Step 1 — Build setpoints  (dispatcher.rs: build_setpoints())
+  ├─ Initialise all assets to their default setpoints
+  ├─ Find current slot in active MILP plan
+  ├─ Overwrite with plan allocations (battery, EV, heater)
+  ├─ Apply heater thermostat override if no plan allocation
+  ├─ Enforce EXPORT_CAPACITY_LIMIT on PV (curtailment)
+  └─ Apply opportunistic surplus EV charging overlay
+
+Step 2 — Physics tick  (simulator/mod.rs: SimState::tick())
+  For each asset in Vec<AssetEntry>:
+    ├─ Apply Behaviour B/C environment overrides
+    │   (PV irradiance, EV plug state, ambient temp, etc.)
+    └─ cfg.step(&state, setpoint_kw, dt_s)  →  (new_state, actual_kw)
+        Asset-specific physics:
+          Battery  → SoC integration + efficiency losses
+          EV       → SoC integration + plug gate + minimum charge rate
+          Heater   → thermal ODE dT/dt + thermostat bounds
+          PV       → irradiance model + EMA smoothing + export clamp
+          BaseLoad → fixed profile lookup
+
+Step 3 — Deviation absorption  (controller/absorber.rs)
+  Compare actual_kw vs. planned_kw per asset
+  Correct deviations within per-asset headroom
+  Sustained residual → fires DeviceDeviation watch → triggers replan
+
+Step 4 — Finalise  (tasks/sim_tick/helpers.rs: finalize_tick_outputs())
+  ├─ Push HistoryPoint to each asset's ring buffer
+  ├─ Recompute GridState (net_power_kw, import_limit_kw, export_limit_kw)
+  └─ Recompute site FlexibilityEnvelope
+```
+
 > **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
+
+---
+
+### 4.8 VTN Internal Architecture
+
+#### 4.8.1 openleadr-rs VTN Server
+
+The VTN is implemented in Rust (Axum) via the `openleadr-rs` git submodule (`openleadr-rs/`), tracking the fork `TinkerPhu/openleadr-rs`.
+
+**Responsibilities:**
+- OAuth2 authorization server — token endpoint is `POST /auth/token` (not `/oauth/token`)
+- Full OpenADR 3 API: programs, events, reports, VENs, resources
+- Event lifecycle management (create, update, delete)
+- Report ingestion and storage
+
+**Database:** PostgreSQL 16 (`vtn-db-1`, host port 8201). SQLx manages a 15-table schema; migrations apply automatically on first boot. The database is not exposed to VENs — only the VTN reads it.
+
+**Token TTL:** 2,592,000 s (30 days). Clients refresh on 401.
+
+**Fixture users (seeded at boot):** `any-business`, `ven-manager`, `user-manager`, `business-1`, `ven-1`.
+
+**Field names:** No DTO normalization — upstream OpenADR field names (`programName`, `venName`, `eventName`, `createdDateTime`) pass through all layers unchanged (backend, BFF, UI).
+
+#### 4.8.2 BFF Dual-Credential Pattern
+
+The VTN BFF (Rust Axum, port 8220) sits between the browser UI and the VTN API. VTN RBAC requires two separate credentials because no single role covers both operator and admin operations:
+
+| Credential | Role | Authorized endpoints |
+|-----------|------|---------------------|
+| `any-business` | Business operator | `GET/POST/PUT/DELETE /programs`, `/events`, `/reports` |
+| `ven-manager` | VEN admin | `GET/POST/PUT/DELETE /vens` |
+
+The BFF holds two independent `VtnClient` instances, one per credential. Each token auto-refreshes on 401. The browser communicates with the BFF via session-scoped API keys, not OAuth credentials.
+
+**Report constraint:** `POST /reports` requires VEN role. The BFF's `any-business` credential cannot create reports. VENs submit reports directly to the VTN; the BFF only proxies report reads.
+
+#### 4.8.3 OpenADR Message Sequences
+
+Six core flows (full sequence diagrams in [`docs/architecture/VTN_ARCHITECTURE.md §4`](docs/architecture/VTN_ARCHITECTURE.md)):
+
+| Flow | Summary |
+|------|---------|
+| VEN startup | Token fetch → program poll → event poll (all within first 30 s cycle) |
+| Event distribution | VEN polls `/events` every 30 s; VTN responds with current event list |
+| Event update | VEN detects changed `modificationDateTime`; re-evaluates active DR response |
+| Event cancellation | VEN detects deletion on poll; rolls back active DR response; re-plans |
+| Token lifecycle | 30-day TTL; VEN refreshes on 401; no proactive refresh |
+| Report submission | VEN → `POST /reports` directly to VTN (not via BFF) on obligation schedule |
+
+#### 4.8.4 Docker Network Topology
+
+**Host port mapping:**
+
+| Container | Host Port | Role |
+|-----------|-----------|------|
+| `vtn-vtn-1` | 8200 | openleadr-rs VTN API |
+| `vtn-db-1` | 8201 | PostgreSQL 16 |
+| `ven-ven-1-1` | 8211 | VEN instance (ven-1) |
+| `ven-ven-2-1` | 8212 | VEN instance (ven-2) |
+| `ven-ven-3-1` | 8213 | VEN instance (ven-3) |
+| `ven-ui-1` | 8214 | React VEN Web UI |
+| `vtn-bff-1` | 8220 | Rust Axum BFF |
+| `vtn-ui-1` | 8221 | React VTN UI (nginx) |
+
+**Docker network:** `vtn_openadr-net` (named from compose project `vtn`). VEN compose files join it as `external: true`. Container-to-container DNS uses Docker service names (`vtn`, `ven-1`, etc.). Host access uses `Pi4-Server:<host-port>`.
+
+**Compose layout:**
+```
+/srv/docker/openadr_lab/
+  VTN/   → compose project name: vtn  (VTN, BFF, DB, VTN UI)
+  VEN/   → compose project name: ven  (VEN instances, VEN UI)
+  tests/ → test compose files
+  openleadr-rs/  → git submodule
+```
+
+> **Reference:** [VTN_ARCHITECTURE.md](docs/architecture/VTN_ARCHITECTURE.md)
+
+---
+
+### 4.9 Design Decisions
+
+Rationale for key architectural choices, sourced from [`docs/architecture/VEN_ARCHITECTURE.md §6`](docs/architecture/VEN_ARCHITECTURE.md).
+
+**D-01: Two-phase MILP solver (supersedes initial greedy design)**  
+The codebase uses a two-phase MILP (HiGHS) for scheduling. VEN_ARCHITECTURE.md §6 D-01 records an earlier design decision to use a priority-based greedy planner ("not LP/MILP"), but this was superseded when the MILP implementation was adopted. The two-phase structure (Phase 1: cost minimisation; Phase 2: friction/switching minimisation under the Phase 1 cost bound) is what is actually implemented. See §2.2 and §2.12.
+
+**D-02: In-memory ledger**  
+`AssetLedger` is kept in memory only and resets on restart. Persistent billing-period data is stored at the VTN as reports. Local persistence adds complexity for little benefit in a lab context.
+
+**D-03: Reactor removed (spec kit 001)**  
+The reactor FSM (Idle → Delaying → Ramping → Holding → RampingBack) and its arbitration logic were removed because the Dispatcher silently overwrote the reactor's output for any asset with a plan allocation, making the reactor redundant. The controller is now the single control authority. `GET /trace` still exists and records Dispatcher decisions.
+
+**D-04: Generic asset model (spec kit 002)**  
+`SimState.assets: Vec<AssetEntry>` with enum dispatch (`AssetState`, `AssetConfig`). The earlier named-field model required touching every layer when adding a new asset type. The generic model isolates new types to their own module — no changes to the simulator loop, API handlers, or profile parser.
+
+**D-05: `OadrEventSnapshot` unification**  
+All time-varying VTN signals (price, CO₂, capacity limits) are stored in one struct per poll tick. A separated-field model caused temporal alignment bugs when price and capacity signals had different poll timestamps. The unified struct guarantees all fields are co-valid at the same timestamp.
+
+**D-06: `POST /sim/override` is full-replace**  
+The override endpoint replaces the entire override struct (not a PATCH). Partial-patch semantics require null-vs-absent disambiguation that is error-prone for callers. Full-replace is explicit: callers must set all fields they want active.
+
+**D-07: 30 s fixed poll interval**  
+Event polling is fixed at 30 s. This balances VTN load against response latency. The 30–60 s range from the original system design was narrowed to 30 s fixed in implementation; configurable jitter is not implemented in the lab.
 
 ---
 
@@ -1210,6 +1532,45 @@ The React UI is served from the same Docker Compose stack on port 8214. It conne
 - Event / program monitoring
 - Ledger and cost tracking
 - Controller trace diagnostics
+
+### VEN Provisioning
+
+VENs are provisioned via the VTN admin API. Four steps, three different credential roles:
+
+```
+Step 1 — Create user account (user-manager role)
+  POST /users
+  body: { "reference": "ven-1", "description": "VEN 1", "roles": [] }
+  → returns { "id": "<user-uuid>" }
+
+Step 2 — Add OAuth credential to user (user-manager role)
+  POST /users/{user-uuid}/credentials
+  body: { "client_id": "ven-1", "client_secret": "ven-1" }
+
+Step 3 — Create VEN entity (ven-manager role)
+  POST /vens
+  body: { "venName": "ven-1" }
+  → returns { "id": "<ven-uuid>" }
+
+Step 4 — Assign VEN role to user (user-manager role)
+  PUT /users/{user-uuid}
+  body: {                             ← FULL body required (not a patch)
+    "reference": "ven-1",
+    "description": "VEN 1",
+    "roles": [{ "role": "VEN", "id": "<ven-uuid>" }]
+  }
+```
+
+**Important:** Step 4 is a full-replace PUT. The `roles` array must include all roles, not just the new one. The VTN does not support PATCH on users.
+
+**VEN identity model:**
+- `ven_id` — stable UUID assigned at `POST /vens`
+- OAuth `client_id` / `client_secret` — used for token acquisition
+- `venName` — human-readable name, used in event `targets` filtering
+
+**Target filtering:** Programs and events with `targets: [{ type: "VEN_NAME", values: ["ven-1"] }]` are visible only to the named VEN(s). Programs/events with `targets: null` are open to all VENs.
+
+> **Reference:** [VTN_ARCHITECTURE.md §5](docs/architecture/VTN_ARCHITECTURE.md)
 
 ---
 
