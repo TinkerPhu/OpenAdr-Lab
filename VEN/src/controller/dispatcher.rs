@@ -125,13 +125,19 @@ pub fn apply_surplus_ev_overlay(
     // not one tick late). Falls back to power_kw for assets with no setpoint
     // (e.g. PV, which is physics-driven and has its setpoint set from the default).
     // PV contributes negative (export); loads (base_load, heater, …) positive (import).
+    // For uncontrolled/physics-driven assets (default_setpoint_kw = f64::MAX, e.g. PV),
+    // the setpoints map holds f64::MAX which would corrupt the sum. Fall back to
+    // snap.power_kw (actual measured power) for those assets.
     let net_other_kw: f64 = sim
         .assets
         .iter()
         .filter(|(id, _)| {
             id.as_str() != crate::ids::ASSET_EV && id.as_str() != crate::ids::ASSET_BATTERY
         })
-        .map(|(id, snap)| setpoints.get(id).copied().unwrap_or(snap.power_kw))
+        .map(|(id, snap)| {
+            let sp = setpoints.get(id).copied().unwrap_or(snap.power_kw);
+            if sp.abs() > 1e20 { snap.power_kw } else { sp }
+        })
         .sum();
     // Also account for any battery charging that the plan has already allocated this
     // tick (positive setpoint = charging). This prevents double-allocating PV surplus

@@ -33,7 +33,7 @@ pub(crate) fn build_plan_envelopes(
                 let slots_available =
                     ((window_end - window_start).num_seconds() / step_s).max(0) as usize;
                 let t_start = 0usize;
-                let t_end = ((window_end - now).num_seconds() / step_s).min(n as i64) as usize;
+                let t_end = ((window_end - now).num_seconds() / step_s).max(0).min(n as i64) as usize;
                 let eligible = t_start..t_end;
                 let count = eligible.len().max(1) as f64;
                 let avg_tariff = (t_start..t_end)
@@ -71,7 +71,7 @@ pub(crate) fn build_plan_envelopes(
                 let window_end = target.ready_by;
                 let slots_available =
                     ((window_end - window_start).num_seconds() / step_s).max(0) as usize;
-                let t_end = ((window_end - now).num_seconds() / step_s).min(n as i64) as usize;
+                let t_end = ((window_end - now).num_seconds() / step_s).max(0).min(n as i64) as usize;
                 let count = t_end.max(1) as f64;
                 let avg_tariff = (0..t_end).map(|t| inputs.c_imp_eur_kwh[t]).sum::<f64>() / count;
                 let avg_co2 = (0..t_end)
@@ -107,7 +107,7 @@ pub(crate) fn build_plan_envelopes(
         let window_end = sl.latest_end;
         let slots_available = ((window_end - window_start).num_seconds() / step_s).max(0) as usize;
         let t_start = ((window_start - now).num_seconds() / step_s).max(0) as usize;
-        let t_end = ((window_end - now).num_seconds() / step_s).min(n as i64) as usize;
+        let t_end = ((window_end - now).num_seconds() / step_s).max(0).min(n as i64) as usize;
         let count = (t_end.saturating_sub(t_start)).max(1) as f64;
         let avg_tariff = (t_start..t_end)
             .map(|t| inputs.c_imp_eur_kwh[t])
