@@ -50,7 +50,6 @@ use super::*;
                 max_export_kw: 10.0,
             },
             packets: vec![],
-            absorber: Default::default(),
         };
         let sim = make_snap_from_profile(&profile);
         let plan = run_planner(
@@ -376,7 +375,6 @@ use super::*;
             },
             grid: GridConfig { max_import_kw: 25.0, max_export_kw: 10.0 },
             packets: vec![],
-            absorber: Default::default(),
         }
     }
 

@@ -11,7 +11,7 @@
 2. [Feature Reference](#2-feature-reference)
    - 2.1 [Simulation Engine](#21-simulation-engine)
    - 2.2 [Energy Planning (MILP)](#22-energy-planning-milp)
-   - 2.3 [Real-time Deviation Absorption](#23-real-time-deviation-absorption)
+   - 2.3 [Real-time Deviation Absorption](#23-real-time-deviation-absorption) *(planned — not yet implemented)*
    - 2.4 [User Energy Requests](#24-user-energy-requests)
    - 2.5 [VTN Integration (OpenADR 3)](#25-vtn-integration-openadr-3)
    - 2.6 [Report Obligations](#26-report-obligations)
@@ -179,7 +179,6 @@ The Grid asset has no setpoint and is never controllable directly; it reflects t
 | EV charge/discharge | `setpoint_kw.clamp(-max_discharge_kw, max_charge_kw)` |
 | PV export curtailment | `raw_kw.max(export_limit_kw)` when limit ≤ 0 (prevents export beyond limit) |
 | Heater thermal energy | `e_kwh.clamp(0.0, (temp_max_c − temp_min_c) × thermal_mass_kwh_per_c)` |
-| Deviation absorber correction | `delta_kw.clamp(-headroom_kw, headroom_kw)` |
 
 > **Reference:** [asset_simulation.md](docs/architecture/asset_simulation.md) · [ven_asset_interface_spec.md](docs/architecture/ven_asset_interface_spec.md)
 
@@ -245,73 +244,16 @@ When `elapsed_s ≥ plan_adoption_decay_s` the plan is considered fully decayed 
 
 > **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md) · [heater_tank_milp_planning_model.md](docs/architecture/heater_tank_milp_planning_model.md)
 
-### 2.3 Real-time Deviation Absorption
-*(UC-08, UC-09; FR-ASSET-01, FR-ASSET-04)*
+### 2.3 Real-time Deviation Absorption *(planned — not yet implemented)*
 
-Between planning cycles, a **two-tier control architecture** keeps the site on its MILP plan:
+Between planning cycles a **two-tier reactive control layer** is intended to keep the site on its MILP plan without triggering a full replan:
 
-#### Tier 1 — Absorber (every tick, ~1 second)
+- **Tier 1 — fast absorber (~1 s):** Computes `deviation_kw = actual_net_kw − planned_net_kw` each tick and distributes corrections across controllable assets (battery → EV → heater) within their flexibility headroom, subject to per-asset dead-band, priority order, relay-wear linger, and EV departure guard constraints.
+- **Tier 2 — replan escalation:** When the uncovered residual stays outside the dead-band for `deviation_trigger_ticks` consecutive ticks, a `DeviceDeviation` trigger forces an immediate MILP replan.
 
-The absorber corrects deviations between planned and actual grid power without triggering a full replan.
+This feature is **not yet implemented**. The current tick loop does not run a deviation absorber; deviations between planned and actual power are visible in the simulator state but trigger replanning only on the periodic schedule.
 
-**Deviation computation:**
-```
-deviation_kw = actual_net_kw − planned_net_kw
-```
-Positive = site is importing more than planned; correction must reduce import (reduce heater, curtail EV, discharge battery).  
-Negative = site is importing less than planned (e.g. PV spike); correction must increase import (charge battery, ramp EV up).
-
-**Note — PV curtailment not yet implemented:** The absorber and dispatcher currently treat PV as non-curtailable (read-only). Some OpenADR `LOAD_DISPATCH` signals may require export curtailment; this would need a controllable PV inverter model and a curtailment setpoint path.
-
-**Per-asset correction state machine:**
-
-Each asset in the absorber configuration independently tracks a *correction overlay* (delta from the MILP setpoint):
-
-```
-Idle  ─── |deviation| > dead_band ──►  Correcting
-           overlay = planned_sp + delta        │
-                                               │ |deviation| ≤ dead_band
-                                               │ for dead_band_clearing_ticks ticks
-                                               ▼
-                                          Settling
-                                          (overlay ramps to 0 over 1 tick)
-                                               │
-                                               ▼
-                                          Idle  (back to clean MILP setpoint)
-```
-
-The `dead_band_clearing_ticks` wait-gate prevents chattering: if the deviation momentarily dips inside the dead-band but then rises again, the settling counter resets to zero and the overlay is held.
-
-**Worked example:** `dead_band_kw = 0.1`, `dead_band_clearing_ticks = 1`.
-
-- *Tick 1:* Plan = 2.0 kW grid import. Actual = 2.3 kW. `deviation_kw = +0.3` (exceeds dead-band). Battery is Idle → transitions to Correcting; absorber applies –0.3 kW overlay (battery discharges 0.3 kW extra).
-- *Tick 2:* Battery discharge covers the gap. Actual = 2.05 kW. `deviation_kw = +0.05` (< dead-band). Battery enters Settling; `dead_band_clearing_ticks = 1` → satisfied in one tick → transitions to Idle. Overlay cleared, battery returns to MILP setpoint.
-- *If at Tick 2 the deviation spiked again (0.2 kW):* The settling counter resets to zero and the battery remains in Correcting until the deviation stays below dead-band for the full clearing count.
-
-**Constraints applied before each asset correction:**
-
-| Constraint | Effect |
-|------------|--------|
-| Dead-band (`dead_band_kw`, default 0.1 kW) | Corrections smaller than this are ignored entirely |
-| Asset priority order (profile-configured) | Assets are tried in priority order: lower number = first (default: battery 0, EV 1) |
-| Headroom bounds | Battery: bounded by SoC vs. min-SoC floor; EV charge: bounded by curtailable setpoint (down) or remaining capacity-to-target (up); Heater: discrete step (off → mid → max) |
-| Relay wear linger (`min_state_linger_s`) | Asset is skipped if fewer than `min_state_linger_s` seconds have passed since its last state change |
-| EV departure guard (`ev_departure_guard_s`) | If an EV session is active, departure is within the guard window (ven-1 profile: 1800 s), AND the EV's current SoC is below its target, the absorber will NOT reduce EV charging (positive deviation). The guard does not apply when SoC ≥ target (already satisfied), when deviation is negative (surplus absorption — EV charging is always increased), or when no session is active |
-
-**SSE telemetry:** When a correction is applied the absorber broadcasts a `PlannerEvent::CorrectionActive` SSE event with planned vs. actual net power and the correction magnitude. When the correction clears it emits `PlannerEvent::CorrectionCleared`. Events are deduplicated: a new SSE fires only when the total correction changes by > 0.2 kW.
-
-**Use cases for correction SSE events:**
-- **UI status indicator:** The frontend can show a live "absorber active" indicator (e.g., yellow badge) when `CorrectionActive` is received, returning to green on `CorrectionCleared`. This gives the operator real-time visibility of how much the site deviates from plan.
-- **DR compliance monitoring:** A client subscribing to the SSE stream can log correction magnitude and duration; sustained corrections are a signal that the MILP plan needs re-tuning or the asset is degraded.
-- **Tier-2 trigger transparency:** The SSE shows the residual being accumulated toward Tier-2 escalation, making it auditable when a full replan was triggered and why.
-
-#### Tier 2 — DeviceDeviation escalation
-
-After the absorber runs, the uncovered `residual_kw` (what could not be absorbed) is accumulated tick-by-tick. When the residual exceeds the dead-band for `deviation_trigger_ticks` consecutive ticks, a `DeviceDeviation` trigger is sent to the planning loop, which wakes up immediately and runs a full MILP replan. This ensures sustained under- or over-performance that the absorber cannot handle is corrected at the planning level.
-
-**Summary:** Tier 1 handles fast, transient deviations within seconds at zero planning cost. Tier 2 escalates only when Tier 1 is genuinely exhausted over multiple ticks.
-
-> **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md)
+> Design reference: `docs/plans/deviation-control-suggestions.md`
 
 ### 2.4 User Energy Requests
 *(UC-01, UC-02, UC-06, UC-09; FR-ASSET-04, FR-OA-04)*
@@ -397,19 +339,19 @@ The VEN polls the VTN continuously over authenticated HTTPS.
 
 **Signal implementation status:**
 
-| Signal / payload type | Parsed? | Effect |
-|----------------------|---------|--------|
-| `PRICE` | Yes | Sets import tariff time series → feeds MILP cost minimisation |
-| `EXPORT_PRICE` | Yes | Sets export tariff time series → feeds MILP export revenue |
-| `GHG` | Yes | Sets CO₂ intensity series → feeds multi-objective (emissions mode) planner |
-| `IMPORT_CAPACITY_LIMIT` | Yes | Hard import ceiling per interval; MILP enforces as soft constraint with penalty; strictest of concurrent events wins |
-| `EXPORT_CAPACITY_LIMIT` | Yes | Same for export |
-| `IMPORT_CAPACITY_SUBSCRIPTION` | Yes | Parsed and stored in `OadrCapacityState`; available to MILP capacity layer |
-| `IMPORT_CAPACITY_RESERVATION` | Yes | Parsed and stored in `OadrCapacityState`; reported back to VTN |
-| `SIMPLE` | No — triggers replan only | Any new/expired event fires a `RateChange` watch signal → planning loop wakes; the numeric level (0–3) is not translated into a curtailment setpoint |
-| `LOAD_DISPATCH` | No — triggers replan only | Same mechanism as `SIMPLE` |
-| `ALERT_*` (all variants) | No — triggers replan only | No dedicated parser; event arrival/departure is the trigger |
-| All other types | Not implemented | See full taxonomy below |
+| Signal / payload type | Parsed? | Current effect | OpenADR 3.1 intended purpose |
+|----------------------|---------|----------------|------------------------------|
+| `PRICE` | Yes | Sets import tariff time series → feeds MILP cost minimisation | Dynamic import electricity price (e.g. EUR/kWh per interval); VEN optimises consumption schedule to minimise cost |
+| `EXPORT_PRICE` | Yes | Sets export tariff time series → feeds MILP export revenue | Dynamic export electricity price; VEN optimises PV/battery discharge schedule to maximise export revenue |
+| `GHG` | Yes | Sets CO₂ intensity series → feeds multi-objective (emissions mode) planner | Grid carbon intensity (g CO₂/kWh); VEN shifts flexible loads to low-carbon intervals |
+| `IMPORT_CAPACITY_LIMIT` | Yes | Hard import ceiling per interval; MILP enforces as soft constraint with penalty; strictest of concurrent events wins | Dynamic Operating Envelope — grid operator restricts site import to protect transformer/feeder capacity |
+| `EXPORT_CAPACITY_LIMIT` | Yes | Same for export | Dynamic Operating Envelope — grid operator restricts site export (e.g. reverse-power protection on LV feeder) |
+| `IMPORT_CAPACITY_SUBSCRIPTION` | Yes | Parsed and stored in `OadrCapacityState`; available to MILP capacity layer | VEN's contracted import capacity ceiling under a subscription tariff; basis for reservation fees |
+| `IMPORT_CAPACITY_RESERVATION` | Yes | Parsed and stored in `OadrCapacityState`; reported back to VTN | Grid-operator-granted import capacity reservation; VEN should stay within this envelope and report compliance |
+| `SIMPLE` | No — triggers replan only | Any new/expired event fires a `RateChange` watch signal → planning loop wakes; the numeric level (0–3) is not translated into a curtailment setpoint | Level-based DR signal (0=normal, 1=moderate, 2=high, 3=emergency); VEN maps level to a proportional load reduction — mandatory compliance at level 3 regardless of cost |
+| `LOAD_DISPATCH` | No — triggers replan only | Same mechanism as `SIMPLE` | Direct load control — grid operator dispatches a specific site power target (W); VEN must match it within a response window |
+| `ALERT_*` (all variants) | No — triggers replan only | No dedicated parser; event arrival/departure fires immediate replan | Safety and emergency signals (grid emergency, outage warning, flex alert, environmental hazards); VEN should respond to the specific alert type, e.g. maximum load shed on `ALERT_GRID_EMERGENCY` |
+| All other types | Not implemented | — | See full taxonomy below |
 
 **The VEN always triggers an immediate replan on any event arrival or departure**, regardless of payload type. This provides a functional fallback for unrecognised signal types.
 
@@ -1266,12 +1208,7 @@ Step 2 — Physics tick  (simulator/mod.rs: SimState::tick())
           PV       → irradiance model + EMA smoothing + export clamp
           BaseLoad → fixed profile lookup
 
-Step 3 — Deviation absorption  (controller/absorber.rs)
-  Compare actual_kw vs. planned_kw per asset
-  Correct deviations within per-asset headroom
-  Sustained residual → fires DeviceDeviation watch → triggers replan
-
-Step 4 — Finalise  (tasks/sim_tick/helpers.rs: finalize_tick_outputs())
+Step 3 — Finalise  (tasks/sim_tick/helpers.rs: finalize_tick_outputs())
   ├─ Push HistoryPoint to each asset's ring buffer
   ├─ Recompute GridState (net_power_kw, import_limit_kw, export_limit_kw)
   └─ Recompute site FlexibilityEnvelope

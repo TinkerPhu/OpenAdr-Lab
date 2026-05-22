@@ -24,7 +24,6 @@ pub(crate) fn spawn_planning(
     sim: Arc<Mutex<SimState>>,
     active_objective: Arc<RwLock<PlannerObjective>>,
     event_tx: PlannerEventTx,
-    deviation_pending: Arc<std::sync::atomic::AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
     let replan_s = planner.replan_interval_s;
     let initial_delay_s = planner.planning_initial_delay_s;
@@ -41,13 +40,7 @@ pub(crate) fn spawn_planning(
             let now = Utc::now();
             let rates = state.planned_tariffs().await;
             let capacity = state.capacity_state().await;
-            // If DeviceDeviation was latched (fired while we were solving and possibly
-            // overwritten by a subsequent trigger), honour it over wake_trigger.
-            let trigger = if deviation_pending.swap(false, std::sync::atomic::Ordering::AcqRel) {
-                PlanTrigger::DeviceDeviation
-            } else {
-                wake_trigger.clone()
-            };
+            let trigger = wake_trigger.clone();
             let trigger_reason = format!("{:?}", trigger);
 
             info!(trigger = %trigger_reason, "planner loop: starting plan cycle");
@@ -260,7 +253,6 @@ pub(crate) fn spawn_planning(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
     use tokio::sync::{broadcast, watch, Mutex, RwLock};
 
@@ -295,7 +287,6 @@ mod tests {
         let vtn = Arc::new(MockVtn::new());
         let sim = minimal_sim();
         let active_objective = Arc::new(RwLock::new(PlannerObjective::default()));
-        let deviation_pending = Arc::new(AtomicBool::new(false));
 
         let handle = spawn_planning(
             AppState::new(),
@@ -309,7 +300,6 @@ mod tests {
             sim,
             active_objective,
             event_tx,
-            deviation_pending,
         );
         handle.abort();
         let _ = trigger_tx; // keep alive until abort
