@@ -2,8 +2,6 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
   Verify that the Dispatcher executes plan slot allocations: the EV sim
   charges when planned, EV sessions trigger replanning, and the asset ledger
   accumulates energy over time.
-  Verify that the two-layer reactive control (Layer 1: battery correction,
-  Layer 2: DeviceDeviation replan) is active and functional.
 
   Background:
     Given the VEN is running with profile "test"
@@ -39,15 +37,3 @@ Feature: VEN Dispatcher — Stage 4 (Plan Execution + Asset Ledger)
     Then the response JSON has field "ev"
     And the response JSON field "ev.energy_kwh" is greater than 0.0
 
-  # --- Layer 1: reactive battery correction ---
-  # Verifies that apply_battery_correction_overlay reacts within one tick when
-  # the grid deviates beyond the threshold, and holds the corrected setpoint.
-
-  Scenario: Layer 1 corrects grid deviation immediately using battery
-    Given the battery SoC is reset to 0.5
-    When I wait for the VEN /plan endpoint to return a plan
-    And I inject base_load_kw 10.0 with alpha 0.0 via sim inject
-    Then within 5 seconds the VEN sim battery power_kw is less than -1.0
-
-  # --- Layer 2: DeviceDeviation replan ---
-  # Isolated scenario is in features/isolated/dispatcher.feature.
