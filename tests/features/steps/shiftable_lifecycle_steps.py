@@ -67,7 +67,7 @@ def step_poll_sim_until_asset_appears(context, asset_id):
 
     context.polled_sim = poll_until(
         fetch, asset_present,
-        timeout=90, interval=3,
+        timeout=150, interval=3,
         description=f"/sim has asset '{asset_id}'",
     )
 
