@@ -183,8 +183,6 @@ pub fn apply_surplus_ev_overlay(
 /// that case to prevent the plan allocation from reverting the battery and
 /// restarting the limit cycle (see `prev_correction_kw` in loops.rs).
 ///
-/// For sustained deviations, Layer 2 fires `DeviceDeviation` after
-/// `deviation_trigger_ticks` consecutive ticks, triggering a full MILP replan.
 ///
 /// Sign: positive setpoint = charging (import), negative = discharging (export).
 /// Returns the delta applied (0.0 if below threshold, SoC-limited, or < min_correction_kw).

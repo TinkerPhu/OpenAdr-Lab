@@ -2,14 +2,10 @@
 
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use tracing::{debug, warn};
 
 use crate::controller;
-use crate::controller::absorber::AbsorberState;
-use crate::entities::asset::PlanTrigger;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
-use crate::entities::planner_params::AbsorberParams;
 use crate::models::SensorSnapshot;
 use crate::controller::SimSnapshot;
 use crate::simulator::SimState;
@@ -133,107 +129,3 @@ pub(crate) fn finalize_tick_outputs(
     (tick_sensor, tick_sim_snap, tick_envelope)
 }
 
-/// PHASE 6: Layer 2 — accumulate absorbed residual deviation → DeviceDeviation trigger.
-pub(crate) fn accumulate_deviation(
-    absorber_state: &mut AbsorberState,
-    residual_kw: f64,
-    absorber_params: &AbsorberParams,
-    trigger_tx: &tokio::sync::watch::Sender<PlanTrigger>,
-    deviation_pending: &std::sync::atomic::AtomicBool,
-    _now: DateTime<Utc>,
-) {
-    // Residual exceeds dead-band: increment sustained deviation counter
-    if residual_kw.abs() > absorber_params.dead_band_kw {
-        absorber_state.residual_ticks = absorber_state.residual_ticks.saturating_add(1);
-        debug!(
-            residual_kw,
-            dead_band_kw = absorber_params.dead_band_kw,
-            residual_ticks = absorber_state.residual_ticks,
-            trigger_ticks = absorber_params.deviation_trigger_ticks,
-            "layer2: sustained residual deviation tick"
-        );
-        if absorber_state.residual_ticks >= absorber_params.deviation_trigger_ticks {
-            absorber_state.residual_ticks = 0;
-            warn!(
-                residual_kw,
-                dead_band_kw = absorber_params.dead_band_kw,
-                trigger_ticks = absorber_params.deviation_trigger_ticks,
-                "layer2: DeviceDeviation trigger fired (absorber exhausted)"
-            );
-            let _ = trigger_tx.send(PlanTrigger::DeviceDeviation);
-            deviation_pending.store(true, std::sync::atomic::Ordering::Release);
-        }
-    } else {
-        if absorber_state.residual_ticks > 0 {
-            debug!(
-                residual_ticks = absorber_state.residual_ticks,
-                residual_kw, "layer2: residual deviation cleared, resetting counter"
-            );
-        }
-        absorber_state.residual_ticks = 0;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::controller::absorber::AbsorberState;
-    use crate::entities::planner_params::AbsorberParams;
-
-    fn make_absorber_state() -> AbsorberState {
-        AbsorberState {
-            residual_ticks: 0,
-            last_state_change_ts: HashMap::new(),
-            settling_ticks: HashMap::new(),
-            active_overlay_kw: HashMap::new(),
-            correction_is_active: false,
-            last_emitted_correction_kw: 0.0,
-        }
-    }
-
-    #[test]
-    fn accumulate_deviation_fires_after_trigger_ticks() {
-        use crate::entities::asset::PlanTrigger;
-        let params = AbsorberParams {
-            enabled: true,
-            dead_band_kw: 0.1,
-            dead_band_clearing_ticks: 1,
-            deviation_trigger_ticks: 3,
-            assets: vec![],
-        };
-        let (tx, _rx) = tokio::sync::watch::channel(PlanTrigger::Periodic);
-        let pending = std::sync::atomic::AtomicBool::new(false);
-        let mut state = make_absorber_state();
-        let now = chrono::Utc::now();
-        // 2 ticks: counter increments but trigger not yet fired
-        for _ in 0..2 {
-            accumulate_deviation(&mut state, 5.0, &params, &tx, &pending, now);
-        }
-        assert!(!pending.load(std::sync::atomic::Ordering::Relaxed));
-        assert_eq!(state.residual_ticks, 2);
-        // 3rd tick: fires the trigger and resets counter
-        accumulate_deviation(&mut state, 5.0, &params, &tx, &pending, now);
-        assert!(pending.load(std::sync::atomic::Ordering::Relaxed));
-        assert_eq!(state.residual_ticks, 0);
-    }
-
-    #[test]
-    fn accumulate_deviation_clears_within_dead_band() {
-        let params = AbsorberParams {
-            enabled: true,
-            dead_band_kw: 1.0,
-            dead_band_clearing_ticks: 1,
-            deviation_trigger_ticks: 5,
-            assets: vec![],
-        };
-        let (tx, _rx) = tokio::sync::watch::channel(crate::entities::asset::PlanTrigger::Periodic);
-        let pending = std::sync::atomic::AtomicBool::new(false);
-        let mut state = make_absorber_state();
-        state.residual_ticks = 3;
-        let now = chrono::Utc::now();
-        // residual within dead-band: counter resets
-        accumulate_deviation(&mut state, 0.5, &params, &tx, &pending, now);
-        assert_eq!(state.residual_ticks, 0);
-        assert!(!pending.load(std::sync::atomic::Ordering::Relaxed));
-    }
-}

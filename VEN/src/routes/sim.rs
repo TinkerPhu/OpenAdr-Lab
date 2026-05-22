@@ -214,9 +214,9 @@ pub async fn post_sim_inject(
     Json(body): Json<PostSimInjectBody>,
 ) -> impl IntoResponse {
     // Trigger a replan only for fields the MILP planner uses as inputs.
-    // base_load_kw / base_load_alpha are one-shot physics overrides for test deviation
-    // simulation — triggering a replan on them would corrupt the absorber's assertion
-    // window by adopting a new plan mid-test.
+    // base_load_kw / base_load_alpha are one-shot physics overrides for test
+    // simulation — triggering a replan on them would race the BDD assertion window
+    // by adopting a new plan mid-test.
     // pv_plan_kw is a planning-only forecast pin — it takes effect on the *next* scheduled
     // solve cycle and must NOT trigger an immediate replan, which would race the BDD
     // assertion window exactly like base_load_kw does.

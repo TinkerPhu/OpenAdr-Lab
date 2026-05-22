@@ -108,10 +108,6 @@ impl PlanningService {
         let slot_count = plan.slots.len();
         if adopted {
             info!(trigger = %trigger_reason, slot_count, "planner: plan adopted");
-            let _ = event_tx.send(PlannerEvent::CorrectionCleared {
-                ts: now,
-                reason: "superseded_by_replan".to_string(),
-            });
             state.set_active_plan(Some(plan.clone())).await;
         } else {
             info!(
@@ -194,21 +190,6 @@ mod tests {
             Utc::now(),
         );
         assert!(!adopt, "improvement below threshold must be rejected on periodic trigger");
-    }
-
-    #[test]
-    fn test_gate_accepts_on_deviation_trigger() {
-        let current = make_plan(10.0, 1.0);
-        let new_plan = make_plan(10.0, 1.5); // worse cost
-        let adopt = evaluate_acceptance_gate(
-            Some(&current),
-            &new_plan,
-            &PlanTrigger::DeviceDeviation,
-            1.0,
-            3600.0,
-            Utc::now(),
-        );
-        assert!(adopt, "DeviceDeviation is a hard trigger and must always adopt");
     }
 
     #[test]

@@ -30,19 +30,6 @@ pub enum PlannerEvent {
         slot_count: usize,
         trigger: String,
     },
-    /// Layer 1 reactive correction is active: battery setpoint adjusted.
-    CorrectionActive {
-        ts: DateTime<Utc>,
-        asset_id: String,
-        reason: String,
-        planned_net_kw: f64,
-        actual_net_kw: f64,
-        deviation_kw: f64,
-        correction_kw: f64,
-        objective: PlannerObjective,
-    },
-    /// Layer 1 correction cleared (deviation within threshold or superseded by replan).
-    CorrectionCleared { ts: DateTime<Utc>, reason: String },
 }
 
 pub type PlannerEventTx = Arc<tokio::sync::broadcast::Sender<PlannerEvent>>;
