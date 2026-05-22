@@ -25,9 +25,6 @@
     #[derive(Debug, Clone, Default)]
     struct SimulatorConfig;
 
-    #[derive(Debug, Clone, Default)]
-    struct AbsorberConfig;
-
     #[derive(Debug, Clone)]
     struct GridConfig {
         max_import_kw: f64,
@@ -41,7 +38,6 @@
         planner: PlannerConfig,
         grid: GridConfig,
         packets: Vec<()>,
-        absorber: AbsorberConfig,
     }
 
     impl Profile {
@@ -167,7 +163,6 @@
                 max_export_kw: 10.0,
             },
             packets: vec![],
-            absorber: AbsorberConfig::default(),
         }
     }
 
@@ -385,7 +380,6 @@
             },
             grid: GridConfig { max_import_kw: 25.0, max_export_kw: 10.0 },
             packets: vec![],
-            absorber: AbsorberConfig::default(),
         }
     }
 

@@ -24,11 +24,9 @@ use crate::assets::ControlDescriptor;
 use simulator::SimState;
 
 use crate::entities::asset_params::AssetParams;
-use crate::entities::planner_params::{
-    AbsorberAssetParams, AbsorberParams, PlannerObjective, PlannerParams, SimulatorParams,
-};
+use crate::entities::planner_params::{PlannerObjective, PlannerParams, SimulatorParams};
 use state::AppState;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
 use vtn::VtnClient;
@@ -51,7 +49,7 @@ pub struct AppCtx {
 
 fn build_domain_params(
     profile: &Profile,
-) -> (SimulatorParams, PlannerParams, AbsorberParams, Vec<AssetParams>) {
+) -> (SimulatorParams, PlannerParams, Vec<AssetParams>) {
     let sim_params = SimulatorParams {
         tick_s: profile.simulator.tick_s,
         persist_every_s: profile.simulator.persist_every_s,
@@ -61,9 +59,6 @@ fn build_domain_params(
         plan_step_s: profile.planner.plan_step_s,
         plan_horizon_h: profile.planner.plan_horizon_h,
         replan_interval_s: profile.planner.replan_interval_s,
-        deviation_threshold_kw: profile.planner.deviation_threshold_kw,
-        deviation_trigger_ticks: profile.planner.deviation_trigger_ticks,
-        correction_min_kw: profile.planner.correction_min_kw,
         w_energy: profile.planner.w_energy,
         w_ghg: profile.planner.w_ghg,
         w_grid: profile.planner.w_grid,
@@ -86,25 +81,8 @@ fn build_domain_params(
         solver_timeout_s: profile.planner.solver_timeout_s,
         planning_initial_delay_s: profile.planner.planning_initial_delay_s,
     };
-    let absorber_params = AbsorberParams {
-        enabled: profile.absorber.enabled,
-        dead_band_kw: profile.absorber.dead_band_kw,
-        dead_band_clearing_ticks: profile.absorber.dead_band_clearing_ticks,
-        deviation_trigger_ticks: profile.planner.deviation_trigger_ticks,
-        assets: profile
-            .absorber
-            .assets
-            .iter()
-            .map(|a| AbsorberAssetParams {
-                id: a.id.clone(),
-                priority: a.priority,
-                min_state_linger_s: a.min_state_linger_s,
-                ev_departure_guard_s: a.ev_departure_guard_s,
-            })
-            .collect(),
-    };
     let asset_params = profile.asset_params();
-    (sim_params, planner_params, absorber_params, asset_params)
+    (sim_params, planner_params, asset_params)
 }
 
 #[tokio::main]
@@ -128,10 +106,6 @@ async fn main() -> anyhow::Result<()> {
     // planning loop receives them for reactive replanning.
     let (trigger_tx, trigger_rx) = tokio::sync::watch::channel(PlanTrigger::Periodic);
     let trigger_tx = Arc::new(trigger_tx);
-
-    // Latch for DeviceDeviation: prevents RateChange (sent every 2s) from
-    // overwriting DeviceDeviation in the watch channel before the planner reads it.
-    let deviation_pending = Arc::new(AtomicBool::new(false));
 
     // Optional: load persisted state
     if let Some(path) = cfg.persist_path.clone() {
@@ -158,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(1);
     }
     let profile = Arc::new(profile);
-    let (sim_params, planner_params, absorber_params, asset_params) = build_domain_params(&profile);
+    let (sim_params, planner_params, asset_params) = build_domain_params(&profile);
     let grid_max_import_kw = profile.grid.max_import_kw;
     let grid_max_export_kw = profile.grid.max_export_kw;
 
@@ -186,13 +160,6 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(Mutex::new(sim))
     };
 
-    // Validate absorber configuration at startup
-    {
-        let sim_guard = sim_state.lock().await;
-        let sim_snap = sim_guard.to_sim_snapshot();
-        controller::absorber::validate_startup(&absorber_params, &sim_snap)?;
-    }
-
     // Spawn background loops — each wrapped in supervised_spawn for automatic restart.
     const TASK_COOLDOWN_S: u64 = 5;
 
@@ -215,19 +182,18 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Plan F: planner_event_tx must exist before spawn_sim_tick (correction SSE)
     let (planner_event_tx_inner, _) = tokio::sync::broadcast::channel::<PlannerEvent>(128);
     let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
     {
-        let (s, sim, sp, ap, vn, v, tx, dd, etx, dp) = (
-            state.clone(), sim_state.clone(), sim_params.clone(), absorber_params.clone(),
+        let (s, sim, sp, vn, v, tx, dd, etx) = (
+            state.clone(), sim_state.clone(), sim_params.clone(),
             cfg.ven_name.clone(), vtn_port.clone(), trigger_tx.clone(),
-            data_dir.clone(), planner_event_tx.clone(), deviation_pending.clone(),
+            data_dir.clone(), planner_event_tx.clone(),
         );
         tasks::supervised_spawn("sim_tick", TASK_COOLDOWN_S, move || {
-            tasks::spawn_sim_tick(s.clone(), sim.clone(), sp.clone(), ap.clone(),
-                vn.clone(), v.clone(), tx.clone(), dd.clone(), etx.clone(), dp.clone())
+            tasks::spawn_sim_tick(s.clone(), sim.clone(), sp.clone(),
+                vn.clone(), v.clone(), tx.clone(), dd.clone(), etx.clone())
         });
     }
     {
@@ -238,14 +204,14 @@ async fn main() -> anyhow::Result<()> {
     }
     let active_objective = Arc::new(RwLock::new(planner_params.objective));
     {
-        let (s, pp, gmax_i, gmax_e, ap, v, vn, rx, sim, ao, etx, dp) = (
+        let (s, pp, gmax_i, gmax_e, ap, v, vn, rx, sim, ao, etx) = (
             state.clone(), planner_params.clone(), grid_max_import_kw, grid_max_export_kw,
             asset_params.clone(), vtn_port.clone(), cfg.ven_name.clone(), trigger_rx,
-            sim_state.clone(), active_objective.clone(), planner_event_tx.clone(), deviation_pending.clone(),
+            sim_state.clone(), active_objective.clone(), planner_event_tx.clone(),
         );
         tasks::supervised_spawn("planning", TASK_COOLDOWN_S, move || {
             tasks::spawn_planning(s.clone(), pp.clone(), gmax_i, gmax_e, ap.clone(),
-                v.clone(), vn.clone(), rx.clone(), sim.clone(), ao.clone(), etx.clone(), dp.clone())
+                v.clone(), vn.clone(), rx.clone(), sim.clone(), ao.clone(), etx.clone())
         });
     }
     if let Some(path) = cfg.persist_path.clone() {

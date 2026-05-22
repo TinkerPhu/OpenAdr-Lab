@@ -26,16 +26,6 @@ simulator:
 planner:
   phase2_epsilon_eur: 0.10  # allow 10 ct slack so Phase 2 can smooth switching
   replan_interval_s: 300
-  deviation_trigger_ticks: 120
   solver_timeout_s: 60
   planning_initial_delay_s: 5
   c_ctrl_imp_malus_eur_kwh: 0.22
-
-absorber:
-  enabled: true
-  dead_band_kw: 0.1
-  dead_band_clearing_ticks: 1
-  assets:
-    - id: heater
-      priority: 0
-      min_state_linger_s: 30
