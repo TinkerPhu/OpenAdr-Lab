@@ -41,6 +41,20 @@ pub fn evaluate_acceptance_gate(
         return true; // no existing plan → always adopt
     };
 
+    // Force-adopt when the existing plan has no future slots (all expired).
+    // Prevents a stale plan from permanently blocking forecasts when the threshold
+    // would otherwise reject every periodic replan.
+    // Empty slot list is not treated as "expired" — that indicates a plan that was
+    // never populated (e.g. a zero-asset solve); the normal threshold logic applies.
+    let current_expired = current
+        .all_slots()
+        .map(|s| s.end)
+        .max()
+        .map_or(false, |end| end <= now);
+    if current_expired {
+        return true;
+    }
+
     let elapsed_s = (now - current.created_at).num_seconds().max(0) as f64;
     let decay_factor = if decay_s > 0.0 {
         (1.0 - elapsed_s / decay_s).max(0.0)
@@ -177,6 +191,60 @@ mod tests {
         )
     }
 
+    /// Build a plan whose single slot ended `slot_age_s` seconds ago.
+    fn make_plan_with_expired_slot(objective_eur: f64, slot_age_s: i64) -> Plan {
+        let now = Utc::now();
+        let slot_end = now - Duration::seconds(slot_age_s);
+        let slot_start = slot_end - Duration::seconds(300);
+        serde_json::from_value(serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "created_at": (now - Duration::seconds(slot_age_s + 300)).to_rfc3339(),
+            "trigger": "PERIODIC",
+            "horizon": {
+                "start_time": slot_start.to_rfc3339(),
+                "end_time": slot_end.to_rfc3339(),
+                "step_size_s": 300,
+                "num_steps": 1,
+                "far_horizon": slot_end.to_rfc3339()
+            },
+            "slots": [{
+                "slot_index": 0,
+                "start": slot_start.to_rfc3339(),
+                "end": slot_end.to_rfc3339(),
+                "import_tariff_eur_kwh": 0.20,
+                "export_tariff_eur_kwh": 0.05,
+                "co2_g_kwh": 300.0,
+                "grid_effective_cost": 0.26,
+                "rate_estimated": false,
+                "import_cap_kw": 10.0,
+                "export_cap_kw": 5.0,
+                "baseline_kw": 0.4,
+                "pv_forecast_kw": 0.0,
+                "surplus_available_kw": 0.0,
+                "allocations": [],
+                "net_import_kw": 0.4,
+                "net_export_kw": 0.0,
+                "import_flexibility_kw": 0.0,
+                "export_flexibility_kw": 0.0,
+                "bat_charge_kw": 0.0,
+                "bat_discharge_kw": 0.0,
+                "planned_kw_by_asset": {},
+                "planned_state_by_asset": {}
+            }],
+            "summary": {
+                "total_cost_eur": 0.0,
+                "total_co2_g": 0.0,
+                "total_import_kwh": 0.0,
+                "total_export_kwh": 0.0
+            },
+            "envelopes": [],
+            "warnings": [],
+            "objective_eur": objective_eur,
+            "friction_eur": 0.0
+        }))
+        .expect("test Plan with expired slot must deserialize")
+    }
+
     #[test]
     fn test_gate_rejects_below_threshold_on_periodic() {
         let current = make_plan(10.0, 1.0); // total 11.0
@@ -235,5 +303,23 @@ mod tests {
             Utc::now(),
         );
         assert!(adopt, "improvement exceeding threshold must be accepted");
+    }
+
+    #[test]
+    fn test_gate_adopts_when_current_plan_slots_all_expired() {
+        // Existing plan has one slot that ended 60 s ago — effectively stale.
+        // Even though cost improvement is zero, the gate must force-adopt so
+        // the timeline never loses its forecast window.
+        let current = make_plan_with_expired_slot(10.0, 60);
+        let new_plan = make_plan(10.0, 0.0); // same cost, no improvement
+        let adopt = evaluate_acceptance_gate(
+            Some(&current),
+            &new_plan,
+            &PlanTrigger::Periodic,
+            5.0,  // high threshold that would normally block adoption
+            0.0,  // no decay
+            Utc::now(),
+        );
+        assert!(adopt, "stale plan with all-expired slots must be replaced unconditionally");
     }
 }

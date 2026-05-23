@@ -28,6 +28,7 @@ simulator:
 
 planner:
   plan_adoption_threshold_eur: 0.20
+  plan_adoption_decay_s: 1500      # 5× replan_interval_s — threshold decays to 0 after 25 min
   replan_interval_s: 300
   solver_timeout_s: 60
   planning_initial_delay_s: 5
