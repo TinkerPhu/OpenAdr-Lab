@@ -167,7 +167,7 @@ export function StackedAreaChart({
               name={`${id} +`}
               stackId="positive"
               fill={colorMap[id] ?? COLOR_ASSET_FALLBACK}
-              stroke={colorMap[id] ?? COLOR_ASSET_FALLBACK}
+              stroke="none"
               fillOpacity={0.6}
               dot={false}
               connectNulls={false}
@@ -185,7 +185,7 @@ export function StackedAreaChart({
               name={`${id} -`}
               stackId="negative"
               fill={colorMap[id] ?? COLOR_ASSET_FALLBACK}
-              stroke={colorMap[id] ?? COLOR_ASSET_FALLBACK}
+              stroke="none"
               fillOpacity={0.6}
               dot={false}
               connectNulls={false}
