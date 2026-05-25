@@ -34,6 +34,36 @@ This applies at unit level for every new function and at BDD level for every new
 session-start: at the start of every AI session read docs/reference/SESSION_START.md
 and follow the checklist before touching any code.
 
+linting: cargo fmt --check and cargo clippy -- -D warnings must pass before any commit.
+For JS/TS (VEN/ui, VTN/ui): eslint must report zero errors. Suppress clippy lints with
+#[allow(...)] only if justified with a comment on the same line. No enforced coverage floor —
+keep domain and application layer tests meaningful.
+
+build:
+  local VEN Rust : wsl cargo build  (or wsl cargo check for fast syntax check)
+  local UI       : cd VEN/ui && npm run build  |  cd VTN/ui && npm run build
+  Pi4 docker     : ssh Pi4-Server "cd /srv/docker/openadr_lab && docker compose build"
+  Pi4 single svc : ssh Pi4-Server "cd /srv/docker/openadr_lab && docker compose build ven"
+  Always use wsl for Rust compilation — native Windows cargo lacks cmake/HiGHS.
+  NOTE: .github/workflows/ is currently empty — no CI pipeline is configured yet.
+  Until CI is in place, run linting + tests manually before merging.
+
+determinism: any code path that depends on the current date/time must accept an injectable
+clock (e.g. a Fn() -> DateTime<Utc> parameter or typed wrapper). Already applied in the MILP
+planner and simulator. All new modules that schedule, timestamp, or expire must follow the
+same pattern. Makes tests reproducible without sleep or wall-clock coupling.
+
+dependencies: pin all new crates to a semver range in Cargo.toml; all new npm packages to
+an exact version in package.json. Run cargo audit and npm audit before each release; add
+findings to docs/BACKLOG.md with severity. Acceptable licences: MIT, Apache-2.0,
+BSD-2-Clause, BSD-3-Clause, ISC. Review every new import — AI-generated code frequently
+introduces undeclared dependencies.
+
+refactoring: before adding a feature in an area listed in docs/reference/TECHNICAL_DEBTS.md,
+check that file first. If the relevant debt is Small or Trivial effort, refactor it before
+adding new behaviour. All tests must pass before and after any refactor. Record newly
+discovered debt in TECHNICAL_DEBTS.md immediately — do not let debt accumulate silently.
+
 When researching about OpenADR reference, only use OpenADR 3 resources. General Questions can be researched from any versions.
 
 Do not add co-authoring footers to commit messages or PR descriptions. they might get rejected.

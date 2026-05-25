@@ -50,7 +50,7 @@ pub fn evaluate_acceptance_gate(
         .all_slots()
         .map(|s| s.end)
         .max()
-        .map_or(false, |end| end <= now);
+        .is_some_and(|end| end <= now);
     if current_expired {
         return true;
     }
@@ -86,6 +86,7 @@ impl PlanningService {
     ///
     /// Called by `tasks/planning.rs` after `spawn_blocking` returns the solved Plan.
     /// Accepts `objective` explicitly since it lives in `AppCtx`, not `AppState`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn adopt_if_warranted(
         plan: Plan,
         trigger: &PlanTrigger,
@@ -138,7 +139,11 @@ impl PlanningService {
         };
         state.push_controller_event(plan_cycle_event.clone()).await;
 
-        PlanCycleResult { adopted, plan, plan_cycle_event }
+        PlanCycleResult {
+            adopted,
+            plan,
+            plan_cycle_event,
+        }
     }
 }
 
@@ -257,7 +262,10 @@ mod tests {
             3600.0,
             Utc::now(),
         );
-        assert!(!adopt, "improvement below threshold must be rejected on periodic trigger");
+        assert!(
+            !adopt,
+            "improvement below threshold must be rejected on periodic trigger"
+        );
     }
 
     #[test]
@@ -287,7 +295,10 @@ mod tests {
             3600.0,
             Utc::now(),
         );
-        assert!(adopt, "plan past decay window must be replaced unconditionally");
+        assert!(
+            adopt,
+            "plan past decay window must be replaced unconditionally"
+        );
     }
 
     #[test]
@@ -316,10 +327,13 @@ mod tests {
             Some(&current),
             &new_plan,
             &PlanTrigger::Periodic,
-            5.0,  // high threshold that would normally block adoption
-            0.0,  // no decay
+            5.0, // high threshold that would normally block adoption
+            0.0, // no decay
             Utc::now(),
         );
-        assert!(adopt, "stale plan with all-expired slots must be replaced unconditionally");
+        assert!(
+            adopt,
+            "stale plan with all-expired slots must be replaced unconditionally"
+        );
     }
 }

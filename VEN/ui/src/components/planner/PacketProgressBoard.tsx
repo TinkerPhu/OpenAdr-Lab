@@ -38,6 +38,7 @@ function DeadlineDisplay({ packet }: { packet: EnergyPacket }) {
   if (!tiers.length || idx >= tiers.length) return null;
 
   const deadline = new Date(tiers[idx].deadline);
+  // eslint-disable-next-line react-hooks/purity -- intentional: snapshot current time for deadline display; component re-renders on data poll
   const diffMs = deadline.getTime() - Date.now();
 
   if (diffMs <= 0) {

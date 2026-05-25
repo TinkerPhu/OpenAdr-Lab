@@ -217,7 +217,10 @@ impl VtnClient {
 
     /// Submit a report with upsert semantics: on 409 Conflict, find the existing
     /// report by name and update it instead.
-    pub(crate) async fn upsert_report(&self, body: crate::controller::vtn_port::OadrReportBody) -> Result<()> {
+    pub(crate) async fn upsert_report(
+        &self,
+        body: crate::controller::vtn_port::OadrReportBody,
+    ) -> Result<()> {
         let value = serde_json::to_value(&body).context("serialize report body")?;
         let (status, text) = self.post_json_raw("/reports", &value).await?;
 

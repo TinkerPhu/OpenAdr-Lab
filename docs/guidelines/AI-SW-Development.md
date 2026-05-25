@@ -52,11 +52,14 @@ Do these steps once, before any project work begins.
 
 ## Prompting Recommendations
 
-**Useful prompting vocabulary:** multiple options, concise, comprehensive, deep dive, contradiction, be critical and thorough, duplication / inline, dead/unused code, violation, missing details.
+**Useful prompting vocabulary:** 
+multiple options, concise,  comprehensive, deep dive, contradiction, duplication / inline, dead/unused code, violation, missing details, review, creap/bleed in.
 
 **Useful prompting techniques:**
 - *"Paraphrase my description so I can confirm I expressed myself correctly."*
-- *"Summarize, analyze the issues, and suggest multiple options on how to solve or fix them."*
+- *"Summarize, analyze the issues, and suggest multiple options on how to solve or fix them. (choose the solution that fits the purpose and requirements best and review it once more before implementing it.)"*
+- *"do not engage in ... yet/before ..."*
+- *"be critical and thorough"*
 
 **Prompt library:** Maintain a living collection of prompts that have proven effective, organized by use case (architecture review, code review, test generation, documentation sync, etc.). Given the document's emphasis on writing everything down, this is a natural extension of the key-learnings workflow.
 

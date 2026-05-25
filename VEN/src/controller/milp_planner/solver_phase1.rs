@@ -1,16 +1,16 @@
 use good_lp::solvers::highs::highs;
 use good_lp::{
-    constraint, variable, variables, Expression, Solution, SolverModel, Variable, WithMipGap, WithTimeLimit,
+    constraint, variable, variables, Expression, Solution, SolverModel, Variable, WithMipGap,
+    WithTimeLimit,
 };
 
+use super::asset_port::{BatteryMilpContext, EvMilpContext, HeaterMilpContext};
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
-use super::asset_port::{BatteryMilpContext, EvMilpContext, HeaterMilpContext};
 
 use super::types::*;
-
 
 /// Phase 1: minimise economic cost only. Battery and EV declared without startup/ramp aux vars.
 /// Heater objective uses m_low penalty only (lambda_sw=0 via c_startup_eur=0.0 convention).
@@ -86,15 +86,15 @@ pub(crate) fn solve_phase1(
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
     }
 
-    let interactions = build_interactions(p1w.c_bat_ev_coexist_eur_kwh, p1w.c_ctrl_imp_malus_eur_kwh);
-    let mut active_interactions: Vec<
-        &Box<dyn crate::controller::milp_interactions::AssetInteraction>,
-    > = Vec::new();
+    let interactions =
+        build_interactions(p1w.c_bat_ev_coexist_eur_kwh, p1w.c_ctrl_imp_malus_eur_kwh);
+    let mut active_interactions: Vec<&dyn crate::controller::milp_interactions::AssetInteraction> =
+        Vec::new();
     let mut iv_list: Vec<crate::controller::milp_interactions::InteractionVars> = Vec::new();
     for interaction in &interactions {
         if interaction.applicable(&pool) {
             let iv = interaction.declare_vars(&pool, &global, &mut vars);
-            active_interactions.push(interaction);
+            active_interactions.push(interaction.as_ref());
             iv_list.push(iv);
         }
     }
@@ -154,7 +154,6 @@ pub(crate) fn solve_phase1(
     Ok(read_solve_output(&solution, &objective, &pool, inputs, n))
 }
 
-
 /// Helper: add power-balance and per-asset constraints to the model.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn add_model_constraints<S: SolverModel>(
@@ -166,7 +165,7 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
     u_grid: &[Variable],
     s_imp_viol: &[Variable],
     s_exp_viol: &[Variable],
-    active_interactions: &[&Box<dyn crate::controller::milp_interactions::AssetInteraction>],
+    active_interactions: &[&dyn crate::controller::milp_interactions::AssetInteraction],
     iv_list: &[crate::controller::milp_interactions::InteractionVars],
     global: &GlobalMilpInputs,
     asset_contexts: &[Box<dyn AssetMilpContext>],
@@ -201,10 +200,7 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
         let heat_kw: Expression = pool
             .heater
             .as_ref()
-            .map(|v| {
-                Expression::from(v.p_mid_kw * v.z_heat_mid[t])
-                    + Expression::from(v.p_full_kw * v.z_heat_full[t])
-            })
+            .map(|v| (v.p_mid_kw * v.z_heat_mid[t]) + (v.p_full_kw * v.z_heat_full[t]))
             .unwrap_or_else(|| Expression::from(0.0));
 
         model = model.with(constraint!(

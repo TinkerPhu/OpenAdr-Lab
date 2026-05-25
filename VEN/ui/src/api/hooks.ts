@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useLayoutEffect } from "react";
 import { useVenContext } from "../App";
 import type {
   SensorSnapshot, SimInjectState, CreateUserRequestBody,
@@ -442,7 +442,7 @@ export function usePlannerEvents(onEvent: (event: PlannerEvent) => void): void {
   const { api } = useVenContext();
   // Ref keeps callback stable so EventSource isn't re-created on every render
   const cbRef = useRef(onEvent);
-  cbRef.current = onEvent;
+  useLayoutEffect(() => { cbRef.current = onEvent; });
 
   useEffect(() => {
     const es = new EventSource(`${api.baseUrl}/plan/events`);

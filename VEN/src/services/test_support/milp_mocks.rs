@@ -6,13 +6,12 @@ use chrono::{DateTime, Utc};
 use good_lp::{Constraint, Expression, ProblemVariables};
 
 use crate::controller::milp_interactions::MilpVarPool;
+use crate::controller::milp_planner::asset_port::{
+    BatteryMilpContext, EvMilpContext, EvMilpMode, HeaterMilpContext, HeaterMilpMode,
+};
 use crate::controller::milp_planner::{
     AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars, HeaterScalars,
     MilpLoadMode,
-};
-use crate::controller::milp_planner::asset_port::{
-    BatteryMilpContext, EvMilpContext, EvMilpMode,
-    HeaterMilpContext, HeaterMilpMode,
 };
 
 // ── MockBatteryCtx ───────────────────────────────────────────────────────────
@@ -191,7 +190,14 @@ impl AssetMilpContext for MockEvCtx {
         } else {
             (c_startup_eur, c_ramp_eur_kw, 0.0_f64)
         };
-        EvMilpContext::objective(&self.ctx, pool.ev.as_ref().unwrap(), startup, ramp, w_services, n)
+        EvMilpContext::objective(
+            &self.ctx,
+            pool.ev.as_ref().unwrap(),
+            startup,
+            ramp,
+            w_services,
+            n,
+        )
     }
 }
 
@@ -281,7 +287,14 @@ impl AssetMilpContext for MockHeaterCtx {
         if c_startup_eur == 0.0 {
             HeaterMilpContext::objective(&self.ctx, v, 0.0, M_LOW_EUR_PER_KWH, 0.0, n)
         } else {
-            HeaterMilpContext::objective(&self.ctx, v, c_ramp_eur_kw, 0.0, self.ctx.lambda_sw_eur, n)
+            HeaterMilpContext::objective(
+                &self.ctx,
+                v,
+                c_ramp_eur_kw,
+                0.0,
+                self.ctx.lambda_sw_eur,
+                n,
+            )
         }
     }
 }

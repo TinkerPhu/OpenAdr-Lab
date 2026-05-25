@@ -28,7 +28,7 @@
 ## Windows Gotchas
 
 - **NEVER use `2>nul`** in Bash tool on Windows — creates a literal file named `nul` that's hard to delete. Use `2>/dev/null` instead
-- **Subst drive D: maps to C:\DriveD** — Vite/vitest resolves paths through the real filesystem, causing `D:/Tinker/...` to become `C:/DriveD/Tinker/...`. This breaks `setupFiles`, `resolve(__dirname)`, etc.
+- **Subst drive C:\DriveD (formerly D:) warning** — Vite/vitest resolves paths through the real filesystem, causing old `C:/DriveD/Tinker/...` subst aliases to break `setupFiles`, `resolve(__dirname)`, etc. Always run from the real path `C:\DriveD\...`.
   - **Fix for vite.config.ts**: do NOT use `resolve(__dirname)` for `root`. Omit `root` entirely.
   - **Fix for tests**: always run `npm test` from the real path: `cd C:\DriveD\Tinker\OpenAdr-Lab\...\ui && npm test`
   - **Docker builds are unaffected** (they run inside the container)

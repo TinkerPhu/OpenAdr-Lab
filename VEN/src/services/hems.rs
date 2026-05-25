@@ -3,8 +3,8 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::entities::device_session::{EvSession, HeaterTarget};
-use crate::entities::DomainError;
 use crate::entities::user_request::UserRequestStatus;
+use crate::entities::DomainError;
 use crate::state::AppState;
 
 pub struct EvSessionService;
@@ -29,18 +29,14 @@ impl EvSessionService {
     pub async fn end(state: &AppState) -> Result<(), DomainError> {
         let session = state.ev_session().await;
         if session.is_none() {
-            return Err(DomainError::NotFound {
-                id: Uuid::nil(),
-            });
+            return Err(DomainError::NotFound { id: Uuid::nil() });
         }
         let session_id = session.unwrap().id;
 
         // Transition any linked active request to Completed.
         let mut requests = state.active_requests().await;
         for req in requests.iter_mut() {
-            if req.session_id == Some(session_id)
-                && req.status == UserRequestStatus::Active
-            {
+            if req.session_id == Some(session_id) && req.status == UserRequestStatus::Active {
                 req.status = UserRequestStatus::Completed;
                 req.updated_at = Utc::now();
                 info!(request_id = %req.id, "user request completed (EV session ended)");
@@ -90,8 +86,8 @@ impl HvacService {
 mod tests {
     use super::*;
     use crate::entities::device_session::EvSession;
-    use crate::entities::DomainError;
     use crate::entities::user_request::{UserRequest, UserRequestStatus};
+    use crate::entities::DomainError;
     use crate::state::AppState;
     use chrono::Utc;
     use uuid::Uuid;
@@ -137,9 +133,14 @@ mod tests {
         let session = make_ev_session();
         state.set_ev_session(Some(session)).await;
 
-        EvSessionService::end(&state).await.expect("end must succeed");
+        EvSessionService::end(&state)
+            .await
+            .expect("end must succeed");
 
-        assert!(state.ev_session().await.is_none(), "session must be cleared");
+        assert!(
+            state.ev_session().await.is_none(),
+            "session must be cleared"
+        );
     }
 
     #[tokio::test]
@@ -154,7 +155,9 @@ mod tests {
         let state = AppState::new();
         let s1 = make_ev_session();
         let s2 = make_ev_session();
-        EvSessionService::start(s1, &state).await.expect("first start must succeed");
+        EvSessionService::start(s1, &state)
+            .await
+            .expect("first start must succeed");
         let result = EvSessionService::start(s2, &state).await;
         assert!(matches!(result, Err(DomainError::SessionConflict(_))));
     }
@@ -164,7 +167,9 @@ mod tests {
         let state = AppState::new();
         let session = make_ev_session();
         let id = session.id;
-        EvSessionService::start(session, &state).await.expect("start must succeed");
+        EvSessionService::start(session, &state)
+            .await
+            .expect("start must succeed");
         assert_eq!(state.ev_session().await.map(|s| s.id), Some(id));
     }
 
@@ -234,6 +239,9 @@ mod tests {
         assert!(state.heater_target().await.is_some());
 
         HvacService::clear_heater_target(&state).await;
-        assert!(state.heater_target().await.is_none(), "heater target must be cleared");
+        assert!(
+            state.heater_target().await.is_none(),
+            "heater target must be cleared"
+        );
     }
 }

@@ -14,6 +14,7 @@ use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
 use crate::state::AppState;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_sim_tick(
     state: AppState,
     sim: Arc<Mutex<SimState>>,
@@ -44,22 +45,21 @@ pub(crate) fn spawn_sim_tick(
 
         loop {
             tick_interval.tick().await;
-            let (new_persist_counter, new_report_counter) =
-                tick::tick_once(
-                    state.clone(),
-                    sim.clone(),
-                    ven_name.clone(),
-                    vtn.clone(),
-                    trigger_tx.clone(),
-                    data_dir.clone(),
-                    event_tx.clone(),
-                    persist_counter,
-                    persist_every_ticks,
-                    report_counter,
-                    report_every_ticks,
-                    tick_s,
-                )
-                .await;
+            let (new_persist_counter, new_report_counter) = tick::tick_once(
+                state.clone(),
+                sim.clone(),
+                ven_name.clone(),
+                vtn.clone(),
+                trigger_tx.clone(),
+                data_dir.clone(),
+                event_tx.clone(),
+                persist_counter,
+                persist_every_ticks,
+                report_counter,
+                report_every_ticks,
+                tick_s,
+            )
+            .await;
 
             persist_counter = new_persist_counter;
             report_counter = new_report_counter;

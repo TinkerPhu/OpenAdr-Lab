@@ -1,10 +1,10 @@
+use crate::controller::SimSnapshot;
 /// Stage 4/5 — Monitor: per-asset energy ledger update.
 ///
 /// `record_tick` updates the cumulative per-asset energy ledger from the
 /// current simulation snapshot. Packet attribution has been removed;
 /// device sessions (EvSession, HeaterTarget) are managed directly.
 use crate::entities::tariff_snapshot::TariffSnapshot;
-use crate::controller::SimSnapshot;
 use crate::state::AssetLedgerEntry;
 use chrono::{DateTime, Utc};
 

@@ -5,8 +5,8 @@ use uuid::Uuid;
 use crate::controller::user_request::{create_from_body, CreateUserRequestBody, RequestError};
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::device_session::{EvSession, HeaterTarget, ShiftableLoad};
-use crate::entities::DomainError;
 use crate::entities::user_request::{UserRequest, UserRequestStatus};
+use crate::entities::DomainError;
 use crate::ids;
 use crate::state::AppState;
 
@@ -194,8 +194,8 @@ impl UserRequestService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entities::DomainError;
     use crate::entities::user_request::UserRequestStatus;
+    use crate::entities::DomainError;
 
     /// Check shiftable request creation from a minimal body.
     #[test]
@@ -325,7 +325,11 @@ mod tests {
             capacity_kwh: Some(60.0),
             max_charge_kw: Some(7.4),
             completion_policy: CompletionPolicy::Stop,
-            comfort_rates: vec![ComfortRate { fill: 0.8, max_marginal_price: 0.3, max_marginal_co2: 0.0 }],
+            comfort_rates: vec![ComfortRate {
+                fill: 0.8,
+                max_marginal_price: 0.3,
+                max_marginal_co2: 0.0,
+            }],
         }
     }
 
@@ -338,7 +342,11 @@ mod tests {
             capacity_kwh: None,
             max_charge_kw: None,
             completion_policy: CompletionPolicy::Stop,
-            comfort_rates: vec![ComfortRate { fill: 0.0, max_marginal_price: 0.0, max_marginal_co2: 0.0 }],
+            comfort_rates: vec![ComfortRate {
+                fill: 0.0,
+                max_marginal_price: 0.0,
+                max_marginal_co2: 0.0,
+            }],
         }
     }
 
@@ -403,7 +411,12 @@ mod tests {
             target_temp_c: None,
         };
         let result = UserRequestService::create_ev(body, &[ev_slice(0.5)], now);
-        assert!(matches!(result, Err(crate::controller::user_request::RequestError::UnknownAsset(_))));
+        assert!(matches!(
+            result,
+            Err(crate::controller::user_request::RequestError::UnknownAsset(
+                _
+            ))
+        ));
     }
 
     #[test]
@@ -432,7 +445,8 @@ mod tests {
             soft_deadline: None,
             target_temp_c: Some(55.0),
         };
-        let (req, target) = UserRequestService::create_heater(body, &[heater_slice()], now).unwrap();
+        let (req, target) =
+            UserRequestService::create_heater(body, &[heater_slice()], now).unwrap();
         assert_eq!(req.asset_id, ids::ASSET_HEATER);
         assert!((req.target_energy_kwh - 5.0).abs() < 0.01);
         assert_eq!(req.session_id, Some(target.id));

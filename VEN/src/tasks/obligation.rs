@@ -21,7 +21,8 @@ pub(crate) fn spawn_obligation_check(
     ven_name: String,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(OBLIGATION_CHECK_INTERVAL_S));
+        let mut interval =
+            tokio::time::interval(std::time::Duration::from_secs(OBLIGATION_CHECK_INTERVAL_S));
         loop {
             interval.tick().await;
             let now = Utc::now();
@@ -44,8 +45,14 @@ pub(crate) fn spawn_obligation_check(
                     })
                     .collect()
             };
-            if let Err(e) =
-                ObligationService::check_and_report(&state, asset_samples, vtn.as_ref(), &ven_name, now).await
+            if let Err(e) = ObligationService::check_and_report(
+                &state,
+                asset_samples,
+                vtn.as_ref(),
+                &ven_name,
+                now,
+            )
+            .await
             {
                 error!("obligation check failed: {e:#}");
             }

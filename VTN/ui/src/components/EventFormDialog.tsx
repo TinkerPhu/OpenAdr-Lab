@@ -26,6 +26,7 @@ export function EventFormDialog(props: EventFormDialogProps) {
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- form reset on dialog open; no loop risk
       setEventName(event?.eventName ?? "");
       setProgramID(event?.programID ?? (programs[0]?.id ?? ""));
       setPriority(event?.priority != null ? String(event.priority) : "");

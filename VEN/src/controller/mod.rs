@@ -4,9 +4,9 @@ pub use simulator_port::{AssetSnapshot, SimSnapshot, SimulatorPort};
 
 // ── VtnPort trait and typed OpenADR structs ───────────────────────────────────
 pub mod vtn_port;
-pub use vtn_port::VtnPort;
 #[cfg(test)]
 pub use simulator_port::GridSnapshot;
+pub use vtn_port::VtnPort;
 
 // ── OpenADR interface ─────────────────────────────────────────────────────────
 pub mod openadr_interface;

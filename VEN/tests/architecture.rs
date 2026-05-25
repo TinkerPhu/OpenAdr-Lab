@@ -8,11 +8,12 @@
 ///   1. Add `use crate::profile::Profile;` to any file in `VEN/src/routes/`
 ///   2. Run `cargo test architecture` — the test fails with a diagnostic naming the file.
 ///   3. Remove the import — the test passes.
-
 use std::path::{Path, PathBuf};
 
 fn routes_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src").join("routes")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("routes")
 }
 
 fn collect_rs_files(dir: &Path) -> Vec<PathBuf> {

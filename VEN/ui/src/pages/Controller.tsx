@@ -40,6 +40,7 @@ export function ControllerPage() {
 
   // Shared nowMs: advances only when fresh timeline data arrives, keeping the
   // NOW reference line consistent across all charts in the same render.
+  // eslint-disable-next-line react-hooks/purity -- intentional: captures wall time at moment timeline data updates
   const nowMs = useMemo(() => Date.now(), [allTimelines]);
 
   // Single poll timer — all sources refresh in one tick.
@@ -95,11 +96,13 @@ export function ControllerPage() {
 
   const assetSummaries = useMemo(() => {
     if (!sim) return [];
+    // eslint-disable-next-line react-hooks/purity -- intentional: passes current wall time into pure summary derivation
     return deriveAssetSummaries(sim, tariffs, requests, allTimelines, Date.now());
   }, [sim, tariffs, requests, allTimelines]);
 
   const tariffSnapshot = useMemo(() => {
     if (!sim) return null;
+    // eslint-disable-next-line react-hooks/purity -- intentional: passes current wall time into pure snapshot derivation
     return deriveTariffSnapshot(sim, tariffs, Date.now());
   }, [sim, tariffs]);
 

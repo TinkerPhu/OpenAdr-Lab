@@ -1,9 +1,9 @@
 /// Timeline: merged past-history + future-plan data per asset.
 ///
 /// `build_asset_timeline` assembles `Vec<AssetTimelinePoint>` by combining:
-///   - Past:   rows from `AssetHistoryBuffer` within the requested back-window.
-///   - Future: plan slot allocations for this asset within the forward-window,
-///             enriched with cost/CO₂ rates from the slot's tariff values.
+/// - Past:   rows from `AssetHistoryBuffer` within the requested back-window.
+/// - Future: plan slot allocations for this asset within the forward-window,
+///   enriched with cost/CO₂ rates from the slot's tariff values.
 ///
 /// The "grid" virtual asset uses `net_import_kw`/`net_export_kw` from plan slots
 /// and tariff interval keys for future; past comes from `history["grid"]` if present.
@@ -14,7 +14,7 @@ use crate::controller::trace::AssetTimelinePoint;
 use crate::entities::plan::Plan;
 
 // Data-carrier types live in entities/timeline.
-use crate::entities::timeline::{TimelineSnapshot, TimeWindow};
+use crate::entities::timeline::{TimeWindow, TimelineSnapshot};
 #[cfg(test)]
 use crate::entities::timeline::{TimelineAssetData, TimelinePoint};
 

@@ -11,13 +11,16 @@ use crate::assets::{
     AssetConfig, AssetHistoryBuffer, AssetState, BaseLoad, Battery, EvCharger, Grid, Heater,
     PvInverter,
 };
-use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot, SimSnapshot, SimulatorPort, SnapshotError};
-use crate::entities::timeline::{HeaterPlanTrajectory, TimelineAssetData, TimelinePoint, TimelineSnapshot};
+use crate::controller::simulator_port::{
+    AssetSnapshot, GridSnapshot, SimSnapshot, SimulatorPort, SnapshotError,
+};
 use crate::entities::asset::AssetType;
 use crate::entities::asset_params::AssetParams;
+use crate::entities::timeline::{
+    HeaterPlanTrajectory, TimelineAssetData, TimelinePoint, TimelineSnapshot,
+};
 use crate::models::SensorSnapshot;
 use energy::EnergyCounter;
-
 
 /// Tracks the user-induced irradiance perturbation between ticks.
 ///
@@ -165,6 +168,7 @@ impl SimState {
     /// - `base_load_kw_override`: if Some, one-shot: captures offset then cleared by sim loop.
     /// - `base_load_alpha`: EMA factor for base load blend-back (0.0–1.0; default 0.1).
     /// - `ev_plugged_override`: if Some, hold EV plugged state; else let physics drive it.
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
         dt_s: f64,
@@ -183,7 +187,7 @@ impl SimState {
         let hour = now.format("%H").to_string().parse::<f64>().unwrap_or(12.0)
             + now.format("%M").to_string().parse::<f64>().unwrap_or(0.0) / 60.0;
 
-        let natural_irradiance = if hour >= 6.0 && hour <= 18.0 {
+        let natural_irradiance = if (6.0..=18.0).contains(&hour) {
             let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
             angle.sin()
         } else {
@@ -369,7 +373,11 @@ impl SimState {
                     .history
                     .slice(w, now)
                     .into_iter()
-                    .map(|p| TimelinePoint { ts: p.ts, power_kw: p.power_kw, state_values: cfg.state_values(&p.state) })
+                    .map(|p| TimelinePoint {
+                        ts: p.ts,
+                        power_kw: p.power_kw,
+                        state_values: cfg.state_values(&p.state),
+                    })
                     .collect();
                 let current_power_kw = entry
                     .history
@@ -398,14 +406,17 @@ impl SimState {
                     }
                     _ => None,
                 };
-                (entry.id.clone(), TimelineAssetData {
-                    asset_id: entry.id.clone(),
-                    asset_type,
-                    history,
-                    current_power_kw,
-                    current_state_values,
-                    plan_trajectory,
-                })
+                (
+                    entry.id.clone(),
+                    TimelineAssetData {
+                        asset_id: entry.id.clone(),
+                        asset_type,
+                        history,
+                        current_power_kw,
+                        current_state_values,
+                        plan_trajectory,
+                    },
+                )
             })
             .collect();
         let grid_history: Vec<TimelinePoint> = self
@@ -413,10 +424,23 @@ impl SimState {
             .history
             .slice(w, now)
             .into_iter()
-            .map(|p| TimelinePoint { ts: p.ts, power_kw: p.power_kw, state_values: HashMap::new() })
+            .map(|p| TimelinePoint {
+                ts: p.ts,
+                power_kw: p.power_kw,
+                state_values: HashMap::new(),
+            })
             .collect();
-        let grid_current_kw = self.grid_asset.history.latest().map(|p| p.power_kw).unwrap_or(0.0);
-        TimelineSnapshot { assets, grid_history, grid_current_kw }
+        let grid_current_kw = self
+            .grid_asset
+            .history
+            .latest()
+            .map(|p| p.power_kw)
+            .unwrap_or(0.0);
+        TimelineSnapshot {
+            assets,
+            grid_history,
+            grid_current_kw,
+        }
     }
 }
 

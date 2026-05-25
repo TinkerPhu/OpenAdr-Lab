@@ -74,7 +74,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(vtn.submitted().len(), 0, "no obligations → no reports submitted");
+        assert_eq!(
+            vtn.submitted().len(),
+            0,
+            "no obligations → no reports submitted"
+        );
     }
 
     #[tokio::test]
@@ -87,8 +91,14 @@ mod tests {
         // Testing that branch requires a due obligation in state — which requires
         // internal state setup beyond the current AppState API.
         // This test verifies the no-obligation path still returns Ok.
-        let result =
-            ObligationService::check_and_report(&state, HashMap::new(), &vtn, "test-ven", Utc::now()).await;
+        let result = ObligationService::check_and_report(
+            &state,
+            HashMap::new(),
+            &vtn,
+            "test-ven",
+            Utc::now(),
+        )
+        .await;
         assert!(result.is_ok());
     }
 

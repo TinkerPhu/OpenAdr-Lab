@@ -1,7 +1,7 @@
 // Extracted from VEN/src/loops.rs — state persistence (spawn_state_persist)
 
-use tracing::error;
 use crate::state::AppState;
+use tracing::error;
 
 pub(crate) fn spawn_state_persist(state: AppState, path: String) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {

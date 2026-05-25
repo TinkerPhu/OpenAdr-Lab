@@ -370,7 +370,7 @@ The VEN UI had been scaffolded (App.tsx, 4 pages, API client, usePoll hook, Json
 
 ### Vite Build on Windows Subst Drives
 
-Hit a Vite build error: `The "fileName" properties of emitted chunks must not be absolute paths, received "C:/DriveD/..."`. Root cause: `D:` drive is a Windows `subst` of `C:\DriveD`, and Vite resolves the real path internally causing a mismatch. Fixed by building from the real path. Not an issue in Docker (Linux).
+Hit a Vite build error: `The "fileName" properties of emitted chunks must not be absolute paths, received "C:/DriveD/..."`. Root cause: project path `C:\DriveD` was previously also accessible as a subst drive, and Vite resolves the real path internally causing a mismatch. Fixed by building from `C:\DriveD\...` directly. Not an issue in Docker (Linux).
 
 ### React Guidelines Improvements
 
@@ -441,7 +441,7 @@ Follows the same patterns as the VEN UI but simpler:
 
 ### Windows Subst Drive Issue (Again)
 
-Vitest failed when run from `D:\Tinker\...` (subst drive) because Vite resolves to the real path `C:\DriveD\Tinker\...`. The `setupFiles` path couldn't be found. Fix: removed `root: resolve(__dirname)` from `vite.config.ts` and run tests from the real path. Updated auto-memory with detailed notes to prevent recurrence.
+Vitest failed when run from a subst drive alias because Vite resolves to the real path `C:\DriveD\Tinker\...`. The `setupFiles` path couldn't be found. Fix: removed `root: resolve(__dirname)` from `vite.config.ts` and run tests from the real path `C:\DriveD\...`. Updated auto-memory with detailed notes to prevent recurrence.
 
 ## Phase 7 Work Log: Port Remapping to 8200 Range (2026-02-07)
 
