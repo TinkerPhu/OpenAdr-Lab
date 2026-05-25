@@ -2,7 +2,9 @@ use chrono::{DateTime, Duration, Utc};
 use std::collections::{HashMap, VecDeque};
 
 use crate::common::{Interpolation, TimeSeries};
-use crate::controller::milp_planner::asset_port::{BatteryMilpContext, EvMilpContext, HeaterMilpContext};
+use crate::controller::milp_planner::asset_port::{
+    BatteryMilpContext, EvMilpContext, HeaterMilpContext,
+};
 
 pub mod base_load;
 pub mod battery;
@@ -306,7 +308,10 @@ impl AssetConfig {
 
     /// Returns a stateful trajectory computer seeded from the current live state,
     /// or `None` for assets without planned state to recompute (battery, EV, PV, etc.).
-    pub fn plan_trajectory(&self, live_state: &AssetState) -> Option<crate::entities::timeline::HeaterPlanTrajectory> {
+    pub fn plan_trajectory(
+        &self,
+        live_state: &AssetState,
+    ) -> Option<crate::entities::timeline::HeaterPlanTrajectory> {
         match self {
             Self::Heater(cfg) => Heater::plan_trajectory(cfg, live_state),
             _ => None,
@@ -481,6 +486,7 @@ impl AssetConfig {
     }
 
     /// Build the MILP context for this asset, or `None` for non-MILP assets (PV, base load, grid).
+    #[allow(clippy::too_many_arguments)]
     pub fn build_milp_context(
         &self,
         state: &AssetState,
@@ -494,9 +500,7 @@ impl AssetConfig {
         lambda_sw: f64,
     ) -> Option<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
         match self {
-            Self::Battery(cfg) => Some(Box::new(
-                BatteryMilpContext::from_state(state, cfg),
-            )),
+            Self::Battery(cfg) => Some(Box::new(BatteryMilpContext::from_state(state, cfg))),
             Self::Ev(cfg) => Some(Box::new(EvMilpContext::from_state(
                 state,
                 cfg,

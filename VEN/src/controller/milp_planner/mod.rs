@@ -23,24 +23,25 @@ use uuid::Uuid;
 
 #[allow(unused_imports)]
 use self::asset_port::{
-    BatteryMilpContext, BatteryMilpVars, BatterySolOutput,
-    EvMilpContext, EvMilpMode, EvMilpVars, EvSolOutput,
-    HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput,
+    BatteryMilpContext, BatteryMilpVars, BatterySolOutput, EvMilpContext, EvMilpMode, EvMilpVars,
+    EvSolOutput, HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput,
 };
 
 pub use self::asset_port::{
-    AssetKind, AssetMilpContext, AssetMilpParams,
-    BatteryScalars, EvScalars, HeaterScalars, MilpLoadMode,
+    AssetKind, AssetMilpContext, AssetMilpParams, BatteryScalars, EvScalars, HeaterScalars,
+    MilpLoadMode,
 };
 #[allow(unused_imports)]
 use crate::controller::milp_interactions::{
     build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
-use crate::entities::asset_params::{BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams};
 use crate::controller::simulator_port::SimSnapshot;
 #[allow(unused_imports)]
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
+use crate::entities::asset_params::{
+    BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
+};
 use crate::entities::capacity::OadrCapacityState;
 #[allow(unused_imports)]
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
@@ -52,21 +53,20 @@ use crate::entities::plan::{
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::entities::tariff_snapshot::TariffTimeSeries;
 
-
-mod types;
+pub mod asset_port;
+mod envelopes;
 mod inputs;
+mod results;
 mod solver_phase1;
 mod solver_phase2;
-mod envelopes;
-mod results;
-pub mod asset_port;
+mod types;
 
 use self::inputs::*;
 use self::results::*;
-use self::solver_phase2::*;
-use self::types::*;
 #[cfg(test)]
 use self::solver_phase1::*;
+use self::solver_phase2::*;
+use self::types::*;
 
 fn battery_params(asset_params: &[AssetParams]) -> Option<&BatteryParams> {
     asset_params.iter().find_map(|p| match p {
@@ -106,6 +106,7 @@ fn base_load_params(asset_params: &[AssetParams]) -> Option<&BaseLoadParams> {
 /// Run the MILP planner: build inputs from asset contexts and live state, solve via HiGHS,
 /// and translate the solution into a Plan.
 /// `objective_override` — when `Some`, overrides the planner default objective.
+#[allow(clippy::too_many_arguments)]
 pub fn run_planner(
     asset_contexts: Vec<Box<dyn self::asset_port::AssetMilpContext>>,
     assets: &SimSnapshot,

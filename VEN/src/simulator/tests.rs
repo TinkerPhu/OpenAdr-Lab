@@ -12,7 +12,10 @@ mod port_tests {
     fn snapshot_returns_ok_for_empty_state() {
         let sim = SimState::from_params(&[]);
         let result = SimulatorPort::snapshot(&sim);
-        assert!(result.is_ok(), "snapshot() must succeed for a valid SimState");
+        assert!(
+            result.is_ok(),
+            "snapshot() must succeed for a valid SimState"
+        );
         let snap = result.unwrap();
         // Grid defaults are zero
         assert_eq!(snap.grid.net_power_w, 0.0);
@@ -47,26 +50,26 @@ mod schema_snapshot_tests {
         let profile_yaml = std::fs::read_to_string(profile_path())
             .expect("ven-1.yaml must be readable for schema snapshot test");
         let profile: crate::profile::Profile =
-            serde_yaml::from_str(&profile_yaml)
-                .expect("ven-1.yaml must parse as a valid Profile");
+            serde_yaml::from_str(&profile_yaml).expect("ven-1.yaml must parse as a valid Profile");
 
         let params = profile.asset_params();
         let schema = schema_from_params(&params);
         // Sort keys for deterministic JSON output
         let mut keys: Vec<_> = schema.keys().cloned().collect();
         keys.sort();
-        let ordered: std::collections::BTreeMap<_, _> =
-            keys.iter().map(|k| (k.clone(), schema[k].clone())).collect();
-        let actual_json = serde_json::to_string_pretty(&ordered)
-            .expect("schema must be JSON-serialisable");
+        let ordered: std::collections::BTreeMap<_, _> = keys
+            .iter()
+            .map(|k| (k.clone(), schema[k].clone()))
+            .collect();
+        let actual_json =
+            serde_json::to_string_pretty(&ordered).expect("schema must be JSON-serialisable");
 
         let fixture = fixture_path();
         if !fixture.exists() {
             // First run: write the golden file and pass
             std::fs::create_dir_all(fixture.parent().unwrap())
                 .expect("fixtures dir must be creatable");
-            std::fs::write(&fixture, &actual_json)
-                .expect("fixture file must be writable");
+            std::fs::write(&fixture, &actual_json).expect("fixture file must be writable");
             println!("schema_snapshot: fixture created at {}", fixture.display());
             return;
         }

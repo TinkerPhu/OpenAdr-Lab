@@ -4,12 +4,13 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::controller::SimulatorPort;
-use crate::entities::asset::PlanTrigger;
 use crate::controller::VtnPort;
+use crate::entities::asset::PlanTrigger;
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
 use crate::state::{AppState, EvSettings};
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn tick_once(
     state: AppState,
     sim: Arc<Mutex<SimState>>,
@@ -51,23 +52,18 @@ pub(crate) async fn tick_once(
     }
 
     // Lock sim for physics only — no .await inside the block.
-    let (
-        tick_sensor,
-        tick_sim_snap,
-        tick_envelope,
-        cleared_fields,
-        pv_clear,
-        base_clear,
-    ) = {
+    let (tick_sensor, tick_sim_snap, tick_envelope, cleared_fields, pv_clear, base_clear) = {
         let mut sim_guard = sim.lock().await;
 
         // PHASE 1: Apply Behaviour A one-shot injections; collect fields to clear.
-        let cleared_fields = super::helpers::apply_sim_injections(&inject, &mut *sim_guard);
+        let cleared_fields = super::helpers::apply_sim_injections(&inject, &mut sim_guard);
         let pv_clear = inject.pv_irradiance.is_some();
         let base_clear = inject.base_load_kw.is_some();
 
         // PHASE 2: Build setpoints (dispatcher from MILP plan + capacity + overlay)
-        let pre_snap = sim_guard.snapshot().expect("SimState::snapshot is infallible");
+        let pre_snap = sim_guard
+            .snapshot()
+            .expect("SimState::snapshot is infallible");
 
         let sp_map = super::helpers::build_tick_setpoints(
             &pre_snap,
@@ -96,7 +92,7 @@ pub(crate) async fn tick_once(
 
         // PHASE 4 (in-lock): extract snapshots and mutate history/grid/envelope.
         let (tick_sensor, tick_sim_snap, tick_envelope) =
-            super::helpers::finalize_tick_outputs(&mut *sim_guard, &capacity_snap, now);
+            super::helpers::finalize_tick_outputs(&mut sim_guard, &capacity_snap, now);
 
         (
             tick_sensor,
@@ -127,7 +123,7 @@ pub(crate) async fn tick_once(
         tick_envelope,
         plan_snap.as_ref(),
         &state,
-        &*trigger_tx,
+        &trigger_tx,
         &rates_snap,
         dt_s,
         now,
@@ -139,7 +135,14 @@ pub(crate) async fn tick_once(
         report_counter += 1;
         if report_counter >= report_every_ticks {
             report_counter = 0;
-            super::publish::run_measurement_reports(&state, &snap_for_reports, vtn.as_ref(), &ven_name, now).await;
+            super::publish::run_measurement_reports(
+                &state,
+                &snap_for_reports,
+                vtn.as_ref(),
+                &ven_name,
+                now,
+            )
+            .await;
         }
     }
 

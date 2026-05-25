@@ -52,6 +52,7 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
     );
   }
 
+  // eslint-disable-next-line react-hooks/purity -- intentional: snapshot current time relative to plan horizon; component re-renders on poll
   const nowMs = Date.now();
   const { points, assetIds } = buildStackedFromPlan(plan);
   const lastEnd = plan.slots[plan.slots.length - 1]?.end;

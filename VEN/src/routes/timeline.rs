@@ -108,8 +108,7 @@ pub async fn get_timeline(
 
     let plan = ctx.state.active_plan().await;
     let snap = ctx.sim.lock().await.to_timeline_snapshot();
-    let known_assets: std::collections::HashSet<String> =
-        snap.assets.keys().cloned().collect();
+    let known_assets: std::collections::HashSet<String> = snap.assets.keys().cloned().collect();
 
     match build_grid_aligned_array(
         &asset_id,
@@ -134,6 +133,7 @@ pub async fn get_timeline(
 
 /// Build a grid-aligned timeline array for one asset:
 /// [history_grid..., now_point, future_grid...]
+#[allow(clippy::too_many_arguments)]
 pub fn build_grid_aligned_array(
     asset_id: &str,
     known_assets: &std::collections::HashSet<String>,
@@ -228,8 +228,7 @@ pub async fn get_timeline_all(
 
     let plan = ctx.state.active_plan().await;
     let snap = ctx.sim.lock().await.to_timeline_snapshot();
-    let known_assets: std::collections::HashSet<String> =
-        snap.assets.keys().cloned().collect();
+    let known_assets: std::collections::HashSet<String> = snap.assets.keys().cloned().collect();
 
     let mut result: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
 

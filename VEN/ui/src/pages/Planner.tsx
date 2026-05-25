@@ -206,6 +206,7 @@ export function PlannerPage() {
   const [correctionStatus, setCorrectionStatus] = useState<CorrectionStatus>({ active: false });
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs local objective from server plan; no loop risk
     if (plan?.objective) setObjective(plan.objective);
   }, [plan?.objective]);
 

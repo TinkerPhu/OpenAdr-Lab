@@ -1,16 +1,16 @@
+pub mod obligation;
+pub mod planning;
 pub mod poll_events;
 pub mod poll_programs;
 pub mod poll_reports;
-pub mod obligation;
-pub mod planning;
 pub mod sim_tick;
 pub mod state_persist;
 
+pub(crate) use obligation::spawn_obligation_check;
+pub(crate) use planning::spawn_planning;
 pub(crate) use poll_events::spawn_event_poll;
 pub(crate) use poll_programs::spawn_program_poll;
 pub(crate) use poll_reports::spawn_report_poll;
-pub(crate) use obligation::spawn_obligation_check;
-pub(crate) use planning::spawn_planning;
 pub(crate) use sim_tick::spawn_sim_tick;
 pub(crate) use state_persist::spawn_state_persist;
 
@@ -31,7 +31,10 @@ pub(crate) fn supervised_spawn(
         loop {
             match make_task().await {
                 Ok(()) => {
-                    tracing::warn!(task = name, "exited unexpectedly, restarting in {cooldown_s}s");
+                    tracing::warn!(
+                        task = name,
+                        "exited unexpectedly, restarting in {cooldown_s}s"
+                    );
                 }
                 Err(e) => {
                     tracing::error!(task = name, "panicked: {e:?}, restarting in {cooldown_s}s");
@@ -45,7 +48,10 @@ pub(crate) fn supervised_spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, atomic::{AtomicU32, Ordering}};
+    use std::sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    };
 
     #[tokio::test]
     async fn supervised_spawn_restarts_after_panic() {

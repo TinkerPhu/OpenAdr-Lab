@@ -7,6 +7,12 @@ pub struct EnergyCounter {
     pub export_kwh: f64,
 }
 
+impl Default for EnergyCounter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EnergyCounter {
     pub fn new() -> Self {
         Self {

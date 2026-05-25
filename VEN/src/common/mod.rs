@@ -234,7 +234,7 @@ impl TimeSeries {
             if let Some(v) = value {
                 samples.push((t, v));
             }
-            t = t + width;
+            t += width;
         }
 
         TimeSeries {

@@ -17,6 +17,7 @@ use super::types::*;
 /// Warm-start vector: Phase 1 solution values provided as initial MIP incumbent for Phase 2.
 /// This ensures HiGHS immediately has a feasible integer point (the Phase 1 solution satisfies
 /// all Phase 2 constraints), avoiding the NoSolutionFound timeout on Pi4 ARM.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_phase2_warm_start(
     inputs: &MilpInputs,
     p1: &SolveOutput,
@@ -118,6 +119,7 @@ pub(crate) fn build_phase2_warm_start(
     iv
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn solve_phase2(
     inputs: &MilpInputs,
     p1w: &Phase1Weights,
@@ -194,12 +196,20 @@ pub(crate) fn solve_phase2(
         match ctx.asset_kind() {
             AssetKind::Battery => {
                 ctx.declare_vars_into_pool(
-                    n, p2w.c_bat_startup_eur, p2w.c_bat_ramp_eur_kw, &mut vars, &mut pool,
+                    n,
+                    p2w.c_bat_startup_eur,
+                    p2w.c_bat_ramp_eur_kw,
+                    &mut vars,
+                    &mut pool,
                 );
             }
             AssetKind::Ev => {
                 ctx.declare_vars_into_pool(
-                    n, p2w.c_ev_startup_eur, p2w.c_ev_ramp_eur_kw, &mut vars, &mut pool,
+                    n,
+                    p2w.c_ev_startup_eur,
+                    p2w.c_ev_ramp_eur_kw,
+                    &mut vars,
+                    &mut pool,
                 );
             }
             AssetKind::Heater => {
@@ -208,15 +218,15 @@ pub(crate) fn solve_phase2(
         }
     }
 
-    let interactions = build_interactions(p1w.c_bat_ev_coexist_eur_kwh, p1w.c_ctrl_imp_malus_eur_kwh);
-    let mut active_interactions: Vec<
-        &Box<dyn crate::controller::milp_interactions::AssetInteraction>,
-    > = Vec::new();
+    let interactions =
+        build_interactions(p1w.c_bat_ev_coexist_eur_kwh, p1w.c_ctrl_imp_malus_eur_kwh);
+    let mut active_interactions: Vec<&dyn crate::controller::milp_interactions::AssetInteraction> =
+        Vec::new();
     let mut iv_list: Vec<crate::controller::milp_interactions::InteractionVars> = Vec::new();
     for interaction in &interactions {
         if interaction.applicable(&pool) {
             let iv = interaction.declare_vars(&pool, &global, &mut vars);
-            active_interactions.push(interaction);
+            active_interactions.push(interaction.as_ref());
             iv_list.push(iv);
         }
     }
@@ -239,8 +249,7 @@ pub(crate) fn solve_phase2(
         match ctx.asset_kind() {
             AssetKind::Battery => {
                 // Battery wear only (c_startup=0, c_ramp=0 in cost cap).
-                phase1_cap_expr +=
-                    ctx.objective(&pool, n, dt_h, p1w.c_bat_wear_eur_kwh, 0.0, 0.0);
+                phase1_cap_expr += ctx.objective(&pool, n, dt_h, p1w.c_bat_wear_eur_kwh, 0.0, 0.0);
             }
             AssetKind::Ev => {
                 // EV service reward only (c_startup=0 → Phase 1 mode in EV impl).
@@ -264,21 +273,29 @@ pub(crate) fn solve_phase2(
             AssetKind::Battery => {
                 // wear=0, startup=bat_startup, ramp=bat_ramp.
                 friction_obj += ctx.objective(
-                    &pool, n, dt_h, 0.0, p2w.c_bat_startup_eur, p2w.c_bat_ramp_eur_kw,
+                    &pool,
+                    n,
+                    dt_h,
+                    0.0,
+                    p2w.c_bat_startup_eur,
+                    p2w.c_bat_ramp_eur_kw,
                 );
             }
             AssetKind::Ev => {
                 // c_startup>0 → Phase 2: startup+ramp active, service reward off.
                 friction_obj += ctx.objective(
-                    &pool, n, dt_h, 0.0, p2w.c_ev_startup_eur, p2w.c_ev_ramp_eur_kw,
+                    &pool,
+                    n,
+                    dt_h,
+                    0.0,
+                    p2w.c_ev_startup_eur,
+                    p2w.c_ev_ramp_eur_kw,
                 );
             }
             AssetKind::Heater => {
                 // c_startup=1.0 signals Phase 2; c_ramp carries w_tier_penalty_eur.
                 // self.lambda_sw_eur applied internally by HeaterMilpContext::objective.
-                friction_obj += ctx.objective(
-                    &pool, n, dt_h, 0.0, 1.0, p2w.w_tier_penalty_eur,
-                );
+                friction_obj += ctx.objective(&pool, n, dt_h, 0.0, 1.0, p2w.w_tier_penalty_eur);
             }
         }
     }
@@ -339,7 +356,16 @@ pub(crate) fn solve_milp_two_phase(
         return Ok((phase1_sol, c_star, 0.0));
     }
     tracing::debug!(c_star, epsilon, "Phase 2 starting");
-    match solve_phase2(inputs, p1w, p2w, c_star, epsilon, &phase1_sol, asset_contexts, timeout_s) {
+    match solve_phase2(
+        inputs,
+        p1w,
+        p2w,
+        c_star,
+        epsilon,
+        &phase1_sol,
+        asset_contexts,
+        timeout_s,
+    ) {
         Ok((sol, friction_eur)) => Ok((sol, c_star, friction_eur)),
         Err(e) => {
             tracing::warn!(

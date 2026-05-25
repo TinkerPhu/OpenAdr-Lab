@@ -20,16 +20,6 @@ pub enum AssetProfile {
 }
 
 impl AssetProfile {
-    pub fn id(&self) -> &str {
-        match self {
-            AssetProfile::Ev(c) => &c.id,
-            AssetProfile::Heater(c) => &c.id,
-            AssetProfile::Pv(c) => &c.id,
-            AssetProfile::Battery(c) => &c.id,
-            AssetProfile::BaseLoad(c) => &c.id,
-        }
-    }
-
     /// Convert this config variant into the domain-level `AssetParams`.
     /// Called at startup only — not on the hot path.
     pub fn to_params(&self) -> AssetParams {
@@ -335,9 +325,6 @@ fn default_persist_every() -> u64 {
 fn default_report_interval() -> u64 {
     60
 }
-
-/// Optimization objective preset. Selects a named weight configuration for the MILP solver.
-/// Individual weight fields in `PlannerConfig` can be tuned further with `Custom`.
 
 /// Physical grid connection limits — meter / main breaker hard ceiling.
 /// The MILP uses these as `p_imp_max_phys_kw` / `p_exp_max_phys_kw`.
@@ -847,6 +834,11 @@ assets:
 "#;
         let p: Profile = serde_yaml::from_str(yaml).unwrap();
         let errs = p.validate().unwrap_err();
-        assert!(errs.len() >= 2, "expected ≥ 2 errors, got {}: {:?}", errs.len(), errs);
+        assert!(
+            errs.len() >= 2,
+            "expected ≥ 2 errors, got {}: {:?}",
+            errs.len(),
+            errs
+        );
     }
 }

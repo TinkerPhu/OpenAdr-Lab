@@ -244,12 +244,18 @@ pub async fn post_requests(
             .map(|(entry, cfg)| {
                 let (current_soc, default_soc_target, capacity_kwh, max_charge_kw) =
                     match (&entry.state, cfg) {
-                        (AS::Ev(s), AC::Ev(c)) => {
-                            (Some(s.soc), Some(c.soc_target), Some(c.battery_kwh), Some(c.max_charge_kw))
-                        }
-                        (AS::Battery(s), AC::Battery(c)) => {
-                            (Some(s.soc), Some(1.0), Some(c.capacity_kwh), Some(c.max_charge_kw))
-                        }
+                        (AS::Ev(s), AC::Ev(c)) => (
+                            Some(s.soc),
+                            Some(c.soc_target),
+                            Some(c.battery_kwh),
+                            Some(c.max_charge_kw),
+                        ),
+                        (AS::Battery(s), AC::Battery(c)) => (
+                            Some(s.soc),
+                            Some(1.0),
+                            Some(c.capacity_kwh),
+                            Some(c.max_charge_kw),
+                        ),
                         _ => (None, None, None, None),
                     };
                 AssetRequestSlice {

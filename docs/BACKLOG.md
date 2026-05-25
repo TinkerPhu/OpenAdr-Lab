@@ -180,3 +180,55 @@ also add ui tests for UserRequests and Controller in VEN\ui\src\__tests__
 the ven poll interval should be configurable in the config file so during test we can easily shorten it. or is there a better option? 
 
 reactor still there?
+
+---
+
+## Dependency Vulnerabilities — 2026-05-25
+
+> Re-run `cargo audit` and `npm audit` before each release and add new findings here.
+
+### Rust (cargo audit) — 10 vulnerabilities
+
+| ID | Crate | Version | Severity | Title | Fix |
+|----|-------|---------|----------|-------|-----|
+| RUSTSEC-2026-0048 | aws-lc-sys | 0.37.0 | High (7.4) | CRL Distribution Point Scope Check Logic Error | Upgrade to ≥0.39.0 |
+| RUSTSEC-2026-0047 | aws-lc-sys | 0.37.0 | High (7.5) | PKCS7_verify Signature Validation Bypass | Upgrade to ≥0.38.0 |
+| RUSTSEC-2026-0046 | aws-lc-sys | 0.37.0 | High (7.5) | PKCS7_verify Certificate Chain Validation Bypass | Upgrade to ≥0.38.0 |
+| RUSTSEC-2026-0045 | aws-lc-sys | 0.37.0 | Medium (5.9) | Timing Side-Channel in AES-CCM Tag Verification | Upgrade to ≥0.38.0 |
+| RUSTSEC-2026-0044 | aws-lc-sys | 0.37.0 | — | X.509 Name Constraints Bypass via Wildcard/Unicode CN | Upgrade to ≥0.39.0 |
+| RUSTSEC-2026-0037 | quinn-proto | 0.11.13 | High (8.7) | Denial of service in Quinn endpoints | Upgrade to ≥0.11.14 |
+| RUSTSEC-2026-0099 | rustls-webpki | 0.103.9 | — | Name constraints accepted for wildcard certificate names | Upgrade to ≥0.103.12 |
+| RUSTSEC-2026-0104 | rustls-webpki | 0.103.9 | — | Reachable panic in CRL parsing | Upgrade to ≥0.103.13 |
+| RUSTSEC-2026-0049 | rustls-webpki | 0.103.9 | — | CRLs not authoritative due to faulty matching logic | Upgrade to ≥0.103.10 |
+| RUSTSEC-2026-0098 | rustls-webpki | 0.103.9 | — | Name constraints for URI names incorrectly accepted | Upgrade to ≥0.103.12 |
+
+**Dependency chain:** All via `reqwest` TLS stack — `aws-lc-rs` → `rustls` → `tokio-rustls` / `hyper-rustls` / `quinn`. Upgrading `reqwest` to a version that pins `aws-lc-sys ≥0.39.0` and `rustls-webpki ≥0.103.13` should resolve all 10.
+
+**Risk context:** Lab/Pi4 deployment — not internet-exposed. VEN communicates only with local VTN. Real-world exploitability is low; fix before any internet-exposed deployment.
+
+### npm — VEN/ui: 12 vulnerabilities (2 high)
+
+| Package | Severity | Issue |
+|---------|----------|-------|
+| esbuild | High | Dev-server allows cross-origin requests |
+| vite | Moderate | Transitive dep on vulnerable esbuild |
+| (10 others) | Low–Moderate | Various transitive deps |
+
+**Fix:** `cd VEN/ui && npm audit fix`. The high-severity issue is in the dev server only — not in production builds.
+
+### npm — VTN/ui: 11 vulnerabilities (1 high)
+
+| Package | Severity | Issue |
+|---------|----------|-------|
+| esbuild | High | Same dev-server issue as VEN/ui |
+| (10 others) | Low–Moderate | Various transitive deps |
+
+**Fix:** `cd VTN/ui && npm audit fix`.
+
+### RUSTSEC warnings (unsound, not vulnerabilities)
+
+| ID | Crate | Title |
+|----|-------|-------|
+| RUSTSEC-2026-0097 | rand 0.8.5, 0.9.2 | Unsound with custom logger calling `rand::rng()` |
+
+**Risk:** Only triggered when a custom global logger calls `rand::rng()` — not applicable here. No action required.

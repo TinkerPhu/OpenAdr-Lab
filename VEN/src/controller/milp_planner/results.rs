@@ -1,22 +1,25 @@
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
-use crate::entities::asset_params::{BatteryParams, EvParams, HeaterParams};
 use crate::entities::asset::PlanTrigger;
+use crate::entities::asset_params::{BatteryParams, EvParams, HeaterParams};
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::{
-    AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot,
-    PlanWarning, PlanningHorizon, WarningSeverity,
+    AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanWarning, PlanningHorizon,
+    WarningSeverity,
 };
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
-use super::asset_port::{battery_future_state, ev_future_state_at, ev_soc_trajectory, heater_future_state};
+use super::asset_port::{
+    battery_future_state, ev_future_state_at, ev_soc_trajectory, heater_future_state,
+};
 use super::envelopes::build_plan_envelopes;
 use super::types::*;
 
 /// Fallback plan returned when the MILP solver fails.
 /// When `inputs` is `Some`, emits populated slots with zero allocations
 /// so tests asserting on per-slot fields still find data.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn fallback_plan(
     planner: &PlannerParams,
     now: DateTime<Utc>,
@@ -92,7 +95,7 @@ pub(crate) fn fallback_plan(
         ),
         None => vec![],
     };
-    let plan = Plan {
+    Plan {
         id: Uuid::new_v4(),
         created_at: now,
         trigger,
@@ -106,11 +109,11 @@ pub(crate) fn fallback_plan(
         objective_eur: 0.0,
         friction_eur: 0.0,
         cost_breakdown: CostBreakdown::default(),
-    };
-    plan
+    }
 }
 
 /// Translate a MILP solution into a `Plan` with per-slot allocations.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn translate_to_plan(
     sol: &SolveOutput,
     inputs: &MilpInputs,
@@ -296,15 +299,18 @@ pub(crate) fn translate_to_plan(
     // Battery SoC forecast — e_bat_kwh[t] is start-of-slot stored energy.
     if let (Some(ref bid), Some(bat_cfg)) = (&bat_id, battery_cfg) {
         let capacity_kwh = bat_cfg.capacity_kwh;
+        #[allow(clippy::needless_range_loop)] // t indexes both slots[] and sol.e_bat_kwh[]
         for t in 0..n {
-            slots[t]
-                .planned_state_by_asset
-                .insert(bid.clone(), battery_future_state(sol.e_bat_kwh[t], capacity_kwh));
+            slots[t].planned_state_by_asset.insert(
+                bid.clone(),
+                battery_future_state(sol.e_bat_kwh[t], capacity_kwh),
+            );
         }
     }
     // EV SoC forecast — requires soc_ev_init captured in MilpInputs.
     if let (Some(ref eid), Some(soc_init), Some(ev_cfg)) = (&ev_id, inputs.soc_ev_init, ev_cfg) {
         let traj = ev_soc_trajectory(&sol.p_ev_kw, soc_init, ev_cfg.battery_kwh, dt_h);
+        #[allow(clippy::needless_range_loop)] // t indexes both slots[] and traj[]
         for t in 0..n {
             slots[t]
                 .planned_state_by_asset
@@ -316,6 +322,8 @@ pub(crate) fn translate_to_plan(
         if !sol.e_heat_tank_kwh.is_empty() {
             let thermal_mass = heat_cfg.thermal_mass_kwh_per_c;
             let temp_min = heat_cfg.temp_min_c;
+            #[allow(clippy::needless_range_loop)]
+            // t indexes both slots[] and sol.e_heat_tank_kwh[]
             for t in 0..n {
                 slots[t].planned_state_by_asset.insert(
                     hid.clone(),
@@ -384,7 +392,7 @@ pub(crate) fn translate_to_plan(
     }
 
     // ── Assemble plan ───────────────────────────────────────────────────
-    let plan = Plan {
+    Plan {
         id: Uuid::new_v4(),
         created_at: now,
         trigger,
@@ -407,6 +415,5 @@ pub(crate) fn translate_to_plan(
         objective_eur: phase1_cost_eur,
         friction_eur,
         cost_breakdown,
-    };
-    plan
+    }
 }

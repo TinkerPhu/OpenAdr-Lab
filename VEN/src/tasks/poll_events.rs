@@ -182,7 +182,6 @@ pub(crate) fn spawn_event_poll(
     })
 }
 
-
 #[cfg(test)]
 mod event_poll_tests {
     use super::*;
@@ -271,7 +270,8 @@ mod event_poll_tests {
                 "intervalPeriod": {"start": "2026-03-21T10:00:00Z", "duration": "PT1H"},
                 "payloads": [{"type": "PRICE", "values": [0.25]}]
             }]
-        })).unwrap()];
+        }))
+        .unwrap()];
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string()); // already seen → no OpenAdrArrived
         let changes = detect_event_changes(&events, &prev_ids, 0, None, ts());
@@ -297,7 +297,8 @@ mod event_poll_tests {
                 "intervalPeriod": {"start": "2026-03-21T10:00:00Z", "duration": "PT1H"},
                 "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [5.0]}]
             }]
-        })).unwrap()];
+        }))
+        .unwrap()];
         let mut prev_ids = empty_ids();
         prev_ids.insert("ev1".to_string()); // already seen
         let prev_limit: Option<f64> = None;

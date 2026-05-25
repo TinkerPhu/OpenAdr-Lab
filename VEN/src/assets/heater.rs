@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
-use crate::controller::milp_planner::asset_port::{HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput};
+use crate::controller::milp_planner::asset_port::{
+    HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput,
+};
 use crate::entities::asset_params::HeaterParams;
 use crate::entities::timeline::HeaterPlanTrajectory;
 
@@ -262,7 +264,7 @@ impl Heater {
             samples.push((t, kw));
             let net_kwh = (kw - loss_kw - self.draw_kw) * dt_h;
             temp += net_kwh / self.thermal_mass_kwh_per_c;
-            t = t + Duration::seconds(60);
+            t += Duration::seconds(60);
         }
         let end_kw = if temp < self.temp_min_c {
             self.max_kw
@@ -302,7 +304,6 @@ impl Heater {
         Some(0.10)
     }
 }
-
 
 impl Asset for Heater {
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
@@ -1037,9 +1038,13 @@ mod tests {
 
     fn heater_pool_and_vars(
         n: usize,
-    ) -> (good_lp::ProblemVariables, HeaterMilpVars, crate::controller::milp_interactions::MilpVarPool) {
-        use good_lp::{variable, variables};
+    ) -> (
+        good_lp::ProblemVariables,
+        HeaterMilpVars,
+        crate::controller::milp_interactions::MilpVarPool,
+    ) {
         use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
+        use good_lp::{variable, variables};
         let mut vars = variables!();
         let ctx = make_may_run_ctx(n);
         let hv = ctx.declare_vars(n, &mut vars);
@@ -1050,7 +1055,13 @@ mod tests {
             s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
             s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
         };
-        let pool = MilpVarPool { grid, bat: None, ev: None, heater: Some(hv.clone()), shiftable: vec![] };
+        let pool = MilpVarPool {
+            grid,
+            bat: None,
+            ev: None,
+            heater: Some(hv.clone()),
+            shiftable: vec![],
+        };
         (vars, hv, pool)
     }
 
@@ -1095,7 +1106,10 @@ mod tests {
         // C0: n, C1: 2, C2: 2×(n-1), C3: n, C4: n, C5: 4×n (4 at t=0, 4 per subsequent slot)
         // Total for MayRun, no deadline: n + 2 + 2(n-1) + n + n + 4n = 9n
         // For n=4: 4 + 2 + 6 + 4 + 4 + 16 = 36
-        assert!(cs.len() >= 2, "should have at least C1 (2 constraints pinning e_tank[0])");
+        assert!(
+            cs.len() >= 2,
+            "should have at least C1 (2 constraints pinning e_tank[0])"
+        );
     }
 
     #[test]
@@ -1105,7 +1119,11 @@ mod tests {
         let ctx = make_may_run_ctx(n);
         let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
         // n=4, MayRun, no deadline: 4 + 2 + 6 + 4 + 4 + 16 = 36
-        assert_eq!(cs.len(), 36, "expected 36 constraints for n=4 MayRun no-deadline");
+        assert_eq!(
+            cs.len(),
+            36,
+            "expected 36 constraints for n=4 MayRun no-deadline"
+        );
     }
 
     #[test]
@@ -1115,7 +1133,10 @@ mod tests {
         let ctx = make_may_run_ctx(n);
         let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
         // C3 contributes n constraints; total >= n (at minimum C0 alone)
-        assert!(cs.len() >= n, "need at least n upper-bound constraints (C3)");
+        assert!(
+            cs.len() >= n,
+            "need at least n upper-bound constraints (C3)"
+        );
     }
 
     #[test]
@@ -1193,9 +1214,11 @@ mod param_tests {
 #[cfg(test)]
 mod milp_context_trait_tests {
     use super::*;
-    use good_lp::{variable, variables};
-    use crate::controller::milp_planner::{AssetKind, AssetMilpContext, AssetMilpParams, MilpLoadMode};
     use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
+    use crate::controller::milp_planner::{
+        AssetKind, AssetMilpContext, AssetMilpParams, MilpLoadMode,
+    };
+    use good_lp::{variable, variables};
 
     fn make_ctx() -> HeaterMilpContext {
         HeaterMilpContext {
@@ -1221,7 +1244,13 @@ mod milp_context_trait_tests {
             s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
             s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
         };
-        MilpVarPool { grid, bat: None, ev: None, heater: None, shiftable: vec![] }
+        MilpVarPool {
+            grid,
+            bat: None,
+            ev: None,
+            heater: None,
+            shiftable: vec![],
+        }
     }
 
     #[test]
@@ -1252,7 +1281,10 @@ mod milp_context_trait_tests {
 
     #[test]
     fn milp_params_must_run_mode() {
-        let ctx = HeaterMilpContext { mode: HeaterMilpMode::MustRun, ..make_ctx() };
+        let ctx = HeaterMilpContext {
+            mode: HeaterMilpMode::MustRun,
+            ..make_ctx()
+        };
         match ctx.milp_params(4, 300, chrono::Utc::now()) {
             AssetMilpParams::Heater(h) => assert_eq!(h.mode, MilpLoadMode::MustRun),
             _ => panic!("expected Heater variant"),
@@ -1284,6 +1316,10 @@ mod milp_context_trait_tests {
         let mut pool = empty_pool(&mut vars, n);
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
         let cs = AssetMilpContext::constraints(&ctx, &pool, n, 300.0 / 3600.0);
-        assert_eq!(cs.len(), 36, "n=4 MayRun no-deadline: expected 36 constraints");
+        assert_eq!(
+            cs.len(),
+            36,
+            "n=4 MayRun no-deadline: expected 36 constraints"
+        );
     }
 }

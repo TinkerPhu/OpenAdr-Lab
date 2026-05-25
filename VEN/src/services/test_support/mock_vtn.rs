@@ -81,7 +81,10 @@ mod tests {
         };
         mock.upsert_report(body).await.unwrap();
         assert_eq!(mock.submitted().len(), 1);
-        assert_eq!(mock.submitted()[0].reportName.as_deref(), Some("ven-status"));
+        assert_eq!(
+            mock.submitted()[0].reportName.as_deref(),
+            Some("ven-status")
+        );
     }
 
     #[tokio::test]

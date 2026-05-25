@@ -1,10 +1,10 @@
 // Extracted from VEN/src/loops.rs — background poll for programs
 
-use std::sync::Arc;
-use metrics::counter;
-use tracing::{info, error};
 use crate::controller::VtnPort;
 use crate::state::AppState;
+use metrics::counter;
+use std::sync::Arc;
+use tracing::{error, info};
 
 /// Spawn a background task that polls the VTN for programs.
 pub(crate) fn spawn_program_poll(

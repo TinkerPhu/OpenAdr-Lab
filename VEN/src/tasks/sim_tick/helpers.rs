@@ -4,16 +4,19 @@ use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
 use crate::controller;
+use crate::controller::SimSnapshot;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::models::SensorSnapshot;
-use crate::controller::SimSnapshot;
 use crate::simulator::SimState;
 use crate::state::SimInjectState;
 
 /// PHASE 1: Apply Behaviour A one-shot state injections to the simulator.
 /// Returns a list of field names that were applied and should be cleared.
-pub(crate) fn apply_sim_injections(inject: &SimInjectState, sim: &mut SimState) -> Vec<&'static str> {
+pub(crate) fn apply_sim_injections(
+    inject: &SimInjectState,
+    sim: &mut SimState,
+) -> Vec<&'static str> {
     let mut cleared = Vec::new();
     if let Some(soc) = inject.battery_soc {
         if let Some((entry, cfg)) = sim.find_asset_mut(crate::ids::ASSET_BATTERY) {
@@ -128,4 +131,3 @@ pub(crate) fn finalize_tick_outputs(
 
     (tick_sensor, tick_sim_snap, tick_envelope)
 }
-

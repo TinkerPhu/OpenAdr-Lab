@@ -6,15 +6,16 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 use crate::controller;
+use crate::controller::SimSnapshot;
+use crate::controller::VtnPort;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::models::SensorSnapshot;
-use crate::controller::SimSnapshot;
 use crate::simulator::SimState;
-use crate::controller::VtnPort;
 use crate::state::AppState;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn publish_sim_tick_result(
     sensor: SensorSnapshot,
     mut sim_snap: SimSnapshot,
@@ -48,13 +49,15 @@ pub(crate) async fn publish_sim_tick_result(
                     if let Some(load) = loads.iter().find(|l| l.asset_id == alloc.asset_id) {
                         let ends_at = now + chrono::Duration::minutes(load.duration_min as i64);
                         state
-                            .start_shiftable(crate::entities::device_session::ShiftableLoadRuntime {
-                                load_id: load.id,
-                                asset_id: load.asset_id.clone(),
-                                power_kw: load.power_kw,
-                                started_at: now,
-                                ends_at,
-                            })
+                            .start_shiftable(
+                                crate::entities::device_session::ShiftableLoadRuntime {
+                                    load_id: load.id,
+                                    asset_id: load.asset_id.clone(),
+                                    power_kw: load.power_kw,
+                                    started_at: now,
+                                    ends_at,
+                                },
+                            )
                             .await;
                         info!(asset_id = %load.asset_id, ends_at = %ends_at, "shiftable load started");
                     }

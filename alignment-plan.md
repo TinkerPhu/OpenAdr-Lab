@@ -182,16 +182,16 @@ Work top-to-bottom within each pass. After each item: update this file (mark Don
 5. ✓ Done 2026-05-25 — 4.1 Create `docs/reference/TECHNICAL_DEBTS.md` from refactoring_backlog.md
 
 ### Pass 2 — Process and coverage (~4 h, Medium items)
-6. [ ] 1.3 Add linter/coverage section to CLAUDE.md
-7. [ ] 1.4 Add build instructions to CLAUDE.md
-8. [ ] 5.2 Add deterministic clock policy to CLAUDE.md
-9. [ ] 5.3 Add dependency audit cadence to CLAUDE.md
-10. [ ] 5.4 Add refactoring-before-feature rule to CLAUDE.md
-11. [ ] 5.5 Add Definition of Done to SESSION_START.md
-12. [ ] 3.3 Create `docs/SECURITY.md` (threat model + mitigations)
-13. [ ] 3.1 Create `docs/architecture/INTERFACES.md`
-14. [ ] 6.1 Add architecture diagram review cadence
-15. [ ] 6.2 Add quarterly doc-to-code sync to SESSION_START.md
+6. ✓ Done 2026-05-25 — 1.3 Add linter/coverage section to CLAUDE.md
+7. ✓ Done 2026-05-25 — 1.4 Add build instructions to CLAUDE.md
+8. ✓ Done 2026-05-25 — 5.2 Add deterministic clock policy to CLAUDE.md
+9. ✓ Done 2026-05-25 — 5.3 Add dependency audit cadence to CLAUDE.md
+10. ✓ Done 2026-05-25 — 5.4 Add refactoring-before-feature rule to CLAUDE.md
+11. ✓ Done 2026-05-25 — 5.5 Definition of Done (in SESSION_START.md §5 from Pass 1)
+12. ✓ Done 2026-05-25 — 3.3 Create `docs/SECURITY.md`
+13. ✓ Done 2026-05-25 — 3.1 Create `docs/architecture/INTERFACES.md`
+14. ✓ Done 2026-05-25 — 6.1 Architecture diagram cadence (in SESSION_START.md §4 from Pass 1)
+15. ✓ Done 2026-05-25 — 6.2 Quarterly doc-to-code sync (in SESSION_START.md §4 from Pass 1)
 
 ### Pass 3 — Nice-to-have (~4 h, Low items)
 16. [ ] 1.5 Backlog handling in CLAUDE.md

@@ -168,4 +168,3 @@ pub fn create_from_body(
 
     Ok(user_request)
 }
-

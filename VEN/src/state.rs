@@ -1,5 +1,6 @@
 use crate::controller::trace::ControllerTrace;
 use crate::controller::vtn_port::{OadrEvent, OadrProgram};
+use crate::controller::SimSnapshot;
 use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
 use crate::entities::device_session::{
     BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime,
@@ -8,7 +9,6 @@ use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::models::SensorSnapshot;
-use crate::controller::SimSnapshot;
 use chrono::DateTime;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -165,6 +165,12 @@ struct PersistedVenState {
     events: Vec<OadrEvent>,
     reports: Vec<serde_json::Value>,
     sensor: SensorSnapshot,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AppState {
@@ -733,7 +739,10 @@ mod tests {
     async fn test_state_persistence_roundtrip() {
         use crate::controller::vtn_port::OadrProgram;
         let state = AppState::new();
-        let prog = OadrProgram { id: "p1".to_string(), programName: "TestProgram".to_string() };
+        let prog = OadrProgram {
+            id: "p1".to_string(),
+            programName: "TestProgram".to_string(),
+        };
         state.set_programs(vec![prog]).await;
         let json_str = state.to_json().await.unwrap();
         let state2 = AppState::new();

@@ -165,11 +165,15 @@ impl AssetInteraction for BatEvCoexistInteraction {
         iv: &InteractionVars,
         global: &GlobalMilpInputs,
     ) -> Vec<Constraint> {
-        let InteractionVars::BatEvCoexist { x_coexist } = iv else { return vec![]; };
+        let InteractionVars::BatEvCoexist { x_coexist } = iv else {
+            return vec![];
+        };
         let bat = pool.bat.as_ref().unwrap();
         let ev = pool.ev.as_ref().unwrap();
         let dis_max = bat.dis_max_kw;
         let mut cs = Vec::new();
+        #[allow(clippy::needless_range_loop)]
+        // t indexes multiple arrays (x_coexist, bat.p_dis, ev.z_ev_on)
         for t in 0..global.n {
             if let Some(x) = x_coexist[t] {
                 // McCormick envelope for x = p_bat_dis[t] × z_ev_on[t]
@@ -184,12 +188,12 @@ impl AssetInteraction for BatEvCoexistInteraction {
     }
 
     fn objective(&self, iv: &InteractionVars, dt_h: f64) -> Expression {
-        let InteractionVars::BatEvCoexist { x_coexist } = iv else { return Expression::from(0.0); };
+        let InteractionVars::BatEvCoexist { x_coexist } = iv else {
+            return Expression::from(0.0);
+        };
         let mut obj = Expression::from(0.0);
-        for x_opt in x_coexist {
-            if let Some(x) = x_opt {
-                obj += (self.c_eur_kwh * dt_h) * *x;
-            }
+        for x in x_coexist.iter().flatten() {
+            obj += (self.c_eur_kwh * dt_h) * *x;
         }
         obj
     }
@@ -216,10 +220,10 @@ fn controllable_power_expr(pool: &MilpVarPool, t: usize) -> Expression {
         e += v.p_mid_kw * v.z_heat_mid[t] + v.p_full_kw * v.z_heat_full[t];
     }
     if let Some(v) = &pool.ev {
-        e = e + v.p_ev[t];
+        e += v.p_ev[t];
     }
     if let Some(v) = &pool.bat {
-        e = e + v.p_ch[t] - v.p_dis[t];
+        e += v.p_ch[t] - v.p_dis[t];
     }
     for sv in &pool.shiftable {
         for (ji, &j) in sv.valid_start_slots.iter().enumerate() {
@@ -258,6 +262,8 @@ impl AssetInteraction for CtrlImportMalusInteraction {
             return vec![];
         };
         let mut cs = Vec::new();
+        #[allow(clippy::needless_range_loop)]
+        // t indexes multiple arrays (p_ctrl_imp, p_pv_kw, p_base_kw)
         for t in 0..global.n {
             let surplus = (global.p_pv_kw[t] - global.p_base_kw[t]).max(0.0);
             let p_ctrl_t = controllable_power_expr(pool, t);
