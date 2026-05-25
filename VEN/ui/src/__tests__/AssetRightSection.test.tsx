@@ -11,7 +11,7 @@ vi.mock("@mui/material", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@mui/material")>();
   return {
     ...actual,
-    Slider: (props: any) => {
+    Slider: (props: { onChange?: (e: React.ChangeEvent<HTMLInputElement>, v: number) => void; onChangeCommitted?: (e: React.MouseEvent, v: number) => void; value?: number; min?: number; max?: number; step?: number; "data-testid"?: string }) => {
       const { onChange, onChangeCommitted, value, min, max, step, "data-testid": testId } = props;
       return (
         <span data-testid={testId}>

@@ -87,12 +87,7 @@ pub fn build_setpoints(
 
     // Opportunistic surplus EV charging: redirect live PV export to EV when no
     // plan-level EV allocation is active.
-    apply_surplus_ev_overlay(
-        &mut setpoints,
-        sim,
-        plan_allocated_ev,
-        overlay_enabled,
-    );
+    apply_surplus_ev_overlay(&mut setpoints, sim, plan_allocated_ev, overlay_enabled);
 
     setpoints
 }
@@ -136,7 +131,11 @@ pub fn apply_surplus_ev_overlay(
         })
         .map(|(id, snap)| {
             let sp = setpoints.get(id).copied().unwrap_or(snap.power_kw);
-            if sp.abs() > 1e20 { snap.power_kw } else { sp }
+            if sp.abs() > 1e20 {
+                snap.power_kw
+            } else {
+                sp
+            }
         })
         .sum();
     // Also account for any battery charging that the plan has already allocated this
@@ -283,7 +282,12 @@ mod tests {
         let bat_kwh = 60.0_f64;
         let (cap_max_import_kw, cap_max_export_kw, avail_dis, avail_ch) = if plugged {
             let import = if soc >= soc_target { 0.0 } else { max_ch };
-            (import, 0.0_f64, Some(soc * bat_kwh), Some((1.0 - soc) * bat_kwh))
+            (
+                import,
+                0.0_f64,
+                Some(soc * bat_kwh),
+                Some((1.0 - soc) * bat_kwh),
+            )
         } else {
             (0.0, 0.0, None, None)
         };
@@ -916,9 +920,7 @@ mod tests {
         // Plan with no slots → no allocations → setpoints come only from snapshot defaults
         let plan = {
             use crate::entities::asset::PlanTrigger;
-            use crate::entities::plan::{
-                CostBreakdown, Plan, PlanSummary, PlanningHorizon,
-            };
+            use crate::entities::plan::{CostBreakdown, Plan, PlanSummary, PlanningHorizon};
             use chrono::Duration;
             use uuid::Uuid;
             Plan {
@@ -945,7 +947,10 @@ mod tests {
         };
         let capacity = crate::entities::capacity::OadrCapacityState::default();
         let sp = build_setpoints(&plan, &sim, &capacity, None, now, false);
-        assert!(sp.is_empty(), "empty snapshot + no plan slots → empty setpoints map");
+        assert!(
+            sp.is_empty(),
+            "empty snapshot + no plan slots → empty setpoints map"
+        );
     }
 
     #[test]
@@ -969,7 +974,10 @@ mod tests {
             1.0,
             0.1,
         );
-        assert_eq!(delta, 0.0, "no battery asset → correction delta must be 0.0");
+        assert_eq!(
+            delta, 0.0,
+            "no battery asset → correction delta must be 0.0"
+        );
         assert!(sp.is_empty(), "no battery asset → setpoints map unchanged");
     }
 }

@@ -6,8 +6,8 @@
 // reduces future migration cost.
 #![allow(non_snake_case)]
 
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 // ── Port trait ─────────────────────────────────────────────────────────────────
@@ -263,15 +263,30 @@ mod tests {
         // Verify round-trip preserves reportName as Some
         assert_eq!(value["resources"][0]["resourceName"], "ven-1-meter");
         assert_eq!(value["resources"][0]["intervals"][0]["id"], 0);
-        assert!(value["resources"][0]["intervals"][0].get("intervalPeriod").is_none());
-        assert_eq!(value["resources"][0]["intervals"][0]["payloads"][0]["type"], "USAGE");
-        assert!((value["resources"][0]["intervals"][0]["payloads"][0]["values"][0].as_f64().unwrap() - 4500.0).abs() < 1e-9);
+        assert!(value["resources"][0]["intervals"][0]
+            .get("intervalPeriod")
+            .is_none());
+        assert_eq!(
+            value["resources"][0]["intervals"][0]["payloads"][0]["type"],
+            "USAGE"
+        );
+        assert!(
+            (value["resources"][0]["intervals"][0]["payloads"][0]["values"][0]
+                .as_f64()
+                .unwrap()
+                - 4500.0)
+                .abs()
+                < 1e-9
+        );
 
         let restored: OadrReportBody = serde_json::from_value(value).expect("deserialize failed");
         assert_eq!(restored.programID, "prog-001");
         assert_eq!(restored.eventID.as_deref(), Some("evt-abc"));
         assert_eq!(restored.reportName.as_deref(), Some("auto-ven-1-evt-abc"));
-        assert_eq!(restored.resources[0].intervals[0].payloads[0].r#type, "USAGE");
+        assert_eq!(
+            restored.resources[0].intervals[0].payloads[0].r#type,
+            "USAGE"
+        );
     }
 
     #[test]
@@ -285,7 +300,10 @@ mod tests {
         };
         let value = serde_json::to_value(&body).expect("serialize failed");
         // eventID must be absent (not null) when None
-        assert!(value.get("eventID").is_none(), "eventID must be absent when None");
+        assert!(
+            value.get("eventID").is_none(),
+            "eventID must be absent when None"
+        );
     }
 
     #[test]
@@ -298,7 +316,10 @@ mod tests {
             resources: vec![],
         };
         let value = serde_json::to_value(&body).expect("serialize failed");
-        assert!(value.get("reportName").is_none(), "reportName must be absent when None");
+        assert!(
+            value.get("reportName").is_none(),
+            "reportName must be absent when None"
+        );
     }
 
     #[test]

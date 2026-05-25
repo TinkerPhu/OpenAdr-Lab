@@ -28,7 +28,8 @@ pub fn parse_rate_snapshots(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<Tar
         }
 
         // ── Collect base intervals ────────────────────────────────────────────
-        let mut base: Vec<(DateTime<Utc>, i64, Vec<(String, f64)>)> = Vec::new();
+        type IntervalEntry = (DateTime<Utc>, i64, Vec<(String, f64)>);
+        let mut base: Vec<IntervalEntry> = Vec::new();
 
         for interval in &event.intervals {
             let ip = match interval.intervalPeriod.as_ref() {
@@ -43,9 +44,8 @@ pub fn parse_rate_snapshots(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<Tar
                 Ok(dt) => dt,
                 Err(_) => continue,
             };
-            let duration_secs = parse_iso8601_duration_secs(
-                ip.duration.as_deref().unwrap_or("PT1H"),
-            );
+            let duration_secs =
+                parse_iso8601_duration_secs(ip.duration.as_deref().unwrap_or("PT1H"));
 
             let mut payloads: Vec<(String, f64)> = Vec::new();
             for p in &interval.payloads {
@@ -354,7 +354,10 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), Utc::now());
+        let snapshots = parse_rate_snapshots(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            Utc::now(),
+        );
         assert_eq!(snapshots.len(), 3);
         assert_eq!(snapshots[0].import_tariff_eur_kwh, Some(0.25));
         assert_eq!(snapshots[1].import_tariff_eur_kwh, Some(0.30));
@@ -381,7 +384,10 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), Utc::now());
+        let snapshots = parse_rate_snapshots(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            Utc::now(),
+        );
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].co2_g_kwh, Some(200.0));
     }
@@ -406,7 +412,10 @@ mod tests {
                 ]
             }
         ]);
-        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), Utc::now());
+        let snapshots = parse_rate_snapshots(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            Utc::now(),
+        );
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].export_tariff_eur_kwh, Some(0.10));
     }
@@ -473,7 +482,11 @@ mod tests {
             }
         ]);
         let now = Utc::now();
-        let obligations = extract_report_obligations(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now, &[]);
+        let obligations = extract_report_obligations(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            now,
+            &[],
+        );
         assert!(obligations.is_empty());
     }
 
@@ -493,7 +506,11 @@ mod tests {
             }
         ]);
         let now = Utc::now();
-        let obligations = extract_report_obligations(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now, &[]);
+        let obligations = extract_report_obligations(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            now,
+            &[],
+        );
         assert_eq!(obligations.len(), 1);
         assert_eq!(obligations[0].payload_type, "USAGE");
         assert_eq!(obligations[0].reading_type, "DIRECT_READ");
@@ -524,7 +541,10 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now);
+        let snapshots = parse_rate_snapshots(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            now,
+        );
         assert_eq!(
             snapshots.len(),
             2,
@@ -554,7 +574,10 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now);
+        let snapshots = parse_rate_snapshots(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            now,
+        );
 
         // More than 2 intervals: looping occurred
         assert!(
@@ -591,7 +614,10 @@ mod tests {
                 }
             ]
         }]);
-        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now);
+        let snapshots = parse_rate_snapshots(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            now,
+        );
         assert!(
             snapshots.iter().any(|s| s.interval_start > now),
             "expected at least one future interval"
@@ -623,7 +649,10 @@ mod tests {
             "intervalPeriod": {"start": "2026-01-01T00:00:00Z", "duration": "P9999Y"},
             "intervals": intervals
         }]);
-        let snapshots = parse_rate_snapshots(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now);
+        let snapshots = parse_rate_snapshots(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            now,
+        );
 
         assert!(
             snapshots.len() > 24,
@@ -665,7 +694,11 @@ mod tests {
             fulfilled: false,
             created_at: now,
         }];
-        let obligations = extract_report_obligations(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now, &existing);
+        let obligations = extract_report_obligations(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            now,
+            &existing,
+        );
         // Should not add a duplicate
         assert!(obligations.is_empty());
     }
@@ -683,7 +716,11 @@ mod tests {
             }
         ]);
         let now = Utc::now();
-        let obligations = extract_report_obligations(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(), now, &[]);
+        let obligations = extract_report_obligations(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            now,
+            &[],
+        );
         assert_eq!(obligations.len(), 1);
         assert_eq!(obligations[0].interval_duration_s, 900);
         assert_eq!(obligations[0].due_at, now + Duration::seconds(900));

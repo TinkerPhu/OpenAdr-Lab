@@ -1,9 +1,9 @@
 use chrono::{DateTime, Duration, Utc};
 
 use super::asset_port::AssetMilpParams;
-use crate::entities::asset_params::{BaseLoadParams, PvParams};
 use crate::controller::milp_planner::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
+use crate::entities::asset_params::{BaseLoadParams, PvParams};
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
 use crate::entities::planner_params::PlannerParams;
@@ -16,7 +16,7 @@ use super::types::*;
 fn pv_natural_irradiance(ts: DateTime<Utc>) -> f64 {
     use chrono::Timelike;
     let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
-    if hour >= 6.0 && hour <= 18.0 {
+    if (6.0..=18.0).contains(&hour) {
         let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
         angle.sin().max(0.0)
     } else {
@@ -28,6 +28,7 @@ fn pv_natural_irradiance(ts: DateTime<Utc>) -> f64 {
 ///
 /// Asset-specific parameters (battery, EV, heater) are extracted via the `AssetMilpContext`
 /// trait; grid, PV, and baseline parameters are still read from `profile` and `assets`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_milp_inputs(
     asset_contexts: &[Box<dyn AssetMilpContext>],
     assets: &SimSnapshot,

@@ -562,7 +562,7 @@ TOTAL WALL CLOCK:             6451s  (107m 31s)
 
 FAILED TIERS: BDD
 a5049ff1604281193bb4a853c05dda0fd646b6c0
-PS D:\Tinker\OpenAdr-Lab> ssh Pi4-Server "tail -f /tmp/run-all-tests.log"
+PS C:\DriveD\Tinker\OpenAdr-Lab> ssh Pi4-Server "tail -f /tmp/run-all-tests.log"
 ========================================================================
 Rust unit tests:              build=3s  tests=1531s  container=1534s
 VEN/ui vitest:                build=54s  tests=218s

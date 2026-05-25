@@ -4,25 +4,26 @@ mod config;
 mod controller;
 mod entities;
 mod ids;
-mod services;
-mod tasks;
 mod models;
 mod planner_events;
 mod profile;
 mod routes;
+mod services;
 mod simulator;
 mod state;
+mod tasks;
 mod vtn;
 
+use crate::assets::ControlDescriptor;
 use config::Config;
 use entities::asset::PlanTrigger;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use planner_events::{PlannerEvent, PlannerEventTx};
 use profile::Profile;
-use std::collections::HashMap;
-use crate::assets::ControlDescriptor;
 use simulator::SimState;
+use std::collections::HashMap;
 
+use crate::controller::VtnPort;
 use crate::entities::asset_params::AssetParams;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams, SimulatorParams};
 use state::AppState;
@@ -30,7 +31,6 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
 use vtn::VtnClient;
-use crate::controller::VtnPort;
 
 #[derive(Clone)]
 pub struct AppCtx {
@@ -47,9 +47,7 @@ pub struct AppCtx {
     pub planner_event_tx: PlannerEventTx,
 }
 
-fn build_domain_params(
-    profile: &Profile,
-) -> (SimulatorParams, PlannerParams, Vec<AssetParams>) {
+fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Vec<AssetParams>) {
     let sim_params = SimulatorParams {
         tick_s: profile.simulator.tick_s,
         persist_every_s: profile.simulator.persist_every_s,
@@ -170,7 +168,12 @@ async fn main() -> anyhow::Result<()> {
         });
     }
     {
-        let (s, v, secs, tx) = (state.clone(), vtn_port.clone(), cfg.poll_events_secs, trigger_tx.clone());
+        let (s, v, secs, tx) = (
+            state.clone(),
+            vtn_port.clone(),
+            cfg.poll_events_secs,
+            trigger_tx.clone(),
+        );
         tasks::supervised_spawn("poll_events", TASK_COOLDOWN_S, move || {
             tasks::spawn_event_poll(s.clone(), v.clone(), secs, tx.clone())
         });
@@ -187,17 +190,35 @@ async fn main() -> anyhow::Result<()> {
 
     {
         let (s, sim, sp, vn, v, tx, dd, etx) = (
-            state.clone(), sim_state.clone(), sim_params.clone(),
-            cfg.ven_name.clone(), vtn_port.clone(), trigger_tx.clone(),
-            data_dir.clone(), planner_event_tx.clone(),
+            state.clone(),
+            sim_state.clone(),
+            sim_params.clone(),
+            cfg.ven_name.clone(),
+            vtn_port.clone(),
+            trigger_tx.clone(),
+            data_dir.clone(),
+            planner_event_tx.clone(),
         );
         tasks::supervised_spawn("sim_tick", TASK_COOLDOWN_S, move || {
-            tasks::spawn_sim_tick(s.clone(), sim.clone(), sp.clone(),
-                vn.clone(), v.clone(), tx.clone(), dd.clone(), etx.clone())
+            tasks::spawn_sim_tick(
+                s.clone(),
+                sim.clone(),
+                sp.clone(),
+                vn.clone(),
+                v.clone(),
+                tx.clone(),
+                dd.clone(),
+                etx.clone(),
+            )
         });
     }
     {
-        let (s, sim, v, vn) = (state.clone(), sim_state.clone(), vtn_port.clone(), cfg.ven_name.clone());
+        let (s, sim, v, vn) = (
+            state.clone(),
+            sim_state.clone(),
+            vtn_port.clone(),
+            cfg.ven_name.clone(),
+        );
         tasks::supervised_spawn("obligation_check", TASK_COOLDOWN_S, move || {
             tasks::spawn_obligation_check(s.clone(), sim.clone(), v.clone(), vn.clone())
         });
@@ -205,13 +226,32 @@ async fn main() -> anyhow::Result<()> {
     let active_objective = Arc::new(RwLock::new(planner_params.objective));
     {
         let (s, pp, gmax_i, gmax_e, ap, v, vn, rx, sim, ao, etx) = (
-            state.clone(), planner_params.clone(), grid_max_import_kw, grid_max_export_kw,
-            asset_params.clone(), vtn_port.clone(), cfg.ven_name.clone(), trigger_rx,
-            sim_state.clone(), active_objective.clone(), planner_event_tx.clone(),
+            state.clone(),
+            planner_params.clone(),
+            grid_max_import_kw,
+            grid_max_export_kw,
+            asset_params.clone(),
+            vtn_port.clone(),
+            cfg.ven_name.clone(),
+            trigger_rx,
+            sim_state.clone(),
+            active_objective.clone(),
+            planner_event_tx.clone(),
         );
         tasks::supervised_spawn("planning", TASK_COOLDOWN_S, move || {
-            tasks::spawn_planning(s.clone(), pp.clone(), gmax_i, gmax_e, ap.clone(),
-                v.clone(), vn.clone(), rx.clone(), sim.clone(), ao.clone(), etx.clone())
+            tasks::spawn_planning(
+                s.clone(),
+                pp.clone(),
+                gmax_i,
+                gmax_e,
+                ap.clone(),
+                v.clone(),
+                vn.clone(),
+                rx.clone(),
+                sim.clone(),
+                ao.clone(),
+                etx.clone(),
+            )
         });
     }
     if let Some(path) = cfg.persist_path.clone() {

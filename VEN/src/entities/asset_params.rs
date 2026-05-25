@@ -110,7 +110,7 @@ impl PvParams {
     pub fn forecast_kw(&self, ts: chrono::DateTime<chrono::Utc>) -> f64 {
         use chrono::Timelike;
         let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
-        if hour >= 6.0 && hour <= 18.0 {
+        if (6.0..=18.0).contains(&hour) {
             let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
             (angle.sin().max(0.0) * self.rated_kw).max(0.0)
         } else {

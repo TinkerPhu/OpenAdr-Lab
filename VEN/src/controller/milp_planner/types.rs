@@ -178,7 +178,10 @@ pub(crate) struct ShiftableLoadMilp {
 /// Build the MILP objective weights from the planner configuration.
 /// `objective` overrides `planner.objective`; pass `planner.objective`
 /// to use the configured default.
-pub(crate) fn build_phase1_weights(planner: &PlannerParams, objective: PlannerObjective) -> Phase1Weights {
+pub(crate) fn build_phase1_weights(
+    planner: &PlannerParams,
+    objective: PlannerObjective,
+) -> Phase1Weights {
     let p = planner;
     match objective {
         PlannerObjective::MinCost => Phase1Weights {
@@ -263,7 +266,12 @@ pub(crate) fn build_phase2_weights(inputs: &MilpInputs, planner: &PlannerParams)
 }
 
 /// Convert a packet deadline to a planning step index, clamped to [0, n−1].
-pub(crate) fn deadline_to_step(deadline: DateTime<Utc>, now: DateTime<Utc>, step_s: u64, n: usize) -> usize {
+pub(crate) fn deadline_to_step(
+    deadline: DateTime<Utc>,
+    now: DateTime<Utc>,
+    step_s: u64,
+    n: usize,
+) -> usize {
     let secs = (deadline - now).num_seconds();
     (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize
 }

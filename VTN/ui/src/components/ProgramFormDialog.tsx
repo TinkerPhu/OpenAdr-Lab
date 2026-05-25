@@ -31,6 +31,7 @@ export function ProgramFormDialog(props: ProgramFormDialogProps) {
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- form reset on dialog open; no loop risk
       setName(program?.programName ?? "");
       setLongName(program?.programLongName ?? "");
       setProgramType(program?.programType ?? "");

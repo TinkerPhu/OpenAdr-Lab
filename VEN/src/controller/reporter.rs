@@ -85,7 +85,11 @@ fn event_is_active(event: &OadrEvent, now: DateTime<Utc>) -> bool {
 /// Sum the most-recent `power_kw` across all assets that are currently importing
 /// (positive power). Returns 0.0 if no assets are importing.
 fn latest_net_import_kw(snap: &SimSnapshot) -> f64 {
-    snap.assets.values().map(|a| a.power_kw).filter(|&kw| kw > 0.0).sum()
+    snap.assets
+        .values()
+        .map(|a| a.power_kw)
+        .filter(|&kw| kw > 0.0)
+        .sum()
 }
 
 /// Build a TELEMETRY_USAGE measurement report for a single active OpenADR event.
@@ -195,7 +199,7 @@ pub fn build_measurement_reports_for_active_events(
         let has_descriptors = event
             .reportDescriptors
             .as_ref()
-            .map_or(false, |arr| !arr.is_empty());
+            .is_some_and(|arr| !arr.is_empty());
         if has_descriptors {
             debug!(
                 event_id = %event.id,
@@ -350,9 +354,7 @@ pub fn build_measurement_report_for_obligation(
 
     debug!(
         report_name = report.reportName.as_deref().unwrap_or(""),
-        event_id,
-        interval_count,
-        "built obligation measurement report"
+        event_id, interval_count, "built obligation measurement report"
     );
     Some(report)
 }
@@ -461,10 +463,7 @@ fn build_soc_intervals(
                 payloads: vec![
                     OadrReportPayload {
                         r#type: "STORAGE_CHARGE_LEVEL".to_string(),
-                        values: vec![serde_json::Value::from(format!(
-                            "{:.1}",
-                            soc_value * 100.0
-                        ))],
+                        values: vec![serde_json::Value::from(format!("{:.1}", soc_value * 100.0))],
                     },
                     OadrReportPayload {
                         r#type: "OPERATING_STATE".to_string(),
@@ -739,26 +738,23 @@ mod tests {
             created_at: Utc::now(),
         };
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
-        assert!(
-            build_measurement_report_for_obligation(&ob, &empty, "ven-1", None).is_none()
-        );
+        assert!(build_measurement_report_for_obligation(&ob, &empty, "ven-1", None).is_none());
     }
 
     #[test]
     fn obligation_report_empty_history_returns_none() {
         let ob = make_obligation("e1", "p1", "USAGE", 900);
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
-        assert!(
-            build_measurement_report_for_obligation(&ob, &empty, "ven-1", None).is_none()
-        );
+        assert!(build_measurement_report_for_obligation(&ob, &empty, "ven-1", None).is_none());
     }
 
     // ── import/export split ────────────────────────────────────────
 
     #[test]
     fn obligation_report_import_clamps_negative_to_zero() {
-        let asset_samples: HashMap<_, _> =
-            [make_samples("pv", &[(0, -5.0), (900, -5.0)])].into_iter().collect();
+        let asset_samples: HashMap<_, _> = [make_samples("pv", &[(0, -5.0), (900, -5.0)])]
+            .into_iter()
+            .collect();
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_LIMIT", 900);
         let report =
             build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None).unwrap();
@@ -775,8 +771,9 @@ mod tests {
 
     #[test]
     fn obligation_report_export_uses_absolute_negative() {
-        let asset_samples: HashMap<_, _> =
-            [make_samples("pv", &[(0, -3.0), (900, -3.0)])].into_iter().collect();
+        let asset_samples: HashMap<_, _> = [make_samples("pv", &[(0, -3.0), (900, -3.0)])]
+            .into_iter()
+            .collect();
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_LIMIT", 900);
         let report =
             build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None).unwrap();
@@ -797,7 +794,12 @@ mod tests {
     fn obligation_report_soc_point_in_time() {
         let asset_samples: HashMap<_, _> = [make_ev_samples(
             "ev",
-            &[(0, 7.0, 0.2), (900, 7.0, 0.4), (1800, 7.0, 0.6), (2700, 7.0, 0.8)],
+            &[
+                (0, 7.0, 0.2),
+                (900, 7.0, 0.4),
+                (1800, 7.0, 0.6),
+                (2700, 7.0, 0.8),
+            ],
         )]
         .into_iter()
         .collect();
@@ -970,11 +972,15 @@ mod tests {
             }],
             reportDescriptors: None,
         };
-        let asset_samples: HashMap<_, _> =
-            [make_ev_samples("ev", &[(0, 7.0, 0.5)])].into_iter().collect();
+        let asset_samples: HashMap<_, _> = [make_ev_samples("ev", &[(0, 7.0, 0.5)])]
+            .into_iter()
+            .collect();
         let report = build_measurement_report(&event, &asset_samples, 0.0, 0.0, "ven-1").unwrap();
         let iv = &report.resources[0].intervals[0];
-        let soc_payload = iv.payloads.iter().find(|p| p.r#type == "STORAGE_CHARGE_LEVEL");
+        let soc_payload = iv
+            .payloads
+            .iter()
+            .find(|p| p.r#type == "STORAGE_CHARGE_LEVEL");
         assert!(soc_payload.is_some(), "expected SoC payload for EV");
         let soc_str = soc_payload.unwrap().values[0].as_str().unwrap();
         let soc_pct: f64 = soc_str.parse().unwrap();
@@ -1093,8 +1099,9 @@ mod tests {
             }],
             reportDescriptors: None,
         };
-        let asset_samples: HashMap<_, _> =
-            [make_samples("site", &[(0, 1.0), (60, 3.0)])].into_iter().collect();
+        let asset_samples: HashMap<_, _> = [make_samples("site", &[(0, 1.0), (60, 3.0)])]
+            .into_iter()
+            .collect();
         let report = build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1");
         assert!(report.is_some(), "expected Some(report)");
         let report = report.unwrap();
@@ -1132,7 +1139,10 @@ mod tests {
             .find(|p| p.r#type == "TELEMETRY_STATUS")
             .unwrap();
         assert!(
-            status_payload.values[0].as_str().unwrap().contains("PlanCycle"),
+            status_payload.values[0]
+                .as_str()
+                .unwrap()
+                .contains("PlanCycle"),
             "expected PlanCycle in status description"
         );
         let usage_payload = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();

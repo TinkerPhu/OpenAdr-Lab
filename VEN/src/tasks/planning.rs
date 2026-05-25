@@ -4,14 +4,15 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
 use crate::controller;
+use crate::controller::VtnPort;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
-use crate::controller::VtnPort;
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::simulator::SimState;
 use crate::state::AppState;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_planning(
     state: AppState,
     planner: PlannerParams,
@@ -78,11 +79,11 @@ pub(crate) fn spawn_planning(
             if let Some(forced) = inject_snap.pv_irradiance {
                 use crate::assets::{AssetConfig, PvInverter};
                 let natural = PvInverter::natural_irradiance_at(now);
-                if let Some((_, cfg)) = sim_snap.find_asset_mut(crate::ids::ASSET_PV) {
-                    if let AssetConfig::Pv(pv) = cfg {
-                        pv.irradiance_offset = forced - natural;
-                        pv.pv_alpha = inject_snap.pv_irradiance_alpha;
-                    }
+                if let Some((_, AssetConfig::Pv(pv))) =
+                    sim_snap.find_asset_mut(crate::ids::ASSET_PV)
+                {
+                    pv.irradiance_offset = forced - natural;
+                    pv.pv_alpha = inject_snap.pv_irradiance_alpha;
                 }
             }
 
@@ -135,29 +136,30 @@ pub(crate) fn spawn_planning(
                     _ => None,
                 })
                 .unwrap_or(0.0);
-            let asset_contexts: Vec<Box<dyn controller::milp_planner::asset_port::AssetMilpContext>> =
-                sim_snap
-                    .iter_assets()
-                    .filter_map(|(entry, cfg)| {
-                        cfg.build_milp_context(
-                            &entry.state,
-                            n_slots,
-                            step_s,
-                            now,
-                            ev_sess.as_ref(),
-                            heat_tgt.as_ref(),
-                            asset_params
-                                .iter()
-                                .find_map(|p| match p {
-                                    AssetParams::Ev(e) => Some(e.min_charge_kw),
-                                    _ => None,
-                                })
-                                .unwrap_or(0.0),
-                            planner.v_ev_extra_eur_kwh,
-                            lambda_sw,
-                        )
-                    })
-                    .collect();
+            let asset_contexts: Vec<
+                Box<dyn controller::milp_planner::asset_port::AssetMilpContext>,
+            > = sim_snap
+                .iter_assets()
+                .filter_map(|(entry, cfg)| {
+                    cfg.build_milp_context(
+                        &entry.state,
+                        n_slots,
+                        step_s,
+                        now,
+                        ev_sess.as_ref(),
+                        heat_tgt.as_ref(),
+                        asset_params
+                            .iter()
+                            .find_map(|p| match p {
+                                AssetParams::Ev(e) => Some(e.min_charge_kw),
+                                _ => None,
+                            })
+                            .unwrap_or(0.0),
+                        planner.v_ev_extra_eur_kwh,
+                        lambda_sw,
+                    )
+                })
+                .collect();
 
             let plan = tokio::task::spawn_blocking(move || {
                 controller::milp_planner::run_planner(
@@ -303,6 +305,6 @@ mod tests {
         );
         handle.abort();
         let _ = trigger_tx; // keep alive until abort
-        // passes if no panic during construction and abort
+                            // passes if no panic during construction and abort
     }
 }

@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor};
 use crate::common::{Interpolation, TimeSeries};
-use crate::controller::milp_planner::asset_port::{BatteryMilpContext, BatteryMilpVars, BatterySolOutput};
+use crate::controller::milp_planner::asset_port::{
+    BatteryMilpContext, BatteryMilpVars, BatterySolOutput,
+};
 use crate::entities::asset_params::BatteryParams;
 
 /// Battery storage config. Bidirectional.
@@ -57,9 +59,9 @@ impl Battery {
         let clamped = setpoint_kw
             .max(-self.max_discharge_kw)
             .min(self.max_charge_kw);
-        let actual = if clamped > 0.0 && state.soc >= 1.0 {
-            0.0
-        } else if clamped < 0.0 && state.soc <= self.min_soc {
+        let actual = if (clamped > 0.0 && state.soc >= 1.0)
+            || (clamped < 0.0 && state.soc <= self.min_soc)
+        {
             0.0
         } else {
             clamped
@@ -152,9 +154,7 @@ impl Battery {
         let mut soc = state.soc;
 
         while t < end {
-            let kw = if setpoint > 0.0 && soc >= 1.0 {
-                0.0
-            } else if setpoint < 0.0 && soc <= self.min_soc {
+            let kw = if (setpoint > 0.0 && soc >= 1.0) || (setpoint < 0.0 && soc <= self.min_soc) {
                 0.0
             } else {
                 setpoint
@@ -168,11 +168,9 @@ impl Battery {
                 soc += (kw * dt_h) / self.capacity_kwh;
             }
             soc = soc.clamp(0.0, 1.0);
-            t = t + Duration::seconds(60);
+            t += Duration::seconds(60);
         }
-        let end_kw = if setpoint > 0.0 && soc >= 1.0 {
-            0.0
-        } else if setpoint < 0.0 && soc <= self.min_soc {
+        let end_kw = if (setpoint > 0.0 && soc >= 1.0) || (setpoint < 0.0 && soc <= self.min_soc) {
             0.0
         } else {
             setpoint
@@ -645,9 +643,9 @@ mod param_tests {
 #[cfg(test)]
 mod milp_context_trait_tests {
     use super::*;
-    use good_lp::{variable, variables};
-    use crate::controller::milp_planner::{AssetKind, AssetMilpContext, AssetMilpParams};
     use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
+    use crate::controller::milp_planner::{AssetKind, AssetMilpContext, AssetMilpParams};
+    use good_lp::{variable, variables};
 
     fn make_ctx() -> BatteryMilpContext {
         BatteryMilpContext {
@@ -670,7 +668,13 @@ mod milp_context_trait_tests {
             s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
             s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
         };
-        MilpVarPool { grid, bat: None, ev: None, heater: None, shiftable: vec![] }
+        MilpVarPool {
+            grid,
+            bat: None,
+            ev: None,
+            heater: None,
+            shiftable: vec![],
+        }
     }
 
     #[test]
@@ -706,7 +710,10 @@ mod milp_context_trait_tests {
         let mut vars = variables!();
         let mut pool = empty_pool(&mut vars, n);
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-        let v = pool.bat.as_ref().expect("pool.bat should be Some after declare");
+        let v = pool
+            .bat
+            .as_ref()
+            .expect("pool.bat should be Some after declare");
         assert_eq!(v.p_ch.len(), n);
         assert_eq!(v.p_dis.len(), n);
         assert_eq!(v.e_bat.len(), n + 1);
@@ -723,6 +730,11 @@ mod milp_context_trait_tests {
         let mut pool = empty_pool(&mut vars, n);
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
         let cs = AssetMilpContext::constraints(&ctx, &pool, n, dt_h);
-        assert!(cs.len() >= n * 3 + 1, "expected at least {} constraints, got {}", n * 3 + 1, cs.len());
+        assert!(
+            cs.len() >= n * 3 + 1,
+            "expected at least {} constraints, got {}",
+            n * 3 + 1,
+            cs.len()
+        );
     }
 }

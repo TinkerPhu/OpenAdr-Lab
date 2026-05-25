@@ -63,6 +63,7 @@ pub struct BatterySolOutput {
 // ── EV MILP types ─────────────────────────────────────────────────────────────
 
 /// Scheduling mode for the EV in the MILP model.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum EvMilpMode {
     /// Hard energy requirement — must be met within the deadline.
@@ -124,6 +125,7 @@ impl EvMilpContext {
     /// Construct from live scalar values — no `AssetState` or `EvCharger` required.
     /// Mirrors the logic in `from_state()` (which stays in `assets/ev.rs`) but
     /// accepts plain scalars extracted directly from the sim snapshot and profile.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_live(
         plugged: bool,
         soc: f64,
@@ -157,8 +159,7 @@ impl EvMilpContext {
                 EvMilpMode::MustRun
             };
             let secs = (session.departure_time - now).num_seconds();
-            let t_dead =
-                (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize;
+            let t_dead = (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize;
             Self {
                 mode,
                 a_ev: (0..n).map(|t| t <= t_dead).collect(),
@@ -187,6 +188,7 @@ impl EvMilpContext {
 // ── Heater MILP types ─────────────────────────────────────────────────────────
 
 /// Scheduling mode for the heater in the MILP model.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum HeaterMilpMode {
     /// Hard energy target — E[t_dead] ≥ e_target_kwh must hold at the deadline.
@@ -266,6 +268,7 @@ impl HeaterMilpContext {
     ///
     /// `q_dem_kw` is the constant per-step thermal demand: `draw_kw + k_loss × (T_mid − ambient)`.
     /// `mid_kw` is the pre-computed mid-tier power (0.0 triggers `max_kw / 2.0` fallback).
+    #[allow(clippy::too_many_arguments)]
     pub fn from_live(
         current_temp_c: f64,
         actual_power_kw: f64,
@@ -284,14 +287,21 @@ impl HeaterMilpContext {
         let live_mid_kw = if mid_kw > 0.0 { mid_kw } else { max_kw / 2.0 };
         let e_init = (current_temp_c - temp_min_c) * thermal_mass_kwh_per_c;
         let e_max = ((temp_max_c - temp_min_c) * thermal_mass_kwh_per_c).max(0.0);
-        let initial_z_mid = if (actual_power_kw - live_mid_kw).abs() < 0.1 { 1.0 } else { 0.0 };
-        let initial_z_full = if (actual_power_kw - max_kw).abs() < 0.1 { 1.0 } else { 0.0 };
+        let initial_z_mid = if (actual_power_kw - live_mid_kw).abs() < 0.1 {
+            1.0
+        } else {
+            0.0
+        };
+        let initial_z_full = if (actual_power_kw - max_kw).abs() < 0.1 {
+            1.0
+        } else {
+            0.0
+        };
         if let Some(target) = heater_target {
             let e_target =
                 ((target.target_temp_c - temp_min_c) * thermal_mass_kwh_per_c).clamp(0.0, e_max);
             let secs = (target.ready_by - now).num_seconds();
-            let t_dead =
-                (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize;
+            let t_dead = (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize;
             Self {
                 mode: HeaterMilpMode::MustRun,
                 t_dead_step: Some(t_dead),
@@ -403,12 +413,7 @@ pub trait AssetMilpContext: Send + Sync {
 
     /// Phase A — scalar extraction: return all MILP parameters for this asset,
     /// pre-computed for a planning cycle of `n` slots starting at `now`.
-    fn milp_params(
-        &self,
-        n: usize,
-        step_s: u64,
-        now: DateTime<Utc>,
-    ) -> AssetMilpParams;
+    fn milp_params(&self, n: usize, step_s: u64, now: DateTime<Utc>) -> AssetMilpParams;
 
     /// Phase B — LP variable declaration: add LP variables for this asset to
     /// `vars` and store the resulting typed handles in the appropriate slot of
@@ -446,6 +451,7 @@ pub trait AssetMilpContext: Send + Sync {
 
 /// MilpLoadMode: scheduling mode shared across EV and heater scalars.
 /// Mirrors the per-asset mode enums but decoupled from concrete asset types.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MilpLoadMode {
     MustRun,

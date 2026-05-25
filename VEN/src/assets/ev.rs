@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
-use crate::controller::milp_planner::asset_port::{EvMilpContext, EvMilpMode, EvMilpVars, EvSolOutput};
+use crate::controller::milp_planner::asset_port::{
+    EvMilpContext, EvMilpMode, EvMilpVars, EvSolOutput,
+};
 use crate::entities::asset_params::EvParams;
 
 /// EV Charger config. Positive = charge (import), negative = V2G discharge (export).
@@ -66,9 +68,9 @@ impl EvCharger {
             );
         }
         let kw = setpoint_kw.clamp(-self.max_discharge_kw, self.max_charge_kw);
-        let kw = if kw > 0.0 && state.soc >= self.soc_target {
-            0.0
-        } else if kw < 0.0 && state.soc <= self.min_soc {
+        let kw = if (kw > 0.0 && state.soc >= self.soc_target)
+            || (kw < 0.0 && state.soc <= self.min_soc)
+        {
             0.0
         } else {
             kw
@@ -405,6 +407,7 @@ impl EvMilpContext {
     }
 
     /// Construct from a live `AssetState`, sim `EvCharger` config, and optional session data.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_state(
         state: &super::AssetState,
         cfg: &EvCharger,
@@ -543,7 +546,14 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
         } else {
             (c_startup_eur, c_ramp_eur_kw, 0.0_f64)
         };
-        EvMilpContext::objective(self, pool.ev.as_ref().unwrap(), startup, ramp, w_services, n)
+        EvMilpContext::objective(
+            self,
+            pool.ev.as_ref().unwrap(),
+            startup,
+            ramp,
+            w_services,
+            n,
+        )
     }
 }
 
@@ -800,9 +810,11 @@ mod param_tests {
 #[cfg(test)]
 mod milp_context_trait_tests {
     use super::*;
-    use good_lp::{variable, variables};
-    use crate::controller::milp_planner::{AssetKind, AssetMilpContext, AssetMilpParams, MilpLoadMode};
     use crate::controller::milp_interactions::{GridMilpVars, MilpVarPool};
+    use crate::controller::milp_planner::{
+        AssetKind, AssetMilpContext, AssetMilpParams, MilpLoadMode,
+    };
+    use good_lp::{variable, variables};
 
     fn empty_pool(vars: &mut good_lp::ProblemVariables, n: usize) -> MilpVarPool {
         let grid = GridMilpVars {
@@ -812,7 +824,13 @@ mod milp_context_trait_tests {
             s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
             s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
         };
-        MilpVarPool { grid, bat: None, ev: None, heater: None, shiftable: vec![] }
+        MilpVarPool {
+            grid,
+            bat: None,
+            ev: None,
+            heater: None,
+            shiftable: vec![],
+        }
     }
 
     fn make_must_run(n: usize) -> EvMilpContext {
@@ -910,7 +928,10 @@ mod milp_context_trait_tests {
         let mut vars = variables!();
         let mut pool = empty_pool(&mut vars, n);
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-        let v = pool.ev.as_ref().expect("pool.ev should be Some after declare");
+        let v = pool
+            .ev
+            .as_ref()
+            .expect("pool.ev should be Some after declare");
         assert_eq!(v.p_ev.len(), n);
         assert_eq!(v.z_ev_on.len(), n);
         assert!(v.delta_ev.is_empty()); // no startup vars when c_startup=0
