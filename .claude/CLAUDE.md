@@ -7,7 +7,32 @@ dto: avoid DTO normalization. pass through upstream field names (e.g. OpenADR sp
 workflow: 1. always keep a project_journal.md in projects where you write for each large step what you did, why you did it and what issues/key-learnings you had. it shall explain, how the project was implemented. The journal lives at docs/history/project_journal.md.
 2. write key learnings into KEY_LEARNINGS.md (at docs/reference/KEY_LEARNINGS.md) and consider them when making decissions.
 
-NEVER stop docker containers that are not involved in this project without asking. They are productive containers. 
+NEVER stop docker containers that are not involved in this project without asking. They are productive containers.
+
+branching: feature branches use the pattern NNN-whatever-case-description where NNN is the
+openspec feature ID (e.g. 030-my-feature). Refactor branches: refactor/<slug>.
+Fix branches: fix/<slug>. All those branches target main. Never force-push to main. The goal is to rebase and fast forward merge.
+DCO sign-off is enforced by CI — do not add co-author footers (see rule above).
+Merge only after all CI checks pass: cargo fmt, cargo clippy -D warnings, cargo audit,
+file-size audit (tasks/ ≤ 200 lines), and E2E tests green on Pi4.
+
+testing: full guide at docs/guidelines/TESTING.md. Four suites:
+  1. UI unit (local)       — cd VEN/ui && npm test  |  cd VTN/ui && npm test
+  2. Rust unit+integration — wsl cargo test -p ven  (local, no HiGHS needed for most)
+  3. E2E BDD (Pi4)         — bash run_all_tests.sh --e2e  (behave, ~49 scenarios)
+  4. Resilience (Pi4)      — bash run_all_tests.sh --resilience
+Run everything: bash run_all_tests.sh
+VEN Rust pyramid (4 layers, all must stay green after any VEN change):
+  Domain → Use-case → Adapter-contract → Integration
+  Shared mock adapters live in VEN/src/services/test_support/ (not cfg(test)).
+  Test naming: test_<function>_<scenario>.
+All suites must pass before merging a PR to main.
+
+test-first: write the test first. Selectively run it to confirm it fails. Implement until it is green.
+This applies at unit level for every new function and at BDD level for every new behaviour.
+
+session-start: at the start of every AI session read docs/reference/SESSION_START.md
+and follow the checklist before touching any code.
 
 When researching about OpenADR reference, only use OpenADR 3 resources. General Questions can be researched from any versions.
 
