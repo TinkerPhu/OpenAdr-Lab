@@ -83,7 +83,7 @@ Close ambiguities before they become bugs. Resolve conflicting requirements and 
 
 ### 4. Decide on Architecture, Guidelines, Branching, and Workflow Rules
 
-- Choose an architecture framework (e.g., *Hexagonal Architecture / Ports and Adapters* combined with *Clean Architecture* layering). Define coding guidelines, linter rules, and code-coverage targets — write all of this into the constitution.
+- Choose an architecture framework (e.g., *Hexagonal Architecture / Ports and Adapters* combined with *Clean Architecture* layering). Define coding guidelines, consequently add UI test IDs to UI components from start, linter rules, and code-coverage targets — write all of this into the constitution.
 - Define a **branching model** (GitFlow, trunk-based, feature-branch naming, PR rules). AI agents need explicit rules about what branch to target and when to push.
 - Establish **workflow rules** now — before any implementation begins: write the project journal, record key learnings and technical debts, look for inline duplication that can be extracted to utility functions, remove dead code, and keep tools and libraries up to date. These habits cannot be retrofitted after the project is underway.
 
