@@ -156,6 +156,7 @@ pub(crate) fn spawn_planning(
                             })
                             .unwrap_or(0.0),
                         planner.v_ev_extra_eur_kwh,
+                        planner.v_ev_core_eur_kwh,
                         lambda_sw,
                     )
                 })

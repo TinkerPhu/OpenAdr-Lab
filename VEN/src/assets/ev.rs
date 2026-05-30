@@ -393,6 +393,9 @@ impl EvMilpContext {
         if self.mode != EvMilpMode::MustNotRun {
             obj += -(w_services * self.v_extra_eur_kwh) * v.e_ev_extra;
         }
+        if self.mode == EvMilpMode::MayRun {
+            obj += -(w_services * self.v_core_eur) * v.z_ev_core;
+        }
         obj
     }
 
@@ -408,6 +411,7 @@ impl EvMilpContext {
 
     /// Construct from a live `AssetState`, sim `EvCharger` config, and optional session data.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub fn from_state(
         state: &super::AssetState,
         cfg: &EvCharger,
@@ -417,6 +421,7 @@ impl EvMilpContext {
         ev_session: Option<&crate::entities::device_session::EvSession>,
         min_charge_kw: f64,
         v_ev_extra_eur_kwh: f64,
+        v_ev_core_eur_kwh: f64,
     ) -> Self {
         let plugged = if let super::AssetState::Ev(s) = state {
             s.plugged
@@ -433,6 +438,7 @@ impl EvMilpContext {
                 e_core_kwh: 0.0,
                 e_extra_max_kwh: cfg.battery_kwh * (1.0 - cfg.soc_target),
                 v_extra_eur_kwh: v_ev_extra_eur_kwh,
+                v_core_eur: 0.0,
             };
         }
         if let Some(session) = ev_session {
@@ -458,6 +464,11 @@ impl EvMilpContext {
                 e_core_kwh: core_kwh,
                 e_extra_max_kwh: cfg.battery_kwh * (1.0 - session.target_soc),
                 v_extra_eur_kwh: v_ev_extra_eur_kwh,
+                v_core_eur: if session.soft_deadline {
+                    core_kwh * v_ev_core_eur_kwh
+                } else {
+                    0.0
+                },
             }
         } else {
             // Plugged, no session: slots available but no charging obligation
@@ -470,6 +481,7 @@ impl EvMilpContext {
                 e_core_kwh: 0.0,
                 e_extra_max_kwh: cfg.battery_kwh * (1.0 - cfg.soc_target),
                 v_extra_eur_kwh: v_ev_extra_eur_kwh,
+                v_core_eur: 0.0,
             }
         }
     }
@@ -506,6 +518,7 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
                 e_core_kwh: self.e_core_kwh,
                 e_extra_max_kwh: self.e_extra_max_kwh,
                 v_extra_eur_kwh: self.v_extra_eur_kwh,
+                v_core_eur: self.v_core_eur,
             },
         )
     }
@@ -843,6 +856,7 @@ mod milp_context_trait_tests {
             e_core_kwh: 10.0,
             e_extra_max_kwh: 5.0,
             v_extra_eur_kwh: 0.05,
+            v_core_eur: 0.0,
         }
     }
 
@@ -876,6 +890,7 @@ mod milp_context_trait_tests {
             e_core_kwh: 0.0,
             e_extra_max_kwh: 5.0,
             v_extra_eur_kwh: 0.05,
+            v_core_eur: 0.0,
         };
         match ctx.milp_params(4, 300, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MayRun),
@@ -894,6 +909,7 @@ mod milp_context_trait_tests {
             e_core_kwh: 0.0,
             e_extra_max_kwh: 5.0,
             v_extra_eur_kwh: 0.05,
+            v_core_eur: 0.0,
         };
         match ctx.milp_params(4, 300, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MustNotRun),
@@ -914,6 +930,7 @@ mod milp_context_trait_tests {
             e_core_kwh: 0.0,
             e_extra_max_kwh: 5.0,
             v_extra_eur_kwh: 0.05,
+            v_core_eur: 0.0,
         };
         match ctx.milp_params(n, 300, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.a_ev, a_ev),

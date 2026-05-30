@@ -124,6 +124,7 @@ pub(crate) fn build_milp_inputs(
     let mut e_ev_core = 0.0_f64;
     let mut e_ev_extra = 0.0_f64;
     let mut v_ev_extra = 0.0_f64;
+    let mut v_ev_core = 0.0_f64;
     let mut soc_ev_init: Option<f64> = None;
 
     let mut heater_mode = MilpLoadMode::MustNotRun;
@@ -159,6 +160,7 @@ pub(crate) fn build_milp_inputs(
                 e_ev_core = e.e_core_kwh;
                 e_ev_extra = e.e_extra_max_kwh;
                 v_ev_extra = e.v_extra_eur_kwh;
+                v_ev_core = e.v_core_eur;
                 soc_ev_init = assets.assets.get("ev").and_then(|s| s.val("soc"));
             }
             AssetMilpParams::Heater(h) => {
@@ -258,7 +260,7 @@ pub(crate) fn build_milp_inputs(
         p_ev_min_kw: p_ev_min,
         e_ev_core_kwh: e_ev_core,
         e_ev_extra_max_kwh: e_ev_extra,
-        v_ev_core_eur: 0.0,
+        v_ev_core_eur: v_ev_core,
         v_ev_extra_eur_kwh: v_ev_extra,
         heater_mode,
         t_heat_dead_step: t_heat_dead,
