@@ -77,6 +77,38 @@ fn make_phase2_weights() -> Phase2Weights {
     }
 }
 
+/// MayRun EV with v_ev_core_eur exceeding tariff cost → optimizer commits to charging.
+#[test]
+fn ev_may_run_commits_when_core_reward_exceeds_cost() {
+    let mut inputs = make_solver_inputs(4, 0.0);
+    inputs.a_ev = vec![true; 4];
+    inputs.ev_mode = MilpLoadMode::MayRun;
+    inputs.t_ev_dead_step = Some(3);
+    inputs.p_ev_max_kw = 7.4;
+    inputs.p_ev_min_kw = 0.0;
+    inputs.e_ev_core_kwh = 4.0;
+    inputs.e_ev_extra_max_kwh = 20.0;
+    // tariff = 0.25, cost = 4.0 × 0.25 × 4 slots = up to 4 EUR; reward = 5 EUR > cost
+    inputs.v_ev_core_eur = 5.0;
+
+    let result = solve_phase1(
+        &inputs,
+        &make_phase1_weights(),
+        &contexts_from_inputs(&inputs),
+        60.0,
+    );
+    assert!(result.is_ok(), "solver failed: {:?}", result.err());
+    let out = result.unwrap();
+
+    let ev_energy: f64 = out.p_ev_kw.iter().sum::<f64>() * inputs.dt_h;
+    assert!(
+        ev_energy >= inputs.e_ev_core_kwh - 0.1,
+        "MayRun EV with sufficient reward should meet core {:.1} kWh, got {:.4}",
+        inputs.e_ev_core_kwh,
+        ev_energy
+    );
+}
+
 #[test]
 fn solve_feasible_no_optional_assets() {
     // Minimal case: no battery, no EV, no heater. Import exactly covers base load.

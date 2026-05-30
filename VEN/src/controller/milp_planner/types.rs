@@ -120,7 +120,7 @@ pub(crate) struct MilpInputs {
     pub(crate) e_ev_core_kwh: f64,
     /// Opportunistic headroom = battery_kwh × (1 − soc_target) [kWh]
     pub(crate) e_ev_extra_max_kwh: f64,
-    /// Reward for meeting core target (MayRun only); hardcoded 0.0 until user-requests integration
+    /// One-time reward in EUR for committing to meet the core energy target (MayRun only; 0.0 otherwise).
     pub(crate) v_ev_core_eur: f64,
     /// Reward per kWh of extra opportunistic charging [€/kWh]
     pub(crate) v_ev_extra_eur_kwh: f64,

@@ -114,6 +114,7 @@ impl MockEvCtx {
                 e_core_kwh: 0.0,
                 e_extra_max_kwh: 0.0,
                 v_extra_eur_kwh: 0.0,
+                v_core_eur: 0.0,
             },
         }
     }
@@ -129,6 +130,7 @@ impl MockEvCtx {
                 e_core_kwh,
                 e_extra_max_kwh: 0.0,
                 v_extra_eur_kwh: 0.05,
+                v_core_eur: 0.0,
             },
         }
     }
@@ -158,6 +160,7 @@ impl AssetMilpContext for MockEvCtx {
             e_core_kwh: self.ctx.e_core_kwh,
             e_extra_max_kwh: self.ctx.e_extra_max_kwh,
             v_extra_eur_kwh: self.ctx.v_extra_eur_kwh,
+            v_core_eur: self.ctx.v_core_eur,
         })
     }
 
