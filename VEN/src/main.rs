@@ -70,6 +70,7 @@ fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Ve
         pen_imp_eur_kwh: profile.planner.pen_imp_eur_kwh,
         pen_exp_eur_kwh: profile.planner.pen_exp_eur_kwh,
         v_ev_extra_eur_kwh: profile.planner.v_ev_extra_eur_kwh,
+        v_ev_core_eur_kwh: profile.planner.v_ev_core_eur_kwh,
         w_tier_penalty_eur: profile.planner.w_tier_penalty_eur,
         c_ctrl_imp_malus_eur_kwh: profile.planner.c_ctrl_imp_malus_eur_kwh,
         objective: profile.planner.objective,

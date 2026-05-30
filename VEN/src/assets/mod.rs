@@ -497,6 +497,7 @@ impl AssetConfig {
         heater_target: Option<&crate::entities::device_session::HeaterTarget>,
         ev_min_charge_kw: f64,
         v_ev_extra_eur_kwh: f64,
+        v_ev_core_eur_kwh: f64,
         lambda_sw: f64,
     ) -> Option<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
         match self {
@@ -510,6 +511,7 @@ impl AssetConfig {
                 ev_session,
                 ev_min_charge_kw,
                 v_ev_extra_eur_kwh,
+                v_ev_core_eur_kwh,
             ))),
             Self::Heater(cfg) => Some(Box::new(HeaterMilpContext::from_state(
                 state,

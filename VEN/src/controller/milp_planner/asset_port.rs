@@ -92,6 +92,9 @@ pub struct EvMilpContext {
     pub e_extra_max_kwh: f64,
     /// Reward per kWh of extra opportunistic charging above core [€/kWh].
     pub v_extra_eur_kwh: f64,
+    /// One-time reward in EUR for committing to meet the core target (MayRun only; 0.0 otherwise).
+    /// Set to e_core_kwh × v_ev_core_eur_kwh so the optimizer commits when tariffs are reasonable.
+    pub v_core_eur: f64,
 }
 
 /// Typed LP variable handles for one EV charger in the MILP model.
@@ -134,6 +137,7 @@ impl EvMilpContext {
         soc_target: f64,
         min_charge_kw: f64,
         v_ev_extra_eur_kwh: f64,
+        v_ev_core_eur_kwh: f64,
         n: usize,
         step_s: u64,
         now: DateTime<Utc>,
@@ -149,6 +153,7 @@ impl EvMilpContext {
                 e_core_kwh: 0.0,
                 e_extra_max_kwh: battery_kwh * (1.0 - soc_target),
                 v_extra_eur_kwh: v_ev_extra_eur_kwh,
+                v_core_eur: 0.0,
             };
         }
         if let Some(session) = ev_session {
@@ -169,6 +174,11 @@ impl EvMilpContext {
                 e_core_kwh: core_kwh,
                 e_extra_max_kwh: battery_kwh * (1.0 - session.target_soc),
                 v_extra_eur_kwh: v_ev_extra_eur_kwh,
+                v_core_eur: if session.soft_deadline {
+                    core_kwh * v_ev_core_eur_kwh
+                } else {
+                    0.0
+                },
             }
         } else {
             // Plugged, no active session: slots available but no obligation
@@ -181,6 +191,7 @@ impl EvMilpContext {
                 e_core_kwh: 0.0,
                 e_extra_max_kwh: battery_kwh * (1.0 - soc_target),
                 v_extra_eur_kwh: v_ev_extra_eur_kwh,
+                v_core_eur: 0.0,
             }
         }
     }
@@ -367,6 +378,7 @@ pub struct EvScalars {
     pub e_core_kwh: f64,
     pub e_extra_max_kwh: f64,
     pub v_extra_eur_kwh: f64,
+    pub v_core_eur: f64,
 }
 
 /// Pre-computed scalar parameters for a heater in one planning cycle.

@@ -29,6 +29,8 @@ pub struct PlannerParams {
     pub pen_imp_eur_kwh: f64,
     pub pen_exp_eur_kwh: f64,
     pub v_ev_extra_eur_kwh: f64,
+    /// One-time reward (EUR/kWh of core target) for committing to a soft-deadline EV session.
+    pub v_ev_core_eur_kwh: f64,
     pub w_tier_penalty_eur: f64,
     /// Penalty [€/kWh] on controllable-asset import exceeding free PV surplus.
     /// Applies to all assets (heater + EV + net battery + shiftables) as a group.
@@ -61,6 +63,7 @@ impl Default for PlannerParams {
             pen_imp_eur_kwh: 10_000.0,
             pen_exp_eur_kwh: 10_000.0,
             v_ev_extra_eur_kwh: 0.10,
+            v_ev_core_eur_kwh: 1.0,
             w_tier_penalty_eur: 0.001,
             c_ctrl_imp_malus_eur_kwh: 0.0,
             objective: PlannerObjective::MinCost,

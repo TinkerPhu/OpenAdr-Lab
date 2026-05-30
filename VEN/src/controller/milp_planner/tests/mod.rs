@@ -457,6 +457,7 @@ fn build_asset_contexts(
                     heater_target,
                     ev_min_kw,
                     v_ev_extra,
+                    1.0,
                     lambda_sw,
                 ) {
                     ctxs.push(ctx);
@@ -489,6 +490,7 @@ fn build_asset_contexts(
                     heater_target,
                     ev_min_kw,
                     v_ev_extra,
+                    1.0,
                     lambda_sw,
                 ) {
                     ctxs.push(ctx);
@@ -514,6 +516,7 @@ fn build_asset_contexts(
                     heater_target,
                     ev_min_kw,
                     v_ev_extra,
+                    1.0,
                     lambda_sw,
                 ) {
                     ctxs.push(ctx);
@@ -561,6 +564,7 @@ fn contexts_from_inputs(
                 e_core_kwh: inputs.e_ev_core_kwh,
                 e_extra_max_kwh: inputs.e_ev_extra_max_kwh,
                 v_extra_eur_kwh: inputs.v_ev_extra_eur_kwh,
+                v_core_eur: inputs.v_ev_core_eur,
             },
         }));
     }

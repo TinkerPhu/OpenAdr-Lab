@@ -423,6 +423,12 @@ pub struct PlannerConfig {
     /// Incentivises opportunistic top-up charging when tariffs are low.
     #[serde(default = "default_v_ev_extra")]
     pub v_ev_extra_eur_kwh: f64,
+    /// One-time reward (EUR) per kWh of core energy target for committing to a
+    /// soft-deadline EV session (MayRun mode). Must exceed the expected charging
+    /// cost for the optimizer to choose z_ev_core = 1. Default: 1.0 EUR/kWh
+    /// (~3–5× typical peak tariff), overridable per-VEN in profile YAML.
+    #[serde(default = "default_v_ev_core")]
+    pub v_ev_core_eur_kwh: f64,
     /// Soft penalty per slot for using the heater's full power tier over mid tier [€/slot].
     /// Breaks ties in favour of mid tier (e.g. 3 kW) over full tier (e.g. 6 kW) when tariff
     /// savings are equal. Must be small relative to actual energy cost differences.
@@ -496,6 +502,7 @@ impl Default for PlannerConfig {
             pen_imp_eur_kwh: default_pen_imp(),
             pen_exp_eur_kwh: default_pen_exp(),
             v_ev_extra_eur_kwh: default_v_ev_extra(),
+            v_ev_core_eur_kwh: default_v_ev_core(),
             w_tier_penalty_eur: default_w_tier_penalty(),
             c_ctrl_imp_malus_eur_kwh: default_c_ctrl_imp_malus(),
             objective: PlannerObjective::MinCost,
@@ -556,6 +563,9 @@ fn default_w_viol() -> f64 {
 }
 fn default_v_ev_extra() -> f64 {
     0.10
+}
+fn default_v_ev_core() -> f64 {
+    1.0
 }
 fn default_w_tier_penalty() -> f64 {
     0.001
