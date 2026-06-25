@@ -389,7 +389,8 @@ impl HeaterMilpContext {
     }
 
     /// Generate all MILP constraints for this heater.
-    pub fn constraints(&self, v: &HeaterMilpVars, n: usize, dt_h: f64) -> Vec<Constraint> {
+    /// `dt_h[t]` is the slot duration in hours for slot `t`.
+    pub fn constraints(&self, v: &HeaterMilpVars, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
         let mut cs: Vec<Constraint> = Vec::new();
 
         // C0: mutual exclusion — mid and full are alternative modes.
@@ -406,12 +407,12 @@ impl HeaterMilpContext {
         cs.push(constraint!(v.e_tank[0] >= e_init));
         cs.push(constraint!(v.e_tank[0] <= e_init));
 
-        // C2: tank dynamics — E[t+1] = E[t] + (P_heat[t] − q_dem) × dt_h.
+        // C2: tank dynamics — E[t+1] = E[t] + (P_heat[t] − q_dem) × dt_h[t].
         // Expressed as two inequalities (== is not directly supported).
-        let net_const = -self.q_dem_kw * dt_h;
         for t in 0..(n.saturating_sub(1)) {
-            let p_mid_dt = self.p_mid_kw * dt_h;
-            let p_full_dt = self.p_full_kw * dt_h;
+            let net_const = -self.q_dem_kw * dt_h[t];
+            let p_mid_dt = self.p_mid_kw * dt_h[t];
+            let p_full_dt = self.p_full_kw * dt_h[t];
             // LHS = e_tank[t+1] − e_tank[t] − p_mid_dt×z_mid[t] − p_full_dt×z_full[t]
             let lhs_ge = Expression::from(v.e_tank[t + 1])
                 - Expression::from(v.e_tank[t])
@@ -481,6 +482,8 @@ impl HeaterMilpContext {
     }
 
     /// Heater objective contribution (penalty terms only; energy cost enters via power balance).
+    /// `dt_h[t]` is the slot duration in hours. Switching penalty scales by `dt_h[t]` so
+    /// a switch in a longer slot costs proportionally more (zone-boundary neutral).
     pub fn objective(
         &self,
         v: &HeaterMilpVars,
@@ -488,6 +491,7 @@ impl HeaterMilpContext {
         m_low_eur_kwh: f64,
         lambda_sw_eur: f64,
         n: usize,
+        dt_h: &[f64],
     ) -> Expression {
         let mut obj = Expression::from(0.0);
         if self.mode == HeaterMilpMode::MustNotRun {
@@ -496,7 +500,7 @@ impl HeaterMilpContext {
         for t in 0..n {
             obj += w_tier_penalty_eur * v.z_heat_full[t]; // prefer mid over full when equal cost
             obj += m_low_eur_kwh * v.s_low[t]; // penalise below-min violations
-            obj += lambda_sw_eur * v.sw[t]; // penalise relay switches
+            obj += lambda_sw_eur * dt_h[t] * v.sw[t]; // penalise relay switches; scale by dt_h
         }
         // Terminal energy reward (Phase 1 only — m_low > 0, lambda_sw == 0).
         // Makes the optimizer treat heat stored at horizon end as having forward
@@ -651,7 +655,7 @@ impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
         &self,
         pool: &crate::controller::milp_interactions::MilpVarPool,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
     ) -> Vec<Constraint> {
         HeaterMilpContext::constraints(self, pool.heater.as_ref().unwrap(), n, dt_h)
     }
@@ -660,7 +664,7 @@ impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
         &self,
         pool: &crate::controller::milp_interactions::MilpVarPool,
         n: usize,
-        _dt_h: f64,
+        dt_h: &[f64],
         _c_wear_eur_kwh: f64,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
@@ -675,10 +679,11 @@ impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
                 crate::controller::milp_planner::asset_port::M_LOW_EUR_PER_KWH,
                 0.0,
                 n,
+                dt_h,
             )
         } else {
             // Phase 2 friction: tier penalty + relay switching penalty.
-            HeaterMilpContext::objective(self, v, c_ramp_eur_kw, 0.0, self.lambda_sw_eur, n)
+            HeaterMilpContext::objective(self, v, c_ramp_eur_kw, 0.0, self.lambda_sw_eur, n, dt_h)
         }
     }
 }
@@ -718,7 +723,7 @@ impl Heater {
         ctx: &HeaterMilpContext,
         v: &HeaterMilpVars,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
     ) -> Vec<Constraint> {
         ctx.constraints(v, n, dt_h)
     }
@@ -732,8 +737,9 @@ impl Heater {
         m_low_eur_kwh: f64,
         lambda_sw_eur: f64,
         n: usize,
+        dt_h: &[f64],
     ) -> Expression {
-        ctx.objective(v, w_tier_penalty_eur, m_low_eur_kwh, lambda_sw_eur, n)
+        ctx.objective(v, w_tier_penalty_eur, m_low_eur_kwh, lambda_sw_eur, n, dt_h)
     }
 
     /// Read back the heater solution from the solved model. Delegates to `HeaterMilpContext::read_solution`.
@@ -1103,7 +1109,7 @@ mod tests {
             ..make_may_run_ctx(n)
         };
         let hv = ctx.declare_vars(n, &mut vars);
-        let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
+        let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
         // MustNotRun: only C0 (n mutual exclusion constraints), early return after
         assert_eq!(cs.len(), n);
     }
@@ -1113,7 +1119,7 @@ mod tests {
         let n = 4;
         let (_, hv, _) = heater_pool_and_vars(n);
         let ctx = make_may_run_ctx(n);
-        let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
+        let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
         // C0: n, C1: 2, C2: 2×(n-1), C3: n, C4: n, C5: 4×n (4 at t=0, 4 per subsequent slot)
         // Total for MayRun, no deadline: n + 2 + 2(n-1) + n + n + 4n = 9n
         // For n=4: 4 + 2 + 6 + 4 + 4 + 16 = 36
@@ -1128,7 +1134,7 @@ mod tests {
         let n = 4;
         let (_, hv, _) = heater_pool_and_vars(n);
         let ctx = make_may_run_ctx(n);
-        let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
+        let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
         // n=4, MayRun, no deadline: 4 + 2 + 6 + 4 + 4 + 16 = 36
         assert_eq!(
             cs.len(),
@@ -1142,7 +1148,7 @@ mod tests {
         let n = 4;
         let (_, hv, _) = heater_pool_and_vars(n);
         let ctx = make_may_run_ctx(n);
-        let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
+        let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
         // C3 contributes n constraints; total >= n (at minimum C0 alone)
         assert!(
             cs.len() >= n,
@@ -1155,7 +1161,7 @@ mod tests {
         let n = 4;
         let (_, hv, _) = heater_pool_and_vars(n);
         let ctx = make_may_run_ctx(n);
-        let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
+        let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
         // C4 contributes n soft-lower constraints; verified by total count
         assert!(cs.len() >= n * 2);
     }
@@ -1165,7 +1171,7 @@ mod tests {
         let n = 4;
         let (_, hv, _) = heater_pool_and_vars(n);
         let ctx = make_may_run_ctx(n);
-        let cs = ctx.constraints(&hv, n, 300.0 / 3600.0);
+        let cs = ctx.constraints(&hv, n, &vec![300.0 / 3600.0; n]);
         // C5: 4 at t=0 + 4×(n-1) at t=1..n-1 = 4n total switching constraints
         // Verified through the total 36 constraint count for n=4
         assert_eq!(cs.len(), 36);
@@ -1327,7 +1333,7 @@ mod milp_context_trait_tests {
         let mut vars = variables!();
         let mut pool = empty_pool(&mut vars, n);
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-        let cs = AssetMilpContext::constraints(&ctx, &pool, n, 300.0 / 3600.0);
+        let cs = AssetMilpContext::constraints(&ctx, &pool, n, &vec![300.0 / 3600.0; n]);
         assert_eq!(
             cs.len(),
             36,
@@ -1372,10 +1378,11 @@ mod milp_context_trait_tests {
 
         // Phase 1: m_low > 0, lambda_sw == 0 — terminal term should appear
         use crate::controller::milp_planner::asset_port::M_LOW_EUR_PER_KWH;
-        let obj_p1 = HeaterMilpContext::objective(&ctx, v, 0.0, M_LOW_EUR_PER_KWH, 0.0, n);
+        let dt_h = vec![300.0 / 3600.0; n];
+        let obj_p1 = HeaterMilpContext::objective(&ctx, v, 0.0, M_LOW_EUR_PER_KWH, 0.0, n, &dt_h);
 
         // Phase 2: m_low == 0, lambda_sw > 0 — terminal term must NOT appear
-        let obj_p2 = HeaterMilpContext::objective(&ctx, v, 0.05, 0.0, 0.5, n);
+        let obj_p2 = HeaterMilpContext::objective(&ctx, v, 0.05, 0.0, 0.5, n, &dt_h);
 
         // We cannot easily inspect the LP expression value without a solver,
         // but we can check the debug representation differs (terminal adds a coefficient).

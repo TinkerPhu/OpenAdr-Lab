@@ -317,19 +317,21 @@ impl EvMilpContext {
     }
 
     /// Build the energy accumulator expression up to the deadline step.
-    pub fn energy_expr(&self, v: &EvMilpVars, n: usize, dt_h: f64) -> Expression {
+    /// `dt_h[t]` is the slot duration in hours for slot `t`.
+    pub fn energy_expr(&self, v: &EvMilpVars, n: usize, dt_h: &[f64]) -> Expression {
         let t_dlim = self.t_dead_step.unwrap_or(n.saturating_sub(1));
         let mut expr = Expression::from(0.0);
         for t in 0..n {
             if t <= t_dlim {
-                expr += dt_h * v.p_ev[t];
+                expr += dt_h[t] * v.p_ev[t];
             }
         }
         expr
     }
 
     /// Generate all MILP constraints for this EV charger. Context-side canonical implementation.
-    pub fn constraints(&self, v: &EvMilpVars, n: usize, dt_h: f64) -> Vec<Constraint> {
+    /// `dt_h[t]` is the slot duration in hours for slot `t`.
+    pub fn constraints(&self, v: &EvMilpVars, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
         let mut cs: Vec<Constraint> = Vec::new();
         let ev_energy = self.energy_expr(v, n, dt_h);
 
@@ -538,7 +540,7 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
         &self,
         pool: &crate::controller::milp_interactions::MilpVarPool,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
     ) -> Vec<Constraint> {
         EvMilpContext::constraints(self, pool.ev.as_ref().unwrap(), n, dt_h)
     }
@@ -547,7 +549,7 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
         &self,
         pool: &crate::controller::milp_interactions::MilpVarPool,
         n: usize,
-        _dt_h: f64,
+        _dt_h: &[f64],
         _c_wear_eur_kwh: f64,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
@@ -589,7 +591,7 @@ impl EvCharger {
         ctx: &EvMilpContext,
         v: &EvMilpVars,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
     ) -> Expression {
         ctx.energy_expr(v, n, dt_h)
     }
@@ -600,7 +602,7 @@ impl EvCharger {
         ctx: &EvMilpContext,
         v: &EvMilpVars,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
     ) -> Vec<Constraint> {
         ctx.constraints(v, n, dt_h)
     }

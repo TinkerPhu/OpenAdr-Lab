@@ -133,8 +133,16 @@ pub(crate) fn translate_to_plan(
 ) -> Plan {
     let step_s = planner.plan_step_s;
     let n = inputs.n;
-    let dt_h = inputs.dt_h;
-    let horizon_end = now + Duration::seconds((n as i64) * step_s as i64);
+    let total_s: i64 = inputs.dt_h.iter().map(|&d| (d * 3600.0) as i64).sum();
+    let horizon_end = now + Duration::seconds(total_s);
+
+    // Precompute cumulative slot start times in seconds from `now`.
+    let mut cum_s: Vec<i64> = Vec::with_capacity(n + 1);
+    cum_s.push(0);
+    for &d in &inputs.dt_h {
+        cum_s.push(cum_s.last().unwrap() + (d * 3600.0) as i64);
+    }
+
     let horizon = PlanningHorizon {
         start_time: now,
         end_time: horizon_end,
@@ -151,8 +159,8 @@ pub(crate) fn translate_to_plan(
     let mut violation_count: usize = 0;
 
     for t in 0..n {
-        let slot_start = now + Duration::seconds((t as i64) * step_s as i64);
-        let slot_end = now + Duration::seconds(((t + 1) as i64) * step_s as i64);
+        let slot_start = now + Duration::seconds(cum_s[t]);
+        let slot_end = now + Duration::seconds(cum_s[t + 1]);
         let surplus_available_kw = (inputs.p_pv_kw[t] - inputs.p_base_kw[t]).max(0.0);
         let mut surplus_remaining_kw = surplus_available_kw;
 
@@ -171,9 +179,9 @@ pub(crate) fn translate_to_plan(
                     surplus_power_kw,
                     grid_power_kw,
                     marginal_value: inputs.c_imp_eur_kwh[t],
-                    cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * dt_h
-                        - surplus_power_kw * inputs.c_exp_eur_kwh[t] * dt_h,
-                    co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h,
+                    cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t]
+                        - surplus_power_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
+                    co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
                 });
             }
         }
@@ -193,9 +201,9 @@ pub(crate) fn translate_to_plan(
                         surplus_power_kw,
                         grid_power_kw,
                         marginal_value: inputs.c_imp_eur_kwh[t],
-                        cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * dt_h
-                            - surplus_power_kw * inputs.c_exp_eur_kwh[t] * dt_h,
-                        co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h,
+                        cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t]
+                            - surplus_power_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
+                        co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
                     });
                 }
             }
@@ -214,9 +222,9 @@ pub(crate) fn translate_to_plan(
                     surplus_power_kw,
                     grid_power_kw,
                     marginal_value: inputs.c_imp_eur_kwh[t],
-                    cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * dt_h
-                        - surplus_power_kw * inputs.c_exp_eur_kwh[t] * dt_h,
-                    co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h,
+                    cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t]
+                        - surplus_power_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
+                    co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
                 });
             }
         }
@@ -232,8 +240,8 @@ pub(crate) fn translate_to_plan(
                     (
                         sp,
                         gp,
-                        gp * inputs.c_imp_eur_kwh[t] * dt_h - sp * inputs.c_exp_eur_kwh[t] * dt_h,
-                        gp * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h,
+                        gp * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t] - sp * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
+                        gp * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
                     )
                 } else {
                     // Discharging: negative power_kw = net injection; revenue = negative cost
@@ -241,8 +249,8 @@ pub(crate) fn translate_to_plan(
                     (
                         0.0,
                         bat_net_kw,
-                        -(dis_kw * inputs.c_exp_eur_kwh[t] * dt_h),
-                        -(dis_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * dt_h),
+                        -(dis_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t]),
+                        -(dis_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t]),
                     )
                 };
                 allocations.push(AssetAllocation {
@@ -309,7 +317,7 @@ pub(crate) fn translate_to_plan(
     }
     // EV SoC forecast — requires soc_ev_init captured in MilpInputs.
     if let (Some(ref eid), Some(soc_init), Some(ev_cfg)) = (&ev_id, inputs.soc_ev_init, ev_cfg) {
-        let traj = ev_soc_trajectory(&sol.p_ev_kw, soc_init, ev_cfg.battery_kwh, dt_h);
+        let traj = ev_soc_trajectory(&sol.p_ev_kw, soc_init, ev_cfg.battery_kwh, &inputs.dt_h);
         #[allow(clippy::needless_range_loop)] // t indexes both slots[] and traj[]
         for t in 0..n {
             slots[t]
@@ -339,14 +347,14 @@ pub(crate) fn translate_to_plan(
             .map(|t| {
                 (inputs.c_imp_eur_kwh[t] * sol.p_imp_kw[t]
                     - inputs.c_exp_eur_kwh[t] * sol.p_exp_kw[t])
-                    * dt_h
+                    * inputs.dt_h[t]
             })
             .sum(),
         total_co2_g: (0..n)
-            .map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0 * sol.p_imp_kw[t] * dt_h)
+            .map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0 * sol.p_imp_kw[t] * inputs.dt_h[t])
             .sum(),
-        total_import_kwh: sol.p_imp_kw.iter().sum::<f64>() * dt_h,
-        total_export_kwh: sol.p_exp_kw.iter().sum::<f64>() * dt_h,
+        total_import_kwh: sol.p_imp_kw.iter().zip(inputs.dt_h.iter()).map(|(p, &d)| p * d).sum(),
+        total_export_kwh: sol.p_exp_kw.iter().zip(inputs.dt_h.iter()).map(|(p, &d)| p * d).sum(),
     };
 
     // ── Cost breakdown (post-hoc from solution × weights) ───────────────
@@ -356,24 +364,24 @@ pub(crate) fn translate_to_plan(
                 weights.w_energy
                     * (inputs.c_imp_eur_kwh[t] * sol.p_imp_kw[t]
                         - inputs.c_exp_eur_kwh[t] * sol.p_exp_kw[t])
-                    * dt_h
+                    * inputs.dt_h[t]
             })
             .sum(),
         c_ghg_eur: (0..n)
-            .map(|t| weights.w_ghg * inputs.g_imp_kgco2_kwh[t] * sol.p_imp_kw[t] * dt_h)
+            .map(|t| weights.w_ghg * inputs.g_imp_kgco2_kwh[t] * sol.p_imp_kw[t] * inputs.dt_h[t])
             .sum(),
         c_grid_eur: (0..n)
-            .map(|t| weights.w_grid * (sol.p_imp_kw[t] + sol.p_exp_kw[t]) * dt_h)
+            .map(|t| weights.w_grid * (sol.p_imp_kw[t] + sol.p_exp_kw[t]) * inputs.dt_h[t])
             .sum(),
         c_wear_eur: (0..n)
-            .map(|t| weights.c_bat_wear_eur_kwh * (sol.p_bat_ch_kw[t] + sol.p_bat_dis_kw[t]) * dt_h)
+            .map(|t| weights.c_bat_wear_eur_kwh * (sol.p_bat_ch_kw[t] + sol.p_bat_dis_kw[t]) * inputs.dt_h[t])
             .sum(),
         c_violations_eur: (0..n)
             .map(|t| {
                 weights.w_viol
                     * (inputs.pen_imp_eur_kwh * sol.s_imp_viol_kw[t]
                         + inputs.pen_exp_eur_kwh * sol.s_exp_viol_kw[t])
-                    * dt_h
+                    * inputs.dt_h[t]
             })
             .sum(),
         v_services_eur: 0.0,
