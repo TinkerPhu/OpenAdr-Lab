@@ -4201,3 +4201,55 @@ Updated `asset_port.rs` header comment to accurately state the invariant now hol
 - `controller/timeline.rs` had `TimeWindow` defined both locally AND in the re-export shim — caught at second cargo check; removed the local definition.
 - `TimelineAssetData` and `TimelinePoint` are used in `controller/timeline.rs` tests (via `super::*`) but not by name in production code. Wrapping their imports in `#[cfg(test)]` eliminates the unused-import warning cleanly.
 - The rustc 1.95.0 ICE on the binary target (triggered by incremental compilation over Windows NTFS via WSL) is a pre-existing compiler bug. `cargo test` and `cargo check --tests` both work correctly. The ICE does not affect correctness — it only affects the specific `cargo check` (without `--tests`) command on the binary target.
+
+---
+
+## Step 31 — MILP Storage Planning Fixes (Steps 1–4)
+
+**Status: Steps 1–4 COMPLETE, Steps 5–6 pending | branch: `remove-deviation-absorber`**
+
+### Motivation
+
+ven-2 (commercial building with 2000 L hot water tank + 12 kW PV) exhibited two problems:
+1. Heater running near 40°C instead of utilising the full 40–80°C thermal band
+2. Excessive relay switching between consecutive planning cycles
+
+Root causes identified and documented in `docs/milp_storage_planning_impl.md`.
+
+### Step 1 — Epsilon/penalty coherence (profile-only, committed)
+
+`phase2_epsilon_eur: 0.10 → 1.00` (= 2× `switching_penalty_eur: 0.50`). Phase 2 can now eliminate up to 2 switches within the economic budget. `plan_adoption_threshold_eur: 0.20` and `plan_adoption_decay_s: 1500` also tuned.
+
+### Step 2 — Auto-computed terminal energy reward
+
+Added `c_terminal_eur_kwh` field to `BatteryMilpContext` and `HeaterMilpContext`. Auto-computed in `build_milp_inputs()`:
+- Heater: `mean(c_imp_eur_kwh) + c_ctrl_imp_malus_eur_kwh` ≈ 0.56 EUR/kWh
+- Battery: `mean(c_imp_eur_kwh) × round_trip_efficiency` ≈ 0.31 EUR/kWh
+- EV: 0.0 (deadline constraint handles incentive)
+
+Term `−c_terminal × e_tank[n−1]` added to Phase 1 objective (detected by `m_low_eur_kwh > 0`). Makes optimizer treat stored heat at horizon end as economically valuable → fills tank during solar instead of stopping near T_min.
+
+### Step 3 — 48h horizon extension
+
+`plan_step_s: 600` (10 min) and `plan_horizon_h: 48` in `ven-2.yaml`. Keeps slot count at 288. Both solar windows now visible, eliminating phase-dependent fragmentation. UI timeline expanded to 48h. E2E feature file updated.
+
+### Step 4 — dt_h interface refactor (Vec<f64>)
+
+Changed `MilpInputs.dt_h: f64` → `Vec<f64>` and `GlobalMilpInputs.dt_h: f64` → `Vec<f64>` throughout all 13 MILP files. Values are uniform today (`vec![step_h; n]`). The interface is now ready for 3-tier zone logic, which requires only a change to `build_milp_inputs`.
+
+Key detail: heater switching penalty now scales by `dt_h[t]` (`obj += lambda_sw_eur * dt_h[t] * v.sw[t]`), making the penalty zone-boundary neutral — a switch in a longer slot costs proportionally more.
+
+All 398 tests pass. 13 files changed.
+
+### Pending (Steps 5–6)
+
+- **Step 5** — Block commitment anchor: add `anchor_until` to `HemsState`, prevent near-future relay flip for the first `plan_step_s × N` slots after commitment.
+- **Step 6** — Gate switch-count guard: extend `evaluate_acceptance_gate` to reject new plans that increase switch count beyond a threshold.
+
+Both steps are independent of each other and of Steps 1–4.
+
+### Key Learnings
+
+- When refactoring `dt_h: f64 → &[f64]` across a MILP module, unit tests in `assets/*.rs` that call `ctx.constraints(&v, n, 300.0/3600.0)` must be updated — the methods now expect `&vec![dt; n]`. The compiler catches all of them.
+- Heater switching penalty should scale by `dt_h[t]` even with uniform steps (correct form for the future 3-tier case). With uniform steps the coefficient is the same as before per switch event × dt_h, but semantically clearer.
+- `vec!` inside a function arg: `&vec![x; n]` works but triggers `clippy::useless_vec` in some versions. Could also use `std::iter::repeat(x).take(n).collect::<Vec<_>>()` if needed.
