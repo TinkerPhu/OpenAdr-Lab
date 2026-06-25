@@ -24,7 +24,9 @@ simulator:
   report_interval_s: 60
 
 planner:
-  phase2_epsilon_eur: 0.10  # allow 10 ct slack so Phase 2 can smooth switching
+  phase2_epsilon_eur: 1.00          # = 2× switching_penalty_eur; Phase 2 can eliminate up to 2 switches
+  plan_adoption_threshold_eur: 0.20 # require real improvement before replacing current plan
+  plan_adoption_decay_s: 1500       # 5× replan_interval_s — allow eventual replacement of stale plans
   replan_interval_s: 300
   solver_timeout_s: 60
   planning_initial_delay_s: 5
