@@ -31,3 +31,5 @@ planner:
   solver_timeout_s: 60
   planning_initial_delay_s: 5
   c_ctrl_imp_malus_eur_kwh: 0.22
+  plan_step_s: 600                  # 10 min slots (was 5 min); keeps slot count at 288 on 48 h horizon
+  plan_horizon_h: 48                # 48 h covers 2 solar windows for the 15.5 h-fill tank
