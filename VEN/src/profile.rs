@@ -54,6 +54,7 @@ impl AssetProfile {
                 k_loss_kw_per_c: c.effective_k_loss(),
                 draw_kw: c.effective_draw_kw(),
                 switching_penalty_eur: c.effective_switching_penalty(),
+                c_terminal_eur_kwh: c.c_terminal_eur_kwh,
             }),
             AssetProfile::Pv(c) => AssetParams::Pv(PvParams {
                 id: c.id.clone(),
@@ -178,6 +179,11 @@ pub struct HeaterConfig {
     /// Defaults to 0.01 EUR/switch when absent.
     #[serde(default)]
     pub switching_penalty_eur: Option<f64>,
+    /// Override for auto-computed terminal energy reward [EUR/kWh].
+    /// Omit (or None) → auto-compute from mean(c_imp) + c_ctrl_imp_malus.
+    /// 0.0 → disabled. Any positive value → fixed coefficient.
+    #[serde(default)]
+    pub c_terminal_eur_kwh: Option<f64>,
 }
 
 impl HeaterConfig {
@@ -712,6 +718,7 @@ mod tests {
             k_loss_kw_per_c: None,
             draw_kw: None,
             switching_penalty_eur: None,
+            c_terminal_eur_kwh: None,
         };
         assert!((cfg.effective_switching_penalty() - 0.01).abs() < 1e-9);
     }
@@ -730,6 +737,7 @@ mod tests {
             k_loss_kw_per_c: None,
             draw_kw: None,
             switching_penalty_eur: Some(0.05),
+            c_terminal_eur_kwh: None,
         };
         assert!((cfg.effective_switching_penalty() - 0.05).abs() < 1e-9);
     }

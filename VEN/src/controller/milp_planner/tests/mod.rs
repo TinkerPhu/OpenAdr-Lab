@@ -143,6 +143,7 @@ fn make_profile() -> Profile {
                 k_loss_kw_per_c: 0.1,
                 draw_kw: 0.0,
                 switching_penalty_eur: 0.01,
+                c_terminal_eur_kwh: None,
             }),
             AssetProfile::Pv(PvConfig {
                 id: "pv".into(),
@@ -377,6 +378,7 @@ fn make_heater_only_profile(
             k_loss_kw_per_c: 0.1,
             draw_kw: 0.0,
             switching_penalty_eur: 0.01,
+            c_terminal_eur_kwh: None,
         })],
         simulator: SimulatorConfig::default(),
         planner: PlannerConfig {
@@ -459,6 +461,7 @@ fn build_asset_contexts(
                     v_ev_extra,
                     1.0,
                     lambda_sw,
+                    0.0,
                 ) {
                     ctxs.push(ctx);
                 }
@@ -492,6 +495,7 @@ fn build_asset_contexts(
                     v_ev_extra,
                     1.0,
                     lambda_sw,
+                    0.0,
                 ) {
                     ctxs.push(ctx);
                 }
@@ -518,6 +522,7 @@ fn build_asset_contexts(
                     v_ev_extra,
                     1.0,
                     lambda_sw,
+                    0.0,
                 ) {
                     ctxs.push(ctx);
                 }
@@ -587,6 +592,7 @@ fn contexts_from_inputs(
                 lambda_sw_eur: inputs.lambda_heat_sw_eur,
                 initial_z_mid: inputs.heat_initial_z_mid,
                 initial_z_full: inputs.heat_initial_z_full,
+                c_terminal_eur_kwh: 0.0,
             },
         }));
     }

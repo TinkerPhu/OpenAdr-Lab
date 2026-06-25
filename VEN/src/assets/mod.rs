@@ -499,9 +499,14 @@ impl AssetConfig {
         v_ev_extra_eur_kwh: f64,
         v_ev_core_eur_kwh: f64,
         lambda_sw: f64,
+        c_terminal_eur_kwh: f64,
     ) -> Option<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
         match self {
-            Self::Battery(cfg) => Some(Box::new(BatteryMilpContext::from_state(state, cfg))),
+            Self::Battery(cfg) => Some(Box::new(BatteryMilpContext::from_state(
+                state,
+                cfg,
+                c_terminal_eur_kwh,
+            ))),
             Self::Ev(cfg) => Some(Box::new(EvMilpContext::from_state(
                 state,
                 cfg,
@@ -521,6 +526,7 @@ impl AssetConfig {
                 now,
                 heater_target,
                 lambda_sw,
+                c_terminal_eur_kwh,
             ))),
             _ => None,
         }
