@@ -1,6 +1,6 @@
 Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
   The VEN planner produces a Plan from RateSnapshots, EnergyPackets, and
-  device sessions. The plan covers a 24-hour horizon as a unified slot
+  device sessions. The plan covers the configured planning horizon as a unified slot
   sequence.
 
   Background:

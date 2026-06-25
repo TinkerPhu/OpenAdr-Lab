@@ -82,7 +82,7 @@ pub fn compute_uniform_grid(
 
 /// Fill `None` slots in a resampled series by carrying the last `Some` value forward.
 ///
-/// Used for forecast data: plan allocations are valid for the full 5-minute slot duration,
+/// Used for forecast data: plan allocations are valid for the full plan slot duration (plan_step_s),
 /// so sub-bucket nulls (caused by fine grid resolution between sparse plan points) should
 /// hold the previous slot's value rather than rendering as gaps / needle peaks.
 ///

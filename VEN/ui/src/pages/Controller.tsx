@@ -27,7 +27,7 @@ export function ControllerPage() {
   const [expanded, setExpanded] = useState(false);
 
   // Widen the timeline window when the global expand toggle is active.
-  const hoursForward = expanded ? 24.0 : 1.0;
+  const hoursForward = expanded ? 48.0 : 1.0;
 
   // Single timeline query shared by all asset cells and the accumulated cell.
   // refetchInterval: false — driven exclusively by the unified timer below so
@@ -186,7 +186,7 @@ export function ControllerPage() {
       <Box sx={{ display: "flex", alignItems: "center", mb: 1, pr: 0.5 }}>
         <Typography variant="h6">Controller</Typography>
         <Box sx={{ flex: 1 }} />
-        <Tooltip title={expanded ? "Collapse to ±1h view" : "Expand to 24h planning horizon"}>
+        <Tooltip title={expanded ? "Collapse to ±1h view" : "Expand to 48h planning horizon"}>
           <IconButton data-testid="global-time-range-extend-btn" size="small" onClick={handleToggleExpand} sx={{ m: 0.5 }}>
             {expanded ? <ZoomInMapIcon fontSize="small" /> : <ZoomOutMapIcon fontSize="small" />}
           </IconButton>
