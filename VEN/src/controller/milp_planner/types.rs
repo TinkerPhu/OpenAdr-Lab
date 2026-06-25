@@ -60,8 +60,8 @@ pub(crate) struct Phase2Weights {
 pub(crate) struct MilpInputs {
     /// Number of planning steps.
     pub(crate) n: usize,
-    /// Step size in hours (e.g. 300 s → 1/12 h).
-    pub(crate) dt_h: f64,
+    /// Per-slot step sizes in hours (len = n). Uniform today; 3-tier variable-step when zones are active.
+    pub(crate) dt_h: Vec<f64>,
 
     // ── Grid (per-step arrays, len = n) ──────────────────────────────────────
     /// Import tariff [€/kWh]

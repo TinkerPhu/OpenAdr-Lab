@@ -21,11 +21,10 @@ pub(crate) fn solve_phase1(
     timeout_s: f64,
 ) -> Result<SolveOutput, Box<dyn std::error::Error>> {
     let n = inputs.n;
-    let dt_h = inputs.dt_h;
 
     let global = GlobalMilpInputs {
         n,
-        dt_h,
+        dt_h: inputs.dt_h.clone(),
         c_imp_eur_kwh: inputs.c_imp_eur_kwh.clone(),
         c_exp_eur_kwh: inputs.c_exp_eur_kwh.clone(),
         g_imp_kgco2_kwh: inputs.g_imp_kgco2_kwh.clone(),
@@ -102,33 +101,33 @@ pub(crate) fn solve_phase1(
     // Phase 1 objective: economic + m_low; no startup/ramp/switching/tier friction.
     let mut objective = Expression::from(0.0);
     for t in 0..n {
-        objective += (p1w.w_energy * dt_h * inputs.c_imp_eur_kwh[t]) * p_imp[t];
-        objective += -(p1w.w_energy * dt_h * inputs.c_exp_eur_kwh[t]) * p_exp[t];
-        objective += (p1w.w_ghg * dt_h * inputs.g_imp_kgco2_kwh[t]) * p_imp[t];
-        objective += (p1w.w_grid * dt_h) * p_imp[t];
-        objective += (p1w.w_grid * dt_h) * p_exp[t];
-        objective += (p1w.w_import * dt_h) * p_imp[t];
-        objective += (p1w.w_viol * inputs.pen_imp_eur_kwh * dt_h) * s_imp_viol[t];
-        objective += (p1w.w_viol * inputs.pen_exp_eur_kwh * dt_h) * s_exp_viol[t];
+        objective += (p1w.w_energy * inputs.dt_h[t] * inputs.c_imp_eur_kwh[t]) * p_imp[t];
+        objective += -(p1w.w_energy * inputs.dt_h[t] * inputs.c_exp_eur_kwh[t]) * p_exp[t];
+        objective += (p1w.w_ghg * inputs.dt_h[t] * inputs.g_imp_kgco2_kwh[t]) * p_imp[t];
+        objective += (p1w.w_grid * inputs.dt_h[t]) * p_imp[t];
+        objective += (p1w.w_grid * inputs.dt_h[t]) * p_exp[t];
+        objective += (p1w.w_import * inputs.dt_h[t]) * p_imp[t];
+        objective += (p1w.w_viol * inputs.pen_imp_eur_kwh * inputs.dt_h[t]) * s_imp_viol[t];
+        objective += (p1w.w_viol * inputs.pen_exp_eur_kwh * inputs.dt_h[t]) * s_exp_viol[t];
     }
     // Asset objective contributions — Phase 1: c_startup=0.0, c_ramp=0.0.
     // Battery: wear only. EV: service reward only. Heater: m_low penalty only.
     for ctx in asset_contexts {
         match ctx.asset_kind() {
             AssetKind::Battery => {
-                objective += ctx.objective(&pool, n, dt_h, p1w.c_bat_wear_eur_kwh, 0.0, 0.0);
+                objective += ctx.objective(&pool, n, &inputs.dt_h, p1w.c_bat_wear_eur_kwh, 0.0, 0.0);
             }
             AssetKind::Ev => {
-                objective += ctx.objective(&pool, n, dt_h, 0.0, 0.0, 0.0);
+                objective += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
             }
             AssetKind::Heater => {
                 // c_startup=0.0 signals Phase 1 → m_low penalty, no tier/switching.
-                objective += ctx.objective(&pool, n, dt_h, 0.0, 0.0, 0.0);
+                objective += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
             }
         }
     }
     for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
-        objective += interaction.objective(iv, dt_h);
+        objective += interaction.objective(iv, &inputs.dt_h);
     }
 
     let mut model = vars.minimise(&objective).using(highs);
@@ -222,7 +221,7 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
     }
 
     for ctx in asset_contexts {
-        for c in ctx.constraints(pool, n, global.dt_h) {
+        for c in ctx.constraints(pool, n, &global.dt_h) {
             model = model.with(c);
         }
     }

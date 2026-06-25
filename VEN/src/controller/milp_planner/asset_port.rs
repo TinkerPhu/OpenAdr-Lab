@@ -456,7 +456,7 @@ pub trait AssetMilpContext: Send + Sync {
         &self,
         pool: &crate::controller::milp_interactions::MilpVarPool,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
     ) -> Vec<good_lp::Constraint>;
 
     /// Phase B — objective contribution: return the cost/comfort expression
@@ -465,7 +465,7 @@ pub trait AssetMilpContext: Send + Sync {
         &self,
         pool: &crate::controller::milp_interactions::MilpVarPool,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
         c_wear_eur_kwh: f64,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
@@ -493,13 +493,14 @@ pub fn battery_future_state(e_kwh: f64, capacity_kwh: f64) -> HashMap<String, f6
 }
 
 /// SoC trajectory from MILP power schedule over `n+1` steps.
+/// `dt_h[t]` is the slot duration in hours for slot `t`.
 /// Mirrors `EvCharger::soc_trajectory()`.
-pub fn ev_soc_trajectory(p_ev_kw: &[f64], soc_init: f64, battery_kwh: f64, dt_h: f64) -> Vec<f64> {
+pub fn ev_soc_trajectory(p_ev_kw: &[f64], soc_init: f64, battery_kwh: f64, dt_h: &[f64]) -> Vec<f64> {
     let n = p_ev_kw.len();
     let mut traj = Vec::with_capacity(n + 1);
     traj.push(soc_init.clamp(0.0, 1.0));
     for t in 0..n {
-        let next = traj[t] + p_ev_kw[t] * dt_h / battery_kwh;
+        let next = traj[t] + p_ev_kw[t] * dt_h[t] / battery_kwh;
         traj.push(next.clamp(0.0, 1.0));
     }
     traj

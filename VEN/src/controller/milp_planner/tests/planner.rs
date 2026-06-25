@@ -568,7 +568,7 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
         ) {
             self.inner.declare_vars_into_pool(n, c_s, c_r, vars, pool);
         }
-        fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: f64) -> Vec<Constraint> {
+        fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
             let mut cs = self.inner.constraints(pool, n, dt_h);
             // Contradiction: require p_ch[0] ≥ 9999 while battery bounds p_ch[0] ≤ 5 kW
             if let Some(bat) = &pool.bat {
@@ -582,7 +582,7 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
             &self,
             pool: &MilpVarPool,
             n: usize,
-            dt_h: f64,
+            dt_h: &[f64],
             c_wear: f64,
             c_startup: f64,
             c_ramp: f64,

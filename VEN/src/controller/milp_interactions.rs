@@ -27,7 +27,7 @@ use crate::controller::milp_planner::asset_port::{BatteryMilpVars, EvMilpVars, H
 #[derive(Debug, Clone)]
 pub struct GlobalMilpInputs {
     pub n: usize,
-    pub dt_h: f64,
+    pub dt_h: Vec<f64>,
     /// Import tariff [€/kWh]
     pub c_imp_eur_kwh: Vec<f64>,
     /// Export tariff [€/kWh]
@@ -109,8 +109,8 @@ pub trait AssetInteraction: Send + Sync {
     ) -> Vec<Constraint>;
 
     /// Return the objective contribution from interaction variables.
-    /// `dt_h` is the slot duration in hours.
-    fn objective(&self, iv: &InteractionVars, dt_h: f64) -> Expression;
+    /// `dt_h[t]` is the slot duration in hours for slot `t`.
+    fn objective(&self, iv: &InteractionVars, dt_h: &[f64]) -> Expression;
 }
 
 /// Typed LP variable handles returned by each [`AssetInteraction`].
@@ -187,13 +187,13 @@ impl AssetInteraction for BatEvCoexistInteraction {
         cs
     }
 
-    fn objective(&self, iv: &InteractionVars, dt_h: f64) -> Expression {
+    fn objective(&self, iv: &InteractionVars, dt_h: &[f64]) -> Expression {
         let InteractionVars::BatEvCoexist { x_coexist } = iv else {
             return Expression::from(0.0);
         };
         let mut obj = Expression::from(0.0);
-        for x in x_coexist.iter().flatten() {
-            obj += (self.c_eur_kwh * dt_h) * *x;
+        for (t, x) in x_coexist.iter().enumerate().filter_map(|(t, x)| x.as_ref().map(|v| (t, v))) {
+            obj += (self.c_eur_kwh * dt_h[t]) * *x;
         }
         obj
     }
@@ -273,13 +273,13 @@ impl AssetInteraction for CtrlImportMalusInteraction {
         cs
     }
 
-    fn objective(&self, iv: &InteractionVars, dt_h: f64) -> Expression {
+    fn objective(&self, iv: &InteractionVars, dt_h: &[f64]) -> Expression {
         let InteractionVars::CtrlImportMalus { p_ctrl_imp } = iv else {
             return Expression::from(0.0);
         };
         let mut obj = Expression::from(0.0);
-        for &x in p_ctrl_imp {
-            obj += (self.c_eur_kwh * dt_h) * x;
+        for (t, &x) in p_ctrl_imp.iter().enumerate() {
+            obj += (self.c_eur_kwh * dt_h[t]) * x;
         }
         obj
     }
