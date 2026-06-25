@@ -131,11 +131,10 @@ pub(crate) fn solve_phase2(
     timeout_s: f64,
 ) -> Result<(SolveOutput, f64), Box<dyn std::error::Error>> {
     let n = inputs.n;
-    let dt_h = inputs.dt_h;
 
     let global = GlobalMilpInputs {
         n,
-        dt_h,
+        dt_h: inputs.dt_h.clone(),
         c_imp_eur_kwh: inputs.c_imp_eur_kwh.clone(),
         c_exp_eur_kwh: inputs.c_exp_eur_kwh.clone(),
         g_imp_kgco2_kwh: inputs.g_imp_kgco2_kwh.clone(),
@@ -234,14 +233,14 @@ pub(crate) fn solve_phase2(
     // Phase 1 cost cap expression, rebuilt using Phase 2 variables.
     let mut phase1_cap_expr = Expression::from(0.0);
     for t in 0..n {
-        phase1_cap_expr += (p1w.w_energy * dt_h * inputs.c_imp_eur_kwh[t]) * p_imp[t];
-        phase1_cap_expr += -(p1w.w_energy * dt_h * inputs.c_exp_eur_kwh[t]) * p_exp[t];
-        phase1_cap_expr += (p1w.w_ghg * dt_h * inputs.g_imp_kgco2_kwh[t]) * p_imp[t];
-        phase1_cap_expr += (p1w.w_grid * dt_h) * p_imp[t];
-        phase1_cap_expr += (p1w.w_grid * dt_h) * p_exp[t];
-        phase1_cap_expr += (p1w.w_import * dt_h) * p_imp[t];
-        phase1_cap_expr += (p1w.w_viol * inputs.pen_imp_eur_kwh * dt_h) * s_imp_viol[t];
-        phase1_cap_expr += (p1w.w_viol * inputs.pen_exp_eur_kwh * dt_h) * s_exp_viol[t];
+        phase1_cap_expr += (p1w.w_energy * inputs.dt_h[t] * inputs.c_imp_eur_kwh[t]) * p_imp[t];
+        phase1_cap_expr += -(p1w.w_energy * inputs.dt_h[t] * inputs.c_exp_eur_kwh[t]) * p_exp[t];
+        phase1_cap_expr += (p1w.w_ghg * inputs.dt_h[t] * inputs.g_imp_kgco2_kwh[t]) * p_imp[t];
+        phase1_cap_expr += (p1w.w_grid * inputs.dt_h[t]) * p_imp[t];
+        phase1_cap_expr += (p1w.w_grid * inputs.dt_h[t]) * p_exp[t];
+        phase1_cap_expr += (p1w.w_import * inputs.dt_h[t]) * p_imp[t];
+        phase1_cap_expr += (p1w.w_viol * inputs.pen_imp_eur_kwh * inputs.dt_h[t]) * s_imp_viol[t];
+        phase1_cap_expr += (p1w.w_viol * inputs.pen_exp_eur_kwh * inputs.dt_h[t]) * s_exp_viol[t];
     }
     // Phase 1 cost cap contributions: battery wear + EV service reward + heater m_low.
     // Matches Phase 1 objective exactly so the cap is meaningful.
@@ -249,20 +248,20 @@ pub(crate) fn solve_phase2(
         match ctx.asset_kind() {
             AssetKind::Battery => {
                 // Battery wear only (c_startup=0, c_ramp=0 in cost cap).
-                phase1_cap_expr += ctx.objective(&pool, n, dt_h, p1w.c_bat_wear_eur_kwh, 0.0, 0.0);
+                phase1_cap_expr += ctx.objective(&pool, n, &inputs.dt_h, p1w.c_bat_wear_eur_kwh, 0.0, 0.0);
             }
             AssetKind::Ev => {
                 // EV service reward only (c_startup=0 → Phase 1 mode in EV impl).
-                phase1_cap_expr += ctx.objective(&pool, n, dt_h, 0.0, 0.0, 0.0);
+                phase1_cap_expr += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
             }
             AssetKind::Heater => {
                 // m_low term: use Phase 1 convention (c_startup=0 → m_low in heater impl).
-                phase1_cap_expr += ctx.objective(&pool, n, dt_h, 0.0, 0.0, 0.0);
+                phase1_cap_expr += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);
             }
         }
     }
     for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
-        phase1_cap_expr += interaction.objective(iv, dt_h);
+        phase1_cap_expr += interaction.objective(iv, &inputs.dt_h);
     }
 
     // Phase 2 friction objective: startup/ramp/switching/tier; no economic terms.
@@ -275,7 +274,7 @@ pub(crate) fn solve_phase2(
                 friction_obj += ctx.objective(
                     &pool,
                     n,
-                    dt_h,
+                    &inputs.dt_h,
                     0.0,
                     p2w.c_bat_startup_eur,
                     p2w.c_bat_ramp_eur_kw,
@@ -286,7 +285,7 @@ pub(crate) fn solve_phase2(
                 friction_obj += ctx.objective(
                     &pool,
                     n,
-                    dt_h,
+                    &inputs.dt_h,
                     0.0,
                     p2w.c_ev_startup_eur,
                     p2w.c_ev_ramp_eur_kw,
@@ -295,7 +294,7 @@ pub(crate) fn solve_phase2(
             AssetKind::Heater => {
                 // c_startup=1.0 signals Phase 2; c_ramp carries w_tier_penalty_eur.
                 // self.lambda_sw_eur applied internally by HeaterMilpContext::objective.
-                friction_obj += ctx.objective(&pool, n, dt_h, 0.0, 1.0, p2w.w_tier_penalty_eur);
+                friction_obj += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 1.0, p2w.w_tier_penalty_eur);
             }
         }
     }

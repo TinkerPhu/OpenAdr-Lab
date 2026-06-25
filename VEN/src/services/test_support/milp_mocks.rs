@@ -72,7 +72,7 @@ impl AssetMilpContext for MockBatteryCtx {
         pool.bat = Some(self.ctx.declare_vars(n, c_startup_eur, c_ramp_eur_kw, vars));
     }
 
-    fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: f64) -> Vec<Constraint> {
+    fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
         BatteryMilpContext::constraints(&self.ctx, pool.bat.as_ref().unwrap(), n, dt_h)
     }
 
@@ -80,7 +80,7 @@ impl AssetMilpContext for MockBatteryCtx {
         &self,
         pool: &MilpVarPool,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
         c_wear_eur_kwh: f64,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
@@ -176,7 +176,7 @@ impl AssetMilpContext for MockEvCtx {
         pool.ev = Some(self.ctx.declare_vars(n, c_startup_eur, c_ramp_eur_kw, vars));
     }
 
-    fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: f64) -> Vec<Constraint> {
+    fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
         EvMilpContext::constraints(&self.ctx, pool.ev.as_ref().unwrap(), n, dt_h)
     }
 
@@ -184,7 +184,7 @@ impl AssetMilpContext for MockEvCtx {
         &self,
         pool: &MilpVarPool,
         n: usize,
-        _dt_h: f64,
+        _dt_h: &[f64],
         _c_wear_eur_kwh: f64,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
@@ -275,7 +275,7 @@ impl AssetMilpContext for MockHeaterCtx {
         pool.heater = Some(self.ctx.declare_vars(n, vars));
     }
 
-    fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: f64) -> Vec<Constraint> {
+    fn constraints(&self, pool: &MilpVarPool, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
         HeaterMilpContext::constraints(&self.ctx, pool.heater.as_ref().unwrap(), n, dt_h)
     }
 
@@ -283,7 +283,7 @@ impl AssetMilpContext for MockHeaterCtx {
         &self,
         pool: &MilpVarPool,
         n: usize,
-        _dt_h: f64,
+        dt_h: &[f64],
         _c_wear_eur_kwh: f64,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
@@ -291,7 +291,7 @@ impl AssetMilpContext for MockHeaterCtx {
         use crate::controller::milp_planner::asset_port::M_LOW_EUR_PER_KWH;
         let v = pool.heater.as_ref().unwrap();
         if c_startup_eur == 0.0 {
-            HeaterMilpContext::objective(&self.ctx, v, 0.0, M_LOW_EUR_PER_KWH, 0.0, n)
+            HeaterMilpContext::objective(&self.ctx, v, 0.0, M_LOW_EUR_PER_KWH, 0.0, n, dt_h)
         } else {
             HeaterMilpContext::objective(
                 &self.ctx,
@@ -300,6 +300,7 @@ impl AssetMilpContext for MockHeaterCtx {
                 0.0,
                 self.ctx.lambda_sw_eur,
                 n,
+                dt_h,
             )
         }
     }

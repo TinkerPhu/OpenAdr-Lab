@@ -281,7 +281,8 @@ impl BatteryMilpContext {
     }
 
     /// Generate all MILP constraints for this battery. Context-side canonical implementation.
-    pub fn constraints(&self, v: &BatteryMilpVars, n: usize, dt_h: f64) -> Vec<Constraint> {
+    /// `dt_h[t]` is the slot duration in hours for slot `t`.
+    pub fn constraints(&self, v: &BatteryMilpVars, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
         let mut cs: Vec<Constraint> = Vec::new();
         for t in 0..n {
             cs.push(constraint!(v.p_ch[t] <= self.p_ch_max_kw * v.u_bat[t]));
@@ -290,8 +291,8 @@ impl BatteryMilpContext {
             ));
             cs.push(constraint!(
                 v.e_bat[t + 1]
-                    == v.e_bat[t] + dt_h * self.eff_ch * v.p_ch[t]
-                        - dt_h * (1.0 / self.eff_dis) * v.p_dis[t]
+                    == v.e_bat[t] + dt_h[t] * self.eff_ch * v.p_ch[t]
+                        - dt_h[t] * (1.0 / self.eff_dis) * v.p_dis[t]
             ));
             if let Some(&z) = v.z_active.get(t) {
                 let big_m = self.p_ch_max_kw + self.p_dis_max_kw;
@@ -318,18 +319,19 @@ impl BatteryMilpContext {
     }
 
     /// Battery objective contribution. Associated function (no `self` needed — no ctx params used).
+    /// `dt_h[t]` is the slot duration in hours for slot `t`.
     pub fn objective(
         v: &BatteryMilpVars,
         c_wear_eur_kwh: f64,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
     ) -> Expression {
         let mut obj = Expression::from(0.0);
         for t in 0..n {
-            obj += (c_wear_eur_kwh * dt_h) * v.p_ch[t];
-            obj += (c_wear_eur_kwh * dt_h) * v.p_dis[t];
+            obj += (c_wear_eur_kwh * dt_h[t]) * v.p_ch[t];
+            obj += (c_wear_eur_kwh * dt_h[t]) * v.p_dis[t];
             if t >= 1 {
                 if let Some(&d) = v.delta_active.get(t - 1) {
                     obj += c_startup_eur * d;
@@ -406,7 +408,7 @@ impl crate::controller::milp_planner::AssetMilpContext for BatteryMilpContext {
         &self,
         pool: &crate::controller::milp_interactions::MilpVarPool,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
     ) -> Vec<Constraint> {
         BatteryMilpContext::constraints(self, pool.bat.as_ref().unwrap(), n, dt_h)
     }
@@ -415,7 +417,7 @@ impl crate::controller::milp_planner::AssetMilpContext for BatteryMilpContext {
         &self,
         pool: &crate::controller::milp_interactions::MilpVarPool,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
         c_wear_eur_kwh: f64,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
@@ -474,7 +476,7 @@ impl Battery {
         ctx: &BatteryMilpContext,
         v: &BatteryMilpVars,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
     ) -> Vec<Constraint> {
         ctx.constraints(v, n, dt_h)
     }
@@ -487,7 +489,7 @@ impl Battery {
         startup_eur: f64,
         ramp_eur_kw: f64,
         n: usize,
-        dt_h: f64,
+        dt_h: &[f64],
     ) -> Expression {
         BatteryMilpContext::objective(v, wear_eur_kwh, startup_eur, ramp_eur_kw, n, dt_h)
     }
@@ -734,11 +736,11 @@ mod milp_context_trait_tests {
     fn constraints_non_empty_for_n4() {
         let ctx = make_ctx();
         let n = 4;
-        let dt_h = 300.0 / 3600.0;
+        let dt_h = vec![300.0 / 3600.0; n];
         let mut vars = variables!();
         let mut pool = empty_pool(&mut vars, n);
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
-        let cs = AssetMilpContext::constraints(&ctx, &pool, n, dt_h);
+        let cs = AssetMilpContext::constraints(&ctx, &pool, n, &dt_h);
         assert!(
             cs.len() >= n * 3 + 1,
             "expected at least {} constraints, got {}",

@@ -6,7 +6,7 @@ use super::*;
 fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
     MilpInputs {
         n,
-        dt_h: 1.0,
+        dt_h: vec![1.0; n],
         c_imp_eur_kwh: vec![0.25; n],
         c_exp_eur_kwh: vec![0.08; n],
         g_imp_kgco2_kwh: vec![0.30; n],
@@ -100,7 +100,7 @@ fn ev_may_run_commits_when_core_reward_exceeds_cost() {
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
-    let ev_energy: f64 = out.p_ev_kw.iter().sum::<f64>() * inputs.dt_h;
+    let ev_energy: f64 = out.p_ev_kw.iter().zip(inputs.dt_h.iter()).map(|(p, &d)| p * d).sum();
     assert!(
         ev_energy >= inputs.e_ev_core_kwh - 0.1,
         "MayRun EV with sufficient reward should meet core {:.1} kWh, got {:.4}",
@@ -155,7 +155,7 @@ fn solve_ev_must_run_meets_core() {
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
-    let ev_energy: f64 = out.p_ev_kw.iter().sum::<f64>() * inputs.dt_h;
+    let ev_energy: f64 = out.p_ev_kw.iter().zip(inputs.dt_h.iter()).map(|(p, &d)| p * d).sum();
     assert!(
         (ev_energy - 4.0).abs() < 1e-2,
         "EV energy {ev_energy:.4} kWh should be ≈ 4.0 kWh"
@@ -188,11 +188,10 @@ fn solve_battery_arbitrage() {
     let out = result.unwrap();
 
     // Both charge patterns are degenerate-optimalat 0.40 EUR. Verify objective value only.
-    let dt_h = inputs.dt_h;
     let obj: f64 = (0..4)
         .map(|t| {
-            inputs.c_imp_eur_kwh[t] * out.p_imp_kw[t] * dt_h
-                - inputs.c_exp_eur_kwh[t] * out.p_exp_kw[t] * dt_h
+            inputs.c_imp_eur_kwh[t] * out.p_imp_kw[t] * inputs.dt_h[t]
+                - inputs.c_exp_eur_kwh[t] * out.p_exp_kw[t] * inputs.dt_h[t]
         })
         .sum();
     assert!(

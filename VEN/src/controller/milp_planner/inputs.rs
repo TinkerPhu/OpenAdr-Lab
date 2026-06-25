@@ -46,7 +46,8 @@ pub(crate) fn build_milp_inputs(
 ) -> MilpInputs {
     let step_s = planner.plan_step_s;
     let n = ((planner.plan_horizon_h as f64 * 3600.0) / step_s as f64) as usize;
-    let dt_h = step_s as f64 / 3600.0;
+    let step_h = step_s as f64 / 3600.0;
+    let dt_h: Vec<f64> = vec![step_h; n];
 
     // ── Per-step grid arrays ──────────────────────────────────────────────────
     let cont_imp = capacity.import_limit_kw.unwrap_or(phys_imp);
@@ -187,7 +188,7 @@ pub(crate) fn build_milp_inputs(
             if offset_s < 0 {
                 continue;
             }
-            let idx = (offset_s as f64 / (dt_h * 3600.0)).floor() as usize;
+            let idx = (offset_s as f64 / (step_h * 3600.0)).floor() as usize;
             if idx < n {
                 p_base[idx] += slot.add_kw;
             }
@@ -197,13 +198,13 @@ pub(crate) fn build_milp_inputs(
     // ── Shiftable loads → ShiftableLoadMilp ──────────────────────────────────
     let milp_loads: Vec<ShiftableLoadMilp> = shiftable_loads.iter().filter_map(|sl| {
         let dur_s = (sl.duration_min as f64) * 60.0;
-        let duration_slots = (dur_s / (dt_h * 3600.0)).ceil() as usize;
+        let duration_slots = (dur_s / (step_h * 3600.0)).ceil() as usize;
         if duration_slots == 0 { return None; }
 
         let window_start_s = (sl.earliest_start - now).num_seconds().max(0) as f64;
         let window_end_s = (sl.latest_end - now).num_seconds().max(0) as f64;
 
-        let first_slot = (window_start_s / (dt_h * 3600.0)).floor() as usize;
+        let first_slot = (window_start_s / (step_h * 3600.0)).floor() as usize;
         // Last valid start: load must finish before latest_end
         let last_valid_s = window_end_s - dur_s;
         if last_valid_s < 0.0 {
@@ -215,7 +216,7 @@ pub(crate) fn build_milp_inputs(
             );
             return None;
         }
-        let last_slot = ((last_valid_s / (dt_h * 3600.0)).floor() as usize).min(n.saturating_sub(duration_slots));
+        let last_slot = ((last_valid_s / (step_h * 3600.0)).floor() as usize).min(n.saturating_sub(duration_slots));
 
         let valid_start_slots: Vec<usize> = (first_slot..=last_slot).filter(|&s| s + duration_slots <= n).collect();
         if valid_start_slots.is_empty() {
