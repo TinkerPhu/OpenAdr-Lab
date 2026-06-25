@@ -33,6 +33,7 @@ impl MockBatteryCtx {
                 p_dis_max_kw: p_max_kw,
                 eff_ch: eff,
                 eff_dis: eff,
+                c_terminal_eur_kwh: 0.0,
             },
         }
     }
@@ -226,6 +227,7 @@ impl MockHeaterCtx {
                 lambda_sw_eur: 0.0,
                 initial_z_mid: 0.0,
                 initial_z_full: 0.0,
+                c_terminal_eur_kwh: 0.0,
             },
         }
     }
@@ -258,6 +260,7 @@ impl AssetMilpContext for MockHeaterCtx {
             lambda_sw_eur: self.ctx.lambda_sw_eur,
             initial_z_mid: self.ctx.initial_z_mid,
             initial_z_full: self.ctx.initial_z_full,
+            c_terminal_eur_kwh: self.ctx.c_terminal_eur_kwh,
         })
     }
 

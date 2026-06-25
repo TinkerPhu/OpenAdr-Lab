@@ -363,6 +363,7 @@ fn make_profile_n48() -> Profile {
                 k_loss_kw_per_c: 0.1,
                 draw_kw: 0.0,
                 switching_penalty_eur: 0.01,
+                c_terminal_eur_kwh: None,
             }),
             AssetProfile::Pv(PvConfig {
                 id: "pv".into(),

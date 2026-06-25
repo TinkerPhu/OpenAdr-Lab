@@ -30,6 +30,9 @@ pub struct BatteryMilpContext {
     pub eff_ch: f64,
     /// One-way discharge efficiency = √(round_trip_efficiency)
     pub eff_dis: f64,
+    /// Terminal energy reward [EUR/kWh stored at horizon end]. Auto-computed:
+    /// mean(c_imp) × round_trip_efficiency. 0.0 disables.
+    pub c_terminal_eur_kwh: f64,
 }
 
 /// Typed LP variable handles for one battery in the MILP model.
@@ -235,6 +238,9 @@ pub struct HeaterMilpContext {
     pub initial_z_mid: f64,
     /// Initial heater full-power binary (1.0 if heater was at full power last tick).
     pub initial_z_full: f64,
+    /// Terminal energy reward [EUR/kWh stored at horizon end]. Auto-computed:
+    /// mean(c_imp) + c_ctrl_imp_malus. 0.0 disables.
+    pub c_terminal_eur_kwh: f64,
 }
 
 /// Typed LP variable handles for one heater in the MILP model.
@@ -290,6 +296,7 @@ impl HeaterMilpContext {
         thermal_mass_kwh_per_c: f64,
         q_dem_kw: f64,
         lambda_sw: f64,
+        c_terminal_eur_kwh: f64,
         n: usize,
         step_s: u64,
         now: DateTime<Utc>,
@@ -325,6 +332,7 @@ impl HeaterMilpContext {
                 lambda_sw_eur: lambda_sw,
                 initial_z_mid,
                 initial_z_full,
+                c_terminal_eur_kwh,
             }
         } else {
             Self {
@@ -339,6 +347,7 @@ impl HeaterMilpContext {
                 lambda_sw_eur: lambda_sw,
                 initial_z_mid,
                 initial_z_full,
+                c_terminal_eur_kwh,
             }
         }
     }
@@ -397,6 +406,8 @@ pub struct HeaterScalars {
     pub initial_z_mid: f64,
     /// 1.0 if heater was at full power on the last real tick; 0.0 otherwise.
     pub initial_z_full: f64,
+    /// Terminal energy reward [EUR/kWh]. Mirrors HeaterMilpContext field.
+    pub c_terminal_eur_kwh: f64,
 }
 
 /// Unified asset MILP parameters — one variant per MILP-capable asset type.

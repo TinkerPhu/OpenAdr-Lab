@@ -352,13 +352,13 @@ impl BatteryMilpContext {
     }
 
     /// Construct from a live `AssetState` and the current sim `Battery` config.
-    pub fn from_state(state: &super::AssetState, cfg: &Battery) -> Self {
+    pub fn from_state(state: &super::AssetState, cfg: &Battery, c_terminal_eur_kwh: f64) -> Self {
         let live_soc = if let super::AssetState::Battery(s) = state {
             s.soc
         } else {
             0.5
         };
-        cfg.build_milp_context(live_soc)
+        cfg.build_milp_context(live_soc, c_terminal_eur_kwh)
     }
 }
 
@@ -420,20 +420,27 @@ impl crate::controller::milp_planner::AssetMilpContext for BatteryMilpContext {
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
     ) -> Expression {
-        BatteryMilpContext::objective(
-            pool.bat.as_ref().unwrap(),
+        let v = pool.bat.as_ref().unwrap();
+        let mut obj = BatteryMilpContext::objective(
+            v,
             c_wear_eur_kwh,
             c_startup_eur,
             c_ramp_eur_kw,
             n,
             dt_h,
-        )
+        );
+        // Terminal energy reward in Phase 1 only (c_startup_eur == 0.0).
+        // e_bat[n] is the SoC trajectory end-state (index n+1 of the n+1 vector).
+        if c_startup_eur == 0.0 && self.c_terminal_eur_kwh > 0.0 && n > 0 {
+            obj += -self.c_terminal_eur_kwh * v.e_bat[n];
+        }
+        obj
     }
 }
 
 impl Battery {
     /// Build the MILP context from the live SoC (not the profile initial_soc).
-    pub fn build_milp_context(&self, live_soc: f64) -> BatteryMilpContext {
+    pub fn build_milp_context(&self, live_soc: f64, c_terminal_eur_kwh: f64) -> BatteryMilpContext {
         let cap = self.capacity_kwh;
         let eff = self.round_trip_efficiency.sqrt();
         BatteryMilpContext {
@@ -445,6 +452,7 @@ impl Battery {
             p_dis_max_kw: self.max_discharge_kw,
             eff_ch: eff,
             eff_dis: eff,
+            c_terminal_eur_kwh,
         }
     }
 
@@ -657,6 +665,7 @@ mod milp_context_trait_tests {
             p_dis_max_kw: 5.0,
             eff_ch: 0.9746794_f64.sqrt(),
             eff_dis: 0.9746794_f64.sqrt(),
+            c_terminal_eur_kwh: 0.0,
         }
     }
 

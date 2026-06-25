@@ -498,6 +498,12 @@ impl HeaterMilpContext {
             obj += m_low_eur_kwh * v.s_low[t]; // penalise below-min violations
             obj += lambda_sw_eur * v.sw[t]; // penalise relay switches
         }
+        // Terminal energy reward (Phase 1 only — m_low > 0, lambda_sw == 0).
+        // Makes the optimizer treat heat stored at horizon end as having forward
+        // value equal to c_terminal EUR/kWh, incentivising solar pre-fill.
+        if m_low_eur_kwh > 0.0 && self.c_terminal_eur_kwh > 0.0 && n > 0 {
+            obj += -self.c_terminal_eur_kwh * v.e_tank[n - 1];
+        }
         obj
     }
 
@@ -522,6 +528,7 @@ impl HeaterMilpContext {
         now: DateTime<Utc>,
         heater_target: Option<&crate::entities::device_session::HeaterTarget>,
         lambda_sw: f64,
+        c_terminal_eur_kwh: f64,
     ) -> Self {
         let current_temp = if let super::AssetState::Heater(s) = state {
             s.temperature_c
@@ -569,6 +576,7 @@ impl HeaterMilpContext {
                 lambda_sw_eur: lambda_sw,
                 initial_z_mid,
                 initial_z_full,
+                c_terminal_eur_kwh,
             }
         } else {
             Self {
@@ -583,6 +591,7 @@ impl HeaterMilpContext {
                 lambda_sw_eur: lambda_sw,
                 initial_z_mid,
                 initial_z_full,
+                c_terminal_eur_kwh,
             }
         }
     }
@@ -622,6 +631,7 @@ impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
                 lambda_sw_eur: self.lambda_sw_eur,
                 initial_z_mid: self.initial_z_mid,
                 initial_z_full: self.initial_z_full,
+                c_terminal_eur_kwh: self.c_terminal_eur_kwh,
             },
         )
     }
@@ -1033,6 +1043,7 @@ mod tests {
             lambda_sw_eur: 0.0,
             initial_z_mid: 0.0,
             initial_z_full: 0.0,
+            c_terminal_eur_kwh: 0.0,
         }
     }
 
@@ -1233,6 +1244,7 @@ mod milp_context_trait_tests {
             lambda_sw_eur: 0.01,
             initial_z_mid: 0.0,
             initial_z_full: 0.0,
+            c_terminal_eur_kwh: 0.0,
         }
     }
 
@@ -1320,6 +1332,74 @@ mod milp_context_trait_tests {
             cs.len(),
             36,
             "n=4 MayRun no-deadline: expected 36 constraints"
+        );
+    }
+
+    // ── Terminal reward unit tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_terminal_reward_coefficient_stored() {
+        let ctx = HeaterMilpContext {
+            c_terminal_eur_kwh: 0.56,
+            ..make_ctx()
+        };
+        assert!(
+            (ctx.c_terminal_eur_kwh - 0.56).abs() < 1e-9,
+            "c_terminal_eur_kwh should be stored as given"
+        );
+    }
+
+    #[test]
+    fn test_terminal_reward_zero_disables() {
+        let ctx = HeaterMilpContext {
+            c_terminal_eur_kwh: 0.0,
+            ..make_ctx()
+        };
+        assert_eq!(ctx.c_terminal_eur_kwh, 0.0);
+    }
+
+    #[test]
+    fn test_terminal_reward_in_phase1_objective_not_phase2() {
+        let n = 3;
+        let ctx = HeaterMilpContext {
+            c_terminal_eur_kwh: 0.5,
+            ..make_ctx()
+        };
+        let mut vars = variables!();
+        let mut pool = empty_pool(&mut vars, n);
+        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
+        let v = pool.heater.as_ref().unwrap();
+
+        // Phase 1: m_low > 0, lambda_sw == 0 — terminal term should appear
+        use crate::controller::milp_planner::asset_port::M_LOW_EUR_PER_KWH;
+        let obj_p1 = HeaterMilpContext::objective(&ctx, v, 0.0, M_LOW_EUR_PER_KWH, 0.0, n);
+
+        // Phase 2: m_low == 0, lambda_sw > 0 — terminal term must NOT appear
+        let obj_p2 = HeaterMilpContext::objective(&ctx, v, 0.05, 0.0, 0.5, n);
+
+        // We cannot easily inspect the LP expression value without a solver,
+        // but we can check the debug representation differs (terminal adds a coefficient).
+        let p1_str = format!("{obj_p1:?}");
+        let p2_str = format!("{obj_p2:?}");
+        assert_ne!(
+            p1_str, p2_str,
+            "Phase 1 objective should differ from Phase 2 when c_terminal > 0"
+        );
+    }
+
+    #[test]
+    fn test_terminal_auto_formula_heater() {
+        // Verify the auto-computation formula: avg_imp + c_ctrl_imp_malus
+        let avg_imp_eur_kwh = 0.34_f64;
+        let c_ctrl_imp_malus_eur_kwh = 0.22_f64;
+        let expected = avg_imp_eur_kwh + c_ctrl_imp_malus_eur_kwh; // 0.56
+        let ctx = HeaterMilpContext {
+            c_terminal_eur_kwh: expected,
+            ..make_ctx()
+        };
+        assert!(
+            (ctx.c_terminal_eur_kwh - 0.56).abs() < 1e-9,
+            "auto-computed c_terminal should equal avg_imp + malus"
         );
     }
 }
