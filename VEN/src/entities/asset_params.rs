@@ -70,6 +70,10 @@ pub struct HeaterParams {
     pub k_loss_kw_per_c: f64,
     pub draw_kw: f64,
     pub switching_penalty_eur: f64,
+    /// Override for auto-computed terminal energy reward [EUR/kWh].
+    /// None → auto-compute from avg import tariff + c_ctrl_imp_malus.
+    /// Some(0.0) → disabled. Some(x) → fixed at x EUR/kWh.
+    pub c_terminal_eur_kwh: Option<f64>,
 }
 
 impl Default for HeaterParams {
@@ -85,6 +89,7 @@ impl Default for HeaterParams {
             k_loss_kw_per_c: 0.1,
             draw_kw: 0.0,
             switching_penalty_eur: 0.01,
+            c_terminal_eur_kwh: None,
         }
     }
 }

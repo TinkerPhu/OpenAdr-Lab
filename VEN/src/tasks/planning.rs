@@ -136,11 +136,57 @@ pub(crate) fn spawn_planning(
                     _ => None,
                 })
                 .unwrap_or(0.0);
+
+            // Average import tariff over the planning horizon — used to auto-compute
+            // terminal energy reward coefficients for storage assets.
+            let avg_imp_eur_kwh = {
+                let total: f64 = (0..n_slots)
+                    .map(|t| {
+                        let slot_t =
+                            now + chrono::Duration::seconds(t as i64 * step_s as i64);
+                        tariff_ts
+                            .import_eur_kwh
+                            .interpolate_at(slot_t)
+                            .unwrap_or(0.25)
+                    })
+                    .sum();
+                if n_slots > 0 { total / n_slots as f64 } else { 0.25 }
+            };
+
+            // Resolve c_terminal_eur_kwh per asset type. Battery and heater get
+            // different formulas; EV gets 0.0 (deadline constraint handles incentive).
+            // Profile override (Some(x)) takes precedence over auto-computed value.
+            let heater_c_terminal_eur_kwh = asset_params
+                .iter()
+                .find_map(|p| match p {
+                    AssetParams::Heater(h) => Some(h.c_terminal_eur_kwh.unwrap_or_else(|| {
+                        avg_imp_eur_kwh + planner.c_ctrl_imp_malus_eur_kwh
+                    })),
+                    _ => None,
+                })
+                .unwrap_or(0.0);
+            let battery_c_terminal_eur_kwh = asset_params
+                .iter()
+                .find_map(|p| match p {
+                    AssetParams::Battery(b) => {
+                        Some(avg_imp_eur_kwh * b.round_trip_efficiency)
+                    }
+                    _ => None,
+                })
+                .unwrap_or(0.0);
+
             let asset_contexts: Vec<
                 Box<dyn controller::milp_planner::asset_port::AssetMilpContext>,
             > = sim_snap
                 .iter_assets()
                 .filter_map(|(entry, cfg)| {
+                    // Use per-asset c_terminal: heater and battery get their own coefficient;
+                    // EV gets 0.0 (deadline constraint handles the charging incentive).
+                    let c_terminal = match cfg {
+                        crate::assets::AssetConfig::Heater(_) => heater_c_terminal_eur_kwh,
+                        crate::assets::AssetConfig::Battery(_) => battery_c_terminal_eur_kwh,
+                        _ => 0.0,
+                    };
                     cfg.build_milp_context(
                         &entry.state,
                         n_slots,
@@ -158,6 +204,7 @@ pub(crate) fn spawn_planning(
                         planner.v_ev_extra_eur_kwh,
                         planner.v_ev_core_eur_kwh,
                         lambda_sw,
+                        c_terminal,
                     )
                 })
                 .collect();
