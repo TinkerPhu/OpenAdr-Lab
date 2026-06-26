@@ -4262,6 +4262,17 @@ Prevents near-future heater relay chattering by pinning tier binary variables to
 
 **Issue encountered:** Three `HeaterMilpContext` struct literals in test support files (`milp_mocks.rs`, `tests/mod.rs`, `tests/solver.rs`) were missing the new `anchored_kw` field — compiler caught them all. Added `anchored_kw: vec![]` (empty = no anchoring).
 
+**Review fixes (commit b29e491):**
+
+After completing Step 5, a review pass identified 4 bugs:
+
+1. **Silent anchor drop** — when `kw_to_tier_pair` returned `(None, None)` for a `Some(kw)` anchor (e.g., config changed tier values), the anchor was silently dropped. Fixed: `tracing::warn!` with slot/kw/tier context.
+2. **4 `todo!()` solver tests** — `solve_heater_dynamics_respected`, `solve_heater_must_run_meets_e_target`, `solve_heater_soft_low_positive_when_below_min`, `solve_heater_upper_bound_not_exceeded` were stubs marked `#[ignore]` despite being tagged "implemented in Step 5". Fully implemented.
+3. **Dead `from_live` methods** — `EvMilpContext::from_live` and `HeaterMilpContext::from_live` were public, never called, and hardcoded `anchored_kw: vec![None; n]`, bypassing the anchor entirely. Removed.
+4. **Unused `step_s` parameter** — `build_heater_anchor` accepted `step_s: u64` but discarded it with `let _ = step_s`. Removed from signature and all callers.
+
+417 tests pass after fixes.
+
 ### Pending (Step 6)
 
 - **Step 6** — Gate switch-count guard: extend `evaluate_acceptance_gate` to reject new plans that increase switch count beyond a threshold. Independent of Steps 1–5.
