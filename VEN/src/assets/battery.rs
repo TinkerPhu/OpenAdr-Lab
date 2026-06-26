@@ -284,15 +284,15 @@ impl BatteryMilpContext {
     /// `dt_h[t]` is the slot duration in hours for slot `t`.
     pub fn constraints(&self, v: &BatteryMilpVars, n: usize, dt_h: &[f64]) -> Vec<Constraint> {
         let mut cs: Vec<Constraint> = Vec::new();
-        for t in 0..n {
+        for (t, &dt) in dt_h.iter().enumerate().take(n) {
             cs.push(constraint!(v.p_ch[t] <= self.p_ch_max_kw * v.u_bat[t]));
             cs.push(constraint!(
                 v.p_dis[t] <= self.p_dis_max_kw * (1.0 - v.u_bat[t])
             ));
             cs.push(constraint!(
                 v.e_bat[t + 1]
-                    == v.e_bat[t] + dt_h[t] * self.eff_ch * v.p_ch[t]
-                        - dt_h[t] * (1.0 / self.eff_dis) * v.p_dis[t]
+                    == v.e_bat[t] + dt * self.eff_ch * v.p_ch[t]
+                        - dt * (1.0 / self.eff_dis) * v.p_dis[t]
             ));
             if let Some(&z) = v.z_active.get(t) {
                 let big_m = self.p_ch_max_kw + self.p_dis_max_kw;
@@ -329,9 +329,9 @@ impl BatteryMilpContext {
         dt_h: &[f64],
     ) -> Expression {
         let mut obj = Expression::from(0.0);
-        for t in 0..n {
-            obj += (c_wear_eur_kwh * dt_h[t]) * v.p_ch[t];
-            obj += (c_wear_eur_kwh * dt_h[t]) * v.p_dis[t];
+        for (t, &dt) in dt_h.iter().enumerate().take(n) {
+            obj += (c_wear_eur_kwh * dt) * v.p_ch[t];
+            obj += (c_wear_eur_kwh * dt) * v.p_dis[t];
             if t >= 1 {
                 if let Some(&d) = v.delta_active.get(t - 1) {
                     obj += c_startup_eur * d;
@@ -423,14 +423,8 @@ impl crate::controller::milp_planner::AssetMilpContext for BatteryMilpContext {
         c_ramp_eur_kw: f64,
     ) -> Expression {
         let v = pool.bat.as_ref().unwrap();
-        let mut obj = BatteryMilpContext::objective(
-            v,
-            c_wear_eur_kwh,
-            c_startup_eur,
-            c_ramp_eur_kw,
-            n,
-            dt_h,
-        );
+        let mut obj =
+            BatteryMilpContext::objective(v, c_wear_eur_kwh, c_startup_eur, c_ramp_eur_kw, n, dt_h);
         // Terminal energy reward in Phase 1 only (c_startup_eur == 0.0).
         // e_bat[n] is the SoC trajectory end-state (index n+1 of the n+1 vector).
         if c_startup_eur == 0.0 && self.c_terminal_eur_kwh > 0.0 && n > 0 {

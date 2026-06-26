@@ -44,6 +44,12 @@ pub(crate) fn spawn_planning(
             let trigger = wake_trigger.clone();
             let trigger_reason = format!("{:?}", trigger);
 
+            // Hard triggers (user action, state change) must not be constrained by the anchor
+            // from a previous Periodic cycle — clear it so the next solve is fully free.
+            if !matches!(trigger, PlanTrigger::Periodic) {
+                state.set_anchor_until(None).await;
+            }
+
             info!(trigger = %trigger_reason, "planner loop: starting plan cycle");
 
             let tariff_ts =
@@ -137,20 +143,35 @@ pub(crate) fn spawn_planning(
                 })
                 .unwrap_or(0.0);
 
+            // Read current plan and anchor_until before the blocking solve so the heater
+            // tier binaries are pinned to the last adopted plan within the anchor window.
+            let anchor_until = state.anchor_until().await;
+            let current_plan = state.active_plan().await;
+            let heater_anchor = crate::services::planning::build_heater_anchor(
+                current_plan.as_ref(),
+                anchor_until,
+                now,
+                step_s,
+                n_slots,
+            );
+
             // Average import tariff over the planning horizon — used to auto-compute
             // terminal energy reward coefficients for storage assets.
             let avg_imp_eur_kwh = {
                 let total: f64 = (0..n_slots)
                     .map(|t| {
-                        let slot_t =
-                            now + chrono::Duration::seconds(t as i64 * step_s as i64);
+                        let slot_t = now + chrono::Duration::seconds(t as i64 * step_s as i64);
                         tariff_ts
                             .import_eur_kwh
                             .interpolate_at(slot_t)
                             .unwrap_or(0.25)
                     })
                     .sum();
-                if n_slots > 0 { total / n_slots as f64 } else { 0.25 }
+                if n_slots > 0 {
+                    total / n_slots as f64
+                } else {
+                    0.25
+                }
             };
 
             // Resolve c_terminal_eur_kwh per asset type. Battery and heater get
@@ -159,18 +180,20 @@ pub(crate) fn spawn_planning(
             let heater_c_terminal_eur_kwh = asset_params
                 .iter()
                 .find_map(|p| match p {
-                    AssetParams::Heater(h) => Some(h.c_terminal_eur_kwh.unwrap_or_else(|| {
-                        avg_imp_eur_kwh + planner.c_ctrl_imp_malus_eur_kwh
-                    })),
+                    AssetParams::Heater(h) => Some(
+                        h.c_terminal_eur_kwh
+                            .unwrap_or(avg_imp_eur_kwh + planner.c_ctrl_imp_malus_eur_kwh),
+                    ),
                     _ => None,
                 })
                 .unwrap_or(0.0);
             let battery_c_terminal_eur_kwh = asset_params
                 .iter()
                 .find_map(|p| match p {
-                    AssetParams::Battery(b) => Some(b.c_terminal_eur_kwh.unwrap_or_else(|| {
-                        avg_imp_eur_kwh * b.round_trip_efficiency
-                    })),
+                    AssetParams::Battery(b) => Some(
+                        b.c_terminal_eur_kwh
+                            .unwrap_or(avg_imp_eur_kwh * b.round_trip_efficiency),
+                    ),
                     _ => None,
                 })
                 .unwrap_or(0.0);
@@ -205,6 +228,11 @@ pub(crate) fn spawn_planning(
                         planner.v_ev_core_eur_kwh,
                         lambda_sw,
                         c_terminal,
+                        if matches!(cfg, crate::assets::AssetConfig::Heater(_)) {
+                            heater_anchor.clone()
+                        } else {
+                            vec![]
+                        },
                     )
                 })
                 .collect();

@@ -241,6 +241,10 @@ pub struct HeaterMilpContext {
     /// Terminal energy reward [EUR/kWh stored at horizon end]. Auto-computed:
     /// mean(c_imp) + c_ctrl_imp_malus. 0.0 disables.
     pub c_terminal_eur_kwh: f64,
+    /// Per-slot heater power anchor [kW]. Some(kw) pins the tier binaries for that slot;
+    /// None leaves them free. Populated from the previous plan after adoption to prevent
+    /// near-future chattering. vec![] or vec![None; n] = no pinning.
+    pub anchored_kw: Vec<Option<f64>>,
 }
 
 /// Typed LP variable handles for one heater in the MILP model.
@@ -333,6 +337,7 @@ impl HeaterMilpContext {
                 initial_z_mid,
                 initial_z_full,
                 c_terminal_eur_kwh,
+                anchored_kw: vec![None; n],
             }
         } else {
             Self {
@@ -348,6 +353,7 @@ impl HeaterMilpContext {
                 initial_z_mid,
                 initial_z_full,
                 c_terminal_eur_kwh,
+                anchored_kw: vec![None; n],
             }
         }
     }
@@ -495,7 +501,12 @@ pub fn battery_future_state(e_kwh: f64, capacity_kwh: f64) -> HashMap<String, f6
 /// SoC trajectory from MILP power schedule over `n+1` steps.
 /// `dt_h[t]` is the slot duration in hours for slot `t`.
 /// Mirrors `EvCharger::soc_trajectory()`.
-pub fn ev_soc_trajectory(p_ev_kw: &[f64], soc_init: f64, battery_kwh: f64, dt_h: &[f64]) -> Vec<f64> {
+pub fn ev_soc_trajectory(
+    p_ev_kw: &[f64],
+    soc_init: f64,
+    battery_kwh: f64,
+    dt_h: &[f64],
+) -> Vec<f64> {
     let n = p_ev_kw.len();
     let mut traj = Vec::with_capacity(n + 1);
     traj.push(soc_init.clamp(0.0, 1.0));
