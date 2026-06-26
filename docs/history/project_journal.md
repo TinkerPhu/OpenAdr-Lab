@@ -4273,9 +4273,20 @@ After completing Step 5, a review pass identified 4 bugs:
 
 417 tests pass after fixes.
 
-### Pending (Step 6)
+### Step 6 — Gate switch-count guard
 
-- **Step 6** — Gate switch-count guard: extend `evaluate_acceptance_gate` to reject new plans that increase switch count beyond a threshold. Independent of Steps 1–5.
+Periodic replans that introduce more heater relay switches than the current plan must compensate for those extra operations before being adopted.
+
+**What was done:**
+
+- `count_heater_switches(plan, now)` — counts tier transitions > 0.1 kW in future slots (`start >= now`). Past slots excluded so it reflects the remaining switching burden from the current moment.
+- `evaluate_acceptance_gate` — new `gate_switch_penalty_eur: f64` parameter. After computing `improvement`, a surcharge is computed: `extra_switches × penalty`. The gate adopts iff `improvement > effective_threshold + switch_surcharge`. Fully decayed plans and hard triggers still bypass (unchanged). Early-return short-circuit updated: both threshold AND penalty must be 0.0 to fast-path accept (previously only threshold was checked).
+- `adopt_if_warranted` — carries `gate_switch_penalty_eur` from `PlannerParams`.
+- `PlannerParams` / `PlannerConfig` / `profile.rs` — new field `gate_switch_penalty_eur: f64`, `#[serde(default)]` = 0.0 (backward-compatible).
+- `main.rs` — threads field through `build_domain_params`.
+- `ven-2.yaml` — `gate_switch_penalty_eur: 0.50` (= effective switching cost: `lambda_sw × dt_h = 3.0 × 1/6 h`).
+
+**Tests:** 7 new tests — 3 for `count_heater_switches` (empty/one-block/filters-past), 5 for gate surcharge (reject-below / accept-above / zero-disabled / hard-trigger / decayed). All 424 tests pass.
 
 ### Key Learnings
 
