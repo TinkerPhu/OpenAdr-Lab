@@ -21,7 +21,7 @@ interface AssetCellProps {
   timePoints: AssetTimelinePoint[];
   /** Epoch ms — shared across all cells from the page for a consistent NOW line. */
   nowMs: number;
-  /** Whether this cell's time window is expanded to 24h forward. */
+  /** Whether this cell's time window is expanded to 48h forward. */
   extended: boolean;
   pinned: boolean;
   onTogglePin: (cellId: string) => void;
@@ -50,7 +50,7 @@ export function AssetCell({
 
   // Display window: each cell clips its chart domain independently.
   // The shared useAllTimelines query on the page always fetches the widest
-  // window needed (24h if any cell is expanded), so data is always available.
+  // window needed (48h if any cell is expanded), so data is always available.
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
 
   return (
