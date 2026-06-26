@@ -4241,15 +4241,36 @@ Key detail: heater switching penalty now scales by `dt_h[t]` (`obj += lambda_sw_
 
 All 398 tests pass. 13 files changed.
 
-### Pending (Steps 5–6)
+### Step 5 — Block commitment anchor
 
-- **Step 5** — Block commitment anchor: add `anchor_until` to `HemsState`, prevent near-future relay flip for the first `plan_step_s × N` slots after commitment.
-- **Step 6** — Gate switch-count guard: extend `evaluate_acceptance_gate` to reject new plans that increase switch count beyond a threshold.
+Prevents near-future heater relay chattering by pinning tier binary variables to the last adopted plan's values within an anchor window.
 
-Both steps are independent of each other and of Steps 1–4.
+**What was done:**
+
+- `HemsState.anchor_until: Option<DateTime<Utc>>` — stores the end of the current heater block (set after each plan adoption, cleared on hard triggers).
+- `heater_block_end(plan, now)` — finds the end of the consecutive heater-power block that contains `now` (consecutive meaning same kW within 0.1 tolerance).
+- `build_heater_anchor(plan, anchor_until, now, step_s, n_slots)` — builds `Vec<Option<f64>>` from the current plan: `Some(kw)` for future slots before `anchor_until`, `None` for slots after.
+- `kw_to_tier_pair(kw, p_mid, p_full)` — maps a kW value to fixed `(z_mid, z_full)` binary pair using 0.1 kW tolerance (off=0/0, mid=1/0, full=0/1, other=None/None).
+- `HeaterMilpContext.anchored_kw: Vec<Option<f64>>` — threaded through `from_state` → `build_milp_context` → `declare_vars`; pinned slots get fixed-bound variables `min(v).max(v)`.
+- `tasks/planning.rs`: reads `anchor_until` and `current_plan` before the blocking solve, builds `heater_anchor`, and passes it only for heater assets.
+
+**Key design decision:** hard triggers (non-Periodic) clear `anchor_until` before solving so user-initiated replans are always fully free.
+
+**Tests added:** `test_heater_block_end_on_block`, `test_heater_block_end_off_block`, `test_heater_block_end_no_future_slots`, `test_build_heater_anchor_pins_within_window`, `test_build_heater_anchor_no_plan_returns_all_none`, `test_build_heater_anchor_no_until_returns_all_none`, `test_anchored_vars_produce_fixed_bounds` (HiGHS LP), `test_kw_to_tier_pair_*`.
+
+413 tests pass. 15 files changed.
+
+**Issue encountered:** Three `HeaterMilpContext` struct literals in test support files (`milp_mocks.rs`, `tests/mod.rs`, `tests/solver.rs`) were missing the new `anchored_kw` field — compiler caught them all. Added `anchored_kw: vec![]` (empty = no anchoring).
+
+### Pending (Step 6)
+
+- **Step 6** — Gate switch-count guard: extend `evaluate_acceptance_gate` to reject new plans that increase switch count beyond a threshold. Independent of Steps 1–5.
 
 ### Key Learnings
 
 - When refactoring `dt_h: f64 → &[f64]` across a MILP module, unit tests in `assets/*.rs` that call `ctx.constraints(&v, n, 300.0/3600.0)` must be updated — the methods now expect `&vec![dt; n]`. The compiler catches all of them.
 - Heater switching penalty should scale by `dt_h[t]` even with uniform steps (correct form for the future 3-tier case). With uniform steps the coefficient is the same as before per switch event × dt_h, but semantically clearer.
 - `vec!` inside a function arg: `&vec![x; n]` works but triggers `clippy::useless_vec` in some versions. Could also use `std::iter::repeat(x).take(n).collect::<Vec<_>>()` if needed.
+- `for t in 0..n { dt_h[t] }` triggers `clippy::needless_range_loop` (-D warnings). Fix: `for (t, &dt) in dt_h.iter().enumerate().take(n)`. Rename `dt_h[t]` → `dt` inside the body.
+- Array syntax `&[val; n]` where `n` is a non-const `let` binding is a compile error (E0435). Use `let arr: Vec<f64> = vec![val; n]; &arr` instead.
+- `unwrap_or_else(|| f64_expr)` triggers `clippy::unnecessary_lazy_evaluations` when the expression is always-cheap to evaluate. Use `unwrap_or(expr)` for Copy types.
