@@ -347,30 +347,39 @@ impl HeaterMilpContext {
     pub fn declare_vars(&self, n: usize, vars: &mut ProblemVariables) -> HeaterMilpVars {
         let must_not = self.mode == HeaterMilpMode::MustNotRun;
 
-        let z_heat_mid = (0..n)
-            .map(|t| {
-                let (fixed_mid, _) = match self.anchored_kw.get(t).copied().flatten() {
-                    Some(kw) => kw_to_tier_pair(kw, self.p_mid_kw, self.p_full_kw),
-                    None => (None, None),
-                };
-                match fixed_mid {
-                    Some(v) => vars.add(variable().min(v).max(v)),
-                    None if must_not => vars.add(variable().min(0.0).max(0.0)),
-                    None => vars.add(variable().binary()),
+        // Compute per-slot anchor pairs once; warn when an anchored kW doesn't match any tier
+        // (can happen after a profile config change that shifts mid_kw or max_kw).
+        let anchor_pairs: Vec<(Option<f64>, Option<f64>)> = (0..n)
+            .map(|t| match self.anchored_kw.get(t).copied().flatten() {
+                Some(kw) => {
+                    let pair = kw_to_tier_pair(kw, self.p_mid_kw, self.p_full_kw);
+                    if pair == (None, None) {
+                        tracing::warn!(
+                            slot = t,
+                            kw,
+                            p_mid = self.p_mid_kw,
+                            p_full = self.p_full_kw,
+                            "heater anchor: kw matches no tier — anchor dropped for this slot"
+                        );
+                    }
+                    pair
                 }
+                None => (None, None),
+            })
+            .collect();
+
+        let z_heat_mid = (0..n)
+            .map(|t| match anchor_pairs[t].0 {
+                Some(v) => vars.add(variable().min(v).max(v)),
+                None if must_not => vars.add(variable().min(0.0).max(0.0)),
+                None => vars.add(variable().binary()),
             })
             .collect();
         let z_heat_full = (0..n)
-            .map(|t| {
-                let (_, fixed_full) = match self.anchored_kw.get(t).copied().flatten() {
-                    Some(kw) => kw_to_tier_pair(kw, self.p_mid_kw, self.p_full_kw),
-                    None => (None, None),
-                };
-                match fixed_full {
-                    Some(v) => vars.add(variable().min(v).max(v)),
-                    None if must_not => vars.add(variable().min(0.0).max(0.0)),
-                    None => vars.add(variable().binary()),
-                }
+            .map(|t| match anchor_pairs[t].1 {
+                Some(v) => vars.add(variable().min(v).max(v)),
+                None if must_not => vars.add(variable().min(0.0).max(0.0)),
+                None => vars.add(variable().binary()),
             })
             .collect();
 

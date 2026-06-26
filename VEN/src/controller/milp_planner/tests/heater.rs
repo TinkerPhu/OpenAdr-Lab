@@ -194,24 +194,134 @@ fn heater_inputs_switching_penalty_defaults() {
 }
 
 #[test]
-#[ignore = "implemented in Step 5"]
 fn solve_heater_dynamics_respected() {
-    // After solve: e_tank[t+1] ≈ e_tank[t] + (p_heat[t] − q_dem) × dt_h ± 1e-3
-    todo!("implement after solve_milp() heater trajectory integration")
+    // e_tank[t+1] = e_tank[t] + (p_heat[t] − q_dem) × dt_h  must hold for every slot.
+    // Use k_loss=0 and draw_kw=0 so q_dem=0 and the math is exact.
+    let now = fixed_now();
+    let mut profile = make_heater_only_profile(None, 18.0, 23.0, 20.0);
+    if let Some(AssetProfile::Heater(ref mut h)) = profile.assets.get_mut(0) {
+        h.k_loss_kw_per_c = 0.0;
+        h.draw_kw = 0.0;
+    }
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::Periodic,
+        None,
+        None,
+        &[],
+        None,
+        None,
+    );
+    let thermal_mass = 2.0_f64; // make_heater_only_profile default
+    let temp_min = 18.0_f64;
+    let dt_h = profile.planner.plan_step_s as f64 / 3600.0;
+    for t in 0..plan.slots.len() - 1 {
+        let p_kw = plan.slots[t]
+            .planned_kw_by_asset
+            .get("heater")
+            .copied()
+            .unwrap_or(0.0);
+        let temp_t = plan.slots[t].planned_state_by_asset["heater"]["temp_c"];
+        let temp_next = plan.slots[t + 1].planned_state_by_asset["heater"]["temp_c"];
+        let e_t = (temp_t - temp_min) * thermal_mass;
+        let e_next_expected = e_t + p_kw * dt_h; // q_dem=0
+        let e_next_actual = (temp_next - temp_min) * thermal_mass;
+        assert!(
+            (e_next_actual - e_next_expected).abs() < 1e-3,
+            "slot {t}: dynamics violated — e_tank[{t}+1]={e_next_actual:.4} expected {e_next_expected:.4} \
+             (p={p_kw:.2} kW, dt_h={dt_h:.4})"
+        );
+    }
 }
 
 #[test]
-#[ignore = "implemented in Step 5"]
 fn solve_heater_must_run_meets_e_target() {
-    // MustRun with deadline: e_tank[t_dead] ≥ e_target − 1e-3
-    todo!("implement after solve_milp() heater trajectory integration")
+    // MustRun with deadline: e_tank[t_dead] ≥ e_target.
+    // Lossless heater (q_dem=0) starts cold. Target = 21°C within 18 slots (90 min).
+    // At full power (3 kW, 5-min slot): +0.25 kWh/slot. Need (21-18)×2=6 kWh; 18×0.25=4.5 kWh
+    // with e_init=(20-18)×2=4 kWh: total possible = 4 + 4.5 = 8.5 kWh > 6 kWh → feasible.
+    let now = fixed_now();
+    let mut profile = make_heater_only_profile(None, 18.0, 23.0, 20.0);
+    if let Some(AssetProfile::Heater(ref mut h)) = profile.assets.get_mut(0) {
+        h.k_loss_kw_per_c = 0.0;
+        h.draw_kw = 0.0;
+    }
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let target = crate::entities::device_session::HeaterTarget {
+        id: uuid::Uuid::new_v4(),
+        target_temp_c: 21.0,
+        ready_by: now + Duration::seconds(18 * 300),
+        created_at: now,
+        updated_at: now,
+    };
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, None, Some(&target), &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::UserRequest,
+        None,
+        Some(&target),
+        &[],
+        None,
+        None,
+    );
+    // t_dead_step = (18×300)/300 = 18; check plan.slots[18]["heater"]["temp_c"] ≥ 21.0
+    let t_dead = 18_usize;
+    assert!(
+        plan.slots.len() > t_dead,
+        "plan must have at least {t_dead} slots"
+    );
+    let temp_at_deadline = plan.slots[t_dead].planned_state_by_asset["heater"]["temp_c"];
+    assert!(
+        temp_at_deadline >= 21.0 - 0.01,
+        "MustRun: temp_c at deadline slot {t_dead} = {temp_at_deadline:.3} must be ≥ 21.0"
+    );
 }
 
 #[test]
-#[ignore = "implemented in Step 5"]
 fn solve_heater_soft_low_positive_when_below_min() {
-    // e_init < 0: s_low[0] > 0 in solution
-    todo!("implement after solve_milp() heater trajectory integration")
+    // e_init < 0 (temp_init < temp_min) → s_low[0] > 0.
+    // Verified via planned_state_by_asset: slot-0 temp_c < temp_min (e_tank[0] = e_init < 0).
+    // The planner must remain feasible — s_low relaxes the lower bound.
+    let now = fixed_now();
+    let profile = make_heater_only_profile(None, 18.0, 23.0, 16.0); // temp_init < temp_min
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::Periodic,
+        None,
+        None,
+        &[],
+        None,
+        None,
+    );
+    assert!(
+        !plan.slots.is_empty(),
+        "solver must remain feasible when starting below T_min"
+    );
+    // slot 0 reports e_tank[0] = e_init = (16-18)×2 = -4 kWh → temp_c = 18 + (-4/2) = 16°C
+    let temp_slot0 = plan.slots[0].planned_state_by_asset["heater"]["temp_c"];
+    assert!(
+        temp_slot0 < 18.0,
+        "slot 0 temp_c={temp_slot0:.2} should be below temp_min=18 (s_low active)"
+    );
 }
 
 #[test]
@@ -320,10 +430,39 @@ fn solve_heater_switching_reduces_with_penalty() {
 }
 
 #[test]
-#[ignore = "implemented in Step 5"]
 fn solve_heater_upper_bound_not_exceeded() {
-    // e_tank[t] ≤ e_max + 1e-6 for all t in solution
-    todo!("implement after solve_milp() heater trajectory integration")
+    // e_tank[t] ≤ e_max for all t: temp_c[t] must never exceed temp_max.
+    // Start near T_max with a cheap tariff so the optimizer is incentivised to overheat.
+    let now = fixed_now();
+    let profile = make_heater_only_profile(None, 18.0, 23.0, 22.8); // temp near T_max
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.05, 0.04, 300.0); // very cheap → heater wants to run
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::Periodic,
+        None,
+        None,
+        &[],
+        None,
+        None,
+    );
+    let thermal_mass = 2.0_f64;
+    let temp_min = 18.0_f64;
+    let temp_max = 23.0_f64;
+    let e_max = (temp_max - temp_min) * thermal_mass; // 10.0 kWh
+    for (t, slot) in plan.slots.iter().enumerate() {
+        let temp_c = slot.planned_state_by_asset["heater"]["temp_c"];
+        let e_tank = (temp_c - temp_min) * thermal_mass;
+        assert!(
+            e_tank <= e_max + 1e-3,
+            "slot {t}: e_tank={e_tank:.4} kWh exceeds e_max={e_max:.4} (temp_c={temp_c:.3})"
+        );
+    }
 }
 
 // T009: Battery soc trajectory is populated in planned_state_by_asset.

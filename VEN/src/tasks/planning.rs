@@ -151,7 +151,6 @@ pub(crate) fn spawn_planning(
                 current_plan.as_ref(),
                 anchor_until,
                 now,
-                step_s,
                 n_slots,
             );
 

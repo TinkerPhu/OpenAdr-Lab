@@ -41,10 +41,8 @@ pub fn build_heater_anchor(
     plan: Option<&Plan>,
     anchor_until: Option<DateTime<Utc>>,
     now: DateTime<Utc>,
-    step_s: u64,
     n_slots: usize,
 ) -> Vec<Option<f64>> {
-    let _ = step_s; // slot alignment uses plan slot boundaries, not step_s
     let mut out = vec![None; n_slots];
     let (Some(plan), Some(until)) = (plan, anchor_until) else {
         return out;
@@ -507,11 +505,10 @@ mod tests {
     #[test]
     fn test_build_heater_anchor_pins_within_window() {
         let now = fixed_now();
-        let step_s: u64 = 1200; // 20 min
         let n_slots = 6;
         let anchor_until = now + Duration::minutes(60); // 3 × 20-min slots
-        let plan = make_plan_with_heater_slots(now, step_s as i64, &[2.0; 6]);
-        let anchor = build_heater_anchor(Some(&plan), Some(anchor_until), now, step_s, n_slots);
+        let plan = make_plan_with_heater_slots(now, 1200, &[2.0; 6]);
+        let anchor = build_heater_anchor(Some(&plan), Some(anchor_until), now, n_slots);
         assert_eq!(anchor[0], Some(2.0), "slot 0 should be pinned");
         assert_eq!(anchor[1], Some(2.0), "slot 1 should be pinned");
         assert_eq!(anchor[2], Some(2.0), "slot 2 should be pinned");
@@ -523,7 +520,7 @@ mod tests {
     #[test]
     fn test_build_heater_anchor_no_plan_returns_all_none() {
         let now = fixed_now();
-        let anchor = build_heater_anchor(None, Some(now + Duration::hours(1)), now, 300, 4);
+        let anchor = build_heater_anchor(None, Some(now + Duration::hours(1)), now, 4);
         assert!(
             anchor.iter().all(|v| v.is_none()),
             "no plan → all-None anchor"
@@ -534,7 +531,7 @@ mod tests {
     fn test_build_heater_anchor_no_until_returns_all_none() {
         let now = fixed_now();
         let plan = make_plan_with_heater_slots(now, 1200, &[2.0; 4]);
-        let anchor = build_heater_anchor(Some(&plan), None, now, 1200, 4);
+        let anchor = build_heater_anchor(Some(&plan), None, now, 4);
         assert!(
             anchor.iter().all(|v| v.is_none()),
             "no anchor_until → all-None anchor"
