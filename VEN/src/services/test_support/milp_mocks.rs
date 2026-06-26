@@ -85,13 +85,16 @@ impl AssetMilpContext for MockBatteryCtx {
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
     ) -> Expression {
-        BatteryMilpContext::objective(
-            pool.bat.as_ref().unwrap(),
+        // Delegate to the AssetMilpContext trait impl on BatteryMilpContext so that
+        // c_terminal_eur_kwh is applied in Phase 1 (the inherent static method omits it).
+        AssetMilpContext::objective(
+            &self.ctx,
+            pool,
+            n,
+            dt_h,
             c_wear_eur_kwh,
             c_startup_eur,
             c_ramp_eur_kw,
-            n,
-            dt_h,
         )
     }
 }
