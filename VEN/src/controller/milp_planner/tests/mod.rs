@@ -121,6 +121,7 @@ fn make_profile() -> Profile {
                 initial_soc: 0.5,
                 round_trip_efficiency: 0.9,
                 min_soc: 0.1,
+                c_terminal_eur_kwh: None,
             }),
             AssetProfile::Ev(EvConfig {
                 id: "ev".into(),

@@ -168,9 +168,9 @@ pub(crate) fn spawn_planning(
             let battery_c_terminal_eur_kwh = asset_params
                 .iter()
                 .find_map(|p| match p {
-                    AssetParams::Battery(b) => {
-                        Some(avg_imp_eur_kwh * b.round_trip_efficiency)
-                    }
+                    AssetParams::Battery(b) => Some(b.c_terminal_eur_kwh.unwrap_or_else(|| {
+                        avg_imp_eur_kwh * b.round_trip_efficiency
+                    })),
                     _ => None,
                 })
                 .unwrap_or(0.0);

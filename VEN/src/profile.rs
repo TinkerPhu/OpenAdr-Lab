@@ -32,6 +32,7 @@ impl AssetProfile {
                 initial_soc: c.initial_soc,
                 round_trip_efficiency: c.round_trip_efficiency,
                 min_soc: c.min_soc,
+                c_terminal_eur_kwh: c.c_terminal_eur_kwh,
             }),
             AssetProfile::Ev(c) => AssetParams::Ev(EvParams {
                 id: c.id.clone(),
@@ -261,6 +262,11 @@ pub struct BatteryConfig {
     pub round_trip_efficiency: f64,
     #[serde(default = "default_battery_min_soc")]
     pub min_soc: f64,
+    /// Optional override for auto-computed terminal energy reward [EUR/kWh].
+    /// None (omitted in YAML): auto-compute from avg import tariff × round_trip_efficiency.
+    /// Some(0.0): disabled. Some(x): fixed at x EUR/kWh.
+    #[serde(default)]
+    pub c_terminal_eur_kwh: Option<f64>,
 }
 
 fn default_asset_id_battery() -> String {

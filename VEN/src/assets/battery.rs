@@ -541,6 +541,7 @@ mod tests {
             round_trip_efficiency: 0.95,
             min_soc: 0.1,
             initial_soc,
+            c_terminal_eur_kwh: None,
         };
         (Battery::from_params(&cfg), Battery::initial_state(&cfg))
     }

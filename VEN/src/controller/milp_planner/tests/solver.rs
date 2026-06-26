@@ -558,6 +558,90 @@ fn ctrl_import_malus_disabled_allows_full_tier() {
 }
 
 #[test]
+fn heater_terminal_reward_raises_end_state() {
+    // Flat tariff 0.25 EUR/kWh. Heater in MayRun with empty tank (e_init=0).
+    // Without c_terminal: no incentive to heat → tank stays empty.
+    // With c_terminal=0.40 > tariff: filling gains 0.15 EUR/kWh → optimizer fills.
+    use crate::controller::milp_planner::asset_port::{HeaterMilpContext, HeaterMilpMode};
+    use crate::services::test_support::milp_mocks::MockHeaterCtx;
+
+    let n = 4;
+    let inputs = make_solver_inputs(n, 0.0); // flat 0.25 EUR/kWh, dt_h=1.0, no load
+
+    let make_ctxs = |c_terminal: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
+        vec![Box::new(MockHeaterCtx {
+            ctx: HeaterMilpContext {
+                mode: HeaterMilpMode::MayRun,
+                t_dead_step: None,
+                p_mid_kw: 1.0,
+                p_full_kw: 2.0,
+                e_init_kwh: 0.0,
+                e_max_kwh: 4.0,
+                q_dem_kw: 0.0,
+                e_target_kwh: 4.0,
+                lambda_sw_eur: 0.0,
+                initial_z_mid: 0.0,
+                initial_z_full: 0.0,
+                c_terminal_eur_kwh: c_terminal,
+            },
+        })]
+    };
+
+    let out_no = solve_phase1(&inputs, &make_phase1_weights(), &make_ctxs(0.0), 60.0)
+        .expect("solver failed (no c_terminal)");
+    let out_yes = solve_phase1(&inputs, &make_phase1_weights(), &make_ctxs(0.40), 60.0)
+        .expect("solver failed (c_terminal=0.40)");
+
+    let e_end_no = out_no.e_heat_tank_kwh.last().copied().unwrap_or(0.0);
+    let e_end_yes = out_yes.e_heat_tank_kwh.last().copied().unwrap_or(0.0);
+    assert!(
+        e_end_yes > e_end_no + 0.1,
+        "c_terminal=0.40 should fill tank above no-reward baseline; e_end_no={e_end_no:.4} e_end_yes={e_end_yes:.4}"
+    );
+}
+
+#[test]
+fn battery_terminal_reward_raises_end_soc() {
+    // Flat tariff 0.25 EUR/kWh. Battery empty (e_init=0), no base load.
+    // Without c_terminal: no incentive to charge → battery stays empty.
+    // With c_terminal=0.40 > tariff: charging gains 0.15 EUR/kWh → optimizer charges.
+    use crate::controller::milp_planner::asset_port::BatteryMilpContext;
+    use crate::services::test_support::milp_mocks::MockBatteryCtx;
+
+    let n = 4;
+    let inputs = make_solver_inputs(n, 0.0); // flat 0.25 EUR/kWh, dt_h=1.0, no load
+
+    let make_ctxs = |c_terminal: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
+        vec![Box::new(MockBatteryCtx {
+            ctx: BatteryMilpContext {
+                e_nom_kwh: 4.0,
+                e_init_kwh: 0.0,
+                e_min_kwh: 0.0,
+                e_max_kwh: 4.0,
+                p_ch_max_kw: 2.0,
+                p_dis_max_kw: 2.0,
+                eff_ch: 1.0,
+                eff_dis: 1.0,
+                c_terminal_eur_kwh: c_terminal,
+            },
+        })]
+    };
+
+    let out_no = solve_phase1(&inputs, &make_phase1_weights(), &make_ctxs(0.0), 60.0)
+        .expect("solver failed (no c_terminal)");
+    let out_yes = solve_phase1(&inputs, &make_phase1_weights(), &make_ctxs(0.40), 60.0)
+        .expect("solver failed (c_terminal=0.40)");
+
+    // e_bat_kwh has len n+1; index n is the post-horizon end state
+    let e_end_no = out_no.e_bat_kwh[n];
+    let e_end_yes = out_yes.e_bat_kwh[n];
+    assert!(
+        e_end_yes > e_end_no + 0.1,
+        "c_terminal=0.40 should charge battery above no-reward baseline; e_end_no={e_end_no:.4} e_end_yes={e_end_yes:.4}"
+    );
+}
+
+#[test]
 fn ctrl_import_malus_zero_when_pv_covers_full_tier() {
     // PV surplus > full tier — no import needed regardless. Malus slack = 0, both tiers are free.
     let n = 4;
