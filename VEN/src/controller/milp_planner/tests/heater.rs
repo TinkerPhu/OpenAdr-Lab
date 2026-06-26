@@ -262,7 +262,7 @@ fn solve_heater_switching_reduces_with_penalty() {
     let sim_high = make_snap_from_profile(&profile_high);
 
     let plan_no = run_planner(
-        build_asset_contexts(&profile_no, &sim_no, now, None, None),
+        build_asset_contexts(&profile_no, &sim_no, now, None, None, &tariffs),
         &sim_no,
         &tariffs,
         &no_capacity(),
@@ -276,7 +276,7 @@ fn solve_heater_switching_reduces_with_penalty() {
         None,
     );
     let plan_high = run_planner(
-        build_asset_contexts(&profile_high, &sim_high, now, None, None),
+        build_asset_contexts(&profile_high, &sim_high, now, None, None, &tariffs),
         &sim_high,
         &tariffs,
         &no_capacity(),
@@ -338,10 +338,11 @@ fn battery_planned_state_soc_populated_and_non_decreasing_in_charging_slots() {
         .retain(|a| matches!(a, AssetProfile::Battery(_) | AssetProfile::BaseLoad(_)));
     let mut sim = make_snap_from_profile(&profile);
     set_battery_soc(&mut sim, 0.1); // low SoC → planner will charge on cheap slots
+    let tariffs = make_two_zone_tariffs(0.05, 0.40);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None),
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
         &sim,
-        &make_two_zone_tariffs(0.05, 0.40),
+        &tariffs,
         &no_capacity(),
         &profile,
         now,
@@ -420,10 +421,11 @@ fn ev_planned_state_soc_populated() {
         created_at: now,
         updated_at: now,
     };
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, Some(&session), None),
+        build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
         &sim,
-        &make_tariffs(0.25, 0.08, 300.0),
+        &tariffs,
         &no_capacity(),
         &profile,
         now,
@@ -464,10 +466,11 @@ fn heater_planned_state_temp_c_populated() {
     let now = fixed_now();
     let profile = make_heater_only_profile(None, 18.0, 23.0, 20.0);
     let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None),
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
         &sim,
-        &make_tariffs(0.25, 0.08, 300.0),
+        &tariffs,
         &no_capacity(),
         &profile,
         now,

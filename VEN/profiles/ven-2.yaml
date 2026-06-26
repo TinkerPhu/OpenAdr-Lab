@@ -10,7 +10,7 @@ assets:
     volume_l: 2000.0
     k_loss_kw_per_c: 0.003
     draw_kw: 0.5
-    switching_penalty_eur: 0.50
+    switching_penalty_eur: 3.0            # unit: EUR/(switch·h); effective at 10-min slot: 3.0×(10/60) = 0.50 EUR/switch
   - type: pv
     id: pv
     rated_kw: 12.0
@@ -24,7 +24,7 @@ simulator:
   report_interval_s: 60
 
 planner:
-  phase2_epsilon_eur: 1.00          # = 2× switching_penalty_eur; Phase 2 can eliminate up to 2 switches
+  phase2_epsilon_eur: 1.00          # = 2× effective switching cost (0.50 EUR/switch); Phase 2 can eliminate up to 2 switches
   plan_adoption_threshold_eur: 0.20 # require real improvement before replacing current plan
   plan_adoption_decay_s: 1500       # 5× replan_interval_s — allow eventual replacement of stale plans
   replan_interval_s: 300

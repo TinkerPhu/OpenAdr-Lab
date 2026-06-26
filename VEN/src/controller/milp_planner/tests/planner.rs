@@ -52,10 +52,11 @@ fn run_planner_no_assets_covers_base_load() {
         packets: vec![],
     };
     let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None),
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
         &sim,
-        &make_tariffs(0.25, 0.08, 300.0),
+        &tariffs,
         &no_capacity(),
         &profile,
         now,
@@ -96,10 +97,11 @@ fn run_planner_battery_absent_no_bat_allocation() {
         created_at: now,
         updated_at: now,
     };
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, Some(&session), None),
+        build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
         &sim,
-        &make_tariffs(0.25, 0.08, 300.0),
+        &tariffs,
         &no_capacity(),
         &profile,
         now,
@@ -134,10 +136,11 @@ fn run_planner_ev_absent_no_ev_allocation() {
     let mut profile = make_profile_1800s();
     profile.assets.retain(|a| !matches!(a, AssetProfile::Ev(_)));
     let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None),
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
         &sim,
-        &make_tariffs(0.25, 0.08, 300.0),
+        &tariffs,
         &no_capacity(),
         &profile,
         now,
@@ -165,10 +168,11 @@ fn run_planner_battery_charges_on_cheap_tariff() {
         .retain(|a| matches!(a, AssetProfile::Battery(_) | AssetProfile::BaseLoad(_)));
     let mut sim = make_snap_from_profile(&profile);
     set_battery_soc(&mut sim, 0.1); // low SoC → wants to charge
+    let tariffs = make_two_zone_tariffs(0.05, 0.40);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None),
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
         &sim,
-        &make_two_zone_tariffs(0.05, 0.40),
+        &tariffs,
         &no_capacity(),
         &profile,
         now,
@@ -230,10 +234,11 @@ fn run_planner_ev_must_run_energy_met() {
         created_at: now,
         updated_at: now,
     };
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, Some(&session), None),
+        build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
         &sim,
-        &make_tariffs(0.25, 0.08, 300.0),
+        &tariffs,
         &no_capacity(),
         &profile,
         now,
@@ -266,10 +271,11 @@ fn run_planner_power_balance_invariant() {
     let profile = make_profile_1800s();
     let mut sim = make_snap_from_profile(&profile);
     set_battery_soc(&mut sim, 0.5);
+    let tariffs = make_two_zone_tariffs(0.05, 0.40);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None),
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
         &sim,
-        &make_two_zone_tariffs(0.05, 0.40),
+        &tariffs,
         &no_capacity(),
         &profile,
         now,
@@ -307,10 +313,11 @@ fn run_planner_absent_battery_no_panic() {
         .assets
         .retain(|a| !matches!(a, AssetProfile::Battery(_)));
     let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None),
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
         &sim,
-        &make_tariffs(0.25, 0.08, 300.0),
+        &tariffs,
         &no_capacity(),
         &profile,
         now,
@@ -406,10 +413,11 @@ fn run_planner_n48_full_horizon() {
         created_at: now,
         updated_at: now,
     };
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
-        build_asset_contexts(&profile, &sim, now, Some(&session), None),
+        build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
         &sim,
-        &make_tariffs(0.25, 0.08, 300.0),
+        &tariffs,
         &no_capacity(),
         &profile,
         now,

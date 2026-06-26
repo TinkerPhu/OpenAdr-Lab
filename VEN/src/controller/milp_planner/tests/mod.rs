@@ -427,6 +427,7 @@ fn build_asset_contexts(
     now: DateTime<Utc>,
     ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
+    tariffs: &TariffTimeSeries,
 ) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
     let step_s = profile.planner.plan_step_s;
     let n = (profile.planner.plan_horizon_h as f64 * 3600.0 / step_s as f64) as usize;
@@ -436,6 +437,19 @@ fn build_asset_contexts(
         .unwrap_or(0.0);
     let v_ev_extra = profile.planner.v_ev_extra_eur_kwh;
     let ev_min_kw = profile.ev_config().map(|e| e.min_charge_kw).unwrap_or(0.0);
+
+    let avg_imp_eur_kwh = {
+        let total: f64 = (0..n)
+            .map(|t| {
+                let slot_t = now + Duration::seconds(t as i64 * step_s as i64);
+                tariffs
+                    .import_eur_kwh
+                    .interpolate_at(slot_t)
+                    .unwrap_or(0.25)
+            })
+            .sum();
+        if n > 0 { total / n as f64 } else { 0.25 }
+    };
 
     let mut ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = Vec::new();
     for ap in &profile.assets {
@@ -451,6 +465,9 @@ fn build_asset_contexts(
                     actual_power_kw: 0.0,
                 });
                 let ac = AssetConfig::Battery(Battery::from_params(cfg));
+                let c_terminal = cfg
+                    .c_terminal_eur_kwh
+                    .unwrap_or_else(|| avg_imp_eur_kwh * cfg.round_trip_efficiency);
                 if let Some(ctx) = ac.build_milp_context(
                     &state,
                     n,
@@ -462,7 +479,7 @@ fn build_asset_contexts(
                     v_ev_extra,
                     1.0,
                     lambda_sw,
-                    0.0,
+                    c_terminal,
                 ) {
                     ctxs.push(ctx);
                 }
@@ -512,6 +529,9 @@ fn build_asset_contexts(
                     actual_power_kw: 0.0,
                 });
                 let ac = AssetConfig::Heater(Heater::from_params(cfg));
+                let c_terminal = cfg.c_terminal_eur_kwh.unwrap_or_else(|| {
+                    avg_imp_eur_kwh + profile.planner.c_ctrl_imp_malus_eur_kwh
+                });
                 if let Some(ctx) = ac.build_milp_context(
                     &state,
                     n,
@@ -523,7 +543,7 @@ fn build_asset_contexts(
                     v_ev_extra,
                     1.0,
                     lambda_sw,
-                    0.0,
+                    c_terminal,
                 ) {
                     ctxs.push(ctx);
                 }
@@ -701,7 +721,7 @@ fn bmi(
     ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
 ) -> MilpInputs {
-    let ctxs = build_asset_contexts(profile, sim, now, ev_session, heater_target);
+    let ctxs = build_asset_contexts(profile, sim, now, ev_session, heater_target, tariffs);
     build_milp_inputs(&ctxs, sim, tariffs, cap, profile, now, &[], None)
 }
 
