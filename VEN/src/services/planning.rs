@@ -74,22 +74,48 @@ pub struct PlanCycleResult {
     pub plan_cycle_event: ControllerEvent,
 }
 
+/// Count heater relay switches in `plan` for all slots starting at or after `now`.
+///
+/// A switch is a transition where the heater power changes by more than 0.1 kW between
+/// consecutive future slots. Past slots are excluded so this reflects the remaining
+/// switching burden of the plan from the current moment onward.
+pub fn count_heater_switches(plan: &Plan, now: DateTime<Utc>) -> usize {
+    let mut count = 0usize;
+    let mut prev: Option<f64> = None;
+    for slot in plan.all_slots().filter(|s| s.start >= now) {
+        let kw = slot
+            .planned_kw_by_asset
+            .get("heater")
+            .copied()
+            .unwrap_or(0.0);
+        if prev.is_some_and(|p| (p - kw).abs() > 0.1) {
+            count += 1;
+        }
+        prev = Some(kw);
+    }
+    count
+}
+
 /// Pure function — evaluate whether the new plan should replace the current one.
 ///
 /// Hard triggers (anything other than Periodic) always adopt.
-/// Periodic triggers adopt only when the cost improvement exceeds the effective threshold,
-/// or when the current plan has fully decayed past its decay window.
+/// Periodic triggers adopt only when the cost improvement exceeds the effective threshold
+/// plus any switch-count surcharge, or when the current plan has fully decayed.
+///
+/// `gate_switch_penalty_eur`: per-extra-switch surcharge added to the effective threshold.
+/// 0.0 disables the switch guard (backward-compatible default).
 pub fn evaluate_acceptance_gate(
     current: Option<&Plan>,
     new_plan: &Plan,
     trigger: &PlanTrigger,
     threshold_eur: f64,
     decay_s: f64,
+    gate_switch_penalty_eur: f64,
     now: DateTime<Utc>,
 ) -> bool {
     let is_hard_trigger = !matches!(trigger, PlanTrigger::Periodic);
 
-    if is_hard_trigger || threshold_eur == 0.0 {
+    if is_hard_trigger || (threshold_eur == 0.0 && gate_switch_penalty_eur == 0.0) {
         return true;
     }
 
@@ -124,14 +150,25 @@ pub fn evaluate_acceptance_gate(
     let new_total = new_plan.objective_eur + new_plan.friction_eur;
     let improvement = current_total - new_total;
 
-    if fully_decayed || improvement > effective_threshold {
+    // Switch surcharge: extra heater relay operations in the new plan raise the bar.
+    // fully_decayed still bypasses — decay is an escape hatch for stale plans regardless.
+    let switch_surcharge = if gate_switch_penalty_eur > 0.0 {
+        let extra = count_heater_switches(new_plan, now)
+            .saturating_sub(count_heater_switches(current, now)) as f64;
+        extra * gate_switch_penalty_eur
+    } else {
+        0.0
+    };
+
+    if fully_decayed || improvement > effective_threshold + switch_surcharge {
         true
     } else {
         debug!(
             improvement_eur = improvement,
             effective_threshold_eur = effective_threshold,
+            switch_surcharge_eur = switch_surcharge,
             elapsed_s,
-            "periodic plan rejected: improvement below threshold"
+            "periodic plan rejected: improvement below threshold + switch surcharge"
         );
         false
     }
@@ -149,6 +186,7 @@ impl PlanningService {
         trigger_reason: &str,
         threshold_eur: f64,
         decay_s: f64,
+        gate_switch_penalty_eur: f64,
         solver_ms: u64,
         objective: PlannerObjective,
         state: &AppState,
@@ -173,6 +211,7 @@ impl PlanningService {
             trigger,
             threshold_eur,
             decay_s,
+            gate_switch_penalty_eur,
             now,
         );
 
@@ -318,6 +357,7 @@ mod tests {
             &PlanTrigger::Periodic,
             1.0,
             3600.0,
+            0.0,
             Utc::now(),
         );
         assert!(
@@ -335,6 +375,7 @@ mod tests {
             &PlanTrigger::Periodic,
             5.0,
             3600.0,
+            0.0,
             Utc::now(),
         );
         assert!(adopt, "no existing plan must always adopt");
@@ -351,6 +392,7 @@ mod tests {
             &PlanTrigger::Periodic,
             1.0,
             3600.0,
+            0.0,
             Utc::now(),
         );
         assert!(
@@ -369,6 +411,7 @@ mod tests {
             &PlanTrigger::Periodic,
             1.0,
             3600.0,
+            0.0,
             Utc::now(),
         );
         assert!(adopt, "improvement exceeding threshold must be accepted");
@@ -387,6 +430,7 @@ mod tests {
             &PlanTrigger::Periodic,
             5.0, // high threshold that would normally block adoption
             0.0, // no decay
+            0.0,
             Utc::now(),
         );
         assert!(
@@ -535,6 +579,197 @@ mod tests {
         assert!(
             anchor.iter().all(|v| v.is_none()),
             "no anchor_until → all-None anchor"
+        );
+    }
+
+    // ── count_heater_switches tests ───────────────────────────────────────────
+
+    /// Builds a plan with heater slots starting at `now` and a custom objective_eur.
+    /// Used for gate surcharge tests that need both heater power patterns and cost.
+    fn make_heater_plan(now: DateTime<Utc>, kws: &[f64], objective_eur: f64) -> Plan {
+        let step_s = 1200_i64;
+        let slots: Vec<serde_json::Value> = kws
+            .iter()
+            .enumerate()
+            .map(|(i, &kw)| {
+                let slot_start = now + Duration::seconds(i as i64 * step_s);
+                let slot_end = slot_start + Duration::seconds(step_s);
+                serde_json::json!({
+                    "slot_index": i,
+                    "start": slot_start.to_rfc3339(),
+                    "end": slot_end.to_rfc3339(),
+                    "import_tariff_eur_kwh": 0.25,
+                    "export_tariff_eur_kwh": 0.08,
+                    "co2_g_kwh": 300.0,
+                    "grid_effective_cost": 0.25,
+                    "rate_estimated": false,
+                    "import_cap_kw": 25.0,
+                    "export_cap_kw": 10.0,
+                    "baseline_kw": 0.5,
+                    "pv_forecast_kw": 0.0,
+                    "surplus_available_kw": 0.0,
+                    "allocations": [],
+                    "net_import_kw": kw + 0.5,
+                    "net_export_kw": 0.0,
+                    "import_flexibility_kw": 0.0,
+                    "export_flexibility_kw": 0.0,
+                    "planned_kw_by_asset": {"heater": kw},
+                    "planned_state_by_asset": {}
+                })
+            })
+            .collect();
+        let plan_end = now + Duration::seconds(kws.len() as i64 * step_s);
+        serde_json::from_value(serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "created_at": now.to_rfc3339(),
+            "trigger": "PERIODIC",
+            "horizon": {
+                "start_time": now.to_rfc3339(),
+                "end_time": plan_end.to_rfc3339(),
+                "step_size_s": step_s,
+                "num_steps": kws.len(),
+                "far_horizon": plan_end.to_rfc3339()
+            },
+            "slots": slots,
+            "summary": {"total_cost_eur": 0.0, "total_co2_g": 0.0, "total_import_kwh": 0.0, "total_export_kwh": 0.0},
+            "envelopes": [],
+            "warnings": [],
+            "objective_eur": objective_eur,
+            "friction_eur": 0.0
+        }))
+        .expect("test heater plan must deserialize")
+    }
+
+    #[test]
+    fn test_count_switches_empty_plan() {
+        // All slots start before `now` — filter gives zero → 0 switches.
+        let now = fixed_now();
+        let past = now - Duration::seconds(4 * 1200);
+        let plan = make_plan_with_heater_slots(past, 1200, &[2.0, 0.0, 2.0, 0.0]);
+        assert_eq!(count_heater_switches(&plan, now), 0);
+    }
+
+    #[test]
+    fn test_count_switches_one_block() {
+        // All future slots at the same kW → no tier changes → 0 switches.
+        let now = fixed_now();
+        let plan = make_plan_with_heater_slots(now, 1200, &[2.0, 2.0, 2.0, 2.0]);
+        assert_eq!(count_heater_switches(&plan, now), 0);
+    }
+
+    #[test]
+    fn test_count_switches_filters_past_slots() {
+        // 6-slot plan: slots 0–1 start before `now`, slots 2–5 start at/after `now`.
+        // Past slots (0.0, 0.0) are filtered; future slots (0.0, 2.0, 0.0, 2.0) give 3 transitions.
+        let now = fixed_now();
+        let start = now - Duration::seconds(2 * 1200);
+        let plan = make_plan_with_heater_slots(start, 1200, &[0.0, 0.0, 0.0, 2.0, 0.0, 2.0]);
+        assert_eq!(count_heater_switches(&plan, now), 3);
+    }
+
+    // ── gate switch-count guard tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_gate_rejects_noisier_plan_below_surcharge() {
+        // current: 1 switch ([2,2,0,0]), new: 3 switches ([2,0,2,0]), extra=2.
+        // improvement = 10.0 − 9.5 = 0.5; surcharge = 2 × 0.50 = 1.0 → 0.5 < 1.0 → reject.
+        let now = fixed_now();
+        let current = make_heater_plan(now, &[2.0, 2.0, 0.0, 0.0], 10.0);
+        let new_plan = make_heater_plan(now, &[2.0, 0.0, 2.0, 0.0], 9.5);
+        let adopt = evaluate_acceptance_gate(
+            Some(&current),
+            &new_plan,
+            &PlanTrigger::Periodic,
+            0.0,
+            0.0,
+            0.50,
+            now,
+        );
+        assert!(
+            !adopt,
+            "improvement (0.5) below surcharge (1.0): must reject"
+        );
+    }
+
+    #[test]
+    fn test_gate_accepts_noisier_plan_above_surcharge() {
+        // current: 1 switch, new: 3 switches (extra=2); but improvement=2.5 > surcharge=1.0 → accept.
+        let now = fixed_now();
+        let current = make_heater_plan(now, &[2.0, 2.0, 0.0, 0.0], 10.0);
+        let new_plan = make_heater_plan(now, &[2.0, 0.0, 2.0, 0.0], 7.5);
+        let adopt = evaluate_acceptance_gate(
+            Some(&current),
+            &new_plan,
+            &PlanTrigger::Periodic,
+            0.0,
+            0.0,
+            0.50,
+            now,
+        );
+        assert!(
+            adopt,
+            "improvement (2.5) exceeds surcharge (1.0): must accept"
+        );
+    }
+
+    #[test]
+    fn test_gate_accepts_cleaner_plan_at_zero_surcharge() {
+        // gate_switch_penalty_eur=0.0 disables switch guard; standard cost improvement wins.
+        let now = fixed_now();
+        let current = make_heater_plan(now, &[2.0, 0.0, 2.0, 0.0], 10.0); // 3 switches
+        let new_plan = make_heater_plan(now, &[2.0, 2.0, 0.0, 0.0], 9.5); // 1 switch, cheaper
+        let adopt = evaluate_acceptance_gate(
+            Some(&current),
+            &new_plan,
+            &PlanTrigger::Periodic,
+            0.0,
+            0.0,
+            0.0,
+            now,
+        );
+        assert!(
+            adopt,
+            "penalty=0 disables surcharge: improvement (0.5) > 0 must accept"
+        );
+    }
+
+    #[test]
+    fn test_gate_hard_trigger_ignores_surcharge() {
+        // Hard trigger (UserRequest) always adopts regardless of switch surcharge.
+        let now = fixed_now();
+        let current = make_heater_plan(now, &[2.0, 2.0, 0.0, 0.0], 10.0); // 1 switch
+        let new_plan = make_heater_plan(now, &[2.0, 0.0, 2.0, 0.0], 10.0); // 3 switches, same cost
+        let adopt = evaluate_acceptance_gate(
+            Some(&current),
+            &new_plan,
+            &PlanTrigger::UserRequest,
+            0.0,
+            0.0,
+            0.50,
+            now,
+        );
+        assert!(adopt, "hard trigger must bypass switch surcharge");
+    }
+
+    #[test]
+    fn test_gate_decayed_accepts_despite_surcharge() {
+        // Fully decayed plan is replaced unconditionally even with high switch surcharge.
+        let now = fixed_now();
+        // current created 2 h ago with decay_s=3600 → fully_decayed=true.
+        let current = make_heater_plan(now - Duration::seconds(7200), &[2.0, 2.0, 0.0, 0.0], 10.0);
+        let new_plan = make_heater_plan(now, &[2.0, 0.0, 2.0, 0.0], 10.0); // same cost, more switches
+        let adopt = evaluate_acceptance_gate(
+            Some(&current),
+            &new_plan,
+            &PlanTrigger::Periodic,
+            1.0,
+            3600.0,
+            0.50,
+            now,
+        );
+        assert!(
+            adopt,
+            "fully decayed plan must be replaced despite switch surcharge"
         );
     }
 }
