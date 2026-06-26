@@ -11,6 +11,10 @@ pub struct BatteryParams {
     pub initial_soc: f64,
     pub round_trip_efficiency: f64,
     pub min_soc: f64,
+    /// Override for auto-computed terminal energy reward [EUR/kWh].
+    /// None → auto-compute from avg import tariff × round_trip_efficiency.
+    /// Some(0.0) → disabled. Some(x) → fixed at x EUR/kWh.
+    pub c_terminal_eur_kwh: Option<f64>,
 }
 
 impl Default for BatteryParams {
@@ -23,6 +27,7 @@ impl Default for BatteryParams {
             initial_soc: 0.5,
             round_trip_efficiency: 0.92,
             min_soc: 0.10,
+            c_terminal_eur_kwh: None,
         }
     }
 }
