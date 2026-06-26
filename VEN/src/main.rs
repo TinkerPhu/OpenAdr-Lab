@@ -79,6 +79,7 @@ fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Ve
         phase2_epsilon_eur: profile.planner.phase2_epsilon_eur,
         solver_timeout_s: profile.planner.solver_timeout_s,
         planning_initial_delay_s: profile.planner.planning_initial_delay_s,
+        gate_switch_penalty_eur: profile.planner.gate_switch_penalty_eur,
     };
     let asset_params = profile.asset_params();
     (sim_params, planner_params, asset_params)

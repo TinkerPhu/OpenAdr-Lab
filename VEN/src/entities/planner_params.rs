@@ -42,6 +42,10 @@ pub struct PlannerParams {
     pub phase2_epsilon_eur: f64,
     pub solver_timeout_s: u64,
     pub planning_initial_delay_s: u64,
+    /// Per-extra-switch surcharge [EUR] added to the effective acceptance threshold.
+    /// 0.0 = disabled (default). Set to match `switching_penalty_eur` so that a noisier
+    /// plan must compensate for its extra relay operations to be adopted.
+    pub gate_switch_penalty_eur: f64,
 }
 
 impl Default for PlannerParams {
@@ -72,6 +76,7 @@ impl Default for PlannerParams {
             phase2_epsilon_eur: 0.02,
             solver_timeout_s: 60,
             planning_initial_delay_s: 5,
+            gate_switch_penalty_eur: 0.0,
         }
     }
 }
