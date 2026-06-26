@@ -10,5 +10,5 @@ export const CELL_LEFT_SECTION_WIDTH = 196; // px
 
 /** Default time window: 1 h back, 1 h forward from now. */
 export const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
-/** Extended time window: 1 h back, 24 h forward (full plan horizon). */
-export const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 24.0 };
+/** Extended time window: 1 h back, 48 h forward (full plan horizon). */
+export const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 48.0 };

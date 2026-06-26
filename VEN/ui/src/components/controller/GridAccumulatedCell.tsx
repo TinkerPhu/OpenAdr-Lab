@@ -51,7 +51,7 @@ interface GridAccumulatedCellProps {
   allTimelines: Record<string, AssetTimelinePoint[]>;
   /** Epoch ms — shared across all cells from the page for a consistent NOW line. */
   nowMs: number;
-  /** Whether this cell's time window is expanded to 24h forward. */
+  /** Whether this cell's time window is expanded to 48h forward. */
   extended: boolean;
   pinned: boolean;
   gridPowerKw: number;
