@@ -500,6 +500,7 @@ impl AssetConfig {
         v_ev_core_eur_kwh: f64,
         lambda_sw: f64,
         c_terminal_eur_kwh: f64,
+        heater_anchor: Vec<Option<f64>>,
     ) -> Option<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
         match self {
             Self::Battery(cfg) => Some(Box::new(BatteryMilpContext::from_state(
@@ -527,6 +528,7 @@ impl AssetConfig {
                 heater_target,
                 lambda_sw,
                 c_terminal_eur_kwh,
+                heater_anchor,
             ))),
             _ => None,
         }

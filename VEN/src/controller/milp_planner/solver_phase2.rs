@@ -248,7 +248,8 @@ pub(crate) fn solve_phase2(
         match ctx.asset_kind() {
             AssetKind::Battery => {
                 // Battery wear only (c_startup=0, c_ramp=0 in cost cap).
-                phase1_cap_expr += ctx.objective(&pool, n, &inputs.dt_h, p1w.c_bat_wear_eur_kwh, 0.0, 0.0);
+                phase1_cap_expr +=
+                    ctx.objective(&pool, n, &inputs.dt_h, p1w.c_bat_wear_eur_kwh, 0.0, 0.0);
             }
             AssetKind::Ev => {
                 // EV service reward only (c_startup=0 → Phase 1 mode in EV impl).
@@ -294,7 +295,8 @@ pub(crate) fn solve_phase2(
             AssetKind::Heater => {
                 // c_startup=1.0 signals Phase 2; c_ramp carries w_tier_penalty_eur.
                 // self.lambda_sw_eur applied internally by HeaterMilpContext::objective.
-                friction_obj += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 1.0, p2w.w_tier_penalty_eur);
+                friction_obj +=
+                    ctx.objective(&pool, n, &inputs.dt_h, 0.0, 1.0, p2w.w_tier_penalty_eur);
             }
         }
     }

@@ -10,6 +10,64 @@ use crate::state::AppState;
 
 pub struct PlanningService;
 
+/// Returns the end time of the consecutive heater block containing `now` in `plan`.
+///
+/// Reads the heater power in the first future slot (start of block), then walks forward
+/// while heater power stays within 0.1 kW of that value. Returns the `end` of the last
+/// slot in the run, or `None` when no future slots exist.
+pub fn heater_block_end(plan: &Plan, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    let mut iter = plan.all_slots().filter(|s| s.end > now).peekable();
+    let kw0 = iter
+        .peek()?
+        .planned_kw_by_asset
+        .get("heater")
+        .copied()
+        .unwrap_or(0.0);
+    iter.take_while(|s| {
+        let kw = s.planned_kw_by_asset.get("heater").copied().unwrap_or(0.0);
+        (kw - kw0).abs() < 0.1
+    })
+    .last()
+    .map(|s| s.end)
+}
+
+/// Build a per-slot heater anchor vector for the next planning cycle.
+///
+/// Each entry is `Some(kw)` for slots whose start is strictly before `anchor_until`
+/// (pinning the heater tier binaries to the current plan's values) and `None` for slots
+/// beyond the anchor window (left free for the optimizer).
+/// Returns all-None when `plan` or `anchor_until` is absent.
+pub fn build_heater_anchor(
+    plan: Option<&Plan>,
+    anchor_until: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+    step_s: u64,
+    n_slots: usize,
+) -> Vec<Option<f64>> {
+    let _ = step_s; // slot alignment uses plan slot boundaries, not step_s
+    let mut out = vec![None; n_slots];
+    let (Some(plan), Some(until)) = (plan, anchor_until) else {
+        return out;
+    };
+    for (i, slot) in plan
+        .all_slots()
+        .filter(|s| s.end > now)
+        .take(n_slots)
+        .enumerate()
+    {
+        if slot.start >= until {
+            break;
+        }
+        out[i] = Some(
+            slot.planned_kw_by_asset
+                .get("heater")
+                .copied()
+                .unwrap_or(0.0),
+        );
+    }
+    out
+}
+
 /// Result of one completed planning cycle.
 pub struct PlanCycleResult {
     pub adopted: bool,
@@ -124,6 +182,8 @@ impl PlanningService {
         if adopted {
             info!(trigger = %trigger_reason, slot_count, "planner: plan adopted");
             state.set_active_plan(Some(plan.clone())).await;
+            let anchor = heater_block_end(&plan, now);
+            state.set_anchor_until(anchor).await;
         } else {
             info!(
                 trigger = %trigger_reason,
@@ -334,6 +394,150 @@ mod tests {
         assert!(
             adopt,
             "stale plan with all-expired slots must be replaced unconditionally"
+        );
+    }
+
+    // ── heater_block_end and build_heater_anchor tests ────────────────────────
+
+    use chrono::TimeZone;
+
+    fn fixed_now() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 4, 11, 6, 0, 0).unwrap()
+    }
+
+    fn make_plan_with_heater_slots(start: DateTime<Utc>, step_s: i64, kws: &[f64]) -> Plan {
+        let slots: Vec<serde_json::Value> = kws
+            .iter()
+            .enumerate()
+            .map(|(i, &kw)| {
+                let slot_start = start + Duration::seconds(i as i64 * step_s);
+                let slot_end = slot_start + Duration::seconds(step_s);
+                serde_json::json!({
+                    "slot_index": i,
+                    "start": slot_start.to_rfc3339(),
+                    "end": slot_end.to_rfc3339(),
+                    "import_tariff_eur_kwh": 0.25,
+                    "export_tariff_eur_kwh": 0.08,
+                    "co2_g_kwh": 300.0,
+                    "grid_effective_cost": 0.25,
+                    "rate_estimated": false,
+                    "import_cap_kw": 25.0,
+                    "export_cap_kw": 10.0,
+                    "baseline_kw": 0.5,
+                    "pv_forecast_kw": 0.0,
+                    "surplus_available_kw": 0.0,
+                    "allocations": [],
+                    "net_import_kw": kw + 0.5,
+                    "net_export_kw": 0.0,
+                    "import_flexibility_kw": 0.0,
+                    "export_flexibility_kw": 0.0,
+                    "planned_kw_by_asset": {"heater": kw},
+                    "planned_state_by_asset": {}
+                })
+            })
+            .collect();
+        let end = start + Duration::seconds(kws.len() as i64 * step_s);
+        serde_json::from_value(serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "created_at": start.to_rfc3339(),
+            "trigger": "PERIODIC",
+            "horizon": {
+                "start_time": start.to_rfc3339(),
+                "end_time": end.to_rfc3339(),
+                "step_size_s": step_s,
+                "num_steps": kws.len(),
+                "far_horizon": end.to_rfc3339()
+            },
+            "slots": slots,
+            "summary": {
+                "total_cost_eur": 0.0,
+                "total_co2_g": 0.0,
+                "total_import_kwh": 0.0,
+                "total_export_kwh": 0.0
+            },
+            "envelopes": [],
+            "warnings": [],
+            "objective_eur": 0.0,
+            "friction_eur": 0.0
+        }))
+        .expect("test plan must deserialize")
+    }
+
+    #[test]
+    fn test_heater_block_end_on_block() {
+        let now = fixed_now();
+        let step_s = 1200i64; // 20 min
+                              // 4 slots: [on, on, on, off]
+        let plan = make_plan_with_heater_slots(now, step_s, &[2.0, 2.0, 2.0, 0.0]);
+        let result = heater_block_end(&plan, now);
+        let expected = now + Duration::seconds(3 * step_s); // end of slot 2
+        assert_eq!(
+            result,
+            Some(expected),
+            "on-block end should be end of slot 2"
+        );
+    }
+
+    #[test]
+    fn test_heater_block_end_off_block() {
+        let now = fixed_now();
+        let step_s = 1200i64;
+        // 4 slots: [off, off, on, on]
+        let plan = make_plan_with_heater_slots(now, step_s, &[0.0, 0.0, 2.0, 2.0]);
+        let result = heater_block_end(&plan, now);
+        let expected = now + Duration::seconds(2 * step_s); // end of slot 1
+        assert_eq!(
+            result,
+            Some(expected),
+            "off-block end should be end of slot 1"
+        );
+    }
+
+    #[test]
+    fn test_heater_block_end_no_future_slots() {
+        let now = fixed_now();
+        let step_s = 1200i64;
+        // Plan ended before now (4 slots starting 80 min ago)
+        let past = now - Duration::seconds(4 * step_s);
+        let plan = make_plan_with_heater_slots(past, step_s, &[2.0, 2.0]);
+        let result = heater_block_end(&plan, now);
+        assert_eq!(result, None, "no future slots must return None");
+    }
+
+    #[test]
+    fn test_build_heater_anchor_pins_within_window() {
+        let now = fixed_now();
+        let step_s: u64 = 1200; // 20 min
+        let n_slots = 6;
+        let anchor_until = now + Duration::minutes(60); // 3 × 20-min slots
+        let plan = make_plan_with_heater_slots(now, step_s as i64, &[2.0; 6]);
+        let anchor = build_heater_anchor(Some(&plan), Some(anchor_until), now, step_s, n_slots);
+        assert_eq!(anchor[0], Some(2.0), "slot 0 should be pinned");
+        assert_eq!(anchor[1], Some(2.0), "slot 1 should be pinned");
+        assert_eq!(anchor[2], Some(2.0), "slot 2 should be pinned");
+        assert_eq!(anchor[3], None, "slot 3 is after anchor_until");
+        assert_eq!(anchor[4], None, "slot 4 is after anchor_until");
+        assert_eq!(anchor[5], None, "slot 5 is after anchor_until");
+    }
+
+    #[test]
+    fn test_build_heater_anchor_no_plan_returns_all_none() {
+        let now = fixed_now();
+        let anchor = build_heater_anchor(None, Some(now + Duration::hours(1)), now, 300, 4);
+        assert!(
+            anchor.iter().all(|v| v.is_none()),
+            "no plan → all-None anchor"
+        );
+    }
+
+    #[test]
+    fn test_build_heater_anchor_no_until_returns_all_none() {
+        let now = fixed_now();
+        let plan = make_plan_with_heater_slots(now, 1200, &[2.0; 4]);
+        let anchor = build_heater_anchor(Some(&plan), None, now, 1200, 4);
+        assert!(
+            anchor.iter().all(|v| v.is_none()),
+            "no anchor_until → all-None anchor"
         );
     }
 }

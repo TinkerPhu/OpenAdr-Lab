@@ -138,6 +138,7 @@ impl Default for ControllerSimState {
 #[derive(Debug, Clone, Default)]
 pub struct HemsState {
     pub active_plan: Option<Plan>,
+    pub anchor_until: Option<DateTime<Utc>>,
     pub planned_tariffs: Vec<TariffSnapshot>,
     pub capacity_state: OadrCapacityState,
     pub report_obligations: Vec<OadrReportObligation>,
@@ -274,6 +275,14 @@ impl AppState {
 
     pub async fn set_active_plan(&self, plan: Option<Plan>) {
         self.hems.write().await.active_plan = plan;
+    }
+
+    pub async fn anchor_until(&self) -> Option<DateTime<Utc>> {
+        self.hems.read().await.anchor_until
+    }
+
+    pub async fn set_anchor_until(&self, t: Option<DateTime<Utc>>) {
+        self.hems.write().await.anchor_until = t;
     }
 
     pub async fn planned_tariffs(&self) -> Vec<TariffSnapshot> {

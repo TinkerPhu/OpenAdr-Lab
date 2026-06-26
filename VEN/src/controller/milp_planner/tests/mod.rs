@@ -448,7 +448,11 @@ fn build_asset_contexts(
                     .unwrap_or(0.25)
             })
             .sum();
-        if n > 0 { total / n as f64 } else { 0.25 }
+        if n > 0 {
+            total / n as f64
+        } else {
+            0.25
+        }
     };
 
     let mut ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = Vec::new();
@@ -480,6 +484,7 @@ fn build_asset_contexts(
                     1.0,
                     lambda_sw,
                     c_terminal,
+                    vec![],
                 ) {
                     ctxs.push(ctx);
                 }
@@ -514,6 +519,7 @@ fn build_asset_contexts(
                     1.0,
                     lambda_sw,
                     0.0,
+                    vec![],
                 ) {
                     ctxs.push(ctx);
                 }
@@ -529,9 +535,9 @@ fn build_asset_contexts(
                     actual_power_kw: 0.0,
                 });
                 let ac = AssetConfig::Heater(Heater::from_params(cfg));
-                let c_terminal = cfg.c_terminal_eur_kwh.unwrap_or_else(|| {
-                    avg_imp_eur_kwh + profile.planner.c_ctrl_imp_malus_eur_kwh
-                });
+                let c_terminal = cfg
+                    .c_terminal_eur_kwh
+                    .unwrap_or_else(|| avg_imp_eur_kwh + profile.planner.c_ctrl_imp_malus_eur_kwh);
                 if let Some(ctx) = ac.build_milp_context(
                     &state,
                     n,
@@ -544,6 +550,7 @@ fn build_asset_contexts(
                     1.0,
                     lambda_sw,
                     c_terminal,
+                    vec![],
                 ) {
                     ctxs.push(ctx);
                 }
@@ -614,6 +621,7 @@ fn contexts_from_inputs(
                 initial_z_mid: inputs.heat_initial_z_mid,
                 initial_z_full: inputs.heat_initial_z_full,
                 c_terminal_eur_kwh: 0.0,
+                anchored_kw: vec![],
             },
         }));
     }
