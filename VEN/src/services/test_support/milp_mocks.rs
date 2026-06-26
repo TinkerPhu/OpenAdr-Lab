@@ -231,6 +231,7 @@ impl MockHeaterCtx {
                 initial_z_mid: 0.0,
                 initial_z_full: 0.0,
                 c_terminal_eur_kwh: 0.0,
+                anchored_kw: vec![],
             },
         }
     }

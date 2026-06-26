@@ -321,9 +321,9 @@ impl EvMilpContext {
     pub fn energy_expr(&self, v: &EvMilpVars, n: usize, dt_h: &[f64]) -> Expression {
         let t_dlim = self.t_dead_step.unwrap_or(n.saturating_sub(1));
         let mut expr = Expression::from(0.0);
-        for t in 0..n {
+        for (t, &dt) in dt_h.iter().enumerate().take(n) {
             if t <= t_dlim {
-                expr += dt_h[t] * v.p_ev[t];
+                expr += dt * v.p_ev[t];
             }
         }
         expr

@@ -100,7 +100,12 @@ fn ev_may_run_commits_when_core_reward_exceeds_cost() {
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
-    let ev_energy: f64 = out.p_ev_kw.iter().zip(inputs.dt_h.iter()).map(|(p, &d)| p * d).sum();
+    let ev_energy: f64 = out
+        .p_ev_kw
+        .iter()
+        .zip(inputs.dt_h.iter())
+        .map(|(p, &d)| p * d)
+        .sum();
     assert!(
         ev_energy >= inputs.e_ev_core_kwh - 0.1,
         "MayRun EV with sufficient reward should meet core {:.1} kWh, got {:.4}",
@@ -155,7 +160,12 @@ fn solve_ev_must_run_meets_core() {
     assert!(result.is_ok(), "solver failed: {:?}", result.err());
     let out = result.unwrap();
 
-    let ev_energy: f64 = out.p_ev_kw.iter().zip(inputs.dt_h.iter()).map(|(p, &d)| p * d).sum();
+    let ev_energy: f64 = out
+        .p_ev_kw
+        .iter()
+        .zip(inputs.dt_h.iter())
+        .map(|(p, &d)| p * d)
+        .sum();
     assert!(
         (ev_energy - 4.0).abs() < 1e-2,
         "EV energy {ev_energy:.4} kWh should be ≈ 4.0 kWh"
@@ -568,24 +578,26 @@ fn heater_terminal_reward_raises_end_state() {
     let n = 4;
     let inputs = make_solver_inputs(n, 0.0); // flat 0.25 EUR/kWh, dt_h=1.0, no load
 
-    let make_ctxs = |c_terminal: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
-        vec![Box::new(MockHeaterCtx {
-            ctx: HeaterMilpContext {
-                mode: HeaterMilpMode::MayRun,
-                t_dead_step: None,
-                p_mid_kw: 1.0,
-                p_full_kw: 2.0,
-                e_init_kwh: 0.0,
-                e_max_kwh: 4.0,
-                q_dem_kw: 0.0,
-                e_target_kwh: 4.0,
-                lambda_sw_eur: 0.0,
-                initial_z_mid: 0.0,
-                initial_z_full: 0.0,
-                c_terminal_eur_kwh: c_terminal,
-            },
-        })]
-    };
+    let make_ctxs =
+        |c_terminal: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
+            vec![Box::new(MockHeaterCtx {
+                ctx: HeaterMilpContext {
+                    mode: HeaterMilpMode::MayRun,
+                    t_dead_step: None,
+                    p_mid_kw: 1.0,
+                    p_full_kw: 2.0,
+                    e_init_kwh: 0.0,
+                    e_max_kwh: 4.0,
+                    q_dem_kw: 0.0,
+                    e_target_kwh: 4.0,
+                    lambda_sw_eur: 0.0,
+                    initial_z_mid: 0.0,
+                    initial_z_full: 0.0,
+                    c_terminal_eur_kwh: c_terminal,
+                    anchored_kw: vec![],
+                },
+            })]
+        };
 
     let out_no = solve_phase1(&inputs, &make_phase1_weights(), &make_ctxs(0.0), 60.0)
         .expect("solver failed (no c_terminal)");
@@ -611,21 +623,22 @@ fn battery_terminal_reward_raises_end_soc() {
     let n = 4;
     let inputs = make_solver_inputs(n, 0.0); // flat 0.25 EUR/kWh, dt_h=1.0, no load
 
-    let make_ctxs = |c_terminal: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
-        vec![Box::new(MockBatteryCtx {
-            ctx: BatteryMilpContext {
-                e_nom_kwh: 4.0,
-                e_init_kwh: 0.0,
-                e_min_kwh: 0.0,
-                e_max_kwh: 4.0,
-                p_ch_max_kw: 2.0,
-                p_dis_max_kw: 2.0,
-                eff_ch: 1.0,
-                eff_dis: 1.0,
-                c_terminal_eur_kwh: c_terminal,
-            },
-        })]
-    };
+    let make_ctxs =
+        |c_terminal: f64| -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
+            vec![Box::new(MockBatteryCtx {
+                ctx: BatteryMilpContext {
+                    e_nom_kwh: 4.0,
+                    e_init_kwh: 0.0,
+                    e_min_kwh: 0.0,
+                    e_max_kwh: 4.0,
+                    p_ch_max_kw: 2.0,
+                    p_dis_max_kw: 2.0,
+                    eff_ch: 1.0,
+                    eff_dis: 1.0,
+                    c_terminal_eur_kwh: c_terminal,
+                },
+            })]
+        };
 
     let out_no = solve_phase1(&inputs, &make_phase1_weights(), &make_ctxs(0.0), 60.0)
         .expect("solver failed (no c_terminal)");

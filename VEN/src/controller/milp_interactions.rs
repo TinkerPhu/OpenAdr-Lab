@@ -192,7 +192,11 @@ impl AssetInteraction for BatEvCoexistInteraction {
             return Expression::from(0.0);
         };
         let mut obj = Expression::from(0.0);
-        for (t, x) in x_coexist.iter().enumerate().filter_map(|(t, x)| x.as_ref().map(|v| (t, v))) {
+        for (t, x) in x_coexist
+            .iter()
+            .enumerate()
+            .filter_map(|(t, x)| x.as_ref().map(|v| (t, v)))
+        {
             obj += (self.c_eur_kwh * dt_h[t]) * *x;
         }
         obj

@@ -115,7 +115,8 @@ pub(crate) fn solve_phase1(
     for ctx in asset_contexts {
         match ctx.asset_kind() {
             AssetKind::Battery => {
-                objective += ctx.objective(&pool, n, &inputs.dt_h, p1w.c_bat_wear_eur_kwh, 0.0, 0.0);
+                objective +=
+                    ctx.objective(&pool, n, &inputs.dt_h, p1w.c_bat_wear_eur_kwh, 0.0, 0.0);
             }
             AssetKind::Ev => {
                 objective += ctx.objective(&pool, n, &inputs.dt_h, 0.0, 0.0, 0.0);

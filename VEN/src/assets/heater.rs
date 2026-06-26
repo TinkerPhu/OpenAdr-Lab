@@ -326,26 +326,50 @@ impl Asset for Heater {
 // Struct/enum definitions live in `controller::milp_planner::asset_port`.
 // Method implementations below are cross-file inherent impl blocks — valid Rust.
 
+/// Map a planned heater power [kW] to tier binary values (z_mid, z_full).
+/// Returns (Some(0|1), Some(0|1)) when kw matches a recognised tier within 0.1 kW,
+/// or (None, None) when the value doesn't match any tier (leave binaries free).
+fn kw_to_tier_pair(kw: f64, p_mid: f64, p_full: f64) -> (Option<f64>, Option<f64>) {
+    const TOL: f64 = 0.1;
+    if kw.abs() < TOL {
+        (Some(0.0), Some(0.0))
+    } else if (kw - p_mid).abs() < TOL {
+        (Some(1.0), Some(0.0))
+    } else if (kw - p_full).abs() < TOL {
+        (Some(0.0), Some(1.0))
+    } else {
+        (None, None)
+    }
+}
+
 impl HeaterMilpContext {
     /// Declare all LP variables for this heater.
     pub fn declare_vars(&self, n: usize, vars: &mut ProblemVariables) -> HeaterMilpVars {
         let must_not = self.mode == HeaterMilpMode::MustNotRun;
 
         let z_heat_mid = (0..n)
-            .map(|_| {
-                if must_not {
-                    vars.add(variable().min(0.0).max(0.0))
-                } else {
-                    vars.add(variable().binary())
+            .map(|t| {
+                let (fixed_mid, _) = match self.anchored_kw.get(t).copied().flatten() {
+                    Some(kw) => kw_to_tier_pair(kw, self.p_mid_kw, self.p_full_kw),
+                    None => (None, None),
+                };
+                match fixed_mid {
+                    Some(v) => vars.add(variable().min(v).max(v)),
+                    None if must_not => vars.add(variable().min(0.0).max(0.0)),
+                    None => vars.add(variable().binary()),
                 }
             })
             .collect();
         let z_heat_full = (0..n)
-            .map(|_| {
-                if must_not {
-                    vars.add(variable().min(0.0).max(0.0))
-                } else {
-                    vars.add(variable().binary())
+            .map(|t| {
+                let (_, fixed_full) = match self.anchored_kw.get(t).copied().flatten() {
+                    Some(kw) => kw_to_tier_pair(kw, self.p_mid_kw, self.p_full_kw),
+                    None => (None, None),
+                };
+                match fixed_full {
+                    Some(v) => vars.add(variable().min(v).max(v)),
+                    None if must_not => vars.add(variable().min(0.0).max(0.0)),
+                    None => vars.add(variable().binary()),
                 }
             })
             .collect();
@@ -409,10 +433,10 @@ impl HeaterMilpContext {
 
         // C2: tank dynamics — E[t+1] = E[t] + (P_heat[t] − q_dem) × dt_h[t].
         // Expressed as two inequalities (== is not directly supported).
-        for t in 0..(n.saturating_sub(1)) {
-            let net_const = -self.q_dem_kw * dt_h[t];
-            let p_mid_dt = self.p_mid_kw * dt_h[t];
-            let p_full_dt = self.p_full_kw * dt_h[t];
+        for (t, &dt) in dt_h.iter().enumerate().take(n.saturating_sub(1)) {
+            let net_const = -self.q_dem_kw * dt;
+            let p_mid_dt = self.p_mid_kw * dt;
+            let p_full_dt = self.p_full_kw * dt;
             // LHS = e_tank[t+1] − e_tank[t] − p_mid_dt×z_mid[t] − p_full_dt×z_full[t]
             let lhs_ge = Expression::from(v.e_tank[t + 1])
                 - Expression::from(v.e_tank[t])
@@ -497,10 +521,10 @@ impl HeaterMilpContext {
         if self.mode == HeaterMilpMode::MustNotRun {
             return obj;
         }
-        for t in 0..n {
+        for (t, &dt) in dt_h.iter().enumerate().take(n) {
             obj += w_tier_penalty_eur * v.z_heat_full[t]; // prefer mid over full when equal cost
             obj += m_low_eur_kwh * v.s_low[t]; // penalise below-min violations
-            obj += lambda_sw_eur * dt_h[t] * v.sw[t]; // penalise relay switches; scale by dt_h
+            obj += lambda_sw_eur * dt * v.sw[t]; // penalise relay switches; scale by dt_h
         }
         // Terminal energy reward (Phase 1 only — m_low > 0, lambda_sw == 0).
         // Makes the optimizer treat heat stored at horizon end as having forward
@@ -524,6 +548,7 @@ impl HeaterMilpContext {
     }
 
     /// Construct from a live `AssetState`, sim `Heater` config, and optional target data.
+    #[allow(clippy::too_many_arguments)] // all parameters are distinct domain values with no natural grouping
     pub fn from_state(
         state: &super::AssetState,
         cfg: &Heater,
@@ -533,6 +558,7 @@ impl HeaterMilpContext {
         heater_target: Option<&crate::entities::device_session::HeaterTarget>,
         lambda_sw: f64,
         c_terminal_eur_kwh: f64,
+        anchored_kw: Vec<Option<f64>>,
     ) -> Self {
         let current_temp = if let super::AssetState::Heater(s) = state {
             s.temperature_c
@@ -581,6 +607,7 @@ impl HeaterMilpContext {
                 initial_z_mid,
                 initial_z_full,
                 c_terminal_eur_kwh,
+                anchored_kw,
             }
         } else {
             Self {
@@ -596,6 +623,7 @@ impl HeaterMilpContext {
                 initial_z_mid,
                 initial_z_full,
                 c_terminal_eur_kwh,
+                anchored_kw,
             }
         }
     }
@@ -729,6 +757,7 @@ impl Heater {
     }
 
     /// Heater objective contribution. Delegates to `HeaterMilpContext::objective`.
+    #[allow(clippy::too_many_arguments)] // all parameters are distinct domain values with no natural grouping
     pub fn milp_objective(
         &self,
         ctx: &HeaterMilpContext,
@@ -1050,6 +1079,7 @@ mod tests {
             initial_z_mid: 0.0,
             initial_z_full: 0.0,
             c_terminal_eur_kwh: 0.0,
+            anchored_kw: vec![],
         }
     }
 
@@ -1251,6 +1281,7 @@ mod milp_context_trait_tests {
             initial_z_mid: 0.0,
             initial_z_full: 0.0,
             c_terminal_eur_kwh: 0.0,
+            anchored_kw: vec![],
         }
     }
 
@@ -1425,9 +1456,9 @@ mod milp_context_trait_tests {
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
         let v = pool.heater.as_ref().unwrap();
 
-        let dt_zone_a = vec![5.0_f64 / 60.0];  // 5-min slot
+        let dt_zone_a = vec![5.0_f64 / 60.0]; // 5-min slot
         let dt_zone_c = vec![15.0_f64 / 60.0]; // 15-min slot
-        // Phase 2 mode: w_tier=0, m_low=0, lambda_sw=0.50
+                                               // Phase 2 mode: w_tier=0, m_low=0, lambda_sw=0.50
         let obj_a = HeaterMilpContext::objective(&ctx, v, 0.0, 0.0, 0.50, n, &dt_zone_a);
         let obj_c = HeaterMilpContext::objective(&ctx, v, 0.0, 0.0, 0.50, n, &dt_zone_c);
 
@@ -1445,5 +1476,59 @@ mod milp_context_trait_tests {
             "Zone C switch cost must be 3× Zone A; ratio={:.6}",
             cost_c / cost_a,
         );
+    }
+
+    #[test]
+    fn test_anchored_vars_produce_fixed_bounds() {
+        // Slot 0 anchored to full tier (2.0 kW): z_full[0] must be 1.0, z_mid[0] must be 0.0.
+        // Slot 1 free: minimizer drives z_full[1] to 0.0.
+        use good_lp::{solvers::highs::highs, Expression, SolverModel};
+        let n = 2;
+        let ctx = HeaterMilpContext {
+            anchored_kw: vec![Some(2.0), None], // full tier anchor on slot 0
+            ..make_ctx()                        // p_mid_kw=1.0, p_full_kw=2.0
+        };
+        let mut vars = variables!();
+        let hv = ctx.declare_vars(n, &mut vars);
+        let dt_h: Vec<f64> = vec![300.0 / 3600.0; n];
+        let cs = ctx.constraints(&hv, n, &dt_h);
+        // Minimize z_full[0] + z_full[1]: slot 0 fixed → contributes 1.0; slot 1 minimized → 0.0.
+        let obj: Expression =
+            Expression::from(hv.z_heat_full[0]) + Expression::from(hv.z_heat_full[1]);
+        let model = cs
+            .into_iter()
+            .fold(vars.minimise(&obj).using(highs), |m, c| m.with(c));
+        let sol = model.solve().expect("anchored LP must be feasible");
+        assert!(
+            (sol.value(hv.z_heat_full[0]) - 1.0).abs() < 1e-4,
+            "slot 0 anchored to full tier: z_full[0] must be 1.0, got {:.6}",
+            sol.value(hv.z_heat_full[0])
+        );
+        assert!(
+            sol.value(hv.z_heat_mid[0]).abs() < 1e-4,
+            "slot 0 anchored to full tier: z_mid[0] must be 0.0, got {:.6}",
+            sol.value(hv.z_heat_mid[0])
+        );
+    }
+
+    #[test]
+    fn test_kw_to_tier_pair_off() {
+        assert_eq!(kw_to_tier_pair(0.0, 1.0, 2.0), (Some(0.0), Some(0.0)));
+        assert_eq!(kw_to_tier_pair(0.05, 1.0, 2.0), (Some(0.0), Some(0.0)));
+    }
+
+    #[test]
+    fn test_kw_to_tier_pair_mid() {
+        assert_eq!(kw_to_tier_pair(1.0, 1.0, 2.0), (Some(1.0), Some(0.0)));
+    }
+
+    #[test]
+    fn test_kw_to_tier_pair_full() {
+        assert_eq!(kw_to_tier_pair(2.0, 1.0, 2.0), (Some(0.0), Some(1.0)));
+    }
+
+    #[test]
+    fn test_kw_to_tier_pair_unrecognised() {
+        assert_eq!(kw_to_tier_pair(1.5, 1.0, 2.0), (None, None));
     }
 }

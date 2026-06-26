@@ -240,7 +240,8 @@ pub(crate) fn translate_to_plan(
                     (
                         sp,
                         gp,
-                        gp * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t] - sp * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
+                        gp * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t]
+                            - sp * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
                         gp * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
                     )
                 } else {
@@ -353,8 +354,18 @@ pub(crate) fn translate_to_plan(
         total_co2_g: (0..n)
             .map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0 * sol.p_imp_kw[t] * inputs.dt_h[t])
             .sum(),
-        total_import_kwh: sol.p_imp_kw.iter().zip(inputs.dt_h.iter()).map(|(p, &d)| p * d).sum(),
-        total_export_kwh: sol.p_exp_kw.iter().zip(inputs.dt_h.iter()).map(|(p, &d)| p * d).sum(),
+        total_import_kwh: sol
+            .p_imp_kw
+            .iter()
+            .zip(inputs.dt_h.iter())
+            .map(|(p, &d)| p * d)
+            .sum(),
+        total_export_kwh: sol
+            .p_exp_kw
+            .iter()
+            .zip(inputs.dt_h.iter())
+            .map(|(p, &d)| p * d)
+            .sum(),
     };
 
     // ── Cost breakdown (post-hoc from solution × weights) ───────────────
@@ -374,7 +385,11 @@ pub(crate) fn translate_to_plan(
             .map(|t| weights.w_grid * (sol.p_imp_kw[t] + sol.p_exp_kw[t]) * inputs.dt_h[t])
             .sum(),
         c_wear_eur: (0..n)
-            .map(|t| weights.c_bat_wear_eur_kwh * (sol.p_bat_ch_kw[t] + sol.p_bat_dis_kw[t]) * inputs.dt_h[t])
+            .map(|t| {
+                weights.c_bat_wear_eur_kwh
+                    * (sol.p_bat_ch_kw[t] + sol.p_bat_dis_kw[t])
+                    * inputs.dt_h[t]
+            })
             .sum(),
         c_violations_eur: (0..n)
             .map(|t| {
