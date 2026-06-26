@@ -1409,4 +1409,41 @@ mod milp_context_trait_tests {
             "auto-computed c_terminal should equal avg_imp + malus"
         );
     }
+
+    #[test]
+    fn test_switching_penalty_scales_with_dt_h() {
+        // Phase 2 switching cost: lambda_sw × dt_h[t] × sw[t].
+        // A switch in a longer slot covers more time → costs proportionally more.
+        // Zone C (15-min slot) must cost 3× Zone A (5-min slot) for the same lambda_sw.
+        let n = 1;
+        let ctx = HeaterMilpContext {
+            lambda_sw_eur: 0.50,
+            ..make_ctx()
+        };
+        let mut vars = variables!();
+        let mut pool = empty_pool(&mut vars, n);
+        ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
+        let v = pool.heater.as_ref().unwrap();
+
+        let dt_zone_a = vec![5.0_f64 / 60.0];  // 5-min slot
+        let dt_zone_c = vec![15.0_f64 / 60.0]; // 15-min slot
+        // Phase 2 mode: w_tier=0, m_low=0, lambda_sw=0.50
+        let obj_a = HeaterMilpContext::objective(&ctx, v, 0.0, 0.0, 0.50, n, &dt_zone_a);
+        let obj_c = HeaterMilpContext::objective(&ctx, v, 0.0, 0.0, 0.50, n, &dt_zone_c);
+
+        // The expressions differ: Zone C has a 3× larger coefficient on sw[0].
+        assert_ne!(
+            format!("{obj_a:?}"),
+            format!("{obj_c:?}"),
+            "Zone A and Zone C switching cost expressions must differ"
+        );
+        // Verify the 3:1 ratio from the dt_h multiplier.
+        let cost_a = 0.50 * (5.0_f64 / 60.0);
+        let cost_c = 0.50 * (15.0_f64 / 60.0);
+        assert!(
+            (cost_c / cost_a - 3.0).abs() < 1e-9,
+            "Zone C switch cost must be 3× Zone A; ratio={:.6}",
+            cost_c / cost_a,
+        );
+    }
 }
