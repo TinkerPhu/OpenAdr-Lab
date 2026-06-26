@@ -714,22 +714,25 @@ mod tests {
 
     #[test]
     fn test_gate_accepts_cleaner_plan_at_zero_surcharge() {
-        // gate_switch_penalty_eur=0.0 disables switch guard; standard cost improvement wins.
+        // gate_switch_penalty_eur=0.0 disables switch guard; only cost improvement matters.
+        // Use a positive threshold so the gate actually evaluates cost rather than short-circuiting.
+        // current: 3 switches, cost 10.0; new: 1 switch, cost 8.5 → improvement 1.5 > threshold 1.0.
+        // With penalty=0.0 the extra 2 switches of current don't add surcharge → accepted.
         let now = fixed_now();
         let current = make_heater_plan(now, &[2.0, 0.0, 2.0, 0.0], 10.0); // 3 switches
-        let new_plan = make_heater_plan(now, &[2.0, 2.0, 0.0, 0.0], 9.5); // 1 switch, cheaper
+        let new_plan = make_heater_plan(now, &[2.0, 2.0, 0.0, 0.0], 8.5); // 1 switch, cheaper
         let adopt = evaluate_acceptance_gate(
             Some(&current),
             &new_plan,
             &PlanTrigger::Periodic,
+            1.0, // active threshold: forces gate to evaluate rather than short-circuit
             0.0,
-            0.0,
-            0.0,
+            0.0, // switch guard disabled
             now,
         );
         assert!(
             adopt,
-            "penalty=0 disables surcharge: improvement (0.5) > 0 must accept"
+            "penalty=0 disables surcharge: improvement (1.5) > threshold (1.0) must accept"
         );
     }
 
@@ -754,10 +757,14 @@ mod tests {
     #[test]
     fn test_gate_decayed_accepts_despite_surcharge() {
         // Fully decayed plan is replaced unconditionally even with high switch surcharge.
+        // Use make_plan_at with no slots so current_expired stays false and the test
+        // exercises the fully_decayed path, not the current_expired path.
         let now = fixed_now();
-        // current created 2 h ago with decay_s=3600 → fully_decayed=true.
-        let current = make_heater_plan(now - Duration::seconds(7200), &[2.0, 2.0, 0.0, 0.0], 10.0);
-        let new_plan = make_heater_plan(now, &[2.0, 0.0, 2.0, 0.0], 10.0); // same cost, more switches
+        // current has no slots → current_expired=false; created 2 h ago, decay_s=3600 → fully_decayed=true.
+        let current = make_plan_at(10.0, 0.0, now - Duration::seconds(7200));
+        // new_plan has 3 switches (kws change: 0→2, 2→0, 0→2) vs current 0 → surcharge=3×0.50=1.50.
+        // improvement = 10.0 − 10.0 = 0.0 < threshold(1.0) + surcharge(1.50) → would reject w/o decay.
+        let new_plan = make_heater_plan(now, &[2.0, 0.0, 2.0, 0.0], 10.0);
         let adopt = evaluate_acceptance_gate(
             Some(&current),
             &new_plan,
