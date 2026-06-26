@@ -493,6 +493,13 @@ pub struct PlannerConfig {
     /// Allows event polling to populate tariff rates first. Default: 5.
     #[serde(default = "default_planning_initial_delay_s")]
     pub planning_initial_delay_s: u64,
+
+    /// Per-extra-switch surcharge [EUR] added to the effective acceptance threshold.
+    /// Periodic replans that introduce more heater relay operations than the current plan
+    /// must overcome this additional cost penalty before being adopted.
+    /// 0.0 = disabled (default). Suggested: match `switching_penalty_eur`.
+    #[serde(default)]
+    pub gate_switch_penalty_eur: f64,
 }
 
 impl Default for PlannerConfig {
@@ -523,6 +530,7 @@ impl Default for PlannerConfig {
             phase2_epsilon_eur: default_phase2_epsilon(),
             solver_timeout_s: default_solver_timeout_s(),
             planning_initial_delay_s: default_planning_initial_delay_s(),
+            gate_switch_penalty_eur: 0.0,
         }
     }
 }

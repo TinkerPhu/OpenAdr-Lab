@@ -277,6 +277,7 @@ pub(crate) fn spawn_planning(
                 &trigger_reason,
                 planner.plan_adoption_threshold_eur,
                 planner.plan_adoption_decay_s,
+                planner.gate_switch_penalty_eur,
                 solver_ms,
                 obj,
                 &state,
