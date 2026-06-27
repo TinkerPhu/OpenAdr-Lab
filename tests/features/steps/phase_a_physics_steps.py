@@ -36,16 +36,22 @@ def step_given_system_idle(context):
         body = resp.json()
         return body if (body and "created_at" in body) else None
 
-    plan = poll_until(
+    poll_until(
         fetch,
         lambda p: p is not None,
         timeout=150,
         description="VEN /plan returns a plan with created_at",
     )
-    # Record the solve timestamp before the inject so the Then step can detect change.
-    context.idle_plan_ts = plan["created_at"]
-    # Brief pause to ensure the planner loop has fully settled.
+    # Brief pause to ensure any in-flight replan (e.g. triggered by a previous
+    # scenario's cleanup removing a rate event) has time to complete and be adopted.
     time.sleep(3)
+    # Re-read plan AFTER the sleep so the baseline is the latest adopted plan.
+    # Without this, a background replan that fires during the sleep would cause
+    # the 'no plan cycle' assertion to fail spuriously.
+    resp = ven_get("/plan")
+    body = resp.json() if resp.ok else None
+    assert body and "created_at" in body, "VEN /plan missing created_at after idle sleep"
+    context.idle_plan_ts = body["created_at"]
 
 
 # ── When: SoC reset and override helpers ─────────────────────────────────────
