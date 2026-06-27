@@ -8,12 +8,14 @@ import {
   CartesianGrid,
   Tooltip,
   ReferenceLine,
+  ReferenceArea,
   Legend,
   ResponsiveContainer,
 } from "recharts";
 import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../types";
 import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_NOW, COLOR_ASSET_FALLBACK } from "../types";
+import type { ZoneDef } from "../../../api/types";
 
 const COLOR_GRID_LINE = "#212121";
 
@@ -25,6 +27,7 @@ interface StackedAreaChartProps {
   hoursBack?: number;
   hoursForward?: number;
   height?: number;
+  zones?: ZoneDef[];
 }
 
 function formatTs(ts: number) {
@@ -107,6 +110,7 @@ export function StackedAreaChart({
   hoursBack = 1.0,
   hoursForward = 1.0,
   height,
+  zones,
 }: StackedAreaChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes
   // and ensures the NOW reference line is always within the visible range.
@@ -205,6 +209,18 @@ export function StackedAreaChart({
             connectNulls={false}
             isAnimationActive={false}
           />
+
+          {/* Zone background shading — rendered before data lines so they sit behind */}
+          {zones?.map((z, i) => (
+            <ReferenceArea
+              key={z.from}
+              yAxisId="power"
+              x1={new Date(z.from).getTime()}
+              x2={new Date(z.to).getTime()}
+              fill={`rgba(0,0,0,${0.04 * i})`}
+              ifOverflow="hidden"
+            />
+          ))}
 
           {/* NOW reference line */}
           <ReferenceLine

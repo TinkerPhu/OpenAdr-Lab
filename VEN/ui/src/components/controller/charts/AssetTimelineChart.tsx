@@ -7,11 +7,13 @@ import {
   CartesianGrid,
   Tooltip,
   ReferenceLine,
+  ReferenceArea,
   Legend,
   ResponsiveContainer,
 } from "recharts";
 import type { AssetTimelinePoint } from "../types";
 import { COLOR_NOW } from "../types";
+import type { ZoneDef } from "../../../api/types";
 
 interface AssetTimelineChartProps {
   data: AssetTimelinePoint[];
@@ -20,6 +22,7 @@ interface AssetTimelineChartProps {
   hoursBack?: number;
   hoursForward?: number;
   stateKey?: "soc" | "temp_c";
+  zones?: ZoneDef[];
 }
 
 function formatTs(ts: number) {
@@ -33,6 +36,7 @@ export function AssetTimelineChart({
   hoursBack = 1.0,
   hoursForward = 1.0,
   stateKey,
+  zones,
 }: AssetTimelineChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes.
   const tMin = nowMs - hoursBack * 3_600_000;
@@ -153,6 +157,18 @@ export function AssetTimelineChart({
             isAnimationActive={false}
           />
         )}
+
+        {/* Zone background shading — rendered before data lines so they sit behind */}
+        {zones?.map((z, i) => (
+          <ReferenceArea
+            key={z.from}
+            yAxisId="power"
+            x1={new Date(z.from).getTime()}
+            x2={new Date(z.to).getTime()}
+            fill={`rgba(0,0,0,${0.04 * i})`}
+            ifOverflow="hidden"
+          />
+        ))}
 
         {/* NOW reference line */}
         <ReferenceLine

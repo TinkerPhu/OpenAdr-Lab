@@ -7,6 +7,7 @@ import UnfoldLessIcon from "@mui/icons-material/UnfoldLess";
 import { CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED_WINDOW, CELL_CHART_HEIGHT_TALL } from "./chartLayout";
 import type { TariffSnapshot, AssetTimelinePoint } from "./types";
 import { TariffChart } from "./charts/TariffChart";
+import type { ZoneDef } from "../../api/types";
 import { useTariffs } from "../../api/hooks";
 import { buildTariffPricePoints, buildPowerPoints, fillCostRateFromTariffs } from "./tariffBuilders";
 
@@ -16,6 +17,7 @@ interface GridTariffCellProps {
   nowMs: number;
   extended: boolean;
   pinned: boolean;
+  zones?: ZoneDef[];
   onTogglePin: () => void;
 }
 
@@ -25,6 +27,7 @@ export function GridTariffCell({
   nowMs,
   extended,
   pinned,
+  zones,
   onTogglePin,
 }: GridTariffCellProps) {
   const [tall, setTall] = useState(false);
@@ -75,6 +78,7 @@ export function GridTariffCell({
           hoursBack={window.hoursBack}
           hoursForward={window.hoursForward}
           height={tall ? CELL_CHART_HEIGHT_TALL : undefined}
+          zones={zones}
         />
       </Box>
 
