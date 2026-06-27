@@ -5,6 +5,7 @@ import type {
   EvSession, CreateEvSessionBody, EvSettings, UpdateEvSettingsBody,
   HeaterTarget, CreateHeaterTargetBody,
   ShiftableLoad, CreateShiftableLoadBody, BaselineOverride, CreateBaselineOverrideBody,
+  ZoneDef,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
@@ -212,7 +213,7 @@ export class VenApi {
 
   async allTimelines(
     params?: { hoursBack?: number; hoursForward?: number; maxPoints?: number; resolution?: number }
-  ): Promise<Record<string, AssetTimelinePoint[]>> {
+  ): Promise<{ zones: ZoneDef[]; timelines: Record<string, AssetTimelinePoint[]> }> {
     const qs = new URLSearchParams();
     if (params?.hoursBack !== undefined) qs.set("hours_back", String(params.hoursBack));
     if (params?.hoursForward !== undefined) qs.set("hours_forward", String(params.hoursForward));
@@ -221,13 +222,17 @@ export class VenApi {
     const path = `/timeline/all${qs.toString() ? `?${qs}` : ""}`;
     const r = await this.getReq(path);
     if (!r.ok) throw new Error(`timeline/all ${r.status}`);
-    const raw: Record<string, { ts: string; values: Record<string, number> | null }[]> = await r.json();
-    return Object.fromEntries(
-      Object.entries(raw).map(([id, pts]) => [
+    const envelope: {
+      zones: ZoneDef[];
+      timelines: Record<string, { ts: string; values: Record<string, number> | null }[]>;
+    } = await r.json();
+    const timelines = Object.fromEntries(
+      Object.entries(envelope.timelines).map(([id, pts]) => [
         id,
         pts.map((pt) => ({ ts: new Date(pt.ts).getTime(), values: pt.values })),
       ])
     );
+    return { zones: envelope.zones, timelines };
   }
 
   async flexibility(): Promise<FlexibilityEnvelope[]> {

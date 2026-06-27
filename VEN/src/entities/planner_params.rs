@@ -51,8 +51,8 @@ pub struct PlannerParams {
 impl Default for PlannerParams {
     fn default() -> Self {
         Self {
-            plan_step_s: 300,
-            plan_horizon_h: 24,
+            plan_step_s: 600,
+            plan_horizon_h: 48,
             replan_interval_s: 300,
             w_energy: 1.0,
             w_ghg: 0.0001,
@@ -69,10 +69,10 @@ impl Default for PlannerParams {
             v_ev_extra_eur_kwh: 0.10,
             v_ev_core_eur_kwh: 1.0,
             w_tier_penalty_eur: 0.001,
-            c_ctrl_imp_malus_eur_kwh: 0.0,
+            c_ctrl_imp_malus_eur_kwh: 0.22,
             objective: PlannerObjective::MinCost,
-            plan_adoption_threshold_eur: 0.0,
-            plan_adoption_decay_s: 0.0,
+            plan_adoption_threshold_eur: 0.20,
+            plan_adoption_decay_s: 1500.0,
             phase2_epsilon_eur: 0.02,
             solver_timeout_s: 60,
             planning_initial_delay_s: 5,
