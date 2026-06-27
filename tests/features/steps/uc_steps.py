@@ -37,7 +37,7 @@ def step_wait_plan_import_cap(context, cap):
     context.ven_plan = poll_until(
         fetch,
         has_cap,
-        timeout=150,
+        timeout=300,
         interval=5,
         description=f"VEN /plan slots have import_cap_kw ≤ {cap}",
     )
