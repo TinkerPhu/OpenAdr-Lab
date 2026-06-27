@@ -29,10 +29,12 @@ simulator:
   report_interval_s: 60
 
 planner:
-  phase2_epsilon_eur: 5.0
-  replan_interval_s: 300
-  plan_adoption_threshold_eur: 0.05
-  plan_adoption_decay_s: 1200
-  solver_timeout_s: 60
-  planning_initial_delay_s: 5
-  c_ctrl_imp_malus_eur_kwh: 0.22
+  # replan_interval_s: 300        # default
+  # solver_timeout_s: 60          # default
+  # planning_initial_delay_s: 5   # default
+  # plan_step_s: 600              # default (10 min slots, 288 slots over 48 h)
+  # plan_horizon_h: 48            # default
+  # c_ctrl_imp_malus_eur_kwh: 0.22  # default
+  # plan_adoption_threshold_eur: 0.20  # default
+  # plan_adoption_decay_s: 1500   # default
+  phase2_epsilon_eur: 0.17          # = 2× effective switching cost (0.50 × 10/60 ≈ 0.083 EUR/switch)

@@ -46,7 +46,7 @@ vi.mock("../components/controller/charts/TariffChart", () => ({
 
 // ─── Mutable: changed between renders to simulate React Query data refresh ───
 
-let allTimelinesData: Record<string, unknown[]> = {};
+let allTimelinesData: { zones: unknown[]; timelines: Record<string, unknown[]> } = { zones: [], timelines: {} };
 let tariffsData: unknown[] = [];
 
 vi.mock("../api/hooks", () => ({
@@ -71,7 +71,7 @@ function makeQueryClient() {
 describe("GridTariffCell — now line position", () => {
   afterEach(() => {
     vi.useRealTimers();
-    allTimelinesData = {};
+    allTimelinesData = { zones: [], timelines: {} };
     tariffsData = [];
   });
 
@@ -97,7 +97,7 @@ describe("GridTariffCell — now line position", () => {
     act(() => void vi.advanceTimersByTime(5 * 60 * 1000));
 
     // Simulate useAllTimelines React Query refetch: swap in a new object reference.
-    allTimelinesData = {};
+    allTimelinesData = { zones: [], timelines: {} };
     act(() => {
       rerender(
         <QueryClientProvider client={qc}>
@@ -178,7 +178,7 @@ describe("GridTariffCell — now line position", () => {
 describe("GridTariffCell — expanded state via global button", () => {
   afterEach(() => {
     vi.useRealTimers();
-    allTimelinesData = {};
+    allTimelinesData = { zones: [], timelines: {} };
     tariffsData = [];
   });
 

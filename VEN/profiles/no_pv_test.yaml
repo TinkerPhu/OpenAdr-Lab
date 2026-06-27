@@ -34,11 +34,11 @@ simulator:
   report_interval_s: 10
 
 planner:
-  plan_step_s: 1800
-  plan_horizon_h: 24
-  replan_interval_s: 20
-  deviation_trigger_ticks: 10
-  c_ctrl_imp_malus_eur_kwh: 0.22
+  plan_zones:
+    - step_s: 1800   # 30 min slots, 24 h horizon — fast for BDD resilience tests
+      slots: 48
+  replan_interval_s: 20   # fast replan for resilience test scenarios
+  # c_ctrl_imp_malus_eur_kwh: 0.22  # default
 
 packets:
   - asset: ev

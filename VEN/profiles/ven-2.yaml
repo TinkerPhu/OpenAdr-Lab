@@ -24,13 +24,13 @@ simulator:
   report_interval_s: 60
 
 planner:
-  phase2_epsilon_eur: 1.00          # = 2× effective switching cost (0.50 EUR/switch); Phase 2 can eliminate up to 2 switches
-  plan_adoption_threshold_eur: 0.20 # require real improvement before replacing current plan
-  plan_adoption_decay_s: 1500       # 5× replan_interval_s — allow eventual replacement of stale plans
-  gate_switch_penalty_eur: 0.50     # per-extra-switch surcharge = effective switching cost (lambda_sw × dt_h = 3.0 × 1/6)
-  replan_interval_s: 300
-  solver_timeout_s: 60
-  planning_initial_delay_s: 5
-  c_ctrl_imp_malus_eur_kwh: 0.22
-  plan_step_s: 600                  # 10 min slots (was 5 min); keeps slot count at 288 on 48 h horizon
-  plan_horizon_h: 48                # 48 h covers 2 solar windows for the 15.5 h-fill tank
+  # replan_interval_s: 300        # default
+  # solver_timeout_s: 60          # default
+  # planning_initial_delay_s: 5   # default
+  # plan_step_s: 600              # default (10 min slots, 288 slots over 48 h)
+  # plan_horizon_h: 48            # default — 2 solar windows for the 15.5 h-fill tank
+  # c_ctrl_imp_malus_eur_kwh: 0.22  # default
+  # plan_adoption_threshold_eur: 0.20  # default
+  # plan_adoption_decay_s: 1500   # default
+  phase2_epsilon_eur: 1.00          # = 2× effective switching cost (3.0 × 10/60 = 0.50 EUR/switch)
+  gate_switch_penalty_eur: 0.50     # per-extra-switch surcharge = effective switching cost (3.0 × 10/60)
