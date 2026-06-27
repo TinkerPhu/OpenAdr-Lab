@@ -26,8 +26,11 @@ const baseTariffs: PlannedRates = [
 ];
 
 const baseTimeline = {
-  grid: [{ ts: Date.now() - 3600_000, values: { power_kw: 1.2 } }],
-  ev: [{ ts: Date.now() - 3600_000, values: { power_kw: 7.0 } }],
+  zones: [],
+  timelines: {
+    grid: [{ ts: Date.now() - 3600_000, values: { power_kw: 1.2 } }],
+    ev: [{ ts: Date.now() - 3600_000, values: { power_kw: 7.0 } }],
+  },
 };
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
