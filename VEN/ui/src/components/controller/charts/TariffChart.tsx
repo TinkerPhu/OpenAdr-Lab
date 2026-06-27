@@ -7,11 +7,13 @@ import {
   CartesianGrid,
   Tooltip,
   ReferenceLine,
+  ReferenceArea,
   Legend,
   ResponsiveContainer,
 } from "recharts";
 import type { TariffTimePoint } from "../types";
 import { COLOR_NOW } from "../types";
+import type { ZoneDef } from "../../../api/types";
 
 const COLOR_IMPORT_TARIFF = "#f44336";
 const COLOR_EXPORT_TARIFF = "#4caf50";
@@ -24,13 +26,14 @@ interface TariffChartProps {
   hoursBack?: number;
   hoursForward?: number;
   height?: number;
+  zones?: ZoneDef[];
 }
 
 function formatTs(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, height }: TariffChartProps) {
+export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, height, zones }: TariffChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable and ensures the
   // NOW reference line is always visible even when past tariff data is absent.
   const tMin = nowMs - hoursBack * 3_600_000;
@@ -164,6 +167,18 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, 
             connectNulls={true}
             isAnimationActive={false}
           />
+
+          {/* Zone background shading — rendered before data lines so they sit behind */}
+          {zones?.map((z, i) => (
+            <ReferenceArea
+              key={z.from}
+              yAxisId="tariff"
+              x1={new Date(z.from).getTime()}
+              x2={new Date(z.to).getTime()}
+              fill={`rgba(0,0,0,${0.04 * i})`}
+              ifOverflow="hidden"
+            />
+          ))}
 
           {/* NOW reference line */}
           <ReferenceLine

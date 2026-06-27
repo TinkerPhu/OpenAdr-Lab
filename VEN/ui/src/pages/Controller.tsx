@@ -37,9 +37,13 @@ export function ControllerPage() {
     hoursForward,
     { refetchInterval: false }
   );
-  // Stable reference — only recomputes when the response object itself changes.
+  // Stable references — only recompute when the response object itself changes.
   const allTimelines = useMemo(
     () => allTimelinesResponse?.timelines ?? {},
+    [allTimelinesResponse]
+  );
+  const zones = useMemo(
+    () => allTimelinesResponse?.zones ?? [],
     [allTimelinesResponse]
   );
 
@@ -141,6 +145,7 @@ export function ControllerPage() {
           nowMs={nowMs}
           extended={expanded}
           pinned
+          zones={zones}
           onTogglePin={() => handleTogglePin("grid:tariff")}
         />
       );
@@ -155,6 +160,7 @@ export function ControllerPage() {
           extended={expanded}
           pinned
           gridPowerKw={sim.grid.net_power_w / 1000}
+          zones={zones}
           onTogglePin={() => handleTogglePin("grid:accumulated")}
         />
       );
@@ -176,6 +182,7 @@ export function ControllerPage() {
           nowMs={nowMs}
           extended={expanded}
           pinned
+          zones={zones}
           onTogglePin={handleTogglePin}
           onToggleCollapse={handleToggleCollapse}
           onOverrideChange={handleOverrideChange}
@@ -211,6 +218,7 @@ export function ControllerPage() {
             nowMs={nowMs}
             extended={expanded}
             pinned={false}
+            zones={zones}
             onTogglePin={() => handleTogglePin("grid:tariff")}
           />
         )}
@@ -223,6 +231,7 @@ export function ControllerPage() {
             extended={expanded}
             pinned={false}
             gridPowerKw={sim.grid.net_power_w / 1000}
+            zones={zones}
             onTogglePin={() => handleTogglePin("grid:accumulated")}
           />
         )}
@@ -245,6 +254,7 @@ export function ControllerPage() {
                 nowMs={nowMs}
                 extended={expanded}
                 pinned={false}
+                zones={zones}
                 onTogglePin={handleTogglePin}
                 onToggleCollapse={handleToggleCollapse}
                 onOverrideChange={handleOverrideChange}

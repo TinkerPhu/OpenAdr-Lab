@@ -8,6 +8,7 @@ import { CELL_CHART_MIN_WIDTH, CELL_LEFT_SECTION_WIDTH, DEFAULT_WINDOW, EXTENDED
 import type { AssetId, AssetSummary, AssetTimelinePoint, StackedAreaPoint } from "./types";
 import { ASSET_COLORS, COLOR_ASSET_FALLBACK } from "./types";
 import { StackedAreaChart } from "./charts/StackedAreaChart";
+import type { ZoneDef } from "../../api/types";
 
 /** Discover all asset IDs present in the timelines (everything except "grid"). */
 function discoverAssetIds(allTimelines: Record<string, AssetTimelinePoint[]>): AssetId[] {
@@ -55,6 +56,7 @@ interface GridAccumulatedCellProps {
   extended: boolean;
   pinned: boolean;
   gridPowerKw: number;
+  zones?: ZoneDef[];
   onTogglePin: () => void;
 }
 
@@ -65,6 +67,7 @@ export function GridAccumulatedCell({
   extended,
   pinned,
   gridPowerKw,
+  zones,
   onTogglePin,
 }: GridAccumulatedCellProps) {
   const [tall, setTall] = useState(false);
@@ -117,6 +120,7 @@ export function GridAccumulatedCell({
           hoursBack={window.hoursBack}
           hoursForward={window.hoursForward}
           height={tall ? CELL_CHART_HEIGHT_TALL : undefined}
+          zones={zones}
         />
       </Box>
 

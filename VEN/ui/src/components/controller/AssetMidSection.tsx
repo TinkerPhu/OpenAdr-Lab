@@ -2,6 +2,7 @@ import { Box } from "@mui/material";
 import { CELL_CHART_HEIGHT, CELL_CHART_MIN_WIDTH } from "./chartLayout";
 import type { AssetId, AssetTimelinePoint } from "./types";
 import { AssetTimelineChart } from "./charts/AssetTimelineChart";
+import type { ZoneDef } from "../../api/types";
 
 interface AssetMidSectionProps {
   assetId: AssetId;
@@ -10,6 +11,7 @@ interface AssetMidSectionProps {
   nowMs: number;
   hoursBack?: number;
   hoursForward?: number;
+  zones?: ZoneDef[];
 }
 
 export function AssetMidSection({
@@ -19,6 +21,7 @@ export function AssetMidSection({
   nowMs,
   hoursBack = 1.0,
   hoursForward = 1.0,
+  zones,
 }: AssetMidSectionProps) {
   const stateKey =
     assetId === "ev" || assetId === "battery" ? "soc" :
@@ -38,6 +41,7 @@ export function AssetMidSection({
           hoursBack={hoursBack}
           hoursForward={hoursForward}
           stateKey={stateKey}
+          zones={zones}
         />
       </div>
     </Box>

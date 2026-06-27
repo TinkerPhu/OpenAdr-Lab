@@ -5,6 +5,7 @@ import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import type { AssetId, AssetSummary, AssetTimelinePoint } from "./types";
 import { ASSET_COLORS, COLOR_ASSET_FALLBACK } from "./types";
+import type { ZoneDef } from "../../api/types";
 import { AssetLeftSection } from "./AssetLeftSection";
 import { AssetMidSection } from "./AssetMidSection";
 import { AssetRightSection } from "./AssetRightSection";
@@ -24,6 +25,7 @@ interface AssetCellProps {
   /** Whether this cell's time window is expanded to 48h forward. */
   extended: boolean;
   pinned: boolean;
+  zones?: ZoneDef[];
   onTogglePin: (cellId: string) => void;
   onToggleCollapse: (cellId: string, section: "left" | "right") => void;
   onOverrideChange: (patch: Partial<SimInjectState>) => void;
@@ -40,6 +42,7 @@ export function AssetCell({
   nowMs,
   extended,
   pinned,
+  zones,
   onTogglePin,
   onToggleCollapse,
   onOverrideChange,
@@ -76,6 +79,7 @@ export function AssetCell({
         nowMs={nowMs}
         hoursBack={window.hoursBack}
         hoursForward={window.hoursForward}
+        zones={zones}
       />
 
       {/* Right section — simulation controls */}

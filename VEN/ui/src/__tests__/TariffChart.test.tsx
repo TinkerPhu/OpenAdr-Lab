@@ -12,9 +12,10 @@ import type { TariffTimePoint } from "../components/controller/types";
 // ─── Capture recharts structural props ───────────────────────────────────────
 // vi.hoisted ensures these arrays exist before the vi.mock factory runs.
 
-const { axes, lines } = vi.hoisted(() => ({
+const { axes, lines, referenceAreas } = vi.hoisted(() => ({
   axes: [] as Array<Record<string, unknown>>,
   lines: [] as Array<Record<string, unknown>>,
+  referenceAreas: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("recharts", () => ({
@@ -26,6 +27,10 @@ vi.mock("recharts", () => ({
   },
   Line: (props: Record<string, unknown>) => {
     lines.push(props);
+    return null;
+  },
+  ReferenceArea: (props: Record<string, unknown>) => {
+    referenceAreas.push(props);
     return null;
   },
   XAxis: () => null,
@@ -68,6 +73,7 @@ describe("TariffChart — dual Y-axis", () => {
   beforeEach(() => {
     axes.length = 0;
     lines.length = 0;
+    referenceAreas.length = 0;
   });
 
   it("renders the chart wrapper", () => {
@@ -107,5 +113,22 @@ describe("TariffChart — dual Y-axis", () => {
     const right = axes.find((a) => a.yAxisId === "co2");
     expect(left?.unit).toBe(" €");
     expect(right?.unit).toBe(" g/h");
+  });
+
+  it("renders one ReferenceArea per zone when zones prop is provided", () => {
+    const zones = [
+      { from: new Date(now).toISOString(), to: new Date(now + 8 * 3_600_000).toISOString(), step_s: 300 },
+      { from: new Date(now + 8 * 3_600_000).toISOString(), to: new Date(now + 24 * 3_600_000).toISOString(), step_s: 600 },
+    ];
+    render(<TariffChart data={data} nowMs={now} zones={zones} />);
+    expect(referenceAreas).toHaveLength(zones.length);
+    expect(referenceAreas[0].x1).toBe(new Date(zones[0].from).getTime());
+    expect(referenceAreas[0].x2).toBe(new Date(zones[0].to).getTime());
+    expect(referenceAreas[1].x1).toBe(new Date(zones[1].from).getTime());
+  });
+
+  it("renders no ReferenceArea when zones prop is omitted", () => {
+    render(<TariffChart data={data} nowMs={now} />);
+    expect(referenceAreas).toHaveLength(0);
   });
 });
