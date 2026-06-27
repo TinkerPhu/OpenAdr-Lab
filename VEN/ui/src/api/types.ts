@@ -387,6 +387,11 @@ export type FlexibilityEnvelope = {
   estimated_cost_eur: number;
 };
 
+// ─── Timeline zones ───────────────────────────────────────────────────────────
+
+/** A planning zone returned by GET /timeline/all. */
+export type ZoneDef = { from: string; to: string; step_s: number };
+
 // ─── Planner SSE events (Plan E) ──────────────────────────────────────────────
 
 export type PlannerEvent =

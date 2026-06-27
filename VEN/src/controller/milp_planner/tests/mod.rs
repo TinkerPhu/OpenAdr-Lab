@@ -159,6 +159,9 @@ fn make_profile() -> Profile {
         planner: PlannerConfig {
             plan_step_s: 300,
             plan_horizon_h: 2,
+            // MILP unit tests verify tariff arbitrage mechanics, not the import malus.
+            // Zero it so cheap tariff truly means cheap and arbitrage assertions hold.
+            c_ctrl_imp_malus_eur_kwh: 0.0,
             ..PlannerConfig::default()
         },
         grid: GridConfig {
@@ -385,6 +388,9 @@ fn make_heater_only_profile(
         planner: PlannerConfig {
             plan_step_s: 300,
             plan_horizon_h: 2,
+            // MILP unit tests verify tariff arbitrage mechanics, not the import malus.
+            // Zero it so cheap tariff truly means cheap and arbitrage assertions hold.
+            c_ctrl_imp_malus_eur_kwh: 0.0,
             ..PlannerConfig::default()
         },
         grid: GridConfig {

@@ -32,10 +32,11 @@ simulator:
   report_interval_s: 10
 
 planner:
-  plan_step_s: 3600
-  plan_horizon_h: 24
+  plan_zones:
+    - step_s: 3600   # 1 h slots, 24 h horizon — coarse for fast E2E solver runs
+      slots: 24
   replan_interval_s: 300
-  c_ctrl_imp_malus_eur_kwh: 0.22
+  # c_ctrl_imp_malus_eur_kwh: 0.22  # default
 
 packets:
   - asset: ev

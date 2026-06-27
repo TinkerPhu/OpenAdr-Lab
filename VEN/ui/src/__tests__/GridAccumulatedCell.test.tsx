@@ -29,7 +29,7 @@ vi.mock("../components/controller/charts/StackedAreaChart", () => ({
 
 // ─── Mutable: changed between renders to simulate React Query data refresh ───
 
-let allTimelinesData: Record<string, unknown> = {};
+let allTimelinesData: { zones: unknown[]; timelines: Record<string, unknown> } = { zones: [], timelines: {} };
 
 vi.mock("../api/hooks", () => ({
   useSim: () => ({ data: baseSim, isLoading: false, isError: false, refetch: vi.fn() }),
@@ -61,7 +61,7 @@ function nullPt(ts: number): AssetTimelinePoint {
 describe("GridAccumulatedCell — now line position", () => {
   afterEach(() => {
     vi.useRealTimers();
-    allTimelinesData = {};
+    allTimelinesData = { zones: [], timelines: {} };
   });
 
   it("nowMs passed to StackedAreaChart advances when allTimelines data refreshes after time has passed", () => {
@@ -86,7 +86,7 @@ describe("GridAccumulatedCell — now line position", () => {
     act(() => void vi.advanceTimersByTime(5 * 60 * 1000));
 
     // Simulate allTimelines React Query refetch: swap in a new object reference.
-    allTimelinesData = {};
+    allTimelinesData = { zones: [], timelines: {} };
     act(() => {
       rerender(
         <QueryClientProvider client={qc}>

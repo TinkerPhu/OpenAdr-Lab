@@ -370,12 +370,28 @@ impl Default for GridConfig {
 }
 
 /// Configuration for the HEMS Planner (Stage 3).
+/// One zone in a variable-step planning grid.
+/// Every zone's `step_s` must be an integer multiple of the first zone's `step_s`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlanZone {
+    /// Slot width in seconds.
+    pub step_s: u64,
+    /// Number of slots in this zone.
+    pub slots: u64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlannerConfig {
-    /// Planning timestep in seconds (default 300 = 5 min).
+    /// Optional variable-step planning grid. When set, `plan_step_s` and `plan_horizon_h`
+    /// are ignored and the effective values are derived from the zones list.
+    /// Production profiles omit this field; the uniform-step defaults apply.
+    /// Test profiles can use a single coarse zone for fast solver runs.
+    #[serde(default)]
+    pub plan_zones: Option<Vec<PlanZone>>,
+    /// Planning timestep in seconds (default 600 = 10 min). Ignored when `plan_zones` is set.
     #[serde(default = "default_plan_step")]
     pub plan_step_s: u64,
-    /// Total planning horizon in hours (default 24).
+    /// Total planning horizon in hours (default 48). Ignored when `plan_zones` is set.
     #[serde(default = "default_plan_horizon_h")]
     pub plan_horizon_h: u64,
     /// Seconds between periodic replanning cycles (default 300).
@@ -463,9 +479,8 @@ pub struct PlannerConfig {
     /// Minimum objective improvement (EUR) required to replace the current plan on a
     /// Periodic replan trigger. Hard triggers (RateChange, CapacityChange, Alert,
     /// UserRequest, AssetStateChange) always force adoption.
-    /// 0.0 = always adopt (default — unchanged behaviour). Raise to e.g. 0.20 to
-    /// suppress plan churn when the new solution is only marginally better.
-    #[serde(default)]
+    /// 0.0 = always adopt. Default: 0.20 (suppress churn when improvement is marginal).
+    #[serde(default = "default_plan_adoption_threshold")]
     pub plan_adoption_threshold_eur: f64,
 
     /// Time constant (seconds) for linear decay of `plan_adoption_threshold_eur`.
@@ -474,9 +489,9 @@ pub struct PlannerConfig {
     /// conditions. The effective threshold at the adoption gate is:
     ///   effective = threshold × max(0, 1 − elapsed_s / decay_s)
     /// After `decay_s` seconds the effective threshold reaches 0.0 and any new plan
-    /// is accepted. 0.0 = no decay (default — full threshold always applied).
-    /// Suggested: 5–10× `replan_interval_s`.
-    #[serde(default)]
+    /// is accepted. 0.0 = no decay (full threshold always applied).
+    /// Default: 1500 s (5× replan_interval_s).
+    #[serde(default = "default_plan_adoption_decay")]
     pub plan_adoption_decay_s: f64,
     /// Cost cap slack for Phase 2 lexicographic solve [EUR]. Phase 2 minimises
     /// operational friction (startup/ramp/switching/tier) subject to:
@@ -502,9 +517,30 @@ pub struct PlannerConfig {
     pub gate_switch_penalty_eur: f64,
 }
 
+impl PlannerConfig {
+    /// Effective slot width: zone[0].step_s when plan_zones is set, else plan_step_s.
+    pub fn effective_step_s(&self) -> u64 {
+        self.plan_zones
+            .as_ref()
+            .and_then(|z| z.first())
+            .map(|z| z.step_s)
+            .unwrap_or(self.plan_step_s)
+    }
+
+    /// Effective horizon: sum(step_s × slots) / 3600 when plan_zones is set, else plan_horizon_h.
+    pub fn effective_horizon_h(&self) -> u64 {
+        self.plan_zones
+            .as_ref()
+            .filter(|z| !z.is_empty())
+            .map(|zones| zones.iter().map(|z| z.step_s * z.slots).sum::<u64>() / 3600)
+            .unwrap_or(self.plan_horizon_h)
+    }
+}
+
 impl Default for PlannerConfig {
     fn default() -> Self {
         Self {
+            plan_zones: None,
             plan_step_s: default_plan_step(),
             plan_horizon_h: default_plan_horizon_h(),
             replan_interval_s: default_replan_interval(),
@@ -525,8 +561,8 @@ impl Default for PlannerConfig {
             w_tier_penalty_eur: default_w_tier_penalty(),
             c_ctrl_imp_malus_eur_kwh: default_c_ctrl_imp_malus(),
             objective: PlannerObjective::MinCost,
-            plan_adoption_threshold_eur: 0.0,
-            plan_adoption_decay_s: 0.0,
+            plan_adoption_threshold_eur: default_plan_adoption_threshold(),
+            plan_adoption_decay_s: default_plan_adoption_decay(),
             phase2_epsilon_eur: default_phase2_epsilon(),
             solver_timeout_s: default_solver_timeout_s(),
             planning_initial_delay_s: default_planning_initial_delay_s(),
@@ -538,6 +574,12 @@ impl Default for PlannerConfig {
 fn default_phase2_epsilon() -> f64 {
     0.02
 }
+fn default_plan_adoption_threshold() -> f64 {
+    0.20
+}
+fn default_plan_adoption_decay() -> f64 {
+    1500.0
+}
 fn default_solver_timeout_s() -> u64 {
     60
 }
@@ -546,10 +588,10 @@ fn default_planning_initial_delay_s() -> u64 {
 }
 
 fn default_plan_step() -> u64 {
-    300
+    600
 }
 fn default_plan_horizon_h() -> u64 {
-    24
+    48
 }
 fn default_replan_interval() -> u64 {
     300
@@ -591,7 +633,7 @@ fn default_w_tier_penalty() -> f64 {
     0.001
 }
 fn default_c_ctrl_imp_malus() -> f64 {
-    0.0
+    0.22
 }
 fn default_pen_imp() -> f64 {
     10_000.0
@@ -693,6 +735,67 @@ impl Profile {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        // plan_zones constraints: every zone's step_s must be a multiple of zone[0].step_s;
+        // no zone may have step_s == 0 or slots == 0.
+        if let Some(zones) = &self.planner.plan_zones {
+            let base = zones.first().map(|z| z.step_s).unwrap_or(0);
+            if base == 0 {
+                errors.push("plan_zones[0].step_s must be > 0".into());
+            } else {
+                for (i, z) in zones.iter().enumerate() {
+                    if z.step_s == 0 {
+                        errors.push(format!("plan_zones[{i}].step_s must be > 0"));
+                    } else if z.step_s % base != 0 {
+                        errors.push(format!(
+                            "plan_zones[{i}].step_s ({}) is not a multiple of zone[0].step_s ({})",
+                            z.step_s, base
+                        ));
+                    }
+                    if z.slots == 0 {
+                        errors.push(format!("plan_zones[{i}].slots must be > 0"));
+                    }
+                }
+            }
+        }
+
+        // phase2_epsilon_eur sanity check: when a heater is present and the epsilon is
+        // non-zero, it must not exceed 6× the effective per-switch cost
+        // (switching_penalty_eur × step_s/3600). At 6× the effective cost the epsilon
+        // already allows the Phase 2 solver to accept solutions with 6 extra relay
+        // operations; values well above this override the Phase 1 cost objective.
+        if self.planner.phase2_epsilon_eur > 0.0 {
+            if let Some(AssetProfile::Heater(h)) = self
+                .assets
+                .iter()
+                .find(|a| matches!(a, AssetProfile::Heater(_)))
+            {
+                // Use the longest zone step for the bound — that is the most expensive
+                // switch in MILP terms, giving the most conservative (largest) ceiling.
+                let longest_step_s =
+                    self.planner
+                        .plan_zones
+                        .as_ref()
+                        .and_then(|z| z.iter().map(|z| z.step_s).max())
+                        .unwrap_or(self.planner.plan_step_s) as f64;
+                let effective_switch_cost =
+                    h.effective_switching_penalty() * (longest_step_s / 3600.0);
+                let sanity_bound = effective_switch_cost * 6.0;
+                if sanity_bound > 0.0 && self.planner.phase2_epsilon_eur > sanity_bound {
+                    let ratio = self.planner.phase2_epsilon_eur / effective_switch_cost;
+                    let target = effective_switch_cost * 2.0;
+                    errors.push(format!(
+                        "planner.phase2_epsilon_eur ({:.3}) is {:.1}× the effective per-switch \
+                         cost ({:.3} EUR); expected ≤ {:.3}. Reduce to ~{:.2}.",
+                        self.planner.phase2_epsilon_eur,
+                        ratio,
+                        effective_switch_cost,
+                        sanity_bound,
+                        target,
+                    ));
+                }
             }
         }
 
@@ -872,5 +975,206 @@ assets:
             errs.len(),
             errs
         );
+    }
+
+    fn make_heater_profile(switching_penalty_eur: f64, phase2_epsilon_eur: f64) -> Profile {
+        let yaml = format!(
+            r#"
+assets:
+  - type: heater
+    id: heater
+    max_kw: 6.0
+    temp_initial_c: 50.0
+    temp_min_c: 45.0
+    temp_max_c: 60.0
+    switching_penalty_eur: {switching_penalty_eur}
+planner:
+  phase2_epsilon_eur: {phase2_epsilon_eur}
+"#
+        );
+        serde_yaml::from_str(&yaml).unwrap()
+    }
+
+    #[test]
+    fn test_validate_phase2_epsilon_rejects_misconfiguration() {
+        // switching_penalty=0.50, step=600s → effective=0.083 EUR/switch, bound=0.50
+        // phase2_epsilon=5.0 is ~10× the bound → must be rejected
+        let p = make_heater_profile(0.50, 5.0);
+        let errs = p.validate().unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("phase2_epsilon_eur")),
+            "expected phase2_epsilon_eur violation, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_phase2_epsilon_accepts_correct_value() {
+        // 2× effective cost = 2 × 0.083 ≈ 0.17 EUR → well within bound
+        let p = make_heater_profile(0.50, 0.17);
+        assert!(
+            p.validate().is_ok(),
+            "phase2_epsilon_eur=0.17 should pass validation"
+        );
+    }
+
+    #[test]
+    fn test_validate_phase2_epsilon_skipped_without_heater() {
+        // No heater → check is irrelevant regardless of value
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+planner:
+  phase2_epsilon_eur: 99.0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        assert!(
+            p.validate().is_ok(),
+            "no heater → phase2_epsilon check must be skipped"
+        );
+    }
+
+    #[test]
+    fn test_default_planner_config_has_correct_values() {
+        let cfg = PlannerConfig::default();
+        assert_eq!(cfg.c_ctrl_imp_malus_eur_kwh, 0.22);
+        assert_eq!(cfg.plan_adoption_threshold_eur, 0.20);
+        assert!((cfg.plan_adoption_decay_s - 1500.0).abs() < 1e-9);
+        assert_eq!(cfg.plan_step_s, 600);
+        assert_eq!(cfg.plan_horizon_h, 48);
+    }
+
+    #[test]
+    fn test_plan_zones_derive_effective_step_and_horizon() {
+        let mut cfg = PlannerConfig::default();
+        cfg.plan_zones = Some(vec![
+            PlanZone {
+                step_s: 300,
+                slots: 96,
+            }, // 8 h
+            PlanZone {
+                step_s: 600,
+                slots: 96,
+            }, // 16 h
+            PlanZone {
+                step_s: 900,
+                slots: 96,
+            }, // 24 h
+        ]);
+        assert_eq!(cfg.effective_step_s(), 300);
+        assert_eq!(cfg.effective_horizon_h(), 48);
+    }
+
+    #[test]
+    fn test_plan_zones_single_zone_matches_test_profile_values() {
+        let mut cfg = PlannerConfig::default();
+        cfg.plan_zones = Some(vec![PlanZone {
+            step_s: 3600,
+            slots: 24,
+        }]);
+        assert_eq!(cfg.effective_step_s(), 3600);
+        assert_eq!(cfg.effective_horizon_h(), 24);
+    }
+
+    #[test]
+    fn test_plan_zones_no_zones_falls_back_to_scalar() {
+        let cfg = PlannerConfig::default();
+        // plan_zones absent → effective values come from plan_step_s / plan_horizon_h defaults
+        assert_eq!(cfg.effective_step_s(), 600);
+        assert_eq!(cfg.effective_horizon_h(), 48);
+    }
+
+    #[test]
+    fn test_validate_plan_zones_rejects_non_multiple() {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+planner:
+  plan_zones:
+    - step_s: 300
+      slots: 96
+    - step_s: 700
+      slots: 96
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p.validate().unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("plan_zones")),
+            "expected plan_zones violation, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_plan_zones_accepts_multiples() {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+planner:
+  plan_zones:
+    - step_s: 300
+      slots: 96
+    - step_s: 600
+      slots: 96
+    - step_s: 900
+      slots: 96
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        assert!(
+            p.validate().is_ok(),
+            "300/600/900 are all multiples of 300 — should pass"
+        );
+    }
+
+    #[test]
+    fn test_validate_plan_zones_rejects_zero_step() {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+planner:
+  plan_zones:
+    - step_s: 0
+      slots: 96
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p.validate().unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("plan_zones")),
+            "zero step_s should be rejected: {errs:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_yaml_round_trip_plan_zones() {
+        // Verify that plan_zones parses correctly from YAML.
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+planner:
+  plan_zones:
+    - step_s: 3600
+      slots: 24
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(p.planner.effective_step_s(), 3600);
+        assert_eq!(p.planner.effective_horizon_h(), 24);
     }
 }

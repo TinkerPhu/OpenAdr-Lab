@@ -32,10 +32,15 @@ export function ControllerPage() {
   // Single timeline query shared by all asset cells and the accumulated cell.
   // refetchInterval: false — driven exclusively by the unified timer below so
   // all data sources update in the same tick.
-  const { data: allTimelines = {}, refetch: refetchTimelines } = useAllTimelines(
+  const { data: allTimelinesResponse, refetch: refetchTimelines } = useAllTimelines(
     1.0,
     hoursForward,
     { refetchInterval: false }
+  );
+  // Stable reference — only recomputes when the response object itself changes.
+  const allTimelines = useMemo(
+    () => allTimelinesResponse?.timelines ?? {},
+    [allTimelinesResponse]
   );
 
   // Shared nowMs: advances only when fresh timeline data arrives, keeping the

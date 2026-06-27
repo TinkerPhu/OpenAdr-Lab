@@ -54,8 +54,8 @@ fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Ve
         report_interval_s: profile.simulator.report_interval_s,
     };
     let planner_params = PlannerParams {
-        plan_step_s: profile.planner.plan_step_s,
-        plan_horizon_h: profile.planner.plan_horizon_h,
+        plan_step_s: profile.planner.effective_step_s(),
+        plan_horizon_h: profile.planner.effective_horizon_h(),
         replan_interval_s: profile.planner.replan_interval_s,
         w_energy: profile.planner.w_energy,
         w_ghg: profile.planner.w_ghg,
