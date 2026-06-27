@@ -56,7 +56,11 @@ def step_every_point_has_values(context):
 def step_timeline_all_contains_key(context, key):
     data = getattr(context, "last_response_json", None) or context.last_response.json()
     assert isinstance(data, dict), "Response is not a JSON object"
-    assert key in data, f"Key '{key}' not found in timeline/all response. Keys: {list(data.keys())}"
+    # Unwrap envelope shape: { zones: [...], timelines: { asset_id: [...] } }
+    timelines = data.get("timelines", data)
+    assert key in timelines, (
+        f"Key '{key}' not found in timeline/all timelines. Keys: {list(timelines.keys())}"
+    )
 
 
 @then("all timeline points are at or after now")
