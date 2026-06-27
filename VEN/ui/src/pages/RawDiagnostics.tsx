@@ -7,7 +7,6 @@ import { SimProfileChart } from "../components/raw-diagnostics/SimProfileChart";
 import { TariffsLineChart } from "../components/raw-diagnostics/TariffsLineChart";
 import { TimelineSeriesChart } from "../components/raw-diagnostics/TimelineSeriesChart";
 import type { SimSnapshot, PlannedRates } from "../api/types";
-import type { AssetTimelinePoint } from "../components/controller/types";
 
 export function RawDiagnosticsPage() {
   const { api } = useVenContext();
@@ -28,7 +27,7 @@ export function RawDiagnosticsPage() {
 
   // ── Timeline ─────────────────────────────────────────────────────────────────
   const [selectedSeries, setSelectedSeries] = useState("grid");
-  const timelineQuery = useQuery<Record<string, AssetTimelinePoint[]>>({
+  const timelineQuery = useQuery({
     queryKey: ["raw-diag-timeline", api.baseUrl],
     queryFn: () => api.allTimelines({ hoursBack: 1.0, hoursForward: 1.0 }),
     enabled: false,
@@ -78,7 +77,7 @@ export function RawDiagnosticsPage() {
       >
         {/* Always render the chart so the series dropdown is present before first load */}
         <TimelineSeriesChart
-          data={timelineQuery.data ?? {}}
+          data={timelineQuery.data?.timelines ?? {}}
           selectedSeries={selectedSeries}
           onSeriesChange={setSelectedSeries}
         />
