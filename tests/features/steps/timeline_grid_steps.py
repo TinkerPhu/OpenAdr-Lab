@@ -13,11 +13,14 @@ def _parse_ts(ts_str):
 
 
 def _get_timeline_all(context):
-    """Get the parsed /timeline/all response as a dict."""
+    """Get the parsed /timeline/all response as a dict of asset arrays."""
     data = getattr(context, "last_response_json", None)
     if data is None:
         data = context.last_response.json()
         context.last_response_json = data
+    # Unwrap envelope shape: { zones: [...], timelines: { asset_id: [...] } }
+    if isinstance(data, dict) and "timelines" in data:
+        return data["timelines"]
     return data
 
 
