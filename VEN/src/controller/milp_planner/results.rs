@@ -5,8 +5,8 @@ use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::{BatteryParams, EvParams, HeaterParams};
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::{
-    AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanWarning, PlanningHorizon,
-    WarningSeverity,
+    AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanWarning, PlanZone,
+    PlanningHorizon, WarningSeverity,
 };
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
@@ -44,6 +44,10 @@ pub(crate) fn fallback_plan(
         step_size_s: step_s,
         num_steps: total_steps,
         far_horizon: horizon_end,
+        zones: vec![PlanZone {
+            step_s,
+            slots: total_steps,
+        }],
     };
     let warning = PlanWarning {
         severity: WarningSeverity::Critical,
@@ -149,6 +153,7 @@ pub(crate) fn translate_to_plan(
         step_size_s: step_s,
         num_steps: n,
         far_horizon: horizon_end,
+        zones: vec![PlanZone { step_s, slots: n }],
     };
 
     let ev_id = ev_cfg.map(|c| c.id.clone());

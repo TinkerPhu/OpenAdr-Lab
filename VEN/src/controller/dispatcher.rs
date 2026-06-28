@@ -886,6 +886,10 @@ mod tests {
                 step_size_s: 300,
                 num_steps: 1,
                 far_horizon: now + Duration::seconds(300),
+                zones: vec![crate::entities::plan::PlanZone {
+                    step_s: 300,
+                    slots: 1,
+                }],
             },
             slots: vec![slot],
             summary: PlanSummary::default(),
@@ -933,6 +937,10 @@ mod tests {
                     step_size_s: 300,
                     num_steps: 1,
                     far_horizon: now + Duration::seconds(300),
+                    zones: vec![crate::entities::plan::PlanZone {
+                        step_s: 300,
+                        slots: 1,
+                    }],
                 },
                 slots: vec![], // no slots → no allocations
                 summary: PlanSummary::default(),

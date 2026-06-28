@@ -7,6 +7,17 @@ use uuid::Uuid;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::planner_params::PlannerObjective;
 
+/// One zone of a variable-step planning horizon.
+/// Defined here (domain layer) so `PlanningHorizon` can carry zone metadata without
+/// importing `profile.rs` (infra). `profile::PlannerConfig` imports this type for YAML parsing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlanZone {
+    /// Slot width for this zone in seconds. Must be a multiple of the first zone's step_s.
+    pub step_s: u64,
+    /// Number of slots in this zone.
+    pub slots: usize,
+}
+
 /// Defines the temporal scope of a planning cycle (§6.1).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningHorizon {
@@ -15,6 +26,11 @@ pub struct PlanningHorizon {
     pub step_size_s: u64, // planning timestep in seconds (e.g. 300 = 5min)
     pub num_steps: usize,
     pub far_horizon: DateTime<Utc>, // = end_time
+    /// Zone definitions for variable-step plans.
+    /// Contains one entry for uniform-step plans; three entries for 3-tier plans (Part B).
+    /// Populated at plan creation; `#[serde(default)]` so old stored plans deserialize cleanly.
+    #[serde(default)]
+    pub zones: Vec<PlanZone>,
 }
 
 /// Assignment of energy to a specific asset within a time slot (§6.3).
