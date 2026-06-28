@@ -494,6 +494,10 @@ mod tests {
                 step_size_s: 300,
                 num_steps: 24,
                 far_horizon: now + Duration::hours(2),
+                zones: vec![crate::entities::plan::PlanZone {
+                    step_s: 300,
+                    slots: 24,
+                }],
             },
             slots: vec![],
             summary: PlanSummary::default(),
@@ -1128,6 +1132,10 @@ mod tests {
                 step_size_s: 300,
                 num_steps: 288,
                 far_horizon: now + Duration::hours(24),
+                zones: vec![crate::entities::plan::PlanZone {
+                    step_s: 300,
+                    slots: 288,
+                }],
             },
             slots: vec![slot],
             summary: PlanSummary::default(),
@@ -1180,6 +1188,10 @@ mod tests {
                 step_size_s: 300,
                 num_steps: 288,
                 far_horizon: now + Duration::hours(24),
+                zones: vec![crate::entities::plan::PlanZone {
+                    step_s: 300,
+                    slots: 288,
+                }],
             },
             slots: vec![slot],
             summary: PlanSummary::default(),

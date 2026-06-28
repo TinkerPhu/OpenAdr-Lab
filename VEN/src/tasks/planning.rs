@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
@@ -11,6 +11,19 @@ use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::simulator::SimState;
 use crate::state::AppState;
+
+/// Align a UTC timestamp down to the nearest `step_s`-second boundary.
+///
+/// All plan replans that fire within the same `step_s` window produce an identical
+/// `now_aligned`, giving the acceptance gate slot-comparable plans and making successive
+/// plans differ by exactly an integer multiple of `step_s` — never an arbitrary offset.
+/// Uses `rem_euclid` so pre-epoch timestamps (negative unix) are handled correctly.
+fn align_to_step(raw: DateTime<Utc>, step_s: u64) -> DateTime<Utc> {
+    let ts = raw.timestamp();
+    let step = step_s as i64;
+    DateTime::<Utc>::from_timestamp(ts - ts.rem_euclid(step), 0)
+        .expect("step-aligned timestamp is always valid")
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_planning(
@@ -38,7 +51,11 @@ pub(crate) fn spawn_planning(
         // bypassing the plan acceptance gate.
         let mut wake_trigger = PlanTrigger::Periodic;
         loop {
-            let now = Utc::now();
+            let wall_now = Utc::now();
+            // Align to the nearest step boundary so all replans within the same window
+            // share identical slot grids (gate stability, warm-start prerequisite).
+            // wall_now is kept separately for Plan.created_at (gate decay uses real age).
+            let now = align_to_step(wall_now, planner.plan_step_s);
             let rates = state.planned_tariffs().await;
             let capacity = state.capacity_state().await;
             let trigger = wake_trigger.clone();
@@ -236,7 +253,7 @@ pub(crate) fn spawn_planning(
                 })
                 .collect();
 
-            let plan = tokio::task::spawn_blocking(move || {
+            let mut plan = tokio::task::spawn_blocking(move || {
                 controller::milp_planner::run_planner(
                     asset_contexts,
                     &snap,
@@ -258,6 +275,9 @@ pub(crate) fn spawn_planning(
             })
             .await
             .expect("planner task panicked");
+            // created_at records true wall-clock time so gate decay (elapsed_s) measures
+            // real plan age. horizon.start_time = now (aligned) is the slot grid origin.
+            plan.created_at = wall_now;
             let solver_ms = solve_start.elapsed().as_millis() as u64;
             info!(
                 solver_ms,
@@ -282,14 +302,17 @@ pub(crate) fn spawn_planning(
                 obj,
                 &state,
                 &event_tx,
-                now,
+                // wall_now: gate decay measures real plan age (created_at is wall time).
+                // Aligned `now` would give elapsed_s ≤ 0 when the step grid doesn't
+                // advance between replans (e.g. step_s=600, replan=300).
+                wall_now,
             )
             .await;
 
             // Refresh site envelope immediately after each plan cycle.
             {
                 let sim_snap = sim.lock().await.to_sim_snapshot();
-                let env = controller::envelope::compute_envelope(&sim_snap, now);
+                let env = controller::envelope::compute_envelope(&sim_snap, wall_now);
                 state.set_site_envelope(env).await;
             }
 
@@ -308,7 +331,7 @@ pub(crate) fn spawn_planning(
                     &sim_snap,
                     &ven_name,
                     None,
-                    now,
+                    wall_now,
                 );
                 if let Some(report) = report_opt {
                     if let Err(e) = vtn.upsert_report(report).await {
@@ -331,6 +354,8 @@ pub(crate) fn spawn_planning(
 
 #[cfg(test)]
 mod tests {
+    use super::align_to_step;
+    use chrono::{TimeZone, Utc};
     use std::sync::Arc;
     use tokio::sync::{broadcast, watch, Mutex, RwLock};
 
@@ -342,6 +367,32 @@ mod tests {
     use crate::state::AppState;
 
     use super::spawn_planning;
+
+    #[test]
+    fn test_align_to_step_rounds_down() {
+        let make = |h: u32, m: u32, s: u32| Utc.with_ymd_and_hms(2026, 4, 11, h, m, s).unwrap();
+
+        // step_s = 600 (10 min)
+        assert_eq!(align_to_step(make(14, 23, 47), 600), make(14, 20, 0));
+        assert_eq!(align_to_step(make(14, 20, 0), 600), make(14, 20, 0)); // already aligned
+        assert_eq!(align_to_step(make(14, 29, 59), 600), make(14, 20, 0));
+
+        // step_s = 300 (5 min)
+        assert_eq!(align_to_step(make(14, 23, 47), 300), make(14, 20, 0));
+        assert_eq!(align_to_step(make(14, 25, 0), 300), make(14, 25, 0)); // already aligned
+        assert_eq!(align_to_step(make(14, 24, 59), 300), make(14, 20, 0));
+
+        // result timestamp is always an exact multiple of step_s from epoch
+        for step_s in [300u64, 600, 900, 1800] {
+            let raw = make(14, 23, 47);
+            let aligned = align_to_step(raw, step_s);
+            assert_eq!(
+                aligned.timestamp() % step_s as i64,
+                0,
+                "step_s={step_s}: aligned timestamp not a multiple of step_s"
+            );
+        }
+    }
 
     fn minimal_sim() -> Arc<Mutex<SimState>> {
         let s: SimState = serde_json::from_value(serde_json::json!({

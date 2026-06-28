@@ -1,6 +1,7 @@
 use crate::entities::asset_params::{
     AssetParams, BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
 };
+use crate::entities::plan::PlanZone;
 use crate::entities::PlannerObjective;
 use serde::Deserialize;
 use std::path::Path;
@@ -369,17 +370,6 @@ impl Default for GridConfig {
     }
 }
 
-/// Configuration for the HEMS Planner (Stage 3).
-/// One zone in a variable-step planning grid.
-/// Every zone's `step_s` must be an integer multiple of the first zone's `step_s`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct PlanZone {
-    /// Slot width in seconds.
-    pub step_s: u64,
-    /// Number of slots in this zone.
-    pub slots: u64,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlannerConfig {
     /// Optional variable-step planning grid. When set, `plan_step_s` and `plan_horizon_h`
@@ -532,7 +522,7 @@ impl PlannerConfig {
         self.plan_zones
             .as_ref()
             .filter(|z| !z.is_empty())
-            .map(|zones| zones.iter().map(|z| z.step_s * z.slots).sum::<u64>() / 3600)
+            .map(|zones| zones.iter().map(|z| z.step_s * z.slots as u64).sum::<u64>() / 3600)
             .unwrap_or(self.plan_horizon_h)
     }
 }
