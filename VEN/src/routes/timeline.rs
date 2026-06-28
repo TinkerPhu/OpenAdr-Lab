@@ -207,22 +207,31 @@ pub fn build_grid_aligned_array(
     Some(out)
 }
 
-/// Build a zone list from the active plan.
-/// Returns a single zone covering [horizon.start_time, plan_end) with the plan's step_size_s.
-/// Returns an empty list when no plan is active or the plan has no future slots.
+/// Build a zone list from the active plan, iterating all `plan.horizon.zones`.
+/// Zones entirely in the past (zone_end <= now) are skipped.
+/// Returns an empty list when no plan is active or all zones are expired.
 fn zones_from_plan(
     plan: Option<&crate::entities::plan::Plan>,
     now: DateTime<Utc>,
 ) -> Vec<serde_json::Value> {
     let Some(plan) = plan else { return vec![] };
-    let step_s = plan.horizon.step_size_s;
-    let Some(end) = plan.all_slots().map(|s| s.end).max() else {
-        return vec![];
-    };
-    if end <= now {
+    if plan.horizon.zones.is_empty() {
         return vec![];
     }
-    vec![serde_json::json!({ "from": plan.horizon.start_time, "to": end, "step_s": step_s })]
+    let mut result = Vec::with_capacity(plan.horizon.zones.len());
+    let mut cursor = plan.horizon.start_time;
+    for zone in &plan.horizon.zones {
+        let zone_end = cursor + chrono::Duration::seconds((zone.step_s * zone.slots as u64) as i64);
+        if zone_end > now {
+            result.push(serde_json::json!({
+                "from": cursor,
+                "to": zone_end,
+                "step_s": zone.step_s,
+            }));
+        }
+        cursor = zone_end;
+    }
+    result
 }
 
 /// GET /timeline/all — merged timelines for all configured assets + "grid".
@@ -377,6 +386,74 @@ mod tests {
             zone_from, plan.horizon.start_time,
             "zone from must equal plan.horizon.start_time"
         );
+    }
+
+    #[test]
+    fn test_zones_from_plan_three_zones() {
+        use crate::entities::asset::PlanTrigger;
+        use crate::entities::plan::{Plan, PlanZone, PlanningHorizon};
+        use crate::entities::planner_params::PlannerObjective;
+        let now = chrono::Utc::now();
+        let zones = vec![
+            PlanZone {
+                step_s: 300,
+                slots: 96,
+            },
+            PlanZone {
+                step_s: 600,
+                slots: 96,
+            },
+            PlanZone {
+                step_s: 900,
+                slots: 96,
+            },
+        ];
+        let total_s: i64 = zones.iter().map(|z| z.step_s as i64 * z.slots as i64).sum();
+        let horizon = PlanningHorizon {
+            start_time: now,
+            end_time: now + Duration::seconds(total_s),
+            step_size_s: 300,
+            num_steps: 288,
+            far_horizon: now + Duration::seconds(total_s),
+            zones: zones.clone(),
+        };
+        let plan = Plan {
+            id: uuid::Uuid::new_v4(),
+            created_at: now,
+            trigger: PlanTrigger::Periodic,
+            objective: PlannerObjective::MinCost,
+            horizon,
+            slots: vec![],
+            objective_eur: 0.0,
+            friction_eur: 0.0,
+            cost_breakdown: Default::default(),
+            soc_trajectory_kwh: vec![],
+            summary: Default::default(),
+            envelopes: vec![],
+            warnings: vec![],
+        };
+        let result = zones_from_plan(Some(&plan), now);
+        assert_eq!(result.len(), 3, "3-zone plan must produce 3 zone entries");
+        assert_eq!(result[0]["step_s"], 300);
+        assert_eq!(result[1]["step_s"], 600);
+        assert_eq!(result[2]["step_s"], 900);
+        // Zone A: [now, now+28800s)
+        let z0_from: chrono::DateTime<chrono::Utc> =
+            result[0]["from"].as_str().unwrap().parse().unwrap();
+        let z0_to: chrono::DateTime<chrono::Utc> =
+            result[0]["to"].as_str().unwrap().parse().unwrap();
+        assert_eq!(z0_from, now);
+        assert_eq!(z0_to, now + Duration::seconds(300 * 96));
+        // Zone B starts where A ends
+        let z1_from: chrono::DateTime<chrono::Utc> =
+            result[1]["from"].as_str().unwrap().parse().unwrap();
+        assert_eq!(z1_from, z0_to);
+        // Zone C starts where B ends
+        let z1_to: chrono::DateTime<chrono::Utc> =
+            result[1]["to"].as_str().unwrap().parse().unwrap();
+        let z2_from: chrono::DateTime<chrono::Utc> =
+            result[2]["from"].as_str().unwrap().parse().unwrap();
+        assert_eq!(z2_from, z1_to);
     }
 
     #[test]

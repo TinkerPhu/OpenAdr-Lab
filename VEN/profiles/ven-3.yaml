@@ -38,3 +38,10 @@ planner:
   # plan_adoption_threshold_eur: 0.20  # default
   # plan_adoption_decay_s: 1500   # default
   phase2_epsilon_eur: 0.17          # = 2× effective switching cost (0.50 × 10/60 ≈ 0.083 EUR/switch)
+  plan_zones:
+    - step_s: 300
+      slots: 96   # 8 h at 5-min resolution
+    - step_s: 600
+      slots: 96   # 16 h at 10-min resolution
+    - step_s: 900
+      slots: 96   # 24 h at 15-min resolution

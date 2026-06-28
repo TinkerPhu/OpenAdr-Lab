@@ -34,3 +34,10 @@ planner:
   # plan_adoption_decay_s: 1500   # default
   phase2_epsilon_eur: 1.00          # = 2× effective switching cost (3.0 × 10/60 = 0.50 EUR/switch)
   gate_switch_penalty_eur: 0.50     # per-extra-switch surcharge = effective switching cost (3.0 × 10/60)
+  plan_zones:
+    - step_s: 300
+      slots: 96   # 8 h at 5-min resolution
+    - step_s: 600
+      slots: 96   # 16 h at 10-min resolution
+    - step_s: 900
+      slots: 96   # 24 h at 15-min resolution

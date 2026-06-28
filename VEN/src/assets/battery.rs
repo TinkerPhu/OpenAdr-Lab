@@ -376,7 +376,6 @@ impl crate::controller::milp_planner::AssetMilpContext for BatteryMilpContext {
     fn milp_params(
         &self,
         _n: usize,
-        _step_s: u64,
         _now: chrono::DateTime<chrono::Utc>,
     ) -> crate::controller::milp_planner::AssetMilpParams {
         crate::controller::milp_planner::AssetMilpParams::Battery(
@@ -696,7 +695,7 @@ mod milp_context_trait_tests {
     #[test]
     fn milp_params_returns_correct_battery_scalars() {
         let ctx = make_ctx();
-        let params = ctx.milp_params(4, 300, chrono::Utc::now());
+        let params = ctx.milp_params(4, chrono::Utc::now());
         match params {
             AssetMilpParams::Battery(b) => {
                 assert!((b.e_nom_kwh - 10.0).abs() < 1e-9);

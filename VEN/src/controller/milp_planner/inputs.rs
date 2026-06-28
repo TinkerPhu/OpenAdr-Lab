@@ -44,10 +44,18 @@ pub(crate) fn build_milp_inputs(
     baseline_override: Option<&BaselineOverride>,
     pv_forecast_override: Option<f64>,
 ) -> MilpInputs {
-    let step_s = planner.plan_step_s;
-    let n = ((planner.plan_horizon_h as f64 * 3600.0) / step_s as f64) as usize;
-    let step_h = step_s as f64 / 3600.0;
-    let dt_h: Vec<f64> = vec![step_h; n];
+    let n: usize = planner.plan_zones.iter().map(|z| z.slots).sum();
+    let mut cum_s: Vec<i64> = Vec::with_capacity(n + 1);
+    cum_s.push(0);
+    let mut dt_h: Vec<f64> = Vec::with_capacity(n);
+    for zone in &planner.plan_zones {
+        let step_h = zone.step_s as f64 / 3600.0;
+        for _ in 0..zone.slots {
+            dt_h.push(step_h);
+            cum_s.push(cum_s.last().unwrap() + zone.step_s as i64);
+        }
+    }
+    let zone_a_step_s = planner.plan_zones.first().map(|z| z.step_s).unwrap_or(300);
 
     // ── Per-step grid arrays ──────────────────────────────────────────────────
     let cont_imp = capacity.import_limit_kw.unwrap_or(phys_imp);
@@ -64,8 +72,8 @@ pub(crate) fn build_milp_inputs(
     let mut p_imp_cont = Vec::with_capacity(n);
     let mut p_exp_cont = Vec::with_capacity(n);
 
-    for t in 0..n {
-        let slot_t = now + Duration::seconds(t as i64 * step_s as i64);
+    for &slot_s in &cum_s[0..n] {
+        let slot_t = now + Duration::seconds(slot_s);
         c_imp.push(
             tariffs
                 .import_eur_kwh
@@ -92,9 +100,10 @@ pub(crate) fn build_milp_inputs(
             let irradiance_offset = pv_snap.val("irradiance_offset").unwrap_or(0.0);
             let pv_alpha = pv_snap.val("pv_alpha").unwrap_or(0.1);
             let rated_kw = pv_snap.val("rated_kw").unwrap_or(0.0);
-            // pv_alpha is "fraction removed per plan step (300 s)".
-            // Exponent is the number of plan steps ahead, not raw seconds.
-            let decayed_offset = irradiance_offset * (1.0 - pv_alpha).powf(t as f64);
+            // pv_alpha is "fraction removed per zone-A step (zone_a_step_s)".
+            // Exponent is the number of zone-A-equivalent steps ahead.
+            let steps_ahead = slot_s as f64 / zone_a_step_s as f64;
+            let decayed_offset = irradiance_offset * (1.0 - pv_alpha).powf(steps_ahead);
             (natural + decayed_offset).clamp(0.0, 1.0) * rated_kw
         } else {
             pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)
@@ -141,7 +150,7 @@ pub(crate) fn build_milp_inputs(
     let mut heat_iz_full = 0.0_f64;
 
     for ctx in asset_contexts {
-        match ctx.milp_params(n, step_s, now) {
+        match ctx.milp_params(n, now) {
             AssetMilpParams::Battery(b) => {
                 e_bat_nom = Some(b.e_nom_kwh);
                 e_bat_init = Some(b.e_init_kwh);
@@ -181,6 +190,14 @@ pub(crate) fn build_milp_inputs(
         }
     }
 
+    // Maps a non-negative offset_s to the latest slot index t where cum_s[t] <= offset_s.
+    let time_to_slot = |offset_s: i64| -> usize {
+        cum_s
+            .partition_point(|&s| s <= offset_s)
+            .saturating_sub(1)
+            .min(n.saturating_sub(1))
+    };
+
     // ── Baseline override: additive per-slot kW adjustments ─────────────────
     if let Some(bo) = baseline_override {
         for slot in &bo.slots {
@@ -188,7 +205,7 @@ pub(crate) fn build_milp_inputs(
             if offset_s < 0 {
                 continue;
             }
-            let idx = (offset_s as f64 / (step_h * 3600.0)).floor() as usize;
+            let idx = time_to_slot(offset_s);
             if idx < n {
                 p_base[idx] += slot.add_kw;
             }
@@ -197,17 +214,17 @@ pub(crate) fn build_milp_inputs(
 
     // ── Shiftable loads → ShiftableLoadMilp ──────────────────────────────────
     let milp_loads: Vec<ShiftableLoadMilp> = shiftable_loads.iter().filter_map(|sl| {
-        let dur_s = (sl.duration_min as f64) * 60.0;
-        let duration_slots = (dur_s / (step_h * 3600.0)).ceil() as usize;
+        let dur_s = (sl.duration_min as i64) * 60;
+        let duration_slots = (1..=n).find(|&k| cum_s[k] >= dur_s).unwrap_or(n);
         if duration_slots == 0 { return None; }
 
-        let window_start_s = (sl.earliest_start - now).num_seconds().max(0) as f64;
-        let window_end_s = (sl.latest_end - now).num_seconds().max(0) as f64;
+        let window_start_s = (sl.earliest_start - now).num_seconds().max(0);
+        let window_end_s = (sl.latest_end - now).num_seconds().max(0);
 
-        let first_slot = (window_start_s / (step_h * 3600.0)).floor() as usize;
+        let first_slot = time_to_slot(window_start_s);
         // Last valid start: load must finish before latest_end
         let last_valid_s = window_end_s - dur_s;
-        if last_valid_s < 0.0 {
+        if last_valid_s < 0 {
             tracing::warn!(
                 asset_id = %sl.asset_id,
                 window_end_s,
@@ -216,7 +233,7 @@ pub(crate) fn build_milp_inputs(
             );
             return None;
         }
-        let last_slot = ((last_valid_s / (step_h * 3600.0)).floor() as usize).min(n.saturating_sub(duration_slots));
+        let last_slot = time_to_slot(last_valid_s).min(n.saturating_sub(duration_slots));
 
         let valid_start_slots: Vec<usize> = (first_slot..=last_slot).filter(|&s| s + duration_slots <= n).collect();
         if valid_start_slots.is_empty() {

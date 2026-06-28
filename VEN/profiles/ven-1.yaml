@@ -35,3 +35,10 @@ planner:
   # c_ctrl_imp_malus_eur_kwh: 0.22  # default
   # plan_adoption_threshold_eur: 0.20  # default
   # plan_adoption_decay_s: 1500   # default (5× replan_interval_s)
+  plan_zones:
+    - step_s: 300
+      slots: 96   # 8 h at 5-min resolution
+    - step_s: 600
+      slots: 96   # 16 h at 10-min resolution
+    - step_s: 900
+      slots: 96   # 24 h at 15-min resolution

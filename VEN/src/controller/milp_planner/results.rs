@@ -5,8 +5,8 @@ use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::{BatteryParams, EvParams, HeaterParams};
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::{
-    AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanWarning, PlanZone,
-    PlanningHorizon, WarningSeverity,
+    AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanWarning, PlanningHorizon,
+    WarningSeverity,
 };
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
@@ -33,21 +33,21 @@ pub(crate) fn fallback_plan(
     ev_cfg: Option<&EvParams>,
     heat_cfg: Option<&HeaterParams>,
 ) -> Plan {
-    let step_s = planner.plan_step_s;
-    let horizon_h = planner.plan_horizon_h;
-    let horizon_end = now + Duration::seconds((horizon_h as f64 * 3600.0) as i64);
-    let total_steps = ((horizon_h as f64 * 3600.0) / step_s as f64) as usize;
+    let total_steps: usize = planner.plan_zones.iter().map(|z| z.slots).sum();
+    let total_horizon_s: i64 = planner
+        .plan_zones
+        .iter()
+        .map(|z| z.step_s as i64 * z.slots as i64)
+        .sum();
+    let horizon_end = now + Duration::seconds(total_horizon_s);
 
     let horizon = PlanningHorizon {
         start_time: now,
         end_time: horizon_end,
-        step_size_s: step_s,
+        step_size_s: planner.plan_step_s,
         num_steps: total_steps,
         far_horizon: horizon_end,
-        zones: vec![PlanZone {
-            step_s,
-            slots: total_steps,
-        }],
+        zones: planner.plan_zones.clone(),
     };
     let warning = PlanWarning {
         severity: WarningSeverity::Critical,
@@ -55,13 +55,17 @@ pub(crate) fn fallback_plan(
         suggested_action: None,
     };
     let slots: Vec<PlanTimeSlot> = match inputs {
-        Some(inp) => (0..inp.n)
-            .map(|t| {
-                let step_s_i64 = step_s as i64;
-                PlanTimeSlot {
+        Some(inp) => {
+            let mut fb_cum_s: Vec<i64> = Vec::with_capacity(inp.n + 1);
+            fb_cum_s.push(0);
+            for &d in &inp.dt_h {
+                fb_cum_s.push(fb_cum_s.last().unwrap() + (d * 3600.0) as i64);
+            }
+            (0..inp.n)
+                .map(|t| PlanTimeSlot {
                     slot_index: t,
-                    start: now + Duration::seconds(t as i64 * step_s_i64),
-                    end: now + Duration::seconds((t as i64 + 1) * step_s_i64),
+                    start: now + Duration::seconds(fb_cum_s[t]),
+                    end: now + Duration::seconds(fb_cum_s[t + 1]),
                     import_tariff_eur_kwh: inp.c_imp_eur_kwh[t],
                     export_tariff_eur_kwh: inp.c_exp_eur_kwh[t],
                     co2_g_kwh: inp.g_imp_kgco2_kwh[t] * 1000.0,
@@ -81,9 +85,9 @@ pub(crate) fn fallback_plan(
                     bat_discharge_kw: 0.0,
                     planned_kw_by_asset: std::collections::HashMap::new(),
                     planned_state_by_asset: std::collections::HashMap::new(),
-                }
-            })
-            .collect(),
+                })
+                .collect()
+        }
         None => vec![],
     };
     let envelopes = match inputs {
@@ -153,7 +157,7 @@ pub(crate) fn translate_to_plan(
         step_size_s: step_s,
         num_steps: n,
         far_horizon: horizon_end,
-        zones: vec![PlanZone { step_s, slots: n }],
+        zones: planner.plan_zones.clone(),
     };
 
     let ev_id = ev_cfg.map(|c| c.id.clone());

@@ -8,6 +8,10 @@ use super::*;
 fn make_profile_1800s() -> Profile {
     let mut p = make_profile();
     p.planner.plan_step_s = 1800;
+    p.planner.plan_zones = vec![crate::entities::plan::PlanZone {
+        step_s: 1800,
+        slots: 4,
+    }];
     p
 }
 
@@ -43,6 +47,10 @@ fn run_planner_no_assets_covers_base_load() {
         planner: PlannerConfig {
             plan_step_s: 1800,
             plan_horizon_h: 2,
+            plan_zones: vec![crate::entities::plan::PlanZone {
+                step_s: 1800,
+                slots: 4,
+            }],
             ..PlannerConfig::default()
         },
         grid: GridConfig {
@@ -386,6 +394,10 @@ fn make_profile_n48() -> Profile {
         planner: PlannerConfig {
             plan_step_s: 1800,
             plan_horizon_h: 24,
+            plan_zones: vec![crate::entities::plan::PlanZone {
+                step_s: 1800,
+                slots: 48,
+            }],
             ..PlannerConfig::default()
         },
         grid: GridConfig {
@@ -564,8 +576,8 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
         fn asset_kind(&self) -> AssetKind {
             self.inner.asset_kind()
         }
-        fn milp_params(&self, n: usize, step_s: u64, now: DateTime<Utc>) -> AssetMilpParams {
-            self.inner.milp_params(n, step_s, now)
+        fn milp_params(&self, n: usize, now: DateTime<Utc>) -> AssetMilpParams {
+            self.inner.milp_params(n, now)
         }
         fn declare_vars_into_pool(
             &self,

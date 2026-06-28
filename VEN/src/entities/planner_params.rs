@@ -15,6 +15,7 @@ pub enum PlannerObjective {
 pub struct PlannerParams {
     pub plan_step_s: u64,
     pub plan_horizon_h: u64,
+    pub plan_zones: Vec<crate::entities::plan::PlanZone>,
     pub replan_interval_s: u64,
     pub w_energy: f64,
     pub w_ghg: f64,
@@ -53,6 +54,10 @@ impl Default for PlannerParams {
         Self {
             plan_step_s: 600,
             plan_horizon_h: 48,
+            plan_zones: vec![crate::entities::plan::PlanZone {
+                step_s: 600,
+                slots: 288,
+            }],
             replan_interval_s: 300,
             w_energy: 1.0,
             w_ghg: 0.0001,
@@ -145,5 +150,18 @@ impl<'de> Deserialize<'de> for PlannerObjective {
                 ],
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_planner_params_default_has_single_zone() {
+        let p = PlannerParams::default();
+        assert_eq!(p.plan_zones.len(), 1);
+        assert_eq!(p.plan_zones[0].step_s, 600);
+        assert_eq!(p.plan_zones[0].slots, 288);
     }
 }
