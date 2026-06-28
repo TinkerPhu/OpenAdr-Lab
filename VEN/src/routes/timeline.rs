@@ -208,7 +208,7 @@ pub fn build_grid_aligned_array(
 }
 
 /// Build a zone list from the active plan.
-/// Returns a single zone covering [now, plan_end) with the plan's step_size_s.
+/// Returns a single zone covering [horizon.start_time, plan_end) with the plan's step_size_s.
 /// Returns an empty list when no plan is active or the plan has no future slots.
 fn zones_from_plan(
     plan: Option<&crate::entities::plan::Plan>,
@@ -222,7 +222,7 @@ fn zones_from_plan(
     if end <= now {
         return vec![];
     }
-    vec![serde_json::json!({ "from": now, "to": end, "step_s": step_s })]
+    vec![serde_json::json!({ "from": plan.horizon.start_time, "to": end, "step_s": step_s })]
 }
 
 /// GET /timeline/all — merged timelines for all configured assets + "grid".
@@ -299,7 +299,7 @@ mod tests {
         now: DateTime<Utc>,
     ) -> crate::entities::plan::Plan {
         use crate::entities::asset::PlanTrigger;
-        use crate::entities::plan::{Plan, PlanTimeSlot, PlanningHorizon};
+        use crate::entities::plan::{Plan, PlanTimeSlot, PlanZone, PlanningHorizon};
         use crate::entities::planner_params::PlannerObjective;
         let horizon = PlanningHorizon {
             start_time: now,
@@ -307,6 +307,7 @@ mod tests {
             step_size_s: step_s,
             num_steps: slots,
             far_horizon: now + Duration::seconds((step_s * slots as u64) as i64),
+            zones: vec![PlanZone { step_s, slots }],
         };
         let plan_slots: Vec<PlanTimeSlot> = (0..slots)
             .map(|i| PlanTimeSlot {
@@ -365,6 +366,17 @@ mod tests {
         let zones = zones_from_plan(Some(&plan), now);
         assert_eq!(zones.len(), 1, "single-zone plan produces one zone entry");
         assert_eq!(zones[0]["step_s"], 600);
+        // from must be the plan's grid origin (horizon.start_time), not the request time.
+        // Parse both sides to DateTime to avoid Z vs +00:00 format differences.
+        let zone_from: chrono::DateTime<chrono::Utc> = zones[0]["from"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .expect("zone from must be a valid RFC 3339 timestamp");
+        assert_eq!(
+            zone_from, plan.horizon.start_time,
+            "zone from must equal plan.horizon.start_time"
+        );
     }
 
     #[test]
