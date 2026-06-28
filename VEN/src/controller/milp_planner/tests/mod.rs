@@ -159,6 +159,10 @@ fn make_profile() -> Profile {
         planner: PlannerConfig {
             plan_step_s: 300,
             plan_horizon_h: 2,
+            plan_zones: vec![crate::entities::plan::PlanZone {
+                step_s: 300,
+                slots: 24,
+            }],
             // MILP unit tests verify tariff arbitrage mechanics, not the import malus.
             // Zero it so cheap tariff truly means cheap and arbitrage assertions hold.
             c_ctrl_imp_malus_eur_kwh: 0.0,
@@ -388,6 +392,10 @@ fn make_heater_only_profile(
         planner: PlannerConfig {
             plan_step_s: 300,
             plan_horizon_h: 2,
+            plan_zones: vec![crate::entities::plan::PlanZone {
+                step_s: 300,
+                slots: 24,
+            }],
             // MILP unit tests verify tariff arbitrage mechanics, not the import malus.
             // Zero it so cheap tariff truly means cheap and arbitrage assertions hold.
             c_ctrl_imp_malus_eur_kwh: 0.0,
@@ -404,6 +412,10 @@ fn make_heater_only_profile(
 fn make_profile_1800s() -> Profile {
     let mut p = make_profile();
     p.planner.plan_step_s = 1800;
+    p.planner.plan_zones = vec![crate::entities::plan::PlanZone {
+        step_s: 1800,
+        slots: 4,
+    }];
     p
 }
 
@@ -436,7 +448,16 @@ fn build_asset_contexts(
     tariffs: &TariffTimeSeries,
 ) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
     let step_s = profile.planner.plan_step_s;
-    let n = (profile.planner.plan_horizon_h as f64 * 3600.0 / step_s as f64) as usize;
+    let n: usize = profile.planner.plan_zones.iter().map(|z| z.slots).sum();
+    let cum_s: Vec<i64> = {
+        let mut v = vec![0i64];
+        for zone in &profile.planner.plan_zones {
+            for _ in 0..zone.slots {
+                v.push(v.last().unwrap() + zone.step_s as i64);
+            }
+        }
+        v
+    };
     let lambda_sw = profile
         .heater_config()
         .map(|h| h.switching_penalty_eur)
@@ -447,7 +468,7 @@ fn build_asset_contexts(
     let avg_imp_eur_kwh = {
         let total: f64 = (0..n)
             .map(|t| {
-                let slot_t = now + Duration::seconds(t as i64 * step_s as i64);
+                let slot_t = now + Duration::seconds(cum_s[t]);
                 tariffs
                     .import_eur_kwh
                     .interpolate_at(slot_t)
@@ -481,7 +502,7 @@ fn build_asset_contexts(
                 if let Some(ctx) = ac.build_milp_context(
                     &state,
                     n,
-                    step_s,
+                    &cum_s,
                     now,
                     ev_session,
                     heater_target,
@@ -516,7 +537,7 @@ fn build_asset_contexts(
                 if let Some(ctx) = ac.build_milp_context(
                     &state,
                     n,
-                    step_s,
+                    &cum_s,
                     now,
                     ev_session,
                     heater_target,
@@ -547,7 +568,7 @@ fn build_asset_contexts(
                 if let Some(ctx) = ac.build_milp_context(
                     &state,
                     n,
-                    step_s,
+                    &cum_s,
                     now,
                     ev_session,
                     heater_target,

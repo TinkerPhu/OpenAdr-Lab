@@ -418,7 +418,7 @@ impl EvMilpContext {
         state: &super::AssetState,
         cfg: &EvCharger,
         n: usize,
-        step_s: u64,
+        cum_s: &[i64],
         now: DateTime<Utc>,
         ev_session: Option<&crate::entities::device_session::EvSession>,
         min_charge_kw: f64,
@@ -456,7 +456,14 @@ impl EvMilpContext {
                 EvMilpMode::MustRun
             };
             let secs = (session.departure_time - now).num_seconds();
-            let t_dead = (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize;
+            let t_dead = if secs <= 0 {
+                0
+            } else {
+                cum_s
+                    .partition_point(|&s| s <= secs)
+                    .saturating_sub(1)
+                    .min(n.saturating_sub(1))
+            };
             Self {
                 mode,
                 a_ev: (0..n).map(|t| t <= t_dead).collect(),
@@ -501,7 +508,6 @@ impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
     fn milp_params(
         &self,
         _n: usize,
-        _step_s: u64,
         _now: chrono::DateTime<chrono::Utc>,
     ) -> crate::controller::milp_planner::AssetMilpParams {
         use crate::controller::milp_planner::MilpLoadMode;
@@ -875,7 +881,7 @@ mod milp_context_trait_tests {
     #[test]
     fn milp_params_must_run_mode() {
         let ctx = make_must_run(4);
-        match ctx.milp_params(4, 300, chrono::Utc::now()) {
+        match ctx.milp_params(4, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MustRun),
             _ => panic!("expected Ev variant"),
         }
@@ -894,7 +900,7 @@ mod milp_context_trait_tests {
             v_extra_eur_kwh: 0.05,
             v_core_eur: 0.0,
         };
-        match ctx.milp_params(4, 300, chrono::Utc::now()) {
+        match ctx.milp_params(4, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MayRun),
             _ => panic!("expected Ev variant"),
         }
@@ -913,7 +919,7 @@ mod milp_context_trait_tests {
             v_extra_eur_kwh: 0.05,
             v_core_eur: 0.0,
         };
-        match ctx.milp_params(4, 300, chrono::Utc::now()) {
+        match ctx.milp_params(4, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.mode, MilpLoadMode::MustNotRun),
             _ => panic!("expected Ev variant"),
         }
@@ -934,7 +940,7 @@ mod milp_context_trait_tests {
             v_extra_eur_kwh: 0.05,
             v_core_eur: 0.0,
         };
-        match ctx.milp_params(n, 300, chrono::Utc::now()) {
+        match ctx.milp_params(n, chrono::Utc::now()) {
             AssetMilpParams::Ev(e) => assert_eq!(e.a_ev, a_ev),
             _ => panic!("expected Ev variant"),
         }

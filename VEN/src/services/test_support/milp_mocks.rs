@@ -48,7 +48,7 @@ impl AssetMilpContext for MockBatteryCtx {
         AssetKind::Battery
     }
 
-    fn milp_params(&self, _n: usize, _step_s: u64, _now: DateTime<Utc>) -> AssetMilpParams {
+    fn milp_params(&self, _n: usize, _now: DateTime<Utc>) -> AssetMilpParams {
         AssetMilpParams::Battery(BatteryScalars {
             e_nom_kwh: self.ctx.e_nom_kwh,
             e_init_kwh: self.ctx.e_init_kwh,
@@ -149,7 +149,7 @@ impl AssetMilpContext for MockEvCtx {
         AssetKind::Ev
     }
 
-    fn milp_params(&self, _n: usize, _step_s: u64, _now: DateTime<Utc>) -> AssetMilpParams {
+    fn milp_params(&self, _n: usize, _now: DateTime<Utc>) -> AssetMilpParams {
         let mode = match self.ctx.mode {
             EvMilpMode::MustRun => MilpLoadMode::MustRun,
             EvMilpMode::MayRun => MilpLoadMode::MayRun,
@@ -246,7 +246,7 @@ impl AssetMilpContext for MockHeaterCtx {
         AssetKind::Heater
     }
 
-    fn milp_params(&self, _n: usize, _step_s: u64, _now: DateTime<Utc>) -> AssetMilpParams {
+    fn milp_params(&self, _n: usize, _now: DateTime<Utc>) -> AssetMilpParams {
         let mode = match self.ctx.mode {
             HeaterMilpMode::MustRun => MilpLoadMode::MustRun,
             HeaterMilpMode::MayRun => MilpLoadMode::MayRun,

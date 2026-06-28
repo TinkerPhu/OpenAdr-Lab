@@ -4296,3 +4296,68 @@ Periodic replans that introduce more heater relay switches than the current plan
 - `for t in 0..n { dt_h[t] }` triggers `clippy::needless_range_loop` (-D warnings). Fix: `for (t, &dt) in dt_h.iter().enumerate().take(n)`. Rename `dt_h[t]` → `dt` inside the body.
 - Array syntax `&[val; n]` where `n` is a non-const `let` binding is a compile error (E0435). Use `let arr: Vec<f64> = vec![val; n]; &arr` instead.
 - `unwrap_or_else(|| f64_expr)` triggers `clippy::unnecessary_lazy_evaluations` when the expression is always-cheap to evaluate. Use `unwrap_or(expr)` for Copy types.
+
+---
+
+## Part B — 3-Tier Variable-Step MILP Solver (branch: `refactor/3-tier-milp`)
+
+### Goal
+
+Thread a cumulative-seconds array (`cum_s`) through the entire MILP pipeline so the solver uses three different slot widths across the 48 h horizon: Zone A = 300 s × 96 (8 h), Zone B = 600 s × 96 (16 h), Zone C = 900 s × 96 (24 h) — 288 slots total, replacing uniform `step_s` arithmetic.
+
+### Central abstraction: `cum_s: Vec<i64>`
+
+- `cum_s[0] = 0`, `cum_s[t+1] = cum_s[t] + zone.step_s`
+- Slot `t` starts at `now + Duration::seconds(cum_s[t])`
+- Time → slot: `cum_s.partition_point(|&s| s <= offset_s).saturating_sub(1).min(n-1)`
+- `dt_h[t] = (cum_s[t+1] - cum_s[t]) as f64 / 3600.0`
+
+`solver_phase1.rs` / `solver_phase2.rs` / `milp_interactions.rs` already consume `dt_h: &[f64]` — variable step is transparent to them.
+
+### Steps implemented
+
+**B1 — `plan_zones: Vec<PlanZone>` in `PlannerParams`** (`entities/planner_params.rs`, `main.rs`)
+
+Added `plan_zones` field with default `[{ step_s: 600, slots: 288 }]` to preserve existing behaviour. `build_domain_params` in `main.rs` wires from profile if present, falls back to `step_s/horizon` arithmetic otherwise.
+
+**B2 — Remove vestigial `step_s` from `milp_params` trait** (`asset_port.rs`, `battery.rs`, `ev.rs`, `heater.rs`, `milp_mocks.rs`)
+
+All 6 implementations had `_step_s: u64` (unused). Removed from trait and all impls.
+
+**B2b — `from_state` deadline computation via `cum_s`** (`assets/ev.rs`, `assets/heater.rs`, `assets/mod.rs`)
+
+Changed `build_milp_context(…, step_s: u64, …)` → `build_milp_context(…, cum_s: &[i64], …)`. `t_dead` now computed via `partition_point` instead of integer division.
+
+**B2c — Build `cum_s` in `tasks/planning.rs`**
+
+`n_slots` and `cum_s` derived exclusively from `plan_zones`. Per-slot timestamps in `avg_imp_eur_kwh` loop changed from `t * step_s` to `cum_s[t]`.
+
+**B2d — Variable `dt_h` and all reverse-mappings in `inputs.rs`**
+
+Replaced 4 uniform-step reverse mappings with `time_to_slot` closure (partition_point). Fixed `pv_alpha` decay exponent to use `cum_s[t] / zone_a_step_s` (zone-A-normalized steps) instead of raw slot index `t`. Main loop changed to `for &slot_s in &cum_s[0..n]` (avoids clippy needless_range_loop).
+
+**B3 — `zones: planner.plan_zones.clone()` in `results.rs`**
+
+Both `translate_to_plan` and `fallback_plan` now populate all zones from `planner.plan_zones`. Old single-zone hardcode removed.
+
+**B4 — Production profile YAMLs** (`ven-1.yaml`, `ven-2.yaml`, `ven-3.yaml`)
+
+Added `plan_zones: [{300s×96}, {600s×96}, {900s×96}]`.
+
+**B5 — Multi-zone `zones_from_plan`** (`routes/timeline.rs`)
+
+Rewrote to iterate all `plan.horizon.zones`, computing `from`/`to` per zone. Added `test_zones_from_plan_three_zones`.
+
+**B6 — Zone-normalised `count_heater_switches → f64`** (`services/planning.rs`)
+
+Return type changed from `usize` to `f64`. Each switch is weighted by `slot_step_s / zone_a_step_s` so a switch in a Zone-B slot counts 2.0 zone-A equivalents. Backward-compatible for uniform plans (ratio = 1.0 always).
+
+### Issues encountered
+
+1. **`PlannerParams::default()` has `plan_zones: [600s×288]`** — all test profiles that set `plan_step_s/plan_horizon_h` without also setting `plan_zones` ended up with n=288 instead of the expected test size. Fixed by adding `plan_zones` to every test profile constructor (`make_profile`, `make_profile_1800s`, `make_profile_n48`, inline profiles in `planner.rs`).
+
+2. **`cargo fmt` struct literal style** — `PlanZone { step_s: X, slots: Y }` was written single-line; `cargo fmt` requires multi-line when inside `vec![]`. Fixed by running `cargo fmt` and accepting the expanded form.
+
+3. **`clippy::needless_range_loop`** — `for t in 0..n { cum_s[t] }` triggers the lint even though `t` is used only for array access. Fixed by rewriting as `for &slot_s in &cum_s[0..n]`.
+
+### Tests: 441 pass (0 failed), `cargo fmt --check` clean, `cargo clippy -D warnings` clean.

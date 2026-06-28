@@ -79,8 +79,17 @@ pub struct PlanCycleResult {
 /// A switch is a transition where the heater power changes by more than 0.1 kW between
 /// consecutive future slots. Past slots are excluded so this reflects the remaining
 /// switching burden of the plan from the current moment onward.
-pub fn count_heater_switches(plan: &Plan, now: DateTime<Utc>) -> usize {
-    let mut count = 0usize;
+pub fn count_heater_switches(plan: &Plan, now: DateTime<Utc>) -> f64 {
+    // zone_a_step_s is the reference slot width for switch weighting.
+    // Falls back to horizon.step_size_s when no zones are present (legacy/test plans),
+    // which keeps the per-switch weight at 1.0 for uniform-step plans.
+    let zone_a_step_s = plan
+        .horizon
+        .zones
+        .first()
+        .map(|z| z.step_s as f64)
+        .unwrap_or(plan.horizon.step_size_s as f64);
+    let mut count = 0.0f64;
     let mut prev: Option<f64> = None;
     for slot in plan.all_slots().filter(|s| s.start >= now) {
         let kw = slot
@@ -89,7 +98,8 @@ pub fn count_heater_switches(plan: &Plan, now: DateTime<Utc>) -> usize {
             .copied()
             .unwrap_or(0.0);
         if prev.is_some_and(|p| (p - kw).abs() > 0.1) {
-            count += 1;
+            let slot_step_s = (slot.end - slot.start).num_seconds() as f64;
+            count += slot_step_s / zone_a_step_s;
         }
         prev = Some(kw);
     }
@@ -153,8 +163,8 @@ pub fn evaluate_acceptance_gate(
     // Switch surcharge: extra heater relay operations in the new plan raise the bar.
     // fully_decayed still bypasses — decay is an escape hatch for stale plans regardless.
     let switch_surcharge = if gate_switch_penalty_eur > 0.0 {
-        let extra = count_heater_switches(new_plan, now)
-            .saturating_sub(count_heater_switches(current, now)) as f64;
+        let extra =
+            (count_heater_switches(new_plan, now) - count_heater_switches(current, now)).max(0.0);
         extra * gate_switch_penalty_eur
     } else {
         0.0
@@ -646,7 +656,7 @@ mod tests {
         let now = fixed_now();
         let past = now - Duration::seconds(4 * 1200);
         let plan = make_plan_with_heater_slots(past, 1200, &[2.0, 0.0, 2.0, 0.0]);
-        assert_eq!(count_heater_switches(&plan, now), 0);
+        assert_eq!(count_heater_switches(&plan, now), 0.0);
     }
 
     #[test]
@@ -654,7 +664,7 @@ mod tests {
         // All future slots at the same kW → no tier changes → 0 switches.
         let now = fixed_now();
         let plan = make_plan_with_heater_slots(now, 1200, &[2.0, 2.0, 2.0, 2.0]);
-        assert_eq!(count_heater_switches(&plan, now), 0);
+        assert_eq!(count_heater_switches(&plan, now), 0.0);
     }
 
     #[test]
@@ -664,7 +674,7 @@ mod tests {
         let now = fixed_now();
         let start = now - Duration::seconds(2 * 1200);
         let plan = make_plan_with_heater_slots(start, 1200, &[0.0, 0.0, 0.0, 2.0, 0.0, 2.0]);
-        assert_eq!(count_heater_switches(&plan, now), 3);
+        assert_eq!(count_heater_switches(&plan, now), 3.0);
     }
 
     // ── gate switch-count guard tests ─────────────────────────────────────────

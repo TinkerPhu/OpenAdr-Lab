@@ -150,8 +150,17 @@ pub(crate) fn spawn_planning(
 
             // Build per-asset MILP contexts from live simulator state.
             // This happens before spawn_blocking so asset states are captured at this instant.
-            let step_s = planner.plan_step_s;
-            let n_slots = (planner.plan_horizon_h as f64 * 3600.0 / step_s as f64) as usize;
+            let n_slots: usize = planner.plan_zones.iter().map(|z| z.slots).sum();
+            let cum_s: Vec<i64> = {
+                let mut v = Vec::with_capacity(n_slots + 1);
+                v.push(0i64);
+                for zone in &planner.plan_zones {
+                    for _ in 0..zone.slots {
+                        v.push(v.last().unwrap() + zone.step_s as i64);
+                    }
+                }
+                v
+            };
             let lambda_sw = asset_params
                 .iter()
                 .find_map(|p| match p {
@@ -176,7 +185,7 @@ pub(crate) fn spawn_planning(
             let avg_imp_eur_kwh = {
                 let total: f64 = (0..n_slots)
                     .map(|t| {
-                        let slot_t = now + chrono::Duration::seconds(t as i64 * step_s as i64);
+                        let slot_t = now + chrono::Duration::seconds(cum_s[t]);
                         tariff_ts
                             .import_eur_kwh
                             .interpolate_at(slot_t)
@@ -229,7 +238,7 @@ pub(crate) fn spawn_planning(
                     cfg.build_milp_context(
                         &entry.state,
                         n_slots,
-                        step_s,
+                        &cum_s,
                         now,
                         ev_sess.as_ref(),
                         heat_tgt.as_ref(),

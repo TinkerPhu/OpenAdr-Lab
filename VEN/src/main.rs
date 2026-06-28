@@ -80,6 +80,12 @@ fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Ve
         solver_timeout_s: profile.planner.solver_timeout_s,
         planning_initial_delay_s: profile.planner.planning_initial_delay_s,
         gate_switch_penalty_eur: profile.planner.gate_switch_penalty_eur,
+        plan_zones: profile.planner.plan_zones.clone().unwrap_or_else(|| {
+            let step_s = profile.planner.effective_step_s();
+            let total_s = profile.planner.effective_horizon_h() * 3600;
+            let slots = (total_s / step_s) as usize;
+            vec![crate::entities::plan::PlanZone { step_s, slots }]
+        }),
     };
     let asset_params = profile.asset_params();
     (sim_params, planner_params, asset_params)
