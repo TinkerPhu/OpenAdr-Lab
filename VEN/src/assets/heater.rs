@@ -562,7 +562,7 @@ impl HeaterMilpContext {
         state: &super::AssetState,
         cfg: &Heater,
         n: usize,
-        step_s: u64,
+        cum_s: &[i64],
         now: DateTime<Utc>,
         heater_target: Option<&crate::entities::device_session::HeaterTarget>,
         lambda_sw: f64,
@@ -602,7 +602,14 @@ impl HeaterMilpContext {
             let e_target = ((target.target_temp_c - cfg.temp_min_c) * cfg.thermal_mass_kwh_per_c)
                 .clamp(0.0, e_max);
             let secs = (target.ready_by - now).num_seconds();
-            let t_dead = (secs / step_s as i64).clamp(0, (n.saturating_sub(1)) as i64) as usize;
+            let t_dead = if secs <= 0 {
+                0
+            } else {
+                cum_s
+                    .partition_point(|&s| s <= secs)
+                    .saturating_sub(1)
+                    .min(n.saturating_sub(1))
+            };
             Self {
                 mode: HeaterMilpMode::MustRun,
                 t_dead_step: Some(t_dead),
@@ -650,7 +657,6 @@ impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
     fn milp_params(
         &self,
         _n: usize,
-        _step_s: u64,
         _now: chrono::DateTime<chrono::Utc>,
     ) -> crate::controller::milp_planner::AssetMilpParams {
         use crate::controller::milp_planner::MilpLoadMode;
@@ -1324,7 +1330,7 @@ mod milp_context_trait_tests {
     #[test]
     fn milp_params_returns_heater_scalars() {
         let ctx = make_ctx();
-        match ctx.milp_params(4, 300, chrono::Utc::now()) {
+        match ctx.milp_params(4, chrono::Utc::now()) {
             AssetMilpParams::Heater(h) => {
                 assert_eq!(h.mode, MilpLoadMode::MayRun);
                 assert!((h.p_mid_kw - 1.0).abs() < 1e-9);
@@ -1343,7 +1349,7 @@ mod milp_context_trait_tests {
             mode: HeaterMilpMode::MustRun,
             ..make_ctx()
         };
-        match ctx.milp_params(4, 300, chrono::Utc::now()) {
+        match ctx.milp_params(4, chrono::Utc::now()) {
             AssetMilpParams::Heater(h) => assert_eq!(h.mode, MilpLoadMode::MustRun),
             _ => panic!("expected Heater variant"),
         }

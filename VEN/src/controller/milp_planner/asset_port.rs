@@ -294,7 +294,7 @@ pub trait AssetMilpContext: Send + Sync {
 
     /// Phase A — scalar extraction: return all MILP parameters for this asset,
     /// pre-computed for a planning cycle of `n` slots starting at `now`.
-    fn milp_params(&self, n: usize, step_s: u64, now: DateTime<Utc>) -> AssetMilpParams;
+    fn milp_params(&self, n: usize, now: DateTime<Utc>) -> AssetMilpParams;
 
     /// Phase B — LP variable declaration: add LP variables for this asset to
     /// `vars` and store the resulting typed handles in the appropriate slot of
