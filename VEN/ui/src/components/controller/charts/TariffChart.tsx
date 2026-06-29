@@ -175,7 +175,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, 
               yAxisId="tariff"
               x1={new Date(z.from).getTime()}
               x2={new Date(z.to).getTime()}
-              fill={`rgba(0,0,0,${0.04 * i})`}
+              fill={`rgba(0,0,0,${0.04 * (i + 1)})`}
               ifOverflow="hidden"
             />
           ))}
