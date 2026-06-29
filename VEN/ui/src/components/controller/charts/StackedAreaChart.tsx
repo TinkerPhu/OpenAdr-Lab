@@ -217,7 +217,7 @@ export function StackedAreaChart({
               yAxisId="power"
               x1={new Date(z.from).getTime()}
               x2={new Date(z.to).getTime()}
-              fill={`rgba(0,0,0,${0.04 * i})`}
+              fill={`rgba(0,0,0,${0.04 * (i + 1)})`}
               ifOverflow="hidden"
             />
           ))}
