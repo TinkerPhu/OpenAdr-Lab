@@ -23,6 +23,14 @@ pub fn heater_block_end(plan: &Plan, now: DateTime<Utc>) -> Option<DateTime<Utc>
         .get("heater")
         .copied()
         .unwrap_or(0.0);
+    // Only anchor an active heating block. When the heater is off in the first future slot
+    // (kw0 ≈ 0 — including fallback plans that have no heater data at all), anchoring all
+    // subsequent slots to "off" forces the dynamics to drain the tank below its domain lower
+    // bound, making the next MILP infeasible at presolve. No anchor is needed for off-state:
+    // the switching penalty in Phase 2 already discourages rapid re-cycling.
+    if kw0 < 0.1 {
+        return None;
+    }
     iter.take_while(|s| {
         let kw = s.planned_kw_by_asset.get("heater").copied().unwrap_or(0.0);
         (kw - kw0).abs() < 0.1
@@ -535,13 +543,24 @@ mod tests {
         let now = fixed_now();
         let step_s = 1200i64;
         // 4 slots: [off, off, on, on]
+        // When heater is off in the first slot, return None — anchoring heater-off
+        // state causes the MILP to fail (forced off + dynamics → tank below domain lb).
         let plan = make_plan_with_heater_slots(now, step_s, &[0.0, 0.0, 2.0, 2.0]);
         let result = heater_block_end(&plan, now);
-        let expected = now + Duration::seconds(2 * step_s); // end of slot 1
+        assert_eq!(result, None, "off-block must not produce an anchor");
+    }
+
+    #[test]
+    fn test_heater_block_end_fallback_plan_returns_none() {
+        let now = fixed_now();
+        // Fallback plan (MILP failed): all slots have no heater data → defaults to 0.0.
+        // Must return None; returning Some(horizon_end) would anchor all 288 slots to
+        // heater-off, forcing e_tank below its domain lower bound → MILP infeasible.
+        let plan = make_plan_with_heater_slots(now, 300, &[0.0; 288]);
+        let result = heater_block_end(&plan, now);
         assert_eq!(
-            result,
-            Some(expected),
-            "off-block end should be end of slot 1"
+            result, None,
+            "fallback (all-zero) plan must not produce an anchor"
         );
     }
 
