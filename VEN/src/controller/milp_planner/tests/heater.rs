@@ -599,6 +599,114 @@ fn ev_planned_state_soc_populated() {
     );
 }
 
+// T019: ven-3 heater config (200 L, 45–60 °C, 3-tier 300/600/900 s zones) must be feasible.
+// Root cause of production infeasibility: heater_block_end() returned Some(horizon_end) for
+// a fallback plan (all zeros), anchoring all 288 slots to heater-off. Forced-off dynamics
+// drained e_tank below its domain lower bound → presolve contradiction in 32 ms.
+// Fix: heater_block_end() returns None when kw0 < 0.1 (heater off or no heater data).
+#[test]
+fn solve_ven3_heater_three_tier_zones_feasible() {
+    // Exact ven-3 production parameters that were causing MILP infeasibility.
+    let now = fixed_now();
+    let volume_l = 200.0_f64;
+    let thermal_mass = volume_l * 4.186 / 3600.0; // ≈ 0.2326 kWh/K
+    let profile = Profile {
+        assets: vec![
+            AssetProfile::Heater(HeaterParams {
+                id: "heater".into(),
+                max_kw: 6.0,
+                mid_kw: Some(3.0),
+                temp_initial_c: 47.82, // live temperature from ven-3
+                temp_min_c: 45.0,
+                temp_max_c: 60.0,
+                thermal_mass_kwh_per_c: thermal_mass,
+                k_loss_kw_per_c: 0.005,
+                draw_kw: 0.3,
+                switching_penalty_eur: 0.50,
+                c_terminal_eur_kwh: None,
+            }),
+            AssetProfile::Ev(EvParams {
+                id: "ev".into(),
+                max_charge_kw: 11.0,
+                max_discharge_kw: 0.0,
+                initial_soc: 0.30,
+                battery_kwh: 75.0,
+                soc_target: 0.80,
+                default_charge_kw: 0.0,
+                min_charge_kw: 0.0,
+            }),
+            AssetProfile::Pv(PvParams {
+                id: "pv".into(),
+                rated_kw: 6.0,
+            }),
+            AssetProfile::BaseLoad(BaseLoadParams {
+                id: "base_load".into(),
+                baseline_kw: 0.6,
+            }),
+        ],
+        simulator: SimulatorConfig::default(),
+        planner: PlannerConfig {
+            plan_step_s: 300,
+            plan_horizon_h: 48,
+            plan_zones: vec![
+                crate::entities::plan::PlanZone {
+                    step_s: 300,
+                    slots: 96,
+                },
+                crate::entities::plan::PlanZone {
+                    step_s: 600,
+                    slots: 96,
+                },
+                crate::entities::plan::PlanZone {
+                    step_s: 900,
+                    slots: 96,
+                },
+            ],
+            c_ctrl_imp_malus_eur_kwh: 0.22,
+            phase2_epsilon_eur: 0.17,
+            ..PlannerConfig::default()
+        },
+        grid: GridConfig {
+            max_import_kw: 25.0,
+            max_export_kw: 10.0,
+        },
+        packets: vec![],
+    };
+    let mut sim = make_snap_from_profile(&profile);
+    // Production state: emergency thermostat running at 6 kW because temp < 48°C.
+    // This sets initial_z_full=1.0 via HeaterMilpContext::from_state → must still be feasible.
+    set_heater_power(&mut sim, 6.0);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::Periodic,
+        None,
+        None,
+        &[],
+        None,
+        None,
+    );
+    assert!(
+        plan.warnings.is_empty(),
+        "ven-3 heater MILP should be feasible, got warnings: {:?}",
+        plan.warnings
+    );
+    let heater_kws: Vec<f64> = plan
+        .slots
+        .iter()
+        .map(|s| s.planned_kw_by_asset.get("heater").copied().unwrap_or(0.0))
+        .collect();
+    assert!(
+        heater_kws.iter().any(|&kw| kw > 0.1),
+        "heater should be planned for at least some slots; all zeros suggests MILP infeasibility"
+    );
+}
+
 // T018: Heater T_tank trajectory is populated in planned_state_by_asset.
 #[test]
 fn heater_planned_state_temp_c_populated() {
