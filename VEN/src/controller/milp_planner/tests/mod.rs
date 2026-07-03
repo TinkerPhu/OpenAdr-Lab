@@ -367,6 +367,12 @@ fn set_heater_temp(snap: &mut SimSnapshot, temp_c: f64) {
     }
 }
 
+fn set_heater_power(snap: &mut SimSnapshot, power_kw: f64) {
+    if let Some(h) = snap.assets.get_mut("heater") {
+        h.power_kw = power_kw;
+    }
+}
+
 fn make_heater_only_profile(
     volume_l: Option<f64>,
     temp_min_c: f64,
@@ -552,14 +558,14 @@ fn build_asset_contexts(
                 }
             }
             AssetProfile::Heater(cfg) => {
-                let temp_c = snap
-                    .assets
-                    .get("heater")
+                let heater_snap = snap.assets.get("heater");
+                let temp_c = heater_snap
                     .and_then(|s| s.val("temp_c"))
                     .unwrap_or(cfg.temp_initial_c);
+                let actual_power_kw = heater_snap.map(|s| s.power_kw).unwrap_or(0.0);
                 let state = AssetState::Heater(HeaterState {
                     temperature_c: temp_c,
-                    actual_power_kw: 0.0,
+                    actual_power_kw,
                 });
                 let ac = AssetConfig::Heater(Heater::from_params(cfg));
                 let c_terminal = cfg
