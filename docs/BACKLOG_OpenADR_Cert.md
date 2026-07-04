@@ -1,6 +1,6 @@
 # OpenADR 3.1 VEN Certification — Fulfilment Analysis
 
-> **Date:** 2026-03-22
+> **Date:** 2026-03-22 (partial update 2026-07-03 — planner section only; percentages not re-audited)
 > **Scope:** VEN backend (`VEN/src/`) vs OpenADR 3.1.0 Definition & User Guide
 > **Spec sources:** `docs/openadr_3_1_specs/2_OpenADR 3.1.0_Definition_20250801.md`, `docs/openadr_3_1_specs/3_OpenADR 3.1.0_User_Guide_20250801.md`, `docs/openadr_3_1_specs/0_READ ME_OpenADR 3 Information and Certification_v3.1.0.md`
 
@@ -325,7 +325,7 @@ The VEN excels as a **HEMS-oriented price-responsive VEN**:
 
 - **OAuth authentication** — full client credentials flow with auto-refresh and 401 retry
 - **PRICE/tariff parsing** — including looping events (P9999Y), variable intervals, ISO 8601 durations
-- **8-phase energy planning** — FIRM/FLEXIBLE horizons, battery arbitrage, comfort curves, multi-tier deadlines
+- **3-tier MILP planning** — FIRM/FLEXIBLE horizons, battery arbitrage, asset-variable solver, multi-tier deadlines, adoption gate
 - **Report submission** — upsert semantics, obligation tracking, measurement + status reports
 - **Simulation layer** — 5 physics-based asset models (EV, Battery, PV, Heater, BaseLoad) with 1s tick
 - **Controller pipeline** — OpenADR interface -> planner -> dispatcher -> monitor -> reporter (full lifecycle)

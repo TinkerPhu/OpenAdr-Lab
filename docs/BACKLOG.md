@@ -4,12 +4,8 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 
 ---
 
-### BL-01: PlanTrigger wiring — RATE_CHANGE / CAPACITY_CHANGE
-**Req:** UC-04, UC-07, VEN_ARCHITECTURE §2.1
-**Problem:** `openadr_interface` parses new rates and capacity from VTN events, but never emits `PlanTrigger::RateChange` or `PlanTrigger::CapacityChange` on the watch channel. The planner only replans on the 20s periodic tick or on packet transitions — rate/capacity changes are invisible until the next periodic cycle.
-**Fix:** After `parse_rate_snapshots()` / `parse_capacity_state()` in the poll loop (`main.rs:133-216`), compare new values against previous. If changed, send the appropriate `PlanTrigger` variant on the watch channel.
-**Complexity:** Small (1–2 hours). Diff detection + channel send.
-**Verify:** BDD test: seed a PRICE event mid-run, assert replan fires within one poll cycle (not 20s).
+### ~~BL-01: PlanTrigger wiring — RATE_CHANGE / CAPACITY_CHANGE~~ ✅ RESOLVED
+`trigger_tx.send(PlanTrigger::RateChange)` is implemented in `tasks/poll_events.rs`. Verified 2026-07-03.
 
 ---
 
@@ -34,7 +30,7 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 ### BL-04: ALERT_GRID_EMERGENCY handling
 **Req:** UC-06, OA-01
 **Problem:** `ALERT_GRID_EMERGENCY` and `ALERT_BLACK_START` event types are not parsed. Emergency signals from the VTN are silently ignored.
-**Fix:** In `openadr_interface`, detect ALERT payload types. Create a high-priority synthetic `EnergyPacket` (shed/limit import) and emit `PlanTrigger::Alert`. Planner treats alert packets as highest-priority FIRM allocations.
+**Fix:** In `openadr_interface`, detect ALERT payload types and emit `PlanTrigger::Alert`. Planner enforces a zero/minimal import hard constraint for the alert duration as highest-priority FIRM slots.
 **Complexity:** Medium (3–5 hours). New parsing path + synthetic packet creation + planner priority handling.
 **Verify:** BDD test: send ALERT_GRID_EMERGENCY event, assert planner creates shed packet and reduces import within one poll cycle.
 
@@ -51,10 +47,10 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 
 ### BL-06: DISPATCH_SETPOINT + CHARGE_STATE_SETPOINT parsing
 **Req:** UC-13, VEN_ARCHITECTURE §2.1
-**Problem:** These event types are not parsed in `openadr_interface`. `DISPATCH_SETPOINT` should bypass the planner and go directly to the dispatcher. `CHARGE_STATE_SETPOINT` should create/modify an EnergyPacket targeting the specified SOC.
-**Fix:** Add parsing branches in `openadr_interface` for both types. `DISPATCH_SETPOINT` → store in `OadrEventCache.dispatch_setpoints` (field already exists in `capacity.rs:53`) and flag for dispatcher override. `CHARGE_STATE_SETPOINT` → create EnergyPacket with target SOC via user_request machinery.
-**Complexity:** Medium (4–6 hours). Two new parsing paths + dispatcher override mode + packet creation.
-**Verify:** BDD test: send DISPATCH_SETPOINT event, assert sim setpoint matches within one poll cycle. Send CHARGE_STATE_SETPOINT, assert EnergyPacket created with correct target.
+**Problem:** These event types are not parsed in `openadr_interface`. `DISPATCH_SETPOINT` should bypass the planner and go directly to the dispatcher. `CHARGE_STATE_SETPOINT` should create/modify an `EvSession` targeting the specified SoC.
+**Fix:** Add parsing branches in `openadr_interface` for both types. `DISPATCH_SETPOINT` → store in `OadrEventCache.dispatch_setpoints` (field already exists in `capacity.rs:53`) and flag for dispatcher override. `CHARGE_STATE_SETPOINT` → create `EvSession` with target SoC via `user_request` machinery.
+**Complexity:** Medium (4–6 hours). Two new parsing paths + dispatcher override mode + session creation.
+**Verify:** BDD test: send DISPATCH_SETPOINT event, assert sim setpoint matches within one poll cycle. Send CHARGE_STATE_SETPOINT, assert `EvSession` created with correct target SoC.
 
 ---
 
@@ -121,65 +117,24 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 
 ---
 
-
+Add log for past. to be shown in VEN UI
 
 ---
 
 ## General Backlog
 
-clean up docker orphans
-
-ven-1 differs in naming scheme from othe VENs. this causes confusion and sometimes errors. can we unify them?
-
-make the ven-1 id a uuid and change it in all test and seed references.
-
-DB-level optimization for active event filter: add `ends_at timestamptz` computed column + index so the `?active=true` filter can run in SQL instead of post-filtering in Rust. Not needed until event tables grow large.
-
-
-Add a filter in VTN UI event table to omit the past events.
-
-Add a DB-Reset script so it can be re-seeded easily.
-
-
-add a setup script that docker composes all required containers.
-
-
-add code coverage tools to tests and formater and linter tools to be applied for each code change.
-
-
-check and remove warnings in all builds.
-
-check for code quality and refactoring possibilities.
-
-write down all your findings to the test errors around VEN UI simulation tests into ven_ui_simulation_test_issues.md. 
-
-The fix is there. Docker's layer cache is stale — it doesn't see the change to Simulation.tsx. Need to force a rebuild without cache
-
-
-add time provider for simulation: 
-pub trait TimeContext: Clone + Send + Sync + 'static {
-    type Instant: Copy + Ord + Send + 'static;
-
-    fn now(&self) -> Self::Instant;
-    fn sleep_until(&self, deadline: Self::Instant) -> Pin<Box<dyn Future<Output = ()> + Send>>;
-    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>>;
-
-    fn pause(&self);
-    fn resume(&self);
-    fn set_rate(&self, rate: f64);
-    fn advance(&self, delta: Duration);
-}
-
-
-how can I test the ven controller in ui?
-
-
-also add ui tests for UserRequests and Controller in VEN\ui\src\__tests__   
-
-
-the ven poll interval should be configurable in the config file so during test we can easily shorten it. or is there a better option? 
-
-reactor still there?
+| ID | Item | Priority |
+|---|---|---|
+| GB-01 | Clean up Docker orphan containers | Low |
+| GB-02 | Unify VEN-1 naming scheme to match VEN-2/VEN-3 (causes test confusion) | Medium |
+| GB-03 | Make VEN-1 ID a UUID and update all test/seed references | Medium |
+| GB-04 | DB-level optimization: add `ends_at timestamptz` index so `?active=true` runs in SQL, not post-filter Rust | Low (not needed until event table is large) |
+| GB-05 | VTN UI: filter past events from event table | Low |
+| GB-06 | Add DB-reset script for easy re-seeding | Low |
+| GB-07 | Add setup script to bring up all required containers | Low |
+| GB-08 | Add VEN UI tests for UserRequests and Controller pages | Medium |
+| GB-09 | Make VEN poll interval configurable per profile (useful for testing) | Medium |
+| GB-10 | Remove remaining compiler warnings across all builds | Medium |
 
 ---
 

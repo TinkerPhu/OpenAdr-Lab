@@ -49,13 +49,13 @@ follows production-inspired design patterns.
 | Term | Full Name | Definition |
 |---|---|---|
 | **HEMS** | Home Energy Management System | Software system that monitors and controls energy flows within a home or small site. Coordinates DERs (solar, battery, EV charger, HVAC) to minimise cost, maximise self-consumption, or respond to DR signals. In this lab the HEMS controller runs inside the VEN. |
-| **Planner** | Energy Planner | Component of the HEMS that schedules future energy use. Given tariff forecasts, device constraints, and DR obligations, it builds an optimal time-slot plan (FIRM + FLEXIBLE slots) using a greedy algorithm. |
+| **Planner** | Energy Planner | Component of the HEMS that schedules future energy use. Given tariff forecasts, device constraints, and DR obligations, it builds an optimal time-slot plan (FIRM + FLEXIBLE slots) using a two-phase MILP solver (HiGHS) over a 3-tier variable-step slot grid. See `docs/architecture/ven_milp_planner.md`. |
 | **Dispatcher** | Setpoint Dispatcher | Real-time control loop (1 s tick) that translates the planner's slot schedule into live device setpoints and accumulates the asset ledger. |
 | **Asset Ledger** | — | Cumulative energy accounting record maintained by the Dispatcher. Tracks how much energy each asset imported/exported and the associated cost/revenue. **In-memory only; resets on restart. POTENTIAL FOR PERSISTANCE, needs VEN Persistance** |
 | **Energy Packet** | — | A schedulable unit of energy delivery: a fixed amount of energy (kWh) for a specific asset, with a time window and status (`PENDING → ACTIVE → COMPLETED / ABANDONED`). |
 | **FIRM slot** | Firm Commitment Slot | A planner output slot that must be executed — driven by a hard user request or minimum SOC constraint. Cannot be deferred. |
 | **FLEXIBLE slot** | Flexible Opportunity Slot | A planner output slot that can be shifted or cancelled if constraints change. Typically price-driven charging windows. |
-| **OadrEventSnapshot** | — | `RateSnapshot` [RENAME → `OadrEventSnapshot`] — A point-in-time capture of all time-varying OpenADR events at one poll tick: import/export tariff (€/kWh), CO₂ intensity, and capacity limits. Unified in one row for temporal correlation — all fields are valid at the same timestamp. Price fields originate from `PRICE`/`EXPORT_PRICE` events; capacity fields from `IMPORT_CAPACITY_LIMIT` / `EXPORT_CAPACITY_LIMIT` events. |
+| **TariffSnapshot** | — | A point-in-time capture of all time-varying OpenADR events at one poll tick: import/export tariff (€/kWh), CO₂ intensity, and capacity limits. Unified in one row for temporal correlation — all fields are valid at the same timestamp. Price fields originate from `PRICE`/`EXPORT_PRICE` events; capacity fields from `IMPORT_CAPACITY_LIMIT` / `EXPORT_CAPACITY_LIMIT` events. See `entities/tariff_snapshot.rs`. |
 | **Capacity State** | — | Current grid capacity constraints parsed from a VTN subscription/reservation event: subscribed import (kW), subscribed export (kW), reserved import (kW), reserved export (kW). Distinct from per-interval capacity limits (which live in OadrEventSnapshot). |
 | **User Request** | — | An explicit energy delivery request submitted by the occupant (e.g. "charge EV to 80% by 07:00"). The planner honours these as FIRM slots. Supports `ASAP`, `BY_DEADLINE`, `MAX_COST`, `OPPORTUNISTIC` modes. |
 | **SOC target** | State-of-Charge Target | Desired battery or EV charge level (%) at a given deadline. The planner back-calculates the required charging power and window to meet it. |
@@ -75,7 +75,7 @@ follows production-inspired design patterns.
 | **Curtailment** | Load Curtailment | Actively reducing electricity consumption in response to a DR signal. |
 | **M&V** | Measurement & Verification | Process of verifying that DR actually delivered the promised load reduction. Uses the Baseline as the reference. |
 | **tariff** | Electricity Tariff | Price in €/kWh (or currency/kWh). Applies to energy quantity. **Not to be confused with rate.** |
-| **rate** | Power Rate | Cost in €/h or currency/h. Applies to power over time. In this project "tariff" is used for €/kWh values everywhere in documentation. API legacy endpoint `GET /rates` [RENAME → `GET /tariffs`] returns tariff data. |
+| **rate** | Power Rate | Cost in €/h or currency/h. Applies to power over time. In this project "tariff" is used for €/kWh values everywhere in documentation. API endpoint `GET /tariffs` returns tariff data. |
 
 ### 2.5 Sign Convention (Grid Boundary)
 
@@ -223,27 +223,14 @@ UNRESPONSIVE     — not confirming setpoint changes
 OFFLINE          — not communicating at all
 ```
 
-**EnergyPacketStatus**
-```
-PENDING          — not yet started
-SCHEDULED        — planned start time assigned
-ACTIVE           — currently executing
-PAUSED           — temporarily suspended
-COMPLETED        — target energy/SoC reached
-PARTIAL_COMPLETED — deadline reached with less than 100% fill
-ABANDONED        — all tiers exhausted or user cancelled
-FAILED           — device failure prevented completion
-```
-
 **PlanTrigger** — what caused the Planner to replan
 ```
 PERIODIC         — regular cycle
 RATE_CHANGE      — new PRICE/GHG/EXPORT_PRICE event from VTN
 CAPACITY_CHANGE  — new capacity limit/reservation from VTN
 ALERT            — emergency/flex alert from VTN
-USER_REQUEST     — new or modified EnergyPacket from user
-DEVICE_DEVIATION — significant actual vs. planned deviation
-ASSET_STATE_CHANGE — device connected/disconnected/failed
+USER_REQUEST     — new or modified user request (EvSession / HeaterTarget / ShiftableLoad)
+ASSET_STATE_CHANGE — device connected/disconnected/failed (emitted from /sim/inject)
 ```
 
 **UserRequestMode**
@@ -256,14 +243,13 @@ MAX_COST         — complete whenever, within cost limit
 OPPORTUNISTIC    — use only free/surplus energy, no deadline
 ```
 
-**CompletionPolicy** — what happens when the last DeadlineTier expires and the packet is incomplete
+**CompletionPolicy** — what happens when the deadline passes and the session is incomplete
 ```
-STOP             — terminate immediately (→ PARTIAL_COMPLETED if fill < 1.0)
-CONTINUE         — keep going at PostDeadlineComfortBid priority
+STOP             — terminate immediately
+CONTINUE         — keep going at lower priority
 ```
 
-Defaults per asset type: `BATTERY → STOP`, `EV → CONTINUE (low bid)`,
-`WASHING_MACHINE → CONTINUE (high bid)`, `HEAT_PUMP / HEATER → STOP`.
+Defaults per asset type: `BATTERY → STOP`, `EV → STOP`, `HEATER → CONTINUE`.
 
 **StaleRatePolicy** — how the Planner handles slots beyond the last known tariff data
 ```
@@ -272,7 +258,8 @@ HEURISTIC_FORECAST — use learned day-of-week / time-of-day patterns
 DEFER_TO_FLEXIBLE — mark all unknown slots FLEXIBLE (most conservative)
 SAFE_AVERAGE     — use a configurable safety tariff (e.g. 80th percentile)
 ```
-Default: `HEURISTIC_FORECAST`.
+Default: `HEURISTIC_FORECAST`. **Dispatch not yet implemented** — enum is defined but planner
+has no branching logic. Only `LAST_KNOWN` behaviour occurs implicitly. Tracked in BL-07.
 
 #### 3.2.2 Core Value Types
 
@@ -283,7 +270,7 @@ MaxPower_kW      — maximum power
 PowerSteps       — discrete levels (null if STEPLESS)
 ```
 
-**OadrEventSnapshot** (`RateSnapshot` [RENAME → `OadrEventSnapshot`])
+**TariffSnapshot** (formerly `RateSnapshot` / `OadrEventSnapshot`)
 ```
 TimeStamp             — RFC 3339
 ImportPrice           — €/kWh (tariff for grid import)
@@ -311,35 +298,42 @@ MinSoC / MaxSoC (optional)   — for BATTERY / EV: hard bounds
 
 #### 3.2.4 Scheduling Entities
 
-**EnergyPacket**
+**EvSession** — EV charging intent (`entities/device_session.rs`)
 ```
-PacketID, AssetID
-TargetEnergy_kWh, EarliestStart, LatestEnd
-CompletionPolicy, PostDeadlineComfortBid
-Status: EnergyPacketStatus
-ValueCurve (DeadlineTiers[] + ComfortRates[])
-PastPowerProfile   — [EnergySnapshot] actual execution history
-PlannedPowerProfile — [EnergySnapshot] forward schedule
-AccumulatedCost_EUR, AccumulatedCO2_g
-FillPercentage     — 0.0–1.0
+id, asset_id
+target_soc        — 0.0–1.0
+departure_time    — when EV must be ready
+soft_deadline     — false = MustRun hard constraint, true = MayRun best-effort
 ```
 
-**UserRequest**
+**HeaterTarget** — heater comfort target (`entities/device_session.rs`)
 ```
-RequestID, AssetID
-Mode: UserRequestMode
-Deadlines: [DeadlineTier]   — each has Deadline, MaxCost, MaxMarginalRate
-LinkedPacketID
+id
+target_temp_c
+ready_by
 ```
 
-**FlexibilityEnvelope** — per unallocated packet, in FLEXIBLE horizon
+**ShiftableLoad** — fixed-power deferrable load (`entities/device_session.rs`)
 ```
-AssetID, PacketID
-EnergyNeeded_kWh, MaxPower_kW
-WindowStart, WindowEnd
-MaxAcceptableRate   — min(ComfortBid, tier ceiling)
-BudgetRemaining_EUR
-EstimatedCost_EUR
+id, asset_id
+power_kw, duration_min
+earliest_start, latest_end
+```
+
+**UserRequest** — user-facing task record (`entities/user_request.rs`)
+```
+id, asset_id
+mode: UserRequestMode
+completion_policy: CompletionPolicy
+session_id        — FK to EvSession / HeaterTarget / ShiftableLoad
+status
+```
+
+**FlexibilityEnvelope** — per-asset headroom in FLEXIBLE horizon
+```
+asset_id
+energy_needed_kwh, max_power_kw
+window_start, window_end
 ```
 
 #### 3.2.5 Plan & Execution Entities
@@ -403,7 +397,7 @@ Key implications:
 ### 4.2 HEMS Controller Requirements (UC-01–UC-12)
 
 These are derived from Step 5 use cases. Each states the **intent and required outcome**.
-For full step-by-step traces see `docs/VEN_Controller/Step5_UseCases.md` [ARCHIVED].
+For full step-by-step observation guides see `docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md`.
 
 | UC | Name | Intent | Required Outcome |
 |---|---|---|---|

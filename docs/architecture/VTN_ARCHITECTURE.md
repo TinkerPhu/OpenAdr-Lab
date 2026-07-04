@@ -165,7 +165,7 @@ POST /auth/token  →  access_token (TTL 30 days)
 
 ```
 OpenADR Interface reads OadrReportObligation (DueAt)
-  → builds report payload from AssetState / PastEnergySum
+  → builds report payload from sim snapshot (asset power, SoC) via reporter.rs
   → VEN: POST /reports  →  VTN stores
   → OadrReportObligation marked Fulfilled
 ```

@@ -1,6 +1,6 @@
 # VEN HEMS Use Case Manual — Glass-Box Observation Guide
 
-This manual shows how to observe all 14 HEMS controller use cases from `docs/VEN_Controller/Step5_UseCases.md` using the live lab UI. The Controller page was designed as a "glass box" into the planning engine: every packet, plan slot, rate snapshot, and ledger entry is visible in real time.
+This manual shows how to observe all 14 HEMS controller use cases using the live lab UI. The Controller page was designed as a "glass box" into the planning engine: every packet, plan slot, rate snapshot, and ledger entry is visible in real time.
 
 **VEN UI:** http://Pi4-Server:8214
 **VTN UI:** http://Pi4-Server:8221
@@ -14,7 +14,7 @@ This manual shows how to observe all 14 HEMS controller use cases from `docs/VEN
 | **Controller** | Power chart (history + plan), Rate chart, Packets table (fill%), Ledger, Status bar |
 | **Requests** | User requests table with status chips; form to create new requests; inline cancel |
 | **Simulation** | Device state cards (EV SoC, Heater temp, PV output), Setpoints chart, Override sliders |
-| **Trace** | Per-tick decision log: mode, FSM state, active events, setpoints, constraints |
+| **Trace** | Per-tick decision log: mode, active events, setpoints, constraints |
 | **Events** | Raw OpenADR events polled from VTN |
 | **Dashboard** | Latest sensor snapshot |
 
@@ -329,7 +329,7 @@ The power chart shows the EV packet is NOT pre-committed to the 18:00–20:00 of
 
 **Scenario:** VTN signals emergency — EV pauses, heater reduces, battery (if present) discharges. Site net import drops sharply.
 
-**What the controller should do:** Import capacity limit 0 is an emergency signal. Reactor switches to IMPORT_CAP or SIMPLE mode. EV charge drops to 0. Any packet in progress transitions to PAUSED.
+**What the controller should do:** Import capacity limit 0 is an emergency signal. The dispatcher enforces the 0 kW site limit — EV charge drops to 0. Any packet in progress transitions to PAUSED.
 
 **Suggested VEN:** VEN1 or VEN3 (both have EV)
 
@@ -354,10 +354,9 @@ The power chart shows the EV packet is NOT pre-committed to the 18:00–20:00 of
 - **EV card**: Current charging drops to 0 kW
 - **Power & Energy card**: Net import drops (EV + possibly heater reduced)
 
-**Trace page:**
-- Latest entries show mode `IMPORT_CAP` or `SIMPLE`
-- `constraints` array shows the active capacity limit
-- `setpoints.ev_charge_kw = 0.0`
+**Trace page (GET /trace/events):**
+- `CapacityChange` event: `import_limit_kw = 0.0`
+- `PlanCycle` event: triggered by `CapacityChange` — plan replans around 0 kW limit
 
 **Controller → Power chart (solid trace lines):**
 - `trace_ev` drops to 0 at the moment the event was received
@@ -431,7 +430,7 @@ The scenario in Step5 where the VEN computes that reservation would pay off (€
 - `Charging: 0 kW`
 
 **Trace page:**
-- New entry: `fsm_state = Idle`, constraints empty for EV
+- New entry shows EV setpoint 0, constraints empty for EV
 
 **Controller → Packets table:**
 - EV packet status: `ACTIVE` → `PAUSED`
@@ -636,7 +635,7 @@ Wait 30 seconds for VEN to reconnect. Controller Plan card should show `RATE_CHA
 
 **Scenario:** VTN sends a direct power setpoint to the heat pump (or EV). System bypasses normal planning and dispatches immediately.
 
-> **Proxy signal.** `DISPATCH_SETPOINT` is the Step5 OpenADR payload type for direct control. In the lab, use `IMPORT_CAPACITY_LIMIT` to achieve the same observable effect: the reactor constrains the controlled asset and the Trace/Simulation pages show the override in action.
+> **Proxy signal.** `DISPATCH_SETPOINT` is the OpenADR payload type for direct control. In the lab, use `IMPORT_CAPACITY_LIMIT` to achieve the same observable effect: the dispatcher enforces the site import limit and the Trace/Simulation pages show the constraint in action.
 
 **Suggested VEN:** VEN3 (has both EV and heater)
 
@@ -664,21 +663,20 @@ Wait 30 seconds for VEN to reconnect. Controller Plan card should show `RATE_CHA
 - **EV card**: Charging power reduces to stay within the 3 kW site import limit
 - If heater is also running: one or both assets reduce
 
-**Trace page:**
-- Mode shows `IMPORT_CAP`
-- `setpoints.ev_charge_kw` shows reduced value
-- `constraints` array lists the active event
+**Trace page (GET /trace/events):**
+- `CapacityChange` event: `import_limit_kw = 3.0`
+- `PlanCycle` event: trigger `CapacityChange` — plan replans with the new site limit
 
 **Controller → Power chart:**
 - `trace_net` drops to ≤ 3 kW after event received
 - `trace_ev` shows the reduced setpoint in solid lines
 
 **After 5 minutes:**
-- Event expires. Trace page shows mode returning to `IDLE` or `PRICE`.
+- Event expires. Next `CapacityChange` event shows `import_limit_kw = null` (no limit).
 - EV charging resumes at normal rate.
 
-### Conceptual difference from Step5
-Step5's `DISPATCH_SETPOINT` targets a specific asset by `resource_name`. The lab's `IMPORT_CAPACITY_LIMIT` targets the whole site. The observable behavior (asset reduction, mode change in Trace, setpoint drop in Simulation) is the same. The VEN3 `partial` strategy means compliance is at 70% — the override is partially followed, which you can verify in the Trace constraints.
+### Conceptual difference
+`DISPATCH_SETPOINT` targets a specific asset by `resource_name`. The lab's `IMPORT_CAPACITY_LIMIT` targets the whole site. The observable behavior (asset reduction, `CapacityChange` + `PlanCycle` in Trace, setpoint drop in Simulation) is the same. The VEN3 `partial` strategy means compliance is at 70% — the override is partially followed, which you can verify in the Trace constraints.
 
 ---
 
