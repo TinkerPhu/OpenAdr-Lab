@@ -70,7 +70,7 @@ pub enum PlanTrigger {
     RateChange,       // new PRICE/GHG/EXPORT_PRICE event from VTN
     CapacityChange,   // new capacity limit/reservation from VTN
     Alert,            // emergency/flex alert from VTN
-    UserRequest,      // new or modified EnergyPacket from user
+    UserRequest,      // new or modified device session / user request
     AssetStateChange, // device connected/disconnected/failed
 }
 
@@ -281,8 +281,7 @@ pub struct AssetLedger {
     pub total_export_revenue_eur: f64,
     pub total_co2_g: f64,
 
-    pub tracked_by_packets_kwh: f64, // energy covered by EnergyPackets
-    pub untracked_energy_kwh: f64,   // = total_consumption - tracked (standby, uncontrolled)
+    pub untracked_energy_kwh: f64, // = total_consumption - tracked (standby, uncontrolled)
 }
 
 /// Flexibility this asset offers right now — computed on demand, not stored (§3.5).
