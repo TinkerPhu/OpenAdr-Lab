@@ -3,8 +3,8 @@ title: "Decision: DTO Pass-Through, No Normalisation"
 type: decision
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: 4695762
-sources: [.claude/CLAUDE.md, docs/architecture/VTN_ARCHITECTURE.md]
+synced_commit: eb8831a
+sources: [.claude/CLAUDE.md, docs/architecture/VTN_ARCHITECTURE.md, docs/openadr_3_1_specs/]
 tags: [decision, dto, api]
 ---
 
@@ -34,3 +34,6 @@ One vocabulary everywhere:
   physical variables.
 - The BFF stays a thin proxy ([[vtn-stack]]) — it adds credentials, never reshapes
   payloads.
+- `targets` is a pass-through field like any other, but its *shape* differs between spec
+  versions (3.0-era type/values maps vs 3.1's flat strings) — see the DRIFT note in
+  [[openadr-security]] for what a 3.1 migration would need to flatten.

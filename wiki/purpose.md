@@ -50,3 +50,7 @@ The wiki is that place. Its two audiences:
   `docs/BACKLOG.md`, not here (the wiki may *link* to backlog themes in overview pages).
 - The wiki never becomes a second spec: `docs/REQUIREMENTS.md` stays the vocabulary
   authority.
+- No project history explanations of changed past imperfections like ('was decided', 'was stale', 
+  etc.) The changes have been made because the previous state was faulty or just not satisfying. 
+  No point in lingering in the past. It only confuses. Remove all those references to a faulty past.
+  When describing the current state, you may mention very briefly why the past solution is not suitable. No 'Was' vs 'Now' but 'this is how it is done and it works because...'

@@ -3,8 +3,8 @@ title: HEMS Planning Concepts
 type: concept
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: 4695762
-sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md]
+synced_commit: eb8831a
+sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems.rs, openspec/specs/ev-session-request-completion/spec.md]
 tags: [hems, planning, sessions, domain]
 ---
 
@@ -37,6 +37,14 @@ into device sessions — `EvSession`, `HeaterTarget`, `ShiftableLoad` — applyi
 `CompletionPolicy` defaults and computing energy from SoC delta × capacity
 (VEN_ARCHITECTURE.md §2.1). Sessions enter the MILP as **constraints** (deadline step,
 energy target, `MilpLoadMode`), never as iterated objects (§2.3.1).
+
+**Session teardown closes the loop back onto the request.** Deleting an `EvSession`
+(`DELETE /ev-session`, `VEN/src/routes/hems.rs`) does not just clear session state — it
+walks `UserRequest`s by `session_id` and transitions any still `Active` to `Completed`
+before the session is cleared (`openspec/specs/ev-session-request-completion/spec.md`).
+Only `Active` requests are touched; `Cancelled` ones and requests tied to a different
+session are left alone. Without this, a completed or manually-ended charge would leave
+its originating request stuck `Active` forever — a UI-visible dangling state.
 
 ## Accounting
 
