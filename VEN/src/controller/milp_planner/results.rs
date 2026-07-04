@@ -55,39 +55,32 @@ pub(crate) fn fallback_plan(
         suggested_action: None,
     };
     let slots: Vec<PlanTimeSlot> = match inputs {
-        Some(inp) => {
-            let mut fb_cum_s: Vec<i64> = Vec::with_capacity(inp.n + 1);
-            fb_cum_s.push(0);
-            for &d in &inp.dt_h {
-                fb_cum_s.push(fb_cum_s.last().unwrap() + (d * 3600.0) as i64);
-            }
-            (0..inp.n)
-                .map(|t| PlanTimeSlot {
-                    slot_index: t,
-                    start: now + Duration::seconds(fb_cum_s[t]),
-                    end: now + Duration::seconds(fb_cum_s[t + 1]),
-                    import_tariff_eur_kwh: inp.c_imp_eur_kwh[t],
-                    export_tariff_eur_kwh: inp.c_exp_eur_kwh[t],
-                    co2_g_kwh: inp.g_imp_kgco2_kwh[t] * 1000.0,
-                    grid_effective_cost: inp.c_imp_eur_kwh[t],
-                    rate_estimated: false,
-                    import_cap_kw: inp.p_imp_max_cont_kw[t],
-                    export_cap_kw: inp.p_exp_max_cont_kw[t],
-                    baseline_kw: inp.p_base_kw[t],
-                    pv_forecast_kw: inp.p_pv_kw[t],
-                    surplus_available_kw: (inp.p_pv_kw[t] - inp.p_base_kw[t]).max(0.0),
-                    allocations: vec![],
-                    net_import_kw: 0.0,
-                    net_export_kw: 0.0,
-                    import_flexibility_kw: 0.0,
-                    export_flexibility_kw: 0.0,
-                    bat_charge_kw: 0.0,
-                    bat_discharge_kw: 0.0,
-                    planned_kw_by_asset: std::collections::HashMap::new(),
-                    planned_state_by_asset: std::collections::HashMap::new(),
-                })
-                .collect()
-        }
+        Some(inp) => (0..inp.n)
+            .map(|t| PlanTimeSlot {
+                slot_index: t,
+                start: now + Duration::seconds(inp.cum_s[t]),
+                end: now + Duration::seconds(inp.cum_s[t + 1]),
+                import_tariff_eur_kwh: inp.c_imp_eur_kwh[t],
+                export_tariff_eur_kwh: inp.c_exp_eur_kwh[t],
+                co2_g_kwh: inp.g_imp_kgco2_kwh[t] * 1000.0,
+                grid_effective_cost: inp.c_imp_eur_kwh[t],
+                rate_estimated: false,
+                import_cap_kw: inp.p_imp_max_cont_kw[t],
+                export_cap_kw: inp.p_exp_max_cont_kw[t],
+                baseline_kw: inp.p_base_kw[t],
+                pv_forecast_kw: inp.p_pv_kw[t],
+                surplus_available_kw: (inp.p_pv_kw[t] - inp.p_base_kw[t]).max(0.0),
+                allocations: vec![],
+                net_import_kw: 0.0,
+                net_export_kw: 0.0,
+                import_flexibility_kw: 0.0,
+                export_flexibility_kw: 0.0,
+                bat_charge_kw: 0.0,
+                bat_discharge_kw: 0.0,
+                planned_kw_by_asset: std::collections::HashMap::new(),
+                planned_state_by_asset: std::collections::HashMap::new(),
+            })
+            .collect(),
         None => vec![],
     };
     let envelopes = match inputs {
@@ -141,15 +134,8 @@ pub(crate) fn translate_to_plan(
 ) -> Plan {
     let step_s = planner.plan_step_s;
     let n = inputs.n;
-    let total_s: i64 = inputs.dt_h.iter().map(|&d| (d * 3600.0) as i64).sum();
-    let horizon_end = now + Duration::seconds(total_s);
-
-    // Precompute cumulative slot start times in seconds from `now`.
-    let mut cum_s: Vec<i64> = Vec::with_capacity(n + 1);
-    cum_s.push(0);
-    for &d in &inputs.dt_h {
-        cum_s.push(cum_s.last().unwrap() + (d * 3600.0) as i64);
-    }
+    let cum_s = &inputs.cum_s;
+    let horizon_end = now + Duration::seconds(cum_s[n]);
 
     let horizon = PlanningHorizon {
         start_time: now,

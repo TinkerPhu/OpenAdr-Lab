@@ -7,6 +7,7 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
     MilpInputs {
         n,
         dt_h: vec![1.0; n],
+        cum_s: (0..=n as i64).map(|i| i * 3600).collect(),
         c_imp_eur_kwh: vec![0.25; n],
         c_exp_eur_kwh: vec![0.08; n],
         g_imp_kgco2_kwh: vec![0.30; n],
