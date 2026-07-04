@@ -3,8 +3,8 @@ title: MILP Planner
 type: component
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: 4695762
-sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/tasks/planning.rs, VEN/src/services/planning.rs]
+synced_commit: eb8831a
+sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/tasks/planning.rs, VEN/src/services/planning.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md]
 tags: [planner, milp, highs, optimization]
 ---
 
@@ -41,6 +41,23 @@ see [[milp-over-greedy]].
 - **Port isolation**: reached via `SolverPort`; asset physics enter as
   `Vec<Box<dyn AssetMilpContext>>` — the planner never imports concrete asset types
   ([[ven-hexagonal-architecture]]).
+- **Phase 2 is a hard-bounded lexicographic pass, not a weighted blend**: it adds the
+  constraint `phase1_cost ≤ C* + phase2_epsilon_eur` and then minimises switching/
+  startup/ramp/tier-preference terms only — never trades cost for friction beyond that
+  epsilon. Setting `phase2_epsilon_eur: 0.0` disables Phase 2 entirely (single-pass
+  Phase 1 only). If Phase 2 comes back infeasible, the planner logs
+  `"phase2 infeasible, falling back to phase1"` and adopts the Phase 1 schedule directly
+  rather than crashing (`openspec/specs/two-phase-milp/spec.md`).
+- **Initial-slot pinning**: slot 0's heater mode variables (`z_heat_mid[0]`,
+  `z_heat_full[0]`) are fixed to the live heater's actual power state at planning time, so
+  `sw[0]` — and its Phase 2 switching penalty — reflects a real transition, not a solver
+  artifact of an unconstrained first slot.
+- **Adoption threshold decay**: `plan_adoption_decay_s` (default 0, no decay) linearly
+  decays `plan_adoption_threshold_eur` to zero as the current plan ages, so a plan that
+  once looked "good enough" doesn't block replans indefinitely as conditions drift.
+- **`solver_timeout_s`** (profile field, default 60 s) bounds the HiGHS time limit for
+  both phases — see [[reliability-and-config]] for this and the other profile-driven
+  config knobs.
 
 ## File map
 

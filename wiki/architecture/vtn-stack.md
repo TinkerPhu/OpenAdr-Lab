@@ -3,7 +3,7 @@ title: VTN Stack — openleadr-rs, BFF, UI
 type: architecture
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: 4695762
+synced_commit: eb8831a
 sources: [docs/architecture/VTN_ARCHITECTURE.md, VTN/, openleadr-rs/]
 tags: [vtn, bff, openleadr-rs, architecture]
 ---
@@ -44,3 +44,6 @@ The VEN-side counterpart is [[openadr-interface]].
 Auth facts that cost debugging time (journal-confirmed): token endpoint is
 `POST /auth/token` (not `/oauth/token`); token TTL 30 days; fixture users
 `any-business`, `ven-manager`, `user-manager`, `business-1`, `ven-1`.
+
+How this maps onto the spec's Authentication/Authorization model (scopes, object privacy,
+transport requirements): [[openadr-security]].
