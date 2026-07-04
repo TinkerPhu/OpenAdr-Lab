@@ -88,10 +88,6 @@ pub struct Profile {
     pub planner: PlannerConfig,
     #[serde(default)]
     pub grid: GridConfig,
-    // Packet-based scheduling — not yet implemented.
-    #[allow(dead_code)]
-    #[serde(default)]
-    pub packets: Vec<PacketSeed>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -632,33 +628,6 @@ fn default_pen_exp() -> f64 {
     10_000.0
 }
 
-/// A single comfort-rate point for a seeded packet.
-// Packet-based scheduling — not yet implemented.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize)]
-pub struct ComfortRateSeed {
-    pub fill: f64,
-    pub bid: f64,
-}
-
-/// An EnergyPacket pre-configured in the device profile (seeded at startup).
-// Packet-based scheduling — not yet implemented.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize)]
-pub struct PacketSeed {
-    /// Asset id this packet targets: "ev", "heater", etc.
-    pub asset: String,
-    /// SoC target (0.0–1.0) for battery-like assets.
-    pub target_soc: Option<f64>,
-    /// Hours from VEN startup until this packet's deadline.
-    pub latest_end_h: f64,
-    /// Preferred charge power (kW); defaults to asset's max_charge_kw.
-    pub desired_power_kw: Option<f64>,
-    /// Comfort rates for ValueCurve (fill→bid pairs, ascending fill).
-    #[serde(default)]
-    pub comfort_rates: Vec<ComfortRateSeed>,
-}
-
 impl Profile {
     pub async fn try_load(path: &str) -> anyhow::Result<Self> {
         let contents = tokio::fs::read_to_string(Path::new(path)).await?;
@@ -802,7 +771,6 @@ impl Profile {
             simulator: SimulatorConfig::default(),
             planner: PlannerConfig::default(),
             grid: GridConfig::default(),
-            packets: vec![],
         }
     }
 }

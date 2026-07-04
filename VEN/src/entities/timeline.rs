@@ -63,11 +63,11 @@ mod tests {
     #[test]
     fn test_next_slot_temperature_declines_below_t_min_when_heater_off() {
         let mut traj = HeaterPlanTrajectory {
-            e_kwh: 0.0,        // tank exactly at T_min
+            e_kwh: 0.0, // tank exactly at T_min
             temp_min_c: 45.0,
             thermal_mass: 0.23256,
-            q_dem_kw: 0.5125,  // ven-3 production value: draw + loss at T_min
-            e_max_kwh: 3.489,  // (60-45)*0.23256
+            q_dem_kw: 0.5125, // ven-3 production value: draw + loss at T_min
+            e_max_kwh: 3.489, // (60-45)*0.23256
         };
         let dt_h = 300.0 / 3600.0; // 5-min slot (Zone A)
 

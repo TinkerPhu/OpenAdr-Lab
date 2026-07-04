@@ -97,8 +97,7 @@ pub fn build_setpoints(
 /// When generation exceeds all other active loads, offer the surplus to the EV
 /// (up to its max charge rate). All non-EV, non-battery assets are included in
 /// the surplus calculation so the EV charge targets zero net grid power.
-/// No EnergyPacket is created — this is dispatcher-only and does not appear in
-/// the plan or VTN reports.
+/// This is dispatcher-only and does not appear in the plan or VTN reports.
 ///
 /// Does nothing when:
 /// - `overlay_enabled` is false (user disabled or auto-paused by active EvSession)
