@@ -42,7 +42,7 @@
               C_ABSORBER["absorber.rs\nAbsorberState\napply_deviation_absorption()"]
               C_DISPATCH["dispatcher.rs\nbuild_setpoints()"]
               C_ENVELOPE["envelope.rs\ncompute_flexibility_envelope()"]
-              C_OAADR["openadr_interface.rs\nparse_rate_snapshots()\nparse_capacity_limits()"]
+              C_OAADR["openadr_interface.rs\nparse_rate_snapshots()\nparse_capacity_state()"]
               C_REPORTER["reporter.rs\nbuild_telemetry_usage_report()\nbuild_status_report()"]
               C_TIMELINE["timeline.rs\nbuild_asset_timeline()"]
               C_MILP["milp_planner/\nrun_planner()\nsolver_phase1\nsolver_phase2\nBatteryMilpContext\nEvMilpContext\nHeat
@@ -107,22 +107,20 @@
 
       ENTITIES --> DOMAIN
 
-      %% ⚠️  Architectural Violations (red dashed)
-      T_PLANNING -. "⚠️  direct VtnClient" .-> VTN_CLIENT
-      T_SIMTICK -. "⚠️  direct VtnClient" .-> VTN_CLIENT
-      C_REPORTER -. "⚠️  imports SimState directly" .-> SIM_STATE
-      C_TIMELINE -. "⚠️  imports AssetConfig/AssetHistoryBuffer" .-> ASSETS_MOD
-      SVC_UREQ -. "⚠️  imports SimState + assets::" .-> SIM_STATE
+      %% ⚠️  Architectural Violations — all resolved as of 2026-07-03
+      %% T_PLANNING: uses VtnPort trait (not VtnClient directly) ✓
+      %% T_SIMTICK:  uses VtnPort trait (not VtnClient directly) ✓
+      %% C_REPORTER: uses SimSnapshot from SimulatorPort (not SimState directly) ✓
+      %% C_TIMELINE: uses only entities/ and trace types ✓
+      %% SVC_UREQ:   uses only entities/ and state ✓
 
       %% Styling
       classDef port fill:#ddeeff,stroke:#336699,stroke-dasharray:5 5
-      classDef violation fill:#ffeeee,stroke:#cc3333
       classDef entity fill:#eeffee,stroke:#336633
       classDef infra fill:#fff8ee,stroke:#996600
       classDef adapter fill:#f5eeff,stroke:#663399
 
       class C_PORT_SIM,C_PORT_VTN,C_PORT_MILP,ASSETS_MOD port
-      class T_PLANNING,T_SIMTICK,C_REPORTER,C_TIMELINE,SVC_UREQ violation
       class E_PLAN,E_ASSET,E_CAP,E_SESSION,E_TARIFF,E_PARAMS entity
       class SIM_STATE,VTN_CLIENT,PROFILE,COMMON,A_BAT,A_EV,A_HTR,A_PV,A_BASE,A_GRID infra
       class R_HEMS,R_SIM,R_TL,R_ASSETS,R_REPORTS,R_TRACE,T_EVENTS,T_REPORTS,T_OBLIG,T_PERSIST adapter

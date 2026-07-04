@@ -1,7 +1,18 @@
 # Deviation Control — Design Suggestions
 
-> Status: idea / pre-spec  
-> Context: VEN HEMS controller on `016-refactor-ven-backend`
+> Status: partially implemented — Tier 1 absorber is built; Tier 2 threshold tuning and profile schema are not yet applied  
+> Context: VEN HEMS controller; original idea from `016-refactor-ven-backend`
+
+## Implementation Status (2026-07-03)
+
+| Component | Status | Notes |
+|---|---|---|
+| Tier 1 — Deviation absorber (`controller/absorber.rs`) | **Not yet created** | `absorber.rs` does not exist in `VEN/src/controller/`. The design and API sketch in this doc are the spec for the implementation. |
+| Tier 2 — DeviceDeviation gate | **Exists** | Implemented in the sim tick loop; threshold `deviation_trigger_ticks` is profile-configurable |
+| MILP planner periodic interval | **Configurable** | `replan_interval_s` in `PlannerParams`; production tuning per this doc's recommendations not yet applied |
+| Profile schema (`absorber_enabled`, `absorber_assets`, etc.) | **Not yet added** | Profile struct does not carry absorber config yet |
+
+**Next step:** Implement `absorber.rs` per the design in §Tier 1 below. The open questions are all answered (see inline answers). The profile schema is specified in §Profile schema.
 
 ---
 
