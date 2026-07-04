@@ -12,8 +12,6 @@ pub struct DispatchCommand {
     pub asset_id: String,
     pub ts: DateTime<Utc>,
     pub commanded_power_kw: f64,
-    /// Which EnergyPacket this serves; None if auto-follow or idle
-    pub source_packet_id: Option<Uuid>,
     /// e.g. "plan", "auto-follow", "emergency override"
     pub reason: String,
 }
@@ -85,11 +83,10 @@ pub struct DispatchState {
     pub actual_power: HashMap<String, f64>,
 }
 
-/// Tracks one active EnergyPacket's real-time execution on a device (§4.2).
+/// Tracks one active device session's real-time execution (§4.2).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceSession {
     pub session_id: Uuid,
-    pub packet_id: Uuid,
     pub asset_id: String,
 
     pub start_time: DateTime<Utc>,

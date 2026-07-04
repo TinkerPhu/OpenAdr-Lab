@@ -3,8 +3,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// A device-centric EV charging session.
-///
-/// Replaces the generic `EnergyPacket` for EV scheduling.
 /// Only carries user intent — sim state (current_soc, plugged) is
 /// injected at solve time from `SimState::ev_state()`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,8 +21,6 @@ pub struct EvSession {
 }
 
 /// A device-centric heater temperature target.
-///
-/// Replaces the generic `EnergyPacket` for heater scheduling.
 /// Only carries user intent — sim state (current_temp_c) is
 /// injected at solve time from `SimState::heater_state()`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
