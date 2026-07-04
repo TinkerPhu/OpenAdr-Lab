@@ -23,6 +23,7 @@ synthesizes the **whole repository** — code, specs, docs, BDD tests, git histo
 | `index.md`        | Catalog of all pages; updated on every ingest/sync                   |
 | `log.md`          | Append-only operation log                                            |
 | `review.md`       | Human-in-the-loop queue: contradictions, gaps, uncertain claims      |
+| `callouts.md`     | Auto-generated index of DRIFT/CONTRADICTION/OPEN QUESTION callouts (`scripts/wiki_callouts.sh` — never edit by hand) |
 | `overview/`       | Synthesis pages: evolving thesis, system-level summaries, vision     |
 | `architecture/`   | Ring map, ports, dependency rules, deployment topology               |
 | `components/`     | One page per significant module (milp_planner, dispatcher, simulator…)|
@@ -94,4 +95,6 @@ tags: [planner, milp]
 | `/wiki-lint`   | Mechanical checks (`scripts/wiki_lint.sh`) + content-level review |
 
 Mechanical invariants (broken links, orphans, staleness, frontmatter) are checked by
-`bash scripts/wiki_lint.sh` — run it after any larger write batch.
+`bash scripts/wiki_lint.sh` — run it after any larger write batch, and regenerate the
+callout index with `bash scripts/wiki_callouts.sh` whenever callouts were added or
+resolved.
