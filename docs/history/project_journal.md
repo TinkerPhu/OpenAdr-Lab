@@ -4361,3 +4361,41 @@ Return type changed from `usize` to `f64`. Each switch is weighted by `slot_step
 3. **`clippy::needless_range_loop`** — `for t in 0..n { cum_s[t] }` triggers the lint even though `t` is used only for array access. Fixed by rewriting as `for &slot_s in &cum_s[0..n]`.
 
 ### Tests: 441 pass (0 failed), `cargo fmt --check` clean, `cargo clippy -D warnings` clean.
+
+## LLM Wiki Scaffold (2026-07-04)
+
+**What:** Replaced the primitive `wiki/llm_wiki_instructions.md` with a full agent-native
+LLM-wiki setup (Karpathy pattern, editorial ideas borrowed from nashsu/llm_wiki but without
+any app infrastructure — Claude Code's file tools are the retrieval layer):
+
+- `wiki/CLAUDE.md` — page schema (YAML frontmatter with `sources:` + `synced_commit:`),
+  conventions (kebab-case slugs = wikilink targets, ≥2 links/page, cite-everything,
+  synthesize-don't-duplicate, CONTRADICTION/OPEN QUESTION/DRIFT callouts), editorial rules
+  (two-step writing, log every operation, review queue instead of guessing).
+- `wiki/purpose.md` — human-curated scope/emphasis (DRAFT, needs owner review).
+- `wiki/index.md`, `log.md`, `review.md` + subdirs `overview/ architecture/ components/
+  concepts/ use-cases/ decisions/ sources/ queries/`.
+- Skills: `/wiki-sync` (git-anchored incremental update + empty-wiki seed), `/wiki-ingest`,
+  `/wiki-query`, `/wiki-lint`.
+- `scripts/wiki_lint.sh` — mechanical checks: broken wikilinks, orphans, frontmatter
+  completeness, missing sources, staleness via `git diff <synced_commit>..HEAD -- <sources>`.
+
+**Why:** A wiki that knows the *code, use cases, decisions and vision* — not just docs —
+and stays current. The key design choice is git-anchored freshness: every page records the
+commit at which it was last verified, so `/wiki-sync` only touches pages whose sources
+actually changed.
+
+**Verified:** lint script tested — clean on scaffold; correctly reports all four issue
+classes on a synthetic bad page (broken link, orphan, missing source, stale vs 2895762).
+
+**Next:** review/edit `wiki/purpose.md`, then run `/wiki-sync` for the seed ingest
+(~15–25 pages, needs confirmation of the proposed page list).
+
+## LLM Wiki Seeded (2026-07-04)
+
+Executed the /wiki-sync bootstrap: 23 content pages at commit 6cb8ca6 — overview (2),
+architecture (4), components (6), concepts (7, incl. the wiki-maintenance workflow page),
+use-cases (1), decisions (3). `scripts/wiki_lint.sh` clean. Three review items filed in
+`wiki/review.md`, notably: `.claude/CLAUDE.md` still references the deleted
+`docs/plans/ven_backend_architecture_refactoring.md`, and `docs/REQUIREMENTS.md` §2.3
+still describes the Planner as greedy (superseded by the MILP).
