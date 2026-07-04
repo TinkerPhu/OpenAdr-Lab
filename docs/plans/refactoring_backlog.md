@@ -63,20 +63,8 @@ ID is the `asset_id()` method in the respective asset file (e.g. `assets/battery
 The `"boiler"` alias issue (previously in `routes/hems.rs`) is resolved — it now appears
 only in a doc comment, not in runtime matching logic.
 
-**Fix:** Define constants in a shared module (e.g. `VEN/src/assets/ids.rs`):
-
-```rust
-pub mod ids {
-    pub const BATTERY:   &str = "battery";
-    pub const EV:        &str = "ev";
-    pub const HEATER:    &str = "heater";
-    pub const PV:        &str = "pv";
-    pub const BASE_LOAD: &str = "base_load";
-}
-```
-
-Use these constants in `dispatcher.rs` and have each asset's `asset_id()` return the
-corresponding constant rather than a string literal.
+**Status:** Constants already created in `VEN/src/ids.rs` (`ASSET_EV`, `ASSET_BATTERY`, etc.).
+**Remaining work:** Replace the inline string literals in `dispatcher.rs` with these constants and have each asset's `asset_id()` return the constant rather than a string literal.
 
 ---
 

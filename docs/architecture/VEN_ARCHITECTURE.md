@@ -19,15 +19,15 @@ via the OpenADR 3 REST API. Internally it has two major subsystems: the **HEMS C
 │  ┌─────────────────────────────────────────────────────────────────────────┐ │
 │  │                         HEMS Controller                                 │ │
 │  │                                                                         │ │
-│  │  ┌──────────────┐   ┌──────────────┐   ┌───────────────────────────┐   │ │
-│  │  │  OpenADR     │   │    User      │   │     Monitor               │   │ │
-│  │  │  Interface   │   │   Request    │   │     (Deviation Detector)  │   │ │
-│  │  └──────┬───────┘   └──────┬───────┘   └────────────┬──────────────┘   │ │
+│  │  ┌──────────────┐   ┌──────────────┐   ┌───────────────────────────┐    │ │
+│  │  │  OpenADR     │   │    User      │   │     Monitor               │    │ │
+│  │  │  Interface   │   │   Request    │   │     (Deviation Detector)  │    │ │
+│  │  └──────┬───────┘   └──────┬───────┘   └────────────┬──────────────┘    │ │
 │  │         │                  │                        │                   │ │
 │  │         └──────────────────┤◄───────────────────────┘                   │ │
 │  │                            ▼                                            │ │
 │  │                   ┌──────────────┐                                      │ │
-│  │                   │   Planner    │ ← PlanTrigger channel                 │ │
+│  │                   │   Planner    │ ← PlanTrigger channel                │ │
 │  │                   └──────┬───────┘                                      │ │
 │  │                          ▼                                              │ │
 │  │                   ┌──────────────┐                                      │ │
@@ -38,15 +38,15 @@ via the OpenADR 3 REST API. Internally it has two major subsystems: the **HEMS C
 │  ┌─────────────────────────────────────────────────────────────────────────┐ │
 │  │                     Asset Layer  (Vec<AssetEntry>)                      │ │
 │  │                                                                         │ │
-│  │  ┌──────────────────────────────────────────────────────────────────┐  │ │
-│  │  │  AssetInterface: current() · forecast(horizon) · past(window)    │  │ │
-│  │  └──────────────────────────────────────────────────────────────────┘  │ │
-│  │          ▲                                            ▲                 │ │
-│  │  ┌───────┴────────┐                       ┌──────────┴──────────┐      │ │
-│  │  │ SimulatedAsset │  ← physics models     │  MeasuredAsset      │      │ │
-│  │  │ PV · Battery   │    per asset type     │  (future: real HW   │      │ │
-│  │  │ EV · Heater    │                       │   / external API)   │      │ │
-│  │  │ BaseLoad       │                       └─────────────────────┘      │ │
+│  │  ┌──────────────────────────────────────────────────────────────────┐   │ │
+│  │  │  AssetInterface: current() · forecast(horizon) · past(window)    │   │ │
+│  │  └──────────────────────────────────────────────────────────────────┘   │ │
+│  │          ▲                                           ▲                  │ │
+│  │  ┌───────┴────────┐                       ┌──────────┴──────────┐       │ │
+│  │  │ SimulatedAsset │  ← physics models     │  MeasuredAsset      │       │ │
+│  │  │ PV · Battery   │    per asset type     │  (future: real HW   │       │ │
+│  │  │ EV · Heater    │                       │   / external API)   │       │ │
+│  │  │ BaseLoad       │                       └─────────────────────┘       │ │
 │  │  └───────┬────────┘                                                     │ │
 │  │          │ UI only                                                      │ │
 │  │  ┌───────▼────────┐                                                     │ │
@@ -54,7 +54,7 @@ via the OpenADR 3 REST API. Internally it has two major subsystems: the **HEMS C
 │  │  └────────────────┘                                                     │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
-│  REST API (Axum, port 8080 internal / 821x host)                            │
+│  REST API (Axum, port 8080 internal / 821x host)                             │
 └──────────────────────────────────────────────────────────────────────────────┘
                         │
                         │ OpenADR 3 REST (OAuth2 + polling at 30 s)
@@ -69,37 +69,13 @@ via the OpenADR 3 REST API. Internally it has two major subsystems: the **HEMS C
 VEN/src/
   main.rs              — Axum router + all handler functions
   controller/          — dispatcher, monitor, openadr_interface, planner, user_request
-  entities/            — asset, capacity, energy_packet, plan, rate_snapshot, site_meter, user_request
+  entities/            — asset, capacity, device_session, plan, tariff_snapshot, site_meter, user_request
   simulator/           — mod.rs, assets/{ev,heater,pv,battery,base_load}, energy, persist, power_model
   reactor/             — REMOVED (see §3.3)
   reporter.rs          — report-building logic (no HTTP endpoints)
 ```
 
-**Source layout (target — post asset-interface + common refactor):**
-```
-VEN/src/
-  main.rs
-  common/              — shared abstractions; no VEN-specific logic
-    mod.rs
-    timeseries.rs      — TimeSeries<T>, Interpolation, bucket(), resample()
-    interval.rs        — overlap(), union_of_breakpoints(), time-weighted average
-  controller/
-  entities/
-  assets/              — one module per asset type; each owns physics + forecast + history
-    mod.rs             — AssetInterface trait + AssetEntry
-    pv/                — PvAsset: irradiation model, forecast(), history(), /sim params
-    battery/           — BatteryAsset: SOC model, forecast(), history(), /sim params
-    ev/                — EvAsset
-    heater/            — HeaterAsset: thermal model
-    base_load/         — BaseLoadAsset
-  reporter.rs
-```
-
-`common/` is a plain Rust module (`mod common;` in `main.rs`), not a separate crate.
-When a VTN controller is built, `common/` can be extracted into a shared workspace crate
-at that point — its public API will not need to change.
-
-See `docs/BACKLOG.md §Refactoring` for the migration plan.
+See `docs/BACKLOG.md §Refactoring` for any pending layout migrations.
 
 ---
 
@@ -109,12 +85,12 @@ See `docs/BACKLOG.md §Refactoring` for the migration plan.
 
 | Component | Module | Cycle / Trigger | Owns |
 |---|---|---|---|
-| **OpenADR Interface** | `controller/openadr_interface` | 30 s poll + event-driven | `OadrEventCache`, `OadrEventSnapshots` [RENAME], `OadrCapacityState`, `OadrReportObligations`, `PlannedRates` |
-| **User Request Manager** | `controller/user_request` | Event-driven (API call) | `UserRequest`, `EnergyPacket` (creation) |
-| **Monitor** | `controller/monitor` | 1 s tick | `AssetLedger`, `PastEnergySum`, deviation detection |
+| **OpenADR Interface** | `controller/openadr_interface` | 30 s poll + event-driven | `OadrEventCache`, `TariffSnapshot` / `TariffTimeSeries`, `OadrCapacityState`, `OadrReportObligation` |
+| **User Request Manager** | `controller/user_request` | Event-driven (API call) | `UserRequest`, `EvSession` / `HeaterTarget` / `ShiftableLoad` |
+| **Monitor** | `controller/monitor` | 1 s tick | `AssetLedger` (cumulative energy/cost/CO₂ per asset) |
 | **Planner** | `controller/planner` | Watch channel + 20 s periodic | `Plan`, `FlexibilityEnvelopes`, `PlanWarnings` |
 | **Dispatcher** | `controller/dispatcher` | 1 s tick | `DispatchCommands` → Simulator setpoints |
-| **Entities** | `entities/` | Shared state | `EnergyPacket`, `Plan`, `RateSnapshot`, `AssetLedger`, `UserRequest` |
+| **Entities** | `entities/` | Shared state | `Plan`, `TariffSnapshot`, `UserRequest`, `EvSession` / `HeaterTarget` / `ShiftableLoad` |
 
 #### OpenADR Interface
 
@@ -134,51 +110,48 @@ knows about OpenADR HTTP, OAuth, and event payload formats.
 | `EXPORT_CAPACITY_SUBSCRIPTION` | `OadrCapacityState.ExportSubscription_kW` |
 | `IMPORT_CAPACITY_RESERVATION` | `OadrCapacityState.ImportReservation_kW` |
 | `EXPORT_CAPACITY_RESERVATION` | `OadrCapacityState.ExportReservation_kW` |
-| `ALERT_GRID_EMERGENCY` / `ALERT_BLACK_START` | High-priority synthetic EnergyPacket via Planner |
+| `ALERT_GRID_EMERGENCY` / `ALERT_BLACK_START` | `PlanTrigger::Alert` → planner enforces shed/import limit (BL-04: not yet implemented) |
 | `ALERT_FLEX_ALERT` | `PlanTrigger.ALERT` |
 | `DISPATCH_SETPOINT` | Direct Dispatcher override (bypasses Planner) |
-| `CHARGE_STATE_SETPOINT` | Creates/modifies EnergyPacket |
+| `CHARGE_STATE_SETPOINT` | Creates/modifies `EvSession` with target SoC (BL-06: not yet implemented) |
 
 **Internal → VTN report generation:**
 
 | Report obligation | Source |
 |---|---|
-| `USAGE` | `PastEnergySum` per resource per interval (from SiteMeter) |
+| `USAGE` | Time-weighted mean of net site import power over the obligation interval (from sim grid snapshot) |
 | `DEMAND` | `AssetState.ActualPower` per resource |
 | `STORAGE_CHARGE_LEVEL` | `AssetState.SoC` per storage resource |
-| `OPERATING_STATE` | Derived from `DeviceResponsiveness` + `EnergyPacketStatus` |
+| `OPERATING_STATE` | Derived from `DeviceResponsiveness` |
 | `USAGE_FORECAST` | FIRM slots: point forecast; FLEXIBLE slots: range [0, MaxPower] in window |
 | `IMPORT_CAPACITY_RESERVATION` | `GetImportFlexibility()` + Σ `FlexibilityEnvelope.MaxPower` |
 | `EXPORT_CAPACITY_RESERVATION` | `GetExportFlexibility()` |
 
 #### User Request Manager
 
-Translates user-facing energy requests (from `POST /user-requests`) into `EnergyPacket`
-entities, then emits `PlanTrigger.USER_REQUEST` to the Planner watch channel.
+Translates user-facing energy requests (from `POST /user-requests`) into device-specific
+session types (`EvSession`, `HeaterTarget`, `ShiftableLoad`), then emits `PlanTrigger::UserRequest`
+to the Planner watch channel.
 
-- Resolves natural-language time shortcuts (UI concern) to concrete RFC 3339 timestamps
-- Applies default `CompletionPolicy` per asset type (see REQUIREMENTS §3.2.1)
-- Calculates `TargetEnergy_kWh` from SOC delta × battery capacity
+- Applies default `CompletionPolicy` per asset type
+- Calculates energy requirements from SoC delta × capacity for battery-like assets
 
-#### Monitor (Deviation Detector)
+#### Monitor (Ledger)
 
-Runs every 1 s in the Dispatcher loop. Responsibilities:
-- Updates `AssetLedger` (cumulative energy/cost/CO₂ per asset)
-- Updates `PastEnergySum` for report obligations
-- Checks penalty thresholds (`MeasurementWindow`)
-- Detects deviation: `|ActualPower − PlannedPower| > threshold` → emits `PlanTrigger.DEVICE_DEVIATION`
-- Derives `SITE_RESIDUAL`: `P_residual = P_utility − Σ P_modelled_assets`
+Runs every 1 s via `record_tick()`. Responsibilities:
+- Updates `AssetLedger` (cumulative energy/cost/CO₂ per asset) using the current sim snapshot and active tariff
+
+Deviation detection and correction live in the Dispatcher (`apply_battery_deviation_correction()`, `apply_ev_surplus_overlay()`), not the Monitor.
 
 #### Dispatcher
 
 1 s tick loop. Translates the current `PlanTimeSlot` into device setpoints:
 
-1. Reads `ActivePlan.currentSlot` from Planner
-2. For each `PacketAllocation` in the slot: computes `DispatchCommand` for the target asset
+1. Reads the current `PlanTimeSlot` from the active Plan
+2. For each `AssetAllocation` in the slot: computes `DispatchCommand` for the target asset
 3. For auto-follow assets: distributes `NetDeviation = Σ(ActualPower) − Σ(PlannedPower)` across auto-follow assets
 4. Writes commands to the Simulator
-5. Updates `EnergyPacket.PastPowerProfile` and accumulated cost/CO₂
-6. Transitions packet status (`PENDING → ACTIVE → COMPLETED`)
+5. Accumulates cost/CO₂ in the asset ledger
 
 ### 2.2 Two-Speed Loop
 
@@ -187,80 +160,49 @@ The controller operates at two timescales:
 | Loop | Period | Driver | Purpose |
 |---|---|---|---|
 | **Fast** (Dispatcher + Monitor) | 1 s | Tokio interval | Execute current plan slot; accumulate ledger; detect deviations |
-| **Slow** (Planner) | 20 s periodic + watch channel | `PlanTrigger` watch channel | Produce new Plan from current rates, packets, and asset state |
+| **Slow** (Planner) | 20 s periodic + watch channel | `PlanTrigger` watch channel | Produce new Plan from current rates, sessions, and asset state |
 
 The watch channel (`PlanTrigger`) decouples triggering from execution: any component can emit
 a trigger; the Planner processes them in order. This prevents redundant replanning while ensuring
 every relevant event causes exactly one new plan.
 
-### 2.3 Planning Algorithm (Summary)
+### 2.3 Planning Algorithm
 
-The Planner runs an **8-phase priority-based greedy scheduler**. It is not a full LP/MILP
-optimizer — deliberate choice for residential scale (24–48 h horizon, 3–15 assets, millisecond
-runtime requirement, frequent replanning).
+The Planner is a **3-tier MILP solver** (`controller/milp_planner/`). It replaced the earlier
+greedy scheduler (removed on the `refactor/3-tier-milp` branch).
 
-For the complete algorithm see `docs/VEN_Controller/Step4_Algorithm.md` [ARCHIVED].
+**Full design reference:** [`docs/architecture/ven_milp_planner.md`](ven_milp_planner.md)
 
-```
-Phase 1 — PREPARE
-  Build planning grid (slots × tariffs × limits)
-  Classify slots: FIRM (near-horizon) vs FLEXIBLE (far-horizon)
-  Populate baseline by calling asset.forecast(horizon) for each asset — NO inline formulas
-  Classify assets and packets
+**Key concepts:**
 
-Phase 2 — SCORE (FIRM slots only)
-  For each (packet, slot) pair:
-    Compute CalcCache: slot cost, comfort bid, time pressure, eligibility
+- **Three tiers** with variable step sizes: fine-grained near-horizon (e.g. 5 min slots),
+  coarser mid-horizon, sparse far-horizon. Controlled by `PlannerParams.tiers`.
+- **Assets as MILP variables**: EV continuous power `p_ev_kw[t]`, heater discrete levels
+  `z_heat_low[t]`, `z_heat_mid[t]`, `z_heat_high[t]`, battery SoC tracking, etc.
+- **Session intent as constraints**: `EvSession`/`HeaterTarget`/`ShiftableLoad` provide energy target, deadline, and mode; the solver iterates over asset variables, not session objects. See §2.3.1 below.
+- **Adoption gate**: new plans are only adopted if they improve on the current plan's expected
+  cost by more than a configured threshold — prevents churn from noise replans.
+- **StaleRatePolicy**: when VTN is unreachable, future tariff slots use the configured fallback
+  (`LAST_KNOWN`, `HEURISTIC_FORECAST`, `DEFER_TO_FLEXIBLE`, or `SAFE_AVERAGE`).
 
-Phase 3 — ALLOCATE CONSUMPTION (FIRM slots only)
-  Sort eligible (packet, slot) pairs by EffectivePriority
-  Greedy allocation respecting hard constraints (capacity limits, SOC bounds)
-
-Phase 4 — ALLOCATE STORAGE (FIRM slots only)
-  Identify charge/discharge opportunities
-  Apply round-trip efficiency test
-
-Phase 5 — ALLOCATE RESIDUAL PV SURPLUS (FIRM slots only)
-  Export unclaimed surplus (up to ExportCapacityLimit)
-  Handle PV curtailment if export cap is zero
-
-Phase 6 — PENALTY CHECK (FIRM slots only)
-  Evaluate discrete penalty thresholds (MeasurementWindow)
-  Reschedule if avoidance cost < penalty cost
-
-Phase 7 — BUILD FLEXIBILITY ENVELOPES (far horizon)
-  For each packet with unallocated energy:
-    Characterize flexible demand window
-    Compute rate range, budget remaining, estimated cost
-
-Phase 8 — FINALIZE
-  Write FIRM PacketAllocations
-  Write FlexibilityEnvelopes
-  Compute slot summaries and completion estimates
-  Emit PlanWarnings
-```
-
-**Key data structure: CalcCache** (transient, per-packet-per-slot, discarded after Phase 3)
-
-| Field | Description |
-|---|---|
-| `EffectiveCost` | Surplus-aware cost for this packet in this slot. Pure grid: `ImportPrice + ImportCO₂ × CO₂Weight`. PV self-consumption: `ExportPrice` (opportunity cost). Blended: weighted average. |
-| `ComfortBid` | Interpolated from `ComfortRate[]` at `ProjectedFill`. Maximum the packet will pay. |
-| `TimePressure` | Urgency factor — rises as `SlotsUntilDeadline` shrinks. |
-| `WithinComfortBid` | `EffectiveCost ≤ ComfortBid` — eligibility gate. |
-
-**Slot classification:** `FirmBoundary = now + NearHorizonDuration` (configurable, default 2 h).
+**Slot classification:** `FirmBoundary = now + NearHorizonDuration` (configurable).
 Slots within `[now, FirmBoundary]` are FIRM. Slots beyond are FLEXIBLE.
 
-**Early firm-up:** If rate variance across the FLEXIBLE window is < 10% (flat rate), FLEXIBLE
-slots may firm up early to simplify execution.
+#### 2.3.1 Session Intent in the MILP
 
-**StaleRatePolicy:** When VTN is unreachable, unknown future slots are handled per
-`StaleRatePolicy` (default: `HEURISTIC_FORECAST`). See REQUIREMENTS §3.2.1.
+Device sessions (`EvSession`, `HeaterTarget`, `ShiftableLoad`) provide user intent as solver
+constraints — the solver does not iterate over session objects directly:
+
+| Session field | MILP use |
+|---|---|
+| `soft_deadline` / `request_mode` | → `MilpLoadMode` (MustRun / MayRun / MustNotRun) |
+| `departure_time` / `ready_by` / `latest_end` | → horizon constraint step `t_ev_dead_step` |
+| `target_soc` / `target_temp_c` | → energy/thermal requirement |
+
+Session tracking (accumulated cost, per-slot power history, status lifecycle) is handled
+by the Dispatcher and reporting layer — not by the solver.
 
 ### 2.4 Data Flows
-
-See `docs/VEN_Controller/Step3_DataFlow.md` [ARCHIVED] for complete entity lifecycle tables.
 
 **One heartbeat (5 min PlanTimeStep, steady state):**
 
@@ -271,14 +213,10 @@ t=0s     Asset Controller polls devices + grid meter
 
 t=0.05s  Dispatcher reads current PlanTimeSlot
            → DispatchCommand[] to Simulator
-           → EnergyPacket.PastPowerProfile updated
-           → AccumulatedCost/CO₂ updated
+           → AccumulatedCost/CO₂ updated in asset ledger
 
 t=0.1s   Monitor
-           → PastEnergySum updated
-           → AssetLedger updated
-           → Penalty check
-           → Deviation detection → PlanTrigger? (via watch channel)
+           → AssetLedger updated (energy/cost/CO₂ per asset)
 
 t=30s    OpenADR Interface polls VTN
            → New events → translate to OadrEventSnapshots, CapacityState
@@ -499,16 +437,14 @@ Physics-based device simulation.
 
 | Method | Path | Stage | Description |
 |---|---|---|---|
-| GET | `/rates` [RENAME → `/tariffs`] | 2 | `OadrEventSnapshot` array parsed from active events |
+| GET | `/tariffs` | 2 | `TariffSnapshot` array parsed from active events |
 | GET | `/capacity` | 2 | `OadrCapacityState` parsed from active events |
 | GET | `/obligations` | 2 | Pending report obligations extracted from events |
-| GET | `/packets` | 3 | All EnergyPackets (FIRM + FLEXIBLE + terminal) |
 | GET | `/plan` | 3 | Active Plan or `null` |
-| POST | `/packets` | 4 | Create EnergyPacket + trigger reactive replanning |
 | GET | `/ledger` | 4 | Per-asset cumulative energy / cost / CO₂ ledger |
 | GET | `/user-requests` | 5 | All active user energy task requests |
-| POST | `/user-requests` | 5 | Create user request with multi-tier deadline + budget |
-| DELETE | `/user-requests/:id` | 5 | Cancel request → marks associated packet `ABANDONED` |
+| POST | `/user-requests` | 5 | Create user request → `EvSession` / `HeaterTarget` / `ShiftableLoad` |
+| DELETE | `/user-requests/:id` | 5 | Cancel request → marks it `ABANDONED` |
 | GET | `/flexibility` | 5 | `FlexibilityEnvelopes` derived from active plan |
 
 ### 4.7 Recorded History — Storage Model Summary
@@ -516,7 +452,6 @@ Physics-based device simulation.
 | Endpoint | What it records | Storage | Max history |
 |---|---|---|---|
 | `GET /trace` | Dispatcher/control decisions (setpoints) | In-memory ring buffer (1 000 entries) | ≈ 16 min at 1 s |
-| `GET /packets` `.past_power_profile` | Actual power per HEMS task while ACTIVE | In-memory, per-packet | Lifetime of packet |
 | `GET /ledger` | Cumulative totals per asset since startup | In-memory, 1 s updates | Since restart |
 | `GET /reports` | Discrete sim snapshots sent to VTN | Stored at VTN | Indefinite |
 
@@ -650,13 +585,13 @@ The spec defines interval structure but leaves VEN-side alignment to the impleme
 
 ## 6. Design Decisions
 
-### D-01: Greedy Planner (not LP/MILP)
+### D-01: MILP Planner (replaces greedy scheduler)
 
-**Decision:** Priority-based greedy scheduler.
-**Rationale:** 24–48 h horizon, 3–15 assets, replanning every 20 s or on event. A greedy
-approach with well-designed CalcCache produces near-optimal results and runs in milliseconds.
-A full LP/MILP solver would add 100–500 ms latency and complexity without meaningful quality
-gain at residential scale.
+**Decision:** 3-tier MILP solver via HiGHS.
+**Rationale:** The greedy scheduler was replaced when more assets and tighter constraints were
+added. HiGHS solves the residential-scale problem (24–48 h, 3–15 assets) in 5–10 s on Pi4,
+which is acceptable for a 20–300 s replan interval. The adoption gate filters noise replans.
+See `docs/architecture/ven_milp_planner.md` for full design rationale.
 
 ### D-02: In-Memory Ledger
 
@@ -677,7 +612,7 @@ asset type. The generic model isolates new asset types to their own module.
 
 ### D-05: OadrEventSnapshot Unification
 
-**Decision:** `RateSnapshot` [RENAME → `OadrEventSnapshot`] holds all time-varying signals
+**Decision:** `TariffSnapshot` holds all time-varying signals
 (price, CO₂, capacity limits) in one struct per poll tick.
 **Rationale:** All fields are co-valid at the same timestamp. A unified struct eliminates
 temporal alignment bugs that arise when price and capacity signals are stored separately.

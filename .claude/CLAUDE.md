@@ -104,4 +104,5 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     grep "serde_json::Value" VEN/src/vtn.rs                                           → must be empty or internal only
     grep -r "use crate::assets::" VEN/src/entities                                   → must be empty
 
-  Reference: docs/plans/ven_backend_architecture_refactoring.md
+  Reference: docs/architecture/VEN_ARCHITECTURE.md and
+  docs/architecture/module_dependency_graph_post_refactoring.md

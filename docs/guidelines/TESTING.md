@@ -138,16 +138,21 @@ docker compose -f tests/docker-compose.test.yml down -v
 
 ## CI/CD
 
-GitHub Actions runs automatically on push/PR to main:
+**No CI pipeline is configured yet.** `.github/workflows/` is empty.
 
-| Job | What | Trigger |
-|---|---|---|
-| `e2e` | All behave tests (excluding @upstream_pending, @resilience) | push, PR, manual |
-| `resilience` | @resilience scenarios | after e2e passes |
+Run linting and all test suites manually before merging any branch:
 
-Workflow file: `.github/workflows/e2e-tests.yml`
+```bash
+# Rust lint (WSL)
+wsl cargo fmt --check -p ven
+wsl cargo clippy -p ven -- -D warnings
 
-The openleadr-rs submodule has its own CI: `.github/workflows/checks.yml` (build, test, clippy, format, audit).
+# All suites
+bash run_all_tests.sh
+```
+
+The openleadr-rs submodule has its own CI (`.github/workflows/checks.yml`) that runs on
+upstream PRs — build, test, clippy, format, audit.
 
 ---
 

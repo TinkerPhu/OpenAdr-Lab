@@ -22,7 +22,7 @@ VEN/src/
     milp_planner.rs   ← run_planner(), MilpSolution
     dispatcher.rs     ← setpoint overlay, AssetLedger
     envelope.rs       ← compute_envelope(), SiteFlexibilityEnvelope
-    openadr_interface.rs ← parse_rate_snapshots, parse_capacity_state
+    openadr_interface.rs ← parse_rate_snapshots(), parse_capacity_state()
     ...
   simulator/
     mod.rs            ← SimState, AssetEntry  (AssetEntry gains history field)
