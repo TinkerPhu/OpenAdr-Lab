@@ -46,13 +46,6 @@ pub enum ControllerEvent {
         trigger_reason: String,
         total_slots: usize,
     },
-    PacketTransition {
-        ts: DateTime<Utc>,
-        packet_id: Uuid,
-        asset_id: String,
-        from_status: String,
-        to_status: String,
-    },
     RequestTransition {
         ts: DateTime<Utc>,
         request_id: Uuid,
