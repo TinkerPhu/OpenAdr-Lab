@@ -6,6 +6,8 @@ Run through this list at the beginning of every Claude Code session before writi
 - [ ] Re-read `.claude/CLAUDE.md` (architecture rules, naming, ports, invariants)
 - [ ] Read the last 15–20 entries of `docs/history/project_journal.md`
 - [ ] Read `docs/reference/KEY_LEARNINGS.md` (skim headings; read relevant sections)
+- [ ] For architecture/domain-heavy tasks: consult the wiki first (`wiki/index.md` is the
+      catalog; `/wiki-query` answers with citations)
 
 ## 2. Check project state
 - [ ] `git status` — any uncommitted changes?
@@ -33,3 +35,5 @@ Run through this list at the beginning of every Claude Code session before writi
 - [ ] `docs/BACKLOG.md` updated (close resolved items, add discovered items)
 - [ ] `docs/reference/TECHNICAL_DEBTS.md` updated if new debt was found or resolved
 - [ ] Feature spec archived to `specs/archive/` (if applicable)
+- [ ] `/wiki-sync` run if the change touched architecture, domain behaviour, or specs
+      (`bash scripts/wiki_lint.sh` reports stale pages)
