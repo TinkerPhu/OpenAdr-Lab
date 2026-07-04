@@ -21,9 +21,33 @@ pub struct TimelineParams {
     pub max_points: Option<usize>,
 }
 
+/// Nice grid bucket widths, in seconds, so chart timestamps land on clean
+/// minute/hour boundaries instead of arbitrary values like 24s or 588s.
+const NICE_RESOLUTIONS_S: &[u64] = &[
+    1, 2, 5, 10, 15, 30, // sub-minute
+    60, 120, 300, 600, 900, 1800, // 1m, 2m, 5m, 10m, 15m, 30m
+    3600, 7200, 10800, 21600, 43200, // 1h, 2h, 3h, 6h, 12h
+    86400, // 1 day
+];
+
+/// Snap `raw` up to the smallest value in `NICE_RESOLUTIONS_S` that is >= raw.
+/// Beyond the table's max (86400s), snap up to the nearest whole-day multiple.
+fn snap_up_to_nice(raw: u64) -> u64 {
+    if let Some(&nice) = NICE_RESOLUTIONS_S.iter().find(|&&v| v >= raw) {
+        return nice;
+    }
+    let days = (raw as f64 / 86400.0).ceil() as u64;
+    days.max(1) * 86400
+}
+
 /// Resolve the grid resolution in seconds from query parameters.
 /// Priority: resolution > max_points > auto (~300 points).
 /// Result is clamped so the grid has at most 3600 points.
+/// The auto-computed value (and the 3600-point clamp fallback) is snapped up
+/// to the nearest "nice" bucket width (e.g. 30s, 5m, 1h) so grid timestamps
+/// land on clean boundaries instead of arbitrary values like 24s or 588s.
+/// Explicit `resolution` values under the clamp, and `max_points`-derived
+/// values, are returned as computed without nice-snapping.
 pub fn resolve_resolution_s(params: &TimelineParams, total_window_s: f64) -> u64 {
     let total = total_window_s.max(1.0) as u64;
 
@@ -32,7 +56,8 @@ pub fn resolve_resolution_s(params: &TimelineParams, total_window_s: f64) -> u64
         // Clamp so grid doesn't exceed 3600 points.
         let points = total / res;
         if points > 3600 {
-            return (total as f64 / 3600.0).ceil() as u64;
+            let raw = (total as f64 / 3600.0).ceil() as u64;
+            return snap_up_to_nice(raw.max(1));
         }
         return res;
     }
@@ -43,9 +68,9 @@ pub fn resolve_resolution_s(params: &TimelineParams, total_window_s: f64) -> u64
         return res.max(1);
     }
 
-    // Auto: target ~300 points.
-    let res = (total as f64 / 300.0).ceil() as u64;
-    res.max(1)
+    // Auto: target ~300 points, snapped to a nice bucket width.
+    let raw = (total as f64 / 300.0).ceil() as u64;
+    snap_up_to_nice(raw.max(1))
 }
 
 /// Serialize a grid-aligned timeline: each entry is either a real point or null-valued.
@@ -301,6 +326,88 @@ pub async fn get_timeline_all(
 mod tests {
     use super::*;
     use chrono::Duration;
+
+    fn auto_params() -> TimelineParams {
+        TimelineParams {
+            hours_back: None,
+            hours_forward: None,
+            resolution: None,
+            max_points: None,
+        }
+    }
+
+    #[test]
+    fn test_resolve_resolution_s_auto_default_view_snaps_to_nice_30s() {
+        let params = auto_params();
+        // 1h back + 1h forward = 7200s total; raw = ceil(7200/300) = 24 -> snap to 30
+        assert_eq!(resolve_resolution_s(&params, 7200.0), 30);
+    }
+
+    #[test]
+    fn test_resolve_resolution_s_auto_wide_forward_view_snaps_to_nice_600s() {
+        let params = auto_params();
+        // 1h back + 48h forward = 176400s total; raw = ceil(176400/300) = 588 -> snap to 600
+        assert_eq!(resolve_resolution_s(&params, 176_400.0), 600);
+    }
+
+    #[test]
+    fn test_resolve_resolution_s_auto_minimum_window_is_one() {
+        let params = auto_params();
+        assert_eq!(resolve_resolution_s(&params, 0.0), 1);
+    }
+
+    #[test]
+    fn test_resolve_resolution_s_auto_already_nice_value_unchanged() {
+        let params = auto_params();
+        // total = 270000s; raw = ceil(270000/300) = 900, already nice -> unchanged
+        assert_eq!(resolve_resolution_s(&params, 270_000.0), 900);
+    }
+
+    #[test]
+    fn test_resolve_resolution_s_auto_very_wide_window_snaps_beyond_table() {
+        let params = auto_params();
+        // total = 34,560,000s (~400 days); raw = ceil(34_560_000/300) = 115200,
+        // beyond the nice table's max (86400) -> snaps to next whole-day multiple (172800).
+        assert_eq!(resolve_resolution_s(&params, 34_560_000.0), 172_800);
+    }
+
+    #[test]
+    fn test_resolve_resolution_s_explicit_resolution_clamp_fallback_snaps_to_nice() {
+        // Force the 3600-point clamp: explicit tiny resolution over a huge window.
+        let params = TimelineParams {
+            hours_back: None,
+            hours_forward: None,
+            resolution: Some(1),
+            max_points: None,
+        };
+        // total = 14,400,000s; points = total/1 > 3600 -> clamp fallback;
+        // raw = ceil(14_400_000/3600) = 4000 -> snap to 7200.
+        assert_eq!(resolve_resolution_s(&params, 14_400_000.0), 7200);
+    }
+
+    #[test]
+    fn test_resolve_resolution_s_explicit_resolution_under_cap_unchanged() {
+        // resolution given, no clamp triggered -> passed through verbatim (not snapped).
+        let params = TimelineParams {
+            hours_back: None,
+            hours_forward: None,
+            resolution: Some(17),
+            max_points: None,
+        };
+        assert_eq!(resolve_resolution_s(&params, 3600.0), 17);
+    }
+
+    #[test]
+    fn test_resolve_resolution_s_max_points_branch_unchanged() {
+        // max_points explicit -> not snapped, preserves existing division-based semantics.
+        let params = TimelineParams {
+            hours_back: None,
+            hours_forward: None,
+            resolution: None,
+            max_points: Some(100),
+        };
+        assert_eq!(resolve_resolution_s(&params, 10_000.0), 100);
+    }
 
     fn make_plan_with_step(
         step_s: u64,

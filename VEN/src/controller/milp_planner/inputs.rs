@@ -252,6 +252,7 @@ pub(crate) fn build_milp_inputs(
     MilpInputs {
         n,
         dt_h,
+        cum_s,
         c_imp_eur_kwh: c_imp,
         c_exp_eur_kwh: c_exp,
         g_imp_kgco2_kwh: g_co2,

@@ -62,6 +62,11 @@ pub(crate) struct MilpInputs {
     pub(crate) n: usize,
     /// Per-slot step sizes in hours (len = n). Uniform today; 3-tier variable-step when zones are active.
     pub(crate) dt_h: Vec<f64>,
+    /// Cumulative slot boundary offsets in whole seconds from `now` (len = n + 1).
+    /// Exact integer arithmetic — must be used instead of re-deriving from `dt_h` via
+    /// float seconds, which can truncate a second short for step sizes that don't
+    /// round-trip exactly through `step_s as f64 / 3600.0`.
+    pub(crate) cum_s: Vec<i64>,
 
     // ── Grid (per-step arrays, len = n) ──────────────────────────────────────
     /// Import tariff [€/kWh]
