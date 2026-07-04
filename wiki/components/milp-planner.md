@@ -3,7 +3,7 @@ title: MILP Planner
 type: component
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: eb8831a
+synced_commit: 5a9a304
 sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/tasks/planning.rs, VEN/src/services/planning.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md]
 tags: [planner, milp, highs, optimization]
 ---

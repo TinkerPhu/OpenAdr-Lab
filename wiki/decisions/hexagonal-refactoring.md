@@ -3,8 +3,8 @@ title: "Decision: Hexagonal Refactoring of the VEN Backend"
 type: decision
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: eb8831a
-sources: [.claude/CLAUDE.md, specs/archive/, openspec/changes/archive/, docs/architecture/module_dependency_graph_post_refactoring.md]
+synced_commit: 5a9a304
+sources: [.claude/CLAUDE.md, openspec/specs/arch-params-in-entities/, openspec/specs/arch-timeline-in-entities/, docs/architecture/module_dependency_graph_post_refactoring.md]
 tags: [decision, architecture, refactoring]
 ---
 
@@ -14,10 +14,10 @@ The VEN backend is organized into the ring architecture described in
 [[ven-hexagonal-architecture]] — ports isolate the domain from HiGHS, Docker, and the VTN
 so it can be tested and evolved independently. A flat, handler-and-globals structure
 cannot offer that isolation: it has no seam to substitute a mock adapter, and it lets
-config and concrete asset types leak into domain logic. Spec series 015–029 and the
-follow-up `fix-arch-layer-violations` change (both archived — `specs/archive/`,
-`openspec/changes/archive/`) established and then closed the remaining gaps: `*Params`
-structs and timeline data-carrier types now live in `entities/`
+config and concrete asset types leak into domain logic. Spec series 015–029 (git history
+only — the working spec artifacts were pruned as redundant with this synthesis) and the
+follow-up `fix-arch-layer-violations` change established and then closed the remaining
+gaps: `*Params` structs and timeline data-carrier types now live in `entities/`
 (`openspec/specs/arch-params-in-entities/spec.md`,
 `openspec/specs/arch-timeline-in-entities/spec.md`), and `assets/battery·ev·heater` no
 longer re-export MILP types into the domain.
