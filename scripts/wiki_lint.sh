@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# wiki_lint.sh — mechanical checks for the LLM wiki (rules: wiki/CLAUDE.md).
+# Content-level linting (contradictions, duplication) is done by the /wiki-lint skill.
+#
+# Checks:
+#   1. broken wikilinks         [[target]] with no matching wiki/**/target.md
+#   2. orphan pages             content pages with no inbound link from another content page
+#   3. under-linked pages       content pages with fewer than 2 outgoing wikilinks
+#   4. frontmatter completeness title/type/created/updated/sources/synced_commit present,
+#                               type value in the allowed set
+#   5. staleness                sources changed in git since synced_commit; missing source paths
+#
+# Limitation: source paths containing spaces are not supported.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+WIKI=wiki
+issues=0
+note() { issues=$((issues + 1)); printf '%s\n' "$1"; }
+
+# Housekeeping files are exempt from page rules (schema, orphan, link count).
+is_housekeeping() {
+    case "$(basename "$1")" in
+    CLAUDE.md | index.md | log.md | review.md | purpose.md) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
+mapfile -t all_md < <(find "$WIKI" -name '*.md' -not -path '*/.claude/*' | sort)
+content_pages=()
+for f in "${all_md[@]}"; do
+    is_housekeeping "$f" || content_pages+=("$f")
+done
+
+# --- 1. broken wikilinks (checked in content pages and index.md) ---------------------------
+link_files=("$WIKI/index.md" "${content_pages[@]}")
+for f in "${link_files[@]}"; do
+    [ -f "$f" ] || continue
+    while IFS= read -r link; do
+        target=$(printf '%s' "$link" | sed 's/^\[\[//; s/\]\]$//; s/[|#].*$//')
+        [ -z "$target" ] && continue
+        # canonical form is a bare slug; tolerate path-form links like [[components/slug]]
+        if [ -e "$WIKI/$target.md" ]; then continue; fi
+        if [ -z "$(find "$WIKI" -name "${target##*/}.md" -not -path '*/.claude/*' -print -quit)" ]; then
+            note "BROKEN LINK: $f -> [[$target]]"
+        fi
+    done < <(grep -o '\[\[[^][]*\]\]' "$f" 2>/dev/null || true)
+done
+
+# --- 2. orphan pages ------------------------------------------------------------------------
+for f in "${content_pages[@]}"; do
+    slug=$(basename "$f" .md)
+    inbound=0
+    for other in "${content_pages[@]}"; do
+        [ "$other" = "$f" ] && continue
+        if grep -qE "\[\[$slug([]|#])" "$other" 2>/dev/null; then
+            inbound=1
+            break
+        fi
+    done
+    [ "$inbound" -eq 0 ] && note "ORPHAN: $f (no inbound wikilink from another content page)"
+done
+
+# --- 3. under-linked pages (convention: >= 2 outgoing wikilinks) ------------------------------
+for f in "${content_pages[@]}"; do
+    outgoing=$(grep -o '\[\[[^][]*\]\]' "$f" 2>/dev/null | sort -u | wc -l)
+    if [ "$outgoing" -lt 2 ]; then
+        note "UNDER-LINKED: $f ($outgoing outgoing wikilink(s), need >= 2)"
+    fi
+done
+
+# --- 4 + 5. frontmatter completeness and staleness --------------------------------------------
+for f in "${content_pages[@]}"; do
+    fm=$(awk '/^---[[:space:]]*$/ { n++; if (n == 2) exit; next } n == 1 { print }' "$f")
+    if [ -z "$fm" ]; then
+        note "NO FRONTMATTER: $f"
+        continue
+    fi
+    for field in title type created updated sources synced_commit; do
+        printf '%s\n' "$fm" | grep -q "^$field:" || note "MISSING FIELD: $f -> $field"
+    done
+
+    ptype=$(printf '%s\n' "$fm" | sed -n 's/^type:[[:space:]]*//p' | tr -d '"' | head -n 1)
+    if [ -n "$ptype" ]; then
+        case " overview architecture component concept use-case decision source query " in
+        *" $ptype "*) : ;;
+        *) note "BAD TYPE: $f -> '$ptype' (allowed: overview architecture component concept use-case decision source query)" ;;
+        esac
+    fi
+
+    synced=$(printf '%s\n' "$fm" | sed -n 's/^synced_commit:[[:space:]]*//p' | tr -d '"' | head -n 1)
+    # sources: inline array [a, b] or YAML block list
+    srcs=$(printf '%s\n' "$fm" | awk '
+        /^sources:/ {
+            line = $0; sub(/^sources:[[:space:]]*/, "", line)
+            if (line ~ /\[/) { gsub(/[][,]/, " ", line); print line } else flag = 1
+            next
+        }
+        flag && /^[[:space:]]*-[[:space:]]/ { l = $0; sub(/^[[:space:]]*-[[:space:]]*/, "", l); print l; next }
+        flag { flag = 0 }
+    ' | tr -d '"' | xargs)
+
+    for s in $srcs; do
+        [ -e "$s" ] || note "MISSING SOURCE: $f -> $s"
+    done
+
+    if [ -n "$synced" ]; then
+        if ! git rev-parse --quiet --verify "${synced}^{commit}" >/dev/null 2>&1; then
+            note "BAD COMMIT: $f -> synced_commit '$synced' not found in repo"
+        elif [ -n "$srcs" ]; then
+            # shellcheck disable=SC2086  # srcs is intentionally word-split into pathspecs
+            changed=$(git diff --name-only "$synced"..HEAD -- $srcs 2>/dev/null || true)
+            if [ -n "$changed" ]; then
+                note "STALE: $f (since $synced): $(printf '%s' "$changed" | tr '\n' ' ')"
+            fi
+        fi
+    fi
+done
+
+# --- result -----------------------------------------------------------------------------------
+if [ "$issues" -eq 0 ]; then
+    echo "wiki lint: clean (${#content_pages[@]} content pages)"
+else
+    echo "wiki lint: $issues issue(s)"
+    exit 1
+fi
