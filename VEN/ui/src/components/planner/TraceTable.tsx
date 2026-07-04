@@ -18,7 +18,6 @@ function TypeChip({ type: t }: { type: string }) {
     t === "RateChange"        ? "info"    :
     t === "CapacityChange"    ? "secondary" :
     t === "PlanCycle"         ? "primary" :
-    t === "PacketTransition"  ? "default" :
     t === "RequestTransition" ? "default" : "default";
   return <Chip label={t} size="small" color={color} />;
 }
@@ -51,13 +50,6 @@ function DetailCell({ entry }: { entry: TraceEntry }) {
       return (
         <span>
           <b>{entry.trigger_reason}</b> · {entry.total_slots} slots
-        </span>
-      );
-    case "PacketTransition":
-      return (
-        <span>
-          <b>{entry.asset_id}</b> · {entry.from_status} → {entry.to_status}
-          · <code style={{ fontSize: "0.7rem" }}>{entry.packet_id.slice(0, 8)}</code>
         </span>
       );
     case "RequestTransition":

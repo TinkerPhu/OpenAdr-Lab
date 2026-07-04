@@ -108,7 +108,6 @@ export type TraceEntry =
   | { type: "RateChange";       ts: string; interval_start: string; import_eur_kwh: number; export_eur_kwh: number }
   | { type: "CapacityChange";   ts: string; import_limit_kw: number | null; export_limit_kw: number | null }
   | { type: "PlanCycle";        ts: string; trigger_reason: string; total_slots: number }
-  | { type: "PacketTransition"; ts: string; packet_id: string; asset_id: string; from_status: string; to_status: string }
   | { type: "RequestTransition"; ts: string; request_id: string; asset_id: string; from_status: string; to_status: string };
 
 // ─── Sim schema types ─────────────────────────────────────────────────────────

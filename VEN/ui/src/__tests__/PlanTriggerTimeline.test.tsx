@@ -55,17 +55,6 @@ function makeOpenAdrExpired(): TraceEntry {
   };
 }
 
-function makePacketTransition(): TraceEntry {
-  return {
-    type: "PacketTransition",
-    ts: "2026-04-04T09:35:00Z",
-    packet_id: "pkt-abc123",
-    asset_id: "ev",
-    from_status: "PENDING",
-    to_status: "ACTIVE",
-  };
-}
-
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("PlanTriggerTimeline", () => {
@@ -117,12 +106,6 @@ describe("PlanTriggerTimeline", () => {
     render(<PlanTriggerTimeline events={[makeOpenAdrExpired()]} />);
     const chip = screen.getByTestId("trigger-chip-0");
     expect(chip.textContent).toMatch(/SummerPeak|✗/);
-  });
-
-  it("shows asset transition in PacketTransition chip", () => {
-    render(<PlanTriggerTimeline events={[makePacketTransition()]} />);
-    const chip = screen.getByTestId("trigger-chip-0");
-    expect(chip.textContent).toMatch(/ev|PENDING|ACTIVE/i);
   });
 
   it("opens popover on chip click", async () => {
@@ -201,18 +184,17 @@ describe("PlanTriggerTimeline", () => {
     expect(popover.textContent).toMatch(/×2/);
   });
 
-  it("renders all 7 event types without throwing", () => {
+  it("renders all 6 event types without throwing", () => {
     const events: TraceEntry[] = [
       makePlanCycle(),
       makeRateChange(),
       makeCapacityChange(),
       makeOpenAdrArrived(),
       makeOpenAdrExpired(),
-      makePacketTransition(),
       { type: "RequestTransition", ts: "2026-04-04T09:30:00Z", request_id: "req-001", asset_id: "ev", from_status: "PENDING", to_status: "SCHEDULED" },
     ];
     render(<PlanTriggerTimeline events={events} />);
     const chips = document.querySelectorAll('[data-testid^="trigger-chip-"]');
-    expect(chips.length).toBe(7);
+    expect(chips.length).toBe(6);
   });
 });
