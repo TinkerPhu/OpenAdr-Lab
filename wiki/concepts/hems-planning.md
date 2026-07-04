@@ -3,8 +3,8 @@ title: HEMS Planning Concepts
 type: concept
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: eb8831a
-sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems.rs, openspec/specs/ev-session-request-completion/spec.md]
+synced_commit: 5a9a304
+sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems.rs, openspec/specs/ev-session-request-completion/spec.md, VEN/src/entities/device_session.rs]
 tags: [hems, planning, sessions, domain]
 ---
 
@@ -26,8 +26,9 @@ monitor at 1 s). Implementations: [[milp-planner]], [[dispatcher]].
 - **FLEXIBLE slot** — may shift or cancel if constraints change; typically price-driven
   charging windows.
 - Classification is time-based: slots within `now + NearHorizonDuration` are FIRM, beyond
-  are FLEXIBLE (VEN_ARCHITECTURE.md §2.3). Reported upstream as point forecasts vs
-  `[0, MaxPower]` ranges ([[openadr-interface]]).
+  are FLEXIBLE (VEN_ARCHITECTURE.md §2.3). The architecture design intends this
+  distinction to shape a forecast report (FIRM as points, FLEXIBLE as `[0, MaxPower]`
+  ranges) — that report is not actually built yet; see the DRIFT in [[openadr-interface]].
 
 ## User intent
 
@@ -51,12 +52,10 @@ its originating request stuck `Active` forever — a UI-visible dangling state.
 The **Asset Ledger** accumulates energy/cost/CO₂ per asset each dispatcher tick;
 it is in-memory only and resets on restart (persistence gap, REQUIREMENTS.md §2.3).
 
-> **DRIFT** The glossary's **Energy Packet** (schedulable kWh unit,
-> `PENDING → ACTIVE → COMPLETED/ABANDONED`, REQUIREMENTS.md §2.3) describes a
-> scheduling model that was superseded by device sessions: the packet-seeding config and
-> `packet_id` fields were removed from the code on 2026-07-04 (`VEN/src/profile.rs`,
-> `entities/site_meter.rs` — "Packet-based scheduling — not yet implemented"), and
-> sessions carry the lifecycle now. Residual "packet" vocabulary remains in comments and
-> `PacketTransition` trace events. Glossary update tracked in `wiki/review.md`.
+The glossary's **Device Session** entry (REQUIREMENTS.md §2.3) is the vocabulary for the
+`EvSession`/`HeaterTarget`/`ShiftableLoad` structs above: a schedulable energy-or-equivalent
+target with a deadline, represented per asset type rather than through one shared type or
+status field. Whether a shared trait across these three would simplify anything is
+examined in [[device-session-common-interface]] (no — the divergent parts don't unify).
 
 Grid-boundary arithmetic underlying all of this: [[sign-convention]].

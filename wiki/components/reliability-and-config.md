@@ -3,8 +3,8 @@ title: VEN Reliability & Config Hygiene
 type: component
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: eb8831a
-sources: [VEN/src/tasks/mod.rs, VEN/src/entities/error.rs, VEN/src/profile.rs, VEN/src/tasks/obligation.rs, VEN/src/vtn.rs, openspec/changes/archive/2026-07-04-fix-tech-debt-gaps/, openspec/specs/task-supervisor/spec.md, openspec/specs/domain-errors/spec.md, openspec/specs/profile-validation/spec.md, openspec/specs/planner-config/spec.md]
+synced_commit: 5a9a304
+sources: [VEN/src/tasks/mod.rs, VEN/src/entities/error.rs, VEN/src/profile.rs, VEN/src/tasks/obligation.rs, VEN/src/vtn.rs, openspec/specs/task-supervisor/spec.md, openspec/specs/domain-errors/spec.md, openspec/specs/profile-validation/spec.md, openspec/specs/planner-config/spec.md]
 tags: [reliability, config, error-handling, ven]
 ---
 
