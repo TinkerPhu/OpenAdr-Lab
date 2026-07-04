@@ -31,5 +31,6 @@ Read `wiki/CLAUDE.md` (schema, conventions, editorial rules) and `wiki/purpose.m
    capturing in `decisions/` or `overview/`.
 7. Update `wiki/index.md`; append one `wiki/log.md` line: date, `sync`, `<baseline>..<HEAD>`,
    pages touched.
-8. Run `bash scripts/wiki_lint.sh` and fix mechanical findings.
+8. Run `bash scripts/wiki_lint.sh` and fix mechanical findings; regenerate the callout
+   index with `bash scripts/wiki_callouts.sh`.
 9. Report: pages updated/created, review items added, anything skipped and why.

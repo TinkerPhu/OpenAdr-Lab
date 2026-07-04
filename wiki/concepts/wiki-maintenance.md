@@ -33,7 +33,28 @@ modules, and logs the operation. It is wired into the Definition of Done in
 | Big new doc or module deserves deep coverage | `/wiki-ingest <path or topic>` |
 | Any knowledge question | `/wiki-query` — answers cite pages + sources; unanswerable questions auto-file a gap to `wiki/review.md` |
 | Quick staleness check (2 s, CI-able) | `bash scripts/wiki_lint.sh` — broken links, orphans, under-linked pages, frontmatter, stale pages; exit 1 on findings |
+| Overview of open flags | `wiki/callouts.md` — auto-generated index of all DRIFT/CONTRADICTION/OPEN QUESTION callouts (`bash scripts/wiki_callouts.sh` to refresh; sync/lint do it automatically) |
 | Project direction shifts | edit `wiki/purpose.md` yourself |
+
+## Enforcing a `purpose.md` change
+
+`purpose.md` steers **future** writes automatically — every workflow re-reads it before
+touching anything, so pages written after the edit follow the new emphasis without
+further action. Existing pages are the catch: their `sources:` lists do **not** include
+`purpose.md`, so the git-anchored staleness check will never flag them when the purpose
+changes. Enforcement across existing content is therefore an explicit step:
+
+1. Edit `wiki/purpose.md` and commit it.
+2. In the same session (best — the session sees the diff), run `/wiki-sync` or
+   `/wiki-lint` and say explicitly: **"purpose.md changed — re-audit all pages against
+   it."** The content pass then checks every page against the new scope and emphasis,
+   not just against its `sources:`.
+3. Pages that no longer fit the purpose get updated, or filed to `wiki/review.md` if the
+   right response needs an owner decision.
+
+Rules of thumb: wording tweaks in purpose.md need no enforcement pass at all; a shifted
+*emphasis* (new focus area, dropped goal, changed audience) warrants step 2 at the next
+sync; a *scope* change (new source types, new page categories) warrants it immediately.
 
 ## Periodic (fits the quarterly-controls slot in SESSION_START.md)
 

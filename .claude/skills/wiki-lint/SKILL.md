@@ -17,3 +17,4 @@ Read `wiki/CLAUDE.md` first.
    broken links, frontmatter) directly; ask before deleting or merging pages.
 4. Bump `updated`/`synced_commit` on touched pages, update `wiki/index.md` if pages changed,
    append one `wiki/log.md` line, and move resolved `wiki/review.md` items to done.
+5. Regenerate the callout index: `bash scripts/wiki_callouts.sh`.
