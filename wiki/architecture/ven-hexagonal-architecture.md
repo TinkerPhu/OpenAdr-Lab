@@ -3,7 +3,7 @@ title: VEN Hexagonal Architecture
 type: architecture
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: 4695762
+synced_commit: eb8831a
 sources: [.claude/CLAUDE.md, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/module_dependency_graph_post_refactoring.md, VEN/src/]
 tags: [architecture, hexagonal, ports, ven]
 ---
@@ -41,9 +41,7 @@ From `.claude/CLAUDE.md`: no `use crate::profile` in `entities/`, `controller/`,
 `milp_planner/` or `entities/`; no `serde_json::Value` leaking out of `vtn.rs`.
 File-size caps: 500 lines in `VEN/src/`, 200 in `tasks/`.
 
-The refactoring that produced this shape is chronicled in [[hexagonal-refactoring]];
-the two-speed runtime behaviour of the rings is described in [[hems-planning]].
-
-(A stale reference in `.claude/CLAUDE.md` to the deleted
-`docs/plans/ven_backend_architecture_refactoring.md` was fixed on 2026-07-04; it now
-points to `docs/architecture/VEN_ARCHITECTURE.md` and the module dependency graph.)
+The rationale for this ring shape is in [[hexagonal-refactoring]]; the two-speed runtime
+behaviour of the rings is described in [[hems-planning]]. `.claude/CLAUDE.md`
+§ven-architecture points to `docs/architecture/VEN_ARCHITECTURE.md` and the module
+dependency graph as the canonical references.

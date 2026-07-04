@@ -3,7 +3,7 @@ title: Vision and Roadmap
 type: overview
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: 4695762
+synced_commit: eb8831a
 sources: [docs/BACKLOG_OpenADR_Cert.md, docs/BACKLOG.md, docs/history/project_journal.md]
 tags: [vision, roadmap, certification]
 ---
@@ -21,7 +21,8 @@ Where [[openadr-lab]] is headed, beyond the current branch.
   against the OpenADR 3.1 certification requirements. Known blockers include: plain-HTTP
   transport (no TLS — "certification blocker", §2), no `/auth/server` token-endpoint
   discovery (§3), no mDNS discovery (§1). Registration/identity and OAuth basics are
-  largely covered.
+  largely covered. Full spec security model (scopes, object privacy, webhook hardening,
+  the TLS MUST): [[openadr-security]].
 - **OpenADR 3.0 → 3.1 migration** — the spec copies in `docs/openadr_3_1_specs/` are
   version **3.1**, which has breaking changes relative to the 3.0-era implementation this
   lab builds on. Migration is a distant goal; see the version note in [[openadr-3]].

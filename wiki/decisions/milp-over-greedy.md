@@ -3,17 +3,17 @@ title: "Decision: MILP over Greedy Scheduling"
 type: decision
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: 4695762
+synced_commit: eb8831a
 sources: [docs/architecture/ven_milp_planner.md, docs/history/project_journal.md, docs/architecture/heater_tank_milp_planning_model.md]
 tags: [decision, planner, milp]
 ---
 
 # Decision: MILP over Greedy Scheduling
 
-The VEN's original planner was a greedy time-slot scheduler. It was replaced by the
-two-phase MILP solver, finalized on branch `refactor/3-tier-milp`
-(docs/architecture/ven_milp_planner.md §1; VEN_ARCHITECTURE.md §2.3 "replaced the earlier
-greedy scheduler").
+The planner solves a two-phase Mixed-Integer Linear Program (HiGHS via `good_lp`) rather
+than allocating time-slots greedily (docs/architecture/ven_milp_planner.md §1;
+VEN_ARCHITECTURE.md §2.3). Greedy allocation cannot trade off coupled constraints
+globally — see below.
 
 ## Why
 
@@ -32,6 +32,4 @@ greedy scheduler").
 - Solver runtime pressure → mitigated by the variable-step grid
   ([[three-tier-plan-grid]]) and single-zone test profiles ([[testing-strategy]]).
 
-(The glossary drift — docs/REQUIREMENTS.md §2.3 still describing the Planner as greedy —
-was fixed on 2026-07-04; the entry now names the two-phase MILP solver. Details of the
-current engine: [[milp-planner]].)
+Engine details: [[milp-planner]].

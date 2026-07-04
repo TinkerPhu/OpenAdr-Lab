@@ -19,6 +19,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[simulator]] — physics models behind SimulatorPort, /sim endpoints (UI only)
 - [[asset-layer]] — AssetInterface trait, simulated vs measured, AssetMilpContext
 - [[ven-ui]] — React SPA, multi-VEN context, timeline with now-point
+- [[reliability-and-config]] — task supervision, typed DomainError, profile validation, config knobs
 
 ## Concepts
 - [[openadr-3]] — protocol entities, event types, certification profiles, 3.0 vs 3.1 skew
@@ -27,6 +28,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[three-tier-plan-grid]] — zones A/B/C, alignment rule, the three "nows"
 - [[sign-convention]] — grid-boundary signs, units, unit-suffix naming
 - [[tariffs-and-capacity]] — TariffSnapshot, capacity limits vs capacity state, stale-rate fallback
+- [[openadr-security]] — OAuth2 scopes, object privacy/targeting, TLS/webhook requirements
 - [[wiki-maintenance]] — how this wiki stays current (sync/ingest/query/lint workflow)
 
 ## Use Cases
@@ -35,7 +37,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 
 ## Decisions
 - [[milp-over-greedy]] — why the greedy scheduler was replaced by a two-phase MILP
-- [[hexagonal-refactoring]] — spec series 016–029, ports for testability and swappability
+- [[hexagonal-refactoring]] — spec series 015–029, ports for testability and swappability
 - [[dto-pass-through]] — OpenADR spec field names pass through all layers unnormalised
 
 ## Sources
@@ -45,4 +47,4 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 _none yet_
 
 ---
-Pages: 24 · Last sync: 2026-07-04 (seed at 6cb8ca6 + review-item fixes)
+Pages: 26 · Last sync: 2026-07-04 (seed at 6cb8ca6 + review-item fixes + openspec/specs ingest + docs/openadr_3_1_specs use-case/security ingest, all at eb8831a)
