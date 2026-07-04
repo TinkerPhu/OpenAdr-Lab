@@ -3,8 +3,8 @@ title: OpenADR Interface (VEN)
 type: component
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: 4695762
-sources: [docs/architecture/VEN_ARCHITECTURE.md, VEN/src/vtn.rs, VEN/src/controller/]
+synced_commit: 5a9a304
+sources: [docs/architecture/VEN_ARCHITECTURE.md, VEN/src/vtn.rs, VEN/src/controller/, VEN/src/entities/capacity.rs]
 tags: [openadr, ven, translation, polling]
 ---
 
@@ -33,9 +33,20 @@ the [[milp-planner]]. Event *removal* on a poll means cancellation ([[openadr-3]
 ## Outbound: report obligations
 
 `USAGE` (time-weighted mean net site import), `DEMAND` (per-resource actual power),
-`STORAGE_CHARGE_LEVEL` (SoC), `OPERATING_STATE`, `USAGE_FORECAST` (FIRM slots as points,
-FLEXIBLE slots as `[0, MaxPower]` ranges), and import/export capacity reservations from
-the flexibility envelopes (VEN_ARCHITECTURE.md §2.1).
+`STORAGE_CHARGE_LEVEL` (SoC), `OPERATING_STATE`, `TELEMETRY_STATUS`, and import/export
+capacity reservations from the flexibility envelope (`VEN/src/controller/reporter.rs`).
+These are the only payload types any code path actually builds.
+
+> **DRIFT** `docs/architecture/VEN_ARCHITECTURE.md` §2.1 additionally lists
+> `USAGE_FORECAST` (FIRM slots as point forecasts, FLEXIBLE slots as `[0, MaxPower]`
+> ranges) as an outbound obligation — but no code path in `reporter.rs` builds this
+> payload type; it appears nowhere outside a comment in `entities/capacity.rs`. The MILP
+> planner already computes exactly this per-slot forecast internally
+> (`planned_state_by_asset`, exposed to `/timeline` for the UI) — it's just never turned
+> into a report. See [[openadr-spec-use-cases]] (§8.7/§8.8 Capability/Operational Forecast
+> Reporting) for what the OpenADR spec expects here and the concrete gap (the VEN doesn't
+> parse `reportDescriptor.historical` at all, so it can't distinguish a forecast request
+> from a historical one).
 
 The tariff/capacity values captured per poll tick form the `TariffSnapshot` described in
 [[tariffs-and-capacity]].

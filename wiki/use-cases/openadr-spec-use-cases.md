@@ -3,8 +3,8 @@ title: OpenADR-Spec-Implied Use Cases — Gap Analysis
 type: use-case
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: eb8831a
-sources: [docs/openadr_3_1_specs/, docs/BACKLOG_OpenADR_Cert.md, docs/architecture/VEN_ARCHITECTURE.md, tests/features/]
+synced_commit: 5a9a304
+sources: [docs/openadr_3_1_specs/, docs/BACKLOG_OpenADR_Cert.md, docs/architecture/VEN_ARCHITECTURE.md, tests/features/, VEN/src/entities/capacity.rs]
 tags: [use-cases, openadr, gap-analysis, spec]
 ---
 
@@ -61,8 +61,8 @@ recognise and respond to:
 | Inverter Management | §8.4 | 🟡 | PV asset exists ([[asset-layer]]) but no inverter-specific dispatch (curtailment/power-factor setpoints) beyond capacity limits |
 | Load Control | §8.5 | ✅ | `DISPATCH_SETPOINT` → direct [[dispatcher]] override |
 | State of Charge Reporting | §8.6 | ✅ | `STORAGE_CHARGE_LEVEL` from battery/EV SoC |
-| Capability Forecast Reporting | §8.7 | 🟡 | `USAGE_FORECAST` covers point/range forecasts; no dedicated capability-forecast payload |
-| Operational Forecast Reporting | §8.8 | 🟡 | Same partial coverage as above |
+| Capability Forecast Reporting | §8.7 | ❌ | `OadrReportObligation` (`entities/capacity.rs`) never parses `reportDescriptor.historical`, so the VEN can't distinguish a forecast request from a historical one; no `LOAD_SHED_DELTA_AVAILABLE`/`GENERATION_DELTA_AVAILABLE` payload exists. See [[openadr-interface]] |
+| Operational Forecast Reporting | §8.8 | ❌ | Same root cause — the MILP already computes the per-slot forecast internally (`planned_state_by_asset`) but it's never turned into a report; see the DRIFT in [[openadr-interface]] |
 | Capacity Management (Dynamic Operating Envelopes, Dynamic Capacity Mgmt) | §8.10 | ✅ | `*_CAPACITY_LIMIT`/`*_CAPACITY_SUBSCRIPTION` → MILP constraints ([[tariffs-and-capacity]]) |
 | Custom Dispatch Instructions | §8.12 | 🟡 | `DISPATCH_SETPOINT` handles the common case; arbitrary custom payloads are not generically supported |
 | Dynamic Targeting | §8.13 | ✅ | `enrollment.feature` exercises BL-granted targets; see [[openadr-security]] for the targeting/object-privacy mechanism and its 3.1 field-shape drift |

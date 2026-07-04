@@ -36,7 +36,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[openadr-spec-use-cases]] — spec-implied VEN use cases, gap-checked (✅/🟡/❌) against the code
 
 ## Decisions
-- [[milp-over-greedy]] — why the greedy scheduler was replaced by a two-phase MILP
+- [[milp-over-greedy]] — why the planner uses a two-phase MILP instead of greedy scheduling
 - [[hexagonal-refactoring]] — spec series 015–029, ports for testability and swappability
 - [[dto-pass-through]] — OpenADR spec field names pass through all layers unnormalised
 
@@ -44,7 +44,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 _none yet — seed pages cite repo files directly; per-document summary pages are created by `/wiki-ingest`_
 
 ## Queries
-_none yet_
+- [[device-session-common-interface]] — why EvSession/HeaterTarget/ShiftableLoad stay separate structs, not one trait
 
 ---
-Pages: 26 · Last sync: 2026-07-04 (seed at 6cb8ca6 + review-item fixes + openspec/specs ingest + docs/openadr_3_1_specs use-case/security ingest, all at eb8831a)
+Pages: 27 · Last sync: 2026-07-04 (seed at 6cb8ca6 + review-item fixes + openspec/specs ingest + docs/openadr_3_1_specs use-case/security ingest + Energy Packet → Device Session glossary fix, all at 5a9a304)
