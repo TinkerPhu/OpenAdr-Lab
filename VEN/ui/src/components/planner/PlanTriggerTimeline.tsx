@@ -34,16 +34,6 @@ function chipFor(event: TraceEntry): ChipProps {
       return { label: `★ ${event.event_name.slice(0, 12)}`, color: "success" };
     case "OpenAdrExpired":
       return { label: `☆ ${event.event_name.slice(0, 10)} ✗`, color: "default" };
-    case "PacketTransition": {
-      const toColorMap: Record<string, ChipProps["color"]> = {
-        ACTIVE: "success", COMPLETED: "success", PARTIAL_COMPLETED: "warning",
-        ABANDONED: "error", FAILED: "error", SCHEDULED: "info", PENDING: "default", PAUSED: "warning",
-      };
-      return {
-        label: `→ ${event.asset_id}: ${event.from_status}→${event.to_status}`,
-        color: toColorMap[event.to_status] ?? "primary",
-      };
-    }
     case "RequestTransition":
       return { label: `→ req: ${event.from_status}→${event.to_status}`, color: "secondary" };
   }
@@ -125,17 +115,6 @@ function EventDetail({ group }: { group: Group }) {
           <Typography variant="caption" fontWeight="bold">OpenAdrExpired</Typography>
           <Typography variant="caption" display="block">ts: {ts}</Typography>
           <Typography variant="caption" display="block">event: {event.event_name}</Typography>
-        </>
-      );
-    case "PacketTransition":
-      return (
-        <>
-          {countHeader}
-          <Typography variant="caption" fontWeight="bold">PacketTransition</Typography>
-          <Typography variant="caption" display="block">ts: {ts}</Typography>
-          <Typography variant="caption" display="block">asset: {event.asset_id}</Typography>
-          <Typography variant="caption" display="block">{event.from_status} → {event.to_status}</Typography>
-          <Typography variant="caption" display="block">packet: …{event.packet_id.slice(-6)}</Typography>
         </>
       );
     case "RequestTransition":

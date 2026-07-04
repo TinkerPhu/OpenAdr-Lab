@@ -2,7 +2,7 @@
 ///
 /// Two modes:
 ///   - Measurement reports (timer-driven): one TELEMETRY_USAGE report per active event.
-///   - Status reports (event-driven): TELEMETRY_STATUS triggered by PlanCycle/PacketTransition.
+///   - Status reports (event-driven): TELEMETRY_STATUS triggered by PlanCycle.
 use chrono::{DateTime, Duration, Utc};
 use tracing::debug;
 
@@ -499,7 +499,7 @@ fn format_iso8601_duration(secs: u64) -> String {
 
 /// Build a TELEMETRY_STATUS report triggered by a `ControllerEvent`.
 ///
-/// Only emits for `PlanCycle` and `PacketTransition` variants.
+/// Only emits for the `PlanCycle` variant.
 /// Returns None when no active OpenADR event provides a `programID` (VTN requires it)
 /// or for unhandled event types.
 pub fn build_status_report(
@@ -511,7 +511,7 @@ pub fn build_status_report(
 ) -> Option<OadrReportBody> {
     let program_id = program_id?;
 
-    let (description, asset_id_opt) = match event {
+    let (description, asset_id_opt): (String, Option<String>) = match event {
         ControllerEvent::PlanCycle {
             trigger_reason,
             total_slots,
@@ -519,15 +519,6 @@ pub fn build_status_report(
         } => (
             format!("PlanCycle trigger={} slots={}", trigger_reason, total_slots),
             None,
-        ),
-        ControllerEvent::PacketTransition {
-            asset_id,
-            from_status,
-            to_status,
-            ..
-        } => (
-            format!("PacketTransition {} → {}", from_status, to_status),
-            Some(asset_id.clone()),
         ),
         _ => return None,
     };
