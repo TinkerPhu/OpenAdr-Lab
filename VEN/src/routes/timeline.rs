@@ -73,6 +73,15 @@ pub fn resolve_resolution_s(params: &TimelineParams, total_window_s: f64) -> u64
     snap_up_to_nice(raw.max(1))
 }
 
+/// Drop NaN entries and serialize a values map to JSON.
+fn serialize_values(values: &HashMap<String, f64>) -> serde_json::Map<String, serde_json::Value> {
+    values
+        .iter()
+        .filter(|(_, v)| !v.is_nan())
+        .map(|(k, v)| (k.clone(), serde_json::json!(v)))
+        .collect()
+}
+
 /// Serialize a grid-aligned timeline: each entry is either a real point or null-valued.
 /// Grid timestamps + resampled Option<HashMap> values → JSON array.
 /// A `None` values entry serializes as `{"ts": "...", "values": null}`.
@@ -84,14 +93,7 @@ pub fn serialize_grid_timeline(
         .iter()
         .zip(values.iter())
         .map(|(ts, opt_vals)| match opt_vals {
-            Some(vals) => {
-                let map: serde_json::Map<String, serde_json::Value> = vals
-                    .iter()
-                    .filter(|(_, v)| !v.is_nan())
-                    .map(|(k, v)| (k.clone(), serde_json::json!(v)))
-                    .collect();
-                serde_json::json!({ "ts": ts, "values": map })
-            }
+            Some(vals) => serde_json::json!({ "ts": ts, "values": serialize_values(vals) }),
             None => serde_json::json!({ "ts": ts, "values": null }),
         })
         .collect()
@@ -101,13 +103,18 @@ pub fn serialize_grid_timeline(
 pub fn serialize_now_point(
     point: &crate::controller::trace::AssetTimelinePoint,
 ) -> serde_json::Value {
-    let values: serde_json::Map<String, serde_json::Value> = point
-        .values
+    serde_json::json!({ "ts": point.ts, "values": serialize_values(&point.values) })
+}
+
+/// Serialize real (un-resampled) future timeline points verbatim: one entry per
+/// actual plan slot at its native per-zone step size, no averaging/blending.
+pub fn serialize_future_points(
+    points: &[crate::controller::trace::AssetTimelinePoint],
+) -> Vec<serde_json::Value> {
+    points
         .iter()
-        .filter(|(_, v)| !v.is_nan())
-        .map(|(k, v)| (k.clone(), serde_json::json!(v)))
-        .collect();
-    serde_json::json!({ "ts": point.ts, "values": values })
+        .map(|p| serde_json::json!({ "ts": p.ts, "values": serialize_values(&p.values) }))
+        .collect()
 }
 
 /// GET /timeline/:asset_id — grid-aligned past+future timeline for one asset.
@@ -128,7 +135,7 @@ pub async fn get_timeline(
 
     let window_start = now - chrono::Duration::milliseconds((hours_back * 3_600_000.0) as i64);
     let window_end = now + chrono::Duration::milliseconds((hours_forward * 3_600_000.0) as i64);
-    let (history_grid, future_grid) =
+    let (history_grid, _future_grid) =
         compute_uniform_grid(window_start, window_end, now, resolution_s);
 
     let plan = ctx.state.active_plan().await;
@@ -144,7 +151,6 @@ pub async fn get_timeline(
         hours_back,
         hours_forward,
         &history_grid,
-        &future_grid,
         resolution_s,
     ) {
         None => (
@@ -156,8 +162,13 @@ pub async fn get_timeline(
     }
 }
 
-/// Build a grid-aligned timeline array for one asset:
-/// [history_grid..., now_point, future_grid...]
+/// Build a grid-aligned past + real-plan-slot future timeline array for one asset:
+/// [history_grid (resampled)..., now_point, future (real plan slots, verbatim)...]
+///
+/// The past segment is resampled onto `history_grid` exactly as before. The future
+/// segment is NOT resampled: `build_asset_timeline` already emits one real point per
+/// real plan slot at its native per-zone step size (5/10/15 min), so it is serialized
+/// verbatim — no averaging/blending across slots, and no synthetic grid timestamps.
 #[allow(clippy::too_many_arguments)]
 pub fn build_grid_aligned_array(
     asset_id: &str,
@@ -168,12 +179,9 @@ pub fn build_grid_aligned_array(
     hours_back: f64,
     hours_forward: f64,
     history_grid: &[DateTime<Utc>],
-    future_grid: &[DateTime<Utc>],
     resolution_s: u64,
 ) -> Option<Vec<serde_json::Value>> {
-    use crate::controller::timeline::{
-        build_asset_timeline, build_now_point, locf_fill_nones, resample_to_grid,
-    };
+    use crate::controller::timeline::{build_asset_timeline, build_now_point, resample_to_grid};
     use crate::entities::timeline::TimeWindow;
 
     let raw = build_asset_timeline(
@@ -188,46 +196,17 @@ pub fn build_grid_aligned_array(
         },
     )?;
 
-    // Split raw points into history (ts < now) and future (ts >= now).
+    // Split raw points into history (ts < now, resampled) and future (ts >= now, verbatim).
     let raw_history: Vec<_> = raw.iter().filter(|p| p.ts < now).cloned().collect();
-    let raw_future: Vec<_> = raw.iter().filter(|p| p.ts >= now).cloned().collect();
+    let raw_future: Vec<_> = raw.into_iter().filter(|p| p.ts >= now).collect();
 
-    // Build now-point before future resampling so we can use it as a LOCF seed.
-    // This covers the gap when the currently-active plan slot started before `now` and
-    // therefore fell into raw_history — without a seed the leading future buckets are null.
     let now_point = build_now_point(asset_id, now, snap);
-    let fut_seed = if now_point.values.is_empty() {
-        None
-    } else {
-        Some(now_point.values.clone())
-    };
-
-    // Resample onto grids.
-    // Future: apply LOCF fill so plan-slot values extend across all fine-grid buckets
-    // within a 5-minute slot rather than leaving sub-bucket gaps that render as needle peaks.
     let hist_resampled = resample_to_grid(&raw_history, history_grid, resolution_s);
 
-    // Plan horizon end: last slot end across all plan slots, or None when no plan is active.
-    // Future grid points strictly after this boundary are nulled out — the LOCF seed must not
-    // fill an unbounded future with stale values beyond what the plan actually covers.
-    let plan_end_opt: Option<DateTime<Utc>> = plan.and_then(|p| p.all_slots().map(|s| s.end).max());
-
-    let fut_resampled: Vec<Option<std::collections::HashMap<String, f64>>> = locf_fill_nones(
-        resample_to_grid(&raw_future, future_grid, resolution_s),
-        fut_seed,
-    )
-    .into_iter()
-    .zip(future_grid.iter())
-    .map(|(v, &ts)| match plan_end_opt {
-        Some(end) if ts <= end => v,
-        _ => None,
-    })
-    .collect();
-
-    // Concatenate: history_grid + now_point + future_grid.
+    // Concatenate: history_grid (resampled) + now_point + future (real plan slots).
     let mut out = serialize_grid_timeline(history_grid, &hist_resampled);
     out.push(serialize_now_point(&now_point));
-    out.extend(serialize_grid_timeline(future_grid, &fut_resampled));
+    out.extend(serialize_future_points(&raw_future));
 
     Some(out)
 }
@@ -275,7 +254,7 @@ pub async fn get_timeline_all(
 
     let window_start = now - chrono::Duration::milliseconds((hours_back * 3_600_000.0) as i64);
     let window_end = now + chrono::Duration::milliseconds((hours_forward * 3_600_000.0) as i64);
-    let (history_grid, future_grid) =
+    let (history_grid, _future_grid) =
         compute_uniform_grid(window_start, window_end, now, resolution_s);
 
     let plan = ctx.state.active_plan().await;
@@ -295,7 +274,6 @@ pub async fn get_timeline_all(
             hours_back,
             hours_forward,
             &history_grid,
-            &future_grid,
             resolution_s,
         ) {
             timelines.insert(asset_id.clone(), serde_json::Value::Array(arr));
@@ -312,7 +290,6 @@ pub async fn get_timeline_all(
         hours_back,
         hours_forward,
         &history_grid,
-        &future_grid,
         resolution_s,
     ) {
         timelines.insert("grid".to_string(), serde_json::Value::Array(arr));
@@ -570,5 +547,226 @@ mod tests {
         let now = chrono::Utc::now();
         let zones = zones_from_plan(Some(&plan), now);
         assert!(zones.is_empty(), "expired plan → empty zones list");
+    }
+
+    // ─── build_grid_aligned_array: future segment is real plan slots, verbatim ──
+
+    /// Build a single-zone plan whose slots carry distinct `net_import_kw` values,
+    /// so the "grid" virtual asset's future power_kw differs slot-to-slot.
+    fn make_plan_with_net_import(
+        step_s: u64,
+        now: DateTime<Utc>,
+        net_import_kw: &[f64],
+    ) -> crate::entities::plan::Plan {
+        use crate::entities::asset::PlanTrigger;
+        use crate::entities::plan::{Plan, PlanTimeSlot, PlanZone, PlanningHorizon};
+        use crate::entities::planner_params::PlannerObjective;
+        let slots_n = net_import_kw.len();
+        let horizon = PlanningHorizon {
+            start_time: now,
+            end_time: now + Duration::seconds((step_s * slots_n as u64) as i64),
+            step_size_s: step_s,
+            num_steps: slots_n,
+            far_horizon: now + Duration::seconds((step_s * slots_n as u64) as i64),
+            zones: vec![PlanZone {
+                step_s,
+                slots: slots_n,
+            }],
+        };
+        let plan_slots: Vec<PlanTimeSlot> = net_import_kw
+            .iter()
+            .enumerate()
+            .map(|(i, &imp)| PlanTimeSlot {
+                slot_index: i,
+                start: now + Duration::seconds((step_s * i as u64) as i64),
+                end: now + Duration::seconds((step_s * (i + 1) as u64) as i64),
+                import_tariff_eur_kwh: 0.25,
+                export_tariff_eur_kwh: 0.08,
+                co2_g_kwh: 300.0,
+                grid_effective_cost: 0.25,
+                rate_estimated: false,
+                import_cap_kw: 25.0,
+                export_cap_kw: 10.0,
+                allocations: vec![],
+                pv_forecast_kw: 0.0,
+                baseline_kw: 0.0,
+                surplus_available_kw: 0.0,
+                net_import_kw: imp,
+                net_export_kw: 0.0,
+                import_flexibility_kw: 0.0,
+                export_flexibility_kw: 0.0,
+                planned_kw_by_asset: std::collections::HashMap::new(),
+                planned_state_by_asset: std::collections::HashMap::new(),
+                bat_charge_kw: 0.0,
+                bat_discharge_kw: 0.0,
+            })
+            .collect();
+        Plan {
+            id: uuid::Uuid::new_v4(),
+            created_at: now,
+            trigger: PlanTrigger::Periodic,
+            objective: PlannerObjective::MinCost,
+            horizon,
+            slots: plan_slots,
+            objective_eur: 0.0,
+            friction_eur: 0.0,
+            cost_breakdown: Default::default(),
+            soc_trajectory_kwh: vec![],
+            summary: Default::default(),
+            envelopes: vec![],
+            warnings: vec![],
+        }
+    }
+
+    fn empty_snap() -> TimelineSnapshot {
+        TimelineSnapshot {
+            assets: std::collections::HashMap::new(),
+            grid_history: vec![],
+            grid_current_kw: 0.0,
+        }
+    }
+
+    #[test]
+    fn test_build_grid_aligned_array_future_ts_are_real_slot_boundaries() {
+        let now = chrono::Utc::now();
+        // 5-min-step zone, 4 slots; resolution deliberately coarser (600s) than the
+        // real step (300s) — before this fix, that would have resampled/blended future
+        // points onto 600s buckets.
+        let plan = make_plan_with_net_import(300, now, &[1.0, 2.0, 3.0, 4.0]);
+        let snap = empty_snap();
+        let known_assets = std::collections::HashSet::new();
+
+        let arr = build_grid_aligned_array(
+            "grid",
+            &known_assets,
+            &snap,
+            Some(&plan),
+            now,
+            0.0,
+            4.0 * 300.0 / 3600.0,
+            &[],
+            600,
+        )
+        .expect("grid asset always resolves");
+
+        // arr[0] is the now-point (history_grid is empty since hours_back=0.0); the
+        // remaining entries must be exactly the 4 real plan slots, not resampled buckets.
+        let future = &arr[1..];
+        assert_eq!(
+            future.len(),
+            4,
+            "one point per real plan slot, not resampled onto 600s buckets"
+        );
+        for (i, slot) in plan.slots.iter().enumerate() {
+            let ts: DateTime<Utc> = future[i]["ts"].as_str().unwrap().parse().unwrap();
+            assert_eq!(
+                ts, slot.start,
+                "future point {i} must be the real slot start, not a grid tick"
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_grid_aligned_array_future_values_are_not_blended() {
+        let now = chrono::Utc::now();
+        // Two adjacent 5-min slots with very different net_import_kw. A 600s-bucket
+        // resample would have averaged them into one synthetic (1.0+9.0)/2 = 5.0 value;
+        // real slot-verbatim output must keep both distinct values.
+        let plan = make_plan_with_net_import(300, now, &[1.0, 9.0]);
+        let snap = empty_snap();
+        let known_assets = std::collections::HashSet::new();
+
+        let arr = build_grid_aligned_array(
+            "grid",
+            &known_assets,
+            &snap,
+            Some(&plan),
+            now,
+            0.0,
+            2.0 * 300.0 / 3600.0,
+            &[],
+            600,
+        )
+        .expect("grid asset always resolves");
+
+        let future = &arr[1..];
+        assert_eq!(future.len(), 2);
+        assert_eq!(future[0]["values"]["power_kw"], 1.0);
+        assert_eq!(future[1]["values"]["power_kw"], 9.0);
+    }
+
+    #[test]
+    fn test_build_grid_aligned_array_future_point_count_independent_of_resolution() {
+        let now = chrono::Utc::now();
+        let plan = make_plan_with_net_import(300, now, &[1.0, 2.0, 3.0, 4.0]);
+        let snap = empty_snap();
+        let known_assets = std::collections::HashSet::new();
+
+        // A fine resolution (60s) would previously have produced many LOCF-filled
+        // sub-buckets per real slot; future point count must stay exactly the real
+        // slot count regardless of resolution_s.
+        let arr = build_grid_aligned_array(
+            "grid",
+            &known_assets,
+            &snap,
+            Some(&plan),
+            now,
+            0.0,
+            4.0 * 300.0 / 3600.0,
+            &[],
+            60,
+        )
+        .expect("grid asset always resolves");
+
+        assert_eq!(
+            arr[1..].len(),
+            4,
+            "future length must equal real slot count, not depend on resolution_s"
+        );
+    }
+
+    #[test]
+    fn test_build_grid_aligned_array_history_still_grid_resampled() {
+        use crate::entities::timeline::TimelinePoint;
+        let now = chrono::Utc::now();
+        let snap = TimelineSnapshot {
+            assets: std::collections::HashMap::new(),
+            grid_history: vec![
+                TimelinePoint {
+                    ts: now - Duration::seconds(60),
+                    power_kw: 5.0,
+                    state_values: std::collections::HashMap::new(),
+                },
+                TimelinePoint {
+                    ts: now - Duration::seconds(30),
+                    power_kw: 7.0,
+                    state_values: std::collections::HashMap::new(),
+                },
+            ],
+            grid_current_kw: 6.0,
+        };
+        let known_assets = std::collections::HashSet::new();
+        let history_grid = vec![now - Duration::seconds(60), now - Duration::seconds(30)];
+
+        let arr = build_grid_aligned_array(
+            "grid",
+            &known_assets,
+            &snap,
+            None,
+            now,
+            120.0 / 3600.0,
+            0.0,
+            &history_grid,
+            30,
+        )
+        .expect("grid asset always resolves");
+
+        // History side unchanged: still one grid-resampled entry per history_grid tick.
+        let arr0_ts: DateTime<Utc> = arr[0]["ts"].as_str().unwrap().parse().unwrap();
+        let arr1_ts: DateTime<Utc> = arr[1]["ts"].as_str().unwrap().parse().unwrap();
+        assert_eq!(arr0_ts, history_grid[0]);
+        assert_eq!(arr1_ts, history_grid[1]);
+        assert!(arr[0]["values"]["power_kw"].is_number());
+        assert!(arr[1]["values"]["power_kw"].is_number());
     }
 }
