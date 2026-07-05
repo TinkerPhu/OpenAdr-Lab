@@ -2,9 +2,9 @@
 title: Tariffs and Capacity State
 type: concept
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: 4695762
-sources: [docs/REQUIREMENTS.md, VEN/src/entities/tariff_snapshot.rs]
+updated: 2026-07-05
+synced_commit: e138861
+sources: [docs/REQUIREMENTS.md, VEN/src/entities/tariff_snapshot.rs, VEN/src/common/mod.rs, VEN/src/entities/capacity.rs]
 tags: [tariff, capacity, domain]
 ---
 
@@ -15,27 +15,45 @@ How time-varying grid signals are captured inside the VEN
 
 ## TariffSnapshot
 
-A point-in-time capture of **all** time-varying OpenADR events at one poll tick: import
-tariff, export tariff (€/kWh), CO₂ intensity, and capacity limits — unified in one row so
-every field is valid at the same timestamp (temporal correlation). Price fields originate
-from `PRICE`/`EXPORT_PRICE` events, capacity fields from `IMPORT_/EXPORT_CAPACITY_LIMIT`
-(`VEN/src/entities/tariff_snapshot.rs`; inbound mapping in [[openadr-interface]]).
+One interval's co-valid rate signals in one row: import tariff, export tariff (€/kWh),
+and CO₂ intensity (g/kWh), each optional (`VEN/src/entities/tariff_snapshot.rs`). Fields
+originate from `PRICE`/`EXPORT_PRICE`/`GHG` payloads merged per interval; capacity limits
+are **not** part of this struct — they are flattened into the scalar `OadrCapacityState`
+(inbound mapping in [[openadr-interface]]).
+
+## TariffTimeSeries — Step/LOCF by construction
+
+At the planning boundary, snapshots become a `TariffTimeSeries`: three independent
+`TimeSeries` (import, export, CO₂) with `Interpolation::Step`
+(`entities/tariff_snapshot.rs`). The shared `TimeSeries` type (`common/mod.rs`) provides
+`interpolate_at` (LOCF for Step), `time_weighted_mean`, min/max buckets, and grid
+resampling — one abstraction serving the planner, the reporter, and the timeline. The
+planner currently samples each slot at its **start** timestamp; time-weighted averaging
+across boundary-straddling slots is available but not yet used there
+([[ven-code-vs-docs-audit]]).
 
 ## Two kinds of capacity — don't conflate
 
-- **Per-interval capacity limits** (in `OadrEventSnapshot`): hard kW caps per event
-  interval, from `*_CAPACITY_LIMIT` events.
-- **Capacity State** (`OadrCapacityState`): the contractual picture — subscribed import/
-  export kW and reserved import/export kW, from `*_SUBSCRIPTION`/`*_RESERVATION` events
-  (REQUIREMENTS.md §2.3).
+- **Per-interval capacity limits**: hard kW caps from `*_CAPACITY_LIMIT` events;
+  strictest active limit wins, source event id retained
+  (`controller/openadr_interface.rs::parse_capacity_state`).
+- **Capacity State** (`OadrCapacityState`): the contractual picture. Import-side only in
+  code — `import_subscription_kw` and `import_reservation_kw` are parsed;
+  `EXPORT_CAPACITY_SUBSCRIPTION`/`EXPORT_CAPACITY_RESERVATION` have no inbound handling
+  and no struct fields (REQUIREMENTS.md §2.3 describes both sides).
 
 Both bound the [[milp-planner]]'s feasible region; reservations also flow back out as
-`IMPORT_/EXPORT_CAPACITY_RESERVATION` report payloads.
+`IMPORT_/EXPORT_CAPACITY_RESERVATION` report payloads built from the live site envelope
+([[openadr-interface]]).
 
 ## Stale data
 
-When the VTN is unreachable, tariff slots beyond the last known data follow the
-configured `StaleRatePolicy` (`LAST_KNOWN`, `HEURISTIC_FORECAST`, `DEFER_TO_FLEXIBLE`,
-`SAFE_AVERAGE`) rather than silently assuming zero ([[milp-planner]]).
+When the VTN is unreachable, Step/LOCF extrapolation carries the **last known rate**
+forward for all future slots, and hardcoded defaults (0.25 €/kWh import, 0.08 €/kWh
+export, 300 g/kWh) cover slots with no data at all (`milp_planner/inputs.rs`). The
+`StaleRatePolicy` enum (`entities/asset.rs` — `LAST_KNOWN`, `HEURISTIC_FORECAST`,
+`DEFER_TO_FLEXIBLE`, `SAFE_AVERAGE`) is unreferenced design vocabulary: only its
+`LAST_KNOWN` behaviour exists, as a hardwired consequence of Step interpolation, and
+plans never mark slots `rate_estimated` ([[ven-code-vs-docs-audit]]).
 
 Tariff (€/kWh) vs rate (€/h) terminology: see [[sign-convention]].

@@ -2,9 +2,9 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: 5a9a304
-sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/tasks/planning.rs, VEN/src/services/planning.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md]
+updated: 2026-07-05
+synced_commit: e138861
+sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/tasks/planning.rs, VEN/src/services/planning.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md]
 tags: [planner, milp, highs, optimization]
 ---
 
@@ -32,15 +32,37 @@ see [[milp-over-greedy]].
   as energy targets, deadline steps, and `MilpLoadMode` (MustRun/MayRun/MustNotRun) —
   the solver iterates over asset variables, never session objects
   (docs/architecture/VEN_ARCHITECTURE.md §2.3.1); see [[hems-planning]].
-- **Adoption gate** (`VEN/src/services/planning.rs`): a new plan is adopted only if it
-  beats the current plan's expected cost by a configured threshold — prevents churn.
-  Gate decay must measure real age, so it always receives `wall_now`, never the aligned
+- **Adoption gate** (`VEN/src/services/planning.rs`): a periodic plan is adopted only if
+  it beats the current plan's cost+friction by the effective threshold plus an optional
+  per-extra-heater-switch surcharge (`gate_switch_penalty_eur`); hard triggers, a fully
+  decayed threshold, or a current plan whose slots have all expired always adopt. Gate
+  decay must measure real age, so it always receives `wall_now`, never the aligned
   timestamp (ven_milp_planner.md §2.2).
-- **StaleRatePolicy**: with the VTN unreachable, future tariff slots fall back to
-  `LAST_KNOWN`, `HEURISTIC_FORECAST`, `DEFER_TO_FLEXIBLE`, or `SAFE_AVERAGE`.
-- **Port isolation**: reached via `SolverPort`; asset physics enter as
-  `Vec<Box<dyn AssetMilpContext>>` — the planner never imports concrete asset types
-  ([[ven-hexagonal-architecture]]).
+- **Stale-rate behaviour**: tariffs reach the solver as Step/LOCF `TariffTimeSeries`
+  ([[tariffs-and-capacity]]) — the last known rate carries forward indefinitely, and
+  hardcoded defaults (0.25 €/kWh import, 0.08 export, 300 g/kWh CO₂) fill slots with no
+  data at all (`inputs.rs:77-90`). The configurable `StaleRatePolicy` enum that the docs
+  describe is dead vocabulary; `rate_estimated` is hardcoded `false`
+  ([[ven-code-vs-docs-audit]]).
+- **Asset isolation**: asset physics enter as `Vec<Box<dyn AssetMilpContext>>` — the
+  planner never imports concrete asset types ([[ven-hexagonal-architecture]]). There is
+  no `SolverPort` trait: `tasks/planning.rs` calls `run_planner()` directly in
+  `spawn_blocking` (MILP solving takes 18–60 s on Pi4; the sim mutex is cloned and
+  released first).
+- **Cross-asset interactions** (`controller/milp_interactions.rs`): pluggable
+  `AssetInteraction` objects add coupled terms — `BatEvCoexist` (McCormick-linearised
+  penalty on battery discharge during PV-covered EV charging) and `CtrlImportMalus`
+  (slack penalty when controllable load exceeds free PV surplus). Active only when their
+  coefficient is non-zero.
+- **Heater anchor**: after adoption, the current heater block's tier binaries are pinned
+  for the next solves until the block ends (`services/planning.rs::build_heater_anchor`,
+  `anchor_until` in state) — prevents near-future chattering; hard triggers clear the
+  anchor. Off-blocks are never anchored (would drive the tank below its domain bound
+  and make the MILP infeasible).
+- **Terminal energy rewards**: battery and heater get an end-of-horizon stored-energy
+  credit auto-computed from the mean import tariff (battery: × round-trip efficiency;
+  heater: + ctrl-import malus), profile-overridable — stops the optimizer from draining
+  storage right before the horizon edge (`tasks/planning.rs:185-224`).
 - **Phase 2 is a hard-bounded lexicographic pass, not a weighted blend**: it adds the
   constraint `phase1_cost ≤ C* + phase2_epsilon_eur` and then minimises switching/
   startup/ramp/tier-preference terms only — never trades cost for friction beyond that
@@ -63,11 +85,15 @@ see [[milp-over-greedy]].
 
 | Concern | File |
 |---|---|
-| Entry point | `VEN/src/controller/milp_planner/mod.rs` |
+| Entry point (`run_planner`) | `VEN/src/controller/milp_planner/mod.rs` |
 | Input tensors | `inputs.rs` |
+| Weights, `MilpInputs`, `SolveOutput` | `types.rs` |
+| Asset port (trait + var/context structs) | `asset_port.rs` |
 | Phase 1 / Phase 2 | `solver_phase1.rs` / `solver_phase2.rs` |
-| Plan translation | `results.rs` |
+| Cross-asset interactions | `VEN/src/controller/milp_interactions.rs` |
+| Plan translation + fallback plan | `results.rs` |
+| Per-session flexibility envelopes | `envelopes.rs` |
 | Planning loop | `VEN/src/tasks/planning.rs` |
-| Acceptance gate | `VEN/src/services/planning.rs` |
+| Acceptance gate + heater anchor | `VEN/src/services/planning.rs` |
 
 Downstream, the plan is executed slot-by-slot by the [[dispatcher]].

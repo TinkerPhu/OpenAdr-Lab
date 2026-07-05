@@ -13,11 +13,11 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[testing-strategy]] — four suites, VEN test pyramid, test-first and determinism rules
 
 ## Components
-- [[milp-planner]] — two-phase HiGHS MILP, adoption gate, StaleRatePolicy, file map
-- [[dispatcher]] — 1 s tick, deviation correction, asset ledger
+- [[milp-planner]] — two-phase HiGHS MILP, adoption gate, heater anchor, cross-asset interactions, file map
+- [[dispatcher]] — build_setpoints on the 1 s sim tick, surplus-EV overlay, shiftable-load runtimes
 - [[openadr-interface]] — event→signal translation tables, report obligations
 - [[simulator]] — physics models behind SimulatorPort, /sim endpoints (UI only)
-- [[asset-layer]] — AssetInterface trait, simulated vs measured, AssetMilpContext
+- [[asset-layer]] — Asset trait + AssetConfig dispatch, history ring buffers, AssetMilpContext
 - [[ven-ui]] — React SPA, multi-VEN context, timeline with now-point
 - [[reliability-and-config]] — task supervision, typed DomainError, profile validation, config knobs
 
@@ -45,6 +45,7 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 
 ## Queries
 - [[device-session-common-interface]] — why EvSession/HeaterTarget/ShiftableLoad stay separate structs, not one trait
+- [[ven-code-vs-docs-audit]] — full VEN/src read vs docs: what matches, 10 confirmed drifts, ranked refactoring candidates
 
 ---
-Pages: 27 · Last sync: 2026-07-04 (seed at 6cb8ca6 + review-item fixes + openspec/specs ingest + docs/openadr_3_1_specs use-case/security ingest + Energy Packet → Device Session glossary fix, all at 5a9a304)
+Pages: 28 · Last sync: 2026-07-05 (VEN code deep-ingest at e138861: audit page + 8 pages corrected against source)
