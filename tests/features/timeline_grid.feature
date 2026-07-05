@@ -1,6 +1,9 @@
 Feature: Uniform-Grid Timeline API (RF-05c)
-  GET /timeline/all and GET /timeline/:asset_id return all assets on a shared
-  uniform time grid with a now-point between history and future portions.
+  GET /timeline/all and GET /timeline/:asset_id return all assets with a
+  now-point between history and future portions. History is resampled onto a
+  shared uniform time grid (resolution/max_points-driven). Future is the
+  plan's real slots verbatim, at their native per-zone step size — not
+  resampled onto the grid.
 
   Background:
     Given the VEN is running
@@ -45,11 +48,11 @@ Feature: Uniform-Grid Timeline API (RF-05c)
     And the response JSON is an object
     And the now-point ts is identical across all assets
 
-  Scenario: Empty future buckets have values null
+  Scenario: Future points are never null (real plan slots, always present)
     When I GET /timeline/all?hours_back=0&hours_forward=25 from the VEN
     Then the response status is 200
     And the response JSON is an object
-    And at least one future point has null values
+    And no future point has null values
 
   Scenario: Response format is unchanged
     When I GET /timeline/all from the VEN
@@ -65,17 +68,20 @@ Feature: Uniform-Grid Timeline API (RF-05c)
     And the response JSON is an object
     And the grid portions have uniform spacing of 30 seconds
 
+  # History is resolution-driven (per hours_back); future is real plan-slot count
+  # (per the plan's own step size, independent of resolution/max_points), so only
+  # the history portion is asserted against a resolution-derived point count.
   Scenario: Default auto-resolution targets approximately 300 points
     When I GET /timeline/all?hours_back=1&hours_forward=1 from the VEN
     Then the response status is 200
     And the response JSON is an object
-    And the total array length is between 200 and 500
+    And the history-portion array length is between 100 and 150
 
   Scenario: max_points=150 produces equivalent resolution
     When I GET /timeline/all?max_points=150&hours_back=1&hours_forward=1 from the VEN
     Then the response status is 200
     And the response JSON is an object
-    And the total array length is between 100 and 250
+    And the history-portion array length is between 60 and 100
 
   Scenario: resolution takes precedence over max_points
     When I GET /timeline/all?resolution=60&max_points=10&hours_back=1&hours_forward=1 from the VEN

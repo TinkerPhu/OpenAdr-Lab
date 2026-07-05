@@ -164,14 +164,19 @@ def step_now_point_same_ts(context):
     assert len(unique) == 1, f"Now-point timestamps differ across assets: {now_timestamps}"
 
 
-@then("at least one future point has null values")
-def step_future_null_values(context):
+@then("no future point has null values")
+def step_future_not_null(context):
     data = _get_timeline_all(context)
     for asset_id, points in data.items():
-        has_null = any(p["values"] is None for p in points)
-        if has_null:
-            return
-    assert False, "No asset has a point with null values"
+        now_idx = _find_now_index(points)
+        # Future points start right after the now-point; if it can't be found
+        # (e.g. array too short), there's nothing to check for this asset.
+        start = now_idx + 1 if now_idx is not None else len(points)
+        nulls = [i for i in range(start, len(points)) if points[i]["values"] is None]
+        assert not nulls, (
+            f"Asset '{asset_id}': found null future point(s) at index/indices {nulls} "
+            "— real plan slots must always carry values"
+        )
 
 
 @then("each value is an array of objects with ts and values fields")
@@ -195,6 +200,19 @@ def step_array_length_range(context, low, high):
     length = len(list(data.values())[0])
     assert low <= length <= high, (
         f"Array length {length} not in range [{low}, {high}]"
+    )
+
+
+@then("the history-portion array length is between {low:d} and {high:d}")
+def step_history_length_range(context, low, high):
+    # History is resolution-driven and resampled onto a uniform grid; future is
+    # real plan-slot count (independent of resolution/max_points) so is excluded.
+    data = _get_timeline_all(context)
+    points = list(data.values())[0]
+    now_idx = _find_now_index(points)
+    length = now_idx if now_idx is not None else len(points)
+    assert low <= length <= high, (
+        f"History-portion length {length} not in range [{low}, {high}]"
     )
 
 
