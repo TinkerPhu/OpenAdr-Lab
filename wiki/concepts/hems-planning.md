@@ -2,8 +2,8 @@
 title: HEMS Planning Concepts
 type: concept
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: 5a9a304
+updated: 2026-07-05
+synced_commit: e138861
 sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems.rs, openspec/specs/ev-session-request-completion/spec.md, VEN/src/entities/device_session.rs]
 tags: [hems, planning, sessions, domain]
 ---
@@ -15,10 +15,15 @@ signals become a schedule (docs/REQUIREMENTS.md §2.3).
 
 ## Two-speed loop
 
-The controller runs at two timescales (docs/architecture/VEN_ARCHITECTURE.md §2.2):
-a **slow loop** (planner: 20 s periodic + `PlanTrigger` watch channel — any component can
-request a replan, each trigger yields exactly one plan) and a **fast loop** (dispatcher +
-monitor at 1 s). Implementations: [[milp-planner]], [[dispatcher]].
+The controller runs at two timescales: a **slow loop** (planner:
+`replan_interval_s` periodic, default 300 s, plus a `PlanTrigger` watch channel — any
+component can request a replan, each trigger yields exactly one plan;
+`VEN/src/tasks/planning.rs`) and a **fast loop** (dispatcher + monitor at 1 s).
+`docs/architecture/VEN_ARCHITECTURE.md` §2.2 still quotes "20 s periodic" — stale.
+Trigger senders in code: routes (`UserRequest`), sim inject / `POST /plan/trigger`
+(`AssetStateChange`), event poll (`RateChange` for *any* detected change), shiftable-load
+completion (`UserRequest`); `Alert` and `CapacityChange` are defined but never sent.
+Implementations: [[milp-planner]], [[dispatcher]].
 
 ## Slot semantics
 

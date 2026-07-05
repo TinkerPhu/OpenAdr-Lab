@@ -2,37 +2,53 @@
 title: Asset Layer
 type: component
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: 4695762
-sources: [docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md, VEN/src/assets/, VEN/src/entities/asset.rs]
+updated: 2026-07-05
+synced_commit: e138861
+sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md]
 tags: [assets, abstraction, ven]
 ---
 
 # Asset Layer
 
-The uniform device abstraction between the HEMS controller and whatever produces the
-numbers — simulated physics today, real hardware later
-(docs/architecture/VEN_ARCHITECTURE.md §3.0; contract details in
-docs/architecture/ven_asset_interface_spec.md).
+The device abstraction between the HEMS controller and the physics that produces the
+numbers (`VEN/src/assets/`). Three cooperating pieces:
 
-```
-trait AssetInterface {
-    fn current(&self) -> f64;                                          // kW now
-    fn forecast(&self, horizon: Duration) -> Vec<(DateTime<Utc>, f64)>; // predicted kW
-    fn past(&self, window: Duration) -> Vec<(DateTime<Utc>, f64)>;      // recorded kW
-}
-```
+- **`Asset` trait** (`assets/mod.rs:545`) — the physics contract:
+  `step(state, setpoint_kw, dt) -> (new_state, actual_kw)`, `capability(state)`
+  (point-in-time feasible power range), plus default-implemented `simulate_forward`,
+  `simulate_free`, and `capability_trajectory`. Identity/history methods (`id`,
+  `current_state`, `history`) are provided by `AssetHandle`, which wraps a
+  config+entry pair.
+- **`AssetConfig` / `AssetState` enums** — config (physics parameters) and mutable
+  runtime state are separate enums with one variant per asset type (Battery, Ev,
+  Heater, Pv, BaseLoad); `AssetConfig` dispatch methods (`state_values`,
+  `control_schema`, `forecast`, `available_storage_kwh`, `build_milp_context`, …) are
+  the single switchboard. Adding an asset type = one new variant + one module.
+- **Per-asset history**: every `AssetEntry` in `SimState` carries a ring buffer of
+  3600 `HistoryPoint`s (≈ 1 h at 1 s tick) with LOCF lookups and time-weighted
+  averaging — this feeds `/timeline`, `/history/:id`, and obligation reports
+  ([[openadr-interface]]).
 
-Two implementations: `SimulatedAsset` (PV · Battery · EV · Heater · BaseLoad, backed by
-the [[simulator]]) and `MeasuredAsset` (future: real hardware / external APIs). The
-controller never calls physics functions or reads simulation parameters directly.
+A virtual **Grid asset** (`assets/grid.rs`, held as `SimState.grid_asset`) tracks net
+site power plus the VTN capacity limits each tick and keeps its own history; it is
+read-only — never dispatched.
+
+> **DRIFT** `docs/architecture/VEN_ARCHITECTURE.md` §3.0 specifies a
+> `trait AssetInterface { current(); forecast(horizon); past(window) }` with
+> `SimulatedAsset`/`MeasuredAsset` implementations. None of these identifiers exist in
+> the code — the shape above (`Asset` + `AssetConfig` + `AssetHandle`) is what was
+> actually built. The *intent* survives (controller code consumes `SimSnapshot`s and
+> forecasts, never physics internals), but the doc section reads as an API reference for
+> an API that isn't there. See [[ven-code-vs-docs-audit]].
 
 ## Planning-side counterpart
 
-For the [[milp-planner]], each asset additionally provides an `AssetMilpContext` —
-its constraints and variables in solver terms (`VEN/src/assets/`). The solver only sees
-the trait objects, keeping concrete asset types out of the optimisation core
-([[ven-hexagonal-architecture]], port obligations).
+For the [[milp-planner]], each controllable asset provides an `AssetMilpContext` —
+its constraints and variables in solver terms. The trait is declared at the planner
+boundary (`controller/milp_planner/asset_port.rs`) and implemented in `assets/battery.rs`,
+`assets/ev.rs`, `assets/heater.rs` (cross-file inherent impls), so the solver only ever
+sees trait objects ([[ven-hexagonal-architecture]]). PV and base load are not
+MILP-controllable; their forecasts enter as per-slot input arrays.
 
 Sign convention for all power values crossing this interface: positive = import,
 negative = export/generation — see [[sign-convention]].
