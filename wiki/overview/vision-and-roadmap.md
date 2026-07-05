@@ -3,7 +3,7 @@ title: Vision and Roadmap
 type: overview
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: eb8831a
+synced_commit: e138861
 sources: [docs/BACKLOG_OpenADR_Cert.md, docs/BACKLOG.md, docs/history/project_journal.md]
 tags: [vision, roadmap, certification]
 ---

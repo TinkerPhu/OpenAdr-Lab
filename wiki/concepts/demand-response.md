@@ -3,7 +3,7 @@ title: Demand Response — Domain Primer
 type: concept
 created: 2026-07-04
 updated: 2026-07-04
-synced_commit: 4695762
+synced_commit: e138861
 sources: [docs/REQUIREMENTS.md]
 tags: [domain, dr, energy]
 ---
