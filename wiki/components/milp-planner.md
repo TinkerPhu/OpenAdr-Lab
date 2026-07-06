@@ -2,9 +2,9 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-07-05
-synced_commit: e138861
-sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/tasks/planning.rs, VEN/src/services/planning.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md]
+updated: 2026-07-06
+synced_commit: ae4a1ed
+sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning.rs, VEN/src/services/planning.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md]
 tags: [planner, milp, highs, optimization]
 ---
 
@@ -41,14 +41,18 @@ see [[milp-over-greedy]].
 - **Stale-rate behaviour**: tariffs reach the solver as Step/LOCF `TariffTimeSeries`
   ([[tariffs-and-capacity]]) — the last known rate carries forward indefinitely, and
   hardcoded defaults (0.25 €/kWh import, 0.08 export, 300 g/kWh CO₂) fill slots with no
-  data at all (`inputs.rs:77-90`). The configurable `StaleRatePolicy` enum that the docs
-  describe is dead vocabulary; `rate_estimated` is hardcoded `false`
-  ([[ven-code-vs-docs-audit]]).
+  data at all (`inputs.rs:77-90`). The four-variant `StaleRatePolicy` enum sketched as
+  future roadmap is quarantined (unwired, not deleted) in `entities/design_vocabulary.rs`
+  — `docs/BACKLOG.md` BL-07 tracks wiring `StaleRatePolicy::LastKnown` and
+  `rate_estimated` (currently hardcoded `false`) as a real feature.
 - **Asset isolation**: asset physics enter as `Vec<Box<dyn AssetMilpContext>>` — the
-  planner never imports concrete asset types ([[ven-hexagonal-architecture]]). There is
-  no `SolverPort` trait: `tasks/planning.rs` calls `run_planner()` directly in
+  planner never imports concrete asset types ([[ven-hexagonal-architecture]]).
+  `tasks/planning.rs` reaches the solver through the `SolverPort` trait
+  (`controller/solver_port.rs`), not `run_planner()` directly — `MilpSolver`
+  (`milp_planner/mod.rs`) is the real implementation, and `services::PlanningService::solve_plan`
+  is the only caller of `SolverPort::solve`. The actual HiGHS call still runs inside
   `spawn_blocking` (MILP solving takes 18–60 s on Pi4; the sim mutex is cloned and
-  released first).
+  released first) — the port adds a swappable seam, not a different execution model.
 - **Cross-asset interactions** (`controller/milp_interactions.rs`): pluggable
   `AssetInteraction` objects add coupled terms — `BatEvCoexist` (McCormick-linearised
   penalty on battery discharge during PV-covered EV charging) and `CtrlImportMalus`
@@ -85,7 +89,8 @@ see [[milp-over-greedy]].
 
 | Concern | File |
 |---|---|
-| Entry point (`run_planner`) | `VEN/src/controller/milp_planner/mod.rs` |
+| Entry point (`run_planner`) + `SolverPort` impl (`MilpSolver`) | `VEN/src/controller/milp_planner/mod.rs` |
+| `SolverPort` trait + `SolveRequest` | `VEN/src/controller/solver_port.rs` |
 | Input tensors | `inputs.rs` |
 | Weights, `MilpInputs`, `SolveOutput` | `types.rs` |
 | Asset port (trait + var/context structs) | `asset_port.rs` |

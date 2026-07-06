@@ -2,9 +2,9 @@
 title: OpenADR Interface (VEN)
 type: component
 created: 2026-07-04
-updated: 2026-07-05
-synced_commit: e138861
-sources: [docs/architecture/VEN_ARCHITECTURE.md, VEN/src/vtn.rs, VEN/src/controller/openadr_interface.rs, VEN/src/controller/reporter.rs, VEN/src/tasks/poll_events.rs, VEN/src/entities/capacity.rs]
+updated: 2026-07-06
+synced_commit: ae4a1ed
+sources: [docs/architecture/VEN_ARCHITECTURE.md, VEN/src/vtn.rs, VEN/src/controller/openadr_interface.rs, VEN/src/controller/reporter.rs, VEN/src/tasks/poll_events.rs, VEN/src/entities/capacity.rs, VEN/src/state.rs, VEN/src/services/obligation.rs]
 tags: [openadr, ven, translation, polling]
 ---
 
@@ -57,11 +57,18 @@ trigger variants are never sent. Event *removal* on a poll means cancellation
   time-weighted-mean net site power, `STORAGE_CHARGE_LEVEL` as point-in-time SoC at
   interval ends, `IMPORT_/EXPORT_CAPACITY_RESERVATION` from the live
   `SiteFlexibilityEnvelope` (up/down kW).
-- Obligations are **one-shot**: fulfilled once and never re-armed, so
-  `frequency: 900` produces one report, not one per 15 min — a certification-relevant
-  gap ([[openadr-spec-use-cases]]).
-- The plan-cycle TELEMETRY_STATUS report is dead code: `tasks/planning.rs:338` passes
-  `program_id = None` and `build_status_report` returns `None` without it.
+- Obligations **recur**: each due obligation is re-armed to its next `due_at`
+  (`interval_duration_s` later) after reporting instead of being permanently fulfilled,
+  so `frequency: 900` produces one report per 15 min for the event's lifetime
+  (`state.rs::rearm_obligation`, called from `services/obligation.rs`). An obligation is
+  retired once its source event drops out of the active poll set
+  (`state.rs::retire_obligations_not_in`, called from `tasks/poll_events.rs`). The stable
+  per-`(ven, event, payload_type)` report name means each cycle upserts the same VTN
+  report resource with the latest trailing window, rather than creating a new report.
+- There is no plan-cycle status report — `PlanCycle` events are visible via
+  `/trace/events` and `/plan/events` (SSE) only; no VTN report is built from them (the
+  dead `TELEMETRY_STATUS`-on-`PlanCycle` code path was removed, not fixed, since it never
+  had a real program ID to report against).
 
 > **DRIFT** `docs/architecture/VEN_ARCHITECTURE.md` §2.1 additionally lists
 > `USAGE_FORECAST` (FIRM slots as point forecasts, FLEXIBLE slots as `[0, MaxPower]`

@@ -48,4 +48,4 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[ven-code-vs-docs-audit]] — full VEN/src read vs docs: what matches, 10 confirmed drifts, ranked refactoring candidates
 
 ---
-Pages: 28 · Last sync: 2026-07-05 (VEN code deep-ingest at e138861: audit page + 8 pages corrected against source)
+Pages: 28 · Last sync: 2026-07-06 (R1/R2/R3/R5/R6 code-and-docs resolution + timeline-forecast fix: 12 pages updated, uncommitted WIP at ae4a1ed)

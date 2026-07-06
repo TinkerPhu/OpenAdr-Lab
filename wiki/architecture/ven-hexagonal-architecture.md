@@ -2,8 +2,8 @@
 title: VEN Hexagonal Architecture
 type: architecture
 created: 2026-07-04
-updated: 2026-07-05
-synced_commit: e138861
+updated: 2026-07-06
+synced_commit: ae4a1ed
 sources: [.claude/CLAUDE.md, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/module_dependency_graph_post_refactoring.md, VEN/src/]
 tags: [architecture, hexagonal, ports, ven]
 ---
@@ -33,31 +33,28 @@ inputs arrive only through the `AssetMilpContext` port. See [[milp-planner]] and
 | `SimulatorPort` | domain/services → simulator | `snapshot()` (`controller/simulator_port.rs`) |
 | `VtnPort` | tasks/services → `vtn.rs` | fetch programs/events/reports, upsert reports (`controller/vtn_port.rs`) |
 | `AssetMilpContext` | planner input | solver receives `Vec<Box<dyn AssetMilpContext>>`; concrete asset types implement it in `assets/*.rs` (`controller/milp_planner/asset_port.rs`) |
+| `SolverPort` | services → `controller/milp_planner` | `solve(SolveRequest) -> Plan` (`controller/solver_port.rs`); `MilpSolver` (in `milp_planner/mod.rs`) is the real implementation, wrapping `run_planner()`; `services::PlanningService::solve_plan` is the only caller |
 
-> **DRIFT** `.claude/CLAUDE.md` §ven-architecture and `docs/architecture/VEN_ARCHITECTURE.md`
-> list a fourth port, `SolverPort: services → controller/milp_planner`. No such trait
-> exists — `tasks/planning.rs:266` calls `milp_planner::run_planner()` (a free function)
-> directly inside `spawn_blocking`. The solver *is* isolated from concrete assets (via
-> `AssetMilpContext`), but there is no trait seam between the planning loop and HiGHS;
-> `services/test_support/milp_mocks.rs` mocks inputs, not a solver port. Either introduce
-> the port or drop it from the rule. Full audit: [[ven-code-vs-docs-audit]].
+All four ports are now real traits with a concrete implementation and a mock
+(`services/test_support/mock_solver_port.rs` alongside the pre-existing simulator/VTN
+mocks) — `tasks/planning.rs`'s planning loop calls `SolverPort::solve` through the trait
+object, not `milp_planner::run_planner()` directly.
 
 ## Enforced invariants (grep checks, run before any VEN PR)
 
 From `.claude/CLAUDE.md`: no `use crate::profile` in `entities/`, `controller/`, `routes/`
 (profile values arrive as typed parameter structs); no `use crate::assets::` inside
 `milp_planner/` or `entities/`; no `serde_json::Value` leaking out of `vtn.rs`.
-All four greps pass at e138861 (the raw-report pass-through `VtnPort::fetch_reports_raw`
+All four greps still pass (the raw-report pass-through `VtnPort::fetch_reports_raw`
 → `PollingState.reports` is a deliberate, commented exception for `GET /reports`).
 
 File-size caps: 500 lines in `VEN/src/`, 200 in `tasks/`. **These are currently
-violated** — nine files exceed 500 production lines (worst: `assets/heater.rs` 799,
-`profile.rs` 777) and `tasks/planning.rs` is 363; split-or-amend options in
-[[ven-code-vs-docs-audit]].
-
-One more `.claude/CLAUDE.md` mismatch: the shared mock adapters in
-`services/test_support/` are `#[cfg(test)]`-gated (`services/mod.rs:2`), while the
-testing rule says they are not.
+violated** and the violation count is growing, not shrinking, as normal feature work
+lands (e.g. `routes/timeline.rs` and `controller/timeline.rs` both grew further past the
+cap during the 2026-07 timeline-forecast fix) — current register with per-file
+complexity/risk: `docs/reference/TECHNICAL_DEBTS.md`. `tasks/planning.rs` is 398 lines
+against the 200 cap for `tasks/`. Split-or-amend options in [[ven-code-vs-docs-audit]];
+R4 in `docs/plans/review_items_resolution_strategy.md` is the open decision item.
 
 The rationale for this ring shape is in [[hexagonal-refactoring]]; the two-speed runtime
 behaviour of the rings is described in [[hems-planning]]. `.claude/CLAUDE.md`

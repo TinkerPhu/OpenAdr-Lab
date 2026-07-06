@@ -2,9 +2,9 @@
 title: VEN Reliability & Config Hygiene
 type: component
 created: 2026-07-04
-updated: 2026-07-05
-synced_commit: e138861
-sources: [VEN/src/tasks/mod.rs, VEN/src/entities/error.rs, VEN/src/profile.rs, VEN/src/tasks/obligation.rs, VEN/src/vtn.rs, openspec/specs/task-supervisor/spec.md, openspec/specs/domain-errors/spec.md, openspec/specs/profile-validation/spec.md, openspec/specs/planner-config/spec.md]
+updated: 2026-07-06
+synced_commit: ae4a1ed
+sources: [VEN/src/tasks/mod.rs, VEN/src/entities/error.rs, VEN/src/profile/, VEN/src/tasks/obligation.rs, VEN/src/vtn.rs, VEN/src/services/hems.rs, openspec/specs/task-supervisor/spec.md, openspec/specs/domain-errors/spec.md, openspec/specs/profile-validation/spec.md, openspec/specs/planner-config/spec.md]
 tags: [reliability, config, error-handling, ven]
 ---
 
@@ -37,7 +37,15 @@ live: route/service code maps `SessionConflict` → 409 and `NotFound` → 404
 > fallback plan carrying a Critical `PlanWarning` (`milp_planner/results.rs`), VTN errors
 > stay `anyhow`, and profile validation returns a plain `Vec<String>`. The retain-last-
 > plan behaviour exists (the acceptance gate simply isn't offered a broken plan), but not
-> via these variants. Wire them or trim the enum. See [[ven-code-vs-docs-audit]].
+> via these variants. All three variants are kept intentionally (not trimmed) — reserved
+> for future real boundaries, tracked as `docs/BACKLOG.md` BL-25 (`PlanInfeasible` at the
+> planner's solve-failure path, `VtnUnreachable` for repeated-timeout classification,
+> `ProfileInvalid` only if profile hot-reload is ever built). See [[ven-code-vs-docs-audit]].
+
+A sibling case: `HvacService` (`services/hems.rs`) sketches the same session-lifecycle
+shape as `EvSessionService`, but `post_heater_target` sets the heater target directly
+instead of going through it — the type is never called. Also kept, not deleted;
+`docs/BACKLOG.md` BL-23 tracks the route-wiring-or-removal decision.
 
 ## Profile startup validation
 

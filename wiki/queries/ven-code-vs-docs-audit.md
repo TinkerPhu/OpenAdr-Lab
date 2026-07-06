@@ -2,8 +2,8 @@
 title: VEN Code vs Documentation Audit
 type: query
 created: 2026-07-05
-updated: 2026-07-05
-synced_commit: e138861
+updated: 2026-07-06
+synced_commit: ae4a1ed
 sources: [VEN/src/, docs/architecture/VEN_ARCHITECTURE.md, .claude/CLAUDE.md]
 tags: [audit, drift, refactoring, ven]
 ---
@@ -36,17 +36,17 @@ should refactoring effort go?
 
 ## Confirmed drift (docs say X, code does Y)
 
-1. **`SolverPort` does not exist.** `.claude/CLAUDE.md` §ven-architecture and
-   `docs/architecture/VEN_ARCHITECTURE.md` list it as a port obligation; there is no such
-   trait anywhere. `tasks/planning.rs:266` calls `milp_planner::run_planner()` (a free
-   function) directly inside `spawn_blocking`. Solver isolation is real but comes from
-   `AssetMilpContext` trait objects, not a solver port. See [[ven-hexagonal-architecture]].
-2. **`StaleRatePolicy` is dead vocabulary.** The enum (`entities/asset.rs:109`) is never
-   referenced; `PlanTimeSlot.rate_estimated` is hardcoded `false` in `results.rs`. Actual
-   stale-rate behaviour: Step/LOCF carries the last known tariff forward indefinitely,
-   and hardcoded defaults (0.25 €/kWh import, 0.08 export, 300 g/kWh) fill slots before
-   the first sample or when no data exists (`milp_planner/inputs.rs:77-90`). See
-   [[tariffs-and-capacity]].
+1. ~~**`SolverPort` does not exist.**~~ **RESOLVED** — `controller/solver_port.rs` now
+   defines the trait; `MilpSolver` (`milp_planner/mod.rs`) implements it, and
+   `services::PlanningService::solve_plan` is the only caller. See
+   [[ven-hexagonal-architecture]], [[milp-planner]].
+2. **`StaleRatePolicy` is dead vocabulary.** Quarantined (not deleted) into
+   `entities/design_vocabulary.rs`; `PlanTimeSlot.rate_estimated` is still hardcoded
+   `false` in `results.rs`. Actual stale-rate behaviour: Step/LOCF carries the last known
+   tariff forward indefinitely, and hardcoded defaults (0.25 €/kWh import, 0.08 export,
+   300 g/kWh) fill slots before the first sample or when no data exists
+   (`milp_planner/inputs.rs:77-90`). `docs/BACKLOG.md` BL-07 tracks wiring it as a real
+   feature. See [[tariffs-and-capacity]].
 3. **The event-translation table is one-third aspirational.** Parsed inbound:
    `PRICE`, `EXPORT_PRICE`, `GHG` (with looping-event support for `P9999Y` daily prices),
    `IMPORT_/EXPORT_CAPACITY_LIMIT`, `IMPORT_CAPACITY_SUBSCRIPTION`,
@@ -66,19 +66,21 @@ should refactoring effort go?
    module (`build_setpoints` + `apply_surplus_ev_overlay`) driven by the 1 s
    `tasks/sim_tick` loop. There is no "auto-follow NetDeviation distribution"; the
    battery deviation correction `apply_battery_correction_overlay` exists but is
-   `#[allow(dead_code)]` — deliberately not wired into `build_setpoints`. Ledger
-   accounting is `monitor::record_tick`, called from `sim_tick/publish.rs`, not the
-   dispatcher. See [[dispatcher]].
-6. **Plan-cycle status reports are dead on arrival.** `tasks/planning.rs:338` calls
-   `build_status_report(..., program_id: None, ...)`, and the function returns `None`
-   unless a program id is supplied (`reporter.rs:512`) — so the TELEMETRY_STATUS report
-   the planning loop appears to submit is never built. Either wire a real programID or
-   delete the call path.
+   `#[allow(dead_code)]` — kept intentionally, not wired into `build_setpoints`
+   (`docs/BACKLOG.md` BL-22 tracks the wiring decision). Ledger accounting is
+   `monitor::record_tick`, called from `sim_tick/publish.rs`, not the dispatcher. See
+   [[dispatcher]].
+6. ~~**Plan-cycle status reports are dead on arrival.**~~ **RESOLVED** — the dead
+   `build_status_report`/`TELEMETRY_STATUS`-on-`PlanCycle` call path was deleted rather
+   than given a real program ID (it never had one to report against). `/trace/events`
+   and `/plan/events` (SSE) remain the observability paths for plan cycles. See
+   [[openadr-interface]].
 7. **`DomainError` is three-fifths unused.** `PlanInfeasible`, `VtnUnreachable`,
    `ProfileInvalid` are never constructed in production code; solver failure produces a
    fallback plan with a Critical `PlanWarning` (`results.rs::fallback_plan`), and profile
    validation returns `Vec<String>`. Only `SessionConflict` and `NotFound` are live
-   (`services/hems.rs`). See [[reliability-and-config]].
+   (`services/hems.rs`). Kept intentionally (not trimmed) — `docs/BACKLOG.md` BL-25
+   tracks wiring each at a real boundary. See [[reliability-and-config]].
 8. **`VEN_ARCHITECTURE.md` §4 (API) and §5.2 (alignment audit) are stale.** Routes live
    in `routes/mod.rs`, not `main.rs`. `/sim/override` (decision D-06) no longer exists —
    replaced by `POST /sim/inject` with four behaviour classes (one-shot, frozen+EMA,
@@ -93,28 +95,37 @@ should refactoring effort go?
 9. **Two-speed loop numbers.** Docs and [[hems-planning]] said "20 s periodic" replan;
    `PlannerParams::default().replan_interval_s` is 300 s and profile-configurable. Poll
    intervals are env-configurable (`POLL_EVENTS_SECS`, default 30 s), not fixed (D-07).
-10. **`services/test_support` is `#[cfg(test)]`-gated** (`services/mod.rs:2`), while
-    `.claude/CLAUDE.md` §testing says the shared mocks are "not cfg(test)".
+10. ~~**`services/test_support` is `#[cfg(test)]`-gated** (`services/mod.rs:2`), while
+    `.claude/CLAUDE.md` §testing says the shared mocks are "not cfg(test)".~~
+    **RESOLVED** — `.claude/CLAUDE.md` corrected to state they are `#[cfg(test)]`-gated.
+11. ~~**Report obligations are one-shot.**~~ **RESOLVED** — `extract_report_obligations`'s
+    dedup was correct all along; the actual fix was replacing permanent
+    `mark_obligation_fulfilled` with `state.rs::rearm_obligation` (advances `due_at` by
+    `interval_duration_s` instead of disabling the obligation forever) plus
+    `retire_obligations_not_in` for when the source event expires. See
+    [[openadr-interface]].
 
 ## Refactoring candidates (ranked)
 
-1. **File-size rule vs reality.** `.claude/CLAUDE.md` demands ≤ 500 lines per
-   `VEN/src/` file and < 200 for `tasks/`. Even counting only production lines (before
-   `#[cfg(test)]`): `assets/heater.rs` 799, `profile.rs` 777, `assets/mod.rs` 687,
-   `routes/hems.rs` 678, `assets/ev.rs` 634, `controller/reporter.rs` 559,
-   `assets/battery.rs` 523, `state.rs` 519, `simulator/mod.rs` 503, and
-   `tasks/planning.rs` 363 (vs 200). Either split (heater/ev: physics vs MILP-context
-   impls are separable; hems.rs: one route module per resource; tasks/planning.rs: hoist
-   the context-building block into `services/planning.rs`) or amend the rule.
-2. **Dead-code inventory** — delete or wire: `StaleRatePolicy`,
+1. **File-size rule vs reality — open, and growing.** `.claude/CLAUDE.md` demands
+   ≤ 500 lines per `VEN/src/` file and < 200 for `tasks/`. The violation count keeps
+   growing as normal feature work lands — `routes/timeline.rs` (now ~772 lines) and
+   `controller/timeline.rs` (~1179) both grew further past the cap during the 2026-07
+   timeline-forecast fix, and `tasks/planning.rs` is now 398 (vs 200), up from 363.
+   Current per-file register: `docs/reference/TECHNICAL_DEBTS.md`. Still open — R4 in
+   `docs/plans/review_items_resolution_strategy.md` is the tracked decision item.
+2. ~~**Dead-code inventory** — delete or wire: `StaleRatePolicy`,
    `apply_battery_correction_overlay`, the plan-cycle status-report call,
    `HvacService`, three `DomainError` variants, and the large unused §-numbered
-   vocabulary block in `entities/asset.rs` (`AssetProfile`, `AssetHeuristics`,
-   `AssetForecast`, `AssetLedger` (the §3.7 one — the live ledger is
-   `state::AssetLedgerEntry`), `PenaltyRule`, `ComfortRate` machinery, `OadrEventCache`,
-   `OadrProgramConfig`, `OadrCapacityRequest` in `entities/capacity.rs`). These are
-   spec-transcription types under `#![allow(dead_code)]` that mislead readers (and this
-   audit's doc-drift items 2 and 3 are their direct consequence).
+   vocabulary block in `entities/asset.rs`~~ **RESOLVED** — quarantined, not deleted.
+   The vocabulary block (`AssetProfile`, `AssetHeuristics`, `AssetForecast`,
+   `AssetLedger` — the live ledger is `state::AssetLedgerEntry` — `PenaltyRule`,
+   and more) moved verbatim into `entities/design_vocabulary.rs` with a
+   not-current-behaviour banner; `ComfortRate` stayed in `entities/asset.rs` (it's
+   actually live, not dead — a correction found during this resolution).
+   `apply_battery_correction_overlay`/`HvacService`/`OadrEventCache` family/
+   `DomainError` variants stayed in place with corrected comments. Every item now has a
+   `docs/BACKLOG.md` entry (BL-14 through BL-29).
 3. **Slot-start tariff sampling.** `build_milp_inputs` evaluates tariffs at each slot's
    start (`interpolate_at(slot_t)`); `TimeSeries::time_weighted_mean` already exists and
    would price boundary-straddling slots correctly — the exact fix
@@ -124,10 +135,7 @@ should refactoring effort go?
 5. **Envelope magic numbers.** `milp_planner/envelopes.rs` hardcodes
    `max_acceptable_rate: 0.35`, `min_acceptable_rate: 0.05`,
    `budget_remaining_eur: 1.0e9` in every `FlexibilityEnvelope`.
-6. **One-shot obligations.** `extract_report_obligations` creates a single obligation
-   per (event, payloadType); once fulfilled it never re-arms, so a descriptor with
-   `frequency: 900` yields one report, not a report every 15 min
-   (`controller/openadr_interface.rs:242`, `services/obligation.rs`). Relevant for
+6. ~~**One-shot obligations.**~~ **RESOLVED** — see doc-drift item 11 above. Relevant for
    certification readiness ([[openadr-spec-use-cases]]).
 7. **Event `priority` parsed but unused** in the rate merge (last-write-wins,
    acknowledged in a long comment at `openadr_interface.rs:102`) — sort by ascending
