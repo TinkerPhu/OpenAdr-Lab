@@ -184,7 +184,9 @@ pub fn apply_surplus_ev_overlay(
 ///
 /// Sign: positive setpoint = charging (import), negative = discharging (export).
 /// Returns the delta applied (0.0 if below threshold, SoC-limited, or < min_correction_kw).
-// Not yet wired into build_setpoints(); see openspec/changes/warnings-cleanup/design.md §Decision 4
+// Not yet wired into build_setpoints() — kept intentionally (not deleted); see
+// docs/BACKLOG.md BL-22 for the wiring decision and docs/architecture/VEN_ARCHITECTURE.md
+// §2.1 for the current GAP description.
 #[allow(dead_code)]
 pub fn apply_battery_correction_overlay(
     setpoints: &mut HashMap<String, f64>,

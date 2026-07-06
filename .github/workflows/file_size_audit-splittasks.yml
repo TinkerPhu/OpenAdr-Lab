@@ -1,4 +1,4 @@
-name: File size audit - tasks
+name: File size audit
 on:
   push:
     branches: [ "main", "master" ]
@@ -14,4 +14,4 @@ jobs:
         with:
           python-version: '3.x'
       - name: Run file size audit
-        run: python3 scripts/check_task_file_sizes.py
+        run: python3 scripts/audit_file_sizes.py

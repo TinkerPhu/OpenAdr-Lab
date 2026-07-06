@@ -30,6 +30,7 @@ impl ObligationService {
                 ven_name,
                 env.as_ref(),
             );
+            let next_due = now + chrono::Duration::seconds(ob.interval_duration_s as i64);
             if let Some(report) = report_opt {
                 vtn.upsert_report(report).await.map_err(|e| {
                     error!(
@@ -38,15 +39,16 @@ impl ObligationService {
                     );
                     e
                 })?;
-                state.mark_obligation_fulfilled(ob.id).await;
+                state.rearm_obligation(ob.id, next_due).await;
                 info!(
                     obligation_id = %ob.id,
                     payload_type = %ob.payload_type,
                     "obligation report submitted"
                 );
             } else {
-                // No history data — mark fulfilled to avoid looping forever.
-                state.mark_obligation_fulfilled(ob.id).await;
+                // No history data yet — re-arm for the next cycle rather than
+                // hot-looping every 5s tick hoping data appears.
+                state.rearm_obligation(ob.id, next_due).await;
                 debug!(
                     obligation_id = %ob.id,
                     "obligation skipped (no history data)"
@@ -100,6 +102,111 @@ mod tests {
         )
         .await;
         assert!(result.is_ok());
+    }
+
+    /// Fixed epoch base so sample timestamps land on 900s grid boundaries — matches
+    /// the pattern in `controller/reporter.rs`'s own obligation-report tests.
+    fn ts(offset_s: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp(1_700_000_000 + offset_s, 0).unwrap()
+    }
+
+    fn make_due_obligation(
+        due_at: DateTime<Utc>,
+    ) -> crate::entities::capacity::OadrReportObligation {
+        crate::entities::capacity::OadrReportObligation {
+            id: uuid::Uuid::new_v4(),
+            event_id: "evt-1".to_string(),
+            program_id: Some("prog-1".to_string()),
+            payload_type: "USAGE".to_string(),
+            reading_type: "DIRECT_READ".to_string(),
+            resource_name: None,
+            due_at,
+            interval_duration_s: 900,
+            fulfilled: false,
+            created_at: due_at,
+        }
+    }
+
+    /// Two full 900s intervals of history (0, 900, 1800) — enough for
+    /// `build_measurement_report_for_obligation` to produce a non-empty report.
+    fn make_samples() -> HashMap<String, Vec<AssetReportSample>> {
+        let mut samples = HashMap::new();
+        samples.insert(
+            "asset-1".to_string(),
+            vec![
+                AssetReportSample {
+                    ts: ts(0),
+                    power_kw: 1.0,
+                    soc: None,
+                },
+                AssetReportSample {
+                    ts: ts(900),
+                    power_kw: 1.5,
+                    soc: None,
+                },
+                AssetReportSample {
+                    ts: ts(1800),
+                    power_kw: 2.0,
+                    soc: None,
+                },
+            ],
+        );
+        samples
+    }
+
+    #[tokio::test]
+    async fn test_due_obligation_rearmed_not_removed_after_report() {
+        let state = AppState::new();
+        let vtn = MockVtn::new();
+        let now = ts(1800);
+        let ob = make_due_obligation(now);
+        let id = ob.id;
+        state.add_obligations(vec![ob]).await;
+
+        ObligationService::check_and_report(&state, make_samples(), &vtn, "test-ven", now)
+            .await
+            .unwrap();
+
+        assert_eq!(vtn.submitted().len(), 1, "one report submitted");
+        let obs = state.report_obligations().await;
+        assert_eq!(obs.len(), 1, "obligation stays in state, not removed");
+        assert_eq!(obs[0].id, id);
+        assert!(
+            obs[0].due_at > now,
+            "due_at advanced into the future, re-armed for the next cycle"
+        );
+        assert!(!obs[0].fulfilled);
+
+        // A second check before the new due_at does nothing — not due yet.
+        ObligationService::check_and_report(&state, make_samples(), &vtn, "test-ven", now)
+            .await
+            .unwrap();
+        assert_eq!(
+            vtn.submitted().len(),
+            1,
+            "not due yet — no second report submitted"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_due_obligation_vtn_error_leaves_due_at_unchanged() {
+        let state = AppState::new();
+        let vtn = MockVtn::new().with_upsert_error("VTN unavailable");
+        let now = ts(1800);
+        let ob = make_due_obligation(now);
+        state.add_obligations(vec![ob]).await;
+
+        let result =
+            ObligationService::check_and_report(&state, make_samples(), &vtn, "test-ven", now)
+                .await;
+        assert!(result.is_err(), "VTN error propagates");
+
+        let obs = state.report_obligations().await;
+        assert_eq!(obs.len(), 1);
+        assert_eq!(
+            obs[0].due_at, now,
+            "due_at unchanged on error — retried on the next tick"
+        );
     }
 
     #[tokio::test]

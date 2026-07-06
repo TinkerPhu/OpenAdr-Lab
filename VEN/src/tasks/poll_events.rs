@@ -162,6 +162,7 @@ pub(crate) fn spawn_event_poll(
                         &existing_obs,
                     );
                     state.add_obligations(new_obs).await;
+                    state.retire_obligations_not_in(&prev_event_ids).await;
 
                     state.set_events(events, 500).await;
 
@@ -336,5 +337,51 @@ mod event_poll_tests {
         assert!(no_arrived, "expected no OpenAdrArrived");
         assert!(no_expired, "expected no OpenAdrExpired");
         assert!(no_capacity, "expected no CapacityChange");
+    }
+
+    // (f) obligation retirement — event drops out of the active poll set
+    #[tokio::test]
+    async fn obligation_retired_when_event_expires() {
+        use crate::entities::capacity::OadrReportObligation;
+        use crate::state::AppState;
+
+        let state = AppState::new();
+        let now = ts();
+        let ob = OadrReportObligation {
+            id: uuid::Uuid::new_v4(),
+            event_id: "ev1".to_string(),
+            program_id: Some("test-program".to_string()),
+            payload_type: "USAGE".to_string(),
+            reading_type: "DIRECT_READ".to_string(),
+            resource_name: None,
+            due_at: now,
+            interval_duration_s: 900,
+            fulfilled: false,
+            created_at: now,
+        };
+        state.add_obligations(vec![ob]).await;
+
+        // First poll still has ev1 — obligation survives.
+        let first = detect_event_changes(
+            &[make_event("ev1", "Peak DR", "PRICE", 0.30)],
+            &empty_ids(),
+            0,
+            None,
+            now,
+        );
+        state.retire_obligations_not_in(&first.current_ids).await;
+        assert_eq!(
+            state.report_obligations().await.len(),
+            1,
+            "event still active"
+        );
+
+        // Second poll: ev1 no longer present — obligation is retired.
+        let second = detect_event_changes(&[], &first.current_ids, 0, None, now);
+        state.retire_obligations_not_in(&second.current_ids).await;
+        assert!(
+            state.report_obligations().await.is_empty(),
+            "obligation retired once its event expired"
+        );
     }
 }

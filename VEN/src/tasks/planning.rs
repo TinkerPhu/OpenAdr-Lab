@@ -1,29 +1,18 @@
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
-use crate::controller;
-use crate::controller::VtnPort;
+use crate::controller::{self, SolverPort};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
+use crate::services::planning::PlanCycleInputs;
 use crate::simulator::SimState;
 use crate::state::AppState;
 
-/// Align a UTC timestamp down to the nearest `step_s`-second boundary.
-///
-/// All plan replans that fire within the same `step_s` window produce an identical
-/// `now_aligned`, giving the acceptance gate slot-comparable plans and making successive
-/// plans differ by exactly an integer multiple of `step_s` — never an arbitrary offset.
-/// Uses `rem_euclid` so pre-epoch timestamps (negative unix) are handled correctly.
-fn align_to_step(raw: DateTime<Utc>, step_s: u64) -> DateTime<Utc> {
-    let ts = raw.timestamp();
-    let step = step_s as i64;
-    DateTime::<Utc>::from_timestamp(ts - ts.rem_euclid(step), 0)
-        .expect("step-aligned timestamp is always valid")
-}
+use super::progress_ticker::spawn_progress_ticker;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_planning(
@@ -32,8 +21,7 @@ pub(crate) fn spawn_planning(
     grid_max_import_kw: f64,
     grid_max_export_kw: f64,
     asset_params: Vec<AssetParams>,
-    vtn: Arc<dyn VtnPort>,
-    ven_name: String,
+    solver: Arc<dyn SolverPort>,
     mut trigger_rx: tokio::sync::watch::Receiver<PlanTrigger>,
     sim: Arc<Mutex<SimState>>,
     active_objective: Arc<RwLock<PlannerObjective>>,
@@ -55,7 +43,7 @@ pub(crate) fn spawn_planning(
             // Align to the nearest step boundary so all replans within the same window
             // share identical slot grids (gate stability, warm-start prerequisite).
             // wall_now is kept separately for Plan.created_at (gate decay uses real age).
-            let now = align_to_step(wall_now, planner.plan_step_s);
+            let now = crate::services::planning::align_to_step(wall_now, planner.plan_step_s);
             let rates = state.planned_tariffs().await;
             let capacity = state.capacity_state().await;
             let trigger = wake_trigger.clone();
@@ -69,8 +57,6 @@ pub(crate) fn spawn_planning(
 
             info!(trigger = %trigger_reason, "planner loop: starting plan cycle");
 
-            let tariff_ts =
-                crate::entities::tariff_snapshot::TariffTimeSeries::from_snapshots(&rates);
             let ev_sess = state.ev_session().await;
             let heat_tgt = state.heater_target().await;
             let shift_loads = state.shiftable_loads().await;
@@ -98,17 +84,8 @@ pub(crate) fn spawn_planning(
 
             // Patch the clone when pv_irradiance inject is pending and the tick hasn't
             // applied it yet. When the tick runs first, the clone already has the correct
-            // offset and this block is a no-op (inject_snap.pv_irradiance is None).
-            if let Some(forced) = inject_snap.pv_irradiance {
-                use crate::assets::{AssetConfig, PvInverter};
-                let natural = PvInverter::natural_irradiance_at(now);
-                if let Some((_, AssetConfig::Pv(pv))) =
-                    sim_snap.find_asset_mut(crate::ids::ASSET_PV)
-                {
-                    pv.irradiance_offset = forced - natural;
-                    pv.pv_alpha = inject_snap.pv_irradiance_alpha;
-                }
-            }
+            // offset and this is a no-op (inject_snap.pv_irradiance is None).
+            crate::services::planning::apply_pending_pv_inject(&mut sim_snap, &inject_snap, now);
 
             // ── Emit solving_started ──────────────────────────────────────
             let num_slots = planner.plan_horizon_h as usize * 3600 / planner.plan_step_s as usize;
@@ -119,171 +96,68 @@ pub(crate) fn spawn_planning(
             });
 
             // ── Spawn 1 s progress ticker ─────────────────────────────────
-            let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
-            let progress_tx = event_tx.clone();
-            let ticker_task = tokio::spawn(async move {
-                let start = std::time::Instant::now();
-                let mut ticker = tokio::time::interval(std::time::Duration::from_secs(1));
-                ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                let mut iteration: u32 = 0;
-                let mut cancel_rx = cancel_rx;
-                loop {
-                    tokio::select! {
-                        _ = ticker.tick() => {
-                            iteration += 1;
-                            let _ = progress_tx.send(PlannerEvent::SolvingProgress {
-                                elapsed_ms: start.elapsed().as_millis() as u64,
-                                iteration,
-                            });
-                        }
-                        _ = &mut cancel_rx => break,
-                    }
-                }
-            });
+            let (ticker_task, cancel_tx) = spawn_progress_ticker(event_tx.clone());
 
             // ── Run blocking HiGHS solve off the async runtime ────────────
             let solve_start = std::time::Instant::now();
-            let planner_clone = planner.clone();
-            let asset_params_clone = asset_params.clone();
-            let trigger_for_planner = trigger.clone();
             let snap = sim_snap.to_sim_snapshot();
 
-            // Build per-asset MILP contexts from live simulator state.
-            // This happens before spawn_blocking so asset states are captured at this instant.
-            let n_slots: usize = planner.plan_zones.iter().map(|z| z.slots).sum();
-            let cum_s: Vec<i64> = {
-                let mut v = Vec::with_capacity(n_slots + 1);
-                v.push(0i64);
-                for zone in &planner.plan_zones {
-                    for _ in 0..zone.slots {
-                        v.push(v.last().unwrap() + zone.step_s as i64);
-                    }
-                }
-                v
-            };
-            let lambda_sw = asset_params
-                .iter()
-                .find_map(|p| match p {
-                    AssetParams::Heater(h) => Some(h.switching_penalty_eur),
-                    _ => None,
-                })
-                .unwrap_or(0.0);
-
-            // Read current plan and anchor_until before the blocking solve so the heater
-            // tier binaries are pinned to the last adopted plan within the anchor window.
+            // Read before the blocking solve so heater tiers pin to the last adopted plan.
             let anchor_until = state.anchor_until().await;
             let current_plan = state.active_plan().await;
-            let heater_anchor = crate::services::planning::build_heater_anchor(
+            let PlanCycleInputs {
+                tariff_ts,
+                n_slots,
+                cum_s,
+                lambda_sw,
+                heater_c_terminal_eur_kwh,
+                battery_c_terminal_eur_kwh,
+                heater_anchor,
+            } = crate::services::planning::build_plan_cycle_inputs(
+                &rates,
+                &planner,
+                &asset_params,
                 current_plan.as_ref(),
                 anchor_until,
                 now,
-                n_slots,
             );
 
-            // Average import tariff over the planning horizon — used to auto-compute
-            // terminal energy reward coefficients for storage assets.
-            let avg_imp_eur_kwh = {
-                let total: f64 = (0..n_slots)
-                    .map(|t| {
-                        let slot_t = now + chrono::Duration::seconds(cum_s[t]);
-                        tariff_ts
-                            .import_eur_kwh
-                            .interpolate_at(slot_t)
-                            .unwrap_or(0.25)
-                    })
-                    .sum();
-                if n_slots > 0 {
-                    total / n_slots as f64
-                } else {
-                    0.25
-                }
-            };
+            // Build per-asset MILP contexts from live simulator state.
+            // This happens before spawn_blocking so asset states are captured at this instant.
+            let asset_contexts = crate::services::planning::build_asset_contexts(
+                &sim_snap,
+                n_slots,
+                &cum_s,
+                now,
+                ev_sess.as_ref(),
+                heat_tgt.as_ref(),
+                &asset_params,
+                &planner,
+                lambda_sw,
+                heater_c_terminal_eur_kwh,
+                battery_c_terminal_eur_kwh,
+                &heater_anchor,
+            );
 
-            // Resolve c_terminal_eur_kwh per asset type. Battery and heater get
-            // different formulas; EV gets 0.0 (deadline constraint handles incentive).
-            // Profile override (Some(x)) takes precedence over auto-computed value.
-            let heater_c_terminal_eur_kwh = asset_params
-                .iter()
-                .find_map(|p| match p {
-                    AssetParams::Heater(h) => Some(
-                        h.c_terminal_eur_kwh
-                            .unwrap_or(avg_imp_eur_kwh + planner.c_ctrl_imp_malus_eur_kwh),
-                    ),
-                    _ => None,
-                })
-                .unwrap_or(0.0);
-            let battery_c_terminal_eur_kwh = asset_params
-                .iter()
-                .find_map(|p| match p {
-                    AssetParams::Battery(b) => Some(
-                        b.c_terminal_eur_kwh
-                            .unwrap_or(avg_imp_eur_kwh * b.round_trip_efficiency),
-                    ),
-                    _ => None,
-                })
-                .unwrap_or(0.0);
-
-            let asset_contexts: Vec<
-                Box<dyn controller::milp_planner::asset_port::AssetMilpContext>,
-            > = sim_snap
-                .iter_assets()
-                .filter_map(|(entry, cfg)| {
-                    // Use per-asset c_terminal: heater and battery get their own coefficient;
-                    // EV gets 0.0 (deadline constraint handles the charging incentive).
-                    let c_terminal = match cfg {
-                        crate::assets::AssetConfig::Heater(_) => heater_c_terminal_eur_kwh,
-                        crate::assets::AssetConfig::Battery(_) => battery_c_terminal_eur_kwh,
-                        _ => 0.0,
-                    };
-                    cfg.build_milp_context(
-                        &entry.state,
-                        n_slots,
-                        &cum_s,
-                        now,
-                        ev_sess.as_ref(),
-                        heat_tgt.as_ref(),
-                        asset_params
-                            .iter()
-                            .find_map(|p| match p {
-                                AssetParams::Ev(e) => Some(e.min_charge_kw),
-                                _ => None,
-                            })
-                            .unwrap_or(0.0),
-                        planner.v_ev_extra_eur_kwh,
-                        planner.v_ev_core_eur_kwh,
-                        lambda_sw,
-                        c_terminal,
-                        if matches!(cfg, crate::assets::AssetConfig::Heater(_)) {
-                            heater_anchor.clone()
-                        } else {
-                            vec![]
-                        },
-                    )
-                })
-                .collect();
-
-            let mut plan = tokio::task::spawn_blocking(move || {
-                controller::milp_planner::run_planner(
-                    asset_contexts,
-                    &snap,
-                    &tariff_ts,
-                    &capacity,
-                    &planner_clone,
-                    grid_max_import_kw,
-                    grid_max_export_kw,
-                    &asset_params_clone,
-                    now,
-                    trigger_for_planner,
-                    ev_sess.as_ref(),
-                    heat_tgt.as_ref(),
-                    &shift_loads,
-                    bl_override.as_ref(),
-                    Some(obj),
-                    pv_forecast_override,
-                )
-            })
-            .await
-            .expect("planner task panicked");
+            let solve_req = crate::services::planning::build_solve_request(
+                asset_contexts,
+                snap,
+                tariff_ts,
+                capacity,
+                planner.clone(),
+                grid_max_import_kw,
+                grid_max_export_kw,
+                asset_params.clone(),
+                now,
+                trigger.clone(),
+                ev_sess,
+                heat_tgt,
+                shift_loads,
+                bl_override,
+                Some(obj),
+                pv_forecast_override,
+            );
+            let mut plan = crate::services::PlanningService::solve_plan(&solver, solve_req).await;
             // created_at records true wall-clock time so gate decay (elapsed_s) measures
             // real plan age. horizon.start_time = now (aligned) is the slot grid origin.
             plan.created_at = wall_now;
@@ -311,10 +185,7 @@ pub(crate) fn spawn_planning(
                 obj,
                 &state,
                 &event_tx,
-                // wall_now: gate decay measures real plan age (created_at is wall time).
-                // Aligned `now` would give elapsed_s ≤ 0 when the step grid doesn't
-                // advance between replans (e.g. step_s=600, replan=300).
-                wall_now,
+                wall_now, // gate decay measures real plan age; aligned `now` can lag replan_s
             )
             .await;
 
@@ -332,23 +203,6 @@ pub(crate) fn spawn_planning(
                 "plan cycle complete"
             );
 
-            // Event-driven status report on PlanCycle (T050)
-            {
-                let sim_snap = sim.lock().await.to_sim_snapshot();
-                let report_opt = controller::reporter::build_status_report(
-                    &cycle.plan_cycle_event,
-                    &sim_snap,
-                    &ven_name,
-                    None,
-                    wall_now,
-                );
-                if let Some(report) = report_opt {
-                    if let Err(e) = vtn.upsert_report(report).await {
-                        error!("status report (plan cycle) submission failed: {e:#}");
-                    }
-                }
-            }
-
             // Wait for next trigger OR periodic timeout.
             // Record what woke us: timeout → Periodic, channel change → that trigger.
             // This ensures the acceptance gate sees Periodic for routine replans
@@ -363,44 +217,47 @@ pub(crate) fn spawn_planning(
 
 #[cfg(test)]
 mod tests {
-    use super::align_to_step;
-    use chrono::{TimeZone, Utc};
+    use chrono::Utc;
     use std::sync::Arc;
     use tokio::sync::{broadcast, watch, Mutex, RwLock};
 
     use crate::entities::asset::PlanTrigger;
     use crate::entities::planner_params::{PlannerObjective, PlannerParams};
     use crate::planner_events::PlannerEvent;
-    use crate::services::test_support::mock_vtn::MockVtn;
+    use crate::services::test_support::mock_solver_port::MockSolverPort;
     use crate::simulator::SimState;
     use crate::state::AppState;
 
     use super::spawn_planning;
 
-    #[test]
-    fn test_align_to_step_rounds_down() {
-        let make = |h: u32, m: u32, s: u32| Utc.with_ymd_and_hms(2026, 4, 11, h, m, s).unwrap();
-
-        // step_s = 600 (10 min)
-        assert_eq!(align_to_step(make(14, 23, 47), 600), make(14, 20, 0));
-        assert_eq!(align_to_step(make(14, 20, 0), 600), make(14, 20, 0)); // already aligned
-        assert_eq!(align_to_step(make(14, 29, 59), 600), make(14, 20, 0));
-
-        // step_s = 300 (5 min)
-        assert_eq!(align_to_step(make(14, 23, 47), 300), make(14, 20, 0));
-        assert_eq!(align_to_step(make(14, 25, 0), 300), make(14, 25, 0)); // already aligned
-        assert_eq!(align_to_step(make(14, 24, 59), 300), make(14, 20, 0));
-
-        // result timestamp is always an exact multiple of step_s from epoch
-        for step_s in [300u64, 600, 900, 1800] {
-            let raw = make(14, 23, 47);
-            let aligned = align_to_step(raw, step_s);
-            assert_eq!(
-                aligned.timestamp() % step_s as i64,
-                0,
-                "step_s={step_s}: aligned timestamp not a multiple of step_s"
-            );
-        }
+    /// Minimal `Plan` for test construction — no cycle in
+    /// `spawn_planning_constructs_without_panic` ever runs to completion (the
+    /// task is aborted right after spawn), so this value is never consumed.
+    fn minimal_plan() -> crate::entities::plan::Plan {
+        serde_json::from_value(serde_json::json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "created_at": Utc::now().to_rfc3339(),
+            "trigger": "PERIODIC",
+            "horizon": {
+                "start_time": "2026-01-01T00:00:00Z",
+                "end_time": "2026-01-02T00:00:00Z",
+                "step_size_s": 900,
+                "num_steps": 96,
+                "far_horizon": "2026-01-02T00:00:00Z"
+            },
+            "slots": [],
+            "summary": {
+                "total_cost_eur": 0.0,
+                "total_co2_g": 0.0,
+                "total_import_kwh": 0.0,
+                "total_export_kwh": 0.0
+            },
+            "envelopes": [],
+            "warnings": [],
+            "objective_eur": 0.0,
+            "friction_eur": 0.0
+        }))
+        .expect("minimal test Plan must deserialize")
     }
 
     fn minimal_sim() -> Arc<Mutex<SimState>> {
@@ -422,7 +279,7 @@ mod tests {
         let (trigger_tx, trigger_rx) = watch::channel(PlanTrigger::Periodic);
         let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(1);
         let event_tx = Arc::new(event_bcast_tx);
-        let vtn = Arc::new(MockVtn::new());
+        let solver = Arc::new(MockSolverPort::returning(minimal_plan()));
         let sim = minimal_sim();
         let active_objective = Arc::new(RwLock::new(PlannerObjective::default()));
 
@@ -432,8 +289,7 @@ mod tests {
             10.0,
             10.0,
             vec![],
-            vtn,
-            "test-ven".to_string(),
+            solver,
             trigger_rx,
             sim,
             active_objective,

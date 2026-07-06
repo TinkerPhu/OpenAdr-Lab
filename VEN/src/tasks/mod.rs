@@ -3,6 +3,7 @@ pub mod planning;
 pub mod poll_events;
 pub mod poll_programs;
 pub mod poll_reports;
+mod progress_ticker;
 pub mod sim_tick;
 pub mod state_persist;
 
