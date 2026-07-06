@@ -48,6 +48,7 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[device-session-common-interface]] — why EvSession/HeaterTarget/ShiftableLoad stay separate structs, not one trait
 - [[ven-code-vs-docs-audit]] — full VEN/src read vs docs: what matches, 10 confirmed drifts, ranked refactoring candidates
 - [[openadr-programs-explained]] — what a Program is, 5 worked examples (VTN vs VEN view), multi-program enrollment, contractual out-of-band joining
+- [[distributor-business-case-tiers]] — arguments for a distributor to adopt VTN/VEN: 4 rollout tiers from open tariff publication to VPP dispatch
 
 ---
-Pages: 30 · Last sync: 2026-07-06 (R1/R2/R3/R5/R6 code-and-docs resolution + timeline-forecast fix: 12 pages updated, uncommitted WIP at ae4a1ed)
+Pages: 31 · Last sync: 2026-07-06 (R1/R2/R3/R5/R6 code-and-docs resolution + timeline-forecast fix: 12 pages updated, uncommitted WIP at ae4a1ed)

@@ -173,4 +173,6 @@ agreement that gives both sides a stable vocabulary.
   for per-program VEN configuration (signal types, capacity participation), not current
   behaviour — tracked in `docs/BACKLOG.md` (BL-14 family).
 
-Q&A form of this material, as originally filed: [[openadr-programs-explained]].
+Q&A form of this material, as originally filed: [[openadr-programs-explained]]. How a
+distributor would stage these program types commercially, from open tariff publication
+to VPP dispatch: [[distributor-business-case-tiers]].
