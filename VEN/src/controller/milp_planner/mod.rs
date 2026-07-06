@@ -203,5 +203,34 @@ pub fn run_planner(
     }
 }
 
+/// Concrete `SolverPort` implementation backed by the two-phase MILP solver.
+/// Thin wrapper: unpacks `SolveRequest` and forwards to `run_planner`, which
+/// remains the single source of truth for solve behaviour and keeps its own
+/// test suite (`tests/`) untouched by this port.
+pub struct MilpSolver;
+
+impl crate::controller::SolverPort for MilpSolver {
+    fn solve(&self, req: crate::controller::SolveRequest) -> Plan {
+        run_planner(
+            req.asset_contexts,
+            &req.assets,
+            &req.tariffs,
+            &req.capacity,
+            &req.planner,
+            req.grid_max_import_kw,
+            req.grid_max_export_kw,
+            &req.asset_params,
+            req.now,
+            req.trigger,
+            req.ev_session.as_ref(),
+            req.heater_target.as_ref(),
+            &req.shiftable_loads,
+            req.baseline_override.as_ref(),
+            req.objective_override,
+            req.pv_forecast_override,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests;

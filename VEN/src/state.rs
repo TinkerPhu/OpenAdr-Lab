@@ -6,6 +6,7 @@ use crate::entities::device_session::{
     BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime,
 };
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
+use crate::entities::sim_inject::SimInjectState;
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::entities::user_request::{SessionType, UserRequest, UserRequestStatus};
 use crate::models::SensorSnapshot;
@@ -33,58 +34,6 @@ impl AssetLedgerEntry {
             asset_id: asset_id.to_string(),
             started_at: Some(Utc::now()),
             ..Default::default()
-        }
-    }
-}
-
-/// Simulation injection state — set via POST /sim/inject.
-/// Three injection behaviours:
-/// - A (one-shot): applied once to physics state, then cleared automatically.
-/// - B (frozen + EMA return): held while active; EMA-blended back to natural model on release.
-/// - C (frozen + snap): held while active; snaps to profile default on release.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SimInjectState {
-    // Behaviour A — one-shot (cleared after application to physics state)
-    pub battery_soc: Option<f64>,
-    pub ev_soc: Option<f64>,
-    pub heater_temp_c: Option<f64>,
-    // Behaviour B — frozen + EMA return on release
-    pub pv_irradiance: Option<f64>,
-    pub pv_irradiance_alpha: f64,  // default 0.1
-    pub base_load_kw: Option<f64>, // one-shot: offset stored in smoothing state, then cleared
-    pub base_load_alpha: f64,      // default 0.1
-    // Behaviour C — frozen while active, snap to profile default on release
-    pub ev_plugged: Option<bool>,
-    pub ev_soc_target: Option<f64>,
-    pub heater_setpoint_c: Option<f64>,
-    pub heater_temp_min_c: Option<f64>,
-    pub heater_temp_max_c: Option<f64>,
-    pub ambient_temp_c: Option<f64>,
-    pub grid_import_limit_kw: Option<f64>,
-    pub grid_export_limit_kw: Option<f64>,
-    // Behaviour D — planning-only override (no physics effect, no replan trigger)
-    pub pv_plan_kw: Option<f64>,
-}
-
-impl Default for SimInjectState {
-    fn default() -> Self {
-        Self {
-            battery_soc: None,
-            ev_soc: None,
-            heater_temp_c: None,
-            pv_irradiance: None,
-            pv_irradiance_alpha: 0.1,
-            base_load_kw: None,
-            base_load_alpha: 0.1,
-            ev_plugged: None,
-            ev_soc_target: None,
-            heater_setpoint_c: None,
-            heater_temp_min_c: None,
-            heater_temp_max_c: None,
-            ambient_temp_c: None,
-            grid_import_limit_kw: None,
-            grid_export_limit_kw: None,
-            pv_plan_kw: None,
         }
     }
 }
@@ -322,12 +271,24 @@ impl AppState {
         }
     }
 
-    /// Mark an obligation as fulfilled by its UUID.
-    pub async fn mark_obligation_fulfilled(&self, id: uuid::Uuid) {
+    /// Advance a fulfilled obligation to its next cycle. `fulfilled` stays false —
+    /// recurrence is driven entirely by `due_at`; `retire_obligations_not_in` below is
+    /// what actually stops an obligation, not this flag.
+    pub async fn rearm_obligation(&self, id: uuid::Uuid, next_due_at: DateTime<Utc>) {
         let mut hems = self.hems.write().await;
         if let Some(ob) = hems.report_obligations.iter_mut().find(|o| o.id == id) {
-            ob.fulfilled = true;
+            ob.due_at = next_due_at;
         }
+    }
+
+    /// Remove obligations whose parent event is no longer in the active poll set.
+    pub async fn retire_obligations_not_in(
+        &self,
+        active_event_ids: &std::collections::HashSet<String>,
+    ) {
+        let mut hems = self.hems.write().await;
+        hems.report_obligations
+            .retain(|o| active_event_ids.contains(&o.event_id));
     }
 
     pub async fn active_requests(&self) -> Vec<UserRequest> {
@@ -759,5 +720,57 @@ mod tests {
         let programs = state2.programs().await;
         assert_eq!(programs.len(), 1);
         assert_eq!(programs[0].id, "p1");
+    }
+
+    fn make_obligation(event_id: &str, due_at: DateTime<Utc>) -> OadrReportObligation {
+        OadrReportObligation {
+            id: Uuid::new_v4(),
+            event_id: event_id.to_string(),
+            program_id: Some("prog-1".to_string()),
+            payload_type: "USAGE".to_string(),
+            reading_type: "DIRECT_READ".to_string(),
+            resource_name: None,
+            due_at,
+            interval_duration_s: 900,
+            fulfilled: false,
+            created_at: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn rearm_obligation_advances_due_at_and_stays_unfulfilled() {
+        let state = AppState::new();
+        let now = Utc::now();
+        let ob = make_obligation("evt-1", now);
+        let id = ob.id;
+        state.add_obligations(vec![ob]).await;
+
+        let next_due = now + Duration::seconds(900);
+        state.rearm_obligation(id, next_due).await;
+
+        let obs = state.report_obligations().await;
+        assert_eq!(obs.len(), 1, "obligation still present, not removed");
+        assert_eq!(obs[0].due_at, next_due);
+        assert!(
+            !obs[0].fulfilled,
+            "fulfilled stays false under the recurring model"
+        );
+    }
+
+    #[tokio::test]
+    async fn retire_obligations_not_in_prunes_expired_event() {
+        let state = AppState::new();
+        let now = Utc::now();
+        let keep = make_obligation("evt-active", now);
+        let drop = make_obligation("evt-expired", now);
+        state.add_obligations(vec![keep, drop]).await;
+
+        let mut active: std::collections::HashSet<String> = std::collections::HashSet::new();
+        active.insert("evt-active".to_string());
+        state.retire_obligations_not_in(&active).await;
+
+        let obs = state.report_obligations().await;
+        assert_eq!(obs.len(), 1);
+        assert_eq!(obs[0].event_id, "evt-active");
     }
 }

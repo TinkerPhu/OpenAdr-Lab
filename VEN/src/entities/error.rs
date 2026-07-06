@@ -8,12 +8,19 @@ pub enum DomainError {
     #[error("not found: {id}")]
     NotFound { id: Uuid },
 
+    /// Reserved — not yet constructed at a real error boundary. Intended for the
+    /// planner's solve failure path. See docs/BACKLOG.md BL-25.
     #[error("plan infeasible: {0}")]
     PlanInfeasible(String),
 
+    /// Reserved — not yet constructed at a real error boundary. Intended for VTN-client
+    /// repeated-timeout classification, distinct from a generic error. See
+    /// docs/BACKLOG.md BL-25.
     #[error("VTN unreachable: {0}")]
     VtnUnreachable(String),
 
+    /// Reserved — not yet constructed at a real error boundary. Intended for profile
+    /// hot-reload validation, if that feature is ever built. See docs/BACKLOG.md BL-25.
     #[error("profile invalid: {0}")]
     ProfileInvalid(String),
 }

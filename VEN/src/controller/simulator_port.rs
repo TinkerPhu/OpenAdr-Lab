@@ -81,7 +81,8 @@ impl AssetSnapshot {
 /// State overrides for the `inject()` port method (used by MockSimulatorPort and tests).
 ///
 /// This is the controller-side inject state type. The UI layer uses the richer
-/// `crate::state::SimInjectState` which is mapped to this type before calling `inject()`.
+/// `crate::entities::sim_inject::SimInjectState` which is mapped to this type before
+/// calling `inject()`.
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // fields read only in mock test assertions
 pub struct SimInjectState {

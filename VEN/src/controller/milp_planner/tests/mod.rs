@@ -453,7 +453,6 @@ fn build_asset_contexts(
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
     tariffs: &TariffTimeSeries,
 ) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
-    let step_s = profile.planner.plan_step_s;
     let n: usize = profile.planner.plan_zones.iter().map(|z| z.slots).sum();
     let cum_s: Vec<i64> = {
         let mut v = vec![0i64];

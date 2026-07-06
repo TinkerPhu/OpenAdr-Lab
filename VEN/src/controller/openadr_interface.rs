@@ -670,6 +670,12 @@ mod tests {
 
     #[test]
     fn test_extract_report_obligations_dedup() {
+        // Dedup by (event_id, payload_type) is intentionally unconditional — it does
+        // not check `fulfilled`. Recurrence (R6) is handled by re-arming the *same*
+        // obligation's `due_at` in place (`AppState::rearm_obligation`), not by letting
+        // this function regenerate a fresh one each cycle; regenerating here would
+        // orphan the original (and its VTN report name history) instead of advancing
+        // it. See docs/plans/review_items_resolution_strategy.md R6.
         let events = json!([
             {
                 "id": "evt-1",

@@ -23,7 +23,7 @@ use profile::Profile;
 use simulator::SimState;
 use std::collections::HashMap;
 
-use crate::controller::VtnPort;
+use crate::controller::{SolverPort, VtnPort};
 use crate::entities::asset_params::AssetParams;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams, SimulatorParams};
 use state::AppState;
@@ -149,6 +149,7 @@ async fn main() -> anyhow::Result<()> {
         cfg.ven_name.clone(),
     );
     let vtn_port: Arc<dyn VtnPort> = Arc::new(vtn.clone());
+    let solver: Arc<dyn SolverPort> = Arc::new(controller::milp_planner::MilpSolver);
 
     // Derive shared data_dir from persist_path
     let data_dir = cfg
@@ -233,14 +234,13 @@ async fn main() -> anyhow::Result<()> {
     }
     let active_objective = Arc::new(RwLock::new(planner_params.objective));
     {
-        let (s, pp, gmax_i, gmax_e, ap, v, vn, rx, sim, ao, etx) = (
+        let (s, pp, gmax_i, gmax_e, ap, sv, rx, sim, ao, etx) = (
             state.clone(),
             planner_params.clone(),
             grid_max_import_kw,
             grid_max_export_kw,
             asset_params.clone(),
-            vtn_port.clone(),
-            cfg.ven_name.clone(),
+            solver.clone(),
             trigger_rx,
             sim_state.clone(),
             active_objective.clone(),
@@ -253,8 +253,7 @@ async fn main() -> anyhow::Result<()> {
                 gmax_i,
                 gmax_e,
                 ap.clone(),
-                v.clone(),
-                vn.clone(),
+                sv.clone(),
                 rx.clone(),
                 sim.clone(),
                 ao.clone(),
