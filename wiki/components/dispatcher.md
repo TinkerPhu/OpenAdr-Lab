@@ -2,8 +2,8 @@
 title: Dispatcher
 type: component
 created: 2026-07-04
-updated: 2026-07-05
-synced_commit: e138861
+updated: 2026-07-06
+synced_commit: ae4a1ed
 sources: [VEN/src/controller/dispatcher.rs, VEN/src/tasks/sim_tick/, VEN/src/controller/monitor.rs, docs/architecture/VEN_ARCHITECTURE.md]
 tags: [dispatcher, realtime, ledger]
 ---
@@ -44,10 +44,9 @@ Per tick, `build_setpoints(plan, sim, capacity, heater_setpoint_c, now, overlay_
   appear in `GET /sim` and the ledger, and fires a replan when they complete
   (`sim_tick/publish.rs`).
 
-> **DRIFT** `docs/architecture/VEN_ARCHITECTURE.md` §2.1 describes the dispatcher as
-> distributing `NetDeviation` across "auto-follow assets" and accumulating the ledger
-> itself. Neither exists: there is no auto-follow concept, and the battery deviation
-> correction (`apply_battery_correction_overlay`, a dead-beat P-controller on grid
-> deviation) is `#[allow(dead_code)]` at `dispatcher.rs:188` — implemented and
-> unit-tested but deliberately **not wired** into `build_setpoints`. The only live
-> reactive layer is the surplus-EV overlay. See [[ven-code-vs-docs-audit]].
+There is no "auto-follow" concept and no `NetDeviation` distribution across assets — the
+only live reactive layer is the surplus-EV overlay above. The battery deviation
+correction (`apply_battery_correction_overlay`, a dead-beat P-controller on grid
+deviation) is implemented and unit-tested but deliberately **not wired** into
+`build_setpoints` (`dispatcher.rs:188`) — kept intentionally rather than deleted;
+`docs/BACKLOG.md` BL-22 tracks wiring it behind a profile flag.

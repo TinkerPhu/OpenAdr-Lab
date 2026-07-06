@@ -2,9 +2,9 @@
 title: Tariffs and Capacity State
 type: concept
 created: 2026-07-04
-updated: 2026-07-05
-synced_commit: e138861
-sources: [docs/REQUIREMENTS.md, VEN/src/entities/tariff_snapshot.rs, VEN/src/common/mod.rs, VEN/src/entities/capacity.rs]
+updated: 2026-07-06
+synced_commit: ae4a1ed
+sources: [docs/REQUIREMENTS.md, VEN/src/entities/tariff_snapshot.rs, VEN/src/common/mod.rs, VEN/src/entities/capacity.rs, VEN/src/entities/design_vocabulary.rs]
 tags: [tariff, capacity, domain]
 ---
 
@@ -51,9 +51,11 @@ Both bound the [[milp-planner]]'s feasible region; reservations also flow back o
 When the VTN is unreachable, Step/LOCF extrapolation carries the **last known rate**
 forward for all future slots, and hardcoded defaults (0.25 €/kWh import, 0.08 €/kWh
 export, 300 g/kWh) cover slots with no data at all (`milp_planner/inputs.rs`). The
-`StaleRatePolicy` enum (`entities/asset.rs` — `LAST_KNOWN`, `HEURISTIC_FORECAST`,
-`DEFER_TO_FLEXIBLE`, `SAFE_AVERAGE`) is unreferenced design vocabulary: only its
-`LAST_KNOWN` behaviour exists, as a hardwired consequence of Step interpolation, and
-plans never mark slots `rate_estimated` ([[ven-code-vs-docs-audit]]).
+`StaleRatePolicy` enum (`entities/design_vocabulary.rs` — `LAST_KNOWN`,
+`HEURISTIC_FORECAST`, `DEFER_TO_FLEXIBLE`, `SAFE_AVERAGE`) is unreferenced roadmap
+vocabulary, quarantined rather than wired: only its `LAST_KNOWN` behaviour exists today,
+as a hardwired consequence of Step interpolation, and plans never mark slots
+`rate_estimated` — `docs/BACKLOG.md` BL-07 tracks formalising `LastKnown` and
+`rate_estimated` as a real feature ([[ven-code-vs-docs-audit]]).
 
 Tariff (€/kWh) vs rate (€/h) terminology: see [[sign-convention]].
