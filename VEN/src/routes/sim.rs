@@ -7,7 +7,7 @@ use serde::Deserialize;
 use tracing::debug;
 
 use crate::entities::asset::PlanTrigger;
-use crate::state::SimInjectState;
+use crate::entities::sim_inject::SimInjectState;
 use crate::AppCtx;
 
 /// Partial-merge body for POST /sim/inject.

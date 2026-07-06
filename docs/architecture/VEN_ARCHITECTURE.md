@@ -39,13 +39,14 @@ via the OpenADR 3 REST API. Internally it has two major subsystems: the **HEMS C
 │  │                     Asset Layer  (Vec<AssetEntry>)                      │ │
 │  │                                                                         │ │
 │  │  ┌──────────────────────────────────────────────────────────────────┐   │ │
-│  │  │  AssetInterface: current() · forecast(horizon) · past(window)    │   │ │
+│  │  │  Asset: step() · capability() · simulate_forward()                │   │ │
+│  │  │  AssetHandle: id() · current_state() · history(window)            │   │ │
 │  │  └──────────────────────────────────────────────────────────────────┘   │ │
 │  │          ▲                                           ▲                  │ │
 │  │  ┌───────┴────────┐                       ┌──────────┴──────────┐       │ │
-│  │  │ SimulatedAsset │  ← physics models     │  MeasuredAsset      │       │ │
-│  │  │ PV · Battery   │    per asset type     │  (future: real HW   │       │ │
-│  │  │ EV · Heater    │                       │   / external API)   │       │ │
+│  │  │  AssetConfig   │  ← physics models     │  MeasuredAsset      │       │ │
+│  │  │ PV · Battery   │    per asset type     │  (future: real HW,  │       │ │
+│  │  │ EV · Heater    │    (implemented)      │   not yet built)    │       │ │
 │  │  │ BaseLoad       │                       └─────────────────────┘       │ │
 │  │  └───────┬────────┘                                                     │ │
 │  │          │ UI only                                                      │ │
@@ -57,7 +58,7 @@ via the OpenADR 3 REST API. Internally it has two major subsystems: the **HEMS C
 │  REST API (Axum, port 8080 internal / 821x host)                             │
 └──────────────────────────────────────────────────────────────────────────────┘
                         │
-                        │ OpenADR 3 REST (OAuth2 + polling at 30 s)
+                        │ OpenADR 3 REST (OAuth2 + polling, default 30 s)
                         ▼
                    ┌──────────┐
                    │   VTN    │
@@ -67,12 +68,15 @@ via the OpenADR 3 REST API. Internally it has two major subsystems: the **HEMS C
 **Source layout (current):**
 ```
 VEN/src/
-  main.rs              — Axum router + all handler functions
-  controller/          — dispatcher, monitor, openadr_interface, planner, user_request
+  main.rs              — startup, task spawning; routes registered in routes/mod.rs (§4)
+  routes/              — HTTP handlers, one module per resource (adapter ring)
+  tasks/                — background loops (sim_tick, planning, poll_*, obligation) (adapter ring)
+  services/            — planning/user-request/obligation application logic
+  controller/          — dispatcher, monitor, openadr_interface, milp_planner, reporter, timeline, envelope, trace
   entities/            — asset, capacity, device_session, plan, tariff_snapshot, site_meter, user_request
-  simulator/           — mod.rs, assets/{ev,heater,pv,battery,base_load}, energy, persist, power_model
+  assets/              — Asset trait implementations (Battery, EvCharger, Heater, PvInverter, BaseLoad)
+  simulator/           — SimState, persist, power_model
   reactor/             — REMOVED (see §3.3)
-  reporter.rs          — report-building logic (no HTTP endpoints)
 ```
 
 See `docs/BACKLOG.md §Refactoring` for any pending layout migrations.
@@ -85,47 +89,42 @@ See `docs/BACKLOG.md §Refactoring` for any pending layout migrations.
 
 | Component | Module | Cycle / Trigger | Owns |
 |---|---|---|---|
-| **OpenADR Interface** | `controller/openadr_interface` | 30 s poll + event-driven | `OadrEventCache`, `TariffSnapshot` / `TariffTimeSeries`, `OadrCapacityState`, `OadrReportObligation` |
+| **OpenADR Interface** | `controller/openadr_interface` | `POLL_EVENTS_SECS` poll (default 30 s, env-configurable) + event-driven | `TariffSnapshot` / `TariffTimeSeries`, `OadrCapacityState`, `OadrReportObligation` |
 | **User Request Manager** | `controller/user_request` | Event-driven (API call) | `UserRequest`, `EvSession` / `HeaterTarget` / `ShiftableLoad` |
-| **Monitor** | `controller/monitor` | 1 s tick | `AssetLedger` (cumulative energy/cost/CO₂ per asset) |
-| **Planner** | `controller/planner` | Watch channel + 20 s periodic | `Plan`, `FlexibilityEnvelopes`, `PlanWarnings` |
-| **Dispatcher** | `controller/dispatcher` | 1 s tick | `DispatchCommands` → Simulator setpoints |
+| **Monitor** | `controller/monitor` | 1 s tick (`tasks/sim_tick`) | Per-asset energy/cost/CO₂ ledger (`state::AssetLedgerEntry`) |
+| **Planner** | `controller/milp_planner`, reached via `SolverPort` | Watch channel + `replan_interval_s` periodic (default 300 s, profile-configurable) | `Plan`, `FlexibilityEnvelope`s, `PlanWarning`s |
+| **Dispatcher** | `controller/dispatcher` | 1 s tick (`tasks/sim_tick`) | Per-asset setpoints written to the simulator |
 | **Entities** | `entities/` | Shared state | `Plan`, `TariffSnapshot`, `UserRequest`, `EvSession` / `HeaterTarget` / `ShiftableLoad` |
 
 #### OpenADR Interface
 
 Translates between VTN REST JSON and the internal domain model. The only component that
-knows about OpenADR HTTP, OAuth, and event payload formats.
+knows about OpenADR HTTP, OAuth, and event payload formats. Transport lives in `vtn.rs`
+behind the `VtnPort` trait; parsing is pure functions in `controller/openadr_interface.rs`.
 
 **VTN → internal translation:**
 
-| OpenADR EventType | Internal target |
-|---|---|
-| `PRICE` | `OadrEventSnapshot.ImportPrice` |
-| `EXPORT_PRICE` | `OadrEventSnapshot.ExportPrice` |
-| `GHG` | `OadrEventSnapshot.ImportCO2` |
-| `IMPORT_CAPACITY_LIMIT` | `OadrEventSnapshot.ImportCapacityLimit` (per interval) |
-| `EXPORT_CAPACITY_LIMIT` | `OadrEventSnapshot.ExportCapacityLimit` (per interval) |
-| `IMPORT_CAPACITY_SUBSCRIPTION` | `OadrCapacityState.ImportSubscription_kW` |
-| `EXPORT_CAPACITY_SUBSCRIPTION` | `OadrCapacityState.ExportSubscription_kW` |
-| `IMPORT_CAPACITY_RESERVATION` | `OadrCapacityState.ImportReservation_kW` |
-| `EXPORT_CAPACITY_RESERVATION` | `OadrCapacityState.ExportReservation_kW` |
-| `ALERT_GRID_EMERGENCY` / `ALERT_BLACK_START` | `PlanTrigger::Alert` → planner enforces shed/import limit (BL-04: not yet implemented) |
-| `ALERT_FLEX_ALERT` | `PlanTrigger.ALERT` |
-| `DISPATCH_SETPOINT` | Direct Dispatcher override (bypasses Planner) |
-| `CHARGE_STATE_SETPOINT` | Creates/modifies `EvSession` with target SoC (BL-06: not yet implemented) |
+| OpenADR EventType | Internal target | Status |
+|---|---|---|
+| `PRICE` / `EXPORT_PRICE` | `TariffSnapshot.import_tariff_eur_kwh` / `.export_tariff_eur_kwh` | ✅ implemented (supports looping daily-price events, e.g. `duration: P9999Y`) |
+| `GHG` | `TariffSnapshot.co2_g_kwh` | ✅ implemented |
+| `IMPORT_CAPACITY_LIMIT` / `EXPORT_CAPACITY_LIMIT` | `OadrCapacityState.import_limit_kw` / `.export_limit_kw` (strictest active event wins) | ✅ implemented |
+| `IMPORT_CAPACITY_SUBSCRIPTION` / `IMPORT_CAPACITY_RESERVATION` | `OadrCapacityState.import_subscription_kw` / `.import_reservation_kw` | ✅ implemented |
+| `EXPORT_CAPACITY_SUBSCRIPTION` / `EXPORT_CAPACITY_RESERVATION` | — | ❌ **GAP** (`docs/reference/TECHNICAL_DEBTS.md` R-14) — not parsed; `OadrCapacityState` has no export-side subscription/reservation fields at all |
+| `ALERT_GRID_EMERGENCY` / `ALERT_BLACK_START` / `ALERT_FLEX_ALERT` | `PlanTrigger::Alert` (defined) → planner shed/import-limit enforcement | ❌ **GAP** (cert backlog BL-04) — `PlanTrigger::Alert` is defined but never sent by any code path; every detected event/rate/capacity change fires `PlanTrigger::RateChange` instead. The shed/import-limit enforcement itself is also unimplemented. |
+| `DISPATCH_SETPOINT` | — | ❌ **GAP** (`docs/reference/TECHNICAL_DEBTS.md` R-13) — no code path parses this payload; it survives only as a dead field on the unreferenced `OadrEventCache` struct (`entities/capacity.rs`) |
+| `CHARGE_STATE_SETPOINT` | `EvSession` create/modify with target SoC | ❌ **GAP** (cert backlog BL-06) — not yet implemented |
 
-**Internal → VTN report generation:**
+**Internal → VTN report generation** (`controller/reporter.rs`):
 
-| Report obligation | Source |
-|---|---|
-| `USAGE` | Time-weighted mean of net site import power over the obligation interval (from sim grid snapshot) |
-| `DEMAND` | `AssetState.ActualPower` per resource |
-| `STORAGE_CHARGE_LEVEL` | `AssetState.SoC` per storage resource |
-| `OPERATING_STATE` | Derived from `DeviceResponsiveness` |
-| `USAGE_FORECAST` | FIRM slots: point forecast; FLEXIBLE slots: range [0, MaxPower] in window |
-| `IMPORT_CAPACITY_RESERVATION` | `GetImportFlexibility()` + Σ `FlexibilityEnvelope.MaxPower` |
-| `EXPORT_CAPACITY_RESERVATION` | `GetExportFlexibility()` |
+| Report obligation | Source | Status |
+|---|---|---|
+| `USAGE` | Time-weighted mean of net site import power over the obligation interval (`TimeSeries::resample_uniform`) | ✅ implemented |
+| `STORAGE_CHARGE_LEVEL` | Point-in-time SoC (EV/battery) sampled at each obligation interval end | ✅ implemented |
+| `OPERATING_STATE` | Hardcoded `"ACTIVE"` | 🟡 partial — the `DeviceResponsiveness` enum this should derive from is unreferenced |
+| `IMPORT_CAPACITY_RESERVATION` / `EXPORT_CAPACITY_RESERVATION` | Live `SiteFlexibilityEnvelope` up/down kW | ✅ implemented |
+| `DEMAND` | — | ❌ not built |
+| `USAGE_FORECAST` | — | ❌ **GAP** (`docs/reference/TECHNICAL_DEBTS.md` R-15) — never built. The MILP already computes the exact per-slot forecast internally (`planned_state_by_asset`, used today only by `/timeline`) — it is simply never turned into a report. `reportDescriptor.historical` is never parsed, so the VEN cannot distinguish a forecast request from a historical one. |
 
 #### User Request Manager
 
@@ -138,20 +137,31 @@ to the Planner watch channel.
 
 #### Monitor (Ledger)
 
-Runs every 1 s via `record_tick()`. Responsibilities:
-- Updates `AssetLedger` (cumulative energy/cost/CO₂ per asset) using the current sim snapshot and active tariff
-
-Deviation detection and correction live in the Dispatcher (`apply_battery_deviation_correction()`, `apply_ev_surplus_overlay()`), not the Monitor.
+Runs every 1 s via `controller::monitor::record_tick()`, called from `tasks/sim_tick/publish.rs`.
+Updates the per-asset cumulative energy/cost/CO₂ ledger (`state::AssetLedgerEntry`) using the
+current sim snapshot and the tariff active at `now` (Step/LOCF lookup). Only importing assets
+accrue cost/CO₂; export is not credited as revenue in the ledger.
 
 #### Dispatcher
 
-1 s tick loop. Translates the current `PlanTimeSlot` into device setpoints:
+Pure-function module (`controller/dispatcher.rs`) driven by the 1 s tick in
+`tasks/sim_tick/`. `build_setpoints()` translates the current `PlanTimeSlot` into device
+setpoints:
 
-1. Reads the current `PlanTimeSlot` from the active Plan
-2. For each `AssetAllocation` in the slot: computes `DispatchCommand` for the target asset
-3. For auto-follow assets: distributes `NetDeviation = Σ(ActualPower) − Σ(PlannedPower)` across auto-follow assets
-4. Writes commands to the Simulator
-5. Accumulates cost/CO₂ in the asset ledger
+1. Seeds every asset with its `default_setpoint_kw`
+2. For each `AssetAllocation` in the plan slot covering `now`: overwrites that asset's setpoint
+3. Caps PV export at the active capacity limit
+4. Applies the opportunistic surplus-EV overlay (`apply_surplus_ev_overlay`): routes live
+   PV surplus (after all other loads and any planned battery charging) to the EV when no
+   plan-level EV allocation is active for this slot
+
+❌ **GAP** (`docs/plans/review_items_resolution_strategy.md` R5, `docs/BACKLOG.md` BL-22):
+there is no "auto-follow" concept and no `NetDeviation` distribution across assets.
+`apply_battery_correction_overlay` — a dead-beat P-controller that reacts to grid
+deviation — is fully implemented and unit-tested but deliberately `#[allow(dead_code)]`:
+it is never wired into `build_setpoints()`. This was built, then left unintegrated; R5
+resolved to keep it (not delete) — BL-22 tracks wiring it behind a profile flag. Ledger
+accounting is **not** the Dispatcher's responsibility — see Monitor above.
 
 ### 2.2 Two-Speed Loop
 
@@ -159,34 +169,56 @@ The controller operates at two timescales:
 
 | Loop | Period | Driver | Purpose |
 |---|---|---|---|
-| **Fast** (Dispatcher + Monitor) | 1 s | Tokio interval | Execute current plan slot; accumulate ledger; detect deviations |
-| **Slow** (Planner) | 20 s periodic + watch channel | `PlanTrigger` watch channel | Produce new Plan from current rates, sessions, and asset state |
+| **Fast** (Dispatcher + Monitor) | 1 s | `tasks/sim_tick` Tokio interval | Execute current plan slot; accumulate ledger |
+| **Slow** (Planner) | `replan_interval_s` periodic (default 300 s, profile-configurable) + watch channel | `PlanTrigger` watch channel | Produce new Plan from current rates, sessions, and asset state |
 
 The watch channel (`PlanTrigger`) decouples triggering from execution: any component can emit
 a trigger; the Planner processes them in order. This prevents redundant replanning while ensuring
 every relevant event causes exactly one new plan.
 
+Trigger senders in code today: HTTP routes (`PlanTrigger::UserRequest`), `POST /plan/trigger`
+and sim state injection (`PlanTrigger::AssetStateChange`), the event poll loop
+(`PlanTrigger::RateChange` — fired for **any** detected change, including capacity changes),
+and shiftable-load completion (`PlanTrigger::UserRequest`). `PlanTrigger::Alert` and
+`::CapacityChange` are defined but never sent — see the OpenADR Interface event table above.
+
 ### 2.3 Planning Algorithm
 
-The Planner is a **3-tier MILP solver** (`controller/milp_planner/`). It replaced the earlier
-greedy scheduler (removed on the `refactor/3-tier-milp` branch).
+The Planner is a **3-tier, two-phase MILP solver** (`controller/milp_planner/`), reached
+through the `SolverPort` trait (`controller/solver_port.rs`) — `services/planning.rs` is
+the only caller of `SolverPort::solve`, so nothing outside the planner module touches
+HiGHS or `run_planner` directly.
 
 **Full design reference:** [`docs/architecture/ven_milp_planner.md`](ven_milp_planner.md)
 
 **Key concepts:**
 
 - **Three tiers** with variable step sizes: fine-grained near-horizon (e.g. 5 min slots),
-  coarser mid-horizon, sparse far-horizon. Controlled by `PlannerParams.tiers`.
-- **Assets as MILP variables**: EV continuous power `p_ev_kw[t]`, heater discrete levels
-  `z_heat_low[t]`, `z_heat_mid[t]`, `z_heat_high[t]`, battery SoC tracking, etc.
-- **Session intent as constraints**: `EvSession`/`HeaterTarget`/`ShiftableLoad` provide energy target, deadline, and mode; the solver iterates over asset variables, not session objects. See §2.3.1 below.
-- **Adoption gate**: new plans are only adopted if they improve on the current plan's expected
-  cost by more than a configured threshold — prevents churn from noise replans.
-- **StaleRatePolicy**: when VTN is unreachable, future tariff slots use the configured fallback
-  (`LAST_KNOWN`, `HEURISTIC_FORECAST`, `DEFER_TO_FLEXIBLE`, or `SAFE_AVERAGE`).
+  coarser mid-horizon, sparse far-horizon. Controlled by `PlannerParams.plan_zones`.
+- **Assets as MILP variables**: EV continuous power `p_ev_kw[t]`, heater discrete tiers
+  (`z_heat_mid[t]`, `z_heat_full[t]`), battery SoC tracking, etc.
+- **Session intent as constraints**: `EvSession`/`HeaterTarget`/`ShiftableLoad` provide
+  energy target, deadline, and mode; the solver iterates over asset variables, not session
+  objects. See §2.3.1 below.
+- **Adoption gate**: a new plan is adopted only if it beats the current plan's cost+friction
+  by the effective threshold (which decays over the current plan's age), or if the current
+  plan's slots have all expired, or on any non-periodic trigger — prevents churn from noise
+  replans.
 
-**Slot classification:** `FirmBoundary = now + NearHorizonDuration` (configurable).
-Slots within `[now, FirmBoundary]` are FIRM. Slots beyond are FLEXIBLE.
+❌ **GAP** (`docs/plans/review_items_resolution_strategy.md` R5, `docs/BACKLOG.md` BL-07):
+this section previously described a configurable `StaleRatePolicy` (`LAST_KNOWN`/
+`HEURISTIC_FORECAST`/`DEFER_TO_FLEXIBLE`/`SAFE_AVERAGE`) for handling VTN unreachability.
+That enum (`entities/design_vocabulary.rs`) is defined but **never referenced anywhere in
+the codebase** — there is no user-facing choice between these four policies, and no
+FIRM/FLEXIBLE slot classification exists in code at all (`FirmBoundary`/
+`NearHorizonDuration` were never implemented). The actual behaviour when the VTN is
+unreachable: tariff lookups use Step/LOCF extrapolation (`common::TimeSeries`), which
+always carries the last known rate forward — equivalent only to the `LAST_KNOWN` policy,
+and not by deliberate design; slots with no tariff data at all fall back to hardcoded
+defaults (0.25 €/kWh import, 0.08 €/kWh export, 300 g/kWh CO₂).
+`PlanTimeSlot.rate_estimated` is hardcoded `false`, so no `PlanWarning` is ever raised to
+flag a stale-rate plan. R5 resolved to keep the enum (quarantined, not deleted) — BL-07
+tracks wiring `StaleRatePolicy::LastKnown` + `rate_estimated` as a real feature.
 
 #### 2.3.1 Session Intent in the MILP
 
@@ -195,9 +227,11 @@ constraints — the solver does not iterate over session objects directly:
 
 | Session field | MILP use |
 |---|---|
-| `soft_deadline` / `request_mode` | → `MilpLoadMode` (MustRun / MayRun / MustNotRun) |
-| `departure_time` / `ready_by` / `latest_end` | → horizon constraint step `t_ev_dead_step` |
-| `target_soc` / `target_temp_c` | → energy/thermal requirement |
+| `EvSession.soft_deadline` | `false` → `MilpLoadMode::MustRun`; `true` → `MayRun` |
+| `EvSession.departure_time` | → horizon constraint step `t_ev_dead_step` |
+| `HeaterTarget` presence | present → `MustRun` (hard deadline); absent → `MayRun` (autonomous, no deadline) |
+| `HeaterTarget.ready_by` | → horizon constraint step `t_dead_step` |
+| `EvSession.target_soc` / `HeaterTarget.target_temp_c` | → energy/thermal requirement |
 
 Session tracking (accumulated cost, per-slot power history, status lifecycle) is handled
 by the Dispatcher and reporting layer — not by the solver.
@@ -218,16 +252,22 @@ t=0.05s  Dispatcher reads current PlanTimeSlot
 t=0.1s   Monitor
            → AssetLedger updated (energy/cost/CO₂ per asset)
 
-t=30s    OpenADR Interface polls VTN
-           → New events → translate to OadrEventSnapshots, CapacityState
-           → PlanTrigger.RATE_CHANGE or CAPACITY_CHANGE if changed
+t=30s    OpenADR Interface polls VTN (POLL_EVENTS_SECS, default 30 s)
+           → New events → translate to TariffSnapshot, OadrCapacityState
+           → PlanTrigger::RateChange if anything changed (see §2.2 — this fires for
+             capacity changes too; there is no separate CapacityChange trigger in use)
 
-t=20s    Planner (if triggered)
+t=300s   Planner (if triggered, or on replan_interval_s timeout — default 300 s)
            → Reads all state
            → Produces new Plan
            → Emits FlexibilityEnvelopes
            → Writes PlanWarnings → UserNotifications
 ```
+
+❌ **GAP** (`docs/BACKLOG.md` BL-20): the last line above overstates current behaviour —
+`PlanWarning`s are written into the `Plan`, but no `UserNotifications` feed exists
+anywhere in the VEN today (no queue, no route, no UI surface). `UserNotificationSeverity`
+(`entities/design_vocabulary.rs`) is the only trace of this intended feature.
 
 ---
 
@@ -238,26 +278,44 @@ t=20s    Planner (if triggered)
 Each asset exposes a uniform interface to the controller. The controller never calls
 physics functions directly or reads simulation parameters.
 
-```
-trait AssetInterface {
-    fn current(&self) -> f64;                              // kW now
-    fn forecast(&self, horizon: Duration) -> Vec<(DateTime<Utc>, f64)>;  // predicted kW
-    fn past(&self, window: Duration) -> Vec<(DateTime<Utc>, f64)>;       // recorded kW
+```rust
+/// Physics contract for one asset type. Implemented by Battery, EvCharger, Heater,
+/// PvInverter, BaseLoad (VEN/src/assets/*.rs).
+trait Asset: Send + Sync {
+    fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64);
+    fn capability(&self, state: &AssetState) -> AssetCapability;
+    fn simulate_forward(&self, initial: &AssetState, setpoints: &[(DateTime<Utc>, f64)]) -> Trajectory; // default impl
+    fn simulate_free(&self, initial: &AssetState, duration: Duration) -> Trajectory;                    // default impl
+    fn capability_trajectory(&self, initial: &AssetState, duration: Duration, resolution: Duration)
+        -> Vec<(DateTime<Utc>, AssetCapability)>;                                                        // default impl
+
+    // Identity/history — callable only via AssetHandle; panic on a bare physics type.
+    fn id(&self) -> &str;
+    fn current_state(&self) -> AssetState;
+    fn history(&self, window: Duration) -> Vec<HistoryPoint>;
 }
 ```
 
-Two implementations exist (or will exist):
+`AssetConfig` (`VEN/src/assets/mod.rs`) is the concrete enum-dispatch implementation —
+one variant per asset type (`Battery`, `Ev`, `Heater`, `Pv`, `BaseLoad`) — holding the
+physics parameters loaded from the profile. `AssetHandle` wraps a `(&AssetConfig,
+&AssetEntry)` pair to implement the identity/history methods. Per-asset history is a
+ring buffer (`AssetHistoryBuffer`, 3600 points ≈ 1 h at 1 s tick) with LOCF lookups and
+time-weighted averaging.
 
-| Implementation | Backend | Used by |
+| Implementation | Backend | Status |
 |---|---|---|
-| `SimulatedAsset` | Physics model (sin, SOC, thermal) | All current VENs |
-| `MeasuredAsset` | Real sensor / hardware API | Future real deployments |
+| `AssetConfig` (Battery/Ev/Heater/Pv/BaseLoad variants) | Physics model (sin, SoC, thermal), `VEN/src/assets/` | ✅ implemented — all current VENs |
+| `MeasuredAsset` | Real sensor / hardware API | Future — not yet built |
 
-From the controller's perspective these are identical. Swapping a `SimulatedAsset` for a
-`MeasuredAsset` requires no changes outside that asset's module.
+From the controller's perspective a future `MeasuredAsset` would be identical to
+`AssetConfig`: swapping one for the other should require no changes outside that asset's
+module. This is a design intent for future real deployments, not a present capability.
 
 **Simulation parameters** (irradiation curve, initial SOC, rated power, thermal constants)
 are only accessible through the `/sim` API endpoints. The controller never reads them.
+
+**Full trait contract:** [`docs/architecture/ven_asset_interface_spec.md`](ven_asset_interface_spec.md).
 
 ### 3.1 Generic Asset Model
 
@@ -375,14 +433,17 @@ User requests ──────────────────────
                                         Dispatcher → Simulator setpoints
 ```
 
-**Legacy:** `GET /trace` still exists and returns the reactor decision log (ring buffer, 1 000
-entries). As of spec kit 001 this records Dispatcher decisions, not reactor FSM transitions.
+**Legacy:** `GET /trace` has been replaced by `GET /trace/events` (in-memory ring buffer of
+`ControllerEvent`s — capacity 500, not 1 000) and `GET /trace/history` (per-asset recent
+history). Neither records reactor FSM transitions; `/trace/events` logs controller-level
+decisions (rate/capacity changes, plan cycles, request transitions).
 
 ---
 
 ## 4. API Contract
 
-All routes are registered in `VEN/src/main.rs`. CORS is open. All handlers receive `State(ctx)`.
+All routes are registered in `VEN/src/routes/mod.rs::build_router`. CORS is open. All
+handlers receive `State(ctx: AppCtx)`.
 
 ### 4.1 Infrastructure
 
@@ -426,14 +487,35 @@ Physics-based device simulation.
 | Method | Path | Description |
 |---|---|---|
 | GET | `/sim` | Full simulator state: device states, power flows, energy counters |
-| GET | `/sim/override` | Current user override settings |
-| POST | `/sim/override` | **Full-replace** override (EV charge limit, battery force kW, heater target, PV curtailment, initial SOC) |
 | GET | `/sim/schema` | JSON schema for the profile YAML |
-| POST | `/sim/reset/:id` | Reset a specific asset to its profile defaults |
+| POST | `/sim/reset/:asset_id` | Reset a specific asset to its profile defaults |
 | PUT | `/sim/config/battery` | Update battery configuration at runtime |
-| GET | `/trace` | Reactor/Dispatcher decision trace log (newest first); optional `?limit=N` |
+| GET | `/sim/inject` | Current injection overrides (`SimInjectState`) |
+| POST | `/sim/inject` | Set one or more injection overrides — **full-replace** semantics (see D-06) |
+| POST | `/sim/inject/reset` | Clear all injection overrides |
+| POST | `/plan/trigger` | Force a `PlanTrigger::AssetStateChange` replan |
 
-### 4.6 HEMS Controller
+`POST /sim/inject` replaced the earlier `/sim/override` and supports four independent
+behaviour classes (`state.rs::SimInjectState`):
+
+| Class | Fields | Semantics |
+|---|---|---|
+| A — one-shot | `battery_soc`, `ev_soc`, `heater_temp_c` | Applied once to physics state, then cleared automatically |
+| B — frozen + EMA return | `pv_irradiance` (+`pv_irradiance_alpha`), `base_load_kw` (+`base_load_alpha`) | Held while active; EMA-blended back to the natural model on release |
+| C — frozen + snap | `ev_plugged`, `ev_soc_target`, `heater_setpoint_c`, `heater_temp_min_c`, `heater_temp_max_c`, `ambient_temp_c`, `grid_import_limit_kw`, `grid_export_limit_kw` | Held while active; snaps to the profile default on release |
+| D — planning-only | `pv_plan_kw` | Pins the PV forecast for all horizon slots; no physics effect, no replan trigger |
+
+### 4.6 Timeline & Asset Forecast
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/timeline/all` | Merged past+future timeline for all known assets + grid (registered before `/timeline/:asset_id` — more specific route first) |
+| GET | `/timeline/:asset_id` | Merged past+future timeline for one asset |
+| GET | `/forecast/:asset_id` | Physics-projected future power for one asset |
+| GET | `/history/:asset_id` | Raw per-asset history slice |
+| GET | `/capability/:asset_id` | Point-in-time feasible power range (`AssetCapability`) |
+
+### 4.7 HEMS Controller
 
 | Method | Path | Stage | Description |
 |---|---|---|---|
@@ -441,22 +523,38 @@ Physics-based device simulation.
 | GET | `/capacity` | 2 | `OadrCapacityState` parsed from active events |
 | GET | `/obligations` | 2 | Pending report obligations extracted from events |
 | GET | `/plan` | 3 | Active Plan or `null` |
+| PUT | `/plan/objective` | 3 | Override the active `PlannerObjective` |
+| GET | `/plan/events` | 3 | SSE stream of `PlannerEvent`s (`SolvingStarted`/`SolvingProgress`/`PlanReady`) |
 | GET | `/ledger` | 4 | Per-asset cumulative energy / cost / CO₂ ledger |
 | GET | `/user-requests` | 5 | All active user energy task requests |
 | POST | `/user-requests` | 5 | Create user request → `EvSession` / `HeaterTarget` / `ShiftableLoad` |
-| DELETE | `/user-requests/:id` | 5 | Cancel request → marks it `ABANDONED` |
-| GET | `/flexibility` | 5 | `FlexibilityEnvelopes` derived from active plan |
+| DELETE | `/user-requests/:id` | 5 | Cancel request → marks it `Cancelled` |
+| GET | `/flexibility` | 5 | `SiteFlexibilityEnvelope` derived from live asset state (refreshed every dispatcher tick, independent of the active plan) |
+| GET / POST / DELETE | `/ev-session` | 5 | Read / create / end the active `EvSession` |
+| GET / PUT | `/ev-settings` | 5 | Opportunistic surplus-EV-charging overlay toggle |
+| GET / POST / DELETE | `/heater-target` | 5 | Read / create / clear the active `HeaterTarget` |
+| GET / POST | `/shiftable-loads` | 5 | List / create shiftable loads |
+| DELETE | `/shiftable-loads/:id` | 5 | Remove a shiftable load |
+| GET / POST / DELETE | `/baseline-override` | 5 | Read / create / clear additive baseline-load adjustments |
 
-### 4.7 Recorded History — Storage Model Summary
+### 4.8 Trace
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/trace/events` | `ControllerEvent` log (ring buffer, capacity 500), newest first; optional `?limit=N` |
+| GET | `/trace/history` | Per-asset recent history slice |
+
+### 4.9 Recorded History — Storage Model Summary
 
 | Endpoint | What it records | Storage | Max history |
 |---|---|---|---|
-| `GET /trace` | Dispatcher/control decisions (setpoints) | In-memory ring buffer (1 000 entries) | ≈ 16 min at 1 s |
+| `GET /trace/events` | Controller-level decisions (rate/capacity changes, plan cycles, request transitions) | In-memory ring buffer (500 entries) | Variable — depends on event frequency, not a fixed duration |
 | `GET /ledger` | Cumulative totals per asset since startup | In-memory, 1 s updates | Since restart |
-| `GET /reports` | Discrete sim snapshots sent to VTN | Stored at VTN | Indefinite |
+| `GET /reports` | Discrete report snapshots sent to VTN | Stored at VTN | Indefinite |
+| `GET /timeline/:asset_id` / `/timeline/all` | Per-asset physics history merged with future plan slots | In-memory ring buffer (3600 points ≈ 1 h at 1 s tick) + full plan horizon | ≈ 1 h past + plan horizon future |
 
-**No continuous power time series endpoint exists.** `/trace` is the closest substitute
-(commanded setpoints at 1 s cadence, not measured watts).
+`/timeline` is the closest thing to a continuous power time series today (measured watts
+in the past window, planned watts in the future window).
 
 ---
 
@@ -489,92 +587,53 @@ silent bugs (e.g. linearly interpolating a tariff implies a continuous ramp, whi
 **LOCF** = Last Observation Carried Forward — the value at time `t` is the most recent value
 at or before `t`. Correct for tariffs and any signal that "takes effect and stays in effect".
 
-### 5.2 Current Implementation (Audit)
+### 5.2 Implementation — `common::TimeSeries`
 
-The codebase uses three different strategies with no shared abstraction:
+A single reusable abstraction (`VEN/src/common/mod.rs`) backs tariffs, obligation
+reports, and timeline resampling — the three-strategies fragmentation this section
+used to describe no longer exists.
 
-**Planner — tariff lookup** (`planner.rs:540–560`, `tariff_import_at()`):
-Exact-interval containment: `interval_start ≤ ts < interval_end`. Applied at the slot
-**start timestamp only**. A planning slot that spans a tariff boundary gets the rate from
-the first half only — the boundary is invisible to the planner.
-
-```
-Tariff:   [10:00──────── €0.20 ────────11:00)  [11:00── €0.15 ──12:00)
-Slots:    [10:30──────────────────── 11:10)
-Lookup:   tariff_at(10:30) = €0.20  ← 10:57–11:10 billed at wrong rate
-```
-
-**Planner — capacity** (`openadr_interface.rs:236–320`):
-Treated as a scalar state (strictest-limit-wins across all active events). Per-interval
-capacity changes within an event are flattened to a single value — slot-level variation lost.
-
-**Event merge** (`openadr_interface.rs:179–213`):
-Last-write-wins when multiple events define the same interval. The OpenADR `priority` field
-is parsed but not used in ordering. A higher-priority event that is processed first can be
-silently overwritten by a lower-priority one processed later.
-
-**UI stacked chart** (`GridAccumulatedCell.tsx:16–80`):
-Nearest-neighbour binary search with 15 s tolerance. Breaks when assets have different
-effective sampling rates (e.g. one asset downsampled to 30 s strides, another at 1 s).
-Currently mitigated by excluding the `grid` virtual asset from timestamp collection to
-avoid false zero-spikes. Known deferred fix — see BACKLOG RF-05.
-
-**Report generation** (`reporter.rs`):
-Latest snapshot only — no per-interval aggregation. Does not align to the report obligation's
-`intervalPeriod`. Produces one data point regardless of reporting interval length.
-
-### 5.3 Target Architecture — `TimeSeries<T>`
-
-A single reusable abstraction should replace all ad-hoc lookups. See BACKLOG RF-05 and RF-06
-for the implementation plan.
-
-```
-TimeSeries<T> {
-    points:        Vec<(DateTime<Utc>, T)>,
-    interpolation: Interpolation,  // Step | Linear | None
+```rust
+struct TimeSeries {
+    samples:       Vec<(DateTime<Utc>, f64)>,
+    interpolation: Interpolation,  // Step | Linear
 }
 
 enum Interpolation {
-    Step,    // LOCF — correct for tariffs, capacity limits, states
-    Linear,  // correct for power, temperature, SOC
-    None,    // cumulative values — aggregate only, never interpolate
+    Step,    // LOCF — used for tariffs, capacity limits
+    Linear,  // used for power, temperature, SOC
 }
 
-impl<T> TimeSeries<T> {
-    fn at(&self, ts: DateTime<Utc>) -> Option<T>
-    // Evaluate at any timestamp using the declared interpolation rule.
-
-    fn resample(&self, grid: &[DateTime<Utc>]) -> TimeSeries<T>
-    // Project onto an arbitrary timestamp grid (union-of-breakpoints or fixed).
-
-    fn merge(series: &[TimeSeries<T>]) -> TimeSeries<T>
-    // Union-of-breakpoints merge: collect all breakpoints from all inputs,
-    // evaluate each series at every breakpoint using its own rule.
-
-    fn bucket(&self, width: Duration, agg: Aggregator) -> TimeSeries<T>
-    // Downsample: mean (power), last (states), sum (cumulative).
+impl TimeSeries {
+    fn interpolate_at(&self, ts: DateTime<Utc>) -> Option<f64>;
+    fn time_weighted_mean(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Option<f64>;
+    fn resample_to_grid(&self, timestamps: &[DateTime<Utc>]) -> TimeSeries;
+    fn resample_uniform(&self, width: Duration, agg: Aggregation) -> TimeSeries; // Mean | Min | Max
 }
 ```
 
-**Planner slot costing (target behaviour):**
-Instead of sampling tariff at `slot.start`, compute the time-weighted average across the slot:
+**Consumers today:**
+- **Tariffs** (`entities/tariff_snapshot.rs::TariffTimeSeries`): three Step-interpolated
+  `TimeSeries` (import, export, CO₂) built from `TariffSnapshot`s at the OpenADR interface
+  boundary.
+- **Obligation reports** (`controller/reporter.rs`): `resample_uniform` buckets net site
+  power onto the obligation's `intervalPeriod` grid; SoC is sampled at each interval end.
+- **Timeline** (`controller/timeline.rs`): uniform-grid resampling with LOCF time-weighted
+  averaging for the UI chart.
 
-```
-effective_tariff(slot) =
-  Σ( tariff_i × overlap(slot, interval_i) ) / slot.duration
-```
+**Event merge** (`openadr_interface.rs`) remains last-write-wins when multiple events
+define the same interval; the OpenADR `priority` field is parsed but not used in
+ordering — a higher-priority event processed first can be silently overwritten by a
+lower-priority one processed later. Not tracked as a numbered item yet; add to
+`docs/reference/TECHNICAL_DEBTS.md` if picked up.
 
-A 5-min slot straddling a 10:57 boundary with €0.20 before and €0.15 after would give:
-`(7 min × €0.20 + 3 min × €0.15) / 10 min = €0.185/kWh` — correct to three decimal places.
+❌ **GAP** (`docs/reference/TECHNICAL_DEBTS.md` R-16): the MILP planner still samples
+each slot's tariff at its **start** timestamp only (`milp_planner/inputs.rs`,
+`interpolate_at(slot_t)`), not the time-weighted mean across the slot. A slot straddling
+a tariff boundary is priced entirely at the pre-boundary rate. `TimeSeries::time_weighted_mean`
+already exists and would fix this in one call.
 
-For capacity: `effective_limit(slot) = min(capacity_i for all intervals overlapping slot)`.
-
-**Report generation (target behaviour):**
-Evaluate `asset.history(interval_period)` bucketed to the obligation's interval grid.
-Payload type determines aggregator: `USAGE → sum(kWh)`, `DEMAND → mean(kW)`,
-`STORAGE_CHARGE_LEVEL → last(%)`, `BASELINE → last(kW)`.
-
-### 5.4 OpenADR Spec Position
+### 5.3 OpenADR Spec Position
 
 The spec defines interval structure but leaves VEN-side alignment to the implementer:
 - Mixed `intervalPeriod` granularities within a single event (or across events) are legal.
@@ -595,7 +654,7 @@ See `docs/architecture/ven_milp_planner.md` for full design rationale.
 
 ### D-02: In-Memory Ledger
 
-**Decision:** `AssetLedger` is in-memory only; resets on restart.
+**Decision:** The per-asset ledger (`state::AssetLedgerEntry`) is in-memory only; resets on restart.
 **Rationale:** The ledger is a running total for the current session. Persistent billing-period
 data is stored at the VTN as reports. Local persistence adds complexity for little benefit in
 a lab context.
@@ -618,14 +677,17 @@ asset type. The generic model isolates new asset types to their own module.
 temporal alignment bugs that arise when price and capacity signals are stored separately.
 See REQUIREMENTS §3.2.2.
 
-### D-06: POST /sim/override is Full-Replace
+### D-06: POST /sim/inject is Full-Replace
 
-**Decision:** `POST /sim/override` replaces the entire override struct.
+**Decision:** `POST /sim/inject` replaces the entire injection-override struct (see §4.5
+for the endpoint's four behaviour classes; it superseded the earlier `/sim/override`).
 **Rationale:** Partial-patch semantics (PATCH) require null-vs-absent disambiguation.
 Full-replace is simpler and explicit. Callers must set all fields they want active.
 
-### D-07: 30 s Fixed Poll Interval
+### D-07: Event Poll Interval — Configurable, Not Fixed
 
-**Decision:** Event polling is fixed at 30 s.
-**Rationale:** Balances VTN load against response latency. The 30–60 s range from system_design
-was narrowed to 30 s fixed in implementation. Configurable jitter is not implemented in the lab.
+**Decision:** Event polling defaults to 30 s (`POLL_EVENTS_SECS` env var, default 30;
+`POLL_PROGRAMS_SECS`/`POLL_REPORTS_SECS` default 30/60) rather than a hardcoded constant.
+**Rationale:** Balances VTN load against response latency; making it env-configurable
+lets a deployment tune this per VTN without a rebuild. Configurable jitter is not
+implemented in the lab.

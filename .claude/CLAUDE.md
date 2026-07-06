@@ -14,7 +14,8 @@ openspec feature ID (e.g. 030-my-feature). Refactor branches: refactor/<slug>.
 Fix branches: fix/<slug>. All those branches target main. Never force-push to main. The goal is to rebase and fast forward merge.
 DCO sign-off is enforced by CI — do not add co-author footers (see rule above).
 Merge only after all CI checks pass: cargo fmt, cargo clippy -D warnings, cargo audit,
-file-size audit (tasks/ ≤ 200 lines), and E2E tests green on Pi4.
+file-size audit (scripts/audit_file_sizes.py — tasks/ ≤ 200, VEN/src/ ≤ 500 production
+lines), and E2E tests green on Pi4.
 
 testing: full guide at docs/guidelines/TESTING.md. Four suites:
   1. UI unit (local)       — cd VEN/ui && npm test  |  cd VTN/ui && npm test
@@ -24,7 +25,8 @@ testing: full guide at docs/guidelines/TESTING.md. Four suites:
 Run everything: bash run_all_tests.sh
 VEN Rust pyramid (4 layers, all must stay green after any VEN change):
   Domain → Use-case → Adapter-contract → Integration
-  Shared mock adapters live in VEN/src/services/test_support/ (not cfg(test)).
+  Shared mock adapters live in VEN/src/services/test_support/ (test-only,
+  #[cfg(test)]-gated via services/mod.rs).
   Test naming: test_<function>_<scenario>.
 All suites must pass before merging a PR to main.
 
@@ -45,8 +47,10 @@ build:
   Pi4 docker     : ssh Pi4-Server "cd /srv/docker/openadr_lab && docker compose build"
   Pi4 single svc : ssh Pi4-Server "cd /srv/docker/openadr_lab && docker compose build ven"
   Always use wsl for Rust compilation — native Windows cargo lacks cmake/HiGHS.
-  NOTE: .github/workflows/ is currently empty — no CI pipeline is configured yet.
-  Until CI is in place, run linting + tests manually before merging.
+  CI: .github/workflows/ holds three workflows — pre-pr-checks-splittasks.yml
+  (fmt/clippy/audit/DCO on PR), file_size_audit-splittasks.yml (scripts/audit_file_sizes.py
+  on push/PR), e2e-tests.yml (manual dispatch only). Still run linting + tests manually
+  before merging — these workflows don't yet block merges.
 
 determinism: any code path that depends on the current date/time must accept an injectable
 clock (e.g. a Fn() -> DateTime<Utc> parameter or typed wrapper). Already applied in the MILP
@@ -96,7 +100,13 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
   Profile rule: no `use crate::profile` in entities/, controller/, or routes/. Profile values are
   injected as typed parameter structs (e.g. BatteryParams) constructed in the application/infra layer.
 
-  File size: no VEN/src/ file > 500 lines. tasks/ files must stay < 200 lines.
+  File size: no VEN/src/ file > 500 production lines; tasks/ files must stay < 200
+  production lines. "Production lines" = non-blank lines excluding #[cfg(test)] blocks
+  and whole test-only files/directories (e.g. controller/milp_planner/tests/) — this is
+  exactly what scripts/audit_file_sizes.py measures; run it to check compliance.
+  Allowlisted exceptions (cohesive dispatch/glue code, not a line-count problem) are
+  listed inside that script — currently just assets/mod.rs, whose real fix is the
+  enum→trait refactor tracked in docs/plans/refactoring_backlog.md.
 
   Verifiable invariants — run before any VEN PR:
     grep -r "use crate::profile" VEN/src/entities VEN/src/controller VEN/src/routes  → must be empty

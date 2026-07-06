@@ -9,6 +9,7 @@ use crate::state::AppState;
 
 pub struct EvSessionService;
 // Not yet wired to route; heater target is set directly in post_heater_target.
+// Kept intentionally (not deleted) — see docs/BACKLOG.md BL-23 for the wiring decision.
 #[allow(dead_code)]
 pub struct HvacService;
 

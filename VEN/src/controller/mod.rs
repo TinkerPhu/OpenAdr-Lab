@@ -8,6 +8,10 @@ pub mod vtn_port;
 pub use simulator_port::GridSnapshot;
 pub use vtn_port::VtnPort;
 
+// ── SolverPort trait and request type ─────────────────────────────────────────
+pub mod solver_port;
+pub use solver_port::{SolveRequest, SolverPort};
+
 // ── OpenADR interface ─────────────────────────────────────────────────────────
 pub mod openadr_interface;
 

@@ -1,4 +1,8 @@
-#![allow(dead_code)] // types constructed via serde deserialization, not direct instantiation
+// Module-wide allow: `OadrCapacityState`/`OadrReportObligation` are live (constructed via
+// serde deserialization and read elsewhere); `OadrProgramConfig`/`OadrEventCache`/
+// `OadrCapacityRequest` below are unwired sketches, kept intentionally (not deleted) —
+// see docs/BACKLOG.md BL-24 and docs/reference/TECHNICAL_DEBTS.md R-13 (DISPATCH_SETPOINT).
+#![allow(dead_code)]
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -25,6 +29,7 @@ pub struct OadrCapacityState {
 }
 
 /// Configuration for an OpenADR program this VEN participates in (§5.1).
+/// Unwired sketch — never constructed anywhere. See docs/BACKLOG.md BL-24.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OadrProgramConfig {
     pub program_id: String,
@@ -39,6 +44,9 @@ pub struct OadrProgramConfig {
 }
 
 /// Internal representation of a received OpenADR event, translated into domain terms (§5.2).
+/// Unwired sketch — never constructed anywhere; `dispatch_setpoints` is the storage this
+/// would need once DISPATCH_SETPOINT parsing exists. See docs/BACKLOG.md BL-24 and
+/// docs/reference/TECHNICAL_DEBTS.md R-13.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OadrEventCache {
     pub event_id: String,
@@ -81,6 +89,7 @@ impl OadrReportObligation {
 }
 
 /// A capacity reservation request sent to the VTN (Stage 2+).
+/// Unwired sketch — never constructed anywhere. See docs/BACKLOG.md BL-24.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OadrCapacityRequest {
     pub program_id: String,

@@ -103,8 +103,8 @@ The VEN handles PRICE-family payloads well (its primary use case as a HEMS), but
 | Delete reports (`DELETE /reports/{id}`) | MUST | Missing | No delete operation in `vtn.rs` |
 | Read own reports (`GET /reports`) | read_ven_objects | Full | Polls with `?clientName={ven_name}` |
 | TELEMETRY_USAGE measurement reports | — | Full | Per-event, includes net power + OPERATING_STATE + SoC |
-| Status reports (event-driven) | — | Full | Triggered on `PlanCycle` controller event (each planning cycle) |
-| Report obligation tracking | — | Full | Extracts from `reportDescriptors`, tracks due times, marks fulfilled |
+| Status reports (event-driven) | — | Missing | `PlanCycle` events are logged to `/trace/events` and streamed via `/plan/events` (SSE), but no VTN report is built from them — the code path that once attempted this (`TELEMETRY_STATUS` on `PlanCycle`) was dead (never had a program ID to report against) and was removed |
+| Report obligation tracking | — | Full | Extracts from `reportDescriptors`; recurring — each due obligation is re-armed to its next `due_at` (`interval_duration_s` later) after reporting, not permanently fulfilled; retired once its source event drops out of the active poll set |
 | Data quality metadata (accuracy, confidence) | — | Missing | Not included in report payloads |
 | Historical / forecast / rolling reports | — | Partial | Only real-time measurement reports; no historical replay or forecast reports |
 | `resourceName` in report resources | — | Full | `"{ven_name}-meter"` naming pattern |

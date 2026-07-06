@@ -1,10 +1,12 @@
 pub mod asset;
 pub mod asset_params;
 pub mod capacity;
+pub mod design_vocabulary;
 pub mod device_session;
 pub mod error;
 pub mod plan;
 pub mod planner_params;
+pub mod sim_inject;
 pub mod site_meter;
 pub mod tariff_snapshot;
 pub mod timeline;

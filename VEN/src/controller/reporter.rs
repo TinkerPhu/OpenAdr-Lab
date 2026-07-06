@@ -1,14 +1,15 @@
 /// Controller reporter: builds OpenADR VEN report payloads.
 ///
 /// Two modes:
-///   - Measurement reports (timer-driven): one TELEMETRY_USAGE report per active event.
-///   - Status reports (event-driven): TELEMETRY_STATUS triggered by PlanCycle.
+///   - Timer-driven measurement reports: one TELEMETRY_USAGE report per active event.
+///   - Obligation-driven measurement reports: multi-interval reports resampled onto a
+///     report obligation's interval grid.
 use chrono::{DateTime, Duration, Utc};
 use tracing::debug;
 
 use crate::common::{parse_iso8601_duration_secs, Aggregation, Interpolation, TimeSeries};
+#[cfg(test)]
 use crate::controller::simulator_port::SimSnapshot;
-use crate::controller::trace::ControllerEvent;
 use crate::controller::vtn_port::{
     OadrEvent, OadrIntervalPeriod, OadrReportBody, OadrReportInterval, OadrReportPayload,
     OadrReportResource,
@@ -77,20 +78,6 @@ fn event_is_active(event: &OadrEvent, now: DateTime<Utc>) -> bool {
 // ---------------------------------------------------------------------------
 // Measurement report (timer-driven, T046)
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Latest asset power helpers
-// ---------------------------------------------------------------------------
-
-/// Sum the most-recent `power_kw` across all assets that are currently importing
-/// (positive power). Returns 0.0 if no assets are importing.
-fn latest_net_import_kw(snap: &SimSnapshot) -> f64 {
-    snap.assets
-        .values()
-        .map(|a| a.power_kw)
-        .filter(|&kw| kw > 0.0)
-        .sum()
-}
 
 /// Build a TELEMETRY_USAGE measurement report for a single active OpenADR event.
 ///
@@ -493,70 +480,6 @@ fn format_iso8601_duration(secs: u64) -> String {
     result
 }
 
-// ---------------------------------------------------------------------------
-// Status report (event-driven, T047)
-// ---------------------------------------------------------------------------
-
-/// Build a TELEMETRY_STATUS report triggered by a `ControllerEvent`.
-///
-/// Only emits for the `PlanCycle` variant.
-/// Returns None when no active OpenADR event provides a `programID` (VTN requires it)
-/// or for unhandled event types.
-pub fn build_status_report(
-    event: &ControllerEvent,
-    snap: &SimSnapshot,
-    ven_name: &str,
-    program_id: Option<&str>,
-    _now: DateTime<Utc>,
-) -> Option<OadrReportBody> {
-    let program_id = program_id?;
-
-    let (description, asset_id_opt): (String, Option<String>) = match event {
-        ControllerEvent::PlanCycle {
-            trigger_reason,
-            total_slots,
-            ..
-        } => (
-            format!("PlanCycle trigger={} slots={}", trigger_reason, total_slots),
-            None,
-        ),
-        _ => return None,
-    };
-
-    let net_import_kw = latest_net_import_kw(snap);
-
-    let resource_name = asset_id_opt
-        .as_deref()
-        .map(|id| format!("{}-{}", ven_name, id))
-        .unwrap_or_else(|| format!("{}-site", ven_name));
-
-    let report = OadrReportBody {
-        programID: program_id.to_string(),
-        eventID: None,
-        clientName: ven_name.to_string(),
-        reportName: Some(format!("status-{}", ven_name)),
-        resources: vec![OadrReportResource {
-            resourceName: resource_name,
-            intervals: vec![OadrReportInterval {
-                id: 0,
-                intervalPeriod: None,
-                payloads: vec![
-                    OadrReportPayload {
-                        r#type: "TELEMETRY_STATUS".to_string(),
-                        values: vec![serde_json::Value::from(description)],
-                    },
-                    OadrReportPayload {
-                        r#type: "USAGE".to_string(),
-                        values: vec![serde_json::Value::from(net_import_kw * 1000.0)],
-                    },
-                ],
-            }],
-        }],
-    };
-
-    Some(report)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -836,26 +759,6 @@ mod tests {
         assert!(net.samples.is_empty());
     }
 
-    // ── latest_net_import_kw ───────────────────────────────────────
-
-    #[test]
-    fn latest_net_import_kw_sums_positive_assets() {
-        let snap = make_snap(&[("a", 3.0), ("b", -2.0)]);
-        assert!((latest_net_import_kw(&snap) - 3.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn latest_net_import_kw_empty_history_returns_zero() {
-        let snap = make_snap(&[]);
-        assert_eq!(latest_net_import_kw(&snap), 0.0);
-    }
-
-    #[test]
-    fn latest_net_import_kw_all_exporting_returns_zero() {
-        let snap = make_snap(&[("pv", -5.0)]);
-        assert_eq!(latest_net_import_kw(&snap), 0.0);
-    }
-
     // ── IMPORT/EXPORT_CAPACITY_RESERVATION ────────────────────────
 
     #[test]
@@ -1025,51 +928,6 @@ mod tests {
         );
     }
 
-    // ── build_status_report ────────────────────────────────────────
-
-    #[test]
-    fn status_report_plan_cycle_fields() {
-        use crate::controller::trace::ControllerEvent;
-        let event = ControllerEvent::PlanCycle {
-            ts: Utc::now(),
-            trigger_reason: "Periodic".to_string(),
-            total_slots: 288,
-        };
-        let snap = make_snap(&[("site", 2.0)]);
-        let report =
-            build_status_report(&event, &snap, "ven-1", Some("prog-001"), Utc::now()).unwrap();
-        assert_eq!(report.programID, "prog-001");
-        assert!(report.eventID.is_none(), "status report must omit eventID");
-        assert_eq!(report.clientName, "ven-1");
-        assert_eq!(report.reportName.as_deref(), Some("status-ven-1"));
-        assert_eq!(report.resources[0].resourceName, "ven-1-site");
-        let iv = &report.resources[0].intervals[0];
-        assert_eq!(iv.id, 0);
-        let status_payload = iv
-            .payloads
-            .iter()
-            .find(|p| p.r#type == "TELEMETRY_STATUS")
-            .unwrap();
-        let desc = status_payload.values[0].as_str().unwrap();
-        assert!(
-            desc.contains("PlanCycle"),
-            "expected PlanCycle in description, got: {desc}"
-        );
-        assert!(iv.payloads.iter().any(|p| p.r#type == "USAGE"));
-    }
-
-    #[test]
-    fn status_report_no_program_id_returns_none() {
-        use crate::controller::trace::ControllerEvent;
-        let event = ControllerEvent::PlanCycle {
-            ts: Utc::now(),
-            trigger_reason: "Periodic".to_string(),
-            total_slots: 288,
-        };
-        let snap = make_snap(&[]);
-        assert!(build_status_report(&event, &snap, "ven-1", None, Utc::now()).is_none());
-    }
-
     // ── SC-004: build_measurement_report callable without SimState ─
 
     #[test]
@@ -1105,39 +963,5 @@ mod tests {
             .unwrap();
         let val = usage.values[0].as_f64().unwrap();
         assert!((val - 3000.0).abs() < 1.0, "expected 3000 W, got {val}");
-    }
-
-    // ── SC-005: build_status_report callable without SimState ─────
-
-    #[test]
-    fn build_status_report_domain_only() {
-        use crate::controller::trace::ControllerEvent;
-        let event = ControllerEvent::PlanCycle {
-            ts: Utc::now(),
-            trigger_reason: "Periodic".to_string(),
-            total_slots: 288,
-        };
-        let snap = make_snap(&[("site", 2.0)]);
-        let report = build_status_report(&event, &snap, "ven-1", Some("prog-001"), Utc::now());
-        assert!(report.is_some(), "expected Some(report)");
-        let report = report.unwrap();
-        assert_eq!(report.programID, "prog-001");
-        assert_eq!(report.clientName, "ven-1");
-        let iv = &report.resources[0].intervals[0];
-        let status_payload = iv
-            .payloads
-            .iter()
-            .find(|p| p.r#type == "TELEMETRY_STATUS")
-            .unwrap();
-        assert!(
-            status_payload.values[0]
-                .as_str()
-                .unwrap()
-                .contains("PlanCycle"),
-            "expected PlanCycle in status description"
-        );
-        let usage_payload = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
-        let val = usage_payload.values[0].as_f64().unwrap();
-        assert!((val - 2000.0).abs() < 1.0, "expected 2000 W, got {val}");
     }
 }

@@ -7,9 +7,9 @@ use crate::controller;
 use crate::controller::SimSnapshot;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
+use crate::entities::sim_inject::SimInjectState;
 use crate::models::SensorSnapshot;
 use crate::simulator::SimState;
-use crate::state::SimInjectState;
 
 /// PHASE 1: Apply Behaviour A one-shot state injections to the simulator.
 /// Returns a list of field names that were applied and should be cleared.
