@@ -5,8 +5,7 @@ created: 2026-07-06
 updated: 2026-07-06
 synced_commit: 3d28b1c
 sources:
-  - docs/openadr_3_1_specs/3_OpenADR 3.1.0_User_Guide_20250801.md
-  - docs/openadr_3_1_specs/2_OpenADR 3.1.0_Definition_20250801.md
+  - docs/openadr_3_1_specs/
   - VEN/src/tasks/poll_programs.rs
   - VEN/src/entities/capacity.rs
 tags: [openadr, program, enrollment, dr, concepts]
@@ -170,6 +169,5 @@ VEN joins because its flexibility is worthless unexposed; the program object is 
 standing agreement that gives both sides a stable vocabulary, so the fast-moving events
 need to carry only numbers, not meaning.
 
-> **OPEN QUESTION** A dedicated `concepts/openadr-programs.md` page would make this
-> durable wiki content instead of a filed query — logged as a coverage gap in
-> `review.md` (2026-07-06).
+This answer has been promoted to a durable concept page: [[openadr-programs]] — link
+there, not here, from other wiki pages.

@@ -23,6 +23,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 
 ## Concepts
 - [[openadr-3]] — protocol entities, event types, certification profiles, 3.0 vs 3.1 skew
+- [[openadr-programs]] — the Program as commercial DR offering: 5 worked VTN/VEN examples, multi-program enrollment, out-of-band contractual joining
 - [[demand-response]] — actors (utility/DSO/TSO/aggregator/prosumer), DER, baseline vs forecast, M&V
 - [[hems-planning]] — two-speed loop, FIRM/FLEXIBLE slots, user requests, sessions as constraints
 - [[three-tier-plan-grid]] — zones A/B/C, alignment rule, the three "nows"
@@ -49,4 +50,4 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[openadr-programs-explained]] — what a Program is, 5 worked examples (VTN vs VEN view), multi-program enrollment, contractual out-of-band joining
 
 ---
-Pages: 29 · Last sync: 2026-07-06 (R1/R2/R3/R5/R6 code-and-docs resolution + timeline-forecast fix: 12 pages updated, uncommitted WIP at ae4a1ed)
+Pages: 30 · Last sync: 2026-07-06 (R1/R2/R3/R5/R6 code-and-docs resolution + timeline-forecast fix: 12 pages updated, uncommitted WIP at ae4a1ed)
