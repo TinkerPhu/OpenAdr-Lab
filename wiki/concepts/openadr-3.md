@@ -2,7 +2,7 @@
 title: OpenADR 3
 type: concept
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-06
 synced_commit: e138861
 sources: [docs/REQUIREMENTS.md, docs/openadr_3_1_specs/]
 tags: [openadr, protocol, spec]
@@ -14,7 +14,9 @@ Open standard for communicating demand-response signals between utilities/aggreg
 (**VTN**, server) and customer energy systems (**VEN**, client) — the protocol at the heart
 of [[openadr-lab]]. Spec entities are used as-is, never redefined locally: Program, Event,
 Report, VEN, Resource, Interval, Payload (docs/REQUIREMENTS.md §3.1, citing spec
-`docs/openadr_3_1_specs/2_OpenADR 3.1.0_Definition_20250801.md` §5.1–5.5).
+`docs/openadr_3_1_specs/2_OpenADR 3.1.0_Definition_20250801.md` §5.1–5.5). The Program —
+the business-level DR offering that events and reports belong to, and why VENs enroll in
+one or several — has its own page: [[openadr-programs]].
 
 ## Event types used in this lab
 

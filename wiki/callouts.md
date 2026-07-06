@@ -14,7 +14,7 @@
 
 ## CONTRADICTION
 
-- [[openadr-3]] (`wiki/concepts/openadr-3.md:40`) — (version skew, intentional): the spec markdown in …
+- [[openadr-3]] (`wiki/concepts/openadr-3.md:42`) — (version skew, intentional): the spec markdown in …
 
 ## OPEN QUESTION
 
