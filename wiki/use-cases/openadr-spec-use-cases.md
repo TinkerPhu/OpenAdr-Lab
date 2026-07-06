@@ -2,8 +2,8 @@
 title: OpenADR-Spec-Implied Use Cases — Gap Analysis
 type: use-case
 created: 2026-07-04
-updated: 2026-07-05
-synced_commit: e138861
+updated: 2026-07-06
+synced_commit: ae4a1ed
 sources: [docs/openadr_3_1_specs/, docs/BACKLOG_OpenADR_Cert.md, docs/architecture/VEN_ARCHITECTURE.md, tests/features/, VEN/src/entities/capacity.rs]
 tags: [use-cases, openadr, gap-analysis, spec]
 ---
@@ -38,7 +38,7 @@ testing, not to model a utility's business logic.
 | Read events, respond within a program | §5.4, §6.5 | ✅ | 30 s poll → typed translation → `PlanTrigger` → [[milp-planner]] replan |
 | **Push notification** on program/event/report change (webhook subscription) | §5.4, §6.3.1 | ❌ | Polling only. Feature: subscription object + webhook receiver endpoint; would cut the 30 s reaction latency |
 | Notification via additional protocols (MQTT) | §6.3.2 | ❌ | No MQTT client (cert backlog §2). Feature: optional MQTT listener beside the poller |
-| Create/update reports fulfilling report requests | §5.4, §6.6, §7.5 | 🟡 | `USAGE`, `SIMPLE`, `STORAGE_CHARGE_LEVEL`, `OPERATING_STATE`, capacity reservations are built (`reporter.rs`); `DEMAND`/`USAGE_FORECAST` are not; obligations are one-shot (a `frequency` descriptor yields one report, not a recurring series); rolling/ad-hoc/`report-only` management (§7.5) not implemented ([[ven-code-vs-docs-audit]]) |
+| Create/update reports fulfilling report requests | §5.4, §6.6, §7.5 | 🟡 | `USAGE`, `SIMPLE`, `STORAGE_CHARGE_LEVEL`, `OPERATING_STATE`, capacity reservations are built (`reporter.rs`); `DEMAND`/`USAGE_FORECAST` are not; obligations now recur correctly (a `frequency` descriptor yields one report per interval, re-armed rather than one-shot — see [[openadr-interface]]); rolling/ad-hoc/`report-only` management (§7.5) not implemented ([[ven-code-vs-docs-audit]]) |
 | Hourly prices + usage response | §6.6 | ✅ | The lab's core loop: `PRICE` events → MILP cost objective → usage reports ([[hems-planning]]) |
 | Load shed on command | §6.6 | 🟡 | `ALERT_GRID_EMERGENCY`/`ALERT_BLACK_START` → planner shed is BL-04, not yet implemented; `SIMPLE` levels 0–3 unmapped ([[openadr-interface]]) |
 | Device status reporting | §6.6 | 🟡 | `OPERATING_STATE` payload is sent but hardcoded to `"ACTIVE"` (`reporter.rs`); the `DeviceResponsiveness` enum it should derive from is unreferenced vocabulary |

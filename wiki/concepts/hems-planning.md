@@ -2,9 +2,9 @@
 title: HEMS Planning Concepts
 type: concept
 created: 2026-07-04
-updated: 2026-07-05
-synced_commit: e138861
-sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems.rs, openspec/specs/ev-session-request-completion/spec.md, VEN/src/entities/device_session.rs]
+updated: 2026-07-06
+synced_commit: ae4a1ed
+sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems/, openspec/specs/ev-session-request-completion/spec.md, VEN/src/entities/device_session.rs]
 tags: [hems, planning, sessions, domain]
 ---
 
@@ -45,7 +45,7 @@ into device sessions — `EvSession`, `HeaterTarget`, `ShiftableLoad` — applyi
 energy target, `MilpLoadMode`), never as iterated objects (§2.3.1).
 
 **Session teardown closes the loop back onto the request.** Deleting an `EvSession`
-(`DELETE /ev-session`, `VEN/src/routes/hems.rs`) does not just clear session state — it
+(`DELETE /ev-session`, `VEN/src/routes/hems/ev.rs`) does not just clear session state — it
 walks `UserRequest`s by `session_id` and transitions any still `Active` to `Completed`
 before the session is cleared (`openspec/specs/ev-session-request-completion/spec.md`).
 Only `Active` requests are touched; `Cancelled` ones and requests tied to a different

@@ -2,8 +2,8 @@
 title: System Use Cases
 type: use-case
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: 4695762
+updated: 2026-07-06
+synced_commit: ae4a1ed
 sources: [docs/use-cases/SYSTEM-USE-CASES.md, tests/features/, docs/use-cases/SYSTEM-USE-CASE-MANUAL.md]
 tags: [use-cases, dr, bdd]
 ---
