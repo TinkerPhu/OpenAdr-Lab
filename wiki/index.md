@@ -23,7 +23,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 
 ## Concepts
 - [[openadr-3]] — protocol entities, event types, certification profiles, 3.0 vs 3.1 skew
-- [[openadr-programs]] — the Program as commercial DR offering: 5 worked VTN/VEN examples, multi-program enrollment, out-of-band contractual joining
+- [[openadr-programs]] — commercial DR offering: 5 worked examples, 4 purposes (interpretation/auth/business/discovery), customer visibility, enrollment
 - [[demand-response]] — actors (utility/DSO/TSO/aggregator/prosumer), DER, baseline vs forecast, M&V
 - [[hems-planning]] — two-speed loop, FIRM/FLEXIBLE slots, user requests, sessions as constraints
 - [[three-tier-plan-grid]] — zones A/B/C, alignment rule, the three "nows"
