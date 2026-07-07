@@ -12,7 +12,7 @@ Feature: Reporter multi-interval resampling (RF-05e)
     And I create an event for the saved program with a reportDescriptor frequency of 5 seconds
     When I wait for VEN-1 to have at least 1 event
     And I wait for VEN-1 to accumulate at least 20 seconds of history
-    And I wait for VEN-1 to have at least 1 fulfilled obligation
+    And I wait for VEN-1 to submit an obligation-driven report for the event
     Then the latest VEN-1 report for the event has multiple intervals
     And each interval has sequential ids starting from 0
     And each interval contains a USAGE payload

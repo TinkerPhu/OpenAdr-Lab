@@ -54,20 +54,26 @@ def step_wait_ven1_history(context, secs):
     time.sleep(secs)
 
 
-@when("I wait for VEN-1 to have at least {count:d} fulfilled obligation")
-@when("I wait for VEN-1 to have at least {count:d} fulfilled obligations")
-def step_wait_ven1_obligations_fulfilled(context, count):
-    def fetch():
-        return requests.get(f"{VEN_BASE_URL}/obligations", timeout=HTTP_TIMEOUT).json()
+@when("I wait for VEN-1 to submit an obligation-driven report for the event")
+def step_wait_ven1_obligation_report_for_event(context):
+    # Obligations recur (R6): `fulfilled` stays false permanently and is no longer a
+    # one-shot "done" signal — due_at advances in place instead. The actual thing this
+    # scenario cares about is that a report was submitted, so poll /reports directly
+    # rather than the obligation's internal fulfilled flag.
+    event_id = context.saved_event_id
 
-    obligations = poll_until(
+    def fetch():
+        reports = requests.get(f"{VEN_BASE_URL}/reports", timeout=HTTP_TIMEOUT).json()
+        return [r for r in reports if r.get("eventID") == event_id]
+
+    matching = poll_until(
         fetch,
-        lambda obs: sum(1 for o in obs if o.get("fulfilled", False)) >= count,
+        lambda rs: len(rs) >= 1,
         timeout=60,
         interval=3,
-        description=f"VEN-1 has >= {count} fulfilled obligations",
+        description=f"VEN-1 has submitted a report for event {event_id}",
     )
-    context.ven1_obligations = obligations
+    context.ven1_reports = matching
 
 
 @when("I wait for VEN-1 to submit at least {count:d} timer-driven report for the event")
