@@ -65,9 +65,13 @@ def step_poll_sim_until_asset_appears(context, asset_id):
             return False
         return asset_id in sim.get("assets", {})
 
+    # Appearance in /sim requires a full plan cycle (trigger → MILP solve → adopt)
+    # plus a dispatcher tick to start the ShiftableLoadRuntime. On Pi4 this latency
+    # clusters around 125–150s, so a 150s cap is razor-thin and flakes under any
+    # extra load. 240s gives genuine margin; fast cases still return immediately.
     context.polled_sim = poll_until(
         fetch, asset_present,
-        timeout=150, interval=3,
+        timeout=240, interval=3,
         description=f"/sim has asset '{asset_id}'",
     )
 
@@ -101,9 +105,11 @@ def step_poll_sim_until_asset_disappears(context, asset_id):
             return False
         return asset_id not in sim.get("assets", {})
 
+    # Disappearance follows the load's duration elapsing plus auto-complete
+    # detection and a removal replan; give the same Pi4 margin as appearance.
     context.polled_sim = poll_until(
         fetch, asset_gone,
-        timeout=90, interval=3,
+        timeout=150, interval=3,
         description=f"/sim no longer has asset '{asset_id}'",
     )
 
