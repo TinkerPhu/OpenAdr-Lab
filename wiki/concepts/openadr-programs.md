@@ -2,13 +2,14 @@
 title: OpenADR Programs
 type: concept
 created: 2026-07-06
-updated: 2026-07-06
-synced_commit: 8c220b3
+updated: 2026-07-07
+synced_commit: 466f792
 sources:
   - docs/openadr_3_1_specs/
   - VEN/src/tasks/poll_programs.rs
   - VEN/src/entities/capacity.rs
-tags: [openadr, program, enrollment, dr, spec]
+  - openleadr-rs/openleadr-wire/src/program.rs
+tags: [openadr, program, enrollment, dr, spec, authorization]
 ---
 
 # OpenADR Programs
@@ -35,6 +36,96 @@ Two spec rules make the program load-bearing in the protocol (User Guide §6.4):
   stable; events are the fast-moving content inside them. `program.programName` must be
   unique per VTN instance (Definition §programName,
   `docs/openadr_3_1_specs/2_OpenADR 3.1.0_Definition_20250801.md`).
+
+## What the Program object is actually *for* — four purposes, not one
+
+"Interpretation of events" is the most visible purpose but not the only one — the spec
+gives Program at least four distinct jobs, and authorization is arguably more
+load-bearing in the protocol than interpretation:
+
+1. **Semantic namespace.** A program's own `payloadDescriptors` list "provides default
+   values for all events associated with a program" (User Guide §8.3) — the program
+   pre-declares what payload types its events will use, so events don't have to.
+2. **Authorization / entitlement boundary — separate from interpretation.** Definitions
+   doc, Security section: *"Within the context of a given program, a VEN will be
+   authorized to access some set of resources and associated operations."* More
+   bluntly: *"a Business Logic client may create an event, but a VEN cannot. Both can
+   read an event, but a VEN can only read events associated with the programs it is
+   entitled to access."* Programs (and events) are also the objects that carry
+   `targets`: BL grants targets to a `ven` object, then attaches matching targets to a
+   program/event to gate read access at all (Definitions doc, "program and event
+   objects - targeting"). This is pure access control, independent of what the events
+   *mean* — see [[openadr-security]].
+3. **Commercial/business container.** Program's own definition is *"the business
+   context for a given usage of the VTN"* (Definitions doc, Terms and Definitions). It
+   carries retailer identity, country/subdivision, program type, `bindingEvents`
+   (whether events are fixed once transmitted), `localPrice` (whether values were
+   adapted by a local VTN) — regulatory/commercial metadata about the offering, not
+   payload-decoding hints.
+4. **Discovery anchor and structural prerequisite.** `GET /programs` is how a VEN/CL
+   discovers what's on offer (User Guide §5.4, §6.4). Structurally, *"a program object
+   must be present on the VTN before an event may be created, as event must refer to an
+   existing program"* (§8.13) — a hard foreign-key dependency, not just a semantic hint.
+
+## Is the Program object meant to be seen by the customer, or only the VEN?
+
+Not VEN-only — but not required to be customer-facing either. Two separate artifacts
+are easy to conflate:
+
+- **The Program Description** — a human-readable document handed over out-of-band at
+  enrollment (*"specifies a usage of the OpenADR 3 object model and configuration
+  details such as VTN address, program names, applicable customer types, etc."*,
+  Definitions doc, Terms and Definitions). Not a protocol object; this is the primary
+  "what am I signing up for" artifact.
+- **The Program object** in the VTN — primarily consumed by the VEN's automation logic,
+  but the spec leaves the door open: *"Some fields in the program object may be
+  displayed to persons using a VEN via a VEN provided user interface, but this feature
+  is not required"* (User Guide §6.4). `programName` itself is defined as *"a unique
+  name for a program or tariff. May be used by customers"* (Definitions doc). Table 8
+  "Program Attribute Enumerations" includes `PROGRAM_LONG_NAME` and
+  `RETAILER_LONG_NAME`, both defined explicitly *"...for human readability"* — the
+  schema deliberately carries display strings. `Customer Logic (CL)` is defined as
+  logic that "may provide human facing features to support configuration and
+  monitoring," and the Customer user stories include *"As CL, I want to read a list of
+  programs or an individual program, so that I have the context necessary to understand
+  what DR programs exist, or select the one appropriate to me"* (User Guide §5.3).
+
+openleadr-rs (`openleadr-rs/openleadr-wire/src/program.rs`) reflects this by promoting
+the Table 8 attributes to first-class typed `Option<String>` fields on `ProgramContent`
+(`program_long_name`, `retailer_name`, `retailer_long_name`, `program_type`...) rather
+than leaving them buried in the generic `attributes: valuesMap` list the raw schema
+technically allows — a signal that a real implementation treats human-readability as a
+normal, expected part of the object, not a fringe feature.
+
+## Many events pointing at one program — is that pattern actually used?
+
+Yes, and it is the *normal* case, not an edge case — a program is designed to long
+outlive any single event.
+
+- **Structural rule:** every event carries a `programID` foreign key (§6.4, enforced by
+  the "program must exist before event can be created" rule in §8.13).
+- **Reuse is the point.** `programName` uniqueness per VTN instance means you don't mint
+  a new program per event — you create the program once and post events against it
+  repeatedly.
+- **Worked example in the spec itself:** §8.10.2 "Dynamic Capacity Management" walks
+  through a *single* program under which BL posts a `capacity_subscription_Event`, then
+  later a `capacity_reservation_Event`, then a `capacity_available_Event`, then further
+  reservation-grant events over time — distinct events, same program, unfolding as an
+  ongoing relationship. The worked examples across User Guide §8.2–§8.12 (CPP event,
+  simple event, pricing event, inverter/curve event, load-control event, fast-DR event,
+  setpoint event, capacity events) all reuse the same placeholder `"programID": "44"` —
+  illustrating that one program is meant to host a whole family of event kinds over its
+  lifetime.
+- **Clearest real-world instance:** the dynamic-tariff case (example 1 below). One
+  `Program` object ("day-ahead hourly tariff") persists for the life of the contract; a
+  brand-new `PRICE` event is created every day (or more often) for as long as the
+  customer is enrolled — potentially thousands of events against one program over a
+  year, matching the "programs change ~yearly, events change daily" split in §6.4.
+- **The other multiplicity in the spec is different and independent:** *"A provider
+  might offer several programs at the same time... A single customer may be enrolled in
+  multiple programs simultaneously"* (§6.4) — many **programs** per VEN (orthogonal
+  deals: tariff + EV + capacity envelope), not many events per program. See "Why a VEN
+  joins multiple programs" below — both fan-out patterns coexist independently.
 
 ## Five worked examples
 
