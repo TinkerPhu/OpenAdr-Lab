@@ -109,6 +109,7 @@ mod tests {
             programID: "p1".into(),
             eventName: None,
             priority: None,
+            createdDateTime: None,
             intervalPeriod: None,
             intervals: vec![],
             reportDescriptors: None,

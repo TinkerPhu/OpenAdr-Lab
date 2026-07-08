@@ -53,6 +53,9 @@ pub struct OadrEvent {
     /// OpenADR 3 priority — lower numbers are higher priority (0 = highest). Optional.
     #[serde(default)]
     pub priority: Option<i64>,
+    /// OpenADR 3 event creation timestamp (ISO 8601), used to break priority ties. Optional.
+    #[serde(default)]
+    pub createdDateTime: Option<String>,
     /// Event-level interval period — used for looping price events (e.g. duration = "P9999Y").
     #[serde(default)]
     pub intervalPeriod: Option<OadrIntervalPeriod>,

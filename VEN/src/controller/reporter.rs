@@ -821,6 +821,7 @@ mod tests {
             programID: "prog-001".to_string(),
             eventName: None,
             priority: None,
+            createdDateTime: None,
             intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
@@ -856,6 +857,7 @@ mod tests {
             programID: "prog-001".to_string(),
             eventName: None,
             priority: None,
+            createdDateTime: None,
             intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
@@ -899,6 +901,7 @@ mod tests {
             programID: "prog-001".to_string(),
             eventName: None,
             priority: None,
+            createdDateTime: None,
             intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
@@ -938,6 +941,7 @@ mod tests {
             programID: "prog-001".to_string(),
             eventName: None,
             priority: None,
+            createdDateTime: None,
             intervalPeriod: None,
             intervals: vec![OadrInterval {
                 intervalPeriod: None,
