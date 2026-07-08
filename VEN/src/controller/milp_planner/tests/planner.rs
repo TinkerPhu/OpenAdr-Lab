@@ -367,6 +367,7 @@ fn make_profile_n48() -> Profile {
                 soc_target: 0.8,
                 default_charge_kw: 0.0,
                 min_charge_kw: 1.4,
+                response_delay_s: 10.0,
             }),
             AssetProfile::Heater(HeaterConfig {
                 id: "heater".into(),

@@ -6,6 +6,16 @@ use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset_params::EvParams;
 
+/// Snap a commanded EV setpoint to 0 if it falls strictly between 0 and the minimum
+/// sustained charge rate (BL-12) — does not apply to V2G discharge (negative setpoints).
+fn snap_to_min_charge(setpoint_kw: f64, min_charge_kw: f64) -> f64 {
+    if setpoint_kw > 0.0 && setpoint_kw < min_charge_kw {
+        0.0
+    } else {
+        setpoint_kw
+    }
+}
+
 /// EV Charger config. Positive = charge (import), negative = V2G discharge (export).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvCharger {
@@ -19,6 +29,13 @@ pub struct EvCharger {
     pub default_charge_kw: f64,
     /// V2G floor; 0.0 if not specified in profile.
     pub min_soc: f64,
+    /// Minimum sustained charge rate — commanded setpoints strictly between 0 and
+    /// this value snap to 0 (most EVSE controllers cannot hold an arbitrarily low
+    /// current). Does not apply to V2G discharge.
+    pub min_charge_kw: f64,
+    /// Expected controller response delay (s). Simulated as a single-tick command
+    /// lag: the setpoint accepted this tick is applied on the *next* tick.
+    pub response_delay_s: f64,
 }
 
 /// EV mutable state.
@@ -29,6 +46,10 @@ pub struct EvState {
     pub plugged: bool,
     /// Actual power last tick. Positive = charging (import). Negative = V2G (export).
     pub actual_power_kw: f64,
+    /// Setpoint accepted this tick; becomes `actual_power_kw` on the *next* tick
+    /// (BL-12 response-delay buffer).
+    #[serde(default)]
+    pub pending_command_kw: f64,
 }
 
 impl EvCharger {
@@ -41,6 +62,8 @@ impl EvCharger {
             soc_target_profile: cfg.soc_target,
             default_charge_kw: cfg.default_charge_kw,
             min_soc: 0.0,
+            min_charge_kw: cfg.min_charge_kw,
+            response_delay_s: cfg.response_delay_s,
         }
     }
 
@@ -49,6 +72,7 @@ impl EvCharger {
             soc: cfg.initial_soc,
             plugged: true,
             actual_power_kw: cfg.max_charge_kw,
+            pending_command_kw: cfg.max_charge_kw,
         }
     }
 
@@ -58,12 +82,14 @@ impl EvCharger {
             return (
                 EvState {
                     actual_power_kw: 0.0,
+                    pending_command_kw: 0.0,
                     ..state.clone()
                 },
                 0.0,
             );
         }
         let kw = setpoint_kw.clamp(-self.max_discharge_kw, self.max_charge_kw);
+        let kw = snap_to_min_charge(kw, self.min_charge_kw);
         let kw = if (kw > 0.0 && state.soc >= self.soc_target)
             || (kw < 0.0 && state.soc <= self.min_soc)
         {
@@ -71,15 +97,20 @@ impl EvCharger {
         } else {
             kw
         };
+
+        // BL-12 response delay: apply the command accepted on the *previous* tick
+        // now, and stage this tick's command to be applied one tick later.
+        let applied_kw = state.pending_command_kw;
         let dt_h = dt.num_milliseconds() as f64 / 3_600_000.0;
-        let new_soc = (state.soc + (kw * dt_h) / self.battery_kwh).clamp(0.0, 1.0);
+        let new_soc = (state.soc + (applied_kw * dt_h) / self.battery_kwh).clamp(0.0, 1.0);
         (
             EvState {
                 soc: new_soc,
                 plugged: state.plugged,
-                actual_power_kw: kw,
+                actual_power_kw: applied_kw,
+                pending_command_kw: kw,
             },
-            kw,
+            applied_kw,
         )
     }
 
@@ -262,11 +293,14 @@ mod tests {
             soc_target_profile: 0.8,
             default_charge_kw: 7.4,
             min_soc: 0.0,
+            min_charge_kw: 1.4,
+            response_delay_s: 10.0,
         };
         let state = EvState {
             soc,
             plugged,
             actual_power_kw,
+            pending_command_kw: actual_power_kw,
         };
         (cfg, state)
     }
@@ -349,11 +383,14 @@ mod tests {
             soc_target_profile: 1.0,
             default_charge_kw: 0.0,
             min_soc: 0.0,
+            min_charge_kw: 1.4,
+            response_delay_s: 10.0,
         };
         let mut state = EvState {
             soc: 0.01,
             plugged: true,
             actual_power_kw: 0.0,
+            pending_command_kw: 0.0,
         };
         for _ in 0..1000 {
             let (ns, _) = ev.step_inner(&state, -10.0, Duration::seconds(1));
@@ -385,6 +422,37 @@ mod tests {
             "capability must be positive when soc < soc_target"
         );
         assert!((cap.max_import_kw - ev.max_charge_kw).abs() < 1e-9);
+    }
+
+    // ── BL-12: minimum charge rate + response delay ─────────────────────────
+
+    #[test]
+    fn test_snap_to_min_charge_below_floor_snaps_to_zero() {
+        assert_eq!(snap_to_min_charge(0.5, 1.5), 0.0);
+    }
+
+    #[test]
+    fn test_snap_to_min_charge_above_floor_unchanged() {
+        assert_eq!(snap_to_min_charge(2.0, 1.5), 2.0);
+    }
+
+    #[test]
+    fn test_step_inner_response_delay_single_tick_lag() {
+        let (ev, mut state) = make_ev(true, 0.0, 3.0);
+        state.pending_command_kw = 3.0; // steady-state command from before this test starts
+
+        // t=0: a new 7 kW setpoint arrives — actual power must still reflect the
+        // previously accepted command (3 kW), not the new one.
+        let (ns, actual_t0) = ev.step_inner(&state, 7.0, Duration::seconds(1));
+        assert_eq!(actual_t0, 3.0, "actual power must lag by one tick");
+        state = ns;
+
+        // t=1: the 7 kW command accepted at t=0 is now applied.
+        let (_, actual_t1) = ev.step_inner(&state, 7.0, Duration::seconds(1));
+        assert_eq!(
+            actual_t1, 7.0,
+            "setpoint must apply one tick after being accepted"
+        );
     }
 
     // T012: EvCharger::soc_trajectory and future_state_values_at.

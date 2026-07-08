@@ -4442,3 +4442,43 @@ lib/bin tests + 1 architecture test pass; `cargo fmt --check` clean.
 `--all-targets` variant (which also lints `#[cfg(test)]` code) carries separate,
 pre-existing debt. Worth deciding explicitly in WP0.4 whether `--all-targets` becomes the
 new gate.
+
+### WP0.3 — BL-12: EV minimum charge rate + response delay
+
+**Problem recap:** the physical `EvCharger::step_inner` never enforced `min_charge_kw`
+(already used by the MILP planner's semi-continuous constraint, but not by the simulator)
+and had no notion of controller response delay — commanded setpoints were applied
+instantly.
+
+**What was done (test-first):**
+
+- Extracted a pure `snap_to_min_charge(setpoint_kw, min_charge_kw) -> f64` free function:
+  snaps setpoints strictly between 0 and the floor to 0.0, leaves discharge (negative)
+  setpoints untouched. Tested directly (`test_snap_to_min_charge_below_floor_snaps_to_zero`,
+  `..._above_floor_unchanged`) rather than through `step_inner`, since the floor behavior
+  itself has no delay semantics — only the *committing* of a new command does.
+- Added `pending_command_kw: f64` to `EvState` (`#[serde(default)]` for backward-compatible
+  state-file deserialization) and `min_charge_kw` / `response_delay_s` to `EvCharger` and
+  `EvParams` (mirrored in `profile.rs`'s `EvConfig` with `#[serde(default = ...)]`, defaults
+  1.4 kW / 10 s — unchanged from the existing `min_charge_kw` default, so no profile YAML
+  edits needed).
+- `step_inner` now applies `state.pending_command_kw` (the command accepted on the
+  *previous* tick) as this tick's `actual_power_kw`, and stages this tick's
+  capability-clamped + floor-snapped setpoint into the returned state's
+  `pending_command_kw` for use next tick — a single-tick lag buffer.
+  `test_step_inner_response_delay_single_tick_lag` drives `step_inner` twice to observe
+  the lag directly.
+
+**Issue encountered:** `EvConfig` struct literals in two MILP-planner test fixtures
+(`controller/milp_planner/tests/mod.rs`, `.../tests/planner.rs`) needed the new
+`response_delay_s` field — `#[serde(default = ...)]` only covers YAML deserialization, not
+plain Rust struct literals, so the compiler caught both.
+
+**Verification:** all 445 lib/bin tests + 1 architecture test pass; `cargo fmt --check` and
+`cargo clippy -- -D warnings` (default targets) clean.
+
+**Debt discovered:** `assets/ev.rs` production line count (628, pre-existing) is already
+over the 500-line cap and grew to ~659 with this change. Recorded as R-17 in
+`TECHNICAL_DEBTS.md` — splitting the `EvMilpContext`/`AssetMilpContext` MILP-plugin impl
+blocks into `assets/ev_milp.rs` is a mechanical, low-risk fix, deferred rather than folded
+into this quick-win to keep WP0.3's diff focused.

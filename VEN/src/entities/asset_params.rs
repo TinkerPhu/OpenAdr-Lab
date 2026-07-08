@@ -44,6 +44,8 @@ pub struct EvParams {
     pub soc_target: f64,
     pub default_charge_kw: f64,
     pub min_charge_kw: f64,
+    /// BL-12: expected controller response delay (s), simulated as a single-tick lag.
+    pub response_delay_s: f64,
 }
 
 impl Default for EvParams {
@@ -57,6 +59,7 @@ impl Default for EvParams {
             soc_target: 0.8,
             default_charge_kw: 0.0,
             min_charge_kw: 1.4,
+            response_delay_s: 10.0,
         }
     }
 }
