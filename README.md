@@ -130,6 +130,14 @@ ssh pi@raspberrypi "cd /srv/openadr_lab/VEN && docker compose up -d --build"
 
 Replace `pi@raspberrypi` and `/srv/openadr_lab` with your host and path. Access the UIs at `http://<host-ip>:8221` and `http://<host-ip>:8214`.
 
+## Screenshots
+
+The VEN Device UI's **Controller** tab visualizes the live plan: tariff/CO₂eq signals, accumulated power, and per-asset forecast vs. planned curves. Each VEN has a different asset mix (see [Seeded Data](#seeded-data)):
+
+| VEN-1 — battery + EV + PV | VEN-3 — heater + EV + PV |
+|---|---|
+| ![VEN-1 controller/planner view](PlannerVEN1.png) | ![VEN-3 controller/planner view](PlannerVEN3.png) |
+
 ## Testing
 
 The project includes integration tests (behave/BDD), resilience tests, and E2E browser tests (Playwright), all running in Docker.
