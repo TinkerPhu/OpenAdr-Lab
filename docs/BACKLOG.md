@@ -18,12 +18,13 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 
 ---
 
-### BL-02: Event priority ordering before merge
+### BL-02: Event priority ordering before merge — RESOLVED (Phase 0, WP0.1)
 **Req:** FR-OA-08
 **Problem:** `openadr_interface.rs:186-195` merges events in array order (last-write-wins). A lower-priority event processed later silently overwrites a higher-priority one. The `priority` field is not read at all.
 **Fix:** Extract `priority` (integer, lower = higher priority) and `createdDateTime` from each event. Sort events by ascending priority, then descending `createdDateTime` (newer breaks ties), before entering the merge loop.
 **Complexity:** Small (1–2 hours). Sort + two field extractions.
 **Verify:** Unit test: two PRICE events with same interval, different priorities — higher-priority value wins. Second test: same priority, newer event wins.
+**Resolution:** Added `createdDateTime: Option<String>` to `OadrEvent` (vtn_port.rs). `parse_rate_snapshots` now sorts events before the merge loop so the highest-priority (lowest number, `None` = lowest) event is processed last, with `createdDateTime` breaking priority ties (newer wins). 3 new unit tests. See project_journal.md.
 
 ---
 

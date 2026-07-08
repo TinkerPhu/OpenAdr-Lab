@@ -4399,3 +4399,46 @@ use-cases (1), decisions (3). `scripts/wiki_lint.sh` clean. Three review items f
 `wiki/review.md`, notably: `.claude/CLAUDE.md` still references the deleted
 `docs/plans/ven_backend_architecture_refactoring.md`, and `docs/REQUIREMENTS.md` §2.3
 still describes the Planner as greedy (superseded by the MILP).
+
+## Phase 0 — Quick Wins (`fix/phase-0-quick-wins`)
+
+**Date**: 2026-07-08
+**Plan**: `docs/plans/roadmap/phase-0-quick-wins.md`
+
+### WP0.1 — BL-02: Event priority ordering before merge
+
+**Problem recap:** `parse_rate_snapshots` in `openadr_interface.rs` merged overlapping
+PRICE/EXPORT_PRICE/GHG events in array order (last-write-wins). The OpenADR 3 `priority`
+field (§ 6.6, lower number = higher priority) was never read, so a low-priority event
+processed later could silently overwrite a high-priority one.
+
+**What was done (test-first):**
+
+- Added 3 unit tests up front: (1) priority 1 beats priority 5 regardless of array order,
+  (2) equal priority — newer `createdDateTime` wins, (3) an event with an explicit priority
+  beats one with `priority: None` (absent priority = lowest).
+- `OadrEvent` (vtn_port.rs) gained a `createdDateTime: Option<String>` field — pass-through
+  string per the project's DTO-avoidance rule, parsed to `DateTime<Utc>` only where consumed.
+- `parse_rate_snapshots` now sorts a local `Vec<&OadrEvent>` before the merge loop:
+  descending by `priority.unwrap_or(i64::MAX)` (so `None`/highest-number sorts first), then
+  ascending by `createdDateTime` (missing → `DateTime::<Utc>::MIN_UTC`) within equal priority.
+  This makes the highest-priority, most-recent event the *last* one processed, so the
+  existing last-write-wins merge loop naturally keeps it — no changes to the merge loop
+  itself, only the iteration order feeding it.
+- Removed the stale "known limitation" comment in the merge loop that used to document the
+  unsorted behavior.
+
+**Issue encountered:** 5 other `OadrEvent` struct literals (4 in `reporter.rs` tests, 1 in
+`services/test_support/mock_vtn.rs`) needed the new `createdDateTime: None` field added —
+compiler caught all of them immediately after adding the field.
+
+**Verification:** `cargo clippy -- -D warnings` (default targets) is clean. `cargo clippy
+--all-targets -- -D warnings` surfaces ~25 pre-existing lint errors in unrelated files
+(`profile.rs`, `reporter.rs` non-`priority` lines, `milp_planner/tests/planner.rs`) that
+predate this change and are out of scope for WP0.1 — left for WP0.4 (GB-10). All 442
+lib/bin tests + 1 architecture test pass; `cargo fmt --check` clean.
+
+**Key learning:** this repo's clippy gate is normally run without `--all-targets`; the
+`--all-targets` variant (which also lints `#[cfg(test)]` code) carries separate,
+pre-existing debt. Worth deciding explicitly in WP0.4 whether `--all-targets` becomes the
+new gate.
