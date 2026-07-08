@@ -22,7 +22,29 @@ pub fn parse_rate_snapshots(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<Tar
     let mut map: std::collections::BTreeMap<(i64, i64), TariffSnapshot> =
         std::collections::BTreeMap::new();
 
-    for event in events {
+    // ── BL-02: priority-ordered merge ───────────────────────────────────────
+    // OpenADR 3 spec (§ 6.6): event `priority` — lower number = higher priority; an
+    // absent priority is treated as lowest. Sort ascending by "wins last" order so the
+    // last-write-wins merge below naturally lets the higher-priority event survive:
+    // lowest-priority events (including `None`) are processed first, highest-priority
+    // last. Equal priority breaks the tie on `createdDateTime` — newer wins, so older
+    // events are processed first.
+    let mut ordered: Vec<&OadrEvent> = events.iter().collect();
+    ordered.sort_by(|a, b| {
+        let pa = a.priority.unwrap_or(i64::MAX);
+        let pb = b.priority.unwrap_or(i64::MAX);
+        pb.cmp(&pa).then_with(|| {
+            let created = |e: &OadrEvent| {
+                e.createdDateTime
+                    .as_deref()
+                    .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+                    .unwrap_or(DateTime::<Utc>::MIN_UTC)
+            };
+            created(a).cmp(&created(b))
+        })
+    });
+
+    for event in ordered {
         if event.intervals.is_empty() {
             continue;
         }
@@ -102,13 +124,8 @@ pub fn parse_rate_snapshots(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<Tar
                 // CONFLICT NOTE: Multiple active events can define prices for the same interval
                 // (e.g. one PRICE event + one GHG event, or two PRICE events from different programs).
                 // This merge uses last-write-wins: whichever event is processed last in the loop
-                // overwrites a previously-set value for the same field.
-                //
-                // OpenADR 3 spec (§ 6.6) defines event `priority` (lower = higher priority) but
-                // does not specify how to resolve two ACTIVE events with overlapping price payloads.
-                // We do not currently sort by priority before merging — a known limitation.
-                // If strict priority-based resolution is needed, sort `events` by ascending priority
-                // before the outer loop.
+                // overwrites a previously-set value for the same field. `ordered` above is sorted
+                // so the highest-priority event (BL-02) is processed last and therefore wins.
                 let entry = map.entry(key).or_insert_with(|| TariffSnapshot {
                     interval_start: start,
                     interval_end: end,
@@ -666,6 +683,80 @@ mod tests {
             .find(|s| s.interval_start <= now && now < s.interval_end);
         assert!(current.is_some(), "no interval covers now at {}", now);
         assert_eq!(current.unwrap().import_tariff_eur_kwh, Some(14.0));
+    }
+
+    // ── BL-02: priority-ordered merge ────────────────────────────────────
+
+    fn price_event(
+        id: &str,
+        priority: Option<i64>,
+        created: Option<&str>,
+        price: f64,
+    ) -> OadrEvent {
+        serde_json::from_value(json!({
+            "id": id,
+            "programID": "prog-1",
+            "priority": priority,
+            "createdDateTime": created,
+            "intervals": [{
+                "id": 0,
+                "intervalPeriod": {"start": "2026-02-01T10:00:00Z", "duration": "PT1H"},
+                "payloads": [{"type": "PRICE", "values": [price]}]
+            }]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn test_parse_rate_snapshots_higher_priority_wins_regardless_of_order() {
+        let now = Utc::now();
+        let high = price_event("evt-high", Some(1), Some("2026-01-01T00:00:00Z"), 0.50);
+        let low = price_event("evt-low", Some(5), Some("2026-01-01T00:00:00Z"), 0.10);
+
+        for events in [
+            vec![high.clone(), low.clone()],
+            vec![low.clone(), high.clone()],
+        ] {
+            let snapshots = parse_rate_snapshots(&events, now);
+            assert_eq!(snapshots.len(), 1);
+            assert_eq!(
+                snapshots[0].import_tariff_eur_kwh,
+                Some(0.50),
+                "priority 1 must beat priority 5 regardless of array order"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_rate_snapshots_equal_priority_newer_created_wins() {
+        let now = Utc::now();
+        let newer = price_event("evt-new", Some(2), Some("2026-02-01T08:00:00Z"), 0.40);
+        let older = price_event("evt-old", Some(2), Some("2026-01-15T08:00:00Z"), 0.20);
+
+        // older last in the array — would win under naive last-write-wins
+        let snapshots = parse_rate_snapshots(&[newer, older], now);
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(
+            snapshots[0].import_tariff_eur_kwh,
+            Some(0.40),
+            "newer createdDateTime must win at equal priority"
+        );
+    }
+
+    #[test]
+    fn test_parse_rate_snapshots_absent_priority_sorts_last() {
+        let now = Utc::now();
+        let explicit = price_event("evt-p5", Some(5), Some("2026-01-01T00:00:00Z"), 0.30);
+        let none = price_event("evt-none", None, Some("2026-02-01T00:00:00Z"), 0.99);
+
+        // None-priority event last in the array — would win under naive last-write-wins
+        let snapshots = parse_rate_snapshots(&[explicit, none], now);
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(
+            snapshots[0].import_tariff_eur_kwh,
+            Some(0.30),
+            "an event with any explicit priority must beat one without"
+        );
     }
 
     #[test]
