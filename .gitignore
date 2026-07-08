@@ -45,3 +45,5 @@ docs/plans/notes.json
 
 openspec/changes/pv-self-consumption-reward/*
 **/.openspec.yaml
+.obsidian/*
+
