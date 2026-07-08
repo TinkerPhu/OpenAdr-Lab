@@ -23,6 +23,9 @@ pub(super) fn default_ev_soc_target() -> f64 {
 pub(super) fn default_ev_min_charge() -> f64 {
     1.4
 }
+pub(super) fn default_ev_response_delay() -> f64 {
+    10.0
+}
 
 impl HeaterConfig {
     /// Effective thermal mass (kWh/°C).

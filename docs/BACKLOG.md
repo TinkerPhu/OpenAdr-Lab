@@ -109,12 +109,19 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 
 ---
 
-### BL-12: EV minimum charge rate + response delay model
+### BL-12: EV minimum charge rate + response delay model — RESOLVED (Phase 0, WP0.3)
 **Req:** FR-SIM-05
 **Problem:** EV asset has no 1.5kW minimum active charge rate floor. Setpoints between 0 and 1.5kW are accepted (should snap to 0 or 1.5kW). 10s response delay not modeled — setpoints apply instantly.
 **Fix:** In `assets/ev.rs` update logic: if `0 < setpoint < min_charge_kw`, snap to 0. Add single-step lag buffer: store commanded setpoint, apply previous tick's command (simulating 10s delay at 10s tick or interpolated at 1s tick).
 **Complexity:** Small (1–2 hours).
 **Verify:** Unit test: setpoint 0.5kW → actual power 0. Setpoint 7kW at t=0 → actual power still 0 at t=0, becomes 7kW at t=10s.
+**Resolution:** `snap_to_min_charge` (pure function) enforces the floor (kept 1.4kW default —
+the existing MILP-side default — rather than 1.5kW, so no profile edits needed). Response
+delay implemented as a literal single-*tick* lag buffer (`EvState.pending_command_kw`), not
+a 10-second timer: all profiles run `tick_s: 1`, so a true 10s buffer would need a multi-tick
+queue. Deferred a duration-based version — track if a profile ever sets `tick_s` close to
+`response_delay_s`'s 10s default, where a 1-tick lag would under-model the delay. 3 new unit
+tests; see project_journal.md.
 
 ---
 
