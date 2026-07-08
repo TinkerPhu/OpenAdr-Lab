@@ -132,6 +132,7 @@ fn make_profile() -> Profile {
                 soc_target: 0.8,
                 default_charge_kw: 0.0,
                 min_charge_kw: 1.4,
+                response_delay_s: 10.0,
             }),
             AssetProfile::Heater(HeaterConfig {
                 id: "heater".into(),
@@ -537,6 +538,7 @@ fn build_asset_contexts(
                     soc,
                     actual_power_kw: 0.0,
                     plugged,
+                    pending_command_kw: 0.0,
                 });
                 let ac = AssetConfig::Ev(EvCharger::from_params(cfg));
                 if let Some(ctx) = ac.build_milp_context(

@@ -43,6 +43,7 @@ impl AssetProfile {
                 soc_target: c.soc_target,
                 default_charge_kw: c.default_charge_kw,
                 min_charge_kw: c.min_charge_kw,
+                response_delay_s: c.response_delay_s,
             }),
             AssetProfile::Heater(c) => AssetParams::Heater(HeaterParams {
                 id: c.id.clone(),
@@ -110,6 +111,9 @@ pub struct EvConfig {
     /// Typical EVSE minimum: 6 A × 230 V ≈ 1.4 kW.
     #[serde(default = "super::defaults::default_ev_min_charge")]
     pub min_charge_kw: f64,
+    /// BL-12: expected controller response delay (s), simulated as a single-tick lag.
+    #[serde(default = "super::defaults::default_ev_response_delay")]
+    pub response_delay_s: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
