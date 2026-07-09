@@ -6,6 +6,7 @@ import type {
   HeaterTarget, CreateHeaterTargetBody,
   ShiftableLoad, CreateShiftableLoadBody, BaselineOverride, CreateBaselineOverrideBody,
   ZoneDef,
+  HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
@@ -239,6 +240,44 @@ export class VenApi {
     const r = await this.getReq("/flexibility");
     if (!r.ok) throw new Error(`flexibility ${r.status}`);
     return r.json();
+  }
+
+  async historyTicks(params: {
+    from: string;
+    to: string;
+    assetId?: string;
+  }): Promise<HistoryTickSample[]> {
+    const qs = new URLSearchParams({ from: params.from, to: params.to });
+    if (params.assetId) qs.set("asset_id", params.assetId);
+    const r = await this.getReq(`/history/ticks?${qs}`);
+    if (!r.ok) throw new Error(`history/ticks ${r.status}`);
+    const raw: (Omit<HistoryTickSample, "ts"> & { ts: string })[] = await r.json();
+    return raw.map((row) => ({ ...row, ts: new Date(row.ts).getTime() }));
+  }
+
+  async historyGrid(params: { from: string; to: string }): Promise<HistoryGridSample[]> {
+    const qs = new URLSearchParams({ from: params.from, to: params.to });
+    const r = await this.getReq(`/history/grid?${qs}`);
+    if (!r.ok) throw new Error(`history/grid ${r.status}`);
+    const raw: (Omit<HistoryGridSample, "ts"> & { ts: string })[] = await r.json();
+    return raw.map((row) => ({ ...row, ts: new Date(row.ts).getTime() }));
+  }
+
+  async historyEvents(params: { from: string; to: string }): Promise<HistoryEventReceived[]> {
+    const qs = new URLSearchParams({ from: params.from, to: params.to });
+    const r = await this.getReq(`/history/events?${qs}`);
+    if (!r.ok) throw new Error(`history/events ${r.status}`);
+    const raw: (Omit<HistoryEventReceived, "received_at"> & { received_at: string })[] =
+      await r.json();
+    return raw.map((row) => ({ ...row, received_at: new Date(row.received_at).getTime() }));
+  }
+
+  async historyReports(params: { from: string; to: string }): Promise<HistoryReportSent[]> {
+    const qs = new URLSearchParams({ from: params.from, to: params.to });
+    const r = await this.getReq(`/history/reports?${qs}`);
+    if (!r.ok) throw new Error(`history/reports ${r.status}`);
+    const raw: (Omit<HistoryReportSent, "sent_at"> & { sent_at: string })[] = await r.json();
+    return raw.map((row) => ({ ...row, sent_at: new Date(row.sent_at).getTime() }));
   }
 
   async postRequest(body: CreateUserRequestBody): Promise<UserRequestWithSession> {

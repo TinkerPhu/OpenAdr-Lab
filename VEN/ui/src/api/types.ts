@@ -401,3 +401,39 @@ export type PlannerEvent =
       planned_net_kw: number; actual_net_kw: number; deviation_kw: number;
       correction_kw: number; objective: PlannerObjective }
   | { type: "correction_cleared"; ts: string; reason: string };
+
+// ─── Persistent history (Phase 1, WP1.4/WP1.5) ────────────────────────────────
+// Field names pass through the VEN's own snake_case wire format verbatim
+// (no DTO renaming), except `ts`/`received_at`/`sent_at` which the client
+// converts from ISO string to epoch ms, same as the /timeline/* client methods.
+
+export type HistoryTickSample = {
+  ts: number;
+  asset_id: string;
+  power_kw: number;
+  soc_pct: number | null;
+  temperature_c: number | null;
+};
+
+export type HistoryGridSample = {
+  ts: number;
+  import_kw: number;
+  export_kw: number;
+  import_tariff_eur_kwh: number | null;
+  export_tariff_eur_kwh: number | null;
+  co2_g_kwh: number | null;
+};
+
+export type HistoryEventReceived = {
+  received_at: number;
+  event_id: string;
+  event_type: string;
+  payload_json: string;
+};
+
+export type HistoryReportSent = {
+  sent_at: number;
+  report_type: string;
+  event_id: string;
+  payload_json: string;
+};
