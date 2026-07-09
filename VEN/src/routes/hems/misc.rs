@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::{
         sse::{Event, KeepAlive, Sse},
@@ -12,6 +12,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
 use crate::entities::asset::PlanTrigger;
+use crate::entities::history::LedgerPeriod;
 use crate::entities::PlannerObjective;
 use crate::AppCtx;
 
@@ -53,9 +54,40 @@ pub async fn get_obligations(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.report_obligations().await)
 }
 
-/// GET /ledger — returns per-asset cumulative energy/cost/CO₂ (Stage 4).
-pub async fn get_ledger(State(ctx): State<AppCtx>) -> impl IntoResponse {
-    Json(ctx.state.asset_ledger().await)
+#[derive(Debug, Deserialize)]
+pub struct LedgerQuery {
+    pub asset_id: Option<String>,
+}
+
+/// GET /ledger — returns per-asset cumulative energy/cost/CO₂ for the current
+/// open billing period (Stage 4). Unchanged shape when `asset_id` is absent
+/// (existing Dashboard consumer). With `?asset_id=`, returns
+/// `{ current, closed_periods }` for that one asset — `closed_periods` comes
+/// from WP1.6's monthly `AssetLedger` rollover archive.
+pub async fn get_ledger(
+    State(ctx): State<AppCtx>,
+    Query(params): Query<LedgerQuery>,
+) -> impl IntoResponse {
+    let current = ctx.state.asset_ledger().await;
+    let Some(asset_id) = params.asset_id else {
+        return Json(serde_json::to_value(&current).unwrap_or_default()).into_response();
+    };
+
+    let closed_periods: Vec<LedgerPeriod> = match ctx.history.clone() {
+        Some(history) => {
+            let aid = asset_id.clone();
+            tokio::task::spawn_blocking(move || history.query_ledger_periods(&aid))
+                .await
+                .unwrap_or_else(|_| Ok(Vec::new()))
+                .unwrap_or_default()
+        }
+        None => Vec::new(),
+    };
+    Json(serde_json::json!({
+        "current": current.get(&asset_id),
+        "closed_periods": closed_periods,
+    }))
+    .into_response()
 }
 
 /// GET /plan/events — Server-Sent Events stream of planner progress.
