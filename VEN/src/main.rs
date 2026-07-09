@@ -283,9 +283,13 @@ async fn main() -> anyhow::Result<()> {
         });
     }
     if let Some(history) = history_port.clone() {
-        let (s, sim) = (state.clone(), sim_state.clone());
+        let (s, sim, retention_days) = (
+            state.clone(),
+            sim_state.clone(),
+            profile.history.retention_days,
+        );
         tasks::supervised_spawn("history_sampler", TASK_COOLDOWN_S, move || {
-            tasks::spawn_history_sampler(sim.clone(), history.clone(), s.clone())
+            tasks::spawn_history_sampler(sim.clone(), history.clone(), s.clone(), retention_days)
         });
     }
 

@@ -471,6 +471,10 @@ impl HistoryPort for SqliteHistoryStore {
                 .map_err(|e| DomainError::StorageError(format!("prune {table}: {e}")))?;
             total += n as u64;
         }
+        // WP1.3: reclaim WAL space after a bulk delete. PASSIVE mode never
+        // blocks writers, so this is safe to run inline on every prune.
+        conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);")
+            .map_err(|e| DomainError::StorageError(format!("wal_checkpoint: {e}")))?;
         Ok(total)
     }
 }
