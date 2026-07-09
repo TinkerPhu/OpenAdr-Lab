@@ -12,6 +12,10 @@ pub use vtn_port::VtnPort;
 pub mod solver_port;
 pub use solver_port::{SolveRequest, SolverPort};
 
+// ── HistoryPort trait ──────────────────────────────────────────────────────────
+pub mod history_port;
+pub use history_port::HistoryPort;
+
 // ── OpenADR interface ─────────────────────────────────────────────────────────
 pub mod openadr_interface;
 
