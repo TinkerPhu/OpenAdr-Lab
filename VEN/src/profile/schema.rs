@@ -88,6 +88,27 @@ pub struct Profile {
     pub planner: PlannerConfig,
     #[serde(default)]
     pub grid: GridConfig,
+    #[serde(default)]
+    pub history: HistoryConfig,
+}
+
+/// WP1.2/WP1.3 (Phase 1, A-1) — persistent history sampling + retention.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HistoryConfig {
+    #[serde(default = "super::defaults::default_history_enabled")]
+    pub enabled: bool,
+    #[serde(default = "super::defaults::default_history_retention_days")]
+    #[allow(dead_code)] // read by WP1.3's retention-pruning task, not yet landed
+    pub retention_days: u32,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: super::defaults::default_history_enabled(),
+            retention_days: super::defaults::default_history_retention_days(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
