@@ -14,6 +14,7 @@ import { ReportsPage } from "./pages/Reports";
 import { MetricsPage } from "./pages/Metrics";
 import { ControllerPage } from "./pages/Controller";
 import { RawDiagnosticsPage } from "./pages/RawDiagnostics";
+import { HistoryPage } from "./pages/History";
 import { PlannerPage } from "./pages/Planner";
 import { DevicesPage } from "./pages/Devices";
 
@@ -220,6 +221,13 @@ export default function App() {
             >
               Raw Data
             </Button>
+            <Button
+              component={Link}
+              to="/history"
+              data-testid="nav-history"
+            >
+              History
+            </Button>
           </Stack>
 
           <Routes>
@@ -232,6 +240,7 @@ export default function App() {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/metrics" element={<MetricsPage />} />
             <Route path="/raw-diagnostics" element={<RawDiagnosticsPage />} />
+            <Route path="/history" element={<HistoryPage />} />
           </Routes>
         </Container>
       </BrowserRouter>

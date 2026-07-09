@@ -4753,3 +4753,61 @@ path per route, the `asset_id` filter, all three 400 validation cases, and the
 **Verification:** 495 lib/bin tests (490 + 5 new) + 1 architecture test pass;
 `cargo fmt --check` and `cargo clippy -- -D warnings` clean. E2E feature run on Pi4
 planned next (this WP touches routing, the one thing unit tests can't confirm).
+
+**E2E confirmed on Pi4:** full suite green, 243/243 scenarios including all 10 new
+`ven_history.feature` scenarios — the literal-route-vs-`:asset_id` precedence concern
+above is empirically resolved, not just theoretically sound.
+
+### WP1.5 — VEN UI history view
+
+**What was done:** reused the existing chart component family exactly as the research
+agent found it (pure-props, no live-polling coupling) — no fork needed:
+
+- `api/types.ts`/`client.ts`/`hooks.ts` — `HistoryTickSample`/`HistoryGridSample`/
+  `HistoryEventReceived`/`HistoryReportSent` types (snake_case fields pass through
+  verbatim per the DTO-avoidance rule; only `ts`/`received_at`/`sent_at` are converted
+  from ISO string to epoch ms client-side, same as the existing `/timeline/*` methods),
+  4 new `VenApi` methods, 4 new `useHistory*` hooks (`refetchInterval: false` — a past
+  date range doesn't change once elapsed).
+- `pages/History.tsx` — date picker (plain MUI `TextField type="date"`, no new
+  date-picker dependency — confirmed none was already pinned), defaulting to
+  *yesterday* (UTC) since "today" barely has any downsampled data yet. Groups
+  `/history/ticks` rows by `asset_id` and feeds each group into a reused
+  `AssetTimelineChart`; maps `/history/grid` rows into `TariffTimePoint`s for a reused
+  `TariffChart`. Events/reports render as plain MUI tables below the charts rather
+  than literal on-chart markers — a deliberate scope reduction from the plan's "overlay
+  markers on the time axis": the reusable chart components have no annotation/marker
+  slot today, and adding one felt like more surface than this quick pass justified.
+  Flagged here rather than silently dropped; revisit if the tables prove insufficient
+  in practice.
+- `App.tsx` — new `/history` route + `nav-history` button, same pattern as every other
+  page.
+- `History.test.tsx` — `dayRangeIso()` (the pure UTC-day-window helper) tested directly;
+  page-level tests mock `useHistory*` (same `vi.mock("../api/hooks", ...)` pattern as
+  `Reports.test.tsx`) and assert per-asset chart sections render, events/reports rows
+  appear, and the date input is a normal controlled input.
+- **Real browser verification** (per the "test UI changes in a browser" rule): added
+  `go_history()` to the Playwright `VenUi` helper (`tests/features/helpers/ui.py`) and
+  a `@ven-ui` scenario in `ven_history.feature` that clicks the nav button and waits for
+  the `history-page` testid — the project's established way of confirming a page
+  actually renders in a real browser (all other page-open checks in this codebase go
+  through this same Playwright/BDD path, not a local dev-server session).
+
+**Issue encountered — MUI `TextField` testid:** `slotProps={{ htmlInput: {...} }}`
+(the newer MUI slot API) did not forward `data-testid` to the actual `<input>` in
+JSDOM for this MUI version (5.16) — `getByTestId` failed to find it. Switched to the
+older, reliable `inputProps={{ "data-testid": ... }}` prop, which worked immediately.
+
+**Issue encountered — TS strictness in the test file:** a `(...args: unknown[]) =>
+mockFn(...args)` wrapper (used to spy on hook call arguments) failed `tsc` with
+"spread argument must have a tuple type", and `Array.prototype.at()` needed a newer
+`lib` target than configured. Rather than change the TS config, simplified the test to
+assert the controlled `<input>`'s own value after `fireEvent.change` (the date-range
+computation itself is already fully covered by the direct `dayRangeIso()` unit test) —
+no loss of real coverage, less incidental complexity.
+
+**Verification:** VEN UI: 313/313 tests (27 files, incl. 4 new in `History.test.tsx`)
+pass; `npm run build` clean; `eslint` 0 errors (9 pre-existing warnings, same
+`react-refresh/only-export-components` class already present on `Reports.tsx` for the
+same reason — exporting a helper alongside the page component). Not yet run on Pi4 —
+next.
