@@ -4482,3 +4482,28 @@ over the 500-line cap and grew to ~659 with this change. Recorded as R-17 in
 `TECHNICAL_DEBTS.md` — splitting the `EvMilpContext`/`AssetMilpContext` MILP-plugin impl
 blocks into `assets/ev_milp.rs` is a mechanical, low-risk fix, deferred rather than folded
 into this quick-win to keep WP0.3's diff focused.
+
+### WP0.4 — GB-10: Zero compiler warnings
+
+**What was found:** `wsl cargo build` in `VEN/` already produced zero warnings (the only
+warnings previously seen came from `cargo test`/`--all-targets`, which also lints
+`#[cfg(test)]` code — 5 pre-existing dead-code warnings in test-only helpers, out of scope
+here since GB-10 targets the production build). `VTN/bff`'s `cargo build` had exactly one:
+unused import `post` in `main.rs` (the free function from `axum::routing`, shadowed by the
+`.post()` *method* calls used everywhere routes are built — `get(...).post(...)`). Removed
+the unused import from the `use` list. Both `VEN/ui` and `VTN/ui` `npm run build` are
+already clean (Vite's "chunk >500kB" notice is a bundling advisory, not a compiler/linter
+warning).
+
+**Verification:** `VTN/bff`: `cargo build` clean, `cargo clippy -- -D warnings` clean,
+`cargo test` (0 tests in this crate) passes. Left `cargo fmt --check` findings in
+`VTN/bff` untouched — pre-existing formatting drift across ~8 files, unrelated to warnings
+and out of scope for a single-import fix; reformatting a crate wholesale as a side effect of
+an unrelated change was judged worse than leaving it, so not applied here.
+
+**Issue encountered:** building `VTN/bff` for the first time in this worktree regenerated
+`Cargo.lock` with ~150 transitive dependency version bumps (unrelated to the `main.rs` fix).
+Reverted `Cargo.lock` before committing to keep the diff scoped to the actual change — a
+lockfile refresh is a separate, deliberate decision, not a side effect of a lint fix.
+Skipped the "RUSTFLAGS=-D warnings on Pi4 docker build" follow-up mentioned in the plan for
+now (belongs with a CI/docker change, not this local-only pass).
