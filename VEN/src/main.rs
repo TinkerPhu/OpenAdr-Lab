@@ -168,6 +168,20 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(Mutex::new(sim))
     };
 
+    // Phase 1 (A-1/WP1.2): persistent history store, gated by profile.history.enabled.
+    let history_port: Option<Arc<dyn controller::HistoryPort>> = if profile.history.enabled {
+        let history_path = format!("{data_dir}/history.sqlite");
+        match history_store::SqliteHistoryStore::open(&history_path) {
+            Ok(store) => Some(Arc::new(store)),
+            Err(e) => {
+                error!("history store open failed at {history_path}: {e} — history disabled for this run");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Spawn background loops — each wrapped in supervised_spawn for automatic restart.
     const TASK_COOLDOWN_S: u64 = 5;
 
@@ -266,6 +280,12 @@ async fn main() -> anyhow::Result<()> {
         let s = state.clone();
         tasks::supervised_spawn("state_persist", TASK_COOLDOWN_S, move || {
             tasks::spawn_state_persist(s.clone(), path.clone())
+        });
+    }
+    if let Some(history) = history_port.clone() {
+        let (s, sim) = (state.clone(), sim_state.clone());
+        tasks::supervised_spawn("history_sampler", TASK_COOLDOWN_S, move || {
+            tasks::spawn_history_sampler(sim.clone(), history.clone(), s.clone())
         });
     }
 
