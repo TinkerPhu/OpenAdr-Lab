@@ -46,6 +46,9 @@ pub struct AppCtx {
     pub sim: Arc<Mutex<SimState>>,
     pub active_objective: Arc<RwLock<PlannerObjective>>,
     pub planner_event_tx: PlannerEventTx,
+    /// Persistent history store (Phase 1, A-1) — `None` when `profile.history.enabled`
+    /// is false or the store failed to open.
+    pub history: Option<Arc<dyn controller::HistoryPort>>,
 }
 
 fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Vec<AssetParams>) {
@@ -304,6 +307,7 @@ async fn main() -> anyhow::Result<()> {
         sim: sim_state.clone(),
         active_objective,
         planner_event_tx,
+        history: history_port,
     };
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;

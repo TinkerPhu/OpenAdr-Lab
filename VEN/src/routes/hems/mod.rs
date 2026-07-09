@@ -1,6 +1,7 @@
 mod baseline_override;
 mod ev;
 mod heater;
+mod history;
 mod misc;
 mod sessions;
 mod shiftable_loads;
@@ -8,6 +9,7 @@ mod shiftable_loads;
 pub use baseline_override::*;
 pub use ev::*;
 pub use heater::*;
+pub use history::*;
 pub use misc::*;
 pub use sessions::*;
 pub use shiftable_loads::*;

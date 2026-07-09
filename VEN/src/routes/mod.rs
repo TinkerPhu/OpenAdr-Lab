@@ -59,6 +59,13 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/timeline/:asset_id", get(timeline::get_timeline))
         // Asset forecast + history + capability endpoints (speckit 007 / Phase A)
         .route("/forecast/:asset_id", get(assets::get_asset_forecast))
+        // Persistent history routes (Phase 1, WP1.4) — literal segments must
+        // precede /:asset_id so they aren't shadowed by the live-history route.
+        .route("/history/ticks", get(hems::get_history_ticks))
+        .route("/history/grid", get(hems::get_history_grid))
+        .route("/history/events", get(hems::get_history_events))
+        .route("/history/reports", get(hems::get_history_reports))
+        .route("/history/plans", get(hems::get_history_plans))
         .route("/history/:asset_id", get(assets::get_asset_history))
         .route("/capability/:asset_id", get(assets::get_asset_capability))
         // HEMS Stage 2 routes
