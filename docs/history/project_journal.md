@@ -4684,3 +4684,31 @@ services, originally for `state.json` persistence). No docker-compose change nee
 
 **Verification:** 487 lib/bin tests (481 + 6 new) + 1 architecture test pass;
 `cargo fmt --check` and `cargo clippy -- -D warnings` clean.
+
+### WP1.3 — Retention pruning
+
+**What was done (test-first):** kept the WAL checkpoint and the day-boundary check
+as two small, separately testable pieces rather than one bigger change:
+
+- `history_store::prune_before` — after the existing per-table `DELETE`s, runs
+  `PRAGMA wal_checkpoint(PASSIVE)` (PASSIVE never blocks writers, safe to run inline
+  on every prune). Covered incidentally by the existing `test_prune_before_*` tests
+  (an in-memory `:memory:` DB still executes the pragma without erroring, confirmed
+  by those tests staying green).
+- `tasks/history_sampler.rs` — `day_boundary_crossed(last_pruned_day: &mut
+  Option<i64>, now: DateTime<Utc>) -> bool`, a pure function (integer day-index
+  comparison, no wall-clock reads) that returns `true` exactly once per calendar-day
+  change — including the very first call (so a fresh VEN prunes any backlog on
+  startup, not just after 24h). Three tests:
+  `test_day_boundary_crossed_first_call_is_true`, `..._same_day_is_false`,
+  `..._next_day_is_true_exactly_once` (asserting it does *not* re-fire later the
+  same new day).
+- `prune_retention()` — the async glue: `spawn_blocking` around
+  `HistoryPort::prune_before`, logs the deleted-row count at `info` (only if >0) and
+  logs-and-continues on error, same failure policy as `write_window`.
+- `spawn_history_sampler` gained a `retention_days: u32` parameter, threaded from
+  `main.rs`'s `profile.history.retention_days` — the `#[allow(dead_code)]` added on
+  that field in WP1.2 is now removed since it's genuinely read.
+
+**Verification:** 490 lib/bin tests (487 + 3 new) + 1 architecture test pass;
+`cargo fmt --check` and `cargo clippy -- -D warnings` clean.
