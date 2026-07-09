@@ -27,6 +27,13 @@ pub(super) fn default_ev_response_delay() -> f64 {
     10.0
 }
 
+pub(super) fn default_history_enabled() -> bool {
+    true
+}
+pub(super) fn default_history_retention_days() -> u32 {
+    90
+}
+
 impl HeaterConfig {
     /// Effective thermal mass (kWh/°C).
     /// Priority: `volume_l` → `thermal_mass_kwh_per_c` → 2.0 (legacy default).

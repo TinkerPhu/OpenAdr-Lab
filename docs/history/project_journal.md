@@ -4637,3 +4637,50 @@ attributable to `rusqlite`/`libsqlite3-sys`.
 **Verification:** 481 lib/bin tests (includes the 17 new history tests: 13 adapter +
 4 mock) + 1 architecture test all pass; `cargo fmt --check` and
 `cargo clippy -- -D warnings` clean.
+
+### WP1.2 — History sampler task (1-min downsampling write path)
+
+**What was done (test-first):** `tasks/history_sampler.rs` — a `HistorySampler`
+accumulator that is pure and clock-injected (`now` passed into `record()` per call,
+no internal wall-clock reads), so minute-boundary crossing is unit-tested without any
+sleeps: feed samples at `ts(0)`/`ts(30)`/`ts(60)` and assert the flush at the minute
+boundary carries the mean of the *previous* window only. Six tests:
+`test_record_same_minute_does_not_flush`,
+`test_record_crossing_minute_boundary_flushes_previous_window_mean`,
+`test_flush_emits_partial_window_on_shutdown`, `test_flush_with_no_samples_returns_none`,
+`test_record_grid_export_when_net_power_negative`, `test_record_applies_matching_tariff`.
+
+- Per-asset accumulation: `power_kw` as a true running mean; `soc_pct`/`temperature_c`
+  as means-of-samples-present (asset snapshots don't always carry both — read via
+  `AssetSnapshot::val("soc")`/`val("temp_c")`, converting the existing 0..1 soc
+  fraction to a 0-100 percent to match the `_pct` unit-suffix convention).
+- Grid accumulation: split `GridSnapshot.net_power_w` into `import_kw`/`export_kw` via
+  the same `max(net, 0)` / `max(-net, 0)` convention already used in
+  `controller/timeline.rs` for `net_import_kw`/`net_export_kw`; tariff/CO2 fields
+  looked up the same way `monitor::record_tick` does (`interval_start <= now < interval_end`).
+- The async wrapper (`spawn_history_sampler`) is a thin 1s-interval loop: snapshot via
+  `sim.lock().await` + `.snapshot()` — matching the concrete `Arc<Mutex<SimState>>`
+  pattern already used by `tasks::obligation` (not the `SimulatorPort` trait object,
+  which doesn't fit cleanly through a tokio `Mutex` guard) — then hands any flushed
+  window to `write_window()`, which appends via `tokio::task::spawn_blocking` and
+  logs-and-continues on any `HistoryPort` error (history writes must never block or
+  crash the control loop; no test asserts this by mocking a failing port yet — the
+  `Result` handling is inline and straightforward enough that a dedicated test felt
+  like padding, but flag if reviewed otherwise).
+- `profile/schema.rs` — new `HistoryConfig { enabled: bool, retention_days: u32 }`
+  (`Profile.history`, defaults `true`/`90`), mirroring the `PlannerConfig` pattern.
+  `retention_days` is `#[allow(dead_code)]` until WP1.3's pruning task reads it.
+- `main.rs` — opens `SqliteHistoryStore` at `{data_dir}/history.sqlite` gated by
+  `profile.history.enabled`; a failed open logs and disables history for that run
+  rather than crashing the VEN. Spawns `history_sampler` via the same
+  `supervised_spawn` wrapper as every other background task.
+
+**Issue avoided, not encountered:** the plan's WP1.2 step 5 said to add a `/data`
+volume per VEN docker-compose service — checked first and it already exists
+(`VEN/Dockerfile`: `RUN mkdir -p /data ...` + `VOLUME ["/data"]`, and
+`VEN/docker-compose.yml` already bind-mounts `./data/ven-N:/data` for all three
+services, originally for `state.json` persistence). No docker-compose change needed;
+`history.sqlite` lands in the same directory.
+
+**Verification:** 487 lib/bin tests (481 + 6 new) + 1 architecture test pass;
+`cargo fmt --check` and `cargo clippy -- -D warnings` clean.

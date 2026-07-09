@@ -1,3 +1,4 @@
+pub mod history_sampler;
 pub mod obligation;
 pub mod planning;
 pub mod poll_events;
@@ -7,6 +8,7 @@ mod progress_ticker;
 pub mod sim_tick;
 pub mod state_persist;
 
+pub(crate) use history_sampler::spawn_history_sampler;
 pub(crate) use obligation::spawn_obligation_check;
 pub(crate) use planning::spawn_planning;
 pub(crate) use poll_events::spawn_event_poll;
