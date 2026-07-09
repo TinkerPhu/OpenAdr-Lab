@@ -23,6 +23,10 @@ pub enum DomainError {
     /// hot-reload validation, if that feature is ever built. See docs/BACKLOG.md BL-25.
     #[error("profile invalid: {0}")]
     ProfileInvalid(String),
+
+    /// History store (SQLite) I/O or migration failure. Phase 1 (A-1).
+    #[error("storage error: {0}")]
+    StorageError(String),
 }
 
 #[cfg(test)]
@@ -38,6 +42,7 @@ mod tests {
             DomainError::PlanInfeasible("infeasible".into()),
             DomainError::VtnUnreachable("timeout".into()),
             DomainError::ProfileInvalid("bad value".into()),
+            DomainError::StorageError("disk full".into()),
         ];
         for e in cases {
             assert!(!e.to_string().is_empty(), "variant {e:?} has empty Display");

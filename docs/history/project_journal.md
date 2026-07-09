@@ -4558,3 +4558,82 @@ explicitly spelled out `"-name"`.
 
 **Not yet run:** the full E2E suite on Pi4 — this WP's stated risk is entirely in shared
 test fixtures, so that's the real verification, planned next.
+
+---
+
+## Phase 1 — Data Foundation (`fix/phase-1-data-foundation`)
+
+**Date**: 2026-07-09
+**Plan**: `docs/plans/roadmap/phase-1-data-foundation.md`
+
+### WP1.1 — A-1: `HistoryPort` trait + SQLite adapter + schema v1
+
+**Problem recap:** the VEN has no persistent history beyond process lifetime (only
+in-memory ring buffers). Phase 1's design decisions (fixed in the roadmap doc) call for
+a `HistoryPort` trait mirroring `SolverPort`/`SimulatorPort`/`VtnPort`, backed by a
+per-VEN SQLite file via `rusqlite` (bundled feature — vendored C sqlite, no cmake/system
+dependency).
+
+**Research first:** spawned 3 parallel Explore agents (VEN port/adapter/mock
+conventions; VEN UI chart/routing structure for the later WP1.5; VTN/bff structure for
+the later WP1.7) before writing code, to match existing patterns exactly rather than
+inventing new ones. Key findings applied here:
+- Every port (`SolverPort`, `SimulatorPort`, `VtnPort`) is one file under `controller/`
+  holding the trait + its DTOs; the concrete adapter lives in its own infra
+  module/file, wired up only in `main.rs` behind `Arc<dyn Port>`.
+- Mock adapters in `services/test_support/` follow one of two shapes: a single
+  canned-response stub (`MockSolverPort`) or a small real in-memory fake with
+  recording (`MockSimulatorPort`). Chose the latter for `MockHistoryPort` since later
+  WPs (sampler, routes) need to assert on data that flowed all the way through.
+
+**What was done (test-first):**
+
+- `entities/history.rs` — 6 row structs (`TickSample`, `GridSample`, `PlanSnapshot`,
+  `EventReceived`, `ReportSent`, `LedgerPeriod`), unit-suffixed fields matching the
+  existing `TariffSnapshot`/`OadrCapacityState` convention (`import_tariff_eur_kwh`,
+  `co2_g_kwh`, not the roadmap doc's slightly different sketch names).
+- `entities/error.rs` — new `DomainError::StorageError(String)` variant.
+- `controller/history_port.rs` — the `HistoryPort` trait: 6 `append_*` + 6 `query_*` +
+  `prune_before`. Every method is synchronous/blocking by design (rusqlite is
+  blocking) — callers in async contexts must use `tokio::task::spawn_blocking`,
+  documented on the trait itself.
+- `history_store/` (adapter, infra ring) — split into `mod.rs` (adapter logic) +
+  `schema.rs` (schema v1 DDL) to stay under the 500-line cap; `SqliteHistoryStore`
+  wraps `Mutex<rusqlite::Connection>`, migrates via `PRAGMA user_version`, enables WAL
+  mode at open. `open()` for a real file, `in_memory()` for tests.
+- `services/test_support/mock_history_port.rs` — in-memory fake with the same
+  time-range/asset_id filtering semantics as the real adapter.
+- Adapter-contract tests (13) + mock tests (4): roundtrip per table, asset_id filter,
+  exclusive upper time bound, prune-only-older, migration idempotency, reopen-same-file
+  persistence.
+
+**Issue encountered — file size:** `history_store.rs` landed at 532 production lines
+(over the 500-line cap) once all 6 tables' CRUD was written. Split the schema DDL into
+`history_store/schema.rs` (converting the file to a directory module), bringing
+`mod.rs` down to 477 lines — matches the plan's own contingency note ("Keep < 500
+lines; split history_store/schema.rs if needed").
+
+**Issue encountered — dead code:** nothing in `main.rs` constructs `SqliteHistoryStore`
+or references `dyn HistoryPort` yet (that's WP1.2), so `cargo clippy` flagged the whole
+trait/adapter as dead code even though both are `pub`. `ven-app` is a `bin` target, not
+a `lib`, so `pub` doesn't imply "reachable from elsewhere" the way it would in a
+library crate. Added `#![allow(dead_code)]` at the top of both `history_port.rs` and
+`history_store/mod.rs`, each with a same-line-ish justification comment noting WP1.2
+removes it by wiring the port in. Also added `#[allow(dead_code)]` to 3
+`MockHistoryPort` helper methods not yet called by any test, matching the existing
+precedent in `mock_simulator_port.rs`'s `snapshot_with_asset`.
+
+**Issue encountered — clippy type_complexity:** two query methods built raw tuples
+(`(i64, String, f64, Option<f64>, Option<f64>)` etc.) straight from `rusqlite::Row`.
+Factored into `TickSampleRow`/`GridSampleRow` type aliases.
+
+**Dependency added:** `rusqlite = { version = "0.32", features = ["bundled"] }` — MIT
+licensed, bundled feature vendors sqlite3 (public domain), no new system dependency.
+Ran `cargo audit`: 12 pre-existing findings, all in the `reqwest`/TLS dependency chain
+or `rand`/`anyhow` (already tracked in `BACKLOG.md`, except the `anyhow`
+`downcast_mut()` unsoundness which was newly logged this pass) — zero new findings
+attributable to `rusqlite`/`libsqlite3-sys`.
+
+**Verification:** 481 lib/bin tests (includes the 17 new history tests: 13 adapter +
+4 mock) + 1 architecture test all pass; `cargo fmt --check` and
+`cargo clippy -- -D warnings` clean.

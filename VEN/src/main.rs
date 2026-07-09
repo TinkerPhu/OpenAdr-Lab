@@ -3,6 +3,7 @@ mod common;
 mod config;
 mod controller;
 mod entities;
+mod history_store;
 mod ids;
 mod models;
 mod planner_events;
