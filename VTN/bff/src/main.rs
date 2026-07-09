@@ -9,7 +9,7 @@ use axum::{
     http::{HeaderName, Method},
     middleware::{self, Next},
     response::Response,
-    routing::{delete, get, post, put},
+    routing::{delete, get, put},
     Router,
 };
 use metrics::{counter, histogram};
