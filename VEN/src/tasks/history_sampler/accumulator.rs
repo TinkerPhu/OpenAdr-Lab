@@ -1,24 +1,13 @@
-//! WP1.2 — 1-second accumulation, 1-minute-mean downsample write path to
-//! `HistoryPort`. The accumulator (`HistorySampler`) is pure and clock-injected
-//! (`now` passed in per call) so minute-boundary logic is testable without
-//! sleeps; the async loop below is a thin wrapper spawning its own 1s tick,
-//! snapshotting the simulator (matching the `sim.lock().await` pattern used
-//! by other tasks, e.g. `tasks::obligation`), and writing through
-//! `spawn_blocking` (history writes are best-effort — log-and-continue,
-//! never block the control loop).
+//! Pure 1-minute downsampling accumulator (WP1.2), split out of `mod.rs` to
+//! keep the `tasks/` file-size cap. Clock-injected (`now` passed in per call)
+//! so minute-boundary logic is testable without sleeps.
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use tokio::sync::Mutex;
-use tracing::warn;
 
 use crate::controller::simulator_port::SimSnapshot;
-use crate::controller::{HistoryPort, SimulatorPort};
 use crate::entities::history::{GridSample, TickSample};
 use crate::entities::tariff_snapshot::TariffSnapshot;
-use crate::simulator::SimState;
-use crate::state::AppState;
 
 #[derive(Default, Clone)]
 struct AssetAcc {
@@ -43,9 +32,9 @@ struct GridAcc {
     n: u32,
 }
 
-/// Pure 1-minute downsampling accumulator. Feed samples via `record`; a flush
-/// (previous window's means) is returned exactly when a sample belongs to a
-/// new minute. Call `flush` directly to force-emit a partial window (shutdown).
+/// Feed samples via `record`; a flush (previous window's means) is returned
+/// exactly when a sample belongs to a new minute. Call `flush` directly to
+/// force-emit a partial window (shutdown).
 #[derive(Default)]
 pub struct HistorySampler {
     window_minute: Option<i64>,
@@ -157,81 +146,6 @@ impl HistorySampler {
         };
         Some((ticks, grid_sample))
     }
-}
-
-/// Append a flushed window through the (blocking) `HistoryPort`, logging and
-/// continuing on failure — history writes must never block or crash the
-/// control loop.
-async fn write_window(history: Arc<dyn HistoryPort>, ticks: Vec<TickSample>, grid: GridSample) {
-    let res = tokio::task::spawn_blocking(move || {
-        history.append_tick_samples(&ticks)?;
-        history.append_grid_sample(&grid)
-    })
-    .await;
-    match res {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => warn!("history sampler write failed: {e}"),
-        Err(e) => warn!("history sampler write task panicked: {e}"),
-    }
-}
-
-/// WP1.3 — returns `true` (and records `now`'s UTC calendar day) exactly the
-/// first time this is called for a given day, i.e. once per day boundary.
-/// Pure/clock-injected: no wall-clock reads, so callers can test it without
-/// sleeping.
-fn day_boundary_crossed(last_pruned_day: &mut Option<i64>, now: DateTime<Utc>) -> bool {
-    let day = now.timestamp().div_euclid(86_400);
-    if *last_pruned_day == Some(day) {
-        false
-    } else {
-        *last_pruned_day = Some(day);
-        true
-    }
-}
-
-/// Run `HistoryPort::prune_before` (WAL checkpoint happens inside the adapter)
-/// off the async loop, logging and continuing on failure.
-async fn prune_retention(history: Arc<dyn HistoryPort>, cutoff: DateTime<Utc>) {
-    match tokio::task::spawn_blocking(move || history.prune_before(cutoff)).await {
-        Ok(Ok(n)) => {
-            if n > 0 {
-                tracing::info!("history retention prune: removed {n} rows older than {cutoff}");
-            }
-        }
-        Ok(Err(e)) => warn!("history retention prune failed: {e}"),
-        Err(e) => warn!("history retention prune task panicked: {e}"),
-    }
-}
-
-pub(crate) fn spawn_history_sampler(
-    sim: Arc<Mutex<SimState>>,
-    history: Arc<dyn HistoryPort>,
-    state: AppState,
-    retention_days: u32,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut sampler = HistorySampler::new();
-        let mut last_pruned_day: Option<i64> = None;
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-        loop {
-            interval.tick().await;
-            let now = Utc::now();
-            let snap = {
-                let sim_guard = sim.lock().await;
-                sim_guard
-                    .snapshot()
-                    .expect("SimState::snapshot is infallible")
-            };
-            let tariffs_snap = state.planned_tariffs().await;
-            if let Some((ticks, grid)) = sampler.record(now, &snap, &tariffs_snap) {
-                write_window(history.clone(), ticks, grid).await;
-            }
-            if day_boundary_crossed(&mut last_pruned_day, now) {
-                let cutoff = now - chrono::Duration::days(retention_days as i64);
-                prune_retention(history.clone(), cutoff).await;
-            }
-        }
-    })
 }
 
 #[cfg(test)]
@@ -349,33 +263,5 @@ mod tests {
         assert_eq!(grid.import_tariff_eur_kwh, Some(0.25));
         assert_eq!(grid.export_tariff_eur_kwh, Some(0.05));
         assert_eq!(grid.co2_g_kwh, Some(300.0));
-    }
-
-    #[test]
-    fn test_day_boundary_crossed_first_call_is_true() {
-        let mut last = None;
-        assert!(day_boundary_crossed(&mut last, ts(0)));
-        assert_eq!(last, Some(0));
-    }
-
-    #[test]
-    fn test_day_boundary_crossed_same_day_is_false() {
-        let mut last = None;
-        assert!(day_boundary_crossed(&mut last, ts(0)));
-        assert!(
-            !day_boundary_crossed(&mut last, ts(86_399)),
-            "still day 0 — must not cross again"
-        );
-    }
-
-    #[test]
-    fn test_day_boundary_crossed_next_day_is_true_exactly_once() {
-        let mut last = None;
-        assert!(day_boundary_crossed(&mut last, ts(0)));
-        assert!(day_boundary_crossed(&mut last, ts(86_400)), "day 1 begins");
-        assert!(
-            !day_boundary_crossed(&mut last, ts(86_400 + 100)),
-            "still day 1 — must not cross again"
-        );
     }
 }

@@ -4811,3 +4811,52 @@ pass; `npm run build` clean; `eslint` 0 errors (9 pre-existing warnings, same
 `react-refresh/only-export-components` class already present on `Reports.tsx` for the
 same reason — exporting a helper alongside the page component). Not yet run on Pi4 —
 next.
+
+**E2E confirmed on Pi4:** full suite green, 244/244 scenarios, including the new
+`@ven-ui` History-page scenario — confirmed rendering in a real Playwright/Chromium
+browser, not just JSDOM.
+
+### WP1.6 — BL-16: AssetLedger rollup
+
+**Debt discovered and fixed first:** `tasks/history_sampler.rs` (a single file since
+WP1.2) had already crept to 236 production lines — over the `tasks/` 200-line cap —
+by WP1.3. Missed catching this at the time; caught it now before adding more. Split
+into a directory module: `history_sampler/accumulator.rs` (the pure `HistorySampler`
+struct + its tests, 150 lines) and `history_sampler/mod.rs` (task glue: write/prune/
+rollover + `spawn_history_sampler`, 173 lines after adding WP1.6's content) — both
+comfortably under the cap.
+
+**What was done (test-first):** rather than reuse `day_boundary_crossed`'s "fires on
+the very first call" semantics for the ledger, wrote a deliberately different
+`month_boundary_crossed(last: &mut Option<(i32,u32)>, now) -> Option<(i32,u32)>`:
+returns `None` on the first call and while still in the same month, `Some(old_year,
+old_month)` exactly once when the calendar month changes. The distinction matters:
+day-pruning is idempotent so firing on startup is harmless, but the live
+`AssetLedgerEntry` map survives process restarts via `state.json` persistence —
+closing it just because the sampler task's own in-memory tracker starts as `None`
+would wrongly truncate an in-progress month every time the VEN restarts. 4 tests:
+`test_month_boundary_crossed_first_call_is_none`, `..._same_month_is_none`,
+`..._returns_old_period_exactly_once`, `..._handles_year_rollover`.
+
+- `close_ledger_period(ledger: &HashMap<String, AssetLedgerEntry>, period_start,
+  period_end) -> Vec<LedgerPeriod>` — pure mapping, converts `co2_g` (existing
+  accumulator's unit) to `co2_kg` (the `ledger_periods` schema's unit from WP1.1). 2
+  tests (mapping + empty-ledger no-op).
+- `rollover_ledger()` — the async glue: reads `state.asset_ledger()`, skips entirely if
+  empty, writes all rows via `spawn_blocking`, and **only resets the live ledger
+  (`state.set_asset_ledger`) if every write succeeded** — a failed archive leaves the
+  data in place to retry next month rather than silently losing it.
+- `routes/hems/misc.rs::get_ledger` — added `Query<LedgerQuery>` with an optional
+  `asset_id`. Omitted: unchanged response shape (the existing Dashboard `LedgerCard`
+  consumer is untouched). Present: `{ current, closed_periods }` for that one asset,
+  `closed_periods` sourced from `HistoryPort::query_ledger_periods`.
+- **No new UI needed** — `pages/Dashboard.tsx`'s existing `LedgerCard` already renders
+  per-asset current-period energy/cost/CO2 with a "running since" label; after the
+  monthly reset this label now correctly reflects the *current billing period* rather
+  than "since VEN first started," which is exactly the "what did each device cost this
+  month" ask. Added 2 BDD scenarios (`ven_history.feature`) for the route's two response
+  shapes instead.
+
+**Verification:** 501 lib/bin tests (495 + 6 new) + 1 architecture test pass;
+`cargo fmt --check` and `cargo clippy -- -D warnings` clean. E2E run on Pi4 planned
+next.
