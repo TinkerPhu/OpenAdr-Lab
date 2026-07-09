@@ -98,7 +98,6 @@ pub struct HistoryConfig {
     #[serde(default = "super::defaults::default_history_enabled")]
     pub enabled: bool,
     #[serde(default = "super::defaults::default_history_retention_days")]
-    #[allow(dead_code)] // read by WP1.3's retention-pruning task, not yet landed
     pub retention_days: u32,
 }
 
