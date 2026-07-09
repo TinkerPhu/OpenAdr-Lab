@@ -217,6 +217,22 @@ Expected result — five test users inserted:
 | `business-1` | `business-1` | Business (scoped) | scoped access |
 | `ven-1` | `ven-1` | VEN (scoped) | scoped VEN access |
 
+> **GB-02/GB-03 note:** the fixture's pre-seeded `ven` row for ven-1 uses a
+> legacy literal id `ven-1` and venName `ven-1-name`. `scripts/seed_vtn.py`
+> now provisions ven-1 through the VTN API (same as ven-2/ven-3), which
+> gives it a real UUID id and the uniform venName `ven-1`. Before running
+> `seed_vtn.py`, delete the fixture's legacy rows so it re-provisions
+> cleanly instead of skipping (matching credentials would otherwise look
+> "already provisioned"):
+> ```bash
+> docker exec -i vtn-db-1 psql -U openadr openadr -c "
+>   DELETE FROM user_ven WHERE ven_id = 'ven-1';
+>   DELETE FROM user_credentials WHERE user_id = 'ven-1-user';
+>   DELETE FROM \"user\" WHERE id = 'ven-1-user';
+>   DELETE FROM ven WHERE id = 'ven-1';
+> "
+> ```
+
 ---
 
 # 8. Obtain OAuth Access Token

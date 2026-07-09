@@ -26,7 +26,7 @@ Feature: UI Use Cases — Full End-to-End via Browser
   Scenario: UI-UC1 - Emergency Load Shed (targeted to VEN-1 only)
     Given I open the VTN UI
     When I navigate to the Programs page
-    And I create a UI program "ui-uc1-emergency" targeting "ven-1-name"
+    And I create a UI program "ui-uc1-emergency" targeting "ven-1"
     Then the program "ui-uc1-emergency" appears in the UI programs list
     When I navigate to the Events page
     And I create a UI event "ui-uc1-loadshed" for program "ui-uc1-emergency" with type "SIMPLE" priority 0 and 1 interval
@@ -71,7 +71,7 @@ Feature: UI Use Cases — Full End-to-End via Browser
   Scenario: UI-UC4 - Peak Shaving (targeted to VEN-1 and VEN-2)
     Given I open the VTN UI
     When I navigate to the Programs page
-    And I create a UI program "ui-uc4-peak" targeting both "ven-1-name" and "ven-2"
+    And I create a UI program "ui-uc4-peak" targeting both "ven-1" and "ven-2"
     Then the program "ui-uc4-peak" appears in the UI programs list
     When I navigate to the Events page
     And I create a UI event "ui-uc4-peak-shave" for program "ui-uc4-peak" with type "IMPORT_CAPACITY_LIMIT" priority 3 and 1 interval with intervalPeriod
@@ -100,7 +100,7 @@ Feature: UI Use Cases — Full End-to-End via Browser
   Scenario: UI-UC6 - Battery Dispatch (targeted to VEN-1 only)
     Given I open the VTN UI
     When I navigate to the Programs page
-    And I create a UI program "ui-uc6-battery" targeting "ven-1-name"
+    And I create a UI program "ui-uc6-battery" targeting "ven-1"
     Then the program "ui-uc6-battery" appears in the UI programs list
     When I navigate to the Events page
     And I create a UI event "ui-uc6-battery-dispatch" for program "ui-uc6-battery" with type "CHARGE_STATE_SETPOINT" priority 3 and 3 intervals
@@ -115,7 +115,7 @@ Feature: UI Use Cases — Full End-to-End via Browser
   Scenario: UI-UC8 - Event Cancellation (delete via UI, VEN loses event)
     Given I open the VTN UI
     When I navigate to the Programs page
-    And I create a UI program "ui-uc8-cancel" targeting "ven-1-name"
+    And I create a UI program "ui-uc8-cancel" targeting "ven-1"
     Then the program "ui-uc8-cancel" appears in the UI programs list
     When I navigate to the Events page
     And I create a UI event "ui-uc8-cancel-evt" for program "ui-uc8-cancel" with type "SIMPLE" priority 5 and 1 interval
