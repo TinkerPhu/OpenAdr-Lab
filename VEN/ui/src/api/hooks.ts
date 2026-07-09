@@ -221,6 +221,44 @@ export function useAllTimelines(
   });
 }
 
+/** WP1.5 — persistent history reads. `from`/`to` are ISO strings; `refetchInterval`
+ * is off since a past date range doesn't change once the window has fully elapsed. */
+export function useHistoryTicks(from: string, to: string, assetId?: string) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["history/ticks", api.baseUrl, from, to, assetId],
+    queryFn: () => api.historyTicks({ from, to, assetId }),
+    refetchInterval: false,
+  });
+}
+
+export function useHistoryGrid(from: string, to: string) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["history/grid", api.baseUrl, from, to],
+    queryFn: () => api.historyGrid({ from, to }),
+    refetchInterval: false,
+  });
+}
+
+export function useHistoryEvents(from: string, to: string) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["history/events", api.baseUrl, from, to],
+    queryFn: () => api.historyEvents({ from, to }),
+    refetchInterval: false,
+  });
+}
+
+export function useHistoryReports(from: string, to: string) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["history/reports", api.baseUrl, from, to],
+    queryFn: () => api.historyReports({ from, to }),
+    refetchInterval: false,
+  });
+}
+
 export function useTariffs(options?: { refetchInterval?: number | false }) {
   const { api } = useVenContext();
   return useQuery({

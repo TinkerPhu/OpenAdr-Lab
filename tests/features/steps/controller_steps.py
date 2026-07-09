@@ -14,6 +14,12 @@ def step_open_controller_v2(context):
     context.ven_ui.go_controller()
 
 
+@given("I open the VEN-1 History UI")
+def step_open_history(context):
+    context.ven_ui.open()
+    context.ven_ui.go_history()
+
+
 # ── Layout: 01_layout.feature ─────────────────────────────────────────────────
 
 @then("the grid tariff cell is visible")

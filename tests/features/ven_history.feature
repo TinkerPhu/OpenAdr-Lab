@@ -54,3 +54,7 @@ Feature: Persistent history routes (Phase 1, WP1.4)
   Scenario: The live in-memory history route still resolves for a real asset id
     When I GET /history/ev from the VEN
     Then the response status is 200
+
+  @ven-ui
+  Scenario: The History UI page opens via the nav bar
+    Given I open the VEN-1 History UI
