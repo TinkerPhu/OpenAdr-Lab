@@ -60,7 +60,7 @@ It's a 42°C afternoon in August. Air conditioning across the city is running at
 1. Navigate to **Programs** page
 2. Click **"Create"** button
 3. Enter Program Name: `manual-uc1-emergency`
-4. Under **Enrolled VENs**, check **ven-1-name** (leave others unchecked)
+4. Under **Enrolled VENs**, check **ven-1** (leave others unchecked)
 5. Click **"Create"**
 6. Navigate to **Events** page
 7. Click **"Create"** button
@@ -285,7 +285,7 @@ The grid operator sees that tomorrow at 2 PM, demand will peak at 95% of grid ca
 1. Navigate to **Programs** page
 2. Click **"Create"**
 3. Enter Program Name: `manual-uc4-peak`
-4. Under **Enrolled VENs**, check both **ven-1-name** and **ven-2**
+4. Under **Enrolled VENs**, check both **ven-1** and **ven-2**
 5. Click **"Create"**
 6. Navigate to **Events** page
 7. Click **"Create"**
@@ -405,7 +405,7 @@ A 500 kWh community battery receives a 3-phase dispatch:
 1. Navigate to **Programs** page
 2. Click **"Create"**
 3. Enter Program Name: `manual-uc6-battery`
-4. Under **Enrolled VENs**, check **ven-1-name** only
+4. Under **Enrolled VENs**, check **ven-1** only
 5. Click **"Create"**
 6. Navigate to **Events** page
 7. Click **"Create"**
@@ -526,7 +526,7 @@ At 1 PM, the grid operator creates a peak shaving event for 4-6 PM. At 3 PM, a l
 1. Navigate to **Programs** page
 2. Click **"Create"**
 3. Enter Program Name: `manual-uc8-cancel`
-4. Under **Enrolled VENs**, check **ven-1-name** only
+4. Under **Enrolled VENs**, check **ven-1** only
 5. Click **"Create"**
 6. Navigate to **Events** page
 7. Click **"Create"**
@@ -615,7 +615,7 @@ TOKEN=$(curl -s -X POST http://Pi4-Server:8200/auth/token \
 curl -s -X POST http://Pi4-Server:8200/programs \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"programName": "manual-uc1-emergency", "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}]}' | python3 -m json.tool
+  -d '{"programName": "manual-uc1-emergency", "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}]}' | python3 -m json.tool
 
 # Save PROGRAM_ID from response, then create event
 curl -s -X POST http://Pi4-Server:8200/events \
@@ -668,7 +668,7 @@ curl -s -X POST http://Pi4-Server:8200/events \
 ```bash
 curl -s -X POST http://Pi4-Server:8200/programs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"programName": "manual-uc4-peak", "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}, {"type": "VEN_NAME", "values": ["ven-2"]}]}' | python3 -m json.tool
+  -d '{"programName": "manual-uc4-peak", "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}, {"type": "VEN_NAME", "values": ["ven-2"]}]}' | python3 -m json.tool
 
 curl -s -X POST http://Pi4-Server:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
@@ -694,7 +694,7 @@ curl -s -X POST http://Pi4-Server:8200/events \
 ```bash
 curl -s -X POST http://Pi4-Server:8200/programs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"programName": "manual-uc6-battery", "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}]}' | python3 -m json.tool
+  -d '{"programName": "manual-uc6-battery", "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}]}' | python3 -m json.tool
 
 curl -s -X POST http://Pi4-Server:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
@@ -727,7 +727,7 @@ curl -s -X POST http://Pi4-Server:8212/reports -H "Content-Type: application/jso
 ```bash
 curl -s -X POST http://Pi4-Server:8200/programs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"programName": "manual-uc8-cancel", "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}]}' | python3 -m json.tool
+  -d '{"programName": "manual-uc8-cancel", "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}]}' | python3 -m json.tool
 
 curl -s -X POST http://Pi4-Server:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

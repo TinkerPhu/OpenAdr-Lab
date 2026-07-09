@@ -4507,3 +4507,54 @@ Reverted `Cargo.lock` before committing to keep the diff scoped to the actual ch
 lockfile refresh is a separate, deliberate decision, not a side effect of a lint fix.
 Skipped the "RUSTFLAGS=-D warnings on Pi4 docker build" follow-up mentioned in the plan for
 now (belongs with a CI/docker change, not this local-only pass).
+
+### WP0.2 — GB-02/GB-03: Uniform VEN naming and UUID IDs
+
+**Problem recap:** `ven-2`/`ven-3` are provisioned cleanly at runtime via
+`scripts/seed_vtn.py`'s `provision_vens()` — a VTN API call that yields a real
+VTN-issued UUID `ven.id` and venName `"ven-2"`/`"ven-3"`. `ven-1` was instead pre-seeded
+by the SQL fixture `openleadr-rs/fixtures/test_user_credentials.sql` with a legacy literal
+id `"ven-1"` (not a UUID) and venName `"ven-1-name"` (an inconsistent suffix nothing else
+uses).
+
+**Key discovery — the fixture is shared, not vendored-and-forgotten:** it's loaded both by
+our E2E stack (`tests/entrypoint.sh`) *and* by openleadr-rs's own CI
+(`.github/workflows/checks.yml`), whose Rust integration tests
+(`api/program.rs`, `data_source/postgres/{event,program,ven}.rs`) assert directly on the
+`"ven-1-name"` row it seeds. An archived plan (`docs/plans/archive/rename-VEN-1-plan.md`)
+had already scoped the "edit the fixture + ~50 Rust call sites in the submodule" approach
+in detail — useful as a file/line inventory, but its own risk analysis is presumably why it
+was archived rather than executed.
+
+**Approach taken (confirmed with user over two rounds of questions, given the added
+submodule-CI risk once discovered):** leave `openleadr-rs` completely untouched — no
+submodule edit, no risk to its CI. Instead:
+
+- `tests/entrypoint.sh`: right after the fixture loads, `DELETE` ven-1's legacy rows
+  (`user_ven`, `user_credentials`, `user`, `ven`) from our own E2E Postgres, then run a new
+  `tests/provision_ven1.py` (a straight clone of the existing `provision_ven2.py` pattern)
+  to re-provision ven-1 through the VTN API — same mechanism as ven-2/ven-3, so it gets a
+  real UUID id and venName `"ven-1"`.
+- `scripts/seed_vtn.py` (manual/demo seeding, used against a separately-bootstrapped VTN
+  that *also* loads this fixture per `vtn_setup_from_blog_step_by_step.md`): added ven-1 to
+  `VENS_TO_PROVISION` alongside ven-2/ven-3; replaced every `"ven-1-name"` target value with
+  `"ven-1"`. Added a note to the setup doc with the same clear-legacy-rows SQL so a human
+  running the manual walkthrough re-provisions cleanly instead of the credential check
+  short-circuiting to "already provisioned."
+- `tests/features/{enrollment,use_cases,ui_use_cases,ven_simulator}.feature` and
+  `ven_isolation_steps.py`: `"ven-1-name"` → `"ven-1"` in program/event targeting values and
+  the one VEN-isolation assertion on `venName`.
+- `docs/use-cases/SYSTEM-USE-CASE-MANUAL.md`, `docs/reference/KEY_LEARNINGS.md`: updated
+  the current-reference mentions of `ven-1-name`; left historical journal/archived-plan
+  mentions as-is per the archived plan's own "historical docs may stay" guidance.
+
+**What did *not* need changing:** `VEN/docker-compose.yml`'s `CLIENT_ID`/`CLIENT_SECRET`/
+`VEN_NAME` env vars were already `"ven-1"` (the OAuth client_id/secret and the VEN app's own
+venName were never the problem — only the VTN's pre-seeded db row was inconsistent). Feature
+steps/UI tests that already said `"ven-1"` (report `clientName`, VTN UI mock data) needed no
+change since they were referring to the client_id/venName, which was always `"ven-1"` — only
+the *venName stored in the VTN's ven-1 row* was wrong, and only in targeting contexts that
+explicitly spelled out `"-name"`.
+
+**Not yet run:** the full E2E suite on Pi4 — this WP's stated risk is entirely in shared
+test fixtures, so that's the real verification, planned next.

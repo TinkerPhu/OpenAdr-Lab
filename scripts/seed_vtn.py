@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Seed the VTN with demo programs and events for all 8 use cases.
 
-Also provisions ven-2 and ven-3 via API if they don't exist yet.
-(ven-1 is created by the SQL fixture test_user_credentials.sql.)
+Also provisions ven-1, ven-2, and ven-3 via API if they don't exist yet
+(GB-02/GB-03: uniform "ven-N" venName + VTN-issued UUID id for all three,
+no special case for ven-1). The SQL fixture test_user_credentials.sql still
+seeds the ven-manager/user-manager/business users this script authenticates
+as, but no longer seeds ven-1 itself.
 
 Usage:
     python3 seed_vtn.py --vtn-url http://localhost:8200
@@ -25,7 +28,7 @@ PROGRAMS = [
         "programLongName": "Summer Peak Demand Response Program",
         "programType": "DEMAND_RESPONSE",
         "targets": [
-            {"type": "VEN_NAME", "values": ["ven-1-name"]},
+            {"type": "VEN_NAME", "values": ["ven-1"]},
             {"type": "VEN_NAME", "values": ["ven-2"]},
         ],
     },
@@ -63,7 +66,7 @@ def build_events():
                     "start": (now + timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "duration": "PT30M",
                 },
-                "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}],
+                "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}],
                 "intervals": [
                     {
                         "id": 0,
@@ -80,7 +83,7 @@ def build_events():
                     "duration": "PT4H",
                 },
                 "targets": [
-                    {"type": "VEN_NAME", "values": ["ven-1-name"]},
+                    {"type": "VEN_NAME", "values": ["ven-1"]},
                     {"type": "VEN_NAME", "values": ["ven-2"]},
                 ],
                 "intervals": [
@@ -179,7 +182,7 @@ def build_events():
                     "start": (now + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "duration": "PT5H",
                 },
-                "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}],
+                "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}],
                 "intervals": [
                     {
                         "id": 0,
@@ -266,7 +269,7 @@ def build_events():
             {
                 "eventName": "cancel-demo-event",
                 "priority": None,
-                "targets": [{"type": "VEN_NAME", "values": ["ven-1-name"]}],
+                "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}],
                 "intervals": [
                     {
                         "id": 0,
@@ -278,9 +281,12 @@ def build_events():
     }
 
 
-# ── VENs to provision via API (ven-1 is created by the SQL fixture) ──────────
+# ── VENs to provision via API (GB-02/GB-03: uniform pattern, no special case
+# for ven-1 — see the note in vtn_setup_from_blog_step_by_step.md about
+# clearing the fixture's legacy ven-1 rows before running this) ─────────────
 
 VENS_TO_PROVISION = [
+    {"ven_name": "ven-1", "client_id": "ven-1", "client_secret": "ven-1", "user_ref": "ven-1-user"},
     {"ven_name": "ven-2", "client_id": "ven-2", "client_secret": "ven-2", "user_ref": "ven-2-user"},
     {"ven_name": "ven-3", "client_id": "ven-3", "client_secret": "ven-3", "user_ref": "ven-3-user"},
 ]
