@@ -156,12 +156,24 @@ Add log for past. to be shown in VEN UI
 
 ---
 
-### BL-16: AssetLedger — per-asset billing-period cost/CO2 ledger
+### BL-16: AssetLedger — per-asset billing-period cost/CO2 ledger — RESOLVED (Phase 1, WP1.6)
 **Req:** entities/design_vocabulary.rs §3.7 (`AssetLedger`)
 **Problem:** `monitor::record_tick` accumulates tick-level cost/CO2 into the asset ledger already (correcting an earlier mis-attribution to the dispatcher — see R5 finding), but there is no `AssetLedger`-shaped per-asset, per-billing-period rollup with defined `period_start`/`period_end` and reset semantics. Nothing constructs or periodically resets one today.
 **Fix:** Wire `AssetLedger` as the billing-period aggregation layer on top of `monitor::record_tick`'s tick-level accumulation; add a period-rollover trigger (e.g. monthly) that closes the current ledger and opens the next.
 **Complexity:** Medium–Large. Needs period-boundary logic and persistence across restarts.
 **Verify:** Unit test: ledger accumulates across ticks within a period, resets exactly at `period_end`, and totals reconcile against `monitor::record_tick`'s raw sums.
+**Resolution:** `tasks/history_sampler/mod.rs`'s existing 1s loop gained a
+`month_boundary_crossed()` check (pure, clock-injected, distinct from the day-pruning
+check — does NOT fire on the very first call, since the live ledger survives restarts
+via `state.json` and must not be closed just because the process happened to restart
+mid-month). On a real crossing, `close_ledger_period()` snapshots `AppState`'s existing
+`AssetLedgerEntry` map into `HistoryPort::append_ledger_period` rows (the `ledger_periods`
+table from WP1.1's schema v1), then resets the live ledger via the existing
+`set_asset_ledger()`. `GET /ledger?asset_id=` now returns `{ current, closed_periods }`
+for one asset (unchanged shape when `asset_id` is omitted — the existing Dashboard
+`LedgerCard` consumer is unaffected). No new UI needed: that same `LedgerCard` already
+shows per-asset current-period cost/energy/CO2 with a "running since" label, which now
+correctly reflects the current billing period after each rollover.
 
 ---
 

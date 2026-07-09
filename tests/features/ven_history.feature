@@ -55,6 +55,18 @@ Feature: Persistent history routes (Phase 1, WP1.4)
     When I GET /history/ev from the VEN
     Then the response status is 200
 
+  @history
+  Scenario: GET /ledger without asset_id keeps its existing shape
+    When I GET /ledger from the VEN
+    Then the response status is 200
+
+  @history
+  Scenario: GET /ledger with asset_id returns current and closed_periods
+    When I GET /ledger?asset_id=ev from the VEN
+    Then the response status is 200
+    And the response JSON has field "current"
+    And the response JSON has field "closed_periods"
+
   @ven-ui
   Scenario: The History UI page opens via the nav bar
     Given I open the VEN-1 History UI
