@@ -346,5 +346,6 @@ Add log for past. to be shown in VEN UI
 | ID | Crate | Title |
 |----|-------|-------|
 | RUSTSEC-2026-0097 | rand 0.8.5, 0.9.2 | Unsound with custom logger calling `rand::rng()` |
+| RUSTSEC-2026-0190 | anyhow 1.0.101 | Unsoundness in `Error::downcast_mut()` |
 
-**Risk:** Only triggered when a custom global logger calls `rand::rng()` — not applicable here. No action required.
+**Risk:** `rand`/`rng()` — only triggered when a custom global logger calls `rand::rng()`, not applicable here. `anyhow::downcast_mut()` — found via `cargo audit` while adding `rusqlite` for Phase 1 (A-1); VEN's own code doesn't call `downcast_mut()` on an `anyhow::Error` anywhere. No action required for either; re-check when `anyhow` publishes a fix.

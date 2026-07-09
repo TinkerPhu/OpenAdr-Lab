@@ -1,0 +1,61 @@
+// HistoryPort trait — the boundary between application/service code and the
+// persistent history store. Mirrors SolverPort/SimulatorPort/VtnPort: the
+// trait is domain-level; the implementation (a SQLite-backed adapter) lives
+// in `history_store` (infra ring), reachable only through this port.
+//
+// Every method is synchronous/blocking by design: the concrete adapter wraps
+// a blocking `rusqlite::Connection`. Callers in async contexts must invoke
+// these through `tokio::task::spawn_blocking` — never call directly from an
+// async fn body.
+//
+// Not yet consumed as `dyn HistoryPort` from `main.rs` — that wiring is
+// WP1.2's history-sampler task; landing the port + adapter as their own
+// reviewable commit first.
+#![allow(dead_code)]
+use chrono::{DateTime, Utc};
+
+use crate::entities::history::{
+    EventReceived, GridSample, LedgerPeriod, PlanSnapshot, ReportSent, TickSample,
+};
+use crate::entities::DomainError;
+
+pub trait HistoryPort: Send + Sync {
+    fn append_tick_samples(&self, rows: &[TickSample]) -> Result<(), DomainError>;
+    fn append_grid_sample(&self, row: &GridSample) -> Result<(), DomainError>;
+    fn append_plan_snapshot(&self, row: &PlanSnapshot) -> Result<(), DomainError>;
+    fn append_event_received(&self, row: &EventReceived) -> Result<(), DomainError>;
+    fn append_report_sent(&self, row: &ReportSent) -> Result<(), DomainError>;
+    fn append_ledger_period(&self, row: &LedgerPeriod) -> Result<(), DomainError>;
+
+    fn query_ticks(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        asset_id: Option<&str>,
+    ) -> Result<Vec<TickSample>, DomainError>;
+    fn query_grid(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<GridSample>, DomainError>;
+    fn query_events(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<EventReceived>, DomainError>;
+    fn query_reports(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<ReportSent>, DomainError>;
+    fn query_plans(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<PlanSnapshot>, DomainError>;
+    fn query_ledger_periods(&self, asset_id: &str) -> Result<Vec<LedgerPeriod>, DomainError>;
+
+    /// Delete all rows across every table with a time column older than `cutoff`.
+    /// Returns the total number of rows deleted.
+    fn prune_before(&self, cutoff: DateTime<Utc>) -> Result<u64, DomainError>;
+}

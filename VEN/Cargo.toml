@@ -27,6 +27,9 @@ rand = "0.8"
 good_lp = { version = "1", features = ["highs"], default-features = false }
 tokio-stream = { version = "0.1", features = ["sync"] }
 async-trait = "0.1"
+# Phase 1 (A-1) history store. "bundled" vendors sqlite3 (public domain) — no
+# cmake/system dependency issue on WSL or Pi4 ARM. MIT licence.
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 # If you decide to use the Rust VEN library:
 # openleadr-client = "0.1"   # check repo/docs for exact version you want

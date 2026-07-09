@@ -4,6 +4,7 @@ pub mod capacity;
 pub mod design_vocabulary;
 pub mod device_session;
 pub mod error;
+pub mod history;
 pub mod plan;
 pub mod planner_params;
 pub mod sim_inject;
