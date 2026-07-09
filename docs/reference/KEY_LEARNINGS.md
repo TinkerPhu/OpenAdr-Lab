@@ -82,7 +82,7 @@
 - **programType**: NOT an enum. It's a free-text `Option<String>` in the spec. Example shows "PRICING_TARIFF" but any string is valid. No dropdown needed.
 - **programDescriptions**: Array of URL entries. Each entry has one field: `url: String`. VTN UI maps single "Description URL" field to first array entry for simplicity.
 - **openleadr-rs targets: one VEN per entry** — `extract_vens()` reads `values[0]` only. Must use `[{type:"VEN_NAME",values:["ven-1"]},{type:"VEN_NAME",values:["ven-2"]}]` NOT `[{type:"VEN_NAME",values:["ven-1","ven-2"]}]`
-- **VEN-1 fixture venName is `ven-1-name`** (not `ven-1`) — ven ID is `ven-1`, venName is `ven-1-name`. Test VEN-2 provisioned with venName `ven-2`.
+- **GB-02/GB-03 (Phase 0):** ven-1's legacy fixture-seeded row (id `ven-1`, venName `ven-1-name`) is superseded — ven-1 is now re-provisioned via the VTN API in `tests/entrypoint.sh` / `scripts/seed_vtn.py`, same as ven-2/ven-3, giving it a real UUID id and uniform venName `ven-1`. The SQL fixture itself (shared with openleadr-rs's own CI) was left untouched; only our E2E/demo bootstrap deletes and re-provisions those rows.
 - **Token endpoint** is `/auth/token` (NOT `/oauth/token`), uses `application/x-www-form-urlencoded` (NOT JSON)
 - **VTN auto-migrates** on first boot — no need for manual `cargo sqlx migrate run`
 - **Role-based access is enforced**: wrong role = 403 Forbidden. `any-business` sees programs/events, `ven-manager` sees VENs — a BFF needing both must use multiple credentials

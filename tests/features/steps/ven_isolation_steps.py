@@ -150,7 +150,7 @@ def step_ven1_own_record(context):
     assert len(context.ven1_vens) == 1, (
         f"VEN-1 sees {len(context.ven1_vens)} VEN records, expected 1"
     )
-    assert context.ven1_vens[0]["venName"] == "ven-1-name", (
+    assert context.ven1_vens[0]["venName"] == "ven-1", (
         f"VEN-1 sees wrong VEN: {context.ven1_vens[0]['venName']}"
     )
 

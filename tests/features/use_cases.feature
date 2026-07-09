@@ -6,7 +6,7 @@ Feature: OpenADR Use Cases — Full End-to-End
     Given I have a VTN token as "any-business"
 
   Scenario: UC1 - Emergency Load Shed (targeted to VEN-1 only)
-    Given I create a program "uc1-e2e-emergency" targeting "ven-1-name" and save its ID
+    Given I create a program "uc1-e2e-emergency" targeting "ven-1" and save its ID
     When I create a UC event "uc1-e2e-loadshed" with type "SIMPLE" priority 0 and 1 interval
     Then the response status is 201
     When I wait for VEN-1 to show event "uc1-e2e-loadshed"
@@ -37,7 +37,7 @@ Feature: OpenADR Use Cases — Full End-to-End
     And the VEN-1 event "uc3-e2e-price" has 3 intervals
 
   Scenario: UC4 - Peak Shaving (targeted to VEN-1 and VEN-2)
-    Given I create a program "uc4-e2e-peak" targeting both "ven-1-name" and "ven-2" and save its ID
+    Given I create a program "uc4-e2e-peak" targeting both "ven-1" and "ven-2" and save its ID
     When I create a UC event "uc4-e2e-peak-shave" with type "IMPORT_CAPACITY_LIMIT" priority 3 and 1 interval with intervalPeriod
     Then the response status is 201
     When I wait for VEN-1 to show event "uc4-e2e-peak-shave"
@@ -58,7 +58,7 @@ Feature: OpenADR Use Cases — Full End-to-End
     Then the report for event "uc5-e2e-ev-charge" from "ven-2" appears in VTN
 
   Scenario: UC6 - Battery Dispatch (targeted to VEN-1 only)
-    Given I create a program "uc6-e2e-battery" targeting "ven-1-name" and save its ID
+    Given I create a program "uc6-e2e-battery" targeting "ven-1" and save its ID
     When I create a UC event "uc6-e2e-battery-dispatch" with type "CHARGE_STATE_SETPOINT" priority 3 and 3 intervals
     Then the response status is 201
     When I wait for VEN-1 to show event "uc6-e2e-battery-dispatch"
@@ -79,7 +79,7 @@ Feature: OpenADR Use Cases — Full End-to-End
     Then the report for event "uc7-e2e-heartbeat" from "ven-1" appears in VTN
 
   Scenario: UC8 - Event Cancellation (VEN-1 sees then loses event)
-    Given I create a program "uc8-e2e-cancel" targeting "ven-1-name" and save its ID
+    Given I create a program "uc8-e2e-cancel" targeting "ven-1" and save its ID
     When I create a UC event "uc8-e2e-cancel-evt" with type "SIMPLE" priority 5 and 1 interval
     Then the response status is 201
     When I wait for VEN-1 to show event "uc8-e2e-cancel-evt"
@@ -109,7 +109,7 @@ Feature: OpenADR Use Cases — Full End-to-End
     Then the VEN-1 event "uc3c-e2e-orig" has payload value 0.99
 
   Scenario: UC4b - Modify peak shaving limit mid-flight
-    Given I create a program "uc4b-e2e-modify" targeting "ven-1-name" and save its ID
+    Given I create a program "uc4b-e2e-modify" targeting "ven-1" and save its ID
     When I create a UC event "uc4b-e2e-peak" with type "IMPORT_CAPACITY_LIMIT" priority 3 and 1 interval with intervalPeriod
     Then the response status is 201
     When I wait for VEN-1 to show event "uc4b-e2e-peak"
@@ -130,7 +130,7 @@ Feature: OpenADR Use Cases — Full End-to-End
     And the VEN-2 event "uc5b-e2e-low" has priority 4
 
   Scenario: UC6b - Conflicting charge and discharge events
-    Given I create a program "uc6b-e2e-conflict" targeting "ven-1-name" and save its ID
+    Given I create a program "uc6b-e2e-conflict" targeting "ven-1" and save its ID
     When I create a UC event "uc6b-e2e-charge" with type "CHARGE_STATE_SETPOINT" priority 3 and value 80
     Then the response status is 201
     When I create a UC event "uc6b-e2e-discharge" with type "CHARGE_STATE_SETPOINT" priority 2 and value -50

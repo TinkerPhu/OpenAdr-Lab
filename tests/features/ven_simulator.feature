@@ -81,7 +81,7 @@ Feature: VEN Simulator
 
   Scenario: Auto-report submitted for active event
     Given I have a VTN token as "any-business"
-    And I create a program "auto-report-test" targeting "ven-1-name" and save its ID
+    And I create a program "auto-report-test" targeting "ven-1" and save its ID
     When I create a UC event "auto-report-evt" with type "IMPORT_CAPACITY_LIMIT" priority 0 and value 5000
     Then the response status is 201
     When I wait for VEN-1 to show event "auto-report-evt"
