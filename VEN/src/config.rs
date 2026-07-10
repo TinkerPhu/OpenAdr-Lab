@@ -10,6 +10,10 @@ pub struct Config {
     pub poll_events_secs: u64,
     pub poll_programs_secs: u64,
     pub poll_reports_secs: u64,
+    /// GB-09 (Phase 2, WP2.5): one-time delay before the poll loops start,
+    /// so a fleet of VENs brought up together don't all poll in lockstep.
+    /// The fleet generator derives this from each instance's index.
+    pub poll_startup_jitter_s: u64,
     pub persist_path: Option<String>,
     pub profile_path: Option<String>,
 }
@@ -37,6 +41,11 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(60);
 
+        let poll_startup_jitter_s = std::env::var("POLL_STARTUP_JITTER_S")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
         let persist_path = std::env::var("PERSIST_PATH").ok();
         let profile_path = std::env::var("PROFILE_PATH").ok();
 
@@ -49,6 +58,7 @@ impl Config {
             poll_events_secs,
             poll_programs_secs,
             poll_reports_secs,
+            poll_startup_jitter_s,
             persist_path,
             profile_path,
         })
