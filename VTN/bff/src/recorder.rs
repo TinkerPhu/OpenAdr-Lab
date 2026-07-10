@@ -172,6 +172,7 @@ async fn record_ven_snapshots(pool: &PgPool, client: &VtnClient) -> Result<u64> 
 pub fn spawn_recorder(
     pool: PgPool,
     business: VtnClient,
+    ven_mgr: VtnClient,
     poll_secs: u64,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -188,7 +189,9 @@ pub fn spawn_recorder(
                 Ok(n) => info!("recorder: {n} new event(s) archived"),
                 Err(e) => warn!("recorder: events poll failed: {e:#}"),
             }
-            if let Err(e) = record_ven_snapshots(&pool, &business).await {
+            // /vens requires the VenManager role — the "any-business" client
+            // (used for reports/events) is not authorized to list VENs.
+            if let Err(e) = record_ven_snapshots(&pool, &ven_mgr).await {
                 warn!("recorder: ven snapshot poll failed: {e:#}");
             }
         }
