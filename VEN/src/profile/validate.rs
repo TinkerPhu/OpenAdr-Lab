@@ -373,32 +373,36 @@ planner:
 
     #[test]
     fn test_plan_zones_derive_effective_step_and_horizon() {
-        let mut cfg = PlannerConfig::default();
-        cfg.plan_zones = Some(vec![
-            PlanZone {
-                step_s: 300,
-                slots: 96,
-            }, // 8 h
-            PlanZone {
-                step_s: 600,
-                slots: 96,
-            }, // 16 h
-            PlanZone {
-                step_s: 900,
-                slots: 96,
-            }, // 24 h
-        ]);
+        let cfg = PlannerConfig {
+            plan_zones: Some(vec![
+                PlanZone {
+                    step_s: 300,
+                    slots: 96,
+                }, // 8 h
+                PlanZone {
+                    step_s: 600,
+                    slots: 96,
+                }, // 16 h
+                PlanZone {
+                    step_s: 900,
+                    slots: 96,
+                }, // 24 h
+            ]),
+            ..Default::default()
+        };
         assert_eq!(cfg.effective_step_s(), 300);
         assert_eq!(cfg.effective_horizon_h(), 48);
     }
 
     #[test]
     fn test_plan_zones_single_zone_matches_test_profile_values() {
-        let mut cfg = PlannerConfig::default();
-        cfg.plan_zones = Some(vec![PlanZone {
-            step_s: 3600,
-            slots: 24,
-        }]);
+        let cfg = PlannerConfig {
+            plan_zones: Some(vec![PlanZone {
+                step_s: 3600,
+                slots: 24,
+            }]),
+            ..Default::default()
+        };
         assert_eq!(cfg.effective_step_s(), 3600);
         assert_eq!(cfg.effective_horizon_h(), 24);
     }

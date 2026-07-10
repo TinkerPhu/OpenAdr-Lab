@@ -53,6 +53,14 @@ pub struct TimelineSnapshot {
     pub grid_current_kw: f64,
 }
 
+/// Time window parameters for `build_asset_timeline`.
+pub struct TimeWindow {
+    /// Hours of history to include (clamped to ≥ 0).
+    pub hours_back: f64,
+    /// Hours of future plan to include (clamped to ≥ 0).
+    pub hours_forward: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,12 +93,4 @@ mod tests {
             s1["temp_c"],
         );
     }
-}
-
-/// Time window parameters for `build_asset_timeline`.
-pub struct TimeWindow {
-    /// Hours of history to include (clamped to ≥ 0).
-    pub hours_back: f64,
-    /// Hours of future plan to include (clamped to ≥ 0).
-    pub hours_forward: f64,
 }

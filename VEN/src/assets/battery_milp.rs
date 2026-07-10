@@ -327,7 +327,7 @@ mod milp_context_trait_tests {
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
         let cs = AssetMilpContext::constraints(&ctx, &pool, n, &dt_h);
         assert!(
-            cs.len() >= n * 3 + 1,
+            cs.len() > n * 3,
             "expected at least {} constraints, got {}",
             n * 3 + 1,
             cs.len()

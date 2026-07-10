@@ -123,6 +123,7 @@ impl MockEvCtx {
         }
     }
 
+    #[allow(dead_code)] // full EvMilpMode mock coverage; no current test exercises MustRun
     pub fn must_run(n: usize, p_max_kw: f64, e_core_kwh: f64) -> Self {
         Self {
             ctx: EvMilpContext {
@@ -216,6 +217,7 @@ pub struct MockHeaterCtx {
 }
 
 impl MockHeaterCtx {
+    #[allow(dead_code)] // full HeaterMilpMode mock coverage; no current test exercises MayRun
     pub fn may_run(p_full_kw: f64, p_mid_kw: f64, e_init_kwh: f64, e_max_kwh: f64) -> Self {
         Self {
             ctx: HeaterMilpContext {

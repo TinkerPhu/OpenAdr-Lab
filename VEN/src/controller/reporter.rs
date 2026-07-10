@@ -8,8 +8,6 @@ use chrono::{DateTime, Duration, Utc};
 use tracing::debug;
 
 use crate::common::{parse_iso8601_duration_secs, Aggregation, Interpolation, TimeSeries};
-#[cfg(test)]
-use crate::controller::simulator_port::SimSnapshot;
 use crate::controller::vtn_port::{
     OadrEvent, OadrIntervalPeriod, OadrReportBody, OadrReportInterval, OadrReportPayload,
     OadrReportResource,
@@ -483,7 +481,6 @@ fn format_iso8601_duration(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot};
     use std::collections::HashMap;
     use uuid::Uuid;
 
@@ -516,38 +513,6 @@ mod tests {
             })
             .collect();
         (id.to_string(), samples)
-    }
-
-    /// Build a `SimSnapshot` with given `(id, power_kw)` asset pairs.
-    fn make_snap(assets: &[(&str, f64)]) -> SimSnapshot {
-        SimSnapshot {
-            ts: Utc::now(),
-            grid: GridSnapshot {
-                net_power_w: 0.0,
-                voltage_v: 0.0,
-                import_kwh: 0.0,
-                export_kwh: 0.0,
-            },
-            assets: assets
-                .iter()
-                .map(|&(id, power_kw)| {
-                    (
-                        id.to_string(),
-                        AssetSnapshot {
-                            power_kw,
-                            asset_type: "base_load".to_string(),
-                            cap_max_import_kw: power_kw.max(0.0),
-                            cap_max_export_kw: (-power_kw).max(0.0),
-                            available_discharge_kwh: None,
-                            available_charge_kwh: None,
-                            default_setpoint_kw: power_kw,
-                            setpoint_kw: power_kw,
-                            values: HashMap::new(),
-                        },
-                    )
-                })
-                .collect(),
-        }
     }
 
     fn make_obligation(
@@ -730,7 +695,7 @@ mod tests {
                 .unwrap();
             let soc_pct: f64 = soc_payload.values[0].as_str().unwrap().parse().unwrap();
             assert!(
-                soc_pct >= 20.0 && soc_pct <= 80.0,
+                (20.0..=80.0).contains(&soc_pct),
                 "SoC {soc_pct} out of range"
             );
         }

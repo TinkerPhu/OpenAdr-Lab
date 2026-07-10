@@ -43,7 +43,7 @@ fn run_planner_no_assets_covers_base_load() {
             id: "base_load".into(),
             baseline_kw: 1.0,
         })],
-        simulator: SimulatorConfig::default(),
+        simulator: SimulatorConfig,
         planner: PlannerConfig {
             plan_step_s: 1800,
             plan_horizon_h: 2,
@@ -391,7 +391,7 @@ fn make_profile_n48() -> Profile {
                 baseline_kw: 0.5,
             }),
         ],
-        simulator: SimulatorConfig::default(),
+        simulator: SimulatorConfig,
         planner: PlannerConfig {
             plan_step_s: 1800,
             plan_horizon_h: 24,
