@@ -27,7 +27,7 @@ pub(crate) fn spawn_program_poll(
         if startup_delay_s > 0 {
             tokio::time::sleep(std::time::Duration::from_secs(startup_delay_s)).await;
         }
-        let mut backoff = Backoff::new(secs, 900, 0);
+        let mut backoff = Backoff::new(secs, secs.saturating_mul(30).min(900), 0);
         loop {
             match vtn.fetch_programs().await {
                 Ok(programs) => {
