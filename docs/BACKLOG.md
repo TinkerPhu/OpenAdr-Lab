@@ -134,7 +134,11 @@ tests; see project_journal.md.
 
 ---
 
-Add log for past. to be shown in VEN UI
+### BL-30: Show past behaviour ("log for past") in VEN UI — RESOLVED (Phase 1, WP1.5)
+**Req:** `docs/plans/strategic_roadmap.md` §9 (numbered here per its own suggestion)
+**Problem:** the VEN UI had no way to browse historical power/cost/CO2, received events, or sent reports beyond the live in-memory view.
+**Fix:** a thin read-only view over A-1 (BL-31, the persistent history store) — see WP1.5.
+**Resolution:** `VEN/ui/src/pages/History.tsx` — date picker (defaults to yesterday), reused `AssetTimelineChart`/`TariffChart` fed from `/history/ticks`/`/history/grid`, plain tables for events received/reports sent. Verified in a real browser via a new `@ven-ui` Playwright scenario.
 
 ---
 
