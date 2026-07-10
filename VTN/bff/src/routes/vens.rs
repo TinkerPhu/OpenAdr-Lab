@@ -35,7 +35,9 @@ pub async fn delete_ven(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rid = request_id(&headers);
-    ctx.ven_mgr.delete_json(&format!("/vens/{id}"), rid.as_deref()).await?;
+    ctx.ven_mgr
+        .delete_json(&format!("/vens/{id}"), rid.as_deref())
+        .await?;
     ctx.cache.invalidate("vens").await;
     Ok(Json(serde_json::json!({"deleted": id})))
 }

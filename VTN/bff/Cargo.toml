@@ -17,3 +17,7 @@ metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# Phase 1 (A-2) VTN recorder — writes to the existing openleadr-rs Postgres
+# instance under schema `lab_recorder`, never touching its own tables.
+# MIT/Apache-2.0, no new system dependency (pure-Rust rustls TLS backend).
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "json"] }

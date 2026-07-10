@@ -243,11 +243,7 @@ impl VtnClient {
     }
 
     /// DELETE a VTN endpoint with automatic 401-retry.
-    pub async fn delete_json(
-        &self,
-        path: &str,
-        request_id: Option<&str>,
-    ) -> Result<()> {
+    pub async fn delete_json(&self, path: &str, request_id: Option<&str>) -> Result<()> {
         let token = self.ensure_token().await?;
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
 
@@ -261,10 +257,7 @@ impl VtnClient {
             self.invalidate_token().await;
             let new_token = self.ensure_token().await?;
             let resp = self
-                .apply_request_id(
-                    self.http.delete(&url).bearer_auth(&new_token),
-                    request_id,
-                )
+                .apply_request_id(self.http.delete(&url).bearer_auth(&new_token), request_id)
                 .send()
                 .await
                 .context(format!("DELETE {path} retry failed"))?;
