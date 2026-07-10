@@ -1,6 +1,7 @@
 mod cache;
 mod config;
 mod error;
+mod recorder;
 mod routes;
 mod vtn_client;
 
@@ -34,11 +35,7 @@ pub struct AppCtx {
     pub metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
 }
 
-async fn metrics_middleware(
-    State(_ctx): State<AppCtx>,
-    req: Request,
-    next: Next,
-) -> Response {
+async fn metrics_middleware(State(_ctx): State<AppCtx>, req: Request, next: Next) -> Response {
     let method = req.method().to_string();
     let path = req.uri().path().to_string();
     let start = Instant::now();
@@ -49,7 +46,8 @@ async fn metrics_middleware(
     let duration = start.elapsed().as_secs_f64();
 
     counter!("http_requests_total", "method" => method.clone(), "path" => path.clone(), "status" => status).increment(1);
-    histogram!("http_request_duration_seconds", "method" => method, "path" => path).record(duration);
+    histogram!("http_request_duration_seconds", "method" => method, "path" => path)
+        .record(duration);
 
     response
 }
@@ -79,12 +77,31 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let ctx = AppCtx {
-        business,
+        business: business.clone(),
         ven_mgr,
         cache: Arc::new(TtlCache::new()),
         config: Arc::new(cfg.clone()),
         metrics_handle: Arc::new(metrics_handle),
     };
+
+    // Phase 1 (A-2): VTN recorder, gated on DATABASE_URL being set.
+    if let Some(database_url) = cfg.database_url.clone() {
+        match sqlx::PgPool::connect(&database_url).await {
+            Ok(pool) => {
+                recorder::init_schema(&pool).await?;
+                recorder::spawn_recorder(pool, business, cfg.recorder_poll_secs);
+                info!(
+                    "VTN recorder started (poll every {}s)",
+                    cfg.recorder_poll_secs
+                );
+            }
+            Err(e) => {
+                tracing::error!("recorder disabled: failed to connect to DATABASE_URL: {e:#}");
+            }
+        }
+    } else {
+        info!("DATABASE_URL not set — VTN recorder disabled");
+    }
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -95,16 +112,31 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/api/health", get(routes::health::health))
-        .route("/api/programs", get(routes::programs::get_programs).post(routes::programs::create_program))
-        .route("/api/programs/:id", put(routes::programs::update_program).delete(routes::programs::delete_program))
-        .route("/api/events", get(routes::events::get_events).post(routes::events::create_event))
-        .route("/api/events/:id", put(routes::events::update_event).delete(routes::events::delete_event))
+        .route(
+            "/api/programs",
+            get(routes::programs::get_programs).post(routes::programs::create_program),
+        )
+        .route(
+            "/api/programs/:id",
+            put(routes::programs::update_program).delete(routes::programs::delete_program),
+        )
+        .route(
+            "/api/events",
+            get(routes::events::get_events).post(routes::events::create_event),
+        )
+        .route(
+            "/api/events/:id",
+            put(routes::events::update_event).delete(routes::events::delete_event),
+        )
         .route("/api/vens", get(routes::vens::get_vens))
         .route("/api/vens/:id", delete(routes::vens::delete_ven))
         .route("/api/reports", get(routes::reports::get_reports))
         .route("/api/reports/:id", delete(routes::reports::delete_report))
         .route("/api/metrics", get(routes::metrics::get_metrics))
-        .route_layer(middleware::from_fn_with_state(ctx.clone(), metrics_middleware))
+        .route_layer(middleware::from_fn_with_state(
+            ctx.clone(),
+            metrics_middleware,
+        ))
         .with_state(ctx)
         .layer(PropagateRequestIdLayer::new(x_request_id.clone()))
         .layer(TraceLayer::new_for_http())

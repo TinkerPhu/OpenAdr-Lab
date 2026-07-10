@@ -35,7 +35,10 @@ pub async fn create_program(
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rid = request_id(&headers);
-    let data = ctx.business.post_json("/programs", body, rid.as_deref()).await?;
+    let data = ctx
+        .business
+        .post_json("/programs", body, rid.as_deref())
+        .await?;
     ctx.cache.invalidate("programs").await;
     Ok(Json(data))
 }
@@ -47,7 +50,10 @@ pub async fn update_program(
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rid = request_id(&headers);
-    let data = ctx.business.put_json(&format!("/programs/{id}"), body, rid.as_deref()).await?;
+    let data = ctx
+        .business
+        .put_json(&format!("/programs/{id}"), body, rid.as_deref())
+        .await?;
     ctx.cache.invalidate("programs").await;
     Ok(Json(data))
 }
@@ -58,7 +64,9 @@ pub async fn delete_program(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rid = request_id(&headers);
-    ctx.business.delete_json(&format!("/programs/{id}"), rid.as_deref()).await?;
+    ctx.business
+        .delete_json(&format!("/programs/{id}"), rid.as_deref())
+        .await?;
     ctx.cache.invalidate("programs").await;
     Ok(Json(serde_json::json!({"deleted": id})))
 }
