@@ -9,13 +9,18 @@ use tracing::{error, info};
 
 /// Spawn a background task that polls the VTN for reports.
 ///
-/// See `spawn_program_poll` for the backoff-on-failure rationale (WP2.1, BL-03).
+/// See `spawn_program_poll` for the backoff-on-failure (WP2.1, BL-03) and
+/// `startup_delay_s` (GB-09, WP2.5) rationale.
 pub(crate) fn spawn_report_poll(
     state: AppState,
     vtn: Arc<dyn VtnPort>,
     secs: u64,
+    startup_delay_s: u64,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        if startup_delay_s > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(startup_delay_s)).await;
+        }
         let mut backoff = Backoff::new(secs, 900, 0);
         loop {
             match vtn.fetch_reports_raw().await {
