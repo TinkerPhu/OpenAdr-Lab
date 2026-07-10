@@ -21,6 +21,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[ven-ui]] — React SPA, multi-VEN context, timeline with now-point, History page
 - [[reliability-and-config]] — task supervision, typed DomainError, profile validation, config knobs
 - [[history-store]] — VEN HistoryPort/SqliteHistoryStore + sampler + routes, VTN BFF recorder
+- [[fleet-tooling]] — fleet.sh (up/down/status), bulk VEN registration, GB-06/GB-09
 
 ## Concepts
 - [[openadr-3]] — protocol entities, event types, certification profiles, 3.0 vs 3.1 skew
@@ -53,4 +54,4 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[history-store-persistence-format]] — SQLite schema, epoch-second time encoding, per-asset-per-minute rows, flat retention pruning, docker bind-mount path
 
 ---
-Pages: 33 · Last sync: 2026-07-10 (Phase 0 quick-wins + Phase 1 data foundation: new history-store component page, 3 pages updated, 88e0e25; query filed at 65afa27)
+Pages: 34 · Last sync: 2026-07-11 (Phase 2 fleet enablement: new fleet-tooling component page, reliability-and-config + deployment-topology updated, 795c8d8)

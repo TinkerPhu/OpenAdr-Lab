@@ -28,12 +28,11 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 
 ---
 
-### BL-03: Exponential backoff on VTN communication failure
+### BL-03: Exponential backoff on VTN communication failure — RESOLVED (Phase 2, WP2.1)
 **Req:** FR-OA-07
 **Problem:** All poll loops (`main.rs:101-298`) use fixed `tokio::time::interval`. On VTN failure, VEN retries every 30s indefinitely — no backoff, no jitter.
 **Fix:** Replace fixed interval with adaptive delay: on success reset to 30s; on failure double delay (30s → 60s → 120s → 240s → 480s → max 900s). Add ±10% jitter. On success, reset immediately.
-**Complexity:** Medium (2–4 hours). Affects 3 poll loops (programs, events, reports). Extract shared backoff helper.
-**Verify:** Integration test: stop VTN, observe VEN log shows increasing intervals. Restart VTN, observe immediate reset to 30s.
+**Resolution:** `VEN/src/tasks/backoff.rs` (`Backoff`, seeded RNG for deterministic tests) wired into `poll_programs.rs`/`poll_events.rs`/`poll_reports.rs`. Verified against a live Pi4 stack: `tests/features/ven_resilience.feature`'s new scenario stops the VTN for 130s, asserts growing gaps between consecutive poll-failure log timestamps, then restarts and confirms recovery. One real finding during that verification: recovery latency after a *sustained* outage is bounded by whatever backoff delay was already in flight when the VTN comes back (up to ~130s here), not instant — the reset to the base interval only takes effect on the *next* successful poll. That's the deliberate trade-off (never hammering a still-recovering VTN), documented in the feature file rather than tightened away.
 
 ---
 
@@ -253,12 +252,11 @@ correctly reflects the current billing period after each rollover.
 
 ---
 
-### BL-25: Reserved `DomainError` variants — wire at real boundaries
+### BL-25: Reserved `DomainError` variants — wire at real boundaries — 2 of 3 RESOLVED (Phase 2, WP2.3)
 **Req:** `entities/error.rs` (`DomainError::{PlanInfeasible, VtnUnreachable, ProfileInvalid}`)
 **Problem:** All three are constructed only inside their own `Display`-format unit test — never at an actual error boundary in the running application.
 **Fix:** `PlanInfeasible` — return from the planner's solve path when `SolverPort::solve` reports infeasibility, surfaced through the relevant route instead of a generic error. `VtnUnreachable` — classify repeated VTN-client timeouts distinctly from other request failures. `ProfileInvalid` — only applicable if profile hot-reload (not just startup validation) is ever built; until then this variant stays reserved with no natural call site.
-**Complexity:** Small–Medium for the first two (mostly replacing an existing generic error return with the specific variant at an already-identified call site); `ProfileInvalid` is blocked on a feature that doesn't exist yet.
-**Verify:** Unit test per variant: trigger the real condition (e.g. force `SolverPort::solve` to return infeasible), assert the route/caller receives `DomainError::PlanInfeasible`, not a generic error.
+**Resolution:** Both variants are now constructed at real boundaries, but as **structured log lines, not propagated errors** — the original "surfaced through the relevant route instead of a generic error" framing didn't match the code once investigated: `SolverPort::solve` is deliberately infallible (always returns a usable `Plan`, falling back with a `PlanWarning` on solver failure — see `solver_port.rs`'s own doc comment), so there was never a route-level 500 to replace for `PlanInfeasible`; it's now logged in `milp_planner::run_planner`'s existing fallback branch. `VtnUnreachable` is classified in `vtn.rs` from a connect/timeout-class `reqwest::Error` at every `send()` call site and logged for fleet debugging, without changing `VtnPort`'s `Result<T, anyhow::Error>` contract. `ProfileInvalid` stays reserved (no hot-reload feature exists).
 
 ---
 
@@ -321,10 +319,10 @@ correctly reflects the current billing period after each rollover.
 | GB-03 | Make VEN-1 ID a UUID and update all test/seed references | Medium |
 | GB-04 | DB-level optimization: add `ends_at timestamptz` index so `?active=true` runs in SQL, not post-filter Rust | Low (not needed until event table is large) |
 | GB-05 | VTN UI: filter past events from event table | Low |
-| GB-06 | Add DB-reset script for easy re-seeding | Low |
+| GB-06 | Add DB-reset script for easy re-seeding — RESOLVED (Phase 2, WP2.5: `scripts/db_reset.sh`) | Low |
 | GB-07 | Add setup script to bring up all required containers | Low |
 | GB-08 | Add VEN UI tests for UserRequests and Controller pages | Medium |
-| GB-09 | Make VEN poll interval configurable per profile (useful for testing) | Medium |
+| GB-09 | Make VEN poll interval configurable per profile (useful for testing) — PARTIALLY RESOLVED (Phase 2, WP2.5): the actual goal ("N VENs don't poll in lockstep") is met via a one-time `POLL_STARTUP_JITTER_S` stagger, not a per-profile interval override — simpler and lower-risk than moving poll intervals from env vars into the profile schema, which nothing currently needs. | Medium |
 | GB-10 | Remove remaining compiler warnings across all builds | Medium |
 
 ---
