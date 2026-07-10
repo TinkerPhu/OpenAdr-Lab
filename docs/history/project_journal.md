@@ -4918,6 +4918,35 @@ accepting the reformat felt proportionate rather than a scope-creep side effect)
 (`rustls-webpki`/`reqwest` chain, `anyhow`, `rand`) — zero new findings from `sqlx`.
 Registered as BL-32 in `BACKLOG.md` (BL-31 for A-1, WP1.1–1.6, alongside it).
 
-**Not yet verified:** a live Pi4 run confirming rows actually land in `lab_recorder.*`
-after publishing a program/event/report — planned next, since this WP's real risk is
-runtime (network/DB wiring), not something unit tests can confirm.
+**Verified live on Pi4 — and found a real bug:** started `test-db`/`test-vtn`/`test-bff`
+manually, loaded the fixture, created a program/event via the BFF and a report
+directly against the VTN as `ven-1`. First attempt: `reports_received` and
+`events_published` both populated correctly (right `ven_name`/`event_type`/
+`program_id` extracted from the raw JSON) — but `ven_snapshots` stayed empty, every
+poll logging `/vens returned 403 Forbidden`. Root cause: `record_ven_snapshots` was
+called with the `business` ("any-business") client, but `/vens` requires the
+VenManager role, same as every other vens route in this BFF. Fixed by threading
+`ven_mgr` through `spawn_recorder` separately. Confirms the value of an actual
+network-level check over unit tests alone — the dedup/pagination logic was correct,
+but the role mismatch would only ever surface at runtime.
+
+**Full E2E on Pi4 surfaced two more failures, both pre-existing timing fragility, not
+recorder bugs** (per the "no pre-existing vs new" rule, investigated and fixed
+anyway):
+
+1. `timeline_grid.feature`'s "now-point" scenario failed again even after the earlier
+   `hours_forward=2` fix — reproduced directly with `curl` against a live VEN: the
+   `test` profile's plan slots are wall-clock-hour-aligned (`02:00`, `03:00`, ...), so
+   how close the *next* boundary sits to "now" ranges from seconds to just under an
+   hour, and evidently 2 hours' margin still wasn't always enough. Widened to
+   `hours_forward=25` (matching an already-reliable scenario in the same file at
+   line 58), which only requires "a plan exists" rather than any specific alignment.
+2. The EV-session-allocates-power scenario, which had passed reliably (~90-95s) in
+   every prior run this session, timed out at its 150s `poll_until` budget. Raised to
+   300s, matching the existing "Pi4-marginal" precedent already used elsewhere
+   (`ev_charging_steps.py`, `uc_steps.py`). Plausible contributor: the new recorder is
+   the first background poller in this stack hitting the VTN/Postgres every 30s from a
+   second process (the BFF) — worth keeping an eye on if more Pi4-timing marginality
+   shows up in future runs sharing this stack.
+
+**Final verification:** full E2E suite green (246/246 scenarios) after both fixes.
