@@ -9,6 +9,7 @@ use crate::controller::VtnPort;
 use crate::entities;
 use crate::entities::asset::PlanTrigger;
 use crate::state::AppState;
+use crate::tasks::backoff::Backoff;
 
 // ─── Event poll change detection (RF-B08) ─────────────────────────────────────
 
@@ -120,14 +121,13 @@ pub(crate) fn spawn_event_poll(
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(secs));
+        let mut backoff = Backoff::new(secs, 900, 0);
         // Track previous event IDs and tariff count for change detection (T034/T035)
         let mut prev_event_ids: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         let mut prev_tariff_count: usize = 0;
         let mut prev_import_limit: Option<f64> = None;
         loop {
-            interval.tick().await;
             match vtn.fetch_events().await {
                 Ok(events) => {
                     counter!("poll_success_total", "resource" => "events").increment(1);
@@ -173,10 +173,13 @@ pub(crate) fn spawn_event_poll(
                     if any_change {
                         let _ = trigger_tx.send(PlanTrigger::RateChange);
                     }
+                    backoff.on_success();
+                    tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
                 }
                 Err(e) => {
                     counter!("poll_error_total", "resource" => "events").increment(1);
                     error!(resource = "events", "poll failed: {e:#}");
+                    tokio::time::sleep(backoff.on_failure()).await;
                 }
             }
         }
@@ -203,16 +206,6 @@ mod event_poll_tests {
             }]
         }))
         .unwrap()
-    }
-
-    fn make_event_json(id: &str, json: serde_json::Value) -> OadrEvent {
-        let mut base = serde_json::json!({ "id": id, "programID": "test-program" });
-        if let (Some(obj), Some(extra)) = (base.as_object_mut(), json.as_object()) {
-            for (k, v) in extra {
-                obj.insert(k.clone(), v.clone());
-            }
-        }
-        serde_json::from_value(base).unwrap()
     }
 
     fn empty_ids() -> std::collections::HashSet<String> {

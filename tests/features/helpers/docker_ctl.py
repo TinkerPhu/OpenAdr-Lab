@@ -62,6 +62,28 @@ def restart_service(service):
         raise RuntimeError(f"Failed to restart {service}: {result.stderr}")
 
 
+def get_logs(service, since=None):
+    """Return the container's stdout/stderr log lines (list of str).
+
+    `since` is an optional Docker-accepted time value (e.g. an RFC3339
+    timestamp or a duration like "2m") passed straight to `docker logs
+    --since`. Used by the WP2.1 backoff resilience scenario to inspect
+    structured `tracing` JSON log lines emitted by the poll loops.
+    """
+    name = _container_name(service)
+    args = ["logs"]
+    if since is not None:
+        args += ["--since", since]
+    args.append(name)
+    result = _docker(*args)
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to fetch logs for {name}: {result.stderr}")
+    # tracing_subscriber's fmt().json() writes to stdout by default; capture
+    # stderr too so this stays correct if that ever changes.
+    text = result.stdout + result.stderr
+    return [line for line in text.splitlines() if line.strip()]
+
+
 def wait_for_healthy(url, timeout=60, interval=2):
     """Poll a URL until it returns HTTP 200."""
     import requests

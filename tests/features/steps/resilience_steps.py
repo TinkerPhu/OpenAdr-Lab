@@ -1,6 +1,8 @@
 """Step definitions for failure-recovery / resilience scenarios."""
 
+import json
 import os
+from datetime import datetime, timezone
 from behave import given, when, then
 from features.helpers.api_client import ven_get, ven2_get, get_token_value
 from features.helpers.wait import poll_until
@@ -75,4 +77,51 @@ def step_ven2_picks_up(context, name, seconds):
         lambda: ven2_get("/events").json(),
         lambda events: any(e.get("eventName") == name for e in events),
         timeout=seconds,        description=f"VEN-2 picks up event '{name}'",
+    )
+
+
+# ── WP2.1 (BL-03): exponential backoff with jitter ─────────────────────────────
+
+@given("I mark the current time as the outage start")
+def step_mark_outage_start(context):
+    context.outage_start = datetime.now(timezone.utc)
+
+
+def _parse_log_ts(raw):
+    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+
+
+@then("VEN-1's events-poll failure log shows growing intervals since the outage start")
+def step_backoff_growing_intervals(context):
+    since = context.outage_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+    lines = docker_ctl.get_logs("test-ven-1", since=since)
+
+    failure_ts = []
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if entry.get("level") != "ERROR":
+            continue
+        fields = entry.get("fields", {})
+        if fields.get("resource") != "events":
+            continue
+        if "poll failed" not in fields.get("message", ""):
+            continue
+        failure_ts.append(_parse_log_ts(entry["timestamp"]))
+
+    assert len(failure_ts) >= 3, (
+        f"expected >= 3 events-poll failures logged during the outage, "
+        f"got {len(failure_ts)} (last 20 log lines: {lines[-20:]})"
+    )
+
+    gaps = [
+        (failure_ts[i + 1] - failure_ts[i]).total_seconds()
+        for i in range(len(failure_ts) - 1)
+    ]
+    # First gap is ~base interval (30s, ±10% jitter); a later gap has doubled
+    # at least once (>=60s, ±10%) — 1.3x leaves clear margin over jitter alone.
+    assert gaps[-1] > gaps[0] * 1.3, (
+        f"expected backoff intervals to grow during the outage, got gaps={gaps}"
     )
