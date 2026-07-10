@@ -18,8 +18,9 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[openadr-interface]] — event→signal translation tables, report obligations
 - [[simulator]] — physics models behind SimulatorPort, /sim endpoints (UI only)
 - [[asset-layer]] — Asset trait + AssetConfig dispatch, history ring buffers, AssetMilpContext
-- [[ven-ui]] — React SPA, multi-VEN context, timeline with now-point
+- [[ven-ui]] — React SPA, multi-VEN context, timeline with now-point, History page
 - [[reliability-and-config]] — task supervision, typed DomainError, profile validation, config knobs
+- [[history-store]] — VEN HistoryPort/SqliteHistoryStore + sampler + routes, VTN BFF recorder
 
 ## Concepts
 - [[openadr-3]] — protocol entities, event types, certification profiles, 3.0 vs 3.1 skew
@@ -51,4 +52,4 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[distributor-business-case-tiers]] — arguments for a distributor to adopt VTN/VEN: 4 rollout tiers from open tariff publication to VPP dispatch
 
 ---
-Pages: 31 · Last sync: 2026-07-06 (R1/R2/R3/R5/R6 code-and-docs resolution + timeline-forecast fix: 12 pages updated, uncommitted WIP at ae4a1ed)
+Pages: 32 · Last sync: 2026-07-10 (Phase 0 quick-wins + Phase 1 data foundation: new history-store component page, 3 pages updated, 88e0e25)
