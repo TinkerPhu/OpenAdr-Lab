@@ -8,14 +8,17 @@ pub enum DomainError {
     #[error("not found: {id}")]
     NotFound { id: Uuid },
 
-    /// Reserved — not yet constructed at a real error boundary. Intended for the
-    /// planner's solve failure path. See docs/BACKLOG.md BL-25.
+    /// Constructed (WP2.3, BL-25) when `milp_planner::run_planner`'s two-phase
+    /// solve fails — logged at that boundary, not propagated as an error:
+    /// `SolverPort::solve` stays infallible by design (see solver_port.rs),
+    /// always returning a usable fallback `Plan` with a matching `PlanWarning`.
     #[error("plan infeasible: {0}")]
     PlanInfeasible(String),
 
-    /// Reserved — not yet constructed at a real error boundary. Intended for VTN-client
-    /// repeated-timeout classification, distinct from a generic error. See
-    /// docs/BACKLOG.md BL-25.
+    /// Constructed (WP2.3, BL-25) in `vtn.rs` when an HTTP request to the VTN
+    /// fails with a connect- or timeout-class `reqwest::Error` — logged to
+    /// distinguish "VTN is down" from a generic request failure, for fleet
+    /// debugging and to pair with the WP2.1 backoff helper's own classification.
     #[error("VTN unreachable: {0}")]
     VtnUnreachable(String),
 
