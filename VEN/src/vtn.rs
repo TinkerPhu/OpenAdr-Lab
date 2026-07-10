@@ -42,6 +42,77 @@ struct Token {
     expires_in_secs: u64,
 }
 
+/// RFC 7807 "Problem Details for HTTP APIs" — openleadr-rs's error response
+/// shape (WP2.3). All fields optional per the RFC; a body that doesn't parse
+/// as this shape at all just falls back to the raw text.
+#[derive(Debug, Deserialize)]
+struct ProblemDetails {
+    #[serde(rename = "type")]
+    problem_type: Option<String>,
+    title: Option<String>,
+    status: Option<i64>,
+    detail: Option<String>,
+    instance: Option<String>,
+}
+
+/// Classify a failed HTTP `send()` as VTN-unreachable (BL-25) when it's a
+/// connect- or timeout-class failure — distinct from an HTTP-level error
+/// response, which always has a status code. Used only to log a typed,
+/// structured `DomainError::VtnUnreachable` for fleet debugging; the
+/// `anyhow::Result` propagated to callers is unchanged (`VtnPort`'s contract
+/// stays a plain `Result<T, anyhow::Error>`).
+fn classify_reqwest_error(e: &reqwest::Error) -> Option<crate::entities::DomainError> {
+    if e.is_connect() || e.is_timeout() {
+        Some(crate::entities::DomainError::VtnUnreachable(e.to_string()))
+    } else {
+        None
+    }
+}
+
+/// Log a structured `DomainError::VtnUnreachable` line if `e` classifies as
+/// one; a no-op for any other `send()` failure (DNS, TLS, etc. still surface
+/// via the caller's `.context(...)` message as before).
+fn log_if_vtn_unreachable(path: &str, e: &reqwest::Error) {
+    if let Some(domain_err) = classify_reqwest_error(e) {
+        tracing::error!(path, error = %domain_err, "VTN unreachable");
+    }
+}
+
+/// Build the error for a non-2xx VTN response, logging a structured line
+/// either way: as parsed RFC 7807 fields if the body is problem+json shaped,
+/// or the raw body otherwise. Called at every "not `is_success()`" branch in
+/// this client so no call site has to duplicate the parse-or-fallback logic.
+fn http_error(path: &str, status: StatusCode, body: &str) -> anyhow::Error {
+    match serde_json::from_str::<ProblemDetails>(body) {
+        Ok(problem) if problem.title.is_some() || problem.detail.is_some() => {
+            tracing::error!(
+                path,
+                status = status.as_u16(),
+                problem_status = problem.status.unwrap_or(-1),
+                problem_type = problem.problem_type.as_deref().unwrap_or(""),
+                problem_title = problem.title.as_deref().unwrap_or(""),
+                problem_detail = problem.detail.as_deref().unwrap_or(""),
+                problem_instance = problem.instance.as_deref().unwrap_or(""),
+                "VTN returned an RFC 7807 problem response"
+            );
+            anyhow::anyhow!(
+                "{path} returned {status}: {} — {}",
+                problem.title.unwrap_or_default(),
+                problem.detail.unwrap_or_default()
+            )
+        }
+        _ => {
+            tracing::error!(
+                path,
+                status = status.as_u16(),
+                body,
+                "VTN returned a non-2xx response"
+            );
+            anyhow::anyhow!("{path} returned {status}: {body}")
+        }
+    }
+}
+
 impl VtnClient {
     pub fn new(
         base_url: String,
@@ -95,6 +166,7 @@ impl VtnClient {
             })
             .send()
             .await
+            .inspect_err(|e| log_if_vtn_unreachable("/auth/token", e))
             .context("token request failed")?;
 
         if resp.status() != StatusCode::OK {
@@ -126,6 +198,7 @@ impl VtnClient {
             .bearer_auth(&token)
             .send()
             .await
+            .inspect_err(|e| log_if_vtn_unreachable(path, e))
             .context(format!("GET {path} failed"))?;
 
         if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
@@ -138,12 +211,13 @@ impl VtnClient {
                 .bearer_auth(&new_token)
                 .send()
                 .await
+                .inspect_err(|e| log_if_vtn_unreachable(path, e))
                 .context(format!("GET {path} retry failed"))?;
 
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("{path} returned {status}: {body}");
+                return Err(http_error(path, status, &body));
             }
             return Ok(resp.json().await?);
         }
@@ -151,7 +225,7 @@ impl VtnClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("{path} returned {status}: {body}");
+            return Err(http_error(path, status, &body));
         }
 
         Ok(resp.json().await?)
@@ -199,6 +273,7 @@ impl VtnClient {
             .json(&body)
             .send()
             .await
+            .inspect_err(|e| log_if_vtn_unreachable(path, e))
             .context(format!("PUT {path} failed"))?;
 
         if resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN {
@@ -211,12 +286,13 @@ impl VtnClient {
                 .json(&body)
                 .send()
                 .await
+                .inspect_err(|e| log_if_vtn_unreachable(path, e))
                 .context(format!("PUT {path} retry failed"))?;
 
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("{path} returned {status}: {body}");
+                return Err(http_error(path, status, &body));
             }
             return Ok(resp.json().await?);
         }
@@ -224,7 +300,7 @@ impl VtnClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("{path} returned {status}: {body}");
+            return Err(http_error(path, status, &body));
         }
 
         Ok(resp.json().await?)
@@ -246,6 +322,7 @@ impl VtnClient {
             .json(body)
             .send()
             .await
+            .inspect_err(|e| log_if_vtn_unreachable(path, e))
             .context(format!("POST {path} failed"))?;
 
         let status = resp.status();
@@ -272,7 +349,7 @@ impl VtnClient {
         }
 
         if !status.is_success() {
-            anyhow::bail!("/reports returned {status}: {text}");
+            return Err(http_error("/reports", status, &text));
         }
 
         Ok(())
@@ -442,5 +519,75 @@ mod tests {
 
         let events = client.fetch_events().await.unwrap();
         assert_eq!(events.len(), 75);
+    }
+
+    // ── WP2.3: RFC 7807 problem parsing ─────────────────────────────────────
+
+    #[test]
+    fn test_http_error_parses_rfc7807_problem_body() {
+        let body = json!({
+            "type": "https://example.com/probs/out-of-range",
+            "title": "Program not found",
+            "status": 404,
+            "detail": "No program with that id exists",
+            "instance": "/programs/abc"
+        })
+        .to_string();
+
+        let err = http_error("/programs/abc", StatusCode::NOT_FOUND, &body);
+
+        let msg = err.to_string();
+        assert!(msg.contains("Program not found"), "message was: {msg}");
+        assert!(
+            msg.contains("No program with that id exists"),
+            "message was: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_http_error_falls_back_to_raw_body_when_not_problem_json() {
+        let body = "internal server error, no JSON here";
+
+        let err = http_error("/events", StatusCode::INTERNAL_SERVER_ERROR, body);
+
+        let msg = err.to_string();
+        assert!(msg.contains(body), "message was: {msg}");
+        assert!(msg.contains("500"), "message was: {msg}");
+    }
+
+    #[test]
+    fn test_http_error_falls_back_when_json_but_not_problem_shaped() {
+        // Valid JSON, but has neither `title` nor `detail` — not an RFC 7807
+        // body, so this must fall back to the raw-body path rather than
+        // silently producing an error message with no useful content.
+        let body = json!({"error": "unexpected"}).to_string();
+
+        let err = http_error("/events", StatusCode::BAD_REQUEST, &body);
+
+        let msg = err.to_string();
+        assert!(msg.contains(&body), "message was: {msg}");
+    }
+
+    // ── WP2.3: BL-25 VtnUnreachable classification ──────────────────────────
+
+    #[tokio::test]
+    async fn test_classify_reqwest_error_detects_connection_refused() {
+        // Port 1 has no listener bound in this sandbox — a real, fast,
+        // network-free connection-refused error, no mock server needed.
+        let client = reqwest::Client::new();
+        let err = client
+            .get("http://127.0.0.1:1/nope")
+            .send()
+            .await
+            .expect_err("connecting to a closed local port must fail");
+
+        let classified = classify_reqwest_error(&err);
+        assert!(
+            matches!(
+                classified,
+                Some(crate::entities::DomainError::VtnUnreachable(_))
+            ),
+            "expected VtnUnreachable, got {classified:?}"
+        );
     }
 }
