@@ -2,9 +2,9 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-07-06
-synced_commit: ae4a1ed
-sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs]
+updated: 2026-07-10
+synced_commit: 88e0e25
+sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx]
 tags: [ui, react, timeline]
 ---
 
@@ -44,3 +44,12 @@ array, so it now snaps to real plan-slot boundaries instead of fake grid buckets
 
 Testing: Vitest + React Testing Library component tests, `data-testid`/`aria` attributes
 per `docs/guidelines/REACT_GUIDELINES.md`; part of suite 1 in [[testing-strategy]].
+
+## History page
+
+Phase 1 added a `History` page (`VEN/ui/src/pages/History.tsx`) that queries the new
+`GET /history/*` routes and reuses the existing `AssetTimelineChart`/`TariffChart`
+components rather than introducing new chart code. It is a distinct concern from the
+live/forecast timeline above: History shows the durably-persisted operational record
+(ticks, grid samples, plan snapshots, events, reports), backed by the VEN-local SQLite
+store described in [[history-store]], not the in-memory simulator ring buffers.

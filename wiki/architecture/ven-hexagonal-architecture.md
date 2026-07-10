@@ -2,8 +2,8 @@
 title: VEN Hexagonal Architecture
 type: architecture
 created: 2026-07-04
-updated: 2026-07-06
-synced_commit: ae4a1ed
+updated: 2026-07-10
+synced_commit: 88e0e25
 sources: [.claude/CLAUDE.md, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/module_dependency_graph_post_refactoring.md, VEN/src/]
 tags: [architecture, hexagonal, ports, ven]
 ---
@@ -34,11 +34,12 @@ inputs arrive only through the `AssetMilpContext` port. See [[milp-planner]] and
 | `VtnPort` | tasks/services → `vtn.rs` | fetch programs/events/reports, upsert reports (`controller/vtn_port.rs`) |
 | `AssetMilpContext` | planner input | solver receives `Vec<Box<dyn AssetMilpContext>>`; concrete asset types implement it in `assets/*.rs` (`controller/milp_planner/asset_port.rs`) |
 | `SolverPort` | services → `controller/milp_planner` | `solve(SolveRequest) -> Plan` (`controller/solver_port.rs`); `MilpSolver` (in `milp_planner/mod.rs`) is the real implementation, wrapping `run_planner()`; `services::PlanningService::solve_plan` is the only caller |
+| `HistoryPort` | domain/routes/tasks → `history_store` | append/query/prune for ticks, grid samples, plan snapshots, events, reports, ledger periods (`controller/history_port.rs`); `SqliteHistoryStore` is the real implementation, all methods synchronous (`rusqlite`), called from async contexts via `tokio::task::spawn_blocking` — see [[history-store]] |
 
-All four ports are now real traits with a concrete implementation and a mock
-(`services/test_support/mock_solver_port.rs` alongside the pre-existing simulator/VTN
-mocks) — `tasks/planning.rs`'s planning loop calls `SolverPort::solve` through the trait
-object, not `milp_planner::run_planner()` directly.
+All five ports are now real traits with a concrete implementation and a mock
+(`services/test_support/mock_solver_port.rs`, `mock_history_port.rs`, alongside the
+pre-existing simulator/VTN mocks) — `tasks/planning.rs`'s planning loop calls
+`SolverPort::solve` through the trait object, not `milp_planner::run_planner()` directly.
 
 ## Enforced invariants (grep checks, run before any VEN PR)
 
