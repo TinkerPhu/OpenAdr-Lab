@@ -188,10 +188,11 @@ async fn main() -> anyhow::Result<()> {
     // Spawn background loops — each wrapped in supervised_spawn for automatic restart.
     const TASK_COOLDOWN_S: u64 = 5;
 
+    let poll_jitter_s = cfg.poll_startup_jitter_s;
     {
         let (s, v, secs) = (state.clone(), vtn_port.clone(), cfg.poll_programs_secs);
         tasks::supervised_spawn("poll_programs", TASK_COOLDOWN_S, move || {
-            tasks::spawn_program_poll(s.clone(), v.clone(), secs)
+            tasks::spawn_program_poll(s.clone(), v.clone(), secs, poll_jitter_s)
         });
     }
     {
@@ -202,13 +203,13 @@ async fn main() -> anyhow::Result<()> {
             trigger_tx.clone(),
         );
         tasks::supervised_spawn("poll_events", TASK_COOLDOWN_S, move || {
-            tasks::spawn_event_poll(s.clone(), v.clone(), secs, tx.clone())
+            tasks::spawn_event_poll(s.clone(), v.clone(), secs, tx.clone(), poll_jitter_s)
         });
     }
     {
         let (s, v, secs) = (state.clone(), vtn_port.clone(), cfg.poll_reports_secs);
         tasks::supervised_spawn("poll_reports", TASK_COOLDOWN_S, move || {
-            tasks::spawn_report_poll(s.clone(), v.clone(), secs)
+            tasks::spawn_report_poll(s.clone(), v.clone(), secs, poll_jitter_s)
         });
     }
 
