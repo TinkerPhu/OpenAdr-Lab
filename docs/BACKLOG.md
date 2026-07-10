@@ -294,6 +294,20 @@ correctly reflects the current billing period after each rollover.
 
 ---
 
+### BL-31: A-1 — Persistent VEN history store — RESOLVED (Phase 1, WP1.1–1.6)
+**Req:** `docs/plans/roadmap/phase-1-data-foundation.md`
+**Problem:** the VEN had no persistent history beyond process lifetime — only in-memory ring buffers.
+**Fix:** `HistoryPort` trait + SQLite adapter (rusqlite, bundled), a 1-minute-mean downsampling sampler task, daily retention pruning, `GET /history/*` routes, a VEN UI History page, and monthly `AssetLedger` billing-period rollover (BL-16).
+**Verify:** see the WP1.1–WP1.6 project journal entries; full E2E green on Pi4 after each WP.
+
+### BL-32: A-2 — VTN recorder in the BFF — RESOLVED (Phase 1, WP1.7)
+**Req:** `docs/plans/roadmap/phase-1-data-foundation.md`
+**Problem:** nothing archived VTN-side reports/events/VEN health beyond openleadr-rs's own live tables — no historical record survives program/event deletion or VTN restarts.
+**Fix:** a background poll task in `VTN/bff` (new `recorder.rs`), gated on `DATABASE_URL`, pages through `/reports`/`/events`/`/vens` via the existing `skip`/`limit` support, dedupes on `(id, modificationDateTime)` via a composite PK + `ON CONFLICT DO NOTHING`, and writes into a new `lab_recorder` Postgres schema in the *same* instance openleadr-rs already uses — never touching its own tables.
+**Verify:** see the WP1.7 project journal entry; confirmed via a real Pi4 run (publish a program/event/report, poll interval elapses, rows appear in `lab_recorder.*` via `psql`).
+
+---
+
 ## General Backlog
 
 | ID | Item | Priority |

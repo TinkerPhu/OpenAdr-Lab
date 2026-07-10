@@ -4873,3 +4873,51 @@ WP1.6's code, just newly exposed by this run's particular timing (it had passed 
 WP1.4 and WP1.5 runs) — fixed anyway per the "no pre-existing vs new" rule, scp'd to
 Pi4 for a quick confirm loop before committing through git properly (per the
 deploy-pi4 skill's golden rule). Full suite re-run: 246/246 green.
+
+### WP1.7 — A-2: VTN recorder in the BFF
+
+**Research first (from the earlier Explore agent, reused here):** the BFF has zero
+existing background tasks, zero Postgres connectivity, zero pagination handling, and
+zero Rust tests — but the openleadr-rs list endpoints (`/reports` at least, confirmed
+via `report.rs`'s `QueryParams`) already support `skip`/`limit` (default 50, max 50),
+and the BFF container is already docker-network-adjacent to the same Postgres instance
+the VTN itself uses, in both the prod and test compose stacks.
+
+**What was done:** `VTN/bff/src/recorder.rs` (new module) — `sqlx` with the runtime
+(non-macro) query API deliberately, not the compile-time-checked `query!` macros: the
+project's own `KEY_LEARNINGS.md` documents the `.sqlx` offline-cache hash-mismatch
+pain from `openleadr-rs`'s use of that macro family, and sidestepping it entirely (no
+`DATABASE_URL` needed at compile time either) felt like the right call for a first cut.
+
+- `init_schema()` — `CREATE SCHEMA IF NOT EXISTS lab_recorder` + 3 tables
+  (`reports_received`, `events_published`, `ven_snapshots`), run once at BFF startup
+  before the poll loop starts. Never touches openleadr-rs's own tables/schema.
+- `dedup_key(value: &Value) -> Option<(String, String)>` — pure, extracts
+  `(id, modificationDateTime)` from a raw OpenADR object; returns `None` (never panics)
+  on a malformed object so one bad row can't crash the recorder. 4 unit tests — the
+  first tests this crate has ever had.
+- `fetch_all_pages()` — generic `skip`/`limit` loop, stops when a page returns fewer
+  than 50 rows. Reused identically for `/reports` and `/events`.
+- Dedup enforced at the DB layer: composite primary key `(id, modification_date_time)`
+  + `INSERT ... ON CONFLICT DO NOTHING`, so re-polling the same page is a no-op rather
+  than needing in-memory dedup state.
+- `spawn_recorder()` — a 30s-interval (`RECORDER_POLL_SECS`, configurable) loop:
+  reports, then events, then VEN snapshots (upserted via `ON CONFLICT DO UPDATE`, since
+  a VEN's "last seen" should overwrite, not accumulate). Log-and-continue on any
+  failure — matches the VEN-side history sampler's established failure policy.
+- Wired into `main.rs` behind `DATABASE_URL` (`Config.database_url: Option<String>`) —
+  absent or unreachable, the recorder is skipped with a log line, never blocking BFF
+  startup. Added `DATABASE_URL` to both `VTN/docker-compose.yml` (prod, pointing at the
+  same `db` service) and `tests/docker-compose.test.yml` (`test-db`).
+
+**Verification:** `cargo build`/`clippy -- -D warnings` clean (first-ever clean run
+required reformatting the whole `main.rs` via `cargo fmt` — unlike WP0.4's
+single-import fix, this time the file was already being substantially extended, so
+accepting the reformat felt proportionate rather than a scope-creep side effect).
+4/4 new tests pass. `cargo audit`: same pre-existing findings as VEN's own audit
+(`rustls-webpki`/`reqwest` chain, `anyhow`, `rand`) — zero new findings from `sqlx`.
+Registered as BL-32 in `BACKLOG.md` (BL-31 for A-1, WP1.1–1.6, alongside it).
+
+**Not yet verified:** a live Pi4 run confirming rows actually land in `lab_recorder.*`
+after publishing a program/event/report — planned next, since this WP's real risk is
+runtime (network/DB wiring), not something unit tests can confirm.

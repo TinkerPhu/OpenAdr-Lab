@@ -12,6 +12,10 @@ pub struct Config {
     pub cache_ttl_events: u64,
     pub cache_ttl_vens: u64,
     pub cache_ttl_reports: u64,
+    /// Phase 1 (A-2) VTN recorder. `None` disables the recorder entirely —
+    /// it's an optional add-on, not required for the BFF's core proxy role.
+    pub database_url: Option<String>,
+    pub recorder_poll_secs: u64,
 }
 
 impl Config {
@@ -50,6 +54,12 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(10);
 
+        let database_url = std::env::var("DATABASE_URL").ok();
+        let recorder_poll_secs = std::env::var("RECORDER_POLL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+
         Ok(Self {
             listen_addr,
             vtn_base_url,
@@ -61,6 +71,8 @@ impl Config {
             cache_ttl_events,
             cache_ttl_vens,
             cache_ttl_reports,
+            database_url,
+            recorder_poll_secs,
         })
     }
 }

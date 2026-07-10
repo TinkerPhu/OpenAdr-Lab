@@ -35,7 +35,9 @@ pub async fn delete_report(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rid = request_id(&headers);
-    ctx.business.delete_json(&format!("/reports/{id}"), rid.as_deref()).await?;
+    ctx.business
+        .delete_json(&format!("/reports/{id}"), rid.as_deref())
+        .await?;
     ctx.cache.invalidate("reports").await;
     Ok(Json(serde_json::json!({"deleted": id})))
 }

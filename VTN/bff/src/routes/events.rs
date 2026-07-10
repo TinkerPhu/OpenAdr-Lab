@@ -59,7 +59,10 @@ pub async fn create_event(
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rid = request_id(&headers);
-    let data = ctx.business.post_json("/events", body, rid.as_deref()).await?;
+    let data = ctx
+        .business
+        .post_json("/events", body, rid.as_deref())
+        .await?;
     invalidate_events_cache(&ctx).await;
     Ok(Json(data))
 }
@@ -71,7 +74,10 @@ pub async fn update_event(
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rid = request_id(&headers);
-    let data = ctx.business.put_json(&format!("/events/{id}"), body, rid.as_deref()).await?;
+    let data = ctx
+        .business
+        .put_json(&format!("/events/{id}"), body, rid.as_deref())
+        .await?;
     invalidate_events_cache(&ctx).await;
     Ok(Json(data))
 }
@@ -82,7 +88,9 @@ pub async fn delete_event(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rid = request_id(&headers);
-    ctx.business.delete_json(&format!("/events/{id}"), rid.as_deref()).await?;
+    ctx.business
+        .delete_json(&format!("/events/{id}"), rid.as_deref())
+        .await?;
     invalidate_events_cache(&ctx).await;
     Ok(Json(serde_json::json!({"deleted": id})))
 }

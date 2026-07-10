@@ -167,6 +167,9 @@ services:
       VTN_BUSINESS_CLIENT_SECRET: "any-business"
       VTN_VEN_MGR_CLIENT_ID: "ven-manager"
       VTN_VEN_MGR_CLIENT_SECRET: "ven-manager"
+      # Phase 1 (A-2) VTN recorder — same test-db instance, separate
+      # `lab_recorder` schema.
+      DATABASE_URL: postgres://openadr:openadr@test-db:5432/openadr
       RUST_LOG: "info"
     healthcheck:
       test: curl --fail http://127.0.0.1:8090/api/health || exit 1
