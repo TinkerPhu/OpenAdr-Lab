@@ -78,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
 
     let ctx = AppCtx {
         business: business.clone(),
-        ven_mgr,
+        ven_mgr: ven_mgr.clone(),
         cache: Arc::new(TtlCache::new()),
         config: Arc::new(cfg.clone()),
         metrics_handle: Arc::new(metrics_handle),
@@ -89,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
         match sqlx::PgPool::connect(&database_url).await {
             Ok(pool) => {
                 recorder::init_schema(&pool).await?;
-                recorder::spawn_recorder(pool, business, cfg.recorder_poll_secs);
+                recorder::spawn_recorder(pool, business, ven_mgr, cfg.recorder_poll_secs);
                 info!(
                     "VTN recorder started (poll every {}s)",
                     cfg.recorder_poll_secs
