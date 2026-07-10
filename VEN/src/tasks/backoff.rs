@@ -1,0 +1,100 @@
+//! Phase 2 (WP2.1, BL-03) — exponential backoff with jitter for the VTN poll
+//! loops. On success the delay resets to `base_s`; on failure it doubles up
+//! to `max_s`. Jitter is ±10% of the pre-jitter delay, drawn from a seeded
+//! RNG so tests are exact (determinism rule: no unseeded randomness).
+use std::time::Duration;
+
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+
+pub(crate) struct Backoff {
+    base_s: u64,
+    max_s: u64,
+    current_s: u64,
+    rng: StdRng,
+}
+
+impl Backoff {
+    pub(crate) fn new(base_s: u64, max_s: u64, seed: u64) -> Self {
+        Self {
+            base_s,
+            max_s,
+            current_s: base_s,
+            rng: StdRng::seed_from_u64(seed),
+        }
+    }
+
+    /// Reset to the base interval after a successful poll.
+    pub(crate) fn on_success(&mut self) {
+        self.current_s = self.base_s;
+    }
+
+    /// Return the jittered delay for the *current* interval, then double the
+    /// interval (capped at `max_s`) for the next failure.
+    pub(crate) fn on_failure(&mut self) -> Duration {
+        let delay = self.jittered(self.current_s);
+        self.current_s = self.current_s.saturating_mul(2).min(self.max_s);
+        delay
+    }
+
+    fn jittered(&mut self, base_s: u64) -> Duration {
+        let jitter_frac: f64 = self.rng.gen_range(-0.1..=0.1);
+        let secs = base_s as f64 * (1.0 + jitter_frac);
+        Duration::from_secs_f64(secs.max(0.0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_backoff_doubles_on_consecutive_failures() {
+        let mut b = Backoff::new(30, 900, 42);
+        // Jitter is ±10%, so compare against the un-jittered doubling sequence
+        // with tolerance rather than exact values.
+        let expected = [30.0, 60.0, 120.0, 240.0, 480.0, 900.0, 900.0];
+        for exp in expected {
+            let d = b.on_failure().as_secs_f64();
+            let tolerance = exp * 0.1 + 1e-9;
+            assert!((d - exp).abs() <= tolerance, "expected ~{exp}s, got {d}s");
+        }
+    }
+
+    #[test]
+    fn test_backoff_resets_on_success() {
+        let mut b = Backoff::new(30, 900, 1);
+        b.on_failure();
+        b.on_failure();
+        b.on_failure();
+        b.on_success();
+        let d = b.on_failure().as_secs_f64();
+        assert!(
+            (d - 30.0).abs() <= 3.0,
+            "expected ~30s after reset, got {d}s"
+        );
+    }
+
+    #[test]
+    fn test_backoff_caps_at_max() {
+        let mut b = Backoff::new(30, 100, 7);
+        for _ in 0..10 {
+            b.on_failure();
+        }
+        let d = b.on_failure().as_secs_f64();
+        assert!(d <= 110.0, "expected capped near 100s, got {d}s");
+    }
+
+    #[test]
+    fn test_backoff_jitter_within_10_percent() {
+        let mut b = Backoff::new(100, 900, 99);
+        for _ in 0..50 {
+            b.current_s = 100; // pin base so only jitter varies
+            let d = b.jittered(100).as_secs_f64();
+            assert!(
+                (90.0..=110.0).contains(&d),
+                "jittered delay {d} outside ±10% of 100s"
+            );
+        }
+    }
+}

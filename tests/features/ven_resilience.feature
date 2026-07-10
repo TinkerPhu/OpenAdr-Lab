@@ -42,3 +42,19 @@ Feature: Failure Recovery
     When the "test-ven-1" service is restarted
     And I wait for the "test-ven-1" service to be healthy
     Then VEN-1 picks up event "ven-restart-evt" within 30 seconds
+
+  # WP2.1 (BL-03): poll loops back off exponentially with jitter while the VTN
+  # is down, instead of hammering it every poll_events_secs (30s in this
+  # stack). 130s of outage covers two backoff steps (~30s, then ~60s), long
+  # enough to observe growing intervals despite ±10% jitter.
+  Scenario: VEN backs off exponentially during a sustained VTN outage
+    Given I mark the current time as the outage start
+    When the "test-vtn" service is stopped
+    And I wait 130 seconds
+    Then VEN-1's events-poll failure log shows growing intervals since the outage start
+    When the "test-vtn" service is restarted
+    And I wait for the "test-vtn" service to be healthy
+    And I refresh my VTN token as "any-business"
+    And I create an open program "resilience-backoff-recovery" and save its ID
+    And I create an event for the saved program named "backoff-recovery-evt"
+    Then VEN-1 picks up event "backoff-recovery-evt" within 30 seconds
