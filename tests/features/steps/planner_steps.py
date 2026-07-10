@@ -90,10 +90,14 @@ def step_wait_for_ev_allocation(context):
             for slot in slots
         )
 
+    # Raised from 150s: this scenario passed reliably (~95s) in prior Pi4
+    # runs but timed out at 150s in a run alongside a newly-added background
+    # poller (the WP1.7 VTN recorder) — matching the existing "Pi4-marginal"
+    # timeout precedent (ev_charging_steps.py, uc_steps.py already use 300s).
     context.ven_plan = poll_until(
         fetch,
         has_ev_alloc,
-        timeout=150,
+        timeout=300,
         interval=5,
         description="VEN /plan has EV allocation in slots",
     )
