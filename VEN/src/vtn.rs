@@ -3,6 +3,14 @@ use async_trait::async_trait;
 use reqwest::StatusCode;
 
 const TOKEN_EXPIRY_MARGIN_S: u64 = 60;
+// WP2.2 (Phase 2): openleadr-rs collection GETs cap at 50/page regardless of
+// a larger requested `limit` — match that cap so every page is full until
+// the last one.
+const PAGE_LIMIT: usize = 50;
+// Runaway-poll guard: a well-behaved poll should never need this many pages
+// for programs/events/reports on a single VEN; log if it does rather than
+// looping forever on a misbehaving or huge-collection VTN.
+const MAX_PAGES_WARNING: u32 = 20;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
@@ -149,6 +157,36 @@ impl VtnClient {
         Ok(resp.json().await?)
     }
 
+    /// GET every page of a collection endpoint via `skip`/`limit`, stopping
+    /// once a page returns fewer than `PAGE_LIMIT` items. `base_path` may
+    /// already contain a query string (e.g. `/events?active=true`).
+    async fn get_json_paginated(&self, base_path: &str) -> Result<Vec<serde_json::Value>> {
+        let mut all = Vec::new();
+        let mut skip = 0usize;
+        let mut pages = 0u32;
+        let sep = if base_path.contains('?') { '&' } else { '?' };
+        loop {
+            let page_path = format!("{base_path}{sep}skip={skip}&limit={PAGE_LIMIT}");
+            let raw = self.get_json(&page_path).await?;
+            let page = raw.as_array().cloned().unwrap_or_default();
+            let n = page.len();
+            all.extend(page);
+            pages += 1;
+            if pages == MAX_PAGES_WARNING {
+                tracing::warn!(
+                    base_path,
+                    pages,
+                    "paginated GET has fetched an unusually large number of pages"
+                );
+            }
+            if n < PAGE_LIMIT {
+                break;
+            }
+            skip += PAGE_LIMIT;
+        }
+        Ok(all)
+    }
+
     /// PUT JSON to a VTN endpoint with automatic 401-retry.
     async fn put_json(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value> {
         let token = self.ensure_token().await?;
@@ -267,8 +305,7 @@ impl VtnClient {
 #[async_trait]
 impl VtnPort for VtnClient {
     async fn fetch_programs(&self) -> Result<Vec<OadrProgram>> {
-        let raw = self.get_json("/programs").await?;
-        let items = raw.as_array().cloned().unwrap_or_default();
+        let items = self.get_json_paginated("/programs").await?;
         items
             .iter()
             .map(|v| serde_json::from_value(v.clone()).map_err(anyhow::Error::from))
@@ -276,8 +313,7 @@ impl VtnPort for VtnClient {
     }
 
     async fn fetch_events(&self) -> Result<Vec<OadrEvent>> {
-        let raw = self.get_json("/events?active=true").await?;
-        let items = raw.as_array().cloned().unwrap_or_default();
+        let items = self.get_json_paginated("/events?active=true").await?;
         items
             .iter()
             .map(|v| serde_json::from_value(v.clone()).map_err(anyhow::Error::from))
@@ -286,8 +322,7 @@ impl VtnPort for VtnClient {
 
     async fn fetch_reports(&self) -> Result<Vec<OadrReport>> {
         let path = format!("/reports?clientName={}", self.ven_name);
-        let raw = self.get_json(&path).await?;
-        let items = raw.as_array().cloned().unwrap_or_default();
+        let items = self.get_json_paginated(&path).await?;
         // Skip reports that can't deserialize (e.g. absent reportName) — they are
         // irrelevant to find_report_by_name which requires a non-null name.
         Ok(items
@@ -298,12 +333,114 @@ impl VtnPort for VtnClient {
 
     async fn fetch_reports_raw(&self) -> Result<Vec<serde_json::Value>> {
         let path = format!("/reports?clientName={}", self.ven_name);
-        let raw = self.get_json(&path).await?;
-        Ok(raw.as_array().cloned().unwrap_or_default())
+        self.get_json_paginated(&path).await
     }
 
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()> {
         // Delegates to the inherent method which handles 409 upsert semantics.
         self.upsert_report(body).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! WP2.2 (Phase 2) adapter-contract tests: a tiny in-process axum server
+    //! (no new test-only HTTP-mock dependency — axum/tokio are already
+    //! production deps) stands in for the VTN so `get_json_paginated`'s real
+    //! skip/limit loop is exercised end-to-end, not just its arithmetic.
+    use super::*;
+    use axum::extract::{Query, State};
+    use axum::routing::{get, post};
+    use axum::{Json, Router};
+    use serde_json::json;
+    use std::collections::HashMap;
+    use tokio::net::TcpListener;
+
+    async fn token_handler() -> Json<serde_json::Value> {
+        Json(json!({"access_token": "test-token", "expires_in": 3600}))
+    }
+
+    async fn paginated_handler(
+        State(items): State<Arc<Vec<serde_json::Value>>>,
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Json<serde_json::Value> {
+        let skip: usize = params.get("skip").and_then(|s| s.parse().ok()).unwrap_or(0);
+        let limit: usize = params
+            .get("limit")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(50);
+        let page: Vec<_> = items.iter().skip(skip).take(limit).cloned().collect();
+        Json(json!(page))
+    }
+
+    /// Spawn a throwaway VTN stand-in serving `items` (paginated) from every
+    /// collection route this test module needs, and return its base URL.
+    async fn spawn_test_vtn(items: Vec<serde_json::Value>) -> String {
+        let state = Arc::new(items);
+        let app = Router::new()
+            .route("/auth/token", post(token_handler))
+            .route("/programs", get(paginated_handler))
+            .route("/events", get(paginated_handler))
+            .with_state(state);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    fn make_client(base_url: String) -> VtnClient {
+        VtnClient::new(base_url, "id".into(), "secret".into(), "test-ven".into())
+    }
+
+    #[tokio::test]
+    async fn test_fetch_programs_accumulates_across_multiple_full_pages() {
+        // 120 items over a 50/page cap = pages of 50, 50, 20 (3 requests).
+        let items: Vec<_> = (0..120)
+            .map(|i| json!({"id": format!("p{i}"), "programName": format!("prog-{i}")}))
+            .collect();
+        let base_url = spawn_test_vtn(items).await;
+        let client = make_client(base_url);
+
+        let programs = client.fetch_programs().await.unwrap();
+        assert_eq!(programs.len(), 120);
+        assert_eq!(programs[0].id, "p0");
+        assert_eq!(programs[119].id, "p119");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_programs_empty_collection_returns_empty_vec() {
+        let base_url = spawn_test_vtn(vec![]).await;
+        let client = make_client(base_url);
+
+        let programs = client.fetch_programs().await.unwrap();
+        assert!(programs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_programs_exact_page_boundary_still_terminates() {
+        // Exactly 50 items (== PAGE_LIMIT): the loop must still issue a
+        // second, empty-page request to confirm there's nothing more, then stop.
+        let items: Vec<_> = (0..50)
+            .map(|i| json!({"id": format!("p{i}"), "programName": format!("prog-{i}")}))
+            .collect();
+        let base_url = spawn_test_vtn(items).await;
+        let client = make_client(base_url);
+
+        let programs = client.fetch_programs().await.unwrap();
+        assert_eq!(programs.len(), 50);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_events_paginates_independently_of_programs() {
+        let items: Vec<_> = (0..75)
+            .map(|i| json!({"id": format!("e{i}"), "programID": "prog-a"}))
+            .collect();
+        let base_url = spawn_test_vtn(items).await;
+        let client = make_client(base_url);
+
+        let events = client.fetch_events().await.unwrap();
+        assert_eq!(events.len(), 75);
     }
 }
