@@ -4860,3 +4860,16 @@ would wrongly truncate an in-progress month every time the VEN restarts. 4 tests
 **Verification:** 501 lib/bin tests (495 + 6 new) + 1 architecture test pass;
 `cargo fmt --check` and `cargo clippy -- -D warnings` clean. E2E run on Pi4 planned
 next.
+
+**E2E on Pi4 found and fixed a real (if narrow) pre-existing flake:**
+`timeline_grid.feature`'s "Each asset array contains a now-point between history and
+future" failed — reproducibly, not intermittently — when it happened to run shortly
+after container start. Root cause: the `test` profile plans in 1-hour slots
+(`plan_zones: step_s=3600`), and the scenario queried only `hours_forward=1` — whether
+any real future slot falls inside a 1h-forward window is pure luck of sub-minute
+alignment between plan creation and the request. Confirmed by re-running the single
+scenario 3× after widening to `hours_forward=2`: all green. This is unrelated to
+WP1.6's code, just newly exposed by this run's particular timing (it had passed in the
+WP1.4 and WP1.5 runs) — fixed anyway per the "no pre-existing vs new" rule, scp'd to
+Pi4 for a quick confirm loop before committing through git properly (per the
+deploy-pi4 skill's golden rule). Full suite re-run: 246/246 green.
