@@ -50,6 +50,7 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[ven-code-vs-docs-audit]] — full VEN/src read vs docs: what matches, 10 confirmed drifts, ranked refactoring candidates
 - [[openadr-programs-explained]] — what a Program is, 5 worked examples (VTN vs VEN view), multi-program enrollment, contractual out-of-band joining
 - [[distributor-business-case-tiers]] — arguments for a distributor to adopt VTN/VEN: 4 rollout tiers from open tariff publication to VPP dispatch
+- [[history-store-persistence-format]] — SQLite schema, epoch-second time encoding, per-asset-per-minute rows, flat retention pruning, docker bind-mount path
 
 ---
-Pages: 32 · Last sync: 2026-07-10 (Phase 0 quick-wins + Phase 1 data foundation: new history-store component page, 3 pages updated, 88e0e25)
+Pages: 33 · Last sync: 2026-07-10 (Phase 0 quick-wins + Phase 1 data foundation: new history-store component page, 3 pages updated, 88e0e25; query filed at 65afa27)

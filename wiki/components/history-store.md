@@ -98,3 +98,6 @@ before 'now' is queryable" — but stay decoupled: the VEN never talks to the VT
 Postgres schema, and the BFF recorder never talks to `HistoryPort`. Each closes its own
 `docs/BACKLOG.md` item (VEN side: BL-31/A-1 and BL-16 rollup; VTN side: BL-32/A-2) without
 either side depending on the other's storage engine or schema.
+
+For the exact on-disk SQLite schema, time encoding, and docker file location, see
+[[history-store-persistence-format]].
