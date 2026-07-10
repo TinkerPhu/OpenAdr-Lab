@@ -185,7 +185,13 @@ pub fn run_planner(
             heater,
         ),
         Err(e) => {
-            warn!("MILP solver failed: {e}");
+            // BL-25 (WP2.3): construct the reserved PlanInfeasible variant at
+            // its real boundary. SolverPort::solve stays infallible by design
+            // (always returns a usable Plan — see solver_port.rs) so this is
+            // logged, not propagated as an error; the resulting fallback Plan
+            // already carries a Critical PlanWarning with the same detail.
+            let domain_err = crate::entities::DomainError::PlanInfeasible(e.to_string());
+            warn!(error = %domain_err, "MILP solver failed");
             fallback_plan(
                 planner,
                 now,
