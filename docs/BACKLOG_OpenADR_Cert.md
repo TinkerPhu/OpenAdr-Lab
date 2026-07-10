@@ -145,6 +145,8 @@ This is one of the largest functional gaps. The VEN operates entirely on polling
 
 The VEN never self-registers or manages its own VEN/resource objects on the VTN. It assumes out-of-band provisioning (done by the seed script). A certified VEN would be expected to at least read its own VEN object and manage resources.
 
+**Investigated in Phase 2 (WP2.4/WP2.5) and confirmed unfixable from the VEN side alone**: `POST /vens` in this project's openleadr-rs fork is gated by a hardcoded `VenManagerUser` extractor (`openleadr-rs/openleadr-vtn/src/api/ven.rs`), not an OAuth scope — a VEN's own credential (role `VEN`) can never call it, regardless of what scope it's granted. This lab's fleet tooling (`fleet.sh`, `scripts/gen_fleet_profiles.py`) works around this by bulk-provisioning VEN/user/credential rows with a separate VenManager credential *before* any VEN container starts — an operational convenience for this lab, not a spec-compliant VEN self-registration path. Closing this gap for real certification would need either an openleadr-rs fork change (a narrow bootstrap path for a VEN's own identity) or giving every VEN a VenManager credential (a real over-privilege). Fulfilment left at 0% — this is a workaround, not a fix.
+
 ---
 
 ## 9. Targeting & Enrollment
@@ -179,12 +181,12 @@ The VEN never self-registers or manages its own VEN/resource objects on the VTN.
 | Requirement | Spec Level | Status | Notes |
 |---|---|---|---|
 | HTTP status code handling (200, 400, 403, 404, 500) | — | Partial | 401/403 triggers token refresh; 409 handled for report upsert; generic error logging for others |
-| Problem response object parsing (RFC 7807) | MUST | Missing | No `ProblemDetails` struct or structured error parsing |
-| Pagination (`skip` / `limit`) | SHOULD | Missing | No pagination parameters in any VTN query |
+| Problem response object parsing (RFC 7807) | MUST | Full (Phase 2, WP2.3) | `vtn.rs`'s `http_error()` parses `type`/`title`/`status`/`detail`/`instance`, falling back to the raw body when the response isn't problem-shaped |
+| Pagination (`skip` / `limit`) | SHOULD | Full (Phase 2, WP2.2) | `get_json_paginated()` pages every collection GET (programs/events/reports) at 50/page, matching openleadr-rs's own cap, with a runaway-poll warning past 20 pages |
 
-**Fulfilment: ~30%**
+**Fulfilment: ~75%**
 
-If the VTN returns 1000+ events or programs, the VEN will only get the first page (VTN default limit). No automatic pagination loop exists.
+Remaining gap: HTTP status handling itself is still only "Partial" — no dedicated behaviour per status code (400/404/500 beyond generic problem/raw-body logging).
 
 ---
 
@@ -215,7 +217,7 @@ If the VTN returns 1000+ events or programs, the VEN will only get the first pag
 
 | Profile | Status | Notes |
 |---|---|---|
-| **Continuous Pricing (CP)** — Price Receiving, GHG, Emergency Alert VEN | Partial | PRICE/EXPORT_PRICE/GHG parsing done, reporting done. Missing: subscriptions, TLS, pagination, problem parsing, full payload type coverage |
+| **Continuous Pricing (CP)** — Price Receiving, GHG, Emergency Alert VEN | Partial | PRICE/EXPORT_PRICE/GHG parsing done, reporting done, pagination + problem parsing done (Phase 2). Missing: subscriptions, TLS, full payload type coverage |
 | **Baseline Profile (BP)** — General Flexibility System | Missing | Would require: DISPATCH_SETPOINT handling, CONTROL payloads, opt-in/out, resource management |
 
 **Overall certification readiness: ~35%**
@@ -236,7 +238,7 @@ If the VTN returns 1000+ events or programs, the VEN will only get the first pag
 | 8 | VEN & Resource Management | **0%** | No self-registration, no resource CRUD |
 | 9 | Targeting & Enrollment | **~50%** | Server-side only; VEN is passive |
 | 10 | Data Model & Payload | **~75%** | No `randomizeStart`, no "now" sentinel |
-| 11 | Error Handling | **~30%** | No problem object parsing, no pagination |
+| 11 | Error Handling | **~75%** | Problem parsing + pagination done (Phase 2); no per-status-code handling beyond 401/403/409 |
 | 12 | Compression | **0%** | Not implemented (optional) |
 | 13 | Security & Privacy | **~40%** | No TLS; scope enforcement delegated to VTN |
 | 14 | Certification Readiness | **~35%** | CP profile partially met; BP profile not met |

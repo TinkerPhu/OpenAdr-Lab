@@ -4950,3 +4950,134 @@ anyway):
    shows up in future runs sharing this stack.
 
 **Final verification:** full E2E suite green (246/246 scenarios) after both fixes.
+
+## Phase 2 — Fleet Enablement (WP2.1–WP2.5)
+
+Goal per `docs/plans/roadmap/phase-2-fleet-enablement.md`: go from 3 hand-seeded VENs
+to `./fleet.sh up N` with a stable VTN under N-agent load. Implemented as five work
+packages, same test-first/Pi4-verified-per-WP rigor as Phase 0/1.
+
+**WP2.1 — BL-03 exponential backoff + jitter.** `VEN/src/tasks/backoff.rs`: `Backoff`
+holds `base_s`/`max_s`/`current_s` and a seeded `StdRng` (determinism rule — jitter
+must be reproducible in tests). `on_failure()` returns the *current* interval jittered
+±10%, then doubles (capped at 900s) for next time; `on_success()` resets to base.
+Wired into `poll_programs.rs`/`poll_events.rs`/`poll_reports.rs`, replacing the fixed
+`tokio::time::interval` each used. New resilience scenario (`ven_resilience.feature`)
+stops the VTN for 130s and asserts growing gaps between consecutive events-poll
+failure log timestamps (parsed from the VEN's own `tracing` JSON output via a new
+`docker_ctl.get_logs()` helper), then restarts and confirms pickup.
+
+Two real bugs found only by running this against the live Pi4 stack (not caught by
+unit tests, which only exercised the `Backoff` struct in isolation):
+1. **Feature-file step-keyword bug**: `"create an open program ... and save its ID"`
+   is registered only under `@given` in `use_case_steps.py`, but my scenario used it
+   as `And` continuing a `When`-chain — behave keeps Given/When/Then as separate
+   step registries, so this silently became an undefined step (visible only as a
+   `# None` source-location comment in the log, easy to miss). Fixed by creating the
+   recovery program up front (`Given`, before the outage), matching how the
+   pre-existing "VEN re-syncs after VTN restart" scenario already does it.
+2. **Recovery-timeout design tension**: the first fix attempt asserted event pickup
+   "within 30 seconds" after the outage ended — failed. Root cause: when a 130s
+   outage ends, the poll loop may already be *mid-sleep* in a previously-computed
+   backoff delay (up to ~130s here, since a third failure/backoff step can fire right
+   before the outage ends); the reset to the base interval only takes effect on the
+   *next* successful poll, not instantly on VTN recovery. This is the deliberate
+   backoff trade-off (never hammering a still-recovering VTN) — widened the
+   assertion to 180s with a comment explaining why, rather than "fixing" the backoff
+   to recover faster (which would defeat its purpose).
+3. Also learned the hard way: never run `git stash`/`git status` from a *different*
+   git binary (WSL's Linux git) than the one used for the rest of a session (Windows
+   git) against the same working tree — line-ending config differences between the
+   two made `git status` briefly show hundreds of false "modified" files during a
+   `clippy --all-targets` cross-check. No actual data was affected (verified via
+   `git diff --stat` on known-clean files after the fact), but it was an unnecessary
+   scare; stuck to one git binary per repo for the rest of the session.
+
+**Also found and fixed while getting to a green baseline for WP2.1**: `cargo clippy
+--all-targets --all-features -- -D warnings` (matching CI's actual invocation) had
+never been run this deeply this session — surfaced 29 pre-existing lint errors
+across test code and test-support modules (manual range checks, unnecessary
+closures/clones, field-reassign-with-default, a production struct placed after its
+own test module, dead test helpers, three test-only wrapper functions over the 7-arg
+clippy default). Fixed all 29 as a separate, non-behavioural commit before starting
+WP2.1's real changes — CLAUDE.md's "don't distinguish pre-existing vs new failures"
+rule applies to lint gates too, not just test failures.
+
+**WP2.2 — pagination in `vtn.rs`.** `get_json_paginated()` loops `skip`/`limit` (50/
+page, matching openleadr-rs's own cap) until a short page returns, reusing the exact
+pattern already proven in the Phase-1 BFF recorder (`VTN/bff/src/recorder.rs`).
+Applied to `fetch_programs`/`fetch_events`/`fetch_reports`/`fetch_reports_raw`. Logs
+a warning past 20 pages (runaway-poll guard). Adapter-contract tests spin up a
+throwaway in-process `axum` server (no new test dependency — `axum`/`tokio` are
+already production deps) to exercise the real HTTP pagination loop: multi-page
+accumulation, empty collections, and the exact-`PAGE_LIMIT` boundary (must still
+probe a trailing empty page before stopping, not assume 50 items means "done").
+
+**WP2.3 — RFC 7807 problem parsing + BL-25 error variants.** `http_error()` parses
+openleadr-rs's problem+json bodies (`type`/`title`/`status`/`detail`/`instance`),
+falling back to the raw body when the response isn't problem-shaped; replaces every
+`anyhow::bail!` on a non-2xx response in `vtn.rs`. Also wired both reserved
+`DomainError` variants at real boundaries — but as **logged classifications, not
+propagated errors**, after investigation showed the backlog's original framing
+("surfaced through the relevant route instead of a generic error") didn't match the
+actual architecture: `SolverPort::solve` is deliberately infallible (`solver_port.rs`'s
+own doc comment: "implementations must return a usable `Plan` even on internal
+solver failure"), so there was never a route-level 500 for `PlanInfeasible` to
+replace — it's logged in `milp_planner::run_planner`'s existing fallback branch
+instead. `VtnUnreachable` is classified from a connect/timeout-class `reqwest::Error`
+at every `send()` call site in `vtn.rs`, without changing `VtnPort`'s
+`Result<T, anyhow::Error>` contract. `ProfileInvalid` stays reserved (no hot-reload
+feature exists to trigger it). Documented this scope correction directly in
+`BACKLOG.md`'s BL-25 entry rather than silently reinterpreting it.
+
+**WP2.4 → folded into WP2.5.** Investigation before writing any code found `POST
+/vens` in this project's openleadr-rs fork is gated by a hardcoded `VenManagerUser`
+extractor (`openleadr-rs/openleadr-vtn/src/api/ven.rs`), not an OAuth scope — a VEN's
+own credential (role `VEN`) can never call it, no matter what scope it's granted.
+True per-VEN self-registration as the plan originally described is architecturally
+blocked. Presented the tradeoffs to the user (bulk fleet-side registration vs. giving
+every VEN a VenManager credential vs. patching the openleadr-rs fork); chosen:
+fleet-side bulk registration, reusing the existing idempotent `provision_vens()` from
+`scripts/seed_vtn.py` — no fleet VEN ever holds an elevated credential.
+
+**WP2.5 — fleet generator + GB-06/GB-09.** `fleet.sh up N [--seed S] [--fresh] / down
+[--purge] / status`:
+- `scripts/gen_fleet_profiles.py` — N randomized-but-seeded profiles (asset mix
+  varies per instance, reproducible via `--seed`), `VEN/docker-compose.fleet.yml`,
+  and a manifest; then bulk-provisions all N via `provision_vens()` (WP2.4's
+  resolution).
+- `scripts/fleet_status.py` — per-VEN health + cross-check against the VTN's own
+  `/vens` list.
+- `scripts/db_reset.sh` (GB-06) — drops/recreates the `public` + `lab_recorder`
+  Postgres schemas and reloads the fixture, replacing the manual `docker exec psql
+  < fixtures.sql` step in the setup guide.
+- GB-09 — `POLL_STARTUP_JITTER_S` (new `Config` field, threaded into all three poll
+  spawners as a one-time pre-loop sleep) staggered by instance index (4s stride) so
+  N VENs brought up together don't poll in lockstep. Scoped down from the plan's
+  literal ask ("poll interval becomes a profile key") to just the startup offset,
+  since that's what actually achieves "VENs don't align their polls" — moving poll
+  intervals into the profile schema would have been a bigger, riskier change for no
+  additional benefit nothing currently needs.
+- New `scripts/requirements.txt` (`requests==2.31.0`, `PyYAML==6.0`) — first
+  documented Python dependency pin for the `scripts/` directory.
+
+Verified live on Pi4: full `up 3` → `status` → idempotent second `up` (all three
+"already provisioned — skipping") → `down --purge` (confirmed no leftover
+containers, data dirs, profiles, or compose file) cycle; real MILP plan generation
+on a fleet VEN; the per-instance poll-jitter offset visible in its own logs (~4.6s
+delay for instance index 1, stride 4s). **Did not push to a live N=10 run**: this
+Pi4 already runs ~20 unrelated production containers (hargassner, pihole, mqtt,
+catcam, influxdb, ...) with only ~660MB free RAM and a load average of ~3 *before*
+the fleet even starts; measured per-VEN memory at N=3 (13–80MB, not the bottleneck)
+but one VEN's MILP solve alone briefly hit 109% CPU — concurrent solves across 10
+VENs on this shared quad-core box is a real CPU-contention risk to unrelated
+services, not a memory one. Deferred the full N=10 exit demonstration to a
+deliberately scheduled low-usage window rather than risking it ad hoc; documented
+the finding in the commit message and here rather than silently skipping it.
+
+**Key learning carried forward**: this session repeatedly re-discovered that running
+the *same* heavy Pi4 operation (full E2E suite, `docker compose build`) back-to-back
+without a cooldown causes load-induced false flakes (isolated `shiftable_lifecycle`
+scenarios failed under a load average of 4.3, then passed cleanly at 0.8) — worth
+checking `uptime` before any Pi4-heavy verification step, not just before the first
+one in a session.
