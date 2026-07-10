@@ -32,12 +32,19 @@ struct GridConfig {
     max_export_kw: f64,
 }
 
+// `simulator`/`packets` and battery_config/base_load_kw are kept unread/unused by any
+// single test file, but every test-fixture `Profile { .. }` literal across mod.rs/
+// heater.rs/planner.rs sets them to mirror the real (pre-refactor) profile shape —
+// removing the fields would mean touching every fixture literal for a lint, not a
+// behaviour change.
 #[derive(Debug, Clone)]
 struct Profile {
     assets: Vec<AssetProfile>,
+    #[allow(dead_code)]
     simulator: SimulatorConfig,
     planner: PlannerConfig,
     grid: GridConfig,
+    #[allow(dead_code)]
     packets: Vec<()>,
 }
 
@@ -63,6 +70,7 @@ impl Profile {
         })
     }
 
+    #[allow(dead_code)] // mirrors the real Profile API; no test currently needs it
     fn battery_config(&self) -> Option<&BatteryParams> {
         self.assets.iter().find_map(|a| match a {
             AssetProfile::Battery(v) => Some(v),
@@ -70,6 +78,7 @@ impl Profile {
         })
     }
 
+    #[allow(dead_code)] // mirrors the real Profile API; no test currently needs it
     fn base_load_kw(&self) -> f64 {
         self.assets
             .iter()
@@ -156,7 +165,7 @@ fn make_profile() -> Profile {
                 baseline_kw: 0.5,
             }),
         ],
-        simulator: SimulatorConfig::default(),
+        simulator: SimulatorConfig,
         planner: PlannerConfig {
             plan_step_s: 300,
             plan_horizon_h: 2,
@@ -395,7 +404,7 @@ fn make_heater_only_profile(
             switching_penalty_eur: 0.01,
             c_terminal_eur_kwh: None,
         })],
-        simulator: SimulatorConfig::default(),
+        simulator: SimulatorConfig,
         planner: PlannerConfig {
             plan_step_s: 300,
             plan_horizon_h: 2,
@@ -504,7 +513,7 @@ fn build_asset_contexts(
                 let ac = AssetConfig::Battery(Battery::from_params(cfg));
                 let c_terminal = cfg
                     .c_terminal_eur_kwh
-                    .unwrap_or_else(|| avg_imp_eur_kwh * cfg.round_trip_efficiency);
+                    .unwrap_or(avg_imp_eur_kwh * cfg.round_trip_efficiency);
                 if let Some(ctx) = ac.build_milp_context(
                     &state,
                     n,
@@ -571,7 +580,7 @@ fn build_asset_contexts(
                 let ac = AssetConfig::Heater(Heater::from_params(cfg));
                 let c_terminal = cfg
                     .c_terminal_eur_kwh
-                    .unwrap_or_else(|| avg_imp_eur_kwh + profile.planner.c_ctrl_imp_malus_eur_kwh);
+                    .unwrap_or(avg_imp_eur_kwh + profile.planner.c_ctrl_imp_malus_eur_kwh);
                 if let Some(ctx) = ac.build_milp_context(
                     &state,
                     n,
@@ -666,6 +675,7 @@ fn build_phase1_weights(profile: &Profile, objective: PlannerObjective) -> Phase
     super::build_phase1_weights(&profile.planner, objective)
 }
 
+#[allow(clippy::too_many_arguments)] // test wrapper mirrors the real solve-path signature
 fn build_milp_inputs(
     ctxs: &[Box<dyn crate::controller::milp_planner::AssetMilpContext>],
     sim: &SimSnapshot,
@@ -689,6 +699,7 @@ fn build_milp_inputs(
     )
 }
 
+#[allow(clippy::too_many_arguments)] // test wrapper mirrors the real solve-path signature
 fn build_milp_inputs_with_override(
     ctxs: &[Box<dyn crate::controller::milp_planner::AssetMilpContext>],
     sim: &SimSnapshot,
@@ -720,6 +731,7 @@ fn build_milp_inputs_with_override(
     )
 }
 
+#[allow(clippy::too_many_arguments)] // test wrapper mirrors the real solve-path signature
 fn run_planner(
     asset_contexts: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
     assets: &SimSnapshot,

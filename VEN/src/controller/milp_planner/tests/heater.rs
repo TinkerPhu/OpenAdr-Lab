@@ -645,7 +645,7 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
                 baseline_kw: 0.6,
             }),
         ],
-        simulator: SimulatorConfig::default(),
+        simulator: SimulatorConfig,
         planner: PlannerConfig {
             plan_step_s: 300,
             plan_horizon_h: 48,

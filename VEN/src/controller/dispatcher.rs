@@ -447,7 +447,7 @@ mod tests {
         let mut sp: HashMap<String, f64> = HashMap::new();
         apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         assert!(
-            sp.get("ev").is_none(),
+            !sp.contains_key("ev"),
             "must not charge EV when soc >= soc_target"
         );
     }
@@ -457,7 +457,7 @@ mod tests {
         let sim = build_sim_snap(-3.0, 1.0, 0.4, false, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
         apply_surplus_ev_overlay(&mut sp, &sim, false, true);
-        assert!(sp.get("ev").is_none(), "must not charge unplugged EV");
+        assert!(!sp.contains_key("ev"), "must not charge unplugged EV");
     }
 
     #[test]
@@ -497,7 +497,7 @@ mod tests {
         sp.insert("battery".to_string(), 3.5);
         apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         assert!(
-            sp.get("ev").is_none(),
+            !sp.contains_key("ev"),
             "EV must not charge when battery claims full surplus"
         );
     }
@@ -508,7 +508,7 @@ mod tests {
         let sim = build_sim_snap(-1.0, 2.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
         apply_surplus_ev_overlay(&mut sp, &sim, false, true);
-        assert!(sp.get("ev").is_none(), "no surplus when base_load > pv");
+        assert!(!sp.contains_key("ev"), "no surplus when base_load > pv");
     }
 
     #[test]
@@ -518,7 +518,7 @@ mod tests {
         let mut sp: HashMap<String, f64> = HashMap::new();
         apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         assert!(
-            sp.get("ev").is_none(),
+            !sp.contains_key("ev"),
             "no surplus when PV is not generating"
         );
     }
@@ -531,7 +531,7 @@ mod tests {
         let mut sp: HashMap<String, f64> = HashMap::new();
         apply_surplus_ev_overlay(&mut sp, &sim, false, false);
         assert!(
-            sp.get("ev").is_none(),
+            !sp.contains_key("ev"),
             "overlay must not fire when overlay_enabled=false"
         );
     }
@@ -548,7 +548,7 @@ mod tests {
         let mut sp: HashMap<String, f64> = HashMap::new();
         apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         assert!(
-            sp.get("ev").is_none(),
+            !sp.contains_key("ev"),
             "must not charge EV when heater consumes all PV surplus"
         );
     }
