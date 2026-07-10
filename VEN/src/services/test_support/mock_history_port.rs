@@ -233,7 +233,8 @@ mod tests {
             soc_pct: None,
             temperature_c: None,
         };
-        port.append_tick_samples(&[row.clone()]).unwrap();
+        port.append_tick_samples(std::slice::from_ref(&row))
+            .unwrap();
         assert_eq!(port.query_ticks(ts(0), ts(200), None).unwrap(), vec![row]);
     }
 
