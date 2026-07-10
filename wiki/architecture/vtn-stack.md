@@ -2,9 +2,9 @@
 title: VTN Stack — openleadr-rs, BFF, UI
 type: architecture
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: eb8831a
-sources: [docs/architecture/VTN_ARCHITECTURE.md, VTN/, openleadr-rs/]
+updated: 2026-07-10
+synced_commit: 88e0e25
+sources: [docs/architecture/VTN_ARCHITECTURE.md, VTN/, openleadr-rs/, VTN/bff/src/recorder.rs]
 tags: [vtn, bff, openleadr-rs, architecture]
 ---
 
@@ -47,3 +47,13 @@ Auth facts that cost debugging time (journal-confirmed): token endpoint is
 
 How this maps onto the spec's Authentication/Authorization model (scopes, object privacy,
 transport requirements): [[openadr-security]].
+
+## Recorder (Phase 1, optional)
+
+`VTN/bff/src/recorder.rs` polls programs/events/reports/VEN snapshots through both
+`VtnClient`s and writes a write-once, deduplicated log into a `lab_recorder.*` Postgres
+schema — gated on `DATABASE_URL` being set (`main.rs`); the BFF behaves exactly as before
+if it isn't. `record_ven_snapshots` must use the `ven-manager` credential, not
+`any-business` — the same `/vens` role restriction as above bit this during Pi4
+verification (403, not caught by unit tests since those mock the client). Full detail:
+[[history-store]].
