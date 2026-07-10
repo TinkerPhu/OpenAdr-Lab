@@ -36,8 +36,14 @@ Feature: Uniform-Grid Timeline API (RF-05c)
 
   # ── US2: Now-point ──────────────────────────────────────────────────────────
 
+  # hours_forward=2, not 1: the "test" profile plans in 1-hour slots
+  # (plan_zones: step_s=3600), so a 1-hour-forward window is timing-marginal —
+  # whether any real future slot falls inside it depends on the exact
+  # sub-minute alignment between plan creation and this request, which is
+  # not guaranteed. 2 hours comfortably guarantees at least one future slot
+  # regardless of that alignment.
   Scenario: Each asset array contains a now-point between history and future
-    When I GET /timeline/all?resolution=30&hours_back=1&hours_forward=1 from the VEN
+    When I GET /timeline/all?resolution=30&hours_back=1&hours_forward=2 from the VEN
     Then the response status is 200
     And the response JSON is an object
     And each asset array has a now-point between history and future grid portions
