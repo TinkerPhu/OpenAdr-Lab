@@ -23,6 +23,8 @@ pub(crate) struct EventChanges {
     pub rates: Vec<entities::tariff_snapshot::TariffSnapshot>,
     /// Parsed capacity state for this tick.
     pub capacity: entities::capacity::OadrCapacityState,
+    /// Parsed grid-alert windows for this tick (WP3.1, BL-04).
+    pub alerts: Vec<entities::capacity::AlertWindow>,
 }
 
 /// Pure change-detection pass over a freshly fetched event list.
@@ -39,6 +41,7 @@ pub(crate) fn detect_event_changes(
 ) -> EventChanges {
     let rates = controller::openadr_interface::parse_rate_snapshots(events, now);
     let capacity = controller::openadr_interface::parse_capacity_state(events);
+    let alerts = controller::openadr_interface::parse_alert_windows(events);
 
     let current_ids: std::collections::HashSet<String> =
         events.iter().map(|e| e.id.clone()).collect();
@@ -109,6 +112,7 @@ pub(crate) fn detect_event_changes(
         current_ids,
         rates,
         capacity,
+        alerts,
     }
 }
 
@@ -132,6 +136,7 @@ pub(crate) fn spawn_event_poll(
             std::collections::HashSet::new();
         let mut prev_tariff_count: usize = 0;
         let mut prev_import_limit: Option<f64> = None;
+        let mut prev_alerts: Vec<entities::capacity::AlertWindow> = Vec::new();
         loop {
             match vtn.fetch_events().await {
                 Ok(events) => {
@@ -160,6 +165,15 @@ pub(crate) fn spawn_event_poll(
                     state.set_planned_tariffs(changes.rates).await;
                     state.set_capacity_state(changes.capacity).await;
 
+                    // WP3.1 (BL-04): alert-window changes trigger an immediate
+                    // replan with the Alert trigger, distinct from RateChange.
+                    let alerts_changed = changes.alerts != prev_alerts;
+                    if alerts_changed {
+                        state.set_alert_windows(changes.alerts.clone()).await;
+                        prev_alerts = changes.alerts;
+                        let _ = trigger_tx.send(PlanTrigger::Alert);
+                    }
+
                     let existing_obs = state.report_obligations().await;
                     let new_obs = controller::openadr_interface::extract_report_obligations(
                         &events,
@@ -175,7 +189,10 @@ pub(crate) fn spawn_event_poll(
                     // tariff count change, or capacity change). Firing on every poll caused
                     // continuous replanning at the poll interval (~30s) regardless of whether
                     // rates changed, which destabilised the plan.
-                    if any_change {
+                    // trigger_tx is a watch channel (latest value wins), so don't
+                    // overwrite an Alert trigger just sent above with RateChange —
+                    // the alert event's own arrival also sets any_change.
+                    if any_change && !alerts_changed {
                         let _ = trigger_tx.send(PlanTrigger::RateChange);
                     }
                     backoff.on_success();

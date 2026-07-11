@@ -637,3 +637,110 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
     );
     assert_eq!(plan.slots.len(), 48, "fallback plan must have 48 slots");
 }
+
+// ── WP3.1 (BL-04): grid-alert windows ────────────────────────────────────
+
+#[test]
+fn alert_window_clamps_import_cap_for_overlapping_slots_only() {
+    use crate::entities::capacity::AlertWindow;
+
+    let now = fixed_now();
+    let profile = make_profile_1800s(); // 4 × 1800s slots, 2h horizon
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let cap = no_capacity();
+    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+
+    // Alert covers the first hour → slots 0 and 1; slots 2 and 3 stay free.
+    let alert = AlertWindow {
+        alert_type: "ALERT_GRID_EMERGENCY".to_string(),
+        start: now,
+        end: now + Duration::hours(1),
+        event_id: "alert-1".to_string(),
+        message: "grid emergency".to_string(),
+    };
+
+    let inputs = super::super::inputs::build_milp_inputs(
+        &ctxs,
+        &sim,
+        &tariffs,
+        &cap,
+        std::slice::from_ref(&alert),
+        &profile.planner,
+        profile.grid.max_import_kw,
+        profile.grid.max_export_kw,
+        profile.pv_config(),
+        None,
+        now,
+        &[],
+        None,
+        None,
+    );
+
+    assert_eq!(inputs.p_imp_max_cont_kw[0], 0.0, "slot 0 inside alert");
+    assert_eq!(inputs.p_imp_max_cont_kw[1], 0.0, "slot 1 inside alert");
+    assert!(
+        inputs.p_imp_max_cont_kw[2] > 0.0,
+        "slot 2 after alert must keep the contractual cap"
+    );
+    assert!(inputs.p_imp_max_cont_kw[3] > 0.0);
+    // Export side untouched by the alert.
+    assert!(inputs.p_exp_max_cont_kw.iter().all(|&v| v > 0.0));
+}
+
+#[test]
+fn run_planner_alert_window_yields_zero_import_cap_slots_and_solves() {
+    use crate::entities::capacity::AlertWindow;
+
+    let now = fixed_now();
+    let profile = make_profile_1800s();
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+
+    let alert = AlertWindow {
+        alert_type: "ALERT_GRID_EMERGENCY".to_string(),
+        start: now,
+        end: now + Duration::hours(1),
+        event_id: "alert-1".to_string(),
+        message: "grid emergency".to_string(),
+    };
+
+    // Call the real entry point (not the alert-less test wrapper) so the alert
+    // path is exercised end-to-end through a genuine HiGHS solve.
+    let plan = super::super::run_planner(
+        ctxs,
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        std::slice::from_ref(&alert),
+        &profile.planner,
+        profile.grid.max_import_kw,
+        profile.grid.max_export_kw,
+        &profile.assets,
+        now,
+        crate::entities::asset::PlanTrigger::Alert,
+        None,
+        None,
+        &[],
+        None,
+        None,
+        None,
+    );
+
+    assert_eq!(plan.slots.len(), 4);
+    assert_eq!(plan.slots[0].import_cap_kw, 0.0);
+    assert_eq!(plan.slots[1].import_cap_kw, 0.0);
+    assert!(plan.slots[2].import_cap_kw > 0.0);
+    // The solve must not degrade to the fallback path: a real solution has a
+    // battery/EV/heater allocation somewhere or at least no "solver failed"
+    // critical warning mentioning failure.
+    assert!(
+        !plan
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("MILP solver failed")),
+        "alert must not make the solve fail outright: {:?}",
+        plan.warnings
+    );
+}

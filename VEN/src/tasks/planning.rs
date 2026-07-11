@@ -46,6 +46,7 @@ pub(crate) fn spawn_planning(
             let now = crate::services::planning::align_to_step(wall_now, planner.plan_step_s);
             let rates = state.planned_tariffs().await;
             let capacity = state.capacity_state().await;
+            let alert_windows = state.alert_windows().await;
             let trigger = wake_trigger.clone();
             let trigger_reason = format!("{:?}", trigger);
 
@@ -144,6 +145,7 @@ pub(crate) fn spawn_planning(
                 snap,
                 tariff_ts,
                 capacity,
+                alert_windows,
                 planner.clone(),
                 grid_max_import_kw,
                 grid_max_export_kw,
