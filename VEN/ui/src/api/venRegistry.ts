@@ -16,10 +16,12 @@
 
 export type VenEntry = { label: string; url: string; venName: string };
 
+// Labels are the venNames so trio and discovered fleet entries read
+// consistently in the dropdown (was "VEN1".."VEN3" before discovery existed).
 export const DEFAULT_VENS: VenEntry[] = [
-  { label: "VEN1", url: import.meta.env.VITE_VEN_1_URL || "/api/ven-1", venName: "ven-1" },
-  { label: "VEN2", url: import.meta.env.VITE_VEN_2_URL || "/api/ven-2", venName: "ven-2" },
-  { label: "VEN3", url: import.meta.env.VITE_VEN_3_URL || "/api/ven-3", venName: "ven-3" },
+  { label: "ven-1", url: import.meta.env.VITE_VEN_1_URL || "/api/ven-1", venName: "ven-1" },
+  { label: "ven-2", url: import.meta.env.VITE_VEN_2_URL || "/api/ven-2", venName: "ven-2" },
+  { label: "ven-3", url: import.meta.env.VITE_VEN_3_URL || "/api/ven-3", venName: "ven-3" },
 ];
 
 /** Defaults first (their static nginx routes keep working unchanged), then
