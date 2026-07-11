@@ -21,6 +21,12 @@ pub struct OadrCapacityState {
     pub import_subscription_kw: Option<f64>,
     /// Active import reservation granted by VTN (kW)
     pub import_reservation_kw: Option<f64>,
+    /// WP3.3: subscribed export capacity (kW); None = not set
+    #[serde(default)]
+    pub export_subscription_kw: Option<f64>,
+    /// WP3.3: active export reservation granted by VTN (kW); None = not set
+    #[serde(default)]
+    pub export_reservation_kw: Option<f64>,
     /// Source event ID for the import limit
     pub import_limit_event_id: Option<String>,
     /// Source event ID for the export limit

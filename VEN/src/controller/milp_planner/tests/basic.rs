@@ -345,6 +345,8 @@ fn capacity_event_overrides_grid_limit() {
         export_limit_kw: None,
         import_subscription_kw: None,
         import_reservation_kw: None,
+        export_subscription_kw: None,
+        export_reservation_kw: None,
         import_limit_event_id: None,
         export_limit_event_id: None,
         last_updated: None,

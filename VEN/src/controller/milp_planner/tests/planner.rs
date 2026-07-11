@@ -829,3 +829,44 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
         "alert wins over SIMPLE L1"
     );
 }
+
+// ── WP3.3 (§8.10): subscription + reservation constrain the solver ───────
+
+#[test]
+fn reservation_allowance_binds_when_tighter_and_is_inactive_when_looser() {
+    let now = fixed_now();
+    let profile = make_profile_1800s(); // contractual/physical import 25 kW
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+
+    // Reservation alone (no subscription), tighter than the 25 kW limit → binds.
+    let mut cap = no_capacity();
+    cap.import_reservation_kw = Some(3.0);
+    let inputs = bmi(&profile, &sim, &tariffs, &cap, now, None, None);
+    assert!(inputs
+        .p_imp_max_cont_kw
+        .iter()
+        .all(|&v| (v - 3.0).abs() < 1e-9));
+    let _ = ctxs;
+
+    // Subscription 20 + reservation 10 = 30 kW allowance, looser than the
+    // 25 kW physical bound → inactive.
+    let mut cap = no_capacity();
+    cap.import_subscription_kw = Some(20.0);
+    cap.import_reservation_kw = Some(10.0);
+    let inputs = bmi(&profile, &sim, &tariffs, &cap, now, None, None);
+    assert!(inputs
+        .p_imp_max_cont_kw
+        .iter()
+        .all(|&v| (v - 25.0).abs() < 1e-9));
+
+    // Export side: subscription 4 kW binds against the 10 kW physical bound.
+    let mut cap = no_capacity();
+    cap.export_subscription_kw = Some(4.0);
+    let inputs = bmi(&profile, &sim, &tariffs, &cap, now, None, None);
+    assert!(inputs
+        .p_exp_max_cont_kw
+        .iter()
+        .all(|&v| (v - 4.0).abs() < 1e-9));
+}
