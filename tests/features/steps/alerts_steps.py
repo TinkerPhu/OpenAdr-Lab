@@ -137,7 +137,11 @@ def step_ev_session_target(context, soc, seconds):
         resp = ven_get("/ev-session")
         if not resp.ok:
             return None
-        body = resp.json()
+        try:
+            body = resp.json()
+        except ValueError:
+            # No session yet -> empty/non-JSON body; keep polling.
+            return None
         return body if isinstance(body, dict) else None
 
     poll_until(
