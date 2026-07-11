@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import App from "../App";
@@ -66,5 +66,62 @@ describe("App shell", () => {
     renderApp();
     const chip = await screen.findByTestId("health-status");
     expect(chip).toBeVisible();
+  });
+});
+
+describe("dynamic VEN dropdown", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("extends the dropdown with a registered, healthy fleet VEN", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/vens-registry") {
+          return {
+            ok: true,
+            json: async () => [
+              { venName: "ven-1" },
+              { venName: "fleet-ven-000" },
+            ],
+          } as Response;
+        }
+        if (url === "/api/dyn/fleet-ven-000/health") {
+          return { ok: true } as Response;
+        }
+        return { ok: false, status: 404 } as Response;
+      }),
+    );
+    try {
+      renderApp();
+      const selector = screen.getByTestId("ven-selector");
+      const combobox = within(selector).getByRole("combobox");
+      fireEvent.mouseDown(combobox);
+      const fleetItem = await screen.findByText(/fleet-ven-000/);
+      expect(fleetItem).toBeVisible();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps only the default trio when the registry is unreachable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("registry down");
+      }),
+    );
+    try {
+      renderApp();
+      const selector = screen.getByTestId("ven-selector");
+      const combobox = within(selector).getByRole("combobox");
+      fireEvent.mouseDown(combobox);
+      const items = await screen.findAllByRole("option");
+      expect(items).toHaveLength(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
