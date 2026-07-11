@@ -53,6 +53,13 @@ pub enum ControllerEvent {
         from_status: String,
         to_status: String,
     },
+    /// WP3.4: a DISPATCH_SETPOINT override became active (with its commanded
+    /// site setpoint) or cleared (`active: false`, `setpoint_kw: None`).
+    DispatchOverride {
+        ts: DateTime<Utc>,
+        setpoint_kw: Option<f64>,
+        active: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------

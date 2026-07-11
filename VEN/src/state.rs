@@ -2,7 +2,7 @@ use crate::controller::trace::ControllerTrace;
 use crate::controller::vtn_port::{OadrEvent, OadrProgram};
 use crate::controller::SimSnapshot;
 use crate::entities::capacity::{
-    AlertWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
+    AlertWindow, DispatchWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
 };
 use crate::entities::design_vocabulary::AssetForecast;
 use crate::entities::device_session::{
@@ -97,6 +97,8 @@ pub struct HemsState {
     pub alert_windows: Vec<AlertWindow>,
     /// WP3.2: active SIMPLE load-shed windows (levels 1–3).
     pub simple_windows: Vec<SimpleWindow>,
+    /// WP3.4: active DISPATCH_SETPOINT windows (direct site-setpoint control).
+    pub dispatch_windows: Vec<DispatchWindow>,
     /// WP3.6 (BL-15): per-asset forecasts from the latest plan cycle.
     pub asset_forecasts: Vec<AssetForecast>,
     pub report_obligations: Vec<OadrReportObligation>,
@@ -273,6 +275,14 @@ impl AppState {
 
     pub async fn set_simple_windows(&self, windows: Vec<SimpleWindow>) {
         self.hems.write().await.simple_windows = windows;
+    }
+
+    pub async fn dispatch_windows(&self) -> Vec<DispatchWindow> {
+        self.hems.read().await.dispatch_windows.clone()
+    }
+
+    pub async fn set_dispatch_windows(&self, windows: Vec<DispatchWindow>) {
+        self.hems.write().await.dispatch_windows = windows;
     }
 
     pub async fn asset_forecasts(&self) -> Vec<AssetForecast> {

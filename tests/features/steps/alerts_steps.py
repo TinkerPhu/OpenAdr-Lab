@@ -106,6 +106,49 @@ def step_delete_capacity_event(context):
     r.raise_for_status()
 
 
+@then("the VEN net site power reaches {target_kw:f} kW within {seconds:d} seconds with tolerance {tol:f}")
+def step_net_power_reaches(context, target_kw, seconds, tol):
+    # WP3.4: DISPATCH_SETPOINT steers the battery so net site power hits the
+    # commanded value. /sim grid.net_power_w is in W, positive = import.
+    def fetch():
+        resp = ven_get("/sim")
+        if not resp.ok:
+            return None
+        return resp.json()
+
+    def at_target(sim):
+        if sim is None:
+            return False
+        net_kw = sim.get("grid", {}).get("net_power_w", 0.0) / 1000.0
+        return abs(net_kw - target_kw) <= tol
+
+    poll_until(
+        fetch,
+        at_target,
+        timeout=seconds,
+        interval=3,
+        description=f"net site power ≈ {target_kw} kW (±{tol})",
+    )
+
+
+@then("the VEN ev-session has target_soc {soc:f} within {seconds:d} seconds")
+def step_ev_session_target(context, soc, seconds):
+    def fetch():
+        resp = ven_get("/ev-session")
+        if not resp.ok:
+            return None
+        body = resp.json()
+        return body if isinstance(body, dict) else None
+
+    poll_until(
+        fetch,
+        lambda s: s is not None and abs(s.get("target_soc", -1) - soc) < 1e-6,
+        timeout=seconds,
+        interval=2,
+        description=f"EvSession with target_soc {soc}",
+    )
+
+
 def _fetch_plan():
     resp = ven_get("/plan")
     if not resp.ok:
