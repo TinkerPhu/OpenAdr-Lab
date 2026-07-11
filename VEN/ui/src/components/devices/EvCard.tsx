@@ -22,8 +22,10 @@ import type {
   CreateUserRequestBody,
   EvSettings,
   UpdateEvSettingsBody,
+  UserRequestMode,
   UserRequestWithSession,
 } from "../../api/types";
+import { ModeSelect } from "./ModeSelect";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -66,6 +68,7 @@ export function EvCard(props: EvCardProps) {
   const [targetSoc, setTargetSoc] = useState(80);
   const [departure, setDeparture] = useState(defaultDateTime(8));
   const [softDeadline, setSoftDeadline] = useState(false);
+  const [mode, setMode] = useState<UserRequestMode>("BY_DEADLINE");
 
   const session = request?.session?.type === "ev" ? request.session : null;
   const paused = evSettings?.paused_by_active_session ?? false;
@@ -79,6 +82,7 @@ export function EvCard(props: EvCardProps) {
       target_energy_kwh: null,
       desired_power_kw: 7.0,
       soft_deadline: softDeadline,
+      mode,
       completion_policy: "CONTINUE",
       deadlines: [{
         latest_end: dt.toISOString(),
@@ -106,6 +110,9 @@ export function EvCard(props: EvCardProps) {
             </Typography>
             {session.soft_deadline && (
               <Chip label="Soft deadline" size="small" data-testid="ev-soft-deadline-chip" sx={{ mt: 0.5 }} />
+            )}
+            {session.mode !== "BY_DEADLINE" && (
+              <Chip label={session.mode} size="small" data-testid="ev-mode-chip" sx={{ mt: 0.5, ml: 0.5 }} />
             )}
             <Typography data-testid="ev-estimated-cost" sx={{ mt: 0.5 }}>
               Est. €{request.estimated_cost_eur.toFixed(2)}
@@ -190,6 +197,7 @@ export function EvCard(props: EvCardProps) {
               />
             }
           />
+          <ModeSelect value={mode} onChange={setMode} testId="ev-mode-select" />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)} data-testid="ev-dialog-cancel">Cancel</Button>

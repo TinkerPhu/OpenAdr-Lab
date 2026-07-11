@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::entities::design_vocabulary::UserRequestMode;
+
 /// A device-centric EV charging session.
 /// Only carries user intent — sim state (current_soc, plugged) is
 /// injected at solve time from `SimState::ev_state()`.
@@ -16,6 +18,9 @@ pub struct EvSession {
     /// If false (default), MustRun (hard constraint, must reach target SoC by departure).
     #[serde(default)]
     pub soft_deadline: bool,
+    /// How the user expressed this request (BL-28); BY_DEADLINE = legacy behaviour.
+    #[serde(default)]
+    pub mode: UserRequestMode,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -30,6 +35,9 @@ pub struct HeaterTarget {
     pub target_temp_c: f64,
     /// When the target temperature must be reached.
     pub ready_by: DateTime<Utc>,
+    /// How the user expressed this request (BL-28); BY_DEADLINE = legacy behaviour.
+    #[serde(default)]
+    pub mode: UserRequestMode,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -51,6 +59,9 @@ pub struct ShiftableLoad {
     pub earliest_start: DateTime<Utc>,
     /// Latest allowed end time (load must finish by this time).
     pub latest_end: DateTime<Utc>,
+    /// How the user expressed this request (BL-28); BY_DEADLINE = legacy behaviour.
+    #[serde(default)]
+    pub mode: UserRequestMode,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -76,6 +87,74 @@ pub struct ShiftableLoadRuntime {
 impl ShiftableLoadRuntime {
     pub fn is_running(&self, now: DateTime<Utc>) -> bool {
         now >= self.started_at && now < self.ends_at
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entities::design_vocabulary::UserRequestMode;
+
+    /// Payloads from before the mode field existed must default to BY_DEADLINE
+    /// (today's implicit behaviour).
+    #[test]
+    fn test_ev_session_deserialize_missing_mode_defaults_by_deadline() {
+        let json = r#"{
+            "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "target_soc": 0.8,
+            "departure_time": "2026-07-12T06:00:00Z",
+            "created_at": "2026-07-11T20:00:00Z",
+            "updated_at": "2026-07-11T20:00:00Z"
+        }"#;
+        let s: EvSession = serde_json::from_str(json).unwrap();
+        assert_eq!(s.mode, UserRequestMode::ByDeadline);
+    }
+
+    /// Mode survives a serde roundtrip in SCREAMING_SNAKE_CASE wire form.
+    #[test]
+    fn test_ev_session_serde_roundtrip_preserves_mode() {
+        let session = EvSession {
+            id: Uuid::new_v4(),
+            target_soc: 0.9,
+            departure_time: Utc::now(),
+            soft_deadline: false,
+            mode: UserRequestMode::Opportunistic,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let json = serde_json::to_string(&session).unwrap();
+        assert!(json.contains("\"OPPORTUNISTIC\""));
+        let back: EvSession = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.mode, UserRequestMode::Opportunistic);
+    }
+
+    #[test]
+    fn test_heater_target_deserialize_missing_mode_defaults_by_deadline() {
+        let json = r#"{
+            "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "target_temp_c": 55.0,
+            "ready_by": "2026-07-12T06:00:00Z",
+            "created_at": "2026-07-11T20:00:00Z",
+            "updated_at": "2026-07-11T20:00:00Z"
+        }"#;
+        let t: HeaterTarget = serde_json::from_str(json).unwrap();
+        assert_eq!(t.mode, UserRequestMode::ByDeadline);
+    }
+
+    #[test]
+    fn test_shiftable_load_deserialize_missing_mode_defaults_by_deadline() {
+        let json = r#"{
+            "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "asset_id": "wm",
+            "power_kw": 2.0,
+            "duration_min": 60,
+            "earliest_start": "2026-07-11T20:00:00Z",
+            "latest_end": "2026-07-12T06:00:00Z",
+            "created_at": "2026-07-11T20:00:00Z",
+            "updated_at": "2026-07-11T20:00:00Z"
+        }"#;
+        let l: ShiftableLoad = serde_json::from_str(json).unwrap();
+        assert_eq!(l.mode, UserRequestMode::ByDeadline);
     }
 }
 
