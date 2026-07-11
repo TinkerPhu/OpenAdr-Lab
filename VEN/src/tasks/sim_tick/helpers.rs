@@ -126,12 +126,19 @@ pub(crate) fn apply_dispatch_override(
     };
 
     // Net site power without the battery: commanded setpoints for controlled
-    // assets, live power for uncontrolled ones (pv, base_load).
+    // assets, live power for uncontrolled ones. Uncontrollable assets (PV)
+    // carry an f64::MAX sentinel default_setpoint_kw that lands in `sp` —
+    // any non-finite or absurd magnitude falls back to live power.
     let net_without_battery: f64 = sim_snap
         .assets
         .iter()
         .filter(|(id, _)| id.as_str() != "battery")
-        .map(|(id, snap)| sp.get(id).copied().unwrap_or(snap.power_kw))
+        .map(|(id, snap)| {
+            sp.get(id)
+                .copied()
+                .filter(|v| v.is_finite() && v.abs() < 1.0e6)
+                .unwrap_or(snap.power_kw)
+        })
         .sum();
 
     // battery > 0 = charging (adds import). Clamp to live capability.
@@ -267,6 +274,22 @@ mod dispatch_override_tests {
             !sp.contains_key("battery"),
             "override skipped while alert active"
         );
+    }
+
+    #[test]
+    fn test_apply_dispatch_override_ignores_pv_sentinel_setpoint() {
+        // Uncontrollable assets carry an f64::MAX default_setpoint_kw that
+        // lands in the setpoint map — the override must fall back to live
+        // power for them instead of summing the sentinel (regression: the
+        // battery got clamped to full discharge because the wanted power
+        // came out -inf).
+        let mut sim = make_sim();
+        sim.assets
+            .insert("pv".to_string(), snap_asset(-2.0, f64::MAX, f64::MAX));
+        let mut sp = HashMap::from([("base_load".to_string(), 0.5), ("pv".to_string(), f64::MAX)]);
+        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[]);
+        // net without battery = 0.5 + (-2.0 live PV) = -1.5 -> battery 3.5.
+        assert!((sp["battery"] - 3.5).abs() < 1e-9);
     }
 
     #[test]
