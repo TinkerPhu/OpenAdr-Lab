@@ -36,6 +36,14 @@ pub async fn init_schema(pool: &PgPool) -> Result<()> {
     )
     .execute(pool)
     .await?;
+    // WP3.7 (Phase 3): SG-3 timeliness column. ADD COLUMN IF NOT EXISTS so
+    // both fresh databases and ones created by the Phase-1 schema get it.
+    sqlx::query(
+        "ALTER TABLE lab_recorder.reports_received
+         ADD COLUMN IF NOT EXISTS report_lag_s DOUBLE PRECISION",
+    )
+    .execute(pool)
+    .await?;
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS lab_recorder.events_published (
             event_id TEXT NOT NULL,
@@ -72,6 +80,73 @@ fn dedup_key(value: &Value) -> Option<(String, String)> {
     Some((id, modified))
 }
 
+/// Parse the simple `PT#H#M#S` ISO-8601 duration subset the VEN reporter
+/// emits (`format_iso8601_duration`). Unknown shapes parse as 0 seconds.
+fn parse_pt_duration_s(s: &str) -> i64 {
+    let Some(rest) = s.strip_prefix("PT") else {
+        return 0;
+    };
+    let mut total = 0i64;
+    let mut num = String::new();
+    for c in rest.chars() {
+        if c.is_ascii_digit() {
+            num.push(c);
+        } else {
+            let v: i64 = num.parse().unwrap_or(0);
+            num.clear();
+            total += match c {
+                'H' => v * 3600,
+                'M' => v * 60,
+                'S' => v,
+                _ => 0,
+            };
+        }
+    }
+    total
+}
+
+/// WP3.7 — SG-3 timeliness: seconds between the end of the newest reported
+/// interval window and the report's own `createdDateTime` (VTN ingestion
+/// time). Positive = the report arrived after the window it measures (normal
+/// for measurements — small is timely); negative = the report describes a
+/// future window (normal for USAGE_FORECAST). `None` when the report has no
+/// parseable `createdDateTime` or no interval with a parseable start.
+fn report_submission_lag_s(report: &Value) -> Option<f64> {
+    let created = report
+        .get("createdDateTime")?
+        .as_str()?
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .ok()?;
+
+    let window_end = report
+        .get("resources")?
+        .as_array()?
+        .iter()
+        .flat_map(|r| {
+            r.get("intervals")
+                .and_then(|i| i.as_array())
+                .into_iter()
+                .flatten()
+        })
+        .filter_map(|iv| {
+            let period = iv.get("intervalPeriod")?;
+            let start = period
+                .get("start")?
+                .as_str()?
+                .parse::<chrono::DateTime<chrono::Utc>>()
+                .ok()?;
+            let dur_s = period
+                .get("duration")
+                .and_then(|d| d.as_str())
+                .map(parse_pt_duration_s)
+                .unwrap_or(0);
+            Some(start + chrono::Duration::seconds(dur_s))
+        })
+        .max()?;
+
+    Some((created - window_end).num_milliseconds() as f64 / 1000.0)
+}
+
 /// Fetch every page of a list endpoint via `skip`/`limit`, stopping when a
 /// page returns fewer than `PAGE_LIMIT` rows.
 async fn fetch_all_pages(client: &VtnClient, path: &str) -> Result<Vec<Value>> {
@@ -101,10 +176,11 @@ async fn record_reports(pool: &PgPool, client: &VtnClient) -> Result<u64> {
         };
         let ven_name = r.get("clientName").and_then(|v| v.as_str());
         let report_type = r.get("reportName").and_then(|v| v.as_str());
+        let report_lag_s = report_submission_lag_s(r);
         let res = sqlx::query(
             "INSERT INTO lab_recorder.reports_received
-                (report_id, modification_date_time, ven_name, report_type, payload_json)
-             VALUES ($1, $2, $3, $4, $5)
+                (report_id, modification_date_time, ven_name, report_type, payload_json, report_lag_s)
+             VALUES ($1, $2, $3, $4, $5, $6)
              ON CONFLICT (report_id, modification_date_time) DO NOTHING",
         )
         .bind(&id)
@@ -112,6 +188,7 @@ async fn record_reports(pool: &PgPool, client: &VtnClient) -> Result<u64> {
         .bind(ven_name)
         .bind(report_type)
         .bind(r)
+        .bind(report_lag_s)
         .execute(pool)
         .await?;
         n += res.rows_affected();
@@ -228,5 +305,62 @@ mod tests {
     fn test_dedup_key_non_string_id_returns_none() {
         let v = json!({"id": 42, "modificationDateTime": "2026-01-01T00:00:00Z"});
         assert_eq!(dedup_key(&v), None);
+    }
+
+    // ── report_submission_lag_s (WP3.7) ─────────────────────────────
+
+    #[test]
+    fn test_parse_pt_duration_s_variants() {
+        assert_eq!(parse_pt_duration_s("PT900S"), 900);
+        assert_eq!(parse_pt_duration_s("PT15M"), 900);
+        assert_eq!(parse_pt_duration_s("PT1H30M"), 5400);
+        assert_eq!(parse_pt_duration_s("garbage"), 0);
+    }
+
+    #[test]
+    fn test_report_lag_positive_for_past_measurement_window() {
+        // Window [10:00, 10:15) reported at 10:15:30 → 30s lag.
+        let v = json!({
+            "createdDateTime": "2026-01-01T10:15:30Z",
+            "resources": [{"intervals": [{
+                "intervalPeriod": {"start": "2026-01-01T10:00:00Z", "duration": "PT15M"}
+            }]}]
+        });
+        assert_eq!(report_submission_lag_s(&v), Some(30.0));
+    }
+
+    #[test]
+    fn test_report_lag_negative_for_forecast_window() {
+        // Forecast slot ending 11:00 reported at 10:00 → -3600s.
+        let v = json!({
+            "createdDateTime": "2026-01-01T10:00:00Z",
+            "resources": [{"intervals": [{
+                "intervalPeriod": {"start": "2026-01-01T10:55:00Z", "duration": "PT5M"}
+            }]}]
+        });
+        assert_eq!(report_submission_lag_s(&v), Some(-3600.0));
+    }
+
+    #[test]
+    fn test_report_lag_uses_newest_interval() {
+        let v = json!({
+            "createdDateTime": "2026-01-01T10:30:00Z",
+            "resources": [{"intervals": [
+                {"intervalPeriod": {"start": "2026-01-01T10:00:00Z", "duration": "PT15M"}},
+                {"intervalPeriod": {"start": "2026-01-01T10:15:00Z", "duration": "PT15M"}}
+            ]}]
+        });
+        assert_eq!(report_submission_lag_s(&v), Some(0.0));
+    }
+
+    #[test]
+    fn test_report_lag_none_without_created_or_intervals() {
+        let no_created = json!({"resources": [{"intervals": [{
+            "intervalPeriod": {"start": "2026-01-01T10:00:00Z"}
+        }]}]});
+        assert_eq!(report_submission_lag_s(&no_created), None);
+
+        let no_intervals = json!({"createdDateTime": "2026-01-01T10:00:00Z", "resources": []});
+        assert_eq!(report_submission_lag_s(&no_intervals), None);
     }
 }
