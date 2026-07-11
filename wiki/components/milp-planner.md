@@ -2,8 +2,8 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-07-06
-synced_commit: ae4a1ed
+updated: 2026-07-11
+synced_commit: b1aba12
 sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning.rs, VEN/src/services/planning.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md]
 tags: [planner, milp, highs, optimization]
 ---
@@ -25,6 +25,14 @@ see [[milp-over-greedy]].
 
 ## Key mechanics
 
+- **Grid-signal import caps** (Phase 3): alerts, SIMPLE levels 1–3, and capacity
+  subscription+reservation allowances all converge on the per-slot contractual
+  import cap (`p_imp_max_cont_kw` in `inputs.rs`) — alert → 0 (overrides all),
+  SIMPLE L1 → `simple_level1_import_cap_pct` × contract, L2 → baseline forecast,
+  L3 → 0, reservation allowance → min with the limit. The cap is a *soft*
+  constraint (slack + violation penalty, warned in the plan), so no signal
+  combination can make the solve infeasible and user deadlines yield
+  automatically. See [[openadr-interface]] for the parsing side.
 - **Plan grid**: 3-tier variable-step zones, `now` truncated to the Zone-A boundary —
   the full reasoning (gate stability, warm-start continuity, block-commitment anchor)
   is in [[three-tier-plan-grid]].

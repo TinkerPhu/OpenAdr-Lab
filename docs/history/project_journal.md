@@ -3636,7 +3636,8 @@ when on Pi4 the BDD suite runs.
 ### Key design decisions
 
 1. **should_replan exclusion**: pv_plan_kw deliberately excluded from the
-   should_replan guard in outes/sim.rs.  Adding it would trigger a T1+T2
+   should_replan guard in 
+outes/sim.rs.  Adding it would trigger a T1+T2
    double-solve race (same root cause as ase_load_kw exclusion), corrupting
    the absorber's assertion window in timing-sensitive BDD steps.
 
@@ -5081,3 +5082,102 @@ without a cooldown causes load-induced false flakes (isolated `shiftable_lifecyc
 scenarios failed under a load average of 4.3, then passed cleanly at 0.8) — worth
 checking `uptime` before any Pi4-heavy verification step, not just before the first
 one in a session.
+
+## Phase 3 — Control-Method Lab (WP3.1–WP3.8)
+
+Goal per `docs/plans/roadmap/phase-3-control-method-lab.md`: every VTN control knob
+honoured per spec, forecast + flexibility reported back, and a scripted experiment
+harness comparing the methods on KPIs. Final state: 49 features / 252 E2E scenarios
+green on Pi4; 543 Rust unit/integration tests; 324 UI tests.
+
+**Track A — inbound signals.** All four control paths converge on the same per-slot
+contractual-import-cap vector (`p_imp_max_cont_kw`) in `build_milp_inputs`, which
+turned out to be the single leverage point the plan's separate "constraint paths"
+all reduce to — the cap is a *soft* constraint (slack + violation penalty), so no
+signal combination can make the solve infeasible, and user deadlines yield
+automatically when a cap starves them:
+
+- **WP3.1 alerts (BL-04):** `parse_alert_windows` (interval-level window,
+  event-level fallback — the shape User Guide Example 8.1-1 actually uses; payload
+  is a human-readable string, not a number). Both ALERT_GRID_EMERGENCY and
+  ALERT_BLACK_START mean "minimize electricity use" → cap 0 over the window; the
+  spec prescribes nothing for export, so export stays untouched (decision recorded
+  on the AlertWindow doc). The long-dormant `PlanTrigger::Alert` variant finally
+  fires; being a watch channel, the RateChange send is suppressed when Alert was
+  just sent (latest-wins would otherwise erase it).
+- **WP3.2 SIMPLE levels (BL from UC:SIMPLE):** L1 = configurable fraction of the
+  contractual limit (`simple_level1_import_cap_pct`, default 0.5), L2 = baseline
+  forecast (defers all flexible draw above uncontrollable load), L3 = 0 (alert
+  path). Highest overlapping level wins; alerts override everything. Scoped down
+  from the plan's `simple_levels:` map to one typed scalar + fixed L2/L3 semantics.
+- **WP3.3 reservations (§8.10):** subscription + reservation form a contracted
+  allowance (either alone counts) that binds when tighter than limit/physical and
+  is inactive when looser; export-side subscription/reservation parsing added.
+  Like the pre-existing limits, window-agnostic while the event is active — the
+  per-window refinement is shared future work for the whole capacity path.
+- **WP3.4 direct setpoints (BL-06/BL-24):** DISPATCH_SETPOINT → typed
+  `DispatchWindow` state (NOT `OadrEventCache.dispatch_setpoints` — the sketch's
+  anticipated consumer no longer exists; flagged for removal in BL-24) →
+  `apply_dispatch_override` steers the battery to hit the commanded net site power,
+  plan running underneath, alert winning precedence (safety over instruction —
+  recorded decision). CHARGE_STATE_SETPOINT → EvSession via the user-request state,
+  fraction-or-percent value, window end as departure. New
+  `ControllerEvent::DispatchOverride` trace variant, wired through the UI.
+
+**Track B — outbound reporting.**
+- **WP3.5 (BL-05)** closed without code: obligation-triggered submission was found
+  already implemented and BDD-covered since the 2026-07-06 R6 resolution — the
+  roadmap predated it. BACKLOG corrected instead.
+- **WP3.6 (BL-15/§8.8/BL-10/device-status):** `services/forecast.rs` builds
+  `AssetForecast`s (new `ForecastSource::Optimization` variant) from every adopted
+  plan, served at `GET /forecast`; USAGE_FORECAST reports are built straight from
+  plan slots at their native boundaries (a forecast resampled onto history buckets
+  is meaningless), descriptor-driven through the existing obligation machinery —
+  settling the plan's open decision as descriptor-driven only. BL-10's
+  envelope-report arms turned out to already exist; the gap was BDD verification,
+  now `ven_reporting_out.feature`. OPERATING_STATE is now derived from sample
+  freshness (ACTIVE/UNRESPONSIVE/OFFLINE, a site-level mirror of
+  DeviceResponsiveness) instead of the hardcoded "ACTIVE".
+- **WP3.7:** recorder gains `report_lag_s` (created − newest interval end; negative
+  = forecast window) via `ALTER TABLE ... IF NOT EXISTS` so Phase-1 databases
+  migrate in place. "Archive the new report types" needed no code — the recorder
+  was already generic.
+
+**WP3.8 experiment harness (A-3 → BL-33).** The sim-time spike came back negative:
+`tick_once` stamps `Utc::now()` and event windows are absolute, so acceleration
+isn't drivable externally — scenarios run in REAL time (the plan's fallback);
+S-1…S-6 are 30-minute windows, ~3 h for the set, run as a scheduled exit demo
+(same rationale as Phase 2's N=10 deferral). `experiments/`: scenario YAMLs,
+`run_experiment.py` (drive VTN per offsets, snapshot VEN SQLite WAL-aware +
+`lab_recorder` CSVs), `kpi.py`, `report.py`. A 3-minute smoke on Pi4 verified the
+whole pipeline with real per-VEN KPI values.
+
+**Defects found only by live Pi4 runs (all fixed + regression-tested):**
+1. `apply_dispatch_override` summed PV's `f64::MAX` default-setpoint sentinel into
+   net-without-battery → wanted power −inf → battery clamped to full discharge
+   against a +2 kW command. Non-finite/absurd setpoints now fall back to live power.
+2. The CHARGE_STATE_SETPOINT-created EvSession survived its event's deletion
+   (deletion == cancellation!) and leaked into every later scenario's plan — the
+   observed knock-on failure in `ven_shiftable_lifecycle`. `SignalPrevs` now tracks
+   the created session id and clears exactly that session when the signal
+   disappears; user sessions are never touched.
+3. The ev-session BDD step crashed on first poll — `GET /ev-session` returns a
+   non-JSON body when no session exists; the fetch now tolerates it.
+4. Harness: VEN history stores are WAL-mode and checkpoint only at daily prune —
+   copying just `history.sqlite` snapshotted an empty file; sidecars now copied.
+   And `report_lag_s` stats ingested the recorder's whole archive (weeks-old rows
+   → absurd lags); now windowed by `received_at`.
+5. Environment, not code: the production trio + BFF had been running
+   pre-Phase-1 binaries for 4 days (no history store, no `lab_recorder` schema) —
+   the first smoke run failed on both counts. Rebuilt from the branch; a stale
+   8-hour-old `openadr-test` E2E stack was also found and torn down earlier the
+   same day. Lesson: long-lived prod containers silently decouple from main —
+   worth a rebuild check whenever a phase lands.
+
+**File-size cap churn:** tasks/planning.rs, services/planning.rs, and
+poll_events.rs each crossed their caps during this phase and were split
+(publish_post_cycle_state + clone_sim_snapshot to services, the whole
+signal-application block to a new tasks/poll_signals.rs with a grouped
+ParsedSignals struct). One audit failure slipped into a commit because a tail
+pipeline masked the script's exit code — caught and fixed the next commit.
+

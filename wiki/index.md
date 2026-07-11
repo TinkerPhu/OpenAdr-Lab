@@ -22,6 +22,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[reliability-and-config]] — task supervision, typed DomainError, profile validation, config knobs
 - [[history-store]] — VEN HistoryPort/SqliteHistoryStore + sampler + routes, VTN BFF recorder
 - [[fleet-tooling]] — fleet.sh (up/down/status), bulk VEN registration, GB-06/GB-09
+- [[experiment-harness]] — scenario YAMLs, real-time runner, KPI extraction, comparison reports
 
 ## Concepts
 - [[openadr-3]] — protocol entities, event types, certification profiles, 3.0 vs 3.1 skew
@@ -54,4 +55,4 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[history-store-persistence-format]] — SQLite schema, epoch-second time encoding, per-asset-per-minute rows, flat retention pruning, docker bind-mount path
 
 ---
-Pages: 34 · Last sync: 2026-07-11 (Phase 2 fleet enablement: new fleet-tooling component page, reliability-and-config + deployment-topology updated, 795c8d8)
+Pages: 35 · Last sync: 2026-07-11 (Phase 3 control-method lab: new experiment-harness page; openadr-interface, dispatcher, milp-planner, openadr-spec-use-cases updated, b1aba12)
