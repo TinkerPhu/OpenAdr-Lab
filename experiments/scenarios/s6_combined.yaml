@@ -1,0 +1,18 @@
+# S-6 — Combined: price spike + capacity reservation + alert overlap.
+# Exercises the constraint-interaction relaxation order (alert wins).
+name: s6_combined
+description: Price spike, 3 kW reservation, and an alert overlapping both
+duration_minutes: 30
+actions:
+  - at_minute: 0
+    type: price_series
+    values_eur_kwh: [0.10, 0.45, 0.10]
+    interval_minutes: 10
+  - at_minute: 8
+    type: capacity_reservation
+    import_kw: 3.0
+    duration_minutes: 15
+  - at_minute: 14
+    type: alert
+    alert_type: ALERT_GRID_EMERGENCY
+    duration_minutes: 4
