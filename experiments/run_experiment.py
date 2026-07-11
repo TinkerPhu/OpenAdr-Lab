@@ -101,7 +101,13 @@ def snapshot(out_dir, vens, pg_container, ven_data_root):
     for ven in vens:
         src = Path(ven_data_root) / ven / "history.sqlite"
         if src.exists():
-            shutil.copy2(src, out_dir / f"{ven}-history.sqlite")
+            # WAL mode: recent rows live in the -wal sidecar until the daily
+            # prune checkpoint — copy all three files so the snapshot opens
+            # with the un-checkpointed data visible.
+            for suffix in ("", "-wal", "-shm"):
+                side = Path(str(src) + suffix)
+                if side.exists():
+                    shutil.copy2(side, out_dir / f"{ven}-history.sqlite{suffix}")
         else:
             print(f"WARN: no history store at {src}")
     for table in ("reports_received", "events_published", "ven_snapshots"):
