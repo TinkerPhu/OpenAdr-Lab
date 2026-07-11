@@ -1,0 +1,13 @@
+# S-4 — Grid emergency alert: 5-minute ALERT_GRID_EMERGENCY (import -> 0).
+name: s4_alert
+description: Grid emergency shed mid-window
+duration_minutes: 30
+actions:
+  - at_minute: 0
+    type: price_series
+    values_eur_kwh: [0.25, 0.25, 0.25]
+    interval_minutes: 10
+  - at_minute: 12
+    type: alert
+    alert_type: ALERT_GRID_EMERGENCY
+    duration_minutes: 5

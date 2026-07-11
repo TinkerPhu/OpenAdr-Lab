@@ -1,0 +1,10 @@
+# S-2 — Price signal only: cheap-expensive-cheap. Tests tariff-driven
+# shifting (storage arbitrage, EV/heater timing).
+name: s2_price_spike
+description: Price spike mid-window, no capacity constraints
+duration_minutes: 30
+actions:
+  - at_minute: 0
+    type: price_series
+    values_eur_kwh: [0.10, 0.45, 0.10]
+    interval_minutes: 10

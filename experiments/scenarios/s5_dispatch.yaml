@@ -1,0 +1,17 @@
+# S-5 — Direct control: SIMPLE level 2 then a DISPATCH_SETPOINT window.
+name: s5_dispatch
+description: SIMPLE level 2 shed followed by a 1.5 kW dispatch setpoint
+duration_minutes: 30
+actions:
+  - at_minute: 0
+    type: price_series
+    values_eur_kwh: [0.25, 0.25, 0.25]
+    interval_minutes: 10
+  - at_minute: 8
+    type: simple
+    level: 2
+    duration_minutes: 7
+  - at_minute: 18
+    type: dispatch
+    setpoint_kw: 1.5
+    duration_minutes: 6
