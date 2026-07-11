@@ -2,8 +2,8 @@
 title: Dispatcher
 type: component
 created: 2026-07-04
-updated: 2026-07-06
-synced_commit: ae4a1ed
+updated: 2026-07-11
+synced_commit: b1aba12
 sources: [VEN/src/controller/dispatcher.rs, VEN/src/tasks/sim_tick/, VEN/src/controller/monitor.rs, docs/architecture/VEN_ARCHITECTURE.md]
 tags: [dispatcher, realtime, ledger]
 ---
@@ -28,6 +28,13 @@ Per tick, `build_setpoints(plan, sim, capacity, heater_setpoint_c, now, overlay_
    all other loads *and* any planned battery charging) is routed to the EV up to
    `max_charge_kw`. Auto-paused while an `EvSession` is active
    (`EvSettings.opportunistic_charging_enabled`, `tasks/sim_tick/tick.rs:44`).
+6. Apply the **dispatch override** (Phase 3, WP3.4 — `apply_dispatch_override` in
+   `tasks/sim_tick/helpers.rs`, composed in `build_tick_setpoints`): while a
+   `DISPATCH_SETPOINT` window is active and no alert window is (alert wins — safety
+   over instruction), the battery is set so net site power hits the commanded kW,
+   clamped to live capability; non-finite sentinel setpoints (PV's `f64::MAX`
+   default) fall back to live power. The plan keeps running underneath and resumes
+   when the window ends. See [[openadr-interface]] for the parsing side.
 
 ## Ownership facts
 

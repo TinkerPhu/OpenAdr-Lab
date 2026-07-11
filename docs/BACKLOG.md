@@ -36,12 +36,13 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 
 ---
 
-### BL-04: ALERT_GRID_EMERGENCY handling
+### BL-04: ALERT_GRID_EMERGENCY handling — RESOLVED (Phase 3, WP3.1)
 **Req:** UC-06, OA-01
 **Problem:** `ALERT_GRID_EMERGENCY` and `ALERT_BLACK_START` event types are not parsed. Emergency signals from the VTN are silently ignored.
 **Fix:** In `openadr_interface`, detect ALERT payload types and emit `PlanTrigger::Alert`. Planner enforces a zero/minimal import hard constraint for the alert duration as highest-priority FIRM slots.
 **Complexity:** Medium (3–5 hours). New parsing path + synthetic packet creation + planner priority handling.
 **Verify:** BDD test: send ALERT_GRID_EMERGENCY event, assert planner creates shed packet and reduces import within one poll cycle.
+**Resolution:** `parse_alert_windows` (openadr_interface.rs) extracts both alert types (interval-level window, event-level fallback per User Guide Example 8.1-1); `PlanTrigger::Alert` fires on change; `build_milp_inputs` clamps the per-slot contractual import cap to 0 over the window (soft constraint — unavoidable base load becomes a penalized/warned violation, never infeasibility; user deadlines yield automatically). Not "highest-priority FIRM slots + synthetic packet" as sketched here — the per-slot cap on the existing constraint path achieves the shed without new packet machinery. `ven_alerts.feature` verifies clamp + recovery-on-delete live.
 
 ---
 
@@ -53,12 +54,13 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 
 ---
 
-### BL-06: DISPATCH_SETPOINT + CHARGE_STATE_SETPOINT parsing
+### BL-06: DISPATCH_SETPOINT + CHARGE_STATE_SETPOINT parsing — RESOLVED (Phase 3, WP3.4)
 **Req:** UC-13, VEN_ARCHITECTURE §2.1
 **Problem:** These event types are not parsed in `openadr_interface`. `DISPATCH_SETPOINT` should bypass the planner and go directly to the dispatcher. `CHARGE_STATE_SETPOINT` should create/modify an `EvSession` targeting the specified SoC.
 **Fix:** Add parsing branches in `openadr_interface` for both types. `DISPATCH_SETPOINT` → store in `OadrEventCache.dispatch_setpoints` (field already exists in `capacity.rs:53`) and flag for dispatcher override. `CHARGE_STATE_SETPOINT` → create `EvSession` with target SoC via `user_request` machinery.
 **Complexity:** Medium (4–6 hours). Two new parsing paths + dispatcher override mode + session creation.
 **Verify:** BDD test: send DISPATCH_SETPOINT event, assert sim setpoint matches within one poll cycle. Send CHARGE_STATE_SETPOINT, assert `EvSession` created with correct target SoC.
+**Resolution:** Both parsed in openadr_interface.rs. DISPATCH_SETPOINT feeds typed `DispatchWindow` state (not `OadrEventCache.dispatch_setpoints` — that stays an unwired sketch, see BL-24); `apply_dispatch_override` (sim_tick/helpers.rs) steers the battery to hit the commanded net site power while the window is active, clamped to live capability, with the plan running underneath. Alert wins over dispatch (recorded precedence decision). `ControllerEvent::DispatchOverride` traces transitions. CHARGE_STATE_SETPOINT creates/updates an EvSession (fraction or percent value; window end = departure); deleting the event cancels the event-created session — and only that one. `ven_dispatch_setpoints.feature` covers both live.
 
 ---
 
@@ -89,12 +91,13 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 
 ---
 
-### BL-10: FlexibilityEnvelope → VTN report
+### BL-10: FlexibilityEnvelope → VTN report — RESOLVED (verified Phase 3, WP3.6)
 **Req:** UC-05, UC-07
 **Problem:** Planner builds `FlexibilityEnvelope` (Phase 7) and exposes via `GET /flexibility`, but never submits them to the VTN as `IMPORT_CAPACITY_RESERVATION` / `EXPORT_CAPACITY_RESERVATION` reports. Aggregators cannot see available DR capacity.
 **Fix:** In the report submission loop, when a new plan is produced with non-empty envelopes, build report payloads of type `IMPORT_CAPACITY_RESERVATION` / `EXPORT_CAPACITY_RESERVATION` from the envelope data and submit to VTN.
 **Complexity:** Medium (3–5 hours). Report payload construction from envelope fields + submission wiring.
 **Verify:** BDD test: planner produces envelopes for FLEXIBLE packets, assert VTN receives capacity reservation report with matching power/energy values.
+**Resolution:** The builder arms already existed (descriptor-driven: `build_measurement_report_for_obligation` serves IMPORT/EXPORT_CAPACITY_RESERVATION payload types from the site envelope) — what was missing was verification, not implementation. `ven_reporting_out.feature` now proves a VTN with a reservation reportDescriptor receives envelope-valued reports. Note: descriptor-driven, not submitted unsolicited on every plan as this entry sketched.
 
 ---
 
@@ -149,12 +152,13 @@ tests; see project_journal.md.
 
 ---
 
-### BL-15: AssetForecast — per-asset predicted power profile
+### BL-15: AssetForecast — per-asset predicted power profile — RESOLVED (Phase 3, WP3.6)
 **Req:** entities/design_vocabulary.rs §3.6 (`AssetForecast`, `ForecastSource`, `TimeRange`)
 **Problem:** `AssetForecast` (per-step predicted power/SoC, confidence, availability windows, tagged by `ForecastSource`) is defined but nothing constructs it. The MILP planner computes an equivalent per-slot forecast internally (`planned_state_by_asset`) but never exposes it in this shape, and it's also the missing piece behind the never-built outbound `USAGE_FORECAST` report (see `docs/reference/TECHNICAL_DEBTS.md` R-15).
 **Fix:** Build `AssetForecast` from the planner's internal per-slot state after each plan cycle; expose via a route and use it as the source for the `USAGE_FORECAST` report (R-15).
 **Complexity:** Medium — mostly plumbing existing planner output into the documented shape, plus BL-14's heuristic source once that exists.
 **Verify:** Unit test: after a plan cycle, `AssetForecast.power_kw` matches the planner's `planned_state_by_asset` for the same asset/horizon.
+**Resolution:** `services/forecast.rs` builds one `AssetForecast` per asset from every adopted plan (`ForecastSource::Optimization`, new enum variant), served at `GET /forecast`; the `USAGE_FORECAST` report (R-15's other half) is built directly from plan slots at their native boundaries, descriptor-driven via the obligation machinery. BL-14's Heuristic source remains future work.
 
 ---
 
@@ -246,6 +250,7 @@ correctly reflects the current billing period after each rollover.
 **Req:** `entities/capacity.rs`
 **Problem:** Three unwired sketches in a file that otherwise holds live types (`OadrCapacityState`, `OadrReportObligation`). `OadrEventCache.dispatch_setpoints` is specifically the storage `TECHNICAL_DEBTS.md` R-13 (`DISPATCH_SETPOINT` parsing) would need once that's built; `OadrProgramConfig` and `OadrCapacityRequest` have no consumer at all yet — no code path builds or sends a capacity reservation request to the VTN in this shape.
 **Fix:** For `OadrEventCache`: build alongside R-13's `DISPATCH_SETPOINT` parsing work (BL-06 already covers the parsing side). For `OadrProgramConfig`/`OadrCapacityRequest`: no dependent feature identified yet — lowest priority of this group until one exists.
+**Update (Phase 3, WP3.4):** DISPATCH_SETPOINT parsing landed WITHOUT `OadrEventCache` — typed `DispatchWindow` state (matching the alert/SIMPLE pattern) proved the better shape, so the cache''s anticipated consumer no longer exists. All three sketches remain unwired; consider removal next time this file is triaged.
 **Complexity:** Tied to BL-06/R-13 for the event cache; TBD for the other two pending a concrete driving feature.
 **Verify:** Tied to whichever consuming feature lands first.
 
@@ -306,6 +311,13 @@ correctly reflects the current billing period after each rollover.
 **Problem:** nothing archived VTN-side reports/events/VEN health beyond openleadr-rs's own live tables — no historical record survives program/event deletion or VTN restarts.
 **Fix:** a background poll task in `VTN/bff` (new `recorder.rs`), gated on `DATABASE_URL`, pages through `/reports`/`/events`/`/vens` via the existing `skip`/`limit` support, dedupes on `(id, modificationDateTime)` via a composite PK + `ON CONFLICT DO NOTHING`, and writes into a new `lab_recorder` Postgres schema in the *same* instance openleadr-rs already uses — never touching its own tables.
 **Verify:** see the WP1.7 project journal entry; confirmed via a real Pi4 run (publish a program/event/report, poll interval elapses, rows appear in `lab_recorder.*` via `psql`).
+
+### BL-33: A-3 — experiment harness + KPI jobs — RESOLVED (Phase 3, WP3.8; exit demo pending a scheduled window)
+**Req:** `docs/plans/roadmap/phase-3-control-method-lab.md`
+**Problem:** no scripted way to compare the control methods (price, capacity, alert, SIMPLE, dispatch) on KPIs — every comparison was manual.
+**Fix:** `experiments/` — declarative scenario YAMLs (S-1 flat baseline … S-6 combined), `run_experiment.py` (drives the VTN API per scenario, snapshots VEN SQLite stores WAL-aware + `lab_recorder` CSVs), `kpi.py` (energy/cost/peak/load-factor/energy-shifted-vs-S1/report-timeliness per VEN), `report.py` (markdown + optional matplotlib charts).
+**Constraint found (sim-time spike):** the sim clock is wall time (`tick_once` stamps `Utc::now()`, event windows are absolute), so time acceleration isn't externally drivable without an injectable clock through the whole tick/poll path — scenarios run in real time; S-1…S-6 are 30-minute same-day windows (~3 h for the full set).
+**Verify:** 3-minute `smoke.yaml` run on Pi4 exercised the full pipeline (event replay, cleanup, WAL-aware snapshot, KPI extraction with real per-VEN values, report rendering). The full S-1…S-6 exit demonstration runs as a scheduled window (same deferral rationale as Phase 2's N=10).
 
 ---
 

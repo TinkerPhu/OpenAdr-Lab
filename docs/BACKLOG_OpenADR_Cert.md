@@ -77,20 +77,20 @@ The entire transport is plain HTTP. For a production/certified VEN, HTTPS with T
 | Read individual event (`GET /events/{id}`) | read_targets | Missing | Only bulk fetch |
 | Target-filtered event queries | MUST | Missing | Relies on server-side filtering |
 | PRICE payload parsing | — | Full | PRICE, EXPORT_PRICE, GHG extracted into TariffSnapshots |
-| SIMPLE payload handling | — | Partial | Referenced in reporter but no dedicated signal handling path |
-| CHARGE_STATE_SETPOINT | — | Missing | Not parsed |
-| DISPATCH_SETPOINT / DISPATCH_INSTRUCTION | — | Partial | `dispatch_setpoints` field exists in capacity model but no dedicated actor/signal path |
+| SIMPLE payload handling | — | Full (Phase 3, WP3.2) | Levels 0–3 clamp the per-slot import cap (L1 %-of-contract, L2 baseline, L3 zero) |
+| CHARGE_STATE_SETPOINT | — | Full (Phase 3, WP3.4) | Creates/updates an EvSession targeting the given SoC; event deletion cancels it |
+| DISPATCH_SETPOINT / DISPATCH_INSTRUCTION | — | Partial (DISPATCH_SETPOINT Full, Phase 3 WP3.4) | Dispatcher steers the battery to the commanded net site power during the window; alert wins precedence. DISPATCH_INSTRUCTION still missing |
 | CONTROL_SETPOINT / CONTROL_LEVEL_OFFSET | — | Missing | Not implemented |
-| Alert payloads (GRID_EMERGENCY, BLACK_START, OUTAGE, FLEX_ALERT, FIRE, FREEZING, WIND) | — | Partial | `alert_type` field in capacity model, `Alert` PlanTrigger enum — but no dedicated alert handling/UI |
+| Alert payloads (GRID_EMERGENCY, BLACK_START, OUTAGE, FLEX_ALERT, FIRE, FREEZING, WIND) | — | Partial (GRID_EMERGENCY + BLACK_START Full, Phase 3 WP3.1) | Both clamp planned import to 0 over their window; OUTAGE/FLEX_ALERT/FIRE/FREEZING/WIND still unhandled |
 | CURVE / OLS payloads | — | Missing | Not implemented |
-| Capacity subscription/reservation payloads | — | Partial | `import_subscription_kw` / `import_reservation_kw` tracked but not dynamically negotiated |
+| Capacity subscription/reservation payloads | — | Partial (constraining Full, Phase 3 WP3.3) | Import + export subscription/reservation now bind the solver as a contracted allowance; dynamic negotiation (requesting capacity) still missing |
 | Opt-in / opt-out signaling | — | Missing | No opt-in/opt-out mechanism at all |
 | Looping event support (`P9999Y` duration) | — | Full | Cyclic repetition implemented in `openadr_interface.rs` |
 | Variable-duration intervals | — | Full | ISO 8601 duration parsing (PT1H, PT15M, PT30S) |
 
-**Fulfilment: ~50%**
+**Fulfilment: ~70%**
 
-The VEN handles PRICE-family payloads well (its primary use case as a HEMS), but most non-price payload types (direct control, alerts, curves) are either stub-level or missing. This limits certification to pricing-oriented profiles only.
+The VEN now handles PRICE-family payloads, SIMPLE levels, grid alerts, capacity subscription/reservation constraints, and direct dispatch/charge setpoints (Phase 3). Remaining gaps: CONTROL/CURVE payload families, the non-emergency alert types, opt-in/out, and dynamic capacity negotiation.
 
 ---
 
@@ -106,10 +106,10 @@ The VEN handles PRICE-family payloads well (its primary use case as a HEMS), but
 | Status reports (event-driven) | — | Missing | `PlanCycle` events are logged to `/trace/events` and streamed via `/plan/events` (SSE), but no VTN report is built from them — the code path that once attempted this (`TELEMETRY_STATUS` on `PlanCycle`) was dead (never had a program ID to report against) and was removed |
 | Report obligation tracking | — | Full | Extracts from `reportDescriptors`; recurring — each due obligation is re-armed to its next `due_at` (`interval_duration_s` later) after reporting, not permanently fulfilled; retired once its source event drops out of the active poll set |
 | Data quality metadata (accuracy, confidence) | — | Missing | Not included in report payloads |
-| Historical / forecast / rolling reports | — | Partial | Only real-time measurement reports; no historical replay or forecast reports |
+| Historical / forecast / rolling reports | — | Partial (USAGE_FORECAST Full, Phase 3 WP3.6) | Plan-slot forecast reports served descriptor-driven; historical replay and rolling reports still missing |
 | `resourceName` in report resources | — | Full | `"{ven_name}-meter"` naming pattern |
 
-**Fulfilment: ~70%**
+**Fulfilment: ~80%**
 
 ---
 
@@ -232,8 +232,8 @@ Remaining gap: HTTP status handling itself is still only "Partial" — no dedica
 | 2 | Communication Protocol | **0%** | No TLS, no MQTT — lab-only HTTP |
 | 3 | Authentication | **~75%** | No `/auth/server` discovery, no unauthenticated mode |
 | 4 | Program Access | **~60%** | No individual fetch, no client-side target filtering |
-| 5 | Event Handling | **~50%** | Strong on PRICE; weak on direct-control payloads, alerts, opt-in/out |
-| 6 | Report Submission | **~70%** | No delete, no data quality metadata, no forecast reports |
+| 5 | Event Handling | **~70%** | PRICE + SIMPLE + alerts + dispatch/charge setpoints handled (Phase 3); CONTROL/CURVE payloads and opt-in/out still missing |
+| 6 | Report Submission | **~80%** | USAGE_FORECAST + envelope reservation reports live (Phase 3); no delete, no data quality metadata |
 | 7 | Subscriptions & Notifications | **0%** | Entirely missing — pure polling model |
 | 8 | VEN & Resource Management | **0%** | No self-registration, no resource CRUD |
 | 9 | Targeting & Enrollment | **~50%** | Server-side only; VEN is passive |

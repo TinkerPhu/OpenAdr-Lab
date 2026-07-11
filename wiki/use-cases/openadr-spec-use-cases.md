@@ -2,8 +2,8 @@
 title: OpenADR-Spec-Implied Use Cases — Gap Analysis
 type: use-case
 created: 2026-07-04
-updated: 2026-07-06
-synced_commit: ae4a1ed
+updated: 2026-07-11
+synced_commit: b1aba12
 sources: [docs/openadr_3_1_specs/, docs/BACKLOG_OpenADR_Cert.md, docs/architecture/VEN_ARCHITECTURE.md, tests/features/, VEN/src/entities/capacity.rs]
 tags: [use-cases, openadr, gap-analysis, spec]
 ---
@@ -75,6 +75,11 @@ and **event arbitration** (priority, `SIMPLE` mapping, emergency shed). The firs
 is infrastructure; the last two are planner/domain features that would fit the existing
 `PlanTrigger` and obligation models.
 
-> **OPEN QUESTION** Which cluster first? Certification pressure says transport;
-> lab-learning value says event arbitration (it exercises the MILP under conflicting
-> constraints). Owner call — belongs in `docs/BACKLOG.md` prioritisation.
+The question of which cluster to tackle first was resolved by execution: Phase 3
+("Control-Method Lab", 2026-07-11) took **event arbitration** — SIMPLE levels,
+grid-emergency alerts, capacity reservations, and direct dispatch/charge setpoints
+all now constrain or steer the planner/dispatcher, each with its precedence rule
+(alert > dispatch; highest SIMPLE level wins; all converge on the per-slot import
+cap). Transport modernisation (webhooks/MQTT/TLS) remains the open cert-blocker
+cluster; report-management depth partially closed via USAGE_FORECAST + envelope
+reports (`docs/BACKLOG_OpenADR_Cert.md` §5 ~70%, §6 ~80%).

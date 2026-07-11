@@ -2,8 +2,8 @@
 title: OpenADR Interface (VEN)
 type: component
 created: 2026-07-04
-updated: 2026-07-06
-synced_commit: ae4a1ed
+updated: 2026-07-11
+synced_commit: b1aba12
 sources: [docs/architecture/VEN_ARCHITECTURE.md, VEN/src/vtn.rs, VEN/src/controller/openadr_interface.rs, VEN/src/controller/reporter.rs, VEN/src/tasks/poll_events.rs, VEN/src/entities/capacity.rs, VEN/src/state.rs, VEN/src/services/obligation.rs]
 tags: [openadr, ven, translation, polling]
 ---
@@ -23,26 +23,35 @@ the poll loop and change detection sit in `VEN/src/tasks/poll_events.rs`
 |---|---|
 | `PRICE` / `EXPORT_PRICE` / `GHG` | `TariffSnapshot` per interval (`parse_rate_snapshots`) |
 | `IMPORT_/EXPORT_CAPACITY_LIMIT` | `OadrCapacityState.import_/export_limit_kw` — strictest wins, source event id kept |
-| `IMPORT_CAPACITY_SUBSCRIPTION` / `IMPORT_CAPACITY_RESERVATION` | `OadrCapacityState` scalar fields (min wins) |
-| `reportDescriptors` | `OadrReportObligation` per (event, payloadType), due after `frequency` seconds |
+| `IMPORT_/EXPORT_CAPACITY_SUBSCRIPTION` / `_RESERVATION` | `OadrCapacityState` scalar fields (min wins); subscription+reservation form a contracted allowance that binds the solver when tighter than the limit (Phase 3, WP3.3) |
+| `ALERT_GRID_EMERGENCY` / `ALERT_BLACK_START` | `AlertWindow` (window from interval- or event-level `intervalPeriod`; both types clamp planned import to 0 — Phase 3, WP3.1) |
+| `SIMPLE` (levels 0–3) | `SimpleWindow` — L1 caps import at a configurable % of contract, L2 at baseline, L3 at 0; highest level wins, alerts override (Phase 3, WP3.2) |
+| `DISPATCH_SETPOINT` | `DispatchWindow` — dispatcher steers the battery to the commanded net site power during the window, plan running underneath; alert wins precedence (Phase 3, WP3.4) |
+| `CHARGE_STATE_SETPOINT` | creates/updates an `EvSession` targeting the given SoC (fraction or percent); event deletion cancels the event-created session (Phase 3, WP3.4) |
+| `reportDescriptors` | `OadrReportObligation` per (event, payloadType), due after `frequency` seconds; `USAGE_FORECAST` and `IMPORT_/EXPORT_CAPACITY_RESERVATION` payload types serve plan-slot forecasts / envelope values (Phase 3, WP3.6) |
 
 **Looping events**: when `event.intervalPeriod.duration` exceeds the intervals' total
 span (the spec's persistent-daily-prices pattern, `P9999Y`), the interval set is repeated
 to cover one cycle back through 3 days ahead (`parse_rate_snapshots`). Multiple events
-writing the same interval merge **last-write-wins**; the `priority` field is parsed but
-not used in ordering (limitation documented at `openadr_interface.rs:102`).
+writing the same interval merge **last-write-wins**, with events pre-sorted so the
+highest-priority one is processed last (BL-02, Phase 0 — `priority` ascending, newer
+`createdDateTime` breaking ties).
 
-Change detection compares poll results against the previous tick (new/expired event ids,
-tariff count, import limit) and pushes trace events; any change fires a single
-`PlanTrigger::RateChange` waking the [[milp-planner]] — the `CapacityChange` and `Alert`
-trigger variants are never sent. Event *removal* on a poll means cancellation
-([[openadr-3]]).
+Change detection compares poll results against the previous tick and pushes trace
+events. Signal application lives in `tasks/poll_signals.rs` (Phase 3): alert changes
+fire `PlanTrigger::Alert`, SIMPLE changes `CapacityChange`, charge-state changes
+`UserRequest`, everything else a single `RateChange` — with the watch-channel caveat
+that only the latest trigger survives, so RateChange is suppressed when a more
+specific trigger was just sent. Event *removal* on a poll means cancellation
+([[openadr-3]]) — including cancelling the EvSession a CHARGE_STATE_SETPOINT event
+created.
 
-> **DRIFT** `docs/architecture/VEN_ARCHITECTURE.md` §2.1's translation table also lists
-> `ALERT_*`, `DISPATCH_SETPOINT`, `CHARGE_STATE_SETPOINT`, and the export-side
-> subscription/reservation payloads as inbound targets. None are handled anywhere —
-> they survive only as fields of the dead `OadrEventCache` vocabulary struct
-> (`entities/capacity.rs:42`), and `OadrCapacityState` has no export-subscription field.
+All of `ALERT_*`, `DISPATCH_SETPOINT`, `CHARGE_STATE_SETPOINT`, and the export-side
+subscription/reservation payloads are now genuinely handled (Phase 3) — the long-standing
+drift against `VEN_ARCHITECTURE.md` §2.1's translation table is closed. Only the
+`OadrEventCache` vocabulary struct remains an unwired sketch (its anticipated
+DISPATCH_SETPOINT consumer landed as typed `DispatchWindow` state instead; removal
+flagged in `docs/BACKLOG.md` BL-24).
 > BL-04/BL-06 markers cover the alerts and charge setpoints; the export-side capacity
 > payloads and priority-ordered merge are unmarked gaps. See [[ven-code-vs-docs-audit]].
 
