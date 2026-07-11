@@ -72,6 +72,21 @@ pub struct SimpleWindow {
     pub event_id: String,
 }
 
+/// WP3.4 (BL-06/BL-24) — a direct-dispatch window parsed from a
+/// DISPATCH_SETPOINT event: while active, the dispatcher applies the
+/// commanded net site setpoint (kW, positive = import; lab convention
+/// matching every other capacity payload) directly by steering the battery,
+/// bypassing the plan. The planner keeps running; normal plan-following
+/// resumes when the window ends. Precedence (decision): an active alert
+/// window wins over dispatch — safety over instruction.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DispatchWindow {
+    pub setpoint_kw: f64,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub event_id: String,
+}
+
 /// Configuration for an OpenADR program this VEN participates in (§5.1).
 /// Unwired sketch — never constructed anywhere. See docs/BACKLOG.md BL-24.
 #[derive(Debug, Clone, Serialize, Deserialize)]
