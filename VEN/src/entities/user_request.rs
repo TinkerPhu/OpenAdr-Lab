@@ -6,6 +6,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::entities::design_vocabulary::UserRequestMode;
+
 /// A single deadline tier from the user's request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestDeadline {
@@ -43,6 +45,9 @@ pub struct UserRequest {
     pub target_energy_kwh: f64,
     pub desired_power_kw: f64,
     pub deadlines: Vec<RequestDeadline>,
+    /// How the user expressed this request (BL-28); BY_DEADLINE = legacy behaviour.
+    #[serde(default)]
+    pub mode: UserRequestMode,
     pub completion_policy: String,
     pub max_total_cost_eur: Option<f64>, // from first tier (for API convenience)
     pub tier_count: usize,               // number of deadline tiers

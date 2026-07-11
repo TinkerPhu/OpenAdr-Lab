@@ -531,6 +531,7 @@ mod tests {
     fn make_load(asset_id: &str) -> ShiftableLoad {
         let now = Utc::now();
         ShiftableLoad {
+            mode: Default::default(),
             id: Uuid::new_v4(),
             asset_id: asset_id.to_string(),
             power_kw: 2.0,
@@ -649,6 +650,7 @@ mod tests {
     ) -> UserRequest {
         let now = Utc::now();
         UserRequest {
+            mode: Default::default(),
             id: Uuid::new_v4(),
             asset_id: "test".to_string(),
             target_soc: None,
@@ -681,6 +683,7 @@ mod tests {
         state.upsert_request(req).await;
         state
             .set_ev_session(Some(EvSession {
+                mode: Default::default(),
                 id: session_id,
                 target_soc: 0.8,
                 departure_time: Utc::now() + chrono::Duration::hours(2),
@@ -707,6 +710,7 @@ mod tests {
         state.upsert_request(req).await;
         state
             .set_heater_target(Some(HeaterTarget {
+                mode: Default::default(),
                 id: session_id,
                 target_temp_c: 21.0,
                 ready_by: Utc::now() + chrono::Duration::hours(1),

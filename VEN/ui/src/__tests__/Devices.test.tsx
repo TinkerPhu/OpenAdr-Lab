@@ -16,6 +16,7 @@ function makeEvRequest(overrides: Partial<UserRequestWithSession> = {}): UserReq
     target_soc: 0.8,
     desired_power_kw: 7.0,
     completion_policy: "CONTINUE",
+    mode: "BY_DEADLINE",
     deadlines: [{ latest_end: "2026-04-12T07:00:00Z", max_total_cost_eur: null, max_marginal_rate_eur_kwh: null, min_completion: 0.8 }],
     max_total_cost_eur: null,
     tier_count: 1,
@@ -35,6 +36,7 @@ function makeEvRequest(overrides: Partial<UserRequestWithSession> = {}): UserReq
       target_soc: 0.8,
       departure_time: "2026-04-12T07:00:00Z",
       soft_deadline: false,
+      mode: "BY_DEADLINE",
       created_at: "2026-04-11T06:00:00Z",
       updated_at: "2026-04-11T06:00:00Z",
     },
@@ -50,6 +52,7 @@ function makeHeaterRequest(overrides: Partial<UserRequestWithSession> = {}): Use
     target_soc: null,
     desired_power_kw: 2,
     completion_policy: "STOP",
+    mode: "BY_DEADLINE",
     deadlines: [{ latest_end: "2026-04-12T09:00:00Z", max_total_cost_eur: null, max_marginal_rate_eur_kwh: null, min_completion: 1.0 }],
     max_total_cost_eur: null,
     tier_count: 1,
@@ -68,6 +71,7 @@ function makeHeaterRequest(overrides: Partial<UserRequestWithSession> = {}): Use
       id: "sess-ht-001",
       target_temp_c: 55,
       ready_by: "2026-04-12T09:00:00Z",
+      mode: "BY_DEADLINE",
       created_at: "2026-04-11T06:00:00Z",
       updated_at: "2026-04-11T06:00:00Z",
     },
@@ -83,6 +87,7 @@ function makeShiftableRequest(id: string, overrides: Partial<UserRequestWithSess
     target_soc: null,
     desired_power_kw: 0,
     completion_policy: "STOP",
+    mode: "BY_DEADLINE",
     deadlines: [],
     max_total_cost_eur: null,
     tier_count: 0,
@@ -104,6 +109,7 @@ function makeShiftableRequest(id: string, overrides: Partial<UserRequestWithSess
       duration_min: 60,
       earliest_start: "2026-04-11T10:00:00Z",
       latest_end: "2026-04-11T16:00:00Z",
+      mode: "BY_DEADLINE",
       created_at: "2026-04-11T06:00:00Z",
       updated_at: "2026-04-11T06:00:00Z",
     },
@@ -212,6 +218,40 @@ describe("DevicesPage", () => {
         deadlines: expect.any(Array),
       }),
     );
+  });
+
+  // 4b. Mode select is sent in the EV body (WP4.1-a)
+  it("sends selected mode in EV body on dialog confirm", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.selectOptions(within(screen.getByTestId("ev-dialog")).getByRole("combobox"), "ASAP");
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+    expect(mockPostRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ asset_id: "ev", mode: "ASAP" }),
+    );
+  });
+
+  // 4c. Omitting the mode selection defaults to BY_DEADLINE
+  it("defaults EV mode to BY_DEADLINE when untouched", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+    expect(mockPostRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "BY_DEADLINE" }),
+    );
+  });
+
+  // 4d. Non-default session mode is surfaced as a chip
+  it("shows mode chip when EV session mode is not BY_DEADLINE", () => {
+    const evReq = makeEvRequest();
+    if (evReq.session?.type === "ev") {
+      evReq.session.mode = "OPPORTUNISTIC";
+    }
+    mockRequestsData.mockReturnValue([evReq]);
+    renderPage();
+    expect(screen.getByTestId("ev-mode-chip")).toHaveTextContent("OPPORTUNISTIC");
   });
 
   // 5. Click Unplan calls deleteRequest

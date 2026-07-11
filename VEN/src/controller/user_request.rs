@@ -4,6 +4,7 @@
 /// and produces a UserRequest that links to an EvSession or HeaterTarget.
 use crate::entities::asset::ComfortRate;
 use crate::entities::asset_params::AssetRequestSlice;
+use crate::entities::design_vocabulary::UserRequestMode;
 use crate::entities::user_request::{RequestDeadline, UserRequest, UserRequestStatus};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -31,6 +32,8 @@ pub struct CreateUserRequestBody {
     // ── Per-device overrides (Plan D) ────────────────────────────────────────
     pub soft_deadline: Option<bool>,
     pub target_temp_c: Option<f64>,
+    // ── Request mode (BL-28) — omitted = BY_DEADLINE (legacy behaviour) ─────
+    pub mode: Option<UserRequestMode>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -151,6 +154,7 @@ pub fn create_from_body(
         target_energy_kwh,
         desired_power_kw,
         deadlines: request_deadlines,
+        mode: body.mode.unwrap_or_default(),
         completion_policy: completion_policy_str,
         max_total_cost_eur,
         tier_count,

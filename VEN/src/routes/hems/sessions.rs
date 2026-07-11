@@ -99,6 +99,7 @@ pub async fn post_requests(
         };
         let power = body.power_kw.unwrap();
         let duration = body.duration_min.unwrap();
+        let mode = body.mode.clone().unwrap_or_default();
         let load = ShiftableLoad {
             id: Uuid::new_v4(),
             asset_id: body.asset_id.clone(),
@@ -106,6 +107,7 @@ pub async fn post_requests(
             duration_min: duration,
             earliest_start: earliest,
             latest_end: latest,
+            mode: mode.clone(),
             created_at: now,
             updated_at: now,
         };
@@ -116,6 +118,7 @@ pub async fn post_requests(
             target_energy_kwh: (power * duration as f64) / 60.0,
             desired_power_kw: power,
             deadlines: vec![],
+            mode,
             completion_policy: "STOP".to_string(),
             max_total_cost_eur: None,
             tier_count: 0,

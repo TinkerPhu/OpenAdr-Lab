@@ -104,6 +104,7 @@ fn ev_mask_plugged_with_session_deadline() {
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
     let session = crate::entities::device_session::EvSession {
+        mode: Default::default(),
         id: uuid::Uuid::new_v4(),
         target_soc: 0.9,
         departure_time: now + Duration::hours(1),
@@ -137,6 +138,7 @@ fn ev_mask_unplugged_all_false() {
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, false);
     let session = crate::entities::device_session::EvSession {
+        mode: Default::default(),
         id: uuid::Uuid::new_v4(),
         target_soc: 0.9,
         departure_time: now + Duration::hours(1),
@@ -164,6 +166,7 @@ fn ev_mode_must_run_for_firm_deadline_session() {
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
     let session = crate::entities::device_session::EvSession {
+        mode: Default::default(),
         id: uuid::Uuid::new_v4(),
         target_soc: 0.9,
         departure_time: now + Duration::hours(2),
@@ -190,6 +193,7 @@ fn ev_mode_may_run_for_soft_deadline_session() {
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
     let session = crate::entities::device_session::EvSession {
+        mode: Default::default(),
         id: uuid::Uuid::new_v4(),
         target_soc: 0.9,
         departure_time: now + Duration::hours(2),

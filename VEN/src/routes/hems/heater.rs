@@ -13,6 +13,9 @@ use crate::AppCtx;
 pub struct CreateHeaterTargetBody {
     pub target_temp_c: f64,
     pub ready_by: chrono::DateTime<Utc>,
+    /// Request mode (BL-28); omitted = BY_DEADLINE (legacy behaviour).
+    #[serde(default)]
+    pub mode: crate::entities::design_vocabulary::UserRequestMode,
 }
 
 /// GET /heater-target — returns the active heater target (204 if none).
@@ -33,6 +36,7 @@ pub async fn post_heater_target(
         id: Uuid::new_v4(),
         target_temp_c: body.target_temp_c,
         ready_by: body.ready_by,
+        mode: body.mode,
         created_at: now,
         updated_at: now,
     };

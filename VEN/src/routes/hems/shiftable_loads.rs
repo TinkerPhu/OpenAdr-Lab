@@ -21,6 +21,9 @@ pub struct CreateShiftableLoadBody {
     pub duration_min: u32,
     pub earliest_start: chrono::DateTime<Utc>,
     pub latest_end: chrono::DateTime<Utc>,
+    /// Request mode (BL-28); omitted = BY_DEADLINE (legacy behaviour).
+    #[serde(default)]
+    pub mode: crate::entities::design_vocabulary::UserRequestMode,
 }
 
 /// GET /shiftable-loads — returns all active shiftable loads.
@@ -41,6 +44,7 @@ pub async fn post_shiftable_load(
         duration_min: body.duration_min,
         earliest_start: body.earliest_start,
         latest_end: body.latest_end,
+        mode: body.mode,
         created_at: now,
         updated_at: now,
     };
