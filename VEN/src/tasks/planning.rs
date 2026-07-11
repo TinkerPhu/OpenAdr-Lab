@@ -47,6 +47,7 @@ pub(crate) fn spawn_planning(
             let rates = state.planned_tariffs().await;
             let capacity = state.capacity_state().await;
             let alert_windows = state.alert_windows().await;
+            let simple_windows = state.simple_windows().await;
             let trigger = wake_trigger.clone();
             let trigger_reason = format!("{:?}", trigger);
 
@@ -140,6 +141,7 @@ pub(crate) fn spawn_planning(
                 tariff_ts,
                 capacity,
                 alert_windows,
+                simple_windows,
                 planner.clone(),
                 grid_max_import_kw,
                 grid_max_export_kw,

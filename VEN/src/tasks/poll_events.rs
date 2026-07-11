@@ -25,6 +25,8 @@ pub(crate) struct EventChanges {
     pub capacity: entities::capacity::OadrCapacityState,
     /// Parsed grid-alert windows for this tick (WP3.1, BL-04).
     pub alerts: Vec<entities::capacity::AlertWindow>,
+    /// Parsed SIMPLE load-shed windows for this tick (WP3.2).
+    pub simple: Vec<entities::capacity::SimpleWindow>,
 }
 
 /// Pure change-detection pass over a freshly fetched event list.
@@ -42,6 +44,7 @@ pub(crate) fn detect_event_changes(
     let rates = controller::openadr_interface::parse_rate_snapshots(events, now);
     let capacity = controller::openadr_interface::parse_capacity_state(events);
     let alerts = controller::openadr_interface::parse_alert_windows(events);
+    let simple = controller::openadr_interface::parse_simple_windows(events);
 
     let current_ids: std::collections::HashSet<String> =
         events.iter().map(|e| e.id.clone()).collect();
@@ -113,6 +116,7 @@ pub(crate) fn detect_event_changes(
         rates,
         capacity,
         alerts,
+        simple,
     }
 }
 
@@ -137,6 +141,7 @@ pub(crate) fn spawn_event_poll(
         let mut prev_tariff_count: usize = 0;
         let mut prev_import_limit: Option<f64> = None;
         let mut prev_alerts: Vec<entities::capacity::AlertWindow> = Vec::new();
+        let mut prev_simple: Vec<entities::capacity::SimpleWindow> = Vec::new();
         loop {
             match vtn.fetch_events().await {
                 Ok(events) => {
@@ -165,13 +170,23 @@ pub(crate) fn spawn_event_poll(
                     state.set_planned_tariffs(changes.rates).await;
                     state.set_capacity_state(changes.capacity).await;
 
-                    // WP3.1 (BL-04): alert-window changes trigger an immediate
-                    // replan with the Alert trigger, distinct from RateChange.
+                    // WP3.1 (BL-04): alert changes replan with the Alert trigger.
                     let alerts_changed = changes.alerts != prev_alerts;
                     if alerts_changed {
                         state.set_alert_windows(changes.alerts.clone()).await;
                         prev_alerts = changes.alerts;
                         let _ = trigger_tx.send(PlanTrigger::Alert);
+                    }
+
+                    // WP3.2: SIMPLE changes replan as CapacityChange (same
+                    // per-slot import cap); Alert wins the label if both changed.
+                    let simple_changed = changes.simple != prev_simple;
+                    if simple_changed {
+                        state.set_simple_windows(changes.simple.clone()).await;
+                        prev_simple = changes.simple;
+                        if !alerts_changed {
+                            let _ = trigger_tx.send(PlanTrigger::CapacityChange);
+                        }
                     }
 
                     let existing_obs = state.report_obligations().await;
@@ -189,10 +204,9 @@ pub(crate) fn spawn_event_poll(
                     // tariff count change, or capacity change). Firing on every poll caused
                     // continuous replanning at the poll interval (~30s) regardless of whether
                     // rates changed, which destabilised the plan.
-                    // trigger_tx is a watch channel (latest value wins), so don't
-                    // overwrite an Alert trigger just sent above with RateChange —
-                    // the alert event's own arrival also sets any_change.
-                    if any_change && !alerts_changed {
+                    // trigger_tx is a watch channel (latest wins) — don't overwrite
+                    // an Alert/CapacityChange trigger sent above with RateChange.
+                    if any_change && !alerts_changed && !simple_changed {
                         let _ = trigger_tx.send(PlanTrigger::RateChange);
                     }
                     backoff.on_success();

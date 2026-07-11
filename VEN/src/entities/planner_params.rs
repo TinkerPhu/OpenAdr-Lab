@@ -47,6 +47,10 @@ pub struct PlannerParams {
     /// 0.0 = disabled (default). Set to match `switching_penalty_eur` so that a noisier
     /// plan must compensate for its extra relay operations to be adopted.
     pub gate_switch_penalty_eur: f64,
+    /// WP3.2 — SIMPLE level 1 import cap as a fraction of the contractual
+    /// limit (0.0–1.0). Levels 2/3 have fixed semantics (baseline / zero cap);
+    /// see `entities::capacity::SimpleWindow`.
+    pub simple_level1_import_cap_pct: f64,
 }
 
 impl Default for PlannerParams {
@@ -82,6 +86,7 @@ impl Default for PlannerParams {
             solver_timeout_s: 60,
             planning_initial_delay_s: 5,
             gate_switch_penalty_eur: 0.0,
+            simple_level1_import_cap_pct: 0.5,
         }
     }
 }

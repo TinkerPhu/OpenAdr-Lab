@@ -46,6 +46,26 @@ pub struct AlertWindow {
     pub message: String,
 }
 
+/// WP3.2 — a SIMPLE load-shed window parsed from a SIMPLE event (levels
+/// 0–3, User Guide §8.2). Level semantics in this lab (decision recorded
+/// here; percentages profile-configurable where noted):
+///   0 = normal (window dropped at parse time),
+///   1 = mild — import cap clamped to `simple_level1_import_cap_pct` ×
+///       contractual limit (planner profile key, default 50%),
+///   2 = moderate — import cap clamped to the slot's baseline forecast, so
+///       all FLEXIBLE/OPPORTUNISTIC consumption above uncontrollable load is
+///       deferred (comfort-critical loads may still exceed via the soft
+///       violation slack, penalized + warned),
+///   3 = severe — import cap 0, same as the WP3.1 alert path.
+/// Overlaps: highest level wins per slot; alert windows override everything.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimpleWindow {
+    pub level: u8,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub event_id: String,
+}
+
 /// Configuration for an OpenADR program this VEN participates in (§5.1).
 /// Unwired sketch — never constructed anywhere. See docs/BACKLOG.md BL-24.
 #[derive(Debug, Clone, Serialize, Deserialize)]
