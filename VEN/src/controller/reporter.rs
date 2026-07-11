@@ -77,11 +77,36 @@ fn event_is_active(event: &OadrEvent, now: DateTime<Utc>) -> bool {
 // Measurement report (timer-driven, T046)
 // ---------------------------------------------------------------------------
 
+/// Site samples younger than this count as "device communicating normally".
+/// Two minutes covers several report/sim ticks in every profile.
+const OPERATING_STATE_STALENESS_S: i64 = 120;
+
+/// Derive the site-level OPERATING_STATE from sample freshness (WP3.6 —
+/// replaces the previously hardcoded "ACTIVE"): any sample within
+/// `OPERATING_STATE_STALENESS_S` of `now` → "ACTIVE"; samples exist but all
+/// stale → "UNRESPONSIVE"; no samples at all → "OFFLINE". Site-granularity
+/// mirror of the per-device `DeviceResponsiveness` vocabulary
+/// (`entities/asset.rs`).
+fn operating_state(
+    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
+    now: DateTime<Utc>,
+) -> &'static str {
+    let newest = asset_samples
+        .values()
+        .flat_map(|v| v.iter().map(|s| s.ts))
+        .max();
+    match newest {
+        Some(ts) if (now - ts).num_seconds() <= OPERATING_STATE_STALENESS_S => "ACTIVE",
+        Some(_) => "UNRESPONSIVE",
+        None => "OFFLINE",
+    }
+}
+
 /// Build a TELEMETRY_USAGE measurement report for a single active OpenADR event.
 ///
 /// The report includes:
 ///   - Net site import power (grid_net_import_kw, pre-computed by the caller).
-///   - OPERATING_STATE = "ACTIVE".
+///   - OPERATING_STATE derived from sample freshness (see `operating_state`).
 ///   - STORAGE_CHARGE_LEVEL (EV SoC %) if EV samples are available.
 ///
 /// Returns None if the event has no id or programID.
@@ -91,9 +116,11 @@ pub fn build_measurement_report(
     grid_net_import_kw: f64,
     grid_net_export_kw: f64,
     ven_name: &str,
+    now: DateTime<Utc>,
 ) -> Option<OadrReportBody> {
     let event_id = &event.id;
     let program_id = &event.programID;
+    let op_state = operating_state(asset_samples, now);
 
     let report_name = format!("auto-{}-{}", ven_name, event_id);
     let resource_name = format!("{}-meter", ven_name);
@@ -126,7 +153,7 @@ pub fn build_measurement_report(
         },
         OadrReportPayload {
             r#type: "OPERATING_STATE".to_string(),
-            values: vec![serde_json::Value::from("ACTIVE")],
+            values: vec![serde_json::Value::from(op_state)],
         },
     ];
 
@@ -200,6 +227,7 @@ pub fn build_measurement_reports_for_active_events(
                 grid_net_import_kw,
                 grid_net_export_kw,
                 ven_name,
+                now,
             ) {
                 reports.push(report);
             }
@@ -233,7 +261,9 @@ pub fn build_measurement_report_for_obligation(
     ven_name: &str,
     site_envelope: Option<&SiteFlexibilityEnvelope>,
     active_plan: Option<&Plan>,
+    now: DateTime<Utc>,
 ) -> Option<OadrReportBody> {
+    let op_state = operating_state(asset_samples, now);
     let program_id = obligation.program_id.as_deref()?;
     let event_id = &obligation.event_id;
 
@@ -249,7 +279,7 @@ pub fn build_measurement_report_for_obligation(
 
     let intervals: Vec<OadrReportInterval> = match payload_type.as_str() {
         "STORAGE_CHARGE_STATE" | "STORAGE_CHARGE_LEVEL" => {
-            build_soc_intervals(asset_samples, interval_width, &duration_iso)
+            build_soc_intervals(asset_samples, interval_width, &duration_iso, op_state)
         }
         // WP3.6 (§8.8): planned net site power per future plan slot, at the
         // plan's own native slot boundaries (not the obligation's interval
@@ -290,7 +320,7 @@ pub fn build_measurement_report_for_obligation(
                     },
                     OadrReportPayload {
                         r#type: "OPERATING_STATE".to_string(),
-                        values: vec![serde_json::Value::from("ACTIVE")],
+                        values: vec![serde_json::Value::from(op_state)],
                     },
                 ],
             }]
@@ -307,7 +337,7 @@ pub fn build_measurement_report_for_obligation(
                     },
                     OadrReportPayload {
                         r#type: "OPERATING_STATE".to_string(),
-                        values: vec![serde_json::Value::from("ACTIVE")],
+                        values: vec![serde_json::Value::from(op_state)],
                     },
                 ],
             }]
@@ -342,7 +372,7 @@ pub fn build_measurement_report_for_obligation(
                             },
                             OadrReportPayload {
                                 r#type: "OPERATING_STATE".to_string(),
-                                values: vec![serde_json::Value::from("ACTIVE")],
+                                values: vec![serde_json::Value::from(op_state)],
                             },
                         ],
                     }
@@ -421,6 +451,7 @@ fn build_soc_intervals(
     asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
     interval_width: Duration,
     duration_iso: &str,
+    op_state: &'static str,
 ) -> Vec<OadrReportInterval> {
     // Build SoC TimeSeries from the "ev" or "battery" sample vec.
     let make_soc_ts = |key: &str| -> Option<TimeSeries> {
@@ -482,7 +513,7 @@ fn build_soc_intervals(
                     },
                     OadrReportPayload {
                         r#type: "OPERATING_STATE".to_string(),
-                        values: vec![serde_json::Value::from("ACTIVE")],
+                        values: vec![serde_json::Value::from(op_state)],
                     },
                 ],
             }
@@ -610,8 +641,15 @@ mod tests {
         .collect();
 
         let ob = make_obligation("ev1", "prog1", "USAGE", 900);
-        let report =
-            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None, None).unwrap();
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &asset_samples,
+            "ven-1",
+            None,
+            None,
+            ts(1800),
+        )
+        .unwrap();
 
         let intervals = &report.resources[0].intervals;
         assert!(
@@ -647,14 +685,30 @@ mod tests {
             created_at: Utc::now(),
         };
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
-        assert!(build_measurement_report_for_obligation(&ob, &empty, "ven-1", None, None).is_none());
+        assert!(build_measurement_report_for_obligation(
+            &ob,
+            &empty,
+            "ven-1",
+            None,
+            None,
+            Utc::now()
+        )
+        .is_none());
     }
 
     #[test]
     fn obligation_report_empty_history_returns_none() {
         let ob = make_obligation("e1", "p1", "USAGE", 900);
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
-        assert!(build_measurement_report_for_obligation(&ob, &empty, "ven-1", None, None).is_none());
+        assert!(build_measurement_report_for_obligation(
+            &ob,
+            &empty,
+            "ven-1",
+            None,
+            None,
+            Utc::now()
+        )
+        .is_none());
     }
 
     // ── import/export split ────────────────────────────────────────
@@ -665,8 +719,15 @@ mod tests {
             .into_iter()
             .collect();
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_LIMIT", 900);
-        let report =
-            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None, None).unwrap();
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &asset_samples,
+            "ven-1",
+            None,
+            None,
+            ts(1800),
+        )
+        .unwrap();
         let intervals = &report.resources[0].intervals;
         for iv in intervals {
             let usage = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
@@ -684,8 +745,15 @@ mod tests {
             .into_iter()
             .collect();
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_LIMIT", 900);
-        let report =
-            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None, None).unwrap();
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &asset_samples,
+            "ven-1",
+            None,
+            None,
+            ts(1800),
+        )
+        .unwrap();
         let intervals = &report.resources[0].intervals;
         for iv in intervals {
             let usage = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
@@ -713,8 +781,15 @@ mod tests {
         .into_iter()
         .collect();
         let ob = make_obligation("e1", "p1", "STORAGE_CHARGE_LEVEL", 900);
-        let report =
-            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None, None).unwrap();
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &asset_samples,
+            "ven-1",
+            None,
+            None,
+            ts(1800),
+        )
+        .unwrap();
         let intervals = &report.resources[0].intervals;
         assert!(!intervals.is_empty());
         for iv in intervals {
@@ -767,8 +842,15 @@ mod tests {
             down_duration_s: None,
         };
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
-        let report = build_measurement_report_for_obligation(&ob, &empty, "ven-test", Some(&env), None)
-            .expect("should return Some");
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &empty,
+            "ven-test",
+            Some(&env),
+            None,
+            Utc::now(),
+        )
+        .expect("should return Some");
         let iv = &report.resources[0].intervals[0];
         let val = iv.payloads[0].values[0].as_f64().unwrap();
         assert!((val - 5000.0).abs() < 1.0, "expected 5000 W, got {val}");
@@ -786,8 +868,15 @@ mod tests {
             down_duration_s: None,
         };
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_RESERVATION", 900);
-        let report = build_measurement_report_for_obligation(&ob, &empty, "ven-test", Some(&env), None)
-            .expect("should return Some");
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &empty,
+            "ven-test",
+            Some(&env),
+            None,
+            Utc::now(),
+        )
+        .expect("should return Some");
         let iv = &report.resources[0].intervals[0];
         let val = iv.payloads[0].values[0].as_f64().unwrap();
         assert!((val - 3000.0).abs() < 1.0, "expected 3000 W, got {val}");
@@ -798,8 +887,15 @@ mod tests {
     fn test_reporter_capacity_reservation_no_envelope_returns_zero() {
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
-        let report = build_measurement_report_for_obligation(&ob, &empty, "ven-test", None, None)
-            .expect("should return Some even with no envelope");
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &empty,
+            "ven-test",
+            None,
+            None,
+            Utc::now(),
+        )
+        .expect("should return Some even with no envelope");
         let val = report.resources[0].intervals[0].payloads[0].values[0]
             .as_f64()
             .unwrap();
@@ -829,7 +925,9 @@ mod tests {
         };
         let asset_samples: HashMap<_, _> =
             [make_samples("site", &[(0, 3.0)])].into_iter().collect();
-        let report = build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1").unwrap();
+        let report =
+            build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1", Utc::now())
+                .unwrap();
         assert_eq!(report.programID, "prog-001");
         assert_eq!(report.eventID.as_deref(), Some("evt-001"));
         assert_eq!(report.clientName, "ven-1");
@@ -866,7 +964,9 @@ mod tests {
         let asset_samples: HashMap<_, _> = [make_ev_samples("ev", &[(0, 7.0, 0.5)])]
             .into_iter()
             .collect();
-        let report = build_measurement_report(&event, &asset_samples, 0.0, 0.0, "ven-1").unwrap();
+        let report =
+            build_measurement_report(&event, &asset_samples, 0.0, 0.0, "ven-1", Utc::now())
+                .unwrap();
         let iv = &report.resources[0].intervals[0];
         let soc_payload = iv
             .payloads
@@ -950,7 +1050,8 @@ mod tests {
         let asset_samples: HashMap<_, _> = [make_samples("site", &[(0, 1.0), (60, 3.0)])]
             .into_iter()
             .collect();
-        let report = build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1");
+        let report =
+            build_measurement_report(&event, &asset_samples, 3.0, 0.0, "ven-1", Utc::now());
         assert!(report.is_some(), "expected Some(report)");
         let report = report.unwrap();
         assert_eq!(report.programID, "prog-001");
@@ -1005,7 +1106,10 @@ mod tests {
                 step_size_s: 300,
                 num_steps: 2,
                 far_horizon: now + Duration::seconds(600),
-                zones: vec![PlanZone { step_s: 300, slots: 2 }],
+                zones: vec![PlanZone {
+                    step_s: 300,
+                    slots: 2,
+                }],
             },
             slots: vec![slot(0, 2.0, 0.0), slot(1, 0.0, 1.5)],
             summary: PlanSummary::default(),
@@ -1029,6 +1133,7 @@ mod tests {
             "ven-1",
             None,
             Some(&plan),
+            Utc::now(),
         )
         .expect("plan present -> report built");
 
@@ -1037,10 +1142,18 @@ mod tests {
         let v0 = intervals[0].payloads[0].values[0].as_f64().unwrap();
         let v1 = intervals[1].payloads[0].values[0].as_f64().unwrap();
         assert!((v0 - 2000.0).abs() < 1.0, "slot 0 net 2 kW import = 2000 W");
-        assert!((v1 - (-1500.0)).abs() < 1.0, "slot 1 net 1.5 kW export = -1500 W");
+        assert!(
+            (v1 - (-1500.0)).abs() < 1.0,
+            "slot 1 net 1.5 kW export = -1500 W"
+        );
         assert_eq!(intervals[0].payloads[0].r#type, "USAGE_FORECAST");
         assert!(
-            intervals[0].intervalPeriod.as_ref().unwrap().start.is_some(),
+            intervals[0]
+                .intervalPeriod
+                .as_ref()
+                .unwrap()
+                .start
+                .is_some(),
             "forecast intervals carry the plan slot's own start time"
         );
     }
@@ -1054,7 +1167,46 @@ mod tests {
             "ven-1",
             None,
             None,
+            Utc::now(),
         );
         assert!(report.is_none(), "no adopted plan -> no forecast report");
+    }
+
+    // ── operating_state (WP3.6) ─────────────────────────────────────
+
+    #[test]
+    fn test_operating_state_fresh_samples_active() {
+        let now = ts(1800);
+        let mut samples = std::collections::HashMap::new();
+        samples.insert(
+            "ev".to_string(),
+            vec![AssetReportSample {
+                ts: ts(1750),
+                power_kw: 1.0,
+                soc: None,
+            }],
+        );
+        assert_eq!(operating_state(&samples, now), "ACTIVE");
+    }
+
+    #[test]
+    fn test_operating_state_stale_samples_unresponsive() {
+        let now = ts(1800);
+        let mut samples = std::collections::HashMap::new();
+        samples.insert(
+            "ev".to_string(),
+            vec![AssetReportSample {
+                ts: ts(0),
+                power_kw: 1.0,
+                soc: None,
+            }],
+        );
+        assert_eq!(operating_state(&samples, now), "UNRESPONSIVE");
+    }
+
+    #[test]
+    fn test_operating_state_no_samples_offline() {
+        let samples = std::collections::HashMap::new();
+        assert_eq!(operating_state(&samples, ts(0)), "OFFLINE");
     }
 }
