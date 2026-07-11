@@ -73,6 +73,8 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/obligations", get(hems::get_obligations))
         // HEMS Stage 4 routes
         .route("/ledger", get(hems::get_ledger))
+        // WP3.6 (BL-15): per-asset forecasts from the latest plan cycle
+        .route("/forecast", get(hems::get_forecast))
         // HEMS Stage 5 routes
         .route(
             "/user-requests",

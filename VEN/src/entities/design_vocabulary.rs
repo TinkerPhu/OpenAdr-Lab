@@ -82,6 +82,7 @@ pub enum ForecastSource {
     PhysicalModel, // computed from physics (e.g. thermal model for heater)
     Heuristic,     // learned from historical usage patterns
     Manual,        // user-provided schedule
+    Optimization,  // derived from the MILP plan's per-slot solution (WP3.6, BL-15)
     None,          // no forecast available (fully controllable assets like battery)
 }
 

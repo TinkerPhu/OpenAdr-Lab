@@ -24,6 +24,12 @@ pub async fn get_plan(State(ctx): State<AppCtx>) -> impl IntoResponse {
     }
 }
 
+/// GET /forecast — per-asset forecasts from the latest plan cycle
+/// (WP3.6, BL-15). Empty array until the first plan has been adopted.
+pub async fn get_forecast(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.asset_forecasts().await)
+}
+
 /// PUT /plan/objective — change the active optimization objective and trigger an immediate replan.
 #[derive(Debug, Deserialize)]
 pub struct SetObjectiveBody {

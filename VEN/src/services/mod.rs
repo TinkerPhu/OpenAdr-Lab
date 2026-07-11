@@ -7,6 +7,8 @@ pub use planning::PlanningService;
 
 pub mod user_request;
 
+pub mod forecast;
+
 pub mod obligation;
 pub use obligation::ObligationService;
 
