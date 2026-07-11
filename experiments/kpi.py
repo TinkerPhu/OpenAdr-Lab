@@ -62,12 +62,21 @@ def ven_kpis(db_path, t_from, t_to):
     }
 
 
-def report_lag_stats(csv_path):
+def report_lag_stats(csv_path, t_from, t_to):
+    """Only reports the recorder received during the run window count —
+    the archive holds every report ever seen, including ancient ones."""
     if not csv_path.exists():
         return None
     lags = []
     with open(csv_path, encoding="utf-8") as f:
         for row in csv.DictReader(f):
+            received = row.get("received_at", "")
+            try:
+                ts = datetime.fromisoformat(received.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                continue
+            if not (t_from <= ts < t_to + 60):
+                continue
             v = row.get("report_lag_s")
             if v not in (None, "", r"\N"):
                 try:
@@ -119,7 +128,9 @@ def main():
             k["energy_shifted_kwh"] = round(baseline[ven] - k["energy_import_kwh"], 4)
         out["vens"][ven] = k
 
-    out["report_timeliness"] = report_lag_stats(run_dir / "recorder-reports_received.csv")
+    out["report_timeliness"] = report_lag_stats(
+        run_dir / "recorder-reports_received.csv", t_from, t_to
+    )
 
     (run_dir / "kpis.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
     print(json.dumps(out, indent=2))
