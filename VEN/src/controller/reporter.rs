@@ -13,7 +13,7 @@ use crate::controller::vtn_port::{
     OadrReportResource,
 };
 use crate::entities::capacity::OadrReportObligation;
-use crate::entities::plan::SiteFlexibilityEnvelope;
+use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 
 // ---------------------------------------------------------------------------
 // Domain-side sample type — extracted at the infra boundary by callers.
@@ -223,6 +223,8 @@ pub fn build_measurement_reports_for_active_events(
 ///   - USAGE / PRICE / IMPORT_CAPACITY_LIMIT → net site import power (time-weighted mean)
 ///   - EXPORT_CAPACITY_LIMIT → net site export power (time-weighted mean, absolute)
 ///   - STORAGE_CHARGE_STATE / STORAGE_CHARGE_LEVEL → EV SoC point-in-time at interval end
+///   - USAGE_FORECAST (WP3.6, §8.8) → planned net site power per future plan
+///     slot, straight from the active plan (None if no plan adopted yet)
 ///
 /// Returns None if the obligation has no event_id or program_id.
 pub fn build_measurement_report_for_obligation(
@@ -230,6 +232,7 @@ pub fn build_measurement_report_for_obligation(
     asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
     ven_name: &str,
     site_envelope: Option<&SiteFlexibilityEnvelope>,
+    active_plan: Option<&Plan>,
 ) -> Option<OadrReportBody> {
     let program_id = obligation.program_id.as_deref()?;
     let event_id = &obligation.event_id;
@@ -248,6 +251,33 @@ pub fn build_measurement_report_for_obligation(
         "STORAGE_CHARGE_STATE" | "STORAGE_CHARGE_LEVEL" => {
             build_soc_intervals(asset_samples, interval_width, &duration_iso)
         }
+        // WP3.6 (§8.8): planned net site power per future plan slot, at the
+        // plan's own native slot boundaries (not the obligation's interval
+        // width — a forecast has no meaning resampled onto history buckets).
+        // No adopted plan yet → empty → caller re-arms and retries next cycle.
+        "USAGE_FORECAST" => active_plan
+            .map(|plan| {
+                plan.slots
+                    .iter()
+                    .enumerate()
+                    .map(|(i, slot)| {
+                        let net_w = (slot.net_import_kw - slot.net_export_kw) * 1000.0;
+                        let slot_s = (slot.end - slot.start).num_seconds().max(0) as u64;
+                        OadrReportInterval {
+                            id: i,
+                            intervalPeriod: Some(OadrIntervalPeriod {
+                                start: Some(slot.start.to_rfc3339()),
+                                duration: Some(format_iso8601_duration(slot_s)),
+                            }),
+                            payloads: vec![OadrReportPayload {
+                                r#type: "USAGE_FORECAST".to_string(),
+                                values: vec![serde_json::Value::from(net_w)],
+                            }],
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         "IMPORT_CAPACITY_RESERVATION" => {
             let up_w = site_envelope.map(|e| e.up_kw * 1000.0).unwrap_or(0.0);
             vec![OadrReportInterval {
@@ -581,7 +611,7 @@ mod tests {
 
         let ob = make_obligation("ev1", "prog1", "USAGE", 900);
         let report =
-            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None).unwrap();
+            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None, None).unwrap();
 
         let intervals = &report.resources[0].intervals;
         assert!(
@@ -617,14 +647,14 @@ mod tests {
             created_at: Utc::now(),
         };
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
-        assert!(build_measurement_report_for_obligation(&ob, &empty, "ven-1", None).is_none());
+        assert!(build_measurement_report_for_obligation(&ob, &empty, "ven-1", None, None).is_none());
     }
 
     #[test]
     fn obligation_report_empty_history_returns_none() {
         let ob = make_obligation("e1", "p1", "USAGE", 900);
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
-        assert!(build_measurement_report_for_obligation(&ob, &empty, "ven-1", None).is_none());
+        assert!(build_measurement_report_for_obligation(&ob, &empty, "ven-1", None, None).is_none());
     }
 
     // ── import/export split ────────────────────────────────────────
@@ -636,7 +666,7 @@ mod tests {
             .collect();
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_LIMIT", 900);
         let report =
-            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None).unwrap();
+            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None, None).unwrap();
         let intervals = &report.resources[0].intervals;
         for iv in intervals {
             let usage = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
@@ -655,7 +685,7 @@ mod tests {
             .collect();
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_LIMIT", 900);
         let report =
-            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None).unwrap();
+            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None, None).unwrap();
         let intervals = &report.resources[0].intervals;
         for iv in intervals {
             let usage = iv.payloads.iter().find(|p| p.r#type == "USAGE").unwrap();
@@ -684,7 +714,7 @@ mod tests {
         .collect();
         let ob = make_obligation("e1", "p1", "STORAGE_CHARGE_LEVEL", 900);
         let report =
-            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None).unwrap();
+            build_measurement_report_for_obligation(&ob, &asset_samples, "ven-1", None, None).unwrap();
         let intervals = &report.resources[0].intervals;
         assert!(!intervals.is_empty());
         for iv in intervals {
@@ -737,7 +767,7 @@ mod tests {
             down_duration_s: None,
         };
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
-        let report = build_measurement_report_for_obligation(&ob, &empty, "ven-test", Some(&env))
+        let report = build_measurement_report_for_obligation(&ob, &empty, "ven-test", Some(&env), None)
             .expect("should return Some");
         let iv = &report.resources[0].intervals[0];
         let val = iv.payloads[0].values[0].as_f64().unwrap();
@@ -756,7 +786,7 @@ mod tests {
             down_duration_s: None,
         };
         let ob = make_obligation("e1", "p1", "EXPORT_CAPACITY_RESERVATION", 900);
-        let report = build_measurement_report_for_obligation(&ob, &empty, "ven-test", Some(&env))
+        let report = build_measurement_report_for_obligation(&ob, &empty, "ven-test", Some(&env), None)
             .expect("should return Some");
         let iv = &report.resources[0].intervals[0];
         let val = iv.payloads[0].values[0].as_f64().unwrap();
@@ -768,7 +798,7 @@ mod tests {
     fn test_reporter_capacity_reservation_no_envelope_returns_zero() {
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
         let ob = make_obligation("e1", "p1", "IMPORT_CAPACITY_RESERVATION", 900);
-        let report = build_measurement_report_for_obligation(&ob, &empty, "ven-test", None)
+        let report = build_measurement_report_for_obligation(&ob, &empty, "ven-test", None, None)
             .expect("should return Some even with no envelope");
         let val = report.resources[0].intervals[0].payloads[0].values[0]
             .as_f64()
@@ -932,5 +962,99 @@ mod tests {
             .unwrap();
         let val = usage.values[0].as_f64().unwrap();
         assert!((val - 3000.0).abs() < 1.0, "expected 3000 W, got {val}");
+    }
+
+    // ── USAGE_FORECAST (WP3.6, §8.8) ────────────────────────────────
+
+    fn make_minimal_plan_two_slots() -> Plan {
+        use crate::entities::plan::{
+            CostBreakdown, PlanSummary, PlanTimeSlot, PlanZone, PlanningHorizon,
+        };
+        let now = Utc::now();
+        let slot = |i: usize, net_import_kw: f64, net_export_kw: f64| PlanTimeSlot {
+            slot_index: i,
+            start: now + Duration::seconds(i as i64 * 300),
+            end: now + Duration::seconds((i as i64 + 1) * 300),
+            import_tariff_eur_kwh: 0.2,
+            export_tariff_eur_kwh: 0.05,
+            co2_g_kwh: 300.0,
+            grid_effective_cost: 0.26,
+            rate_estimated: false,
+            import_cap_kw: 10.0,
+            export_cap_kw: 5.0,
+            baseline_kw: 0.5,
+            pv_forecast_kw: 0.0,
+            surplus_available_kw: 0.0,
+            allocations: vec![],
+            net_import_kw,
+            net_export_kw,
+            import_flexibility_kw: 0.0,
+            export_flexibility_kw: 0.0,
+            bat_charge_kw: 0.0,
+            bat_discharge_kw: 0.0,
+            planned_kw_by_asset: std::collections::HashMap::new(),
+            planned_state_by_asset: std::collections::HashMap::new(),
+        };
+        Plan {
+            id: Uuid::new_v4(),
+            created_at: now,
+            trigger: crate::entities::asset::PlanTrigger::Periodic,
+            horizon: PlanningHorizon {
+                start_time: now,
+                end_time: now + Duration::seconds(600),
+                step_size_s: 300,
+                num_steps: 2,
+                far_horizon: now + Duration::seconds(600),
+                zones: vec![PlanZone { step_s: 300, slots: 2 }],
+            },
+            slots: vec![slot(0, 2.0, 0.0), slot(1, 0.0, 1.5)],
+            summary: PlanSummary::default(),
+            envelopes: vec![],
+            warnings: vec![],
+            soc_trajectory_kwh: vec![],
+            objective: crate::entities::PlannerObjective::MinCost,
+            objective_eur: 0.0,
+            friction_eur: 0.0,
+            cost_breakdown: CostBreakdown::default(),
+        }
+    }
+
+    #[test]
+    fn test_usage_forecast_obligation_reports_plan_slots() {
+        let ob = make_obligation("evt-f", "prog-f", "USAGE_FORECAST", 900);
+        let plan = make_minimal_plan_two_slots();
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &std::collections::HashMap::new(),
+            "ven-1",
+            None,
+            Some(&plan),
+        )
+        .expect("plan present -> report built");
+
+        let intervals = &report.resources[0].intervals;
+        assert_eq!(intervals.len(), 2, "one interval per plan slot");
+        let v0 = intervals[0].payloads[0].values[0].as_f64().unwrap();
+        let v1 = intervals[1].payloads[0].values[0].as_f64().unwrap();
+        assert!((v0 - 2000.0).abs() < 1.0, "slot 0 net 2 kW import = 2000 W");
+        assert!((v1 - (-1500.0)).abs() < 1.0, "slot 1 net 1.5 kW export = -1500 W");
+        assert_eq!(intervals[0].payloads[0].r#type, "USAGE_FORECAST");
+        assert!(
+            intervals[0].intervalPeriod.as_ref().unwrap().start.is_some(),
+            "forecast intervals carry the plan slot's own start time"
+        );
+    }
+
+    #[test]
+    fn test_usage_forecast_obligation_without_plan_returns_none() {
+        let ob = make_obligation("evt-f", "prog-f", "USAGE_FORECAST", 900);
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &std::collections::HashMap::new(),
+            "ven-1",
+            None,
+            None,
+        );
+        assert!(report.is_none(), "no adopted plan -> no forecast report");
     }
 }
