@@ -75,6 +75,37 @@ def step_delete_simple_event(context):
     r.raise_for_status()
 
 
+@given('I create a capacity event of type "{ptype}" with {kw:f} kW for the saved program lasting {minutes:d} minutes')
+def step_create_capacity_event(context, ptype, kw, minutes):
+    # WP3.3: capacity subscription/reservation events with a starting-now
+    # window (same event-level shape as the alert/SIMPLE steps above).
+    start = datetime.now(timezone.utc)
+    r = vtn_post(
+        "/events",
+        context.vtn_token,
+        json={
+            "programID": context.saved_program_id,
+            "eventName": f"capacity-{ptype.lower().replace('_', '-')}",
+            "intervalPeriod": {
+                "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "duration": f"PT{minutes}M",
+            },
+            "intervals": [{
+                "id": 0,
+                "payloads": [{"type": ptype, "values": [kw]}],
+            }],
+        },
+    )
+    r.raise_for_status()
+    context.capacity_event_id = r.json().get("id")
+
+
+@when("I delete the saved capacity event")
+def step_delete_capacity_event(context):
+    r = vtn_delete(f"/events/{context.capacity_event_id}", context.vtn_token)
+    r.raise_for_status()
+
+
 def _fetch_plan():
     resp = ven_get("/plan")
     if not resp.ok:
