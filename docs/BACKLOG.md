@@ -45,12 +45,11 @@ Items ordered by recommended implementation sequence: dependencies first, then b
 
 ---
 
-### BL-05: Obligation-triggered report submission
+### BL-05: Obligation-triggered report submission — RESOLVED (found already done during Phase 3, WP3.5)
 **Req:** FR-OA-04
 **Problem:** `main.rs:506-512` checks `due_obligations(now)` and marks them `fulfilled`, but does **not** build or submit reports. Reports are only sent on timer (`report_interval_s`) and packet transitions — not when obligations actually become due.
 **Fix:** In the obligation check loop, when `due_obligations` returns non-empty: call `build_measurement_reports_for_active_events()` for each due obligation, submit via `upsert_report()`, then mark fulfilled.
-**Complexity:** Small–Medium (2–3 hours). Wire existing report builder to obligation trigger.
-**Verify:** BDD test: create event with `reportDescriptor` that has short interval, assert report submitted at `due_at` time (not just at timer tick).
+**Resolution:** Discovered already implemented when Phase 3's WP3.5 came up — this landed as part of the 2026-07-06 R6 review-item resolution (obligation recurrence), after the roadmap doc was written. `ObligationService::check_and_report` (`services/obligation.rs`, driven by the 5s `tasks/obligation.rs` tick) builds a per-obligation measurement report via `build_measurement_report_for_obligation` and submits via `upsert_report`, re-arming `due_at` on success and leaving it unchanged on VTN error (natural retry next tick). Unit-tested (rearm-not-remove, error-leaves-due_at, no-history skip) and BDD-covered by `reporter_resampling.feature`'s obligation-driven scenario (5-second `reportDescriptor` frequency — precisely this entry's verify clause). No new work was needed in Phase 3.
 
 ---
 
