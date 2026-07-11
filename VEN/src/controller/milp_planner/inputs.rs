@@ -4,7 +4,7 @@ use super::asset_port::AssetMilpParams;
 use crate::controller::milp_planner::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset_params::{BaseLoadParams, PvParams};
-use crate::entities::capacity::OadrCapacityState;
+use crate::entities::capacity::{AlertWindow, OadrCapacityState};
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::tariff_snapshot::TariffTimeSeries;
@@ -34,6 +34,7 @@ pub(crate) fn build_milp_inputs(
     assets: &SimSnapshot,
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
+    alert_windows: &[AlertWindow],
     planner: &PlannerParams,
     phys_imp: f64,
     phys_exp: f64,
@@ -72,8 +73,9 @@ pub(crate) fn build_milp_inputs(
     let mut p_imp_cont = Vec::with_capacity(n);
     let mut p_exp_cont = Vec::with_capacity(n);
 
-    for &slot_s in &cum_s[0..n] {
+    for (i, &slot_s) in cum_s[0..n].iter().enumerate() {
         let slot_t = now + Duration::seconds(slot_s);
+        let slot_end = now + Duration::seconds(cum_s[i + 1]);
         c_imp.push(
             tariffs
                 .import_eur_kwh
@@ -112,7 +114,15 @@ pub(crate) fn build_milp_inputs(
         p_base.push(base_kw);
         p_imp_phys.push(phys_imp);
         p_exp_phys.push(phys_exp);
-        p_imp_cont.push(cont_imp);
+        // WP3.1 (BL-04): slots overlapping an active grid-alert window get an
+        // import cap of 0 ("minimize electricity use", both alert types). The
+        // cap is soft in the solver (slack + violation penalty), so unavoidable
+        // base load yields a warned violation, never infeasibility. Export is
+        // left untouched — the spec prescribes nothing for it.
+        let in_alert = alert_windows
+            .iter()
+            .any(|a| a.start < slot_end && slot_t < a.end);
+        p_imp_cont.push(if in_alert { 0.0 } else { cont_imp });
         p_exp_cont.push(cont_exp);
     }
 
