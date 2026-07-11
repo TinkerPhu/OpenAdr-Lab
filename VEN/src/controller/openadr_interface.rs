@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::common::parse_iso8601_duration_secs;
 use crate::controller::vtn_port::OadrEvent;
-use crate::entities::capacity::{OadrCapacityState, OadrReportObligation};
+use crate::entities::capacity::{AlertWindow, OadrCapacityState, OadrReportObligation};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 
 // ---------------------------------------------------------------------------
@@ -251,6 +251,59 @@ pub fn parse_capacity_state(events: &[OadrEvent]) -> OadrCapacityState {
 }
 
 // ---------------------------------------------------------------------------
+// Grid alert parsing (WP3.1, BL-04)
+// ---------------------------------------------------------------------------
+
+/// Extract grid-alert windows (ALERT_GRID_EMERGENCY / ALERT_BLACK_START) from
+/// active events. The window comes from the interval's own `intervalPeriod`,
+/// falling back to the event-level one (User Guide Example 8.1-1 puts it at
+/// event level with a bare interval). Intervals without any resolvable start
+/// are skipped. The payload value is the spec's human-readable message.
+pub fn parse_alert_windows(events: &[OadrEvent]) -> Vec<AlertWindow> {
+    let mut out = Vec::new();
+    for event in events {
+        for interval in &event.intervals {
+            for payload in &interval.payloads {
+                let alert_type = payload.r#type.as_str();
+                if !matches!(alert_type, "ALERT_GRID_EMERGENCY" | "ALERT_BLACK_START") {
+                    continue;
+                }
+                let Some(ip) = interval
+                    .intervalPeriod
+                    .as_ref()
+                    .or(event.intervalPeriod.as_ref())
+                else {
+                    continue;
+                };
+                let Some(start) = ip
+                    .start
+                    .as_deref()
+                    .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+                else {
+                    continue;
+                };
+                let duration_s =
+                    parse_iso8601_duration_secs(ip.duration.as_deref().unwrap_or("PT1H"));
+                let message = payload
+                    .values
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                out.push(AlertWindow {
+                    alert_type: alert_type.to_string(),
+                    start,
+                    end: start + Duration::seconds(duration_s),
+                    event_id: event.id.clone(),
+                    message,
+                });
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Report obligation extraction
 // ---------------------------------------------------------------------------
 
@@ -329,6 +382,88 @@ mod tests {
     use super::*;
     use crate::controller::vtn_port::OadrEvent;
     use serde_json::json;
+
+    // ── parse_alert_windows (WP3.1, BL-04) ──────────────────────────────────
+
+    #[test]
+    fn test_parse_alert_windows_event_level_period_fallback() {
+        // Shape of User Guide Example 8.1-1: intervalPeriod at event level,
+        // interval itself has only the payload.
+        let events = json!([{
+            "id": "alert-1",
+            "programID": "prog-1",
+            "eventName": "alertEvent",
+            "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT4H" },
+            "intervals": [{
+                "id": 0,
+                "payloads": [{
+                    "type": "ALERT_GRID_EMERGENCY",
+                    "values": ["The grid is currently under emergency conditions"]
+                }]
+            }]
+        }]);
+        let alerts =
+            parse_alert_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].alert_type, "ALERT_GRID_EMERGENCY");
+        assert_eq!(alerts[0].event_id, "alert-1");
+        assert_eq!(alerts[0].start.to_rfc3339(), "2026-03-14T00:00:00+00:00");
+        assert_eq!((alerts[0].end - alerts[0].start).num_hours(), 4);
+        assert!(alerts[0].message.contains("emergency"));
+    }
+
+    #[test]
+    fn test_parse_alert_windows_interval_level_period_wins() {
+        let events = json!([{
+            "id": "alert-2",
+            "programID": "prog-1",
+            "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT4H" },
+            "intervals": [{
+                "id": 0,
+                "intervalPeriod": { "start": "2026-03-14T02:00:00Z", "duration": "PT30M" },
+                "payloads": [{ "type": "ALERT_BLACK_START", "values": ["restoring"] }]
+            }]
+        }]);
+        let alerts =
+            parse_alert_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].alert_type, "ALERT_BLACK_START");
+        assert_eq!(alerts[0].start.to_rfc3339(), "2026-03-14T02:00:00+00:00");
+        assert_eq!((alerts[0].end - alerts[0].start).num_minutes(), 30);
+    }
+
+    #[test]
+    fn test_parse_alert_windows_ignores_non_alert_events() {
+        let events = json!([{
+            "id": "evt-1",
+            "programID": "prog-1",
+            "intervals": [{
+                "id": 0,
+                "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT1H" },
+                "payloads": [{ "type": "PRICE", "values": [0.25] }]
+            }]
+        }]);
+        let alerts =
+            parse_alert_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        assert!(alerts.is_empty());
+    }
+
+    #[test]
+    fn test_parse_alert_windows_skips_unresolvable_start() {
+        // No intervalPeriod anywhere — window can't be resolved, alert skipped
+        // rather than guessed.
+        let events = json!([{
+            "id": "alert-3",
+            "programID": "prog-1",
+            "intervals": [{
+                "id": 0,
+                "payloads": [{ "type": "ALERT_GRID_EMERGENCY", "values": ["no window"] }]
+            }]
+        }]);
+        let alerts =
+            parse_alert_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        assert!(alerts.is_empty());
+    }
 
     #[test]
     fn test_parse_rate_snapshots_price() {

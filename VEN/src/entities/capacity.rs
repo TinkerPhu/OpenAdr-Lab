@@ -28,6 +28,24 @@ pub struct OadrCapacityState {
     pub last_updated: Option<DateTime<Utc>>,
 }
 
+/// WP3.1 (BL-04) — an active grid-alert window parsed from an
+/// ALERT_GRID_EMERGENCY / ALERT_BLACK_START event. Both alert types carry a
+/// human-readable string payload (Definition doc, event payload type table)
+/// and take their window from the interval's own `intervalPeriod`, falling
+/// back to the event-level one (User Guide Example 8.1-1 uses the latter).
+/// Both mean "minimize electricity use": the planner clamps the contractual
+/// import cap to 0 over the window (soft constraint — unavoidable base load
+/// becomes a penalized violation with a PlanWarning, never infeasibility);
+/// export is left untouched since the spec prescribes nothing for it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AlertWindow {
+    pub alert_type: String,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub event_id: String,
+    pub message: String,
+}
+
 /// Configuration for an OpenADR program this VEN participates in (§5.1).
 /// Unwired sketch — never constructed anywhere. See docs/BACKLOG.md BL-24.
 #[derive(Debug, Clone, Serialize, Deserialize)]

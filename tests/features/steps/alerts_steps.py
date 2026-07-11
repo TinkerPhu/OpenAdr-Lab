@@ -1,0 +1,110 @@
+"""Step definitions for grid alert events (WP3.1, BL-04)."""
+
+from datetime import datetime, timedelta, timezone
+
+from behave import given, then, when
+from features.helpers.api_client import ven_get, vtn_post, vtn_delete
+from features.helpers.wait import poll_until
+
+
+@given('I create an alert event "{name}" of type "{alert_type}" for the saved program lasting {minutes:d} minutes')
+def step_create_alert_event(context, name, alert_type, minutes):
+    # Event-level intervalPeriod with a bare interval — the shape of User
+    # Guide Example 8.1-1. The payload value is the spec's human-readable
+    # string, not a number.
+    start = datetime.now(timezone.utc)
+    r = vtn_post(
+        "/events",
+        context.vtn_token,
+        json={
+            "programID": context.saved_program_id,
+            "eventName": name,
+            "intervalPeriod": {
+                "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "duration": f"PT{minutes}M",
+            },
+            "intervals": [{
+                "id": 0,
+                "payloads": [{
+                    "type": alert_type,
+                    "values": [f"test alert: {name}"],
+                }],
+            }],
+        },
+    )
+    r.raise_for_status()
+    context.alert_event_id = r.json().get("id")
+    context.alert_start = start
+    context.alert_minutes = minutes
+
+
+@when("I delete the saved alert event")
+def step_delete_alert_event(context):
+    r = vtn_delete(f"/events/{context.alert_event_id}", context.vtn_token)
+    r.raise_for_status()
+
+
+def _fetch_plan():
+    resp = ven_get("/plan")
+    if not resp.ok:
+        return None
+    body = resp.json()
+    return body if isinstance(body, dict) else None
+
+
+@when("I wait for the VEN /plan to have at least one slot with import_cap_kw at most {cap:f}")
+def step_wait_any_slot_capped(context, cap):
+    def any_capped(plan):
+        if plan is None:
+            return False
+        return any(
+            slot.get("import_cap_kw", float("inf")) <= cap + 0.01
+            for slot in plan.get("slots", [])
+        )
+
+    context.ven_plan = poll_until(
+        _fetch_plan,
+        any_capped,
+        timeout=300,
+        interval=5,
+        description=f"VEN /plan has at least one slot with import_cap_kw ≤ {cap}",
+    )
+
+
+@when("I wait for the VEN /plan to have no slot with import_cap_kw below {cap:f}")
+def step_wait_no_slot_capped(context, cap):
+    def none_capped(plan):
+        if plan is None:
+            return False
+        slots = plan.get("slots", [])
+        if not slots:
+            return False
+        return all(slot.get("import_cap_kw", float("inf")) >= cap for slot in slots)
+
+    context.ven_plan = poll_until(
+        _fetch_plan,
+        none_capped,
+        timeout=300,
+        interval=5,
+        description=f"VEN /plan has no slot with import_cap_kw < {cap}",
+    )
+
+
+@then('every plan slot overlapping the next {minutes:d} minutes has import_cap_kw at most {cap:f}')
+def step_assert_window_slots_capped(context, minutes, cap):
+    plan = context.ven_plan
+    now = datetime.now(timezone.utc)
+    window_end = now + timedelta(minutes=minutes)
+    checked = 0
+    for slot in plan.get("slots", []):
+        slot_start = datetime.fromisoformat(slot["start"].replace("Z", "+00:00"))
+        if slot_start >= window_end:
+            continue
+        # Slot overlaps [now, window_end) — must be clamped.
+        slot_cap = slot.get("import_cap_kw", float("inf"))
+        assert slot_cap <= cap + 0.01, (
+            f"slot starting {slot['start']} inside the alert window has "
+            f"import_cap_kw={slot_cap}, expected ≤ {cap}"
+        )
+        checked += 1
+    assert checked > 0, "no plan slots overlapped the alert window at all"
