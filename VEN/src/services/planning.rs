@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::controller::milp_planner::asset_port::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
@@ -18,6 +18,24 @@ use crate::entities::PlannerObjective;
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::simulator::SimState;
 use crate::state::AppState;
+
+/// Clone the `SimState` under its Mutex, logging when the lock wait was long.
+/// The clone releases the Mutex immediately — MILP solving takes 18–60s on
+/// Pi4 ARM64 and must never hold the sim lock for its duration.
+pub async fn clone_sim_snapshot(
+    sim: &Arc<tokio::sync::Mutex<SimState>>,
+    trigger_reason: &str,
+) -> SimState {
+    let lock_start = std::time::Instant::now();
+    let snap = sim.lock().await.clone();
+    let lock_ms = lock_start.elapsed().as_millis();
+    if lock_ms > 500 {
+        warn!(lock_wait_ms = lock_ms, trigger = %trigger_reason, "planner: sim lock wait was long");
+    } else {
+        debug!(lock_wait_ms = lock_ms, "planner: sim lock acquired");
+    }
+    snap
+}
 
 pub struct PlanningService;
 
