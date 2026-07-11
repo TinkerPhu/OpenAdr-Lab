@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::common::parse_iso8601_duration_secs;
 use crate::controller::vtn_port::OadrEvent;
 use crate::entities::capacity::{
-    AlertWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
+    AlertWindow, DispatchWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
 };
 use crate::entities::tariff_snapshot::TariffSnapshot;
 
@@ -386,6 +386,85 @@ pub fn parse_simple_windows(events: &[OadrEvent]) -> Vec<SimpleWindow> {
 }
 
 // ---------------------------------------------------------------------------
+// Direct setpoints (WP3.4 — BL-06/BL-24)
+// ---------------------------------------------------------------------------
+
+/// Extract DISPATCH_SETPOINT windows. Window resolution matches the alert/
+/// SIMPLE parsers (interval-level `intervalPeriod`, event-level fallback);
+/// the payload value is the commanded net site setpoint in kW.
+pub fn parse_dispatch_windows(events: &[OadrEvent]) -> Vec<DispatchWindow> {
+    let mut out = Vec::new();
+    for event in events {
+        for interval in &event.intervals {
+            for payload in &interval.payloads {
+                if payload.r#type != "DISPATCH_SETPOINT" {
+                    continue;
+                }
+                let Some(setpoint_kw) = payload.values.first().and_then(|v| v.as_f64()) else {
+                    continue;
+                };
+                let Some(ip) = interval
+                    .intervalPeriod
+                    .as_ref()
+                    .or(event.intervalPeriod.as_ref())
+                else {
+                    continue;
+                };
+                let Some(start) = ip
+                    .start
+                    .as_deref()
+                    .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+                else {
+                    continue;
+                };
+                let duration_s =
+                    parse_iso8601_duration_secs(ip.duration.as_deref().unwrap_or("PT1H"));
+                out.push(DispatchWindow {
+                    setpoint_kw,
+                    start,
+                    end: start + Duration::seconds(duration_s),
+                    event_id: event.id.clone(),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Extract the first CHARGE_STATE_SETPOINT from active events (WP3.4):
+/// `(target_soc 0.0–1.0, window_end, event_id)`. Values > 1 are read as
+/// percent (80 → 0.8); out-of-range results are dropped.
+pub fn parse_charge_state_setpoint(events: &[OadrEvent]) -> Option<(f64, DateTime<Utc>, String)> {
+    for event in events {
+        for interval in &event.intervals {
+            for payload in &interval.payloads {
+                if payload.r#type != "CHARGE_STATE_SETPOINT" {
+                    continue;
+                }
+                let raw = payload.values.first().and_then(|v| v.as_f64())?;
+                let target_soc = if raw > 1.0 { raw / 100.0 } else { raw };
+                if !(0.0..=1.0).contains(&target_soc) {
+                    continue;
+                }
+                let ip = interval
+                    .intervalPeriod
+                    .as_ref()
+                    .or(event.intervalPeriod.as_ref())?;
+                let start = ip.start.as_deref()?.parse::<DateTime<Utc>>().ok()?;
+                let duration_s =
+                    parse_iso8601_duration_secs(ip.duration.as_deref().unwrap_or("PT1H"));
+                return Some((
+                    target_soc,
+                    start + Duration::seconds(duration_s),
+                    event.id.clone(),
+                ));
+            }
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
 // Report obligation extraction
 // ---------------------------------------------------------------------------
 
@@ -528,6 +607,47 @@ mod tests {
         let alerts =
             parse_alert_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert!(alerts.is_empty());
+    }
+
+    // ── parse_dispatch_windows / parse_charge_state_setpoint (WP3.4) ───────
+
+    #[test]
+    fn test_parse_dispatch_windows_extracts_setpoint_and_window() {
+        let events = json!([{
+            "id": "disp-1",
+            "programID": "prog-1",
+            "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT15M" },
+            "intervals": [{ "id": 0, "payloads": [{ "type": "DISPATCH_SETPOINT", "values": [1.5] }] }]
+        }]);
+        let w = parse_dispatch_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].setpoint_kw, 1.5);
+        assert_eq!((w[0].end - w[0].start).num_minutes(), 15);
+        assert_eq!(w[0].event_id, "disp-1");
+    }
+
+    #[test]
+    fn test_parse_charge_state_setpoint_fraction_and_percent() {
+        let make = |val: serde_json::Value| {
+            json!([{
+                "id": "cs-1",
+                "programID": "prog-1",
+                "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT2H" },
+                "intervals": [{ "id": 0, "payloads": [{ "type": "CHARGE_STATE_SETPOINT", "values": [val] }] }]
+            }])
+        };
+        let parse = |v| {
+            parse_charge_state_setpoint(&serde_json::from_value::<Vec<OadrEvent>>(make(v)).unwrap())
+        };
+        let (soc, end, eid) = parse(json!(0.9)).expect("fraction accepted");
+        assert!((soc - 0.9).abs() < 1e-9);
+        assert_eq!(eid, "cs-1");
+        assert_eq!(end.to_rfc3339(), "2026-03-14T02:00:00+00:00");
+
+        let (soc, _, _) = parse(json!(85)).expect("percent accepted");
+        assert!((soc - 0.85).abs() < 1e-9);
+
+        assert!(parse(json!("full")).is_none(), "non-numeric dropped");
     }
 
     // ── parse_capacity_state export subscription/reservation (WP3.3) ───────

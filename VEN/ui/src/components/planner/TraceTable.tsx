@@ -59,6 +59,14 @@ function DetailCell({ entry }: { entry: TraceEntry }) {
           · <code style={{ fontSize: "0.7rem" }}>{entry.request_id.slice(0, 8)}</code>
         </span>
       );
+    case "DispatchOverride":
+      return (
+        <span>
+          {entry.active
+            ? <><b>active</b> · {entry.setpoint_kw != null ? `${entry.setpoint_kw} kW site setpoint` : "—"}</>
+            : <b>cleared</b>}
+        </span>
+      );
   }
 }
 

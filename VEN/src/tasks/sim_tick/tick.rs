@@ -35,6 +35,8 @@ pub(crate) async fn tick_once(
     // Pre-tick: snapshot plan/capacity/tariffs for dispatcher
     let plan_snap = state.active_plan().await;
     let capacity_snap = state.capacity_state().await;
+    let dispatch_windows = state.dispatch_windows().await;
+    let alert_windows = state.alert_windows().await;
     let rates_snap = state.planned_tariffs().await;
 
     // Compute overlay_enabled: user toggle AND no active EvSession.
@@ -72,6 +74,8 @@ pub(crate) async fn tick_once(
             &inject,
             overlay_enabled,
             now,
+            &dispatch_windows,
+            &alert_windows,
         );
 
         // PHASE 3: Simulator tick — apply setpoints → update device states.

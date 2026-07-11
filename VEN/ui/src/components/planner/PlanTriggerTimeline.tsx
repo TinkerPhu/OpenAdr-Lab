@@ -36,6 +36,11 @@ function chipFor(event: TraceEntry): ChipProps {
       return { label: `☆ ${event.event_name.slice(0, 10)} ✗`, color: "default" };
     case "RequestTransition":
       return { label: `→ req: ${event.from_status}→${event.to_status}`, color: "secondary" };
+    case "DispatchOverride":
+      return {
+        label: event.active ? `⚡ dispatch ${event.setpoint_kw ?? "?"} kW` : "⚡ dispatch cleared",
+        color: "error",
+      };
   }
 }
 
@@ -126,6 +131,17 @@ function EventDetail({ group }: { group: Group }) {
           <Typography variant="caption" display="block">asset: {event.asset_id}</Typography>
           <Typography variant="caption" display="block">{event.from_status} → {event.to_status}</Typography>
           <Typography variant="caption" display="block">request: …{event.request_id.slice(-6)}</Typography>
+        </>
+      );
+    case "DispatchOverride":
+      return (
+        <>
+          {countHeader}
+          <Typography variant="caption" fontWeight="bold">DispatchOverride</Typography>
+          <Typography variant="caption" display="block">ts: {ts}</Typography>
+          <Typography variant="caption" display="block">
+            {event.active ? `active · ${event.setpoint_kw ?? "?"} kW` : "cleared"}
+          </Typography>
         </>
       );
   }

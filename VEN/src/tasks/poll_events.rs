@@ -23,10 +23,9 @@ pub(crate) struct EventChanges {
     pub rates: Vec<entities::tariff_snapshot::TariffSnapshot>,
     /// Parsed capacity state for this tick.
     pub capacity: entities::capacity::OadrCapacityState,
-    /// Parsed grid-alert windows for this tick (WP3.1, BL-04).
-    pub alerts: Vec<entities::capacity::AlertWindow>,
-    /// Parsed SIMPLE load-shed windows for this tick (WP3.2).
-    pub simple: Vec<entities::capacity::SimpleWindow>,
+    /// Parsed grid signals for this tick: alerts (WP3.1), SIMPLE levels
+    /// (WP3.2), dispatch + charge-state setpoints (WP3.4).
+    pub signals: super::poll_signals::ParsedSignals,
 }
 
 /// Pure change-detection pass over a freshly fetched event list.
@@ -43,8 +42,12 @@ pub(crate) fn detect_event_changes(
 ) -> EventChanges {
     let rates = controller::openadr_interface::parse_rate_snapshots(events, now);
     let capacity = controller::openadr_interface::parse_capacity_state(events);
-    let alerts = controller::openadr_interface::parse_alert_windows(events);
-    let simple = controller::openadr_interface::parse_simple_windows(events);
+    let signals = super::poll_signals::ParsedSignals {
+        alerts: controller::openadr_interface::parse_alert_windows(events),
+        simple: controller::openadr_interface::parse_simple_windows(events),
+        dispatch: controller::openadr_interface::parse_dispatch_windows(events),
+        charge_state: controller::openadr_interface::parse_charge_state_setpoint(events),
+    };
 
     let current_ids: std::collections::HashSet<String> =
         events.iter().map(|e| e.id.clone()).collect();
@@ -115,8 +118,7 @@ pub(crate) fn detect_event_changes(
         current_ids,
         rates,
         capacity,
-        alerts,
-        simple,
+        signals,
     }
 }
 
@@ -140,8 +142,7 @@ pub(crate) fn spawn_event_poll(
             std::collections::HashSet::new();
         let mut prev_tariff_count: usize = 0;
         let mut prev_import_limit: Option<f64> = None;
-        let mut prev_alerts: Vec<entities::capacity::AlertWindow> = Vec::new();
-        let mut prev_simple: Vec<entities::capacity::SimpleWindow> = Vec::new();
+        let mut signal_prevs = super::poll_signals::SignalPrevs::default();
         loop {
             match vtn.fetch_events().await {
                 Ok(events) => {
@@ -170,24 +171,17 @@ pub(crate) fn spawn_event_poll(
                     state.set_planned_tariffs(changes.rates).await;
                     state.set_capacity_state(changes.capacity).await;
 
-                    // WP3.1 (BL-04): alert changes replan with the Alert trigger.
-                    let alerts_changed = changes.alerts != prev_alerts;
-                    if alerts_changed {
-                        state.set_alert_windows(changes.alerts.clone()).await;
-                        prev_alerts = changes.alerts;
-                        let _ = trigger_tx.send(PlanTrigger::Alert);
-                    }
-
-                    // WP3.2: SIMPLE changes replan as CapacityChange (same
-                    // per-slot import cap); Alert wins the label if both changed.
-                    let simple_changed = changes.simple != prev_simple;
-                    if simple_changed {
-                        state.set_simple_windows(changes.simple.clone()).await;
-                        prev_simple = changes.simple;
-                        if !alerts_changed {
-                            let _ = trigger_tx.send(PlanTrigger::CapacityChange);
-                        }
-                    }
+                    // WP3.1/3.2/3.4: apply alert/SIMPLE/dispatch/charge-state
+                    // signal changes (see poll_signals.rs). True = a plan
+                    // trigger was already sent; don't overwrite it below.
+                    let signal_trigger_sent = super::poll_signals::apply_signal_changes(
+                        &state,
+                        &trigger_tx,
+                        changes.signals,
+                        now,
+                        &mut signal_prevs,
+                    )
+                    .await;
 
                     let existing_obs = state.report_obligations().await;
                     let new_obs = controller::openadr_interface::extract_report_obligations(
@@ -206,7 +200,7 @@ pub(crate) fn spawn_event_poll(
                     // rates changed, which destabilised the plan.
                     // trigger_tx is a watch channel (latest wins) — don't overwrite
                     // an Alert/CapacityChange trigger sent above with RateChange.
-                    if any_change && !alerts_changed && !simple_changed {
+                    if any_change && !signal_trigger_sent {
                         let _ = trigger_tx.send(PlanTrigger::RateChange);
                     }
                     backoff.on_success();
