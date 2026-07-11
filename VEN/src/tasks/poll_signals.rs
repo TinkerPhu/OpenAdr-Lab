@@ -102,6 +102,8 @@ pub(crate) async fn apply_signal_changes(
                         target_soc,
                         departure_time: window_end,
                         soft_deadline: false,
+                        // VTN-commanded charge target with a window end == a deadline.
+                        mode: crate::entities::design_vocabulary::UserRequestMode::ByDeadline,
                         created_at: now,
                         updated_at: now,
                     }))
@@ -178,6 +180,7 @@ mod tests {
             target_soc: 0.7,
             departure_time: ts(3600),
             soft_deadline: false,
+            mode: Default::default(),
             created_at: ts(5),
             updated_at: ts(5),
         };

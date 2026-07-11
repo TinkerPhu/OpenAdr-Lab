@@ -34,6 +34,7 @@ impl UserRequestService {
             target_soc,
             departure_time: departure,
             soft_deadline: soft_deadline.unwrap_or(false),
+            mode: req.mode.clone(),
             created_at: now,
             updated_at: now,
         };
@@ -70,6 +71,7 @@ impl UserRequestService {
             id: Uuid::new_v4(),
             target_temp_c,
             ready_by,
+            mode: req.mode.clone(),
             created_at: now,
             updated_at: now,
         };
@@ -101,6 +103,7 @@ impl UserRequestService {
             .latest_end
             .ok_or_else(|| "latest_end required for shiftable load".to_string())?;
 
+        let mode = body.mode.clone().unwrap_or_default();
         let load = ShiftableLoad {
             id: Uuid::new_v4(),
             asset_id: body.asset_id.clone(),
@@ -108,6 +111,7 @@ impl UserRequestService {
             duration_min: duration,
             earliest_start: earliest,
             latest_end: latest,
+            mode: mode.clone(),
             created_at: now,
             updated_at: now,
         };
@@ -119,6 +123,7 @@ impl UserRequestService {
             target_energy_kwh: (power * duration as f64) / 60.0,
             desired_power_kw: power,
             deadlines: vec![],
+            mode,
             completion_policy: "STOP".to_string(),
             max_total_cost_eur: None,
             tier_count: 0,
@@ -201,6 +206,7 @@ mod tests {
     #[test]
     fn test_create_shiftable_builds_load() {
         let body = CreateUserRequestBody {
+            mode: Default::default(),
             asset_id: "washing_machine".to_string(),
             power_kw: Some(2.0),
             duration_min: Some(60),
@@ -244,6 +250,7 @@ mod tests {
         let state = AppState::new();
         // Insert a pre-cancelled request.
         let req = UserRequest {
+            mode: Default::default(),
             id: Uuid::new_v4(),
             asset_id: "ev".to_string(),
             status: UserRequestStatus::Cancelled,
@@ -276,6 +283,7 @@ mod tests {
     async fn test_cancel_sets_cancelled_and_clears_ev_session() {
         let state = AppState::new();
         let ev_session = EvSession {
+            mode: Default::default(),
             id: Uuid::new_v4(),
             target_soc: 0.8,
             departure_time: Utc::now() + chrono::Duration::hours(6),
@@ -287,6 +295,7 @@ mod tests {
         state.set_ev_session(Some(ev_session)).await;
 
         let req = UserRequest {
+            mode: Default::default(),
             id: Uuid::new_v4(),
             asset_id: "ev".to_string(),
             status: UserRequestStatus::Active,
@@ -354,6 +363,7 @@ mod tests {
     fn test_create_ev_builds_session() {
         let now = Utc::now();
         let body = CreateUserRequestBody {
+            mode: Default::default(),
             asset_id: ids::ASSET_EV.to_string(),
             target_soc: Some(0.9),
             target_energy_kwh: None,
@@ -384,10 +394,80 @@ mod tests {
         assert!((session.target_soc - 0.9).abs() < 0.01);
     }
 
+    /// A mode given in the body must land on both the UserRequest and the EvSession.
+    #[test]
+    fn test_create_ev_mode_passthrough_to_session() {
+        use crate::entities::design_vocabulary::UserRequestMode;
+        let now = Utc::now();
+        let body = CreateUserRequestBody {
+            asset_id: ids::ASSET_EV.to_string(),
+            target_soc: Some(0.9),
+            target_energy_kwh: None,
+            desired_power_kw: None,
+            deadlines: vec![crate::controller::user_request::RequestDeadlineInput {
+                latest_end: now + chrono::Duration::hours(6),
+                max_total_cost_eur: None,
+                max_marginal_rate_eur_kwh: None,
+                min_completion: None,
+            }],
+            completion_policy: None,
+            comfort_rates: None,
+            budget_eur: None,
+            interruptible: None,
+            tolerance_min: None,
+            power_kw: None,
+            duration_min: None,
+            earliest_start: None,
+            latest_end: None,
+            soft_deadline: None,
+            target_temp_c: None,
+            mode: Some(UserRequestMode::Asap),
+        };
+        let (req, session) = UserRequestService::create_ev(body, &[ev_slice(0.5)], now).unwrap();
+        assert_eq!(req.mode, UserRequestMode::Asap);
+        assert_eq!(session.mode, UserRequestMode::Asap);
+    }
+
+    /// Omitting the mode falls back to BY_DEADLINE (today's implicit behaviour).
+    #[test]
+    fn test_create_heater_missing_mode_defaults_by_deadline() {
+        use crate::entities::design_vocabulary::UserRequestMode;
+        let now = Utc::now();
+        let body = CreateUserRequestBody {
+            asset_id: ids::ASSET_HEATER.to_string(),
+            target_soc: None,
+            target_energy_kwh: Some(5.0),
+            desired_power_kw: Some(2.0),
+            deadlines: vec![crate::controller::user_request::RequestDeadlineInput {
+                latest_end: now + chrono::Duration::hours(4),
+                max_total_cost_eur: None,
+                max_marginal_rate_eur_kwh: None,
+                min_completion: None,
+            }],
+            completion_policy: None,
+            comfort_rates: None,
+            budget_eur: None,
+            interruptible: None,
+            tolerance_min: None,
+            power_kw: None,
+            duration_min: None,
+            earliest_start: None,
+            latest_end: None,
+            soft_deadline: None,
+            target_temp_c: Some(55.0),
+            mode: None,
+        };
+        let (req, target) =
+            UserRequestService::create_heater(body, &[heater_slice()], now).unwrap();
+        assert_eq!(req.mode, UserRequestMode::ByDeadline);
+        assert_eq!(target.mode, UserRequestMode::ByDeadline);
+    }
+
     #[test]
     fn test_create_ev_unknown_asset_returns_err() {
         let now = Utc::now();
         let body = CreateUserRequestBody {
+            mode: Default::default(),
             asset_id: "nonexistent".to_string(),
             target_soc: Some(0.9),
             target_energy_kwh: None,
@@ -423,6 +503,7 @@ mod tests {
     fn test_create_heater_builds_target() {
         let now = Utc::now();
         let body = CreateUserRequestBody {
+            mode: Default::default(),
             asset_id: ids::ASSET_HEATER.to_string(),
             target_soc: None,
             target_energy_kwh: Some(5.0),
@@ -457,6 +538,7 @@ mod tests {
     #[test]
     fn test_discriminators() {
         let base = CreateUserRequestBody {
+            mode: Default::default(),
             asset_id: String::new(),
             target_soc: None,
             target_energy_kwh: None,

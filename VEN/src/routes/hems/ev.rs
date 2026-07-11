@@ -18,6 +18,9 @@ pub struct CreateEvSessionBody {
     /// If false (default), charging is a hard constraint (must reach target SoC by departure).
     #[serde(default)]
     pub soft_deadline: bool,
+    /// Request mode (BL-28); omitted = BY_DEADLINE (legacy behaviour).
+    #[serde(default)]
+    pub mode: crate::entities::design_vocabulary::UserRequestMode,
 }
 
 /// GET /ev-session — returns the active EV session (204 if none).
@@ -39,6 +42,7 @@ pub async fn post_ev_session(
         target_soc: body.target_soc,
         departure_time: body.departure_time,
         soft_deadline: body.soft_deadline,
+        mode: body.mode,
         created_at: now,
         updated_at: now,
     };

@@ -34,6 +34,14 @@ pub enum UserRequestMode {
     Opportunistic,  // use only free/surplus energy, no deadline
 }
 
+/// BY_DEADLINE is the pre-mode implicit behaviour: cost-aware completion by a
+/// deadline. Payloads without the field must keep behaving exactly as before.
+impl Default for UserRequestMode {
+    fn default() -> Self {
+        Self::ByDeadline
+    }
+}
+
 /// Used in capacity requests: which direction we're requesting from VTN (§1.6).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

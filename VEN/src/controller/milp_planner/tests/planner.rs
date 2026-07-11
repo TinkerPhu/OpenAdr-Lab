@@ -98,6 +98,7 @@ fn run_planner_battery_absent_no_bat_allocation() {
     let mut sim = make_snap_from_profile(&profile);
     set_ev_plugged(&mut sim, true);
     let session = crate::entities::device_session::EvSession {
+        mode: Default::default(),
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
         departure_time: now + Duration::hours(2),
@@ -235,6 +236,7 @@ fn run_planner_ev_must_run_energy_met() {
     }
     let e_core_kwh = (0.8 - 0.1) * 10.0; // 7.0 kWh
     let session = crate::entities::device_session::EvSession {
+        mode: Default::default(),
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
         departure_time: now + Duration::hours(2),
@@ -419,6 +421,7 @@ fn run_planner_n48_full_horizon() {
     set_battery_soc(&mut sim, 0.5);
     set_ev_plugged(&mut sim, true);
     let session = crate::entities::device_session::EvSession {
+        mode: Default::default(),
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
         departure_time: now + Duration::hours(24),

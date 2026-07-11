@@ -106,6 +106,7 @@ fn heater_inputs_e_target_from_heater_target() {
     let profile = make_heater_only_profile(Some(200.0), 40.0, 80.0, 60.0);
     let sim = make_snap_from_profile(&profile);
     let target = HeaterTarget {
+        mode: Default::default(),
         id: uuid::Uuid::new_v4(),
         target_temp_c: 70.0,
         ready_by: now + Duration::hours(1),
@@ -256,6 +257,7 @@ fn solve_heater_must_run_meets_e_target() {
     let sim = make_snap_from_profile(&profile);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let target = crate::entities::device_session::HeaterTarget {
+        mode: Default::default(),
         id: uuid::Uuid::new_v4(),
         target_temp_c: 21.0,
         ready_by: now + Duration::seconds(18 * 300),
@@ -553,6 +555,7 @@ fn ev_planned_state_soc_populated() {
         ev.available_charge_kwh = Some(0.8 * bat_kwh);
     }
     let session = crate::entities::device_session::EvSession {
+        mode: Default::default(),
         id: uuid::Uuid::new_v4(),
         target_soc: 0.8,
         departure_time: now + Duration::hours(2),

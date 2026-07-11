@@ -241,6 +241,15 @@ export type AssetLedger = {
 
 export type UserRequestStatus = "ACTIVE" | "COMPLETED" | "CANCELLED" | "FAILED";
 
+/** How the user expressed the request (BL-28). Omitted = BY_DEADLINE (legacy). */
+export type UserRequestMode =
+  | "ASAP"
+  | "ASAP_FREE"
+  | "BY_DEADLINE"
+  | "BY_DEADLINE_FREE"
+  | "MAX_COST"
+  | "OPPORTUNISTIC";
+
 export type SessionType = "ev" | "heater" | "shiftable_load";
 
 export type UserRequest = {
@@ -256,6 +265,7 @@ export type UserRequest = {
     max_marginal_rate_eur_kwh: number | null;
     min_completion: number;
   }>;
+  mode: UserRequestMode;
   max_total_cost_eur: number | null;
   tier_count: number;
   session_id: string | null;
@@ -300,6 +310,8 @@ export type CreateUserRequestBody = {
   // Per-device overrides (Plan D)
   soft_deadline?: boolean;
   target_temp_c?: number;
+  // Request mode (BL-28); omitted = BY_DEADLINE
+  mode?: UserRequestMode;
 };
 
 // ─── Device Session types ─────────────────────────────────────────────────────
@@ -310,6 +322,7 @@ export type EvSession = {
   departure_time: string;
   /** When true, MILP treats charging as a soft reward (best-effort). Default false = must reach target by departure. */
   soft_deadline: boolean;
+  mode: UserRequestMode;
   created_at: string;
   updated_at: string;
 };
@@ -318,6 +331,7 @@ export type CreateEvSessionBody = {
   target_soc: number;
   departure_time: string;
   soft_deadline?: boolean;
+  mode?: UserRequestMode;
 };
 
 export type EvSettings = {
@@ -334,6 +348,7 @@ export type HeaterTarget = {
   id: string;
   target_temp_c: number;
   ready_by: string;
+  mode: UserRequestMode;
   created_at: string;
   updated_at: string;
 };
@@ -350,6 +365,7 @@ export type ShiftableLoad = {
   duration_min: number;
   earliest_start: string;
   latest_end: string;
+  mode: UserRequestMode;
   created_at: string;
   updated_at: string;
 };

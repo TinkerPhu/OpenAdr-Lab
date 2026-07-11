@@ -13,7 +13,8 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import type { CreateUserRequestBody, UserRequestWithSession } from "../../api/types";
+import type { CreateUserRequestBody, UserRequestMode, UserRequestWithSession } from "../../api/types";
+import { ModeSelect } from "./ModeSelect";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ export function HeaterCard(props: HeaterCardProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [tempC, setTempC] = useState("55");
   const [readyBy, setReadyBy] = useState(defaultDateTime(4));
+  const [mode, setMode] = useState<UserRequestMode>("BY_DEADLINE");
 
   const session = request?.session?.type === "heater" ? request.session : null;
 
@@ -64,6 +66,7 @@ export function HeaterCard(props: HeaterCardProps) {
       target_energy_kwh: null,
       desired_power_kw: null,
       target_temp_c: Number(tempC),
+      mode,
       completion_policy: "STOP",
       deadlines: [{
         latest_end: dt.toISOString(),
@@ -142,6 +145,7 @@ export function HeaterCard(props: HeaterCardProps) {
             inputProps={{ lang: "de" }}
             data-testid="heater-readyby-input"
           />
+          <ModeSelect value={mode} onChange={setMode} testId="heater-mode-select" />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)} data-testid="heater-dialog-cancel">Cancel</Button>

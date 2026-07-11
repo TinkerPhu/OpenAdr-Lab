@@ -16,7 +16,8 @@ import {
   Typography,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
-import type { CreateUserRequestBody, UserRequestWithSession } from "../../api/types";
+import type { CreateUserRequestBody, UserRequestMode, UserRequestWithSession } from "../../api/types";
+import { ModeSelect } from "./ModeSelect";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +60,7 @@ export function ShiftableLoadsCard(props: ShiftableLoadsCardProps) {
   const [durationMin, setDurationMin] = useState("60");
   const [earliestStart, setEarliestStart] = useState(defaultDateTime(0));
   const [latestEnd, setLatestEnd] = useState(defaultDateTime(4));
+  const [mode, setMode] = useState<UserRequestMode>("BY_DEADLINE");
 
   function handleConfirm() {
     postRequest({
@@ -69,6 +71,7 @@ export function ShiftableLoadsCard(props: ShiftableLoadsCardProps) {
       completion_policy: null,
       deadlines: [],
       comfort_rates: null,
+      mode,
       power_kw: Number(powerKw),
       duration_min: Number(durationMin),
       earliest_start: new Date(earliestStart).toISOString(),
@@ -169,6 +172,7 @@ export function ShiftableLoadsCard(props: ShiftableLoadsCardProps) {
             inputProps={{ lang: "de" }}
             data-testid="shiftable-latest-input"
           />
+          <ModeSelect value={mode} onChange={setMode} testId="shiftable-mode-select" />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)} data-testid="shiftable-dialog-cancel">Cancel</Button>

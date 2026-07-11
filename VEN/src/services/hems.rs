@@ -95,6 +95,7 @@ mod tests {
 
     fn make_ev_session() -> EvSession {
         EvSession {
+            mode: Default::default(),
             id: Uuid::new_v4(),
             target_soc: 0.8,
             departure_time: Utc::now() + chrono::Duration::hours(6),
@@ -106,6 +107,7 @@ mod tests {
 
     fn make_active_request(session_id: Uuid) -> UserRequest {
         UserRequest {
+            mode: Default::default(),
             id: Uuid::new_v4(),
             asset_id: "ev".to_string(),
             status: UserRequestStatus::Active,
@@ -230,6 +232,7 @@ mod tests {
     async fn test_heater_clear_removes_target() {
         let state = AppState::new();
         let target = HeaterTarget {
+            mode: Default::default(),
             id: Uuid::new_v4(),
             target_temp_c: 55.0,
             ready_by: Utc::now() + chrono::Duration::hours(2),
