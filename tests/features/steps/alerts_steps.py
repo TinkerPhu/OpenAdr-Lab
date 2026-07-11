@@ -44,6 +44,37 @@ def step_delete_alert_event(context):
     r.raise_for_status()
 
 
+@given("I create a SIMPLE event of level {level:d} for the saved program lasting {minutes:d} minutes")
+def step_create_simple_event(context, level, minutes):
+    # WP3.2: SIMPLE levels 0-3. Numeric payload, event-level window (same
+    # shape as the alert events above).
+    start = datetime.now(timezone.utc)
+    r = vtn_post(
+        "/events",
+        context.vtn_token,
+        json={
+            "programID": context.saved_program_id,
+            "eventName": f"simple-level-{level}",
+            "intervalPeriod": {
+                "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "duration": f"PT{minutes}M",
+            },
+            "intervals": [{
+                "id": 0,
+                "payloads": [{"type": "SIMPLE", "values": [level]}],
+            }],
+        },
+    )
+    r.raise_for_status()
+    context.simple_event_id = r.json().get("id")
+
+
+@when("I delete the saved SIMPLE event")
+def step_delete_simple_event(context):
+    r = vtn_delete(f"/events/{context.simple_event_id}", context.vtn_token)
+    r.raise_for_status()
+
+
 def _fetch_plan():
     resp = ven_get("/plan")
     if not resp.ok:

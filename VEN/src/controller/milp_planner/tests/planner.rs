@@ -666,6 +666,7 @@ fn alert_window_clamps_import_cap_for_overlapping_slots_only() {
         &tariffs,
         &cap,
         std::slice::from_ref(&alert),
+        &[],
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,
@@ -714,6 +715,7 @@ fn run_planner_alert_window_yields_zero_import_cap_slots_and_solves() {
         &tariffs,
         &no_capacity(),
         std::slice::from_ref(&alert),
+        &[],
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,
@@ -742,5 +744,88 @@ fn run_planner_alert_window_yields_zero_import_cap_slots_and_solves() {
             .any(|w| w.message.contains("MILP solver failed")),
         "alert must not make the solve fail outright: {:?}",
         plan.warnings
+    );
+}
+
+// ── WP3.2: SIMPLE levels 0–3 ─────────────────────────────────────────────
+
+#[test]
+fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
+    use crate::entities::capacity::{AlertWindow, SimpleWindow};
+
+    let now = fixed_now();
+    let profile = make_profile_1800s(); // 4 × 1800s slots; grid contractual 25 kW
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let cap = no_capacity();
+    let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+
+    let win = |level: u8, from_slot: i64, slots: i64| SimpleWindow {
+        level,
+        start: now + Duration::seconds(from_slot * 1800),
+        end: now + Duration::seconds((from_slot + slots) * 1800),
+        event_id: format!("simple-l{level}"),
+    };
+    // Slot 0: level 1; slot 1: levels 1 AND 2 overlap (2 wins); slot 2: level 3.
+    let simple = vec![win(1, 0, 2), win(2, 1, 1), win(3, 2, 1)];
+
+    let inputs = super::super::inputs::build_milp_inputs(
+        &ctxs,
+        &sim,
+        &tariffs,
+        &cap,
+        &[],
+        &simple,
+        &profile.planner,
+        profile.grid.max_import_kw,
+        profile.grid.max_export_kw,
+        profile.pv_config(),
+        profile.assets.iter().find_map(|a| match a {
+            AssetProfile::BaseLoad(v) => Some(v),
+            _ => None,
+        }),
+        now,
+        &[],
+        None,
+        None,
+    );
+
+    // L1: 50% of contractual 25 kW (default simple_level1_import_cap_pct).
+    assert!((inputs.p_imp_max_cont_kw[0] - 12.5).abs() < 1e-9);
+    // L2 (overlap with L1 — highest wins): baseline forecast 0.5 kW.
+    assert!((inputs.p_imp_max_cont_kw[1] - 0.5).abs() < 1e-9);
+    // L3: zero.
+    assert_eq!(inputs.p_imp_max_cont_kw[2], 0.0);
+    // Slot 3: no window — contractual limit untouched.
+    assert!((inputs.p_imp_max_cont_kw[3] - 25.0).abs() < 1e-9);
+
+    // Alert overrides a mild SIMPLE level on the same slot.
+    let alert = AlertWindow {
+        alert_type: "ALERT_GRID_EMERGENCY".to_string(),
+        start: now,
+        end: now + Duration::seconds(1800),
+        event_id: "alert-1".to_string(),
+        message: String::new(),
+    };
+    let inputs2 = super::super::inputs::build_milp_inputs(
+        &build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &cap,
+        std::slice::from_ref(&alert),
+        &[win(1, 0, 1)],
+        &profile.planner,
+        profile.grid.max_import_kw,
+        profile.grid.max_export_kw,
+        profile.pv_config(),
+        None,
+        now,
+        &[],
+        None,
+        None,
+    );
+    assert_eq!(
+        inputs2.p_imp_max_cont_kw[0], 0.0,
+        "alert wins over SIMPLE L1"
     );
 }
