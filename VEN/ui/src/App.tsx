@@ -4,9 +4,10 @@ import {
   AppBar, Box, Button, Chip, Container, FormControl, InputLabel,
   MenuItem, Select, Stack, Toolbar, Typography,
 } from "@mui/material";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { VenApi } from "./api/client";
 import { useHealth } from "./api/hooks";
+import { DEFAULT_VENS, fetchDiscoveredVens, mergeVens } from "./api/venRegistry";
 import { DashboardPage } from "./pages/Dashboard";
 import { ProgramsPage } from "./pages/Programs";
 import { EventsPage } from "./pages/Events";
@@ -17,12 +18,6 @@ import { RawDiagnosticsPage } from "./pages/RawDiagnostics";
 import { HistoryPage } from "./pages/History";
 import { PlannerPage } from "./pages/Planner";
 import { DevicesPage } from "./pages/Devices";
-
-const DEFAULT_VENS = [
-  { label: "VEN1", url: import.meta.env.VITE_VEN_1_URL || "/api/ven-1", venName: "ven-1" },
-  { label: "VEN2", url: import.meta.env.VITE_VEN_2_URL || "/api/ven-2", venName: "ven-2" },
-  { label: "VEN3", url: import.meta.env.VITE_VEN_3_URL || "/api/ven-3", venName: "ven-3" },
-];
 
 type VenContextType = {
   venUrl: string;
@@ -63,8 +58,23 @@ export default function App() {
   console.log("[VEN-UI] App render");
   const [venUrl, setVenUrl] = useState(DEFAULT_VENS[0].url);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const api = useMemo(() => { console.log("[VEN-UI] VenApi created for", venUrl); return new VenApi(venUrl); }, [venUrl]);
   const queryClient = useQueryClient();
+
+  // Dynamic dropdown: registered + reachable VENs beyond the default trio
+  // (fleet instances). On registry error the dropdown just stays defaults.
+  const { data: discovered } = useQuery({
+    queryKey: ["vens-registry"],
+    queryFn: () => fetchDiscoveredVens(),
+    refetchInterval: 30_000,
+    retry: false,
+  });
+  const vens = useMemo(() => mergeVens(DEFAULT_VENS, discovered ?? []), [discovered]);
+
+  // If the selected VEN vanished from the list (fleet purged between
+  // refreshes), fall back to the first default rather than rendering a
+  // Select value with no matching MenuItem.
+  const safeVenUrl = vens.some((v) => v.url === venUrl) ? venUrl : DEFAULT_VENS[0].url;
+  const api = useMemo(() => { console.log("[VEN-UI] VenApi created for", safeVenUrl); return new VenApi(safeVenUrl); }, [safeVenUrl]);
 
   function handleVenChange(url: string) {
     setVenUrl(url);
@@ -91,8 +101,11 @@ export default function App() {
     queryClient.invalidateQueries();
   }
 
-  const venName = DEFAULT_VENS.find((v) => v.url === venUrl)?.venName ?? "ven-1";
-  const ctx = useMemo(() => ({ venUrl, venName, setVenUrl, api }), [venUrl, venName, api]);
+  const venName = vens.find((v) => v.url === safeVenUrl)?.venName ?? "ven-1";
+  const ctx = useMemo(
+    () => ({ venUrl: safeVenUrl, venName, setVenUrl, api }),
+    [safeVenUrl, venName, api],
+  );
 
   return (
     <VenContext.Provider value={ctx}>
@@ -109,14 +122,14 @@ export default function App() {
             >
               <InputLabel sx={{ color: "white" }}>VEN</InputLabel>
               <Select
-                value={venUrl}
+                value={safeVenUrl}
                 label="VEN"
                 onChange={(e) => handleVenChange(e.target.value)}
                 sx={{ color: "white" }}
                 data-testid="ven-selector"
                 aria-label="Select VEN"
               >
-                {DEFAULT_VENS.map((v) => (
+                {vens.map((v) => (
                   <MenuItem key={v.url} value={v.url}>
                     {v.label} — {v.url}
                   </MenuItem>
