@@ -198,6 +198,14 @@ pub(crate) fn spawn_planning(
                 state.set_site_envelope(env).await;
             }
 
+            // WP3.6 (BL-15): publish per-asset forecasts from the adopted plan
+            // (the plan actually driving dispatch, not a rejected candidate).
+            {
+                let forecasts =
+                    crate::services::forecast::build_asset_forecasts(&cycle.plan, wall_now);
+                state.set_asset_forecasts(forecasts).await;
+            }
+
             info!(
                 trigger = %trigger_reason,
                 slot_count = cycle.plan.slots.len(),

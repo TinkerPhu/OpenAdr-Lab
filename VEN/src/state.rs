@@ -2,6 +2,7 @@ use crate::controller::trace::ControllerTrace;
 use crate::controller::vtn_port::{OadrEvent, OadrProgram};
 use crate::controller::SimSnapshot;
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, OadrReportObligation};
+use crate::entities::design_vocabulary::AssetForecast;
 use crate::entities::device_session::{
     BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime,
 };
@@ -92,6 +93,8 @@ pub struct HemsState {
     pub capacity_state: OadrCapacityState,
     /// WP3.1 (BL-04): active grid-alert windows parsed from ALERT_* events.
     pub alert_windows: Vec<AlertWindow>,
+    /// WP3.6 (BL-15): per-asset forecasts from the latest plan cycle.
+    pub asset_forecasts: Vec<AssetForecast>,
     pub report_obligations: Vec<OadrReportObligation>,
     pub asset_ledger: HashMap<String, AssetLedgerEntry>,
     pub active_requests: Vec<UserRequest>,
@@ -258,6 +261,14 @@ impl AppState {
 
     pub async fn set_alert_windows(&self, alerts: Vec<AlertWindow>) {
         self.hems.write().await.alert_windows = alerts;
+    }
+
+    pub async fn asset_forecasts(&self) -> Vec<AssetForecast> {
+        self.hems.read().await.asset_forecasts.clone()
+    }
+
+    pub async fn set_asset_forecasts(&self, forecasts: Vec<AssetForecast>) {
+        self.hems.write().await.asset_forecasts = forecasts;
     }
 
     pub async fn report_obligations(&self) -> Vec<OadrReportObligation> {
