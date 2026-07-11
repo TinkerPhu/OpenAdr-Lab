@@ -109,11 +109,7 @@ mod tests {
         }
     }
 
-    fn slot(
-        idx: usize,
-        kw_by_asset: &[(&str, f64)],
-        soc_by_asset: &[(&str, f64)],
-    ) -> PlanTimeSlot {
+    fn slot(idx: usize, kw_by_asset: &[(&str, f64)], soc_by_asset: &[(&str, f64)]) -> PlanTimeSlot {
         let start = ts(idx as i64 * 300);
         PlanTimeSlot {
             slot_index: idx,
