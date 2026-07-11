@@ -1,0 +1,15 @@
+# Harness self-test — NOT one of the S-1..S-6 experiment scenarios.
+# 3 minutes: a price event + a capacity limit, just enough to verify the
+# runner drives the VTN, the window elapses, and both snapshots land.
+name: smoke
+description: 3-minute harness smoke test
+duration_minutes: 3
+actions:
+  - at_minute: 0
+    type: price_series
+    values_eur_kwh: [0.10, 0.30]
+    interval_minutes: 1
+  - at_minute: 1
+    type: capacity_limit
+    import_kw: 3.0
+    duration_minutes: 1

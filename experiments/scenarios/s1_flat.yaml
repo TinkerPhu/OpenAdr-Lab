@@ -1,0 +1,10 @@
+# S-1 — Baseline: flat tariff, no DR signals. Every other scenario's
+# "energy shifted" KPI is computed against this run's import profile.
+name: s1_flat
+description: Flat tariff baseline, no control signals
+duration_minutes: 30
+actions:
+  - at_minute: 0
+    type: price_series
+    values_eur_kwh: [0.25, 0.25, 0.25]
+    interval_minutes: 10
