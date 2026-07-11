@@ -79,3 +79,7 @@ VENs on this shared quad-core box risk starving those other services — a CPU, 
 memory, constraint. The full N=10 exit demonstration from
 `docs/plans/roadmap/phase-2-fleet-enablement.md` is deferred to a deliberately
 scheduled low-usage window rather than run ad hoc.
+
+Phase 3's [[experiment-harness]] builds on this tooling: `run_experiment.py`
+follows the same run-on-the-docker-host convention and its scenarios drive the
+same stack the fleet brings up.
