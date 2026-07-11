@@ -8,7 +8,7 @@ use crate::controller::trace::ControllerEvent;
 use crate::controller::{SolveRequest, SolverPort};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
-use crate::entities::capacity::{AlertWindow, OadrCapacityState};
+use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::PlannerParams;
@@ -139,6 +139,7 @@ pub fn build_solve_request(
     tariffs: TariffTimeSeries,
     capacity: OadrCapacityState,
     alert_windows: Vec<AlertWindow>,
+    simple_windows: Vec<SimpleWindow>,
     planner: PlannerParams,
     grid_max_import_kw: f64,
     grid_max_export_kw: f64,
@@ -158,6 +159,7 @@ pub fn build_solve_request(
         tariffs,
         capacity,
         alert_windows,
+        simple_windows,
         planner,
         grid_max_import_kw,
         grid_max_export_kw,

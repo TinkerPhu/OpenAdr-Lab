@@ -201,8 +201,13 @@ impl Default for PlannerConfig {
             solver_timeout_s: default_solver_timeout_s(),
             planning_initial_delay_s: default_planning_initial_delay_s(),
             gate_switch_penalty_eur: 0.0,
+            simple_level1_import_cap_pct: default_simple_level1_import_cap_pct(),
         }
     }
+}
+
+pub(super) fn default_simple_level1_import_cap_pct() -> f64 {
+    0.5
 }
 
 pub(super) fn default_phase2_epsilon() -> f64 {

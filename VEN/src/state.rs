@@ -1,7 +1,9 @@
 use crate::controller::trace::ControllerTrace;
 use crate::controller::vtn_port::{OadrEvent, OadrProgram};
 use crate::controller::SimSnapshot;
-use crate::entities::capacity::{AlertWindow, OadrCapacityState, OadrReportObligation};
+use crate::entities::capacity::{
+    AlertWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
+};
 use crate::entities::design_vocabulary::AssetForecast;
 use crate::entities::device_session::{
     BaselineOverride, EvSession, HeaterTarget, ShiftableLoad, ShiftableLoadRuntime,
@@ -93,6 +95,8 @@ pub struct HemsState {
     pub capacity_state: OadrCapacityState,
     /// WP3.1 (BL-04): active grid-alert windows parsed from ALERT_* events.
     pub alert_windows: Vec<AlertWindow>,
+    /// WP3.2: active SIMPLE load-shed windows (levels 1–3).
+    pub simple_windows: Vec<SimpleWindow>,
     /// WP3.6 (BL-15): per-asset forecasts from the latest plan cycle.
     pub asset_forecasts: Vec<AssetForecast>,
     pub report_obligations: Vec<OadrReportObligation>,
@@ -261,6 +265,14 @@ impl AppState {
 
     pub async fn set_alert_windows(&self, alerts: Vec<AlertWindow>) {
         self.hems.write().await.alert_windows = alerts;
+    }
+
+    pub async fn simple_windows(&self) -> Vec<SimpleWindow> {
+        self.hems.read().await.simple_windows.clone()
+    }
+
+    pub async fn set_simple_windows(&self, windows: Vec<SimpleWindow>) {
+        self.hems.write().await.simple_windows = windows;
     }
 
     pub async fn asset_forecasts(&self) -> Vec<AssetForecast> {

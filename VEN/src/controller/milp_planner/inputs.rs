@@ -4,7 +4,7 @@ use super::asset_port::AssetMilpParams;
 use crate::controller::milp_planner::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset_params::{BaseLoadParams, PvParams};
-use crate::entities::capacity::{AlertWindow, OadrCapacityState};
+use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::tariff_snapshot::TariffTimeSeries;
@@ -35,6 +35,7 @@ pub(crate) fn build_milp_inputs(
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
     alert_windows: &[AlertWindow],
+    simple_windows: &[SimpleWindow],
     planner: &PlannerParams,
     phys_imp: f64,
     phys_exp: f64,
@@ -114,15 +115,35 @@ pub(crate) fn build_milp_inputs(
         p_base.push(base_kw);
         p_imp_phys.push(phys_imp);
         p_exp_phys.push(phys_exp);
+        // WP3.2: SIMPLE levels clamp the import cap per slot — level 1 to a
+        // configurable fraction of the contractual limit, level 2 to the
+        // baseline forecast (defer all flexible draw), level 3 to 0. Highest
+        // overlapping level wins; combined with the contractual cap via min.
+        let simple_level = simple_windows
+            .iter()
+            .filter(|w| w.start < slot_end && slot_t < w.end)
+            .map(|w| w.level)
+            .max();
+        let simple_cap = match simple_level {
+            Some(1) => cont_imp * planner.simple_level1_import_cap_pct,
+            Some(2) => base_kw.max(0.0),
+            Some(l) if l >= 3 => 0.0,
+            _ => cont_imp,
+        };
         // WP3.1 (BL-04): slots overlapping an active grid-alert window get an
         // import cap of 0 ("minimize electricity use", both alert types). The
         // cap is soft in the solver (slack + violation penalty), so unavoidable
         // base load yields a warned violation, never infeasibility. Export is
-        // left untouched — the spec prescribes nothing for it.
+        // left untouched — the spec prescribes nothing for it. Alerts override
+        // any SIMPLE level.
         let in_alert = alert_windows
             .iter()
             .any(|a| a.start < slot_end && slot_t < a.end);
-        p_imp_cont.push(if in_alert { 0.0 } else { cont_imp });
+        p_imp_cont.push(if in_alert {
+            0.0
+        } else {
+            cont_imp.min(simple_cap)
+        });
         p_exp_cont.push(cont_exp);
     }
 

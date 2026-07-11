@@ -3,7 +3,9 @@ use uuid::Uuid;
 
 use crate::common::parse_iso8601_duration_secs;
 use crate::controller::vtn_port::OadrEvent;
-use crate::entities::capacity::{AlertWindow, OadrCapacityState, OadrReportObligation};
+use crate::entities::capacity::{
+    AlertWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
+};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 
 // ---------------------------------------------------------------------------
@@ -304,6 +306,62 @@ pub fn parse_alert_windows(events: &[OadrEvent]) -> Vec<AlertWindow> {
 }
 
 // ---------------------------------------------------------------------------
+// SIMPLE level parsing (WP3.2)
+// ---------------------------------------------------------------------------
+
+/// Extract SIMPLE load-shed windows (levels 1–3) from active events. Window
+/// resolution matches `parse_alert_windows` (interval-level `intervalPeriod`,
+/// event-level fallback). Level 0 ("normal") windows are dropped here — they
+/// constrain nothing. Non-numeric or out-of-range values are skipped.
+pub fn parse_simple_windows(events: &[OadrEvent]) -> Vec<SimpleWindow> {
+    let mut out = Vec::new();
+    for event in events {
+        for interval in &event.intervals {
+            for payload in &interval.payloads {
+                if payload.r#type != "SIMPLE" {
+                    continue;
+                }
+                let Some(level) = payload
+                    .values
+                    .first()
+                    .and_then(|v| v.as_f64())
+                    .filter(|v| (0.0..=3.0).contains(v))
+                    .map(|v| v as u8)
+                else {
+                    continue;
+                };
+                if level == 0 {
+                    continue;
+                }
+                let Some(ip) = interval
+                    .intervalPeriod
+                    .as_ref()
+                    .or(event.intervalPeriod.as_ref())
+                else {
+                    continue;
+                };
+                let Some(start) = ip
+                    .start
+                    .as_deref()
+                    .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+                else {
+                    continue;
+                };
+                let duration_s =
+                    parse_iso8601_duration_secs(ip.duration.as_deref().unwrap_or("PT1H"));
+                out.push(SimpleWindow {
+                    level,
+                    start,
+                    end: start + Duration::seconds(duration_s),
+                    event_id: event.id.clone(),
+                });
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Report obligation extraction
 // ---------------------------------------------------------------------------
 
@@ -446,6 +504,57 @@ mod tests {
         let alerts =
             parse_alert_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert!(alerts.is_empty());
+    }
+
+    // ── parse_simple_windows (WP3.2) ────────────────────────────────────────
+
+    #[test]
+    fn test_parse_simple_windows_extracts_levels_and_window() {
+        let events = json!([{
+            "id": "simple-1",
+            "programID": "prog-1",
+            "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT30M" },
+            "intervals": [{ "id": 0, "payloads": [{ "type": "SIMPLE", "values": [2] }] }]
+        }]);
+        let windows =
+            parse_simple_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].level, 2);
+        assert_eq!(windows[0].event_id, "simple-1");
+        assert_eq!((windows[0].end - windows[0].start).num_minutes(), 30);
+    }
+
+    #[test]
+    fn test_parse_simple_windows_drops_level_zero_and_out_of_range() {
+        let events = json!([{
+            "id": "simple-2",
+            "programID": "prog-1",
+            "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT1H" },
+            "intervals": [
+                { "id": 0, "payloads": [{ "type": "SIMPLE", "values": [0] }] },
+                { "id": 1, "payloads": [{ "type": "SIMPLE", "values": [7] }] },
+                { "id": 2, "payloads": [{ "type": "SIMPLE", "values": ["high"] }] }
+            ]
+        }]);
+        let windows =
+            parse_simple_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        assert!(windows.is_empty());
+    }
+
+    #[test]
+    fn test_parse_simple_windows_ignores_non_simple_payloads() {
+        let events = json!([{
+            "id": "evt-1",
+            "programID": "prog-1",
+            "intervals": [{
+                "id": 0,
+                "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT1H" },
+                "payloads": [{ "type": "PRICE", "values": [0.25] }]
+            }]
+        }]);
+        let windows =
+            parse_simple_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        assert!(windows.is_empty());
     }
 
     #[test]

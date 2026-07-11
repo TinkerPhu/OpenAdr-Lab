@@ -8,7 +8,7 @@ use crate::controller::milp_planner::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
-use crate::entities::capacity::{AlertWindow, OadrCapacityState};
+use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
@@ -25,6 +25,9 @@ pub struct SolveRequest {
     /// WP3.1 (BL-04): active grid-alert windows — planner clamps the
     /// contractual import cap to 0 for slots overlapping any of these.
     pub alert_windows: Vec<AlertWindow>,
+    /// WP3.2: active SIMPLE load-shed windows (levels 1–3) — planner clamps
+    /// the per-slot import cap per level; see `SimpleWindow`.
+    pub simple_windows: Vec<SimpleWindow>,
     pub planner: PlannerParams,
     pub grid_max_import_kw: f64,
     pub grid_max_export_kw: f64,

@@ -384,4 +384,10 @@ pub struct PlannerConfig {
     /// 0.0 = disabled (default). Suggested: match `switching_penalty_eur`.
     #[serde(default)]
     pub gate_switch_penalty_eur: f64,
+
+    /// WP3.2 — SIMPLE level 1 ("mild") import cap as a fraction of the
+    /// contractual limit (0.0–1.0, default 0.5). Levels 2 and 3 have fixed
+    /// semantics (baseline cap / zero cap) — see `entities::capacity::SimpleWindow`.
+    #[serde(default = "super::defaults::default_simple_level1_import_cap_pct")]
+    pub simple_level1_import_cap_pct: f64,
 }
