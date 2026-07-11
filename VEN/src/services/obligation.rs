@@ -32,6 +32,7 @@ impl ObligationService {
                 ven_name,
                 env.as_ref(),
                 plan.as_ref(),
+                now,
             );
             let next_due = now + chrono::Duration::seconds(ob.interval_duration_s as i64);
             if let Some(report) = report_opt {
