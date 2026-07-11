@@ -1,9 +1,9 @@
 use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, info, warn};
+use tracing::info;
 
-use crate::controller::{self, SolverPort};
+use crate::controller::SolverPort;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
@@ -74,14 +74,8 @@ pub(crate) fn spawn_planning(
             // Clone SimState snapshot so the Mutex is released immediately.
             // MILP solving takes 18-60s on Pi4 ARM64; holding the lock would
             // block sim ticks and /capability reads for the entire duration.
-            let lock_start = std::time::Instant::now();
-            let mut sim_snap = sim.lock().await.clone();
-            let lock_ms = lock_start.elapsed().as_millis();
-            if lock_ms > 500 {
-                warn!(lock_wait_ms = lock_ms, trigger = %trigger_reason, "planner: sim lock wait was long");
-            } else {
-                debug!(lock_wait_ms = lock_ms, "planner: sim lock acquired");
-            }
+            let mut sim_snap =
+                crate::services::planning::clone_sim_snapshot(&sim, &trigger_reason).await;
 
             // Patch the clone when pv_irradiance inject is pending and the tick hasn't
             // applied it yet. When the tick runs first, the clone already has the correct
@@ -191,20 +185,15 @@ pub(crate) fn spawn_planning(
             )
             .await;
 
-            // Refresh site envelope immediately after each plan cycle.
-            {
-                let sim_snap = sim.lock().await.to_sim_snapshot();
-                let env = controller::envelope::compute_envelope(&sim_snap, wall_now);
-                state.set_site_envelope(env).await;
-            }
-
-            // WP3.6 (BL-15): publish per-asset forecasts from the adopted plan
-            // (the plan actually driving dispatch, not a rejected candidate).
-            {
-                let forecasts =
-                    crate::services::forecast::build_asset_forecasts(&cycle.plan, wall_now);
-                state.set_asset_forecasts(forecasts).await;
-            }
+            // Envelope + per-asset forecasts (WP3.6, BL-15), from the adopted plan.
+            let sim_snap = sim.lock().await.to_sim_snapshot();
+            crate::services::forecast::publish_post_cycle_state(
+                &state,
+                &sim_snap,
+                &cycle.plan,
+                wall_now,
+            )
+            .await;
 
             info!(
                 trigger = %trigger_reason,

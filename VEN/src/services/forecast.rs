@@ -5,8 +5,25 @@
 use chrono::{DateTime, Utc};
 use std::collections::BTreeSet;
 
+use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::design_vocabulary::{AssetForecast, ForecastSource};
 use crate::entities::plan::Plan;
+use crate::state::AppState;
+
+/// Post-plan-cycle state publication: site flexibility envelope and per-asset
+/// forecasts (WP3.6, BL-15), both derived from the *adopted* plan — the one
+/// actually driving dispatch, never a rejected candidate.
+pub async fn publish_post_cycle_state(
+    state: &AppState,
+    sim_snap: &SimSnapshot,
+    adopted_plan: &Plan,
+    wall_now: DateTime<Utc>,
+) {
+    let env = crate::controller::envelope::compute_envelope(sim_snap, wall_now);
+    state.set_site_envelope(env).await;
+    let forecasts = build_asset_forecasts(adopted_plan, wall_now);
+    state.set_asset_forecasts(forecasts).await;
+}
 
 /// Build one `AssetForecast` per asset that appears in the plan's slot
 /// allocations (`planned_kw_by_asset`), tagged `ForecastSource::Optimization`.
