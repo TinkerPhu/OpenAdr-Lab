@@ -24,11 +24,14 @@ impl ObligationService {
         let due = state.due_obligations(now).await;
         for ob in due {
             let env = state.site_envelope().await;
+            // WP3.6: USAGE_FORECAST obligations report from the adopted plan.
+            let plan = state.active_plan().await;
             let report_opt = crate::controller::reporter::build_measurement_report_for_obligation(
                 &ob,
                 &asset_samples,
                 ven_name,
                 env.as_ref(),
+                plan.as_ref(),
             );
             let next_due = now + chrono::Duration::seconds(ob.interval_duration_s as i64);
             if let Some(report) = report_opt {
