@@ -174,6 +174,8 @@ pub fn parse_capacity_state(events: &[OadrEvent]) -> OadrCapacityState {
     let mut export_limit: Option<(f64, String)> = None;
     let mut import_sub: Option<f64> = None;
     let mut import_res: Option<f64> = None;
+    let mut export_sub: Option<f64> = None;
+    let mut export_res: Option<f64> = None;
     let mut found_any = false;
 
     for event in events {
@@ -233,6 +235,26 @@ pub fn parse_capacity_state(events: &[OadrEvent]) -> OadrCapacityState {
                             });
                         }
                     }
+                    // WP3.3: export-side subscription/reservation (strictest wins,
+                    // matching the import side).
+                    "EXPORT_CAPACITY_SUBSCRIPTION" => {
+                        if let Some(v) = value {
+                            found_any = true;
+                            export_sub = Some(match export_sub {
+                                None => v,
+                                Some(cur) => cur.min(v),
+                            });
+                        }
+                    }
+                    "EXPORT_CAPACITY_RESERVATION" => {
+                        if let Some(v) = value {
+                            found_any = true;
+                            export_res = Some(match export_res {
+                                None => v,
+                                Some(cur) => cur.min(v),
+                            });
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -246,6 +268,8 @@ pub fn parse_capacity_state(events: &[OadrEvent]) -> OadrCapacityState {
         existing.export_limit_event_id = export_limit.map(|(_, eid)| eid);
         existing.import_subscription_kw = import_sub;
         existing.import_reservation_kw = import_res;
+        existing.export_subscription_kw = export_sub;
+        existing.export_reservation_kw = export_res;
         existing.last_updated = Some(Utc::now());
     }
 
@@ -504,6 +528,27 @@ mod tests {
         let alerts =
             parse_alert_windows(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
         assert!(alerts.is_empty());
+    }
+
+    // ── parse_capacity_state export subscription/reservation (WP3.3) ───────
+
+    #[test]
+    fn test_parse_capacity_state_export_subscription_and_reservation() {
+        let events = json!([{
+            "id": "cap-1",
+            "programID": "prog-1",
+            "intervals": [{
+                "id": 0,
+                "intervalPeriod": { "start": "2026-03-14T00:00:00Z", "duration": "PT1H" },
+                "payloads": [
+                    { "type": "EXPORT_CAPACITY_SUBSCRIPTION", "values": [4.0] },
+                    { "type": "EXPORT_CAPACITY_RESERVATION", "values": [2.0] }
+                ]
+            }]
+        }]);
+        let cap = parse_capacity_state(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        assert_eq!(cap.export_subscription_kw, Some(4.0));
+        assert_eq!(cap.export_reservation_kw, Some(2.0));
     }
 
     // ── parse_simple_windows (WP3.2) ────────────────────────────────────────

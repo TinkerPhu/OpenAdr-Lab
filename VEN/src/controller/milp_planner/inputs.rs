@@ -60,8 +60,30 @@ pub(crate) fn build_milp_inputs(
     let zone_a_step_s = planner.plan_zones.first().map(|z| z.step_s).unwrap_or(300);
 
     // ── Per-step grid arrays ──────────────────────────────────────────────────
-    let cont_imp = capacity.import_limit_kw.unwrap_or(phys_imp);
-    let cont_exp = capacity.export_limit_kw.unwrap_or(phys_exp);
+    // WP3.3 (§8.10): subscription + reservation form a contracted allowance
+    // that binds when tighter than the event limit / physical bound and is
+    // inactive when looser. A reservation without a subscription (or vice
+    // versa) counts alone.
+    let allowance = |sub: Option<f64>, res: Option<f64>| match (sub, res) {
+        (None, None) => f64::INFINITY,
+        (s, r) => s.unwrap_or(0.0) + r.unwrap_or(0.0),
+    };
+    let imp_allowance = allowance(
+        capacity.import_subscription_kw,
+        capacity.import_reservation_kw,
+    );
+    let exp_allowance = allowance(
+        capacity.export_subscription_kw,
+        capacity.export_reservation_kw,
+    );
+    let cont_imp = capacity
+        .import_limit_kw
+        .unwrap_or(phys_imp)
+        .min(imp_allowance);
+    let cont_exp = capacity
+        .export_limit_kw
+        .unwrap_or(phys_exp)
+        .min(exp_allowance);
     let base_kw = base_load.map(|c| c.baseline_kw).unwrap_or(0.0);
 
     let mut c_imp = Vec::with_capacity(n);
