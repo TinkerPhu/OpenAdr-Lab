@@ -21,6 +21,9 @@ pub struct CreateEvSessionBody {
     /// Request mode (BL-28); omitted = BY_DEADLINE (legacy behaviour).
     #[serde(default)]
     pub mode: crate::entities::design_vocabulary::UserRequestMode,
+    /// MAX_COST (WP4.1-c): total charging-cost ceiling [€].
+    #[serde(default)]
+    pub budget_eur: Option<f64>,
 }
 
 /// GET /ev-session — returns the active EV session (204 if none).
@@ -43,6 +46,7 @@ pub async fn post_ev_session(
         departure_time: body.departure_time,
         soft_deadline: body.soft_deadline,
         mode: body.mode,
+        budget_eur: body.budget_eur,
         created_at: now,
         updated_at: now,
     };

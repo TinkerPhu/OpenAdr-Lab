@@ -196,6 +196,7 @@ pub(crate) fn build_milp_inputs(
     let mut e_ev_extra = 0.0_f64;
     let mut v_ev_extra = 0.0_f64;
     let mut v_ev_core = 0.0_f64;
+    let mut ev_budget_eur: Option<f64> = None;
     let mut soc_ev_init: Option<f64> = None;
 
     let mut heater_mode = MilpLoadMode::MustNotRun;
@@ -232,6 +233,7 @@ pub(crate) fn build_milp_inputs(
                 e_ev_extra = e.e_extra_max_kwh;
                 v_ev_extra = e.v_extra_eur_kwh;
                 v_ev_core = e.v_core_eur;
+                ev_budget_eur = e.budget_eur;
                 soc_ev_init = assets.assets.get("ev").and_then(|s| s.val("soc"));
             }
             AssetMilpParams::Heater(h) => {
@@ -310,6 +312,18 @@ pub(crate) fn build_milp_inputs(
         })
     }).collect();
 
+    // WP4.1-c: even at the cheapest slot rate the target energy (all "extra"
+    // headroom in MAX_COST mode) exceeds the budget → charging will stop
+    // early. Stable text — WP4.3's notification dedup keys on it.
+    let budget_warning = ev_budget_eur.and_then(|budget_eur| {
+        let min_rate = c_imp.iter().cloned().fold(f64::INFINITY, f64::min);
+        (e_ev_extra * min_rate > budget_eur).then(|| {
+            "EV charging budget too low to reach the session target — \
+             charging stops at the budget (MAX_COST)"
+                .to_string()
+        })
+    });
+
     MilpInputs {
         n,
         dt_h,
@@ -317,6 +331,7 @@ pub(crate) fn build_milp_inputs(
         c_imp_eur_kwh: c_imp,
         rate_stale: stale_outcome.rate_stale,
         stale_rate_warning: stale_outcome.warning,
+        budget_warning,
         c_exp_eur_kwh: c_exp,
         g_imp_kgco2_kwh: g_co2,
         p_pv_kw: p_pv,

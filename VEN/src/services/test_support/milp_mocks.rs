@@ -122,6 +122,10 @@ impl MockEvCtx {
                 asap_lateness_eur_kwh_h: 0.0,
                 free_only: false,
                 p_free_cap_kw: None,
+                reward_per_slot: false,
+                free_early_bias: false,
+                budget_eur: None,
+                c_imp_eur_kwh: None,
             },
         }
     }
@@ -142,6 +146,10 @@ impl MockEvCtx {
                 asap_lateness_eur_kwh_h: 0.0,
                 free_only: false,
                 p_free_cap_kw: None,
+                reward_per_slot: false,
+                free_early_bias: false,
+                budget_eur: None,
+                c_imp_eur_kwh: None,
             },
         }
     }
@@ -172,6 +180,7 @@ impl AssetMilpContext for MockEvCtx {
             e_extra_max_kwh: self.ctx.e_extra_max_kwh,
             v_extra_eur_kwh: self.ctx.v_extra_eur_kwh,
             v_core_eur: self.ctx.v_core_eur,
+            budget_eur: self.ctx.budget_eur,
         })
     }
 

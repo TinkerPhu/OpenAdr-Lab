@@ -103,6 +103,7 @@ fn run_planner_battery_absent_no_bat_allocation() {
         target_soc: 0.8,
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
+        budget_eur: None,
         created_at: now,
         updated_at: now,
     };
@@ -241,6 +242,7 @@ fn run_planner_ev_must_run_energy_met() {
         target_soc: 0.8,
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
+        budget_eur: None,
         created_at: now,
         updated_at: now,
     };
@@ -426,6 +428,7 @@ fn run_planner_n48_full_horizon() {
         target_soc: 0.8,
         departure_time: now + Duration::hours(24),
         soft_deadline: false,
+        budget_eur: None,
         created_at: now,
         updated_at: now,
     };

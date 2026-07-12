@@ -100,6 +100,7 @@ mod tests {
             target_soc: 0.8,
             departure_time: Utc::now() + chrono::Duration::hours(6),
             soft_deadline: false,
+            budget_eur: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
