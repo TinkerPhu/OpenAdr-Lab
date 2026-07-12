@@ -3,7 +3,7 @@ title: VEN UI
 type: component
 created: 2026-07-04
 updated: 2026-07-12
-synced_commit: c5a1d03
+synced_commit: f0e2d7f
 sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx]
 tags: [ui, react, timeline]
 ---
@@ -27,6 +27,14 @@ React + TypeScript SPA (Vite build, nginx-served, port 8214) — the per-site da
   built-in default — WP4.2/BL-19); the EV/heater/shiftable dialogs gained a
   request-mode select (`ModeSelect`, native `<select>` for testability) and the EV
   dialog a budget field shown only for `MAX_COST` (WP4.1/BL-28).
+- WP4.6 observability polish: `GridSignalStrip` on the Controller page (chips for
+  active alert / SIMPLE / dispatch / capacity, from the `GET /signals` aggregate;
+  renders nothing when idle), hatched+dimmed estimated-rate slots in the plan
+  matrix (WP4.4 `rate_estimated`), persona labels in the VEN selector (from the
+  VEN `PERSONA` attribute via `/api/vens-registry`), a Mode column in the
+  All-Requests table and mode chips on all device cards. Build gate lesson:
+  vitest/eslint don't typecheck — `npm run build` (tsc) is part of the local
+  gates for UI-typed changes.
 
 ## Timeline specifics
 
