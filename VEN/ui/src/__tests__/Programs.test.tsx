@@ -17,6 +17,7 @@ const useProgramsMock = vi.fn(() => ({
 }));
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   usePrograms: () => useProgramsMock(),
 }));
 

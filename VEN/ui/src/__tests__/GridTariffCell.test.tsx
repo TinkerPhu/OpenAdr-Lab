@@ -50,6 +50,7 @@ let allTimelinesData: { zones: unknown[]; timelines: Record<string, unknown[]> }
 let tariffsData: unknown[] = [];
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   useSim: () => ({ data: baseSim, isLoading: false, isError: false, refetch: vi.fn() }),
   useTariffs: () => ({ data: tariffsData, refetch: vi.fn() }),
   useRequests: () => ({ data: [], refetch: vi.fn() }),

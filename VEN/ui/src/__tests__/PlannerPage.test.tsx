@@ -13,6 +13,7 @@ vi.mock("@tanstack/react-query", async () => {
 });
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   usePlan: vi.fn(),
   useTrace: vi.fn(),
   usePackets: vi.fn(),

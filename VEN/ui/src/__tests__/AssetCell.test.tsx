@@ -26,6 +26,7 @@ vi.mock("../components/controller/charts/AssetTimelineChart", () => ({
 }));
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   useSimSchema: () => ({ data: {} }),
 }));
 

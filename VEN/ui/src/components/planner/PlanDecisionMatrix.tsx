@@ -39,7 +39,8 @@ function MatrixLegend() {
   return (
     <Box data-testid="matrix-legend" sx={{ mt: 1 }}>
       <Typography variant="caption" color="text.secondary">
-        Cell color: grey = idle, teal = allocated (intensity scales with power)
+        Cell color: grey = idle, teal = allocated (intensity scales with power).
+        Tariff row: hatched/dimmed = estimated rate (beyond tariff coverage).
       </Typography>
     </Box>
   );
@@ -212,13 +213,21 @@ export function PlanDecisionMatrix({ plan }: Props) {
                 {allSlots.map((slot, ci) => (
                   <Tooltip
                     key={ci}
-                    title={`${new Date(slot.start).toLocaleTimeString()} — ${slot.import_tariff_eur_kwh.toFixed(3)} €/kWh`}
+                    title={`${new Date(slot.start).toLocaleTimeString()} — ${slot.import_tariff_eur_kwh.toFixed(3)} €/kWh${slot.rate_estimated ? " (estimated — beyond tariff coverage, WP4.4 stale-rate fill)" : ""}`}
                   >
                     <Box
+                      data-testid={slot.rate_estimated ? `tariff-cell-est-${ci}` : undefined}
                       sx={{
                         width: CELL_W,
                         height: CELL_H,
                         bgcolor: tariffColor(slot.import_tariff_eur_kwh, tariffMin, tariffMax),
+                        // WP4.4: estimated rates are visually distinct — dimmed
+                        // with a diagonal hatch so stale-tariff fills are never
+                        // mistaken for real published rates.
+                        opacity: slot.rate_estimated ? 0.45 : 1,
+                        backgroundImage: slot.rate_estimated
+                          ? "repeating-linear-gradient(45deg, rgba(0,0,0,0.25) 0 2px, transparent 2px 5px)"
+                          : undefined,
                         flexShrink: 0,
                         border: "1px solid rgba(0,0,0,0.06)",
                       }}

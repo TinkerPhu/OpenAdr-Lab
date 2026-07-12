@@ -130,6 +130,7 @@ const mockDeleteRequest = vi.fn();
 const mockPutEvSettings = vi.fn();
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   useRequests: () => ({
     data: mockRequestsData(),
     isLoading: false,
@@ -283,6 +284,24 @@ describe("DevicesPage", () => {
     renderPage();
     await user.click(screen.getByTestId("ev-unplan-btn"));
     expect(mockDeleteRequest).toHaveBeenCalledWith("ur-ev-001");
+  });
+
+  // 5b. Heater mode chip for non-default modes (WP4.6)
+  it("shows heater mode chip when the session mode is not BY_DEADLINE", () => {
+    const req = makeHeaterRequest();
+    if (req.session?.type === "heater") {
+      req.session.mode = "ASAP";
+    }
+    mockRequestsData.mockReturnValue([req]);
+    renderPage();
+    expect(screen.getByTestId("heater-mode-chip")).toHaveTextContent("ASAP");
+  });
+
+  // 5c. Mode column in the All-Requests table (WP4.6)
+  it("shows the request mode in the All-Requests table", () => {
+    mockRequestsData.mockReturnValue([makeEvRequest({ mode: "OPPORTUNISTIC" })]);
+    renderPage();
+    expect(screen.getByTestId("request-mode-ur-ev-001")).toHaveTextContent("OPPORTUNISTIC");
   });
 
   // 6. Heater active request

@@ -151,4 +151,12 @@ describe("PlanDecisionMatrix", () => {
     expect(parseFloat(cell0.getAttribute("data-power") ?? "0")).toBeGreaterThan(0);
     expect(parseFloat(cell1.getAttribute("data-power") ?? "0")).toBe(0);
   });
+
+  it("marks estimated-rate slots distinctly (WP4.4)", () => {
+    const plan = makePlan();
+    plan.slots[1].rate_estimated = true;
+    render(<PlanDecisionMatrix plan={plan} />);
+    expect(screen.getByTestId("tariff-cell-est-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("tariff-cell-est-0")).not.toBeInTheDocument();
+  });
 });

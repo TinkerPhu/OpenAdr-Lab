@@ -7,7 +7,7 @@ import type {
   ShiftableLoad, CreateShiftableLoadBody, BaselineOverride, CreateBaselineOverrideBody,
   ZoneDef,
   HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent,
-  UserNotification, ComfortRate, ComfortCurveResponse,
+  UserNotification, ComfortRate, ComfortCurveResponse, SignalsState,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
@@ -68,6 +68,12 @@ export class VenApi {
     const q = since ? `?since=${encodeURIComponent(since)}` : "";
     const r = await this.getReq(`/notifications${q}`);
     if (!r.ok) throw new Error(`notifications ${r.status}`);
+    return r.json();
+  }
+
+  async signals(): Promise<SignalsState> {
+    const r = await this.getReq("/signals");
+    if (!r.ok) throw new Error(`signals ${r.status}`);
     return r.json();
   }
 

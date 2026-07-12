@@ -437,8 +437,13 @@ def provision_vens(base, vens):
                           json={"client_id": ven["client_id"], "client_secret": ven["client_secret"]}, timeout=10)
         r.raise_for_status()
 
+        ven_body = {"venName": ven["ven_name"]}
+        # WP4.5: persona tag as an OpenADR VEN attribute so the UI dropdown
+        # can label fleet entries (only present on persona fleets).
+        if ven.get("persona"):
+            ven_body["attributes"] = [{"type": "PERSONA", "values": [ven["persona"]]}]
         r = requests.post(f"{base}/vens", headers=auth_headers(vm_token),
-                          json={"venName": ven["ven_name"]}, timeout=10)
+                          json=ven_body, timeout=10)
         r.raise_for_status()
         ven_id = r.json()["id"]
 
