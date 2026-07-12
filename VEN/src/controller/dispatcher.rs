@@ -156,8 +156,15 @@ pub fn apply_surplus_ev_overlay(
         let soc_target = snap.val("soc_target").unwrap_or(1.0);
         if plugged && soc < soc_target {
             let max_charge_kw = snap.values.get("max_charge_kw").copied().unwrap_or(0.0);
+            let min_charge_kw = snap.values.get("min_charge_kw").copied().unwrap_or(0.0);
             let charge_kw = surplus_kw.min(max_charge_kw);
-            setpoints.insert(crate::ids::ASSET_EV.to_string(), charge_kw);
+            // BL-12: the charger cannot sustain below min_charge_kw — a
+            // sub-minimum command yields 0 kW physically while the dispatch
+            // override would still count the phantom setpoint in its net-power
+            // compensation (found live in the WP4.1-c E2E run).
+            if charge_kw >= min_charge_kw {
+                setpoints.insert(crate::ids::ASSET_EV.to_string(), charge_kw);
+            }
         }
     }
 }
@@ -296,6 +303,7 @@ mod tests {
         values.insert("soc".into(), soc);
         values.insert("plugged".into(), if plugged { 1.0 } else { 0.0 });
         values.insert("max_charge_kw".into(), max_ch);
+        values.insert("min_charge_kw".into(), 1.4);
         values.insert("soc_target".into(), soc_target);
         values.insert("battery_kwh".into(), bat_kwh);
         (
@@ -477,14 +485,17 @@ mod tests {
     #[test]
     fn battery_charging_reduces_ev_surplus() {
         // PV 4 kW, base 0.5 kW → raw PV surplus 3.5 kW.
-        // Battery plan setpoint = 3.0 kW → EV should only get 0.5 kW.
+        // Battery plan setpoint = 1.5 kW → EV gets the remaining 2.0 kW.
+        // (Remainder kept above the 1.4 kW min-charge floor — a sub-minimum
+        // remainder is correctly NOT commanded, covered by
+        // surplus_below_min_charge_rate_is_not_commanded.)
         let sim = build_sim_snap(-4.0, 0.5, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        sp.insert("battery".to_string(), 3.0); // battery plan allocation
+        sp.insert("battery".to_string(), 1.5); // battery plan allocation
         apply_surplus_ev_overlay(&mut sp, &sim, false, true);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
-            (ev_sp - 0.5).abs() < 1e-6,
+            (ev_sp - 2.0).abs() < 1e-6,
             "EV should receive only the remaining surplus after battery, got {ev_sp}"
         );
     }
@@ -520,6 +531,23 @@ mod tests {
         assert!(
             !sp.contains_key("ev"),
             "no surplus when PV is not generating"
+        );
+    }
+
+    #[test]
+    fn surplus_below_min_charge_rate_is_not_commanded() {
+        // PV exports 1.5 kW, base 0.5 kW → surplus 1.0 kW, below the charger's
+        // 1.4 kW sustained minimum (BL-12). Commanding it would physically
+        // yield 0 kW while the dispatch override counts the phantom setpoint
+        // in its net-power compensation — found live in the WP4.1-c E2E run
+        // (net site power stuck ~1 kW under the DISPATCH_SETPOINT target).
+        let sim = build_sim_snap(-1.5, 0.5, 0.4, true, 0.8);
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        assert!(
+            !sp.contains_key("ev"),
+            "sub-minimum surplus must not be commanded, got {:?}",
+            sp.get("ev")
         );
     }
 

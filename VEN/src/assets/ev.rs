@@ -145,6 +145,7 @@ impl EvCharger {
         m.insert("soc".into(), state.soc);
         m.insert("plugged".into(), if state.plugged { 1.0 } else { 0.0 });
         m.insert("max_charge_kw".into(), self.max_charge_kw);
+        m.insert("min_charge_kw".into(), self.min_charge_kw);
         m.insert("soc_target".into(), self.soc_target);
         m.insert("battery_kwh".into(), self.battery_kwh);
         m
