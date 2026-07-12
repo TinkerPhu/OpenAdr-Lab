@@ -5,7 +5,7 @@ import type {
   SensorSnapshot, SimInjectState, CreateUserRequestBody,
   CreateEvSessionBody, UpdateEvSettingsBody,
   CreateHeaterTargetBody, CreateShiftableLoadBody, CreateBaselineOverrideBody,
-  PlannerObjective, PlannerEvent,
+  PlannerObjective, PlannerEvent, ComfortRate,
 } from "./types";
 
 export function useHealth() {
@@ -25,6 +25,38 @@ export function useNotifications() {
     queryKey: ["notifications", api.baseUrl],
     queryFn: () => api.notifications(),
     refetchInterval: 10_000,
+  });
+}
+
+/** WP4.2 (BL-19): the effective comfort curve for one asset. */
+export function useComfortCurve(assetId: string) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["comfort_curve", api.baseUrl, assetId],
+    queryFn: () => api.comfortCurve(assetId),
+  });
+}
+
+export function useSetComfortCurve() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ assetId, rates }: { assetId: string; rates: ComfortRate[] }) =>
+      api.postComfortCurve(assetId, rates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["comfort_curve"] });
+    },
+  });
+}
+
+export function useDeleteComfortCurve() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (assetId: string) => api.deleteComfortCurve(assetId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["comfort_curve"] });
+    },
   });
 }
 

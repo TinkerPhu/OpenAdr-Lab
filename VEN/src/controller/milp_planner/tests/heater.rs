@@ -701,7 +701,10 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
     let blocking: Vec<_> = plan
         .warnings
         .iter()
-        .filter(|w| !w.message.contains("Tariff data ends before the planning horizon"))
+        .filter(|w| {
+            !w.message
+                .contains("Tariff data ends before the planning horizon")
+        })
         .collect();
     assert!(
         blocking.is_empty(),

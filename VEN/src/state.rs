@@ -121,6 +121,10 @@ pub struct AppState {
     /// WP4.3 (BL-20): bounded ring of user-facing notifications, newest last.
     pub notifications:
         Arc<RwLock<std::collections::VecDeque<crate::entities::notification::UserNotification>>>,
+    /// WP4.2 (BL-19): per-asset user comfort-curve overrides (hot map;
+    /// persisted through SettingsPort, re-seeded at startup).
+    pub comfort_overrides:
+        Arc<RwLock<std::collections::HashMap<String, Vec<crate::entities::asset::ComfortRate>>>>,
 }
 
 /// WP4.3: in-memory notification ring capacity (mirrors the /trace/events ring).
@@ -157,7 +161,33 @@ impl AppState {
                 ..HemsState::default()
             })),
             notifications: Arc::new(RwLock::new(std::collections::VecDeque::new())),
+            comfort_overrides: Arc::new(RwLock::new(std::collections::HashMap::new())),
         }
+    }
+
+    /// WP4.2: install/replace a comfort-curve override for one asset.
+    pub async fn set_comfort_override(
+        &self,
+        asset_id: String,
+        rates: Vec<crate::entities::asset::ComfortRate>,
+    ) {
+        self.comfort_overrides.write().await.insert(asset_id, rates);
+    }
+
+    /// WP4.2: drop an override; returns whether one existed.
+    pub async fn remove_comfort_override(&self, asset_id: &str) -> bool {
+        self.comfort_overrides
+            .write()
+            .await
+            .remove(asset_id)
+            .is_some()
+    }
+
+    /// WP4.2: snapshot of all overrides (for effective-curve resolution).
+    pub async fn comfort_overrides_map(
+        &self,
+    ) -> std::collections::HashMap<String, Vec<crate::entities::asset::ComfortRate>> {
+        self.comfort_overrides.read().await.clone()
     }
 
     /// WP4.3: append a notification, evicting the oldest past the ring cap.

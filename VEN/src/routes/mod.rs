@@ -74,6 +74,12 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/history/plans", get(hems::get_history_plans))
         .route("/history/:asset_id", get(assets::get_asset_history))
         .route("/capability/:asset_id", get(assets::get_asset_capability))
+        .route(
+            "/assets/:asset_id/comfort_curve",
+            get(hems::get_comfort_curve)
+                .post(hems::post_comfort_curve)
+                .delete(hems::delete_comfort_curve),
+        )
         // HEMS Stage 2 routes
         .route("/capacity", get(hems::get_capacity))
         .route("/obligations", get(hems::get_obligations))

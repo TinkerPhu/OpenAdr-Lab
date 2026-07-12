@@ -16,6 +16,10 @@ pub use solver_port::{SolveRequest, SolverPort};
 pub mod history_port;
 pub use history_port::HistoryPort;
 
+// ── SettingsPort trait (WP4.2, BL-19) ─────────────────────────────────────────
+pub mod settings_port;
+pub use settings_port::SettingsPort;
+
 // ── OpenADR interface ─────────────────────────────────────────────────────────
 pub mod openadr_interface;
 
