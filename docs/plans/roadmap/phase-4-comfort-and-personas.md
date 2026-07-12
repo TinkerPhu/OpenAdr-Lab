@@ -89,6 +89,36 @@ Planner work lands in `controller/milp_planner`'s session-intent translation —
    spread is *not* visible, that's a real finding about the control method, write it
    up either way.
 
+## WP4.6 — Observability UI polish (S, added 2026-07-12 after WP4.1–4.5 landed)
+
+Phase 3/4 features are all reachable via API and mostly via UI, but several
+effects are only *indirectly* observable (a demo requires knowing where to
+look). Pure UI work — every item already has an API; no backend changes.
+
+1. **Grid-signal status strip** on the Controller page: chips for active
+   alert window(s), highest active SIMPLE level, dispatch override
+   ("override active: X kW"), and capacity subscription/reservation/limit
+   state. Sources: `GET /capacity` + alert/SIMPLE/dispatch windows already
+   in state (expose via a small `GET /signals` aggregate or reuse existing
+   endpoints — prefer reuse; add the aggregate only if the UI needs >2
+   round-trips).
+2. **Estimated-rate shading** (WP4.4): timeline/plan-matrix slots with
+   `rate_estimated: true` get a visual treatment (hatch/opacity) + legend
+   entry, so stale-tariff fills are distinguishable from real rates.
+3. **Persona labels** (WP4.5): the VEN selector shows `fleet-ven-003 (eco)`
+   — persona comes from the fleet manifest via the existing VEN registry
+   (extend `venRegistry.ts` discovery; static trio unaffected).
+4. **Mode everywhere**: mode column in the All-Requests table; mode chips on
+   the heater and shiftable cards (EV already has one).
+5. **Dispatch-override badge**: live "override active" indicator (the trace
+   already records transitions; the strip in item 1 covers this — listed
+   separately only if item 1 is descoped).
+
+Test-first at UI level (vitest, mocked hooks) per item; one BDD/manual-test
+section (M4.8) covering the status strip against a live alert event.
+Exit: a running alert/SIMPLE/dispatch/capacity condition and a stale-rate
+plan are each identifiable from the UI within one glance, no API calls.
+
 ## Order & risks
 
 ```
