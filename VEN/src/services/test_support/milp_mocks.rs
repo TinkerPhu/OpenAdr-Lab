@@ -119,6 +119,9 @@ impl MockEvCtx {
                 e_extra_max_kwh: 0.0,
                 v_extra_eur_kwh: 0.0,
                 v_core_eur: 0.0,
+                asap_lateness_eur_kwh_h: 0.0,
+                free_only: false,
+                p_free_cap_kw: None,
             },
         }
     }
@@ -136,6 +139,9 @@ impl MockEvCtx {
                 e_extra_max_kwh: 0.0,
                 v_extra_eur_kwh: 0.05,
                 v_core_eur: 0.0,
+                asap_lateness_eur_kwh_h: 0.0,
+                free_only: false,
+                p_free_cap_kw: None,
             },
         }
     }
@@ -188,7 +194,7 @@ impl AssetMilpContext for MockEvCtx {
         &self,
         pool: &MilpVarPool,
         n: usize,
-        _dt_h: &[f64],
+        dt_h: &[f64],
         _c_wear_eur_kwh: f64,
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
@@ -205,6 +211,7 @@ impl AssetMilpContext for MockEvCtx {
             ramp,
             w_services,
             n,
+            dt_h,
         )
     }
 }
