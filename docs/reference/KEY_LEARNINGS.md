@@ -241,7 +241,8 @@
   (e.g., stable battery headroom) must use pv_plan_kw, not pv_irradiance.
 
 - **MILP planning-only overrides must NOT trigger a replan**: Including pv_plan_kw
-  in the should_replan guard in outes/sim.rs causes a T1+T2 double-solve race:
+  in the should_replan guard in 
+outes/sim.rs causes a T1+T2 double-solve race:
   the Background step fires T1 (replan), the subsequent absorber step fires T2, and
   the second plan is adopted during the 8 s assertion window.  Overrides that only
   affect future planning (not current device state) must be excluded from
@@ -306,3 +307,18 @@
   `compose up -d` then silently kept the old image running ("Container …
   Running" instead of "Recreated"). Check for ERROR lines explicitly, or let
   the full output through.
+
+- **A MILP with cost-equal integer choices is nondeterministic across builds —
+  break ties in the objective** (Phase 3/4 review): shiftable-load start slots
+  were only pinned by cost; the x86 HiGHS build happened to pick the earliest
+  slot while the Pi4 ARM build picked a later one, producing an E2E flake that
+  no local run could reproduce. Any binary choice the system's observable
+  behaviour depends on needs an explicit (tiny) objective bias — in BOTH
+  phases of a two-phase solve, or the phase-2 epsilon budget undoes it.
+
+- **Attach a one-line state diagnostic to E2E poll timeouts** (Phase 3/4
+  review): wrapping `poll_until` failures with a `/plan` summary (trigger,
+  allocated assets, warnings) turned four unreproducible "flakes" into a
+  single attributable planner defect on the first failing run afterwards.
+  A timeout that only says "timed out" blames the infrastructure by default.
+
