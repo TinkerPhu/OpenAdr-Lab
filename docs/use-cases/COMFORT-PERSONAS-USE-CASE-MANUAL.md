@@ -263,3 +263,45 @@ wherever the curve is consulted; DELETE restores the default. Invalid curves
 > constraints is future work (see BL-19 resolution note in `docs/BACKLOG.md`).
 
 ---
+
+## M4.6 — MAX_COST and *_FREE request modes (WP4.1-c)
+
+### What this verifies
+
+The remaining request modes (BL-28):
+
+- **MAX_COST** — charge toward the target whenever it is cheapest, but total
+  charging cost never exceeds the session budget. An unaffordable target does
+  NOT fail the plan: charging stops at the budget and one Warn notification
+  ("budget") appears in the feed.
+- **ASAP_FREE** — only free energy (PV surplus / non-positive tariff), taken
+  as early as it appears.
+- **BY_DEADLINE_FREE** — only free energy, and only inside the deadline window.
+
+### Steps — MAX_COST budget shortfall
+
+1. **VEN UI → Devices → Plan Charging** (VEN1): target 90 %, mode `MAX_COST`.
+   A **Budget (€)** field appears — set it absurdly low, e.g. `0.05`. Confirm.
+2. Within ~1–2 replans: **Expected:** the notification bell gains one **WARN**
+   entry saying the budget is too low to reach the target; the Controller page
+   shows partial EV charging only (what €0.05 buys).
+3. Unplan, repeat with budget `5.00`. **Expected:** full charging schedule in
+   the cheapest slots, no budget notification.
+
+### Steps — free-energy modes
+
+4. Pin the PV forecast to zero so no energy is free:
+   `curl -s -X POST http://Pi4-Server:8211/sim/inject -H 'Content-Type: application/json' -d '{"pv_plan_kw": 0.0}'`
+5. Plan Charging with mode `ASAP_FREE` (no other change).
+   **Expected:** after the next replan the plan contains **no** EV charging at
+   all — the request stays active but nothing is scheduled (flat positive
+   tariff, no surplus → no free energy).
+6. Restore PV (`curl -s -X POST http://Pi4-Server:8211/sim/inject/reset`) at
+   midday, or publish a price event with a negative-price interval.
+   **Expected:** charging appears exactly in the surplus / negative-price
+   slots, front-loaded (earliest free slots first for `ASAP_FREE`).
+7. Repeat with `BY_DEADLINE_FREE` and a departure before the free window:
+   **Expected:** still no charging — free energy outside the deadline does
+   not count.
+
+---

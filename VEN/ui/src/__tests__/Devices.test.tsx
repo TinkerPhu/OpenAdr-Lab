@@ -37,6 +37,7 @@ function makeEvRequest(overrides: Partial<UserRequestWithSession> = {}): UserReq
       departure_time: "2026-04-12T07:00:00Z",
       soft_deadline: false,
       mode: "BY_DEADLINE",
+      budget_eur: null,
       created_at: "2026-04-11T06:00:00Z",
       updated_at: "2026-04-11T06:00:00Z",
     },
@@ -255,6 +256,24 @@ describe("DevicesPage", () => {
     mockRequestsData.mockReturnValue([evReq]);
     renderPage();
     expect(screen.getByTestId("ev-mode-chip")).toHaveTextContent("OPPORTUNISTIC");
+  });
+
+  // 4e. MAX_COST reveals a budget field and sends budget_eur (WP4.1-c)
+  it("sends budget_eur when MAX_COST is selected", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("ev-plan-btn"));
+    await user.selectOptions(
+      within(screen.getByTestId("ev-dialog")).getByRole("combobox"),
+      "MAX_COST",
+    );
+    const budget = screen.getByTestId("ev-budget-input");
+    await user.clear(budget);
+    await user.type(budget, "2.5");
+    await user.click(screen.getByTestId("ev-dialog-confirm"));
+    expect(mockPostRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "MAX_COST", budget_eur: 2.5 }),
+    );
   });
 
   // 5. Click Unplan calls deleteRequest

@@ -69,6 +69,7 @@ export function EvCard(props: EvCardProps) {
   const [departure, setDeparture] = useState(defaultDateTime(8));
   const [softDeadline, setSoftDeadline] = useState(false);
   const [mode, setMode] = useState<UserRequestMode>("BY_DEADLINE");
+  const [budgetEur, setBudgetEur] = useState("2.00");
 
   const session = request?.session?.type === "ev" ? request.session : null;
   const paused = evSettings?.paused_by_active_session ?? false;
@@ -83,6 +84,7 @@ export function EvCard(props: EvCardProps) {
       desired_power_kw: 7.0,
       soft_deadline: softDeadline,
       mode,
+      budget_eur: mode === "MAX_COST" ? Number(budgetEur) : undefined,
       completion_policy: "CONTINUE",
       deadlines: [{
         latest_end: dt.toISOString(),
@@ -198,6 +200,15 @@ export function EvCard(props: EvCardProps) {
             }
           />
           <ModeSelect value={mode} onChange={setMode} testId="ev-mode-select" />
+          {mode === "MAX_COST" && (
+            <TextField
+              label="Budget (€)"
+              type="number"
+              value={budgetEur}
+              onChange={(e) => setBudgetEur(e.target.value)}
+              inputProps={{ min: 0, step: 0.5, "data-testid": "ev-budget-input" }}
+            />
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)} data-testid="ev-dialog-cancel">Cancel</Button>

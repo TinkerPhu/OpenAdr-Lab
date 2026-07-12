@@ -77,6 +77,9 @@ pub(crate) struct MilpInputs {
     /// WP4.4: stable warning text when any slot is stale (→ PlanWarning →
     /// WP4.3 notification), `None` when the horizon is fully covered.
     pub(crate) stale_rate_warning: Option<String>,
+    /// WP4.1-c MAX_COST: stable warning text when the session budget cannot
+    /// buy the target energy even at the cheapest slot rate.
+    pub(crate) budget_warning: Option<String>,
     /// Export tariff [€/kWh]
     pub(crate) c_exp_eur_kwh: Vec<f64>,
     /// Grid CO₂ intensity [kgCO₂/kWh] (÷1000 from stored g/kWh)

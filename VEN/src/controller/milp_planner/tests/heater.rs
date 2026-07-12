@@ -560,6 +560,7 @@ fn ev_planned_state_soc_populated() {
         target_soc: 0.8,
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
+        budget_eur: None,
         created_at: now,
         updated_at: now,
     };

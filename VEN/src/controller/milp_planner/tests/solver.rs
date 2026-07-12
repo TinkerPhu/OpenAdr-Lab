@@ -11,6 +11,7 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
         c_imp_eur_kwh: vec![0.25; n],
         rate_stale: vec![false; n],
         stale_rate_warning: None,
+        budget_warning: None,
         c_exp_eur_kwh: vec![0.08; n],
         g_imp_kgco2_kwh: vec![0.30; n],
         p_pv_kw: vec![0.0; n],
