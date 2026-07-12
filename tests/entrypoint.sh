@@ -41,6 +41,28 @@ python -m behave --tags=~@isolated --exclude "isolated" "$@"
 MAIN_EXIT=$?
 
 echo ""
+# The @isolated pass exists precisely because these scenarios are
+# timing-sensitive on Pi4 — but starting them seconds after the ~40-minute
+# main suite defeats the purpose: the box is still busy (planner solves,
+# docker I/O) and their poll_until timeouts flake. Containers share the host
+# kernel, so /proc/loadavg is the real Pi4 load. Wait for it to settle
+# (1-min load < 2.0), capped at 8 minutes.
+echo "=== Waiting for host load to settle before @isolated pass ==="
+SETTLE_DEADLINE=$(( $(date +%s) + 480 ))
+while :; do
+  LOAD1=$(cut -d' ' -f1 /proc/loadavg)
+  if [ "$(awk -v l="$LOAD1" 'BEGIN { print (l < 2.0) ? 1 : 0 }')" = "1" ]; then
+    echo "Host load settled at $LOAD1."
+    break
+  fi
+  if [ "$(date +%s)" -ge "$SETTLE_DEADLINE" ]; then
+    echo "Host load still $LOAD1 after 8 min — proceeding anyway."
+    break
+  fi
+  echo "  load $LOAD1 >= 2.0 — waiting 15 s"
+  sleep 15
+done
+
 echo "=== Running @isolated scenarios (fresh VEN state) ==="
 # Point directly at the dedicated isolated/ subdirectory. Every scenario in
 # that directory is @isolated, so nothing is loaded-but-skipped: zero structural
