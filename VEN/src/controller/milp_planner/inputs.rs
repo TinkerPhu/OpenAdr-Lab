@@ -86,7 +86,21 @@ pub(crate) fn build_milp_inputs(
         .min(exp_allowance);
     let base_kw = base_load.map(|c| c.baseline_kw).unwrap_or(0.0);
 
-    let mut c_imp = Vec::with_capacity(n);
+    // WP4.4 (BL-07): import rates come through the stale-rate policy — covered
+    // slots interpolate, slots beyond tariff coverage are filled per policy.
+    let slot_starts: Vec<DateTime<Utc>> = cum_s[0..n]
+        .iter()
+        .map(|&s| now + Duration::seconds(s))
+        .collect();
+    let stale_outcome = super::stale_rates::apply_stale_rate_policy(
+        &planner.stale_rate_policy,
+        planner.stale_rate_safe_pctl,
+        tariffs,
+        &slot_starts,
+        0.25,
+    );
+    let c_imp = stale_outcome.c_imp_eur_kwh;
+
     let mut c_exp = Vec::with_capacity(n);
     let mut g_co2 = Vec::with_capacity(n);
     let mut p_pv = Vec::with_capacity(n);
@@ -99,12 +113,6 @@ pub(crate) fn build_milp_inputs(
     for (i, &slot_s) in cum_s[0..n].iter().enumerate() {
         let slot_t = now + Duration::seconds(slot_s);
         let slot_end = now + Duration::seconds(cum_s[i + 1]);
-        c_imp.push(
-            tariffs
-                .import_eur_kwh
-                .interpolate_at(slot_t)
-                .unwrap_or(0.25),
-        );
         c_exp.push(
             tariffs
                 .export_eur_kwh
@@ -307,6 +315,8 @@ pub(crate) fn build_milp_inputs(
         dt_h,
         cum_s,
         c_imp_eur_kwh: c_imp,
+        rate_stale: stale_outcome.rate_stale,
+        stale_rate_warning: stale_outcome.warning,
         c_exp_eur_kwh: c_exp,
         g_imp_kgco2_kwh: g_co2,
         p_pv_kw: p_pv,

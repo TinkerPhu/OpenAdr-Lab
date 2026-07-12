@@ -177,3 +177,42 @@ newly-appearing planner warnings on an adopted plan (Warn / Alert).
     open; trigger step 2 again and watch the notification arrive live.
 
 ---
+
+## M4.4 — StaleRatePolicy fills slots beyond tariff coverage (WP4.4)
+
+### What this verifies
+
+The planner (BL-07) now prices slots that lie beyond the last known tariff
+data per the profile-configured `stale_rate_policy`:
+
+| Policy | Stale-slot import rate |
+|---|---|
+| `LAST_KNOWN` | last known rate repeated |
+| `SAFE_AVERAGE` | `stale_rate_safe_pctl` percentile of the known rates (default 0.8) |
+| `DEFER_TO_FLEXIBLE` | maximum known rate — discretionary load defers into covered slots |
+| `HEURISTIC_FORECAST` (default) | stub until Phase 5 (BL-14): behaves like `LAST_KNOWN`, says so in the warning |
+
+Stale slots carry `rate_estimated: true` and the plan carries one stable
+warning, which the WP4.3 feed surfaces as a single Warn notification.
+
+### Steps
+
+1. On the **VTN UI**, publish a short price event: three intervals over the
+   next 2 h, e.g. `0.40 / 0.20 / 0.10 €/kWh` (UC recipe from
+   `SYSTEM-USE-CASE-MANUAL.md`). The VEN horizon (48 h) now extends far past
+   coverage.
+2. After the next replan: `curl -s http://Pi4-Server:8211/plan | jq '[.slots[] | {start, rate: .import_tariff_eur_kwh, est: .rate_estimated}] | .[0:8]'`
+   **Expected:** the first ~2 h of slots show the published rates with
+   `est: false`; later slots show the fill rate with `est: true`.
+   With the default policy the fill equals the last published rate (0.10).
+3. `curl -s http://Pi4-Server:8211/plan | jq .warnings`
+   **Expected:** one warning naming `HEURISTIC_FORECAST` and its
+   `LAST_KNOWN` fallback.
+4. Check the notification bell: **Expected:** one **WARN** entry with the same
+   text — and only one, even after several replans (dedup by stable text).
+5. Optional — policy comparison: set `stale_rate_policy: SAFE_AVERAGE` (or
+   `DEFER_TO_FLEXIBLE`) in the VEN profile YAML, restart the VEN, repeat
+   step 2. **Expected:** the stale-slot rate changes to the percentile
+   (0.20 at p50) or the maximum (0.40) respectively.
+
+---

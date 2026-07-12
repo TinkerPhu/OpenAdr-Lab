@@ -21,6 +21,11 @@ pub struct TariffTimeSeries {
     pub import_eur_kwh: TimeSeries,
     pub export_eur_kwh: TimeSeries,
     pub co2_g_kwh: TimeSeries,
+    /// WP4.4 (BL-07): where real import-rate data ends (max `interval_end`
+    /// over snapshots carrying an import value). Slots at/after this instant
+    /// are "stale" and filled per the configured `StaleRatePolicy`.
+    /// `None` = no import data at all (every slot is stale).
+    pub import_coverage_end: Option<DateTime<Utc>>,
 }
 
 impl TariffTimeSeries {
@@ -35,10 +40,15 @@ impl TariffTimeSeries {
         let mut import_samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
         let mut export_samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
         let mut co2_samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
+        let mut import_coverage_end: Option<DateTime<Utc>> = None;
 
         for snap in &sorted {
             let ts = snap.interval_start;
             if let Some(v) = snap.import_tariff_eur_kwh {
+                import_coverage_end = Some(match import_coverage_end {
+                    Some(cur) => cur.max(snap.interval_end),
+                    None => snap.interval_end,
+                });
                 // Last-write-wins: replace if duplicate timestamp
                 if let Some(last) = import_samples.last_mut() {
                     if last.0 == ts {
@@ -87,6 +97,7 @@ impl TariffTimeSeries {
                 samples: co2_samples,
                 interpolation: Interpolation::Step,
             },
+            import_coverage_end,
         }
     }
 
