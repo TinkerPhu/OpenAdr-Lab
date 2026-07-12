@@ -53,11 +53,17 @@ pub(super) fn query(
     limit: usize,
 ) -> Result<Vec<UserNotification>, DomainError> {
     let since_unix = since.map(to_unix).unwrap_or(i64::MIN);
+    // The NEWEST `limit` rows, returned oldest-first: seeding the in-memory
+    // ring must keep the most recent history, not the most ancient (found in
+    // the Phase 3+4 review — a plain ASC LIMIT drops the newest rows once
+    // more than `limit` notifications have accumulated).
     let mut stmt = conn
         .prepare(
-            "SELECT id, created_at, severity, message, asset_id, event_id
-             FROM notifications WHERE created_at > ?1
-             ORDER BY created_at ASC LIMIT ?2",
+            "SELECT id, created_at, severity, message, asset_id, event_id FROM (
+                 SELECT id, created_at, severity, message, asset_id, event_id
+                 FROM notifications WHERE created_at > ?1
+                 ORDER BY created_at DESC LIMIT ?2
+             ) ORDER BY created_at ASC",
         )
         .map_err(|e| DomainError::StorageError(format!("prepare query: {e}")))?;
     let rows = stmt

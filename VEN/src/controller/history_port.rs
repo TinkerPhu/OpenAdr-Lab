@@ -61,8 +61,8 @@ pub trait HistoryPort: Send + Sync {
         to: DateTime<Utc>,
     ) -> Result<Vec<PlanSnapshot>, DomainError>;
     fn query_ledger_periods(&self, asset_id: &str) -> Result<Vec<LedgerPeriod>, DomainError>;
-    /// WP4.3 (BL-20): notifications newer than `since` (all when `None`),
-    /// oldest first, at most `limit` rows. Default empty for test doubles.
+    /// WP4.3 (BL-20): the NEWEST `limit` notifications newer than `since`
+    /// (all when `None`), returned oldest first. Default empty for test doubles.
     fn query_notifications(
         &self,
         since: Option<DateTime<Utc>>,

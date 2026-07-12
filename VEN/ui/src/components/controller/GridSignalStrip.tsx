@@ -9,6 +9,14 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
+/** "until HH:MM" for an active window, "from HH:MM" for an upcoming one —
+ * the /signals aggregate already drops ended windows server-side. */
+function windowLabel(startIso: string, endIso: string): string {
+  return new Date(startIso).getTime() > Date.now()
+    ? `from ${fmtTime(startIso)}`
+    : `until ${fmtTime(endIso)}`;
+}
+
 /** WP4.6: at-a-glance strip of the active grid signals (alert / SIMPLE /
  *  dispatch / capacity). Renders nothing when no signal is active, so the
  *  page stays uncluttered in normal operation. */
@@ -39,7 +47,7 @@ export function GridSignalStrip() {
             color="error"
             size="small"
             data-testid="signal-chip-alert"
-            label={`Alert ${a.alert_type} until ${fmtTime(a.end)}`}
+            label={`Alert ${a.alert_type} ${windowLabel(a.start, a.end)}`}
           />
         </Tooltip>
       ))}
@@ -49,7 +57,8 @@ export function GridSignalStrip() {
           color="warning"
           size="small"
           data-testid="signal-chip-simple"
-          label={`SIMPLE L${maxSimple} until ${fmtTime(
+          label={`SIMPLE L${maxSimple} ${windowLabel(
+            simple.filter((w) => w.level === maxSimple)[0].start,
             simple.filter((w) => w.level === maxSimple)[0].end,
           )}`}
         />
@@ -60,7 +69,7 @@ export function GridSignalStrip() {
           color="info"
           size="small"
           data-testid="signal-chip-dispatch"
-          label={`Dispatch ${activeDispatch.setpoint_kw} kW until ${fmtTime(activeDispatch.end)}`}
+          label={`Dispatch ${activeDispatch.setpoint_kw} kW ${windowLabel(activeDispatch.start, activeDispatch.end)}`}
         />
       )}
       {capParts.length > 0 && (

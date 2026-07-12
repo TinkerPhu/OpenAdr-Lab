@@ -59,10 +59,37 @@ pub async fn get_capacity(State(ctx): State<AppCtx>) -> impl IntoResponse {
 /// (alert / SIMPLE / dispatch windows + capacity state) for the UI status
 /// strip. Read-only view over state the poll loop already maintains.
 pub async fn get_signals(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    // Ended windows stay in state while their event exists on the VTN
+    // (events are permanent records; operators may end an emergency by
+    // adding timing rather than deleting) — drop them here so the strip
+    // never shows a stale chip. Upcoming windows are kept (the UI labels
+    // them "from HH:MM").
+    let now = chrono::Utc::now();
+    let alerts: Vec<_> = ctx
+        .state
+        .alert_windows()
+        .await
+        .into_iter()
+        .filter(|w| !w.is_ended(now))
+        .collect();
+    let simple: Vec<_> = ctx
+        .state
+        .simple_windows()
+        .await
+        .into_iter()
+        .filter(|w| !w.is_ended(now))
+        .collect();
+    let dispatch: Vec<_> = ctx
+        .state
+        .dispatch_windows()
+        .await
+        .into_iter()
+        .filter(|w| !w.is_ended(now))
+        .collect();
     Json(serde_json::json!({
-        "alerts": ctx.state.alert_windows().await,
-        "simple": ctx.state.simple_windows().await,
-        "dispatch": ctx.state.dispatch_windows().await,
+        "alerts": alerts,
+        "simple": simple,
+        "dispatch": dispatch,
         "capacity": ctx.state.capacity_state().await,
     }))
 }
