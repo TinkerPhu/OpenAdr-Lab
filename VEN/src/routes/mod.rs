@@ -1,6 +1,7 @@
 pub mod assets;
 pub mod events;
 pub mod hems;
+pub mod notifications;
 pub mod reports;
 pub mod sim;
 pub mod system;
@@ -53,6 +54,11 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/plan", get(hems::get_plan))
         .route("/plan/objective", put(hems::put_plan_objective))
         .route("/plan/events", get(hems::get_plan_events))
+        .route("/notifications", get(notifications::get_notifications))
+        .route(
+            "/notifications/events",
+            get(notifications::get_notification_events),
+        )
         .route("/tariffs", get(hems::get_tariffs))
         // Timeline routes (speckit 005) — /all must precede /:asset_id
         .route("/timeline/all", get(timeline::get_timeline_all))

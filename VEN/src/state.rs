@@ -118,7 +118,13 @@ pub struct AppState {
     pub polling: Arc<RwLock<PollingState>>,
     pub ctrl_sim: Arc<RwLock<ControllerSimState>>,
     pub hems: Arc<RwLock<HemsState>>,
+    /// WP4.3 (BL-20): bounded ring of user-facing notifications, newest last.
+    pub notifications:
+        Arc<RwLock<std::collections::VecDeque<crate::entities::notification::UserNotification>>>,
 }
+
+/// WP4.3: in-memory notification ring capacity (mirrors the /trace/events ring).
+pub const NOTIFICATION_RING_CAP: usize = 200;
 
 #[derive(Serialize, Deserialize)]
 struct PersistedVenState {
@@ -150,7 +156,29 @@ impl AppState {
                 },
                 ..HemsState::default()
             })),
+            notifications: Arc::new(RwLock::new(std::collections::VecDeque::new())),
         }
+    }
+
+    /// WP4.3: append a notification, evicting the oldest past the ring cap.
+    pub async fn push_notification(&self, n: crate::entities::notification::UserNotification) {
+        let mut ring = self.notifications.write().await;
+        if ring.len() >= NOTIFICATION_RING_CAP {
+            ring.pop_front();
+        }
+        ring.push_back(n);
+    }
+
+    /// WP4.3: notifications strictly newer than `since` (all when `None`), oldest first.
+    pub async fn notifications_since(
+        &self,
+        since: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Vec<crate::entities::notification::UserNotification> {
+        let ring = self.notifications.read().await;
+        ring.iter()
+            .filter(|n| since.is_none_or(|s| n.created_at > s))
+            .cloned()
+            .collect()
     }
 
     pub async fn set_programs(&self, programs: Vec<OadrProgram>) {

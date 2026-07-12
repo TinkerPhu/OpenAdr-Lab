@@ -18,6 +18,16 @@ export function useHealth() {
   });
 }
 
+/** WP4.3 (BL-20): the notification feed, polled every 10 s. */
+export function useNotifications() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["notifications", api.baseUrl],
+    queryFn: () => api.notifications(),
+    refetchInterval: 10_000,
+  });
+}
+
 export function usePrograms() {
   const { api } = useVenContext();
   return useQuery({

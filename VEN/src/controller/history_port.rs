@@ -17,6 +17,7 @@ use chrono::{DateTime, Utc};
 use crate::entities::history::{
     EventReceived, GridSample, LedgerPeriod, PlanSnapshot, ReportSent, TickSample,
 };
+use crate::entities::notification::UserNotification;
 use crate::entities::DomainError;
 
 pub trait HistoryPort: Send + Sync {
@@ -26,6 +27,12 @@ pub trait HistoryPort: Send + Sync {
     fn append_event_received(&self, row: &EventReceived) -> Result<(), DomainError>;
     fn append_report_sent(&self, row: &ReportSent) -> Result<(), DomainError>;
     fn append_ledger_period(&self, row: &LedgerPeriod) -> Result<(), DomainError>;
+    /// WP4.3 (BL-20): persist one user notification. Default no-op so
+    /// history-less test doubles keep compiling; the SQLite store overrides.
+    fn append_notification(&self, row: &UserNotification) -> Result<(), DomainError> {
+        let _ = row;
+        Ok(())
+    }
 
     fn query_ticks(
         &self,
@@ -54,6 +61,16 @@ pub trait HistoryPort: Send + Sync {
         to: DateTime<Utc>,
     ) -> Result<Vec<PlanSnapshot>, DomainError>;
     fn query_ledger_periods(&self, asset_id: &str) -> Result<Vec<LedgerPeriod>, DomainError>;
+    /// WP4.3 (BL-20): notifications newer than `since` (all when `None`),
+    /// oldest first, at most `limit` rows. Default empty for test doubles.
+    fn query_notifications(
+        &self,
+        since: Option<DateTime<Utc>>,
+        limit: usize,
+    ) -> Result<Vec<UserNotification>, DomainError> {
+        let _ = (since, limit);
+        Ok(Vec::new())
+    }
 
     /// Delete all rows across every table with a time column older than `cutoff`.
     /// Returns the total number of rows deleted.

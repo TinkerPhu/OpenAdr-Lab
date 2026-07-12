@@ -49,6 +49,8 @@ pub struct AppCtx {
     /// Persistent history store (Phase 1, A-1) — `None` when `profile.history.enabled`
     /// is false or the store failed to open.
     pub history: Option<Arc<dyn controller::HistoryPort>>,
+    /// WP4.3 (BL-20): notification fan-out (ring + SSE broadcast + persistence).
+    pub notifier: services::notify::Notifier,
 }
 
 fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Vec<AssetParams>) {
@@ -188,6 +190,18 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    // WP4.3 (BL-20): notification fan-out; seed the live ring from the store
+    // so the feed survives restarts.
+    let notifier = services::notify::Notifier::new(history_port.clone());
+    if let Some(h) = history_port.clone() {
+        let seeded = tokio::task::spawn_blocking(move || h.query_notifications(None, 200)).await;
+        if let Ok(Ok(rows)) = seeded {
+            for n in rows {
+                state.push_notification(n).await;
+            }
+        }
+    }
+
     // Spawn background loops — each wrapped in supervised_spawn for automatic restart.
     const TASK_COOLDOWN_S: u64 = 5;
 
@@ -199,14 +213,22 @@ async fn main() -> anyhow::Result<()> {
         });
     }
     {
-        let (s, v, secs, tx) = (
+        let (s, v, secs, tx, nf) = (
             state.clone(),
             vtn_port.clone(),
             cfg.poll_events_secs,
             trigger_tx.clone(),
+            notifier.clone(),
         );
         tasks::supervised_spawn("poll_events", TASK_COOLDOWN_S, move || {
-            tasks::spawn_event_poll(s.clone(), v.clone(), secs, tx.clone(), poll_jitter_s)
+            tasks::spawn_event_poll(
+                s.clone(),
+                v.clone(),
+                secs,
+                tx.clone(),
+                nf.clone(),
+                poll_jitter_s,
+            )
         });
     }
     {
@@ -256,7 +278,7 @@ async fn main() -> anyhow::Result<()> {
     }
     let active_objective = Arc::new(RwLock::new(planner_params.objective));
     {
-        let (s, pp, gmax_i, gmax_e, ap, sv, rx, sim, ao, etx) = (
+        let (s, pp, gmax_i, gmax_e, ap, sv, rx, sim, ao, etx, nf) = (
             state.clone(),
             planner_params.clone(),
             grid_max_import_kw,
@@ -267,6 +289,7 @@ async fn main() -> anyhow::Result<()> {
             sim_state.clone(),
             active_objective.clone(),
             planner_event_tx.clone(),
+            notifier.clone(),
         );
         tasks::supervised_spawn("planning", TASK_COOLDOWN_S, move || {
             tasks::spawn_planning(
@@ -280,6 +303,7 @@ async fn main() -> anyhow::Result<()> {
                 sim.clone(),
                 ao.clone(),
                 etx.clone(),
+                nf.clone(),
             )
         });
     }
@@ -312,6 +336,7 @@ async fn main() -> anyhow::Result<()> {
         active_objective,
         planner_event_tx,
         history: history_port,
+        notifier,
     };
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;

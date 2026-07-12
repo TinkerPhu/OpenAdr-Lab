@@ -38,6 +38,7 @@ pub(crate) struct SignalPrevs {
 pub(crate) async fn apply_signal_changes(
     state: &AppState,
     trigger_tx: &tokio::sync::watch::Sender<PlanTrigger>,
+    notifier: &crate::services::notify::Notifier,
     signals: ParsedSignals,
     now: DateTime<Utc>,
     prevs: &mut SignalPrevs,
@@ -52,6 +53,20 @@ pub(crate) async fn apply_signal_changes(
     let alerts_changed = alerts != prevs.alerts;
     if alerts_changed {
         state.set_alert_windows(alerts.clone()).await;
+        // WP4.3 (BL-20): each newly-appearing alert window is a grid
+        // emergency the resident should see — notify once per window.
+        for w in alerts.iter().filter(|w| !prevs.alerts.contains(w)) {
+            notifier
+                .notify(
+                    state,
+                    now,
+                    crate::entities::design_vocabulary::UserNotificationSeverity::Alert,
+                    format!("Grid emergency ({}): {}", w.alert_type, w.message),
+                    None,
+                    Some(w.event_id.clone()),
+                )
+                .await;
+        }
         prevs.alerts = alerts;
         let _ = trigger_tx.send(PlanTrigger::Alert);
     }
@@ -148,14 +163,22 @@ mod tests {
             charge_state: Some((0.9, ts(7200), "evt-cs".to_string())),
             ..Default::default()
         };
-        let sent = apply_signal_changes(&state, &tx, signals, ts(0), &mut prevs).await;
+        let notifier = crate::services::notify::Notifier::new(None);
+        let sent = apply_signal_changes(&state, &tx, &notifier, signals, ts(0), &mut prevs).await;
         assert!(sent);
         let session = state.ev_session().await.expect("session created");
         assert!((session.target_soc - 0.9).abs() < 1e-9);
 
         // Signal gone (event deleted == cancelled) -> that session cleared.
-        let sent =
-            apply_signal_changes(&state, &tx, ParsedSignals::default(), ts(10), &mut prevs).await;
+        let sent = apply_signal_changes(
+            &state,
+            &tx,
+            &notifier,
+            ParsedSignals::default(),
+            ts(10),
+            &mut prevs,
+        )
+        .await;
         assert!(sent);
         assert!(
             state.ev_session().await.is_none(),
@@ -174,7 +197,8 @@ mod tests {
             charge_state: Some((0.9, ts(7200), "evt-cs".to_string())),
             ..Default::default()
         };
-        apply_signal_changes(&state, &tx, signals, ts(0), &mut prevs).await;
+        let notifier = crate::services::notify::Notifier::new(None);
+        apply_signal_changes(&state, &tx, &notifier, signals, ts(0), &mut prevs).await;
         let user_session = crate::entities::device_session::EvSession {
             id: uuid::Uuid::new_v4(),
             target_soc: 0.7,
@@ -186,8 +210,52 @@ mod tests {
         };
         state.set_ev_session(Some(user_session.clone())).await;
 
-        apply_signal_changes(&state, &tx, ParsedSignals::default(), ts(10), &mut prevs).await;
+        apply_signal_changes(
+            &state,
+            &tx,
+            &notifier,
+            ParsedSignals::default(),
+            ts(10),
+            &mut prevs,
+        )
+        .await;
         let still = state.ev_session().await.expect("user session untouched");
         assert_eq!(still.id, user_session.id);
+    }
+
+    #[tokio::test]
+    async fn test_alert_appearance_emits_one_grid_emergency_notification() {
+        use crate::entities::capacity::AlertWindow;
+        use crate::entities::design_vocabulary::UserNotificationSeverity;
+        let state = AppState::new();
+        let (tx, _rx) = tokio::sync::watch::channel(PlanTrigger::Periodic);
+        let notifier = crate::services::notify::Notifier::new(None);
+        let mut prevs = SignalPrevs::default();
+
+        let alert = AlertWindow {
+            alert_type: "GRID_EMERGENCY".to_string(),
+            start: ts(0),
+            end: ts(3600),
+            event_id: "evt-a".to_string(),
+            message: "shed all load".to_string(),
+        };
+        let signals = ParsedSignals {
+            alerts: vec![alert.clone()],
+            ..Default::default()
+        };
+        apply_signal_changes(&state, &tx, &notifier, signals, ts(0), &mut prevs).await;
+
+        // Same alert set on the next poll -> no duplicate notification.
+        let signals = ParsedSignals {
+            alerts: vec![alert],
+            ..Default::default()
+        };
+        apply_signal_changes(&state, &tx, &notifier, signals, ts(30), &mut prevs).await;
+
+        let notes = state.notifications_since(None).await;
+        assert_eq!(notes.len(), 1, "exactly one notification per alert window");
+        assert_eq!(notes[0].severity, UserNotificationSeverity::Alert);
+        assert_eq!(notes[0].event_id.as_deref(), Some("evt-a"));
+        assert!(notes[0].message.contains("shed all load"));
     }
 }

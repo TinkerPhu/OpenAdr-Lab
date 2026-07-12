@@ -11,6 +11,7 @@
 //! the schema/adapter as its own reviewable commit first.
 #![allow(dead_code)]
 
+mod notifications;
 mod schema;
 
 use std::sync::Mutex;
@@ -23,7 +24,7 @@ use crate::entities::history::{
     EventReceived, GridSample, LedgerPeriod, PlanSnapshot, ReportSent, TickSample,
 };
 use crate::entities::DomainError;
-use schema::{SCHEMA_V1, SCHEMA_VERSION};
+use schema::{SCHEMA_V1, SCHEMA_V2, SCHEMA_VERSION};
 
 type TickSampleRow = (i64, String, f64, Option<f64>, Option<f64>);
 type GridSampleRow = (i64, f64, f64, Option<f64>, Option<f64>, Option<f64>);
@@ -75,8 +76,14 @@ impl SqliteHistoryStore {
         if version >= SCHEMA_VERSION {
             return Ok(());
         }
-        conn.execute_batch(SCHEMA_V1)
-            .map_err(|e| DomainError::StorageError(format!("apply schema v1: {e}")))?;
+        if version < 1 {
+            conn.execute_batch(SCHEMA_V1)
+                .map_err(|e| DomainError::StorageError(format!("apply schema v1: {e}")))?;
+        }
+        if version < 2 {
+            conn.execute_batch(SCHEMA_V2)
+                .map_err(|e| DomainError::StorageError(format!("apply schema v2: {e}")))?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| DomainError::StorageError(format!("set user_version: {e}")))?;
         Ok(())
@@ -453,6 +460,21 @@ impl HistoryPort for SqliteHistoryStore {
             .collect()
     }
 
+    fn append_notification(
+        &self,
+        row: &crate::entities::notification::UserNotification,
+    ) -> Result<(), DomainError> {
+        notifications::append(&*self.lock()?, row)
+    }
+
+    fn query_notifications(
+        &self,
+        since: Option<DateTime<Utc>>,
+        limit: usize,
+    ) -> Result<Vec<crate::entities::notification::UserNotification>, DomainError> {
+        notifications::query(&*self.lock()?, since, limit)
+    }
+
     fn prune_before(&self, cutoff: DateTime<Utc>) -> Result<u64, DomainError> {
         let conn = self.lock()?;
         let cutoff_unix = to_unix(cutoff);
@@ -464,6 +486,7 @@ impl HistoryPort for SqliteHistoryStore {
             ("events_received", "received_at"),
             ("reports_sent", "sent_at"),
             ("ledger_periods", "period_end"),
+            ("notifications", "created_at"),
         ] {
             let sql = format!("DELETE FROM {table} WHERE {col} < ?1");
             let n = conn
@@ -502,7 +525,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(table_count, 6, "expected 6 tables from schema v1");
+        assert_eq!(
+            table_count, 7,
+            "expected 6 tables from schema v1 + notifications from v2"
+        );
     }
 
     #[test]
@@ -744,5 +770,41 @@ mod tests {
         }
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_append_notification_roundtrip_and_since_filter() {
+        use crate::entities::design_vocabulary::UserNotificationSeverity;
+        use crate::entities::notification::UserNotification;
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        let old = UserNotification::new(
+            ts(100),
+            UserNotificationSeverity::Warn,
+            "VTN unreachable",
+            None,
+            None,
+        );
+        let new = UserNotification::new(
+            ts(200),
+            UserNotificationSeverity::Alert,
+            "grid emergency",
+            Some("ev".into()),
+            Some("evt-1".into()),
+        );
+        store.append_notification(&old).unwrap();
+        store.append_notification(&new).unwrap();
+
+        let all = store.query_notifications(None, 100).unwrap();
+        assert_eq!(
+            all,
+            vec![old.clone(), new.clone()],
+            "roundtrip, oldest first"
+        );
+
+        let since = store.query_notifications(Some(ts(150)), 100).unwrap();
+        assert_eq!(since, vec![new], "since filter keeps only newer rows");
+
+        let pruned = store.prune_before(ts(150)).unwrap();
+        assert_eq!(pruned, 1, "prune covers the notifications table");
     }
 }
