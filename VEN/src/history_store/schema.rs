@@ -1,7 +1,7 @@
-//! Schema v1 DDL for the history SQLite store, applied once via
+//! Versioned DDL for the history SQLite store, applied stepwise via
 //! `PRAGMA user_version` in `history_store::migrate`.
 
-pub(super) const SCHEMA_VERSION: i64 = 1;
+pub(super) const SCHEMA_VERSION: i64 = 2;
 
 pub(super) const SCHEMA_V1: &str = "
 CREATE TABLE tick_samples (
@@ -57,4 +57,17 @@ CREATE TABLE ledger_periods (
     co2_kg REAL NOT NULL
 );
 CREATE INDEX idx_ledger_periods_asset ON ledger_periods(asset_id, period_start);
+";
+
+/// WP4.3 (BL-20): user-facing notification feed persistence.
+pub(super) const SCHEMA_V2: &str = "
+CREATE TABLE notifications (
+    id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    severity TEXT NOT NULL,
+    message TEXT NOT NULL,
+    asset_id TEXT,
+    event_id TEXT
+);
+CREATE INDEX idx_notifications_ts ON notifications(created_at);
 ";

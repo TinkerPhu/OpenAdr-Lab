@@ -13,6 +13,7 @@ use crate::simulator::SimState;
 use crate::state::AppState;
 
 use super::progress_ticker::spawn_progress_ticker;
+use crate::services::forecast::finish_plan_cycle;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_planning(
@@ -26,6 +27,7 @@ pub(crate) fn spawn_planning(
     sim: Arc<Mutex<SimState>>,
     active_objective: Arc<RwLock<PlannerObjective>>,
     event_tx: PlannerEventTx,
+    notifier: crate::services::notify::Notifier,
 ) -> tokio::task::JoinHandle<()> {
     let replan_s = planner.replan_interval_s;
     let initial_delay_s = planner.planning_initial_delay_s;
@@ -187,15 +189,9 @@ pub(crate) fn spawn_planning(
             )
             .await;
 
-            // Envelope + per-asset forecasts (WP3.6, BL-15), from the adopted plan.
-            let sim_snap = sim.lock().await.to_sim_snapshot();
-            crate::services::forecast::publish_post_cycle_state(
-                &state,
-                &sim_snap,
-                &cycle.plan,
-                wall_now,
-            )
-            .await;
+            // Post-cycle outputs: WP4.3 notifications + WP3.6 forecasts.
+            let prev = current_plan.as_ref();
+            finish_plan_cycle(&state, &sim, &notifier, wall_now, prev, &cycle).await;
 
             info!(
                 trigger = %trigger_reason,
@@ -295,6 +291,7 @@ mod tests {
             sim,
             active_objective,
             event_tx,
+            crate::services::notify::Notifier::new(None),
         );
         handle.abort();
         let _ = trigger_tx; // keep alive until abort

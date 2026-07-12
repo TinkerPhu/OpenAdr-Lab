@@ -241,6 +241,19 @@ export type AssetLedger = {
 
 export type UserRequestStatus = "ACTIVE" | "COMPLETED" | "CANCELLED" | "FAILED";
 
+/** WP4.3 (BL-20): user-facing notification severity. */
+export type UserNotificationSeverity = "INFO" | "WARN" | "ALERT";
+
+/** WP4.3 (BL-20): one entry in the notification feed. */
+export type UserNotification = {
+  id: string;
+  created_at: string;
+  severity: UserNotificationSeverity;
+  message: string;
+  asset_id: string | null;
+  event_id: string | null;
+};
+
 /** How the user expressed the request (BL-28). Omitted = BY_DEADLINE (legacy). */
 export type UserRequestMode =
   | "ASAP"

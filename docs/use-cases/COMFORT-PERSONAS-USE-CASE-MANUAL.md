@@ -130,3 +130,50 @@ The two mode poles now steer the MILP planner on the EV path:
     shows the same allocation pattern the UI displays.
 
 ---
+
+## M4.3 — Notification feed (WP4.3)
+
+### What this verifies
+
+User-facing notifications (BL-20): a bell with badge in the VEN UI app bar, a
+feed panel, `GET /notifications`, an SSE stream, and persistence across VEN
+restarts. Producers live at three trigger points so far: grid-emergency alert
+events (Alert), VTN reachability edges (Warn on loss / Info on recovery), and
+newly-appearing planner warnings on an adopted plan (Warn / Alert).
+
+### Steps — grid emergency produces an Alert
+
+1. Open the **VEN UI** (VEN1). Note the bell icon next to the health chip —
+   remember its badge count.
+2. On the **VTN UI**, create an alert event (priority 0, `alertType` payload —
+   same recipe as UC1 in `SYSTEM-USE-CASE-MANUAL.md`) targeted at VEN1 with a
+   window starting now.
+3. Within one poll cycle (~30 s) the badge count increments.
+   Click the bell: the top entry reads **ALERT — Grid emergency (…)** with the
+   event's message text.
+4. Delete the alert event. **Expected:** no new notification (deletion is not
+   an emergency), and the existing entry stays in the feed (it is history).
+
+### Steps — VTN outage edges
+
+5. Stop the VTN container: `ssh Pi4-Server "docker stop vtn-vtn-1"` (test stack
+   only — never production containers without approval; this is the lab VTN).
+6. After the next poll (~30 s): **Expected:** one **WARN — VTN unreachable**
+   notification. Repeated failed polls must NOT add more entries.
+7. Start the VTN again. **Expected:** one **INFO — VTN connection restored**.
+
+### Steps — persistence across restart
+
+8. `curl -s http://Pi4-Server:8211/notifications | jq length` — note the count.
+9. Restart VEN1: `ssh Pi4-Server "cd /srv/docker/openadr_lab/VEN && docker compose restart ven-1"`.
+10. After it is healthy, repeat step 8. **Expected:** the same entries are
+    back (seeded from `history.sqlite`), not an empty list.
+
+### API check — since filter and SSE
+
+11. `curl -s "http://Pi4-Server:8211/notifications?since=2026-07-12T00:00:00Z"`
+    returns only entries newer than the timestamp.
+12. `curl -N http://Pi4-Server:8211/notifications/events` holds an SSE stream
+    open; trigger step 2 again and watch the notification arrive live.
+
+---

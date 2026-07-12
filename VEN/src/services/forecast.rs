@@ -10,6 +10,30 @@ use crate::entities::design_vocabulary::{AssetForecast, ForecastSource};
 use crate::entities::plan::Plan;
 use crate::state::AppState;
 
+/// Everything that happens after a plan cycle resolves, in one call (kept
+/// here for the tasks/ file-size cap): WP4.3 new-warning notifications (only
+/// when the plan was adopted) followed by envelope/forecast publication.
+pub async fn finish_plan_cycle(
+    state: &AppState,
+    sim: &std::sync::Arc<tokio::sync::Mutex<crate::simulator::SimState>>,
+    notifier: &crate::services::notify::Notifier,
+    wall_now: DateTime<Utc>,
+    prev_plan: Option<&Plan>,
+    cycle: &crate::services::planning::PlanCycleResult,
+) {
+    crate::services::notify::notify_new_plan_warnings(
+        notifier,
+        state,
+        wall_now,
+        cycle.adopted,
+        prev_plan,
+        &cycle.plan,
+    )
+    .await;
+    let sim_snap = sim.lock().await.to_sim_snapshot();
+    publish_post_cycle_state(state, &sim_snap, &cycle.plan, wall_now).await;
+}
+
 /// Post-plan-cycle state publication: site flexibility envelope and per-asset
 /// forecasts (WP3.6, BL-15), both derived from the *adopted* plan — the one
 /// actually driving dispatch, never a rejected candidate.
