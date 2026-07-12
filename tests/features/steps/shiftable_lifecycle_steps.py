@@ -49,6 +49,28 @@ def step_assert_plan_has_alloc(context, asset_id):
     )
 
 
+
+def _plan_diagnostic():
+    """On a sim-poll timeout, summarize /plan so the failure attributes itself:
+    planner never allocated (planner-side) vs allocated but not started
+    (dispatcher-side). Keeps the timeout error actionable instead of a flake."""
+    try:
+        r = ven_get("/plan")
+        if not r.ok:
+            return f"/plan -> HTTP {r.status_code}"
+        plan = r.json()
+        allocs = sorted({
+            a.get("asset_id")
+            for slot in plan.get("slots", [])
+            for a in slot.get("allocations", [])
+        })
+        return (
+            f"/plan created_at={plan.get('created_at')} trigger={plan.get('trigger')} "
+            f"allocated_assets={allocs} warnings={[w.get('message') for w in plan.get('warnings', [])]}"
+        )
+    except Exception as e:  # diagnostics must never mask the real timeout
+        return f"/plan diagnostic failed: {e}"
+
 # ── Sim polling (asset appears) ─────────────────────────────────────────────
 
 @when('I poll the VEN /sim until asset "{asset_id}" appears')
@@ -69,11 +91,14 @@ def step_poll_sim_until_asset_appears(context, asset_id):
     # plus a dispatcher tick to start the ShiftableLoadRuntime. On Pi4 this latency
     # clusters around 125–150s, so a 150s cap is razor-thin and flakes under any
     # extra load. 240s gives genuine margin; fast cases still return immediately.
-    context.polled_sim = poll_until(
-        fetch, asset_present,
-        timeout=240, interval=3,
-        description=f"/sim has asset '{asset_id}'",
-    )
+    try:
+        context.polled_sim = poll_until(
+            fetch, asset_present,
+            timeout=240, interval=3,
+            description=f"/sim has asset '{asset_id}'",
+        )
+    except TimeoutError as e:
+        raise TimeoutError(f"{e}\nDIAGNOSTIC {_plan_diagnostic()}") from None
 
 
 @then('the polled sim has asset "{asset_id}" with power_kw > 0')
@@ -107,11 +132,14 @@ def step_poll_sim_until_asset_disappears(context, asset_id):
 
     # Disappearance follows the load's duration elapsing plus auto-complete
     # detection and a removal replan; give the same Pi4 margin as appearance.
-    context.polled_sim = poll_until(
-        fetch, asset_gone,
-        timeout=150, interval=3,
-        description=f"/sim no longer has asset '{asset_id}'",
-    )
+    try:
+        context.polled_sim = poll_until(
+            fetch, asset_gone,
+            timeout=150, interval=3,
+            description=f"/sim no longer has asset '{asset_id}'",
+        )
+    except TimeoutError as e:
+        raise TimeoutError(f"{e}\nDIAGNOSTIC {_plan_diagnostic()}") from None
 
 
 @then('the polled sim does not have asset "{asset_id}"')
