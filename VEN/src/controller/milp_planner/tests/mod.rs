@@ -526,6 +526,8 @@ fn build_asset_contexts(
                     ev_min_kw,
                     v_ev_extra,
                     1.0,
+                    profile.planner.asap_lateness_eur_kwh_h,
+                    profile.planner.v_ev_free_charge_eur_kwh,
                     lambda_sw,
                     c_terminal,
                     vec![],
@@ -562,6 +564,8 @@ fn build_asset_contexts(
                     ev_min_kw,
                     v_ev_extra,
                     1.0,
+                    profile.planner.asap_lateness_eur_kwh_h,
+                    profile.planner.v_ev_free_charge_eur_kwh,
                     lambda_sw,
                     0.0,
                     vec![],
@@ -593,6 +597,8 @@ fn build_asset_contexts(
                     ev_min_kw,
                     v_ev_extra,
                     1.0,
+                    profile.planner.asap_lateness_eur_kwh_h,
+                    profile.planner.v_ev_free_charge_eur_kwh,
                     lambda_sw,
                     c_terminal,
                     vec![],
@@ -643,6 +649,9 @@ fn contexts_from_inputs(
                 e_extra_max_kwh: inputs.e_ev_extra_max_kwh,
                 v_extra_eur_kwh: inputs.v_ev_extra_eur_kwh,
                 v_core_eur: inputs.v_ev_core_eur,
+                asap_lateness_eur_kwh_h: 0.0,
+                free_only: false,
+                p_free_cap_kw: None,
             },
         }));
     }
@@ -787,6 +796,7 @@ fn bmi(
 
 mod basic;
 mod heater;
+mod modes;
 mod planner;
 mod pv;
 mod solver;

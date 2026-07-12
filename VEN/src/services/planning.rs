@@ -117,6 +117,8 @@ pub fn build_asset_contexts(
                 min_ev_charge_kw,
                 planner.v_ev_extra_eur_kwh,
                 planner.v_ev_core_eur_kwh,
+                planner.asap_lateness_eur_kwh_h,
+                planner.v_ev_free_charge_eur_kwh,
                 lambda_sw,
                 c_terminal,
                 if matches!(cfg, crate::assets::AssetConfig::Heater(_)) {

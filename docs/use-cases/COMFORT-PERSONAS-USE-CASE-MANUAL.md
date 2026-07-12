@@ -75,3 +75,58 @@ through API and UI, default to `BY_DEADLINE`, and change no planning behaviour.
     behavioural change, only the field.
 
 ---
+
+## M4.2 — ASAP and OPPORTUNISTIC change the plan (WP4.1-b)
+
+### What this verifies
+
+The two mode poles now steer the MILP planner on the EV path:
+
+- **ASAP** — charge at maximum feasible rate from *now*, cost-blind (a lateness
+  penalty of `asap_lateness_eur_kwh_h`, default 10 €/kWh·h, dominates any tariff).
+- **OPPORTUNISTIC** — no deadline, no charging obligation; charge **only** where
+  energy is free (forecast PV surplus, or slots with a non-positive import
+  tariff), rewarded at `v_ev_free_charge_eur_kwh` (default 0.10 €/kWh).
+
+### Setup — a price ramp that separates the modes
+
+1. On the **VTN UI**, create a price event on the open program for the next 2 h:
+   first hour expensive (e.g. `0.40 €/kWh`), second hour cheap (e.g. `0.05 €/kWh`)
+   — same recipe as the dynamic-tariff scenarios in `SYSTEM-USE-CASE-MANUAL.md`.
+2. On the **VEN UI** (VEN1), make sure the EV shows as plugged in with SoC well
+   below target (Devices page; use `/sim` injection if needed).
+
+### Steps — ASAP front-loads
+
+3. Plan Charging: Target ≈ 30 % above current SoC, departure **+2 h**, mode `ASAP`.
+4. Open the **Controller** page and look at the plan timeline.
+   **Expected:** EV charging starts in the *first* slots at ~max charger power,
+   inside the expensive window. A cost-aware plan would have waited — that's the
+   point: ASAP is cost-blind.
+5. Unplan.
+
+### Steps — BY_DEADLINE defers (contrast)
+
+6. Same session but mode `BY_DEADLINE` (or untouched default).
+   **Expected:** the planned EV charging sits in the *cheap* second hour, not in
+   the expensive first hour. Unplan.
+
+### Steps — OPPORTUNISTIC charges only free energy
+
+7. Same session but mode `OPPORTUNISTIC`, departure time irrelevant (it is
+   ignored — no deadline constraint).
+8. **While the import tariff is positive and there is no PV surplus** (evening,
+   or PV irradiance slider at 0): **Expected:** the plan contains *no* EV
+   charging at all. The request stays active but nothing is scheduled.
+9. Now create PV surplus: on the **Devices/Sim** controls raise PV irradiance so
+   forecast PV exceeds the base load (daytime), or publish a price event with a
+   **negative** import tariff interval.
+   **Expected:** after the next replan (≤ ~30 s), EV charging appears exactly in
+   the surplus / negative-price slots, capped at the surplus power — never more.
+
+### API check
+
+10. `curl -s http://Pi4-Server:8211/plan | jq '[.slots[] | {start, ev: (.allocations[]? | select(.asset_id=="ev") | .power_kw)}]'`
+    shows the same allocation pattern the UI displays.
+
+---

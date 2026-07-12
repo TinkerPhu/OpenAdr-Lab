@@ -501,6 +501,8 @@ impl AssetConfig {
         ev_min_charge_kw: f64,
         v_ev_extra_eur_kwh: f64,
         v_ev_core_eur_kwh: f64,
+        asap_lateness_eur_kwh_h: f64,
+        v_ev_free_charge_eur_kwh: f64,
         lambda_sw: f64,
         c_terminal_eur_kwh: f64,
         heater_anchor: Vec<Option<f64>>,
@@ -521,6 +523,8 @@ impl AssetConfig {
                 ev_min_charge_kw,
                 v_ev_extra_eur_kwh,
                 v_ev_core_eur_kwh,
+                asap_lateness_eur_kwh_h,
+                v_ev_free_charge_eur_kwh,
             ))),
             Self::Heater(cfg) => Some(Box::new(HeaterMilpContext::from_state(
                 state,
