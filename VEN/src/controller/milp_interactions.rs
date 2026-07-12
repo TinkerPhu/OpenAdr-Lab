@@ -73,6 +73,30 @@ pub struct ShiftableLoadMilpVars {
     pub y_shift: Vec<Variable>,
 }
 
+/// Deterministic earliest-start tie-break for shiftable loads [€ per start-slot index].
+///
+/// Window offsets are measured from the ALIGNED grid start (now truncated to the
+/// Zone-A slot boundary), so a request posted mid-slot often has several
+/// cost-equal valid start slots under flat tariffs. Without a bias HiGHS's
+/// arbitrary pick can schedule the load a full slot later than necessary
+/// (found via the isolated E2E tail diagnostic, 2026-07-12). Small enough that
+/// any real per-slot cost difference dominates (2 kW × 0.5 h × 0.01 €/kWh =
+/// 0.01 € ≫ 0.001 €); applied in BOTH solver phases (and the Phase-1 cost cap)
+/// so Phase 2's epsilon budget cannot trade the early start away.
+pub const SHIFT_TIEBREAK_EUR_PER_SLOT: f64 = 0.001;
+
+/// Objective term implementing the earliest-start tie-break: a tiny cost per
+/// start-slot index on each `y_shift` binary, for every shiftable load.
+pub fn shiftable_tiebreak_expr(shiftable: &[ShiftableLoadMilpVars]) -> Expression {
+    let mut expr = Expression::from(0.0);
+    for sv in shiftable {
+        for (ji, &y) in sv.y_shift.iter().enumerate() {
+            expr += SHIFT_TIEBREAK_EUR_PER_SLOT * (sv.valid_start_slots[ji] as f64) * y;
+        }
+    }
+    expr
+}
+
 /// All LP variable handles for one planning cycle, keyed by asset.
 /// `Option::None` means the asset is absent from the profile.
 #[derive(Debug)]

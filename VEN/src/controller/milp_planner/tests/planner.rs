@@ -876,3 +876,120 @@ fn reservation_allowance_binds_when_tighter_and_is_inactive_when_looser() {
         .iter()
         .all(|&v| (v - 4.0).abs() < 1e-9));
 }
+
+// ── WP4.6 review: deterministic earliest-start for shiftable loads ───────────
+
+fn make_shiftable(
+    now: DateTime<Utc>,
+    dur_min: u32,
+    window_min: i64,
+) -> crate::entities::device_session::ShiftableLoad {
+    crate::entities::device_session::ShiftableLoad {
+        id: uuid::Uuid::new_v4(),
+        asset_id: "wm".to_string(),
+        power_kw: 2.0,
+        duration_min: dur_min,
+        earliest_start: now,
+        latest_end: now + Duration::minutes(window_min),
+        mode: Default::default(),
+        created_at: now,
+        updated_at: now,
+    }
+}
+
+fn wm_kw_per_slot(plan: &crate::entities::plan::Plan) -> Vec<f64> {
+    plan.slots
+        .iter()
+        .map(|s| {
+            s.allocations
+                .iter()
+                .find(|a| a.asset_id == "wm")
+                .map(|a| a.power_kw)
+                .unwrap_or(0.0)
+        })
+        .collect()
+}
+
+/// Two cost-equal start slots (the window straddles a slot boundary because
+/// slot grids start at the ALIGNED now, not the wall now) must start the
+/// load in the EARLIEST slot — the E2E flake root cause: HiGHS was free to
+/// pick the future slot and the load "never appeared" within the poll window.
+#[test]
+fn run_planner_shiftable_tie_breaks_to_earliest_start() {
+    let now = fixed_now();
+    let mut profile = make_profile_1800s();
+    profile
+        .assets
+        .retain(|a| matches!(a, AssetProfile::BaseLoad(_)));
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0); // flat → slots 0 and 1 cost-equal
+                                                   // 30-min load, 65-min window → valid start slots {0, 1} on the 1800 s grid.
+    let load = make_shiftable(now, 30, 65);
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::UserRequest,
+        None,
+        None,
+        &[load],
+        None,
+        None,
+    );
+    let wm = wm_kw_per_slot(&plan);
+    assert!(
+        wm[0] > 1.9,
+        "cost-equal starts must resolve to the earliest slot, got {wm:?}"
+    );
+}
+
+/// The tie-break is a tie-break only: a genuinely cheaper later slot still wins.
+#[test]
+fn run_planner_shiftable_still_defers_for_real_savings() {
+    let now = fixed_now();
+    let mut profile = make_profile_1800s();
+    profile
+        .assets
+        .retain(|a| matches!(a, AssetProfile::BaseLoad(_)));
+    let sim = make_snap_from_profile(&profile);
+    // Slot 0 expensive, slot 1 cheap (30-min intervals).
+    let tariffs = TariffTimeSeries::from_snapshots(&[
+        TariffSnapshot {
+            interval_start: now,
+            interval_end: now + Duration::minutes(30),
+            import_tariff_eur_kwh: Some(0.40),
+            export_tariff_eur_kwh: Some(0.08),
+            co2_g_kwh: Some(300.0),
+        },
+        TariffSnapshot {
+            interval_start: now + Duration::minutes(30),
+            interval_end: now + Duration::hours(3),
+            import_tariff_eur_kwh: Some(0.05),
+            export_tariff_eur_kwh: Some(0.08),
+            co2_g_kwh: Some(300.0),
+        },
+    ]);
+    let load = make_shiftable(now, 30, 65);
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::UserRequest,
+        None,
+        None,
+        &[load],
+        None,
+        None,
+    );
+    let wm = wm_kw_per_slot(&plan);
+    assert!(
+        wm[1] > 1.9 && wm[0] < 1e-3,
+        "a 0.35 €/kWh saving must beat the 0.001 €/slot tie-break, got {wm:?}"
+    );
+}

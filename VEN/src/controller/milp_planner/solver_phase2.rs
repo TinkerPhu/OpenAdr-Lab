@@ -5,7 +5,8 @@ use good_lp::{
 };
 
 use crate::controller::milp_interactions::{
-    build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
+    build_interactions, shiftable_tiebreak_expr, GlobalMilpInputs, GridMilpVars, MilpVarPool,
+    ShiftableLoadMilpVars,
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
@@ -264,6 +265,8 @@ pub(crate) fn solve_phase2(
     for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
         phase1_cap_expr += interaction.objective(iv, &inputs.dt_h);
     }
+    // Mirror the Phase 1 objective exactly: earliest-start tie-break included.
+    phase1_cap_expr += shiftable_tiebreak_expr(&pool.shiftable);
 
     // Phase 2 friction objective: startup/ramp/switching/tier; no economic terms.
     // c_startup_eur > 0.0 signals Phase 2 mode to asset objective impls.
@@ -300,6 +303,10 @@ pub(crate) fn solve_phase2(
             }
         }
     }
+    // Earliest-start tie-break must also bias Phase 2: the epsilon cost budget
+    // would otherwise let friction smoothing move a shiftable start to a later
+    // cost-equal slot, undoing the Phase 1 choice (same lesson as ASAP_FREE).
+    friction_obj += shiftable_tiebreak_expr(&pool.shiftable);
 
     let warm_start = build_phase2_warm_start(
         inputs,
