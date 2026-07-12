@@ -346,10 +346,12 @@ correctly reflects the current billing period after each rollover.
 
 > Re-run `cargo audit` and `npm audit` before each release and add new findings here.
 
-### Rust (cargo audit) — 10 vulnerabilities
+### Rust (cargo audit) — 12 vulnerabilities (re-checked 2026-07-12 before the phase 3+4 merge; two new rows marked)
 
 | ID | Crate | Version | Severity | Title | Fix |
 |----|-------|---------|----------|-------|-----|
+| RUSTSEC-2026-0185 | quinn-proto | 0.11.13 | High (7.5) | Remote memory exhaustion via unbounded out-of-order stream reassembly (new 2026-07-12) | Upgrade to ≥0.11.14 |
+| RUSTSEC-2026-0204 | crossbeam-epoch | 0.9.18 | — | Invalid pointer dereference in `fmt::Pointer` impl for `Atomic`/`Shared` (new 2026-07-12) | Upgrade when fix released |
 | RUSTSEC-2026-0048 | aws-lc-sys | 0.37.0 | High (7.4) | CRL Distribution Point Scope Check Logic Error | Upgrade to ≥0.39.0 |
 | RUSTSEC-2026-0047 | aws-lc-sys | 0.37.0 | High (7.5) | PKCS7_verify Signature Validation Bypass | Upgrade to ≥0.38.0 |
 | RUSTSEC-2026-0046 | aws-lc-sys | 0.37.0 | High (7.5) | PKCS7_verify Certificate Chain Validation Bypass | Upgrade to ≥0.38.0 |
