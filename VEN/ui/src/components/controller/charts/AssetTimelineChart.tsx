@@ -14,6 +14,7 @@ import {
 import type { AssetTimelinePoint } from "../types";
 import { COLOR_NOW } from "../types";
 import type { ZoneDef } from "../../../api/types";
+import { minSpanDomain, MIN_COST_RATE_SPAN_EUR_H, MIN_CO2_RATE_SPAN_G_H } from "./axisDomain";
 
 interface AssetTimelineChartProps {
   data: AssetTimelinePoint[];
@@ -61,6 +62,15 @@ export function AssetTimelineChart({
       })()
     : rawData;
 
+  const costDomain = minSpanDomain(
+    chartData.map((p) => p.values?.["cost_rate_eur_h"] ?? null),
+    MIN_COST_RATE_SPAN_EUR_H
+  );
+  const co2Domain = minSpanDomain(
+    chartData.map((p) => p.values?.["co2_rate_g_h"] ?? null),
+    MIN_CO2_RATE_SPAN_G_H
+  );
+
   return (
     <ResponsiveContainer width="100%" height={CELL_CHART_HEIGHT}>
       <ComposedChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
@@ -74,8 +84,22 @@ export function AssetTimelineChart({
           tick={{ fontSize: 10 }}
         />
         <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} unit=" kW" />
-        <YAxis yAxisId="cost" orientation="right" tick={{ fontSize: 10 }} width={44} unit=" €" />
-        <YAxis yAxisId="co2" orientation="right" tick={{ fontSize: 10 }} width={44} unit=" g" />
+        <YAxis
+          yAxisId="cost"
+          orientation="right"
+          tick={{ fontSize: 10 }}
+          width={44}
+          unit=" €"
+          domain={costDomain}
+        />
+        <YAxis
+          yAxisId="co2"
+          orientation="right"
+          tick={{ fontSize: 10 }}
+          width={44}
+          unit=" g"
+          domain={co2Domain}
+        />
         {stateKey && (
           <YAxis
             yAxisId="state"
