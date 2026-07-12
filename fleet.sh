@@ -3,7 +3,7 @@
 # Phase 2 (WP2.5) — fleet lifecycle for arbitrary-N VEN bring-up.
 #
 # Usage:
-#   bash fleet.sh up N [--seed S] [--fresh]   # generate + register + start N VENs
+#   bash fleet.sh up N [--seed S] [--fresh] [--personas eco:0.4,comfort:0.4,commuter:0.2]
 #   bash fleet.sh down [--purge]              # stop the fleet (--purge also removes data/profiles)
 #   bash fleet.sh status                      # per-VEN health + VTN registration check
 #
@@ -29,10 +29,12 @@ cmd_up() {
     local count="$1"; shift
     local seed=42
     local fresh=false
+    local personas=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --seed) seed="$2"; shift 2 ;;
             --fresh) fresh=true; shift ;;
+            --personas) personas="$2"; shift 2 ;;
             *) echo "unknown option: $1"; usage; exit 1 ;;
         esac
     done
@@ -41,7 +43,11 @@ cmd_up() {
         bash "$REPO_ROOT/scripts/db_reset.sh"
     fi
 
-    python3 "$REPO_ROOT/scripts/gen_fleet_profiles.py" --count "$count" --seed "$seed"
+    if [[ -n "$personas" ]]; then
+        python3 "$REPO_ROOT/scripts/gen_fleet_profiles.py" --count "$count" --seed "$seed" --personas "$personas"
+    else
+        python3 "$REPO_ROOT/scripts/gen_fleet_profiles.py" --count "$count" --seed "$seed"
+    fi
 
     (cd "$VEN_DIR" && docker compose -f docker-compose.fleet.yml up -d --build)
 

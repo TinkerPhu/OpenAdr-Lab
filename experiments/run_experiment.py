@@ -122,6 +122,65 @@ def snapshot(out_dir, vens, pg_container, ven_data_root):
             print(f"WARN: recorder dump {table} failed: {res.stderr.strip()}")
 
 
+def _persona_departure(hour_utc, now):
+    """Next occurrence of hour_utc (UTC), at least 2 h out so the deadline is plannable."""
+    dep = now.replace(hour=hour_utc, minute=0, second=0, microsecond=0)
+    while dep < now + timedelta(hours=2):
+        dep += timedelta(days=1)
+    return dep
+
+
+def setup_persona_sessions(manifest_path, host):
+    """WP4.5: give each fleet VEN its persona's EV session + comfort curve.
+    Returns (ven_names, teardown) — call teardown() in the finally block."""
+    import sys
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from personas import PERSONAS
+
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    now = datetime.now(timezone.utc)
+    created = []  # (base_url, had_curve)
+    for ven in manifest["vens"]:
+        persona = ven.get("persona")
+        if not persona:
+            continue
+        preset = PERSONAS[persona]
+        base = f"http://{host}:{ven['port']}"
+        r = requests.post(
+            f"{base}/assets/ev/comfort_curve", json=preset["comfort_curve"], timeout=10
+        )
+        curve_ok = r.status_code in (200, 201)
+        if not curve_ok and r.status_code != 404:
+            print(f"WARN: comfort curve for {ven['ven_name']}: {r.status_code}")
+        dep_hour = preset["ev_departure_hour_utc"]
+        dep = _persona_departure(dep_hour, now) if dep_hour is not None else now + timedelta(hours=8)
+        body = {
+            "target_soc": preset["ev_target_soc"],
+            "departure_time": iso(dep),
+            "mode": preset["ev_mode"],
+        }
+        if preset["ev_budget_eur"] is not None:
+            body["budget_eur"] = preset["ev_budget_eur"]
+        r = requests.post(f"{base}/ev-session", json=body, timeout=10)
+        if r.status_code not in (200, 201):
+            print(f"WARN: ev-session for {ven['ven_name']} ({persona}): {r.status_code} {r.text[:120]}")
+        else:
+            print(f"  persona {persona:<9} {ven['ven_name']}: mode={preset['ev_mode']}")
+        created.append((base, curve_ok))
+
+    def teardown():
+        for base, had_curve in created:
+            try:
+                requests.delete(f"{base}/ev-session", timeout=10)
+                if had_curve:
+                    requests.delete(f"{base}/assets/ev/comfort_curve", timeout=10)
+            except requests.RequestException as e:
+                print(f"WARN: persona cleanup {base}: {e}")
+
+    ven_names = [v["ven_name"] for v in manifest["vens"]]
+    return ven_names, teardown
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--scenario", required=True)
@@ -130,6 +189,14 @@ def main():
     p.add_argument("--ven-data-root", default=str(REPO_ROOT / "VEN" / "data"))
     p.add_argument("--pg-container", default="vtn-db-1")
     p.add_argument("--out", default=str(REPO_ROOT / "experiments" / "results"))
+    p.add_argument(
+        "--personas",
+        action="store_true",
+        help="WP4.5: create each fleet VEN's persona EV session + comfort curve "
+             "from VEN/fleet/manifest.json before the scenario, remove them after",
+    )
+    p.add_argument("--fleet-manifest", default=str(REPO_ROOT / "VEN" / "fleet" / "manifest.json"))
+    p.add_argument("--fleet-host", default="localhost")
     args = p.parse_args()
 
     scenario = yaml.safe_load(Path(args.scenario).read_text(encoding="utf-8"))
@@ -138,6 +205,12 @@ def main():
     t0 = datetime.now(timezone.utc)
     run_dir = Path(args.out) / f"{t0.strftime('%Y%m%d-%H%M')}-{name}"
     print(f"=== scenario {name}: {scenario.get('description', '')} ({duration_min} min) ===")
+
+    persona_teardown = None
+    ven_names = args.vens.split(",")
+    if args.personas:
+        fleet_names, persona_teardown = setup_persona_sessions(args.fleet_manifest, args.fleet_host)
+        ven_names = sorted(set(ven_names) | set(fleet_names))
 
     token = get_token(args.vtn_url, "any-business", "any-business")
     r = requests.post(
@@ -173,14 +246,17 @@ def main():
         for eid in created_events:
             requests.delete(f"{args.vtn_url}/events/{eid}", headers=auth(token), timeout=10)
         requests.delete(f"{args.vtn_url}/programs/{program_id}", headers=auth(token), timeout=10)
+        if persona_teardown:
+            persona_teardown()
 
-    snapshot(run_dir, args.vens.split(","), args.pg_container, args.ven_data_root)
+    snapshot(run_dir, ven_names, args.pg_container, args.ven_data_root)
     meta = {
         "scenario": name,
         "started_at": iso(t0),
         "duration_minutes": duration_min,
-        "vens": args.vens.split(","),
+        "vens": ven_names,
         "events": created_events,
+        "personas": args.personas,
     }
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"=== snapshot written to {run_dir} ===")

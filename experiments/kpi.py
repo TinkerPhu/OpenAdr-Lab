@@ -98,6 +98,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--run", required=True)
     p.add_argument("--baseline", help="an s1_flat run dir for energy_shifted_kwh")
+    p.add_argument(
+        "--manifest",
+        help="WP4.5: fleet manifest.json with persona tags — adds a per-persona KPI block",
+    )
     args = p.parse_args()
 
     run_dir = Path(args.run)
@@ -131,6 +135,29 @@ def main():
     out["report_timeliness"] = report_lag_stats(
         run_dir / "recorder-reports_received.csv", t_from, t_to
     )
+
+    # WP4.5: persona segmentation — mean KPIs per persona group so the
+    # experiment report shows the behavioural spread across the fleet.
+    if args.manifest:
+        manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+        persona_of = {v["ven_name"]: v.get("persona") for v in manifest["vens"]}
+        groups = {}
+        for ven, k in out["vens"].items():
+            persona = persona_of.get(ven)
+            if persona:
+                groups.setdefault(persona, []).append(k)
+        metrics = ("energy_import_kwh", "cost_eur", "peak_import_kw", "energy_shifted_kwh")
+        out["personas"] = {
+            persona: {
+                "vens": len(ks),
+                **{
+                    f"mean_{m}": round(sum(k[m] for k in ks) / len(ks), 4)
+                    for m in metrics
+                    if all(m in k for k in ks)
+                },
+            }
+            for persona, ks in sorted(groups.items())
+        }
 
     (run_dir / "kpis.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
     print(json.dumps(out, indent=2))

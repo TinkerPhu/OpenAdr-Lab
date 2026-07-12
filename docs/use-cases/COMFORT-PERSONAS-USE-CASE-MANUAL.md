@@ -305,3 +305,53 @@ The remaining request modes (BL-28):
    not count.
 
 ---
+
+## M4.7 — Personas and the diverse-fleet experiment (WP4.5)
+
+### What this verifies
+
+Three persona presets (`scripts/personas.py`) turn the fleet *diverse*:
+`eco` (OPPORTUNISTIC, low bids), `comfort` (ASAP, high bids), `commuter`
+(BY_DEADLINE 07:00). The S-2/S-3/S-4 experiment re-runs then show
+persona-segmented KPIs with visible behavioural spread — or, if the spread is
+not visible, that is itself a finding about the control method.
+
+> All commands run on the Pi4 docker host (`/srv/docker/openadr_lab`), in a
+> low-usage window: the full re-run is ~90 min of real time plus fleet
+> bring-up (the sim clock is wall time).
+
+### Steps — persona fleet bring-up
+
+1. `bash fleet.sh up 10 --personas eco:0.4,comfort:0.4,commuter:0.2 --seed 42`
+2. `cat VEN/fleet/manifest.json | python3 -m json.tool | grep -A1 persona`
+   **Expected:** 4× eco, 4× comfort, 2× commuter, deterministic for the seed.
+3. Spot-check one VEN of each persona in the VEN UI dropdown: eco VENs have
+   an EV + battery and low base load; comfort VENs higher base load.
+
+### Steps — experiment re-run with persona sessions
+
+4. For each of S-2 (dynamic tariff), S-3 (capacity limit), S-4 (emergency):
+
+   ```bash
+   python3 experiments/run_experiment.py \
+     --scenario experiments/scenarios/s2_price_spike.yaml \
+     --personas --fleet-host localhost
+   ```
+
+   **Expected during setup:** one `persona <name> fleet-ven-…: mode=…` line
+   per fleet VEN; each VEN UI shows the persona's mode chip on the EV card
+   and an `override` comfort-curve chip.
+5. After each run:
+
+   ```bash
+   python3 experiments/kpi.py --run experiments/results/<dir> \
+     --baseline <s1 run dir> --manifest VEN/fleet/manifest.json
+   ```
+
+   **Expected:** the `personas` block reports mean import/cost/peak/shifted
+   per persona. The hypothesis to check: eco shifts hard on price while
+   comfort barely moves; commuter's import clusters before 07:00.
+6. Cleanup: `bash fleet.sh down --purge` (persona sessions/curves are already
+   removed by the harness teardown).
+
+---

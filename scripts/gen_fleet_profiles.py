@@ -26,6 +26,7 @@ import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from seed_vtn import provision_vens  # noqa: E402
+from personas import PERSONAS, assign_personas  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VEN_DIR = os.path.join(REPO_ROOT, "VEN")
@@ -38,15 +39,20 @@ BASE_PORT = 8300  # 8211-8213 are ven-1..3; fleet instances start well clear of 
 POLL_STARTUP_STRIDE_S = 4  # GB-09: spread instance i's first poll by i*stride seconds.
 
 
-def gen_profile(rng):
+def gen_profile(rng, persona=None):
     """One randomized-but-seeded asset mix, structurally identical to the
-    hand-written ven-1/2/3 profiles (VEN/profiles/ven-N.yaml)."""
-    has_ev = rng.random() < 0.7
-    has_battery = rng.random() < 0.6
+    hand-written ven-1/2/3 profiles (VEN/profiles/ven-N.yaml). A persona
+    (WP4.5) nudges the mix: EV/battery probability and base-load range."""
+    preset = PERSONAS.get(persona, {})
+    ev_p = preset.get("ev_probability", 0.7)
+    bat_p = preset.get("battery_probability", 0.6)
+    base_lo, base_hi = preset.get("base_load_range_kw", (0.2, 0.8))
+    has_ev = rng.random() < ev_p
+    has_battery = rng.random() < bat_p
     battery_kwh = round(rng.uniform(5.0, 15.0), 1)
     ev_battery_kwh = round(rng.uniform(40.0, 75.0), 1)
     pv_kw = round(rng.uniform(3.0, 10.0), 1)
-    base_load_kw = round(rng.uniform(0.2, 0.8), 2)
+    base_load_kw = round(rng.uniform(base_lo, base_hi), 2)
 
     assets = [
         {"type": "pv", "id": "pv", "rated_kw": pv_kw},
@@ -130,11 +136,19 @@ def main():
     p.add_argument("--prefix", default="fleet-ven", help="venName prefix")
     p.add_argument("--vtn-url", default="http://localhost:8200", help="VTN base URL for registration")
     p.add_argument("--no-register", action="store_true", help="skip VTN registration (profiles/compose only)")
+    p.add_argument(
+        "--personas",
+        help="WP4.5 persona mix, e.g. eco:0.4,comfort:0.4,commuter:0.2 (seeded assignment)",
+    )
     args = p.parse_args()
 
     rng = random.Random(args.seed)
     os.makedirs(PROFILES_DIR, exist_ok=True)
     os.makedirs(FLEET_DIR, exist_ok=True)
+
+    persona_by_index = (
+        assign_personas(args.count, args.personas, rng) if args.personas else [None] * args.count
+    )
 
     vens = []
     services = {}
@@ -142,10 +156,11 @@ def main():
         ven_name = f"{args.prefix}-{i:03d}"
         port = BASE_PORT + i
         jitter_s = i * POLL_STARTUP_STRIDE_S
+        persona = persona_by_index[i]
 
         profile_path = os.path.join(PROFILES_DIR, f"{ven_name}.yaml")
         with open(profile_path, "w") as f:
-            yaml.safe_dump(gen_profile(rng), f, sort_keys=False)
+            yaml.safe_dump(gen_profile(rng, persona), f, sort_keys=False)
 
         services[ven_name] = compose_service(ven_name, port, jitter_s)
         vens.append(
@@ -155,6 +170,7 @@ def main():
                 "client_secret": ven_name,
                 "user_ref": f"{ven_name}-user",
                 "port": port,
+                "persona": persona,
             }
         )
 
