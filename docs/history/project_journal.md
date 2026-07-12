@@ -5293,3 +5293,31 @@ only the Pi4 ARM build chose the late slot. Validation run after the fix:
 52 features / 259 scenarios / 0 failed, isolated tail 3/3, with the
 "appears in /sim" scenario dropping from ~125–150 s to ~9 s.
 
+### Phase 3/4 review — EV-surplus overlay one-tick PV lag (root cause fix)
+
+Follow-up to the axis-domain display fix: the user asked to fix the underlying
+control-loop bug behind the EV grid-residual toggle, not just stop it from
+being visually exaggerated. `apply_surplus_ev_overlay` (`controller/
+dispatcher.rs`) computed available PV surplus using `AssetSnapshot.power_kw`
+for PV, which is last tick's actual output (`SimulatorPort::snapshot()` is
+taken *before* `SimState::tick()` runs physics for the current tick). Since
+PV output moves continuously (sin-model irradiance), the overlay was always
+chasing where PV *was*, producing a persistent one-tick-lag residual.
+
+Fix: `SimState::peek_pv_kw` (new) previews this tick's PV output using the
+identical irradiance formula `tick()` is about to apply, without mutating any
+state. `tick_once` (`tasks/sim_tick/tick.rs`) computes it right after taking
+the pre-physics snapshot and threads it through `build_tick_setpoints` →
+`dispatcher::build_setpoints` → `apply_surplus_ev_overlay`, which now prefers
+it over the stale snapshot for PV specifically (every other asset's handling
+is unchanged — only PV lacks a real setpoint and therefore only PV was
+affected). An equivalence test (`peek_pv_kw_matches_tick_output_for_same_now`)
+calls both `peek_pv_kw` and `tick()` with identical arguments and asserts
+their PV output matches exactly, guarding the two formulas against silently
+drifting apart in future edits.
+
+`apply_dispatch_override` (`tasks/sim_tick/helpers.rs`) has the identical
+stale-PV-fallback pattern but serves the still-unwired `DISPATCH_SETPOINT`
+path (R-13) — left alone and recorded as R-19 rather than fixed opportunistically,
+to keep this fix's scope matched to what was actually diagnosed.
+
