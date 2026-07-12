@@ -169,6 +169,8 @@ pub async fn post_requests(
     }
 
     // ── EV / heater path — requires sim-asset lookup ────────────────────────
+    // WP4.2 (BL-19): user comfort-curve overrides beat the built-in defaults.
+    let comfort_overrides = ctx.state.comfort_overrides_map().await;
     let asset_data: Vec<AssetRequestSlice> = {
         use crate::assets::{AssetConfig as AC, AssetState as AS};
         let sim = ctx.sim.lock().await;
@@ -199,7 +201,11 @@ pub async fn post_requests(
                     capacity_kwh,
                     max_charge_kw,
                     completion_policy: cfg.default_completion_policy(),
-                    comfort_rates: cfg.default_comfort_rates(),
+                    comfort_rates: crate::services::comfort::effective_comfort_rates(
+                        &comfort_overrides,
+                        &entry.id,
+                        cfg.default_comfort_rates(),
+                    ),
                 }
             })
             .collect()

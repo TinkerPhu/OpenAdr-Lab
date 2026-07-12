@@ -1,7 +1,7 @@
 //! Versioned DDL for the history SQLite store, applied stepwise via
 //! `PRAGMA user_version` in `history_store::migrate`.
 
-pub(super) const SCHEMA_VERSION: i64 = 2;
+pub(super) const SCHEMA_VERSION: i64 = 3;
 
 pub(super) const SCHEMA_V1: &str = "
 CREATE TABLE tick_samples (
@@ -70,4 +70,15 @@ CREATE TABLE notifications (
     event_id TEXT
 );
 CREATE INDEX idx_notifications_ts ON notifications(created_at);
+";
+
+/// WP4.2 (BL-19): per-asset user settings (first consumer: comfort-curve overrides).
+pub(super) const SCHEMA_V3: &str = "
+CREATE TABLE user_settings (
+    key TEXT NOT NULL,
+    asset_id TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (key, asset_id)
+);
 ";

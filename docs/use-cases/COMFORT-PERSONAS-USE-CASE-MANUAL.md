@@ -216,3 +216,50 @@ warning, which the WP4.3 feed surfaces as a single Warn notification.
    (0.20 at p50) or the maximum (0.40) respectively.
 
 ---
+
+## M4.5 — Comfort-curve override (WP4.2)
+
+### What this verifies
+
+A resident can replace an asset's built-in comfort/value curve (BL-19) with
+their own bid curve via UI or API; the override persists across VEN restarts
+(`user_settings` table) and is preferred over `default_comfort_rates()`
+wherever the curve is consulted; DELETE restores the default. Invalid curves
+(non-monotonic fill, out-of-range bids) are rejected.
+
+### Steps (VEN UI)
+
+1. **VEN UI → Devices** (VEN1). The new **Comfort Curve** card shows the
+   selected asset's effective curve with a `default` chip.
+2. Change the first point's bid (e.g. 0.30 → 0.50 €/kWh) and click **Save**.
+   **Expected:** the chip flips to `override`.
+3. Click **Reset to default**. **Expected:** chip back to `default`, table
+   shows the built-in points again.
+
+### Steps (API + persistence)
+
+4. Install an override:
+
+   ```bash
+   curl -s -X POST http://Pi4-Server:8211/assets/ev/comfort_curve \
+     -H 'Content-Type: application/json' \
+     -d '[{"fill":0.5,"max_marginal_price":0.40,"max_marginal_co2":0},
+          {"fill":1.0,"max_marginal_price":0.10,"max_marginal_co2":0}]'
+   ```
+
+   **Expected:** HTTP 201 with `"source":"override"`.
+5. `curl -s http://Pi4-Server:8211/assets/ev/comfort_curve` echoes the
+   override.
+6. Restart VEN1 (`docker compose restart ven-1`), wait for healthy, repeat
+   step 5. **Expected:** the override is still there (persisted).
+7. Validation: POST a non-monotonic curve
+   (`[{"fill":0.9,...},{"fill":0.5,...}]`). **Expected:** HTTP 422 with a
+   reason. POST to `/assets/toaster/comfort_curve` → HTTP 404.
+8. `curl -s -X DELETE http://Pi4-Server:8211/assets/ev/comfort_curve` →
+   HTTP 204; GET reports `"source":"default"` again.
+
+> Note: today the curve feeds the user-request build path
+> (`AssetRequestSlice`); a deeper coupling of the curve into MILP tier
+> constraints is future work (see BL-19 resolution note in `docs/BACKLOG.md`).
+
+---

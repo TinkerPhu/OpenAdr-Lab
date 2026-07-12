@@ -241,6 +241,22 @@ export type AssetLedger = {
 
 export type UserRequestStatus = "ACTIVE" | "COMPLETED" | "CANCELLED" | "FAILED";
 
+/** WP4.2 (BL-19): one point of a comfort/value curve (domain passthrough). */
+export type ComfortRate = {
+  /** Task completion fraction 0.0–1.0. */
+  fill: number;
+  /** Max €/kWh the user bids at this fill level. */
+  max_marginal_price: number;
+  /** Max gCO2/kWh the user accepts at this fill level. */
+  max_marginal_co2: number;
+};
+
+/** WP4.2: GET /assets/:id/comfort_curve response. */
+export type ComfortCurveResponse = {
+  source: "default" | "override";
+  rates: ComfortRate[];
+};
+
 /** WP4.3 (BL-20): user-facing notification severity. */
 export type UserNotificationSeverity = "INFO" | "WARN" | "ALERT";
 
