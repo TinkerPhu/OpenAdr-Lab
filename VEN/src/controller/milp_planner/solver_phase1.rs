@@ -6,7 +6,8 @@ use good_lp::{
 
 use super::asset_port::{BatteryMilpContext, EvMilpContext, HeaterMilpContext};
 use crate::controller::milp_interactions::{
-    build_interactions, GlobalMilpInputs, GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
+    build_interactions, shiftable_tiebreak_expr, GlobalMilpInputs, GridMilpVars, MilpVarPool,
+    ShiftableLoadMilpVars,
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
@@ -130,6 +131,9 @@ pub(crate) fn solve_phase1(
     for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
         objective += interaction.objective(iv, &inputs.dt_h);
     }
+    // Deterministic earliest-start tie-break for shiftable loads (see
+    // SHIFT_TIEBREAK_EUR_PER_SLOT for the rationale).
+    objective += shiftable_tiebreak_expr(&pool.shiftable);
 
     let mut model = vars.minimise(&objective).using(highs);
     model = add_model_constraints(
