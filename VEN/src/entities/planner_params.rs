@@ -51,6 +51,14 @@ pub struct PlannerParams {
     /// limit (0.0–1.0). Levels 2/3 have fixed semantics (baseline / zero cap);
     /// see `entities::capacity::SimpleWindow`.
     pub simple_level1_import_cap_pct: f64,
+    /// WP4.1 (BL-28) — ASAP mode lateness penalty [€/kWh per hour of delay].
+    /// Must dominate any plausible tariff spread so ASAP is effectively
+    /// cost-blind; 0.0 disables the mode's early-allocation pressure.
+    pub asap_lateness_eur_kwh_h: f64,
+    /// WP4.1 (BL-28) — reward per kWh of free-energy charging in
+    /// OPPORTUNISTIC / *_FREE modes [€/kWh]. Must exceed the feed-in tariff
+    /// so consuming PV surplus beats exporting it.
+    pub v_ev_free_charge_eur_kwh: f64,
 }
 
 impl Default for PlannerParams {
@@ -87,6 +95,8 @@ impl Default for PlannerParams {
             planning_initial_delay_s: 5,
             gate_switch_penalty_eur: 0.0,
             simple_level1_import_cap_pct: 0.5,
+            asap_lateness_eur_kwh_h: 10.0,
+            v_ev_free_charge_eur_kwh: 0.10,
         }
     }
 }

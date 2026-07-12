@@ -108,7 +108,7 @@ fn base_load_params(asset_params: &[AssetParams]) -> Option<&BaseLoadParams> {
 /// `objective_override` — when `Some`, overrides the planner default objective.
 #[allow(clippy::too_many_arguments)]
 pub fn run_planner(
-    asset_contexts: Vec<Box<dyn self::asset_port::AssetMilpContext>>,
+    mut asset_contexts: Vec<Box<dyn self::asset_port::AssetMilpContext>>,
     assets: &SimSnapshot,
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
@@ -161,6 +161,11 @@ pub fn run_planner(
         baseline_override,
         pv_forecast_override,
     );
+    // WP4.1 (BL-28): give contexts the per-slot grid data they cannot know at
+    // construction time (e.g. the OPPORTUNISTIC free-energy charge cap).
+    for ctx in asset_contexts.iter_mut() {
+        ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.p_pv_kw, &inputs.p_base_kw);
+    }
     let p1w = build_phase1_weights(planner, objective);
     let p2w = build_phase2_weights(&inputs, planner);
     match solve_milp_two_phase(

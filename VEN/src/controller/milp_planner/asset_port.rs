@@ -98,6 +98,15 @@ pub struct EvMilpContext {
     /// One-time reward in EUR for committing to meet the core target (MayRun only; 0.0 otherwise).
     /// Set to e_core_kwh × v_ev_core_eur_kwh so the optimizer commits when tariffs are reasonable.
     pub v_core_eur: f64,
+    /// WP4.1 (BL-28) ASAP mode: lateness penalty [€/kWh per hour of delay].
+    /// Large enough to dominate tariff spreads → cost-blind front-loading. 0.0 = inactive.
+    pub asap_lateness_eur_kwh_h: f64,
+    /// WP4.1 (BL-28) OPPORTUNISTIC / *_FREE: when true, `inject_grid_slots`
+    /// computes `p_free_cap_kw` and charging is limited to free energy.
+    pub free_only: bool,
+    /// Per-slot free-energy charge cap [kW]: PV surplus, opened fully when the
+    /// import tariff is non-positive. Filled by `inject_grid_slots`; None = no gating.
+    pub p_free_cap_kw: Option<Vec<f64>>,
 }
 
 /// Typed LP variable handles for one EV charger in the MILP model.
@@ -330,6 +339,13 @@ pub trait AssetMilpContext: Send + Sync {
         c_startup_eur: f64,
         c_ramp_eur_kw: f64,
     ) -> good_lp::Expression;
+
+    /// Phase A2 — optional per-slot grid-context injection, called after the
+    /// global MILP inputs are built (so tariff / PV-forecast / baseline arrays
+    /// exist) and before variable declaration. Lets a context derive slot data
+    /// it cannot know at construction time — e.g. the OPPORTUNISTIC free-energy
+    /// charge cap (WP4.1). Default: no-op.
+    fn inject_grid_slots(&mut self, _c_imp_eur_kwh: &[f64], _p_pv_kw: &[f64], _p_base_kw: &[f64]) {}
 }
 
 /// MilpLoadMode: scheduling mode shared across EV and heater scalars.

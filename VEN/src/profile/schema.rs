@@ -390,4 +390,15 @@ pub struct PlannerConfig {
     /// semantics (baseline cap / zero cap) — see `entities::capacity::SimpleWindow`.
     #[serde(default = "super::defaults::default_simple_level1_import_cap_pct")]
     pub simple_level1_import_cap_pct: f64,
+
+    /// WP4.1 (BL-28) — ASAP mode lateness penalty [€/kWh per hour of delay].
+    /// Large by design so ASAP is effectively cost-blind (default 10.0).
+    #[serde(default = "super::defaults::default_asap_lateness_eur_kwh_h")]
+    pub asap_lateness_eur_kwh_h: f64,
+
+    /// WP4.1 (BL-28) — reward per kWh of free-energy charging in
+    /// OPPORTUNISTIC / *_FREE modes (default 0.10; must exceed the feed-in
+    /// tariff so consuming PV surplus beats exporting it).
+    #[serde(default = "super::defaults::default_v_ev_free_charge")]
+    pub v_ev_free_charge_eur_kwh: f64,
 }

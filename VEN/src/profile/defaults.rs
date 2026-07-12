@@ -202,12 +202,22 @@ impl Default for PlannerConfig {
             planning_initial_delay_s: default_planning_initial_delay_s(),
             gate_switch_penalty_eur: 0.0,
             simple_level1_import_cap_pct: default_simple_level1_import_cap_pct(),
+            asap_lateness_eur_kwh_h: default_asap_lateness_eur_kwh_h(),
+            v_ev_free_charge_eur_kwh: default_v_ev_free_charge(),
         }
     }
 }
 
 pub(super) fn default_simple_level1_import_cap_pct() -> f64 {
     0.5
+}
+
+pub(super) fn default_asap_lateness_eur_kwh_h() -> f64 {
+    10.0
+}
+
+pub(super) fn default_v_ev_free_charge() -> f64 {
+    0.10
 }
 
 pub(super) fn default_phase2_epsilon() -> f64 {

@@ -85,6 +85,8 @@ fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Ve
         planning_initial_delay_s: profile.planner.planning_initial_delay_s,
         gate_switch_penalty_eur: profile.planner.gate_switch_penalty_eur,
         simple_level1_import_cap_pct: profile.planner.simple_level1_import_cap_pct,
+        asap_lateness_eur_kwh_h: profile.planner.asap_lateness_eur_kwh_h,
+        v_ev_free_charge_eur_kwh: profile.planner.v_ev_free_charge_eur_kwh,
         plan_zones: profile.planner.plan_zones.clone().unwrap_or_else(|| {
             let step_s = profile.planner.effective_step_s();
             let total_s = profile.planner.effective_horizon_h() * 3600;
