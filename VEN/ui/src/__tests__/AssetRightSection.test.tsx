@@ -36,6 +36,7 @@ vi.mock("@mui/material", async (importOriginal) => {
 const mockSchemaData = vi.fn(() => ({} as Record<string, unknown>));
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   useSimSchema: () => ({ data: mockSchemaData() }),
 }));
 

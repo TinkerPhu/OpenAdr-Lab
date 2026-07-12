@@ -9,6 +9,7 @@ import { enrichAllAssetTimelines } from "../components/controller/tariffBuilders
 import { AssetCell } from "../components/controller/AssetCell";
 import { PinnedZone } from "../components/controller/PinnedZone";
 import { GridTariffCell } from "../components/controller/GridTariffCell";
+import { GridSignalStrip } from "../components/controller/GridSignalStrip";
 import { GridAccumulatedCell } from "../components/controller/GridAccumulatedCell";
 import type { SimInjectState } from "../api/types";
 
@@ -195,6 +196,7 @@ export function ControllerPage() {
 
   return (
     <Box data-testid="controller-page">
+      <GridSignalStrip />
       <Box sx={{ display: "flex", alignItems: "center", mb: 1, pr: 0.5 }}>
         <Typography variant="h6">Controller</Typography>
         <Box sx={{ flex: 1 }} />

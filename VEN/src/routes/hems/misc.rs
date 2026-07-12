@@ -55,6 +55,18 @@ pub async fn get_capacity(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.capacity_state().await)
 }
 
+/// GET /signals — WP4.6: one-round-trip aggregate of the active grid signals
+/// (alert / SIMPLE / dispatch windows + capacity state) for the UI status
+/// strip. Read-only view over state the poll loop already maintains.
+pub async fn get_signals(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(serde_json::json!({
+        "alerts": ctx.state.alert_windows().await,
+        "simple": ctx.state.simple_windows().await,
+        "dispatch": ctx.state.dispatch_windows().await,
+        "capacity": ctx.state.capacity_state().await,
+    }))
+}
+
 /// GET /obligations — returns pending report obligations (Stage 2).
 pub async fn get_obligations(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.report_obligations().await)

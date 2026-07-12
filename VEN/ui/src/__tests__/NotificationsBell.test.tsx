@@ -7,6 +7,7 @@ import { NotificationsBell } from "../components/NotificationsBell";
 const mockNotificationsData = vi.fn((): UserNotification[] => []);
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   useNotifications: () => ({ data: mockNotificationsData() }),
 }));
 

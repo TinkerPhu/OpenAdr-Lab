@@ -26,6 +26,7 @@ const mutateMock = vi.fn();
 const updateMutateMock = vi.fn();
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   useReports: () => ({ data: mockReports, dataUpdatedAt: Date.now() }),
   useEvents: () => ({ data: mockEvents }),
   usePrograms: () => ({ data: mockPrograms }),
