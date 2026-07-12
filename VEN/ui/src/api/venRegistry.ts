@@ -68,7 +68,7 @@ export async function fetchDiscoveredVens(
       (v): v is { venName: string; attributes?: Array<{ type?: string; values?: unknown[] }> | null } =>
         typeof v.venName === "string" && v.venName.length > 0 && !known.has(v.venName),
     )
-    .map((v) => {
+    .map((v): DiscoveredVen => {
       const personaValue = (v.attributes ?? []).find((a) => a.type === "PERSONA")?.values?.[0];
       return {
         venName: v.venName,
