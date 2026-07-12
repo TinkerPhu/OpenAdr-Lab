@@ -7,8 +7,12 @@ Feature: Shiftable Load Lifecycle — isolated scenarios
     Given the VEN is running with profile "test"
 
   # ── AC#2: Running load appears in GET /sim ──────────────────────────────
-  # Window must exceed duration to survive planner delay (window=80m > duration=60m),
-  # but stay below duration + plan_step_s (60m + 30m = 90m) so MILP has only slot 0.
+  # Window must exceed duration to survive planner delay (window=80m > duration=60m).
+  # NOTE: the window does NOT guarantee a single valid start slot — window offsets
+  # are measured from the ALIGNED grid start (now truncated to the slot boundary),
+  # so a mid-slot POST can make slot 1 valid too. The planner's earliest-start
+  # tie-break (SHIFT_TIEBREAK_EUR_PER_SLOT) guarantees the load still starts in
+  # the current slot when both are cost-equal, which is what these polls rely on.
 
   @isolated
   Scenario: Running shiftable load appears in GET /sim
@@ -17,7 +21,9 @@ Feature: Shiftable Load Lifecycle — isolated scenarios
     Then the polled sim has asset "wm-2" with power_kw > 0
 
   # ── AC#3: Load auto-completes after duration ────────────────────────────
-  # 1-minute load in 30-minute window ⇒ only slot 0 valid with 1800s steps.
+  # 1-minute load in 30-minute window. Slot 1 can also be valid when the POST
+  # lands mid-slot (aligned-now offset, see note above); the earliest-start
+  # tie-break keeps the start in slot 0.
   #
   # Timing note: appearance in /sim takes ~125–150s on Pi4 (plan cycle → MILP
   # solve → adopt → dispatch tick), then a 1-min run + auto-complete detection.
