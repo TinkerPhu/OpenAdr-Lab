@@ -67,6 +67,13 @@ pub(crate) async fn tick_once(
             .snapshot()
             .expect("SimState::snapshot is infallible");
 
+        // `pre_snap` is taken before physics runs this tick, so its PV power
+        // is last tick's value. `peek_pv_kw` previews what physics is about
+        // to compute for `now`, avoiding the one-tick lag `pre_snap` would
+        // otherwise introduce into the EV-surplus overlay.
+        let live_pv_kw =
+            sim_guard.peek_pv_kw(now, dt_s, inject.pv_irradiance, inject.pv_irradiance_alpha);
+
         let sp_map = super::helpers::build_tick_setpoints(
             &pre_snap,
             plan_snap.as_ref(),
@@ -76,6 +83,7 @@ pub(crate) async fn tick_once(
             now,
             &dispatch_windows,
             &alert_windows,
+            live_pv_kw,
         );
 
         // PHASE 3: Simulator tick — apply setpoints → update device states.

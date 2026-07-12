@@ -322,3 +322,13 @@ outes/sim.rs causes a T1+T2 double-solve race:
   single attributable planner defect on the first failing run afterwards.
   A timeout that only says "timed out" blames the infrastructure by default.
 
+- **A pre-physics snapshot is last tick's state, not this tick's — a control
+  loop that reads it for an uncontrolled/physics-driven asset (no real
+  setpoint, e.g. PV) is always one tick behind** (Phase 3/4 review): the
+  EV-surplus overlay's tiny, persistent grid-residual toggle traced back to
+  exactly this. Fix pattern: preview what physics is about to compute for
+  `now` (a pure, read-only function mirroring the mutating formula) and pass
+  that into the control loop instead of the pre-tick snapshot. Guard the
+  preview against drifting from the real formula with an equivalence test
+  that calls both with identical arguments and asserts they agree.
+

@@ -22,6 +22,110 @@ mod port_tests {
     }
 }
 
+/// `SimState::peek_pv_kw` — a read-only preview of this tick's PV output,
+/// added to fix the one-tick PV lag in `apply_surplus_ev_overlay` (found via
+/// the phase 3+4 review's EV grid-residual toggle, 2026-07-12). The anchor
+/// test proves peek() and tick() can never silently diverge.
+mod peek_pv_kw_tests {
+    use super::super::*;
+    use crate::entities::asset_params::{AssetParams, PvParams};
+    use chrono::TimeZone;
+
+    fn pv_state(rated_kw: f64) -> SimState {
+        SimState::from_params(&[AssetParams::Pv(PvParams {
+            id: crate::ids::ASSET_PV.to_string(),
+            rated_kw,
+        })])
+    }
+
+    fn noon() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 7, 12, 12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn peek_pv_kw_returns_none_without_pv_asset() {
+        let sim = SimState::from_params(&[]);
+        assert_eq!(sim.peek_pv_kw(noon(), 30.0, None, 0.1), None);
+    }
+
+    #[test]
+    fn peek_pv_kw_matches_tick_output_for_same_now() {
+        let mut sim = pv_state(5.0);
+        // A lingering perturbation offset (as if a slider was recently released),
+        // so the decay branch — not just the pure sin model — is exercised.
+        sim.pv_smoothing.irradiance_offset = 0.15;
+
+        let now = noon();
+        let dt_s = 30.0;
+        let pv_alpha = 0.1;
+
+        let preview = sim
+            .peek_pv_kw(now, dt_s, None, pv_alpha)
+            .expect("PV asset is configured");
+
+        sim.tick(
+            dt_s,
+            HashMap::new(),
+            now,
+            None,
+            pv_alpha,
+            None,
+            None,
+            None,
+            None,
+            0.1,
+            None,
+            None,
+        );
+
+        let pv_entry = sim
+            .assets
+            .iter()
+            .find(|e| e.id == crate::ids::ASSET_PV)
+            .expect("PV asset entry must exist");
+        assert!(
+            (pv_entry.last_power_kw - preview).abs() < 1e-9,
+            "peek_pv_kw ({preview}) must equal tick()'s actual PV output ({}) for the same `now` — \
+             any divergence reintroduces the one-tick lag this method exists to prevent",
+            pv_entry.last_power_kw
+        );
+    }
+
+    #[test]
+    fn peek_pv_kw_override_bypasses_decay() {
+        let mut sim = pv_state(10.0);
+        // A large lingering offset that would dominate the natural model if it
+        // were applied — the override must win outright, not blend with it.
+        sim.pv_smoothing.irradiance_offset = 0.9;
+
+        let preview = sim
+            .peek_pv_kw(noon(), 30.0, Some(0.5), 0.1)
+            .expect("PV asset is configured");
+        assert!(
+            (preview + 5.0).abs() < 1e-9,
+            "override=0.5 on a 10 kW array must yield -5.0 kW export, got {preview}"
+        );
+    }
+
+    #[test]
+    fn peek_pv_kw_respects_export_limit_kw() {
+        let mut sim = pv_state(10.0);
+        if let Some(AssetConfig::Pv(pv)) = sim.asset_configs.first_mut() {
+            pv.export_limit_kw = Some(-2.0);
+        } else {
+            panic!("expected a PV asset config");
+        }
+
+        let preview = sim
+            .peek_pv_kw(noon(), 30.0, Some(1.0), 0.1)
+            .expect("PV asset is configured");
+        assert!(
+            (preview + 2.0).abs() < 1e-9,
+            "export limit of -2.0 kW must clamp full-irradiance output, got {preview}"
+        );
+    }
+}
+
 /// SC-002: Verify `GET /sim/schema` response is identical before and after the
 /// pre-computation refactor.
 ///
