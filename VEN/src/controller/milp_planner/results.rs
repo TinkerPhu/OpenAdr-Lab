@@ -64,7 +64,7 @@ pub(crate) fn fallback_plan(
                 export_tariff_eur_kwh: inp.c_exp_eur_kwh[t],
                 co2_g_kwh: inp.g_imp_kgco2_kwh[t] * 1000.0,
                 grid_effective_cost: inp.c_imp_eur_kwh[t],
-                rate_estimated: false,
+                rate_estimated: inp.rate_stale[t],
                 import_cap_kw: inp.p_imp_max_cont_kw[t],
                 export_cap_kw: inp.p_exp_max_cont_kw[t],
                 baseline_kw: inp.p_base_kw[t],
@@ -275,7 +275,7 @@ pub(crate) fn translate_to_plan(
             export_tariff_eur_kwh: inputs.c_exp_eur_kwh[t],
             co2_g_kwh: inputs.g_imp_kgco2_kwh[t] * 1000.0,
             grid_effective_cost: inputs.c_imp_eur_kwh[t],
-            rate_estimated: false,
+            rate_estimated: inputs.rate_stale[t],
             import_cap_kw: inputs.p_imp_max_cont_kw[t],
             export_cap_kw: inputs.p_exp_max_cont_kw[t],
             baseline_kw: inputs.p_base_kw[t],
@@ -399,6 +399,14 @@ pub(crate) fn translate_to_plan(
 
     // ── Warnings ────────────────────────────────────────────────────────
     let mut warnings = Vec::new();
+    // WP4.4 (BL-07): stable text — WP4.3's notification dedup keys on it.
+    if let Some(msg) = &inputs.stale_rate_warning {
+        warnings.push(PlanWarning {
+            severity: WarningSeverity::Warning,
+            message: msg.clone(),
+            suggested_action: None,
+        });
+    }
     if violation_count > 0 {
         warnings.push(PlanWarning {
             severity: WarningSeverity::Warning,

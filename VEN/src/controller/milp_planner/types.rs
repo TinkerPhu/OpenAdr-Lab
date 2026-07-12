@@ -71,6 +71,12 @@ pub(crate) struct MilpInputs {
     // ── Grid (per-step arrays, len = n) ──────────────────────────────────────
     /// Import tariff [€/kWh]
     pub(crate) c_imp_eur_kwh: Vec<f64>,
+    /// WP4.4 (BL-07): true where `c_imp_eur_kwh[t]` was filled by the
+    /// StaleRatePolicy (slot lies beyond tariff coverage).
+    pub(crate) rate_stale: Vec<bool>,
+    /// WP4.4: stable warning text when any slot is stale (→ PlanWarning →
+    /// WP4.3 notification), `None` when the horizon is fully covered.
+    pub(crate) stale_rate_warning: Option<String>,
     /// Export tariff [€/kWh]
     pub(crate) c_exp_eur_kwh: Vec<f64>,
     /// Grid CO₂ intensity [kgCO₂/kWh] (÷1000 from stored g/kWh)

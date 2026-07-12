@@ -204,6 +204,8 @@ impl Default for PlannerConfig {
             simple_level1_import_cap_pct: default_simple_level1_import_cap_pct(),
             asap_lateness_eur_kwh_h: default_asap_lateness_eur_kwh_h(),
             v_ev_free_charge_eur_kwh: default_v_ev_free_charge(),
+            stale_rate_policy: default_stale_rate_policy(),
+            stale_rate_safe_pctl: default_stale_rate_safe_pctl(),
         }
     }
 }
@@ -218,6 +220,14 @@ pub(super) fn default_asap_lateness_eur_kwh_h() -> f64 {
 
 pub(super) fn default_v_ev_free_charge() -> f64 {
     0.10
+}
+
+pub(super) fn default_stale_rate_policy() -> crate::entities::design_vocabulary::StaleRatePolicy {
+    crate::entities::design_vocabulary::StaleRatePolicy::HeuristicForecast
+}
+
+pub(super) fn default_stale_rate_safe_pctl() -> f64 {
+    0.8
 }
 
 pub(super) fn default_phase2_epsilon() -> f64 {

@@ -695,10 +695,17 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
         None,
         None,
     );
+    // WP4.4 adds a benign informational warning when tariff coverage ends
+    // before the horizon — this test's invariant is *feasibility*, so only
+    // solver/violation warnings may fail it.
+    let blocking: Vec<_> = plan
+        .warnings
+        .iter()
+        .filter(|w| !w.message.contains("Tariff data ends before the planning horizon"))
+        .collect();
     assert!(
-        plan.warnings.is_empty(),
-        "ven-3 heater MILP should be feasible, got warnings: {:?}",
-        plan.warnings
+        blocking.is_empty(),
+        "ven-3 heater MILP should be feasible, got warnings: {blocking:?}"
     );
     let heater_kws: Vec<f64> = plan
         .slots
