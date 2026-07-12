@@ -13,6 +13,7 @@
 
 mod notifications;
 mod schema;
+mod settings;
 
 use std::sync::Mutex;
 
@@ -24,7 +25,7 @@ use crate::entities::history::{
     EventReceived, GridSample, LedgerPeriod, PlanSnapshot, ReportSent, TickSample,
 };
 use crate::entities::DomainError;
-use schema::{SCHEMA_V1, SCHEMA_V2, SCHEMA_VERSION};
+use schema::{SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_VERSION};
 
 type TickSampleRow = (i64, String, f64, Option<f64>, Option<f64>);
 type GridSampleRow = (i64, f64, f64, Option<f64>, Option<f64>, Option<f64>);
@@ -83,6 +84,10 @@ impl SqliteHistoryStore {
         if version < 2 {
             conn.execute_batch(SCHEMA_V2)
                 .map_err(|e| DomainError::StorageError(format!("apply schema v2: {e}")))?;
+        }
+        if version < 3 {
+            conn.execute_batch(SCHEMA_V3)
+                .map_err(|e| DomainError::StorageError(format!("apply schema v3: {e}")))?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| DomainError::StorageError(format!("set user_version: {e}")))?;
@@ -526,8 +531,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            table_count, 7,
-            "expected 6 tables from schema v1 + notifications from v2"
+            table_count, 8,
+            "expected 6 tables from schema v1 + notifications (v2) + user_settings (v3)"
         );
     }
 
@@ -806,5 +811,40 @@ mod tests {
 
         let pruned = store.prune_before(ts(150)).unwrap();
         assert_eq!(pruned, 1, "prune covers the notifications table");
+    }
+
+    #[test]
+    fn test_settings_put_get_delete_roundtrip() {
+        use crate::controller::SettingsPort;
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        assert_eq!(store.get_setting("comfort_curve", "ev").unwrap(), None);
+
+        store
+            .put_setting("comfort_curve", "ev", "[{\"fill\":0.8}]", ts(100))
+            .unwrap();
+        assert_eq!(
+            store.get_setting("comfort_curve", "ev").unwrap().as_deref(),
+            Some("[{\"fill\":0.8}]")
+        );
+
+        // Upsert replaces the value for the same (key, asset_id).
+        store
+            .put_setting("comfort_curve", "ev", "[{\"fill\":0.9}]", ts(200))
+            .unwrap();
+        assert_eq!(
+            store.get_setting("comfort_curve", "ev").unwrap().as_deref(),
+            Some("[{\"fill\":0.9}]")
+        );
+
+        store
+            .put_setting("comfort_curve", "heater", "[]", ts(300))
+            .unwrap();
+        let mut all = store.settings_for_key("comfort_curve").unwrap();
+        all.sort();
+        assert_eq!(all.len(), 2, "one row per asset");
+
+        assert!(store.delete_setting("comfort_curve", "ev").unwrap());
+        assert!(!store.delete_setting("comfort_curve", "ev").unwrap());
+        assert_eq!(store.get_setting("comfort_curve", "ev").unwrap(), None);
     }
 }

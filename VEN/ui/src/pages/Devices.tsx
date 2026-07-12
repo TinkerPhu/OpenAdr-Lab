@@ -15,6 +15,7 @@ import {
 import { EvCard } from "../components/devices/EvCard";
 import { HeaterCard } from "../components/devices/HeaterCard";
 import { ShiftableLoadsCard } from "../components/devices/ShiftableLoadsCard";
+import { ComfortCurveCard } from "../components/devices/ComfortCurveCard";
 import { AllRequestsSection } from "../components/devices/AllRequestsSection";
 
 export function DevicesPage() {
@@ -70,6 +71,9 @@ export function DevicesPage() {
             isPosting={postMut.isPending}
             isDeleting={deleteMut.isPending}
           />
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <ComfortCurveCard />
         </Grid>
       </Grid>
       <AllRequestsSection

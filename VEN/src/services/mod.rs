@@ -9,6 +9,7 @@ pub mod user_request;
 
 pub mod forecast;
 
+pub mod comfort;
 pub mod notify;
 pub mod obligation;
 pub use obligation::ObligationService;

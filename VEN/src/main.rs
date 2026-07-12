@@ -51,6 +51,8 @@ pub struct AppCtx {
     pub history: Option<Arc<dyn controller::HistoryPort>>,
     /// WP4.3 (BL-20): notification fan-out (ring + SSE broadcast + persistence).
     pub notifier: services::notify::Notifier,
+    /// WP4.2 (BL-19): per-asset user-settings persistence (comfort curves).
+    pub settings: Option<Arc<dyn controller::SettingsPort>>,
 }
 
 fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Vec<AssetParams>) {
@@ -179,7 +181,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Phase 1 (A-1/WP1.2): persistent history store, gated by profile.history.enabled.
-    let history_port: Option<Arc<dyn controller::HistoryPort>> = if profile.history.enabled {
+    // The same SQLite store also serves as the WP4.2 SettingsPort.
+    let store = if profile.history.enabled {
         let history_path = format!("{data_dir}/history.sqlite");
         match history_store::SqliteHistoryStore::open(&history_path) {
             Ok(store) => Some(Arc::new(store)),
@@ -191,6 +194,15 @@ async fn main() -> anyhow::Result<()> {
     } else {
         None
     };
+    let history_port: Option<Arc<dyn controller::HistoryPort>> =
+        store.clone().map(|s| s as Arc<dyn controller::HistoryPort>);
+    let settings_port: Option<Arc<dyn controller::SettingsPort>> =
+        store.map(|s| s as Arc<dyn controller::SettingsPort>);
+
+    // WP4.2 (BL-19): re-seed persisted comfort-curve overrides into the hot map.
+    if let Some(s) = settings_port.clone() {
+        services::comfort::load_overrides(&state, s).await;
+    }
 
     // WP4.3 (BL-20): notification fan-out; seed the live ring from the store
     // so the feed survives restarts.
@@ -339,6 +351,7 @@ async fn main() -> anyhow::Result<()> {
         planner_event_tx,
         history: history_port,
         notifier,
+        settings: settings_port,
     };
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;

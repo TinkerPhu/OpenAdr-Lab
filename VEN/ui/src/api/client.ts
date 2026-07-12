@@ -7,7 +7,7 @@ import type {
   ShiftableLoad, CreateShiftableLoadBody, BaselineOverride, CreateBaselineOverrideBody,
   ZoneDef,
   HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent,
-  UserNotification,
+  UserNotification, ComfortRate, ComfortCurveResponse,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
@@ -69,6 +69,23 @@ export class VenApi {
     const r = await this.getReq(`/notifications${q}`);
     if (!r.ok) throw new Error(`notifications ${r.status}`);
     return r.json();
+  }
+
+  async comfortCurve(assetId: string): Promise<ComfortCurveResponse> {
+    const r = await this.getReq(`/assets/${assetId}/comfort_curve`);
+    if (!r.ok) throw new Error(`comfort_curve ${r.status}`);
+    return r.json();
+  }
+
+  async postComfortCurve(assetId: string, rates: ComfortRate[]): Promise<ComfortCurveResponse> {
+    const r = await this.jsonReq("POST", `/assets/${assetId}/comfort_curve`, rates);
+    if (!r.ok) throw new Error(`comfort_curve ${r.status}`);
+    return r.json();
+  }
+
+  async deleteComfortCurve(assetId: string): Promise<void> {
+    const r = await this.jsonReq("DELETE", `/assets/${assetId}/comfort_curve`, undefined);
+    if (!r.ok && r.status !== 404) throw new Error(`comfort_curve ${r.status}`);
   }
 
   async programs(): Promise<Program[]> {
