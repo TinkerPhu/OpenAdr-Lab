@@ -2,8 +2,8 @@
 title: Experiment Harness
 type: component
 created: 2026-07-11
-updated: 2026-07-11
-synced_commit: b1aba12
+updated: 2026-07-12
+synced_commit: c5a1d03
 sources: [experiments/, docs/plans/roadmap/phase-3-control-method-lab.md, VEN/src/tasks/sim_tick/tick.rs]
 tags: [experiments, kpi, scenarios, phase3]
 ---
@@ -47,6 +47,18 @@ as Phase 2's N=10 fleet test.
 4. **`report.py`** — markdown comparison across runs; import-profile PNGs when
    matplotlib is importable, silently skipped otherwise (not installed on the Pi4
    host).
+
+## Personas (Phase 4, WP4.5)
+
+`run_experiment.py --personas` reads `VEN/fleet/manifest.json`
+([[fleet-tooling]]) and, before the scenario's first action, gives every
+persona-tagged fleet VEN its preset EV session (mode/target/departure/budget)
+and comfort-curve override; both are removed in the teardown alongside the
+event cleanup. Fleet VENs are auto-added to the snapshot set, and
+`kpi.py --manifest` appends a per-persona block (mean import/cost/peak/shifted)
+so the S-2/S-3/S-4 re-runs show the behavioural spread — or its absence, which
+would itself be a finding. The full persona re-run is a scheduled real-time
+window like the Phase-3 exit demo.
 
 ## Verified
 

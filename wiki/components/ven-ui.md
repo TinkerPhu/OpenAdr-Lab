@@ -2,8 +2,8 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-07-10
-synced_commit: 88e0e25
+updated: 2026-07-12
+synced_commit: c5a1d03
 sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx]
 tags: [ui, react, timeline]
 ---
@@ -21,6 +21,12 @@ React + TypeScript SPA (Vite build, nginx-served, port 8214) — the per-site da
 - `VenContext` — multi-VEN selector switching all pages across the three instances.
 - Pages: Dashboard, Programs, Events, Sensors; plus the planner timeline views exercised
   by `tests/features/ven_ui_planner.feature` and `ven_timeline.feature`.
+- Phase 4 additions: `NotificationsBell` in the app bar (badge + feed panel, 10 s
+  polling — the UI face of [[notifications]]); a `ComfortCurveCard` on the Devices
+  page (per-asset fill%/bid table, POST installs an override, Reset restores the
+  built-in default — WP4.2/BL-19); the EV/heater/shiftable dialogs gained a
+  request-mode select (`ModeSelect`, native `<select>` for testability) and the EV
+  dialog a budget field shown only for `MAX_COST` (WP4.1/BL-28).
 
 ## Timeline specifics
 

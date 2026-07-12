@@ -3,7 +3,7 @@ title: Fleet Tooling
 type: component
 created: 2026-07-11
 updated: 2026-07-11
-synced_commit: 795c8d8
+synced_commit: c5a1d03
 sources: [fleet.sh, scripts/gen_fleet_profiles.py, scripts/fleet_status.py, scripts/db_reset.sh, scripts/seed_vtn.py, VEN/src/config.rs, docs/plans/roadmap/phase-2-fleet-enablement.md]
 tags: [fleet, docker, provisioning, ven, phase2]
 ---
@@ -47,6 +47,19 @@ same function that provisions `ven-1`/`ven-2`/`ven-3`).
 - **`status`**: `scripts/fleet_status.py` — per-VEN `/health` plus a cross-check
   against the VTN's own `GET /vens` (using the `ven-manager` fixture credential) so a
   container that's "up" but never actually registered is visible as a mismatch.
+
+## Personas (Phase 4, WP4.5)
+
+`fleet.sh up N --personas eco:0.4,comfort:0.4,commuter:0.2` assigns each
+generated VEN a persona (seeded largest-remainder split — `scripts/personas.py`
+is the single source of truth, with a `python3 scripts/personas.py` self-check).
+The persona nudges the generated asset mix (EV/battery probability, base-load
+range) and lands in `VEN/fleet/manifest.json`; at experiment time
+`run_experiment.py --personas` gives each fleet VEN its persona's EV session
+(request mode / target / departure / budget) and comfort-curve override, and
+`kpi.py --manifest` segments KPIs per persona ([[experiment-harness]]).
+Presets are pure configuration over the Phase-4 features — documented in
+`VEN/profiles/README.md`.
 
 ## GB-09: poll-startup jitter, not per-profile intervals
 

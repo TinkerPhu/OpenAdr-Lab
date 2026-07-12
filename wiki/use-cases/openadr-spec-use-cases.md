@@ -3,7 +3,7 @@ title: OpenADR-Spec-Implied Use Cases — Gap Analysis
 type: use-case
 created: 2026-07-04
 updated: 2026-07-11
-synced_commit: b1aba12
+synced_commit: c5a1d03
 sources: [docs/openadr_3_1_specs/, docs/BACKLOG_OpenADR_Cert.md, docs/architecture/VEN_ARCHITECTURE.md, tests/features/, VEN/src/entities/capacity.rs]
 tags: [use-cases, openadr, gap-analysis, spec]
 ---

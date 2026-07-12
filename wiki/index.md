@@ -23,6 +23,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[history-store]] — VEN HistoryPort/SqliteHistoryStore + sampler + routes, VTN BFF recorder
 - [[fleet-tooling]] — fleet.sh (up/down/status), bulk VEN registration, GB-06/GB-09
 - [[experiment-harness]] — scenario YAMLs, real-time runner, KPI extraction, comparison reports
+- [[notifications]] — user notification feed: ring + SSE + persistence, edge-triggered producers, dedup via stable warning text
 
 ## Concepts
 - [[openadr-3]] — protocol entities, event types, certification profiles, 3.0 vs 3.1 skew
@@ -55,4 +56,4 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[history-store-persistence-format]] — SQLite schema, epoch-second time encoding, per-asset-per-minute rows, flat retention pruning, docker bind-mount path
 
 ---
-Pages: 35 · Last sync: 2026-07-11 (Phase 3 control-method lab: new experiment-harness page; openadr-interface, dispatcher, milp-planner, openadr-spec-use-cases updated, b1aba12)
+Pages: 36 · Last sync: 2026-07-12 (Phase 4 comfort & personas: new notifications page; milp-planner, ven-ui, history-store, fleet-tooling, experiment-harness, hems-planning updated, c5a1d03)
