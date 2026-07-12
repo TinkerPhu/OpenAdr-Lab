@@ -3,7 +3,7 @@ title: System Use Cases
 type: use-case
 created: 2026-07-04
 updated: 2026-07-06
-synced_commit: ae4a1ed
+synced_commit: c5a1d03
 sources: [docs/use-cases/SYSTEM-USE-CASES.md, tests/features/, docs/use-cases/SYSTEM-USE-CASE-MANUAL.md]
 tags: [use-cases, dr, bdd]
 ---
@@ -31,8 +31,10 @@ capacity subscription scenarios, etc.)
 
 BDD suites `ven_uc_normal.feature`, `ven_uc_edge_cases.feature`, `ven_uc_stress.feature`,
 `ven_uc_vtn_coordination.feature`, plus per-component features (planner, dispatcher,
-heater tank, user requests, reports) — ~49 scenarios total. Observation procedures for
-manual runs: docs/use-cases/SYSTEM-USE-CASE-MANUAL.md.
+heater tank, user requests, reports) — 51 features / ~258 scenarios after Phase 4
+added `ven_comfort_curve.feature` and `ven_request_modes.feature`. Observation
+procedures for manual runs: docs/use-cases/SYSTEM-USE-CASE-MANUAL.md, and per-WP
+Phase-4 procedures in docs/use-cases/COMFORT-PERSONAS-USE-CASE-MANUAL.md (M4.1-M4.7).
 
 The complementary spec-side view — use cases the OpenADR 3.1 spec *implies* a VEN should
 handle, gap-checked against this code base — is in [[openadr-spec-use-cases]].

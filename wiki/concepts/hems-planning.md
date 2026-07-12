@@ -3,7 +3,7 @@ title: HEMS Planning Concepts
 type: concept
 created: 2026-07-04
 updated: 2026-07-06
-synced_commit: ae4a1ed
+synced_commit: c5a1d03
 sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems/, openspec/specs/ev-session-request-completion/spec.md, VEN/src/entities/device_session.rs]
 tags: [hems, planning, sessions, domain]
 ---
@@ -37,12 +37,21 @@ Implementations: [[milp-planner]], [[dispatcher]].
 
 ## User intent
 
-A **User Request** ("charge EV to 80% by 07:00") supports modes `ASAP`, `BY_DEADLINE`,
-`MAX_COST`, `OPPORTUNISTIC` (REQUIREMENTS.md §2.3). The User Request Manager translates it
-into device sessions — `EvSession`, `HeaterTarget`, `ShiftableLoad` — applying per-asset
-`CompletionPolicy` defaults and computing energy from SoC delta × capacity
-(VEN_ARCHITECTURE.md §2.1). Sessions enter the MILP as **constraints** (deadline step,
-energy target, `MilpLoadMode`), never as iterated objects (§2.3.1).
+A **User Request** ("charge EV to 80% by 07:00") carries one of six
+`UserRequestMode`s — `ASAP`, `ASAP_FREE`, `BY_DEADLINE` (default = the pre-mode
+behaviour), `BY_DEADLINE_FREE`, `MAX_COST`, `OPPORTUNISTIC` (REQUIREMENTS.md
+§3.2.1). Since Phase 4 (BL-28) the mode is real on the EV path: it is stored on
+the session and branches the MILP's session-intent translation — see
+[[milp-planner]] for the per-mode mechanics (lateness penalty, free-energy
+gating, budget cap). Heater/shiftable sessions store the mode but the planner
+does not branch on it yet. The User Request Manager translates requests into
+device sessions — `EvSession`, `HeaterTarget`, `ShiftableLoad` — applying
+per-asset `CompletionPolicy` defaults and computing energy from SoC delta ×
+capacity (VEN_ARCHITECTURE.md §2.1). Sessions enter the MILP as **constraints**
+(deadline step, energy target, `MilpLoadMode`), never as iterated objects
+(§2.3.1). A user may also override an asset's comfort/value curve
+(WP4.2/BL-19), preferred over `default_comfort_rates()` wherever the curve is
+consulted.
 
 **Session teardown closes the loop back onto the request.** Deleting an `EvSession`
 (`DELETE /ev-session`, `VEN/src/routes/hems/ev.rs`) does not just clear session state — it

@@ -5181,3 +5181,64 @@ signal-application block to a new tasks/poll_signals.rs with a grouped
 ParsedSignals struct). One audit failure slipped into a commit because a tail
 pipeline masked the script's exit code — caught and fixed the next commit.
 
+
+## Phase 4 — Comfort & Personas (WP4.1–WP4.5, branch fix/phase-4-comfort-and-personas)
+
+**What:** the resident's intent, comfort and trust became first-class (SG-5):
+the six `UserRequestMode`s drive the MILP's EV session-intent translation
+(BL-28), users can override comfort curves with persistence (BL-19), a
+notification feed with three wired producers exists end-to-end (BL-20), the
+planner dispatches on `StaleRatePolicy` for slots beyond tariff coverage
+(BL-07), and three persona presets plus harness/KPI support make the fleet
+diverse for the S-2/S-3/S-4 re-runs. Additionally each WP shipped a
+human-executable manual test procedure
+(docs/use-cases/COMFORT-PERSONAS-USE-CASE-MANUAL.md, M4.1–M4.7).
+
+**How (order):** WP4.1-a (mode plumbing, zero behavioural change) → WP4.1-b
+(ASAP + OPPORTUNISTIC in the MILP) → WP4.3 (notifications; needed by later
+WPs' warnings) → WP4.4 (stale rates; emits through the plan-warning channel)
+→ WP4.2 (comfort curves + SettingsPort) → WP4.1-c (MAX_COST + *_FREE) →
+WP4.5 (personas). Per-WP: test-first, local gates, commit, deploy to Pi4,
+full E2E. Suite grew 49→51 features / 252→258 scenarios; Rust 549→582 unit
+tests, UI 327→333.
+
+**Key design moves:**
+- Grid-slot injection: `AssetMilpContext::inject_grid_slots` (default no-op)
+  hands contexts the per-slot tariff/PV/baseline arrays after
+  `build_milp_inputs` — the OPPORTUNISTIC free-energy cap and the MAX_COST
+  budget constraint both derive from it without the MILP core importing
+  asset types.
+- Warnings as the notification backbone: WP4.3's plan-warning diff (stable
+  text = dedup key, once per new message on an adopted plan) automatically
+  carries WP4.4's stale-rate warning and WP4.1-c's budget warning — no extra
+  producer wiring per feature.
+- MAX_COST infeasibility UX as designed: budget is a hard constraint but
+  completion is a per-kWh reward, so unaffordable targets degrade to partial
+  charging + one Warn notification instead of failing the whole solve.
+
+**Issues / learnings:**
+1. The legacy `e_ev_extra` reward is structurally inert (upper-bound-only
+   coupling lets the solver bank the reward without charging) — found live
+   when OPPORTUNISTIC refused to charge in a negative-price window; free/
+   budget modes now reward charged energy per slot; legacy modes recorded as
+   R-18.
+2. Phase 2's friction smoothing legitimately spends `phase2_epsilon_eur`
+   against soft mode incentives: ASAP_FREE's early bias cannot force
+   earliest-slot saturation, only front-loading up to the friction budget —
+   the unit test asserts exactly that invariant and documents why.
+3. The isolated E2E tail flaked twice (different scenario each time, main
+   suite green both times) because it starts seconds after the ~40-min main
+   suite; `tests/entrypoint.sh` now waits for the host 1-min load to drop
+   below 2.0 (containers see the host `/proc/loadavg`) before the tail —
+   validated green in the next run.
+4. BL-19's premise was partly wrong: comfort curves had no live consumption
+   path (`create_from_body` drops the resolved curve). The override
+   machinery + preference landed; curve→MILP-tier translation is recorded as
+   open in the BL-19 resolution rather than silently absorbed.
+5. A departure exactly on a slot boundary counts as inside the deadline
+   (established BY_DEADLINE semantic) — surfaced by the BY_DEADLINE_FREE
+   test; test moved off the boundary, semantic kept.
+
+**Deferred to a scheduled window:** the S-2/S-3/S-4 persona-fleet re-run
+(~90 min real time + fleet bring-up) — same rationale as the Phase 2 N=10
+and Phase 3 exit demo.

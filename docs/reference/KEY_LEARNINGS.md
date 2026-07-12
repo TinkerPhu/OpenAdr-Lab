@@ -268,3 +268,29 @@
   then poll GET /plan for N seconds after the inject and assert created_at does
   not change.  This is more reliable than log-string matching and works across both
   the replan_interval-based periodic solve and the watch-channel-based reactive solve.
+
+- **Reward variables need a lower coupling to act** (Phase 4, WP4.1-b): a reward
+  on a slack variable that only appears in upper-bound constraints
+  (`ev_energy <= core + e_ev_extra`) is free money — the solver maxes the slack
+  without moving the physical variable. To make a reward drive behaviour, put it
+  on the physical quantity itself (per-slot `p_ev`) or couple the slack from
+  below. Audit any `-reward * aux_var` objective term for this shape.
+
+- **Phase 2 friction smoothing competes with soft incentives** (Phase 4, WP4.1-c):
+  any objective preference weaker than `phase2_epsilon_eur` over the affected
+  slots can be traded away by the friction phase (it may spend exactly that
+  budget on ramp smoothing). Either make the incentive dominate the epsilon
+  (ASAP's 10 EUR/kWh·h lateness) or specify and test the weaker invariant
+  ("front-loaded up to the friction budget"), never assert the strong one.
+
+- **Gate timing-sensitive test phases on actual host load, not ordering**
+  (Phase 4): running the @isolated E2E tail "after" the main suite still means
+  running at load 5+. Containers see the host /proc/loadavg — poll it and start
+  the sensitive phase only below a threshold (entrypoint.sh waits for 1-min
+  load < 2.0, capped). Two flaky runs became deterministic.
+
+- **When a backlog entry's premise is wrong, say so in its resolution**
+  (Phase 4, BL-19): the entry assumed a live comfort-curve consumption path;
+  implementation found the resolved curve was dropped. The resolution records
+  the gap (curve→MILP tiers still open) instead of silently absorbing or
+  silently expanding scope.

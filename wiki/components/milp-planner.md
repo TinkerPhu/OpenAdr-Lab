@@ -2,8 +2,8 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-07-11
-synced_commit: b1aba12
+updated: 2026-07-12
+synced_commit: c5a1d03
 sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning.rs, VEN/src/services/planning.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md]
 tags: [planner, milp, highs, optimization]
 ---
@@ -46,13 +46,34 @@ see [[milp-over-greedy]].
   decayed threshold, or a current plan whose slots have all expired always adopt. Gate
   decay must measure real age, so it always receives `wall_now`, never the aligned
   timestamp (ven_milp_planner.md §2.2).
-- **Stale-rate behaviour**: tariffs reach the solver as Step/LOCF `TariffTimeSeries`
-  ([[tariffs-and-capacity]]) — the last known rate carries forward indefinitely, and
-  hardcoded defaults (0.25 €/kWh import, 0.08 export, 300 g/kWh CO₂) fill slots with no
-  data at all (`inputs.rs:77-90`). The four-variant `StaleRatePolicy` enum sketched as
-  future roadmap is quarantined (unwired, not deleted) in `entities/design_vocabulary.rs`
-  — `docs/BACKLOG.md` BL-07 tracks wiring `StaleRatePolicy::LastKnown` and
-  `rate_estimated` (currently hardcoded `false`) as a real feature.
+- **Request-mode session translation** (Phase 4, WP4.1 / BL-28): the EV path branches
+  on `EvSession.mode` in `assets/ev_milp.rs::from_state` — ASAP adds a lateness
+  penalty (`asap_lateness_eur_kwh_h`, default 10 €/kWh·h → cost-blind front-loading);
+  OPPORTUNISTIC / ASAP_FREE / BY_DEADLINE_FREE cap charging per slot at the free
+  energy (PV surplus over baseline, opened fully when the import rate ≤ 0) and reward
+  each charged kWh (`v_ev_free_charge_eur_kwh`); MAX_COST adds a hard budget
+  constraint on charging cost with a per-kWh completion reward, so an unaffordable
+  target degrades to partial charging + a plan warning instead of an infeasible solve.
+  The per-slot data these modes need arrives through the new
+  `AssetMilpContext::inject_grid_slots` hook (default no-op), called by `run_planner`
+  after `build_milp_inputs` — the MILP core still never imports asset types.
+  Heater/shiftable sessions store the mode but the planner ignores it there (BL-28
+  resolution). Two solver-shape lessons: the legacy `e_ev_extra` reward is
+  structurally inert (upper-bound-only coupling — R-18 in TECHNICAL_DEBTS.md), and
+  any soft incentive weaker than `phase2_epsilon_eur` gets traded away by Phase 2's
+  friction smoothing (ASAP_FREE's invariant is therefore "front-loaded up to the
+  friction budget", not "earliest slot saturated").
+- **Stale-rate policy dispatch** (Phase 4, WP4.4 / BL-07 — resolved): `TariffTimeSeries`
+  now records `import_coverage_end`; `build_milp_inputs` fills slots beyond it via
+  `milp_planner/stale_rates.rs` per the profile's `stale_rate_policy` — LAST_KNOWN
+  repeats, SAFE_AVERAGE takes the `stale_rate_safe_pctl` nearest-rank percentile,
+  DEFER_TO_FLEXIBLE prices stale slots at the max known rate (defers discretionary
+  load into covered slots), HEURISTIC_FORECAST (default) is a documented stub →
+  LAST_KNOWN until Phase 5 (BL-14). Stale slots set `PlanTimeSlot.rate_estimated`
+  (no longer hardcoded false) and the plan carries one stable-text warning, which the
+  [[notifications]] feed dedups into a single Warn. Export/CO₂ keep step-hold +
+  defaults (0.08 export, 300 g/kWh) — the policy governs the import price that
+  actually drives scheduling ([[tariffs-and-capacity]]).
 - **Asset isolation**: asset physics enter as `Vec<Box<dyn AssetMilpContext>>` — the
   planner never imports concrete asset types ([[ven-hexagonal-architecture]]).
   `tasks/planning.rs` reaches the solver through the `SolverPort` trait
@@ -103,6 +124,8 @@ see [[milp-over-greedy]].
 | Weights, `MilpInputs`, `SolveOutput` | `types.rs` |
 | Asset port (trait + var/context structs) | `asset_port.rs` |
 | Phase 1 / Phase 2 | `solver_phase1.rs` / `solver_phase2.rs` |
+| Stale-rate policy dispatch (WP4.4) | `stale_rates.rs` |
+| Request-mode EV semantics (WP4.1) | `VEN/src/assets/ev_milp.rs` (via `AssetMilpContext`) |
 | Cross-asset interactions | `VEN/src/controller/milp_interactions.rs` |
 | Plan translation + fallback plan | `results.rs` |
 | Per-session flexibility envelopes | `envelopes.rs` |

@@ -3,7 +3,7 @@ title: History Store (VEN local persistence + VTN recorder)
 type: component
 created: 2026-07-10
 updated: 2026-07-10
-synced_commit: 88e0e25
+synced_commit: c5a1d03
 sources: [VEN/src/history_store/, VEN/src/controller/history_port.rs, VEN/src/entities/history.rs, VEN/src/tasks/history_sampler/, VEN/src/routes/hems/history.rs, VEN/ui/src/pages/History.tsx, VTN/bff/src/recorder.rs, docs/plans/roadmap/phase-1-data-foundation.md]
 tags: [history, sqlite, persistence, vtn, recorder, ports]
 ---
@@ -90,6 +90,19 @@ upsert logic, since the recorder is a write-once log, not a live mirror.
 > curl+psql check against the running stack, not by unit tests (the recorder's own tests
 > mock the client entirely). Fixed by threading `ven_mgr` through `spawn_recorder`'s
 > signature.
+
+## Phase 4 additions: schema v2/v3 + SettingsPort
+
+The one-shot v1 migration became stepwise (`PRAGMA user_version`, apply each
+`SCHEMA_Vn` in order — `history_store/mod.rs::migrate`). v2 adds the
+`notifications` table ([[notifications]]; persistence code split to
+`history_store/notifications.rs` for the 500-line cap). v3 adds `user_settings`
+(`(key, asset_id) → value_json`), behind the new **`SettingsPort`** trait
+(`controller/settings_port.rs`) — a deliberate *sibling* of `HistoryPort`
+rather than an extension: settings are current-state, not time-series, and the
+same `SqliteHistoryStore` implements both (`main.rs` hands out two `Arc<dyn …>`
+views of one store). First consumer: WP4.2 comfort-curve overrides, re-seeded
+into an `AppState` hot map at startup.
 
 ## Why this shape
 
