@@ -14,6 +14,7 @@ import {
 import type { TariffTimePoint } from "../types";
 import { COLOR_NOW } from "../types";
 import type { ZoneDef } from "../../../api/types";
+import { minSpanDomain, MIN_CO2_RATE_SPAN_G_H } from "./axisDomain";
 
 const COLOR_IMPORT_TARIFF = "#f44336";
 const COLOR_EXPORT_TARIFF = "#4caf50";
@@ -76,6 +77,11 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, 
     return windowed;
   })();
 
+  const co2Domain = minSpanDomain(
+    clipped.map((p) => p.totalCo2RateGH ?? null),
+    MIN_CO2_RATE_SPAN_G_H
+  );
+
   // Ensure at least a 2-point range so recharts can render the NOW line when data is empty.
   const chartData: TariffTimePoint[] =
     clipped.length > 0
@@ -99,7 +105,14 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, 
             tick={{ fontSize: 10 }}
           />
           <YAxis yAxisId="tariff" tick={{ fontSize: 10 }} width={40} unit=" €" />
-          <YAxis yAxisId="co2" orientation="right" tick={{ fontSize: 10 }} width={52} unit=" g/h" />
+          <YAxis
+            yAxisId="co2"
+            orientation="right"
+            tick={{ fontSize: 10 }}
+            width={52}
+            unit=" g/h"
+            domain={co2Domain}
+          />
           <Tooltip
             contentStyle={{ fontSize: 9, padding: "1px 5px" }}
             itemStyle={{ padding: "0" }}
