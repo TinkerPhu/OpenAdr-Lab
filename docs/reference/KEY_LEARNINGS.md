@@ -294,3 +294,15 @@
   implementation found the resolved curve was dropped. The resolution records
   the gap (curve→MILP tiers still open) instead of silently absorbing or
   silently expanding scope.
+
+- **vitest and eslint do not typecheck — run `npm run build` before shipping UI
+  changes** (Phase 4, WP4.6): a type-predicate error passed the full UI test
+  suite and lint locally, then failed `tsc && vite build` inside the Docker
+  image build on Pi4, killing the E2E run before any test executed. The tsc
+  gate only exists in the image build unless you run it locally.
+
+- **Never pipe docker build output through `tail -1`** (Phase 4): a failed
+  `docker compose build` was invisible because only the last line survived;
+  `compose up -d` then silently kept the old image running ("Container …
+  Running" instead of "Recreated"). Check for ERROR lines explicitly, or let
+  the full output through.

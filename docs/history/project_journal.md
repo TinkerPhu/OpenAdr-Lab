@@ -5242,3 +5242,29 @@ tests, UI 327→333.
 **Deferred to a scheduled window:** the S-2/S-3/S-4 persona-fleet re-run
 (~90 min real time + fleet bring-up) — same rationale as the Phase 2 N=10
 and Phase 3 exit demo.
+
+### Phase 4 addendum — WP4.6 observability polish + two live-found fixes
+
+After WP4.1–4.5 landed, a UI review found the Phase 3/4 features accessible
+but their *effects* only indirectly observable. WP4.6 (added to the roadmap
+mid-phase) closed that: a grid-signal status strip on the Controller page
+(alerts / SIMPLE / dispatch / capacity chips, backed by a new one-round-trip
+`GET /signals` aggregate), hatched estimated-rate slots in the plan matrix,
+persona labels in the VEN selector (persona travels as an OpenADR VEN
+`PERSONA` attribute set at fleet provisioning), and request-mode visibility
+on every device card and the All-Requests table. Manual procedure M4.8.
+
+Two defects were found and fixed via the E2E runs, not by inspection:
+1. The PV-surplus overlay commanded the EV below its 1.4 kW minimum charge
+   rate; the physical model outputs 0 for sub-minimum commands, but the
+   dispatch override counted the phantom setpoint in its net-power
+   compensation — the DISPATCH_SETPOINT scenario sat ~1 kW under target for
+   a full window. The overlay now reads `min_charge_kw` from the EV snapshot
+   and never commands below it.
+2. A venRegistry type-predicate change passed vitest and eslint but failed
+   `tsc` inside the Docker UI build — neither local gate runs the TypeScript
+   compiler. `npm run build` is now part of the local gate sequence for
+   UI-typed changes.
+
+Final suite: 52 features / 259 scenarios / 0 failed (isolated tail 3/3);
+583 Rust unit/integration tests; 341 UI tests.
