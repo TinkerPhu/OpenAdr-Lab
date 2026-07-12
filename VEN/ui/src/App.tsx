@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { VenApi } from "./api/client";
 import { useHealth } from "./api/hooks";
 import { DEFAULT_VENS, fetchDiscoveredVens, mergeVens } from "./api/venRegistry";
+import { NotificationsBell } from "./components/NotificationsBell";
 import { DashboardPage } from "./pages/Dashboard";
 import { ProgramsPage } from "./pages/Programs";
 import { EventsPage } from "./pages/Events";
@@ -140,6 +141,8 @@ export default function App() {
             <Box sx={{ mx: 1 }}>
               <HealthChip />
             </Box>
+
+            <NotificationsBell />
 
             <Box sx={{ flex: 1 }} />
 

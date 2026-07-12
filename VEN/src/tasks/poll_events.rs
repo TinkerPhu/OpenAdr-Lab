@@ -130,6 +130,7 @@ pub(crate) fn spawn_event_poll(
     vtn: Arc<dyn VtnPort>,
     secs: u64,
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
+    notifier: crate::services::notify::Notifier,
     startup_delay_s: u64,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -143,9 +144,12 @@ pub(crate) fn spawn_event_poll(
         let mut prev_tariff_count: usize = 0;
         let mut prev_import_limit: Option<f64> = None;
         let mut signal_prevs = super::poll_signals::SignalPrevs::default();
+        let mut vtn_ok = true; // WP4.3: notify only on reachable⇄unreachable edges
         loop {
+            use crate::services::notify::notify_outage_edge as outage_edge;
             match vtn.fetch_events().await {
                 Ok(events) => {
+                    vtn_ok = outage_edge(&notifier, &state, Utc::now(), vtn_ok, true).await;
                     counter!("poll_success_total", "resource" => "events").increment(1);
                     info!(resource = "events", count = events.len(), "poll success");
 
@@ -177,6 +181,7 @@ pub(crate) fn spawn_event_poll(
                     let signal_trigger_sent = super::poll_signals::apply_signal_changes(
                         &state,
                         &trigger_tx,
+                        &notifier,
                         changes.signals,
                         now,
                         &mut signal_prevs,
@@ -209,6 +214,7 @@ pub(crate) fn spawn_event_poll(
                 Err(e) => {
                     counter!("poll_error_total", "resource" => "events").increment(1);
                     error!(resource = "events", "poll failed: {e:#}");
+                    vtn_ok = outage_edge(&notifier, &state, Utc::now(), vtn_ok, false).await;
                     tokio::time::sleep(backoff.on_failure()).await;
                 }
             }

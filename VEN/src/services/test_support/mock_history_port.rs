@@ -13,6 +13,7 @@ use crate::controller::HistoryPort;
 use crate::entities::history::{
     EventReceived, GridSample, LedgerPeriod, PlanSnapshot, ReportSent, TickSample,
 };
+use crate::entities::notification::UserNotification;
 use crate::entities::DomainError;
 
 #[derive(Default)]
@@ -23,6 +24,7 @@ pub struct MockHistoryPort {
     events: Mutex<Vec<EventReceived>>,
     reports: Mutex<Vec<ReportSent>>,
     ledger_periods: Mutex<Vec<LedgerPeriod>>,
+    notifications: Mutex<Vec<UserNotification>>,
 }
 
 impl MockHistoryPort {
@@ -33,6 +35,11 @@ impl MockHistoryPort {
     /// All tick samples appended so far, in insertion order.
     pub fn appended_ticks(&self) -> Vec<TickSample> {
         self.ticks.lock().unwrap().clone()
+    }
+
+    /// All notifications appended so far, in insertion order (WP4.3).
+    pub fn appended_notifications(&self) -> Vec<UserNotification> {
+        self.notifications.lock().unwrap().clone()
     }
 
     /// All grid samples appended so far, in insertion order.
@@ -83,6 +90,27 @@ impl HistoryPort for MockHistoryPort {
     fn append_ledger_period(&self, row: &LedgerPeriod) -> Result<(), DomainError> {
         self.ledger_periods.lock().unwrap().push(row.clone());
         Ok(())
+    }
+
+    fn append_notification(&self, row: &UserNotification) -> Result<(), DomainError> {
+        self.notifications.lock().unwrap().push(row.clone());
+        Ok(())
+    }
+
+    fn query_notifications(
+        &self,
+        since: Option<DateTime<Utc>>,
+        limit: usize,
+    ) -> Result<Vec<UserNotification>, DomainError> {
+        Ok(self
+            .notifications
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|n| since.is_none_or(|s| n.created_at > s))
+            .take(limit)
+            .cloned()
+            .collect())
     }
 
     fn query_ticks(
