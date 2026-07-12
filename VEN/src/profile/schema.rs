@@ -401,4 +401,15 @@ pub struct PlannerConfig {
     /// tariff so consuming PV surplus beats exporting it).
     #[serde(default = "super::defaults::default_v_ev_free_charge")]
     pub v_ev_free_charge_eur_kwh: f64,
+
+    /// WP4.4 (BL-07) — policy for slots beyond tariff coverage. One of
+    /// LAST_KNOWN, HEURISTIC_FORECAST (default; stub → LAST_KNOWN until
+    /// Phase 5 BL-14), DEFER_TO_FLEXIBLE, SAFE_AVERAGE.
+    #[serde(default = "super::defaults::default_stale_rate_policy")]
+    pub stale_rate_policy: crate::entities::design_vocabulary::StaleRatePolicy,
+
+    /// WP4.4 — SAFE_AVERAGE percentile over the known import rates
+    /// (0.0–1.0, nearest-rank; default 0.8).
+    #[serde(default = "super::defaults::default_stale_rate_safe_pctl")]
+    pub stale_rate_safe_pctl: f64,
 }

@@ -59,6 +59,13 @@ pub struct PlannerParams {
     /// OPPORTUNISTIC / *_FREE modes [€/kWh]. Must exceed the feed-in tariff
     /// so consuming PV surplus beats exporting it.
     pub v_ev_free_charge_eur_kwh: f64,
+    /// WP4.4 (BL-07) — how slots beyond tariff coverage are priced.
+    /// HEURISTIC_FORECAST is a documented stub until Phase 5 (BL-14): it
+    /// behaves like LAST_KNOWN and says so in the plan warning.
+    pub stale_rate_policy: crate::entities::design_vocabulary::StaleRatePolicy,
+    /// WP4.4 — SAFE_AVERAGE percentile over the known import rates (0.0–1.0,
+    /// nearest-rank; default 0.8 per REQUIREMENTS §3.2.1).
+    pub stale_rate_safe_pctl: f64,
 }
 
 impl Default for PlannerParams {
@@ -97,6 +104,9 @@ impl Default for PlannerParams {
             simple_level1_import_cap_pct: 0.5,
             asap_lateness_eur_kwh_h: 10.0,
             v_ev_free_charge_eur_kwh: 0.10,
+            stale_rate_policy:
+                crate::entities::design_vocabulary::StaleRatePolicy::HeuristicForecast,
+            stale_rate_safe_pctl: 0.8,
         }
     }
 }

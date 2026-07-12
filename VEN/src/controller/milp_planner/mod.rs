@@ -59,6 +59,7 @@ mod inputs;
 mod results;
 mod solver_phase1;
 mod solver_phase2;
+mod stale_rates;
 mod types;
 
 use self::inputs::*;
