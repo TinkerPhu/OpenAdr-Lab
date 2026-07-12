@@ -5268,3 +5268,28 @@ Two defects were found and fixed via the E2E runs, not by inspection:
 
 Final suite: 52 features / 259 scenarios / 0 failed (isolated tail 3/3);
 583 Rust unit/integration tests; 341 UI tests.
+
+### Phase 3/4 review — isolated shiftable tail root cause (planner tie-break)
+
+The user-requested phase 3+4 implementation review surfaced three defects:
+stale `/signals` chips (ended OpenADR windows persist while their event
+exists — now filtered by `is_ended(now)`), notification restart seeding
+keeping the OLDEST 200 rows (SQL was `ASC LIMIT`; now newest-N oldest-first),
+and — via a new /plan diagnostic attached to the E2E poll timeout — the real
+cause of the recurring isolated-tail flake: the plan HAD the wm allocation,
+but in a FUTURE slot. Window offsets are computed against the ALIGNED grid
+start (now truncated to the slot boundary), not wall now, so a mid-slot POST
+yields two cost-equal valid start slots under flat tariffs and HiGHS may pick
+the later one — legitimate per the deadline, invisible to a 240 s poll.
+
+Fix: a deterministic earliest-start tie-break (`SHIFT_TIEBREAK_EUR_PER_SLOT`
+= 0.001 €/start-slot-index on each `y_shift` binary) in the Phase 1
+objective, mirrored in the Phase 2 cost cap, and repeated in the Phase 2
+friction objective so the epsilon budget cannot trade the early start away
+(same lesson as ASAP_FREE). Regression tests cover both directions (tie →
+earliest slot; real 0.35 €/kWh saving → still defers). Honest caveat: the
+tests were not red pre-fix on x86 — the tie-pick is solver-arbitrary and
+only the Pi4 ARM build chose the late slot. Validation run after the fix:
+52 features / 259 scenarios / 0 failed, isolated tail 3/3, with the
+"appears in /sim" scenario dropping from ~125–150 s to ~9 s.
+
