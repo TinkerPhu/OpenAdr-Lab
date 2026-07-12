@@ -21,6 +21,9 @@ pub struct EvSession {
     /// How the user expressed this request (BL-28); BY_DEADLINE = legacy behaviour.
     #[serde(default)]
     pub mode: UserRequestMode,
+    /// MAX_COST (WP4.1-c): total charging-cost ceiling [€]. None = no cap.
+    #[serde(default)]
+    pub budget_eur: Option<f64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -119,6 +122,7 @@ mod tests {
             departure_time: Utc::now(),
             soft_deadline: false,
             mode: UserRequestMode::Opportunistic,
+            budget_eur: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

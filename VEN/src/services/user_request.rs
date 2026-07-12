@@ -35,6 +35,7 @@ impl UserRequestService {
             departure_time: departure,
             soft_deadline: soft_deadline.unwrap_or(false),
             mode: req.mode.clone(),
+            budget_eur: req.budget_eur,
             created_at: now,
             updated_at: now,
         };
@@ -288,6 +289,7 @@ mod tests {
             target_soc: 0.8,
             departure_time: Utc::now() + chrono::Duration::hours(6),
             soft_deadline: false,
+            budget_eur: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

@@ -107,6 +107,19 @@ pub struct EvMilpContext {
     /// Per-slot free-energy charge cap [kW]: PV surplus, opened fully when the
     /// import tariff is non-positive. Filled by `inject_grid_slots`; None = no gating.
     pub p_free_cap_kw: Option<Vec<f64>>,
+    /// WP4.1-c: reward each charged kWh per slot (v_extra_eur_kwh) instead of
+    /// the inert e_ev_extra term. True for all *_FREE / OPPORTUNISTIC / MAX_COST.
+    pub reward_per_slot: bool,
+    /// WP4.1-c ASAP_FREE: bias the per-slot reward toward earlier slots so free
+    /// energy is taken as soon as it appears (never makes later charging unprofitable).
+    pub free_early_bias: bool,
+    /// WP4.1-c MAX_COST: total charging-cost ceiling [€]; charging cost is
+    /// priced at the per-slot import rate (conservative — PV surplus counts
+    /// at the same rate). None = no cap.
+    pub budget_eur: Option<f64>,
+    /// Per-slot import rate [€/kWh] for the budget constraint. Filled by
+    /// `inject_grid_slots` when `budget_eur` is set.
+    pub c_imp_eur_kwh: Option<Vec<f64>>,
 }
 
 /// Typed LP variable handles for one EV charger in the MILP model.
@@ -257,6 +270,8 @@ pub struct EvScalars {
     pub e_extra_max_kwh: f64,
     pub v_extra_eur_kwh: f64,
     pub v_core_eur: f64,
+    /// WP4.1-c MAX_COST: total charging-cost ceiling [€]; None otherwise.
+    pub budget_eur: Option<f64>,
 }
 
 /// Pre-computed scalar parameters for a heater in one planning cycle.

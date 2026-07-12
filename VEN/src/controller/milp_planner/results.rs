@@ -407,6 +407,14 @@ pub(crate) fn translate_to_plan(
             suggested_action: None,
         });
     }
+    // WP4.1-c (BL-28) MAX_COST budget shortfall — same stable-text contract.
+    if let Some(msg) = &inputs.budget_warning {
+        warnings.push(PlanWarning {
+            severity: WarningSeverity::Warning,
+            message: msg.clone(),
+            suggested_action: Some("raise the budget or lower the target SoC".to_string()),
+        });
+    }
     if violation_count > 0 {
         warnings.push(PlanWarning {
             severity: WarningSeverity::Warning,

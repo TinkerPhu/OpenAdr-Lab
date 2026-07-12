@@ -341,6 +341,8 @@ export type CreateUserRequestBody = {
   target_temp_c?: number;
   // Request mode (BL-28); omitted = BY_DEADLINE
   mode?: UserRequestMode;
+  // MAX_COST (WP4.1-c): total charging-cost ceiling in €
+  budget_eur?: number;
 };
 
 // ─── Device Session types ─────────────────────────────────────────────────────
@@ -352,6 +354,8 @@ export type EvSession = {
   /** When true, MILP treats charging as a soft reward (best-effort). Default false = must reach target by departure. */
   soft_deadline: boolean;
   mode: UserRequestMode;
+  /** MAX_COST (WP4.1-c): total charging-cost ceiling in €, null otherwise. */
+  budget_eur: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -361,6 +365,7 @@ export type CreateEvSessionBody = {
   departure_time: string;
   soft_deadline?: boolean;
   mode?: UserRequestMode;
+  budget_eur?: number;
 };
 
 export type EvSettings = {

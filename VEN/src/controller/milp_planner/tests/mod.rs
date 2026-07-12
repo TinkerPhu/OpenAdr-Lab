@@ -652,6 +652,10 @@ fn contexts_from_inputs(
                 asap_lateness_eur_kwh_h: 0.0,
                 free_only: false,
                 p_free_cap_kw: None,
+                reward_per_slot: false,
+                free_early_bias: false,
+                budget_eur: None,
+                c_imp_eur_kwh: None,
             },
         }));
     }
