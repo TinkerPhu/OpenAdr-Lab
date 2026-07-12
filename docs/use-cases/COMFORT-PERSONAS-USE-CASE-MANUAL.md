@@ -355,3 +355,47 @@ not visible, that is itself a finding about the control method.
    removed by the harness teardown).
 
 ---
+
+## M4.8 — Observability UI polish (WP4.6)
+
+### What this verifies
+
+Every active grid condition and stale-rate plan is identifiable from the UI
+at a glance: a grid-signal status strip on the Controller page, hatched
+estimated-rate slots in the plan matrix, persona labels in the VEN selector,
+and request-mode visibility on every device card and the All-Requests table.
+
+### Steps — status strip
+
+1. Open **VEN UI → Controller** (VEN1). With no grid signals active, no strip
+   is shown (uncluttered normal state).
+2. On the VTN UI, create an **alert** event (UC1 recipe) targeting VEN1.
+   Within one poll (~30 s): **Expected:** a red chip
+   `Alert ALERT_GRID_EMERGENCY until HH:MM` appears at the top of the
+   Controller page; hovering shows the alert message.
+3. Delete the alert; create a **SIMPLE level 2** event: **Expected:** the red
+   chip disappears; an orange `SIMPLE L2 until HH:MM` chip appears.
+4. Create a **DISPATCH_SETPOINT 2 kW** event: **Expected:** a blue
+   `Dispatch 2 kW until HH:MM` chip.
+5. Create a capacity **IMPORT_CAPACITY_LIMIT 5 kW** event: **Expected:** a
+   `Capacity: limit 5 kW` chip. Delete all events → strip disappears.
+6. API cross-check: `curl -s http://Pi4-Server:8211/signals | jq keys` →
+   `["alerts","capacity","dispatch","simple"]`.
+
+### Steps — estimated-rate shading
+
+7. Publish a short price event (2 h of rates, M4.4 recipe), then open
+   **VEN UI → Planner**. **Expected:** tariff-row cells beyond the covered
+   2 h render dimmed with a diagonal hatch; hovering says "(estimated —
+   beyond tariff coverage)". The matrix legend explains the treatment.
+
+### Steps — persona labels and modes
+
+8. With a persona fleet up (M4.7 step 1): **Expected:** the VEN selector
+   lists `fleet-ven-000 (eco)` etc. (Personas provision as a VEN `PERSONA`
+   attribute — only fleets created after WP4.6 carry it.)
+9. Create a heater target with mode `ASAP` and a shiftable load with mode
+   `OPPORTUNISTIC`: **Expected:** both cards show the mode as a chip, and
+   the All-Requests table has a **Mode** column showing it for every row.
+
+---

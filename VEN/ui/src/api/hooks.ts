@@ -28,6 +28,16 @@ export function useNotifications() {
   });
 }
 
+/** WP4.6: active grid signals for the status strip, polled every 10 s. */
+export function useSignals() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["signals", api.baseUrl],
+    queryFn: () => api.signals(),
+    refetchInterval: 10_000,
+  });
+}
+
 /** WP4.2 (BL-19): the effective comfort curve for one asset. */
 export function useComfortCurve(assetId: string) {
   const { api } = useVenContext();

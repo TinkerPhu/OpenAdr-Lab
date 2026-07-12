@@ -26,6 +26,7 @@ const mockReports = [
 ];
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   useHistoryTicks: () => ({ data: mockTicks }),
   useHistoryGrid: () => ({ data: mockGrid }),
   useHistoryEvents: () => ({ data: mockEvents }),

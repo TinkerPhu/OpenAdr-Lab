@@ -6,6 +6,7 @@ import {
   CardActions,
   CardContent,
   CardHeader,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -101,6 +102,9 @@ export function ShiftableLoadsCard(props: ShiftableLoadsCardProps) {
                   <Typography variant="body2" sx={{ flex: 1 }}>
                     {s ? `${s.asset_id} · ${s.power_kw}kW · ${s.duration_min}min · by ${fmtDate(s.latest_end)}` : req.asset_id}
                   </Typography>
+                  {s && s.mode !== "BY_DEADLINE" && (
+                    <Chip label={s.mode} size="small" data-testid={`shiftable-mode-chip-${req.id}`} />
+                  )}
                   <IconButton
                     size="small"
                     data-testid={`shiftable-cancel-${req.id}`}

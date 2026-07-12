@@ -39,6 +39,7 @@ const mockLedger = [
 ];
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   useHealth: vi.fn(() => ({ data: "ok", isError: false })),
   usePrograms: vi.fn(() => ({ data: mockPrograms })),
   useEvents: vi.fn(() => ({ data: mockEvents })),

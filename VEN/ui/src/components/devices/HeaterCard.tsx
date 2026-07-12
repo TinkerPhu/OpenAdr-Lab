@@ -92,6 +92,9 @@ export function HeaterCard(props: HeaterCardProps) {
             <Typography data-testid="heater-ready-by">
               Ready by: {fmtDate(session.ready_by)}
             </Typography>
+            {session.mode !== "BY_DEADLINE" && (
+              <Chip label={session.mode} size="small" data-testid="heater-mode-chip" sx={{ mt: 0.5 }} />
+            )}
             <Typography data-testid="heater-estimated-cost" sx={{ mt: 0.5 }}>
               Est. €{request.estimated_cost_eur.toFixed(2)}
             </Typography>

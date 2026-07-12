@@ -73,6 +73,7 @@ export function AllRequestsSection(props: AllRequestsSectionProps) {
               <TableRow>
                 <TableCell>Device</TableCell>
                 <TableCell>Summary</TableCell>
+                <TableCell>Mode</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Est. Cost €</TableCell>
                 <TableCell>Created</TableCell>
@@ -84,6 +85,7 @@ export function AllRequestsSection(props: AllRequestsSectionProps) {
                 <TableRow key={req.id} data-testid={`all-requests-row-${req.id}`}>
                   <TableCell>{deviceIcon(req)} {req.asset_id}</TableCell>
                   <TableCell>{sessionSummary(req)}</TableCell>
+                  <TableCell data-testid={`request-mode-${req.id}`}>{req.mode}</TableCell>
                   <TableCell>{req.status}</TableCell>
                   <TableCell>{req.estimated_cost_eur.toFixed(2)}</TableCell>
                   <TableCell>{fmtDate(req.created_at)}</TableCell>

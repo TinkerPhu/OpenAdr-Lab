@@ -11,6 +11,7 @@ const mockSetCurve = vi.fn(async () => ({}));
 const mockDeleteCurve = vi.fn(async () => ({}));
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   useComfortCurve: () => ({ data: mockCurveData() }),
   useSetComfortCurve: () => ({ mutateAsync: mockSetCurve, isPending: false }),
   useDeleteComfortCurve: () => ({ mutateAsync: mockDeleteCurve, isPending: false }),

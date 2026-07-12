@@ -3,7 +3,10 @@ import { DEFAULT_VENS, mergeVens, fetchDiscoveredVens } from "../api/venRegistry
 
 describe("mergeVens", () => {
   it("appends discovered names not in the defaults as /api/dyn entries", () => {
-    const merged = mergeVens(DEFAULT_VENS, ["fleet-ven-000", "fleet-ven-001"]);
+    const merged = mergeVens(DEFAULT_VENS, [
+      { venName: "fleet-ven-000" },
+      { venName: "fleet-ven-001" },
+    ]);
     expect(merged).toHaveLength(DEFAULT_VENS.length + 2);
     expect(merged[DEFAULT_VENS.length]).toEqual({
       label: "fleet-ven-000",
@@ -14,21 +17,25 @@ describe("mergeVens", () => {
   });
 
   it("keeps the defaults first and untouched", () => {
-    const merged = mergeVens(DEFAULT_VENS, ["fleet-ven-000"]);
+    const merged = mergeVens(DEFAULT_VENS, [{ venName: "fleet-ven-000" }]);
     expect(merged.slice(0, DEFAULT_VENS.length)).toEqual(DEFAULT_VENS);
   });
 
   it("drops discovered names that are already defaults", () => {
-    const merged = mergeVens(DEFAULT_VENS, ["ven-1", "ven-2", "fleet-ven-000"]);
+    const merged = mergeVens(DEFAULT_VENS, [
+      { venName: "ven-1" },
+      { venName: "ven-2" },
+      { venName: "fleet-ven-000" },
+    ]);
     expect(merged).toHaveLength(DEFAULT_VENS.length + 1);
     expect(merged.filter((v) => v.venName === "ven-1")).toHaveLength(1);
   });
 
   it("dedupes repeated discovered names and sorts extras", () => {
     const merged = mergeVens(DEFAULT_VENS, [
-      "fleet-ven-002",
-      "fleet-ven-000",
-      "fleet-ven-002",
+      { venName: "fleet-ven-002" },
+      { venName: "fleet-ven-000" },
+      { venName: "fleet-ven-002" },
     ]);
     const extras = merged.slice(DEFAULT_VENS.length).map((v) => v.venName);
     expect(extras).toEqual(["fleet-ven-000", "fleet-ven-002"]);
@@ -36,6 +43,15 @@ describe("mergeVens", () => {
 
   it("returns just the defaults for an empty discovery list", () => {
     expect(mergeVens(DEFAULT_VENS, [])).toEqual(DEFAULT_VENS);
+  });
+
+  it("labels persona-tagged fleet VENs (WP4.5)", () => {
+    const merged = mergeVens(DEFAULT_VENS, [
+      { venName: "fleet-ven-000", persona: "eco" },
+      { venName: "fleet-ven-001" },
+    ]);
+    expect(merged[DEFAULT_VENS.length].label).toBe("fleet-ven-000 (eco)");
+    expect(merged[DEFAULT_VENS.length + 1].label).toBe("fleet-ven-001");
   });
 });
 
@@ -64,7 +80,7 @@ describe("fetchDiscoveredVens", () => {
 
     const names = await fetchDiscoveredVens(fetchFn as unknown as typeof fetch);
 
-    expect(names).toEqual(["fleet-ven-000"]);
+    expect(names).toEqual([{ venName: "fleet-ven-000", persona: undefined }]);
     const probed = fetchFn.mock.calls.map((c) => String(c[0]));
     expect(probed).not.toContain("/api/dyn/ven-1/health");
   });
@@ -85,6 +101,15 @@ describe("fetchDiscoveredVens", () => {
     expect(names).toEqual([]);
   });
 
+  it("reads the WP4.5 PERSONA attribute into the persona field", async () => {
+    const fetchFn = fetchStub(
+      [{ venName: "fleet-ven-000", attributes: [{ type: "PERSONA", values: ["eco"] }] }],
+      ["fleet-ven-000"],
+    );
+    const names = await fetchDiscoveredVens(fetchFn as unknown as typeof fetch);
+    expect(names).toEqual([{ venName: "fleet-ven-000", persona: "eco" }]);
+  });
+
   it("rejects when the registry endpoint itself fails", async () => {
     const fetchFn = vi.fn(async () => ({ ok: false, status: 502 }) as Response);
     await expect(
@@ -97,6 +122,6 @@ describe("fetchDiscoveredVens", () => {
       "fleet-ven-000",
     ]);
     const names = await fetchDiscoveredVens(fetchFn as unknown as typeof fetch);
-    expect(names).toEqual(["fleet-ven-000"]);
+    expect(names).toEqual([{ venName: "fleet-ven-000", persona: undefined }]);
   });
 });

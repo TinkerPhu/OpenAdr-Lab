@@ -146,6 +146,8 @@ export type OadrCapacityState = {
   export_limit_kw: number | null;
   import_subscription_kw: number | null;
   import_reservation_kw: number | null;
+  export_subscription_kw: number | null;
+  export_reservation_kw: number | null;
   import_limit_event_id: string | null;
   export_limit_event_id: string | null;
   last_updated: string | null;
@@ -170,6 +172,8 @@ export type PlanTimeSlot = {
   start: string;
   end: string;
   import_tariff_eur_kwh: number;
+  /** WP4.4: true when the rate was filled by the StaleRatePolicy (beyond tariff coverage). */
+  rate_estimated?: boolean;
   export_tariff_eur_kwh: number;
   co2_g_kwh: number;
   import_cap_kw: number;
@@ -255,6 +259,39 @@ export type ComfortRate = {
 export type ComfortCurveResponse = {
   source: "default" | "override";
   rates: ComfortRate[];
+};
+
+/** WP3.1: an active grid-alert window (parsed from ALERT_* events). */
+export type AlertWindow = {
+  alert_type: string;
+  start: string;
+  end: string;
+  event_id: string;
+  message: string;
+};
+
+/** WP3.2: an active SIMPLE load-shed window (levels 1-3). */
+export type SimpleWindow = {
+  level: number;
+  start: string;
+  end: string;
+  event_id: string;
+};
+
+/** WP3.4: an active DISPATCH_SETPOINT window. */
+export type DispatchWindow = {
+  setpoint_kw: number;
+  start: string;
+  end: string;
+  event_id: string;
+};
+
+/** WP4.6: GET /signals — one-round-trip aggregate for the grid-signal strip. */
+export type SignalsState = {
+  alerts: AlertWindow[];
+  simple: SimpleWindow[];
+  dispatch: DispatchWindow[];
+  capacity: OadrCapacityState;
 };
 
 /** WP4.3 (BL-20): user-facing notification severity. */

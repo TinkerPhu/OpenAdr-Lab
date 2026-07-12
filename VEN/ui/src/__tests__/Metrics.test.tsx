@@ -21,6 +21,7 @@ const mockMetrics = vi.fn((): string => "");
 const mockDataUpdatedAt = vi.fn((): number => Date.now());
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   useMetrics: () => ({
     data: mockMetrics(),
     dataUpdatedAt: mockDataUpdatedAt(),

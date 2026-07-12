@@ -46,6 +46,7 @@ const evSchema = [
 ];
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   useSim: () => ({ data: mockSim(), isLoading: false, isError: false, refetch: vi.fn() }),
   useTariffs: () => ({ data: mockRates(), refetch: vi.fn() }),
   useRequests: () => ({ data: [], refetch: vi.fn() }),

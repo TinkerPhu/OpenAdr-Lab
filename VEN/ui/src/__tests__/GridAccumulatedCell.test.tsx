@@ -32,6 +32,7 @@ vi.mock("../components/controller/charts/StackedAreaChart", () => ({
 let allTimelinesData: { zones: unknown[]; timelines: Record<string, unknown> } = { zones: [], timelines: {} };
 
 vi.mock("../api/hooks", () => ({
+  useSignals: () => ({ data: undefined }),
   useSim: () => ({ data: baseSim, isLoading: false, isError: false, refetch: vi.fn() }),
   useTariffs: () => ({ data: [], refetch: vi.fn() }),
   useRequests: () => ({ data: [], refetch: vi.fn() }),
