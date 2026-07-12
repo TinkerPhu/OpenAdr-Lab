@@ -46,6 +46,11 @@ pub(crate) fn apply_sim_injections(
 }
 
 /// PHASE 2: Compose effective capacity and build per-asset setpoints.
+///
+/// `live_pv_kw`: this tick's PV output, computed *before* physics runs
+/// (`SimState::peek_pv_kw`) — passed through to the EV-surplus overlay so it
+/// doesn't fall back to a one-tick-stale PV snapshot. See
+/// `controller::dispatcher::apply_surplus_ev_overlay` for the full rationale.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_tick_setpoints(
     sim_snap: &SimSnapshot,
@@ -56,6 +61,7 @@ pub(crate) fn build_tick_setpoints(
     now: DateTime<Utc>,
     dispatch_windows: &[crate::entities::capacity::DispatchWindow],
     alert_windows: &[crate::entities::capacity::AlertWindow],
+    live_pv_kw: Option<f64>,
 ) -> HashMap<String, f64> {
     // Compose effective capacity: inject grid limits only when no VTN event active.
     let mut effective_capacity = capacity_snap.clone();
@@ -77,6 +83,7 @@ pub(crate) fn build_tick_setpoints(
             inject.heater_setpoint_c,
             now,
             overlay_enabled,
+            live_pv_kw,
         ),
         None => {
             // No plan yet (startup window). Apply defaults then surplus overlay.
@@ -90,6 +97,7 @@ pub(crate) fn build_tick_setpoints(
                 sim_snap,
                 false,
                 overlay_enabled,
+                live_pv_kw,
             );
             m
         }

@@ -20,6 +20,12 @@ use std::collections::HashMap;
 ///    compute ON/OFF setpoint based on current temperature vs. target.
 /// 5. Enforce `export_limit_kw` on the `pv` key if capacity state has one.
 /// 6. Apply opportunistic surplus EV charging (see `apply_surplus_ev_overlay`).
+///
+/// `live_pv_kw`: this tick's PV output, computed *before* physics runs
+/// (`SimState::peek_pv_kw`). Passed straight through to
+/// `apply_surplus_ev_overlay` so it doesn't have to fall back to `sim`'s
+/// (necessarily one-tick-stale) PV snapshot. `None` when unavailable.
+#[allow(clippy::too_many_arguments)]
 pub fn build_setpoints(
     plan: &Plan,
     sim: &SimSnapshot,
@@ -27,6 +33,7 @@ pub fn build_setpoints(
     heater_setpoint_c: Option<f64>,
     now: DateTime<Utc>,
     overlay_enabled: bool,
+    live_pv_kw: Option<f64>,
 ) -> HashMap<String, f64> {
     // Start with defaults from snapshot
     let mut setpoints: HashMap<String, f64> = sim
@@ -87,7 +94,13 @@ pub fn build_setpoints(
 
     // Opportunistic surplus EV charging: redirect live PV export to EV when no
     // plan-level EV allocation is active.
-    apply_surplus_ev_overlay(&mut setpoints, sim, plan_allocated_ev, overlay_enabled);
+    apply_surplus_ev_overlay(
+        &mut setpoints,
+        sim,
+        plan_allocated_ev,
+        overlay_enabled,
+        live_pv_kw,
+    );
 
     setpoints
 }
@@ -105,11 +118,19 @@ pub fn build_setpoints(
 /// - EV is unplugged
 /// - EV SoC has reached its target
 /// - Surplus is below the 100 W noise floor
+///
+/// `live_pv_kw`: this tick's PV output (`SimState::peek_pv_kw`), preferred
+/// over `sim`'s snapshot for the PV term in `net_other_kw`. Without it, PV's
+/// contribution falls back to `AssetSnapshot.power_kw`, which is last tick's
+/// actual output — a one-tick lag that, since PV moves continuously, produces
+/// a small persistent grid-import residual (found via the phase 3+4 review's
+/// EV rate-chart toggle, 2026-07-12). `None` preserves the pre-fix fallback.
 pub fn apply_surplus_ev_overlay(
     setpoints: &mut HashMap<String, f64>,
     sim: &SimSnapshot,
     plan_has_ev_allocation: bool,
     overlay_enabled: bool,
+    live_pv_kw: Option<f64>,
 ) {
     if plan_has_ev_allocation || !overlay_enabled {
         return;
@@ -129,6 +150,11 @@ pub fn apply_surplus_ev_overlay(
             id.as_str() != crate::ids::ASSET_EV && id.as_str() != crate::ids::ASSET_BATTERY
         })
         .map(|(id, snap)| {
+            if id.as_str() == crate::ids::ASSET_PV {
+                if let Some(pv_kw) = live_pv_kw {
+                    return pv_kw;
+                }
+            }
             let sp = setpoints.get(id).copied().unwrap_or(snap.power_kw);
             if sp.abs() > 1e20 {
                 snap.power_kw
@@ -427,7 +453,7 @@ mod tests {
         // PV exports 3 kW, base consumes 1 kW → surplus = 2 kW
         let sim = build_sim_snap(-3.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 2.0).abs() < 1e-6,
@@ -436,11 +462,41 @@ mod tests {
     }
 
     #[test]
+    fn surplus_overlay_prefers_live_pv_kw_over_stale_snapshot() {
+        // Snapshot says PV exported only 0.5 kW last tick (stale). With base
+        // load 1.0 kW that implies a 0.5 kW deficit, so the old code (reading
+        // only `snap.power_kw`) would see no surplus and skip charging.
+        // `live_pv_kw` says PV is actually exporting 5.0 kW THIS tick — the
+        // fix must use that, not the stale snapshot value.
+        let sim = build_sim_snap(-0.5, 1.0, 0.4, true, 0.8);
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, Some(-5.0));
+        let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
+        assert!(
+            (ev_sp - 4.0).abs() < 1e-6,
+            "expected EV setpoint 4.0 kW using live_pv_kw (5.0 export − 1.0 base), got {ev_sp}"
+        );
+    }
+
+    #[test]
+    fn surplus_overlay_falls_back_to_stale_snapshot_without_live_pv_kw() {
+        // Same stale snapshot as above but live_pv_kw=None (e.g. no PV asset
+        // configured this tick) — must fall back to the pre-fix behavior.
+        let sim = build_sim_snap(-0.5, 1.0, 0.4, true, 0.8);
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
+        assert!(
+            !sp.contains_key("ev"),
+            "0.5 kW deficit (from the stale snapshot) must not trigger EV charging"
+        );
+    }
+
+    #[test]
     fn surplus_capped_at_ev_max_charge_kw() {
         // PV exports 10 kW, base 0 kW → surplus 10 kW, but EV max is 7.4 kW
         let sim = build_sim_snap(-10.0, 0.0, 0.1, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 7.4).abs() < 1e-6,
@@ -453,7 +509,7 @@ mod tests {
         // EV already at target — must not charge even with surplus
         let sim = build_sim_snap(-3.0, 1.0, 0.8, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
         assert!(
             !sp.contains_key("ev"),
             "must not charge EV when soc >= soc_target"
@@ -464,7 +520,7 @@ mod tests {
     fn surplus_not_applied_when_ev_unplugged() {
         let sim = build_sim_snap(-3.0, 1.0, 0.4, false, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
         assert!(!sp.contains_key("ev"), "must not charge unplugged EV");
     }
 
@@ -473,7 +529,7 @@ mod tests {
         let sim = build_sim_snap(-3.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("ev".to_string(), 5.0); // plan allocation already present
-        apply_surplus_ev_overlay(&mut sp, &sim, true, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, true, true, None);
         // Plan's 5.0 kW must be preserved, not overwritten
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
@@ -492,7 +548,7 @@ mod tests {
         let sim = build_sim_snap(-4.0, 0.5, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 1.5); // battery plan allocation
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 2.0).abs() < 1e-6,
@@ -506,7 +562,7 @@ mod tests {
         let sim = build_sim_snap(-4.0, 0.5, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("battery".to_string(), 3.5);
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
         assert!(
             !sp.contains_key("ev"),
             "EV must not charge when battery claims full surplus"
@@ -518,7 +574,7 @@ mod tests {
         // PV exports 1 kW, base consumes 2 kW → net import, no surplus
         let sim = build_sim_snap(-1.0, 2.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
         assert!(!sp.contains_key("ev"), "no surplus when base_load > pv");
     }
 
@@ -527,7 +583,7 @@ mod tests {
         // PV at 0 kW (night), base consumes 1 kW
         let sim = build_sim_snap(0.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
         assert!(
             !sp.contains_key("ev"),
             "no surplus when PV is not generating"
@@ -543,7 +599,7 @@ mod tests {
         // (net site power stuck ~1 kW under the DISPATCH_SETPOINT target).
         let sim = build_sim_snap(-1.5, 0.5, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
         assert!(
             !sp.contains_key("ev"),
             "sub-minimum surplus must not be commanded, got {:?}",
@@ -557,7 +613,7 @@ mod tests {
         // overlay_enabled=false means nothing is written regardless.
         let sim = build_sim_snap(-3.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, false);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, false, None);
         assert!(
             !sp.contains_key("ev"),
             "overlay must not fire when overlay_enabled=false"
@@ -574,7 +630,7 @@ mod tests {
             ev_entry(0.4, true, 0.8),
         ]);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
         assert!(
             !sp.contains_key("ev"),
             "must not charge EV when heater consumes all PV surplus"
@@ -591,7 +647,7 @@ mod tests {
             ev_entry(0.4, true, 0.8),
         ]);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 1.4).abs() < 1e-6,
@@ -938,7 +994,7 @@ mod tests {
         let sim = make_sim_snap(vec![battery_entry(0.5)]);
         let plan = make_test_plan(-3.0, now);
         let capacity = crate::entities::capacity::OadrCapacityState::default();
-        let sp = build_setpoints(&plan, &sim, &capacity, None, now, false);
+        let sp = build_setpoints(&plan, &sim, &capacity, None, now, false, None);
         let bat = sp.get("battery").copied().unwrap_or(999.0);
         assert!(
             (bat - (-3.0)).abs() < 0.01,
@@ -983,7 +1039,7 @@ mod tests {
             }
         };
         let capacity = crate::entities::capacity::OadrCapacityState::default();
-        let sp = build_setpoints(&plan, &sim, &capacity, None, now, false);
+        let sp = build_setpoints(&plan, &sim, &capacity, None, now, false, None);
         assert!(
             sp.is_empty(),
             "empty snapshot + no plan slots → empty setpoints map"
@@ -994,7 +1050,7 @@ mod tests {
     fn surplus_overlay_empty_assets_no_panic() {
         let sim = make_sim_snap(vec![]);
         let mut sp = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true);
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
         assert!(sp.is_empty(), "empty snapshot → overlay is a no-op");
     }
 

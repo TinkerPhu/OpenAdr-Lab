@@ -1,6 +1,7 @@
 pub mod energy;
 pub mod persist;
 pub mod power_model;
+mod pv_preview;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -168,6 +169,8 @@ impl SimState {
     /// - `base_load_kw_override`: if Some, one-shot: captures offset then cleared by sim loop.
     /// - `base_load_alpha`: EMA factor for base load blend-back (0.0–1.0; default 0.1).
     /// - `ev_plugged_override`: if Some, hold EV plugged state; else let physics drive it.
+    ///
+    /// See `peek_pv_kw` (`pv_preview.rs`) for a read-only preview of this tick's PV term.
     #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
