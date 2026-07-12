@@ -102,15 +102,17 @@ impl HistoryPort for MockHistoryPort {
         since: Option<DateTime<Utc>>,
         limit: usize,
     ) -> Result<Vec<UserNotification>, DomainError> {
-        Ok(self
+        let matching: Vec<_> = self
             .notifications
             .lock()
             .unwrap()
             .iter()
             .filter(|n| since.is_none_or(|s| n.created_at > s))
-            .take(limit)
             .cloned()
-            .collect())
+            .collect();
+        // Mirror the real store: the newest `limit` rows, oldest first.
+        let skip = matching.len().saturating_sub(limit);
+        Ok(matching.into_iter().skip(skip).collect())
     }
 
     fn query_ticks(

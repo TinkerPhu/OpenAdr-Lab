@@ -847,4 +847,26 @@ mod tests {
         assert!(!store.delete_setting("comfort_curve", "ev").unwrap());
         assert_eq!(store.get_setting("comfort_curve", "ev").unwrap(), None);
     }
+
+    #[test]
+    fn test_query_notifications_returns_newest_n_oldest_first() {
+        use crate::entities::design_vocabulary::UserNotificationSeverity;
+        use crate::entities::notification::UserNotification;
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        for (i, msg) in ["a", "b", "c"].iter().enumerate() {
+            store
+                .append_notification(&UserNotification::new(
+                    ts(100 * (i as i64 + 1)),
+                    UserNotificationSeverity::Info,
+                    *msg,
+                    None,
+                    None,
+                ))
+                .unwrap();
+        }
+        // limit 2 must keep the NEWEST two (b, c), oldest first — not (a, b).
+        let got = store.query_notifications(None, 2).unwrap();
+        let msgs: Vec<_> = got.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(msgs, vec!["b", "c"]);
+    }
 }
