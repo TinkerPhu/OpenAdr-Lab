@@ -84,4 +84,22 @@ describe("GridSignalStrip", () => {
     expect(screen.getByTestId("signal-chip-dispatch")).toHaveTextContent("2 kW");
     expect(screen.getByTestId("signal-chip-capacity")).toHaveTextContent("limit 5");
   });
+
+  it("labels an upcoming window 'from' instead of 'until'", () => {
+    const base = mockSignals();
+    const future = new Date(Date.now() + 3_600_000).toISOString();
+    const futureEnd = new Date(Date.now() + 7_200_000).toISOString();
+    mockSignals.mockReturnValue({
+      ...base,
+      alerts: [{
+        alert_type: "GRID_EMERGENCY",
+        start: future,
+        end: futureEnd,
+        event_id: "evt-f",
+        message: "scheduled shed",
+      }],
+    });
+    render(<GridSignalStrip />);
+    expect(screen.getByTestId("signal-chip-alert")).toHaveTextContent(/from/);
+  });
 });

@@ -158,3 +158,63 @@ pub struct OadrCapacityRequest {
     pub time_window_end: DateTime<Utc>,
     pub reason: String,
 }
+
+/// WP4.6 review fix: OpenADR events are permanent records — an ended window
+/// stays in state as long as its event exists on the VTN. Consumers that show
+/// "current" signals (GET /signals, the UI strip) must drop ended windows;
+/// the planner/dispatcher already filter by slot/now overlap themselves.
+impl AlertWindow {
+    pub fn is_ended(&self, now: DateTime<Utc>) -> bool {
+        now >= self.end
+    }
+}
+
+impl SimpleWindow {
+    pub fn is_ended(&self, now: DateTime<Utc>) -> bool {
+        now >= self.end
+    }
+}
+
+impl DispatchWindow {
+    pub fn is_ended(&self, now: DateTime<Utc>) -> bool {
+        now >= self.end
+    }
+}
+
+#[cfg(test)]
+mod window_expiry_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn ts(secs: i64) -> DateTime<Utc> {
+        Utc.timestamp_opt(1_700_000_000 + secs, 0).unwrap()
+    }
+
+    #[test]
+    fn test_is_ended_boundary_semantics() {
+        let w = AlertWindow {
+            alert_type: "ALERT_GRID_EMERGENCY".into(),
+            start: ts(0),
+            end: ts(600),
+            event_id: "e".into(),
+            message: String::new(),
+        };
+        assert!(!w.is_ended(ts(0)), "active at start");
+        assert!(!w.is_ended(ts(599)), "active until the last second");
+        assert!(w.is_ended(ts(600)), "ended exactly at end (end-exclusive)");
+        let s = SimpleWindow {
+            level: 2,
+            start: ts(0),
+            end: ts(600),
+            event_id: "e".into(),
+        };
+        assert!(s.is_ended(ts(601)));
+        let d = DispatchWindow {
+            setpoint_kw: 2.0,
+            start: ts(0),
+            end: ts(600),
+            event_id: "e".into(),
+        };
+        assert!(!d.is_ended(ts(300)));
+    }
+}
