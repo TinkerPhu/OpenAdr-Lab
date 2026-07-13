@@ -38,6 +38,8 @@ pub struct GlobalMilpInputs {
     pub p_pv_kw: Vec<f64>,
     /// Non-controllable baseline load [kW]
     pub p_base_kw: Vec<f64>,
+    /// SITE_RESIDUAL (BL-08): unmodelled site consumption [kW].
+    pub p_residual_kw: Vec<f64>,
     /// Physical import limit [kW]
     pub p_imp_max_phys_kw: Vec<f64>,
     /// Physical export limit [kW]
@@ -172,7 +174,7 @@ impl AssetInteraction for BatEvCoexistInteraction {
         let ev = pool.ev.as_ref().unwrap();
         let x_coexist = (0..global.n)
             .map(|t| {
-                let surplus = global.p_pv_kw[t] - global.p_base_kw[t];
+                let surplus = global.p_pv_kw[t] - global.p_base_kw[t] - global.p_residual_kw[t];
                 if surplus >= ev.p_min_kw {
                     Some(vars.add(variable().min(0.0).max(bat.dis_max_kw)))
                 } else {
@@ -293,7 +295,8 @@ impl AssetInteraction for CtrlImportMalusInteraction {
         #[allow(clippy::needless_range_loop)]
         // t indexes multiple arrays (p_ctrl_imp, p_pv_kw, p_base_kw)
         for t in 0..global.n {
-            let surplus = (global.p_pv_kw[t] - global.p_base_kw[t]).max(0.0);
+            let surplus =
+                (global.p_pv_kw[t] - global.p_base_kw[t] - global.p_residual_kw[t]).max(0.0);
             let p_ctrl_t = controllable_power_expr(pool, t);
             // p_ctrl_imp[t] ≥ p_ctrl[t] − surplus_pv[t], combined with min(0.0) bound
             cs.push(constraint!(p_ctrl_imp[t] >= p_ctrl_t - surplus));

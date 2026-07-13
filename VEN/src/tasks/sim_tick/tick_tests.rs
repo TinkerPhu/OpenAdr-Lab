@@ -51,4 +51,67 @@ mod tests {
         .await;
         // passes if no panic
     }
+
+    #[tokio::test]
+    async fn tick_once_publishes_site_residual_asset() {
+        // The physics engine derives grid.net_power_w as the literal sum of
+        // its own modelled assets each tick (see `SimState::tick`'s "Derive
+        // grid meter" step) — there is no independent meter reading in this
+        // simulator (that would require a dedicated unmodelled-load
+        // injection mechanism, out of WP5.1's scope). So with an empty asset
+        // list, residual must land at exactly 0 kW; this test proves the
+        // site-residual asset is wired into the published SimSnapshot at
+        // all, not that a nonzero residual can be produced end-to-end (that
+        // case is covered directly against `compute_site_residual_kw` in
+        // `controller::residual`'s own unit tests).
+        let s: SimState = serde_json::from_value(serde_json::json!({
+            "asset_configs": [],
+            "assets": [],
+            "grid": {
+                "net_power_w": 0.0, "import_w": 0.0, "export_w": 0.0,
+                "voltage_v": 230.0, "import_kwh": 0.0, "export_kwh": 0.0
+            },
+            "last_tick": chrono::Utc::now().to_rfc3339()
+        }))
+        .expect("minimal SimState must deserialize");
+        let sim = Arc::new(Mutex::new(s));
+
+        let (trigger_tx, _trigger_rx) = watch::channel(PlanTrigger::Periodic);
+        let trigger_tx = Arc::new(trigger_tx);
+        let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(1);
+        let event_tx = Arc::new(event_bcast_tx);
+        let vtn: Arc<dyn VtnPort> = Arc::new(MockVtn::new());
+        let state = AppState::new();
+
+        let (_pc, _rc) = tick_once(
+            state.clone(),
+            sim,
+            "test-ven".to_string(),
+            vtn,
+            trigger_tx,
+            "/tmp".to_string(),
+            event_tx,
+            0,   // persist_counter
+            100, // persist_every_ticks — no persist this tick
+            0,   // report_counter
+            100, // report_every_ticks — no report this tick
+            1,   // tick_s
+        )
+        .await;
+
+        let sim_snap = state.sim().await.expect("sim snapshot must be published");
+        let residual = sim_snap
+            .assets
+            .get(crate::controller::residual::SITE_RESIDUAL_ASSET_ID)
+            .expect("site-residual asset must be present");
+        assert!(
+            residual.power_kw.abs() < 1e-9,
+            "expected 0kW residual with no assets, got {}",
+            residual.power_kw
+        );
+        assert_eq!(
+            residual.asset_type,
+            crate::controller::residual::SITE_RESIDUAL_ASSET_TYPE
+        );
+    }
 }

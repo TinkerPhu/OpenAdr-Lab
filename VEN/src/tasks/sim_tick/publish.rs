@@ -30,6 +30,18 @@ pub(crate) async fn publish_sim_tick_result(
     // Update sensor snapshot (backward compat)
     state.update_sensor(sensor).await;
 
+    // SITE_RESIDUAL (BL-08): computed from the raw simulator snapshot,
+    // before any synthetic assets (shiftable-load runtimes) are inserted
+    // below, so a currently-running shiftable load is not double-counted
+    // as unexplained residual.
+    {
+        let residual_kw = controller::residual::compute_site_residual_kw(&sim_snap);
+        sim_snap.assets.insert(
+            controller::residual::SITE_RESIDUAL_ASSET_ID.to_string(),
+            controller::residual::site_residual_snapshot(residual_kw),
+        );
+    }
+
     // Update sim in app state — augmented with shiftable runtimes
 
     // ── Shiftable load runtime: start / complete / augment ──────

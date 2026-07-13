@@ -28,6 +28,7 @@ export const ASSET_COLORS: Record<string, string> = {
   base_load: "#607D8B",
   wm: "#FF9800",
   dw: "#795548",
+  "site-residual": "#8BC34A",
 };
 
 /** Human-readable labels for known asset IDs. */
@@ -39,6 +40,7 @@ export const ASSET_LABELS: Record<string, string> = {
   base_load: "Base Load",
   wm: "Washing Machine",
   dw: "Dishwasher",
+  "site-residual": "Site Residual",
 };
 
 /**
@@ -50,6 +52,7 @@ export const ASSET_LABELS: Record<string, string> = {
 export const ASSET_PLANNING_ROLE: Record<string, "forecast" | "planned"> = {
   pv: "forecast",
   base_load: "forecast",
+  "site-residual": "forecast",
 };
 
 // ─── Summary (left section of each asset cell) ───────────────────────────────

@@ -16,6 +16,7 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
         g_imp_kgco2_kwh: vec![0.30; n],
         p_pv_kw: vec![0.0; n],
         p_base_kw: vec![base_kw; n],
+        p_residual_kw: vec![0.0; n],
         p_imp_max_phys_kw: vec![25.0; n],
         p_exp_max_phys_kw: vec![10.0; n],
         p_imp_max_cont_kw: vec![25.0; n],
@@ -141,6 +142,30 @@ fn solve_feasible_no_optional_assets() {
         out.s_imp_viol_kw.iter().all(|&v| v < 1e-6),
         "unexpected violations"
     );
+}
+
+#[test]
+fn solve_residual_kw_flows_into_net_import() {
+    // WP5.1 (BL-08): SITE_RESIDUAL is a distinct term from base_kw — verify it
+    // reaches the balance constraint independently by leaving base_kw at 0
+    // and setting only p_residual_kw.
+    let mut inputs = make_solver_inputs(4, 0.0); // no base load
+    inputs.p_residual_kw = vec![0.3; 4];
+    let result = solve_phase1(
+        &inputs,
+        &make_phase1_weights(),
+        &contexts_from_inputs(&inputs),
+        60.0,
+    );
+    assert!(result.is_ok(), "solver failed: {:?}", result.err());
+    let out = result.unwrap();
+    for t in 0..4 {
+        assert!(
+            (out.p_imp_kw[t] - 0.3).abs() < 1e-3,
+            "p_imp[{t}] = {:.4} should be ~0.3 (residual_kw alone)",
+            out.p_imp_kw[t]
+        );
+    }
 }
 
 #[test]

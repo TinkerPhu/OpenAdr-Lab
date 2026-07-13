@@ -202,6 +202,36 @@ mod tests {
     }
 
     #[test]
+    fn test_record_flushes_site_residual_asset_when_present() {
+        // WP5.1 (BL-08): the history-sampler loop inserts a site-residual
+        // AssetSnapshot into its own raw snapshot before calling `record`
+        // (mod.rs); this proves that once present, it flushes into
+        // tick_samples like any other asset — no special-casing needed
+        // inside the accumulator itself.
+        let mut with_residual = snap(ts(0), 1.0, Some(0.5));
+        with_residual.assets.insert(
+            crate::controller::residual::SITE_RESIDUAL_ASSET_ID.to_string(),
+            crate::controller::residual::site_residual_snapshot(0.3),
+        );
+
+        let mut sampler = HistorySampler::new();
+        sampler.record(ts(0), &with_residual, &[]);
+        let (ticks, _grid) = sampler
+            .record(ts(60), &snap(ts(60), 1.0, Some(0.5)), &[])
+            .expect("crossing into minute 1 must flush minute 0");
+
+        let residual_tick = ticks
+            .iter()
+            .find(|t| t.asset_id == crate::controller::residual::SITE_RESIDUAL_ASSET_ID)
+            .expect("site-residual tick sample must be present");
+        assert!(
+            (residual_tick.power_kw - 0.3).abs() < 1e-9,
+            "expected 0.3kW residual tick, got {}",
+            residual_tick.power_kw
+        );
+    }
+
+    #[test]
     fn test_record_crossing_minute_boundary_flushes_previous_window_mean() {
         let mut sampler = HistorySampler::new();
         sampler.record(ts(0), &snap(ts(0), 1.0, Some(0.5)), &[]);

@@ -2,7 +2,7 @@ import type { TariffSnapshot as ApiTariffSnapshot } from "../../api/types";
 import { NEAR_ZERO_KW } from "../../thresholds";
 import type { AssetTimelinePoint, TariffTimePoint } from "./types";
 
-const ASSET_IDS = ["ev", "heater", "pv", "battery", "base_load"] as const;
+const ASSET_IDS = ["ev", "heater", "pv", "battery", "base_load", "site-residual"] as const;
 
 // ─── Internal LOCF tariff lookup ─────────────────────────────────────────────
 

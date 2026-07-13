@@ -332,3 +332,25 @@ outes/sim.rs causes a T1+T2 double-solve race:
   preview against drifting from the real formula with an equivalence test
   that calls both with identical arguments and asserts they agree.
 
+- **A "derived" simulator quantity can't be used to test for the deviation it
+  was derived from** (Phase 5 WP5.1): SITE_RESIDUAL is defined as
+  `grid_meter_kw − Σ modelled_asset_kw`, but the simulator's own
+  `grid.net_power_w` is computed *as* the sum of its modelled assets each
+  tick — so in simulation the two terms can never disagree, and residual is
+  mathematically guaranteed to read 0. Caught only by tracing the physics
+  engine's "derive grid meter" step, not by the unit tests (which correctly
+  pass against hand-built snapshots that assert nothing about what the real
+  simulator can produce). Before writing an integration/adapter-contract
+  test for a formula involving two "independent" signals, verify they really
+  are independent in the system under test — one may be defined in terms of
+  the other, silently making the interesting case untestable end-to-end.
+
+- **Threading a new "distinct but structurally identical" term through a
+  solver (residual_kw parallel to base_kw) touches every site that already
+  special-cases the original term, not just its declaration** (Phase 5
+  WP5.1): `p_base_kw` alone appeared in the shared power-balance constraint,
+  two independent PV-surplus heuristics in a separate interactions module,
+  and two result-reporting call sites — all needed the same treatment.
+  `grep -n "p_base_kw"` across the whole subsystem before starting is faster
+  than discovering each site via compile errors one at a time.
+
