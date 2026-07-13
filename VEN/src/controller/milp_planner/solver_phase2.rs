@@ -141,6 +141,7 @@ pub(crate) fn solve_phase2(
         g_imp_kgco2_kwh: inputs.g_imp_kgco2_kwh.clone(),
         p_pv_kw: inputs.p_pv_kw.clone(),
         p_base_kw: inputs.p_base_kw.clone(),
+        p_residual_kw: inputs.p_residual_kw.clone(),
         p_imp_max_phys_kw: inputs.p_imp_max_phys_kw.clone(),
         p_exp_max_phys_kw: inputs.p_exp_max_phys_kw.clone(),
         p_imp_max_cont_kw: inputs.p_imp_max_cont_kw.clone(),

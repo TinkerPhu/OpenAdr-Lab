@@ -85,6 +85,15 @@ pub(crate) fn build_milp_inputs(
         .unwrap_or(phys_exp)
         .min(exp_allowance);
     let base_kw = base_load.map(|c| c.baseline_kw).unwrap_or(0.0);
+    // SITE_RESIDUAL (BL-08, Phase 5 WP5.1): flat scalar from the live
+    // SimSnapshot for now (0.0 if the tick loop hasn't populated it yet,
+    // e.g. before the first tick). WP5.2 replaces this with a per-slot
+    // learned profile once AssetHeuristics exists for "site-residual".
+    let residual_kw = assets
+        .assets
+        .get(crate::controller::residual::SITE_RESIDUAL_ASSET_ID)
+        .map(|s| s.power_kw)
+        .unwrap_or(0.0);
 
     // WP4.4 (BL-07): import rates come through the stale-rate policy — covered
     // slots interpolate, slots beyond tariff coverage are filled per policy.
@@ -105,6 +114,7 @@ pub(crate) fn build_milp_inputs(
     let mut g_co2 = Vec::with_capacity(n);
     let mut p_pv = Vec::with_capacity(n);
     let mut p_base = Vec::with_capacity(n);
+    let mut p_residual = Vec::with_capacity(n);
     let mut p_imp_phys = Vec::with_capacity(n);
     let mut p_exp_phys = Vec::with_capacity(n);
     let mut p_imp_cont = Vec::with_capacity(n);
@@ -143,6 +153,7 @@ pub(crate) fn build_milp_inputs(
         };
         p_pv.push(pv_kw);
         p_base.push(base_kw);
+        p_residual.push(residual_kw);
         p_imp_phys.push(phys_imp);
         p_exp_phys.push(phys_exp);
         // WP3.2: SIMPLE levels clamp the import cap per slot — level 1 to a
@@ -336,6 +347,7 @@ pub(crate) fn build_milp_inputs(
         g_imp_kgco2_kwh: g_co2,
         p_pv_kw: p_pv,
         p_base_kw: p_base,
+        p_residual_kw: p_residual,
         p_imp_max_phys_kw: p_imp_phys,
         p_exp_max_phys_kw: p_exp_phys,
         p_imp_max_cont_kw: p_imp_cont,

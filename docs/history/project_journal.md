@@ -5321,3 +5321,67 @@ stale-PV-fallback pattern but serves the still-unwired `DISPATCH_SETPOINT`
 path (R-13) — left alone and recorded as R-19 rather than fixed opportunistically,
 to keep this fix's scope matched to what was actually diagnosed.
 
+### Phase 5 WP5.1 — BL-08 SITE_RESIDUAL virtual asset
+
+First work package of `docs/plans/roadmap/phase-5-forecast-and-baseline.md`.
+`AssetType::SiteResidual` existed as an unused enum variant; this lands the
+real thing: `controller::residual::compute_site_residual_kw` (`grid_kw −
+Σ modelled_asset_kw`, pure, domain-ring) and `site_residual_snapshot`
+(read-only virtual `AssetSnapshot`, zero import/export capability). Wired in
+at three independent insertion points, each of which takes its own snapshot
+of the sim so each needed the residual inserted separately: `tasks/sim_tick/
+publish.rs::publish_sim_tick_result` (computed from the raw snapshot, before
+the shiftable-load synthetic insert, so a running shiftable load is never
+double-counted as "unexplained"); `tasks/history_sampler/mod.rs`'s own 1 s
+loop (a second, independent `sim.snapshot()` call on its own cadence); and
+`controller/milp_planner/inputs.rs` (reads the live SimSnapshot's
+`site-residual` entry into a new `p_residual_kw` scalar term).
+
+Per the approved plan, `p_residual_kw` was kept as its own MILP field
+parallel to `p_base_kw` rather than folded in, so WP5.2 can later swap the
+flat scalar for a per-slot learned profile without touching `p_base_kw`'s
+semantics. This threaded through more surface than expected once traced:
+`MilpInputs`/`GlobalMilpInputs` (new field), the shared power-balance
+constraint (`add_model_constraints`, used by both solver phases), two PV
+surplus heuristics in `milp_interactions.rs` (battery/EV coexistence
+penalty, controllable-import malus — both now subtract residual alongside
+base load, since unmodelled load also eats PV surplus), and `results.rs`'s
+`baseline_kw`/`surplus_available_kw` reporting (both now include residual).
+One test fixture (`tests/solver.rs::make_solver_inputs`) needed the new
+field added directly; the other MilpInputs construction sites in
+`tests/mod.rs`/`tests/stale_rates.rs` are wrapper functions around the real
+`build_milp_inputs` and needed no changes.
+
+UI: the chart stack (`dataBuilders.ts`, `AssetTimelineChart.tsx`,
+`StackedAreaChart.tsx`) turned out to already render any `sim.assets` key
+generically — confirmed via a dedicated Explore pass rather than assumed, per
+the plan's explicit "verify against the actual component" instruction. The
+one real allowlist found, `tariffBuilders.ts::ASSET_IDS`, only gates
+client-side cost/CO₂-rate derivation (not visibility); added `"site-residual"`
+there plus cosmetic `ASSET_COLORS`/`ASSET_LABELS`/`ASSET_PLANNING_ROLE`
+entries in `types.ts`.
+
+**Key finding, recorded as R-20 (TECHNICAL_DEBTS.md):** the simulator's
+`SimState::tick` derives `grid.net_power_w` as the literal sum of its own
+modelled assets every tick (`"Derive grid meter"` step) — there is no
+independent meter reading in this simulator. `compute_site_residual_kw` is
+correctly implemented and unit-tested directly (500 W-unmodelled-load case
+matches the roadmap's own verify clause exactly), but in the live simulator
+`residual_kw` is mathematically guaranteed to read exactly 0 kW, always —
+confirmed by an adapter-contract test against `tick_once`. This makes
+WP5.2's real-data exit demonstration (heuristic MAE < last-known MAE on
+held-out Pi4 fleet history) degenerate as written: both predictors would
+trivially converge to 0 with nothing to learn. The roadmap's own risk (b)
+("simulated households may be too regular... consider stochastic base-load
+noise") anticipated a related concern; R-20 is the same class of fix but is
+now a correctness blocker for BL-14's validation step, not just a realism
+nicety, and should be resolved before WP5.2's exit demo is scheduled.
+
+Result: 6 new tests (4 `controller::residual` unit tests, 1 `tick_once`
+adapter-contract test, 1 `history_sampler` accumulator test, 1 MILP solver
+test proving `p_residual_kw` flows into net import independently of
+`p_base_kw`) — 600 Rust tests total, 0 failed. UI: 348 tests, 0 failed,
+eslint clean. `cargo fmt --check`, `clippy -D warnings`, and
+`scripts/audit_file_sizes.py` all pass; architecture invariants
+(`use crate::assets::` / `use crate::profile` boundary checks) hold.
+

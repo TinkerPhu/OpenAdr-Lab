@@ -67,9 +67,10 @@ pub(crate) fn fallback_plan(
                 rate_estimated: inp.rate_stale[t],
                 import_cap_kw: inp.p_imp_max_cont_kw[t],
                 export_cap_kw: inp.p_exp_max_cont_kw[t],
-                baseline_kw: inp.p_base_kw[t],
+                baseline_kw: inp.p_base_kw[t] + inp.p_residual_kw[t],
                 pv_forecast_kw: inp.p_pv_kw[t],
-                surplus_available_kw: (inp.p_pv_kw[t] - inp.p_base_kw[t]).max(0.0),
+                surplus_available_kw: (inp.p_pv_kw[t] - inp.p_base_kw[t] - inp.p_residual_kw[t])
+                    .max(0.0),
                 allocations: vec![],
                 net_import_kw: 0.0,
                 net_export_kw: 0.0,
@@ -156,7 +157,8 @@ pub(crate) fn translate_to_plan(
     for t in 0..n {
         let slot_start = now + Duration::seconds(cum_s[t]);
         let slot_end = now + Duration::seconds(cum_s[t + 1]);
-        let surplus_available_kw = (inputs.p_pv_kw[t] - inputs.p_base_kw[t]).max(0.0);
+        let surplus_available_kw =
+            (inputs.p_pv_kw[t] - inputs.p_base_kw[t] - inputs.p_residual_kw[t]).max(0.0);
         let mut surplus_remaining_kw = surplus_available_kw;
 
         let mut allocations = Vec::new();
@@ -278,7 +280,7 @@ pub(crate) fn translate_to_plan(
             rate_estimated: inputs.rate_stale[t],
             import_cap_kw: inputs.p_imp_max_cont_kw[t],
             export_cap_kw: inputs.p_exp_max_cont_kw[t],
-            baseline_kw: inputs.p_base_kw[t],
+            baseline_kw: inputs.p_base_kw[t] + inputs.p_residual_kw[t],
             pv_forecast_kw: inputs.p_pv_kw[t],
             surplus_available_kw,
             planned_kw_by_asset: allocations

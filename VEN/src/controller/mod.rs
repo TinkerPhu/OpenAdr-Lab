@@ -33,6 +33,7 @@ pub mod timeline;
 // ── Monitoring & reporting ────────────────────────────────────────────────────
 pub mod monitor;
 pub mod reporter;
+pub mod residual;
 
 // ── User requests ─────────────────────────────────────────────────────────────
 pub mod user_request;
