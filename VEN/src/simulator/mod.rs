@@ -236,9 +236,14 @@ impl SimState {
                 }
                 AssetConfig::BaseLoad(bl) => {
                     // Behaviour B: base load — one-shot sets offset; EMA decays it back.
+                    // `natural_base_kw` (profile + simulated appliance noise) plays the
+                    // same role here that `natural_irradiance` plays for PV above: the
+                    // override folds into the offset relative to it, so a forced value
+                    // lands exactly on `forced_kw` — not `forced_kw` plus a hidden bump.
+                    let natural_base_kw =
+                        bl.baseline_kw_profile + BaseLoad::appliance_noise_kw(now);
                     if let Some(forced_kw) = base_load_kw_override {
-                        self.base_load_smoothing.load_offset_kw =
-                            forced_kw - bl.baseline_kw_profile;
+                        self.base_load_smoothing.load_offset_kw = forced_kw - natural_base_kw;
                     } else {
                         let per_tick_factor = (1.0 - base_load_alpha).powf(dt_s / PLAN_STEP_S);
                         self.base_load_smoothing.load_offset_kw *= per_tick_factor;
@@ -247,7 +252,7 @@ impl SimState {
                         }
                     }
                     bl.baseline_kw =
-                        (bl.baseline_kw_profile + self.base_load_smoothing.load_offset_kw).max(0.0);
+                        (natural_base_kw + self.base_load_smoothing.load_offset_kw).max(0.0);
                 }
                 AssetConfig::Ev(ev) => {
                     // Behaviour C: ev_plugged — hold override or snap back to profile default
