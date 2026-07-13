@@ -88,6 +88,11 @@ pub(crate) struct MilpInputs {
     pub(crate) p_pv_kw: Vec<f64>,
     /// Non-controllable baseline load [kW]
     pub(crate) p_base_kw: Vec<f64>,
+    /// SITE_RESIDUAL (BL-08, Phase 5 WP5.1): unmodelled site consumption
+    /// [kW], kept distinct from `p_base_kw` so WP5.2 can later swap this
+    /// scalar for a per-slot learned heuristic profile without touching
+    /// `p_base_kw`'s semantics.
+    pub(crate) p_residual_kw: Vec<f64>,
     /// Physical import limit at meter/breaker [kW]
     pub(crate) p_imp_max_phys_kw: Vec<f64>,
     /// Physical export limit [kW]

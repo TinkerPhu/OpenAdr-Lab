@@ -148,12 +148,21 @@ pub(crate) fn spawn_history_sampler(
         loop {
             interval.tick().await;
             let now = Utc::now();
-            let snap = {
+            let mut snap = {
                 let sim_guard = sim.lock().await;
                 sim_guard
                     .snapshot()
                     .expect("SimState::snapshot is infallible")
             };
+            // SITE_RESIDUAL (BL-08, Phase 5 WP5.1): this loop takes its own
+            // raw simulator snapshot independent of `tick_once`/`publish.rs`
+            // (a separate 1s cadence), so site-residual must be inserted
+            // here too for its history to accumulate via `tick_samples`.
+            let residual_kw = crate::controller::residual::compute_site_residual_kw(&snap);
+            snap.assets.insert(
+                crate::controller::residual::SITE_RESIDUAL_ASSET_ID.to_string(),
+                crate::controller::residual::site_residual_snapshot(residual_kw),
+            );
             let tariffs_snap = state.planned_tariffs().await;
             if let Some((ticks, grid)) = sampler.record(now, &snap, &tariffs_snap) {
                 write_window(history.clone(), ticks, grid).await;
