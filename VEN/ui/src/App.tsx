@@ -183,6 +183,13 @@ export default function App() {
             </Button>
             <Button
               component={Link}
+              to="/history"
+              data-testid="nav-history"
+            >
+              History
+            </Button>
+            <Button
+              component={Link}
               to="/controller"
               data-testid="nav-controller"
             >
@@ -236,13 +243,6 @@ export default function App() {
               data-testid="nav-raw-diagnostics"
             >
               Raw Data
-            </Button>
-            <Button
-              component={Link}
-              to="/history"
-              data-testid="nav-history"
-            >
-              History
             </Button>
           </Stack>
 
