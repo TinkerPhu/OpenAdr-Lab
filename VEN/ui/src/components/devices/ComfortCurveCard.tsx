@@ -19,6 +19,7 @@ import {
   useSetComfortCurve,
 } from "../../api/hooks";
 import type { ComfortRate } from "../../api/types";
+import { ComfortCurveChart } from "./ComfortCurveChart";
 
 const CURVE_ASSETS = ["ev", "heater", "battery"];
 
@@ -72,10 +73,11 @@ export function ComfortCurveCard() {
             </option>
           ))}
         </TextField>
+        <ComfortCurveChart rows={rows} />
         {rows.length === 0 ? (
           <Typography color="text.secondary">No curve points</Typography>
         ) : (
-          <Stack spacing={1}>
+          <Stack spacing={1} sx={{ mt: 2 }}>
             {rows.map((r, i) => (
               <Box
                 key={i}
