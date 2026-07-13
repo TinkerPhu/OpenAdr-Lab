@@ -39,6 +39,18 @@ describe("ComfortCurveCard", () => {
     expect(screen.getByTestId("comfort-bid-0")).toHaveValue(0.3);
   });
 
+  it("renders a curve chart preview alongside the editable rows", () => {
+    render(<ComfortCurveCard />);
+    expect(screen.getByTestId("comfort-curve-chart")).toBeInTheDocument();
+  });
+
+  it("shows an empty-state placeholder instead of a chart when there are no points", () => {
+    mockCurveData.mockReturnValue({ source: "default", rates: [] });
+    render(<ComfortCurveCard />);
+    expect(screen.getByTestId("comfort-curve-chart-empty")).toBeInTheDocument();
+    expect(screen.queryByTestId("comfort-curve-chart")).not.toBeInTheDocument();
+  });
+
   it("saves an edited curve as an override", async () => {
     const user = userEvent.setup();
     render(<ComfortCurveCard />);
