@@ -23,7 +23,7 @@ One vocabulary everywhere:
 - **Less debugging friction** — a field seen in a network trace, a DB row, a BFF log,
   and a React prop has the same name; grep works end-to-end.
 - **Spec traceability** — payloads remain directly comparable to [[openadr-3]] spec
-  examples and to `VTN/DTO examples/`.
+  examples (`docs/openadr_3_1_specs/`).
 
 ## Consequences
 

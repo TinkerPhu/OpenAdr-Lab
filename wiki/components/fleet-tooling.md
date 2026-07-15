@@ -77,7 +77,7 @@ Drops and recreates the VTN's `public` (openleadr-rs's own tables, re-applied vi
 SQLx auto-migration on VTN restart) and `lab_recorder` ([[history-store]]'s VTN-side
 recorder schema) Postgres schemas, then reloads
 `openleadr-rs/fixtures/test_user_credentials.sql` — replacing the manual `docker exec
-psql < fixtures.sql` step documented in `VTN/vtn_setup_from_blog_step_by_step.md`.
+psql < fixtures.sql` step from the original setup procedure (see README.md §Setup).
 
 ## Verified live on Pi4; N=10 deliberately deferred
 

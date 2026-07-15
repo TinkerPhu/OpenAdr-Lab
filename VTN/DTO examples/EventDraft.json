@@ -1,6 +1,0 @@
-{
-  "programId":"...",
-  "targets": { "venIds":["ven1","ven2"], "resourceIds":[] },
-  "timing": { "start":"now", "durationMinutes":30 },
-  "payload": { "type":"LOAD_REDUCTION", "valueKw":10 }
-}
