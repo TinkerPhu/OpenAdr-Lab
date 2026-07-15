@@ -337,8 +337,8 @@ Every step below applies two checks to each file:
 |---|---|---|
 | docs/DOC_AUDIT.md | **delete** | Superseded by this review; rows it marked "archive" are already gone. Preserve: move any still-open rows into this plan's findings log first. |
 | docs/guidelines/superpowers_analysis.md | **move + delete** | One-off dated assessment, not a guideline. Preserve: conclusion (adopt/not-adopt + why) as a wiki decision page or KEY_LEARNINGS entry. |
-| docs/milp_storage_planning.md | **relocate now, merge later** | Active 3-tier design doc at docs/ top level. Now: move to docs/plans/. After branch merge: fold durable model content into docs/architecture/heater_tank_milp_planning_model.md + ven_milp_planner.md, then archive — before/after comparisons become history. |
-| docs/milp_storage_planning_impl.md | **relocate now, merge later** | Same as above (implementation companion). |
+| docs/milp_storage_planning.md | **merge + archive now** | Design doc for the 3-tier MILP work, which is merged to main (refactor/3-tier-milp closed 2026-07-15) — the "wait for the branch" staging no longer applies. Fold the durable model content into docs/architecture/heater_tank_milp_planning_model.md + ven_milp_planner.md, then archive/delete; the before/after comparisons are now history. |
+| docs/milp_storage_planning_impl.md | **merge + archive now** | Same as above (implementation companion). Verify each described mechanism against the merged code while folding — anything not implemented moves to BACKLOG.md instead of the architecture docs. |
 | docs/milp_planner_config.md | **keep** (optional: merge into docs/architecture/ven_milp_planner.md) | Live config reference; merging would give one planner doc, but standalone is defensible. Owner's call. |
 | VTN/vtn_rust_bff_blueprint.md | **extract + delete** | Construction blueprint. Preserve: any still-true architecture facts into docs/architecture/VTN_ARCHITECTURE.md. |
 | VTN/vtn_web_ui_blueprint.md | **extract + delete** | Same. |
@@ -354,8 +354,32 @@ Every step below applies two checks to each file:
 | DOCUMENTATION.md vs docs/architecture/* | **keep both, de-duplicate via B11 SSOT links** | Different audiences (single narrative vs per-topic deep dives). |
 | docs/use-cases/SYSTEM-USE-CASES.md + manuals | **keep** | Definitions vs walk-through manuals are complementary, low overlap. |
 
-Net effect if all accepted: **7 deletions, 2 relocations, 2 shrinks, 1 rename**
-out of 94 documents, with all unique information preserved via the listed moves.
+Net effect if all accepted: **7 deletions, 2 merge-then-archive, 2 shrinks,
+1 rename** out of 94 documents, with all unique information preserved via the
+listed moves. *(Updated 2026-07-15 after refactor/3-tier-milp merged to main:
+the two milp_storage docs moved from "relocate now, merge later" to
+"merge + archive now".)*
+
+## Owner decisions (2026-07-15)
+
+1. **B12 reduction proposal: approved in full** — all 12 rows execute in C2,
+   information-preservation steps first (extract-before-delete, verify-before-archive).
+2. **Wiki exemptions extended**: `wiki/queries/**` and `wiki/review.md` join the
+   content-rule exempt list (dated point-in-time records).
+3. **Test naming: amend the rule** — CLAUDE.md changes to `<function>_<scenario>`
+   (no `test_` prefix); no test renames.
+4. **npm pinning: amend the rule** — `^` ranges stay; package-lock.json is the
+   declared pinning mechanism. Update the CLAUDE.md dependencies rule accordingly.
+5. **StaleRatePolicy enum: delete now** — vision remains as BACKLOG BL-07 prose.
+6. **Clippy gate: align docs to CI** — documented gate becomes
+   `cargo clippy --all-targets --all-features -- -D warnings`; the 28 test-code
+   lints get fixed (blocker).
+7. **milp_planner_config.md: keep standalone**, cross-link with
+   ven_milp_planner.md (B12 row resolved as "keep").
+8. **C3 scope: blockers + majors now** — clippy-CI blocker, dependency-vuln
+   updates, monitor.rs→state violation, planning.rs port bypass, BFF unit tests,
+   tasks/planning.rs split, README rewrite, VEN_ARCHITECTURE rewrite, wiki-sync.
+   Minors/nits mirror to the backlogs.
 
 ## Part C — Consolidation & fix waves
 
@@ -486,9 +510,9 @@ out of 94 documents, with all unique information preserved via the listed moves.
   `with_mip_gap(0.02)` hard-codes the solver tolerance; name it (e.g.
   `MIP_GAP_REL`) or expose via PlannerParams like the other tuning knobs.
 - [A1.5] [nit] docs/architecture/ven_milp_planner.md:127 — "current Part A …
-  Part B will populate 3 entries" phased narrative; with the 3-tier work on this
-  branch, verify in B3 whether Part B is now the implemented state and rewrite
-  present-tense.
+  Part B will populate 3 entries" phased narrative; the 3-tier work is merged to
+  main, so verify whether "Part B" is now the implemented state and rewrite the
+  section present-tense (drop the Part A/B framing).
 - [A1.6] [nit] VEN/src/models.rs — 34-line grab-bag holding `SensorSnapshot`/
   `SensorInput` (sensor DTOs used by simulator, sim_tick, routes/events). The
   generic "models" name predates the ring layout; fold the types into entities/
@@ -590,10 +614,10 @@ out of 94 documents, with all unique information preserved via the listed moves.
   B12 should propose retiring it (moving any still-open rows into this plan's
   findings).
 - [B2] [minor] docs/milp_storage_planning.md + milp_storage_planning_impl.md —
-  active design docs for the 3-tier MILP work sitting at docs/ top level instead
-  of docs/plans/. After the branch merges, fold the durable content into
-  docs/architecture/heater_tank_milp_planning_model.md / ven_milp_planner.md and
-  archive the rest (B12 proposal); the before/after comparisons are then history.
+  design docs for the 3-tier MILP work, which is now merged to main. Fold the
+  durable content into docs/architecture/heater_tank_milp_planning_model.md /
+  ven_milp_planner.md and archive the rest (B12 proposal, "merge + archive now");
+  the before/after comparisons are history under the content rule.
 - [B3] [major] docs/architecture/VEN_ARCHITECTURE.md — multiple content-rule
   violations: §3.3 "Reactor (REMOVED)" is a pure history section ("removed in
   spec kit 001 (2026-03-15)", rationale about Phases 15/20–23) → delete section,
