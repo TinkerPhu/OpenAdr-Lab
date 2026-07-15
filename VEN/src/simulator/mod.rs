@@ -240,8 +240,7 @@ impl SimState {
                     // same role here that `natural_irradiance` plays for PV above: the
                     // override folds into the offset relative to it, so a forced value
                     // lands exactly on `forced_kw` — not `forced_kw` plus a hidden bump.
-                    let natural_base_kw =
-                        bl.baseline_kw_profile + BaseLoad::appliance_noise_kw(now);
+                    let natural_base_kw = bl.baseline_kw_profile + bl.appliance_noise_kw(now);
                     if let Some(forced_kw) = base_load_kw_override {
                         self.base_load_smoothing.load_offset_kw = forced_kw - natural_base_kw;
                     } else {

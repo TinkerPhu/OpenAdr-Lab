@@ -1,4 +1,5 @@
 mod backoff;
+pub mod heuristics_job;
 pub mod history_sampler;
 pub mod obligation;
 pub mod planning;
@@ -10,6 +11,7 @@ mod progress_ticker;
 pub mod sim_tick;
 pub mod state_persist;
 
+pub(crate) use heuristics_job::spawn_heuristics_job;
 pub(crate) use history_sampler::spawn_history_sampler;
 pub(crate) use obligation::spawn_obligation_check;
 pub(crate) use planning::spawn_planning;

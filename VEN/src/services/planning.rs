@@ -9,6 +9,7 @@ use crate::controller::{SolveRequest, SolverPort};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
+use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::PlannerParams;
@@ -154,6 +155,7 @@ pub fn build_solve_request(
     baseline_override: Option<BaselineOverride>,
     objective_override: Option<PlannerObjective>,
     pv_forecast_override: Option<f64>,
+    asset_heuristics: std::collections::HashMap<String, AssetHeuristics>,
 ) -> SolveRequest {
     SolveRequest {
         asset_contexts,
@@ -174,6 +176,7 @@ pub fn build_solve_request(
         baseline_override,
         objective_override,
         pv_forecast_override,
+        asset_heuristics,
     }
 }
 

@@ -8,6 +8,7 @@ pub use planning::PlanningService;
 pub mod user_request;
 
 pub mod forecast;
+pub mod heuristics;
 
 pub mod comfort;
 pub mod notify;

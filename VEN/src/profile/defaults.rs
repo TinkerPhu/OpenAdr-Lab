@@ -115,6 +115,19 @@ pub(super) fn default_base_load_kw() -> f64 {
     0.5
 }
 
+pub(super) fn default_spike_jitter_h() -> f64 {
+    0.25
+}
+pub(super) fn default_spike_duration_h() -> f64 {
+    0.5
+}
+pub(super) fn default_spike_ramp_h() -> f64 {
+    0.05
+}
+pub(super) fn default_spike_probability() -> f64 {
+    1.0
+}
+
 impl Default for SimulatorConfig {
     fn default() -> Self {
         Self {

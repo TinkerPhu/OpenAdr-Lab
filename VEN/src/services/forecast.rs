@@ -3,10 +3,10 @@
 //! stored in `AppState` by the planning task and served at `GET /forecast`.
 
 use chrono::{DateTime, Utc};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::controller::simulator_port::SimSnapshot;
-use crate::entities::design_vocabulary::{AssetForecast, ForecastSource};
+use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics, ForecastSource};
 use crate::entities::plan::Plan;
 use crate::state::AppState;
 
@@ -45,8 +45,50 @@ pub async fn publish_post_cycle_state(
 ) {
     let env = crate::controller::envelope::compute_envelope(sim_snap, wall_now);
     state.set_site_envelope(env).await;
-    let forecasts = build_asset_forecasts(adopted_plan, wall_now);
+
+    let mut forecasts = build_asset_forecasts(adopted_plan, wall_now);
+    // WP5.2 (BL-14): add heuristic-sourced forecasts for assets that never
+    // appear in the plan's own allocations (uncontrollable assets like
+    // base_load/site-residual) — no precedence conflict since Optimization
+    // and Heuristic never cover the same asset_id in practice.
+    let existing_ids: HashSet<String> = forecasts.iter().map(|f| f.asset_id.clone()).collect();
+    let heuristics = state.asset_heuristics().await;
+    if !heuristics.is_empty() {
+        let slot_starts: Vec<DateTime<Utc>> = adopted_plan.slots.iter().map(|s| s.start).collect();
+        for hf in build_heuristic_forecasts(&heuristics, &slot_starts, wall_now) {
+            if !existing_ids.contains(&hf.asset_id) {
+                forecasts.push(hf);
+            }
+        }
+    }
     state.set_asset_forecasts(forecasts).await;
+}
+
+/// Build one `AssetForecast` per learned heuristic, tagged
+/// `ForecastSource::Heuristic`, sampling `daytime_profile_kw[weekday_bucket][hour]
+/// × seasonal_factor` at each of `slot_starts`.
+pub fn build_heuristic_forecasts(
+    heuristics: &HashMap<String, AssetHeuristics>,
+    slot_starts: &[DateTime<Utc>],
+    now: DateTime<Utc>,
+) -> Vec<AssetForecast> {
+    heuristics
+        .values()
+        .map(|h| {
+            let power_kw: Vec<f64> = slot_starts.iter().map(|t| h.sample_kw(*t)).collect();
+            AssetForecast {
+                asset_id: h.asset_id.clone(),
+                updated_at: now,
+                source: ForecastSource::Heuristic,
+                // Fixed placeholder confidence — WP5.4's quality-metadata work
+                // is where this becomes derived from sample count/variance.
+                confidence: 0.5,
+                power_kw,
+                soc: None,
+                availability_windows: None,
+            }
+        })
+        .collect()
 }
 
 /// Build one `AssetForecast` per asset that appears in the plan's slot
@@ -234,5 +276,76 @@ mod tests {
     fn test_build_asset_forecasts_empty_plan_yields_empty() {
         let plan = make_plan_with_slots(vec![]);
         assert!(build_asset_forecasts(&plan, ts(0)).is_empty());
+    }
+
+    #[test]
+    fn test_build_heuristic_forecasts_samples_hour_and_weekday() {
+        // 2023-01-02 was a Monday (weekday index 0).
+        let monday_8am = chrono::Utc.with_ymd_and_hms(2023, 1, 2, 8, 0, 0).unwrap();
+        let monday_3am = chrono::Utc.with_ymd_and_hms(2023, 1, 2, 3, 0, 0).unwrap();
+
+        let mut weekday_profile = vec![0.3; 24];
+        weekday_profile[8] = 1.5;
+        let mut heuristics = HashMap::new();
+        heuristics.insert(
+            "base_load".to_string(),
+            AssetHeuristics {
+                asset_id: "base_load".to_string(),
+                daytime_profile_kw: [weekday_profile, vec![0.3; 24]],
+                seasonal_factor: 1.0,
+                last_updated: Some(ts(0)),
+            },
+        );
+
+        let forecasts = build_heuristic_forecasts(&heuristics, &[monday_3am, monday_8am], ts(0));
+        assert_eq!(forecasts.len(), 1);
+        let f = &forecasts[0];
+        assert_eq!(f.source, ForecastSource::Heuristic);
+        assert_eq!(f.power_kw, vec![0.3, 1.5]);
+    }
+
+    #[test]
+    fn test_build_heuristic_forecasts_applies_seasonal_factor() {
+        let now = ts(0);
+        let mut heuristics = HashMap::new();
+        heuristics.insert(
+            "base_load".to_string(),
+            AssetHeuristics {
+                asset_id: "base_load".to_string(),
+                daytime_profile_kw: [vec![1.0; 24], vec![1.0; 24]],
+                seasonal_factor: 1.5,
+                last_updated: Some(now),
+            },
+        );
+        let monday = chrono::Utc.with_ymd_and_hms(2023, 1, 2, 0, 0, 0).unwrap();
+        let forecasts = build_heuristic_forecasts(&heuristics, &[monday], now);
+        assert!(
+            (forecasts[0].power_kw[0] - 1.5).abs() < 1e-9,
+            "1.0 * 1.5 = 1.5"
+        );
+    }
+
+    #[test]
+    fn test_build_heuristic_forecasts_picks_weekend_bucket_on_saturday() {
+        // 2023-01-02 was a Monday, 2023-01-07 a Saturday.
+        let saturday_10am = chrono::Utc.with_ymd_and_hms(2023, 1, 7, 10, 0, 0).unwrap();
+        let mut weekend_profile = vec![0.3; 24];
+        weekend_profile[10] = 2.2; // brunch peak
+        let mut heuristics = HashMap::new();
+        heuristics.insert(
+            "base_load".to_string(),
+            AssetHeuristics {
+                asset_id: "base_load".to_string(),
+                daytime_profile_kw: [vec![0.3; 24], weekend_profile],
+                seasonal_factor: 1.0,
+                last_updated: Some(ts(0)),
+            },
+        );
+
+        let forecasts = build_heuristic_forecasts(&heuristics, &[saturday_10am], ts(0));
+        assert!(
+            (forecasts[0].power_kw[0] - 2.2).abs() < 1e-9,
+            "a Saturday slot must sample the weekend bucket"
+        );
     }
 }

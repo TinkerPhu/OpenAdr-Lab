@@ -127,6 +127,10 @@ pub fn run_planner(
     baseline_override: Option<&BaselineOverride>,
     objective_override: Option<PlannerObjective>,
     pv_forecast_override: Option<f64>,
+    asset_heuristics: &std::collections::HashMap<
+        String,
+        crate::entities::design_vocabulary::AssetHeuristics,
+    >,
 ) -> Plan {
     // Guard: MilpVarPool has one named slot per kind; silently overwrites on duplicates.
     debug_assert!(
@@ -161,6 +165,7 @@ pub fn run_planner(
         shiftable_loads,
         baseline_override,
         pv_forecast_override,
+        asset_heuristics,
     );
     // WP4.1 (BL-28): give contexts the per-slot grid data they cannot know at
     // construction time (e.g. the OPPORTUNISTIC free-energy charge cap).
@@ -246,6 +251,7 @@ impl crate::controller::SolverPort for MilpSolver {
             req.baseline_override.as_ref(),
             req.objective_override,
             req.pv_forecast_override,
+            &req.asset_heuristics,
         )
     }
 }

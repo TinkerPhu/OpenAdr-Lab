@@ -2,6 +2,8 @@
 // MILP solver. Mirrors SimulatorPort/VtnPort: the trait and its request type
 // are domain-level; the implementation (`MilpSolver`) lives in
 // `controller::milp_planner`, which remains reachable only through this port.
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 
 use crate::controller::milp_planner::AssetMilpContext;
@@ -9,6 +11,7 @@ use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::AssetParams;
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
+use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
@@ -40,6 +43,10 @@ pub struct SolveRequest {
     pub baseline_override: Option<BaselineOverride>,
     pub objective_override: Option<PlannerObjective>,
     pub pv_forecast_override: Option<f64>,
+    /// WP5.2 (BL-14): learned per-asset heuristics, keyed by asset_id —
+    /// resolved from `AppState` once per cycle, same as `ev_session`/
+    /// `heater_target` above.
+    pub asset_heuristics: HashMap<String, AssetHeuristics>,
 }
 
 /// Port to the MILP planning engine. Always infallible: implementations must
