@@ -1,6 +1,6 @@
 # OpenADR 3 Raspberry Pi Lab
 
-A Raspberry Pi4-hosted **OpenADR 3.0 laboratory environment** for demand response experimentation, multi-VEN simulation, and edge computing research.
+A Raspberry Pi4-hosted **OpenADR 3 laboratory environment** for demand response experimentation, multi-VEN simulation, and edge computing research.
 
 ## The context
 
@@ -34,7 +34,7 @@ Raspberry Pi 4 (Docker)
 
 | Component | Technology | Description |
 |---|---|---|
-| VTN | [openleadr-rs](https://github.com/OpenLEADR/openleadr-rs) (Rust) | OpenADR 3.0 Virtual Top Node |
+| VTN | [openleadr-rs](https://github.com/OpenLEADR/openleadr-rs) (Rust) | OpenADR 3 Virtual Top Node |
 | DB | PostgreSQL 16 | VTN persistence (auto-migrated) |
 | BFF | Rust (axum) | Backend-for-frontend with dual OAuth credentials |
 | VTN UI | React + MUI + nginx | Operator dashboard (programs, events, VENs, reports) |
@@ -158,7 +158,9 @@ DOCKER_HOST=""                        # "" = run docker commands locally (no SSH
 DOCKER_DIR="/srv/docker/openadr_lab"  # repo path on the docker host
 ```
 
-Tests also run automatically via GitHub Actions on push to `main`.
+GitHub Actions runs lint/audit/DCO checks on PRs and the file-size audit on
+pushes; the E2E workflow is manual-dispatch only. Run the full suite yourself
+before merging.
 
 ## Running on a different Linux Docker host
 
@@ -202,28 +204,31 @@ OpenAdr-Lab/
   scripts/
     seed_vtn.py           # Seed programs, events, and VEN enrollment
   tests/
-    features/             # Behave BDD scenarios (15 features, 49 scenarios)
+    features/             # Behave BDD scenarios
     docker-compose.test.yml
   docs/
     architecture/         # System design, concepts, diagrams
-    use-cases/            # Use case definitions and manual
+    use-cases/            # Use case definitions and manuals
     guidelines/           # Coding and testing conventions
-    reference/            # KEY_LEARNINGS, GLOSSARY, FAQ
-    plans/                # Active and archived implementation plans
+    reference/            # KEY_LEARNINGS, GLOSSARY, FAQ, TECHNICAL_DEBTS
+    plans/                # Roadmap and implementation plans
     history/              # Project journal
-    VEN_Controller/       # HEMS controller design documents
-    specs/                # OpenADR 3.1.0 specification (markdown)
+    openadr_3_1_specs/    # OpenADR 3.1.0 specification (markdown)
     BACKLOG.md            # Future work wishlist
+  wiki/                   # Knowledge base (concepts, components, decisions)
 ```
 
 ## Documentation
 
 | Document | Description |
 |---|---|
-| [System Design](docs/architecture/system_design.md) | Full architecture, data flows, and design decisions |
-| [DR Simulation Concept](docs/architecture/concept_vtn_ven_demand_response_simulation.md) | Concept for realistic demand response simulation |
-| [Use Case Manual](docs/use-cases/USE-CASE-MANUAL.md) | Step-by-step guide for all demand response use cases |
-| [Use Cases](docs/use-cases/USE-CASES.md) | Use case definitions and test coverage |
+| [Application Documentation](DOCUMENTATION.md) | Purpose, features, architecture, and operational guidance |
+| [VEN Architecture](docs/architecture/VEN_ARCHITECTURE.md) | VEN system design, rings, ports, control path |
+| [VTN Architecture](docs/architecture/VTN_ARCHITECTURE.md) | VTN stack design (openleadr-rs, BFF, UI) |
+| [Asset Simulation](docs/architecture/asset_simulation.md) | Physics simulation of battery, EV, heater, PV, base load |
+| [System Use Case Manual](docs/use-cases/SYSTEM-USE-CASE-MANUAL.md) | Step-by-step guide for demand response use cases |
+| [HEMS Use Case Manual](docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md) | Observing HEMS planning behaviour |
+| [Use Cases](docs/use-cases/SYSTEM-USE-CASES.md) | Use case definitions and test coverage |
 | [Testing Guide](docs/guidelines/TESTING.md) | Test strategy, running tests, and CI setup |
 | [React Guidelines](docs/guidelines/REACT_GUIDELINES.md) | UI development conventions |
 | [Key Learnings](docs/reference/KEY_LEARNINGS.md) | Hard-won lessons from implementation |
@@ -231,7 +236,7 @@ OpenAdr-Lab/
 | [Glossary](docs/reference/GLOSSARY.md) | OpenADR terminology reference |
 | [Project Journal](docs/history/project_journal.md) | Implementation history and phase summaries |
 | [Backlog](docs/BACKLOG.md) | Future work wishlist |
-| [Active Plans](docs/plans/active/) | In-flight implementation plans |
+| [Plans & Roadmap](docs/plans/) | Strategic roadmap and in-flight implementation plans |
 
 ## Seeded Data
 
