@@ -205,20 +205,13 @@ HiGHS or `run_planner` directly.
   plan's slots have all expired, or on any non-periodic trigger — prevents churn from noise
   replans.
 
-❌ **GAP** (`docs/plans/review_items_resolution_strategy.md` R5, `docs/BACKLOG.md` BL-07):
-this section previously described a configurable `StaleRatePolicy` (`LAST_KNOWN`/
-`HEURISTIC_FORECAST`/`DEFER_TO_FLEXIBLE`/`SAFE_AVERAGE`) for handling VTN unreachability.
-That enum (`entities/design_vocabulary.rs`) is defined but **never referenced anywhere in
-the codebase** — there is no user-facing choice between these four policies, and no
-FIRM/FLEXIBLE slot classification exists in code at all (`FirmBoundary`/
-`NearHorizonDuration` were never implemented). The actual behaviour when the VTN is
-unreachable: tariff lookups use Step/LOCF extrapolation (`common::TimeSeries`), which
-always carries the last known rate forward — equivalent only to the `LAST_KNOWN` policy,
-and not by deliberate design; slots with no tariff data at all fall back to hardcoded
-defaults (0.25 €/kWh import, 0.08 €/kWh export, 300 g/kWh CO₂).
-`PlanTimeSlot.rate_estimated` is hardcoded `false`, so no `PlanWarning` is ever raised to
-flag a stale-rate plan. R5 resolved to keep the enum (quarantined, not deleted) — BL-07
-tracks wiring `StaleRatePolicy::LastKnown` + `rate_estimated` as a real feature.
+**VTN-unreachable behaviour (current):** tariff lookups use Step/LOCF extrapolation
+(`common::TimeSeries`), carrying the last known rate forward; slots with no tariff
+data at all fall back to hardcoded defaults (0.25 €/kWh import, 0.08 €/kWh export,
+300 g/kWh CO₂). `PlanTimeSlot.rate_estimated` is hardcoded `false`, so no
+`PlanWarning` flags a stale-rate plan. A configurable stale-rate policy (choice of
+last-known / heuristic-forecast / defer-to-flexible / safe-average, plus a real
+`rate_estimated` flag) is future work — tracked as `docs/BACKLOG.md` BL-07.
 
 #### 2.3.1 Session Intent in the MILP
 
@@ -411,18 +404,15 @@ Power levels: discrete `[0, 3, 6]` kW (STEPPED adjustability).
 Static consumption profile (`W` constant or time-varying). Not controllable.
 Represents appliances, lighting, standby — the uncontrollable fraction of site demand.
 
-### 3.3 Reactor (REMOVED)
+### 3.3 Control Path
 
-> **The reactor was removed in spec kit 001 (2026-03-15).** The controller is the single
-> control authority.
+The controller is the **single control authority** — exactly one writer produces the
+`Setpoints` struct each cycle. (A separate reactive FSM layer alongside the planner was
+rejected: two independent writers to `Setpoints` make arbitration ambiguous, with the
+Dispatcher silently overriding one of them. Transition smoothing, where needed, lives in
+the Dispatcher execution layer.)
 
-**Rationale:** The reactor (Phase 15) and controller (Phases 20–23) both read VTN events and
-both wrote to the same `Setpoints` struct. The Dispatcher silently overwrote the reactor's
-output for any asset with a plan allocation, making the reactor work redundant. The FSM
-(Idle → Delaying → Ramping → Holding → RampingBack) and arbitration logic have been removed.
-Transition smoothing, if needed, lives in the Dispatcher execution layer.
-
-**New single control path:**
+**Control path:**
 ```
 VTN events → openadr_interface → rates + capacity constraints
                                             │
@@ -433,10 +423,9 @@ User requests ──────────────────────
                                         Dispatcher → Simulator setpoints
 ```
 
-**Legacy:** `GET /trace` has been replaced by `GET /trace/events` (in-memory ring buffer of
-`ControllerEvent`s — capacity 500, not 1 000) and `GET /trace/history` (per-asset recent
-history). Neither records reactor FSM transitions; `/trace/events` logs controller-level
-decisions (rate/capacity changes, plan cycles, request transitions).
+**Tracing:** `GET /trace/events` serves an in-memory ring buffer of `ControllerEvent`s
+(capacity 500) with controller-level decisions — rate/capacity changes, plan cycles,
+request transitions. `GET /trace/history` serves per-asset recent history.
 
 ---
 
@@ -589,9 +578,9 @@ at or before `t`. Correct for tariffs and any signal that "takes effect and stay
 
 ### 5.2 Implementation — `common::TimeSeries`
 
-A single reusable abstraction (`VEN/src/common/mod.rs`) backs tariffs, obligation
-reports, and timeline resampling — the three-strategies fragmentation this section
-used to describe no longer exists.
+A single reusable abstraction (`VEN/src/common/mod.rs`) backs all three time-series
+consumers — tariffs, obligation reports, and timeline resampling — so there is one
+interpolation/aggregation implementation, not one per consumer.
 
 ```rust
 struct TimeSeries {

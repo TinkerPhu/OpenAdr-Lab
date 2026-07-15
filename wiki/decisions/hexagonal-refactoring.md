@@ -4,7 +4,7 @@ type: decision
 created: 2026-07-04
 updated: 2026-07-04
 synced_commit: 5a9a304
-sources: [.claude/CLAUDE.md, openspec/specs/arch-params-in-entities/, openspec/specs/arch-timeline-in-entities/, docs/architecture/module_dependency_graph_post_refactoring.md]
+sources: [.claude/CLAUDE.md, openspec/specs/arch-params-in-entities/, openspec/specs/arch-timeline-in-entities/, docs/architecture/module_dependency_graph.md]
 tags: [decision, architecture, refactoring]
 ---
 
@@ -41,5 +41,5 @@ architectural review remains necessary to catch the rest.
 The dependency rule is kept honest by grep-based invariant checks in `.claude/CLAUDE.md`
 (no `crate::profile` in inner rings, no concrete assets in the solver, no
 `serde_json::Value` beyond `vtn.rs`) plus the post-refactoring module graph snapshot
-(docs/architecture/module_dependency_graph_post_refactoring.md) — re-verified quarterly
+(docs/architecture/module_dependency_graph.md) — re-verified quarterly
 per `docs/reference/SESSION_START.md`.

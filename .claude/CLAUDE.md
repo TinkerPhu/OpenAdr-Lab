@@ -13,21 +13,21 @@ branching: feature branches use the pattern NNN-whatever-case-description where 
 openspec feature ID (e.g. 030-my-feature). Refactor branches: refactor/<slug>.
 Fix branches: fix/<slug>. All those branches target main. Never force-push to main. The goal is to rebase and fast forward merge.
 DCO sign-off is enforced by CI — do not add co-author footers (see rule above).
-Merge only after all CI checks pass: cargo fmt, cargo clippy -D warnings, cargo audit,
+Merge only after all CI checks pass: cargo fmt, cargo clippy --all-targets --all-features -- -D warnings, cargo audit,
 file-size audit (scripts/audit_file_sizes.py — tasks/ ≤ 200, VEN/src/ ≤ 500 production
 lines), and E2E tests green on Pi4.
 
 testing: full guide at docs/guidelines/TESTING.md. Four suites:
   1. UI unit (local)       — cd VEN/ui && npm test  |  cd VTN/ui && npm test
-  2. Rust unit+integration — wsl cargo test -p ven  (local, no HiGHS needed for most)
-  3. E2E BDD (Pi4)         — bash run_all_tests.sh --e2e  (behave, ~49 scenarios)
+  2. Rust unit+integration — wsl cargo test -p ven-app  (local, no HiGHS needed for most)
+  3. E2E BDD (Pi4)         — bash run_all_tests.sh --e2e  (behave)
   4. Resilience (Pi4)      — bash run_all_tests.sh --resilience
 Run everything: bash run_all_tests.sh
 VEN Rust pyramid (4 layers, all must stay green after any VEN change):
   Domain → Use-case → Adapter-contract → Integration
   Shared mock adapters live in VEN/src/services/test_support/ (test-only,
   #[cfg(test)]-gated via services/mod.rs).
-  Test naming: test_<function>_<scenario>.
+  Test naming: <function>_<scenario> (no test_ prefix — redundant inside #[cfg(test)]).
 All suites must pass before merging a PR to main.
 
 test-first: write the test first. Selectively run it to confirm it fails. Implement until it is green.
@@ -36,7 +36,8 @@ This applies at unit level for every new function and at BDD level for every new
 session-start: at the start of every AI session read docs/reference/SESSION_START.md
 and follow the checklist before touching any code.
 
-linting: cargo fmt --check and cargo clippy -- -D warnings must pass before any commit.
+linting: cargo fmt --check and cargo clippy --all-targets --all-features -- -D warnings
+(same command CI runs) must pass before any commit.
 For JS/TS (VEN/ui, VTN/ui): eslint must report zero errors. Suppress clippy lints with
 #[allow(...)] only if justified with a comment on the same line. No enforced coverage floor —
 keep domain and application layer tests meaningful.
@@ -53,14 +54,17 @@ build:
   before merging — these workflows don't yet block merges.
 
 determinism: any code path that depends on the current date/time must accept an injectable
-clock (e.g. a Fn() -> DateTime<Utc> parameter or typed wrapper). Already applied in the MILP
-planner and simulator. All new modules that schedule, timestamp, or expire must follow the
+clock (e.g. a Fn() -> DateTime<Utc> parameter or typed wrapper). Applied in the MILP
+planner; the simulator/assets still have gaps (tracked as R-24 in TECHNICAL_DEBTS.md).
+All new modules that schedule, timestamp, or expire must follow the
 same pattern. Makes tests reproducible without sleep or wall-clock coupling.
 
-dependencies: pin all new crates to a semver range in Cargo.toml; all new npm packages to
-an exact version in package.json. Run cargo audit and npm audit before each release; add
+dependencies: pin all new crates to a semver range in Cargo.toml; npm packages use caret
+ranges in package.json — package-lock.json is the pinning mechanism (commit it; never
+delete it to "fix" installs). Run cargo audit and npm audit before each release; add
 findings to docs/BACKLOG.md with severity. Acceptable licences: MIT, Apache-2.0,
-BSD-2-Clause, BSD-3-Clause, ISC. Review every new import — AI-generated code frequently
+BSD-2-Clause, BSD-3-Clause, ISC, Unicode-3.0, Zlib, CDLA-Permissive-2.0, and the
+OpenSSL licence (aws-lc-sys). Review every new import — AI-generated code frequently
 introduces undeclared dependencies.
 
 refactoring: before adding a feature in an area listed in docs/reference/TECHNICAL_DEBTS.md,
@@ -79,7 +83,7 @@ test failures: Do NOT distinguish between "pre-existing" and "new" failures — 
 
 It is also legitimate to question whether a test's purpose or form is still correct — requirements change, and a test's expectations can become wrong. It is also valid to ask whether a test could be done more cleanly in a different setup. However, this is NOT a free pass to delete or weaken a failing test. Any change to test purpose, form, or expectations must be explained to the user with the reasoning and the alternatives considered. Never silently change test expectations to make failures go away.
 
-docs/specs/pdf/: do not read, search, or reference any files under this directory. Use the markdown versions in docs/specs/ instead.
+docs/openadr_3_1_specs/pdf/: do not read, search, or reference any files under this directory. Use the markdown versions in docs/openadr_3_1_specs/ instead.
 
 naming: variables and function names for physical quantities must include the unit as suffix (e.g. `power_kw`, `energy_kwh`, `temperature_c`, `tariff_eur_per_kwh`, `soc_pct`). When adding new code, check nearby code or nearby source files for existing suffixes to stay consistent.
 
@@ -115,4 +119,4 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
     grep -r "use crate::assets::" VEN/src/entities                                   → must be empty
 
   Reference: docs/architecture/VEN_ARCHITECTURE.md and
-  docs/architecture/module_dependency_graph_post_refactoring.md
+  docs/architecture/module_dependency_graph.md
