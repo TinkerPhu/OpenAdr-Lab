@@ -205,13 +205,18 @@ HiGHS or `run_planner` directly.
   plan's slots have all expired, or on any non-periodic trigger — prevents churn from noise
   replans.
 
-**VTN-unreachable behaviour (current):** tariff lookups use Step/LOCF extrapolation
-(`common::TimeSeries`), carrying the last known rate forward; slots with no tariff
-data at all fall back to hardcoded defaults (0.25 €/kWh import, 0.08 €/kWh export,
-300 g/kWh CO₂). `PlanTimeSlot.rate_estimated` is hardcoded `false`, so no
-`PlanWarning` flags a stale-rate plan. A configurable stale-rate policy (choice of
-last-known / heuristic-forecast / defer-to-flexible / safe-average, plus a real
-`rate_estimated` flag) is future work — tracked as `docs/BACKLOG.md` BL-07.
+**Stale-rate handling (slots beyond the last known tariff data):** the planner
+applies the profile-configured `StaleRatePolicy`
+(`planner.stale_rate_policy`, default `HEURISTIC_FORECAST`;
+`controller/milp_planner/stale_rates.rs`) to price stale import slots —
+`LAST_KNOWN` carries the last rate forward, `SAFE_AVERAGE` takes a percentile of
+known rates, `DEFER_TO_FLEXIBLE` prices stale slots at the max known rate so firm
+load avoids them, and `HEURISTIC_FORECAST` is a documented stub behaving like
+`LAST_KNOWN` until learned rate patterns land (BL-14). Stale slots set
+`PlanTimeSlot.rate_estimated = true` and raise a stable-text plan warning
+(feeds the notification dedup). Export and CO₂ rates keep Step/LOCF hold; slots
+with no tariff data at all fall back to hardcoded defaults (0.25 €/kWh import,
+0.08 €/kWh export, 300 g/kWh CO₂).
 
 #### 2.3.1 Session Intent in the MILP
 

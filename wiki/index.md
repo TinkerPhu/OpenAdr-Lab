@@ -44,6 +44,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[milp-over-greedy]] — why the planner uses a two-phase MILP instead of greedy scheduling
 - [[hexagonal-refactoring]] — spec series 015–029, ports for testability and swappability
 - [[dto-pass-through]] — OpenADR spec field names pass through all layers unnormalised
+- [[superpowers-not-adopted]] — agentic framework evaluated 2026-06-25; only the worktree-per-feature pattern borrowed
 
 ## Sources
 _none yet — seed pages cite repo files directly; per-document summary pages are created by `/wiki-ingest`_
