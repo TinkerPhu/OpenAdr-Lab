@@ -124,7 +124,7 @@ fn align_to_step(raw: DateTime<Utc>, step_s: u64) -> DateTime<Utc> {
 pub struct PlanZone { pub step_s: u64, pub slots: usize }
 ```
 
-`PlanningHorizon` carries `zones: Vec<PlanZone>` (`#[serde(default)]` — old stored plans without the field deserialise as `vec![]`). For uniform-step plans (current Part A), `zones` always contains a single entry mirroring `step_size_s` and `num_steps`. Part B will populate it with 3 entries for the 3-tier horizon.
+`PlanningHorizon` carries `zones: Vec<PlanZone>` (`#[serde(default)]` — stored plans without the field deserialise as `vec![]`). The zone list drives the whole grid: `n_slots = Σ zone.slots`, and per-slot durations come from each zone's `step_s` (`services/planning.rs`). Production profiles carry the 3-tier list; single-zone lists produce a uniform grid (used by test profiles).
 
 **Architecture note:** `profile::PlannerConfig.plan_zones` also uses `Vec<PlanZone>` — it imports the same type from `entities/plan`. There is no separate profile-layer zone type and no mapping step. This is the correct dependency direction: infra (`profile.rs`) imports domain (`entities/plan.rs`), never the reverse.
 
@@ -220,3 +220,29 @@ All planner configuration lives in `VEN/src/profile.rs → PlannerConfig`. Key p
 | `phase2_epsilon_eur` | 0.02 | Phase 2 may not increase total cost beyond this slack |
 | `c_ctrl_imp_malus_eur_kwh` | 0.22 | Malus added to import price to discourage unnecessary import |
 | `solver_timeout_s` | 60 | HiGHS wall-time limit per phase |
+
+## 7. Terminal Energy Reward (c_terminal)
+
+Without a terminal value, the optimizer treats energy stored at the horizon end as
+worthless and refuses to pre-heat/pre-charge beyond immediate need (temperature
+ceiling, overnight top-up fragmentation). The Phase 1 objective therefore includes a
+per-asset reward `−c_terminal × stored_energy[n−1]` — the forward value of 1 kWh
+still stored at the horizon end.
+
+**Coefficients** (resolved in `services/planning.rs::build_plan_cycle_inputs`; the
+profile can override via `c_terminal_eur_kwh`, default = auto-computation):
+
+| Asset | Coefficient | Rationale |
+|---|---|---|
+| Heater | `mean(c_imp_eur_kwh) + c_ctrl_imp_malus_eur_kwh` | Filling during PV surplus is always net-positive; cheap overnight ≈ net-neutral; peak-rate filling stays net-negative |
+| Battery | `mean(c_imp_eur_kwh) × round_trip_efficiency` | Stored energy offsets later import; the import malus does not apply to storage value |
+| EV | `0` | The session deadline constraint (`e_ev[t_dead] ≥ e_target`) already forces delivery; a terminal reward would double-count and could over-charge at peak rates |
+
+The formula is size-independent (EUR/kWh scales with any tank/battery via the energy
+variable) and needs no mandatory profile parameter — all inputs already exist at
+`build_milp_inputs` time. Side effect: with the tank filled during each solar window,
+coast time to `T_min` exceeds two nights, so overnight top-up pulses (plan
+fragmentation) disappear for the steady-state case. Cold-start/cloudy-day gaps are
+covered by the horizon length instead — the two mechanisms are complementary
+(terminal value fixes the ceiling; a ≥48 h horizon shows the next solar window for
+coherent coast planning from any start state).
