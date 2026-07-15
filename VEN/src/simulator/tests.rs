@@ -132,13 +132,29 @@ mod peek_pv_kw_tests {
 /// `assets::base_load::tests`).
 mod base_load_noise_tests {
     use super::super::*;
-    use crate::entities::asset_params::{AssetParams, BaseLoadParams};
+    use crate::entities::asset_params::{ApplianceSpikeParams, AssetParams, BaseLoadParams};
     use chrono::TimeZone;
+
+    /// A single coffee-time spike (matches the values this session's earlier
+    /// hardcoded `APPLIANCE_PATTERNS[0]` used, now supplied explicitly since
+    /// spikes are profile-configured rather than a built-in const).
+    fn coffee_spike() -> ApplianceSpikeParams {
+        ApplianceSpikeParams {
+            center_hour: 8.0,
+            jitter_h: 0.05,
+            amplitude_kw: 1.2,
+            duration_h: 0.25,
+            ramp_h: 0.03,
+            probability: 1.0,
+            weekdays: vec![],
+        }
+    }
 
     fn base_load_state(baseline_kw: f64) -> SimState {
         SimState::from_params(&[AssetParams::BaseLoad(BaseLoadParams {
             id: crate::ids::ASSET_BASE_LOAD.to_string(),
             baseline_kw,
+            spikes: vec![coffee_spike()],
         })])
     }
 

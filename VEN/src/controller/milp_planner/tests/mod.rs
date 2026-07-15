@@ -165,6 +165,7 @@ fn make_profile() -> Profile {
             AssetProfile::BaseLoad(BaseLoadConfig {
                 id: "base_load".into(),
                 baseline_kw: 0.5,
+                spikes: vec![],
             }),
         ],
         simulator: SimulatorConfig,
@@ -745,6 +746,7 @@ fn build_milp_inputs_with_override(
         shiftable_loads,
         baseline_override,
         pv_forecast_override,
+        &std::collections::HashMap::new(),
     )
 }
 
@@ -782,6 +784,7 @@ fn run_planner(
         baseline_override,
         objective_override,
         None,
+        &std::collections::HashMap::new(),
     )
 }
 

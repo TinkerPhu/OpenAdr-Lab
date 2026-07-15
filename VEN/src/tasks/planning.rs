@@ -65,6 +65,9 @@ pub(crate) fn spawn_planning(
             let heat_tgt = state.heater_target().await;
             let shift_loads = state.shiftable_loads().await;
             let bl_override = state.baseline_override().await;
+            // WP5.2 (BL-14): resolved here (async) and threaded down as a
+            // plain owned value — build_milp_inputs et al. are sync/pure.
+            let asset_heuristics = state.asset_heuristics().await;
             let obj = *active_objective.read().await;
             // Read inject state BEFORE cloning the sim. The pv_irradiance inject is a
             // one-shot: the sim tick applies it to pv.irradiance_offset and then clears
@@ -156,6 +159,7 @@ pub(crate) fn spawn_planning(
                 bl_override,
                 Some(obj),
                 pv_forecast_override,
+                asset_heuristics,
             );
             let mut plan = crate::services::PlanningService::solve_plan(&solver, solve_req).await;
             // created_at records true wall-clock time so gate decay (elapsed_s) measures

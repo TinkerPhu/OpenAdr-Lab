@@ -337,6 +337,12 @@ async fn main() -> anyhow::Result<()> {
             tasks::spawn_history_sampler(sim.clone(), history.clone(), s.clone(), retention_days)
         });
     }
+    if let Some(history) = history_port.clone() {
+        let s = state.clone();
+        tasks::supervised_spawn("heuristics_job", TASK_COOLDOWN_S, move || {
+            tasks::spawn_heuristics_job(history.clone(), s.clone())
+        });
+    }
 
     // Build HTTP app and serve
     let sim_schema = Arc::new(simulator::schema_from_params(&asset_params));

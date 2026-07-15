@@ -189,16 +189,44 @@ pub struct AssetState {
 }
 
 /// Learned behavioral patterns for uncontrollable/implicit assets (§3.3).
+/// Populated by `services::heuristics::learn_asset_heuristics` (WP5.2,
+/// BL-14) — unlike most types in this file, this one is shipped behavior.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AssetHeuristics {
     pub asset_id: String,
-    /// Typical power by time of day (power_kw values, one per hour of day, 24 entries)
-    pub daytime_profile_kw: Vec<f64>,
-    /// Relative activity per weekday: Mon=0..Sun=6
-    pub weekday_weights: Vec<f64>, // 7 values
+    /// Typical power by time of day, one 24-hour curve per weekday/weekend
+    /// bucket: `[0]` = weekday (Mon-Fri), `[1]` = weekend (Sat/Sun). A
+    /// single scaled curve can't represent a genuinely different daily
+    /// shape (e.g. brunch replacing coffee+lunch), so weekday and weekend
+    /// each get their own learned curve rather than one curve times a
+    /// per-day multiplier.
+    pub daytime_profile_kw: [Vec<f64>; 2],
     /// Multiplier for current season (e.g. 1.2 = 20% more in winter)
     pub seasonal_factor: f64,
     pub last_updated: Option<DateTime<Utc>>,
+}
+
+impl AssetHeuristics {
+    /// Sample this heuristic's expected power at `slot_t`:
+    /// `daytime_profile_kw[weekday_bucket][hour] × seasonal_factor`.
+    /// Shared by `services::forecast::build_heuristic_forecasts` (the
+    /// `/forecast` API) and `controller::milp_planner::inputs` (the
+    /// planner's own solve inputs) so both consumers can never silently
+    /// diverge into two different sampling formulas.
+    pub fn sample_kw(&self, slot_t: DateTime<Utc>) -> f64 {
+        use chrono::{Datelike, Timelike, Weekday};
+        let bucket = if matches!(slot_t.weekday(), Weekday::Sat | Weekday::Sun) {
+            1
+        } else {
+            0
+        };
+        let hour = slot_t.hour() as usize;
+        let base = self.daytime_profile_kw[bucket]
+            .get(hour)
+            .copied()
+            .unwrap_or(0.0);
+        base * self.seasonal_factor
+    }
 }
 
 /// Predicted power profile for an asset over the planning horizon (§3.6).
@@ -309,4 +337,71 @@ pub struct PenaltyRule {
     pub current_peak_value: f64,
     /// Rolling average power over measurement window (kW)
     pub rolling_average_kw: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn sample_kw_multiplies_hour_and_seasonal_factor() {
+        let mut weekday_profile = vec![0.5; 24];
+        weekday_profile[8] = 2.0;
+        let h = AssetHeuristics {
+            asset_id: "base_load".to_string(),
+            daytime_profile_kw: [weekday_profile, vec![0.0; 24]],
+            seasonal_factor: 1.1,
+            last_updated: None,
+        };
+
+        // 2023-01-02 08:00 UTC was a Monday.
+        let monday_8am = Utc.with_ymd_and_hms(2023, 1, 2, 8, 0, 0).unwrap();
+        let expected = 2.0 * 1.1;
+        assert!((h.sample_kw(monday_8am) - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sample_kw_defaults_missing_indices_gracefully() {
+        let h = AssetHeuristics {
+            asset_id: "x".to_string(),
+            daytime_profile_kw: [vec![], vec![]],
+            seasonal_factor: 1.0,
+            last_updated: None,
+        };
+        let now = Utc.with_ymd_and_hms(2023, 1, 2, 8, 0, 0).unwrap();
+        assert_eq!(h.sample_kw(now), 0.0);
+    }
+
+    #[test]
+    fn sample_kw_picks_weekday_bucket_for_weekday_and_weekend_bucket_for_weekend() {
+        let mut weekday_profile = vec![0.0; 24];
+        weekday_profile[8] = 1.2; // weekday coffee peak
+        let mut weekend_profile = vec![0.0; 24];
+        weekend_profile[10] = 2.2; // weekend brunch peak
+        let h = AssetHeuristics {
+            asset_id: "base_load".to_string(),
+            daytime_profile_kw: [weekday_profile, weekend_profile],
+            seasonal_factor: 1.0,
+            last_updated: None,
+        };
+
+        // 2023-01-02 was a Monday, 2023-01-07 a Saturday.
+        let tuesday_8am = Utc.with_ymd_and_hms(2023, 1, 3, 8, 0, 0).unwrap();
+        let saturday_10am = Utc.with_ymd_and_hms(2023, 1, 7, 10, 0, 0).unwrap();
+
+        assert!((h.sample_kw(tuesday_8am) - 1.2).abs() < 1e-9);
+        assert!((h.sample_kw(saturday_10am) - 2.2).abs() < 1e-9);
+        // Cross-check: weekday bucket has nothing at hour 10, weekend
+        // bucket has nothing at hour 8 — proves the bucket actually
+        // switches rather than falling back to a shared curve.
+        assert_eq!(
+            h.sample_kw(Utc.with_ymd_and_hms(2023, 1, 3, 10, 0, 0).unwrap()),
+            0.0
+        );
+        assert_eq!(
+            h.sample_kw(Utc.with_ymd_and_hms(2023, 1, 7, 8, 0, 0).unwrap()),
+            0.0
+        );
+    }
 }

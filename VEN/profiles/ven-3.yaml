@@ -22,6 +22,51 @@ assets:
   - type: base_load
     id: base_load
     baseline_kw: 0.6
+    spikes:
+      - center_hour: 8.0
+        amplitude_kw: 1.2
+        duration_h: 0.25
+        ramp_h: 0.03
+        jitter_h: 0.2
+        probability: 1.0
+        weekdays: [0, 1, 2, 3, 4]      # coffee, weekdays
+      # ven-3 skips lunch cooking about 40% of the time (out at work) —
+      # demonstrates per-household routine variety via `probability`.
+      - center_hour: 12.0
+        amplitude_kw: 2.0
+        duration_h: 0.5
+        ramp_h: 0.05
+        jitter_h: 0.25
+        probability: 0.6
+        weekdays: [0, 1, 2, 3, 4]      # lunch, weekdays
+      - center_hour: 18.0
+        amplitude_kw: 2.5
+        duration_h: 0.75
+        ramp_h: 0.08
+        jitter_h: 0.3
+        probability: 1.0
+        weekdays: [0, 1, 2, 3, 4]      # dinner, weekdays
+      - center_hour: 10.5
+        amplitude_kw: 2.2
+        duration_h: 1.0
+        ramp_h: 0.1
+        jitter_h: 0.5
+        probability: 1.0
+        weekdays: [5, 6]               # brunch, weekend
+      - center_hour: 17.0
+        amplitude_kw: 2.5
+        duration_h: 0.83
+        ramp_h: 0.08
+        jitter_h: 0.3
+        probability: 1.0
+        weekdays: [5, 6]               # dinner, weekend (earlier than weekday)
+      - center_hour: 20.0
+        amplitude_kw: 0.4
+        duration_h: 3.0
+        ramp_h: 0.2
+        jitter_h: 0.5
+        probability: 1.0
+        weekdays: []                    # TV/lights, every day
 
 simulator:
   tick_s: 1

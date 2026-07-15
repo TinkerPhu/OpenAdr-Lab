@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Duration, Utc};
 
 use super::asset_port::AssetMilpParams;
@@ -5,6 +7,7 @@ use crate::controller::milp_planner::AssetMilpContext;
 use crate::controller::simulator_port::SimSnapshot;
 use crate::entities::asset_params::{BaseLoadParams, PvParams};
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
+use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::device_session::{BaselineOverride, ShiftableLoad};
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::tariff_snapshot::TariffTimeSeries;
@@ -45,6 +48,7 @@ pub(crate) fn build_milp_inputs(
     shiftable_loads: &[ShiftableLoad],
     baseline_override: Option<&BaselineOverride>,
     pv_forecast_override: Option<f64>,
+    asset_heuristics: &HashMap<String, AssetHeuristics>,
 ) -> MilpInputs {
     let n: usize = planner.plan_zones.iter().map(|z| z.slots).sum();
     let mut cum_s: Vec<i64> = Vec::with_capacity(n + 1);
@@ -84,16 +88,25 @@ pub(crate) fn build_milp_inputs(
         .export_limit_kw
         .unwrap_or(phys_exp)
         .min(exp_allowance);
-    let base_kw = base_load.map(|c| c.baseline_kw).unwrap_or(0.0);
-    // SITE_RESIDUAL (BL-08, Phase 5 WP5.1): flat scalar from the live
-    // SimSnapshot for now (0.0 if the tick loop hasn't populated it yet,
-    // e.g. before the first tick). WP5.2 replaces this with a per-slot
-    // learned profile once AssetHeuristics exists for "site-residual".
-    let residual_kw = assets
+    // Flat fallback (today's exact pre-WP5.2 behavior) used whenever no
+    // learned heuristic exists yet for the asset (cold-start, or a VEN that
+    // has never had `POST /debug/heuristics/preload` run / accumulated
+    // enough history) — see the per-slot loop below for the heuristic path.
+    let flat_base_kw = base_load.map(|c| c.baseline_kw).unwrap_or(0.0);
+    let flat_residual_kw = assets
         .assets
         .get(crate::controller::residual::SITE_RESIDUAL_ASSET_ID)
         .map(|s| s.power_kw)
         .unwrap_or(0.0);
+    // WP5.2 (BL-14): when a learned heuristic exists, the planner samples a
+    // per-slot value (`daytime_profile_kw[weekday_bucket][hour] ×
+    // seasonal_factor`) instead of repeating a flat scalar across the whole
+    // horizon — this is what makes the Controller tab's future-horizon line
+    // for base_load/site-residual show real daily structure instead of a
+    // flat line once history has been seeded.
+    let base_heuristic = asset_heuristics.get(crate::ids::ASSET_BASE_LOAD);
+    let residual_heuristic =
+        asset_heuristics.get(crate::controller::residual::SITE_RESIDUAL_ASSET_ID);
 
     // WP4.4 (BL-07): import rates come through the stale-rate policy — covered
     // slots interpolate, slots beyond tariff coverage are filled per policy.
@@ -152,8 +165,15 @@ pub(crate) fn build_milp_inputs(
             pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)
         };
         p_pv.push(pv_kw);
-        p_base.push(base_kw);
-        p_residual.push(residual_kw);
+        let base_kw_t = base_heuristic
+            .map(|h| h.sample_kw(slot_t))
+            .unwrap_or(flat_base_kw);
+        p_base.push(base_kw_t);
+        p_residual.push(
+            residual_heuristic
+                .map(|h| h.sample_kw(slot_t))
+                .unwrap_or(flat_residual_kw),
+        );
         p_imp_phys.push(phys_imp);
         p_exp_phys.push(phys_exp);
         // WP3.2: SIMPLE levels clamp the import cap per slot — level 1 to a
@@ -167,7 +187,7 @@ pub(crate) fn build_milp_inputs(
             .max();
         let simple_cap = match simple_level {
             Some(1) => cont_imp * planner.simple_level1_import_cap_pct,
-            Some(2) => base_kw.max(0.0),
+            Some(2) => base_kw_t.max(0.0),
             Some(l) if l >= 3 => 0.0,
             _ => cont_imp,
         };

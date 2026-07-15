@@ -647,6 +647,7 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
             AssetProfile::BaseLoad(BaseLoadParams {
                 id: "base_load".into(),
                 baseline_kw: 0.6,
+                spikes: vec![],
             }),
         ],
         simulator: SimulatorConfig,
