@@ -12,7 +12,7 @@ Run through this list at the beginning of every Claude Code session before writi
 ## 2. Check project state
 - [ ] `git status` — any uncommitted changes?
 - [ ] `git log --oneline -10` — what was done last?
-- [ ] Confirm current branch name and its purpose (check `alignment-plan.md` or openspec
+- [ ] Confirm current branch name and its purpose (check `docs/plans/` or the openspec
       feature list if unclear)
 
 ## 3. Check open work

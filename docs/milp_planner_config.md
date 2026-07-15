@@ -102,8 +102,9 @@ in ven-3 (0.05 / 1200) without documented justification:
 - `plan_adoption_threshold_eur`: 0.20 (ven-1, ven-2) vs. 0.05 (ven-3)
 - `plan_adoption_decay_s`: 1500 (ven-1, ven-2) vs. 1200 (ven-3)
 
-The ven-1 / ven-2 values (0.20 / 1500) are intentional and documented in
-`milp_storage_planning.md`. The ven-3 divergence appears to be drift.
+The ven-1 / ven-2 values (0.20 / 1500) are intentional (rationale archived in
+`docs/history/archive/milp_storage_planning.md`). The ven-3 divergence appears
+to be drift.
 
 **Action:** raise code defaults to `0.20` and `1500`. Remove from all
 production profiles.

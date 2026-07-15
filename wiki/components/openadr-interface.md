@@ -75,9 +75,10 @@ flagged in `docs/BACKLOG.md` BL-24).
   per-`(ven, event, payload_type)` report name means each cycle upserts the same VTN
   report resource with the latest trailing window, rather than creating a new report.
 - There is no plan-cycle status report — `PlanCycle` events are visible via
-  `/trace/events` and `/plan/events` (SSE) only; no VTN report is built from them (the
-  dead `TELEMETRY_STATUS`-on-`PlanCycle` code path was removed, not fixed, since it never
-  had a real program ID to report against).
+  `/trace/events` and `/plan/events` (SSE) only; no VTN report is built from them. A
+  `TELEMETRY_STATUS`-on-`PlanCycle` report would need a program ID to report against,
+  which `PlanCycle` events don't carry — that mapping is the open work
+  (see `docs/BACKLOG_OpenADR_Cert.md`).
 
 > **DRIFT** `docs/architecture/VEN_ARCHITECTURE.md` §2.1 additionally lists
 > `USAGE_FORECAST` (FIRM slots as point forecasts, FLEXIBLE slots as `[0, MaxPower]`
