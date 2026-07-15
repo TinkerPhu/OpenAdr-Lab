@@ -28,8 +28,8 @@ React component tests using Vitest + React Testing Library. Run locally, no Dock
 
 | Suite | Directory | Files | Command |
 |---|---|---|---|
-| VEN UI | `VEN/ui/` | 8 test files | `cd VEN/ui && npm test` |
-| VTN UI | `VTN/ui/` | 7 test files | `cd VTN/ui && npm test` |
+| VEN UI | `VEN/ui/` | see `VEN/ui/src/__tests__/` | `cd VEN/ui && npm test` |
+| VTN UI | `VTN/ui/` | see `VTN/ui/src/__tests__/` | `cd VTN/ui && npm test` |
 
 **Prerequisites:** Node.js, `npm install` in each UI directory.
 
@@ -67,7 +67,8 @@ SQLX_OFFLINE=true cargo test --workspace
 
 Behave (Python) scenarios testing the full stack: VTN, VENs, BFF, and UI through real HTTP calls. Runs inside Docker Compose with an ephemeral database.
 
-**16 feature files, ~49 scenarios, ~348 steps** covering:
+Feature files live in `tests/features/` (`ls tests/features/*.feature` for the
+current count — hard numbers rot). Coverage:
 - VTN auth, programs, events CRUD
 - VEN health, integration, sensors, reports
 - BFF proxy endpoints

@@ -270,7 +270,7 @@ MaxPower_kW      — maximum power
 PowerSteps       — discrete levels (null if STEPLESS)
 ```
 
-**TariffSnapshot** (formerly `RateSnapshot` / `OadrEventSnapshot`)
+**TariffSnapshot**
 ```
 TimeStamp             — RFC 3339
 ImportPrice           — €/kWh (tariff for grid import)

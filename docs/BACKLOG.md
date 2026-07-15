@@ -233,7 +233,7 @@ correctly reflects the current billing period after each rollover.
 
 ### BL-22: `apply_battery_correction_overlay` — wire behind a flag, or re-confirm abandoned
 **Req:** `controller/dispatcher.rs` (`apply_battery_correction_overlay`)
-**Problem:** A finished, unit-tested dead-beat P-controller that reacts to grid deviation by nudging the battery setpoint — but never called from `build_setpoints()`. Kept per explicit user decision (not deleted); its old design-doc reference (`openspec/changes/warnings-cleanup/design.md`) no longer exists.
+**Problem:** A finished, unit-tested dead-beat P-controller that reacts to grid deviation by nudging the battery setpoint — but never called from `build_setpoints()`. Deliberately kept unwired pending the wire-or-delete decision below.
 **Fix:** Either wire it behind a profile flag (e.g. `battery.deviation_correction_enabled`) so it's an opt-in feature, or, at a later date, re-confirm with the user that it's genuinely abandoned and delete it then — this entry exists so that decision doesn't get lost.
 **Complexity:** Small to wire behind a flag (the function and its tests already work); the design decision (default on/off, interaction with the adoption gate) is the real work.
 **Verify:** Integration test: with the flag on, sustained grid deviation produces a nonzero correction visible in the dispatcher's setpoint output; with it off, behaviour is unchanged from today.
