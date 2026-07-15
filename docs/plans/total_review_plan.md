@@ -370,7 +370,11 @@ the two milp_storage docs moved from "relocate now, merge later" to
    (no `test_` prefix); no test renames.
 4. **npm pinning: amend the rule** — `^` ranges stay; package-lock.json is the
    declared pinning mechanism. Update the CLAUDE.md dependencies rule accordingly.
-5. **StaleRatePolicy enum: delete now** — vision remains as BACKLOG BL-07 prose.
+5. **StaleRatePolicy enum: delete now** — *OBSOLETE (C2, 2026-07-16): the review
+   finding predated Phase 4 (WP4.4/BL-07), which fully implemented StaleRatePolicy
+   dispatch (`controller/milp_planner/stale_rates.rs`, profile-configurable,
+   `rate_estimated` wired). The enum is live production code — nothing to delete.
+   VEN_ARCHITECTURE.md stale-rate section rewritten to the implemented state.*
 6. **Clippy gate: align docs to CI** — documented gate becomes
    `cargo clippy --all-targets --all-features -- -D warnings`; the 28 test-code
    lints get fixed (blocker).
