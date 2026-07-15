@@ -4,7 +4,7 @@ type: architecture
 created: 2026-07-04
 updated: 2026-07-10
 synced_commit: 88e0e25
-sources: [.claude/CLAUDE.md, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/module_dependency_graph_post_refactoring.md, VEN/src/]
+sources: [.claude/CLAUDE.md, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/module_dependency_graph.md, VEN/src/]
 tags: [architecture, hexagonal, ports, ven]
 ---
 

@@ -39,7 +39,6 @@
               C_PORT_SIM["≪trait≫\nSimulatorPort\nsnapshot() → SimSnapshot"]
               C_PORT_VTN["≪trait≫\nVtnPort\nfetch_events()\nfetch_reports()\nupsert_report()"]
               C_PORT_MILP["≪trait≫\nAssetMilpContext\nbuild_variables()\nextract_solution()"]
-              C_ABSORBER["absorber.rs\nAbsorberState\napply_deviation_absorption()"]
               C_DISPATCH["dispatcher.rs\nbuild_setpoints()"]
               C_ENVELOPE["envelope.rs\ncompute_flexibility_envelope()"]
               C_OAADR["openadr_interface.rs\nparse_rate_snapshots()\nparse_capacity_state()"]
@@ -96,7 +95,6 @@
       T_REPORTS --> C_REPORTER
       T_OBLIG --> SVC_OBLIG
       T_SIMTICK --> C_DISPATCH
-      T_SIMTICK --> C_ABSORBER
 
       R_HEMS --> SVC_UREQ
       R_HEMS --> SVC_HEMS

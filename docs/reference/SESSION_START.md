@@ -23,7 +23,7 @@ Run through this list at the beginning of every Claude Code session before writi
 ## 4. Quarterly controls *(do this ~every 3 months, not every session)*
 - [ ] Run architecture invariant checks (from CLAUDE.md `ven-architecture:` section)
 - [ ] Generate Mermaid module diagram and compare to
-      `docs/architecture/module_dependency_graph_post_refactoring.md`
+      `docs/architecture/module_dependency_graph.md`
 - [ ] Compare `DOCUMENTATION.md` to actual code; update stale sections
 - [ ] Run `cargo audit` and `npm audit`; add findings to BACKLOG.md
 
