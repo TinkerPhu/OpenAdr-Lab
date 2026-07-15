@@ -383,7 +383,16 @@ the two milp_storage docs moved from "relocate now, merge later" to
 
 ## Part C — Consolidation & fix waves
 
-- [ ] **C1 Consolidate findings.** Merge all Part A/B findings, dedupe, tag severity,
+- [x] **C1 Consolidate findings.** *Done 2026-07-15.* TECHNICAL_DEBTS.md: added
+  R-23–R-36 (parked minors/nits per decision 8), updated stale R-10 (VtnPort now
+  mostly typed) and R-13 (content rule). refactoring_backlog.md shrink happens in
+  C2 (approved B12 row). BACKLOG.md security section will be refreshed in C3
+  with post-`cargo update` audit results (avoids writing soon-stale numbers).
+  Licence check completed: **Rust** — all permissive, but Unicode-3.0 (ICU crates),
+  Zlib (foldhash), CDLA-Permissive-2.0 (webpki-roots) and OpenSSL (aws-lc-sys
+  AND-clause) fall outside the declared allowlist → amend the CLAUDE.md
+  dependencies rule to include them (C2). **npm** (production) — MIT/ISC/BSD only,
+  clean. Original text: Merge all Part A/B findings, dedupe, tag severity,
   sort into: (a) quick fixes, (b) refactorings → `docs/plans/refactoring_backlog.md`,
   (c) debts → `TECHNICAL_DEBTS.md`, (d) backlog items → `BACKLOG.md`,
   (e) doc rewrites (per-file list with proposed wording).
