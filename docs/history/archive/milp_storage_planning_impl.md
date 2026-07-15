@@ -1,3 +1,7 @@
+> **ARCHIVED 2026-07-16** — implementation plan for the storage/3-tier MILP work,
+> executed and merged. See `docs/architecture/ven_milp_planner.md` for the
+> implemented state. Kept as historical record.
+
 # MILP Storage Planning — Implementation Plan
 
 Implements the minimum necessary combination from

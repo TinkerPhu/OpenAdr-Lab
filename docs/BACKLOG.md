@@ -339,6 +339,7 @@ correctly reflects the current billing period after each rollover.
 | GB-08 | Add VEN UI tests for UserRequests and Controller pages | Medium |
 | GB-09 | Make VEN poll interval configurable per profile (useful for testing) — PARTIALLY RESOLVED (Phase 2, WP2.5): the actual goal ("N VENs don't poll in lockstep") is met via a one-time `POLL_STARTUP_JITTER_S` stagger, not a per-profile interval override — simpler and lower-risk than moving poll intervals from env vars into the profile schema, which nothing currently needs. | Medium |
 | GB-10 | Remove remaining compiler warnings across all builds | Medium |
+| GB-11 | Remaining AI-SW-Development alignment items (from the retired root alignment-plan.md, Pass 3): backlog-handling + tool-installation + archive-folder notes in CLAUDE.md; USER_STORIES.md; RISK_ANALYSIS.md; PROMPT_LIBRARY.md; changelog decision (journal-as-changelog note); security-review cadence; automated code-review hook; file-header descriptions on key VEN modules | Low |
 
 ---
 

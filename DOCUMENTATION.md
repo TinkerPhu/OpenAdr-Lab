@@ -794,7 +794,7 @@ Quick-reference table mapping every FR code to its one-line description. Full re
 | [FR-SIM-06](#21-simulation-engine) | Heater MUST implement thermal model: `dT/dt = (P_heater × efficiency − ambient_loss) / thermal_mass` |
 | [FR-SIM-07](#29-persistence--recovery) | Simulator state MUST persist to `/data/sim_state.json` and survive VEN restart |
 | [FR-SIM-08](#21-simulation-engine) | Profile configuration MUST be loaded from `VEN/profiles/<ven-id>.yaml` via `PROFILE_PATH` env var |
-| [FR-SIM-09](#28-simulation-injection--overrides) | `POST /sim/override` MUST be a full-replace operation (not a patch) |
+| [FR-SIM-09](#28-simulation-injection--overrides) | `POST /sim/inject` MUST use explicit tri-state merge semantics: absent field = no change, `null` = release override, value = set override |
 | [FR-SIM-10](#210-observability) | `GET /sim/schema` MUST return JSON schema for profile YAML to support tooling |
 
 ---
@@ -844,6 +844,9 @@ All endpoints are served by each VEN on its configured port (default: `8211` for
 | `GET` | `/obligations` | Active report obligations |
 | `GET` | `/flexibility` | Site flexibility envelope |
 | `GET` | `/ledger` | Cumulative asset energy / cost / CO₂ |
+| `GET` | `/signals` | Active grid signals (alerts, SIMPLE levels, capacity) |
+| `GET` | `/notifications` | User notification feed (ring buffer) |
+| `GET` | `/notifications/events` | SSE stream of new notifications |
 
 ### User Requests & Device Sessions
 
@@ -871,9 +874,21 @@ All endpoints are served by each VEN on its configured port (default: `8211` for
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/forecast` | Site-level forward forecast |
 | `GET` | `/forecast/:asset_id` | Forward power forecast for asset |
-| `GET` | `/history/:asset_id` | Historical power / state trace |
+| `GET` | `/history/:asset_id` | Live in-memory power / state trace (ring buffer) |
 | `GET` | `/capability/:asset_id` | Current max import / export kW |
+| `GET/POST/DELETE` | `/assets/:asset_id/comfort_curve` | User comfort-curve override (beats the built-in default) |
+
+### History Store (persistent, SQLite)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/history/ticks` | Persisted per-asset-per-minute samples |
+| `GET` | `/history/grid` | Persisted grid meter history |
+| `GET` | `/history/events` | Persisted VTN event history |
+| `GET` | `/history/reports` | Persisted report history |
+| `GET` | `/history/plans` | Persisted plan history |
 
 ### Timeline
 
@@ -896,6 +911,7 @@ All endpoints are served by each VEN on its configured port (default: `8211` for
 |--------|------|-------------|
 | `GET` | `/trace/events` | SSE stream of controller events |
 | `GET` | `/trace/history` | Last 500 controller events |
+| `POST` | `/debug/heuristics/preload` | Seed base-load heuristics from synthetic history (test support) |
 
 ---
 
@@ -1313,8 +1329,12 @@ The reactor FSM (Idle → Delaying → Ramping → Holding → RampingBack) and 
 **D-05: `OadrEventSnapshot` unification**  
 All time-varying VTN signals (price, CO₂, capacity limits) are stored in one struct per poll tick. A separated-field model caused temporal alignment bugs when price and capacity signals had different poll timestamps. The unified struct guarantees all fields are co-valid at the same timestamp.
 
-**D-06: `POST /sim/override` is full-replace**  
-The override endpoint replaces the entire override struct (not a PATCH). Partial-patch semantics require null-vs-absent disambiguation that is error-prone for callers. Full-replace is explicit: callers must set all fields they want active.
+**D-06: `POST /sim/inject` uses tri-state partial merge**  
+The inject endpoint merges per field: a field absent from the JSON leaves the current
+override untouched, an explicit `null` releases it, and a value activates it
+(`routes/sim.rs::merge_inject`). This lets callers change one override without knowing
+the others' state. (A full-replace body — the obvious simpler alternative — forces every
+caller to read-modify-write the whole struct and loses concurrent changes.)
 
 **D-07: 30 s fixed poll interval**  
 Event polling is fixed at 30 s. This balances VTN load against response latency. The 30–60 s range from the original system design was narrowed to 30 s fixed in implementation; configurable jitter is not implemented in the lab.

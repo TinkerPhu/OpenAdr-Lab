@@ -30,7 +30,10 @@ before anything is fixed. Fixes land on separate `fix/` or `refactor/` branches.
    - `wiki/log.md` (a log by nature),
    - `wiki/decisions/**` (ADR-style pages — rationale allowed, but chronology
      ("changed then-and-then") still gets rewritten), 
+   - `wiki/queries/**` and `wiki/review.md` (dated point-in-time records — owner
+     decision 2, 2026-07-15),
    - `specs/archive/**` (archived feature records), 
+   - `docs/history/archive/**` (superseded design docs kept as record),
    - git history itself.
 6. `docs/specs/pdf/` is never read (project rule); the markdown spec copies in
    `docs/openadr_3_1_specs/` are third-party text — checked only for stray local
@@ -400,7 +403,22 @@ the two milp_storage docs moved from "relocate now, merge later" to
   sort into: (a) quick fixes, (b) refactorings → `docs/plans/refactoring_backlog.md`,
   (c) debts → `TECHNICAL_DEBTS.md`, (d) backlog items → `BACKLOG.md`,
   (e) doc rewrites (per-file list with proposed wording).
-- [ ] **C2 Fix wave — docs.** Apply approved doc rewrites in small commits
+- [x] **C2 Fix wave — docs.** *Done 2026-07-16 on `fix/review-c1-c2-docs`.*
+  Executed: all content-rule rewrites (VEN_ARCHITECTURE ×4 incl. stale-rate
+  section corrected to implemented WP4.4 state, REQUIREMENTS, both BACKLOGs,
+  TESTING counts→commands, TECHNICAL_DEBTS R-13, refactoring_backlog shrink);
+  CLAUDE.md rule amendments (clippy gate→CI command, test naming, npm pinning→
+  lockfile, licence allowlist extension, pdf path, determinism wording, root
+  pointer); README fixed (links, structure, CI claim, 3.0→3);
+  module graph renamed + phantom absorber node removed; B12 executed in full
+  (DOC_AUDIT + superpowers_analysis + 4 VTN construction files + alignment-plan
+  + empty postponed/ deleted; superpowers decision → wiki/decisions/;
+  alignment Pass-3 remainder → BACKLOG GB-11; milp_storage docs →
+  docs/history/archive/ after extracting c_terminal into ven_milp_planner.md §7);
+  DOCUMENTATION.md API reference completed (+12 routes, /sim/override → tri-state
+  /sim/inject in FR-SIM-09 + D-06); 2 wiki content-rule fixes. Full /wiki-sync
+  deferred until after C3 (code changes would immediately re-stale it).
+  Original text: Apply approved doc rewrites in small commits
   (one branch, e.g. `fix/doc-review-rewrites`); run `wiki-lint` after wiki edits.
 - [ ] **C3 Fix wave — code quick fixes.** `blocker`/`major` code findings with
   Small/Trivial effort, test-first, one `fix/` branch per theme. Larger items stay
