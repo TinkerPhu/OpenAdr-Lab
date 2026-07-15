@@ -1,5 +1,6 @@
 use crate::entities::asset_params::{
-    AssetParams, BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
+    ApplianceSpikeParams, AssetParams, BaseLoadParams, BatteryParams, EvParams, HeaterParams,
+    PvParams,
 };
 use crate::entities::plan::PlanZone;
 use crate::entities::PlannerObjective;
@@ -65,6 +66,19 @@ impl AssetProfile {
             AssetProfile::BaseLoad(c) => AssetParams::BaseLoad(BaseLoadParams {
                 id: c.id.clone(),
                 baseline_kw: c.baseline_kw,
+                spikes: c
+                    .spikes
+                    .iter()
+                    .map(|s| ApplianceSpikeParams {
+                        center_hour: s.center_hour,
+                        jitter_h: s.jitter_h,
+                        amplitude_kw: s.amplitude_kw,
+                        duration_h: s.duration_h,
+                        ramp_h: s.ramp_h,
+                        probability: s.probability,
+                        weekdays: s.weekdays.clone(),
+                    })
+                    .collect(),
             }),
         }
     }
@@ -222,6 +236,32 @@ pub struct BaseLoadConfig {
     pub id: String,
     #[serde(default = "super::defaults::default_base_load_kw")]
     pub baseline_kw: f64,
+    /// Simulated appliance draw bumps (coffee/cooking/TV etc.). Empty by
+    /// default — profiles that don't list any get zero appliance noise.
+    #[serde(default)]
+    pub spikes: Vec<SpikeConfig>,
+}
+
+/// One simulated appliance draw: a Gaussian-shaped power bump centered on
+/// `center_hour`, with day-to-day jitter in timing and magnitude, and a
+/// `probability` (0.0-1.0) that it fires at all on a given simulated day.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpikeConfig {
+    pub center_hour: f64,
+    #[serde(default = "super::defaults::default_spike_jitter_h")]
+    pub jitter_h: f64,
+    pub amplitude_kw: f64,
+    /// Total on-period width in hours (ramp-up + plateau + ramp-down).
+    #[serde(default = "super::defaults::default_spike_duration_h")]
+    pub duration_h: f64,
+    /// Linear transition width at each edge, in hours.
+    #[serde(default = "super::defaults::default_spike_ramp_h")]
+    pub ramp_h: f64,
+    #[serde(default = "super::defaults::default_spike_probability")]
+    pub probability: f64,
+    /// `0`=Monday..`6`=Sunday; empty (the default) means every day.
+    #[serde(default)]
+    pub weekdays: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

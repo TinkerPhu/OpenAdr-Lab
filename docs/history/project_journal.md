@@ -5385,3 +5385,152 @@ eslint clean. `cargo fmt --check`, `clippy -D warnings`, and
 `scripts/audit_file_sizes.py` all pass; architecture invariants
 (`use crate::assets::` / `use crate::profile` boundary checks) hold.
 
+### Planner consumes learned heuristics (closes a silently-scoped-out WP5.2 gap)
+
+User asked why ven-1's Controller-tab future/48h `base_load` line stayed
+flat after WP5.2 landed. Root cause: WP5.2's `build_heuristic_forecasts`
+only fed the separate `GET /forecast` API — the MILP planner's own solve
+inputs (`controller/milp_planner/inputs.rs`'s `p_base_kw`/`p_residual_kw`)
+never consulted `state.asset_heuristics()`, so `PlanTimeSlot.baseline_kw`
+(what `controller/timeline.rs` actually renders for the Controller tab's
+future segment) stayed a flat scalar regardless of what had been learned.
+This was a deliberate scope cut in the WP5.2 plan, never logged as
+follow-up debt — a real miss, since the original roadmap doc explicitly
+called for "planner consumes them for baseline slots."
+
+Fix: `AssetHeuristics::sample_kw(slot_t)` (new, `entities/
+design_vocabulary.rs` — Domain ring, reusable from both `services/` and
+`controller/milp_planner/` without an Infra→Application import inversion)
+centralizes the sampling formula; `services/forecast.rs::
+build_heuristic_forecasts` now calls it instead of duplicating the
+formula. `state.asset_heuristics()` is resolved in `tasks/planning.rs`
+(async context) and threaded as a plain owned value through
+`SolveRequest` → `run_planner` → `build_milp_inputs` (all sync/pure by
+design) — `inputs.rs`'s per-slot loop now samples `h.sample_kw(slot_t)`
+per slot when a heuristic exists, falling back to the exact flat scalar
+otherwise (cold-start / never-preloaded VEN), preserving every existing
+test's assertions.
+
+Also added `scripts/seed_history.py`, a thin fleet-wide wrapper around the
+existing `/debug/heuristics/preload` route, mirroring `experiments/
+run_experiment.py`'s dual VEN-enumeration convention (static comma-list
+vs. fleet manifest.json) rather than inventing a new one.
+
+Verified live on Pi4 across all three VENs (not just ven-3, which was the
+only one preloaded earlier): `GET /plan`'s per-hour `baseline_kw` now
+shows real daily structure — flat at the static baseline overnight (0.4/
+0.5/0.6 kW per VEN), rising through the coffee/lunch hours, peaking at the
+dinner hour (~1.05-1.15 kW), then declining — the literal fix for the
+symptom originally reported.
+
+607 → 635 Rust tests (3 new: `AssetHeuristics::sample_kw` unit tests ×2,
+`run_planner_with_heuristic_baseline_kw_varies_per_slot` integration
+test), 0 failed. `cargo fmt`, `clippy -D warnings`, `audit_file_sizes.py`,
+and architecture invariants all pass.
+
+## Realistic appliance pulses + weekday/weekend heuristic split (Part D)
+
+User noticed the learned heuristic looked "the same every day" with
+2-hour-wide peaks, and back-of-envelope math confirmed the earlier
+appliance-noise model (Gaussian pulses, `sigma_h`) was inflating daily
+energy well past reality: a Gaussian's tails never reach zero, so its
+energy integral (`amplitude × sigma_h × √(2π)`) is uncontrollably larger
+than a real cooking session — ven-1's dinner spike alone worked out to
+3.76 kWh vs a realistic ~1-1.5 kWh, 8.97 kWh/day total spike energy on
+top of the static baseline. Separately, `AssetHeuristics` could not
+represent a genuinely different weekend shape at all: `daytime_profile_kw
+[24]` + `weekday_weights[7]` is one curve times a *scalar* per weekday —
+it can scale a day up or down, not swap breakfast+lunch for a later
+brunch.
+
+**Part D1** — `assets/base_load.rs`'s `AppliancePattern`/
+`appliance_noise_kw` rewritten around a trapezoidal pulse
+(`trapezoid_kw(amplitude, dist_h, duration_h, ramp_h)`: full amplitude on
+the plateau, linear ramp at each edge, hard zero beyond `duration_h/2`)
+instead of a Gaussian — energy is now directly `≈ amplitude_kw ×
+(duration_h − ramp_h)`, settable to match a real appliance session rather
+than an uncontrollable tail integral. Spikes also gained a `weekdays:
+Vec<u8>` membership list (`0`=Monday..`6`=Sunday, empty = every day) so a
+pattern can be weekday-only or weekend-only; a pattern outside its
+membership contributes `0.0` outright, no RNG draw. Threaded the field
+swap (`sigma_h` → `duration_h`+`ramp_h`+`weekdays`) through
+`entities/asset_params.rs`, `profile/{schema,defaults,validate}.rs`, and
+every test fixture across `assets/base_load.rs`, `simulator/tests.rs`,
+`services/heuristics.rs`, `tasks/heuristics_job/mod.rs`,
+`routes/debug.rs`. All three VEN profiles rewritten with a weekday
+coffee/lunch/dinner set and a weekend brunch/shifted-dinner set (dinner
+17:00 weekends vs 18:00 weekdays), plus a shared every-day TV/lights
+spike; new daily total ~3.9 kWh weekday / ~4.9 kWh weekend, down from
+8.97 kWh/day.
+
+**Key learning — narrow pulses need narrow test jitter.** The first test
+run after switching to trapezoids failed intermittently
+(`appliance_noise_kw_probability_one_always_fires`,
+`..._weekend_restricted_spike_fires_only_on_weekend`): the shared test
+fixture's `jitter_h: 0.2` was wider than the pulse's own half-width
+(`duration_h/2 = 0.125`), so on ~37% of simulated days the jittered
+center drifted far enough that the fixed clock instant the test sampled
+(e.g. exactly `8:00:00`) fell entirely outside the pulse — a real
+consequence of moving from a wide, always-nonzero Gaussian tail to a
+narrow, genuinely-zero-outside-its-window trapezoid. Fixed by tightening
+the shared test fixture's `jitter_h` to `0.05` (well under
+`duration_h/2 - ramp_h`) so exact-instant sampling is deterministic;
+day-to-day variation is still exercised via the independent amplitude
+jitter (0.7×-1.3×). Confirmed clean across 5 repeated runs after the fix.
+A second, expected fallout: `learn_asset_heuristics_converges_to_coffee_
+peak_from_synthetic_backfill`'s `> 0.5 kW` threshold assumed the old wide
+shape; a 15-min pulse centered exactly at `8:00` has *half* its energy
+fall into the `[7:00, 8:00)` hour bucket, so the analytic `[8:00, 9:00)`
+bucket average is ~0.44 kW, not the full-amplitude figure — relaxed to
+`> 0.35 kW` with a comment explaining the bucket-straddling math, not a
+weakened test purpose.
+
+**Part D2** — `AssetHeuristics.daytime_profile_kw` restructured from
+`Vec<f64>` (24 entries) + `weekday_weights: Vec<f64>` (7-entry scalar
+multiplier) to `[Vec<f64>; 2]` (`[0]`=weekday Mon-Fri, `[1]`=weekend
+Sat/Sun) — one mechanism for weekday/weekend difference, not two
+overlapping ones. `sample_kw` (the shared boundary built in Part C1
+specifically so internal restructuring wouldn't ripple into its callers)
+now picks the bucket via `slot_t.weekday()` — confirmed zero changes
+needed in `services/forecast.rs::build_heuristic_forecasts` or
+`controller/milp_planner/inputs.rs` beyond the doc comment, exactly as
+designed. `services/heuristics.rs::learn_asset_heuristics`'s aggregation
+split into two independent 24-bucket EWMA passes (weekday-fed,
+weekend-fed) instead of one pass + a separate weekday-ratio pass; with a
+28-day seeding window the weekend bucket still gets ~8 days of 1-min
+samples, plenty for a stable mean. New test
+`learn_asset_heuristics_captures_distinct_weekday_and_weekend_shapes`
+proves the learned weekday bucket peaks at a configured dinner hour while
+staying quiet at a weekend-only brunch hour, and vice versa. New planner
+integration test
+`run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday`
+proves the same `AssetHeuristics` produces different
+`plan.slots[0].baseline_kw` for a Tuesday-dated vs Saturday-dated
+`run_planner` call at the same hour-of-day.
+
+**Deliberate scope limit** (recorded in `TECHNICAL_DEBTS.md`): the split
+is weekday-vs-weekend (2 buckets), not one curve per day of the week (7
+buckets) — a 28-day window gives each weekend bucket ~8 days of samples
+(stable mean) but would starve each individual weekday bucket to ~4
+samples in a 7-way split. Revisit if per-weekday granularity is ever
+wanted, with a longer seeding window.
+
+Deployed to Pi4 (`ven-1`/`ven-2`/`ven-3` rebuilt, `ui` restarted for
+nginx re-resolution) and re-seeded via `scripts/seed_history.py`. Verified
+live via `POST /debug/heuristics/preload`'s response on all three VENs:
+ven-1's weekday bucket shows the coffee (h8: 0.64 kW vs 0.4 kW baseline),
+lunch (h12: 1.0 kW), and dinner (h17-18: up to 1.64 kW) shape, while its
+weekend bucket shows the lunch peak gone, a brunch peak at h10 (1.5 kW),
+and dinner shifted a full hour earlier to h17 (1.6 kW) instead of h18 —
+the direct end-to-end proof this was built for. `site-residual` stayed
+flat 0 in both buckets on all three VENs, consistent with R-20.
+
+635 → 645 Rust tests (10 new: 5 trapezoid_kw/appliance_noise_kw shape
+tests, 1 weekday/weekend-restriction test, 1 `sample_kw` bucket-picking
+test, 1 `learn_asset_heuristics` weekday/weekend-divergence test, 1
+`build_heuristic_forecasts` weekend-bucket test, 1 planner
+Saturday-vs-Tuesday integration test), 0 failed, confirmed clean across 3
+repeated full-suite runs (no R-21 HiGHS flake this round). `cargo fmt`,
+`clippy -D warnings`, `audit_file_sizes.py`, and architecture invariants
+all pass.
+

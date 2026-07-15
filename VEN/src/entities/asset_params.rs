@@ -138,6 +138,7 @@ impl PvParams {
 pub struct BaseLoadParams {
     pub id: String,
     pub baseline_kw: f64,
+    pub spikes: Vec<ApplianceSpikeParams>,
 }
 
 impl Default for BaseLoadParams {
@@ -145,8 +146,25 @@ impl Default for BaseLoadParams {
         Self {
             id: crate::ids::ASSET_BASE_LOAD.to_string(),
             baseline_kw: 0.5,
+            spikes: Vec::new(),
         }
     }
+}
+
+/// One simulated appliance draw bump (a trapezoidal pulse) — see
+/// `profile::schema::SpikeConfig` for the YAML shape this is parsed from.
+#[derive(Debug, Clone)]
+pub struct ApplianceSpikeParams {
+    pub center_hour: f64,
+    pub jitter_h: f64,
+    pub amplitude_kw: f64,
+    /// Total on-period width in hours (ramp-up + plateau + ramp-down).
+    pub duration_h: f64,
+    /// Linear transition width at each edge, in hours.
+    pub ramp_h: f64,
+    pub probability: f64,
+    /// `0`=Monday..`6`=Sunday; empty means every day.
+    pub weekdays: Vec<u8>,
 }
 
 // ── Dispatch enum ─────────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 pub mod assets;
+pub mod debug;
 pub mod events;
 pub mod hems;
 pub mod notifications;
@@ -47,6 +48,10 @@ pub fn build_router(ctx: AppCtx) -> Router {
         )
         .route("/sim/inject/reset", post(sim::post_sim_inject_reset))
         .route("/plan/trigger", post(sim::post_plan_trigger))
+        .route(
+            "/debug/heuristics/preload",
+            post(debug::post_heuristics_preload),
+        )
         .route("/trace/events", get(trace::get_trace_events))
         .route("/trace/history", get(trace::get_trace_history))
         .route("/metrics", get(system::get_metrics))

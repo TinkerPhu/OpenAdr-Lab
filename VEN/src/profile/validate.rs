@@ -66,6 +66,41 @@ impl Profile {
                         ));
                     }
                 }
+                AssetProfile::BaseLoad(c) => {
+                    for (i, spike) in c.spikes.iter().enumerate() {
+                        if !(0.0..=1.0).contains(&spike.probability) {
+                            errors.push(format!(
+                                "base_load.spikes[{i}].probability must be in [0.0, 1.0], got {}",
+                                spike.probability
+                            ));
+                        }
+                        if spike.duration_h <= 0.0 {
+                            errors.push(format!(
+                                "base_load.spikes[{i}].duration_h must be > 0.0, got {}",
+                                spike.duration_h
+                            ));
+                        }
+                        if spike.ramp_h < 0.0 || spike.ramp_h > spike.duration_h / 2.0 {
+                            errors.push(format!(
+                                "base_load.spikes[{i}].ramp_h must be in [0.0, duration_h/2], \
+                                 got ramp_h={} duration_h={}",
+                                spike.ramp_h, spike.duration_h
+                            ));
+                        }
+                        if spike.amplitude_kw < 0.0 {
+                            errors.push(format!(
+                                "base_load.spikes[{i}].amplitude_kw must be ≥ 0.0, got {}",
+                                spike.amplitude_kw
+                            ));
+                        }
+                        if spike.weekdays.iter().any(|&d| d > 6) {
+                            errors.push(format!(
+                                "base_load.spikes[{i}].weekdays entries must be 0-6 (Mon-Sun), got {:?}",
+                                spike.weekdays
+                            ));
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -203,6 +238,161 @@ temp_max_c: 23.0
         } else {
             panic!("expected AssetProfile::Heater");
         }
+    }
+
+    #[test]
+    fn base_load_yaml_round_trip_with_spikes() {
+        let yaml = r#"
+type: base_load
+id: base_load
+baseline_kw: 0.4
+spikes:
+  - center_hour: 8.0
+    amplitude_kw: 1.2
+    duration_h: 0.25
+    ramp_h: 0.03
+    probability: 1.0
+    weekdays: [0, 1, 2, 3, 4]
+  - center_hour: 18.0
+    amplitude_kw: 2.5
+    jitter_h: 0.3
+"#;
+        let asset: AssetProfile =
+            serde_yaml::from_str(yaml).expect("should parse base_load yaml with spikes");
+        let AssetProfile::BaseLoad(cfg) = asset else {
+            panic!("expected AssetProfile::BaseLoad");
+        };
+        assert_eq!(cfg.spikes.len(), 2);
+        assert!((cfg.spikes[0].center_hour - 8.0).abs() < 1e-9);
+        assert!((cfg.spikes[0].amplitude_kw - 1.2).abs() < 1e-9);
+        assert!((cfg.spikes[0].probability - 1.0).abs() < 1e-9);
+        assert_eq!(cfg.spikes[0].weekdays, vec![0, 1, 2, 3, 4]);
+        // Second spike sets jitter_h explicitly, omits duration_h/ramp_h/probability/weekdays.
+        assert!((cfg.spikes[1].jitter_h - 0.3).abs() < 1e-9);
+        assert!(
+            (cfg.spikes[1].duration_h - 0.5).abs() < 1e-9,
+            "duration_h should default to 0.5 when omitted"
+        );
+        assert!(
+            (cfg.spikes[1].ramp_h - 0.05).abs() < 1e-9,
+            "ramp_h should default to 0.05 when omitted"
+        );
+        assert!(
+            (cfg.spikes[1].probability - 1.0).abs() < 1e-9,
+            "probability should default to 1.0 when omitted"
+        );
+        assert!(
+            cfg.spikes[1].weekdays.is_empty(),
+            "weekdays should default to empty (every day) when omitted"
+        );
+    }
+
+    #[test]
+    fn base_load_no_spikes_key_defaults_to_empty() {
+        let yaml = "type: base_load\nid: base_load\nbaseline_kw: 0.5\n";
+        let asset: AssetProfile = serde_yaml::from_str(yaml).expect("should parse base_load yaml");
+        let AssetProfile::BaseLoad(cfg) = asset else {
+            panic!("expected AssetProfile::BaseLoad");
+        };
+        assert!(cfg.spikes.is_empty());
+    }
+
+    fn base_load_profile_with_spike(
+        spike_overrides: crate::profile::schema::SpikeConfig,
+    ) -> Profile {
+        Profile {
+            assets: vec![AssetProfile::BaseLoad(
+                crate::profile::schema::BaseLoadConfig {
+                    id: "base_load".into(),
+                    baseline_kw: 0.5,
+                    spikes: vec![spike_overrides],
+                },
+            )],
+            ..Profile::default()
+        }
+    }
+
+    fn valid_spike() -> crate::profile::schema::SpikeConfig {
+        crate::profile::schema::SpikeConfig {
+            center_hour: 8.0,
+            jitter_h: 0.2,
+            amplitude_kw: 1.2,
+            duration_h: 0.25,
+            ramp_h: 0.03,
+            probability: 1.0,
+            weekdays: vec![],
+        }
+    }
+
+    #[test]
+    fn validate_rejects_spike_probability_out_of_range() {
+        let profile = base_load_profile_with_spike(crate::profile::schema::SpikeConfig {
+            probability: 1.5,
+            ..valid_spike()
+        });
+        let result = profile.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("probability")));
+    }
+
+    #[test]
+    fn validate_rejects_spike_non_positive_duration_h() {
+        let profile = base_load_profile_with_spike(crate::profile::schema::SpikeConfig {
+            duration_h: 0.0,
+            ..valid_spike()
+        });
+        let result = profile.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("duration_h")));
+    }
+
+    #[test]
+    fn validate_rejects_ramp_h_exceeding_half_duration() {
+        let profile = base_load_profile_with_spike(crate::profile::schema::SpikeConfig {
+            duration_h: 0.5,
+            ramp_h: 0.4, // > duration_h/2 = 0.25
+            ..valid_spike()
+        });
+        let result = profile.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("ramp_h")));
+    }
+
+    #[test]
+    fn validate_rejects_negative_spike_amplitude() {
+        let profile = base_load_profile_with_spike(crate::profile::schema::SpikeConfig {
+            amplitude_kw: -1.0,
+            ..valid_spike()
+        });
+        let result = profile.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("amplitude_kw")));
+    }
+
+    #[test]
+    fn validate_rejects_invalid_weekday_entry() {
+        let profile = base_load_profile_with_spike(crate::profile::schema::SpikeConfig {
+            weekdays: vec![0, 7], // 7 is out of range (0-6)
+            ..valid_spike()
+        });
+        let result = profile.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("weekdays")));
+    }
+
+    #[test]
+    fn validate_accepts_valid_spike_list() {
+        let profile = base_load_profile_with_spike(crate::profile::schema::SpikeConfig {
+            probability: 0.8,
+            weekdays: vec![5, 6],
+            ..valid_spike()
+        });
+        assert!(profile.validate().is_ok());
     }
 
     #[tokio::test]

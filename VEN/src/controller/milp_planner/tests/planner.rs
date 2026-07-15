@@ -42,6 +42,7 @@ fn run_planner_no_assets_covers_base_load() {
         assets: vec![AssetProfile::BaseLoad(BaseLoadConfig {
             id: "base_load".into(),
             baseline_kw: 1.0,
+            spikes: vec![],
         })],
         simulator: SimulatorConfig,
         planner: PlannerConfig {
@@ -86,6 +87,193 @@ fn run_planner_no_assets_covers_base_load() {
         assert!(slot.bat_discharge_kw < 1e-3);
         assert!(!slot.allocations.iter().any(|a| a.asset_id == "ev"));
     }
+}
+
+#[test]
+fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
+    // WP5.2 (BL-14) planner-consumption test: when a learned heuristic
+    // exists for "base_load", the resulting plan's per-slot baseline_kw
+    // must vary with hour-of-day instead of repeating the flat static
+    // scalar — this is the literal fix for the Controller tab's
+    // previously-flat future-horizon base_load line.
+    let now = fixed_now(); // 2026-04-11 06:00:00 UTC
+    let profile = Profile {
+        assets: vec![AssetProfile::BaseLoad(BaseLoadConfig {
+            id: "base_load".into(),
+            baseline_kw: 1.0,
+            spikes: vec![],
+        })],
+        simulator: SimulatorConfig,
+        planner: PlannerConfig {
+            plan_step_s: 1800,
+            plan_horizon_h: 2,
+            plan_zones: vec![crate::entities::plan::PlanZone {
+                step_s: 1800,
+                slots: 4,
+            }],
+            ..PlannerConfig::default()
+        },
+        grid: GridConfig {
+            max_import_kw: 25.0,
+            max_export_kw: 10.0,
+        },
+        packets: vec![],
+    };
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+
+    // daytime_profile_kw[h] = h as f64 kW — slots at 06:00/06:30/07:00/07:30
+    // UTC sample hours 6,6,7,7, so the expected per-slot baseline is
+    // 6.0, 6.0, 7.0, 7.0 kW: not constant, and traceable to a known formula.
+    // Same curve in both weekday/weekend buckets — this test only cares
+    // about hour-of-day variation, not the weekday/weekend split itself.
+    let profile_by_hour: Vec<f64> = (0..24).map(|h| h as f64).collect();
+    let mut heuristics = std::collections::HashMap::new();
+    heuristics.insert(
+        "base_load".to_string(),
+        crate::entities::design_vocabulary::AssetHeuristics {
+            asset_id: "base_load".to_string(),
+            daytime_profile_kw: [profile_by_hour.clone(), profile_by_hour],
+            seasonal_factor: 1.0,
+            last_updated: Some(now),
+        },
+    );
+
+    let plan = super::super::run_planner(
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &[],
+        &[],
+        &profile.planner,
+        profile.grid.max_import_kw,
+        profile.grid.max_export_kw,
+        &profile.assets,
+        now,
+        crate::entities::asset::PlanTrigger::Periodic,
+        None,
+        None,
+        &[],
+        None,
+        None,
+        None,
+        &heuristics,
+    );
+
+    assert_eq!(plan.slots.len(), 4);
+    let baselines: Vec<f64> = plan.slots.iter().map(|s| s.baseline_kw).collect();
+    assert!(
+        (baselines[0] - 6.0).abs() < 1e-6,
+        "slot 0 (06:00) expected 6.0 kW, got {baselines:?}"
+    );
+    assert!(
+        (baselines[2] - 7.0).abs() < 1e-6,
+        "slot 2 (07:00) expected 7.0 kW, got {baselines:?}"
+    );
+    assert!(
+        (baselines[0] - baselines[2]).abs() > 0.5,
+        "baseline_kw must vary across slots when a heuristic is supplied, got {baselines:?}"
+    );
+}
+
+#[test]
+fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
+    // WP D2 (weekday/weekend split): a heuristic with distinct weekday and
+    // weekend buckets must produce different plan.slots[t].baseline_kw for
+    // the same hour-of-day depending on which weekday the plan is for —
+    // this is the direct end-to-end proof of the 2-bucket restructure.
+    use chrono::TimeZone;
+    // 2023-01-03 was a Tuesday, 2023-01-07 a Saturday.
+    let tuesday = Utc.with_ymd_and_hms(2023, 1, 3, 6, 0, 0).unwrap();
+    let saturday = Utc.with_ymd_and_hms(2023, 1, 7, 6, 0, 0).unwrap();
+
+    let profile = Profile {
+        assets: vec![AssetProfile::BaseLoad(BaseLoadConfig {
+            id: "base_load".into(),
+            baseline_kw: 1.0,
+            spikes: vec![],
+        })],
+        simulator: SimulatorConfig,
+        planner: PlannerConfig {
+            plan_step_s: 1800,
+            plan_horizon_h: 2,
+            plan_zones: vec![crate::entities::plan::PlanZone {
+                step_s: 1800,
+                slots: 4,
+            }],
+            ..PlannerConfig::default()
+        },
+        grid: GridConfig {
+            max_import_kw: 25.0,
+            max_export_kw: 10.0,
+        },
+        packets: vec![],
+    };
+
+    let mut weekday_profile = vec![0.0; 24];
+    weekday_profile[6] = 6.0;
+    let mut weekend_profile = vec![0.0; 24];
+    weekend_profile[6] = 11.0;
+    let mut heuristics = std::collections::HashMap::new();
+    heuristics.insert(
+        "base_load".to_string(),
+        crate::entities::design_vocabulary::AssetHeuristics {
+            asset_id: "base_load".to_string(),
+            daytime_profile_kw: [weekday_profile, weekend_profile],
+            seasonal_factor: 1.0,
+            last_updated: Some(tuesday),
+        },
+    );
+
+    let baseline_kw_for = |now: DateTime<Utc>| {
+        let sim = make_snap_from_profile(&profile);
+        let tariffs = TariffTimeSeries::from_snapshots(&[TariffSnapshot {
+            interval_start: now - Duration::hours(1),
+            interval_end: now + Duration::hours(25),
+            import_tariff_eur_kwh: Some(0.25),
+            export_tariff_eur_kwh: Some(0.08),
+            co2_g_kwh: Some(300.0),
+        }]);
+        let plan = super::super::run_planner(
+            build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+            &sim,
+            &tariffs,
+            &no_capacity(),
+            &[],
+            &[],
+            &profile.planner,
+            profile.grid.max_import_kw,
+            profile.grid.max_export_kw,
+            &profile.assets,
+            now,
+            crate::entities::asset::PlanTrigger::Periodic,
+            None,
+            None,
+            &[],
+            None,
+            None,
+            None,
+            &heuristics,
+        );
+        plan.slots[0].baseline_kw
+    };
+
+    let tuesday_baseline = baseline_kw_for(tuesday);
+    let saturday_baseline = baseline_kw_for(saturday);
+
+    assert!(
+        (tuesday_baseline - 6.0).abs() < 1e-6,
+        "Tuesday 06:00 should sample the weekday bucket, got {tuesday_baseline}"
+    );
+    assert!(
+        (saturday_baseline - 11.0).abs() < 1e-6,
+        "Saturday 06:00 should sample the weekend bucket, got {saturday_baseline}"
+    );
+    assert!(
+        (tuesday_baseline - saturday_baseline).abs() > 1.0,
+        "same hour-of-day must differ between a weekday and weekend plan"
+    );
 }
 
 #[test]
@@ -393,6 +581,7 @@ fn make_profile_n48() -> Profile {
             AssetProfile::BaseLoad(BaseLoadConfig {
                 id: "base_load".into(),
                 baseline_kw: 0.5,
+                spikes: vec![],
             }),
         ],
         simulator: SimulatorConfig,
@@ -682,6 +871,7 @@ fn alert_window_clamps_import_cap_for_overlapping_slots_only() {
         &[],
         None,
         None,
+        &std::collections::HashMap::new(),
     );
 
     assert_eq!(inputs.p_imp_max_cont_kw[0], 0.0, "slot 0 inside alert");
@@ -734,6 +924,7 @@ fn run_planner_alert_window_yields_zero_import_cap_slots_and_solves() {
         None,
         None,
         None,
+        &std::collections::HashMap::new(),
     );
 
     assert_eq!(plan.slots.len(), 4);
@@ -794,6 +985,7 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
         &[],
         None,
         None,
+        &std::collections::HashMap::new(),
     );
 
     // L1: 50% of contractual 25 kW (default simple_level1_import_cap_pct).
@@ -829,6 +1021,7 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
         &[],
         None,
         None,
+        &std::collections::HashMap::new(),
     );
     assert_eq!(
         inputs2.p_imp_max_cont_kw[0], 0.0,
