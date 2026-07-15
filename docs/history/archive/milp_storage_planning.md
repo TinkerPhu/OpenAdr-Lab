@@ -1,3 +1,8 @@
+> **ARCHIVED 2026-07-16** — design analysis for the storage/3-tier MILP work, now
+> implemented and merged. Durable model content lives in
+> `docs/architecture/ven_milp_planner.md` (§7 c_terminal, §2 plan grid) and
+> `docs/architecture/heater_tank_milp_planning_model.md`. Kept as historical record.
+
 # MILP Planner: Generic Storage Optimisation and Plan Stability
 
 > **Origin:** Investigation started with the ven-2 hot water tank running near T_min.

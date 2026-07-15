@@ -1,33 +1,10 @@
 # VEN Backend — Refactoring Backlog
 
-> Code quality review conducted 2026-04-28. Updated 2026-05-25 to reflect resolved items.
-> Scope: `VEN/src/` (Rust backend). UI and BFF not yet reviewed.
+> Detailed diagnostics for the open refactoring items. Scope: `VEN/src/` (Rust backend).
 >
 > Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (large, deferred)
 >
 > Authoritative status register: `docs/reference/TECHNICAL_DEBTS.md`
-
----
-
-## Summary Map
-
-```
-VEN BACKEND — FRAGMENTATION MAP (as of 2026-05-25)
-════════════════════════════════════════════════════════════════
-
-  AssetConfig enum
-  ┌──────────────────────────────────────────────────────┐
-  │  ~9 methods × 5 variants = ~45 manual match arms     │
-  │  Every new asset type: +9 match blocks               │
-  │  Every new method: +5 match arms                     │
-  └──────────────────────────────────────────────────────┘
-
-  ────────────────────────────────────────────────────────────
-
-  "battery","heater","ev","pv" string literals in dispatcher.rs
-  ↑ each asset's asset_id() method is the authoritative source,
-    but dispatcher.rs still duplicates them inline
-```
 
 ---
 
@@ -60,10 +37,7 @@ ID is the `asset_id()` method in the respective asset file (e.g. `assets/battery
 "base_load"— dispatcher.rs:338, 341 (approx)
 ```
 
-The `"boiler"` alias issue (previously in `routes/hems.rs`) is resolved — it now appears
-only in a doc comment, not in runtime matching logic.
-
-**Status:** Constants already created in `VEN/src/ids.rs` (`ASSET_EV`, `ASSET_BATTERY`, etc.).
+**Status:** Constants exist in `VEN/src/ids.rs` (`ASSET_EV`, `ASSET_BATTERY`, etc.).
 **Remaining work:** Replace the inline string literals in `dispatcher.rs` with these constants and have each asset's `asset_id()` return the constant rather than a string literal.
 
 ---

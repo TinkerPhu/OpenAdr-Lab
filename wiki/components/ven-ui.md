@@ -47,11 +47,11 @@ exact request time — deliberately *not* snapped to the plan grid
 `GET /timeline/:asset_id` and `/timeline/all` (`VEN/src/routes/timeline.rs`,
 `VEN/src/controller/timeline.rs`) serve the chart data. The **future/forecast segment**
 returns one real point per real plan slot at its native per-zone step size (5/10/15 min,
-`build_asset_timeline`) — it is no longer resampled onto a fixed-width grid with
-time-weighted averaging. That resampling used to blend real slot values into synthetic
-buckets and desynchronise the displayed timestamp from any real planning decision
-whenever the bucket width didn't line up with a zone's step size (routine in the
-expanded 48 h view). The **history segment** is still grid-resampled at a fixed
+`build_asset_timeline`) — deliberately not resampled onto a fixed-width grid:
+fixed-bucket resampling with time-weighted averaging would blend real slot values into
+synthetic buckets and desynchronise the displayed timestamp from any real planning
+decision whenever the bucket width didn't line up with a zone's step size (routine in
+the expanded 48 h view). The **history segment** is grid-resampled at a fixed
 resolution, since it has no natural "slot" structure to preserve. The frontend needed no
 change: recharts' existing tooltip snap already reads real `ts` values from the data
 array, so it now snaps to real plan-slot boundaries instead of fake grid buckets.
