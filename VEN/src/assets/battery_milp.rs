@@ -149,7 +149,7 @@ impl BatteryMilpContext {
 
 impl crate::controller::milp_planner::AssetMilpContext for BatteryMilpContext {
     fn asset_id(&self) -> &str {
-        "battery"
+        crate::ids::ASSET_BATTERY
     }
 
     fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {

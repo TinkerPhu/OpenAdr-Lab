@@ -326,7 +326,7 @@ impl HeaterMilpContext {
 
 impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
     fn asset_id(&self) -> &str {
-        "heater"
+        crate::ids::ASSET_HEATER
     }
 
     fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {
