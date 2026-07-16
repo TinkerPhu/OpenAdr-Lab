@@ -1,7 +1,9 @@
 # Total Project Review Plan
 
-Status: **review complete (Parts A + B done 2026-07-15) — awaiting owner
-decisions on the B12 reduction proposal and fix-wave priorities; Part C open**
+Status: **DONE (2026-07-16).** All parts complete: review (A+B), consolidation
+(C1), doc fixes (C2), code fixes (C3), close-out (C4). Merged to main at
+1e7e807. Parked findings live in TECHNICAL_DEBTS.md R-23–R-36, the
+refactoring backlog, and BACKLOG.md.
 Scope: whole repository — code (VEN, VTN, UIs, scripts, CI) and documentation
 (docs/**, root-level docs, wiki/**).
 Execution model: one step per session (or a few small ones), findings recorded
@@ -444,7 +446,22 @@ the two milp_storage docs moved from "relocate now, merge later" to
   Original text: `blocker`/`major` code findings with
   Small/Trivial effort, test-first, one `fix/` branch per theme. Larger items stay
   in the refactoring backlog for their own openspec features.
-- [ ] **C4 Close-out.** Re-run baseline (A0.1–A0.3), journal entry in
+- [x] **C4 Close-out.** *Done 2026-07-16 on merged main (1e7e807).*
+  Baseline re-run all green on the final code: Pi4 E2E 262 scenarios /
+  0 failed, resilience 5/5, VEN Rust 646/646, BFF 22/22, VEN UI 350/350,
+  VTN UI 64/64, fmt + strict clippy clean (both crates), eslint 0 errors,
+  file-size audit passes, all four architecture invariant greps empty,
+  cargo/npm audits 0 findings (single documented lockfile-only exception).
+  Journal entry appended (project_journal.md "Total Project Review");
+  5 learnings added to KEY_LEARNINGS.md (bundle-vs-unit-test blindness,
+  finding staleness, lockfile-vs-build-graph audits, vitest-4 constructor
+  mocks, host memory budget). DOC_AUDIT.md was already deleted in C2 (B12).
+  E2E surfaced one real C3 regression pre-merge: vite 8/rolldown broke the
+  VTN UI production bundle → pinned vite ^7 (commit 1e7e807).
+  **This plan is complete.** Remaining parked work lives in
+  TECHNICAL_DEBTS.md (R-23–R-36), the refactoring backlog (R-03, R-08),
+  and BACKLOG.md (GB-11, BL-24) — see the findings log below for context.
+  Original text: Re-run baseline (A0.1–A0.3), journal entry in
   `docs/history/project_journal.md`, new learnings into KEY_LEARNINGS.md,
   retire/merge `docs/DOC_AUDIT.md` if decided in B2, mark this plan done.
 
