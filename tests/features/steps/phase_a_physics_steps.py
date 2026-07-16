@@ -73,9 +73,30 @@ def step_given_inject_ev_soc(context, soc):
 
 @given("I inject heater_temp_c {temp:f} via sim inject")
 def step_given_inject_heater_temp_c(context, temp):
-    """One-shot reset of the heater's current temperature via POST /sim/inject."""
+    """One-shot reset of the heater's current temperature via POST /sim/inject.
+
+    Blocks until GET /sim reflects the injected value: the inject is applied by
+    the next 1 s sim tick, and a planner cycle that clones the sim inside that
+    window would otherwise solve against the pre-inject tank state — making a
+    subsequent "wait for recomputed plan" step accept a plan built without the
+    injection (observed as a load-dependent flake on the near-T_max scenario).
+    """
     r = ven_post("/sim/inject", json={"heater_temp_c": temp})
     r.raise_for_status()
+
+    def heater_temp():
+        resp = ven_get("/sim")
+        if not resp.ok:
+            return None
+        return (resp.json().get("assets") or {}).get("heater", {}).get("temp_c")
+
+    poll_until(
+        heater_temp,
+        lambda t: t is not None and abs(t - temp) < 0.2,
+        timeout=15,
+        interval=0.5,
+        description=f"sim heater temp_c reflects injected {temp}",
+    )
 
 
 @given("I inject pv irradiance {irradiance:f} via sim inject")
