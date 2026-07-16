@@ -4,7 +4,7 @@ type: component
 created: 2026-07-04
 updated: 2026-07-11
 synced_commit: b1aba12
-sources: [docs/architecture/VEN_ARCHITECTURE.md, VEN/src/vtn.rs, VEN/src/controller/openadr_interface.rs, VEN/src/controller/reporter.rs, VEN/src/tasks/poll_events.rs, VEN/src/entities/capacity.rs, VEN/src/state.rs, VEN/src/services/obligation.rs]
+sources: [docs/architecture/VEN_ARCHITECTURE.md, VEN/src/vtn.rs, VEN/src/controller/openadr_interface.rs, VEN/src/controller/reporter.rs, VEN/src/tasks/poll_events.rs, VEN/src/entities/capacity.rs, VEN/src/state/mod.rs, VEN/src/services/obligation.rs]
 tags: [openadr, ven, translation, polling]
 ---
 

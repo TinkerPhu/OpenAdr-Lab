@@ -2,8 +2,8 @@
 title: VEN Hexagonal Architecture
 type: architecture
 created: 2026-07-04
-updated: 2026-07-10
-synced_commit: 88e0e25
+updated: 2026-07-16
+synced_commit: f08e469
 sources: [.claude/CLAUDE.md, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/module_dependency_graph.md, VEN/src/]
 tags: [architecture, hexagonal, ports, ven]
 ---
@@ -46,16 +46,24 @@ pre-existing simulator/VTN mocks) — `tasks/planning.rs`'s planning loop calls
 From `.claude/CLAUDE.md`: no `use crate::profile` in `entities/`, `controller/`, `routes/`
 (profile values arrive as typed parameter structs); no `use crate::assets::` inside
 `milp_planner/` or `entities/`; no `serde_json::Value` leaking out of `vtn.rs`.
-All four greps still pass (the raw-report pass-through `VtnPort::fetch_reports_raw`
-→ `PollingState.reports` is a deliberate, commented exception for `GET /reports`).
+All four greps pass (the raw-report pass-through `VtnPort::fetch_reports_raw`
+→ `PollingState.reports` is a deliberate, commented exception for `GET /reports`,
+tracked as R-10).
 
-File-size caps: 500 lines in `VEN/src/`, 200 in `tasks/`. **These are currently
-violated** and the violation count is growing, not shrinking, as normal feature work
-lands (e.g. `routes/timeline.rs` and `controller/timeline.rs` both grew further past the
-cap during the 2026-07 timeline-forecast fix) — current register with per-file
-complexity/risk: `docs/reference/TECHNICAL_DEBTS.md`. `tasks/planning.rs` is 398 lines
-against the 200 cap for `tasks/`. Split-or-amend options in [[ven-code-vs-docs-audit]];
-R4 in `docs/plans/review_items_resolution_strategy.md` is the open decision item.
+Two placements enforce the ring boundaries around planning and state:
+`entities/asset_ledger.rs` holds the per-asset energy/cost/CO₂ ledger entry (a
+domain type; `controller/monitor.rs` consumes it without reaching into
+`state/`), and `simulator/plan_context.rs` holds the plan-cycle helpers that
+need the concrete `SimState` (sim-snapshot clone, pending-PV-inject patch,
+`build_asset_contexts`) — so `services/` touches the simulator only through
+`SimulatorPort` ([[milp-planner]]).
+
+File-size caps: 500 **production** lines in `VEN/src/`, 200 in `tasks/` —
+non-blank lines excluding `#[cfg(test)]` blocks and test-only paths, exactly
+what `scripts/audit_file_sizes.py` measures (allowlisted exception:
+`assets/mod.rs`, whose real fix is the enum→trait refactor, R-08). The audit
+passes repo-wide; `tasks/planning.rs` sits near its cap and is the first
+candidate for a split when it next grows.
 
 The rationale for this ring shape is in [[hexagonal-refactoring]]; the two-speed runtime
 behaviour of the rings is described in [[hems-planning]]. `.claude/CLAUDE.md`
