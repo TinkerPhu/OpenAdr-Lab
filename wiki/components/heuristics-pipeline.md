@@ -3,7 +3,7 @@ title: Heuristics Pipeline (learned baselines)
 type: component
 created: 2026-07-16
 updated: 2026-07-16
-synced_commit: f08e469
+synced_commit: ddeeb68
 sources: [VEN/src/services/heuristics.rs, VEN/src/tasks/heuristics_job/mod.rs, VEN/src/controller/residual.rs, VEN/src/entities/design_vocabulary.rs, VEN/src/services/forecast.rs, VEN/src/controller/milp_planner/inputs.rs, VEN/src/routes/debug.rs, VEN/src/assets/base_load.rs, docs/history/project_journal.md]
 tags: [heuristics, forecasting, baseline, phase-5]
 ---
@@ -26,10 +26,12 @@ runtimes) are inserted, so a running shiftable load isn't misread as
 publish path and the history sampler's own independent snapshot — so its
 history accumulates in `tick_samples`.
 
-In pure simulation the residual is structurally 0: the simulator *derives* the
-grid meter as the sum of its modelled assets, so the two terms can never
-disagree (recorded as R-20; the mechanism exists for when a real meter feed
-arrives).
+The simulator gives the residual a real signal via the profile knob
+`simulator.unmodelled_load_kw`: a deterministic diurnal load (zero at 06:00,
+peak at 18:00, `simulator/mod.rs::unmodelled_load_at`) added to the *derived
+grid meter* but to no asset — exactly the gap `site-residual` reports. Default
+0.0, in which case the meter is the exact sum of the modelled assets and the
+residual reads 0.
 
 ## The phenomenon: configured appliance noise (`assets/base_load.rs`)
 

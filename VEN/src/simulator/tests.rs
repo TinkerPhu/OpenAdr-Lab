@@ -321,3 +321,82 @@ mod schema_snapshot_tests {
         );
     }
 }
+
+/// R-20: unmodelled diurnal load on the derived grid meter — gives
+/// `site-residual` a non-zero, learnable signal in simulation.
+mod unmodelled_load_tests {
+    use super::super::*;
+    use crate::entities::asset_params::{AssetParams, BaseLoadParams};
+    use chrono::TimeZone;
+
+    fn base_only(baseline_kw: f64) -> SimState {
+        SimState::from_params(&[AssetParams::BaseLoad(BaseLoadParams {
+            id: crate::ids::ASSET_BASE_LOAD.to_string(),
+            baseline_kw,
+            spikes: vec![],
+        })])
+    }
+
+    fn at(h: u32, m: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 7, 16, h, m, 0).unwrap()
+    }
+
+    fn run_tick(sim: &mut SimState, now: DateTime<Utc>) {
+        sim.tick(
+            30.0,
+            HashMap::new(),
+            now,
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            None,
+            0.1,
+            None,
+            None,
+        );
+    }
+
+    #[test]
+    fn unmodelled_load_at_is_zero_at_6h_and_peak_at_18h() {
+        assert!(unmodelled_load_at(at(6, 0), 1.2).abs() < 1e-9);
+        assert!((unmodelled_load_at(at(18, 0), 1.2) - 1.2).abs() < 1e-9);
+        assert_eq!(unmodelled_load_at(at(18, 0), 0.0), 0.0, "0 peak disables");
+        let noon = unmodelled_load_at(at(12, 0), 1.2);
+        assert!(noon > 0.0 && noon < 1.2, "noon is between the extremes");
+    }
+
+    #[test]
+    fn tick_meter_includes_unmodelled_load_making_residual_visible() {
+        let mut sim = base_only(0.5);
+        sim.unmodelled_load_kw = 2.0;
+        run_tick(&mut sim, at(18, 0));
+
+        let asset_sum_kw: f64 = sim.assets.iter().map(|e| e.last_power_kw).sum();
+        let meter_kw = sim.grid.net_power_w / 1000.0;
+        let residual_kw = meter_kw - asset_sum_kw;
+        assert!(
+            (residual_kw - 2.0).abs() < 1e-9,
+            "at 18:00 the meter must exceed the asset sum by the full peak, got {residual_kw}"
+        );
+
+        // And the snapshot-level residual (what the heuristics learn from)
+        // sees the same signal.
+        let snap = sim.to_sim_snapshot();
+        let snap_residual = crate::controller::residual::compute_site_residual_kw(&snap);
+        assert!((snap_residual - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tick_meter_equals_asset_sum_when_disabled() {
+        let mut sim = base_only(0.5);
+        run_tick(&mut sim, at(18, 0));
+        let asset_sum_kw: f64 = sim.assets.iter().map(|e| e.last_power_kw).sum();
+        let meter_kw = sim.grid.net_power_w / 1000.0;
+        assert!(
+            (meter_kw - asset_sum_kw).abs() < 1e-9,
+            "default 0.0 peak must not change the derived meter"
+        );
+    }
+}

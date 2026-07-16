@@ -60,6 +60,7 @@ fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Ve
         tick_s: profile.simulator.tick_s,
         persist_every_s: profile.simulator.persist_every_s,
         report_interval_s: profile.simulator.report_interval_s,
+        unmodelled_load_kw: profile.simulator.unmodelled_load_kw,
     };
     let planner_params = PlannerParams {
         plan_step_s: profile.planner.effective_step_s(),
