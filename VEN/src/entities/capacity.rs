@@ -138,6 +138,9 @@ pub struct OadrReportObligation {
     pub interval_duration_s: u64,
     pub fulfilled: bool,
     pub created_at: DateTime<Utc>,
+    /// From `reportDescriptor.historical` (spec default true): true = report
+    /// past data; false = the VTN asked for a forecast (R-15).
+    pub historical: bool,
 }
 
 impl OadrReportObligation {

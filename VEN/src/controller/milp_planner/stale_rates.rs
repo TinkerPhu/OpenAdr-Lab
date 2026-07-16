@@ -36,7 +36,7 @@ pub(crate) fn apply_stale_rate_policy(
     policy: &StaleRatePolicy,
     safe_pctl: f64,
     tariffs: &TariffTimeSeries,
-    slot_starts: &[DateTime<Utc>],
+    slot_bounds: &[(DateTime<Utc>, DateTime<Utc>)],
     default_rate_eur_kwh: f64,
 ) -> StaleRateOutcome {
     let known: Vec<f64> = tariffs
@@ -59,19 +59,23 @@ pub(crate) fn apply_stale_rate_policy(
         StaleRatePolicy::DeferToFlexible => sorted.last().copied().unwrap_or(default_rate_eur_kwh),
     };
 
-    let mut c_imp = Vec::with_capacity(slot_starts.len());
-    let mut rate_stale = Vec::with_capacity(slot_starts.len());
-    for &slot_t in slot_starts {
+    let mut c_imp = Vec::with_capacity(slot_bounds.len());
+    let mut rate_stale = Vec::with_capacity(slot_bounds.len());
+    for &(slot_start, slot_end) in slot_bounds {
         let stale = tariffs
             .import_coverage_end
-            .is_none_or(|cov_end| slot_t >= cov_end);
+            .is_none_or(|cov_end| slot_start >= cov_end);
         rate_stale.push(stale);
         c_imp.push(if stale {
             stale_fill
         } else {
+            // R-16 (BL-11): price the slot at its time-weighted mean so a slot
+            // straddling a tariff boundary blends both rates instead of taking
+            // the slot-start rate for its whole width.
             tariffs
                 .import_eur_kwh
-                .interpolate_at(slot_t)
+                .time_weighted_mean(slot_start, slot_end)
+                .or_else(|| tariffs.import_eur_kwh.interpolate_at(slot_start))
                 .unwrap_or(default_rate_eur_kwh)
         });
     }
