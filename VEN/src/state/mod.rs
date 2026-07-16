@@ -1,6 +1,7 @@
 use crate::controller::trace::ControllerTrace;
 use crate::controller::vtn_port::{OadrEvent, OadrProgram};
 use crate::controller::SimSnapshot;
+use crate::entities::asset_ledger::AssetLedgerEntry;
 use crate::entities::capacity::{
     AlertWindow, DispatchWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
 };
@@ -22,27 +23,6 @@ use tokio::sync::RwLock;
 
 mod heuristics;
 mod obligations;
-
-/// Per-asset cumulative energy/cost/CO₂ since VEN startup.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AssetLedgerEntry {
-    pub asset_id: String,
-    pub energy_kwh: f64,
-    pub cost_eur: f64,
-    pub co2_g: f64,
-    pub updated_at: Option<DateTime<Utc>>,
-    pub started_at: Option<DateTime<Utc>>,
-}
-
-impl AssetLedgerEntry {
-    pub fn new(asset_id: &str) -> Self {
-        Self {
-            asset_id: asset_id.to_string(),
-            started_at: Some(Utc::now()),
-            ..Default::default()
-        }
-    }
-}
 
 /// User-controllable settings for the opportunistic EV charging overlay.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

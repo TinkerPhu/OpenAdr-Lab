@@ -1,8 +1,8 @@
 /// SimulatorPort trait — the boundary between controller logic and the physics simulator.
 ///
-/// All 6 named controller functions (build_setpoints, apply_surplus_ev_overlay,
-/// apply_battery_correction_overlay, apply_deviation_absorption, record_tick,
-/// compute_envelope) accept `&SimSnapshot` or `&dyn SimulatorPort` rather than `&SimState`.
+/// All 5 named controller functions (build_setpoints, apply_surplus_ev_overlay,
+/// apply_battery_correction_overlay, record_tick, compute_envelope) accept
+/// `&SimSnapshot` or `&dyn SimulatorPort` rather than `&SimState`.
 /// This allows unit testing without a running simulator.
 use std::collections::HashMap;
 

@@ -1,5 +1,6 @@
 pub mod energy;
 pub mod persist;
+pub mod plan_context;
 pub mod power_model;
 mod pv_preview;
 
