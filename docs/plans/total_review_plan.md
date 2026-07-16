@@ -420,7 +420,28 @@ the two milp_storage docs moved from "relocate now, merge later" to
   deferred until after C3 (code changes would immediately re-stale it).
   Original text: Apply approved doc rewrites in small commits
   (one branch, e.g. `fix/doc-review-rewrites`); run `wiki-lint` after wiki edits.
-- [ ] **C3 Fix wave — code quick fixes.** `blocker`/`major` code findings with
+- [x] **C3 Fix wave — code quick fixes.** *Done 2026-07-16 on `fix/review-c3-code`
+  (local gates; Pi4 E2E/resilience still to run before merge).* Executed:
+  strict clippy verified clean on VEN **and** BFF (the 28-lint blocker was resolved
+  by intervening main merges — no fix needed); `cargo update` both crates →
+  cargo audit: VEN 0 vulns/0 warnings (was 12), BFF 1 = RUSTSEC-2023-0071 `rsa`
+  via never-compiled sqlx-mysql (lockfile-only false positive, documented in
+  BACKLOG); vite 8/vitest 4 toolchain upgrade + `npm audit fix` → 0 npm vulns in
+  both UIs (was 17/16), one vitest-4 mock fix per UI (constructor mocks need
+  `function`, not arrow); BACKLOG "Dependency Vulnerabilities" section rewritten
+  to 2026-07-16 state; `AssetLedgerEntry` moved state→`entities/asset_ledger.rs`
+  with injectable-clock `new(asset_id, now)` (fixes monitor.rs ring violation);
+  SimulatorPort bypass fixed — `clone_sim_snapshot`/`apply_pending_pv_inject`/
+  `build_asset_contexts` moved services→`simulator/plan_context.rs` (infra);
+  simulator_port.rs doc comment corrected (5 fns, phantom
+  `apply_deviation_absorption` removed); 13 new BFF unit tests (TtlCache expiry,
+  AppError→502 mapping, VtnClient 200/500/401-retry/health via local axum stub);
+  StaleRatePolicy deletion SKIPPED (decision 5 obsolete — implemented as WP4.4).
+  tasks/planning.rs split not needed — within the 200-line cap after import
+  cleanup; file-size audit passes. Architecture invariant greps all clean.
+  Gates: fmt+clippy strict 0 warnings (both crates), VEN 646/646, BFF 22/22,
+  VEN/ui 350/350, VTN/ui 64/64, both UI builds + eslint clean.
+  Original text: `blocker`/`major` code findings with
   Small/Trivial effort, test-first, one `fix/` branch per theme. Larger items stay
   in the refactoring backlog for their own openspec features.
 - [ ] **C4 Close-out.** Re-run baseline (A0.1–A0.3), journal entry in
