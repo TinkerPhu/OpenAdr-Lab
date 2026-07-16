@@ -9,6 +9,9 @@ use crate::entities::asset_params::AssetParams;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::services::planning::PlanCycleInputs;
+use crate::simulator::plan_context::{
+    apply_pending_pv_inject, build_asset_contexts, clone_sim_snapshot,
+};
 use crate::simulator::SimState;
 use crate::state::AppState;
 
@@ -80,13 +83,11 @@ pub(crate) fn spawn_planning(
             // Clone SimState snapshot so the Mutex is released immediately.
             // MILP solving takes 18-60s on Pi4 ARM64; holding the lock would
             // block sim ticks and /capability reads for the entire duration.
-            let mut sim_snap =
-                crate::services::planning::clone_sim_snapshot(&sim, &trigger_reason).await;
+            let mut sim_snap = clone_sim_snapshot(&sim, &trigger_reason).await;
 
             // Patch the clone when pv_irradiance inject is pending and the tick hasn't
-            // applied it yet. When the tick runs first, the clone already has the correct
-            // offset and this is a no-op (inject_snap.pv_irradiance is None).
-            crate::services::planning::apply_pending_pv_inject(&mut sim_snap, &inject_snap, now);
+            // applied it yet (no-op when the tick ran first — see fn docs).
+            apply_pending_pv_inject(&mut sim_snap, &inject_snap, now);
 
             // ── Emit solving_started ──────────────────────────────────────
             let num_slots = planner.plan_horizon_h as usize * 3600 / planner.plan_step_s as usize;
@@ -125,7 +126,7 @@ pub(crate) fn spawn_planning(
 
             // Build per-asset MILP contexts from live simulator state.
             // This happens before spawn_blocking so asset states are captured at this instant.
-            let asset_contexts = crate::services::planning::build_asset_contexts(
+            let asset_contexts = build_asset_contexts(
                 &sim_snap,
                 n_slots,
                 &cum_s,

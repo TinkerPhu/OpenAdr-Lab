@@ -19,10 +19,11 @@ use tracing::warn;
 use accumulator::HistorySampler;
 
 use crate::controller::{HistoryPort, SimulatorPort};
+use crate::entities::asset_ledger::AssetLedgerEntry;
 use crate::entities::history::{GridSample, LedgerPeriod, TickSample};
 use crate::entities::DomainError;
 use crate::simulator::SimState;
-use crate::state::{AppState, AssetLedgerEntry};
+use crate::state::AppState;
 
 /// Append a flushed window through the (blocking) `HistoryPort`, logging and
 /// continuing on failure — history writes must never block or crash the

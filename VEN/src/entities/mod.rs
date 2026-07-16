@@ -1,4 +1,5 @@
 pub mod asset;
+pub mod asset_ledger;
 pub mod asset_params;
 pub mod capacity;
 pub mod design_vocabulary;
