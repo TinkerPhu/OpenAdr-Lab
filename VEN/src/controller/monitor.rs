@@ -4,8 +4,8 @@ use crate::controller::SimSnapshot;
 /// `record_tick` updates the cumulative per-asset energy ledger from the
 /// current simulation snapshot. Packet attribution has been removed;
 /// device sessions (EvSession, HeaterTarget) are managed directly.
+use crate::entities::asset_ledger::AssetLedgerEntry;
 use crate::entities::tariff_snapshot::TariffSnapshot;
-use crate::state::AssetLedgerEntry;
 use chrono::{DateTime, Utc};
 
 const NEAR_ZERO_KW: f64 = 1e-3;
@@ -42,7 +42,7 @@ pub fn record_tick(
         }
         let entry = ledger
             .entry(asset_id.clone())
-            .or_insert_with(|| AssetLedgerEntry::new(asset_id));
+            .or_insert_with(|| AssetLedgerEntry::new(asset_id, now));
         entry.energy_kwh += kw.abs() * dt_h;
         if kw > 0.0 {
             entry.cost_eur += kw * dt_h * import_tariff;
