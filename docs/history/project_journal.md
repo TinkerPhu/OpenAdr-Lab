@@ -5534,3 +5534,60 @@ repeated full-suite runs (no R-21 HiGHS flake this round). `cargo fmt`,
 `clippy -D warnings`, `audit_file_sizes.py`, and architecture invariants
 all pass.
 
+
+## Total Project Review (Parts A–C, plan: docs/plans/total_review_plan.md)
+
+**What.** A full-codebase + full-documentation review (2026-07-14 → 07-16),
+executed from a written plan with ~45 logged findings and 8 recorded owner
+decisions. Part A reviewed the code ring-by-ring against the hexagonal
+architecture plus cross-cutting quality (duplication, magic numbers,
+unwraps, lints, dependencies/licences). Part B reviewed every document in
+docs/, the root docs, and wiki/ against the content rule (current state +
+future visions only; history belongs here and in KEY_LEARNINGS only) and
+produced a reduction proposal (B12). Fix waves: C1 consolidated findings
+into TECHNICAL_DEBTS (R-23–R-36), BACKLOG, and the refactoring backlog;
+C2 executed the doc rewrites and deletions on `fix/review-c1-c2-docs`;
+C3 executed blocker/major code fixes on `fix/review-c3-code`.
+
+**Why.** Accumulated drift: docs described removed subsystems (Reactor,
+/sim/override, /trace), the architecture had ring violations that the
+invariant greps didn't cover, dependency audits had 12–17 open
+vulnerabilities per component, and construction-era documents duplicated
+or contradicted the current state.
+
+**C3 outcome.** `cargo update` + vite/vitest major upgrades took every
+component to 0 audit findings (single exception: RUSTSEC-2023-0071 `rsa`
+in the BFF lockfile — a false positive from sqlx's never-compiled
+optional MySQL driver; documented in BACKLOG). Two ring violations fixed:
+`AssetLedgerEntry` moved state→entities with an injectable clock, and the
+three SimState-coupled plan-cycle helpers moved services→
+`simulator/plan_context.rs` so the application layer only touches the
+simulator through `SimulatorPort`. 13 new BFF unit tests (TtlCache,
+AppError, VtnClient against a local axum stub — no new dev-deps).
+Merged to main as a fast-forward (2c79d53..1e7e807) after E2E (262
+scenarios, 0 failed) and resilience (5/5) on Pi4.
+
+**Issues / key learnings.**
+- *vite 8 broke the production bundle while every unit test stayed green.*
+  vite 8's rolldown bundler mis-resolved a MUI/CJS default-import interop
+  in the VTN UI production build (React error #130 at runtime); vitest
+  (jsdom, no bundling) and `tsc` were blind to it. Only the Pi4 browser
+  E2E caught it. Fixed by pinning vite ^7 / plugin-react ^5 — same 0-vuln
+  audit result without the bleeding-edge bundler.
+- *Review findings age fast on an active repo.* The review baseline
+  (466f792) predated the Phase 3–5 merges; a "delete unused
+  StaleRatePolicy" finding — and the owner decision made from it — was
+  obsolete by execution time (WP4.4 had implemented it). Every finding
+  must be re-verified against current main immediately before fixing.
+- *The 8 GB host cannot survive unthrottled WSL cargo builds.* Two host
+  crashes (pagefile exhaustion) during the review. Rule added to
+  .claude/CLAUDE.md: check free RAM first, `-j 2`, one build at a time.
+- *vitest 4 requires constructor mocks to be `function`/`class`.* Both
+  UIs' `vi.fn().mockImplementation(() => ({...}))` class mocks broke on
+  upgrade; arrow functions are not constructable.
+- *cargo audit scans the lockfile, not the build graph.* Optional
+  features' dependencies land in Cargo.lock even when never compiled —
+  verify with `cargo tree -i <crate>` before treating a finding as real.
+- *A non-bare deploy repo rejects pushes to its checked-out branch* —
+  deploying to Pi4 by direct push requires flipping its checkout aside
+  first (or keeping it parked on main).
