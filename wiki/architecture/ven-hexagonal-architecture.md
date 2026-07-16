@@ -46,9 +46,9 @@ pre-existing simulator/VTN mocks) — `tasks/planning.rs`'s planning loop calls
 From `.claude/CLAUDE.md`: no `use crate::profile` in `entities/`, `controller/`, `routes/`
 (profile values arrive as typed parameter structs); no `use crate::assets::` inside
 `milp_planner/` or `entities/`; no `serde_json::Value` leaking out of `vtn.rs`.
-All four greps pass (the raw-report pass-through `VtnPort::fetch_reports_raw`
-→ `PollingState.reports` is a deliberate, commented exception for `GET /reports`,
-tracked as R-10).
+All four greps pass. The GET /reports pass-through goes through the typed
+`OadrReport` (known fields by name, everything else preserved verbatim via
+serde flatten), so no `serde_json::Value` crosses `VtnPort`.
 
 Two placements enforce the ring boundaries around planning and state:
 `entities/asset_ledger.rs` holds the per-asset energy/cost/CO₂ ledger entry (a

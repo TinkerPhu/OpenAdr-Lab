@@ -527,6 +527,7 @@ pub fn extract_report_obligations(
                 interval_duration_s,
                 fulfilled: false,
                 created_at: now,
+                historical: descriptor.historical.unwrap_or(true),
             });
         }
     }
@@ -941,6 +942,29 @@ mod tests {
         assert_eq!(obligations[0].payload_type, "USAGE");
         assert_eq!(obligations[0].reading_type, "DIRECT_READ");
         assert!(!obligations[0].fulfilled);
+        assert!(
+            obligations[0].historical,
+            "absent reportDescriptor.historical defaults to true per spec"
+        );
+    }
+
+    #[test]
+    fn extract_report_obligations_parses_historical_false() {
+        // R-15: `historical: false` marks the obligation as a forecast request.
+        let events = json!([{
+            "id": "evt-h",
+            "programID": "prog-1",
+            "reportDescriptors": [
+                {"payloadType": "USAGE", "frequency": 900, "historical": false}
+            ]
+        }]);
+        let obligations = extract_report_obligations(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            Utc::now(),
+            &[],
+        );
+        assert_eq!(obligations.len(), 1);
+        assert!(!obligations[0].historical);
     }
 
     #[test]
@@ -1199,6 +1223,7 @@ mod tests {
             interval_duration_s: 3600,
             fulfilled: false,
             created_at: now,
+            historical: true,
         }];
         let obligations = extract_report_obligations(
             &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),

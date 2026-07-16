@@ -387,6 +387,7 @@ mod event_poll_tests {
             interval_duration_s: 900,
             fulfilled: false,
             created_at: now,
+            historical: true,
         };
         state.add_obligations(vec![ob]).await;
 

@@ -16,19 +16,10 @@ use serde::{Deserialize, Serialize};
 pub trait VtnPort: Send + Sync {
     async fn fetch_programs(&self) -> Result<Vec<OadrProgram>>;
     async fn fetch_events(&self) -> Result<Vec<OadrEvent>>;
-    /// Returns minimal typed reports (id + reportName only). Used internally for
-    /// 409 conflict resolution. Skips reports with absent reportName.
+    /// Returns full-fidelity typed reports: `id`/`reportName` accessed by field,
+    /// every other VTN field preserved verbatim in `extra` (serde flatten) so
+    /// state storage and the GET /reports route stay wire-shape pass-through.
     async fn fetch_reports(&self) -> Result<Vec<OadrReport>>;
-    /// Returns full report JSON from the VTN — pass-through for state storage and
-    /// the GET /reports route. Default delegates to fetch_reports (minimal fields only);
-    /// VtnClient overrides this to return the unmodified VTN response.
-    async fn fetch_reports_raw(&self) -> Result<Vec<serde_json::Value>> {
-        let reports = self.fetch_reports().await?;
-        Ok(reports
-            .iter()
-            .map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null))
-            .collect())
-    }
     /// Submit or upsert a typed report body. Returns Ok(()) on success; errors are
     /// propagated from the VTN HTTP response.
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()>;
@@ -100,15 +91,24 @@ pub struct OadrReportDescriptor {
     /// Reporting frequency in seconds.
     #[serde(default)]
     pub frequency: Option<i64>,
+    /// Spec default true (historical data); false requests a forecast.
+    #[serde(default)]
+    pub historical: Option<bool>,
 }
 
 // ── OadrReport ────────────────────────────────────────────────────────────────
 
-/// Minimal typed report — only `id` and `reportName` are accessed by field.
+/// Typed report with full wire fidelity: `id` and `reportName` are the fields
+/// the VEN accesses (409 upsert resolution); everything else the VTN sent is
+/// preserved verbatim in `extra` and round-trips on serialization, keeping the
+/// GET /reports pass-through intact without `serde_json::Value` on the port.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OadrReport {
     pub id: String,
-    pub reportName: String,
+    #[serde(default)]
+    pub reportName: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 // ── OadrReportBody and nested types ──────────────────────────────────────────
@@ -229,7 +229,28 @@ mod tests {
         let json = r#"{ "id": "rep-001", "reportName": "ven-status" }"#;
         let report: OadrReport = serde_json::from_str(json).expect("deserialization failed");
         assert_eq!(report.id, "rep-001");
-        assert_eq!(report.reportName, "ven-status");
+        assert_eq!(report.reportName.as_deref(), Some("ven-status"));
+    }
+
+    #[test]
+    fn oadr_report_preserves_unknown_fields_and_null_name_roundtrip() {
+        // R-10: the pass-through contract — every VTN field survives the typed
+        // struct, including ones the VEN never accesses and a null reportName.
+        let json = serde_json::json!({
+            "id": "rep-002",
+            "reportName": null,
+            "programID": "prog-1",
+            "clientName": "ven-1",
+            "payloadDescriptors": [{"payloadType": "USAGE", "units": "KW"}],
+            "createdDateTime": "2026-07-16T12:00:00Z"
+        });
+        let report: OadrReport = serde_json::from_value(json.clone()).expect("must deserialize");
+        assert!(report.reportName.is_none());
+        assert_eq!(
+            serde_json::to_value(&report).expect("must serialize"),
+            json,
+            "wire shape must round-trip unchanged"
+        );
     }
 
     #[test]

@@ -23,7 +23,7 @@ pub(crate) fn spawn_report_poll(
         }
         let mut backoff = Backoff::new(secs, secs.saturating_mul(30).min(900), 0);
         loop {
-            match vtn.fetch_reports_raw().await {
+            match vtn.fetch_reports().await {
                 Ok(reports) => {
                     counter!("poll_success_total", "resource" => "reports").increment(1);
                     info!(resource = "reports", count = reports.len(), "poll success");

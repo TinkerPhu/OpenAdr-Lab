@@ -319,6 +319,7 @@ async fn main() -> anyhow::Result<()> {
                 ao.clone(),
                 etx.clone(),
                 nf.clone(),
+                chrono::Utc::now,
             )
         });
     }

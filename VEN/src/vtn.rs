@@ -365,11 +365,10 @@ impl VtnClient {
     }
 
     /// Search own reports (filtered by client_name) for a matching reportName.
-    /// Uses typed VtnPort::fetch_reports() so only id + reportName are accessed.
     async fn find_report_by_name(&self, report_name: &str) -> Result<String> {
         let reports = VtnPort::fetch_reports(self).await?;
         for r in &reports {
-            if r.reportName == report_name {
+            if r.reportName.as_deref() == Some(report_name) {
                 return Ok(r.id.clone());
             }
         }
@@ -400,17 +399,12 @@ impl VtnPort for VtnClient {
     async fn fetch_reports(&self) -> Result<Vec<OadrReport>> {
         let path = format!("/reports?clientName={}", self.ven_name);
         let items = self.get_json_paginated(&path).await?;
-        // Skip reports that can't deserialize (e.g. absent reportName) — they are
-        // irrelevant to find_report_by_name which requires a non-null name.
+        // Skip items without an `id` (can't deserialize) — everything else,
+        // including absent reportName, is preserved via OadrReport's flatten.
         Ok(items
             .iter()
             .filter_map(|v| serde_json::from_value(v.clone()).ok())
             .collect())
-    }
-
-    async fn fetch_reports_raw(&self) -> Result<Vec<serde_json::Value>> {
-        let path = format!("/reports?clientName={}", self.ven_name);
-        self.get_json_paginated(&path).await
     }
 
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()> {

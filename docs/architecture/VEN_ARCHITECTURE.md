@@ -125,7 +125,7 @@ behind the `VtnPort` trait; parsing is pure functions in `controller/openadr_int
 | `OPERATING_STATE` | Derived from sample freshness (`reporter.rs::operating_state`: fresh ≤ 120 s → ACTIVE, stale → UNAVAILABLE) — site-level mirror of the `DeviceResponsiveness` vocabulary | ✅ implemented |
 | `IMPORT_CAPACITY_RESERVATION` / `EXPORT_CAPACITY_RESERVATION` | Live `SiteFlexibilityEnvelope` up/down kW | ✅ implemented |
 | `DEMAND` | — | ❌ not built |
-| `USAGE_FORECAST` | Plan-slot forecasts served at their native slot boundaries, descriptor-driven via the obligation machinery | ✅ implemented — remaining gap: `reportDescriptor.historical` is never parsed, so a forecast request can't be distinguished from a historical one (`docs/reference/TECHNICAL_DEBTS.md` R-15, lands with roadmap WP5.4) |
+| `USAGE_FORECAST` | Plan-slot forecasts served at their native slot boundaries, descriptor-driven via the obligation machinery; `reportDescriptor.historical: false` on any usage-family payload also requests the forecast path | ✅ implemented |
 
 #### User Request Manager
 
@@ -616,17 +616,15 @@ impl TimeSeries {
 - **Timeline** (`controller/timeline.rs`): uniform-grid resampling with LOCF time-weighted
   averaging for the UI chart.
 
-**Event merge** (`openadr_interface.rs`) remains last-write-wins when multiple events
-define the same interval; the OpenADR `priority` field is parsed but not used in
-ordering — a higher-priority event processed first can be silently overwritten by a
-lower-priority one processed later. Not tracked as a numbered item yet; add to
-`docs/reference/TECHNICAL_DEBTS.md` if picked up.
+**Event merge** (`openadr_interface.rs`): when multiple events define the same
+interval, events are pre-sorted by ascending `priority` (newer `createdDateTime`
+breaking ties) so the highest-priority event is processed last and wins the
+last-write-wins merge (BL-02).
 
-❌ **GAP** (`docs/reference/TECHNICAL_DEBTS.md` R-16): the MILP planner still samples
-each slot's tariff at its **start** timestamp only (`milp_planner/inputs.rs`,
-`interpolate_at(slot_t)`), not the time-weighted mean across the slot. A slot straddling
-a tariff boundary is priced entirely at the pre-boundary rate. `TimeSeries::time_weighted_mean`
-already exists and would fix this in one call.
+The MILP planner prices each slot at its **time-weighted mean** tariff
+(`TimeSeries::time_weighted_mean` via `milp_planner/inputs.rs` and
+`stale_rates.rs`), so a slot straddling a tariff boundary blends both rates —
+import, export, and CO₂ alike.
 
 ### 5.3 OpenADR Spec Position
 

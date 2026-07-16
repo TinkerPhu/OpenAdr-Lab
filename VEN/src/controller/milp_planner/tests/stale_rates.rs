@@ -183,3 +183,28 @@ fn test_rate_estimated_flag_lands_in_plan_slots() {
         plan.warnings
     );
 }
+
+#[test]
+fn covered_slot_straddling_tariff_boundary_uses_time_weighted_mean() {
+    // R-16 (BL-11): a 10-min slot with 7 min at 0.20 and 3 min at 0.15 must be
+    // priced (7*0.20 + 3*0.15)/10 = 0.185, not the slot-start 0.20.
+    use crate::controller::milp_planner::stale_rates::apply_stale_rate_policy;
+    let now = fixed_now();
+    let snap = |off_min: i64, dur_min: i64, imp: f64| TariffSnapshot {
+        interval_start: now + Duration::minutes(off_min),
+        interval_end: now + Duration::minutes(off_min + dur_min),
+        import_tariff_eur_kwh: Some(imp),
+        export_tariff_eur_kwh: Some(0.08),
+        co2_g_kwh: Some(300.0),
+    };
+    let tariffs = TariffTimeSeries::from_snapshots(&[snap(0, 7, 0.20), snap(7, 53, 0.15)]);
+    let bounds = [(now, now + Duration::minutes(10))];
+    let outcome =
+        apply_stale_rate_policy(&StaleRatePolicy::LastKnown, 0.8, &tariffs, &bounds, 0.25);
+    assert!(!outcome.rate_stale[0], "slot start is covered");
+    assert!(
+        (outcome.c_imp_eur_kwh[0] - 0.185).abs() < 1e-9,
+        "expected blended 0.185, got {}",
+        outcome.c_imp_eur_kwh[0]
+    );
+}

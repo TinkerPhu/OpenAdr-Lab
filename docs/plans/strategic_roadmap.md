@@ -28,7 +28,7 @@ SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort*
 - `docs/BACKLOG.md` — feature gaps: BL-09, BL-11, BL-13, BL-17, BL-18, BL-21…BL-27,
   BL-29, BL-34, BL-35; general items GB-04, GB-05, GB-07, GB-09, GB-11.
 - `docs/BACKLOG_OpenADR_Cert.md` — certification/transport line items (Cluster H).
-- `docs/reference/TECHNICAL_DEBTS.md` — R-09…R-40 debt register.
+- `docs/reference/TECHNICAL_DEBTS.md` — the debt register (R-18…R-40).
 - `docs/plans/refactoring_backlog.md` — R-08 (AssetConfig enum→trait).
 - `docs/plans/roadmap/` — the per-phase implementation plans (phases 0–4 executed;
   phase 5 partially; phase 6 not started).
