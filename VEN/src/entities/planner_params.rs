@@ -116,6 +116,9 @@ pub struct SimulatorParams {
     pub tick_s: u64,
     pub persist_every_s: u64,
     pub report_interval_s: u64,
+    /// Peak of the deterministic diurnal unmodelled load added to the derived
+    /// grid meter (kW); 0.0 disables. See `SimState::unmodelled_load_kw`.
+    pub unmodelled_load_kw: f64,
 }
 
 impl Default for SimulatorParams {
@@ -124,6 +127,7 @@ impl Default for SimulatorParams {
             tick_s: 1,
             persist_every_s: 15,
             report_interval_s: 60,
+            unmodelled_load_kw: 0.0,
         }
     }
 }

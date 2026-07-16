@@ -134,6 +134,7 @@ impl Default for SimulatorConfig {
             tick_s: default_tick(),
             persist_every_s: default_persist_every(),
             report_interval_s: default_report_interval(),
+            unmodelled_load_kw: 0.0,
         }
     }
 }

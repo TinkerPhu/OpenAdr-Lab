@@ -96,7 +96,26 @@ pub struct SimState {
     /// Base load EMA state for Behaviour B smoothing. Ephemeral — resets on restart.
     #[serde(skip, default)]
     pub base_load_smoothing: BaseLoadSmoothingState,
+    /// Peak of the deterministic diurnal unmodelled load added to the derived
+    /// grid meter but to no asset (kW); 0.0 disables. Gives `site-residual` a
+    /// real, learnable signal — otherwise the meter is the exact sum of the
+    /// modelled assets and the residual is structurally 0. Set from the
+    /// profile at startup (`persist::load_with_params`), not persisted state.
+    #[serde(skip, default)]
+    pub unmodelled_load_kw: f64,
     pub last_tick: DateTime<Utc>,
+}
+
+/// Deterministic diurnal unmodelled-load curve: 0 at 06:00, `peak_kw` at
+/// 18:00, smooth cosine in between. Pure function of the injected clock so
+/// simulation stays reproducible (no RNG).
+pub fn unmodelled_load_at(now: DateTime<Utc>, peak_kw: f64) -> f64 {
+    if peak_kw == 0.0 {
+        return 0.0;
+    }
+    let secs = now.timestamp().rem_euclid(86_400) as f64;
+    let hour = secs / 3600.0;
+    peak_kw * 0.5 * (1.0 - (std::f64::consts::PI * (hour - 6.0) / 12.0).cos())
 }
 
 impl SimState {
@@ -155,6 +174,7 @@ impl SimState {
             grid_asset: Grid::new(),
             pv_smoothing: PvSmoothingState::default(),
             base_load_smoothing: BaseLoadSmoothingState::default(),
+            unmodelled_load_kw: 0.0,
             last_tick: Utc::now(),
         }
     }
@@ -282,11 +302,14 @@ impl SimState {
         }
 
         // ── Derive grid meter ─────────────────────────────────────────────
-        let import_kw = total_kw.max(0.0);
-        let export_kw = (-total_kw).max(0.0);
+        // The meter sees the modelled assets PLUS the configured unmodelled
+        // diurnal load — the gap is exactly what `site-residual` reports.
+        let meter_kw = total_kw + unmodelled_load_at(now, self.unmodelled_load_kw);
+        let import_kw = meter_kw.max(0.0);
+        let export_kw = (-meter_kw).max(0.0);
         let dt_h = dt_s / 3600.0;
 
-        self.grid.net_power_w = total_kw * 1000.0;
+        self.grid.net_power_w = meter_kw * 1000.0;
         self.grid.import_w = import_kw * 1000.0;
         self.grid.export_w = export_kw * 1000.0;
         self.grid.voltage_v = power_model::random_voltage();
