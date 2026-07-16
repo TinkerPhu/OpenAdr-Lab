@@ -70,4 +70,6 @@ coverage gaps instead of guessing.
 - Let a wiki workflow modify source documents — `wiki/` is its only write target.
 
 Context: the wiki's role in the project is described in [[vision-and-roadmap]];
-what it covers starts at [[openadr-lab]].
+what it covers starts at [[openadr-lab]]. A related AI-workflow tooling
+evaluation — why the "superpowers" skill collection is not used in this
+project — is recorded in [[superpowers-not-adopted]].

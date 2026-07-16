@@ -4,7 +4,7 @@ type: query
 created: 2026-07-04
 updated: 2026-07-04
 synced_commit: 5a9a304
-sources: [VEN/src/entities/user_request.rs, VEN/src/services/user_request.rs, VEN/src/entities/device_session.rs, VEN/src/assets/ev.rs, VEN/src/state.rs, VEN/src/tasks/planning.rs]
+sources: [VEN/src/entities/user_request.rs, VEN/src/services/user_request.rs, VEN/src/entities/device_session.rs, VEN/src/assets/ev.rs, VEN/src/state/mod.rs, VEN/src/tasks/planning.rs]
 tags: [query, device-session, architecture, milp]
 ---
 

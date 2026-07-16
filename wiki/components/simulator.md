@@ -4,7 +4,7 @@ type: component
 created: 2026-07-04
 updated: 2026-07-05
 synced_commit: e138861
-sources: [VEN/src/simulator/, VEN/src/state.rs, docs/architecture/asset_simulation.md, docs/architecture/VEN_ARCHITECTURE.md]
+sources: [VEN/src/simulator/, VEN/src/state/mod.rs, docs/architecture/asset_simulation.md, docs/architecture/VEN_ARCHITECTURE.md]
 tags: [simulator, physics, determinism]
 ---
 

@@ -2,8 +2,8 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-07-12
-synced_commit: f0e2d7f
+updated: 2026-07-16
+synced_commit: f08e469
 sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx]
 tags: [ui, react, timeline]
 ---
@@ -19,22 +19,30 @@ React + TypeScript SPA (Vite build, nginx-served, port 8214) — the per-site da
   with `refetchInterval` polling; `src/api/types.ts` — pass-through DTO types
   ([[dto-pass-through]]).
 - `VenContext` — multi-VEN selector switching all pages across the three instances.
-- Pages: Dashboard, Programs, Events, Sensors; plus the planner timeline views exercised
+- Pages: Dashboard, History (placed directly after Dashboard in the nav),
+  Controller, Programs, Events, Sensors; plus the planner timeline views exercised
   by `tests/features/ven_ui_planner.feature` and `ven_timeline.feature`.
 - Phase 4 additions: `NotificationsBell` in the app bar (badge + feed panel, 10 s
   polling — the UI face of [[notifications]]); a `ComfortCurveCard` on the Devices
-  page (per-asset fill%/bid table, POST installs an override, Reset restores the
-  built-in default — WP4.2/BL-19); the EV/heater/shiftable dialogs gained a
-  request-mode select (`ModeSelect`, native `<select>` for testability) and the EV
-  dialog a budget field shown only for `MAX_COST` (WP4.1/BL-28).
+  page (per-asset fill%/bid table plus a `ComfortCurveChart` visualization of the
+  curve, POST installs an override, Reset restores the built-in default —
+  WP4.2/BL-19); the EV/heater/shiftable dialogs gained a request-mode select
+  (`ModeSelect`, native `<select>` for testability) and the EV dialog a budget
+  field shown only for `MAX_COST` (WP4.1/BL-28).
 - WP4.6 observability polish: `GridSignalStrip` on the Controller page (chips for
   active alert / SIMPLE / dispatch / capacity, from the `GET /signals` aggregate;
   renders nothing when idle), hatched+dimmed estimated-rate slots in the plan
   matrix (WP4.4 `rate_estimated`), persona labels in the VEN selector (from the
   VEN `PERSONA` attribute via `/api/vens-registry`), a Mode column in the
-  All-Requests table and mode chips on all device cards. Build gate lesson:
-  vitest/eslint don't typecheck — `npm run build` (tsc) is part of the local
-  gates for UI-typed changes.
+  All-Requests table and mode chips on all device cards. Rate charts enforce a
+  minimum axis span (`axisDomain.ts`) so near-flat cost/CO₂ lines don't render
+  as noise. Build gate lessons: vitest/eslint don't typecheck — `npm run build`
+  (tsc) is part of the local gates for UI-typed changes — and neither vitest
+  (jsdom, unbundled) nor tsc sees *production-bundle* breakage: only the Pi4
+  browser E2E exercises the built bundle. The toolchain is vite ^7 /
+  vitest ^4 / plugin-react ^5; vite 8's rolldown bundler mis-resolves a MUI
+  default-import interop at bundle time (React #130 at runtime with all unit
+  tests green), so the vite major is held at 7 until that interop is proven.
 
 ## Timeline specifics
 

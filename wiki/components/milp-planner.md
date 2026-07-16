@@ -2,9 +2,9 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-07-12
-synced_commit: c5a1d03
-sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning.rs, VEN/src/services/planning.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md]
+updated: 2026-07-16
+synced_commit: f08e469
+sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning.rs, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md]
 tags: [planner, milp, highs, optimization]
 ---
 
@@ -130,6 +130,23 @@ see [[milp-over-greedy]].
 | Plan translation + fallback plan | `results.rs` |
 | Per-session flexibility envelopes | `envelopes.rs` |
 | Planning loop | `VEN/src/tasks/planning.rs` |
-| Acceptance gate + heater anchor | `VEN/src/services/planning.rs` |
+| Acceptance gate + heater anchor + cycle inputs | `VEN/src/services/planning.rs` |
+| SimState-coupled cycle helpers (sim clone, PV-inject patch, `build_asset_contexts`) | `VEN/src/simulator/plan_context.rs` |
+
+The split between the last two rows is the port rule: `services/planning.rs`
+holds only pure/port-based logic, while everything needing the concrete
+`SimState` lives in the infra ring next to the simulator
+([[ven-hexagonal-architecture]]).
+
+Per-slot baselines for `base_load` and `site-residual` come from learned
+heuristics when available ([[heuristics-pipeline]]) — `inputs.rs` samples
+`daytime_profile_kw[weekday_bucket][hour] × seasonal_factor` per slot, falling
+back to the profile's flat `baseline_kw` / the live residual reading on
+cold-start. Shiftable-load starts use a deterministic earliest-start tie-break,
+so equal-cost windows always resolve to the same schedule across replans.
+
+The terminal-energy reward (`c_terminal`) model — why heater/battery terminal
+state is credited at horizon end and the per-asset coefficient table — is
+documented in `docs/architecture/ven_milp_planner.md` §7.
 
 Downstream, the plan is executed slot-by-slot by the [[dispatcher]].
