@@ -110,10 +110,11 @@ behind the `VtnPort` trait; parsing is pure functions in `controller/openadr_int
 | `GHG` | `TariffSnapshot.co2_g_kwh` | ✅ implemented |
 | `IMPORT_CAPACITY_LIMIT` / `EXPORT_CAPACITY_LIMIT` | `OadrCapacityState.import_limit_kw` / `.export_limit_kw` (strictest active event wins) | ✅ implemented |
 | `IMPORT_CAPACITY_SUBSCRIPTION` / `IMPORT_CAPACITY_RESERVATION` | `OadrCapacityState.import_subscription_kw` / `.import_reservation_kw` | ✅ implemented |
-| `EXPORT_CAPACITY_SUBSCRIPTION` / `EXPORT_CAPACITY_RESERVATION` | — | ❌ **GAP** (`docs/reference/TECHNICAL_DEBTS.md` R-14) — not parsed; `OadrCapacityState` has no export-side subscription/reservation fields at all |
-| `ALERT_GRID_EMERGENCY` / `ALERT_BLACK_START` / `ALERT_FLEX_ALERT` | `PlanTrigger::Alert` (defined) → planner shed/import-limit enforcement | ❌ **GAP** (cert backlog BL-04) — `PlanTrigger::Alert` is defined but never sent by any code path; every detected event/rate/capacity change fires `PlanTrigger::RateChange` instead. The shed/import-limit enforcement itself is also unimplemented. |
-| `DISPATCH_SETPOINT` | — | ❌ **GAP** (`docs/reference/TECHNICAL_DEBTS.md` R-13) — no code path parses this payload; it survives only as a dead field on the unreferenced `OadrEventCache` struct (`entities/capacity.rs`) |
-| `CHARGE_STATE_SETPOINT` | `EvSession` create/modify with target SoC | ❌ **GAP** (cert backlog BL-06) — not yet implemented |
+| `EXPORT_CAPACITY_SUBSCRIPTION` / `EXPORT_CAPACITY_RESERVATION` | `OadrCapacityState` export-side scalar fields (min wins); subscription+reservation form a contracted allowance that binds the solver when tighter than the limit | ✅ implemented |
+| `ALERT_GRID_EMERGENCY` / `ALERT_BLACK_START` | `AlertWindow` (window from interval- or event-level `intervalPeriod`); `PlanTrigger::Alert` fires on change; both types clamp planned import to 0 over the window (soft constraint — never infeasible) | ✅ implemented |
+| `SIMPLE` (levels 0–3) | `SimpleWindow` — L1 caps import at a configurable % of contract, L2 at baseline, L3 at 0; highest level wins, alerts override | ✅ implemented |
+| `DISPATCH_SETPOINT` | `DispatchWindow` — dispatcher steers the battery to the commanded net site power during the window, plan running underneath; alert wins precedence | ✅ implemented |
+| `CHARGE_STATE_SETPOINT` | `EvSession` create/modify targeting the given SoC (fraction or percent); event deletion cancels the event-created session | ✅ implemented |
 
 **Internal → VTN report generation** (`controller/reporter.rs`):
 
@@ -121,10 +122,10 @@ behind the `VtnPort` trait; parsing is pure functions in `controller/openadr_int
 |---|---|---|
 | `USAGE` | Time-weighted mean of net site import power over the obligation interval (`TimeSeries::resample_uniform`) | ✅ implemented |
 | `STORAGE_CHARGE_LEVEL` | Point-in-time SoC (EV/battery) sampled at each obligation interval end | ✅ implemented |
-| `OPERATING_STATE` | Hardcoded `"ACTIVE"` | 🟡 partial — the `DeviceResponsiveness` enum this should derive from is unreferenced |
+| `OPERATING_STATE` | Derived from sample freshness (`reporter.rs::operating_state`: fresh ≤ 120 s → ACTIVE, stale → UNAVAILABLE) — site-level mirror of the `DeviceResponsiveness` vocabulary | ✅ implemented |
 | `IMPORT_CAPACITY_RESERVATION` / `EXPORT_CAPACITY_RESERVATION` | Live `SiteFlexibilityEnvelope` up/down kW | ✅ implemented |
 | `DEMAND` | — | ❌ not built |
-| `USAGE_FORECAST` | — | ❌ **GAP** (`docs/reference/TECHNICAL_DEBTS.md` R-15) — never built. The MILP already computes the exact per-slot forecast internally (`planned_state_by_asset`, used today only by `/timeline`) — it is simply never turned into a report. `reportDescriptor.historical` is never parsed, so the VEN cannot distinguish a forecast request from a historical one. |
+| `USAGE_FORECAST` | Plan-slot forecasts served at their native slot boundaries, descriptor-driven via the obligation machinery | ✅ implemented — remaining gap: `reportDescriptor.historical` is never parsed, so a forecast request can't be distinguished from a historical one (`docs/reference/TECHNICAL_DEBTS.md` R-15, lands with roadmap WP5.4) |
 
 #### User Request Manager
 
