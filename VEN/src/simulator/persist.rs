@@ -30,10 +30,11 @@ pub async fn save(state: &SimState, data_dir: &str) -> anyhow::Result<()> {
 /// when the persisted asset IDs don't match the current asset list.
 pub async fn load_with_params(
     data_dir: &str,
-    _sim_params: &crate::entities::planner_params::SimulatorParams,
+    sim_params: &crate::entities::planner_params::SimulatorParams,
     asset_params: &[crate::entities::asset_params::AssetParams],
 ) -> SimState {
-    let fresh = SimState::from_params(asset_params);
+    let mut fresh = SimState::from_params(asset_params);
+    fresh.unmodelled_load_kw = sim_params.unmodelled_load_kw;
 
     let Some(mut loaded) = load(data_dir).await else {
         return fresh;
@@ -51,6 +52,7 @@ pub async fn load_with_params(
     }
 
     loaded.asset_configs = fresh.asset_configs;
+    loaded.unmodelled_load_kw = fresh.unmodelled_load_kw;
     loaded
 }
 

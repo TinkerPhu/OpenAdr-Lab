@@ -272,6 +272,13 @@ pub struct SimulatorConfig {
     pub persist_every_s: u64,
     #[serde(default = "super::defaults::default_report_interval")]
     pub report_interval_s: u64,
+    /// Peak of a deterministic diurnal *unmodelled* load added to the derived
+    /// grid meter but to no asset (kW). Makes `site-residual` non-zero in
+    /// simulation, so the residual heuristic has a real signal to learn —
+    /// without it the simulator derives the meter as the exact sum of its
+    /// modelled assets and the residual is structurally 0. Zero disables.
+    #[serde(default)]
+    pub unmodelled_load_kw: f64,
 }
 
 /// Physical grid connection limits — meter / main breaker hard ceiling.
