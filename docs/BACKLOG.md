@@ -343,55 +343,28 @@ correctly reflects the current billing period after each rollover.
 
 ---
 
-## Dependency Vulnerabilities — 2026-05-25
+## Dependency Vulnerabilities — 2026-07-16
 
-> Re-run `cargo audit` and `npm audit` before each release and add new findings here.
+> Re-run `cargo audit` and `npm audit` before each release and update this section.
 
-### Rust (cargo audit) — 12 vulnerabilities (re-checked 2026-07-12 before the phase 3+4 merge; two new rows marked)
+Current state after `cargo update` (VEN, VTN/bff) and the vite 8 / vitest 4 toolchain
+upgrade + `npm audit fix` (both UIs), all done 2026-07-16 on `fix/review-c3-code`:
 
-| ID | Crate | Version | Severity | Title | Fix |
-|----|-------|---------|----------|-------|-----|
-| RUSTSEC-2026-0185 | quinn-proto | 0.11.13 | High (7.5) | Remote memory exhaustion via unbounded out-of-order stream reassembly (new 2026-07-12) | Upgrade to ≥0.11.14 |
-| RUSTSEC-2026-0204 | crossbeam-epoch | 0.9.18 | — | Invalid pointer dereference in `fmt::Pointer` impl for `Atomic`/`Shared` (new 2026-07-12) | Upgrade when fix released |
-| RUSTSEC-2026-0048 | aws-lc-sys | 0.37.0 | High (7.4) | CRL Distribution Point Scope Check Logic Error | Upgrade to ≥0.39.0 |
-| RUSTSEC-2026-0047 | aws-lc-sys | 0.37.0 | High (7.5) | PKCS7_verify Signature Validation Bypass | Upgrade to ≥0.38.0 |
-| RUSTSEC-2026-0046 | aws-lc-sys | 0.37.0 | High (7.5) | PKCS7_verify Certificate Chain Validation Bypass | Upgrade to ≥0.38.0 |
-| RUSTSEC-2026-0045 | aws-lc-sys | 0.37.0 | Medium (5.9) | Timing Side-Channel in AES-CCM Tag Verification | Upgrade to ≥0.38.0 |
-| RUSTSEC-2026-0044 | aws-lc-sys | 0.37.0 | — | X.509 Name Constraints Bypass via Wildcard/Unicode CN | Upgrade to ≥0.39.0 |
-| RUSTSEC-2026-0037 | quinn-proto | 0.11.13 | High (8.7) | Denial of service in Quinn endpoints | Upgrade to ≥0.11.14 |
-| RUSTSEC-2026-0099 | rustls-webpki | 0.103.9 | — | Name constraints accepted for wildcard certificate names | Upgrade to ≥0.103.12 |
-| RUSTSEC-2026-0104 | rustls-webpki | 0.103.9 | — | Reachable panic in CRL parsing | Upgrade to ≥0.103.13 |
-| RUSTSEC-2026-0049 | rustls-webpki | 0.103.9 | — | CRLs not authoritative due to faulty matching logic | Upgrade to ≥0.103.10 |
-| RUSTSEC-2026-0098 | rustls-webpki | 0.103.9 | — | Name constraints for URI names incorrectly accepted | Upgrade to ≥0.103.12 |
+| Component | cargo/npm audit result |
+|-----------|------------------------|
+| VEN (Rust) | **0 vulnerabilities, 0 warnings** (267 crates) |
+| VTN/bff (Rust) | 1 advisory — see below (315 crates) |
+| VEN/ui (npm) | **0 vulnerabilities** |
+| VTN/ui (npm) | **0 vulnerabilities** |
 
-**Dependency chain:** All via `reqwest` TLS stack — `aws-lc-rs` → `rustls` → `tokio-rustls` / `hyper-rustls` / `quinn`. Upgrading `reqwest` to a version that pins `aws-lc-sys ≥0.39.0` and `rustls-webpki ≥0.103.13` should resolve all 10.
+### VTN/bff — RUSTSEC-2023-0071 (`rsa` 0.9.x, Marvin timing side-channel, medium 5.9)
 
-**Risk context:** Lab/Pi4 deployment — not internet-exposed. VEN communicates only with local VTN. Real-world exploitability is low; fix before any internet-exposed deployment.
+Lockfile-only false positive: `rsa` enters `Cargo.lock` via `sqlx-mysql`, an *optional*
+sqlx driver that is never enabled (the BFF pins
+`sqlx = { default-features = false, features = ["postgres", ...] }`) and never compiled —
+`cargo tree -i rsa` resolves to nothing. Cargo records optional dependencies for all
+features in the lockfile, and `cargo audit` scans the lockfile, hence the hit. No fixed
+`rsa` release exists upstream. Accept and re-check on sqlx upgrades.
 
-### npm — VEN/ui: 12 vulnerabilities (2 high)
-
-| Package | Severity | Issue |
-|---------|----------|-------|
-| esbuild | High | Dev-server allows cross-origin requests |
-| vite | Moderate | Transitive dep on vulnerable esbuild |
-| (10 others) | Low–Moderate | Various transitive deps |
-
-**Fix:** `cd VEN/ui && npm audit fix`. The high-severity issue is in the dev server only — not in production builds.
-
-### npm — VTN/ui: 11 vulnerabilities (1 high)
-
-| Package | Severity | Issue |
-|---------|----------|-------|
-| esbuild | High | Same dev-server issue as VEN/ui |
-| (10 others) | Low–Moderate | Various transitive deps |
-
-**Fix:** `cd VTN/ui && npm audit fix`.
-
-### RUSTSEC warnings (unsound, not vulnerabilities)
-
-| ID | Crate | Title |
-|----|-------|-------|
-| RUSTSEC-2026-0097 | rand 0.8.5, 0.9.2 | Unsound with custom logger calling `rand::rng()` |
-| RUSTSEC-2026-0190 | anyhow 1.0.101 | Unsoundness in `Error::downcast_mut()` |
-
-**Risk:** `rand`/`rng()` — only triggered when a custom global logger calls `rand::rng()`, not applicable here. `anyhow::downcast_mut()` — found via `cargo audit` while adding `rusqlite` for Phase 1 (A-1); VEN's own code doesn't call `downcast_mut()` on an `anyhow::Error` anywhere. No action required for either; re-check when `anyhow` publishes a fix.
+**Risk context:** Lab/Pi4 deployment — not internet-exposed. Re-run both audits before
+any internet-exposed deployment.
