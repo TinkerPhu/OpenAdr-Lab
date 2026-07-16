@@ -354,3 +354,36 @@ outes/sim.rs causes a T1+T2 double-solve race:
   `grep -n "p_base_kw"` across the whole subsystem before starting is faster
   than discovering each site via compile errors one at a time.
 
+
+## Total Project Review (docs/plans/total_review_plan.md, 2026-07)
+
+- **Unit tests + tsc cannot see production-bundle breakage — only a real
+  browser can.** vite 8's rolldown bundler mis-resolved a MUI default-import
+  interop in the VTN UI so the built bundle threw React #130 at runtime,
+  while vitest (jsdom, unbundled modules) and `tsc` stayed fully green.
+  After any bundler/toolchain major upgrade, the Pi4 browser E2E is the
+  gate that matters; alternatively `vite preview` + one manual page load
+  before merging. Conservative pin (vite ^7) chosen over debugging a
+  brand-new bundler.
+
+- **Review findings expire — re-verify each one against current main
+  immediately before fixing.** A review conducted on a baseline commit that
+  intervening merges outran produced an obsolete finding (an "unused"
+  StaleRatePolicy that WP4.4 had since fully wired) which survived into an
+  owner decision before being caught. The cost of one grep per finding at
+  fix time is trivially cheaper than reverting a wrong fix.
+
+- **cargo audit reports the lockfile, not the compiled graph.** Cargo.lock
+  pins dependencies of *optional, disabled* features (e.g. sqlx-mysql's
+  `rsa` behind `default-features = false`); `cargo tree -i <crate>` is the
+  arbiter of whether an advisory is actually in the build.
+
+- **vitest 4: mocks called with `new` must be implemented with
+  `function`/`class`.** Arrow-function `mockImplementation(() => ({...}))`
+  for class mocks (VenApi/BffApi pattern) is not constructable and fails
+  at render, not at mock definition.
+
+- **On this 8 GB host, WSL cargo builds must be throttled** (`-j 2`, one
+  build at a time, check free RAM first) — two host crashes via pagefile
+  exhaustion during this review. Rule lives in `.claude/CLAUDE.md`
+  (memory-budget).
