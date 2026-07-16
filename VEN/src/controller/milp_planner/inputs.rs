@@ -109,16 +109,21 @@ pub(crate) fn build_milp_inputs(
         asset_heuristics.get(crate::controller::residual::SITE_RESIDUAL_ASSET_ID);
 
     // WP4.4 (BL-07): import rates come through the stale-rate policy — covered
-    // slots interpolate, slots beyond tariff coverage are filled per policy.
-    let slot_starts: Vec<DateTime<Utc>> = cum_s[0..n]
-        .iter()
-        .map(|&s| now + Duration::seconds(s))
+    // slots use the time-weighted mean over the slot (R-16), slots beyond
+    // tariff coverage are filled per policy.
+    let slot_bounds: Vec<(DateTime<Utc>, DateTime<Utc>)> = (0..n)
+        .map(|i| {
+            (
+                now + Duration::seconds(cum_s[i]),
+                now + Duration::seconds(cum_s[i + 1]),
+            )
+        })
         .collect();
     let stale_outcome = super::stale_rates::apply_stale_rate_policy(
         &planner.stale_rate_policy,
         planner.stale_rate_safe_pctl,
         tariffs,
-        &slot_starts,
+        &slot_bounds,
         0.25,
     );
     let c_imp = stale_outcome.c_imp_eur_kwh;
@@ -136,14 +141,24 @@ pub(crate) fn build_milp_inputs(
     for (i, &slot_s) in cum_s[0..n].iter().enumerate() {
         let slot_t = now + Duration::seconds(slot_s);
         let slot_end = now + Duration::seconds(cum_s[i + 1]);
+        // R-16: time-weighted means so boundary-straddling slots blend rates;
+        // falls back to the slot-start sample when the mean is undefined.
         c_exp.push(
             tariffs
                 .export_eur_kwh
-                .interpolate_at(slot_t)
+                .time_weighted_mean(slot_t, slot_end)
+                .or_else(|| tariffs.export_eur_kwh.interpolate_at(slot_t))
                 .unwrap_or(0.08),
         );
         // CO₂ stored as g/kWh → MILP uses kgCO₂/kWh
-        g_co2.push(tariffs.co2_g_kwh.interpolate_at(slot_t).unwrap_or(300.0) / 1000.0);
+        g_co2.push(
+            tariffs
+                .co2_g_kwh
+                .time_weighted_mean(slot_t, slot_end)
+                .or_else(|| tariffs.co2_g_kwh.interpolate_at(slot_t))
+                .unwrap_or(300.0)
+                / 1000.0,
+        );
         // Use live PvInverter snapshot when available so that irradiance_offset (irradiance
         // slider) and pv_alpha (blend-back speed slider) both project into the
         // forecast. Falls back to the static sin model if no "pv" asset exists.

@@ -7,7 +7,10 @@
 use chrono::{DateTime, Duration, Utc};
 use tracing::debug;
 
-use crate::common::{parse_iso8601_duration_secs, Aggregation, Interpolation, TimeSeries};
+use crate::common::{parse_iso8601_duration_secs, Aggregation};
+use crate::controller::report_intervals::{
+    build_forecast_intervals, build_net_site_power_ts, build_soc_intervals,
+};
 use crate::controller::vtn_port::{
     OadrEvent, OadrIntervalPeriod, OadrReportBody, OadrReportInterval, OadrReportPayload,
     OadrReportResource,
@@ -31,15 +34,6 @@ pub struct AssetReportSample {
 // ---------------------------------------------------------------------------
 // TimeSeries conversion helpers
 // ---------------------------------------------------------------------------
-
-/// Build a `TimeSeries` of `power_kw` from a slice of `AssetReportSample`.
-fn samples_to_power_ts(samples: &[AssetReportSample], interpolation: Interpolation) -> TimeSeries {
-    let pts: Vec<(DateTime<Utc>, f64)> = samples.iter().map(|s| (s.ts, s.power_kw)).collect();
-    TimeSeries {
-        samples: pts,
-        interpolation,
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Interval activity detection
@@ -285,29 +279,7 @@ pub fn build_measurement_report_for_obligation(
         // plan's own native slot boundaries (not the obligation's interval
         // width — a forecast has no meaning resampled onto history buckets).
         // No adopted plan yet → empty → caller re-arms and retries next cycle.
-        "USAGE_FORECAST" => active_plan
-            .map(|plan| {
-                plan.slots
-                    .iter()
-                    .enumerate()
-                    .map(|(i, slot)| {
-                        let net_w = (slot.net_import_kw - slot.net_export_kw) * 1000.0;
-                        let slot_s = (slot.end - slot.start).num_seconds().max(0) as u64;
-                        OadrReportInterval {
-                            id: i,
-                            intervalPeriod: Some(OadrIntervalPeriod {
-                                start: Some(slot.start.to_rfc3339()),
-                                duration: Some(format_iso8601_duration(slot_s)),
-                            }),
-                            payloads: vec![OadrReportPayload {
-                                r#type: "USAGE_FORECAST".to_string(),
-                                values: vec![serde_json::Value::from(net_w)],
-                            }],
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
+        "USAGE_FORECAST" => build_forecast_intervals(active_plan, "USAGE_FORECAST"),
         "IMPORT_CAPACITY_RESERVATION" => {
             let up_w = site_envelope.map(|e| e.up_kw * 1000.0).unwrap_or(0.0);
             vec![OadrReportInterval {
@@ -342,6 +314,9 @@ pub fn build_measurement_report_for_obligation(
                 ],
             }]
         }
+        // R-15: `reportDescriptor.historical: false` asks for a forecast of the
+        // requested payload — serve plan slots instead of measured history.
+        _ if !obligation.historical => build_forecast_intervals(active_plan, payload_type),
         _ => {
             let resampled = net_power_ts.resample_uniform(interval_width, Aggregation::Mean);
             resampled
@@ -404,125 +379,8 @@ pub fn build_measurement_report_for_obligation(
     Some(report)
 }
 
-/// Sum all assets' `power_kw` into a single net site power `TimeSeries`.
-///
-/// Uses LOCF cross-asset aggregation: for each unique timestamp across all
-/// asset sample vecs, sums each asset's `power_at(t)`.
-fn build_net_site_power_ts(
-    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
-) -> TimeSeries {
-    let mut per_asset: Vec<TimeSeries> = asset_samples
-        .values()
-        .map(|samples| samples_to_power_ts(samples, Interpolation::Step))
-        .filter(|ts| !ts.samples.is_empty())
-        .collect();
-
-    if per_asset.is_empty() {
-        return TimeSeries::empty(Interpolation::Step);
-    }
-    if per_asset.len() == 1 {
-        return per_asset.remove(0);
-    }
-
-    // Collect all unique timestamps across all assets, then sum at each point
-    let mut all_ts: Vec<DateTime<Utc>> = per_asset
-        .iter()
-        .flat_map(|s| s.samples.iter().map(|(t, _)| *t))
-        .collect();
-    all_ts.sort();
-    all_ts.dedup();
-
-    let samples: Vec<(DateTime<Utc>, f64)> = all_ts
-        .iter()
-        .map(|&t| {
-            let sum: f64 = per_asset.iter().filter_map(|s| s.interpolate_at(t)).sum();
-            (t, sum)
-        })
-        .collect();
-
-    TimeSeries {
-        samples,
-        interpolation: Interpolation::Step,
-    }
-}
-
-/// Build SoC intervals using point-in-time sampling at interval ends.
-fn build_soc_intervals(
-    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
-    interval_width: Duration,
-    duration_iso: &str,
-    op_state: &'static str,
-) -> Vec<OadrReportInterval> {
-    // Build SoC TimeSeries from the "ev" or "battery" sample vec.
-    let make_soc_ts = |key: &str| -> Option<TimeSeries> {
-        let samples = asset_samples.get(key)?;
-        let pts: Vec<(DateTime<Utc>, f64)> = samples
-            .iter()
-            .filter_map(|s| s.soc.map(|soc| (s.ts, soc)))
-            .collect();
-        if pts.is_empty() {
-            return None;
-        }
-        Some(TimeSeries {
-            samples: pts,
-            interpolation: Interpolation::Step,
-        })
-    };
-
-    // Look for EV or battery SoC timeseries
-    let soc_ts = make_soc_ts("ev").or_else(|| make_soc_ts("battery"));
-
-    let soc_ts = match soc_ts {
-        Some(ts) => ts,
-        None => return Vec::new(),
-    };
-
-    // Build interval-end timestamps using the same grid alignment as resample_uniform
-    let resampled_uniform = soc_ts.resample_uniform(interval_width, Aggregation::Mean);
-    let interval_end_timestamps: Vec<DateTime<Utc>> = resampled_uniform
-        .samples
-        .iter()
-        .map(|(t, _)| *t + interval_width)
-        .collect();
-
-    // Sample SoC at interval ends
-    let soc_at_ends = soc_ts.resample_to_grid(&interval_end_timestamps);
-
-    resampled_uniform
-        .samples
-        .iter()
-        .enumerate()
-        .map(|(i, (ts, _))| {
-            let soc_value = soc_at_ends
-                .samples
-                .iter()
-                .find(|(t, _)| *t == *ts + interval_width)
-                .map(|(_, v)| *v)
-                .unwrap_or(0.0);
-
-            OadrReportInterval {
-                id: i,
-                intervalPeriod: Some(OadrIntervalPeriod {
-                    start: Some(ts.to_rfc3339()),
-                    duration: Some(duration_iso.to_string()),
-                }),
-                payloads: vec![
-                    OadrReportPayload {
-                        r#type: "STORAGE_CHARGE_LEVEL".to_string(),
-                        values: vec![serde_json::Value::from(format!("{:.1}", soc_value * 100.0))],
-                    },
-                    OadrReportPayload {
-                        r#type: "OPERATING_STATE".to_string(),
-                        values: vec![serde_json::Value::from(op_state)],
-                    },
-                ],
-            }
-        })
-        .collect()
-}
-
 /// Format seconds as minimal ISO 8601 duration string.
-fn format_iso8601_duration(secs: u64) -> String {
+pub(crate) fn format_iso8601_duration(secs: u64) -> String {
     let h = secs / 3600;
     let m = (secs % 3600) / 60;
     let s = secs % 60;
@@ -593,18 +451,8 @@ mod tests {
             interval_duration_s,
             fulfilled: false,
             created_at: Utc::now(),
+            historical: true,
         }
-    }
-
-    // ── samples_to_power_ts ───────────────────────────────────────
-
-    #[test]
-    fn samples_to_power_ts_basic() {
-        let (_, samples) = make_samples("site", &[(0, 1.0), (60, 2.0), (120, 3.0)]);
-        let series = samples_to_power_ts(&samples, Interpolation::Step);
-        assert_eq!(series.samples.len(), 3);
-        assert!((series.samples[0].1 - 1.0).abs() < 1e-9);
-        assert!((series.samples[2].1 - 3.0).abs() < 1e-9);
     }
 
     // ── format_iso8601_duration ────────────────────────────────────
@@ -683,6 +531,7 @@ mod tests {
             interval_duration_s: 900,
             fulfilled: false,
             created_at: Utc::now(),
+            historical: true,
         };
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
         assert!(build_measurement_report_for_obligation(
@@ -1009,6 +858,7 @@ mod tests {
                 payloadType: "USAGE".to_string(),
                 readingType: None,
                 frequency: Some(900),
+                historical: None,
             }]),
         };
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
@@ -1156,6 +1006,30 @@ mod tests {
                 .is_some(),
             "forecast intervals carry the plan slot's own start time"
         );
+    }
+
+    #[test]
+    fn usage_obligation_with_historical_false_serves_forecast_slots() {
+        // R-15: `reportDescriptor.historical: false` on a plain USAGE payload
+        // is a forecast request — plan slots, typed as the requested payload.
+        let mut ob = make_obligation("evt-h", "prog-h", "USAGE", 900);
+        ob.historical = false;
+        let plan = make_minimal_plan_two_slots();
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &std::collections::HashMap::new(),
+            "ven-1",
+            None,
+            Some(&plan),
+            Utc::now(),
+        )
+        .expect("plan present -> forecast report built");
+
+        let intervals = &report.resources[0].intervals;
+        assert_eq!(intervals.len(), 2, "one interval per plan slot");
+        assert_eq!(intervals[0].payloads[0].r#type, "USAGE");
+        let v0 = intervals[0].payloads[0].values[0].as_f64().unwrap();
+        assert!((v0 - 2000.0).abs() < 1.0, "forecast value from plan slot 0");
     }
 
     #[test]

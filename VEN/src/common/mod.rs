@@ -80,7 +80,9 @@ impl TimeSeries {
     /// Compute the time-weighted mean of the signal over `[start, end)`.
     ///
     /// Returns `None` if the signal is undefined at `start` (i.e. before data).
-    fn time_weighted_mean(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Option<f64> {
+    /// Used by the MILP input builder so a plan slot straddling a tariff
+    /// boundary is priced at the true blended rate, not the slot-start rate.
+    pub fn time_weighted_mean(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Option<f64> {
         if start >= end || self.samples.is_empty() {
             return None;
         }

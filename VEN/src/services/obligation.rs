@@ -128,6 +128,7 @@ mod tests {
             interval_duration_s: 900,
             fulfilled: false,
             created_at: due_at,
+            historical: true,
         }
     }
 

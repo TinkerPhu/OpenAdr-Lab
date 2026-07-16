@@ -80,13 +80,11 @@ flagged in `docs/BACKLOG.md` BL-24).
   which `PlanCycle` events don't carry — that mapping is the open work
   (see `docs/BACKLOG_OpenADR_Cert.md`).
 
-> **DRIFT** `docs/architecture/VEN_ARCHITECTURE.md` §2.1 additionally lists
-> `USAGE_FORECAST` (FIRM slots as point forecasts, FLEXIBLE slots as `[0, MaxPower]`
-> ranges) as an outbound obligation — but no code path in `reporter.rs` builds this
-> payload type. The MILP planner already computes exactly this per-slot forecast
-> internally (`planned_state_by_asset`, exposed to `/timeline` for the UI) — it's just
-> never turned into a report. See [[openadr-spec-use-cases]] (§8.7/§8.8) for what the
-> spec expects (the VEN doesn't parse `reportDescriptor.historical` at all).
+`USAGE_FORECAST` obligations serve planned net site power per future plan slot
+at the plan's native slot boundaries (a forecast has no meaning resampled onto
+history buckets), and `reportDescriptor.historical: false` on any usage-family
+payload routes to the same forecast path — the spec's forecast-vs-historical
+distinction (§8.7/§8.8, [[openadr-spec-use-cases]]) is honoured on both axes.
 
 The tariff/capacity values captured per poll tick form the `TariffSnapshot` described in
 [[tariffs-and-capacity]].

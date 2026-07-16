@@ -1,5 +1,5 @@
 use crate::controller::trace::ControllerTrace;
-use crate::controller::vtn_port::{OadrEvent, OadrProgram};
+use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport};
 use crate::controller::SimSnapshot;
 use crate::entities::asset_ledger::AssetLedgerEntry;
 use crate::entities::capacity::{
@@ -44,8 +44,9 @@ fn bool_true() -> bool {
 pub struct PollingState {
     pub programs: Vec<OadrProgram>,
     pub events: Vec<OadrEvent>,
-    /// Full report JSON from VTN — pass-through for GET /reports and BDD assertions.
-    pub reports: Vec<serde_json::Value>,
+    /// Full-fidelity typed reports from the VTN (wire shape preserved via
+    /// serde flatten) — pass-through for GET /reports and BDD assertions.
+    pub reports: Vec<OadrReport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,7 +120,7 @@ pub const NOTIFICATION_RING_CAP: usize = 200;
 struct PersistedVenState {
     programs: Vec<OadrProgram>,
     events: Vec<OadrEvent>,
-    reports: Vec<serde_json::Value>,
+    reports: Vec<OadrReport>,
     sensor: SensorSnapshot,
 }
 
@@ -205,7 +206,7 @@ impl AppState {
         self.polling.write().await.events = events;
     }
 
-    pub async fn set_reports(&self, reports: Vec<serde_json::Value>) {
+    pub async fn set_reports(&self, reports: Vec<OadrReport>) {
         self.polling.write().await.reports = reports;
     }
 
@@ -225,7 +226,7 @@ impl AppState {
         self.polling.read().await.events.clone()
     }
 
-    pub async fn reports(&self) -> Vec<serde_json::Value> {
+    pub async fn reports(&self) -> Vec<OadrReport> {
         self.polling.read().await.reports.clone()
     }
 
@@ -772,6 +773,7 @@ mod tests {
             interval_duration_s: 900,
             fulfilled: false,
             created_at: Utc::now(),
+            historical: true,
         }
     }
 

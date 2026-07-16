@@ -31,12 +31,14 @@ pub(crate) fn spawn_planning(
     active_objective: Arc<RwLock<PlannerObjective>>,
     event_tx: PlannerEventTx,
     notifier: crate::services::notify::Notifier,
+    now_fn: impl Fn() -> chrono::DateTime<Utc> + Send + Sync + 'static,
 ) -> tokio::task::JoinHandle<()> {
-    let replan_s = planner.replan_interval_s;
-    let initial_delay_s = planner.planning_initial_delay_s;
     tokio::spawn(async move {
         // Initial delay: let event poll populate rates before first plan
-        tokio::time::sleep(std::time::Duration::from_secs(initial_delay_s)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(
+            planner.planning_initial_delay_s,
+        ))
+        .await;
         // First cycle is always Periodic; subsequent cycles are set by the select! below.
         // Using a local variable instead of borrow()ing the watch channel prevents stale
         // retained values (e.g. AssetStateChange set once and never cleared) from
@@ -44,7 +46,7 @@ pub(crate) fn spawn_planning(
         // bypassing the plan acceptance gate.
         let mut wake_trigger = PlanTrigger::Periodic;
         loop {
-            let wall_now = Utc::now();
+            let wall_now = now_fn();
             // Align to the nearest step boundary so all replans within the same window
             // share identical slot grids (gate stability, warm-start prerequisite).
             // wall_now is kept separately for Plan.created_at (gate decay uses real age).
@@ -210,7 +212,7 @@ pub(crate) fn spawn_planning(
             // This ensures the acceptance gate sees Periodic for routine replans
             // and is only bypassed for genuine event-driven triggers.
             wake_trigger = tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_secs(replan_s)) => PlanTrigger::Periodic,
+                _ = tokio::time::sleep(std::time::Duration::from_secs(planner.replan_interval_s)) => PlanTrigger::Periodic,
                 _ = trigger_rx.changed() => trigger_rx.borrow_and_update().clone(),
             };
         }
@@ -297,6 +299,7 @@ mod tests {
             active_objective,
             event_tx,
             crate::services::notify::Notifier::new(None),
+            Utc::now,
         );
         handle.abort();
         let _ = trigger_tx; // keep alive until abort
