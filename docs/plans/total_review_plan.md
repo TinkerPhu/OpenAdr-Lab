@@ -21,7 +21,7 @@ registers — nothing open is tracked in this file:
   placements, injectable-clock gaps, unwrap triage, lint/doc hygiene, BFF error
   flattening/duplication, dead behave steps, tooling, repo hygiene, state-type
   placement, file-size watch-list).
-- `docs/plans/refactoring_backlog.md` — R-03, R-08.
+- `docs/plans/refactoring_backlog.md` — R-08.
 - `docs/BACKLOG.md` — BL-34, BL-35, GB-11 (and the refreshed
   Dependency Vulnerabilities section).
 - `wiki/review.md` — the stale-page remainder from the scoped 2026-07-16
