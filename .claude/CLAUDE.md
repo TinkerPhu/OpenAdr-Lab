@@ -2,6 +2,15 @@ docker: docker runs on ssh Pi4-Server. run all tasks with docker on Pi4-Server v
 
 local-rust: WSL is installed on this Windows machine. Use `wsl cargo check` (or `wsl cargo test`) inside the VEN directory for local Rust compilation instead of native Windows cargo, which lacks cmake/HiGHS. For a full test run including HiGHS, use the Pi4-Server docker stack.
 
+memory-budget: this laptop has only 8 GB RAM — WSL cargo builds have crashed the host
+(pagefile exhaustion, "Catastrophic failure Wsl/Service/E_UNEXPECTED"). Before starting
+any large-memory task (cargo build/check/test/clippy in WSL, parallel npm builds), check
+free memory first:
+  Get-CimInstance Win32_OperatingSystem | % { "{0:N1} GB free" -f ($_.FreePhysicalMemory/1MB) }
+Rules: always pass `-j 2` to cargo in WSL; run only ONE WSL build at a time (never in
+parallel with another build or test run); if free physical memory is below ~1 GB, wait or
+ask the user to close applications before starting.
+
 dto: avoid DTO normalization. pass through upstream field names (e.g. OpenADR spec names) across all layers — backend, BFF, UI. one vocabulary everywhere reduces boilerplate and debugging friction.
 
 workflow: 1. always keep a project_journal.md in projects where you write for each large step what you did, why you did it and what issues/key-learnings you had. it shall explain, how the project was implemented. The journal lives at docs/history/project_journal.md.
