@@ -2,9 +2,9 @@
 title: VTN Stack — openleadr-rs, BFF, UI
 type: architecture
 created: 2026-07-04
-updated: 2026-07-10
-synced_commit: 88e0e25
-sources: [docs/architecture/VTN_ARCHITECTURE.md, VTN/, openleadr-rs/, VTN/bff/src/recorder.rs]
+updated: 2026-07-16
+synced_commit: f08e469
+sources: [docs/architecture/VTN_ARCHITECTURE.md, VTN/, openleadr-rs/, VTN/bff/src/]
 tags: [vtn, bff, openleadr-rs, architecture]
 ---
 
@@ -57,3 +57,13 @@ if it isn't. `record_ven_snapshots` must use the `ven-manager` credential, not
 `any-business` — the same `/vens` role restriction as above bit this during Pi4
 verification (403, not caught by unit tests since those mock the client). Full detail:
 [[history-store]].
+
+## BFF unit tests
+
+All four BFF support modules carry inline unit tests (`cargo test` in
+`VTN/bff`): `recorder.rs` (dedup keys, report-lag), `cache.rs` (TtlCache
+expiry/overwrite/invalidate), `error.rs` (every `AppError` maps to 502 with a
+JSON `error` body — the 4xx-flattening limitation is tracked as R-31), and
+`vtn_client.rs` (200/500/401-retry-once/health paths, exercised against a
+throwaway axum server on an ephemeral port — real HTTP, no new dev-dependency,
+so the OAuth retry loop is tested without mocking `reqwest`).

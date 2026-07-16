@@ -24,6 +24,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[fleet-tooling]] — fleet.sh (up/down/status), bulk VEN registration, GB-06/GB-09
 - [[experiment-harness]] — scenario YAMLs, real-time runner, KPI extraction, comparison reports
 - [[notifications]] — user notification feed: ring + SSE + persistence, edge-triggered producers, dedup via stable warning text
+- [[heuristics-pipeline]] — learned per-asset baselines: SITE_RESIDUAL signal, trapezoid appliance noise, weekday/weekend EWMA profiles, planner/forecast consumers
 
 ## Concepts
 - [[openadr-3]] — protocol entities, event types, certification profiles, 3.0 vs 3.1 skew
@@ -57,4 +58,4 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[history-store-persistence-format]] — SQLite schema, epoch-second time encoding, per-asset-per-minute rows, flat retention pruning, docker bind-mount path
 
 ---
-Pages: 36 · Last sync: 2026-07-12 (Phase 4 comfort & personas: new notifications page; milp-planner, ven-ui, history-store, fleet-tooling, experiment-harness, hems-planning updated, c5a1d03)
+Pages: 37 · Last sync: 2026-07-16 (Phase 5 heuristics + total review: new heuristics-pipeline page; milp-planner, ven-ui, asset-layer, ven-hexagonal-architecture, vtn-stack, testing-strategy updated, f08e469)

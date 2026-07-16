@@ -2,9 +2,9 @@
 title: Asset Layer
 type: component
 created: 2026-07-04
-updated: 2026-07-05
-synced_commit: e138861
-sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md]
+updated: 2026-07-16
+synced_commit: f08e469
+sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, VEN/src/controller/residual.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md]
 tags: [assets, abstraction, ven]
 ---
 
@@ -32,6 +32,20 @@ numbers (`VEN/src/assets/`). Three cooperating pieces:
 A virtual **Grid asset** (`assets/grid.rs`, held as `SimState.grid_asset`) tracks net
 site power plus the VTN capacity limits each tick and keeps its own history; it is
 read-only — never dispatched.
+
+A second read-only virtual asset, **`site-residual`** (`controller/residual.rs`,
+Phase 5 WP5.1), is inserted into snapshots rather than living in `SimState`:
+`residual_kw = grid meter − Σ modelled asset power`, the unmodelled background
+load the planner budgets for and the learning pipeline trains on
+([[heuristics-pipeline]]). Zero import/export capability marks it
+point-reading-only.
+
+**BaseLoad appliance noise** (Phase 5): a profile-configured `base_load.spikes`
+list adds trapezoidal daily appliance pulses (plateau at `amplitude_kw`, linear
+ramps, timing/magnitude jitter, optional weekday restriction, per-day firing
+probability; empty by default). Trapezoids, not Gaussians, because a
+trapezoid's energy is directly `≈ amplitude_kw × (duration_h − ramp_h)` —
+settable to match a real appliance session ([[heuristics-pipeline]]).
 
 > **DRIFT** `docs/architecture/VEN_ARCHITECTURE.md` §3.0 specifies a
 > `trait AssetInterface { current(); forecast(horizon); past(window) }` with
