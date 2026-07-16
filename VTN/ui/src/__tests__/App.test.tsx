@@ -4,7 +4,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import App from "../App";
 
 vi.mock("../api/client", () => ({
-  BffApi: vi.fn().mockImplementation(() => ({
+  // vitest 4: a mock invoked with `new` must use `function`, not an arrow
+  BffApi: vi.fn().mockImplementation(function () {
+    return {
     baseUrl: "",
     health: vi.fn().mockResolvedValue({
       time: "2026-01-01T00:00:00Z",
@@ -15,7 +17,8 @@ vi.mock("../api/client", () => ({
     events: vi.fn().mockResolvedValue([]),
     vens: vi.fn().mockResolvedValue([]),
     reports: vi.fn().mockResolvedValue([]),
-  })),
+    };
+  }),
 }));
 
 function renderApp() {

@@ -4,7 +4,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import App from "../App";
 
 vi.mock("../api/client", () => ({
-  VenApi: vi.fn().mockImplementation(() => ({
+  // vitest 4: a mock invoked with `new` must use `function`, not an arrow
+  VenApi: vi.fn().mockImplementation(function () {
+    return {
     baseUrl: "http://localhost:8081",
     health: vi.fn().mockResolvedValue("ok"),
     programs: vi.fn().mockResolvedValue([]),
@@ -16,7 +18,8 @@ vi.mock("../api/client", () => ({
       temperature_c: 22, power_w: 100, voltage_v: 230, raw: {},
     }),
     postSensors: vi.fn().mockResolvedValue({}),
-  })),
+    };
+  }),
 }));
 
 function renderApp() {
