@@ -148,15 +148,10 @@ re-sort/prioritization pass to decide actual implementation order.
 
 | ID | Item | Priority |
 |---|---|---|
-| GB-01 | Clean up Docker orphan containers | Low |
-| GB-02 | Unify VEN-1 naming scheme to match VEN-2/VEN-3 (causes test confusion) | Medium |
-| GB-03 | Make VEN-1 ID a UUID and update all test/seed references | Medium |
 | GB-04 | DB-level optimization: add `ends_at timestamptz` index so `?active=true` runs in SQL, not post-filter Rust | Low (not needed until event table is large) |
-| GB-05 | VTN UI: filter past events from event table | Low |
-| GB-07 | Add setup script to bring up all required containers | Low |
-| GB-08 | Add VEN UI tests for UserRequests and Controller pages | Medium |
+| GB-05 | VTN UI: filter past events from event table (the Events page search box matches text only — no active/past filtering) | Low |
+| GB-07 | Add setup script to bring up all required containers (fleet.sh covers only the fleet VENs; VTN stack + base VENs are separate compose invocations) | Low |
 | GB-09 | Per-profile VEN poll interval override. The original motivation ("N VENs don't poll in lockstep") is met via the one-time `POLL_STARTUP_JITTER_S` stagger; a per-profile interval override remains unbuilt and nothing currently needs it | Low |
-| GB-10 | Remove remaining compiler warnings across all builds | Medium |
 | GB-11 | Remaining AI-SW-Development alignment items (from the retired root alignment-plan.md, Pass 3): backlog-handling + tool-installation + archive-folder notes in CLAUDE.md; USER_STORIES.md; RISK_ANALYSIS.md; PROMPT_LIBRARY.md; changelog decision (journal-as-changelog note); security-review cadence; automated code-review hook; file-header descriptions on key VEN modules | Low |
 
 ---
