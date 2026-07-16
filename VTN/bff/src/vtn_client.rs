@@ -298,3 +298,134 @@ impl VtnClient {
         (reachable, auth_ok)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode as AxStatus;
+    use axum::response::IntoResponse;
+    use axum::routing::{get, post};
+    use axum::{Json, Router};
+    use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    async fn token_handler() -> Json<serde_json::Value> {
+        Json(json!({"access_token": "test-token", "token_type": "bearer", "expires_in": 3600}))
+    }
+
+    /// Serve `app` on an ephemeral local port; returns the base URL.
+    async fn spawn_stub(app: Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    fn client_for(base_url: String) -> VtnClient {
+        VtnClient::new(base_url, "id".into(), "secret".into())
+    }
+
+    #[tokio::test]
+    async fn get_json_returns_body_on_200() {
+        let app = Router::new()
+            .route("/auth/token", post(token_handler))
+            .route("/programs", get(|| async { Json(json!([{"id": "p1"}])) }));
+        let client = client_for(spawn_stub(app).await);
+
+        let body = client.get_json("/programs", None).await.unwrap();
+        assert_eq!(body, json!([{"id": "p1"}]));
+    }
+
+    #[tokio::test]
+    async fn get_json_bails_with_status_on_500() {
+        let app = Router::new()
+            .route("/auth/token", post(token_handler))
+            .route(
+                "/programs",
+                get(|| async { (AxStatus::INTERNAL_SERVER_ERROR, "boom") }),
+            );
+        let client = client_for(spawn_stub(app).await);
+
+        let err = client.get_json("/programs", None).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("500"), "error must carry the status: {msg}");
+        assert!(msg.contains("boom"), "error must carry the body: {msg}");
+    }
+
+    #[tokio::test]
+    async fn get_json_retries_once_after_401() {
+        let calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let calls_handler = calls.clone();
+        let app = Router::new()
+            .route("/auth/token", post(token_handler))
+            .route(
+                "/events",
+                get(move || {
+                    let calls = calls_handler.clone();
+                    async move {
+                        if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                            AxStatus::UNAUTHORIZED.into_response()
+                        } else {
+                            Json(json!([{"id": "e1"}])).into_response()
+                        }
+                    }
+                }),
+            );
+        let client = client_for(spawn_stub(app).await);
+
+        let body = client.get_json("/events", None).await.unwrap();
+        assert_eq!(body, json!([{"id": "e1"}]));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "must retry exactly once after a 401"
+        );
+    }
+
+    #[tokio::test]
+    async fn post_json_sends_body_and_returns_response() {
+        let app =
+            Router::new()
+                .route("/auth/token", post(token_handler))
+                .route(
+                    "/reports",
+                    post(|Json(body): Json<serde_json::Value>| async move {
+                        Json(json!({"echo": body}))
+                    }),
+                );
+        let client = client_for(spawn_stub(app).await);
+
+        let body = client
+            .post_json("/reports", json!({"reportName": "r1"}), None)
+            .await
+            .unwrap();
+        assert_eq!(body, json!({"echo": {"reportName": "r1"}}));
+    }
+
+    #[tokio::test]
+    async fn check_health_reports_unreachable_vtn() {
+        // Nothing listens on this port (bound then dropped immediately).
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let client = client_for(format!("http://{addr}"));
+        let (reachable, auth_ok) = client.check_health().await;
+        assert!(!reachable);
+        assert!(!auth_ok, "auth must not be probed when unreachable");
+    }
+
+    #[tokio::test]
+    async fn check_health_reports_reachable_and_authed() {
+        let app = Router::new()
+            .route("/auth/token", post(token_handler))
+            .route("/health", get(|| async { "ok" }));
+        let client = client_for(spawn_stub(app).await);
+
+        let (reachable, auth_ok) = client.check_health().await;
+        assert!(reachable);
+        assert!(auth_ok);
+    }
+}

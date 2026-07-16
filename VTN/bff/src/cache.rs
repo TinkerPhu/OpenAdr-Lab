@@ -33,3 +33,54 @@ impl TtlCache {
         entries.remove(key);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn get_returns_value_within_ttl() {
+        let cache = TtlCache::new();
+        cache
+            .set("k".into(), json!({"a": 1}), Duration::from_secs(60))
+            .await;
+        assert_eq!(cache.get("k").await, Some(json!({"a": 1})));
+    }
+
+    #[tokio::test]
+    async fn get_returns_none_after_ttl_expiry() {
+        let cache = TtlCache::new();
+        // Zero TTL: `created.elapsed() < ttl` is false immediately — expired on first read.
+        cache.set("k".into(), json!(42), Duration::ZERO).await;
+        assert_eq!(cache.get("k").await, None);
+    }
+
+    #[tokio::test]
+    async fn get_returns_none_for_missing_key() {
+        let cache = TtlCache::new();
+        assert_eq!(cache.get("absent").await, None);
+    }
+
+    #[tokio::test]
+    async fn invalidate_removes_entry() {
+        let cache = TtlCache::new();
+        cache
+            .set("k".into(), json!("v"), Duration::from_secs(60))
+            .await;
+        cache.invalidate("k").await;
+        assert_eq!(cache.get("k").await, None);
+    }
+
+    #[tokio::test]
+    async fn set_overwrites_existing_entry() {
+        let cache = TtlCache::new();
+        cache
+            .set("k".into(), json!(1), Duration::from_secs(60))
+            .await;
+        cache
+            .set("k".into(), json!(2), Duration::from_secs(60))
+            .await;
+        assert_eq!(cache.get("k").await, Some(json!(2)));
+    }
+}
