@@ -12,33 +12,11 @@
 
 | # | Issue | Priority | Effort | Risk |
 |---|-------|----------|--------|------|
-| R-03 | Replace hardcoded string asset IDs in `dispatcher.rs` with constants | 🟠 | Small | Mechanical |
 | R-08 | `AssetConfig` → `dyn Asset` dispatch or macro forwarder | 🔵 | Large | Correctness risk, deferred |
 
 ---
 
 ## Detailed Findings
-
----
-
-### R-03 — Hardcoded string asset IDs in `dispatcher.rs` 🟠
-
-**File:** `VEN/src/controller/dispatcher.rs`
-
-Asset ID string literals are duplicated in `dispatcher.rs`. The canonical source for each
-ID is the `asset_id()` method in the respective asset file (e.g. `assets/battery.rs` returns
-`"battery"`). `dispatcher.rs` re-declares these inline instead of referencing a shared constant:
-
-```
-"battery"  — dispatcher.rs:266, 269, 297, 338 (approx)
-"ev"       — dispatcher.rs:297, 300 (approx)
-"heater"   — dispatcher.rs:361, 364 (approx)
-"pv"       — dispatcher.rs:319, 322 (approx)
-"base_load"— dispatcher.rs:338, 341 (approx)
-```
-
-**Status:** Constants exist in `VEN/src/ids.rs` (`ASSET_EV`, `ASSET_BATTERY`, etc.).
-**Remaining work:** Replace the inline string literals in `dispatcher.rs` with these constants and have each asset's `asset_id()` return the constant rather than a string literal.
 
 ---
 

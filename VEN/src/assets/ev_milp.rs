@@ -361,7 +361,7 @@ impl EvMilpContext {
 
 impl crate::controller::milp_planner::AssetMilpContext for EvMilpContext {
     fn asset_id(&self) -> &str {
-        "ev"
+        crate::ids::ASSET_EV
     }
 
     fn asset_kind(&self) -> crate::controller::milp_planner::AssetKind {

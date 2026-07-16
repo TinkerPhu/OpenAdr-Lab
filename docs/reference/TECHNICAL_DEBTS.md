@@ -12,7 +12,6 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (large, d
 
 | ID | Description | Affected files | Effort | Risk | Priority |
 |----|-------------|----------------|--------|------|----------|
-| R-03 | Replace hardcoded string asset IDs in `dispatcher.rs` with shared constants. `asset_id()` methods in each asset file are the authoritative source — keep them; only the duplicate literals in dispatcher need replacing. | `VEN/src/controller/dispatcher.rs` | Small | Mechanical | 🟠 |
 | R-08 | Replace `AssetConfig` manual dispatch enum (~9 methods × 5 variants) with `dyn Asset` or macro forwarder | `VEN/src/assets/mod.rs` | Large | Serialisation risk | 🔵 |
 | R-09 | Inject clock into `tasks/planning.rs` instead of calling `Utc::now()` directly. Accept a `Fn() -> DateTime<Utc>` parameter in `spawn_planning` so the planning loop is testable without wall-clock coupling. `align_to_step` is already a pure function. Blocked on threading the clock through `spawn_planning`'s argument list. | `VEN/src/tasks/planning.rs` | Small | Low | 🟡 |
 | R-10 | Mostly resolved: `VtnPort` exposes typed `OadrProgram`/`OadrEvent`/`OadrReport` structs (`controller/vtn_port.rs`). Remaining untyped surface: `VtnPort::fetch_reports_raw` returns `Vec<serde_json::Value>` (vtn_port.rs:25) and `update_report` takes a raw `Value` body — type or relocate these two so no `Value` crosses the port. `values: Vec<serde_json::Value>` fields stay (OpenADR 3 defines them polymorphic — documented). | `VEN/src/controller/vtn_port.rs`, `VEN/src/vtn.rs` | Small | Low | 🟡 |
