@@ -3,8 +3,8 @@ title: "Query: what is the Planner tab in the VEN UI for?"
 type: query
 created: 2026-07-17
 updated: 2026-07-17
-synced_commit: cd2150d
-sources: [VEN/ui/src/pages/Planner.tsx, VEN/ui/src/App.tsx, VEN/ui/src/pages/Controller.tsx, VEN/ui/src/pages/Dashboard.tsx]
+synced_commit: f068d94
+sources: [VEN/ui/src/pages/Planner.tsx, VEN/ui/src/App.tsx, VEN/ui/src/pages/Controller.tsx, VEN/ui/src/pages/Dashboard.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx]
 tags: [ui, planner, ux]
 ---
 
@@ -30,14 +30,14 @@ BL-38** in `docs/BACKLOG.md`.
 | PlanPowerStack | Stacked per-asset power over the plan horizon | both |
 | PlanTriggerTimeline | History of *why* replans fired | debug |
 | PlanDecisionMatrix | Per-slot decisions and rates, incl. hatched estimated-rate slots ([[ven-ui]] WP4.6) | debug |
-| PacketProgressBoard | Session/deadline progress ("EV charged by 7?") — [[hems-planning]] sessions | user |
+| SessionProgressBoard | Session/deadline progress ("EV charged by 7?") — [[hems-planning]] sessions | user |
 | TraceTable (collapsed accordion) | Raw decision-trace event log | debug |
 | CorrectionBanner (snackbar) | Live Layer-1 reactive battery correction ([[dispatcher]]) | both |
 
 ## Value by audience
 
 - **VEN user (site operator):** only the objective selector (the most consequential user
-  decision in the UI), the PacketProgressBoard, and loosely the PowerStack matter. The
+  decision in the UI), the SessionProgressBoard, and loosely the PowerStack matter. The
   rest is noise to this persona.
 - **Debugging/understanding:** the tab's real strength is *correlation* — diagnosing
   "why did the plan change?" needs trigger history + solve status + resulting matrix +
@@ -53,18 +53,34 @@ Controller shows per-asset *timelines with zones* ([[three-tier-plan-grid]],
 `VEN/ui/src/pages/Controller.tsx`), Dashboard shows *current state* (capacity, ledger,
 `VEN/ui/src/pages/Dashboard.tsx`); neither duplicates the decision matrix or trace.
 
+## Correction (2026-07-17) — the board was dead when this page was written
+
+The original answer classified `PacketProgressBoard` as one of the tab's two user-facing
+elements. It was in fact **dead UI**: it polled `GET /packets`, an endpoint removed with
+the EnergyPacket abstraction (Phase D, commits `efd861f`…`0079a77`), so it permanently
+rendered its empty state. Same day, it was rebuilt UI-only as **`SessionProgressBoard`**
+(`VEN/ui/src/components/sessions/SessionProgressBoard.tsx`, commit f068d94) on the live
+[[hems-planning]] session vocabulary: `GET /user-requests` + live sim snapshot (EV SoC
+fill gauge, heater current→target temperature) + the active plan (`planned_kw_by_asset`
+summed to the session deadline vs `envelopes.energy_needed_kwh` → on-track/at-risk chip).
+The budget bar shows `estimated_cost_eur` labeled "est." — per-session *accumulated* cost
+does not exist anywhere (tracked as BL-39). The table above reflects the rebuilt board.
+
 ## Improvements → backlog
 
 Filed in `docs/BACKLOG.md` (User-Value View, "comfort, control & trust"):
 
-- **BL-36** — surface a condensed PacketProgressBoard + read-only objective chip on the
-  Dashboard; the objective *control* stays on the Planner tab beside its weight legend,
-  where the legend and live solve feedback teach the user what each objective does.
+- **BL-36 — resolved (f068d94)** with the rebuild: condensed session chips + a read-only
+  objective chip on the Dashboard (`dash-session-strip`); the objective *control* stays on
+  the Planner tab beside its weight legend, where the legend and live solve feedback teach
+  the user what each objective does.
 - **BL-37** — route `correction_active`/`correction_cleared` through the backend
   [[notifications]] feed: `usePlannerEvents` subscribes only while the Planner page is
   mounted, so corrections firing on any other tab are currently invisible.
 - **BL-38** — layout split (user zone on top, diagnostics collapsed below) and
   matrix-slot → trace filtering to close the "what happened in slot 14:35?" loop.
+- **BL-39** — per-session accumulated-cost accounting so the budget bar can show real
+  spend instead of the plan-time estimate (spun off from the BL-36 resolution).
 
-A coverage-gap item in `review.md` (2026-07-17) tracks extending [[ven-ui]] with a proper
-Planner-tab section — that page names the tab only as "planner timeline views".
+The [[ven-ui]] page now carries the Planner-tab composition and Dashboard session strip
+(coverage-gap item of 2026-07-17 resolved).
