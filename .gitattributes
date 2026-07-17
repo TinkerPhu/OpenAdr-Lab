@@ -1,2 +1,4 @@
 # Force LF for generated snapshot fixtures so Windows CRLF checkout never breaks the golden-file tests.
 VEN/tests/fixtures/*.json text eol=lf
+# Shell scripts must stay LF: pi4_lock.sh pipes a heredoc to the Pi4's Linux bash, which rejects CRLF.
+*.sh text eol=lf
