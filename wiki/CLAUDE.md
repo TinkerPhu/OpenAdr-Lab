@@ -82,6 +82,9 @@ tags: [planner, milp]
   isolation.
 - Every workflow run appends one line to `log.md` (date, operation, commit range, pages touched).
 - When uncertain or when sources contradict, add an item to `review.md` instead of guessing.
+- `review.md` holds **open items only**: when an item is resolved, delete it entirely (never
+  mark it `[x]` or append a RESOLVED note). The resolution record is a one-line entry in
+  `log.md` plus git history of the pages/files the resolution touched.
 - After any write batch, update `index.md`.
 - Deleting a page requires user confirmation and a check for inbound links (cascade).
 
