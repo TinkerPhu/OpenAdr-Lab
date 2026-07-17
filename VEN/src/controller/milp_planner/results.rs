@@ -94,6 +94,7 @@ pub(crate) fn fallback_plan(
             ev_cfg,
             heat_cfg,
             now,
+            None, // no solution — estimates fall back to energy × avg tariff
         ),
         None => vec![],
     };
@@ -428,6 +429,17 @@ pub(crate) fn translate_to_plan(
     }
 
     // ── Assemble plan ───────────────────────────────────────────────────
+    let envelopes = build_plan_envelopes(
+        ev_session,
+        heater_target,
+        shiftable_loads,
+        inputs,
+        planner,
+        ev_cfg,
+        heat_cfg,
+        now,
+        Some(&slots),
+    );
     Plan {
         id: Uuid::new_v4(),
         created_at: now,
@@ -435,16 +447,7 @@ pub(crate) fn translate_to_plan(
         horizon,
         slots,
         summary,
-        envelopes: build_plan_envelopes(
-            ev_session,
-            heater_target,
-            shiftable_loads,
-            inputs,
-            planner,
-            ev_cfg,
-            heat_cfg,
-            now,
-        ),
+        envelopes,
         warnings,
         objective,
         soc_trajectory_kwh,
