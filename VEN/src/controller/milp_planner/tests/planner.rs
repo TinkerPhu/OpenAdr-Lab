@@ -1186,3 +1186,100 @@ fn run_planner_shiftable_still_defers_for_real_savings() {
         "a 0.35 €/kWh saving must beat the 0.001 €/slot tie-break, got {wm:?}"
     );
 }
+
+#[test]
+fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
+    // Two-rate tariff: cheap first hour (0.10), expensive second (0.50).
+    // A min_cost solve puts the whole 7 kWh EV charge into the cheap hour, so the
+    // envelope estimate must be the solved schedule's cost (~0.70 €), not
+    // energy × average tariff (7 × 0.30 = 2.10 €).
+    let now = fixed_now();
+    let mut profile = make_profile_1800s();
+    profile
+        .assets
+        .retain(|a| !matches!(a, AssetProfile::Heater(_) | AssetProfile::Pv(_)));
+    profile.assets = profile
+        .assets
+        .into_iter()
+        .map(|a| match a {
+            AssetProfile::Ev(mut ev) => {
+                ev.battery_kwh = 10.0;
+                AssetProfile::Ev(ev)
+            }
+            other => other,
+        })
+        .collect();
+    let mut sim = make_snap_from_profile(&profile);
+    set_ev_plugged(&mut sim, true);
+    if let Some(ev) = sim.assets.get_mut("ev") {
+        let bat_kwh = ev.val("battery_kwh").unwrap_or(60.0);
+        let soc_target = ev.val("soc_target").unwrap_or(0.8);
+        let max_ch = ev.val("max_charge_kw").unwrap_or(7.4);
+        ev.values.insert("soc".into(), 0.1);
+        ev.cap_max_import_kw = if 0.1_f64 >= soc_target { 0.0 } else { max_ch };
+        ev.available_discharge_kwh = Some(0.1 * bat_kwh);
+        ev.available_charge_kwh = Some(0.9 * bat_kwh);
+    }
+    let session = crate::entities::device_session::EvSession {
+        mode: Default::default(),
+        id: uuid::Uuid::new_v4(),
+        target_soc: 0.8,
+        departure_time: now + Duration::hours(2),
+        soft_deadline: false,
+        budget_eur: None,
+        created_at: now,
+        updated_at: now,
+    };
+    let tariffs = make_two_zone_tariffs(0.10, 0.50);
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, Some(&session), None, &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::Periodic,
+        Some(&session),
+        None,
+        &[],
+        None,
+        None,
+    );
+    let env = plan
+        .envelopes
+        .iter()
+        .find(|e| e.asset_id == "ev")
+        .expect("EV envelope present");
+
+    // Expected: solved per-slot session cost — grid share at the slot import
+    // tariff plus surplus share at its export opportunity price.
+    let expected_eur: f64 = plan
+        .slots
+        .iter()
+        .filter(|s| s.start < session.departure_time)
+        .map(|s| {
+            let dt_h = (s.end - s.start).num_seconds() as f64 / 3600.0;
+            s.allocations
+                .iter()
+                .filter(|a| a.asset_id == "ev")
+                .map(|a| {
+                    (a.grid_power_kw * s.import_tariff_eur_kwh
+                        + a.surplus_power_kw * s.export_tariff_eur_kwh)
+                        * dt_h
+                })
+                .sum::<f64>()
+        })
+        .sum();
+    assert!(
+        (env.estimated_cost_eur - expected_eur).abs() < 1e-6,
+        "envelope estimate {:.4} must equal the solved schedule cost {:.4}",
+        env.estimated_cost_eur,
+        expected_eur
+    );
+    // Discriminator vs the old energy × avg-tariff formula (would be ≈ 2.10 €).
+    assert!(
+        env.estimated_cost_eur < 1.0,
+        "cheap-window charging must be reflected: got {:.4} €",
+        env.estimated_cost_eur
+    );
+}

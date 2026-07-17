@@ -2,12 +2,43 @@ use chrono::{DateTime, Utc};
 
 use crate::entities::asset_params::{EvParams, HeaterParams};
 use crate::entities::device_session::ShiftableLoad;
-use crate::entities::plan::FlexibilityEnvelope;
+use crate::entities::plan::{FlexibilityEnvelope, PlanTimeSlot};
 use crate::entities::planner_params::PlannerParams;
 
 use super::types::*;
 
+/// Session cost/CO2 from the solved schedule: for every allocation of the asset
+/// in slots before `window_end`, the grid share is priced at the slot import
+/// tariff and the PV-surplus share at its export opportunity price (the revenue
+/// forgone by not exporting it). CO2 comes from the allocation (grid share only
+/// — surplus is zero-carbon). `None` when the schedule has no allocation for
+/// the asset, so callers can fall back to a pre-solve estimate.
+fn solved_session_cost(
+    slots: &[PlanTimeSlot],
+    asset_id: &str,
+    window_end: DateTime<Utc>,
+) -> Option<(f64, f64)> {
+    let mut found = false;
+    let mut cost_eur = 0.0;
+    let mut co2_g = 0.0;
+    for slot in slots.iter().filter(|s| s.start < window_end) {
+        let dt_h = (slot.end - slot.start).num_seconds() as f64 / 3600.0;
+        for alloc in slot.allocations.iter().filter(|a| a.asset_id == asset_id) {
+            found = true;
+            cost_eur += (alloc.grid_power_kw * slot.import_tariff_eur_kwh
+                + alloc.surplus_power_kw * slot.export_tariff_eur_kwh)
+                * dt_h;
+            co2_g += alloc.co2_g;
+        }
+    }
+    found.then_some((cost_eur, co2_g))
+}
+
 /// Build per-device schedulability metadata for all active device sessions.
+///
+/// `solved_slots` is the translated schedule when a solution exists; estimates
+/// are then derived from the actual allocations. Without it (fallback plan),
+/// estimates degrade to energy × average import tariff over the window.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_plan_envelopes(
     ev_session: Option<&crate::entities::device_session::EvSession>,
@@ -18,6 +49,7 @@ pub(crate) fn build_plan_envelopes(
     ev_cfg: Option<&EvParams>,
     heat_cfg: Option<&HeaterParams>,
     now: DateTime<Utc>,
+    solved_slots: Option<&[PlanTimeSlot]>,
 ) -> Vec<FlexibilityEnvelope> {
     let step_s = planner.plan_step_s as i64;
     let n = inputs.n;
@@ -47,6 +79,9 @@ pub(crate) fn build_plan_envelopes(
                     .map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0)
                     .sum::<f64>()
                     / count;
+                let (estimated_cost_eur, estimated_co2_g) = solved_slots
+                    .and_then(|s| solved_session_cost(s, &ev_cfg.id, window_end))
+                    .unwrap_or((energy_needed_kwh * avg_tariff, energy_needed_kwh * avg_co2));
                 envelopes.push(FlexibilityEnvelope {
                     asset_id: ev_cfg.id.clone(),
                     energy_needed_kwh,
@@ -58,8 +93,8 @@ pub(crate) fn build_plan_envelopes(
                     max_acceptable_rate: 0.35,
                     min_acceptable_rate: 0.05,
                     budget_remaining_eur: 1.0e9,
-                    estimated_cost_eur: energy_needed_kwh * avg_tariff,
-                    estimated_co2_g: energy_needed_kwh * avg_co2,
+                    estimated_cost_eur,
+                    estimated_co2_g,
                 });
             }
         }
@@ -83,6 +118,9 @@ pub(crate) fn build_plan_envelopes(
                     .map(|t| inputs.g_imp_kgco2_kwh[t] * 1000.0)
                     .sum::<f64>()
                     / count;
+                let (estimated_cost_eur, estimated_co2_g) = solved_slots
+                    .and_then(|s| solved_session_cost(s, &heat_cfg.id, window_end))
+                    .unwrap_or((energy_needed_kwh * avg_tariff, energy_needed_kwh * avg_co2));
                 envelopes.push(FlexibilityEnvelope {
                     asset_id: heat_cfg.id.clone(),
                     energy_needed_kwh,
@@ -94,8 +132,8 @@ pub(crate) fn build_plan_envelopes(
                     max_acceptable_rate: 0.35,
                     min_acceptable_rate: 0.05,
                     budget_remaining_eur: 1.0e9,
-                    estimated_cost_eur: energy_needed_kwh * avg_tariff,
-                    estimated_co2_g: energy_needed_kwh * avg_co2,
+                    estimated_cost_eur,
+                    estimated_co2_g,
                 });
             }
         }
@@ -125,6 +163,9 @@ pub(crate) fn build_plan_envelopes(
             .sum::<f64>()
             / count;
         let _ = milp_sl;
+        let (estimated_cost_eur, estimated_co2_g) = solved_slots
+            .and_then(|s| solved_session_cost(s, &sl.asset_id, window_end))
+            .unwrap_or((energy_needed_kwh * avg_tariff, energy_needed_kwh * avg_co2));
         envelopes.push(FlexibilityEnvelope {
             asset_id: sl.asset_id.clone(),
             energy_needed_kwh,
@@ -136,8 +177,8 @@ pub(crate) fn build_plan_envelopes(
             max_acceptable_rate: 0.35,
             min_acceptable_rate: 0.05,
             budget_remaining_eur: 1.0e9,
-            estimated_cost_eur: energy_needed_kwh * avg_tariff,
-            estimated_co2_g: energy_needed_kwh * avg_co2,
+            estimated_cost_eur,
+            estimated_co2_g,
         });
     }
 
