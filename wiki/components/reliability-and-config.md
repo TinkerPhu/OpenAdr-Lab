@@ -46,9 +46,10 @@ fleet debugging — `VtnPort`'s `Result<T, anyhow::Error>` contract is unchanged
 > transport failure", but neither variant was ever constructed). Investigation for
 > WP2.3 found the spec's "surfaced through the relevant route" framing didn't fit the
 > actual architecture — there was never a route-level error to replace for either
-> variant, only existing logging/fallback paths to extend. `docs/BACKLOG.md`'s BL-25
-> entry documents this scope correction. `ProfileInvalid` stays reserved (blocked on
-> profile hot-reload, which doesn't exist). See [[ven-code-vs-docs-audit]].
+> variant, only existing logging/fallback paths to extend. BL-25 documented this scope
+> correction; the entry was retired from `docs/BACKLOG.md` on 2026-07-17 (user decision:
+> not needed). `ProfileInvalid` simply stays reserved in `entities/error.rs` — no work
+> is tracked for it. See [[ven-code-vs-docs-audit]].
 
 A sibling case: `HvacService` (`services/hems.rs`) sketches the same session-lifecycle
 shape as `EvSessionService`, but `post_heater_target` sets the heater target directly

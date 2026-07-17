@@ -9,6 +9,62 @@ re-sort/prioritization pass to decide actual implementation order.
 
 ---
 
+## User-Value View
+
+Same items as below, regrouped by *who benefits and how* rather than by where
+the gap sits in the code. Effort mirrors each item's own Complexity field
+(S/M/L). Risk is regression/architectural risk of the change itself, not of
+leaving it undone.
+
+### VEN user (site operator) — money saved
+
+| ID | What the user gets | Effort | Risk |
+|---|---|---|---|
+| [BL-09](#bl-09-phase-6--penalty-threshold-check) | Avoids demand-charge/peak penalties by rescheduling load ahead of a threshold — real €/kW savings on penalty tariffs | L | Medium — new constraint category + cost comparison, touches Phase 6 slot reallocation |
+| [BL-11](#bl-11-time-weighted-tariff-averaging-for-planner-slot-costing) | Slightly cheaper/more accurate plans for slots that straddle a tariff-rate boundary | S | Low — isolated calc on existing `TimeSeries` |
+| [BL-13](#bl-13-early-firm-up-heuristic) | Fewer noisy replans under flat-rate tariffs (plan feels more stable) | S | Low — statistical check + reclassification |
+| [BL-22](#bl-22-apply_battery_correction_overlay--wire-behind-a-flag-or-re-confirm-abandoned) | Tighter grid-deviation tracking → better self-consumption; logic already built and tested | S | Low — flag-gated, but needs a decision on adoption-gate interaction |
+
+### VEN user (site operator) — comfort, control & trust
+
+| ID | What the user gets | Effort | Risk |
+|---|---|---|---|
+| [BL-34](#bl-34-comfort-curves-never-reach-the-milp-constraints) | Comfort-preference sliders the UI already exposes actually change what the planner does — today they're silently dropped | M | Medium — touches solver constraints on every asset path |
+| [BL-27](#bl-27-poweradjustability--powerrange--device-control-mode-classification) | UI controls (e.g. a stepped EV charger) snap to real device levels instead of rendering a misleading continuous slider | M | Low–Medium — every asset's `capability()` impl must report it |
+| [BL-18](#bl-18-assetflexibility--real-time-per-asset-flexibility-snapshot) | A live "how much can this device flex right now" widget, per asset instead of whole-site | M (scope TBD) | Low — but needs a design decision (superseded by `FlexibilityEnvelope`?) before scoping |
+| [BL-35](#bl-35-notification-producers-for-tier-fallback--deadline-at-risk--packet-abandoned) | Gets warned *before* a tier fallback / missed deadline / abandoned session, not after | S (once BL-09 lands) | Low — blocked on BL-09's tier machinery existing |
+| [BL-36](#bl-36-surface-planner-user-signals-on-dashboard-packet-progress--objective-chip) | Sees session/deadline progress and the active objective on the Dashboard instead of digging into the Planner debug tab | S | Low — placement of existing components |
+| [BL-37](#bl-37-reactive-correction-events-into-the-notification-feed-sse-blind-spot) | Learns about reactive battery corrections even when not watching the Planner tab (today they're invisible elsewhere) | S | Low — one producer on the existing notification path |
+| [BL-38](#bl-38-planner-tab-layout--userdiagnostic-split-and-matrix-slottrace-linking) | Planner tab reads cleanly for operators (user zone on top) and debugs faster (click a slot → see its trace) | S (layout) / M (slot→trace) | Low — UI-only |
+| [GB-09](#general-backlog) | Fleet operators get a per-profile poll-interval override | S | Low — current jitter already covers the motivating case, so low urgency |
+
+### VEN user (site operator) — forecast accuracy
+
+| ID | What the user gets | Effort | Risk |
+|---|---|---|---|
+| [BL-17](#bl-17-externaldatasource--external-weatherirradiationco2-forecast-ingestion) | Better PV-yield and grid-CO2-aware planning from real weather/irradiance/CO2 forecasts instead of none | L | Medium–High — third-party API dependency, staleness/failure handling, provider not yet chosen |
+
+### VTN user (aggregator / program operator)
+
+| ID | What the user gets | Effort | Risk |
+|---|---|---|---|
+| [GB-04](#general-backlog) | VTN UI stays responsive as event history grows (SQL-side filtering instead of post-filter Rust) | S | Low |
+| [GB-05](#general-backlog) | Faster triage — Events page can filter to active events, not just text-search | S | Low |
+| [BL-24](#bl-24-oadrprogramconfigoadreventcacheoadrcapacityrequest-wiring) | Would let the VTN request/receive capacity reservations from the VEN — no such workflow exists today | S if removed / unknown if built | Low — no consumer yet; recommend leaving parked until a real feature needs it |
+
+### No direct user value — internal cleanup/consistency (do opportunistically, don't prioritize)
+
+| ID | Note |
+|---|---|
+| [BL-21](#bl-21-reconcile-duplicate-thermalmodelparams) | Duplicate dead struct, superseded by `assets/heater.rs`'s own |
+| [BL-23](#bl-23-hvacservice--route-wiring-or-removal-of-the-unused-impl) | Consistency-only decision, no behavior change either way |
+| [BL-26](#bl-26-assetstate-entities--resolve-the-name-collision-with-the-live-assetsassetstate) | Dead type shadowing a live one's name |
+| [BL-29](#bl-29-flexibilitydirection-ratetype-rateunit--narrow-supporting-enums) | No standalone value — fold into whichever future feature needs each enum |
+| [GB-07](#general-backlog) | Dev/ops convenience (container setup script), not user-facing |
+| [GB-11](#general-backlog) | Process/docs alignment items, not user-facing |
+
+---
+
 ### BL-09: Phase 6 — Penalty threshold check
 **Req:** UC-10, VEN_ARCHITECTURE §2.3
 **Problem:** Planner Phase 6 is marked "deferred to Stage 4" (`planner.rs:76`). No penalty avoidance logic exists. Peak demand penalties are not evaluated.
@@ -90,15 +146,6 @@ re-sort/prioritization pass to decide actual implementation order.
 
 ---
 
-### BL-25: Reserved `DomainError::ProfileInvalid` — wire if profile hot-reload is built
-**Req:** `entities/error.rs` (`DomainError::ProfileInvalid`)
-**Problem:** `ProfileInvalid` is constructed only inside its own `Display`-format unit test. It is only applicable if profile hot-reload (not just startup validation) is ever built; until then this variant stays reserved with no natural call site. (`PlanInfeasible` and `VtnUnreachable` are constructed at real boundaries as structured log lines.)
-**Fix:** Wire when hot-reload exists; otherwise leave reserved.
-**Complexity:** N/A until the driving feature exists.
-**Verify:** Tied to the hot-reload feature.
-
----
-
 ### BL-26: `AssetState` (entities) — resolve the name collision with the live `assets::AssetState`
 **Req:** `entities/design_vocabulary.rs` (`AssetState`)
 **Problem:** A second unreferenced type sharing a name with a real, heavily-used live type (`assets::mod::AssetState`, the per-device-kind enum driving `step`/`capability`). The entities-level one (device status snapshot: commanded/actual power, responsiveness, SoC, temperature, connection) has no consumer and predates the real `Asset` trait design.
@@ -141,6 +188,33 @@ re-sort/prioritization pass to decide actual implementation order.
 **Fix:** Wire these producers when the tier/penalty machinery lands (BL-09); each should emit through the existing `Notifier` with a stable dedup text.
 **Complexity:** Small once the producing machinery exists.
 **Verify:** Test per producer: the triggering condition emits exactly one notification of the expected severity.
+
+---
+
+### BL-36: Surface planner user-signals on Dashboard (packet progress + objective chip)
+**Req:** `VEN/ui/src/pages/Planner.tsx` (PacketProgressBoard, objective selector); wiki `queries/planner-tab-purpose.md`
+**Problem:** The two elements of the Planner tab a site operator actually needs — session/deadline progress ("will my EV be charged by 7?") and the active optimization objective — are stranded among diagnostic surfaces three levels into a debug-oriented tab. Dashboard shows current state but not deadline risk or the active objective.
+**Fix:** Render a condensed `PacketProgressBoard` (or per-session progress chips) on the Dashboard (or Devices) page, plus a read-only objective chip linking to the Planner tab. Keep the objective *control* on the Planner tab next to its weight legend — duplicate visibility, not the control.
+**Complexity:** Small — components exist; this is placement plus a condensed variant.
+**Verify:** UI test: Dashboard shows one progress element per active session and the current objective label; changing the objective on the Planner tab updates the Dashboard chip.
+
+---
+
+### BL-37: Reactive-correction events into the notification feed (SSE blind spot)
+**Req:** `VEN/ui/src/pages/Planner.tsx` (`usePlannerEvents`, CorrectionBanner); `services/notify.rs`; wiki `queries/planner-tab-purpose.md`
+**Problem:** `usePlannerEvents` subscribes to the planner SSE stream only while the Planner page is mounted, so a Layer-1 reactive battery correction firing while the user is on any other tab is invisible — the CorrectionBanner never renders and no durable record reaches the user.
+**Fix:** Emit `correction_active`/`correction_cleared` through the existing backend `Notifier` (ring + SSE + persistence, stable dedup text), so the global NotificationsBell carries it on every tab; the Planner-tab banner remains as the richer live view.
+**Complexity:** Small — one edge-triggered producer on an existing signal, following the established producer pattern.
+**Verify:** Test: a sustained deviation triggering a correction emits exactly one notification of severity info/warning; clearing emits at most one follow-up; no duplicates while the correction stays active.
+
+---
+
+### BL-38: Planner tab layout — user/diagnostic split and matrix-slot→trace linking
+**Req:** `VEN/ui/src/pages/Planner.tsx`; wiki `queries/planner-tab-purpose.md`
+**Problem:** User-facing elements (objective, power stack, packet progress) are interleaved with diagnostic surfaces (trigger timeline, decision matrix, trace table), so the operator persona sees noise and the debugging persona scrolls past controls. Additionally, answering "what happened in slot 14:35?" requires manually cross-reading the decision matrix and the trace table.
+**Fix:** (a) Reorder into a user zone on top (objective + legend, power stack, packet progress) and a diagnostics zone below a divider, collapsed by default like the existing trace accordion. (b) Make decision-matrix slots clickable, filtering the TraceTable to entries relevant to that slot's window.
+**Complexity:** Small for (a) — pure reordering/collapse; Medium for (b) — needs a slot↔trace-entry time-window correlation and filter state.
+**Verify:** (a) UI test: diagnostics sections render collapsed by default, user zone above the divider. (b) UI test: clicking a matrix slot filters the trace table to entries whose timestamp falls in that slot.
 
 ---
 

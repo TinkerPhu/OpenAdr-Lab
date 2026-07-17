@@ -56,6 +56,7 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[openadr-programs-explained]] — what a Program is, 5 worked examples (VTN vs VEN view), multi-program enrollment, contractual out-of-band joining
 - [[distributor-business-case-tiers]] — arguments for a distributor to adopt VTN/VEN: 4 rollout tiers from open tariff publication to VPP dispatch
 - [[history-store-persistence-format]] — SQLite schema, epoch-second time encoding, per-asset-per-minute rows, flat retention pruning, docker bind-mount path
+- [[planner-tab-purpose]] — what the Planner tab is for (user vs. debug view), keep-don't-dismantle verdict, improvements filed as BL-36..38
 
 ---
 Pages: 37 · Last sync: 2026-07-16 (Phase 5 heuristics + total review: new heuristics-pipeline page; milp-planner, ven-ui, asset-layer, ven-hexagonal-architecture, vtn-stack, testing-strategy updated, f08e469)
