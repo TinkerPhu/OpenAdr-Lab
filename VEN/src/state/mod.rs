@@ -185,6 +185,26 @@ impl AppState {
         ring.push_back(n);
     }
 
+    /// 030 (notification-dedup): find the newest ring entry carrying this
+    /// dedup key whose `last_seen_at` is within `window` of `now`; bump its
+    /// `count`/`last_seen_at` in place and return the updated clone. `None`
+    /// when no entry qualifies (caller creates a fresh notification).
+    pub async fn bump_notification_seen(
+        &self,
+        dedup_key: &str,
+        now: chrono::DateTime<chrono::Utc>,
+        window: chrono::Duration,
+    ) -> Option<crate::entities::notification::UserNotification> {
+        let mut ring = self.notifications.write().await;
+        let hit = ring.iter_mut().rev().find(|n| {
+            n.dedup_key.as_deref() == Some(dedup_key)
+                && now.signed_duration_since(n.last_seen_at) <= window
+        })?;
+        hit.count += 1;
+        hit.last_seen_at = now;
+        Some(hit.clone())
+    }
+
     /// WP4.3: notifications strictly newer than `since` (all when `None`), oldest first.
     pub async fn notifications_since(
         &self,

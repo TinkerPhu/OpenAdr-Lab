@@ -25,7 +25,7 @@ use crate::entities::history::{
     EventReceived, GridSample, LedgerPeriod, PlanSnapshot, ReportSent, TickSample,
 };
 use crate::entities::DomainError;
-use schema::{SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_VERSION};
+use schema::{SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_VERSION};
 
 type TickSampleRow = (i64, String, f64, Option<f64>, Option<f64>);
 type GridSampleRow = (i64, f64, f64, Option<f64>, Option<f64>, Option<f64>);
@@ -88,6 +88,10 @@ impl SqliteHistoryStore {
         if version < 3 {
             conn.execute_batch(SCHEMA_V3)
                 .map_err(|e| DomainError::StorageError(format!("apply schema v3: {e}")))?;
+        }
+        if version < 4 {
+            conn.execute_batch(SCHEMA_V4)
+                .map_err(|e| DomainError::StorageError(format!("apply schema v4: {e}")))?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| DomainError::StorageError(format!("set user_version: {e}")))?;
@@ -476,8 +480,18 @@ impl HistoryPort for SqliteHistoryStore {
         &self,
         since: Option<DateTime<Utc>>,
         limit: usize,
+        severity: Option<crate::entities::design_vocabulary::UserNotificationSeverity>,
     ) -> Result<Vec<crate::entities::notification::UserNotification>, DomainError> {
-        notifications::query(&*self.lock()?, since, limit)
+        notifications::query(&*self.lock()?, since, limit, severity)
+    }
+
+    fn update_notification_seen(
+        &self,
+        id: uuid::Uuid,
+        count: u32,
+        last_seen_at: DateTime<Utc>,
+    ) -> Result<(), DomainError> {
+        notifications::update_seen(&*self.lock()?, id, count, last_seen_at)
     }
 
     fn prune_before(&self, cutoff: DateTime<Utc>) -> Result<u64, DomainError> {
@@ -799,18 +813,76 @@ mod tests {
         store.append_notification(&old).unwrap();
         store.append_notification(&new).unwrap();
 
-        let all = store.query_notifications(None, 100).unwrap();
+        let all = store.query_notifications(None, 100, None).unwrap();
         assert_eq!(
             all,
             vec![old.clone(), new.clone()],
             "roundtrip, oldest first"
         );
 
-        let since = store.query_notifications(Some(ts(150)), 100).unwrap();
+        let since = store.query_notifications(Some(ts(150)), 100, None).unwrap();
         assert_eq!(since, vec![new], "since filter keeps only newer rows");
 
         let pruned = store.prune_before(ts(150)).unwrap();
         assert_eq!(pruned, 1, "prune covers the notifications table");
+    }
+
+    #[test]
+    fn test_update_notification_seen_bumps_count_and_last_seen() {
+        use crate::entities::design_vocabulary::UserNotificationSeverity;
+        use crate::entities::notification::UserNotification;
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        let n = UserNotification::new(
+            ts(100),
+            UserNotificationSeverity::Alert,
+            "storage error",
+            None,
+            None,
+        )
+        .with_dedup_key("storage-error");
+        store.append_notification(&n).unwrap();
+
+        store.update_notification_seen(n.id, 2, ts(400)).unwrap();
+
+        let rows = store.query_notifications(None, 10, None).unwrap();
+        assert_eq!(rows.len(), 1, "dedup hit must not add a row");
+        assert_eq!(rows[0].count, 2);
+        assert_eq!(rows[0].last_seen_at, ts(400));
+        assert_eq!(rows[0].created_at, ts(100), "first occurrence preserved");
+        assert_eq!(rows[0].message, "storage error");
+
+        let missing = store.update_notification_seen(uuid::Uuid::new_v4(), 2, ts(500));
+        assert!(
+            matches!(missing, Err(DomainError::NotFound { .. })),
+            "unknown id must surface NotFound, got {missing:?}"
+        );
+    }
+
+    #[test]
+    fn test_migrate_v4_backfills_count_and_last_seen_from_created_at() {
+        // Build a v3 database by hand (pre-030 state) with one notification,
+        // then let from_connection run the v4 migration against it.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(schema::SCHEMA_V1).unwrap();
+        conn.execute_batch(schema::SCHEMA_V2).unwrap();
+        conn.execute_batch(schema::SCHEMA_V3).unwrap();
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        conn.execute(
+            "INSERT INTO notifications (id, created_at, severity, message, asset_id, event_id)
+             VALUES (?1, ?2, 'WARN', 'VTN unreachable', NULL, NULL)",
+            params![uuid::Uuid::new_v4().to_string(), 12345_i64],
+        )
+        .unwrap();
+
+        let store = SqliteHistoryStore::from_connection(conn).expect("v3→v4 migration");
+        let rows = store.query_notifications(None, 10, None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].count, 1, "existing rows backfilled with count 1");
+        assert_eq!(
+            rows[0].last_seen_at, rows[0].created_at,
+            "last_seen_at backfilled from created_at"
+        );
+        assert_eq!(rows[0].dedup_key, None);
     }
 
     #[test]
@@ -865,7 +937,7 @@ mod tests {
                 .unwrap();
         }
         // limit 2 must keep the NEWEST two (b, c), oldest first — not (a, b).
-        let got = store.query_notifications(None, 2).unwrap();
+        let got = store.query_notifications(None, 2, None).unwrap();
         let msgs: Vec<_> = got.iter().map(|n| n.message.as_str()).collect();
         assert_eq!(msgs, vec!["b", "c"]);
     }

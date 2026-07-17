@@ -27,8 +27,17 @@ use crate::state::AppState;
 
 /// Append a flushed window through the (blocking) `HistoryPort`, logging and
 /// continuing on failure — history writes must never block or crash the
-/// control loop.
-async fn write_window(history: Arc<dyn HistoryPort>, ticks: Vec<TickSample>, grid: GridSample) {
+/// control loop. 030: a `StorageError` additionally raises one deduplicated
+/// ALERT (`dedup_key` "storage-error") so the resident sees a persistent
+/// storage problem exactly once, not per flush.
+async fn write_window(
+    history: Arc<dyn HistoryPort>,
+    notifier: &crate::services::notify::Notifier,
+    state: &AppState,
+    now: DateTime<Utc>,
+    ticks: Vec<TickSample>,
+    grid: GridSample,
+) {
     let res = tokio::task::spawn_blocking(move || {
         history.append_tick_samples(&ticks)?;
         history.append_grid_sample(&grid)
@@ -36,7 +45,20 @@ async fn write_window(history: Arc<dyn HistoryPort>, ticks: Vec<TickSample>, gri
     .await;
     match res {
         Ok(Ok(())) => {}
-        Ok(Err(e)) => warn!("history sampler write failed: {e}"),
+        Ok(Err(e)) => {
+            warn!("history sampler write failed: {e}");
+            notifier
+                .notify(
+                    state,
+                    now,
+                    crate::entities::design_vocabulary::UserNotificationSeverity::Alert,
+                    format!("{e}"),
+                    None,
+                    None,
+                    Some("storage-error".into()),
+                )
+                .await;
+        }
         Err(e) => warn!("history sampler write task panicked: {e}"),
     }
 }
@@ -140,6 +162,7 @@ pub(crate) fn spawn_history_sampler(
     history: Arc<dyn HistoryPort>,
     state: AppState,
     retention_days: u32,
+    notifier: crate::services::notify::Notifier,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut sampler = HistorySampler::new();
@@ -166,7 +189,7 @@ pub(crate) fn spawn_history_sampler(
             );
             let tariffs_snap = state.planned_tariffs().await;
             if let Some((ticks, grid)) = sampler.record(now, &snap, &tariffs_snap) {
-                write_window(history.clone(), ticks, grid).await;
+                write_window(history.clone(), &notifier, &state, now, ticks, grid).await;
             }
             if day_boundary_crossed(&mut last_pruned_day, now) {
                 let cutoff = now - chrono::Duration::days(retention_days as i64);
@@ -289,5 +312,68 @@ mod tests {
     fn test_close_ledger_period_empty_ledger_returns_empty() {
         let rows = close_ledger_period(&HashMap::new(), ymd(2026, 1, 1), ymd(2026, 2, 1));
         assert!(rows.is_empty());
+    }
+
+    fn sample_window() -> (Vec<TickSample>, GridSample) {
+        (
+            vec![TickSample {
+                ts: ts(0),
+                asset_id: "ev".into(),
+                power_kw: 1.0,
+                soc_pct: None,
+                temperature_c: None,
+            }],
+            GridSample {
+                ts: ts(0),
+                import_kw: 1.0,
+                export_kw: 0.0,
+                import_tariff_eur_kwh: None,
+                export_tariff_eur_kwh: None,
+                co2_g_kwh: None,
+            },
+        )
+    }
+
+    // 030: repeated storage failures must surface as ONE deduplicated ALERT.
+    #[tokio::test]
+    async fn write_window_storage_failure_notifies_one_deduplicated_alert() {
+        use crate::entities::design_vocabulary::UserNotificationSeverity;
+        use crate::services::test_support::mock_history_port::MockHistoryPort;
+        let history = Arc::new(MockHistoryPort::new());
+        history.set_fail_storage(true);
+        let state = AppState::new();
+        let notifier = crate::services::notify::Notifier::new(None);
+
+        for at in [ts(0), ts(60)] {
+            let (ticks, grid) = sample_window();
+            write_window(history.clone(), &notifier, &state, at, ticks, grid).await;
+        }
+
+        let ring = state.notifications_since(None).await;
+        assert_eq!(
+            ring.len(),
+            1,
+            "two failures → one deduplicated notification"
+        );
+        assert_eq!(ring[0].severity, UserNotificationSeverity::Alert);
+        assert_eq!(ring[0].dedup_key.as_deref(), Some("storage-error"));
+        assert_eq!(ring[0].count, 2);
+        assert!(
+            ring[0].message.starts_with("storage error"),
+            "message carries the DomainError display: {}",
+            ring[0].message
+        );
+    }
+
+    #[tokio::test]
+    async fn write_window_success_does_not_notify() {
+        use crate::services::test_support::mock_history_port::MockHistoryPort;
+        let history = Arc::new(MockHistoryPort::new());
+        let state = AppState::new();
+        let notifier = crate::services::notify::Notifier::new(None);
+        let (ticks, grid) = sample_window();
+        write_window(history.clone(), &notifier, &state, ts(0), ticks, grid).await;
+        assert!(state.notifications_since(None).await.is_empty());
+        assert_eq!(history.appended_ticks().len(), 1);
     }
 }

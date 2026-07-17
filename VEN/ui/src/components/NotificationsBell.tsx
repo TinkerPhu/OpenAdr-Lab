@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   Badge,
   Box,
+  Button,
   Chip,
   IconButton,
   List,
@@ -11,6 +12,7 @@ import {
   Typography,
 } from "@mui/material";
 import NotificationsIcon from "@mui/icons-material/Notifications";
+import { Link } from "react-router-dom";
 import { useNotifications } from "../api/hooks";
 import type { UserNotificationSeverity } from "../api/types";
 
@@ -70,13 +72,24 @@ export function NotificationsBell() {
                   sx={{ mr: 1, mt: 0.5 }}
                 />
                 <ListItemText
-                  primary={n.message}
+                  primary={n.count > 1 ? `${n.message} ×${n.count}` : n.message}
                   secondary={new Date(n.created_at).toLocaleString()}
                 />
               </ListItem>
             ))}
           </List>
         )}
+        <Box sx={{ p: 1, textAlign: "right" }}>
+          <Button
+            component={Link}
+            to="/notifications"
+            size="small"
+            data-testid="notifications-view-all"
+            onClick={() => setAnchor(null)}
+          >
+            View all
+          </Button>
+        </Box>
       </Popover>
     </>
   );

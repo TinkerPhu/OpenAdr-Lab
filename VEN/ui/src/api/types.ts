@@ -278,6 +278,12 @@ export type UserNotification = {
   message: string;
   asset_id: string | null;
   event_id: string | null;
+  /** 030: repeats with this key inside the rolling window collapse into one row. */
+  dedup_key: string | null;
+  /** 030: occurrence count (dedup hits + 1). */
+  count: number;
+  /** 030: last occurrence; equals created_at until a dedup hit bumps it. */
+  last_seen_at: string;
 };
 
 /** How the user expressed the request (BL-28). Omitted = BY_DEADLINE (legacy). */

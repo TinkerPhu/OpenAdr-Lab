@@ -7,7 +7,7 @@ import type {
   ShiftableLoad, CreateShiftableLoadBody, BaselineOverride, CreateBaselineOverrideBody,
   ZoneDef,
   HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent,
-  UserNotification, ComfortRate, ComfortCurveResponse, SignalsState,
+  UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, SignalsState,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
@@ -68,6 +68,22 @@ export class VenApi {
     const q = since ? `?since=${encodeURIComponent(since)}` : "";
     const r = await this.getReq(`/notifications${q}`);
     if (!r.ok) throw new Error(`notifications ${r.status}`);
+    return r.json();
+  }
+
+  /** 030: persisted notification history (beyond the in-memory ring). */
+  async notificationsHistory(params?: {
+    since?: string;
+    limit?: number;
+    severity?: UserNotificationSeverity;
+  }): Promise<UserNotification[]> {
+    const q = new URLSearchParams();
+    if (params?.since) q.set("since", params.since);
+    if (params?.limit !== undefined) q.set("limit", String(params.limit));
+    if (params?.severity) q.set("severity", params.severity);
+    const qs = q.toString();
+    const r = await this.getReq(`/notifications/history${qs ? `?${qs}` : ""}`);
+    if (!r.ok) throw new Error(`notifications/history ${r.status}`);
     return r.json();
   }
 

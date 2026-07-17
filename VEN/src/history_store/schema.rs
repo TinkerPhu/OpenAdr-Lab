@@ -1,7 +1,7 @@
 //! Versioned DDL for the history SQLite store, applied stepwise via
 //! `PRAGMA user_version` in `history_store::migrate`.
 
-pub(super) const SCHEMA_VERSION: i64 = 3;
+pub(super) const SCHEMA_VERSION: i64 = 4;
 
 pub(super) const SCHEMA_V1: &str = "
 CREATE TABLE tick_samples (
@@ -81,4 +81,16 @@ CREATE TABLE user_settings (
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (key, asset_id)
 );
+";
+
+/// 030 (notification-dedup): repeats with the same dedup_key inside the
+/// rolling window collapse into one row via count/last_seen_at. ADD COLUMN
+/// requires a constant default, so last_seen_at is backfilled from
+/// created_at in a second statement.
+pub(super) const SCHEMA_V4: &str = "
+ALTER TABLE notifications ADD COLUMN dedup_key TEXT;
+ALTER TABLE notifications ADD COLUMN count INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE notifications ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0;
+UPDATE notifications SET last_seen_at = created_at WHERE last_seen_at = 0;
+CREATE INDEX idx_notifications_last_seen ON notifications(last_seen_at);
 ";

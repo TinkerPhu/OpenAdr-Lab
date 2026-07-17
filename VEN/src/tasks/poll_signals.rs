@@ -64,6 +64,7 @@ pub(crate) async fn apply_signal_changes(
                     format!("Grid emergency ({}): {}", w.alert_type, w.message),
                     None,
                     Some(w.event_id.clone()),
+                    None,
                 )
                 .await;
         }
