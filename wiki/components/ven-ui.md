@@ -2,9 +2,9 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-07-16
-synced_commit: f08e469
-sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx]
+updated: 2026-07-17
+synced_commit: f068d94
+sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx]
 tags: [ui, react, timeline]
 ---
 
@@ -43,6 +43,29 @@ React + TypeScript SPA (Vite build, nginx-served, port 8214) — the per-site da
   vitest ^4 / plugin-react ^5; vite 8's rolldown bundler mis-resolves a MUI
   default-import interop at bundle time (React #130 at runtime with all unit
   tests green), so the vite major is held at 7 until that interop is proven.
+
+## Planner tab
+
+`VEN/ui/src/pages/Planner.tsx` is the [[milp-planner]]'s decision-process view (purpose
+analysis: [[planner-tab-purpose]]). Composition, top to bottom: objective selector (the
+one real control — min_cost/GHG/grid/autarky/revenue) + collapsible weight legend; SSE
+`PlannerStatusBar` (live solve progress via `usePlannerEvents`); `PlanHeaderBar` (plan
+metadata + warnings badge); `PlanPowerStack`; `PlanTriggerTimeline` (why replans fired);
+`PlanDecisionMatrix` (per-slot decisions, hatched estimated-rate slots);
+`SessionProgressBoard`; collapsed `TraceTable` accordion; `CorrectionBanner` snackbar
+(Layer-1 reactive correction, [[dispatcher]]).
+
+**SessionProgressBoard** (`components/sessions/SessionProgressBoard.tsx`, f068d94)
+replaced the Phase-D-orphaned `PacketProgressBoard`, which had polled the deleted
+`GET /packets` endpoint and permanently rendered empty. It renders one card per
+[[hems-planning]] user request grouped Active/Done: EV fill gauge from the live sim
+`soc` vs `target_soc`, heater current→target temperature (deliberately no % gauge),
+deadline countdown/OVERDUE, an on-track/at-risk chip comparing the plan's
+`planned_kw_by_asset` energy up to the session deadline against the plan envelope's
+`energy_needed_kwh` (the first UI consumer of `Plan.envelopes`), and a budget bar from
+`estimated_cost_eur` labeled "est." (per-session accumulated cost doesn't exist —
+BL-39). A `variant="condensed"` chip strip plus a read-only objective chip sits on the
+Dashboard (`dash-session-strip`, BL-36); the objective control stays on the Planner tab.
 
 ## Timeline specifics
 
