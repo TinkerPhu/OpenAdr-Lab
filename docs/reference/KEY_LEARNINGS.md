@@ -387,3 +387,18 @@ outes/sim.rs causes a T1+T2 double-solve race:
   build at a time, check free RAM first) — two host crashes via pagefile
   exhaustion during this review. Rule lives in `.claude/CLAUDE.md`
   (memory-budget).
+
+- **A dead endpoint can hide behind a plausible empty state.** The Planner
+  tab's packet board polled a route deleted months earlier; react-query's
+  error state left `data` undefined, `?? []` rendered the same UI as "no
+  work scheduled", and every unit test stayed green because tests mock the
+  hook. When removing a backend abstraction, grep the UI/consumer side for
+  its whole chain (types → client method → hook → component → tests), and
+  prefer empty states that distinguish "nothing to show" from "fetch
+  failed".
+
+- **DTO pass-through types drift unless audited against the owning
+  struct.** The UI's `FlexibilityEnvelope` carried a `packet_id` field the
+  Rust wire struct never had and lacked four real fields — harmless only
+  because nothing consumed the type. When a wire struct changes, its UI
+  mirror must change in the same commit.

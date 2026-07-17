@@ -75,4 +75,9 @@ Feature: Planner Visualization Page
     When I click the element with testid "matrix-collapse-btn"
     Then the decision matrix cells are visible
 
-  # ── Device Sessions Board placeholder (PacketProgressBoard removed in Phase D) ──
+  # ── Session Progress Board (SessionProgressBoard, replaced the Phase-D PacketProgressBoard) ──
+  # Rendered on the Planner page (testids session-board / session-board-empty /
+  # session-card-<id> / session-fill-<id> / session-deadline-<id>) and as a condensed
+  # strip on the Dashboard (dash-session-strip, dash-objective-chip, session-chip-<id>).
+  # Covered by UI unit tests (SessionProgressBoard.test.tsx); add browser scenarios here
+  # when a BDD flow needs deadline-progress assertions.

@@ -5591,3 +5591,47 @@ scenarios, 0 failed) and resilience (5/5) on Pi4.
 - *A non-bare deploy repo rejects pushes to its checked-out branch* —
   deploying to Pi4 by direct push requires flipping its checkout aside
   first (or keeping it parked on main).
+
+## SessionProgressBoard — rebuild of the dead packet board + BL-36 (branch fix/session-progress-board)
+
+**What.** A `/wiki-query` ("what packets is the Planner tab talking about?")
+exposed that `PacketProgressBoard` was dead UI: it polled `GET /packets`,
+an endpoint deleted with the EnergyPacket abstraction in Phase D, so every
+poll 404ed and the board permanently rendered "No energy packets." Rebuilt
+UI-only as `SessionProgressBoard` (`VEN/ui/src/components/sessions/`) on
+the live session vocabulary — no backend change, no EnergyPacket revival:
+`GET /user-requests` (targets, tiers, mode, budget, status), live sim
+snapshot (`soc`/`temp_c` — fill gauge for EV, current→target temperature
+for the heater), and the active Plan (`planned_kw_by_asset` summed to the
+session deadline + `envelopes.energy_needed_kwh` → on-track/at-risk chip;
+first UI consumer of plan envelopes). Budget bar deliberately shows
+`estimated_cost_eur` labeled "est." — per-session accumulated cost does
+not exist anywhere (spun off as BL-39). BL-36 done in the same change:
+condensed chip variant + read-only objective chip on the Dashboard
+(`dash-session-strip`), objective control stays on the Planner tab.
+Cleanup removed the whole packet surface from the UI (`EnergyPacket`,
+`PacketStatus`, `usePackets`, `api.packets()`, dangling `["packets"]`
+invalidation) and fixed `FlexibilityEnvelope` drift (bogus `packet_id`,
+four missing wire fields vs `entities/plan.rs`). `sessionSummary()`
+extracted to a shared module reused by `AllRequestsSection`.
+
+**Why.** The question the board answered ("will my EV be charged by 7, at
+what cost?") is genuinely user-facing and ~90 % of the data was already on
+the wire; the deleted abstraction was the packet *lifecycle state machine*,
+not the question. Reviving EnergyPacket would have re-added bookkeeping
+nothing produces; per-asset sessions + plan data answer it honestly.
+
+**Issues / key learnings.**
+- *A dead endpoint can hide behind a plausible empty state.* react-query
+  keeps `data` undefined on 404, and `packets ?? []` rendered the same UI
+  as "no work scheduled" — nobody noticed for weeks, and even a wiki
+  analysis of the Planner tab classified the board as working. Empty
+  states that can also mean "the fetch failed" should render an error
+  variant.
+- *Backend abstraction removals must grep the consumer side.* Phase D
+  scrubbed `/packets` from BDD steps but the UI kept the whole chain
+  (types, client, hook, component, tests) green because unit tests mock
+  the hook — mocks preserve dead contracts.
+- *The UI type of a wire struct had silently forked* (`FlexibilityEnvelope`
+  with a `packet_id` the Rust struct never had). DTO pass-through only
+  works if types are audited against the owning struct when it changes.

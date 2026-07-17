@@ -38,6 +38,35 @@ const mockLedger = [
   { asset_id: "battery", energy_kwh: 0.5, cost_eur: 0.1, co2_g: 50.0, updated_at: "2024-01-01T11:00:00Z", started_at: "2024-01-01T10:00:00Z" },
 ];
 
+const mockActiveRequest = {
+  id: "req-ev-01",
+  asset_id: "ev",
+  target_energy_kwh: 10,
+  target_soc: 0.9,
+  desired_power_kw: 7.4,
+  completion_policy: "STOP",
+  deadlines: [{ latest_end: new Date(Date.now() + 3_600_000).toISOString(), max_total_cost_eur: null, max_marginal_rate_eur_kwh: null, min_completion: 1.0 }],
+  mode: "BY_DEADLINE",
+  max_total_cost_eur: null,
+  tier_count: 1,
+  session_id: "sess-ev-01",
+  session_type: "ev",
+  status: "ACTIVE",
+  estimated_cost_eur: 1.8,
+  estimated_co2_g: 300,
+  interruptible: true,
+  tolerance_min: null,
+  budget_eur: null,
+  created_at: "2024-01-01T08:00:00Z",
+  updated_at: "2024-01-01T10:00:00Z",
+  session: {
+    type: "ev", id: "sess-ev-01", target_soc: 0.9,
+    departure_time: new Date(Date.now() + 3_600_000).toISOString(),
+    soft_deadline: false, mode: "BY_DEADLINE", budget_eur: null,
+    created_at: "2024-01-01T08:00:00Z", updated_at: "2024-01-01T10:00:00Z",
+  },
+};
+
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
   useHealth: vi.fn(() => ({ data: "ok", isError: false })),
@@ -48,6 +77,8 @@ vi.mock("../api/hooks", () => ({
   useSim: vi.fn(() => ({ data: null, isError: false })),
   useCapacity: vi.fn(() => ({ data: mockCapacity })),
   useLedger: vi.fn(() => ({ data: mockLedger })),
+  usePlan: vi.fn(() => ({ data: { objective: "min_cost" } })),
+  useRequests: vi.fn(() => ({ data: [mockActiveRequest] })),
 }));
 
 function renderDashboard() {
@@ -95,6 +126,13 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("dash-capacity-card")).toBeVisible();
     expect(screen.getByTestId("dash-capacity-card")).toHaveTextContent("10.0 kW");
     expect(screen.getByTestId("dash-capacity-card")).toHaveTextContent("5.0 kW");
+  });
+
+  it("renders session strip with objective chip and one chip per active session (BL-36)", () => {
+    renderDashboard();
+    expect(screen.getByTestId("dash-session-strip")).toBeVisible();
+    expect(screen.getByTestId("dash-objective-chip")).toHaveTextContent("Objective: Cost");
+    expect(screen.getByTestId("session-chip-req-ev-01")).toBeVisible();
   });
 
   it("renders ledger card with asset rows and running-since header", () => {

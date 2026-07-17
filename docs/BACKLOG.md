@@ -33,7 +33,7 @@ leaving it undone.
 | [BL-27](#bl-27-poweradjustability--powerrange--device-control-mode-classification) | UI controls (e.g. a stepped EV charger) snap to real device levels instead of rendering a misleading continuous slider | M | Low–Medium — every asset's `capability()` impl must report it |
 | [BL-18](#bl-18-assetflexibility--real-time-per-asset-flexibility-snapshot) | A live "how much can this device flex right now" widget, per asset instead of whole-site | M (scope TBD) | Low — but needs a design decision (superseded by `FlexibilityEnvelope`?) before scoping |
 | [BL-35](#bl-35-notification-producers-for-tier-fallback--deadline-at-risk--packet-abandoned) | Gets warned *before* a tier fallback / missed deadline / abandoned session, not after | S (once BL-09 lands) | Low — blocked on BL-09's tier machinery existing |
-| [BL-36](#bl-36-surface-planner-user-signals-on-dashboard-packet-progress--objective-chip) | Sees session/deadline progress and the active objective on the Dashboard instead of digging into the Planner debug tab | S | Low — placement of existing components |
+| [BL-39](#bl-39-per-session-accumulated-cost-accounting-real-budget-bar) | Budget bar on the session board shows real money spent so far instead of a plan-time estimate | M | Medium — new accounting invariant in monitor/ledger or history-store, session attribution |
 | [BL-37](#bl-37-reactive-correction-events-into-the-notification-feed-sse-blind-spot) | Learns about reactive battery corrections even when not watching the Planner tab (today they're invisible elsewhere) | S | Low — one producer on the existing notification path |
 | [BL-38](#bl-38-planner-tab-layout--userdiagnostic-split-and-matrix-slottrace-linking) | Planner tab reads cleanly for operators (user zone on top) and debugs faster (click a slot → see its trace) | S (layout) / M (slot→trace) | Low — UI-only |
 | [GB-09](#general-backlog) | Fleet operators get a per-profile poll-interval override | S | Low — current jitter already covers the motivating case, so low urgency |
@@ -191,15 +191,6 @@ leaving it undone.
 
 ---
 
-### BL-36: Surface planner user-signals on Dashboard (packet progress + objective chip)
-**Req:** `VEN/ui/src/pages/Planner.tsx` (PacketProgressBoard, objective selector); wiki `queries/planner-tab-purpose.md`
-**Problem:** The two elements of the Planner tab a site operator actually needs — session/deadline progress ("will my EV be charged by 7?") and the active optimization objective — are stranded among diagnostic surfaces three levels into a debug-oriented tab. Dashboard shows current state but not deadline risk or the active objective.
-**Fix:** Render a condensed `PacketProgressBoard` (or per-session progress chips) on the Dashboard (or Devices) page, plus a read-only objective chip linking to the Planner tab. Keep the objective *control* on the Planner tab next to its weight legend — duplicate visibility, not the control.
-**Complexity:** Small — components exist; this is placement plus a condensed variant.
-**Verify:** UI test: Dashboard shows one progress element per active session and the current objective label; changing the objective on the Planner tab updates the Dashboard chip.
-
----
-
 ### BL-37: Reactive-correction events into the notification feed (SSE blind spot)
 **Req:** `VEN/ui/src/pages/Planner.tsx` (`usePlannerEvents`, CorrectionBanner); `services/notify.rs`; wiki `queries/planner-tab-purpose.md`
 **Problem:** `usePlannerEvents` subscribes to the planner SSE stream only while the Planner page is mounted, so a Layer-1 reactive battery correction firing while the user is on any other tab is invisible — the CorrectionBanner never renders and no durable record reaches the user.
@@ -211,10 +202,19 @@ leaving it undone.
 
 ### BL-38: Planner tab layout — user/diagnostic split and matrix-slot→trace linking
 **Req:** `VEN/ui/src/pages/Planner.tsx`; wiki `queries/planner-tab-purpose.md`
-**Problem:** User-facing elements (objective, power stack, packet progress) are interleaved with diagnostic surfaces (trigger timeline, decision matrix, trace table), so the operator persona sees noise and the debugging persona scrolls past controls. Additionally, answering "what happened in slot 14:35?" requires manually cross-reading the decision matrix and the trace table.
-**Fix:** (a) Reorder into a user zone on top (objective + legend, power stack, packet progress) and a diagnostics zone below a divider, collapsed by default like the existing trace accordion. (b) Make decision-matrix slots clickable, filtering the TraceTable to entries relevant to that slot's window.
+**Problem:** User-facing elements (objective, power stack, session progress) are interleaved with diagnostic surfaces (trigger timeline, decision matrix, trace table), so the operator persona sees noise and the debugging persona scrolls past controls. Additionally, answering "what happened in slot 14:35?" requires manually cross-reading the decision matrix and the trace table.
+**Fix:** (a) Reorder into a user zone on top (objective + legend, power stack, session progress) and a diagnostics zone below a divider, collapsed by default like the existing trace accordion. (b) Make decision-matrix slots clickable, filtering the TraceTable to entries relevant to that slot's window.
 **Complexity:** Small for (a) — pure reordering/collapse; Medium for (b) — needs a slot↔trace-entry time-window correlation and filter state.
 **Verify:** (a) UI test: diagnostics sections render collapsed by default, user zone above the divider. (b) UI test: clicking a matrix slot filters the trace table to entries whose timestamp falls in that slot.
+
+---
+
+### BL-39: Per-session accumulated-cost accounting (real budget bar)
+**Req:** `VEN/ui/src/components/sessions/SessionProgressBoard.tsx` (BudgetLine); `VEN/src/controller/monitor.rs` (AssetLedger); `docs/reference/TECHNICAL_DEBTS.md` R-24 (ledger clock/persistence)
+**Problem:** The session board's budget bar compares the user's budget against `estimated_cost_eur` (a plan-time estimate, labeled "est.") because no per-session accumulated cost exists anywhere: the `AssetLedger` accumulates per asset since startup with no session attribution, resets on restart, and the plan envelope's `budget_remaining_eur` is a placeholder. Spun off from the BL-36 resolution — the SessionProgressBoard rebuild deliberately excluded this.
+**Fix:** Either extend the monitor ledger with session-scoped accumulation (attribute each tick's asset cost to the active session id), or derive it on demand from the history store windowed on `session.created_at` × recorded tariffs. Decide only if enforcement-grade budget tracking is actually needed; the estimate may be good enough.
+**Complexity:** Medium — a new accounting invariant plus persistence questions (interacts with R-24).
+**Verify:** Unit test: a session accumulating N ticks at known power/tariff reports Σ(power × Δt × tariff); UI budget bar switches from "est." to actual once the field exists.
 
 ---
 
