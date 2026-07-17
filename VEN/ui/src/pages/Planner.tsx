@@ -7,13 +7,13 @@ import {
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import BoltIcon from "@mui/icons-material/Bolt";
 import { useQueryClient } from "@tanstack/react-query";
-import { usePlan, usePlannerEvents, useSetObjective, useTrace, usePackets } from "../api/hooks";
+import { usePlan, usePlannerEvents, useRequests, useSetObjective, useSim, useTrace } from "../api/hooks";
 import type { PlannerEvent, PlannerObjective } from "../api/types";
 import { PlanHeaderBar } from "../components/planner/PlanHeaderBar";
 import { PlanTriggerTimeline } from "../components/planner/PlanTriggerTimeline";
 import { PlanDecisionMatrix } from "../components/planner/PlanDecisionMatrix";
 import { PlanPowerStack } from "../components/planner/PlanPowerStack";
-import { PacketProgressBoard } from "../components/planner/PacketProgressBoard";
+import { SessionProgressBoard } from "../components/sessions/SessionProgressBoard";
 import { TraceTable } from "../components/planner/TraceTable";
 
 const OBJECTIVE_OPTIONS: {
@@ -197,7 +197,8 @@ function CorrectionBanner({ status }: { status: CorrectionStatus }) {
 export function PlannerPage() {
   const { data: plan } = usePlan();
   const { data: events } = useTrace(200);
-  const { data: packets } = usePackets();
+  const { data: requests } = useRequests();
+  const { data: sim } = useSim();
   const setObjectiveMutation = useSetObjective();
   const queryClient = useQueryClient();
 
@@ -300,12 +301,12 @@ export function PlannerPage() {
         {/* Decision Matrix */}
         <PlanDecisionMatrix plan={plan} />
 
-        {/* Packet Progress Board */}
+        {/* Session Progress Board */}
         <Box>
           <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-            Packet Progress
+            Session Progress
           </Typography>
-          <PacketProgressBoard packets={packets ?? []} />
+          <SessionProgressBoard requests={requests ?? []} plan={plan ?? undefined} sim={sim ?? undefined} />
         </Box>
 
         {/* Decision Trace (collapsible) */}

@@ -2,7 +2,7 @@ import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PlannerPage } from "../pages/Planner";
-import type { Plan, EnergyPacket, TraceEntry, PlanTimeSlot, PlannerEvent } from "../api/types";
+import type { Plan, TraceEntry, PlanTimeSlot, PlannerEvent, UserRequestWithSession } from "../api/types";
 
 // ─── Mock hooks ───────────────────────────────────────────────────────────────
 
@@ -16,12 +16,13 @@ vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
   usePlan: vi.fn(),
   useTrace: vi.fn(),
-  usePackets: vi.fn(),
+  useRequests: vi.fn(),
+  useSim: vi.fn(),
   useSetObjective: vi.fn(),
   usePlannerEvents: vi.fn(),
 }));
 
-import { usePlan, useTrace, usePackets, useSetObjective, usePlannerEvents } from "../api/hooks";
+import { usePlan, useTrace, useRequests, useSim, useSetObjective, usePlannerEvents } from "../api/hooks";
 
 /** Captured SSE callback from the most recent usePlannerEvents call. */
 let capturedOnEvent: ((event: PlannerEvent) => void) | null = null;
@@ -59,24 +60,34 @@ function makeMockPlan(): Plan {
   };
 }
 
-function makeMockPacket(): EnergyPacket {
+function makeMockRequest(): UserRequestWithSession {
+  const departure = new Date(Date.now() + 3600000).toISOString();
   return {
-    id: "pkt-0001",
+    id: "req-0001",
     asset_id: "ev",
-    status: "ACTIVE",
     target_energy_kwh: 10,
     target_soc: 0.9,
     desired_power_kw: 7.4,
+    completion_policy: "STOP",
+    deadlines: [{ latest_end: departure, max_total_cost_eur: 2.0, max_marginal_rate_eur_kwh: null, min_completion: 0.8 }],
+    mode: "BY_DEADLINE",
+    max_total_cost_eur: 2.0,
+    tier_count: 1,
+    session_id: "sess-0001",
+    session_type: "ev",
+    status: "ACTIVE",
     estimated_cost_eur: 1.0,
     estimated_co2_g: 300,
-    estimated_completion: 0.5,
-    accumulated_cost_eur: 0.5,
-    value_curve: {
-      deadline_tiers: [{ deadline: new Date(Date.now() + 3600000).toISOString(), max_total_cost_eur: 2.0, min_completion: 0.8 }],
-      active_tier_index: 0,
-    },
+    interruptible: true,
+    tolerance_min: null,
+    budget_eur: null,
     created_at: "2026-04-04T08:00:00Z",
     updated_at: "2026-04-04T10:00:00Z",
+    session: {
+      type: "ev", id: "sess-0001", target_soc: 0.9, departure_time: departure,
+      soft_deadline: false, mode: "BY_DEADLINE", budget_eur: null,
+      created_at: "2026-04-04T08:00:00Z", updated_at: "2026-04-04T10:00:00Z",
+    },
   };
 }
 
@@ -106,7 +117,8 @@ describe("PlannerPage", () => {
     capturedOnEvent = null;
     vi.mocked(usePlan).mockReturnValue({ data: undefined } as ReturnType<typeof usePlan>);
     vi.mocked(useTrace).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useTrace>);
-    vi.mocked(usePackets).mockReturnValue({ data: [] } as unknown as ReturnType<typeof usePackets>);
+    vi.mocked(useRequests).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useRequests>);
+    vi.mocked(useSim).mockReturnValue({ data: undefined } as unknown as ReturnType<typeof useSim>);
     vi.mocked(useSetObjective).mockReturnValue({ mutate: vi.fn() } as unknown as ReturnType<typeof useSetObjective>);
     vi.mocked(usePlannerEvents).mockImplementation((cb: (e: PlannerEvent) => void) => {
       capturedOnEvent = cb;
@@ -139,9 +151,9 @@ describe("PlannerPage", () => {
     expect(screen.getByTestId("matrix-empty")).toBeInTheDocument();
   });
 
-  it("renders packet-board empty state when no packets", () => {
+  it("renders session-board empty state when no requests", () => {
     render(<PlannerPage />);
-    expect(screen.getByTestId("packet-board-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("session-board-empty")).toBeInTheDocument();
   });
 
   it("renders plan header content when plan is available", () => {
@@ -173,11 +185,11 @@ describe("PlannerPage", () => {
     expect(screen.getByTestId("trigger-chip-0")).toBeInTheDocument();
   });
 
-  it("renders packet board when packets available", () => {
-    vi.mocked(usePackets).mockReturnValue({ data: [makeMockPacket()] } as unknown as ReturnType<typeof usePackets>);
+  it("renders session board when requests available", () => {
+    vi.mocked(useRequests).mockReturnValue({ data: [makeMockRequest()] } as unknown as ReturnType<typeof useRequests>);
     render(<PlannerPage />);
-    expect(screen.getByTestId("packet-board")).toBeInTheDocument();
-    expect(screen.getByTestId("packet-group-active")).toBeInTheDocument();
+    expect(screen.getByTestId("session-board")).toBeInTheDocument();
+    expect(screen.getByTestId("session-group-active")).toBeInTheDocument();
   });
 
   // ── Plan E: Planner status SSE tests ──────────────────────────────────────

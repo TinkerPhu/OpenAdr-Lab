@@ -153,10 +153,6 @@ export type OadrCapacityState = {
   last_updated: string | null;
 };
 
-export type PacketStatus =
-  | "PENDING" | "SCHEDULED" | "ACTIVE" | "PAUSED"
-  | "COMPLETED" | "PARTIAL_COMPLETED" | "ABANDONED" | "FAILED";
-
 export type AssetAllocation = {
   asset_id: string;
   power_kw: number;
@@ -184,29 +180,6 @@ export type PlanTimeSlot = {
   pv_forecast_kw: number;
   baseline_kw: number;
   planned_kw_by_asset?: Record<string, number>;
-};
-
-export type EnergyPacket = {
-  id: string;
-  asset_id: string;
-  status: PacketStatus;
-  target_energy_kwh: number;
-  target_soc: number | null;
-  desired_power_kw: number;
-  estimated_cost_eur: number;
-  estimated_co2_g: number;
-  estimated_completion: number;
-  accumulated_cost_eur: number;
-  value_curve: {
-    deadline_tiers: Array<{
-      deadline: string;
-      max_total_cost_eur: number | null;
-      min_completion: number;
-    }>;
-    active_tier_index: number;
-  };
-  created_at: string;
-  updated_at: string;
 };
 
 export type PlanSummary = {
@@ -462,16 +435,20 @@ export type CreateBaselineOverrideBody = { slots: BaselineSlot[] };
 
 // ─── Flexibility Envelope ─────────────────────────────────────────────────────
 
+/** Per-device schedulability metadata emitted at plan time (VEN/src/entities/plan.rs FlexibilityEnvelope). */
 export type FlexibilityEnvelope = {
-  packet_id: string;
   asset_id: string;
   energy_needed_kwh: number;
   power_min_kw: number;
   power_max_kw: number;
   window_start: string;
   window_end: string;
+  slots_available: number;
   max_acceptable_rate: number;
+  min_acceptable_rate: number;
+  budget_remaining_eur: number;
   estimated_cost_eur: number;
+  estimated_co2_g: number;
 };
 
 // ─── Timeline zones ───────────────────────────────────────────────────────────

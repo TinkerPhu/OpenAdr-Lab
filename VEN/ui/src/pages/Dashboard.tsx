@@ -1,7 +1,17 @@
 import { useMemo } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import { Chip, Grid, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
-import { useHealth, usePrograms, useEvents, useSensor, useReports, useSim, useCapacity, useLedger } from "../api/hooks";
-import type { OadrCapacityState, AssetLedger } from "../api/types";
+import { useHealth, usePlan, usePrograms, useEvents, useRequests, useSensor, useReports, useSim, useCapacity, useLedger } from "../api/hooks";
+import type { OadrCapacityState, AssetLedger, PlannerObjective } from "../api/types";
+import { SessionProgressBoard } from "../components/sessions/SessionProgressBoard";
+
+const OBJECTIVE_LABELS: Record<PlannerObjective, string> = {
+  min_cost: "Cost",
+  min_ghg: "GHG",
+  min_grid: "Grid",
+  min_import: "Autarky",
+  max_revenue: "Revenue",
+};
 
 function fmtNum(v: number | undefined | null, decimals = 1): string {
   if (v == null) return "—";
@@ -133,6 +143,8 @@ export function DashboardPage() {
   const sim = useSim();
   const capacity = useCapacity();
   const ledger = useLedger();
+  const plan = usePlan();
+  const requests = useRequests();
 
   const healthStatus = health.isError ? "offline" : health.data ? "ok" : "unknown";
   const netPowerW = sim.data?.grid.net_power_w ?? null;
@@ -183,6 +195,30 @@ export function DashboardPage() {
           <Typography variant="h4" data-testid="dash-reports-count">
             {reports.data?.length ?? 0}
           </Typography>
+        </Paper>
+      </Grid>
+
+      {/* Session progress strip + active planner objective (BL-36) */}
+      <Grid item xs={12}>
+        <Paper sx={{ p: 2 }} data-testid="dash-session-strip">
+          <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+            <Typography variant="subtitle2" color="text.secondary">Sessions</Typography>
+            <Chip
+              data-testid="dash-objective-chip"
+              size="small"
+              variant="outlined"
+              clickable
+              component={RouterLink}
+              to="/planner"
+              label={`Objective: ${plan.data?.objective ? OBJECTIVE_LABELS[plan.data.objective] : "—"}`}
+            />
+          </Stack>
+          <SessionProgressBoard
+            variant="condensed"
+            requests={requests.data ?? []}
+            plan={plan.data ?? undefined}
+            sim={sim.data ?? undefined}
+          />
         </Paper>
       </Grid>
 
