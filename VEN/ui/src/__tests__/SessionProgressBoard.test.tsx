@@ -234,7 +234,10 @@ describe("SessionProgressBoard", () => {
     render(
       <SessionProgressBoard requests={[makeEvRequest(), done]} sim={sim} variant="condensed" />,
     );
-    expect(screen.getByTestId("session-chip-req-ev-01")).toBeInTheDocument();
+    const chip = screen.getByTestId("session-chip-req-ev-01");
+    expect(chip).toBeInTheDocument();
+    // Same countdown format as the full board: T−1h 59m, not T−119m
+    expect(chip).toHaveTextContent(/T−1h \d+m/);
     expect(screen.queryByTestId("session-chip-req-htr-done")).not.toBeInTheDocument();
     expect(screen.queryByTestId("session-board")).not.toBeInTheDocument();
   });
