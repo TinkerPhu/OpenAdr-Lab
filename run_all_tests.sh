@@ -119,6 +119,16 @@ echo -e "${BOLD}╔════════════════════�
 echo -e "${BOLD}║           OpenADR Lab — Full Test Suite                  ║${NC}"
 echo -e "${BOLD}╚═══════════════════════════════════════════════════════════╝${NC}"
 
+# ── Pi4 lease lock ───────────────────────────────────────────────────────────
+# The docker host is shared between worktrees/sessions; serialize access.
+# Aborts (exit 2) if the lock stays held past the wait limit — rerun to retry.
+
+if ! $_DOCKER_IS_LOCAL && { $RUN_E2E || $RUN_RESILIENCE || $RUN_RUST; }; then
+    header "Acquiring $_DOCKER_LABEL lock"
+    PI4_LOCK_HOST="$DOCKER_HOST" bash "$SCRIPT_DIR/scripts/pi4_lock.sh" acquire -l 180 -m "run_all_tests.sh ${*:-all}"
+    trap 'PI4_LOCK_HOST="$DOCKER_HOST" bash "$SCRIPT_DIR/scripts/pi4_lock.sh" release' EXIT
+fi
+
 # ── 1. Local UI Unit Tests ───────────────────────────────────────────────────
 
 if $RUN_LOCAL; then

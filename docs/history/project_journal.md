@@ -5666,3 +5666,37 @@ error boundaries into the resident feed per the ERROR_HANDLING audience rule.
   wholesale refetch; the backend still re-emits updated rows on SSE for future
   consumers.
 
+
+## Pi4 lease lock — serializing the shared docker host (branch fix/pi4-lock)
+
+**What.** `scripts/pi4_lock.sh` (acquire / release / refresh / status): a
+cooperative lease lock for Pi4-Server, held for the whole build+test
+sequence of a session. The mutex is an atomic `mkdir /tmp/openadr_pi4.lock`
+executed *on the Pi4* via one `ssh bash -s` round-trip; an owner file
+records `user@host:worktree`, the declared lease end (UTC epoch, from
+`-l minutes`, default 60), and the task description. Once the lease end
+passes, the lock counts as dead (crashed session) and is stolen by the
+next acquirer with a warning; `refresh` extends a live lease from now. `acquire` polls every 20 s and exits 2 after ~9 min (below
+the 10-min AI-tool timeout) with "rerun to keep waiting". `run_all_tests.sh`
+acquires the lock automatically before any remote docker suite and releases
+it via EXIT trap; `.claude/CLAUDE.md` (pi4-lock rule) makes manual docker
+sequences take it too.
+
+**Why.** Multiple Claude sessions on different worktrees deploy and test on
+the same Pi4; concurrent `docker compose build/run` invocations corrupt each
+other's stacks and produce false failures. A queue file ("append a line,
+wait until you are first") was considered and rejected: a killed session
+leaves its entry at the head and deadlocks everyone behind it, so every
+entry would need its own lease-expiry anyway — a single lease lock gives the same
+serialization with self-healing. The lock lives on the Pi4, not in a
+worktree, so it covers every checkout and machine that can reach the host.
+
+**Issues / key learnings.**
+- *MSYS path mangling reaches ssh arguments.* Git Bash rewrote the
+  `/tmp/openadr_pi4.lock` argument into `C:/Users/…/Temp/…` before ssh saw
+  it; the remote mkdir then failed and the fallback path mis-stole the
+  lock. Fix: define POSIX paths inside the single-quoted remote heredoc,
+  never pass them as ssh arguments from Windows.
+- *ssh flattens remote-command arguments.* Multi-word descriptions were
+  word-split remotely ("lock self-test" arrived as "lock"); arguments must
+  be re-escaped with `printf %q` before the ssh call.
