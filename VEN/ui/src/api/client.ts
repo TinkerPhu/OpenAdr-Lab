@@ -1,6 +1,6 @@
 import type {
   VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry,
-  SimInjectState, PlannedRates, OadrCapacityState, EnergyPacket, Plan, PlannerObjective, AssetLedger,
+  SimInjectState, PlannedRates, OadrCapacityState, Plan, PlannerObjective, AssetLedger,
   UserRequestWithSession, FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
   EvSession, CreateEvSessionBody, EvSettings, UpdateEvSettingsBody,
   HeaterTarget, CreateHeaterTargetBody,
@@ -180,12 +180,6 @@ export class VenApi {
     const r = await this.getReq("/metrics");
     if (!r.ok) throw new Error(`metrics ${r.status}`);
     return r.text();
-  }
-
-  async packets(): Promise<EnergyPacket[]> {
-    const r = await this.getReq("/packets");
-    if (!r.ok) throw new Error(`packets ${r.status}`);
-    return r.json();
   }
 
   async plan(): Promise<Plan | null> {

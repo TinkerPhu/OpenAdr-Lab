@@ -220,15 +220,6 @@ export function useMetrics() {
   });
 }
 
-export function usePackets() {
-  const { api } = useVenContext();
-  return useQuery({
-    queryKey: ["packets", api.baseUrl],
-    queryFn: () => api.packets(),
-    refetchInterval: 10_000,
-  });
-}
-
 export function usePlan(options?: { refetchInterval?: number | false }) {
   const { api } = useVenContext();
   return useQuery({
@@ -354,7 +345,6 @@ export function usePostRequest() {
     mutationFn: (body: CreateUserRequestBody) => api.postRequest(body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user_requests"] });
-      queryClient.invalidateQueries({ queryKey: ["packets"] });
       queryClient.invalidateQueries({ queryKey: ["plan"] });
     },
   });

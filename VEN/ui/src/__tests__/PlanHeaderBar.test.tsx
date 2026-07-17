@@ -119,7 +119,7 @@ describe("PlanHeaderBar", () => {
   it("renders warnings badge showing count when warnings exist", () => {
     const plan = makePlan({
       warnings: [
-        { severity: "WARNING", message: "Packet infeasible", suggested_action: null },
+        { severity: "WARNING", message: "Session infeasible", suggested_action: null },
         { severity: "CRITICAL", message: "Grid limit exceeded", suggested_action: "Reduce load" },
       ],
     });
