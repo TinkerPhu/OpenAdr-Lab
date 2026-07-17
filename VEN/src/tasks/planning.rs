@@ -39,11 +39,9 @@ pub(crate) fn spawn_planning(
             planner.planning_initial_delay_s,
         ))
         .await;
-        // First cycle is always Periodic; subsequent cycles are set by the select! below.
-        // Using a local variable instead of borrow()ing the watch channel prevents stale
-        // retained values (e.g. AssetStateChange set once and never cleared) from
-        // mis-classifying every subsequent timeout-driven cycle as a hard trigger and
-        // bypassing the plan acceptance gate.
+        // First cycle is always Periodic; later cycles are set by the select! below.
+        // A local (not borrow()ing the watch channel) prevents stale retained values
+        // from mis-classifying timeout cycles as hard triggers, bypassing the gate.
         let mut wake_trigger = PlanTrigger::Periodic;
         loop {
             let wall_now = now_fn();
@@ -74,12 +72,9 @@ pub(crate) fn spawn_planning(
             // plain owned value — build_milp_inputs et al. are sync/pure.
             let asset_heuristics = state.asset_heuristics().await;
             let obj = *active_objective.read().await;
-            // Read inject state BEFORE cloning the sim. The pv_irradiance inject is a
-            // one-shot: the sim tick applies it to pv.irradiance_offset and then clears
-            // inject.pv_irradiance. If we read inject_state after the clone, the tick
-            // can race in between: it clears the inject flag but we already have a stale
-            // clone with offset=0. Reading first guarantees we always capture the pending
-            // value before the tick has a chance to clear it.
+            // Read inject state BEFORE cloning the sim: the one-shot pv_irradiance
+            // inject is cleared by the sim tick after applying it — reading after the
+            // clone can race that clear and lose the pending value (stale offset=0).
             let inject_snap = state.inject_state().await;
             let pv_forecast_override = inject_snap.pv_plan_kw;
             // Clone SimState snapshot so the Mutex is released immediately.
