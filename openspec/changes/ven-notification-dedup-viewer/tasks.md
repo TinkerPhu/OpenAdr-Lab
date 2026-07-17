@@ -66,7 +66,7 @@ a time); UI via `cd VEN/ui && npm test`; full E2E on Pi4 needs `docker compose b
 
 ## 6. E2E + quality gates
 
-- [ ] 6.1 BDD scenario "repeated storage failures appear once with a count"
+- [x] 6.1 BDD scenario "repeated storage failures appear once with a count"
       (inject storage failure via debug/sim hook; assert single ALERT with
       count > 1 via `/notifications/history`). Requires
       `ssh Pi4-Server … docker compose build ven` before running
@@ -74,6 +74,6 @@ a time); UI via `cd VEN/ui && npm test`; full E2E on Pi4 needs `docker compose b
 - [ ] 6.2 `wsl cargo fmt --check`, `wsl cargo clippy --all-targets --all-features
       -- -D warnings -j 2`, `python scripts/audit_file_sizes.py`, full
       `wsl cargo test -p ven-app -j 2`.
-- [ ] 6.3 Docs: journal entry (`docs/history/project_journal.md`); note the new
+- [x] 6.3 Docs: journal entry (`docs/history/project_journal.md`); note the new
       endpoint in `docs/architecture/INTERFACES.md` if it lists VEN routes;
       wiki-sync after merge.
