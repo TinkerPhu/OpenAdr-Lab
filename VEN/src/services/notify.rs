@@ -18,6 +18,12 @@ use crate::entities::design_vocabulary::UserNotificationSeverity;
 use crate::entities::notification::UserNotification;
 use crate::state::AppState;
 
+/// 030: rolling dedup window — a keyed repeat whose predecessor was last
+/// seen within this window collapses into it instead of a new notification.
+pub fn dedup_window() -> chrono::Duration {
+    chrono::Duration::minutes(30)
+}
+
 #[derive(Clone)]
 pub struct Notifier {
     history: Option<Arc<dyn HistoryPort>>,
@@ -38,6 +44,11 @@ impl Notifier {
     /// Create and fan out one notification. Storage failures are logged,
     /// never propagated — notifying must not break the calling code path.
     /// `now` is injected per the determinism rule.
+    ///
+    /// 030: with a `dedup_key`, a repeat inside [`dedup_window`] updates the
+    /// existing notification (`count`/`last_seen_at`) instead of creating a
+    /// new one; the updated row is re-broadcast so live feeds reconcile by id.
+    #[allow(clippy::too_many_arguments)] // mirrors UserNotification's fields 1:1; a params struct would duplicate the entity
     pub async fn notify(
         &self,
         state: &AppState,
@@ -46,8 +57,28 @@ impl Notifier {
         message: impl Into<String>,
         asset_id: Option<String>,
         event_id: Option<String>,
+        dedup_key: Option<String>,
     ) -> UserNotification {
-        let n = UserNotification::new(now, severity, message, asset_id, event_id);
+        if let Some(key) = dedup_key.as_deref() {
+            if let Some(bumped) = state.bump_notification_seen(key, now, dedup_window()).await {
+                let _ = self.tx.send(bumped.clone()); // re-emit: feeds reconcile by id
+                if let Some(h) = self.history.clone() {
+                    let (id, count, last_seen_at) = (bumped.id, bumped.count, bumped.last_seen_at);
+                    match tokio::task::spawn_blocking(move || {
+                        h.update_notification_seen(id, count, last_seen_at)
+                    })
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => warn!(error = %e, "notification seen-update failed"),
+                        Err(e) => warn!(error = %e, "notification seen-update task panicked"),
+                    }
+                }
+                return bumped;
+            }
+        }
+        let mut n = UserNotification::new(now, severity, message, asset_id, event_id);
+        n.dedup_key = dedup_key;
         state.push_notification(n.clone()).await;
         let _ = self.tx.send(n.clone()); // no subscribers = fine
         if let Some(h) = self.history.clone() {
@@ -115,7 +146,9 @@ pub async fn notify_new_plan_warnings(
         return;
     }
     for (sev, msg) in new_plan_warnings(prev, cur) {
-        notifier.notify(state, now, sev, msg, None, None).await;
+        notifier
+            .notify(state, now, sev, msg, None, None, None)
+            .await;
     }
 }
 
@@ -129,7 +162,9 @@ pub async fn notify_outage_edge(
     now_ok: bool,
 ) -> bool {
     if let Some((sev, msg)) = outage_transition(was_ok, now_ok) {
-        notifier.notify(state, now, sev, msg, None, None).await;
+        notifier
+            .notify(state, now, sev, msg, None, None, None)
+            .await;
     }
     now_ok
 }
@@ -160,6 +195,7 @@ mod tests {
                 "grid emergency",
                 None,
                 Some("evt-1".into()),
+                None,
             )
             .await;
 
@@ -185,6 +221,7 @@ mod tests {
                 "VTN unreachable",
                 None,
                 None,
+                None,
             )
             .await;
         assert_eq!(state.notifications_since(None).await.len(), 1);
@@ -201,6 +238,7 @@ mod tests {
                     ts(i as i64),
                     UserNotificationSeverity::Info,
                     format!("n{i}"),
+                    None,
                     None,
                     None,
                 )
@@ -282,6 +320,158 @@ mod tests {
         );
     }
 
+    // 030: convenience — keyed notify with fixed message/severity.
+    async fn notify_keyed(
+        notifier: &Notifier,
+        state: &AppState,
+        at: DateTime<Utc>,
+        key: &str,
+    ) -> UserNotification {
+        notifier
+            .notify(
+                state,
+                at,
+                UserNotificationSeverity::Alert,
+                "storage error",
+                None,
+                None,
+                Some(key.into()),
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn notify_dedup_hit_within_window_updates_instead_of_appending() {
+        let state = AppState::new();
+        let mock = Arc::new(MockHistoryPort::new());
+        let notifier = Notifier::new(Some(mock.clone()));
+        let mut rx = notifier.subscribe();
+
+        let first = notify_keyed(&notifier, &state, ts(0), "storage-error").await;
+        let bumped = notify_keyed(&notifier, &state, ts(5 * 60), "storage-error").await;
+
+        assert_eq!(bumped.id, first.id, "same notification, not a new one");
+        assert_eq!(bumped.count, 2);
+        assert_eq!(bumped.last_seen_at, ts(5 * 60));
+        assert_eq!(bumped.created_at, ts(0), "first occurrence preserved");
+
+        let ring = state.notifications_since(None).await;
+        assert_eq!(ring.len(), 1, "ring must not grow on a dedup hit");
+        assert_eq!(ring[0].count, 2);
+
+        // SSE: first emission + the re-emitted update, both with first.id.
+        assert_eq!(rx.try_recv().unwrap().id, first.id);
+        let update = rx.try_recv().unwrap();
+        assert_eq!(update.id, first.id);
+        assert_eq!(update.count, 2);
+
+        let persisted = mock.appended_notifications();
+        assert_eq!(persisted.len(), 1, "no second row persisted");
+        assert_eq!(persisted[0].count, 2, "seen-update persisted");
+        assert_eq!(persisted[0].last_seen_at, ts(5 * 60));
+    }
+
+    #[tokio::test]
+    async fn notify_keyed_outside_window_creates_new_notification() {
+        let state = AppState::new();
+        let notifier = Notifier::new(None);
+
+        let first = notify_keyed(&notifier, &state, ts(0), "storage-error").await;
+        let second = notify_keyed(&notifier, &state, ts(31 * 60), "storage-error").await;
+
+        assert_ne!(second.id, first.id, "31 min > window → new notification");
+        assert_eq!(second.count, 1);
+        assert_eq!(state.notifications_since(None).await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn notify_without_dedup_key_never_dedups() {
+        let state = AppState::new();
+        let notifier = Notifier::new(None);
+        for at in [ts(0), ts(60)] {
+            notifier
+                .notify(
+                    &state,
+                    at,
+                    UserNotificationSeverity::Warn,
+                    "identical message",
+                    None,
+                    None,
+                    None,
+                )
+                .await;
+        }
+        assert_eq!(
+            state.notifications_since(None).await.len(),
+            2,
+            "unkeyed repeats stay separate rows"
+        );
+    }
+
+    #[tokio::test]
+    async fn notify_dedup_keys_are_independent() {
+        let state = AppState::new();
+        let notifier = Notifier::new(None);
+        notify_keyed(&notifier, &state, ts(0), "storage-error").await;
+        let other = notify_keyed(&notifier, &state, ts(60), "other-key").await;
+        assert_eq!(other.count, 1, "different key must not collapse");
+        assert_eq!(state.notifications_since(None).await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn notify_dedup_hit_survives_restart_via_ring_seed() {
+        // After a restart main.rs seeds the ring from the store; a keyed
+        // repeat must then bump the persisted row, not append a new one.
+        let mock = Arc::new(MockHistoryPort::new());
+        let seeded = UserNotification::new(
+            ts(0),
+            UserNotificationSeverity::Alert,
+            "storage error",
+            None,
+            None,
+        )
+        .with_dedup_key("storage-error");
+        mock.append_notification(&seeded).unwrap();
+
+        let state = AppState::new();
+        state.push_notification(seeded.clone()).await; // the seed step
+
+        let notifier = Notifier::new(Some(mock.clone()));
+        let bumped = notify_keyed(&notifier, &state, ts(5 * 60), "storage-error").await;
+
+        assert_eq!(bumped.id, seeded.id);
+        let persisted = mock.appended_notifications();
+        assert_eq!(persisted.len(), 1, "no new row after restart");
+        assert_eq!(persisted[0].count, 2);
+    }
+
+    // 030: a failure to persist a notification stays log-only — it must not
+    // produce another notification (recursion) nor break the fanout.
+    #[tokio::test]
+    async fn notify_persist_failure_stays_log_only() {
+        let state = AppState::new();
+        let mock = Arc::new(MockHistoryPort::new());
+        mock.set_fail_storage(true);
+        let notifier = Notifier::new(Some(mock.clone()));
+        notifier
+            .notify(
+                &state,
+                ts(0),
+                UserNotificationSeverity::Warn,
+                "VTN unreachable",
+                None,
+                None,
+                None,
+            )
+            .await;
+        assert_eq!(
+            state.notifications_since(None).await.len(),
+            1,
+            "exactly the original notification, no recursion"
+        );
+        assert!(mock.appended_notifications().is_empty());
+    }
+
     #[test]
     fn test_outage_transition_fires_on_edges_only() {
         assert!(matches!(
@@ -308,6 +498,7 @@ mod tests {
                 "old",
                 None,
                 None,
+                None,
             )
             .await;
         notifier
@@ -316,6 +507,7 @@ mod tests {
                 ts(60),
                 UserNotificationSeverity::Info,
                 "new",
+                None,
                 None,
                 None,
             )

@@ -6,63 +6,63 @@ a time); UI via `cd VEN/ui && npm test`; full E2E on Pi4 needs `docker compose b
 
 ## 1. Entity + schema (dedup foundations)
 
-- [ ] 1.1 Extend `UserNotification` (`VEN/src/entities/notification.rs`) with
+- [x] 1.1 Extend `UserNotification` (`VEN/src/entities/notification.rs`) with
       `dedup_key: Option<String>`, `count: u32`, `last_seen_at: DateTime<Utc>`;
       update constructor + serde; unit tests for serialization (additive fields,
       SCREAMING_SNAKE severities unchanged).
-- [ ] 1.2 SQLite migration in `history_store`: add `dedup_key`, `count` (default 1),
+- [x] 1.2 SQLite migration in `history_store`: add `dedup_key`, `count` (default 1),
       `last_seen_at` (backfilled from `created_at`); adapter test proves a
       pre-migration DB migrates and backfills per spec scenario.
-- [ ] 1.3 Extend `history_store/notifications.rs` `append`/`query` to the new
+- [x] 1.3 Extend `history_store/notifications.rs` `append`/`query` to the new
       columns; add `update_notification_seen(id, count, last_seen_at)`; adapter
       tests (round-trip, update path). Watch the 500-line cap.
-- [ ] 1.4 Add `update_notification_seen` to `HistoryPort`
+- [x] 1.4 Add `update_notification_seen` to `HistoryPort`
       (`VEN/src/controller/history_port.rs`) and to
       `test_support/mock_history_port.rs`.
 
 ## 2. Notifier dedup (application layer)
 
-- [ ] 2.1 Failing use-case tests in `services/notify.rs`: dedup hit within window
+- [x] 2.1 Failing use-case tests in `services/notify.rs`: dedup hit within window
       (count/last_seen_at updated, no new row, SSE re-emit), miss outside window,
       `None` key never dedups, injected-clock determinism — the four
       notification-dedup spec scenarios.
-- [ ] 2.2 Implement: `notify` gains `dedup_key: Option<String>`; ring scan for a
+- [x] 2.2 Implement: `notify` gains `dedup_key: Option<String>`; ring scan for a
       key within `DEDUP_WINDOW` (30 min const); update-in-place path
       (`AppState` ring mutation helper in `state/mod.rs`, broadcast re-emit,
       `update_notification_seen` via HistoryPort). All existing callers pass
       `None` — behaviour unchanged; existing tests stay green.
-- [ ] 2.3 Restart-survival test: ring seeded from store, then a keyed notify
+- [x] 2.3 Restart-survival test: ring seeded from store, then a keyed notify
       increments the persisted row (spec scenario "Dedup hit survives restart").
 
 ## 3. StorageError producer
 
-- [ ] 3.1 Failing test: hot-path history-store write failure (mock returning
+- [x] 3.1 Failing test: hot-path history-store write failure (mock returning
       `DomainError::StorageError`) produces one ALERT with
       `dedup_key = "storage-error"`; repeated failures increment count; the
       persist step inside `notify` itself stays log-only.
-- [ ] 3.2 Wire the producer at the history-sampler/planner-cycle write boundary
+- [x] 3.2 Wire the producer at the history-sampler/planner-cycle write boundary
       (thread `Notifier` in where needed; keep tasks/ files < 200 production lines).
 
 ## 4. History endpoint (adapter)
 
-- [ ] 4.1 Failing route tests for `GET /notifications/history`
+- [x] 4.1 Failing route tests for `GET /notifications/history`
       (`routes/notifications.rs`): rows beyond ring cap, `severity` filter,
       `400` on invalid severity, `limit` keeps newest rows oldest-first.
-- [ ] 4.2 Implement route + severity filter in the store query; register in
+- [x] 4.2 Implement route + severity filter in the store query; register in
       `routes/mod.rs`.
 
 ## 5. VEN UI
 
-- [ ] 5.1 API types + `useNotificationHistory(severity?)` hook
+- [x] 5.1 API types + `useNotificationHistory(severity?)` hook
       (`VEN/ui/src/api/`): additive `count`/`last_seen_at`/`dedup_key` fields;
       hook unit test.
-- [ ] 5.2 `Notifications.tsx` page + route + nav entry: severity filter chips,
+- [x] 5.2 `Notifications.tsx` page + route + nav entry: severity filter chips,
       `message ×N` rendering (count > 1 only), first/last-seen timestamps;
       component tests for the four viewer spec scenarios.
-- [ ] 5.3 Bell: "view all" link in the popover; SSE/id reconciliation — incoming
+- [x] 5.3 Bell: "view all" link in the popover; SSE/id reconciliation — incoming
       row with existing `id` replaces the entry (test: count 3 → 4, length
       unchanged). Update `NotificationsBell.test.tsx`.
-- [ ] 5.4 `npm test` + `npm run build` + eslint clean in `VEN/ui`.
+- [x] 5.4 `npm test` + `npm run build` + eslint clean in `VEN/ui`.
 
 ## 6. E2E + quality gates
 

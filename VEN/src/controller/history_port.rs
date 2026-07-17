@@ -61,15 +61,31 @@ pub trait HistoryPort: Send + Sync {
         to: DateTime<Utc>,
     ) -> Result<Vec<PlanSnapshot>, DomainError>;
     fn query_ledger_periods(&self, asset_id: &str) -> Result<Vec<LedgerPeriod>, DomainError>;
-    /// WP4.3 (BL-20): the NEWEST `limit` notifications newer than `since`
-    /// (all when `None`), returned oldest first. Default empty for test doubles.
+    /// WP4.3 (BL-20): the NEWEST `limit` notifications last seen after `since`
+    /// (all when `None`), returned oldest first. 030: optionally filtered to
+    /// one severity — the filter applies before `limit`, so a filtered page is
+    /// still `limit` matching rows. Default empty for test doubles.
     fn query_notifications(
         &self,
         since: Option<DateTime<Utc>>,
         limit: usize,
+        severity: Option<crate::entities::design_vocabulary::UserNotificationSeverity>,
     ) -> Result<Vec<UserNotification>, DomainError> {
-        let _ = (since, limit);
+        let _ = (since, limit, severity);
         Ok(Vec::new())
+    }
+
+    /// 030 (notification-dedup): record a dedup hit — bump `count` and
+    /// `last_seen_at` on an existing notification. The window decision is
+    /// made in the application layer. Default no-op for test doubles.
+    fn update_notification_seen(
+        &self,
+        id: uuid::Uuid,
+        count: u32,
+        last_seen_at: DateTime<Utc>,
+    ) -> Result<(), DomainError> {
+        let _ = (id, count, last_seen_at);
+        Ok(())
     }
 
     /// Delete all rows across every table with a time column older than `cutoff`.

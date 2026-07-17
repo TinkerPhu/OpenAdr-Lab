@@ -5,7 +5,7 @@ import type {
   SensorSnapshot, SimInjectState, CreateUserRequestBody,
   CreateEvSessionBody, UpdateEvSettingsBody,
   CreateHeaterTargetBody, CreateShiftableLoadBody, CreateBaselineOverrideBody,
-  PlannerObjective, PlannerEvent, ComfortRate,
+  PlannerObjective, PlannerEvent, ComfortRate, UserNotificationSeverity,
 } from "./types";
 
 export function useHealth() {
@@ -24,6 +24,16 @@ export function useNotifications() {
   return useQuery({
     queryKey: ["notifications", api.baseUrl],
     queryFn: () => api.notifications(),
+    refetchInterval: 10_000,
+  });
+}
+
+/** 030: persisted notification history with optional severity filter. */
+export function useNotificationHistory(severity?: UserNotificationSeverity) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["notifications/history", api.baseUrl, severity ?? "ALL"],
+    queryFn: () => api.notificationsHistory(severity ? { severity } : undefined),
     refetchInterval: 10_000,
   });
 }

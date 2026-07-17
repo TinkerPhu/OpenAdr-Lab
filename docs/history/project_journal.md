@@ -5635,3 +5635,34 @@ nothing produces; per-asset sessions + plan data answer it honestly.
 - *The UI type of a wire struct had silently forked* (`FlexibilityEnvelope`
   with a `packet_id` the Rust struct never had). DTO pass-through only
   works if types are audited against the owning struct when it changes.
+## 030 — Notification Dedup + History Viewer (openspec ven-notification-dedup-viewer)
+
+**What:** `Notifier::notify` gained an optional `dedup_key`: a keyed repeat within a
+rolling 30-min window bumps the existing notification's `count`/`last_seen_at` (ring
+updated in place, SSE re-emits, SQLite `UPDATE`) instead of appending. Schema v4 adds
+`dedup_key`/`count`/`last_seen_at` (backfilled from `created_at`). First keyed producer:
+history-sampler `StorageError` boundary (`dedup_key` "storage-error", ALERT). New
+`GET /notifications/history?since=&limit=&severity=` over the persisted store, and a
+VEN UI Notifications page (severity chips, `message ×N`, first/last-seen) with a
+"view all" link from the bell. Formalized the DomainError pattern in
+docs/guidelines/ERROR_HANDLING.md (+ CLAUDE.md `error-handling:` rule).
+
+**Why:** the bell only showed the in-memory ring (persisted history had no consumer),
+and any repeat-firing error producer would flood the feed — both blocked wiring more
+error boundaries into the resident feed per the ERROR_HANDLING audience rule.
+
+**Key decisions/learnings:**
+- Dedup state lives in the ring (entity fields), not a separate map — survives
+  restarts for free via the existing SQLite ring-seeding; no second source of truth.
+- Window policy stays in the application layer; the store only gets a dumb
+  `update_notification_seen(id, count, last_seen_at)` port method (no SQL upsert).
+- Store recency switched to `last_seen_at` (== `created_at` until a dedup hit), so a
+  long-running deduplicated condition stays in the newest rows.
+- The planned E2E "inject storage failure via debug hook" was reframed: no such hook
+  exists and a production self-sabotage endpoint is bad surface. Dedup collapse is
+  verified at use-case level (write_window test); E2E verifies the history endpoint
+  HTTP contract (ven_notifications.feature).
+- The UI consumes notifications by polling, not SSE — "reconcile by id" holds by
+  wholesale refetch; the backend still re-emits updated rows on SSE for future
+  consumers.
+

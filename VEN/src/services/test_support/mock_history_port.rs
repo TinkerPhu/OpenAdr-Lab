@@ -25,11 +25,30 @@ pub struct MockHistoryPort {
     reports: Mutex<Vec<ReportSent>>,
     ledger_periods: Mutex<Vec<LedgerPeriod>>,
     notifications: Mutex<Vec<UserNotification>>,
+    /// 030: when set, append methods fail with `StorageError` — for testing
+    /// the storage-failure notification producer.
+    fail_storage: std::sync::atomic::AtomicBool,
 }
 
 impl MockHistoryPort {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 030: make subsequent append calls fail with `DomainError::StorageError`.
+    pub fn set_fail_storage(&self, fail: bool) {
+        self.fail_storage
+            .store(fail, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn storage_result(&self, what: &str) -> Result<(), DomainError> {
+        if self.fail_storage.load(std::sync::atomic::Ordering::SeqCst) {
+            Err(DomainError::StorageError(format!(
+                "{what}: disk full (mock)"
+            )))
+        } else {
+            Ok(())
+        }
     }
 
     /// All tick samples appended so far, in insertion order.
@@ -63,11 +82,13 @@ impl MockHistoryPort {
 
 impl HistoryPort for MockHistoryPort {
     fn append_tick_samples(&self, rows: &[TickSample]) -> Result<(), DomainError> {
+        self.storage_result("insert tick samples")?;
         self.ticks.lock().unwrap().extend_from_slice(rows);
         Ok(())
     }
 
     fn append_grid_sample(&self, row: &GridSample) -> Result<(), DomainError> {
+        self.storage_result("insert grid sample")?;
         self.grid.lock().unwrap().push(row.clone());
         Ok(())
     }
@@ -93,21 +114,41 @@ impl HistoryPort for MockHistoryPort {
     }
 
     fn append_notification(&self, row: &UserNotification) -> Result<(), DomainError> {
+        self.storage_result("insert notification")?;
         self.notifications.lock().unwrap().push(row.clone());
         Ok(())
+    }
+
+    fn update_notification_seen(
+        &self,
+        id: uuid::Uuid,
+        count: u32,
+        last_seen_at: DateTime<Utc>,
+    ) -> Result<(), DomainError> {
+        let mut rows = self.notifications.lock().unwrap();
+        match rows.iter_mut().find(|n| n.id == id) {
+            Some(n) => {
+                n.count = count;
+                n.last_seen_at = last_seen_at;
+                Ok(())
+            }
+            None => Err(DomainError::NotFound { id }),
+        }
     }
 
     fn query_notifications(
         &self,
         since: Option<DateTime<Utc>>,
         limit: usize,
+        severity: Option<crate::entities::design_vocabulary::UserNotificationSeverity>,
     ) -> Result<Vec<UserNotification>, DomainError> {
         let matching: Vec<_> = self
             .notifications
             .lock()
             .unwrap()
             .iter()
-            .filter(|n| since.is_none_or(|s| n.created_at > s))
+            .filter(|n| since.is_none_or(|s| n.last_seen_at > s))
+            .filter(|n| severity.as_ref().is_none_or(|s| n.severity == *s))
             .cloned()
             .collect();
         // Mirror the real store: the newest `limit` rows, oldest first.

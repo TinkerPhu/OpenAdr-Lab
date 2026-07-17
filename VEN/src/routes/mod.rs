@@ -61,6 +61,10 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/plan/events", get(hems::get_plan_events))
         .route("/notifications", get(notifications::get_notifications))
         .route(
+            "/notifications/history",
+            get(notifications::get_notifications_history),
+        )
+        .route(
             "/notifications/events",
             get(notifications::get_notification_events),
         )
