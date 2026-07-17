@@ -77,6 +77,14 @@ function onTrack(req: UserRequestWithSession, plan?: Plan): boolean | null {
   return null;
 }
 
+/** Shared countdown format: T−7h 56m / T−42m. */
+function countdownLabel(diffMs: number): string {
+  const totalMin = Math.floor(Math.max(diffMs, 0) / 60_000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `T−${h}h ${m}m` : `T−${m}m`;
+}
+
 // ─── Deadline countdown ───────────────────────────────────────────────────────
 
 function DeadlineDisplay({ req }: { req: UserRequestWithSession }) {
@@ -98,10 +106,7 @@ function DeadlineDisplay({ req }: { req: UserRequestWithSession }) {
     );
   }
 
-  const totalMin = Math.floor(Math.max(diffMs, 0) / 60_000);
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  const label = diffMs <= 0 ? "done" : h > 0 ? `T−${h}h ${m}m` : `T−${m}m`;
+  const label = diffMs <= 0 ? "done" : countdownLabel(diffMs);
 
   return (
     <Typography
@@ -306,7 +311,7 @@ function CondensedChips({ requests, plan, sim }: { requests: UserRequestWithSess
           ? ""
           : overdue
             ? " · OVERDUE"
-            : ` · T−${Math.floor((deadline.getTime() - nowMs) / 60_000)}m`;
+            : ` · ${countdownLabel(deadline.getTime() - nowMs)}`;
         return (
           <Chip
             key={req.id}
