@@ -2,7 +2,7 @@
 title: Testing Strategy
 type: architecture
 created: 2026-07-04
-updated: 2026-07-16
+updated: 2026-07-17
 synced_commit: f08e469
 sources: [docs/guidelines/TESTING.md, tests/features/, .claude/CLAUDE.md, run_all_tests.sh]
 tags: [testing, bdd, pyramid]
@@ -12,7 +12,9 @@ tags: [testing, bdd, pyramid]
 
 Four suites, all green before any merge to main (`.claude/CLAUDE.md` §testing;
 full guide docs/guidelines/TESTING.md). Entry point: `bash run_all_tests.sh` (with
-`--local`, `--e2e`, `--resilience`, `--rust` flags).
+`--local`, `--e2e`, `--resilience`, `--rust` flags). The remote docker suites
+(3, 4, and Rust-in-docker) automatically take the [[pi4-lease-lock]] so parallel
+sessions cannot corrupt each other's stacks on the shared Pi4.
 
 | # | Suite | Where | What |
 |---|---|---|---|
