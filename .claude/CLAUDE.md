@@ -1,5 +1,20 @@
 docker: docker runs on ssh Pi4-Server. run all tasks with docker on Pi4-Server via ssh in directory /srv/docker/openadr_lab.
 
+pi4-lock: the Pi4 is shared between multiple parallel sessions/worktrees. Before ANY
+docker build or test run on Pi4-Server, acquire the lease lock and hold it for the
+whole sequence:
+  bash scripts/pi4_lock.sh acquire -m "<branch>: <what you are doing>" [-l MIN]
+  ... all ssh Pi4-Server docker commands ...
+  bash scripts/pi4_lock.sh release
+The acquirer declares its own lease end (-l minutes, default 60) which is stored in
+the lock as UTC time; once that time passes the lock counts as dead and the next
+acquirer steals it. Pick -l honestly for the expected runtime; `refresh [-l MIN]`
+extends from now if a run overshoots. `status` shows holder, task, and lease end.
+`acquire` blocks up to ~9 min then exits 2 — rerun it to keep waiting; report to the
+user if the lock stays held unusually long instead of bypassing it. run_all_tests.sh
+acquires/releases the lock automatically (-l 180) for remote docker suites. Never run
+docker commands on the Pi4 while another owner holds an unexpired lock.
+
 local-rust: WSL is installed on this Windows machine. Use `wsl cargo check` (or `wsl cargo test`) inside the VEN directory for local Rust compilation instead of native Windows cargo, which lacks cmake/HiGHS. For a full test run including HiGHS, use the Pi4-Server docker stack.
 
 memory-budget: this laptop has only 8 GB RAM — WSL cargo builds have crashed the host
