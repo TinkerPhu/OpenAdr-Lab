@@ -2,7 +2,7 @@
 title: Deployment Topology
 type: architecture
 created: 2026-07-04
-updated: 2026-07-11
+updated: 2026-07-17
 synced_commit: 795c8d8
 sources: [docs/architecture/VTN_ARCHITECTURE.md, .claude/CLAUDE.md, docs/guidelines/TESTING.md, fleet.sh]
 tags: [deployment, docker, pi4]
@@ -28,7 +28,9 @@ Everything runs in Docker on **Pi4-Server** (reached via ssh), directory
 
 The [[vtn-stack]] and the three VEN containers are separate compose stacks joined by the
 external network. Caution from `.claude/CLAUDE.md`: the Pi also hosts **productive
-containers unrelated to this project — never stop them**. This is also the reason
+containers unrelated to this project — never stop them**. The Pi is also shared
+between parallel dev sessions: any docker build or test run there must hold the
+[[pi4-lease-lock]] first (`scripts/pi4_lock.sh`, `.claude/CLAUDE.md` §pi4-lock). This is also the reason
 [[fleet-tooling]]'s live verification deliberately stopped at N=3 rather than N=10 —
 the Pi already runs ~20 of those unrelated containers with limited headroom.
 
