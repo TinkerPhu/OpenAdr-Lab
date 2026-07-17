@@ -71,7 +71,7 @@ a time); UI via `cd VEN/ui && npm test`; full E2E on Pi4 needs `docker compose b
       count > 1 via `/notifications/history`). Requires
       `ssh Pi4-Server … docker compose build ven` before running
       `bash run_all_tests.sh --e2e`.
-- [ ] 6.2 `wsl cargo fmt --check`, `wsl cargo clippy --all-targets --all-features
+- [x] 6.2 `wsl cargo fmt --check`, `wsl cargo clippy --all-targets --all-features
       -- -D warnings -j 2`, `python scripts/audit_file_sizes.py`, full
       `wsl cargo test -p ven-app -j 2`.
 - [x] 6.3 Docs: journal entry (`docs/history/project_journal.md`); note the new
