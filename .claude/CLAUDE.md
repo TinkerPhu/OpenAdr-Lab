@@ -94,6 +94,13 @@ It is also legitimate to question whether a test's purpose or form is still corr
 
 docs/openadr_3_1_specs/pdf/: do not read, search, or reference any files under this directory. Use the markdown versions in docs/openadr_3_1_specs/ instead.
 
+error-handling: all cross-layer failures use the domain-owned DomainError enum
+(VEN/src/entities/error.rs); translate technical errors to a domain variant at the
+boundary where they occur; carry structured context (typed fields, not pre-flattened
+Strings); terse one-line Display; remediation hints only in the component's own
+vocabulary — deployment/config advice belongs at the presentation boundary. Full
+rules: docs/guidelines/ERROR_HANDLING.md.
+
 naming: variables and function names for physical quantities must include the unit as suffix (e.g. `power_kw`, `energy_kwh`, `temperature_c`, `tariff_eur_per_kwh`, `soc_pct`). When adding new code, check nearby code or nearby source files for existing suffixes to stay consistent.
 
 ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency rule: inner rings NEVER import outer rings.
