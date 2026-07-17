@@ -218,6 +218,15 @@ leaving it undone.
 
 ---
 
+### BL-40: AssetAllocation.cost_eur credits PV-surplus use instead of pricing it as forgone export revenue
+**Req:** `VEN/src/controller/milp_planner/results.rs` (`translate_to_plan`, all four allocation blocks: EV/heater/shiftable/battery-charging); found while fixing `FlexibilityEnvelope.estimated_cost_eur` (BL-36 rebuild — see `solved_session_cost()` in `controller/milp_planner/envelopes.rs`)
+**Problem:** Every allocation computes `cost_eur = grid_power_kw × import_tariff − surplus_power_kw × export_tariff` (note the minus). Consuming PV surplus instead of exporting it forfeits export revenue — an opportunity *cost*, not a credit — so the sign makes surplus-covered energy look cheaper than free instead of costing the forgone export price. The new envelope estimate (`solved_session_cost`) intentionally uses `+` (adds the surplus share's export-price cost) to get an honest per-session number; the decision matrix's `AssetAllocation.cost_eur` still uses the old `−` convention, so the Planner tab's per-slot/per-asset cost display and the envelope's session-total cost can now disagree in sign on the surplus-priced portion.
+**Fix:** Decide the intended semantics first (opportunity cost vs. a deliberate "surplus is free-plus-avoided-export-loss" display convention used elsewhere in the UI), then align `AssetAllocation.cost_eur` with `solved_session_cost()` — likely flipping the sign on all four allocation blocks — or document why they differ and adjust `PlanSummary.total_cost_eur`/`CostBreakdown.c_energy_eur` (which sum `net_import × import − net_export × export` at grid level, a different but related computation) accordingly.
+**Complexity:** Small code change (sign flip in up to 4 places) but needs a semantics decision first — touches solver-facing objective weights indirectly only if reused elsewhere; check no downstream code depends on the current sign before flipping.
+**Verify:** Unit test: a slot where an asset is charged entirely from PV surplus reports `cost_eur` equal to `surplus_power_kw × export_tariff_eur_kwh × dt_h` (the forgone revenue), not its negative; decision matrix and envelope totals agree in sign for the same slot range.
+
+---
+
 ## General Backlog
 
 | ID | Item | Priority |
