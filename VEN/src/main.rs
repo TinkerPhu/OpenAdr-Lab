@@ -209,7 +209,8 @@ async fn main() -> anyhow::Result<()> {
     // so the feed survives restarts.
     let notifier = services::notify::Notifier::new(history_port.clone());
     if let Some(h) = history_port.clone() {
-        let seeded = tokio::task::spawn_blocking(move || h.query_notifications(None, 200)).await;
+        let seeded =
+            tokio::task::spawn_blocking(move || h.query_notifications(None, 200, None)).await;
         if let Ok(Ok(rows)) = seeded {
             for n in rows {
                 state.push_notification(n).await;
@@ -335,8 +336,15 @@ async fn main() -> anyhow::Result<()> {
             sim_state.clone(),
             profile.history.retention_days,
         );
+        let n = notifier.clone();
         tasks::supervised_spawn("history_sampler", TASK_COOLDOWN_S, move || {
-            tasks::spawn_history_sampler(sim.clone(), history.clone(), s.clone(), retention_days)
+            tasks::spawn_history_sampler(
+                sim.clone(),
+                history.clone(),
+                s.clone(),
+                retention_days,
+                n.clone(),
+            )
         });
     }
     if let Some(history) = history_port.clone() {
