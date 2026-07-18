@@ -14,19 +14,28 @@ import {
 import { useVenContext } from "../App";
 import { JsonDialog } from "../components/JsonDialog";
 
-/** WP-T5 (G-5): newest submission matching a report, by reportName falling
- * back to eventID (submissions may predate the report having either). */
+/** WP-T5 (G-5): newest submission matching a report, by reportName AND
+ * eventID when both are known (reportName alone is free-text and not
+ * unique — two unrelated reports can share a name), falling back to
+ * whichever single field is available. */
 function latestSubmissionFor(
   report: Report,
   submissions: ReportSubmission[],
 ): ReportSubmission | null {
-  const matches = submissions.filter((s) =>
-    (report.reportName && s.report_name === report.reportName) ||
-    (!report.reportName && report.eventID && s.event_id === report.eventID),
-  );
+  const matches = submissions.filter((s) => {
+    if (report.reportName && report.eventID) {
+      return s.report_name === report.reportName && s.event_id === report.eventID;
+    }
+    if (report.reportName) return s.report_name === report.reportName;
+    if (report.eventID) return s.event_id === report.eventID;
+    return false;
+  });
   if (matches.length === 0) return null;
+  // Compare as actual timestamps, not strings — chrono's serde output omits
+  // trailing zero fractional-second digits, so two differently-formatted
+  // ISO strings can sort backwards under plain string comparison.
   return matches.reduce((newest, s) =>
-    s.submitted_at > newest.submitted_at ? s : newest,
+    new Date(s.submitted_at).getTime() > new Date(newest.submitted_at).getTime() ? s : newest,
   );
 }
 

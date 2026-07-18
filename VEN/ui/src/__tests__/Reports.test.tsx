@@ -153,6 +153,30 @@ describe("ReportsPage", () => {
     expect(screen.getByTestId("report-status-accepted")).toBeVisible();
   });
 
+  // Regression test: latestSubmissionFor previously matched by reportName
+  // alone whenever it was present, ignoring eventID — two reports sharing a
+  // free-text name would cross-contaminate each other's status chip.
+  it("does not match a submission with the same reportName but a different eventID", () => {
+    mockSubmissions = [
+      { report_name: "test-report", event_id: "some-other-event", client_name: "ven-1", vtn_accepted: true, submitted_at: "2024-01-01T00:00:00Z", error: null },
+    ];
+    renderReports();
+    expect(screen.queryByTestId("report-status-accepted")).not.toBeInTheDocument();
+  });
+
+  // Regression test: comparing submitted_at as plain strings sorts backwards
+  // when one timestamp has a fractional-second component and the other
+  // doesn't ('.' sorts before 'Z' in ASCII), even though the fractional one
+  // is chronologically later.
+  it("picks the chronologically newest submission even when only one has fractional seconds", () => {
+    mockSubmissions = [
+      { report_name: "test-report", event_id: "e1", client_name: "ven-1", vtn_accepted: false, submitted_at: "2024-01-01T00:00:00Z", error: "earlier, whole second" },
+      { report_name: "test-report", event_id: "e1", client_name: "ven-1", vtn_accepted: true, submitted_at: "2024-01-01T00:00:00.500Z", error: null },
+    ];
+    renderReports();
+    expect(screen.getByTestId("report-status-accepted")).toBeVisible();
+  });
+
   it("renders Edit button on each report row", () => {
     renderReports();
     expect(screen.getByTestId("report-edit-r1")).toBeVisible();

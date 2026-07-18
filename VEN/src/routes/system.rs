@@ -116,7 +116,7 @@ fn build_vtn_status_response(
 /// `token_expires_at`; this endpoint answers "what exactly, in detail."
 pub async fn vtn_status(State(ctx): State<AppCtx>) -> Json<VtnStatusResponse> {
     let vtn = ctx.state.vtn_connection_status().await;
-    let token_expires_at = ctx.vtn.token_expires_at().await;
+    let token_expires_at = ctx.vtn.token_expires_at(Utc::now()).await;
     Json(build_vtn_status_response(vtn, token_expires_at))
 }
 

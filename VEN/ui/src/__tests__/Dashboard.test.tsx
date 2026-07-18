@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
 import { DashboardPage } from "../pages/Dashboard";
+import { useHealth } from "../api/hooks";
 
 const mockPrograms = [
   { id: "p1", programName: "Program Alpha" },
@@ -69,7 +70,18 @@ const mockActiveRequest = {
 
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
-  useHealth: vi.fn(() => ({ data: "ok", isError: false })),
+  useHealth: vi.fn(() => ({
+    data: {
+      status: "ok",
+      components: {
+        ven_process: { status: "ok" },
+        vtn_connection: { status: "ok" },
+        storage: { status: "ok" },
+        planner: { status: "ok" },
+      },
+    },
+    isError: false,
+  })),
   usePrograms: vi.fn(() => ({ data: mockPrograms })),
   useEvents: vi.fn(() => ({ data: mockEvents })),
   useSensor: vi.fn(() => ({ data: mockSensor })),
@@ -99,6 +111,26 @@ describe("DashboardPage", () => {
     renderDashboard();
     expect(screen.getByTestId("dash-health-card")).toBeVisible();
     expect(screen.getByTestId("dash-health-value")).toHaveTextContent("ok");
+  });
+
+  // Regression test: the Dashboard's health card previously did a truthy
+  // check on the response body instead of reading `.status`, so it always
+  // showed "ok" once /health returned any successful (always-truthy) object.
+  it("renders degraded status when a health component is degraded", () => {
+    vi.mocked(useHealth).mockReturnValueOnce({
+      data: {
+        status: "degraded",
+        components: {
+          ven_process: { status: "ok" },
+          vtn_connection: { status: "degraded", detail: "backoff 30.0s" },
+          storage: { status: "ok" },
+          planner: { status: "ok" },
+        },
+      },
+      isError: false,
+    } as ReturnType<typeof useHealth>);
+    renderDashboard();
+    expect(screen.getByTestId("dash-health-value")).toHaveTextContent("degraded");
   });
 
   it("renders programs card with count", () => {

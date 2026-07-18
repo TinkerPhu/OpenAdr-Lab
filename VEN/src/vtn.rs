@@ -150,13 +150,20 @@ impl VtnClient {
     /// currently cached token, for `GET /vtn/status`. `Instant` is monotonic, so
     /// this derives an approximate `DateTime<Utc>` from elapsed time since
     /// acquisition — read-only observability, not used by `ensure_token`'s own
-    /// (monotonic) refresh check.
-    pub async fn token_expires_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+    /// (monotonic) refresh check. `now` is injected per the determinism rule.
+    /// Deliberately unclamped: an already-expired token returns a timestamp in
+    /// the past (how long ago it expired), not "now" — clamping would make an
+    /// expired token indistinguishable from one that's healthy but about to
+    /// expire, on every call after the first.
+    pub async fn token_expires_at(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Option<chrono::DateTime<chrono::Utc>> {
         let guard = self.token.read().await;
         let t = guard.as_ref()?;
-        let remaining = std::time::Duration::from_secs(t.expires_in_secs)
-            .saturating_sub(t.acquired_at.elapsed());
-        Some(chrono::Utc::now() + remaining)
+        let elapsed = chrono::Duration::from_std(t.acquired_at.elapsed()).unwrap_or_default();
+        let total = chrono::Duration::seconds(t.expires_in_secs as i64);
+        Some(now - elapsed + total)
     }
 
     async fn fetch_new_token(&self) -> Result<String> {
@@ -717,15 +724,47 @@ mod tests {
             expires_in_secs: 3600,
         });
 
-        let expires_at = client.token_expires_at().await.expect("token was just set");
+        // `Instant::elapsed()` still measures real time even with an injected
+        // `now`, so a small tolerance is unavoidable — but the result is exact
+        // to the millisecond rather than the old ±100s inequality bounds.
         let now = chrono::Utc::now();
+        let expires_at = client
+            .token_expires_at(now)
+            .await
+            .expect("token was just set");
+        let expected = now + chrono::Duration::seconds(3600);
+        let drift = (expires_at - expected).num_milliseconds().abs();
         assert!(
-            expires_at > now + chrono::Duration::seconds(3500),
-            "expiry should be ~3600s out, got {expires_at} vs now {now}"
+            drift < 1000,
+            "expiry should be ~3600s from `now`, got {expires_at} vs expected {expected} (drift {drift}ms)"
         );
+    }
+
+    #[tokio::test]
+    async fn token_expires_at_unclamped_for_an_already_expired_token() {
+        // Regression test: this used to `saturating_sub` the remaining time to
+        // zero, so an expired token always reported "expires right now"
+        // instead of the actual past timestamp it expired at.
+        let client = VtnClient::new(
+            "http://example.invalid".to_string(),
+            "id".to_string(),
+            "secret".to_string(),
+            "ven".to_string(),
+        );
+        *client.token.write().await = Some(Token {
+            access_token: "t".to_string(),
+            acquired_at: std::time::Instant::now() - std::time::Duration::from_secs(7200),
+            expires_in_secs: 3600,
+        });
+
+        let now = chrono::Utc::now();
+        let expires_at = client
+            .token_expires_at(now)
+            .await
+            .expect("token was just set");
         assert!(
-            expires_at <= now + chrono::Duration::seconds(3600),
-            "expiry should not exceed the full expires_in window"
+            expires_at < now - chrono::Duration::seconds(3500),
+            "expiry must be reported in the past (expired ~3600s ago), got {expires_at} vs now {now}"
         );
     }
 
@@ -737,6 +776,6 @@ mod tests {
             "secret".to_string(),
             "ven".to_string(),
         );
-        assert_eq!(client.token_expires_at().await, None);
+        assert_eq!(client.token_expires_at(chrono::Utc::now()).await, None);
     }
 }
