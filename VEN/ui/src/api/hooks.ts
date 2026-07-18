@@ -132,8 +132,9 @@ export function useSubmitReport() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: unknown) => api.submitReport(payload),
-    onSuccess: () => {
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["reports"] });
+      queryClient.invalidateQueries({ queryKey: ["reportSubmissions"] });
     },
   });
 }
@@ -144,9 +145,20 @@ export function useUpdateReport() {
   return useMutation({
     mutationFn: ({ id, payload }: { id: string; payload: unknown }) =>
       api.updateReport(id, payload),
-    onSuccess: () => {
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["reports"] });
+      queryClient.invalidateQueries({ queryKey: ["reportSubmissions"] });
     },
+  });
+}
+
+/** WP-T5 (G-5): recent report submission outcomes, for the per-row status chip. */
+export function useReportSubmissions() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["reportSubmissions", api.baseUrl],
+    queryFn: () => api.reportSubmissions(),
+    refetchInterval: 30_000,
   });
 }
 

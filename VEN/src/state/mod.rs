@@ -25,6 +25,7 @@ mod connection;
 mod event_log;
 mod heuristics;
 mod obligations;
+mod report_submissions;
 mod task_status;
 
 pub use connection::VtnConnectionStatus;
@@ -131,6 +132,12 @@ pub struct AppState {
     /// `notifications` (see `state/event_log.rs`).
     pub event_log: Arc<RwLock<std::collections::VecDeque<EventLogEntry>>>,
     pub event_log_tx: tokio::sync::broadcast::Sender<EventLogEntry>,
+    /// WP-T5 (G-5): bounded ring of report submission outcomes, newest last.
+    pub report_submissions: Arc<
+        RwLock<
+            std::collections::VecDeque<crate::entities::report_submission::ReportSubmissionRecord>,
+        >,
+    >,
 }
 
 /// WP4.3: in-memory notification ring capacity (mirrors the /trace/events ring).
@@ -173,6 +180,7 @@ impl AppState {
             task_status: Arc::new(RwLock::new(std::collections::HashMap::new())),
             event_log: Arc::new(RwLock::new(std::collections::VecDeque::new())),
             event_log_tx: tokio::sync::broadcast::channel(64).0,
+            report_submissions: Arc::new(RwLock::new(std::collections::VecDeque::new())),
         }
     }
 
