@@ -20,6 +20,14 @@ export type VtnStatus = {
   token_expires_at: string | null;
 };
 
+// WP-T3 (docs/plans/ven-ui-transparency.md): per-task restart/outcome status.
+export type TaskStatusEntry = {
+  name: string;
+  last_run_ts: string | null;
+  last_success: boolean | null;
+  restart_count: number;
+};
+
 export type Program = {
   id: string;
   programName?: string | null;

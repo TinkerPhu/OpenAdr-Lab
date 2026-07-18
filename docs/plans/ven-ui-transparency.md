@@ -137,7 +137,7 @@ Effort tags per roadmap convention: S ≤ ½ day · M ≈ 1–2 days · L ≈ 3�
 |----|------|-----------------|-----------|--------|
 | WP-T1 ✅ | VTN connection status + multi-component health (G-1) — **done**, branch `032-vtn-health-status`, `openspec/changes/wp-t1-vtn-health-status/`. `/health` now `{status, components: {ven_process, vtn_connection, storage, planner}}`; new `GET /vtn/status`. Fixed the existing health chip's actual misleading-truthiness bug in the process | Existing Dashboard health chip now reads real `status` (was always "ok" on any truthy response); full independently-coloured widget redesign still WP-T8 | M |
 | WP-T2 ✅ | MILP solve status badge (G-2) — **done**, branch `031-plan-solve-status`, `openspec/changes/wp-t2-plan-solve-status/`. Shipped as a two-state `solve_status: OPTIMAL \| INFEASIBLE` (no `fallback_heuristic` — no such code path exists; see design.md Non-Goals) | `PlanHeaderBar.tsx`: distinct infeasible chip vs. generic warning badge (Dashboard summary line deferred to WP-T8) | S |
-| WP-T3 | Background task status (G-3) | New `GET /tasks/status` route: for each task in `VEN/src/tasks/`, report `{name, last_run_ts, last_success, restart_count}` from `supervised_spawn`'s existing tracking | New Tasks page (Diagnostics group); Dashboard summary line | M |
+| WP-T3 ✅ | Background task status (G-3) — **done**, branch `033-task-status`, `openspec/changes/wp-t3-task-status/`. `GET /tasks/status` reports `{name, last_run_ts, last_success, restart_count}` per task actually spawned (`supervised_spawn` now records it — it tracked nothing before this WP) | New Tasks page shipped (Diagnostics-adjacent nav); Dashboard summary line deferred to WP-T8 | M |
 | WP-T4 | Persistent error/event log (G-4) | New bounded in-memory ring buffer + `GET /events/log` (`/events/log/history`), independent of the notification store — background tasks push `VtnUnreachable`/`StorageError`/task-restart entries here, not into Notifications | New Event Log page (Diagnostics group); separate badge/count from Notifications | M |
 | WP-T5 | VTN report submission status (G-5) | No backend change — `reports_sent_total` already exists; add a per-report `vtn_accepted: bool` field at creation time if not already tracked, else just surface the existing counter contextually | Reports page: per-report submission status chip, not just a raw counter elsewhere | S |
 | WP-T6 | Wire unused routes (G-6) | None — routes exist | Add UI callers/views for `/forecast`, `/capability/:asset_id`, `/history/plans`, `/obligations`; wire `/notifications/events` SSE to replace notification polling if beneficial | M |
@@ -359,18 +359,45 @@ pattern) and moving `poll_events.rs`'s two new call sites into `tasks/backoff.rs
 helpers (`record_success`/`record_fail_sleep`) rather than inlining them in the
 poll loop.
 
-### WP-T3 — Background task status (M)
+### WP-T3 — Background task status (M) — ✅ done
 
-1. In `VEN/src/tasks/mod.rs`, extend `supervised_spawn`'s existing panic-restart
-   tracking to record `last_run_ts`, `last_success`, and `restart_count` per task if
-   not already tracked in a queryable form.
-2. New route `GET /tasks/status` → `[{name, last_run_ts, last_success, restart_count}]`
-   for every task in `VEN/src/tasks/` (poll_events, poll_programs, poll_reports,
-   sim_tick, planning, obligation, state_persist, history_sampler, heuristics_job,
-   progress_ticker).
-3. Test-first: `test_tasks_status_reports_restart_count_after_simulated_panic`.
-4. UI: new Tasks page (Diagnostics group); Dashboard gets its third status line
-   ("Tasks: 10/10 running").
+Branch `033-task-status`; OpenSpec change `openspec/changes/wp-t3-task-status/`
+(proposal/design/specs/tasks all complete). Journal entry in
+`docs/history/project_journal.md`.
+
+Investigation found `supervised_spawn` tracked **nothing** queryable before this WP
+(confirmed — no counter, no timestamp, purely local to each restart loop's stack
+frame) — step 1's "if not already tracked" resolved to "not tracked, added from
+scratch," same pattern as WP-T1's `VtnConnectionStatus` finding.
+
+1. Added `TaskStatus { last_run_ts, last_success, restart_count }` on `AppState`
+   (new `state/task_status.rs` submodule), threaded `AppState` into
+   `supervised_spawn` itself (one parameter, `state.clone()` at all 9 call sites in
+   `main.rs`, all already had `state` in scope).
+2. New route `GET /tasks/status` → array, one entry per task **actually spawned**
+   (not a fixed 9-or-10 — `state_persist`/`history_sampler`/`heuristics_job` are
+   config-conditional). **`progress_ticker` excluded** — it's not a top-level
+   supervised task; it's spawned/cancelled per plan-solve-cycle inside
+   `spawn_planning`'s own loop with a cancel-and-await lifecycle, not a restart
+   lifecycle, so the plan doc's original list of 10 was one item too many.
+3. Test-first, done — plus one deviation: the exact-count assertion
+   (`restart_count == 1`) in the updated `supervised_spawn_restarts_after_panic`
+   test proved flaky (the test's `cooldown_s = 0` lets the supervisor loop race
+   far ahead of the test's 10ms polling; observed `restart_count == 9` on a real
+   run). Relaxed to `>= 1` — the exact count was never a real invariant.
+4. UI: new Tasks page shipped (table: name/last-run/outcome/restart-count,
+   `restart_count == 0` as the healthy signal since `last_success` is legitimately
+   `null` for a still-running task). Wired into nav next to Raw Data/Metrics: full
+   Diagnostics-group nav restructuring is still WP-T8. Dashboard's third status
+   line ("Tasks: N/N running") also deferred to WP-T8's Dashboard rebuild.
+
+**Unplanned incident during this WP**: a background `cargo test` run coincided
+with an unrelated concurrent `wsl cargo check` from a different worktree
+(`.claude/worktrees/034-vtn-report-status`), dropping free host memory to 0.2 GB —
+under the memory-budget rule's ~1 GB floor. Resolved by stopping this session's own
+WSL process (not the other worktree's). Prompted a new `wsl-lock` rule +
+`scripts/wsl_lock.sh` in `.claude/CLAUDE.md`, mirroring `pi4_lock.sh` — outside this
+WP's scope but noted here since it happened during it.
 
 ### WP-T4 — Event Log, separate from Notifications (M)
 
