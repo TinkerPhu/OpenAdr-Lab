@@ -340,12 +340,28 @@ impl VtnClient {
         let (status, text) = self.post_json_raw("/reports", &value).await?;
 
         if status == StatusCode::CONFLICT {
+            // A VTN 409 is NOT proof of a reportName duplicate: openleadr-rs
+            // maps both unique violations and foreign-key violations (e.g. the
+            // referenced event was cascade-deleted) to 409. Attempt the
+            // name-based upsert when possible, but every failure on this path
+            // must carry the VTN's problem body — it names the real cause.
+            let vtn_problem = http_error("/reports", status, &text);
             if let Some(name) = body.reportName.as_deref() {
-                let id = self.find_report_by_name(name).await?;
-                self.update_report(&id, value).await?;
-                return Ok(());
+                match self.find_report_by_name(name).await {
+                    Ok(id) => {
+                        self.update_report(&id, value).await?;
+                        return Ok(());
+                    }
+                    Err(lookup_err) => anyhow::bail!(
+                        "409 on POST /reports and upsert of reportName '{name}' failed \
+                         ({lookup_err:#}); VTN said: {vtn_problem:#}"
+                    ),
+                }
             }
-            anyhow::bail!("409 Conflict but reportName is absent — cannot upsert");
+            anyhow::bail!(
+                "409 on POST /reports without reportName — cannot upsert by name; \
+                 VTN said: {vtn_problem:#}"
+            );
         }
 
         if !status.is_success() {
@@ -582,6 +598,93 @@ mod tests {
                 Some(crate::entities::DomainError::VtnUnreachable(_))
             ),
             "expected VtnUnreachable, got {classified:?}"
+        );
+    }
+
+    // ── upsert_report: 409 handling must surface the VTN problem detail ─────
+    //
+    // The VTN maps BOTH unique violations AND foreign-key violations to 409
+    // (openleadr-rs error.rs), so a 409 is not proof of a reportName duplicate.
+    // Errors on this path must carry the VTN's problem body so the true cause
+    // (e.g. "A foreign key constraint is violated") is visible to operators.
+
+    async fn conflict_post_handler() -> (StatusCode, Json<serde_json::Value>) {
+        (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "title": "409 Conflict",
+                "status": 409,
+                "detail": "A foreign key constraint is violated"
+            })),
+        )
+    }
+
+    /// VTN stand-in whose POST /reports always 409s with an FK-violation
+    /// problem body; GET /reports serves `own_reports` (paginated).
+    async fn spawn_conflict_vtn(own_reports: Vec<serde_json::Value>) -> String {
+        let state = Arc::new(own_reports);
+        let app = Router::new()
+            .route("/auth/token", post(token_handler))
+            .route(
+                "/reports",
+                get(paginated_handler).post(conflict_post_handler),
+            )
+            .with_state(state);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    fn report_body(report_name: Option<&str>) -> crate::controller::vtn_port::OadrReportBody {
+        crate::controller::vtn_port::OadrReportBody {
+            programID: "prog-1".into(),
+            eventID: Some("evt-1".into()),
+            clientName: "test-ven".into(),
+            reportName: report_name.map(str::to_string),
+            resources: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn upsert_report_409_without_name_surfaces_vtn_detail() {
+        let base_url = spawn_conflict_vtn(vec![]).await;
+        let client = make_client(base_url);
+
+        let err = client
+            .upsert_report(report_body(None))
+            .await
+            .expect_err("nameless 409 cannot be upserted");
+
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("foreign key constraint"),
+            "error must carry the VTN problem detail, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn upsert_report_409_name_lookup_miss_surfaces_vtn_detail() {
+        // Own reports contain no TELEMETRY_USAGE (e.g. the conflicting row is
+        // another client's — report_name is globally unique on the VTN).
+        let base_url = spawn_conflict_vtn(vec![]).await;
+        let client = make_client(base_url);
+
+        let err = client
+            .upsert_report(report_body(Some("TELEMETRY_USAGE")))
+            .await
+            .expect_err("upsert recovery must fail when the name is not visible");
+
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("TELEMETRY_USAGE"),
+            "error must name the report, got: {msg}"
+        );
+        assert!(
+            msg.contains("foreign key constraint"),
+            "error must carry the VTN problem detail, got: {msg}"
         );
     }
 }
