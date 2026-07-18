@@ -1,8 +1,17 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MetricsPage } from "../pages/Metrics";
+
+// WP-T7 (docs/plans/ven-ui-transparency.md): the metrics this VEN actually
+// emits, grep-confirmed against VEN/src's `counter!` call sites.
+const realMetricsText = [
+  'poll_success_total{resource="events"} 42',
+  'poll_error_total{resource="events"} 3',
+  "reports_sent_total 7",
+].join("\n");
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
@@ -92,5 +101,46 @@ describe("MetricsPage", () => {
     expect(screen.getByText("42")).toBeInTheDocument();
     // The "—" (em-dash) for empty labels
     expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("groups known metrics under human labels and category headings by default", () => {
+    mockMetrics.mockReturnValue(realMetricsText);
+    renderPage();
+
+    expect(screen.getByTestId("metrics-grouped-view")).toBeInTheDocument();
+    expect(screen.getByTestId("metrics-group-VTN Polling")).toBeInTheDocument();
+    expect(screen.getByTestId("metrics-group-Reports")).toBeInTheDocument();
+    expect(screen.getByText("Poll successes")).toBeInTheDocument();
+    expect(screen.getByText("Poll failures")).toBeInTheDocument();
+    expect(screen.getByText("Reports sent")).toBeInTheDocument();
+    // Raw name still discoverable underneath the human label.
+    expect(screen.getByTestId("metrics-raw-name-poll_success_total")).toHaveTextContent(
+      "poll_success_total",
+    );
+  });
+
+  it("switches to the raw view on toggle, showing raw names ungrouped", async () => {
+    const user = userEvent.setup();
+    mockMetrics.mockReturnValue(realMetricsText);
+    renderPage();
+
+    await user.click(screen.getByTestId("metrics-raw-toggle"));
+
+    expect(screen.getByTestId("metrics-raw-view")).toBeInTheDocument();
+    expect(screen.queryByTestId("metrics-grouped-view")).toBeNull();
+    expect(screen.queryByTestId("metrics-group-VTN Polling")).toBeNull();
+    // Raw view still renders the same per-metric tables, keyed by raw name.
+    expect(screen.getByTestId("metrics-table-poll_success_total")).toBeInTheDocument();
+    expect(screen.getByTestId("metrics-table-reports_sent_total")).toBeInTheDocument();
+  });
+
+  it("an unrecognized metric falls back to the Other group under its raw name", () => {
+    mockMetrics.mockReturnValue(samplePrometheusText);
+    renderPage();
+
+    expect(screen.getByTestId("metrics-group-Other")).toBeInTheDocument();
+    expect(screen.getByTestId("metrics-table-plan_cycle_total")).toBeInTheDocument();
+    // No known human label exists, so no duplicate raw-name caption is rendered.
+    expect(screen.queryByTestId("metrics-raw-name-plan_cycle_total")).toBeNull();
   });
 });
