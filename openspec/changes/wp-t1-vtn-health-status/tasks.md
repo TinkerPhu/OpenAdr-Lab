@@ -51,13 +51,17 @@
       `tests/features/steps/ven_health_steps.py` to assert on the JSON
       `status` field and the presence/shape of all four components, instead
       of the literal string `"ok"`.
-- [ ] 6.2 Empirical re-verification on Pi4 (`fleet.sh`, Docker healthchecks
-      unaffected) **not yet run live** — the reasoning (curl `--fail` checks
-      HTTP status only, confirmed by reading every healthcheck definition) is
-      documented in the plan doc §5 Q2 and design.md, but this task explicitly
-      asked for empirical, not just reasoned, confirmation. Flagged as a
-      follow-up before merging to main; do not treat the reasoning alone as
-      equivalent to having run it.
+- [x] 6.2 Empirical re-verification on Pi4 — **done**. Deployed the branch's
+      `VEN/src/` changes via scp (per the `deploy-pi4` skill, no commit/push
+      needed) to `ven-1/2/3`, rebuilt, restarted. `docker ps` showed all three
+      `Up ... (healthy)`; `curl --fail -w '%{http_code}'` returned `HTTP 200`
+      / exit 0; `/health` and `/vtn/status` returned the expected JSON shapes
+      with real data (`connected: true`, a `token_expires_at` ~30 days out).
+      Confirms the reasoning empirically, not just by reading the healthcheck
+      definitions. Pi4's working tree was restored afterward (`git checkout --`
+      on the scp'd files); the new `state/connection.rs` had to be `rm`'d
+      separately since `git checkout --` can't restore a file git doesn't
+      track yet — noted for next time this pattern is used.
 
 ## 7. UI: connection widget
 

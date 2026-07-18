@@ -5803,7 +5803,16 @@ connection detail (backoff state, last error, token expiry) for diagnosis.
   unit-testable directly, leaving the `async fn health(State(ctx)...)` handlers as
   thin glue. Reusable pattern for any future route whose logic is non-trivial but
   whose adapter wiring is heavy.
-- *Not yet done*: live re-verification on Pi4 that `fleet.sh`/Docker healthchecks
-  still pass unchanged with the new JSON body (the reasoning — `curl --fail` checks
-  HTTP status only — was confirmed by reading every healthcheck definition, but not
-  run live). Tracked in `openspec/changes/wp-t1-vtn-health-status/tasks.md` §6.
+- *Live Pi4 re-verification, done after initial write-up.* Deployed via scp
+  (`deploy-pi4` skill — no commit/push needed) to `ven-1/2/3`, rebuilt, restarted.
+  `docker ps` showed all three `Up ... (healthy)`; `curl --fail` returned HTTP 200 /
+  exit 0; `/health` and `/vtn/status` returned the expected shapes with real data.
+  Confirms the reasoning empirically. One follow-up snag: the cleanup step's
+  `git checkout -- <scp'd files>` failed atomically because one of the files
+  (`state/connection.rs`) is new and git on Pi4 doesn't track it yet — `checkout --`
+  can't restore a pathspec that doesn't exist in the index, and failed for *all*
+  listed files at once, not just that one. Fix was a separate `rm` for the untracked
+  file plus a second `checkout --` for the rest. Lesson for next time this pattern
+  is used: split the cleanup into "checkout tracked files" and "rm untracked new
+  files" from the start, rather than one command assuming everything scp'd is
+  already tracked.

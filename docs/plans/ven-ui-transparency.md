@@ -340,11 +340,10 @@ outage-detection loop in this codebase (it already drives `notify_outage_edge`).
 5. Updated `tests/features/ven_health.feature` + step defs to assert on the JSON
    `status` field and all four component keys, replacing the literal-`"ok"`
    assertion.
-6. **Not yet empirically re-verified on Pi4** — the reasoning (every healthcheck
-   uses `curl --fail`, which checks HTTP status only) is confirmed by reading every
-   definition, but this step specifically asked for a live re-check, which hasn't
-   run. Flagged in `openspec/changes/wp-t1-vtn-health-status/tasks.md` §6 as a
-   follow-up before merging to main.
+6. **Empirically re-verified on Pi4** — deployed via scp, rebuilt `ven-1/2/3`;
+   `docker ps` reported all three `Up ... (healthy)`, `curl --fail` returned HTTP
+   200/exit 0, `/health` and `/vtn/status` returned the expected shapes with real
+   data. Confirms the healthcheck-compatibility reasoning live, not just on paper.
 7. UI: fixed the existing Dashboard health chip (`App.tsx`'s `HealthChip`) — it
    previously rendered `"ok"` whenever *any* truthy response arrived, which is
    exactly the misleading-chip bug this WP targets (the old plain-string body was
