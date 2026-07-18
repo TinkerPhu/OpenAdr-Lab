@@ -8,6 +8,7 @@ import type {
   ZoneDef,
   HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent,
   UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, SignalsState,
+  HealthResponse, VtnStatus,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
@@ -58,10 +59,16 @@ export class VenApi {
     }
   }
 
-  async health(): Promise<string> {
+  async health(): Promise<HealthResponse> {
     const r = await this.getReq("/health");
     if (!r.ok) throw new Error(`health ${r.status}`);
-    return r.text();
+    return r.json();
+  }
+
+  async vtnStatus(): Promise<VtnStatus> {
+    const r = await this.getReq("/vtn/status");
+    if (!r.ok) throw new Error(`vtn/status ${r.status}`);
+    return r.json();
   }
 
   async notifications(since?: string): Promise<UserNotification[]> {

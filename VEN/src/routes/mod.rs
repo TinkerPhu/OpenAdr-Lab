@@ -27,6 +27,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
 
     Router::new()
         .route("/health", get(system::health))
+        .route("/vtn/status", get(system::vtn_status))
         .route("/events", get(events::get_events))
         .route("/programs", get(events::get_programs))
         .route(

@@ -39,8 +39,12 @@ export function useVenContext(): VenContextType {
 function HealthChip() {
   const { data, isError, isLoading, fetchStatus, error } = useHealth();
   console.log("[VEN-UI] HealthChip render:", { isLoading, isError, fetchStatus, data, error: error?.message });
-  const status = isError ? "offline" : data ? "ok" : "unknown";
-  const color = status === "ok" ? "success" : status === "offline" ? "error" : "default";
+  // WP-T1 (docs/plans/ven-ui-transparency.md): /health now returns
+  // {status, components} — read the real status instead of assuming "ok"
+  // whenever a response merely arrived (that was the misleading-chip bug).
+  const status = isError ? "offline" : data ? data.status : "unknown";
+  const color =
+    status === "ok" ? "success" : status === "degraded" ? "warning" : status === "offline" ? "error" : "default";
 
   return (
     <Chip

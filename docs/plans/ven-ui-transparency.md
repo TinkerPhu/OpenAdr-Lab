@@ -135,7 +135,7 @@ Effort tags per roadmap convention: S ≤ ½ day · M ≈ 1–2 days · L ≈ 3�
 
 | WP | Item | Backend change | UI change | Effort |
 |----|------|-----------------|-----------|--------|
-| WP-T1 | VTN connection status + multi-component health (G-1) | Split `/health` into a component-based response instead of one boolean (see below); new `GET /vtn/status` for the VTN-specific detail feeding the Dashboard widget | Dashboard connection widget + VEN-process widget, each independently coloured; make `/health` reflect real state instead of hardcoded `"ok"` | M |
+| WP-T1 ✅ | VTN connection status + multi-component health (G-1) — **done**, branch `032-vtn-health-status`, `openspec/changes/wp-t1-vtn-health-status/`. `/health` now `{status, components: {ven_process, vtn_connection, storage, planner}}`; new `GET /vtn/status`. Fixed the existing health chip's actual misleading-truthiness bug in the process | Existing Dashboard health chip now reads real `status` (was always "ok" on any truthy response); full independently-coloured widget redesign still WP-T8 | M |
 | WP-T2 ✅ | MILP solve status badge (G-2) — **done**, branch `031-plan-solve-status`, `openspec/changes/wp-t2-plan-solve-status/`. Shipped as a two-state `solve_status: OPTIMAL \| INFEASIBLE` (no `fallback_heuristic` — no such code path exists; see design.md Non-Goals) | `PlanHeaderBar.tsx`: distinct infeasible chip vs. generic warning badge (Dashboard summary line deferred to WP-T8) | S |
 | WP-T3 | Background task status (G-3) | New `GET /tasks/status` route: for each task in `VEN/src/tasks/`, report `{name, last_run_ts, last_success, restart_count}` from `supervised_spawn`'s existing tracking | New Tasks page (Diagnostics group); Dashboard summary line | M |
 | WP-T4 | Persistent error/event log (G-4) | New bounded in-memory ring buffer + `GET /events/log` (`/events/log/history`), independent of the notification store — background tasks push `VtnUnreachable`/`StorageError`/task-restart entries here, not into Notifications | New Event Log page (Diagnostics group); separate badge/count from Notifications | M |
@@ -307,31 +307,58 @@ is a small follow-up once a real heuristic-solve path exists (candidate: BL-13).
    (`InfeasibleBatCtx`) is unit-test-only and not exposed at the BDD/E2E layer.
    Deferred as **GB-12** in `docs/BACKLOG.md` rather than forced into this WP.
 
-### WP-T1 — Multi-component `/health` + `/vtn/status` (M)
+### WP-T1 — Multi-component `/health` + `/vtn/status` (M) — ✅ done
 
-1. In `tasks/backoff.rs` and the poll tasks (`poll_events.rs`/`poll_programs.rs`/
-   `poll_reports.rs`), confirm what per-task state already exists (last success
-   timestamp, current backoff delay, consecutive-failure count, token expiry from
-   `vtn.rs`) and expose it via a small shared read accessor rather than duplicating
-   state.
+Branch `032-vtn-health-status`; OpenSpec change
+`openspec/changes/wp-t1-vtn-health-status/` (proposal/design/specs/tasks all
+complete). Journal entry in `docs/history/project_journal.md`.
+
+Investigation found the plan doc's assumption in step 1 below (originally: "confirm
+what per-task state already exists ... expose it via a small shared read accessor")
+did not hold — `Backoff` and the poll loop's `vtn_ok` flag are stack-local variables
+with no external visibility today, and `state_persist.rs` only logs failures.
+Shipped by adding new **in-memory, process-lifetime-only** shared state (not
+persistence) on `AppState`, written from `poll_events.rs` — the existing canonical
+outage-detection loop in this codebase (it already drives `notify_outage_edge`).
+
+1. ~~confirm what per-task state already exists~~ → added `VtnConnectionStatus`
+   (`state/connection.rs`, extracted there to stay under `state/mod.rs`'s file-size
+   cap) + `storage_ok: bool`, both on `AppState`.
 2. New route `GET /vtn/status` → `{connected, last_success_ts, last_error,
-   current_backoff_s, token_expires_at}`, read live from that accessor (no new
-   persistence).
-3. Rewrite `GET /health` to the `{status, components: {ven_process, vtn_connection,
+   current_backoff_s, token_expires_at}`. `token_expires_at` required a new
+   `VtnClient::token_expires_at()` accessor deriving wall-clock time from the
+   existing monotonic `Instant`-based token expiry.
+3. Rewrote `GET /health` to the `{status, components: {ven_process, vtn_connection,
    storage, planner}}` shape from §4.1. `planner` component reads WP-T2's
-   `solve_status` (infeasible/fallback → `degraded`). HTTP status stays 2xx unless
-   `ven_process` itself is unhealthy — see §5 Q2 resolution.
-4. Test-first: `test_health_reports_degraded_vtn_component_during_backoff`,
-   `test_health_returns_200_when_only_vtn_component_degraded`.
-5. Update `tests/features/ven_health.feature`: replace the literal-`"ok"`-body
-   assertion with an assertion on the new JSON `status` field; add a scenario for a
-   degraded component if the harness can simulate one (else note as a follow-up).
-6. Re-verify `fleet.sh`, `VEN/docker-compose.yml`, `tests/docker-compose.test.yml`
-   healthchecks still pass unchanged (they check HTTP status only — confirmed in §5,
-   but re-confirm empirically after the change, on Pi4).
-7. UI: Dashboard connection widget (green/amber/red on `vtn_connection`) and a
-   VEN-process widget; make the existing (currently misleading) health chip read the
-   new shape.
+   `solve_status` (infeasible → `degraded`) — no new state needed there, a direct
+   payoff of WP-T2 landing first. HTTP status stays 200 regardless of component
+   status (`ven_process` being reachable at all is the only thing a restart could
+   fix) — see §5 Q2 resolution.
+4. Test-first, done: 8 unit tests across `routes/system.rs` (health/vtn_status pure
+   builders, kept separate from the handlers for testability without constructing a
+   full `AppCtx`), `state/connection.rs`, and `vtn.rs`.
+5. Updated `tests/features/ven_health.feature` + step defs to assert on the JSON
+   `status` field and all four component keys, replacing the literal-`"ok"`
+   assertion.
+6. **Not yet empirically re-verified on Pi4** — the reasoning (every healthcheck
+   uses `curl --fail`, which checks HTTP status only) is confirmed by reading every
+   definition, but this step specifically asked for a live re-check, which hasn't
+   run. Flagged in `openspec/changes/wp-t1-vtn-health-status/tasks.md` §6 as a
+   follow-up before merging to main.
+7. UI: fixed the existing Dashboard health chip (`App.tsx`'s `HealthChip`) — it
+   previously rendered `"ok"` whenever *any* truthy response arrived, which is
+   exactly the misleading-chip bug this WP targets (the old plain-string body was
+   always truthy). Now reads `data.status` with an added `"degraded"` state. A
+   dedicated separate connection widget + VEN-process widget is deferred to WP-T8's
+   Dashboard rebuild — this WP made the existing chip truthful, not yet redesigned.
+
+**Notable deviation**: implementing this required a file-size-driven refactor —
+adding the new state/route logic pushed `state/mod.rs` and `tasks/poll_events.rs`
+over their respective caps (500 and 200 production lines). Fixed by extracting
+`state/connection.rs` (mirrors the existing `state/heuristics.rs`/`obligations.rs`
+pattern) and moving `poll_events.rs`'s two new call sites into `tasks/backoff.rs`
+helpers (`record_success`/`record_fail_sleep`) rather than inlining them in the
+poll loop.
 
 ### WP-T3 — Background task status (M)
 
