@@ -141,7 +141,7 @@ Effort tags per roadmap convention: S ≤ ½ day · M ≈ 1–2 days · L ≈ 3�
 | WP-T4 ✅ | Event log (G-4) — **done**, branch `035-event-log`, `openspec/changes/wp-t4-event-log/`. Bounded in-memory ring (no persistence, no `/events/log/history` — see design.md) + `GET /events/log` + `GET /events/log/events` (SSE), independent of Notifications — `vtn_connection`/`storage`/`task_supervisor` producers wired | New Event Log page shipped (polling, not yet SSE-wired) | M |
 | WP-T5 | VTN report submission status (G-5) | No backend change — `reports_sent_total` already exists; add a per-report `vtn_accepted: bool` field at creation time if not already tracked, else just surface the existing counter contextually | Reports page: per-report submission status chip, not just a raw counter elsewhere | S |
 | WP-T6 | Wire unused routes (G-6) | None — routes exist | Add UI callers/views for `/forecast`, `/capability/:asset_id`, `/history/plans`, `/obligations`; wire `/notifications/events` SSE to replace notification polling if beneficial | M |
-| WP-T7 | Metrics page labeling (G-7) | None | Group `MetricsPage.tsx` rows by meaning (VTN polling / reports / tasks / HTTP) with human labels instead of raw Prometheus names; keep raw view as a toggle | S |
+| WP-T7 ✅ | Metrics page labeling (G-7) — **done**, branch `036-metrics-labeling`, `openspec/changes/wp-t7-metrics-labeling/`. Only 2 real categories exist (VTN Polling, Reports) — grep-confirmed no "tasks"/"HTTP" metrics are emitted, contra the original 4-category sketch | Grouped-by-default `MetricsPage.tsx` with human labels + raw-name captions; raw view toggle reproduces prior exact behavior | S |
 | WP-T8 | Tab re-architecture (§3) | None | Implement primary/secondary/tertiary nav grouping; Dashboard status-row redesign | M |
 
 ### 4.1 WP-T1 detail — multi-state `/health`
@@ -452,13 +452,29 @@ Resolved by killing this session's own (already-redundant, post-fmt) re-test run
 3. UI: Reports page gets a per-report status chip instead of the status only being
    visible via raw `/metrics`.
 
-### WP-T7 — Metrics page labeling (S)
+### WP-T7 — Metrics page labeling (S) — ✅ done
 
-UI-only, no backend change.
+Branch `036-metrics-labeling`; OpenSpec change
+`openspec/changes/wp-t7-metrics-labeling/`. UI-only, no backend change.
 
-1. Group `MetricsPage.tsx` rows by meaning (VTN polling / reports / tasks / HTTP)
-   with human labels instead of raw Prometheus metric names.
-2. Keep a raw-view toggle so the underlying names remain inspectable.
+**Scope correction**: grep across `VEN/src`'s `counter!`/`histogram!`/`gauge!`
+call sites found only two real metric families — `poll_success_total`/
+`poll_error_total` (VTN Polling) and `reports_sent_total` (Reports) — not the
+four categories ("VTN polling / reports / tasks / HTTP") originally sketched.
+`PrometheusBuilder::new()` has no HTTP-instrumentation middleware installed and
+no per-task metrics are recorded anywhere (WP-T3's task status lives on
+`/tasks/status`, not the Prometheus registry). Built a grouping map covering
+what's real, with an "Other" fallback (raw name, ungrouped-looking but still
+under a heading) for anything else — including any future metric — so nothing
+is ever hidden by an incomplete map.
+
+1. Grouped `MetricsPage.tsx` by meaning via a static name→`{group, label}`
+   lookup (not a naming-convention parser — see design.md D1 for why), default
+   view.
+2. Raw-view `Switch` toggle reproduces the page's exact pre-change flat/raw-name
+   rendering — same `MetricTable` component reused by both views, which is why
+   every pre-existing test in `Metrics.test.tsx` passed unmodified (373/373
+   total after adding 3 new tests for grouping/toggle/fallback behavior).
 
 ### WP-T6 — Wire unused routes (M)
 
