@@ -9,6 +9,7 @@ import type {
   HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent,
   UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, SignalsState,
   HealthResponse, VtnStatus, TaskStatusEntry, EventLogEntry,
+  PlanSnapshot, ReportObligation, AssetCapability, AssetForecast,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
@@ -338,6 +339,34 @@ export class VenApi {
     if (!r.ok) throw new Error(`history/reports ${r.status}`);
     const raw: (Omit<HistoryReportSent, "sent_at"> & { sent_at: string })[] = await r.json();
     return raw.map((row) => ({ ...row, sent_at: new Date(row.sent_at).getTime() }));
+  }
+
+  // WP-T6 (docs/plans/ven-ui-transparency.md): wiring previously-unused routes.
+
+  async historyPlans(params: { from: string; to: string }): Promise<PlanSnapshot[]> {
+    const qs = new URLSearchParams({ from: params.from, to: params.to });
+    const r = await this.getReq(`/history/plans?${qs}`);
+    if (!r.ok) throw new Error(`history/plans ${r.status}`);
+    const raw: (Omit<PlanSnapshot, "created_at"> & { created_at: string })[] = await r.json();
+    return raw.map((row) => ({ ...row, created_at: new Date(row.created_at).getTime() }));
+  }
+
+  async obligations(): Promise<ReportObligation[]> {
+    const r = await this.getReq("/obligations");
+    if (!r.ok) throw new Error(`obligations ${r.status}`);
+    return r.json();
+  }
+
+  async assetCapability(assetId: string): Promise<AssetCapability> {
+    const r = await this.getReq(`/capability/${encodeURIComponent(assetId)}`);
+    if (!r.ok) throw new Error(`capability/${assetId} ${r.status}`);
+    return r.json();
+  }
+
+  async assetForecasts(): Promise<AssetForecast[]> {
+    const r = await this.getReq("/forecast");
+    if (!r.ok) throw new Error(`forecast ${r.status}`);
+    return r.json();
   }
 
   async postRequest(body: CreateUserRequestBody): Promise<UserRequestWithSession> {

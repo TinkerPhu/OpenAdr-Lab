@@ -7,7 +7,7 @@ import AddIcon from "@mui/icons-material/Add";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import EditIcon from "@mui/icons-material/Edit";
 import type { Report, VtnEvent } from "../api/types";
-import { useReports, useSubmitReport, useUpdateReport, useEvents, usePrograms } from "../api/hooks";
+import { useReports, useSubmitReport, useUpdateReport, useEvents, usePrograms, useObligations } from "../api/hooks";
 import { useVenContext } from "../App";
 import { JsonDialog } from "../components/JsonDialog";
 
@@ -32,6 +32,9 @@ export function ReportsPage() {
   const { data: reports = [], dataUpdatedAt } = useReports();
   const { data: events = [] } = useEvents();
   const { data: programs = [] } = usePrograms();
+  const { data: obligations = [] } = useObligations();
+  // eslint-disable-next-line react-hooks/purity -- intentional: captures wall time for the overdue check below
+  const nowMs = Date.now();
   const submitMut = useSubmitReport();
   const updateMut = useUpdateReport();
   const { venName } = useVenContext();
@@ -131,6 +134,50 @@ export function ReportsPage() {
           Submit Report
         </Button>
       </Stack>
+
+      {/* WP-T6 (docs/plans/ven-ui-transparency.md): wires GET /obligations,
+          previously unused — pending report obligations derived from VTN events. */}
+      <TableContainer component={Paper}>
+        <Table size="small" data-testid="obligations-table">
+          <TableHead>
+            <TableRow>
+              <TableCell colSpan={5}>
+                <Typography variant="subtitle1">Pending Obligations</Typography>
+              </TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell>Event</TableCell>
+              <TableCell>Payload type</TableCell>
+              <TableCell>Due</TableCell>
+              <TableCell>Historical</TableCell>
+              <TableCell>Status</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {obligations.map((o) => {
+              const overdue = !o.fulfilled && new Date(o.due_at).getTime() < nowMs;
+              return (
+                <TableRow key={o.id} data-testid={`obligation-row-${o.id}`}>
+                  <TableCell sx={{ fontFamily: "monospace" }}>{o.event_id}</TableCell>
+                  <TableCell>{o.payload_type}</TableCell>
+                  <TableCell>{new Date(o.due_at).toLocaleString()}</TableCell>
+                  <TableCell>{o.historical ? "Yes" : "Forecast"}</TableCell>
+                  <TableCell sx={{ color: overdue ? "error.main" : undefined }}>
+                    {o.fulfilled ? "Fulfilled" : overdue ? "Overdue" : "Pending"}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            {obligations.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} align="center" data-testid="obligations-empty">
+                  No pending obligations
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
 
       <Paper sx={{ p: 2 }}>
         <TextField
