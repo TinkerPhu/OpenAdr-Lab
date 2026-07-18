@@ -8,7 +8,15 @@ vi.mock("../api/client", () => ({
   VenApi: vi.fn().mockImplementation(function () {
     return {
     baseUrl: "http://localhost:8081",
-    health: vi.fn().mockResolvedValue("ok"),
+    health: vi.fn().mockResolvedValue({
+      status: "ok",
+      components: {
+        ven_process: { status: "ok" },
+        vtn_connection: { status: "ok" },
+        storage: { status: "ok" },
+        planner: { status: "ok" },
+      },
+    }),
     programs: vi.fn().mockResolvedValue([]),
     events: vi.fn().mockResolvedValue([]),
     reports: vi.fn().mockResolvedValue([]),

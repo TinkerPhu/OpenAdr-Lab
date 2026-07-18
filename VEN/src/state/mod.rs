@@ -21,8 +21,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+mod connection;
 mod heuristics;
 mod obligations;
+
+pub use connection::VtnConnectionStatus;
 
 /// User-controllable settings for the opportunistic EV charging overlay.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -111,6 +114,12 @@ pub struct AppState {
     /// persisted through SettingsPort, re-seeded at startup).
     pub comfort_overrides:
         Arc<RwLock<std::collections::HashMap<String, Vec<crate::entities::asset::ComfortRate>>>>,
+    /// WP-T1: VTN reachability, written by `tasks::poll_events`, read by
+    /// `GET /health` and `GET /vtn/status`.
+    pub vtn_connection: Arc<RwLock<VtnConnectionStatus>>,
+    /// WP-T1: whether the last state-persist write succeeded, written by
+    /// `tasks::state_persist`, read by `GET /health`.
+    pub storage_ok: Arc<RwLock<bool>>,
 }
 
 /// WP4.3: in-memory notification ring capacity (mirrors the /trace/events ring).
@@ -148,6 +157,8 @@ impl AppState {
             })),
             notifications: Arc::new(RwLock::new(std::collections::VecDeque::new())),
             comfort_overrides: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            vtn_connection: Arc::new(RwLock::new(VtnConnectionStatus::default())),
+            storage_ok: Arc::new(RwLock::new(true)),
         }
     }
 

@@ -146,6 +146,19 @@ impl VtnClient {
         *self.token.write().await = None;
     }
 
+    /// WP-T1 (`docs/plans/ven-ui-transparency.md`): wall-clock expiry of the
+    /// currently cached token, for `GET /vtn/status`. `Instant` is monotonic, so
+    /// this derives an approximate `DateTime<Utc>` from elapsed time since
+    /// acquisition — read-only observability, not used by `ensure_token`'s own
+    /// (monotonic) refresh check.
+    pub async fn token_expires_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        let guard = self.token.read().await;
+        let t = guard.as_ref()?;
+        let remaining = std::time::Duration::from_secs(t.expires_in_secs)
+            .saturating_sub(t.acquired_at.elapsed());
+        Some(chrono::Utc::now() + remaining)
+    }
+
     async fn fetch_new_token(&self) -> Result<String> {
         let token_url = format!("{}/auth/token", self.base_url.trim_end_matches('/'));
 
@@ -686,5 +699,44 @@ mod tests {
             msg.contains("foreign key constraint"),
             "error must carry the VTN problem detail, got: {msg}"
         );
+    }
+
+    // WP-T1 (docs/plans/ven-ui-transparency.md): token expiry observability.
+
+    #[tokio::test]
+    async fn token_expires_at_reflects_expires_in_from_acquisition() {
+        let client = VtnClient::new(
+            "http://example.invalid".to_string(),
+            "id".to_string(),
+            "secret".to_string(),
+            "ven".to_string(),
+        );
+        *client.token.write().await = Some(Token {
+            access_token: "t".to_string(),
+            acquired_at: std::time::Instant::now(),
+            expires_in_secs: 3600,
+        });
+
+        let expires_at = client.token_expires_at().await.expect("token was just set");
+        let now = chrono::Utc::now();
+        assert!(
+            expires_at > now + chrono::Duration::seconds(3500),
+            "expiry should be ~3600s out, got {expires_at} vs now {now}"
+        );
+        assert!(
+            expires_at <= now + chrono::Duration::seconds(3600),
+            "expiry should not exceed the full expires_in window"
+        );
+    }
+
+    #[tokio::test]
+    async fn token_expires_at_none_when_no_token_cached() {
+        let client = VtnClient::new(
+            "http://example.invalid".to_string(),
+            "id".to_string(),
+            "secret".to_string(),
+            "ven".to_string(),
+        );
+        assert_eq!(client.token_expires_at().await, None);
     }
 }

@@ -5745,3 +5745,65 @@ warning text closely.
   struct-literal pattern specifically (`Plan {` with an `id: Uuid::new_v4()`
   neighbor), not just the type name — `serde_json::from_value` fixtures are
   invisible to the compiler error you'd otherwise rely on to find every site.
+
+---
+
+## WP-T1 — VTN connection status + multi-component health (branch 032-vtn-health-status)
+
+**What.** Replaced `GET /health`'s hardcoded `"ok"` string with
+`{status, components: {ven_process, vtn_connection, storage, planner}}`, and added
+`GET /vtn/status` (`{connected, last_success_ts, last_error, current_backoff_s,
+token_expires_at}`). Backed by new in-memory `AppState` fields
+(`VtnConnectionStatus`, `storage_ok`), written from `tasks/poll_events.rs` (success/
+failure) and `tasks/state_persist.rs` (write outcome). `planner` reads WP-T2's
+`Plan.solve_status` — no new state needed there. Fixed the VEN UI's Dashboard health
+chip in the process: it previously rendered `"ok"` whenever *any* truthy response
+arrived (the exact bug this WP set out to fix, since the old plain-string body was
+always truthy). WP-T1 of `docs/plans/ven-ui-transparency.md`.
+
+**Why.** `/health` was actively misleading — it couldn't reflect a VTN outage even
+though the poll loop was already retrying through one. No endpoint anywhere exposed
+connection detail (backoff state, last error, token expiry) for diagnosis.
+
+**Issues / key learnings.**
+- *The plan doc's "read live from existing poll-task state" assumption was wrong.*
+  Investigation found `Backoff` (`tasks/backoff.rs`) and the poll loop's `vtn_ok` flag
+  are stack-local variables captured in each loop's closure — never written to
+  `AppState`, so nothing outside the loop could read them. Same for
+  `state_persist.rs` (logs failures, no queryable state) and `VtnClient.token`
+  (private field, no accessor). All three needed new plumbing, not just a new route
+  reading something that already existed. Lesson: a plan document's assumptions
+  about "the data already exists somewhere" should be treated as a hypothesis to
+  verify by reading the actual code, not a given — even when the plan itself was
+  written after a code survey (the survey found the *concept* existed, e.g. backoff
+  counters in `/metrics`, but not that it was *reachable* from a route handler).
+- *Single canonical reachability signal, not per-resource.* `poll_events.rs` was
+  already the only poll loop driving `notify_outage_edge`; the new
+  `VtnConnectionStatus` writes were added there only, not duplicated across
+  `poll_programs.rs`/`poll_reports.rs`. Documented as a scoping decision (not a gap)
+  in the design doc — a resource-specific poll can fail while `vtn_connection` still
+  reads `ok`, which is an accepted limitation matching existing precedent, not a new
+  one this WP introduced.
+- *Adding a few lines of state-recording glue pushed two files over their file-size
+  caps* (`state/mod.rs` past 500, `tasks/poll_events.rs` past its tighter 200-line
+  `tasks/` cap) — small additions to already-large files are exactly where the caps
+  bite hardest. Fixed by extracting `state/connection.rs` (mirroring the existing
+  `state/heuristics.rs`/`obligations.rs` split-out pattern) and moving
+  `poll_events.rs`'s two new call sites into `tasks/backoff.rs` helper functions
+  (`record_success`/`record_fail_sleep`) rather than inlining them in the poll loop
+  body. Lesson: budget for the file-size audit *before* writing the glue code for a
+  WP that touches an already-near-cap file, not after — several iterations were
+  spent shaving lines post hoc (renaming functions, removing a `use` import,
+  reordering `Utc::now()` calls) that a five-minute `wc -l` check up front would
+  have avoided.
+- *Testing route handlers without a precedent for constructing `AppCtx`.* No test in
+  this codebase builds a full `AppCtx` (it carries heavy adapter fields like the
+  metrics handle and sim state). Extracted pure `build_health_response`/
+  `build_vtn_status_response`/`plan_is_ok` functions so the branching logic is
+  unit-testable directly, leaving the `async fn health(State(ctx)...)` handlers as
+  thin glue. Reusable pattern for any future route whose logic is non-trivial but
+  whose adapter wiring is heavy.
+- *Not yet done*: live re-verification on Pi4 that `fleet.sh`/Docker healthchecks
+  still pass unchanged with the new JSON body (the reasoning — `curl --fail` checks
+  HTTP status only — was confirmed by reading every healthcheck definition, but not
+  run live). Tracked in `openspec/changes/wp-t1-vtn-health-status/tasks.md` §6.

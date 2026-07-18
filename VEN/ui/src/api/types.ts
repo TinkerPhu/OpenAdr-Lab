@@ -1,3 +1,25 @@
+// WP-T1 (docs/plans/ven-ui-transparency.md): componentised health, replacing the
+// previous plain "ok" string GET /health used to return.
+export type HealthComponentStatus = { status: "ok" | "degraded"; detail?: string };
+
+export type HealthResponse = {
+  status: "ok" | "degraded";
+  components: {
+    ven_process: HealthComponentStatus;
+    vtn_connection: HealthComponentStatus;
+    storage: HealthComponentStatus;
+    planner: HealthComponentStatus;
+  };
+};
+
+export type VtnStatus = {
+  connected: boolean;
+  last_success_ts: string | null;
+  last_error: string | null;
+  current_backoff_s: number;
+  token_expires_at: string | null;
+};
+
 export type Program = {
   id: string;
   programName?: string | null;
