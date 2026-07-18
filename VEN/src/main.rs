@@ -224,7 +224,7 @@ async fn main() -> anyhow::Result<()> {
     let poll_jitter_s = cfg.poll_startup_jitter_s;
     {
         let (s, v, secs) = (state.clone(), vtn_port.clone(), cfg.poll_programs_secs);
-        tasks::supervised_spawn("poll_programs", TASK_COOLDOWN_S, move || {
+        tasks::supervised_spawn("poll_programs", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_program_poll(s.clone(), v.clone(), secs, poll_jitter_s)
         });
     }
@@ -236,7 +236,7 @@ async fn main() -> anyhow::Result<()> {
             trigger_tx.clone(),
             notifier.clone(),
         );
-        tasks::supervised_spawn("poll_events", TASK_COOLDOWN_S, move || {
+        tasks::supervised_spawn("poll_events", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_event_poll(
                 s.clone(),
                 v.clone(),
@@ -249,7 +249,7 @@ async fn main() -> anyhow::Result<()> {
     }
     {
         let (s, v, secs) = (state.clone(), vtn_port.clone(), cfg.poll_reports_secs);
-        tasks::supervised_spawn("poll_reports", TASK_COOLDOWN_S, move || {
+        tasks::supervised_spawn("poll_reports", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_report_poll(s.clone(), v.clone(), secs, poll_jitter_s)
         });
     }
@@ -268,7 +268,7 @@ async fn main() -> anyhow::Result<()> {
             data_dir.clone(),
             planner_event_tx.clone(),
         );
-        tasks::supervised_spawn("sim_tick", TASK_COOLDOWN_S, move || {
+        tasks::supervised_spawn("sim_tick", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_sim_tick(
                 s.clone(),
                 sim.clone(),
@@ -288,9 +288,12 @@ async fn main() -> anyhow::Result<()> {
             vtn_port.clone(),
             cfg.ven_name.clone(),
         );
-        tasks::supervised_spawn("obligation_check", TASK_COOLDOWN_S, move || {
-            tasks::spawn_obligation_check(s.clone(), sim.clone(), v.clone(), vn.clone())
-        });
+        tasks::supervised_spawn(
+            "obligation_check",
+            TASK_COOLDOWN_S,
+            state.clone(),
+            move || tasks::spawn_obligation_check(s.clone(), sim.clone(), v.clone(), vn.clone()),
+        );
     }
     let active_objective = Arc::new(RwLock::new(planner_params.objective));
     {
@@ -307,7 +310,7 @@ async fn main() -> anyhow::Result<()> {
             planner_event_tx.clone(),
             notifier.clone(),
         );
-        tasks::supervised_spawn("planning", TASK_COOLDOWN_S, move || {
+        tasks::supervised_spawn("planning", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_planning(
                 s.clone(),
                 pp.clone(),
@@ -326,7 +329,7 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Some(path) = cfg.persist_path.clone() {
         let s = state.clone();
-        tasks::supervised_spawn("state_persist", TASK_COOLDOWN_S, move || {
+        tasks::supervised_spawn("state_persist", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_state_persist(s.clone(), path.clone())
         });
     }
@@ -337,21 +340,29 @@ async fn main() -> anyhow::Result<()> {
             profile.history.retention_days,
         );
         let n = notifier.clone();
-        tasks::supervised_spawn("history_sampler", TASK_COOLDOWN_S, move || {
-            tasks::spawn_history_sampler(
-                sim.clone(),
-                history.clone(),
-                s.clone(),
-                retention_days,
-                n.clone(),
-            )
-        });
+        tasks::supervised_spawn(
+            "history_sampler",
+            TASK_COOLDOWN_S,
+            state.clone(),
+            move || {
+                tasks::spawn_history_sampler(
+                    sim.clone(),
+                    history.clone(),
+                    s.clone(),
+                    retention_days,
+                    n.clone(),
+                )
+            },
+        );
     }
     if let Some(history) = history_port.clone() {
         let s = state.clone();
-        tasks::supervised_spawn("heuristics_job", TASK_COOLDOWN_S, move || {
-            tasks::spawn_heuristics_job(history.clone(), s.clone())
-        });
+        tasks::supervised_spawn(
+            "heuristics_job",
+            TASK_COOLDOWN_S,
+            state.clone(),
+            move || tasks::spawn_heuristics_job(history.clone(), s.clone()),
+        );
     }
 
     // Build HTTP app and serve

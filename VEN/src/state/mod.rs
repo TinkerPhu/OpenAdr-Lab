@@ -24,8 +24,10 @@ use tokio::sync::RwLock;
 mod connection;
 mod heuristics;
 mod obligations;
+mod task_status;
 
 pub use connection::VtnConnectionStatus;
+pub use task_status::TaskStatus;
 
 /// User-controllable settings for the opportunistic EV charging overlay.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -120,6 +122,9 @@ pub struct AppState {
     /// WP-T1: whether the last state-persist write succeeded, written by
     /// `tasks::state_persist`, read by `GET /health`.
     pub storage_ok: Arc<RwLock<bool>>,
+    /// WP-T3: per-task restart/outcome status, written by `tasks::supervised_spawn`,
+    /// read by `GET /tasks/status`. Keyed by task name; entries created lazily.
+    pub task_status: Arc<RwLock<std::collections::HashMap<String, TaskStatus>>>,
 }
 
 /// WP4.3: in-memory notification ring capacity (mirrors the /trace/events ring).
@@ -159,6 +164,7 @@ impl AppState {
             comfort_overrides: Arc::new(RwLock::new(std::collections::HashMap::new())),
             vtn_connection: Arc::new(RwLock::new(VtnConnectionStatus::default())),
             storage_ok: Arc::new(RwLock::new(true)),
+            task_status: Arc::new(RwLock::new(std::collections::HashMap::new())),
         }
     }
 
