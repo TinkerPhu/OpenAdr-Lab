@@ -196,6 +196,8 @@ export type PlannerObjective =
   | "min_import"
   | "max_revenue";
 
+export type SolveStatus = "OPTIMAL" | "INFEASIBLE";
+
 export type Plan = {
   id: string;
   created_at: string;
@@ -205,6 +207,9 @@ export type Plan = {
   summary: PlanSummary;
   envelopes: FlexibilityEnvelope[];
   warnings: Array<{ severity: string; message: string; suggested_action: string | null }>;
+  objective_eur: number;
+  friction_eur: number;
+  solve_status: SolveStatus;
 };
 
 export type AssetLedger = {
@@ -467,7 +472,7 @@ export type ZoneDef = { from: string; to: string; step_s: number };
 export type PlannerEvent =
   | { type: "solving_started"; objective: PlannerObjective; num_slots: number; triggered_at: string }
   | { type: "solving_progress"; elapsed_ms: number; iteration: number }
-  | { type: "plan_ready"; plan_id: string; objective: PlannerObjective; solver_ms: number; objective_eur: number; slot_count: number; trigger: string }
+  | { type: "plan_ready"; plan_id: string; objective: PlannerObjective; solver_ms: number; objective_eur: number; friction_eur: number; solve_status: SolveStatus; slot_count: number; trigger: string }
   | { type: "correction_active"; ts: string; asset_id: string; reason: string;
       planned_net_kw: number; actual_net_kw: number; deviation_kw: number;
       correction_kw: number; objective: PlannerObjective }

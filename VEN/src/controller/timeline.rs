@@ -479,6 +479,7 @@ mod tests {
             objective_eur: 0.0,
             friction_eur: 0.0,
             cost_breakdown: CostBreakdown::default(),
+            solve_status: crate::entities::plan::SolveStatus::Optimal,
         }
     }
 
@@ -1061,6 +1062,7 @@ mod tests {
             objective_eur: 0.0,
             friction_eur: 0.0,
             cost_breakdown: CostBreakdown::default(),
+            solve_status: crate::entities::plan::SolveStatus::Optimal,
         };
 
         let points = build_asset_timeline(
@@ -1117,6 +1119,7 @@ mod tests {
             objective_eur: 0.0,
             friction_eur: 0.0,
             cost_breakdown: CostBreakdown::default(),
+            solve_status: crate::entities::plan::SolveStatus::Optimal,
         };
 
         let points = build_asset_timeline(

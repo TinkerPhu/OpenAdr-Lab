@@ -392,6 +392,7 @@ impl PlanningService {
             solver_ms,
             objective_eur: plan.objective_eur,
             friction_eur: plan.friction_eur,
+            solve_status: plan.solve_status,
             slot_count: plan.slots.len(),
             trigger: trigger_reason.to_string(),
         });
@@ -1176,5 +1177,53 @@ mod tests {
         let inputs = build_plan_cycle_inputs(&[], &planner, &[], None, None, now);
         assert_eq!(inputs.heater_anchor.len(), 4);
         assert!(inputs.heater_anchor.iter().all(|v| v.is_none()));
+    }
+
+    // WP-T2 (docs/plans/ven-ui-transparency.md): the PlanReady SSE event must
+    // carry the same solve_status/objective_eur/friction_eur as the adopted Plan.
+    #[tokio::test]
+    async fn test_plan_ready_event_solve_status_matches_plan() {
+        use crate::entities::plan::SolveStatus;
+
+        let now = fixed_now();
+        let mut plan = make_plan(12.5, 0.75);
+        plan.solve_status = SolveStatus::Infeasible;
+        let state = AppState::new();
+        let (tx, mut rx) = tokio::sync::broadcast::channel(4);
+        let event_tx: PlannerEventTx = Arc::new(tx);
+
+        let result = PlanningService::adopt_if_warranted(
+            plan.clone(),
+            &crate::entities::asset::PlanTrigger::Periodic,
+            "test",
+            0.0,
+            300.0,
+            0.0,
+            10,
+            PlannerObjective::MinCost,
+            &state,
+            &event_tx,
+            now,
+        )
+        .await;
+        assert!(
+            result.adopted,
+            "no current plan → first plan is always adopted"
+        );
+
+        let event = rx.try_recv().expect("PlanReady must have been sent");
+        match event {
+            PlannerEvent::PlanReady {
+                objective_eur,
+                friction_eur,
+                solve_status,
+                ..
+            } => {
+                assert_eq!(objective_eur, 12.5);
+                assert_eq!(friction_eur, 0.75);
+                assert_eq!(solve_status, SolveStatus::Infeasible);
+            }
+            other => panic!("expected PlanReady, got {other:?}"),
+        }
     }
 }
