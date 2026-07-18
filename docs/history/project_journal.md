@@ -5911,3 +5911,38 @@ vocabulary, consumption pattern — see that section for the full reasoning).
   `wsl_lock` yet, which is the exact scenario the lock exists to prevent — if this
   keeps happening, the lock needs enforcement teeth beyond a documented
   convention, or every session needs a reminder to actually use it.
+
+---
+
+## WP-T7 — Metrics page labeling (branch 036-metrics-labeling)
+
+**What.** Grouped `MetricsPage.tsx`'s metrics under human-readable
+categories/labels by default, with a raw-view toggle reproducing the exact
+pre-change flat/raw-name rendering. UI-only. WP-T7 of
+`docs/plans/ven-ui-transparency.md`.
+
+**Why.** Raw Prometheus names (`poll_success_total{resource="events"}`) require
+already knowing the naming scheme to interpret.
+
+**Issues / key learnings.**
+- *The plan doc's category list was speculative, not verified.* It named four
+  categories — "VTN polling / reports / tasks / HTTP" — but grepping
+  `VEN/src`'s actual `counter!`/`histogram!`/`gauge!` call sites found only two:
+  `poll_success_total`/`poll_error_total` and `reports_sent_total`. No HTTP
+  metrics exist because `PrometheusBuilder::new()` was installed with no
+  request-instrumentation middleware; no task metrics exist because WP-T3 put
+  task status on `/tasks/status`, not the metrics registry. This is the same
+  pattern as WP-T2's `FallbackHeuristic` and WP-T1's assumed-but-missing
+  connection state: a plan document's specifics about *what exists* need
+  verifying against the actual code, even when the plan's *goal* (group metrics
+  meaningfully) is completely sound. Built the grouping map around what's real,
+  with an "Other" fallback so nothing is ever hidden by an incomplete map.
+- *Reusing the exact same table component for both views kept every existing
+  test green for free.* Extracting `MetricTable` and having both the grouped
+  and raw views call it with different `(name, label)` pairs meant the
+  underlying markup/testids never changed — all 4 pre-existing
+  `Metrics.test.tsx` tests passed unmodified, and only the *new* grouping/toggle
+  behavior needed new tests. Worth remembering as a pattern: when adding a
+  presentation mode to an existing page, look for a way to make the old mode a
+  special case of the new rendering path rather than a parallel one — the
+  regression-safety comes for free.
