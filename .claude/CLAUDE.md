@@ -22,9 +22,23 @@ memory-budget: this laptop has only 8 GB RAM — WSL cargo builds have crashed t
 any large-memory task (cargo build/check/test/clippy in WSL, parallel npm builds), check
 free memory first:
   Get-CimInstance Win32_OperatingSystem | % { "{0:N1} GB free" -f ($_.FreePhysicalMemory/1MB) }
-Rules: always pass `-j 2` to cargo in WSL; run only ONE WSL build at a time (never in
-parallel with another build or test run); if free physical memory is below ~1 GB, wait or
+Rules: always pass `-j 2` to cargo in WSL; if free physical memory is below ~1 GB, wait or
 ask the user to close applications before starting.
+
+wsl-lock: the WSL instance on this laptop is shared between multiple parallel
+sessions/worktrees, same as the Pi4. Before ANY `wsl cargo build/check/test/clippy` (or
+other large-memory WSL command), acquire the lease lock and hold it for the whole
+sequence:
+  bash scripts/wsl_lock.sh acquire -m "<branch>: <what you are doing>" [-l MIN]
+  ... all wsl cargo commands ...
+  bash scripts/wsl_lock.sh release
+Same semantics as pi4-lock (self-declared lease stored as UTC epoch, re-entrant per
+owner, dead locks are stolen with a warning): `-l` sets the lease in minutes (default
+20 — override for long test runs), `refresh [-l MIN]` extends from now if a run
+overshoots, `status` shows holder/task/lease end. `acquire` blocks up to ~9 min then
+exits 2 — rerun it to keep waiting; report to the user if the lock stays held unusually
+long instead of bypassing it. Never run a WSL cargo build/test while another owner
+holds an unexpired wsl_lock.
 
 dto: avoid DTO normalization. pass through upstream field names (e.g. OpenADR spec names) across all layers — backend, BFF, UI. one vocabulary everywhere reduces boilerplate and debugging friction.
 
