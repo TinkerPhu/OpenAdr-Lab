@@ -16,6 +16,7 @@ import { ReportsPage } from "./pages/Reports";
 import { MetricsPage } from "./pages/Metrics";
 import { ControllerPage } from "./pages/Controller";
 import { RawDiagnosticsPage } from "./pages/RawDiagnostics";
+import { TasksPage } from "./pages/Tasks";
 import { HistoryPage } from "./pages/History";
 import { NotificationsPage } from "./pages/Notifications";
 import { PlannerPage } from "./pages/Planner";
@@ -251,6 +252,13 @@ export default function App() {
             </Button>
             <Button
               component={Link}
+              to="/tasks"
+              data-testid="nav-tasks"
+            >
+              Tasks
+            </Button>
+            <Button
+              component={Link}
               to="/notifications"
               data-testid="nav-notifications"
             >
@@ -268,6 +276,7 @@ export default function App() {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/metrics" element={<MetricsPage />} />
             <Route path="/raw-diagnostics" element={<RawDiagnosticsPage />} />
+            <Route path="/tasks" element={<TasksPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
           </Routes>

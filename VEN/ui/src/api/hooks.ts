@@ -230,6 +230,16 @@ export function useMetrics() {
   });
 }
 
+// WP-T3 (docs/plans/ven-ui-transparency.md): background task restart status.
+export function useTasksStatus() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["tasks-status", api.baseUrl],
+    queryFn: () => api.tasksStatus(),
+    refetchInterval: 10_000,
+  });
+}
+
 export function usePlan(options?: { refetchInterval?: number | false }) {
   const { api } = useVenContext();
   return useQuery({

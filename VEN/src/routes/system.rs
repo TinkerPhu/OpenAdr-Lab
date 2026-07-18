@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::entities::plan::{Plan, SolveStatus};
-use crate::state::VtnConnectionStatus;
+use crate::state::{TaskStatus, VtnConnectionStatus};
 use crate::AppCtx;
 
 #[derive(Serialize)]
@@ -120,6 +120,40 @@ pub async fn vtn_status(State(ctx): State<AppCtx>) -> Json<VtnStatusResponse> {
     Json(build_vtn_status_response(vtn, token_expires_at))
 }
 
+#[derive(Serialize)]
+pub struct TaskStatusEntry {
+    name: String,
+    last_run_ts: Option<DateTime<Utc>>,
+    last_success: Option<bool>,
+    restart_count: u32,
+}
+
+/// Pure sort/flatten step — see `build_health_response`'s doc comment for why
+/// this is kept separate from the handler (testability without `AppCtx`).
+fn build_tasks_status_response(
+    statuses: std::collections::HashMap<String, TaskStatus>,
+) -> Vec<TaskStatusEntry> {
+    let mut entries: Vec<TaskStatusEntry> = statuses
+        .into_iter()
+        .map(|(name, s)| TaskStatusEntry {
+            name,
+            last_run_ts: s.last_run_ts,
+            last_success: s.last_success,
+            restart_count: s.restart_count,
+        })
+        .collect();
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    entries
+}
+
+/// WP-T3 (`docs/plans/ven-ui-transparency.md`): per-task restart/outcome status
+/// from `tasks::supervised_spawn`. Only reflects tasks actually spawned in this
+/// process — several are conditional on config, so this is not a fixed-length list.
+pub async fn tasks_status(State(ctx): State<AppCtx>) -> Json<Vec<TaskStatusEntry>> {
+    let statuses = ctx.state.task_statuses().await;
+    Json(build_tasks_status_response(statuses))
+}
+
 pub async fn get_metrics(State(ctx): State<AppCtx>) -> impl IntoResponse {
     ctx.metrics_handle.render()
 }
@@ -232,5 +266,39 @@ mod tests {
         let expires_at = Utc::now();
         let resp = build_vtn_status_response(healthy_vtn(), Some(expires_at));
         assert_eq!(resp.token_expires_at, Some(expires_at));
+    }
+
+    #[test]
+    fn tasks_status_response_sorted_by_name() {
+        let mut statuses = std::collections::HashMap::new();
+        statuses.insert(
+            "sim_tick".to_string(),
+            TaskStatus {
+                last_run_ts: Some(Utc::now()),
+                last_success: None,
+                restart_count: 0,
+            },
+        );
+        statuses.insert(
+            "obligation_check".to_string(),
+            TaskStatus {
+                last_run_ts: Some(Utc::now()),
+                last_success: Some(false),
+                restart_count: 2,
+            },
+        );
+
+        let entries = build_tasks_status_response(statuses);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "obligation_check");
+        assert_eq!(entries[0].restart_count, 2);
+        assert_eq!(entries[1].name, "sim_tick");
+        assert_eq!(entries[1].restart_count, 0);
+    }
+
+    #[test]
+    fn tasks_status_response_reflects_only_recorded_tasks() {
+        let entries = build_tasks_status_response(std::collections::HashMap::new());
+        assert!(entries.is_empty(), "no tasks recorded → empty response");
     }
 }

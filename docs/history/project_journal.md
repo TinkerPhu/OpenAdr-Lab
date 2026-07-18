@@ -5816,3 +5816,48 @@ connection detail (backoff state, last error, token expiry) for diagnosis.
   is used: split the cleanup into "checkout tracked files" and "rm untracked new
   files" from the start, rather than one command assuming everything scp'd is
   already tracked.
+
+---
+
+## WP-T3 — Background task supervision status (branch 033-task-status)
+
+**What.** Added `TaskStatus { last_run_ts, last_success, restart_count }` per task
+name, threaded `AppState` into `supervised_spawn` (which previously tracked nothing
+outside its log line), and shipped `GET /tasks/status` + a new Tasks page. WP-T3 of
+`docs/plans/ven-ui-transparency.md`.
+
+**Why.** None of the 9 supervised background tasks exposed whether they were
+actually running — a silent crash-loop would be invisible outside the logs.
+
+**Issues / key learnings.**
+- *`progress_ticker` doesn't fit this shape.* The plan doc's original task list
+  named it alongside the 9 real supervised tasks, but it's spawned/cancelled per
+  plan-solve-cycle inside `spawn_planning`'s own loop with a cancel-and-await
+  lifecycle, not a restart lifecycle — excluded, not force-fit.
+- *`last_success` semantics needed real thought for infinite-loop tasks.* Every
+  supervised task loops forever by design and only returns to `supervised_spawn`'s
+  `await` on panic. So `last_success` stays `None` for a task's entire healthy
+  first run — that's not "unknown," it's "still running, never completed." The UI
+  renders `restart_count == 0` as the healthy signal, not `last_success`, to avoid
+  reading `null` as ambiguous.
+- *A test's exact-count assertion was wrong, not the code.* Extended
+  `supervised_spawn_restarts_after_panic` to assert `restart_count == 1` after one
+  deliberate panic — failed with `restart_count == 9` on a real run. The test uses
+  `cooldown_s = 0`, so the supervisor loop races far ahead of the test's 10ms
+  polling interval; by the time the assertion runs, several more (non-panicking)
+  restarts have already happened. The original test only ever asserted "counter
+  reached 2" (at least one restart occurred), never an exact count — my added
+  assertion overspecified something the test's own timing model can't guarantee.
+  Fixed to `>= 1` and `.is_some()`. Lesson: when extending an existing test with a
+  new assertion, check what invariant the *existing* assertions actually establish
+  before asserting something more precise than that.
+- *A real resource-contention incident, caught mid-task.* While this WP's test
+  suite ran in the background, an unrelated concurrent `wsl cargo check` from a
+  different worktree (`.claude/worktrees/034-vtn-report-status`) — not something
+  this session started — dropped free host memory to 0.2 GB, under the
+  memory-budget rule's ~1 GB floor. Killed this session's own WSL test process
+  (safe: rerunnable) rather than touching the other worktree's process (unclear
+  ownership). Memory recovered once that other build finished. The user added a
+  `wsl-lock` rule + `scripts/wsl_lock.sh` to `.claude/CLAUDE.md` shortly after,
+  mirroring the existing `pi4_lock.sh` pattern, to prevent recurrence across
+  concurrent sessions sharing this laptop's one WSL instance.
