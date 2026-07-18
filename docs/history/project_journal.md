@@ -5987,3 +5987,148 @@ target gap — cheaper to fix than building anything new, since the hard part
   *other* pages' tests (via shared page composition, not just the page you
   edited) means grepping for every test that renders anything upstream of your
   change, not just the test file for the page you touched directly.
+
+---
+
+## WP-T5 — VTN report submission status (branch 034-vtn-report-status)
+
+**What.** New bounded (cap 100) `ReportSubmissionRecord` ring, recorded on
+both the success and failure branch of `post_reports`/`put_report`, exposed
+via `GET /reports/submissions`. Reports page renders an "Accepted"/"Rejected"
+chip per report, matched by `reportName`/`eventID`, with a tooltip showing the
+VTN's rejection error. WP-T5 of `docs/plans/ven-ui-transparency.md`.
+
+**Why.** `reports_sent_total` (a Prometheus counter) told you *how many*
+reports were sent, never *whether the VTN accepted them* — a resident had no
+way to see a rejected report without reading raw metrics or logs.
+
+**Issues / key learnings.** This WP was implemented in a parallel worktree
+session while WP-T1/T3/T4/T6/T7 were in progress here; it surfaced a real
+finding later confirmed independently during the combined-branch code review
+(see below) and recorded as debt rather than fixed in-scope:
+- *A dormant, fully-wired route with no caller.* While implementing this WP,
+  the other session found `entities/history.rs::ReportSent` +
+  `HistoryPort::append_report_sent` and `GET /history/reports` are complete
+  end-to-end but nothing in production code ever calls
+  `append_report_sent` — only unit tests exercise it, so `GET /history/reports`
+  always returns empty. Recorded as R-43 rather than silently left for someone
+  to rediscover.
+- *Live Pi4 verification without a rendered-chip screenshot.* No headless
+  browser was available in that environment, so the chip's *rendering* wasn't
+  visually confirmed — but the exact JSON contract it consumes was proven live
+  end-to-end (`POST /reports` without `eventID` → 400, recorded
+  `vtn_accepted:false`; retry with `eventID` → 201, recorded `true`; both
+  visible newest-first through the real nginx `ui` proxy), and
+  `Reports.test.tsx` already asserts deterministic chip rendering from that
+  exact shape. A reasonable substitute for a screenshot when the render logic
+  is otherwise fully covered by unit tests.
+- **This entry and the plan-doc §4/§7 WP-T5 write-up were completed
+  retroactively** (during the WP-T8 session, after merging the combined branch
+  to `main`) — the other session's own `tasks.md` items 6.2/6.3 for this
+  bookkeeping had been left unchecked.
+
+---
+
+## Combined branch (034-vtn-report-status) — code review + Pi4 verification before merge
+
+**What.** Before merging WP-T1/T2/T3/T4/T6/T7 (this session) plus the
+independently-completed WP-T5 (the other session) into `main`, ran an 8-angle,
+high-effort `/code-review` pass (line-by-line, removed-behavior, cross-file-
+tracer, reuse, simplification, efficiency, altitude, CLAUDE.md-conventions ×
+1-vote verify) across the full `main...HEAD` diff (89 files, ~5500 lines) —
+not just the newest commit — then fixed the 4 CONFIRMED correctness findings
+before Pi4 E2E/resilience testing.
+
+**Why.** This was the first time this many WPs from two parallel sessions
+landed on `main` together; a review pass before the expensive Pi4 test runs
+catches regressions cheaper than a failing E2E scenario would, and the user
+explicitly asked whether review-first or test-first was wiser here.
+
+**Issues / key learnings.**
+- *A real, silent Dashboard regression survived until this review.*
+  `Dashboard.tsx`'s health card still did a truthy check (`health.data ? "ok"
+  : ...`) instead of reading `.data.status` — the exact bug WP-T1 fixed in
+  `App.tsx`'s `HealthChip` months earlier, reintroduced independently on a
+  different page because the fix was never generalized into one shared
+  component. (This is now moot for the Dashboard health card specifically,
+  since WP-T8 replaced it with the three-row status panel reading real
+  component/task/plan state — but the same "duplicate copies of the same
+  logic drift independently" risk applies to the new rows too if a similar
+  card is ever added elsewhere.)
+- *Two correctness bugs in `Reports.tsx`'s `latestSubmissionFor`*: matching a
+  submission by `reportName` alone let two reports sharing a free-text name
+  but different `eventID`s cross-contaminate; comparing `submitted_at` as raw
+  strings instead of `Date.getTime()` picked the wrong "newest" submission
+  when only one of two timestamps had a fractional-seconds component.
+- *A determinism violation in `vtn.rs::token_expires_at`*: it called
+  `Utc::now()` internally and `saturating_sub`-clamped the result, so an
+  actually-expired token always reported "now" instead of a genuinely-past
+  timestamp — violating this project's "any code path depending on current
+  time must accept an injectable clock" rule (see `.claude/CLAUDE.md`,
+  `determinism`). Fixed by accepting `now: DateTime<Utc>` as a parameter and
+  removing the clamp.
+- *Personally re-verifying sub-agent findings mattered.* Of ~10 candidate
+  findings from the 8 finder angles, only 4 were confirmed correctness bugs by
+  reading the actual code myself; the other 6 (recorded as R-44 through R-49 in
+  `TECHNICAL_DEBTS.md` rather than silently dropped) were real but lower-
+  priority cleanup/efficiency items, not correctness bugs — worth fixing before
+  Pi4 testing, not worth blocking the merge for.
+- Local pyramid after the fix: 708 Rust tests, 388 UI tests, fmt/clippy/tsc/
+  eslint/file-size-audit/architecture-invariant-greps all clean. Pi4: E2E 265
+  scenarios/0 failed, resilience 5 scenarios/0 failed (Failure Recovery
+  feature — VTN outage recovery, VEN self-restart, exponential backoff,
+  dual-VEN convergence). Fast-forward merged to `main` immediately after
+  (main hadn't moved since the branch was cut) rather than starting WP-T8 on
+  top of an untested-on-main branch.
+
+---
+
+## WP-T8 — Nav re-architecture + Dashboard redesign (branch 038-nav-dashboard-redesign)
+
+**What.** Last WP of `docs/plans/ven-ui-transparency.md`. Regrouped the top
+nav from 11 flat tabs to a primary bar (Dashboard, Devices, Controller,
+History, Planner, Notifications) plus two `Menu`-anchored groups — "VTN Feed"
+(Reports, Programs, Events) and "Diagnostics" (Metrics, RawDiagnostics, Tasks,
+Event Log), the latter always visible, never gated. Rebuilt the Dashboard's
+top section into three traffic-light status rows (VTN Connection, Plan
+status, Active tasks) consuming WP-T1/T2/T3's already-shipped endpoints — no
+backend change at all.
+
+**Why.** Deliberately sequenced last in the plan: it needed WP-T1/T2/T3/T4's
+data shapes and pages to already exist before it could group or surface them,
+and the user confirmed after the combined-branch merge to go straight into
+this WP rather than pause.
+
+**Issues / key learnings.**
+- *Route paths never changed, only how they're reached.* Grouping
+  Reports/Programs/Events/Metrics/etc. behind dropdown `Menu`s kept every
+  existing route (`/reports`, `/tasks`, ...) identical, so no page-level test
+  or deep link needed touching — only `App.tsx`'s nav markup and
+  `App.test.tsx`'s nav-visibility assertions changed. Confirmed by grepping
+  for `DashboardPage`/route usage across `__tests__/` before touching
+  anything — only `Dashboard.test.tsx` renders it directly, so the blast
+  radius for the status-row change was contained to one test file plus the
+  new `StatusRows.test.tsx`.
+- *Reused existing "healthy" definitions instead of inventing new ones for the
+  same data.* The Active tasks row's healthy rule (`restart_count === 0`, not
+  `last_success`) mirrors `Tasks.tsx`'s own rule exactly; the Plan status
+  row's "no plan yet is neutral, not degraded" mirrors
+  `routes/system.rs::plan_is_ok`'s rule for `/health`'s `planner` component.
+  Deliberately avoided a second, subtly different definition of "degraded"
+  for the same underlying signal — the kind of drift the combined-branch
+  code review had just caught between `App.tsx`'s `HealthChip` and
+  `Dashboard.tsx`'s health card.
+- *Test-first caught nothing new this time, which is itself the useful
+  signal.* `StatusRows.test.tsx` was written and confirmed failing (import
+  error — the component didn't exist yet) before `StatusRows.tsx` was
+  written; all 9 tests passed on the first implementation attempt. Reused the
+  exact `Collapse` + `IconButton` expand idiom `PlanHeaderBar.tsx` already
+  established for warnings, rather than inventing a second one on the same
+  page — worth calling out as a case where reuse-hunting *prevented* a bug
+  class (a second expand/collapse implementation to keep in sync) rather than
+  just tidying code after the fact.
+- Full local pyramid: 402/402 UI tests (37 files, up from 388/388 at the
+  combined-branch merge — 3 new Dashboard tests, 2 new App tests, 9 new
+  StatusRows tests), `tsc --noEmit` clean, ESLint clean (same one
+  pre-existing `App.tsx` fast-refresh warning, unrelated to this change),
+  file-size audit clean (no `VEN/src/` files touched — UI-only WP).

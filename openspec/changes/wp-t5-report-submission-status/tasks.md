@@ -37,5 +37,5 @@
 ## 6. Bookkeeping
 
 - [x] 6.1 Record the dormant `append_report_sent`/`/history/reports` finding (never called from production code) as new debt in `docs/reference/TECHNICAL_DEBTS.md` (R-43).
-- [ ] 6.2 Update `docs/history/project_journal.md` with a WP-T5 entry.
-- [ ] 6.3 Update `docs/plans/ven-ui-transparency.md` WP-T5 row/section to ✅ done, mirroring the WP-T1/WP-T2 write-up style.
+- [x] 6.2 Update `docs/history/project_journal.md` with a WP-T5 entry.
+- [x] 6.3 Update `docs/plans/ven-ui-transparency.md` WP-T5 row/section to ✅ done, mirroring the WP-T1/WP-T2 write-up style.
