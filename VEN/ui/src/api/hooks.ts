@@ -252,6 +252,19 @@ export function useTasksStatus() {
   });
 }
 
+// WP-T1 (docs/plans/ven-ui-transparency.md): VTN connection detail
+// (token expiry, backoff, last error) — `/health` only carries a terse
+// ok/degraded summary, this is the detail behind it for the Dashboard's
+// VTN Connection status row (WP-T8).
+export function useVtnStatus() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["vtn-status", api.baseUrl],
+    queryFn: () => api.vtnStatus(),
+    refetchInterval: 10_000,
+  });
+}
+
 // WP-T4: VEN-operational Event Log — polled like the other Diagnostics
 // pages (Metrics, Tasks); the backend also offers an SSE stream
 // (/events/log/events) but wiring that into the UI is left for a follow-up,

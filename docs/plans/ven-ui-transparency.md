@@ -139,10 +139,10 @@ Effort tags per roadmap convention: S ≤ ½ day · M ≈ 1–2 days · L ≈ 3�
 | WP-T2 ✅ | MILP solve status badge (G-2) — **done**, branch `031-plan-solve-status`, `openspec/changes/wp-t2-plan-solve-status/`. Shipped as a two-state `solve_status: OPTIMAL \| INFEASIBLE` (no `fallback_heuristic` — no such code path exists; see design.md Non-Goals) | `PlanHeaderBar.tsx`: distinct infeasible chip vs. generic warning badge (Dashboard summary line deferred to WP-T8) | S |
 | WP-T3 ✅ | Background task status (G-3) — **done**, branch `033-task-status`, `openspec/changes/wp-t3-task-status/`. `GET /tasks/status` reports `{name, last_run_ts, last_success, restart_count}` per task actually spawned (`supervised_spawn` now records it — it tracked nothing before this WP) | New Tasks page shipped (Diagnostics-adjacent nav); Dashboard summary line deferred to WP-T8 | M |
 | WP-T4 ✅ | Event log (G-4) — **done**, branch `035-event-log`, `openspec/changes/wp-t4-event-log/`. Bounded in-memory ring (no persistence, no `/events/log/history` — see design.md) + `GET /events/log` + `GET /events/log/events` (SSE), independent of Notifications — `vtn_connection`/`storage`/`task_supervisor` producers wired | New Event Log page shipped (polling, not yet SSE-wired) | M |
-| WP-T5 | VTN report submission status (G-5) | No backend change — `reports_sent_total` already exists; add a per-report `vtn_accepted: bool` field at creation time if not already tracked, else just surface the existing counter contextually | Reports page: per-report submission status chip, not just a raw counter elsewhere | S |
+| WP-T5 ✅ | VTN report submission status (G-5) — **done**, branch `034-vtn-report-status`, `openspec/changes/wp-t5-report-submission-status/`. New bounded `ReportSubmissionRecord` ring (cap 100) + `GET /reports/submissions`, recorded on both `post_reports` and `put_report` success/failure paths | Reports page: per-report "Accepted"/"Rejected" chip (tooltip shows error on rejection), matched by `reportName`/`eventID` | S |
 | WP-T6 ✅ | Wire unused routes (G-6) — **done**, branch `037-wire-unused-routes`, `openspec/changes/wp-t6-wire-unused-routes/`. Wired `/capability/:asset_id` + `/forecast` (Controller), `/history/plans` (History), `/obligations` (Reports) | New `FlexibilityForecastPanel` on Controller; new Plans section on History; new Pending Obligations section on Reports | M |
 | WP-T7 ✅ | Metrics page labeling (G-7) — **done**, branch `036-metrics-labeling`, `openspec/changes/wp-t7-metrics-labeling/`. Only 2 real categories exist (VTN Polling, Reports) — grep-confirmed no "tasks"/"HTTP" metrics are emitted, contra the original 4-category sketch | Grouped-by-default `MetricsPage.tsx` with human labels + raw-name captions; raw view toggle reproduces prior exact behavior | S |
-| WP-T8 | Tab re-architecture (§3) | None | Implement primary/secondary/tertiary nav grouping; Dashboard status-row redesign | M |
+| WP-T8 ✅ | Tab re-architecture (§3) — **done**, branch `038-nav-dashboard-redesign`, `openspec/changes/wp-t8-nav-dashboard-redesign/`. No backend change — consumes WP-T1/T2/T3's existing endpoints | Primary nav (Dashboard, Devices, Controller, History, Planner, Notifications) + grouped "VTN Feed" and always-visible "Diagnostics" menus; Dashboard gained a 3-row traffic-light status panel (VTN Connection, Plan status, Active tasks) | M |
 
 ### 4.1 WP-T1 detail — multi-state `/health`
 
@@ -443,14 +443,30 @@ from scratch concurrently with this session's `wsl_lock`-held test run, dropping
 free memory to 1.0 GB. The other session did not appear to respect `wsl_lock`.
 Resolved by killing this session's own (already-redundant, post-fmt) re-test run.
 
-### WP-T5 — VTN report submission status (S)
+### WP-T5 — VTN report submission status (S) — ✅ done
 
-1. In `routes/reports.rs`, check whether per-report acceptance is tracked anywhere
-   beyond the aggregate `reports_sent_total` counter; if not, add a `vtn_accepted:
-   bool` field set at submission time alongside the existing counter increment.
-2. Test-first: `test_report_submission_marks_vtn_accepted_on_success_and_false_on_failure`.
-3. UI: Reports page gets a per-report status chip instead of the status only being
-   visible via raw `/metrics`.
+Branch `034-vtn-report-status`; OpenSpec change
+`openspec/changes/wp-t5-report-submission-status/`.
+
+1. `entities/report_submission.rs::ReportSubmissionRecord` + a bounded
+   (cap 100) `state/report_submissions.rs` ring, newest-first, mirroring
+   `state/obligations.rs`'s module style.
+2. `routes/reports.rs::post_reports`/`put_report` record a submission on both
+   the success and failure branch (`vtn_accepted: true/false` + the VTN's
+   error text on rejection), alongside the pre-existing `reports_sent_total`
+   counter increment. New `GET /reports/submissions` route.
+3. UI: Reports page matches submissions by `reportName`/`eventID` and renders
+   an "Accepted"/"Rejected" chip with a tooltip showing the rejection error;
+   no chip when unmatched.
+4. Verified live on Pi4: a `POST /reports` without `eventID` was rejected by
+   the VTN (400) and recorded `vtn_accepted:false` with its error text; a
+   follow-up with `eventID` was accepted (201) and recorded `true` — both
+   returned newest-first from `GET /reports/submissions` via the real nginx
+   `ui` proxy path.
+5. Found and recorded as new debt (R-43, not fixed in this WP): the existing
+   `HistoryPort::append_report_sent`/`GET /history/reports` route is fully
+   wired but has no production call site — discovered while implementing this
+   WP, unrelated to its own scope.
 
 ### WP-T7 — Metrics page labeling (S) — ✅ done
 
@@ -499,16 +515,35 @@ Branch `037-wire-unused-routes`; OpenSpec change
    WP-T4's precedent (backend route exists and works; UI consumption is a
    follow-up, not dropped).
 
-### WP-T8 — Nav re-architecture + Dashboard redesign (M)
+### WP-T8 — Nav re-architecture + Dashboard redesign (M) — ✅ done
 
-1. Implement the primary/secondary/Diagnostics grouping exactly as ordered in §3.2:
-   Dashboard, Devices, Controller, History, Planner, Notifications (primary); Reports,
-   Programs, Events (VTN Feed group); Metrics, RawDiagnostics, Tasks, Event Log
-   (Diagnostics group, always visible, no gating).
-2. Rebuild the Dashboard per §3.3: the three status lines from WP-T2 (plan status),
-   WP-T1 (VTN connection + VEN-process), WP-T3 (task summary), each collapsed to a
-   single green line when healthy and expanding inline with detail only when
-   degraded.
-3. Update `App.test.tsx` and any routing/nav tests for the new tab structure.
-4. Manual pass: verify the "glance-and-go" property holds — a healthy system shows
-   three short lines on the Dashboard, not a wall of gauges (design principle 2, §2).
+Branch `038-nav-dashboard-redesign`; OpenSpec change
+`openspec/changes/wp-t8-nav-dashboard-redesign/`. No backend change — pure
+presentation layer, consuming WP-T1/T2/T3's existing endpoints.
+
+1. Primary nav bar (Dashboard, Devices, Controller, History, Planner,
+   Notifications) plus two `Menu`-anchored dropdowns — "VTN Feed" (Reports,
+   Programs, Events) and "Diagnostics" (Metrics, RawDiagnostics, Tasks, Event
+   Log) — implemented as a shared `NavMenu` component in `App.tsx`. Route
+   paths are unchanged, so no page-level test or deep link broke; only
+   `App.test.tsx`'s nav assertions needed updating (primary tabs visible
+   directly, grouped tabs only visible after opening their menu). Diagnostics
+   is unconditionally rendered — no settings flag hides it.
+2. New `components/dashboard/StatusRows.tsx`: `VtnConnectionRow`,
+   `PlanStatusRow`, `TaskSummaryRow`, each a single traffic-light line when
+   healthy, expanding via the same `Collapse`+`IconButton` idiom
+   `PlanHeaderBar.tsx` already used for plan warnings. "Healthy" definitions
+   deliberately mirror the existing single sources of truth rather than
+   inventing new ones: task health is `restart_count === 0` (same rule
+   `Tasks.tsx` uses — a task's first still-running attempt has
+   `last_success === null` and is not degraded); plan health treats "no plan
+   yet" as neutral, not degraded (same rule `routes/system.rs::plan_is_ok`
+   uses for `/health`'s `planner` component).
+3. New `useVtnStatus` hook in `hooks.ts` — `client.ts::vtnStatus()` already
+   existed from WP-T1 but had no caller until this WP.
+4. Test-first throughout: `StatusRows.test.tsx` (9 tests, written and
+   confirmed failing before the component existed) plus updated
+   `Dashboard.test.tsx` (3 new tests) and `App.test.tsx` (2 new tests, 1
+   renamed). Full UI suite: 402/402 passed (37 files, up from 388/388 at merge
+   time); `tsc --noEmit` and ESLint both clean (only the pre-existing
+   `App.tsx` fast-refresh warning, unchanged by this WP).

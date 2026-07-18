@@ -54,13 +54,44 @@ describe("App shell", () => {
     expect(screen.getByTestId("ven-selector")).toBeVisible();
   });
 
-  it("renders navigation links", () => {
+  it("renders primary navigation links directly", () => {
     renderApp();
     expect(screen.getByTestId("nav-dashboard")).toBeVisible();
+    expect(screen.getByTestId("nav-devices")).toBeVisible();
+    expect(screen.getByTestId("nav-controller")).toBeVisible();
+    expect(screen.getByTestId("nav-history")).toBeVisible();
+    expect(screen.getByTestId("nav-planner")).toBeVisible();
+    expect(screen.getByTestId("nav-notifications")).toBeVisible();
+  });
+
+  // WP-T8 (docs/plans/ven-ui-transparency.md §3.2): Reports/Programs/Events
+  // are grouped behind a "VTN Feed" menu, not shown in the flat top bar.
+  it("groups Reports/Programs/Events behind the VTN Feed menu", () => {
+    renderApp();
+    expect(screen.getByTestId("nav-vtn-feed-menu")).toBeVisible();
+    expect(screen.queryByTestId("nav-reports")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("nav-programs")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("nav-events")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("nav-vtn-feed-menu"));
+    expect(screen.getByTestId("nav-reports")).toBeVisible();
     expect(screen.getByTestId("nav-programs")).toBeVisible();
     expect(screen.getByTestId("nav-events")).toBeVisible();
-    expect(screen.getByTestId("nav-reports")).toBeVisible();
-    expect(screen.getByTestId("nav-planner")).toBeVisible();
+  });
+
+  // The Diagnostics group is grouped for the same usage-frequency reason but
+  // must never be gated behind a settings flag (design principle 2, §2) —
+  // this test only checks it's reachable, not that it starts open.
+  it("groups Diagnostics pages behind an always-visible Diagnostics menu", () => {
+    renderApp();
+    expect(screen.getByTestId("nav-diagnostics-menu")).toBeVisible();
+    expect(screen.queryByTestId("nav-tasks")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("nav-diagnostics-menu"));
+    expect(screen.getByTestId("nav-metrics")).toBeVisible();
+    expect(screen.getByTestId("nav-raw-diagnostics")).toBeVisible();
+    expect(screen.getByTestId("nav-tasks")).toBeVisible();
+    expect(screen.getByTestId("nav-event-log")).toBeVisible();
   });
 
   it("renders auto-refresh toggle", () => {

@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
 import { DashboardPage } from "../pages/Dashboard";
-import { useHealth } from "../api/hooks";
+import { useHealth, useVtnStatus, useTasksStatus } from "../api/hooks";
 
 const mockPrograms = [
   { id: "p1", programName: "Program Alpha" },
@@ -89,8 +89,28 @@ vi.mock("../api/hooks", () => ({
   useSim: vi.fn(() => ({ data: null, isError: false })),
   useCapacity: vi.fn(() => ({ data: mockCapacity })),
   useLedger: vi.fn(() => ({ data: mockLedger })),
-  usePlan: vi.fn(() => ({ data: { objective: "min_cost" } })),
+  usePlan: vi.fn(() => ({
+    data: {
+      id: "plan-1",
+      created_at: new Date(Date.now() - 45_000).toISOString(),
+      trigger: "Periodic",
+      objective: "min_cost",
+      slots: [],
+      summary: { total_cost_eur: 0, total_co2_g: 0, total_import_kwh: 0, total_export_kwh: 0 },
+      envelopes: [],
+      warnings: [],
+      objective_eur: 0,
+      friction_eur: 0,
+      solve_status: "OPTIMAL",
+    },
+  })),
   useRequests: vi.fn(() => ({ data: [mockActiveRequest] })),
+  useVtnStatus: vi.fn(() => ({
+    data: { connected: true, last_success_ts: new Date().toISOString(), last_error: null, current_backoff_s: 0, token_expires_at: null },
+  })),
+  useTasksStatus: vi.fn(() => ({
+    data: [{ name: "sim_tick", last_run_ts: null, last_success: null, restart_count: 0 }],
+  })),
 }));
 
 function renderDashboard() {
@@ -165,6 +185,32 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("dash-session-strip")).toBeVisible();
     expect(screen.getByTestId("dash-objective-chip")).toHaveTextContent("Objective: Cost");
     expect(screen.getByTestId("session-chip-req-ev-01")).toBeVisible();
+  });
+
+  // WP-T8: the Dashboard combines WP-T1/T2/T3's status signals into a
+  // three-row traffic-light panel above the existing cards.
+  it("renders the status panel with connected/optimal/running rows", () => {
+    renderDashboard();
+    expect(screen.getByTestId("dash-status-panel")).toBeVisible();
+    expect(screen.getByTestId("dash-vtn-status")).toHaveTextContent(/connected/i);
+    expect(screen.getByTestId("dash-plan-status")).toHaveTextContent(/optimal/i);
+    expect(screen.getByTestId("dash-tasks-status")).toHaveTextContent("1/1 running");
+  });
+
+  it("renders a degraded VTN row when disconnected", () => {
+    vi.mocked(useVtnStatus).mockReturnValueOnce({
+      data: { connected: false, last_success_ts: null, last_error: "connection refused", current_backoff_s: 12.0, token_expires_at: null },
+    } as ReturnType<typeof useVtnStatus>);
+    renderDashboard();
+    expect(screen.getByTestId("dash-vtn-status")).toHaveTextContent(/disconnected/i);
+  });
+
+  it("renders a degraded tasks row when a task has restarted", () => {
+    vi.mocked(useTasksStatus).mockReturnValueOnce({
+      data: [{ name: "poll_events", last_run_ts: null, last_success: false, restart_count: 2 }],
+    } as ReturnType<typeof useTasksStatus>);
+    renderDashboard();
+    expect(screen.getByTestId("dash-tasks-status")).toHaveTextContent("0/1 running");
   });
 
   it("renders ledger card with asset rows and running-since header", () => {

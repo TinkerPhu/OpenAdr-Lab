@@ -1,9 +1,10 @@
 import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { Chip, Grid, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
-import { useHealth, usePlan, usePrograms, useEvents, useRequests, useSensor, useReports, useSim, useCapacity, useLedger } from "../api/hooks";
+import { useHealth, usePlan, usePrograms, useEvents, useRequests, useSensor, useReports, useSim, useCapacity, useLedger, useVtnStatus, useTasksStatus } from "../api/hooks";
 import type { OadrCapacityState, AssetLedger, PlannerObjective } from "../api/types";
 import { SessionProgressBoard } from "../components/sessions/SessionProgressBoard";
+import { DashboardStatusPanel } from "../components/dashboard/StatusRows";
 
 const OBJECTIVE_LABELS: Record<PlannerObjective, string> = {
   min_cost: "Cost",
@@ -145,6 +146,8 @@ export function DashboardPage() {
   const ledger = useLedger();
   const plan = usePlan();
   const requests = useRequests();
+  const vtnStatus = useVtnStatus();
+  const tasksStatus = useTasksStatus();
 
   // WP-T1 (docs/plans/ven-ui-transparency.md): /health now returns
   // {status, components} — read the real status instead of assuming "ok"
@@ -154,6 +157,17 @@ export function DashboardPage() {
 
   return (
     <Grid container spacing={2}>
+      {/* WP-T8 (docs/plans/ven-ui-transparency.md §3.3): three traffic-light
+          status rows combining WP-T1/T2/T3's signals into the "is everything
+          okay right now" answer the Dashboard didn't have before. */}
+      <Grid item xs={12}>
+        <DashboardStatusPanel
+          vtnStatus={vtnStatus.data}
+          plan={plan.data}
+          tasks={tasksStatus.data ?? []}
+        />
+      </Grid>
+
       <Grid item xs={12} md={3}>
         <Paper sx={{ p: 2 }} data-testid="dash-health-card">
           <Typography variant="h6">
