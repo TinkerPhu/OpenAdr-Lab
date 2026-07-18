@@ -1,15 +1,45 @@
 import { useMemo, useState } from "react";
 import {
-  Button, IconButton, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableContainer,
+  Button, Chip, IconButton, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, TextField, Tooltip, Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import EditIcon from "@mui/icons-material/Edit";
-import type { Report, VtnEvent } from "../api/types";
-import { useReports, useSubmitReport, useUpdateReport, useEvents, usePrograms, useObligations } from "../api/hooks";
+import type { Report, ReportSubmission, VtnEvent } from "../api/types";
+import {
+  useReports, useReportSubmissions, useSubmitReport, useUpdateReport, useEvents, usePrograms,
+  useObligations,
+} from "../api/hooks";
 import { useVenContext } from "../App";
 import { JsonDialog } from "../components/JsonDialog";
+
+/** WP-T5 (G-5): newest submission matching a report, by reportName falling
+ * back to eventID (submissions may predate the report having either). */
+function latestSubmissionFor(
+  report: Report,
+  submissions: ReportSubmission[],
+): ReportSubmission | null {
+  const matches = submissions.filter((s) =>
+    (report.reportName && s.report_name === report.reportName) ||
+    (!report.reportName && report.eventID && s.event_id === report.eventID),
+  );
+  if (matches.length === 0) return null;
+  return matches.reduce((newest, s) =>
+    s.submitted_at > newest.submitted_at ? s : newest,
+  );
+}
+
+export function ReportStatusChip({ submission }: { submission: ReportSubmission | null }) {
+  if (!submission) return null;
+  return submission.vtn_accepted ? (
+    <Chip size="small" color="success" label="Accepted" data-testid="report-status-accepted" />
+  ) : (
+    <Tooltip title={submission.error ?? "Rejected"}>
+      <Chip size="small" color="error" label="Rejected" data-testid="report-status-rejected" />
+    </Tooltip>
+  );
+}
 
 export function buildExampleResources(event: VtnEvent, venName: string): string {
   const intervals = (event.intervals ?? []).map((iv) => ({
@@ -30,6 +60,7 @@ export function buildExampleResources(event: VtnEvent, venName: string): string 
 
 export function ReportsPage() {
   const { data: reports = [], dataUpdatedAt } = useReports();
+  const { data: submissions = [] } = useReportSubmissions();
   const { data: events = [] } = useEvents();
   const { data: programs = [] } = usePrograms();
   const { data: obligations = [] } = useObligations();
@@ -202,6 +233,7 @@ export function ReportsPage() {
               <TableCell>Program</TableCell>
               <TableCell>Event</TableCell>
               <TableCell>Created</TableCell>
+              <TableCell>Status</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -222,6 +254,9 @@ export function ReportsPage() {
                 <TableCell sx={{ fontFamily: "monospace" }}>{r.eventID ?? "—"}</TableCell>
                 <TableCell>{r.createdDateTime ?? "—"}</TableCell>
                 <TableCell>
+                  <ReportStatusChip submission={latestSubmissionFor(r, submissions)} />
+                </TableCell>
+                <TableCell>
                   <Tooltip title="Edit report">
                     <IconButton
                       size="small"
@@ -236,7 +271,7 @@ export function ReportsPage() {
             ))}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} align="center" data-testid="reports-empty">
+                <TableCell colSpan={7} align="center" data-testid="reports-empty">
                   No reports
                 </TableCell>
               </TableRow>

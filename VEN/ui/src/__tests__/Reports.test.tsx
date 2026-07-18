@@ -39,12 +39,15 @@ const mockObligations = [
   },
 ];
 
+let mockSubmissions: unknown[] = [];
+
 const mutateMock = vi.fn();
 const updateMutateMock = vi.fn();
 
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
   useReports: () => ({ data: mockReports, dataUpdatedAt: Date.now() }),
+  useReportSubmissions: () => ({ data: mockSubmissions }),
   useEvents: () => ({ data: mockEvents }),
   usePrograms: () => ({ data: mockPrograms }),
   useObligations: () => ({ data: mockObligations }),
@@ -71,6 +74,7 @@ describe("ReportsPage", () => {
   beforeEach(() => {
     mutateMock.mockReset();
     updateMutateMock.mockReset();
+    mockSubmissions = [];
   });
 
   it("renders heading and reports table", () => {
@@ -113,6 +117,40 @@ describe("ReportsPage", () => {
     await userEvent.click(screen.getByTestId("report-suggest-btn"));
 
     expect((nameInput as HTMLInputElement).value).toBe("my-custom-name");
+  });
+
+  it("shows an Accepted chip when a matching submission was accepted", () => {
+    mockSubmissions = [
+      { report_name: "test-report", event_id: "e1", client_name: "ven-1", vtn_accepted: true, submitted_at: "2024-01-01T00:00:00Z", error: null },
+    ];
+    renderReports();
+    expect(screen.getByTestId("report-status-accepted")).toBeVisible();
+    expect(screen.queryByTestId("report-status-rejected")).not.toBeInTheDocument();
+  });
+
+  it("shows a Rejected chip when a matching submission was rejected", () => {
+    mockSubmissions = [
+      { report_name: "test-report", event_id: "e1", client_name: "ven-1", vtn_accepted: false, submitted_at: "2024-01-01T00:00:00Z", error: "vtn unreachable" },
+    ];
+    renderReports();
+    expect(screen.getByTestId("report-status-rejected")).toBeVisible();
+    expect(screen.queryByTestId("report-status-accepted")).not.toBeInTheDocument();
+  });
+
+  it("shows no status chip when there is no matching submission", () => {
+    mockSubmissions = [];
+    renderReports();
+    expect(screen.queryByTestId("report-status-accepted")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("report-status-rejected")).not.toBeInTheDocument();
+  });
+
+  it("picks the newest matching submission when there are multiple", () => {
+    mockSubmissions = [
+      { report_name: "test-report", event_id: "e1", client_name: "ven-1", vtn_accepted: false, submitted_at: "2024-01-01T00:00:00Z", error: "first attempt failed" },
+      { report_name: "test-report", event_id: "e1", client_name: "ven-1", vtn_accepted: true, submitted_at: "2024-01-02T00:00:00Z", error: null },
+    ];
+    renderReports();
+    expect(screen.getByTestId("report-status-accepted")).toBeVisible();
   });
 
   it("renders Edit button on each report row", () => {

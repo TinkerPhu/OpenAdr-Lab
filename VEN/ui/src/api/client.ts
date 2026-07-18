@@ -1,5 +1,5 @@
 import type {
-  VtnEvent, Program, Report, SensorSnapshot, SimSnapshot, TraceEntry,
+  VtnEvent, Program, Report, ReportSubmission, SensorSnapshot, SimSnapshot, TraceEntry,
   SimInjectState, PlannedRates, OadrCapacityState, Plan, PlannerObjective, AssetLedger,
   UserRequestWithSession, FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
   EvSession, CreateEvSessionBody, EvSettings, UpdateEvSettingsBody,
@@ -169,6 +169,12 @@ export class VenApi {
   async updateReport(id: string, payload: unknown): Promise<Report> {
     const r = await this.jsonReq("PUT", `/reports/${id}`, payload);
     if (!r.ok) throw new Error(`update report ${r.status}`);
+    return r.json();
+  }
+
+  async reportSubmissions(): Promise<ReportSubmission[]> {
+    const r = await this.getReq("/reports/submissions");
+    if (!r.ok) throw new Error(`report submissions ${r.status}`);
     return r.json();
   }
 
