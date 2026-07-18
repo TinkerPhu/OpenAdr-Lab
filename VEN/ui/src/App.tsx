@@ -17,6 +17,7 @@ import { MetricsPage } from "./pages/Metrics";
 import { ControllerPage } from "./pages/Controller";
 import { RawDiagnosticsPage } from "./pages/RawDiagnostics";
 import { TasksPage } from "./pages/Tasks";
+import { EventLogPage } from "./pages/EventLog";
 import { HistoryPage } from "./pages/History";
 import { NotificationsPage } from "./pages/Notifications";
 import { PlannerPage } from "./pages/Planner";
@@ -259,6 +260,13 @@ export default function App() {
             </Button>
             <Button
               component={Link}
+              to="/event-log"
+              data-testid="nav-event-log"
+            >
+              Event Log
+            </Button>
+            <Button
+              component={Link}
               to="/notifications"
               data-testid="nav-notifications"
             >
@@ -277,6 +285,7 @@ export default function App() {
             <Route path="/metrics" element={<MetricsPage />} />
             <Route path="/raw-diagnostics" element={<RawDiagnosticsPage />} />
             <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/event-log" element={<EventLogPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
           </Routes>

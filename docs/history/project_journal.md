@@ -5861,3 +5861,53 @@ actually running — a silent crash-loop would be invisible outside the logs.
   `wsl-lock` rule + `scripts/wsl_lock.sh` to `.claude/CLAUDE.md` shortly after,
   mirroring the existing `pi4_lock.sh` pattern, to prevent recurrence across
   concurrent sessions sharing this laptop's one WSL instance.
+
+---
+
+## WP-T4 — Event Log (branch 035-event-log)
+
+**What.** Added `EventLogEntry { id, created_at, category, message }` + a bounded
+in-memory ring/broadcast on `AppState` (`state/event_log.rs`), independent of the
+Notifications feed. Wired producers at the connection-failure, storage-failure, and
+task-panic sites WP-T1/WP-T3 already touched. Shipped `GET /events/log` + SSE +
+a new Event Log page. WP-T4 of `docs/plans/ven-ui-transparency.md`.
+
+**Why.** VEN-operational failures only reached log lines — invisible to anyone not
+tailing server logs. Per the plan's earlier-resolved §5 Q1, this had to be a fully
+separate mechanism from Notifications (different frequency, dedup, retention,
+vocabulary, consumption pattern — see that section for the full reasoning).
+
+**Issues / key learnings.**
+- *No separate `EventLogger` service, unlike the plan doc's original sketch.*
+  `Notifier` is a standalone struct threaded through `AppCtx` because it predates
+  WP-T1/WP-T3's pattern of threading `AppState` directly into every producer site.
+  Since every event-log producer already receives `AppState` for exactly the
+  status-recording WP-T1/WP-T3 added, mirroring `Notifier`'s struct shape here
+  would have meant new `AppCtx` fields and clone captures for no benefit — plain
+  `AppState` methods were simpler and just as separate from Notifications' storage.
+- *`poll_events.rs`'s zero file-size headroom shaped where the producer call
+  landed, again.* Same constraint as WP-T1: the file was exactly 200/200 lines, so
+  the `vtn_connection` event-log call had to go inside `tasks/backoff.rs`'s
+  `record_fail_sleep` (which already has headroom) rather than at the
+  `poll_events.rs` call site — a sibling call within one function body, not a
+  merged responsibility (documented explicitly so a future reader doesn't assume
+  the two concerns were conflated on purpose vs. by file-size necessity).
+- *Cut two things from the original sketch, both because no real need existed:*
+  the `detail` field (every producer has exactly one string worth recording) and
+  `/events/log/history` (with no persistence, it would return exactly what
+  `/events/log` already does — dead API surface). Neither is a scope *cut*, just
+  not built ahead of a concrete need, matching this plan's running pattern
+  (WP-T2's two-state enum, WP-T1's in-memory-only connection status).
+- *A second resource-contention incident, same other worktree.* While this
+  session's `wsl_lock`-held test run was going, the other worktree
+  (`.claude/worktrees/034-vtn-report-status`) started compiling `HiGHS` (a C++
+  MILP solver, heavy) from scratch — concurrently, despite this session holding
+  the lock with 14+ minutes left on its lease. Free memory dropped to 1.0 GB
+  (the floor, not yet critical). Resolved by killing this session's own redundant
+  post-`cargo fmt` re-verification run rather than waiting it out — the fmt diff
+  was whitespace/import-order only, already independently confirmed safe by a
+  clean `clippy` recompile after the format change, so the interrupted re-run cost
+  nothing real. Worth flagging: the other session does not appear to be honoring
+  `wsl_lock` yet, which is the exact scenario the lock exists to prevent — if this
+  keeps happening, the lock needs enforcement teeth beyond a documented
+  convention, or every session needs a reminder to actually use it.

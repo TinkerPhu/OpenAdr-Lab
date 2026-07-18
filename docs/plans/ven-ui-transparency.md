@@ -138,7 +138,7 @@ Effort tags per roadmap convention: S ≤ ½ day · M ≈ 1–2 days · L ≈ 3�
 | WP-T1 ✅ | VTN connection status + multi-component health (G-1) — **done**, branch `032-vtn-health-status`, `openspec/changes/wp-t1-vtn-health-status/`. `/health` now `{status, components: {ven_process, vtn_connection, storage, planner}}`; new `GET /vtn/status`. Fixed the existing health chip's actual misleading-truthiness bug in the process | Existing Dashboard health chip now reads real `status` (was always "ok" on any truthy response); full independently-coloured widget redesign still WP-T8 | M |
 | WP-T2 ✅ | MILP solve status badge (G-2) — **done**, branch `031-plan-solve-status`, `openspec/changes/wp-t2-plan-solve-status/`. Shipped as a two-state `solve_status: OPTIMAL \| INFEASIBLE` (no `fallback_heuristic` — no such code path exists; see design.md Non-Goals) | `PlanHeaderBar.tsx`: distinct infeasible chip vs. generic warning badge (Dashboard summary line deferred to WP-T8) | S |
 | WP-T3 ✅ | Background task status (G-3) — **done**, branch `033-task-status`, `openspec/changes/wp-t3-task-status/`. `GET /tasks/status` reports `{name, last_run_ts, last_success, restart_count}` per task actually spawned (`supervised_spawn` now records it — it tracked nothing before this WP) | New Tasks page shipped (Diagnostics-adjacent nav); Dashboard summary line deferred to WP-T8 | M |
-| WP-T4 | Persistent error/event log (G-4) | New bounded in-memory ring buffer + `GET /events/log` (`/events/log/history`), independent of the notification store — background tasks push `VtnUnreachable`/`StorageError`/task-restart entries here, not into Notifications | New Event Log page (Diagnostics group); separate badge/count from Notifications | M |
+| WP-T4 ✅ | Event log (G-4) — **done**, branch `035-event-log`, `openspec/changes/wp-t4-event-log/`. Bounded in-memory ring (no persistence, no `/events/log/history` — see design.md) + `GET /events/log` + `GET /events/log/events` (SSE), independent of Notifications — `vtn_connection`/`storage`/`task_supervisor` producers wired | New Event Log page shipped (polling, not yet SSE-wired) | M |
 | WP-T5 | VTN report submission status (G-5) | No backend change — `reports_sent_total` already exists; add a per-report `vtn_accepted: bool` field at creation time if not already tracked, else just surface the existing counter contextually | Reports page: per-report submission status chip, not just a raw counter elsewhere | S |
 | WP-T6 | Wire unused routes (G-6) | None — routes exist | Add UI callers/views for `/forecast`, `/capability/:asset_id`, `/history/plans`, `/obligations`; wire `/notifications/events` SSE to replace notification polling if beneficial | M |
 | WP-T7 | Metrics page labeling (G-7) | None | Group `MetricsPage.tsx` rows by meaning (VTN polling / reports / tasks / HTTP) with human labels instead of raw Prometheus names; keep raw view as a toggle | S |
@@ -399,26 +399,49 @@ WSL process (not the other worktree's). Prompted a new `wsl-lock` rule +
 `scripts/wsl_lock.sh` in `.claude/CLAUDE.md`, mirroring `pi4_lock.sh` — outside this
 WP's scope but noted here since it happened during it.
 
-### WP-T4 — Event Log, separate from Notifications (M)
+### WP-T4 — Event Log, separate from Notifications (M) — ✅ done
+
+Branch `035-event-log`; OpenSpec change `openspec/changes/wp-t4-event-log/`
+(proposal/design/specs/tasks all complete). Journal entry in
+`docs/history/project_journal.md`.
 
 Per the resolved Option A design (§5 Q1): an independent mechanism, not a shared
-buffer with Notifications.
+buffer with Notifications. Shipped with two scope narrowings from the original
+sketch, both documented in design.md:
 
-1. Domain: `EventLogEntry { created_at, category, message, detail }` for
-   VEN-operational events (`VtnUnreachable`, `StorageError`, `TaskRestarted`, backoff
-   transitions) — deliberately not reusing `UserNotification`/`UserNotificationSeverity`.
-2. New service mirroring the shape of `Notifier` (`services/notify.rs`) but as its own
-   struct/instance — bounded ring + broadcast, **no 30-min dedup** (every occurrence
-   is diagnostically meaningful; rely on ring capacity instead, e.g. 500 entries) +
-   optional persistence for restart survival.
-3. Producers: background tasks call the new logger on retry/backoff/restart/storage
-   error — hook points are the same tasks touched in WP-T1/WP-T3, so land this after
-   those to avoid touching the same call sites twice.
-4. Routes: `GET /events/log`, `GET /events/log/history`, optionally an SSE stream
-   mirroring `/plan/events`'s pattern.
-5. Test-first: `test_poll_failure_emits_one_event_log_entry_with_backoff_detail`.
-6. UI: new Event Log page (Diagnostics group), separate badge/count from
-   Notifications.
+1. Domain: `EventLogEntry { id, created_at, category, message }` — **no separate
+   `detail` field**. Every real producer (connection failure, storage error, task
+   panic) has exactly one string worth recording; the sketch's `message`+`detail`
+   split had no site that actually needed two fields, so adding it would have been
+   speculative.
+2. ~~New service mirroring `Notifier`'s shape as its own struct~~ → plain
+   `AppState` methods instead (`state/event_log.rs`, mirrors `state/connection.rs`/
+   `task_status.rs`). Every producer site already receives `AppState` (threaded
+   there by WP-T1/WP-T3 for the same reason) — a separate service struct would have
+   meant new `AppCtx` fields and new clone captures at every `main.rs` spawn block
+   for no benefit "Option A: separate" actually required. Bounded ring + broadcast,
+   no dedup, as planned — but **no persistence** for this first cut (see design.md
+   Non-Goals: a `HistoryPort` trait method + migration is a bigger yak-shave than
+   this WP's effort budget for diagnostic, not personal, notices).
+3. Producers wired exactly where WP-T1/WP-T3 already touched: `tasks/backoff.rs`
+   (`record_fail_sleep` — the *only* place, since `tasks/poll_events.rs` was at
+   **exactly** 200/200 lines with zero headroom), `tasks/state_persist.rs`'s two
+   failure branches, `tasks/mod.rs`'s `supervised_spawn` completion branches.
+4. Routes: `GET /events/log` (snapshot) + `GET /events/log/events` (SSE, copying
+   `/notifications/events`'s exact bridge pattern). **No `/events/log/history`** —
+   with no persistence, it would return exactly what `/events/log` already does;
+   dead API surface deferred until persistence is added, if ever.
+5. Test-first, done — unit tests in `state/event_log.rs` (ring/broadcast behavior),
+   `tasks/backoff.rs` and `tasks/mod.rs` (producer sites recording correctly).
+6. UI: new Event Log page shipped, polling (`useEventLog`, 10s refetch) rather than
+   consuming the SSE stream — consistent with every other Diagnostics page; SSE
+   wiring into the UI is a follow-up, not dropped, just not this WP's scope.
+
+**Unplanned incident during this WP**: a second resource-contention episode with
+the same other worktree as WP-T3's — this time it compiled `HiGHS` (a C++ solver)
+from scratch concurrently with this session's `wsl_lock`-held test run, dropping
+free memory to 1.0 GB. The other session did not appear to respect `wsl_lock`.
+Resolved by killing this session's own (already-redundant, post-fmt) re-test run.
 
 ### WP-T5 — VTN report submission status (S)
 

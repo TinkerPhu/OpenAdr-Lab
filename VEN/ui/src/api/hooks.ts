@@ -240,6 +240,19 @@ export function useTasksStatus() {
   });
 }
 
+// WP-T4: VEN-operational Event Log — polled like the other Diagnostics
+// pages (Metrics, Tasks); the backend also offers an SSE stream
+// (/events/log/events) but wiring that into the UI is left for a follow-up,
+// consistent with this WP's in-memory-only, keep-it-contained scope.
+export function useEventLog() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["event-log", api.baseUrl],
+    queryFn: () => api.eventLog(),
+    refetchInterval: 10_000,
+  });
+}
+
 export function usePlan(options?: { refetchInterval?: number | false }) {
   const { api } = useVenContext();
   return useQuery({

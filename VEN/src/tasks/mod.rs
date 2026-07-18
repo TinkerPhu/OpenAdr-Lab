@@ -49,10 +49,24 @@ pub(crate) fn supervised_spawn(
                         "exited unexpectedly, restarting in {cooldown_s}s"
                     );
                     state.record_task_completed(name, true).await;
+                    state
+                        .record_event(
+                            chrono::Utc::now(),
+                            "task_supervisor",
+                            format!("{name} exited unexpectedly, restarting in {cooldown_s}s"),
+                        )
+                        .await;
                 }
                 Err(e) => {
                     tracing::error!(task = name, "panicked: {e:?}, restarting in {cooldown_s}s");
                     state.record_task_completed(name, false).await;
+                    state
+                        .record_event(
+                            chrono::Utc::now(),
+                            "task_supervisor",
+                            format!("{name} panicked: {e:?}, restarting in {cooldown_s}s"),
+                        )
+                        .await;
                 }
             }
             tokio::time::sleep(std::time::Duration::from_secs(cooldown_s)).await;
@@ -114,6 +128,14 @@ mod tests {
         assert!(
             entry.last_success.is_some(),
             "at least one completion must be recorded"
+        );
+
+        // WP-T4: a task_supervisor event log entry must also have been recorded.
+        let log = state.event_log_snapshot().await;
+        assert!(
+            log.iter()
+                .any(|e| e.category == "task_supervisor" && e.message.contains("test-task")),
+            "expected a task_supervisor event log entry naming test-task, got {log:?}"
         );
     }
 }
