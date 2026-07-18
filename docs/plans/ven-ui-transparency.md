@@ -140,7 +140,7 @@ Effort tags per roadmap convention: S ≤ ½ day · M ≈ 1–2 days · L ≈ 3�
 | WP-T3 ✅ | Background task status (G-3) — **done**, branch `033-task-status`, `openspec/changes/wp-t3-task-status/`. `GET /tasks/status` reports `{name, last_run_ts, last_success, restart_count}` per task actually spawned (`supervised_spawn` now records it — it tracked nothing before this WP) | New Tasks page shipped (Diagnostics-adjacent nav); Dashboard summary line deferred to WP-T8 | M |
 | WP-T4 ✅ | Event log (G-4) — **done**, branch `035-event-log`, `openspec/changes/wp-t4-event-log/`. Bounded in-memory ring (no persistence, no `/events/log/history` — see design.md) + `GET /events/log` + `GET /events/log/events` (SSE), independent of Notifications — `vtn_connection`/`storage`/`task_supervisor` producers wired | New Event Log page shipped (polling, not yet SSE-wired) | M |
 | WP-T5 | VTN report submission status (G-5) | No backend change — `reports_sent_total` already exists; add a per-report `vtn_accepted: bool` field at creation time if not already tracked, else just surface the existing counter contextually | Reports page: per-report submission status chip, not just a raw counter elsewhere | S |
-| WP-T6 | Wire unused routes (G-6) | None — routes exist | Add UI callers/views for `/forecast`, `/capability/:asset_id`, `/history/plans`, `/obligations`; wire `/notifications/events` SSE to replace notification polling if beneficial | M |
+| WP-T6 ✅ | Wire unused routes (G-6) — **done**, branch `037-wire-unused-routes`, `openspec/changes/wp-t6-wire-unused-routes/`. Wired `/capability/:asset_id` + `/forecast` (Controller), `/history/plans` (History), `/obligations` (Reports) | New `FlexibilityForecastPanel` on Controller; new Plans section on History; new Pending Obligations section on Reports | M |
 | WP-T7 ✅ | Metrics page labeling (G-7) — **done**, branch `036-metrics-labeling`, `openspec/changes/wp-t7-metrics-labeling/`. Only 2 real categories exist (VTN Polling, Reports) — grep-confirmed no "tasks"/"HTTP" metrics are emitted, contra the original 4-category sketch | Grouped-by-default `MetricsPage.tsx` with human labels + raw-name captions; raw view toggle reproduces prior exact behavior | S |
 | WP-T8 | Tab re-architecture (§3) | None | Implement primary/secondary/tertiary nav grouping; Dashboard status-row redesign | M |
 
@@ -476,17 +476,28 @@ is ever hidden by an incomplete map.
    every pre-existing test in `Metrics.test.tsx` passed unmodified (373/373
    total after adding 3 new tests for grouping/toggle/fallback behavior).
 
-### WP-T6 — Wire unused routes (M)
+### WP-T6 — Wire unused routes (M) — ✅ done
 
-1. Add UI client methods (`client.ts`) for `/forecast`, `/forecast/:asset_id`,
-   `/capability/:asset_id`, `/history/plans`, `/obligations`.
-2. Decide placement per item — favour surfacing inside an existing page (e.g.
-   forecast alongside the relevant asset in Devices/Controller, `/history/plans`
-   inside the History tab) over adding new top-level tabs, per the "don't invent
-   nav clutter" instinct behind §3's redesign.
-3. Evaluate `/notifications/events` SSE as a replacement for notification polling in
-   `client.ts` if it reduces polling overhead; not required for this plan's scope if
-   polling already works adequately.
+Branch `037-wire-unused-routes`; OpenSpec change
+`openspec/changes/wp-t6-wire-unused-routes/`. Journal entry in
+`docs/history/project_journal.md`.
+
+1. Added client methods for `/capability/:asset_id`, `/forecast`,
+   `/history/plans`, `/obligations`. **`/forecast/:asset_id` excluded** — it's a
+   different concept from the bare `/forecast` despite sharing a path prefix
+   (a physics-model forward sample series requiring a timespan control, vs. the
+   bare route's plan-cycle `AssetForecast[]`) and materially overlaps with the
+   existing Timeline/RawDiagnostics charts — wiring it would be new chart UI,
+   not a contained "surface existing data" change.
+2. Placement, per the "favour an existing page" principle: `/capability`+
+   `/forecast` → new standalone `FlexibilityForecastPanel` on Controller
+   (deliberately not new `AssetCell` props — see design.md D1); `/history/plans`
+   → new Plans section on History (reuses the existing `JsonDialog` for plan
+   detail); `/obligations` → new Pending Obligations section on Reports
+   (client-computed Pending/Overdue/Fulfilled status, no server field for it).
+3. `/notifications/events` SSE **not wired into the UI** — consistent with
+   WP-T4's precedent (backend route exists and works; UI consumption is a
+   follow-up, not dropped).
 
 ### WP-T8 — Nav re-architecture + Dashboard redesign (M)
 

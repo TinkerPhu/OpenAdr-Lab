@@ -5946,3 +5946,44 @@ already knowing the naming scheme to interpret.
   presentation mode to an existing page, look for a way to make the old mode a
   special case of the new rendering path rather than a parallel one — the
   regression-safety comes for free.
+
+---
+
+## WP-T6 — Wire unused routes (branch 037-wire-unused-routes)
+
+**What.** Wired `/capability/:asset_id` + `/forecast` into a new
+`FlexibilityForecastPanel` on the Controller page, `/history/plans` into a new
+Plans section on History, and `/obligations` into a new Pending Obligations
+section on Reports — four backend routes that already worked but no UI page
+called. WP-T6 of `docs/plans/ven-ui-transparency.md`.
+
+**Why.** Working backend data with no UI path to it is exactly this plan's
+target gap — cheaper to fix than building anything new, since the hard part
+(the route, the data shape) already existed.
+
+**Issues / key learnings.**
+- *Two different "forecast" concepts share a path prefix.* `GET /forecast`
+  (no asset_id) returns `AssetForecast[]` — the plan cycle's own per-asset
+  prediction with confidence/source. `GET /forecast/:asset_id` returns a
+  different, physics-model forward sample series requiring a `timespan_s`
+  query param. Reading both handlers before wiring anything caught this —
+  wiring only the bare `/forecast` and explicitly excluding `/forecast/:asset_id`
+  (documented in the OpenSpec proposal, not just silently skipped) avoided
+  conflating two things that only look related because of a shared URL prefix.
+- *Extending an existing page's data, not its most complex component.*
+  `Controller.tsx`'s `AssetCell` is a large, tightly-composed component. Adding
+  capability/forecast as new `AssetCell` props would have meant touching its
+  internals and its existing tests for a change whose only goal was surfacing
+  data that already existed. A standalone `FlexibilityForecastPanel`, fetching
+  independently and rendered alongside (not inside) the asset cells, kept the
+  change purely additive — zero risk to `AssetCell`'s existing behavior/tests.
+- *A cross-test-file mock gap, caught by running the suite, not assumed safe.*
+  Two pre-existing test files (`GridTariffCell.test.tsx`,
+  `GridAccumulatedCell.test.tsx`) also render `ControllerPage` — and therefore
+  the new `FlexibilityForecastPanel` — through component composition I hadn't
+  directly touched. Their `../api/hooks` mocks didn't include the two new hooks,
+  so the first full suite run failed with 6 errors ("No useAssetCapabilities
+  export"). Lesson: adding a hook call to a component that's reachable from
+  *other* pages' tests (via shared page composition, not just the page you
+  edited) means grepping for every test that renders anything upstream of your
+  change, not just the test file for the page you touched directly.

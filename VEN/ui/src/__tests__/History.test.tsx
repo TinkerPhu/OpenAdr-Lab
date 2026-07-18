@@ -24,6 +24,15 @@ const mockEvents = [
 const mockReports = [
   { sent_at: Date.UTC(2026, 0, 1, 8), report_type: "USAGE", event_id: "evt-1", payload_json: "{}" },
 ];
+// WP-T6 (docs/plans/ven-ui-transparency.md): wires GET /history/plans.
+const mockPlans = [
+  {
+    created_at: Date.UTC(2026, 0, 1, 9),
+    horizon_start: "2026-01-01T09:00:00Z",
+    horizon_end: "2026-01-02T09:00:00Z",
+    plan_json: '{"slots":[]}',
+  },
+];
 
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
@@ -31,6 +40,7 @@ vi.mock("../api/hooks", () => ({
   useHistoryGrid: () => ({ data: mockGrid }),
   useHistoryEvents: () => ({ data: mockEvents }),
   useHistoryReports: () => ({ data: mockReports }),
+  useHistoryPlans: () => ({ data: mockPlans }),
 }));
 
 vi.mock("../App", () => ({
@@ -74,5 +84,17 @@ describe("HistoryPage", () => {
     const input = screen.getByTestId("history-date-input") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "2026-02-15" } });
     expect(input.value).toBe("2026-02-15");
+  });
+
+  it("renders a plans table with the mocked snapshot", () => {
+    renderHistory();
+    expect(screen.getByTestId(`history-plan-row-${mockPlans[0].created_at}`)).toBeInTheDocument();
+  });
+
+  it("opens a JSON dialog with the plan detail when View is clicked", () => {
+    renderHistory();
+    fireEvent.click(screen.getByTestId(`history-plan-view-${mockPlans[0].created_at}`));
+    expect(screen.getByTestId("json-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("json-dialog-content")).toHaveTextContent("slots");
   });
 });

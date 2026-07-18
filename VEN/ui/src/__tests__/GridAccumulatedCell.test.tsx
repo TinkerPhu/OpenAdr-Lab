@@ -41,6 +41,9 @@ vi.mock("../api/hooks", () => ({
   useResetAssetSoc: () => ({ mutate: vi.fn() }),
   useAllTimelines: () => ({ data: allTimelinesData, refetch: vi.fn() }),
   useSimSchema: () => ({ data: {} }),
+  // WP-T6 (docs/plans/ven-ui-transparency.md): wires GET /capability/:asset_id, GET /forecast.
+  useAssetCapabilities: () => [],
+  useAssetForecasts: () => ({ data: [] }),
 }));
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

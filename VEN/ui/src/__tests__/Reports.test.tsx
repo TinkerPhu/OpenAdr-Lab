@@ -21,6 +21,23 @@ const mockPrograms = [{ id: "p1", programName: "Program Alpha" }];
 const mockReports = [
   { id: "r1", clientName: "ven-1", reportName: "test-report", programID: "p1", eventID: "e1", createdDateTime: "2024-01-01" },
 ];
+// WP-T6 (docs/plans/ven-ui-transparency.md): wires GET /obligations.
+const mockObligations = [
+  {
+    id: "ob-1", event_id: "e1", program_id: "p1", payload_type: "USAGE",
+    reading_type: "DIRECT_READ", resource_name: null,
+    due_at: new Date(Date.now() + 3_600_000).toISOString(),
+    interval_duration_s: 900, fulfilled: false,
+    created_at: new Date().toISOString(), historical: true,
+  },
+  {
+    id: "ob-2", event_id: "e2", program_id: "p1", payload_type: "USAGE",
+    reading_type: "DIRECT_READ", resource_name: null,
+    due_at: new Date(Date.now() - 3_600_000).toISOString(),
+    interval_duration_s: 900, fulfilled: false,
+    created_at: new Date().toISOString(), historical: true,
+  },
+];
 
 const mutateMock = vi.fn();
 const updateMutateMock = vi.fn();
@@ -30,6 +47,7 @@ vi.mock("../api/hooks", () => ({
   useReports: () => ({ data: mockReports, dataUpdatedAt: Date.now() }),
   useEvents: () => ({ data: mockEvents }),
   usePrograms: () => ({ data: mockPrograms }),
+  useObligations: () => ({ data: mockObligations }),
   useSubmitReport: () => ({ mutate: mutateMock, isPending: false }),
   useUpdateReport: () => ({ mutate: updateMutateMock, isPending: false }),
 }));
@@ -127,6 +145,16 @@ describe("ReportsPage", () => {
       payload: expect.objectContaining({ eventID: "e1" }),
     });
     expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it("renders a not-yet-due obligation with a Pending status", () => {
+    renderReports();
+    expect(screen.getByTestId("obligation-row-ob-1")).toHaveTextContent("Pending");
+  });
+
+  it("renders a past-due, unfulfilled obligation with an Overdue status", () => {
+    renderReports();
+    expect(screen.getByTestId("obligation-row-ob-2")).toHaveTextContent("Overdue");
   });
 });
 

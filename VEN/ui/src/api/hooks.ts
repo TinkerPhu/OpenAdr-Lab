@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef, useEffect, useLayoutEffect } from "react";
 import { useVenContext } from "../App";
 import type {
@@ -332,6 +332,50 @@ export function useHistoryReports(from: string, to: string) {
     queryKey: ["history/reports", api.baseUrl, from, to],
     queryFn: () => api.historyReports({ from, to }),
     refetchInterval: false,
+  });
+}
+
+// WP-T6 (docs/plans/ven-ui-transparency.md): wiring previously-unused routes.
+
+export function useHistoryPlans(from: string, to: string) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["history/plans", api.baseUrl, from, to],
+    queryFn: () => api.historyPlans({ from, to }),
+    refetchInterval: false,
+  });
+}
+
+export function useObligations() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["obligations", api.baseUrl],
+    queryFn: () => api.obligations(),
+    refetchInterval: 10_000,
+  });
+}
+
+/** Per-asset feasible power range (Phase A), fetched in parallel for every
+ * `assetIds` entry via `useQueries` — no bulk endpoint exists server-side. */
+export function useAssetCapabilities(assetIds: string[]) {
+  const { api } = useVenContext();
+  return useQueries({
+    queries: assetIds.map((assetId) => ({
+      queryKey: ["capability", api.baseUrl, assetId],
+      queryFn: () => api.assetCapability(assetId),
+      refetchInterval: 10_000,
+    })),
+  });
+}
+
+/** Per-asset forecasts from the latest plan cycle (WP3.6, BL-15) — empty
+ * array until the first plan has been adopted. */
+export function useAssetForecasts() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["forecast", api.baseUrl],
+    queryFn: () => api.assetForecasts(),
+    refetchInterval: 10_000,
   });
 }
 

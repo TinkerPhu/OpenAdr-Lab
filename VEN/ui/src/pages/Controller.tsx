@@ -11,6 +11,7 @@ import { PinnedZone } from "../components/controller/PinnedZone";
 import { GridTariffCell } from "../components/controller/GridTariffCell";
 import { GridSignalStrip } from "../components/controller/GridSignalStrip";
 import { GridAccumulatedCell } from "../components/controller/GridAccumulatedCell";
+import { FlexibilityForecastPanel } from "../components/controller/FlexibilityForecastPanel";
 import type { SimInjectState } from "../api/types";
 
 export function ControllerPage() {
@@ -212,6 +213,8 @@ export function ControllerPage() {
 
       {/* Scrollable content */}
       <Box data-testid="scrollable-content">
+        <FlexibilityForecastPanel assetIds={assetSummaries.map((s) => s.assetId)} />
+
         {/* Grid-level cells */}
         {tariffSnapshot && !pinnedCellIds.includes("grid:tariff") && (
           <GridTariffCell
