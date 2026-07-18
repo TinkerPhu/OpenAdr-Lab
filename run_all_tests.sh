@@ -21,7 +21,7 @@ set -euo pipefail
 # SSH hostname of the machine running Docker.
 # Set to empty string "" to run docker commands directly on this machine (no SSH).
 # Example remote value: "Pi4-Server"
-DOCKER_HOST=""                        # "" = local docker; remote example: "Pi4-Server"
+DOCKER_HOST="${DOCKER_HOST:-Pi4-Server}"  # override with DOCKER_HOST="" for local docker
 DOCKER_DIR="/srv/docker/openadr_lab"  # repo path on the docker host
 
 # Auto-detect: if DOCKER_HOST is empty, "localhost", or matches this machine's
