@@ -57,6 +57,11 @@ pub(crate) async fn record_success(backoff: &mut Backoff, state: &AppState, now:
 
 /// `on_failure` + recording the outcome + the retry sleep, all in one call so
 /// callers don't need a separate `let delay = ...` binding.
+///
+/// WP-T4: also records an Event Log entry (`category: "vtn_connection"`) —
+/// a sibling call, not a merged responsibility (see design.md D2); it lives
+/// here rather than at the `poll_events.rs` call site because that file has
+/// zero file-size-cap headroom.
 pub(crate) async fn record_fail_sleep(
     backoff: &mut Backoff,
     state: &AppState,
@@ -64,15 +69,36 @@ pub(crate) async fn record_fail_sleep(
     error: impl std::fmt::Display,
 ) {
     let delay = backoff.on_failure();
+    let message = error.to_string();
     state
-        .record_vtn_poll_failure(now, error.to_string(), delay.as_secs_f64())
+        .record_vtn_poll_failure(now, message.clone(), delay.as_secs_f64())
         .await;
+    state.record_event(now, "vtn_connection", message).await;
     tokio::time::sleep(delay).await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // WP-T4 (docs/plans/ven-ui-transparency.md): record_fail_sleep's sibling
+    // event-log call.
+    #[tokio::test]
+    async fn record_fail_sleep_records_connection_failure_and_event_log_entry() {
+        let mut b = Backoff::new(0, 1, 0);
+        let state = AppState::new();
+        let now = Utc::now();
+
+        record_fail_sleep(&mut b, &state, now, "connection refused").await;
+
+        let vtn = state.vtn_connection_status().await;
+        assert_eq!(vtn.last_error, Some("connection refused".to_string()));
+
+        let log = state.event_log_snapshot().await;
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].category, "vtn_connection");
+        assert_eq!(log[0].message, "connection refused");
+    }
 
     #[test]
     fn test_backoff_doubles_on_consecutive_failures() {

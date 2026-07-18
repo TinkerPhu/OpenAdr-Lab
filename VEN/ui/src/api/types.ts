@@ -28,6 +28,15 @@ export type TaskStatusEntry = {
   restart_count: number;
 };
 
+// WP-T4 (docs/plans/ven-ui-transparency.md): VEN-operational Event Log entry,
+// deliberately separate from UserNotification (see Notifications types).
+export type EventLogEntry = {
+  id: string;
+  created_at: string;
+  category: string;
+  message: string;
+};
+
 export type Program = {
   id: string;
   programName?: string | null;

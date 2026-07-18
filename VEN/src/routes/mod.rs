@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod debug;
+pub mod event_log;
 pub mod events;
 pub mod hems;
 pub mod notifications;
@@ -29,6 +30,8 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/health", get(system::health))
         .route("/vtn/status", get(system::vtn_status))
         .route("/tasks/status", get(system::tasks_status))
+        .route("/events/log", get(event_log::get_event_log))
+        .route("/events/log/events", get(event_log::get_event_log_events))
         .route("/events", get(events::get_events))
         .route("/programs", get(events::get_programs))
         .route(

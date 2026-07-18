@@ -14,11 +14,25 @@ pub(crate) fn spawn_state_persist(state: AppState, path: String) -> tokio::task:
                     Err(e) => {
                         error!("persist write failed: {e:#}");
                         state.set_storage_ok(false).await;
+                        state
+                            .record_event(
+                                chrono::Utc::now(),
+                                "storage",
+                                format!("write failed: {e:#}"),
+                            )
+                            .await;
                     }
                 },
                 Err(e) => {
                     error!("persist serialization failed: {e:#}");
                     state.set_storage_ok(false).await;
+                    state
+                        .record_event(
+                            chrono::Utc::now(),
+                            "storage",
+                            format!("serialization failed: {e:#}"),
+                        )
+                        .await;
                 }
             }
         }

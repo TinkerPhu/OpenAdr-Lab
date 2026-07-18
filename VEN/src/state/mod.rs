@@ -22,11 +22,13 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 mod connection;
+mod event_log;
 mod heuristics;
 mod obligations;
 mod task_status;
 
 pub use connection::VtnConnectionStatus;
+pub use event_log::EventLogEntry;
 pub use task_status::TaskStatus;
 
 /// User-controllable settings for the opportunistic EV charging overlay.
@@ -125,6 +127,10 @@ pub struct AppState {
     /// WP-T3: per-task restart/outcome status, written by `tasks::supervised_spawn`,
     /// read by `GET /tasks/status`. Keyed by task name; entries created lazily.
     pub task_status: Arc<RwLock<std::collections::HashMap<String, TaskStatus>>>,
+    /// WP-T4: VEN-operational event log — deliberately separate from
+    /// `notifications` (see `state/event_log.rs`).
+    pub event_log: Arc<RwLock<std::collections::VecDeque<EventLogEntry>>>,
+    pub event_log_tx: tokio::sync::broadcast::Sender<EventLogEntry>,
 }
 
 /// WP4.3: in-memory notification ring capacity (mirrors the /trace/events ring).
@@ -165,6 +171,8 @@ impl AppState {
             vtn_connection: Arc::new(RwLock::new(VtnConnectionStatus::default())),
             storage_ok: Arc::new(RwLock::new(true)),
             task_status: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            event_log: Arc::new(RwLock::new(std::collections::VecDeque::new())),
+            event_log_tx: tokio::sync::broadcast::channel(64).0,
         }
     }
 
