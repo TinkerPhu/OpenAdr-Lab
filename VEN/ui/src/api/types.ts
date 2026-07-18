@@ -85,6 +85,16 @@ export type Report = {
   [key: string]: unknown;
 };
 
+/** WP-T5 (G-5): outcome of a VEN-initiated report submission. */
+export type ReportSubmission = {
+  report_name: string | null;
+  event_id: string | null;
+  client_name: string;
+  vtn_accepted: boolean;
+  submitted_at: string;
+  error: string | null;
+};
+
 export type SensorSnapshot = {
   id: string;
   ts: string;

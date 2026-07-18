@@ -9,6 +9,7 @@ pub mod history;
 pub mod notification;
 pub mod plan;
 pub mod planner_params;
+pub mod report_submission;
 pub mod sim_inject;
 pub mod site_meter;
 pub mod tariff_snapshot;
