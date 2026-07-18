@@ -177,6 +177,20 @@ pub struct SiteFlexibilityEnvelope {
     pub down_duration_s: Option<u64>,
 }
 
+/// Outcome of the MILP solve that produced a `Plan`.
+///
+/// Two states only — the codebase has no distinct heuristic-solve path today
+/// (verified: all "heuristic" references are `AssetHeuristics`/BL-14 learned load
+/// profiles, unrelated to solver fallback). `fallback_plan` is synonymous with
+/// infeasibility, not a substitute heuristic solve. A `FallbackHeuristic` variant
+/// is deferred until a real heuristic-solve path exists (candidate: BL-13).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SolveStatus {
+    Optimal,
+    Infeasible,
+}
+
 /// Severity of a plan warning.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -250,6 +264,16 @@ pub struct Plan {
     /// Decomposed cost components for diagnostics.
     #[serde(default)]
     pub cost_breakdown: CostBreakdown,
+    /// Whether this plan came from a successful MILP solve or the infeasibility
+    /// fallback (WP-T2, `docs/plans/ven-ui-transparency.md`).
+    #[serde(default = "SolveStatus::default_optimal")]
+    pub solve_status: SolveStatus,
+}
+
+impl SolveStatus {
+    fn default_optimal() -> Self {
+        SolveStatus::Optimal
+    }
 }
 
 impl Plan {
@@ -261,5 +285,30 @@ impl Plan {
     /// Return the plan slot that covers `now`, if any.
     pub fn current_slot(&self, now: DateTime<Utc>) -> Option<&PlanTimeSlot> {
         self.slots.iter().find(|s| s.start <= now && now < s.end)
+    }
+}
+
+#[cfg(test)]
+mod solve_status_tests {
+    use super::SolveStatus;
+
+    #[test]
+    fn solve_status_serializes_as_screaming_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&SolveStatus::Optimal).unwrap(),
+            "\"OPTIMAL\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SolveStatus::Infeasible).unwrap(),
+            "\"INFEASIBLE\""
+        );
+        assert_eq!(
+            serde_json::from_str::<SolveStatus>("\"OPTIMAL\"").unwrap(),
+            SolveStatus::Optimal
+        );
+        assert_eq!(
+            serde_json::from_str::<SolveStatus>("\"INFEASIBLE\"").unwrap(),
+            SolveStatus::Infeasible
+        );
     }
 }

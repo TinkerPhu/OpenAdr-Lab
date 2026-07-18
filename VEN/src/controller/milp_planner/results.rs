@@ -6,7 +6,7 @@ use crate::entities::asset_params::{BatteryParams, EvParams, HeaterParams};
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::{
     AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanWarning, PlanningHorizon,
-    WarningSeverity,
+    SolveStatus, WarningSeverity,
 };
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
@@ -112,6 +112,7 @@ pub(crate) fn fallback_plan(
         objective_eur: 0.0,
         friction_eur: 0.0,
         cost_breakdown: CostBreakdown::default(),
+        solve_status: SolveStatus::Infeasible,
     }
 }
 
@@ -454,5 +455,6 @@ pub(crate) fn translate_to_plan(
         objective_eur: phase1_cost_eur,
         friction_eur,
         cost_breakdown,
+        solve_status: SolveStatus::Optimal,
     }
 }

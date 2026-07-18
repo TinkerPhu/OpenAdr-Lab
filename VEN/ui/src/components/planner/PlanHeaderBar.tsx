@@ -3,6 +3,7 @@ import {
   Box, Chip, Collapse, IconButton, Stack, Tooltip, Typography,
 } from "@mui/material";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import type { Plan } from "../../api/types";
@@ -58,11 +59,26 @@ export function PlanHeaderBar({ plan }: Props) {
   }
 
   const hasWarnings = plan.warnings.length > 0;
+  const isInfeasible = plan.solve_status === "INFEASIBLE";
 
   return (
     <Box data-testid="plan-header">
       {/* Main summary row */}
       <Stack direction="row" alignItems="center" flexWrap="wrap" gap={1}>
+        {/* Infeasible-solve chip — distinct from the generic warnings badge below;
+            a solver failure must not read the same as a minor plan caveat. */}
+        {isInfeasible && (
+          <Tooltip title="The MILP solver could not find a feasible plan; this is the infeasibility fallback, not an optimised schedule.">
+            <Chip
+              data-testid="plan-infeasible-chip"
+              icon={<ErrorOutlineIcon fontSize="small" />}
+              label="Infeasible"
+              color="error"
+              size="small"
+            />
+          </Tooltip>
+        )}
+
         {/* Trigger badge */}
         <Chip
           data-testid="plan-trigger-badge"

@@ -5700,3 +5700,48 @@ worktree, so it covers every checkout and machine that can reach the host.
 - *ssh flattens remote-command arguments.* Multi-word descriptions were
   word-split remotely ("lock self-test" arrived as "lock"); arguments must
   be re-escaped with `printf %q` before the ssh call.
+
+---
+
+## WP-T2 — Plan solve status surfaced to the UI (branch 031-plan-solve-status)
+
+**What.** Added `SolveStatus { Optimal, Infeasible }` to the `Plan` entity
+(`VEN/src/entities/plan.rs`), set at the two places that already exist —
+`translate_to_plan` (happy path) and `fallback_plan` (the MILP-infeasible
+path) in `controller/milp_planner/results.rs`. Threaded the field through the
+`PlanReady` SSE variant (`planner_events.rs`) and into the VEN UI's `Plan`/
+`PlannerEvent` TypeScript types, plus a distinct "Infeasible" chip in
+`PlanHeaderBar.tsx` separate from the generic warnings badge. This is WP-T2
+of `docs/plans/ven-ui-transparency.md` — the first work package from that
+plan, chosen first for being the cheapest and most safety-relevant gap (an
+infeasible plan previously looked identical to a plan with a minor warning).
+
+**Why.** The planner already knew whether a solve succeeded or fell through
+to the infeasibility fallback (`DomainError::PlanInfeasible` was constructed
+and logged in `mod.rs`), but that outcome was discarded before reaching the
+`Plan` returned to callers — a resident/operator had no way to tell "the
+solver genuinely failed" from "the plan has a small caveat" without reading
+warning text closely.
+
+**Issues / key learnings.**
+- *Scoped down from three states to two.* The original plan doc wording
+  called for `Optimal | FallbackHeuristic | Infeasible`. Code investigation
+  found no distinct heuristic-solve path exists anywhere in the codebase
+  today — `fallback_plan` is synonymous with infeasibility, not a separate
+  heuristic substitute. Shipped a two-state enum instead of adding an enum
+  variant nothing can produce; documented as a deliberate narrowing (not a
+  scope cut) in the OpenSpec proposal and design doc
+  (`openspec/changes/wp-t2-plan-solve-status/`). A third state is a small,
+  isolated follow-up once a real heuristic-solve path exists (candidate:
+  BL-13).
+- *Adding a required field to `Plan` touched far more call sites than
+  expected.* `Plan` is constructed as a literal struct (not via
+  `..Default::default()`) in 12 places across the VEN crate — mostly test
+  fixtures in `dispatcher.rs`, `forecast.rs`, `reporter.rs`,
+  `controller/timeline.rs`, `routes/timeline.rs` — versus a handful of
+  `serde_json::from_value(...)` fixtures elsewhere that needed no change
+  thanks to `#[serde(default = "SolveStatus::default_optimal")]`. Lesson:
+  when adding a field to a widely-constructed domain entity, grep for the
+  struct-literal pattern specifically (`Plan {` with an `id: Uuid::new_v4()`
+  neighbor), not just the type name — `serde_json::from_value` fixtures are
+  invisible to the compiler error you'd otherwise rely on to find every site.

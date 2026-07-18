@@ -57,6 +57,9 @@ function makeMockPlan(): Plan {
     summary: { total_cost_eur: 1.0, total_co2_g: 500, total_import_kwh: 3.0, total_export_kwh: 0 },
     envelopes: [],
     warnings: [],
+    objective_eur: 0,
+    friction_eur: 0,
+    solve_status: "OPTIMAL",
   };
 }
 
@@ -243,6 +246,8 @@ describe("PlannerPage", () => {
         objective: "min_cost",
         solver_ms: 23400,
         objective_eur: 1.5,
+        friction_eur: 0,
+        solve_status: "OPTIMAL",
         slot_count: 288,
         trigger: "Periodic",
       });
