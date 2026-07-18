@@ -57,6 +57,9 @@ vi.mock("../api/hooks", () => ({
   useTimeline: () => ({ data: [] }),
   useAllTimelines: () => ({ data: { zones: [], timelines: {} }, refetch: vi.fn() }),
   useSimSchema: () => ({ data: { ev: evSchema } }),
+  // WP-T6 (docs/plans/ven-ui-transparency.md): wires GET /capability/:asset_id, GET /forecast.
+  useAssetCapabilities: () => [],
+  useAssetForecasts: () => ({ data: [] }),
 }));
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

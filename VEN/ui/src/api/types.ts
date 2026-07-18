@@ -552,3 +552,51 @@ export type HistoryReportSent = {
   event_id: string;
   payload_json: string;
 };
+
+// WP-T6 (docs/plans/ven-ui-transparency.md): wiring previously-unused routes.
+
+export type PlanSnapshot = {
+  created_at: number;
+  horizon_start: string;
+  horizon_end: string;
+  plan_json: string;
+};
+
+export type ReportObligation = {
+  id: string;
+  event_id: string;
+  program_id: string | null;
+  payload_type: string;
+  reading_type: string;
+  resource_name: string | null;
+  due_at: string;
+  interval_duration_s: number;
+  fulfilled: boolean;
+  created_at: string;
+  historical: boolean;
+};
+
+export type AssetCapability = {
+  max_import_kw: number;
+  max_export_kw: number;
+  is_fixed: boolean;
+};
+
+export type ForecastSource =
+  | "WEATHER_MODEL"
+  | "DEVICE_CLOUD"
+  | "PHYSICAL_MODEL"
+  | "HEURISTIC"
+  | "MANUAL"
+  | "OPTIMIZATION"
+  | "NONE";
+
+export type AssetForecast = {
+  asset_id: string;
+  updated_at: string;
+  source: ForecastSource;
+  confidence: number;
+  power_kw: number[];
+  soc: number[] | null;
+  availability_windows: Array<{ start: string; end: string }> | null;
+};

@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
 import {
-  Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
+  Box, Button, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
-import { useHistoryTicks, useHistoryGrid, useHistoryEvents, useHistoryReports } from "../api/hooks";
+import { useHistoryTicks, useHistoryGrid, useHistoryEvents, useHistoryReports, useHistoryPlans } from "../api/hooks";
 import { AssetTimelineChart } from "../components/controller/charts/AssetTimelineChart";
 import { TariffChart } from "../components/controller/charts/TariffChart";
 import { ASSET_COLORS, ASSET_LABELS } from "../components/controller/types";
 import type { AssetTimelinePoint, TariffTimePoint } from "../components/controller/types";
+import type { PlanSnapshot } from "../api/types";
+import { JsonDialog } from "../components/JsonDialog";
 
 /** Yesterday's date (UTC), the sensible default — "today" barely has any
  * downsampled history to show, especially early in the day. */
@@ -32,6 +34,8 @@ export function HistoryPage() {
   const { data: grid = [] } = useHistoryGrid(fromIso, toIso);
   const { data: events = [] } = useHistoryEvents(fromIso, toIso);
   const { data: reports = [] } = useHistoryReports(fromIso, toIso);
+  const { data: plans = [] } = useHistoryPlans(fromIso, toIso);
+  const [selectedPlan, setSelectedPlan] = useState<PlanSnapshot | null>(null);
 
   const ticksByAsset = useMemo(() => {
     const map = new Map<string, AssetTimelinePoint[]>();
@@ -145,6 +149,54 @@ export function HistoryPage() {
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* WP-T6 (docs/plans/ven-ui-transparency.md): wires GET /history/plans,
+          previously unused — plan snapshots archived for this day. */}
+      <Typography variant="h6" sx={{ mt: 3 }}>Plans</Typography>
+      <TableContainer component={Paper}>
+        <Table size="small" data-testid="history-plans-table">
+          <TableHead>
+            <TableRow>
+              <TableCell>Created</TableCell>
+              <TableCell>Horizon start</TableCell>
+              <TableCell>Horizon end</TableCell>
+              <TableCell>Detail</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {plans.map((p) => (
+              <TableRow key={p.created_at} data-testid={`history-plan-row-${p.created_at}`}>
+                <TableCell>{new Date(p.created_at).toLocaleString()}</TableCell>
+                <TableCell>{new Date(p.horizon_start).toLocaleString()}</TableCell>
+                <TableCell>{new Date(p.horizon_end).toLocaleString()}</TableCell>
+                <TableCell>
+                  <Button
+                    size="small"
+                    data-testid={`history-plan-view-${p.created_at}`}
+                    onClick={() => setSelectedPlan(p)}
+                  >
+                    View
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+            {plans.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={4} align="center" data-testid="history-plans-empty">
+                  No plan snapshots for this day
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      <JsonDialog
+        open={selectedPlan !== null}
+        title={selectedPlan ? `Plan snapshot: ${new Date(selectedPlan.created_at).toLocaleString()}` : "Plan"}
+        json={selectedPlan ? JSON.parse(selectedPlan.plan_json) : {}}
+        onClose={() => setSelectedPlan(null)}
+      />
     </Box>
   );
 }
