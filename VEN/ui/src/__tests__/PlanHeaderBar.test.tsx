@@ -41,6 +41,9 @@ function makePlan(overrides: Partial<Plan> = {}): Plan {
     },
     envelopes: [],
     warnings: [],
+    objective_eur: 0,
+    friction_eur: 0,
+    solve_status: "OPTIMAL",
     ...overrides,
   };
 }
@@ -167,5 +170,37 @@ describe("PlanHeaderBar", () => {
     await user.click(screen.getByTestId("plan-warnings-expand"));
     const warning = screen.getByTestId("plan-warning-0");
     expect(warning.textContent).toContain("Curtail load immediately");
+  });
+
+  // WP-T2 (docs/plans/ven-ui-transparency.md): infeasible chip must be a
+  // distinct signal from the generic warnings badge.
+  it("renders infeasible chip when solve_status is INFEASIBLE", () => {
+    const plan = makePlan({
+      solve_status: "INFEASIBLE",
+      warnings: [
+        { severity: "CRITICAL", message: "MILP solver failed: infeasible", suggested_action: null },
+      ],
+    });
+    render(<PlanHeaderBar plan={plan} />);
+    expect(screen.getByTestId("plan-infeasible-chip")).toBeInTheDocument();
+  });
+
+  it("does not render infeasible chip when solve_status is OPTIMAL", () => {
+    render(<PlanHeaderBar plan={makePlan({ solve_status: "OPTIMAL" })} />);
+    expect(screen.queryByTestId("plan-infeasible-chip")).toBeNull();
+  });
+
+  it("infeasible chip and the critical warning coexist when the warnings list is expanded", async () => {
+    const user = userEvent.setup({});
+    const plan = makePlan({
+      solve_status: "INFEASIBLE",
+      warnings: [
+        { severity: "CRITICAL", message: "MILP solver failed: infeasible", suggested_action: null },
+      ],
+    });
+    render(<PlanHeaderBar plan={plan} />);
+    expect(screen.getByTestId("plan-infeasible-chip")).toBeInTheDocument();
+    await user.click(screen.getByTestId("plan-warnings-expand"));
+    expect(screen.getByTestId("plan-warning-0").textContent).toContain("MILP solver failed: infeasible");
   });
 });

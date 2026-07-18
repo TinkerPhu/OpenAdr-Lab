@@ -89,6 +89,61 @@ fn run_planner_no_assets_covers_base_load() {
     }
 }
 
+// WP-T2 (docs/plans/ven-ui-transparency.md): a feasible solve reports
+// solve_status == Optimal and a non-zero objective_eur.
+#[test]
+fn test_plan_carries_optimal_status_and_objective_value() {
+    let now = fixed_now();
+    let profile = Profile {
+        assets: vec![AssetProfile::BaseLoad(BaseLoadConfig {
+            id: "base_load".into(),
+            baseline_kw: 1.0,
+            spikes: vec![],
+        })],
+        simulator: SimulatorConfig,
+        planner: PlannerConfig {
+            plan_step_s: 1800,
+            plan_horizon_h: 2,
+            plan_zones: vec![crate::entities::plan::PlanZone {
+                step_s: 1800,
+                slots: 4,
+            }],
+            ..PlannerConfig::default()
+        },
+        grid: GridConfig {
+            max_import_kw: 25.0,
+            max_export_kw: 10.0,
+        },
+        packets: vec![],
+    };
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::Periodic,
+        None,
+        None,
+        &[],
+        None,
+        None,
+    );
+    assert_eq!(
+        plan.solve_status,
+        crate::entities::plan::SolveStatus::Optimal,
+        "feasible solve must report Optimal"
+    );
+    assert!(
+        plan.objective_eur > 0.0,
+        "feasible solve with import-only base load must have positive objective_eur, got {}",
+        plan.objective_eur
+    );
+}
+
 #[test]
 fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
     // WP5.2 (BL-14) planner-consumption test: when a learned heuristic
@@ -831,6 +886,20 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
         None,
     );
     assert_eq!(plan.slots.len(), 48, "fallback plan must have 48 slots");
+    // WP-T2 (docs/plans/ven-ui-transparency.md): the fallback path must be
+    // distinguishable from a successful solve via solve_status, not just by
+    // reading the warning text.
+    assert_eq!(
+        plan.solve_status,
+        crate::entities::plan::SolveStatus::Infeasible,
+        "fallback plan must report Infeasible"
+    );
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|w| w.severity == crate::entities::plan::WarningSeverity::Critical),
+        "fallback plan must still carry the existing Critical warning with the reason"
+    );
 }
 
 // ── WP3.1 (BL-04): grid-alert windows ────────────────────────────────────

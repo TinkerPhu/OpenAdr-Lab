@@ -59,6 +59,9 @@ function makePlan(slot0Allocs: AssetAllocation[] = [makeAlloc()]): Plan {
     summary: { total_cost_eur: 0.50, total_co2_g: 800, total_import_kwh: 3.0, total_export_kwh: 0 },
     envelopes: [],
     warnings: [],
+    objective_eur: 0,
+    friction_eur: 0,
+    solve_status: "OPTIMAL",
   };
 }
 

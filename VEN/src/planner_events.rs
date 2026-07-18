@@ -1,3 +1,4 @@
+use crate::entities::plan::SolveStatus;
 use crate::entities::PlannerObjective;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -27,6 +28,7 @@ pub enum PlannerEvent {
         solver_ms: u64,
         objective_eur: f64,
         friction_eur: f64,
+        solve_status: SolveStatus,
         slot_count: usize,
         trigger: String,
     },
