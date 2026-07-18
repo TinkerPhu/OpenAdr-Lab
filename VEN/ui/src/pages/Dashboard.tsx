@@ -146,7 +146,10 @@ export function DashboardPage() {
   const plan = usePlan();
   const requests = useRequests();
 
-  const healthStatus = health.isError ? "offline" : health.data ? "ok" : "unknown";
+  // WP-T1 (docs/plans/ven-ui-transparency.md): /health now returns
+  // {status, components} — read the real status instead of assuming "ok"
+  // whenever a response merely arrived (same bug App.tsx's HealthChip had).
+  const healthStatus = health.isError ? "offline" : health.data ? health.data.status : "unknown";
   const netPowerW = sim.data?.grid.net_power_w ?? null;
 
   return (
