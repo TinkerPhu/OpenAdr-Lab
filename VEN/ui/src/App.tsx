@@ -1,8 +1,9 @@
 import { createContext, useContext, useMemo, useState } from "react";
+import type { MouseEvent } from "react";
 import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 import {
   AppBar, Box, Button, Chip, Container, FormControl, InputLabel,
-  MenuItem, Select, Stack, Toolbar, Typography,
+  Menu, MenuItem, Select, Stack, Toolbar, Typography,
 } from "@mui/material";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { VenApi } from "./api/client";
@@ -57,6 +58,37 @@ function HealthChip() {
       role="status"
       aria-label={`Health status: ${status}`}
     />
+  );
+}
+
+// WP-T8 (docs/plans/ven-ui-transparency.md §3.2): a grouped nav dropdown —
+// same route Links as the flat bar previously used, just anchored under a
+// Button instead of shown directly, so page-level tests/routes stay untouched.
+type NavMenuItem = { to: string; label: string; testId: string };
+
+function NavMenu({ menuTestId, label, items }: { menuTestId: string; label: string; items: NavMenuItem[] }) {
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+
+  function handleOpen(e: MouseEvent<HTMLElement>) {
+    setAnchorEl(e.currentTarget);
+  }
+  function handleClose() {
+    setAnchorEl(null);
+  }
+
+  return (
+    <>
+      <Button color="inherit" data-testid={menuTestId} onClick={handleOpen} aria-haspopup="true">
+        {label}
+      </Button>
+      <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={handleClose}>
+        {items.map((item) => (
+          <MenuItem key={item.to} component={Link} to={item.to} data-testid={item.testId} onClick={handleClose}>
+            {item.label}
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
   );
 }
 
@@ -181,95 +213,45 @@ export default function App() {
             sx={{ mb: 2 }}
             aria-label="Main navigation"
           >
-            <Button
-              component={Link}
-              to="/"
-              data-testid="nav-dashboard"
-            >
+            {/* WP-T8 (docs/plans/ven-ui-transparency.md §3.2): primary bar
+                ordered by usage frequency; VTN Feed and Diagnostics are
+                grouped dropdowns, not flat tabs — Diagnostics stays
+                unconditionally visible (design principle 2, §2). */}
+            <Button component={Link} to="/" data-testid="nav-dashboard">
               Dashboard
             </Button>
-            <Button
-              component={Link}
-              to="/history"
-              data-testid="nav-history"
-            >
-              History
-            </Button>
-            <Button
-              component={Link}
-              to="/controller"
-              data-testid="nav-controller"
-            >
-              Controller
-            </Button>
-            <Button
-              component={Link}
-              to="/planner"
-              data-testid="nav-planner"
-            >
-              Planner
-            </Button>
-            <Button
-              component={Link}
-              to="/devices"
-              data-testid="nav-devices"
-            >
+            <Button component={Link} to="/devices" data-testid="nav-devices">
               Devices
             </Button>
-            <Button
-              component={Link}
-              to="/programs"
-              data-testid="nav-programs"
-            >
-              Programs
+            <Button component={Link} to="/controller" data-testid="nav-controller">
+              Controller
             </Button>
-            <Button
-              component={Link}
-              to="/events"
-              data-testid="nav-events"
-            >
-              Events
+            <Button component={Link} to="/history" data-testid="nav-history">
+              History
             </Button>
-            <Button
-              component={Link}
-              to="/reports"
-              data-testid="nav-reports"
-            >
-              Reports
+            <Button component={Link} to="/planner" data-testid="nav-planner">
+              Planner
             </Button>
-            <Button
-              component={Link}
-              to="/metrics"
-              data-testid="nav-metrics"
-            >
-              Metrics
-            </Button>
-            <Button
-              component={Link}
-              to="/raw-diagnostics"
-              data-testid="nav-raw-diagnostics"
-            >
-              Raw Data
-            </Button>
-            <Button
-              component={Link}
-              to="/tasks"
-              data-testid="nav-tasks"
-            >
-              Tasks
-            </Button>
-            <Button
-              component={Link}
-              to="/event-log"
-              data-testid="nav-event-log"
-            >
-              Event Log
-            </Button>
-            <Button
-              component={Link}
-              to="/notifications"
-              data-testid="nav-notifications"
-            >
+            <NavMenu
+              menuTestId="nav-vtn-feed-menu"
+              label="VTN Feed"
+              items={[
+                { to: "/reports", label: "Reports", testId: "nav-reports" },
+                { to: "/programs", label: "Programs", testId: "nav-programs" },
+                { to: "/events", label: "Events", testId: "nav-events" },
+              ]}
+            />
+            <NavMenu
+              menuTestId="nav-diagnostics-menu"
+              label="Diagnostics"
+              items={[
+                { to: "/metrics", label: "Metrics", testId: "nav-metrics" },
+                { to: "/raw-diagnostics", label: "Raw Data", testId: "nav-raw-diagnostics" },
+                { to: "/tasks", label: "Tasks", testId: "nav-tasks" },
+                { to: "/event-log", label: "Event Log", testId: "nav-event-log" },
+              ]}
+            />
+            <Button component={Link} to="/notifications" data-testid="nav-notifications">
               Notifications
             </Button>
           </Stack>
