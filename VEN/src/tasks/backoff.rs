@@ -4,8 +4,11 @@
 //! RNG so tests are exact (determinism rule: no unseeded randomness).
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+
+use crate::state::AppState;
 
 pub(crate) struct Backoff {
     base_s: u64,
@@ -42,6 +45,29 @@ impl Backoff {
         let secs = base_s as f64 * (1.0 + jitter_frac);
         Duration::from_secs_f64(secs.max(0.0))
     }
+}
+
+/// WP-T1 (`docs/plans/ven-ui-transparency.md`): `on_success`/`on_failure` plus
+/// recording the outcome on `AppState` — kept here (not in `poll_events.rs`'s loop
+/// body) so that file stays under the `tasks/` file-size cap.
+pub(crate) async fn record_success(backoff: &mut Backoff, state: &AppState, now: DateTime<Utc>) {
+    backoff.on_success();
+    state.record_vtn_poll_success(now).await;
+}
+
+/// `on_failure` + recording the outcome + the retry sleep, all in one call so
+/// callers don't need a separate `let delay = ...` binding.
+pub(crate) async fn record_fail_sleep(
+    backoff: &mut Backoff,
+    state: &AppState,
+    now: DateTime<Utc>,
+    error: impl std::fmt::Display,
+) {
+    let delay = backoff.on_failure();
+    state
+        .record_vtn_poll_failure(now, error.to_string(), delay.as_secs_f64())
+        .await;
+    tokio::time::sleep(delay).await;
 }
 
 #[cfg(test)]

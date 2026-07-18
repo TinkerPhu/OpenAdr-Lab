@@ -208,14 +208,14 @@ pub(crate) fn spawn_event_poll(
                     if any_change && !signal_trigger_sent {
                         let _ = trigger_tx.send(PlanTrigger::RateChange);
                     }
-                    backoff.on_success();
+                    super::backoff::record_success(&mut backoff, &state, now).await;
                     tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
                 }
                 Err(e) => {
                     counter!("poll_error_total", "resource" => "events").increment(1);
                     error!(resource = "events", "poll failed: {e:#}");
                     vtn_ok = outage_edge(&notifier, &state, Utc::now(), vtn_ok, false).await;
-                    tokio::time::sleep(backoff.on_failure()).await;
+                    super::backoff::record_fail_sleep(&mut backoff, &state, Utc::now(), e).await;
                 }
             }
         }

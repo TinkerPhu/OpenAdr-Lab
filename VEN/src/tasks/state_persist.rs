@@ -9,12 +9,17 @@ pub(crate) fn spawn_state_persist(state: AppState, path: String) -> tokio::task:
         loop {
             interval.tick().await;
             match state.to_json().await {
-                Ok(json) => {
-                    if let Err(e) = tokio::fs::write(&path, json).await {
+                Ok(json) => match tokio::fs::write(&path, json).await {
+                    Ok(()) => state.set_storage_ok(true).await,
+                    Err(e) => {
                         error!("persist write failed: {e:#}");
+                        state.set_storage_ok(false).await;
                     }
+                },
+                Err(e) => {
+                    error!("persist serialization failed: {e:#}");
+                    state.set_storage_ok(false).await;
                 }
-                Err(e) => error!("persist serialization failed: {e:#}"),
             }
         }
     })
