@@ -57,6 +57,24 @@ services:
       - test-net
 
   # ---------------------------------------------------------------------------
+  # Mosquitto — ephemeral MQTT broker for the weather-forecast-plugin BDD
+  # scenarios only. Isolated to test-net; anonymous access is fine for a
+  # throwaway test broker (see TECHNICAL_DEBTS.md R-54 for the production
+  # Pi4-Server broker's separate auth posture).
+  # ---------------------------------------------------------------------------
+  mosquitto:
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./mosquitto-test.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: mosquitto_pub -h 127.0.0.1 -t healthcheck -m ping -q 0 || exit 1
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - test-net
+
+  # ---------------------------------------------------------------------------
   # VEN — single instance with fast polling (2s) for test speed
   # Starts before fixtures; poll retry handles initial auth failures.
   # ---------------------------------------------------------------------------
@@ -75,6 +93,8 @@ services:
       POLL_REPORTS_SECS: "2"
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
+      WEATHER_MQTT_HOST: "mosquitto"
+      WEATHER_MQTT_SITE_ID: "ven-1"
     volumes:
       - ../VEN/profiles/test.yaml:/config/profile.yaml:ro
     healthcheck:
@@ -85,6 +105,8 @@ services:
       start_period: 10s
     depends_on:
       test-vtn:
+        condition: service_healthy
+      mosquitto:
         condition: service_healthy
     networks:
       - test-net
@@ -260,6 +282,8 @@ services:
       test-ui:
         condition: service_healthy
       test-ven-ui:
+        condition: service_healthy
+      mosquitto:
         condition: service_healthy
     networks:
       - test-net
