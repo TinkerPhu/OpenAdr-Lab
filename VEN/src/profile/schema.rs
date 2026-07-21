@@ -1,9 +1,10 @@
 use crate::entities::asset_params::{
     ApplianceSpikeParams, AssetParams, BaseLoadParams, BatteryParams, EvParams, HeaterParams,
-    PvParams,
+    PvForecastParams, PvParams,
 };
 use crate::entities::plan::PlanZone;
 use crate::entities::PlannerObjective;
+use crate::profile::weather_pv::WeatherPvConfig;
 use serde::Deserialize;
 
 /// YAML-loaded asset profile tagged enum for the `assets:` list format.
@@ -104,6 +105,20 @@ pub struct Profile {
     pub grid: GridConfig,
     #[serde(default)]
     pub history: HistoryConfig,
+    /// Weather-sourced PV forecast config (weather-forecast-visibility).
+    /// Optional and additive — absent by default, so every profile without
+    /// it parses and behaves exactly as before this section existed.
+    #[serde(default)]
+    pub weather_pv: Option<WeatherPvConfig>,
+}
+
+impl Profile {
+    /// Weather-sourced PV forecast params, if configured. `None` when the
+    /// profile has no `weather_pv` section — callers (the `GET /weather`
+    /// route) treat that as "derived state unavailable," not an error.
+    pub fn weather_pv_params(&self) -> Option<PvForecastParams> {
+        self.weather_pv.as_ref().map(WeatherPvConfig::to_params)
+    }
 }
 
 /// WP1.2/WP1.3 (Phase 1, A-1) — persistent history sampling + retention.

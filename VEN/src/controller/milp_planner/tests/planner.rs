@@ -214,6 +214,7 @@ fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
         None,
         None,
         &heuristics,
+        None,
     );
 
     assert_eq!(plan.slots.len(), 4);
@@ -310,6 +311,7 @@ fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
             None,
             None,
             &heuristics,
+            None,
         );
         plan.slots[0].baseline_kw
     };
@@ -941,6 +943,7 @@ fn alert_window_clamps_import_cap_for_overlapping_slots_only() {
         None,
         None,
         &std::collections::HashMap::new(),
+        None,
     );
 
     assert_eq!(inputs.p_imp_max_cont_kw[0], 0.0, "slot 0 inside alert");
@@ -994,6 +997,7 @@ fn run_planner_alert_window_yields_zero_import_cap_slots_and_solves() {
         None,
         None,
         &std::collections::HashMap::new(),
+        None,
     );
 
     assert_eq!(plan.slots.len(), 4);
@@ -1055,6 +1059,7 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
         None,
         None,
         &std::collections::HashMap::new(),
+        None,
     );
 
     // L1: 50% of contractual 25 kW (default simple_level1_import_cap_pct).
@@ -1091,6 +1096,7 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
         None,
         None,
         &std::collections::HashMap::new(),
+        None,
     );
     assert_eq!(
         inputs2.p_imp_max_cont_kw[0], 0.0,

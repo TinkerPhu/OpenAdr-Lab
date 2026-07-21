@@ -20,6 +20,10 @@ pub use history_port::HistoryPort;
 pub mod settings_port;
 pub use settings_port::SettingsPort;
 
+// ── WeatherForecastPort trait ──────────────────────────────────────────────────
+pub mod weather_port;
+pub use weather_port::{NoopWeatherPort, WeatherForecastPort};
+
 // ── OpenADR interface ─────────────────────────────────────────────────────────
 pub mod openadr_interface;
 

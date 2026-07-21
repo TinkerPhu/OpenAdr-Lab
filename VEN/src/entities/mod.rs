@@ -9,12 +9,15 @@ pub mod history;
 pub mod notification;
 pub mod plan;
 pub mod planner_params;
+pub mod pv_snow;
 pub mod report_submission;
 pub mod sim_inject;
 pub mod site_meter;
+pub mod solar;
 pub mod tariff_snapshot;
 pub mod timeline;
 pub mod user_request;
+pub mod weather;
 
 pub use error::DomainError;
 pub use planner_params::PlannerObjective;
