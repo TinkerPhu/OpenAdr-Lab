@@ -1,9 +1,8 @@
-"""Step definitions for the weather-forecast-plugin BDD scenarios (@wip —
-see weather_forecast.feature: these depend on
-weather-forecast-implementation-plan.md Phase 8 planner wiring, not yet
-landed. Excluded from the default suite via behave.ini's `tags = ~@wip`;
-kept here so the intended scenario shape is committed and reviewable ahead
-of that follow-up, matching the existing precedent in ven_reports.feature.
+"""Step definitions for the weather-forecast-plugin BDD scenarios
+(weather_forecast.feature). Requires the `mosquitto` test-broker service in
+tests/docker-compose.test.yml and the `weather_pv` section in
+VEN/profiles/test.yaml — see docs/plans/weather-forecast-implementation-plan.md
+Phase 8.
 """
 
 import json
@@ -87,10 +86,11 @@ def step_wait_for_plan_cycle(context):
 
 
 def _pv_allocation_kw(context) -> list:
+    # PV is exogenous input to the MILP, not a solved allocation — the plan
+    # carries it as pv_forecast_kw per slot, never inside planned_kw_by_asset
+    # (see controller/timeline.rs's pv_future_uses_pv_forecast_kw_not_allocations).
     plan = context.plan_response.json()
-    return [
-        slot.get("planned_kw_by_asset", {}).get("pv", 0.0) for slot in plan.get("slots", [])
-    ]
+    return [slot.get("pv_forecast_kw", 0.0) for slot in plan.get("slots", [])]
 
 
 @then("the plan's PV allocation reflects the weather-sourced forecast rather than the sin model")
