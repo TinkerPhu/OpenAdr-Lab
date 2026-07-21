@@ -7,12 +7,13 @@ use crate::controller::simulator_port::SimSnapshot;
 use crate::controller::trace::ControllerEvent;
 use crate::controller::{SolveRequest, SolverPort};
 use crate::entities::asset::PlanTrigger;
-use crate::entities::asset_params::AssetParams;
+use crate::entities::asset_params::{AssetParams, PvForecastParams};
 use crate::entities::capacity::{AlertWindow, OadrCapacityState, SimpleWindow};
 use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::device_session::{BaselineOverride, EvSession, HeaterTarget, ShiftableLoad};
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::PlannerParams;
+use crate::entities::solar::resolve_weather_pv_kw;
 use crate::entities::tariff_snapshot::{TariffSnapshot, TariffTimeSeries};
 use crate::entities::PlannerObjective;
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
@@ -33,11 +34,52 @@ pub fn align_to_step(raw: DateTime<Utc>, step_s: u64) -> DateTime<Utc> {
         .expect("step-aligned timestamp is always valid")
 }
 
+/// A cached `WeatherForecast` older than this is not trusted for planning
+/// purposes — starting default, not a measured value (see
+/// docs/plans/weather-forecast-plugin.md's staleness policy discussion).
+pub const WEATHER_STALENESS_THRESHOLD: chrono::Duration = chrono::Duration::hours(2);
+
+/// R-50: fetch (if configured) and resolve the weather-sourced PV forecast
+/// for this cycle's own slot grid. Kept here rather than in
+/// `tasks::planning` to stay under that module's stricter file-size cap —
+/// the only reason this is `async` at all is the port fetch; the
+/// staleness/config decision itself is the pure
+/// `entities::solar::resolve_weather_pv_kw`.
+pub async fn resolve_weather_pv_kw_for_cycle(
+    weather: &Arc<dyn crate::controller::WeatherForecastPort>,
+    weather_pv_params: Option<&PvForecastParams>,
+    wall_now: DateTime<Utc>,
+    now: DateTime<Utc>,
+    cum_s: &[i64],
+    n_slots: usize,
+) -> Option<Vec<f64>> {
+    let forecast = if weather_pv_params.is_some() {
+        weather.latest().await
+    } else {
+        None
+    };
+    let slot_starts: Vec<_> = cum_s[0..n_slots]
+        .iter()
+        .map(|&s| now + chrono::Duration::seconds(s))
+        .collect();
+    resolve_weather_pv_kw(
+        weather_pv_params,
+        forecast.as_ref(),
+        wall_now,
+        WEATHER_STALENESS_THRESHOLD,
+        &slot_starts,
+    )
+}
+
 /// Assemble the fully-owned `SolveRequest` for one plan cycle from already-computed
-/// per-cycle locals. Pure field marshalling — kept as a function (not an inline struct
-/// literal in the task loop) so the loop body stays focused on orchestration.
+/// per-cycle locals. Kept as a function (not an inline struct literal in the task
+/// loop) so the loop body stays focused on orchestration. `async` only because it
+/// resolves R-50's weather-sourced PV forecast internally
+/// (`resolve_weather_pv_kw_for_cycle`) — folding that in here, rather than a
+/// separate call in `tasks::planning::cycle`, keeps that module under its
+/// file-size cap.
 #[allow(clippy::too_many_arguments)]
-pub fn build_solve_request(
+pub async fn build_solve_request(
     asset_contexts: Vec<Box<dyn AssetMilpContext>>,
     assets: SimSnapshot,
     tariffs: TariffTimeSeries,
@@ -57,7 +99,15 @@ pub fn build_solve_request(
     objective_override: Option<PlannerObjective>,
     pv_forecast_override: Option<f64>,
     asset_heuristics: std::collections::HashMap<String, AssetHeuristics>,
+    weather: &Arc<dyn crate::controller::WeatherForecastPort>,
+    weather_pv_params: Option<&PvForecastParams>,
+    wall_now: DateTime<Utc>,
+    cum_s: &[i64],
+    n_slots: usize,
 ) -> SolveRequest {
+    let weather_pv_kw =
+        resolve_weather_pv_kw_for_cycle(weather, weather_pv_params, wall_now, now, cum_s, n_slots)
+            .await;
     SolveRequest {
         asset_contexts,
         assets,
@@ -78,6 +128,7 @@ pub fn build_solve_request(
         objective_override,
         pv_forecast_override,
         asset_heuristics,
+        weather_pv_kw,
     }
 }
 

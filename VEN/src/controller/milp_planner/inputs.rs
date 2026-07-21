@@ -49,6 +49,14 @@ pub(crate) fn build_milp_inputs(
     baseline_override: Option<&BaselineOverride>,
     pv_forecast_override: Option<f64>,
     asset_heuristics: &HashMap<String, AssetHeuristics>,
+    // Weather-sourced PV forecast (R-50), pre-aligned to this call's own
+    // slot grid by the caller (entities::solar::weather_pv_kw_for_slots).
+    // None when no weather feed is configured or the cached forecast has
+    // gone stale — falls back to the live-snapshot/sin-model behavior
+    // below, unchanged from before this parameter existed. Takes
+    // precedence over that fallback but not over pv_forecast_override
+    // (deterministic-testing pin always wins).
+    weather_pv_kw: Option<&[f64]>,
 ) -> MilpInputs {
     let n: usize = planner.plan_zones.iter().map(|z| z.slots).sum();
     let mut cum_s: Vec<i64> = Vec::with_capacity(n + 1);
@@ -164,8 +172,13 @@ pub(crate) fn build_milp_inputs(
         // forecast. Falls back to the static sin model if no "pv" asset exists.
         // pv_forecast_override pins all horizon slots to a fixed kW,
         // making plans deterministic regardless of time-of-day.
+        // weather_pv_kw (R-50), when present, takes precedence over the
+        // sin-model/live-snapshot fallback but never over pv_forecast_override
+        // — the deterministic-testing pin always wins.
         let pv_kw = if let Some(forced_kw) = pv_forecast_override {
             forced_kw.max(0.0)
+        } else if let Some(weather_kw) = weather_pv_kw.and_then(|v| v.get(i)) {
+            weather_kw.max(0.0)
         } else if let Some(pv_snap) = assets.assets.get("pv") {
             let natural = pv_natural_irradiance(slot_t);
             let irradiance_offset = pv_snap.val("irradiance_offset").unwrap_or(0.0);

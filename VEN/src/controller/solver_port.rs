@@ -47,6 +47,12 @@ pub struct SolveRequest {
     /// resolved from `AppState` once per cycle, same as `ev_session`/
     /// `heater_target` above.
     pub asset_heuristics: HashMap<String, AssetHeuristics>,
+    /// Weather-sourced PV forecast (R-50), already aligned to this cycle's
+    /// slot grid. `None` when no weather feed is configured, no
+    /// `weather_pv` profile section exists, or the cached forecast has
+    /// gone stale — see `entities::solar::weather_pv_kw_for_slots` and
+    /// `WeatherForecast::is_fresh`.
+    pub weather_pv_kw: Option<Vec<f64>>,
 }
 
 /// Port to the MILP planning engine. Always infallible: implementations must

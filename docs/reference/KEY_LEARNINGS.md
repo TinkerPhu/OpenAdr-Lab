@@ -402,3 +402,68 @@ outes/sim.rs causes a T1+T2 double-solve race:
   Rust wire struct never had and lacked four real fields — harmless only
   because nothing consumed the type. When a wire struct changes, its UI
   mirror must change in the same commit.
+
+- **When a wide, multi-call-site refactor can't be compile-verified in the
+  same pass (host memory constraint, no build available), ship the
+  fully-tested pure building blocks and defer the wiring as documented
+  debt rather than risk an unverifiable edit across several existing test
+  suites.** Applied during the weather-forecast-plugin build: the domain
+  physics/port/adapter layers landed fully tested, but threading a new
+  field through `SolveRequest`/`build_milp_inputs` (6+ call sites) was
+  deferred to a follow-up, recorded as R-50 in `docs/reference/TECHNICAL_DEBTS.md`
+  instead of silently left undone.
+
+- **Read the vendor's own API documentation before reverse-engineering
+  codes from a small observed sample.** SRF Meteo's icon-code legend
+  (fetched from the PDF linked in `SrfWeatherToInfluxDb.py`'s own source
+  comment) revealed sign=day/night, magnitude=condition — not guessable
+  from the handful of codes seen in one day's data.
+
+- **This project already has two reusable patterns for "staged but not
+  yet wired" work**: a module-level `#![allow(dead_code)]` with a doc
+  comment (`entities/design_vocabulary.rs`'s "type-level sketches" header)
+  for Rust code, and a `@wip` BDD tag (`behave.ini`'s `tags = ~@wip`, per
+  `ven_reports.feature`) for committed-but-not-yet-passing scenarios. Reuse
+  these before inventing a new "not implemented yet" convention.
+
+- **Re-verify a prior session's "too risky, deferred" call before
+  accepting it as settled — the risk may have been overestimated, and any
+  blocking prerequisite may have since landed.** R-50 (weather → planner
+  wiring) was deferred as "6+ risky call sites"; tracing the actual call
+  graph on a follow-up pass found only 9, most of the apparent call sites
+  being local test-wrapper functions rather than the production functions
+  themselves. Don't let an earlier deferral decision calcify into an
+  assumption.
+
+- **A file already flagged near its size cap (an existing watch-list
+  debt note) will tip over on the very next real change — plan the split
+  the note already called for, don't spend cycles manually shaving
+  comment lines to survive one more feature.** `tasks/planning.rs` was at
+  ~198/200 per a pre-existing debt note recommending a split "when next
+  touched." That next touch arrived; the fix was the directory-module
+  split the note had already specified, not line-by-line compaction.
+
+- **Verify document structure immediately after any edit that inserts a
+  new section into an existing file with prior content — not just that
+  the diff looks right in isolation.** An edit meant to append a new
+  journal section instead landed mid-list inside an earlier entry,
+  orphaning an unrelated bullet. Caught by grepping the file's heading
+  structure right after, before reporting the edit done.
+
+- **`#[allow(dead_code)]` markers need revisiting once code actually gets
+  wired in** — they're not "set and forget." When `GET /weather` started
+  calling the weather-forecast-plugin's physics functions, clippy stopped
+  flagging them as dead on its own; the stale `#[allow(dead_code)]`
+  attributes and their "not yet wired" doc comments had to be found and
+  removed by hand (clippy doesn't warn about an unnecessary `allow`).
+  Treat every such marker as a follow-up-change checklist item, not a
+  permanent annotation.
+
+- **When adding a new config type to an existing profile file, check
+  `scripts/audit_file_sizes.py` before, not after, deciding where it goes.**
+  ~55 lines pushed `profile/schema.rs` over its 500-line cap; every other
+  asset in this codebase already keeps its config-struct-to-domain-struct
+  mapping (`BatteryConfig`→`BatteryParams` etc.) in one place, but nothing
+  stops a new one from being the file that finally tips the cap. Run the
+  audit script immediately after a green build, before calling any phase
+  "done."

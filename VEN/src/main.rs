@@ -14,6 +14,7 @@ mod simulator;
 mod state;
 mod tasks;
 mod vtn;
+mod weather;
 
 use crate::assets::ControlDescriptor;
 use config::Config;
@@ -53,6 +54,14 @@ pub struct AppCtx {
     pub notifier: services::notify::Notifier,
     /// WP4.2 (BL-19): per-asset user-settings persistence (comfort curves).
     pub settings: Option<Arc<dyn controller::SettingsPort>>,
+    /// Weather forecast plugin port (docs/plans/weather-forecast-plugin.md).
+    /// Always present — `NoopWeatherPort` when no MQTT broker is configured,
+    /// so consumers never need `Option<Arc<dyn WeatherForecastPort>>`.
+    pub weather: Arc<dyn controller::WeatherForecastPort>,
+    /// Weather-sourced PV forecast config (weather-forecast-visibility).
+    /// `None` when the profile has no `weather_pv` section — the `/weather`
+    /// route's `derived` field is `null` in that case, not an error.
+    pub weather_pv_params: Option<crate::entities::asset_params::PvForecastParams>,
 }
 
 fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Vec<AssetParams>) {
@@ -164,6 +173,23 @@ async fn main() -> anyhow::Result<()> {
     );
     let vtn_port: Arc<dyn VtnPort> = Arc::new(vtn.clone());
     let solver: Arc<dyn SolverPort> = Arc::new(controller::milp_planner::MilpSolver);
+
+    // Weather forecast plugin (docs/plans/weather-forecast-plugin.md): only
+    // active when WEATHER_MQTT_HOST is set; falls back to a no-op adapter
+    // otherwise, so every downstream consumer behaves exactly as before
+    // this feature existed.
+    let weather_port: Arc<dyn controller::WeatherForecastPort> =
+        match weather::WeatherMqttConfig::from_env() {
+            Some(cfg) => {
+                info!(
+                    broker = %cfg.broker_host,
+                    site_id = %cfg.site_id,
+                    "weather forecast plugin: MQTT adapter configured"
+                );
+                Arc::new(weather::MqttWeatherAdapter::spawn(cfg))
+            }
+            None => Arc::new(controller::NoopWeatherPort),
+        };
 
     // Derive shared data_dir from persist_path
     let data_dir = cfg
@@ -296,8 +322,9 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     let active_objective = Arc::new(RwLock::new(planner_params.objective));
+    let weather_pv_params = profile.weather_pv_params();
     {
-        let (s, pp, gmax_i, gmax_e, ap, sv, rx, sim, ao, etx, nf) = (
+        let (s, pp, gmax_i, gmax_e, ap, sv, rx, sim, ao, etx, nf, wp, wpp) = (
             state.clone(),
             planner_params.clone(),
             grid_max_import_kw,
@@ -309,6 +336,8 @@ async fn main() -> anyhow::Result<()> {
             active_objective.clone(),
             planner_event_tx.clone(),
             notifier.clone(),
+            weather_port.clone(),
+            weather_pv_params,
         );
         tasks::supervised_spawn("planning", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_planning(
@@ -324,6 +353,8 @@ async fn main() -> anyhow::Result<()> {
                 etx.clone(),
                 nf.clone(),
                 chrono::Utc::now,
+                wp.clone(),
+                wpp,
             )
         });
     }
@@ -379,6 +410,8 @@ async fn main() -> anyhow::Result<()> {
         history: history_port,
         notifier,
         settings: settings_port,
+        weather: weather_port,
+        weather_pv_params: profile.weather_pv_params(),
     };
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;
