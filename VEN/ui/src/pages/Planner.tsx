@@ -254,7 +254,7 @@ export function PlannerPage() {
   return (
     <Box data-testid="planner-heading" sx={{ p: 2 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-        <Typography variant="h5">Planner</Typography>
+        <Typography variant="h5">Plan</Typography>
         <FormControl size="small" sx={{ minWidth: 180 }}>
           <InputLabel>Optimization objective</InputLabel>
           <Select

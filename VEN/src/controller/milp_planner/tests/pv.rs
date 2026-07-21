@@ -252,3 +252,116 @@ fn pv_forecast_override_none_is_non_zero_during_day() {
         inp.p_pv_kw[0]
     );
 }
+
+// ── R-50: weather_pv_kw precedence ────────────────────────────────────────
+
+/// Direct call to the real `inputs::build_milp_inputs` (not the
+/// `build_milp_inputs_with_override` test wrapper, which hardcodes
+/// `weather_pv_kw: None`) — needed to exercise the weather precedence branch.
+#[allow(clippy::too_many_arguments)]
+fn bmi_with_weather(
+    ctxs: &[Box<dyn crate::controller::milp_planner::AssetMilpContext>],
+    sim: &SimSnapshot,
+    tariffs: &TariffTimeSeries,
+    cap: &OadrCapacityState,
+    profile: &Profile,
+    now: DateTime<Utc>,
+    pv_forecast_override: Option<f64>,
+    weather_pv_kw: Option<&[f64]>,
+) -> MilpInputs {
+    super::super::inputs::build_milp_inputs(
+        ctxs,
+        sim,
+        tariffs,
+        cap,
+        &[],
+        &[],
+        &profile.planner,
+        profile.grid.max_import_kw,
+        profile.grid.max_export_kw,
+        profile.pv_config(),
+        None,
+        now,
+        &[],
+        None,
+        pv_forecast_override,
+        &std::collections::HashMap::new(),
+        weather_pv_kw,
+    )
+}
+
+#[test]
+fn weather_pv_kw_overrides_sin_model_fallback() {
+    let now = fixed_midnight(); // natural sin-model irradiance = 0 at midnight
+    let profile = make_profile(); // rated_kw=5.0
+    let sim = make_snap_from_profile(&profile); // no live "pv" asset injected offset
+    let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
+
+    let weather_kw = vec![3.5; 100]; // clearly non-zero, distinct from the midnight sin model
+    let inp = bmi_with_weather(
+        &ctxs,
+        &sim,
+        &TariffTimeSeries::from_snapshots(&[]),
+        &no_capacity(),
+        &profile,
+        now,
+        None,
+        Some(&weather_kw),
+    );
+    assert!(
+        (inp.p_pv_kw[0] - 3.5).abs() < 1e-9,
+        "weather_pv_kw must override the midnight sin-model fallback (0.0), got {:.4}",
+        inp.p_pv_kw[0]
+    );
+}
+
+#[test]
+fn weather_pv_kw_none_falls_back_to_sin_model() {
+    let noon = {
+        use chrono::TimeZone;
+        Utc.with_ymd_and_hms(2026, 4, 11, 12, 0, 0).unwrap()
+    };
+    let profile = make_profile();
+    let sim = make_snap_from_profile(&profile);
+    let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
+
+    let inp = bmi_with_weather(
+        &ctxs,
+        &sim,
+        &TariffTimeSeries::from_snapshots(&[]),
+        &no_capacity(),
+        &profile,
+        noon,
+        None,
+        None,
+    );
+    assert!(
+        inp.p_pv_kw[0] > 0.0,
+        "weather_pv_kw=None must fall back to the sin model (non-zero at noon)"
+    );
+}
+
+#[test]
+fn pv_forecast_override_wins_over_weather_pv_kw() {
+    let now = fixed_midnight();
+    let profile = make_profile();
+    let sim = make_snap_from_profile(&profile);
+    let ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = vec![];
+
+    let weather_kw = vec![3.5; 100];
+    let inp = bmi_with_weather(
+        &ctxs,
+        &sim,
+        &TariffTimeSeries::from_snapshots(&[]),
+        &no_capacity(),
+        &profile,
+        now,
+        Some(0.0), // deterministic-testing pin
+        Some(&weather_kw),
+    );
+    assert!(
+        inp.p_pv_kw[0].abs() < 1e-9,
+        "pv_forecast_override must win over weather_pv_kw, got {:.4}",
+        inp.p_pv_kw[0]
+    );
+}

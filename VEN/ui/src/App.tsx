@@ -22,6 +22,7 @@ import { EventLogPage } from "./pages/EventLog";
 import { HistoryPage } from "./pages/History";
 import { NotificationsPage } from "./pages/Notifications";
 import { PlannerPage } from "./pages/Planner";
+import { WeatherPage } from "./pages/Weather";
 import { DevicesPage } from "./pages/Devices";
 
 type VenContextType = {
@@ -230,7 +231,10 @@ export default function App() {
               History
             </Button>
             <Button component={Link} to="/planner" data-testid="nav-planner">
-              Planner
+              Plan
+            </Button>
+            <Button component={Link} to="/weather" data-testid="nav-weather">
+              Weather
             </Button>
             <NavMenu
               menuTestId="nav-vtn-feed-menu"
@@ -259,6 +263,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/planner" element={<PlannerPage />} />
+            <Route path="/weather" element={<WeatherPage />} />
             <Route path="/controller" element={<ControllerPage />} />
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/programs" element={<ProgramsPage />} />

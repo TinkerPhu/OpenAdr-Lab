@@ -31,5 +31,14 @@ async-trait = "0.1"
 # cmake/system dependency issue on WSL or Pi4 ARM. MIT licence.
 rusqlite = { version = "0.32", features = ["bundled"] }
 
+# Weather forecast plugin (MQTT adapter for WeatherForecastPort). Pure-Rust,
+# tokio-native, no C bindings — cross-compiles cleanly for the Pi4 ARM64 target.
+# default-features off: rumqttc's default "use-rustls" pulls a rustls-webpki
+# with 4 known advisories (RUSTSEC-2026-0098/0099/0104, RUSTSEC-2025-0134).
+# We only connect plaintext MQTT to the local Mosquitto broker (port 1883)
+# today — no TLS feature needed. Re-enable "use-rustls" (and re-audit) if the
+# adapter is ever pointed at the broker's 8883/TLS listener.
+rumqttc = { version = "0.25", default-features = false }
+
 # If you decide to use the Rust VEN library:
 # openleadr-client = "0.1"   # check repo/docs for exact version you want

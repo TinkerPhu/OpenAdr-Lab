@@ -10,6 +10,7 @@ import type {
   UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, SignalsState,
   HealthResponse, VtnStatus, TaskStatusEntry, EventLogEntry,
   PlanSnapshot, ReportObligation, AssetCapability, AssetForecast,
+  WeatherResponse,
 } from "./types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
@@ -230,6 +231,12 @@ export class VenApi {
     const data = await r.json();
     if (data === null) return null;
     return data as Plan;
+  }
+
+  async weather(): Promise<WeatherResponse> {
+    const r = await this.getReq("/weather");
+    if (!r.ok) throw new Error(`weather ${r.status}`);
+    return r.json();
   }
 
   async setObjective(objective: PlannerObjective): Promise<void> {

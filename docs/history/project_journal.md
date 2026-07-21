@@ -6132,3 +6132,297 @@ this WP rather than pause.
   StatusRows tests), `tsc --noEmit` clean, ESLint clean (same one
   pre-existing `App.tsx` fast-refresh warning, unrelated to this change),
   file-size audit clean (no `VEN/src/` files touched — UI-only WP).
+
+## Weather Forecast Plugin (OpenSpec change `weather-forecast-plugin`)
+
+### What Was Done
+
+Investigated the existing weather-data pipeline on Pi4-Server (read-only):
+the `data_acquisition` container polls the SRF Meteo API hourly (48h
+forecast horizon) into InfluxDB, and hand-tuned flux dashboards
+(`WeatherForcastAdjustedToMeasurement.flux`) already implement a solar-
+position + panel-incidence-angle model, just not combined with the raw
+forecast into one documented formula. That investigation, plus follow-up
+design conversations covering sky-condition/fluctuation signals (SRF's own
+`SUN_MIN` field and icon legend, fetched from SRF's commercial API PDF),
+snow-cover behavior on tilted panels, and a full MQTT wire contract, were
+written up as `docs/plans/weather-forecast-plugin.md` (merged from two
+earlier drafts) and `docs/plans/weather-forecast-implementation-plan.md`.
+
+That plan was fed into OpenSpec (`openspec/changes/weather-forecast-plugin/`
+— proposal, design, two capability specs, tasks) and partially implemented:
+
+- **Domain layer** (fully implemented + unit tested): `WeatherForecast`/
+  `WeatherForecastSample`/`SkyCondition`/`GeoPosition`
+  (`entities/weather.rs`); PV array geometry + forecast params
+  (`entities/asset_params.rs`); the clear-sky-index solar transposition
+  physics — `solar_position`, `poa_irradiance_w_m2`, `cell_temperature_c`,
+  `forecast_ac_kw` (`entities/solar.rs`); the near-binary snow-cover state
+  machine (`entities/pv_snow.rs`).
+- **Port + adapter** (fully implemented + unit tested): `WeatherForecastPort`
+  trait + `NoopWeatherPort` (`controller/weather_port.rs`); `MockWeatherPort`
+  test double (`services/test_support/mock_weather_port.rs`); the MQTT
+  adapter (`weather.rs`, `rumqttc`) with schema-validating parse functions
+  for both wire-contract topics, wired into `AppCtx` at the composition root
+  (`main.rs`, env-gated via `WEATHER_MQTT_HOST`).
+- **Not yet done**: the actual planner/API wiring (feeding
+  `forecast_ac_kw`'s output into `SolveRequest`/`build_milp_inputs` and the
+  API-visible `AssetForecast`) and the profile/config surface for
+  `PvForecastParams`. Recorded as R-50..R-56 in `docs/reference/TECHNICAL_DEBTS.md`
+  rather than silently left undone.
+
+### Issues & Key Learnings
+
+- **Scope the boundary explicitly when a compile-verified follow-up is
+  safer than a wide unverifiable edit.** Threading a new field through
+  `SolveRequest` touches 6+ call sites across `controller/milp_planner/`,
+  `services/planning.rs`, `tasks/planning.rs`, and several test files —
+  doable, but risky to land in the same pass as ~700 lines of new domain
+  code without a compile check in between, especially while the host was
+  near its WSL memory-budget threshold. Chose to ship the fully-tested
+  pure building blocks and defer the wiring, documented as debt rather than
+  claimed as done.
+- **This codebase already had the right escape hatch for staged-but-unwired
+  code.** `entities/design_vocabulary.rs`'s existing `#![allow(dead_code)]`
+  convention ("type-level sketches of features not yet implemented") was
+  the exact precedent needed once `cargo clippy -D warnings` flagged the
+  new physics/snow modules as dead code — reused verbatim rather than
+  inventing a different pattern.
+- **`@wip`-tagged BDD scenarios are also an existing, reusable pattern.**
+  `ven_reports.feature` already committed a scenario ahead of the code that
+  would make it pass, tagged `@wip` (excluded by `behave.ini`'s
+  `tags = ~@wip`) with a comment explaining the blocker. Followed the same
+  shape for `weather_forecast.feature` instead of inventing a new
+  "pending test" convention.
+- **Read the actual upstream API documentation instead of reverse-engineering
+  icon codes from observed values.** SRF's commercial-API PDF (linked from
+  the existing `SrfWeatherToInfluxDb.py` source comment) gave the real
+  icon-code legend, including the detail that sign encodes day/night and
+  magnitude encodes the condition — confirmed directly by the vendor's own
+  German-language table rather than inferred from the small sample of codes
+  seen in one day's data.
+- Full local pyramid run under the `wsl_lock` (host was at 0.9–1.1 GB free
+  at the time; `-j 2` throughout, one build at a time): 743/743 Rust tests
+  green (34 new), `cargo fmt --check` clean, `cargo clippy --all-targets
+  --all-features -D warnings` clean (after the `#[allow(dead_code)]`
+  additions above), `scripts/audit_file_sizes.py` clean, and the
+  entities/controller/routes architecture-invariant greps all empty.
+- `cargo audit` (task 1.2, run separately since it doesn't need a full
+  build) found 4 advisories pulled in transitively by `rumqttc`'s default
+  `use-rustls` feature (old `rustls-webpki`, unmaintained `rustls-pemfile`).
+  Fixed by building `rumqttc` with `default-features = false` — we only
+  connect plaintext MQTT to the local Mosquitto broker (port 1883) today,
+  so the TLS feature wasn't needed at all. `cargo audit` now exits clean.
+
+### Self-review pass (same session, before reporting completion)
+
+Re-read every new file line by line against the specs rather than trusting
+the first green test run. Found and fixed three real issues:
+
+- **MQTT resubscribe-on-reconnect bug.** `MqttWeatherAdapter::spawn` issued
+  the two topic subscriptions once, before entering the event loop, never
+  again. `rumqttc`'s default `MqttOptions` is `clean_session = true`, so
+  the broker forgets subscriptions on every disconnect — after the first
+  network blip or broker restart, the adapter would have silently stopped
+  receiving forecasts forever, with no error surfaced anywhere. Fixed by
+  resubscribing on every `Packet::ConnAck` (covers both the initial
+  connect and every reconnect), the standard `rumqttc` idiom for this
+  exact problem. Not caught by the original test run because the adapter-
+  contract tests only exercise the standalone parse functions (by design,
+  to stay broker-independent) — this class of bug only shows up by reading
+  the event-loop code itself, not by running unit tests against it.
+- **Wrong doc-comment path.** `entities/solar.rs` and `entities/pv_snow.rs`
+  both referenced `docs/TECHNICAL_DEBTS.md`; the real path is
+  `docs/reference/TECHNICAL_DEBTS.md`. Fixed in both files and in
+  `docs/plans/weather-forecast-implementation-plan.md`.
+- **"Forecast-only fallback" (task 4.7) was described but not
+  demonstrated.** The snow-cover model's bootstrap policy — start from
+  `PvSnowState::default()` and fold forward from the forecast's own
+  `age_h=0` sample — was true by construction (`snow_coverage_trajectory`
+  is generic over any `initial` and any sample slice) but no test actually
+  exercised an `age_h=0` sample specifically, so the claim was unverified.
+  Added `trajectory_bootstraps_from_forecasts_own_fact_sample` to close
+  the gap between "described in prose" and "demonstrated by a test."
+
+Re-ran the full pyramid after these fixes: 744/744 tests green, `cargo
+fmt --check` clean, `cargo clippy --all-targets --all-features -D
+warnings` clean, file-size audit clean, architecture invariants empty.
+
+## Weather Forecast Visibility (OpenSpec change `weather-forecast-visibility`)
+
+### What Was Done
+
+Closed R-57 (the `ui-transparency` rule violation this project adopted
+immediately after the weather-forecast-plugin work above) and narrowed
+R-51: added `GET /weather` (raw received forecast + derived weather-sourced
+PV forecast, both over the same up-to-48h horizon, single most-recent
+forecast only — no history), a new optional `weather_pv` profile YAML
+section (`profile/weather_pv.rs`) feeding `PvForecastParams` without
+touching the planner at all, a shared pure function
+`weather_pv_forecast_series` (`entities/solar.rs`) so a future R-50
+implementation reuses the exact same transposition/snow-override logic
+instead of re-deriving it, and a VEN UI split: "Planner" tab renamed to
+"Plan" (route/testid unchanged, content untouched) plus a new "Weather" tab
+showing both raw and derived state with explicit empty/stale states.
+
+Deliberately scoped to need nothing from R-50 (the still-deferred planner/
+`SolveRequest` wiring): the derived state shown here is a read-only
+diagnostic computation over the cached forecast, independent of what the
+actual MILP planner uses for its own PV input.
+
+### Issues & Key Learnings
+
+- **A route reachable from `main` turns "not yet wired" into "actually
+  used," which retroactively resolves upstream `#[allow(dead_code)]`
+  markers.** Once `GET /weather` called `weather_pv_forecast_series` (which
+  calls `forecast_ac_kw`, `snow_coverage_trajectory`, etc.), `cargo clippy`
+  stopped flagging any of `entities/solar.rs`, `entities/pv_snow.rs`, or the
+  three PV-forecast structs in `entities/asset_params.rs` as dead code —
+  removed all four now-stale `#[allow(dead_code)]` markers and their
+  "not yet wired" doc comments rather than leaving them inaccurate.
+- **File-size audit failures are cheap to catch immediately and expensive to
+  defer.** Adding ~55 production lines of `WeatherPvConfig` directly into
+  `profile/schema.rs` pushed it to 503/500 lines. Caught by running the
+  audit script right after the Rust build passed (before declaring the
+  phase done), not after. Fix: split the new config type into its own
+  `profile/weather_pv.rs` file — the same "config struct separate from the
+  domain-entity struct, mapped via `to_params()`" pattern every other asset
+  (`BatteryConfig`→`BatteryParams`, `EvConfig`→`EvParams`, etc.) already
+  uses in this codebase, applied consistently rather than improvised.
+- **A missing derive is a fast, unambiguous compile error, not a design
+  problem.** `WeatherPvForecastSlot` needed `#[derive(Serialize)]` once it
+  became part of an HTTP response type it wasn't originally designed
+  for (it started as a pure-computation return type in the prior change) —
+  caught immediately by `cargo check`, one-line fix.
+- **Manual browser verification of a UI change requires a running
+  backend, which requires either a local run or a deployment — neither
+  requested this session.** Recorded honestly as deferred (in `tasks.md`
+  and R-57's closure note) rather than skipped silently; the automated
+  test pyramid (Rust route-response tests covering all four states, React
+  component tests covering all four UI states) is what was actually run.
+- Full local pyramid: 754/754 Rust tests green (+10 new: 3 profile-parsing,
+  3 derived-series, 4 route-response), `cargo fmt --check` clean, `cargo
+  clippy --all-targets --all-features -D warnings` clean, file-size audit
+  clean (after the schema.rs split above), architecture invariants empty.
+  VEN UI: 406/406 tests green (+4 new Weather page tests), `tsc --noEmit`
+  clean, ESLint clean (one pre-existing unrelated `App.tsx` warning).
+
+## R-50 Planner Wiring (follow-up to Weather Forecast Plugin)
+
+### What Was Done
+
+Closed the half of R-50 that matters most: the weather-sourced PV forecast
+now feeds the actual MILP planner, not just `GET /weather`'s diagnostic
+view. Once `weather-forecast-visibility` supplied the `weather_pv` profile
+config surface (R-51), R-50's earlier "6+ risky call sites" estimate turned
+out to be overstated on closer reading — `controller/milp_planner/tests/`
+mostly calls *local test-wrapper functions* (`bmi`,
+`build_milp_inputs_with_override`, a local `run_planner`), not the
+production `inputs::build_milp_inputs`/`mod::run_planner` directly. Only 9
+real call sites needed the new trailing parameter.
+
+Wired `SolveRequest.weather_pv_kw` end to end through `MilpSolver::solve` →
+`run_planner` → `build_milp_inputs`, with precedence `pv_forecast_override`
+> `weather_pv_kw` > the existing sin-model/live-snapshot fallback
+(unchanged when weather isn't configured or has gone stale). The
+staleness/config decision itself (`entities::solar::resolve_weather_pv_kw`)
+is pure and separately unit-tested from the async port-fetch wrapper
+(`services::planning::resolve_weather_pv_kw_for_cycle`/`build_solve_request`),
+so the "three cases" (fresh/stale/unconfigured) are tested without needing
+a running task or a live broker. The API-visible forecast tagging
+(`ForecastSource::WeatherModel` on `AssetForecast`) is still open —
+recorded as the narrowed remainder of R-50 in
+`docs/reference/TECHNICAL_DEBTS.md`, not silently dropped.
+
+### Issues & Key Learnings
+
+- **An estimate of call-site risk made without tracing the actual call
+  graph can be wrong in either direction — verify before deferring, not
+  just before proceeding.** The original "6+ call sites, too risky"
+  judgment (previous session) turned out to overcount once actually
+  traced: most `run_planner`/`build_milp_inputs` calls in the test suite
+  go through local wrapper functions in `tests/mod.rs`, not the
+  production functions. Only 9 sites needed touching. Worth re-verifying
+  a prior session's risk assessment before treating it as settled,
+  especially once a blocking prerequisite (R-51's config surface) has
+  since landed and the deferred work is back in scope.
+- **A file already flagged as near its size cap will tip over on the very
+  next real change to it — plan for the split, don't fight it line by
+  line.** `tasks/planning.rs` was already at ~198/200 per an existing
+  R-40 watch-list note ("split proactively when next touched"). Adding
+  R-50's ~10 genuinely-necessary production lines pushed it to 210–223
+  depending on how the weather-resolution glue was organized; several
+  rounds of manual compaction (moving the async port-fetch into
+  `services/planning.rs`, folding two calls into one) only closed part of
+  the gap. The actual fix was the one the debt note already called for:
+  split `tasks/planning.rs` into a directory module
+  (`tasks/planning/{mod.rs,cycle.rs}`), extracting one full plan-cycle's
+  work into its own file. Stopped manually shaving lines once it became
+  clear the file was structurally over capacity, not just verbosely
+  written.
+- **Folding an async resolution step into an existing builder function
+  (`build_solve_request` becoming `async`) can shrink a call site more
+  than adding a second parallel helper call does.** Two sequential
+  `let x = ...; let y = f(x);` local bindings in the caller collapse to
+  one call once the second function absorbs the first — worth trying
+  before reaching for a bigger structural change, though in this case
+  both were needed (the merge got partway there; the directory split
+  closed the rest).
+- **A misplaced journal edit is its own lesson: verify the surrounding
+  structure after an insert, not just the content.** An earlier edit in
+  this same session appended a new `### ` subsection into the middle of a
+  prior entry's bullet list instead of after the whole entry, orphaning an
+  unrelated bullet between two unrelated headings. Caught by re-reading
+  the file's heading structure immediately after, not assumed correct
+  because the individual edit's diff looked right in isolation.
+- Full local pyramid, final state: 763/763 Rust tests green (+9 from this
+  follow-up: 4 `resolve_weather_pv_kw` staleness-gate cases, 3
+  `build_milp_inputs` precedence tests, 2 `weather_pv_kw_for_slots`
+  alignment tests), `cargo fmt --check` clean, `cargo clippy
+  --all-targets --all-features -D warnings` clean, file-size audit clean
+  (after the `tasks/planning/` split), architecture invariants empty.
+
+### R-50 fully closed: API-visible forecast tagging (tasks 8.4/8.5)
+
+Added `services::forecast::build_weather_pv_forecast`, tagging the PV
+forecast `ForecastSource::WeatherModel` and built from the same
+`weather_pv_forecast_series` the planner-input path (above) already uses —
+deliberately the same function, not a re-derivation, so `GET /forecast`'s
+PV entry and the planner's actual PV input can never silently diverge.
+Wired into `publish_post_cycle_state`/`finish_plan_cycle` (both gained
+`weather`/`weather_pv_params` parameters), added with the same "skip if
+already present" precedence the existing heuristics-fallback block uses —
+confirmed PV can never collide with an Optimization-sourced entry, since
+PV has no LP decision variable (`assets/pv.rs`) and therefore never appears
+in `planned_kw_by_asset` in the first place.
+
+`AssetForecast.confidence` turned out to be a single overall scalar, not
+per-slot — the design doc's `base_confidence(age_h) × (1 −
+irradiance_variability)` formula was written per-hour, so it's averaged
+across the forecast's samples here. `base_confidence(age_h)` itself needed
+a concrete curve that was never pinned down earlier: chose a linear decay
+to a 0.2 floor at the 48h horizon, documented as a starting default (same
+"not measured yet" framing already used for the 2h staleness threshold).
+
+**Issues & key learnings**
+
+- **A design doc's formula can assume a data shape the actual type doesn't
+  have — check the type before implementing the formula.** The original
+  design wrote the confidence formula as if `AssetForecast` carried
+  per-slot confidence; it doesn't (one `f64` for the whole forecast).
+  Averaging across samples was the natural fix, but it only became visible
+  by reading `AssetForecast`'s actual field list before writing code, not
+  by trusting the design doc's phrasing literally.
+- **Reusing the exact same function for two consumers (not just the same
+  formula) is what actually prevents divergence.** Both the planner-input
+  path and this API-visible path call `weather_pv_forecast_series`
+  directly rather than each computing "the PV forecast" independently —
+  the R-50 design decision from the previous session paid off here exactly
+  as intended.
+- Full local pyramid: 769/769 Rust tests green (+6: 4 confidence-formula
+  cases matching the design doc's worked example — uniform/broken/missing
+  variability, age_h decay — plus 2 on `build_weather_pv_forecast` itself),
+  `cargo fmt --check` clean, `cargo clippy --all-targets --all-features -D
+  warnings` clean (one real finding fixed: `unnecessary_to_owned` on a
+  `HashSet<String>` membership check), file-size audit clean, architecture
+  invariants empty.

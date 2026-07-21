@@ -9,6 +9,7 @@ pub mod sim;
 pub mod system;
 pub mod timeline;
 pub mod trace;
+pub mod weather;
 
 use axum::{
     http::Method,
@@ -28,6 +29,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
 
     Router::new()
         .route("/health", get(system::health))
+        .route("/weather", get(weather::get_weather))
         .route("/vtn/status", get(system::vtn_status))
         .route("/tasks/status", get(system::tasks_status))
         .route("/events/log", get(event_log::get_event_log))

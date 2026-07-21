@@ -610,3 +610,55 @@ export type AssetForecast = {
   soc: number[] | null;
   availability_windows: Array<{ start: string; end: string }> | null;
 };
+
+// ── Weather forecast plugin (weather-forecast-visibility) ────────────────────
+// Field names pass through the Rust WeatherResponse/WeatherForecast wire shape
+// verbatim (see VEN/src/routes/weather.rs, entities/weather.rs).
+
+export type SkyCondition =
+  | "clear"
+  | "mostly_clear"
+  | "partly_cloudy"
+  | "overcast"
+  | "fog"
+  | "rain"
+  | "sleet"
+  | "snow"
+  | "thunderstorm"
+  | "unknown";
+
+export type GeoPosition = { latitude_deg: number; longitude_deg: number };
+
+export type WeatherForecastSample = {
+  valid_at: string;
+  age_h: number;
+  temperature_c: number;
+  ghi_w_m2: number;
+  wind_speed_kmh: number | null;
+  rain_prob_pct: number | null;
+  new_snowfall_cm: number | null;
+  sky_condition: SkyCondition | null;
+  irradiance_variability: number | null;
+};
+
+export type WeatherForecast = {
+  source_id: string;
+  location: GeoPosition;
+  fetched_at: string;
+  samples: WeatherForecastSample[];
+};
+
+export type WeatherPvForecastSlot = {
+  valid_at: string;
+  forecast_ac_kw: number;
+  snow_covered: boolean;
+};
+
+export type WeatherStatus = "ok" | "stale" | "no_forecast";
+
+export type WeatherResponse = {
+  status: WeatherStatus;
+  is_fresh: boolean;
+  raw: WeatherForecast | null;
+  derived: WeatherPvForecastSlot[] | null;
+};

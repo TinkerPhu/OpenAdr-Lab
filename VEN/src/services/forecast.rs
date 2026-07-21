@@ -4,15 +4,20 @@
 
 use chrono::{DateTime, Utc};
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::controller::simulator_port::SimSnapshot;
+use crate::controller::WeatherForecastPort;
+use crate::entities::asset_params::PvForecastParams;
 use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics, ForecastSource};
 use crate::entities::plan::Plan;
+use crate::entities::weather::WeatherForecast;
 use crate::state::AppState;
 
 /// Everything that happens after a plan cycle resolves, in one call (kept
 /// here for the tasks/ file-size cap): WP4.3 new-warning notifications (only
 /// when the plan was adopted) followed by envelope/forecast publication.
+#[allow(clippy::too_many_arguments)]
 pub async fn finish_plan_cycle(
     state: &AppState,
     sim: &std::sync::Arc<tokio::sync::Mutex<crate::simulator::SimState>>,
@@ -20,6 +25,8 @@ pub async fn finish_plan_cycle(
     wall_now: DateTime<Utc>,
     prev_plan: Option<&Plan>,
     cycle: &crate::services::planning::PlanCycleResult,
+    weather: &Arc<dyn WeatherForecastPort>,
+    weather_pv_params: Option<&PvForecastParams>,
 ) {
     crate::services::notify::notify_new_plan_warnings(
         notifier,
@@ -31,7 +38,15 @@ pub async fn finish_plan_cycle(
     )
     .await;
     let sim_snap = sim.lock().await.to_sim_snapshot();
-    publish_post_cycle_state(state, &sim_snap, &cycle.plan, wall_now).await;
+    publish_post_cycle_state(
+        state,
+        &sim_snap,
+        &cycle.plan,
+        wall_now,
+        weather,
+        weather_pv_params,
+    )
+    .await;
 }
 
 /// Post-plan-cycle state publication: site flexibility envelope and per-asset
@@ -42,6 +57,8 @@ pub async fn publish_post_cycle_state(
     sim_snap: &SimSnapshot,
     adopted_plan: &Plan,
     wall_now: DateTime<Utc>,
+    weather: &Arc<dyn WeatherForecastPort>,
+    weather_pv_params: Option<&PvForecastParams>,
 ) {
     let env = crate::controller::envelope::compute_envelope(sim_snap, wall_now);
     state.set_site_envelope(env).await;
@@ -61,7 +78,69 @@ pub async fn publish_post_cycle_state(
             }
         }
     }
+    // R-50 (remainder): weather-sourced PV forecast. PV has no LP decision
+    // variable (see assets/pv.rs), so it never appears in `planned_kw_by_asset`
+    // — no precedence conflict with the Optimization-sourced forecasts above,
+    // same reasoning as the heuristics block. `None` (no config, no feed, or
+    // stale) leaves PV forecast-less here exactly as before this existed.
+    if let Some(params) = weather_pv_params {
+        if !existing_ids.contains(crate::ids::ASSET_PV) {
+            if let Some(forecast) = weather.latest().await {
+                if forecast.is_fresh(
+                    wall_now,
+                    crate::services::planning::WEATHER_STALENESS_THRESHOLD,
+                ) {
+                    forecasts.push(build_weather_pv_forecast(&forecast, params, wall_now));
+                }
+            }
+        }
+    }
     state.set_asset_forecasts(forecasts).await;
+}
+
+/// Weather-sourced PV forecast for the API-visible `/forecast` endpoint —
+/// the counterpart to R-50's planner-input wiring
+/// (`entities::solar::resolve_weather_pv_kw`), built from the same
+/// `weather_pv_forecast_series` so the two views can't silently diverge.
+///
+/// `AssetForecast.confidence` is a single overall scalar (not per-slot), so
+/// the per-hour `base_confidence(age_h) × (1 − irradiance_variability)`
+/// signal is averaged across the series. `base_confidence` is a starting
+/// default (linear decay to a 0.2 floor at the 48h horizon), not a measured
+/// curve — tune once real accuracy data exists.
+pub fn build_weather_pv_forecast(
+    forecast: &WeatherForecast,
+    params: &PvForecastParams,
+    now: DateTime<Utc>,
+) -> AssetForecast {
+    let series = crate::entities::solar::weather_pv_forecast_series(params, forecast);
+    // Sign convention: AssetForecast.power_kw is positive = import (see
+    // entities/design_vocabulary.rs); PV only exports, so negate.
+    let power_kw: Vec<f64> = series.iter().map(|s| -s.forecast_ac_kw).collect();
+    let confidence = if forecast.samples.is_empty() {
+        0.0
+    } else {
+        forecast.samples.iter().map(slot_confidence).sum::<f64>() / forecast.samples.len() as f64
+    };
+    AssetForecast {
+        asset_id: crate::ids::ASSET_PV.to_string(),
+        updated_at: now,
+        source: ForecastSource::WeatherModel,
+        confidence,
+        power_kw,
+        soc: None,
+        availability_windows: None,
+    }
+}
+
+/// `base_confidence(age_h) × (1 − irradiance_variability)` for one sample —
+/// see `build_weather_pv_forecast`'s doc comment for why this starting
+/// formula isn't a measured curve.
+fn slot_confidence(sample: &crate::entities::weather::WeatherForecastSample) -> f64 {
+    const HORIZON_H: f64 = 48.0;
+    const FLOOR: f64 = 0.2;
+    let base_confidence = (1.0 - sample.age_h as f64 / HORIZON_H).clamp(FLOOR, 1.0);
+    base_confidence * (1.0 - sample.irradiance_variability.unwrap_or(1.0))
 }
 
 /// Build one `AssetForecast` per learned heuristic, tagged
@@ -348,5 +427,118 @@ mod tests {
             (forecasts[0].power_kw[0] - 2.2).abs() < 1e-9,
             "a Saturday slot must sample the weekend bucket"
         );
+    }
+
+    // ── build_weather_pv_forecast / slot_confidence (R-50, task 8.4/8.5) ────
+
+    use crate::entities::asset_params::{PvArrayGeometry, PvForecastParams, PvSnowParams};
+    use crate::entities::weather::{GeoPosition, SkyCondition, WeatherForecastSample};
+
+    fn weather_sample(age_h: u32, irradiance_variability: Option<f64>) -> WeatherForecastSample {
+        WeatherForecastSample {
+            valid_at: ts(age_h as i64 * 3600),
+            age_h,
+            temperature_c: 20.0,
+            ghi_w_m2: 400.0,
+            wind_speed_kmh: None,
+            rain_prob_pct: None,
+            new_snowfall_cm: None,
+            sky_condition: Some(SkyCondition::Clear),
+            irradiance_variability,
+        }
+    }
+
+    fn weather_forecast(
+        samples: Vec<WeatherForecastSample>,
+    ) -> crate::entities::weather::WeatherForecast {
+        crate::entities::weather::WeatherForecast {
+            source_id: "test".into(),
+            location: GeoPosition {
+                latitude_deg: 47.4491,
+                longitude_deg: 7.8081,
+            },
+            fetched_at: ts(0),
+            samples,
+        }
+    }
+
+    fn pv_forecast_params() -> PvForecastParams {
+        PvForecastParams {
+            rated_kwp: 10.0,
+            geometry: PvArrayGeometry {
+                location: GeoPosition {
+                    latitude_deg: 47.4491,
+                    longitude_deg: 7.8081,
+                },
+                tilt_deg: 30.0,
+                azimuth_deg: 180.0,
+            },
+            performance_ratio: 0.87,
+            temp_coeff_pct_per_c: -0.35,
+            noct_c: 45.0,
+            ac_limit_kw: None,
+            snow: PvSnowParams::default(),
+        }
+    }
+
+    #[test]
+    fn slot_confidence_uniform_sky_is_not_reduced() {
+        let sample = weather_sample(1, Some(0.0)); // uniform sky (clear or overcast)
+        let base = (1.0 - 1.0 / 48.0_f64).clamp(0.2, 1.0);
+        assert!((slot_confidence(&sample) - base).abs() < 1e-9);
+    }
+
+    #[test]
+    fn slot_confidence_broken_sky_is_maximally_reduced() {
+        let sample = weather_sample(1, Some(1.0)); // maximally broken sky
+        assert_eq!(slot_confidence(&sample), 0.0);
+    }
+
+    #[test]
+    fn slot_confidence_missing_variability_treated_as_maximal_uncertainty() {
+        let sample = weather_sample(1, None);
+        assert_eq!(
+            slot_confidence(&sample),
+            0.0,
+            "missing irradiance_variability must be treated as maximum uncertainty, not stable"
+        );
+    }
+
+    #[test]
+    fn slot_confidence_decays_with_age_h() {
+        let near = weather_sample(1, Some(0.0));
+        let far = weather_sample(40, Some(0.0));
+        assert!(
+            slot_confidence(&near) > slot_confidence(&far),
+            "a same-quality forecast further out must have lower confidence"
+        );
+    }
+
+    #[test]
+    fn build_weather_pv_forecast_tags_source_and_negates_power() {
+        let params = pv_forecast_params();
+        let noon = chrono::Utc.with_ymd_and_hms(2026, 6, 21, 11, 0, 0).unwrap();
+        let forecast = weather_forecast(vec![WeatherForecastSample {
+            valid_at: noon,
+            ..weather_sample(1, Some(0.0))
+        }]);
+        let af = build_weather_pv_forecast(&forecast, &params, noon);
+        assert_eq!(af.asset_id, crate::ids::ASSET_PV);
+        assert_eq!(af.source, ForecastSource::WeatherModel);
+        assert_eq!(af.power_kw.len(), 1);
+        assert!(
+            af.power_kw[0] <= 0.0,
+            "PV forecast power must be non-positive (export), got {}",
+            af.power_kw[0]
+        );
+    }
+
+    #[test]
+    fn build_weather_pv_forecast_empty_samples_zero_confidence() {
+        let params = pv_forecast_params();
+        let forecast = weather_forecast(vec![]);
+        let af = build_weather_pv_forecast(&forecast, &params, ts(0));
+        assert_eq!(af.confidence, 0.0);
+        assert!(af.power_kw.is_empty());
     }
 }
