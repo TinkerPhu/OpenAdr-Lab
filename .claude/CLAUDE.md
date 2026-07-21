@@ -105,6 +105,17 @@ BSD-2-Clause, BSD-3-Clause, ISC, Unicode-3.0, Zlib, CDLA-Permissive-2.0, and the
 OpenSSL licence (aws-lc-sys). Review every new import — AI-generated code frequently
 introduces undeclared dependencies.
 
+ui-transparency: every backend capability, external feed/port, and piece of derived state must
+have a visible surface in the corresponding UI (VEN UI / VTN UI) — no functionality should exist
+only server-side with no way to inspect it. This applies to both the raw received state (e.g. a
+fetched external forecast, a polled upstream value) and any state VEN/VTN constructs from it (e.g.
+a derived forecast, a computed status). When adding a new capability, plan its UI surface (a
+status row, a diagnostics-page entry, a panel) as part of the same piece of work, not a deferred
+follow-up — a route or port with no UI-visible counterpart is an incomplete implementation, not a
+finished one with polish pending. Precedent: docs/plans/ven-ui-transparency.md and the WP-T1..T8
+work that put VTN connection/plan/task status directly on the VEN UI Dashboard and under its
+Diagnostics menu group.
+
 refactoring: before adding a feature in an area listed in docs/reference/TECHNICAL_DEBTS.md,
 check that file first. If the relevant debt is Small or Trivial effort, refactor it before
 adding new behaviour. All tests must pass before and after any refactor. Record newly
