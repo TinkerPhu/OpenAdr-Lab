@@ -38,6 +38,16 @@ planner:
   replan_interval_s: 300
   # c_ctrl_imp_malus_eur_kwh: 0.22  # default
 
+# Weather-sourced PV forecast (weather-forecast-plugin BDD scenarios). Site
+# coordinates and rated_kwp match the "pv" asset above and the BDD test
+# fixture's sample message location (Zunzgen, 47.4491/7.8081).
+weather_pv:
+  latitude_deg: 47.4491
+  longitude_deg: 7.8081
+  tilt_deg: 30.0
+  azimuth_deg: 180.0
+  rated_kwp: 5.0
+
 packets:
   - asset: ev
     target_soc: 0.80
