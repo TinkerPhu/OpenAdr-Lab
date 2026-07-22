@@ -1,7 +1,7 @@
 // WeatherForecastPort trait — the in-process seam between weather-consuming
 // code (services, planner) and any weather data source (currently: an MQTT
 // adapter, see `crate::weather`). Same ring as VtnPort/SolverPort/SimulatorPort.
-// See docs/plans/weather-forecast-plugin.md for the full architecture.
+// See docs/architecture/weather_forecast.md for the full architecture.
 
 use async_trait::async_trait;
 

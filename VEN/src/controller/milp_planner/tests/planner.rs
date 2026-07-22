@@ -89,7 +89,7 @@ fn run_planner_no_assets_covers_base_load() {
     }
 }
 
-// WP-T2 (docs/plans/ven-ui-transparency.md): a feasible solve reports
+// WP-T2 (docs/history/project_journal.md, search "WP-T"): a feasible solve reports
 // solve_status == Optimal and a non-zero objective_eur.
 #[test]
 fn test_plan_carries_optimal_status_and_objective_value() {
@@ -888,7 +888,7 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
         None,
     );
     assert_eq!(plan.slots.len(), 48, "fallback plan must have 48 slots");
-    // WP-T2 (docs/plans/ven-ui-transparency.md): the fallback path must be
+    // WP-T2 (docs/history/project_journal.md, search "WP-T"): the fallback path must be
     // distinguishable from a successful solve via solve_status, not just by
     // reading the warning text.
     assert_eq!(

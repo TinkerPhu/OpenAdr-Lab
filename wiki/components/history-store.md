@@ -4,18 +4,17 @@ type: component
 created: 2026-07-10
 updated: 2026-07-10
 synced_commit: c5a1d03
-sources: [VEN/src/history_store/, VEN/src/controller/history_port.rs, VEN/src/entities/history.rs, VEN/src/tasks/history_sampler/, VEN/src/routes/hems/history.rs, VEN/ui/src/pages/History.tsx, VTN/bff/src/recorder.rs, docs/plans/roadmap/phase-1-data-foundation.md]
+sources: [VEN/src/history_store/, VEN/src/controller/history_port.rs, VEN/src/entities/history.rs, VEN/src/tasks/history_sampler/, VEN/src/routes/hems/history.rs, VEN/ui/src/pages/History.tsx, VTN/bff/src/recorder.rs]
 tags: [history, sqlite, persistence, vtn, recorder, ports]
 ---
 
 # History Store (VEN local persistence + VTN recorder)
 
-Phase 1 ("Data Foundation", `docs/plans/roadmap/phase-1-data-foundation.md`) gave the VEN a
-durable, queryable record of its own operation, and gave the VTN-side BFF a Postgres
-recorder for programs/events/reports/VEN snapshots. Both close the same gap: before this
-phase, everything [[ven-ui]] and [[vtn-stack]] showed was either live-only (in-memory,
-lost on restart) or resampled forecast/history from [[simulator]] ring buffers, never a
-true operational log.
+Phase 1 ("Data Foundation") gave the VEN a durable, queryable record of its own
+operation, and gave the VTN-side BFF a Postgres recorder for programs/events/reports/VEN
+snapshots. Both close the same gap: before this phase, everything [[ven-ui]] and
+[[vtn-stack]] showed was either live-only (in-memory, lost on restart) or resampled
+forecast/history from [[simulator]] ring buffers, never a true operational log.
 
 ## VEN side: HistoryPort + SqliteHistoryStore
 

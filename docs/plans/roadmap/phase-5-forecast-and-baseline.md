@@ -50,24 +50,23 @@ The load the heuristics will forecast — build the consumer before the forecast
    predict week 6, compare MAE vs. last-known extrapolation — this produces the
    phase-exit evidence. Run against *real* accumulated fleet history, not synthetic.
 
-## WP5.3 — BL-17: ExternalDataSource — weather/irradiation/CO₂ (L)
+## WP5.3 — BL-17: weather/irradiation done; CO₂ remains (L)
 
-1. **Provider decision:** Open-Meteo (free, no API key, JSON, includes GHI/DNI
-   irradiation and cloud cover; commercial-use caveat acceptable for a lab). CO₂
-   intensity: Electricity Maps has no free tier — defer CO₂ *external* feed and keep
-   using event-delivered GHG values; note in BACKLOG.
-2. Implement the sketched contract (`ExternalDataSource`, `ExternalDataFetchStatus`):
-   poll loop per configured source (hourly, WP2.1 backoff on failure), cache last
-   good response with staleness marking. New port trait (`ExternalDataPort`) + HTTP
-   adapter + mock, per the standard pattern. **Offline-friendly:** the Pi4 lab must
-   keep working with the feed disabled or unreachable — staleness degrades to
-   heuristic/last-known, never blocks planning.
-3. PV forecast: map irradiation forecast through the PV asset's capacity to
-   `AssetForecast` tagged `ForecastSource::WeatherModel`; source precedence
-   WeatherModel > Heuristic > LastKnown (document in code).
-4. Tests: fake-server integration test asserting `fetch_status` transitions
-   (success/failure/timeout → Fresh/Stale/Failed); unit test for irradiation→kW
-   mapping against known panel params.
+**Weather/irradiation half: done.** Shipped as an MQTT-pushed feed rather than
+the originally-sketched `ExternalDataSource` poll loop — the production
+supplier (SRF Meteo, via the sibling `data_acquisition` project) pushes an
+hourly forecast over MQTT, VEN consumes it behind `WeatherForecastPort`, and
+`entities::solar` transposes GHI onto the PV array's plane (clear-sky-index
+method) to produce an `AssetForecast` tagged `ForecastSource::WeatherModel` —
+precedence `WeatherModel` > `Heuristic` > `LastKnown`, offline-friendly (a
+stale or absent feed falls back to the sin model, never blocks planning).
+Full architecture, wire contract, and known accuracy gaps:
+`docs/architecture/weather_forecast.md`; remaining minor debts tracked as
+R-52 through R-56 in `docs/reference/TECHNICAL_DEBTS.md`.
+
+**CO₂-intensity half: still open**, tracked as BL-17 in `docs/BACKLOG.md`
+(narrowed to CO₂ only). Electricity Maps has no free tier — no provider
+chosen yet; keep using event-delivered GHG values until one is.
 
 ## WP5.4 — Baselines + capability forecast + quality metadata (L)
 
@@ -104,10 +103,11 @@ validation slips; mitigate by landing WP5.1 + the synthetic-data pipeline first;
 (b) simulated households may be *too* regular, making heuristics look better than
 they'd be in reality — note this in the experiment write-up, and consider adding
 stochastic base-load noise to the simulator (small follow-up item, record in
-BACKLOG); (c) Open-Meteo coupling — the offline-degradation rule in WP5.3 step 2 is
-non-negotiable and must have a resilience-suite scenario.
+BACKLOG); (c) MQTT weather-feed coupling — the offline-degradation rule (stale
+or absent feed falls back to the sin model) is non-negotiable and has
+resilience-suite coverage.
 
-Bookkeeping: mark BL-08/14/17 resolved, cert rows §6 (forecast/historical/quality)
+Bookkeeping: mark BL-08/14 resolved and BL-17 narrowed to CO₂-only, cert rows §6 (forecast/historical/quality)
 updated; `StaleRatePolicy::HEURISTIC_FORECAST` stub note removed; journal +
 `/wiki-sync` ([[milp-planner]], [[tariffs-and-capacity]], new forecasting concept
 page); add BACKLOG items for CO₂ feed and simulator noise if adopted.

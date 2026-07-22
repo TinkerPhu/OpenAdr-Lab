@@ -1,4 +1,4 @@
-//! WP-T4 (`docs/plans/ven-ui-transparency.md`) — Event Log: VEN-operational
+//! WP-T4 (`docs/history/project_journal.md, search "WP-T"`) — Event Log: VEN-operational
 //! events (VTN connectivity failures, storage errors, task panics/restarts),
 //! deliberately separate from the resident-facing Notifications feed
 //! (`services/notify.rs`) — different ring, different broadcast channel,

@@ -1,6 +1,6 @@
 //! Snow-cover state model for weather-sourced PV forecasting — a near-binary
 //! self-clearing state machine, not a continuous melt-depth integrator. See
-//! `docs/plans/weather-forecast-plugin.md` ("Snow cover") for the physical
+//! `docs/architecture/weather_forecast.md` ("Snow cover") for the physical
 //! reasoning. Pure state transition + fold, no I/O.
 //!
 //! Consumed by `entities::solar::weather_pv_forecast_series`, used by both

@@ -7,7 +7,7 @@ import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import type { Plan, TaskStatusEntry, VtnStatus } from "../../api/types";
 
-// WP-T8 (docs/plans/ven-ui-transparency.md §3.3): shared traffic-light row —
+// WP-T8 (docs/history/project_journal.md, search "WP-T" §3.3): shared traffic-light row —
 // a single-line healthy state, or a degraded state whose detail only shows
 // once expanded. Same idiom PlanHeaderBar.tsx already uses for warnings.
 type Severity = "ok" | "warn" | "neutral";

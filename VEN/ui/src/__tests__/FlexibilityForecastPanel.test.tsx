@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 import { FlexibilityForecastPanel } from "../components/controller/FlexibilityForecastPanel";
 import type { AssetCapability, AssetForecast } from "../api/types";
 
-// WP-T6 (docs/plans/ven-ui-transparency.md): wires GET /capability/:asset_id
+// WP-T6 (docs/history/project_journal.md, search "WP-T"): wires GET /capability/:asset_id
 // and GET /forecast.
 
 const mockCapabilities = vi.fn((): Array<{ data?: AssetCapability }> => []);

@@ -1,7 +1,7 @@
 """Step definitions for the weather-forecast-plugin BDD scenarios
 (weather_forecast.feature). Requires the `mosquitto` test-broker service in
 tests/docker-compose.test.yml and the `weather_pv` section in
-VEN/profiles/test.yaml — see docs/plans/weather-forecast-implementation-plan.md
+VEN/profiles/test.yaml — see docs/architecture/weather_forecast.md
 Phase 8.
 """
 

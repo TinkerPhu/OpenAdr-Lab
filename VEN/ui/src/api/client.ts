@@ -354,7 +354,7 @@ export class VenApi {
     return raw.map((row) => ({ ...row, sent_at: new Date(row.sent_at).getTime() }));
   }
 
-  // WP-T6 (docs/plans/ven-ui-transparency.md): wiring previously-unused routes.
+  // WP-T6 (docs/history/project_journal.md, search "WP-T"): wiring previously-unused routes.
 
   async historyPlans(params: { from: string; to: string }): Promise<PlanSnapshot[]> {
     const qs = new URLSearchParams({ from: params.from, to: params.to });

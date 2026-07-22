@@ -1,4 +1,4 @@
-//! WP-T3 (`docs/plans/ven-ui-transparency.md`) accessors — split out of
+//! WP-T3 (`docs/history/project_journal.md, search "WP-T"`) accessors — split out of
 //! `mod.rs` to keep it under the file-size cap; behaves as an ordinary
 //! `impl AppState` block.
 //!

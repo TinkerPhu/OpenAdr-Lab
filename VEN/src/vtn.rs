@@ -146,7 +146,7 @@ impl VtnClient {
         *self.token.write().await = None;
     }
 
-    /// WP-T1 (`docs/plans/ven-ui-transparency.md`): wall-clock expiry of the
+    /// WP-T1 (`docs/history/project_journal.md, search "WP-T"`): wall-clock expiry of the
     /// currently cached token, for `GET /vtn/status`. `Instant` is monotonic, so
     /// this derives an approximate `DateTime<Utc>` from elapsed time since
     /// acquisition — read-only observability, not used by `ensure_token`'s own
@@ -708,7 +708,7 @@ mod tests {
         );
     }
 
-    // WP-T1 (docs/plans/ven-ui-transparency.md): token expiry observability.
+    // WP-T1 (docs/history/project_journal.md, search "WP-T"): token expiry observability.
 
     #[tokio::test]
     async fn token_expires_at_reflects_expires_in_from_acquisition() {

@@ -4,7 +4,7 @@ import {
 } from "@mui/material";
 import { useTasksStatus } from "../api/hooks";
 
-// WP-T3 (docs/plans/ven-ui-transparency.md): the "healthy" signal is
+// WP-T3 (docs/history/project_journal.md, search "WP-T"): the "healthy" signal is
 // restart_count === 0, not last_success — last_success is legitimately null
 // for a task on its first, still-running attempt (these tasks loop forever
 // by design and only return to the supervisor when they panic).

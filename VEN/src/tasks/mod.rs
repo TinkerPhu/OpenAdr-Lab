@@ -30,7 +30,7 @@ pub(crate) use state_persist::spawn_state_persist;
 /// `make_task` is called each time the task is (re-)started. It must return a
 /// `JoinHandle` that drives the task to completion (or panic).
 ///
-/// WP-T3 (`docs/plans/ven-ui-transparency.md`): records each (re)start and
+/// WP-T3 (`docs/history/project_journal.md, search "WP-T"`): records each (re)start and
 /// completion on `state.task_status` for `GET /tasks/status` — the only place
 /// `supervised_spawn`'s restart behavior was previously observable was the log.
 pub(crate) fn supervised_spawn(

@@ -265,7 +265,7 @@ pub struct Plan {
     #[serde(default)]
     pub cost_breakdown: CostBreakdown,
     /// Whether this plan came from a successful MILP solve or the infeasibility
-    /// fallback (WP-T2, `docs/plans/ven-ui-transparency.md`).
+    /// fallback (WP-T2, `docs/history/project_journal.md, search "WP-T"`).
     #[serde(default = "SolveStatus::default_optimal")]
     pub solve_status: SolveStatus,
 }

@@ -34,7 +34,7 @@ services:
       PERSIST_PATH: "/data/state.json"
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
-      # Weather forecast plugin (docs/plans/weather-forecast-plugin.md).
+      # Weather forecast plugin (docs/architecture/weather_forecast.md).
       # Reaches the pre-existing, unrelated Pi4-Server Mosquitto deployment
       # (/srv/docker/mosquitto, on its own external influxdb_network) via
       # its published host port rather than joining that network — keeps

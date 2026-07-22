@@ -1,7 +1,7 @@
 //! `GET /weather` — read-only visibility into the weather-forecast plugin:
 //! the most recently received forecast plus, when a `weather_pv` profile
 //! section is configured, its derived PV forecast. See
-//! docs/plans/weather-forecast-plugin.md and the weather-forecast-visibility
+//! docs/architecture/weather_forecast.md and the weather-forecast-visibility
 //! OpenSpec change. Computes its own view independently of the planner's PV
 //! input (`tasks::planning::spawn_planning`) — both resolve through
 //! `entities::solar::resolve_weather_pv_kw`/`weather_pv_forecast_series`
@@ -19,7 +19,7 @@ use crate::AppCtx;
 
 /// Cached forecasts older than this are still shown (never hidden) but
 /// flagged `status: "stale"` — mirrors `WeatherForecast::is_fresh`'s own
-/// starting default (see docs/plans/weather-forecast-plugin.md's staleness
+/// starting default (see docs/architecture/weather_forecast.md's staleness
 /// policy discussion).
 const STALENESS_THRESHOLD: Duration = Duration::hours(2);
 
