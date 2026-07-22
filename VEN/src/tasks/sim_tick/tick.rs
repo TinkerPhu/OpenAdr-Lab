@@ -5,7 +5,10 @@ use tokio::sync::Mutex;
 
 use crate::controller::SimulatorPort;
 use crate::controller::VtnPort;
+use crate::controller::WeatherForecastPort;
 use crate::entities::asset::PlanTrigger;
+use crate::entities::asset_params::PvForecastParams;
+use crate::entities::solar::resolve_weather_pv_kw;
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
 use crate::state::{AppState, EvSettings};
@@ -24,6 +27,8 @@ pub(crate) async fn tick_once(
     mut report_counter: u64,
     report_every_ticks: u64,
     tick_s: u64,
+    weather: Arc<dyn WeatherForecastPort>,
+    weather_pv_params: Option<PvForecastParams>,
 ) -> (u64, u64) {
     let now = chrono::Utc::now();
     let dt_s = tick_s as f64;
@@ -31,6 +36,25 @@ pub(crate) async fn tick_once(
     // PHASE 0: Snapshot — events, inject, plan, capacity, tariffs, overlay flag
     let _events = state.events().await;
     let inject = state.inject_state().await;
+
+    // Weather-sourced PV power for this exact instant — same translation
+    // (staleness gating, transposition physics, calibration) the planner's
+    // own PV input uses (R-50); reused here via the one shared entry point
+    // rather than re-derived. `.await` must happen before the sync sim lock
+    // below, mirroring services::planning::resolve_weather_pv_kw_for_cycle.
+    let weather_pv_kw_now: Option<f64> = if weather_pv_params.is_some() {
+        let forecast = weather.latest().await;
+        resolve_weather_pv_kw(
+            weather_pv_params.as_ref(),
+            forecast.as_ref(),
+            now,
+            crate::services::planning::WEATHER_STALENESS_THRESHOLD,
+            &[now],
+        )
+        .and_then(|v| v.first().copied())
+    } else {
+        None
+    };
 
     // Pre-tick: snapshot plan/capacity/tariffs for dispatcher
     let plan_snap = state.active_plan().await;
@@ -71,8 +95,13 @@ pub(crate) async fn tick_once(
         // is last tick's value. `peek_pv_kw` previews what physics is about
         // to compute for `now`, avoiding the one-tick lag `pre_snap` would
         // otherwise introduce into the EV-surplus overlay.
-        let live_pv_kw =
-            sim_guard.peek_pv_kw(now, dt_s, inject.pv_irradiance, inject.pv_irradiance_alpha);
+        let live_pv_kw = sim_guard.peek_pv_kw(
+            now,
+            dt_s,
+            inject.pv_irradiance,
+            inject.pv_irradiance_alpha,
+            weather_pv_kw_now,
+        );
 
         let sp_map = super::helpers::build_tick_setpoints(
             &pre_snap,
@@ -100,6 +129,7 @@ pub(crate) async fn tick_once(
             inject.base_load_alpha,
             inject.ev_plugged,
             inject.ev_soc_target,
+            weather_pv_kw_now,
         );
 
         // PHASE 4 (in-lock): extract snapshots and mutate history/grid/envelope.

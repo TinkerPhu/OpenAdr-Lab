@@ -45,7 +45,7 @@ mod peek_pv_kw_tests {
     #[test]
     fn peek_pv_kw_returns_none_without_pv_asset() {
         let sim = SimState::from_params(&[]);
-        assert_eq!(sim.peek_pv_kw(noon(), 30.0, None, 0.1), None);
+        assert_eq!(sim.peek_pv_kw(noon(), 30.0, None, 0.1, None), None);
     }
 
     #[test]
@@ -60,7 +60,7 @@ mod peek_pv_kw_tests {
         let pv_alpha = 0.1;
 
         let preview = sim
-            .peek_pv_kw(now, dt_s, None, pv_alpha)
+            .peek_pv_kw(now, dt_s, None, pv_alpha, None)
             .expect("PV asset is configured");
 
         sim.tick(
@@ -74,6 +74,7 @@ mod peek_pv_kw_tests {
             None,
             None,
             0.1,
+            None,
             None,
             None,
         );
@@ -99,7 +100,7 @@ mod peek_pv_kw_tests {
         sim.pv_smoothing.irradiance_offset = 0.9;
 
         let preview = sim
-            .peek_pv_kw(noon(), 30.0, Some(0.5), 0.1)
+            .peek_pv_kw(noon(), 30.0, Some(0.5), 0.1, None)
             .expect("PV asset is configured");
         assert!(
             (preview + 5.0).abs() < 1e-9,
@@ -117,11 +118,74 @@ mod peek_pv_kw_tests {
         }
 
         let preview = sim
-            .peek_pv_kw(noon(), 30.0, Some(1.0), 0.1)
+            .peek_pv_kw(noon(), 30.0, Some(1.0), 0.1, None)
             .expect("PV asset is configured");
         assert!(
             (preview + 2.0).abs() < 1e-9,
             "export limit of -2.0 kW must clamp full-irradiance output, got {preview}"
+        );
+    }
+
+    #[test]
+    fn peek_pv_kw_uses_weather_when_no_manual_override() {
+        let sim = pv_state(10.0); // sin model at noon would be near-full irradiance
+        let preview = sim
+            .peek_pv_kw(noon(), 30.0, None, 0.1, Some(4.2))
+            .expect("PV asset is configured");
+        assert!(
+            (preview + 4.2).abs() < 1e-9,
+            "weather value must override the sin model when no manual inject is active, got {preview}"
+        );
+    }
+
+    #[test]
+    fn peek_pv_kw_manual_override_wins_over_weather() {
+        let sim = pv_state(10.0);
+        let preview = sim
+            .peek_pv_kw(noon(), 30.0, Some(0.5), 0.1, Some(4.2))
+            .expect("PV asset is configured");
+        assert!(
+            (preview + 5.0).abs() < 1e-9,
+            "manual sim inject must win over the weather value, got {preview}"
+        );
+    }
+
+    #[test]
+    fn peek_pv_kw_matches_tick_output_with_weather_for_same_now() {
+        let mut sim = pv_state(10.0);
+        let now = noon();
+        let dt_s = 30.0;
+
+        let preview = sim
+            .peek_pv_kw(now, dt_s, None, 0.1, Some(7.0))
+            .expect("PV asset is configured");
+
+        sim.tick(
+            dt_s,
+            HashMap::new(),
+            now,
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            None,
+            0.1,
+            None,
+            None,
+            Some(7.0),
+        );
+
+        let pv_entry = sim
+            .assets
+            .iter()
+            .find(|e| e.id == crate::ids::ASSET_PV)
+            .expect("PV asset entry must exist");
+        assert!(
+            (pv_entry.last_power_kw - preview).abs() < 1e-9,
+            "peek_pv_kw ({preview}) must equal tick()'s actual PV output ({}) when a weather \
+             value is supplied, same as the sin-model case",
+            pv_entry.last_power_kw
         );
     }
 }
@@ -176,6 +240,7 @@ mod base_load_noise_tests {
             0.1,
             None,
             None,
+            None,
         );
 
         let entry = sim
@@ -212,6 +277,7 @@ mod base_load_noise_tests {
             0.1,
             None,
             None,
+            None,
         );
 
         let entry = sim
@@ -242,6 +308,7 @@ mod base_load_noise_tests {
             None,
             None,
             0.1,
+            None,
             None,
             None,
         );
@@ -353,6 +420,7 @@ mod unmodelled_load_tests {
             None,
             None,
             0.1,
+            None,
             None,
             None,
         );

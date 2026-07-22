@@ -47,6 +47,8 @@ mod tests {
             0,   // report_counter
             100, // report_every_ticks — no report this tick
             1,   // tick_s
+            Arc::new(crate::controller::NoopWeatherPort),
+            None, // weather_pv_params
         )
         .await;
         // passes if no panic
@@ -96,6 +98,8 @@ mod tests {
             0,   // report_counter
             100, // report_every_ticks — no report this tick
             1,   // tick_s
+            Arc::new(crate::controller::NoopWeatherPort),
+            None, // weather_pv_params
         )
         .await;
 

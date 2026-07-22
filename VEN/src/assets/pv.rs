@@ -20,6 +20,14 @@ pub struct PvInverter {
     /// Per-tick decay factor for irradiance_offset (0–1). Set from pv_irradiance_alpha inject.
     /// NOT from YAML.
     pub pv_alpha: f64,
+    /// Weather-sourced actual power for this tick (kW, generation-positive),
+    /// via `entities::solar::resolve_weather_pv_kw` — the same translation
+    /// the planner's own PV input uses (R-50), reused here rather than
+    /// reimplemented. `None` when no weather feed is configured, the cached
+    /// forecast has gone stale, or a manual `pv_irradiance_override` inject
+    /// is active (that takes precedence — see `SimState::tick`). Set each
+    /// tick by the sim loop. NOT from YAML.
+    pub weather_power_kw: Option<f64>,
 }
 
 /// PV mutable state.
@@ -37,6 +45,7 @@ impl PvInverter {
             irradiance: 0.0,
             irradiance_offset: 0.0,
             pv_alpha: 0.1,
+            weather_power_kw: None,
         }
     }
 
@@ -47,9 +56,14 @@ impl PvInverter {
     }
 
     /// Pure physics step. Ignores setpoint (non-curtailable in Phase A).
-    /// Reads `self.irradiance` (set by sim loop each tick before calling).
+    /// Reads `self.weather_power_kw` if set (weather-sourced actual, takes
+    /// precedence), else `self.irradiance` (sin model or manual override —
+    /// both set by sim loop each tick before calling).
     pub fn step_inner(&self, _state: &PvState, _setpoint_kw: f64, _dt: Duration) -> (PvState, f64) {
-        let raw_kw = -(self.rated_kw * self.irradiance); // negative = export
+        let raw_kw = match self.weather_power_kw {
+            Some(weather_kw) => -weather_kw.max(0.0), // negative = export
+            None => -(self.rated_kw * self.irradiance), // negative = export
+        };
         let actual_kw = self
             .export_limit_kw
             .map(|lim| raw_kw.max(lim)) // lim ≤ 0; max() clamps to less export
@@ -323,11 +337,56 @@ mod tests {
                 irradiance_offset: 0.0,
                 pv_alpha: 0.1,
                 export_limit_kw: None,
+                weather_power_kw: None,
             },
             PvState {
                 actual_power_kw: 0.0,
             },
         )
+    }
+
+    // ── step_inner: weather_power_kw precedence ──────────────────────────────
+
+    #[test]
+    fn step_inner_uses_weather_power_kw_when_set() {
+        let (mut pv, state) = make_pv(10.0);
+        pv.irradiance = 1.0; // would give -10.0 kW via the sin/manual path if used
+        pv.weather_power_kw = Some(6.5);
+        let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
+        assert!(
+            (power_kw + 6.5).abs() < 1e-9,
+            "weather_power_kw must override the irradiance-based calc, got {power_kw}"
+        );
+    }
+
+    #[test]
+    fn step_inner_falls_back_to_irradiance_when_weather_power_kw_is_none() {
+        let (pv, state) = make_pv(10.0);
+        let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
+        // make_pv sets irradiance=0.0 → 0.0 kW either way, but confirms no panic/None-handling bug.
+        assert!((power_kw - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn step_inner_clamps_weather_power_kw_to_export_limit() {
+        let (mut pv, state) = make_pv(10.0);
+        pv.weather_power_kw = Some(9.0);
+        pv.export_limit_kw = Some(-3.0);
+        let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
+        assert!(
+            (power_kw + 3.0).abs() < 1e-9,
+            "export_limit_kw must still clamp weather-sourced output, got {power_kw}"
+        );
+    }
+
+    #[test]
+    fn step_inner_treats_negative_weather_power_kw_as_zero() {
+        // forecast_ac_kw is documented non-negative, but defend against a
+        // malformed/negative value rather than silently flipping sign to import.
+        let (mut pv, state) = make_pv(10.0);
+        pv.weather_power_kw = Some(-2.0);
+        let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
+        assert!((power_kw - 0.0).abs() < 1e-9, "got {power_kw}");
     }
 
     #[test]
@@ -415,6 +474,7 @@ mod tests {
             irradiance_offset: 0.0,
             pv_alpha: 0.1,
             export_limit_kw: None,
+            weather_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: -5.0,
@@ -466,6 +526,7 @@ mod tests {
             irradiance_offset: 0.3,
             pv_alpha: 0.0, // alpha=0 → offset never decays → full offset at every slot
             export_limit_kw: None,
+            weather_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
@@ -496,6 +557,7 @@ mod tests {
             irradiance_offset: 0.4,
             pv_alpha: 1.0, // full decay after 1 tick
             export_limit_kw: None,
+            weather_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
@@ -525,6 +587,7 @@ mod tests {
             irradiance_offset: 0.4,
             pv_alpha: 0.1,
             export_limit_kw: None,
+            weather_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
@@ -572,6 +635,7 @@ mod tests {
             irradiance_offset: 0.0,
             pv_alpha: 0.1,
             export_limit_kw: None,
+            weather_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
@@ -597,6 +661,7 @@ mod tests {
             irradiance_offset: 0.2,
             pv_alpha: 0.0, // no decay → offset constant at 0.2 everywhere
             export_limit_kw: None,
+            weather_power_kw: None,
         };
         // Verify offset is read from self.irradiance_offset, not from self.irradiance.
         // With pv_alpha=0 and offset=0.2, each slot must equal sin(t)+0.2 (clamped).
