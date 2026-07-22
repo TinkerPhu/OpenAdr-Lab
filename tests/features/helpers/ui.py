@@ -188,7 +188,7 @@ class VenUi:
             raise
 
     def go_raw_diagnostics(self):
-        # WP-T8 (docs/plans/ven-ui-transparency.md): Raw Data now lives behind
+        # WP-T8 (docs/history/project_journal.md, search "WP-T"): Raw Data now lives behind
         # the "Diagnostics" nav menu instead of a flat top-level tab.
         self.page.click(tid("nav-diagnostics-menu"))
         self.page.click(tid("nav-raw-diagnostics"))

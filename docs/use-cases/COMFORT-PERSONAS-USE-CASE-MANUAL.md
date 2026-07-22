@@ -1,7 +1,9 @@
 # Phase 4 Use Case Manual — Comfort & Personas (Manual Test Procedures)
 
 This manual contains human-executable, step-by-step test procedures for every Phase 4
-work package (`docs/plans/roadmap/phase-4-comfort-and-personas.md`). Each section
+work package (comfort curves, notifications, stale-rate policy, personas — all shipped;
+see `wiki/components/heuristics-pipeline.md`, `wiki/components/notifications.md`, and
+`wiki/components/fleet-tooling.md` for the current-state architecture). Each section
 verifies the new behaviour of one WP against the running lab, the same way
 `SYSTEM-USE-CASE-MANUAL.md` replays the VTN-side use cases. One section is appended
 per WP as it lands.

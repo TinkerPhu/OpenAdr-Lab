@@ -91,7 +91,7 @@ planner:
     - step_s: 900
       slots: 96   # 24 h at 15-min resolution
 
-# Weather-sourced PV forecast (docs/plans/weather-forecast-plugin.md).
+# Weather-sourced PV forecast (docs/architecture/weather_forecast.md).
 # 8 kWp hypothetical array at the same Zunzgen site/geometry as ven-1
 # (which uses the real 14.4 kWp installation as calibration reference) —
 # kept smaller here intentionally for cross-VEN comparison. performance_ratio

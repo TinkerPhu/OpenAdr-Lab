@@ -134,7 +134,7 @@ impl PvParams {
 
 // ── PV weather-sourced forecast (additive — see PvParams above for the
 //    sin-model path used by the simulator; this is the real-weather path,
-//    docs/plans/weather-forecast-plugin.md) ──────────────────────────────────
+//    docs/architecture/weather_forecast.md) ─────────────────────────────────
 
 /// PV array geometry, independent of electrical rating: geo-position, panel
 /// tilt (0°=horizontal, 90°=vertical), and panel azimuth (compass bearing

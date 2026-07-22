@@ -6,12 +6,11 @@ VEN's PV forecast today comes from two internal sources only —
 weather data anywhere in the pipeline. The full technical design (transport
 architecture, data structures, transposition physics, sky-condition and
 snow-cover models, and the exact MQTT wire contract) is written up in
-`docs/plans/weather-forecast-plugin.md`; the phased build order is in
-`docs/plans/weather-forecast-implementation-plan.md`. This design.md
-summarizes the key architectural decisions from those documents for the
-OpenSpec record; it does not restate every formula — see those docs for
-the full derivations (solar position, clear-sky-index transposition, NOCT
-cell-temperature model, snow self-clearing state machine).
+`docs/architecture/weather_forecast.md`, which reflects the shipped
+implementation. This design.md summarizes the key architectural decisions
+for the OpenSpec record; it does not restate every formula — see that doc
+for the full derivations (solar position, clear-sky-index transposition,
+NOCT cell-temperature model, snow self-clearing state machine).
 
 Existing patterns this change follows: the port-per-external-system shape
 already used for `VtnPort`, `SolverPort`, `SimulatorPort`

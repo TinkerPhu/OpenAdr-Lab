@@ -24,7 +24,7 @@ const mockEvents = [
 const mockReports = [
   { sent_at: Date.UTC(2026, 0, 1, 8), report_type: "USAGE", event_id: "evt-1", payload_json: "{}" },
 ];
-// WP-T6 (docs/plans/ven-ui-transparency.md): wires GET /history/plans.
+// WP-T6 (docs/history/project_journal.md, search "WP-T"): wires GET /history/plans.
 const mockPlans = [
   {
     created_at: Date.UTC(2026, 0, 1, 9),

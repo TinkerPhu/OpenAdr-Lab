@@ -16,7 +16,7 @@
 | **SG-1 Fleet** | Run a fleet of independent, *diverse* VEN agents against one VTN | **Built.** `fleet.sh up N` (bulk registration, personas, health checks); resource budget on the Pi4 caps practical size at N=3 base + fleet VENs |
 | **SG-2 Control-method lab** | Observe and compare VTN control methods (tariffs, limits, alerts, SIMPLE, dispatch) | **Built, not yet exercised.** All control paths implemented and BDD-covered; the experiment harness exists — the first full S-1…S-6 comparison run is still pending (see §3.1) |
 | **SG-3 Report evaluation** | Judge the *usefulness* of VEN reports from the VTN side | **Directional only.** VTN recorder archives reports incl. `report_lag_s`; rigorous M&V-grade evaluation needs BASELINE reports (WP5.4, §3.2) |
-| **SG-4 Forecast from history** | VEN learns heuristics from its own past data | **Half done.** History store + learned weekday/weekend heuristics ship and feed the planner; external weather/CO₂ feeds (WP5.3) and the held-out-week validation demo remain |
+| **SG-4 Forecast from history** | VEN learns heuristics from its own past data | **Mostly done.** History store + learned weekday/weekend heuristics ship and feed the planner; a live weather feed (MQTT, `docs/architecture/weather_forecast.md`) now drives a physics-based PV forecast too. Remaining: the held-out-week validation demo and an external grid-CO₂ feed (BL-17) |
 | **SG-5 Client comfort** | The resident's experience is first-class | **Mostly done.** Request modes, comfort-curve overrides, notifications, History UI ship — with one substantive gap: comfort curves never reach the MILP constraints (BL-34) |
 
 SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort** axis.
@@ -57,11 +57,11 @@ Scenario matrix and KPI definitions: §4 below.
 
 | WP | Item | Content |
 |----|------|---------|
-| WP5.3 | BL-17 `ExternalDataSource` | Weather/irradiation/CO₂-forecast ingestion (Open-Meteo sketched), cached with `ExternalDataFetchStatus`, feeding `ForecastSource::WeatherModel` forecasts — PV forecasting from physics + weather instead of history alone |
+| WP5.3 | BL-17 weather/PV done; CO₂ remains | PV forecasting from physics + a live MQTT weather feed ships (`docs/architecture/weather_forecast.md`, tagged `ForecastSource::WeatherModel`) — an MQTT push from SRF Meteo rather than the originally-sketched `ExternalDataSource` poll loop. Grid-CO₂-intensity forecast ingestion is the one part of BL-17 still open (no free-tier provider evaluated) |
 | WP5.4 | BASELINE + capability forecast | `BASELINE` report = heuristic forecast computed *as if no event* (M&V counterfactual); parse `reportDescriptor.historical`; `LOAD_SHED_DELTA_AVAILABLE`/`GENERATION_DELTA_AVAILABLE` payloads; data-quality metadata. **This is what upgrades SG-3 from directional to rigorous** |
 | exit | Validation demo | Heuristic forecast beats last-known extrapolation on a held-out week; baseline reports quantify one event's impact |
 
-Plan: `docs/plans/roadmap/phase-5-forecast-and-baseline.md` (WP5.1/WP5.2 are done).
+Plan: `docs/plans/roadmap/phase-5-forecast-and-baseline.md` (WP5.1/WP5.2/WP5.3-weather are done).
 
 ### 3.3 Comfort remainder (SG-5)
 

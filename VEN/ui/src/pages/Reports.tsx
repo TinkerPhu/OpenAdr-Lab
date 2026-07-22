@@ -175,7 +175,7 @@ export function ReportsPage() {
         </Button>
       </Stack>
 
-      {/* WP-T6 (docs/plans/ven-ui-transparency.md): wires GET /obligations,
+      {/* WP-T6 (docs/history/project_journal.md, search "WP-T"): wires GET /obligations,
           previously unused — pending report obligations derived from VTN events. */}
       <TableContainer component={Paper}>
         <Table size="small" data-testid="obligations-table">

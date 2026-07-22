@@ -112,9 +112,9 @@ fetched external forecast, a polled upstream value) and any state VEN/VTN constr
 a derived forecast, a computed status). When adding a new capability, plan its UI surface (a
 status row, a diagnostics-page entry, a panel) as part of the same piece of work, not a deferred
 follow-up — a route or port with no UI-visible counterpart is an incomplete implementation, not a
-finished one with polish pending. Precedent: docs/plans/ven-ui-transparency.md and the WP-T1..T8
-work that put VTN connection/plan/task status directly on the VEN UI Dashboard and under its
-Diagnostics menu group.
+finished one with polish pending. Precedent: the WP-T1..T8 work (openspec/changes/wp-t{1..8}-*/,
+docs/history/project_journal.md — search "WP-T") that put VTN connection/plan/task status directly
+on the VEN UI Dashboard and under its Diagnostics menu group.
 
 refactoring: before adding a feature in an area listed in docs/reference/TECHNICAL_DEBTS.md,
 check that file first. If the relevant debt is Small or Trivial effort, refactor it before

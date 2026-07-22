@@ -5,7 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MetricsPage } from "../pages/Metrics";
 
-// WP-T7 (docs/plans/ven-ui-transparency.md): the metrics this VEN actually
+// WP-T7 (docs/history/project_journal.md, search "WP-T"): the metrics this VEN actually
 // emits, grep-confirmed against VEN/src's `counter!` call sites.
 const realMetricsText = [
   'poll_success_total{resource="events"} 42',

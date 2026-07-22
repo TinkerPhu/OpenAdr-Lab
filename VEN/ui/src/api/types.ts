@@ -1,4 +1,4 @@
-// WP-T1 (docs/plans/ven-ui-transparency.md): componentised health, replacing the
+// WP-T1 (docs/history/project_journal.md, search "WP-T"): componentised health, replacing the
 // previous plain "ok" string GET /health used to return.
 export type HealthComponentStatus = { status: "ok" | "degraded"; detail?: string };
 
@@ -20,7 +20,7 @@ export type VtnStatus = {
   token_expires_at: string | null;
 };
 
-// WP-T3 (docs/plans/ven-ui-transparency.md): per-task restart/outcome status.
+// WP-T3 (docs/history/project_journal.md, search "WP-T"): per-task restart/outcome status.
 export type TaskStatusEntry = {
   name: string;
   last_run_ts: string | null;
@@ -28,7 +28,7 @@ export type TaskStatusEntry = {
   restart_count: number;
 };
 
-// WP-T4 (docs/plans/ven-ui-transparency.md): VEN-operational Event Log entry,
+// WP-T4 (docs/history/project_journal.md, search "WP-T"): VEN-operational Event Log entry,
 // deliberately separate from UserNotification (see Notifications types).
 export type EventLogEntry = {
   id: string;
@@ -563,7 +563,7 @@ export type HistoryReportSent = {
   payload_json: string;
 };
 
-// WP-T6 (docs/plans/ven-ui-transparency.md): wiring previously-unused routes.
+// WP-T6 (docs/history/project_journal.md, search "WP-T"): wiring previously-unused routes.
 
 export type PlanSnapshot = {
   created_at: number;

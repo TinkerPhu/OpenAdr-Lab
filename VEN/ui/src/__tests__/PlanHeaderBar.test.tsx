@@ -172,7 +172,7 @@ describe("PlanHeaderBar", () => {
     expect(warning.textContent).toContain("Curtail load immediately");
   });
 
-  // WP-T2 (docs/plans/ven-ui-transparency.md): infeasible chip must be a
+  // WP-T2 (docs/history/project_journal.md, search "WP-T"): infeasible chip must be a
   // distinct signal from the generic warnings badge.
   it("renders infeasible chip when solve_status is INFEASIBLE", () => {
     const plan = makePlan({

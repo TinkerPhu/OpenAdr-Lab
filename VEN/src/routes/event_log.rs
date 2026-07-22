@@ -1,4 +1,4 @@
-//! WP-T4 (`docs/plans/ven-ui-transparency.md`) — Event Log routes.
+//! WP-T4 (`docs/history/project_journal.md, search "WP-T"`) — Event Log routes.
 //! Deliberately separate from `routes/notifications.rs`: different ring,
 //! different broadcast channel, no shared route or dedup (see
 //! `openspec/changes/wp-t4-event-log/design.md`).
