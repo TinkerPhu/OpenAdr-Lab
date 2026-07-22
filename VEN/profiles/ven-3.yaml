@@ -91,12 +91,16 @@ planner:
     - step_s: 900
       slots: 96   # 24 h at 15-min resolution
 
-# Weather-sourced PV forecast (docs/plans/weather-forecast-plugin.md). Real
-# Zunzgen site geometry — WSW-facing roof, shallow pitch. rated_kwp matches
-# this profile's pv asset above.
+# Weather-sourced PV forecast (docs/plans/weather-forecast-plugin.md).
+# 8 kWp hypothetical array at the same Zunzgen site/geometry as ven-1
+# (which uses the real 14.4 kWp installation as calibration reference) —
+# kept smaller here intentionally for cross-VEN comparison. performance_ratio
+# reuses ven-1's calibrated value (see its profile comment) since it's a
+# site electrical-loss factor, not size-dependent.
 weather_pv:
   latitude_deg: 47.4491
   longitude_deg: 7.8081
   tilt_deg: 22.0
   azimuth_deg: 267.0
-  rated_kwp: 6.0
+  rated_kwp: 8.0
+  performance_ratio: 0.84
