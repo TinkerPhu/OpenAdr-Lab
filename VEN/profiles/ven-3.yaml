@@ -90,3 +90,13 @@ planner:
       slots: 96   # 16 h at 10-min resolution
     - step_s: 900
       slots: 96   # 24 h at 15-min resolution
+
+# Weather-sourced PV forecast (docs/plans/weather-forecast-plugin.md). Real
+# Zunzgen site geometry — WSW-facing roof, shallow pitch. rated_kwp matches
+# this profile's pv asset above.
+weather_pv:
+  latitude_deg: 47.4491
+  longitude_deg: 7.8081
+  tilt_deg: 22.0
+  azimuth_deg: 267.0
+  rated_kwp: 6.0

@@ -162,11 +162,24 @@ impl MqttWeatherAdapter {
 
         let forecast_topic = config.forecast_topic();
         let status_topic = config.status_topic();
-        let client_id = format!("ven-weather-{}", config.site_id);
+        // MQTT client IDs must be unique per broker connection — a duplicate
+        // ID gets the previous holder disconnected ("Connection closed by
+        // peer abruptly"). Multiple VEN instances legitimately share one
+        // site_id (same physical site, e.g. ven-1/2/3 all monitoring
+        // Zunzgen), so site_id alone collides; disambiguate with VEN_NAME
+        // (already required per instance — see config.rs).
+        let ven_name = std::env::var("VEN_NAME").unwrap_or_else(|_| "ven-1".into());
+        let client_id = format!("ven-weather-{}-{}", ven_name, config.site_id);
 
         let mut mqtt_options =
             MqttOptions::new(client_id, config.broker_host.clone(), config.broker_port);
         mqtt_options.set_keep_alive(Duration::from_secs(30));
+        // rumqttc defaults to a 10 KB incoming packet cap, which a real
+        // multi-sample forecast payload exceeds (observed 11389 B against
+        // the production feed vs. the BDD fixture's single-sample ~300 B
+        // message, which never surfaced this). Outgoing stays default —
+        // this adapter never publishes.
+        mqtt_options.set_max_packet_size(256 * 1024, 10 * 1024);
         let (client, mut eventloop) = AsyncClient::new(mqtt_options, 32);
 
         let last_status_task = last_status.clone();
