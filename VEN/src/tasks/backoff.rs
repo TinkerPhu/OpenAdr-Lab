@@ -47,7 +47,7 @@ impl Backoff {
     }
 }
 
-/// WP-T1 (`docs/plans/ven-ui-transparency.md`): `on_success`/`on_failure` plus
+/// WP-T1 (`docs/history/project_journal.md, search "WP-T"`): `on_success`/`on_failure` plus
 /// recording the outcome on `AppState` — kept here (not in `poll_events.rs`'s loop
 /// body) so that file stays under the `tasks/` file-size cap.
 pub(crate) async fn record_success(backoff: &mut Backoff, state: &AppState, now: DateTime<Utc>) {
@@ -81,7 +81,7 @@ pub(crate) async fn record_fail_sleep(
 mod tests {
     use super::*;
 
-    // WP-T4 (docs/plans/ven-ui-transparency.md): record_fail_sleep's sibling
+    // WP-T4 (docs/history/project_journal.md, search "WP-T"): record_fail_sleep's sibling
     // event-log call.
     #[tokio::test]
     async fn record_fail_sleep_records_connection_failure_and_event_log_entry() {

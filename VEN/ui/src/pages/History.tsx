@@ -150,7 +150,7 @@ export function HistoryPage() {
         </Table>
       </TableContainer>
 
-      {/* WP-T6 (docs/plans/ven-ui-transparency.md): wires GET /history/plans,
+      {/* WP-T6 (docs/history/project_journal.md, search "WP-T"): wires GET /history/plans,
           previously unused — plan snapshots archived for this day. */}
       <Typography variant="h6" sx={{ mt: 3 }}>Plans</Typography>
       <TableContainer component={Paper}>

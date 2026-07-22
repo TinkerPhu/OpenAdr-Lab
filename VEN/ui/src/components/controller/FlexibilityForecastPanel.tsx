@@ -4,7 +4,7 @@ import {
 import { useAssetCapabilities, useAssetForecasts } from "../../api/hooks";
 import { ASSET_LABELS } from "./types";
 
-// WP-T6 (docs/plans/ven-ui-transparency.md): wires GET /capability/:asset_id
+// WP-T6 (docs/history/project_journal.md, search "WP-T"): wires GET /capability/:asset_id
 // and GET /forecast, both previously unused — "how much can this device flex
 // right now" and "what does the planner expect it to do next", side by side
 // per asset. Deliberately a standalone panel rather than folded into the

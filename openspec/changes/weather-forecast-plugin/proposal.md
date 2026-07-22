@@ -15,10 +15,10 @@ single hard-coded API integration.
 
 The full design (transport architecture, data structures, PV transposition
 physics, sky-condition/variability signal, snow-cover model, and the exact
-MQTT wire contract) is already written up in `docs/plans/weather-forecast-plugin.md`,
-with the phased build order in `docs/plans/weather-forecast-implementation-plan.md`.
-This proposal turns that design into an OpenSpec change so it can be
-reviewed and implemented in tracked increments.
+MQTT wire contract) is written up in `docs/architecture/weather_forecast.md`,
+which reflects the shipped implementation. This proposal turned that design
+into an OpenSpec change so it could be reviewed and implemented in tracked
+increments.
 
 ## What Changes
 
@@ -84,8 +84,7 @@ fills them in rather than altering any shipped requirement.)
 - **New infrastructure dependency**: an MQTT broker reachable from VEN
   (the project's existing Mosquitto deployment on Pi4-Server already
   satisfies this — no new broker needs to be stood up).
-- **Affected files**: see the File Layout table in
-  `docs/plans/weather-forecast-implementation-plan.md` — spans
+- **Affected files**: see `docs/architecture/weather_forecast.md` — spans
   `entities/`, `controller/`, a new top-level `weather.rs` adapter,
   `assets/pv.rs`, `controller/milp_planner/`, `services/forecast.rs`,
   `main.rs` (composition root), plus BDD coverage under `tests/features/`.

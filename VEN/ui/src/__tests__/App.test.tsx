@@ -65,7 +65,7 @@ describe("App shell", () => {
     expect(screen.getByTestId("nav-notifications")).toBeVisible();
   });
 
-  // WP-T8 (docs/plans/ven-ui-transparency.md §3.2): Reports/Programs/Events
+  // WP-T8 (docs/history/project_journal.md, search "WP-T" §3.2): Reports/Programs/Events
   // are grouped behind a "VTN Feed" menu, not shown in the flat top bar.
   it("groups Reports/Programs/Events behind the VTN Feed menu", () => {
     renderApp();

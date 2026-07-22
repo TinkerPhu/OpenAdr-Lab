@@ -1,5 +1,5 @@
 //! MQTT adapter for `WeatherForecastPort` — see
-//! `docs/plans/weather-forecast-plugin.md` ("Wire contract") for the full
+//! `docs/architecture/weather_forecast.md` ("Wire contract") for the full
 //! topic/schema/cadence specification this implements. Infra-layer adapter,
 //! same shape as `vtn.rs` implementing `VtnPort`.
 

@@ -4,7 +4,7 @@ import {
 } from "@mui/material";
 import { useEventLog } from "../api/hooks";
 
-// WP-T4 (docs/plans/ven-ui-transparency.md): VEN-operational diagnostic
+// WP-T4 (docs/history/project_journal.md, search "WP-T"): VEN-operational diagnostic
 // trail — deliberately separate from the Notifications page/feed (different
 // backend store, different route, no dedup). Newest entries render first
 // since this is a log to scan, not a feed to read in order.

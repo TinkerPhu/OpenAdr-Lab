@@ -4,7 +4,7 @@ type: component
 created: 2026-07-11
 updated: 2026-07-11
 synced_commit: c5a1d03
-sources: [fleet.sh, scripts/gen_fleet_profiles.py, scripts/fleet_status.py, scripts/db_reset.sh, scripts/seed_vtn.py, VEN/src/config.rs, docs/plans/roadmap/phase-2-fleet-enablement.md]
+sources: [fleet.sh, scripts/gen_fleet_profiles.py, scripts/fleet_status.py, scripts/db_reset.sh, scripts/seed_vtn.py, VEN/src/config.rs]
 tags: [fleet, docker, provisioning, ven, phase2]
 ---
 
@@ -89,8 +89,7 @@ Per-VEN memory is modest (13–80MB at N=3) — not the constraint. What is: thi
 with only ~660MB free RAM and a load average around 3 *before* the fleet starts, and
 a single VEN's MILP solve alone briefly used 109% CPU. Concurrent solves across 10
 VENs on this shared quad-core box risk starving those other services — a CPU, not
-memory, constraint. The full N=10 exit demonstration from
-`docs/plans/roadmap/phase-2-fleet-enablement.md` is deferred to a deliberately
+memory, constraint. The full N=10 exit demonstration is deferred to a deliberately
 scheduled low-usage window rather than run ad hoc.
 
 Phase 3's [[experiment-harness]] builds on this tooling: `run_experiment.py`

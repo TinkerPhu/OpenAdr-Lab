@@ -36,7 +36,7 @@ pub fn align_to_step(raw: DateTime<Utc>, step_s: u64) -> DateTime<Utc> {
 
 /// A cached `WeatherForecast` older than this is not trusted for planning
 /// purposes — starting default, not a measured value (see
-/// docs/plans/weather-forecast-plugin.md's staleness policy discussion).
+/// docs/architecture/weather_forecast.md's staleness policy discussion).
 pub const WEATHER_STALENESS_THRESHOLD: chrono::Duration = chrono::Duration::hours(2);
 
 /// R-50: fetch (if configured) and resolve the weather-sourced PV forecast
@@ -1230,7 +1230,7 @@ mod tests {
         assert!(inputs.heater_anchor.iter().all(|v| v.is_none()));
     }
 
-    // WP-T2 (docs/plans/ven-ui-transparency.md): the PlanReady SSE event must
+    // WP-T2 (docs/history/project_journal.md, search "WP-T"): the PlanReady SSE event must
     // carry the same solve_status/objective_eur/friction_eur as the adopted Plan.
     #[tokio::test]
     async fn test_plan_ready_event_solve_status_matches_plan() {

@@ -242,7 +242,7 @@ export function useMetrics() {
   });
 }
 
-// WP-T3 (docs/plans/ven-ui-transparency.md): background task restart status.
+// WP-T3 (docs/history/project_journal.md, search "WP-T"): background task restart status.
 export function useTasksStatus() {
   const { api } = useVenContext();
   return useQuery({
@@ -252,7 +252,7 @@ export function useTasksStatus() {
   });
 }
 
-// WP-T1 (docs/plans/ven-ui-transparency.md): VTN connection detail
+// WP-T1 (docs/history/project_journal.md, search "WP-T"): VTN connection detail
 // (token expiry, backoff, last error) — `/health` only carries a terse
 // ok/degraded summary, this is the detail behind it for the Dashboard's
 // VTN Connection status row (WP-T8).
@@ -369,7 +369,7 @@ export function useHistoryReports(from: string, to: string) {
   });
 }
 
-// WP-T6 (docs/plans/ven-ui-transparency.md): wiring previously-unused routes.
+// WP-T6 (docs/history/project_journal.md, search "WP-T"): wiring previously-unused routes.
 
 export function useHistoryPlans(from: string, to: string) {
   const { api } = useVenContext();

@@ -4,7 +4,7 @@ type: component
 created: 2026-07-11
 updated: 2026-07-12
 synced_commit: c5a1d03
-sources: [experiments/, docs/plans/roadmap/phase-3-control-method-lab.md, VEN/src/tasks/sim_tick/tick.rs]
+sources: [experiments/, VEN/src/tasks/sim_tick/tick.rs]
 tags: [experiments, kpi, scenarios, phase3]
 ---
 

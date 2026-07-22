@@ -73,7 +73,7 @@ fn plan_is_ok(plan: Option<&Plan>) -> bool {
     !matches!(plan, Some(p) if p.solve_status == SolveStatus::Infeasible)
 }
 
-/// WP-T1 (`docs/plans/ven-ui-transparency.md`): componentised health, replacing the
+/// WP-T1 (`docs/history/project_journal.md, search "WP-T"`): componentised health, replacing the
 /// previous hardcoded `"ok"` string. HTTP status stays 200 regardless of component
 /// status — `ven_process` being reachable at all is the only thing a restart could
 /// fix; a VTN outage or infeasible plan is not resolved by restarting the container,
@@ -146,7 +146,7 @@ fn build_tasks_status_response(
     entries
 }
 
-/// WP-T3 (`docs/plans/ven-ui-transparency.md`): per-task restart/outcome status
+/// WP-T3 (`docs/history/project_journal.md, search "WP-T"`): per-task restart/outcome status
 /// from `tasks::supervised_spawn`. Only reflects tasks actually spawned in this
 /// process — several are conditional on config, so this is not a fixed-length list.
 pub async fn tasks_status(State(ctx): State<AppCtx>) -> Json<Vec<TaskStatusEntry>> {

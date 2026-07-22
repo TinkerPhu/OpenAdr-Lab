@@ -43,7 +43,7 @@ export function useVenContext(): VenContextType {
 function HealthChip() {
   const { data, isError, isLoading, fetchStatus, error } = useHealth();
   console.log("[VEN-UI] HealthChip render:", { isLoading, isError, fetchStatus, data, error: error?.message });
-  // WP-T1 (docs/plans/ven-ui-transparency.md): /health now returns
+  // WP-T1 (docs/history/project_journal.md, search "WP-T"): /health now returns
   // {status, components} — read the real status instead of assuming "ok"
   // whenever a response merely arrived (that was the misleading-chip bug).
   const status = isError ? "offline" : data ? data.status : "unknown";
@@ -62,7 +62,7 @@ function HealthChip() {
   );
 }
 
-// WP-T8 (docs/plans/ven-ui-transparency.md §3.2): a grouped nav dropdown —
+// WP-T8 (docs/history/project_journal.md, search "WP-T" §3.2): a grouped nav dropdown —
 // same route Links as the flat bar previously used, just anchored under a
 // Button instead of shown directly, so page-level tests/routes stay untouched.
 type NavMenuItem = { to: string; label: string; testId: string };
@@ -214,7 +214,7 @@ export default function App() {
             sx={{ mb: 2 }}
             aria-label="Main navigation"
           >
-            {/* WP-T8 (docs/plans/ven-ui-transparency.md §3.2): primary bar
+            {/* WP-T8 (docs/history/project_journal.md, search "WP-T" §3.2): primary bar
                 ordered by usage frequency; VTN Feed and Diagnostics are
                 grouped dropdowns, not flat tabs — Diagnostics stays
                 unconditionally visible (design principle 2, §2). */}

@@ -1,4 +1,4 @@
-//! Weather forecast domain types — see `docs/plans/weather-forecast-plugin.md`
+//! Weather forecast domain types — see `docs/architecture/weather_forecast.md`
 //! for the full design (transport, physics, wire contract). Pure data, no I/O,
 //! no `crate::profile` import per the entities-layer rule. Fills in the
 //! `ForecastSource::WeatherModel` / `ExternalDataSourceType::Weather` /
@@ -66,7 +66,7 @@ pub struct GeoPosition {
 
 impl WeatherForecast {
     /// Whether this forecast is still trustworthy for planning purposes,
-    /// per the staleness policy in `docs/plans/weather-forecast-plugin.md`.
+    /// per the staleness policy in `docs/architecture/weather_forecast.md`.
     /// Default threshold (2h) is a starting value, not a measured one.
     pub fn is_fresh(&self, now: DateTime<Utc>, max_age: chrono::Duration) -> bool {
         now.signed_duration_since(self.fetched_at) <= max_age
@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn weather_forecast_round_trips_through_json_matching_wire_example() {
         // Mirrors the wire contract's example message in
-        // docs/plans/weather-forecast-plugin.md.
+        // docs/architecture/weather_forecast.md.
         let json = r#"{
             "source_id": "srf_meteo",
             "location": { "latitude_deg": 47.4491, "longitude_deg": 7.8081 },

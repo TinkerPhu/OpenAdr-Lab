@@ -25,6 +25,12 @@ leaving it undone.
 | [BL-13](#bl-13-early-firm-up-heuristic) | Fewer noisy replans under flat-rate tariffs (plan feels more stable) | S | Low — statistical check + reclassification |
 | [BL-22](#bl-22-apply_battery_correction_overlay--wire-behind-a-flag-or-re-confirm-abandoned) | Tighter grid-deviation tracking → better self-consumption; logic already built and tested | S | Low — flag-gated, but needs a decision on adoption-gate interaction |
 
+### VEN user (site operator) — forecast accuracy
+
+| ID | What the user gets | Effort | Risk |
+|---|---|---|---|
+| [BL-17](#bl-17-externaldatasource--grid-co2-intensity-forecast-ingestion) | Grid-CO2-aware planning from a real CO2-intensity forecast (weather/irradiance ingestion for PV is already implemented) | L | Medium–High — third-party API dependency, staleness/failure handling, provider not yet chosen |
+
 ### VEN user (site operator) — comfort, control & trust
 
 | ID | What the user gets | Effort | Risk |
@@ -37,12 +43,6 @@ leaving it undone.
 | [BL-37](#bl-37-reactive-correction-events-into-the-notification-feed-sse-blind-spot) | Learns about reactive battery corrections even when not watching the Planner tab (today they're invisible elsewhere) | S | Low — one producer on the existing notification path |
 | [BL-38](#bl-38-planner-tab-layout--userdiagnostic-split-and-matrix-slottrace-linking) | Planner tab reads cleanly for operators (user zone on top) and debugs faster (click a slot → see its trace) | S (layout) / M (slot→trace) | Low — UI-only |
 | [GB-09](#general-backlog) | Fleet operators get a per-profile poll-interval override | S | Low — current jitter already covers the motivating case, so low urgency |
-
-### VEN user (site operator) — forecast accuracy
-
-| ID | What the user gets | Effort | Risk |
-|---|---|---|---|
-| [BL-17](#bl-17-externaldatasource--external-weatherirradiationco2-forecast-ingestion) | Better PV-yield and grid-CO2-aware planning from real weather/irradiance/CO2 forecasts instead of none | L | Medium–High — third-party API dependency, staleness/failure handling, provider not yet chosen |
 
 ### VTN user (aggregator / program operator)
 
@@ -92,11 +92,11 @@ leaving it undone.
 
 ---
 
-### BL-17: ExternalDataSource — external weather/irradiation/CO2-forecast ingestion
+### BL-17: ExternalDataSource — grid CO2-intensity forecast ingestion
 **Req:** entities/design_vocabulary.rs §2.11 (`ExternalDataSource`, `ExternalDataSourceType`, `ExternalDataFetchStatus`)
-**Problem:** No code path polls an external weather/irradiation/CO2-intensity feed. PV forecasting has no external data input to draw from — `ExternalDataSource` sketches the polling/caching contract but nothing implements it.
-**Fix:** Implement a poll loop per configured `ExternalDataSource` (weather, irradiation, grid CO2 forecast), caching the last successful response and tracking `ExternalDataFetchStatus`; feed results into `ForecastSource::WeatherModel`-tagged `AssetForecast`s.
-**Complexity:** Large. External API integration, caching, and failure/staleness handling depend on which provider is chosen.
+**Problem:** Weather/irradiation ingestion for PV forecasting is implemented (`docs/architecture/weather_forecast.md`, an MQTT-pushed feed rather than the originally-sketched poll loop). Grid CO2-intensity forecasting is not: no code path polls or receives a CO2-intensity feed, so the planner has no way to prefer low-carbon slots beyond whatever GHG values arrive on an event.
+**Fix:** Implement an `ExternalDataSource`/`ExternalDataPort` poll loop for a CO2-intensity provider, caching the last successful response and tracking `ExternalDataFetchStatus`; feed results into planning as a new forecast/cost input alongside tariffs.
+**Complexity:** Large — third-party API dependency (no evaluated free-tier provider yet, per `docs/plans/roadmap/phase-5-forecast-and-baseline.md`), staleness/failure handling.
 **Verify:** TBD — depends on the chosen external API; at minimum, a fake-server integration test asserting `fetch_status` transitions correctly on success/failure/timeout.
 
 ---

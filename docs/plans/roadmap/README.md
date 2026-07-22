@@ -6,13 +6,16 @@
 
 | Phase | Plan | Goal | Exit demonstration |
 |-------|------|------|--------------------|
-| 0 | [phase-0-quick-wins.md](phase-0-quick-wins.md) | Small, high-value fixes | BL-02/BL-12 merged, uniform VEN naming, zero warnings |
-| 1 | [phase-1-data-foundation.md](phase-1-data-foundation.md) | Persistent history in VEN (SQLite) + VTN (Postgres recorder) | "Show me yesterday" works in VEN UI after container restart |
-| 2 | [phase-2-fleet-enablement.md](phase-2-fleet-enablement.md) | N independent VENs, one command, stable VTN | `./fleet.sh up 10` → 10 healthy VENs on Pi4 |
-| 3 | [phase-3-control-method-lab.md](phase-3-control-method-lab.md) | All VTN control knobs honoured + experiment harness | Experiment report: tariff vs. limit vs. event day |
-| 4 | [phase-4-comfort-and-personas.md](phase-4-comfort-and-personas.md) | Resident intent, comfort curves, notifications | Same experiments with 3 personas → measurably different fleet response |
 | 5 | [phase-5-forecast-and-baseline.md](phase-5-forecast-and-baseline.md) | Heuristics from history, external feeds, baselines | Heuristic forecast beats last-known on a held-out week |
 | 6 | [phase-6-fidelity-and-cert.md](phase-6-fidelity-and-cert.md) | Planner fidelity, transport modernisation, hygiene | Cert-readiness re-audit; slot costs match real bills |
+
+Phases 0–4 (quick wins, data foundation, fleet enablement, control-method lab,
+comfort & personas) are fully implemented; their plan documents were removed.
+Current-state documentation lives in `wiki/components/` (`history-store.md`,
+`fleet-tooling.md`, `experiment-harness.md`, `heuristics-pipeline.md`,
+`notifications.md`), with resolved backlog items dropped from `docs/BACKLOG.md`
+and open remainders (the S-1…S-6 experiment run, persona re-run) tracked in
+`docs/plans/strategic_roadmap.md` §3.1.
 
 ## Conventions common to all phases (do not repeat per plan)
 
@@ -37,13 +40,7 @@
 
 ## Cross-phase dependencies
 
-```
-P0 ──► P1 ──► P2 ──► P3 ──► P4
-        │                    │
-        └───(history data accumulates ≥ 4 weeks)───► P5 ──► P6
-```
-
-Phase 1's history store must run in "collect" mode as early as possible — Phase 5's
-heuristics (BL-14) need multi-week real history. Phases 3 and 4 can overlap with that
-accumulation window. Phase 6 is a grab-bag; its WPs are independent and can be
-interleaved anywhere after Phase 3 if priorities shift.
+Phases 0–4 shipped in order (0 → 1 → 2 → 3 → 4), with Phase 1's history store running
+in "collect" mode from early on so Phase 5's heuristics (BL-14) had multi-week real
+history once they started. Phase 5 builds on that accumulated history; Phase 6 is a
+grab-bag whose WPs are independent and can be worked in any order.

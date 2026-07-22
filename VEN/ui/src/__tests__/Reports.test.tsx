@@ -21,7 +21,7 @@ const mockPrograms = [{ id: "p1", programName: "Program Alpha" }];
 const mockReports = [
   { id: "r1", clientName: "ven-1", reportName: "test-report", programID: "p1", eventID: "e1", createdDateTime: "2024-01-01" },
 ];
-// WP-T6 (docs/plans/ven-ui-transparency.md): wires GET /obligations.
+// WP-T6 (docs/history/project_journal.md, search "WP-T"): wires GET /obligations.
 const mockObligations = [
   {
     id: "ob-1", event_id: "e1", program_id: "p1", payload_type: "USAGE",

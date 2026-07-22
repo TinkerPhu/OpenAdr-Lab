@@ -149,7 +149,7 @@ export function DashboardPage() {
   const vtnStatus = useVtnStatus();
   const tasksStatus = useTasksStatus();
 
-  // WP-T1 (docs/plans/ven-ui-transparency.md): /health now returns
+  // WP-T1 (docs/history/project_journal.md, search "WP-T"): /health now returns
   // {status, components} — read the real status instead of assuming "ok"
   // whenever a response merely arrived (same bug App.tsx's HealthChip had).
   const healthStatus = health.isError ? "offline" : health.data ? health.data.status : "unknown";
@@ -157,7 +157,7 @@ export function DashboardPage() {
 
   return (
     <Grid container spacing={2}>
-      {/* WP-T8 (docs/plans/ven-ui-transparency.md §3.3): three traffic-light
+      {/* WP-T8 (docs/history/project_journal.md, search "WP-T" §3.3): three traffic-light
           status rows combining WP-T1/T2/T3's signals into the "is everything
           okay right now" answer the Dashboard didn't have before. */}
       <Grid item xs={12}>

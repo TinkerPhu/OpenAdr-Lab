@@ -1,6 +1,6 @@
 Feature: VEN Health Check
   The VEN exposes a componentised health endpoint (WP-T1,
-  docs/plans/ven-ui-transparency.md) instead of a plain "ok" string.
+  docs/history/project_journal.md, search "WP-T") instead of a plain "ok" string.
 
   Scenario: Health endpoint reports ok status with all components healthy
     When I GET the VEN "/health" endpoint

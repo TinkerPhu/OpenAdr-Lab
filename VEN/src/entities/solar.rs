@@ -1,5 +1,5 @@
 //! Solar position + PV transposition physics — see
-//! `docs/plans/weather-forecast-plugin.md` ("The transposition problem")
+//! `docs/architecture/weather_forecast.md` ("The transposition problem")
 //! for the full derivation. Pure math, no I/O, no `crate::profile` import.
 //!
 //! `resolve_weather_pv_kw` (below) is the single entry point both consumers

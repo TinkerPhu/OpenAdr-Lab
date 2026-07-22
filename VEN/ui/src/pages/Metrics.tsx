@@ -44,7 +44,7 @@ function formatLabels(labels: Record<string, string>): string {
   return entries.map(([k, v]) => `${k}="${v}"`).join(", ");
 }
 
-// WP-T7 (docs/plans/ven-ui-transparency.md): human labels/grouping for the
+// WP-T7 (docs/history/project_journal.md, search "WP-T"): human labels/grouping for the
 // metrics this VEN actually emits (grep-confirmed — VEN/src only calls
 // `counter!` for these three names; there is no generic "tasks" or "HTTP"
 // category emitted today, despite the plan doc's original sketch naming
