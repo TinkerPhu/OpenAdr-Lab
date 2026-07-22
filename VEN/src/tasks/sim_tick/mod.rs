@@ -8,7 +8,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::controller::VtnPort;
+use crate::controller::WeatherForecastPort;
 use crate::entities::asset::PlanTrigger;
+use crate::entities::asset_params::PvForecastParams;
 use crate::entities::planner_params::SimulatorParams;
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
@@ -24,6 +26,8 @@ pub(crate) fn spawn_sim_tick(
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
     data_dir: String,
     event_tx: PlannerEventTx,
+    weather: Arc<dyn WeatherForecastPort>,
+    weather_pv_params: Option<PvForecastParams>,
 ) -> tokio::task::JoinHandle<()> {
     let tick_s = sim_params.tick_s;
     let persist_every_s = sim_params.persist_every_s;
@@ -58,6 +62,8 @@ pub(crate) fn spawn_sim_tick(
                 report_counter,
                 report_every_ticks,
                 tick_s,
+                weather.clone(),
+                weather_pv_params,
             )
             .await;
 

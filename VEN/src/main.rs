@@ -54,7 +54,7 @@ pub struct AppCtx {
     pub notifier: services::notify::Notifier,
     /// WP4.2 (BL-19): per-asset user-settings persistence (comfort curves).
     pub settings: Option<Arc<dyn controller::SettingsPort>>,
-    /// Weather forecast plugin port (docs/plans/weather-forecast-plugin.md).
+    /// Weather forecast plugin port (docs/architecture/weather_forecast.md).
     /// Always present — `NoopWeatherPort` when no MQTT broker is configured,
     /// so consumers never need `Option<Arc<dyn WeatherForecastPort>>`.
     pub weather: Arc<dyn controller::WeatherForecastPort>,
@@ -174,7 +174,7 @@ async fn main() -> anyhow::Result<()> {
     let vtn_port: Arc<dyn VtnPort> = Arc::new(vtn.clone());
     let solver: Arc<dyn SolverPort> = Arc::new(controller::milp_planner::MilpSolver);
 
-    // Weather forecast plugin (docs/plans/weather-forecast-plugin.md): only
+    // Weather forecast plugin (docs/architecture/weather_forecast.md): only
     // active when WEATHER_MQTT_HOST is set; falls back to a no-op adapter
     // otherwise, so every downstream consumer behaves exactly as before
     // this feature existed.
@@ -284,7 +284,7 @@ async fn main() -> anyhow::Result<()> {
     let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
     {
-        let (s, sim, sp, vn, v, tx, dd, etx) = (
+        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp) = (
             state.clone(),
             sim_state.clone(),
             sim_params.clone(),
@@ -293,6 +293,8 @@ async fn main() -> anyhow::Result<()> {
             trigger_tx.clone(),
             data_dir.clone(),
             planner_event_tx.clone(),
+            weather_port.clone(),
+            profile.weather_pv_params(),
         );
         tasks::supervised_spawn("sim_tick", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_sim_tick(
@@ -304,6 +306,8 @@ async fn main() -> anyhow::Result<()> {
                 tx.clone(),
                 dd.clone(),
                 etx.clone(),
+                wp.clone(),
+                wpp,
             )
         });
     }

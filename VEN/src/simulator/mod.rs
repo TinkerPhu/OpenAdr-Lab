@@ -1,4 +1,5 @@
 pub mod energy;
+mod grid_meter;
 pub mod persist;
 pub mod plan_context;
 pub mod power_model;
@@ -190,6 +191,10 @@ impl SimState {
     /// - `base_load_kw_override`: if Some, one-shot: captures offset then cleared by sim loop.
     /// - `base_load_alpha`: EMA factor for base load blend-back (0.0–1.0; default 0.1).
     /// - `ev_plugged_override`: if Some, hold EV plugged state; else let physics drive it.
+    /// - `weather_pv_kw`: weather-sourced actual PV power (kW, generation-positive) for
+    ///   this instant, via `entities::solar::resolve_weather_pv_kw` — same translation
+    ///   the planner's own PV input uses (R-50). Takes precedence over the sin model,
+    ///   but a manual `pv_irradiance_override` inject (testing/demo) wins over both.
     ///
     /// See `peek_pv_kw` (`pv_preview.rs`) for a read-only preview of this tick's PV term.
     #[allow(clippy::too_many_arguments)]
@@ -207,6 +212,7 @@ impl SimState {
         base_load_alpha: f64,
         ev_plugged_override: Option<bool>,
         ev_soc_target_override: Option<f64>,
+        weather_pv_kw: Option<f64>,
     ) {
         let hour = now.format("%H").to_string().parse::<f64>().unwrap_or(12.0)
             + now.format("%M").to_string().parse::<f64>().unwrap_or(0.0) / 60.0;
@@ -247,6 +253,12 @@ impl SimState {
                     pv.irradiance = irradiance;
                     pv.irradiance_offset = self.pv_smoothing.irradiance_offset;
                     pv.pv_alpha = pv_alpha;
+                    // Manual sim inject (testing/demo) wins over the weather feed.
+                    pv.weather_power_kw = if pv_irradiance_override.is_none() {
+                        weather_pv_kw
+                    } else {
+                        None
+                    };
                 }
                 AssetConfig::Heater(h) => {
                     // Behaviour C: ambient temp — hold override or use default.
@@ -301,22 +313,7 @@ impl SimState {
             total_kw += actual_kw;
         }
 
-        // ── Derive grid meter ─────────────────────────────────────────────
-        // The meter sees the modelled assets PLUS the configured unmodelled
-        // diurnal load — the gap is exactly what `site-residual` reports.
-        let meter_kw = total_kw + unmodelled_load_at(now, self.unmodelled_load_kw);
-        let import_kw = meter_kw.max(0.0);
-        let export_kw = (-meter_kw).max(0.0);
-        let dt_h = dt_s / 3600.0;
-
-        self.grid.net_power_w = meter_kw * 1000.0;
-        self.grid.import_w = import_kw * 1000.0;
-        self.grid.export_w = export_kw * 1000.0;
-        self.grid.voltage_v = power_model::random_voltage();
-        self.grid.import_kwh += import_kw * dt_h;
-        self.grid.export_kwh += export_kw * dt_h;
-
-        self.last_tick = now;
+        self.derive_grid_meter(total_kw, now, dt_s);
     }
 
     /// Build a SensorSnapshot for backward compatibility with /sensors endpoint.
