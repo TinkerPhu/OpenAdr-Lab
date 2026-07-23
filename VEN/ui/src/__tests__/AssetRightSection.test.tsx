@@ -492,7 +492,7 @@ describe("AssetRightSection — PV export limit control", () => {
     mockSchemaData.mockReturnValue({});
   });
 
-  it("shows no ceiling (slider at min) when neither operator nor VTN limit is active", () => {
+  it("shows no ceiling (slider at max/rated_kw, not min) when neither operator nor VTN limit is active", () => {
     render(
       <AssetRightSection
         assetId="pv"
@@ -502,7 +502,10 @@ describe("AssetRightSection — PV export limit control", () => {
         onResetSoc={vi.fn()}
       />
     );
-    expect(screen.getByText(/Export Limit: 0/)).toBeInTheDocument();
+    // Regression: must NOT show "0.00 kW", which reads as "no export
+    // allowed" — the opposite of "no limit set". pvSchema's max is 8.
+    expect(screen.getByText(/Export Limit: 8/)).toBeInTheDocument();
+    expect(screen.queryByText(/Export Limit: 0\.00/)).not.toBeInTheDocument();
   });
 
   it("shows the live effective ceiling (abs of signed export_limit_kw) when one is active", () => {

@@ -135,12 +135,18 @@ export function AssetRightSection({
     // EXPORT_CAPACITY_LIMIT signal) is currently the more restrictive and
     // therefore actually in effect — not just this operator's own override.
     // `export_limit_kw` is signed (≤ 0) on the wire; the slider is a
-    // positive-magnitude kW control. Absent (no ceiling from either source)
-    // reads as 0 kW on the slider — a known display quirk shared with other
-    // "null means unset" controls, not "fully curtailed".
+    // positive-magnitude kW control.
     if (key === "pv_export_limit_kw") {
       const v = sim?.assets?.["pv"]?.["export_limit_kw"];
-      return typeof v === "number" ? Math.abs(v) : null;
+      if (typeof v === "number") return Math.abs(v);
+      // No ceiling from either source: the generic slider fallback (see
+      // DynamicControl) defaults an unset value to `min` (0), which would
+      // read as "0 kW allowed" — the opposite of "no limit". Default to
+      // `max` (rated_kw) instead: a ceiling at rated_kw is non-binding
+      // (PV can never exceed it anyway), so the slider correctly reads as
+      // unrestricted.
+      const maxKw = controls.find((d) => d.key === "pv_export_limit_kw")?.max;
+      return maxKw ?? null;
     }
     return null;
   }

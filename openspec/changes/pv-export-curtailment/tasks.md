@@ -169,6 +169,20 @@ mechanism) was truly dead. No change to `step_inner`'s handling of its
       including the full resilience suite (VTN restart, VEN restart,
       exponential backoff during a sustained VTN outage) and the
       browser-driven Controller V2 UI scenarios.
+- [x] 7.7 Found post-deployment by user testing the live UI: the
+      Controller tab's Export Limit slider showed "0.00 kW" when no
+      ceiling was active — read as "no export allowed" instead of the
+      intended "no limit set". Root cause: `DynamicControl`'s generic
+      slider fallback defaults an unset value to `min` (0);
+      `AssetRightSection.tsx::getValue("pv_export_limit_kw")` returned
+      `null` in that case with no override applied. Fixed by falling back
+      to the control's `max` (`rated_kw`) instead — a ceiling at rated_kw
+      is non-binding, so the slider now correctly reads as unrestricted.
+      Updated the corresponding UI test to assert on 8 (rated_kw), not 0,
+      and added a regression assertion that "0.00" is never shown when no
+      ceiling is set. Verified: 21/21 `AssetRightSection.test.tsx` tests
+      pass, full UI suite 409/409 passing, ESLint clean on both changed
+      files.
 
 ## 8. Fix: `POST /sim/inject` null-clearing was broken for every field
 
