@@ -86,11 +86,18 @@ impl PvInverter {
         }
     }
 
-    /// Non-controllable: the floor equals the ceiling, same as `capability_inner`.
-    pub fn flexibility_floor_inner(&self, state: &PvState) -> AssetFlexibilityFloor {
+    /// Export is curtailable to 0 via `export_limit_kw` (sim-inject or VTN
+    /// EXPORT_CAPACITY_LIMIT — see `step_inner`, which clamps every tick, not
+    /// just on config change). The floor reflects that achievable minimum,
+    /// independent of whether a limit is currently active. PV never imports,
+    /// so both directions collapse to the same curtailed-to-zero point —
+    /// mirrors battery's idle floor. The ceiling (`capability_inner`) stays
+    /// fixed at `actual_power_kw`: curtailment can only reduce export, never
+    /// force more than the weather allows.
+    pub fn flexibility_floor_inner(&self, _state: &PvState) -> AssetFlexibilityFloor {
         AssetFlexibilityFloor {
-            min_export_kw: state.actual_power_kw,
-            min_import_kw: state.actual_power_kw,
+            min_export_kw: 0.0,
+            min_import_kw: 0.0,
         }
     }
 
@@ -363,14 +370,18 @@ mod tests {
     }
 
     #[test]
-    fn flexibility_floor_equals_actual_power_kw_both_directions() {
+    fn flexibility_floor_is_zero_regardless_of_actual_power_kw() {
+        // Curtailment (export_limit_kw) clamps every tick in step_inner, so the
+        // achievable floor is 0 kW export — independent of the current
+        // uncurtailed actual_power_kw, and independent of whether a limit is
+        // presently active on this PvInverter instance.
         let (pv, _) = make_pv(10.0);
         let state = PvState {
             actual_power_kw: -4.2,
         };
         let floor = pv.flexibility_floor_inner(&state);
-        assert_eq!(floor.min_export_kw, -4.2);
-        assert_eq!(floor.min_import_kw, -4.2);
+        assert_eq!(floor.min_export_kw, 0.0);
+        assert_eq!(floor.min_import_kw, 0.0);
     }
 
     // ── step_inner: weather_power_kw precedence ──────────────────────────────
