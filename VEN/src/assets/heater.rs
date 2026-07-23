@@ -2,7 +2,9 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
+use super::{
+    Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
+};
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset_params::HeaterParams;
 use crate::entities::timeline::HeaterPlanTrajectory;
@@ -131,6 +133,29 @@ impl Heater {
         AssetCapability {
             max_export_kw: 0.0,
             max_import_kw,
+        }
+    }
+
+    /// Smallest nonzero achievable commitment. Hardware is a 3-tier relay
+    /// (0 / mid_kw / max_kw — see `step_inner`'s quantization), so unlike a
+    /// continuously-controllable asset the floor while running is `mid_kw`,
+    /// not 0. In the overheat/too-cold branches, `capability_inner` already
+    /// collapses `max_import_kw` to a single value (0 or `min_power_kw`) —
+    /// mirror that here so min == max in those branches too, same as it does
+    /// there.
+    pub fn flexibility_floor_inner(&self, state: &HeaterState) -> AssetFlexibilityFloor {
+        let min_import_kw = if state.temperature_c >= self.temp_max_c {
+            0.0 // overheat — forced off, same as capability_inner's ceiling
+        } else if state.temperature_c <= self.temp_min_c {
+            self.min_power_kw // too cold — forced on, same as capability_inner's ceiling
+        } else if self.mid_kw > 0.0 {
+            self.mid_kw
+        } else {
+            self.max_kw / 2.0
+        };
+        AssetFlexibilityFloor {
+            min_export_kw: 0.0,
+            min_import_kw,
         }
     }
 
@@ -324,6 +349,13 @@ impl Asset for Heater {
         };
         self.capability_inner(s)
     }
+
+    fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
+        let AssetState::Heater(s) = state else {
+            unreachable!()
+        };
+        self.flexibility_floor_inner(s)
+    }
 }
 
 #[cfg(test)]
@@ -368,6 +400,45 @@ mod tests {
             temperature_c,
             actual_power_kw,
         }
+    }
+
+    // ── flexibility_floor ─────────────────────────────────────────────────────
+
+    #[test]
+    fn flexibility_floor_uses_mid_kw_in_normal_band() {
+        let heater = default_heater(); // mid_kw=1.25, temp_min_c=20, temp_max_c=23
+        let floor = heater.flexibility_floor_inner(&state_at(21.5, 0.0));
+        assert_eq!(floor.min_import_kw, 1.25);
+        assert_eq!(floor.min_export_kw, 0.0);
+    }
+
+    #[test]
+    fn flexibility_floor_falls_back_to_half_max_kw_when_mid_kw_unset() {
+        let mut heater = default_heater();
+        heater.mid_kw = 0.0; // old persisted JSON without the field
+        let floor = heater.flexibility_floor_inner(&state_at(21.5, 0.0));
+        assert_eq!(floor.min_import_kw, heater.max_kw / 2.0);
+    }
+
+    #[test]
+    fn flexibility_floor_is_zero_when_overheated() {
+        let heater = default_heater(); // temp_max_c=23
+        let floor = heater.flexibility_floor_inner(&state_at(23.0, 0.0));
+        assert_eq!(
+            floor.min_import_kw, 0.0,
+            "must match capability_inner's forced-off ceiling"
+        );
+        assert_eq!(floor.min_export_kw, 0.0);
+    }
+
+    #[test]
+    fn flexibility_floor_matches_min_power_kw_when_too_cold() {
+        let heater = default_heater(); // temp_min_c=20, min_power_kw=0.0
+        let floor = heater.flexibility_floor_inner(&state_at(20.0, 0.0));
+        assert_eq!(
+            floor.min_import_kw, heater.min_power_kw,
+            "must match capability_inner's forced-on ceiling, not mid_kw"
+        );
     }
 
     // ── control_schema ────────────────────────────────────────────────────────

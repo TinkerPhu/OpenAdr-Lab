@@ -4,7 +4,9 @@ use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
+use super::{
+    Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
+};
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset_params::{ApplianceSpikeParams, BaseLoadParams};
 
@@ -173,6 +175,17 @@ impl BaseLoad {
         }
     }
 
+    /// Non-controllable: the floor equals the ceiling, same as `capability_inner`.
+    /// Uses the live actual value, not the learned heuristic — they can diverge
+    /// (see `services::forecast`), and this must match what `capability_inner`
+    /// already reports.
+    pub fn flexibility_floor_inner(&self, state: &BaseLoadState) -> AssetFlexibilityFloor {
+        AssetFlexibilityFloor {
+            min_export_kw: state.actual_power_kw,
+            min_import_kw: state.actual_power_kw,
+        }
+    }
+
     pub fn default_setpoint(&self) -> f64 {
         self.baseline_kw
     }
@@ -264,6 +277,13 @@ impl Asset for BaseLoad {
         };
         self.capability_inner(s)
     }
+
+    fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
+        let AssetState::BaseLoad(s) = state else {
+            unreachable!()
+        };
+        self.flexibility_floor_inner(s)
+    }
 }
 
 // ── BaseLoad MILP plugin types ────────────────────────────────────────────────
@@ -314,6 +334,17 @@ mod tests {
             spikes,
             ..BaseLoadParams::default()
         })
+    }
+
+    #[test]
+    fn flexibility_floor_equals_actual_power_kw() {
+        let bl = base_load_with_spikes(vec![]);
+        let state = BaseLoadState {
+            actual_power_kw: 0.87,
+        };
+        let floor = bl.flexibility_floor_inner(&state);
+        assert_eq!(floor.min_export_kw, 0.87);
+        assert_eq!(floor.min_import_kw, 0.87);
     }
 
     #[test]

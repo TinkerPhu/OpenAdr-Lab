@@ -2,7 +2,9 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
+use super::{
+    Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
+};
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset_params::PvParams;
 
@@ -81,6 +83,14 @@ impl PvInverter {
         AssetCapability {
             max_export_kw: state.actual_power_kw, // e.g. -2.0
             max_import_kw: state.actual_power_kw, // same — is_fixed() = true
+        }
+    }
+
+    /// Non-controllable: the floor equals the ceiling, same as `capability_inner`.
+    pub fn flexibility_floor_inner(&self, state: &PvState) -> AssetFlexibilityFloor {
+        AssetFlexibilityFloor {
+            min_export_kw: state.actual_power_kw,
+            min_import_kw: state.actual_power_kw,
         }
     }
 
@@ -248,6 +258,13 @@ impl Asset for PvInverter {
         self.capability_inner(s)
     }
 
+    fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
+        let AssetState::Pv(s) = state else {
+            unreachable!()
+        };
+        self.flexibility_floor_inner(s)
+    }
+
     /// Forecast trajectory for the planner: sin model + decaying perturbation offset.
     ///
     /// For each future slot at `now + i×resolution`:
@@ -343,6 +360,17 @@ mod tests {
                 actual_power_kw: 0.0,
             },
         )
+    }
+
+    #[test]
+    fn flexibility_floor_equals_actual_power_kw_both_directions() {
+        let (pv, _) = make_pv(10.0);
+        let state = PvState {
+            actual_power_kw: -4.2,
+        };
+        let floor = pv.flexibility_floor_inner(&state);
+        assert_eq!(floor.min_export_kw, -4.2);
+        assert_eq!(floor.min_import_kw, -4.2);
     }
 
     // ── step_inner: weather_power_kw precedence ──────────────────────────────

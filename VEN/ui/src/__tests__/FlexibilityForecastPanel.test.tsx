@@ -39,9 +39,17 @@ describe("FlexibilityForecastPanel", () => {
     expect(row).toHaveTextContent("—");
   });
 
-  it("renders capability and forecast values when both are present", () => {
+  it("renders capability min/max and forecast source when present", () => {
     mockCapabilities.mockReturnValue([
-      { data: { max_import_kw: 7.4, max_export_kw: 0, is_fixed: false } },
+      {
+        data: {
+          max_import_kw: 7.4,
+          min_import_kw: 1.4,
+          max_export_kw: 0,
+          min_export_kw: 0,
+          is_fixed: false,
+        },
+      },
     ]);
     mockForecasts.mockReturnValue([
       {
@@ -58,18 +66,47 @@ describe("FlexibilityForecastPanel", () => {
 
     const row = screen.getByTestId("flexibility-row-ev");
     expect(row).toHaveTextContent("7.40 kW");
-    expect(row).toHaveTextContent("3.20 kW");
-    expect(row).toHaveTextContent("90% confidence");
+    expect(row).toHaveTextContent("1.40 kW");
+    expect(row).not.toHaveTextContent("3.20 kW"); // forecast number dropped
+    expect(row).not.toHaveTextContent("confidence");
     expect(screen.getByTestId("forecast-source-ev")).toHaveTextContent("Optimization");
   });
 
   it("marks a fixed-capability asset", () => {
     mockCapabilities.mockReturnValue([
-      { data: { max_import_kw: 2.0, max_export_kw: 0, is_fixed: true } },
+      {
+        data: {
+          max_import_kw: 2.0,
+          min_import_kw: 2.0,
+          max_export_kw: 0,
+          min_export_kw: 0,
+          is_fixed: true,
+        },
+      },
     ]);
     mockForecasts.mockReturnValue([]);
     renderPanel(["heater"]);
 
     expect(screen.getByTestId("flexibility-row-heater")).toHaveTextContent("(fixed)");
+  });
+
+  it("shows the heater's Min import distinct from Max import (tiered asset)", () => {
+    mockCapabilities.mockReturnValue([
+      {
+        data: {
+          max_import_kw: 6.0,
+          min_import_kw: 3.0,
+          max_export_kw: 0,
+          min_export_kw: 0,
+          is_fixed: false,
+        },
+      },
+    ]);
+    mockForecasts.mockReturnValue([]);
+    renderPanel(["heater"]);
+
+    const row = screen.getByTestId("flexibility-row-heater");
+    expect(row).toHaveTextContent("6.00 kW");
+    expect(row).toHaveTextContent("3.00 kW");
   });
 });

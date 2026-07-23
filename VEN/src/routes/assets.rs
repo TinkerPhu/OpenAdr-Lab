@@ -56,7 +56,8 @@ pub async fn get_asset_forecast(
 }
 
 /// GET /capability/:asset_id — point-in-time feasible power range for one asset (Phase A).
-/// Returns `{"max_import_kw": ..., "max_export_kw": ..., "is_fixed": ...}`.
+/// Returns `{"max_import_kw": ..., "max_export_kw": ..., "min_import_kw": ...,
+/// "min_export_kw": ..., "is_fixed": ...}`.
 pub async fn get_asset_capability(
     State(ctx): State<AppCtx>,
     Path(asset_id): Path<String>,
@@ -72,9 +73,12 @@ pub async fn get_asset_capability(
             .into_response(),
         Some((entry, cfg)) => {
             let cap = cfg.capability(&entry.state);
+            let floor = cfg.flexibility_floor(&entry.state);
             Json(serde_json::json!({
                 "max_import_kw": cap.max_import_kw,
                 "max_export_kw": cap.max_export_kw,
+                "min_import_kw": floor.min_import_kw,
+                "min_export_kw": floor.min_export_kw,
                 "is_fixed": cap.is_fixed(),
             }))
             .into_response()
