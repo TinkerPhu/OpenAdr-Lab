@@ -164,8 +164,11 @@ mechanism) was truly dead. No change to `step_inner`'s handling of its
       fixed. Re-verified post-fix: set → clamps, clear via null → natural
       output restored, confirmed both via direct API and will be
       re-confirmed via `POST /sim/inject/reset` equivalence.
-- [ ] 7.6 Full suite on Pi4 (`bash run_all_tests.sh`, acquire
-      `pi4_lock.sh` first) before merge, per repo testing guide.
+- [x] 7.6 Full E2E suite on Pi4 (`bash run_all_tests.sh --e2e`, pi4_lock
+      acquired/auto-released): 268 scenarios, 0 failed, 0 skipped,
+      including the full resilience suite (VTN restart, VEN restart,
+      exponential backoff during a sustained VTN outage) and the
+      browser-driven Controller V2 UI scenarios.
 
 ## 8. Fix: `POST /sim/inject` null-clearing was broken for every field
 
@@ -202,5 +205,11 @@ pre-existing defect affecting all ~13 `PostSimInjectBody` fields, not just
 - [x] 8.4 Full local verification re-run after the fix: 794 Rust tests
       (was 789 + 5 new), `cargo fmt`/`clippy -D warnings` clean, file-size
       audit clean.
-- [ ] 8.5 Redeploy to Pi4 and re-confirm the clear-via-null scenario works
-      end-to-end over the real API (not just local unit tests).
+- [x] 8.5 Redeployed to Pi4 (rebuilt ven-1/2/3 + restarted ui) and
+      re-confirmed live: `POST /sim/inject {"pv_export_limit_kw": 1.5}`
+      clamped `power_kw` to exactly -1.5 kW within one tick; `POST
+      /sim/inject {"pv_export_limit_kw": null}` fully restored natural
+      output (-4.386 kW, matching pre-test baseline) and removed
+      `export_limit_kw` from the asset snapshot — the null-clear path now
+      genuinely works end-to-end over the real API, not just in unit
+      tests that bypass JSON deserialization.
