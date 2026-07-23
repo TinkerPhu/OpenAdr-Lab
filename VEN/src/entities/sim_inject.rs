@@ -23,8 +23,9 @@ pub struct SimInjectState {
     pub heater_temp_min_c: Option<f64>,
     pub heater_temp_max_c: Option<f64>,
     pub ambient_temp_c: Option<f64>,
-    pub grid_import_limit_kw: Option<f64>,
-    pub grid_export_limit_kw: Option<f64>,
+    /// PV export ceiling (kW, positive magnitude); sign-converted to the
+    /// internal `PvInverter.export_limit_kw` (≤ 0) convention where applied.
+    pub pv_export_limit_kw: Option<f64>,
     // Behaviour D — planning-only override (no physics effect, no replan trigger)
     pub pv_plan_kw: Option<f64>,
 }
@@ -45,8 +46,7 @@ impl Default for SimInjectState {
             heater_temp_min_c: None,
             heater_temp_max_c: None,
             ambient_temp_c: None,
-            grid_import_limit_kw: None,
-            grid_export_limit_kw: None,
+            pv_export_limit_kw: None,
             pv_plan_kw: None,
         }
     }

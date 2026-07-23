@@ -1,10 +1,12 @@
 /// Dispatcher: translates FIRM plan slot allocations into per-asset setpoints.
 ///
-/// Single responsibility: given the current plan, simulator assets, and capacity
-/// constraints, produce a HashMap<asset_id, kW> that drives the simulator tick.
-/// The plan is the sole authority.
+/// Single responsibility: given the current plan and simulator assets, produce
+/// a HashMap<asset_id, kW> that drives the simulator tick. The plan is the
+/// sole authority. (PV export curtailment — VTN capacity and operator
+/// overrides — is handled upstream in `tasks/sim_tick/tick.rs`, feeding
+/// `PvInverter.export_limit_kw` directly rather than a dispatcher setpoint;
+/// see that module's `effective_pv_export_ceiling_kw`.)
 use crate::controller::SimSnapshot;
-use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::PlannerObjective;
 use chrono::{DateTime, Utc};
@@ -18,8 +20,7 @@ use std::collections::HashMap;
 /// 3. Overwrite entries for assets that have an allocation in that slot.
 /// 4. If `heater_setpoint_c` override is set and the plan has no heater allocation,
 ///    compute ON/OFF setpoint based on current temperature vs. target.
-/// 5. Enforce `export_limit_kw` on the `pv` key if capacity state has one.
-/// 6. Apply opportunistic surplus EV charging (see `apply_surplus_ev_overlay`).
+/// 5. Apply opportunistic surplus EV charging (see `apply_surplus_ev_overlay`).
 ///
 /// `live_pv_kw`: this tick's PV output, computed *before* physics runs
 /// (`SimState::peek_pv_kw`). Passed straight through to
@@ -29,7 +30,6 @@ use std::collections::HashMap;
 pub fn build_setpoints(
     plan: &Plan,
     sim: &SimSnapshot,
-    capacity: &OadrCapacityState,
     heater_setpoint_c: Option<f64>,
     now: DateTime<Utc>,
     overlay_enabled: bool,
@@ -78,17 +78,6 @@ pub fn build_setpoints(
                 let power_kw = if temp_c < target_c { max_kw } else { 0.0 };
                 setpoints.insert(crate::ids::ASSET_HEATER.to_string(), power_kw);
             }
-        }
-    }
-
-    // Enforce export capacity limit on PV
-    if let Some(export_cap) = capacity.export_limit_kw {
-        let pv_sp = setpoints
-            .entry(crate::ids::ASSET_PV.to_string())
-            .or_insert(0.0);
-        // PV export is negative in sign convention; cap absolute value
-        if *pv_sp < -export_cap {
-            *pv_sp = -export_cap;
         }
     }
 
@@ -994,8 +983,7 @@ mod tests {
         let now = Utc::now();
         let sim = make_sim_snap(vec![battery_entry(0.5)]);
         let plan = make_test_plan(-3.0, now);
-        let capacity = crate::entities::capacity::OadrCapacityState::default();
-        let sp = build_setpoints(&plan, &sim, &capacity, None, now, false, None);
+        let sp = build_setpoints(&plan, &sim, None, now, false, None);
         let bat = sp.get("battery").copied().unwrap_or(999.0);
         assert!(
             (bat - (-3.0)).abs() < 0.01,
@@ -1040,8 +1028,7 @@ mod tests {
                 solve_status: crate::entities::plan::SolveStatus::Optimal,
             }
         };
-        let capacity = crate::entities::capacity::OadrCapacityState::default();
-        let sp = build_setpoints(&plan, &sim, &capacity, None, now, false, None);
+        let sp = build_setpoints(&plan, &sim, None, now, false, None);
         assert!(
             sp.is_empty(),
             "empty snapshot + no plan slots → empty setpoints map"

@@ -195,8 +195,7 @@ impl SimState {
     ///   this instant, via `entities::solar::resolve_weather_pv_kw` — same translation
     ///   the planner's own PV input uses (R-50). Takes precedence over the sin model,
     ///   but a manual `pv_irradiance_override` inject (testing/demo) wins over both.
-    ///
-    /// See `peek_pv_kw` (`pv_preview.rs`) for a read-only preview of this tick's PV term.
+    ///   See `peek_pv_kw` (`pv_preview.rs`) and `tasks/sim_tick::effective_pv_export_ceiling_kw`.
     #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
@@ -213,6 +212,7 @@ impl SimState {
         ev_plugged_override: Option<bool>,
         ev_soc_target_override: Option<f64>,
         weather_pv_kw: Option<f64>,
+        pv_export_limit_kw_override: Option<f64>,
     ) {
         let hour = now.format("%H").to_string().parse::<f64>().unwrap_or(12.0)
             + now.format("%M").to_string().parse::<f64>().unwrap_or(0.0) / 60.0;
@@ -259,6 +259,7 @@ impl SimState {
                     } else {
                         None
                     };
+                    pv.export_limit_kw = pv_export_limit_kw_override.map(|v| -v.abs());
                 }
                 AssetConfig::Heater(h) => {
                     // Behaviour C: ambient temp — hold override or use default.

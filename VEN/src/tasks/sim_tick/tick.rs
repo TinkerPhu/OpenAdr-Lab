@@ -13,6 +13,24 @@ use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
 use crate::state::{AppState, EvSettings};
 
+/// Combine the VTN's EXPORT_CAPACITY_LIMIT signal and the operator's
+/// `pv_export_limit_kw` sim-inject override into a single effective PV export
+/// ceiling (kW, positive magnitude) — whichever source is tighter wins. Both
+/// values use the same positive-magnitude convention; sign conversion to
+/// `PvInverter.export_limit_kw`'s `≤ 0` field happens later, in
+/// `SimState::tick`.
+fn effective_pv_export_ceiling_kw(
+    operator_override_kw: Option<f64>,
+    vtn_capacity_kw: Option<f64>,
+) -> Option<f64> {
+    match (operator_override_kw, vtn_capacity_kw) {
+        (Some(operator), Some(vtn)) => Some(operator.min(vtn)),
+        (Some(operator), None) => Some(operator),
+        (None, Some(vtn)) => Some(vtn),
+        (None, None) => None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn tick_once(
     state: AppState,
@@ -63,6 +81,9 @@ pub(crate) async fn tick_once(
     let alert_windows = state.alert_windows().await;
     let rates_snap = state.planned_tariffs().await;
 
+    let pv_export_ceiling_kw =
+        effective_pv_export_ceiling_kw(inject.pv_export_limit_kw, capacity_snap.export_limit_kw);
+
     // Compute overlay_enabled: user toggle AND no active EvSession.
     let ev_sess_tick = state.ev_session().await;
     let ev_settings_tick = state.ev_settings().await;
@@ -106,7 +127,6 @@ pub(crate) async fn tick_once(
         let sp_map = super::helpers::build_tick_setpoints(
             &pre_snap,
             plan_snap.as_ref(),
-            &capacity_snap,
             &inject,
             overlay_enabled,
             now,
@@ -130,6 +150,7 @@ pub(crate) async fn tick_once(
             inject.ev_plugged,
             inject.ev_soc_target,
             weather_pv_kw_now,
+            pv_export_ceiling_kw,
         );
 
         // PHASE 4 (in-lock): extract snapshots and mutate history/grid/envelope.

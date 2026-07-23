@@ -45,17 +45,20 @@ pub(crate) fn apply_sim_injections(
     cleared
 }
 
-/// PHASE 2: Compose effective capacity and build per-asset setpoints.
+/// PHASE 2: Build per-asset setpoints from the active plan.
 ///
 /// `live_pv_kw`: this tick's PV output, computed *before* physics runs
 /// (`SimState::peek_pv_kw`) — passed through to the EV-surplus overlay so it
 /// doesn't fall back to a one-tick-stale PV snapshot. See
 /// `controller::dispatcher::apply_surplus_ev_overlay` for the full rationale.
+///
+/// PV export curtailment (VTN capacity + operator override) is applied
+/// upstream in `tick.rs` directly onto `PvInverter.export_limit_kw`, not
+/// through this setpoints map — see `effective_pv_export_ceiling_kw`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_tick_setpoints(
     sim_snap: &SimSnapshot,
     plan_snap: Option<&Plan>,
-    capacity_snap: &OadrCapacityState,
     inject: &SimInjectState,
     overlay_enabled: bool,
     now: DateTime<Utc>,
@@ -63,23 +66,10 @@ pub(crate) fn build_tick_setpoints(
     alert_windows: &[crate::entities::capacity::AlertWindow],
     live_pv_kw: Option<f64>,
 ) -> HashMap<String, f64> {
-    // Compose effective capacity: inject grid limits only when no VTN event active.
-    let mut effective_capacity = capacity_snap.clone();
-    if effective_capacity.import_limit_event_id.is_none() {
-        if let Some(lim) = inject.grid_import_limit_kw {
-            effective_capacity.import_limit_kw = Some(lim);
-        }
-    }
-    if effective_capacity.export_limit_event_id.is_none() {
-        if let Some(lim) = inject.grid_export_limit_kw {
-            effective_capacity.export_limit_kw = Some(lim);
-        }
-    }
     let mut sp = match plan_snap {
         Some(plan) => controller::dispatcher::build_setpoints(
             plan,
             sim_snap,
-            &effective_capacity,
             inject.heater_setpoint_c,
             now,
             overlay_enabled,

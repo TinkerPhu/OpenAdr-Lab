@@ -35,10 +35,35 @@ is cleared.
   not decay back toward an unclamped state the way the `pv_irradiance`
   override does
 
+### Requirement: VTN export capacity signal also curtails PV
+The simulator SHALL also curtail PV export in response to the VTN's
+`EXPORT_CAPACITY_LIMIT` signal, combined with any operator override —
+whichever of the two is more restrictive at a given tick determines the
+effective ceiling.
+
+#### Scenario: VTN signal curtails PV when no operator override is active
+- **WHEN** the VTN's `EXPORT_CAPACITY_LIMIT` signal sets a capacity limit
+  and no `pv_export_limit_kw` operator override is active
+- **THEN** PV export power is clamped to the VTN-signaled limit
+
+#### Scenario: The tighter of VTN and operator ceilings wins
+- **WHEN** both a VTN `EXPORT_CAPACITY_LIMIT` signal and an operator
+  `pv_export_limit_kw` override are active simultaneously with different
+  values
+- **THEN** PV export power is clamped to whichever of the two values is
+  more restrictive (the smaller magnitude)
+
+#### Scenario: Operator override alone still curtails when no VTN signal is active
+- **WHEN** only an operator `pv_export_limit_kw` override is active and no
+  VTN `EXPORT_CAPACITY_LIMIT` signal is present
+- **THEN** PV export power is clamped to the operator's value (unchanged
+  from the operator-only scenarios above)
+
 ### Requirement: PV export ceiling changes trigger a replan
-Setting or clearing `pv_export_limit_kw` via sim-inject SHALL trigger an
-out-of-cycle planner replan, consistent with the existing
-`grid_export_limit_kw` sim-inject field's replan-triggering behavior.
+The simulator SHALL trigger an out-of-cycle planner replan when the
+operator's `pv_export_limit_kw` sim-inject value is set or cleared. VTN
+`EXPORT_CAPACITY_LIMIT` changes already trigger a replan via their own
+existing event path and are unaffected by this requirement.
 
 #### Scenario: Replan triggered on ceiling change
 - **WHEN** an operator POSTs a new `pv_export_limit_kw` value that differs

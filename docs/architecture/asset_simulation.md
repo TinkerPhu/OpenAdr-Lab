@@ -305,7 +305,15 @@ No Behaviour C fields. Battery scheduling is fully planner-driven.
 
 ### Physics
 
-- Non-curtailable: ignores dispatcher setpoint.
+- Ignores the dispatcher's per-tick setpoint (`step_inner`'s `setpoint_kw`
+  parameter is unused) — the planner cannot dispatch PV to an arbitrary
+  point, so `AssetCapability` still reports it as fixed (see below).
+- Export ceiling: `PvInverter.export_limit_kw` (`Option<f64>`, `≤ 0`) *is*
+  respected by both `step_inner` and `peek_pv_kw` — set each tick from
+  `tasks/sim_tick/tick.rs::effective_pv_export_ceiling_kw`, the more
+  restrictive of the VTN's `EXPORT_CAPACITY_LIMIT` signal and the operator's
+  `pv_export_limit_kw` sim-inject override (see Inject Overrides and
+  External Influences below).
 - Power output:
   ```
   power_kw = −(rated_kw × irradiance)   [negative = export]
@@ -348,13 +356,15 @@ baseline. `pv_alpha` controls the half-life of the perturbation after release.
 |---|---|---|
 | `pv_irradiance` | B — perturbation overlay | Set irradiance [0–1]; offset above/below sin model decays to zero on release |
 | `pv_irradiance_alpha` | Parameter | Decay speed (default 0.1 per tick); higher = faster return to sin model |
+| `pv_export_limit_kw` | C — frozen, no snap-back | Positive-magnitude export ceiling (kW); combined with the VTN's `EXPORT_CAPACITY_LIMIT` signal (more restrictive wins) each tick, sign-converted onto `PvInverter.export_limit_kw` |
 
 ### External Influences
 
 | Source | Influence |
 |---|---|
 | System clock (hour-of-day) | Automatic irradiance unless overridden |
-| `export_limit_kw` (OadrCapacityState) | Curtails PV output if VTN sets a limit |
+| VTN `EXPORT_CAPACITY_LIMIT` event | `OadrCapacityState.export_limit_kw`; combined with `pv_export_limit_kw` inject (more restrictive wins) into `PvInverter.export_limit_kw` |
+| `pv_export_limit_kw` inject | Operator-set export ceiling; combined with the VTN signal the same way |
 
 ### Output State
 
@@ -412,12 +422,15 @@ None. Output is entirely determined by profile / active inject.
 |---|---|
 | All other assets | `net_power_kw = Σ(all asset powers)` |
 | VTN `IMPORT_CAPACITY_LIMIT` event | Sets `import_limit_kw` in `OadrCapacityState` |
-| VTN `EXPORT_CAPACITY_LIMIT` event | Sets `export_limit_kw` in `OadrCapacityState` |
-| `grid_import_limit_kw` inject | Overrides import limit when no VTN event is active |
-| `grid_export_limit_kw` inject | Overrides export limit when no VTN event is active |
+| VTN `EXPORT_CAPACITY_LIMIT` event | Sets `export_limit_kw` in `OadrCapacityState`; also feeds PV's export ceiling (see §4) |
 
-**Grid limit priority**: VTN event always wins. Inject only applies when
-`capacity_snap.import_limit_event_id.is_none()`.
+`import_limit_kw`/`export_limit_kw` on the Grid virtual asset itself are
+VTN-event-sourced only — there is no operator sim-inject override for the
+grid connection point (a `grid_import_limit_kw`/`grid_export_limit_kw`
+inject pair existed at one point but was found to be dead code — it never
+had any consumer — and was removed rather than wired up, since no use case
+motivated fixing it; PV curtailment now correctly wires the VTN's export
+signal through, see §4).
 
 ### Default Limits
 
@@ -448,8 +461,7 @@ None. Output is entirely determined by profile / active inject.
 | `heater_temp_max_c` | f64 | C | Heater | Snaps to `temp_max_c_profile` |
 | `ambient_temp_c` | f64 | C | Heater | No snap-back — stays until cleared |
 | `base_load_kw` | f64 | C | Base Load | Snaps to `baseline_kw_profile` |
-| `grid_import_limit_kw` | f64 | C | Grid | No snap-back; VTN event takes precedence |
-| `grid_export_limit_kw` | f64 | C | Grid | No snap-back; VTN event takes precedence |
+| `pv_export_limit_kw` | f64 | C | PV | No snap-back; combined with VTN `EXPORT_CAPACITY_LIMIT` (tighter wins) |
 
 Sending a field as **absent** = no change. Sending **`null`** = release override.
 See `docs/architecture/asset_simulation_override_redesign.md` → deleted; full inject API

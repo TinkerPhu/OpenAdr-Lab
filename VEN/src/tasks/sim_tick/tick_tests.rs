@@ -9,7 +9,30 @@ mod tests {
     use crate::services::test_support::mock_vtn::MockVtn;
     use crate::simulator::SimState;
     use crate::state::AppState;
-    use crate::tasks::sim_tick::tick::tick_once;
+    use crate::tasks::sim_tick::tick::{effective_pv_export_ceiling_kw, tick_once};
+
+    #[test]
+    fn effective_pv_export_ceiling_kw_takes_the_tighter_of_operator_and_vtn() {
+        assert_eq!(
+            effective_pv_export_ceiling_kw(Some(5.0), Some(3.0)),
+            Some(3.0)
+        );
+        assert_eq!(
+            effective_pv_export_ceiling_kw(Some(3.0), Some(5.0)),
+            Some(3.0)
+        );
+    }
+
+    #[test]
+    fn effective_pv_export_ceiling_kw_falls_back_to_whichever_source_is_set() {
+        assert_eq!(effective_pv_export_ceiling_kw(Some(3.0), None), Some(3.0));
+        assert_eq!(effective_pv_export_ceiling_kw(None, Some(4.0)), Some(4.0));
+    }
+
+    #[test]
+    fn effective_pv_export_ceiling_kw_is_none_when_neither_source_is_set() {
+        assert_eq!(effective_pv_export_ceiling_kw(None, None), None);
+    }
 
     fn minimal_sim() -> Arc<Mutex<SimState>> {
         let s: SimState = serde_json::from_value(serde_json::json!({

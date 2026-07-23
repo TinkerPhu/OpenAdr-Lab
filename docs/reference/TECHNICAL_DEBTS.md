@@ -74,6 +74,12 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 | R-56 | No REST/BDD-executable end-to-end coverage for the weather MQTT path yet — `tests/features/weather_forecast.feature` is committed `@wip` (excluded from the default suite). No longer blocked on R-50 (planner-input half landed); only needs Pi4/Docker access to un-`@wip` and run. | `tests/features/weather_forecast.feature` | Small | Low |
 | R-57 | ~~Violates the `ui-transparency` rule~~ **Closed** (weather-forecast-visibility): `GET /weather` (raw + derived state) and the VEN UI Weather tab now exist. Manual browser verification against a running VEN was not performed (no deployment requested this session) — only the automated test pyramid; do a manual pass before/at next deployment. | `VEN/src/routes/weather.rs`, `VEN/ui/src/pages/Weather.tsx` | — | — |
 
+### PV export curtailment (openspec/changes/pv-export-curtailment)
+
+| ID | Description | Affected files | Effort | Risk |
+|----|-------------|----------------|--------|------|
+| R-58 | The MILP planner's PV forecast input (`resolve_weather_pv_kw_for_cycle`/`weather_pv_forecast_series`) is not ceiling-aware: once a `pv_export_limit_kw` sim-inject override or a VTN `EXPORT_CAPACITY_LIMIT` event curtails simulator output, the plan can still assume the *uncurtailed* forecast for upcoming slots until the next replan cycle picks up the changed constraint indirectly (nothing feeds the ceiling into the solver's PV input series directly). Only the live simulator physics respects the ceiling immediately; the plan may transiently overcommit PV export capacity. Not fixed here — planner-side PV curtailment awareness is Tier 2 scope (see `openspec/changes/pv-export-curtailment/proposal.md` non-goals). | `VEN/src/services/planning.rs`, `VEN/src/entities/solar.rs`, `VEN/src/tasks/sim_tick/tick.rs` | Medium | Low |
+
 ### Cross-crate duplication
 
 | ID | Description | Affected files | Effort | Risk |

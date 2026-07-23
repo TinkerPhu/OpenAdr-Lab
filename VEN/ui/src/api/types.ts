@@ -147,8 +147,7 @@ export type SimInjectState = {
   heater_temp_min_c?: number | null;
   heater_temp_max_c?: number | null;
   ambient_temp_c?: number | null;
-  grid_import_limit_kw?: number | null;
-  grid_export_limit_kw?: number | null;
+  pv_export_limit_kw?: number | null;
 };
 
 export type TraceEntry =

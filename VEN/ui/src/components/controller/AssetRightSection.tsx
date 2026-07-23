@@ -130,6 +130,18 @@ export function AssetRightSection({
       const v = sim?.assets?.["heater"]?.["temp_max_c"];
       return typeof v === "number" ? v : null;
     }
+    // Persistent PV export ceiling: fall back to the live sim value so the
+    // slider reflects whichever source (operator override or VTN
+    // EXPORT_CAPACITY_LIMIT signal) is currently the more restrictive and
+    // therefore actually in effect — not just this operator's own override.
+    // `export_limit_kw` is signed (≤ 0) on the wire; the slider is a
+    // positive-magnitude kW control. Absent (no ceiling from either source)
+    // reads as 0 kW on the slider — a known display quirk shared with other
+    // "null means unset" controls, not "fully curtailed".
+    if (key === "pv_export_limit_kw") {
+      const v = sim?.assets?.["pv"]?.["export_limit_kw"];
+      return typeof v === "number" ? Math.abs(v) : null;
+    }
     return null;
   }
 

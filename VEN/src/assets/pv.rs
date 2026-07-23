@@ -120,6 +120,15 @@ impl PvInverter {
                 unit: "".into(),
                 display_scale: None,
             },
+            ControlDescriptor {
+                key: "pv_export_limit_kw".into(),
+                label: "Export Limit".into(),
+                kind: ControlKind::Slider,
+                min: Some(0.0),
+                max: Some(self.rated_kw),
+                unit: "kW".into(),
+                display_scale: None,
+            },
         ]
     }
 
@@ -343,6 +352,20 @@ mod tests {
                 actual_power_kw: 0.0,
             },
         )
+    }
+
+    #[test]
+    fn control_schema_includes_export_limit_bounded_by_rated_kw() {
+        let (pv, _state) = make_pv(6.5);
+        let schema = pv.control_schema();
+        let d = schema
+            .iter()
+            .find(|d| d.key == "pv_export_limit_kw")
+            .expect("pv_export_limit_kw descriptor must be present");
+        assert!(matches!(d.kind, ControlKind::Slider));
+        assert_eq!(d.min, Some(0.0));
+        assert_eq!(d.max, Some(6.5), "max must track the asset's rated_kw");
+        assert_eq!(d.unit, "kW");
     }
 
     // ── step_inner: weather_power_kw precedence ──────────────────────────────

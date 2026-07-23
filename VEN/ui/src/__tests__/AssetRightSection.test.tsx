@@ -66,6 +66,14 @@ const simWithPv: SimSnapshot = {
   },
 };
 
+const simWithPvCurtailed: SimSnapshot = {
+  ts: "2026-03-14T10:00:00Z",
+  grid: { net_power_w: 1500, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 },
+  assets: {
+    pv: { power_kw: -3, irradiance: 0.8, rated_kw: 8, export_limit_kw: -3 },
+  },
+};
+
 const simWithHeater: SimSnapshot = {
   ts: "2026-03-14T10:00:00Z",
   grid: { net_power_w: 1500, voltage_v: 230, import_kwh: 5.0, export_kwh: 0 },
@@ -84,6 +92,7 @@ const heaterSchema = [
 const pvSchema = [
   { key: "pv_irradiance", label: "Irradiance Override", kind: "slider" as const, min: 0, max: 1, unit: "%", display_scale: 100 },
   { key: "pv_irradiance_alpha", label: "Blend-back Speed", kind: "slider" as const, min: 0.01, max: 1, unit: "", display_scale: undefined },
+  { key: "pv_export_limit_kw", label: "Export Limit", kind: "slider" as const, min: 0, max: 8, unit: "kW", display_scale: undefined },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -469,6 +478,67 @@ describe("AssetRightSection — blend-back speed holds local value across prop u
     expect(mockOnOverrideChange).toHaveBeenCalledTimes(2);
     expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance_alpha: 0.99 });
     expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_irradiance: 0.7 });
+  });
+});
+
+// ─── PV export limit — persistent override (no snap-back) ─────────────────────
+
+describe("AssetRightSection — PV export limit control", () => {
+  beforeEach(() => {
+    mockSchemaData.mockReturnValue({ pv: pvSchema });
+  });
+
+  afterEach(() => {
+    mockSchemaData.mockReturnValue({});
+  });
+
+  it("shows no ceiling (slider at min) when neither operator nor VTN limit is active", () => {
+    render(
+      <AssetRightSection
+        assetId="pv"
+        simSnapshot={simWithPv}   // no export_limit_kw key
+        overrides={undefined}
+        onOverrideChange={vi.fn()}
+        onResetSoc={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/Export Limit: 0/)).toBeInTheDocument();
+  });
+
+  it("shows the live effective ceiling (abs of signed export_limit_kw) when one is active", () => {
+    render(
+      <AssetRightSection
+        assetId="pv"
+        simSnapshot={simWithPvCurtailed}   // export_limit_kw = -3
+        overrides={undefined}
+        onOverrideChange={vi.fn()}
+        onResetSoc={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/Export Limit: 3/)).toBeInTheDocument();
+  });
+
+  it("drag posts a positive-magnitude value and retains the local value after commit (persistent behavior)", () => {
+    const mockOnOverrideChange = vi.fn();
+
+    render(
+      <AssetRightSection
+        assetId="pv"
+        simSnapshot={simWithPv}
+        overrides={undefined}
+        onOverrideChange={mockOnOverrideChange}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    const input = getSchemaSliderInput("pv_export_limit_kw");
+
+    act(() => { fireEvent.change(input, { target: { value: "3" } }); });
+    act(() => { fireEvent.mouseUp(input); });
+
+    expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_export_limit_kw: 3 });
+    // Persistent: slider should hold the locally-set value, not revert.
+    expect(screen.getByText(/Export Limit: 3/)).toBeInTheDocument();
   });
 });
 

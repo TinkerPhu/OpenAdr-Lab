@@ -45,9 +45,7 @@ pub struct PostSimInjectBody {
     #[serde(default)]
     pub base_load_alpha: Option<serde_json::Value>,
     #[serde(default)]
-    pub grid_import_limit_kw: Option<serde_json::Value>,
-    #[serde(default)]
-    pub grid_export_limit_kw: Option<serde_json::Value>,
+    pub pv_export_limit_kw: Option<serde_json::Value>,
     #[serde(default)]
     pub pv_plan_kw: Option<serde_json::Value>,
 }
@@ -93,8 +91,7 @@ fn merge_inject(current: &mut SimInjectState, body: PostSimInjectBody) {
             current.base_load_alpha = 0.1; // reset to default
         }
     }
-    merge_f64!(grid_import_limit_kw);
-    merge_f64!(grid_export_limit_kw);
+    merge_f64!(pv_export_limit_kw);
     merge_f64!(pv_plan_kw);
 }
 
@@ -207,20 +204,15 @@ pub async fn get_sim_inject(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.inject_state().await)
 }
 
-/// POST /sim/inject — partial-merge inject state.
-/// Absent fields are unchanged; `null` releases the override; a value activates it.
-pub async fn post_sim_inject(
-    State(ctx): State<AppCtx>,
-    Json(body): Json<PostSimInjectBody>,
-) -> impl IntoResponse {
-    // Trigger a replan only for fields the MILP planner uses as inputs.
-    // base_load_kw / base_load_alpha are one-shot physics overrides for test
-    // simulation — triggering a replan on them would race the BDD assertion window
-    // by adopting a new plan mid-test.
-    // pv_plan_kw is a planning-only forecast pin — it takes effect on the *next* scheduled
-    // solve cycle and must NOT trigger an immediate replan, which would race the BDD
-    // assertion window exactly like base_load_kw does.
-    let should_replan = body.pv_irradiance.is_some()
+/// Trigger a replan only for fields the MILP planner uses as inputs.
+/// base_load_kw / base_load_alpha are one-shot physics overrides for test
+/// simulation — triggering a replan on them would race the BDD assertion window
+/// by adopting a new plan mid-test.
+/// pv_plan_kw is a planning-only forecast pin — it takes effect on the *next* scheduled
+/// solve cycle and must NOT trigger an immediate replan, which would race the BDD
+/// assertion window exactly like base_load_kw does.
+fn body_triggers_replan(body: &PostSimInjectBody) -> bool {
+    body.pv_irradiance.is_some()
         || body.battery_soc.is_some()
         || body.ev_soc.is_some()
         || body.ev_plugged.is_some()
@@ -228,8 +220,16 @@ pub async fn post_sim_inject(
         || body.heater_temp_c.is_some()
         || body.heater_setpoint_c.is_some()
         || body.ambient_temp_c.is_some()
-        || body.grid_import_limit_kw.is_some()
-        || body.grid_export_limit_kw.is_some();
+        || body.pv_export_limit_kw.is_some()
+}
+
+/// POST /sim/inject — partial-merge inject state.
+/// Absent fields are unchanged; `null` releases the override; a value activates it.
+pub async fn post_sim_inject(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<PostSimInjectBody>,
+) -> impl IntoResponse {
+    let should_replan = body_triggers_replan(&body);
     let mut current = ctx.state.inject_state().await;
     merge_inject(&mut current, body);
     ctx.state.set_inject_state(current).await;
@@ -253,4 +253,63 @@ pub async fn post_plan_trigger(State(ctx): State<AppCtx>) -> impl IntoResponse {
 pub async fn post_sim_inject_reset(State(ctx): State<AppCtx>) -> impl IntoResponse {
     ctx.state.set_inject_state(SimInjectState::default()).await;
     axum::http::StatusCode::NO_CONTENT
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_body() -> PostSimInjectBody {
+        PostSimInjectBody::default()
+    }
+
+    #[test]
+    fn merge_inject_sets_pv_export_limit_kw_from_value() {
+        let mut state = SimInjectState::default();
+        let mut body = empty_body();
+        body.pv_export_limit_kw = Some(serde_json::json!(3.5));
+        merge_inject(&mut state, body);
+        assert_eq!(state.pv_export_limit_kw, Some(3.5));
+    }
+
+    #[test]
+    fn merge_inject_clears_pv_export_limit_kw_on_null() {
+        let mut state = SimInjectState {
+            pv_export_limit_kw: Some(3.5),
+            ..SimInjectState::default()
+        };
+        let mut body = empty_body();
+        body.pv_export_limit_kw = Some(serde_json::Value::Null);
+        merge_inject(&mut state, body);
+        assert_eq!(state.pv_export_limit_kw, None);
+    }
+
+    #[test]
+    fn merge_inject_leaves_pv_export_limit_kw_unchanged_when_absent() {
+        let mut state = SimInjectState {
+            pv_export_limit_kw: Some(3.5),
+            ..SimInjectState::default()
+        };
+        merge_inject(&mut state, empty_body());
+        assert_eq!(state.pv_export_limit_kw, Some(3.5));
+    }
+
+    #[test]
+    fn body_triggers_replan_true_when_pv_export_limit_kw_set() {
+        let mut body = empty_body();
+        body.pv_export_limit_kw = Some(serde_json::json!(3.5));
+        assert!(body_triggers_replan(&body));
+    }
+
+    #[test]
+    fn body_triggers_replan_true_when_pv_export_limit_kw_cleared() {
+        let mut body = empty_body();
+        body.pv_export_limit_kw = Some(serde_json::Value::Null);
+        assert!(body_triggers_replan(&body));
+    }
+
+    #[test]
+    fn body_triggers_replan_false_when_no_planner_input_fields_present() {
+        assert!(!body_triggers_replan(&empty_body()));
+    }
 }

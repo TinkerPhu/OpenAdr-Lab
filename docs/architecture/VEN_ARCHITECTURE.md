@@ -497,7 +497,7 @@ behaviour classes (`state.rs::SimInjectState`):
 |---|---|---|
 | A — one-shot | `battery_soc`, `ev_soc`, `heater_temp_c` | Applied once to physics state, then cleared automatically |
 | B — frozen + EMA return | `pv_irradiance` (+`pv_irradiance_alpha`), `base_load_kw` (+`base_load_alpha`) | Held while active; EMA-blended back to the natural model on release |
-| C — frozen + snap | `ev_plugged`, `ev_soc_target`, `heater_setpoint_c`, `heater_temp_min_c`, `heater_temp_max_c`, `ambient_temp_c`, `grid_import_limit_kw`, `grid_export_limit_kw` | Held while active; snaps to the profile default on release |
+| C — frozen + snap | `ev_plugged`, `ev_soc_target`, `heater_setpoint_c`, `heater_temp_min_c`, `heater_temp_max_c`, `ambient_temp_c`, `pv_export_limit_kw` | Held while active; snaps to the profile default (or no limit, for `pv_export_limit_kw`) on release |
 | D — planning-only | `pv_plan_kw` | Pins the PV forecast for all horizon slots; no physics effect, no replan trigger |
 
 ### 4.6 Timeline & Asset Forecast

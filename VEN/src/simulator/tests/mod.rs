@@ -77,6 +77,7 @@ mod peek_pv_kw_tests {
             None,
             None,
             None,
+            None,
         );
 
         let pv_entry = sim
@@ -174,6 +175,7 @@ mod peek_pv_kw_tests {
             None,
             None,
             Some(7.0),
+            None,
         );
 
         let pv_entry = sim
@@ -186,6 +188,147 @@ mod peek_pv_kw_tests {
             "peek_pv_kw ({preview}) must equal tick()'s actual PV output ({}) when a weather \
              value is supplied, same as the sin-model case",
             pv_entry.last_power_kw
+        );
+    }
+}
+
+/// `pv_export_limit_kw_override` — the operator-set PV export ceiling threaded
+/// from sim-inject into `SimState::tick`. Verifies the positive-magnitude ->
+/// `≤ 0` sign conversion happens correctly and that the ceiling is enforced
+/// on live simulator output, not just at the `PvInverter::step_inner` unit
+/// level (already covered by `assets::pv::tests::step_inner_clamps_weather_power_kw_to_export_limit`).
+mod pv_export_limit_tests {
+    use super::super::*;
+    use crate::entities::asset_params::{AssetParams, PvParams};
+    use chrono::TimeZone;
+
+    fn pv_state(rated_kw: f64) -> SimState {
+        SimState::from_params(&[AssetParams::Pv(PvParams {
+            id: crate::ids::ASSET_PV.to_string(),
+            rated_kw,
+        })])
+    }
+
+    fn noon() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 7, 12, 12, 0, 0).unwrap()
+    }
+
+    fn pv_power_kw(sim: &SimState) -> f64 {
+        sim.assets
+            .iter()
+            .find(|e| e.id == crate::ids::ASSET_PV)
+            .expect("PV asset entry must exist")
+            .last_power_kw
+    }
+
+    #[test]
+    fn ceiling_below_natural_output_clamps_pv_export() {
+        let mut sim = pv_state(10.0); // full-noon sin model ~= -10 kW export
+
+        sim.tick(
+            30.0,
+            HashMap::new(),
+            noon(),
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            Some(3.0), // pv_export_limit_kw_override: positive magnitude
+        );
+
+        assert!(
+            (pv_power_kw(&sim) + 3.0).abs() < 1e-9,
+            "a 3.0 kW ceiling must clamp export to -3.0 kW, got {}",
+            pv_power_kw(&sim)
+        );
+    }
+
+    #[test]
+    fn ceiling_above_natural_output_has_no_effect() {
+        let mut sim = pv_state(1.0); // small array, natural output well under the ceiling
+
+        sim.tick(
+            30.0,
+            HashMap::new(),
+            noon(),
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            Some(50.0), // ceiling far above what a 1 kW array can produce
+        );
+
+        assert!(
+            pv_power_kw(&sim) < 0.0,
+            "PV should still export naturally when the ceiling is non-binding, got {}",
+            pv_power_kw(&sim)
+        );
+        assert!(
+            pv_power_kw(&sim) > -1.0 - 1e-9,
+            "non-binding ceiling must not alter natural output, got {}",
+            pv_power_kw(&sim)
+        );
+    }
+
+    #[test]
+    fn clearing_ceiling_restores_natural_output_next_tick() {
+        let mut sim = pv_state(10.0);
+
+        sim.tick(
+            30.0,
+            HashMap::new(),
+            noon(),
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            Some(3.0),
+        );
+        assert!(
+            (pv_power_kw(&sim) + 3.0).abs() < 1e-9,
+            "ceiling must be applied first"
+        );
+
+        // Same tick args but ceiling override now None (cleared).
+        sim.tick(
+            30.0,
+            HashMap::new(),
+            noon(),
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        assert!(
+            pv_power_kw(&sim) < -3.0 - 1e-9,
+            "clearing the ceiling must restore natural (unclamped) output, got {}",
+            pv_power_kw(&sim)
         );
     }
 }
@@ -241,6 +384,7 @@ mod base_load_noise_tests {
             None,
             None,
             None,
+            None,
         );
 
         let entry = sim
@@ -278,6 +422,7 @@ mod base_load_noise_tests {
             None,
             None,
             None,
+            None,
         );
 
         let entry = sim
@@ -308,6 +453,7 @@ mod base_load_noise_tests {
             None,
             None,
             0.1,
+            None,
             None,
             None,
             None,
@@ -420,6 +566,7 @@ mod unmodelled_load_tests {
             None,
             None,
             0.1,
+            None,
             None,
             None,
             None,

@@ -1,39 +1,55 @@
 ## Why
 
 The VEN simulator's `PvInverter.export_limit_kw` field already exists and PV
-physics already respects it (`step_inner` clamps output when it is `Some`),
-but nothing in the production tick path ever sets it — it is hardcoded to
-`None` at construction and only ever set in unit tests. A separate clamp in
-`controller/dispatcher.rs` computes a curtailed PV setpoint from the VTN's
-grid export-limit signal, but PV physics ignores its setpoint entirely
-("non-curtailable in Phase A"), so that clamp has no effect either. The net
-result: there is no way, today, to actually curtail PV export in the
-simulator — operator-set or otherwise — despite the field and clamp code
-existing. This leaves PV always reported as fixed capability
+physics already respects it (`step_inner` and `peek_pv_kw` both clamp output
+when it is `Some`), but nothing in the production tick path ever sets it —
+it is hardcoded to `None` at construction and only ever set in unit tests.
+A separate, *different* mechanism in `controller/dispatcher.rs` computes a
+curtailed PV setpoint from the VTN's grid export-limit signal
+(`OadrCapacityState.export_limit_kw`), but writes it to the dispatcher's
+setpoints map — a channel `PvInverter::step_inner` ignores entirely
+(its parameter is literally named `_setpoint_kw`). So both the VTN's
+`EXPORT_CAPACITY_LIMIT` signal and any operator override are, today,
+completely inert: there is no way to actually curtail PV export in the
+simulator. This leaves PV always reported as fixed capability
 (`max_export_kw == max_import_kw`) in the Flexibility & Forecast UI panel,
-and makes it impossible to demo or test export-limit scenarios end to end.
+and — most importantly — means the VTN cannot actually enforce an export
+capacity limit it has signaled, which is the primary motivation for this
+change.
 
 ## What Changes
 
 - Add a `pv_export_limit_kw` field to the sim-inject mechanism (mirroring
   the existing `grid_export_limit_kw` pattern) so an operator/UI can set a
   persistent PV export ceiling (kW) at runtime via `POST /sim/inject`.
-- Thread that value into `PvInverter.export_limit_kw` every simulator tick,
-  so PV physics — which already clamps on this field — actually curtails.
-- Setting/clearing the limit triggers an out-of-cycle replan (same as
-  `grid_export_limit_kw` today), since a changed export ceiling changes
-  what the plan can assume PV will deliver.
-- Remove the now-fully-redundant dead PV clamp in `controller/dispatcher.rs`
-  (computed a setpoint that PV physics never consumed).
-- Add a third PV `ControlDescriptor` (`pv_export_limit_kw`) so the export
-  limit shows up in the generic schema-driven UI controls, using the same
-  persistent-override pattern as the heater's `heater_temp_min_c`/
+- Combine that operator override with the VTN's `EXPORT_CAPACITY_LIMIT`
+  signal (`OadrCapacityState.export_limit_kw`) into one effective ceiling
+  per tick — whichever is more restrictive wins
+  (`tasks/sim_tick/tick.rs::effective_pv_export_ceiling_kw`) — and thread
+  it into `PvInverter.export_limit_kw` every simulator tick, so PV physics
+  (which already clamps on this field) actually curtails from **either**
+  source.
+- Setting/clearing the operator override triggers an out-of-cycle replan
+  (same as `grid_export_limit_kw` today), since a changed export ceiling
+  changes what the plan can assume PV will deliver. (VTN capacity changes
+  already trigger a replan via their own existing event path.)
+- Remove the dead, redundant `capacity.export_limit_kw` → dispatcher
+  setpoint clamp in `controller/dispatcher.rs`, since PV physics never
+  consumed the setpoint it produced — fully superseded by the mechanism
+  above. This also removes the now-unused `capacity` parameter from
+  `build_setpoints` and the dead `effective_capacity`/
+  `grid_import_limit_kw`/`grid_export_limit_kw` merge in
+  `tasks/sim_tick/helpers.rs` that only ever fed that dead clamp.
+- Add a third PV `ControlDescriptor` (`pv_export_limit_kw`) so the operator
+  override shows up in the generic schema-driven UI controls, using the
+  same persistent-override pattern as the heater's `heater_temp_min_c`/
   `heater_temp_max_c` controls (sticks until explicitly cleared — no decay).
 - The VEN UI Dashboard's existing "Export limit" display for PV
   (`Dashboard.tsx:326`, already reads `sim.data.assets["pv"].export_limit_kw`
   but has never had real data to show) starts reflecting real values with no
   UI code change needed, since `PvInverter::state_values()` already emits
-  the field when set.
+  the field when set — and will now show whichever of VTN/operator is
+  currently binding.
 
 ## Non-Goals
 

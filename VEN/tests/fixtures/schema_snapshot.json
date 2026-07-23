@@ -54,6 +54,14 @@
       "min": 0.01,
       "max": 1.0,
       "unit": ""
+    },
+    {
+      "key": "pv_export_limit_kw",
+      "label": "Export Limit",
+      "kind": "slider",
+      "min": 0.0,
+      "max": 8.0,
+      "unit": "kW"
     }
   ]
 }
