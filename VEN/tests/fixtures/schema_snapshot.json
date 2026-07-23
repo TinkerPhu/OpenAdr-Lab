@@ -60,7 +60,7 @@
       "label": "Export Limit",
       "kind": "slider",
       "min": 0.0,
-      "max": 8.0,
+      "max": 14.4,
       "unit": "kW"
     }
   ]

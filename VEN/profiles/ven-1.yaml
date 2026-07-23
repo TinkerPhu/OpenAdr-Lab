@@ -8,7 +8,7 @@ assets:
     soc_target: 0.80
   - type: pv
     id: pv
-    rated_kw: 8.0
+    rated_kw: 14.4
   - type: battery
     id: battery
     capacity_kwh: 10.0

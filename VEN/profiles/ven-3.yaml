@@ -18,7 +18,7 @@ assets:
     switching_penalty_eur: 0.50
   - type: pv
     id: pv
-    rated_kw: 6.0
+    rated_kw: 8.0
   - type: base_load
     id: base_load
     baseline_kw: 0.6
