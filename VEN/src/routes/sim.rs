@@ -10,89 +10,94 @@ use crate::entities::asset::PlanTrigger;
 use crate::entities::sim_inject::SimInjectState;
 use crate::AppCtx;
 
-/// Partial-merge body for POST /sim/inject.
-///
-/// Serde semantics per field:
-/// - Absent from JSON     → `None`              → no change to current state
-/// - Present as `null`   → `Some(Value::Null)`  → release override
-/// - Present as value    → `Some(Value::...)`   → activate override with that value
+/// serde_json's `Option<T>` deserializer treats a literal JSON `null` as `None`
+/// directly — it never delegates to `T`, so a plain `Option<serde_json::Value>`
+/// field can never actually observe an explicit `null` versus the key being
+/// absent (both collapse to `None`). This "double option" wrapper is only
+/// invoked by serde when the JSON key is present at all (an absent key skips
+/// `deserialize_with` entirely and falls through to `#[serde(default)]` =
+/// `None`), so the three states become distinguishable:
+/// - Absent from JSON  → `None`       → no change to current state
+/// - Present as `null` → `Some(None)` → release override
+/// - Present as value  → `Some(Some(v))` → activate override with that value
+fn double_option<'de, D, T>(de: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::deserialize(de)?))
+}
+
+/// Partial-merge body for POST /sim/inject. See `double_option` for the
+/// absent/null/value serde semantics applied to every field below.
 #[derive(Debug, Default, Deserialize)]
 pub struct PostSimInjectBody {
-    #[serde(default)]
-    pub battery_soc: Option<serde_json::Value>,
-    #[serde(default)]
-    pub ev_soc: Option<serde_json::Value>,
-    #[serde(default)]
-    pub heater_temp_c: Option<serde_json::Value>,
-    #[serde(default)]
-    pub pv_irradiance: Option<serde_json::Value>,
-    #[serde(default)]
-    pub pv_irradiance_alpha: Option<serde_json::Value>,
-    #[serde(default)]
-    pub ev_plugged: Option<serde_json::Value>,
-    #[serde(default)]
-    pub ev_soc_target: Option<serde_json::Value>,
-    #[serde(default)]
-    pub heater_setpoint_c: Option<serde_json::Value>,
-    #[serde(default)]
-    pub heater_temp_min_c: Option<serde_json::Value>,
-    #[serde(default)]
-    pub heater_temp_max_c: Option<serde_json::Value>,
-    #[serde(default)]
-    pub ambient_temp_c: Option<serde_json::Value>,
-    #[serde(default)]
-    pub base_load_kw: Option<serde_json::Value>,
-    #[serde(default)]
-    pub base_load_alpha: Option<serde_json::Value>,
-    #[serde(default)]
-    pub pv_export_limit_kw: Option<serde_json::Value>,
-    #[serde(default)]
-    pub pv_plan_kw: Option<serde_json::Value>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub battery_soc: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub ev_soc: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub heater_temp_c: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub pv_irradiance: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub pv_irradiance_alpha: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub ev_plugged: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub ev_soc_target: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub heater_setpoint_c: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub heater_temp_min_c: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub heater_temp_max_c: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub ambient_temp_c: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub base_load_kw: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub base_load_alpha: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub pv_export_limit_kw: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub pv_plan_kw: Option<Option<f64>>,
 }
 
 /// Apply partial-merge: absent = no change, null = release (None), value = set.
 fn merge_inject(current: &mut SimInjectState, body: PostSimInjectBody) {
-    macro_rules! merge_f64 {
+    macro_rules! merge {
         ($field:ident) => {
-            if let Some(v) = body.$field {
-                current.$field = if v.is_null() { None } else { v.as_f64() };
+            match body.$field {
+                None => {}
+                Some(None) => current.$field = None,
+                Some(Some(v)) => current.$field = Some(v),
             }
         };
     }
-    macro_rules! merge_bool {
-        ($field:ident) => {
-            if let Some(v) = body.$field {
-                current.$field = if v.is_null() { None } else { v.as_bool() };
-            }
-        };
+    merge!(battery_soc);
+    merge!(ev_soc);
+    merge!(heater_temp_c);
+    merge!(pv_irradiance);
+    match body.pv_irradiance_alpha {
+        None => {}
+        Some(None) => current.pv_irradiance_alpha = 0.1, // reset to default
+        Some(Some(alpha)) => current.pv_irradiance_alpha = alpha,
     }
-    merge_f64!(battery_soc);
-    merge_f64!(ev_soc);
-    merge_f64!(heater_temp_c);
-    merge_f64!(pv_irradiance);
-    if let Some(v) = body.pv_irradiance_alpha {
-        if let Some(alpha) = v.as_f64() {
-            current.pv_irradiance_alpha = alpha;
-        } else if v.is_null() {
-            current.pv_irradiance_alpha = 0.1; // reset to default
-        }
+    merge!(ev_plugged);
+    merge!(ev_soc_target);
+    merge!(heater_setpoint_c);
+    merge!(heater_temp_min_c);
+    merge!(heater_temp_max_c);
+    merge!(ambient_temp_c);
+    merge!(base_load_kw);
+    match body.base_load_alpha {
+        None => {}
+        Some(None) => current.base_load_alpha = 0.1, // reset to default
+        Some(Some(alpha)) => current.base_load_alpha = alpha,
     }
-    merge_bool!(ev_plugged);
-    merge_f64!(ev_soc_target);
-    merge_f64!(heater_setpoint_c);
-    merge_f64!(heater_temp_min_c);
-    merge_f64!(heater_temp_max_c);
-    merge_f64!(ambient_temp_c);
-    merge_f64!(base_load_kw);
-    if let Some(v) = body.base_load_alpha {
-        if let Some(alpha) = v.as_f64() {
-            current.base_load_alpha = alpha;
-        } else if v.is_null() {
-            current.base_load_alpha = 0.1; // reset to default
-        }
-    }
-    merge_f64!(pv_export_limit_kw);
-    merge_f64!(pv_plan_kw);
+    merge!(pv_export_limit_kw);
+    merge!(pv_plan_kw);
 }
 
 #[derive(Deserialize)]
@@ -267,7 +272,7 @@ mod tests {
     fn merge_inject_sets_pv_export_limit_kw_from_value() {
         let mut state = SimInjectState::default();
         let mut body = empty_body();
-        body.pv_export_limit_kw = Some(serde_json::json!(3.5));
+        body.pv_export_limit_kw = Some(Some(3.5));
         merge_inject(&mut state, body);
         assert_eq!(state.pv_export_limit_kw, Some(3.5));
     }
@@ -279,7 +284,7 @@ mod tests {
             ..SimInjectState::default()
         };
         let mut body = empty_body();
-        body.pv_export_limit_kw = Some(serde_json::Value::Null);
+        body.pv_export_limit_kw = Some(None);
         merge_inject(&mut state, body);
         assert_eq!(state.pv_export_limit_kw, None);
     }
@@ -297,19 +302,77 @@ mod tests {
     #[test]
     fn body_triggers_replan_true_when_pv_export_limit_kw_set() {
         let mut body = empty_body();
-        body.pv_export_limit_kw = Some(serde_json::json!(3.5));
+        body.pv_export_limit_kw = Some(Some(3.5));
         assert!(body_triggers_replan(&body));
     }
 
     #[test]
     fn body_triggers_replan_true_when_pv_export_limit_kw_cleared() {
         let mut body = empty_body();
-        body.pv_export_limit_kw = Some(serde_json::Value::Null);
+        body.pv_export_limit_kw = Some(None);
         assert!(body_triggers_replan(&body));
     }
 
     #[test]
     fn body_triggers_replan_false_when_no_planner_input_fields_present() {
         assert!(!body_triggers_replan(&empty_body()));
+    }
+
+    // ── Regression coverage for the real JSON-deserialization boundary ──────
+    // The bug this guards against: serde_json's `Option<T>` deserializer
+    // treats a literal JSON `null` as `None` directly, never delegating to
+    // `T` — so a naive `Option<serde_json::Value>` field can never actually
+    // observe `null` distinctly from the key being absent. Tests that only
+    // construct `PostSimInjectBody` fields directly in Rust (like the ones
+    // above) don't exercise that boundary at all and would pass even if this
+    // were broken — confirmed live on Pi4 (`pv_irradiance` and
+    // `pv_export_limit_kw` both failed to clear via real `POST /sim/inject`
+    // before the `double_option` fix). These tests deserialize actual JSON.
+
+    #[test]
+    fn json_absent_key_deserializes_to_outer_none() {
+        let body: PostSimInjectBody = serde_json::from_str("{}").unwrap();
+        assert_eq!(body.pv_export_limit_kw, None);
+    }
+
+    #[test]
+    fn json_explicit_null_deserializes_to_some_none() {
+        let body: PostSimInjectBody =
+            serde_json::from_str(r#"{"pv_export_limit_kw": null}"#).unwrap();
+        assert_eq!(body.pv_export_limit_kw, Some(None));
+    }
+
+    #[test]
+    fn json_value_deserializes_to_some_some() {
+        let body: PostSimInjectBody =
+            serde_json::from_str(r#"{"pv_export_limit_kw": 3.5}"#).unwrap();
+        assert_eq!(body.pv_export_limit_kw, Some(Some(3.5)));
+    }
+
+    #[test]
+    fn json_null_round_trip_actually_clears_the_field() {
+        // End-to-end through the real deserialization boundary AND merge_inject.
+        let mut state = SimInjectState {
+            pv_export_limit_kw: Some(3.5),
+            ..SimInjectState::default()
+        };
+        let body: PostSimInjectBody =
+            serde_json::from_str(r#"{"pv_export_limit_kw": null}"#).unwrap();
+        merge_inject(&mut state, body);
+        assert_eq!(
+            state.pv_export_limit_kw, None,
+            "a JSON null in the real request body must clear the field"
+        );
+    }
+
+    #[test]
+    fn json_bool_field_null_round_trip_actually_clears() {
+        let mut state = SimInjectState {
+            ev_plugged: Some(true),
+            ..SimInjectState::default()
+        };
+        let body: PostSimInjectBody = serde_json::from_str(r#"{"ev_plugged": null}"#).unwrap();
+        merge_inject(&mut state, body);
+        assert_eq!(state.ev_plugged, None);
     }
 }

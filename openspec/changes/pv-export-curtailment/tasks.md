@@ -152,9 +152,55 @@ mechanism) was truly dead. No change to `step_inner`'s handling of its
 - [x] Logged `docs/reference/TECHNICAL_DEBTS.md` R-58: the planner's PV
       forecast input is not ceiling-aware yet (only live simulator physics
       respects the ceiling immediately) — Tier 2 scope, not fixed here.
-- [ ] 7.5 Manual verification: run the VEN UI locally/on Pi4, set a
-      `pv_export_limit_kw` below current PV output via the new Controller
-      control, confirm the Dashboard "Export limit" display updates and
-      PV power in the live status drops to the ceiling within one tick.
+- [x] 7.5 Manual verification on Pi4 (deployed 040-pv-export-curtailment,
+      built + `docker compose up -d`, all 4 containers healthy): via
+      direct API against ven-1 (port 8211) — `POST /sim/inject
+      {"pv_export_limit_kw": 1.0}` while natural PV output was -2.32 kW
+      clamped `power_kw` to exactly -1.0 kW within one tick, and
+      `export_limit_kw: -1.0` appeared in the asset snapshot. **This
+      surfaced a real, pre-existing bug**: clearing via
+      `{"pv_export_limit_kw": null}` did not restore natural output —
+      traced to serde_json's `Option<T>` null-handling (see §8 below) and
+      fixed. Re-verified post-fix: set → clamps, clear via null → natural
+      output restored, confirmed both via direct API and will be
+      re-confirmed via `POST /sim/inject/reset` equivalence.
 - [ ] 7.6 Full suite on Pi4 (`bash run_all_tests.sh`, acquire
       `pi4_lock.sh` first) before merge, per repo testing guide.
+
+## 8. Fix: `POST /sim/inject` null-clearing was broken for every field
+
+Discovered during §7.5 manual verification, not part of the original scope
+— logged here rather than silently folded into §1-2 since it's a
+pre-existing defect affecting all ~13 `PostSimInjectBody` fields, not just
+`pv_export_limit_kw`.
+
+- [x] 8.1 Root cause: `serde_json`'s `Option<T>` deserializer intercepts a
+      literal JSON `null` and always produces `None` before `T` (here
+      `serde_json::Value`) is ever constructed — so `Some(Value::Null)`
+      (what the old `merge_f64!`'s `is_null()` check expected) is
+      unreachable via real HTTP requests. Confirmed live on Pi4:
+      `pv_irradiance` (pre-existing field) exhibited the identical symptom.
+- [x] 8.2 Fix: added a shared `double_option` deserializer
+      (`routes/sim.rs`) and changed every `PostSimInjectBody` field from
+      `Option<serde_json::Value>` to `Option<Option<T>>` (`f64` or `bool`),
+      so absent/null/value become distinguishable
+      (`None`/`Some(None)`/`Some(Some(v))`). Rewrote `merge_f64!`/
+      `merge_bool!` into a single `merge!` macro matching on the new shape;
+      `pv_irradiance_alpha`/`base_load_alpha`'s "reset to default on null"
+      branches updated the same way.
+- [x] 8.3 Added JSON-deserialization-boundary regression tests
+      (`json_absent_key_deserializes_to_outer_none`,
+      `json_explicit_null_deserializes_to_some_none`,
+      `json_value_deserializes_to_some_some`,
+      `json_null_round_trip_actually_clears_the_field`,
+      `json_bool_field_null_round_trip_actually_clears`) — these use
+      `serde_json::from_str` on real JSON strings rather than constructing
+      `PostSimInjectBody` directly, specifically to close the test gap that
+      let the original bug ship (existing/prior tests all constructed the
+      struct directly, never exercising the actual deserialization
+      boundary).
+- [x] 8.4 Full local verification re-run after the fix: 794 Rust tests
+      (was 789 + 5 new), `cargo fmt`/`clippy -D warnings` clean, file-size
+      audit clean.
+- [ ] 8.5 Redeploy to Pi4 and re-confirm the clear-via-null scenario works
+      end-to-end over the real API (not just local unit tests).

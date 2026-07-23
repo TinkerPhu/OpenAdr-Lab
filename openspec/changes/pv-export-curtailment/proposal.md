@@ -50,6 +50,16 @@ change.
   UI code change needed, since `PvInverter::state_values()` already emits
   the field when set — and will now show whichever of VTN/operator is
   currently binding.
+- **Bug fix found during manual Pi4 verification**: `POST /sim/inject`
+  clearing via explicit JSON `null` never actually worked for *any*
+  sim-inject field, not just the new one — `serde_json`'s `Option<T>`
+  deserializer treats a literal `null` as `None` directly, so the
+  `Option<serde_json::Value>` fields' `is_null()` check was unreachable.
+  Fixed for all `PostSimInjectBody` fields via the standard "double option"
+  deserializer pattern (`Option<Option<T>>` + a shared `double_option`
+  helper), with new tests that deserialize real JSON (not just construct
+  the struct directly in Rust) to guard against the same test gap that let
+  the original bug ship undetected.
 
 ## Non-Goals
 
