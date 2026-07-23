@@ -1,6 +1,9 @@
 use chrono::{DateTime, Duration, Utc};
 
-use super::{Asset, AssetCapability, AssetHistoryBuffer, AssetState, GridState, HistoryPoint};
+use super::{
+    Asset, AssetCapability, AssetFlexibilityFloor, AssetHistoryBuffer, AssetState, GridState,
+    HistoryPoint,
+};
 
 /// Grid virtual asset.
 ///
@@ -97,6 +100,24 @@ impl Asset for Grid {
             _ => AssetCapability {
                 max_export_kw: 0.0,
                 max_import_kw: 0.0,
+            },
+        }
+    }
+
+    /// Grid is not a controllable device — it's the site boundary, driven by
+    /// externally-imposed VTN capacity limits, not something the VEN dispatches.
+    /// Floor equals ceiling, same reasoning as PV/base_load. Not rendered in
+    /// the Flexibility & Forecast panel (Grid isn't in `AssetConfig`), but the
+    /// `Asset` trait requires an explicit answer regardless.
+    fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
+        match state {
+            AssetState::Grid(g) => AssetFlexibilityFloor {
+                min_export_kw: g.export_limit_kw,
+                min_import_kw: g.import_limit_kw,
+            },
+            _ => AssetFlexibilityFloor {
+                min_export_kw: 0.0,
+                min_import_kw: 0.0,
             },
         }
     }

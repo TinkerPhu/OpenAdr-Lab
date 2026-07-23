@@ -2,7 +2,9 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{Asset, AssetCapability, AssetState, ControlDescriptor, ControlKind};
+use super::{
+    Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, ControlKind,
+};
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset_params::EvParams;
 
@@ -133,6 +135,25 @@ impl EvCharger {
             } else {
                 self.max_charge_kw
             },
+        }
+    }
+
+    /// Smallest nonzero achievable commitment. Import side: `min_charge_kw` is
+    /// already a real, modeled minimum sustained charge rate (see
+    /// `snap_to_min_charge`), gated by the exact same plugged/soc_target
+    /// condition `capability_inner` uses for its import ceiling. Export side
+    /// (V2G discharge) has no such floor — "does not apply to V2G discharge"
+    /// per `snap_to_min_charge`'s doc comment — so it's continuously
+    /// controllable down to 0, same as battery, regardless of `max_export_kw`.
+    pub fn flexibility_floor_inner(&self, state: &EvState) -> AssetFlexibilityFloor {
+        let min_import_kw = if !state.plugged || state.soc >= self.soc_target {
+            0.0
+        } else {
+            self.min_charge_kw
+        };
+        AssetFlexibilityFloor {
+            min_export_kw: 0.0,
+            min_import_kw,
         }
     }
 
@@ -279,6 +300,13 @@ impl Asset for EvCharger {
         };
         self.capability_inner(s)
     }
+
+    fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
+        let AssetState::Ev(s) = state else {
+            unreachable!()
+        };
+        self.flexibility_floor_inner(s)
+    }
 }
 
 #[cfg(test)]
@@ -304,6 +332,30 @@ mod tests {
             pending_command_kw: actual_power_kw,
         };
         (cfg, state)
+    }
+
+    #[test]
+    fn flexibility_floor_uses_min_charge_kw_when_chargeable() {
+        let (ev, state) = make_ev(true, 0.5, 0.0); // plugged, soc < soc_target=0.8
+        let floor = ev.flexibility_floor_inner(&state);
+        assert_eq!(floor.min_import_kw, 1.4, "must equal min_charge_kw");
+        assert_eq!(floor.min_export_kw, 0.0);
+    }
+
+    #[test]
+    fn flexibility_floor_import_is_zero_at_soc_target() {
+        let (ev, state) = make_ev(true, 0.9, 0.0); // plugged, soc >= soc_target=0.8
+        let floor = ev.flexibility_floor_inner(&state);
+        assert_eq!(floor.min_import_kw, 0.0);
+        assert_eq!(floor.min_export_kw, 0.0);
+    }
+
+    #[test]
+    fn flexibility_floor_import_is_zero_when_unplugged() {
+        let (ev, state) = make_ev(false, 0.5, 0.0);
+        let floor = ev.flexibility_floor_inner(&state);
+        assert_eq!(floor.min_import_kw, 0.0);
+        assert_eq!(floor.min_export_kw, 0.0);
     }
 
     #[test]

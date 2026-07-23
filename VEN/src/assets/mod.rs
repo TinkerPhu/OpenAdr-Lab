@@ -71,6 +71,17 @@ impl AssetCapability {
     }
 }
 
+/// The lowest magnitude the asset could still be forced to right now, if the VEN had
+/// to minimize its power irrespective of current commitments — distinct from 0 for
+/// assets with a genuine operational floor (e.g. a heater's discrete hardware tiers).
+/// Same sign convention as `AssetCapability`; `min_export_kw`/`min_import_kw` sit
+/// between 0 and the corresponding `max_export_kw`/`max_import_kw`.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct AssetFlexibilityFloor {
+    pub min_export_kw: f64,
+    pub min_import_kw: f64,
+}
+
 /// State-only enum. Variants hold only mutable runtime state — no config fields.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "asset_type", rename_all = "snake_case")]
@@ -294,6 +305,17 @@ impl AssetConfig {
             Self::Heater(cfg) => cfg.capability(state),
             Self::Pv(cfg) => cfg.capability(state),
             Self::BaseLoad(cfg) => cfg.capability(state),
+        }
+    }
+
+    pub fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
+        use Asset as _;
+        match self {
+            Self::Battery(cfg) => cfg.flexibility_floor(state),
+            Self::Ev(cfg) => cfg.flexibility_floor(state),
+            Self::Heater(cfg) => cfg.flexibility_floor(state),
+            Self::Pv(cfg) => cfg.flexibility_floor(state),
+            Self::BaseLoad(cfg) => cfg.flexibility_floor(state),
         }
     }
 
@@ -582,6 +604,11 @@ pub trait Asset: Send + Sync {
     /// Point-in-time feasible power range given current state.
     fn capability(&self, state: &AssetState) -> AssetCapability;
 
+    /// Lowest magnitude the asset could still be forced to right now — see
+    /// `AssetFlexibilityFloor`'s doc comment. No default: every asset type must
+    /// state its own answer explicitly rather than silently inherit a wrong one.
+    fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor;
+
     /// Free-run: step with setpoint=0.0 for `duration`. Single physics step.
     /// Override for assets where "free run" means something other than zero setpoint.
     fn simulate_free(&self, initial: &AssetState, duration: Duration) -> Trajectory {
@@ -683,6 +710,10 @@ impl<'a> Asset for AssetHandle<'a> {
 
     fn capability(&self, state: &AssetState) -> AssetCapability {
         self.config.capability(state)
+    }
+
+    fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
+        self.config.flexibility_floor(state)
     }
 
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {

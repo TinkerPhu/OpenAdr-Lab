@@ -2,7 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{Asset, AssetCapability, AssetState, ControlDescriptor};
+use super::{Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor};
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset_params::BatteryParams;
 
@@ -92,6 +92,15 @@ impl Battery {
             } else {
                 self.max_charge_kw
             },
+        }
+    }
+
+    /// Continuously controllable in both directions — can always idle at 0,
+    /// no minimum-nonzero commitment exists for battery.
+    pub fn flexibility_floor_inner(&self, _state: &BatteryState) -> AssetFlexibilityFloor {
+        AssetFlexibilityFloor {
+            min_export_kw: 0.0,
+            min_import_kw: 0.0,
         }
     }
 
@@ -233,6 +242,13 @@ impl Asset for Battery {
         };
         self.capability_inner(s)
     }
+
+    fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
+        let AssetState::Battery(s) = state else {
+            unreachable!()
+        };
+        self.flexibility_floor_inner(s)
+    }
 }
 
 #[cfg(test)]
@@ -251,6 +267,17 @@ mod tests {
             c_terminal_eur_kwh: None,
         };
         (Battery::from_params(&cfg), Battery::initial_state(&cfg))
+    }
+
+    #[test]
+    fn flexibility_floor_is_always_zero_regardless_of_soc() {
+        for soc in [0.05, 0.5, 1.0] {
+            // 0.05 is below min_soc=0.1; 1.0 is fully charged.
+            let (bat, state) = make_battery_cfg(soc);
+            let floor = bat.flexibility_floor_inner(&state);
+            assert_eq!(floor.min_export_kw, 0.0, "soc={soc}");
+            assert_eq!(floor.min_import_kw, 0.0, "soc={soc}");
+        }
     }
 
     #[test]

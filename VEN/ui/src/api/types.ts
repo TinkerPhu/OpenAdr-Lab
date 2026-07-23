@@ -589,6 +589,8 @@ export type ReportObligation = {
 export type AssetCapability = {
   max_import_kw: number;
   max_export_kw: number;
+  min_import_kw: number;
+  min_export_kw: number;
   is_fixed: boolean;
 };
 
