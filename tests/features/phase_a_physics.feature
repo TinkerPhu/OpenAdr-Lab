@@ -26,10 +26,10 @@ Feature: Phase A — Asset physics and capability coverage
     And I wait for the VEN /capability/ev max_export_kw to equal 0.0
     Then the polled capability matched
 
-  Scenario: PV always reports fixed (non-curtailable) capability
+  Scenario: PV always reports zero import capability (never imports)
     When I GET /capability/pv from the VEN
     Then the response status is 200
-    And the capability is_fixed is true
+    And the capability max_import_kw is 0.0
 
   # ── Block B: UserOverrides paths ──────────────────────────────────────────
 
