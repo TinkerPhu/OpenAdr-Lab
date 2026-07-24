@@ -78,11 +78,15 @@ impl PvInverter {
         )
     }
 
-    /// Non-curtailable point-range capability.
+    /// Export-only: PV never imports, so `max_import_kw` is pinned to 0
+    /// rather than mirroring the export value (see `AssetCapability`'s doc
+    /// comment for the general rule). The export ceiling itself is the
+    /// currently uncurtailed value; curtailment's achievable range down to
+    /// 0 is expressed via `flexibility_floor_inner`, not here.
     pub fn capability_inner(&self, state: &PvState) -> AssetCapability {
         AssetCapability {
             max_export_kw: state.actual_power_kw, // e.g. -2.0
-            max_import_kw: state.actual_power_kw, // same — is_fixed() = true
+            max_import_kw: 0.0,
         }
     }
 
@@ -367,6 +371,18 @@ mod tests {
                 actual_power_kw: 0.0,
             },
         )
+    }
+
+    #[test]
+    fn capability_max_import_kw_is_always_zero() {
+        // PV never imports — max_import_kw must not mirror the export value.
+        let (pv, _) = make_pv(10.0);
+        let state = PvState {
+            actual_power_kw: -4.2,
+        };
+        let cap = pv.capability_inner(&state);
+        assert_eq!(cap.max_import_kw, 0.0);
+        assert_eq!(cap.max_export_kw, -4.2);
     }
 
     #[test]

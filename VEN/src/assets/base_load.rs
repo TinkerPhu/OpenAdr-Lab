@@ -167,21 +167,25 @@ impl BaseLoad {
         )
     }
 
-    /// Point-range capability (non-curtailable).
+    /// Import-only, non-curtailable: `baseline_kw` is clamped `>= 0` in
+    /// `update_config`, so base load never exports — `max_export_kw` is
+    /// pinned to 0 rather than mirroring the import-side value (see
+    /// `AssetCapability`'s doc comment for the general rule).
     pub fn capability_inner(&self, state: &BaseLoadState) -> AssetCapability {
         AssetCapability {
-            max_export_kw: state.actual_power_kw,
+            max_export_kw: 0.0,
             max_import_kw: state.actual_power_kw,
         }
     }
 
-    /// Non-controllable: the floor equals the ceiling, same as `capability_inner`.
-    /// Uses the live actual value, not the learned heuristic — they can diverge
-    /// (see `services::forecast`), and this must match what `capability_inner`
-    /// already reports.
+    /// Import side: non-controllable, floor equals ceiling — uses the live
+    /// actual value, not the learned heuristic (they can diverge, see
+    /// `services::forecast`), matching what `capability_inner` reports.
+    /// Export side: pinned to 0, same as `capability_inner` — base load
+    /// structurally never exports.
     pub fn flexibility_floor_inner(&self, state: &BaseLoadState) -> AssetFlexibilityFloor {
         AssetFlexibilityFloor {
-            min_export_kw: state.actual_power_kw,
+            min_export_kw: 0.0,
             min_import_kw: state.actual_power_kw,
         }
     }
@@ -337,14 +341,26 @@ mod tests {
     }
 
     #[test]
-    fn flexibility_floor_equals_actual_power_kw() {
+    fn flexibility_floor_import_equals_actual_power_kw_export_is_zero() {
         let bl = base_load_with_spikes(vec![]);
         let state = BaseLoadState {
             actual_power_kw: 0.87,
         };
         let floor = bl.flexibility_floor_inner(&state);
-        assert_eq!(floor.min_export_kw, 0.87);
+        assert_eq!(floor.min_export_kw, 0.0);
         assert_eq!(floor.min_import_kw, 0.87);
+    }
+
+    #[test]
+    fn capability_max_export_kw_is_always_zero() {
+        // Base load never exports — max_export_kw must not mirror the import value.
+        let bl = base_load_with_spikes(vec![]);
+        let state = BaseLoadState {
+            actual_power_kw: 0.87,
+        };
+        let cap = bl.capability_inner(&state);
+        assert_eq!(cap.max_export_kw, 0.0);
+        assert_eq!(cap.max_import_kw, 0.87);
     }
 
     #[test]
