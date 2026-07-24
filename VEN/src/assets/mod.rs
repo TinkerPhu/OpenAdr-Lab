@@ -54,10 +54,14 @@ pub struct ControlDescriptor {
 /// Point-in-time feasible power range. Valid only for the state it was computed from.
 ///
 /// Sign convention: negative = export/generation, positive = import/consumption.
-///   max_export_kw ≤ 0  — floor (maximum export magnitude)
+///   max_export_kw ≤ 0  — ceiling (maximum export magnitude)
 ///   max_import_kw ≥ 0  — ceiling (maximum import magnitude)
 ///
-/// For non-curtailable assets (PV, BaseLoad): max_export_kw == max_import_kw == actual_power_kw.
+/// Each field describes only its own direction. An asset that cannot physically
+/// move in a direction at all (e.g. PV never imports, BaseLoad never exports)
+/// reports 0.0 for that direction's field — never a copy of the other
+/// direction's live value. The two fields are only ever equal by coincidence
+/// (both genuinely 0), never by construction.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct AssetCapability {
     pub max_export_kw: f64,
@@ -65,9 +69,14 @@ pub struct AssetCapability {
 }
 
 impl AssetCapability {
-    /// True if the asset has no controllable headroom (point-range capability).
-    pub fn is_fixed(&self) -> bool {
-        (self.max_import_kw - self.max_export_kw).abs() < 1e-6
+    /// True if the asset has no controllable headroom in either direction right
+    /// now (floor == ceiling for both `min_export_kw`/`max_export_kw` and
+    /// `min_import_kw`/`max_import_kw`) — not whether the two directions equal
+    /// each other, which conflates "stuck at a single operating point" with
+    /// "structurally can't move this way at all."
+    pub fn is_fixed(&self, floor: &AssetFlexibilityFloor) -> bool {
+        (self.max_export_kw - floor.min_export_kw).abs() < 1e-6
+            && (self.max_import_kw - floor.min_import_kw).abs() < 1e-6
     }
 }
 
