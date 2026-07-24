@@ -12,8 +12,10 @@ Implemented in `VEN/src/entities/weather.rs`, `entities/solar.rs`,
 `entities/pv_snow.rs`, `entities/asset_params.rs` (`PvArrayGeometry`,
 `PvForecastParams`), `controller/weather_port.rs`, `VEN/src/weather.rs` (the
 MQTT adapter), `routes/weather.rs` (`GET /weather`), the VEN UI Weather tab
-(`VEN/ui/src/pages/Weather.tsx`), and profile config (`profile/weather_pv.rs`,
-the `weather_pv` YAML section in `VEN/profiles/ven-{1,2,3}.yaml`). The
+(`VEN/ui/src/pages/Weather.tsx`), the simulator's PV ground truth
+(`simulator/mod.rs`, `simulator/pv_preview.rs`, `tasks/sim_tick/`), and
+profile config (`profile/weather_pv.rs`, the `weather_pv` YAML section in
+`VEN/profiles/ven-{1,2,3}.yaml`). The
 production feed for ven-1/2/3 is the Zunzgen site, published by the
 `data_acquisition` project's `WeatherMqttPublisher`/`SrfWeatherToMqtt`
 modules from SRF Meteo data — see that project's own docs for the publisher
@@ -187,13 +189,28 @@ method) → DC power (`poa/1000 × rated_kwp`) → cell-temp derate →
 last — see below).
 
 `entities::solar::resolve_weather_pv_kw`/`weather_pv_forecast_series` are the
-single entry point both consumers of this math share: `GET /weather`
-(read-only diagnostic) and the planner's own PV input
-(`SolveRequest.weather_pv_kw` → `run_planner` →
-`controller::milp_planner::inputs::build_milp_inputs`, precedence
-`pv_forecast_override` > `weather_pv_kw` > sin-model fallback) — so the two
-views can never silently diverge on what a `WeatherForecast` implies for PV
-output.
+single entry point all three consumers of this math share, so none of them
+can silently diverge on what a `WeatherForecast` implies for PV output:
+
+1. **`GET /weather`** (read-only diagnostic).
+2. **The planner's PV input** (`SolveRequest.weather_pv_kw` → `run_planner` →
+   `controller::milp_planner::inputs::build_milp_inputs`, precedence
+   `pv_forecast_override` > `weather_pv_kw` > sin-model fallback).
+3. **The simulator's own PV ground truth** (`PvInverter::step_inner` via
+   `SimState::tick`'s `weather_pv_kw` parameter, and its read-only preview
+   counterpart `SimState::peek_pv_kw`) — everything derived from the sim
+   tick (`/sim`, `/history/*`, the asset ledger, timeline charts) uses the
+   weather-sourced value when a fresh forecast is available, instead of
+   staying on the sin model regardless of a configured live feed. Resolved
+   once per tick in `tasks::sim_tick::tick_once` (async, before the sync sim
+   lock) and threaded through. Precedence here is `pv_irradiance_override`
+   (manual sim-inject, for testing/demo) > `weather_pv_kw` > sin model —
+   the same three-way order as the planner's, with the manual override
+   added on top. `tick()` and `peek_pv_kw()` are kept in lockstep by an
+   equivalence test, per this codebase's existing rule for that pair.
+   (`SimState`'s grid-meter derivation was split out into its own
+   `simulator/grid_meter.rs` to keep `simulator/mod.rs` under the file-size
+   cap after this addition.)
 
 **Known deferred accuracy gaps** (tracked as R-53 in TECHNICAL_DEBTS.md):
 horizon/shading obstructions (real rooftops rarely have an unobstructed
