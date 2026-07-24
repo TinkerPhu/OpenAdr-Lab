@@ -150,7 +150,7 @@ function PlannerStatusBar({ status }: { status: PlannerStatus }) {
         <Chip
           data-testid="planner-status-updated"
           size="small"
-          color={status.trigger === "DeviceDeviation" ? "warning" : "success"}
+          color="success"
           label={`Plan updated (${status.trigger}) — solved in ${(status.solver_ms / 1000).toFixed(1)} s`}
         />
       )}

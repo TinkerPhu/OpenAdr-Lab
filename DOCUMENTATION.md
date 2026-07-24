@@ -234,7 +234,7 @@ The planner runs in a blocking Tokio thread to avoid starving the async runtime.
 
 **Configuring Phase 2:** Set `phase2_epsilon_eur` in the `planner:` section of the profile YAML (default: `0.02`). This is the maximum extra cost (in €) that Phase 2 may spend while defragmenting. Increasing it allows more aggressive defragmentation at a small cost premium. Setting it to `0.0` disables Phase 2 entirely (single-phase solve — purely cost-optimal, potentially fragmented). Phase 1's cost optimum is protected by the hard constraint `phase1_cost ≤ c_star + phase2_epsilon_eur`; Phase 2 can only minimise friction within that budget, never worsen the economic result beyond ε.
 
-**Acceptance gate:** A new plan is adopted only if its total cost is below a threshold relative to the current plan. Hard triggers (VTN rate change, capacity alert, user request, device deviation) bypass the gate.
+**Acceptance gate:** A new plan is adopted only if its total cost is below a threshold relative to the current plan. Hard triggers — anything other than a periodic replan (VTN rate change, capacity change, alert, user request, asset state change) — bypass the gate.
 
 **Threshold decay:** The effective threshold decays linearly with plan age:
 ```
@@ -246,14 +246,13 @@ When `elapsed_s ≥ plan_adoption_decay_s` the plan is considered fully decayed 
 
 ### 2.3 Real-time Deviation Absorption *(planned — not yet implemented)*
 
-Between planning cycles a **two-tier reactive control layer** is intended to keep the site on its MILP plan without triggering a full replan:
+A real-time control layer that corrects actual-vs-plan deviations between planning cycles was built,
+iterated on, and removed twice (`absorber.rs`, feature 017) after it fought with the MILP plan and
+the opportunistic EV-surplus overlay and produced sustained oscillation. The current tick loop does
+not run any deviation absorber; deviations between planned and actual power are visible in the
+simulator state but trigger replanning only on the periodic schedule.
 
-- **Tier 1 — fast absorber (~1 s):** Computes `deviation_kw = actual_net_kw − planned_net_kw` each tick and distributes corrections across controllable assets (battery → EV → heater) within their flexibility headroom, subject to per-asset dead-band, priority order, relay-wear linger, and EV departure guard constraints.
-- **Tier 2 — replan escalation:** When the uncovered residual stays outside the dead-band for `deviation_trigger_ticks` consecutive ticks, a `DeviceDeviation` trigger forces an immediate MILP replan.
-
-This feature is **not yet implemented**. The current tick loop does not run a deviation absorber; deviations between planned and actual power are visible in the simulator state but trigger replanning only on the periodic schedule.
-
-> Design reference: `docs/plans/deviation-control-suggestions.md`
+> Design reference and rebuild proposal: `docs/plans/deviation-scenarios-analysis.md`
 
 ### 2.4 User Energy Requests
 *(UC-01, UC-02, UC-06, UC-09; FR-ASSET-04, FR-OA-04)*
@@ -1122,13 +1121,10 @@ Seven `tokio::spawn` loops run concurrently:
 │  sim_tick loop  (1 s)                           │
 │   Phase 1: apply one-shot injections            │
 │   Phase 2: build setpoints (dispatcher)         │
-│   Phase 3: Tier-1 absorber → correct deviation  │
-│   Phase 4: physics tick (step all assets)       │
-│   Phase 5: update snapshots, history, envelope  │
-│   Phase 6: Tier-2 residual accumulation →       │
-│            DeviceDeviation trigger if sustained │
-│   Phase 7: measurement reports (if due)         │
-│   Phase 8: persist sim state to disk            │
+│   Phase 3: physics tick (step all assets)       │
+│   Phase 4: update snapshots, history, envelope  │
+│   Phase 5: measurement reports (if due)         │
+│   Phase 6: persist sim state to disk            │
 └─────────────────────────────────────────────────┘
       ┌──────────────┐
       │obligation    │
@@ -1190,11 +1186,8 @@ poll_events detects rate change
                 ▼
         sim_tick (every 1 s):
           Phase 2: dispatcher → planned setpoints for current slot
-          Phase 3: Tier-1 absorber → correct deviations
-                    │ residual uncorrectable?
-                    ▼ (sustained N ticks)
-          Phase 6: DeviceDeviation watch signal → planning loop wakes
-          Phase 7/8: measurement reports + persist sim state
+          Phase 3: physics tick (step all assets)
+          Phase 5/6: measurement reports + persist sim state
                 │
                 ▼
         obligation loop:
@@ -1396,20 +1389,6 @@ simulator:
 planner:
   plan_adoption_threshold_eur: 0.20
   replan_interval_s: 300
-  deviation_trigger_ticks: 120
-
-absorber:
-  enabled: true
-  dead_band_kw: 0.1
-  dead_band_clearing_ticks: 1
-  assets:
-    - id: battery
-      priority: 0
-      min_state_linger_s: 0
-    - id: ev
-      priority: 1
-      min_state_linger_s: 0
-      ev_departure_guard_s: 1800
 ```
 
 Note: not all VENs carry all asset types. VEN-1 has EV + PV + battery + base load (no heater). VEN-2 has heater + PV. Assets not present in the profile are simply absent from the simulation.
