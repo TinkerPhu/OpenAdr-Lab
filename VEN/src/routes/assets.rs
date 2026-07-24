@@ -79,7 +79,7 @@ pub async fn get_asset_capability(
                 "max_export_kw": cap.max_export_kw,
                 "min_import_kw": floor.min_import_kw,
                 "min_export_kw": floor.min_export_kw,
-                "is_fixed": cap.is_fixed(),
+                "is_fixed": cap.is_fixed(&floor),
             }))
             .into_response()
         }
