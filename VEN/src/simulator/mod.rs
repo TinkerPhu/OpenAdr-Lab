@@ -4,6 +4,7 @@ pub mod persist;
 pub mod plan_context;
 pub mod power_model;
 mod pv_preview;
+mod pv_smoothing;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -24,18 +25,7 @@ use crate::entities::timeline::{
 };
 use crate::models::SensorSnapshot;
 use energy::EnergyCounter;
-
-/// Tracks the user-induced irradiance perturbation between ticks.
-///
-/// While the user drags the irradiance slider, the offset is set to
-/// `slider_position − natural_irradiance`. After release the offset decays
-/// exponentially (EMA with factor `pv_alpha`) until it reaches zero, at which
-/// point the simulation resumes tracking the sin model with no lag.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PvSmoothingState {
-    /// Current perturbation above (or below) the natural sin model. Zero = no override.
-    pub irradiance_offset: f64,
-}
+pub use pv_smoothing::PvSmoothingState;
 
 /// Tracks the user-induced base load perturbation between ticks.
 ///
@@ -232,17 +222,9 @@ impl SimState {
         const PLAN_STEP_S: f64 = 300.0;
 
         // Behaviour B — PV perturbation overlay.
-        if let Some(forced) = pv_irradiance_override {
-            // Re-capture offset every tick while the user is dragging.
-            self.pv_smoothing.irradiance_offset = forced - natural_irradiance;
-        } else {
-            let per_tick_factor = (1.0 - pv_alpha).powf(dt_s / PLAN_STEP_S);
-            self.pv_smoothing.irradiance_offset *= per_tick_factor;
-            if self.pv_smoothing.irradiance_offset.abs() < 0.005 {
-                self.pv_smoothing.irradiance_offset = 0.0;
-            }
-        }
-        let irradiance = (natural_irradiance + self.pv_smoothing.irradiance_offset).clamp(0.0, 1.0);
+        let irradiance =
+            self.pv_smoothing
+                .update(pv_irradiance_override, natural_irradiance, dt_s, pv_alpha);
 
         let dt = chrono::Duration::milliseconds((dt_s * 1000.0) as i64);
         let mut total_kw = 0.0;
@@ -254,11 +236,15 @@ impl SimState {
                     pv.irradiance = irradiance;
                     pv.irradiance_offset = self.pv_smoothing.irradiance_offset;
                     pv.pv_alpha = pv_alpha;
-                    // Manual sim inject (testing/demo) wins over the weather feed.
-                    pv.weather_power_kw = if pv_irradiance_override.is_none() {
-                        weather_pv_kw
-                    } else {
+                    // Manual sim inject wins over weather for as long as the perturbation
+                    // is still in effect or decaying — see PvSmoothingState::manual_override_active.
+                    pv.weather_power_kw = if self
+                        .pv_smoothing
+                        .manual_override_active(pv_irradiance_override)
+                    {
                         None
+                    } else {
+                        weather_pv_kw
                     };
                 }
                 AssetConfig::Heater(h) => h.apply_tick_overrides(

@@ -38,7 +38,7 @@ Feature: Phase A — Asset physics and capability coverage
     And I wait 5 seconds for the sim to tick
     And I GET /capability/pv from the VEN
     Then the response status is 200
-    And the capability is_fixed is true
+    And the capability max_export_kw magnitude is less than 0.01
     And the capability max_import_kw is less than 0.01
 
   Scenario: pv_irradiance override to full produces nonzero PV export
