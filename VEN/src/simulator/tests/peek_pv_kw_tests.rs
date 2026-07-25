@@ -55,6 +55,7 @@ fn peek_pv_kw_matches_tick_output_for_same_now() {
         None,
         None,
         None,
+        None,
     );
 
     let pv_entry = sim
@@ -172,6 +173,7 @@ fn peek_pv_kw_matches_tick_output_with_weather_for_same_now() {
         Some(7.0),
         None,
         None,
+        None,
     );
 
     let pv_entry = sim
@@ -215,6 +217,7 @@ fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
         Some(7.0), // a large live weather value, must be ignored
         None,
         None,
+        None,
     );
     let pv_after_tick1 = sim
         .assets
@@ -243,6 +246,7 @@ fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
         Some(7.0),
         None,
         None,
+        None,
     );
     let pv_after_tick2 = sim
         .assets
@@ -254,5 +258,100 @@ fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
         pv_after_tick2.abs() < 1.0,
         "weather (-7.0) must not snap back in on tick 2 while the offset is still \
          decaying, got {pv_after_tick2}"
+    );
+}
+
+// ── pv_export_limit_override (pv-export-curtailment) ────────────────────
+
+#[test]
+fn tick_applies_pv_export_limit_override_to_asset() {
+    // Regression: PvInverter.export_limit_kw was never written by any live code
+    // path — only by unit tests directly — so VTN/plan-driven curtailment had no
+    // physical effect. `tick()`'s new parameter must set it every tick.
+    let mut sim = pv_state(10.0);
+    let now = noon(); // full irradiance, would be -10.0 kW unclamped
+
+    sim.tick(
+        1.0,
+        HashMap::new(),
+        now,
+        None,
+        0.1,
+        None,
+        None,
+        None,
+        None,
+        0.1,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(-3.0), // export limit: at most 3 kW export
+    );
+    let pv_power = sim
+        .assets
+        .iter()
+        .find(|e| e.id == crate::ids::ASSET_PV)
+        .unwrap()
+        .last_power_kw;
+    assert!(
+        (pv_power + 3.0).abs() < 1e-6,
+        "export limit override must clamp PV output to -3.0 kW, got {pv_power}"
+    );
+}
+
+#[test]
+fn tick_clears_pv_export_limit_when_override_is_none() {
+    let mut sim = pv_state(10.0);
+    let now = noon();
+
+    // Tick 1: limit active.
+    sim.tick(
+        1.0,
+        HashMap::new(),
+        now,
+        None,
+        0.1,
+        None,
+        None,
+        None,
+        None,
+        0.1,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(-2.0),
+    );
+    // Tick 2: no active limit — PV must return to unclamped output.
+    sim.tick(
+        1.0,
+        HashMap::new(),
+        now + chrono::Duration::seconds(1),
+        None,
+        0.1,
+        None,
+        None,
+        None,
+        None,
+        0.1,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let pv_power = sim
+        .assets
+        .iter()
+        .find(|e| e.id == crate::ids::ASSET_PV)
+        .unwrap()
+        .last_power_kw;
+    assert!(
+        pv_power < -9.0,
+        "with no active limit, PV must be unclamped (~-10.0 kW at noon), got {pv_power}"
     );
 }

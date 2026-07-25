@@ -105,6 +105,41 @@ pub fn build_setpoints(
     setpoints
 }
 
+/// Resolve the effective PV export limit (kW, negative = export ceiling; `None` = uncurtailed)
+/// applied to `PvInverter.export_limit_kw` every tick, as the more restrictive of:
+/// - the live capacity state's `export_limit_kw` (VTN `EXPORT_CAPACITY_LIMIT` or sim-inject,
+///   stored as a positive magnitude), and
+/// - the current plan slot's curtailment target (`pv_used_kw < pv_forecast_kw`).
+///
+/// Either source can only tighten the limit, never loosen it, so taking the smaller-magnitude
+/// (numerically larger, since both are `<= 0`) value is correct without needing to know which
+/// source is active. See `openspec/changes/pv-export-curtailment/`.
+pub fn resolve_pv_export_limit_kw(
+    plan: Option<&Plan>,
+    capacity: &OadrCapacityState,
+    now: DateTime<Utc>,
+) -> Option<f64> {
+    let capacity_limit = capacity.export_limit_kw.map(|v| -v.abs());
+    let plan_limit = plan.and_then(|p| {
+        p.slots
+            .iter()
+            .find(|s| s.start <= now && now < s.end)
+            .and_then(|slot| {
+                if slot.pv_used_kw + 1e-6 < slot.pv_forecast_kw {
+                    Some(-slot.pv_used_kw)
+                } else {
+                    None
+                }
+            })
+    });
+    match (capacity_limit, plan_limit) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
 /// Opportunistic surplus EV charging overlay.
 ///
 /// When generation exceeds all other active loads, offer the surplus to the EV
@@ -941,6 +976,7 @@ mod tests {
             export_cap_kw: 5.0,
             baseline_kw: 0.5,
             pv_forecast_kw: 0.0,
+            pv_used_kw: 0.0,
             surplus_available_kw: 0.0,
             allocations: vec![AssetAllocation {
                 asset_id: "battery".to_string(),
@@ -1074,5 +1110,151 @@ mod tests {
             "no battery asset → correction delta must be 0.0"
         );
         assert!(sp.is_empty(), "no battery asset → setpoints map unchanged");
+    }
+
+    // ── resolve_pv_export_limit_kw (pv-export-curtailment) ────────────────
+
+    /// Build a minimal Plan with one slot covering `now`, with the given
+    /// PV forecast/used values and no other allocations.
+    fn make_pv_plan(
+        pv_forecast_kw: f64,
+        pv_used_kw: f64,
+        now: chrono::DateTime<Utc>,
+    ) -> crate::entities::plan::Plan {
+        use crate::entities::asset::PlanTrigger;
+        use crate::entities::plan::{
+            CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanningHorizon,
+        };
+        use chrono::Duration;
+        use uuid::Uuid;
+
+        let slot = PlanTimeSlot {
+            slot_index: 0,
+            start: now - Duration::seconds(1),
+            end: now + Duration::seconds(300),
+            import_tariff_eur_kwh: 0.20,
+            export_tariff_eur_kwh: 0.05,
+            co2_g_kwh: 300.0,
+            grid_effective_cost: 0.26,
+            rate_estimated: false,
+            import_cap_kw: 10.0,
+            export_cap_kw: 5.0,
+            baseline_kw: 0.5,
+            pv_forecast_kw,
+            pv_used_kw,
+            surplus_available_kw: 0.0,
+            allocations: vec![],
+            net_import_kw: 0.0,
+            net_export_kw: 0.0,
+            import_flexibility_kw: 0.0,
+            export_flexibility_kw: 0.0,
+            bat_charge_kw: 0.0,
+            bat_discharge_kw: 0.0,
+            planned_kw_by_asset: HashMap::new(),
+            planned_state_by_asset: HashMap::new(),
+        };
+
+        Plan {
+            id: Uuid::new_v4(),
+            created_at: now,
+            trigger: PlanTrigger::Periodic,
+            horizon: PlanningHorizon {
+                start_time: now,
+                end_time: now + Duration::seconds(300),
+                step_size_s: 300,
+                num_steps: 1,
+                far_horizon: now + Duration::seconds(300),
+                zones: vec![crate::entities::plan::PlanZone {
+                    step_s: 300,
+                    slots: 1,
+                }],
+            },
+            slots: vec![slot],
+            summary: PlanSummary::default(),
+            envelopes: vec![],
+            warnings: vec![],
+            soc_trajectory_kwh: vec![],
+            objective: crate::entities::PlannerObjective::MinCost,
+            objective_eur: 0.0,
+            friction_eur: 0.0,
+            cost_breakdown: CostBreakdown::default(),
+            solve_status: crate::entities::plan::SolveStatus::Optimal,
+        }
+    }
+
+    fn capacity_with_export_limit_kw(
+        limit_kw: f64,
+    ) -> crate::entities::capacity::OadrCapacityState {
+        crate::entities::capacity::OadrCapacityState {
+            export_limit_kw: Some(limit_kw),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn resolve_pv_export_limit_no_active_limit_is_none() {
+        let now = Utc::now();
+        let plan = make_pv_plan(5.0, 5.0, now); // no plan-side curtailment
+        let capacity = crate::entities::capacity::OadrCapacityState::default();
+        assert_eq!(
+            resolve_pv_export_limit_kw(Some(&plan), &capacity, now),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_pv_export_limit_plan_curtailment_alone() {
+        let now = Utc::now();
+        let plan = make_pv_plan(5.0, 3.0, now); // plan curtails 2 kW
+        let capacity = crate::entities::capacity::OadrCapacityState::default();
+        let limit = resolve_pv_export_limit_kw(Some(&plan), &capacity, now);
+        assert!(
+            (limit.unwrap() - (-3.0)).abs() < 1e-9,
+            "plan-driven limit should be -pv_used_kw, got {limit:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_pv_export_limit_capacity_alone() {
+        let now = Utc::now();
+        let plan = make_pv_plan(5.0, 5.0, now); // no plan-side curtailment
+        let capacity = capacity_with_export_limit_kw(2.0);
+        let limit = resolve_pv_export_limit_kw(Some(&plan), &capacity, now);
+        assert!(
+            (limit.unwrap() - (-2.0)).abs() < 1e-9,
+            "capacity-driven limit should be -export_limit_kw, got {limit:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_pv_export_limit_tighter_of_two_wins() {
+        let now = Utc::now();
+        // Plan wants to curtail to 3 kW; capacity separately caps at 2 kW (tighter).
+        let plan = make_pv_plan(5.0, 3.0, now);
+        let capacity = capacity_with_export_limit_kw(2.0);
+        let limit = resolve_pv_export_limit_kw(Some(&plan), &capacity, now);
+        assert!(
+            (limit.unwrap() - (-2.0)).abs() < 1e-9,
+            "tighter (capacity) limit must win, got {limit:?}"
+        );
+
+        // Now capacity is looser (4 kW) than the plan's 3 kW target — plan wins.
+        let capacity_loose = capacity_with_export_limit_kw(4.0);
+        let limit2 = resolve_pv_export_limit_kw(Some(&plan), &capacity_loose, now);
+        assert!(
+            (limit2.unwrap() - (-3.0)).abs() < 1e-9,
+            "tighter (plan) limit must win, got {limit2:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_pv_export_limit_no_plan_falls_back_to_capacity_only() {
+        let now = Utc::now();
+        let capacity = capacity_with_export_limit_kw(1.5);
+        let limit = resolve_pv_export_limit_kw(None, &capacity, now);
+        assert!(
+            (limit.unwrap() - (-1.5)).abs() < 1e-9,
+            "with no plan, capacity limit alone applies, got {limit:?}"
+        );
     }
 }

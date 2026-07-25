@@ -520,3 +520,49 @@ outes/sim.rs causes a T1+T2 double-solve race:
   the same fix as its counterpart, found by grep, not by assumption — the
   equivalence test between them only catches *output* divergence for
   scenarios it actually exercises, not a shared logic bug present in both.
+
+## PV-Export Decision Variable (openspec/changes/pv-export-curtailment/)
+
+- **A field that "looks wired" (has a doc comment describing its intended
+  path) can still be completely dead in production.** Scoping "give the
+  planner a PV-export decision variable" surfaced that
+  `PvInverter.export_limit_kw` — the field `step_inner` actually clamps
+  against — was never written by any live tick-pipeline code path, only by
+  unit tests. `dispatcher.rs` computed a clamped `setpoints["pv"]` value
+  intending to enforce it, but `PvInverter::step()` ignores its
+  `setpoint_kw` argument entirely (already flagged dead by its `_` prefix
+  and a doc comment) — so VTN `EXPORT_CAPACITY_LIMIT` events had no
+  physical effect on simulated PV output until this change. A doc comment
+  asserting a mechanism works is a claim, not evidence; trace the actual
+  call graph before building on top of it.
+- **Adding a free decision variable to a MIP can surface a pre-existing
+  MIP-gap-tolerance artifact immediately, even with zero real incentive to
+  exploit it.** Every real cost term already favored *not* curtailing PV
+  (export revenue exceeds the small `w_grid` friction cost), yet a test
+  with **no export cap at all** still came back with PV curtailed by a
+  small amount — `solve_phase1`'s pre-existing `with_mip_gap(0.02)` let
+  HiGHS accept a "good enough" incumbent on the `u_grid` binary rather than
+  the true optimum. Separately, Phase 2's objective is friction-only and
+  had *zero* opinion on the new variable, so it could drift arbitrarily
+  within the epsilon cost budget. Fixed with a tiny tie-break
+  (`PV_USE_TIEBREAK_EUR_PER_KWH`), the same pattern already established by
+  `SHIFT_TIEBREAK_EUR_PER_SLOT` for shiftable-load start slots — this
+  codebase's second confirmed case of "a real cost difference should
+  dominate, but a tiny nudge is still needed to make HiGHS actually find
+  it."
+- **A per-tick "effective" value computed inside one function isn't
+  automatically available to a second function called alongside it.**
+  `build_tick_setpoints` composes `effective_capacity` (VTN capacity state
+  merged with sim-injected overrides) as a local variable and never
+  exposed it; the new PV export-limit resolver, called separately in
+  `tick.rs`, initially read the raw un-merged `capacity_snap` instead —
+  compiling and unit-testing fine, but silently ignoring the
+  `grid_export_limit_kw` sim-inject path in production. Caught only by a
+  live Pi4 `curl` test (`POST /sim/inject` with `grid_export_limit_kw`,
+  then `GET /capability/pv`), not by any unit test, since the unit tests
+  each exercised the resolver and the capacity-composition logic
+  separately, never together through the real tick path. Fixed by
+  extracting the composition into a shared `effective_capacity()` helper
+  both call. Lesson: when two code paths both need "the same effective
+  value," share the function that computes it — don't let each caller
+  reconstruct it from raw inputs.

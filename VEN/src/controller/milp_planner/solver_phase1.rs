@@ -6,8 +6,8 @@ use good_lp::{
 
 use super::asset_port::{BatteryMilpContext, EvMilpContext, HeaterMilpContext};
 use crate::controller::milp_interactions::{
-    build_interactions, shiftable_tiebreak_expr, GlobalMilpInputs, GridMilpVars, MilpVarPool,
-    ShiftableLoadMilpVars,
+    build_interactions, pv_use_tiebreak_expr, shiftable_tiebreak_expr, GlobalMilpInputs,
+    GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
@@ -47,12 +47,14 @@ pub(crate) fn solve_phase1(
     let u_grid: Vec<Variable> = (0..n).map(|_| vars.add(variable().binary())).collect();
     let s_imp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
     let s_exp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
+    let p_pv_used: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
     let grid_vars = GridMilpVars {
         p_imp: p_imp.clone(),
         p_exp: p_exp.clone(),
         u_grid: u_grid.clone(),
         s_imp_viol: s_imp_viol.clone(),
         s_exp_viol: s_exp_viol.clone(),
+        p_pv_used: p_pv_used.clone(),
     };
 
     let shift_vars: Vec<ShiftableLoadMilpVars> = inputs
@@ -135,6 +137,8 @@ pub(crate) fn solve_phase1(
     // Deterministic earliest-start tie-break for shiftable loads (see
     // SHIFT_TIEBREAK_EUR_PER_SLOT for the rationale).
     objective += shiftable_tiebreak_expr(&pool.shiftable);
+    // Full-PV-utilization tie-break (see PV_USE_TIEBREAK_EUR_PER_KWH for the rationale).
+    objective += pv_use_tiebreak_expr(&pool.grid, &inputs.dt_h);
 
     let mut model = vars.minimise(&objective).using(highs);
     model = add_model_constraints(
@@ -209,7 +213,7 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
             .unwrap_or_else(|| Expression::from(0.0));
 
         model = model.with(constraint!(
-            p_imp[t] + inputs.p_pv_kw[t] + bat_dis
+            p_imp[t] + pool.grid.p_pv_used[t] + bat_dis
                 == inputs.p_base_kw[t]
                     + inputs.p_residual_kw[t]
                     + ev_kw
@@ -218,6 +222,7 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
                     + bat_ch
                     + p_exp[t]
         ));
+        model = model.with(constraint!(pool.grid.p_pv_used[t] <= inputs.p_pv_kw[t]));
         model = model.with(constraint!(
             p_imp[t] <= inputs.p_imp_max_phys_kw[t] * u_grid[t]
         ));
@@ -266,6 +271,7 @@ pub(crate) fn read_solve_output<S: Solution>(
     let p_exp_ref = &pool.grid.p_exp;
     let s_imp_ref = &pool.grid.s_imp_viol;
     let s_exp_ref = &pool.grid.s_exp_viol;
+    let p_pv_used_ref = &pool.grid.p_pv_used;
 
     let (bat_ch_kw, bat_dis_kw, e_bat_kwh) = if let Some(v) = &pool.bat {
         let sol = BatteryMilpContext::read_solution(solution, v, n);
@@ -309,6 +315,7 @@ pub(crate) fn read_solve_output<S: Solution>(
         objective_eur: solution.eval(objective),
         p_imp_kw: (0..n).map(|t| solution.value(p_imp_ref[t])).collect(),
         p_exp_kw: (0..n).map(|t| solution.value(p_exp_ref[t])).collect(),
+        p_pv_used_kw: (0..n).map(|t| solution.value(p_pv_used_ref[t])).collect(),
         p_bat_ch_kw: bat_ch_kw,
         p_bat_dis_kw: bat_dis_kw,
         p_ev_kw: ev_kw_out,

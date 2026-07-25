@@ -5,8 +5,8 @@ use good_lp::{
 };
 
 use crate::controller::milp_interactions::{
-    build_interactions, shiftable_tiebreak_expr, GlobalMilpInputs, GridMilpVars, MilpVarPool,
-    ShiftableLoadMilpVars,
+    build_interactions, pv_use_tiebreak_expr, shiftable_tiebreak_expr, GlobalMilpInputs,
+    GridMilpVars, MilpVarPool, ShiftableLoadMilpVars,
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
@@ -37,6 +37,7 @@ pub(crate) fn build_phase2_warm_start(
         iv.push((u_grid[t], if p1.p_imp_kw[t] > 1e-6 { 1.0 } else { 0.0 }));
         iv.push((s_imp_viol[t], p1.s_imp_viol_kw[t].max(0.0)));
         iv.push((s_exp_viol[t], p1.s_exp_viol_kw[t].max(0.0)));
+        iv.push((pool.grid.p_pv_used[t], p1.p_pv_used_kw[t].max(0.0)));
     }
     if let Some(v) = &pool.heater {
         let iz_mid = inputs.heat_initial_z_mid;
@@ -157,12 +158,14 @@ pub(crate) fn solve_phase2(
     let u_grid: Vec<Variable> = (0..n).map(|_| vars.add(variable().binary())).collect();
     let s_imp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
     let s_exp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
+    let p_pv_used: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
     let grid_vars = GridMilpVars {
         p_imp: p_imp.clone(),
         p_exp: p_exp.clone(),
         u_grid: u_grid.clone(),
         s_imp_viol: s_imp_viol.clone(),
         s_exp_viol: s_exp_viol.clone(),
+        p_pv_used: p_pv_used.clone(),
     };
 
     let shift_vars: Vec<ShiftableLoadMilpVars> = inputs
@@ -308,6 +311,11 @@ pub(crate) fn solve_phase2(
     // would otherwise let friction smoothing move a shiftable start to a later
     // cost-equal slot, undoing the Phase 1 choice (same lesson as ASAP_FREE).
     friction_obj += shiftable_tiebreak_expr(&pool.shiftable);
+    // Phase 2's objective is friction-only and otherwise has no opinion on
+    // p_pv_used at all — without this, the epsilon cost budget could let
+    // friction smoothing curtail PV arbitrarily. Same rationale as the
+    // shiftable-load tie-break above.
+    friction_obj += pv_use_tiebreak_expr(&pool.grid, &inputs.dt_h);
 
     let warm_start = build_phase2_warm_start(
         inputs,
