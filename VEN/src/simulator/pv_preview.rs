@@ -31,11 +31,16 @@ impl SimState {
             _ => None,
         })?;
 
-        // Mirrors SimState::tick's precedence exactly: manual override wins,
-        // then weather, then the sin model — kept in lockstep by the
-        // peek_pv_kw_matches_tick_output_for_same_now equivalence test.
-        let raw_kw = match (pv_irradiance_override, weather_pv_kw) {
-            (None, Some(weather_kw)) => -weather_kw.max(0.0),
+        // Mirrors SimState::tick's precedence exactly: manual override wins — for as
+        // long as its offset is still decaying, not just the tick it was posted (see
+        // PvSmoothingState::manual_override_active) — then weather, then the sin
+        // model. Kept in lockstep by the peek_pv_kw_matches_tick_output_for_same_now
+        // equivalence test.
+        let manual_override_active = self
+            .pv_smoothing
+            .manual_override_active(pv_irradiance_override);
+        let raw_kw = match (manual_override_active, weather_pv_kw) {
+            (false, Some(weather_kw)) => -weather_kw.max(0.0),
             _ => {
                 let natural_irradiance = PvInverter::natural_irradiance_at(now);
                 const PLAN_STEP_S: f64 = 300.0;
