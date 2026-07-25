@@ -77,6 +77,8 @@ mod peek_pv_kw_tests {
             None,
             None,
             None,
+            None,
+            None,
         );
 
         let pv_entry = sim
@@ -174,6 +176,8 @@ mod peek_pv_kw_tests {
             None,
             None,
             Some(7.0),
+            None,
+            None,
         );
 
         let pv_entry = sim
@@ -241,6 +245,8 @@ mod base_load_noise_tests {
             None,
             None,
             None,
+            None,
+            None,
         );
 
         let entry = sim
@@ -278,6 +284,8 @@ mod base_load_noise_tests {
             None,
             None,
             None,
+            None,
+            None,
         );
 
         let entry = sim
@@ -308,6 +316,8 @@ mod base_load_noise_tests {
             None,
             None,
             0.1,
+            None,
+            None,
             None,
             None,
             None,
@@ -420,6 +430,8 @@ mod unmodelled_load_tests {
             None,
             None,
             0.1,
+            None,
+            None,
             None,
             None,
             None,

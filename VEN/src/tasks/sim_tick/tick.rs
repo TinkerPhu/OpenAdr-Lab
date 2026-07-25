@@ -130,6 +130,8 @@ pub(crate) async fn tick_once(
             inject.ev_plugged,
             inject.ev_soc_target,
             weather_pv_kw_now,
+            inject.heater_emergency_curtail,
+            inject.heater_emergency_absorb,
         );
 
         // PHASE 4 (in-lock): extract snapshots and mutate history/grid/envelope.

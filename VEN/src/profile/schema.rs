@@ -53,6 +53,7 @@ impl AssetProfile {
                 temp_initial_c: c.temp_initial_c,
                 temp_min_c: c.temp_min_c,
                 temp_max_c: c.temp_max_c,
+                temp_safety_max_c: c.temp_safety_max_c.unwrap_or(c.temp_max_c),
                 mid_kw: c.mid_kw,
                 thermal_mass_kwh_per_c: c.effective_thermal_mass(),
                 k_loss_kw_per_c: c.effective_k_loss(),
@@ -177,6 +178,12 @@ pub struct HeaterConfig {
     pub temp_min_c: f64,
     #[serde(default = "super::defaults::default_heater_max_temp")]
     pub temp_max_c: f64,
+    /// True hard safety ceiling (°C), above `temp_max_c` — e.g. scalding risk / relief-valve
+    /// limit for a hot-water tank. Only reachable in `HeaterEmergencyMode::Absorb`, which is
+    /// not wired to a live VTN signal yet (sim-inject only). Defaults to `temp_max_c` (no
+    /// extra headroom) when omitted, so existing profiles are unaffected.
+    #[serde(default)]
+    pub temp_safety_max_c: Option<f64>,
     /// Mid-power level (kW). Used by the MILP to model a two-level heater (mid / full).
     /// If absent, defaults to `max_kw / 2.0` at solve time.
     /// Set `mid_kw = max_kw` to model an on/off heater with a single power level.

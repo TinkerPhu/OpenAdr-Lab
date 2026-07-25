@@ -73,6 +73,8 @@ pub struct HeaterParams {
     pub temp_initial_c: f64,
     pub temp_min_c: f64,
     pub temp_max_c: f64,
+    /// True hard safety ceiling, above `temp_max_c`. Only reachable in `Absorb` mode.
+    pub temp_safety_max_c: f64,
     pub mid_kw: Option<f64>,
     pub thermal_mass_kwh_per_c: f64,
     pub k_loss_kw_per_c: f64,
@@ -92,6 +94,7 @@ impl Default for HeaterParams {
             temp_initial_c: 20.0,
             temp_min_c: 18.0,
             temp_max_c: 23.0,
+            temp_safety_max_c: 23.0,
             mid_kw: None,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,

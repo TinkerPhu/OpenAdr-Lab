@@ -22,6 +22,11 @@ pub struct SimInjectState {
     pub heater_setpoint_c: Option<f64>,
     pub heater_temp_min_c: Option<f64>,
     pub heater_temp_max_c: Option<f64>,
+    /// Manual stand-in for a VTN emergency-curtailment directive (no such directive is
+    /// wired in yet — see docs/plans/deviation-scenarios-analysis.md §2/§7 task 1).
+    pub heater_emergency_curtail: Option<bool>,
+    /// Manual stand-in for a VTN emergency-absorption directive (ibid).
+    pub heater_emergency_absorb: Option<bool>,
     pub ambient_temp_c: Option<f64>,
     pub grid_import_limit_kw: Option<f64>,
     pub grid_export_limit_kw: Option<f64>,
@@ -44,6 +49,8 @@ impl Default for SimInjectState {
             heater_setpoint_c: None,
             heater_temp_min_c: None,
             heater_temp_max_c: None,
+            heater_emergency_curtail: None,
+            heater_emergency_absorb: None,
             ambient_temp_c: None,
             grid_import_limit_kw: None,
             grid_export_limit_kw: None,
