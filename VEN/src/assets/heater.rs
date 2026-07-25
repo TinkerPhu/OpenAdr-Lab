@@ -9,6 +9,43 @@ use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset_params::HeaterParams;
 use crate::entities::timeline::HeaterPlanTrajectory;
 
+/// Which safety-envelope override is active for this tick, if any.
+///
+/// `temp_min_c`/`temp_max_c` are a comfort/service band, not the asset's true physical
+/// limits (docs/plans/deviation-scenarios-analysis.md §2). Outside that band there is a
+/// wider safety envelope — ambient temperature on the low side (no physical harm ever),
+/// `temp_safety_max_c` on the high side (a real hard ceiling) — that only an active VTN
+/// emergency directive should unlock. No such directive is wired in yet; today this is
+/// settable only via `SimInjectState` (manual/test/demo), the same interim path PV
+/// curtailment (`export_limit_kw`) uses before its own planner wiring lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HeaterEmergencyMode {
+    /// Normal operation: comfort band enforced as today (emergency heat at temp_min_c,
+    /// forced off at temp_max_c).
+    Normal,
+    /// Emergency curtailment: suppress the forced-on emergency heat at temp_min_c,
+    /// letting the tank drift toward ambient. temp_max_c ceiling is unaffected.
+    Curtail,
+    /// Emergency energy absorption: suppress the forced-off ceiling at temp_max_c,
+    /// allowing heating up to temp_safety_max_c instead. temp_min_c floor is unaffected.
+    Absorb,
+}
+
+impl HeaterEmergencyMode {
+    /// Resolve from the two independent SimInjectState override flags. Curtail wins if
+    /// both are somehow set (callers shouldn't set both truthy).
+    pub fn from_overrides(curtail: Option<bool>, absorb: Option<bool>) -> Self {
+        if curtail.unwrap_or(false) {
+            Self::Curtail
+        } else if absorb.unwrap_or(false) {
+            Self::Absorb
+        } else {
+            Self::Normal
+        }
+    }
+}
+
 /// Heater config. Consumes power for space heating (positive = import).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Heater {
@@ -28,6 +65,15 @@ pub struct Heater {
     pub temp_min_c_profile: f64,
     /// Original profile value — used for snap-back when inject override is released.
     pub temp_max_c_profile: f64,
+    /// True hard safety ceiling, above `temp_max_c`. Only reachable in `Absorb` mode.
+    /// Defaults to `temp_max_c` when not configured — behaviour is then identical to
+    /// today's (no extra headroom), so existing profiles are unaffected.
+    #[serde(default)]
+    pub temp_safety_max_c: f64,
+    /// Set each tick by sim from SimInjectState (Behaviour C); NOT from YAML. Defaults
+    /// to `Normal` — no behaviour change until something actively sets it.
+    #[serde(default)]
+    pub emergency_mode: HeaterEmergencyMode,
     /// Thermal mass in kWh/°C. Derived from volume_l (water tank) or explicit config.
     pub thermal_mass_kwh_per_c: f64,
     /// Newton cooling coefficient (kW/°C). Loss = k_loss × (temp − ambient).
@@ -36,6 +82,12 @@ pub struct Heater {
     pub draw_kw: f64,
     /// Set each tick by sim from SimInjectState.ambient_temp_c; NOT from YAML.
     pub ambient_temp_c: f64,
+}
+
+impl Default for HeaterEmergencyMode {
+    fn default() -> Self {
+        Self::Normal
+    }
 }
 
 /// Heater mutable state.
@@ -56,11 +108,34 @@ impl Heater {
             temp_max_c: cfg.temp_max_c,
             temp_min_c_profile: cfg.temp_min_c,
             temp_max_c_profile: cfg.temp_max_c,
+            temp_safety_max_c: cfg.temp_safety_max_c,
+            emergency_mode: HeaterEmergencyMode::Normal,
             thermal_mass_kwh_per_c: cfg.thermal_mass_kwh_per_c,
             k_loss_kw_per_c: cfg.k_loss_kw_per_c,
             draw_kw: cfg.draw_kw,
             ambient_temp_c: 10.0,
         }
+    }
+
+    /// Apply this tick's Behaviour C sim-inject overrides (ambient temp, comfort band,
+    /// emergency mode) — hold override or snap back to profile default. Called once per
+    /// tick from `SimState::tick`, before physics runs.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_tick_overrides(
+        &mut self,
+        ambient_temp_c_override: Option<f64>,
+        temp_min_override: Option<f64>,
+        temp_max_override: Option<f64>,
+        emergency_curtail_override: Option<bool>,
+        emergency_absorb_override: Option<bool>,
+    ) {
+        self.ambient_temp_c = ambient_temp_c_override.unwrap_or(10.0);
+        self.temp_min_c = temp_min_override.unwrap_or(self.temp_min_c_profile);
+        self.temp_max_c = temp_max_override.unwrap_or(self.temp_max_c_profile);
+        self.emergency_mode = HeaterEmergencyMode::from_overrides(
+            emergency_curtail_override,
+            emergency_absorb_override,
+        );
     }
 
     pub fn initial_state(cfg: &HeaterParams) -> HeaterState {
@@ -97,11 +172,22 @@ impl Heater {
         // Thermostat overrides with hysteresis: once emergency fires at T_min,
         // keep running until T_min + 3 °C to prevent rapid relay cycling.
         // actual_power_kw from the previous tick is the implicit thermostat state.
+        // Curtail mode suppresses this: an emergency-curtailment directive means
+        // drifting toward ambient below temp_min_c is the desired response, not a
+        // fault to fight (§2 — no physical floor on this side).
         const EMERGENCY_HYSTERESIS_C: f64 = 3.0;
-        let emergency_active = state.temperature_c <= self.temp_min_c
-            || (state.actual_power_kw >= self.max_kw
-                && state.temperature_c < self.temp_min_c + EMERGENCY_HYSTERESIS_C);
-        let actual = if state.temperature_c >= self.temp_max_c {
+        let emergency_active = self.emergency_mode != HeaterEmergencyMode::Curtail
+            && (state.temperature_c <= self.temp_min_c
+                || (state.actual_power_kw >= self.max_kw
+                    && state.temperature_c < self.temp_min_c + EMERGENCY_HYSTERESIS_C));
+        // Absorb mode relaxes the forced-off ceiling from temp_max_c to the true safety
+        // ceiling temp_safety_max_c (§2); temp_min_c-side behaviour is unaffected.
+        let safety_ceiling_c = if self.emergency_mode == HeaterEmergencyMode::Absorb {
+            self.temp_safety_max_c
+        } else {
+            self.temp_max_c
+        };
+        let actual = if state.temperature_c >= safety_ceiling_c {
             0.0
         } else if emergency_active {
             self.max_kw
@@ -171,6 +257,15 @@ impl Heater {
         m.insert("mid_kw".into(), self.mid_kw);
         m.insert("temp_min_c".into(), self.temp_min_c);
         m.insert("temp_max_c".into(), self.temp_max_c);
+        m.insert("temp_safety_max_c".into(), self.temp_safety_max_c);
+        m.insert(
+            "emergency_curtail".into(),
+            (self.emergency_mode == HeaterEmergencyMode::Curtail) as u8 as f64,
+        );
+        m.insert(
+            "emergency_absorb".into(),
+            (self.emergency_mode == HeaterEmergencyMode::Absorb) as u8 as f64,
+        );
         m
     }
 
@@ -240,6 +335,24 @@ impl Heater {
                 min: Some(19.0),
                 max: Some(95.0),
                 unit: "°C".into(),
+                display_scale: None,
+            },
+            ControlDescriptor {
+                key: "heater_emergency_curtail".into(),
+                label: "Emergency curtail".into(),
+                kind: ControlKind::Switch,
+                min: None,
+                max: None,
+                unit: "".into(),
+                display_scale: None,
+            },
+            ControlDescriptor {
+                key: "heater_emergency_absorb".into(),
+                label: "Emergency absorb".into(),
+                kind: ControlKind::Switch,
+                min: None,
+                max: None,
+                unit: "".into(),
                 display_scale: None,
             },
         ]
@@ -371,6 +484,8 @@ mod tests {
             temp_max_c: 23.0,
             temp_min_c_profile: 20.0,
             temp_max_c_profile: 23.0,
+            temp_safety_max_c: 23.0,
+            emergency_mode: HeaterEmergencyMode::Normal,
             thermal_mass_kwh_per_c: 2.0,
             k_loss_kw_per_c: 0.1,
             draw_kw: 0.0,
@@ -379,6 +494,8 @@ mod tests {
     }
 
     /// Hot water tank fixture: 200 L, 40–80 °C comfort band, low heat loss, 0.5 kW draw.
+    /// Safety ceiling 90 °C, matching the worked example in
+    /// docs/plans/deviation-scenarios-analysis.md §2.
     fn hot_water_heater() -> Heater {
         Heater {
             max_kw: 6.0,
@@ -388,6 +505,8 @@ mod tests {
             temp_max_c: 80.0,
             temp_min_c_profile: 40.0,
             temp_max_c_profile: 80.0,
+            temp_safety_max_c: 90.0,
+            emergency_mode: HeaterEmergencyMode::Normal,
             thermal_mass_kwh_per_c: 200.0 * 4.186 / 3600.0, // ≈ 0.233 kWh/°C
             k_loss_kw_per_c: 0.003,
             draw_kw: 0.5,
@@ -444,7 +563,7 @@ mod tests {
     // ── control_schema ────────────────────────────────────────────────────────
 
     #[test]
-    fn control_schema_returns_four_descriptors() {
+    fn control_schema_returns_six_descriptors() {
         let heater = default_heater();
         let schema = heater.control_schema();
         let keys: Vec<_> = schema.iter().map(|d| d.key.as_str()).collect();
@@ -461,7 +580,15 @@ mod tests {
             keys.contains(&"heater_temp_max_c"),
             "missing heater_temp_max_c"
         );
-        assert_eq!(schema.len(), 4, "expected exactly 4 control descriptors");
+        assert!(
+            keys.contains(&"heater_emergency_curtail"),
+            "missing heater_emergency_curtail"
+        );
+        assert!(
+            keys.contains(&"heater_emergency_absorb"),
+            "missing heater_emergency_absorb"
+        );
+        assert_eq!(schema.len(), 6, "expected exactly 6 control descriptors");
     }
 
     #[test]
@@ -582,6 +709,81 @@ mod tests {
             "heater should snap setpoint 1.5 to mid tier {}, got {power}",
             heater.mid_kw
         );
+    }
+
+    // ── emergency safety envelope (§2 of deviation-scenarios-analysis.md) ─────
+
+    #[test]
+    fn curtail_mode_suppresses_emergency_heat_below_temp_min() {
+        let mut heater = default_heater(); // temp_min_c=20
+        heater.emergency_mode = HeaterEmergencyMode::Curtail;
+        let state = state_at(19.9, 0.0); // below temp_min, would normally force max_kw
+        let (_ns, power) = heater.step_inner(&state, 0.0, Duration::seconds(1));
+        assert_eq!(
+            power, 0.0,
+            "curtail mode must let the tank drift below temp_min_c instead of forcing heat"
+        );
+    }
+
+    #[test]
+    fn curtail_mode_still_forces_off_above_temp_max() {
+        let mut heater = default_heater(); // temp_max_c=23
+        heater.emergency_mode = HeaterEmergencyMode::Curtail;
+        let state = state_at(23.1, 2.5);
+        let (_ns, power) = heater.step_inner(&state, 2.5, Duration::seconds(1));
+        assert_eq!(
+            power, 0.0,
+            "curtail mode must not relax the temp_max_c ceiling"
+        );
+    }
+
+    #[test]
+    fn absorb_mode_heats_past_temp_max_up_to_safety_ceiling() {
+        let mut heater = hot_water_heater(); // temp_max_c=80, temp_safety_max_c=90
+        heater.emergency_mode = HeaterEmergencyMode::Absorb;
+        let state = state_at(85.0, 6.0); // above comfort ceiling, below safety ceiling
+        let (_ns, power) = heater.step_inner(&state, 6.0, Duration::seconds(1));
+        assert!(
+            power > 0.0,
+            "absorb mode must keep heating above temp_max_c and below temp_safety_max_c"
+        );
+    }
+
+    #[test]
+    fn absorb_mode_still_forces_off_above_safety_ceiling() {
+        let mut heater = hot_water_heater(); // temp_safety_max_c=90
+        heater.emergency_mode = HeaterEmergencyMode::Absorb;
+        let state = state_at(90.1, 6.0);
+        let (_ns, power) = heater.step_inner(&state, 6.0, Duration::seconds(1));
+        assert_eq!(
+            power, 0.0,
+            "absorb mode must still force off above the true safety ceiling"
+        );
+    }
+
+    #[test]
+    fn absorb_mode_still_forces_emergency_heat_below_temp_min() {
+        let mut heater = hot_water_heater(); // temp_min_c=40
+        heater.emergency_mode = HeaterEmergencyMode::Absorb;
+        let state = state_at(39.9, 0.0);
+        let (_ns, power) = heater.step_inner(&state, 0.0, Duration::seconds(1));
+        assert_eq!(
+            power, heater.max_kw,
+            "absorb mode must not relax the temp_min_c emergency floor"
+        );
+    }
+
+    #[test]
+    fn normal_mode_unaffected_by_new_fields() {
+        // Regression guard: temp_safety_max_c defaults equal temp_max_c and
+        // emergency_mode defaults to Normal, so behaviour must be byte-for-byte
+        // identical to before this feature existed.
+        let heater = default_heater();
+        assert_eq!(heater.emergency_mode, HeaterEmergencyMode::Normal);
+        assert_eq!(heater.temp_safety_max_c, heater.temp_max_c);
+        let state = state_at(23.1, 2.5);
+        let (_ns, power) = heater.step_inner(&state, 2.5, Duration::seconds(1));
+        assert_eq!(power, 0.0);
     }
 
     // ── hot water tank physics ────────────────────────────────────────────────

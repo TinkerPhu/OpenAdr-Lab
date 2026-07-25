@@ -7,6 +7,7 @@ assets:
     temp_initial_c: 60.0
     temp_min_c: 40.0      # tank hysteresis lower bound
     temp_max_c: 80.0      # tank hysteresis upper bound
+    temp_safety_max_c: 90.0  # true safety ceiling (relief-valve limit), only reachable under an emergency-absorb directive
     volume_l: 2000.0
     k_loss_kw_per_c: 0.003
     draw_kw: 0.5

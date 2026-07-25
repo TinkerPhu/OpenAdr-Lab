@@ -624,6 +624,7 @@ fn make_profile_n48() -> Profile {
                 temp_initial_c: 20.0,
                 temp_min_c: 18.0,
                 temp_max_c: 23.0,
+                temp_safety_max_c: 23.0,
                 mid_kw: Some(1.0),
                 thermal_mass_kwh_per_c: 2.0,
                 k_loss_kw_per_c: 0.1,
