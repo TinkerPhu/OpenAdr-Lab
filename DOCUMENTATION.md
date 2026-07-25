@@ -133,7 +133,7 @@ Each VEN hosts a physics engine that advances asset states every simulation tick
 |-------|----------------|----------------|----------|---------|
 | Battery | `assets: - type: battery` | `capacity_kwh`, `max_charge_kw`, `max_discharge_kw`, `round_trip_efficiency`, `min_soc` | `GET /forecast/battery` | `GET /history/battery` |
 | EV | `assets: - type: ev` | `battery_kwh`, `max_charge_kw`, `max_discharge_kw` (0 = charge-only), `soc_target` | `GET /forecast/ev` | `GET /history/ev` |
-| Heater | `assets: - type: heater` | `max_kw`, `thermal_mass_kwh_per_c`, `k_loss_kw_per_c`, `temp_min_c`, `temp_max_c` | `GET /forecast/heater` | `GET /history/heater` |
+| Heater | `assets: - type: heater` | `max_kw`, `thermal_mass_kwh_per_c`, `k_loss_kw_per_c`, `temp_min_c`, `temp_max_c`, `temp_safety_max_c` | `GET /forecast/heater` | `GET /history/heater` |
 | PV | `assets: - type: pv` | `rated_kw`, `peak_hour` (solar noon), `ema_alpha` (smoothing) | `GET /forecast/pv` | `GET /history/pv` |
 | Base load | `assets: - type: base_load` | `baseline_kw` | `GET /forecast/base_load` | `GET /history/base_load` |
 
@@ -478,11 +478,13 @@ For experimentation, any simulated physics parameter can be overridden via the A
 | Injection mode | Fields | Behaviour |
 |---------------|--------|-----------|
 | **A — one-shot** | `battery_soc`, `ev_soc`, `heater_temp_c` | Applied once to physics state, then cleared automatically on the next tick |
-| **B — frozen + EMA return** | `pv_irradiance`, `base_load_kw` | Value is held constant while the override is active. On release, the physics model blends back toward the natural value exponentially (EMA) |
-| **C — frozen + snap** | `ev_plugged`, `ev_soc_target`, `heater_setpoint_c`, `heater_temp_min/max_c`, `ambient_temp_c`, `grid_import/export_limit_kw` | Value is held constant while active; on release snaps immediately to the profile default |
+| **B — one-shot + EMA return** | `pv_irradiance`, `base_load_kw` | Applied for exactly one tick, then the inject field auto-clears (like Mode A) — but instead of snapping back immediately, the *resulting offset* from the natural model decays back exponentially (EMA) over subsequent ticks. A UI slider simulates a sustained hold only by re-posting the same value on every drag frame; a single POST is a one-tick nudge, not a persistent freeze |
+| **C — frozen + snap** | `ev_plugged`, `ev_soc_target`, `heater_setpoint_c`, `heater_temp_min/max_c`, `heater_emergency_curtail`, `heater_emergency_absorb`, `ambient_temp_c`, `grid_import/export_limit_kw` | Value is held constant while active; on release snaps immediately to the profile default |
 | **D — planning only** | `pv_plan_kw` | Seen by the MILP planner only; has no effect on the physics simulator |
 
 **Mode C — frozen + snap — rationale:** Mode C applies to fields that have no meaningful "natural return trajectory". For example, `ev_soc_target` is a configuration value, not a physics state — there is no EMA blend-back to a natural value. Similarly, `ev_plugged` is a discrete boolean, `ambient_temp_c` is an external boundary condition, and grid limits are VTN-imposed thresholds. Releasing any of these with EMA blending (Mode B) would produce nonsensical intermediate values. Mode C simply holds the overridden value until explicitly released, then snaps to the profile default. In the UI, Mode C fields appear as persistent override inputs that stay active until the user clears them — they are not self-resetting.
+
+**Mode B correctness note:** a manual override in Mode B must keep winning over the live weather feed (PV) for the entire EMA decay window, not just the tick it was posted on — a bug where weather resumed at full strength one tick after a single `pv_irradiance` POST (before the offset had meaningfully decayed) was found and fixed on Pi4 (2026-07-25); see `PvSmoothingState::manual_override_active` in `VEN/src/simulator/pv_smoothing.rs`.
 
 **Why `pv_plan_kw` is planning-only (Mode D):** The MILP planner needs a PV forecast (what will PV generate over the next 24 hours?) to optimise battery and EV charging schedules. `pv_plan_kw` overrides this forecast *inside the solver* without touching the physics simulation. The real PV simulator continues running its irradiance model and its output continues to appear in `GET /history/pv` and the real-time grid balance. The timeline (`GET /timeline/pv`) shows the *planned* PV trajectory, which will reflect the override; `GET /history/pv` shows actual simulated output. This separation is intentional: you can test "what if PV generates flat 5 kW?" in the planner without corrupting the physics state, which matters for absorption/deviation calculations.
 
@@ -1402,8 +1404,9 @@ assets:
     max_kw: 6.0          # full power tier
     mid_kw: 3.0          # mid power tier (0 / mid / max are the three discrete levels)
     temp_initial_c: 60.0
-    temp_min_c: 40.0     # tank hysteresis lower bound
-    temp_max_c: 80.0     # tank hysteresis upper bound
+    temp_min_c: 40.0         # comfort/service lower bound — not a physical floor
+    temp_max_c: 80.0         # comfort/service upper bound — not the physical ceiling
+    temp_safety_max_c: 90.0  # true hard safety ceiling (e.g. scalding/relief-valve limit)
     thermal_mass_kwh_per_c: 2.3   # thermal capacity of the tank
     k_loss_kw_per_c: 0.05         # standby heat loss rate
 ```
@@ -1412,8 +1415,9 @@ assets:
 |-----------|-------------|---------|
 | `max_kw` | Full-tier electrical power (kW) | required |
 | `mid_kw` | Mid-tier electrical power (kW) | required |
-| `temp_min_c` | Minimum tank temperature — comfort lower bound (°C) | required |
-| `temp_max_c` | Maximum tank temperature — safety upper bound (°C) | required |
+| `temp_min_c` | Comfort/service lower bound (°C) — not a physical limit; the tank can drift to ambient with no physical harm | required |
+| `temp_max_c` | Comfort/service upper bound (°C) — not the true physical ceiling, see `temp_safety_max_c` | required |
+| `temp_safety_max_c` | True hard safety ceiling (°C), above `temp_max_c` — scalding risk, tank pressure/relief-valve limits. Only reachable in `HeaterEmergencyMode::Absorb` | defaults to `temp_max_c` (no extra headroom) when omitted |
 | `temp_initial_c` | Initial tank temperature at sim start (°C) | required |
 | `thermal_mass_kwh_per_c` | Tank thermal capacity (kWh/°C) | required |
 | `k_loss_kw_per_c` | Standby heat loss rate (kW/°C) | required |
@@ -1421,6 +1425,16 @@ assets:
 | `min_off_slots` | Minimum consecutive 5-min slots heater must stay OFF after a switch | planned — not yet a YAML parameter; hardcoded default = 0 (no minimum) |
 
 `min_run_slots` and `min_off_slots` model compressor protection for heat-pump assets — once started, a compressor must run for a minimum block (e.g., `3` slots = 15 min) to avoid damage. For a purely resistive heater or boiler, set both to `0`. These parameters are described in §2.4; implementation as YAML-configurable fields is planned.
+
+**Emergency safety envelope** (`HeaterEmergencyMode`, `VEN/src/assets/heater.rs`): `temp_min_c`/
+`temp_max_c` are a comfort band the planner respects under normal objectives — not the asset's true
+limits (see `docs/plans/deviation-scenarios-analysis.md` §2 for the full reasoning). `Curtail` mode
+suppresses the forced-on emergency heat at `temp_min_c`, letting the tank drift toward ambient (no
+physical floor); `Absorb` mode suppresses the forced-off ceiling at `temp_max_c`, allowing heating up
+to `temp_safety_max_c` instead. Each direction leaves the other bound's normal behavior untouched.
+Settable today only via `POST /sim/inject` (`heater_emergency_curtail`/`heater_emergency_absorb`,
+Behaviour C — held while active, snaps back to `Normal` on release) — no VTN emergency directive
+drives it automatically yet, and the MILP still plans only within the comfort band.
 
 ---
 

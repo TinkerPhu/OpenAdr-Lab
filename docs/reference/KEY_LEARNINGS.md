@@ -467,3 +467,56 @@ outes/sim.rs causes a T1+T2 double-solve race:
   stops a new one from being the file that finally tips the cap. Run the
   audit script immediately after a green build, before calling any phase
   "done."
+
+## Heater Safety Envelope (docs/plans/deviation-scenarios-analysis.md §2)
+
+- **A comfort/service band and a true physical safety limit are two
+  different kinds of constraint, even when the code only has one field for
+  each edge.** `temp_min_c`/`temp_max_c` looked like "the" physical bounds;
+  they're actually a user-configured comfort target. The real physical
+  ceiling sits *above* `temp_max_c` (scalding/relief-valve risk), and there
+  is no physical floor at all — the tank can drift to ambient with zero
+  harm. Conflating the two meant `emergency_active` was treating a comfort
+  edge as if defending it were a safety requirement.
+- **Removing a doc's backlog entry is a "done" signal — don't emit it
+  before the work is actually done.** Caught mid-session: the entry was
+  deleted from the analysis doc's backlog right when a renumbering pass
+  touched that section, before any code existed yet. Restored it and only
+  removed it again once Pi4 validation actually passed. Doc bookkeeping
+  and completion are separate steps.
+- Every new struct field needs a literal-construction site audit, not just
+  the `Default` impl. `HeaterParams`/`HeaterConfig` are constructed via
+  full struct literals (no `..Default::default()`) in several test files;
+  `grep -rn "HeaterParams {" / "HeaterConfig {"` found all of them before
+  `cargo check` did, which was faster than iterating on compiler errors
+  one file at a time.
+
+## PV Weather-Override Decay Bug
+
+- **A one-shot field's "is this override active" check must track the
+  field's whole lifecycle, including decay, not just its instantaneous
+  value on the current tick.** `pv_irradiance` auto-clears from
+  `SimInjectState` one tick after being posted, then its offset EMA-decays
+  back toward the natural sin model — deliberately slowly (tuned for
+  slider-drag smoothness over a 300 s window). The precedence rule ("manual
+  override beats weather") was correctly *stated*; it broke because
+  "override active" was implemented as "is the field `Some` this exact
+  tick" instead of "is there still a perturbation in flight." Those two
+  only coincide for fields that don't decay.
+- **Reproduce live before trusting a code review of precedence logic.**
+  The suppression check read correctly in isolation; only `curl`-ing a
+  running instance (`POST /sim/inject`, then polling `/capability/pv`) and
+  watching `irradiance` drift while `power_kw` stayed pinned to the weather
+  value revealed the override was clearing far sooner than its own doc
+  comments assumed.
+- **`run_all_tests.sh --e2e` pulls the Pi4 checkout from `origin` before
+  building — it does not test local uncommitted changes.** The first E2E
+  run in this session validated `origin/main`, not the working tree with
+  the heater feature in it; the PV bug found there was real but unrelated
+  to what was supposedly being tested. Confirmed via `git status --branch`
+  before drawing conclusions. Use `scp` (per `.claude/skills/deploy-pi4`)
+  to test uncommitted local work against the Pi4 E2E stack instead.
+- A twin/preview function (`peek_pv_kw` mirroring `SimState::tick`) needs
+  the same fix as its counterpart, found by grep, not by assumption — the
+  equivalence test between them only catches *output* divergence for
+  scenarios it actually exercises, not a shared logic bug present in both.
