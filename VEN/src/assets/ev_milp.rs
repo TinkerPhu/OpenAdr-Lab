@@ -484,6 +484,7 @@ mod milp_context_trait_tests {
             u_grid: (0..n).map(|_| vars.add(variable().binary())).collect(),
             s_imp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
             s_exp_viol: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
+            p_pv_used: (0..n).map(|_| vars.add(variable().min(0.0))).collect(),
         };
         MilpVarPool {
             grid,

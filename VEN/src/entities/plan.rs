@@ -79,6 +79,11 @@ pub struct PlanTimeSlot {
     pub baseline_kw: f64,
     /// PV generation forecast for this slot (kW)
     pub pv_forecast_kw: f64,
+    /// Planned PV export after the planner's curtailment decision (kW, `<= pv_forecast_kw`).
+    /// Equals `pv_forecast_kw` when the planner does not curtail (including the infeasibility
+    /// fallback path). See `openspec/changes/pv-export-curtailment/`.
+    #[serde(default)]
+    pub pv_used_kw: f64,
     /// = max(0, -BaselineLoad): PV surplus available above fixed loads
     pub surplus_available_kw: f64,
 

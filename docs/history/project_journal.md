@@ -6528,3 +6528,63 @@ assertion on `max_import_kw`.
   (extracted `pv_smoothing.rs` and split `peek_pv_kw_tests` into its own
   `tests/` subdirectory file), Pi4 E2E 265/265 + resilience clean, deployed
   to `ven-1`/`ven-2`/`ven-3`.
+
+### PV-Export Decision Variable (openspec/changes/pv-export-curtailment/)
+
+Implemented backlog task 1 from `docs/plans/deviation-scenarios-analysis.md` §2/§7:
+gave the MILP planner a real decision variable for PV export, `p_pv_used[t]`
+(`0 <= p_pv_used[t] <= p_pv_kw[t]`, `GridMilpVars` in
+`controller/milp_interactions.rs`), substituted for the raw forecast constant
+in the power-balance constraint of both solver phases. No cost term is
+attached to curtailment itself — every real cost term already favors using
+PV — so the solver only reduces `p_pv_used[t]` below the forecast when doing
+so relieves an active export-capacity constraint. The decision is exposed as
+`PlanTimeSlot.pv_used_kw` alongside the existing `pv_forecast_kw`, and shown
+on the VEN UI's plan power-stack chart (a small curtailment indicator when
+present).
+
+Scoping this before implementation surfaced that PV curtailment had **no
+physical effect in the live simulator at all**: `PvInverter.export_limit_kw`
+— the field `step_inner` actually clamps against — was never written by any
+live tick-pipeline code path, only by unit tests. `dispatcher.rs` computed a
+clamped `setpoints["pv"]` value intending to enforce it, but
+`PvInverter::step()` ignores its `setpoint_kw` argument entirely (already
+flagged dead by its `_` prefix). So VTN `EXPORT_CAPACITY_LIMIT` events had
+never actually curtailed simulated PV output. Fixed in the same change:
+`SimState::tick()` gained a `pv_export_limit_override` parameter, applied to
+`PvInverter.export_limit_kw` every tick (mirroring the existing heater
+`apply_tick_overrides` pattern); `dispatcher::resolve_pv_export_limit_kw`
+computes the value each tick as the more restrictive of the live VTN/sim-inject
+capacity cap and the plan's own curtailment target.
+
+**Issues & key learnings**
+
+- Adding a free decision variable to the MILP surfaced a pre-existing MIP-gap
+  artifact immediately: a test with **no export cap at all** still came back
+  with PV curtailed by a small amount. `solve_phase1`'s existing
+  `with_mip_gap(0.02)` let HiGHS accept a "good enough" incumbent on the
+  `u_grid` binary short of the true optimum, and Phase 2's friction-only
+  objective had zero opinion on the new variable at all. Fixed with a tiny
+  tie-break (`PV_USE_TIEBREAK_EUR_PER_KWH`), the same pattern already
+  established by `SHIFT_TIEBREAK_EUR_PER_SLOT` for shiftable-load start slots.
+- A per-tick "effective" value composed inside one function (`effective_capacity`,
+  merging VTN capacity state with sim-injected overrides) isn't automatically
+  available to a second function called alongside it. The new PV export-limit
+  resolver initially read the raw, un-merged `capacity_snap` in `tick.rs`
+  instead of the composed value — compiled and unit-tested fine, but silently
+  ignored the `grid_export_limit_kw` sim-inject path in production. Caught only
+  by a live Pi4 `curl` test (`POST /sim/inject` with `grid_export_limit_kw`,
+  then `GET /capability/pv`), not by any unit test, since the unit tests each
+  exercised the resolver and the capacity-composition logic separately, never
+  together through the real tick path. Fixed by extracting the composition
+  into a shared `effective_capacity()` helper both call.
+- Full local pyramid: 812/812 Rust tests green (+21 new: MILP decision-variable
+  behavior, plan reporting, `resolve_pv_export_limit_kw`, tick-level export-limit
+  clamping), UI unit tests 407/407, `cargo fmt --check` and `cargo clippy
+  --all-targets --all-features -D warnings` clean, file-size audit clean. Pi4
+  E2E: one scenario (`DISPATCH_SETPOINT steers net site power to the commanded
+  value`) failed on the full run under host load (1-min load 4.3–6.5 during the
+  run) but passed cleanly on an isolated retry — confirmed transient, not a
+  regression (the test profile's physical export cap, 10 kW, never binds at
+  PV's 5 kW rating, so this change's new curtailment logic cannot engage for
+  that scenario). Resilience suite green. Deployed to `ven-1`/`ven-2`/`ven-3`.

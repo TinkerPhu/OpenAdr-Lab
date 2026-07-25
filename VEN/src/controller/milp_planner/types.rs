@@ -304,6 +304,8 @@ pub(crate) struct SolveOutput {
     pub(crate) p_imp_kw: Vec<f64>,
     /// Grid export power per step [kW]
     pub(crate) p_exp_kw: Vec<f64>,
+    /// PV export decision variable solution per step [kW]; `<= p_pv_kw[t]` (§ pv-export-curtailment)
+    pub(crate) p_pv_used_kw: Vec<f64>,
     /// Battery charge power per step [kW]; all 0.0 when no battery present
     pub(crate) p_bat_ch_kw: Vec<f64>,
     /// Battery discharge power per step [kW]; all 0.0 when no battery present

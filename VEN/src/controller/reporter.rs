@@ -935,6 +935,7 @@ mod tests {
             export_cap_kw: 5.0,
             baseline_kw: 0.5,
             pv_forecast_kw: 0.0,
+            pv_used_kw: 0.0,
             surplus_available_kw: 0.0,
             allocations: vec![],
             net_import_kw,

@@ -69,6 +69,7 @@ pub(crate) fn fallback_plan(
                 export_cap_kw: inp.p_exp_max_cont_kw[t],
                 baseline_kw: inp.p_base_kw[t] + inp.p_residual_kw[t],
                 pv_forecast_kw: inp.p_pv_kw[t],
+                pv_used_kw: inp.p_pv_kw[t],
                 surplus_available_kw: (inp.p_pv_kw[t] - inp.p_base_kw[t] - inp.p_residual_kw[t])
                     .max(0.0),
                 allocations: vec![],
@@ -284,6 +285,7 @@ pub(crate) fn translate_to_plan(
             export_cap_kw: inputs.p_exp_max_cont_kw[t],
             baseline_kw: inputs.p_base_kw[t] + inputs.p_residual_kw[t],
             pv_forecast_kw: inputs.p_pv_kw[t],
+            pv_used_kw: sol.p_pv_used_kw[t],
             surplus_available_kw,
             planned_kw_by_asset: allocations
                 .iter()

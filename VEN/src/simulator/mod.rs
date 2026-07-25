@@ -204,6 +204,7 @@ impl SimState {
         weather_pv_kw: Option<f64>,
         heater_emergency_curtail_override: Option<bool>,
         heater_emergency_absorb_override: Option<bool>,
+        pv_export_limit_override: Option<f64>,
     ) {
         let hour = now.format("%H").to_string().parse::<f64>().unwrap_or(12.0)
             + now.format("%M").to_string().parse::<f64>().unwrap_or(0.0) / 60.0;
@@ -236,6 +237,7 @@ impl SimState {
                     pv.irradiance = irradiance;
                     pv.irradiance_offset = self.pv_smoothing.irradiance_offset;
                     pv.pv_alpha = pv_alpha;
+                    pv.export_limit_kw = pv_export_limit_override;
                     // Manual sim inject wins over weather for as long as the perturbation
                     // is still in effect or decaying — see PvSmoothingState::manual_override_active.
                     pv.weather_power_kw = if self

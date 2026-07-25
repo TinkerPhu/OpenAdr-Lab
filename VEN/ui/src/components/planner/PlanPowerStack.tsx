@@ -20,7 +20,9 @@ function buildStackedFromPlan(plan: Plan): { points: StackedAreaPoint[]; assetId
       base_load_pos: slot.baseline_kw,
       base_load_neg: 0,
       pv_pos: 0,
-      pv_neg: -(slot.pv_forecast_kw),
+      // Planned export after curtailment, not the raw forecast — falls back to
+      // the forecast when pv_used_kw is absent (older plans / not curtailed).
+      pv_neg: -(slot.pv_used_kw ?? slot.pv_forecast_kw),
       ev_pos: 0, ev_neg: 0,
       heater_pos: 0, heater_neg: 0,
       battery_pos: 0, battery_neg: 0,
@@ -59,11 +61,30 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
   const tMax = lastEnd ? new Date(lastEnd).getTime() : nowMs + 12 * 3_600_000;
   const hoursForward = Math.max(0.5, (tMax - nowMs) / 3_600_000);
 
+  const curtailedSlots = plan.slots.filter(
+    (slot) => (slot.pv_forecast_kw - (slot.pv_used_kw ?? slot.pv_forecast_kw)) > 0.05,
+  );
+
   return (
     <Box data-testid="plan-power-stack" sx={{ width: "100%", height: 340 }}>
       <Typography variant="subtitle2" color="text.secondary" gutterBottom>
         Power Stack — Forecast vs Plan
       </Typography>
+      {curtailedSlots.length > 0 && (
+        <Typography
+          data-testid="pv-curtailment-indicator"
+          variant="caption"
+          color="warning.main"
+          display="block"
+        >
+          PV curtailed in {curtailedSlots.length} upcoming slot
+          {curtailedSlots.length === 1 ? "" : "s"} (peak −
+          {Math.max(
+            ...curtailedSlots.map((s) => s.pv_forecast_kw - (s.pv_used_kw ?? s.pv_forecast_kw)),
+          ).toFixed(2)}{" "}
+          kW)
+        </Typography>
+      )}
       <StackedAreaChart
         data={points}
         assetIds={assetIds}

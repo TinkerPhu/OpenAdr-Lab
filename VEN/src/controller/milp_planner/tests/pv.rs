@@ -365,3 +365,125 @@ fn pv_forecast_override_wins_over_weather_pv_kw() {
         inp.p_pv_kw[0]
     );
 }
+
+// ── PV-export decision variable (pv-export-curtailment) ────────────────────
+
+fn capacity_with_export_limit_kw(limit_kw: f64) -> OadrCapacityState {
+    OadrCapacityState {
+        export_limit_kw: Some(limit_kw),
+        ..no_capacity()
+    }
+}
+
+/// PV + base load only — no battery/EV/heater to absorb surplus, so curtailment
+/// is the only zero-cost way to relieve an export-capacity constraint.
+fn make_pv_only_profile() -> Profile {
+    let mut profile = make_profile_1800s();
+    profile
+        .assets
+        .retain(|a| matches!(a, AssetProfile::Pv(_) | AssetProfile::BaseLoad(_)));
+    profile
+}
+
+#[test]
+fn pv_used_equals_forecast_when_no_export_constraint_binds() {
+    use chrono::TimeZone;
+    let noon = Utc.with_ymd_and_hms(2026, 4, 11, 12, 0, 0).unwrap();
+    let profile = make_pv_only_profile();
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, noon, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        noon,
+        crate::entities::asset::PlanTrigger::Periodic,
+        None,
+        None,
+        &[],
+        None,
+        None,
+    );
+    for slot in &plan.slots {
+        assert!(
+            (slot.pv_used_kw - slot.pv_forecast_kw).abs() < 1e-6,
+            "slot {}: expected no curtailment, pv_used_kw={:.4} pv_forecast_kw={:.4}",
+            slot.slot_index,
+            slot.pv_used_kw,
+            slot.pv_forecast_kw
+        );
+    }
+}
+
+#[test]
+fn export_cap_forces_pv_curtailment_without_soft_violation() {
+    use chrono::TimeZone;
+    let noon = Utc.with_ymd_and_hms(2026, 4, 11, 12, 0, 0).unwrap();
+    let profile = make_pv_only_profile();
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    // Rated 5.0 kW PV, 0.5 kW base load → up to ~4.5 kW export at noon.
+    // Cap far below that so curtailment is the only zero-cost relief.
+    let capacity = capacity_with_export_limit_kw(1.0);
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, noon, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &capacity,
+        &profile,
+        noon,
+        crate::entities::asset::PlanTrigger::Periodic,
+        None,
+        None,
+        &[],
+        None,
+        None,
+    );
+    let noon_slot = plan
+        .slots
+        .iter()
+        .find(|s| s.pv_forecast_kw > 2.0)
+        .expect("at least one slot near noon must have a strong PV forecast");
+    assert!(
+        noon_slot.pv_used_kw < noon_slot.pv_forecast_kw - 0.1,
+        "expected curtailment: pv_used_kw={:.4} pv_forecast_kw={:.4}",
+        noon_slot.pv_used_kw,
+        noon_slot.pv_forecast_kw
+    );
+    assert!(
+        noon_slot.net_export_kw <= 1.05,
+        "export must respect the 1.0 kW cap via curtailment, not soft violation, got {:.4}",
+        noon_slot.net_export_kw
+    );
+}
+
+#[test]
+fn run_planner_pv_and_base_load_only_declares_pv_used_without_panic() {
+    let now = fixed_now();
+    let profile = make_pv_only_profile();
+    let sim = make_snap_from_profile(&profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let plan = run_planner(
+        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+        &sim,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::Periodic,
+        None,
+        None,
+        &[],
+        None,
+        None,
+    );
+    assert_eq!(plan.slots.len(), 4, "plan must have 4 slots");
+    for slot in &plan.slots {
+        assert!(
+            slot.pv_used_kw <= slot.pv_forecast_kw + 1e-9,
+            "pv_used_kw must never exceed the forecast"
+        );
+    }
+}

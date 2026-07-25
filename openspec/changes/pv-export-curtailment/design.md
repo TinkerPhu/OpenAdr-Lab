@@ -62,20 +62,29 @@ Alternative considered: a full `AssetMilpContext` for PV (own `milp_params`/`dec
 every method but `constraints` would be a near-empty stub; the trait exists to give stateful assets
 a uniform plug-in point, not to force every physical quantity through it.
 
-**2. No objective term for curtailment.**
-Because `p_exp` (export) and `p_imp` (import) already carry the real tariff/GHG/violation costs,
-and curtailing PV only ever *reduces* available supply (forcing `p_imp` up or `p_exp` down), the
-solver has no incentive to curtail unless doing so relieves a binding constraint elsewhere (the
-`p_exp <= p_exp_max_phys_kw * (1 - u_grid)` hard cap or the `p_exp_max_cont_kw` soft-violation
-penalty). That is exactly the desired behavior — curtailment as a last resort, never a free
-choice — so no tie-break or explicit cost term is needed.
+**2. A tiny full-utilization tie-break is needed after all (revised during implementation).**
+The original plan was "no objective term for curtailment" — every real cost term (tariff revenue
+on `p_exp`, minus the small `w_grid` grid-exchange friction) already nets out in favor of using
+PV, so curtailment should only happen when a real constraint forces it. That held for the *true*
+LP optimum, but implementation surfaced a gap: `solve_phase1` calls `model.with_mip_gap(0.02)`
+(a pre-existing, documented 2% relative tolerance HiGHS uses to accept a "good enough" incumbent
+for the `u_grid` mutual-exclusion binary) — and a PV-only test with **no export cap at all**
+(`pv_used_equals_forecast_when_no_export_constraint_binds`) still came back with PV curtailed by a
+small, cost-irrelevant amount. Separately, Phase 2's objective is friction-only and has *no*
+opinion on `p_pv_used` whatsoever — nothing stopped it from curtailing PV arbitrarily while
+optimizing switching/ramp within the epsilon cost budget.
 
-Alternative considered: a tiny anti-curtailment tie-break (symmetric to
-`SHIFT_TIEBREAK_EUR_PER_SLOT`) to guard against degenerate alternate optima. Rejected for now —
-unlike shiftable-load start slots (many cost-equal starts under flat tariffs), `p_pv_used` only
-has one direction of degeneracy (unconstrained slots where curtailing is strictly cost-neutral vs.
-not), and HiGHS returns the LP vertex it finds first; if this proves to matter in practice (see
-Open Questions) it can be added later without touching the constraint structure.
+Fix: added `PV_USE_TIEBREAK_EUR_PER_KWH` (0.005 €/kWh) and `pv_use_tiebreak_expr()`
+(`milp_interactions.rs`), applied in both phases exactly like the pre-existing
+`SHIFT_TIEBREAK_EUR_PER_SLOT` pattern for shiftable-load start slots — small enough that any real
+constraint (export cap, soft-violation penalty) still dominates and forces genuine curtailment,
+but large enough to close the MIP-gap-tolerance and Phase-2-indifference gaps. This is the same
+category of fix the codebase already has precedent for, not a new pattern.
+
+Alternative considered: tightening `with_mip_gap` instead of adding a tie-break. Rejected — the gap
+setting is shared with every other MIP decision in the same solve (heater/battery/EV switching),
+so tightening it globally to fix one variable's degeneracy would slow every solve for a problem
+that a targeted, tiny objective term already fixes cheaply.
 
 **3. Runtime wiring goes through `SimState::tick()`, not the `setpoints` HashMap.**
 `build_setpoints`'s `HashMap<String, f64>` is a *power target* contract (used for the battery,
@@ -106,12 +115,6 @@ curtailment amount is a trivial `pv_forecast_kw - pv_used_kw` derivation, comput
   active] → `PlanSlot.pv_used_kw` and `OadrCapacityState.export_limit_kw` both stay independently
   visible (UI, `/sim`, `/plan`); the tick only combines them for the *physical* clamp, not for
   reporting. No new ambiguity beyond "the tighter of two already-visible values won."
-- [LP degeneracy: solver may curtail more than strictly necessary on ties] → Accepted per Decision
-  2; revisit with a tie-break only if a real deviation-scenarios experiment shows it matters (see
-  Open Questions).
-
-## Open Questions
-
-- Whether LP degeneracy on unconstrained slots ever produces a visibly wrong `pv_used_kw` in
-  practice (§ Decision 2) is unknown until exercised — not blocking, addressed by the mitigation
-  above if it surfaces.
+- [MIP-gap/Phase-2-indifference degeneracy curtails PV with no real cost benefit] → Confirmed
+  during implementation (not hypothetical) and fixed via Decision 2's tie-break; covered by the
+  `pv_used_equals_forecast_when_no_export_constraint_binds` regression test.

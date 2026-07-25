@@ -550,8 +550,8 @@ fn run_planner_power_balance_invariant() {
             .get("heater")
             .copied()
             .unwrap_or(0.0);
-        // p_imp + p_pv + p_dis = p_base + p_ev + p_heat + p_ch + p_exp
-        let lhs = slot.net_import_kw + slot.pv_forecast_kw + slot.bat_discharge_kw;
+        // p_imp + p_pv_used + p_dis = p_base + p_ev + p_heat + p_ch + p_exp
+        let lhs = slot.net_import_kw + slot.pv_used_kw + slot.bat_discharge_kw;
         let rhs = slot.baseline_kw + ev_kw + heat_kw + slot.bat_charge_kw + slot.net_export_kw;
         assert!(
             (lhs - rhs).abs() < 0.1,

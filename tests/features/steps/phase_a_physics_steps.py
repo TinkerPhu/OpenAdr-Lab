@@ -123,6 +123,20 @@ def step_sim_override_pv_irradiance(context, irradiance):
     context.last_response = r
 
 
+@when("I POST a sim override setting grid_export_limit_kw to {kw:f}")
+def step_sim_override_grid_export_limit_kw(context, kw):
+    """Set the VTN/sim-injected grid export capacity limit (kW, positive magnitude).
+
+    Regression: PvInverter.export_limit_kw — the field step_inner actually clamps
+    against — was never written by any live tick-pipeline code path, only by unit
+    tests. This exercises the real path (OadrCapacityState -> resolve_pv_export_limit_kw
+    -> SimState::tick's pv_export_limit_override) end to end.
+    """
+    r = ven_post("/sim/inject", json={"grid_export_limit_kw": kw})
+    r.raise_for_status()
+    context.last_response = r
+
+
 @when("I wait {seconds:d} seconds for the sim to tick")
 def step_wait_sim_tick(context, seconds):
     time.sleep(seconds)

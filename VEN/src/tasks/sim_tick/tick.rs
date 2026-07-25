@@ -115,6 +115,13 @@ pub(crate) async fn tick_once(
             live_pv_kw,
         );
 
+        let effective_capacity_for_pv = super::helpers::effective_capacity(&capacity_snap, &inject);
+        let pv_export_limit_kw = crate::controller::dispatcher::resolve_pv_export_limit_kw(
+            plan_snap.as_ref(),
+            &effective_capacity_for_pv,
+            now,
+        );
+
         // PHASE 3: Simulator tick — apply setpoints → update device states.
         sim_guard.tick(
             dt_s,
@@ -132,6 +139,7 @@ pub(crate) async fn tick_once(
             weather_pv_kw_now,
             inject.heater_emergency_curtail,
             inject.heater_emergency_absorb,
+            pv_export_limit_kw,
         );
 
         // PHASE 4 (in-lock): extract snapshots and mutate history/grid/envelope.
