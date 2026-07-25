@@ -97,25 +97,22 @@ well inside of:
 | High side | `temp_max_c` (e.g. 80 °C) | A real hard ceiling above it (e.g. 90 °C — scalding risk, tank pressure/relief-valve limits) | Still physically safe, but outside what the user configured as comfortable |
 
 The comfort band is what normal planning should respect. The wider safety envelope should only be
-reachable under an **active VTN emergency directive**, not during routine optimization: an emergency
-curtailment request lets the tank drift below `temp_min_c` all the way toward ambient (no physical
-cost to doing so, only comfort); an emergency energy-absorption request lets it heat above
-`temp_max_c` up to the real safety ceiling (still physically safe, just outside normal comfort). The
-current code doesn't model this distinction — `temp_min_c`/`temp_max_c` are the only bounds that
-exist, `emergency_active` already treats `temp_min_c` as if it were a hard limit rather than a
-comfort edge, and there is no separate field for the true safety ceiling above `temp_max_c` at all.
+reachable under an **active VTN emergency directive**, not during routine optimization.
 
-The natural model extension is a second, wider pair of bounds — a true safety floor (ambient) and
-true safety ceiling (e.g. 90 °C) — that only an active VTN emergency signal is allowed to use; normal
-objectives stay confined to the existing comfort band regardless of how aggressively they'd otherwise
-want to trade comfort for cost or grid compliance.
+**Implemented** (`VEN/src/assets/heater.rs`, `87d6037`): a `HeaterEmergencyMode` enum
+(`Normal`/`Curtail`/`Absorb`) and a `temp_safety_max_c` field (per-profile, `VEN/profiles/*.yaml` —
+e.g. `ven-2.yaml`'s tank is 40–80 °C comfort / 90 °C true safety ceiling, distinct from
+`no_pv_test.yaml`'s 18–23 °C room-heating band). `Curtail` suppresses the forced-on emergency heat at
+`temp_min_c`, letting the tank drift toward ambient with no physical floor; `Absorb` suppresses the
+forced-off ceiling at `temp_max_c`, allowing heating up to `temp_safety_max_c` instead. Each direction
+leaves the *other* bound's normal behavior untouched (curtailing doesn't relax the ceiling; absorbing
+doesn't relax the floor).
 
-This also means the per-site profile format needs extending, not just the code: today's profiles
-(`VEN/profiles/*.yaml`) configure only `temp_min_c`/`temp_max_c`, and the values vary a lot by
-installation — `ven-2.yaml`'s 40–80 °C tank vs. `no_pv_test.yaml`'s 18–23 °C room-heating band — so
-the true safety floor/ceiling would need to be new, separately configurable fields per profile (e.g.
-`temp_safety_min_c`/`temp_safety_max_c`), not a hardcoded constant, since a room heater's real safety
-ceiling has nothing in common with a hot-water tank's.
+**Still open:** the mode is settable today only via `SimInjectState` (`heater_emergency_curtail`/
+`heater_emergency_absorb`, manual/test/demo) — the same interim path PV curtailment's
+`export_limit_kw` used before its own planner wiring. No VTN emergency directive exists yet to drive
+it automatically, and the MILP itself doesn't know about the safety envelope at all (it still plans
+only within the comfort band) — that wiring is a separate, not-yet-scoped piece of work.
 
 ## 3. Deviation scenario catalog
 
@@ -145,7 +142,7 @@ obligation, WP-T5 report-submission-status territory — the one with contractua
 | **Battery** | Yes — fully electronic | Fast, no physical objection | SoC, `max_charge_kw`/`max_discharge_kw`, round-trip efficiency |
 | **EV charger** | Yes — same electronic profile | Fast, no physical objection | SoC target, min_soc, session deadline/urgency |
 | **PV inverter (curtailment)** | Physically curtailable and already modelled in the simulator (`export_limit_kw` clamps every tick) — but not yet a planner decision variable, only ever set externally (VTN signal or test injection) | **Physically curtailable**, fast (inverter-electronic) | Rated kW, export limit; the gap is the MILP not choosing a value, not the simulator lacking the mechanism |
-| **Heater / boiler** | Slow, thermal-inertia bound; two-tier bounds (see §2) | Both `temp_min_c`/`temp_max_c` are comfort-level, not physical; the true safety envelope (ambient floor, real ceiling above `temp_max_c`) is wider and currently unmodelled | `temp_max_c`/`temp_min_c` (comfort band, today's only bounds), no field yet for the true safety ceiling; relay-wear concerns (`min_state_linger_s`, proven useful in feature 017, not currently implemented) |
+| **Heater / boiler** | Slow, thermal-inertia bound; two-tier bounds, both implemented (see §2) | Both `temp_min_c`/`temp_max_c` are comfort-level, not physical; the true safety envelope (ambient floor, `temp_safety_max_c` ceiling) exists in the model but is reachable today only via manual sim-inject, not a VTN directive or the planner | `temp_max_c`/`temp_min_c` (comfort band) plus `temp_safety_max_c` (true ceiling, per-profile); relay-wear concerns (`min_state_linger_s`, proven useful in feature 017, not currently implemented) |
 | **Base load / uncontrollable appliance (e.g., washing machine)** | No — not a controllable asset at all, and no per-appliance model exists | Genuinely zero control authority — this is the one case in the table that stays "none" | None — it's a forecast input, not a lever, regardless of any future modelling work |
 
 The washing-machine case remains the clean example of a load with **zero** control authority: it
@@ -259,11 +256,13 @@ penalty for breach (say €50 for the event), the shadow price on the import con
 obligation window isn't the routine 0.15–0.30 €/kWh, it's whatever the breach penalty amortizes to —
 effectively far higher than any comfort-preservation value. The same greedy-cheapest-lever arbiter
 therefore prefers whatever avoids the breach over whatever preserves comfort, including pushing the
-heater below today's `temp_min_c` (§2) toward ambient — not because a special "DR event" row
-overrides normal priority, but because the obligation's penalty is baked into that window's shadow
-price and the arbiter is just following the numbers. This is what collapses the old table's five
-separate rows into one mechanism: the "Active DR event" and "comfort-priority" rows were really just
-different shadow-price magnitudes on the same constraint, not different logic.
+heater into `HeaterEmergencyMode::Curtail` (§2, implemented) to drift below `temp_min_c` toward
+ambient — not because a special "DR event" row overrides normal priority, but because the
+obligation's penalty is baked into that window's shadow price and the arbiter is just following the
+numbers. This is what collapses the old table's five separate rows into one mechanism: the "Active DR
+event" and "comfort-priority" rows were really just different shadow-price magnitudes on the same
+constraint, not different logic. The lever itself already exists; only the arbiter that would decide
+*when* to flip it doesn't.
 
 ### 5.5 Where pure greedy breaks — the SoC-coupling trap
 
@@ -304,9 +303,9 @@ actually is instead of trusting hours-stale marginal-cost numbers.
 | E. Base load slow drift | Adaptive forecasting, not real-time control | `Heuristic` forecast source exists but has no error-feedback loop | Forecast subsystem — close the loop from measured actuals |
 | F. EV session change | Immediate replan — hard input change, not noise | Fits an existing hard-trigger category already | MILP replan trigger, already exists in `PlanTrigger` |
 | G. Asset fault/capability loss | Immediate hard replan with reduced flexibility envelope | Unconfirmed whether `CapacityChange`/`Alert` triggers are wired to asset-level (not just tariff/VTN) faults today | Needs its own verification pass |
-| H. VTN event boundary mismatch | Fast, obligation-aware absorption allowed to override normal priority/comfort bounds (including heater's comfort floor, §2/§5.4) for the event's duration | No obligation-aware override path exists | New: the §5 marginal-cost arbiter, with the obligation's breach penalty baked into that window's shadow price (§5.4) — not a separate mode, tied to WP-T5 report-submission-status tracking |
+| H. VTN event boundary mismatch | Fast, obligation-aware absorption allowed to use the heater's safety envelope (§2, implemented) for the event's duration | The lever (`HeaterEmergencyMode`) exists; no obligation-aware trigger path to flip it exists | New: the §5 marginal-cost arbiter, with the obligation's breach penalty baked into that window's shadow price (§5.4) — not a separate mode, tied to WP-T5 report-submission-status tracking |
 | I. Measurement noise | Dead-band ignore | Dead-band concept proven useful in the removed feature 017; not currently implemented | Rebuilt real-time layer's dead-band, if/when rebuilt |
-| J. Heater comfort-floor recovery | Should be a policy choice bounded by the comfort band, not an unconditional immediate override into the (currently unmodelled) safety envelope (§2) | Currently unconditional (`emergency_active` bypasses everything) | Add the true safety floor/ceiling as a second, wider bound pair — reachable only under an active VTN emergency directive — plus the corresponding profile fields (§2) |
+| J. Heater comfort-floor recovery | Should be a policy choice bounded by the comfort band, not an unconditional immediate override into the safety envelope | Currently unconditional in `Normal` mode (`emergency_active` bypasses everything); the safety envelope + `Curtail`/`Absorb` modes exist (§2, implemented) but nothing decides *when* to switch modes yet | Needs the §5 arbiter (or an interim policy) to actually choose `Curtail`/`Absorb` — the model extension itself is done |
 | K. Comms loss | Documented fail-safe default per asset | No explicit fail-safe-on-comms-loss behavior found; assets appear to hold last commanded setpoint by default | Separate fault-handling/watchdog design, out of scope for deviation-absorption specifically |
 
 ## 7. Remaining implementation work
