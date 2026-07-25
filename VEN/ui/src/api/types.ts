@@ -146,6 +146,8 @@ export type SimInjectState = {
   heater_setpoint_c?: number | null;
   heater_temp_min_c?: number | null;
   heater_temp_max_c?: number | null;
+  heater_emergency_curtail?: boolean | null;
+  heater_emergency_absorb?: boolean | null;
   ambient_temp_c?: number | null;
   grid_import_limit_kw?: number | null;
   grid_export_limit_kw?: number | null;

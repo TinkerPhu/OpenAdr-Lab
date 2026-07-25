@@ -39,6 +39,10 @@ pub struct PostSimInjectBody {
     #[serde(default)]
     pub heater_temp_max_c: Option<serde_json::Value>,
     #[serde(default)]
+    pub heater_emergency_curtail: Option<serde_json::Value>,
+    #[serde(default)]
+    pub heater_emergency_absorb: Option<serde_json::Value>,
+    #[serde(default)]
     pub ambient_temp_c: Option<serde_json::Value>,
     #[serde(default)]
     pub base_load_kw: Option<serde_json::Value>,
@@ -84,6 +88,8 @@ fn merge_inject(current: &mut SimInjectState, body: PostSimInjectBody) {
     merge_f64!(heater_setpoint_c);
     merge_f64!(heater_temp_min_c);
     merge_f64!(heater_temp_max_c);
+    merge_bool!(heater_emergency_curtail);
+    merge_bool!(heater_emergency_absorb);
     merge_f64!(ambient_temp_c);
     merge_f64!(base_load_kw);
     if let Some(v) = body.base_load_alpha {

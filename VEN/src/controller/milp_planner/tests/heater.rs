@@ -623,6 +623,7 @@ fn solve_ven3_heater_three_tier_zones_feasible() {
                 temp_initial_c: 47.82, // live temperature from ven-3
                 temp_min_c: 45.0,
                 temp_max_c: 60.0,
+                temp_safety_max_c: 60.0,
                 thermal_mass_kwh_per_c: thermal_mass,
                 k_loss_kw_per_c: 0.005,
                 draw_kw: 0.3,

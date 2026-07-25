@@ -185,16 +185,15 @@ impl SimState {
     /// Inject parameters implement Behaviour B (pv_irradiance + EMA smoothing) and
     /// Behaviour C (frozen env/state while active, snap-back on release):
     /// - `pv_irradiance_override`: if Some, freeze PV irradiance; if None and was active,
-    ///   EMA-blend back to natural model.
-    /// - `pv_alpha`: EMA factor for PV blend-back (0.0–1.0; default 0.1).
+    ///   EMA-blend back to natural model at rate `pv_alpha` (0.0–1.0; default 0.1).
     /// - `ambient_temp_c_override`: if Some, override heater ambient temp; else use 10.0°C.
     /// - `base_load_kw_override`: if Some, one-shot: captures offset then cleared by sim loop.
     /// - `base_load_alpha`: EMA factor for base load blend-back (0.0–1.0; default 0.1).
     /// - `ev_plugged_override`: if Some, hold EV plugged state; else let physics drive it.
-    /// - `weather_pv_kw`: weather-sourced actual PV power (kW, generation-positive) for
-    ///   this instant, via `entities::solar::resolve_weather_pv_kw` — same translation
-    ///   the planner's own PV input uses (R-50). Takes precedence over the sin model,
-    ///   but a manual `pv_irradiance_override` inject (testing/demo) wins over both.
+    /// - `weather_pv_kw`: weather-sourced actual PV power (kW, generation-positive), via
+    ///   `entities::solar::resolve_weather_pv_kw` (R-50); precedence sin model < weather
+    ///   < manual `pv_irradiance_override` inject (testing/demo).
+    /// - `heater_emergency_curtail/absorb_override`: Behaviour C, see `Heater::apply_tick_overrides`.
     ///
     /// See `peek_pv_kw` (`pv_preview.rs`) for a read-only preview of this tick's PV term.
     #[allow(clippy::too_many_arguments)]
@@ -213,6 +212,8 @@ impl SimState {
         ev_plugged_override: Option<bool>,
         ev_soc_target_override: Option<f64>,
         weather_pv_kw: Option<f64>,
+        heater_emergency_curtail_override: Option<bool>,
+        heater_emergency_absorb_override: Option<bool>,
     ) {
         let hour = now.format("%H").to_string().parse::<f64>().unwrap_or(12.0)
             + now.format("%M").to_string().parse::<f64>().unwrap_or(0.0) / 60.0;
@@ -260,13 +261,13 @@ impl SimState {
                         None
                     };
                 }
-                AssetConfig::Heater(h) => {
-                    // Behaviour C: ambient temp — hold override or use default.
-                    h.ambient_temp_c = ambient_temp_c_override.unwrap_or(10.0);
-                    // Behaviour C: comfort band — hold override or snap to profile defaults.
-                    h.temp_min_c = heater_temp_min_override.unwrap_or(h.temp_min_c_profile);
-                    h.temp_max_c = heater_temp_max_override.unwrap_or(h.temp_max_c_profile);
-                }
+                AssetConfig::Heater(h) => h.apply_tick_overrides(
+                    ambient_temp_c_override,
+                    heater_temp_min_override,
+                    heater_temp_max_override,
+                    heater_emergency_curtail_override,
+                    heater_emergency_absorb_override,
+                ),
                 AssetConfig::BaseLoad(bl) => {
                     // Behaviour B: base load — one-shot sets offset; EMA decays it back.
                     // `natural_base_kw` (profile + simulated appliance noise) plays the
