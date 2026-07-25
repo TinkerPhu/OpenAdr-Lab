@@ -229,6 +229,8 @@ export type PlanTimeSlot = {
   net_import_kw: number;
   net_export_kw: number;
   pv_forecast_kw: number;
+  /** Planned PV export after curtailment (<= pv_forecast_kw); equal when uncurtailed. */
+  pv_used_kw?: number;
   baseline_kw: number;
   planned_kw_by_asset?: Record<string, number>;
 };

@@ -65,21 +65,28 @@ directly from the planner's own solve.
 
 ### PV curtailment
 
-PV curtailment is physically real and already modelled in the simulator. `export_limit_kw` clamps
-export every tick (`PvInverter::step_inner`, `VEN/src/assets/pv.rs`), and is driven today by VTN
-`EXPORT_CAPACITY_LIMIT` events and by sim-injected test scenarios. (`step_inner`'s `setpoint_kw`
-argument is unused dead code — it was never the curtailment mechanism; `export_limit_kw` is.)
+**Implemented** (`pv-export-curtailment`, `openspec/changes/pv-export-curtailment/`): the MILP now
+has a real PV-export decision variable, `p_pv_used[t]` (`GridMilpVars`, `milp_interactions.rs`),
+bounded `0 <= p_pv_used[t] <= p_pv_kw[t]` and substituted for the raw forecast constant in the
+power-balance constraint in both solver phases. No cost term is attached to curtailment itself —
+every real cost term already favors using PV, so the solver only curtails when doing so relieves an
+active export-capacity constraint (a tiny `PV_USE_TIEBREAK_EUR_PER_KWH` bias, mirroring the
+pre-existing `SHIFT_TIEBREAK_EUR_PER_SLOT` pattern, was needed to stop HiGHS's MIP-gap tolerance and
+Phase 2's friction-only objective from curtailing PV for no cost benefit — found via a "no export
+constraint at all" regression test during implementation, not a hypothetical). `PlanSlot.pv_used_kw`
+exposes the decision alongside the existing `pv_forecast_kw`, and the VEN UI's plan power-stack chart
+shows the curtailed amount when present.
 
-**What needs implementing:** the MILP has no PV-export decision variable. PV is only ever a forecast
-input to the power-balance equation, so the plan never evaluates "would curtailing X kW of PV
-improve the objective this slot," and nothing feeds a planner-derived value into `export_limit_kw` —
-today that field only ever comes from an external VTN signal or a test injection, never from
-optimization. Once the planner gains that decision variable, PV moves from "forecast input" to
-"lever" in §4's table below and in §5's marginal-cost design. This matters directly for deviation
-handling: several `OpenADR` `LOAD_DISPATCH`-style signals assume curtailment is available as an
-*optimized* choice, and the deviation catalog's "positive deviation" scenarios (too much import) get
-a genuinely different, cheaper answer once the planner can choose to reduce PV export directly
-rather than only compensating via battery/EV.
+Scoping this also surfaced that PV curtailment had **no physical effect in the live simulator at
+all**: `PvInverter.export_limit_kw` — the field `step_inner` actually clamps against — was never
+written by any live tick-pipeline code path, only by unit tests (`step_inner`'s `setpoint_kw`
+argument really is dead, as previously noted here — the intended enforcement path through
+`dispatcher.rs`'s `setpoints["pv"]` never reached the asset either). Fixed in the same change:
+`SimState::tick()` gained a `pv_export_limit_override` parameter, applied to
+`PvInverter.export_limit_kw` every tick; `dispatcher::resolve_pv_export_limit_kw` computes it as the
+more restrictive of the live VTN/sim-inject capacity cap and the plan's own curtailment target. This
+means VTN `EXPORT_CAPACITY_LIMIT` events — previously inert — now actually curtail PV, not just the
+new planner-driven case.
 
 ### Heater temperature bounds are not symmetric
 
@@ -141,7 +148,7 @@ obligation, WP-T5 report-submission-status territory — the one with contractua
 |---|---|---|---|
 | **Battery** | Yes — fully electronic | Fast, no physical objection | SoC, `max_charge_kw`/`max_discharge_kw`, round-trip efficiency |
 | **EV charger** | Yes — same electronic profile | Fast, no physical objection | SoC target, min_soc, session deadline/urgency |
-| **PV inverter (curtailment)** | Physically curtailable and already modelled in the simulator (`export_limit_kw` clamps every tick) — but not yet a planner decision variable, only ever set externally (VTN signal or test injection) | **Physically curtailable**, fast (inverter-electronic) | Rated kW, export limit; the gap is the MILP not choosing a value, not the simulator lacking the mechanism |
+| **PV inverter (curtailment)** | Yes — both a planner decision variable (`p_pv_used[t]`) and the VTN/sim-inject path now actually reach `PvInverter.export_limit_kw` every tick (§2) | **Physically curtailable**, fast (inverter-electronic) | Rated kW forecast (ceiling); the planner only curtails below it when an export cap is binding |
 | **Heater / boiler** | Slow, thermal-inertia bound; two-tier bounds, both implemented (see §2) | Both `temp_min_c`/`temp_max_c` are comfort-level, not physical; the true safety envelope (ambient floor, `temp_safety_max_c` ceiling) exists in the model but is reachable today only via manual sim-inject, not a VTN directive or the planner | `temp_max_c`/`temp_min_c` (comfort band) plus `temp_safety_max_c` (true ceiling, per-profile); relay-wear concerns (`min_state_linger_s`, proven useful in feature 017, not currently implemented) |
 | **Base load / uncontrollable appliance (e.g., washing machine)** | No — not a controllable asset at all, and no per-appliance model exists | Genuinely zero control authority — this is the one case in the table that stays "none" | None — it's a forecast input, not a lever, regardless of any future modelling work |
 
@@ -296,9 +303,9 @@ actually is instead of trusting hours-stale marginal-cost numbers.
 
 | Scenario | Ideal response | Realistic response given current architecture | Where it fits |
 |---|---|---|---|
-| A. PV cloud transient | Fast lever absorption per active objective, potentially including PV curtailment once the planner can choose it (§2/§7 task 1) | Only battery/EV can react today; the historically-tried absorber for this was removed for oscillating with the opportunistic EV overlay (§1) — a rebuild must fix that arbitration gap first, not just re-tune dead-bands | The §5 marginal-cost arbiter, once (a) it subsumes the opportunistic overlay and reads current-tick PV, and (b) the `SolverPort` duals (§5.2) exist |
+| A. PV cloud transient | Fast lever absorption per active objective; PV curtailment is now an available lever (§2, implemented) alongside battery/EV | Curtailment exists as a lever but nothing decides *when* to use it for a fast transient yet — the historically-tried real-time absorber for this was removed for oscillating with the opportunistic EV overlay (§1); a rebuild must fix that arbitration gap first, not just re-tune dead-bands | The §5 marginal-cost arbiter, once (a) it subsumes the opportunistic overlay and reads current-tick PV, and (b) the `SolverPort` duals (§5.2) exist |
 | B. PV forecast bias (systematic) | Better forecast input, not a control reaction | A live external weather forecast now exists and feeds the planner — MQTT `openadr-lab/weather/<site_id>/forecast`, ~10 min past every hour (`VEN/src/weather.rs`, `controller/weather_port.rs`, architecture in `docs/architecture/weather_forecast.md`). `PvInverter::build_milp_context`'s PV input now resolves through `entities::solar::resolve_weather_pv_kw` (weather-sourced forecast when fresh, sin-model fallback otherwise), and the same resolution feeds the `/weather` visibility endpoint (`ForecastSource::WeatherModel`) — so this is a real forecast-vs-ground-truth channel wired into planning, not just a parallel visibility feed. Whether it measurably reduces PV-driven deviation/absorption events is still open — no experiment has quantified it yet | Forecast subsystem (`services/forecast.rs`, `entities/solar.rs`) — wired; quantifying its effect on deviation is the remaining step |
-| C. Inverter clipping | Planned inside the export limit; if not, hard ceiling, no lever needed (today) — an active lever once the planner can choose `export_limit_kw` itself (§7 task 1) | Export limit enforced as a clamp in `dispatcher.rs`; the clamp mechanism already works (§2), it's just never planner-driven | MILP input validation today; active curtailment lever once the planner gains that decision variable |
+| C. Inverter clipping | Planned inside the export limit — now an actual planner choice (§2, implemented), not just a passive ceiling | The planner chooses `p_pv_used[t]` and the resolved limit reaches `PvInverter.export_limit_kw` every tick (§2); no gap remains for this scenario specifically | Planner decision variable + runtime wiring, both done (§2) |
 | D. Base load step (washing machine) | Absorbed by whichever lever the objective prefers; the load itself never participates | Same arbitration-gap caveat as scenario A | The §5 marginal-cost arbiter, same prerequisites as scenario A |
 | E. Base load slow drift | Adaptive forecasting, not real-time control | `Heuristic` forecast source exists but has no error-feedback loop | Forecast subsystem — close the loop from measured actuals |
 | F. EV session change | Immediate replan — hard input change, not noise | Fits an existing hard-trigger category already | MILP replan trigger, already exists in `PlanTrigger` |
@@ -327,14 +334,10 @@ deciding them.
 
 **Backlog, in build order:**
 
-1. **Give the planner a PV-export decision variable** (§2) — the simulator already curtails
-   correctly (`export_limit_kw`); the MILP just needs to choose a value for it instead of treating
-   PV as forecast-only. Standalone value (better peak-shaving/capacity-limit/autarky plans) with no
-   dependency on the arbiter rebuild, and none of the risk that's bitten twice before.
-2. **`SolverPort` marginal-cost/shadow-price extension** (§5.2) — one extra cheap LP solve per
+1. **`SolverPort` marginal-cost/shadow-price extension** (§5.2) — one extra cheap LP solve per
    planning cycle, exposing directional duals per slot. Only useful once building the arbiter, so it
    comes right before it.
-3. **Build the single arbiter** (§5.3) — the highest-risk piece, the one that's failed twice
-   already (§1). Do it last, so it inherits the richer lever set from task 1 and whatever's learned
-   building task 2; give it its own focused design pass rather than rushing it alongside everything
-   else.
+2. **Build the single arbiter** (§5.3) — the highest-risk piece, the one that's failed twice
+   already (§1). Do it last, so it inherits the richer lever set already built (PV curtailment, §2)
+   and whatever's learned building task 1; give it its own focused design pass rather than rushing
+   it alongside everything else.

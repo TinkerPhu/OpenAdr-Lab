@@ -52,3 +52,11 @@ Feature: Phase A — Asset physics and capability coverage
     When I POST a sim override setting ev_plugged to false
     And I wait for the VEN /capability/ev max_import_kw to equal 0.0
     Then the polled capability matched
+
+  Scenario: grid_export_limit_kw sim override actually curtails PV output
+    When I POST a sim override with full PV irradiance
+    And I POST a sim override setting grid_export_limit_kw to 1.0
+    And I wait 5 seconds for the sim to tick
+    And I GET /capability/pv from the VEN
+    Then the response status is 200
+    And the capability max_export_kw magnitude is less than 1.05

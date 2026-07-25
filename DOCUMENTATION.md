@@ -180,6 +180,18 @@ The Grid asset has no setpoint and is never controllable directly; it reflects t
 | PV export curtailment | `raw_kw.max(export_limit_kw)` when limit ≤ 0 (prevents export beyond limit) |
 | Heater thermal energy | `e_kwh.clamp(0.0, (temp_max_c − temp_min_c) × thermal_mass_kwh_per_c)` |
 
+**PV export is a planner decision, not just a passive ceiling.** The MILP's power-balance
+constraint uses a bounded decision variable `p_pv_used[t]` (`0 <= p_pv_used[t] <= p_pv_kw[t]`,
+`GridMilpVars` in `controller/milp_interactions.rs`) instead of feeding the raw forecast straight
+in — the solver curtails below the forecast only when doing so relieves an active export-capacity
+constraint (no cost is attached to curtailment itself). The resulting value is exposed as
+`PlanTimeSlot.pv_used_kw` alongside the existing `pv_forecast_kw`. Each tick,
+`controller::dispatcher::resolve_pv_export_limit_kw` combines this plan-driven target with the
+live VTN/sim-inject capacity cap (whichever permits less export) and writes the result to
+`PvInverter.export_limit_kw` — this is also the fix for a pre-existing gap where that field was
+never written by any live code path, so VTN `EXPORT_CAPACITY_LIMIT` events had no physical effect
+on simulated PV output until this change.
+
 > **Reference:** [asset_simulation.md](docs/architecture/asset_simulation.md) · [ven_asset_interface_spec.md](docs/architecture/ven_asset_interface_spec.md)
 
 ### 2.2 Energy Planning (MILP)

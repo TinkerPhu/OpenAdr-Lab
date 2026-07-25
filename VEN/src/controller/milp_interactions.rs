@@ -62,6 +62,10 @@ pub struct GridMilpVars {
     pub u_grid: Vec<Variable>,
     pub s_imp_viol: Vec<Variable>,
     pub s_exp_viol: Vec<Variable>,
+    /// PV export decision variable: `0 <= p_pv_used[t] <= p_pv_kw[t]`. The solver curtails
+    /// below the forecast only when doing so relieves an export-capacity constraint — see
+    /// `openspec/changes/pv-export-curtailment/design.md`.
+    pub p_pv_used: Vec<Variable>,
 }
 
 /// Per-shiftable-load LP variables and scheduling metadata.
@@ -86,6 +90,27 @@ pub struct ShiftableLoadMilpVars {
 /// 0.01 € ≫ 0.001 €); applied in BOTH solver phases (and the Phase-1 cost cap)
 /// so Phase 2's epsilon budget cannot trade the early start away.
 pub const SHIFT_TIEBREAK_EUR_PER_SLOT: f64 = 0.001;
+
+/// Tiny per-kWh bias favoring full PV utilization [€/kWh]. Even though every real
+/// cost term already favors using PV over curtailing it for free (see
+/// `pv-export-curtailment` design), HiGHS's `with_mip_gap` tolerance on `u_grid`
+/// (grid mutual-exclusion binary) can still accept a solution that curtails PV
+/// by a small, cost-irrelevant amount rather than searching for the true
+/// optimum — found via `pv_used_equals_forecast_when_no_export_constraint_binds`
+/// (no export cap at all, yet the unbiased solver still curtailed). This bias
+/// is small enough that any real constraint (export cap, soft-violation
+/// penalty) still dominates and forces genuine curtailment when needed.
+pub const PV_USE_TIEBREAK_EUR_PER_KWH: f64 = 0.005;
+
+/// Objective term implementing the full-PV-utilization tie-break: a tiny
+/// reward per kWh of `p_pv_used`, for every slot.
+pub fn pv_use_tiebreak_expr(grid: &GridMilpVars, dt_h: &[f64]) -> Expression {
+    let mut expr = Expression::from(0.0);
+    for (t, &v) in grid.p_pv_used.iter().enumerate() {
+        expr += -(PV_USE_TIEBREAK_EUR_PER_KWH * dt_h[t]) * v;
+    }
+    expr
+}
 
 /// Objective term implementing the earliest-start tie-break: a tiny cost per
 /// start-slot index on each `y_shift` binary, for every shiftable load.

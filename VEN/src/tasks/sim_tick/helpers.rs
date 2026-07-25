@@ -45,6 +45,28 @@ pub(crate) fn apply_sim_injections(
     cleared
 }
 
+/// Compose effective capacity: inject grid limits only when no VTN event is active.
+/// Shared by `build_tick_setpoints` and the PV export-limit resolver so both see
+/// the same sim-injected overrides (`grid_import/export_limit_kw`), not just the
+/// raw VTN-driven `OadrCapacityState`.
+pub(crate) fn effective_capacity(
+    capacity_snap: &OadrCapacityState,
+    inject: &SimInjectState,
+) -> OadrCapacityState {
+    let mut effective_capacity = capacity_snap.clone();
+    if effective_capacity.import_limit_event_id.is_none() {
+        if let Some(lim) = inject.grid_import_limit_kw {
+            effective_capacity.import_limit_kw = Some(lim);
+        }
+    }
+    if effective_capacity.export_limit_event_id.is_none() {
+        if let Some(lim) = inject.grid_export_limit_kw {
+            effective_capacity.export_limit_kw = Some(lim);
+        }
+    }
+    effective_capacity
+}
+
 /// PHASE 2: Compose effective capacity and build per-asset setpoints.
 ///
 /// `live_pv_kw`: this tick's PV output, computed *before* physics runs
@@ -63,18 +85,7 @@ pub(crate) fn build_tick_setpoints(
     alert_windows: &[crate::entities::capacity::AlertWindow],
     live_pv_kw: Option<f64>,
 ) -> HashMap<String, f64> {
-    // Compose effective capacity: inject grid limits only when no VTN event active.
-    let mut effective_capacity = capacity_snap.clone();
-    if effective_capacity.import_limit_event_id.is_none() {
-        if let Some(lim) = inject.grid_import_limit_kw {
-            effective_capacity.import_limit_kw = Some(lim);
-        }
-    }
-    if effective_capacity.export_limit_event_id.is_none() {
-        if let Some(lim) = inject.grid_export_limit_kw {
-            effective_capacity.export_limit_kw = Some(lim);
-        }
-    }
+    let effective_capacity = effective_capacity(capacity_snap, inject);
     let mut sp = match plan_snap {
         Some(plan) => controller::dispatcher::build_setpoints(
             plan,

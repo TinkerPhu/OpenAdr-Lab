@@ -80,6 +80,7 @@ mod base_load_noise_tests {
             None,
             None,
             None,
+            None,
         );
 
         let entry = sim
@@ -119,6 +120,7 @@ mod base_load_noise_tests {
             None,
             None,
             None,
+            None,
         );
 
         let entry = sim
@@ -149,6 +151,7 @@ mod base_load_noise_tests {
             None,
             None,
             0.1,
+            None,
             None,
             None,
             None,
@@ -263,6 +266,7 @@ mod unmodelled_load_tests {
             None,
             None,
             0.1,
+            None,
             None,
             None,
             None,

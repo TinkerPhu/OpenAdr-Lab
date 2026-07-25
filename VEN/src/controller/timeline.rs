@@ -503,6 +503,7 @@ mod tests {
             export_cap_kw: 5.0,
             baseline_kw: 0.5,
             pv_forecast_kw: 0.0,
+            pv_used_kw: 0.0,
             surplus_available_kw: 0.0,
             allocations: if asset_id.is_empty() {
                 vec![]
@@ -1016,6 +1017,7 @@ mod tests {
             export_cap_kw: 5.0,
             baseline_kw: 0.5,
             pv_forecast_kw,
+            pv_used_kw: pv_forecast_kw,
             surplus_available_kw: pv_forecast_kw.max(0.0),
             allocations: vec![], // intentionally empty — PV should not appear here
             net_import_kw: (0.5_f64 - pv_forecast_kw).max(0.0),
