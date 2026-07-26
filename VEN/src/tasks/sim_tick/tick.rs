@@ -116,7 +116,7 @@ pub(crate) async fn tick_once(
         );
 
         let effective_capacity_for_pv = super::helpers::effective_capacity(&capacity_snap, &inject);
-        let pv_export_limit_kw = crate::controller::dispatcher::resolve_pv_export_limit_kw(
+        let resolved_pv_export_limit = crate::controller::dispatcher::resolve_pv_export_limit_kw(
             plan_snap.as_ref(),
             &effective_capacity_for_pv,
             now,
@@ -139,7 +139,8 @@ pub(crate) async fn tick_once(
             weather_pv_kw_now,
             inject.heater_emergency_curtail,
             inject.heater_emergency_absorb,
-            pv_export_limit_kw,
+            resolved_pv_export_limit.limit_kw,
+            resolved_pv_export_limit.source,
         );
 
         // PHASE 4 (in-lock): extract snapshots and mutate history/grid/envelope.

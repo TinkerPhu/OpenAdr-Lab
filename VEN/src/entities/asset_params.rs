@@ -1,4 +1,5 @@
 use crate::entities::asset::{ComfortRate, CompletionPolicy};
+use serde::{Deserialize, Serialize};
 
 // ── Battery ─────────────────────────────────────────────────────────────────
 
@@ -111,6 +112,9 @@ impl Default for HeaterParams {
 pub struct PvParams {
     pub id: String,
     pub rated_kw: f64,
+    /// Inverter's true AC output capability (kW); distinct from `rated_kw` (DC panel peak).
+    /// Resolved from profile `inverter_max_kw` at conversion time, defaulting to `rated_kw`.
+    pub inverter_max_kw: f64,
 }
 
 impl Default for PvParams {
@@ -118,6 +122,7 @@ impl Default for PvParams {
         Self {
             id: crate::ids::ASSET_PV.to_string(),
             rated_kw: 5.0,
+            inverter_max_kw: 5.0,
         }
     }
 }
@@ -128,9 +133,34 @@ impl PvParams {
         let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
         if (6.0..=18.0).contains(&hour) {
             let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
-            (angle.sin().max(0.0) * self.rated_kw).max(0.0)
+            (angle.sin().max(0.0) * self.rated_kw)
+                .max(0.0)
+                .min(self.inverter_max_kw)
         } else {
             0.0
+        }
+    }
+}
+
+/// Which source produced the currently-resolved PV export limit. `None` means neither the plan
+/// nor a live capacity source is imposing a limit. On a tie (plan and capacity resolve to the
+/// same limit value), `Plan` wins — see `openspec/changes/pv-curtailment-history/`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum PvCurtailmentSource {
+    #[default]
+    None,
+    Plan,
+    Capacity,
+}
+
+impl PvCurtailmentSource {
+    /// Numeric encoding for the flattened `state_values()` map (which is `HashMap<String, f64>`):
+    /// `0.0` = none, `1.0` = plan, `2.0` = capacity.
+    pub fn as_f64(self) -> f64 {
+        match self {
+            PvCurtailmentSource::None => 0.0,
+            PvCurtailmentSource::Plan => 1.0,
+            PvCurtailmentSource::Capacity => 2.0,
         }
     }
 }

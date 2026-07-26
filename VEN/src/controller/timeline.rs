@@ -305,14 +305,16 @@ pub fn build_asset_timeline(
                 values.insert("import_limit_kw".into(), slot.import_cap_kw);
                 values.insert("export_limit_kw".into(), slot.export_cap_kw);
             } else {
-                // Physical asset: PV uses pv_forecast_kw (negate: generation is export-negative).
+                // Physical asset: PV uses pv_used_kw (negate: generation is export-negative) —
+                // the planner's actual dispatch decision, not the raw forecast; the two differ
+                // exactly when the plan curtails (see pv-export-curtailment/pv-curtailment-history).
                 // Base load uses baseline_kw — non-controllable, so no allocation is ever created.
                 // All other assets use their packet allocation, or 0 kW if absent.
                 // We always emit a point (even 0 kW) so that all assets share the same
                 // set of plan-slot timestamps. Omitting zero-allocation slots causes the
                 // stacked chart to fall back to an exact-match miss → false zero spikes.
                 let power_kw = if asset_id == crate::ids::ASSET_PV {
-                    -slot.pv_forecast_kw
+                    -slot.pv_used_kw
                 } else if asset_id == crate::ids::ASSET_BASE_LOAD {
                     slot.baseline_kw
                 } else {
@@ -323,6 +325,11 @@ pub fn build_asset_timeline(
                         .unwrap_or(0.0)
                 };
                 values.insert("power_kw".into(), power_kw);
+                // Exposed alongside power_kw so the UI can derive "planned curtailment" as
+                // pv_forecast_kw - (-power_kw), the same gap PlanPowerStack.tsx already shows.
+                if asset_id == crate::ids::ASSET_PV {
+                    values.insert("pv_forecast_kw".into(), slot.pv_forecast_kw);
+                }
                 // Derive cost/CO2 rates from the allocation's pre-computed cost_eur / co2_g,
                 // which already account for the PV-surplus vs grid split (see alloc_cost_eur).
                 // PV has no allocation → both rates are 0 (no import cost for generation).
@@ -656,6 +663,7 @@ mod tests {
         let mut plan = empty_plan(now);
         let mut slot = make_slot(60, "", 0.0, now);
         slot.pv_forecast_kw = 4.0;
+        slot.pv_used_kw = 4.0; // no curtailment intended — this test is about cost/co2 rates
         plan.slots.push(slot);
         let result = build_asset_timeline(
             "pv",
@@ -1086,6 +1094,71 @@ mod tests {
         assert!(
             (power_kw - (-5.0)).abs() < 1e-9,
             "expected power_kw = -5.0 (pv export), got {power_kw}"
+        );
+    }
+
+    #[test]
+    fn pv_future_uses_pv_used_kw_when_plan_curtails() {
+        // slot has pv_forecast_kw = 5.0 but the plan curtails to pv_used_kw = 2.0.
+        // power_kw must reflect the planner's actual dispatch decision (-2.0), not the raw
+        // forecast — and pv_forecast_kw must still be exposed so the UI can derive the gap.
+        let now = Utc::now();
+        let known = make_known(&["pv"]);
+        let snap = make_timeline_snap(vec![]);
+
+        let mut slot = make_pv_slot(60, 5.0, now);
+        slot.pv_used_kw = 2.0;
+        let plan = Plan {
+            id: Uuid::new_v4(),
+            created_at: now,
+            trigger: crate::entities::asset::PlanTrigger::Periodic,
+            horizon: crate::entities::plan::PlanningHorizon {
+                start_time: now,
+                end_time: now + Duration::hours(24),
+                step_size_s: 300,
+                num_steps: 288,
+                far_horizon: now + Duration::hours(24),
+                zones: vec![crate::entities::plan::PlanZone {
+                    step_s: 300,
+                    slots: 288,
+                }],
+            },
+            slots: vec![slot],
+            summary: PlanSummary::default(),
+            envelopes: vec![],
+            warnings: vec![],
+            soc_trajectory_kwh: vec![],
+            objective: Default::default(),
+            objective_eur: 0.0,
+            friction_eur: 0.0,
+            cost_breakdown: CostBreakdown::default(),
+            solve_status: crate::entities::plan::SolveStatus::Optimal,
+        };
+
+        let points = build_asset_timeline(
+            "pv",
+            &known,
+            &snap,
+            Some(&plan),
+            now,
+            TimeWindow {
+                hours_back: 0.0,
+                hours_forward: 1.0,
+            },
+        )
+        .expect("pv is a known asset");
+
+        let future: Vec<_> = points.iter().filter(|p| p.ts > now).collect();
+        assert_eq!(future.len(), 1, "expected exactly one future point");
+        let power_kw = future[0].values["power_kw"];
+        assert!(
+            (power_kw - (-2.0)).abs() < 1e-9,
+            "expected power_kw = -2.0 (pv_used_kw, curtailed below forecast), got {power_kw}"
+        );
+        let pv_forecast_kw = future[0].values["pv_forecast_kw"];
+        assert!(
+            (pv_forecast_kw - 5.0).abs() < 1e-9,
+            "pv_forecast_kw must still be exposed so the UI can derive the curtailment gap, got {pv_forecast_kw}"
         );
     }
 

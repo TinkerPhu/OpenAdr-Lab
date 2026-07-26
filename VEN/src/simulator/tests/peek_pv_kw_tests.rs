@@ -4,13 +4,14 @@
 //! test proves peek() and tick() can never silently diverge.
 
 use super::super::*;
-use crate::entities::asset_params::{AssetParams, PvParams};
+use crate::entities::asset_params::{AssetParams, PvCurtailmentSource, PvParams};
 use chrono::TimeZone;
 
 fn pv_state(rated_kw: f64) -> SimState {
     SimState::from_params(&[AssetParams::Pv(PvParams {
         id: crate::ids::ASSET_PV.to_string(),
         rated_kw,
+        inverter_max_kw: rated_kw,
     })])
 }
 
@@ -56,6 +57,7 @@ fn peek_pv_kw_matches_tick_output_for_same_now() {
         None,
         None,
         None,
+        PvCurtailmentSource::None,
     );
 
     let pv_entry = sim
@@ -174,6 +176,7 @@ fn peek_pv_kw_matches_tick_output_with_weather_for_same_now() {
         None,
         None,
         None,
+        PvCurtailmentSource::None,
     );
 
     let pv_entry = sim
@@ -218,6 +221,7 @@ fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
         None,
         None,
         None,
+        PvCurtailmentSource::None,
     );
     let pv_after_tick1 = sim
         .assets
@@ -247,6 +251,7 @@ fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
         None,
         None,
         None,
+        PvCurtailmentSource::None,
     );
     let pv_after_tick2 = sim
         .assets
@@ -288,6 +293,7 @@ fn tick_applies_pv_export_limit_override_to_asset() {
         None,
         None,
         Some(-3.0), // export limit: at most 3 kW export
+        PvCurtailmentSource::None,
     );
     let pv_power = sim
         .assets
@@ -324,6 +330,7 @@ fn tick_clears_pv_export_limit_when_override_is_none() {
         None,
         None,
         Some(-2.0),
+        PvCurtailmentSource::None,
     );
     // Tick 2: no active limit — PV must return to unclamped output.
     sim.tick(
@@ -343,6 +350,7 @@ fn tick_clears_pv_export_limit_when_override_is_none() {
         None,
         None,
         None,
+        PvCurtailmentSource::None,
     );
     let pv_power = sim
         .assets

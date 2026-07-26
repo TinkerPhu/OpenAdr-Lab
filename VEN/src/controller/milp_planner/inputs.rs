@@ -178,17 +178,23 @@ pub(crate) fn build_milp_inputs(
         let pv_kw = if let Some(forced_kw) = pv_forecast_override {
             forced_kw.max(0.0)
         } else if let Some(weather_kw) = weather_pv_kw.and_then(|v| v.get(i)) {
-            weather_kw.max(0.0)
+            let inverter_max_kw = assets
+                .assets
+                .get("pv")
+                .and_then(|s| s.val("inverter_max_kw"))
+                .unwrap_or(f64::INFINITY);
+            weather_kw.max(0.0).min(inverter_max_kw)
         } else if let Some(pv_snap) = assets.assets.get("pv") {
             let natural = pv_natural_irradiance(slot_t);
             let irradiance_offset = pv_snap.val("irradiance_offset").unwrap_or(0.0);
             let pv_alpha = pv_snap.val("pv_alpha").unwrap_or(0.1);
             let rated_kw = pv_snap.val("rated_kw").unwrap_or(0.0);
+            let inverter_max_kw = pv_snap.val("inverter_max_kw").unwrap_or(rated_kw);
             // pv_alpha is "fraction removed per zone-A step (zone_a_step_s)".
             // Exponent is the number of zone-A-equivalent steps ahead.
             let steps_ahead = slot_s as f64 / zone_a_step_s as f64;
             let decayed_offset = irradiance_offset * (1.0 - pv_alpha).powf(steps_ahead);
-            (natural + decayed_offset).clamp(0.0, 1.0) * rated_kw
+            ((natural + decayed_offset).clamp(0.0, 1.0) * rated_kw).min(inverter_max_kw)
         } else {
             pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)
         };

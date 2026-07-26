@@ -1,5 +1,6 @@
 // Simulator tick background task.
 
+mod dispatch_override;
 mod helpers;
 mod publish;
 mod tick;

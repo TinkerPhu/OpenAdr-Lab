@@ -14,6 +14,7 @@
 mod notifications;
 mod schema;
 mod settings;
+mod ticks;
 
 use std::sync::Mutex;
 
@@ -25,9 +26,8 @@ use crate::entities::history::{
     EventReceived, GridSample, LedgerPeriod, PlanSnapshot, ReportSent, TickSample,
 };
 use crate::entities::DomainError;
-use schema::{SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_VERSION};
+use schema::{SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_VERSION};
 
-type TickSampleRow = (i64, String, f64, Option<f64>, Option<f64>);
 type GridSampleRow = (i64, f64, f64, Option<f64>, Option<f64>, Option<f64>);
 
 pub struct SqliteHistoryStore {
@@ -93,6 +93,10 @@ impl SqliteHistoryStore {
             conn.execute_batch(SCHEMA_V4)
                 .map_err(|e| DomainError::StorageError(format!("apply schema v4: {e}")))?;
         }
+        if version < 5 {
+            conn.execute_batch(SCHEMA_V5)
+                .map_err(|e| DomainError::StorageError(format!("apply schema v5: {e}")))?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| DomainError::StorageError(format!("set user_version: {e}")))?;
         Ok(())
@@ -108,30 +112,7 @@ impl SqliteHistoryStore {
 impl HistoryPort for SqliteHistoryStore {
     fn append_tick_samples(&self, rows: &[TickSample]) -> Result<(), DomainError> {
         let mut conn = self.lock()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| DomainError::StorageError(format!("begin tx: {e}")))?;
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT INTO tick_samples (ts, asset_id, power_kw, soc_pct, temperature_c)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                )
-                .map_err(|e| DomainError::StorageError(format!("prepare insert: {e}")))?;
-            for row in rows {
-                stmt.execute(params![
-                    to_unix(row.ts),
-                    row.asset_id,
-                    row.power_kw,
-                    row.soc_pct,
-                    row.temperature_c,
-                ])
-                .map_err(|e| DomainError::StorageError(format!("insert tick sample: {e}")))?;
-            }
-        }
-        tx.commit()
-            .map_err(|e| DomainError::StorageError(format!("commit tx: {e}")))?;
-        Ok(())
+        ticks::append(&mut conn, rows)
     }
 
     fn append_grid_sample(&self, row: &GridSample) -> Result<(), DomainError> {
@@ -227,52 +208,7 @@ impl HistoryPort for SqliteHistoryStore {
         asset_id: Option<&str>,
     ) -> Result<Vec<TickSample>, DomainError> {
         let conn = self.lock()?;
-        let (sql, asset_filter): (&str, Option<&str>) = match asset_id {
-            Some(id) => (
-                "SELECT ts, asset_id, power_kw, soc_pct, temperature_c FROM tick_samples
-                 WHERE ts >= ?1 AND ts < ?2 AND asset_id = ?3 ORDER BY ts ASC",
-                Some(id),
-            ),
-            None => (
-                "SELECT ts, asset_id, power_kw, soc_pct, temperature_c FROM tick_samples
-                 WHERE ts >= ?1 AND ts < ?2 ORDER BY ts ASC",
-                None,
-            ),
-        };
-        let mut stmt = conn
-            .prepare(sql)
-            .map_err(|e| DomainError::StorageError(format!("prepare query_ticks: {e}")))?;
-        let map_row = |row: &rusqlite::Row| -> rusqlite::Result<TickSampleRow> {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-            ))
-        };
-        let raw: Vec<_> = if let Some(id) = asset_filter {
-            stmt.query_map(params![to_unix(from), to_unix(to), id], map_row)
-        } else {
-            stmt.query_map(params![to_unix(from), to_unix(to)], map_row)
-        }
-        .map_err(|e| DomainError::StorageError(format!("query_ticks: {e}")))?
-        .collect::<Result<_, _>>()
-        .map_err(|e| DomainError::StorageError(format!("read query_ticks rows: {e}")))?;
-
-        raw.into_iter()
-            .map(
-                |(ts, asset_id, power_kw, soc_pct, temperature_c)| -> Result<TickSample, DomainError> {
-                    Ok(TickSample {
-                        ts: from_unix(ts)?,
-                        asset_id,
-                        power_kw,
-                        soc_pct,
-                        temperature_c,
-                    })
-                },
-            )
-            .collect()
+        ticks::query(&conn, from, to, asset_id)
     }
 
     fn query_grid(
@@ -569,6 +505,8 @@ mod tests {
                 power_kw: 3.5,
                 soc_pct: Some(42.0),
                 temperature_c: None,
+                export_limit_kw: None,
+                curtailment_source: None,
             },
             TickSample {
                 ts: ts(1060),
@@ -576,6 +514,8 @@ mod tests {
                 power_kw: 1.2,
                 soc_pct: None,
                 temperature_c: Some(55.0),
+                export_limit_kw: None,
+                curtailment_source: None,
             },
         ];
         store.append_tick_samples(&rows).unwrap();
@@ -595,6 +535,8 @@ mod tests {
                     power_kw: 3.5,
                     soc_pct: None,
                     temperature_c: None,
+                    export_limit_kw: None,
+                    curtailment_source: None,
                 },
                 TickSample {
                     ts: ts(1000),
@@ -602,6 +544,8 @@ mod tests {
                     power_kw: 1.2,
                     soc_pct: None,
                     temperature_c: None,
+                    export_limit_kw: None,
+                    curtailment_source: None,
                 },
             ])
             .unwrap();
@@ -696,6 +640,8 @@ mod tests {
                     power_kw: 1.0,
                     soc_pct: None,
                     temperature_c: None,
+                    export_limit_kw: None,
+                    curtailment_source: None,
                 },
                 TickSample {
                     ts: ts(10_000),
@@ -703,6 +649,8 @@ mod tests {
                     power_kw: 2.0,
                     soc_pct: None,
                     temperature_c: None,
+                    export_limit_kw: None,
+                    curtailment_source: None,
                 },
             ])
             .unwrap();
@@ -738,6 +686,8 @@ mod tests {
                 power_kw: 1.0,
                 soc_pct: None,
                 temperature_c: None,
+                export_limit_kw: None,
+                curtailment_source: None,
             }])
             .unwrap();
         let deleted = store.prune_before(ts(100)).unwrap();
@@ -754,6 +704,8 @@ mod tests {
                 power_kw: 1.0,
                 soc_pct: None,
                 temperature_c: None,
+                export_limit_kw: None,
+                curtailment_source: None,
             }])
             .unwrap();
         let rows = store.query_ticks(ts(0), ts(1000), None).unwrap();

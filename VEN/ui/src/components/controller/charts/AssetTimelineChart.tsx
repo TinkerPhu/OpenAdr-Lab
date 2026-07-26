@@ -24,10 +24,100 @@ interface AssetTimelineChartProps {
   hoursForward?: number;
   stateKey?: "soc" | "temp_c";
   zones?: ZoneDef[];
+  /** PV only: shade curtailment bands derived from `values` (export_limit_kw,
+   * curtailment_source, inverter_max_kw for past points; pv_forecast_kw for future points).
+   * See openspec/changes/pv-curtailment-history/. */
+  pvCurtailment?: boolean;
 }
 
 function formatTs(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+const CURTAILMENT_EPS_KW = 0.05;
+
+type CurtailmentKind = "hardware" | "planned" | "unplanned";
+
+interface CurtailmentZone {
+  x1: number;
+  x2: number;
+  kind: CurtailmentKind;
+}
+
+/** Classify one point's curtailment state from its `values` map. `null` = no shading.
+ *
+ * Past points carry `export_limit_kw` (the commanded limit, present only when a limit was
+ * active), `curtailment_source` (0=none, 1=plan, 2=capacity — only meaningful alongside
+ * export_limit_kw), and `inverter_max_kw` (the static hardware ceiling). Future (plan) points
+ * instead carry `pv_forecast_kw` next to `power_kw` — the plan's forecast is already clamped to
+ * `inverter_max_kw` at solve time, so any gap there is always a planned choice, never a hardware
+ * ceiling to distinguish separately.
+ */
+function classifyPvPoint(values: Record<string, number> | null | undefined): CurtailmentKind | null {
+  const powerKw = values?.["power_kw"];
+  if (powerKw == null) return null;
+
+  const pvForecastKw = values?.["pv_forecast_kw"];
+  if (pvForecastKw != null) {
+    // Future (plan) point.
+    return pvForecastKw - -powerKw > CURTAILMENT_EPS_KW ? "planned" : null;
+  }
+
+  // Past (history) point.
+  const exportLimitKw = values?.["export_limit_kw"];
+  const inverterMaxKw = values?.["inverter_max_kw"];
+  if (
+    exportLimitKw != null &&
+    Math.abs(powerKw - exportLimitKw) < CURTAILMENT_EPS_KW &&
+    (inverterMaxKw == null || Math.abs(exportLimitKw) < inverterMaxKw - CURTAILMENT_EPS_KW)
+  ) {
+    return values?.["curtailment_source"] === 2 ? "unplanned" : "planned";
+  }
+  if (inverterMaxKw != null && Math.abs(-powerKw - inverterMaxKw) < CURTAILMENT_EPS_KW) {
+    return "hardware";
+  }
+  return null;
+}
+
+const CURTAILMENT_COLORS: Record<CurtailmentKind, string> = {
+  hardware: "rgba(120,120,120,0.15)",
+  planned: "rgba(230,160,20,0.18)",
+  unplanned: "rgba(210,30,30,0.22)",
+};
+
+/** Derive contiguous shaded bands from per-point curtailment classification. Each band spans
+ * from its first point's ts to the next point's ts (or, for the final run, one extra point-gap
+ * beyond the last ts so the band remains visible). */
+function buildCurtailmentZones(data: AssetTimelinePoint[]): CurtailmentZone[] {
+  const zones: CurtailmentZone[] = [];
+  let runStart: number | null = null;
+  let runKind: CurtailmentKind | null = null;
+
+  const closeRun = (endTs: number) => {
+    if (runStart != null && runKind != null) {
+      zones.push({ x1: runStart, x2: endTs, kind: runKind });
+    }
+    runStart = null;
+    runKind = null;
+  };
+
+  for (let i = 0; i < data.length; i++) {
+    const kind = classifyPvPoint(data[i].values);
+    if (kind !== runKind) {
+      closeRun(data[i].ts);
+      if (kind) {
+        runStart = data[i].ts;
+        runKind = kind;
+      }
+    }
+  }
+  if (runStart != null && runKind != null) {
+    const lastTs = data[data.length - 1]?.ts ?? runStart;
+    const prevTs = data.length > 1 ? data[data.length - 2].ts : runStart;
+    const step = Math.max(lastTs - prevTs, 1);
+    closeRun(lastTs + step);
+  }
+  return zones;
 }
 
 export function AssetTimelineChart({
@@ -38,6 +128,7 @@ export function AssetTimelineChart({
   hoursForward = 1.0,
   stateKey,
   zones,
+  pvCurtailment,
 }: AssetTimelineChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes.
   const tMin = nowMs - hoursBack * 3_600_000;
@@ -70,6 +161,8 @@ export function AssetTimelineChart({
     chartData.map((p) => p.values?.["co2_rate_g_h"] ?? null),
     MIN_CO2_RATE_SPAN_G_H
   );
+
+  const curtailmentZones = pvCurtailment ? buildCurtailmentZones(chartData) : [];
 
   return (
     <ResponsiveContainer width="100%" height={CELL_CHART_HEIGHT}>
@@ -190,6 +283,18 @@ export function AssetTimelineChart({
             x1={new Date(z.from).getTime()}
             x2={new Date(z.to).getTime()}
             fill={`rgba(0,0,0,${0.04 * (i + 1)})`}
+            ifOverflow="hidden"
+          />
+        ))}
+
+        {/* PV curtailment shading: hardware-capped (neutral), planned (amber), unplanned (red) */}
+        {curtailmentZones.map((z, i) => (
+          <ReferenceArea
+            key={`curtail-${i}-${z.x1}`}
+            yAxisId="power"
+            x1={z.x1}
+            x2={z.x2}
+            fill={CURTAILMENT_COLORS[z.kind]}
             ifOverflow="hidden"
           />
         ))}

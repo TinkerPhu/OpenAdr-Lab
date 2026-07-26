@@ -1,7 +1,7 @@
 //! Versioned DDL for the history SQLite store, applied stepwise via
 //! `PRAGMA user_version` in `history_store::migrate`.
 
-pub(super) const SCHEMA_VERSION: i64 = 4;
+pub(super) const SCHEMA_VERSION: i64 = 5;
 
 pub(super) const SCHEMA_V1: &str = "
 CREATE TABLE tick_samples (
@@ -93,4 +93,14 @@ ALTER TABLE notifications ADD COLUMN count INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE notifications ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0;
 UPDATE notifications SET last_seen_at = created_at WHERE last_seen_at = 0;
 CREATE INDEX idx_notifications_last_seen ON notifications(last_seen_at);
+";
+
+/// pv-curtailment-history: records the applied PV export limit and its source (plan vs. live
+/// capacity) per tick sample. Both nullable — `NULL` means no limit was commanded during the
+/// window, not a sentinel value. No `ADD COLUMN ... DEFAULT` needed since both are nullable with
+/// no non-null default required (existing rows simply read back as `NULL`, correctly meaning
+/// "unknown/not recorded before this migration", not "no limit").
+pub(super) const SCHEMA_V5: &str = "
+ALTER TABLE tick_samples ADD COLUMN export_limit_kw REAL;
+ALTER TABLE tick_samples ADD COLUMN curtailment_source TEXT;
 ";

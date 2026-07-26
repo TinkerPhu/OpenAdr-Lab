@@ -42,6 +42,7 @@ export function AssetMidSection({
           hoursForward={hoursForward}
           stateKey={stateKey}
           zones={zones}
+          pvCurtailment={assetId === "pv"}
         />
       </div>
     </Box>

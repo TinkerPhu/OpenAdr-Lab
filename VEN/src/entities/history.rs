@@ -15,6 +15,17 @@ pub struct TickSample {
     pub power_kw: f64,
     pub soc_pct: Option<f64>,
     pub temperature_c: Option<f64>,
+    /// PV export limit active at some point in this window (kW, negative = export ceiling).
+    /// `None` when no source commanded any limit during the whole window — never a sentinel
+    /// value. Within a window, the highest-priority source (capacity > plan) determines both
+    /// this and `curtailment_source`, so a brief unplanned event is never masked by surrounding
+    /// plan-sourced or unlimited samples. See `openspec/changes/pv-curtailment-history/`.
+    #[serde(default)]
+    pub export_limit_kw: Option<f64>,
+    /// Source of `export_limit_kw`: `"plan"` or `"capacity"`. `None` iff `export_limit_kw` is
+    /// `None`.
+    #[serde(default)]
+    pub curtailment_source: Option<String>,
 }
 
 /// Site-level grid exchange and prevailing tariff over a 1-minute downsample window.
