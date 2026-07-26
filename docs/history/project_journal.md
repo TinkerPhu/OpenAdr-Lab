@@ -6661,3 +6661,73 @@ points instead of `pv_used_kw`.
   established `notifications.rs`/`pv_smoothing.rs` split pattern). VEN UI:
   415/415 tests green (+8 new curtailment-shading tests), `npm run build`
   clean, ESLint clean.
+
+### E2E verify+deploy for `pv-curtailment-history`: a stale-image trap and an over-broad test assertion (2026-07-26)
+
+Deploying the feature to Pi4 caught a genuine production bug on its own (see
+`717ca5c`: `PvInverter.inverter_max_kw`/`curtailment_source` lacked
+`#[serde(default)]`, so `simulator::persist::load()` failed to deserialize
+the *whole* persisted `SimState` blob — not just the PV part — on any
+pre-existing sim-state file). Fixed and redeployed before running the full
+suite.
+
+The full E2E run then surfaced one real failure:
+`ven_heater_tank.feature:12` ("Plan uses only mid-tier heater near T_max")
+asserted "no full-tier heater allocation in the first 12 slots" after
+injecting the tank near `T_max`. First hypothesis (matching the file's own
+documented "Pi4-marginal" precedent for other scenarios already bumped from
+150s→300s) was a plain host-load timeout on the polling step — bumped it the
+same way. That fix alone didn't hold: a second failure showed the poll
+*did* get a fresh plan, but the assertion itself failed — slot 11 had a
+genuine, non-error full-power allocation.
+
+Direct reproduction against the running Pi4 test stack (manual `/sim/inject`
++ `/plan` fetch, bypassing behave) confirmed this wasn't a bug: `E[t] ≤
+E_max` is enforced uniformly for every slot in `heater_milp.rs` (unchanged
+since before any of this session's work), and the tank legitimately cools
+during idle/mid-tier slots, reopening headroom for a later full-power burst
+— that's correct trajectory-model behavior, not overheating. *Which* slot
+gets the burst depends on solver tie-breaking, and this session's
+`PV_USE_TIEBREAK_EUR_PER_KWH` term (added unconditionally to the global MILP
+objective in `pv-export-curtailment`) nudges that tie-breaking on every
+solve, including ones with no PV curtailment in play at all. The test's
+"no full-tier anywhere in a wide fixed window" assertion was really testing
+one specific tie-break outcome, not a real invariant — the only slot where
+headroom is *provably* too tight for full power is slot 0. Narrowed the
+assertion to 1 slot (with the reasoning recorded in the feature file itself)
+after confirming with the user, then verified clean.
+
+Two flaky-looking failures on a later full-suite rerun (`ven_alerts.feature`
+ALERT_GRID_EMERGENCY, `ven_device_sessions.feature` EV allocation — both
+timing out at 300s) turned up under Pi4 load of 7-8 (this box is shared;
+`uptime`/`ps aux --sort=-%cpu` showed 3+ concurrent users' `ven-app`
+processes). Reran just those three feature files in isolation once load
+dropped to ~4 and all 13 scenarios passed cleanly — confirming host
+contention, not regressions. Per the "don't distinguish pre-existing vs.
+new, investigate" rule, the isolation rerun was the actual investigation,
+not an excuse to skip it.
+
+**Key learnings**
+
+- `docker compose run <service>` (no `--build`) silently reuses whatever
+  image was last built — including a stale `COPY`'d test-fixture/step file
+  baked in from before a fix. Burned two verification cycles (retry2,
+  retry3) before noticing the container's own behavior hadn't changed at
+  all after scp'ing a fix to the host filesystem. Always pass `--build`
+  when verifying a fix to files that get `COPY`'d into a Dockerfile-built
+  image — a bind-mounted volume this is not.
+- `docker compose run ... <specific feature files>` don't scope the
+  isolated pass in `entrypoint.sh` — it hardcodes `features/isolated/ "$@"`,
+  so positional args meant for the main pass get appended there too,
+  silently re-running the same scenarios a second time in the same
+  container. Harmless (just wasted time) but worth knowing before reading
+  too much into a container still "running" after its logged summary
+  looks complete.
+- An assertion window that "happens to pass" isn't the same as an
+  invariant. When a test encodes "and it doesn't do X anywhere in this
+  wide window," ask whether X is truly infeasible there or just
+  historically un-chosen — the latter breaks the moment anything nudges
+  solver tie-breaking, even an unrelated, tiny, always-on objective term.
+- Full suites green: E2E (`docker compose run --build --rm test-runner`)
+  and resilience (`--tags=@resilience`), both via `run_all_tests.sh`-style
+  invocation on Pi4.

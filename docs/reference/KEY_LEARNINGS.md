@@ -623,3 +623,29 @@ outes/sim.rs causes a T1+T2 double-solve race:
   existing `pv_smoothing.rs`/`notifications.rs` split pattern (free
   functions taking `&Connection`/`&mut Connection`, delegated to from the
   trait impl).
+- **`docker compose run <service>` without `--build` silently reuses the
+  last-built image**, including stale test fixtures/step files `COPY`'d in
+  at build time — it is not a bind mount. Two verification cycles wasted
+  scp'ing a fix to the Pi4 host filesystem and rerunning, without noticing
+  the container's behavior hadn't changed at all. Always pass `--build`
+  when verifying a fix to Dockerfile-`COPY`'d files.
+- **An E2E assertion that "happens to pass" isn't the same as an
+  invariant.** `ven_heater_tank.feature`'s "no full-tier heater allocation
+  anywhere in the first 12 slots near T_max" looked like it tested the
+  trajectory model's overheating guard, but `E[t] ≤ E_max` is enforced for
+  *every* slot unconditionally — the tank legitimately cools during
+  idle/mid-tier slots and reopens headroom for a later full-power burst,
+  which is correct behavior, not a bug. Only slot 0 is provably
+  headroom-constrained; which later slot (if any) gets a burst depends on
+  MILP solver tie-breaking, and this session's own always-on
+  `PV_USE_TIEBREAK_EUR_PER_KWH` objective term nudged that tie-breaking
+  even for a scenario with no PV curtailment involved at all. Confirmed via
+  direct manual repro (`/sim/inject` + `/plan` fetch, bypassing behave)
+  before narrowing the assertion — verify a suspected over-broad assertion
+  against real solver output, don't just guess and weaken it.
+- Pi4 is shared with other active sessions; host load spikes to 7-8 are
+  real and cause genuine timeouts on scenarios that are otherwise correct.
+  Before concluding a timeout is a regression, check `uptime`/`ps aux
+  --sort=-%cpu` for concurrent load, and rerun the specific failing
+  scenario(s) in isolation once load drops — don't rerun the entire ~45min
+  suite repeatedly hoping for a quiet window.
