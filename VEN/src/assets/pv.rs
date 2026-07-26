@@ -8,6 +8,10 @@ use super::{
 use crate::common::{Interpolation, TimeSeries};
 use crate::entities::asset_params::{PvCurtailmentSource, PvParams};
 
+fn f64_infinity() -> f64 {
+    f64::INFINITY
+}
+
 /// PV Inverter config. Generates power (export = negative).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PvInverter {
@@ -16,12 +20,20 @@ pub struct PvInverter {
     /// DC potential is clamped to this before any commanded `export_limit_kw` — see
     /// `openspec/changes/pv-curtailment-history/`. Defaults to `rated_kw` (no hardware ceiling
     /// below panel peak).
+    ///
+    /// `#[serde(default)]`: `PvInverter` is part of the persisted `sim_state.json` blob, and
+    /// `simulator::persist::load_with_params` always overwrites `asset_configs` from fresh
+    /// profile params after a successful load — so the deserialized value here is never actually
+    /// used, but a missing field must not fail the *whole* state file's deserialization (which
+    /// would otherwise also lose unrelated persisted runtime state — SoC, temperature, etc.).
+    #[serde(default = "f64_infinity")]
     pub inverter_max_kw: f64,
     /// Active export limit in kW (≤ 0); None = no curtailment limit.
     pub export_limit_kw: Option<f64>,
     /// Which source produced `export_limit_kw` (plan, live capacity/VTN, or neither). Set each
     /// tick alongside `export_limit_kw`, copied into `PvState` by `step_inner` for accurate
-    /// historical reconstruction.
+    /// historical reconstruction. `#[serde(default)]`: see `inverter_max_kw`'s doc comment.
+    #[serde(default)]
     pub curtailment_source: PvCurtailmentSource,
     /// [0.0, 1.0]; set each tick by sim (natural + offset, clamped). NOT from YAML.
     pub irradiance: f64,
@@ -930,5 +942,37 @@ mod tests {
                 cap.max_export_kw
             );
         }
+    }
+
+    #[test]
+    fn pv_inverter_deserializes_from_json_missing_new_fields() {
+        // Regression: a PvInverter persisted before this change (in sim_state.json,
+        // as part of SimState::asset_configs) lacks `inverter_max_kw` and
+        // `curtailment_source`. `simulator::persist::load()` deserializes the whole
+        // SimState in one shot and only discards/rebuilds asset_configs afterward —
+        // a missing-field error here fails that entire deserialize, losing unrelated
+        // persisted runtime state (SoC, temperature) that had nothing to do with PV.
+        let json = r#"{
+            "rated_kw": 5.0,
+            "export_limit_kw": null,
+            "irradiance": 0.5,
+            "irradiance_offset": 0.0,
+            "pv_alpha": 0.1,
+            "weather_power_kw": null
+        }"#;
+        let pv: PvInverter = serde_json::from_str(json).expect(
+            "PvInverter must deserialize from a payload missing inverter_max_kw/curtailment_source",
+        );
+        assert_eq!(pv.inverter_max_kw, f64::INFINITY);
+        assert_eq!(pv.curtailment_source, PvCurtailmentSource::None);
+    }
+
+    #[test]
+    fn pv_state_deserializes_from_json_missing_new_fields() {
+        let json = r#"{ "actual_power_kw": -2.0 }"#;
+        let state: PvState = serde_json::from_str(json)
+            .expect("PvState must deserialize from a payload missing the new curtailment fields");
+        assert_eq!(state.export_limit_kw, None);
+        assert_eq!(state.curtailment_source, PvCurtailmentSource::None);
     }
 }
