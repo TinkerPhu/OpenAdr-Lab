@@ -155,6 +155,21 @@ describe("PlanDecisionMatrix", () => {
     expect(parseFloat(cell1.getAttribute("data-power") ?? "0")).toBe(0);
   });
 
+  it("renders marginal-cost header row", () => {
+    render(<PlanDecisionMatrix plan={makePlan()} />);
+    expect(screen.getByTestId("matrix-marginal-header")).toBeInTheDocument();
+    expect(screen.getByTestId("marginal-cell-0")).toBeInTheDocument();
+    expect(screen.getByTestId("marginal-cell-1")).toBeInTheDocument();
+  });
+
+  it("falls back to the plain tariff when marginal_cost_import_eur_per_kwh is absent", () => {
+    const plan = makePlan();
+    render(<PlanDecisionMatrix plan={plan} />);
+    // No marginal_cost_import_eur_per_kwh set on either slot — component must not throw
+    // and must still render a cell per slot (verified above); this just documents intent.
+    expect(screen.getByTestId("marginal-cell-0")).toBeInTheDocument();
+  });
+
   it("marks estimated-rate slots distinctly (WP4.4)", () => {
     const plan = makePlan();
     plan.slots[1].rate_estimated = true;

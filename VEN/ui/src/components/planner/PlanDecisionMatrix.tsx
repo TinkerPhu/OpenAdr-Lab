@@ -116,6 +116,14 @@ export function PlanDecisionMatrix({ plan }: Props) {
     return [Math.min(...vals), Math.max(...vals)];
   }, [plan, allSlots]);
 
+  // Marginal-cost range for color gradient (separate scale from tariff — the shadow
+  // price can exceed the tariff range when a lever is pinned at a bound, §5.2).
+  const [marginalMin, marginalMax] = useMemo(() => {
+    if (!plan || allSlots.length === 0) return [0, 1];
+    const vals = allSlots.map((s) => s.marginal_cost_import_eur_per_kwh ?? s.import_tariff_eur_kwh);
+    return [Math.min(...vals), Math.max(...vals)];
+  }, [plan, allSlots]);
+
   if (!plan) {
     return (
       <Typography data-testid="matrix-empty" color="text.secondary">
@@ -152,6 +160,10 @@ export function PlanDecisionMatrix({ plan }: Props) {
               {/* Tariff header label */}
               <Box sx={{ height: CELL_H, display: "flex", alignItems: "center" }}>
                 <Typography variant="caption" color="text.secondary" noWrap>Tariff</Typography>
+              </Box>
+              {/* Marginal cost header label */}
+              <Box sx={{ height: CELL_H, display: "flex", alignItems: "center" }}>
+                <Typography variant="caption" color="text.secondary" noWrap>Marginal €</Typography>
               </Box>
               {/* Asset row labels */}
               {assetIds.map((id) => (
@@ -234,6 +246,30 @@ export function PlanDecisionMatrix({ plan }: Props) {
                     />
                   </Tooltip>
                 ))}
+              </Box>
+
+              {/* Marginal-cost row — shadow price on the power-balance constraint (§5.2) */}
+              <Box data-testid="matrix-marginal-header" sx={{ display: "flex" }}>
+                {allSlots.map((slot, ci) => {
+                  const marginal = slot.marginal_cost_import_eur_per_kwh ?? slot.import_tariff_eur_kwh;
+                  return (
+                    <Tooltip
+                      key={ci}
+                      title={`${new Date(slot.start).toLocaleTimeString()} — marginal ${marginal.toFixed(3)} €/kWh (tariff ${slot.import_tariff_eur_kwh.toFixed(3)} €/kWh)`}
+                    >
+                      <Box
+                        data-testid={`marginal-cell-${ci}`}
+                        sx={{
+                          width: CELL_W,
+                          height: CELL_H,
+                          bgcolor: tariffColor(marginal, marginalMin, marginalMax),
+                          flexShrink: 0,
+                          border: "1px solid rgba(0,0,0,0.06)",
+                        }}
+                      />
+                    </Tooltip>
+                  );
+                })}
               </Box>
 
               {/* Asset rows — color by allocation */}

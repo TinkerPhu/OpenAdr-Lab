@@ -57,6 +57,7 @@ pub mod asset_port;
 mod envelopes;
 mod inputs;
 mod results;
+mod solver_duals;
 mod solver_phase1;
 mod solver_phase2;
 mod stale_rates;
@@ -64,6 +65,8 @@ mod types;
 
 use self::inputs::*;
 use self::results::*;
+#[cfg(test)]
+use self::solver_duals::*;
 #[cfg(test)]
 use self::solver_phase1::*;
 use self::solver_phase2::*;
@@ -184,7 +187,7 @@ pub fn run_planner(
         &asset_contexts,
         planner.solver_timeout_s as f64,
     ) {
-        Ok((sol, phase1_cost_eur, friction_eur)) => translate_to_plan(
+        Ok((sol, phase1_cost_eur, friction_eur, marginal_cost_eur_per_kwh)) => translate_to_plan(
             &sol,
             &inputs,
             &p1w,
@@ -200,6 +203,7 @@ pub fn run_planner(
             battery,
             ev,
             heater,
+            &marginal_cost_eur_per_kwh,
         ),
         Err(e) => {
             // BL-25 (WP2.3): construct the reserved PlanInfeasible variant at

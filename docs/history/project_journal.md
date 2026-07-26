@@ -6731,3 +6731,56 @@ not an excuse to skip it.
 - Full suites green: E2E (`docker compose run --build --rm test-runner`)
   and resilience (`--tags=@resilience`), both via `run_all_tests.sh`-style
   invocation on Pi4.
+
+### `SolverPort` marginal-cost/shadow-price extension (openspec `solver-marginal-cost`, 2026-07-26)
+
+Implemented backlog item 1 from `docs/plans/deviation-scenarios-analysis.md` §5.2: a per-slot
+shadow price on the MILP's power-balance constraint, exposed as `marginal_cost_import_eur_per_kwh`
+/ `marginal_cost_export_eur_per_kwh` on `PlanTimeSlot`. Scoped deliberately to *only* this piece —
+the real-time arbiter that would consume it (§5.3, backlog item 2) is the higher-risk piece that's
+failed twice before (§1) and stays out of scope here; this change is a read-only diagnostic that
+doesn't touch any planning decision.
+
+The design called for "fix the winning MILP's binary decisions, re-solve as a pure LP, read the
+dual" — since raw MILP duals aren't meaningful once integers are involved. The first implementation
+attempt did exactly that literally: kept every mode variable declared as `variable().binary()` and
+added an *extra equality constraint* pinning it to the winning value. This compiled and solved
+without error, but returned an all-zero dual vector in every scenario, including ones with an
+obviously non-trivial expected answer. Root cause, confirmed empirically: HiGHS never populates
+row/column duals for a model with *any* integer-flagged column present, regardless of whether that
+column is actually free or pinned to a single value by an extra constraint — "pinned" is not the
+same as "declared continuous" from the solver's point of view. Disabling presolve (the first
+hypothesis) made no difference, which was itself the tell that the bug was at the
+declaration/model-type level, not a presolve-eliminated-row artifact.
+
+The fix: for the dual-LP solve only, declare every erstwhile-binary variable directly as a
+continuous variable with `min == max == winning_value` (a genuinely fixed point, not
+integer-flagged), instead of routing through `AssetMilpContext::declare_vars_into_pool` (which
+always hardcodes `.binary()` for these). This meant re-declaring each asset's variables from
+`MilpInputs`' own scalar fields (the same source `build_milp_inputs` used originally) rather than
+reusing the trait's declare step — but the *same* `constraints()`/`objective()` trait methods still
+apply unchanged, since `good_lp::Variable` is just an opaque id that those methods don't care how
+was declared. New file: `VEN/src/controller/milp_planner/solver_duals.rs`.
+
+Validated against two hand-derived-by-KKT scenarios rather than guessing at expected values: (1) a
+scenario with nothing binding, where the dual should collapse to exactly the plain tariff coefficient
+— confirmed; (2) an attempt to prove the dual differs when *some other asset* (a battery) sits at
+its own power bound, which turned out to be the wrong mental model — KKT stationarity only pulls in
+another constraint's dual when the balance row's own variable (`p_imp`) participates in that
+constraint, not merely because some unrelated asset is busy. Redesigned the second test around a
+directly-binding import-violation-penalty scenario instead (base load over the contractual cap,
+non-zero `pen_imp_eur_kwh`) and confirmed the dual matches the hand-derived
+`tariff + w_viol × pen_imp_eur_kwh` exactly.
+
+Wired through `solve_milp_two_phase` (now returns a 4-tuple; `#[allow(clippy::type_complexity)]`
+justified inline) → `translate_to_plan` → `PlanTimeSlot`, with a tariff fallback on any dual-LP
+error so this diagnostic can never fail a planning cycle. VEN UI: added a "Marginal €" heatmap row
+to the Planner Decision Matrix, directly below the existing Tariff row, reusing its color-gradient
+helper — satisfies `ui-transparency` for this newly-derived state. Full VEN Rust pyramid (831 + 1
+architecture test), fmt/clippy/file-size-audit, and VEN UI suite (417/417) all green.
+
+**Key learning**: a HiGHS/good_lp model with any integer-flagged column returns all-zero duals,
+even for columns pinned to a constant via an added equality constraint — "integer-typed but
+effectively fixed" is not equivalent to "declared continuous" for dual availability. Any future
+code that needs LP duals from a MILP by fixing its integer decisions must declare those decisions
+as continuous `[v, v]` variables outright, not add a constraint on top of a binary declaration.

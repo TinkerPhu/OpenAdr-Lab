@@ -930,6 +930,8 @@ mod tests {
             export_tariff_eur_kwh: 0.05,
             co2_g_kwh: 300.0,
             grid_effective_cost: 0.26,
+            marginal_cost_import_eur_per_kwh: 0.2,
+            marginal_cost_export_eur_per_kwh: 0.2,
             rate_estimated: false,
             import_cap_kw: 10.0,
             export_cap_kw: 5.0,

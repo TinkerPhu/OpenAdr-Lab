@@ -223,6 +223,9 @@ export type PlanTimeSlot = {
   rate_estimated?: boolean;
   export_tariff_eur_kwh: number;
   co2_g_kwh: number;
+  /** Shadow price on this slot's power-balance constraint (§5.2, deviation-scenarios-analysis.md). */
+  marginal_cost_import_eur_per_kwh?: number;
+  marginal_cost_export_eur_per_kwh?: number;
   import_cap_kw: number;
   export_cap_kw: number;
   allocations: AssetAllocation[];
