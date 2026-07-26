@@ -6588,3 +6588,76 @@ capacity cap and the plan's own curtailment target.
   regression (the test profile's physical export cap, 10 kW, never binds at
   PV's 5 kW rating, so this change's new curtailment logic cannot engage for
   that scenario). Resilience suite green. Deployed to `ven-1`/`ven-2`/`ven-3`.
+
+### PV Curtailment History & Inverter Capability (openspec/changes/pv-curtailment-history/)
+
+A first draft of "track PV curtailment history" proposed storing a simulator-only
+"potential vs. actual" delta (`curtailed_kw`). Rejected during scoping: a real
+inverter under a curtailment command reports actual output and the commanded
+limit, never "what would have been produced" — persisting a delta as ground
+truth wouldn't generalize past the simulator. Scoping also surfaced a real
+model gap: PV profiles only carried `rated_kw` (installed DC panel peak), with
+no separate inverter AC output capability, so a benign hardware-side ceiling
+(common on deliberately DC/AC-oversized systems) couldn't be told apart from a
+real, externally-imposed limit.
+
+Shipped: `inverter_max_kw` (`PvConfig`/`PvParams`, defaults to `rated_kw` — a
+no-op for every existing profile) is now a physical clamp applied to DC
+potential *before* any commanded export limit, everywhere PV output is
+computed (`step_inner`, `forecast_kw_at`, `irradiance_at`,
+`capability_trajectory`, `build_milp_context`, and both MILP-forecast branches
+in `inputs.rs`). `export_limit_kw` and a `curtailment_source` tag
+(none/plan/capacity) moved from `PvInverter` (live config) onto `PvState`
+(per-tick), fixing a latent bug where a historical reconstruction of a past
+tick reported the *current* limit, not what was active then.
+`resolve_pv_export_limit_kw` now returns which source produced the resolved
+limit, tagged at the moment it's resolved — no plan-snapshot persistence or
+retrospective cross-reference needed for "was this planned." Two new nullable
+columns on `tick_samples` (schema v5) persist the limit and its source, with
+window aggregation prioritizing capacity > plan > none so a brief unplanned
+event is never averaged away by a plan-sourced majority. The Controller page's
+PV timeline chart shades three states (hardware-capped/neutral,
+planned/amber, unplanned/red), reusing the existing `ReferenceArea` zone
+mechanism. Also fixed a leftover inconsistency from `pv-export-curtailment`:
+`controller/timeline.rs`'s PV branch still plotted `pv_forecast_kw` for future
+points instead of `pv_used_kw`.
+
+**Issues & key learnings**
+
+- Scoping caught two design mistakes before any code was written, both from
+  the user pushing back on the first draft: (1) don't persist a modeled
+  delta as if it were a measurement — persist only what's actually knowable
+  in both simulation and on real hardware; (2) "a limit is active" and "a
+  limit is actually reducing output" are different questions, and conflating
+  them (via `rated_kw` instead of a true inverter capability) would have
+  made the whole feature actively wrong for any DC/AC-oversized system.
+- The openspec spec.md itself needed a review pass before implementation:
+  a self-review turned up a missing tie-break scenario, a "binding" concept
+  leaking into the persistence requirement where it didn't belong, no
+  aggregation rule for a categorical field across a downsample window, no
+  scenario for the actual motivating case (limit at/above hardware
+  capacity), no requirement making `inverter_max_kw` live-visible, and a
+  proposal/spec disagreement over the `> 0` validation. All six were
+  concrete, fixable gaps — a spec that "sounds right" can still leave real
+  behavior unconstrained.
+- `run_in_background: true` on a `wsl bash -lc "cargo test ..."` invocation
+  got silently killed mid-compile four times in a row, even after waiting
+  for free host memory each time and dropping to `-j 1`; running the exact
+  same command synchronously (foreground, large timeout) succeeded
+  immediately and — when it ran long enough — the harness auto-backgrounded
+  it without issue. The failure was specific to *manually* requesting
+  backgrounding for this kind of long-running nested-shell command, not to
+  memory or parallelism. Prefer synchronous invocation with a large timeout
+  for WSL cargo commands; let auto-backgrounding take over only if it
+  genuinely runs long.
+- Full local pyramid: 827/827 Rust tests green (+20 new: inverter-capability
+  physics clamps, profile validation, per-tick source tagging including the
+  equal-tightness case, window-aggregation priority, the future-PV
+  `pv_used_kw` fix), `cargo fmt --check` and `cargo clippy --all-targets
+  --all-features -D warnings` clean, file-size audit clean (also fixed two
+  pre-existing overages found by the same audit run —
+  `tasks/sim_tick/helpers.rs` and `history_store/mod.rs` — by extracting
+  `dispatch_override.rs` and `ticks.rs` respectively, following the
+  established `notifications.rs`/`pv_smoothing.rs` split pattern). VEN UI:
+  415/415 tests green (+8 new curtailment-shading tests), `npm run build`
+  clean, ESLint clean.

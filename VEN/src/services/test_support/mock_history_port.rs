@@ -303,6 +303,8 @@ mod tests {
             power_kw: 1.0,
             soc_pct: None,
             temperature_c: None,
+            export_limit_kw: None,
+            curtailment_source: None,
         };
         port.append_tick_samples(std::slice::from_ref(&row))
             .unwrap();
@@ -319,6 +321,8 @@ mod tests {
                 power_kw: 1.0,
                 soc_pct: None,
                 temperature_c: None,
+                export_limit_kw: None,
+                curtailment_source: None,
             },
             TickSample {
                 ts: ts(9999),
@@ -326,6 +330,8 @@ mod tests {
                 power_kw: 2.0,
                 soc_pct: None,
                 temperature_c: None,
+                export_limit_kw: None,
+                curtailment_source: None,
             },
         ])
         .unwrap();
@@ -343,6 +349,8 @@ mod tests {
             power_kw: 1.0,
             soc_pct: None,
             temperature_c: None,
+            export_limit_kw: None,
+            curtailment_source: None,
         }])
         .unwrap();
         port.append_grid_sample(&GridSample {
@@ -369,6 +377,8 @@ mod tests {
             power_kw: 1.0,
             soc_pct: None,
             temperature_c: None,
+            export_limit_kw: None,
+            curtailment_source: None,
         };
         let b = TickSample {
             ts: ts(2),
@@ -376,6 +386,8 @@ mod tests {
             power_kw: 2.0,
             soc_pct: None,
             temperature_c: None,
+            export_limit_kw: None,
+            curtailment_source: None,
         };
         port.append_tick_samples(&[a.clone(), b.clone()]).unwrap();
         assert_eq!(port.appended_ticks(), vec![a, b]);

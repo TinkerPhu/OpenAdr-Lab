@@ -101,6 +101,15 @@ impl Profile {
                         }
                     }
                 }
+                AssetProfile::Pv(c) => {
+                    if let Some(inverter_max_kw) = c.inverter_max_kw {
+                        if inverter_max_kw <= 0.0 {
+                            errors.push(format!(
+                                "pv.inverter_max_kw must be > 0.0, got {inverter_max_kw}"
+                            ));
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -459,6 +468,42 @@ assets:
         let p: Profile = serde_yaml::from_str(yaml).unwrap();
         let errs = p.validate().unwrap_err();
         assert!(errs.iter().any(|e| e.contains("soc_target")));
+    }
+
+    #[test]
+    fn validate_fails_for_non_positive_inverter_max_kw() {
+        let yaml = r#"
+assets:
+  - type: pv
+    id: pv
+    rated_kw: 5.0
+    inverter_max_kw: 0.0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("inverter_max_kw")));
+    }
+
+    #[test]
+    fn validate_passes_when_inverter_max_kw_unset_or_positive() {
+        let yaml = r#"
+assets:
+  - type: pv
+    id: pv
+    rated_kw: 5.0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        assert!(p.validate().is_ok());
+
+        let yaml2 = r#"
+assets:
+  - type: pv
+    id: pv
+    rated_kw: 5.0
+    inverter_max_kw: 4.0
+"#;
+        let p2: Profile = serde_yaml::from_str(yaml2).unwrap();
+        assert!(p2.validate().is_ok());
     }
 
     #[test]

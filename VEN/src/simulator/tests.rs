@@ -33,7 +33,9 @@ mod peek_pv_kw_tests;
 /// `assets::base_load::tests`).
 mod base_load_noise_tests {
     use super::super::*;
-    use crate::entities::asset_params::{ApplianceSpikeParams, AssetParams, BaseLoadParams};
+    use crate::entities::asset_params::{
+        ApplianceSpikeParams, AssetParams, BaseLoadParams, PvCurtailmentSource,
+    };
     use chrono::TimeZone;
 
     /// A single coffee-time spike (matches the values this session's earlier
@@ -81,6 +83,7 @@ mod base_load_noise_tests {
             None,
             None,
             None,
+            PvCurtailmentSource::None,
         );
 
         let entry = sim
@@ -121,6 +124,7 @@ mod base_load_noise_tests {
             None,
             None,
             None,
+            PvCurtailmentSource::None,
         );
 
         let entry = sim
@@ -157,6 +161,7 @@ mod base_load_noise_tests {
             None,
             None,
             None,
+            PvCurtailmentSource::None,
         );
 
         let entry = sim
@@ -239,7 +244,7 @@ mod schema_snapshot_tests {
 /// `site-residual` a non-zero, learnable signal in simulation.
 mod unmodelled_load_tests {
     use super::super::*;
-    use crate::entities::asset_params::{AssetParams, BaseLoadParams};
+    use crate::entities::asset_params::{AssetParams, BaseLoadParams, PvCurtailmentSource};
     use chrono::TimeZone;
 
     fn base_only(baseline_kw: f64) -> SimState {
@@ -272,6 +277,7 @@ mod unmodelled_load_tests {
             None,
             None,
             None,
+            PvCurtailmentSource::None,
         );
     }
 
