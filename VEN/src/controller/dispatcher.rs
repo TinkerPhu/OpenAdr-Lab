@@ -4,6 +4,7 @@
 /// constraints, produce a HashMap<asset_id, kW> that drives the simulator tick.
 /// The plan is the sole authority.
 use crate::controller::SimSnapshot;
+use crate::entities::asset_params::PvCurtailmentSource;
 use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::PlannerObjective;
@@ -105,20 +106,32 @@ pub fn build_setpoints(
     setpoints
 }
 
-/// Resolve the effective PV export limit (kW, negative = export ceiling; `None` = uncurtailed)
-/// applied to `PvInverter.export_limit_kw` every tick, as the more restrictive of:
+/// Result of resolving the effective PV export limit for the current tick.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResolvedPvExportLimit {
+    /// kW, negative = export ceiling; `None` = uncurtailed.
+    pub limit_kw: Option<f64>,
+    /// Which source produced `limit_kw`.
+    pub source: PvCurtailmentSource,
+}
+
+/// Resolve the effective PV export limit applied to `PvInverter.export_limit_kw` every tick, as
+/// the more restrictive of:
 /// - the live capacity state's `export_limit_kw` (VTN `EXPORT_CAPACITY_LIMIT` or sim-inject,
 ///   stored as a positive magnitude), and
 /// - the current plan slot's curtailment target (`pv_used_kw < pv_forecast_kw`).
 ///
 /// Either source can only tighten the limit, never loosen it, so taking the smaller-magnitude
 /// (numerically larger, since both are `<= 0`) value is correct without needing to know which
-/// source is active. See `openspec/changes/pv-export-curtailment/`.
+/// source is active — but which one it *is* is also returned, tagged at this exact moment, so
+/// curtailment can be recorded as planned vs. unplanned without ever reconstructing past plans.
+/// On a tie, the plan wins (see `openspec/changes/pv-curtailment-history/`).
+/// See also `openspec/changes/pv-export-curtailment/`.
 pub fn resolve_pv_export_limit_kw(
     plan: Option<&Plan>,
     capacity: &OadrCapacityState,
     now: DateTime<Utc>,
-) -> Option<f64> {
+) -> ResolvedPvExportLimit {
     let capacity_limit = capacity.export_limit_kw.map(|v| -v.abs());
     let plan_limit = plan.and_then(|p| {
         p.slots
@@ -133,10 +146,32 @@ pub fn resolve_pv_export_limit_kw(
             })
     });
     match (capacity_limit, plan_limit) {
-        (Some(a), Some(b)) => Some(a.max(b)),
-        (Some(a), None) => Some(a),
-        (None, Some(b)) => Some(b),
-        (None, None) => None,
+        (Some(a), Some(b)) => {
+            if a > b {
+                ResolvedPvExportLimit {
+                    limit_kw: Some(a),
+                    source: PvCurtailmentSource::Capacity,
+                }
+            } else {
+                // b >= a: plan is tighter or equal — plan wins ties.
+                ResolvedPvExportLimit {
+                    limit_kw: Some(b),
+                    source: PvCurtailmentSource::Plan,
+                }
+            }
+        }
+        (Some(a), None) => ResolvedPvExportLimit {
+            limit_kw: Some(a),
+            source: PvCurtailmentSource::Capacity,
+        },
+        (None, Some(b)) => ResolvedPvExportLimit {
+            limit_kw: Some(b),
+            source: PvCurtailmentSource::Plan,
+        },
+        (None, None) => ResolvedPvExportLimit {
+            limit_kw: None,
+            source: PvCurtailmentSource::None,
+        },
     }
 }
 
@@ -1196,10 +1231,9 @@ mod tests {
         let now = Utc::now();
         let plan = make_pv_plan(5.0, 5.0, now); // no plan-side curtailment
         let capacity = crate::entities::capacity::OadrCapacityState::default();
-        assert_eq!(
-            resolve_pv_export_limit_kw(Some(&plan), &capacity, now),
-            None
-        );
+        let resolved = resolve_pv_export_limit_kw(Some(&plan), &capacity, now);
+        assert_eq!(resolved.limit_kw, None);
+        assert_eq!(resolved.source, PvCurtailmentSource::None);
     }
 
     #[test]
@@ -1207,11 +1241,12 @@ mod tests {
         let now = Utc::now();
         let plan = make_pv_plan(5.0, 3.0, now); // plan curtails 2 kW
         let capacity = crate::entities::capacity::OadrCapacityState::default();
-        let limit = resolve_pv_export_limit_kw(Some(&plan), &capacity, now);
+        let resolved = resolve_pv_export_limit_kw(Some(&plan), &capacity, now);
         assert!(
-            (limit.unwrap() - (-3.0)).abs() < 1e-9,
-            "plan-driven limit should be -pv_used_kw, got {limit:?}"
+            (resolved.limit_kw.unwrap() - (-3.0)).abs() < 1e-9,
+            "plan-driven limit should be -pv_used_kw, got {resolved:?}"
         );
+        assert_eq!(resolved.source, PvCurtailmentSource::Plan);
     }
 
     #[test]
@@ -1219,11 +1254,12 @@ mod tests {
         let now = Utc::now();
         let plan = make_pv_plan(5.0, 5.0, now); // no plan-side curtailment
         let capacity = capacity_with_export_limit_kw(2.0);
-        let limit = resolve_pv_export_limit_kw(Some(&plan), &capacity, now);
+        let resolved = resolve_pv_export_limit_kw(Some(&plan), &capacity, now);
         assert!(
-            (limit.unwrap() - (-2.0)).abs() < 1e-9,
-            "capacity-driven limit should be -export_limit_kw, got {limit:?}"
+            (resolved.limit_kw.unwrap() - (-2.0)).abs() < 1e-9,
+            "capacity-driven limit should be -export_limit_kw, got {resolved:?}"
         );
+        assert_eq!(resolved.source, PvCurtailmentSource::Capacity);
     }
 
     #[test]
@@ -1232,18 +1268,38 @@ mod tests {
         // Plan wants to curtail to 3 kW; capacity separately caps at 2 kW (tighter).
         let plan = make_pv_plan(5.0, 3.0, now);
         let capacity = capacity_with_export_limit_kw(2.0);
-        let limit = resolve_pv_export_limit_kw(Some(&plan), &capacity, now);
+        let resolved = resolve_pv_export_limit_kw(Some(&plan), &capacity, now);
         assert!(
-            (limit.unwrap() - (-2.0)).abs() < 1e-9,
-            "tighter (capacity) limit must win, got {limit:?}"
+            (resolved.limit_kw.unwrap() - (-2.0)).abs() < 1e-9,
+            "tighter (capacity) limit must win, got {resolved:?}"
         );
+        assert_eq!(resolved.source, PvCurtailmentSource::Capacity);
 
         // Now capacity is looser (4 kW) than the plan's 3 kW target — plan wins.
         let capacity_loose = capacity_with_export_limit_kw(4.0);
-        let limit2 = resolve_pv_export_limit_kw(Some(&plan), &capacity_loose, now);
+        let resolved2 = resolve_pv_export_limit_kw(Some(&plan), &capacity_loose, now);
         assert!(
-            (limit2.unwrap() - (-3.0)).abs() < 1e-9,
-            "tighter (plan) limit must win, got {limit2:?}"
+            (resolved2.limit_kw.unwrap() - (-3.0)).abs() < 1e-9,
+            "tighter (plan) limit must win, got {resolved2:?}"
+        );
+        assert_eq!(resolved2.source, PvCurtailmentSource::Plan);
+    }
+
+    #[test]
+    fn resolve_pv_export_limit_equal_tightness_is_tagged_plan() {
+        let now = Utc::now();
+        // Plan curtails to 3 kW; capacity independently also caps at 3 kW — a tie.
+        let plan = make_pv_plan(5.0, 3.0, now);
+        let capacity = capacity_with_export_limit_kw(3.0);
+        let resolved = resolve_pv_export_limit_kw(Some(&plan), &capacity, now);
+        assert!(
+            (resolved.limit_kw.unwrap() - (-3.0)).abs() < 1e-9,
+            "got {resolved:?}"
+        );
+        assert_eq!(
+            resolved.source,
+            PvCurtailmentSource::Plan,
+            "a tie must be tagged as planned, not unplanned"
         );
     }
 
@@ -1251,10 +1307,11 @@ mod tests {
     fn resolve_pv_export_limit_no_plan_falls_back_to_capacity_only() {
         let now = Utc::now();
         let capacity = capacity_with_export_limit_kw(1.5);
-        let limit = resolve_pv_export_limit_kw(None, &capacity, now);
+        let resolved = resolve_pv_export_limit_kw(None, &capacity, now);
         assert!(
-            (limit.unwrap() - (-1.5)).abs() < 1e-9,
-            "with no plan, capacity limit alone applies, got {limit:?}"
+            (resolved.limit_kw.unwrap() - (-1.5)).abs() < 1e-9,
+            "with no plan, capacity limit alone applies, got {resolved:?}"
         );
+        assert_eq!(resolved.source, PvCurtailmentSource::Capacity);
     }
 }

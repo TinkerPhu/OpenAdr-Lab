@@ -566,3 +566,60 @@ outes/sim.rs causes a T1+T2 double-solve race:
   both call. Lesson: when two code paths both need "the same effective
   value," share the function that computes it — don't let each caller
   reconstruct it from raw inputs.
+
+## PV Curtailment History & Inverter Capability (openspec/changes/pv-curtailment-history/)
+
+- **Don't persist a modeled quantity as if it were a measurement.** A first
+  draft proposed storing `curtailed_kw` (potential vs. actual output). Real
+  inverters under a curtailment command report actual output and the
+  commanded limit — never "what would have been produced," which is a
+  model, not something measurable. Persisting it as ground truth wouldn't
+  have generalized past the simulator. Store only the facts the system
+  actually knows (the limit, its source); derive anything else (e.g.
+  whether a limit is currently binding) at render/query time from those
+  facts.
+- **"A limit is active" and "a limit is actually reducing output" are
+  different questions — conflating them breaks on real hardware.**
+  Checking only whether `export_limit_kw` was set (ignoring the inverter's
+  own AC capability) would have misclassified ordinary DC/AC-oversizing
+  clipping as imposed curtailment. `rated_kw` (DC panel peak) and
+  `inverter_max_kw` (AC output capability) are genuinely different values
+  in real installations; a profile field for one doesn't stand in for the
+  other.
+- **Self-review an openspec spec before implementing it, even a spec you
+  just wrote.** A dedicated review pass on `spec.md` found six real gaps —
+  a missing tie-break scenario, a "binding" concept leaking into a
+  requirement that shouldn't have known about it, no aggregation rule for
+  a categorical field sampled across a time window, no scenario for the
+  actual motivating case, a requirement with no way to satisfy it
+  (`inverter_max_kw` needed live-visibility but nothing required it), and a
+  proposal/spec disagreement over a validation rule. None were wording —
+  each would have let two implementers build different, incompatible
+  behavior from the same document.
+- **`run_in_background: true` on a `wsl bash -lc "cargo test ..."` call
+  can get silently killed mid-compile even with ample free memory and
+  `-j 1`, while the identical command run synchronously (foreground, large
+  timeout) succeeds immediately.** Four consecutive manually-backgrounded
+  attempts died at the same "Compiling ven-app" line regardless of host
+  memory (checked immediately before each: 1.0–2.2 GB free) or WSL's own
+  internal memory (always healthy, 4.8+ GiB free). Running the same command
+  in the foreground with a large timeout — even when it later exceeded the
+  timeout and got auto-backgrounded by the harness — completed cleanly. The
+  failure was specific to *manually requesting* background execution for
+  this class of command, not to system resources. Default to synchronous
+  invocation for WSL cargo commands; only rely on auto-backgrounding when a
+  command genuinely runs long.
+- Adding a new field to a persisted struct (`PvState`, written to
+  `sim_state.json`) needs `#[serde(default)]` on the new fields for
+  backward compatibility with already-persisted state on disk — the same
+  pattern already used for config structs, just not yet needed on a *state*
+  struct before this change.
+- The file-size audit can fail on a file nobody touched in the current
+  change — `tasks/sim_tick/helpers.rs` was already over its 200-line cap
+  from a previous, unrelated feature merge, and `history_store/mod.rs`
+  crossed 500 lines from this change's own two new columns. Per the "fix
+  what the audit reports, don't triage by blame" rule: extracted
+  `dispatch_override.rs` and `ticks.rs` respectively, following the
+  existing `pv_smoothing.rs`/`notifications.rs` split pattern (free
+  functions taking `&Connection`/`&mut Connection`, delegated to from the
+  trait impl).

@@ -134,7 +134,7 @@ Each VEN hosts a physics engine that advances asset states every simulation tick
 | Battery | `assets: - type: battery` | `capacity_kwh`, `max_charge_kw`, `max_discharge_kw`, `round_trip_efficiency`, `min_soc` | `GET /forecast/battery` | `GET /history/battery` |
 | EV | `assets: - type: ev` | `battery_kwh`, `max_charge_kw`, `max_discharge_kw` (0 = charge-only), `soc_target` | `GET /forecast/ev` | `GET /history/ev` |
 | Heater | `assets: - type: heater` | `max_kw`, `thermal_mass_kwh_per_c`, `k_loss_kw_per_c`, `temp_min_c`, `temp_max_c`, `temp_safety_max_c` | `GET /forecast/heater` | `GET /history/heater` |
-| PV | `assets: - type: pv` | `rated_kw`, `peak_hour` (solar noon), `ema_alpha` (smoothing) | `GET /forecast/pv` | `GET /history/pv` |
+| PV | `assets: - type: pv` | `rated_kw` (DC panel peak), `inverter_max_kw` (AC output capability, defaults to `rated_kw`), `peak_hour` (solar noon), `ema_alpha` (smoothing) | `GET /forecast/pv` | `GET /history/pv` |
 | Base load | `assets: - type: base_load` | `baseline_kw` | `GET /forecast/base_load` | `GET /history/base_load` |
 
 **Shared physics between simulation and planning:** Every asset type implements two separate forward-step paths using the same underlying ODE:
@@ -191,6 +191,24 @@ live VTN/sim-inject capacity cap (whichever permits less export) and writes the 
 `PvInverter.export_limit_kw` — this is also the fix for a pre-existing gap where that field was
 never written by any live code path, so VTN `EXPORT_CAPACITY_LIMIT` events had no physical effect
 on simulated PV output until this change.
+
+**Inverter AC capability is a separate ceiling from installed panel peak.** `rated_kw` is the
+installed DC panel peak; `inverter_max_kw` (defaults to `rated_kw`) is the inverter's true AC
+output capability — real installations routinely run an inverter rated below panel peak
+(deliberate DC/AC oversizing). DC potential is clamped to `inverter_max_kw` *before* any commanded
+`export_limit_kw` everywhere PV output is computed (live physics, forecast, MILP input), so a
+commanded limit at or above `inverter_max_kw` has no additional effect — the hardware ceiling
+already governs. `PvState` (not the live `PvInverter` config) carries `export_limit_kw` and a
+`curtailment_source` tag (`none` / `plan` / `capacity` — whichever side of
+`resolve_pv_export_limit_kw`'s tighter-of-two comparison produced the value, tagged at the moment
+it's resolved) so a historical reconstruction of a past tick reports what was actually active
+then, not the current live value. Both are sampled into long-term history
+(`tick_samples.export_limit_kw` / `curtailment_source`, schema v5) — within a 1-minute downsample
+window, a live capacity-sourced event always wins over a plan-sourced or unlimited majority, so a
+brief unplanned curtailment is never averaged away. The Controller page's PV timeline chart shades
+three states: hardware-capped (neutral — the inverter's own ceiling, not a real loss), planned
+imposed curtailment (amber, past and future), and unplanned imposed curtailment (red, past only).
+See `openspec/changes/pv-curtailment-history/`.
 
 > **Reference:** [asset_simulation.md](docs/architecture/asset_simulation.md) · [ven_asset_interface_spec.md](docs/architecture/ven_asset_interface_spec.md)
 
@@ -897,7 +915,7 @@ All endpoints are served by each VEN on its configured port (default: `8211` for
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/history/ticks` | Persisted per-asset-per-minute samples |
+| `GET` | `/history/ticks` | Persisted per-asset-per-minute samples (PV also carries `export_limit_kw`/`curtailment_source` — schema v5) |
 | `GET` | `/history/grid` | Persisted grid meter history |
 | `GET` | `/history/events` | Persisted VTN event history |
 | `GET` | `/history/reports` | Persisted report history |
