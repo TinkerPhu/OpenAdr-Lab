@@ -141,7 +141,7 @@ pub(crate) fn solve_phase1(
     objective += pv_use_tiebreak_expr(&pool.grid, &inputs.dt_h);
 
     let mut model = vars.minimise(&objective).using(highs);
-    model = add_model_constraints(
+    (model, _) = add_model_constraints(
         model,
         inputs,
         &pool,
@@ -164,6 +164,9 @@ pub(crate) fn solve_phase1(
 }
 
 /// Helper: add power-balance and per-asset constraints to the model.
+/// Returns the model plus the per-slot power-balance `ConstraintReference`s
+/// (needed by `solver_duals.rs` to read the shadow price off each row;
+/// unused by the two solve-phase callers, which discard it).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn add_model_constraints<S: SolverModel>(
     mut model: S,
@@ -179,7 +182,8 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
     global: &GlobalMilpInputs,
     asset_contexts: &[Box<dyn AssetMilpContext>],
     n: usize,
-) -> S {
+) -> (S, Vec<good_lp::constraint::ConstraintReference>) {
+    let mut power_balance_refs = Vec::with_capacity(n);
     for t in 0..n {
         let mut shift_kw = Expression::from(0.0);
         for sv in &pool.shiftable {
@@ -212,7 +216,7 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
             .map(|v| (v.p_mid_kw * v.z_heat_mid[t]) + (v.p_full_kw * v.z_heat_full[t]))
             .unwrap_or_else(|| Expression::from(0.0));
 
-        model = model.with(constraint!(
+        let power_balance_ref = model.add_constraint(constraint!(
             p_imp[t] + pool.grid.p_pv_used[t] + bat_dis
                 == inputs.p_base_kw[t]
                     + inputs.p_residual_kw[t]
@@ -222,6 +226,7 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
                     + bat_ch
                     + p_exp[t]
         ));
+        power_balance_refs.push(power_balance_ref);
         model = model.with(constraint!(pool.grid.p_pv_used[t] <= inputs.p_pv_kw[t]));
         model = model.with(constraint!(
             p_imp[t] <= inputs.p_imp_max_phys_kw[t] * u_grid[t]
@@ -256,7 +261,7 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
             model = model.with(c);
         }
     }
-    model
+    (model, power_balance_refs)
 }
 
 /// Extract a `SolveOutput` from a solved `good_lp::Solution`.

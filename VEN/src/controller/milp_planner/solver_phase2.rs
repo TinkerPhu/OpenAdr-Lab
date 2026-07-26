@@ -332,7 +332,7 @@ pub(crate) fn solve_phase2(
     let mut model = vars.minimise(&friction_obj).using(highs);
     model = model.with_initial_solution(warm_start);
     model = model.with(constraint!(phase1_cap_expr <= c_star + epsilon));
-    model = add_model_constraints(
+    (model, _) = add_model_constraints(
         model,
         inputs,
         &pool,
@@ -358,7 +358,12 @@ pub(crate) fn solve_phase2(
 
 /// Lexicographic two-phase wrapper. Phase 1 always runs.
 /// Phase 2 runs when `epsilon > 0`; on Phase 2 failure, Phase 1 solution is returned.
-/// Returns `(solution, phase1_cost_eur, friction_eur)`.
+/// Returns `(solution, phase1_cost_eur, friction_eur, marginal_cost_eur_per_kwh)`.
+/// The marginal-cost vector (§5.2, deviation-scenarios-analysis.md) comes from a second,
+/// binaries-fixed LP solve over the winning solution — see `solver_duals::solve_marginal_costs`.
+/// It's a read-only diagnostic: a failure there degrades to the plain import tariff per slot
+/// rather than failing the whole planning cycle.
+#[allow(clippy::type_complexity)] // 4-tuple documented above: solution, phase1_cost_eur, friction_eur, marginal_cost_eur_per_kwh
 pub(crate) fn solve_milp_two_phase(
     inputs: &MilpInputs,
     p1w: &Phase1Weights,
@@ -366,31 +371,48 @@ pub(crate) fn solve_milp_two_phase(
     epsilon: f64,
     asset_contexts: &[Box<dyn AssetMilpContext>],
     timeout_s: f64,
-) -> Result<(SolveOutput, f64, f64), Box<dyn std::error::Error>> {
+) -> Result<(SolveOutput, f64, f64, Vec<f64>), Box<dyn std::error::Error>> {
     let phase1_sol = solve_phase1(inputs, p1w, asset_contexts, timeout_s)?;
     let c_star = phase1_sol.objective_eur;
-    if epsilon == 0.0 {
-        return Ok((phase1_sol, c_star, 0.0));
-    }
-    tracing::debug!(c_star, epsilon, "Phase 2 starting");
-    match solve_phase2(
+    let (winning_sol, friction_eur) = if epsilon == 0.0 {
+        (phase1_sol, 0.0)
+    } else {
+        tracing::debug!(c_star, epsilon, "Phase 2 starting");
+        match solve_phase2(
+            inputs,
+            p1w,
+            p2w,
+            c_star,
+            epsilon,
+            &phase1_sol,
+            asset_contexts,
+            timeout_s,
+        ) {
+            Ok((sol, friction_eur)) => (sol, friction_eur),
+            Err(e) => {
+                tracing::warn!(
+                    c_star,
+                    epsilon,
+                    "Phase 2 failed (warm-start provided), using Phase 1: {e}"
+                );
+                (phase1_sol, 0.0)
+            }
+        }
+    };
+
+    let marginal_cost_eur_per_kwh = match super::solver_duals::solve_marginal_costs(
         inputs,
         p1w,
-        p2w,
-        c_star,
-        epsilon,
-        &phase1_sol,
         asset_contexts,
+        &winning_sol,
         timeout_s,
     ) {
-        Ok((sol, friction_eur)) => Ok((sol, c_star, friction_eur)),
+        Ok(v) => v,
         Err(e) => {
-            tracing::warn!(
-                c_star,
-                epsilon,
-                "Phase 2 failed (warm-start provided), using Phase 1: {e}"
-            );
-            Ok((phase1_sol, c_star, 0.0))
+            tracing::warn!(error = %e, "marginal-cost dual LP failed, falling back to tariff");
+            inputs.c_imp_eur_kwh.clone()
         }
-    }
+    };
+
+    Ok((winning_sol, c_star, friction_eur, marginal_cost_eur_per_kwh))
 }

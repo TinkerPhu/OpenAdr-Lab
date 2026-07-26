@@ -72,6 +72,8 @@ pub(crate) fn fallback_plan(
                 pv_used_kw: inp.p_pv_kw[t],
                 surplus_available_kw: (inp.p_pv_kw[t] - inp.p_base_kw[t] - inp.p_residual_kw[t])
                     .max(0.0),
+                marginal_cost_import_eur_per_kwh: 0.0,
+                marginal_cost_export_eur_per_kwh: 0.0,
                 allocations: vec![],
                 net_import_kw: 0.0,
                 net_export_kw: 0.0,
@@ -135,6 +137,7 @@ pub(crate) fn translate_to_plan(
     battery_cfg: Option<&BatteryParams>,
     ev_cfg: Option<&EvParams>,
     heat_cfg: Option<&HeaterParams>,
+    marginal_cost_eur_per_kwh: &[f64],
 ) -> Plan {
     let step_s = planner.plan_step_s;
     let n = inputs.n;
@@ -280,6 +283,8 @@ pub(crate) fn translate_to_plan(
             export_tariff_eur_kwh: inputs.c_exp_eur_kwh[t],
             co2_g_kwh: inputs.g_imp_kgco2_kwh[t] * 1000.0,
             grid_effective_cost: inputs.c_imp_eur_kwh[t],
+            marginal_cost_import_eur_per_kwh: marginal_cost_eur_per_kwh[t],
+            marginal_cost_export_eur_per_kwh: marginal_cost_eur_per_kwh[t],
             rate_estimated: inputs.rate_stale[t],
             import_cap_kw: inputs.p_imp_max_cont_kw[t],
             export_cap_kw: inputs.p_exp_max_cont_kw[t],

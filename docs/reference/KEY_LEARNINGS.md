@@ -649,3 +649,29 @@ outes/sim.rs causes a T1+T2 double-solve race:
   --sort=-%cpu` for concurrent load, and rerun the specific failing
   scenario(s) in isolation once load drops — don't rerun the entire ~45min
   suite repeatedly hoping for a quiet window.
+- **HiGHS (via `good_lp`) returns all-zero row/column duals for any model
+  containing an integer-flagged column — even one pinned to a single value
+  via an added equality constraint.** Building the `solver-marginal-cost`
+  dual LP by keeping mode variables `variable().binary()` and adding
+  `constraint!(x == fixed_value)` on top compiled, solved, and silently
+  returned zeros for every dual, in scenarios where the hand-derived
+  answer was clearly non-zero. Disabling presolve didn't fix it either
+  (which was itself the signal the bug was at the declaration/model-type
+  level, not a presolve-eliminated-row artifact). The fix: declare the
+  variable directly as continuous with `min == max == fixed_value` instead
+  — "integer column pinned to a constant" and "continuous column fixed at
+  a constant" are not equivalent for dual availability, even though they
+  describe the same feasible region. Any future code reading LP duals out
+  of a MILP by fixing its integers must declare those decisions as
+  continuous `[v, v]` outright.
+- When validating a solver-derived economic quantity (a shadow
+  price/dual), don't just assert "differs from X" against a scenario
+  picked by intuition — derive the expected value by hand via the LP's
+  KKT stationarity condition first. A "battery pinned at its own power
+  bound" scenario looked like it should move the balance row's dual (per
+  the design doc's worked example), but it doesn't: KKT only pulls another
+  constraint's dual into a variable's own equation when that variable
+  participates in the constraint, and `p_imp` never touches the battery's
+  power-bound row directly. Redesigned the test around a scenario where
+  `p_imp` itself is party to a binding constraint (an import-violation
+  penalty), which matched the hand-derived value exactly on the first try.
