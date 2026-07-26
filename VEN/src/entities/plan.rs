@@ -67,6 +67,18 @@ pub struct PlanTimeSlot {
     pub co2_g_kwh: f64,
     /// = ImportPrice + (CO2Rate × CO2Weight); used for storage arbitrage scoring
     pub grid_effective_cost: f64,
+    /// Shadow price on this slot's power-balance constraint: how much the planner's
+    /// objective would change per extra kWh imported, from a second LP solve with the
+    /// winning MILP's binary decisions fixed (deviation-scenarios-analysis.md §5.2).
+    /// Read-only diagnostic — does not influence any other field on this slot.
+    /// `#[serde(default)]` so plans persisted before this field existed still deserialize.
+    #[serde(default)]
+    pub marginal_cost_import_eur_per_kwh: f64,
+    /// Same shadow price, export side. Currently identical to the import-side value —
+    /// a harmless simplification under cost-minimizing objectives (§5.2) — until a
+    /// self-consumption-style objective needs the two to diverge.
+    #[serde(default)]
+    pub marginal_cost_export_eur_per_kwh: f64,
     /// True if rate was filled by StaleRatePolicy (VTN offline); used for PlanWarning generation
     pub rate_estimated: bool,
     /// Effective import capacity limit (subscription + event limit) (kW)

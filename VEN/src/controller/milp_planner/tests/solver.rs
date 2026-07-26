@@ -718,3 +718,69 @@ fn ctrl_import_malus_zero_when_pv_covers_full_tier() {
         );
     }
 }
+
+// ── Marginal-cost dual LP (§5.2, deviation-scenarios-analysis.md) ────────────
+
+#[test]
+fn marginal_cost_matches_tariff_when_nothing_binding() {
+    // 4 slots, flat tariff, no battery/EV/heater, import cap far above base load —
+    // nothing is ever pinned at a bound, so the shadow price on each slot's
+    // power-balance row should collapse to the plain per-kWh objective coefficient
+    // on p_imp (§5.2 worked example row 1: "nothing else is binding").
+    let n = 4;
+    let inputs = make_solver_inputs(n, 0.5);
+    let contexts = contexts_from_inputs(&inputs);
+    let weights = make_phase1_weights();
+
+    let winning = solve_phase1(&inputs, &weights, &contexts, 60.0).expect("phase1 solve failed");
+    let marginal = solve_marginal_costs(&inputs, &weights, &contexts, &winning, 60.0)
+        .expect("dual LP solve failed");
+
+    assert_eq!(marginal.len(), n);
+    for (t, &m) in marginal.iter().enumerate() {
+        assert!(
+            (m - inputs.c_imp_eur_kwh[t]).abs() < 1e-3,
+            "slot {t}: expected marginal cost ≈ tariff {:.3}, got {:.6}",
+            inputs.c_imp_eur_kwh[t],
+            m
+        );
+    }
+}
+
+#[test]
+fn marginal_cost_reflects_binding_import_violation_penalty() {
+    // 1 slot: base load (10 kW) exceeds the contractual import cap (2 kW), forcing the
+    // solver to use violation slack at cost `pen_imp_eur_kwh`. The extra kWh of import
+    // this slot needs comes at tariff + the violation penalty, not tariff alone — the
+    // clearest, directly-verifiable case where the marginal cost genuinely differs
+    // from the plain tariff (§5.2 worked example row 2's underlying mechanism): the
+    // balance row's own variable (p_imp) is party to another active constraint, so
+    // its KKT stationarity condition pulls in that constraint's dual too. A battery
+    // sitting at its own power bound does *not* by itself move this slot's dual —
+    // only a constraint that p_imp itself participates in does.
+    let n = 1;
+    let mut inputs = make_solver_inputs(n, 10.0);
+    inputs.p_imp_max_cont_kw = vec![2.0; n];
+    inputs.pen_imp_eur_kwh = 1.0;
+
+    let contexts = contexts_from_inputs(&inputs);
+    let weights = make_phase1_weights(); // w_viol = 1.0
+
+    let winning = solve_phase1(&inputs, &weights, &contexts, 60.0).expect("phase1 solve failed");
+    assert!(
+        winning.s_imp_viol_kw[0] > 1.0,
+        "expected the import violation slack to be active, got {:.3}",
+        winning.s_imp_viol_kw[0]
+    );
+
+    let marginal = solve_marginal_costs(&inputs, &weights, &contexts, &winning, 60.0)
+        .expect("dual LP solve failed");
+
+    let expected = inputs.c_imp_eur_kwh[0] + weights.w_viol * inputs.pen_imp_eur_kwh;
+    assert!(
+        (marginal[0] - expected).abs() < 1e-3,
+        "slot 0: expected marginal cost ≈ tariff + violation penalty {:.3}, got {:.6}",
+        expected,
+        marginal[0]
+    );
+}
