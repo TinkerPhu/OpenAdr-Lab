@@ -63,9 +63,14 @@ def step_wait_for_fresh_plan(context):
         except ValueError:
             return False
 
+    # Raised from 150s: this scenario replays a full MILP solve on Pi4 under
+    # shared load and times out intermittently at 150s — the existing
+    # "Pi4-marginal" precedent already bumped ev/uc/heater-allocation waits to
+    # 300s (see step_wait_for_ev_allocation above) for the same reason.
     context.ven_plan = poll_until(
         fetch, is_fresh,
-        timeout=150,
+        timeout=300,
+        interval=5,
         description="VEN /plan recomputed after sim inject",
     )
 
