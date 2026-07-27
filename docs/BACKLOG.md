@@ -23,7 +23,7 @@ leaving it undone.
 | [BL-09](#bl-09-phase-6--penalty-threshold-check) | Avoids demand-charge/peak penalties by rescheduling load ahead of a threshold — real €/kW savings on penalty tariffs | L | Medium — new constraint category + cost comparison, touches Phase 6 slot reallocation |
 | [BL-11](#bl-11-time-weighted-tariff-averaging-for-planner-slot-costing) | Slightly cheaper/more accurate plans for slots that straddle a tariff-rate boundary | S | Low — isolated calc on existing `TimeSeries` |
 | [BL-13](#bl-13-early-firm-up-heuristic) | Fewer noisy replans under flat-rate tariffs (plan feels more stable) | S | Low — statistical check + reclassification |
-| [BL-22](#bl-22-apply_battery_correction_overlay--wire-behind-a-flag-or-re-confirm-abandoned) | Tighter grid-deviation tracking → better self-consumption; logic already built and tested | S | Low — flag-gated, but needs a decision on adoption-gate interaction |
+| [BL-22](#bl-22-apply_battery_correction_overlay--wire-behind-a-flag-or-re-confirm-abandoned----resolved) | ✅ RESOLVED — wired via `controller::arbiter` (`openspec/changes/deviation-arbiter/`) | S | Low — flag-gated, but needs a decision on adoption-gate interaction |
 
 ### VEN user (site operator) — forecast accuracy
 
@@ -119,8 +119,16 @@ leaving it undone.
 
 ---
 
-### BL-22: `apply_battery_correction_overlay` — wire behind a flag, or re-confirm abandoned
+### BL-22: `apply_battery_correction_overlay` — wire behind a flag, or re-confirm abandoned — ✅ RESOLVED
 **Req:** `controller/dispatcher.rs` (`apply_battery_correction_overlay`)
+**Resolution (`openspec/changes/deviation-arbiter/`):** Wired — adapted into `controller::arbiter`'s
+battery lever (metered against a shared cross-lever deviation pool rather than reused verbatim),
+gated behind `deviation_arbiter_enabled` (`AppState`, default `false`, matching this entry's
+"opt-in feature" option). Interaction with the adoption gate: unaffected — the arbiter only
+adjusts within a tick on top of whatever plan is currently active; a new `PlanTrigger::
+ResidualThreshold` hard trigger was added separately for the case where accumulated reactive
+correction should force a full replan (§5.5 of `docs/plans/deviation-scenarios-analysis.md`).
+**Original problem/fix text kept below for history.**
 **Problem:** A finished, unit-tested dead-beat P-controller that reacts to grid deviation by nudging the battery setpoint — but never called from `build_setpoints()`. Deliberately kept unwired pending the wire-or-delete decision below.
 **Fix:** Either wire it behind a profile flag (e.g. `battery.deviation_correction_enabled`) so it's an opt-in feature, or, at a later date, re-confirm with the user that it's genuinely abandoned and delete it then — this entry exists so that decision doesn't get lost.
 **Complexity:** Small to wire behind a flag (the function and its tests already work); the design decision (default on/off, interaction with the adoption gate) is the real work.

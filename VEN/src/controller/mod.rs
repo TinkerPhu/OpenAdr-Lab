@@ -28,6 +28,7 @@ pub use weather_port::{NoopWeatherPort, WeatherForecastPort};
 pub mod openadr_interface;
 
 // ── Planning & dispatch ───────────────────────────────────────────────────────
+pub mod arbiter;
 pub mod dispatcher;
 pub mod envelope;
 pub mod milp_interactions;

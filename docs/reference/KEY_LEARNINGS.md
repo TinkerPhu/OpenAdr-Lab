@@ -694,3 +694,20 @@ outes/sim.rs causes a T1+T2 double-solve race:
   power-bound row directly. Redesigned the test around a scenario where
   `p_imp` itself is party to a binding constraint (an import-violation
   penalty), which matched the hand-derived value exactly on the first try.
+- **A storage asset's "available capacity" has two independent dimensions —
+  power rating and energy headroom — and a capacity check that only tests
+  one will silently offer a lever that's actually unusable.** The
+  deviation arbiter's battery lever (`controller::arbiter`) initially
+  checked only `cap_max_import/export_kw`, which stays nonzero regardless
+  of SoC — so a battery at 100% SoC would still have been offered as a
+  charge lever, violating the arbiter's own "zero-capacity levers must be
+  excluded outright, not deprioritized" rule (§5.3 of
+  `docs/plans/deviation-scenarios-analysis.md`). Caught by a test for the
+  "everything else is exhausted, only the backstop lever remains" case,
+  which only works if the battery is genuinely excluded — not by reasoning
+  about the battery lever in isolation. Fix: also gate on
+  `available_charge/discharge_kwh <= 0.0`. General lesson: when modelling
+  "how much more can this asset do right now," enumerate every resource
+  dimension that can independently reach zero (rate limit, energy/SoC
+  limit, thermal limit, etc.) rather than checking the one that's most
+  obviously relevant to the lever's direction.

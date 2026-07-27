@@ -1,3 +1,4 @@
+mod base_load_preview;
 pub mod energy;
 mod grid_meter;
 pub mod persist;
