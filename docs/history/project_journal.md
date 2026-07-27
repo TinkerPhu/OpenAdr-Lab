@@ -6784,3 +6784,60 @@ even for columns pinned to a constant via an added equality constraint — "inte
 effectively fixed" is not equivalent to "declared continuous" for dual availability. Any future
 code that needs LP duals from a MILP by fixing its integer decisions must declare those decisions
 as continuous `[v, v]` variables outright, not add a constraint on top of a binary declaration.
+
+### Post-merge E2E fixes for `solver-marginal-cost`: heater-forced-power accounting bug + a test-fixture race (2026-07-27)
+
+The Pi4 E2E rerun for `solver-marginal-cost` (above) surfaced a genuine, unrelated bug: the WP3.4
+`DISPATCH_SETPOINT steers net site power to the commanded value` scenario timed out at 60s with
+`grid.net_power_w` exactly `max_kw` (3.0 kW) above the commanded target. Root cause:
+`dispatcher::apply_surplus_ev_overlay` and `tasks::sim_tick::dispatch_override::apply_dispatch_override`
+both trusted the heater's *commanded* setpoint when computing net site power — but the heater's own
+emergency-heat hysteresis (`Heater::step_inner`, fires at `temp_min_c`, holds until
+`temp_min_c + 3°C`) or its overheat safety cutoff can force it to draw `max_kw` (or 0) regardless of
+what setpoint the dispatcher committed for that tick. This is the same "commanded ≠ actual" gap
+`live_pv_kw` already closes for PV — the heater just never got the equivalent treatment because,
+unlike PV, nothing was forcing it away from its setpoint in earlier test runs until this specific
+combination of injected temperature + prior emergency state occurred.
+
+Fixed with a new `predict_heater_forced_kw(snap: &AssetSnapshot) -> Option<f64>` in `dispatcher.rs`,
+replicating `step_inner`'s hysteresis/safety-ceiling predicate against the already-available
+pre-physics snapshot fields (`temp_c`, `max_kw`, `temp_min_c`, `temp_max_c`, `temp_safety_max_c`,
+`emergency_curtail`/`emergency_absorb`, and `power_kw` as the prior tick's actual output) — no new
+"peek" mechanism needed, unlike PV, since none of this state depends on physics not yet run this
+tick. Returns `Some(forced_kw)` when the hysteresis/safety predicate is active, `None` otherwise
+(caller falls back to the commanded setpoint as before). Wired into both call sites the same way
+`live_pv_kw` is. New regression tests reconstruct the exact failure numerically
+(`predict_heater_forced_kw_returns_max_kw_during_emergency_hysteresis`,
+`surplus_overlay_accounts_for_heater_forced_on_not_commanded_setpoint`,
+`test_apply_dispatch_override_accounts_for_heater_forced_on`).
+
+Re-running the full E2E suite after this fix surfaced a *second*, distinct problem: the previously-
+passing `ven_heater_tank.feature` "near-T_max" scenario now timed out at 300s (it had passed in 81s
+before). Investigation (full transcript worth recording since the naive read was wrong): the failing
+step's `poll_until` "wait for the VEN /plan to be recomputed after the sim inject" captures
+`cutoff = datetime.now()` and waits for a plan whose `created_at > cutoff`. But `POST /sim/inject`
+with `heater_temp_c` *synchronously* fires `PlanTrigger::AssetStateChange` inside the request handler
+(`routes/sim.rs`) — and the preceding "Given I inject heater_temp_c" step blocks for up to 15s
+*after* that POST, polling `GET /sim` until the physical tick reflects the injected temperature (an
+already-documented, separate race that step's own docstring already fixed). By the time the *next*
+step captures its cutoff, the AssetStateChange-triggered plan (built almost immediately after the
+POST) is already older than that cutoff — so the test was never actually waiting on its own
+injection's plan at all, only on some unrelated later trigger that might or might not arrive within
+the 300s window. The 81s-vs-timeout variance between runs was exactly this: whether some incidental
+later trigger happened to fire in time, which is load-dependent and non-deterministic — nothing to
+do with the heater dispatcher fix above (confirmed by checking `git log` for a prior, unrelated
+occurrence of the identical symptom, already flagged in that step's own docstring as "observed as a
+load-dependent flake on the near-T_max scenario").
+
+Fixed by capturing the cutoff *before* sending the triggering POST
+(`context.plan_freshness_cutoff` in `phase_a_physics_steps.py`'s `step_given_inject_heater_temp_c`)
+and having `planner_steps.py`'s `step_wait_for_fresh_plan` consume it when present, falling back to
+`datetime.now()` for the (only) other caller pattern. Verified via a targeted rerun of just
+`ven_heater_tank.feature` on Pi4 (`docker compose run --rm test-runner features/ven_heater_tank.feature`) —
+all 6 scenarios pass, including two runs of the previously-flaky scenario in 11.1s and 5.6s. Full
+suite (269 scenarios) subsequently confirmed green with 1 pass 0 fail.
+
+**Key learning**: when a test waits for "a plan/state created after cutoff X," X must be captured
+*before* the action that can cause that creation — not after any preceding step that itself blocks,
+however briefly, since the trigger can fire and resolve entirely within that blocking window. See
+also `docs/reference/KEY_LEARNINGS.md`.
