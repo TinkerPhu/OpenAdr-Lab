@@ -330,6 +330,56 @@ fn battery_startup_penalty_minimises_active_restarts() {
         );
 }
 
+/// Regression: `pv_use_tiebreak_expr` is mirrored into Phase 2's friction
+/// objective (`solver_phase2.rs`) but was missing from `phase1_cap_expr`,
+/// the recomputed Phase-1 cost cap. Phase 1's true `c_star` already includes
+/// the tiebreak's PV-use bonus; without the same term in the cap expression,
+/// even resubmitting Phase 1's own optimal solution through Phase 2 violates
+/// `phase1_cap_expr <= c_star + epsilon` by roughly
+/// `PV_USE_TIEBREAK_EUR_PER_KWH * total_pv_used_kwh` — which dwarfs the
+/// production default epsilon (0.02 €) whenever PV is used at all, making
+/// Phase 2 infeasible on every single solve (observed live on Pi4).
+#[test]
+fn phase2_feasible_with_pv_and_production_epsilon() {
+    let n = 24;
+    let mut inputs = make_solver_inputs(n, 1.0);
+    inputs.p_pv_kw = vec![5.0; n]; // substantial PV so the missing bonus >> epsilon
+    inputs.e_bat_nom_kwh = Some(10.0);
+    inputs.e_bat_init_kwh = Some(5.0);
+    inputs.e_bat_min_kwh = Some(1.0);
+    inputs.e_bat_max_kwh = Some(10.0);
+    inputs.p_bat_ch_max_kw = Some(5.0);
+    inputs.p_bat_dis_max_kw = Some(5.0);
+    inputs.eff_bat_ch = Some(1.0);
+    inputs.eff_bat_dis = Some(1.0);
+
+    let p1w = make_phase1_weights();
+    let mut p2w = make_phase2_weights();
+    p2w.c_bat_startup_eur = 0.01; // production default
+
+    let contexts = contexts_from_inputs(&inputs);
+    let phase1_sol = solve_phase1(&inputs, &p1w, &contexts, 60.0).expect("phase 1 solve failed");
+    let c_star = phase1_sol.objective_eur;
+
+    let result = solve_phase2(
+        &inputs,
+        &p1w,
+        &p2w,
+        c_star,
+        0.02, // production default phase2_epsilon_eur
+        &phase1_sol,
+        &contexts,
+        60.0,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Phase 2 must stay feasible with nontrivial PV usage under the production \
+         epsilon budget; got: {:?}",
+        result.err()
+    );
+}
+
 #[test]
 fn solve_power_balance_holds() {
     // For every step the power balance constraint must hold in the solution.
