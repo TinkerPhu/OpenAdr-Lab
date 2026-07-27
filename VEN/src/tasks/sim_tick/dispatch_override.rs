@@ -39,7 +39,11 @@ pub(crate) fn apply_dispatch_override(
     // tick's value from `SimState::peek_pv_kw`) over the snapshot, which holds
     // last tick's output. Uncontrollable assets carry an f64::MAX sentinel
     // default_setpoint_kw that lands in `sp` — any non-finite or absurd
-    // magnitude falls back to live power.
+    // magnitude falls back to live power. The heater prefers
+    // `predict_heater_forced_kw` over its commanded setpoint whenever its own
+    // thermostat hysteresis/safety cutoff will override that setpoint this tick
+    // (same "commanded ≠ actual" gap PV's live_pv_kw closes — see that function's
+    // doc comment for the E2E failure this fixes).
     let net_without_battery: f64 = sim_snap
         .assets
         .iter()
@@ -48,6 +52,13 @@ pub(crate) fn apply_dispatch_override(
             if id.as_str() == crate::ids::ASSET_PV {
                 if let Some(pv_kw) = live_pv_kw {
                     return pv_kw;
+                }
+            }
+            if id.as_str() == crate::ids::ASSET_HEATER {
+                if let Some(forced_kw) =
+                    crate::controller::dispatcher::predict_heater_forced_kw(snap)
+                {
+                    return forced_kw;
                 }
             }
             sp.get(id)
@@ -197,6 +208,49 @@ mod dispatch_override_tests {
         apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None);
         // net without battery = 0.5 + (-2.0 live PV) = -1.5 -> battery 3.5.
         assert!((sp["battery"] - 3.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_apply_dispatch_override_accounts_for_heater_forced_on() {
+        // Regression: WP3.4 DISPATCH_SETPOINT E2E scenario failed because the
+        // heater was mid-emergency-hysteresis (drawing max_kw physically) while
+        // its commanded setpoint read 0 — the override's net_without_battery
+        // calc trusted the commanded 0 and undershot the battery correction by
+        // exactly the heater's forced power (see
+        // `dispatcher::predict_heater_forced_kw`'s doc comment for the full story).
+        let mut sim = make_sim();
+        let mut heater_values = std::collections::HashMap::new();
+        heater_values.insert("temp_c".to_string(), 20.0);
+        heater_values.insert("max_kw".to_string(), 3.0);
+        heater_values.insert("temp_min_c".to_string(), 18.0);
+        heater_values.insert("temp_max_c".to_string(), 23.0);
+        heater_values.insert("temp_safety_max_c".to_string(), 23.0);
+        sim.assets.insert(
+            "heater".to_string(),
+            AssetSnapshot {
+                power_kw: 3.0, // forced on last tick, still within hysteresis window
+                asset_type: "heater".into(),
+                cap_max_import_kw: 3.0,
+                cap_max_export_kw: 0.0,
+                available_discharge_kwh: None,
+                available_charge_kwh: None,
+                default_setpoint_kw: 0.0,
+                setpoint_kw: 0.0,
+                values: heater_values,
+            },
+        );
+        let mut sp = HashMap::from([
+            ("base_load".to_string(), 0.5),
+            ("heater".to_string(), 0.0), // dispatcher committed 0; hysteresis overrides it
+        ]);
+        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None);
+        // net w/o battery = base 0.5 + forced heater 3.0 = 3.5 -> battery must
+        // discharge 1.5 kW (charge = -1.5) to still hit the 2.0 kW site target.
+        assert!(
+            (sp["battery"] - (-1.5)).abs() < 1e-9,
+            "expected battery -1.5 kW accounting for the heater's forced 3.0 kW, got {}",
+            sp["battery"]
+        );
     }
 
     #[test]

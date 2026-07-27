@@ -195,6 +195,46 @@ pub fn resolve_pv_export_limit_kw(
 /// actual output — a one-tick lag that, since PV moves continuously, produces
 /// a small persistent grid-import residual (found via the phase 3+4 review's
 /// EV rate-chart toggle, 2026-07-12). `None` preserves the pre-fix fallback.
+/// Predicts the heater's actual physical power this tick when its own thermostat
+/// hysteresis forces a value regardless of the commanded setpoint — mirrors the same
+/// "commanded ≠ actual" gap `live_pv_kw` already closes for PV. The emergency-heat
+/// hysteresis (fires at `temp_min_c`, holds until `temp_min_c + 3°C`, see
+/// `Heater::step_inner`) and the overheat safety cutoff both override whatever
+/// setpoint the dispatcher/overlay computed, so any net-power accounting that trusts
+/// the commanded heater setpoint under-counts import while the hysteresis is active
+/// (found via the WP3.4 DISPATCH_SETPOINT E2E scenario: reported `grid.net_power_w`
+/// was 3 kW — exactly `max_kw` — above the commanded target because the heater was
+/// mid-hysteresis and drawing full power while its setpoint read 0).
+/// Returns `None` when the heater is following its commanded setpoint normally, so
+/// callers should use the setpoints-map value as before.
+pub(crate) fn predict_heater_forced_kw(
+    snap: &crate::controller::simulator_port::AssetSnapshot,
+) -> Option<f64> {
+    let max_kw = snap.val("max_kw")?;
+    let temp_c = snap.val("temp_c")?;
+    let temp_min_c = snap.val("temp_min_c")?;
+    let temp_max_c = snap.val("temp_max_c")?;
+    let temp_safety_max_c = snap.val("temp_safety_max_c").unwrap_or(temp_max_c);
+    let curtail = snap.val("emergency_curtail").unwrap_or(0.0) > 0.5;
+    let absorb = snap.val("emergency_absorb").unwrap_or(0.0) > 0.5;
+    const EMERGENCY_HYSTERESIS_C: f64 = 3.0;
+    let emergency_active = !curtail
+        && (temp_c <= temp_min_c
+            || (snap.power_kw >= max_kw && temp_c < temp_min_c + EMERGENCY_HYSTERESIS_C));
+    let safety_ceiling_c = if absorb {
+        temp_safety_max_c
+    } else {
+        temp_max_c
+    };
+    if temp_c >= safety_ceiling_c {
+        Some(0.0)
+    } else if emergency_active {
+        Some(max_kw)
+    } else {
+        None
+    }
+}
+
 pub fn apply_surplus_ev_overlay(
     setpoints: &mut HashMap<String, f64>,
     sim: &SimSnapshot,
@@ -223,6 +263,11 @@ pub fn apply_surplus_ev_overlay(
             if id.as_str() == crate::ids::ASSET_PV {
                 if let Some(pv_kw) = live_pv_kw {
                     return pv_kw;
+                }
+            }
+            if id.as_str() == crate::ids::ASSET_HEATER {
+                if let Some(forced_kw) = predict_heater_forced_kw(snap) {
+                    return forced_kw;
                 }
             }
             let sp = setpoints.get(id).copied().unwrap_or(snap.power_kw);
@@ -558,6 +603,89 @@ mod tests {
         assert!(
             !sp.contains_key("ev"),
             "0.5 kW deficit (from the stale snapshot) must not trigger EV charging"
+        );
+    }
+
+    #[test]
+    fn predict_heater_forced_kw_returns_max_kw_during_emergency_hysteresis() {
+        // Regression (WP3.4 DISPATCH_SETPOINT E2E failure): temp is back inside the
+        // comfort band (20 > temp_min_c 18) but the heater was drawing max_kw last
+        // tick and hasn't yet climbed past temp_min_c + 3°C — hysteresis says it's
+        // still forced on regardless of what setpoint the dispatcher commanded.
+        let mut values = StdHashMap::new();
+        values.insert("temp_c".into(), 20.0);
+        values.insert("max_kw".into(), 3.0);
+        values.insert("temp_min_c".into(), 18.0);
+        values.insert("temp_max_c".into(), 23.0);
+        values.insert("temp_safety_max_c".into(), 23.0);
+        let snap = AssetSnapshot {
+            power_kw: 3.0, // last tick's actual output == max_kw
+            asset_type: "heater".to_string(),
+            cap_max_import_kw: 3.0,
+            cap_max_export_kw: 0.0,
+            available_discharge_kwh: None,
+            available_charge_kwh: None,
+            default_setpoint_kw: 0.0,
+            setpoint_kw: 0.0,
+            values,
+        };
+        assert_eq!(
+            predict_heater_forced_kw(&snap),
+            Some(3.0),
+            "hysteresis must force max_kw even though temp is inside the comfort band"
+        );
+    }
+
+    #[test]
+    fn predict_heater_forced_kw_returns_none_in_normal_band() {
+        // Temp mid-band, last tick's output was below max_kw — no hysteresis or
+        // safety override active, so the caller should trust the commanded setpoint.
+        let mut values = StdHashMap::new();
+        values.insert("temp_c".into(), 20.0);
+        values.insert("max_kw".into(), 3.0);
+        values.insert("temp_min_c".into(), 18.0);
+        values.insert("temp_max_c".into(), 23.0);
+        values.insert("temp_safety_max_c".into(), 23.0);
+        let snap = AssetSnapshot {
+            power_kw: 0.0,
+            asset_type: "heater".to_string(),
+            cap_max_import_kw: 3.0,
+            cap_max_export_kw: 0.0,
+            available_discharge_kwh: None,
+            available_charge_kwh: None,
+            default_setpoint_kw: 0.0,
+            setpoint_kw: 0.0,
+            values,
+        };
+        assert_eq!(predict_heater_forced_kw(&snap), None);
+    }
+
+    #[test]
+    fn surplus_overlay_accounts_for_heater_forced_on_not_commanded_setpoint() {
+        // Regression (WP3.4 DISPATCH_SETPOINT E2E failure): heater's commanded
+        // setpoint is 0 but it's physically forced to max_kw (3.0) by emergency
+        // hysteresis. PV exports 6.0 kW, base load 1.0 kW → without the fix the
+        // overlay would see a 5.0 kW surplus (ignoring the heater's real 3.0 kW
+        // draw) instead of the correct 2.0 kW.
+        let (_, mut heater_snap) = heater_entry(3.0);
+        heater_snap.values.insert("temp_c".into(), 20.0);
+        heater_snap.values.insert("max_kw".into(), 3.0);
+        heater_snap.values.insert("temp_min_c".into(), 18.0);
+        heater_snap.values.insert("temp_max_c".into(), 23.0);
+        heater_snap.values.insert("temp_safety_max_c".into(), 23.0);
+        let sim = make_sim_snap(vec![
+            pv_entry(-6.0),
+            base_entry(1.0),
+            ev_entry(0.4, true, 0.8),
+            ("heater".to_string(), heater_snap),
+        ]);
+        let mut sp: HashMap<String, f64> = HashMap::new();
+        sp.insert("heater".to_string(), 0.0); // dispatcher committed 0, hysteresis overrides it
+        apply_surplus_ev_overlay(&mut sp, &sim, false, true, Some(-6.0));
+        let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
+        assert!(
+            (ev_sp - 2.0).abs() < 1e-6,
+            "expected EV surplus of 2.0 kW (6.0 PV − 1.0 base − 3.0 forced heater), got {ev_sp}"
         );
     }
 
