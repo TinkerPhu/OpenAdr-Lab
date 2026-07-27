@@ -27,6 +27,9 @@ mod port_tests {
 // approached the cap after adding the weather-suppression-decay regression tests.
 mod peek_pv_kw_tests;
 
+// `peek_base_load_kw` tests — same rationale as peek_pv_kw_tests above.
+mod peek_base_load_kw_tests;
+
 /// Simulated appliance noise on BaseLoad (coffee/cooking/TV bumps) — verifies
 /// `SimState::tick` actually applies `BaseLoad::appliance_noise_kw`, not just
 /// that the pure function itself behaves correctly in isolation (covered in

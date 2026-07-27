@@ -151,16 +151,21 @@ pub enum PvCurtailmentSource {
     None,
     Plan,
     Capacity,
+    /// The deviation arbiter tightened the export limit as a backstop lever
+    /// (§5.4 of `docs/plans/deviation-scenarios-analysis.md`, only offered
+    /// once battery/EV/heater levers are exhausted). See `controller::arbiter`.
+    Arbiter,
 }
 
 impl PvCurtailmentSource {
     /// Numeric encoding for the flattened `state_values()` map (which is `HashMap<String, f64>`):
-    /// `0.0` = none, `1.0` = plan, `2.0` = capacity.
+    /// `0.0` = none, `1.0` = plan, `2.0` = capacity, `3.0` = arbiter.
     pub fn as_f64(self) -> f64 {
         match self {
             PvCurtailmentSource::None => 0.0,
             PvCurtailmentSource::Plan => 1.0,
             PvCurtailmentSource::Capacity => 2.0,
+            PvCurtailmentSource::Arbiter => 3.0,
         }
     }
 }
