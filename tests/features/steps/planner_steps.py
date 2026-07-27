@@ -39,8 +39,18 @@ def step_wait_for_fresh_plan(context):
     trigger a replan, so the existing plan may reflect a different state.
     Waiting for a fresh created_at ensures the MILP ran with the injected
     value as its starting point.
+
+    Some injects (e.g. heater_temp_c) *do* synchronously trigger a replan on
+    the POST itself; for those, the preceding step stashes
+    `context.plan_freshness_cutoff` (captured before the request was sent) so
+    that plan counts as fresh here, instead of racing this step's own
+    datetime.now() against a plan that may already have been created while
+    this step's own preceding "Given" was still blocked waiting for the sim
+    tick to reflect the injected value.
     """
-    cutoff = datetime.now(timezone.utc)
+    cutoff = getattr(context, "plan_freshness_cutoff", None) or datetime.now(timezone.utc)
+    if hasattr(context, "plan_freshness_cutoff"):
+        del context.plan_freshness_cutoff
 
     def fetch():
         resp = ven_get("/plan")
