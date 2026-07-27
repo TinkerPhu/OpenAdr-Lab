@@ -649,6 +649,25 @@ outes/sim.rs causes a T1+T2 double-solve race:
   --sort=-%cpu` for concurrent load, and rerun the specific failing
   scenario(s) in isolation once load drops — don't rerun the entire ~45min
   suite repeatedly hoping for a quiet window.
+- **A "wait for fresh plan" step that captures its cutoff timestamp *after*
+  the triggering action can race the trigger it's waiting on.**
+  `ven_heater_tank.feature`'s near-T_max scenario intermittently timed out
+  at 300s (previously passed in 81s) even though nothing in the planner or
+  dispatcher changed for it. Root cause: `POST /sim/inject` with
+  `heater_temp_c` synchronously fires `PlanTrigger::AssetStateChange` — but
+  the "Given I inject" step blocks for up to 15s *after* that POST, waiting
+  for the sim tick to reflect the injected temperature (a real, separate,
+  already-fixed race — see that step's own docstring). By the time the next
+  step captured `cutoff = datetime.now()`, the AssetStateChange-triggered
+  plan (built almost immediately after the POST) was already older than
+  cutoff — so the test was never actually waiting on its own injection's
+  plan, only on some unrelated later trigger that might or might not arrive
+  within the timeout. Fixed by capturing the cutoff *before* sending the
+  triggering POST (`context.plan_freshness_cutoff`, `phase_a_physics_steps.py`)
+  and having the wait step consume it when present. General lesson: when a
+  test waits for "a plan/state created after X," X must be captured before
+  the action that can cause that creation — not after any step that itself
+  blocks, however briefly.
 - **HiGHS (via `good_lp`) returns all-zero row/column duals for any model
   containing an integer-flagged column — even one pinned to a single value
   via an added equality constraint.** Building the `solver-marginal-cost`

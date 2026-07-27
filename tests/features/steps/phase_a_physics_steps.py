@@ -5,6 +5,7 @@ and UserOverrides paths (pv_irradiance, ev_plugged).
 """
 
 import time
+from datetime import datetime, timezone
 from behave import given, when, then, step
 from features.helpers.api_client import ven_post, ven_get
 from features.helpers.wait import poll_until
@@ -80,7 +81,18 @@ def step_given_inject_heater_temp_c(context, temp):
     window would otherwise solve against the pre-inject tank state — making a
     subsequent "wait for recomputed plan" step accept a plan built without the
     injection (observed as a load-dependent flake on the near-T_max scenario).
+
+    Records `context.plan_freshness_cutoff` *before* sending the request: the
+    POST synchronously fires PlanTrigger::AssetStateChange, so the resulting
+    plan's created_at can land before a cutoff captured only after this step
+    returns (this step can block here for several seconds waiting for the sim
+    tick) — the subsequent "wait for recomputed plan" step would then never see
+    a "fresh" plan from this injection at all and fall back to waiting for an
+    unrelated, non-deterministic later trigger (the actual root cause of the
+    load-dependent flake this docstring already flagged, not just the
+    stale-tank-state race the polling below fixes).
     """
+    context.plan_freshness_cutoff = datetime.now(timezone.utc)
     r = ven_post("/sim/inject", json={"heater_temp_c": temp})
     r.raise_for_status()
 
