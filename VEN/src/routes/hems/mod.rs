@@ -1,3 +1,4 @@
+mod arbiter;
 mod baseline_override;
 mod comfort;
 mod ev;
@@ -7,6 +8,7 @@ mod misc;
 mod sessions;
 mod shiftable_loads;
 
+pub use arbiter::*;
 pub use baseline_override::*;
 pub use comfort::*;
 pub use ev::*;

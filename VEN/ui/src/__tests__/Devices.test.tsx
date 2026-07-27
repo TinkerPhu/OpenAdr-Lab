@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DevicesPage } from "../pages/Devices";
-import type { UserRequestWithSession, EvSettings } from "../api/types";
+import type { UserRequestWithSession, EvSettings, ArbiterSettings } from "../api/types";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
@@ -125,9 +125,13 @@ const mockEvSettingsData = vi.fn((): EvSettings => ({
   opportunistic_charging_enabled: true,
   paused_by_active_session: false,
 }));
+const mockArbiterSettingsData = vi.fn((): ArbiterSettings => ({
+  deviation_arbiter_enabled: false,
+}));
 const mockPostRequest = vi.fn();
 const mockDeleteRequest = vi.fn();
 const mockPutEvSettings = vi.fn();
+const mockPutArbiterSettings = vi.fn();
 
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
@@ -156,6 +160,14 @@ vi.mock("../api/hooks", () => ({
     mutate: mockPutEvSettings,
     isPending: false,
   }),
+  useArbiterSettings: () => ({
+    data: mockArbiterSettingsData(),
+    isLoading: false,
+  }),
+  usePutArbiterSettings: () => ({
+    mutate: mockPutArbiterSettings,
+    isPending: false,
+  }),
 }));
 
 // ─── Wrapper ─────────────────────────────────────────────────────────────────
@@ -181,6 +193,7 @@ describe("DevicesPage", () => {
       opportunistic_charging_enabled: true,
       paused_by_active_session: false,
     });
+    mockArbiterSettingsData.mockReturnValue({ deviation_arbiter_enabled: false });
   });
 
   // 1. All idle
@@ -415,6 +428,32 @@ describe("DevicesPage", () => {
     // MUI Switch uses aria-disabled on the span wrapper, not the HTML disabled attribute
     const sw = screen.getByTestId("ev-opportunistic-charging-switch");
     expect(sw).toHaveAttribute("aria-disabled", "true");
+  });
+
+  // 16a. Arbiter toggle rendered, unchecked by default
+  it("renders arbiter toggle switch that is unchecked by default", () => {
+    renderPage();
+    const sw = screen.getByTestId("arbiter-enabled-switch");
+    expect(sw).toBeInTheDocument();
+    const input = sw.querySelector("input[type='checkbox']")!;
+    expect(input).not.toBeChecked();
+  });
+
+  // 16b. Toggle arbiter calls putArbiterSettings
+  it("calls putArbiterSettings when arbiter toggle clicked", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("arbiter-enabled-switch"));
+    expect(mockPutArbiterSettings).toHaveBeenCalledWith({ deviation_arbiter_enabled: true });
+  });
+
+  // 16c. Arbiter toggle reflects enabled state
+  it("shows arbiter toggle checked when enabled", () => {
+    mockArbiterSettingsData.mockReturnValue({ deviation_arbiter_enabled: true });
+    renderPage();
+    const sw = screen.getByTestId("arbiter-enabled-switch");
+    const input = sw.querySelector("input[type='checkbox']")!;
+    expect(input).toBeChecked();
   });
 
   // 17. All Requests accordion expands
