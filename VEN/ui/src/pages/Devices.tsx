@@ -11,19 +11,24 @@ import {
   usePostRequest,
   useDeleteRequest,
   usePutEvSettings,
+  useArbiterSettings,
+  usePutArbiterSettings,
 } from "../api/hooks";
 import { EvCard } from "../components/devices/EvCard";
 import { HeaterCard } from "../components/devices/HeaterCard";
 import { ShiftableLoadsCard } from "../components/devices/ShiftableLoadsCard";
 import { ComfortCurveCard } from "../components/devices/ComfortCurveCard";
+import { ArbiterSettingsCard } from "../components/devices/ArbiterSettingsCard";
 import { AllRequestsSection } from "../components/devices/AllRequestsSection";
 
 export function DevicesPage() {
   const { data: allRequests = [], isLoading, isError, error } = useRequests();
   const { data: evSettings } = useEvSettings();
+  const { data: arbiterSettings } = useArbiterSettings();
   const postMut = usePostRequest();
   const deleteMut = useDeleteRequest();
   const putEvMut = usePutEvSettings();
+  const putArbiterMut = usePutArbiterSettings();
 
   const evRequest = allRequests.find(
     (r) => r.session_type === "ev" && r.status === "ACTIVE",
@@ -74,6 +79,12 @@ export function DevicesPage() {
         </Grid>
         <Grid item xs={12} md={4}>
           <ComfortCurveCard />
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <ArbiterSettingsCard
+            arbiterSettings={arbiterSettings}
+            putArbiterSettings={putArbiterMut.mutate}
+          />
         </Grid>
       </Grid>
       <AllRequestsSection
