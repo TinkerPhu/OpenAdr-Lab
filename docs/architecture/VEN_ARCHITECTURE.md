@@ -147,22 +147,38 @@ accrue cost/CO₂; export is not credited as revenue in the ledger.
 
 Pure-function module (`controller/dispatcher.rs`) driven by the 1 s tick in
 `tasks/sim_tick/`. `build_setpoints()` translates the current `PlanTimeSlot` into device
-setpoints:
+setpoints — narrowed to plan-allocation only:
 
 1. Seeds every asset with its `default_setpoint_kw`
 2. For each `AssetAllocation` in the plan slot covering `now`: overwrites that asset's setpoint
 3. Caps PV export at the active capacity limit
-4. Applies the opportunistic surplus-EV overlay (`apply_surplus_ev_overlay`): routes live
-   PV surplus (after all other loads and any planned battery charging) to the EV when no
-   plan-level EV allocation is active for this slot
 
-❌ **GAP** (`docs/plans/review_items_resolution_strategy.md` R5, `docs/BACKLOG.md` BL-22):
-there is no "auto-follow" concept and no `NetDeviation` distribution across assets.
-`apply_battery_correction_overlay` — a dead-beat P-controller that reacts to grid
-deviation — is fully implemented and unit-tested but deliberately `#[allow(dead_code)]`:
-it is never wired into `build_setpoints()`. This was built, then left unintegrated; R5
-resolved to keep it (not delete) — BL-22 tracks wiring it behind a profile flag. Ledger
+Reactive adjustment on top of the plan's allocation — including the opportunistic
+surplus-EV overlay's role — has moved to the Deviation Arbiter (below). Ledger
 accounting is **not** the Dispatcher's responsibility — see Monitor above.
+
+#### Deviation Arbiter (BL-22 resolved — `openspec/changes/deviation-arbiter/`)
+
+`controller::arbiter::reconcile`, called once per tick from
+`tasks/sim_tick/helpers.rs::build_tick_setpoints` after `dispatcher::build_setpoints`, is the
+single owner of every reactive (non-plan, non-VTN-override) actuator adjustment — resolving the
+gap R5/BL-22 tracked (`apply_battery_correction_overlay`'s dead-beat P-controller sat unwired,
+and the opportunistic EV-surplus overlay ran as a separate, uncoordinated writer). It:
+
+1. Computes this tick's deviation between the plan's expected net site power and a live
+   projection (using `SimState::peek_pv_kw`/`peek_base_load_kw` so neither physics-driven input
+   is ever one tick stale — the specific lag that caused feature 017's removal, twice; see
+   `docs/plans/deviation-scenarios-analysis.md` §1)
+2. Ranks available levers (battery, EV, heater pause/emergency-mode, PV curtailment backstop) by
+   marginal cost (`PlanTimeSlot.marginal_cost_import/export_eur_per_kwh`, `solver-marginal-cost`),
+   excluding zero-capacity levers outright and applying preemption-margin/dwell hysteresis so two
+   near-equal-cost levers don't chatter tick to tick
+3. Feeds absorbed kWh into a per-asset (battery/EV) residual accumulator; a capacity-fraction
+   breach past a cooldown emits `PlanTrigger::ResidualThreshold` — accumulator-based, never a raw
+   per-tick-deviation trigger
+
+Gated behind `deviation_arbiter_enabled` (`AppState`, default `false`) for a fully reversible
+rollout; when disabled, `build_tick_setpoints` takes the pre-arbiter code path unchanged.
 
 ### 2.2 Two-Speed Loop
 

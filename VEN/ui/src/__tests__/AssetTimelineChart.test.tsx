@@ -104,6 +104,20 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
     expect(referenceAreas[0].fill).toContain("210,30,30");
   });
 
+  it("renders an unplanned (red) band for arbiter-sourced imposed curtailment", () => {
+    const data = [
+      point(-2 * minute, {
+        power_kw: -2.0,
+        export_limit_kw: -2.0,
+        curtailment_source: 3,
+        inverter_max_kw: 5.0,
+      }),
+    ];
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    expect(referenceAreas).toHaveLength(1);
+    expect(referenceAreas[0].fill).toContain("210,30,30");
+  });
+
   it("renders a planned band for a future slot where pv_used_kw is below pv_forecast_kw", () => {
     const data = [point(2 * minute, { power_kw: -3.0, pv_forecast_kw: 5.0 })];
     render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);

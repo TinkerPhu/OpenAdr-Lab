@@ -8,10 +8,9 @@ use crate::controller::VtnPort;
 use crate::controller::WeatherForecastPort;
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::PvForecastParams;
-use crate::entities::solar::resolve_weather_pv_kw;
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
-use crate::state::{AppState, EvSettings};
+use crate::state::AppState;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn tick_once(
@@ -37,24 +36,13 @@ pub(crate) async fn tick_once(
     let _events = state.events().await;
     let inject = state.inject_state().await;
 
-    // Weather-sourced PV power for this exact instant — same translation
-    // (staleness gating, transposition physics, calibration) the planner's
-    // own PV input uses (R-50); reused here via the one shared entry point
-    // rather than re-derived. `.await` must happen before the sync sim lock
-    // below, mirroring services::planning::resolve_weather_pv_kw_for_cycle.
-    let weather_pv_kw_now: Option<f64> = if weather_pv_params.is_some() {
-        let forecast = weather.latest().await;
-        resolve_weather_pv_kw(
-            weather_pv_params.as_ref(),
-            forecast.as_ref(),
-            now,
-            crate::services::planning::WEATHER_STALENESS_THRESHOLD,
-            &[now],
-        )
-        .and_then(|v| v.first().copied())
-    } else {
-        None
-    };
+    // Weather-sourced PV power for this instant (must happen before the sync lock).
+    let weather_pv_kw_now = super::arbiter_glue::resolve_weather_pv_kw_now(
+        weather.as_ref(),
+        weather_pv_params.as_ref(),
+        now,
+    )
+    .await;
 
     // Pre-tick: snapshot plan/capacity/tariffs for dispatcher
     let plan_snap = state.active_plan().await;
@@ -63,22 +51,23 @@ pub(crate) async fn tick_once(
     let alert_windows = state.alert_windows().await;
     let rates_snap = state.planned_tariffs().await;
 
-    // Compute overlay_enabled: user toggle AND no active EvSession.
-    let ev_sess_tick = state.ev_session().await;
-    let ev_settings_tick = state.ev_settings().await;
-    let session_active = ev_sess_tick.is_some();
-    let overlay_enabled = ev_settings_tick.opportunistic_charging_enabled && !session_active;
-    if ev_settings_tick.paused_by_active_session != session_active {
-        state
-            .set_ev_settings(EvSettings {
-                paused_by_active_session: session_active,
-                ..ev_settings_tick
-            })
-            .await;
-    }
+    let overlay_enabled = super::arbiter_glue::resolve_overlay_enabled(&state).await;
+
+    // Deviation-arbiter rollout gate + hysteresis state (read pre-lock).
+    let deviation_arbiter_enabled = state.deviation_arbiter_enabled().await;
+    let incumbent_lever = state.arbiter_active_lever().await;
 
     // Lock sim for physics only — no .await inside the block.
-    let (tick_sensor, tick_sim_snap, tick_envelope, cleared_fields, pv_clear, base_clear) = {
+    let (
+        tick_sensor,
+        tick_sim_snap,
+        tick_envelope,
+        cleared_fields,
+        pv_clear,
+        base_clear,
+        absorbed_kwh_by_asset,
+        new_active_lever,
+    ) = {
         let mut sim_guard = sim.lock().await;
 
         // PHASE 1: Apply Behaviour A one-shot injections; collect fields to clear.
@@ -86,15 +75,14 @@ pub(crate) async fn tick_once(
         let pv_clear = inject.pv_irradiance.is_some();
         let base_clear = inject.base_load_kw.is_some();
 
-        // PHASE 2: Build setpoints (dispatcher from MILP plan + capacity + overlay)
+        // PHASE 2: Build setpoints (dispatcher from MILP plan + capacity) then
+        // run the deviation arbiter's reactive adjustment layer on top.
         let pre_snap = sim_guard
             .snapshot()
             .expect("SimState::snapshot is infallible");
 
-        // `pre_snap` is taken before physics runs this tick, so its PV power
-        // is last tick's value. `peek_pv_kw` previews what physics is about
-        // to compute for `now`, avoiding the one-tick lag `pre_snap` would
-        // otherwise introduce into the EV-surplus overlay.
+        // `pre_snap` predates this tick's physics; peek_pv_kw/peek_base_load_kw
+        // preview `now`'s values so the arbiter never sees a one-tick-stale input.
         let live_pv_kw = sim_guard.peek_pv_kw(
             now,
             dt_s,
@@ -102,8 +90,10 @@ pub(crate) async fn tick_once(
             inject.pv_irradiance_alpha,
             weather_pv_kw_now,
         );
+        let live_base_load_kw =
+            sim_guard.peek_base_load_kw(now, dt_s, inject.base_load_kw, inject.base_load_alpha);
 
-        let sp_map = super::helpers::build_tick_setpoints(
+        let outcome = super::helpers::build_tick_setpoints(
             &pre_snap,
             plan_snap.as_ref(),
             &capacity_snap,
@@ -113,6 +103,9 @@ pub(crate) async fn tick_once(
             &dispatch_windows,
             &alert_windows,
             live_pv_kw,
+            live_base_load_kw,
+            deviation_arbiter_enabled,
+            incumbent_lever.as_deref(),
         );
 
         let effective_capacity_for_pv = super::helpers::effective_capacity(&capacity_snap, &inject);
@@ -120,12 +113,22 @@ pub(crate) async fn tick_once(
             plan_snap.as_ref(),
             &effective_capacity_for_pv,
             now,
+            outcome.pv_export_limit_tighten_kw,
         );
+
+        let (heater_emergency_curtail, heater_emergency_absorb) =
+            super::arbiter_glue::resolve_heater_emergency_mode(
+                &inject,
+                outcome.heater_emergency_mode,
+            );
+
+        let absorbed_kwh_by_asset = outcome.absorbed_kwh_by_asset.clone();
+        let new_active_lever = outcome.active_lever.map(|s| s.to_string());
 
         // PHASE 3: Simulator tick — apply setpoints → update device states.
         sim_guard.tick(
             dt_s,
-            sp_map,
+            outcome.setpoints,
             now,
             inject.pv_irradiance,
             inject.pv_irradiance_alpha,
@@ -137,8 +140,8 @@ pub(crate) async fn tick_once(
             inject.ev_plugged,
             inject.ev_soc_target,
             weather_pv_kw_now,
-            inject.heater_emergency_curtail,
-            inject.heater_emergency_absorb,
+            heater_emergency_curtail,
+            heater_emergency_absorb,
             resolved_pv_export_limit.limit_kw,
             resolved_pv_export_limit.source,
         );
@@ -154,8 +157,20 @@ pub(crate) async fn tick_once(
             cleared_fields,
             pv_clear,
             base_clear,
+            absorbed_kwh_by_asset,
+            new_active_lever,
         )
     };
+
+    // PHASE 3.5 (post-lock): arbiter hysteresis + residual escalation (§5.5).
+    state.set_arbiter_active_lever(new_active_lever).await;
+    super::arbiter_glue::apply_residual_escalation(
+        &state,
+        &trigger_tx,
+        &absorbed_kwh_by_asset,
+        now,
+    )
+    .await;
 
     // PHASE 1 (post-lock): clear one-shot inject fields.
     for field in cleared_fields {

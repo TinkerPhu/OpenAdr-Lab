@@ -6841,3 +6841,81 @@ suite (269 scenarios) subsequently confirmed green with 1 pass 0 fail.
 *before* the action that can cause that creation — not after any preceding step that itself blocks,
 however briefly, since the trigger can fire and resolve entirely within that blocking window. See
 also `docs/reference/KEY_LEARNINGS.md`.
+
+### The Deviation Arbiter (openspec `deviation-arbiter`, §5.3, 2026-07-27)
+
+Implemented backlog item 2 of `docs/plans/deviation-scenarios-analysis.md` — the single
+marginal-cost-driven arbiter that subsumes the opportunistic EV-surplus overlay, the piece flagged
+in that doc's own §7 as "the highest-risk piece, the one that's failed twice already" (feature 017,
+`absorber.rs`, removed twice for oscillating against the EV overlay). Followed the plan-mode design
+from the same session (`docs/plans/deviation-scenarios-analysis.md` §5.3–§5.5, the openspec
+proposal/spec at `openspec/changes/deviation-arbiter/`), which itself survived a critical review
+that surfaced two risks a naive rebuild would have reintroduced (see that change's proposal.md):
+a previously-real single-lever oscillation bug in the reused battery corrector, and an unthrottled
+replan-escalation trigger.
+
+**Architecture**: `controller::arbiter::reconcile`, called once per tick from
+`build_tick_setpoints` after `dispatcher::build_setpoints`, is the sole owner of every reactive
+actuator write. It computes a deviation between the plan's expected net site power and a live
+projection (`peek_pv_kw` + new `peek_base_load_kw`, closing the base-load half of the one-tick-lag
+gap §1 left open after PV's own lag was fixed), then ranks battery/EV/heater/PV-curtailment levers
+by marginal cost (from `solver-marginal-cost`'s shadow prices), excluding zero-capacity levers
+outright and applying a preemption-margin hysteresis so two near-equal-cost levers can't chatter
+tick to tick. Absorbed kWh feeds a per-asset (battery/EV) residual accumulator; a capacity-fraction
+breach past a cooldown fires a new `PlanTrigger::ResidualThreshold` — accumulator-based from day
+one, deliberately never a raw-per-tick-deviation trigger (the exact bug that made feature 017's
+own replan trigger spurious before it switched to residual too late).
+
+**§3a stability re-verification, resolved empirically, not just architecturally.** The battery
+lever reuses `apply_battery_correction_overlay`'s dead-beat formula, but that function's own doc
+comment named a `prev_correction_kw`/`loops.rs` "holding" contract — confirmed by grep to no longer
+exist anywhere in the codebase. Rather than assume the new architecture's unconditional-every-tick
+execution made that holding mechanism redundant, a dedicated multi-tick convergence test
+(`battery_lever_converges_under_stationary_disturbance_across_multiple_ticks`) drove the lever for
+6 consecutive simulated ticks under a stationary disturbance. Result: no rebuild needed — reading
+`AssetSnapshot.setpoint_kw` (the actually-applied value) as the integrator state on every tick
+already supplies the guarantee the old holding mechanism used to provide.
+
+**A real correctness gap found during testing, not just a test-fixture bug.** The first
+implementation of the battery lever's capacity check only considered power headroom
+(`cap_max_import/export_kw`), not energy headroom (`available_charge/discharge_kwh`) — meaning it
+would have offered the battery as a lever even at 100% SoC, violating §5.3's own "zero-capacity
+levers must be excluded outright" requirement. Caught by a PV-curtailment-backstop test that
+expected the battery to be excluded and initially wasn't; fixed by gating on
+`available_charge/discharge_kwh <= 0.0` in addition to the power-rating check.
+
+**Scope simplifications made during implementation** (all documented in
+`openspec/changes/deviation-arbiter/tasks.md` against each affected task):
+- `deviation_arbiter_enabled` is a hardcoded `AppState` field (default `false`), not new
+  profile-YAML schema — this actually matches the *real* precedent
+  (`EvSettings.opportunistic_charging_enabled` isn't profile-plumbed either), correcting an
+  inaccurate assumption in the original task list.
+- `apply_surplus_ev_overlay` was kept in `dispatcher.rs` rather than deleted, specifically so the
+  `deviation_arbiter_enabled == false` path stays byte-for-byte identical to pre-change behaviour
+  (the arbiter's own EV lever is capacity-metered differently, so it isn't a drop-in replacement).
+- The full multi-tick `tick_once`-level oscillation-shape and lever-chatter regression tests were
+  scoped down to their equivalent unit-level tests (which exercise the same mechanisms directly)
+  plus one `tick_once`-level smoke test proving the wiring itself works end-to-end
+  (`deviation_arbiter_absorbs_unplanned_pv_surplus_end_to_end`).
+- `heater_comfort_override_eur_per_kwh`, `lever_preemption_margin_eur_per_kwh`,
+  `residual_threshold_fraction`, and `residual_cooldown_s` are Rust constants with illustrative
+  defaults (no numeric default exists in the source design doc), not yet profile-configurable.
+
+**File-size restructuring required by the change itself**: `arbiter.rs` split into
+`arbiter.rs` (ranking/reconcile) + `arbiter_levers.rs` (per-lever capacity/apply functions);
+`tasks/sim_tick/{helpers,tick}.rs` shed a new `arbiter_glue.rs` (residual escalation, weather-PV
+resolution, heater-mode combination, overlay-enabled resolution); `state/mod.rs` shed
+`state/arbiter.rs` (new `AppState` accessors), following the existing `state/connection.rs`-style
+split-`impl`-block precedent. Test file `arbiter_tests.rs` moved into `controller/tests/` to
+qualify for the size audit's test-path exemption (a sibling `_tests.rs` file referenced via
+`#[path]` does **not** qualify — only a literal `tests/` path component does).
+
+Verification: full VEN Rust pyramid (842/842 + 1 architecture test), fmt/clippy clean,
+file-size audit clean, VEN UI suite (418/418, 39 files) + tsc + ESLint clean.
+`docs/BACKLOG.md` BL-22 marked resolved.
+
+**Key learning**: a lever's capacity check must account for every resource dimension that can
+independently hit zero — power rating alone is not enough for a storage asset; energy headroom
+(SoC-derived) can be the binding constraint even when the power rating says otherwise. Caught by a
+test that exercised the "everything else exhausted" backstop case, not by reasoning about the
+lever in isolation.

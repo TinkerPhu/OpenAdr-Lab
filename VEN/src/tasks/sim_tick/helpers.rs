@@ -69,12 +69,19 @@ pub(crate) fn effective_capacity(
     effective_capacity
 }
 
-/// PHASE 2: Compose effective capacity and build per-asset setpoints.
+/// PHASE 2: Compose effective capacity, build the plan's base setpoint
+/// allocation, then run the deviation arbiter's reactive adjustment layer
+/// (`controller::arbiter::reconcile`) on top of it — the single owner of
+/// every reactive (non-plan, non-VTN-override) actuator write per tick
+/// (`openspec/changes/deviation-arbiter/`).
 ///
-/// `live_pv_kw`: this tick's PV output, computed *before* physics runs
-/// (`SimState::peek_pv_kw`) — passed through to the EV-surplus overlay so it
-/// doesn't fall back to a one-tick-stale PV snapshot. See
-/// `controller::dispatcher::apply_surplus_ev_overlay` for the full rationale.
+/// `live_pv_kw`/`live_base_load_kw`: this tick's previewed output for the two
+/// physics-driven inputs (`SimState::peek_pv_kw`/`peek_base_load_kw`),
+/// computed *before* physics runs — passed through so the arbiter's deviation
+/// calculation never reads a one-tick-stale snapshot for either.
+///
+/// When `deviation_arbiter_enabled` is `false`, takes the exact pre-arbiter
+/// code path (`apply_surplus_ev_overlay` inline) — fully reversible rollout.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_tick_setpoints(
     sim_snap: &SimSnapshot,
@@ -86,44 +93,71 @@ pub(crate) fn build_tick_setpoints(
     dispatch_windows: &[crate::entities::capacity::DispatchWindow],
     alert_windows: &[crate::entities::capacity::AlertWindow],
     live_pv_kw: Option<f64>,
-) -> HashMap<String, f64> {
+    live_base_load_kw: Option<f64>,
+    deviation_arbiter_enabled: bool,
+    incumbent_lever: Option<&str>,
+) -> controller::arbiter::ArbiterOutcome {
     let effective_capacity = effective_capacity(capacity_snap, inject);
-    let mut sp = match plan_snap {
+    let base_sp = match plan_snap {
         Some(plan) => controller::dispatcher::build_setpoints(
             plan,
             sim_snap,
             &effective_capacity,
             inject.heater_setpoint_c,
             now,
+        ),
+        None => sim_snap
+            .assets
+            .iter()
+            .map(|(id, snap)| (id.clone(), snap.default_setpoint_kw))
+            .collect(),
+    };
+
+    let mut outcome = if deviation_arbiter_enabled {
+        let plan_has_ev_allocation =
+            plan_snap.is_some_and(|p| controller::dispatcher::plan_has_ev_allocation(p, now));
+        let plan_slot =
+            plan_snap.and_then(|p| p.slots.iter().find(|s| s.start <= now && now < s.end));
+        let objective = plan_snap
+            .map(|p| p.objective)
+            .unwrap_or(crate::entities::planner_params::PlannerObjective::MinCost);
+        controller::arbiter::reconcile(
+            sim_snap,
+            &base_sp,
+            plan_slot,
+            objective,
+            plan_has_ev_allocation,
             overlay_enabled,
             live_pv_kw,
-        ),
-        None => {
-            // No plan yet (startup window). Apply defaults then surplus overlay.
-            let mut m: HashMap<String, f64> = sim_snap
-                .assets
-                .iter()
-                .map(|(id, snap)| (id.clone(), snap.default_setpoint_kw))
-                .collect();
-            controller::dispatcher::apply_surplus_ev_overlay(
-                &mut m,
-                sim_snap,
-                false,
-                overlay_enabled,
-                live_pv_kw,
-            );
-            m
+            live_base_load_kw,
+            incumbent_lever,
+        )
+    } else {
+        let mut sp = base_sp;
+        let plan_has_ev_allocation =
+            plan_snap.is_some_and(|p| controller::dispatcher::plan_has_ev_allocation(p, now));
+        controller::dispatcher::apply_surplus_ev_overlay(
+            &mut sp,
+            sim_snap,
+            plan_has_ev_allocation,
+            overlay_enabled,
+            live_pv_kw,
+        );
+        controller::arbiter::ArbiterOutcome {
+            setpoints: sp,
+            ..Default::default()
         }
     };
+
     apply_dispatch_override(
-        &mut sp,
+        &mut outcome.setpoints,
         sim_snap,
         now,
         dispatch_windows,
         alert_windows,
         live_pv_kw,
     );
-    sp
+    outcome
 }
 
 /// PHASE 5 in-lock tail: extract snapshots, push history, update grid asset, compute envelope.

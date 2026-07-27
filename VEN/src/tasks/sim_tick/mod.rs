@@ -1,5 +1,6 @@
 // Simulator tick background task.
 
+mod arbiter_glue;
 mod dispatch_override;
 mod helpers;
 mod publish;

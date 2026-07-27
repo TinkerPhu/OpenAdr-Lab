@@ -1,3 +1,4 @@
+pub mod arbiter_residual;
 pub mod asset;
 pub mod asset_ledger;
 pub mod asset_params;

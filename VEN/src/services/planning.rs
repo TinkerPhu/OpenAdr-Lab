@@ -465,6 +465,23 @@ impl PlanningService {
             state.set_active_plan(Some(plan.clone())).await;
             let anchor = heater_block_end(&plan, now);
             state.set_anchor_until(anchor).await;
+
+            // §5.5: reset the arbiter's residual accumulator on every plan
+            // adoption (any trigger, not just hard ones) and re-snapshot each
+            // SoC-coupled asset's available capacity as the new baseline.
+            if let Some(sim_snap) = state.sim().await {
+                let mut new_capacities = std::collections::HashMap::new();
+                for asset_id in [crate::ids::ASSET_BATTERY, crate::ids::ASSET_EV] {
+                    if let Some(snap) = sim_snap.assets.get(asset_id) {
+                        let capacity_kwh = snap
+                            .available_charge_kwh
+                            .unwrap_or(0.0)
+                            .max(snap.available_discharge_kwh.unwrap_or(0.0));
+                        new_capacities.insert(asset_id.to_string(), capacity_kwh);
+                    }
+                }
+                state.reset_residual(&new_capacities).await;
+            }
         } else {
             info!(
                 trigger = %trigger_reason,

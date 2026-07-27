@@ -46,6 +46,14 @@ pub enum PlanTrigger {
     Alert,            // emergency/flex alert from VTN
     UserRequest,      // new or modified device session / user request
     AssetStateChange, // device connected/disconnected/failed
+    /// The deviation arbiter's accumulated absorbed-kWh (per SoC-coupled
+    /// asset) crossed its capacity-fraction threshold since the last plan
+    /// adoption (§5.5) — an accumulator/hysteresis signal, deliberately not a
+    /// raw-per-tick-deviation trigger (see `docs/plans/deviation-scenarios-analysis.md`
+    /// §1 on why the removed feature 017's raw-deviation trigger caused
+    /// spurious replans). Rate-limited by a cooldown — see
+    /// `AppState::last_residual_trigger_at`.
+    ResidualThreshold,
 }
 
 /// One point on the comfort/value curve (§2.7).
