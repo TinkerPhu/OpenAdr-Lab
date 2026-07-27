@@ -269,8 +269,13 @@ pub(crate) fn solve_phase2(
     for (interaction, iv) in active_interactions.iter().zip(iv_list.iter()) {
         phase1_cap_expr += interaction.objective(iv, &inputs.dt_h);
     }
-    // Mirror the Phase 1 objective exactly: earliest-start tie-break included.
+    // Mirror the Phase 1 objective exactly: earliest-start and PV-use tie-breaks
+    // included. Omitting either lets c_star (Phase 1's true optimum, which
+    // includes both) diverge from this cap by the missing term's magnitude —
+    // for PV-use, up to PV_USE_TIEBREAK_EUR_PER_KWH * total_pv_used_kwh, which
+    // easily dwarfs the epsilon budget and makes Phase 2 infeasible outright.
     phase1_cap_expr += shiftable_tiebreak_expr(&pool.shiftable);
+    phase1_cap_expr += pv_use_tiebreak_expr(&pool.grid, &inputs.dt_h);
 
     // Phase 2 friction objective: startup/ramp/switching/tier; no economic terms.
     // c_startup_eur > 0.0 signals Phase 2 mode to asset objective impls.
