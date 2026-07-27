@@ -3,7 +3,7 @@ import { useRef, useEffect, useLayoutEffect } from "react";
 import { useVenContext } from "../App";
 import type {
   SensorSnapshot, SimInjectState, CreateUserRequestBody,
-  CreateEvSessionBody, UpdateEvSettingsBody,
+  CreateEvSessionBody, UpdateEvSettingsBody, UpdateArbiterSettingsBody,
   CreateHeaterTargetBody, CreateShiftableLoadBody, CreateBaselineOverrideBody,
   PlannerObjective, PlannerEvent, ComfortRate, UserNotificationSeverity,
 } from "./types";
@@ -523,6 +523,26 @@ export function usePutEvSettings() {
     mutationFn: (body: UpdateEvSettingsBody) => api.putEvSettings(body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ev_settings"] });
+    },
+  });
+}
+
+export function useArbiterSettings() {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["arbiter_settings", api.baseUrl],
+    queryFn: () => api.arbiterSettings(),
+    refetchInterval: 10_000,
+  });
+}
+
+export function usePutArbiterSettings() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateArbiterSettingsBody) => api.putArbiterSettings(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["arbiter_settings"] });
     },
   });
 }

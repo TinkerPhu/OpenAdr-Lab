@@ -455,6 +455,15 @@ export type UpdateEvSettingsBody = {
   opportunistic_charging_enabled: boolean;
 };
 
+/** Deviation arbiter rollout gate (openspec/changes/deviation-arbiter/). Default false. */
+export type ArbiterSettings = {
+  deviation_arbiter_enabled: boolean;
+};
+
+export type UpdateArbiterSettingsBody = {
+  deviation_arbiter_enabled: boolean;
+};
+
 export type HeaterTarget = {
   id: string;
   target_temp_c: number;
