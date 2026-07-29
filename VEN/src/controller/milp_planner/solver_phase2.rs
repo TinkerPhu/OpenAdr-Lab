@@ -364,7 +364,7 @@ pub(crate) fn solve_phase2(
 /// Lexicographic two-phase wrapper. Phase 1 always runs.
 /// Phase 2 runs when `epsilon > 0`; on Phase 2 failure, Phase 1 solution is returned.
 /// Returns `(solution, phase1_cost_eur, friction_eur, marginal_cost_eur_per_kwh)`.
-/// The marginal-cost vector (§5.2, deviation-scenarios-analysis.md) comes from a second,
+/// The marginal-cost vector (see `docs/architecture/VEN_ARCHITECTURE.md`) comes from a second,
 /// binaries-fixed LP solve over the winning solution — see `solver_duals::solve_marginal_costs`.
 /// It's a read-only diagnostic: a failure there degrades to the plain import tariff per slot
 /// rather than failing the whole planning cycle.

@@ -1,5 +1,5 @@
-//! Per-asset residual-escalation state for the deviation arbiter (§5.5 of
-//! `docs/plans/deviation-scenarios-analysis.md`).
+//! Per-asset residual-escalation state for the deviation arbiter (see
+//! `docs/architecture/VEN_ARCHITECTURE.md`'s Deviation Arbiter section).
 //!
 //! Deliberately a fresh, per-asset type rather than a repurposing of the
 //! (confirmed dead) `entities::site_meter::DispatchState` — that type is

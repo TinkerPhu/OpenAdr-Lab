@@ -168,7 +168,7 @@ and the opportunistic EV-surplus overlay ran as a separate, uncoordinated writer
 1. Computes this tick's deviation between the plan's expected net site power and a live
    projection (using `SimState::peek_pv_kw`/`peek_base_load_kw` so neither physics-driven input
    is ever one tick stale — the specific lag that caused feature 017's removal, twice; see
-   `docs/plans/deviation-scenarios-analysis.md` §1)
+   `docs/reference/KEY_LEARNINGS.md`'s Deviation Absorber section)
 2. Ranks available levers (battery, EV, heater pause/emergency-mode, PV curtailment backstop) by
    marginal cost (`PlanTimeSlot.marginal_cost_import/export_eur_per_kwh`, `solver-marginal-cost`),
    excluding zero-capacity levers outright and applying preemption-margin/dwell hysteresis so two
@@ -397,6 +397,26 @@ Curtailment: if `ExportCapacityLimit` is set and `|P_pv| > limit`, the inverter 
 **Forecast:** `PvAsset.forecast(horizon)` applies the same irradiation model over future
 time slots. The planner calls this — it does not contain a PV formula of its own.
 
+**Export curtailment as a planner decision** (`pv-export-curtailment`,
+`openspec/changes/pv-export-curtailment/`): the MILP has a real decision variable,
+`p_pv_used[t]` (`GridMilpVars`, `controller/milp_interactions.rs`), bounded
+`0 <= p_pv_used[t] <= p_pv_kw[t]` and substituted for the raw forecast in the power-balance
+constraint in both solver phases. No cost term is attached to curtailment itself — every real
+cost term already favors using PV, so the solver only curtails when doing so relieves an active
+export-capacity constraint. A small `PV_USE_TIEBREAK_EUR_PER_KWH` bias (mirroring the
+pre-existing `SHIFT_TIEBREAK_EUR_PER_SLOT` pattern) keeps HiGHS's MIP-gap tolerance and Phase 2's
+friction-only objective from curtailing PV for no cost benefit — the tie-break must be mirrored
+into every cost-cap expression that recomputes Phase 1's true objective (a missed mirror caused
+Phase 2 to go infeasible on every solve whenever PV was used at all, fixed in `c27b296`).
+`PlanTimeSlot.pv_used_kw` exposes the decision alongside `pv_forecast_kw`; the VEN UI's plan
+power-stack chart shows the curtailed amount when present.
+
+The resolved limit reaches the simulator every tick: `SimState::tick()` takes a
+`pv_export_limit_override` parameter applied to `PvInverter.export_limit_kw`;
+`dispatcher::resolve_pv_export_limit_kw` computes it as the most restrictive of the live
+VTN/sim-inject capacity cap, the plan's own curtailment target, and (when the deviation arbiter
+is enabled) its backstop tighten value — `PvCurtailmentSource` tags which one won.
+
 #### Battery
 
 ```
@@ -420,6 +440,20 @@ dT/dt = (P_heater × efficiency − ambient_loss_rate × (T_room − T_ambient))
 
 `ambient_loss_rate` default: 0.1 kW/°C. Thermostat override at `T_min` / `T_max` bounds.
 Power levels: discrete `[0, 3, 6]` kW (STEPPED adjustability).
+
+**Comfort band vs. safety envelope** (`VEN/src/assets/heater.rs`, `87d6037`): `temp_min_c`/
+`temp_max_c` are a comfort/service band, not the asset's true physical limits — the low side has
+no physical harm (the tank just drifts toward ambient), while the high side sits well inside a
+separate, wider **safety envelope** (`temp_safety_max_c`, per-profile — e.g. `ven-2.yaml`'s tank
+is 40–80 °C comfort / 90 °C true safety ceiling). A `HeaterEmergencyMode` enum
+(`Normal`/`Curtail`/`Absorb`) exposes that envelope: `Curtail` suppresses the forced-on emergency
+heat at `temp_min_c`, letting the tank drift with no physical floor; `Absorb` suppresses the
+forced-off ceiling at `temp_max_c`, allowing heating up to `temp_safety_max_c` instead. Each
+direction leaves the *other* bound's normal behavior untouched. Settable via `SimInjectState`
+(manual/test/demo) or, when `deviation_arbiter_enabled`, automatically by the arbiter's heater
+lever once the deviation's marginal cost crosses `HEATER_COMFORT_OVERRIDE_EUR_PER_KWH` — but no
+VTN emergency directive drives it yet, and the MILP itself still plans only within the comfort
+band (it doesn't know the safety envelope exists).
 
 #### Base Load
 

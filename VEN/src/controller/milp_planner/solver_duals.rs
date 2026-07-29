@@ -1,4 +1,4 @@
-//! Second, cheap LP solve per planning cycle (`docs/plans/deviation-scenarios-analysis.md` §5.2):
+//! Second, cheap LP solve per planning cycle (see `docs/architecture/VEN_ARCHITECTURE.md`):
 //! fixes every binary decision to the winning MILP solution's value and re-solves as a pure LP to
 //! read a real shadow price off each slot's power-balance row.
 //!
