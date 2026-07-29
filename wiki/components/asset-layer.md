@@ -2,9 +2,9 @@
 title: Asset Layer
 type: component
 created: 2026-07-04
-updated: 2026-07-16
-synced_commit: f08e469
-sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, VEN/src/controller/residual.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md]
+updated: 2026-07-28
+synced_commit: c27b296
+sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, VEN/src/controller/residual.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md, VEN/src/entities/asset_params.rs, VEN/src/entities/sim_inject.rs]
 tags: [assets, abstraction, ven]
 ---
 
@@ -54,6 +54,31 @@ settable to match a real appliance session ([[heuristics-pipeline]]).
 > actually built. The *intent* survives (controller code consumes `SimSnapshot`s and
 > forecasts, never physics internals), but the doc section reads as an API reference for
 > an API that isn't there. See [[ven-code-vs-docs-audit]].
+
+## PV curtailment
+
+`PvInverter` (`assets/pv.rs`) distinguishes `rated_kw` (DC nameplate, forecast ceiling) from
+`inverter_max_kw` (AC ceiling — DC potential clamps to it everywhere before any commanded
+limit). The live-simulator export limit lives on per-tick `PvState.export_limit_kw` /
+`curtailment_source` (`none`/`plan`/`capacity`, persisted via `tick_samples` schema v5) rather
+than on `PvInverter` itself, so a historical reconstruction reports the limit that was actually
+active at that tick, not the current one. `dispatcher::resolve_pv_export_limit_kw` computes the
+live limit as the more restrictive of the VTN/sim-inject capacity cap and the [[milp-planner]]'s
+own `p_pv_used[t]` curtailment target — this is what makes VTN `EXPORT_CAPACITY_LIMIT` events
+physically take effect, not just appear in the plan.
+
+## Heater safety envelope
+
+Beyond `temp_min_c`/`temp_max_c` (the **comfort band** a user configures and the planner respects
+under ordinary objectives) sits a wider **physical safety envelope**: no floor on the low side
+(ambient is harmless, the tank just drifts), but a real hard ceiling `temp_safety_max_c` above
+`temp_max_c` (e.g. `ven-2.yaml`'s 40–80 °C comfort / 90 °C true ceiling). `HeaterEmergencyMode`
+(`entities/sim_inject.rs`: `Normal`/`Curtail`/`Absorb`) reaches into that envelope — `Curtail`
+suppresses the forced-on floor, letting the tank drift toward ambient; `Absorb` suppresses the
+forced-off ceiling, allowing heating up to `temp_safety_max_c`. Each direction leaves the other
+bound untouched. Settable today only via `SimInjectState` (manual/test/demo) — no VTN emergency
+directive drives it yet, and the MILP itself still plans only within the comfort band. This is
+the lever [[deviation-arbiter]]'s heater-emergency lever drives.
 
 ## Planning-side counterpart
 

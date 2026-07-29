@@ -2,9 +2,9 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-07-17
-synced_commit: f068d94
-sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx]
+updated: 2026-07-28
+synced_commit: c27b296
+sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/pages/Weather.tsx, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx]
 tags: [ui, react, timeline]
 ---
 
@@ -20,8 +20,14 @@ React + TypeScript SPA (Vite build, nginx-served, port 8214) — the per-site da
   ([[dto-pass-through]]).
 - `VenContext` — multi-VEN selector switching all pages across the three instances.
 - Pages: Dashboard, History (placed directly after Dashboard in the nav),
-  Controller, Programs, Events, Sensors; plus the planner timeline views exercised
-  by `tests/features/ven_ui_planner.feature` and `ven_timeline.feature`.
+  Controller, Programs, Events, Sensors, Weather; plus the planner timeline views
+  exercised by `tests/features/ven_ui_planner.feature` and `ven_timeline.feature`.
+- **Weather page** (`pages/Weather.tsx`): raw MQTT feed (`WeatherRawPanel`) and the
+  derived PV forecast (`WeatherDerivedPanel`) from [[weather-forecast]]'s `GET /weather`
+  — the UI face of that plugin, per the `ui-transparency` rule.
+- **ArbiterSettingsCard** (Devices page, `components/devices/ArbiterSettingsCard.tsx`):
+  the toggle for [[deviation-arbiter]]'s `deviation_arbiter_enabled` runtime gate, via
+  `GET/PUT /arbiter-settings`.
 - Phase 4 additions: `NotificationsBell` in the app bar (badge + feed panel, 10 s
   polling — the UI face of [[notifications]]); a `ComfortCurveCard` on the Devices
   page (per-asset fill%/bid table plus a `ComfortCurveChart` visualization of the
@@ -51,9 +57,12 @@ analysis: [[planner-tab-purpose]]). Composition, top to bottom: objective select
 one real control — min_cost/GHG/grid/autarky/revenue) + collapsible weight legend; SSE
 `PlannerStatusBar` (live solve progress via `usePlannerEvents`); `PlanHeaderBar` (plan
 metadata + warnings badge); `PlanPowerStack`; `PlanTriggerTimeline` (why replans fired);
-`PlanDecisionMatrix` (per-slot decisions, hatched estimated-rate slots);
-`SessionProgressBoard`; collapsed `TraceTable` accordion; `CorrectionBanner` snackbar
-(Layer-1 reactive correction, [[dispatcher]]).
+`PlanDecisionMatrix` (per-slot decisions, hatched estimated-rate slots, plus the
+[[milp-planner]] marginal-cost dual as a "Marginal €" column); `SessionProgressBoard`;
+collapsed `TraceTable` accordion; a `CorrectionBanner` snackbar labeled "Plan F: Layer 1
+reactive correction" that is permanently dead — it listens for SSE `correction_active`/
+`correction_cleared` events that no backend code emits (predates and was never rewired to
+[[deviation-arbiter]]; see that page's DRIFT callout).
 
 **SessionProgressBoard** (`components/sessions/SessionProgressBoard.tsx`, f068d94)
 replaced the Phase-D-orphaned `PacketProgressBoard`, which had polled the deleted
@@ -66,6 +75,10 @@ deadline countdown/OVERDUE, an on-track/at-risk chip comparing the plan's
 `estimated_cost_eur` labeled "est." (per-session accumulated cost doesn't exist —
 BL-39). A `variant="condensed"` chip strip plus a read-only objective chip sits on the
 Dashboard (`dash-session-strip`, BL-36); the objective control stays on the Planner tab.
+
+Controller page: the PV asset's `AssetTimelineChart` shades hardware-capped, planned-curtailment,
+and unplanned regions distinctly, reflecting `PvState.curtailment_source` from [[asset-layer]]'s
+PV curtailment model.
 
 ## Timeline specifics
 
