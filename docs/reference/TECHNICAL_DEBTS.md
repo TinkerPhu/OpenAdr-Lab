@@ -161,6 +161,9 @@ dependency, not by ID — work top-to-bottom.
 7. **R-31, R-43** last — both fully independent of everything above (R-31 is VTN/bff-only;
    R-43 wires VEN report-submission call sites nothing else on this list touches). Order
    between them doesn't matter; listed in ID order.
+8. **R-21** — deliberately last and separate: its own entry has no concrete fix, only a
+   workaround (root cause is allocator/heap-state-dependent inside the native HiGHS library
+   via FFI, not this codebase). Its task below is an investigation, not a code fix.
 
 Each item's tasks follow this repo's test-first convention (`test-first` rule, `CLAUDE.md`):
 write the test, confirm it fails, implement until green. Full verification before considering
@@ -264,3 +267,16 @@ update `docs/history/project_journal.md` and remove the item from this register 
 - [ ] 9.4 Confirm `GET /history/reports` returns non-empty results after a real submission
       (BDD scenario, if practical, per this project's E2E conventions).
 - [ ] 9.5 Full verification; remove R-43 from this register.
+
+### 10. R-21 — Investigate the intermittent `cargo test` heap-corruption crash
+
+- [ ] 10.1 Try to minimize a standalone repro isolating `run_planner_n48_full_horizon` and
+      `solve_ven3_heater_three_tier_zones_feasible` from the rest of the suite.
+- [ ] 10.2 Check for a `good_lp`/HiGHS version bump that might already fix an allocator bug;
+      try upgrading in isolation and re-running the full suite several times.
+- [ ] 10.3 If still reproducible, file an upstream issue against `good_lp` or HiGHS with the
+      minimized repro; link it from this entry.
+- [ ] 10.4 If no upstream fix lands, formalize the existing workaround (e.g. a
+      `scripts/`-level note or CI retry step) rather than leaving it tribal knowledge.
+- [ ] 10.5 This item stays in the register until the crash stops reproducing across several
+      full-suite runs — remove only then, not merely once a workaround is documented.
