@@ -468,7 +468,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
   audit script immediately after a green build, before calling any phase
   "done."
 
-## Heater Safety Envelope (docs/plans/deviation-scenarios-analysis.md §2)
+## Heater Safety Envelope (see docs/architecture/VEN_ARCHITECTURE.md's Heater section)
 
 - **A comfort/service band and a true physical safety limit are two
   different kinds of constraint, even when the code only has one field for
@@ -701,8 +701,8 @@ outes/sim.rs causes a T1+T2 double-solve race:
   checked only `cap_max_import/export_kw`, which stays nonzero regardless
   of SoC — so a battery at 100% SoC would still have been offered as a
   charge lever, violating the arbiter's own "zero-capacity levers must be
-  excluded outright, not deprioritized" rule (§5.3 of
-  `docs/plans/deviation-scenarios-analysis.md`). Caught by a test for the
+  excluded outright, not deprioritized" rule (see
+  `docs/architecture/VEN_ARCHITECTURE.md`'s Deviation Arbiter section). Caught by a test for the
   "everything else is exhausted, only the backstop lever remains" case,
   which only works if the battery is genuinely excluded — not by reasoning
   about the battery lever in isolation. Fix: also gate on

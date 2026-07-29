@@ -127,7 +127,7 @@ gated behind `deviation_arbiter_enabled` (`AppState`, default `false`, matching 
 "opt-in feature" option). Interaction with the adoption gate: unaffected — the arbiter only
 adjusts within a tick on top of whatever plan is currently active; a new `PlanTrigger::
 ResidualThreshold` hard trigger was added separately for the case where accumulated reactive
-correction should force a full replan (§5.5 of `docs/plans/deviation-scenarios-analysis.md`).
+correction should force a full replan (see `docs/architecture/VEN_ARCHITECTURE.md`'s Deviation Arbiter section).
 **Original problem/fix text kept below for history.**
 **Problem:** A finished, unit-tested dead-beat P-controller that reacts to grid deviation by nudging the battery setpoint — but never called from `build_setpoints()`. Deliberately kept unwired pending the wire-or-delete decision below.
 **Fix:** Either wire it behind a profile flag (e.g. `battery.deviation_correction_enabled`) so it's an opt-in feature, or, at a later date, re-confirm with the user that it's genuinely abandoned and delete it then — this entry exists so that decision doesn't get lost.

@@ -12,12 +12,12 @@ use crate::entities::timeline::HeaterPlanTrajectory;
 /// Which safety-envelope override is active for this tick, if any.
 ///
 /// `temp_min_c`/`temp_max_c` are a comfort/service band, not the asset's true physical
-/// limits (docs/plans/deviation-scenarios-analysis.md §2). Outside that band there is a
-/// wider safety envelope — ambient temperature on the low side (no physical harm ever),
-/// `temp_safety_max_c` on the high side (a real hard ceiling) — that only an active VTN
-/// emergency directive should unlock. No such directive is wired in yet; today this is
-/// settable only via `SimInjectState` (manual/test/demo), the same interim path PV
-/// curtailment (`export_limit_kw`) uses before its own planner wiring lands.
+/// limits (see `docs/architecture/VEN_ARCHITECTURE.md`'s Heater section). Outside that band
+/// there is a wider safety envelope — ambient temperature on the low side (no physical harm
+/// ever), `temp_safety_max_c` on the high side (a real hard ceiling) — that only an active VTN
+/// emergency directive should unlock. No such directive is wired in yet; today this is settable
+/// via `SimInjectState` (manual/test/demo) or automatically by the deviation arbiter's heater
+/// lever (`controller::arbiter`) once enabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HeaterEmergencyMode {
@@ -494,8 +494,8 @@ mod tests {
     }
 
     /// Hot water tank fixture: 200 L, 40–80 °C comfort band, low heat loss, 0.5 kW draw.
-    /// Safety ceiling 90 °C, matching the worked example in
-    /// docs/plans/deviation-scenarios-analysis.md §2.
+    /// Safety ceiling 90 °C, matching `ven-2.yaml`'s comfort/safety split
+    /// (see `docs/architecture/VEN_ARCHITECTURE.md`'s Heater section).
     fn hot_water_heater() -> Heater {
         Heater {
             max_kw: 6.0,
@@ -711,7 +711,7 @@ mod tests {
         );
     }
 
-    // ── emergency safety envelope (§2 of deviation-scenarios-analysis.md) ─────
+    // ── emergency safety envelope (see docs/architecture/VEN_ARCHITECTURE.md) ─────
 
     #[test]
     fn curtail_mode_suppresses_emergency_heat_below_temp_min() {

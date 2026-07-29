@@ -769,7 +769,7 @@ fn ctrl_import_malus_zero_when_pv_covers_full_tier() {
     }
 }
 
-// ── Marginal-cost dual LP (§5.2, deviation-scenarios-analysis.md) ────────────
+// ── Marginal-cost dual LP (see docs/architecture/VEN_ARCHITECTURE.md) ────────
 
 #[test]
 fn marginal_cost_matches_tariff_when_nothing_binding() {

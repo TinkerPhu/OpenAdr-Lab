@@ -1,4 +1,4 @@
-//! The deviation arbiter (§5.3 of `docs/plans/deviation-scenarios-analysis.md`,
+//! The deviation arbiter (see `docs/architecture/VEN_ARCHITECTURE.md`,
 //! `openspec/changes/deviation-arbiter/`).
 //!
 //! Single owner of every reactive (non-plan, non-VTN-override) actuator

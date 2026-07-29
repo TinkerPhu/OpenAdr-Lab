@@ -14,9 +14,9 @@ impl SimState {
     /// `mod.rs`; read-only). `None` if no base-load asset is configured.
     ///
     /// Closes the base-load half of the one-tick lag `peek_pv_kw` already
-    /// closes for PV — a future deviation arbiter needs both uncontrollable
+    /// closes for PV — the deviation arbiter needs both uncontrollable
     /// inputs to be this tick's value, not last tick's `AssetSnapshot.power_kw`
-    /// (`docs/plans/deviation-scenarios-analysis.md` §1). Must stay in
+    /// (see `docs/reference/KEY_LEARNINGS.md`'s Deviation Absorber section). Must stay in
     /// lockstep with `tick()`'s formula —
     /// `peek_base_load_kw_matches_tick_output_for_same_now` in
     /// `simulator/tests/peek_base_load_kw_tests.rs` guards against drift.
