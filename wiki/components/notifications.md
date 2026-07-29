@@ -2,9 +2,9 @@
 title: Notification Feed
 type: component
 created: 2026-07-12
-updated: 2026-07-12
-synced_commit: c5a1d03
-sources: [VEN/src/services/notify.rs, VEN/src/entities/notification.rs, VEN/src/routes/notifications.rs, VEN/src/history_store/notifications.rs, VEN/ui/src/components/NotificationsBell.tsx, VEN/src/tasks/poll_signals.rs, VEN/src/tasks/poll_events.rs]
+updated: 2026-07-28
+synced_commit: c27b296
+sources: [VEN/src/services/notify.rs, VEN/src/entities/notification.rs, VEN/src/routes/notifications.rs, VEN/src/history_store/notifications.rs, VEN/ui/src/components/NotificationsBell.tsx, VEN/src/tasks/poll_signals.rs, VEN/src/tasks/poll_events.rs, VEN/ui/src/pages/Notifications.tsx]
 tags: [notifications, ux, phase4]
 ---
 
@@ -27,6 +27,18 @@ enum, message, optional asset/event refs) fans out from the application-layer
    to SSE exactly like `/plan/events` (lagged clients never poison the sender).
 3. **History store** — `notifications` table (schema v2, [[history-store]]);
    the ring is re-seeded from it at startup so the feed survives restarts.
+
+## Dedup (030: ven-notification-dedup-viewer)
+
+`Notifier::notify` takes an optional `dedup_key`; a repeat within `dedup_window()` (30 min) of an
+existing notification carrying the same key updates that row's `count`/`last_seen_at`
+(`state.bump_notification_seen`) and re-broadcasts it — clients reconcile by id over SSE — instead
+of creating a new row. Notifications without a `dedup_key` never dedup. History schema bumped to
+v4 to persist `count`/`last_seen_at`. `GET /notifications/history` adds a severity filter and
+backs a dedicated `Notifications.tsx` page (`xN` badges, bell "view all" link) distinct from the
+bell popover's live ring. A storage-error `ALERT` producer at the history-sampler boundary uses a
+stable `dedup_key` so repeated storage failures collapse into one escalating badge rather than
+flooding the feed.
 
 Producers depend on the `Notifier` service only — inner rings gain no outward
 deps ([[ven-hexagonal-architecture]]).

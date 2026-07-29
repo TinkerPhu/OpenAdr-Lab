@@ -2,8 +2,8 @@
 title: Dispatcher
 type: component
 created: 2026-07-04
-updated: 2026-07-11
-synced_commit: b1aba12
+updated: 2026-07-28
+synced_commit: c27b296
 sources: [VEN/src/controller/dispatcher.rs, VEN/src/tasks/sim_tick/, VEN/src/controller/monitor.rs, docs/architecture/VEN_ARCHITECTURE.md]
 tags: [dispatcher, realtime, ledger]
 ---
@@ -27,7 +27,12 @@ Per tick, `build_setpoints(plan, sim, capacity, heater_setpoint_c, now, overlay_
    plan-level EV allocation exists and the overlay is enabled, live PV surplus (after
    all other loads *and* any planned battery charging) is routed to the EV up to
    `max_charge_kw`. Auto-paused while an `EvSession` is active
-   (`EvSettings.opportunistic_charging_enabled`, `tasks/sim_tick/tick.rs:44`).
+   (`EvSettings.opportunistic_charging_enabled`, `tasks/sim_tick/tick.rs:44`). **Only
+   runs when [[deviation-arbiter]]'s `deviation_arbiter_enabled` is false** — the
+   overlay call is pinned to the disabled-arbiter rollout-gate path
+   (`dispatcher.rs:217-219`); when the arbiter is enabled, `controller::arbiter::reconcile`
+   owns the EV-surplus decision instead, as one of its ranked levers, called right after
+   `build_setpoints` in the tick loop.
 6. Apply the **dispatch override** (Phase 3, WP3.4 — `apply_dispatch_override` in
    `tasks/sim_tick/helpers.rs`, composed in `build_tick_setpoints`): while a
    `DISPATCH_SETPOINT` window is active and no alert window is (alert wins — safety
@@ -51,9 +56,10 @@ Per tick, `build_setpoints(plan, sim, capacity, heater_setpoint_c, now, overlay_
   appear in `GET /sim` and the ledger, and fires a replan when they complete
   (`sim_tick/publish.rs`).
 
-There is no "auto-follow" concept and no `NetDeviation` distribution across assets — the
-only live reactive layer is the surplus-EV overlay above. The battery deviation
-correction (`apply_battery_correction_overlay`, a dead-beat P-controller on grid
-deviation) is implemented and unit-tested but deliberately **not wired** into
-`build_setpoints` (`dispatcher.rs:188`) — kept intentionally rather than deleted;
-`docs/BACKLOG.md` BL-22 tracks wiring it behind a profile flag.
+There is no "auto-follow" concept and no `NetDeviation` distribution across assets driven from
+inside `build_setpoints` itself — real-time deviation correction across all assets is now
+[[deviation-arbiter]]'s job, running after `build_setpoints` on the same tick when enabled. The
+battery deviation correction (`apply_battery_correction_overlay`, a dead-beat P-controller on grid
+deviation) is implemented and unit-tested but deliberately **not wired** into `build_setpoints`
+(`dispatcher.rs:188`) — kept intentionally rather than deleted; `docs/BACKLOG.md` BL-22 tracks
+wiring it behind a profile flag.

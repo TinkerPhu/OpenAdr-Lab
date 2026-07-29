@@ -2,9 +2,9 @@
 title: Pi4 Lease Lock
 type: decision
 created: 2026-07-17
-updated: 2026-07-17
-synced_commit: 5e001dd
-sources: [scripts/pi4_lock.sh, run_all_tests.sh, .claude/CLAUDE.md]
+updated: 2026-07-28
+synced_commit: c27b296
+sources: [scripts/pi4_lock.sh, scripts/wsl_lock.sh, run_all_tests.sh, .claude/CLAUDE.md]
 tags: [pi4, docker, concurrency, dev-workflow]
 ---
 
@@ -51,6 +51,18 @@ waits until its entry is first. Rejected for two reasons
   releases it via EXIT trap; manual `ssh Pi4-Server docker …` sequences (including
   [[fleet-tooling]] work) must bracket themselves with acquire/release per the
   `.claude/CLAUDE.md` rule.
+
+## Same pattern for the shared WSL instance (`scripts/wsl_lock.sh`)
+
+The dev laptop has only 8 GB RAM (`.claude/CLAUDE.md` §memory-budget); a `wsl cargo
+build/check/test/clippy` can exhaust the pagefile and crash WSL, and — same root cause as the
+Pi4 — multiple worktrees/sessions share the one WSL instance. `wsl_lock.sh` copies
+`pi4_lock.sh`'s mechanism verbatim (self-declared lease as a UTC epoch, re-entrant per owner,
+dead-lock stealing, `acquire` polling then exiting 2 after ~9 min) with two differences: the
+lock lives *inside* WSL (`wsl bash -s --` instead of `ssh <host> bash -s --`), and the default
+lease is 20 min / 10 s poll (vs. Pi4's 60 min / 20 s) — shorter because it's guarding a local
+build, not a remote multi-stack docker run. `.claude/CLAUDE.md` §wsl-lock requires it around
+every large-memory WSL command.
 
 ## Limits
 
