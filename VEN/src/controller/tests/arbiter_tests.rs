@@ -1,6 +1,6 @@
-//! Unit tests for the deviation arbiter. Reconstructs §5.4's worked examples
-//! from `docs/plans/deviation-scenarios-analysis.md` as table tests, plus the
-//! lever-switching-chatter and zero-capacity-exclusion invariants from §5.3/§4a.
+//! Unit tests for the deviation arbiter. Reconstructs the design's worked examples
+//! (see `docs/architecture/VEN_ARCHITECTURE.md`'s Deviation Arbiter section) as table
+//! tests, plus the lever-switching-chatter and zero-capacity-exclusion invariants.
 
 use super::*;
 use crate::controller::simulator_port::{AssetSnapshot, GridSnapshot};

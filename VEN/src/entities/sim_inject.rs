@@ -23,7 +23,7 @@ pub struct SimInjectState {
     pub heater_temp_min_c: Option<f64>,
     pub heater_temp_max_c: Option<f64>,
     /// Manual stand-in for a VTN emergency-curtailment directive (no such directive is
-    /// wired in yet — see docs/plans/deviation-scenarios-analysis.md §2/§7 task 1).
+    /// wired in yet — see `docs/architecture/VEN_ARCHITECTURE.md`'s Heater section).
     pub heater_emergency_curtail: Option<bool>,
     /// Manual stand-in for a VTN emergency-absorption directive (ibid).
     pub heater_emergency_absorb: Option<bool>,

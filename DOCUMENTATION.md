@@ -11,7 +11,7 @@
 2. [Feature Reference](#2-feature-reference)
    - 2.1 [Simulation Engine](#21-simulation-engine)
    - 2.2 [Energy Planning (MILP)](#22-energy-planning-milp)
-   - 2.3 [Real-time Deviation Absorption](#23-real-time-deviation-absorption) *(planned — not yet implemented)*
+   - 2.3 [Deviation Arbiter](#23-deviation-arbiter)
    - 2.4 [User Energy Requests](#24-user-energy-requests)
    - 2.5 [VTN Integration (OpenADR 3)](#25-vtn-integration-openadr-3)
    - 2.6 [Report Obligations](#26-report-obligations)
@@ -274,15 +274,32 @@ When `elapsed_s ≥ plan_adoption_decay_s` the plan is considered fully decayed 
 
 > **Reference:** [VEN_ARCHITECTURE.md](docs/architecture/VEN_ARCHITECTURE.md) · [heater_tank_milp_planning_model.md](docs/architecture/heater_tank_milp_planning_model.md)
 
-### 2.3 Real-time Deviation Absorption *(planned — not yet implemented)*
+### 2.3 Deviation Arbiter
 
-A real-time control layer that corrects actual-vs-plan deviations between planning cycles was built,
-iterated on, and removed twice (`absorber.rs`, feature 017) after it fought with the MILP plan and
-the opportunistic EV-surplus overlay and produced sustained oscillation. The current tick loop does
-not run any deviation absorber; deviations between planned and actual power are visible in the
-simulator state but trigger replanning only on the periodic schedule.
+An earlier real-time control layer that corrected actual-vs-plan deviations between planning
+cycles was built, iterated on, and removed twice (`absorber.rs`, feature 017) after it fought with
+the MILP plan and the opportunistic EV-surplus overlay and produced sustained oscillation. Its
+replacement, the **deviation arbiter** (`controller::arbiter::reconcile`), is implemented and runs
+once per 1 s tick: it computes this tick's live deviation between the plan's expected net site
+power and a current (not one-tick-stale) projection, ranks the available levers — battery, EV,
+heater pause/emergency-mode, PV curtailment backstop — by their marginal €/kWh
+(`PlanTimeSlot.marginal_cost_import/export_eur_per_kwh`, a second cheap LP solve per planning
+cycle with the winning MILP's binaries fixed), and greedily absorbs the deviation cheapest-lever
+first, excluding any lever with zero remaining capacity outright rather than merely
+deprioritizing it. Absorbed kWh on SoC-coupled assets (battery, EV) accumulates in a per-asset
+residual; once it crosses a capacity-fraction threshold past a cooldown, it fires a
+`PlanTrigger::ResidualThreshold` for a fresh MILP replan.
 
-> Design reference and rebuild proposal: `docs/plans/deviation-scenarios-analysis.md`
+It is the single owner of every reactive actuator write per tick — subsuming the opportunistic
+EV-surplus overlay rather than running alongside it as a second, uncoordinated loop, which is
+what caused feature 017's oscillation. Gated behind `deviation_arbiter_enabled` (`AppState`,
+default `false` in every profile) for a fully reversible rollout — exposed via `GET`/`PUT
+/arbiter-settings` and the VEN UI's Devices page. When disabled, the tick loop takes the
+pre-arbiter code path unchanged.
+
+> Full design and implementation detail: `docs/architecture/VEN_ARCHITECTURE.md`'s Deviation
+> Arbiter section; postmortem of the removed feature 017: `docs/reference/KEY_LEARNINGS.md`'s
+> Deviation Absorber section.
 
 ### 2.4 User Energy Requests
 *(UC-01, UC-02, UC-06, UC-09; FR-ASSET-04, FR-OA-04)*
@@ -1458,13 +1475,14 @@ assets:
 
 **Emergency safety envelope** (`HeaterEmergencyMode`, `VEN/src/assets/heater.rs`): `temp_min_c`/
 `temp_max_c` are a comfort band the planner respects under normal objectives — not the asset's true
-limits (see `docs/plans/deviation-scenarios-analysis.md` §2 for the full reasoning). `Curtail` mode
-suppresses the forced-on emergency heat at `temp_min_c`, letting the tank drift toward ambient (no
-physical floor); `Absorb` mode suppresses the forced-off ceiling at `temp_max_c`, allowing heating up
-to `temp_safety_max_c` instead. Each direction leaves the other bound's normal behavior untouched.
-Settable today only via `POST /sim/inject` (`heater_emergency_curtail`/`heater_emergency_absorb`,
-Behaviour C — held while active, snaps back to `Normal` on release) — no VTN emergency directive
-drives it automatically yet, and the MILP still plans only within the comfort band.
+limits. `Curtail` mode suppresses the forced-on emergency heat at `temp_min_c`, letting the tank
+drift toward ambient (no physical floor); `Absorb` mode suppresses the forced-off ceiling at
+`temp_max_c`, allowing heating up to `temp_safety_max_c` instead. Each direction leaves the other
+bound's normal behavior untouched. Settable via `POST /sim/inject`
+(`heater_emergency_curtail`/`heater_emergency_absorb`, Behaviour C — held while active, snaps back
+to `Normal` on release) or, when `deviation_arbiter_enabled` (§2.3), automatically by the
+arbiter's heater lever once the deviation's marginal cost crosses a threshold — no VTN emergency
+directive drives it yet, and the MILP still plans only within the comfort band.
 
 ---
 

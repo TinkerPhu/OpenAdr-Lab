@@ -69,7 +69,7 @@ pub struct PlanTimeSlot {
     pub grid_effective_cost: f64,
     /// Shadow price on this slot's power-balance constraint: how much the planner's
     /// objective would change per extra kWh imported, from a second LP solve with the
-    /// winning MILP's binary decisions fixed (deviation-scenarios-analysis.md §5.2).
+    /// winning MILP's binary decisions fixed (see `docs/architecture/VEN_ARCHITECTURE.md`).
     /// Read-only diagnostic — does not influence any other field on this slot.
     /// `#[serde(default)]` so plans persisted before this field existed still deserialize.
     #[serde(default)]

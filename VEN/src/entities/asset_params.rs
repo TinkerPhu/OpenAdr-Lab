@@ -152,8 +152,8 @@ pub enum PvCurtailmentSource {
     Plan,
     Capacity,
     /// The deviation arbiter tightened the export limit as a backstop lever
-    /// (§5.4 of `docs/plans/deviation-scenarios-analysis.md`, only offered
-    /// once battery/EV/heater levers are exhausted). See `controller::arbiter`.
+    /// (see `docs/architecture/VEN_ARCHITECTURE.md`'s Deviation Arbiter section, only
+    /// offered once battery/EV/heater levers are exhausted). See `controller::arbiter`.
     Arbiter,
 }
 
