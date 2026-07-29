@@ -2,9 +2,9 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-07-16
-synced_commit: f08e469
-sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning.rs, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md]
+updated: 2026-07-28
+synced_commit: c27b296
+sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md, VEN/src/controller/milp_planner/solver_duals.rs]
 tags: [planner, milp, highs, optimization]
 ---
 
@@ -76,7 +76,7 @@ see [[milp-over-greedy]].
   actually drives scheduling ([[tariffs-and-capacity]]).
 - **Asset isolation**: asset physics enter as `Vec<Box<dyn AssetMilpContext>>` — the
   planner never imports concrete asset types ([[ven-hexagonal-architecture]]).
-  `tasks/planning.rs` reaches the solver through the `SolverPort` trait
+  `tasks/planning/mod.rs` reaches the solver through the `SolverPort` trait
   (`controller/solver_port.rs`), not `run_planner()` directly — `MilpSolver`
   (`milp_planner/mod.rs`) is the real implementation, and `services::PlanningService::solve_plan`
   is the only caller of `SolverPort::solve`. The actual HiGHS call still runs inside
@@ -95,7 +95,7 @@ see [[milp-over-greedy]].
 - **Terminal energy rewards**: battery and heater get an end-of-horizon stored-energy
   credit auto-computed from the mean import tariff (battery: × round-trip efficiency;
   heater: + ctrl-import malus), profile-overridable — stops the optimizer from draining
-  storage right before the horizon edge (`tasks/planning.rs:185-224`).
+  storage right before the horizon edge (`tasks/planning/cycle.rs`).
 - **Phase 2 is a hard-bounded lexicographic pass, not a weighted blend**: it adds the
   constraint `phase1_cost ≤ C* + phase2_epsilon_eur` and then minimises switching/
   startup/ramp/tier-preference terms only — never trades cost for friction beyond that
@@ -113,6 +113,16 @@ see [[milp-over-greedy]].
 - **`solver_timeout_s`** (profile field, default 60 s) bounds the HiGHS time limit for
   both phases — see [[reliability-and-config]] for this and the other profile-driven
   config knobs.
+- **Marginal-cost extension** (`solver_duals.rs::solve_marginal_costs`, deviation-scenarios-analysis.md
+  §5.2): a second, cheap LP solve per planning cycle, re-declaring every winning MILP
+  binary as a fixed continuous value (`min == max == winning_value` — HiGHS returns
+  all-zero duals on any model with an integer column) and reading the real shadow price
+  off each slot's power-balance row. Exposed as `PlanTimeSlot.marginal_cost_import_eur_per_kwh`
+  / `marginal_cost_export_eur_per_kwh` — directional because the objective can be kinked
+  at zero net exchange (self-consumption maximisation, autarky). This is a **read-only
+  diagnostic** feeding the UI's Decision Matrix "Marginal €" column; it does not drive
+  scheduling itself, but it is the signal [[deviation-arbiter]] ranks its real-time levers
+  by.
 
 ## File map
 
@@ -127,9 +137,10 @@ see [[milp-over-greedy]].
 | Stale-rate policy dispatch (WP4.4) | `stale_rates.rs` |
 | Request-mode EV semantics (WP4.1) | `VEN/src/assets/ev_milp.rs` (via `AssetMilpContext`) |
 | Cross-asset interactions | `VEN/src/controller/milp_interactions.rs` |
+| Marginal-cost dual extraction (§5.2) | `solver_duals.rs` |
 | Plan translation + fallback plan | `results.rs` |
 | Per-session flexibility envelopes | `envelopes.rs` |
-| Planning loop | `VEN/src/tasks/planning.rs` |
+| Planning loop | `VEN/src/tasks/planning/mod.rs` (entry) + `cycle.rs` (terminal rewards, cycle inputs) |
 | Acceptance gate + heater anchor + cycle inputs | `VEN/src/services/planning.rs` |
 | SimState-coupled cycle helpers (sim clone, PV-inject patch, `build_asset_contexts`) | `VEN/src/simulator/plan_context.rs` |
 
@@ -149,4 +160,5 @@ The terminal-energy reward (`c_terminal`) model — why heater/battery terminal
 state is credited at horizon end and the per-asset coefficient table — is
 documented in `docs/architecture/ven_milp_planner.md` §7.
 
-Downstream, the plan is executed slot-by-slot by the [[dispatcher]].
+Downstream, the plan is executed slot-by-slot by the [[dispatcher]], with real-time
+deviation correction owned by the [[deviation-arbiter]] when enabled.

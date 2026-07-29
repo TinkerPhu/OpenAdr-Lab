@@ -23,8 +23,10 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[history-store]] — VEN HistoryPort/SqliteHistoryStore + sampler + routes, VTN BFF recorder
 - [[fleet-tooling]] — fleet.sh (up/down/status), bulk VEN registration, GB-06/GB-09
 - [[experiment-harness]] — scenario YAMLs, real-time runner, KPI extraction, comparison reports
-- [[notifications]] — user notification feed: ring + SSE + persistence, edge-triggered producers, dedup via stable warning text
+- [[notifications]] — user notification feed: ring + SSE + persistence, edge-triggered producers, dedup_key rolling-window collapse + history viewer
 - [[heuristics-pipeline]] — learned per-asset baselines: SITE_RESIDUAL signal, trapezoid appliance noise, weekday/weekend EWMA profiles, planner/forecast consumers
+- [[deviation-arbiter]] — single real-time reconciler: marginal-cost lever ranking, residual escalation to replan, replaces the twice-removed absorber + opportunistic overlay
+- [[weather-forecast]] — MQTT-ingested external forecast → physics-based PV generation, wired into both the planner and the live simulator's PV ground truth
 
 ## Concepts
 - [[openadr-3]] — protocol entities, event types, certification profiles, 3.0 vs 3.1 skew
@@ -46,7 +48,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[hexagonal-refactoring]] — spec series 015–029, ports for testability and swappability
 - [[dto-pass-through]] — OpenADR spec field names pass through all layers unnormalised
 - [[superpowers-not-adopted]] — agentic framework evaluated 2026-06-25; only the worktree-per-feature pattern borrowed
-- [[pi4-lease-lock]] — lease lock on the Pi4 serializes parallel sessions' docker builds/tests; why not a queue file
+- [[pi4-lease-lock]] — lease lock on the Pi4 (and, via wsl_lock.sh, the shared WSL instance) serializes parallel sessions' builds/tests; why not a queue file
 
 ## Sources
 _none yet — seed pages cite repo files directly; per-document summary pages are created by `/wiki-ingest`_
@@ -60,4 +62,4 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[planner-tab-purpose]] — what the Planner tab is for (user vs. debug view), keep-don't-dismantle verdict, improvements filed as BL-36..38
 
 ---
-Pages: 38 · Last sync: 2026-07-16 (Phase 5 heuristics + total review: new heuristics-pipeline page; milp-planner, ven-ui, asset-layer, ven-hexagonal-architecture, vtn-stack, testing-strategy updated, f08e469)
+Pages: 42 · Last sync: 2026-07-28 (deviation arbiter + weather forecast plugin + PV curtailment + solver marginal-cost + notification dedup + wsl_lock: new deviation-arbiter and weather-forecast pages; milp-planner, dispatcher, asset-layer, notifications, ven-ui, pi4-lease-lock updated, c27b296)
