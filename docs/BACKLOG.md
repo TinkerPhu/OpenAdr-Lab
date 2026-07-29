@@ -275,3 +275,84 @@ features in the lockfile, and `cargo audit` scans the lockfile, hence the hit. N
 
 **Risk context:** Lab/Pi4 deployment — not internet-exposed. Re-run both audits before
 any internet-exposed deployment.
+
+---
+
+## Implementation Task List — High / Medium-High Gain Items
+
+Scope: the only items currently rated Gain: High or Medium-High (BL-09, BL-34, BL-40).
+Ordered by dependency, not by ID — work top-to-bottom.
+
+**Why this order:**
+
+1. **BL-40** first — fully isolated to `results.rs`'s four allocation-cost blocks and their
+   tests. Touches no solver constraint, so it can't collide with what BL-34/BL-09 change in
+   the same solve. Smallest, lowest-risk, do it as a quick win.
+2. **BL-34** second — adds new MILP tier constraints/rewards to the allocation model itself.
+   Land this before BL-09 so Phase 6's slot-reallocation logic is built and tested against
+   the *final* constraint model, not one that later grows new comfort-tier constraints
+   underneath it.
+3. **BL-09** last — the largest item (5–8h), a new solver phase built on top of an
+   already-stable allocation model. Also the item that unblocks BL-35 (tier-fallback
+   notifications — Low gain, not in this list) once it lands.
+
+Each item's tasks follow this repo's test-first convention (`test-first` rule,
+`CLAUDE.md`): write the test, confirm it fails, implement until green. Full verification
+before considering an item done: `wsl cargo test -j 2 -p ven-app` under `wsl_lock`,
+`cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+`scripts/audit_file_sizes.py`; update `docs/history/project_journal.md` and remove the
+item from this backlog once resolved.
+
+### 1. BL-40 — `AssetAllocation.cost_eur` sign fix
+
+- [ ] 1.1 Decide the semantics question the item itself flags: align `AssetAllocation.cost_eur`
+      with `solved_session_cost()`'s opportunity-cost convention (`+`, forgone export revenue)
+      rather than keep the old credit convention (`−`). Recommended, since `solved_session_cost`
+      is the newer, already-scrutinized convention from the BL-36 rebuild.
+- [ ] 1.2 Write a failing unit test (`controller/milp_planner/tests/`) asserting a slot fully
+      covered by PV surplus reports `cost_eur == surplus_power_kw × export_tariff_eur_kwh × dt_h`
+      (positive) for the EV allocation block in `results.rs::translate_to_plan`.
+- [ ] 1.3 Flip the sign in the EV block; confirm the new test passes; update any existing test
+      that asserted the old sign.
+- [ ] 1.4 Repeat 1.2–1.3 for the heater, shiftable-load, and battery-charging blocks.
+- [ ] 1.5 Add a test asserting the decision matrix and the envelope's session-total cost agree
+      in sign for a PV-surplus scenario spanning multiple asset types.
+- [ ] 1.6 Full verification (see above); update `docs/history/project_journal.md`; remove BL-40
+      from this backlog.
+
+### 2. BL-34 — Comfort curves reach the MILP constraints
+
+- [ ] 2.1 Trace `controller/user_request.rs::create_from_body` to confirm exactly where the
+      resolved `ComfortRate` (`_comfort_rates`) is dropped today.
+- [ ] 2.2 Design pass: decide how a `ComfortRate` fill-level-vs-time curve maps to MILP tier
+      constraints/rewards per asset — heater already has mid/full tiers; battery/EV likely need
+      a new soft-constraint reward term rather than a hard tier. Needs its own short design
+      note before implementation, given the item's own "per asset path" complexity.
+- [ ] 2.3 Write a failing planner unit test (per the item's own Verify note): two identical
+      sessions with different `ComfortRate` curves produce different allocations.
+- [ ] 2.4 Wire the resolved curve into MILP tier constraints/rewards in the session-intent path.
+- [ ] 2.5 Add a no-curve-session regression test confirming unchanged fallback to
+      `default_comfort_rates()`.
+- [ ] 2.6 Manual UI check: confirm the existing comfort-curve sliders visibly change a real
+      plan (or an E2E scenario, if manual verification isn't practical this session).
+- [ ] 2.7 Full verification; update `docs/history/project_journal.md`; remove BL-34 from this
+      backlog.
+
+### 3. BL-09 — Phase 6: penalty threshold check
+
+- [ ] 3.1 Design pass: penalty rule configuration shape (new profile YAML section, e.g.
+      `planner.penalty_thresholds`), threshold evaluation logic, and the cost-comparison model
+      (penalty cost vs. reschedule/avoidance cost).
+- [ ] 3.2 Write a failing BDD scenario (per the item's own Verify note): configure a 10 kW
+      penalty threshold, schedule 12 kW of load in one slot, assert the planner splits it
+      across two slots to stay below threshold.
+- [ ] 3.3 Implement Phase 6 after Phase 5: for each FIRM slot, evaluate projected peak against
+      the configured threshold.
+- [ ] 3.4 Implement the cost comparison (penalty cost vs. avoidance cost) and the reallocation
+      step when avoidance is cheaper.
+- [ ] 3.5 Unit tests for the three cases: threshold not exceeded (no change); exceeded but
+      avoidance costlier (penalty accepted); exceeded and avoidance cheaper (reschedule).
+- [ ] 3.6 Full verification, including the new BDD scenario on Pi4 (`bash run_all_tests.sh
+      --e2e`); update `docs/history/project_journal.md`; remove BL-09 from this backlog.
+- [ ] 3.7 Note for later (not in this list): BL-35's tier-fallback notification producers
+      become buildable once this lands.
