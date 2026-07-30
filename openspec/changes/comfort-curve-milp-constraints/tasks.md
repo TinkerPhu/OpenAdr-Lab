@@ -106,3 +106,10 @@
       learnings (e.g. anything discovered in task 2.1/2.2 that diverged from the design).
 - [ ] 6.7 Remove the BL-34 entry (and its Implementation Task List section 1 checklist) from
       `docs/BACKLOG.md` once merged.
+- [ ] 6.8 Per the `workflow` rule in `.claude/CLAUDE.md` (no-lingering-plans, added on `main`
+      after this change was proposed): once implemented and tested, delete this openspec
+      change directory (`openspec/changes/comfort-curve-milp-constraints/`, including its
+      `specs/`) rather than leaving or archiving it — its content is git-recoverable via
+      history. Fold anything durable (the phase-gating/mode-scope decisions) into
+      `docs/reference/KEY_LEARNINGS.md` if they'd help future MILP objective work; the
+      day-to-day narrative doesn't need to survive.
