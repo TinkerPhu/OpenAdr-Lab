@@ -2,9 +2,9 @@
 title: VEN Reliability & Config Hygiene
 type: component
 created: 2026-07-04
-updated: 2026-07-11
-synced_commit: 795c8d8
-sources: [VEN/src/tasks/mod.rs, VEN/src/tasks/backoff.rs, VEN/src/entities/error.rs, VEN/src/profile/, VEN/src/tasks/obligation.rs, VEN/src/vtn.rs, VEN/src/controller/milp_planner/mod.rs, VEN/src/services/hems.rs, VEN/src/config.rs, openspec/specs/task-supervisor/spec.md, openspec/specs/domain-errors/spec.md, openspec/specs/profile-validation/spec.md, openspec/specs/planner-config/spec.md]
+updated: 2026-07-30
+synced_commit: d42dcd3
+sources: [VEN/src/tasks/mod.rs, VEN/src/tasks/backoff.rs, VEN/src/entities/error.rs, VEN/src/profile/, VEN/src/tasks/obligation.rs, VEN/src/vtn.rs, VEN/src/controller/milp_planner/mod.rs, VEN/src/services/hems.rs, VEN/src/config.rs, docs/guidelines/ERROR_HANDLING.md, docs/architecture/ven_milp_planner.md]
 tags: [reliability, config, error-handling, ven]
 ---
 
@@ -41,8 +41,8 @@ point. `VtnUnreachable` is classified in `vtn.rs` from a connect/timeout-class
 `reqwest::Error` at every `send()` call site (`classify_reqwest_error`), logged for
 fleet debugging — `VtnPort`'s `Result<T, anyhow::Error>` contract is unchanged.
 
-> **RESOLVED DRIFT** (was: `openspec/specs/domain-errors/spec.md` motivates the type
-> with "infeasibility can retain the last valid plan instead of being handled like a
+> **RESOLVED DRIFT** (the original domain-errors proposal motivated the type with
+> "infeasibility can retain the last valid plan instead of being handled like a
 > transport failure", but neither variant was ever constructed). Investigation for
 > WP2.3 found the spec's "surfaced through the relevant route" framing didn't fit the
 > actual architecture — there was never a route-level error to replace for either

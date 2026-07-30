@@ -25,7 +25,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[experiment-harness]] — scenario YAMLs, real-time runner, KPI extraction, comparison reports
 - [[notifications]] — user notification feed: ring + SSE + persistence, edge-triggered producers, dedup_key rolling-window collapse + history viewer
 - [[heuristics-pipeline]] — learned per-asset baselines: SITE_RESIDUAL signal, trapezoid appliance noise, weekday/weekend EWMA profiles, planner/forecast consumers
-- [[deviation-arbiter]] — single real-time reconciler: marginal-cost lever ranking, residual escalation to replan, replaces the twice-removed absorber + opportunistic overlay
+- [[deviation-arbiter]] — single real-time reconciler: marginal-cost lever ranking, residual escalation to replan, replaces the twice-removed absorber + opportunistic overlay; battery/EV runaway-correction bug found and fixed, `/arbiter-diagnostics` readout added
 - [[weather-forecast]] — MQTT-ingested external forecast → physics-based PV generation, wired into both the planner and the live simulator's PV ground truth
 
 ## Concepts
@@ -62,4 +62,4 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[planner-tab-purpose]] — what the Planner tab is for (user vs. debug view), keep-don't-dismantle verdict, improvements filed as BL-36..38
 
 ---
-Pages: 42 · Last sync: 2026-07-28 (deviation arbiter + weather forecast plugin + PV curtailment + solver marginal-cost + notification dedup + wsl_lock: new deviation-arbiter and weather-forecast pages; milp-planner, dispatcher, asset-layer, notifications, ven-ui, pi4-lease-lock updated, c27b296)
+Pages: 42 · Last sync: 2026-07-30 (deviation-arbiter battery/EV runaway fix + diagnostics surface, BL-40 cost-sign fix, R-52 weather-source liveness, openspec/ cleanup — no more openspec citations anywhere in the wiki, since the underlying change directories/specs are deleted per the project's no-lingering-plans rule: deviation-arbiter, milp-planner, weather-forecast, reliability-and-config, hems-planning, hexagonal-refactoring, ven-ui updated, d42dcd3)

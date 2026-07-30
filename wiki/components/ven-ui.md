@@ -2,8 +2,8 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-07-28
-synced_commit: c27b296
+updated: 2026-07-30
+synced_commit: d42dcd3
 sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/pages/Weather.tsx, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx]
 tags: [ui, react, timeline]
 ---
@@ -27,7 +27,8 @@ React + TypeScript SPA (Vite build, nginx-served, port 8214) — the per-site da
   — the UI face of that plugin, per the `ui-transparency` rule.
 - **ArbiterSettingsCard** (Devices page, `components/devices/ArbiterSettingsCard.tsx`):
   the toggle for [[deviation-arbiter]]'s `deviation_arbiter_enabled` runtime gate, via
-  `GET/PUT /arbiter-settings`.
+  `GET/PUT /arbiter-settings`, plus a live readout (net site power, deviation, active lever)
+  from `GET /arbiter-diagnostics` while enabled.
 - Phase 4 additions: `NotificationsBell` in the app bar (badge + feed panel, 10 s
   polling — the UI face of [[notifications]]); a `ComfortCurveCard` on the Devices
   page (per-asset fill%/bid table plus a `ComfortCurveChart` visualization of the
