@@ -17,8 +17,15 @@ use crate::entities::weather::WeatherForecast;
 
 /// Every status message that hasn't arrived within 2x this interval is
 /// considered dead, per the wire contract's heartbeat cadence.
-#[allow(dead_code)] // consumed by is_alive(), not yet called from production code
 const STATUS_HEARTBEAT_S: u64 = 300;
+
+/// Pure helper for `is_alive()` — testable without a real `Instant`/clock wait.
+fn alive_from_elapsed(elapsed: Option<Duration>, heartbeat_s: u64) -> bool {
+    match elapsed {
+        Some(e) => e < Duration::from_secs(heartbeat_s * 2),
+        None => false,
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct WeatherMqttConfig {
@@ -149,7 +156,6 @@ pub fn parse_status_message(payload: &[u8]) -> Result<WeatherStatusMessage, Stri
 /// that owns the MQTT subscription.
 pub struct MqttWeatherAdapter {
     rx: watch::Receiver<Option<WeatherForecast>>,
-    #[allow(dead_code)] // read by is_alive(), not yet called from production code
     last_status: std::sync::Arc<Mutex<Option<(WeatherStatusMessage, Instant)>>>,
 }
 
@@ -234,23 +240,25 @@ impl MqttWeatherAdapter {
 
         Self { rx, last_status }
     }
-
-    /// Whether the configured source has been heard from (status heartbeat)
-    /// within 2x the documented heartbeat interval. `false` if no status
-    /// message has ever been received.
-    #[allow(dead_code)] // liveness surfacing (health endpoint) not yet wired
-    pub fn is_alive(&self) -> bool {
-        match self.last_status.lock().unwrap().as_ref() {
-            Some((_, seen_at)) => seen_at.elapsed() < Duration::from_secs(STATUS_HEARTBEAT_S * 2),
-            None => false,
-        }
-    }
 }
 
 #[async_trait]
 impl WeatherForecastPort for MqttWeatherAdapter {
     async fn latest(&self) -> Option<WeatherForecast> {
         self.rx.borrow().clone()
+    }
+
+    /// Whether the configured source has been heard from (status heartbeat)
+    /// within 2x the documented heartbeat interval. `false` if no status
+    /// message has ever been received.
+    fn is_alive(&self) -> bool {
+        let elapsed = self
+            .last_status
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|(_, seen_at)| seen_at.elapsed());
+        alive_from_elapsed(elapsed, STATUS_HEARTBEAT_S)
     }
 }
 
@@ -344,5 +352,22 @@ mod tests {
         let missing_status = r#"{ "schema_version": "1.0.0", "source_id": "srf_meteo",
             "ts": "2026-07-19T06:05:00Z" }"#;
         assert!(parse_status_message(missing_status.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn dead_when_no_status_ever_received() {
+        assert!(!alive_from_elapsed(None, STATUS_HEARTBEAT_S));
+    }
+
+    #[test]
+    fn alive_within_2x_heartbeat() {
+        let elapsed = Duration::from_secs(STATUS_HEARTBEAT_S * 2 - 1);
+        assert!(alive_from_elapsed(Some(elapsed), STATUS_HEARTBEAT_S));
+    }
+
+    #[test]
+    fn dead_past_2x_heartbeat() {
+        let elapsed = Duration::from_secs(STATUS_HEARTBEAT_S * 2 + 1);
+        assert!(!alive_from_elapsed(Some(elapsed), STATUS_HEARTBEAT_S));
     }
 }

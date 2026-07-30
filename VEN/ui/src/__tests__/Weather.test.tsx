@@ -46,7 +46,7 @@ function renderWeather() {
 describe("WeatherPage", () => {
   it("shows a no-forecast empty state when no weather feed is configured", () => {
     vi.mocked(useWeather).mockReturnValue({
-      data: { status: "no_forecast", is_fresh: false, raw: null, derived: null },
+      data: { status: "no_forecast", is_fresh: false, source_alive: false, raw: null, derived: null },
       isLoading: false,
     } as ReturnType<typeof useWeather>);
     renderWeather();
@@ -56,7 +56,13 @@ describe("WeatherPage", () => {
 
   it("shows raw and derived panels when both are available and fresh", () => {
     vi.mocked(useWeather).mockReturnValue({
-      data: { status: "ok", is_fresh: true, raw: mockRawForecast, derived: mockDerivedSlots },
+      data: {
+        status: "ok",
+        is_fresh: true,
+        source_alive: true,
+        raw: mockRawForecast,
+        derived: mockDerivedSlots,
+      },
       isLoading: false,
     } as ReturnType<typeof useWeather>);
     renderWeather();
@@ -67,7 +73,13 @@ describe("WeatherPage", () => {
 
   it("shows a stale warning without hiding the raw forecast", () => {
     vi.mocked(useWeather).mockReturnValue({
-      data: { status: "stale", is_fresh: false, raw: mockRawForecast, derived: null },
+      data: {
+        status: "stale",
+        is_fresh: false,
+        source_alive: true,
+        raw: mockRawForecast,
+        derived: null,
+      },
       isLoading: false,
     } as ReturnType<typeof useWeather>);
     renderWeather();
@@ -77,12 +89,48 @@ describe("WeatherPage", () => {
 
   it("shows a derived-unavailable message when raw is present but no PV config exists", () => {
     vi.mocked(useWeather).mockReturnValue({
-      data: { status: "ok", is_fresh: true, raw: mockRawForecast, derived: null },
+      data: {
+        status: "ok",
+        is_fresh: true,
+        source_alive: true,
+        raw: mockRawForecast,
+        derived: null,
+      },
       isLoading: false,
     } as ReturnType<typeof useWeather>);
     renderWeather();
     expect(screen.getByTestId("weather-raw-panel")).toBeVisible();
     expect(screen.getByTestId("weather-derived-unavailable")).toBeVisible();
     expect(screen.queryByTestId("weather-derived-panel")).not.toBeInTheDocument();
+  });
+
+  it("shows a live source chip when source_alive is true", () => {
+    vi.mocked(useWeather).mockReturnValue({
+      data: {
+        status: "ok",
+        is_fresh: true,
+        source_alive: true,
+        raw: mockRawForecast,
+        derived: mockDerivedSlots,
+      },
+      isLoading: false,
+    } as ReturnType<typeof useWeather>);
+    renderWeather();
+    expect(screen.getByTestId("weather-source-alive")).toHaveTextContent("Source: Live");
+  });
+
+  it("shows an offline source chip when source_alive is false, independent of forecast freshness", () => {
+    vi.mocked(useWeather).mockReturnValue({
+      data: {
+        status: "ok",
+        is_fresh: true,
+        source_alive: false,
+        raw: mockRawForecast,
+        derived: mockDerivedSlots,
+      },
+      isLoading: false,
+    } as ReturnType<typeof useWeather>);
+    renderWeather();
+    expect(screen.getByTestId("weather-source-alive")).toHaveTextContent("Source: Offline");
   });
 });
