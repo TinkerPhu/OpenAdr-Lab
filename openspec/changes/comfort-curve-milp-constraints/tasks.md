@@ -55,22 +55,35 @@
 - [ ] 4.1 Write a failing planner test in `VEN/src/controller/milp_planner/tests/` (new or
       existing EV test file): two EV sessions with `mode: ByDeadline, soft_deadline: true`
       (`MayRun`), identical state/tariffs, differing only in `comfort_rates`, must produce
-      different `e_ev_extra_kwh`/`z_ev_core` results in the solved plan.
-- [ ] 4.2 Confirm the test fails (both sessions currently produce identical allocations).
-- [ ] 4.3 In `ev_milp.rs::from_state`, inside the `UserRequestMode::ByDeadline |
-      UserRequestMode::Asap` match arm (line ~336) only, compute `v_core_eur_kwh =
-      ComfortRate::value_at_fill(&session.comfort_rates, 0.0)` and `v_extra_eur_kwh =
-      ComfortRate::value_at_fill(&session.comfort_rates, 1.0)`, replacing the passed-in
-      `v_ev_core_eur_kwh`/`v_ev_extra_eur_kwh` parameters for that arm's `v_core_eur`
-      (`core_kwh * v_core_eur_kwh`, only when `soft_deadline`) and `e_ev_extra` reward. All
-      other match arms (`Opportunistic | AsapFree`, `MaxCost`, `ByDeadlineFree`) are
-      unchanged — confirmed in design D3 that their `v_extra_eur_kwh` overrides
-      (`v_ev_free_charge_eur_kwh`, `BUDGET_CHARGE_REWARD_EUR_KWH`) are a different signal than
-      comfort preference.
-- [ ] 4.4 Confirm the 4.1 test passes.
-- [ ] 4.5 Add a no-curve-session regression test: a session using `default_comfort_rates()`
-      (no override) produces the same allocation as before this change (compare against a
-      fixture solved with the old hardcoded `PlannerParams` values).
+      different results in the solved plan.
+      **Revised during implementation**: the original plan to assert on `e_ev_extra_kwh`
+      differing doesn't hold — `e_ev_extra` is only bounded *above* by
+      `e_extra_max_kwh * z_ev_core` (`ev_milp.rs::constraints`), nothing lower-bounds it by
+      real charged power, so its reward is a documented no-op for driving allocation. This is
+      an already-known limitation, tracked as **R-18** in `docs/reference/TECHNICAL_DEBTS.md`
+      (found independently again here — same root cause, same fix noted there: couple
+      `e_ev_extra` from below or move to per-slot reward form). Verified empirically
+      (binary-search probe on the reward coefficient) before locking in the test. Switched to
+      asserting on `z_ev_core`
+      commitment (whether the session charges its core target at all) instead — the
+      correctly-wired mechanism (`ev_milp.rs::constraints`'s `ev_energy >= e_core_kwh *
+      z_ev_core`). Test written in `tests/modes.rs`, pinning the fill=1.0 price to `0.0` in
+      both curves to avoid the banked-extra-reward confound cross-contaminating the
+      core-price comparison.
+- [x] 4.2 Confirmed the test fails pre-fix (both sessions charge exactly the core amount,
+      curve has zero effect).
+- [x] 4.3 In `ev_milp.rs::from_state`, inside the `UserRequestMode::ByDeadline |
+      UserRequestMode::Asap` match arm only, compute `v_core_eur_kwh`/`v_extra_eur_kwh` via
+      `ComfortRate::value_at_fill` at `fill=0.0`/`1.0` from `session.comfort_rates` — falling
+      back to the passed-in global defaults when `comfort_rates` is empty (legacy
+      `/ev-session` route, VTN-commanded sessions never resolve a curve). All other match arms
+      unchanged, confirmed in design D3.
+- [x] 4.4 Confirmed the test passes.
+- [x] 4.5 Added two regression tests: `from_state_by_deadline_empty_curve_falls_back_to_global_defaults`
+      (unit-level, `ev_milp.rs`) confirms the empty-curve fallback reproduces the old
+      global-parameter behavior exactly; `test_by_deadline_soft_no_curve_override_uses_default_reward`
+      (`tests/modes.rs`) confirms the EV's real `default_comfort_rates()` values commit as
+      expected, not a no-op zero reward.
 
 ## 5. Heater — new reward term (D4)
 
