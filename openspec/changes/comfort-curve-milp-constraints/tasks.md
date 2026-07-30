@@ -1,11 +1,12 @@
 ## 1. Interpolation helper
 
-- [ ] 1.1 Write failing unit tests in `VEN/src/entities/asset.rs` (near `ComfortRate`) for a
+- [x] 1.1 Write failing unit tests in `VEN/src/entities/asset.rs` (near `ComfortRate`) for a
       new `ComfortRate::value_at_fill(rates: &[ComfortRate], fill: f64) -> f64`: exact
       breakpoint lookup, mid-curve linear interpolation, and out-of-range clamping (per the
       `session-comfort-curve-planning` spec's interpolation requirement).
-- [ ] 1.2 Confirm the tests fail (function doesn't exist yet).
-- [ ] 1.3 Implement `value_at_fill`; confirm the tests pass.
+- [x] 1.2 Confirm the tests fail (function doesn't exist yet).
+- [x] 1.3 Implement `value_at_fill`; confirm the tests pass. (4/4 green, incl. a 3-point curve
+      bracket-interpolation test beyond the spec's 2-point minimum.)
 
 ## 2. Trace and confirm the call chain to `EvSession`/`HeaterTarget`
 
