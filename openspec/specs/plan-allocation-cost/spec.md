@@ -1,4 +1,11 @@
-## ADDED Requirements
+# plan-allocation-cost Specification
+
+## Purpose
+Defines the sign convention for `AssetAllocation.cost_eur` (per-slot, per-asset cost shown on the
+Planner tab's decision matrix), so it stays consistent with `FlexibilityEnvelope`'s
+session-total cost estimate — both must price energy covered by PV surplus the same way.
+
+## Requirements
 
 ### Requirement: PV-surplus consumption priced as opportunity cost
 `AssetAllocation.cost_eur`, computed per slot per asset in
