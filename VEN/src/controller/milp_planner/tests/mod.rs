@@ -684,6 +684,7 @@ fn contexts_from_inputs(
                 initial_z_full: inputs.heat_initial_z_full,
                 c_terminal_eur_kwh: 0.0,
                 anchored_kw: vec![],
+                comfort_full_reward_eur_kwh: 0.0,
             },
         }));
     }
