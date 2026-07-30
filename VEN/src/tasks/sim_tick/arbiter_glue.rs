@@ -42,6 +42,20 @@ pub(crate) async fn apply_residual_escalation(
     }
 }
 
+/// PHASE 3.5 (post-lock): update the preemption-margin hysteresis state
+/// (§4a.1) and record this tick's arbiter reasoning for
+/// `GET /arbiter-diagnostics` (ui-transparency) in one call.
+pub(crate) async fn record_arbiter_outcome(
+    state: &crate::state::AppState,
+    (active_lever, net_kw, dev_kw): (Option<String>, Option<f64>, Option<f64>),
+    now: DateTime<Utc>,
+) {
+    state
+        .set_arbiter_diagnostics(net_kw, dev_kw, active_lever.clone(), now)
+        .await;
+    state.set_arbiter_active_lever(active_lever).await;
+}
+
 /// PHASE 0: user toggle AND no active EvSession. Also updates the derived
 /// `paused_by_active_session` flag on `EvSettings` when it goes stale.
 pub(crate) async fn resolve_overlay_enabled(state: &crate::state::AppState) -> bool {

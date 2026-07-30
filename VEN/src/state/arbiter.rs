@@ -3,9 +3,22 @@
 //! file-size cap; behaves as an ordinary `impl AppState` block.
 
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use std::collections::HashMap;
 
 use super::AppState;
+
+/// Last tick's arbiter reasoning — surfaced via `GET /arbiter-diagnostics`
+/// so the reactive levers aren't only-server-side state (ui-transparency).
+/// `None` fields mirror `ArbiterOutcome`'s: absent during the no-plan-yet
+/// startup window or before the arbiter has run at all this process.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ArbiterDiagnostics {
+    pub net_kw: Option<f64>,
+    pub dev_kw: Option<f64>,
+    pub active_lever: Option<String>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
 
 impl AppState {
     pub async fn deviation_arbiter_enabled(&self) -> bool {
@@ -65,5 +78,24 @@ impl AppState {
 
     pub async fn set_arbiter_active_lever(&self, lever: Option<String>) {
         self.hems.write().await.arbiter_active_lever = lever;
+    }
+
+    pub async fn arbiter_diagnostics(&self) -> ArbiterDiagnostics {
+        self.hems.read().await.arbiter_diagnostics.clone()
+    }
+
+    pub async fn set_arbiter_diagnostics(
+        &self,
+        net_kw: Option<f64>,
+        dev_kw: Option<f64>,
+        active_lever: Option<String>,
+        now: DateTime<Utc>,
+    ) {
+        self.hems.write().await.arbiter_diagnostics = ArbiterDiagnostics {
+            net_kw,
+            dev_kw,
+            active_lever,
+            updated_at: Some(now),
+        };
     }
 }

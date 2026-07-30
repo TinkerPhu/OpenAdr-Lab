@@ -39,3 +39,13 @@ pub async fn put_arbiter_settings(
         deviation_arbiter_enabled: body.deviation_arbiter_enabled,
     })
 }
+
+/// GET /arbiter-diagnostics — last tick's arbiter reasoning (projected net
+/// site power, residual deviation from the plan target, and which lever, if
+/// any, fired) so the reactive levers are visible outside the server process
+/// (ui-transparency — no backend-only decision without an inspectable
+/// surface). `net_kw`/`dev_kw`/`active_lever` are `null` before the arbiter
+/// has run this process, or during the no-plan-yet startup window.
+pub async fn get_arbiter_diagnostics(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.arbiter_diagnostics().await)
+}

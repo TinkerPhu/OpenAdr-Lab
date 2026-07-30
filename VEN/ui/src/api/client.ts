@@ -3,7 +3,7 @@ import type {
   SimInjectState, PlannedRates, OadrCapacityState, Plan, PlannerObjective, AssetLedger,
   UserRequestWithSession, FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
   EvSession, CreateEvSessionBody, EvSettings, UpdateEvSettingsBody,
-  ArbiterSettings, UpdateArbiterSettingsBody,
+  ArbiterSettings, UpdateArbiterSettingsBody, ArbiterDiagnostics,
   HeaterTarget, CreateHeaterTargetBody,
   ShiftableLoad, CreateShiftableLoadBody, BaselineOverride, CreateBaselineOverrideBody,
   ZoneDef,
@@ -441,6 +441,12 @@ export class VenApi {
   async putArbiterSettings(body: UpdateArbiterSettingsBody): Promise<ArbiterSettings> {
     const r = await this.jsonReq("PUT", "/arbiter-settings", body);
     if (!r.ok) throw new Error(`PUT /arbiter-settings ${r.status}`);
+    return r.json();
+  }
+
+  async arbiterDiagnostics(): Promise<ArbiterDiagnostics> {
+    const r = await this.getReq("/arbiter-diagnostics");
+    if (!r.ok) throw new Error(`arbiter-diagnostics ${r.status}`);
     return r.json();
   }
 

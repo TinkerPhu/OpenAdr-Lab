@@ -464,6 +464,16 @@ export type UpdateArbiterSettingsBody = {
   deviation_arbiter_enabled: boolean;
 };
 
+/** Last tick's arbiter reasoning (GET /arbiter-diagnostics) — null fields
+ * before the arbiter has run this process, or during the no-plan-yet
+ * startup window. */
+export type ArbiterDiagnostics = {
+  net_kw: number | null;
+  dev_kw: number | null;
+  active_lever: string | null;
+  updated_at: string | null;
+};
+
 export type HeaterTarget = {
   id: string;
   target_temp_c: number;
