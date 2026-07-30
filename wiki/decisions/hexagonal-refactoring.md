@@ -2,9 +2,9 @@
 title: "Decision: Hexagonal Refactoring of the VEN Backend"
 type: decision
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: 5a9a304
-sources: [.claude/CLAUDE.md, openspec/specs/arch-params-in-entities/, openspec/specs/arch-timeline-in-entities/, docs/architecture/module_dependency_graph.md]
+updated: 2026-07-30
+synced_commit: d42dcd3
+sources: [.claude/CLAUDE.md, docs/architecture/module_dependency_graph.md]
 tags: [decision, architecture, refactoring]
 ---
 
@@ -17,10 +17,10 @@ cannot offer that isolation: it has no seam to substitute a mock adapter, and it
 config and concrete asset types leak into domain logic. Spec series 015–029 (git history
 only — the working spec artifacts were pruned as redundant with this synthesis) and the
 follow-up `fix-arch-layer-violations` change established and then closed the remaining
-gaps: `*Params` structs and timeline data-carrier types now live in `entities/`
-(`openspec/specs/arch-params-in-entities/spec.md`,
-`openspec/specs/arch-timeline-in-entities/spec.md`), and `assets/battery·ev·heater` no
-longer re-export MILP types into the domain.
+gaps: `*Params` structs and timeline data-carrier types now live in `entities/` — enforced by
+the grep invariants in `.claude/CLAUDE.md`'s `ven-architecture` rule (`entities does not import
+from assets`, etc.) — and `assets/battery·ev·heater` no longer re-export MILP types into the
+domain.
 
 Rule enforcement is incremental by design: grep invariants (below) catch regressions
 going forward, but they only cover violations someone has already found — periodic full

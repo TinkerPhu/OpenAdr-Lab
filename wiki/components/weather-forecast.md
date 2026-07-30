@@ -2,9 +2,9 @@
 title: Weather Forecast Plugin
 type: component
 created: 2026-07-28
-updated: 2026-07-28
-synced_commit: c27b296
-sources: [docs/architecture/weather_forecast.md, VEN/src/weather.rs, VEN/src/entities/weather.rs, VEN/src/entities/solar.rs, VEN/src/entities/pv_snow.rs, VEN/src/controller/weather_port.rs, VEN/src/routes/weather.rs, VEN/src/profile/weather_pv.rs, VEN/src/services/forecast.rs, VEN/ui/src/pages/Weather.tsx, openspec/changes/weather-forecast-plugin/, openspec/changes/weather-forecast-visibility/]
+updated: 2026-07-30
+synced_commit: d42dcd3
+sources: [docs/architecture/weather_forecast.md, VEN/src/weather.rs, VEN/src/entities/weather.rs, VEN/src/entities/solar.rs, VEN/src/entities/pv_snow.rs, VEN/src/controller/weather_port.rs, VEN/src/routes/weather.rs, VEN/src/profile/weather_pv.rs, VEN/src/services/forecast.rs, VEN/ui/src/pages/Weather.tsx, VEN/src/services/test_support/mock_weather_port.rs]
 tags: [weather, pv, forecast, mqtt, ven]
 ---
 
@@ -60,10 +60,17 @@ installation, ven-2/ven-3 are hypothetical (12 kWp / 6→8 kWp), and `performanc
 0.87 → 0.84 during calibration. A future PV site added to this lab needs the same manual
 calibration pass, not just a config value copied from an existing VEN.
 
+## Source liveness (R-52, resolved 2026-07-30)
+
+`MqttWeatherAdapter::is_alive()` existed but was unreachable dead code — wired through
+`WeatherForecastPort` (all three implementors, including the test mock), surfaced as
+`source_alive` on `GET /weather` (distinct from `is_fresh`: transport health vs. content age —
+a broker connection can be up with a stale retained message, or vice versa), and given a visible
+chip on the VEN UI Weather page, per the `ui-transparency` rule.
+
 ## Known deferred gaps
 
-`docs/reference/TECHNICAL_DEBTS.md` R-52..R-56: `MqttWeatherAdapter::is_alive()` isn't
-surfaced to `/health` or any metric yet; horizon/shading obstructions and the Perez/HDKR
+`docs/reference/TECHNICAL_DEBTS.md` R-53..R-56: horizon/shading obstructions and the Perez/HDKR
 diffuse-sky model are deliberately deferred accuracy improvements over the current
 isotropic-on-zenith transposition; the snow-cover model's initial state has no cross-check
 against live PV telemetry deviation; the Mosquitto broker accepts anonymous publishes on
@@ -73,8 +80,8 @@ access to run it.
 
 ## Relationship to the deviation arbiter
 
-`docs/plans/deviation-scenarios-analysis.md` §6 scenario B: the weather forecast closes the
-"plan doesn't model PV" precondition [[deviation-arbiter]]'s design once depended on — the
-plan's marginal-cost duals (§5.2) are only meaningful once PV forecast error stops dominating
-the deviation signal. Whether the forecast measurably reduces PV-driven deviation/absorption
-events is still an open, unquantified question.
+The weather forecast closes the "plan doesn't model PV" precondition [[deviation-arbiter]]'s
+design once depended on — the plan's marginal-cost duals (`docs/architecture/ven_milp_planner.md`
+§9) are only meaningful once PV forecast error stops dominating the deviation signal. Whether the
+forecast measurably reduces PV-driven deviation/absorption events is still an open, unquantified
+question.

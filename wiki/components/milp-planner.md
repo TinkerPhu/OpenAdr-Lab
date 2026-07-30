@@ -2,9 +2,9 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-07-28
-synced_commit: c27b296
-sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, openspec/specs/two-phase-milp/spec.md, openspec/specs/planner-config/spec.md, VEN/src/controller/milp_planner/solver_duals.rs]
+updated: 2026-07-30
+synced_commit: d42dcd3
+sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, VEN/src/controller/milp_planner/solver_duals.rs]
 tags: [planner, milp, highs, optimization]
 ---
 
@@ -102,7 +102,7 @@ see [[milp-over-greedy]].
   epsilon. Setting `phase2_epsilon_eur: 0.0` disables Phase 2 entirely (single-pass
   Phase 1 only). If Phase 2 comes back infeasible, the planner logs
   `"phase2 infeasible, falling back to phase1"` and adopts the Phase 1 schedule directly
-  rather than crashing (`openspec/specs/two-phase-milp/spec.md`).
+  rather than crashing.
 - **Initial-slot pinning**: slot 0's heater mode variables (`z_heat_mid[0]`,
   `z_heat_full[0]`) are fixed to the live heater's actual power state at planning time, so
   `sw[0]` — and its Phase 2 switching penalty — reflects a real transition, not a solver
@@ -113,16 +113,25 @@ see [[milp-over-greedy]].
 - **`solver_timeout_s`** (profile field, default 60 s) bounds the HiGHS time limit for
   both phases — see [[reliability-and-config]] for this and the other profile-driven
   config knobs.
-- **Marginal-cost extension** (`solver_duals.rs::solve_marginal_costs`, deviation-scenarios-analysis.md
-  §5.2): a second, cheap LP solve per planning cycle, re-declaring every winning MILP
-  binary as a fixed continuous value (`min == max == winning_value` — HiGHS returns
-  all-zero duals on any model with an integer column) and reading the real shadow price
-  off each slot's power-balance row. Exposed as `PlanTimeSlot.marginal_cost_import_eur_per_kwh`
-  / `marginal_cost_export_eur_per_kwh` — directional because the objective can be kinked
-  at zero net exchange (self-consumption maximisation, autarky). This is a **read-only
-  diagnostic** feeding the UI's Decision Matrix "Marginal €" column; it does not drive
-  scheduling itself, but it is the signal [[deviation-arbiter]] ranks its real-time levers
-  by.
+- **Marginal-cost extension** (`solver_duals.rs::solve_marginal_costs`,
+  `docs/architecture/ven_milp_planner.md` §9): a second, cheap LP solve per planning cycle,
+  re-declaring every winning MILP binary as a fixed continuous value (`min == max ==
+  winning_value` — HiGHS returns all-zero duals on any model with an integer column) and
+  reading the real shadow price off each slot's power-balance row. Exposed as
+  `PlanTimeSlot.marginal_cost_import_eur_per_kwh` / `marginal_cost_export_eur_per_kwh` —
+  directional because the objective can be kinked at zero net exchange (self-consumption
+  maximisation, autarky). This is a **read-only diagnostic** feeding the UI's Decision Matrix
+  "Marginal €" column; it does not drive scheduling itself, but it is the signal
+  [[deviation-arbiter]] ranks its real-time levers by. A dual-solve failure doesn't fail the
+  cycle — both fields fall back to the plain tariff, logged as a warning.
+- **Per-allocation cost sign convention** (BL-40, `docs/architecture/ven_milp_planner.md` §8):
+  `AssetAllocation.cost_eur` (`results.rs::translate_to_plan`) prices energy covered by PV
+  surplus as an **opportunity cost** (forgone export revenue, `+surplus_power_kw ×
+  export_tariff_eur_kwh × dt_h`), not a credit — matching `envelopes.rs::solved_session_cost`'s
+  convention so the Planner tab's per-slot decision matrix and the session-total estimate never
+  disagree in sign on the same energy. Applies to EV/heater/shiftable-load/battery-*charging*;
+  battery-*discharging* uses an unrelated revenue formula. Post-solve reporting only — no
+  solver objective/constraint depends on it.
 
 ## File map
 
@@ -137,7 +146,7 @@ see [[milp-over-greedy]].
 | Stale-rate policy dispatch (WP4.4) | `stale_rates.rs` |
 | Request-mode EV semantics (WP4.1) | `VEN/src/assets/ev_milp.rs` (via `AssetMilpContext`) |
 | Cross-asset interactions | `VEN/src/controller/milp_interactions.rs` |
-| Marginal-cost dual extraction (§5.2) | `solver_duals.rs` |
+| Marginal-cost dual extraction (§9) | `solver_duals.rs` |
 | Plan translation + fallback plan | `results.rs` |
 | Per-session flexibility envelopes | `envelopes.rs` |
 | Planning loop | `VEN/src/tasks/planning/mod.rs` (entry) + `cycle.rs` (terminal rewards, cycle inputs) |

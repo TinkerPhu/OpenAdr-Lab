@@ -2,9 +2,9 @@
 title: HEMS Planning Concepts
 type: concept
 created: 2026-07-04
-updated: 2026-07-06
-synced_commit: c5a1d03
-sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems/, openspec/specs/ev-session-request-completion/spec.md, VEN/src/entities/device_session.rs]
+updated: 2026-07-30
+synced_commit: d42dcd3
+sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems/, VEN/src/entities/device_session.rs]
 tags: [hems, planning, sessions, domain]
 ---
 
@@ -56,7 +56,7 @@ consulted.
 **Session teardown closes the loop back onto the request.** Deleting an `EvSession`
 (`DELETE /ev-session`, `VEN/src/routes/hems/ev.rs`) does not just clear session state — it
 walks `UserRequest`s by `session_id` and transitions any still `Active` to `Completed`
-before the session is cleared (`openspec/specs/ev-session-request-completion/spec.md`).
+before the session is cleared (`docs/architecture/VEN_ARCHITECTURE.md` §4.7, `/ev-session` row).
 Only `Active` requests are touched; `Cancelled` ones and requests tied to a different
 session are left alone. Without this, a completed or manually-ended charge would leave
 its originating request stuck `Active` forever — a UI-visible dangling state.
