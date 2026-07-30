@@ -14,6 +14,12 @@ pub trait WeatherForecastPort: Send + Sync {
     /// `None` when no forecast has ever been received (or no weather
     /// source is configured at all).
     async fn latest(&self) -> Option<WeatherForecast>;
+
+    /// Whether the configured source is currently considered alive (R-52):
+    /// for the MQTT adapter, a status-topic heartbeat seen within 2x the
+    /// documented interval. `false` when no source is configured at all.
+    /// Synchronous — reads an in-memory flag, never touches the network.
+    fn is_alive(&self) -> bool;
 }
 
 /// No-op adapter: always returns `None`. The composition root wires this in
@@ -27,6 +33,10 @@ impl WeatherForecastPort for NoopWeatherPort {
     async fn latest(&self) -> Option<WeatherForecast> {
         None
     }
+
+    fn is_alive(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
@@ -37,5 +47,11 @@ mod tests {
     async fn noop_weather_port_always_returns_none() {
         let port = NoopWeatherPort;
         assert!(port.latest().await.is_none());
+    }
+
+    #[test]
+    fn noop_weather_port_is_never_alive() {
+        let port = NoopWeatherPort;
+        assert!(!port.is_alive());
     }
 }

@@ -6956,3 +6956,36 @@ file-size audit clean. `docs/BACKLOG.md` BL-40 to be removed once merged.
 assertion failure, check feasibility before assuming the fixture is malformed — an unsatisfiable
 session/target deadline silently starves that asset out of the solve rather than erroring, which
 looks like a fixture bug but is actually a capacity/deadline mismatch.
+
+### R-22 + R-52: shiftable-lifecycle E2E flake and weather-source liveness surfacing (branch `fix/tech-debt-r22-r52`, 2026-07-30)
+
+First items ("point 1") off `docs/reference/TECHNICAL_DEBTS.md`'s Gain: High/Medium
+implementation task list.
+
+**R-22** turned out to need no code change: `Running shiftable load appears in GET /sim` was
+already moved to `tests/features/isolated/shiftable_lifecycle.feature` and tagged `@isolated`
+with raised poll timeouts (240s appear / 150s disappear) in prior commits, predating this task.
+Removed from the register without a code diff.
+
+**R-52**: `MqttWeatherAdapter::is_alive()` existed but was dead code (`#[allow(dead_code)]`),
+unreachable from any consumer. Wired it through: added `is_alive()` to the `WeatherForecastPort`
+trait (`controller/weather_port.rs`) with implementations for all three implementors —
+`NoopWeatherPort` (always `false`), `MqttWeatherAdapter` (extracted a pure `alive_from_elapsed()`
+helper so the 2x-heartbeat threshold logic is unit-testable without a real clock wait), and
+`MockWeatherPort` (new seedable `alive` field, defaults `true`, `set_alive()` setter). Surfaced
+as `source_alive` on the `GET /weather` response, distinct from `is_fresh` (one judges transport
+health, the other content age — they can disagree, e.g. a fresh cached forecast from a source
+that's now offline). VEN UI: added a `Chip` next to the Weather page's title reading "Source:
+Live"/"Source: Offline", per this project's `ui-transparency` rule.
+
+**Test-first**: 8 new/updated unit tests across `weather_port.rs`, `weather.rs`,
+`mock_weather_port.rs`, `routes/weather.rs`, plus 2 new UI tests in `Weather.test.tsx` for the
+chip's two states.
+
+**Verification**: full VEN Rust suite (855/855 + 1 architecture test), fmt/clippy clean,
+file-size audit clean; VEN UI `Weather.test.tsx` (8/8), `tsc --noEmit` clean, ESLint clean.
+
+**Key learning**: a from-scratch `git worktree add` gets its own `target/`, so the first
+`cargo test`/`clippy` run there recompiles everything including HiGHS's C++ sources from
+scratch (~18 minutes) even though a fully-built `target/` already exists in the primary
+checkout — budget for this on the first build in any new worktree.
