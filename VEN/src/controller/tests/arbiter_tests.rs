@@ -179,8 +179,13 @@ fn scenario_a_ev_picked_over_battery_no_battery_movement() {
         None,
     );
     assert_eq!(outcome.active_lever, Some("ev"));
-    assert!(
-        !outcome.setpoints.contains_key("battery"),
+    // `setpoints` now always carries the battery's last-applied setpoint
+    // forward as its baseline (see `projected_net_kw`'s doc comment), so
+    // presence of the key no longer signals movement — check the value is
+    // unchanged from its snapshot instead.
+    assert_eq!(
+        outcome.setpoints.get("battery").copied().unwrap_or(0.0),
+        0.0,
         "battery must not move while EV alone covers the deviation"
     );
     let ev_sp = outcome.setpoints.get("ev").copied().unwrap_or(0.0);
@@ -533,6 +538,88 @@ fn battery_lever_converges_under_stationary_disturbance_across_multiple_ticks() 
             "setpoint must stay converged at tick {i}, got {sp} vs converged {converged} — \
              any divergence is ringing/oscillation, exactly what the missing holding \
              mechanism was meant to prevent"
+        );
+    }
+}
+
+#[test]
+fn reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp() {
+    // Drives the *real* production entry point (`reconcile`, not
+    // `apply_battery_lever` directly) across multiple ticks, mirroring
+    // exactly how `tasks::sim_tick::helpers::build_tick_setpoints` calls it:
+    // `base_setpoints` is rebuilt fresh from the *static* plan allocation
+    // every tick (battery's plan target never changes tick to tick, exactly
+    // like `dispatcher::build_setpoints` would produce for an unchanging
+    // plan slot), while `sim`'s battery snapshot carries forward whatever
+    // `reconcile` actually applied last tick.
+    //
+    // `battery_lever_converges_under_stationary_disturbance_across_multiple_ticks`
+    // above asserts the same convergence property but hand-simulates
+    // `assigned_kw` directly, assuming `projected_net_kw` already folds in
+    // the battery's prior setpoint. It does not: `projected_net_kw` falls
+    // back to `base_setpoints.get("battery")` (the static plan target), so
+    // through the real `reconcile` path the deviation never shrinks and the
+    // battery is driven to its physical clamp instead of converging to the
+    // exact correction.
+    let mut setpoint_kw = 0.0_f64;
+    let mut soc = 0.5_f64;
+    const STATIONARY_DEVIATION_KW: f64 = 2.0; // constant unplanned base-load step
+    const CAPACITY_KWH: f64 = 10.0;
+    const DT_H: f64 = 300.0 / 3600.0;
+    // Plan target: 2.0 kW net import, exactly matching the pre-disturbance
+    // baseline, so the entire STATIONARY_DEVIATION_KW step is unplanned. A
+    // `base_load` asset must be present for `live_base_load_kw` to feed into
+    // `projected_net_kw` at all (it only substitutes for an id already in
+    // `sim.assets`).
+    let slot = test_slot(0.20, 0.20, 2.0, 0.0, 0.0, 0.08);
+    let mut base_setpoints: StdHashMap<String, f64> = StdHashMap::new();
+    base_setpoints.insert("battery".to_string(), 0.0); // static plan target, never changes
+
+    let mut history = Vec::new();
+    let mut incumbent: Option<&'static str> = None;
+    for _ in 0..6 {
+        let sim = make_sim(vec![
+            ("battery", battery_snap(setpoint_kw, soc)),
+            ("base_load", base_snap(2.0)),
+        ]);
+        let outcome = reconcile(
+            &sim,
+            &base_setpoints,
+            Some(&slot),
+            PlannerObjective::MinCost,
+            false,
+            true,
+            None,
+            Some(2.0 + STATIONARY_DEVIATION_KW), // live base load: 2.0 planned + 2.0 kW step
+            incumbent,
+        );
+        incumbent = outcome.active_lever;
+        setpoint_kw = outcome
+            .setpoints
+            .get("battery")
+            .copied()
+            .unwrap_or(setpoint_kw);
+        // Physics: setpoint_kw negative = discharge, drains SoC.
+        soc = (soc - (-setpoint_kw).max(0.0) * DT_H / CAPACITY_KWH).clamp(0.0, 1.0);
+        history.push(setpoint_kw);
+    }
+
+    let converged = history[0];
+    assert!(
+        (converged - (-STATIONARY_DEVIATION_KW)).abs() < 1e-6,
+        "expected convergence to -{STATIONARY_DEVIATION_KW} kW after one tick \
+         (exactly canceling the deviation), got {converged} — a value pinned at \
+         the physical clamp (-5.0), or drifting further each tick, indicates the \
+         battery term of projected_net_kw is reading the static plan allocation, \
+         not the arbiter's own prior setpoint"
+    );
+    for (i, &sp) in history.iter().enumerate().skip(1) {
+        assert!(
+            (sp - converged).abs() < 1e-6,
+            "setpoint must stay converged at tick {i}, got {sp} vs converged {converged} — \
+             any divergence means a tick where the lever didn't fire reverted the \
+             correction back toward the static plan allocation instead of holding \
+             the last-applied setpoint"
         );
     }
 }
