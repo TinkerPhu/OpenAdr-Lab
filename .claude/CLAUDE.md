@@ -48,10 +48,14 @@ workflow: 1. always keep a project_journal.md in projects where you write for ea
 openspec change (openspec/changes/, including its specs/) has been implemented and successfully
 tested, wave its feature/functionality into the appropriate current-state documentation, then
 delete the plan/change (do not archive — the openspec-archive-change skill is removed, replaced
-by this delete workflow). Implementation-issue narrative is not carried forward once a thing is
-implemented; if an issue holds a durable lesson for future work, put it in KEY_LEARNINGS.md, not
-in a surviving plan file. If only part of a plan/change is done and tested, remove just that part
-and leave the rest in place — do not delete a plan/change wholesale on partial completion.
+by this delete workflow). If a change's specs/ describes requirements worth keeping as a living
+reference (not just "what we built this time" but "what this capability is now supposed to do"),
+fold that content into the relevant capability's baseline spec doc before deleting — don't let the
+requirement statement disappear just because the change directory does. Implementation-issue
+narrative is not carried forward once a thing is implemented; if an issue holds a durable lesson
+for future work, put it in KEY_LEARNINGS.md, not in a surviving plan file. If only part of a
+plan/change is done and tested, remove just that part and leave the rest in place — do not delete
+a plan/change wholesale on partial completion.
 Deletion here is git-recoverable (history isn't lost), so this is about keeping the working tree's
 active plans/specs true to what's still outstanding, not about erasing the record.
 
