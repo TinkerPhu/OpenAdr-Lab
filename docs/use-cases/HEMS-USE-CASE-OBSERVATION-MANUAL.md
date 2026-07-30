@@ -11,12 +11,17 @@ This manual shows how to observe all 14 HEMS controller use cases using the live
 
 | Page | What it shows |
 |---|---|
+| **Dashboard** | Latest sensor snapshot + three traffic-light status rows (VTN connection, background tasks, plan health) |
 | **Controller** | Power chart (history + plan), Rate chart, Packets table (fill%), Ledger, Status bar |
 | **Requests** | User requests table with status chips; form to create new requests; inline cancel |
 | **Simulation** | Device state cards (EV SoC, Heater temp, PV output), Setpoints chart, Override sliders |
 | **Trace** | Per-tick decision log: mode, active events, setpoints, constraints |
 | **Events** | Raw OpenADR events polled from VTN |
-| **Dashboard** | Latest sensor snapshot |
+| **Devices** | Per-device settings cards (EV overlay, Deviation Arbiter, Heater, Shiftable loads, Comfort curve) |
+
+Under a **Diagnostics** nav group (WP-T1–T8): **VTN Status**, **Tasks**, **Event Log**,
+**Report Submissions**, **Metrics** — operational/process health, distinct from the HEMS
+controller state the pages above show. See `docs/architecture/VEN_ARCHITECTURE.md` §4.10.
 
 The **Controller** page is the primary observation surface for all HEMS use cases. Open it in one browser tab and keep the **Simulation** page open in another. Use the **Requests** page to submit and cancel energy requests without curl.
 

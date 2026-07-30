@@ -12,6 +12,12 @@ The VEN is a Rust/Axum application. It runs as a Docker container and communicat
 via the OpenADR 3 REST API. Internally it has two major subsystems: the **HEMS Controller**
 (planner-based, multi-step scheduling) and the **Simulator** (physics-based device models).
 
+Each VEN instance loads a per-VEN YAML profile (`profile.rs`) declaring its assets and their
+physical parameters. The profile is validated on startup, before any task is spawned: an invalid
+profile (out-of-range numeric fields, an absorber referencing an undeclared asset, an empty asset
+list) exits with every violation listed at once, rather than starting into an inconsistent state
+or failing piecemeal later.
+
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                              VEN Container                                   │
@@ -409,8 +415,7 @@ Curtailment: if `ExportCapacityLimit` is set and `|P_pv| > limit`, the inverter 
 **Forecast:** `PvAsset.forecast(horizon)` applies the same irradiation model over future
 time slots. The planner calls this — it does not contain a PV formula of its own.
 
-**Export curtailment as a planner decision** (`pv-export-curtailment`,
-`openspec/changes/pv-export-curtailment/`): the MILP has a real decision variable,
+**Export curtailment as a planner decision**: the MILP has a real decision variable,
 `p_pv_used[t]` (`GridMilpVars`, `controller/milp_interactions.rs`), bounded
 `0 <= p_pv_used[t] <= p_pv_kw[t]` and substituted for the raw forecast in the power-balance
 constraint in both solver phases. No cost term is attached to curtailment itself — every real
@@ -587,7 +592,7 @@ behaviour classes (`state.rs::SimInjectState`):
 | POST | `/user-requests` | 5 | Create user request → `EvSession` / `HeaterTarget` / `ShiftableLoad` |
 | DELETE | `/user-requests/:id` | 5 | Cancel request → marks it `Cancelled` |
 | GET | `/flexibility` | 5 | `SiteFlexibilityEnvelope` derived from live asset state (refreshed every dispatcher tick, independent of the active plan) |
-| GET / POST / DELETE | `/ev-session` | 5 | Read / create / end the active `EvSession` |
+| GET / POST / DELETE | `/ev-session` | 5 | Read / create / end the active `EvSession`; `DELETE` also transitions any linked `Active` `UserRequest` to `Completed` before clearing the session |
 | GET / PUT | `/ev-settings` | 5 | Opportunistic surplus-EV-charging overlay toggle |
 | GET / POST / DELETE | `/heater-target` | 5 | Read / create / clear the active `HeaterTarget` |
 | GET / POST | `/shiftable-loads` | 5 | List / create shiftable loads |
@@ -612,6 +617,22 @@ behaviour classes (`state.rs::SimInjectState`):
 
 `/timeline` is the closest thing to a continuous power time series today (measured watts
 in the past window, planned watts in the future window).
+
+### 4.10 Operational Diagnostics (WP-T1–T8, `docs/history/project_journal.md` — search "WP-T")
+
+Backend-process/task health and operational status, distinct from HEMS controller state (4.7) —
+surfaced on the VEN UI Dashboard and under its Diagnostics nav group, per the ui-transparency
+principle (every backend capability needs an inspectable UI surface, not just a route).
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/vtn/status` | Componentised VTN connection health (last successful poll, last error) |
+| GET | `/tasks/status` | Per-supervised-task status (last panic/restart, without digging through logs) |
+| GET | `/events/log` | Snapshot of VEN-operational failures (distinct from OpenADR events) |
+| GET | `/events/log/events` | SSE stream of the same |
+| GET | `/reports/submissions` | Per-report submission outcome (accepted/rejected/error), keyed to the Reports page |
+| GET | `/notifications`, `/notifications/history`, `/notifications/events` | User-facing notifications: current, history, SSE stream |
+| GET | `/metrics` | Prometheus metrics; VEN UI's Metrics page groups these under human-readable categories by default, with a raw-view toggle |
 
 ---
 
