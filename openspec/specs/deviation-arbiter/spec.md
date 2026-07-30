@@ -1,4 +1,17 @@
-## ADDED Requirements
+# deviation-arbiter Specification
+
+## Purpose
+Single-arbiter, tick-time reactive layer (`controller::arbiter`) that corrects the MILP plan's
+per-slot setpoints for the gap between what the plan expected (forecast PV/base-load, its own
+battery/EV/heater dispatch) and what is actually happening this tick — battery, EV, heater
+(pause-within-comfort-band and obligation-penalty-driven emergency mode), and PV curtailment,
+ranked by marginal cost. Replaces two prior attempts (feature 017's `absorber.rs`, built and
+removed twice) that oscillated from a stale PV signal, uncoordinated writers to the same
+actuators, and a raw-deviation replan trigger — this design rules out all three by construction:
+one function, one call per tick, live-previewed physics inputs, and an accumulator/cooldown-gated
+replan trigger.
+
+## Requirements
 
 ### Requirement: A single arbiter owns every reactive actuator adjustment per tick
 The system SHALL compute, once per tick and in exactly one call site, a reactive adjustment to the
@@ -24,6 +37,23 @@ falling back to the prior-tick snapshot only when a preview is unavailable.
 - **WHEN** base load changes materially between the previous tick and the current tick
 - **THEN** the arbiter's `deviation_kw` for the current tick SHALL reflect the current tick's
   base-load value, not the previous tick's
+
+### Requirement: The deviation signal reflects the arbiter's own last-applied setpoint for battery and EV, not the plan's static allocation
+The system SHALL compute the battery and EV terms of the projected net site power from
+`AssetSnapshot.setpoint_kw` (the arbiter's own last-applied command for that asset), not from the
+plan's per-slot allocation — for both the deviation calculation and the `setpoints` baseline
+returned when no lever fires for that asset this tick.
+
+#### Scenario: A correction already applied is not re-applied on top of itself
+- **WHEN** the battery lever fires on tick N to fully correct a stationary deviation
+- **THEN** tick N+1's deviation calculation SHALL reflect that correction (not the plan's original
+  static allocation), and SHALL NOT stack a second correction on top of the first
+
+#### Scenario: A converged setpoint is not silently reverted
+- **WHEN** the battery has converged to a corrected setpoint and the underlying disturbance is
+  still present, so no lever fires this tick (deviation within the dead band)
+- **THEN** the returned setpoint for the battery SHALL remain at its last-applied value, not revert
+  to the plan's static per-slot allocation
 
 ### Requirement: Levers are ranked by marginal cost, with zero-capacity levers excluded outright
 The system SHALL rank available levers (battery, EV, heater-pause, heater-emergency-mode, PV
@@ -84,7 +114,8 @@ slot's `export_tariff_eur_kwh`.
 ### Requirement: The battery reactive-correction lever converges under a stationary disturbance without oscillating
 The system SHALL, when the battery lever is active under a sustained (stationary) deviation across
 multiple consecutive ticks, converge the applied battery setpoint to a stable value rather than
-ringing or reversing sign after convergence.
+ringing or reversing sign after convergence — driven through the real `reconcile` entry point, not
+just the lever's own internal computation in isolation.
 
 #### Scenario: A constant unplanned load step converges within a few ticks
 - **WHEN** a stationary (non-decaying) base-load deviation persists across several consecutive
@@ -132,3 +163,18 @@ active profile; when false, the tick loop SHALL behave exactly as before this ch
 - **WHEN** `deviation_arbiter_enabled` is false
 - **THEN** `dispatcher::build_setpoints` SHALL apply the opportunistic EV overlay inline exactly as
   it did before this change, and no heater/PV-curtailment reactive lever SHALL fire
+
+### Requirement: The arbiter's per-tick reasoning is observable outside the server process
+The system SHALL expose the last tick's projected net site power, residual deviation from the
+plan's target, and active lever (if any) via `GET /arbiter-diagnostics`, so the reactive levers are
+not backend-only state with no way to inspect them.
+
+#### Scenario: A tick with no active lever still reports a deviation reading
+- **WHEN** the arbiter ran this tick but no lever fired (deviation within the dead band)
+- **THEN** `GET /arbiter-diagnostics` SHALL report the computed `net_kw`/`dev_kw` and a `null`
+  `active_lever`
+
+#### Scenario: No data before the arbiter has run
+- **WHEN** the arbiter has not run yet this process (startup, or the no-plan-yet window)
+- **THEN** `GET /arbiter-diagnostics` SHALL report `null` for `net_kw`, `dev_kw`, and
+  `active_lever`
