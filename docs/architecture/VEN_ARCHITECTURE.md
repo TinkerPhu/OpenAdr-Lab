@@ -157,7 +157,7 @@ Reactive adjustment on top of the plan's allocation — including the opportunis
 surplus-EV overlay's role — has moved to the Deviation Arbiter (below). Ledger
 accounting is **not** the Dispatcher's responsibility — see Monitor above.
 
-#### Deviation Arbiter (BL-22 resolved — `openspec/changes/deviation-arbiter/`)
+#### Deviation Arbiter (BL-22 resolved)
 
 `controller::arbiter::reconcile`, called once per tick from
 `tasks/sim_tick/helpers.rs::build_tick_setpoints` after `dispatcher::build_setpoints`, is the
@@ -168,7 +168,14 @@ and the opportunistic EV-surplus overlay ran as a separate, uncoordinated writer
 1. Computes this tick's deviation between the plan's expected net site power and a live
    projection (using `SimState::peek_pv_kw`/`peek_base_load_kw` so neither physics-driven input
    is ever one tick stale — the specific lag that caused feature 017's removal, twice; see
-   `docs/reference/KEY_LEARNINGS.md`'s Deviation Absorber section)
+   `docs/reference/KEY_LEARNINGS.md`'s Deviation Absorber section). For battery/EV specifically,
+   the projection reads `AssetSnapshot.setpoint_kw` (the arbiter's own last-applied command), not
+   the plan's static per-slot allocation — reading the static value instead caused a real
+   production bug (a tick-to-tick correction runaway/revert cycle, visible as rapid battery
+   oscillation on the dashboard) since a correction already applied was invisible to the next
+   tick's deviation calc and got re-applied or silently reverted; both `apply_battery_lever` and
+   `apply_ev_lever` already used `setpoint_kw` as their own integrator state, so the deviation
+   signal now agrees with them.
 2. Ranks available levers (battery, EV, heater pause/emergency-mode, PV curtailment backstop) by
    marginal cost (`PlanTimeSlot.marginal_cost_import/export_eur_per_kwh`, `solver-marginal-cost`),
    excluding zero-capacity levers outright and applying preemption-margin/dwell hysteresis so two
@@ -179,6 +186,11 @@ and the opportunistic EV-surplus overlay ran as a separate, uncoordinated writer
 
 Gated behind `deviation_arbiter_enabled` (`AppState`, default `false`) for a fully reversible
 rollout; when disabled, `build_tick_setpoints` takes the pre-arbiter code path unchanged.
+
+Per-tick reasoning (projected net power, residual deviation, active lever) is surfaced via
+`GET /arbiter-diagnostics` and a readout in the VEN UI's `ArbiterSettingsCard` — see
+`docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md`. The exact convergence/hysteresis
+invariants are enforced by `controller/tests/arbiter_tests.rs`, not restated here.
 
 ### 2.2 Two-Speed Loop
 
