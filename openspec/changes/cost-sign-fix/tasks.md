@@ -54,5 +54,5 @@
 - [x] 6.4 Run `scripts/audit_file_sizes.py` — `results.rs` still within the VEN/src/ 500
       production-line limit. (PASSED.)
 - [x] 6.5 Update `docs/history/project_journal.md` with what changed, why, and any key learnings.
-- [ ] 6.6 Remove the BL-40 entry (and its Implementation Task List section 1 checklist) from
-      `docs/BACKLOG.md` once merged. (Pending: do after this branch merges to main.)
+- [x] 6.6 Remove the BL-40 entry (and its Implementation Task List section 1 checklist) from
+      `docs/BACKLOG.md` once merged.
