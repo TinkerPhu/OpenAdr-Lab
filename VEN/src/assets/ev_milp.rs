@@ -333,28 +333,54 @@ impl EvMilpContext {
             },
             // Legacy BY_DEADLINE (+ ASAP, which only adds the lateness
             // penalty): hard/soft core energy by the departure deadline.
-            UserRequestMode::ByDeadline | UserRequestMode::Asap => Self {
-                mode: if session.soft_deadline {
-                    EvMilpMode::MayRun
+            // BL-34: v_core_eur/v_extra_eur_kwh are sourced from the session's
+            // resolved comfort curve here — this is the only mode where they
+            // retain their original "reward for completing core / reward for
+            // topping off beyond core" meaning; every other arm above already
+            // redirects v_extra_eur_kwh to an unrelated signal (free-energy
+            // incentive, budget reward), so the curve doesn't apply there.
+            UserRequestMode::ByDeadline | UserRequestMode::Asap => {
+                // Empty curve (no session-intent comfort override was ever resolved for this
+                // session, e.g. the legacy `/ev-session` route or a VTN-commanded session) keeps
+                // the passed-in global defaults — matches pre-BL-34 behavior exactly.
+                let (v_core_eur_kwh, v_extra_eur_kwh) = if session.comfort_rates.is_empty() {
+                    (v_ev_core_eur_kwh, v_ev_extra_eur_kwh)
                 } else {
-                    EvMilpMode::MustRun
-                },
-                a_ev: deadline_mask,
-                t_dead_step: Some(t_dead),
-                e_core_kwh: core_kwh,
-                e_extra_max_kwh: cfg.battery_kwh * (1.0 - session.target_soc),
-                v_core_eur: if session.soft_deadline {
-                    core_kwh * v_ev_core_eur_kwh
-                } else {
-                    0.0
-                },
-                asap_lateness_eur_kwh_h: if session.mode == UserRequestMode::Asap {
-                    asap_lateness_eur_kwh_h
-                } else {
-                    0.0
-                },
-                ..base
-            },
+                    (
+                        crate::entities::asset::ComfortRate::value_at_fill(
+                            &session.comfort_rates,
+                            0.0,
+                        ),
+                        crate::entities::asset::ComfortRate::value_at_fill(
+                            &session.comfort_rates,
+                            1.0,
+                        ),
+                    )
+                };
+                Self {
+                    mode: if session.soft_deadline {
+                        EvMilpMode::MayRun
+                    } else {
+                        EvMilpMode::MustRun
+                    },
+                    a_ev: deadline_mask,
+                    t_dead_step: Some(t_dead),
+                    e_core_kwh: core_kwh,
+                    e_extra_max_kwh: cfg.battery_kwh * (1.0 - session.target_soc),
+                    v_extra_eur_kwh,
+                    v_core_eur: if session.soft_deadline {
+                        core_kwh * v_core_eur_kwh
+                    } else {
+                        0.0
+                    },
+                    asap_lateness_eur_kwh_h: if session.mode == UserRequestMode::Asap {
+                        asap_lateness_eur_kwh_h
+                    } else {
+                        0.0
+                    },
+                    ..base
+                }
+            }
         }
     }
 }
@@ -514,6 +540,148 @@ mod milp_context_trait_tests {
             budget_eur: None,
             c_imp_eur_kwh: None,
         }
+    }
+
+    /// BL-34: `from_state` sources `v_core_eur`/`v_extra_eur_kwh` from the session's resolved
+    /// comfort curve in the `ByDeadline`/soft_deadline branch, not the passed-in global
+    /// defaults (here `v_ev_core_eur_kwh=1.0`, `v_ev_extra_eur_kwh=1.0` — if the curve were
+    /// ignored, `v_core_eur` would be `6.0 * 1.0 = 6.0`, not `6.0 * 0.05 = 0.30`).
+    #[test]
+    fn from_state_by_deadline_soft_sources_v_core_eur_from_curve() {
+        use crate::entities::asset::ComfortRate;
+        use crate::entities::design_vocabulary::UserRequestMode;
+        use crate::entities::device_session::EvSession;
+        use chrono::Utc;
+
+        let cfg = super::EvCharger {
+            max_charge_kw: 7.4,
+            max_discharge_kw: 0.0,
+            battery_kwh: 60.0,
+            soc_target: 0.8,
+            soc_target_profile: 0.8,
+            default_charge_kw: 7.4,
+            min_soc: 0.0,
+            min_charge_kw: 0.0,
+            response_delay_s: 0.0,
+        };
+        let state = super::super::AssetState::Ev(super::super::EvState {
+            soc: 0.2,
+            plugged: true,
+            actual_power_kw: 0.0,
+            pending_command_kw: 0.0,
+        });
+        let now = Utc::now();
+        let session = EvSession {
+            id: uuid::Uuid::new_v4(),
+            target_soc: 0.3,
+            departure_time: now + chrono::Duration::hours(2),
+            soft_deadline: true,
+            mode: UserRequestMode::ByDeadline,
+            budget_eur: None,
+            comfort_rates: vec![
+                ComfortRate {
+                    fill: 0.0,
+                    max_marginal_price: 0.05,
+                    max_marginal_co2: 0.0,
+                },
+                ComfortRate {
+                    fill: 1.0,
+                    max_marginal_price: 0.12,
+                    max_marginal_co2: 0.0,
+                },
+            ],
+            created_at: now,
+            updated_at: now,
+        };
+        let cum_s: Vec<i64> = (0..=24).map(|i| i * 300).collect();
+        let ctx = EvMilpContext::from_state(
+            &state,
+            &cfg,
+            24,
+            &cum_s,
+            now,
+            Some(&session),
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+        );
+        assert!((ctx.e_core_kwh - 6.0).abs() < 1e-9, "{}", ctx.e_core_kwh);
+        assert!(
+            (ctx.v_core_eur - 0.30).abs() < 1e-9,
+            "expected 6.0 * 0.05 = 0.30, got {}",
+            ctx.v_core_eur
+        );
+        assert!(
+            (ctx.v_extra_eur_kwh - 0.12).abs() < 1e-9,
+            "expected curve's fill=1.0 price 0.12, got {}",
+            ctx.v_extra_eur_kwh
+        );
+        assert_eq!(ctx.mode, EvMilpMode::MayRun);
+    }
+
+    /// Empty `comfort_rates` (legacy `/ev-session` route, VTN-commanded sessions) falls back
+    /// to the passed-in global defaults exactly — no panic, no behavior change.
+    #[test]
+    fn from_state_by_deadline_empty_curve_falls_back_to_global_defaults() {
+        use crate::entities::design_vocabulary::UserRequestMode;
+        use crate::entities::device_session::EvSession;
+        use chrono::Utc;
+
+        let cfg = super::EvCharger {
+            max_charge_kw: 7.4,
+            max_discharge_kw: 0.0,
+            battery_kwh: 60.0,
+            soc_target: 0.8,
+            soc_target_profile: 0.8,
+            default_charge_kw: 7.4,
+            min_soc: 0.0,
+            min_charge_kw: 0.0,
+            response_delay_s: 0.0,
+        };
+        let state = super::super::AssetState::Ev(super::super::EvState {
+            soc: 0.2,
+            plugged: true,
+            actual_power_kw: 0.0,
+            pending_command_kw: 0.0,
+        });
+        let now = Utc::now();
+        let session = EvSession {
+            id: uuid::Uuid::new_v4(),
+            target_soc: 0.3,
+            departure_time: now + chrono::Duration::hours(2),
+            soft_deadline: true,
+            mode: UserRequestMode::ByDeadline,
+            budget_eur: None,
+            comfort_rates: vec![],
+            created_at: now,
+            updated_at: now,
+        };
+        let cum_s: Vec<i64> = (0..=24).map(|i| i * 300).collect();
+        let ctx = EvMilpContext::from_state(
+            &state,
+            &cfg,
+            24,
+            &cum_s,
+            now,
+            Some(&session),
+            0.0,
+            0.42, // v_ev_extra_eur_kwh
+            0.77, // v_ev_core_eur_kwh
+            0.0,
+            0.0,
+        );
+        assert!(
+            (ctx.v_core_eur - 6.0 * 0.77).abs() < 1e-9,
+            "{}",
+            ctx.v_core_eur
+        );
+        assert!(
+            (ctx.v_extra_eur_kwh - 0.42).abs() < 1e-9,
+            "{}",
+            ctx.v_extra_eur_kwh
+        );
     }
 
     #[test]
