@@ -13,6 +13,7 @@ import {
   usePutEvSettings,
   useArbiterSettings,
   usePutArbiterSettings,
+  useArbiterDiagnostics,
 } from "../api/hooks";
 import { EvCard } from "../components/devices/EvCard";
 import { HeaterCard } from "../components/devices/HeaterCard";
@@ -25,6 +26,9 @@ export function DevicesPage() {
   const { data: allRequests = [], isLoading, isError, error } = useRequests();
   const { data: evSettings } = useEvSettings();
   const { data: arbiterSettings } = useArbiterSettings();
+  const { data: arbiterDiagnostics } = useArbiterDiagnostics(
+    arbiterSettings?.deviation_arbiter_enabled ?? false,
+  );
   const postMut = usePostRequest();
   const deleteMut = useDeleteRequest();
   const putEvMut = usePutEvSettings();
@@ -84,6 +88,7 @@ export function DevicesPage() {
           <ArbiterSettingsCard
             arbiterSettings={arbiterSettings}
             putArbiterSettings={putArbiterMut.mutate}
+            diagnostics={arbiterDiagnostics}
           />
         </Grid>
       </Grid>

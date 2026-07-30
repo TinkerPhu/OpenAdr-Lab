@@ -112,8 +112,9 @@ pub struct HemsState {
     pub arbiter_residual: HashMap<String, crate::entities::arbiter_residual::AssetResidual>,
     /// Cooldown guard for `PlanTrigger::ResidualThreshold` (§5.5/§4).
     pub last_residual_trigger_at: Option<DateTime<Utc>>,
-    /// Previous tick's active lever, for preemption-margin hysteresis (§4a.1).
+    /// Previous tick's active lever (§4a.1); last tick's arbiter reasoning.
     pub arbiter_active_lever: Option<String>,
+    pub arbiter_diagnostics: arbiter::ArbiterDiagnostics,
 }
 
 #[derive(Clone)]

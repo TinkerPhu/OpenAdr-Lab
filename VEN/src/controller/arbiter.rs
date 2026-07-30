@@ -67,6 +67,12 @@ pub struct ArbiterOutcome {
     /// The cheapest lever actually used this tick, if any — fed back in as
     /// `incumbent_lever` next tick for the preemption-margin hysteresis.
     pub active_lever: Option<&'static str>,
+    /// This tick's `projected_net_kw`/`deviation_kw` (diagnostics surface —
+    /// `state::arbiter::ArbiterDiagnostics`, `GET /arbiter-diagnostics`).
+    /// `None` only in the no-plan-yet startup window, where no plan target
+    /// exists to compute a deviation against.
+    pub net_kw: Option<f64>,
+    pub dev_kw: Option<f64>,
 }
 
 /// Generalizes the former `apply_surplus_ev_overlay`'s `net_other_kw`
@@ -212,6 +218,8 @@ pub fn reconcile(
     if dev_kw.abs() < DEAD_BAND_KW {
         return ArbiterOutcome {
             setpoints,
+            net_kw: Some(net_kw),
+            dev_kw: Some(dev_kw),
             ..Default::default()
         };
     }
@@ -303,6 +311,8 @@ pub fn reconcile(
         pv_export_limit_tighten_kw,
         absorbed_kwh_by_asset,
         active_lever,
+        net_kw: Some(net_kw),
+        dev_kw: Some(dev_kw),
     }
 }
 
