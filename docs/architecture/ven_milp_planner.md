@@ -246,3 +246,21 @@ fragmentation) disappear for the steady-state case. Cold-start/cloudy-day gaps a
 covered by the horizon length instead — the two mechanisms are complementary
 (terminal value fixes the ceiling; a ≥48 h horizon shows the next solar window for
 coherent coast planning from any start state).
+
+## 8. Per-Allocation Cost Sign Convention
+
+`AssetAllocation.cost_eur` (`results.rs::translate_to_plan`, one value per slot per asset — the
+Planner tab's decision-matrix display) and `FlexibilityEnvelope.estimated_cost_eur`
+(`envelopes.rs::solved_session_cost`, the session-total estimate) must agree in sign on the same
+underlying energy, since both price energy covered by PV surplus the same way — as an **opportunity
+cost** (forgone export revenue), not a credit:
+
+```
+cost_eur = grid_power_kw * import_tariff_eur_kwh * dt_h
+         + surplus_power_kw * export_tariff_eur_kwh * dt_h
+```
+
+Applies to the EV, heater, shiftable-load, and battery-*charging* allocation blocks in
+`translate_to_plan`; the battery-*discharging* branch uses an unrelated revenue formula. This is a
+post-solve reporting computation only — no solver objective/constraint depends on it. Regression
+coverage: `controller/milp_planner/tests/cost_sign.rs`.
