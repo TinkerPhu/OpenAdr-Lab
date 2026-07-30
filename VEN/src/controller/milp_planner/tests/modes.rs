@@ -18,6 +18,7 @@ fn ev_session_with_mode(
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
         budget_eur: None,
+        comfort_rates: vec![],
         mode,
         created_at: now,
         updated_at: now,

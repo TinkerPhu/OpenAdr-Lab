@@ -101,6 +101,7 @@ mod tests {
             departure_time: Utc::now() + chrono::Duration::hours(6),
             soft_deadline: false,
             budget_eur: None,
+            comfort_rates: vec![],
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -121,6 +122,7 @@ mod tests {
             tier_count: 0,
             session_id: Some(session_id),
             session_type: Some(crate::entities::user_request::SessionType::Ev),
+            comfort_rates: vec![],
             estimated_cost_eur: 0.0,
             estimated_co2_g: 0.0,
             interruptible: false,
@@ -237,6 +239,7 @@ mod tests {
             id: Uuid::new_v4(),
             target_temp_c: 55.0,
             ready_by: Utc::now() + chrono::Duration::hours(2),
+            comfort_rates: vec![],
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

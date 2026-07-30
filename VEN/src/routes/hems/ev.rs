@@ -47,6 +47,7 @@ pub async fn post_ev_session(
         soft_deadline: body.soft_deadline,
         mode: body.mode,
         budget_eur: body.budget_eur,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };

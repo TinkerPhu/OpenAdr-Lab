@@ -110,6 +110,7 @@ fn heater_inputs_e_target_from_heater_target() {
         id: uuid::Uuid::new_v4(),
         target_temp_c: 70.0,
         ready_by: now + Duration::hours(1),
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };
@@ -261,6 +262,7 @@ fn solve_heater_must_run_meets_e_target() {
         id: uuid::Uuid::new_v4(),
         target_temp_c: 21.0,
         ready_by: now + Duration::seconds(18 * 300),
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };
@@ -561,6 +563,7 @@ fn ev_planned_state_soc_populated() {
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
         budget_eur: None,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };
