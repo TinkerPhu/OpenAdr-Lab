@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::entities::asset::ComfortRate;
 use crate::entities::design_vocabulary::UserRequestMode;
 
 /// A single deadline tier from the user's request.
@@ -54,6 +55,10 @@ pub struct UserRequest {
     pub session_id: Option<Uuid>, // linked DeviceSession (EvSession, HeaterTarget, or ShiftableLoad)
     #[serde(default)]
     pub session_type: Option<SessionType>,
+    /// Resolved comfort/value curve (user override or asset default) — BL-34: carried through
+    /// to the linked device session so the MILP planner can shape reward coefficients from it.
+    #[serde(default)]
+    pub comfort_rates: Vec<ComfortRate>,
     pub status: UserRequestStatus,
     pub estimated_cost_eur: f64,
     pub estimated_co2_g: f64,

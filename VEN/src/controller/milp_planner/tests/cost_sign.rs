@@ -105,6 +105,7 @@ fn ev_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
         budget_eur: None,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };
@@ -153,6 +154,7 @@ fn heater_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
         id: uuid::Uuid::new_v4(),
         target_temp_c: 20.0,
         ready_by: now + Duration::hours(1),
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };
@@ -300,6 +302,7 @@ fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
         budget_eur: None,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };
@@ -308,6 +311,7 @@ fn decision_matrix_and_envelope_totals_agree_in_sign_across_asset_types() {
         id: uuid::Uuid::new_v4(),
         target_temp_c: 20.0,
         ready_by: now + Duration::hours(1),
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };

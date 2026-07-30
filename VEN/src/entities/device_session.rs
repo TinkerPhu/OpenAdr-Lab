@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::entities::asset::ComfortRate;
 use crate::entities::design_vocabulary::UserRequestMode;
 
 /// A device-centric EV charging session.
@@ -24,6 +25,9 @@ pub struct EvSession {
     /// MAX_COST (WP4.1-c): total charging-cost ceiling [€]. None = no cap.
     #[serde(default)]
     pub budget_eur: Option<f64>,
+    /// Resolved comfort/value curve carried from the linking `UserRequest` (BL-34).
+    #[serde(default)]
+    pub comfort_rates: Vec<ComfortRate>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -41,6 +45,9 @@ pub struct HeaterTarget {
     /// How the user expressed this request (BL-28); BY_DEADLINE = legacy behaviour.
     #[serde(default)]
     pub mode: UserRequestMode,
+    /// Resolved comfort/value curve carried from the linking `UserRequest` (BL-34).
+    #[serde(default)]
+    pub comfort_rates: Vec<ComfortRate>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -123,6 +130,7 @@ mod tests {
             soft_deadline: false,
             mode: UserRequestMode::Opportunistic,
             budget_eur: None,
+            comfort_rates: vec![],
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

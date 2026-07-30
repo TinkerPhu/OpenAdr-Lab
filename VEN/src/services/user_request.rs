@@ -36,6 +36,7 @@ impl UserRequestService {
             soft_deadline: soft_deadline.unwrap_or(false),
             mode: req.mode.clone(),
             budget_eur: req.budget_eur,
+            comfort_rates: req.comfort_rates.clone(),
             created_at: now,
             updated_at: now,
         };
@@ -73,6 +74,7 @@ impl UserRequestService {
             target_temp_c,
             ready_by,
             mode: req.mode.clone(),
+            comfort_rates: req.comfort_rates.clone(),
             created_at: now,
             updated_at: now,
         };
@@ -130,6 +132,7 @@ impl UserRequestService {
             tier_count: 0,
             session_id: Some(load.id),
             session_type: Some(crate::entities::user_request::SessionType::ShiftableLoad),
+            comfort_rates: vec![],
             status: UserRequestStatus::Active,
             estimated_cost_eur: 0.0,
             estimated_co2_g: 0.0,
@@ -264,6 +267,7 @@ mod tests {
             tier_count: 0,
             session_id: None,
             session_type: None,
+            comfort_rates: vec![],
             estimated_cost_eur: 0.0,
             estimated_co2_g: 0.0,
             interruptible: false,
@@ -290,6 +294,7 @@ mod tests {
             departure_time: Utc::now() + chrono::Duration::hours(6),
             soft_deadline: false,
             budget_eur: None,
+            comfort_rates: vec![],
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -310,6 +315,7 @@ mod tests {
             tier_count: 0,
             session_id: Some(session_id),
             session_type: Some(crate::entities::user_request::SessionType::Ev),
+            comfort_rates: vec![],
             estimated_cost_eur: 0.0,
             estimated_co2_g: 0.0,
             interruptible: false,

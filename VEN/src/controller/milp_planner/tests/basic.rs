@@ -110,6 +110,7 @@ fn ev_mask_plugged_with_session_deadline() {
         departure_time: now + Duration::hours(1),
         soft_deadline: false,
         budget_eur: None,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };
@@ -145,6 +146,7 @@ fn ev_mask_unplugged_all_false() {
         departure_time: now + Duration::hours(1),
         soft_deadline: false,
         budget_eur: None,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };
@@ -174,6 +176,7 @@ fn ev_mode_must_run_for_firm_deadline_session() {
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
         budget_eur: None,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };
@@ -202,6 +205,7 @@ fn ev_mode_may_run_for_soft_deadline_session() {
         departure_time: now + Duration::hours(2),
         soft_deadline: true,
         budget_eur: None,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };

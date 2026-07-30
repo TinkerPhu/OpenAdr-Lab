@@ -349,6 +349,7 @@ fn run_planner_battery_absent_no_bat_allocation() {
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
         budget_eur: None,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };
@@ -488,6 +489,7 @@ fn run_planner_ev_must_run_energy_met() {
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
         budget_eur: None,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };
@@ -677,6 +679,7 @@ fn run_planner_n48_full_horizon() {
         departure_time: now + Duration::hours(24),
         soft_deadline: false,
         budget_eur: None,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };
@@ -1304,6 +1307,7 @@ fn run_planner_envelope_estimated_cost_reflects_solved_schedule() {
         departure_time: now + Duration::hours(2),
         soft_deadline: false,
         budget_eur: None,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };

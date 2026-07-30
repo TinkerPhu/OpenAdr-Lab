@@ -108,7 +108,7 @@ pub fn create_from_body(
     });
 
     // Build comfort rates (user-specified or asset default)
-    let _comfort_rates: Vec<ComfortRate> = if let Some(ref rates) = body.comfort_rates {
+    let comfort_rates: Vec<ComfortRate> = if let Some(ref rates) = body.comfort_rates {
         rates
             .iter()
             .map(|r| ComfortRate {
@@ -160,6 +160,7 @@ pub fn create_from_body(
         tier_count,
         session_id: None,   // set by caller after device session is created
         session_type: None, // set by caller (Ev, Heater, etc.)
+        comfort_rates,
         status: UserRequestStatus::Active,
         estimated_cost_eur: 0.0,
         estimated_co2_g: 0.0,

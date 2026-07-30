@@ -716,6 +716,7 @@ mod tests {
             tier_count: 0,
             session_id,
             session_type,
+            comfort_rates: vec![],
             status: UserRequestStatus::Active,
             estimated_cost_eur: 0.0,
             estimated_co2_g: 0.0,
@@ -743,6 +744,7 @@ mod tests {
                 departure_time: Utc::now() + chrono::Duration::hours(2),
                 soft_deadline: false,
                 budget_eur: None,
+                comfort_rates: vec![],
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -769,6 +771,7 @@ mod tests {
                 id: session_id,
                 target_temp_c: 21.0,
                 ready_by: Utc::now() + chrono::Duration::hours(1),
+                comfort_rates: vec![],
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
