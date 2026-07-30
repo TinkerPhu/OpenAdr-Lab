@@ -807,6 +807,7 @@ fn bmi(
 }
 
 mod basic;
+mod cost_sign;
 mod heater;
 mod modes;
 mod planner;
