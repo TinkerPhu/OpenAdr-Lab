@@ -24,3 +24,10 @@ Feature: Weather Forecast Plugin — MQTT-sourced PV forecast
     Given a weather forecast message older than the staleness threshold is published to the test Mosquitto broker for VEN-1
     When a plan cycle runs on VEN-1
     Then the plan's PV allocation matches the sin-model forecast
+
+  @weather-forecast
+  Scenario: Weather status heartbeat marks the source alive independent of forecast content
+    Given a weather forecast message is published to the test Mosquitto broker for VEN-1
+    Then /weather reports the source as not alive
+    When a weather status heartbeat is published to the test Mosquitto broker for VEN-1
+    Then /weather reports the source as alive

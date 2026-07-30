@@ -7099,3 +7099,33 @@ not run this session — the unit tests already exercise the full call chain end
 (`create_from_body` → session → `*MilpContext::from_state` → solved plan via
 `solve_with_session`/`run_planner`), the functional equivalent of the UI flow minus the actual
 HTTP/browser layer.
+
+### R-56: weather MQTT E2E coverage, source_alive scenario (branch `fix/r56-weather-e2e-source-alive`, 2026-07-30)
+
+Second item off the same task list. Tasks 1.1/1.2 ("remove `@wip`", "fix whatever the scenario
+reveals") needed no action: `tests/features/weather_forecast.feature` already carried no `@wip`
+tag (confirmed via grep), and `behave.ini` only excludes `~@wip` by default — so it was already
+running in the default E2E suite, same pattern as R-22. The only real work was task 1.3:
+extending coverage to `/weather`'s `source_alive` field (R-52, this session), which none of the
+3 existing scenarios exercised (they only ever publish to the MQTT `forecast` topic, never
+`status`).
+
+**Fix**: added `_publish_status()` to `weather_forecast_steps.py` (mirrors the existing
+`_publish_mqtt`/`_sample_forecast_message` pattern, targets the sibling `.../status` topic) plus
+a `Given`/`Then` step pair, and one new scenario asserting `source_alive` is `false` before any
+status heartbeat and `true` after one is published — mirroring
+`source_alive_reflects_the_passed_in_flag_independent_of_forecast_freshness` (the R-52 unit test)
+at BDD/E2E level. The post-heartbeat assertion polls (`poll_until`, 15s) rather than checking
+once immediately, to tolerate MQTT delivery/processing latency; the pre-heartbeat assertion needs
+no poll since "no status ever received" holds trivially regardless of timing.
+
+**Verification**: `bash run_all_tests.sh --e2e` on Pi4, run immediately after this merge lands
+on `main` (Pi4's checkout only ever tests `main`, so verification had to follow the merge, not
+precede it).
+
+**Key learning**: when a debt-register item's task list assumes a broken/missing state (`@wip`
+tag, uncovered field), check the actual current state before writing new steps — two of R-56's
+four listed sub-tasks were already satisfied by earlier, unrelated work, same as R-22's fix
+predating its own task-list entry. Also: Pi4-Server's checkout always tracks `main` — a feature
+branch's E2E behavior can only be observed on Pi4 after merging, not before, unlike local
+unit/UI tests which run against the worktree directly.
