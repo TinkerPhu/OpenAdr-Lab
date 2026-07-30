@@ -1,4 +1,4 @@
-import { Alert, Stack, Typography } from "@mui/material";
+import { Alert, Chip, Stack, Typography } from "@mui/material";
 import { useWeather } from "../api/hooks";
 import { WeatherRawPanel } from "../components/weather/WeatherRawPanel";
 import { WeatherDerivedPanel } from "../components/weather/WeatherDerivedPanel";
@@ -8,9 +8,17 @@ export function WeatherPage() {
 
   return (
     <div data-testid="weather-page">
-      <Typography variant="h5" sx={{ mb: 2 }}>
-        Weather
-      </Typography>
+      <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
+        <Typography variant="h5">Weather</Typography>
+        {!isLoading && data && (
+          <Chip
+            size="small"
+            data-testid="weather-source-alive"
+            label={data.source_alive ? "Source: Live" : "Source: Offline"}
+            color={data.source_alive ? "success" : "default"}
+          />
+        )}
+      </Stack>
 
       {isLoading && <Typography color="text.secondary">Loading…</Typography>}
 

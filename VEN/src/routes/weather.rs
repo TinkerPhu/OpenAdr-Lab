@@ -35,6 +35,12 @@ pub enum WeatherStatus {
 pub struct WeatherResponse {
     status: WeatherStatus,
     is_fresh: bool,
+    /// Transport heartbeat (R-52): whether the configured source has been
+    /// heard from recently. Independent of `is_fresh`, which judges the
+    /// *content* age of the last received forecast — a source can go
+    /// offline while its last forecast is still within the staleness
+    /// window, or vice versa.
+    source_alive: bool,
     raw: Option<WeatherForecast>,
     derived: Option<Vec<WeatherPvForecastSlot>>,
 }
@@ -44,6 +50,7 @@ pub struct WeatherResponse {
 fn build_weather_response(
     forecast: Option<WeatherForecast>,
     pv_params: Option<&PvForecastParams>,
+    source_alive: bool,
     now: chrono::DateTime<chrono::Utc>,
 ) -> WeatherResponse {
     let is_fresh = forecast
@@ -61,6 +68,7 @@ fn build_weather_response(
     WeatherResponse {
         status,
         is_fresh,
+        source_alive,
         raw: forecast,
         derived,
     }
@@ -68,9 +76,11 @@ fn build_weather_response(
 
 pub async fn get_weather(State(ctx): State<AppCtx>) -> Json<WeatherResponse> {
     let forecast = ctx.weather.latest().await;
+    let source_alive = ctx.weather.is_alive();
     Json(build_weather_response(
         forecast,
         ctx.weather_pv_params.as_ref(),
+        source_alive,
         chrono::Utc::now(),
     ))
 }
@@ -130,6 +140,7 @@ mod tests {
         let resp = build_weather_response(
             Some(sample_forecast(fetched_at)),
             Some(&sample_params()),
+            true,
             now,
         );
         assert_eq!(resp.status, WeatherStatus::Ok);
@@ -145,6 +156,7 @@ mod tests {
         let resp = build_weather_response(
             Some(sample_forecast(fetched_at)),
             Some(&sample_params()),
+            true,
             now,
         );
         assert_eq!(resp.status, WeatherStatus::Stale);
@@ -158,7 +170,7 @@ mod tests {
     #[test]
     fn no_forecast_returns_null_raw_and_no_forecast_status() {
         let now = Utc.with_ymd_and_hms(2026, 7, 19, 6, 0, 0).unwrap();
-        let resp = build_weather_response(None, Some(&sample_params()), now);
+        let resp = build_weather_response(None, Some(&sample_params()), false, now);
         assert_eq!(resp.status, WeatherStatus::NoForecast);
         assert!(resp.raw.is_none());
         assert!(resp.derived.is_none());
@@ -168,9 +180,27 @@ mod tests {
     fn forecast_present_without_config_returns_null_derived() {
         let now = Utc.with_ymd_and_hms(2026, 7, 19, 6, 5, 0).unwrap();
         let fetched_at = Utc.with_ymd_and_hms(2026, 7, 19, 5, 54, 48).unwrap();
-        let resp = build_weather_response(Some(sample_forecast(fetched_at)), None, now);
+        let resp = build_weather_response(Some(sample_forecast(fetched_at)), None, true, now);
         assert_eq!(resp.status, WeatherStatus::Ok);
         assert!(resp.raw.is_some());
         assert!(resp.derived.is_none());
+    }
+
+    #[test]
+    fn source_alive_reflects_the_passed_in_flag_independent_of_forecast_freshness() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 19, 6, 5, 0).unwrap();
+        let fetched_at = Utc.with_ymd_and_hms(2026, 7, 19, 6, 4, 0).unwrap();
+        let resp = build_weather_response(
+            Some(sample_forecast(fetched_at)),
+            Some(&sample_params()),
+            false,
+            now,
+        );
+        assert_eq!(resp.status, WeatherStatus::Ok);
+        assert!(resp.is_fresh);
+        assert!(
+            !resp.source_alive,
+            "source_alive must reflect the transport heartbeat, not forecast freshness"
+        );
     }
 }

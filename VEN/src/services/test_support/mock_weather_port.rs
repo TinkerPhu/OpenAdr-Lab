@@ -5,9 +5,18 @@ use crate::controller::WeatherForecastPort;
 use crate::entities::weather::WeatherForecast;
 
 /// Test double for WeatherForecastPort. Seedable; mirrors `MockVtn`/`mock_solver_port`.
-#[derive(Default)]
 pub struct MockWeatherPort {
     forecast: Mutex<Option<WeatherForecast>>,
+    alive: Mutex<bool>,
+}
+
+impl Default for MockWeatherPort {
+    fn default() -> Self {
+        Self {
+            forecast: Mutex::new(None),
+            alive: Mutex::new(true),
+        }
+    }
 }
 
 impl MockWeatherPort {
@@ -23,12 +32,20 @@ impl MockWeatherPort {
     pub fn set(&self, forecast: Option<WeatherForecast>) {
         *self.forecast.lock().unwrap() = forecast;
     }
+
+    pub fn set_alive(&self, alive: bool) {
+        *self.alive.lock().unwrap() = alive;
+    }
 }
 
 #[async_trait]
 impl WeatherForecastPort for MockWeatherPort {
     async fn latest(&self) -> Option<WeatherForecast> {
         self.forecast.lock().unwrap().clone()
+    }
+
+    fn is_alive(&self) -> bool {
+        *self.alive.lock().unwrap()
     }
 }
 
@@ -80,5 +97,18 @@ mod tests {
     async fn with_forecast_seeds_at_construction() {
         let mock = MockWeatherPort::new().with_forecast(sample_forecast());
         assert!(mock.latest().await.is_some());
+    }
+
+    #[test]
+    fn defaults_to_alive() {
+        let mock = MockWeatherPort::new();
+        assert!(mock.is_alive());
+    }
+
+    #[test]
+    fn set_alive_updates_is_alive() {
+        let mock = MockWeatherPort::new();
+        mock.set_alive(false);
+        assert!(!mock.is_alive());
     }
 }
