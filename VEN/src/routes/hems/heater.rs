@@ -37,6 +37,7 @@ pub async fn post_heater_target(
         target_temp_c: body.target_temp_c,
         ready_by: body.ready_by,
         mode: body.mode,
+        comfort_rates: vec![],
         created_at: now,
         updated_at: now,
     };

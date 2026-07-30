@@ -25,23 +25,30 @@
       point where `build_asset_contexts` reads `EvSession`/`HeaterTarget` to call
       `EvMilpContext::from_state`/`HeaterMilpContext::from_state` (`simulator/plan_context.rs`)
       before starting task 3.
-- [ ] 2.2 Confirm task 3.3's field population only needs to touch the `/user-requests`
-      construction site(s) in `services/user_request.rs` (where `EvSession`/`HeaterTarget` are
-      built from a `UserRequest`) — not `routes/hems/ev.rs`/`routes/hems/heater.rs`, which stay
-      as they are.
+- [x] 2.2 Confirmed: task 3.3's field population only needed `services/user_request.rs`'s
+      `create_ev`/`create_heater` (single construction site per asset). `routes/hems/ev.rs`/
+      `routes/hems/heater.rs` were given `comfort_rates: vec![]` (required field, no curve
+      concept there — unchanged behavior). Also found and fixed a third `UserRequest`
+      construction site not in the original trace: `routes/hems/sessions.rs`'s shiftable-load
+      fast-path (duplicates `UserRequestService::create_shiftable` inline) — out of scope for
+      the curve mechanism (shiftable loads aren't part of this change) but needed the new
+      required field.
 - [ ] 2.3 Resolve the design's open question on `HeaterTarget`'s autonomous (no-session)
       MayRun path: confirm `comfort_full_reward_eur_kwh` stays `0.0` there (no behavior
       change), matching D5's MustRun/no-session handling.
 
 ## 3. Carry the curve through the entities
 
-- [ ] 3.1 Add `pub comfort_rates: Vec<ComfortRate>` to `UserRequest`
-      (`entities/user_request.rs`).
-- [ ] 3.2 Fix `create_from_body`: stop binding to `_comfort_rates`; store the resolved value on
+- [x] 3.1 Add `pub comfort_rates: Vec<ComfortRate>` to `UserRequest`
+      (`entities/user_request.rs`, `#[serde(default)]` for back-compat).
+- [x] 3.2 Fix `create_from_body`: stop binding to `_comfort_rates`; store the resolved value on
       the constructed `UserRequest`.
-- [ ] 3.3 Add `pub comfort_rates: Vec<ComfortRate>` to `EvSession` and `HeaterTarget`
-      (`entities/device_session.rs`); populate from `UserRequest.comfort_rates` at the
-      construction site(s) found in 2.1.
+- [x] 3.3 Add `pub comfort_rates: Vec<ComfortRate>` to `EvSession` and `HeaterTarget`
+      (`entities/device_session.rs`, `#[serde(default)]`); populate from
+      `UserRequest.comfort_rates` in `services/user_request.rs::create_ev`/`create_heater`.
+      Compiles clean (`cargo check --tests`) — all other construction sites (legacy direct
+      routes, poll_signals.rs VTN-commanded sessions, ~20 test fixtures) updated to pass
+      `comfort_rates: vec![]` where no curve concept applies.
 
 ## 4. EV — repoint reward sourcing (D3)
 

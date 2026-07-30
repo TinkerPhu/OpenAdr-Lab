@@ -124,6 +124,7 @@ pub async fn post_requests(
             tier_count: 0,
             session_id: Some(load.id),
             session_type: Some(SessionType::ShiftableLoad),
+            comfort_rates: vec![],
             status: UserRequestStatus::Active,
             estimated_cost_eur: 0.0,
             estimated_co2_g: 0.0,
