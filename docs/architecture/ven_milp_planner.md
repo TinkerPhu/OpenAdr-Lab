@@ -264,3 +264,21 @@ Applies to the EV, heater, shiftable-load, and battery-*charging* allocation blo
 `translate_to_plan`; the battery-*discharging* branch uses an unrelated revenue formula. This is a
 post-solve reporting computation only — no solver objective/constraint depends on it. Regression
 coverage: `controller/milp_planner/tests/cost_sign.rs`.
+
+## 9. Marginal Cost (Shadow Price)
+
+`PlanTimeSlot.marginal_cost_import_eur_per_kwh` / `marginal_cost_export_eur_per_kwh` are a
+per-slot shadow price on the power-balance constraint, computed once per planning cycle *after*
+the winning MILP solve: the same problem is re-solved as a pure LP with every binary decision
+fixed to the winning solution's values, and the constraint's dual value is read off that solve.
+
+- **Read-only diagnostic**: never influences `p_imp`/`p_exp` or any allocation — only computed
+  after the winning solve is already final.
+- **No binding constraint** → equals the slot's plain `import_tariff_eur_kwh` (within solver
+  tolerance). **A binding constraint** (e.g. an asset pinned at its max power bound) → differs
+  from the plain tariff, reflecting the binding constraint's additional cost.
+- **Dual solve failure** doesn't fail the planning cycle — both fields fall back to the plain
+  tariff, with a warning logged; every other `Plan` field is unaffected either way.
+- Feeds `controller::arbiter`'s marginal-cost-ranked lever selection (§2.1 of
+  `VEN_ARCHITECTURE.md`) and the Planner tab's Decision Matrix (marginal-cost heatmap cell
+  alongside the plain-tariff row).
