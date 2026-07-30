@@ -195,6 +195,9 @@ pub struct HeaterMilpContext {
     /// None leaves them free. Populated from the previous plan after adoption to prevent
     /// near-future chattering. vec![] or vec![None; n] = no pinning.
     pub anchored_kw: Vec<Option<f64>>,
+    /// BL-34: session comfort curve's price at fill=1.0 [EUR/kWh] — a reward on full-tier
+    /// operation, competing against the tier penalty. 0.0 when there's no session/curve.
+    pub comfort_full_reward_eur_kwh: f64,
 }
 
 /// Typed LP variable handles for one heater in the MILP model.
