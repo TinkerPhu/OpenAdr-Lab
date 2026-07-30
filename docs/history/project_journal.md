@@ -6956,3 +6956,56 @@ file-size audit clean. `docs/BACKLOG.md` BL-40 to be removed once merged.
 assertion failure, check feasibility before assuming the fixture is malformed — an unsatisfiable
 session/target deadline silently starves that asset out of the solve rather than erroring, which
 looks like a fixture bug but is actually a capacity/deadline mismatch.
+
+### Deviation arbiter battery/EV runaway fix + diagnostics surface (branch `fix/arbiter-projected-net-kw-plan-fallback`, 2026-07-30)
+
+Root-caused a small-magnitude, rapid zig-zag visible in the ven-1 dashboard's Battery timeline
+(alternating roughly ±0.1–0.2 kW every ~90s), distinct from the large tariff-boundary-aligned
+battery swings in the same chart (8 legitimate sign flips over 48h, confirmed against `/plan` —
+not a bug). This is the **third** occurrence of real-time deviation-correction oscillation in this
+codebase — feature 017's `absorber.rs` was built and removed twice before the current
+`controller::arbiter` module shipped 2026-07-28 as a structural rebuild
+(`openspec/changes/deviation-arbiter/`) explicitly designed to rule out the first two incidents'
+root causes. This time the arbiter itself had a new, distinct defect from those.
+
+**Root cause**: `arbiter::projected_net_kw`'s battery/EV term fell back to `base_setpoints` — the
+plan's *static* per-slot allocation, rebuilt fresh every tick from the unchanging plan slot — while
+`apply_battery_lever`/`apply_ev_lever` (the actual correctors) already treat
+`AssetSnapshot.setpoint_kw` (the arbiter's own last-applied command) as their integrator state. A
+correction applied on tick N was therefore invisible to tick N+1's deviation calculation, which
+"rediscovered" the same deviation and stacked a fresh correction on top of it every tick — an
+unbounded per-tick runaway rather than convergence. Compounding this, `reconcile`'s `setpoints`
+baseline always started from `base_setpoints.clone()`, so any tick where the lever didn't fire
+(deviation newly within dead band, or a cheaper lever absorbed it) silently reverted the setpoint
+back to the plan's static target — re-creating the deviation next tick whenever the underlying
+disturbance was persistent, producing the observed 2-tick correct/revert ping-pong.
+
+The existing multi-tick stability test
+(`battery_lever_converges_under_stationary_disturbance_across_multiple_ticks`) had not caught this
+because it hand-simulated `assigned_kw` directly against `apply_battery_lever`, bypassing
+`reconcile`/`projected_net_kw` entirely — its own code comment asserted an assumption about
+`projected_net_kw`'s behavior that didn't match the actual implementation.
+
+**Fix**: both `projected_net_kw` and `reconcile`'s initial `setpoints` seed now read
+`AssetSnapshot.setpoint_kw` for battery/EV specifically (heater/PV/base-load are unaffected —
+they already have their own live-preview paths). Added
+`reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp`, which drives the
+*real* `reconcile` entry point (not `apply_battery_lever` directly) across multiple ticks and
+confirmed-failing before the fix (settled at a runaway +4 kW instead of the correct -2 kW).
+
+**Diagnostics surface** (ui-transparency): the arbiter's per-tick reasoning previously existed only
+as local variables inside `reconcile`. Added `GET /arbiter-diagnostics` (net site power, residual
+deviation, active lever) backed by a new `AppState.arbiter_diagnostics` field updated every tick,
+and a readout in the VEN UI's `ArbiterSettingsCard` shown while the arbiter is enabled.
+
+**Verification**: full VEN Rust suite (849/849), fmt/clippy clean, file-size audit clean, VEN UI
+suite (421/421, 39 files) + tsc + ESLint clean.
+
+**Key learning**: a dead-beat corrector (one that recomputes its *entire* target from current state
+each cycle, not an incremental delta) requires every reader of "current state" — both the deviation
+signal and the returned setpoints baseline — to agree on what "current state" means. Two call sites
+using different sources of truth for the same asset (`base_setpoints` vs. `setpoint_kw`) is enough
+to turn a converging controller into a runaway one, even though each site looks locally reasonable.
+A multi-tick convergence test that bypasses the real entry point and hand-simulates the "obvious"
+next-tick input can pass while hiding exactly this class of bug — the regression test must drive
+the actual production call path, not a hand-authored approximation of it.
