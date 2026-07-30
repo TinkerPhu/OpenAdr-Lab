@@ -71,6 +71,41 @@ def step_no_forecast_published(context):
     pass  # nothing to do — absence is the precondition
 
 
+def _sample_status_message(status: str) -> dict:
+    now = datetime.now(timezone.utc)
+    return {
+        "schema_version": "1.0.0",
+        "source_id": "bdd-test-source",
+        "ts": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "status": status,
+    }
+
+
+@given("a weather status heartbeat is published to the test Mosquitto broker for VEN-1")
+def step_publish_status_heartbeat(context):
+    _publish_mqtt("openadr-lab/weather/ven-1/status", _sample_status_message("ok"))
+
+
+@then("/weather reports the source as not alive")
+def step_weather_source_not_alive(context):
+    resp = ven_get("/weather")
+    assert resp.ok
+    assert resp.json()["source_alive"] is False, "expected source_alive=false before any status heartbeat"
+
+
+@then("/weather reports the source as alive")
+def step_weather_source_alive(context):
+    from features.helpers.wait import poll_until
+
+    poll_until(
+        lambda: ven_get("/weather"),
+        lambda resp: resp.ok and resp.json().get("source_alive") is True,
+        timeout=15,
+        interval=1,
+        description="VEN-1's /weather reports source_alive=true after status heartbeat",
+    )
+
+
 @when("a plan cycle runs on VEN-1")
 def step_wait_for_plan_cycle(context):
     from features.helpers.wait import poll_until
