@@ -99,26 +99,58 @@ In `ev_milp.rs::from_state`, when `ev_session` is `Some`, compute:
 let v_core_eur_kwh = ComfortRate::value_at_fill(&session.comfort_rates, 0.0);
 let v_extra_eur_kwh = ComfortRate::value_at_fill(&session.comfort_rates, 1.0);
 ```
-and use these in place of the `v_ev_core_eur_kwh` / `v_ev_extra_eur_kwh` parameters *for the
-session-bearing branches only* (the plugged-no-session early return keeps using the passed-in
-global defaults, since there is no session/curve to resolve). `v_core_eur = core_kwh ×
-v_core_eur_kwh` as today's doc comment already specifies. `ASAP`/`MAX_COST`/`*_FREE` branches
-that use `v_ev_free_charge_eur_kwh` or lateness penalties are untouched — those modes aren't
-about the completion/extra tradeoff a comfort curve encodes.
+and use these **only in the `UserRequestMode::ByDeadline | UserRequestMode::Asap` match arm**
+(`ev_milp.rs:336-357`) — confirmed by re-reading the full `match session.mode` block that this
+is the *only* arm where `v_core_eur`/`v_extra_eur_kwh` retain their original "reward for
+completing core / reward for topping off beyond core" meaning. Every other arm
+(`Opportunistic | AsapFree`, `MaxCost`, `ByDeadlineFree`) already overrides `v_extra_eur_kwh`
+with an unrelated economic signal — `v_ev_free_charge_eur_kwh` (free-PV-energy incentive) or
+`BUDGET_CHARGE_REWARD_EUR_KWH` (budget-driven completion reward) — so applying the comfort
+curve there would conflate two independent concepts. `v_core_eur = core_kwh × v_core_eur_kwh`
+as today's doc comment already specifies, unchanged only when `session.soft_deadline` is true
+(hard `MustRun` still gets `v_core_eur = 0.0`, per D5). The plugged-no-session early return
+and all other match arms keep using the passed-in global defaults untouched.
 
 ### D4: Heater — new additive reward term, not a repoint of `w_tier_penalty_eur`
 
 Add `pub comfort_full_reward_eur_kwh: f64` to `HeaterMilpContext`, computed in
 `heater_milp.rs::from_state` as `ComfortRate::value_at_fill(&target.comfort_rates, 1.0)` (0.0
 when there's no session/curve, preserving today's behavior exactly). In the inherent
-`objective()` (`heater_milp.rs:199-224`), add:
+`objective()` (`heater_milp.rs:199-224`), add a new parameter (not a `self` read, so it can be
+phase-gated by the caller the same way `w_tier_penalty_eur` already is):
 ```
-obj -= self.comfort_full_reward_eur_kwh * dt * v.z_heat_full[t];
+pub fn objective(
+    &self, v: &HeaterMilpVars,
+    w_tier_penalty_eur: f64, m_low_eur_kwh: f64, lambda_sw_eur: f64,
+    comfort_full_reward_eur_kwh: f64,   // new
+    n: usize, dt_h: &[f64],
+) -> Expression {
+    ...
+    obj += w_tier_penalty_eur * v.z_heat_full[t];
+    obj -= comfort_full_reward_eur_kwh * dt * v.z_heat_full[t];   // new
+    ...
+}
 ```
-alongside the existing `w_tier_penalty_eur * v.z_heat_full[t]` penalty — the two terms net
-against each other: a higher curve price at `fill=1.0` (user willing to pay more to be fully
-heated) makes full-tier operation more attractive, without touching the ramp-cost-derived
-`w_tier_penalty_eur` input or its Phase-1/Phase-2 dispatch logic.
+**Gated to Phase 2 only**, mirroring exactly how `w_tier_penalty_eur` is already phase-gated in
+the `AssetMilpContext::objective()` trait impl (`asset_port.rs:385-410`): the Phase 1 branch
+(`c_startup_eur == 0.0`) passes `0.0` for the new parameter; the Phase 2 branch passes
+`self.comfort_full_reward_eur_kwh`. Rationale: `w_tier_penalty_eur` is `0.0` in Phase 1 (tier
+choice has no cost there — Phase 1's "value of stored energy" lever is the separate
+`c_terminal_eur_kwh` terminal reward, not the tier penalty), so an *unconditional* comfort
+reward on `z_heat_full` would be a free, uncounterbalanced bias toward full-tier in Phase 1's
+coarse allocation. Gating to Phase 2 keeps the new term exactly analogous to the tier penalty
+it competes against — both are Phase-2-only friction/smoothing-pass terms — and needs no
+change to Phase 1's terminal-reward mechanism or `c_terminal_eur_kwh`'s formula.
+
+**Alternative considered**: fold the curve's `fill=1.0` price into `c_terminal_eur_kwh` instead
+(Phase 1's existing "value of stored heat at horizon end" lever), leaving `z_heat_full`/tier
+penalty untouched entirely. Semantically also defensible — arguably cleaner reuse of an
+existing mechanism — but rejected for this change: it would require re-deriving
+`c_terminal_eur_kwh`'s auto-computed formula (today `mean(c_imp) + c_ctrl_imp_malus`) and
+verifying that change doesn't alter Phase 1 behavior for sessions that already relied on the
+current terminal-reward calibration. The Phase-2-gated tier reward is a strictly additive,
+lower-blast-radius change: Phase 1's objective is untouched byte-for-byte when
+`comfort_full_reward_eur_kwh` is passed as `0.0`.
 
 ### D5: Scope to MayRun/soft paths; MustRun ignores the curve for feasibility
 
@@ -131,19 +163,17 @@ and avoids infeasibility regressions.
 
 ## Risks / Trade-offs
 
-- **[Risk] Reward-term interaction with existing Phase-1/Phase-2 friction weights**: heater's
-  new `comfort_full_reward_eur_kwh` term is additive next to `w_tier_penalty_eur`, which is
-  itself phase-dependent (0.0 in Phase 1, `c_ramp_eur_kw` in Phase 2). The new term applies in
-  both phases (no phase gating) since it isn't a friction/switching cost tied to the two-phase
-  split. → **Mitigation**: cover both phases in the failing-then-passing test (Task group
-  below) — assert Phase 1 and Phase 2 allocations both respond to curve changes, not just one.
-- **[Risk] EV `MustRun` opportunistic/free/ASAP branches don't use `v_core_eur`/`v_extra_eur_kwh`
-  the same way** (some set `reward_per_slot` and swap in `v_ev_free_charge_eur_kwh` instead).
-  Repointing only the plain `MayRun`/default `MustRun` branches, not those specialized modes,
-  risks missing cases a reviewer expects covered. → **Mitigation**: design explicitly scopes D3
-  to "session-bearing branches" generally but the tasks step must enumerate every `match
-  session.mode` arm in `from_state` and decide per-arm whether the curve applies; document any
-  arm left untouched with a one-line rationale in the code.
+- **[Resolved] Reward-term interaction with existing Phase-1/Phase-2 friction weights**: settled
+  by D4 — `comfort_full_reward_eur_kwh` is threaded as an explicit `objective()` parameter and
+  gated to Phase 2 only (`0.0` in the Phase 1 call), mirroring `w_tier_penalty_eur`'s existing
+  phase-gating. → verify with a Phase 1 test asserting the objective is byte-for-byte unchanged
+  when the parameter is `0.0`, and a Phase 2 test asserting curve changes shift `z_heat_full`
+  allocation.
+- **[Resolved] EV mode-arm scope**: settled by D3 — the curve applies only to
+  `UserRequestMode::ByDeadline | UserRequestMode::Asap` (the only arm where `v_core_eur`/
+  `v_extra_eur_kwh` retain their original core/extra-comfort meaning); every other arm already
+  redirects `v_extra_eur_kwh` to an unrelated signal (free-energy incentive, budget reward) and
+  is left untouched.
 - **[Risk] `value_at_fill` clamping semantics for fill values outside `[0.0, 1.0]`** are
   untested territory (today's callers always query `0.0`/`1.0` exactly, so clamping is inert
   in practice, but the helper must still define clamp behavior for future callers). →
