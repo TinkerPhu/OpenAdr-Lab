@@ -24,11 +24,11 @@
       point where `build_asset_contexts` reads `EvSession`/`HeaterTarget` to call
       `EvMilpContext::from_state`/`HeaterMilpContext::from_state` (`simulator/plan_context.rs`)
       before starting task 3.
-- [ ] 2.2b Confirm task 3.3's field population only needs to touch the `/user-requests`
+- [ ] 2.2 Confirm task 3.3's field population only needs to touch the `/user-requests`
       construction site(s) in `services/user_request.rs` (where `EvSession`/`HeaterTarget` are
       built from a `UserRequest`) — not `routes/hems/ev.rs`/`routes/hems/heater.rs`, which stay
       as they are.
-- [ ] 2.2 Resolve the design's open question on `HeaterTarget`'s autonomous (no-session)
+- [ ] 2.3 Resolve the design's open question on `HeaterTarget`'s autonomous (no-session)
       MayRun path: confirm `comfort_full_reward_eur_kwh` stays `0.0` there (no behavior
       change), matching D5's MustRun/no-session handling.
 
@@ -45,18 +45,20 @@
 ## 4. EV — repoint reward sourcing (D3)
 
 - [ ] 4.1 Write a failing planner test in `VEN/src/controller/milp_planner/tests/` (new or
-      existing EV test file): two `MayRun` EV sessions, identical state/tariffs, differing
-      only in `comfort_rates`, must produce different `e_ev_extra_kwh`/`z_ev_core` results in
-      the solved plan.
+      existing EV test file): two EV sessions with `mode: ByDeadline, soft_deadline: true`
+      (`MayRun`), identical state/tariffs, differing only in `comfort_rates`, must produce
+      different `e_ev_extra_kwh`/`z_ev_core` results in the solved plan.
 - [ ] 4.2 Confirm the test fails (both sessions currently produce identical allocations).
-- [ ] 4.3 In `ev_milp.rs::from_state`, for session-bearing branches, compute
-      `v_core_eur_kwh`/`v_extra_eur_kwh` via `ComfortRate::value_at_fill` at `fill=0.0`/`1.0`
-      from `session.comfort_rates`, replacing the passed-in global defaults for those
-      branches. Enumerate every `match session.mode` arm and decide per-arm whether the curve
-      applies (per design Risk 2); leave `ASAP`/`*_FREE`/`MAX_COST` branches using their
-      existing dedicated sourcing (`v_ev_free_charge_eur_kwh`, lateness penalty) unless a
-      specific arm's own logic clearly should also read the curve — document any arm left
-      untouched with a one-line comment.
+- [ ] 4.3 In `ev_milp.rs::from_state`, inside the `UserRequestMode::ByDeadline |
+      UserRequestMode::Asap` match arm (line ~336) only, compute `v_core_eur_kwh =
+      ComfortRate::value_at_fill(&session.comfort_rates, 0.0)` and `v_extra_eur_kwh =
+      ComfortRate::value_at_fill(&session.comfort_rates, 1.0)`, replacing the passed-in
+      `v_ev_core_eur_kwh`/`v_ev_extra_eur_kwh` parameters for that arm's `v_core_eur`
+      (`core_kwh * v_core_eur_kwh`, only when `soft_deadline`) and `e_ev_extra` reward. All
+      other match arms (`Opportunistic | AsapFree`, `MaxCost`, `ByDeadlineFree`) are
+      unchanged — confirmed in design D3 that their `v_extra_eur_kwh` overrides
+      (`v_ev_free_charge_eur_kwh`, `BUDGET_CHARGE_REWARD_EUR_KWH`) are a different signal than
+      comfort preference.
 - [ ] 4.4 Confirm the 4.1 test passes.
 - [ ] 4.5 Add a no-curve-session regression test: a session using `default_comfort_rates()`
       (no override) produces the same allocation as before this change (compare against a
@@ -75,11 +77,15 @@
 - [ ] 5.3 Add `pub comfort_full_reward_eur_kwh: f64` to `HeaterMilpContext`; compute it in
       `from_state` via `ComfortRate::value_at_fill(&target.comfort_rates, 1.0)` (0.0 when no
       session/curve, preserving current behavior).
-- [ ] 5.4 Add the reward term to the inherent `objective()`:
-      `obj -= self.comfort_full_reward_eur_kwh * dt * v.z_heat_full[t]`, alongside the
-      existing `w_tier_penalty_eur * v.z_heat_full[t]` term.
-- [ ] 5.5 Confirm the 5.1 test passes in both Phase 1 and Phase 2 dispatch paths (per design
-      Risk 1 — the new term isn't phase-gated, verify both call sites still behave correctly).
+- [ ] 5.4 Add a new `comfort_full_reward_eur_kwh: f64` parameter to the inherent `objective()`
+      signature (not a `self` read); add `obj -= comfort_full_reward_eur_kwh * dt *
+      v.z_heat_full[t]` alongside the existing `w_tier_penalty_eur * v.z_heat_full[t]` term.
+      In the `AssetMilpContext::objective()` trait impl (`asset_port.rs:385-410`), pass `0.0`
+      in the Phase 1 branch (`c_startup_eur == 0.0`) and `self.comfort_full_reward_eur_kwh` in
+      the Phase 2 branch — mirrors `w_tier_penalty_eur`'s existing phase-gating exactly (D4).
+- [ ] 5.5 Confirm the 5.1 test passes: Phase 1's objective is unchanged when the new parameter
+      is `0.0` (add an explicit assertion for this, not just "doesn't regress"); Phase 2's
+      `z_heat_full` allocation responds to `comfort_full_reward_eur_kwh` changes.
 - [ ] 5.6 Add a no-curve-session regression test confirming unchanged fallback behavior
       (`comfort_full_reward_eur_kwh == 0.0` reproduces pre-change allocations).
 
