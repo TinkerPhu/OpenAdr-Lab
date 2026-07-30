@@ -687,6 +687,8 @@ export type WeatherStatus = "ok" | "stale" | "no_forecast";
 export type WeatherResponse = {
   status: WeatherStatus;
   is_fresh: boolean;
+  /** Transport heartbeat: whether the configured source has been heard from recently. */
+  source_alive: boolean;
   raw: WeatherForecast | null;
   derived: WeatherPvForecastSlot[] | null;
 };

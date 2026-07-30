@@ -71,7 +71,6 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 
 | ID | Description | Affected files | Effort | Risk | Gain |
 |----|-------------|----------------|--------|------|------|
-| R-52 | `MqttWeatherAdapter::is_alive()` (liveness/heartbeat check) and the cached `last_status` aren't surfaced anywhere yet (no `/health` integration, no metric). Currently `#[allow(dead_code)]`. | `VEN/src/weather.rs` | Trivial | Low | Medium — a live external feed's health isn't currently observable, contrary to this project's own `ui-transparency` principle |
 | R-53 | Horizon/shading obstructions, the Perez/HDKR diffuse-sky model (vs. the current isotropic-on-zenith simplification), and module degradation over time are known, deliberately deferred accuracy gaps in `entities::solar`'s clear-sky transposition — see `docs/architecture/weather_forecast.md`. | `VEN/src/entities/solar.rs` | Medium | Low | Low-Medium — PV forecast accuracy improvement, deliberately deferred until it's the dominant error source |
 | R-54 | The Mosquitto broker in this project's existing deployment (Pi4-Server) allows anonymous connections on its plaintext 1883 listener — anyone on the local network can publish to the weather topics today. Acceptable for a lab on a trusted LAN; revisit (password file already exists at `/srv/docker/mosquitto/config/pwfile`, unused) before any exposure beyond the local network. | Pi4-Server `mosquitto` deployment | Small | Low | Low today (LAN-only lab) — would become High if this deployment is ever network-exposed |
 | R-55 | Snow-cover model's initial state (`PvSnowState` at the start of a forecast trajectory) only has the forecast-only fallback implemented — no cross-check against live PV telemetry deviation (`AssetState.power_deviation_kw`) to detect "actually covered right now" the way `docs/architecture/weather_forecast.md` describes as the preferred source. | `VEN/src/entities/pv_snow.rs` | Small | Low | Low — accuracy improvement for a specific, infrequent edge case |
@@ -95,7 +94,6 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 | ID | Description | Affected files | Effort | Risk | Gain |
 |----|-------------|----------------|--------|------|------|
 | R-35 | No script regenerates the module dependency graph — the SESSION_START.md quarterly check is manual. Add `scripts/gen_module_graph.py` emitting Mermaid from `use crate::` imports (test code excluded). | `scripts/` | Small | Low | Low — removes manual toil from a quarterly check |
-| R-22 | E2E scenario `ven_shiftable_lifecycle.feature:11` can time out under Pi4 load peaks (passes in isolation, 35–40 s). Tag it `@isolated` (move to `features/isolated/`) so it gets the load-settle wait like its siblings, or raise its poll timeout. | `tests/features/ven_shiftable_lifecycle.feature` | Trivial | Low (flake) | Medium — removes a confirmed, actively-observed E2E flake (trivial fix, same pattern as its siblings) |
 
 ### Watch-list (not violations)
 
@@ -132,36 +130,33 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 ## Implementation Task List — Gain: High or Medium Items
 
 Scope: every item currently rated Gain exactly **High** or **Medium** (no compound levels
-like Medium-High/Low-Medium). No item is currently rated plain High, so this is the 10 items
-rated Medium: R-08, R-21, R-22, R-24, R-29, R-31, R-43, R-52, R-56, R-58. Ordered by
-dependency, not by ID — work top-to-bottom.
+like Medium-High/Low-Medium). No item is currently rated plain High, so this is the 8 items
+rated Medium: R-08, R-21, R-24, R-29, R-31, R-43, R-56, R-58 (R-22 and R-52 were also on this
+list and are now resolved — see below). Ordered by dependency, not by ID — work top-to-bottom.
 
 **Why this order:**
 
-1. **R-22, R-52** first — both trivial, fully isolated (one `.feature` file; one weather
-   module), no interaction with anything else on this list. Quick wins.
-2. **R-56** next — builds on R-52: once liveness/`last_status` is surfaced, the weather E2E
-   scenario being un-`@wip`'d can assert on it too, not just forecast values. Needs Pi4/Docker
-   access either way.
-3. **R-24** — threads an injectable clock through `assets/base_load.rs`, `assets/battery.rs`,
+1. **R-56** first — needs Pi4/Docker access either way, and can now assert on R-52's liveness
+   field (resolved) in addition to forecast values.
+2. **R-24** — threads an injectable clock through `assets/base_load.rs`, `assets/battery.rs`,
    `assets/ev.rs`, `assets/grid.rs` (additive parameter, no structural change). Land this
    *before* R-08 so the big dispatch-enum rewrite doesn't need a second pass to accommodate a
    clock parameter added afterward.
-4. **R-08** — the large `AssetConfig` → `dyn Asset`/macro-forwarder refactor. Since this
+3. **R-08** — the large `AssetConfig` → `dyn Asset`/macro-forwarder refactor. Since this
    touches every asset variant's methods anyway, fold in R-29's heater/ev/battery_milp.rs
    `unwrap()`/`expect()` triage (~6 of its ~24 call sites) as part of the same pass instead of
    touching those files twice.
-5. **R-58** — asset-level fault-trigger verification (`entities/asset.rs`,
+4. **R-58** — asset-level fault-trigger verification (`entities/asset.rs`,
    `services/planning.rs`, `assets/`). Soft-clustered after R-08/R-24 so it verifies/extends
    trigger call sites against the *settled* asset layer, not one mid-refactor.
-6. **R-29 (remainder)** — the non-asset `unwrap()`/`expect()` call sites (`milp_interactions.rs`,
+5. **R-29 (remainder)** — the non-asset `unwrap()`/`expect()` call sites (`milp_interactions.rs`,
    `common/mod.rs`, `services/planning.rs`, `user_request.rs`, `routes/hems/sessions.rs`,
    `openadr_interface.rs`, `sim_tick/tick.rs`, `services/hems.rs`, `milp_planner/inputs.rs`) —
-   the asset-file portion is already done in step 4.
-7. **R-31, R-43** last — both fully independent of everything above (R-31 is VTN/bff-only;
+   the asset-file portion is already done in step 3.
+6. **R-31, R-43** last — both fully independent of everything above (R-31 is VTN/bff-only;
    R-43 wires VEN report-submission call sites nothing else on this list touches). Order
    between them doesn't matter; listed in ID order.
-8. **R-21** — deliberately last and separate: its own entry has no concrete fix, only a
+7. **R-21** — deliberately last and separate: its own entry has no concrete fix, only a
    workaround (root cause is allocator/heap-state-dependent inside the native HiGHS library
    via FFI, not this codebase). Its task below is an investigation, not a code fix.
 
@@ -171,112 +166,93 @@ an item done: `wsl cargo test -j 2 -p ven-app` under `wsl_lock`, `cargo fmt --ch
 `cargo clippy --all-targets --all-features -- -D warnings`, `scripts/audit_file_sizes.py`;
 update `docs/history/project_journal.md` and remove the item from this register once resolved.
 
-### 1. R-22 — Tag the shiftable-lifecycle E2E flake `@isolated`
+### 1. R-56 — Un-`@wip` the weather MQTT E2E coverage
 
-- [ ] 1.1 Move `Running shiftable load appears in GET /sim` from
-      `tests/features/ven_shiftable_lifecycle.feature` into `tests/features/isolated/` (or
-      raise its poll timeout, if moving is judged disruptive to the feature file's grouping).
-- [ ] 1.2 Confirm it now gets the `entrypoint.sh` load-settle wait like its siblings.
-- [ ] 1.3 Run the full E2E suite on Pi4 (`bash run_all_tests.sh --e2e`) at least twice under
-      concurrent load to confirm the flake is gone; remove R-22 from this register.
-
-### 2. R-52 — Surface `MqttWeatherAdapter::is_alive()`/`last_status`
-
-- [ ] 2.1 Write a failing test asserting a `/health`-reachable (or dedicated) field reflects
-      `is_alive()`'s current value.
-- [ ] 2.2 Wire `is_alive()`/`last_status` into `routes/system.rs::health` (or a `/weather`
-      liveness field, whichever fits the existing `ui-transparency` pattern better) and drop
-      the `#[allow(dead_code)]`.
-- [ ] 2.3 VEN UI: surface the liveness field somewhere on the Weather tab or diagnostics area,
-      per this project's `ui-transparency` rule.
-- [ ] 2.4 Full verification; remove R-52 from this register.
-
-### 3. R-56 — Un-`@wip` the weather MQTT E2E coverage
-
-- [ ] 3.1 Remove the `@wip` tag from `tests/features/weather_forecast.feature` and run it on
+- [ ] 1.1 Remove the `@wip` tag from `tests/features/weather_forecast.feature` and run it on
       Pi4 to see its current state (it was written before R-50's planner wiring landed).
-- [ ] 3.2 Fix whatever the scenario reveals against the now-landed planner-input path.
-- [ ] 3.3 If R-52 is already done, extend the scenario to assert on the new liveness field too.
-- [ ] 3.4 Confirm it passes in the default (non-`@wip`) suite on Pi4; remove R-56 from this
+- [ ] 1.2 Fix whatever the scenario reveals against the now-landed planner-input path.
+- [ ] 1.3 Extend the scenario to assert on `/weather`'s `source_alive` liveness field too
+      (R-52, resolved).
+- [ ] 1.4 Confirm it passes in the default (non-`@wip`) suite on Pi4; remove R-56 from this
       register.
 
-### 4. R-24 — Thread an injectable clock through the remaining simulator/assets gaps
+### 2. R-24 — Thread an injectable clock through the remaining simulator/assets gaps
 
-- [ ] 4.1 Classify each listed call site as a legitimate live-loop entry point (keep
+- [ ] 2.1 Classify each listed call site as a legitimate live-loop entry point (keep
       `Utc::now()`) vs. a genuine violation (needs threading) — `entities/site_meter.rs:49`,
       `controller/openadr_interface.rs:230`, `simulator/mod.rs:156,367`,
       `assets/base_load.rs:108`, `assets/battery.rs:142`, `assets/ev.rs:184`,
       `assets/grid.rs:86`.
-- [ ] 4.2 Write a failing test for one violation (e.g. `assets/battery.rs:142`) that injects a
+- [ ] 2.2 Write a failing test for one violation (e.g. `assets/battery.rs:142`) that injects a
       fixed clock and asserts deterministic output across repeated calls.
-- [ ] 4.3 Thread the tick clock through each confirmed violation; repeat 4.2 per site.
-- [ ] 4.4 Replace `simulator/power_model.rs::random_voltage()`'s unseeded `rand::thread_rng()`
+- [ ] 2.3 Thread the tick clock through each confirmed violation; repeat 2.2 per site.
+- [ ] 2.4 Replace `simulator/power_model.rs::random_voltage()`'s unseeded `rand::thread_rng()`
       with a seedable RNG threaded the same way.
-- [ ] 4.5 Full verification; remove R-24 from this register.
+- [ ] 2.5 Full verification; remove R-24 from this register.
 
-### 5. R-08 — Replace the `AssetConfig` manual dispatch enum
+### 3. R-08 — Replace the `AssetConfig` manual dispatch enum
 
-- [ ] 5.1 Design pass: `dyn Asset` trait object vs. a macro forwarder — see
+- [ ] 3.1 Design pass: `dyn Asset` trait object vs. a macro forwarder — see
       `docs/plans/refactoring_backlog.md` for prior diagnostics; confirm the chosen approach
       resolves the allowlisted file-size exception in `scripts/audit_file_sizes.py`.
-- [ ] 5.2 Write/port tests asserting each of the 5 variants' 9 methods behave identically
+- [ ] 3.2 Write/port tests asserting each of the 5 variants' 9 methods behave identically
       before and after dispatch mechanism changes (characterization tests if none exist yet).
-- [ ] 5.3 Implement the new dispatch mechanism in `VEN/src/assets/mod.rs`.
-- [ ] 5.4 While touching each variant's methods, fold in R-29's heater/ev/battery_milp.rs
+- [ ] 3.3 Implement the new dispatch mechanism in `VEN/src/assets/mod.rs`.
+- [ ] 3.4 While touching each variant's methods, fold in R-29's heater/ev/battery_milp.rs
       `unwrap()`/`expect()` triage (~6 call sites) — convert to `Result` or add a
       safety-justifying comment, per R-29's own fix note.
-- [ ] 5.5 Remove `VEN/src/assets/mod.rs` from `scripts/audit_file_sizes.py`'s allowlist.
-- [ ] 5.6 Full verification; remove R-08 from this register.
+- [ ] 3.5 Remove `VEN/src/assets/mod.rs` from `scripts/audit_file_sizes.py`'s allowlist.
+- [ ] 3.6 Full verification; remove R-08 from this register.
 
-### 6. R-58 — Verify `PlanTrigger::CapacityChange`/`Alert` cover asset-level faults
+### 4. R-58 — Verify `PlanTrigger::CapacityChange`/`Alert` cover asset-level faults
 
-- [ ] 6.1 Trace every call site constructing `PlanTrigger::CapacityChange`/`Alert` in
+- [ ] 4.1 Trace every call site constructing `PlanTrigger::CapacityChange`/`Alert` in
       `services/planning.rs` and `assets/`.
-- [ ] 6.2 Confirm at least one covers an asset-originated fault (thermal derate, BMS fault,
+- [ ] 4.2 Confirm at least one covers an asset-originated fault (thermal derate, BMS fault,
       breaker trip), not only tariff/VTN-sourced capacity changes.
-- [ ] 6.3 If none do, write a failing test for the missing case (e.g. a simulated thermal
+- [ ] 4.3 If none do, write a failing test for the missing case (e.g. a simulated thermal
       derate should emit `CapacityChange`) and extend the relevant call site.
-- [ ] 6.4 Full verification; remove R-58 from this register.
+- [ ] 4.4 Full verification; remove R-58 from this register.
 
-### 7. R-29 — Triage the remaining `unwrap()`/`expect()` call sites
+### 5. R-29 — Triage the remaining `unwrap()`/`expect()` call sites
 
-- [ ] 7.1 List the non-asset call sites (asset-file ones already handled in step 5.4):
+- [ ] 5.1 List the non-asset call sites (asset-file ones already handled in step 3.4):
       `milp_interactions.rs` ×4, `common/mod.rs` ×4, `services/planning.rs` ×3,
       `user_request.rs` ×2, `routes/hems/sessions.rs` ×2, `openadr_interface.rs` ×2,
       `sim_tick/tick.rs` ×1, `services/hems.rs` ×1, `milp_planner/inputs.rs` ×1.
-- [ ] 7.2 For each: convert to `Result` if the panic path is reachable with attacker/user-
+- [ ] 5.2 For each: convert to `Result` if the panic path is reachable with attacker/user-
       controlled or otherwise fallible input; otherwise add a one-line safety-justifying
       comment explaining why it can't panic in practice.
-- [ ] 7.3 Full verification; remove R-29 from this register.
+- [ ] 5.3 Full verification; remove R-29 from this register.
 
-### 8. R-31 — Propagate VTN BFF upstream error status class
+### 6. R-31 — Propagate VTN BFF upstream error status class
 
-- [ ] 8.1 Write a failing unit test in `VTN/bff/src/error.rs` asserting a VTN 4xx
+- [ ] 6.1 Write a failing unit test in `VTN/bff/src/error.rs` asserting a VTN 4xx
       validation/conflict error surfaces as its own status class, not a flattened 502.
-- [ ] 8.2 Implement status-class propagation in `error.rs`/`vtn_client.rs` where the upstream
+- [ ] 6.2 Implement status-class propagation in `error.rs`/`vtn_client.rs` where the upstream
       status is known; keep 502 only for genuine gateway/connectivity failures.
-- [ ] 8.3 Update the existing pinning unit test in `error.rs` to match the new behavior.
-- [ ] 8.4 Full verification; remove R-31 from this register.
+- [ ] 6.3 Update the existing pinning unit test in `error.rs` to match the new behavior.
+- [ ] 6.4 Full verification; remove R-31 from this register.
 
-### 9. R-43 — Wire `append_report_sent` into real report-submission call sites
+### 7. R-43 — Wire `append_report_sent` into real report-submission call sites
 
-- [ ] 9.1 Write a failing integration test: submitting a report via the real call path results
+- [ ] 7.1 Write a failing integration test: submitting a report via the real call path results
       in a row visible through `GET /history/reports`.
-- [ ] 9.2 Call `HistoryPort::append_report_sent` from `tasks/sim_tick/publish.rs::run_measurement_reports`.
-- [ ] 9.3 Call it from `services/obligation.rs` and `routes/reports.rs`'s submission paths too.
-- [ ] 9.4 Confirm `GET /history/reports` returns non-empty results after a real submission
+- [ ] 7.2 Call `HistoryPort::append_report_sent` from `tasks/sim_tick/publish.rs::run_measurement_reports`.
+- [ ] 7.3 Call it from `services/obligation.rs` and `routes/reports.rs`'s submission paths too.
+- [ ] 7.4 Confirm `GET /history/reports` returns non-empty results after a real submission
       (BDD scenario, if practical, per this project's E2E conventions).
-- [ ] 9.5 Full verification; remove R-43 from this register.
+- [ ] 7.5 Full verification; remove R-43 from this register.
 
-### 10. R-21 — Investigate the intermittent `cargo test` heap-corruption crash
+### 8. R-21 — Investigate the intermittent `cargo test` heap-corruption crash
 
-- [ ] 10.1 Try to minimize a standalone repro isolating `run_planner_n48_full_horizon` and
+- [ ] 8.1 Try to minimize a standalone repro isolating `run_planner_n48_full_horizon` and
       `solve_ven3_heater_three_tier_zones_feasible` from the rest of the suite.
-- [ ] 10.2 Check for a `good_lp`/HiGHS version bump that might already fix an allocator bug;
+- [ ] 8.2 Check for a `good_lp`/HiGHS version bump that might already fix an allocator bug;
       try upgrading in isolation and re-running the full suite several times.
-- [ ] 10.3 If still reproducible, file an upstream issue against `good_lp` or HiGHS with the
+- [ ] 8.3 If still reproducible, file an upstream issue against `good_lp` or HiGHS with the
       minimized repro; link it from this entry.
-- [ ] 10.4 If no upstream fix lands, formalize the existing workaround (e.g. a
+- [ ] 8.4 If no upstream fix lands, formalize the existing workaround (e.g. a
       `scripts/`-level note or CI retry step) rather than leaving it tribal knowledge.
-- [ ] 10.5 This item stays in the register until the crash stops reproducing across several
+- [ ] 8.5 This item stays in the register until the crash stops reproducing across several
       full-suite runs — remove only then, not merely once a workaround is documented.
