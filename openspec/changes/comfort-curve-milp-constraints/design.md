@@ -163,9 +163,12 @@ change (none can, since sessions aren't persisted across deploys) or omits an ov
 
 ## Open Questions
 
-- Exact call site(s) that construct `EvSession`/`HeaterTarget` from a `UserRequest` need to be
-  located during implementation (not fully traced in this design) — confirm there's a single
-  construction point per asset, not several duplicated ones, before adding the field.
+- **Resolved**: two independent routes construct `EvSession`/`HeaterTarget` in production —
+  `POST /user-requests` (→ `create_from_body`, the VEN UI's only session-creation path,
+  confirmed via `usePostRequest`'s single caller in `Devices.tsx`) and the legacy
+  `POST /ev-session`/`POST /heater-target` direct routes (unused by any UI page). This change
+  only touches the `/user-requests` construction path in `services/user_request.rs`; the
+  direct routes stay as they are (see proposal Non-goals).
 - Whether `HeaterTarget`'s `MayRun` autonomous (no active session) path should synthesize a
   curve from `default_comfort_rates()` explicitly, or simply leave
   `comfort_full_reward_eur_kwh` at `0.0` (today's behavior) — leaning toward `0.0`/unchanged
