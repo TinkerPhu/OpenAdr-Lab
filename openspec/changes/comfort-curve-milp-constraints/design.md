@@ -111,6 +111,16 @@ as today's doc comment already specifies, unchanged only when `session.soft_dead
 (hard `MustRun` still gets `v_core_eur = 0.0`, per D5). The plugged-no-session early return
 and all other match arms keep using the passed-in global defaults untouched.
 
+**Implementation-time finding**: the `v_extra_eur_kwh`/`e_ev_extra` half of this reward is a
+documented pre-existing no-op for driving allocation — `e_ev_extra` is only bounded *above* by
+`e_extra_max_kwh * z_ev_core`, so the solver "banks" the reward without any real charging
+change (tracked as **R-18** in `docs/reference/TECHNICAL_DEBTS.md`, independently
+re-discovered while writing this change's tests). Only the `v_core_eur`/`z_ev_core` half is
+correctly wired and was used for the verify test. The source-of-truth fix here (curve instead
+of global constant) is still correct for `v_extra_eur_kwh` — it just has no observable effect
+until R-18 is separately fixed. Not fixed as part of this change (out of scope, see proposal
+Non-goals).
+
 ### D4: Heater — new additive reward term, not a repoint of `w_tier_penalty_eur`
 
 Add `pub comfort_full_reward_eur_kwh: f64` to `HeaterMilpContext`, computed in
