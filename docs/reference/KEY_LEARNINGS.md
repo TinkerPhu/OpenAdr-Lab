@@ -711,3 +711,32 @@ outes/sim.rs causes a T1+T2 double-solve race:
   dimension that can independently reach zero (rate limit, energy/SoC
   limit, thermal limit, etc.) rather than checking the one that's most
   obviously relevant to the lever's direction.
+
+## Comfort-Curve MILP Wiring (BL-34, openspec/changes/comfort-curve-milp-constraints/)
+
+- **A MILP reward term can be syntactically correct and semantically inert at the same
+  time — verify the variable it rewards is actually load-bearing in the constraint set
+  before writing a test around it.** The plan was to test the EV's comfort curve by
+  asserting `e_ev_extra_kwh` differs between two curves. It never did, at any reward
+  value: `e_ev_extra` is bounded only *above* by `e_extra_max_kwh × z_ev_core`
+  (`ev_milp.rs::constraints`) — nothing lower-bounds it by real charged power, so the
+  solver "banks" the reward without moving `p_ev`. This was an already-filed debt item
+  (R-18, `docs/reference/TECHNICAL_DEBTS.md`), independently rediscovered here via a
+  binary-search probe on the reward coefficient before the pattern made sense. The fix
+  was to trace which variable the constraint set actually couples to real allocation
+  (`z_ev_core`, via `ev_energy ≥ e_core_kwh × z_ev_core`) and test that instead. Before
+  wiring a new reward into an existing MILP objective, read the constraints, not just the
+  objective — the two can disagree about what a variable actually controls.
+- **A "reward gated behind the same binary as another degenerate reward" confounds any
+  test of the first reward.** Once `z_ev_core=1`, the free-banked `e_ev_extra` reward
+  (above) subsidizes committing to core regardless of the core-side reward's own value —
+  so a naive core-price threshold test kept committing even when the core price alone
+  was clearly unprofitable, until the confounding extra-price was pinned to `0.0`
+  independently. When two reward terms share a gating variable, isolate one by neutralizing
+  the other, not just varying the one under test.
+- **An "obviously correct" objective-coefficient estimate (tariff × energy) can be off by
+  a wide margin against the real solved threshold** — Phase 2 friction terms and other
+  objective contributions shift the true breakeven point. A short empirical binary search
+  on the actual solved output (a handful of `cargo test -- --nocapture` runs at different
+  coefficient values) found the real threshold faster and more reliably than deriving it
+  by hand from the objective's listed terms.
