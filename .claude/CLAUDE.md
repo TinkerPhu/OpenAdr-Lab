@@ -44,18 +44,20 @@ dto: avoid DTO normalization. pass through upstream field names (e.g. OpenADR sp
 
 workflow: 1. always keep a project_journal.md in projects where you write for each large step what you did, why you did it and what issues/key-learnings you had. it shall explain, how the project was implemented. The journal lives at docs/history/project_journal.md.
 2. write key learnings into KEY_LEARNINGS.md (at docs/reference/KEY_LEARNINGS.md) and consider them when making decissions.
-3. no lingering old plans or plan items after implementation. Once a plan (docs/plans/) or an
-openspec change (openspec/changes/, including its specs/) has been implemented and successfully
-tested, wave its feature/functionality into the appropriate current-state documentation, then
-delete the plan/change (do not archive — the openspec-archive-change skill is removed, replaced
-by this delete workflow). If a change's specs/ describes requirements worth keeping as a living
-reference (not just "what we built this time" but "what this capability is now supposed to do"),
-fold that content into the relevant capability's baseline spec doc before deleting — don't let the
-requirement statement disappear just because the change directory does. Implementation-issue
-narrative is not carried forward once a thing is implemented; if an issue holds a durable lesson
-for future work, put it in KEY_LEARNINGS.md, not in a surviving plan file. If only part of a
-plan/change is done and tested, remove just that part and leave the rest in place — do not delete
-a plan/change wholesale on partial completion.
+3. no lingering old plans or plan items after implementation. The entire openspec/ folder is
+construction/change-management scaffolding, not a documentation destination — this includes
+openspec/specs/, not just openspec/changes/. Once a plan (docs/plans/) or an openspec change
+(openspec/changes/, including its specs/) has been implemented and successfully tested, wave its
+feature/functionality into the appropriate current-state documentation under docs/ (mechanism-level
+facts into the relevant docs/architecture/*.md; user-observable behavior into the relevant
+docs/use-cases/*.md; new doc files only when no existing one fits, not by default), then delete the
+plan/change (do not archive — the openspec-archive-change skill is removed, replaced by this delete
+workflow). Don't restate what tests already assert with full rigor — point to the test file by
+name instead of hand-copying SHALL/Scenario prose into docs; that duplication rots as the code
+evolves. Implementation-issue narrative is not carried forward once a thing is implemented; if an
+issue holds a durable lesson for future work, put it in KEY_LEARNINGS.md, not in a surviving plan
+file. If only part of a plan/change is done and tested, remove just that part and leave the rest in
+place — do not delete a plan/change wholesale on partial completion.
 Deletion here is git-recoverable (history isn't lost), so this is about keeping the working tree's
 active plans/specs true to what's still outstanding, not about erasing the record.
 
