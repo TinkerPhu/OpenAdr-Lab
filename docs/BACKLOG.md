@@ -36,7 +36,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
 | [BL-34](#bl-34-comfort-curves-never-reach-the-milp-constraints) | Comfort-preference sliders the UI already exposes actually change what the planner does — today they're silently dropped | High | M | Medium — touches solver constraints on every asset path |
-| [BL-40](#bl-40-assetallocationcost_eur-credits-pv-surplus-use-instead-of-pricing-it-as-forgone-export-revenue) | Planner-tab per-slot costs and the envelope's session total agree in sign instead of visibly disagreeing on PV-surplus-covered energy | Medium-High | S (sign flip) + a semantics decision | Low — isolated to allocation cost display, no solver-objective impact |
 | [BL-27](#bl-27-poweradjustability--powerrange--device-control-mode-classification) | UI controls (e.g. a stepped EV charger) snap to real device levels instead of rendering a misleading continuous slider | Medium | M | Low–Medium — every asset's `capability()` impl must report it |
 | [BL-39](#bl-39-per-session-accumulated-cost-accounting-real-budget-bar) | Budget bar on the session board shows real money spent so far instead of a plan-time estimate | Medium | M | Medium — new accounting invariant in monitor/ledger or history-store, session attribution |
 | [BL-37](#bl-37-reactive-correction-events-into-the-notification-feed-sse-blind-spot) | Learns about reactive battery corrections even when not watching the Planner tab (today they're invisible elsewhere) | Medium | S | Low — one producer on the existing notification path |
@@ -226,16 +225,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 ---
 
-### BL-40: AssetAllocation.cost_eur credits PV-surplus use instead of pricing it as forgone export revenue
-**Req:** `VEN/src/controller/milp_planner/results.rs` (`translate_to_plan`, all four allocation blocks: EV/heater/shiftable/battery-charging); found while fixing `FlexibilityEnvelope.estimated_cost_eur` (BL-36 rebuild — see `solved_session_cost()` in `controller/milp_planner/envelopes.rs`)
-**Problem:** Every allocation computes `cost_eur = grid_power_kw × import_tariff − surplus_power_kw × export_tariff` (note the minus). Consuming PV surplus instead of exporting it forfeits export revenue — an opportunity *cost*, not a credit — so the sign makes surplus-covered energy look cheaper than free instead of costing the forgone export price. The new envelope estimate (`solved_session_cost`) intentionally uses `+` (adds the surplus share's export-price cost) to get an honest per-session number; the decision matrix's `AssetAllocation.cost_eur` still uses the old `−` convention, so the Planner tab's per-slot/per-asset cost display and the envelope's session-total cost can now disagree in sign on the surplus-priced portion.
-**Fix:** Decide the intended semantics first (opportunity cost vs. a deliberate "surplus is free-plus-avoided-export-loss" display convention used elsewhere in the UI), then align `AssetAllocation.cost_eur` with `solved_session_cost()` — likely flipping the sign on all four allocation blocks — or document why they differ and adjust `PlanSummary.total_cost_eur`/`CostBreakdown.c_energy_eur` (which sum `net_import × import − net_export × export` at grid level, a different but related computation) accordingly.
-**Gain:** Medium-High — the current sign inconsistency means the Planner tab's per-slot cost and the envelope's session total can visibly disagree for the same data, a data-integrity/trust issue, not just cosmetic.
-**Complexity:** Small code change (sign flip in up to 4 places) but needs a semantics decision first — touches solver-facing objective weights indirectly only if reused elsewhere; check no downstream code depends on the current sign before flipping.
-**Verify:** Unit test: a slot where an asset is charged entirely from PV surplus reports `cost_eur` equal to `surplus_power_kw × export_tariff_eur_kwh × dt_h` (the forgone revenue), not its negative; decision matrix and envelope totals agree in sign for the same slot range.
-
----
-
 ## General Backlog
 
 | ID | Item | Gain | Priority |
@@ -280,19 +269,18 @@ any internet-exposed deployment.
 
 ## Implementation Task List — High / Medium-High Gain Items
 
-Scope: the only items currently rated Gain: High or Medium-High (BL-09, BL-34, BL-40).
+Scope: the items currently rated Gain: High or Medium-High (BL-09, BL-34). BL-40 was in this
+list and has been resolved (`openspec/changes/cost-sign-fix/`, branch `042-cost-sign-fix`);
+its entry is removed per the completion step below.
 Ordered by dependency, not by ID — work top-to-bottom.
 
 **Why this order:**
 
-1. **BL-40** first — fully isolated to `results.rs`'s four allocation-cost blocks and their
-   tests. Touches no solver constraint, so it can't collide with what BL-34/BL-09 change in
-   the same solve. Smallest, lowest-risk, do it as a quick win.
-2. **BL-34** second — adds new MILP tier constraints/rewards to the allocation model itself.
+1. **BL-34** first — adds new MILP tier constraints/rewards to the allocation model itself.
    Land this before BL-09 so Phase 6's slot-reallocation logic is built and tested against
    the *final* constraint model, not one that later grows new comfort-tier constraints
    underneath it.
-3. **BL-09** last — the largest item (5–8h), a new solver phase built on top of an
+2. **BL-09** last — the largest item (5–8h), a new solver phase built on top of an
    already-stable allocation model. Also the item that unblocks BL-35 (tier-fallback
    notifications — Low gain, not in this list) once it lands.
 
@@ -303,24 +291,7 @@ before considering an item done: `wsl cargo test -j 2 -p ven-app` under `wsl_loc
 `scripts/audit_file_sizes.py`; update `docs/history/project_journal.md` and remove the
 item from this backlog once resolved.
 
-### 1. BL-40 — `AssetAllocation.cost_eur` sign fix
-
-- [ ] 1.1 Decide the semantics question the item itself flags: align `AssetAllocation.cost_eur`
-      with `solved_session_cost()`'s opportunity-cost convention (`+`, forgone export revenue)
-      rather than keep the old credit convention (`−`). Recommended, since `solved_session_cost`
-      is the newer, already-scrutinized convention from the BL-36 rebuild.
-- [ ] 1.2 Write a failing unit test (`controller/milp_planner/tests/`) asserting a slot fully
-      covered by PV surplus reports `cost_eur == surplus_power_kw × export_tariff_eur_kwh × dt_h`
-      (positive) for the EV allocation block in `results.rs::translate_to_plan`.
-- [ ] 1.3 Flip the sign in the EV block; confirm the new test passes; update any existing test
-      that asserted the old sign.
-- [ ] 1.4 Repeat 1.2–1.3 for the heater, shiftable-load, and battery-charging blocks.
-- [ ] 1.5 Add a test asserting the decision matrix and the envelope's session-total cost agree
-      in sign for a PV-surplus scenario spanning multiple asset types.
-- [ ] 1.6 Full verification (see above); update `docs/history/project_journal.md`; remove BL-40
-      from this backlog.
-
-### 2. BL-34 — Comfort curves reach the MILP constraints
+### 1. BL-34 — Comfort curves reach the MILP constraints
 
 - [ ] 2.1 Trace `controller/user_request.rs::create_from_body` to confirm exactly where the
       resolved `ComfortRate` (`_comfort_rates`) is dropped today.
@@ -338,7 +309,7 @@ item from this backlog once resolved.
 - [ ] 2.7 Full verification; update `docs/history/project_journal.md`; remove BL-34 from this
       backlog.
 
-### 3. BL-09 — Phase 6: penalty threshold check
+### 2. BL-09 — Phase 6: penalty threshold check
 
 - [ ] 3.1 Design pass: penalty rule configuration shape (new profile YAML section, e.g.
       `planner.penalty_thresholds`), threshold evaluation logic, and the cost-comparison model
