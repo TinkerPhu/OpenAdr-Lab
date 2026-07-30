@@ -87,28 +87,30 @@
 
 ## 5. Heater — new reward term (D4)
 
-- [ ] 5.1 Write a failing test in `VEN/src/assets/heater_milp.rs`'s existing
-      `milp_context_trait_tests`/`milp_tests` modules (or
-      `controller/milp_planner/tests/heater.rs`) asserting that two otherwise-identical
-      `HeaterMilpContext`s with different `comfort_full_reward_eur_kwh` values produce
-      different objective expressions (follow the existing `format!("{obj:?}")` comparison
-      pattern used for terminal-reward tests), and/or different solved `z_heat_full`
-      allocations end-to-end.
-- [ ] 5.2 Confirm the test fails (field doesn't exist yet / has no effect).
-- [ ] 5.3 Add `pub comfort_full_reward_eur_kwh: f64` to `HeaterMilpContext`; compute it in
-      `from_state` via `ComfortRate::value_at_fill(&target.comfort_rates, 1.0)` (0.0 when no
-      session/curve, preserving current behavior).
-- [ ] 5.4 Add a new `comfort_full_reward_eur_kwh: f64` parameter to the inherent `objective()`
-      signature (not a `self` read); add `obj -= comfort_full_reward_eur_kwh * dt *
-      v.z_heat_full[t]` alongside the existing `w_tier_penalty_eur * v.z_heat_full[t]` term.
-      In the `AssetMilpContext::objective()` trait impl (`asset_port.rs:385-410`), pass `0.0`
-      in the Phase 1 branch (`c_startup_eur == 0.0`) and `self.comfort_full_reward_eur_kwh` in
-      the Phase 2 branch — mirrors `w_tier_penalty_eur`'s existing phase-gating exactly (D4).
-- [ ] 5.5 Confirm the 5.1 test passes: Phase 1's objective is unchanged when the new parameter
-      is `0.0` (add an explicit assertion for this, not just "doesn't regress"); Phase 2's
-      `z_heat_full` allocation responds to `comfort_full_reward_eur_kwh` changes.
-- [ ] 5.6 Add a no-curve-session regression test confirming unchanged fallback behavior
-      (`comfort_full_reward_eur_kwh == 0.0` reproduces pre-change allocations).
+- [x] 5.1 Wrote objective-expression-level tests in `heater_milp.rs`'s
+      `milp_context_trait_tests` module (`format!("{obj:?}")` comparison pattern, matching
+      the existing terminal-reward tests): `test_comfort_full_reward_phase1_objective_unaffected`,
+      `test_comfort_full_reward_shapes_phase2_objective`. Confirmed the mid/full tier choice
+      is genuinely coupled to real tank-energy dynamics (constraint C2 in `constraints()`) —
+      unlike the EV's `e_ev_extra` (R-18), so no confound risk here; skipped a full end-to-end
+      solve test as unnecessary given task 5.1's own "and/or" allowance.
+- [x] 5.2 Confirmed failing pre-fix (compile error: field/parameter didn't exist).
+- [x] 5.3 Added `pub comfort_full_reward_eur_kwh: f64` to `HeaterMilpContext`
+      (`asset_port.rs`); computed in `from_state` via `ComfortRate::value_at_fill` when a
+      target with a non-empty curve exists, else `0.0`.
+- [x] 5.4 Added the parameter to the inherent `objective()` (marked
+      `#[allow(clippy::too_many_arguments)]`, justified inline — 8 distinct phase-gated
+      coefficients, no natural grouping) and the term `obj -= comfort_full_reward_eur_kwh * dt
+      * v.z_heat_full[t]`. Phase-gated in the `AssetMilpContext::objective()` trait impl:
+      `0.0` in Phase 1, `self.comfort_full_reward_eur_kwh` in Phase 2, exactly mirroring
+      `w_tier_penalty_eur`. Also updated the two other `HeaterMilpContext::objective()` call
+      sites (`services/test_support/milp_mocks.rs`'s `MockHeaterCtx`) and every
+      `HeaterMilpContext { .. }` struct literal across the codebase (tests/solver.rs,
+      tests/mod.rs) to add the new field.
+- [x] 5.5 Confirmed: 4/4 new tests pass, including the explicit Phase 1 byte-identical
+      assertion and the Phase 2 differs assertion.
+- [x] 5.6 Added `from_state_no_target_comfort_full_reward_is_zero` (autonomous MayRun path,
+      no session) confirming the field stays `0.0`, reproducing pre-change behavior exactly.
 
 ## 6. Cross-check and full verification
 

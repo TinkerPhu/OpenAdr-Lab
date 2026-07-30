@@ -196,12 +196,14 @@ impl HeaterMilpContext {
     /// Heater objective contribution (penalty terms only; energy cost enters via power balance).
     /// `dt_h[t]` is the slot duration in hours. Switching penalty scales by `dt_h[t]` so
     /// a switch in a longer slot costs proportionally more (zone-boundary neutral).
+    #[allow(clippy::too_many_arguments)] // all parameters are distinct phase-gated objective coefficients, no natural grouping
     pub fn objective(
         &self,
         v: &HeaterMilpVars,
         w_tier_penalty_eur: f64,
         m_low_eur_kwh: f64,
         lambda_sw_eur: f64,
+        comfort_full_reward_eur_kwh: f64,
         n: usize,
         dt_h: &[f64],
     ) -> Expression {
@@ -213,6 +215,9 @@ impl HeaterMilpContext {
             obj += w_tier_penalty_eur * v.z_heat_full[t]; // prefer mid over full when equal cost
             obj += m_low_eur_kwh * v.s_low[t]; // penalise below-min violations
             obj += lambda_sw_eur * dt * v.sw[t]; // penalise relay switches; scale by dt_h
+                                                 // BL-34: reward full-tier operation by the session comfort curve's fill=1.0 price;
+                                                 // caller phase-gates this to Phase 2 only (0.0 in Phase 1), mirroring w_tier_penalty_eur.
+            obj += -comfort_full_reward_eur_kwh * dt * v.z_heat_full[t];
         }
         // Terminal energy reward (Phase 1 only — m_low > 0, lambda_sw == 0).
         // Makes the optimizer treat heat stored at horizon end as having forward
@@ -289,6 +294,11 @@ impl HeaterMilpContext {
                     .saturating_sub(1)
                     .min(n.saturating_sub(1))
             };
+            let comfort_full_reward_eur_kwh = if target.comfort_rates.is_empty() {
+                0.0
+            } else {
+                crate::entities::asset::ComfortRate::value_at_fill(&target.comfort_rates, 1.0)
+            };
             Self {
                 mode: HeaterMilpMode::MustRun,
                 t_dead_step: Some(t_dead),
@@ -303,6 +313,7 @@ impl HeaterMilpContext {
                 initial_z_full,
                 c_terminal_eur_kwh,
                 anchored_kw,
+                comfort_full_reward_eur_kwh,
             }
         } else {
             Self {
@@ -319,6 +330,7 @@ impl HeaterMilpContext {
                 initial_z_full,
                 c_terminal_eur_kwh,
                 anchored_kw,
+                comfort_full_reward_eur_kwh: 0.0,
             }
         }
     }
@@ -394,18 +406,31 @@ impl crate::controller::milp_planner::AssetMilpContext for HeaterMilpContext {
         let v = pool.heater.as_ref().unwrap();
         if c_startup_eur == 0.0 {
             // Phase 1: below-min penalty only; tier=0, lambda_sw=0 (switching handled by Phase 2).
+            // comfort_full_reward_eur_kwh=0.0 here too — Phase 1 has no counterbalancing tier
+            // penalty (w_tier_penalty_eur=0.0), so an unconditional reward on z_heat_full would
+            // be a free, uncounterbalanced bias toward full-tier in Phase 1's coarse allocation.
             HeaterMilpContext::objective(
                 self,
                 v,
                 0.0,
                 crate::controller::milp_planner::asset_port::M_LOW_EUR_PER_KWH,
                 0.0,
+                0.0,
                 n,
                 dt_h,
             )
         } else {
-            // Phase 2 friction: tier penalty + relay switching penalty.
-            HeaterMilpContext::objective(self, v, c_ramp_eur_kw, 0.0, self.lambda_sw_eur, n, dt_h)
+            // Phase 2 friction: tier penalty + relay switching penalty + comfort-curve reward.
+            HeaterMilpContext::objective(
+                self,
+                v,
+                c_ramp_eur_kw,
+                0.0,
+                self.lambda_sw_eur,
+                self.comfort_full_reward_eur_kwh,
+                n,
+                dt_h,
+            )
         }
     }
 }
@@ -429,6 +454,7 @@ mod milp_tests {
             initial_z_full: 0.0,
             c_terminal_eur_kwh: 0.0,
             anchored_kw: vec![],
+            comfort_full_reward_eur_kwh: 0.0,
         }
     }
 
@@ -582,6 +608,7 @@ mod milp_context_trait_tests {
             initial_z_full: 0.0,
             c_terminal_eur_kwh: 0.0,
             anchored_kw: vec![],
+            comfort_full_reward_eur_kwh: 0.0,
         }
     }
 
@@ -711,10 +738,11 @@ mod milp_context_trait_tests {
         // Phase 1: m_low > 0, lambda_sw == 0 — terminal term should appear
         use crate::controller::milp_planner::asset_port::M_LOW_EUR_PER_KWH;
         let dt_h = vec![300.0 / 3600.0; n];
-        let obj_p1 = HeaterMilpContext::objective(&ctx, v, 0.0, M_LOW_EUR_PER_KWH, 0.0, n, &dt_h);
+        let obj_p1 =
+            HeaterMilpContext::objective(&ctx, v, 0.0, M_LOW_EUR_PER_KWH, 0.0, 0.0, n, &dt_h);
 
         // Phase 2: m_low == 0, lambda_sw > 0 — terminal term must NOT appear
-        let obj_p2 = HeaterMilpContext::objective(&ctx, v, 0.05, 0.0, 0.5, n, &dt_h);
+        let obj_p2 = HeaterMilpContext::objective(&ctx, v, 0.05, 0.0, 0.5, 0.0, n, &dt_h);
 
         // We cannot easily inspect the LP expression value without a solver,
         // but we can check the debug representation differs (terminal adds a coefficient).
@@ -760,8 +788,8 @@ mod milp_context_trait_tests {
         let dt_zone_a = vec![5.0_f64 / 60.0]; // 5-min slot
         let dt_zone_c = vec![15.0_f64 / 60.0]; // 15-min slot
                                                // Phase 2 mode: w_tier=0, m_low=0, lambda_sw=0.50
-        let obj_a = HeaterMilpContext::objective(&ctx, v, 0.0, 0.0, 0.50, n, &dt_zone_a);
-        let obj_c = HeaterMilpContext::objective(&ctx, v, 0.0, 0.0, 0.50, n, &dt_zone_c);
+        let obj_a = HeaterMilpContext::objective(&ctx, v, 0.0, 0.0, 0.50, 0.0, n, &dt_zone_a);
+        let obj_c = HeaterMilpContext::objective(&ctx, v, 0.0, 0.0, 0.50, 0.0, n, &dt_zone_c);
 
         // The expressions differ: Zone C has a 3× larger coefficient on sw[0].
         assert_ne!(
@@ -831,5 +859,174 @@ mod milp_context_trait_tests {
     #[test]
     fn test_kw_to_tier_pair_unrecognised() {
         assert_eq!(kw_to_tier_pair(1.5, 1.0, 2.0), (None, None));
+    }
+
+    // ── BL-34: comfort-curve full-tier reward unit tests ─────────────────────
+
+    #[test]
+    fn test_comfort_full_reward_phase1_objective_unaffected() {
+        // Phase 1 (c_startup=0.0) must always pass 0.0 for the new parameter, regardless of
+        // the context's stored comfort_full_reward_eur_kwh — matches w_tier_penalty_eur's
+        // existing phase-gating (D4).
+        let n = 3;
+        let dt_h = vec![300.0 / 3600.0; n];
+
+        let ctx_zero = HeaterMilpContext {
+            comfort_full_reward_eur_kwh: 0.0,
+            ..make_ctx()
+        };
+        let ctx_reward = HeaterMilpContext {
+            comfort_full_reward_eur_kwh: 0.30,
+            ..make_ctx()
+        };
+
+        let mut vars_zero = variables!();
+        let mut pool_zero = empty_pool(&mut vars_zero, n);
+        ctx_zero.declare_vars_into_pool(n, 0.0, 0.0, &mut vars_zero, &mut pool_zero);
+        let obj_zero = AssetMilpContext::objective(&ctx_zero, &pool_zero, n, &dt_h, 0.0, 0.0, 0.0);
+
+        let mut vars_reward = variables!();
+        let mut pool_reward = empty_pool(&mut vars_reward, n);
+        ctx_reward.declare_vars_into_pool(n, 0.0, 0.0, &mut vars_reward, &mut pool_reward);
+        let obj_reward =
+            AssetMilpContext::objective(&ctx_reward, &pool_reward, n, &dt_h, 0.0, 0.0, 0.0);
+
+        assert_eq!(
+            format!("{obj_zero:?}"),
+            format!("{obj_reward:?}"),
+            "Phase 1 objective must not depend on comfort_full_reward_eur_kwh"
+        );
+    }
+
+    #[test]
+    fn test_comfort_full_reward_shapes_phase2_objective() {
+        // Phase 2 (c_startup>0.0) must include the reward: two contexts differing only in
+        // comfort_full_reward_eur_kwh must produce different objective expressions.
+        let n = 3;
+        let dt_h = vec![300.0 / 3600.0; n];
+
+        let ctx_zero = HeaterMilpContext {
+            comfort_full_reward_eur_kwh: 0.0,
+            ..make_ctx()
+        };
+        let ctx_reward = HeaterMilpContext {
+            comfort_full_reward_eur_kwh: 0.30,
+            ..make_ctx()
+        };
+
+        let mut vars_zero = variables!();
+        let mut pool_zero = empty_pool(&mut vars_zero, n);
+        ctx_zero.declare_vars_into_pool(n, 1.0, 0.05, &mut vars_zero, &mut pool_zero);
+        let obj_zero = AssetMilpContext::objective(&ctx_zero, &pool_zero, n, &dt_h, 0.0, 1.0, 0.05);
+
+        let mut vars_reward = variables!();
+        let mut pool_reward = empty_pool(&mut vars_reward, n);
+        ctx_reward.declare_vars_into_pool(n, 1.0, 0.05, &mut vars_reward, &mut pool_reward);
+        let obj_reward =
+            AssetMilpContext::objective(&ctx_reward, &pool_reward, n, &dt_h, 0.0, 1.0, 0.05);
+
+        assert_ne!(
+            format!("{obj_zero:?}"),
+            format!("{obj_reward:?}"),
+            "Phase 2 objective must depend on comfort_full_reward_eur_kwh"
+        );
+    }
+
+    /// BL-34: `from_state` sources `comfort_full_reward_eur_kwh` from the target's resolved
+    /// comfort curve's fill=1.0 price when a session (`MustRun`) is active.
+    #[test]
+    fn from_state_sources_comfort_full_reward_from_curve() {
+        use crate::entities::asset::ComfortRate;
+        use crate::entities::design_vocabulary::UserRequestMode;
+        use crate::entities::device_session::HeaterTarget;
+        use chrono::Utc;
+
+        let cfg = super::Heater::from_params(&crate::entities::asset_params::HeaterParams {
+            id: "heater".into(),
+            max_kw: 3.0,
+            temp_initial_c: 20.0,
+            temp_min_c: 18.0,
+            temp_max_c: 23.0,
+            temp_safety_max_c: 23.0,
+            mid_kw: None,
+            thermal_mass_kwh_per_c: 2.0,
+            k_loss_kw_per_c: 0.1,
+            draw_kw: 0.0,
+            switching_penalty_eur: 0.0,
+            c_terminal_eur_kwh: None,
+        });
+        let state = super::super::AssetState::Heater(super::super::HeaterState {
+            temperature_c: 20.0,
+            actual_power_kw: 0.0,
+        });
+        let now = Utc::now();
+        let target = HeaterTarget {
+            id: uuid::Uuid::new_v4(),
+            target_temp_c: 22.0,
+            ready_by: now + chrono::Duration::hours(1),
+            mode: UserRequestMode::ByDeadline,
+            comfort_rates: vec![
+                ComfortRate {
+                    fill: 0.0,
+                    max_marginal_price: 0.30,
+                    max_marginal_co2: 0.0,
+                },
+                ComfortRate {
+                    fill: 1.0,
+                    max_marginal_price: 0.18,
+                    max_marginal_co2: 0.0,
+                },
+            ],
+            created_at: now,
+            updated_at: now,
+        };
+        let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();
+        let ctx = HeaterMilpContext::from_state(
+            &state,
+            &cfg,
+            12,
+            &cum_s,
+            now,
+            Some(&target),
+            0.0,
+            0.0,
+            vec![],
+        );
+        assert!(
+            (ctx.comfort_full_reward_eur_kwh - 0.18).abs() < 1e-9,
+            "expected the curve's fill=1.0 price 0.18, got {}",
+            ctx.comfort_full_reward_eur_kwh
+        );
+        assert_eq!(ctx.mode, HeaterMilpMode::MustRun);
+    }
+
+    /// No session (autonomous `MayRun`) or an empty curve keeps
+    /// `comfort_full_reward_eur_kwh` at 0.0 — no behavior change from before this feature.
+    #[test]
+    fn from_state_no_target_comfort_full_reward_is_zero() {
+        let cfg = super::Heater::from_params(&crate::entities::asset_params::HeaterParams {
+            id: "heater".into(),
+            max_kw: 3.0,
+            temp_initial_c: 20.0,
+            temp_min_c: 18.0,
+            temp_max_c: 23.0,
+            temp_safety_max_c: 23.0,
+            mid_kw: None,
+            thermal_mass_kwh_per_c: 2.0,
+            k_loss_kw_per_c: 0.1,
+            draw_kw: 0.0,
+            switching_penalty_eur: 0.0,
+            c_terminal_eur_kwh: None,
+        });
+        let state = super::super::AssetState::Heater(super::super::HeaterState {
+            temperature_c: 20.0,
+            actual_power_kw: 0.0,
+        });
+        let now = chrono::Utc::now();
+        let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();
+        let ctx =
+            HeaterMilpContext::from_state(&state, &cfg, 12, &cum_s, now, None, 0.0, 0.0, vec![]);
+        assert_eq!(ctx.comfort_full_reward_eur_kwh, 0.0);
+        assert_eq!(ctx.mode, HeaterMilpMode::MayRun);
     }
 }
