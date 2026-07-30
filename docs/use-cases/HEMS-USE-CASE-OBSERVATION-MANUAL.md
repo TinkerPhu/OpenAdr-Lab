@@ -723,6 +723,47 @@ The feedback loop is: ambient drops → heat loss rate increases → thermal mod
 
 ---
 
+## UC-15: Deviation Arbiter Correcting a Live PV Deviation
+
+**Scenario:** The plan was built against a PV forecast; live irradiance now differs from that
+forecast enough to matter. With the deviation arbiter enabled, the battery should absorb the
+surplus/shortfall smoothly and then hold — not oscillate.
+
+**What the controller should do:** `controller::arbiter::reconcile` computes the deviation between
+the plan's expected net site power and the live PV/base-load projection, ranks levers by marginal
+cost, and applies a battery correction that converges in one step and stays converged while the
+underlying disturbance persists.
+
+**Suggested VEN:** VEN1 (has PV 8 kW + Battery 10 kWh)
+
+### Setup
+
+1. Switch to **VEN1**
+2. Navigate to **Devices** page, find the **Deviation Arbiter** card, enable it
+3. Navigate to **Simulation** page, adjust **Manual Irradiance** away from what the current plan
+   assumed (e.g. drop it 20–30 percentage points)
+4. Wait 30–60 seconds for several ticks
+
+### What to observe
+
+**Devices → Deviation Arbiter card** (readout only visible while enabled):
+- `Projected net site power` and `Deviation from plan` update every ~5s
+- `Active lever` shows `battery` briefly while correcting, then `none` once converged
+
+**Controller → Battery timeline chart:**
+- A single step to the corrected power level, then a flat line — not a repeating zig-zag
+
+**Raw check:** `GET /arbiter-diagnostics` — `dev_kw` should shrink toward the dead band (0.1 kW)
+and stay there; `active_lever` should go back to `null` once converged, not keep toggling.
+
+### What you should NOT see
+Rapid small-magnitude alternation in the battery's power (e.g. flipping sign every tick/every few
+ticks). That was a real bug (deviation signal read the plan's static allocation instead of the
+arbiter's own last-applied setpoint for the battery/EV terms) — fixed; if you see it recur, it's a
+regression, not expected behavior.
+
+---
+
 ## CLI Reference: POST /user-requests
 
 The **User Requests** page (http://Pi4-Server:8214/user-requests) is the primary way to submit and cancel user requests. The curl commands below are provided as alternatives for scripting, automation, or quick access without opening a browser.
