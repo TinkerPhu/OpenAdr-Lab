@@ -7042,3 +7042,60 @@ file-size audit clean; VEN UI `Weather.test.tsx` (8/8), `tsc --noEmit` clean, ES
 `cargo test`/`clippy` run there recompiles everything including HiGHS's C++ sources from
 scratch (~18 minutes) even though a fully-built `target/` already exists in the primary
 checkout — budget for this on the first build in any new worktree.
+
+### BL-34: comfort curves reach the MILP constraints (openspec `comfort-curve-milp-constraints`, branch `043-comfort-curves-milp`, 2026-07-31)
+
+Second item off `docs/BACKLOG.md`'s Implementation Task List — comfort-curve sliders in the UI
+were fully wired end to end (routes, `SettingsPort` persistence, `effective_comfort_rates()`)
+but the resolved curve was silently dropped at `controller/user_request.rs::create_from_body`
+(bound to `_comfort_rates`, never read), so it never reached the MILP solver. Every
+comfort-curve slider was a no-op.
+
+**Fix, in two parts.** First, threading: added `comfort_rates: Vec<ComfortRate>` to
+`UserRequest`, `EvSession`, `HeaterTarget`; fixed `create_from_body` to stop discarding the
+curve; populated the field at the single production construction site per asset
+(`services/user_request.rs::create_ev`/`create_heater`). Along the way, found a second live
+session-creation path — the legacy `POST /ev-session`/`POST /heater-target` routes, which build
+sessions directly and bypass `create_from_body` entirely — confirmed via `usePostRequest`'s
+single caller in `Devices.tsx` that only `/user-requests` is UI-wired; the direct routes stay
+curve-blind (unchanged from before this fix, not a regression).
+
+Second, consumption: added `ComfortRate::value_at_fill()` (linear interpolation between
+breakpoints, clamped outside the curve's range) and used it to source the MILP reward
+coefficients that previously came from fixed `PlannerParams` constants:
+- **EV**: `v_core_eur`/`v_extra_eur_kwh`, but *only* in the `ByDeadline`/`Asap` match arm of
+  `ev_milp.rs::from_state` — the only arm where those coefficients still mean "reward for
+  completing core / topping off beyond core." Every other mode (`Opportunistic`, `MaxCost`,
+  `ByDeadlineFree`) already redirects `v_extra_eur_kwh` to an unrelated signal (free-energy
+  incentive, budget reward).
+- **Heater**: a new `comfort_full_reward_eur_kwh` field/objective term, additive next to the
+  existing tier penalty, phase-gated to Phase 2 only (mirrors `w_tier_penalty_eur`, which is
+  `0.0` in Phase 1 — an unconditional reward there would be a free bias toward full-tier with
+  no counterweight).
+
+**Key learning — verify the mechanism, not just the source.** The original plan was to test the
+EV side by asserting `e_ev_extra_kwh` differs between two curves. It didn't, no matter how the
+curve was skewed: `e_ev_extra` is only bounded *above* by `e_extra_max_kwh * z_ev_core`
+(`ev_milp.rs::constraints`) — nothing lower-bounds it by real charged power, so the solver
+"banks" the reward without moving `p_ev`. This turned out to be an already-known, already-filed
+debt item (**R-18** in `docs/reference/TECHNICAL_DEBTS.md`), independently rediscovered here via
+a binary-search probe on the reward coefficient before the numbers stopped making sense. Pivoted
+the EV verify test to `z_ev_core` (genuinely coupled to `ev_energy >= e_core_kwh * z_ev_core`)
+instead. The heater side had no such trap — its tier binaries are coupled to real tank-energy
+dynamics (`constraints()` C2) — confirmed *before* writing its test, not after. Lesson: before
+writing a MILP verify test around "does reward X change allocation Y," trace whether Y is
+actually load-bearing in the constraint set, not just present in the objective. A reward term
+can be syntactically correct and semantically inert at the same time.
+
+**Also learned, mid-debug**: an "obviously correct" back-of-envelope cost estimate
+(tariff × energy) for a commit/skip threshold was off by a wide margin in practice — Phase 2
+friction and other objective terms shift the real breakeven point. Empirical binary-search on
+the actual solved output found the true threshold faster and more reliably than trying to
+hand-derive it from the objective's terms in isolation.
+
+**Verification**: full VEN Rust suite (868/868 + 1 architecture test), fmt/clippy clean,
+file-size audit clean, `cargo audit` clean. Manual UI verification and a Pi4 E2E scenario were
+not run this session — the unit tests already exercise the full call chain end-to-end
+(`create_from_body` → session → `*MilpContext::from_state` → solved plan via
+`solve_with_session`/`run_planner`), the functional equivalent of the UI flow minus the actual
+HTTP/browser layer.
