@@ -44,6 +44,16 @@ dto: avoid DTO normalization. pass through upstream field names (e.g. OpenADR sp
 
 workflow: 1. always keep a project_journal.md in projects where you write for each large step what you did, why you did it and what issues/key-learnings you had. it shall explain, how the project was implemented. The journal lives at docs/history/project_journal.md.
 2. write key learnings into KEY_LEARNINGS.md (at docs/reference/KEY_LEARNINGS.md) and consider them when making decissions.
+3. no lingering old plans or plan items after implementation. Once a plan (docs/plans/) or an
+openspec change (openspec/changes/, including its specs/) has been implemented and successfully
+tested, wave its feature/functionality into the appropriate current-state documentation, then
+delete the plan/change (do not archive — the openspec-archive-change skill is removed, replaced
+by this delete workflow). Implementation-issue narrative is not carried forward once a thing is
+implemented; if an issue holds a durable lesson for future work, put it in KEY_LEARNINGS.md, not
+in a surviving plan file. If only part of a plan/change is done and tested, remove just that part
+and leave the rest in place — do not delete a plan/change wholesale on partial completion.
+Deletion here is git-recoverable (history isn't lost), so this is about keeping the working tree's
+active plans/specs true to what's still outstanding, not about erasing the record.
 
 NEVER stop docker containers that are not involved in this project without asking. They are productive containers.
 
