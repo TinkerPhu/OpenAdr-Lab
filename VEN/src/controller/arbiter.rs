@@ -73,7 +73,17 @@ pub struct ArbiterOutcome {
 /// calculation: this tick's projected net site power, preferring
 /// `live_pv_kw`/`live_base_load_kw` over the necessarily-stale `SimSnapshot`
 /// for those two physics-driven inputs, and `base_setpoints` (the plan's own
-/// allocation, before any arbiter adjustment) for battery/EV/heater.
+/// allocation, before any arbiter adjustment) for heater.
+///
+/// Battery/EV are deliberately excluded from the `base_setpoints` fallback:
+/// both are dead-beat correctors whose `apply_*_lever` already treats
+/// `AssetSnapshot.setpoint_kw` (the arbiter's own last-tick command) as the
+/// integrator state, not the plan's static per-slot allocation. Reading
+/// `base_setpoints` here instead would make the deviation signal blind to a
+/// correction already applied — the next tick "rediscovers" the same
+/// deviation and re-applies a fresh correction on top of it, an unbounded
+/// per-tick runaway rather than settling once corrected (see
+/// `reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp`).
 pub fn projected_net_kw(
     sim: &SimSnapshot,
     base_setpoints: &HashMap<String, f64>,
@@ -97,6 +107,9 @@ pub fn projected_net_kw(
                 if let Some(forced_kw) = predict_heater_forced_kw(snap) {
                     return forced_kw;
                 }
+            }
+            if id.as_str() == crate::ids::ASSET_BATTERY || id.as_str() == crate::ids::ASSET_EV {
+                return snap.setpoint_kw;
             }
             let sp = base_setpoints.get(id).copied().unwrap_or(snap.power_kw);
             if sp.abs() > 1e20 {
@@ -161,6 +174,19 @@ pub fn reconcile(
     incumbent_lever: Option<&str>,
 ) -> ArbiterOutcome {
     let mut setpoints = base_setpoints.clone();
+    // Carry forward the dead-beat correctors' own last-applied setpoint as
+    // the baseline, not the plan's static per-slot allocation — otherwise a
+    // tick where the corresponding lever doesn't fire (deviation within dead
+    // band, or a cheaper lever absorbed it) would silently revert the
+    // correction, immediately re-creating the very deviation it just
+    // resolved whenever the underlying disturbance is persistent rather than
+    // transient. Mirrors `projected_net_kw`'s use of `snap.setpoint_kw` for
+    // the same two assets, above.
+    for id in [crate::ids::ASSET_BATTERY, crate::ids::ASSET_EV] {
+        if let Some(snap) = sim.assets.get(id) {
+            setpoints.insert(id.to_string(), snap.setpoint_kw);
+        }
+    }
 
     let Some(slot) = plan_slot else {
         // No active plan yet (startup window): same fallback as the
