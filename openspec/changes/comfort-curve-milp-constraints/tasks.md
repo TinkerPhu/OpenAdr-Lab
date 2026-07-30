@@ -9,10 +9,25 @@
 
 ## 2. Trace and confirm the call chain to `EvSession`/`HeaterTarget`
 
-- [ ] 2.1 Locate the exact construction site(s) where a `UserRequest` becomes an
-      `EvSession`/`HeaterTarget` (design's open question — confirm single vs. multiple sites)
-      and where `build_asset_contexts` reads those structs to call
-      `EvMilpContext::from_state`/`HeaterMilpContext::from_state`.
+- [x] 2.1 Confirmed: two independent construction paths exist.
+      `routes/hems/sessions.rs::post_requests` (`POST /user-requests`) → `UserRequestService::
+      create_ev`/`create_heater` (`services/user_request.rs:18,57`) → `create_from_body`
+      (`controller/user_request.rs:75`, where the curve is resolved then dropped) — this is
+      the path the VEN UI actually uses (`usePostRequest` in `Devices.tsx`, the only caller of
+      that hook). Separately, `routes/hems/ev.rs::post_ev_session` (`POST /ev-session`) and
+      `routes/hems/heater.rs` (`POST /heater-target`) build `EvSession`/`HeaterTarget` directly
+      with no comfort-curve field/logic at all — these hooks (`usePostEvSession`,
+      `usePostHeaterTarget`) exist in `api/hooks.ts` but are not called from any UI page/
+      component. Scope this change to the `/user-requests` path only: the direct routes were
+      already curve-blind before this change (never referenced `comfort_rates`), so leaving
+      them unchanged is not a regression, just an existing dead/legacy surface. Locate the
+      point where `build_asset_contexts` reads `EvSession`/`HeaterTarget` to call
+      `EvMilpContext::from_state`/`HeaterMilpContext::from_state` (`simulator/plan_context.rs`)
+      before starting task 3.
+- [ ] 2.2b Confirm task 3.3's field population only needs to touch the `/user-requests`
+      construction site(s) in `services/user_request.rs` (where `EvSession`/`HeaterTarget` are
+      built from a `UserRequest`) — not `routes/hems/ev.rs`/`routes/hems/heater.rs`, which stay
+      as they are.
 - [ ] 2.2 Resolve the design's open question on `HeaterTarget`'s autonomous (no-session)
       MayRun path: confirm `comfort_full_reward_eur_kwh` stays `0.0` there (no behavior
       change), matching D5's MustRun/no-session handling.

@@ -33,6 +33,13 @@ feature, not a nice-to-have, and BL-34 is the highest-gain unresolved backlog it
 
 ## Non-goals
 
+- The legacy direct routes `POST /ev-session` (`routes/hems/ev.rs`) and `POST /heater-target`
+  (`routes/hems/heater.rs`), which build `EvSession`/`HeaterTarget` without going through
+  `create_from_body` at all: they were already curve-blind before this change (no
+  `comfort_rates` concept in their request bodies), and their corresponding UI hooks
+  (`usePostEvSession`, `usePostHeaterTarget`) are unused by any page/component — the VEN UI's
+  only session-creation path is `usePostRequest` → `POST /user-requests`. Leaving the direct
+  routes unchanged is not a regression.
 - Battery, PV, and base-load assets: they have no session-intent path through
   `create_from_body`/`UserRequestService` (no `create_battery`/equivalent exists) — their
   `default_comfort_rates()` implementations are unused dead code today and stay that way;
