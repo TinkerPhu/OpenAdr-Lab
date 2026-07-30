@@ -35,7 +35,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
-| [BL-34](#bl-34-comfort-curves-never-reach-the-milp-constraints) | Comfort-preference sliders the UI already exposes actually change what the planner does — today they're silently dropped | High | M | Medium — touches solver constraints on every asset path |
 | [BL-27](#bl-27-poweradjustability--powerrange--device-control-mode-classification) | UI controls (e.g. a stepped EV charger) snap to real device levels instead of rendering a misleading continuous slider | Medium | M | Low–Medium — every asset's `capability()` impl must report it |
 | [BL-39](#bl-39-per-session-accumulated-cost-accounting-real-budget-bar) | Budget bar on the session board shows real money spent so far instead of a plan-time estimate | Medium | M | Medium — new accounting invariant in monitor/ledger or history-store, session attribution |
 | [BL-37](#bl-37-reactive-correction-events-into-the-notification-feed-sse-blind-spot) | Learns about reactive battery corrections even when not watching the Planner tab (today they're invisible elsewhere) | Medium | S | Low — one producer on the existing notification path |
@@ -175,16 +174,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 ---
 
-### BL-34: Comfort curves never reach the MILP constraints
-**Req:** REQUIREMENTS §comfort curves; `services/comfort.rs`, `controller/user_request.rs`
-**Problem:** The comfort-curve override path (routes + `SettingsPort` persistence + `AssetRequestSlice` resolution) is live, but `create_from_body` resolves the curve and then drops it (`_comfort_rates`) — no curve, default or user-provided, is translated into solver tier constraints. The curve currently influences nothing the planner decides.
-**Fix:** Translate the resolved `ComfortRate` curve into MILP tier constraints/rewards in the session-intent path so fill-level bids actually shape the allocation.
-**Gain:** High — this is a fully silent, user-facing broken feature (the sliders the UI already exposes currently do nothing), not a nice-to-have.
-**Complexity:** Medium — solver-side constraint construction plus tests per asset path.
-**Verify:** Planner unit test: two identical sessions with different curves produce different allocations; no-curve session falls back to `default_comfort_rates()` behaviour.
-
----
-
 ### BL-35: Notification producers for tier fallback / deadline-at-risk / packet abandoned
 **Req:** `entities/design_vocabulary.rs` (`UserNotificationSeverity` doc comments)
 **Problem:** The notification feed (ring + SSE + persistence, `services/notify.rs`) carries grid-emergency, VTN-reachability, and adopted-plan-warning producers. The remaining producers named by the severity enum's own doc comments — tier fallback, deadline approaching, packet abandoned — have nothing to hook onto because the Stage-5 tier machinery (BL-09-adjacent) doesn't exist yet.
@@ -269,20 +258,10 @@ any internet-exposed deployment.
 
 ## Implementation Task List — High / Medium-High Gain Items
 
-Scope: the items currently rated Gain: High or Medium-High (BL-09, BL-34). BL-40 was in this
-list and has been resolved (branch `042-cost-sign-fix`, see `docs/architecture/ven_milp_planner.md`
-§8); its entry is removed per the completion step below.
-Ordered by dependency, not by ID — work top-to-bottom.
-
-**Why this order:**
-
-1. **BL-34** first — adds new MILP tier constraints/rewards to the allocation model itself.
-   Land this before BL-09 so Phase 6's slot-reallocation logic is built and tested against
-   the *final* constraint model, not one that later grows new comfort-tier constraints
-   underneath it.
-2. **BL-09** last — the largest item (5–8h), a new solver phase built on top of an
-   already-stable allocation model. Also the item that unblocks BL-35 (tier-fallback
-   notifications — Low gain, not in this list) once it lands.
+Scope: the item currently rated Gain: High or Medium-High (BL-09). BL-40 and BL-34 were in this
+list and have been resolved (branches `042-cost-sign-fix`, `043-comfort-curves-milp`; see
+`docs/architecture/ven_milp_planner.md` §8 and §10); their entries are removed per the
+completion step below.
 
 Each item's tasks follow this repo's test-first convention (`test-first` rule,
 `CLAUDE.md`): write the test, confirm it fails, implement until green. Full verification
@@ -291,39 +270,21 @@ before considering an item done: `wsl cargo test -j 2 -p ven-app` under `wsl_loc
 `scripts/audit_file_sizes.py`; update `docs/history/project_journal.md` and remove the
 item from this backlog once resolved.
 
-### 1. BL-34 — Comfort curves reach the MILP constraints
+### 1. BL-09 — Phase 6: penalty threshold check
 
-- [ ] 2.1 Trace `controller/user_request.rs::create_from_body` to confirm exactly where the
-      resolved `ComfortRate` (`_comfort_rates`) is dropped today.
-- [ ] 2.2 Design pass: decide how a `ComfortRate` fill-level-vs-time curve maps to MILP tier
-      constraints/rewards per asset — heater already has mid/full tiers; battery/EV likely need
-      a new soft-constraint reward term rather than a hard tier. Needs its own short design
-      note before implementation, given the item's own "per asset path" complexity.
-- [ ] 2.3 Write a failing planner unit test (per the item's own Verify note): two identical
-      sessions with different `ComfortRate` curves produce different allocations.
-- [ ] 2.4 Wire the resolved curve into MILP tier constraints/rewards in the session-intent path.
-- [ ] 2.5 Add a no-curve-session regression test confirming unchanged fallback to
-      `default_comfort_rates()`.
-- [ ] 2.6 Manual UI check: confirm the existing comfort-curve sliders visibly change a real
-      plan (or an E2E scenario, if manual verification isn't practical this session).
-- [ ] 2.7 Full verification; update `docs/history/project_journal.md`; remove BL-34 from this
-      backlog.
-
-### 2. BL-09 — Phase 6: penalty threshold check
-
-- [ ] 3.1 Design pass: penalty rule configuration shape (new profile YAML section, e.g.
+- [ ] 1.1 Design pass: penalty rule configuration shape (new profile YAML section, e.g.
       `planner.penalty_thresholds`), threshold evaluation logic, and the cost-comparison model
       (penalty cost vs. reschedule/avoidance cost).
-- [ ] 3.2 Write a failing BDD scenario (per the item's own Verify note): configure a 10 kW
+- [ ] 1.2 Write a failing BDD scenario (per the item's own Verify note): configure a 10 kW
       penalty threshold, schedule 12 kW of load in one slot, assert the planner splits it
       across two slots to stay below threshold.
-- [ ] 3.3 Implement Phase 6 after Phase 5: for each FIRM slot, evaluate projected peak against
+- [ ] 1.3 Implement Phase 6 after Phase 5: for each FIRM slot, evaluate projected peak against
       the configured threshold.
-- [ ] 3.4 Implement the cost comparison (penalty cost vs. avoidance cost) and the reallocation
+- [ ] 1.4 Implement the cost comparison (penalty cost vs. avoidance cost) and the reallocation
       step when avoidance is cheaper.
-- [ ] 3.5 Unit tests for the three cases: threshold not exceeded (no change); exceeded but
+- [ ] 1.5 Unit tests for the three cases: threshold not exceeded (no change); exceeded but
       avoidance costlier (penalty accepted); exceeded and avoidance cheaper (reschedule).
-- [ ] 3.6 Full verification, including the new BDD scenario on Pi4 (`bash run_all_tests.sh
+- [ ] 1.6 Full verification, including the new BDD scenario on Pi4 (`bash run_all_tests.sh
       --e2e`); update `docs/history/project_journal.md`; remove BL-09 from this backlog.
-- [ ] 3.7 Note for later (not in this list): BL-35's tier-fallback notification producers
+- [ ] 1.7 Note for later (not in this list): BL-35's tier-fallback notification producers
       become buildable once this lands.

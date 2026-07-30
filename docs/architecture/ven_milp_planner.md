@@ -282,3 +282,42 @@ fixed to the winning solution's values, and the constraint's dual value is read 
 - Feeds `controller::arbiter`'s marginal-cost-ranked lever selection (§2.1 of
   `VEN_ARCHITECTURE.md`) and the Planner tab's Decision Matrix (marginal-cost heatmap cell
   alongside the plain-tariff row).
+
+## 10. Session Comfort Curve
+
+A session's resolved `ComfortRate` curve (`entities/asset.rs`; a `{fill, max_marginal_price,
+max_marginal_co2}` bid-price point, see `services/comfort.rs::effective_comfort_rates` for
+override-vs-default resolution) is carried from the `POST /user-requests` route through
+`UserRequest` → `EvSession`/`HeaterTarget` → the MILP context, and shapes reward coefficients
+that were previously fixed `PlannerParams` constants. `ComfortRate::value_at_fill()` linearly
+interpolates the curve's `max_marginal_price` at an arbitrary fill (clamped outside the stored
+range).
+
+- **EV** (`ev_milp.rs::from_state`, `UserRequestMode::ByDeadline`/`Asap` arm only): `v_core_eur
+  = e_core_kwh × value_at_fill(curve, 0.0)`, `v_extra_eur_kwh = value_at_fill(curve, 1.0)`. Every
+  other request mode (`Opportunistic`, `MaxCost`, `ByDeadlineFree`) already redirects
+  `v_extra_eur_kwh` to an unrelated signal (free-energy incentive, budget reward) and is
+  unaffected.
+- **Heater** (`heater_milp.rs`): `comfort_full_reward_eur_kwh = value_at_fill(curve, 1.0)`, a new
+  objective term `−comfort_full_reward_eur_kwh × dt × z_heat_full[t]` next to the existing tier
+  penalty. Phase-gated to Phase 2 only (`0.0` in Phase 1), mirroring `w_tier_penalty_eur`'s own
+  phase split — Phase 1 has no counterbalancing tier cost, so an unconditional reward there would
+  be a free bias toward full-tier in the coarse allocation.
+- **No curve / empty `comfort_rates`** (the legacy `POST /ev-session`/`POST /heater-target`
+  direct routes, or a VTN-commanded session): falls back to the passed-in global defaults
+  exactly, reproducing pre-feature behavior.
+- **Battery, PV, base-load**: unaffected — no session-intent path exists for them
+  (`services/user_request.rs` has no `create_battery`/equivalent).
+
+**Known limitation (R-18, `docs/reference/TECHNICAL_DEBTS.md`)**: the EV's `v_extra_eur_kwh`
+reward is structurally inert for driving allocation — `e_ev_extra` is bounded only *above* by
+`e_extra_max_kwh × z_ev_core`, so the solver can "bank" the reward without any real charging
+change. The `v_core_eur`/`z_ev_core` half is genuinely coupled (`ev_energy ≥ e_core_kwh ×
+z_ev_core`) and is what the curve actually influences today for EV sessions. The heater's tier
+reward has no equivalent gap — `z_heat_mid`/`z_heat_full` are coupled to real tank-energy
+dynamics.
+
+Regression coverage: `entities/asset.rs::comfort_rate_tests`, `ev_milp.rs`'s
+`from_state_by_deadline_soft_sources_v_core_eur_from_curve`/`..._falls_back_to_global_defaults`,
+`heater_milp.rs`'s `test_comfort_full_reward_*`/`from_state_sources_comfort_full_reward_*`,
+`controller/milp_planner/tests/modes.rs`'s `test_by_deadline_soft_comfort_curve_shapes_core_commitment`.
