@@ -183,7 +183,7 @@ pub(crate) fn translate_to_plan(
                     grid_power_kw,
                     marginal_value: inputs.c_imp_eur_kwh[t],
                     cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t]
-                        - surplus_power_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
+                        + surplus_power_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
                     co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
                 });
             }
@@ -205,7 +205,7 @@ pub(crate) fn translate_to_plan(
                         grid_power_kw,
                         marginal_value: inputs.c_imp_eur_kwh[t],
                         cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t]
-                            - surplus_power_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
+                            + surplus_power_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
                         co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
                     });
                 }
@@ -226,7 +226,7 @@ pub(crate) fn translate_to_plan(
                     grid_power_kw,
                     marginal_value: inputs.c_imp_eur_kwh[t],
                     cost_eur: grid_power_kw * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t]
-                        - surplus_power_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
+                        + surplus_power_kw * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
                     co2_g: grid_power_kw * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
                 });
             }
@@ -244,7 +244,7 @@ pub(crate) fn translate_to_plan(
                         sp,
                         gp,
                         gp * inputs.c_imp_eur_kwh[t] * inputs.dt_h[t]
-                            - sp * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
+                            + sp * inputs.c_exp_eur_kwh[t] * inputs.dt_h[t],
                         gp * inputs.g_imp_kgco2_kwh[t] * 1000.0 * inputs.dt_h[t],
                     )
                 } else {

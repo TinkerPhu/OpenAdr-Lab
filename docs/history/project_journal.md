@@ -6919,3 +6919,40 @@ independently hit zero — power rating alone is not enough for a storage asset;
 (SoC-derived) can be the binding constraint even when the power rating says otherwise. Caught by a
 test that exercised the "everything else exhausted" backstop case, not by reasoning about the
 lever in isolation.
+
+### BL-40: `AssetAllocation.cost_eur` sign fix (openspec `cost-sign-fix`, branch `042-cost-sign-fix`, 2026-07-29)
+
+Fixed a sign-convention mismatch between the Planner tab's per-slot/per-asset cost display
+(`AssetAllocation.cost_eur`, computed in `controller/milp_planner/results.rs::translate_to_plan`)
+and the envelope's session-total cost estimate (`solved_session_cost()` in
+`controller/milp_planner/envelopes.rs`, added by the BL-36 `FlexibilityEnvelope` rebuild). Both
+compute the cost of energy covered by PV surplus, but `translate_to_plan` still used
+`grid_power_kw × import − surplus_power_kw × export` (a credit), while `solved_session_cost` used
+`+` (an opportunity cost: consuming surplus instead of exporting it forfeits export revenue). The
+two could visibly disagree in sign on the Planner tab vs. the envelope panel for the same data —
+`AssetAllocation`'s own field doc comment already documented the intended `+` convention, so the
+code had silently drifted from its own spec.
+
+**Fix**: flipped the sign on the PV-surplus term in all four allocation blocks in
+`translate_to_plan` (EV, heater, shiftable-load, and the battery *charging* branch only — the
+discharging branch uses an unrelated revenue formula and was left untouched, matching BL-40's own
+scope). No solver objective or constraint changes — this is a post-solve reporting computation.
+
+**Test-first**: added `controller/milp_planner/tests/cost_sign.rs` — one test per allocation block
+(each builds a PV-surplus-abundant noon scenario, confirmed to fail against the old `-` sign
+before the fix) plus a cross-check test asserting the decision-matrix total and an
+envelope-style-recomputed total agree in sign across a multi-asset-type plan. First attempt at the
+EV/heater scenarios found a modeling mistake, not a fixture typo: the initial fixtures set energy
+needs (EV SoC gap × battery_kwh, heater's temp delta × thermal mass) that were physically
+undeliverable within the session/target deadline at the asset's max power, so the solver left
+those assets unallocated entirely (no allocation ⇒ no fully-surplus-covered slot to assert on,
+surfacing as "expected at least one slot" rather than a sign failure) — reduced to feasible
+energy deltas (`battery_kwh: 10.0` for the EV pack, a 1 °C heater delta) to get real allocations.
+
+**Verification**: full VEN Rust suite (855/855 + 1 architecture test), fmt/clippy clean,
+file-size audit clean. `docs/BACKLOG.md` BL-40 to be removed once merged.
+
+**Key learning**: when a test-first fixture produces "no allocation found" instead of a sign
+assertion failure, check feasibility before assuming the fixture is malformed — an unsatisfiable
+session/target deadline silently starves that asset out of the solve rather than erroring, which
+looks like a fixture bug but is actually a capacity/deadline mismatch.
