@@ -44,7 +44,6 @@ pub(crate) async fn tick_once(
     )
     .await;
 
-    // Pre-tick: snapshot plan/capacity/tariffs for dispatcher
     let plan_snap = state.active_plan().await;
     let capacity_snap = state.capacity_state().await;
     let dispatch_windows = state.dispatch_windows().await;
@@ -66,7 +65,7 @@ pub(crate) async fn tick_once(
         pv_clear,
         base_clear,
         absorbed_kwh_by_asset,
-        new_active_lever,
+        (new_active_lever, arbiter_net_kw, arbiter_dev_kw),
     ) = {
         let mut sim_guard = sim.lock().await;
 
@@ -75,8 +74,7 @@ pub(crate) async fn tick_once(
         let pv_clear = inject.pv_irradiance.is_some();
         let base_clear = inject.base_load_kw.is_some();
 
-        // PHASE 2: Build setpoints (dispatcher from MILP plan + capacity) then
-        // run the deviation arbiter's reactive adjustment layer on top.
+        // PHASE 2: dispatcher setpoints, then the deviation arbiter on top.
         let pre_snap = sim_guard
             .snapshot()
             .expect("SimState::snapshot is infallible");
@@ -124,6 +122,7 @@ pub(crate) async fn tick_once(
 
         let absorbed_kwh_by_asset = outcome.absorbed_kwh_by_asset.clone();
         let new_active_lever = outcome.active_lever.map(|s| s.to_string());
+        let (arbiter_net_kw, arbiter_dev_kw) = (outcome.net_kw, outcome.dev_kw);
 
         // PHASE 3: Simulator tick — apply setpoints → update device states.
         sim_guard.tick(
@@ -158,12 +157,13 @@ pub(crate) async fn tick_once(
             pv_clear,
             base_clear,
             absorbed_kwh_by_asset,
-            new_active_lever,
+            (new_active_lever, arbiter_net_kw, arbiter_dev_kw),
         )
     };
 
     // PHASE 3.5 (post-lock): arbiter hysteresis + residual escalation (§5.5).
-    state.set_arbiter_active_lever(new_active_lever).await;
+    let arbiter_summary = (new_active_lever, arbiter_net_kw, arbiter_dev_kw);
+    super::arbiter_glue::record_arbiter_outcome(&state, arbiter_summary, now).await;
     super::arbiter_glue::apply_residual_escalation(
         &state,
         &trigger_tx,

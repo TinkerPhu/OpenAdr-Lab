@@ -168,6 +168,14 @@ vi.mock("../api/hooks", () => ({
     mutate: mockPutArbiterSettings,
     isPending: false,
   }),
+  useArbiterDiagnostics: () => ({
+    data: {
+      net_kw: null,
+      dev_kw: null,
+      active_lever: null,
+      updated_at: null,
+    },
+  }),
 }));
 
 // ─── Wrapper ─────────────────────────────────────────────────────────────────

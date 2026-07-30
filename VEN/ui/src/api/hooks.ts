@@ -547,6 +547,16 @@ export function usePutArbiterSettings() {
   });
 }
 
+export function useArbiterDiagnostics(enabled: boolean) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["arbiter_diagnostics", api.baseUrl],
+    queryFn: () => api.arbiterDiagnostics(),
+    refetchInterval: 5_000,
+    enabled,
+  });
+}
+
 export function useHeaterTarget() {
   const { api } = useVenContext();
   return useQuery({

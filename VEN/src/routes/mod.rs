@@ -126,6 +126,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
             "/arbiter-settings",
             get(hems::get_arbiter_settings).put(hems::put_arbiter_settings),
         )
+        .route("/arbiter-diagnostics", get(hems::get_arbiter_diagnostics))
         .route(
             "/heater-target",
             get(hems::get_heater_target)
