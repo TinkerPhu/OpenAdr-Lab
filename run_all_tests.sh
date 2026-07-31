@@ -11,17 +11,20 @@
 #
 # Prerequisites:
 #   - Node.js + npm installed locally (for UI tests)
-#   - SSH access to DOCKER_HOST configured (when running remotely)
+#   - SSH access to DOCKER_HOST (or the shared OPENADR_LAB_HOST) configured
+#     (when running remotely)
 #   - Git repo cloned at DOCKER_DIR on the docker host
 #
 set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-# SSH hostname of the machine running Docker.
+# SSH hostname of the machine running Docker. Falls back to the shared
+# OPENADR_LAB_HOST env var (also used by scripts/pi4_lock.sh) before the
+# hardcoded default, so the host only needs to be set in one place.
 # Set to empty string "" to run docker commands directly on this machine (no SSH).
 # Example remote value: "Pi4"
-DOCKER_HOST="${DOCKER_HOST:-Pi4}"  # override with DOCKER_HOST="" for local docker
+DOCKER_HOST="${DOCKER_HOST:-${OPENADR_LAB_HOST:-Pi4}}"  # override with DOCKER_HOST="" for local docker
 DOCKER_DIR="/srv/docker/openadr_lab"  # repo path on the docker host
 
 # Auto-detect: if DOCKER_HOST is empty, "localhost", or matches this machine's
