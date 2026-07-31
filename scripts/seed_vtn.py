@@ -289,6 +289,11 @@ VENS_TO_PROVISION = [
     {"ven_name": "ven-1", "client_id": "ven-1", "client_secret": "ven-1", "user_ref": "ven-1-user"},
     {"ven_name": "ven-2", "client_id": "ven-2", "client_secret": "ven-2", "user_ref": "ven-2-user"},
     {"ven_name": "ven-3", "client_id": "ven-3", "client_secret": "ven-3", "user_ref": "ven-3-user"},
+    # BL-41: ven-4 runs on a second physical host (Po4), so it advertises its
+    # own reachable origin via the DASHBOARD_URL attribute instead of relying
+    # on same-host Docker DNS (see _ensure_dashboard_url_attribute below).
+    {"ven_name": "ven-4", "client_id": "ven-4", "client_secret": "ven-4", "user_ref": "ven-4-user",
+     "dashboard_url": "http://192.168.1.104:8211"},
 ]
 
 
@@ -410,6 +415,32 @@ def delete_event(base_url, token, event_id):
     r.raise_for_status()
 
 
+def _ensure_dashboard_url_attribute(base, vm_token, ven_name, dashboard_url):
+    """BL-41: set/replace the DASHBOARD_URL attribute on an already-provisioned
+    VEN. PUT /vens/{id} is a full-content replace, so this reads the current
+    attributes first and merges the DASHBOARD_URL entry in, preserving any
+    existing attribute (e.g. PERSONA)."""
+    r = requests.get(f"{base}/vens", headers=auth_headers(vm_token),
+                      params={"venName": ven_name}, timeout=10)
+    r.raise_for_status()
+    matches = [v for v in r.json() if v["venName"] == ven_name]
+    if not matches:
+        print(f"  WARNING: VEN '{ven_name}' not found — cannot set DASHBOARD_URL")
+        return
+    ven = matches[0]
+    ven_id = ven["id"]
+    attributes = [a for a in (ven.get("attributes") or []) if a.get("type") != "DASHBOARD_URL"]
+    attributes.append({"type": "DASHBOARD_URL", "values": [dashboard_url]})
+
+    # Ven is VenContent flattened with id/createdDateTime/modificationDateTime;
+    # PUT /vens/{id} takes VenContent only, so drop the non-content fields.
+    body = {k: v for k, v in ven.items() if k not in ("id", "createdDateTime", "modificationDateTime")}
+    body["attributes"] = attributes
+    r = requests.put(f"{base}/vens/{ven_id}", headers=auth_headers(vm_token), json=body, timeout=10)
+    r.raise_for_status()
+    print(f"  '{ven_name}' DASHBOARD_URL set to {dashboard_url}")
+
+
 def provision_vens(base, vens):
     """Provision VEN users, credentials, and VEN entities via API. Idempotent."""
     um_token = get_token(base, "user-manager", "user-manager")
@@ -424,6 +455,8 @@ def provision_vens(base, vens):
         )
         if r.ok:
             print(f"VEN '{ven['ven_name']}' already provisioned — skipping.")
+            if ven.get("dashboard_url"):
+                _ensure_dashboard_url_attribute(base, vm_token, ven["ven_name"], ven["dashboard_url"])
             continue
 
         print(f"Provisioning VEN '{ven['ven_name']}' ...")
@@ -440,8 +473,14 @@ def provision_vens(base, vens):
         ven_body = {"venName": ven["ven_name"]}
         # WP4.5: persona tag as an OpenADR VEN attribute so the UI dropdown
         # can label fleet entries (only present on persona fleets).
+        # BL-41: DASHBOARD_URL for VENs on a different host than the VTN/UI.
+        attributes = []
         if ven.get("persona"):
-            ven_body["attributes"] = [{"type": "PERSONA", "values": [ven["persona"]]}]
+            attributes.append({"type": "PERSONA", "values": [ven["persona"]]})
+        if ven.get("dashboard_url"):
+            attributes.append({"type": "DASHBOARD_URL", "values": [ven["dashboard_url"]]})
+        if attributes:
+            ven_body["attributes"] = attributes
         r = requests.post(f"{base}/vens", headers=auth_headers(vm_token),
                           json=ven_body, timeout=10)
         r.raise_for_status()

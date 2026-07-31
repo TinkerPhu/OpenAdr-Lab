@@ -12,13 +12,22 @@
  * are offered: `fleet.sh down --purge` removes containers but does NOT
  * deregister VENs from the VTN, so without the probe the dropdown would
  * accumulate dead entries from every past fleet.
+ *
+ * BL-41: a VEN on a different physical host (not reachable via this UI's
+ * Docker DNS) can carry a DASHBOARD_URL attribute — its own full origin,
+ * e.g. `http://192.168.1.104:8211`. When present, that origin is used
+ * directly (browser fetches the VEN's API straight, CORS is open on the VEN
+ * side) instead of the same-host `/api/dyn/<venName>` route.
  */
 
 export type VenEntry = { label: string; url: string; venName: string };
 
 /** One discovered (non-default) VEN: name + optional WP4.5 persona tag,
- * read from the VEN object's PERSONA attribute set at fleet provisioning. */
-export type DiscoveredVen = { venName: string; persona?: string };
+ * read from the VEN object's PERSONA attribute set at fleet provisioning.
+ * BL-41: optional dashboardUrl, read from the DASHBOARD_URL attribute, lets
+ * a VEN on a different physical host advertise its own reachable origin
+ * instead of relying on same-host Docker DNS. */
+export type DiscoveredVen = { venName: string; persona?: string; dashboardUrl?: string };
 
 // Labels are the venNames so trio and discovered fleet entries read
 // consistently in the dropdown (was "VEN1".."VEN3" before discovery existed).
@@ -39,9 +48,9 @@ export function mergeVens(defaults: VenEntry[], discovered: DiscoveredVen[]): Ve
   }
   const extras = [...byName.values()]
     .sort((a, b) => a.venName.localeCompare(b.venName))
-    .map(({ venName, persona }) => ({
+    .map(({ venName, persona, dashboardUrl }) => ({
       label: persona ? `${venName} (${persona})` : venName,
-      url: `/api/dyn/${venName}`,
+      url: dashboardUrl ?? `/api/dyn/${venName}`,
       venName,
     }));
   return [...defaults, ...extras];
@@ -70,16 +79,20 @@ export async function fetchDiscoveredVens(
     )
     .map((v): DiscoveredVen => {
       const personaValue = (v.attributes ?? []).find((a) => a.type === "PERSONA")?.values?.[0];
+      const dashboardUrlValue = (v.attributes ?? []).find((a) => a.type === "DASHBOARD_URL")
+        ?.values?.[0];
       return {
         venName: v.venName,
         persona: typeof personaValue === "string" ? personaValue : undefined,
+        dashboardUrl: typeof dashboardUrlValue === "string" ? dashboardUrlValue : undefined,
       };
     });
 
   const probes = await Promise.all(
     candidates.map(async (ven) => {
       try {
-        const r = await fetchFn(`/api/dyn/${ven.venName}/health`);
+        const base = ven.dashboardUrl ?? `/api/dyn/${ven.venName}`;
+        const r = await fetchFn(`${base}/health`);
         return r.ok ? ven : null;
       } catch {
         return null; // unreachable (e.g. purged fleet container) — hide it
