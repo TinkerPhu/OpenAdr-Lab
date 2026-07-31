@@ -7248,3 +7248,55 @@ which simplified `merge_inject`'s macros in the process (no more manual `is_null
 Full suite (884/884) and fmt/clippy clean; verified live on Pi4 for both `pv_generation_limit_kw`
 and `grid_export_limit_kw` — set-then-null-clear now round-trips correctly. See
 `docs/reference/KEY_LEARNINGS.md`'s Rust/Axum section for the reusable pattern.
+
+### R-08 — `AssetConfig` manual dispatch enum → macro forwarder + file split (2026-07-31)
+
+`docs/plans/refactoring_backlog.md` described this as "~9 methods × 5 variants, uniformly."
+Reading the actual current `assets/mod.rs` before touching it showed a different shape: ~20
+inherent methods split into 14 with a uniform signature across all 5 variants (mirroring the
+`Asset` trait or a plain per-config accessor — the real target) and ~6 asset-specific ones
+(`plan_trajectory`, `resolve_request_target`, `available_storage_kwh`, `thermostat_setpoint_kw`,
+`surplus_charge_kw`, `build_milp_context`) that only exist for a subset of variants and fall
+back to `None`/no-op for the rest — those aren't part of the `Asset` trait and don't have a
+uniform signature to generalize, so forcing them into a macro would make every unrelated asset
+type carry irrelevant methods. Left their hand-written matches untouched.
+
+**Macro, not `dyn Asset`**: `AssetConfig` derives `Serialize`/`Deserialize`
+(`#[serde(tag = "asset_type", ...)]`) and is persisted to disk via `simulator/persist.rs`;
+`Box<dyn Asset>` isn't (de)serializable. Worse, `AssetConfig` structurally can't implement
+`Asset` directly even if desired — the trait's `id()`/`current_state()`/`history()` assume a
+unified config+state+id object, which is exactly what `AssetHandle` exists for (a prior refactor's
+whole point was separating config from state, so `AssetConfig` alone only ever holds config).
+Added two `macro_rules!` forwarders (`delegate_asset!` for the self-only match shape,
+`delegate_asset_state!` for the `(self, state)` tuple shape with a variant-mismatch fallback) that
+declare the `Battery|Ev|Heater|Pv|BaseLoad` variant list exactly once each, then converted all 14
+uniform methods to call through them. Pure mechanical forwarding — behavior unchanged, verified by
+the full suite staying green before and after (the per-asset methods already carry their own unit
+tests in each `assets/*.rs` file; the `AssetConfig` wrappers are pure pass-through with no logic of
+their own to characterize separately).
+
+**The macro alone didn't clear the file-size cap**: `assets/mod.rs` was 621 production lines after
+the dispatch conversion, still 121 over the 500 cap — the file had always bundled several
+independent concerns beyond `AssetConfig` (the per-asset history ring buffer, the `Asset` trait
+itself, `AssetHandle`). Split those into `assets/history.rs` (`HistoryPoint`, `AssetHistoryBuffer`)
+and `assets/asset_trait.rs` (`Trajectory`, `TrajectoryPoint`, the `Asset` trait, `AssetHandle`),
+re-exported via `pub use` from `mod.rs` so existing `super::Asset`-style imports in
+`battery.rs`/`ev.rs`/etc. and the one external `crate::assets::HistoryPoint` import kept resolving
+unchanged. Removed `VEN/src/assets/mod.rs` from `scripts/audit_file_sizes.py`'s `ALLOWLIST` (now
+empty) — the audit passes without it.
+
+**Scope correction vs. the debt register's own task list**: R-08's task 1.4 said to fold in
+R-29's heater/ev/battery_milp.rs `unwrap()`/`expect()` triage (~6 sites) into this same pass "since
+this touches every asset variant's methods anyway." It didn't happen — the actual refactor turned
+out to be pure mechanical dispatch/file-organization work with no reason to touch panic-handling
+code, and mixing the two would have made review of the mechanical change harder to isolate from a
+behavioral risk change. `TECHNICAL_DEBTS.md`'s R-29 task list is updated to keep those 6 call
+sites in its own scope rather than mark them done.
+
+**Verification**: full VEN Rust suite (884/884 + 1 architecture test), fmt/clippy clean, file-size
+audit passes with the allowlist empty.
+
+**Key learning**: same lesson as R-24 — a debt register's own diagnostic framing (method counts,
+"fold this in" task notes) can be wrong or stale by the time the item is actually worked; re-derive
+scope from the current file before trusting a prior write-up, and correct the register rather than
+silently doing (or silently skipping) what it says.

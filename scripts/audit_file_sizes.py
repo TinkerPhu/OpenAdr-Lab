@@ -18,11 +18,7 @@ list short and re-justify each entry there before adding to it.
 import os
 import sys
 
-ALLOWLIST = {
-    # AssetConfig enum-dispatch boilerplate — real fix is the enum->trait refactor
-    # already tracked in docs/plans/refactoring_backlog.md, not a line-count split.
-    os.path.join('VEN', 'src', 'assets', 'mod.rs'),
-}
+ALLOWLIST = set()
 
 
 def strip_test_blocks(lines):

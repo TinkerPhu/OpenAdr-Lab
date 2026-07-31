@@ -10,62 +10,8 @@
 
 ## Open Items
 
-| # | Issue | Priority | Effort | Risk |
-|---|-------|----------|--------|------|
-| R-08 | `AssetConfig` → `dyn Asset` dispatch or macro forwarder | 🔵 | Large | Correctness risk, deferred |
-
----
-
-## Detailed Findings
-
----
-
-### R-08 — `AssetConfig` dispatch explosion 🔵 *(deferred)*
-
-**File:** `VEN/src/assets/mod.rs`
-
-`AssetConfig` is a manual dispatch enum with ~9 methods, each a full `match` over 5 variants
-(~45 match arms total). Every new asset type requires 9 new match arms; every new method
-requires 5.
-
-```rust
-pub enum AssetConfig {
-    Battery(Battery),
-    Ev(EvCharger),
-    Heater(Heater),
-    Pv(PvInverter),
-    BaseLoad(BaseLoad),
-}
-
-// × 9 methods, each:
-pub fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
-    match self {
-        Self::Battery(cfg) => cfg.step(state, setpoint_kw, dt),
-        Self::Ev(cfg)      => cfg.step(state, setpoint_kw, dt),
-        ...
-    }
-}
-```
-
-The `Asset` trait exists and is implemented by each physics type, but `AssetConfig` bypasses
-it with manual dispatch instead of `Box<dyn Asset>` or a macro-generated forwarder.
-
-**Why deferred:** Switching to `dyn Asset` changes object layout, potentially impacts
-serialisation (`AssetConfig` derives `Serialize`/`Deserialize`), and requires threading
-lifetime/ownership concerns through `SimState`. High correctness risk for incremental gain.
-
-A lighter alternative: a `delegate_asset!` macro that generates all match arms from a single
-declaration:
-
-```rust
-delegate_asset! {
-    impl AssetConfig {
-        fn step(state, setpoint_kw, dt) -> (AssetState, f64);
-        fn capability(state) -> AssetCapability;
-        ...
-    }
-}
-```
+_(none currently — R-08, the last item tracked here, is resolved; see
+`docs/history/project_journal.md`.)_
 
 ---
 
