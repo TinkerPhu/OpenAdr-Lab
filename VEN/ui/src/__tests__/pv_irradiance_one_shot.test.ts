@@ -7,7 +7,7 @@
  *   so the offset decays from that moment forward.
  *
  * Requires a running VEN instance.  Set VITE_VEN_URL to point at it, or let it
- * default to http://Pi4-Server:8211.  The suite is skipped automatically when
+ * default to http://Pi4:8211.  The suite is skipped automatically when
  * the VEN is unreachable so CI stays green without a live server.
  */
 
@@ -15,7 +15,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { VenApi } from "../api/client";
 
 const VEN_URL = (import.meta as { env?: Record<string, string> }).env?.VITE_VEN_URL
-  ?? "http://Pi4-Server:8211";
+  ?? "http://Pi4:8211";
 
 const api = new VenApi(VEN_URL);
 

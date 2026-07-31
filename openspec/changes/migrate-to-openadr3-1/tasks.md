@@ -3,7 +3,7 @@
 - [ ] 1.1 Create `openadr3_1` branch in `TinkerPhu/openleadr-rs` fork from `upstream/openadr3_1`
 - [ ] 1.2 Push the branch to origin (`TinkerPhu/openleadr-rs`)
 - [ ] 1.3 Update the lab submodule pointer to `TinkerPhu/openleadr-rs@openadr3_1` and commit
-- [ ] 1.4 Verify `git submodule status` reflects the new commit hash on Pi4-Server after `git pull`
+- [ ] 1.4 Verify `git submodule status` reflects the new commit hash on Pi4 after `git pull`
 
 ## 2. VTN — Fixture SQL and Docker deploy
 

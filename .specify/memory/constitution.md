@@ -101,12 +101,12 @@ code would guard against.
 
 ### V. Infrastructure Parity
 
-All Docker operations MUST run on Pi4-Server via SSH in `/srv/docker/openadr_lab`.
+All Docker operations MUST run on Pi4 via SSH in `/srv/docker/openadr_lab`.
 Dev, test, and production environments MUST use the same Docker Compose definitions.
 No manual server state outside of Compose files and committed configuration.
 
 Concrete rules:
-- Deploy flow: commit locally → `git push` → `ssh Pi4-Server "cd /srv/docker/
+- Deploy flow: commit locally → `git push` → `ssh Pi4 "cd /srv/docker/
   openadr_lab && git pull"` → `docker compose up -d --build`.
 - NEVER stop containers not involved in this project without explicit user
   confirmation — other containers are productive services.
@@ -174,7 +174,7 @@ All React code MUST follow `docs/guidelines/REACT_GUIDELINES.md`:
 **Unit tests**: vitest (UI), cargo test (Rust).
 **Platform**: Linux ARM64 (Raspberry Pi 4), Docker Compose v2.
 
-SQLx offline cache MUST be regenerated on Pi4-Server whenever SQL in Rust source
+SQLx offline cache MUST be regenerated on Pi4 whenever SQL in Rust source
 changes (see `docs/reference/KEY_LEARNINGS.md` — "SQLx Offline Cache" section).
 A wrong cache wastes ~25 min per rebuild cycle.
 

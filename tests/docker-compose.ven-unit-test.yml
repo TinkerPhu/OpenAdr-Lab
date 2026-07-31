@@ -6,7 +6,7 @@
 # (~20 min on Pi4 ARM64 due to HiGHS + aws-lc-rs C++ builds); subsequent
 # runs only recompile changed files (~1-2 min).
 #
-# Usage (on Pi4-Server):
+# Usage (on Pi4):
 #   cd /srv/docker/openadr_lab
 #   docker compose -f tests/docker-compose.ven-unit-test.yml run --build --rm ven-unit-test
 #   docker compose -f tests/docker-compose.ven-unit-test.yml down
