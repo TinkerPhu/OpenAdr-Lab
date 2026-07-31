@@ -34,8 +34,8 @@ Feature: User comfort-curve override (WP4.2, BL-19)
     And I wait for the VEN plan to be recomputed after the comfort-curve session
     Then the comfort-curve-driven plan has no "ev" charging
     When I DELETE the comfort-curve-driven user request
-    And I inject ev_soc 0.20 via sim inject
-    And I set a comfort curve for asset "ev" with points "0.0:2.0,1.0:2.0"
+    Given I inject ev_soc 0.20 via sim inject
+    When I set a comfort curve for asset "ev" with points "0.0:2.0,1.0:2.0"
     And I POST a soft-deadline user request for asset "ev" with target_soc 0.90 and latest_end in 6 hours
     And I wait for the VEN plan to be recomputed after the comfort-curve session
     Then the comfort-curve-driven plan has "ev" charging
