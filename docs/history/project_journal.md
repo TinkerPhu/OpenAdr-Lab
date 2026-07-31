@@ -7300,3 +7300,41 @@ audit passes with the allowlist empty.
 "fold this in" task notes) can be wrong or stale by the time the item is actually worked; re-derive
 scope from the current file before trusting a prior write-up, and correct the register rather than
 silently doing (or silently skipping) what it says.
+
+### PV generation-limit slider: "Off" state instead of misleading 0 kW (branch `fix/sim-inject-null-clear`, 2026-07-31)
+
+Follow-up to the null-clear fix above, reported live: the `pv_generation_limit_kw` slider sat at
+0 kW whenever no override was active, but PV kept exporting normally — looked like a broken
+curtailment limit. Root cause was frontend-only: `DynamicControl.tsx`'s slider fell back to `min`
+(0 kW) whenever the current value was `null` (no override), making "no override" and "override =
+0 kW, fully curtailed" render identically. The backend was never at fault — `resolve_pv_generation
+_limit_kw` and the PV inverter's clamp already treat `Some(0.0)` as a genuine, distinct value from
+`None`.
+
+Fix: added a `nullable: bool` flag to `ControlDescriptor` (omitted from the wire format unless
+`true`, via `skip_serializing_if`), set only on `pv_generation_limit_kw`'s descriptor — its `max`
+(rated_kw) is physically identical to "no limit" since the inverter can never exceed rated power
+anyway, so the top of the range doubles as the release/"Off" state. When `nullable`, the slider
+pins to max and shows "Off" whenever the value is `null`; dragging into the top 5% of the range and
+releasing sends `null` instead of the numeric max — a snap-to-off zone at the high end, matching
+the requested "extra notch that snaps in" UX without a separate toggle button (no toggle+slider
+precedent existed anywhere in the schema-driven control system to build on, and no per-control
+"release override" affordance existed at all before this — both confirmed via investigation before
+choosing this design). Scoped to `pv_generation_limit_kw` only, not applied generically to all
+sliders, since "drag to max = release" is only semantically correct for limit-style controls where
+max is physically unrestricted — it would be wrong for e.g. a temperature setpoint or SoC target.
+
+**Verification**: 3 new frontend tests (no-override renders "Off" pinned at max; drag into snap
+zone + release sends `null`; drag just below the zone still commits a real numeric value), full
+suite 428/428, tsc/eslint clean. Backend: `nullable: true` added only to the PV descriptor (12
+other `ControlDescriptor` literals across battery/ev/heater/base_load explicitly set `nullable:
+false` since the struct has no `Default` derive), 884/884 backend tests green including the
+`schema_snapshot_matches_fixture` golden-file test, fmt/clippy/file-size clean. Rebased onto a
+concurrent same-day refactor (R-08, which split `assets/mod.rs` into `asset_trait.rs`/`history.rs`)
+before merging — rebase applied cleanly but was re-verified with a full fmt/clippy/test pass
+afterward rather than trusting a conflict-free rebase to mean semantically correct.
+
+**Gap**: no browser automation tool was available in this environment to visually screenshot the
+live UI per the project's UI-change verification norm; verification relied on unit tests asserting
+exact DOM text/slider-value behavior plus live API round-trip checks against the deployed schema
+and inject endpoints on Pi4, not an actual screenshot.
