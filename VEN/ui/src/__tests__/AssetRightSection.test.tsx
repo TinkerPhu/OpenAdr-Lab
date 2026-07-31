@@ -84,6 +84,7 @@ const heaterSchema = [
 const pvSchema = [
   { key: "pv_irradiance", label: "Irradiance Override", kind: "slider" as const, min: 0, max: 1, unit: "%", display_scale: 100 },
   { key: "pv_irradiance_alpha", label: "Blend-back Speed", kind: "slider" as const, min: 0.01, max: 1, unit: "", display_scale: undefined },
+  { key: "pv_generation_limit_kw", label: "Generation Limit", kind: "slider" as const, min: 0, max: 8, unit: "kW", display_scale: undefined },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -358,6 +359,33 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
 
     // Not sent to server yet
     expect(mockOnOverrideChange).not.toHaveBeenCalled();
+  });
+
+  it("generation limit: renders and commits pv_generation_limit_kw on mouse-up", () => {
+    const mockOnOverrideChange = vi.fn();
+
+    render(
+      <AssetRightSection
+        assetId="pv"
+        simSnapshot={simWithPv}
+        overrides={undefined}
+        onOverrideChange={mockOnOverrideChange}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    const input = getSchemaSliderInput("pv_generation_limit_kw");
+
+    act(() => {
+      fireEvent.change(input, { target: { value: "3" } });
+    });
+    expect(screen.getByText(/Generation Limit: 3/)).toBeInTheDocument();
+    expect(mockOnOverrideChange).not.toHaveBeenCalled();
+
+    act(() => {
+      fireEvent.mouseUp(input);
+    });
+    expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_generation_limit_kw: 3 });
   });
 });
 

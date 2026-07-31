@@ -26,7 +26,7 @@ pub(super) fn append(conn: &mut Connection, rows: &[TickSample]) -> Result<(), D
         let mut stmt = tx
             .prepare(
                 "INSERT INTO tick_samples
-                    (ts, asset_id, power_kw, soc_pct, temperature_c, export_limit_kw, curtailment_source)
+                    (ts, asset_id, power_kw, soc_pct, temperature_c, generation_limit_kw, curtailment_source)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )
             .map_err(|e| DomainError::StorageError(format!("prepare insert: {e}")))?;
@@ -37,7 +37,7 @@ pub(super) fn append(conn: &mut Connection, rows: &[TickSample]) -> Result<(), D
                 row.power_kw,
                 row.soc_pct,
                 row.temperature_c,
-                row.export_limit_kw,
+                row.generation_limit_kw,
                 row.curtailment_source,
             ])
             .map_err(|e| DomainError::StorageError(format!("insert tick sample: {e}")))?;
@@ -56,12 +56,12 @@ pub(super) fn query(
 ) -> Result<Vec<TickSample>, DomainError> {
     let (sql, asset_filter): (&str, Option<&str>) = match asset_id {
         Some(id) => (
-            "SELECT ts, asset_id, power_kw, soc_pct, temperature_c, export_limit_kw, curtailment_source
+            "SELECT ts, asset_id, power_kw, soc_pct, temperature_c, generation_limit_kw, curtailment_source
              FROM tick_samples WHERE ts >= ?1 AND ts < ?2 AND asset_id = ?3 ORDER BY ts ASC",
             Some(id),
         ),
         None => (
-            "SELECT ts, asset_id, power_kw, soc_pct, temperature_c, export_limit_kw, curtailment_source
+            "SELECT ts, asset_id, power_kw, soc_pct, temperature_c, generation_limit_kw, curtailment_source
              FROM tick_samples WHERE ts >= ?1 AND ts < ?2 ORDER BY ts ASC",
             None,
         ),
@@ -97,7 +97,7 @@ pub(super) fn query(
                 power_kw,
                 soc_pct,
                 temperature_c,
-                export_limit_kw,
+                generation_limit_kw,
                 curtailment_source,
             )|
              -> Result<TickSample, DomainError> {
@@ -107,7 +107,7 @@ pub(super) fn query(
                     power_kw,
                     soc_pct,
                     temperature_c,
-                    export_limit_kw,
+                    generation_limit_kw,
                     curtailment_source,
                 })
             },

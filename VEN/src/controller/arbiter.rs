@@ -56,10 +56,10 @@ pub struct ArbiterOutcome {
     pub setpoints: HashMap<String, f64>,
     /// `(curtail, absorb)` — mirrors `SimInjectState`'s two independent flags.
     pub heater_emergency_mode: Option<(bool, bool)>,
-    /// Additional export-limit tightening (kW, positive magnitude) the
-    /// arbiter wants folded into `resolve_pv_export_limit_kw`'s tighter-wins
+    /// Additional generation-limit tightening (kW, positive magnitude) the
+    /// arbiter wants folded into `resolve_pv_generation_limit_kw`'s tighter-wins
     /// comparison.
-    pub pv_export_limit_tighten_kw: Option<f64>,
+    pub pv_generation_limit_tighten_kw: Option<f64>,
     /// kWh absorbed this tick, keyed by asset id — feeds the residual
     /// accumulator (§5.5). Only battery/EV are ever populated (the
     /// SoC-coupled resources the accumulator protects).
@@ -246,7 +246,7 @@ pub fn reconcile(
     let mut remaining_kw = dev_kw.abs();
     let mut absorbed_kwh_by_asset = HashMap::new();
     let mut heater_emergency_mode = None;
-    let mut pv_export_limit_tighten_kw = None;
+    let mut pv_generation_limit_tighten_kw = None;
     let mut active_lever = None;
 
     for lever in ranked {
@@ -297,7 +297,7 @@ pub fn reconcile(
                 active_lever.get_or_insert(lever.id);
             }
             "pv_curtail" => {
-                pv_export_limit_tighten_kw = Some(assigned_kw);
+                pv_generation_limit_tighten_kw = Some(assigned_kw);
                 active_lever.get_or_insert(lever.id);
             }
             _ => {}
@@ -308,7 +308,7 @@ pub fn reconcile(
     ArbiterOutcome {
         setpoints,
         heater_emergency_mode,
-        pv_export_limit_tighten_kw,
+        pv_generation_limit_tighten_kw,
         absorbed_kwh_by_asset,
         active_lever,
         net_kw: Some(net_kw),

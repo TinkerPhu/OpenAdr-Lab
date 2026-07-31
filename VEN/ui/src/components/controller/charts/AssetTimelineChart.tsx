@@ -24,7 +24,7 @@ interface AssetTimelineChartProps {
   hoursForward?: number;
   stateKey?: "soc" | "temp_c";
   zones?: ZoneDef[];
-  /** PV only: shade curtailment bands derived from `values` (export_limit_kw,
+  /** PV only: shade curtailment bands derived from `values` (generation_limit_kw,
    * curtailment_source, inverter_max_kw for past points; pv_forecast_kw for future points).
    * See openspec/changes/pv-curtailment-history/. */
   pvCurtailment?: boolean;
@@ -46,14 +46,15 @@ interface CurtailmentZone {
 
 /** Classify one point's curtailment state from its `values` map. `null` = no shading.
  *
- * Past points carry `export_limit_kw` (the commanded limit, present only when a limit was
- * active), `curtailment_source` (0=none, 1=plan, 2=capacity, 3=arbiter — only meaningful
- * alongside export_limit_kw), and `inverter_max_kw` (the static hardware ceiling). Capacity and
- * arbiter sources are both externally-imposed/reactive, not the plan's own forecasted choice, so
- * both classify as "unplanned" (see `openspec/changes/deviation-arbiter/`). Future (plan) points
- * instead carry `pv_forecast_kw` next to `power_kw` — the plan's forecast is already clamped to
- * `inverter_max_kw` at solve time, so any gap there is always a planned choice, never a hardware
- * ceiling to distinguish separately.
+ * Past points carry `generation_limit_kw` (the commanded limit, present only when a limit was
+ * active), `curtailment_source` (0=none, 1=plan, 2=capacity, 3=arbiter, 4=manual — only
+ * meaningful alongside generation_limit_kw), and `inverter_max_kw` (the static hardware
+ * ceiling). Capacity, arbiter, and manual sources are all externally-imposed/reactive, not the
+ * plan's own forecasted choice, so all three classify as "unplanned" (see
+ * `openspec/changes/deviation-arbiter/`). Future (plan) points instead carry `pv_forecast_kw`
+ * next to `power_kw` — the plan's forecast is already clamped to `inverter_max_kw` at solve
+ * time, so any gap there is always a planned choice, never a hardware ceiling to distinguish
+ * separately.
  */
 function classifyPvPoint(values: Record<string, number> | null | undefined): CurtailmentKind | null {
   const powerKw = values?.["power_kw"];
@@ -66,15 +67,15 @@ function classifyPvPoint(values: Record<string, number> | null | undefined): Cur
   }
 
   // Past (history) point.
-  const exportLimitKw = values?.["export_limit_kw"];
+  const generationLimitKw = values?.["generation_limit_kw"];
   const inverterMaxKw = values?.["inverter_max_kw"];
   if (
-    exportLimitKw != null &&
-    Math.abs(powerKw - exportLimitKw) < CURTAILMENT_EPS_KW &&
-    (inverterMaxKw == null || Math.abs(exportLimitKw) < inverterMaxKw - CURTAILMENT_EPS_KW)
+    generationLimitKw != null &&
+    Math.abs(powerKw - generationLimitKw) < CURTAILMENT_EPS_KW &&
+    (inverterMaxKw == null || Math.abs(generationLimitKw) < inverterMaxKw - CURTAILMENT_EPS_KW)
   ) {
     const source = values?.["curtailment_source"];
-    return source === 2 || source === 3 ? "unplanned" : "planned";
+    return source === 2 || source === 3 || source === 4 ? "unplanned" : "planned";
   }
   if (inverterMaxKw != null && Math.abs(-powerKw - inverterMaxKw) < CURTAILMENT_EPS_KW) {
     return "hardware";

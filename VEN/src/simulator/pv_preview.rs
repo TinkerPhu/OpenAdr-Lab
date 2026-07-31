@@ -59,7 +59,7 @@ impl SimState {
         };
         Some(
             pv_cfg
-                .export_limit_kw
+                .generation_limit_kw
                 .map(|lim| raw_kw.max(lim))
                 .unwrap_or(raw_kw),
         )

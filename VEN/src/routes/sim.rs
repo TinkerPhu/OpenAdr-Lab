@@ -53,6 +53,8 @@ pub struct PostSimInjectBody {
     #[serde(default)]
     pub grid_export_limit_kw: Option<serde_json::Value>,
     #[serde(default)]
+    pub pv_generation_limit_kw: Option<serde_json::Value>,
+    #[serde(default)]
     pub pv_plan_kw: Option<serde_json::Value>,
 }
 
@@ -101,6 +103,7 @@ fn merge_inject(current: &mut SimInjectState, body: PostSimInjectBody) {
     }
     merge_f64!(grid_import_limit_kw);
     merge_f64!(grid_export_limit_kw);
+    merge_f64!(pv_generation_limit_kw);
     merge_f64!(pv_plan_kw);
 }
 
@@ -235,7 +238,8 @@ pub async fn post_sim_inject(
         || body.heater_setpoint_c.is_some()
         || body.ambient_temp_c.is_some()
         || body.grid_import_limit_kw.is_some()
-        || body.grid_export_limit_kw.is_some();
+        || body.grid_export_limit_kw.is_some()
+        || body.pv_generation_limit_kw.is_some();
     let mut current = ctx.state.inject_state().await;
     merge_inject(&mut current, body);
     ctx.state.set_inject_state(current).await;
@@ -259,4 +263,49 @@ pub async fn post_plan_trigger(State(ctx): State<AppCtx>) -> impl IntoResponse {
 pub async fn post_sim_inject_reset(State(ctx): State<AppCtx>) -> impl IntoResponse {
     ctx.state.set_inject_state(SimInjectState::default()).await;
     axum::http::StatusCode::NO_CONTENT
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_inject_sets_pv_generation_limit_kw() {
+        let mut current = SimInjectState::default();
+        let body = PostSimInjectBody {
+            pv_generation_limit_kw: Some(serde_json::json!(3.5)),
+            ..Default::default()
+        };
+        merge_inject(&mut current, body);
+        assert_eq!(current.pv_generation_limit_kw, Some(3.5));
+    }
+
+    #[test]
+    fn merge_inject_null_releases_pv_generation_limit_kw() {
+        let mut current = SimInjectState {
+            pv_generation_limit_kw: Some(2.0),
+            ..Default::default()
+        };
+        let body = PostSimInjectBody {
+            pv_generation_limit_kw: Some(serde_json::Value::Null),
+            ..Default::default()
+        };
+        merge_inject(&mut current, body);
+        assert_eq!(current.pv_generation_limit_kw, None);
+    }
+
+    #[test]
+    fn merge_inject_absent_pv_generation_limit_kw_leaves_unchanged() {
+        let mut current = SimInjectState {
+            pv_generation_limit_kw: Some(2.0),
+            ..Default::default()
+        };
+        let body = PostSimInjectBody::default();
+        merge_inject(&mut current, body);
+        assert_eq!(
+            current.pv_generation_limit_kw,
+            Some(2.0),
+            "absent field must not change the current value"
+        );
+    }
 }
