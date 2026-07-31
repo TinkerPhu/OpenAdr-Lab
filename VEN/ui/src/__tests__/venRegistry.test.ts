@@ -53,10 +53,37 @@ describe("mergeVens", () => {
     expect(merged[DEFAULT_VENS.length].label).toBe("fleet-ven-000 (eco)");
     expect(merged[DEFAULT_VENS.length + 1].label).toBe("fleet-ven-001");
   });
+
+  it("routes a VEN carrying DASHBOARD_URL directly to that origin (BL-41)", () => {
+    const merged = mergeVens(DEFAULT_VENS, [
+      { venName: "ven-4", dashboardUrl: "http://192.168.1.104:8211" },
+    ]);
+    expect(merged[DEFAULT_VENS.length]).toEqual({
+      label: "ven-4",
+      url: "http://192.168.1.104:8211",
+      venName: "ven-4",
+    });
+  });
+
+  it("keeps the /api/dyn route for a VEN without DASHBOARD_URL (BL-41 regression)", () => {
+    const merged = mergeVens(DEFAULT_VENS, [{ venName: "ven-4" }]);
+    expect(merged[DEFAULT_VENS.length].url).toBe("/api/dyn/ven-4");
+  });
+
+  it("combines PERSONA label with a DASHBOARD_URL route (BL-41)", () => {
+    const merged = mergeVens(DEFAULT_VENS, [
+      { venName: "ven-4", persona: "eco", dashboardUrl: "http://192.168.1.104:8211" },
+    ]);
+    expect(merged[DEFAULT_VENS.length]).toEqual({
+      label: "ven-4 (eco)",
+      url: "http://192.168.1.104:8211",
+      venName: "ven-4",
+    });
+  });
 });
 
 describe("fetchDiscoveredVens", () => {
-  function fetchStub(registry: unknown, healthyNames: string[]) {
+  function fetchStub(registry: unknown, healthyNames: string[], healthyUrls: string[] = []) {
     return vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/vens-registry") {
@@ -65,6 +92,9 @@ describe("fetchDiscoveredVens", () => {
       const m = url.match(/^\/api\/dyn\/([^/]+)\/health$/);
       if (m) {
         return { ok: healthyNames.includes(m[1]) } as Response;
+      }
+      if (url.endsWith("/health")) {
+        return { ok: healthyUrls.includes(url.replace(/\/health$/, "")) } as Response;
       }
       throw new Error(`unexpected fetch: ${url}`);
     });
@@ -123,5 +153,53 @@ describe("fetchDiscoveredVens", () => {
     ]);
     const names = await fetchDiscoveredVens(fetchFn as unknown as typeof fetch);
     expect(names).toEqual([{ venName: "fleet-ven-000", persona: undefined }]);
+  });
+
+  it("reads the DASHBOARD_URL attribute and probes health there directly (BL-41)", async () => {
+    const fetchFn = fetchStub(
+      [
+        {
+          venName: "ven-4",
+          attributes: [{ type: "DASHBOARD_URL", values: ["http://192.168.1.104:8211"] }],
+        },
+      ],
+      [],
+      ["http://192.168.1.104:8211"],
+    );
+    const names = await fetchDiscoveredVens(fetchFn as unknown as typeof fetch);
+    expect(names).toEqual([
+      { venName: "ven-4", persona: undefined, dashboardUrl: "http://192.168.1.104:8211" },
+    ]);
+    const probed = fetchFn.mock.calls.map((c) => String(c[0]));
+    expect(probed).toContain("http://192.168.1.104:8211/health");
+    expect(probed).not.toContain("/api/dyn/ven-4/health");
+  });
+
+  it("keeps PERSONA and DASHBOARD_URL working together (BL-41)", async () => {
+    const fetchFn = fetchStub(
+      [
+        {
+          venName: "ven-4",
+          attributes: [
+            { type: "PERSONA", values: ["eco"] },
+            { type: "DASHBOARD_URL", values: ["http://192.168.1.104:8211"] },
+          ],
+        },
+      ],
+      [],
+      ["http://192.168.1.104:8211"],
+    );
+    const names = await fetchDiscoveredVens(fetchFn as unknown as typeof fetch);
+    expect(names).toEqual([
+      { venName: "ven-4", persona: "eco", dashboardUrl: "http://192.168.1.104:8211" },
+    ]);
+  });
+
+  it("falls back to the /api/dyn probe when DASHBOARD_URL is absent (BL-41 regression)", async () => {
+    const fetchFn = fetchStub([{ venName: "fleet-ven-000" }], ["fleet-ven-000"]);
+    const names = await fetchDiscoveredVens(fetchFn as unknown as typeof fetch);
+    expect(names).toEqual([
+      { venName: "fleet-ven-000", persona: undefined, dashboardUrl: undefined },
+    ]);
   });
 });

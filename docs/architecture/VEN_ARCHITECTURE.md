@@ -634,6 +634,32 @@ principle (every backend capability needs an inspectable UI surface, not just a 
 | GET | `/notifications`, `/notifications/history`, `/notifications/events` | User-facing notifications: current, history, SSE stream |
 | GET | `/metrics` | Prometheus metrics; VEN UI's Metrics page groups these under human-readable categories by default, with a raw-view toggle |
 
+### 4.11 Fleet Dashboard — Multi-Host VEN Discovery (BL-41)
+
+The VEN UI's fleet dropdown (`VEN/ui/src/api/venRegistry.ts`) discovers VENs beyond the
+hardcoded `ven-1`/`ven-2`/`ven-3` trio (`DEFAULT_VENS`) via the VTN's own VEN registry,
+proxied at `/api/vens-registry`. Each discovered VEN's dashboard base URL is resolved as
+follows:
+
+- **Same Docker host as the UI** (the common case — fleet VENs, `ven-1..3`): resolved via
+  the dynamic nginx route `/api/dyn/{venName}` (`VEN/ui/nginx.conf`), which relies on
+  Docker's embedded DNS resolving the VEN's container name — this only works when the VEN
+  container shares a Docker network with the `ui` container.
+- **Different physical host** (e.g. a VEN running on a second machine administered by the
+  same VTN): the VEN object carries an optional `DASHBOARD_URL` attribute — a full origin
+  string (e.g. `http://192.168.1.104:8211`) set via `scripts/seed_vtn.py`'s
+  `provision_vens`/`_ensure_dashboard_url_attribute`, using the VTN's generic
+  `attributes: ValuesMap[]` mechanism (the same one used for the WP4.5 `PERSONA` tag).
+  When present, `mergeVens`/`fetchDiscoveredVens` use that origin directly as the VEN's
+  base URL — the browser fetches the VEN's API straight, with no proxy hop. This works
+  because VEN's axum router already sets `CorsLayer::new().allow_origin(Any)`
+  (`VEN/src/routes/mod.rs`), and the entire `VEN/ui` data layer already treats a VEN's base
+  URL as an opaque prefix (`ApiClient.baseUrl`, consumed uniformly by every hook including
+  the `EventSource` stream).
+
+A VEN without `DASHBOARD_URL` is unaffected — same-host resolution via `/api/dyn/{venName}`
+is unchanged, so this is purely additive for cross-host fleets.
+
 ---
 
 ## 5. Time-Series Alignment
