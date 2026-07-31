@@ -23,10 +23,12 @@
 #     kept under the 10-minute tool timeout of AI sessions on purpose.
 #   - Owner identity = user@host:<worktree path>, so release/refresh only act
 #     on a lock you own.
+#   - Host: PI4_LOCK_HOST overrides for this script only; OPENADR_LAB_HOST is
+#     the shared default (also used by run_all_tests.sh); falls back to "Pi4".
 #
 set -euo pipefail
 
-PI4_HOST="${PI4_LOCK_HOST:-Pi4}"
+PI4_HOST="${PI4_LOCK_HOST:-${OPENADR_LAB_HOST:-Pi4}}"
 LEASE_MIN="${PI4_LOCK_LEASE_MIN:-60}"
 POLL_SEC="${PI4_LOCK_POLL_SEC:-20}"
 MAX_WAIT_SEC="${PI4_LOCK_MAX_WAIT_SEC:-540}"
