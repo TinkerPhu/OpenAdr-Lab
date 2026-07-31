@@ -7119,13 +7119,35 @@ at BDD/E2E level. The post-heartbeat assertion polls (`poll_until`, 15s) rather 
 once immediately, to tolerate MQTT delivery/processing latency; the pre-heartbeat assertion needs
 no poll since "no status ever received" holds trivially regardless of timing.
 
-**Verification**: `bash run_all_tests.sh --e2e` on Pi4, run immediately after this merge lands
-on `main` (Pi4's checkout only ever tests `main`, so verification had to follow the merge, not
-precede it).
+**Verification found a real bug in the new scenario itself**: the first Pi4 E2E run after
+merging showed the new scenario failing — its `When a weather status heartbeat is published...`
+step was decorated `@given` instead of `@when` in `weather_forecast_steps.py`, leaving it (and
+the following `Then ... alive` assertion) unmatched at collection time (behave showed `# None`
+as their location, its marker for an undefined step). Fixed the decorator
+(`fix/r56-when-decorator`, follow-up commit) and re-ran: the new scenario passed, and a full
+suite run confirmed no other regressions (266/266 scenarios, only the already-known-flaky
+`timeline_grid.feature` scenario below intermittently failing, unrelated to this change).
+
+**Verification**: `bash run_all_tests.sh --e2e` on Pi4 (had to run after merging, not before —
+Pi4's checkout only ever tests `main`). First run caught the decorator bug above; after the
+follow-up fix, a full suite run passed cleanly except for the pre-existing R-61 flake.
 
 **Key learning**: when a debt-register item's task list assumes a broken/missing state (`@wip`
 tag, uncovered field), check the actual current state before writing new steps — two of R-56's
 four listed sub-tasks were already satisfied by earlier, unrelated work, same as R-22's fix
 predating its own task-list entry. Also: Pi4-Server's checkout always tracks `main` — a feature
 branch's E2E behavior can only be observed on Pi4 after merging, not before, unlike local
-unit/UI tests which run against the worktree directly.
+unit/UI tests which run against the worktree directly. And: a wrong `@given`/`@when`/`@then`
+decorator in behave produces an *undefined* step (shown as `# None`), not a keyword-mismatch
+error — easy to misread as "not yet reached" rather than "never matched."
+
+### R-61: intermittent `timeline_grid.feature` now-point flake (found during R-56 verification, 2026-07-31)
+
+Discovered as a side effect of two Pi4 E2E runs on the same day: `Each asset array contains a
+now-point between history and future` passed cleanly in the first full run, then failed
+(`now-point at index 120 is not between history and future (array length 121)`) in a later run
+with zero code changes to the timeline/grid path in between — a genuine intermittent flake, not
+a regression from the weather/R-56 work being verified at the time. Logged in
+`docs/reference/TECHNICAL_DEBTS.md` (R-61) rather than investigated further, since it's unrelated
+to the change in flight; root cause is presumably an edge case when "now" lands exactly on the
+last grid slot boundary.
