@@ -1,11 +1,12 @@
 use chrono::{DateTime, Duration, Utc};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use crate::common::{Interpolation, TimeSeries};
 use crate::controller::milp_planner::asset_port::{
     BatteryMilpContext, EvMilpContext, HeaterMilpContext,
 };
 
+mod asset_trait;
 pub mod base_load;
 pub mod battery;
 mod battery_milp;
@@ -14,13 +15,20 @@ mod ev_milp;
 pub mod grid;
 pub mod heater;
 mod heater_milp;
+mod history;
 pub mod pv;
 
+// AssetHandle/TrajectoryPoint are consumed only within asset_trait's own tests — same
+// bin-crate "pub items have no external consumer" situation AssetHandle was already
+// #[allow(dead_code)]'d for before this file split.
+#[allow(unused_imports)]
+pub use asset_trait::{Asset, AssetHandle, Trajectory, TrajectoryPoint};
 pub use base_load::{BaseLoad, BaseLoadState};
 pub use battery::{Battery, BatteryState};
 pub use ev::{EvCharger, EvState};
 pub use grid::Grid;
 pub use heater::{Heater, HeaterState};
+pub use history::{AssetHistoryBuffer, HistoryPoint};
 pub use pv::{PvInverter, PvState};
 
 // ─── Input type for a runtime-controllable parameter ─────────────────────────
@@ -138,147 +146,6 @@ pub struct GridState {
     pub export_limit_kw: f64,
 }
 
-/// Trajectory produced by simulate_forward() / simulate_free().
-pub struct Trajectory {
-    pub points: Vec<TrajectoryPoint>,
-}
-
-/// State is the state AFTER the step at `ts`.
-pub struct TrajectoryPoint {
-    pub ts: DateTime<Utc>,
-    /// Signed: positive = import, negative = export.
-    pub power_kw: f64,
-    pub state: AssetState,
-}
-
-/// One recorded tick in a per-asset history buffer.
-#[derive(Debug, Clone)]
-pub struct HistoryPoint {
-    pub ts: DateTime<Utc>,
-    /// Signed: positive = import from grid, negative = export.
-    pub power_kw: f64,
-    /// Full state snapshot at this tick.
-    pub state: AssetState,
-}
-
-/// Rolling per-asset ring buffer of `HistoryPoint` values.
-///
-/// Capacity defaults to 3600 entries ≈ 1 h at 1 s tick rate.
-/// Oldest point is evicted automatically when full.
-#[derive(Debug, Clone)]
-pub struct AssetHistoryBuffer {
-    capacity: usize,
-    points: VecDeque<HistoryPoint>,
-}
-
-impl AssetHistoryBuffer {
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            points: VecDeque::with_capacity(capacity),
-        }
-    }
-
-    /// Append a point, evicting the oldest when at capacity.
-    pub fn push(&mut self, point: HistoryPoint) {
-        if self.points.len() == self.capacity {
-            self.points.pop_front();
-        }
-        self.points.push_back(point);
-    }
-
-    /// All points in `[now − window, now]`, ordered ascending.
-    pub fn slice(&self, window: Duration, now: DateTime<Utc>) -> Vec<HistoryPoint> {
-        let start = now - window;
-        self.points
-            .iter()
-            .filter(|p| p.ts >= start && p.ts <= now)
-            .cloned()
-            .collect()
-    }
-
-    /// Most recent point.
-    pub fn latest(&self) -> Option<&HistoryPoint> {
-        self.points.back()
-    }
-
-    /// Last-observation-carried-forward power at or before `t`.
-    /// Returns `None` if no point exists at or before `t`.
-    pub fn power_at(&self, t: DateTime<Utc>) -> Option<f64> {
-        self.points
-            .iter()
-            .rev()
-            .find(|p| p.ts <= t)
-            .map(|p| p.power_kw)
-    }
-
-    pub fn len(&self) -> usize {
-        self.points.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.points.is_empty()
-    }
-
-    /// Time-weighted average of `power_kw` over the last `window` ending at `now`.
-    ///
-    /// Uses LOCF (last-observation-carried-forward): each recorded value is held
-    /// until the next point. Falls back to the single latest value when no points
-    /// fall within the window.
-    pub fn recent_avg_power(&self, window: Duration, now: DateTime<Utc>) -> Option<f64> {
-        let window_start = now - window;
-        let in_window: Vec<_> = self
-            .points
-            .iter()
-            .filter(|p| p.ts >= window_start && p.ts <= now)
-            .collect();
-
-        if in_window.is_empty() {
-            return self.latest().map(|p| p.power_kw);
-        }
-
-        let mut weighted_sum = 0.0f64;
-        let mut total_weight = 0.0f64;
-
-        // Seed the LOCF value: the last point *before* the window start, if any.
-        let seed_power = self
-            .points
-            .iter()
-            .rev()
-            .find(|p| p.ts < window_start)
-            .map(|p| p.power_kw)
-            .unwrap_or(in_window[0].power_kw);
-
-        let mut last_power = seed_power;
-        let mut last_t_ms = window_start.timestamp_millis();
-
-        for pt in &in_window {
-            let t_ms = pt.ts.timestamp_millis();
-            if t_ms > last_t_ms {
-                let dt = (t_ms - last_t_ms) as f64;
-                weighted_sum += last_power * dt;
-                total_weight += dt;
-            }
-            last_power = pt.power_kw;
-            last_t_ms = t_ms;
-        }
-
-        // Carry the last in-window point forward to `now`.
-        let now_ms = now.timestamp_millis();
-        if now_ms > last_t_ms {
-            let dt = (now_ms - last_t_ms) as f64;
-            weighted_sum += last_power * dt;
-            total_weight += dt;
-        }
-
-        if total_weight > 0.0 {
-            Some(weighted_sum / total_weight)
-        } else {
-            self.latest().map(|p| p.power_kw)
-        }
-    }
-}
-
 /// Runtime config dispatch enum. Holds physics config for each asset type.
 /// This is the renamed + restructured successor to what was previously called `AssetState`
 /// (which conflated config and state).
@@ -292,52 +159,61 @@ pub enum AssetConfig {
     BaseLoad(BaseLoad),
 }
 
+/// Forwards a method call to the config held by whichever `AssetConfig` variant `self` is,
+/// declaring the `Battery|Ev|Heater|Pv|BaseLoad` variant list exactly once. For methods whose
+/// signature is uniform across all 5 variants (mirrors the `Asset` trait or is a simple
+/// per-config accessor) — see `delegate_asset_state!` for methods that also match on `AssetState`.
+macro_rules! delegate_asset {
+    ($self:expr, $method:ident($($arg:expr),*)) => {
+        match $self {
+            AssetConfig::Battery(cfg) => cfg.$method($($arg),*),
+            AssetConfig::Ev(cfg) => cfg.$method($($arg),*),
+            AssetConfig::Heater(cfg) => cfg.$method($($arg),*),
+            AssetConfig::Pv(cfg) => cfg.$method($($arg),*),
+            AssetConfig::BaseLoad(cfg) => cfg.$method($($arg),*),
+        }
+    };
+}
+
+/// Like `delegate_asset!`, but also matches `$state` against the same variant so the config
+/// and state can be destructured together (e.g. `state_values`, `reset`, `forecast`). Falls
+/// back to `$default` on a config/state variant mismatch — mirrors the hand-written `_ => ...`
+/// arm every one of these methods had before the macro existed.
+macro_rules! delegate_asset_state {
+    ($self:expr, $state:expr, $method:ident($($arg:expr),*), $default:expr) => {
+        match ($self, $state) {
+            (AssetConfig::Battery(cfg), AssetState::Battery(s)) => cfg.$method(s, $($arg),*),
+            (AssetConfig::Ev(cfg), AssetState::Ev(s)) => cfg.$method(s, $($arg),*),
+            (AssetConfig::Heater(cfg), AssetState::Heater(s)) => cfg.$method(s, $($arg),*),
+            (AssetConfig::Pv(cfg), AssetState::Pv(s)) => cfg.$method(s, $($arg),*),
+            (AssetConfig::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.$method(s, $($arg),*),
+            _ => $default,
+        }
+    };
+}
+
 impl AssetConfig {
     // ── Asset trait dispatch ────────────────────────────────────────────────
 
     pub fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
         use Asset as _;
-        match self {
-            Self::Battery(cfg) => cfg.step(state, setpoint_kw, dt),
-            Self::Ev(cfg) => cfg.step(state, setpoint_kw, dt),
-            Self::Heater(cfg) => cfg.step(state, setpoint_kw, dt),
-            Self::Pv(cfg) => cfg.step(state, setpoint_kw, dt),
-            Self::BaseLoad(cfg) => cfg.step(state, setpoint_kw, dt),
-        }
+        delegate_asset!(self, step(state, setpoint_kw, dt))
     }
 
     pub fn capability(&self, state: &AssetState) -> AssetCapability {
         use Asset as _;
-        match self {
-            Self::Battery(cfg) => cfg.capability(state),
-            Self::Ev(cfg) => cfg.capability(state),
-            Self::Heater(cfg) => cfg.capability(state),
-            Self::Pv(cfg) => cfg.capability(state),
-            Self::BaseLoad(cfg) => cfg.capability(state),
-        }
+        delegate_asset!(self, capability(state))
     }
 
     pub fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
         use Asset as _;
-        match self {
-            Self::Battery(cfg) => cfg.flexibility_floor(state),
-            Self::Ev(cfg) => cfg.flexibility_floor(state),
-            Self::Heater(cfg) => cfg.flexibility_floor(state),
-            Self::Pv(cfg) => cfg.flexibility_floor(state),
-            Self::BaseLoad(cfg) => cfg.flexibility_floor(state),
-        }
+        delegate_asset!(self, flexibility_floor(state))
     }
 
     // ── Dispatch methods (previously on AssetState) ─────────────────────────
 
     pub fn default_setpoint(&self, _state: &AssetState) -> f64 {
-        match self {
-            Self::Battery(cfg) => cfg.default_setpoint(),
-            Self::Ev(cfg) => cfg.default_setpoint(),
-            Self::Heater(cfg) => cfg.default_setpoint(),
-            Self::Pv(cfg) => cfg.default_setpoint(),
-            Self::BaseLoad(cfg) => cfg.default_setpoint(),
-        }
+        delegate_asset!(self, default_setpoint())
     }
 
     /// Returns a stateful trajectory computer seeded from the current live state,
@@ -353,45 +229,19 @@ impl AssetConfig {
     }
 
     pub fn state_values(&self, state: &AssetState) -> HashMap<String, f64> {
-        match (self, state) {
-            (Self::Battery(cfg), AssetState::Battery(s)) => cfg.state_values(s),
-            (Self::Ev(cfg), AssetState::Ev(s)) => cfg.state_values(s),
-            (Self::Heater(cfg), AssetState::Heater(s)) => cfg.state_values(s),
-            (Self::Pv(cfg), AssetState::Pv(s)) => cfg.state_values(s),
-            (Self::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.state_values(s),
-            _ => HashMap::new(),
-        }
+        delegate_asset_state!(self, state, state_values(), HashMap::new())
     }
 
     pub fn control_schema(&self) -> Vec<ControlDescriptor> {
-        match self {
-            Self::Battery(cfg) => cfg.control_schema(),
-            Self::Ev(cfg) => cfg.control_schema(),
-            Self::Heater(cfg) => cfg.control_schema(),
-            Self::Pv(cfg) => cfg.control_schema(),
-            Self::BaseLoad(cfg) => cfg.control_schema(),
-        }
+        delegate_asset!(self, control_schema())
     }
 
     pub fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
-        match (self, state) {
-            (Self::Battery(cfg), AssetState::Battery(s)) => cfg.reset(s, values),
-            (Self::Ev(cfg), AssetState::Ev(s)) => cfg.reset(s, values),
-            (Self::Heater(cfg), AssetState::Heater(s)) => cfg.reset(s, values),
-            (Self::Pv(cfg), AssetState::Pv(s)) => cfg.reset(s, values),
-            (Self::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.reset(s, values),
-            _ => {}
-        }
+        delegate_asset_state!(self, state, reset(values), ())
     }
 
     pub fn update_config(&mut self, values: HashMap<String, f64>) {
-        match self {
-            Self::Battery(cfg) => cfg.update_config(values),
-            Self::Ev(cfg) => cfg.update_config(values),
-            Self::Heater(cfg) => cfg.update_config(values),
-            Self::Pv(cfg) => cfg.update_config(values),
-            Self::BaseLoad(cfg) => cfg.update_config(values),
-        }
+        delegate_asset!(self, update_config(values))
     }
 
     pub fn forecast(
@@ -400,14 +250,12 @@ impl AssetConfig {
         timespan: Duration,
         now: DateTime<Utc>,
     ) -> TimeSeries {
-        match (self, state) {
-            (Self::Battery(cfg), AssetState::Battery(s)) => cfg.forecast(s, timespan, now),
-            (Self::Ev(cfg), AssetState::Ev(s)) => cfg.forecast(s, timespan, now),
-            (Self::Heater(cfg), AssetState::Heater(s)) => cfg.forecast(s, timespan, now),
-            (Self::Pv(cfg), AssetState::Pv(s)) => cfg.forecast(s, timespan, now),
-            (Self::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.forecast(s, timespan, now),
-            _ => TimeSeries::empty(Interpolation::Linear),
-        }
+        delegate_asset_state!(
+            self,
+            state,
+            forecast(timespan, now),
+            TimeSeries::empty(Interpolation::Linear)
+        )
     }
 
     pub fn resolve_request_target(
@@ -428,33 +276,15 @@ impl AssetConfig {
     }
 
     pub fn default_comfort_rates(&self) -> Vec<crate::entities::asset::ComfortRate> {
-        match self {
-            Self::Battery(cfg) => cfg.default_comfort_rates(),
-            Self::Ev(cfg) => cfg.default_comfort_rates(),
-            Self::Heater(cfg) => cfg.default_comfort_rates(),
-            Self::Pv(cfg) => cfg.default_comfort_rates(),
-            Self::BaseLoad(cfg) => cfg.default_comfort_rates(),
-        }
+        delegate_asset!(self, default_comfort_rates())
     }
 
     pub fn default_completion_policy(&self) -> crate::entities::asset::CompletionPolicy {
-        match self {
-            Self::Battery(cfg) => cfg.default_completion_policy(),
-            Self::Ev(cfg) => cfg.default_completion_policy(),
-            Self::Heater(cfg) => cfg.default_completion_policy(),
-            Self::Pv(cfg) => cfg.default_completion_policy(),
-            Self::BaseLoad(cfg) => cfg.default_completion_policy(),
-        }
+        delegate_asset!(self, default_completion_policy())
     }
 
     pub fn default_post_deadline_comfort_bid(&self) -> Option<f64> {
-        match self {
-            Self::Battery(cfg) => cfg.default_post_deadline_comfort_bid(),
-            Self::Ev(cfg) => cfg.default_post_deadline_comfort_bid(),
-            Self::Heater(cfg) => cfg.default_post_deadline_comfort_bid(),
-            Self::Pv(cfg) => cfg.default_post_deadline_comfort_bid(),
-            Self::BaseLoad(cfg) => cfg.default_post_deadline_comfort_bid(),
-        }
+        delegate_asset!(self, default_post_deadline_comfort_bid())
     }
 
     pub fn simulate_free(
@@ -464,13 +294,7 @@ impl AssetConfig {
         now: DateTime<Utc>,
     ) -> Trajectory {
         use Asset as _;
-        match self {
-            Self::Battery(cfg) => cfg.simulate_free(state, duration, now),
-            Self::Ev(cfg) => cfg.simulate_free(state, duration, now),
-            Self::Heater(cfg) => cfg.simulate_free(state, duration, now),
-            Self::Pv(cfg) => cfg.simulate_free(state, duration, now),
-            Self::BaseLoad(cfg) => cfg.simulate_free(state, duration, now),
-        }
+        delegate_asset!(self, simulate_free(state, duration, now))
     }
 
     pub fn capability_trajectory(
@@ -481,13 +305,10 @@ impl AssetConfig {
         now: DateTime<Utc>,
     ) -> Vec<(DateTime<Utc>, AssetCapability)> {
         use Asset as _;
-        match self {
-            Self::Battery(cfg) => cfg.capability_trajectory(state, duration, resolution, now),
-            Self::Ev(cfg) => cfg.capability_trajectory(state, duration, resolution, now),
-            Self::Heater(cfg) => cfg.capability_trajectory(state, duration, resolution, now),
-            Self::Pv(cfg) => cfg.capability_trajectory(state, duration, resolution, now),
-            Self::BaseLoad(cfg) => cfg.capability_trajectory(state, duration, resolution, now),
-        }
+        delegate_asset!(
+            self,
+            capability_trajectory(state, duration, resolution, now)
+        )
     }
 
     /// Available storage energy. Returns `(discharge_kwh, charge_kwh)`.
@@ -581,361 +402,5 @@ impl AssetConfig {
             ))),
             _ => None,
         }
-    }
-}
-
-/// Full Asset trait. Combines the physics interface (Phase A) with the identity and
-/// history interface (Phase B/C) needed for `&dyn Asset` trait objects.
-///
-/// Physics types (`Battery`, `EvCharger`, etc.) implement only `step()` and `capability()`.
-/// They inherit the three identity/history methods with panicking defaults — those methods
-/// must only be called via `AssetHandle`, which properly implements them.
-#[allow(dead_code)]
-pub trait Asset: Send + Sync {
-    // ── Identity / observability (Phase B/C) ──────────────────────────────────
-
-    /// Unique asset identifier (e.g. "battery", "ev", "grid").
-    /// Default panics — call via `AssetHandle`, not a bare physics type.
-    fn id(&self) -> &str {
-        unimplemented!("Asset::id() must be called via AssetHandle, not a bare physics type")
-    }
-
-    /// Current live state snapshot. Positive = import from grid, negative = export.
-    /// Default panics — call via `AssetHandle`, not a bare physics type.
-    fn current_state(&self) -> AssetState {
-        unimplemented!(
-            "Asset::current_state() must be called via AssetHandle, not a bare physics type"
-        )
-    }
-
-    /// Slice of this asset's own ring buffer over [now − window, now].
-    /// Default panics — call via `AssetHandle`, not a bare physics type.
-    fn history(&self, _window: Duration, _now: DateTime<Utc>) -> Vec<HistoryPoint> {
-        unimplemented!("Asset::history() must be called via AssetHandle, not a bare physics type")
-    }
-
-    // ── Physics primitives (Phase A) ──────────────────────────────────────────
-
-    /// Pure physics step. Returns (new_state, actual_power_kw).
-    /// actual_power_kw may differ from setpoint_kw (e.g. SoC ceiling clamps charge rate).
-    /// Sign convention: positive = import/charge, negative = export/discharge.
-    fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64);
-
-    /// Point-in-time feasible power range given current state.
-    fn capability(&self, state: &AssetState) -> AssetCapability;
-
-    /// Lowest magnitude the asset could still be forced to right now — see
-    /// `AssetFlexibilityFloor`'s doc comment. No default: every asset type must
-    /// state its own answer explicitly rather than silently inherit a wrong one.
-    fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor;
-
-    /// Free-run: step with setpoint=0.0 for `duration`. Single physics step.
-    /// Override for assets where "free run" means something other than zero setpoint.
-    fn simulate_free(
-        &self,
-        initial: &AssetState,
-        duration: Duration,
-        now: DateTime<Utc>,
-    ) -> Trajectory {
-        self.simulate_forward(initial, &[(now, 0.0), (now + duration, 0.0)])
-    }
-
-    /// Capability at each `resolution` step in free-run (setpoint=0.0).
-    /// Steps `duration / resolution` times; returns (timestamp, capability) pairs.
-    /// Used by `precompute_lookahead()`.
-    fn capability_trajectory(
-        &self,
-        initial: &AssetState,
-        duration: Duration,
-        resolution: Duration,
-        now: DateTime<Utc>,
-    ) -> Vec<(DateTime<Utc>, AssetCapability)> {
-        let n = (duration.num_seconds() / resolution.num_seconds().max(1)) as usize;
-        let mut state = initial.clone();
-        let mut result = Vec::with_capacity(n);
-        for i in 1..=n {
-            let (next, _) = self.step(&state, 0.0, resolution);
-            result.push((now + resolution * i as i32, self.capability(&next)));
-            state = next;
-        }
-        result
-    }
-
-    /// Project state forward over an explicit setpoint schedule (default impl).
-    /// `setpoints` is a list of (slot_start, setpoint_kw) pairs in ascending time order.
-    fn simulate_forward(
-        &self,
-        initial: &AssetState,
-        setpoints: &[(DateTime<Utc>, f64)],
-    ) -> Trajectory {
-        let mut state = initial.clone();
-        let mut points = Vec::new();
-        for window in setpoints.windows(2) {
-            let (ts, sp) = window[0];
-            let dt = window[1].0 - ts;
-            let (next, actual_kw) = self.step(&state, sp, dt);
-            points.push(TrajectoryPoint {
-                ts,
-                power_kw: actual_kw,
-                state: state.clone(),
-            });
-            state = next;
-        }
-        if let Some(&(ts, sp)) = setpoints.last() {
-            let (_, actual_kw) = self.step(&state, sp, Duration::seconds(0));
-            points.push(TrajectoryPoint {
-                ts,
-                power_kw: actual_kw,
-                state,
-            });
-        }
-        Trajectory { points }
-    }
-}
-
-// ─── AssetHandle ──────────────────────────────────────────────────────────────
-
-/// Wraps individual fields from a `(AssetConfig, AssetEntry)` pair to implement
-/// the full `Asset` trait, including `id()`, `current_state()`, and `history()`.
-///
-/// Takes individual field references instead of `&AssetEntry` to avoid a circular
-/// dependency (`AssetEntry` lives in `simulator`, which imports from `assets`).
-///
-/// Usage:
-/// ```ignore
-/// let handle = AssetHandle {
-///     config: &entry_config,
-///     id: &entry.id,
-///     state: &entry.state,
-///     history: &entry.history,
-/// };
-/// ```
-// AssetHandle is used in tests and serves as the intended path for dyn Asset dispatch.
-#[allow(dead_code)]
-pub struct AssetHandle<'a> {
-    pub config: &'a AssetConfig,
-    pub id: &'a str,
-    pub state: &'a AssetState,
-    pub history: &'a AssetHistoryBuffer,
-}
-
-impl<'a> Asset for AssetHandle<'a> {
-    fn id(&self) -> &str {
-        self.id
-    }
-
-    fn current_state(&self) -> AssetState {
-        self.state.clone()
-    }
-
-    fn history(&self, window: Duration, now: DateTime<Utc>) -> Vec<HistoryPoint> {
-        self.history.slice(window, now)
-    }
-
-    fn capability(&self, state: &AssetState) -> AssetCapability {
-        self.config.capability(state)
-    }
-
-    fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
-        self.config.flexibility_floor(state)
-    }
-
-    fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
-        self.config.step(state, setpoint_kw, dt)
-    }
-
-    // simulate_forward, simulate_free, capability_trajectory: default impls inherited from Asset
-}
-
-#[cfg(test)]
-mod handle_tests {
-    use super::*;
-
-    fn make_battery_state(soc: f64, power_kw: f64) -> AssetState {
-        AssetState::Battery(BatteryState {
-            soc,
-            actual_power_kw: power_kw,
-        })
-    }
-
-    fn make_battery_config(capacity_kwh: f64, max_kw: f64) -> AssetConfig {
-        AssetConfig::Battery(Battery {
-            capacity_kwh,
-            max_charge_kw: max_kw,
-            max_discharge_kw: max_kw,
-            round_trip_efficiency: 1.0,
-            min_soc: 0.1,
-        })
-    }
-
-    #[test]
-    fn handle_id_returns_given_id() {
-        let state = make_battery_state(0.5, 0.0);
-        let config = make_battery_config(10.0, 5.0);
-        let history = AssetHistoryBuffer::new(3600);
-        let handle = AssetHandle {
-            config: &config,
-            id: "bat-01",
-            state: &state,
-            history: &history,
-        };
-        assert_eq!(handle.id(), "bat-01");
-    }
-
-    #[test]
-    fn handle_current_state_returns_state() {
-        let state = make_battery_state(0.7, 2.0);
-        let config = make_battery_config(10.0, 5.0);
-        let history = AssetHistoryBuffer::new(3600);
-        let handle = AssetHandle {
-            config: &config,
-            id: "bat",
-            state: &state,
-            history: &history,
-        };
-        match handle.current_state() {
-            AssetState::Battery(s) => {
-                assert!((s.soc - 0.7).abs() < 1e-9);
-                assert!((s.actual_power_kw - 2.0).abs() < 1e-9);
-            }
-            _ => panic!("expected Battery state"),
-        }
-    }
-
-    #[test]
-    fn handle_history_delegates_to_buffer() {
-        let state = make_battery_state(0.5, 0.0);
-        let config = make_battery_config(10.0, 5.0);
-        let mut history = AssetHistoryBuffer::new(3600);
-        let now = Utc::now();
-        history.push(HistoryPoint {
-            ts: now,
-            power_kw: 3.0,
-            state: make_battery_state(0.5, 3.0),
-        });
-        let handle = AssetHandle {
-            config: &config,
-            id: "bat",
-            state: &state,
-            history: &history,
-        };
-        let hist = handle.history(Duration::seconds(60), now);
-        assert_eq!(hist.len(), 1);
-        assert!((hist[0].power_kw - 3.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn handle_capability_delegates_to_config() {
-        let state = make_battery_state(0.5, 0.0);
-        let config = make_battery_config(10.0, 5.0);
-        let history = AssetHistoryBuffer::new(3600);
-        let handle = AssetHandle {
-            config: &config,
-            id: "bat",
-            state: &state,
-            history: &history,
-        };
-        let cap = handle.capability(&state);
-        // mid-SoC battery (soc=0.5, min_soc=0.1): can charge up to 5 kW and discharge up to 5 kW
-        assert!((cap.max_import_kw - 5.0).abs() < 1e-9);
-        assert!((cap.max_export_kw + 5.0).abs() < 1e-9); // -5.0
-    }
-
-    #[test]
-    fn handle_step_delegates_to_config() {
-        let state = make_battery_state(0.5, 0.0);
-        let config = make_battery_config(10.0, 5.0);
-        let history = AssetHistoryBuffer::new(3600);
-        let handle = AssetHandle {
-            config: &config,
-            id: "bat",
-            state: &state,
-            history: &history,
-        };
-        let (new_state, actual_kw) = handle.step(&state, 5.0, Duration::seconds(3600));
-        // 1 hour at 5 kW on 10 kWh battery → SoC goes from 0.5 to 1.0 (full)
-        match new_state {
-            AssetState::Battery(s) => assert!((s.soc - 1.0).abs() < 1e-6),
-            _ => panic!("expected Battery state"),
-        }
-        assert!(actual_kw > 0.0);
-    }
-}
-
-#[cfg(test)]
-mod history_buffer_tests {
-    use super::*;
-
-    fn make_point(ts: DateTime<Utc>, power_kw: f64) -> HistoryPoint {
-        // Use a battery state as a stand-in — the type is irrelevant for power tests.
-        HistoryPoint {
-            ts,
-            power_kw,
-            state: AssetState::Battery(crate::assets::battery::BatteryState {
-                soc: 0.5,
-                actual_power_kw: power_kw,
-            }),
-        }
-    }
-
-    fn secs(n: i64) -> DateTime<Utc> {
-        DateTime::from_timestamp(n, 0).unwrap()
-    }
-
-    // ── recent_avg_power ─────────────────────────────────────────────────────
-
-    #[test]
-    fn recent_avg_power_empty_buffer_returns_none() {
-        let buf = AssetHistoryBuffer::new(100);
-        let now = secs(100);
-        assert!(buf.recent_avg_power(Duration::seconds(60), now).is_none());
-    }
-
-    #[test]
-    fn recent_avg_power_constant_power_returns_that_power() {
-        let mut buf = AssetHistoryBuffer::new(100);
-        let now = secs(100);
-        for i in 0..10 {
-            buf.push(make_point(secs(i * 10), 1.5));
-        }
-        let avg = buf.recent_avg_power(Duration::seconds(60), now).unwrap();
-        assert!((avg - 1.5).abs() < 1e-9, "expected 1.5, got {avg}");
-    }
-
-    #[test]
-    fn recent_avg_power_alternating_returns_time_weighted_mean() {
-        // 10 points alternating 0 and 2.5 at 1-second intervals in [0, 9].
-        // Window = [0, 10]. Average should be ≈ 1.25 kW.
-        let mut buf = AssetHistoryBuffer::new(100);
-        for i in 0..10i64 {
-            let power = if i % 2 == 0 { 0.0 } else { 2.5 };
-            buf.push(make_point(secs(i), power));
-        }
-        let now = secs(10);
-        let avg = buf.recent_avg_power(Duration::seconds(10), now).unwrap();
-        // Tolerance of 0.5 kW: LOCF means off periods contribute 0, on periods 2.5
-        assert!(avg > 0.5 && avg < 2.0, "expected ~1.25, got {avg}");
-    }
-
-    #[test]
-    fn recent_avg_power_all_points_before_window_returns_latest() {
-        // All points are older than the window → fallback to latest().
-        let mut buf = AssetHistoryBuffer::new(100);
-        buf.push(make_point(secs(0), 3.0));
-        buf.push(make_point(secs(1), 4.0));
-        let now = secs(100); // window = [40, 100], all points at t<40
-        let avg = buf.recent_avg_power(Duration::seconds(60), now).unwrap();
-        assert!((avg - 4.0).abs() < 1e-9, "expected 4.0 (latest), got {avg}");
-    }
-
-    #[test]
-    fn recent_avg_power_window_larger_than_buffer_uses_all_points() {
-        let mut buf = AssetHistoryBuffer::new(100);
-        for i in 0..5 {
-            buf.push(make_point(secs(i), 2.0));
-        }
-        let now = secs(4);
-        let avg = buf.recent_avg_power(Duration::hours(1), now).unwrap();
-        assert!((avg - 2.0).abs() < 1e-9, "expected 2.0, got {avg}");
     }
 }
