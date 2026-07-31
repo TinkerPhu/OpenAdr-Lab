@@ -15,6 +15,7 @@ assets:
   - type: pv
     id: pv
     rated_kw: 12.0
+    inverter_max_kw: 10.0
   - type: base_load
     id: base_load
     baseline_kw: 0.5
