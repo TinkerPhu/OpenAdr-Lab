@@ -493,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn step_inner_clamps_weather_power_kw_to_export_limit() {
+    fn step_inner_clamps_weather_power_kw_to_generation_limit() {
         let (mut pv, state) = make_pv(10.0);
         pv.weather_power_kw = Some(9.0);
         pv.generation_limit_kw = Some(-3.0);

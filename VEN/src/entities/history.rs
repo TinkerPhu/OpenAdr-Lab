@@ -15,7 +15,7 @@ pub struct TickSample {
     pub power_kw: f64,
     pub soc_pct: Option<f64>,
     pub temperature_c: Option<f64>,
-    /// PV export limit active at some point in this window (kW, negative = export ceiling).
+    /// PV generation limit active at some point in this window (kW, negative = generation ceiling).
     /// `None` when no source commanded any limit during the whole window — never a sentinel
     /// value. Within a window, the highest-priority source (capacity > plan) determines both
     /// this and `curtailment_source`, so a brief unplanned event is never masked by surrounding
