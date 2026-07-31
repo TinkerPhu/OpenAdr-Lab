@@ -309,6 +309,7 @@ impl Heater {
                 max: Some(95.0),
                 unit: "°C".into(),
                 display_scale: None,
+                nullable: false,
             },
             ControlDescriptor {
                 key: "heater_setpoint_c".into(),
@@ -318,6 +319,7 @@ impl Heater {
                 max: Some(self.max_kw),
                 unit: "kW".into(),
                 display_scale: None,
+                nullable: false,
             },
             ControlDescriptor {
                 key: "heater_temp_min_c".into(),
@@ -327,6 +329,7 @@ impl Heater {
                 max: Some(94.0),
                 unit: "°C".into(),
                 display_scale: None,
+                nullable: false,
             },
             ControlDescriptor {
                 key: "heater_temp_max_c".into(),
@@ -336,6 +339,7 @@ impl Heater {
                 max: Some(95.0),
                 unit: "°C".into(),
                 display_scale: None,
+                nullable: false,
             },
             ControlDescriptor {
                 key: "heater_emergency_curtail".into(),
@@ -345,6 +349,7 @@ impl Heater {
                 max: None,
                 unit: "".into(),
                 display_scale: None,
+                nullable: false,
             },
             ControlDescriptor {
                 key: "heater_emergency_absorb".into(),
@@ -354,6 +359,7 @@ impl Heater {
                 max: None,
                 unit: "".into(),
                 display_scale: None,
+                nullable: false,
             },
         ]
     }

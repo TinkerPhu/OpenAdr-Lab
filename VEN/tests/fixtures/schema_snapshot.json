@@ -61,7 +61,8 @@
       "kind": "slider",
       "min": 0.0,
       "max": 8.0,
-      "unit": "kW"
+      "unit": "kW",
+      "nullable": true
     }
   ]
 }
