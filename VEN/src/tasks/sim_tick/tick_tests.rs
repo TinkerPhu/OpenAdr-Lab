@@ -133,23 +133,26 @@ mod tests {
     // the arbiter's internal functions in isolation — is correct.
     fn battery_pv_sim() -> Arc<Mutex<SimState>> {
         use crate::entities::asset_params::{AssetParams, BatteryParams, PvParams};
-        let s = SimState::from_params(&[
-            AssetParams::Battery(BatteryParams {
-                id: crate::ids::ASSET_BATTERY.to_string(),
-                capacity_kwh: 10.0,
-                max_charge_kw: 5.0,
-                max_discharge_kw: 5.0,
-                initial_soc: 0.5,
-                round_trip_efficiency: 0.95,
-                min_soc: 0.1,
-                c_terminal_eur_kwh: None,
-            }),
-            AssetParams::Pv(PvParams {
-                id: crate::ids::ASSET_PV.to_string(),
-                rated_kw: 5.0,
-                inverter_max_kw: 5.0,
-            }),
-        ]);
+        let s = SimState::from_params(
+            &[
+                AssetParams::Battery(BatteryParams {
+                    id: crate::ids::ASSET_BATTERY.to_string(),
+                    capacity_kwh: 10.0,
+                    max_charge_kw: 5.0,
+                    max_discharge_kw: 5.0,
+                    initial_soc: 0.5,
+                    round_trip_efficiency: 0.95,
+                    min_soc: 0.1,
+                    c_terminal_eur_kwh: None,
+                }),
+                AssetParams::Pv(PvParams {
+                    id: crate::ids::ASSET_PV.to_string(),
+                    rated_kw: 5.0,
+                    inverter_max_kw: 5.0,
+                }),
+            ],
+            chrono::Utc::now(),
+        );
         Arc::new(Mutex::new(s))
     }
 

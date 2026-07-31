@@ -144,11 +144,15 @@ impl Battery {
         }
     }
 
-    pub fn forecast(&self, state: &BatteryState, timespan: Duration) -> TimeSeries {
+    pub fn forecast(
+        &self,
+        state: &BatteryState,
+        timespan: Duration,
+        now: DateTime<Utc>,
+    ) -> TimeSeries {
         if timespan <= Duration::zero() {
             return TimeSeries::empty(Interpolation::Linear);
         }
-        let now = Utc::now();
         let end = now + timespan;
         let setpoint = state
             .actual_power_kw
@@ -254,6 +258,7 @@ impl Asset for Battery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     fn make_battery_cfg(initial_soc: f64) -> (Battery, BatteryState) {
         let cfg = BatteryParams {
@@ -283,7 +288,7 @@ mod tests {
     #[test]
     fn forecast_zero_timespan_returns_empty() {
         let (bat, state) = make_battery_cfg(0.5);
-        let series = bat.forecast(&state, Duration::zero());
+        let series = bat.forecast(&state, Duration::zero(), Utc::now());
         assert!(series.samples.is_empty());
     }
 
@@ -291,7 +296,7 @@ mod tests {
     fn forecast_at_full_soc_charge_setpoint_returns_zero() {
         let (bat, mut state) = make_battery_cfg(1.0);
         state.actual_power_kw = 5.0;
-        let series = bat.forecast(&state, Duration::seconds(300));
+        let series = bat.forecast(&state, Duration::seconds(300), Utc::now());
         for (_, v) in &series.samples {
             assert_eq!(
                 *v, 0.0,
@@ -301,15 +306,18 @@ mod tests {
     }
 
     #[test]
-    fn forecast_has_boundary_point() {
+    fn forecast_has_boundary_point_at_exactly_now_plus_timespan() {
         let (bat, state) = make_battery_cfg(0.5);
         let timespan = Duration::seconds(120);
-        let before = Utc::now();
-        let series = bat.forecast(&state, timespan);
-        let after = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 9, 0, 0).unwrap();
+        let series = bat.forecast(&state, timespan, now);
         assert!(!series.samples.is_empty());
         let last_ts = series.samples.last().unwrap().0;
-        assert!(last_ts >= before + timespan && last_ts <= after + timespan);
+        assert_eq!(
+            last_ts,
+            now + timespan,
+            "boundary point must be exactly now+timespan, not merely close to wall-clock"
+        );
     }
 
     #[test]
