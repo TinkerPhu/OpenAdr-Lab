@@ -66,7 +66,7 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
     const data = [
       point(-2 * minute, {
         power_kw: -5.0,
-        export_limit_kw: -8.0, // looser than inverter_max_kw — output pinned by hardware instead
+        generation_limit_kw: -8.0, // looser than inverter_max_kw — output pinned by hardware instead
         curtailment_source: 2,
         inverter_max_kw: 5.0,
       }),
@@ -80,7 +80,7 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
     const data = [
       point(-2 * minute, {
         power_kw: -2.0,
-        export_limit_kw: -2.0,
+        generation_limit_kw: -2.0,
         curtailment_source: 1,
         inverter_max_kw: 5.0,
       }),
@@ -94,7 +94,7 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
     const data = [
       point(-2 * minute, {
         power_kw: -2.0,
-        export_limit_kw: -2.0,
+        generation_limit_kw: -2.0,
         curtailment_source: 2,
         inverter_max_kw: 5.0,
       }),
@@ -108,8 +108,22 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
     const data = [
       point(-2 * minute, {
         power_kw: -2.0,
-        export_limit_kw: -2.0,
+        generation_limit_kw: -2.0,
         curtailment_source: 3,
+        inverter_max_kw: 5.0,
+      }),
+    ];
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} pvCurtailment />);
+    expect(referenceAreas).toHaveLength(1);
+    expect(referenceAreas[0].fill).toContain("210,30,30");
+  });
+
+  it("renders an unplanned (red) band for manual-sourced imposed curtailment", () => {
+    const data = [
+      point(-2 * minute, {
+        power_kw: -2.0,
+        generation_limit_kw: -2.0,
+        curtailment_source: 4,
         inverter_max_kw: 5.0,
       }),
     ];
@@ -135,7 +149,7 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
     const data = [
       point(-2 * minute, {
         power_kw: -2.0,
-        export_limit_kw: -2.0,
+        generation_limit_kw: -2.0,
         curtailment_source: 2,
         inverter_max_kw: 5.0,
       }),

@@ -125,7 +125,6 @@ export type SimSnapshot = {
 export type Setpoints = {
   ev_charge_kw: number;
   heater_kw: number;
-  pv_export_limit_kw: number | null; // active export cap (kW); null = no limit
   mode: string;
 };
 
@@ -151,6 +150,7 @@ export type SimInjectState = {
   ambient_temp_c?: number | null;
   grid_import_limit_kw?: number | null;
   grid_export_limit_kw?: number | null;
+  pv_generation_limit_kw?: number | null;
 };
 
 export type TraceEntry =

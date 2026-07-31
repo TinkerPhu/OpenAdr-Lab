@@ -1,7 +1,7 @@
 //! Versioned DDL for the history SQLite store, applied stepwise via
 //! `PRAGMA user_version` in `history_store::migrate`.
 
-pub(super) const SCHEMA_VERSION: i64 = 5;
+pub(super) const SCHEMA_VERSION: i64 = 6;
 
 pub(super) const SCHEMA_V1: &str = "
 CREATE TABLE tick_samples (
@@ -103,4 +103,13 @@ CREATE INDEX idx_notifications_last_seen ON notifications(last_seen_at);
 pub(super) const SCHEMA_V5: &str = "
 ALTER TABLE tick_samples ADD COLUMN export_limit_kw REAL;
 ALTER TABLE tick_samples ADD COLUMN curtailment_source TEXT;
+";
+
+/// pv-generation-limit-rename: renames the persisted column to match the PV-asset-level rename
+/// (`export_limit_kw` → `generation_limit_kw`) applied application-wide — the column name was a
+/// mislabel of a device-level PV output cap as a site-level grid export quantity, which the PV
+/// inverter has no visibility into. `RENAME COLUMN` is safe on the bundled rusqlite (SQLite ≥
+/// 3.45, well past the 3.25 minimum for this syntax).
+pub(super) const SCHEMA_V6: &str = "
+ALTER TABLE tick_samples RENAME COLUMN export_limit_kw TO generation_limit_kw;
 ";

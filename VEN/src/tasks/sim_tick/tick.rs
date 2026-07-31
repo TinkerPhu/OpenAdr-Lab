@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::controller::dispatcher::resolve_pv_generation_limit_kw;
 use crate::controller::SimulatorPort;
 use crate::controller::VtnPort;
 use crate::controller::WeatherForecastPort;
@@ -32,8 +33,7 @@ pub(crate) async fn tick_once(
     let now = chrono::Utc::now();
     let dt_s = tick_s as f64;
 
-    // PHASE 0: Snapshot — events, inject, plan, capacity, tariffs, overlay flag
-    let _events = state.events().await;
+    let _events = state.events().await; // PHASE 0: snapshot events, inject, plan, capacity, tariffs
     let inject = state.inject_state().await;
 
     // Weather-sourced PV power for this instant (must happen before the sync lock).
@@ -94,7 +94,6 @@ pub(crate) async fn tick_once(
         let outcome = super::helpers::build_tick_setpoints(
             &pre_snap,
             plan_snap.as_ref(),
-            &capacity_snap,
             &inject,
             overlay_enabled,
             now,
@@ -107,11 +106,12 @@ pub(crate) async fn tick_once(
         );
 
         let effective_capacity_for_pv = super::helpers::effective_capacity(&capacity_snap, &inject);
-        let resolved_pv_export_limit = crate::controller::dispatcher::resolve_pv_export_limit_kw(
+        let resolved_pv_generation_limit = resolve_pv_generation_limit_kw(
             plan_snap.as_ref(),
             &effective_capacity_for_pv,
             now,
-            outcome.pv_export_limit_tighten_kw,
+            outcome.pv_generation_limit_tighten_kw,
+            inject.pv_generation_limit_kw,
         );
 
         let (heater_emergency_curtail, heater_emergency_absorb) =
@@ -141,8 +141,8 @@ pub(crate) async fn tick_once(
             weather_pv_kw_now,
             heater_emergency_curtail,
             heater_emergency_absorb,
-            resolved_pv_export_limit.limit_kw,
-            resolved_pv_export_limit.source,
+            resolved_pv_generation_limit.limit_kw,
+            resolved_pv_generation_limit.source,
         );
 
         // PHASE 4 (in-lock): extract snapshots and mutate history/grid/envelope.

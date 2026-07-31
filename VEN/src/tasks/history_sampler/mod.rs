@@ -322,7 +322,7 @@ mod tests {
                 power_kw: 1.0,
                 soc_pct: None,
                 temperature_c: None,
-                export_limit_kw: None,
+                generation_limit_kw: None,
                 curtailment_source: None,
             }],
             GridSample {

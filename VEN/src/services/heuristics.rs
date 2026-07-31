@@ -153,7 +153,7 @@ pub fn generate_synthetic_backfill(
             power_kw: power_kw_at(ts),
             soc_pct: None,
             temperature_c: None,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: None,
         });
         ts += Duration::minutes(1);

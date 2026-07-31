@@ -21,8 +21,8 @@ pub struct TickSample {
     /// this and `curtailment_source`, so a brief unplanned event is never masked by surrounding
     /// plan-sourced or unlimited samples. See `openspec/changes/pv-curtailment-history/`.
     #[serde(default)]
-    pub export_limit_kw: Option<f64>,
-    /// Source of `export_limit_kw`: `"plan"` or `"capacity"`. `None` iff `export_limit_kw` is
+    pub generation_limit_kw: Option<f64>,
+    /// Source of `generation_limit_kw`: `"plan"` or `"capacity"`. `None` iff `generation_limit_kw` is
     /// `None`.
     #[serde(default)]
     pub curtailment_source: Option<String>,

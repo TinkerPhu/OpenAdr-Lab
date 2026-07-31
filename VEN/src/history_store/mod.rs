@@ -26,7 +26,7 @@ use crate::entities::history::{
     EventReceived, GridSample, LedgerPeriod, PlanSnapshot, ReportSent, TickSample,
 };
 use crate::entities::DomainError;
-use schema::{SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_VERSION};
+use schema::{SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_VERSION};
 
 type GridSampleRow = (i64, f64, f64, Option<f64>, Option<f64>, Option<f64>);
 
@@ -96,6 +96,10 @@ impl SqliteHistoryStore {
         if version < 5 {
             conn.execute_batch(SCHEMA_V5)
                 .map_err(|e| DomainError::StorageError(format!("apply schema v5: {e}")))?;
+        }
+        if version < 6 {
+            conn.execute_batch(SCHEMA_V6)
+                .map_err(|e| DomainError::StorageError(format!("apply schema v6: {e}")))?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| DomainError::StorageError(format!("set user_version: {e}")))?;
@@ -505,7 +509,7 @@ mod tests {
                 power_kw: 3.5,
                 soc_pct: Some(42.0),
                 temperature_c: None,
-                export_limit_kw: None,
+                generation_limit_kw: None,
                 curtailment_source: None,
             },
             TickSample {
@@ -514,7 +518,7 @@ mod tests {
                 power_kw: 1.2,
                 soc_pct: None,
                 temperature_c: Some(55.0),
-                export_limit_kw: None,
+                generation_limit_kw: None,
                 curtailment_source: None,
             },
         ];
@@ -535,7 +539,7 @@ mod tests {
                     power_kw: 3.5,
                     soc_pct: None,
                     temperature_c: None,
-                    export_limit_kw: None,
+                    generation_limit_kw: None,
                     curtailment_source: None,
                 },
                 TickSample {
@@ -544,7 +548,7 @@ mod tests {
                     power_kw: 1.2,
                     soc_pct: None,
                     temperature_c: None,
-                    export_limit_kw: None,
+                    generation_limit_kw: None,
                     curtailment_source: None,
                 },
             ])
@@ -640,7 +644,7 @@ mod tests {
                     power_kw: 1.0,
                     soc_pct: None,
                     temperature_c: None,
-                    export_limit_kw: None,
+                    generation_limit_kw: None,
                     curtailment_source: None,
                 },
                 TickSample {
@@ -649,7 +653,7 @@ mod tests {
                     power_kw: 2.0,
                     soc_pct: None,
                     temperature_c: None,
-                    export_limit_kw: None,
+                    generation_limit_kw: None,
                     curtailment_source: None,
                 },
             ])
@@ -686,7 +690,7 @@ mod tests {
                 power_kw: 1.0,
                 soc_pct: None,
                 temperature_c: None,
-                export_limit_kw: None,
+                generation_limit_kw: None,
                 curtailment_source: None,
             }])
             .unwrap();
@@ -704,7 +708,7 @@ mod tests {
                 power_kw: 1.0,
                 soc_pct: None,
                 temperature_c: None,
-                export_limit_kw: None,
+                generation_limit_kw: None,
                 curtailment_source: None,
             }])
             .unwrap();
@@ -835,6 +839,37 @@ mod tests {
             "last_seen_at backfilled from created_at"
         );
         assert_eq!(rows[0].dedup_key, None);
+    }
+
+    #[test]
+    fn test_migrate_v6_renames_export_limit_kw_column_preserving_data() {
+        // Build a v5 database by hand (pre-rename state) with one tick_samples row using the
+        // old column name, then let from_connection run the v6 rename migration against it.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(schema::SCHEMA_V1).unwrap();
+        conn.execute_batch(schema::SCHEMA_V2).unwrap();
+        conn.execute_batch(schema::SCHEMA_V3).unwrap();
+        conn.execute_batch(schema::SCHEMA_V4).unwrap();
+        conn.execute_batch(schema::SCHEMA_V5).unwrap();
+        conn.pragma_update(None, "user_version", 5).unwrap();
+        conn.execute(
+            "INSERT INTO tick_samples
+                (ts, asset_id, power_kw, soc_pct, temperature_c, export_limit_kw, curtailment_source)
+             VALUES (?1, 'pv', -2.0, NULL, NULL, -2.0, 'capacity')",
+            params![100_i64],
+        )
+        .unwrap();
+
+        let store = SqliteHistoryStore::from_connection(conn).expect("v5→v6 migration");
+        let rows = store
+            .query_ticks(from_unix(0).unwrap(), from_unix(200).unwrap(), Some("pv"))
+            .unwrap();
+        assert_eq!(rows.len(), 1, "existing row survives the column rename");
+        assert_eq!(
+            rows[0].generation_limit_kw,
+            Some(-2.0),
+            "data readable under the new column name after rename"
+        );
     }
 
     #[test]

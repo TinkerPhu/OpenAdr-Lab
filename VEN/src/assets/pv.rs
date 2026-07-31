@@ -17,7 +17,7 @@ fn f64_infinity() -> f64 {
 pub struct PvInverter {
     pub rated_kw: f64,
     /// Inverter's true AC output capability (kW); distinct from `rated_kw` (DC panel peak).
-    /// DC potential is clamped to this before any commanded `export_limit_kw` — see
+    /// DC potential is clamped to this before any commanded `generation_limit_kw` — see
     /// `openspec/changes/pv-curtailment-history/`. Defaults to `rated_kw` (no hardware ceiling
     /// below panel peak).
     ///
@@ -28,11 +28,15 @@ pub struct PvInverter {
     /// would otherwise also lose unrelated persisted runtime state — SoC, temperature, etc.).
     #[serde(default = "f64_infinity")]
     pub inverter_max_kw: f64,
-    /// Active export limit in kW (≤ 0); None = no curtailment limit.
-    pub export_limit_kw: Option<f64>,
-    /// Which source produced `export_limit_kw` (plan, live capacity/VTN, or neither). Set each
-    /// tick alongside `export_limit_kw`, copied into `PvState` by `step_inner` for accurate
-    /// historical reconstruction. `#[serde(default)]`: see `inverter_max_kw`'s doc comment.
+    /// Active generation limit in kW (≤ 0); None = no curtailment limit. This is a device-level
+    /// cap on the inverter's own output — not the site's net grid export, which the inverter has
+    /// no visibility into (see `OadrCapacityState.export_limit_kw`/`SimInjectState.grid_export_limit_kw`
+    /// for that, genuinely site-level, concept).
+    pub generation_limit_kw: Option<f64>,
+    /// Which source produced `generation_limit_kw` (plan, live capacity/VTN, arbiter, or
+    /// manual sim-inject). Set each tick alongside `generation_limit_kw`, copied into `PvState`
+    /// by `step_inner` for accurate historical reconstruction. `#[serde(default)]`: see
+    /// `inverter_max_kw`'s doc comment.
     #[serde(default)]
     pub curtailment_source: PvCurtailmentSource,
     /// [0.0, 1.0]; set each tick by sim (natural + offset, clamped). NOT from YAML.
@@ -58,12 +62,12 @@ pub struct PvInverter {
 pub struct PvState {
     /// Actual power last tick. Always ≤ 0 (PV only exports). Unit: kW.
     pub actual_power_kw: f64,
-    /// The export limit active during the tick that produced this state — a snapshot copy of
-    /// `PvInverter.export_limit_kw` at that moment, not the live/current value, so a later
-    /// historical reconstruction reports what was actually active then.
+    /// The generation limit active during the tick that produced this state — a snapshot copy
+    /// of `PvInverter.generation_limit_kw` at that moment, not the live/current value, so a
+    /// later historical reconstruction reports what was actually active then.
     #[serde(default)]
-    pub export_limit_kw: Option<f64>,
-    /// The source of `export_limit_kw` during the tick that produced this state.
+    pub generation_limit_kw: Option<f64>,
+    /// The source of `generation_limit_kw` during the tick that produced this state.
     #[serde(default)]
     pub curtailment_source: PvCurtailmentSource,
 }
@@ -73,7 +77,7 @@ impl PvInverter {
         Self {
             rated_kw: cfg.rated_kw,
             inverter_max_kw: cfg.inverter_max_kw,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             irradiance: 0.0,
             irradiance_offset: 0.0,
@@ -85,7 +89,7 @@ impl PvInverter {
     pub fn initial_state(_cfg: &PvParams) -> PvState {
         PvState {
             actual_power_kw: 0.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
         }
     }
@@ -103,13 +107,13 @@ impl PvInverter {
         // see openspec/changes/pv-curtailment-history/.
         let raw_kw = -dc_potential_kw.min(self.inverter_max_kw); // negative = export
         let actual_kw = self
-            .export_limit_kw
+            .generation_limit_kw
             .map(|lim| raw_kw.max(lim)) // lim ≤ 0; max() clamps to less export
             .unwrap_or(raw_kw);
         (
             PvState {
                 actual_power_kw: actual_kw,
-                export_limit_kw: self.export_limit_kw,
+                generation_limit_kw: self.generation_limit_kw,
                 curtailment_source: self.curtailment_source,
             },
             actual_kw,
@@ -128,7 +132,7 @@ impl PvInverter {
         }
     }
 
-    /// Export is curtailable to 0 via `export_limit_kw` (sim-inject or VTN
+    /// Export is curtailable to 0 via `generation_limit_kw` (sim-inject or VTN
     /// EXPORT_CAPACITY_LIMIT — see `step_inner`, which clamps every tick, not
     /// just on config change). The floor reflects that achievable minimum,
     /// independent of whether a limit is currently active. PV never imports,
@@ -144,7 +148,7 @@ impl PvInverter {
     }
 
     pub fn default_setpoint(&self) -> f64 {
-        f64::MAX // no export limit by default
+        f64::MAX // no generation limit by default
     }
 
     pub fn state_values(&self, state: &PvState) -> HashMap<String, f64> {
@@ -158,8 +162,8 @@ impl PvInverter {
         // AssetHistoryBuffer), `state` is the snapshot taken at that past tick, while `self` is
         // the live/current PvInverter — reading `self` here would report the current limit on
         // every past point instead of what was actually active then.
-        if let Some(lim) = state.export_limit_kw {
-            m.insert("export_limit_kw".into(), lim);
+        if let Some(lim) = state.generation_limit_kw {
+            m.insert("generation_limit_kw".into(), lim);
         }
         m.insert(
             "curtailment_source".into(),
@@ -186,6 +190,15 @@ impl PvInverter {
                 min: Some(0.01),
                 max: Some(1.0),
                 unit: "".into(),
+                display_scale: None,
+            },
+            ControlDescriptor {
+                key: "pv_generation_limit_kw".into(),
+                label: "Generation Limit".into(),
+                kind: ControlKind::Slider,
+                min: Some(0.0),
+                max: Some(self.rated_kw),
+                unit: "kW".into(),
                 display_scale: None,
             },
         ]
@@ -270,7 +283,7 @@ impl PvInverter {
     fn irradiance_at(&self, ts: DateTime<Utc>) -> f64 {
         let natural_kw =
             (self.rated_kw * Self::natural_irradiance_at(ts)).min(self.inverter_max_kw);
-        let limited_kw = match self.export_limit_kw {
+        let limited_kw = match self.generation_limit_kw {
             Some(limit) => natural_kw.min(limit.abs()),
             None => natural_kw,
         };
@@ -414,13 +427,13 @@ mod tests {
                 irradiance_offset: 0.0,
                 pv_alpha: 0.1,
                 inverter_max_kw: rated_kw,
-                export_limit_kw: None,
+                generation_limit_kw: None,
                 curtailment_source: PvCurtailmentSource::None,
                 weather_power_kw: None,
             },
             PvState {
                 actual_power_kw: 0.0,
-                export_limit_kw: None,
+                generation_limit_kw: None,
                 curtailment_source: PvCurtailmentSource::None,
             },
         )
@@ -432,7 +445,7 @@ mod tests {
         let (pv, _) = make_pv(10.0);
         let state = PvState {
             actual_power_kw: -4.2,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
         };
         let cap = pv.capability_inner(&state);
@@ -442,14 +455,14 @@ mod tests {
 
     #[test]
     fn flexibility_floor_is_zero_regardless_of_actual_power_kw() {
-        // Curtailment (export_limit_kw) clamps every tick in step_inner, so the
+        // Curtailment (generation_limit_kw) clamps every tick in step_inner, so the
         // achievable floor is 0 kW export — independent of the current
         // uncurtailed actual_power_kw, and independent of whether a limit is
         // presently active on this PvInverter instance.
         let (pv, _) = make_pv(10.0);
         let state = PvState {
             actual_power_kw: -4.2,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
         };
         let floor = pv.flexibility_floor_inner(&state);
@@ -483,11 +496,11 @@ mod tests {
     fn step_inner_clamps_weather_power_kw_to_export_limit() {
         let (mut pv, state) = make_pv(10.0);
         pv.weather_power_kw = Some(9.0);
-        pv.export_limit_kw = Some(-3.0);
+        pv.generation_limit_kw = Some(-3.0);
         let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
         assert!(
             (power_kw + 3.0).abs() < 1e-9,
-            "export_limit_kw must still clamp weather-sourced output, got {power_kw}"
+            "generation_limit_kw must still clamp weather-sourced output, got {power_kw}"
         );
     }
 
@@ -586,13 +599,13 @@ mod tests {
             irradiance_offset: 0.0,
             pv_alpha: 0.1,
             inverter_max_kw: 10.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: -5.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
         });
 
@@ -643,13 +656,13 @@ mod tests {
             irradiance_offset: 0.3,
             pv_alpha: 0.0, // alpha=0 → offset never decays → full offset at every slot
             inverter_max_kw: 10.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
         });
 
@@ -679,13 +692,13 @@ mod tests {
             irradiance_offset: 0.4,
             pv_alpha: 1.0, // full decay after 1 tick
             inverter_max_kw: 10.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
         });
         let traj = pv.capability_trajectory(
@@ -718,13 +731,13 @@ mod tests {
             irradiance_offset: 0.4,
             pv_alpha: 0.1,
             inverter_max_kw: 10.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
         });
         let traj = pv.capability_trajectory(
@@ -771,13 +784,13 @@ mod tests {
             irradiance_offset: 0.0,
             pv_alpha: 0.1,
             inverter_max_kw: 8.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
         });
         let traj =
@@ -802,7 +815,7 @@ mod tests {
             irradiance_offset: 0.2,
             pv_alpha: 0.0, // no decay → offset constant at 0.2 everywhere
             inverter_max_kw: 10.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
         };
@@ -810,7 +823,7 @@ mod tests {
         // With pv_alpha=0 and offset=0.2, each slot must equal sin(t)+0.2 (clamped).
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
-            export_limit_kw: None,
+            generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
         });
         let now = Utc::now();
@@ -896,13 +909,13 @@ mod tests {
 
     #[test]
     fn commanded_limit_at_or_above_inverter_max_kw_has_no_additional_effect() {
-        // The central motivating case: a commanded export_limit_kw looser than the
+        // The central motivating case: a commanded generation_limit_kw looser than the
         // inverter's own ceiling must not change output beyond what the hardware
         // clamp already produces.
         let (mut pv, state) = make_pv(10.0);
         pv.irradiance = 1.0;
         pv.inverter_max_kw = 6.0;
-        pv.export_limit_kw = Some(-8.0); // looser than -6.0 — must be a no-op
+        pv.generation_limit_kw = Some(-8.0); // looser than -6.0 — must be a no-op
         let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
         assert!(
             (power_kw + 6.0).abs() < 1e-9,
@@ -915,7 +928,7 @@ mod tests {
         let (mut pv, state) = make_pv(10.0);
         pv.irradiance = 1.0;
         pv.inverter_max_kw = 6.0;
-        pv.export_limit_kw = Some(-3.0); // tighter than both DC potential and hardware ceiling
+        pv.generation_limit_kw = Some(-3.0); // tighter than both DC potential and hardware ceiling
         let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
         assert!(
             (power_kw + 3.0).abs() < 1e-9,
@@ -965,7 +978,7 @@ mod tests {
         // persisted runtime state (SoC, temperature) that had nothing to do with PV.
         let json = r#"{
             "rated_kw": 5.0,
-            "export_limit_kw": null,
+            "generation_limit_kw": null,
             "irradiance": 0.5,
             "irradiance_offset": 0.0,
             "pv_alpha": 0.1,
@@ -983,7 +996,7 @@ mod tests {
         let json = r#"{ "actual_power_kw": -2.0 }"#;
         let state: PvState = serde_json::from_str(json)
             .expect("PvState must deserialize from a payload missing the new curtailment fields");
-        assert_eq!(state.export_limit_kw, None);
+        assert_eq!(state.generation_limit_kw, None);
         assert_eq!(state.curtailment_source, PvCurtailmentSource::None);
     }
 }

@@ -279,7 +279,7 @@ fn pv_curtailment_used_only_as_backstop_when_other_levers_exhausted() {
         None,
     );
     assert_eq!(outcome.active_lever, Some("pv_curtail"));
-    assert!(outcome.pv_export_limit_tighten_kw.unwrap_or(0.0) > 0.0);
+    assert!(outcome.pv_generation_limit_tighten_kw.unwrap_or(0.0) > 0.0);
 }
 
 // ── §4a lever-switching hysteresis ──────────────────────────────────────────

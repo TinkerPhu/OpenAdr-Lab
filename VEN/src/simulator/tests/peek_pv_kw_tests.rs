@@ -93,10 +93,10 @@ fn peek_pv_kw_override_bypasses_decay() {
 }
 
 #[test]
-fn peek_pv_kw_respects_export_limit_kw() {
+fn peek_pv_kw_respects_generation_limit_kw() {
     let mut sim = pv_state(10.0);
     if let Some(AssetConfig::Pv(pv)) = sim.asset_configs.first_mut() {
-        pv.export_limit_kw = Some(-2.0);
+        pv.generation_limit_kw = Some(-2.0);
     } else {
         panic!("expected a PV asset config");
     }
@@ -106,7 +106,7 @@ fn peek_pv_kw_respects_export_limit_kw() {
         .expect("PV asset is configured");
     assert!(
         (preview + 2.0).abs() < 1e-9,
-        "export limit of -2.0 kW must clamp full-irradiance output, got {preview}"
+        "generation limit of -2.0 kW must clamp full-irradiance output, got {preview}"
     );
 }
 
@@ -269,11 +269,11 @@ fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
     );
 }
 
-// ── pv_export_limit_override (pv-export-curtailment) ────────────────────
+// ── pv_generation_limit_override (pv-export-curtailment) ─────────────────
 
 #[test]
-fn tick_applies_pv_export_limit_override_to_asset() {
-    // Regression: PvInverter.export_limit_kw was never written by any live code
+fn tick_applies_pv_generation_limit_override_to_asset() {
+    // Regression: PvInverter.generation_limit_kw was never written by any live code
     // path — only by unit tests directly — so VTN/plan-driven curtailment had no
     // physical effect. `tick()`'s new parameter must set it every tick.
     let mut sim = pv_state(10.0);
@@ -295,7 +295,7 @@ fn tick_applies_pv_export_limit_override_to_asset() {
         None,
         None,
         None,
-        Some(-3.0), // export limit: at most 3 kW export
+        Some(-3.0), // generation limit: at most 3 kW export
         PvCurtailmentSource::None,
     );
     let pv_power = sim
@@ -306,12 +306,12 @@ fn tick_applies_pv_export_limit_override_to_asset() {
         .last_power_kw;
     assert!(
         (pv_power + 3.0).abs() < 1e-6,
-        "export limit override must clamp PV output to -3.0 kW, got {pv_power}"
+        "generation limit override must clamp PV output to -3.0 kW, got {pv_power}"
     );
 }
 
 #[test]
-fn tick_clears_pv_export_limit_when_override_is_none() {
+fn tick_clears_pv_generation_limit_when_override_is_none() {
     let mut sim = pv_state(10.0);
     let now = noon();
 

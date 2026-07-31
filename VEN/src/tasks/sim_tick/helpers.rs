@@ -48,9 +48,9 @@ pub(crate) fn apply_sim_injections(
 }
 
 /// Compose effective capacity: inject grid limits only when no VTN event is active.
-/// Shared by `build_tick_setpoints` and the PV export-limit resolver so both see
-/// the same sim-injected overrides (`grid_import/export_limit_kw`), not just the
-/// raw VTN-driven `OadrCapacityState`.
+/// Used by the PV generation-limit resolver (`tasks/sim_tick/tick.rs`) so it sees the
+/// same sim-injected overrides (`grid_import/export_limit_kw`), not just the raw
+/// VTN-driven `OadrCapacityState`.
 pub(crate) fn effective_capacity(
     capacity_snap: &OadrCapacityState,
     inject: &SimInjectState,
@@ -86,7 +86,6 @@ pub(crate) fn effective_capacity(
 pub(crate) fn build_tick_setpoints(
     sim_snap: &SimSnapshot,
     plan_snap: Option<&Plan>,
-    capacity_snap: &OadrCapacityState,
     inject: &SimInjectState,
     overlay_enabled: bool,
     now: DateTime<Utc>,
@@ -97,15 +96,10 @@ pub(crate) fn build_tick_setpoints(
     deviation_arbiter_enabled: bool,
     incumbent_lever: Option<&str>,
 ) -> controller::arbiter::ArbiterOutcome {
-    let effective_capacity = effective_capacity(capacity_snap, inject);
     let base_sp = match plan_snap {
-        Some(plan) => controller::dispatcher::build_setpoints(
-            plan,
-            sim_snap,
-            &effective_capacity,
-            inject.heater_setpoint_c,
-            now,
-        ),
+        Some(plan) => {
+            controller::dispatcher::build_setpoints(plan, sim_snap, inject.heater_setpoint_c, now)
+        }
         None => sim_snap
             .assets
             .iter()
