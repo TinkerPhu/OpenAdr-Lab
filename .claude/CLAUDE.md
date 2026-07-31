@@ -60,6 +60,12 @@ file. If only part of a plan/change is done and tested, remove just that part an
 place — do not delete a plan/change wholesale on partial completion.
 Deletion here is git-recoverable (history isn't lost), so this is about keeping the working tree's
 active plans/specs true to what's still outstanding, not about erasing the record.
+4. when a feature enables or improves a user-facing use case, document it in the relevant
+docs/use-cases/*.md (new file only if none fits) and add or extend a BDD scenario in
+tests/features/ that exercises that use case specifically — not just implementation-level unit
+tests. A unit test proves the mechanism works internally; a use-case scenario proves the thing a
+user actually does (set a curve, create a session, get a different plan) works end-to-end. Do
+this as part of the same piece of work, not a deferred follow-up.
 
 NEVER stop docker containers that are not involved in this project without asking. They are productive containers.
 
