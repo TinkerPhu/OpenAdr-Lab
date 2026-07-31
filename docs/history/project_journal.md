@@ -7195,3 +7195,56 @@ doc comments (not logic) to fit under 500 production lines rather than splitting
 land; always re-grep the named files and trace actual callers before starting the "classify"
 step literally — several cited sites in this item no longer existed at those exact lines, and
 one (`site_meter.rs`) turned out to be dead code rather than a live violation at all.
+
+### PV `export_limit_kw` → `generation_limit_kw` rename + manual override slider (2026-07-31)
+
+`PvInverter.export_limit_kw` (and everything downstream: `PvState`, the dispatcher resolver,
+the JSON wire key, the persisted DB column, the frontend readers) misused this project's
+vocabulary — "export" is reserved for net site-to-grid flow, a system-level quantity the PV
+inverter has no visibility into; what the field actually caps is the inverter's own output.
+Renamed the PV-level quantity across the full stack (26 files) to `generation_limit_kw`, leaving
+the genuinely site-level `OadrCapacityState.export_limit_kw`/`SimInjectState.grid_export_limit_kw`
+untouched. In the same pass, re-added a manual operator-override lever (`pv_generation_limit_kw`
+sim-inject field + UI slider) that had existed on a since-deleted branch
+(`040-pv-export-curtailment`) but was dropped when PV curtailment was reimplemented at the MILP-
+planner level — added as a fourth `PvCurtailmentSource::Manual`, listed last in the resolver's
+candidates array so it wins exact ties (most-deliberate-source convention already used for
+Arbiter beating Plan/Capacity). Also deleted a confirmed-dead `dispatcher.rs` code path (a
+setpoints-map write under `"pv"` that `PvInverter::step_inner` never reads).
+
+Staged implementation (9 stages, test-first per stage): mechanical rename → dead-code deletion →
+new sim-inject field → resolver wiring → `control_schema()` slider descriptor → SQLite
+`SCHEMA_V6` migration (`ALTER TABLE ... RENAME COLUMN`, explicit `if version < 6` step wired into
+`history_store/mod.rs::migrate()` — adding the schema constant alone is not sufficient) →
+frontend rename → frontend new field/slider test. Full backend suite (883/883) and frontend suite
+(425/425) green, fmt/clippy/eslint/tsc clean, file-size audit clean. Verified live on Pi4: DB
+migration applied cleanly on the real `history.sqlite` (`user_version` 5→6, 28k+ existing PV rows
+intact), slider correctly clamped live PV output and tagged `curtailment_source: Manual`.
+
+### `POST /sim/inject` null-clear bug — pre-existing, systemic (branch `fix/sim-inject-null-clear`, 2026-07-31)
+
+Found while doing the above Pi4 verification: releasing the new `pv_generation_limit_kw` override
+via `POST /sim/inject {"pv_generation_limit_kw": null}` silently did nothing — the value stayed
+stuck. Reproduced the identical failure on the untouched `grid_export_limit_kw`, confirming this
+was pre-existing and systemic across all 17 `PostSimInjectBody` fields, not something the rename
+introduced.
+
+**Root cause**: every field was typed `Option<serde_json::Value>`. `serde_json`'s blanket
+`Option<T>` impl collapses a top-level JSON `null` straight to Rust `None` for *any* `T` —
+including `serde_json::Value` — before `T::deserialize` ever runs. So an explicit `null` in the
+request body was indistinguishable from the key being absent entirely, making the `v.is_null()`
+null-clear branch in `merge_inject()`'s macros structurally unreachable via real HTTP requests.
+This is exactly the bug the deleted `040-pv-export-curtailment` branch had already found and fixed
+with a `double_option`-style deserializer — an earlier assessment during that branch's review that
+main's approach "sidesteps this bug entirely" was wrong.
+
+**Test-methodology gap**: the existing unit tests for `merge_inject()` constructed
+`PostSimInjectBody { field: Some(Value::Null), .. }` directly in Rust, bypassing real JSON
+deserialization entirely — a false positive that would pass even with the bug present. Fixed by
+writing a new regression test that deserializes an actual JSON string via `serde_json::from_str`,
+confirmed it failed against the old implementation, then fixed the type: all 17 fields changed
+from `Option<serde_json::Value>` to `Option<Option<T>>` via a `double_option` deserializer helper,
+which simplified `merge_inject`'s macros in the process (no more manual `is_null()` branching).
+Full suite (884/884) and fmt/clippy clean; verified live on Pi4 for both `pv_generation_limit_kw`
+and `grid_export_limit_kw` — set-then-null-clear now round-trips correctly. See
+`docs/reference/KEY_LEARNINGS.md`'s Rust/Axum section for the reusable pattern.
