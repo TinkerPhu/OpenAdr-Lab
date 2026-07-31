@@ -30,6 +30,11 @@ pub struct SimInjectState {
     pub ambient_temp_c: Option<f64>,
     pub grid_import_limit_kw: Option<f64>,
     pub grid_export_limit_kw: Option<f64>,
+    /// Manual/operator PV generation ceiling (kW, positive magnitude) — a device-level cap on
+    /// the PV inverter's own output, not the site's net grid export (see `grid_export_limit_kw`
+    /// for that). Feeds into `resolve_pv_generation_limit_kw` as the `Manual` source, alongside
+    /// plan/VTN-capacity/arbiter.
+    pub pv_generation_limit_kw: Option<f64>,
     // Behaviour D — planning-only override (no physics effect, no replan trigger)
     pub pv_plan_kw: Option<f64>,
 }
@@ -54,6 +59,7 @@ impl Default for SimInjectState {
             ambient_temp_c: None,
             grid_import_limit_kw: None,
             grid_export_limit_kw: None,
+            pv_generation_limit_kw: None,
             pv_plan_kw: None,
         }
     }

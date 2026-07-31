@@ -87,7 +87,7 @@ impl HistorySampler {
                 acc.temperature_c_sum += temp;
                 acc.temperature_c_n += 1;
             }
-            if let Some(limit_kw) = snap.val("export_limit_kw") {
+            if let Some(limit_kw) = snap.val("generation_limit_kw") {
                 let priority = snap.val("curtailment_source").unwrap_or(0.0) as u8;
                 match priority.cmp(&acc.curtailment_priority) {
                     std::cmp::Ordering::Greater => {
@@ -144,7 +144,7 @@ impl HistorySampler {
                 soc_pct: (acc.soc_pct_n > 0).then(|| acc.soc_pct_sum / acc.soc_pct_n as f64),
                 temperature_c: (acc.temperature_c_n > 0)
                     .then(|| acc.temperature_c_sum / acc.temperature_c_n as f64),
-                export_limit_kw: acc.curtailment_limit_kw,
+                generation_limit_kw: acc.curtailment_limit_kw,
                 curtailment_source: match acc.curtailment_priority {
                     2 => Some("capacity".to_string()),
                     1 => Some("plan".to_string()),
@@ -326,7 +326,7 @@ mod tests {
 
     /// A SimSnapshot with a single "pv" asset carrying the given curtailment fields
     /// (mirrors PvInverter::state_values()'s flattened map). `None` omits the
-    /// export_limit_kw key entirely, matching "no limit active this tick".
+    /// generation_limit_kw key entirely, matching "no limit active this tick".
     fn pv_snap(
         now: DateTime<Utc>,
         power_kw: f64,
@@ -334,7 +334,7 @@ mod tests {
     ) -> SimSnapshot {
         let mut values = HashMap::new();
         if let Some((limit_kw, source)) = limit_and_source {
-            values.insert("export_limit_kw".to_string(), limit_kw);
+            values.insert("generation_limit_kw".to_string(), limit_kw);
             values.insert("curtailment_source".to_string(), source);
         } else {
             values.insert("curtailment_source".to_string(), 0.0);
@@ -371,7 +371,7 @@ mod tests {
         let mut sampler = HistorySampler::new();
         sampler.record(ts(0), &pv_snap(ts(0), -3.0, None), &[]);
         let (ticks, _) = sampler.flush().unwrap();
-        assert_eq!(ticks[0].export_limit_kw, None);
+        assert_eq!(ticks[0].generation_limit_kw, None);
         assert_eq!(ticks[0].curtailment_source, None);
     }
 
@@ -380,7 +380,7 @@ mod tests {
         let mut sampler = HistorySampler::new();
         sampler.record(ts(0), &pv_snap(ts(0), -2.0, Some((-2.0, 1.0))), &[]);
         let (ticks, _) = sampler.flush().unwrap();
-        assert!((ticks[0].export_limit_kw.unwrap() - (-2.0)).abs() < 1e-9);
+        assert!((ticks[0].generation_limit_kw.unwrap() - (-2.0)).abs() < 1e-9);
         assert_eq!(ticks[0].curtailment_source.as_deref(), Some("plan"));
     }
 
@@ -400,7 +400,7 @@ mod tests {
             "a brief capacity-sourced event must win over a plan-sourced majority"
         );
         assert!(
-            (ticks[0].export_limit_kw.unwrap() - (-2.0)).abs() < 1e-9,
+            (ticks[0].generation_limit_kw.unwrap() - (-2.0)).abs() < 1e-9,
             "the persisted limit must be the capacity-sourced value, not the plan one"
         );
     }
@@ -412,9 +412,9 @@ mod tests {
         sampler.record(ts(10), &pv_snap(ts(10), -1.5, Some((-1.5, 2.0))), &[]);
         let (ticks, _) = sampler.flush().unwrap();
         assert!(
-            (ticks[0].export_limit_kw.unwrap() - (-1.5)).abs() < 1e-9,
+            (ticks[0].generation_limit_kw.unwrap() - (-1.5)).abs() < 1e-9,
             "the tighter (less negative) value within the same priority must win, got {:?}",
-            ticks[0].export_limit_kw
+            ticks[0].generation_limit_kw
         );
     }
 }
