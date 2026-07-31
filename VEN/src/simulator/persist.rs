@@ -32,8 +32,9 @@ pub async fn load_with_params(
     data_dir: &str,
     sim_params: &crate::entities::planner_params::SimulatorParams,
     asset_params: &[crate::entities::asset_params::AssetParams],
+    now: chrono::DateTime<chrono::Utc>,
 ) -> SimState {
-    let mut fresh = SimState::from_params(asset_params);
+    let mut fresh = SimState::from_params(asset_params, now);
     fresh.unmodelled_load_kw = sim_params.unmodelled_load_kw;
 
     let Some(mut loaded) = load(data_dir).await else {

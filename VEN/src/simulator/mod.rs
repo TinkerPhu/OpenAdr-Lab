@@ -8,6 +8,7 @@ mod pv_preview;
 mod pv_smoothing;
 
 use chrono::{DateTime, Utc};
+use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -96,6 +97,8 @@ pub struct SimState {
     #[serde(skip, default)]
     pub unmodelled_load_kw: f64,
     pub last_tick: DateTime<Utc>,
+    #[serde(skip, default = "StdRng::from_entropy")]
+    pub rng: StdRng, // R-24: seeds power_model::random_voltage; reseeded fresh on load
 }
 
 /// Deterministic diurnal unmodelled-load curve: 0 at 06:00, `peak_kw` at
@@ -141,7 +144,11 @@ impl SimState {
     }
 
     /// Initialize from domain asset parameters.
-    pub fn from_params(params: &[AssetParams]) -> Self {
+    pub fn from_params(params: &[AssetParams], now: DateTime<Utc>) -> Self {
+        Self::from_params_seeded(params, now, StdRng::from_entropy())
+    }
+    /// Like `from_params`, but with an explicit RNG for deterministic tests (R-24).
+    pub fn from_params_seeded(params: &[AssetParams], now: DateTime<Utc>, rng: StdRng) -> Self {
         let mut configs: Vec<AssetConfig> = Vec::new();
         let mut entries: Vec<AssetEntry> = Vec::new();
 
@@ -167,7 +174,8 @@ impl SimState {
             pv_smoothing: PvSmoothingState::default(),
             base_load_smoothing: BaseLoadSmoothingState::default(),
             unmodelled_load_kw: 0.0,
-            last_tick: Utc::now(),
+            rng,
+            last_tick: now,
         }
     }
 

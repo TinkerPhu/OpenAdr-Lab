@@ -231,11 +231,15 @@ impl BaseLoad {
         }
     }
 
-    pub fn forecast(&self, _state: &BaseLoadState, timespan: Duration) -> TimeSeries {
+    pub fn forecast(
+        &self,
+        _state: &BaseLoadState,
+        timespan: Duration,
+        now: DateTime<Utc>,
+    ) -> TimeSeries {
         if timespan <= Duration::zero() {
             return TimeSeries::empty(Interpolation::Step);
         }
-        let now = Utc::now();
         TimeSeries {
             samples: vec![(now, self.baseline_kw), (now + timespan, self.baseline_kw)],
             interpolation: Interpolation::Step,
@@ -338,6 +342,30 @@ mod tests {
             spikes,
             ..BaseLoadParams::default()
         })
+    }
+
+    #[test]
+    fn forecast_zero_timespan_returns_empty() {
+        let bl = base_load_with_spikes(vec![]);
+        let state = BaseLoadState {
+            actual_power_kw: 0.3,
+        };
+        let series = bl.forecast(&state, Duration::zero(), Utc::now());
+        assert!(series.samples.is_empty());
+    }
+
+    #[test]
+    fn forecast_boundary_points_are_exactly_now_and_now_plus_timespan() {
+        let bl = base_load_with_spikes(vec![]);
+        let state = BaseLoadState {
+            actual_power_kw: 0.3,
+        };
+        let timespan = Duration::seconds(300);
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 9, 0, 0).unwrap();
+        let series = bl.forecast(&state, timespan, now);
+        assert_eq!(series.samples.len(), 2);
+        assert_eq!(series.samples[0].0, now);
+        assert_eq!(series.samples[1].0, now + timespan);
     }
 
     #[test]

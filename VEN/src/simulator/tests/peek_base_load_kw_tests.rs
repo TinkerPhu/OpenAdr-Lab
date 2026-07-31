@@ -8,11 +8,14 @@ use crate::entities::asset_params::{AssetParams, BaseLoadParams, PvCurtailmentSo
 use chrono::TimeZone;
 
 fn base_load_state(baseline_kw: f64) -> SimState {
-    SimState::from_params(&[AssetParams::BaseLoad(BaseLoadParams {
-        id: crate::ids::ASSET_BASE_LOAD.to_string(),
-        baseline_kw,
-        spikes: Vec::new(),
-    })])
+    SimState::from_params(
+        &[AssetParams::BaseLoad(BaseLoadParams {
+            id: crate::ids::ASSET_BASE_LOAD.to_string(),
+            baseline_kw,
+            spikes: Vec::new(),
+        })],
+        noon(),
+    )
 }
 
 fn noon() -> DateTime<Utc> {
@@ -21,7 +24,7 @@ fn noon() -> DateTime<Utc> {
 
 #[test]
 fn peek_base_load_kw_returns_none_without_base_load_asset() {
-    let sim = SimState::from_params(&[]);
+    let sim = SimState::from_params(&[], noon());
     assert_eq!(sim.peek_base_load_kw(noon(), 30.0, None, 0.1), None);
 }
 

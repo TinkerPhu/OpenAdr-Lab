@@ -19,7 +19,7 @@ impl SimState {
         self.grid.net_power_w = meter_kw * 1000.0;
         self.grid.import_w = import_kw * 1000.0;
         self.grid.export_w = export_kw * 1000.0;
-        self.grid.voltage_v = power_model::random_voltage();
+        self.grid.voltage_v = power_model::random_voltage(&mut self.rng);
         self.grid.import_kwh += import_kw * dt_h;
         self.grid.export_kwh += export_kw * dt_h;
 
