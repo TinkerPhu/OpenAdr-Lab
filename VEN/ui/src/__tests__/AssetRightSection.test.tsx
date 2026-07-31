@@ -84,7 +84,7 @@ const heaterSchema = [
 const pvSchema = [
   { key: "pv_irradiance", label: "Irradiance Override", kind: "slider" as const, min: 0, max: 1, unit: "%", display_scale: 100 },
   { key: "pv_irradiance_alpha", label: "Blend-back Speed", kind: "slider" as const, min: 0.01, max: 1, unit: "", display_scale: undefined },
-  { key: "pv_generation_limit_kw", label: "Generation Limit", kind: "slider" as const, min: 0, max: 8, unit: "kW", display_scale: undefined },
+  { key: "pv_generation_limit_kw", label: "Generation Limit", kind: "slider" as const, min: 0, max: 8, unit: "kW", display_scale: undefined, nullable: true },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -386,6 +386,70 @@ describe("AssetRightSection — schema-driven sliders instant response", () => {
       fireEvent.mouseUp(input);
     });
     expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_generation_limit_kw: 3 });
+  });
+
+  it("generation limit: shows 'Off' and slider pinned at max when no override is active", () => {
+    render(
+      <AssetRightSection
+        assetId="pv"
+        simSnapshot={simWithPv}
+        overrides={undefined}
+        onOverrideChange={vi.fn()}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    // No active override (null) must NOT render as "0 kW" — it renders as
+    // "Off", pinned to the top of the range (max = rated_kw = 8).
+    expect(screen.getByText(/Generation Limit: Off/)).toBeInTheDocument();
+    const input = getSchemaSliderInput("pv_generation_limit_kw");
+    expect(input.value).toBe("8");
+  });
+
+  it("generation limit: dragging into the top snap zone and releasing sends null (release override)", () => {
+    const mockOnOverrideChange = vi.fn();
+
+    render(
+      <AssetRightSection
+        assetId="pv"
+        simSnapshot={simWithPv}
+        overrides={undefined}
+        onOverrideChange={mockOnOverrideChange}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    const input = getSchemaSliderInput("pv_generation_limit_kw");
+
+    // Top 5% of [0, 8] is [7.6, 8] — dragging to 7.8 must land in the snap zone.
+    act(() => { fireEvent.change(input, { target: { value: "7.8" } }); });
+    expect(screen.getByText(/Generation Limit: Off/)).toBeInTheDocument();
+
+    act(() => { fireEvent.mouseUp(input); });
+    expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_generation_limit_kw: null });
+  });
+
+  it("generation limit: dragging just below the snap zone still commits a real numeric limit", () => {
+    const mockOnOverrideChange = vi.fn();
+
+    render(
+      <AssetRightSection
+        assetId="pv"
+        simSnapshot={simWithPv}
+        overrides={undefined}
+        onOverrideChange={mockOnOverrideChange}
+        onResetSoc={vi.fn()}
+      />
+    );
+
+    const input = getSchemaSliderInput("pv_generation_limit_kw");
+
+    // 7.0 is below the [7.6, 8] snap zone — a real curtailment value.
+    act(() => { fireEvent.change(input, { target: { value: "7" } }); });
+    expect(screen.getByText(/Generation Limit: 7/)).toBeInTheDocument();
+
+    act(() => { fireEvent.mouseUp(input); });
+    expect(mockOnOverrideChange).toHaveBeenCalledWith({ pv_generation_limit_kw: 7 });
   });
 });
 
