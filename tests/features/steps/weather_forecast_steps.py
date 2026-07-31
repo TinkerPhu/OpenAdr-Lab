@@ -81,7 +81,7 @@ def _sample_status_message(status: str) -> dict:
     }
 
 
-@given("a weather status heartbeat is published to the test Mosquitto broker for VEN-1")
+@when("a weather status heartbeat is published to the test Mosquitto broker for VEN-1")
 def step_publish_status_heartbeat(context):
     _publish_mqtt("openadr-lab/weather/ven-1/status", _sample_status_message("ok"))
 
