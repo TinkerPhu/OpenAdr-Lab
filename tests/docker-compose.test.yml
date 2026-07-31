@@ -60,7 +60,7 @@ services:
   # Mosquitto — ephemeral MQTT broker for the weather-forecast-plugin BDD
   # scenarios only. Isolated to test-net; anonymous access is fine for a
   # throwaway test broker (see TECHNICAL_DEBTS.md R-54 for the production
-  # Pi4-Server broker's separate auth posture).
+  # Pi4 broker's separate auth posture).
   # ---------------------------------------------------------------------------
   mosquitto:
     image: eclipse-mosquitto:2

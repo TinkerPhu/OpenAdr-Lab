@@ -5,9 +5,9 @@
 - Hash = SHA-256 of the exact query string between `r#"` and `"#` (whitespace matters)
 - File naming: `.sqlx/query-{hash}.json`, `hash` field inside must match
 - When modifying SQL in Rust source, must update/rename `.sqlx` cache files with new hash
-- **Preferred workflow** — generate cache on Pi4-Server (safest, reads the exact bytes Rust will compile):
+- **Preferred workflow** — generate cache on Pi4 (safest, reads the exact bytes Rust will compile):
   1. Push Rust code changes to the fork
-  2. Pull on Pi4-Server
+  2. Pull on Pi4
   3. Run hash script on Pi4 reading the actual `.rs` file:
      ```python
      import hashlib, re, json

@@ -10,7 +10,7 @@ VEN architecture is in [docs/architecture/VEN_ARCHITECTURE.md](VEN_ARCHITECTURE.
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│                         Pi4-Server (Docker)                        │
+│                         Pi4 (Docker)                        │
 │                                                                    │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │                       VTN Stack                              │  │
@@ -233,7 +233,7 @@ are visible only to the named VEN(s). Programs/events with `targets: null` are o
 - VTN uses Docker network `vtn_openadr-net` (named from compose project `vtn`)
 - VEN compose references it as `external: true` — containers join the same network
 - Container-to-container: use Docker DNS names (`vtn`, `ven-1`, etc.)
-- Host access: use `Pi4-Server:<host-port>`
+- Host access: use `Pi4:<host-port>`
 
 ### Compose Projects
 
@@ -253,7 +253,7 @@ are visible only to the named VEN(s). Programs/events with `targets: null` are o
 
 ```
 local: git push
-Pi4-Server: cd /srv/docker/openadr_lab && git pull
+Pi4: cd /srv/docker/openadr_lab && git pull
   → if VEN source changed: docker compose build ven-1 (or all)
   → docker compose up -d
 ```

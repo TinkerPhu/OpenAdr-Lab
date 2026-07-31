@@ -154,7 +154,7 @@ Configure the docker host at the top of `run_all_tests.sh`:
 
 ```bash
 DOCKER_HOST=""                        # "" = run docker commands locally (no SSH)
-                                      # set to e.g. "Pi4-Server" for a remote host
+                                      # set to e.g. "Pi4" for a remote host
 DOCKER_DIR="/srv/docker/openadr_lab"  # repo path on the docker host
 ```
 

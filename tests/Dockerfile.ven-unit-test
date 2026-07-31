@@ -8,7 +8,7 @@
 # only changed files are recompiled on each run. First run is slow (~20 min
 # on Pi4 ARM64 — HiGHS + aws-lc-rs C++ builds); subsequent runs are ~1-2 min.
 #
-# Usage (on Pi4-Server):
+# Usage (on Pi4):
 #   cd /srv/docker/openadr_lab
 #   docker compose -f tests/docker-compose.ven-unit-test.yml run --build --rm ven-unit-test
 ###############################################################################

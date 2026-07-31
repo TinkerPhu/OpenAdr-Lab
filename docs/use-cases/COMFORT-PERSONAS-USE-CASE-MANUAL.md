@@ -8,8 +8,8 @@ verifies the new behaviour of one WP against the running lab, the same way
 `SYSTEM-USE-CASE-MANUAL.md` replays the VTN-side use cases. One section is appended
 per WP as it lands.
 
-**VTN UI:** http://Pi4-Server:8221
-**VEN UI:** http://Pi4-Server:8214
+**VTN UI:** http://Pi4:8221
+**VEN UI:** http://Pi4:8214
 
 ## Prerequisites
 
@@ -55,18 +55,18 @@ through API and UI, default to `BY_DEADLINE`, and change no planning behaviour.
 
    ```bash
    # Create an EV session with an explicit mode
-   curl -s -X POST http://Pi4-Server:8211/ev-session \
+   curl -s -X POST http://Pi4:8211/ev-session \
      -H 'Content-Type: application/json' \
      -d '{"target_soc":0.8,"departure_time":"2026-07-12T22:00:00+02:00","mode":"ASAP"}'
    ```
 
    **Expected:** HTTP 201; response JSON contains `"mode":"ASAP"`.
-9. `curl -s http://Pi4-Server:8211/ev-session` — **Expected:** `"mode":"ASAP"` echoed.
-10. Delete it: `curl -s -X DELETE http://Pi4-Server:8211/ev-session`.
+9. `curl -s http://Pi4:8211/ev-session` — **Expected:** `"mode":"ASAP"` echoed.
+10. Delete it: `curl -s -X DELETE http://Pi4:8211/ev-session`.
 11. Re-create **without** the field (drop `"mode":"ASAP"` from the body).
     **Expected:** HTTP 201 and the response contains `"mode":"BY_DEADLINE"` —
     the backward-compatible default.
-12. `curl -s http://Pi4-Server:8211/user-requests` after creating a request from the
+12. `curl -s http://Pi4:8211/user-requests` after creating a request from the
     UI — **Expected:** each request object carries a `mode` field, and its embedded
     `session` object carries the same value.
 
@@ -128,7 +128,7 @@ The two mode poles now steer the MILP planner on the EV path:
 
 ### API check
 
-10. `curl -s http://Pi4-Server:8211/plan | jq '[.slots[] | {start, ev: (.allocations[]? | select(.asset_id=="ev") | .power_kw)}]'`
+10. `curl -s http://Pi4:8211/plan | jq '[.slots[] | {start, ev: (.allocations[]? | select(.asset_id=="ev") | .power_kw)}]'`
     shows the same allocation pattern the UI displays.
 
 ---
@@ -158,7 +158,7 @@ newly-appearing planner warnings on an adopted plan (Warn / Alert).
 
 ### Steps — VTN outage edges
 
-5. Stop the VTN container: `ssh Pi4-Server "docker stop vtn-vtn-1"` (test stack
+5. Stop the VTN container: `ssh Pi4 "docker stop vtn-vtn-1"` (test stack
    only — never production containers without approval; this is the lab VTN).
 6. After the next poll (~30 s): **Expected:** one **WARN — VTN unreachable**
    notification. Repeated failed polls must NOT add more entries.
@@ -166,16 +166,16 @@ newly-appearing planner warnings on an adopted plan (Warn / Alert).
 
 ### Steps — persistence across restart
 
-8. `curl -s http://Pi4-Server:8211/notifications | jq length` — note the count.
-9. Restart VEN1: `ssh Pi4-Server "cd /srv/docker/openadr_lab/VEN && docker compose restart ven-1"`.
+8. `curl -s http://Pi4:8211/notifications | jq length` — note the count.
+9. Restart VEN1: `ssh Pi4 "cd /srv/docker/openadr_lab/VEN && docker compose restart ven-1"`.
 10. After it is healthy, repeat step 8. **Expected:** the same entries are
     back (seeded from `history.sqlite`), not an empty list.
 
 ### API check — since filter and SSE
 
-11. `curl -s "http://Pi4-Server:8211/notifications?since=2026-07-12T00:00:00Z"`
+11. `curl -s "http://Pi4:8211/notifications?since=2026-07-12T00:00:00Z"`
     returns only entries newer than the timestamp.
-12. `curl -N http://Pi4-Server:8211/notifications/events` holds an SSE stream
+12. `curl -N http://Pi4:8211/notifications/events` holds an SSE stream
     open; trigger step 2 again and watch the notification arrive live.
 
 ---
@@ -203,11 +203,11 @@ warning, which the WP4.3 feed surfaces as a single Warn notification.
    next 2 h, e.g. `0.40 / 0.20 / 0.10 €/kWh` (UC recipe from
    `SYSTEM-USE-CASE-MANUAL.md`). The VEN horizon (48 h) now extends far past
    coverage.
-2. After the next replan: `curl -s http://Pi4-Server:8211/plan | jq '[.slots[] | {start, rate: .import_tariff_eur_kwh, est: .rate_estimated}] | .[0:8]'`
+2. After the next replan: `curl -s http://Pi4:8211/plan | jq '[.slots[] | {start, rate: .import_tariff_eur_kwh, est: .rate_estimated}] | .[0:8]'`
    **Expected:** the first ~2 h of slots show the published rates with
    `est: false`; later slots show the fill rate with `est: true`.
    With the default policy the fill equals the last published rate (0.10).
-3. `curl -s http://Pi4-Server:8211/plan | jq .warnings`
+3. `curl -s http://Pi4:8211/plan | jq .warnings`
    **Expected:** one warning naming `HEURISTIC_FORECAST` and its
    `LAST_KNOWN` fallback.
 4. Check the notification bell: **Expected:** one **WARN** entry with the same
@@ -243,21 +243,21 @@ wherever the curve is consulted; DELETE restores the default. Invalid curves
 4. Install an override:
 
    ```bash
-   curl -s -X POST http://Pi4-Server:8211/assets/ev/comfort_curve \
+   curl -s -X POST http://Pi4:8211/assets/ev/comfort_curve \
      -H 'Content-Type: application/json' \
      -d '[{"fill":0.5,"max_marginal_price":0.40,"max_marginal_co2":0},
           {"fill":1.0,"max_marginal_price":0.10,"max_marginal_co2":0}]'
    ```
 
    **Expected:** HTTP 201 with `"source":"override"`.
-5. `curl -s http://Pi4-Server:8211/assets/ev/comfort_curve` echoes the
+5. `curl -s http://Pi4:8211/assets/ev/comfort_curve` echoes the
    override.
 6. Restart VEN1 (`docker compose restart ven-1`), wait for healthy, repeat
    step 5. **Expected:** the override is still there (persisted).
 7. Validation: POST a non-monotonic curve
    (`[{"fill":0.9,...},{"fill":0.5,...}]`). **Expected:** HTTP 422 with a
    reason. POST to `/assets/toaster/comfort_curve` → HTTP 404.
-8. `curl -s -X DELETE http://Pi4-Server:8211/assets/ev/comfort_curve` →
+8. `curl -s -X DELETE http://Pi4:8211/assets/ev/comfort_curve` →
    HTTP 204; GET reports `"source":"default"` again.
 
 ### Steps — the curve actually shapes the plan (BL-34)
@@ -276,7 +276,7 @@ tariff — a near-zero price is unaffordable against any realistic tariff, a lar
 9. Install a near-zero curve:
 
    ```bash
-   curl -s -X POST http://Pi4-Server:8211/assets/ev/comfort_curve \
+   curl -s -X POST http://Pi4:8211/assets/ev/comfort_curve \
      -H 'Content-Type: application/json' \
      -d '[{"fill":0.0,"max_marginal_price":0.0,"max_marginal_co2":0},
           {"fill":1.0,"max_marginal_price":0.0,"max_marginal_co2":0}]'
@@ -326,12 +326,12 @@ The remaining request modes (BL-28):
 ### Steps — free-energy modes
 
 4. Pin the PV forecast to zero so no energy is free:
-   `curl -s -X POST http://Pi4-Server:8211/sim/inject -H 'Content-Type: application/json' -d '{"pv_plan_kw": 0.0}'`
+   `curl -s -X POST http://Pi4:8211/sim/inject -H 'Content-Type: application/json' -d '{"pv_plan_kw": 0.0}'`
 5. Plan Charging with mode `ASAP_FREE` (no other change).
    **Expected:** after the next replan the plan contains **no** EV charging at
    all — the request stays active but nothing is scheduled (flat positive
    tariff, no surplus → no free energy).
-6. Restore PV (`curl -s -X POST http://Pi4-Server:8211/sim/inject/reset`) at
+6. Restore PV (`curl -s -X POST http://Pi4:8211/sim/inject/reset`) at
    midday, or publish a price event with a negative-price interval.
    **Expected:** charging appears exactly in the surplus / negative-price
    slots, front-loaded (earliest free slots first for `ASAP_FREE`).
@@ -414,7 +414,7 @@ and request-mode visibility on every device card and the All-Requests table.
    `Dispatch 2 kW until HH:MM` chip.
 5. Create a capacity **IMPORT_CAPACITY_LIMIT 5 kW** event: **Expected:** a
    `Capacity: limit 5 kW` chip. Delete all events → strip disappears.
-6. API cross-check: `curl -s http://Pi4-Server:8211/signals | jq keys` →
+6. API cross-check: `curl -s http://Pi4:8211/signals | jq keys` →
    `["alerts","capacity","dispatch","simple"]`.
 
 ### Steps — estimated-rate shading

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# pi4_lock.sh — cooperative lease lock for the shared Pi4-Server docker host.
+# pi4_lock.sh — cooperative lease lock for the shared Pi4 docker host.
 #
 # Multiple worktrees / AI sessions deploy and test on the same Pi4. Anything
 # that builds or runs docker there must hold this lock first. The lock lives
@@ -26,7 +26,7 @@
 #
 set -euo pipefail
 
-PI4_HOST="${PI4_LOCK_HOST:-Pi4-Server}"
+PI4_HOST="${PI4_LOCK_HOST:-Pi4}"
 LEASE_MIN="${PI4_LOCK_LEASE_MIN:-60}"
 POLL_SEC="${PI4_LOCK_POLL_SEC:-20}"
 MAX_WAIT_SEC="${PI4_LOCK_MAX_WAIT_SEC:-540}"

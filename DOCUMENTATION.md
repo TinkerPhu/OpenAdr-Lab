@@ -986,7 +986,7 @@ This keeps domain logic free of infrastructure concerns and makes all external d
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Raspberry Pi 4  (Docker Compose — Pi4-Server)          │
+│  Raspberry Pi 4  (Docker Compose — Pi4)          │
 │                                                         │
 │  ┌─────────────────────────────────────────────────┐    │
 │  │  VTN Stack                                      │    │
@@ -1337,7 +1337,7 @@ Six core flows (full sequence diagrams in [`docs/architecture/VTN_ARCHITECTURE.m
 | `vtn-bff-1` | 8220 | Rust Axum BFF |
 | `vtn-ui-1` | 8221 | React VTN UI (nginx) |
 
-**Docker network:** `vtn_openadr-net` (named from compose project `vtn`). VEN compose files join it as `external: true`. Container-to-container DNS uses Docker service names (`vtn`, `ven-1`, etc.). Host access uses `Pi4-Server:<host-port>`.
+**Docker network:** `vtn_openadr-net` (named from compose project `vtn`). VEN compose files join it as `external: true`. Container-to-container DNS uses Docker service names (`vtn`, `ven-1`, etc.). Host access uses `Pi4:<host-port>`.
 
 **Compose layout:**
 ```
@@ -1488,13 +1488,13 @@ directive drives it yet, and the MILP still plans only within the comfort band.
 
 ## 6. Deployment
 
-### Running on Pi4-Server
+### Running on Pi4
 
-All Docker operations run via SSH on the Pi4-Server in `/srv/docker/openadr_lab`.
+All Docker operations run via SSH on the Pi4 in `/srv/docker/openadr_lab`.
 
 **Start the full stack:**
 ```sh
-ssh pi4-server
+ssh Pi4
 cd /srv/docker/openadr_lab
 docker compose up -d
 ```
@@ -1520,7 +1520,7 @@ wsl cargo check          # inside VEN/
 wsl cargo test           # unit tests only
 ```
 
-For full integration tests including HiGHS, use the Pi4-Server Docker stack.
+For full integration tests including HiGHS, use the Pi4 Docker stack.
 
 ### VEN UI
 

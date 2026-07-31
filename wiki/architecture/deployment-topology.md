@@ -10,7 +10,7 @@ tags: [deployment, docker, pi4]
 
 # Deployment Topology
 
-Everything runs in Docker on **Pi4-Server** (reached via ssh), directory
+Everything runs in Docker on **Pi4** (reached via ssh), directory
 `/srv/docker/openadr_lab`, on the shared external network `vtn_openadr-net`
 (docs/architecture/VTN_ARCHITECTURE.md §1).
 

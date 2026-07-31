@@ -8,9 +8,9 @@ Before creating a branch or writing any code, verify:
 
 1. **Git identity on Pi4** — Pi4's global config is set correctly. Verify before any PR work:
    ```bash
-   ssh Pi4-Server "git config --global user.name && git config --global user.email"
+   ssh Pi4 "git config --global user.name && git config --global user.email"
    # Must print: TinkerPhu / TinkerPhu@users.noreply.github.com
-   # If wrong: ssh Pi4-Server "git config --global user.name 'TinkerPhu' && git config --global user.email 'TinkerPhu@users.noreply.github.com'"
+   # If wrong: ssh Pi4 "git config --global user.name 'TinkerPhu' && git config --global user.email 'TinkerPhu@users.noreply.github.com'"
    ```
 
 2. **After any `git commit --amend`** — verify both author AND committer (amend sets committer from current git config, which can silently differ from the original author):

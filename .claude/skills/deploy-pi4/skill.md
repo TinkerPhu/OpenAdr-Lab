@@ -1,6 +1,6 @@
 # Skill: Deploy to Pi4
 
-Deploy changed files to Pi4-Server via scp, then rebuild the affected Docker service.
+Deploy changed files to Pi4 via scp, then rebuild the affected Docker service.
 Do NOT commit or push before deploying — scp lets us test on Pi4 without polluting git history.
 
 ## Golden rule: Pi4 never originates changes
@@ -20,13 +20,13 @@ If the user named specific files, use those directly.
 Mirror the local path under `/srv/docker/openadr_lab/` on Pi4:
 
 ```bash
-scp <local-path> Pi4-Server:/srv/docker/openadr_lab/<same-relative-path>
+scp <local-path> Pi4:/srv/docker/openadr_lab/<same-relative-path>
 ```
 
 Example:
 ```bash
 scp VEN/ui/src/components/controller-v2/charts/TariffChart.tsx \
-    Pi4-Server:/srv/docker/openadr_lab/VEN/ui/src/components/controller-v2/charts/TariffChart.tsx
+    Pi4:/srv/docker/openadr_lab/VEN/ui/src/components/controller-v2/charts/TariffChart.tsx
 ```
 
 ## Step 3 — Rebuild the affected service
@@ -41,19 +41,19 @@ Determine which Docker service needs rebuilding from the file paths:
 | `scripts/` | — | no rebuild; run directly via ssh python3 |
 
 ```bash
-ssh Pi4-Server "cd /srv/docker/openadr_lab/<compose-dir> && docker compose build <service> && docker compose up -d <service>"
+ssh Pi4 "cd /srv/docker/openadr_lab/<compose-dir> && docker compose build <service> && docker compose up -d <service>"
 ```
 
 **Important:** nginx caches upstream hostnames at startup. After rebuilding any `ven-*` backend service, **always restart `ui`** so nginx re-resolves the new container IPs — otherwise the proxy may route requests to the wrong container:
 
 ```bash
-ssh Pi4-Server "cd /srv/docker/openadr_lab/VEN && docker compose restart ui"
+ssh Pi4 "cd /srv/docker/openadr_lab/VEN && docker compose restart ui"
 ```
 
 ## Step 4 — Verify
 
 ```bash
-ssh Pi4-Server "docker ps --filter name=<service> --format '{{.Names}} {{.Status}}'"
+ssh Pi4 "docker ps --filter name=<service> --format '{{.Names}} {{.Status}}'"
 ```
 
 Container should show `Up X seconds/minutes`.
@@ -63,5 +63,5 @@ Container should show `Up X seconds/minutes`.
 Once the change is confirmed working:
 1. Commit locally as usual
 2. `git push`
-3. `ssh Pi4-Server "cd /srv/docker/openadr_lab && git checkout -- <scp'd files> && git pull"`
+3. `ssh Pi4 "cd /srv/docker/openadr_lab && git checkout -- <scp'd files> && git pull"`
    (the checkout discards the scp copy so pull can fast-forward cleanly)
