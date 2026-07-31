@@ -199,12 +199,14 @@ impl PvInverter {
                 label: "Generation Limit".into(),
                 kind: ControlKind::Slider,
                 min: Some(0.0),
-                max: Some(self.rated_kw),
+                max: Some(self.inverter_max_kw),
                 unit: "kW".into(),
                 display_scale: None,
-                // max (rated_kw) is physically identical to "no limit" — the
-                // inverter can never exceed rated_kw anyway — so the top of
-                // the range doubles as the release/"Off" state.
+                // max (inverter_max_kw, the true AC ceiling — not rated_kw, the DC
+                // panel peak, which can exceed what the inverter can ever output)
+                // is physically identical to "no limit", since step_inner clamps
+                // to inverter_max_kw everywhere. So the top of the range doubles
+                // as the release/"Off" state.
                 nullable: true,
             },
         ]
@@ -898,6 +900,27 @@ mod tests {
         assert!(
             (power_kw + 6.0).abs() < 1e-9,
             "output must be clipped to inverter_max_kw regardless of DC potential, got {power_kw}"
+        );
+    }
+
+    #[test]
+    fn control_schema_pv_generation_limit_kw_max_is_inverter_max_kw_not_rated_kw() {
+        // Regression: the manual generation-limit slider's ceiling (and thus its
+        // nullable "Off" position) must track the inverter's true AC capability,
+        // not the DC panel peak — step_inner clamps to inverter_max_kw everywhere,
+        // so a slider capped at rated_kw would let the "Off" position sit above a
+        // value the inverter can ever actually deliver whenever the two diverge.
+        let (mut pv, _) = make_pv(14.4);
+        pv.inverter_max_kw = 12.5;
+        let descriptor = pv
+            .control_schema()
+            .into_iter()
+            .find(|d| d.key == "pv_generation_limit_kw")
+            .expect("pv_generation_limit_kw descriptor must exist");
+        assert_eq!(
+            descriptor.max,
+            Some(12.5),
+            "slider max must equal inverter_max_kw, not rated_kw (14.4)"
         );
     }
 

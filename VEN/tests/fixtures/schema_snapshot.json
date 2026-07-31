@@ -60,7 +60,7 @@
       "label": "Generation Limit",
       "kind": "slider",
       "min": 0.0,
-      "max": 8.0,
+      "max": 12.5,
       "unit": "kW",
       "nullable": true
     }
