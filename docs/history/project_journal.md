@@ -7388,3 +7388,68 @@ just on a branch nobody ever merged; three separate sessions each independently 
 same wrong starting point from `main` because `main` itself was never corrected. The fix for
 "keeps reverting" was git hygiene (merge to `main`, delete the orphaned branch), not a code change
 to find and neutralize.
+
+## Po4 — a second Pi4 extending the fleet, and BL-41 (dynamic VEN-dashboard discovery)
+
+**Why**: a second Raspberry Pi ("Po4") joined the same LAN as the existing project host
+("Pi4"). It was set up as an *extension* of the lab, not a duplicate: no VTN, no
+InfluxDB, no GPIO, no desktop, no OpenVPN (reachable through Pi4's VPN once on the LAN)
+— only Docker plus new VENs, administered by Pi4's existing VTN. A `git sparse-checkout
+--cone` clone on Po4 keeps only `VEN/`, `scripts/`, `docs/` in the working tree (`VTN/`
+and the `openleadr-rs` submodule dropped via `git submodule deinit`), since Po4 never
+needs VTN code.
+
+`ven-4` was brought up on Po4 as the proof of concept: provisioned against Pi4's VTN via
+`scripts/seed_vtn.py`'s existing `provision_vens()`, addressed by real LAN IP:port
+(`VTN_BASE_URL=http://192.168.1.103:8200`, `WEATHER_MQTT_HOST=192.168.1.103`) instead of
+Docker service-name DNS, on its own local `po4-ven-net` bridge network (no `vtn` network
+to join). One real bug surfaced getting it healthy: the container's `nonroot` user is
+uid/gid 2000:2000, but a plain `mkdir -p` under the `pi` user created the bind-mounted
+data directory as 1000:1000 — `chown -R 2000:2000` fixed it. Worth remembering for every
+future per-VEN data directory on a new host.
+
+**The gap this exposed**: once `ven-4` was live, neither dashboard could see it correctly.
+Po4's own `ui` proxies `/api/vens-registry` to a local `bff` service that doesn't exist
+there (Po4 has no VTN/bff) — patched host-locally (not committed) to point at Pi4's real
+`bff` (`192.168.1.103:8220`), a standing requirement for Po4 (not a workaround BL-41
+removes, since Po4 structurally has no local `bff` to point at instead). Pi4's dashboard,
+which *does* have a real `bff`, still couldn't reach `ven-4`'s live data: the fleet
+dashboard's VEN discovery (`VEN/ui/src/api/venRegistry.ts`) resolved every non-default
+VEN through `/api/dyn/{venName}`, relying on Docker's embedded DNS on the *dashboard's*
+host — which can never resolve a container running on a different physical machine.
+Logged as BL-41 in `docs/BACKLOG.md`, deliberately deferred until `ven-4` was confirmed
+stable end-to-end.
+
+**Fix (BL-41)**: VEN objects can now carry an optional `DASHBOARD_URL` attribute (a full
+origin string, e.g. `http://192.168.1.104:8211`) via the VTN's existing generic
+`attributes: ValuesMap[]` mechanism — the same one already used for the WP4.5 `PERSONA`
+tag. `venRegistry.ts`'s `mergeVens`/`fetchDiscoveredVens` use that origin directly as the
+VEN's base URL (and health-probe target) when present, browser-fetching the VEN's API
+straight with no new proxy hop — VEN's axum router already sets
+`CorsLayer::new().allow_origin(Any)`, and the whole `VEN/ui` data layer already treats a
+VEN's base URL as an opaque prefix. Absent the attribute, same-host VENs resolve exactly
+as before via `/api/dyn/{venName}` — purely additive, zero regression risk.
+
+Since `PUT /vens/{id}` on the VTN is a full-content replace (no partial-patch endpoint),
+adding the attribute to an already-provisioned VEN (`ven-4` was provisioned before this
+attribute existed) needed a GET-merge-PUT migration helper
+(`_ensure_dashboard_url_attribute` in `scripts/seed_vtn.py`) that reads the VEN's current
+attributes first so an existing `PERSONA` tag isn't dropped by the replace.
+
+**Verification**: `VEN/ui` unit tests (`venRegistry.test.ts`, 8 new BL-41 cases + full
+434-test suite green); a new BDD scenario (`tests/features/bff_vens.feature`) round-trips
+the attribute through the VTN → BFF. One test-design bug surfaced and was fixed during
+this: two separate scenarios registering VENs back-to-back raced the BFF's
+`GET /vens` cache (`CACHE_TTL_VENS`, default 10 s) — the second scenario's VEN wasn't
+reflected in the still-cached response from the first. Fixed by registering both VENs
+before a single shared list call, not by disabling or shortening the cache. Confirmed
+live: from Pi4, a direct `curl` to `ven-4`'s advertised origin
+(`http://192.168.1.104:8211/health`) succeeds even though Docker DNS on Pi4 has no way
+to resolve `ven-4` — proving the browser-direct path is what makes it reachable.
+
+**Key learning**: an "obvious" fix instruction in a plan (here: "revert the temporary
+Po4 nginx patch") can be wrong once you actually look at why the patch exists — Po4's
+`/api/vens-registry` → Pi4's `bff` proxy isn't a workaround for the bug BL-41 fixes, it's
+a structural necessity (Po4 has no local `bff`), so "reverting" it would have broken
+Po4's dashboard entirely. Verify a plan step's premise against the actual system before
+executing it, even after a plan has been approved.

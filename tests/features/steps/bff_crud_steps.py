@@ -1,5 +1,8 @@
 from behave import given, when, then
-from features.helpers.api_client import bff_get, bff_post, bff_put, bff_delete
+from features.helpers.api_client import (
+    bff_get, bff_post, bff_put, bff_delete,
+    get_token_value, vtn_get, vtn_post, vtn_put,
+)
 
 
 # ── Programs ─────────────────────────────────────────────────────────────────
@@ -76,6 +79,54 @@ def step_event_not_in_list(context):
 @when("I list VENs via BFF")
 def step_list_vens(context):
     context.response = bff_get("/api/vens")
+
+
+def _register_ven(ven_name, attributes):
+    """Register a VEN directly against the VTN (ven-manager scope), idempotent:
+    if it already exists, PUT the desired attributes onto it instead."""
+    token = get_token_value("ven-manager", "ven-manager")
+    body = {"venName": ven_name}
+    if attributes:
+        body["attributes"] = attributes
+    r = vtn_post("/vens", token, json=body)
+    if r.status_code == 409:
+        existing = vtn_get("/vens", token, params={"venName": ven_name}).json()
+        match = next(v for v in existing if v["venName"] == ven_name)
+        put_body = {k: v for k, v in match.items()
+                    if k not in ("id", "createdDateTime", "modificationDateTime")}
+        put_body["attributes"] = attributes or None
+        vtn_put(f"/vens/{match['id']}", token, json=put_body).raise_for_status()
+    else:
+        r.raise_for_status()
+
+
+@given('I register a VEN named "{ven_name}" with a DASHBOARD_URL attribute of "{url}"')
+def step_register_ven_with_dashboard_url(context, ven_name, url):
+    _register_ven(ven_name, [{"type": "DASHBOARD_URL", "values": [url]}])
+
+
+@given('I register a VEN named "{ven_name}" with no DASHBOARD_URL attribute')
+def step_register_ven_without_dashboard_url(context, ven_name):
+    _register_ven(ven_name, [])
+
+
+@then('the listed VEN "{ven_name}" has a DASHBOARD_URL attribute of "{url}"')
+def step_listed_ven_has_dashboard_url(context, ven_name, url):
+    vens = context.response.json()
+    match = next((v for v in vens if v["venName"] == ven_name), None)
+    assert match is not None, f"VEN '{ven_name}' not in BFF VEN list"
+    attrs = match.get("attributes") or []
+    values = next((a["values"] for a in attrs if a["type"] == "DASHBOARD_URL"), None)
+    assert values == [url], f"Expected DASHBOARD_URL=[{url}], got {values}"
+
+
+@then('the listed VEN "{ven_name}" has no DASHBOARD_URL attribute')
+def step_listed_ven_has_no_dashboard_url(context, ven_name):
+    vens = context.response.json()
+    match = next((v for v in vens if v["venName"] == ven_name), None)
+    assert match is not None, f"VEN '{ven_name}' not in BFF VEN list"
+    attrs = match.get("attributes") or []
+    assert all(a["type"] != "DASHBOARD_URL" for a in attrs), f"Unexpected DASHBOARD_URL in {attrs}"
 
 
 # ── Health ───────────────────────────────────────────────────────────────────
