@@ -48,7 +48,7 @@ waits until its entry is first. Rejected for two reasons
 - Re-entrant per owner: re-acquiring while holding renews the lease.
 - `run_all_tests.sh` acquires the lock automatically (`-l 180`) before the remote
   docker suites of [[testing-strategy]] (Rust-in-docker, E2E, resilience) and
-  releases it via EXIT trap; manual `ssh Pi4-Server docker …` sequences (including
+  releases it via EXIT trap; manual `ssh Pi4 docker …` sequences (including
   [[fleet-tooling]] work) must bracket themselves with acquire/release per the
   `.claude/CLAUDE.md` rule.
 

@@ -55,10 +55,10 @@ cd VTN/ui && npm test
 
 Test files live in `src/__tests__/<ComponentName>.test.tsx`.
 
-### Run a single BDD feature or scenario (Pi4-Server)
+### Run a single BDD feature or scenario (Pi4)
 
 ```bash
-ssh Pi4-Server
+ssh Pi4
 cd /srv/docker/openadr_lab
 
 # Single feature file
