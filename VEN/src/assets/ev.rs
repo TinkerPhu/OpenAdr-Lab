@@ -205,6 +205,7 @@ impl EvCharger {
                 max: None,
                 unit: "".into(),
                 display_scale: None,
+                nullable: false,
             },
             ControlDescriptor {
                 key: "ev_soc_target".into(),
@@ -214,6 +215,7 @@ impl EvCharger {
                 max: Some(1.0),
                 unit: "%".into(),
                 display_scale: Some(100.0),
+                nullable: false,
             },
         ]
     }

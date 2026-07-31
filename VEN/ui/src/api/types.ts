@@ -176,6 +176,14 @@ export type ControlDescriptor = {
   unit: string;
   /** Multiply raw value by this for display; divide on send. e.g. 100 renders 0.8 as "80 %" */
   display_scale?: number;
+  /**
+   * True when `max` is physically equivalent to "no limit" (e.g. a
+   * generation cap at rated power curtails nothing). The slider renders the
+   * top of the range as an explicit "Off" state, both when no override is
+   * active and when the user drags/releases into that zone, which sends
+   * `null` to clear the override instead of the numeric max.
+   */
+  nullable?: boolean;
 };
 
 // ─── HEMS Controller types ────────────────────────────────────────────────────

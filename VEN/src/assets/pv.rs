@@ -182,6 +182,7 @@ impl PvInverter {
                 max: Some(1.0),
                 unit: "%".into(),
                 display_scale: Some(100.0),
+                nullable: false,
             },
             ControlDescriptor {
                 key: "pv_irradiance_alpha".into(),
@@ -191,6 +192,7 @@ impl PvInverter {
                 max: Some(1.0),
                 unit: "".into(),
                 display_scale: None,
+                nullable: false,
             },
             ControlDescriptor {
                 key: "pv_generation_limit_kw".into(),
@@ -200,6 +202,10 @@ impl PvInverter {
                 max: Some(self.rated_kw),
                 unit: "kW".into(),
                 display_scale: None,
+                // max (rated_kw) is physically identical to "no limit" — the
+                // inverter can never exceed rated_kw anyway — so the top of
+                // the range doubles as the release/"Off" state.
+                nullable: true,
             },
         ]
     }

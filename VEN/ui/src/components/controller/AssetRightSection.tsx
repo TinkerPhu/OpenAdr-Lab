@@ -86,8 +86,9 @@ export function AssetRightSection({
     setLocalControlValues(prev => ({ ...prev, [key]: val }));
   }
 
-  // Mouse-up commit: POST the value; release local hold for Behaviour B controls.
-  function handleCommit(key: string, val: number | boolean) {
+  // Mouse-up commit: POST the value (or null to release a nullable override);
+  // release local hold for Behaviour B controls.
+  function handleCommit(key: string, val: number | boolean | null) {
     onOverrideChange({ [key]: val } as Partial<SimInjectState>);
     // Decay controls (Behaviour B): release the local hold after posting so
     // the slider follows the live sim value as the backend EMA-blends back.

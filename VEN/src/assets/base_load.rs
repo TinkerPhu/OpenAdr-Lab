@@ -210,6 +210,7 @@ impl BaseLoad {
                 max: Some(6.0),
                 unit: "kW".into(),
                 display_scale: None,
+                nullable: false,
             },
             ControlDescriptor {
                 key: "base_load_alpha".into(),
@@ -219,6 +220,7 @@ impl BaseLoad {
                 max: Some(1.0),
                 unit: "".into(),
                 display_scale: None,
+                nullable: false,
             },
         ]
     }

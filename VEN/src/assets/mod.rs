@@ -55,6 +55,17 @@ pub struct ControlDescriptor {
     /// E.g. display_scale=100.0 renders SoC fraction 0.8 as "80 %".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_scale: Option<f64>,
+    /// Marks this slider as representing an optional override where `max` is
+    /// physically equivalent to "no limit" (e.g. a generation cap at the
+    /// asset's rated power curtails nothing). The frontend renders the
+    /// top of the range as an explicit "Off" state — both when no override
+    /// is active (current value is `None`) and when the user drags into
+    /// that top zone and releases, which sends `null` instead of `max` to
+    /// clear the override. Not meaningful for controls whose max is a real,
+    /// distinct setpoint (e.g. a temperature or SoC target), so defaults to
+    /// `false` and is omitted from the wire format unless `true`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub nullable: bool,
 }
 
 // ─── Phase A new types ────────────────────────────────────────────────────────
