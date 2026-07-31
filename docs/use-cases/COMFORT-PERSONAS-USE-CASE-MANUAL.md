@@ -260,9 +260,42 @@ wherever the curve is consulted; DELETE restores the default. Invalid curves
 8. `curl -s -X DELETE http://Pi4-Server:8211/assets/ev/comfort_curve` →
    HTTP 204; GET reports `"source":"default"` again.
 
-> Note: today the curve feeds the user-request build path
-> (`AssetRequestSlice`); a deeper coupling of the curve into MILP tier
-> constraints is future work (see BL-19 resolution note in `docs/BACKLOG.md`).
+### Steps — the curve actually shapes the plan (BL-34)
+
+The curve reaches the MILP solver, not just `AssetRequestSlice` storage — a session's
+resolved curve changes real allocations, not only what's echoed back by GET. See
+`docs/architecture/ven_milp_planner.md` §10 for the mechanism (EV: `ByDeadline`/`Asap`
+mode's core/extra reward; heater: full-tier reward). Demonstrate the EV side, where the
+effect is a clean commit/skip toggle:
+
+The live import tariff in the E2E environment comes from the VTN's rate feed and isn't a
+fixed profile value, so use deliberately extreme curve prices rather than guessing today's
+tariff — a near-zero price is unaffordable against any realistic tariff, a large price
+(order of magnitude above any realistic tariff) is always worth it:
+
+9. Install a near-zero curve:
+
+   ```bash
+   curl -s -X POST http://Pi4-Server:8211/assets/ev/comfort_curve \
+     -H 'Content-Type: application/json' \
+     -d '[{"fill":0.0,"max_marginal_price":0.0,"max_marginal_co2":0},
+          {"fill":1.0,"max_marginal_price":0.0,"max_marginal_co2":0}]'
+   ```
+
+10. Create a soft-deadline EV session (`POST /user-requests`, `asset_id: "ev"`,
+    `soft_deadline: true`, a `deadlines` tier a few hours out). **Expected:** within one
+    replan, `GET /plan` shows little-to-no EV allocation — a zero-value curve isn't worth
+    any positive tariff, so the solver skips charging (soft deadline = optional).
+11. Reinstall a curve with a large price (e.g. `2.00 €/kWh`, well above any realistic
+    tariff) and repeat step 10 with a fresh session. **Expected:** the plan now shows EV
+    charging reaching the session's core target.
+12. `DELETE /assets/ev/comfort_curve`, repeat step 10 with the restored default curve
+    (`0.35`/`0.05`). **Expected:** committing behavior like step 11 for any realistic
+    tariff — the default curve isn't a no-op.
+
+> Automated coverage: `tests/features/ven_comfort_curve.feature`'s
+> "Comfort curve changes whether the EV session commits to charging" scenario drives
+> steps 9–12 end-to-end via the BDD harness.
 
 ---
 
