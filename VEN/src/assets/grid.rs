@@ -85,8 +85,8 @@ impl Asset for Grid {
         AssetState::Grid(self.state.clone())
     }
 
-    fn history(&self, window: Duration) -> Vec<HistoryPoint> {
-        self.history.slice(window, Utc::now())
+    fn history(&self, window: Duration, now: DateTime<Utc>) -> Vec<HistoryPoint> {
+        self.history.slice(window, now)
     }
 
     /// Grid capability reflects active VTN capacity limits.
@@ -226,7 +226,7 @@ mod tests {
         let now = Utc::now();
         g.update(1.0, f64::MAX, -f64::MAX, now - Duration::seconds(30));
         g.update(2.0, f64::MAX, -f64::MAX, now);
-        let hist = g.history(Duration::seconds(60));
+        let hist = g.history(Duration::seconds(60), now);
         assert_eq!(hist.len(), 2);
         // Most recent push should be the last in ascending order
         assert!((hist[1].power_kw - 2.0).abs() < 1e-9);

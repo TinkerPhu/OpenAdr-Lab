@@ -199,11 +199,10 @@ impl PvInverter {
         }
     }
 
-    pub fn forecast(&self, _state: &PvState, timespan: Duration) -> TimeSeries {
+    pub fn forecast(&self, _state: &PvState, timespan: Duration, now: DateTime<Utc>) -> TimeSeries {
         if timespan <= Duration::zero() {
             return TimeSeries::empty(Interpolation::Linear);
         }
-        let now = Utc::now();
         let end = now + timespan;
         let mut samples: Vec<(DateTime<Utc>, f64)> = Vec::new();
 
@@ -340,8 +339,8 @@ impl Asset for PvInverter {
         _initial: &AssetState,
         duration: Duration,
         resolution: Duration,
+        now: DateTime<Utc>,
     ) -> Vec<(DateTime<Utc>, AssetCapability)> {
-        let now = Utc::now();
         let n = (duration.num_seconds() / resolution.num_seconds().max(1)) as usize;
         let res_s = resolution.num_seconds() as f64;
         // pv_alpha is "fraction removed per plan step (300 s)".
@@ -505,7 +504,7 @@ mod tests {
     #[test]
     fn forecast_zero_timespan_returns_empty() {
         let (pv, state) = make_pv(5.0);
-        let series = pv.forecast(&state, Duration::zero());
+        let series = pv.forecast(&state, Duration::zero(), Utc::now());
         assert!(
             series.samples.is_empty(),
             "Zero timespan must return empty series"
@@ -516,16 +515,16 @@ mod tests {
     fn forecast_has_boundary_point_at_end() {
         let (pv, state) = make_pv(5.0);
         let timespan = Duration::seconds(300);
-        let before = Utc::now();
-        let series = pv.forecast(&state, timespan);
-        let after = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 9, 0, 0).unwrap();
+        let series = pv.forecast(&state, timespan, now);
         assert!(
             !series.samples.is_empty(),
             "Non-zero timespan must produce samples"
         );
         let last_ts = series.samples.last().unwrap().0;
-        assert!(
-            last_ts >= before + timespan && last_ts <= after + timespan,
+        assert_eq!(
+            last_ts,
+            now + timespan,
             "Boundary point must be at now+timespan"
         );
     }
@@ -533,7 +532,7 @@ mod tests {
     #[test]
     fn forecast_samples_ascending() {
         let (pv, state) = make_pv(5.0);
-        let series = pv.forecast(&state, Duration::seconds(120));
+        let series = pv.forecast(&state, Duration::seconds(120), Utc::now());
         let timestamps: Vec<_> = series.samples.iter().map(|(t, _)| t).collect();
         for i in 1..timestamps.len() {
             assert!(
@@ -546,7 +545,7 @@ mod tests {
     #[test]
     fn forecast_rated_zero_returns_all_zero() {
         let (pv, state) = make_pv(0.0);
-        let series = pv.forecast(&state, Duration::seconds(300));
+        let series = pv.forecast(&state, Duration::seconds(300), Utc::now());
         for (_, v) in &series.samples {
             assert_eq!(*v, 0.0, "Zero-rated PV must produce all-zero series");
         }
@@ -597,7 +596,8 @@ mod tests {
             curtailment_source: PvCurtailmentSource::None,
         });
 
-        let traj = pv.capability_trajectory(&state, Duration::hours(24), Duration::hours(1));
+        let traj =
+            pv.capability_trajectory(&state, Duration::hours(24), Duration::hours(1), Utc::now());
         assert_eq!(traj.len(), 24);
 
         // All values ≤ 0 (export only).
@@ -654,7 +654,8 @@ mod tests {
         });
 
         // Use a 1-hour resolution so slot timestamps are well into daytime when run near noon.
-        let traj = pv.capability_trajectory(&state, Duration::hours(4), Duration::hours(1));
+        let traj =
+            pv.capability_trajectory(&state, Duration::hours(4), Duration::hours(1), Utc::now());
         assert_eq!(traj.len(), 4);
 
         for (t, cap) in &traj {
@@ -687,7 +688,12 @@ mod tests {
             export_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
         });
-        let traj = pv.capability_trajectory(&state, Duration::seconds(3), Duration::seconds(1));
+        let traj = pv.capability_trajectory(
+            &state,
+            Duration::seconds(3),
+            Duration::seconds(1),
+            Utc::now(),
+        );
         // Slot 1 (1 s ahead): decayed_offset = 0.4 × 0^1 = 0 → equals sin model
         for (t, cap) in &traj {
             let natural = PvInverter::natural_irradiance_at(*t);
@@ -725,6 +731,7 @@ mod tests {
             &state,
             Duration::seconds(900), // 3 plan steps
             Duration::seconds(300), // 1 plan step per slot
+            Utc::now(),
         );
         assert_eq!(traj.len(), 3);
         // With correct per-STEP decay: slot 1 exponent = 300/300 = 1  → offset = 0.4 × 0.9 = 0.36
@@ -773,7 +780,8 @@ mod tests {
             export_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
         });
-        let traj = pv.capability_trajectory(&state, Duration::hours(24), Duration::hours(1));
+        let traj =
+            pv.capability_trajectory(&state, Duration::hours(24), Duration::hours(1), Utc::now());
         for (_, cap) in &traj {
             assert!(
                 cap.max_export_kw >= -8.0 - 1e-9,
@@ -805,7 +813,8 @@ mod tests {
             export_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
         });
-        let traj = pv.capability_trajectory(&state, Duration::hours(4), Duration::hours(1));
+        let now = Utc::now();
+        let traj = pv.capability_trajectory(&state, Duration::hours(4), Duration::hours(1), now);
 
         for (t, cap) in &traj {
             let natural = PvInverter::natural_irradiance_at(*t);
@@ -820,7 +829,7 @@ mod tests {
 
         // Changing offset on self must change the trajectory output.
         pv.irradiance_offset = -0.5;
-        let traj2 = pv.capability_trajectory(&state, Duration::hours(4), Duration::hours(1));
+        let traj2 = pv.capability_trajectory(&state, Duration::hours(4), Duration::hours(1), now);
         let same = traj
             .iter()
             .zip(traj2.iter())
@@ -835,7 +844,8 @@ mod tests {
     fn capability_trajectory_ascending_timestamps() {
         let (pv, state_inner) = make_pv(5.0);
         let state = AssetState::Pv(state_inner);
-        let traj = pv.capability_trajectory(&state, Duration::hours(6), Duration::hours(1));
+        let traj =
+            pv.capability_trajectory(&state, Duration::hours(6), Duration::hours(1), Utc::now());
         assert_eq!(traj.len(), 6);
         for i in 1..traj.len() {
             assert!(
@@ -934,7 +944,8 @@ mod tests {
         pv.irradiance_offset = 1.0;
         pv.pv_alpha = 0.0; // no decay — offset stays saturating every slot
         let state = AssetState::Pv(state_inner);
-        let traj = pv.capability_trajectory(&state, Duration::hours(6), Duration::hours(1));
+        let traj =
+            pv.capability_trajectory(&state, Duration::hours(6), Duration::hours(1), Utc::now());
         for (_, cap) in &traj {
             assert!(
                 cap.max_export_kw >= -4.0 - 1e-9,

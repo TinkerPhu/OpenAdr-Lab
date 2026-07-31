@@ -7151,3 +7151,47 @@ a regression from the weather/R-56 work being verified at the time. Logged in
 `docs/reference/TECHNICAL_DEBTS.md` (R-61) rather than investigated further, since it's unrelated
 to the change in flight; root cause is presumably an edge case when "now" lands exactly on the
 last grid slot boundary.
+
+### R-24: injectable clock + seedable RNG through simulator/assets (branch `fix/r24-injectable-clock`, 2026-07-31)
+
+Next item off the same task list (now first, since R-22/R-52/R-56 resolved ahead of it). The
+debt entry's own cited line numbers were stale — re-grepped every named file and traced each
+`Utc::now()`/`thread_rng()` call site to its real production caller before touching anything.
+
+**Findings, not all as expected**: `entities/site_meter.rs::SiteMeter::default()`'s `Utc::now()`
+turned out to be **dead code** — `SiteMeter` (and its `DispatchState` sibling) is never
+constructed anywhere outside its own file, same "100% dead" status independently noted during
+the deviation-arbiter work. Logged as **R-62** rather than "fixed," since there's no live code
+path to thread a clock through. `assets/grid.rs::Asset::history()`, `AssetHandle::history()`,
+and the `Asset` trait's `simulate_free()`/`capability_trajectory()` defaults are likewise only
+reachable from their own unit tests today (production history reads bypass the trait via
+`entry.history.slice(timespan, now)` directly) — still threaded `now` through them for trait
+consistency (one signature change cascades to both impls regardless), but noted as lower-value
+than the two real violations.
+
+**Real violations, both cheaper than expected because the call site already had `now` in
+scope**: `controller::openadr_interface::parse_capacity_state(events)` — its only production
+caller, `tasks::poll_events::detect_event_changes`, already receives `now` and already threads
+it into the sibling call `parse_rate_snapshots(events, now)` one line above; `parse_capacity_state`
+was simply missing the same treatment. `simulator::SimState::from_params(params)` — its
+production path is `simulator::persist::load_with_params` → `main.rs`'s composition root, which
+had no `now` yet but took one line to add.
+
+**Genuine multi-file work**: all 5 `AssetConfig` variants' `forecast()` methods (called from
+`routes/assets.rs::get_asset_forecast`, which — unlike its sibling `get_asset_history` — wasn't
+fetching `now` at all) and `simulator::power_model::random_voltage()`'s unseeded
+`rand::thread_rng()`. Added a `rng: StdRng` field to `SimState` (`#[serde(skip, default =
+"StdRng::from_entropy")]` — `StdRng` isn't serializable and reseeding fresh on load is fine,
+determinism only needs to hold within one run/test) plus `SimState::from_params_seeded(...)` for
+tests. Replaced several "before/after wall-clock bracket" test assertions (`assert!(ts >= before
++ timespan && ts <= after + timespan)`) with exact equality against the injected `now` — the
+kind of workaround this debt item exists to eliminate.
+
+**Verification**: full VEN Rust suite (875/875 + 1 architecture test), fmt/clippy clean. Hit the
+file-size cap on `simulator/mod.rs` by 10 lines from the new `rng` field/constructor — trimmed
+doc comments (not logic) to fit under 500 production lines rather than splitting the file.
+
+**Key learning**: a debt register's own line-number citations can go stale as unrelated commits
+land; always re-grep the named files and trace actual callers before starting the "classify"
+step literally — several cited sites in this item no longer existed at those exact lines, and
+one (`site_meter.rs`) turned out to be dead code rather than a live violation at all.

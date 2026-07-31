@@ -168,7 +168,7 @@ pub fn parse_rate_snapshots(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<Tar
 /// Parse capacity limits from the CURRENT set of active events.
 /// Computed from scratch on each call — reflects the live VTN state.
 /// Strictest limit wins (lowest value when multiple events specify same field).
-pub fn parse_capacity_state(events: &[OadrEvent]) -> OadrCapacityState {
+pub fn parse_capacity_state(events: &[OadrEvent], now: DateTime<Utc>) -> OadrCapacityState {
     let mut existing = OadrCapacityState::default();
     let mut import_limit: Option<(f64, String)> = None;
     let mut export_limit: Option<(f64, String)> = None;
@@ -270,7 +270,7 @@ pub fn parse_capacity_state(events: &[OadrEvent]) -> OadrCapacityState {
         existing.import_reservation_kw = import_res;
         existing.export_subscription_kw = export_sub;
         existing.export_reservation_kw = export_res;
-        existing.last_updated = Some(Utc::now());
+        existing.last_updated = Some(now);
     }
 
     existing
@@ -543,6 +543,7 @@ pub fn extract_report_obligations(
 mod tests {
     use super::*;
     use crate::controller::vtn_port::OadrEvent;
+    use chrono::TimeZone;
     use serde_json::json;
 
     // ── parse_alert_windows (WP3.1, BL-04) ──────────────────────────────────
@@ -667,7 +668,10 @@ mod tests {
                 ]
             }]
         }]);
-        let cap = parse_capacity_state(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        let cap = parse_capacity_state(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            Utc::now(),
+        );
         assert_eq!(cap.export_subscription_kw, Some(4.0));
         assert_eq!(cap.export_reservation_kw, Some(2.0));
     }
@@ -867,9 +871,18 @@ mod tests {
                 ]
             }
         ]);
-        let cap = parse_capacity_state(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        let now = Utc.with_ymd_and_hms(2025, 1, 1, 9, 0, 0).unwrap();
+        let cap = parse_capacity_state(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            now,
+        );
         assert_eq!(cap.import_limit_kw, Some(5.0));
         assert_eq!(cap.import_limit_event_id, Some("evt-cap".to_string()));
+        assert_eq!(
+            cap.last_updated,
+            Some(now),
+            "last_updated must equal the injected clock, not wall-clock Utc::now()"
+        );
     }
 
     #[test]
@@ -894,7 +907,10 @@ mod tests {
                 }]
             }
         ]);
-        let cap = parse_capacity_state(&serde_json::from_value::<Vec<OadrEvent>>(events).unwrap());
+        let cap = parse_capacity_state(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            Utc::now(),
+        );
         assert_eq!(cap.import_limit_kw, Some(3.0));
         assert_eq!(cap.import_limit_event_id, Some("evt-b".to_string()));
     }

@@ -41,7 +41,7 @@ pub(crate) fn detect_event_changes(
     now: DateTime<Utc>,
 ) -> EventChanges {
     let rates = controller::openadr_interface::parse_rate_snapshots(events, now);
-    let capacity = controller::openadr_interface::parse_capacity_state(events);
+    let capacity = controller::openadr_interface::parse_capacity_state(events, now);
     let signals = super::poll_signals::ParsedSignals {
         alerts: controller::openadr_interface::parse_alert_windows(events),
         simple: controller::openadr_interface::parse_simple_windows(events),

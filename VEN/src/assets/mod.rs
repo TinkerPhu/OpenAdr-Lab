@@ -394,13 +394,18 @@ impl AssetConfig {
         }
     }
 
-    pub fn forecast(&self, state: &AssetState, timespan: Duration) -> TimeSeries {
+    pub fn forecast(
+        &self,
+        state: &AssetState,
+        timespan: Duration,
+        now: DateTime<Utc>,
+    ) -> TimeSeries {
         match (self, state) {
-            (Self::Battery(cfg), AssetState::Battery(s)) => cfg.forecast(s, timespan),
-            (Self::Ev(cfg), AssetState::Ev(s)) => cfg.forecast(s, timespan),
-            (Self::Heater(cfg), AssetState::Heater(s)) => cfg.forecast(s, timespan),
-            (Self::Pv(cfg), AssetState::Pv(s)) => cfg.forecast(s, timespan),
-            (Self::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.forecast(s, timespan),
+            (Self::Battery(cfg), AssetState::Battery(s)) => cfg.forecast(s, timespan, now),
+            (Self::Ev(cfg), AssetState::Ev(s)) => cfg.forecast(s, timespan, now),
+            (Self::Heater(cfg), AssetState::Heater(s)) => cfg.forecast(s, timespan, now),
+            (Self::Pv(cfg), AssetState::Pv(s)) => cfg.forecast(s, timespan, now),
+            (Self::BaseLoad(cfg), AssetState::BaseLoad(s)) => cfg.forecast(s, timespan, now),
             _ => TimeSeries::empty(Interpolation::Linear),
         }
     }
@@ -452,14 +457,19 @@ impl AssetConfig {
         }
     }
 
-    pub fn simulate_free(&self, state: &AssetState, duration: Duration) -> Trajectory {
+    pub fn simulate_free(
+        &self,
+        state: &AssetState,
+        duration: Duration,
+        now: DateTime<Utc>,
+    ) -> Trajectory {
         use Asset as _;
         match self {
-            Self::Battery(cfg) => cfg.simulate_free(state, duration),
-            Self::Ev(cfg) => cfg.simulate_free(state, duration),
-            Self::Heater(cfg) => cfg.simulate_free(state, duration),
-            Self::Pv(cfg) => cfg.simulate_free(state, duration),
-            Self::BaseLoad(cfg) => cfg.simulate_free(state, duration),
+            Self::Battery(cfg) => cfg.simulate_free(state, duration, now),
+            Self::Ev(cfg) => cfg.simulate_free(state, duration, now),
+            Self::Heater(cfg) => cfg.simulate_free(state, duration, now),
+            Self::Pv(cfg) => cfg.simulate_free(state, duration, now),
+            Self::BaseLoad(cfg) => cfg.simulate_free(state, duration, now),
         }
     }
 
@@ -468,14 +478,15 @@ impl AssetConfig {
         state: &AssetState,
         duration: Duration,
         resolution: Duration,
+        now: DateTime<Utc>,
     ) -> Vec<(DateTime<Utc>, AssetCapability)> {
         use Asset as _;
         match self {
-            Self::Battery(cfg) => cfg.capability_trajectory(state, duration, resolution),
-            Self::Ev(cfg) => cfg.capability_trajectory(state, duration, resolution),
-            Self::Heater(cfg) => cfg.capability_trajectory(state, duration, resolution),
-            Self::Pv(cfg) => cfg.capability_trajectory(state, duration, resolution),
-            Self::BaseLoad(cfg) => cfg.capability_trajectory(state, duration, resolution),
+            Self::Battery(cfg) => cfg.capability_trajectory(state, duration, resolution, now),
+            Self::Ev(cfg) => cfg.capability_trajectory(state, duration, resolution, now),
+            Self::Heater(cfg) => cfg.capability_trajectory(state, duration, resolution, now),
+            Self::Pv(cfg) => cfg.capability_trajectory(state, duration, resolution, now),
+            Self::BaseLoad(cfg) => cfg.capability_trajectory(state, duration, resolution, now),
         }
     }
 
@@ -599,7 +610,7 @@ pub trait Asset: Send + Sync {
 
     /// Slice of this asset's own ring buffer over [now − window, now].
     /// Default panics — call via `AssetHandle`, not a bare physics type.
-    fn history(&self, _window: Duration) -> Vec<HistoryPoint> {
+    fn history(&self, _window: Duration, _now: DateTime<Utc>) -> Vec<HistoryPoint> {
         unimplemented!("Asset::history() must be called via AssetHandle, not a bare physics type")
     }
 
@@ -620,8 +631,12 @@ pub trait Asset: Send + Sync {
 
     /// Free-run: step with setpoint=0.0 for `duration`. Single physics step.
     /// Override for assets where "free run" means something other than zero setpoint.
-    fn simulate_free(&self, initial: &AssetState, duration: Duration) -> Trajectory {
-        let now = Utc::now();
+    fn simulate_free(
+        &self,
+        initial: &AssetState,
+        duration: Duration,
+        now: DateTime<Utc>,
+    ) -> Trajectory {
         self.simulate_forward(initial, &[(now, 0.0), (now + duration, 0.0)])
     }
 
@@ -633,8 +648,8 @@ pub trait Asset: Send + Sync {
         initial: &AssetState,
         duration: Duration,
         resolution: Duration,
+        now: DateTime<Utc>,
     ) -> Vec<(DateTime<Utc>, AssetCapability)> {
-        let now = Utc::now();
         let n = (duration.num_seconds() / resolution.num_seconds().max(1)) as usize;
         let mut state = initial.clone();
         let mut result = Vec::with_capacity(n);
@@ -713,8 +728,8 @@ impl<'a> Asset for AssetHandle<'a> {
         self.state.clone()
     }
 
-    fn history(&self, window: Duration) -> Vec<HistoryPoint> {
-        self.history.slice(window, Utc::now())
+    fn history(&self, window: Duration, now: DateTime<Utc>) -> Vec<HistoryPoint> {
+        self.history.slice(window, now)
     }
 
     fn capability(&self, state: &AssetState) -> AssetCapability {
@@ -804,7 +819,7 @@ mod handle_tests {
             state: &state,
             history: &history,
         };
-        let hist = handle.history(Duration::seconds(60));
+        let hist = handle.history(Duration::seconds(60), now);
         assert_eq!(hist.len(), 1);
         assert!((hist[0].power_kw - 3.0).abs() < 1e-9);
     }

@@ -8,11 +8,14 @@ use crate::entities::asset_params::{AssetParams, PvCurtailmentSource, PvParams};
 use chrono::TimeZone;
 
 fn pv_state(rated_kw: f64) -> SimState {
-    SimState::from_params(&[AssetParams::Pv(PvParams {
-        id: crate::ids::ASSET_PV.to_string(),
-        rated_kw,
-        inverter_max_kw: rated_kw,
-    })])
+    SimState::from_params(
+        &[AssetParams::Pv(PvParams {
+            id: crate::ids::ASSET_PV.to_string(),
+            rated_kw,
+            inverter_max_kw: rated_kw,
+        })],
+        noon(),
+    )
 }
 
 fn noon() -> DateTime<Utc> {
@@ -21,7 +24,7 @@ fn noon() -> DateTime<Utc> {
 
 #[test]
 fn peek_pv_kw_returns_none_without_pv_asset() {
-    let sim = SimState::from_params(&[]);
+    let sim = SimState::from_params(&[], noon());
     assert_eq!(sim.peek_pv_kw(noon(), 30.0, None, 0.1, None), None);
 }
 

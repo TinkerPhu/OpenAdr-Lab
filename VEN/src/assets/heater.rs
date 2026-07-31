@@ -370,11 +370,15 @@ impl Heater {
         }
     }
 
-    pub fn forecast(&self, state: &HeaterState, timespan: Duration) -> TimeSeries {
+    pub fn forecast(
+        &self,
+        state: &HeaterState,
+        timespan: Duration,
+        now: DateTime<Utc>,
+    ) -> TimeSeries {
         if timespan <= Duration::zero() {
             return TimeSeries::empty(Interpolation::Linear);
         }
-        let now = Utc::now();
         let end = now + timespan;
         // Simulate uncontrolled thermostat operation (no plan overlay, setpoint = 0).
         // The thermostat emergency fires when temp ≤ T_min, so the forecast still
@@ -637,7 +641,7 @@ mod tests {
         let state = state_at(23.0, 0.0);
         // thermal_mass=2.0 kWh/°C → τ=20h; T drops from 23→20°C in ~5h.
         // Use 24h to ensure full thermostat cycling is captured.
-        let ts = heater.forecast(&state, Duration::hours(24));
+        let ts = heater.forecast(&state, Duration::hours(24), Utc::now());
 
         // Compute mean power over the forecast samples
         let n = ts.samples.len() as f64;
@@ -664,7 +668,7 @@ mod tests {
         let state = state_at(21.5, 1.3);
         // thermal_mass=2.0 kWh/°C → T drops from 21.5→20°C (T_min) in ~2.8h.
         // Use 12h to ensure cycling is captured in the mean.
-        let ts = heater.forecast(&state, Duration::hours(12));
+        let ts = heater.forecast(&state, Duration::hours(12), Utc::now());
         let n = ts.samples.len() as f64;
         assert!(n > 0.0);
         let mean: f64 = ts.samples.iter().map(|(_, kw)| kw).sum::<f64>() / n;

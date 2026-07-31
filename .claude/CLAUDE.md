@@ -115,9 +115,9 @@ build:
 
 determinism: any code path that depends on the current date/time must accept an injectable
 clock (e.g. a Fn() -> DateTime<Utc> parameter or typed wrapper). Applied in the MILP
-planner; the simulator/assets still have gaps (tracked as R-24 in TECHNICAL_DEBTS.md).
-All new modules that schedule, timestamp, or expire must follow the
-same pattern. Makes tests reproducible without sleep or wall-clock coupling.
+planner, simulator, and assets rings (R-24). All new modules that schedule, timestamp,
+or expire must follow the same pattern. Makes tests reproducible without sleep or
+wall-clock coupling.
 
 dependencies: pin all new crates to a semver range in Cargo.toml; npm packages use caret
 ranges in package.json — package-lock.json is the pinning mechanism (commit it; never

@@ -10,7 +10,7 @@ mod port_tests {
 
     #[test]
     fn snapshot_returns_ok_for_empty_state() {
-        let sim = SimState::from_params(&[]);
+        let sim = SimState::from_params(&[], Utc::now());
         let result = SimulatorPort::snapshot(&sim);
         assert!(
             result.is_ok(),
@@ -19,6 +19,94 @@ mod port_tests {
         let snap = result.unwrap();
         // Grid defaults are zero
         assert_eq!(snap.grid.net_power_w, 0.0);
+    }
+}
+
+/// R-24: `SimState::from_params`'s `last_tick` and `derive_grid_meter`'s voltage
+/// noise must come from injected sources (a `now` param and a seedable RNG),
+/// not wall-clock `Utc::now()`/unseeded `thread_rng()` — otherwise repeated
+/// runs of the same scenario are never bit-for-bit reproducible.
+mod clock_and_rng_tests {
+    use super::super::*;
+    use crate::entities::asset_params::PvCurtailmentSource;
+    use chrono::{Duration, TimeZone};
+    use rand::{rngs::StdRng, SeedableRng};
+
+    fn at(h: u32, m: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 7, 20, h, m, 0).unwrap()
+    }
+
+    fn run_tick(sim: &mut SimState, now: DateTime<Utc>) {
+        sim.tick(
+            30.0,
+            HashMap::new(),
+            now,
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            None,
+            0.1,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            PvCurtailmentSource::None,
+        );
+    }
+
+    #[test]
+    fn from_params_sets_last_tick_to_the_injected_now() {
+        let now = at(9, 0);
+        let sim = SimState::from_params(&[], now);
+        assert_eq!(sim.last_tick, now);
+    }
+
+    #[test]
+    fn same_seed_produces_identical_voltage_sequence_across_ticks() {
+        let now = at(9, 0);
+        let mut sim_a = SimState::from_params_seeded(&[], now, StdRng::seed_from_u64(7));
+        let mut sim_b = SimState::from_params_seeded(&[], now, StdRng::seed_from_u64(7));
+
+        let mut voltages_a = Vec::new();
+        let mut voltages_b = Vec::new();
+        for i in 1..=5 {
+            let t = now + Duration::seconds(30 * i);
+            run_tick(&mut sim_a, t);
+            run_tick(&mut sim_b, t);
+            voltages_a.push(sim_a.grid.voltage_v);
+            voltages_b.push(sim_b.grid.voltage_v);
+        }
+
+        assert_eq!(
+            voltages_a, voltages_b,
+            "identically-seeded SimState instances must produce identical voltage sequences"
+        );
+    }
+
+    #[test]
+    fn different_seeds_produce_different_voltage_sequences() {
+        let now = at(9, 0);
+        let mut sim_a = SimState::from_params_seeded(&[], now, StdRng::seed_from_u64(1));
+        let mut sim_b = SimState::from_params_seeded(&[], now, StdRng::seed_from_u64(2));
+
+        let mut voltages_a = Vec::new();
+        let mut voltages_b = Vec::new();
+        for i in 1..=5 {
+            let t = now + Duration::seconds(30 * i);
+            run_tick(&mut sim_a, t);
+            run_tick(&mut sim_b, t);
+            voltages_a.push(sim_a.grid.voltage_v);
+            voltages_b.push(sim_b.grid.voltage_v);
+        }
+
+        assert_ne!(
+            voltages_a, voltages_b,
+            "different seeds should (overwhelmingly likely) diverge"
+        );
     }
 }
 
@@ -57,11 +145,14 @@ mod base_load_noise_tests {
     }
 
     fn base_load_state(baseline_kw: f64) -> SimState {
-        SimState::from_params(&[AssetParams::BaseLoad(BaseLoadParams {
-            id: crate::ids::ASSET_BASE_LOAD.to_string(),
-            baseline_kw,
-            spikes: vec![coffee_spike()],
-        })])
+        SimState::from_params(
+            &[AssetParams::BaseLoad(BaseLoadParams {
+                id: crate::ids::ASSET_BASE_LOAD.to_string(),
+                baseline_kw,
+                spikes: vec![coffee_spike()],
+            })],
+            Utc::now(),
+        )
     }
 
     #[test]
@@ -250,16 +341,19 @@ mod unmodelled_load_tests {
     use crate::entities::asset_params::{AssetParams, BaseLoadParams, PvCurtailmentSource};
     use chrono::TimeZone;
 
-    fn base_only(baseline_kw: f64) -> SimState {
-        SimState::from_params(&[AssetParams::BaseLoad(BaseLoadParams {
-            id: crate::ids::ASSET_BASE_LOAD.to_string(),
-            baseline_kw,
-            spikes: vec![],
-        })])
-    }
-
     fn at(h: u32, m: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 7, 16, h, m, 0).unwrap()
+    }
+
+    fn base_only(baseline_kw: f64) -> SimState {
+        SimState::from_params(
+            &[AssetParams::BaseLoad(BaseLoadParams {
+                id: crate::ids::ASSET_BASE_LOAD.to_string(),
+                baseline_kw,
+                spikes: vec![],
+            })],
+            at(0, 0),
+        )
     }
 
     fn run_tick(sim: &mut SimState, now: DateTime<Utc>) {

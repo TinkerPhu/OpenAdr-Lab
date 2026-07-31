@@ -31,6 +31,7 @@ pub async fn get_asset_forecast(
 
     let timespan_s = params.timespan_s.unwrap_or(0.0);
     let timespan = Duration::milliseconds((timespan_s * 1000.0) as i64);
+    let now = chrono::Utc::now();
 
     let sim = ctx.sim.lock().await;
     match sim.find_asset(&asset_id) {
@@ -40,7 +41,7 @@ pub async fn get_asset_forecast(
         )
             .into_response(),
         Some((entry, cfg)) => {
-            let series = cfg.forecast(&entry.state, timespan);
+            let series = cfg.forecast(&entry.state, timespan, now);
             let samples: Vec<serde_json::Value> = series
                 .samples
                 .iter()
