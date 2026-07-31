@@ -7338,3 +7338,53 @@ afterward rather than trusting a conflict-free rebase to mean semantically corre
 live UI per the project's UI-change verification norm; verification relied on unit tests asserting
 exact DOM text/slider-value behavior plus live API round-trip checks against the deployed schema
 and inject endpoints on Pi4, not an actual screenshot.
+
+### PV `rated_kw`/`inverter_max_kw` reversion — root cause was branch divergence, not a runtime bug (branch `fix/pv-rated-kw-reversion`, 2026-07-31)
+
+Reported live: the three VEN profiles' PV capacity kept "crawling back" to stale values
+(`rated_kw: 8.0/12.0/6.0`) across separate sessions, and the inverter's true AC-max-power field
+"disappeared" — the third time this had happened. Investigated via a full-repo search (git
+history + every plausible in-app override mechanism) rather than guessing.
+
+**Root cause 1 — orphaned fix branch, not a silent revert.** `assets.pv.rated_kw` (the DC panel
+peak, used by the sin-model whenever the live weather feed is stale) had drifted from
+`weather_pv.rated_kwp` (the real calibrated Zunzgen array size, already correct) since the weather
+feed was wired up. A fix already existed — commit `70f42d7`, `ven-1: 8.0→14.4`, `ven-3: 6.0→8.0` —
+but it lived only on `040-pv-export-curtailment`, a branch that was never merged into `main`. No
+code anywhere reads/writes/infers these values outside the profile YAML and its direct
+deserialization path (ruled out: heuristics inference, `history_store` migrations,
+`simulator::persist::load_with_params`, which provably always rebuilds `asset_configs` fresh from
+profile params on load, never reusing a persisted snapshot). Every worktree cut from `main` — three
+of them this month, including two from this session alone — regenerated the stale numbers simply
+because that's what was actually committed there. Re-applied the fix directly to `main` this time
+(same values) and deleted the now-fully-superseded branch (local + remote) to remove the
+divergence source.
+
+**Root cause 2 — a real gap, not a regression.** `inverter_max_kw` (the true AC hardware ceiling,
+distinct from `rated_kw`'s DC panel peak) was added to the Rust struct/physics in `b86157c`
+("PV curtailment history") but deliberately left unconfigured — "defaults to `rated_kw` so
+existing profiles are unaffected." It wasn't disappearing; it had never been populated in any
+profile YAML on any branch. Set now: `12.5/10.0/7.5 kW` for ven-1/2/3, each below the corrected
+`rated_kw`.
+
+**Secondary bug this surfaced**: `PvInverter::control_schema()`'s `pv_generation_limit_kw` slider
+capped at `self.rated_kw` instead of `self.inverter_max_kw` — invisible until now because the two
+values always happened to be equal (every profile left `inverter_max_kw` unset, defaulting to
+`rated_kw`). Once genuinely divergent, the slider's "Off"/max position would have silently
+permitted a value above what the inverter can ever physically deliver. Fixed to use
+`inverter_max_kw`, matching what `step_inner` actually clamps against everywhere; added a
+regression test using a fixture where the two values differ (the exact condition that let the bug
+hide), and updated the `schema_snapshot_matches_fixture` golden fixture (`max: 8.0 → 12.5` for
+ven-1).
+
+**Verification**: 885/885 backend tests green (884 + new), fmt/clippy/file-size clean. Deployed to
+Pi4 with an explicit anti-reversion check per the fix's own prevention plan — confirmed Pi4's
+checked-out profile YAMLs matched the corrected values *before* rebuilding, not just after — then
+confirmed live via `GET /sim` and `GET /sim/schema` on all three VENs post-deploy.
+
+**Key learning**: a "value keeps reverting" report is not automatically a runtime bug — check
+`git log` for the file first. Here, the correct value had been computed and committed once already,
+just on a branch nobody ever merged; three separate sessions each independently regenerated the
+same wrong starting point from `main` because `main` itself was never corrected. The fix for
+"keeps reverting" was git hygiene (merge to `main`, delete the orphaned branch), not a code change
+to find and neutralize.
