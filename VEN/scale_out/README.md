@@ -13,8 +13,6 @@ top-level directory (next to `VEN/`/`VTN/`) would wrongly suggest otherwise.
 
 ## Naming: `scale_out/nodeN`
 
-- **`scale_out`** — the standard infra term for horizontal scaling (adding
-  more machines), as opposed to scaling up one machine's resources.
 - **`nodeN`** numbers *each additional host's deployment*, starting at 2. The
   primary host's own `VEN/docker-compose.yml` (ven-1/2/3/ui) deliberately is
   **not** part of this numbering scheme and was not renamed/moved into a

@@ -29,7 +29,7 @@ Deployed a Pi4-hosted OpenADR 3 lab: VTN (openleadr-rs + PostgreSQL), three VEN 
 - Docker Compose project name defaults to the directory name. A service named `vtn-db` in a directory called `VTN/` produces container `vtn-vtn-db-1`. Name services without the directory prefix.
 - Docker Compose `${VAR:-default}` values are silently overridden by `.env` files. Check `.env` on both local and Pi4 when changing defaults.
 - All OpenADR Lab services use the `82xx` port range to avoid conflicts with existing Pi4 containers.
-- Pi4 hostname is `pi4server.local` (via mDNS/Avahi), not `raspberrypi.local`.
+- Pi4's mDNS name is `pi4.local` (via mDNS/Avahi, explicit `host-name=pi4` override in `/etc/avahi/avahi-daemon.conf`), not `raspberrypi.local` or the older `pi4server.local`.
 - Vite builds fail when run from Windows `subst` drive aliases — Vite resolves the real path internally causing mismatches. Build from the real path `C:\DriveD\...` or in Docker.
 - `npm ci` requires `package-lock.json` to be in sync with `package.json`. Always run `npm install` locally and commit the lock file before Docker builds.
 
