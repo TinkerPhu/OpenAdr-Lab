@@ -6,11 +6,11 @@ Use this skill when creating a pull request against `OpenLEADR/openleadr-rs` fro
 
 Before creating a branch or writing any code, verify:
 
-1. **Git identity on Pi4** — Pi4's global config is set correctly. Verify before any PR work:
+1. **Git identity on Node1** — Node1's global config is set correctly. Verify before any PR work:
    ```bash
-   ssh Pi4 "git config --global user.name && git config --global user.email"
+   ssh Node1 "git config --global user.name && git config --global user.email"
    # Must print: TinkerPhu / TinkerPhu@users.noreply.github.com
-   # If wrong: ssh Pi4 "git config --global user.name 'TinkerPhu' && git config --global user.email 'TinkerPhu@users.noreply.github.com'"
+   # If wrong: ssh Node1 "git config --global user.name 'TinkerPhu' && git config --global user.email 'TinkerPhu@users.noreply.github.com'"
    ```
 
 2. **After any `git commit --amend`** — verify both author AND committer (amend sets committer from current git config, which can silently differ from the original author):
@@ -38,11 +38,11 @@ Before creating a branch or writing any code, verify:
 - Run `cargo fmt` to format — CI will reject unformatted code
 
 ### 2. SQLx offline cache (if SQL changed)
-Verify hashes match by running on Pi4 after push:
+Verify hashes match by running on Node1 after push:
 ```bash
 python3 -c "import hashlib,re; content=open('openleadr-vtn/src/data_source/postgres/event.rs').read(); queries=re.findall(r'r#\"(.*?)\"#',content,re.DOTALL); [print(i,hashlib.sha256(q.encode()).hexdigest()) for i,q in enumerate(queries)]"
 ```
-The hashes must match the filenames in `.sqlx/`. If not, regenerate the cache files on Pi4.
+The hashes must match the filenames in `.sqlx/`. If not, regenerate the cache files on Node1.
 
 ### 3. Write tests (if adding a `#[sqlx::test]`)
 - **Always include `"users"` before `"vens"`** in fixture lists — `vens.sql` inserts into `user_ven` which has a FK to `users`
@@ -88,11 +88,11 @@ Check status: `gh pr checks <PR_NUMBER> --repo OpenLEADR/openleadr-rs`
 
 | Failure | Cause | Fix |
 |---|---|---|
-| DCO — Invalid committer email | `git commit --amend` set committer from Pi4 git config (wrong email) | `GIT_COMMITTER_NAME='TinkerPhu' GIT_COMMITTER_EMAIL='TinkerPhu@users.noreply.github.com' git commit --amend --no-edit` + force-push |
+| DCO — Invalid committer email | `git commit --amend` set committer from Node1 git config (wrong email) | `GIT_COMMITTER_NAME='TinkerPhu' GIT_COMMITTER_EMAIL='TinkerPhu@users.noreply.github.com' git commit --amend --no-edit` + force-push |
 | DCO — author/SOB mismatch | Author email differs from `Signed-off-by` email | `git commit --amend --signoff --reset-author --no-edit` (with `GIT_AUTHOR_*` set) + force-push |
 | Format | Code not formatted | `cargo fmt` + amend + force-push |
 | Build/test panic (exit 101) | Test fixture missing `"users"` | Add `"users"` to fixture list |
-| Build compile error | SQLx cache hash mismatch | Regenerate cache on Pi4, verify hash matches |
+| Build compile error | SQLx cache hash mismatch | Regenerate cache on Node1, verify hash matches |
 
 Force-push after fixing:
 ```bash

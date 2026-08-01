@@ -165,7 +165,7 @@ def step_no_plan_cycle(context, sec):
     the system is idle'), a new solve fired and the assertion fails.
 
     Uses 500 ms poll interval so a spurious solve firing within the window is
-    reliably detected even on Pi4 ARM64.
+    reliably detected even on Node1 ARM64.
     """
     baseline_ts = getattr(context, "idle_plan_ts", None)
     assert baseline_ts is not None, (

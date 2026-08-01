@@ -531,7 +531,7 @@ For experimentation, any simulated physics parameter can be overridden via the A
 
 **Mode C — frozen + snap — rationale:** Mode C applies to fields that have no meaningful "natural return trajectory". For example, `ev_soc_target` is a configuration value, not a physics state — there is no EMA blend-back to a natural value. Similarly, `ev_plugged` is a discrete boolean, `ambient_temp_c` is an external boundary condition, and grid limits are VTN-imposed thresholds. Releasing any of these with EMA blending (Mode B) would produce nonsensical intermediate values. Mode C simply holds the overridden value until explicitly released, then snaps to the profile default. In the UI, Mode C fields appear as persistent override inputs that stay active until the user clears them — they are not self-resetting.
 
-**Mode B correctness note:** a manual override in Mode B must keep winning over the live weather feed (PV) for the entire EMA decay window, not just the tick it was posted on — a bug where weather resumed at full strength one tick after a single `pv_irradiance` POST (before the offset had meaningfully decayed) was found and fixed on Pi4 (2026-07-25); see `PvSmoothingState::manual_override_active` in `VEN/src/simulator/pv_smoothing.rs`.
+**Mode B correctness note:** a manual override in Mode B must keep winning over the live weather feed (PV) for the entire EMA decay window, not just the tick it was posted on — a bug where weather resumed at full strength one tick after a single `pv_irradiance` POST (before the offset had meaningfully decayed) was found and fixed on Node1 (2026-07-25); see `PvSmoothingState::manual_override_active` in `VEN/src/simulator/pv_smoothing.rs`.
 
 **Why `pv_plan_kw` is planning-only (Mode D):** The MILP planner needs a PV forecast (what will PV generate over the next 24 hours?) to optimise battery and EV charging schedules. `pv_plan_kw` overrides this forecast *inside the solver* without touching the physics simulation. The real PV simulator continues running its irradiance model and its output continues to appear in `GET /history/pv` and the real-time grid balance. The timeline (`GET /timeline/pv`) shows the *planned* PV trajectory, which will reflect the override; `GET /history/pv` shows actual simulated output. This separation is intentional: you can test "what if PV generates flat 5 kW?" in the planner without corrupting the physics state, which matters for absorption/deviation calculations.
 
@@ -748,7 +748,7 @@ minimise Σ_{t=0}^{n-1} [
 subject to: phase1_cost_expr(Phase2_vars) ≤ c_star + phase2_epsilon_eur
 ```
 
-The warm-start hint provides Phase 1's solution as the initial MIP incumbent, so Phase 2 immediately has a feasible integer point (important for solving in time on the Pi4's ARM CPU).
+The warm-start hint provides Phase 1's solution as the initial MIP incumbent, so Phase 2 immediately has a feasible integer point (important for solving in time on the Node1's ARM CPU).
 
 #### Independence of objectives
 
@@ -986,7 +986,7 @@ This keeps domain logic free of infrastructure concerns and makes all external d
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Raspberry Pi 4  (Docker Compose — Pi4)          │
+│  Raspberry Pi 4  (Docker Compose — Node1)          │
 │                                                         │
 │  ┌─────────────────────────────────────────────────┐    │
 │  │  VTN Stack                                      │    │
@@ -1337,7 +1337,7 @@ Six core flows (full sequence diagrams in [`docs/architecture/VTN_ARCHITECTURE.m
 | `vtn-bff-1` | 8220 | Rust Axum BFF |
 | `vtn-ui-1` | 8221 | React VTN UI (nginx) |
 
-**Docker network:** `vtn_openadr-net` (named from compose project `vtn`). VEN compose files join it as `external: true`. Container-to-container DNS uses Docker service names (`vtn`, `ven-1`, etc.). Host access uses `Pi4:<host-port>`.
+**Docker network:** `vtn_openadr-net` (named from compose project `vtn`). VEN compose files join it as `external: true`. Container-to-container DNS uses Docker service names (`vtn`, `ven-1`, etc.). Host access uses `Node1:<host-port>`.
 
 **Compose layout:**
 ```
@@ -1488,13 +1488,13 @@ directive drives it yet, and the MILP still plans only within the comfort band.
 
 ## 6. Deployment
 
-### Running on Pi4
+### Running on Node1
 
-All Docker operations run via SSH on the Pi4 in `/srv/docker/openadr_lab`.
+All Docker operations run via SSH on Node1 in `/srv/docker/openadr_lab`.
 
 **Start the full stack:**
 ```sh
-ssh Pi4
+ssh Node1
 cd /srv/docker/openadr_lab
 docker compose up -d
 ```
@@ -1520,7 +1520,7 @@ wsl cargo check          # inside VEN/
 wsl cargo test           # unit tests only
 ```
 
-For full integration tests including HiGHS, use the Pi4 Docker stack.
+For full integration tests including HiGHS, use the Node1 Docker stack.
 
 ### VEN UI
 

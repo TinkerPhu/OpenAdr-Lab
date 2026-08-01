@@ -122,7 +122,7 @@ pub struct BatteryConfigBody {
 ///
 /// Reads the pre-computed schema from `AppCtx.sim_schema`. Does NOT acquire
 /// the sim mutex, so it remains responsive even while the MILP planner is
-/// running (10-24s on Pi4).
+/// running (10-24s on Node1).
 pub async fn get_sim_schema(State(ctx): State<AppCtx>) -> impl IntoResponse {
     debug!("GET /sim/schema: returning pre-computed schema");
     let schema = (*ctx.sim_schema).clone();
@@ -319,7 +319,7 @@ mod tests {
     /// That makes `body.$field` `None` (indistinguishable from "absent") for an
     /// explicit `null`, so `merge_f64!`'s `if let Some(v) = body.$field` branch
     /// never fires and the field is silently never cleared — confirmed live on
-    /// Pi4 for both `pv_generation_limit_kw` and the pre-existing
+    /// Node1 for both `pv_generation_limit_kw` and the pre-existing
     /// `grid_export_limit_kw`.
     #[test]
     fn post_body_null_actually_clears_via_real_json_deserialization() {

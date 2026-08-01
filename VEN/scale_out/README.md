@@ -17,7 +17,7 @@ top-level directory (next to `VEN/`/`VTN/`) would wrongly suggest otherwise.
   primary host's own `VEN/docker-compose.yml` (ven-1/2/3/ui) deliberately is
   **not** part of this numbering scheme and was not renamed/moved into a
   `node1/` — it's the established, working production path (referenced by
-  the `deploy-pi4` skill and `CLAUDE.md`), and moving it purely for numbering
+  the `deploy-node1` skill and `CLAUDE.md`), and moving it purely for numbering
   symmetry would be real churn on something that already works. So
   numbering starts at 2, not because a `node1` exists somewhere, but because
   each `nodeN/` here is conceptually "the Nth additional host beyond the
@@ -25,8 +25,8 @@ top-level directory (next to `VEN/`/`VTN/`) would wrongly suggest otherwise.
 
 ## What a `nodeN/` directory contains
 
-Using `node2/` (currently `Po4`, 192.168.1.104, running `ven-4`, administered
-by the primary host's VTN — currently `Pi4`, 192.168.1.103 — over the real
+Using `node2/` (currently `Node2`, 192.168.1.104, running `ven-4`, administered
+by the primary host's VTN — currently `Node1`, 192.168.1.103 — over the real
 LAN, since a second machine can't join the primary host's Docker network or
 resolve `vtn`/`bff` by Docker DNS) as the concrete example:
 
@@ -55,7 +55,7 @@ profiles are VEN-application config, independent of which host runs them.
 
 ## Bringing a node up on a fresh host
 
-See `docs/history/project_journal.md` ("Po4 — a second Pi4 extending the
+See `docs/history/project_journal.md` ("Node2 — a second Node1 extending the
 fleet") for `node2`'s original narrative, and the plan history for the exact
 reprovisioning steps (Docker install, sparse git checkout, `chown`, `docker
 compose up`, then rerun `scripts/seed_vtn.py` to restore the VTN-side

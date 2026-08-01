@@ -32,10 +32,10 @@ History is kept as in-memory `VecDeque` ring buffers (3600 rows per asset), not 
 ## Build & Deploy
 
 ```bash
-# VTN stack (first build ~25 min on Pi4, ~5 min x86)
+# VTN stack (first build ~25 min on Node1, ~5 min x86)
 cd VTN && docker compose up -d --build
 
-# VEN stack (first build ~11 min on Pi4, ~2 min x86)
+# VEN stack (first build ~11 min on Node1, ~2 min x86)
 cd VEN && docker compose up -d --build
 
 # Seed demo programs/events
@@ -55,10 +55,10 @@ cd VTN/ui && npm test
 
 Test files live in `src/__tests__/<ComponentName>.test.tsx`.
 
-### Run a single BDD feature or scenario (Pi4)
+### Run a single BDD feature or scenario (Node1)
 
 ```bash
-ssh Pi4
+ssh Node1
 cd /srv/docker/openadr_lab
 
 # Single feature file
@@ -111,7 +111,7 @@ SQLX_OFFLINE=true cargo test --workspace
 
 ### Playwright timeouts
 
-All `wait_for_selector` / navigation calls must use **≥ 20000 ms** timeout (Pi4 ARM64 is slow under full-suite load).
+All `wait_for_selector` / navigation calls must use **≥ 20000 ms** timeout (Node1 ARM64 is slow under full-suite load).
 
 ### React component style (from `docs/guidelines/REACT_GUIDELINES.md`)
 

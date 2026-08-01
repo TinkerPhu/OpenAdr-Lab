@@ -56,7 +56,7 @@ triggers a replan the same way `grid_import_limit_kw`/`grid_export_limit_kw` do 
 top-level JSON `null` to Rust `None` before `T::deserialize` ever runs — so an explicit
 `{"field": null}` request body was indistinguishable from the field being absent entirely,
 making the documented null-clear behaviour structurally unreachable via real HTTP calls
-(confirmed live on Pi4 for both `pv_generation_limit_kw` and `grid_export_limit_kw`). Every
+(confirmed live on Node1 for both `pv_generation_limit_kw` and `grid_export_limit_kw`). Every
 field now deserializes through a `double_option` helper (`Option<Option<T>>`), restoring the
 three-way absent/null/value distinction the endpoint's doc comment always claimed. The
 original unit tests only constructed `PostSimInjectBody` directly in Rust, bypassing real JSON

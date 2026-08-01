@@ -2,8 +2,8 @@
 
 This manual explains how to replay all 8 use cases from `SYSTEM-USE-CASES.md` against the running OpenADR lab. Each use case includes the real-world motivation, a concrete example, and step-by-step UI instructions.
 
-**VTN UI:** http://Pi4:8221
-**VEN UI:** http://Pi4:8214
+**VTN UI:** http://Node1:8221
+**VEN UI:** http://Node1:8214
 
 ### Timestamps and Time Zones
 
@@ -19,8 +19,8 @@ When you see a timestamp like `2026-02-15T20:00:00+01:00`, that means "8 PM loca
 
 ### Verify the System Is Running
 
-1. Open the **VTN UI** at http://Pi4:8221 — the health chip in the top bar should show **"VTN: ok"** (green)
-2. Open the **VEN UI** at http://Pi4:8214 — the health chip should show **"ok"** (green) for the selected VEN
+1. Open the **VTN UI** at http://Node1:8221 — the health chip in the top bar should show **"VTN: ok"** (green)
+2. Open the **VEN UI** at http://Node1:8214 — the health chip should show **"ok"** (green) for the selected VEN
 
 ### Understanding the Flow
 
@@ -55,7 +55,7 @@ It's a 42°C afternoon in August. Air conditioning across the city is running at
 
 ### Step-by-Step Replay (Web UI)
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 1. Navigate to **Programs** page
 2. Click **"Create"** button
@@ -73,7 +73,7 @@ It's a 42°C afternoon in August. Air conditioning across the city is running at
     ```
 12. Click **"Create"**
 
-**VEN UI** (http://Pi4:8214):
+**VEN UI** (http://Node1:8214):
 
 13. Select **VEN1** in the VEN dropdown (top bar)
 14. Navigate to **Events** — verify `manual-emergency-loadshed` appears (wait up to 30s for polling)
@@ -84,7 +84,7 @@ It's a 42°C afternoon in August. Air conditioning across the city is running at
 19. Select Event: `manual-emergency-loadshed` from the dropdown
 20. Click **"Suggest Example"** → click **"Submit"**
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 21. Navigate to **Reports** — verify a report from `ven-1` appears with the matching event ID
 
@@ -100,7 +100,7 @@ It's a 42°C afternoon in August. Air conditioning across the city is running at
 
 When the grid emergency is over, the operator **edits** the event to add timing — this marks it as "completed" without deleting it. Events in OpenADR 3 are permanent contractual records; deletion may fail if reports reference the event.
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 1. Navigate to **Events** page
 2. Find `manual-emergency-loadshed` in the table
@@ -109,7 +109,7 @@ When the grid emergency is over, the operator **edits** the event to add timing 
 5. Enter Duration: how long the curtailment lasted (e.g., `PT30M` for 30 minutes)
 6. Click **"Save"**
 
-**VEN UI** (http://Pi4:8214):
+**VEN UI** (http://Node1:8214):
 
 7. Select **VEN1** in the VEN dropdown
 8. Navigate to **Events** — the event now shows the start time and duration, marking it as a completed historical record
@@ -150,7 +150,7 @@ A neighborhood with heavy solar PV penetration is over-generating at noon. The d
 
 ### Step-by-Step Replay (Web UI)
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 1. Navigate to **Programs** page
 2. Click **"Create"**
@@ -181,7 +181,7 @@ A neighborhood with heavy solar PV penetration is over-generating at noon. The d
     Each interval is 2 minutes for quick observation. In production, these would be 20-minute windows.
 12. Click **"Create"**
 
-**VEN UI** (http://Pi4:8214):
+**VEN UI** (http://Node1:8214):
 
 13. Select **VEN2** in the VEN dropdown
 14. Navigate to **Events** — verify `manual-export-limit` appears with 3 intervals
@@ -219,7 +219,7 @@ A utility publishes tomorrow's hourly electricity prices: $0.06/kWh at 3 AM (off
 
 ### Step-by-Step Replay (Web UI)
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 1. Navigate to **Programs** page
 2. Click **"Create"**
@@ -242,7 +242,7 @@ A utility publishes tomorrow's hourly electricity prices: $0.06/kWh at 3 AM (off
     Adjust the start times to your current local time. Each interval is 2 minutes for quick observation. In production, these would be hourly (PT1H) or longer.
 12. Click **"Create"**
 
-**VEN UI** (http://Pi4:8214):
+**VEN UI** (http://Node1:8214):
 
 13. Select **VEN1** in the VEN dropdown
 14. Navigate to **Events** — verify `manual-tou-pricing` appears
@@ -280,7 +280,7 @@ The grid operator sees that tomorrow at 2 PM, demand will peak at 95% of grid ca
 
 ### Step-by-Step Replay (Web UI)
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 1. Navigate to **Programs** page
 2. Click **"Create"**
@@ -300,7 +300,7 @@ The grid operator sees that tomorrow at 2 PM, demand will peak at 95% of grid ca
     ```
 14. Click **"Create"**
 
-**VEN UI** (http://Pi4:8214):
+**VEN UI** (http://Node1:8214):
 
 15. Select **VEN1** in the VEN dropdown
 16. Navigate to **Events** — verify `manual-peak-shave` appears with an intervalPeriod
@@ -335,7 +335,7 @@ A fleet of 50 EVs returns to the company parking garage at 5 PM and all plug in.
 
 ### Step-by-Step Replay (Web UI)
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 1. Navigate to **Programs** page
 2. Click **"Create"**
@@ -357,7 +357,7 @@ A fleet of 50 EVs returns to the company parking garage at 5 PM and all plug in.
     ```
 13. Click **"Create"**
 
-**VEN UI** (http://Pi4:8214):
+**VEN UI** (http://Node1:8214):
 
 14. Select **VEN2** in the VEN dropdown
 15. Navigate to **Events** — verify `manual-ev-charge-control` appears (enrolled in program AND targeted by event)
@@ -400,7 +400,7 @@ A 500 kWh community battery receives a 3-phase dispatch:
 
 ### Step-by-Step Replay (Web UI)
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 1. Navigate to **Programs** page
 2. Click **"Create"**
@@ -423,7 +423,7 @@ A 500 kWh community battery receives a 3-phase dispatch:
     Adjust the start times to your current local time. Each interval is 2 minutes for quick observation.
 12. Click **"Create"**
 
-**VEN UI** (http://Pi4:8214):
+**VEN UI** (http://Node1:8214):
 
 13. Select **VEN1** in the VEN dropdown
 14. Navigate to **Events** — verify `manual-battery-dispatch` appears with 3 intervals
@@ -461,7 +461,7 @@ Before the summer demand response season begins, the utility sends a "heartbeat"
 
 ### Step-by-Step Replay (Web UI)
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 1. Navigate to **Programs** page
 2. Click **"Create"**
@@ -479,7 +479,7 @@ Before the summer demand response season begins, the utility sends a "heartbeat"
     ```
 12. Click **"Create"**
 
-**VEN UI** (http://Pi4:8214):
+**VEN UI** (http://Node1:8214):
 
 13. Select **VEN1** in the VEN dropdown
 14. Navigate to **Events** — verify `manual-heartbeat` appears
@@ -490,7 +490,7 @@ Before the summer demand response season begins, the utility sends a "heartbeat"
 19. Navigate to **Reports** → click **"Submit Report"**
 20. Select Event: `manual-heartbeat` → click **"Suggest Example"** → click **"Submit"**
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 21. Navigate to **Reports** — verify reports from both `ven-1` and `ven-2` appear
 
@@ -521,7 +521,7 @@ At 1 PM, the grid operator creates a peak shaving event for 4-6 PM. At 3 PM, a l
 
 ### Step-by-Step Replay (Web UI)
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 1. Navigate to **Programs** page
 2. Click **"Create"**
@@ -539,19 +539,19 @@ At 1 PM, the grid operator creates a peak shaving event for 4-6 PM. At 3 PM, a l
     ```
 12. Click **"Create"**
 
-**VEN UI** (http://Pi4:8214):
+**VEN UI** (http://Node1:8214):
 
 13. Select **VEN1** in the VEN dropdown
 14. Navigate to **Events** — verify `manual-cancel-test` appears (wait up to 30s)
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 15. Navigate to **Events** page
 16. Find `manual-cancel-test` in the table
 17. Click the **delete icon** (trash can) on that event row
 18. In the confirmation dialog, click **"Delete"**
 
-**VEN UI** (http://Pi4:8214):
+**VEN UI** (http://Node1:8214):
 
 19. Select **VEN1** in the VEN dropdown (if not already selected)
 20. Navigate to **Events** — verify `manual-cancel-test` has **disappeared** (wait up to 30s for next poll)
@@ -572,13 +572,13 @@ At 1 PM, the grid operator creates a peak shaving event for 4-6 PM. At 3 PM, a l
 The seed script creates programs and events for all 8 use cases with realistic timing:
 
 ```bash
-python3 scripts/seed_vtn.py --vtn-url http://Pi4:8200
+python3 scripts/seed_vtn.py --vtn-url http://Node1:8200
 ```
 
 To also demo UC8 cancellation (creates event, waits 5s, deletes it):
 
 ```bash
-python3 scripts/seed_vtn.py --vtn-url http://Pi4:8200 --demo-cancel
+python3 scripts/seed_vtn.py --vtn-url http://Node1:8200 --demo-cancel
 ```
 
 The seed script is **idempotent** — safe to run multiple times. It updates existing programs and replaces stale events with fresh timings.
@@ -588,7 +588,7 @@ The seed script is **idempotent** — safe to run multiple times. It updates exi
 Run the full E2E test suite (all 8 use cases, API + UI):
 
 ```bash
-ssh Pi4 "cd /srv/docker/openadr_lab/tests && docker compose -f docker-compose.test.yml run --rm test"
+ssh Node1 "cd /srv/docker/openadr_lab/tests && docker compose -f docker-compose.test.yml run --rm test"
 ```
 
 This executes 49 scenarios (348 steps) including all use cases via both API calls and browser-driven UI interactions.
@@ -603,7 +603,7 @@ This executes 49 scenarios (348 steps) including all use cases via both API call
 ### Prerequisites
 
 ```bash
-TOKEN=$(curl -s -X POST http://Pi4:8200/auth/token \
+TOKEN=$(curl -s -X POST http://Node1:8200/auth/token \
   -d "grant_type=client_credentials&client_id=any-business&client_secret=any-business" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 ```
@@ -612,41 +612,41 @@ TOKEN=$(curl -s -X POST http://Pi4:8200/auth/token \
 
 ```bash
 # Create targeted program
-curl -s -X POST http://Pi4:8200/programs \
+curl -s -X POST http://Node1:8200/programs \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"programName": "manual-uc1-emergency", "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}]}' | python3 -m json.tool
 
 # Save PROGRAM_ID from response, then create event
-curl -s -X POST http://Pi4:8200/events \
+curl -s -X POST http://Node1:8200/events \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-emergency-loadshed", "priority": 0, "intervals": [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [0]}]}]}' | python3 -m json.tool
 
 # Verify VEN-1 received it
-curl -s http://Pi4:8211/events | python3 -m json.tool
+curl -s http://Node1:8211/events | python3 -m json.tool
 
 # Verify VEN-2 did NOT receive it
-curl -s http://Pi4:8212/events | python3 -m json.tool
+curl -s http://Node1:8212/events | python3 -m json.tool
 
 # Submit report from VEN-1
-EVENT_ID=$(curl -s http://Pi4:8211/events | python3 -c "import sys,json; evts=json.load(sys.stdin); print(next(e['id'] for e in evts if e['eventName']=='manual-emergency-loadshed'))")
-curl -s -X POST http://Pi4:8211/reports \
+EVENT_ID=$(curl -s http://Node1:8211/events | python3 -c "import sys,json; evts=json.load(sys.stdin); print(next(e['id'] for e in evts if e['eventName']=='manual-emergency-loadshed'))")
+curl -s -X POST http://Node1:8211/reports \
   -H "Content-Type: application/json" \
   -d '{"programID": "'$PROGRAM_ID'", "eventID": "'$EVENT_ID'", "clientName": "ven-1", "resources": []}' | python3 -m json.tool
 
 # Verify report in VTN
-curl -s http://Pi4:8200/reports -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+curl -s http://Node1:8200/reports -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
 ```
 
 ### UC2 — Renewable Export Limitation
 
 ```bash
-curl -s -X POST http://Pi4:8200/programs \
+curl -s -X POST http://Node1:8200/programs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programName": "manual-uc2-export", "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}]}' | python3 -m json.tool
 
-curl -s -X POST http://Pi4:8200/events \
+curl -s -X POST http://Node1:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-export-limit", "priority": 5, "intervals": [{"id": 0, "intervalPeriod": {"start": "'$(date -d '+0 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]}, {"id": 1, "intervalPeriod": {"start": "'$(date -d '+2 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [50.0]}]}, {"id": 2, "intervalPeriod": {"start": "'$(date -d '+4 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "EXPORT_CAPACITY_LIMIT", "values": [100.0]}]}]}' | python3 -m json.tool
 ```
@@ -654,11 +654,11 @@ curl -s -X POST http://Pi4:8200/events \
 ### UC3 — Dynamic Price Signal
 
 ```bash
-curl -s -X POST http://Pi4:8200/programs \
+curl -s -X POST http://Node1:8200/programs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programName": "manual-uc3-pricing", "targets": null}' | python3 -m json.tool
 
-curl -s -X POST http://Pi4:8200/events \
+curl -s -X POST http://Node1:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-tou-pricing", "priority": 5, "intervals": [{"id": 0, "intervalPeriod": {"start": "'$(date -d '+0 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.12]}]}, {"id": 1, "intervalPeriod": {"start": "'$(date -d '+2 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.35]}]}, {"id": 2, "intervalPeriod": {"start": "'$(date -d '+4 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "PRICE", "values": [0.15]}]}]}' | python3 -m json.tool
 ```
@@ -666,11 +666,11 @@ curl -s -X POST http://Pi4:8200/events \
 ### UC4 — Planned Peak Shaving
 
 ```bash
-curl -s -X POST http://Pi4:8200/programs \
+curl -s -X POST http://Node1:8200/programs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programName": "manual-uc4-peak", "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}, {"type": "VEN_NAME", "values": ["ven-2"]}]}' | python3 -m json.tool
 
-curl -s -X POST http://Pi4:8200/events \
+curl -s -X POST http://Node1:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-peak-shave", "priority": 3, "intervalPeriod": {"start": "2026-03-01T15:00:00+01:00", "duration": "PT4H"}, "intervals": [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [50.0]}]}]}' | python3 -m json.tool
 ```
@@ -679,12 +679,12 @@ curl -s -X POST http://Pi4:8200/events \
 
 ```bash
 # Enroll both ven-2 and ven-3 in the program
-curl -s -X POST http://Pi4:8200/programs \
+curl -s -X POST http://Node1:8200/programs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programName": "manual-uc5-ev", "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}, {"type": "VEN_NAME", "values": ["ven-3"]}]}' | python3 -m json.tool
 
 # Target only ven-2 in the event (ven-3 enrolled but not targeted)
-curl -s -X POST http://Pi4:8200/events \
+curl -s -X POST http://Node1:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-ev-charge-control", "priority": 2, "targets": [{"type": "VEN_NAME", "values": ["ven-2"]}], "intervals": [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [0.0]}]}]}' | python3 -m json.tool
 ```
@@ -692,11 +692,11 @@ curl -s -X POST http://Pi4:8200/events \
 ### UC6 — Battery Dispatch Window
 
 ```bash
-curl -s -X POST http://Pi4:8200/programs \
+curl -s -X POST http://Node1:8200/programs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programName": "manual-uc6-battery", "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}]}' | python3 -m json.tool
 
-curl -s -X POST http://Pi4:8200/events \
+curl -s -X POST http://Node1:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-battery-dispatch", "priority": 3, "intervals": [{"id": 0, "intervalPeriod": {"start": "'$(date -d '+0 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [80.0]}]}, {"id": 1, "intervalPeriod": {"start": "'$(date -d '+2 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [0.0]}]}, {"id": 2, "intervalPeriod": {"start": "'$(date -d '+4 min' +%Y-%m-%dT%H:%M:%S%:z)'", "duration": "PT2M"}, "payloads": [{"type": "CHARGE_STATE_SETPOINT", "values": [-50.0]}]}]}' | python3 -m json.tool
 ```
@@ -704,40 +704,40 @@ curl -s -X POST http://Pi4:8200/events \
 ### UC7 — Connectivity Check
 
 ```bash
-curl -s -X POST http://Pi4:8200/programs \
+curl -s -X POST http://Node1:8200/programs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programName": "manual-uc7-connectivity", "targets": null}' | python3 -m json.tool
 
-curl -s -X POST http://Pi4:8200/events \
+curl -s -X POST http://Node1:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-heartbeat", "priority": 5, "intervals": [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [0]}]}]}' | python3 -m json.tool
 
 # Submit reports from VENs
-EVENT_ID=$(curl -s http://Pi4:8211/events | python3 -c "import sys,json; evts=json.load(sys.stdin); print(next(e['id'] for e in evts if e['eventName']=='manual-heartbeat'))")
+EVENT_ID=$(curl -s http://Node1:8211/events | python3 -c "import sys,json; evts=json.load(sys.stdin); print(next(e['id'] for e in evts if e['eventName']=='manual-heartbeat'))")
 
-curl -s -X POST http://Pi4:8211/reports -H "Content-Type: application/json" \
+curl -s -X POST http://Node1:8211/reports -H "Content-Type: application/json" \
   -d '{"programID": "'$PROGRAM_ID'", "eventID": "'$EVENT_ID'", "clientName": "ven-1", "resources": []}' | python3 -m json.tool
 
-curl -s -X POST http://Pi4:8212/reports -H "Content-Type: application/json" \
+curl -s -X POST http://Node1:8212/reports -H "Content-Type: application/json" \
   -d '{"programID": "'$PROGRAM_ID'", "eventID": "'$EVENT_ID'", "clientName": "ven-2", "resources": []}' | python3 -m json.tool
 ```
 
 ### UC8 — Event Cancellation
 
 ```bash
-curl -s -X POST http://Pi4:8200/programs \
+curl -s -X POST http://Node1:8200/programs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programName": "manual-uc8-cancel", "targets": [{"type": "VEN_NAME", "values": ["ven-1"]}]}' | python3 -m json.tool
 
-curl -s -X POST http://Pi4:8200/events \
+curl -s -X POST http://Node1:8200/events \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"programID": "'$PROGRAM_ID'", "eventName": "manual-cancel-test", "priority": 5, "intervals": [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [1]}]}]}' | python3 -m json.tool
 
 # Save EVENT_ID, verify VEN-1 received it, then delete
-curl -s -X DELETE http://Pi4:8200/events/$EVENT_ID -H "Authorization: Bearer $TOKEN"
+curl -s -X DELETE http://Node1:8200/events/$EVENT_ID -H "Authorization: Bearer $TOKEN"
 
 # Verify VEN-1 no longer has the event
-curl -s http://Pi4:8211/events | python3 -m json.tool
+curl -s http://Node1:8211/events | python3 -m json.tool
 ```
 
 </details>

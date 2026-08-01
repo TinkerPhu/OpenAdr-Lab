@@ -691,7 +691,7 @@ The heater contributes 2 binary variables per slot (`z_heat_mid`, `z_heat_full`)
 | 48 h × 15 min                |  192  |   384           | 0.7×          |
 | 48 h × 3-tier (5/10/15 min)  |  288  |   576           | 1.0×          |
 
-MILP branch-and-bound scaling is super-linear in binary count. On Pi4-Server (ARM64),
+MILP branch-and-bound scaling is super-linear in binary count. On Node1-Server (ARM64),
 the current 24 h plan uses 18–60 s. A uniform 48 h × 5 min plan would likely time out.
 
 ### Option 3a: Uniform coarser step (48 h × 10 min) — interim
@@ -781,7 +781,7 @@ grained optimal timing; new orchestration code in `tasks/planning.rs`.
 
 ### Recommendation for horizon extension
 
-**Start with Option 3a** (profile-only, benchmark solver time on Pi4 immediately). If
+**Start with Option 3a** (profile-only, benchmark solver time on Node1 immediately). If
 `solver_ms` stays under 40 s, this is a complete near-term solution. Implement
 c_terminal (Option 2) first — it is simpler and fixes the temperature ceiling on the
 existing 24 h horizon.
@@ -839,7 +839,7 @@ clear the terminal reward target in those cases.
 See "Horizon and Resolution Trade-offs" above for the full analysis.
 
 - **3a (interim, profile-only):** `plan_step_s: 600`, `plan_horizon_h: 48` — 288 slots,
-  same binary count, benchmark Pi4 solver time first.
+  same binary count, benchmark Node1 solver time first.
 - **3b (target):** 3-tier grid Zone A/B/C as described above, with `dt_h[t]` switching
   penalty scaling. The correct long-term generic architecture.
 - **3c (fallback):** Two-stage coarse/fine solve — only if 3b cannot meet the timeout.
@@ -1002,7 +1002,7 @@ Phase 1 cost. Observable in the live plan within one solar cycle.
 ### Priority 3 — Profile only, benchmark
 
 Implement Option 3a (`plan_step_s: 600`, `plan_horizon_h: 48`) and benchmark solver
-time on Pi4. Target: < 40 s. If met, keep as a complete near-term fix for
+time on Node1. Target: < 40 s. If met, keep as a complete near-term fix for
 phase-dependence. Monitor EV deadline precision.
 
 ### Priority 4 — Bounded refactor
@@ -1022,7 +1022,7 @@ Priorities 1–4. Implement in either order after Priority 2 is deployed and con
 - **Option 5** (minimum-on-time): superseded by Priorities 1–4 combined.
 - **Option 8** (two-zone MPC): defer until Option 7 is evaluated — Option 7 may be
   sufficient for plan stability.
-- **Option 3c** (two-stage solve): fallback only if Option 3b cannot meet the Pi4
+- **Option 3c** (two-stage solve): fallback only if Option 3b cannot meet the Node1
   solver timeout.
 
 ---

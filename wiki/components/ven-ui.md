@@ -45,7 +45,7 @@ React + TypeScript SPA (Vite build, nginx-served, port 8214) — the per-site da
   minimum axis span (`axisDomain.ts`) so near-flat cost/CO₂ lines don't render
   as noise. Build gate lessons: vitest/eslint don't typecheck — `npm run build`
   (tsc) is part of the local gates for UI-typed changes — and neither vitest
-  (jsdom, unbundled) nor tsc sees *production-bundle* breakage: only the Pi4
+  (jsdom, unbundled) nor tsc sees *production-bundle* breakage: only the Node1
   browser E2E exercises the built bundle. The toolchain is vite ^7 /
   vitest ^4 / plugin-react ^5; vite 8's rolldown bundler mis-resolves a MUI
   default-import interop at bundle time (React #130 at runtime with all unit

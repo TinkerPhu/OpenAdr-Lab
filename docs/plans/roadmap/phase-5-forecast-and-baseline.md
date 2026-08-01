@@ -13,7 +13,7 @@
 ## WP5.1/WP5.2 — done: SITE_RESIDUAL + AssetHeuristics (BL-08, BL-14)
 
 Both shipped and resolved in `docs/BACKLOG.md`. Architecture, design rationale, and
-Pi4 verification: `wiki/components/heuristics-pipeline.md` — the `site-residual`
+Node1 verification: `wiki/components/heuristics-pipeline.md` — the `site-residual`
 virtual asset, the EWMA-weighted weekday/weekend learner
 (`services/heuristics.rs`), and the daily seeding job feeding both the planner
 baseline and the Controller tab's forecast timeline.

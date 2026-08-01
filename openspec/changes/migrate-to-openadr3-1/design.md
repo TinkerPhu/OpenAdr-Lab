@@ -154,7 +154,7 @@ git push origin openadr3_1
 
 ## Risks / Trade-offs
 
-**R1: Long Pi4 build time after branch switch**
+**R1: Long Node1 build time after branch switch**
 → Mitigation: `openadr3_1` has a new migration file and likely new Cargo.lock entries.
 Expect a full rebuild (~25 min). Run during off-hours or accept the delay.
 

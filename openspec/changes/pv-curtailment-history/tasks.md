@@ -99,4 +99,4 @@
 - [ ] 9.2 `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings`
 - [ ] 9.3 `scripts/audit_file_sizes.py`
 - [ ] 9.4 VEN UI unit tests + `npm run build`
-- [ ] 9.5 Pi4 E2E + resilience suites green (pi4_lock) before merge
+- [ ] 9.5 Node1 E2E + resilience suites green (docker_host_lock) before merge

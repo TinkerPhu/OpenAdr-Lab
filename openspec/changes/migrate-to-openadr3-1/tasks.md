@@ -3,14 +3,14 @@
 - [ ] 1.1 Create `openadr3_1` branch in `TinkerPhu/openleadr-rs` fork from `upstream/openadr3_1`
 - [ ] 1.2 Push the branch to origin (`TinkerPhu/openleadr-rs`)
 - [ ] 1.3 Update the lab submodule pointer to `TinkerPhu/openleadr-rs@openadr3_1` and commit
-- [ ] 1.4 Verify `git submodule status` reflects the new commit hash on Pi4 after `git pull`
+- [ ] 1.4 Verify `git submodule status` reflects the new commit hash on Node1 after `git pull`
 
 ## 2. VTN — Fixture SQL and Docker deploy
 
 - [ ] 2.1 Write new `VTN/fixtures/users.sql` for 3.1 scope model: `bl-client` (read_all + write scopes) and `ven-1-client`, `ven-2-client`, `ven-3-client` (VEN scopes)
 - [ ] 2.2 Write `VTN/fixtures/credentials.sql` with hashed secrets for all four clients
 - [ ] 2.3 Update `VTN/docker-compose.yml` to mount new fixture SQL instead of old role-based fixtures
-- [ ] 2.4 Deploy VTN on Pi4: `docker compose down vtn && docker compose up --build -d vtn` (⚠️ wipes DB)
+- [ ] 2.4 Deploy VTN on Node1: `docker compose down vtn && docker compose up --build -d vtn` (⚠️ wipes DB)
 - [ ] 2.5 Validate: `POST /auth/token` with `bl-client`/`bl-client` returns a token (HTTP 200)
 - [ ] 2.6 Validate: `POST /auth/token` with `ven-1-client`/`ven-1-client` returns a token (HTTP 200)
 - [ ] 2.7 Validate: `GET /programs` with `bl-client` token returns HTTP 200 with empty array
@@ -21,7 +21,7 @@
 - [ ] 3.2 Rewrite `VTN/bff/src/vtn_client.rs` to use a single `VtnClient` with `bl-client` credential
 - [ ] 3.3 Remove dual-client route switching in `VTN/bff/src/routes/`; all routes use the single client
 - [ ] 3.4 Update `VTN/docker-compose.yml` BFF env vars (`BL_CLIENT_ID=bl-client`, `BL_CLIENT_SECRET=bl-client`)
-- [ ] 3.5 Deploy BFF on Pi4: `docker compose up --build -d bff`
+- [ ] 3.5 Deploy BFF on Node1: `docker compose up --build -d bff`
 - [ ] 3.6 Validate: `GET /api/programs`, `GET /api/events`, `GET /api/vens` all return HTTP 200 via BFF
 
 ## 4. VEN App — Wire format and self-registration
@@ -48,7 +48,7 @@
 
 ## 6. VEN Deploy and Validate
 
-- [ ] 6.1 Deploy 3 VEN instances on Pi4: `docker compose up --build -d` (⚠️ full rebuild ~11 min)
+- [ ] 6.1 Deploy 3 VEN instances on Node1: `docker compose up --build -d` (⚠️ full rebuild ~11 min)
 - [ ] 6.2 Validate: each VEN self-registers — `GET /vens` (bl-client token) shows 3 VEN objects with correct `clientID` values
 - [ ] 6.3 Validate: `GET /sim` returns device state on each VEN (ports 8211, 8212, 8213)
 - [ ] 6.4 Validate: `GET /trace` returns an array on each VEN
@@ -74,7 +74,7 @@
 - [ ] 8.5 Update `Reports.tsx`: replace `programId` column with `eventID` column
 - [ ] 8.6 Run `npm run build` in `VTN/ui/`; fix TypeScript errors
 - [ ] 8.7 Run VTN UI unit tests (`npm test`); fix failures
-- [ ] 8.8 Deploy VTN UI on Pi4: `docker compose up --build -d ui`
+- [ ] 8.8 Deploy VTN UI on Node1: `docker compose up --build -d ui`
 - [ ] 8.9 Smoke-test in browser: create a program, view VENs with clientID, check reports page
 
 ## 9. VEN UI — Update for 3.1 wire format
@@ -85,7 +85,7 @@
 - [ ] 9.4 Update `Simulation.tsx`: adapt to new `GET /sim` response shape from redesigned simulator; remove override controls
 - [ ] 9.5 Run `npm run build` in `VEN/ui/`; fix TypeScript errors
 - [ ] 9.6 Run VEN UI unit tests (`npm test`); fix failures
-- [ ] 9.7 Deploy VEN UI on Pi4: `docker compose up --build -d ui`
+- [ ] 9.7 Deploy VEN UI on Node1: `docker compose up --build -d ui`
 - [ ] 9.8 Smoke-test in browser: view programs (enrolled), reports (eventID), simulation page
 
 ## 10. Integration Tests — Update for 3.1
@@ -95,7 +95,7 @@
 - [ ] 10.3 Update enrollment steps: use flat `targets: ["ven-1-client"]` instead of `{type:"VEN_NAME", values:["ven-1"]}`
 - [ ] 10.4 Update report assertion steps: assert `eventID` present, assert `programId` absent
 - [ ] 10.5 Add scenario: "VEN self-registers against the VTN" (happy path + 409 idempotency)
-- [ ] 10.6 Run full BDD suite on Pi4; fix failures
+- [ ] 10.6 Run full BDD suite on Node1; fix failures
 - [ ] 10.7 Verify all scenarios pass: enrollment, events, reports, privacy filtering
 
 ## 11. Documentation

@@ -28,11 +28,11 @@ good_lp = { version = "1", features = ["highs"], default-features = false }
 tokio-stream = { version = "0.1", features = ["sync"] }
 async-trait = "0.1"
 # Phase 1 (A-1) history store. "bundled" vendors sqlite3 (public domain) — no
-# cmake/system dependency issue on WSL or Pi4 ARM. MIT licence.
+# cmake/system dependency issue on WSL or Node1 ARM. MIT licence.
 rusqlite = { version = "0.32", features = ["bundled"] }
 
 # Weather forecast plugin (MQTT adapter for WeatherForecastPort). Pure-Rust,
-# tokio-native, no C bindings — cross-compiles cleanly for the Pi4 ARM64 target.
+# tokio-native, no C bindings — cross-compiles cleanly for the Node1 ARM64 target.
 # default-features off: rumqttc's default "use-rustls" pulls a rustls-webpki
 # with 4 known advisories (RUSTSEC-2026-0098/0099/0104, RUSTSEC-2025-0134).
 # We only connect plaintext MQTT to the local Mosquitto broker (port 1883)

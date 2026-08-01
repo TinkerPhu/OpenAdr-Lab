@@ -225,7 +225,7 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | GB-11 | Remaining AI-SW-Development alignment items (from the retired root alignment-plan.md, Pass 3): backlog-handling + tool-installation + archive-folder notes in CLAUDE.md; USER_STORIES.md; RISK_ANALYSIS.md; PROMPT_LIBRARY.md; changelog decision (journal-as-changelog note); security-review cadence; automated code-review hook; file-header descriptions on key VEN modules | Low | Low |
 | GB-12 | BDD scenario for `Plan.solve_status == Infeasible` on `/plan`/`/plan/events`. Unit-level coverage exists (`run_planner_infeasible_constraints_fallback_no_panic` plus new solve_status assertions); no BDD scenario forces an infeasible solve today because doing so needs a fixture heavier than the existing `InfeasibleBatCtx` test double, which isn't exposed at the BDD/E2E layer | Low | Low |
 | GB-13 | Wire the Event Log's SSE stream (`GET /events/log/events`) into the UI — `useEventLog()` (`VEN/ui/src/api/hooks.ts`) still polls every 10s; the backend route works but nothing consumes it | Low-Medium — removes needless polling overhead, minor UX win | Low |
-| GB-14 | Create a dedicated SSH key pair for the `Pi4` host instead of falling back to the default `id_rsa` — checked 2026-07-31: `~/.ssh/config`'s `Pi4` entry has no `IdentityFile`, so it authenticates with whatever default identity (`id_rsa`) the server happens to accept, unlike `Po4` which already has its own pinned `id_ed25519_po4` key | Low — security/hygiene hardening, no functional gap | Low |
+| GB-14 | Create a dedicated SSH key pair for the `Node1` host instead of falling back to the default `id_rsa` — checked 2026-07-31: `~/.ssh/config`'s `Node1` entry has no `IdentityFile`, so it authenticates with whatever default identity (`id_rsa`) the server happens to accept, unlike `Node2` which already has its own pinned identity file | Low — security/hygiene hardening, no functional gap | Low |
 
 ---
 
@@ -252,7 +252,7 @@ sqlx driver that is never enabled (the BFF pins
 features in the lockfile, and `cargo audit` scans the lockfile, hence the hit. No fixed
 `rsa` release exists upstream. Accept and re-check on sqlx upgrades.
 
-**Risk context:** Lab/Pi4 deployment — not internet-exposed. Re-run both audits before
+**Risk context:** Lab/Node1 deployment — not internet-exposed. Re-run both audits before
 any internet-exposed deployment.
 
 ---
@@ -285,7 +285,7 @@ item from this backlog once resolved.
       step when avoidance is cheaper.
 - [ ] 1.5 Unit tests for the three cases: threshold not exceeded (no change); exceeded but
       avoidance costlier (penalty accepted); exceeded and avoidance cheaper (reschedule).
-- [ ] 1.6 Full verification, including the new BDD scenario on Pi4 (`bash run_all_tests.sh
+- [ ] 1.6 Full verification, including the new BDD scenario on Node1 (`bash run_all_tests.sh
       --e2e`); update `docs/history/project_journal.md`; remove BL-09 from this backlog.
 - [ ] 1.7 Note for later (not in this list): BL-35's tier-fallback notification producers
       become buildable once this lands.

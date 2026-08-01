@@ -6,7 +6,7 @@
 
 ## Foundation (Phases 1–14)
 
-Deployed a Pi4-hosted OpenADR 3 lab: VTN (openleadr-rs + PostgreSQL), three VEN instances, VEN UI, VTN BFF, and VTN UI — all communicating over Docker bridge network `openadr-net`.
+Deployed a Node1-hosted OpenADR 3 lab: VTN (openleadr-rs + PostgreSQL), three VEN instances, VEN UI, VTN BFF, and VTN UI — all communicating over Docker bridge network `openadr-net`.
 
 ### VTN API Shape Discoveries
 
@@ -27,9 +27,9 @@ Deployed a Pi4-hosted OpenADR 3 lab: VTN (openleadr-rs + PostgreSQL), three VEN 
 ### Infrastructure Constraints
 
 - Docker Compose project name defaults to the directory name. A service named `vtn-db` in a directory called `VTN/` produces container `vtn-vtn-db-1`. Name services without the directory prefix.
-- Docker Compose `${VAR:-default}` values are silently overridden by `.env` files. Check `.env` on both local and Pi4 when changing defaults.
-- All OpenADR Lab services use the `82xx` port range to avoid conflicts with existing Pi4 containers.
-- Pi4's mDNS name is `pi4.local` (via mDNS/Avahi, explicit `host-name=pi4` override in `/etc/avahi/avahi-daemon.conf`), not `raspberrypi.local` or the older `pi4server.local`.
+- Docker Compose `${VAR:-default}` values are silently overridden by `.env` files. Check `.env` on both local and Node1 when changing defaults.
+- All OpenADR Lab services use the `82xx` port range to avoid conflicts with existing Node1 containers.
+- Node1's mDNS name is `node1.local` (via mDNS/Avahi, explicit `host-name=node1` override in `/etc/avahi/avahi-daemon.conf`), not `raspberrypi.local` or the older `node1server.local`.
 - Vite builds fail when run from Windows `subst` drive aliases — Vite resolves the real path internally causing mismatches. Build from the real path `C:\DriveD\...` or in Docker.
 - `npm ci` requires `package-lock.json` to be in sync with `package.json`. Always run `npm install` locally and commit the lock file before Docker builds.
 
@@ -94,7 +94,7 @@ Built a physics-based simulator (EV charger, heater, PV inverter, battery) with 
 
 - **Three independent locks** (R-07): `AppState` uses `polling: Arc<RwLock<>>`, `ctrl_sim: Arc<RwLock<>>`, `hems: Arc<RwLock<>>`. INVARIANT: no function acquires more than one lock simultaneously.
 
-- **`PersistedVenState` struct** maintains identical `state.json` format across the lock split — existing Pi4 state files load without migration.
+- **`PersistedVenState` struct** maintains identical `state.json` format across the lock split — existing Node1 state files load without migration.
 
 ### Architecture Invariant Greps (run before any VEN PR)
 
@@ -110,13 +110,13 @@ The `TimelineSnapshot` / `TimelineAssetData` pattern: `SimState::to_timeline_sna
 
 ### MILP Planner Design
 
-- HiGHS is the MILP solver. It requires cmake/HiGHS to be available at compile time — not available natively on Windows. Use `wsl cargo build` for local builds; Pi4 Docker for full runs.
+- HiGHS is the MILP solver. It requires cmake/HiGHS to be available at compile time — not available natively on Windows. Use `wsl cargo build` for local builds; Node1 Docker for full runs.
 - Two-phase solve: Phase 1 minimises cost; Phase 2 minimises relay switches while staying within `phase2_epsilon_eur` of the Phase 1 cost.
 - `dt_h: Vec<f64>` (not scalar) enables variable-slot-width zones. Uniform plans use `vec![step_h; n]` — the interface is zone-ready without behavioural change.
 - **3-tier zones** (current state on `refactor/3-tier-milp`): Zone A = 300 s × 96 slots (8 h), Zone B = 600 s × 96 (16 h), Zone C = 900 s × 96 (24 h) = 288 slots total. Central abstraction: `cum_s: Vec<i64>` where `cum_s[t]` = seconds from now to slot `t` start.
 - `resample_uniform` aligns to epoch-based grid boundaries. Planner slots start at `now` (arbitrary seconds). **The HashMap lookup pattern always returns `None`** for tariff lookups. Use `interpolate_at(slot_start)` per slot instead.
 - LOCF extends a single Step tariff sample forward indefinitely. Use two-interval event design (target price + reset-to-default interval) to prevent tariff contamination of all subsequent slots.
-- MILP solve time: 5–10 s on an unloaded Pi4; 80–120 s under 3-VEN concurrent load (CPU contention). BDD timeouts must accommodate the worst-case loaded scenario.
+- MILP solve time: 5–10 s on an unloaded Node1; 80–120 s under 3-VEN concurrent load (CPU contention). BDD timeouts must accommodate the worst-case loaded scenario.
 - `f64::MAX` is used as a sentinel for "no capacity limit" — `isFinite(Number.MAX_VALUE)` returns `true` in JS. Use a threshold check (`< 1e15`) in TypeScript.
 
 ### Sim Inject API
@@ -145,7 +145,7 @@ The `TimelineSnapshot` / `TimelineAssetData` pattern: `SimState::to_timeline_sna
 
 ### Timeline API
 
-- Server-side `max_points` downsampling is essential for constrained hardware. 3600 rows/asset × 5 assets = browser freeze on Pi4 ARM. Default 120 points.
+- Server-side `max_points` downsampling is essential for constrained hardware. 3600 rows/asset × 5 assets = browser freeze on Node1 ARM. Default 120 points.
 - All assets share identical `ts` values at each index (uniform grid) — enables positional indexing instead of tolerance-based nearest-neighbour matching.
 - Grid snapped to round boundaries of `resolution_s` — deterministic regardless of call time.
 - Now-point is NOT grid-aligned; it sits between history and future at exact server `now`. Required because the UI cannot interpolate without knowing the interpolation method.
@@ -165,7 +165,7 @@ The `TimelineSnapshot` / `TimelineAssetData` pattern: `SimState::to_timeline_sna
 - Playwright `wait_for_selector` timeout with "locator resolved to visible" in call log = JS thread blocked (CPU overload), not a missing element.
 - Behave `{param}` captures are greedy — `{hours_back}` matches `0&hours_forward=1`. Avoid step patterns that partially overlap with generic steps.
 - `docker compose run --build` only rebuilds the named service image, NOT `depends_on` images. Explicitly `docker compose build <service>` after source changes to dependent services.
-- Docker named volumes survive Pi4 power cycles — cargo compiled artifacts are not lost.
+- Docker named volumes survive Node1 power cycles — cargo compiled artifacts are not lost.
 - Bash `exit code 1` from nohup over SSH ≠ process failed — nohup writes to stderr. Always `docker ps` to verify before concluding a background launch failed.
 
 ---
@@ -201,4 +201,4 @@ Addressed heater under-utilisation (40°C instead of full 40–80°C band) and e
 - **`@upstream_pending` scenarios**: 2 VEN isolation report tests tagged to skip in CI because they depend on upstream PRs not yet merged.
 - **Reporter resampling (RF-05e)**: Multi-interval obligation reporting works; single-point fallback also works. Five complications remain for further improvement (obligation interval plumbing, import/export split, EV SoC point-in-time) — tracked in BACKLOG.
 - **Polling tasks still use concrete `VtnClient`** in some routes (`AppCtx.vtn` used by HTTP handlers). The `VtnPort` trait is wired for all tasks (`spawn_*`), but the routes layer still holds a concrete client — a future cleanup to complete Invariant 4 across all of `VEN/src/`.
-- **`deviation_absorber.feature:149`** (`DeviceDeviation does not fire for transient deviations`): marked `@wip`. Root causes: (1) T1+T2 trigger race where a second planning trigger queues while the first solve runs, and (2) time-of-day headroom — at solar-prep hours the MILP pre-discharges the battery, leaving insufficient headroom for the absorber assertion. Fixed for BDD by `pv_plan_kw` inject; the wip tag should be removed once confirmed green on Pi4.
+- **`deviation_absorber.feature:149`** (`DeviceDeviation does not fire for transient deviations`): marked `@wip`. Root causes: (1) T1+T2 trigger race where a second planning trigger queues while the first solve runs, and (2) time-of-day headroom — at solar-prep hours the MILP pre-discharges the battery, leaving insufficient headroom for the absorber assertion. Fixed for BDD by `pv_plan_kw` inject; the wip tag should be removed once confirmed green on Node1.

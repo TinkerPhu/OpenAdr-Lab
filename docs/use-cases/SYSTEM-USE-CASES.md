@@ -153,7 +153,7 @@ In OpenADR 3 (and openleadr-rs), there is no "cancel" status field on events. Ca
 - State consistency after cancel
 
 **Demo:**
-Run `python3 scripts/seed_vtn.py --vtn-url http://Pi4:8200 --demo-cancel` to create a `cancel-demo-event`, wait 5 seconds for VEN polling, then delete it.
+Run `python3 scripts/seed_vtn.py --vtn-url http://Node1:8200 --demo-cancel` to create a `cancel-demo-event`, wait 5 seconds for VEN polling, then delete it.
 
 ---
 

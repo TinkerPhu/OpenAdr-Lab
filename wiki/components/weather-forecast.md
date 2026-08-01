@@ -69,7 +69,7 @@ a broker connection can be up with a stale retained message, or vice versa), and
 chip on the VEN UI Weather page, per the `ui-transparency` rule. E2E coverage for this
 specific behaviour (R-56, resolved): `weather_forecast.feature` gained a scenario publishing a
 status-topic heartbeat and asserting `source_alive` flips `false`→`true`, mirroring the R-52
-unit test at BDD level. Its first real Pi4 run caught a step-decorator bug (the heartbeat-publish
+unit test at BDD level. Its first real Node1 run caught a step-decorator bug (the heartbeat-publish
 step was `@given` instead of `@when`, leaving it and the following assertion undefined) — fixed,
 then reverified green; a pre-existing, unrelated intermittent flake in
 `timeline_grid.feature` (R-61) surfaced incidentally during that same verification run.

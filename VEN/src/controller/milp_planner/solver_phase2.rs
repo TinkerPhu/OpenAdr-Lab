@@ -17,7 +17,7 @@ use super::types::*;
 /// All variables are declared fresh. Battery/EV get startup/ramp aux vars.
 /// Warm-start vector: Phase 1 solution values provided as initial MIP incumbent for Phase 2.
 /// This ensures HiGHS immediately has a feasible integer point (the Phase 1 solution satisfies
-/// all Phase 2 constraints), avoiding the NoSolutionFound timeout on Pi4 ARM.
+/// all Phase 2 constraints), avoiding the NoSolutionFound timeout on Node1 ARM.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_phase2_warm_start(
     inputs: &MilpInputs,

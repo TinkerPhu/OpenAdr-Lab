@@ -35,7 +35,7 @@ React component tests using Vitest + React Testing Library. Run locally, no Dock
 
 **Windows note:** If using a subst drive (D: -> C:\DriveD), vitest may resolve paths through the real filesystem. Run from the real path if you get module resolution errors.
 
-### 2. openleadr-rs Cargo Tests (Pi4)
+### 2. openleadr-rs Cargo Tests (Node1)
 
 Rust unit and integration tests for the VTN library, client library, and wire protocol.
 
@@ -63,7 +63,7 @@ cd openleadr-rs
 SQLX_OFFLINE=true cargo test --workspace
 ```
 
-### 3. E2E Integration Tests (Pi4)
+### 3. E2E Integration Tests (Node1)
 
 Behave (Python) scenarios testing the full stack: VTN, VENs, BFF, and UI through real HTTP calls. Runs inside Docker Compose with an ephemeral database.
 
@@ -77,10 +77,10 @@ current count — hard numbers rot). Coverage:
 - 8 end-to-end use cases (UC1-UC8)
 - Browser-based UI tests via Playwright
 
-**Run on Pi4:**
+**Run on Node1:**
 
 ```bash
-ssh Pi4
+ssh Node1
 cd /srv/docker/openadr_lab
 docker compose -f tests/docker-compose.test.yml run --build --rm test-runner
 docker compose -f tests/docker-compose.test.yml down -v
@@ -103,7 +103,7 @@ docker compose -f tests/docker-compose.test.yml run --rm test-runner --tags=@ups
 - `@upstream_pending` — VEN report isolation tests awaiting upstream fix
 - `@resilience` — requires Docker socket access, run separately
 
-### 4. Resilience / Failure Recovery Tests (Pi4)
+### 4. Resilience / Failure Recovery Tests (Node1)
 
 Tests that services recover from restarts and outages. Uses Docker socket to stop/start compose services mid-test.
 
@@ -116,7 +116,7 @@ Tests that services recover from restarts and outages. Uses Docker socket to sto
 **Run:**
 
 ```bash
-ssh Pi4
+ssh Node1
 cd /srv/docker/openadr_lab
 docker compose -f tests/docker-compose.test.yml run --build --rm test-runner --tags=@resilience
 docker compose -f tests/docker-compose.test.yml down -v
@@ -125,7 +125,7 @@ docker compose -f tests/docker-compose.test.yml down -v
 **Standalone script** (alternative, runs outside Docker):
 
 ```bash
-ssh Pi4
+ssh Node1
 cd /srv/docker/openadr_lab
 # Start the test stack first
 docker compose -f tests/docker-compose.test.yml up -d --build

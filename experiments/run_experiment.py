@@ -8,7 +8,7 @@ externally drivable without an injectable clock through the whole tick/poll
 path — the spike result from the phase plan. S-1..S-6 are therefore short
 same-day windows (default 30 min each) rather than simulated days.
 
-Runs ON the docker host (Pi4), same convention as fleet.sh:
+Runs ON the docker host (Node1), same convention as fleet.sh:
     python3 experiments/run_experiment.py --scenario experiments/scenarios/s2_price_spike.yaml
     ... --vens ven-1,ven-2,ven-3            # which VEN data dirs to snapshot
     ... --out experiments/results           # output root

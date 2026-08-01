@@ -3,7 +3,7 @@
 import os
 import requests
 
-# Generous default for Pi4 ARM64 under full-suite load.
+# Generous default for Node1 ARM64 under full-suite load.
 HTTP_TIMEOUT = int(os.environ.get("TEST_HTTP_TIMEOUT", "60"))
 
 VTN_BASE_URL = os.environ.get("VTN_BASE_URL", "http://test-vtn:3000")

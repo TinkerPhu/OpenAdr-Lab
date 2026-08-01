@@ -20,11 +20,11 @@ set -euo pipefail
 # ── Configuration ────────────────────────────────────────────────────────────
 
 # SSH hostname of the machine running Docker. Falls back to the shared
-# OPENADR_LAB_HOST env var (also used by scripts/pi4_lock.sh) before the
+# OPENADR_LAB_HOST env var (also used by scripts/docker_host_lock.sh) before the
 # hardcoded default, so the host only needs to be set in one place.
 # Set to empty string "" to run docker commands directly on this machine (no SSH).
-# Example remote value: "Pi4"
-DOCKER_HOST="${DOCKER_HOST:-${OPENADR_LAB_HOST:-Pi4}}"  # override with DOCKER_HOST="" for local docker
+# Example remote value: "Node1"
+DOCKER_HOST="${DOCKER_HOST:-${OPENADR_LAB_HOST:-Node1}}"  # override with DOCKER_HOST="" for local docker
 DOCKER_DIR="/srv/docker/openadr_lab"  # repo path on the docker host
 
 # Auto-detect: if DOCKER_HOST is empty, "localhost", or matches this machine's
@@ -122,14 +122,14 @@ echo -e "${BOLD}╔════════════════════�
 echo -e "${BOLD}║           OpenADR Lab — Full Test Suite                  ║${NC}"
 echo -e "${BOLD}╚═══════════════════════════════════════════════════════════╝${NC}"
 
-# ── Pi4 lease lock ───────────────────────────────────────────────────────────
+# ── Node1 lease lock ───────────────────────────────────────────────────────────
 # The docker host is shared between worktrees/sessions; serialize access.
 # Aborts (exit 2) if the lock stays held past the wait limit — rerun to retry.
 
 if ! $_DOCKER_IS_LOCAL && { $RUN_E2E || $RUN_RESILIENCE || $RUN_RUST; }; then
     header "Acquiring $_DOCKER_LABEL lock"
-    PI4_LOCK_HOST="$DOCKER_HOST" bash "$SCRIPT_DIR/scripts/pi4_lock.sh" acquire -l 180 -m "run_all_tests.sh ${*:-all}"
-    trap 'PI4_LOCK_HOST="$DOCKER_HOST" bash "$SCRIPT_DIR/scripts/pi4_lock.sh" release' EXIT
+    LOCK_HOST="$DOCKER_HOST" bash "$SCRIPT_DIR/scripts/docker_host_lock.sh" acquire -l 180 -m "run_all_tests.sh ${*:-all}"
+    trap 'LOCK_HOST="$DOCKER_HOST" bash "$SCRIPT_DIR/scripts/docker_host_lock.sh" release' EXIT
 fi
 
 # ── 1. Local UI Unit Tests ───────────────────────────────────────────────────

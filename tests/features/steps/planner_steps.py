@@ -73,9 +73,9 @@ def step_wait_for_fresh_plan(context):
         except ValueError:
             return False
 
-    # Raised from 150s: this scenario replays a full MILP solve on Pi4 under
+    # Raised from 150s: this scenario replays a full MILP solve on Node1 under
     # shared load and times out intermittently at 150s — the existing
-    # "Pi4-marginal" precedent already bumped ev/uc/heater-allocation waits to
+    # "Node1-marginal" precedent already bumped ev/uc/heater-allocation waits to
     # 300s (see step_wait_for_ev_allocation above) for the same reason.
     context.ven_plan = poll_until(
         fetch, is_fresh,
@@ -105,9 +105,9 @@ def step_wait_for_ev_allocation(context):
             for slot in slots
         )
 
-    # Raised from 150s: this scenario passed reliably (~95s) in prior Pi4
+    # Raised from 150s: this scenario passed reliably (~95s) in prior Node1
     # runs but timed out at 150s in a run alongside a newly-added background
-    # poller (the WP1.7 VTN recorder) — matching the existing "Pi4-marginal"
+    # poller (the WP1.7 VTN recorder) — matching the existing "Node1-marginal"
     # timeout precedent (ev_charging_steps.py, uc_steps.py already use 300s).
     context.ven_plan = poll_until(
         fetch,

@@ -75,7 +75,7 @@ epsilon. The E2E suite validates behaviour post-deploy; no test changes needed.
 ### 1.2 Deploy and observe
 
 ```
-ssh Pi4-Server "cd /srv/docker/openadr_lab/VEN && docker compose build ven-2 && docker compose up -d ven-2"
+ssh Node1-Server "cd /srv/docker/openadr_lab/VEN && docker compose build ven-2 && docker compose up -d ven-2"
 ```
 
 Observe over 24 h:
@@ -367,8 +367,8 @@ Neither causes a test failure, but both are lies after the profile change.
 ### 3.3 Deploy and benchmark solver time
 
 ```
-ssh Pi4-Server "cd /srv/docker/openadr_lab/VEN && docker compose build ven-2 && docker compose up -d ven-2"
-curl -X POST http://Pi4-Server:8212/plan/trigger
+ssh Node1-Server "cd /srv/docker/openadr_lab/VEN && docker compose build ven-2 && docker compose up -d ven-2"
+curl -X POST http://Node1-Server:8212/plan/trigger
 ```
 
 Watch the `planner: plan adopted` log line for `solver_ms`. Target: < 40 000 ms on three
@@ -868,7 +868,7 @@ proceed as the long-term architecture and Step 3 becomes a transient state.
 
 Each step must pass the full test suite before merging:
 - `wsl cargo test -p ven` locally
-- E2E BDD suite on Pi4 (`bash run_all_tests.sh --e2e`)
+- E2E BDD suite on Node1 (`bash run_all_tests.sh --e2e`)
 
 Steps 1 and 3 additionally require a ≥ 24 h observation period to verify plan quality
 across the full daily cycle before the next dependent step is started.

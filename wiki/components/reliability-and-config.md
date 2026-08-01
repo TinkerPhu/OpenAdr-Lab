@@ -65,7 +65,7 @@ VTN no longer gets hammered at the configured cadence indefinitely. One trade-of
 worth knowing: after a *sustained* outage, recovery latency is bounded by whatever
 backoff delay was already in flight when the VTN comes back — the reset to the base
 interval only takes effect on the next successful poll, not instantly on recovery
-(found while verifying against a live 130s-outage Pi4 scenario; see
+(found while verifying against a live 130s-outage Node1 scenario; see
 [[ven-hexagonal-architecture]] for where this sits relative to `VtnPort`).
 
 ## Profile startup validation

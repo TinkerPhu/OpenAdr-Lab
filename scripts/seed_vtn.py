@@ -289,7 +289,7 @@ VENS_TO_PROVISION = [
     {"ven_name": "ven-1", "client_id": "ven-1", "client_secret": "ven-1", "user_ref": "ven-1-user"},
     {"ven_name": "ven-2", "client_id": "ven-2", "client_secret": "ven-2", "user_ref": "ven-2-user"},
     {"ven_name": "ven-3", "client_id": "ven-3", "client_secret": "ven-3", "user_ref": "ven-3-user"},
-    # BL-41: ven-4 runs on a second physical host (Po4), so it advertises its
+    # BL-41: ven-4 runs on a second physical host (Node2), so it advertises its
     # own reachable origin via the DASHBOARD_URL attribute instead of relying
     # on same-host Docker DNS (see _ensure_dashboard_url_attribute below).
     {"ven_name": "ven-4", "client_id": "ven-4", "client_secret": "ven-4", "user_ref": "ven-4-user",

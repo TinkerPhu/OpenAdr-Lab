@@ -750,7 +750,7 @@ The spec defines interval structure but leaves VEN-side alignment to the impleme
 
 **Decision:** 3-tier MILP solver via HiGHS.
 **Rationale:** The greedy scheduler was replaced when more assets and tighter constraints were
-added. HiGHS solves the residential-scale problem (24–48 h, 3–15 assets) in 5–10 s on Pi4,
+added. HiGHS solves the residential-scale problem (24–48 h, 3–15 assets) in 5–10 s on Node1,
 which is acceptable for a 20–300 s replan interval. The adoption gate filters noise replans.
 See `docs/architecture/ven_milp_planner.md` for full design rationale.
 

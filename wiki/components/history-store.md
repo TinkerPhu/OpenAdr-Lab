@@ -83,7 +83,7 @@ openleadr-rs's `skip`/`limit` convention (max 50/page,
 `fetch_all_pages`); deduplication is a composite-PK `ON CONFLICT DO NOTHING` rather than
 upsert logic, since the recorder is a write-once log, not a live mirror.
 
-> **Fixed during Pi4 verification**: `record_ven_snapshots` initially ran on the `business`
+> **Fixed during Node1 verification**: `record_ven_snapshots` initially ran on the `business`
 > `VtnClient`, which gets a 403 from `/vens` — that endpoint requires the `ven-manager`
 > role specifically ([[vtn-stack]]'s dual-credential pattern). Found only by a live
 > curl+psql check against the running stack, not by unit tests (the recorder's own tests

@@ -1,14 +1,14 @@
-docker: docker runs on ssh Pi4 (primary — VTN, its DB, BFF, VTN UI, and the main VEN
-docker-compose stack) or ssh Po4 (secondary — ven-4 + build/test offload, see
+docker: docker runs on ssh Node1 (primary — VTN, its DB, BFF, VTN UI, and the main VEN
+docker-compose stack) or ssh Node2 (secondary — ven-4 + build/test offload, see
 VEN/scale_out/node2/). Run tasks with docker on the intended host via ssh in
 directory /srv/docker/openadr_lab (same path on both hosts).
 
-pi4-lock: the Pi4 is shared between multiple parallel sessions/worktrees. Before ANY
-docker build or test run on Pi4, acquire the lease lock and hold it for the
+node1-lock: Node1 is shared between multiple parallel sessions/worktrees. Before ANY
+docker build or test run on Node1, acquire the lease lock and hold it for the
 whole sequence:
-  bash scripts/pi4_lock.sh acquire -m "<branch>: <what you are doing>" [-l MIN]
-  ... all ssh Pi4 docker commands ...
-  bash scripts/pi4_lock.sh release
+  bash scripts/docker_host_lock.sh acquire -m "<branch>: <what you are doing>" [-l MIN]
+  ... all ssh Node1 docker commands ...
+  bash scripts/docker_host_lock.sh release
 The acquirer declares its own lease end (-l minutes, default 60) which is stored in
 the lock as UTC time; once that time passes the lock counts as dead and the next
 acquirer steals it. Pick -l honestly for the expected runtime; `refresh [-l MIN]`
@@ -16,18 +16,18 @@ extends from now if a run overshoots. `status` shows holder, task, and lease end
 `acquire` blocks up to ~9 min then exits 2 — rerun it to keep waiting; report to the
 user if the lock stays held unusually long instead of bypassing it. run_all_tests.sh
 acquires/releases the lock automatically (-l 180) for remote docker suites. Never run
-docker commands on the Pi4 while another owner holds an unexpired lock.
+docker commands on Node1 while another owner holds an unexpired lock.
 
-po4-lock: Po4 (192.168.1.104) is a second docker host, used to take build/test load
-off Pi4. It shares the same lock script and mechanism as Pi4 (pi4_lock.sh isn't
-Pi4-specific despite the name — the lock file is derived from the target host, so
-each host gets its own independent lock). Set PI4_LOCK_HOST=Po4 to target it
-directly, or run `DOCKER_HOST=Po4 bash run_all_tests.sh ...`, which sets this
-automatically. Pi4 and Po4 can be used concurrently by different sessions without
+node2-lock: Node2 (192.168.1.104) is a second docker host, used to take build/test load
+off Node1. It shares the same lock script and mechanism as Node1 (docker_host_lock.sh isn't
+Node1-specific despite the name — the lock file is derived from the target host, so
+each host gets its own independent lock). Set LOCK_HOST=Node2 to target it
+directly, or run `DOCKER_HOST=Node2 bash run_all_tests.sh ...`, which sets this
+automatically. Node1 and Node2 can be used concurrently by different sessions without
 contention, since each holds its own lock. Same lease semantics and default
-(60min) as Pi4.
+(60min) as Node1.
 
-local-rust: WSL is installed on this Windows machine. Use `wsl cargo check` (or `wsl cargo test`) inside the VEN directory for local Rust compilation instead of native Windows cargo, which lacks cmake/HiGHS. For a full test run including HiGHS, use the Pi4 docker stack.
+local-rust: WSL is installed on this Windows machine. Use `wsl cargo check` (or `wsl cargo test`) inside the VEN directory for local Rust compilation instead of native Windows cargo, which lacks cmake/HiGHS. For a full test run including HiGHS, use the Node1 docker stack.
 
 memory-budget: this laptop has only 8 GB RAM — WSL cargo builds have crashed the host
 (pagefile exhaustion, "Catastrophic failure Wsl/Service/E_UNEXPECTED"). Before starting
@@ -38,13 +38,13 @@ Rules: always pass `-j 2` to cargo in WSL; if free physical memory is below ~1 G
 ask the user to close applications before starting.
 
 wsl-lock: the WSL instance on this laptop is shared between multiple parallel
-sessions/worktrees, same as the Pi4. Before ANY `wsl cargo build/check/test/clippy` (or
+sessions/worktrees, same as Node1. Before ANY `wsl cargo build/check/test/clippy` (or
 other large-memory WSL command), acquire the lease lock and hold it for the whole
 sequence:
   bash scripts/wsl_lock.sh acquire -m "<branch>: <what you are doing>" [-l MIN]
   ... all wsl cargo commands ...
   bash scripts/wsl_lock.sh release
-Same semantics as pi4-lock (self-declared lease stored as UTC epoch, re-entrant per
+Same semantics as node1-lock (self-declared lease stored as UTC epoch, re-entrant per
 owner, dead locks are stolen with a warning): `-l` sets the lease in minutes (default
 20 — override for long test runs), `refresh [-l MIN]` extends from now if a run
 overshoots, `status` shows holder/task/lease end. `acquire` blocks up to ~9 min then
@@ -87,13 +87,13 @@ Fix branches: fix/<slug>. All those branches target main. Never force-push to ma
 DCO sign-off is enforced by CI — do not add co-author footers (see rule above).
 Merge only after all CI checks pass: cargo fmt, cargo clippy --all-targets --all-features -- -D warnings, cargo audit,
 file-size audit (scripts/audit_file_sizes.py — tasks/ ≤ 200, VEN/src/ ≤ 500 production
-lines), and E2E tests green on Pi4.
+lines), and E2E tests green on Node1.
 
 testing: full guide at docs/guidelines/TESTING.md. Four suites:
   1. UI unit (local)       — cd VEN/ui && npm test  |  cd VTN/ui && npm test
   2. Rust unit+integration — wsl cargo test -p ven-app  (local, no HiGHS needed for most)
-  3. E2E BDD (Pi4)         — bash run_all_tests.sh --e2e  (behave)
-  4. Resilience (Pi4)      — bash run_all_tests.sh --resilience
+  3. E2E BDD (Node1)         — bash run_all_tests.sh --e2e  (behave)
+  4. Resilience (Node1)      — bash run_all_tests.sh --resilience
 Run everything: bash run_all_tests.sh
 VEN Rust pyramid (4 layers, all must stay green after any VEN change):
   Domain → Use-case → Adapter-contract → Integration
@@ -117,9 +117,9 @@ keep domain and application layer tests meaningful.
 build:
   local VEN Rust : wsl cargo build  (or wsl cargo check for fast syntax check)
   local UI       : cd VEN/ui && npm run build  |  cd VTN/ui && npm run build
-  Pi4 docker     : ssh Pi4 "cd /srv/docker/openadr_lab && docker compose build"
-  Pi4 single svc : ssh Pi4 "cd /srv/docker/openadr_lab && docker compose build ven"
-  Po4 docker     : ssh Po4 "cd /srv/docker/openadr_lab && docker compose build"
+  Node1 docker     : ssh Node1 "cd /srv/docker/openadr_lab && docker compose build"
+  Node1 single svc : ssh Node1 "cd /srv/docker/openadr_lab && docker compose build ven"
+  Node2 docker     : ssh Node2 "cd /srv/docker/openadr_lab && docker compose build"
   Always use wsl for Rust compilation — native Windows cargo lacks cmake/HiGHS.
   CI: .github/workflows/ holds three workflows — pre-pr-checks-splittasks.yml
   (fmt/clippy/audit/DCO on PR), file_size_audit-splittasks.yml (scripts/audit_file_sizes.py

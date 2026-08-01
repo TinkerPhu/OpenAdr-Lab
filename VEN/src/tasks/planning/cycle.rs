@@ -66,7 +66,7 @@ pub(super) async fn run_plan_cycle(
     let inject_snap = state.inject_state().await;
     let pv_forecast_override = inject_snap.pv_plan_kw;
     // Clone SimState snapshot so the Mutex is released immediately.
-    // MILP solving takes 18-60s on Pi4 ARM64; holding the lock would
+    // MILP solving takes 18-60s on Node1 ARM64; holding the lock would
     // block sim ticks and /capability reads for the entire duration.
     let mut sim_snap = clone_sim_snapshot(sim, trigger_reason).await;
 

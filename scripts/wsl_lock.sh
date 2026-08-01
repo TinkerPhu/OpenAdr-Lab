@@ -9,7 +9,7 @@
 # Windows host share the one WSL instance, so anything that runs a
 # large-memory WSL command must hold this lock first. The lock lives INSIDE
 # WSL (not any worktree), so it covers every session that reaches this WSL
-# instance, the same way pi4_lock.sh's lock lives on the Pi4 for every
+# instance, the same way docker_host_lock.sh's lock lives on Node1 for every
 # session that reaches that host.
 #
 # Usage:
@@ -19,7 +19,7 @@
 #   bash scripts/wsl_lock.sh refresh [-l MIN]   # extend the lease (from now)
 #   bash scripts/wsl_lock.sh status
 #
-# Semantics: identical to pi4_lock.sh — self-declared lease, re-entrant per
+# Semantics: identical to docker_host_lock.sh — self-declared lease, re-entrant per
 # owner, dead locks are stolen with a warning, acquire waits up to
 # MAX_WAIT_SEC then exits 2 ("rerun to keep waiting"). Owner identity =
 # user@host:<worktree path>, so release/refresh only act on a lock you own.
@@ -36,7 +36,7 @@ OWNER="$(whoami)@$(hostname):${repo_root}"
 usage() { sed -n '2,22p' "$0"; exit 1; }
 
 # All check-and-act logic runs inside WSL so it is atomic (mkdir is the
-# mutex; the owner file is metadata) — same design as pi4_lock.sh's remote_op,
+# mutex; the owner file is metadata) — same design as docker_host_lock.sh's remote_op,
 # just via `wsl` instead of `ssh`.
 wsl_op() { # $1=op  $2=description
     wsl bash -s -- "$1" "$OWNER" "$LEASE_MIN" "${2:-}" <<'REMOTE'

@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 #
-# pi4_lock.sh — cooperative lease lock for the shared Pi4 docker host.
+# docker_host_lock.sh — cooperative lease lock for a shared docker host
+# (e.g. Node1 or Node2).
 #
-# Multiple worktrees / AI sessions deploy and test on the same Pi4. Anything
+# Multiple worktrees / AI sessions deploy and test on the same host. Anything
 # that builds or runs docker there must hold this lock first. The lock lives
-# ON the Pi4 (not in any worktree), so it covers every session and machine
-# that can reach the host.
+# ON the target host (not in any worktree), so it covers every session and
+# machine that can reach it.
 #
 # Usage:
-#   bash scripts/pi4_lock.sh acquire -m "E2E run for fix/foo"        # 60-min lease
-#   bash scripts/pi4_lock.sh acquire -m "full suite" -l 180          # 180-min lease
-#   bash scripts/pi4_lock.sh release
-#   bash scripts/pi4_lock.sh refresh [-l MIN]   # extend the lease (from now)
-#   bash scripts/pi4_lock.sh status
+#   bash scripts/docker_host_lock.sh acquire -m "E2E run for fix/foo"        # 60-min lease
+#   bash scripts/docker_host_lock.sh acquire -m "full suite" -l 180          # 180-min lease
+#   bash scripts/docker_host_lock.sh release
+#   bash scripts/docker_host_lock.sh refresh [-l MIN]   # extend the lease (from now)
+#   bash scripts/docker_host_lock.sh status
 #
 # Semantics:
 #   - The acquirer declares its own lease end (now + LEASE_MIN, stored as a UTC
@@ -23,19 +24,19 @@
 #     kept under the 10-minute tool timeout of AI sessions on purpose.
 #   - Owner identity = user@host:<worktree path>, so release/refresh only act
 #     on a lock you own.
-#   - Host: PI4_LOCK_HOST overrides for this script only; OPENADR_LAB_HOST is
-#     the shared default (also used by run_all_tests.sh); falls back to "Pi4".
-#     This script isn't Pi4-specific despite the filename — it works against
-#     any docker host reachable the same way (e.g. PI4_LOCK_HOST=Po4). The
+#   - Host: LOCK_HOST overrides for this script only; OPENADR_LAB_HOST is
+#     the shared default (also used by run_all_tests.sh); falls back to "Node1".
+#     This script isn't Node1-specific despite the filename — it works against
+#     any docker host reachable the same way (e.g. LOCK_HOST=Node2). The
 #     lock file's name is derived from the host, so each host gets its own
 #     independent lock automatically.
 #
 set -euo pipefail
 
-PI4_HOST="${PI4_LOCK_HOST:-${OPENADR_LAB_HOST:-Pi4}}"
-LEASE_MIN="${PI4_LOCK_LEASE_MIN:-60}"
-POLL_SEC="${PI4_LOCK_POLL_SEC:-20}"
-MAX_WAIT_SEC="${PI4_LOCK_MAX_WAIT_SEC:-540}"
+LOCK_TARGET_HOST="${LOCK_HOST:-${OPENADR_LAB_HOST:-Node1}}"
+LEASE_MIN="${LOCK_LEASE_MIN:-60}"
+POLL_SEC="${LOCK_POLL_SEC:-20}"
+MAX_WAIT_SEC="${LOCK_MAX_WAIT_SEC:-540}"
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 OWNER="$(whoami)@$(hostname):${repo_root}"
@@ -49,7 +50,7 @@ usage() { sed -n '2,25p' "$0"; exit 1; }
 remote_op() { # $1=op  $2=description
     # printf %q: ssh joins remote-command args with spaces, so multi-word
     # descriptions must be shell-escaped to survive the remote word split.
-    ssh "$PI4_HOST" bash -s -- $(printf '%q %q %q %q %q' "$1" "$OWNER" "$LEASE_MIN" "${2:-}" "$PI4_HOST") <<'REMOTE'
+    ssh "$LOCK_TARGET_HOST" bash -s -- $(printf '%q %q %q %q %q' "$1" "$OWNER" "$LEASE_MIN" "${2:-}" "$LOCK_TARGET_HOST") <<'REMOTE'
 op="$1"; owner="$2"; lease_min="$3"; desc="$4"; host="$5"
 lock="/tmp/openadr_$(echo "$host" | tr '[:upper:]' '[:lower:]').lock"
 now=$(date +%s)
@@ -115,7 +116,7 @@ case "$cmd" in
             if out=$(remote_op try_acquire "$desc"); then echo "$out"; exit 0; fi
             echo "$out"
             if [ "$waited" -ge "$MAX_WAIT_SEC" ]; then
-                echo "Still held after ${waited}s — rerun 'pi4_lock.sh acquire' to keep waiting."
+                echo "Still held after ${waited}s — rerun 'docker_host_lock.sh acquire' to keep waiting."
                 exit 2
             fi
             echo "  waiting ${POLL_SEC}s... (${waited}s so far; the lock is stealable once its lease end passes)"

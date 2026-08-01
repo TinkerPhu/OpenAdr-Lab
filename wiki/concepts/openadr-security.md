@@ -74,7 +74,7 @@ Two mechanisms enforce that a VEN sees only what it owns or has been granted:
 - **HTTPS/TLS is a MUST** for both VTN and VEN, TLS ≥ 1.2. A VEN **SHOULD** verify the
   VTN's certificate by default and refuse unverified connections (with an opt-out setting
   for private-network self-signed certs). MQTT clients **MUST** use MQTTS.
-- This lab's Pi4 stack runs plain HTTP between BFF, VTN, and VENs — tracked as a
+- This lab's Node1 stack runs plain HTTP between BFF, VTN, and VENs — tracked as a
   certification blocker in [[vision-and-roadmap]], not duplicated here.
 
 ## Webhook hardening (new/tightened in 3.1 — issue 128, 226)

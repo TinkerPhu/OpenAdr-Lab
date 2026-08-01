@@ -72,7 +72,7 @@ Concrete rules:
   After opening, wait for CI to actually report before drawing conclusions.
   Investigate every CI failure as potentially caused by our changes — never write
   off failures as pre-existing without evidence.
-- The submodule on Pi4 resets to the recorded commit after `git pull`; always
+- The submodule on Node1 resets to the recorded commit after `git pull`; always
   re-run `cd openleadr-rs && git checkout <branch>` before testing a PR branch.
 
 **Rationale**: Sloppy commits, missing DCO, and premature PRs caused rework and
@@ -101,24 +101,24 @@ code would guard against.
 
 ### V. Infrastructure Parity
 
-All Docker operations MUST run on Pi4 via SSH in `/srv/docker/openadr_lab`.
+All Docker operations MUST run on Node1 via SSH in `/srv/docker/openadr_lab`.
 Dev, test, and production environments MUST use the same Docker Compose definitions.
 No manual server state outside of Compose files and committed configuration.
 
 Concrete rules:
-- Deploy flow: commit locally → `git push` → `ssh Pi4 "cd /srv/docker/
+- Deploy flow: commit locally → `git push` → `ssh Node1 "cd /srv/docker/
   openadr_lab && git pull"` → `docker compose up -d --build`.
 - NEVER stop containers not involved in this project without explicit user
   confirmation — other containers are productive services.
 - Named cargo volumes survive power cycles; incremental builds resume from cache.
   After source changes, always rebuild the image explicitly (`docker compose build
   <service>`) — `--build` on `run` may not rebuild the target service.
-- ARM64 (Pi4) resource constraints (`cpus: 1.5`, `memory: 1500M`,
+- ARM64 (Node1) resource constraints (`cpus: 1.5`, `memory: 1500M`,
   `CARGO_BUILD_JOBS=4`) MUST stay in committed files; document removal instructions
   for non-Pi hosts in the README.
 
 **Rationale**: Inconsistent environments caused builds that passed locally but
-failed on Pi4. All test and deployment commands are defined once and run through
+failed on Node1. All test and deployment commands are defined once and run through
 SSH to eliminate drift.
 
 ### VI. VEN Backend — Hexagonal + Clean Architecture
@@ -174,7 +174,7 @@ All React code MUST follow `docs/guidelines/REACT_GUIDELINES.md`:
 **Unit tests**: vitest (UI), cargo test (Rust).
 **Platform**: Linux ARM64 (Raspberry Pi 4), Docker Compose v2.
 
-SQLx offline cache MUST be regenerated on Pi4 whenever SQL in Rust source
+SQLx offline cache MUST be regenerated on Node1 whenever SQL in Rust source
 changes (see `docs/reference/KEY_LEARNINGS.md` — "SQLx Offline Cache" section).
 A wrong cache wastes ~25 min per rebuild cycle.
 
