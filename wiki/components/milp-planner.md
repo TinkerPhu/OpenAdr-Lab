@@ -2,9 +2,9 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-07-30
-synced_commit: d42dcd3
-sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, VEN/src/controller/milp_planner/solver_duals.rs]
+updated: 2026-07-31
+synced_commit: e9f5207
+sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, VEN/src/controller/milp_planner/solver_duals.rs, VEN/src/entities/asset.rs, VEN/src/assets/ev_milp.rs, VEN/src/assets/heater_milp.rs]
 tags: [planner, milp, highs, optimization]
 ---
 
@@ -132,6 +132,27 @@ see [[milp-over-greedy]].
   disagree in sign on the same energy. Applies to EV/heater/shiftable-load/battery-*charging*;
   battery-*discharging* uses an unrelated revenue formula. Post-solve reporting only — no
   solver objective/constraint depends on it.
+- **Session comfort curve** (BL-34, `docs/architecture/ven_milp_planner.md` §10): a resolved
+  `ComfortRate` curve (`entities/asset.rs` — `{fill, max_marginal_price, max_marginal_co2}`
+  points, `ComfortRate::value_at_fill` linearly interpolating, clamped outside the stored
+  range) now flows `POST /user-requests` → `UserRequest` → `EvSession`/`HeaterTarget` → the
+  MILP context, replacing fixed `PlannerParams` reward constants for two request shapes:
+  `ev_milp.rs::from_state`'s `ByDeadline`/`Asap` arm sources `v_core_eur`/`v_extra_eur_kwh`
+  from the curve (every other EV mode already redirects `v_extra_eur_kwh` to an unrelated
+  signal, unaffected); `heater_milp.rs` gets a new `comfort_full_reward_eur_kwh` objective
+  term at `z_heat_full[t]`, phase-gated to Phase 2 only (mirroring `w_tier_penalty_eur`'s own
+  split — Phase 1 has no counterbalancing tier cost, so an unconditional reward would bias
+  Phase 1's coarse allocation for free). No curve / empty `comfort_rates` (legacy
+  `/ev-session`, `/heater-target` routes, VTN-commanded sessions) falls back to the passed-in
+  global defaults exactly. Rediscovered while wiring this: EV's `v_extra_eur_kwh` reward is
+  structurally inert for driving allocation (R-18, `TECHNICAL_DEBTS.md`) — `e_ev_extra` is
+  bounded only *above* by `e_extra_max_kwh × z_ev_core`, so the solver can bank the reward
+  without changing real charging; `v_core_eur`/`z_ev_core` is the half genuinely coupled to
+  allocation. The heater's tier reward has no equivalent gap (`z_heat_mid`/`z_heat_full` are
+  coupled to real tank-energy dynamics via constraint C2). BDD coverage proving the curve
+  actually reshapes a plan (not just unit-level reward wiring):
+  `tests/features/ven_comfort_curve.feature`. See [[hems-planning]] for where
+  `comfort_rates` is resolved and attached to a session.
 
 ## File map
 

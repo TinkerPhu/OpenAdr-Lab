@@ -2,8 +2,8 @@
 title: Pi4 Lease Lock
 type: decision
 created: 2026-07-17
-updated: 2026-07-28
-synced_commit: c27b296
+updated: 2026-07-31
+synced_commit: e9f5207
 sources: [scripts/pi4_lock.sh, scripts/wsl_lock.sh, run_all_tests.sh, .claude/CLAUDE.md]
 tags: [pi4, docker, concurrency, dev-workflow]
 ---
@@ -63,6 +63,16 @@ lock lives *inside* WSL (`wsl bash -s --` instead of `ssh <host> bash -s --`), a
 lease is 20 min / 10 s poll (vs. Pi4's 60 min / 20 s) — shorter because it's guarding a local
 build, not a remote multi-stack docker run. `.claude/CLAUDE.md` §wsl-lock requires it around
 every large-memory WSL command.
+
+## Shared hostname variable (`OPENADR_LAB_HOST`)
+
+`pi4_lock.sh` and `run_all_tests.sh` each independently hardcoded the same "Pi4" default
+behind their own script-specific env var (`PI4_LOCK_HOST`, `DOCKER_HOST`) — the exact
+duplication that made the SSH alias rename from `Pi4-Server` to `Pi4` touch 29 files across
+the repo. Both scripts now fall back to a shared `OPENADR_LAB_HOST` env var before their own
+hardcoded default, so a future hostname change needs only one variable set (or one grep
+target, if it must be a permanent rename again); existing script-specific overrides still
+take precedence for anyone already relying on them.
 
 ## Limits
 

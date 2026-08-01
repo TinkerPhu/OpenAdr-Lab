@@ -266,4 +266,6 @@ agreement that gives both sides a stable vocabulary.
 
 Q&A form of this material, as originally filed: [[openadr-programs-explained]]. How a
 distributor would stage these program types commercially, from open tariff publication
-to VPP dispatch: [[distributor-business-case-tiers]].
+to VPP dispatch: [[distributor-business-case-tiers]]. How a DSO and a legally separate
+retailer coordinate tariff/envelope programs on one VTN when unbundling forbids the DSO
+from selling energy: [[dso-retailer-unbundled-tariff-coordination]].

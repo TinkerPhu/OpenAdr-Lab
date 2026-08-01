@@ -2,8 +2,8 @@
 title: VEN Reliability & Config Hygiene
 type: component
 created: 2026-07-04
-updated: 2026-07-30
-synced_commit: d42dcd3
+updated: 2026-07-31
+synced_commit: e9f5207
 sources: [VEN/src/tasks/mod.rs, VEN/src/tasks/backoff.rs, VEN/src/entities/error.rs, VEN/src/profile/, VEN/src/tasks/obligation.rs, VEN/src/vtn.rs, VEN/src/controller/milp_planner/mod.rs, VEN/src/services/hems.rs, VEN/src/config.rs, docs/guidelines/ERROR_HANDLING.md, docs/architecture/ven_milp_planner.md]
 tags: [reliability, config, error-handling, ven]
 ---

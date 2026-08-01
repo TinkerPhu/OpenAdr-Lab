@@ -2,8 +2,8 @@
 title: Deployment Topology
 type: architecture
 created: 2026-07-04
-updated: 2026-07-17
-synced_commit: 795c8d8
+updated: 2026-07-31
+synced_commit: e9f5207
 sources: [docs/architecture/VTN_ARCHITECTURE.md, .claude/CLAUDE.md, docs/guidelines/TESTING.md, fleet.sh]
 tags: [deployment, docker, pi4]
 ---
