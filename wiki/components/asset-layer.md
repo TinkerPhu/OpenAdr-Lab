@@ -2,8 +2,8 @@
 title: Asset Layer
 type: component
 created: 2026-07-04
-updated: 2026-07-28
-synced_commit: c27b296
+updated: 2026-07-31
+synced_commit: e9f5207
 sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, VEN/src/controller/residual.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md, VEN/src/entities/asset_params.rs, VEN/src/entities/sim_inject.rs]
 tags: [assets, abstraction, ven]
 ---
@@ -13,12 +13,12 @@ tags: [assets, abstraction, ven]
 The device abstraction between the HEMS controller and the physics that produces the
 numbers (`VEN/src/assets/`). Three cooperating pieces:
 
-- **`Asset` trait** (`assets/mod.rs:545`) — the physics contract:
-  `step(state, setpoint_kw, dt) -> (new_state, actual_kw)`, `capability(state)`
-  (point-in-time feasible power range), plus default-implemented `simulate_forward`,
-  `simulate_free`, and `capability_trajectory`. Identity/history methods (`id`,
-  `current_state`, `history`) are provided by `AssetHandle`, which wraps a
-  config+entry pair.
+- **`Asset` trait** (`assets/asset_trait.rs`, split out of `assets/mod.rs` by the R-08
+  refactor below) — the physics contract: `step(state, setpoint_kw, dt) -> (new_state,
+  actual_kw)`, `capability(state)` (point-in-time feasible power range), plus
+  default-implemented `simulate_forward`, `simulate_free`, and `capability_trajectory`.
+  Identity/history methods (`id`, `current_state`, `history`) are provided by
+  `AssetHandle`, which wraps a config+entry pair.
 - **`AssetConfig` / `AssetState` enums** — config (physics parameters) and mutable
   runtime state are separate enums with one variant per asset type (Battery, Ev,
   Heater, Pv, BaseLoad); `AssetConfig` dispatch methods (`state_values`,
@@ -26,8 +26,22 @@ numbers (`VEN/src/assets/`). Three cooperating pieces:
   the single switchboard. Adding an asset type = one new variant + one module.
 - **Per-asset history**: every `AssetEntry` in `SimState` carries a ring buffer of
   3600 `HistoryPoint`s (≈ 1 h at 1 s tick) with LOCF lookups and time-weighted
-  averaging — this feeds `/timeline`, `/history/:id`, and obligation reports
+  averaging (`assets/history.rs`, split out of `assets/mod.rs` by the same R-08
+  refactor) — this feeds `/timeline`, `/history/:id`, and obligation reports
   ([[openadr-interface]]).
+
+## Dispatch macro refactor (R-08)
+
+`AssetConfig`'s 14 uniformly-shaped dispatch methods (`step`, `capability`, `forecast`,
+`state_values`, …) were hand-written 5-arm matches; two `macro_rules!` forwarders
+(`delegate_asset!`, `delegate_asset_state!` in `assets/mod.rs`) now declare the
+Battery|Ev|Heater|Pv|BaseLoad variant list once and generate them. The ~6
+asset-specific methods that only apply to a subset of variants (`plan_trajectory`,
+`build_milp_context`, …) are untouched — they aren't part of the `Asset` trait and have
+no uniform signature to generalize. The macro alone didn't clear `assets/mod.rs`'s
+500-line production cap, so the `Asset` trait/`AssetHandle` and the history ring buffer
+moved to `assets/asset_trait.rs` and `assets/history.rs` respectively; `assets/mod.rs` is
+no longer on `scripts/audit_file_sizes.py`'s allowlist.
 
 A virtual **Grid asset** (`assets/grid.rs`, held as `SimState.grid_asset`) tracks net
 site power plus the VTN capacity limits each tick and keeps its own history; it is
@@ -59,13 +73,36 @@ settable to match a real appliance session ([[heuristics-pipeline]]).
 
 `PvInverter` (`assets/pv.rs`) distinguishes `rated_kw` (DC nameplate, forecast ceiling) from
 `inverter_max_kw` (AC ceiling — DC potential clamps to it everywhere before any commanded
-limit). The live-simulator export limit lives on per-tick `PvState.export_limit_kw` /
-`curtailment_source` (`none`/`plan`/`capacity`, persisted via `tick_samples` schema v5) rather
-than on `PvInverter` itself, so a historical reconstruction reports the limit that was actually
-active at that tick, not the current one. `dispatcher::resolve_pv_export_limit_kw` computes the
-live limit as the more restrictive of the VTN/sim-inject capacity cap and the [[milp-planner]]'s
-own `p_pv_used[t]` curtailment target — this is what makes VTN `EXPORT_CAPACITY_LIMIT` events
+limit). The live-simulator generation limit lives on per-tick `PvState.generation_limit_kw` /
+`curtailment_source` (`none`/`plan`/`capacity`/`manual`, persisted via `tick_samples` schema v6 —
+`RENAME COLUMN` from the pre-rename `export_limit_kw`) rather than on `PvInverter` itself, so a
+historical reconstruction reports the limit that was actually active at that tick, not the
+current one. `dispatcher::resolve_pv_generation_limit_kw` computes the live limit as the most
+restrictive of four candidates — VTN/sim-inject capacity cap, the [[milp-planner]]'s own
+`p_pv_used[t]` curtailment target, and a new **manual operator override**
+(`pv_generation_limit_kw` sim-inject field, `PvCurtailmentSource::Manual`, wins exact ties as
+the most deliberate/explicit source) — this is what makes VTN `EXPORT_CAPACITY_LIMIT` events
 physically take effect, not just appear in the plan.
+
+The field was renamed application-wide (`export_limit_kw` → `generation_limit_kw`) because
+"export" is reserved in this project's vocabulary for net site-to-grid flow — a system-level
+quantity the PV inverter has no visibility into; what the inverter actually enforces is a cap
+on its own output. `OadrCapacityState.export_limit_kw` and `SimInjectState.grid_export_limit_kw`
+are genuinely site-level and were left untouched. The manual override re-adds a capability from
+a deleted branch that predated MILP-level PV curtailment, now built on top of it instead of
+replacing it — surfaced automatically through the existing schema-driven `ControlDescriptor`
+mechanism, no new frontend component needed (see [[ven-ui]]'s nullable-slider note for the UI
+side).
+
+`assets.pv.rated_kw` had drifted from the weather feed's calibrated `weather_pv.rated_kwp` since
+[[weather-forecast]] was wired up (a fix existed on an unmerged branch, so every worktree cut
+from `main` kept regenerating the stale values — a branch-divergence bug, not a runtime revert).
+Corrected per-VEN (ven-1 8.0→14.4 kW, ven-3 6.0→8.0 kW; ven-2 was already correct), and
+`inverter_max_kw` — previously left defaulted to `rated_kw` "so existing profiles are
+unaffected" — is now set explicitly per VEN (12.5/10.0/7.5 kW, each below its corrected
+`rated_kw`). This surfaced a latent bug in `PvInverter::control_schema()`: the manual
+`pv_generation_limit_kw` slider capped at `rated_kw` instead of `inverter_max_kw`, invisible
+until the two values diverged — fixed to match what `step_inner` clamps against everywhere.
 
 ## Heater safety envelope
 
@@ -79,6 +116,18 @@ forced-off ceiling, allowing heating up to `temp_safety_max_c`. Each direction l
 bound untouched. Settable today only via `SimInjectState` (manual/test/demo) — no VTN emergency
 directive drives it yet, and the MILP itself still plans only within the comfort band. This is
 the lever [[deviation-arbiter]]'s heater-emergency lever drives.
+
+## Determinism: injectable clock and seedable RNG (R-24)
+
+`AssetConfig::forecast()` (all 5 variants), `Asset::history()`/`simulate_free()`/
+`capability_trajectory()`, `parse_capacity_state()`, and `SimState::from_params()` now take
+an explicit `now: DateTime<Utc>` instead of calling `Utc::now()` internally, and `SimState`
+carries a seedable `StdRng` so `power_model::random_voltage()` no longer draws from unseeded
+`thread_rng()` — closing the last live gaps against this project's determinism rule
+(`.claude/CLAUDE.md` §determinism: no code path depending on wall-clock/randomness without an
+injectable seam). One `Utc::now()` call site was found and classified as dead rather than
+fixed: `entities/site_meter.rs::SiteMeter` is never constructed anywhere, logged as R-62
+rather than wired up.
 
 ## Planning-side counterpart
 

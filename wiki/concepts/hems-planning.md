@@ -2,9 +2,9 @@
 title: HEMS Planning Concepts
 type: concept
 created: 2026-07-04
-updated: 2026-07-30
-synced_commit: d42dcd3
-sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems/, VEN/src/entities/device_session.rs]
+updated: 2026-07-31
+synced_commit: e9f5207
+sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems/, VEN/src/entities/device_session.rs, VEN/src/services/user_request.rs]
 tags: [hems, planning, sessions, domain]
 ---
 
@@ -51,7 +51,12 @@ capacity (VEN_ARCHITECTURE.md §2.1). Sessions enter the MILP as **constraints**
 (deadline step, energy target, `MilpLoadMode`), never as iterated objects
 (§2.3.1). A user may also override an asset's comfort/value curve
 (WP4.2/BL-19), preferred over `default_comfort_rates()` wherever the curve is
-consulted.
+consulted. Since BL-34, the resolved curve is no longer dropped after
+resolution: `services/user_request.rs::create_ev`/`create_heater` carry it onto
+`EvSession`/`HeaterTarget` as `comfort_rates`, from which the MILP actually
+sources reward coefficients for `ByDeadline`/`Asap` EV sessions and heater
+full-tier operation — see [[milp-planner]]'s comfort-curve section for the
+solver-side mechanics.
 
 **Session teardown closes the loop back onto the request.** Deleting an `EvSession`
 (`DELETE /ev-session`, `VEN/src/routes/hems/ev.rs`) does not just clear session state — it

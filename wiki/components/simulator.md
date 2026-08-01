@@ -2,9 +2,9 @@
 title: Simulator
 type: component
 created: 2026-07-04
-updated: 2026-07-05
-synced_commit: e138861
-sources: [VEN/src/simulator/, VEN/src/state/mod.rs, docs/architecture/asset_simulation.md, docs/architecture/VEN_ARCHITECTURE.md]
+updated: 2026-07-31
+synced_commit: e9f5207
+sources: [VEN/src/simulator/, VEN/src/state/mod.rs, VEN/src/routes/sim.rs, docs/architecture/asset_simulation.md, docs/architecture/VEN_ARCHITECTURE.md]
 tags: [simulator, physics, determinism]
 ---
 
@@ -26,7 +26,12 @@ in docs/architecture/asset_simulation.md). The [[dispatcher]] writes setpoints t
   depend on them.
 - `tick()` takes `now` and `dt_s` as parameters (injectable clock), so tests reproduce
   identical trajectories without sleeps ([[testing-strategy]], `.claude/CLAUDE.md`
-  §determinism).
+  §determinism). R-24 (closed) extended this discipline further: `AssetConfig::forecast()`,
+  `Asset::history()`/`simulate_free()`/`capability_trajectory()`, and
+  `SimState::from_params()` now take an explicit `now` instead of calling `Utc::now()`
+  internally, and `SimState` carries a seedable `StdRng` so `power_model::random_voltage()`
+  no longer draws from unseeded `thread_rng()` — see [[asset-layer]] for the full list of
+  call sites and the one dead-code exception found (R-62, `entities/site_meter.rs`).
 
 ## State injection (`POST /sim/inject`, `state.rs::SimInjectState`)
 
@@ -38,11 +43,24 @@ Four behaviour classes, replacing the older full-replace `/sim/override` API tha
 |---|---|---|
 | A — one-shot | `battery_soc`, `ev_soc`, `heater_temp_c` | applied once to physics state, then cleared |
 | B — frozen + EMA return | `pv_irradiance`, `base_load_kw` (+ alphas) | held while active; offset decays exponentially on release |
-| C — frozen + snap | `ev_plugged`, `ev_soc_target`, `heater_setpoint_c`, comfort band, ambient, grid limits | held while active; snaps to profile default on release |
+| C — frozen + snap | `ev_plugged`, `ev_soc_target`, `heater_setpoint_c`, comfort band, ambient, grid limits, `pv_generation_limit_kw` | held while active; snaps to profile default on release |
 | D — planning-only | `pv_plan_kw` | pins the PV forecast for all horizon slots; no physics effect |
 
 Injected grid limits only apply when no VTN capacity event is active — real events win
-(`tasks/sim_tick/helpers.rs`).
+(`tasks/sim_tick/helpers.rs`). `pv_generation_limit_kw` (Behaviour C, `PvCurtailmentSource::Manual`)
+triggers a replan the same way `grid_import_limit_kw`/`grid_export_limit_kw` do — see
+[[asset-layer]]'s PV curtailment section for the four-way resolution it participates in.
+
+**Null-clear fix (`routes/sim.rs`)**: `POST /sim/inject`'s body originally used
+`Option<serde_json::Value>` per field, but serde_json's blanket `Option<T>` impl collapses a
+top-level JSON `null` to Rust `None` before `T::deserialize` ever runs — so an explicit
+`{"field": null}` request body was indistinguishable from the field being absent entirely,
+making the documented null-clear behaviour structurally unreachable via real HTTP calls
+(confirmed live on Pi4 for both `pv_generation_limit_kw` and `grid_export_limit_kw`). Every
+field now deserializes through a `double_option` helper (`Option<Option<T>>`), restoring the
+three-way absent/null/value distinction the endpoint's doc comment always claimed. The
+original unit tests only constructed `PostSimInjectBody` directly in Rust, bypassing real JSON
+deserialization — a false positive; the regression test now goes through `serde_json::from_str`.
 
 ## Role in planning
 
