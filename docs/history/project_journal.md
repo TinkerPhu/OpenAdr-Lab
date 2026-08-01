@@ -3638,7 +3638,7 @@ when on Node1 the BDD suite runs.
 1. **should_replan exclusion**: pv_plan_kw deliberately excluded from the
    should_replan guard in 
 outes/sim.rs.  Adding it would trigger a T1+T2
-   double-solve race (same root cause as ase_load_kw exclusion), corrupting
+   double-solve race (same root cause as base_load_kw exclusion), corrupting
    the absorber's assertion window in timing-sensitive BDD steps.
 
 2. **Inject snapshot read-before-spawn_blocking**: pv_plan_kw is read from
@@ -7489,3 +7489,43 @@ passing:**
    lines. Verified: `curl http://node1.local:8214/` → 200 from the Windows dev machine.
    `nslookup node1.local` still reports "non-existent domain" — expected, since `.local`
    only resolves via mDNS, which `nslookup` doesn't query; `curl`/browsers do.
+
+## Public repo: personal-info scrub (Pi4/Po4 -> Node1/Node2)
+
+**Why**: the repo was made public on GitHub. An audit turned up ~570 occurrences of
+the home-lab hostnames Pi4/Po4 across 86 files, plus two real personal email addresses
+accidentally preserved in this journal's DCO-failure narrative, and a stale
+`/etc/hosts` hostname fragment (`TinkerPi`) quoted in the mDNS-rename story below.
+
+**Fix**: renamed Pi4 -> Node1 (primary docker host) and Po4 -> Node2 (secondary/
+offload host) across docs, scripts, and code comments. `scripts/pi4_lock.sh` became
+`scripts/docker_host_lock.sh`, with its env vars genericized (`LOCK_HOST` etc.)
+independent of node numbering, per explicit instruction that the lock mechanism
+shouldn't be tied to a specific node's identity — it already worked against any
+docker host reachable via SSH, so only the naming needed to stop implying Node1
+specifically. `.claude/skills/deploy-pi4/` -> `deploy-node1/`,
+`wiki/decisions/pi4-lease-lock.md` -> `docker-host-lease-lock.md`. Added `Node1`/
+`Node2` as new SSH config aliases (same hosts) alongside the existing `Pi4`/`Po4`
+ones so nothing broke mid-migration. The two leaked emails were replaced with
+obviously-generic placeholders (`wrong-address@example.com`) since the DCO-mismatch
+lesson didn't depend on the real addresses. Private LAN IPs (192.168.1.103/.104) and
+the `TinkerPhu` GitHub handle were left as-is — judged low-sensitivity (non-routable
+IPs; the handle is already the public repo owner's visible identity).
+
+**Verification**: exhaustive case-insensitive repo grep for `pi4`/`po4` returns zero
+matches (excluding an unrelated example IP inside the vendored OpenADR spec text).
+Confirmed no functional config (ports, network/service names, compose files) changed —
+only comments, docs, and identifiers. Fixed a couple of nested rename artifacts by hand
+afterward: "A Raspberry Node1-hosted" in README.md (from "Raspberry Pi4-hosted",
+missed because the regex only matched whole-word `Pi4`) and two leftover "the Node1"
+bare-noun instances left inconsistent with an earlier stylistic cleanup pass.
+
+**Key learning**: a blind find-and-replace rename across a large text corpus needs a
+follow-up targeted grep for the adjacent words it can silently mangle (here:
+"Raspberry " immediately before the token, and word-boundary-adjacent compound words
+like "pi4server"/"pi4-lock" that a plain whole-word `Pi4` regex handles fine but which still
+need eyeballing case by case). Also: automated regex passes over narrative/historical
+text (a project journal, key-learnings doc) need a manual review pass on top, since
+personal-name fragments and typo'd duplicate words don't follow a clean pattern the
+regex can catch.
+
