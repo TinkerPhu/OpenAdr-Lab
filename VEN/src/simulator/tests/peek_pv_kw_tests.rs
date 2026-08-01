@@ -197,7 +197,7 @@ fn peek_pv_kw_matches_tick_output_with_weather_for_same_now() {
 
 #[test]
 fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
-    // Regression, found live on Pi4 (2026-07-25): pv_irradiance is one-shot —
+    // Regression, found live on Node1 (2026-07-25): pv_irradiance is one-shot —
     // the caller (tasks::sim_tick::tick.rs) auto-clears it from SimInjectState
     // one tick after posting. Tick 1 correctly silences PV via the override.
     // Tick 2 passes `pv_irradiance_override: None` (already auto-cleared) while

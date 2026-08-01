@@ -1,7 +1,7 @@
 ###############################################################################
 # Cargo test stack for openleadr-rs (submodule)
 #
-# Usage (on Pi4):
+# Usage (on Node1):
 #   cd /srv/docker/openadr_lab
 #   docker compose -f tests/docker-compose.openleadr-test.yml down   # ALWAYS run first
 #   docker compose -f tests/docker-compose.openleadr-test.yml run --build --rm cargo-test

@@ -5,12 +5,12 @@ created: 2026-07-04
 updated: 2026-07-31
 synced_commit: e9f5207
 sources: [docs/architecture/VTN_ARCHITECTURE.md, .claude/CLAUDE.md, docs/guidelines/TESTING.md, fleet.sh]
-tags: [deployment, docker, pi4]
+tags: [deployment, docker, node1]
 ---
 
 # Deployment Topology
 
-Everything runs in Docker on **Pi4** (reached via ssh), directory
+Everything runs in Docker on **Node1** (reached via ssh), directory
 `/srv/docker/openadr_lab`, on the shared external network `vtn_openadr-net`
 (docs/architecture/VTN_ARCHITECTURE.md §1).
 
@@ -30,7 +30,7 @@ The [[vtn-stack]] and the three VEN containers are separate compose stacks joine
 external network. Caution from `.claude/CLAUDE.md`: the Pi also hosts **productive
 containers unrelated to this project — never stop them**. The Pi is also shared
 between parallel dev sessions: any docker build or test run there must hold the
-[[pi4-lease-lock]] first (`scripts/pi4_lock.sh`, `.claude/CLAUDE.md` §pi4-lock). This is also the reason
+[[docker-host-lease-lock]] first (`scripts/docker_host_lock.sh`, `.claude/CLAUDE.md` §node1-lock). This is also the reason
 [[fleet-tooling]]'s live verification deliberately stopped at N=3 rather than N=10 —
 the Pi already runs ~20 of those unrelated containers with limited headroom.
 
@@ -40,7 +40,7 @@ the Pi already runs ~20 of those unrelated containers with limited headroom.
   through WSL (`wsl cargo check` / `wsl cargo test`) (`.claude/CLAUDE.md` §local-rust).
   The HiGHS dependency comes from the [[milp-planner]].
 - **Local UI**: `cd VEN/ui && npm test` / `npm run build` (same for `VTN/ui`).
-- **Full-stack runs**: only on Pi4 (`docker compose build/up`), including the E2E and
+- **Full-stack runs**: only on Node1 (`docker compose build/up`), including the E2E and
   resilience suites described in [[testing-strategy]].
 - Deployments follow git pull on the Pi; builds are ARM64 (first VTN source build took
   ~25 min, cached afterwards — docs/history/project_journal.md §1).

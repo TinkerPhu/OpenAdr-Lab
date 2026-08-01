@@ -45,7 +45,7 @@ as Phase 2's N=10 fleet test.
    stats from the recorder's `report_lag_s` column (WP3.7) — windowed by
    `received_at`, since the recorder archive holds every report ever seen.
 4. **`report.py`** — markdown comparison across runs; import-profile PNGs when
-   matplotlib is importable, silently skipped otherwise (not installed on the Pi4
+   matplotlib is importable, silently skipped otherwise (not installed on the Node1
    host).
 
 ## Personas (Phase 4, WP4.5)
@@ -62,7 +62,7 @@ window like the Phase-3 exit demo.
 
 ## Verified
 
-A 3-minute smoke run on Pi4 exercised the full pipeline with real per-VEN KPI
+A 3-minute smoke run on Node1 exercised the full pipeline with real per-VEN KPI
 values. That run also exposed an environment trap worth remembering: the
 production trio + BFF had been running pre-Phase-1 binaries for four days (no
 history store, no `lab_recorder` schema) — long-lived containers silently decouple

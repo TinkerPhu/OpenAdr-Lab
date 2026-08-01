@@ -13,7 +13,7 @@
 
 | ID | Goal | Status |
 |----|------|--------|
-| **SG-1 Fleet** | Run a fleet of independent, *diverse* VEN agents against one VTN | **Built.** `fleet.sh up N` (bulk registration, personas, health checks); resource budget on the Pi4 caps practical size at N=3 base + fleet VENs |
+| **SG-1 Fleet** | Run a fleet of independent, *diverse* VEN agents against one VTN | **Built.** `fleet.sh up N` (bulk registration, personas, health checks); resource budget on Node1 caps practical size at N=3 base + fleet VENs |
 | **SG-2 Control-method lab** | Observe and compare VTN control methods (tariffs, limits, alerts, SIMPLE, dispatch) | **Built, not yet exercised.** All control paths implemented and BDD-covered; the experiment harness exists — the first full S-1…S-6 comparison run is still pending (see §3.1) |
 | **SG-3 Report evaluation** | Judge the *usefulness* of VEN reports from the VTN side | **Directional only.** VTN recorder archives reports incl. `report_lag_s`; rigorous M&V-grade evaluation needs BASELINE reports (WP5.4, §3.2) |
 | **SG-4 Forecast from history** | VEN learns heuristics from its own past data | **Mostly done.** History store + learned weekday/weekend heuristics ship and feed the planner; a live weather feed (MQTT, `docs/architecture/weather_forecast.md`) now drives a physics-based PV forecast too. Remaining: the held-out-week validation demo and an external grid-CO₂ feed (BL-17) |
@@ -40,7 +40,7 @@ SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort*
 ### 3.1 The experiment windows (highest value, zero new code)
 
 The whole SG-1/SG-2 arc converges on demonstrations that have not run yet — they are
-scheduled-time items (scenarios run in real time; the full set is ~3 h on the Pi4):
+scheduled-time items (scenarios run in real time; the full set is ~3 h on Node1):
 
 1. **S-1…S-6 control-method comparison** (Phase 3 exit): one report comparing flat
    tariff vs. dynamic tariff vs. capacity limit vs. emergency alert vs. direct
@@ -133,5 +133,5 @@ M&V-grade after.
   choice* is an experiment variable.
 - **Capacity negotiation (`OadrCapacityRequest`)** — no driving experiment yet (S-7
   placeholder above).
-- **Fleet scale N=10** — the Pi4 resource budget caps practical fleet size; larger
+- **Fleet scale N=10** — the Node1 resource budget caps practical fleet size; larger
   fleets need a second host or lighter VEN builds.

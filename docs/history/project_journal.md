@@ -16,7 +16,7 @@ The system design is defined in `open_adr_3_raspberry_pi_lab_complete_system_des
 
 **Status: COMPLETE**
 
-The VTN stack is live on Pi4-Server with two healthy containers:
+The VTN stack is live on Node1-Server with two healthy containers:
 
 | Container | Image | Status | Port |
 |-----------|-------|--------|------|
@@ -26,7 +26,7 @@ The VTN stack is live on Pi4-Server with two healthy containers:
 **What was done:**
 - Created `VTN/docker-compose.yml` with services `db` (PostgreSQL) and `vtn` (openleadr-rs)
 - Cloned `openleadr-rs` at project root (not inside VTN/); docker-compose references `../openleadr-rs`
-- Built VTN from source inside Docker (~25 min on Pi4 ARM64, cached afterwards)
+- Built VTN from source inside Docker (~25 min on Node1 ARM64, cached afterwards)
 - Confirmed VTN auto-runs SQLx migrations at startup (15 tables created)
 - Loaded test credential fixtures (5 users: any-business, ven-manager, user-manager, business-1, ven-1)
 
@@ -47,8 +47,8 @@ The VTN stack is live on Pi4-Server with two healthy containers:
 
 **Status: COMPLETE**
 
-- Repository on GitHub, Pi4-Server pulls via HTTPS with PAT
-- `ssh Pi4-Server "cd /srv/docker/openadr_lab && git pull"` works
+- Repository on GitHub, Node1-Server pulls via HTTPS with PAT
+- `ssh Node1-Server "cd /srv/docker/openadr_lab && git pull"` works
 - `.gitignore` excludes `openleadr-rs/` (cloned third-party repo)
 
 ### 4. Design Documents — All Written
@@ -70,7 +70,7 @@ The VTN stack is live on Pi4-Server with two healthy containers:
 
 **Status: COMPLETE**
 
-Three VEN instances running on Pi4-Server, all connecting to the VTN:
+Three VEN instances running on Node1-Server, all connecting to the VTN:
 
 | Container | Credentials | Port |
 |-----------|-------------|------|
@@ -104,7 +104,7 @@ React + TypeScript SPA served by nginx on port 8084:
 - Created `SensorForm` component for POST /sensors injection
 - Wrote 31 component tests across 6 test files (Vitest + Testing Library)
 - Multi-stage Docker build (node:20-alpine build + nginx:alpine serve) with SPA fallback
-- Deployed to Pi4-Server as `ui` service in VEN docker-compose
+- Deployed to Node1-Server as `ui` service in VEN docker-compose
 
 **Architecture:**
 - `src/api/hooks.ts` — 5 react-query hooks (`useHealth`, `usePrograms`, `useEvents`, `useSensor`, `usePostSensor`)
@@ -312,7 +312,7 @@ The VTN's test fixtures only included `ven-1`. To add `ven-2` and `ven-3`, I nee
 
 - Rewrote `VEN/Dockerfile` to use `rust:1.90-alpine` (matching VTN) with multi-stage build, dep caching, and nonroot user
 - Created `VEN/docker-compose.yml` with 3 VEN services sharing the VTN's external network (`vtn_openadr-net`)
-- Built VEN on Pi4: ~10 min for dependencies + 1 min for app code (total ~11 min)
+- Built VEN on Node1: ~10 min for dependencies + 1 min for app code (total ~11 min)
 - VEN-1 started and immediately:
   - Authenticated with VTN using `ven-1/ven-1`
   - Polled 1 program, 1 event
@@ -426,7 +426,7 @@ Fixed by giving the BFF two VtnClient instances (`business` and `ven_mgr`), each
 
 ### BFF Build Performance
 
-First build on Pi4: ~11 min (deps cached from VEN build sharing the same base image). Cached rebuilds (source-only changes): ~1 min.
+First build on Node1: ~11 min (deps cached from VEN build sharing the same base image). Cached rebuilds (source-only changes): ~1 min.
 
 ### Port Conflicts
 
@@ -447,7 +447,7 @@ Vitest failed when run from a subst drive alias because Vite resolves to the rea
 
 ### Motivation
 
-Ports 8080 (UI) and 8090 (BFF) conflicted with existing containers (`data_acquisition` and `dokuwiki`) on Pi4. Rather than risk future conflicts, all OpenADR Lab ports were moved to the 8200 range with a clear allocation scheme.
+Ports 8080 (UI) and 8090 (BFF) conflicted with existing containers (`data_acquisition` and `dokuwiki`) on Node1. Rather than risk future conflicts, all OpenADR Lab ports were moved to the 8200 range with a clear allocation scheme.
 
 ### Port Allocation
 
@@ -464,11 +464,11 @@ Ports 8080 (UI) and 8090 (BFF) conflicted with existing containers (`data_acquis
 
 ### .env Override Pitfall
 
-Docker Compose `${VAR:-default}` syntax in YAML is overridden by `.env` files. The local `.env` and the Pi4's `.env` both had the old port values, silently ignoring the new defaults. Had to update both.
+Docker Compose `${VAR:-default}` syntax in YAML is overridden by `.env` files. The local `.env` and the Node1's `.env` both had the old port values, silently ignoring the new defaults. Had to update both.
 
 ### Hostname Fix
 
-Hardcoded `raspberrypi.local` didn't resolve — Pi4's actual hostname is `pi4server`, so `pi4server.local` works via mDNS/Avahi. (Superseded 2026-08-01: the box was later renamed to `Pi4`/`pi4.local` — see the mDNS fix at the end of this journal.)
+Hardcoded `raspberrypi.local` didn't resolve — Node1's actual hostname is `node1server`, so `node1server.local` works via mDNS/Avahi. (Superseded 2026-08-01: the box was later renamed to `Node1`/`node1.local` — see the mDNS fix at the end of this journal.)
 
 ---
 
@@ -668,8 +668,8 @@ Both UIs displayed all Programs and Events identically regardless of which VEN w
 - VTN auto-migrates on first boot — no need for manual `cargo sqlx migrate run`
 - Token endpoint is `/auth/token`, not `/oauth/token`
 - Token expires in 30 days (2,592,000 sec), not 1 hour
-- VTN build takes ~25 min on Pi4 ARM64 (first time); cached builds are fast
-- VEN build takes ~11 min on Pi4 ARM64 (first time); cached rebuilds are ~1 min
+- VTN build takes ~25 min on Node1 ARM64 (first time); cached builds are fast
+- VEN build takes ~11 min on Node1 ARM64 (first time); cached rebuilds are ~1 min
 - SSH to Pi has no interactive terminal — git credentials must be written directly to `~/.git-credentials`
 - Role-based access is enforced: wrong role = 403 Forbidden
 - Docker Compose project name = directory name; avoid duplicating it in service names
@@ -755,7 +755,7 @@ The `use_cases.md` defines 8 real-world OpenADR scenarios, but seed data was tri
 ### Deployment Required
 
 After deployment:
-1. Re-run seed script to create new events: `python3 seed_vtn.py --vtn-url http://Pi4-Server:8200`
+1. Re-run seed script to create new events: `python3 seed_vtn.py --vtn-url http://Node1-Server:8200`
 2. Rebuild VEN UI: `docker compose up -d --build ui` (in VEN/)
 3. Rebuild VTN UI: `docker compose up -d --build ui` (in VTN/)
 4. No BFF or VEN backend rebuilds needed
@@ -846,7 +846,7 @@ Or use GitHub's "Sync fork" button, then `git submodule update --remote` locally
 
 ### Deployment Note
 
-On Pi4-Server (or any existing clone), a one-time init is needed after pulling:
+On Node1-Server (or any existing clone), a one-time init is needed after pulling:
 ```bash
 git pull
 git submodule update --init --recursive
@@ -1052,7 +1052,7 @@ Added browser-driven end-to-end tests that exercise the full stack: headless Chr
 1. **Behave step ambiguity** — `{param}` captures greedily, so `'create a program "{name}" via the UI'` matches `'create a program "{name}" targeting "{ven}" via the UI'`. Fix: use `use_step_matcher("re")` with `[^"]+` capture groups for targeted variants.
 2. **Feature-level @ui tag** — Behave's `scenario.tags` only includes scenario-level tags, not inherited feature tags. Fixed with helper `_is_ui(scenario)` checking both `scenario.tags` and `scenario.feature.tags`.
 3. **Missing VTN token** — UI scenarios reuse API steps (e.g. `the report for event ... appears in VTN`) that need `context.vtn_token`. Fixed by auto-provisioning token in `before_scenario` for UI scenarios.
-4. **Playwright on Pi4 ARM64** — Works out of the box with `playwright install chromium --with-deps` on Debian-slim. First build downloads ~300MB (Chromium + dependencies), cached in Docker layers.
+4. **Playwright on Node1 ARM64** — Works out of the box with `playwright install chromium --with-deps` on Debian-slim. First build downloads ~300MB (Chromium + dependencies), cached in Docker layers.
 5. **MUI Select interaction** — MUI's `<TextField select>` puts `data-testid` on the hidden `<input>`. Playwright clicks the parent div to open the dropdown, then selects `li[role="option"]` by text.
 
 **Test Results:**
@@ -1143,7 +1143,7 @@ Two complementary approaches:
 
    Infrastructure: Docker socket mounted into test-runner container, `docker.io` CLI added to Dockerfile. Steps use `docker compose stop/start/restart` to control services. Cleanup in `after_scenario` hook restarts any stopped services.
 
-2. **Standalone script** (`tests/failure_recovery_test.sh`) — bash script for manual testing on Pi4:
+2. **Standalone script** (`tests/failure_recovery_test.sh`) — bash script for manual testing on Node1:
    - VTN outage → VEN cache retention
    - VTN restart → VEN re-sync
    - VEN restart → event recovery
@@ -1406,7 +1406,7 @@ New `ven_simulator.feature` with 6 scenarios:
 
 ### Deployment & Verification
 
-Built and deployed to Pi4-Server. VEN build with new simulator/reactor modules: ~11 min (first build with new deps). All 3 VENs came up healthy with distinct behavior matching their profiles:
+Built and deployed to Node1-Server. VEN build with new simulator/reactor modules: ~11 min (first build with new deps). All 3 VENs came up healthy with distinct behavior matching their profiles:
 
 | VEN | Profile | Observed Behavior |
 |-----|---------|-------------------|
@@ -1599,7 +1599,7 @@ No new query parameters needed — reuses existing `is_ven()` and `ven_ids_strin
    - Event without VEN_NAME targets → all enrolled VENs see it
    - Business user → sees all events
 4. Updated SQLx offline cache (2 files renamed with new hashes)
-5. Built and deployed on Pi4 (~28 min full rebuild from upstream/main)
+5. Built and deployed on Node1 (~28 min full rebuild from upstream/main)
 
 ### Verification
 
@@ -1617,11 +1617,11 @@ Events without VEN_NAME targets (e.g., from "HVAC Optimization") remain visible 
 
 ### Problem
 
-PR #373 (`fix/event-ven-targets`) had a DCO failure on `337ca5c` ("Fix test fixtures"): the commit author was `TinkerPhu@users.noreply.github.com` but `Signed-off-by` used `tinker.phu@gmail.com` — the DCO bot requires these to match exactly.
+PR #373 (`fix/event-ven-targets`) had a DCO failure on `337ca5c` ("Fix test fixtures"): the commit author was `TinkerPhu@users.noreply.github.com` but `Signed-off-by` used `wrong-address@example.com` — the DCO bot requires these to match exactly.
 
 The local branch was also in a messy state: 4 commits locally (a stray `fixup!` from an aborted rebase) vs 3 on origin.
 
-Additionally, the first cargo test run on Pi4 caused a hard crash: two `cargo test --workspace` containers started simultaneously (first nohup launch reported exit code 1 due to stderr output, but the container had actually launched; the second explicit launch added a second), maxing out the Pi4's CPU and RAM until SSH became unreachable and required a power cycle.
+Additionally, the first cargo test run on Node1 caused a hard crash: two `cargo test --workspace` containers started simultaneously (first nohup launch reported exit code 1 due to stderr output, but the container had actually launched; the second explicit launch added a second), maxing out the Node1's CPU and RAM until SSH became unreachable and required a power cycle.
 
 ### What Was Done
 
@@ -1681,7 +1681,7 @@ Root cause: the new test `add_with_mixed_targets` was annotated `#[sqlx::test(fi
 
 ### What Was Done
 
-**Reproduce:** Checked out the PR branch on Pi4 (`git -C openleadr-rs checkout fix/program-ven-targets`), then ran the failing test via the cargo-test Docker stack with `--build` to force a fresh image from the PR source:
+**Reproduce:** Checked out the PR branch on Node1 (`git -C openleadr-rs checkout fix/program-ven-targets`), then ran the failing test via the cargo-test Docker stack with `--build` to force a fresh image from the PR source:
 
 ```
 docker compose run --build --rm cargo-test cargo test -p openleadr-vtn --lib add_with_mixed_targets
@@ -1748,7 +1748,7 @@ Added a dedicated **Simulation** tab to the VEN UI, replacing the basic sim card
 
 - **`docker compose run --build` is required when source changes and the image bakes source via `COPY . .`** — without it, the cached image runs the old binary and the new test simply does not exist in it. The "118 filtered out, 0 run" result is a silent false negative that can mask both failures and successes.
 - **Named volumes only help the container that mounts them** — the cargo-target volume accelerates the `cargo-test` step (incremental builds ~1.5 min), but the VTN image rebuild triggered by `COPY . .` invalidation still recompiles from scratch (~25 min). These are two separate caching layers with no interaction.
-- **sed is unreliable for multi-line patterns on Pi4 Alpine** — Python one-liner was more reliable: `content.replace('<old multiline string>', '<new multiline string>')`.
+- **sed is unreliable for multi-line patterns on Node1 Alpine** — Python one-liner was more reliable: `content.replace('<old multiline string>', '<new multiline string>')`.
 - **Submodule checkout conflicts** — after `git submodule update --init`, if local edits exist in the submodule, git refuses to switch branches. Fix: `git checkout -- <file>` inside the submodule first, then re-run the update.
 
 ---
@@ -1784,7 +1784,7 @@ Implemented `fix/event-ven-target-privacy` in the `openleadr-rs` submodule: a co
 **Deployment**
 - Squashed to 1 clean DCO commit: `0a6014e` on `fix/event-ven-target-privacy`
 - Merged into `dev` branch (conflict-resolved with dev's `filter.active` post-processing)
-- VTN image rebuilt and redeployed on Pi4
+- VTN image rebuilt and redeployed on Node1
 - Full integration test suite: **17 features, 62 scenarios, 439 steps — all passed**
 - **Upstream PR #374** opened against `OpenLEADR/openleadr-rs:main` — all 13 CI checks passed (DCO, Format, Audit, Clippy ×4, Build+test ×5, unused-deps)
 
@@ -1822,21 +1822,21 @@ PR #374 had all 13 CI checks green but Codecov flagged one uncovered line — li
 - Updated `ven_list_filters_and_strips` assertions: event-5 is visible to all VENs, so ven-1 now sees 2 events (not 1) and ven-2 sees 1 (not 0); used `.any()` to find event-4 in the list instead of asserting on position
 
 **Squash and CI**
-- Intermediate test commits had wrong `Signed-off-by` email (`tinker@phu.eu` instead of `TinkerPhu@users.noreply.github.com`) causing DCO failure
+- Intermediate test commits had wrong `Signed-off-by` email (`another-wrong-address@example.com` instead of `TinkerPhu@users.noreply.github.com`) causing DCO failure
 - All 3 commits squashed to 1 clean commit via `git reset --soft <base>`, force-pushed — all 13 CI checks passed
 
 **Deployment**
 - Merged into `dev` (conflict-resolved by taking fix branch version)
 - Submodule updated to `dev` tip, pushed to origin
-- VTN image rebuilt and redeployed on Pi4
+- VTN image rebuilt and redeployed on Node1
 
 ### Issues encountered
 
 - **New `#[sqlx::test]` functions not appearing in test output** — root cause: Docker cargo-test image was stale (source baked in at image build time, not volume-mounted). Running `cargo clean` alone doesn't help if the image is old. Fix: `docker compose run --build` to rebuild image, then `cargo clean` inside the container, then test.
-- **Wrong Signed-off-by email** — intermediate commits used `tinker@phu.eu`. DCO bot requires exact match with commit author email. Fix: squash all commits with correct email.
+- **Wrong Signed-off-by email** — intermediate commits used `another-wrong-address@example.com`. DCO bot requires exact match with commit author email. Fix: squash all commits with correct email.
 - **`basic_create_read` flaky failure in `--jobs 2` run** — client integration test races against other tests hitting the shared VTN server. Passes in isolation. Pre-existing issue, unrelated to our changes.
 
-*Last updated: 2026-02-21 — Phase 19b complete, all CI green, deployed to Pi4*
+*Last updated: 2026-02-21 — Phase 19b complete, all CI green, deployed to Node1*
 
 ---
 
@@ -1860,7 +1860,7 @@ Fixed all 3 failing `@ven-ui` scenarios in `tests/features/sim_override_ui.featu
 
 6. **Override state bleeds between scenarios** — VEN containers are long-lived; `UserOverrides` set in Scenario 2 (toggle click → `ev_force_kw=7.0`) survives in memory to Scenario 3. Fixed by adding `And the VEN-1 sim overrides are reset` to the behave Background (calls `POST /sim/override {}`).
 
-**Test isolation note on disk persistence**: VEN disk persistence (`PERSIST_PATH`) is a production feature for surviving Pi4 reboots — the sim state (SoC, temperatures, energy counters) has meaningful continuity. In the test environment, `PERSIST_PATH` is not set; state is in-memory only. The bleed-over issue was purely in-memory state within a long-lived container, unrelated to disk.
+**Test isolation note on disk persistence**: VEN disk persistence (`PERSIST_PATH`) is a production feature for surviving Node1 reboots — the sim state (SoC, temperatures, energy counters) has meaningful continuity. In the test environment, `PERSIST_PATH` is not set; state is in-memory only. The bleed-over issue was purely in-memory state within a long-lived container, unrelated to disk.
 
 ### Issues encountered
 
@@ -1871,7 +1871,7 @@ Fixed all 3 failing `@ven-ui` scenarios in `tests/features/sim_override_ui.featu
 
 See KEY_LEARNINGS.md (Playwright section and React/UI section) for the MUI Slider selector pattern and the Rust `null` vs JS `undefined` pitfall.
 
-*Last updated: 2026-02-21 — Phase 20 complete, all 468 E2E steps pass, deployed to Pi4*
+*Last updated: 2026-02-21 — Phase 20 complete, all 468 E2E steps pass, deployed to Node1*
 
 ---
 
@@ -1934,13 +1934,13 @@ With this change, the chart's dashed desired line (`EXPORT_CAPACITY_LIMIT` paylo
 - **Hard constraints should not be interpolated** — a kW cap either applies or doesn't. Using `if f > 0.0 { to.value } else { from.value }` for binary fields in `interpolate()` is cleaner than trying to blend `None` and `Some`.
 - **Docker build is the final TypeScript type-checker for the full project** — running `npm test` locally only covers tested components; pages like `Dashboard.tsx` and `Trace.tsx` that have no dedicated tests only fail at `tsc` time during the Docker build. Running `tsc` locally before pushing would catch these earlier.
 
-*Last updated: 2026-02-22 — Phase 21 complete, 69 UI tests pass, deployed to Pi4*
+*Last updated: 2026-02-22 — Phase 21 complete, 69 UI tests pass, deployed to Node1*
 
 ---
 
 ## Phase 22: VEN HEMS Controller — Stage 1 Entity Model
 
-**Status: COMPLETE — 10 BDD scenarios pass on Pi4-Server (1 feature, 48 steps)**
+**Status: COMPLETE — 10 BDD scenarios pass on Node1-Server (1 feature, 48 steps)**
 
 ### What Was Done
 
@@ -2177,7 +2177,7 @@ Added a new **Controller** page to the VEN web UI at `/controller`, giving a "gl
 
 - When a recharts data point has `null` for a `Line` dataKey, it creates a gap (`connectNulls={false}`). Setting past points' `plan_*` to `null` and future points' `trace_*` to `null` gives a clean visual split at the NOW line without any special logic.
 - `GET /plan` returns JSON `null` when no plan exists yet. The client method must handle `data === null` explicitly before casting.
-- Pi4 may have uncommitted local files that block `git pull`. Use `git stash` before pull in deploy scripts.
+- Node1 may have uncommitted local files that block `git pull`. Use `git stash` before pull in deploy scripts.
 - Docker service name is `ui` (not `ven-ui`) in `VEN/docker-compose.yml`.
 
 ### Commit
@@ -2388,7 +2388,7 @@ Two consecutive runs (first `--build`, second without) both 0 failures.
 
 - TypeScript compile errors (`Cannot find name 'onOverrideChange'`, `unused 'overrides'`, `unused 'nowMs'`) — caught at Docker build time, fixed before deploy.
 - `global` not available in browser TypeScript target — replaced with `globalThis`.
-- Wrong docker-compose directory for Pi4-Server builds (`/srv/docker/openadr_lab/VEN/` not root).
+- Wrong docker-compose directory for Node1-Server builds (`/srv/docker/openadr_lab/VEN/` not root).
 - BDD toggle test failing due to null handling and MUI Switch click target — both fixed in step definitions.
 
 ### Commits
@@ -2432,7 +2432,7 @@ Replaced the hardcoded per-device named fields in `SimState` (ev, heater, pv, ba
 
 **Final test result:**
 
-33 features, 143 scenarios, 895 steps — all passing with 0 failures on Pi4-Server ARM64.
+33 features, 143 scenarios, 895 steps — all passing with 0 failures on Node1-Server ARM64.
 
 ---
 
@@ -2467,7 +2467,7 @@ Added a new BDD scenario: "Request for a non-storage asset is rejected" — `POS
 
 ### Final test result
 
-33 features, 144 scenarios, 899 steps — all passing with 0 failures on Pi4-Server ARM64.
+33 features, 144 scenarios, 899 steps — all passing with 0 failures on Node1-Server ARM64.
 
 **Commits:** `b4eea32`, `6a5163b`, `09a64fe`
 
@@ -2522,7 +2522,7 @@ When re-running tests after rebuilding `test-ven-ui`, `docker compose run --rm t
 The old `VEN/src/reporter.rs` imported `crate::reactor::interval::find_active_intervals`. Since `src/reporter.rs` was never added to `mod` declarations in `main.rs`, it compiled silently despite the broken imports. The Phase 3 reactor deletion orphaned it without a visible build error. Fixed in Phase 6 by creating the new `controller/reporter.rs` with inline interval-activity detection (no reactor dependency) and deleting the old file.
 
 **5. "Already up to date" masks forgotten git push:**
-Several times, `git pull` on Pi4 showed "Already up to date" while Docker was still building from the previous commit because the local commit hadn't been pushed yet. Pattern: always `git push` locally before SSH → Pi4 → `git pull`.
+Several times, `git pull` on Node1 showed "Already up to date" while Docker was still building from the previous commit because the local commit hadn't been pushed yet. Pattern: always `git push` locally before SSH → Node1 → `git pull`.
 
 ### Key learnings
 
@@ -2559,7 +2559,7 @@ Add per-asset timeline charts, grid-level stacked area chart, and schema-driven 
 - Deleted `buildAssetTimeline`, `buildTariffTimeline`, `buildStackedAreaData`, `getTraceAssetPower` from `dataBuilders.ts` (replaced by hook-driven data flow)
 - `nowMs` in `ControllerV2.tsx` changed to `useMemo(() => Date.now(), [])` to avoid rendering on every data refetch
 
-**Phase 9 (browser freeze fix):** After deploying, the Pi4 browser froze because the timeline buffer had accumulated 3600 rows/asset × 5 assets + 1 allTimelines call = ~21,000+ data points. Added server-side `max_points` downsampling: `TimelineParams.max_points` (default 120) with a `downsample()` stride function in Rust that always preserves the last point. A fresh VEN returns ~62 points; a 1-hour-old VEN returns exactly 120. Freezes eliminated.
+**Phase 9 (browser freeze fix):** After deploying, the Node1 browser froze because the timeline buffer had accumulated 3600 rows/asset × 5 assets + 1 allTimelines call = ~21,000+ data points. Added server-side `max_points` downsampling: `TimelineParams.max_points` (default 120) with a `downsample()` stride function in Rust that always preserves the last point. A fresh VEN returns ~62 points; a 1-hour-old VEN returns exactly 120. Freezes eliminated.
 
 **Phase 10 (ControlKind case fix):** Rust `#[serde(rename_all = "snake_case")]` produces `"switch"`, `"slider"`, `"number_input"`. TypeScript `ControlKind` had PascalCase `"Switch"`, `"Slider"`, `"NumberInput"`. `DynamicControl` comparisons never matched so all controls fell through to the NumberInput/TextField fallback — MUI Switch never rendered. Fixed by aligning `ControlKind` to snake_case.
 
@@ -2569,14 +2569,14 @@ Add per-asset timeline charts, grid-level stacked area chart, and schema-driven 
 
 ### Issues encountered
 
-**1. Missing committed files caused build failure on Pi4:**
-`api/hooks.ts` and `api/types.ts` were modified locally but never staged. The Pi4 build failed with "Module has no exported member 'TariffSnapshot'". Fixed by committing them as a separate fix commit.
+**1. Missing committed files caused build failure on Node1:**
+`api/hooks.ts` and `api/types.ts` were modified locally but never staged. The Node1 build failed with "Module has no exported member 'TariffSnapshot'". Fixed by committing them as a separate fix commit.
 
 **2. AmbiguousStep — duplicate step definition:**
 `the response JSON is an array` was defined in both `ven_timeline_steps.py` and `entity_model_steps.py`. behave raises `AmbiguousStep` and exits. Fixed by removing from the new file.
 
 **3. Browser freeze from accumulated timeline data:**
-test-ven-ui was stale (21 hours old). After rebuild, all `@ven-ui` scenarios failed because recharts was processing ~18,000+ data points on a Pi4 ARM CPU, freezing the JS thread. Playwright's `wait_for_selector` timed out with "locator resolved to visible" in the call log — the element existed in DOM but JS was frozen. The `inner_html()` call also timed out. Diagnosed by examining Playwright's own call log entries. Fixed by server-side downsampling.
+test-ven-ui was stale (21 hours old). After rebuild, all `@ven-ui` scenarios failed because recharts was processing ~18,000+ data points on a Node1 ARM CPU, freezing the JS thread. Playwright's `wait_for_selector` timed out with "locator resolved to visible" in the call log — the element existed in DOM but JS was frozen. The `inner_html()` call also timed out. Diagnosed by examining Playwright's own call log entries. Fixed by server-side downsampling.
 
 **4. ControlKind case mismatch — silent rendering fallback:**
 Backend `serde(rename_all = "snake_case")` vs TypeScript PascalCase. Scenario 9 (visibility) still passed because the fallback TextField also had `data-testid`, but scenario 17 (interaction) failed when looking for `input[type="checkbox"]` inside it.
@@ -2586,7 +2586,7 @@ When override is empty (`{}`), the control should show the sim's current hardwar
 
 ### Key learnings
 
-- Server-side `max_points` downsampling is essential for timeline APIs consumed by browser charts on constrained hardware. 3600 rows/asset at 5+ assets = browser freeze on Pi4.
+- Server-side `max_points` downsampling is essential for timeline APIs consumed by browser charts on constrained hardware. 3600 rows/asset at 5+ assets = browser freeze on Node1.
 - When Playwright `wait_for_selector` times out but the call log shows "locator resolved to visible", the page DOM is present but the JS thread is blocked. This points to CPU overload from data processing, not a missing element.
 - Rust `#[serde(rename_all = "snake_case")]` produces lowercase underscore names. Any TypeScript `ControlKind` or enum must match exactly — case mismatches produce no TypeScript error (it's a string union) but silently fall through to a wrong rendering branch.
 - Schema-driven controls (Switch/Slider) need to display the system's current real state as initial value, not assume `false`/0. When the backend override is absent, use the sim snapshot value as fallback so the user sees accurate state before interacting.
@@ -2905,13 +2905,13 @@ Refactored the VEN measurement reporter to produce multi-interval reports when e
 
 #### BDD Integration Issues & Fixes
 
-The initial BDD tests failed due to three issues discovered during Pi4 integration testing:
+The initial BDD tests failed due to three issues discovered during Node1 integration testing:
 
 1. **VTN does not store `duration` in reportDescriptors**. The OpenADR 3.0 `reportDescriptor` has a `frequency` field (integer seconds), not a `duration` field (ISO 8601). The VTN silently drops unknown fields. Fix: changed `extract_report_obligations()` to read `descriptor.frequency` instead of `descriptor.duration`.
 
 2. **Timer/obligation report collision**. Both the timer-driven and obligation-driven paths submitted reports with the same `reportName` (`auto-{ven}-{event}`), causing upsert overwrites. The timer path would overwrite the multi-interval obligation report with a single-interval snapshot. Fix: (a) obligation reports use distinct `reportName` (`ob-{ven}-{event}-{type}`), (b) timer-driven path skips events that have `reportDescriptors` in the event JSON.
 
-3. **Docker build caching**. `docker compose run --build test-runner` only rebuilds the test-runner, NOT the VEN service. VEN changes require explicit `docker compose build --no-cache test-ven-1`. This caused multiple debug cycles where the old VEN code was running despite source changes on Pi4.
+3. **Docker build caching**. `docker compose run --build test-runner` only rebuilds the test-runner, NOT the VEN service. VEN changes require explicit `docker compose build --no-cache test-ven-1`. This caused multiple debug cycles where the old VEN code was running despite source changes on Node1.
 
 #### Tests
 
@@ -3151,14 +3151,14 @@ A new `/planner` tab with four integrated sections:
 
 ### Key discovery: backend serialization mismatch
 
-Initial types.ts used `{ type: "CheapTariff" }` but the backend uses `{ kind: "CHEAP_TARIFF" }` (`serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")`). `state_before` was typed as `string` but is actually `AssetState` tagged enum serialized as `{ asset_type: "pv"|"ev"|"battery"|..., actual_power_kw: number, ... }`. Discovered via live API inspection on Pi4 during BDD run — React error #31 ("can't render object as React child") in the drawer.
+Initial types.ts used `{ type: "CheapTariff" }` but the backend uses `{ kind: "CHEAP_TARIFF" }` (`serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")`). `state_before` was typed as `string` but is actually `AssetState` tagged enum serialized as `{ asset_type: "pv"|"ev"|"battery"|..., actual_power_kw: number, ... }`. Discovered via live API inspection on Node1 during BDD run — React error #31 ("can't render object as React child") in the drawer.
 
 Fix: Updated `PlanReason` discriminator to `kind` with SCREAMING_SNAKE_CASE values; `PlanStep.state_before` typed as `{ asset_type: string; actual_power_kw: number; [key: string]: unknown }`.
 
 ### Tests
 
 - **59 vitest tests** added (PlanDecisionMatrix×15, PacketProgressBoard×16, PlanTriggerTimeline×14, PlanHeaderBar×14, PlannerPage×9, App×1 updated) — 244 total, all green.
-- **14 BDD scenarios** in `ven_ui_planner.feature` — all pass on Pi4 (3 skip gracefully when environment state doesn't match precondition).
+- **14 BDD scenarios** in `ven_ui_planner.feature` — all pass on Node1 (3 skip gracefully when environment state doesn't match precondition).
 - TypeScript build clean.
 
 ### Key learnings
@@ -3203,13 +3203,13 @@ Fix: Updated `PlanReason` discriminator to `kind` with SCREAMING_SNAKE_CASE valu
 
 `InnerState` struct and its manual `Clone` impl deleted. INVARIANT comment added at top of `impl AppState`: "No function may acquire more than one lock simultaneously."
 
-`PersistedVenState` private helper struct introduced to keep `state.json` format identical (`programs`, `events`, `reports`, `sensor` as top-level keys) — no migration needed for existing Pi4 state files.
+`PersistedVenState` private helper struct introduced to keep `state.json` format identical (`programs`, `events`, `reports`, `sensor` as top-level keys) — no migration needed for existing Node1 state files.
 
 `AppState::new()` explicitly sets `ev_settings.opportunistic_charging_enabled = true` (struct-update syntax) since Rust's `Default` derive ignores `#[serde(default = "bool_true")]`.
 
 ### Key decisions
 
-- **`PersistedVenState` for JSON backward-compat**: The original `InnerState` serialised only 4 fields (rest were `#[serde(skip)]`). Replicating exactly those 4 fields in `PersistedVenState` means all Pi4 `state.json` files load without modification.
+- **`PersistedVenState` for JSON backward-compat**: The original `InnerState` serialised only 4 fields (rest were `#[serde(skip)]`). Replicating exactly those 4 fields in `PersistedVenState` means all Node1 `state.json` files load without modification.
 - **`ControllerSimState` naming**: Chosen to avoid collision with `crate::simulator::SimState`. Has explicit `impl Default` (not `#[derive(Default)]`) because `SensorSnapshot::empty_now()` requires a constructor call.
 - **`to_json` INVARIANT compliance**: Initial implementation held `polling.read()` and `ctrl_sim.read()` simultaneously (read guards are safe from deadlock, but violate the written INVARIANT). Fixed to acquire-clone-drop each lock separately.
 - **Startup guard placement**: Guard in `try_load()` (not `load()`), so the public `Profile::load()` method remains available for tests that construct test profiles directly.
@@ -3254,7 +3254,7 @@ Fix applied in `ven_timeline_steps.py`:
 ### Tests
 
 - **12 Rust unit tests** added across `battery.rs` (T007/T008), `ev.rs` (T009/T011/T012), `heater.rs` (T015/T016/T018), `milp_planner.rs` (T013/T014/T017), `controller/timeline.rs` (T010) — all pass locally.
-- **3 new BDD scenarios** in `ven_timeline.feature` (T019/T020/T021) — all pass on Pi4.
+- **3 new BDD scenarios** in `ven_timeline.feature` (T019/T020/T021) — all pass on Node1.
 - **Full BDD suite**: 225 scenarios pass, 8 pre-existing failures (unchanged from `main`).
 
 ### Key learnings
@@ -3279,7 +3279,7 @@ Starting from T047 (17 failures) a series of commits addressed RC1 (sim-Mutex st
 
 ### Why MILP solves are slow in tests
 
-Under the full test suite the Pi4 runs **3 VEN containers simultaneously**, each with its own HiGHS MILP planner. 3 HiGHS processes compete for 4 Pi4 Cortex-A72 cores. Observed distribution (from VEN-1 logs): min=42s, median=80s, max=120s for 24 slots. The commit `e6ff7f9` measured 5-10s on an **unloaded** Pi4 with one VEN — the 10-20× gap is entirely CPU contention.
+Under the full test suite Node1 runs **3 VEN containers simultaneously**, each with its own HiGHS MILP planner. 3 HiGHS processes compete for 4 Node1 Cortex-A72 cores. Observed distribution (from VEN-1 logs): min=42s, median=80s, max=120s for 24 slots. The commit `e6ff7f9` measured 5-10s on an **unloaded** Node1 with one VEN — the 10-20× gap is entirely CPU contention.
 
 A secondary amplifier: `deviation_trigger_ticks=10` causes DeviceDeviation to fire every 10s whenever actual power deviates from the plan (common during plan transitions). This keeps the planner in a continuous-solve loop with no 20s wait between solves, since a new trigger is always waiting when a solve finishes. The test profile uses 10 to make the DeviceDeviation BDD scenario fast; production profiles should use 60-120.
 
@@ -3287,7 +3287,7 @@ A secondary amplifier: `deviation_trigger_ticks=10` causes DeviceDeviation to fi
 
 ### Key learnings
 
-- **MILP solve time scales with CPU contention, not just slot count**: 24 slots is 5-10s on an unloaded Pi4 but 80-120s when 3 HiGHS instances share 4 cores. Test timeouts must accommodate the worst-case loaded scenario, not the unloaded measurement.
+- **MILP solve time scales with CPU contention, not just slot count**: 24 slots is 5-10s on an unloaded Node1 but 80-120s when 3 HiGHS instances share 4 cores. Test timeouts must accommodate the worst-case loaded scenario, not the unloaded measurement.
 - **DeviceDeviation feedback loop**: Each plan adoption changes setpoints → actual power lags → deviation fires → replan triggered. In the test environment with 10-tick threshold this creates continuous solving. The BDD timeout strategy must account for two consecutive full solves (the cleanup-triggered solve without the new request, plus the solve that finally includes it).
 - **Cross-scenario ledger state**: The UC-11c test relied on EV being dispatched in a prior scenario. Under load, the MILP finishes after the EV session is cleaned up, so EV never charges and the ledger never accumulates EV energy. Tests that implicitly depend on cross-scenario state break under load. Fixed by checking `battery` (always active) instead of `ev`.
 - **Cleanup trigger races the new POST**: `after_scenario` deletes the previous load → sends UserRequest trigger → planner wakes and starts a solve with empty shiftable_loads. The new scenario's POST arrives seconds later, but the planner is already 10s into a 120s solve. Only the next solve (after the first finishes) includes the new load.
@@ -3296,7 +3296,7 @@ A secondary amplifier: `deviation_trigger_ticks=10` causes DeviceDeviation to fi
 
 ## Phase 30 — Deviation Absorber (Feature 017)
 
-**Status: COMPLETE (cargo tests) / Pending Pi4 BDD validation**
+**Status: COMPLETE (cargo tests) / Pending Node1 BDD validation**
 
 **Branch**: `017-add-deviation-absorber`
 
@@ -3333,9 +3333,9 @@ The absorber runs every sim tick (1 s) and keeps corrections out of the planner 
 
 **`#[serde(default)]` on nested fields**: `AbsorberAssetConfig.min_state_linger_s` was required in YAML (no default). Profiles that omitted it caused a deserialization error. Fixed by adding `#[serde(default)]` — the field defaults to 0 (no linger), which is correct for electronics.
 
-**Docker build context (2.1 GB)**: First Pi4 builds of the unit test Docker image were slow because VEN/target/ (2.1 GB) was being sent as build context. Fixed by adding `VEN/.dockerignore` with `target/` excluded.
+**Docker build context (2.1 GB)**: First Node1 builds of the unit test Docker image were slow because VEN/target/ (2.1 GB) was being sent as build context. Fixed by adding `VEN/.dockerignore` with `target/` excluded.
 
-**Named volume for Pi4 unit tests**: Introduced `tests/docker-compose.ven-unit-test.yml` with named volumes for cargo registry, git, and target directories. First run seeds the volume with all compiled artifacts; subsequent runs take ~2-3 min (incremental only). HiGHS compiles once and stays cached.
+**Named volume for Node1 unit tests**: Introduced `tests/docker-compose.ven-unit-test.yml` with named volumes for cargo registry, git, and target directories. First run seeds the volume with all compiled artifacts; subsequent runs take ~2-3 min (incremental only). HiGHS compiles once and stays cached.
 
 ### Test coverage
 
@@ -3352,7 +3352,7 @@ The absorber runs every sim tick (1 s) and keeps corrections out of the planner 
 4 updated unit tests in `loops.rs`:
 - `accumulate_deviation`: increments on residual, fires trigger at threshold, resets on clear, recovery cycle (T061–T063 + recovery)
 
-Final result: **307 passed, 0 failed** (Pi4 Pi4 `docker compose run`), confirmed by WSL2 first build.
+Final result: **307 passed, 0 failed** (Node1 `docker compose run`), confirmed by WSL2 first build.
 
 ### Key learnings
 
@@ -3602,7 +3602,7 @@ Pre-existing files `heater.rs` (1339), `absorber.rs` (1371), `ev.rs` (945), `bat
 ## Feature 022 — Deterministic Test Environment ( 22-deterministic-test-env)
 
 **Branch**:  22-deterministic-test-env (off  21-decouple-profile-domain)
-**Status**: COMPLETE — local code changes committed (2026-05-12); Pi4 validation pending
+**Status**: COMPLETE — local code changes committed (2026-05-12); Node1 validation pending
 
 ### What changed
 
@@ -3627,7 +3627,7 @@ from infrastructure field names.
 **Feature files updated**: deviation_absorber.feature, en_planner.feature,
 en_dispatcher.feature, en_uc_normal.feature, en_uc_stress.feature.
 All Backgrounds now inject pv_plan_kw=0.0 so plans are identical regardless of
-when on Pi4 the BDD suite runs.
+when on Node1 the BDD suite runs.
 
 **New BDD scenario**: "PV forecast override does not trigger a replan" in
 en_planner.feature — verifies the no-replan contract using context.idle_plan_ts
@@ -3662,9 +3662,9 @@ outes/sim.rs.  Adding it would trigger a T1+T2
 | pv_plan_kw absent from domain ring | ✅ no hits in ntities/ or controller/ |
 | pv_plan_kw absent from should_replan | ✅ code-reviewed |
 | @wip removed from deviation_absorber.feature:149 | ✅ |
-| New unit tests compile and pass (SQLX_OFFLINE) | ⏳ Pi4 pending |
-| BDD deviation_absorber.feature green | ⏳ Pi4 pending |
-| Full BDD suite green | ⏳ Pi4 pending |
+| New unit tests compile and pass (SQLX_OFFLINE) | ⏳ Node1 pending |
+| BDD deviation_absorber.feature green | ⏳ Node1 pending |
+| Full BDD suite green | ⏳ Node1 pending |
 
 
 ---
@@ -3760,7 +3760,7 @@ Architecture violation AB-05 (raised in 023): `reporter.rs` imported `SimState` 
 
 ### Key learnings
 
-1. **BDD failures from CPU contention, not code**: The initial full BDD run showed 9 failures. A concurrent second test-runner container was competing for the ARM64 Pi4's cores, causing MILP solver timeouts (18–60s per solve × 2 competitors). A targeted clean re-run of the same 5 features (no concurrent load) passed 29/29 scenarios — confirming the failures were environmental, not regressions.
+1. **BDD failures from CPU contention, not code**: The initial full BDD run showed 9 failures. A concurrent second test-runner container was competing for the ARM64 Node1's cores, causing MILP solver timeouts (18–60s per solve × 2 competitors). A targeted clean re-run of the same 5 features (no concurrent load) passed 29/29 scenarios — confirming the failures were environmental, not regressions.
 
 2. **Targeted BDD re-run as the correct verification tool**: When a full-suite run shows timing failures, the right response is a targeted clean run of the specific features, not to dismiss them as pre-existing or search for a code root cause that doesn't exist.
 
@@ -4126,7 +4126,7 @@ grep "use crate::assets" VEN/src/controller/timeline.rs -> EMPTY
 grep -r "use crate::profile" VEN/src/tasks -> EMPTY
 grep -r "use crate::assets|use crate::simulator" VEN/src/services -> FAIL (services/obligation.rs — Item 2, addressed separately)
 cargo check -> 0 errors (42 pre-existing warnings)
-BDD suite -> pending Pi4-Server run
+BDD suite -> pending Node1-Server run
 ```
 
 ---
@@ -4153,7 +4153,7 @@ BDD suite -> pending Pi4-Server run
 
 ### Results
 
-All five architecture invariant greps return empty. Full unit test suite: **403 passed, 0 failed** (including both new tests). BDD suite (Pi4-Server): **44 features passed, 233 scenarios passed, 0 failed** (both main and isolated passes).
+All five architecture invariant greps return empty. Full unit test suite: **403 passed, 0 failed** (including both new tests). BDD suite (Node1-Server): **44 features passed, 233 scenarios passed, 0 failed** (both main and isolated passes).
 
 ### Key learnings
 
@@ -4164,7 +4164,7 @@ All five architecture invariant greps return empty. Full unit test suite: **403 
 
 ## Step 30 — Fix Architectural Layer Violations (fix-arch-layer-violations)
 
-**Status: COMPLETE (local cargo check passes; Pi4 deploy + BDD pending)**
+**Status: COMPLETE (local cargo check passes; Node1 deploy + BDD pending)**
 
 ### Motivation
 
@@ -4506,7 +4506,7 @@ an unrelated change was judged worse than leaving it, so not applied here.
 `Cargo.lock` with ~150 transitive dependency version bumps (unrelated to the `main.rs` fix).
 Reverted `Cargo.lock` before committing to keep the diff scoped to the actual change — a
 lockfile refresh is a separate, deliberate decision, not a side effect of a lint fix.
-Skipped the "RUSTFLAGS=-D warnings on Pi4 docker build" follow-up mentioned in the plan for
+Skipped the "RUSTFLAGS=-D warnings on Node1 docker build" follow-up mentioned in the plan for
 now (belongs with a CI/docker change, not this local-only pass).
 
 ### WP0.2 — GB-02/GB-03: Uniform VEN naming and UUID IDs
@@ -4557,7 +4557,7 @@ change since they were referring to the client_id/venName, which was always `"ve
 the *venName stored in the VTN's ven-1 row* was wrong, and only in targeting contexts that
 explicitly spelled out `"-name"`.
 
-**Not yet run:** the full E2E suite on Pi4 — this WP's stated risk is entirely in shared
+**Not yet run:** the full E2E suite on Node1 — this WP's stated risk is entirely in shared
 test fixtures, so that's the real verification, planned next.
 
 ---
@@ -4752,10 +4752,10 @@ path per route, the `asset_id` filter, all three 400 validation cases, and the
 `/history/:asset_id` regression check above.
 
 **Verification:** 495 lib/bin tests (490 + 5 new) + 1 architecture test pass;
-`cargo fmt --check` and `cargo clippy -- -D warnings` clean. E2E feature run on Pi4
+`cargo fmt --check` and `cargo clippy -- -D warnings` clean. E2E feature run on Node1
 planned next (this WP touches routing, the one thing unit tests can't confirm).
 
-**E2E confirmed on Pi4:** full suite green, 243/243 scenarios including all 10 new
+**E2E confirmed on Node1:** full suite green, 243/243 scenarios including all 10 new
 `ven_history.feature` scenarios — the literal-route-vs-`:asset_id` precedence concern
 above is empirically resolved, not just theoretically sound.
 
@@ -4810,10 +4810,10 @@ no loss of real coverage, less incidental complexity.
 **Verification:** VEN UI: 313/313 tests (27 files, incl. 4 new in `History.test.tsx`)
 pass; `npm run build` clean; `eslint` 0 errors (9 pre-existing warnings, same
 `react-refresh/only-export-components` class already present on `Reports.tsx` for the
-same reason — exporting a helper alongside the page component). Not yet run on Pi4 —
+same reason — exporting a helper alongside the page component). Not yet run on Node1 —
 next.
 
-**E2E confirmed on Pi4:** full suite green, 244/244 scenarios, including the new
+**E2E confirmed on Node1:** full suite green, 244/244 scenarios, including the new
 `@ven-ui` History-page scenario — confirmed rendering in a real Playwright/Chromium
 browser, not just JSDOM.
 
@@ -4859,10 +4859,10 @@ would wrongly truncate an in-progress month every time the VEN restarts. 4 tests
   shapes instead.
 
 **Verification:** 501 lib/bin tests (495 + 6 new) + 1 architecture test pass;
-`cargo fmt --check` and `cargo clippy -- -D warnings` clean. E2E run on Pi4 planned
+`cargo fmt --check` and `cargo clippy -- -D warnings` clean. E2E run on Node1 planned
 next.
 
-**E2E on Pi4 found and fixed a real (if narrow) pre-existing flake:**
+**E2E on Node1 found and fixed a real (if narrow) pre-existing flake:**
 `timeline_grid.feature`'s "Each asset array contains a now-point between history and
 future" failed — reproducibly, not intermittently — when it happened to run shortly
 after container start. Root cause: the `test` profile plans in 1-hour slots
@@ -4872,8 +4872,8 @@ alignment between plan creation and the request. Confirmed by re-running the sin
 scenario 3× after widening to `hours_forward=2`: all green. This is unrelated to
 WP1.6's code, just newly exposed by this run's particular timing (it had passed in the
 WP1.4 and WP1.5 runs) — fixed anyway per the "no pre-existing vs new" rule, scp'd to
-Pi4 for a quick confirm loop before committing through git properly (per the
-deploy-pi4 skill's golden rule). Full suite re-run: 246/246 green.
+Node1 for a quick confirm loop before committing through git properly (per the
+deploy-node1 skill's golden rule). Full suite re-run: 246/246 green.
 
 ### WP1.7 — A-2: VTN recorder in the BFF
 
@@ -4919,7 +4919,7 @@ accepting the reformat felt proportionate rather than a scope-creep side effect)
 (`rustls-webpki`/`reqwest` chain, `anyhow`, `rand`) — zero new findings from `sqlx`.
 Registered as BL-32 in `BACKLOG.md` (BL-31 for A-1, WP1.1–1.6, alongside it).
 
-**Verified live on Pi4 — and found a real bug:** started `test-db`/`test-vtn`/`test-bff`
+**Verified live on Node1 — and found a real bug:** started `test-db`/`test-vtn`/`test-bff`
 manually, loaded the fixture, created a program/event via the BFF and a report
 directly against the VTN as `ven-1`. First attempt: `reports_received` and
 `events_published` both populated correctly (right `ven_name`/`event_type`/
@@ -4931,7 +4931,7 @@ VenManager role, same as every other vens route in this BFF. Fixed by threading
 network-level check over unit tests alone — the dedup/pagination logic was correct,
 but the role mismatch would only ever surface at runtime.
 
-**Full E2E on Pi4 surfaced two more failures, both pre-existing timing fragility, not
+**Full E2E on Node1 surfaced two more failures, both pre-existing timing fragility, not
 recorder bugs** (per the "no pre-existing vs new" rule, investigated and fixed
 anyway):
 
@@ -4944,10 +4944,10 @@ anyway):
    line 58), which only requires "a plan exists" rather than any specific alignment.
 2. The EV-session-allocates-power scenario, which had passed reliably (~90-95s) in
    every prior run this session, timed out at its 150s `poll_until` budget. Raised to
-   300s, matching the existing "Pi4-marginal" precedent already used elsewhere
+   300s, matching the existing "Node1-marginal" precedent already used elsewhere
    (`ev_charging_steps.py`, `uc_steps.py`). Plausible contributor: the new recorder is
    the first background poller in this stack hitting the VTN/Postgres every 30s from a
-   second process (the BFF) — worth keeping an eye on if more Pi4-timing marginality
+   second process (the BFF) — worth keeping an eye on if more Node1-timing marginality
    shows up in future runs sharing this stack.
 
 **Final verification:** full E2E suite green (246/246 scenarios) after both fixes.
@@ -4956,7 +4956,7 @@ anyway):
 
 Goal per `docs/plans/roadmap/phase-2-fleet-enablement.md`: go from 3 hand-seeded VENs
 to `./fleet.sh up N` with a stable VTN under N-agent load. Implemented as five work
-packages, same test-first/Pi4-verified-per-WP rigor as Phase 0/1.
+packages, same test-first/Node1-verified-per-WP rigor as Phase 0/1.
 
 **WP2.1 — BL-03 exponential backoff + jitter.** `VEN/src/tasks/backoff.rs`: `Backoff`
 holds `base_s`/`max_s`/`current_s` and a seeded `StdRng` (determinism rule — jitter
@@ -4968,7 +4968,7 @@ stops the VTN for 130s and asserts growing gaps between consecutive events-poll
 failure log timestamps (parsed from the VEN's own `tracing` JSON output via a new
 `docker_ctl.get_logs()` helper), then restarts and confirms pickup.
 
-Two real bugs found only by running this against the live Pi4 stack (not caught by
+Two real bugs found only by running this against the live Node1 stack (not caught by
 unit tests, which only exercised the `Backoff` struct in isolation):
 1. **Feature-file step-keyword bug**: `"create an open program ... and save its ID"`
    is registered only under `@given` in `use_case_steps.py`, but my scenario used it
@@ -5062,12 +5062,12 @@ fleet-side bulk registration, reusing the existing idempotent `provision_vens()`
 - New `scripts/requirements.txt` (`requests==2.31.0`, `PyYAML==6.0`) — first
   documented Python dependency pin for the `scripts/` directory.
 
-Verified live on Pi4: full `up 3` → `status` → idempotent second `up` (all three
+Verified live on Node1: full `up 3` → `status` → idempotent second `up` (all three
 "already provisioned — skipping") → `down --purge` (confirmed no leftover
 containers, data dirs, profiles, or compose file) cycle; real MILP plan generation
 on a fleet VEN; the per-instance poll-jitter offset visible in its own logs (~4.6s
 delay for instance index 1, stride 4s). **Did not push to a live N=10 run**: this
-Pi4 already runs ~20 unrelated production containers (hargassner, pihole, mqtt,
+Node1 already runs ~20 unrelated production containers (hargassner, pihole, mqtt,
 catcam, influxdb, ...) with only ~660MB free RAM and a load average of ~3 *before*
 the fleet even starts; measured per-VEN memory at N=3 (13–80MB, not the bottleneck)
 but one VEN's MILP solve alone briefly hit 109% CPU — concurrent solves across 10
@@ -5077,10 +5077,10 @@ deliberately scheduled low-usage window rather than risking it ad hoc; documente
 the finding in the commit message and here rather than silently skipping it.
 
 **Key learning carried forward**: this session repeatedly re-discovered that running
-the *same* heavy Pi4 operation (full E2E suite, `docker compose build`) back-to-back
+the *same* heavy Node1 operation (full E2E suite, `docker compose build`) back-to-back
 without a cooldown causes load-induced false flakes (isolated `shiftable_lifecycle`
 scenarios failed under a load average of 4.3, then passed cleanly at 0.8) — worth
-checking `uptime` before any Pi4-heavy verification step, not just before the first
+checking `uptime` before any Node1-heavy verification step, not just before the first
 one in a session.
 
 ## Phase 3 — Control-Method Lab (WP3.1–WP3.8)
@@ -5088,7 +5088,7 @@ one in a session.
 Goal per `docs/plans/roadmap/phase-3-control-method-lab.md`: every VTN control knob
 honoured per spec, forecast + flexibility reported back, and a scripted experiment
 harness comparing the methods on KPIs. Final state: 49 features / 252 E2E scenarios
-green on Pi4; 543 Rust unit/integration tests; 324 UI tests.
+green on Node1; 543 Rust unit/integration tests; 324 UI tests.
 
 **Track A — inbound signals.** All four control paths converge on the same per-slot
 contractual-import-cap vector (`p_imp_max_cont_kw`) in `build_milp_inputs`, which
@@ -5149,10 +5149,10 @@ isn't drivable externally — scenarios run in REAL time (the plan's fallback);
 S-1…S-6 are 30-minute windows, ~3 h for the set, run as a scheduled exit demo
 (same rationale as Phase 2's N=10 deferral). `experiments/`: scenario YAMLs,
 `run_experiment.py` (drive VTN per offsets, snapshot VEN SQLite WAL-aware +
-`lab_recorder` CSVs), `kpi.py`, `report.py`. A 3-minute smoke on Pi4 verified the
+`lab_recorder` CSVs), `kpi.py`, `report.py`. A 3-minute smoke on Node1 verified the
 whole pipeline with real per-VEN KPI values.
 
-**Defects found only by live Pi4 runs (all fixed + regression-tested):**
+**Defects found only by live Node1 runs (all fixed + regression-tested):**
 1. `apply_dispatch_override` summed PV's `f64::MAX` default-setpoint sentinel into
    net-without-battery → wanted power −inf → battery clamped to full discharge
    against a +2 kW command. Non-finite/absurd setpoints now fall back to live power.
@@ -5198,7 +5198,7 @@ human-executable manual test procedure
 (ASAP + OPPORTUNISTIC in the MILP) → WP4.3 (notifications; needed by later
 WPs' warnings) → WP4.4 (stale rates; emits through the plan-warning channel)
 → WP4.2 (comfort curves + SettingsPort) → WP4.1-c (MAX_COST + *_FREE) →
-WP4.5 (personas). Per-WP: test-first, local gates, commit, deploy to Pi4,
+WP4.5 (personas). Per-WP: test-first, local gates, commit, deploy to Node1,
 full E2E. Suite grew 49→51 features / 252→258 scenarios; Rust 549→582 unit
 tests, UI 327→333.
 
@@ -5289,7 +5289,7 @@ friction objective so the epsilon budget cannot trade the early start away
 (same lesson as ASAP_FREE). Regression tests cover both directions (tie →
 earliest slot; real 0.35 €/kWh saving → still defers). Honest caveat: the
 tests were not red pre-fix on x86 — the tie-pick is solver-arbitrary and
-only the Pi4 ARM build chose the late slot. Validation run after the fix:
+only the Node1 ARM build chose the late slot. Validation run after the fix:
 52 features / 259 scenarios / 0 failed, isolated tail 3/3, with the
 "appears in /sim" scenario dropping from ~125–150 s to ~9 s.
 
@@ -5370,7 +5370,7 @@ matches the roadmap's own verify clause exactly), but in the live simulator
 `residual_kw` is mathematically guaranteed to read exactly 0 kW, always —
 confirmed by an adapter-contract test against `tick_once`. This makes
 WP5.2's real-data exit demonstration (heuristic MAE < last-known MAE on
-held-out Pi4 fleet history) degenerate as written: both predictors would
+held-out Node1 fleet history) degenerate as written: both predictors would
 trivially converge to 0 with nothing to learn. The roadmap's own risk (b)
 ("simulated households may be too regular... consider stochastic base-load
 noise") anticipated a related concern; R-20 is the same class of fix but is
@@ -5416,7 +5416,7 @@ existing `/debug/heuristics/preload` route, mirroring `experiments/
 run_experiment.py`'s dual VEN-enumeration convention (static comma-list
 vs. fleet manifest.json) rather than inventing a new one.
 
-Verified live on Pi4 across all three VENs (not just ven-3, which was the
+Verified live on Node1 across all three VENs (not just ven-3, which was the
 only one preloaded earlier): `GET /plan`'s per-hour `baseline_kw` now
 shows real daily structure — flat at the static baseline overnight (0.4/
 0.5/0.6 kW per VEN), rising through the coffee/lunch hours, peaking at the
@@ -5515,7 +5515,7 @@ buckets) — a 28-day window gives each weekend bucket ~8 days of samples
 samples in a 7-way split. Revisit if per-weekday granularity is ever
 wanted, with a longer seeding window.
 
-Deployed to Pi4 (`ven-1`/`ven-2`/`ven-3` rebuilt, `ui` restarted for
+Deployed to Node1 (`ven-1`/`ven-2`/`ven-3` rebuilt, `ui` restarted for
 nginx re-resolution) and re-seeded via `scripts/seed_history.py`. Verified
 live via `POST /debug/heuristics/preload`'s response on all three VENs:
 ven-1's weekday bucket shows the coffee (h8: 0.64 kW vs 0.4 kW baseline),
@@ -5565,13 +5565,13 @@ three SimState-coupled plan-cycle helpers moved services→
 simulator through `SimulatorPort`. 13 new BFF unit tests (TtlCache,
 AppError, VtnClient against a local axum stub — no new dev-deps).
 Merged to main as a fast-forward (2c79d53..1e7e807) after E2E (262
-scenarios, 0 failed) and resilience (5/5) on Pi4.
+scenarios, 0 failed) and resilience (5/5) on Node1.
 
 **Issues / key learnings.**
 - *vite 8 broke the production bundle while every unit test stayed green.*
   vite 8's rolldown bundler mis-resolved a MUI/CJS default-import interop
   in the VTN UI production build (React error #130 at runtime); vitest
-  (jsdom, no bundling) and `tsc` were blind to it. Only the Pi4 browser
+  (jsdom, no bundling) and `tsc` were blind to it. Only the Node1 browser
   E2E caught it. Fixed by pinning vite ^7 / plugin-react ^5 — same 0-vuln
   audit result without the bleeding-edge bundler.
 - *Review findings age fast on an active repo.* The review baseline
@@ -5589,7 +5589,7 @@ scenarios, 0 failed) and resilience (5/5) on Pi4.
   features' dependencies land in Cargo.lock even when never compiled —
   verify with `cargo tree -i <crate>` before treating a finding as real.
 - *A non-bare deploy repo rejects pushes to its checked-out branch* —
-  deploying to Pi4 by direct push requires flipping its checkout aside
+  deploying to Node1 by direct push requires flipping its checkout aside
   first (or keeping it parked on main).
 
 ## SessionProgressBoard — rebuild of the dead packet board + BL-36 (branch fix/session-progress-board)
@@ -5667,33 +5667,33 @@ error boundaries into the resident feed per the ERROR_HANDLING audience rule.
   consumers.
 
 
-## Pi4 lease lock — serializing the shared docker host (branch fix/pi4-lock)
+## Node1 lease lock — serializing the shared docker host (branch fix/node1-lock)
 
-**What.** `scripts/pi4_lock.sh` (acquire / release / refresh / status): a
-cooperative lease lock for Pi4-Server, held for the whole build+test
-sequence of a session. The mutex is an atomic `mkdir /tmp/openadr_pi4.lock`
-executed *on the Pi4* via one `ssh bash -s` round-trip; an owner file
+**What.** `scripts/docker_host_lock.sh` (acquire / release / refresh / status): a
+cooperative lease lock for Node1-Server, held for the whole build+test
+sequence of a session. The mutex is an atomic `mkdir /tmp/openadr_node1.lock`
+executed *on the Node1* via one `ssh bash -s` round-trip; an owner file
 records `user@host:worktree`, the declared lease end (UTC epoch, from
 `-l minutes`, default 60), and the task description. Once the lease end
 passes, the lock counts as dead (crashed session) and is stolen by the
 next acquirer with a warning; `refresh` extends a live lease from now. `acquire` polls every 20 s and exits 2 after ~9 min (below
 the 10-min AI-tool timeout) with "rerun to keep waiting". `run_all_tests.sh`
 acquires the lock automatically before any remote docker suite and releases
-it via EXIT trap; `.claude/CLAUDE.md` (pi4-lock rule) makes manual docker
+it via EXIT trap; `.claude/CLAUDE.md` (node1-lock rule) makes manual docker
 sequences take it too.
 
 **Why.** Multiple Claude sessions on different worktrees deploy and test on
-the same Pi4; concurrent `docker compose build/run` invocations corrupt each
+the same Node1; concurrent `docker compose build/run` invocations corrupt each
 other's stacks and produce false failures. A queue file ("append a line,
 wait until you are first") was considered and rejected: a killed session
 leaves its entry at the head and deadlocks everyone behind it, so every
 entry would need its own lease-expiry anyway — a single lease lock gives the same
-serialization with self-healing. The lock lives on the Pi4, not in a
+serialization with self-healing. The lock lives on the Node1, not in a
 worktree, so it covers every checkout and machine that can reach the host.
 
 **Issues / key learnings.**
 - *MSYS path mangling reaches ssh arguments.* Git Bash rewrote the
-  `/tmp/openadr_pi4.lock` argument into `C:/Users/…/Temp/…` before ssh saw
+  `/tmp/openadr_node1.lock` argument into `C:/Users/…/Temp/…` before ssh saw
   it; the remote mkdir then failed and the fallback path mis-stole the
   lock. Fix: define POSIX paths inside the single-quoted remote heredoc,
   never pass them as ssh arguments from Windows.
@@ -5803,13 +5803,13 @@ connection detail (backoff state, last error, token expiry) for diagnosis.
   unit-testable directly, leaving the `async fn health(State(ctx)...)` handlers as
   thin glue. Reusable pattern for any future route whose logic is non-trivial but
   whose adapter wiring is heavy.
-- *Live Pi4 re-verification, done after initial write-up.* Deployed via scp
-  (`deploy-pi4` skill — no commit/push needed) to `ven-1/2/3`, rebuilt, restarted.
+- *Live Node1 re-verification, done after initial write-up.* Deployed via scp
+  (`deploy-node1` skill — no commit/push needed) to `ven-1/2/3`, rebuilt, restarted.
   `docker ps` showed all three `Up ... (healthy)`; `curl --fail` returned HTTP 200 /
   exit 0; `/health` and `/vtn/status` returned the expected shapes with real data.
   Confirms the reasoning empirically. One follow-up snag: the cleanup step's
   `git checkout -- <scp'd files>` failed atomically because one of the files
-  (`state/connection.rs`) is new and git on Pi4 doesn't track it yet — `checkout --`
+  (`state/connection.rs`) is new and git on Node1 doesn't track it yet — `checkout --`
   can't restore a pathspec that doesn't exist in the index, and failed for *all*
   listed files at once, not just that one. Fix was a separate `rm` for the untracked
   file plus a second `checkout --` for the rest. Lesson for next time this pattern
@@ -5859,7 +5859,7 @@ actually running — a silent crash-loop would be invisible outside the logs.
   (safe: rerunnable) rather than touching the other worktree's process (unclear
   ownership). Memory recovered once that other build finished. The user added a
   `wsl-lock` rule + `scripts/wsl_lock.sh` to `.claude/CLAUDE.md` shortly after,
-  mirroring the existing `pi4_lock.sh` pattern, to prevent recurrence across
+  mirroring the existing `docker_host_lock.sh` pattern, to prevent recurrence across
   concurrent sessions sharing this laptop's one WSL instance.
 
 ---
@@ -6013,7 +6013,7 @@ finding later confirmed independently during the combined-branch code review
   `append_report_sent` — only unit tests exercise it, so `GET /history/reports`
   always returns empty. Recorded as R-43 rather than silently left for someone
   to rediscover.
-- *Live Pi4 verification without a rendered-chip screenshot.* No headless
+- *Live Node1 verification without a rendered-chip screenshot.* No headless
   browser was available in that environment, so the chip's *rendering* wasn't
   visually confirmed — but the exact JSON contract it consumes was proven live
   end-to-end (`POST /reports` without `eventID` → 400, recorded
@@ -6029,7 +6029,7 @@ finding later confirmed independently during the combined-branch code review
 
 ---
 
-## Combined branch (034-vtn-report-status) — code review + Pi4 verification before merge
+## Combined branch (034-vtn-report-status) — code review + Node1 verification before merge
 
 **What.** Before merging WP-T1/T2/T3/T4/T6/T7 (this session) plus the
 independently-completed WP-T5 (the other session) into `main`, ran an 8-angle,
@@ -6037,10 +6037,10 @@ high-effort `/code-review` pass (line-by-line, removed-behavior, cross-file-
 tracer, reuse, simplification, efficiency, altitude, CLAUDE.md-conventions ×
 1-vote verify) across the full `main...HEAD` diff (89 files, ~5500 lines) —
 not just the newest commit — then fixed the 4 CONFIRMED correctness findings
-before Pi4 E2E/resilience testing.
+before Node1 E2E/resilience testing.
 
 **Why.** This was the first time this many WPs from two parallel sessions
-landed on `main` together; a review pass before the expensive Pi4 test runs
+landed on `main` together; a review pass before the expensive Node1 test runs
 catches regressions cheaper than a failing E2E scenario would, and the user
 explicitly asked whether review-first or test-first was wiser here.
 
@@ -6072,9 +6072,9 @@ explicitly asked whether review-first or test-first was wiser here.
   reading the actual code myself; the other 6 (recorded as R-44 through R-49 in
   `TECHNICAL_DEBTS.md` rather than silently dropped) were real but lower-
   priority cleanup/efficiency items, not correctness bugs — worth fixing before
-  Pi4 testing, not worth blocking the merge for.
+  Node1 testing, not worth blocking the merge for.
 - Local pyramid after the fix: 708 Rust tests, 388 UI tests, fmt/clippy/tsc/
-  eslint/file-size-audit/architecture-invariant-greps all clean. Pi4: E2E 265
+  eslint/file-size-audit/architecture-invariant-greps all clean. Node1: E2E 265
   scenarios/0 failed, resilience 5 scenarios/0 failed (Failure Recovery
   feature — VTN outage recovery, VEN self-restart, exponential backoff,
   dual-VEN convergence). Fast-forward merged to `main` immediately after
@@ -6137,7 +6137,7 @@ this WP rather than pause.
 
 ### What Was Done
 
-Investigated the existing weather-data pipeline on Pi4-Server (read-only):
+Investigated the existing weather-data pipeline on Node1-Server (read-only):
 the `data_acquisition` container polls the SRF Meteo API hourly (48h
 forecast horizon) into InfluxDB, and hand-tuned flux dashboards
 (`WeatherForcastAdjustedToMeasurement.flux`) already implement a solar-
@@ -6457,7 +6457,7 @@ it automatically; the MILP still only plans within the comfort band.
 - **Removing a doc's backlog entry before the code exists is premature.**
   Caught mid-session: the backlog item was deleted from the analysis doc
   right after starting the renumbering cleanup, before the feature was
-  actually built. Restored it, then removed it again only once the Pi4
+  actually built. Restored it, then removed it again only once the Node1
   validation actually passed. The rule going forward: doc bookkeeping
   ("remove when done") and actual completion are two different steps: don't
   collapse them.
@@ -6465,13 +6465,13 @@ it automatically; the MILP still only plans within the comfort band.
   cases), `cargo fmt --check` clean, `cargo clippy --all-targets
   --all-features -D warnings` clean, file-size audit clean (extracted
   `HeaterEmergencyMode::from_overrides`/`Heater::apply_tick_overrides` to
-  keep `simulator/mod.rs` under cap), Pi4 E2E 264/265 (the one failure was
+  keep `simulator/mod.rs` under cap), Node1 E2E 264/265 (the one failure was
   a separate, pre-existing bug — see next entry) + resilience 5/5 green,
   deployed to `ven-1`/`ven-2`/`ven-3`.
 
 ### PV manual override snapped back to the live weather feed after 1 tick (2026-07-25)
 
-Found while validating the heater work on Pi4's E2E suite: one scenario
+Found while validating the heater work on Node1's E2E suite: one scenario
 (`pv_irradiance override to zero silences PV output`) failed with a small
 non-zero export instead of exact silence. Root cause was *not* what it
 first looked like — `git diff --stat` confirmed zero overlap with the
@@ -6514,8 +6514,8 @@ assertion on `max_import_kw`.
   `/capability/pv`, watching `irradiance` drift while `power_kw` stayed
   frozen at the weather value) to see that the override was being cleared
   far sooner than the code's own doc comments assumed.
-- Never assume a Pi4 test run reflects local uncommitted changes:
-  `run_all_tests.sh --e2e` does `git pull` on the Pi4 checkout before
+- Never assume a Node1 test run reflects local uncommitted changes:
+  `run_all_tests.sh --e2e` does `git pull` on the Node1 checkout before
   building, so the first E2E run in this session actually validated
   `origin/main`, not the working tree — the bug was real but had nothing
   to do with the heater feature being tested at the time. Confirmed by
@@ -6526,7 +6526,7 @@ assertion on `max_import_kw`.
   reproduction of the exact bug), `cargo fmt --check` clean, `cargo clippy
   --all-targets --all-features -D warnings` clean, file-size audit clean
   (extracted `pv_smoothing.rs` and split `peek_pv_kw_tests` into its own
-  `tests/` subdirectory file), Pi4 E2E 265/265 + resilience clean, deployed
+  `tests/` subdirectory file), Node1 E2E 265/265 + resilience clean, deployed
   to `ven-1`/`ven-2`/`ven-3`.
 
 ### PV-Export Decision Variable (openspec/changes/pv-export-curtailment/)
@@ -6573,7 +6573,7 @@ capacity cap and the plan's own curtailment target.
   resolver initially read the raw, un-merged `capacity_snap` in `tick.rs`
   instead of the composed value — compiled and unit-tested fine, but silently
   ignored the `grid_export_limit_kw` sim-inject path in production. Caught only
-  by a live Pi4 `curl` test (`POST /sim/inject` with `grid_export_limit_kw`,
+  by a live Node1 `curl` test (`POST /sim/inject` with `grid_export_limit_kw`,
   then `GET /capability/pv`), not by any unit test, since the unit tests each
   exercised the resolver and the capacity-composition logic separately, never
   together through the real tick path. Fixed by extracting the composition
@@ -6581,7 +6581,7 @@ capacity cap and the plan's own curtailment target.
 - Full local pyramid: 812/812 Rust tests green (+21 new: MILP decision-variable
   behavior, plan reporting, `resolve_pv_export_limit_kw`, tick-level export-limit
   clamping), UI unit tests 407/407, `cargo fmt --check` and `cargo clippy
-  --all-targets --all-features -D warnings` clean, file-size audit clean. Pi4
+  --all-targets --all-features -D warnings` clean, file-size audit clean. Node1
   E2E: one scenario (`DISPATCH_SETPOINT steers net site power to the commanded
   value`) failed on the full run under host load (1-min load 4.3–6.5 during the
   run) but passed cleanly on an isolated retry — confirmed transient, not a
@@ -6664,7 +6664,7 @@ points instead of `pv_used_kw`.
 
 ### E2E verify+deploy for `pv-curtailment-history`: a stale-image trap and an over-broad test assertion (2026-07-26)
 
-Deploying the feature to Pi4 caught a genuine production bug on its own (see
+Deploying the feature to Node1 caught a genuine production bug on its own (see
 `717ca5c`: `PvInverter.inverter_max_kw`/`curtailment_source` lacked
 `#[serde(default)]`, so `simulator::persist::load()` failed to deserialize
 the *whole* persisted `SimState` blob — not just the PV part — on any
@@ -6675,13 +6675,13 @@ The full E2E run then surfaced one real failure:
 `ven_heater_tank.feature:12` ("Plan uses only mid-tier heater near T_max")
 asserted "no full-tier heater allocation in the first 12 slots" after
 injecting the tank near `T_max`. First hypothesis (matching the file's own
-documented "Pi4-marginal" precedent for other scenarios already bumped from
+documented "Node1-marginal" precedent for other scenarios already bumped from
 150s→300s) was a plain host-load timeout on the polling step — bumped it the
 same way. That fix alone didn't hold: a second failure showed the poll
 *did* get a fresh plan, but the assertion itself failed — slot 11 had a
 genuine, non-error full-power allocation.
 
-Direct reproduction against the running Pi4 test stack (manual `/sim/inject`
+Direct reproduction against the running Node1 test stack (manual `/sim/inject`
 + `/plan` fetch, bypassing behave) confirmed this wasn't a bug: `E[t] ≤
 E_max` is enforced uniformly for every slot in `heater_milp.rs` (unchanged
 since before any of this session's work), and the tank legitimately cools
@@ -6699,7 +6699,7 @@ after confirming with the user, then verified clean.
 
 Two flaky-looking failures on a later full-suite rerun (`ven_alerts.feature`
 ALERT_GRID_EMERGENCY, `ven_device_sessions.feature` EV allocation — both
-timing out at 300s) turned up under Pi4 load of 7-8 (this box is shared;
+timing out at 300s) turned up under Node1 load of 7-8 (this box is shared;
 `uptime`/`ps aux --sort=-%cpu` showed 3+ concurrent users' `ven-app`
 processes). Reran just those three feature files in isolation once load
 dropped to ~4 and all 13 scenarios passed cleanly — confirming host
@@ -6730,7 +6730,7 @@ not an excuse to skip it.
   solver tie-breaking, even an unrelated, tiny, always-on objective term.
 - Full suites green: E2E (`docker compose run --build --rm test-runner`)
   and resilience (`--tags=@resilience`), both via `run_all_tests.sh`-style
-  invocation on Pi4.
+  invocation on Node1.
 
 ### `SolverPort` marginal-cost/shadow-price extension (openspec `solver-marginal-cost`, 2026-07-26)
 
@@ -6787,7 +6787,7 @@ as continuous `[v, v]` variables outright, not add a constraint on top of a bina
 
 ### Post-merge E2E fixes for `solver-marginal-cost`: heater-forced-power accounting bug + a test-fixture race (2026-07-27)
 
-The Pi4 E2E rerun for `solver-marginal-cost` (above) surfaced a genuine, unrelated bug: the WP3.4
+The Node1 E2E rerun for `solver-marginal-cost` (above) surfaced a genuine, unrelated bug: the WP3.4
 `DISPATCH_SETPOINT steers net site power to the commanded value` scenario timed out at 60s with
 `grid.net_power_w` exactly `max_kw` (3.0 kW) above the commanded target. Root cause:
 `dispatcher::apply_surplus_ev_overlay` and `tasks::sim_tick::dispatch_override::apply_dispatch_override`
@@ -6833,7 +6833,7 @@ Fixed by capturing the cutoff *before* sending the triggering POST
 (`context.plan_freshness_cutoff` in `phase_a_physics_steps.py`'s `step_given_inject_heater_temp_c`)
 and having `planner_steps.py`'s `step_wait_for_fresh_plan` consume it when present, falling back to
 `datetime.now()` for the (only) other caller pattern. Verified via a targeted rerun of just
-`ven_heater_tank.feature` on Pi4 (`docker compose run --rm test-runner features/ven_heater_tank.feature`) —
+`ven_heater_tank.feature` on Node1 (`docker compose run --rm test-runner features/ven_heater_tank.feature`) —
 all 6 scenarios pass, including two runs of the previously-flaky scenario in 11.1s and 5.6s. Full
 suite (269 scenarios) subsequently confirmed green with 1 pass 0 fail.
 
@@ -7094,7 +7094,7 @@ the actual solved output found the true threshold faster and more reliably than 
 hand-derive it from the objective's terms in isolation.
 
 **Verification**: full VEN Rust suite (868/868 + 1 architecture test), fmt/clippy clean,
-file-size audit clean, `cargo audit` clean. Manual UI verification and a Pi4 E2E scenario were
+file-size audit clean, `cargo audit` clean. Manual UI verification and a Node1 E2E scenario were
 not run this session — the unit tests already exercise the full call chain end-to-end
 (`create_from_body` → session → `*MilpContext::from_state` → solved plan via
 `solve_with_session`/`run_planner`), the functional equivalent of the UI flow minus the actual
@@ -7119,7 +7119,7 @@ at BDD/E2E level. The post-heartbeat assertion polls (`poll_until`, 15s) rather 
 once immediately, to tolerate MQTT delivery/processing latency; the pre-heartbeat assertion needs
 no poll since "no status ever received" holds trivially regardless of timing.
 
-**Verification found a real bug in the new scenario itself**: the first Pi4 E2E run after
+**Verification found a real bug in the new scenario itself**: the first Node1 E2E run after
 merging showed the new scenario failing — its `When a weather status heartbeat is published...`
 step was decorated `@given` instead of `@when` in `weather_forecast_steps.py`, leaving it (and
 the following `Then ... alive` assertion) unmatched at collection time (behave showed `# None`
@@ -7128,22 +7128,22 @@ as their location, its marker for an undefined step). Fixed the decorator
 suite run confirmed no other regressions (266/266 scenarios, only the already-known-flaky
 `timeline_grid.feature` scenario below intermittently failing, unrelated to this change).
 
-**Verification**: `bash run_all_tests.sh --e2e` on Pi4 (had to run after merging, not before —
-Pi4's checkout only ever tests `main`). First run caught the decorator bug above; after the
+**Verification**: `bash run_all_tests.sh --e2e` on Node1 (had to run after merging, not before —
+Node1's checkout only ever tests `main`). First run caught the decorator bug above; after the
 follow-up fix, a full suite run passed cleanly except for the pre-existing R-61 flake.
 
 **Key learning**: when a debt-register item's task list assumes a broken/missing state (`@wip`
 tag, uncovered field), check the actual current state before writing new steps — two of R-56's
 four listed sub-tasks were already satisfied by earlier, unrelated work, same as R-22's fix
-predating its own task-list entry. Also: Pi4-Server's checkout always tracks `main` — a feature
-branch's E2E behavior can only be observed on Pi4 after merging, not before, unlike local
+predating its own task-list entry. Also: Node1-Server's checkout always tracks `main` — a feature
+branch's E2E behavior can only be observed on Node1 after merging, not before, unlike local
 unit/UI tests which run against the worktree directly. And: a wrong `@given`/`@when`/`@then`
 decorator in behave produces an *undefined* step (shown as `# None`), not a keyword-mismatch
 error — easy to misread as "not yet reached" rather than "never matched."
 
 ### R-61: intermittent `timeline_grid.feature` now-point flake (found during R-56 verification, 2026-07-31)
 
-Discovered as a side effect of two Pi4 E2E runs on the same day: `Each asset array contains a
+Discovered as a side effect of two Node1 E2E runs on the same day: `Each asset array contains a
 now-point between history and future` passed cleanly in the first full run, then failed
 (`now-point at index 120 is not between history and future (array length 121)`) in a later run
 with zero code changes to the timeline/grid path in between — a genuine intermittent flake, not
@@ -7217,13 +7217,13 @@ new sim-inject field → resolver wiring → `control_schema()` slider descripto
 `SCHEMA_V6` migration (`ALTER TABLE ... RENAME COLUMN`, explicit `if version < 6` step wired into
 `history_store/mod.rs::migrate()` — adding the schema constant alone is not sufficient) →
 frontend rename → frontend new field/slider test. Full backend suite (883/883) and frontend suite
-(425/425) green, fmt/clippy/eslint/tsc clean, file-size audit clean. Verified live on Pi4: DB
+(425/425) green, fmt/clippy/eslint/tsc clean, file-size audit clean. Verified live on Node1: DB
 migration applied cleanly on the real `history.sqlite` (`user_version` 5→6, 28k+ existing PV rows
 intact), slider correctly clamped live PV output and tagged `curtailment_source: Manual`.
 
 ### `POST /sim/inject` null-clear bug — pre-existing, systemic (branch `fix/sim-inject-null-clear`, 2026-07-31)
 
-Found while doing the above Pi4 verification: releasing the new `pv_generation_limit_kw` override
+Found while doing the above Node1 verification: releasing the new `pv_generation_limit_kw` override
 via `POST /sim/inject {"pv_generation_limit_kw": null}` silently did nothing — the value stayed
 stuck. Reproduced the identical failure on the untouched `grid_export_limit_kw`, confirming this
 was pre-existing and systemic across all 17 `PostSimInjectBody` fields, not something the rename
@@ -7245,7 +7245,7 @@ writing a new regression test that deserializes an actual JSON string via `serde
 confirmed it failed against the old implementation, then fixed the type: all 17 fields changed
 from `Option<serde_json::Value>` to `Option<Option<T>>` via a `double_option` deserializer helper,
 which simplified `merge_inject`'s macros in the process (no more manual `is_null()` branching).
-Full suite (884/884) and fmt/clippy clean; verified live on Pi4 for both `pv_generation_limit_kw`
+Full suite (884/884) and fmt/clippy clean; verified live on Node1 for both `pv_generation_limit_kw`
 and `grid_export_limit_kw` — set-then-null-clear now round-trips correctly. See
 `docs/reference/KEY_LEARNINGS.md`'s Rust/Axum section for the reusable pattern.
 
@@ -7337,7 +7337,7 @@ afterward rather than trusting a conflict-free rebase to mean semantically corre
 **Gap**: no browser automation tool was available in this environment to visually screenshot the
 live UI per the project's UI-change verification norm; verification relied on unit tests asserting
 exact DOM text/slider-value behavior plus live API round-trip checks against the deployed schema
-and inject endpoints on Pi4, not an actual screenshot.
+and inject endpoints on Node1, not an actual screenshot.
 
 ### PV `rated_kw`/`inverter_max_kw` reversion — root cause was branch divergence, not a runtime bug (branch `fix/pv-rated-kw-reversion`, 2026-07-31)
 
@@ -7378,7 +7378,7 @@ hide), and updated the `schema_snapshot_matches_fixture` golden fixture (`max: 8
 ven-1).
 
 **Verification**: 885/885 backend tests green (884 + new), fmt/clippy/file-size clean. Deployed to
-Pi4 with an explicit anti-reversion check per the fix's own prevention plan — confirmed Pi4's
+Node1 with an explicit anti-reversion check per the fix's own prevention plan — confirmed Node1's
 checked-out profile YAMLs matched the corrected values *before* rebuilding, not just after — then
 confirmed live via `GET /sim` and `GET /sim/schema` on all three VENs post-deploy.
 
@@ -7389,30 +7389,30 @@ same wrong starting point from `main` because `main` itself was never corrected.
 "keeps reverting" was git hygiene (merge to `main`, delete the orphaned branch), not a code change
 to find and neutralize.
 
-## Po4 — a second Pi4 extending the fleet, and BL-41 (dynamic VEN-dashboard discovery)
+## Node2 — a second Node1 extending the fleet, and BL-41 (dynamic VEN-dashboard discovery)
 
-**Why**: a second Raspberry Pi ("Po4") joined the same LAN as the existing project host
-("Pi4"). It was set up as an *extension* of the lab, not a duplicate: no VTN, no
-InfluxDB, no GPIO, no desktop, no OpenVPN (reachable through Pi4's VPN once on the LAN)
-— only Docker plus new VENs, administered by Pi4's existing VTN. A `git sparse-checkout
---cone` clone on Po4 keeps only `VEN/`, `scripts/`, `docs/` in the working tree (`VTN/`
-and the `openleadr-rs` submodule dropped via `git submodule deinit`), since Po4 never
+**Why**: a second Raspberry Pi ("Node2") joined the same LAN as the existing project host
+("Node1"). It was set up as an *extension* of the lab, not a duplicate: no VTN, no
+InfluxDB, no GPIO, no desktop, no OpenVPN (reachable through Node1's VPN once on the LAN)
+— only Docker plus new VENs, administered by Node1's existing VTN. A `git sparse-checkout
+--cone` clone on Node2 keeps only `VEN/`, `scripts/`, `docs/` in the working tree (`VTN/`
+and the `openleadr-rs` submodule dropped via `git submodule deinit`), since Node2 never
 needs VTN code.
 
-`ven-4` was brought up on Po4 as the proof of concept: provisioned against Pi4's VTN via
+`ven-4` was brought up on Node2 as the proof of concept: provisioned against Node1's VTN via
 `scripts/seed_vtn.py`'s existing `provision_vens()`, addressed by real LAN IP:port
 (`VTN_BASE_URL=http://192.168.1.103:8200`, `WEATHER_MQTT_HOST=192.168.1.103`) instead of
-Docker service-name DNS, on its own local `po4-ven-net` bridge network (no `vtn` network
+Docker service-name DNS, on its own local `node2-ven-net` bridge network (no `vtn` network
 to join). One real bug surfaced getting it healthy: the container's `nonroot` user is
 uid/gid 2000:2000, but a plain `mkdir -p` under the `pi` user created the bind-mounted
 data directory as 1000:1000 — `chown -R 2000:2000` fixed it. Worth remembering for every
 future per-VEN data directory on a new host.
 
 **The gap this exposed**: once `ven-4` was live, neither dashboard could see it correctly.
-Po4's own `ui` proxies `/api/vens-registry` to a local `bff` service that doesn't exist
-there (Po4 has no VTN/bff) — patched host-locally (not committed) to point at Pi4's real
-`bff` (`192.168.1.103:8220`), a standing requirement for Po4 (not a workaround BL-41
-removes, since Po4 structurally has no local `bff` to point at instead). Pi4's dashboard,
+Node2's own `ui` proxies `/api/vens-registry` to a local `bff` service that doesn't exist
+there (Node2 has no VTN/bff) — patched host-locally (not committed) to point at Node1's real
+`bff` (`192.168.1.103:8220`), a standing requirement for Node2 (not a workaround BL-41
+removes, since Node2 structurally has no local `bff` to point at instead). Node1's dashboard,
 which *does* have a real `bff`, still couldn't reach `ven-4`'s live data: the fleet
 dashboard's VEN discovery (`VEN/ui/src/api/venRegistry.ts`) resolved every non-default
 VEN through `/api/dyn/{venName}`, relying on Docker's embedded DNS on the *dashboard's*
@@ -7443,15 +7443,15 @@ this: two separate scenarios registering VENs back-to-back raced the BFF's
 `GET /vens` cache (`CACHE_TTL_VENS`, default 10 s) — the second scenario's VEN wasn't
 reflected in the still-cached response from the first. Fixed by registering both VENs
 before a single shared list call, not by disabling or shortening the cache. Confirmed
-live: from Pi4, a direct `curl` to `ven-4`'s advertised origin
-(`http://192.168.1.104:8211/health`) succeeds even though Docker DNS on Pi4 has no way
+live: from Node1, a direct `curl` to `ven-4`'s advertised origin
+(`http://192.168.1.104:8211/health`) succeeds even though Docker DNS on Node1 has no way
 to resolve `ven-4` — proving the browser-direct path is what makes it reachable.
 
 **Key learning**: an "obvious" fix instruction in a plan (here: "revert the temporary
-Po4 nginx patch") can be wrong once you actually look at why the patch exists — Po4's
-`/api/vens-registry` → Pi4's `bff` proxy isn't a workaround for the bug BL-41 fixes, it's
-a structural necessity (Po4 has no local `bff`), so "reverting" it would have broken
-Po4's dashboard entirely. Verify a plan step's premise against the actual system before
+Node2 nginx patch") can be wrong once you actually look at why the patch exists — Node2's
+`/api/vens-registry` → Node1's `bff` proxy isn't a workaround for the bug BL-41 fixes, it's
+a structural necessity (Node2 has no local `bff`), so "reverting" it would have broken
+Node2's dashboard entirely. Verify a plan step's premise against the actual system before
 executing it, even after a plan has been approved.
 
 **Follow-up: the cache-race fix above wasn't actually complete.** The final full-suite
@@ -7469,23 +7469,23 @@ assertions at the point of consumption, not just careful ordering of the produci
 **Session also surfaced two infrastructure issues unrelated to BL-41 itself, fixed in
 passing:**
 
-1. Pi4 rebooted twice unattended during this session (likely `unattended-upgrades`),
+1. Node1 rebooted twice unattended during this session (likely `unattended-upgrades`),
    silently killing a detached `nohup`-launched full-suite run each time and wiping its
-   `/tmp` log (`pi4_lock`'s lock file lives in `/tmp` too, so the lease was lost — had to
+   `/tmp` log (`docker_host_lock`'s lock file lives in `/tmp` too, so the lease was lost — had to
    re-`acquire`, not `refresh`). Detected via `uptime`/kernel-version drift in container
    logs, not any error signal. Always wait for an explicit `ALL_DONE` marker in the log
    before trusting a background run finished, and check `ps aux` for orphaned duplicate
    `docker compose` processes after any resume — reboots and interrupted local wrappers
    both leave stale remote processes behind that a naive relaunch can race against.
 
-2. Pi4's mDNS name was wrong in the docs (`pi4server.local` — a fossil from a hostname
-   the box had before it was renamed to `Pi4`, `/etc/hosts` still carried both stale
-   `127.0.1.1` entries, `TinkerPi` and `pi4server`). Avahi had no explicit `host-name`
-   override, so it fell back to the static hostname `Pi4` → advertised `Pi4.local`
+2. Node1's mDNS name was wrong in the docs (`node1server.local` — a fossil from a hostname
+   the box had before it was renamed to `Node1`, `/etc/hosts` still carried both stale
+   `127.0.1.1` entries, `old-tinker` and `node1server`). Avahi had no explicit `host-name`
+   override, so it fell back to the static hostname `Node1` → advertised `Node1.local`
    (capitalized) — but the docs still pointed at the older, no-longer-advertised
-   `pi4server.local`. Fixed by setting `host-name=pi4` explicitly in
+   `node1server.local`. Fixed by setting `host-name=node1` explicitly in
    `/etc/avahi/avahi-daemon.conf` (decoupling the mDNS name from `hostnamectl`'s
    capitalization) and restarting `avahi-daemon`; cleaned the two stale `/etc/hosts`
-   lines. Verified: `curl http://pi4.local:8214/` → 200 from the Windows dev machine.
-   `nslookup pi4.local` still reports "non-existent domain" — expected, since `.local`
+   lines. Verified: `curl http://node1.local:8214/` → 200 from the Windows dev machine.
+   `nslookup node1.local` still reports "non-existent domain" — expected, since `.local`
    only resolves via mDNS, which `nslookup` doesn't query; `curl`/browsers do.

@@ -6,8 +6,8 @@ static comma-list for the fixed ven-1/ven-2/ven-3 docker-compose trio, or
 a fleet manifest.json for the arbitrary-N `fleet.sh` stack.
 
 Usage:
-    python3 scripts/seed_history.py --host <pi4-ip-or-hostname>
-    python3 scripts/seed_history.py --fleet-manifest VEN/fleet/manifest.json --host <pi4-ip>
+    python3 scripts/seed_history.py --host <node1-ip-or-hostname>
+    python3 scripts/seed_history.py --fleet-manifest VEN/fleet/manifest.json --host <node1-ip>
 """
 
 import argparse

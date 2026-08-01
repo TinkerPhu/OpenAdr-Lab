@@ -85,7 +85,7 @@ to ~4 samples per weekday (limit recorded in TECHNICAL_DEBTS.md).
   [[ven-ui]], which show real daily structure (coffee/lunch/dinner peaks,
   weekend brunch shift) once history is seeded.
 
-Verified end-to-end on Pi4: ven-1's learned weekday bucket shows coffee
+Verified end-to-end on Node1: ven-1's learned weekday bucket shows coffee
 (h8), lunch (h12) and dinner (h17–18) peaks while its weekend bucket drops the
 lunch peak, adds a brunch peak (h10) and moves dinner an hour earlier — with a
 planner integration test proving `baseline_kw` differs for a Saturday-dated vs

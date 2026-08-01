@@ -13,15 +13,15 @@ tags: [testing, bdd, pyramid]
 Four suites, all green before any merge to main (`.claude/CLAUDE.md` §testing;
 full guide docs/guidelines/TESTING.md). Entry point: `bash run_all_tests.sh` (with
 `--local`, `--e2e`, `--resilience`, `--rust` flags). The remote docker suites
-(3, 4, and Rust-in-docker) automatically take the [[pi4-lease-lock]] so parallel
-sessions cannot corrupt each other's stacks on the shared Pi4.
+(3, 4, and Rust-in-docker) automatically take the [[docker-host-lease-lock]] so parallel
+sessions cannot corrupt each other's stacks on the shared Node1.
 
 | # | Suite | Where | What |
 |---|---|---|---|
 | 1 | UI unit | local (`VEN/ui`, `VTN/ui`) | Vitest + React Testing Library |
 | 2 | Rust unit+integration | local WSL (`wsl cargo test -p ven-app`; `VTN/bff` has its own `cargo test`) | most tests need no HiGHS |
-| 3 | E2E BDD | Pi4 docker | behave, 51 feature files / ~270 scenarios, incl. Playwright browser tests |
-| 4 | Resilience | Pi4 docker | failure-recovery scenarios (`--tags=@resilience`) |
+| 3 | E2E BDD | Node1 docker | behave, 51 feature files / ~270 scenarios, incl. Playwright browser tests |
+| 4 | Resilience | Node1 docker | failure-recovery scenarios (`--tags=@resilience`) |
 
 Suite 3 is the only gate that exercises the **built UI bundles** in a real
 browser — bundler-level breakage (e.g. an import-interop bug introduced by a

@@ -338,7 +338,7 @@ fn battery_startup_penalty_minimises_active_restarts() {
 /// `phase1_cap_expr <= c_star + epsilon` by roughly
 /// `PV_USE_TIEBREAK_EUR_PER_KWH * total_pv_used_kwh` — which dwarfs the
 /// production default epsilon (0.02 €) whenever PV is used at all, making
-/// Phase 2 infeasible on every single solve (observed live on Pi4).
+/// Phase 2 infeasible on every single solve (observed live on Node1).
 #[test]
 fn phase2_feasible_with_pv_and_production_epsilon() {
     let n = 24;

@@ -35,17 +35,17 @@ echo "Provisioning done."
 
 # Run main suite first, excluding timing-sensitive @isolated scenarios.
 # Then run @isolated scenarios in a second pass so each gets a fresh VEN
-# state and is not affected by Pi4 resource contention from prior scenarios.
+# state and is not affected by Node1 resource contention from prior scenarios.
 set +e
 python -m behave --tags=~@isolated --exclude "isolated" "$@"
 MAIN_EXIT=$?
 
 echo ""
 # The @isolated pass exists precisely because these scenarios are
-# timing-sensitive on Pi4 — but starting them seconds after the ~40-minute
+# timing-sensitive on Node1 — but starting them seconds after the ~40-minute
 # main suite defeats the purpose: the box is still busy (planner solves,
 # docker I/O) and their poll_until timeouts flake. Containers share the host
-# kernel, so /proc/loadavg is the real Pi4 load. Wait for it to settle
+# kernel, so /proc/loadavg is the real Node1 load. Wait for it to settle
 # (1-min load < 2.0), capped at 8 minutes.
 echo "=== Waiting for host load to settle before @isolated pass ==="
 SETTLE_DEADLINE=$(( $(date +%s) + 480 ))

@@ -54,7 +54,7 @@ transport requirements): [[openadr-security]].
 `VtnClient`s and writes a write-once, deduplicated log into a `lab_recorder.*` Postgres
 schema — gated on `DATABASE_URL` being set (`main.rs`); the BFF behaves exactly as before
 if it isn't. `record_ven_snapshots` must use the `ven-manager` credential, not
-`any-business` — the same `/vens` role restriction as above bit this during Pi4
+`any-business` — the same `/vens` role restriction as above bit this during Node1
 verification (403, not caught by unit tests since those mock the client). Full detail:
 [[history-store]].
 

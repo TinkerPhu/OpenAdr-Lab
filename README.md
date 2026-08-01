@@ -1,6 +1,6 @@
 # OpenADR 3 Raspberry Pi Lab
 
-A Raspberry Pi4-hosted **OpenADR 3 laboratory environment** for demand response experimentation, multi-VEN simulation, and edge computing research.
+A Node1-hosted **OpenADR 3 laboratory environment** for demand response experimentation, multi-VEN simulation, and edge computing research. Node1 is a Raspberry Pi 4; the lab can scale out to further hosts, and a Node2 is already set up in this repo (`VEN/scale_out/node2/`).
 
 ## The context
 
@@ -154,7 +154,7 @@ Configure the docker host at the top of `run_all_tests.sh`:
 
 ```bash
 DOCKER_HOST=""                        # "" = run docker commands locally (no SSH)
-                                      # set to e.g. "Pi4" for a remote host
+                                      # set to e.g. "Node1" for a remote host
 DOCKER_DIR="/srv/docker/openadr_lab"  # repo path on the docker host
 ```
 
@@ -172,7 +172,7 @@ DOCKER_HOST=""                        # "" = local; or SSH hostname e.g. "my-ser
 DOCKER_DIR="/your/repo/path"
 ```
 
-**2. `tests/docker-compose.openleadr-test.yml`** — remove the Pi4 resource caps (they prevent OOM crashes on 4 GB RAM; unnecessary on bigger machines):
+**2. `tests/docker-compose.openleadr-test.yml`** — remove the Node1 resource caps (they prevent OOM crashes on 4 GB RAM; unnecessary on bigger machines):
 ```yaml
 # delete or raise this block:
 deploy:
@@ -182,7 +182,7 @@ deploy:
       memory: 1500M
 ```
 
-**3. `tests/Dockerfile.openleadr-test`** — remove or raise the Cargo job limit (set to 4 to avoid Pi4 OOM during linking):
+**3. `tests/Dockerfile.openleadr-test`** — remove or raise the Cargo job limit (set to 4 to avoid Node1 OOM during linking):
 ```dockerfile
 # delete or set higher, e.g. ENV CARGO_BUILD_JOBS=8
 ENV CARGO_BUILD_JOBS=4

@@ -6,7 +6,7 @@
 #
 # Compiled artifacts live in named Docker volumes (see docker-compose), so
 # only changed crates are recompiled on each run. First run is slow (~25 min
-# on Pi4 ARM64); subsequent runs are ~1-2 min.
+# on Node1 ARM64); subsequent runs are ~1-2 min.
 ###############################################################################
 
 FROM rust:1.90-alpine

@@ -103,7 +103,7 @@ both touch the reqwest stack.
 ### WP6.7 — MQTT (optional, M) + mDNS (optional, S)
 
 Only if WP6.6's latency experiment motivates a second transport. MQTT listener
-beside the poller (rumqttc, pinned; broker container on Pi4); mDNS discovery is a
+beside the poller (rumqttc, pinned; broker container on Node1); mDNS discovery is a
 cert SHOULD with near-zero lab value — implement last or explicitly close as
 won't-do-in-lab in the cert backlog.
 
@@ -119,7 +119,7 @@ same files):
 | BL-29 | Fold `FlexibilityDirection` into BL-10's report code (done in Phase 3 — verify), close the rest pending multi-currency demand |
 | BL-22 | Decide: wire `apply_battery_correction_overlay` behind `battery.deviation_correction_enabled` (default off) **or** delete after user re-confirmation — ask, don't assume |
 | BL-23 | Route `post_heater_target` through `HvacService` (consistency with EV path) or delete the shell |
-| GB-01 | Prune orphan docker containers on Pi4 (project-owned only — never touch productive containers) |
+| GB-01 | Prune orphan docker containers on Node1 (project-owned only — never touch productive containers) |
 | GB-04 | `ends_at timestamptz` index for `?active=true` (SQL-side filtering) |
 | GB-05 | VTN UI: filter past events from the event table |
 | GB-08 | VEN UI tests for UserRequests + Controller pages |

@@ -2,8 +2,8 @@
 
 This manual shows how to observe all 14 HEMS controller use cases using the live lab UI. The Controller page was designed as a "glass box" into the planning engine: every packet, plan slot, rate snapshot, and ledger entry is visible in real time.
 
-**VEN UI:** http://Pi4:8214
-**VTN UI:** http://Pi4:8221
+**VEN UI:** http://Node1:8214
+**VTN UI:** http://Node1:8221
 
 ---
 
@@ -64,8 +64,8 @@ The **Controller** page is the primary observation surface for all HEMS use case
 
 ## Prerequisites
 
-1. Open **VTN UI** (http://Pi4:8221) — health chip shows **"VTN: ok"**
-2. Open **VEN UI** (http://Pi4:8214) — health chip shows **"ok"**
+1. Open **VTN UI** (http://Node1:8221) — health chip shows **"VTN: ok"**
+2. Open **VEN UI** (http://Node1:8214) — health chip shows **"ok"**
 3. Navigate to the **Controller** page — you should see seeded packets in the Packets table and a Power chart with trace lines
 4. Open the **Simulation** page in a second tab
 
@@ -77,9 +77,9 @@ For use cases that create energy requests, use the **User Requests** page (nav b
 
 If you prefer curl (e.g. for scripting or automation), the CLI equivalents are listed in the **CLI Reference** section at the end of this document. Set up shortcuts:
 ```bash
-VEN1=http://Pi4:8211
-VEN2=http://Pi4:8212
-VEN3=http://Pi4:8213
+VEN1=http://Node1:8211
+VEN2=http://Node1:8212
+VEN3=http://Node1:8213
 ```
 
 ---
@@ -243,7 +243,7 @@ Replace `TODAY_14:00:00+01:00` with today's 14:00 in ISO 8601 (e.g. `2026-03-12T
 
 ### Setup
 
-**VTN UI** (http://Pi4:8221):
+**VTN UI** (http://Node1:8221):
 
 1. Navigate to **Programs** → **Create**
 2. Program Name: `obs-uc04-price` — leave VENs unchecked (open program)
@@ -507,7 +507,7 @@ For Tier 1 to fail by budget: the €0.10 max marginal rate is below all availab
 **Controller → Status bar, Plan card:**
 - Warning count > 0
 
-To inspect warning details: `GET http://Pi4:8211/plan` — the `warnings` array in the JSON contains the message text (`"EV can only reach ~X% of target by tonight"` etc.). The **User Requests** page also shows the stalled request with status `ACTIVE` and estimated cost at or near €0.
+To inspect warning details: `GET http://Node1:8211/plan` — the `warnings` array in the JSON contains the message text (`"EV can only reach ~X% of target by tonight"` etc.). The **User Requests** page also shows the stalled request with status `ACTIVE` and estimated cost at or near €0.
 
 ### Repairing the situation
 
@@ -547,7 +547,7 @@ On the **User Requests** page, find the stalled user request and click the **del
 - New entries show updated constraints or reduced setpoints
 
 ### What you cannot see
-The PenaltyRule entity (threshold €100, measurement window PT15M, rolling average) is not exposed in the UI. To inspect it directly: `GET http://Pi4:8211/plan` and look at the plan JSON for `phase_6_diagnostics` or check the Rust logs on Pi4.
+The PenaltyRule entity (threshold €100, measurement window PT15M, rolling average) is not exposed in the UI. To inspect it directly: `GET http://Node1:8211/plan` and look at the plan JSON for `phase_6_diagnostics` or check the Rust logs on Node1.
 
 ---
 
@@ -604,7 +604,7 @@ VEN2 has only a heater and PV. To make it consumption-only:
 ### Setup
 
 ```bash
-ssh Pi4 "cd /srv/docker/openadr_lab && docker compose -f VTN/docker-compose.yml stop vtn"
+ssh Node1 "cd /srv/docker/openadr_lab && docker compose -f VTN/docker-compose.yml stop vtn"
 ```
 
 Wait 60–90 seconds (VEN poll interval).
@@ -629,7 +629,7 @@ Wait until cached rates would normally expire (if day-ahead rates were loaded, t
 ### Restore
 
 ```bash
-ssh Pi4 "cd /srv/docker/openadr_lab && docker compose -f VTN/docker-compose.yml start vtn"
+ssh Node1 "cd /srv/docker/openadr_lab && docker compose -f VTN/docker-compose.yml start vtn"
 ```
 
 Wait 30 seconds for VEN to reconnect. Controller Plan card should show `RATE_CHANGE` trigger as the fresh rates arrive.
@@ -771,13 +771,13 @@ regression, not expected behavior.
 
 ## CLI Reference: POST /user-requests
 
-The **User Requests** page (http://Pi4:8214/user-requests) is the primary way to submit and cancel user requests. The curl commands below are provided as alternatives for scripting, automation, or quick access without opening a browser.
+The **User Requests** page (http://Node1:8214/user-requests) is the primary way to submit and cancel user requests. The curl commands below are provided as alternatives for scripting, automation, or quick access without opening a browser.
 
 ### EV charge to target SoC
 
 ```bash
 # VEN1: charge EV to 80% by tomorrow 07:00, budget €3
-curl -s -X POST http://Pi4:8211/user-requests \
+curl -s -X POST http://Node1:8211/user-requests \
   -H "Content-Type: application/json" \
   -d '{
     "asset_id": "ev",
@@ -791,7 +791,7 @@ curl -s -X POST http://Pi4:8211/user-requests \
 ### Multi-tier deadline (UC-09)
 
 ```bash
-curl -s -X POST http://Pi4:8211/user-requests \
+curl -s -X POST http://Node1:8211/user-requests \
   -H "Content-Type: application/json" \
   -d '{
     "asset_id": "ev",
@@ -808,25 +808,25 @@ curl -s -X POST http://Pi4:8211/user-requests \
 ### Cancel a request
 
 ```bash
-curl -s -X DELETE http://Pi4:8211/user-requests/<REQUEST_ID>
+curl -s -X DELETE http://Node1:8211/user-requests/<REQUEST_ID>
 ```
 
 ### List all requests
 
 ```bash
-curl -s http://Pi4:8211/user-requests | python3 -m json.tool
+curl -s http://Node1:8211/user-requests | python3 -m json.tool
 ```
 
 ### View active plan (full JSON including warnings)
 
 ```bash
-curl -s http://Pi4:8211/plan | python3 -m json.tool
+curl -s http://Node1:8211/plan | python3 -m json.tool
 ```
 
 ### View flexibility envelopes
 
 ```bash
-curl -s http://Pi4:8211/flexibility | python3 -m json.tool
+curl -s http://Node1:8211/flexibility | python3 -m json.tool
 ```
 
 ---
