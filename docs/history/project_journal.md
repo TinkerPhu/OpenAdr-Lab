@@ -468,7 +468,7 @@ Docker Compose `${VAR:-default}` syntax in YAML is overridden by `.env` files. T
 
 ### Hostname Fix
 
-Hardcoded `raspberrypi.local` didn't resolve — Pi4's actual hostname is `pi4server`, so `pi4server.local` works via mDNS/Avahi.
+Hardcoded `raspberrypi.local` didn't resolve — Pi4's actual hostname is `pi4server`, so `pi4server.local` works via mDNS/Avahi. (Superseded 2026-08-01: the box was later renamed to `Pi4`/`pi4.local` — see the mDNS fix at the end of this journal.)
 
 ---
 
@@ -7453,3 +7453,39 @@ Po4 nginx patch") can be wrong once you actually look at why the patch exists �
 a structural necessity (Po4 has no local `bff`), so "reverting" it would have broken
 Po4's dashboard entirely. Verify a plan step's premise against the actual system before
 executing it, even after a plan has been approved.
+
+**Follow-up: the cache-race fix above wasn't actually complete.** The final full-suite
+run (after `ven-4` was reprovisioned onto `VEN/scale_out/node2`) still failed the same
+scenario, `VEN 'bl41-dashboard-ven' not in BFF VEN list` — a *different* scenario earlier
+in the same feature file (`Scenario: List VENs via BFF`) had already warmed the BFF's
+10s cache ~0.3s before ours ran, so our own single list call (even after registering
+both VENs first) still returned the stale pre-registration snapshot. Merging two
+scenarios into one only protects against a race *within* the scenario; it does nothing
+about a *preceding* scenario's cache-warming call. Real fix: poll `GET /vens` (bounded by
+the cache TTL, `_wait_for_ven_in_list` in `bff_crud_steps.py`) instead of trusting a
+single fetch (commit `5e28e51`). Lesson: a shared TTL cache in BDD tests needs retry-until
+assertions at the point of consumption, not just careful ordering of the producing steps.
+
+**Session also surfaced two infrastructure issues unrelated to BL-41 itself, fixed in
+passing:**
+
+1. Pi4 rebooted twice unattended during this session (likely `unattended-upgrades`),
+   silently killing a detached `nohup`-launched full-suite run each time and wiping its
+   `/tmp` log (`pi4_lock`'s lock file lives in `/tmp` too, so the lease was lost — had to
+   re-`acquire`, not `refresh`). Detected via `uptime`/kernel-version drift in container
+   logs, not any error signal. Always wait for an explicit `ALL_DONE` marker in the log
+   before trusting a background run finished, and check `ps aux` for orphaned duplicate
+   `docker compose` processes after any resume — reboots and interrupted local wrappers
+   both leave stale remote processes behind that a naive relaunch can race against.
+
+2. Pi4's mDNS name was wrong in the docs (`pi4server.local` — a fossil from a hostname
+   the box had before it was renamed to `Pi4`, `/etc/hosts` still carried both stale
+   `127.0.1.1` entries, `TinkerPi` and `pi4server`). Avahi had no explicit `host-name`
+   override, so it fell back to the static hostname `Pi4` → advertised `Pi4.local`
+   (capitalized) — but the docs still pointed at the older, no-longer-advertised
+   `pi4server.local`. Fixed by setting `host-name=pi4` explicitly in
+   `/etc/avahi/avahi-daemon.conf` (decoupling the mDNS name from `hostnamectl`'s
+   capitalization) and restarting `avahi-daemon`; cleaned the two stale `/etc/hosts`
+   lines. Verified: `curl http://pi4.local:8214/` → 200 from the Windows dev machine.
+   `nslookup pi4.local` still reports "non-existent domain" — expected, since `.local`
+   only resolves via mDNS, which `nslookup` doesn't query; `curl`/browsers do.
