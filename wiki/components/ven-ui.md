@@ -2,8 +2,8 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-07-30
-synced_commit: d42dcd3
+updated: 2026-07-31
+synced_commit: e9f5207
 sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/pages/Weather.tsx, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx]
 tags: [ui, react, timeline]
 ---
@@ -78,8 +78,20 @@ BL-39). A `variant="condensed"` chip strip plus a read-only objective chip sits 
 Dashboard (`dash-session-strip`, BL-36); the objective control stays on the Planner tab.
 
 Controller page: the PV asset's `AssetTimelineChart` shades hardware-capped, planned-curtailment,
-and unplanned regions distinctly, reflecting `PvState.curtailment_source` from [[asset-layer]]'s
-PV curtailment model.
+manual-override, and unplanned regions distinctly, reflecting `PvState.curtailment_source` from
+[[asset-layer]]'s PV curtailment model (renamed `generation_limit_kw`, fourth `manual` source
+added alongside the pre-existing `none`/`plan`/`capacity`).
+
+**Nullable slider convention** (`components/controller/DynamicControl.tsx`): a plain slider
+falling back to its `min` whenever no override is active made "no override" visually
+indistinguishable from "curtailed to the minimum" — for `pv_generation_limit_kw` specifically,
+whose `max` (`inverter_max_kw`) is physically identical to "no limit" since the inverter can
+never exceed it anyway, that reads as PV being capped to zero when it's actually exporting
+normally. A new `nullable` flag on `ControlDescriptor` (schema-driven, set only on this one
+control) pins the slider to `max` and shows "Off" when the value is `null`; dragging into the
+top 5% of the range and releasing sends `null` instead of the numeric max — a snap-to-off zone,
+no separate toggle control needed. `AssetRightSection`/`AssetTimelineChart` tests extended to
+cover the null/Off rendering path.
 
 ## Timeline specifics
 

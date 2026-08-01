@@ -2,8 +2,8 @@
 title: "Query: what is the Planner tab in the VEN UI for?"
 type: query
 created: 2026-07-17
-updated: 2026-07-17
-synced_commit: f068d94
+updated: 2026-07-31
+synced_commit: e9f5207
 sources: [VEN/ui/src/pages/Planner.tsx, VEN/ui/src/App.tsx, VEN/ui/src/pages/Controller.tsx, VEN/ui/src/pages/Dashboard.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx]
 tags: [ui, planner, ux]
 ---
@@ -84,3 +84,11 @@ Filed in `docs/BACKLOG.md` (User-Value View, "comfort, control & trust"):
 
 The [[ven-ui]] page now carries the Planner-tab composition and Dashboard session strip
 (coverage-gap item of 2026-07-17 resolved).
+
+## Minor drift since this page was written
+
+The page heading now reads "Plan" rather than "Planner" (`Planner.tsx`'s `<Typography
+variant="h5">`) — a wording tweak only, the route/tab identity and composition above are
+unchanged. `PlannerStatusBar`'s trigger-colored chip also dropped its
+`DeviceDeviation`-specific warning color (always `success` now); not a behavior change to
+anything documented above.

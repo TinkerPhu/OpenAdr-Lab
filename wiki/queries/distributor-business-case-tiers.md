@@ -19,6 +19,12 @@ tags: [business-case, dso, rollout, programs, flexibility]
 > volatility and PV in the grid, causing both energy oversupply and local power
 > overload.
 
+> **Note:** this rollout assumes one distributor entity owns all four tiers. Where grid
+> maintenance and energy sales are legally unbundled (a DSO forbidden from selling
+> energy, running only the VTN and Tier 3's envelopes), see
+> [[dso-retailer-unbundled-tariff-coordination]] for how the DSO and a separate retailer
+> can still cooperate on Tier 1/2's tariff signals.
+
 ## Framing: the PV problem is really two problems
 
 Increasing PV creates two *distinct* pains, and OpenADR 3 has a distinct signal type

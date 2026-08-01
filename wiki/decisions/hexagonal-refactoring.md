@@ -2,8 +2,8 @@
 title: "Decision: Hexagonal Refactoring of the VEN Backend"
 type: decision
 created: 2026-07-04
-updated: 2026-07-30
-synced_commit: d42dcd3
+updated: 2026-07-31
+synced_commit: e9f5207
 sources: [.claude/CLAUDE.md, docs/architecture/module_dependency_graph.md]
 tags: [decision, architecture, refactoring]
 ---

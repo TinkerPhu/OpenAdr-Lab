@@ -2,8 +2,8 @@
 title: Weather Forecast Plugin
 type: component
 created: 2026-07-28
-updated: 2026-07-30
-synced_commit: d42dcd3
+updated: 2026-07-31
+synced_commit: e9f5207
 sources: [docs/architecture/weather_forecast.md, VEN/src/weather.rs, VEN/src/entities/weather.rs, VEN/src/entities/solar.rs, VEN/src/entities/pv_snow.rs, VEN/src/controller/weather_port.rs, VEN/src/routes/weather.rs, VEN/src/profile/weather_pv.rs, VEN/src/services/forecast.rs, VEN/ui/src/pages/Weather.tsx, VEN/src/services/test_support/mock_weather_port.rs]
 tags: [weather, pv, forecast, mqtt, ven]
 ---
@@ -66,17 +66,21 @@ calibration pass, not just a config value copied from an existing VEN.
 `WeatherForecastPort` (all three implementors, including the test mock), surfaced as
 `source_alive` on `GET /weather` (distinct from `is_fresh`: transport health vs. content age —
 a broker connection can be up with a stale retained message, or vice versa), and given a visible
-chip on the VEN UI Weather page, per the `ui-transparency` rule.
+chip on the VEN UI Weather page, per the `ui-transparency` rule. E2E coverage for this
+specific behaviour (R-56, resolved): `weather_forecast.feature` gained a scenario publishing a
+status-topic heartbeat and asserting `source_alive` flips `false`→`true`, mirroring the R-52
+unit test at BDD level. Its first real Pi4 run caught a step-decorator bug (the heartbeat-publish
+step was `@given` instead of `@when`, leaving it and the following assertion undefined) — fixed,
+then reverified green; a pre-existing, unrelated intermittent flake in
+`timeline_grid.feature` (R-61) surfaced incidentally during that same verification run.
 
 ## Known deferred gaps
 
-`docs/reference/TECHNICAL_DEBTS.md` R-53..R-56: horizon/shading obstructions and the Perez/HDKR
+`docs/reference/TECHNICAL_DEBTS.md` R-53..R-55: horizon/shading obstructions and the Perez/HDKR
 diffuse-sky model are deliberately deferred accuracy improvements over the current
 isotropic-on-zenith transposition; the snow-cover model's initial state has no cross-check
-against live PV telemetry deviation; the Mosquitto broker accepts anonymous publishes on
-its plaintext listener (acceptable on the trusted lab LAN, revisit before any wider
-exposure); and `tests/features/weather_forecast.feature` is committed `@wip` pending Pi4
-access to run it.
+against live PV telemetry deviation; and the Mosquitto broker accepts anonymous publishes on
+its plaintext listener (acceptable on the trusted lab LAN, revisit before any wider exposure).
 
 ## Relationship to the deviation arbiter
 

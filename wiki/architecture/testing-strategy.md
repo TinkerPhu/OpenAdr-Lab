@@ -2,8 +2,8 @@
 title: Testing Strategy
 type: architecture
 created: 2026-07-04
-updated: 2026-07-17
-synced_commit: f08e469
+updated: 2026-07-31
+synced_commit: e9f5207
 sources: [docs/guidelines/TESTING.md, tests/features/, .claude/CLAUDE.md, run_all_tests.sh]
 tags: [testing, bdd, pyramid]
 ---
@@ -20,7 +20,7 @@ sessions cannot corrupt each other's stacks on the shared Pi4.
 |---|---|---|---|
 | 1 | UI unit | local (`VEN/ui`, `VTN/ui`) | Vitest + React Testing Library |
 | 2 | Rust unit+integration | local WSL (`wsl cargo test -p ven-app`; `VTN/bff` has its own `cargo test`) | most tests need no HiGHS |
-| 3 | E2E BDD | Pi4 docker | behave, 48 feature files / ~262 scenarios, incl. Playwright browser tests |
+| 3 | E2E BDD | Pi4 docker | behave, 51 feature files / ~270 scenarios, incl. Playwright browser tests |
 | 4 | Resilience | Pi4 docker | failure-recovery scenarios (`--tags=@resilience`) |
 
 Suite 3 is the only gate that exercises the **built UI bundles** in a real
