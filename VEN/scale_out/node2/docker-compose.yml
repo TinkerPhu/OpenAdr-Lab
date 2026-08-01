@@ -1,0 +1,77 @@
+###############################################################################
+# ven-4 — a VEN instance running on a second physical host ("node2")
+#
+# This is a horizontal scale-out deployment: the same VEN application as
+# VEN/docker-compose.yml (ven-1/2/3), but running on a different machine
+# than the primary VTN host. Because it's a separate machine, it cannot
+# join that host's `vtn_openadr-net` Docker network or resolve `vtn`/`bff`
+# by Docker DNS — it reaches the primary host over the real LAN instead
+# (see PRIMARY_HOST_LAN_IP in .env).
+#
+# Prerequisites:
+#   - The primary host's VTN + BFF must be running and reachable on the LAN
+#   - ven-4's OAuth credentials must be provisioned in the VTN
+#     (scripts/seed_vtn.py — idempotent, safe to rerun)
+#
+# Usage:
+#   docker compose up -d --build ven-4 ui
+#   curl http://localhost:8211/health
+###############################################################################
+
+services:
+  ven-4:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8211:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      CLIENT_ID: "ven-4"
+      CLIENT_SECRET: "ven-4"
+      VEN_NAME: "ven-4"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+      # Weather forecast plugin (docs/architecture/weather_forecast.md).
+      # No shared Docker network with the primary host's Mosquitto, so this
+      # reaches it over the real LAN instead of host.docker.internal.
+      WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      WEATHER_MQTT_SITE_ID: "zunzgen"
+    volumes:
+      - ./data/ven-4:/data
+      - ../../profiles/ven-4.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - node2-ven-net
+
+  # UI build is identical to VEN/ui except for nginx.conf: this node has no
+  # local `bff`, so /api/vens-registry must proxy to the primary host's real
+  # BFF over the LAN instead of Docker DNS (see nginx/nginx.conf here).
+  ui:
+    build:
+      context: ../../ui
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8214:80"
+    # Overrides the image's baked-in nginx.conf (VEN/ui/nginx.conf, which
+    # proxies /api/vens-registry to `bff` via Docker DNS) with this node's
+    # own config that proxies to the primary host's real BFF over the LAN.
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - node2-ven-net
+
+networks:
+  node2-ven-net:
+    driver: bridge
