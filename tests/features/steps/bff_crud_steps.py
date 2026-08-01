@@ -1,3 +1,5 @@
+import time
+
 from behave import given, when, then
 from features.helpers.api_client import (
     bff_get, bff_post, bff_put, bff_delete,
@@ -110,10 +112,29 @@ def step_register_ven_without_dashboard_url(context, ven_name):
     _register_ven(ven_name, [])
 
 
+def _wait_for_ven_in_list(ven_name, timeout=12, interval=1):
+    """Poll BFF's /api/vens until ven_name shows up or timeout elapses.
+
+    The BFF caches GET /vens for CACHE_TTL_VENS (default 10s). A prior
+    scenario's list call can leave a stale cached response that predates a
+    VEN registered by this scenario, so a single fetch is not reliable —
+    retry until the cache naturally rolls over.
+    """
+    deadline = time.monotonic() + timeout
+    vens = []
+    while True:
+        r = bff_get("/api/vens")
+        r.raise_for_status()
+        vens = r.json()
+        match = next((v for v in vens if v["venName"] == ven_name), None)
+        if match is not None or time.monotonic() >= deadline:
+            return match, vens
+        time.sleep(interval)
+
+
 @then('the listed VEN "{ven_name}" has a DASHBOARD_URL attribute of "{url}"')
 def step_listed_ven_has_dashboard_url(context, ven_name, url):
-    vens = context.response.json()
-    match = next((v for v in vens if v["venName"] == ven_name), None)
+    match, vens = _wait_for_ven_in_list(ven_name)
     assert match is not None, f"VEN '{ven_name}' not in BFF VEN list"
     attrs = match.get("attributes") or []
     values = next((a["values"] for a in attrs if a["type"] == "DASHBOARD_URL"), None)
@@ -122,8 +143,7 @@ def step_listed_ven_has_dashboard_url(context, ven_name, url):
 
 @then('the listed VEN "{ven_name}" has no DASHBOARD_URL attribute')
 def step_listed_ven_has_no_dashboard_url(context, ven_name):
-    vens = context.response.json()
-    match = next((v for v in vens if v["venName"] == ven_name), None)
+    match, vens = _wait_for_ven_in_list(ven_name)
     assert match is not None, f"VEN '{ven_name}' not in BFF VEN list"
     attrs = match.get("attributes") or []
     assert all(a["type"] != "DASHBOARD_URL" for a in attrs), f"Unexpected DASHBOARD_URL in {attrs}"
