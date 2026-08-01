@@ -60,7 +60,7 @@ write. The whole store is optional: `profile.history.enabled: false` skips const
 
 `main.rs` derives `data_dir` from `PERSIST_PATH`'s parent (fallback `/data`) and opens
 `{data_dir}/history.sqlite`. `VEN/docker-compose.yml` sets `PERSIST_PATH:
-/data/state.json` per VEN and bind-mounts `./data/ven-N:/data`, so on Pi4 the files are at:
+/data/state.json` per VEN and bind-mounts `./data/ven-N:/data`, so on Node1 the files are at:
 
 ```
 /srv/docker/openadr_lab/VEN/data/ven-1/history.sqlite  (and ven-2, ven-3)
@@ -68,7 +68,7 @@ write. The whole store is optional: `profile.history.enabled: false` skips const
 
 A bind-mounted host directory (not a named Docker volume) — survives container rebuilds
 and sits directly alongside the pre-existing `state.json`, directly inspectable from the
-Pi4 host.
+Node1 host.
 
 ## Relation to [[history-store]]
 

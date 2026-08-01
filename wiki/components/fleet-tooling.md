@@ -79,12 +79,12 @@ recorder schema) Postgres schemas, then reloads
 `openleadr-rs/fixtures/test_user_credentials.sql` — replacing the manual `docker exec
 psql < fixtures.sql` step from the original setup procedure (see README.md §Setup).
 
-## Verified live on Pi4; N=10 deliberately deferred
+## Verified live on Node1; N=10 deliberately deferred
 
 A full `up 3` → `status` → idempotent second `up` (all three VENs correctly reported
 "already provisioned — skipping") → `down --purge` cycle ran clean, including real
 MILP plan generation on a fleet VEN and the per-instance jitter visible in its logs.
-Per-VEN memory is modest (13–80MB at N=3) — not the constraint. What is: this Pi4
+Per-VEN memory is modest (13–80MB at N=3) — not the constraint. What is: this Node1
 ([[deployment-topology]]) already runs roughly 20 unrelated production containers
 with only ~660MB free RAM and a load average around 3 *before* the fleet starts, and
 a single VEN's MILP solve alone briefly used 109% CPU. Concurrent solves across 10

@@ -9,7 +9,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 ## Architecture
 - [[ven-hexagonal-architecture]] — ring map, ports, enforced invariants
 - [[vtn-stack]] — openleadr-rs, PostgreSQL, dual-credential BFF, operator UI
-- [[deployment-topology]] — Pi4 docker stacks, port map, WSL dev environment
+- [[deployment-topology]] — Node1 docker stacks, port map, WSL dev environment
 - [[testing-strategy]] — four suites, VEN test pyramid, test-first and determinism rules
 
 ## Components
@@ -48,7 +48,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[hexagonal-refactoring]] — spec series 015–029, ports for testability and swappability
 - [[dto-pass-through]] — OpenADR spec field names pass through all layers unnormalised
 - [[superpowers-not-adopted]] — agentic framework evaluated 2026-06-25; only the worktree-per-feature pattern borrowed
-- [[pi4-lease-lock]] — lease lock on the Pi4 (and, via wsl_lock.sh, the shared WSL instance) serializes parallel sessions' builds/tests; why not a queue file
+- [[docker-host-lease-lock]] — lease lock on Node1 (and, via wsl_lock.sh, the shared WSL instance) serializes parallel sessions' builds/tests; why not a queue file
 
 ## Sources
 _none yet — seed pages cite repo files directly; per-document summary pages are created by `/wiki-ingest`_
@@ -63,4 +63,4 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[dso-retailer-unbundled-tariff-coordination]] — legally-unbundled DSO/retailer tariff coordination: multi-program protocol support, why an unbounded virtual DSO price is dishonest (shadows the real tariff), DLMP shadow-price duality with the envelope, regulator revenue-cap as the actual answer to "who sets the relation"
 
 ---
-Pages: 43 · Last sync: 2026-07-31 (d42dcd3..e9f5207: BL-34 session comfort curve, R-08 asset-dispatch macro refactor, R-24 injectable clock/RNG, PV generation_limit_kw rename + rated_kw/inverter_max_kw fix + nullable slider, sim-inject double-option null-clear fix, R-56 E2E coverage, Pi4 hostname rename/centralization; new query page dso-retailer-unbundled-tariff-coordination filed, coverage-gap review item resolved). Stale-backlog triage batch 1 same day: 35→22 pages, 13 cleared, 22 re-queued in review.md
+Pages: 43 · Last sync: 2026-07-31 (d42dcd3..e9f5207: BL-34 session comfort curve, R-08 asset-dispatch macro refactor, R-24 injectable clock/RNG, PV generation_limit_kw rename + rated_kw/inverter_max_kw fix + nullable slider, sim-inject double-option null-clear fix, R-56 E2E coverage, Node1 hostname rename/centralization; new query page dso-retailer-unbundled-tariff-coordination filed, coverage-gap review item resolved). Stale-backlog triage batch 1 same day: 35→22 pages, 13 cleared, 22 re-queued in review.md

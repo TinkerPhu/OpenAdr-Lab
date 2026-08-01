@@ -1,7 +1,7 @@
 # Security Concept
 
 > Scope: OpenADR-Lab — VEN, VTN BFF, VTN UI, VEN UI.
-> Deployment context: Pi4 local network; not internet-exposed. Lab/research environment.
+> Deployment context: Node1 local network; not internet-exposed. Lab/research environment.
 
 ---
 
@@ -24,7 +24,7 @@ OAuth flow handled by `openleadr-rs` (VTN side) and `VEN/src/vtn.rs` (client sid
 |---|--------|-----------|--------|------------|
 | T-1 | OAuth credentials exposed in profile YAML committed to a public repo | Medium | High | `profile.yaml` in `.gitignore`; inject via docker env in production |
 | T-2 | Malformed/malicious OpenADR events from VTN corrupting VEN state | Low | Medium | `serde` deserialization rejects unknown or type-mismatched payloads |
-| T-3 | No TLS between VEN and VTN | Low | Low | Acceptable for local lab network; add TLS if exposed beyond Pi4 |
+| T-3 | No TLS between VEN and VTN | Low | Low | Acceptable for local lab network; add TLS if exposed beyond Node1 |
 | T-4 | VEN REST API has no authentication (any local process can send commands) | Low | Low | Local network trust; acceptable for lab; add token auth before production use |
 | T-5 | Prometheus `/metrics` endpoint exposes internal counters without auth | Low | Low | Same network-isolation mitigation as T-4 |
 

@@ -55,7 +55,7 @@ Feature: Failure Recovery
   # to the base interval only takes effect on the *next* successful poll, not
   # instantly on VTN recovery. That bounded-but-longer recovery latency is the
   # deliberate backoff trade-off (never hammering a still-recovering VTN), not
-  # a regression — confirmed via a live Pi4 run where the actual wait was
+  # a regression — confirmed via a live Node1 run where the actual wait was
   # ~130-160s.
   Scenario: VEN backs off exponentially during a sustained VTN outage
     Given I create an open program "resilience-backoff-recovery" and save its ID

@@ -3,7 +3,7 @@
 kpi.py outputs (run dirs containing kpis.json).
 
 Charts are optional: import-power PNGs are rendered per run when matplotlib
-is importable, silently skipped otherwise (it isn't installed on the Pi4
+is importable, silently skipped otherwise (it isn't installed on the Node1
 host by default and the tables carry the KPIs either way).
 
 Usage:

@@ -19,7 +19,7 @@ use crate::simulator::SimState;
 
 /// Clone the `SimState` under its Mutex, logging when the lock wait was long.
 /// The clone releases the Mutex immediately — MILP solving takes 18–60s on
-/// Pi4 ARM64 and must never hold the sim lock for its duration.
+/// Node1 ARM64 and must never hold the sim lock for its duration.
 pub async fn clone_sim_snapshot(
     sim: &Arc<tokio::sync::Mutex<SimState>>,
     trigger_reason: &str,

@@ -8,7 +8,7 @@
 #   bash fleet.sh status                      # per-VEN health + VTN registration check
 #
 # Run from the repo root, directly on the docker host (matches this repo's
-# existing run_all_tests.sh / deploy-pi4 convention — no SSH wrapping here).
+# existing run_all_tests.sh / deploy-node1 convention — no SSH wrapping here).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

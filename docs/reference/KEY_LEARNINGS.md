@@ -5,10 +5,10 @@
 - Hash = SHA-256 of the exact query string between `r#"` and `"#` (whitespace matters)
 - File naming: `.sqlx/query-{hash}.json`, `hash` field inside must match
 - When modifying SQL in Rust source, must update/rename `.sqlx` cache files with new hash
-- **Preferred workflow** — generate cache on Pi4 (safest, reads the exact bytes Rust will compile):
+- **Preferred workflow** — generate cache on Node1 (safest, reads the exact bytes Rust will compile):
   1. Push Rust code changes to the fork
-  2. Pull on Pi4
-  3. Run hash script on Pi4 reading the actual `.rs` file:
+  2. Pull on Node1
+  3. Run hash script on Node1 reading the actual `.rs` file:
      ```python
      import hashlib, re, json
      with open('openleadr-vtn/src/data_source/postgres/event.rs') as f: content = f.read()
@@ -16,14 +16,14 @@
      for i, q in enumerate(queries): print(i, hashlib.sha256(q.encode()).hexdigest())
      ```
   4. Copy an existing `.sqlx/query-*.json`, update `hash` + `query` fields, save as new filename
-  5. Commit from Pi4 and push
-- **Alternative (Windows-safe)** — define SQL inline in a Python `.py` script file, run on Windows with `python gen_sqlx_cache.py`. This avoids reading the `.rs` file (avoiding CRLF/LF ambiguity) because Python string literals use `\n` (LF), matching what Rust/SQLx sees on Pi4. Verified working in Phase 17.
-- **Risk**: if the Edit tool alters whitespace inside the SQL `r#"..."#` block (e.g. strips trailing spaces), the hash changes silently and the build fails 25 min later — always verify the generated hash against what Pi4 computes
+  5. Commit from Node1 and push
+- **Alternative (Windows-safe)** — define SQL inline in a Python `.py` script file, run on Windows with `python gen_sqlx_cache.py`. This avoids reading the `.rs` file (avoiding CRLF/LF ambiguity) because Python string literals use `\n` (LF), matching what Rust/SQLx sees on Node1. Verified working in Phase 17.
+- **Risk**: if the Edit tool alters whitespace inside the SQL `r#"..."#` block (e.g. strips trailing spaces), the hash changes silently and the build fails 25 min later — always verify the generated hash against what Node1 computes
 - **Symlink note**: `openleadr-vtn/.sqlx` → `../.sqlx`. Use `.sqlx/` path for `git add`, not `openleadr-vtn/.sqlx/`
 - **When replacing a cache file**: (1) DELETE the old file (`git rm`), (2) create new file with correct hash as filename AND in `hash` field, (3) **update the `query` field** inside the JSON to match the actual current SQL text from the source. Copying an old file and only changing `hash` field leaves stale query text → SQLx "hash collision" error
 - **The `query` field inside the cache JSON must match the SQL in the `.rs` file exactly** — if it doesn't, SQLx detects the mismatch and fails
 - **Cross-platform hash verification for PRs** — when creating `.sqlx` cache files on Windows for GitHub CI (Linux), verify hashes account for CRLF→LF conversion
-- A wrong hash wastes ~25 min per rebuild cycle on Pi4
+- A wrong hash wastes ~25 min per rebuild cycle on Node1
 
 ## Windows Gotchas
 
@@ -59,7 +59,7 @@
 
 ## Playwright (E2E UI Tests)
 
-- **Playwright on Pi4 ARM64** — works with Debian-slim + `playwright install chromium --with-deps` (~300MB); Alpine won't work (needs glibc)
+- **Playwright on Node1 ARM64** — works with Debian-slim + `playwright install chromium --with-deps` (~300MB); Alpine won't work (needs glibc)
 - **MUI Select in Playwright** — `data-testid` is on hidden `<input>`; click parent div to open, then `li[role="option"]:has-text("...")` to select
 - **MUI Slider `data-testid` via `slotProps.input`** — forwards the prop to the internal `<input type="range">` in JSDOM (unit tests pass), but does NOT reliably reach the DOM `<input>` in a real Chromium browser. Use a `<Box data-testid={...}>` wrapper around the `<Slider>` instead, then scope selectors to `[data-testid="..."] input[type="range"]`
 - **MUI Slider disabled state in Playwright** — use `wait_for_selector` with CSS `:disabled` / `:not([disabled])` pseudo-classes scoped to the Box wrapper (`state="attached"` works on hidden inputs). `wait_for_function` JS polling is less reliable and harder to debug
@@ -76,7 +76,7 @@
 - **VEN poll retry logic** handles auth failures gracefully — safe to start before fixtures are loaded
 - **Don't add `ORDER BY` when application code groups results** — if rows are collected into a `HashMap` keyed by ID, DB-side ordering is redundant overhead. Remove it; the grouping logic is unaffected by row order.
 - **`Ok(sqlx::query_as!(...))` wrapper pattern** — `retrieve()` wraps the entire async chain in a single `Ok(...)`. The `)` before `?` closes `Ok(`, not just the inner expression. When inserting `.map(|e| transform(e))` or strip helpers, they go inside this chain before `?`: `Ok(query!(...).fetch_one(&db).await?.try_into().map(|e| strip(e, flag))?)`. Dropping the `Ok(` leaves a dangling `)` that causes a compile error ("unexpected closing delimiter") far from the actual deletion site
-- **`Option<T>` cannot represent tri-state PATCH bodies (absent / null / value)** — `serde_json`'s blanket `Option<T>` impl collapses a top-level JSON `null` straight to Rust `None` for *any* `T`, including `Option<serde_json::Value>`, before `T::deserialize` ever runs. A field typed `Option<serde_json::Value>` therefore cannot distinguish "key absent from the JSON body" from "key present with value `null`" — both deserialize to `None`. This silently breaks any partial-merge endpoint whose contract is "absent = no change, null = clear the field, value = set it" (e.g. `POST /sim/inject`): the null-clear branch becomes structurally unreachable via real HTTP requests, even though it looks correct in code and in tests that construct the body struct directly in Rust. Fix: use the "double option" pattern — `Option<Option<T>>` with `#[serde(default, deserialize_with = "double_option")]`, where `double_option` wraps the field in an extra `Option::deserialize` call to preserve the third state. **Regression tests for this class of bug must deserialize an actual JSON string via `serde_json::from_str`, not construct the body struct by hand** — hand construction bypasses the exact serde behavior being tested and produces a false-positive pass. (VEN `routes/sim.rs`, fixed 2026-07-31 after the bug was found live on Pi4 for `grid_export_limit_kw`/`pv_generation_limit_kw`.)
+- **`Option<T>` cannot represent tri-state PATCH bodies (absent / null / value)** — `serde_json`'s blanket `Option<T>` impl collapses a top-level JSON `null` straight to Rust `None` for *any* `T`, including `Option<serde_json::Value>`, before `T::deserialize` ever runs. A field typed `Option<serde_json::Value>` therefore cannot distinguish "key absent from the JSON body" from "key present with value `null`" — both deserialize to `None`. This silently breaks any partial-merge endpoint whose contract is "absent = no change, null = clear the field, value = set it" (e.g. `POST /sim/inject`): the null-clear branch becomes structurally unreachable via real HTTP requests, even though it looks correct in code and in tests that construct the body struct directly in Rust. Fix: use the "double option" pattern — `Option<Option<T>>` with `#[serde(default, deserialize_with = "double_option")]`, where `double_option` wraps the field in an extra `Option::deserialize` call to preserve the third state. **Regression tests for this class of bug must deserialize an actual JSON string via `serde_json::from_str`, not construct the body struct by hand** — hand construction bypasses the exact serde behavior being tested and produces a false-positive pass. (VEN `routes/sim.rs`, fixed 2026-07-31 after the bug was found live on Node1 for `grid_export_limit_kw`/`pv_generation_limit_kw`.)
 
 ## OpenADR & VTN
 
@@ -137,7 +137,7 @@
 - SSH to Pi has no interactive terminal — git credentials must be written directly to `~/.git-credentials`
 - **BFF token refresh after VTN restart** — VTN regenerates JWT keys on restart; BFF's cached OAuth token becomes stale. BFF restart needed (or wait for token refresh)
 - **Docker named volumes survive Pi power cycles** — volumes are stored in Docker's storage area on the filesystem, not in container layers. A mid-compilation crash does not corrupt them; the next build resumes incrementally with full cache hit rate
-- **Two concurrent `cargo test --workspace` on Pi4 = crash** — each Rust compile job can use 200-400 MB RAM. Two containers with default parallelism saturate 4 cores + 4 GB RAM → SSH unreachable → power cycle required. Always run `docker compose down` before `docker compose run`. Use `CARGO_BUILD_JOBS` and compose `deploy.resources.limits` as safety nets
+- **Two concurrent `cargo test --workspace` on Node1 = crash** — each Rust compile job can use 200-400 MB RAM. Two containers with default parallelism saturate 4 cores + 4 GB RAM → SSH unreachable → power cycle required. Always run `docker compose down` before `docker compose run`. Use `CARGO_BUILD_JOBS` and compose `deploy.resources.limits` as safety nets
 - **`CARGO_BUILD_JOBS=N` limits parallelism per container** — controls how many crates compile in parallel within one cargo invocation. Does not prevent multiple containers from running, but caps the damage if they do
 
 ## React / Vitest / recharts (Phase 26)
@@ -174,12 +174,12 @@
 
 ## Timeline UI (speckit 005)
 
-- **Server-side `max_points` downsampling is essential for timeline APIs** — a 3600-row ring buffer (1 sample/sec × 1 hour) sent raw to a browser chart on Pi4 ARM freezes the JS thread. Add a `max_points` parameter (default 120) and stride through the buffer with `step_by(ceil(n / max_points))`, always preserving the last point. A fresh VEN returns ~62 points; a 1-hour-old VEN returns exactly 120.
+- **Server-side `max_points` downsampling is essential for timeline APIs** — a 3600-row ring buffer (1 sample/sec × 1 hour) sent raw to a browser chart on Node1 ARM freezes the JS thread. Add a `max_points` parameter (default 120) and stride through the buffer with `step_by(ceil(n / max_points))`, always preserving the last point. A fresh VEN returns ~62 points; a 1-hour-old VEN returns exactly 120.
 - **Playwright "locator resolved to visible" with timeout = JS frozen, not missing element** — when `wait_for_selector` times out but the call log shows `locator resolved to visible`, the DOM has the element but the JS thread is blocked (CPU overload). Confirms a performance/data-size issue, not a missing testid.
 - **Rust `serde(rename_all = "snake_case")` vs TypeScript string unions** — serde produces `"switch"`, `"slider"`, `"number_input"`. If TypeScript defines `ControlKind = "Switch" | "Slider" | "NumberInput"`, all comparisons fail silently (no TS error on string union mismatch). Always verify serde output format against TS type values.
 - **Schema-driven Switch must reflect sim state, not assume false** — when a boolean override is absent from `UserOverrides`, the control should display the sim's current hardware state as its initial value. Defaulting to `Boolean(null) = false` causes a click to toggle in the wrong direction (sends `true` instead of `false`). Add a per-key sim-snapshot fallback in `getValue` for any boolean control whose absent-override semantic is "use hardware default".
 - **Stale test-ven-ui image silently runs old code** — `docker compose run --build test-runner` does NOT rebuild `test-ven-ui`. Must explicitly `docker compose build test-ven-ui` before the run whenever React source changes. The image bakes source at build time via `COPY`.
-- **Uncommitted files cause Pi4 build failure, not local failure** — TypeScript files modified locally but not staged pass local `npm test` because the dev server uses the filesystem directly. The Pi4 Docker build fails because `COPY . .` copies only committed files. Always stage and commit all changed source files before pushing and deploying.
+- **Uncommitted files cause Node1 build failure, not local failure** — TypeScript files modified locally but not staged pass local `npm test` because the dev server uses the filesystem directly. The Node1 Docker build fails because `COPY . .` copies only committed files. Always stage and commit all changed source files before pushing and deploying.
 
 ## OpenADR reportDescriptor Fields
 
@@ -217,13 +217,13 @@
 
 - **Private re-export at module boundary**: `crate::simulator::EnergyCounter` is not available because `simulator/mod.rs` uses `use energy::EnergyCounter` (private), not `pub use`. To use it from outside `simulator`, import through the public sub-module: `use crate::simulator::energy::EnergyCounter`. Before assuming a re-export exists, check whether the mod.rs line is `pub use` or just `use`.
 
-- **VEN unit tests were never run in CI**: The first `cargo test` run on Pi4 revealed multiple stale tests referencing removed types (`DeviationState`, `apply_deviation_correction`) and non-existent fields. New features should ensure unit tests run in the BDD pipeline (or a parallel cargo-test job). Test infrastructure gaps accumulate silently.
+- **VEN unit tests were never run in CI**: The first `cargo test` run on Node1 revealed multiple stale tests referencing removed types (`DeviationState`, `apply_deviation_correction`) and non-existent fields. New features should ensure unit tests run in the BDD pipeline (or a parallel cargo-test job). Test infrastructure gaps accumulate silently.
 
 - **Residual vs. raw deviation for Tier 2 triggers**: Accumulating the raw grid deviation (post-net) into a Tier 2 counter causes spurious MILP replans for transient deviations the absorber handles in real-time. Accumulate `residual_kw` (what the absorber could NOT cover) instead. The trigger becomes "absorber exhausted for N consecutive ticks" — a semantically meaningful and less noisy escalation signal.
 
 - **SSE deduplication by magnitude delta**: Emitting a `CorrectionActive` event every tick floods SSE subscribers with near-identical messages. A threshold (0.2 kW change since last emission) suppresses noise during steady-state correction. State-transition events (`CorrectionCleared`) should always be emitted regardless of magnitude — they signal a discrete change in control state.
 
-- **Docker build context includes `target/` by default**: On a Pi4 with 2.1 GB in VEN/target/, every `docker compose run --build` spent 3 minutes just sending the build context before compilation started. Fix: add `VEN/.dockerignore` with `target/`. Named volumes (`ven-cargo-target`) then keep the compiled artifacts across runs without re-sending them through the Docker socket.
+- **Docker build context includes `target/` by default**: On a Node1 with 2.1 GB in VEN/target/, every `docker compose run --build` spent 3 minutes just sending the build context before compilation started. Fix: add `VEN/.dockerignore` with `target/`. Named volumes (`ven-cargo-target`) then keep the compiled artifacts across runs without re-sending them through the Docker socket.
 
 - **EV departure guard: skipping charge curtailment, not charge addition**: The guard blocks the absorber from reducing EV charge when departure is imminent and SoC < target. It does NOT block increasing EV charge to absorb surplus. When no session exists (unknown departure), the guard is disabled — conservative assumption is that absorption takes priority. Guard only triggers for positive deviation (import excess → curtail load).
 
@@ -300,7 +300,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
 - **vitest and eslint do not typecheck — run `npm run build` before shipping UI
   changes** (Phase 4, WP4.6): a type-predicate error passed the full UI test
   suite and lint locally, then failed `tsc && vite build` inside the Docker
-  image build on Pi4, killing the E2E run before any test executed. The tsc
+  image build on Node1, killing the E2E run before any test executed. The tsc
   gate only exists in the image build unless you run it locally.
 
 - **Never pipe docker build output through `tail -1`** (Phase 4): a failed
@@ -312,7 +312,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
 - **A MILP with cost-equal integer choices is nondeterministic across builds —
   break ties in the objective** (Phase 3/4 review): shiftable-load start slots
   were only pinned by cost; the x86 HiGHS build happened to pick the earliest
-  slot while the Pi4 ARM build picked a later one, producing an E2E flake that
+  slot while the Node1 ARM build picked a later one, producing an E2E flake that
   no local run could reproduce. Any binary choice the system's observable
   behaviour depends on needs an explicit (tiny) objective bias — in BOTH
   phases of a two-phase solve, or the phase-2 epsilon budget undoes it.
@@ -362,7 +362,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
   browser can.** vite 8's rolldown bundler mis-resolved a MUI default-import
   interop in the VTN UI so the built bundle threw React #130 at runtime,
   while vitest (jsdom, unbundled modules) and `tsc` stayed fully green.
-  After any bundler/toolchain major upgrade, the Pi4 browser E2E is the
+  After any bundler/toolchain major upgrade, the Node1 browser E2E is the
   gate that matters; alternatively `vite preview` + one manual page load
   before merging. Conservative pin (vite ^7) chosen over debugging a
   brand-new bundler.
@@ -483,7 +483,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
   before the work is actually done.** Caught mid-session: the entry was
   deleted from the analysis doc's backlog right when a renumbering pass
   touched that section, before any code existed yet. Restored it and only
-  removed it again once Pi4 validation actually passed. Doc bookkeeping
+  removed it again once Node1 validation actually passed. Doc bookkeeping
   and completion are separate steps.
 - Every new struct field needs a literal-construction site audit, not just
   the `Default` impl. `HeaterParams`/`HeaterConfig` are constructed via
@@ -510,13 +510,13 @@ outes/sim.rs causes a T1+T2 double-solve race:
   watching `irradiance` drift while `power_kw` stayed pinned to the weather
   value revealed the override was clearing far sooner than its own doc
   comments assumed.
-- **`run_all_tests.sh --e2e` pulls the Pi4 checkout from `origin` before
+- **`run_all_tests.sh --e2e` pulls the Node1 checkout from `origin` before
   building — it does not test local uncommitted changes.** The first E2E
   run in this session validated `origin/main`, not the working tree with
   the heater feature in it; the PV bug found there was real but unrelated
   to what was supposedly being tested. Confirmed via `git status --branch`
-  before drawing conclusions. Use `scp` (per `.claude/skills/deploy-pi4`)
-  to test uncommitted local work against the Pi4 E2E stack instead.
+  before drawing conclusions. Use `scp` (per `.claude/skills/deploy-node1`)
+  to test uncommitted local work against the Node1 E2E stack instead.
 - A twin/preview function (`peek_pv_kw` mirroring `SimState::tick`) needs
   the same fix as its counterpart, found by grep, not by assumption — the
   equivalence test between them only catches *output* divergence for
@@ -559,7 +559,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
   `tick.rs`, initially read the raw un-merged `capacity_snap` instead —
   compiling and unit-testing fine, but silently ignoring the
   `grid_export_limit_kw` sim-inject path in production. Caught only by a
-  live Pi4 `curl` test (`POST /sim/inject` with `grid_export_limit_kw`,
+  live Node1 `curl` test (`POST /sim/inject` with `grid_export_limit_kw`,
   then `GET /capability/pv`), not by any unit test, since the unit tests
   each exercised the resolver and the capacity-composition logic
   separately, never together through the real tick path. Fixed by
@@ -627,7 +627,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
 - **`docker compose run <service>` without `--build` silently reuses the
   last-built image**, including stale test fixtures/step files `COPY`'d in
   at build time — it is not a bind mount. Two verification cycles wasted
-  scp'ing a fix to the Pi4 host filesystem and rerunning, without noticing
+  scp'ing a fix to the Node1 host filesystem and rerunning, without noticing
   the container's behavior hadn't changed at all. Always pass `--build`
   when verifying a fix to Dockerfile-`COPY`'d files.
 - **An E2E assertion that "happens to pass" isn't the same as an
@@ -644,7 +644,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
   direct manual repro (`/sim/inject` + `/plan` fetch, bypassing behave)
   before narrowing the assertion — verify a suspected over-broad assertion
   against real solver output, don't just guess and weaken it.
-- Pi4 is shared with other active sessions; host load spikes to 7-8 are
+- Node1 is shared with other active sessions; host load spikes to 7-8 are
   real and cause genuine timeouts on scenarios that are otherwise correct.
   Before concluding a timeout is a regression, check `uptime`/`ps aux
   --sort=-%cpu` for concurrent load, and rerun the specific failing
@@ -742,30 +742,30 @@ outes/sim.rs causes a T1+T2 double-solve race:
   coefficient values) found the real threshold faster and more reliably than deriving it
   by hand from the objective's listed terms.
 
-## Pi4 Operational Gotchas (BL-41 final verification, 2026-08-01)
+## Node1 Operational Gotchas (BL-41 final verification, 2026-08-01)
 
-- **Never wrap `pi4_lock.sh` in an outer `ssh Pi4 "..."` call.** The script does its own
-  internal `ssh "$PI4_HOST"` round-trip so the lock check/mutate runs atomically
-  server-side. Nesting it (running it from inside a shell already SSH'd into Pi4) makes
-  Pi4 try to SSH to itself via the alias `Pi4` — an alias that only exists in the
-  *local* machine's `~/.ssh/config`, not on Pi4 — producing intermittent, confusing
+- **Never wrap `docker_host_lock.sh` in an outer `ssh Node1 "..."` call.** The script does its own
+  internal `ssh "$LOCK_TARGET_HOST"` round-trip so the lock check/mutate runs atomically
+  server-side. Nesting it (running it from inside a shell already SSH'd into Node1) makes
+  Node1 try to SSH to itself via the alias `Node1` — an alias that only exists in the
+  *local* machine's `~/.ssh/config`, not on Node1 — producing intermittent, confusing
   "Host key verification failed" errors that look like a real host-key problem but
-  aren't. Always run `pi4_lock.sh` directly from the local worktree.
-- **A long-running detached Pi4 test suite can be silently killed by an unattended
-  reboot**, not just by the local session's background-task lifecycle. Pi4 rebooted
+  aren't. Always run `docker_host_lock.sh` directly from the local worktree.
+- **A long-running detached Node1 test suite can be silently killed by an unattended
+  reboot**, not just by the local session's background-task lifecycle. Node1 rebooted
   twice unprompted during one session (likely `unattended-upgrades`), each time wiping
-  `/tmp` (killing the `nohup`-launched suite's log *and* `pi4_lock`'s lock file — the
+  `/tmp` (killing the `nohup`-launched suite's log *and* `docker_host_lock`'s lock file — the
   next acquire has to be a fresh `acquire`, not `refresh`, since the lease is gone).
   Detect via `uptime` or a kernel-version change in restarted containers' startup logs,
   not any explicit error. Always wait for an explicit `ALL_DONE` marker before trusting a
   background run finished, and check `ps aux`/`docker ps` for orphaned duplicate
   `docker compose` process trees after any resume — both a reboot and a locally-killed
   wrapper leave the remote side able to keep running (or half-running) undetected.
-- **Pi4's mDNS name is `pi4.local`** (lowercase, explicit `host-name=pi4` in
+- **Node1's mDNS name is `node1.local`** (lowercase, explicit `host-name=node1` in
   `/etc/avahi/avahi-daemon.conf` — Avahi otherwise falls back to the static hostname
-  `Pi4` → `Pi4.local`, capitalized). Older docs/journal entries said `pi4server.local`,
-  a fossil from a hostname the box had before an earlier rename to `Pi4`; `/etc/hosts`
-  still carried two matching stale `127.0.1.1` lines (`TinkerPi`, `pi4server`) that
+  `Node1` → `Node1.local`, capitalized). Older docs/journal entries said `node1server.local`,
+  a fossil from a hostname the box had before an earlier rename to `Node1`; `/etc/hosts`
+  still carried two matching stale `127.0.1.1` lines (`old-tinker`, `node1server`) that
   never got cleaned up at rename time. `nslookup name.local` will report "non-existent
   domain" even when the name is fine — `nslookup` only queries regular DNS, not mDNS;
   verify `.local` names with `curl`/a browser instead.

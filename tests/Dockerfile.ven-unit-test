@@ -6,9 +6,9 @@
 #
 # Compiled artifacts live in named Docker volumes (see compose file), so
 # only changed files are recompiled on each run. First run is slow (~20 min
-# on Pi4 ARM64 — HiGHS + aws-lc-rs C++ builds); subsequent runs are ~1-2 min.
+# on Node1 ARM64 — HiGHS + aws-lc-rs C++ builds); subsequent runs are ~1-2 min.
 #
-# Usage (on Pi4):
+# Usage (on Node1):
 #   cd /srv/docker/openadr_lab
 #   docker compose -f tests/docker-compose.ven-unit-test.yml run --build --rm ven-unit-test
 ###############################################################################
@@ -31,7 +31,7 @@ WORKDIR /app
 
 COPY . .
 
-# Keep parallelism low to avoid OOM linker failures on Pi4
+# Keep parallelism low to avoid OOM linker failures on Node1
 # (linking HiGHS + aws-lc-rs simultaneously exceeds 1500 MiB).
 ENV CARGO_BUILD_JOBS=2
 ENV RUST_BACKTRACE=1

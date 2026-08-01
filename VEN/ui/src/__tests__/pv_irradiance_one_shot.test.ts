@@ -7,10 +7,10 @@
  *   so the offset decays from that moment forward.
  *
  * Requires a running VEN instance.  Set VITE_VEN_URL to point at it, or let it
- * default to Pi4's real LAN address.  The suite is skipped automatically when
+ * default to Node1's real LAN address.  The suite is skipped automatically when
  * the VEN is unreachable so CI stays green without a live server.
  *
- * Uses the IP, not the "Pi4" hostname: "Pi4" is only an SSH client alias
+ * Uses the IP, not the "Node1" hostname: "Node1" is only an SSH client alias
  * (~/.ssh/config), not a real DNS/hosts entry, so Node's getaddrinfo can't
  * reliably resolve it (falls back to unreliable Windows LLMNR/NetBIOS
  * broadcast resolution, which flakes independently on every call).

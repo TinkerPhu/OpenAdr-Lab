@@ -24,7 +24,7 @@ and open remainders (the S-1…S-6 experiment run, persona re-run) tracked in
   all four suites green → PR to `main`, rebase + fast-forward merge.
 - **Gates before merge:** `cargo fmt --check`, `cargo clippy -- -D warnings`,
   `cargo audit`, `scripts/audit_file_sizes.py` (tasks/ ≤ 200, VEN/src/ ≤ 500
-  production lines), E2E green on Pi4.
+  production lines), E2E green on Node1.
 - **Test pyramid (VEN Rust):** Domain → Use-case → Adapter-contract → Integration;
   mocks in `VEN/src/services/test_support/`; naming `test_<function>_<scenario>`.
 - **Architecture:** hexagonal ring rules from `.claude/CLAUDE.md` (ven-architecture);
@@ -32,7 +32,7 @@ and open remainders (the S-1…S-6 experiment run, persona re-run) tracked in
   an inner ring. Every time-dependent module takes an **injectable clock**.
 - **Naming:** physical quantities carry unit suffixes (`power_kw`, `soc_pct`,
   `tariff_eur_per_kwh`).
-- **Builds:** `wsl cargo …` locally; full HiGHS runs via Pi4 docker.
+- **Builds:** `wsl cargo …` locally; full HiGHS runs via Node1 docker.
 - **Bookkeeping at phase end:** update `docs/BACKLOG.md` (mark items resolved),
   `docs/history/project_journal.md` entry, `docs/reference/KEY_LEARNINGS.md` if any,
   `/wiki-sync`, and re-check `docs/reference/TECHNICAL_DEBTS.md` for items touched.

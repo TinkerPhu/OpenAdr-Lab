@@ -3,10 +3,10 @@
 #
 # Named volumes (ven-cargo-registry, ven-cargo-git, ven-cargo-target) cache
 # compiled artifacts between runs. First run compiles everything from scratch
-# (~20 min on Pi4 ARM64 due to HiGHS + aws-lc-rs C++ builds); subsequent
+# (~20 min on Node1 ARM64 due to HiGHS + aws-lc-rs C++ builds); subsequent
 # runs only recompile changed files (~1-2 min).
 #
-# Usage (on Pi4):
+# Usage (on Node1):
 #   cd /srv/docker/openadr_lab
 #   docker compose -f tests/docker-compose.ven-unit-test.yml run --build --rm ven-unit-test
 #   docker compose -f tests/docker-compose.ven-unit-test.yml down

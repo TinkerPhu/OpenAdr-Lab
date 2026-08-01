@@ -33,7 +33,7 @@ The existing skill stack already covers ~80 % of what Superpowers provides:
   determinism) already constrain agent behaviour heavily.
 
 The one concrete gain is **worktree isolation per feature** — given the
-Pi4 dependency for full test runs (see [[testing-strategy]]) and
+Node1 dependency for full test runs (see [[testing-strategy]]) and
 DCO/CI discipline, a clean
 worktree per feature reduces accidental cross-contamination between
 concurrent features. This pattern is used (see `worktrees/`), without the

@@ -80,7 +80,7 @@ see [[milp-over-greedy]].
   (`controller/solver_port.rs`), not `run_planner()` directly — `MilpSolver`
   (`milp_planner/mod.rs`) is the real implementation, and `services::PlanningService::solve_plan`
   is the only caller of `SolverPort::solve`. The actual HiGHS call still runs inside
-  `spawn_blocking` (MILP solving takes 18–60 s on Pi4; the sim mutex is cloned and
+  `spawn_blocking` (MILP solving takes 18–60 s on Node1; the sim mutex is cloned and
   released first) — the port adds a swappable seam, not a different execution model.
 - **Cross-asset interactions** (`controller/milp_interactions.rs`): pluggable
   `AssetInteraction` objects add coupled terms — `BatEvCoexist` (McCormick-linearised

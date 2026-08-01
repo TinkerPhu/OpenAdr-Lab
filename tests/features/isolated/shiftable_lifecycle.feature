@@ -1,5 +1,5 @@
 Feature: Shiftable Load Lifecycle — isolated scenarios
-  # Scenarios that require a clean VEN state due to timing sensitivity on Pi4.
+  # Scenarios that require a clean VEN state due to timing sensitivity on Node1.
   # These pass reliably in isolation but can hit poll_until timeouts when run at
   # the end of the full suite under resource contention.
 
@@ -25,10 +25,10 @@ Feature: Shiftable Load Lifecycle — isolated scenarios
   # lands mid-slot (aligned-now offset, see note above); the earliest-start
   # tie-break keeps the start in slot 0.
   #
-  # Timing note: appearance in /sim takes ~125–150s on Pi4 (plan cycle → MILP
+  # Timing note: appearance in /sim takes ~125–150s on Node1 (plan cycle → MILP
   # solve → adopt → dispatch tick), then a 1-min run + auto-complete detection.
   # The poll_until timeouts were raised (appears 240s, disappears 150s) so this
-  # is no longer marginal against the inherent Pi4 latency. Not a code bug.
+  # is no longer marginal against the inherent Node1 latency. Not a code bug.
 
   @slow @isolated
   Scenario: Shiftable load auto-completes and disappears from GET /sim

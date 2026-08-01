@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Standalone failure-recovery test script.
-# Run from the repo root on Pi4:
+# Run from the repo root on Node1:
 #   bash tests/failure_recovery_test.sh
 #
 # Tests VTN restart, VEN restart, and DB outage recovery.
