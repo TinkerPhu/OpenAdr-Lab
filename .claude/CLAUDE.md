@@ -1,4 +1,7 @@
-docker: docker runs on ssh Pi4. run all tasks with docker on Pi4 via ssh in directory /srv/docker/openadr_lab.
+docker: docker runs on ssh Pi4 (primary — VTN, its DB, BFF, VTN UI, and the main VEN
+docker-compose stack) or ssh Po4 (secondary — ven-4 + build/test offload, see
+VEN/scale_out/node2/). Run tasks with docker on the intended host via ssh in
+directory /srv/docker/openadr_lab (same path on both hosts).
 
 pi4-lock: the Pi4 is shared between multiple parallel sessions/worktrees. Before ANY
 docker build or test run on Pi4, acquire the lease lock and hold it for the
@@ -14,6 +17,15 @@ extends from now if a run overshoots. `status` shows holder, task, and lease end
 user if the lock stays held unusually long instead of bypassing it. run_all_tests.sh
 acquires/releases the lock automatically (-l 180) for remote docker suites. Never run
 docker commands on the Pi4 while another owner holds an unexpired lock.
+
+po4-lock: Po4 (192.168.1.104) is a second docker host, used to take build/test load
+off Pi4. It shares the same lock script and mechanism as Pi4 (pi4_lock.sh isn't
+Pi4-specific despite the name — the lock file is derived from the target host, so
+each host gets its own independent lock). Set PI4_LOCK_HOST=Po4 to target it
+directly, or run `DOCKER_HOST=Po4 bash run_all_tests.sh ...`, which sets this
+automatically. Pi4 and Po4 can be used concurrently by different sessions without
+contention, since each holds its own lock. Same lease semantics and default
+(60min) as Pi4.
 
 local-rust: WSL is installed on this Windows machine. Use `wsl cargo check` (or `wsl cargo test`) inside the VEN directory for local Rust compilation instead of native Windows cargo, which lacks cmake/HiGHS. For a full test run including HiGHS, use the Pi4 docker stack.
 
@@ -107,6 +119,7 @@ build:
   local UI       : cd VEN/ui && npm run build  |  cd VTN/ui && npm run build
   Pi4 docker     : ssh Pi4 "cd /srv/docker/openadr_lab && docker compose build"
   Pi4 single svc : ssh Pi4 "cd /srv/docker/openadr_lab && docker compose build ven"
+  Po4 docker     : ssh Po4 "cd /srv/docker/openadr_lab && docker compose build"
   Always use wsl for Rust compilation — native Windows cargo lacks cmake/HiGHS.
   CI: .github/workflows/ holds three workflows — pre-pr-checks-splittasks.yml
   (fmt/clippy/audit/DCO on PR), file_size_audit-splittasks.yml (scripts/audit_file_sizes.py
