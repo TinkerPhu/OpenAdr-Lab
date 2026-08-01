@@ -25,6 +25,10 @@
 #     on a lock you own.
 #   - Host: PI4_LOCK_HOST overrides for this script only; OPENADR_LAB_HOST is
 #     the shared default (also used by run_all_tests.sh); falls back to "Pi4".
+#     This script isn't Pi4-specific despite the filename — it works against
+#     any docker host reachable the same way (e.g. PI4_LOCK_HOST=Po4). The
+#     lock file's name is derived from the host, so each host gets its own
+#     independent lock automatically.
 #
 set -euo pipefail
 
@@ -45,9 +49,9 @@ usage() { sed -n '2,25p' "$0"; exit 1; }
 remote_op() { # $1=op  $2=description
     # printf %q: ssh joins remote-command args with spaces, so multi-word
     # descriptions must be shell-escaped to survive the remote word split.
-    ssh "$PI4_HOST" bash -s -- $(printf '%q %q %q %q' "$1" "$OWNER" "$LEASE_MIN" "${2:-}") <<'REMOTE'
-op="$1"; owner="$2"; lease_min="$3"; desc="$4"
-lock="/tmp/openadr_pi4.lock"
+    ssh "$PI4_HOST" bash -s -- $(printf '%q %q %q %q %q' "$1" "$OWNER" "$LEASE_MIN" "${2:-}" "$PI4_HOST") <<'REMOTE'
+op="$1"; owner="$2"; lease_min="$3"; desc="$4"; host="$5"
+lock="/tmp/openadr_$(echo "$host" | tr '[:upper:]' '[:lower:]').lock"
 now=$(date +%s)
 expiry=$(( now + lease_min * 60 ))
 write_owner() { printf '%s\n%s\n%s\n' "$owner" "$expiry" "$desc" > "$lock/owner"; }
