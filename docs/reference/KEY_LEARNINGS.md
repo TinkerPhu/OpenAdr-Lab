@@ -741,3 +741,31 @@ outes/sim.rs causes a T1+T2 double-solve race:
   on the actual solved output (a handful of `cargo test -- --nocapture` runs at different
   coefficient values) found the real threshold faster and more reliably than deriving it
   by hand from the objective's listed terms.
+
+## Pi4 Operational Gotchas (BL-41 final verification, 2026-08-01)
+
+- **Never wrap `pi4_lock.sh` in an outer `ssh Pi4 "..."` call.** The script does its own
+  internal `ssh "$PI4_HOST"` round-trip so the lock check/mutate runs atomically
+  server-side. Nesting it (running it from inside a shell already SSH'd into Pi4) makes
+  Pi4 try to SSH to itself via the alias `Pi4` — an alias that only exists in the
+  *local* machine's `~/.ssh/config`, not on Pi4 — producing intermittent, confusing
+  "Host key verification failed" errors that look like a real host-key problem but
+  aren't. Always run `pi4_lock.sh` directly from the local worktree.
+- **A long-running detached Pi4 test suite can be silently killed by an unattended
+  reboot**, not just by the local session's background-task lifecycle. Pi4 rebooted
+  twice unprompted during one session (likely `unattended-upgrades`), each time wiping
+  `/tmp` (killing the `nohup`-launched suite's log *and* `pi4_lock`'s lock file — the
+  next acquire has to be a fresh `acquire`, not `refresh`, since the lease is gone).
+  Detect via `uptime` or a kernel-version change in restarted containers' startup logs,
+  not any explicit error. Always wait for an explicit `ALL_DONE` marker before trusting a
+  background run finished, and check `ps aux`/`docker ps` for orphaned duplicate
+  `docker compose` process trees after any resume — both a reboot and a locally-killed
+  wrapper leave the remote side able to keep running (or half-running) undetected.
+- **Pi4's mDNS name is `pi4.local`** (lowercase, explicit `host-name=pi4` in
+  `/etc/avahi/avahi-daemon.conf` — Avahi otherwise falls back to the static hostname
+  `Pi4` → `Pi4.local`, capitalized). Older docs/journal entries said `pi4server.local`,
+  a fossil from a hostname the box had before an earlier rename to `Pi4`; `/etc/hosts`
+  still carried two matching stale `127.0.1.1` lines (`TinkerPi`, `pi4server`) that
+  never got cleaned up at rename time. `nslookup name.local` will report "non-existent
+  domain" even when the name is fine — `nslookup` only queries regular DNS, not mDNS;
+  verify `.local` names with `curl`/a browser instead.
