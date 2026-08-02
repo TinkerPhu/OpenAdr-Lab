@@ -70,6 +70,21 @@ describe("mergeVens", () => {
     expect(merged[DEFAULT_VENS.length].url).toBe("/api/dyn/ven-4");
   });
 
+  it("sorts extras by natural (numeric) order, not lexicographic string order", () => {
+    // Node2 fleet ven-4..ven-13: plain string sort puts "ven-10".."ven-13"
+    // before "ven-4".."ven-9" (lexicographic: "1" < "4"). Natural sort must
+    // compare the numeric suffix numerically so the dropdown reads 4..13.
+    const merged = mergeVens(DEFAULT_VENS, [
+      { venName: "ven-13" },
+      { venName: "ven-4" },
+      { venName: "ven-10" },
+      { venName: "ven-9" },
+      { venName: "ven-5" },
+    ]);
+    const extras = merged.slice(DEFAULT_VENS.length).map((v) => v.venName);
+    expect(extras).toEqual(["ven-4", "ven-5", "ven-9", "ven-10", "ven-13"]);
+  });
+
   it("combines PERSONA label with a DASHBOARD_URL route (BL-41)", () => {
     const merged = mergeVens(DEFAULT_VENS, [
       { venName: "ven-4", persona: "eco", dashboardUrl: "http://192.168.1.104:8211" },
