@@ -37,6 +37,26 @@ export const DEFAULT_VENS: VenEntry[] = [
   { label: "ven-3", url: import.meta.env.VITE_VEN_3_URL || "/api/ven-3", venName: "ven-3" },
 ];
 
+/** Natural-order string comparator: numeric runs compare by value, not digit
+ * by digit, so "ven-4" sorts before "ven-10" (plain string/localeCompare
+ * sort puts "ven-10".."ven-13" before "ven-4".."ven-9" instead). */
+function naturalCompare(a: string, b: string): number {
+  const split = (s: string) => s.match(/\d+|\D+/g) ?? [];
+  const aParts = split(a);
+  const bParts = split(b);
+  const len = Math.max(aParts.length, bParts.length);
+  for (let i = 0; i < len; i++) {
+    const ap = aParts[i] ?? "";
+    const bp = bParts[i] ?? "";
+    if (ap === bp) continue;
+    const an = Number(ap);
+    const bn = Number(bp);
+    if (!Number.isNaN(an) && !Number.isNaN(bn) && ap !== "" && bp !== "") return an - bn;
+    return ap < bp ? -1 : 1;
+  }
+  return 0;
+}
+
 /** Defaults first (their static nginx routes keep working unchanged), then
  * discovered extras deduped, sorted, and mapped onto the dynamic route.
  * WP4.5: a persona tag shows in the label — `fleet-ven-003 (eco)`. */
@@ -47,7 +67,7 @@ export function mergeVens(defaults: VenEntry[], discovered: DiscoveredVen[]): Ve
     if (!known.has(d.venName) && !byName.has(d.venName)) byName.set(d.venName, d);
   }
   const extras = [...byName.values()]
-    .sort((a, b) => a.venName.localeCompare(b.venName))
+    .sort((a, b) => naturalCompare(a.venName, b.venName))
     .map(({ venName, persona, dashboardUrl }) => ({
       label: persona ? `${venName} (${persona})` : venName,
       url: dashboardUrl ?? `/api/dyn/${venName}`,
