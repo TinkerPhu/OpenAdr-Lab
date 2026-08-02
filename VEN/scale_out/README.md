@@ -25,10 +25,11 @@ top-level directory (next to `VEN/`/`VTN/`) would wrongly suggest otherwise.
 
 ## What a `nodeN/` directory contains
 
-Using `node2/` (currently `Node2`, 192.168.1.104, running `ven-4`, administered
-by the primary host's VTN — currently `Node1`, 192.168.1.103 — over the real
-LAN, since a second machine can't join the primary host's Docker network or
-resolve `vtn`/`bff` by Docker DNS) as the concrete example:
+Using `node2/` (currently `Node2`, 192.168.1.104, running `ven-4` through
+`ven-13` — 10 VENs with varied asset mixes, see `VEN/profiles/ven-{4..13}.yaml`
+— administered by the primary host's VTN — currently `Node1`, 192.168.1.103 —
+over the real LAN, since a second machine can't join the primary host's
+Docker network or resolve `vtn`/`bff` by Docker DNS) as the concrete example:
 
 - `docker-compose.yml` — the VEN + `ui` services for that host, adapted from
   `VEN/docker-compose.yml`'s `ven-1`/`ui` pattern. Build contexts point back
@@ -44,14 +45,16 @@ resolve `vtn`/`bff` by Docker DNS) as the concrete example:
   `ui` service's `volumes:` in `docker-compose.yml`) rather than baked in at
   build time, so each node's UI keeps using `VEN/ui`'s own Dockerfile/build
   unmodified.
-- `data/` — gitignored (`**/data/` in the repo's `.gitignore`), holds the
-  VEN's persisted state (`state.json`). The VEN container's `nonroot` user is
+- `data/` — gitignored (`**/data/` in the repo's `.gitignore`), holds each
+  VEN's persisted state (`state.json`), one subdir per VEN (e.g.
+  `data/ven-4/`, `data/ven-5/`, ...). The VEN container's `nonroot` user is
   uid/gid 2000:2000; a plain `mkdir -p` creates this as 1000:1000 — run
   `chown -R 2000:2000 data/<ven-name>` before the first `docker compose up`.
 
-Each node's VEN profile (asset mix/physics) lives at `VEN/profiles/`
-alongside the primary trio (e.g. `ven-4.yaml`), not inside `nodeN/` —
-profiles are VEN-application config, independent of which host runs them.
+Each node's VEN profiles (asset mix/physics) live at `VEN/profiles/`
+alongside the primary trio (e.g. `ven-4.yaml`..`ven-13.yaml`), not inside
+`nodeN/` — profiles are VEN-application config, independent of which host
+runs them.
 
 ## Bringing a node up on a fresh host
 

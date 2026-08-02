@@ -294,6 +294,27 @@ VENS_TO_PROVISION = [
     # on same-host Docker DNS (see _ensure_dashboard_url_attribute below).
     {"ven_name": "ven-4", "client_id": "ven-4", "client_secret": "ven-4", "user_ref": "ven-4-user",
      "dashboard_url": "http://192.168.1.104:8211"},
+    # ven-5..ven-13: 9 more VENs on Node2 (same LAN-reachability reasoning as
+    # ven-4 above), rounding out a 10-VEN, mixed-asset Node2 fleet — see
+    # VEN/profiles/ven-{5..13}.yaml for each instance's asset mix.
+    {"ven_name": "ven-5", "client_id": "ven-5", "client_secret": "ven-5", "user_ref": "ven-5-user",
+     "dashboard_url": "http://192.168.1.104:8215"},
+    {"ven_name": "ven-6", "client_id": "ven-6", "client_secret": "ven-6", "user_ref": "ven-6-user",
+     "dashboard_url": "http://192.168.1.104:8216"},
+    {"ven_name": "ven-7", "client_id": "ven-7", "client_secret": "ven-7", "user_ref": "ven-7-user",
+     "dashboard_url": "http://192.168.1.104:8217"},
+    {"ven_name": "ven-8", "client_id": "ven-8", "client_secret": "ven-8", "user_ref": "ven-8-user",
+     "dashboard_url": "http://192.168.1.104:8218"},
+    {"ven_name": "ven-9", "client_id": "ven-9", "client_secret": "ven-9", "user_ref": "ven-9-user",
+     "dashboard_url": "http://192.168.1.104:8219"},
+    {"ven_name": "ven-10", "client_id": "ven-10", "client_secret": "ven-10", "user_ref": "ven-10-user",
+     "dashboard_url": "http://192.168.1.104:8220"},
+    {"ven_name": "ven-11", "client_id": "ven-11", "client_secret": "ven-11", "user_ref": "ven-11-user",
+     "dashboard_url": "http://192.168.1.104:8221"},
+    {"ven_name": "ven-12", "client_id": "ven-12", "client_secret": "ven-12", "user_ref": "ven-12-user",
+     "dashboard_url": "http://192.168.1.104:8222"},
+    {"ven_name": "ven-13", "client_id": "ven-13", "client_secret": "ven-13", "user_ref": "ven-13-user",
+     "dashboard_url": "http://192.168.1.104:8223"},
 ]
 
 
