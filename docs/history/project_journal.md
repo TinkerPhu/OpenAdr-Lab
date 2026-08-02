@@ -7529,3 +7529,36 @@ text (a project journal, key-learnings doc) need a manual review pass on top, si
 personal-name fragments and typo'd duplicate words don't follow a clean pattern the
 regex can catch.
 
+## Node2 fleet grown to 10 VENs (ven-4..ven-13)
+
+**Why**: exercise the fleet/scale-out machinery at a larger, more realistic size and
+give the planner/BFF/dashboard a richer population of VENs to aggregate over — one
+lone `ven-4` on Node2 wasn't representative of a real deployment. Requested mix:
+~50% of Node2 VENs have PV, ~60% of the PV VENs also have a battery, plus at least
+one minimal (few-asset) and one maximal (all-asset) instance.
+
+**What was done**: added `ven-5`..`ven-13` (9 new VEN instances) as services in
+`VEN/scale_out/node2/docker-compose.yml`, copy-pasted from the existing `ven-4`
+service block with only `CLIENT_ID`/`CLIENT_SECRET`/`VEN_NAME`/port/volumes varying
+per instance (ports `8215`..`8223`, sequential from `ven-4`'s `8211` and `ui`'s
+`8214`). Each gets its own hand-authored profile under `VEN/profiles/ven-{5..13}.yaml`,
+following the existing `ven-1`..`ven-4` template shape (asset list + simulator +
+planner + optional `weather_pv` block). Asset mix across the 10 Node2 VENs
+(`ven-4..ven-13`): PV = {4,5,6,7,8} = 5/10 (50%); of those, battery = {4,5,6} = 3/5
+(60%) — matches the request exactly. `ven-5` has all four asset types (PV + battery +
+EV + heater) as the maximal instance; `ven-9` has only `base_load` as the minimal
+instance. Extended `VENS_TO_PROVISION` in `scripts/seed_vtn.py` with the 9 new
+entries, each with its own `DASHBOARD_URL` attribute (BL-41 pattern — Node2 VENs
+aren't reachable via Docker DNS from the VTN/BFF host, so each advertises its own
+LAN origin). Updated `VEN/scale_out/README.md` to describe the now-10-VEN Node2
+fleet instead of the lone `ven-4`. Deployment (bringing the containers up on Node2,
+provisioning via `seed_vtn.py`) was intentionally left for a follow-up session/host
+access, not done as part of authoring these files.
+
+**Key learning**: hand-authoring 9 near-identical Docker Compose service blocks is
+pure copy-paste boilerplate (`fleet.sh`/`gen_fleet_profiles.py` would generate this,
+but assumes same-host Docker DNS to the VTN and isn't LAN-aware like `ven-4`'s
+pattern) — if a third scale-out host or a much larger Node2 fleet is ever needed,
+that generator is worth extending with a LAN-mode flag rather than repeating this
+by hand again.
+

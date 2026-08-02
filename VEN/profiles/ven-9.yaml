@@ -1,0 +1,21 @@
+# VEN-9: Minimal household — base load only, no controllable assets
+# Runs on a second physical host (VEN/scale_out/node2/ — see that
+# directory's README.md for why), not the primary VTN host.
+assets:
+  - type: base_load
+    id: base_load
+    baseline_kw: 0.5
+
+simulator:
+  tick_s: 1
+  persist_every_s: 15
+  report_interval_s: 60
+
+planner:
+  plan_zones:
+    - step_s: 300
+      slots: 96   # 8 h at 5-min resolution
+    - step_s: 600
+      slots: 96   # 16 h at 10-min resolution
+    - step_s: 900
+      slots: 96   # 24 h at 15-min resolution

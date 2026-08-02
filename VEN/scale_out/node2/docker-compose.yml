@@ -1,5 +1,5 @@
 ###############################################################################
-# ven-4 — a VEN instance running on a second physical host ("node2")
+# ven-4..ven-13 — VEN instances running on a second physical host ("node2")
 #
 # This is a horizontal scale-out deployment: the same VEN application as
 # VEN/docker-compose.yml (ven-1/2/3), but running on a different machine
@@ -8,14 +8,19 @@
 # by Docker DNS — it reaches the primary host over the real LAN instead
 # (see PRIMARY_HOST_LAN_IP in .env).
 #
+# ven-5..ven-13 follow ven-4's shape exactly (same env var set, same
+# network, same LAN-based VTN/weather access) — only CLIENT_ID/CLIENT_SECRET/
+# VEN_NAME/port/volumes differ per instance. See VEN/profiles/ven-{5..13}.yaml
+# for each instance's asset mix (PV/battery/EV/heater vary per VEN).
+#
 # Prerequisites:
 #   - The primary host's VTN + BFF must be running and reachable on the LAN
-#   - ven-4's OAuth credentials must be provisioned in the VTN
+#   - Each VEN's OAuth credentials must be provisioned in the VTN
 #     (scripts/seed_vtn.py — idempotent, safe to rerun)
 #
 # Usage:
-#   docker compose up -d --build ven-4 ui
-#   curl http://localhost:8211/health
+#   docker compose up -d --build ven-4 ven-5 ven-6 ven-7 ven-8 ven-9 ven-10 ven-11 ven-12 ven-13 ui
+#   curl http://localhost:8211/health   # ven-4; ven-5..13 are 8215..8223
 ###############################################################################
 
 services:
@@ -45,6 +50,294 @@ services:
     volumes:
       - ./data/ven-4:/data
       - ../../profiles/ven-4.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - node2-ven-net
+
+  ven-5:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8215:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      CLIENT_ID: "ven-5"
+      CLIENT_SECRET: "ven-5"
+      VEN_NAME: "ven-5"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+      WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      WEATHER_MQTT_SITE_ID: "zunzgen"
+    volumes:
+      - ./data/ven-5:/data
+      - ../../profiles/ven-5.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - node2-ven-net
+
+  ven-6:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8216:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      CLIENT_ID: "ven-6"
+      CLIENT_SECRET: "ven-6"
+      VEN_NAME: "ven-6"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+      WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      WEATHER_MQTT_SITE_ID: "zunzgen"
+    volumes:
+      - ./data/ven-6:/data
+      - ../../profiles/ven-6.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - node2-ven-net
+
+  ven-7:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8217:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      CLIENT_ID: "ven-7"
+      CLIENT_SECRET: "ven-7"
+      VEN_NAME: "ven-7"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+      WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      WEATHER_MQTT_SITE_ID: "zunzgen"
+    volumes:
+      - ./data/ven-7:/data
+      - ../../profiles/ven-7.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - node2-ven-net
+
+  ven-8:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8218:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      CLIENT_ID: "ven-8"
+      CLIENT_SECRET: "ven-8"
+      VEN_NAME: "ven-8"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+      WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      WEATHER_MQTT_SITE_ID: "zunzgen"
+    volumes:
+      - ./data/ven-8:/data
+      - ../../profiles/ven-8.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - node2-ven-net
+
+  ven-9:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8219:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      CLIENT_ID: "ven-9"
+      CLIENT_SECRET: "ven-9"
+      VEN_NAME: "ven-9"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+      WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      WEATHER_MQTT_SITE_ID: "zunzgen"
+    volumes:
+      - ./data/ven-9:/data
+      - ../../profiles/ven-9.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - node2-ven-net
+
+  ven-10:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8220:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      CLIENT_ID: "ven-10"
+      CLIENT_SECRET: "ven-10"
+      VEN_NAME: "ven-10"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+      WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      WEATHER_MQTT_SITE_ID: "zunzgen"
+    volumes:
+      - ./data/ven-10:/data
+      - ../../profiles/ven-10.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - node2-ven-net
+
+  ven-11:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8221:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      CLIENT_ID: "ven-11"
+      CLIENT_SECRET: "ven-11"
+      VEN_NAME: "ven-11"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+      WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      WEATHER_MQTT_SITE_ID: "zunzgen"
+    volumes:
+      - ./data/ven-11:/data
+      - ../../profiles/ven-11.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - node2-ven-net
+
+  ven-12:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8222:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      CLIENT_ID: "ven-12"
+      CLIENT_SECRET: "ven-12"
+      VEN_NAME: "ven-12"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+      WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      WEATHER_MQTT_SITE_ID: "zunzgen"
+    volumes:
+      - ./data/ven-12:/data
+      - ../../profiles/ven-12.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - node2-ven-net
+
+  ven-13:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8223:8080"
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://${PRIMARY_HOST_LAN_IP:-192.168.1.103}:8200"
+      CLIENT_ID: "ven-13"
+      CLIENT_SECRET: "ven-13"
+      VEN_NAME: "ven-13"
+      POLL_EVENTS_SECS: "30"
+      POLL_PROGRAMS_SECS: "300"
+      PERSIST_PATH: "/data/state.json"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+      WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
+      WEATHER_MQTT_SITE_ID: "zunzgen"
+    volumes:
+      - ./data/ven-13:/data
+      - ../../profiles/ven-13.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
