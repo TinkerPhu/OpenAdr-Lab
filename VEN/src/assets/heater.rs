@@ -313,13 +313,18 @@ impl Heater {
             },
             ControlDescriptor {
                 key: "heater_setpoint_c".into(),
-                label: "Power setpoint".into(),
+                label: "Comfort target".into(),
                 kind: ControlKind::Slider,
-                min: Some(0.0),
-                max: Some(self.max_kw),
-                unit: "kW".into(),
+                min: Some(18.0),
+                max: Some(95.0),
+                unit: "°C".into(),
                 display_scale: None,
-                nullable: false,
+                // Compared against temp_c by the dispatcher (build_setpoints) to
+                // derive ON/OFF — not a continuous value like T_tank, and no
+                // override is active most of the time. nullable so "no override"
+                // reads as "Off" (pinned to the top of the range) rather than a
+                // numeric value indistinguishable from an active override.
+                nullable: true,
             },
             ControlDescriptor {
                 key: "heater_temp_min_c".into(),
@@ -603,6 +608,11 @@ mod tests {
 
     #[test]
     fn control_schema_heater_setpoint_bounds() {
+        // heater_setpoint_c is a comfort-target temperature (compared against
+        // temp_c by the dispatcher — see build_setpoints), not a power value:
+        // its schema must describe °C over the same range as T_tank, and be
+        // nullable so "no override active" renders as "Off" rather than a
+        // numeric value indistinguishable from an active override at that value.
         let heater = default_heater();
         let schema = heater.control_schema();
         let sp_d = schema
@@ -610,8 +620,10 @@ mod tests {
             .find(|d| d.key == "heater_setpoint_c")
             .unwrap();
         let temp_d = schema.iter().find(|d| d.key == "heater_temp_c").unwrap();
-        assert_eq!(sp_d.min.unwrap(), 0.0);
-        assert_eq!(sp_d.max.unwrap(), heater.max_kw);
+        assert_eq!(sp_d.min.unwrap(), 18.0);
+        assert_eq!(sp_d.max.unwrap(), 95.0);
+        assert_eq!(sp_d.unit, "°C");
+        assert!(sp_d.nullable, "heater_setpoint_c must be nullable");
         assert_eq!(temp_d.min.unwrap(), 18.0);
         assert_eq!(temp_d.max.unwrap(), 95.0);
     }
