@@ -25,7 +25,16 @@ each host gets its own independent lock). Set LOCK_HOST=Node2 to target it
 directly, or run `DOCKER_HOST=Node2 bash run_all_tests.sh ...`, which sets this
 automatically. Node1 and Node2 can be used concurrently by different sessions without
 contention, since each holds its own lock. Same lease semantics and default
-(60min) as Node1.
+(60min) as Node1. Node2 also has `tests`/`VTN` in its sparse-checkout and openleadr-rs
+submodule initialized, so all four suites (`--rust`, `--e2e`, `--resilience`, and the
+full run_all_tests.sh) run there too, not just `--rust`.
+
+test-host-preference: this project now has two build/test-capable docker hosts (Node1,
+Node2) alongside local WSL. Prefer Node2 for build/test runs (`DOCKER_HOST=Node2 bash
+run_all_tests.sh ...`) — Node1 also runs the always-on production VTN/BFF/VEN stack, so
+heavy test builds there compete with and can slow down live services. Use Node1 only when
+Node2 is unavailable/locked, or when a test specifically needs Node1 (e.g. verifying
+something against the real production stack).
 
 local-rust: WSL is installed on this Windows machine. Use `wsl cargo check` (or `wsl cargo test`) inside the VEN directory for local Rust compilation instead of native Windows cargo, which lacks cmake/HiGHS. For a full test run including HiGHS, use the Node1 docker stack.
 
