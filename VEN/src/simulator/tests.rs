@@ -420,3 +420,87 @@ mod unmodelled_load_tests {
         );
     }
 }
+
+/// Regression for the production bug found on ven-1: a manual PV irradiance
+/// override left weather fully suppressed for roughly an hour after release,
+/// because `weather_power_kw` was nulled for as long as the decaying offset
+/// hadn't reached exact zero. It must now stay visible immediately.
+mod pv_weather_blend_tests {
+    use super::super::*;
+    use crate::entities::asset_params::{AssetParams, PvCurtailmentSource, PvParams};
+
+    fn pv_only(rated_kw: f64) -> SimState {
+        SimState::from_params(
+            &[AssetParams::Pv(PvParams {
+                id: crate::ids::ASSET_PV.to_string(),
+                rated_kw,
+                inverter_max_kw: rated_kw,
+            })],
+            Utc::now(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_tick(
+        sim: &mut SimState,
+        now: DateTime<Utc>,
+        pv_irradiance_override: Option<f64>,
+        weather_pv_kw: Option<f64>,
+    ) {
+        sim.tick(
+            30.0,
+            HashMap::new(),
+            now,
+            pv_irradiance_override,
+            0.1,
+            None,
+            None,
+            None,
+            None,
+            0.1,
+            None,
+            None,
+            weather_pv_kw,
+            None,
+            None,
+            None,
+            PvCurtailmentSource::None,
+        );
+    }
+
+    #[test]
+    fn weather_stays_visible_immediately_after_a_manual_override_is_released() {
+        let mut sim = pv_only(10.0);
+        let now = Utc::now();
+
+        // Tick 1: manual override forced.
+        run_tick(&mut sim, now, Some(0.9), Some(4.0));
+
+        // Tick 2: override released (None) — weather is fresh and available,
+        // but the just-released offset hasn't decayed to zero yet.
+        run_tick(
+            &mut sim,
+            now + chrono::Duration::seconds(30),
+            None,
+            Some(4.0),
+        );
+
+        let pv_cfg = sim
+            .asset_configs
+            .iter()
+            .find_map(|c| match c {
+                crate::assets::AssetConfig::Pv(pv) => Some(pv),
+                _ => None,
+            })
+            .expect("pv asset config must exist");
+        assert!(
+            pv_cfg.weather_power_kw.is_some(),
+            "weather_power_kw must not be nulled on the tick right after release, \
+             even though the manual offset is still decaying"
+        );
+        assert!(
+            !pv_cfg.irradiance_forced,
+            "irradiance_forced must be false once the override is released"
+        );
+    }
+}

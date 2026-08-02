@@ -254,25 +254,45 @@ pub fn resolve_weather_pv_kw(
 }
 
 /// Align a `weather_pv_forecast_series` (hourly) onto an arbitrary plan slot
-/// grid (which may be finer-grained near-term): each `slot_start` takes the
-/// `forecast_ac_kw` of whichever series entry is nearest in time. Used by the
-/// planner's own PV input (R-50) — the same series that feeds `GET /weather`,
-/// just resampled onto the solver's slot boundaries instead of the raw
-/// forecast's own hourly ones. Returns an all-zero vec if `series` is empty.
+/// grid (which may be finer-grained near-term): each `slot_start` is linearly
+/// interpolated between the two bracketing series entries by `valid_at` (a
+/// continuous blend, not a step at whichever hourly sample happens to be
+/// nearest). Times before the first sample or after the last clamp to that
+/// sample's value — no extrapolation. Used by the planner's own PV input
+/// (R-50) — the same series that feeds `GET /weather`, just resampled onto
+/// the solver's slot boundaries instead of the raw forecast's own hourly
+/// ones. Returns an all-zero vec if `series` is empty.
 pub fn weather_pv_kw_for_slots(
     series: &[WeatherPvForecastSlot],
     slot_starts: &[DateTime<Utc>],
 ) -> Vec<f64> {
+    if series.is_empty() {
+        return vec![0.0; slot_starts.len()];
+    }
+    let mut sorted: Vec<&WeatherPvForecastSlot> = series.iter().collect();
+    sorted.sort_by_key(|s| s.valid_at); // defensive — don't assume publisher order
     slot_starts
         .iter()
-        .map(|slot_t| {
-            series
-                .iter()
-                .min_by_key(|s| (s.valid_at - *slot_t).num_seconds().abs())
-                .map(|s| s.forecast_ac_kw)
-                .unwrap_or(0.0)
-        })
+        .map(|t| interpolate_ac_kw(&sorted, *t))
         .collect()
+}
+
+/// Linearly interpolate `forecast_ac_kw` at `t` between the two `sorted`
+/// entries bracketing it. `sorted` must be non-empty and ascending by
+/// `valid_at`. Clamps to the first/last value outside the series' range.
+fn interpolate_ac_kw(sorted: &[&WeatherPvForecastSlot], t: DateTime<Utc>) -> f64 {
+    if t <= sorted[0].valid_at {
+        return sorted[0].forecast_ac_kw;
+    }
+    let last = sorted.len() - 1;
+    if t >= sorted[last].valid_at {
+        return sorted[last].forecast_ac_kw;
+    }
+    let idx = sorted.partition_point(|s| s.valid_at <= t);
+    let (a, b) = (sorted[idx - 1], sorted[idx]);
+    let span_s = (b.valid_at - a.valid_at).num_seconds() as f64;
+    let frac = (t - a.valid_at).num_seconds() as f64 / span_s;
+    a.forecast_ac_kw + (b.forecast_ac_kw - a.forecast_ac_kw) * frac
 }
 
 #[cfg(test)]
@@ -545,10 +565,8 @@ mod tests {
 
     // ── weather_pv_kw_for_slots ───────────────────────────────────────────────
 
-    #[test]
-    fn weather_pv_kw_for_slots_picks_nearest_hourly_sample() {
-        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 6, 0, 0).unwrap();
-        let series = vec![
+    fn two_sample_series(t0: DateTime<Utc>) -> Vec<WeatherPvForecastSlot> {
+        vec![
             WeatherPvForecastSlot {
                 valid_at: t0,
                 forecast_ac_kw: 1.0,
@@ -559,20 +577,73 @@ mod tests {
                 forecast_ac_kw: 2.0,
                 snow_covered: false,
             },
-        ];
-        // A finer-grained slot grid within the same two hours: 15-min steps.
-        let slot_starts: Vec<_> = (0..8)
+        ]
+    }
+
+    #[test]
+    fn weather_pv_kw_for_slots_exact_sample_returns_exact_value() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 6, 0, 0).unwrap();
+        let series = two_sample_series(t0);
+        let kw = weather_pv_kw_for_slots(&series, &[t0, t0 + chrono::Duration::hours(1)]);
+        assert_eq!(kw, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn weather_pv_kw_for_slots_interpolates_linearly_between_samples() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 6, 0, 0).unwrap();
+        let series = two_sample_series(t0);
+        // A finer-grained slot grid within the same hour: 15-min steps.
+        let slot_starts: Vec<_> = (0..5)
             .map(|i| t0 + chrono::Duration::minutes(15 * i))
             .collect();
         let kw = weather_pv_kw_for_slots(&series, &slot_starts);
-        assert_eq!(kw.len(), 8);
-        // First 3 slots (0, 15, 30 min) are nearer to t0 than t0+1h.
-        assert_eq!(kw[0], 1.0);
-        assert_eq!(kw[1], 1.0);
-        assert_eq!(kw[2], 1.0);
-        // Slots from 45 min onward are nearer to t0+1h.
-        assert_eq!(kw[3], 2.0);
-        assert_eq!(kw[7], 2.0);
+        assert_eq!(kw.len(), 5);
+        assert!((kw[0] - 1.0).abs() < 1e-9, "at t0: {}", kw[0]);
+        assert!(
+            (kw[1] - 1.25).abs() < 1e-9,
+            "at t0+15min (1/4 of the way): {}",
+            kw[1]
+        );
+        assert!(
+            (kw[2] - 1.5).abs() < 1e-9,
+            "at the midpoint, expected the arithmetic mean: {}",
+            kw[2]
+        );
+        assert!(
+            (kw[3] - 1.75).abs() < 1e-9,
+            "at t0+45min (3/4 of the way): {}",
+            kw[3]
+        );
+        assert!((kw[4] - 2.0).abs() < 1e-9, "at t0+1h: {}", kw[4]);
+    }
+
+    #[test]
+    fn weather_pv_kw_for_slots_clamps_outside_series_range() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 6, 0, 0).unwrap();
+        let series = two_sample_series(t0);
+        let before = t0 - chrono::Duration::hours(1);
+        let after = t0 + chrono::Duration::hours(5);
+        let kw = weather_pv_kw_for_slots(&series, &[before, after]);
+        assert_eq!(kw, vec![1.0, 2.0], "must clamp, not extrapolate");
+    }
+
+    #[test]
+    fn weather_pv_kw_for_slots_single_sample_series_is_constant() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 6, 0, 0).unwrap();
+        let series = vec![WeatherPvForecastSlot {
+            valid_at: t0,
+            forecast_ac_kw: 3.0,
+            snow_covered: false,
+        }];
+        let kw = weather_pv_kw_for_slots(
+            &series,
+            &[
+                t0 - chrono::Duration::hours(1),
+                t0,
+                t0 + chrono::Duration::hours(1),
+            ],
+        );
+        assert_eq!(kw, vec![3.0, 3.0, 3.0]);
     }
 
     #[test]

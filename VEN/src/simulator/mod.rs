@@ -190,8 +190,10 @@ impl SimState {
     /// - `base_load_alpha`: EMA factor for base load blend-back (0.0–1.0; default 0.1).
     /// - `ev_plugged_override`: if Some, hold EV plugged state; else let physics drive it.
     /// - `weather_pv_kw`: weather-sourced actual PV power (kW, generation-positive), via
-    ///   `entities::solar::resolve_weather_pv_kw` (R-50); precedence sin model < weather
-    ///   < manual `pv_irradiance_override` inject (testing/demo).
+    ///   `entities::solar::resolve_weather_pv_kw` (R-50). A forced `pv_irradiance_override`
+    ///   (the tick it's posted) wins outright, weather ignored; otherwise weather (if
+    ///   configured/fresh) is the base with any decaying override offset blended
+    ///   additively on top; sin model only when no weather is configured at all.
     /// - `heater_emergency_curtail/absorb_override`: Behaviour C, see `Heater::apply_tick_overrides`.
     ///
     /// See `peek_pv_kw` (`pv_preview.rs`) for a read-only preview of this tick's PV term.
@@ -249,16 +251,13 @@ impl SimState {
                     pv.pv_alpha = pv_alpha;
                     pv.generation_limit_kw = pv_generation_limit_override;
                     pv.curtailment_source = pv_curtailment_source;
-                    // Manual sim inject wins over weather for as long as the perturbation
-                    // is still in effect or decaying — see PvSmoothingState::manual_override_active.
-                    pv.weather_power_kw = if self
-                        .pv_smoothing
-                        .manual_override_active(pv_irradiance_override)
-                    {
-                        None
-                    } else {
-                        weather_pv_kw
-                    };
+                    // Weather is never nulled by a manual override anymore — a
+                    // recently-released override's decaying irradiance_offset
+                    // blends additively on top of it instead (see
+                    // PvInverter::step_inner). Only a forced override (this
+                    // exact tick) takes exclusive control.
+                    pv.weather_power_kw = weather_pv_kw;
+                    pv.irradiance_forced = pv_irradiance_override.is_some();
                 }
                 AssetConfig::Heater(h) => h.apply_tick_overrides(
                     ambient_temp_c_override,

@@ -31,30 +31,27 @@ impl SimState {
             _ => None,
         })?;
 
-        // Mirrors SimState::tick's precedence exactly: manual override wins — for as
-        // long as its offset is still decaying, not just the tick it was posted (see
-        // PvSmoothingState::manual_override_active) — then weather, then the sin
-        // model. Kept in lockstep by the peek_pv_kw_matches_tick_output_for_same_now
-        // equivalence test.
-        let manual_override_active = self
-            .pv_smoothing
-            .manual_override_active(pv_irradiance_override);
-        let raw_kw = match (manual_override_active, weather_pv_kw) {
-            (false, Some(weather_kw)) => -weather_kw.max(0.0),
-            _ => {
-                let natural_irradiance = PvInverter::natural_irradiance_at(now);
-                const PLAN_STEP_S: f64 = 300.0;
-                let irradiance = if let Some(forced) = pv_irradiance_override {
-                    forced.clamp(0.0, 1.0)
-                } else {
-                    let per_tick_factor = (1.0 - pv_alpha).powf(dt_s / PLAN_STEP_S);
-                    let mut offset = self.pv_smoothing.irradiance_offset * per_tick_factor;
-                    if offset.abs() < 0.005 {
-                        offset = 0.0;
-                    }
-                    (natural_irradiance + offset).clamp(0.0, 1.0)
-                };
-                -(pv_cfg.rated_kw * irradiance)
+        // Mirrors SimState::tick's / PvInverter::step_inner's precedence exactly: a
+        // forced override (posted this exact tick) wins outright; otherwise weather
+        // (if present) is the base with the decaying offset blended additively on
+        // top; otherwise the sin model + offset. Kept in lockstep by the
+        // peek_pv_kw_matches_tick_output_for_same_now equivalence test.
+        let raw_kw = if let Some(forced) = pv_irradiance_override {
+            -(pv_cfg.rated_kw * forced.clamp(0.0, 1.0))
+        } else {
+            const PLAN_STEP_S: f64 = 300.0;
+            let per_tick_factor = (1.0 - pv_alpha).powf(dt_s / PLAN_STEP_S);
+            let mut offset = self.pv_smoothing.irradiance_offset * per_tick_factor;
+            if offset.abs() < 0.005 {
+                offset = 0.0;
+            }
+            match weather_pv_kw {
+                Some(weather_kw) => -(weather_kw.max(0.0) + offset * pv_cfg.rated_kw).max(0.0),
+                None => {
+                    let natural_irradiance = PvInverter::natural_irradiance_at(now);
+                    let irradiance = (natural_irradiance + offset).clamp(0.0, 1.0);
+                    -(pv_cfg.rated_kw * irradiance)
+                }
             }
         };
         Some(

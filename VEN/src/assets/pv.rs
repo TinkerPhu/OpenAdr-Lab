@@ -50,11 +50,19 @@ pub struct PvInverter {
     /// Weather-sourced actual power for this tick (kW, generation-positive),
     /// via `entities::solar::resolve_weather_pv_kw` — the same translation
     /// the planner's own PV input uses (R-50), reused here rather than
-    /// reimplemented. `None` when no weather feed is configured, the cached
-    /// forecast has gone stale, or a manual `pv_irradiance_override` inject
-    /// is active (that takes precedence — see `SimState::tick`). Set each
-    /// tick by the sim loop. NOT from YAML.
+    /// reimplemented. `None` when no weather feed is configured or the
+    /// cached forecast has gone stale. Set each tick by the sim loop. NOT
+    /// from YAML.
     pub weather_power_kw: Option<f64>,
+    /// True only on the exact tick a manual `pv_irradiance` inject is posted
+    /// (Behaviour C: full override, weather ignored entirely that tick).
+    /// False while the resulting offset is merely decaying — during that
+    /// window the residual perturbation blends additively onto whichever
+    /// base (weather or sin-model) is otherwise authoritative, so weather is
+    /// never fully suppressed by an old, nearly-decayed manual override
+    /// (see `SimState::tick`). Set each tick by the sim loop. NOT from YAML.
+    #[serde(default)]
+    pub irradiance_forced: bool,
 }
 
 /// PV mutable state.
@@ -83,6 +91,7 @@ impl PvInverter {
             irradiance_offset: 0.0,
             pv_alpha: 0.1,
             weather_power_kw: None,
+            irradiance_forced: false,
         }
     }
 
@@ -95,13 +104,22 @@ impl PvInverter {
     }
 
     /// Pure physics step. Ignores setpoint (non-curtailable in Phase A).
-    /// Reads `self.weather_power_kw` if set (weather-sourced actual, takes
-    /// precedence), else `self.irradiance` (sin model or manual override —
-    /// both set by sim loop each tick before calling).
+    /// While `irradiance_forced` (a manual override posted this exact tick),
+    /// `self.irradiance` fully dictates output, weather ignored entirely.
+    /// Otherwise, weather (if configured/fresh) is the base, with the
+    /// decaying `irradiance_offset` from any recently-released manual
+    /// override blended additively on top; falls back to the sin-model
+    /// `self.irradiance` when no weather is configured at all.
     pub fn step_inner(&self, _state: &PvState, _setpoint_kw: f64, _dt: Duration) -> (PvState, f64) {
-        let dc_potential_kw = match self.weather_power_kw {
-            Some(weather_kw) => weather_kw.max(0.0),
-            None => self.rated_kw * self.irradiance,
+        let dc_potential_kw = if self.irradiance_forced {
+            self.rated_kw * self.irradiance
+        } else {
+            match self.weather_power_kw {
+                Some(weather_kw) => {
+                    (weather_kw.max(0.0) + self.irradiance_offset * self.rated_kw).max(0.0)
+                }
+                None => self.rated_kw * self.irradiance,
+            }
         };
         // Inverter's own AC-side ceiling clips DC potential before any commanded limit —
         // see openspec/changes/pv-curtailment-history/.
@@ -438,6 +456,7 @@ mod tests {
                 generation_limit_kw: None,
                 curtailment_source: PvCurtailmentSource::None,
                 weather_power_kw: None,
+                irradiance_forced: false,
             },
             PvState {
                 actual_power_kw: 0.0,
@@ -520,6 +539,53 @@ mod tests {
         pv.weather_power_kw = Some(-2.0);
         let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
         assert!((power_kw - 0.0).abs() < 1e-9, "got {power_kw}");
+    }
+
+    // ── step_inner: blend decaying manual offset onto weather (not a binary null) ──
+
+    #[test]
+    fn step_inner_blends_decaying_offset_onto_weather_power_kw() {
+        // Regression for the production bug: a not-yet-fully-decayed manual
+        // pv_irradiance override must NOT suppress weather entirely — it
+        // blends additively on top of it instead.
+        let (mut pv, state) = make_pv(20.0);
+        pv.weather_power_kw = Some(5.0);
+        pv.irradiance_offset = 0.5; // residual perturbation, still decaying
+        pv.irradiance_forced = false; // released, not actively forced
+        let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
+        assert!(
+            (power_kw + 15.0).abs() < 1e-9,
+            "expected weather(5.0) + offset(0.5)*rated_kw(20.0) = 15.0 kW export, got {power_kw}"
+        );
+    }
+
+    #[test]
+    fn step_inner_forced_override_ignores_weather_entirely() {
+        // Behaviour C must be unchanged: while a manual override is actively
+        // forced (the exact tick it's posted), weather is ignored outright.
+        let (mut pv, state) = make_pv(10.0);
+        pv.irradiance = 1.0;
+        pv.irradiance_forced = true;
+        pv.weather_power_kw = Some(6.5);
+        let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
+        assert!(
+            (power_kw + 10.0).abs() < 1e-9,
+            "forced override must ignore weather entirely, got {power_kw}"
+        );
+    }
+
+    #[test]
+    fn step_inner_negative_offset_blend_clamps_to_zero() {
+        // A large negative residual offset must never push output positive
+        // (import) — clamp the blended result, not just the raw weather term.
+        let (mut pv, state) = make_pv(10.0);
+        pv.weather_power_kw = Some(1.0);
+        pv.irradiance_offset = -5.0;
+        let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
+        assert!(
+            (power_kw - 0.0).abs() < 1e-9,
+            "blended dc_potential must clamp to 0, not go negative/import, got {power_kw}"
+        );
     }
 
     #[test]
@@ -610,6 +676,7 @@ mod tests {
             generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
+            irradiance_forced: false,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: -5.0,
@@ -667,6 +734,7 @@ mod tests {
             generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
+            irradiance_forced: false,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
@@ -703,6 +771,7 @@ mod tests {
             generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
+            irradiance_forced: false,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
@@ -742,6 +811,7 @@ mod tests {
             generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
+            irradiance_forced: false,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
@@ -795,6 +865,7 @@ mod tests {
             generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
+            irradiance_forced: false,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
@@ -826,6 +897,7 @@ mod tests {
             generation_limit_kw: None,
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
+            irradiance_forced: false,
         };
         // Verify offset is read from self.irradiance_offset, not from self.irradiance.
         // With pv_alpha=0 and offset=0.2, each slot must equal sin(t)+0.2 (clamped).
