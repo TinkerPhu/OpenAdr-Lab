@@ -7551,14 +7551,37 @@ instance. Extended `VENS_TO_PROVISION` in `scripts/seed_vtn.py` with the 9 new
 entries, each with its own `DASHBOARD_URL` attribute (BL-41 pattern — Node2 VENs
 aren't reachable via Docker DNS from the VTN/BFF host, so each advertises its own
 LAN origin). Updated `VEN/scale_out/README.md` to describe the now-10-VEN Node2
-fleet instead of the lone `ven-4`. Deployment (bringing the containers up on Node2,
-provisioning via `seed_vtn.py`) was intentionally left for a follow-up session/host
-access, not done as part of authoring these files.
+fleet instead of the lone `ven-4`.
+
+**Deployment**: brought up on Node2 under `docker_host_lock.sh` (`LOCK_HOST=Node2`).
+`ven-10` and `ven-12` crash-looped on first boot — their heaters left
+`switching_penalty_eur` at its 0.01 EUR/switch-h default, too low relative to the
+default `planner.phase2_epsilon_eur` (0.02) at their 900s longest zone step, tripping
+the profile validator's 6× sanity bound (`VEN/src/profile/validate.rs`). Fixed by
+setting `switching_penalty_eur: 0.05` explicitly on both heaters (matches the
+existing `ven-2`/`ven-3` pattern of always setting this field when a heater is
+present). Ran `scripts/seed_vtn.py` from Node1 (needs `localhost:8200`) to provision
+the 9 new VENs' OAuth credentials/VEN entities — all succeeded. The new containers
+initially reported `vtn_connection: degraded` (401 `invalid_client`) since they'd
+started and cached the failure before their credentials existed; a `docker compose
+restart` on Node2 cleared it, and all 10 Node2 VENs (`ven-4..ven-13`) now report
+`{"status":"ok", ...}` on `/health` with a live VTN connection.
+
+**Aside — pre-existing VTN data found, not touched**: `seed_vtn.py`'s later
+demo-program-seeding step threw a 400 updating "Summer Peak DR" — its stored
+targets are `["ven-2", "ven-1-name"]`. The VTN's actual `/vens` list has no `ven-1`
+at all, only a `ven-1-name` entry — an old provisioning typo predating this session,
+unrelated to the Node2 fleet work. Left as-is (production VTN data; out of scope for
+this change) but worth a follow-up to rename/fix `ven-1-name` -> `ven-1` and correct
+the program's target list.
 
 **Key learning**: hand-authoring 9 near-identical Docker Compose service blocks is
 pure copy-paste boilerplate (`fleet.sh`/`gen_fleet_profiles.py` would generate this,
 but assumes same-host Docker DNS to the VTN and isn't LAN-aware like `ven-4`'s
 pattern) — if a third scale-out host or a much larger Node2 fleet is ever needed,
 that generator is worth extending with a LAN-mode flag rather than repeating this
-by hand again.
+by hand again. Also: a freshly-provisioned VEN container that starts before its VTN
+credentials exist caches the resulting 401 into an exponential backoff — after
+running `seed_vtn.py`, restart the affected containers rather than waiting out the
+backoff.
 
