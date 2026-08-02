@@ -37,14 +37,6 @@ impl PvSmoothingState {
         }
         (natural_irradiance + self.irradiance_offset).clamp(0.0, 1.0)
     }
-
-    /// True while a manual override is posted or its offset is still decaying — the
-    /// window during which weather should stay suppressed. Checking only the current
-    /// tick's `forced` value would let weather snap back in one tick after the
-    /// (one-shot) override is posted, while the offset is still actively EMA-decaying.
-    pub fn manual_override_active(&self, forced: Option<f64>) -> bool {
-        forced.is_some() || self.irradiance_offset != 0.0
-    }
 }
 
 #[cfg(test)]
@@ -78,28 +70,5 @@ mod tests {
         };
         s.update(None, 0.5, 1.0, 0.1);
         assert_eq!(s.irradiance_offset, 0.0);
-    }
-
-    #[test]
-    fn manual_override_active_true_while_forced() {
-        let s = PvSmoothingState::default();
-        assert!(s.manual_override_active(Some(0.0)));
-    }
-
-    #[test]
-    fn manual_override_active_true_while_offset_still_decaying() {
-        let s = PvSmoothingState {
-            irradiance_offset: -0.3,
-        };
-        assert!(
-            s.manual_override_active(None),
-            "must stay active while the offset from a one-shot override hasn't fully decayed"
-        );
-    }
-
-    #[test]
-    fn manual_override_inactive_once_offset_reaches_zero() {
-        let s = PvSmoothingState::default();
-        assert!(!s.manual_override_active(None));
     }
 }

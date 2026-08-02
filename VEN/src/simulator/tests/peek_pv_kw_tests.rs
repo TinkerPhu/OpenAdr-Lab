@@ -135,20 +135,18 @@ fn peek_pv_kw_manual_override_wins_over_weather() {
 }
 
 #[test]
-fn peek_pv_kw_manual_override_still_wins_while_offset_decaying() {
-    // Regression: pv_irradiance is one-shot (auto-clears one tick after being
-    // posted, tasks::sim_tick::tick.rs). Weather must stay suppressed for as
-    // long as the resulting offset is still decaying, not just the tick the
-    // override was posted on — else weather snaps back in on tick 2 while the
-    // sin-model irradiance is still actively blending back from the override.
+fn peek_pv_kw_blends_decaying_offset_onto_weather_when_override_released() {
+    // Regression for the production bug found live on ven-1: a released manual
+    // override's decaying offset must NOT suppress weather entirely — it blends
+    // additively on top of it instead (see PvInverter::step_inner).
     let mut sim = pv_state(10.0);
-    sim.pv_smoothing.irradiance_offset = -0.999; // still decaying from a released override
+    sim.pv_smoothing.irradiance_offset = -0.1; // still decaying from a released override
     let preview = sim
-        .peek_pv_kw(noon(), 30.0, None, 0.1, Some(4.2))
+        .peek_pv_kw(noon(), 30.0, None, 0.0, Some(4.2)) // pv_alpha=0.0: no decay, offset stays exact
         .expect("PV asset is configured");
     assert!(
-        preview.abs() < 1.0,
-        "weather (-4.2) must not be used while the override's offset is still decaying, got {preview}"
+        (preview + 3.2).abs() < 1e-9,
+        "expected weather(4.2) + offset(-0.1)*rated_kw(10.0) = -3.2 kW, got {preview}"
     );
 }
 
@@ -196,13 +194,19 @@ fn peek_pv_kw_matches_tick_output_with_weather_for_same_now() {
 }
 
 #[test]
-fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
-    // Regression, found live on Node1 (2026-07-25): pv_irradiance is one-shot —
-    // the caller (tasks::sim_tick::tick.rs) auto-clears it from SimInjectState
-    // one tick after posting. Tick 1 correctly silences PV via the override.
-    // Tick 2 passes `pv_irradiance_override: None` (already auto-cleared) while
-    // the offset from tick 1 is still ≈ -1.0, actively decaying — weather must
-    // stay suppressed through that decay, not snap back in immediately.
+fn tick_weather_visible_immediately_after_override_auto_clears() {
+    // Regression, originally found live on Node1 (2026-07-25) and again on ven-1
+    // in production (2026-08-02): pv_irradiance is one-shot — the caller
+    // (tasks::sim_tick::tick.rs) auto-clears it from SimInjectState one tick
+    // after posting. Tick 1 correctly silences PV via the override. Tick 2
+    // passes `pv_irradiance_override: None` (already auto-cleared) with the
+    // offset from tick 1 still actively decaying — weather must be visible on
+    // tick 2 (blended with the residual offset), not suppressed entirely for
+    // as long as the offset takes to fully decay (the bug: with a large enough
+    // starting offset and the default pv_alpha≈0.1 EMA, that could take hours).
+    // forced=0.9 (close to noon's natural≈1.0) keeps the resulting offset small,
+    // so the tick-2 blend stays well under inverter_max_kw (=rated_kw=10.0 in
+    // `pv_state`) rather than saturating at the hardware cap.
     let mut sim = pv_state(10.0);
     let now = noon();
     let dt_s = 1.0;
@@ -211,7 +215,7 @@ fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
         dt_s,
         HashMap::new(),
         now,
-        Some(0.0), // tick 1: override posted
+        Some(0.9), // tick 1: override posted
         0.1,
         None,
         None,
@@ -220,7 +224,7 @@ fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
         0.1,
         None,
         None,
-        Some(7.0), // a large live weather value, must be ignored
+        Some(5.0), // a live weather value, ignored this tick (forced override wins)
         None,
         None,
         None,
@@ -233,8 +237,8 @@ fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
         .unwrap()
         .last_power_kw;
     assert!(
-        pv_after_tick1.abs() < 1e-6,
-        "tick 1 must silence PV via the override, got {pv_after_tick1}"
+        (pv_after_tick1 + 9.0).abs() < 1e-6,
+        "tick 1: forced override=0.9 on a 10 kW array must yield -9.0 kW, got {pv_after_tick1}"
     );
 
     sim.tick(
@@ -250,7 +254,7 @@ fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
         0.1,
         None,
         None,
-        Some(7.0),
+        Some(5.0),
         None,
         None,
         None,
@@ -262,10 +266,14 @@ fn tick_weather_stays_suppressed_one_tick_after_override_auto_clears() {
         .find(|e| e.id == crate::ids::ASSET_PV)
         .unwrap()
         .last_power_kw;
+    // Natural irradiance at noon ≈ 1.0, so offset after tick 1 ≈ 0.9 − 1.0 = −0.1,
+    // barely decayed by tick 2 (dt_s=1s). Weather(5.0) + offset(≈−0.1)×rated_kw(10.0)
+    // ≈ −4.0 kW — clearly visible (nowhere near the old ≈0 suppressed value, and
+    // distinct from a raw, un-blended −5.0 kW weather value too).
     assert!(
-        pv_after_tick2.abs() < 1.0,
-        "weather (-7.0) must not snap back in on tick 2 while the offset is still \
-         decaying, got {pv_after_tick2}"
+        (pv_after_tick2 + 4.0).abs() < 0.01,
+        "weather must be visible (blended with the residual offset) on the tick right \
+         after release, not suppressed, got {pv_after_tick2}"
     );
 }
 
