@@ -13,6 +13,7 @@ assets:
     max_kw: 3.0
     temp_initial_c: 20.0
     temp_min_c: 18.0
+    switching_penalty_eur: 0.05
     temp_max_c: 23.0
   - type: base_load
     id: base_load
