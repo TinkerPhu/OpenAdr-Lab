@@ -23,6 +23,7 @@ fn make_solver_inputs(n: usize, base_kw: f64) -> MilpInputs {
         p_exp_max_cont_kw: vec![10.0; n],
         pen_imp_eur_kwh: 0.0,
         pen_exp_eur_kwh: 0.0,
+        penalty_rules: vec![],
         e_bat_nom_kwh: None,
         e_bat_init_kwh: None,
         e_bat_min_kwh: None,

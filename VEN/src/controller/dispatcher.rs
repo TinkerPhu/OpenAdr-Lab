@@ -621,6 +621,7 @@ mod tests {
             friction_eur: 0.0,
             cost_breakdown: CostBreakdown::default(),
             solve_status: crate::entities::plan::SolveStatus::Optimal,
+            penalty_rules_active: vec![],
         }
     }
 
@@ -672,6 +673,7 @@ mod tests {
                 friction_eur: 0.0,
                 cost_breakdown: CostBreakdown::default(),
                 solve_status: crate::entities::plan::SolveStatus::Optimal,
+                penalty_rules_active: vec![],
             }
         };
         let sp = build_setpoints(&plan, &sim, None, now);
@@ -750,6 +752,7 @@ mod tests {
             friction_eur: 0.0,
             cost_breakdown: CostBreakdown::default(),
             solve_status: crate::entities::plan::SolveStatus::Optimal,
+            penalty_rules_active: vec![],
         }
     }
 

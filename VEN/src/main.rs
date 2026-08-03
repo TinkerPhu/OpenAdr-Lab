@@ -103,6 +103,7 @@ fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Ve
         v_ev_free_charge_eur_kwh: profile.planner.v_ev_free_charge_eur_kwh,
         stale_rate_policy: profile.planner.stale_rate_policy.clone(),
         stale_rate_safe_pctl: profile.planner.stale_rate_safe_pctl,
+        penalty_rules: profile.planner.penalty_rules.clone(),
         plan_zones: profile.planner.plan_zones.clone().unwrap_or_else(|| {
             let step_s = profile.planner.effective_step_s();
             let total_s = profile.planner.effective_horizon_h() * 3600;

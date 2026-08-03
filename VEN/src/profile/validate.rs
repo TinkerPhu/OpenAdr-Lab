@@ -137,6 +137,38 @@ impl Profile {
             }
         }
 
+        // WP6.3 (BL-09) penalty_rules constraints: threshold_kw must be > 0,
+        // measurement_window_s must be a positive multiple of the *effective*
+        // step (zones[0].step_s when plan_zones is set — plan_step_s alone is
+        // ignored in that mode, same rule effective_step_s()/effective_horizon_h()
+        // already encode), and rule_id must be unique.
+        {
+            let step_s = self.planner.effective_step_s();
+            let mut seen_ids: Vec<&str> = Vec::new();
+            for (i, rule) in self.planner.penalty_rules.iter().enumerate() {
+                if rule.threshold_kw <= 0.0 {
+                    errors.push(format!(
+                        "penalty_rules[{i}].threshold_kw must be > 0, got {}",
+                        rule.threshold_kw
+                    ));
+                }
+                if rule.measurement_window_s == 0 || rule.measurement_window_s % step_s != 0 {
+                    errors.push(format!(
+                        "penalty_rules[{i}].measurement_window_s ({}) must be a positive multiple of the effective planning step ({step_s})",
+                        rule.measurement_window_s
+                    ));
+                }
+                if seen_ids.contains(&rule.rule_id.as_str()) {
+                    errors.push(format!(
+                        "penalty_rules[{i}].rule_id '{}' duplicates an earlier rule",
+                        rule.rule_id
+                    ));
+                } else {
+                    seen_ids.push(&rule.rule_id);
+                }
+            }
+        }
+
         // phase2_epsilon_eur sanity check: when a heater is present and the epsilon is
         // non-zero, it must not exceed 6× the effective per-switch cost
         // (switching_penalty_eur × step_s/3600). At 6× the effective cost the epsilon
@@ -721,6 +753,106 @@ planner:
             errs.iter().any(|e| e.contains("plan_zones")),
             "zero step_s should be rejected: {errs:?}"
         );
+    }
+
+    #[test]
+    fn test_validate_penalty_rules_rejects_non_positive_threshold() {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+planner:
+  plan_step_s: 300
+  penalty_rules:
+    - rule_id: peak-10kw
+      threshold_kw: 0.0
+      measurement_window_s: 300
+      penalty_eur_per_kw: 5.0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p.validate().unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("threshold_kw")),
+            "expected threshold_kw violation, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_penalty_rules_rejects_window_not_multiple_of_step() {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+planner:
+  plan_step_s: 300
+  penalty_rules:
+    - rule_id: peak-10kw
+      threshold_kw: 10.0
+      measurement_window_s: 400
+      penalty_eur_per_kw: 5.0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p.validate().unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("measurement_window_s")),
+            "expected measurement_window_s violation, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_penalty_rules_rejects_duplicate_rule_id() {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+planner:
+  plan_step_s: 300
+  penalty_rules:
+    - rule_id: peak-10kw
+      threshold_kw: 10.0
+      measurement_window_s: 300
+      penalty_eur_per_kw: 5.0
+    - rule_id: peak-10kw
+      threshold_kw: 8.0
+      measurement_window_s: 300
+      penalty_eur_per_kw: 3.0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let errs = p.validate().unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("duplicates")),
+            "expected duplicate rule_id violation, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_penalty_rules_accepts_valid_rule() {
+        let yaml = r#"
+assets:
+  - type: battery
+    id: battery
+    capacity_kwh: 10.0
+    min_soc: 0.10
+    round_trip_efficiency: 0.92
+planner:
+  plan_step_s: 300
+  penalty_rules:
+    - rule_id: peak-10kw
+      threshold_kw: 10.0
+      measurement_window_s: 300
+      penalty_eur_per_kw: 5.0
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        assert!(p.validate().is_ok(), "valid penalty rule should pass");
     }
 
     #[tokio::test]

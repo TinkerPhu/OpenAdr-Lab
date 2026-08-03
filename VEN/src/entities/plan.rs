@@ -234,6 +234,17 @@ pub struct CostBreakdown {
     pub c_wear_eur: f64,
     pub c_violations_eur: f64,
     pub v_services_eur: f64,
+    /// WP6.3 (BL-09) — accepted peak-demand penalty cost, summed across all
+    /// rule/window slacks that still exceeded threshold after solving.
+    #[serde(default)]
+    pub c_peak_penalty_eur: f64,
+}
+
+/// A penalty rule active on the current plan, for UI consumption (WP6.3, BL-09).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActivePenaltyRule {
+    pub rule_id: String,
+    pub threshold_kw: f64,
 }
 
 /// Summary of the full plan horizon.
@@ -285,6 +296,11 @@ pub struct Plan {
     /// fallback (WP-T2, `docs/history/project_journal.md, search "WP-T"`).
     #[serde(default = "SolveStatus::default_optimal")]
     pub solve_status: SolveStatus,
+    /// WP6.3 (BL-09) — penalty rules active for this plan, so a UI client can
+    /// render per-slot peak-demand status without deriving it independently.
+    /// Empty when the feature is not configured.
+    #[serde(default)]
+    pub penalty_rules_active: Vec<ActivePenaltyRule>,
 }
 
 impl SolveStatus {

@@ -1,7 +1,7 @@
 #![allow(dead_code)] // types used by milp_planner submodules via use super::*
 use chrono::{DateTime, Utc};
 
-use crate::entities::planner_params::{PlannerObjective, PlannerParams};
+use crate::entities::planner_params::{PenaltyRuleParams, PlannerObjective, PlannerParams};
 
 // ── Internal MILP types ──────────────────────────────────────────────────────
 
@@ -105,6 +105,8 @@ pub(crate) struct MilpInputs {
     pub(crate) pen_imp_eur_kwh: f64,
     /// Per-kWh export violation penalty (scalar)
     pub(crate) pen_exp_eur_kwh: f64,
+    /// WP6.3 (BL-09) — active peak-demand penalty rules. Empty = feature disabled.
+    pub(crate) penalty_rules: Vec<PenaltyRuleParams>,
 
     // ── Battery (None when no battery asset present in profile) ──────────────
     /// Nameplate capacity [kWh]
@@ -334,4 +336,9 @@ pub(crate) struct SolveOutput {
     pub(crate) e_heat_tank_kwh: Vec<f64>,
     /// Per-shiftable-load power schedule [kW]; outer len = num loads, inner len = n
     pub(crate) p_shiftable_kw: Vec<Vec<f64>>,
+    /// WP6.3 (BL-09) — per-rule, per-window peak-demand penalty slack [kW].
+    /// Outer len = `inputs.penalty_rules.len()` (same order), inner len = that
+    /// rule's window count. `> 0.0` means that window's peak still exceeded
+    /// `threshold_kw` after solving (penalty accepted).
+    pub(crate) s_penalty_kw: Vec<Vec<f64>>,
 }

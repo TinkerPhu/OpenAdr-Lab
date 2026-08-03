@@ -257,6 +257,25 @@ def step_firm_slot_has_allocation(context, asset_id):
         f"Checked {len(slots)} slots."
     )
 
+@then('no plan slot\'s net_import_kw exceeds "{kw:f}" within the horizon')
+def step_no_slot_exceeds_import_threshold(context, kw):
+    """WP6.3 (BL-09): assert the planner kept every slot's grid import at or
+    below `kw` — the visible effect of the peak-demand penalty threshold
+    steering the plan away from a single-slot spike.
+    """
+    plan = context.ven_plan
+    slots = plan.get("slots", [])
+    over = [
+        (s.get("slot_index"), s.get("net_import_kw"))
+        for s in slots
+        if s.get("net_import_kw", 0.0) > kw + 1e-6
+    ]
+    assert not over, (
+        f"expected every slot's net_import_kw <= {kw}, but these exceeded it "
+        f"(slot_index, net_import_kw): {over}"
+    )
+
+
 @then('the plan contains a packet with asset_id"{asset_id}" in a non-terminal status')
 def step_plan_packet_non_terminal(context, asset_id):
     plan = context.ven_plan

@@ -237,6 +237,7 @@ impl Default for PlannerConfig {
             v_ev_free_charge_eur_kwh: default_v_ev_free_charge(),
             stale_rate_policy: default_stale_rate_policy(),
             stale_rate_safe_pctl: default_stale_rate_safe_pctl(),
+            penalty_rules: vec![],
         }
     }
 }

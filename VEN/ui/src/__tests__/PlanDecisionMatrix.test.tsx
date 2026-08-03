@@ -177,4 +177,23 @@ describe("PlanDecisionMatrix", () => {
     expect(screen.getByTestId("tariff-cell-est-1")).toBeInTheDocument();
     expect(screen.queryByTestId("tariff-cell-est-0")).not.toBeInTheDocument();
   });
+
+  // ─── Peak-demand row (WP6.3, BL-09) ────────────────────────────────────────
+
+  it("does not render the peak-demand row when no penalty rule is active", () => {
+    render(<PlanDecisionMatrix plan={makePlan()} />);
+    expect(screen.queryByTestId("matrix-row-peak-demand")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("matrix-peak-demand-cells")).not.toBeInTheDocument();
+  });
+
+  it("renders the peak-demand row with correct over/under coloring when a rule is active", () => {
+    const plan = makePlan();
+    plan.penalty_rules_active = [{ rule_id: "peak-10kw", threshold_kw: 3.0 }];
+    // slot 0: net_import_kw = 3.5 (over 3.0 threshold); slot 1: net_import_kw = 0 (under)
+    render(<PlanDecisionMatrix plan={plan} />);
+    expect(screen.getByTestId("matrix-row-peak-demand")).toBeInTheDocument();
+    expect(screen.getByTestId("peak-demand-cell-over-0")).toBeInTheDocument();
+    expect(screen.getByTestId("peak-demand-cell-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("peak-demand-cell-over-1")).not.toBeInTheDocument();
+  });
 });

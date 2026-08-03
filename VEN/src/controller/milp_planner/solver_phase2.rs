@@ -10,6 +10,7 @@ use crate::controller::milp_interactions::{
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
+use super::penalty;
 use super::solver_phase1::{add_model_constraints, read_solve_output, solve_phase1};
 use super::types::*;
 
@@ -195,6 +196,11 @@ pub(crate) fn solve_phase2(
         shiftable: shift_vars,
     };
 
+    // WP6.3 (BL-09): declared fresh here too — Phase 2 re-declares all variables,
+    // same as s_imp_viol/s_exp_viol above.
+    let penalty_vars =
+        penalty::declare_penalty_vars(&inputs.penalty_rules, &inputs.cum_s, &mut vars);
+
     // Phase 2: per-asset startup/ramp aux vars declared with real cost values.
     for ctx in asset_contexts {
         match ctx.asset_kind() {
@@ -247,6 +253,10 @@ pub(crate) fn solve_phase2(
         phase1_cap_expr += (p1w.w_viol * inputs.pen_imp_eur_kwh * inputs.dt_h[t]) * s_imp_viol[t];
         phase1_cap_expr += (p1w.w_viol * inputs.pen_exp_eur_kwh * inputs.dt_h[t]) * s_exp_viol[t];
     }
+    // WP6.3 (BL-09): must mirror Phase 1's objective exactly, same rationale as
+    // every other term here — this is an economic cost, not friction, so it
+    // belongs in the cap expression, not in `friction_obj` below.
+    phase1_cap_expr += penalty::penalty_objective(&penalty_vars);
     // Phase 1 cost cap contributions: battery wear + EV service reward + heater m_low.
     // Matches Phase 1 objective exactly so the cap is meaningful.
     for ctx in asset_contexts {
@@ -351,13 +361,14 @@ pub(crate) fn solve_phase2(
         &global,
         asset_contexts,
         n,
+        &penalty_vars,
     );
     model = model.with_time_limit(timeout_s);
     model = model.with_mip_gap(0.02)?;
     let solution = model.solve()?;
 
     let friction_value = solution.eval(&friction_obj);
-    let out = read_solve_output(&solution, &friction_obj, &pool, inputs, n);
+    let out = read_solve_output(&solution, &friction_obj, &pool, inputs, n, &penalty_vars);
     Ok((out, friction_value))
 }
 

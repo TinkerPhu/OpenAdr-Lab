@@ -274,6 +274,8 @@ export type Plan = {
   objective_eur: number;
   friction_eur: number;
   solve_status: SolveStatus;
+  /** WP6.3 (BL-09) — active peak-demand penalty rules; empty when the feature is not configured. */
+  penalty_rules_active?: Array<{ rule_id: string; threshold_kw: number }>;
 };
 
 export type AssetLedger = {

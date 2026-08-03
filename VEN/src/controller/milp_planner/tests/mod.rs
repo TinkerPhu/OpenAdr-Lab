@@ -811,6 +811,7 @@ mod basic;
 mod cost_sign;
 mod heater;
 mod modes;
+mod penalty;
 mod planner;
 mod pv;
 mod solver;
