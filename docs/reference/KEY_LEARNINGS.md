@@ -761,6 +761,16 @@ outes/sim.rs causes a T1+T2 double-solve race:
   background run finished, and check `ps aux`/`docker ps` for orphaned duplicate
   `docker compose` process trees after any resume — both a reboot and a locally-killed
   wrapper leave the remote side able to keep running (or half-running) undetected.
+- **`run_all_tests.sh --e2e` only `git pull`s Node1's checkout — it never checks out a
+  feature branch.** Running it while working on an unmerged branch silently E2E-tests
+  whatever Node1's checkout is currently on (typically `main`), not the branch under
+  test, with no error — the run just "passes" against stale code. To E2E-test a feature
+  branch before merging: `git push origin <branch>`, then on Node1
+  `git fetch origin <branch> && git checkout <branch>` (verify with `git log --oneline -1`)
+  before invoking the script; switch back to `main` (`git checkout main && git pull`)
+  afterward. Also watch for a stale scp'd working tree from an earlier `deploy-node1`-skill
+  session blocking the pull/checkout (`git status`; `git checkout -- <files>` to discard —
+  safe once those files' content is already merged into `main`).
 - **Node1's mDNS name is `node1.local`** (lowercase, explicit `host-name=node1` in
   `/etc/avahi/avahi-daemon.conf` — Avahi otherwise falls back to the static hostname
   `Node1` → `Node1.local`, capitalized). Older docs/journal entries said `node1server.local`,
