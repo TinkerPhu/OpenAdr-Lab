@@ -30,20 +30,31 @@ def _publish_mqtt(topic: str, payload: dict) -> None:
 
 
 def _sample_forecast_message(fetched_at: datetime) -> dict:
-    valid_at = fetched_at.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    # 24 hourly samples spanning a full day ahead, not just a single sample
+    # 1h out: a single-sample fixture is time-of-day flaky against real solar
+    # position (Zunzgen) — whenever the suite happens to run in the evening,
+    # "1h ahead" can land after sunset, making every plan slot's forecast_ac_kw
+    # zero regardless of the (nonzero) GHI. Spanning 24h guarantees genuine
+    # daytime coverage within the test profile's plan horizon no matter what
+    # real wall-clock time the suite runs at.
+    base = fetched_at.replace(minute=0, second=0, microsecond=0)
+    samples = []
+    for h in range(1, 25):
+        valid_at = base + timedelta(hours=h)
+        samples.append(
+            {
+                "valid_at": valid_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "age_h": h,
+                "temperature_c": 20.0,
+                "ghi_w_m2": 600.0,
+            }
+        )
     return {
         "schema_version": "1.0.0",
         "source_id": "bdd-test-source",
         "location": {"latitude_deg": 47.4491, "longitude_deg": 7.8081},
         "fetched_at": fetched_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "samples": [
-            {
-                "valid_at": valid_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "age_h": 1,
-                "temperature_c": 20.0,
-                "ghi_w_m2": 600.0,
-            }
-        ],
+        "samples": samples,
     }
 
 
