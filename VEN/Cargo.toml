@@ -40,5 +40,12 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # adapter is ever pointed at the broker's 8883/TLS listener.
 rumqttc = { version = "0.25", default-features = false }
 
+# malloc_trim(0) after each MILP solve (services::planning::PlanningService::solve_plan)
+# — glibc doesn't return a blocking-thread's freed heap pages to the OS on its own after
+# a large HiGHS solve, so RSS otherwise plateaus at the largest solve's high-water mark.
+# Linux/glibc only (matches the debian:bookworm-slim runtime image); cfg-gated at the
+# call site for other targets (local dev on Windows/macOS).
+libc = "0.2"
+
 # If you decide to use the Rust VEN library:
 # openleadr-client = "0.1"   # check repo/docs for exact version you want
