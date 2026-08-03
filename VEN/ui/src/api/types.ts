@@ -702,3 +702,23 @@ export type WeatherResponse = {
   raw: WeatherForecast | null;
   derived: WeatherPvForecastSlot[] | null;
 };
+
+// ── Real-measurement MQTT feeds (real-measurement-mqtt) ───────────────────────
+// Field names pass through the Rust MeasurementResponse wire shape verbatim
+// (see VEN/src/routes/measurement.rs).
+
+export type MeasurementStatus = "ok" | "stale" | "disabled" | "not_configured";
+
+export type MeasurementSignal = {
+  status: MeasurementStatus;
+  is_fresh: boolean;
+  /** Transport heartbeat: whether the configured source has been heard from recently. */
+  source_alive: boolean;
+  raw_kw: number | null;
+  raw_at: string | null;
+};
+
+export type MeasurementResponse = {
+  pv: MeasurementSignal;
+  base_load: MeasurementSignal;
+};
