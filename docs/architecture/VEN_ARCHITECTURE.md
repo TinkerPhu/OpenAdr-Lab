@@ -269,6 +269,35 @@ constraints — the solver does not iterate over session objects directly:
 Session tracking (accumulated cost, per-slot power history, status lifecycle) is handled
 by the Dispatcher and reporting layer — not by the solver.
 
+#### 2.3.2 Peak-Demand Penalty Threshold (WP6.3, BL-09)
+
+A profile may declare zero or more `planner.penalty_rules` entries
+(`rule_id`, `threshold_kw`, `measurement_window_s`, `penalty_eur_per_kw`;
+`entities::planner_params::PenaltyRuleParams`), each keeping the planner's grid
+import at or below `threshold_kw` within fixed, horizon-aligned windows of
+`measurement_window_s`. Implemented as a per-solve soft-penalty MILP term
+(`controller/milp_planner/penalty.rs`), mirroring the existing `s_imp_viol`
+soft-constraint idiom: one shared slack variable per rule per window bounds
+every slot's import in that window, penalized in the objective at
+`penalty_eur_per_kw` per kW over threshold — once per window, not per slot
+(a demand-charge-style peak cost, not an energy cost). The planner reschedules
+flexible load away from a threshold breach whenever that costs less than the
+accepted penalty; when it can't (or it's cheaper not to), the accepted cost
+surfaces as `CostBreakdown.c_peak_penalty_eur` and a `PlanWarning` naming the
+breached rule, window, peak, and cost. Feature is off by default
+(`penalty_rules: []`); `measurement_window_s` must be a positive multiple of
+the effective planning step (`PlannerConfig::effective_step_s()`), validated
+at profile load in `profile::validate`.
+
+Deliberately **not** the stateful, persisted billing-period tracker sketched in
+`entities::design_vocabulary::PenaltyRule` (rolling averages,
+`breached_this_period` surviving restarts, non-peak `PenaltyCondition`
+variants) — each solve re-evaluates its own horizon fresh, with no
+cross-restart state. See
+`openspec/changes/penalty-threshold-check/design.md` (archived once merged;
+`docs/history/project_journal.md` has the resolution summary) for the full
+set of decisions and rejected alternatives.
+
 ### 2.4 Data Flows
 
 **One heartbeat (5 min PlanTimeStep, steady state):**

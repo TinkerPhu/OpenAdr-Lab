@@ -21,7 +21,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 | ID | What the user gets | Gain | Effort | Risk |
 |---|---|---|---|---|
-| [BL-09](#bl-09-phase-6--penalty-threshold-check) | Avoids demand-charge/peak penalties by rescheduling load ahead of a threshold — real €/kW savings on penalty tariffs | High | L | Medium — new constraint category + cost comparison, touches Phase 6 slot reallocation |
 | [BL-11](#bl-11-time-weighted-tariff-averaging-for-planner-slot-costing) | Slightly cheaper/more accurate plans for slots that straddle a tariff-rate boundary | Low | S | Low — isolated calc on existing `TimeSeries` |
 | [BL-13](#bl-13-early-firm-up-heuristic) | Fewer noisy replans under flat-rate tariffs (plan feels more stable) | Low | S | Low — statistical check + reclassification |
 
@@ -61,16 +60,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | [BL-29](#bl-29-flexibilitydirection-ratetype-rateunit--narrow-supporting-enums) | No standalone value — fold into whichever future feature needs each enum | None |
 | [GB-07](#general-backlog) | Dev/ops convenience (container setup script), not user-facing | Low |
 | [GB-11](#general-backlog) | Process/docs alignment items, not user-facing | Low |
-
----
-
-### BL-09: Phase 6 — Penalty threshold check
-**Req:** UC-10, VEN_ARCHITECTURE §2.3
-**Problem:** Planner Phase 6 is marked "deferred to Stage 4" (`planner.rs:76`). No penalty avoidance logic exists. Peak demand penalties are not evaluated.
-**Fix:** After Phase 5, evaluate each FIRM slot against configurable penalty thresholds (e.g., MeasurementWindow peak kW). If projected peak exceeds threshold, compute penalty cost vs. avoidance cost (rescheduling allocations to stay below). Reschedule if avoidance is cheaper.
-**Gain:** High — direct, ongoing €/kW penalty avoidance once a real penalty tariff is in play; the only item in this backlog with a recurring, quantifiable financial upside.
-**Complexity:** Large (5–8 hours). Needs penalty rule configuration, threshold evaluation, cost comparison, and slot reallocation.
-**Verify:** BDD test: configure 10kW penalty threshold, schedule 12kW of load in one slot, assert planner splits across two slots to stay below threshold.
 
 ---
 
@@ -176,9 +165,9 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 
 ### BL-35: Notification producers for tier fallback / deadline-at-risk / packet abandoned
 **Req:** `entities/design_vocabulary.rs` (`UserNotificationSeverity` doc comments)
-**Problem:** The notification feed (ring + SSE + persistence, `services/notify.rs`) carries grid-emergency, VTN-reachability, and adopted-plan-warning producers. The remaining producers named by the severity enum's own doc comments — tier fallback, deadline approaching, packet abandoned — have nothing to hook onto because the Stage-5 tier machinery (BL-09-adjacent) doesn't exist yet.
-**Fix:** Wire these producers when the tier/penalty machinery lands (BL-09); each should emit through the existing `Notifier` with a stable dedup text.
-**Gain:** Low — incremental notification coverage, and blocked on BL-09's machinery existing first.
+**Problem:** The notification feed (ring + SSE + persistence, `services/notify.rs`) carries grid-emergency, VTN-reachability, and adopted-plan-warning producers. The remaining producers named by the severity enum's own doc comments — tier fallback, deadline approaching, packet abandoned — have nothing to hook onto because the Stage-5 tier/SIMPLE-level-fallback machinery doesn't exist yet. Not unblocked by BL-09 (peak-demand penalty threshold, resolved): that shipped a lightweight, per-solve constraint with no persisted tier/billing-period state, deliberately not the stateful tracker this item's tier-fallback producer would hook into — see `docs/history/project_journal.md` (search "BL-09") for that scope decision.
+**Fix:** Wire these producers when the tier/SIMPLE-level-fallback machinery lands; each should emit through the existing `Notifier` with a stable dedup text.
+**Gain:** Low — incremental notification coverage, and blocked on that machinery existing first.
 **Complexity:** Small once the producing machinery exists.
 **Verify:** Test per producer: the triggering condition emits exactly one notification of the expected severity.
 
@@ -257,36 +246,3 @@ features in the lockfile, and `cargo audit` scans the lockfile, hence the hit. N
 any internet-exposed deployment.
 
 ---
-
-## Implementation Task List — High / Medium-High Gain Items
-
-Scope: the item currently rated Gain: High or Medium-High (BL-09). BL-40 and BL-34 were in this
-list and have been resolved (branches `042-cost-sign-fix`, `043-comfort-curves-milp`; see
-`docs/architecture/ven_milp_planner.md` §8 and §10); their entries are removed per the
-completion step below.
-
-Each item's tasks follow this repo's test-first convention (`test-first` rule,
-`CLAUDE.md`): write the test, confirm it fails, implement until green. Full verification
-before considering an item done: `wsl cargo test -j 2 -p ven-app` under `wsl_lock`,
-`cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
-`scripts/audit_file_sizes.py`; update `docs/history/project_journal.md` and remove the
-item from this backlog once resolved.
-
-### 1. BL-09 — Phase 6: penalty threshold check
-
-- [ ] 1.1 Design pass: penalty rule configuration shape (new profile YAML section, e.g.
-      `planner.penalty_thresholds`), threshold evaluation logic, and the cost-comparison model
-      (penalty cost vs. reschedule/avoidance cost).
-- [ ] 1.2 Write a failing BDD scenario (per the item's own Verify note): configure a 10 kW
-      penalty threshold, schedule 12 kW of load in one slot, assert the planner splits it
-      across two slots to stay below threshold.
-- [ ] 1.3 Implement Phase 6 after Phase 5: for each FIRM slot, evaluate projected peak against
-      the configured threshold.
-- [ ] 1.4 Implement the cost comparison (penalty cost vs. avoidance cost) and the reallocation
-      step when avoidance is cheaper.
-- [ ] 1.5 Unit tests for the three cases: threshold not exceeded (no change); exceeded but
-      avoidance costlier (penalty accepted); exceeded and avoidance cheaper (reschedule).
-- [ ] 1.6 Full verification, including the new BDD scenario on Node1 (`bash run_all_tests.sh
-      --e2e`); update `docs/history/project_journal.md`; remove BL-09 from this backlog.
-- [ ] 1.7 Note for later (not in this list): BL-35's tier-fallback notification producers
-      become buildable once this lands.
