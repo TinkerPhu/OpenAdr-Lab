@@ -463,6 +463,10 @@ The resolved limit reaches the simulator every tick: `SimState::tick()` takes a
 VTN/sim-inject capacity cap, the plan's own curtailment target, and (when the deviation arbiter
 is enabled) its backstop tighten value — `PvCurtailmentSource` tags which one won.
 
+**Ground-truth precedence** (ven-1 only, when configured): a real measured PV reading
+outranks the weather-derived estimate, which in turn outranks the sin model — see
+[`docs/architecture/real_measurement_mqtt.md`](real_measurement_mqtt.md).
+
 #### Battery
 
 ```
@@ -505,6 +509,10 @@ band (it doesn't know the safety envelope exists).
 
 Static consumption profile (`W` constant or time-varying). Not controllable.
 Represents appliances, lighting, standby — the uncontrollable fraction of site demand.
+
+**Ground-truth replace** (ven-1 only, when configured): a real measured baseline-load
+reading replaces the synthetic profile+noise outright — see
+[`docs/architecture/real_measurement_mqtt.md`](real_measurement_mqtt.md).
 
 ### 3.3 Control Path
 
@@ -662,6 +670,7 @@ principle (every backend capability needs an inspectable UI surface, not just a 
 | GET | `/reports/submissions` | Per-report submission outcome (accepted/rejected/error), keyed to the Reports page |
 | GET | `/notifications`, `/notifications/history`, `/notifications/events` | User-facing notifications: current, history, SSE stream |
 | GET | `/metrics` | Prometheus metrics; VEN UI's Metrics page groups these under human-readable categories by default, with a raw-view toggle |
+| GET | `/measurement` | Real-measurement MQTT feed status (PV, baseline load): raw reading, freshness, source-alive — see [`docs/architecture/real_measurement_mqtt.md`](real_measurement_mqtt.md) |
 
 ### 4.11 Fleet Dashboard — Multi-Host VEN Discovery (BL-41)
 
