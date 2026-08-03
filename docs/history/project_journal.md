@@ -7637,3 +7637,89 @@ on Node2); all confirmed healthy post-restart. Commit `447de6a`.
   question before it's a leak question: check `solver_ms` (or equivalent per-instance workload
   metric) and `pmap -x`'s resident-vs-dirty split before reaching for heap profiling tools.
 
+## Peak-demand penalty threshold check (WP6.3, BL-09)
+
+**Why**: BL-09 was the only open backlog item rated Gain: High — the sole item with
+a recurring, quantifiable €/kW financial upside once a real demand-charge/penalty
+tariff is in play. Planned via `openspec/changes/penalty-threshold-check/` (proposal,
+design, spec, tasks) before implementation, per the openspec workflow.
+
+**Scope decision**: `entities::design_vocabulary::PenaltyRule` already sketched a
+much larger vocabulary for this space — a stateful, persisted billing-period tracker
+(rolling averages, `breached_this_period` surviving restarts, four `PenaltyCondition`
+variants). That's a different, heavier feature with no requirement backing it yet.
+Built instead: a lightweight, per-solve, per-window soft-penalty MILP term covering
+only `PeakDemandExceeded`, re-evaluated fresh every plan cycle with no persisted
+state. If real multi-day billing-period tracking is ever needed, it should reuse
+`design_vocabulary::PenaltyRule` as a separate future proposal, not extend this one.
+
+**What was done**: new `entities::planner_params::PenaltyRuleParams` (`rule_id`,
+`threshold_kw`, `measurement_window_s`, `penalty_eur_per_kw`), threaded through
+`PlannerParams` → `profile::schema::PlannerConfig` (reusing the entity type directly
+via serde, same pattern as `PlanZone`) → `MilpInputs`. New
+`controller/milp_planner/penalty.rs`: one shared slack variable per rule per fixed,
+horizon-aligned window (bucketed via `MilpInputs::cum_s`'s exact integer arithmetic,
+not `dt_h`) bounds every slot's import in that window at `threshold_kw`; the
+objective is penalized at `penalty_eur_per_kw` per kW of slack, once per window (a
+demand-charge-style peak cost, not an energy cost — no `dt_h` factor, unlike
+`s_imp_viol`'s per-slot violation penalty). Wired into both solver phases and the
+dual-LP solve via `add_model_constraints`'s existing shared constraint-adding
+function (one new parameter, not three separate implementations). Results side:
+`CostBreakdown.c_peak_penalty_eur` sums accepted penalty cost; a `PlanWarning` names
+any window still exceeding threshold after solving. VEN UI: new "Peak demand" row in
+`PlanDecisionMatrix.tsx`, gated on a new `Plan.penalty_rules_active` field; the
+"penalty accepted" case needed zero new UI code since `PlanWarning`s already render
+generically in `PlanHeaderBar.tsx`.
+
+**Deviation found during implementation**: the design assumed invalid penalty-rule
+config would surface via `DomainError::ProfileInvalid`. On inspection, profile-load
+validation already has its own established, tested mechanism —
+`Profile::validate() -> Result<(), Vec<String>>` — used by every other profile
+invariant; `ProfileInvalid`'s own doc comment marks it reserved for a not-yet-built
+hot-reload path, a different feature. Used the existing mechanism instead of
+introducing a redundant one. That same validation pass also surfaced a **real,
+independent bug**: the new window-multiple check first validated
+`measurement_window_s` against the profile's raw `plan_step_s`, but that field is
+silently ignored whenever `planner.plan_zones` is set (the effective step comes from
+`zones[0].step_s` via `PlannerConfig::effective_step_s()`) — i.e. every real fleet
+profile (`ven-1`..`ven-13`, `test.yaml`) uses `plan_zones`, so the check would have
+validated against the wrong number for all of them. Fixed to use
+`effective_step_s()`.
+
+**BDD infrastructure**: BDD "profile" scenarios (`Given the VEN is running with
+profile "..."`) route to distinct, already-running docker containers rather than
+hot-swapping YAML on a shared instance — so exercising `penalty_test.yaml` required
+standing up a 5th VEN test container (`test-ven-penalty` in
+`tests/docker-compose.test.yml`, mirroring the existing but never-actually-exercised
+`test-ven-no-pv` pattern) and wiring `VEN_PENALTY_TEST_BASE_URL` through
+`api_client.py`, `entity_model_steps.py`'s `profile_urls` map, and `test-runner`'s
+`depends_on`. Real infrastructure addition, not scope creep — no cheaper way to run a
+profile-scoped BDD scenario exists in this repo today.
+
+**Also learned mid-session**: Node1/Node2's `/srv/docker/openadr_lab` checkouts are
+separate git clones that `run_all_tests.sh --e2e` updates via a plain `git pull`
+(current branch, `main` by default) — they do **not** see local uncommitted changes.
+A first e2e run against a freshly-created feature branch silently tested the
+previous commit on `main` for 26 minutes before this was noticed (the new
+`test-ven-penalty` container was simply absent from `docker ps`, the tell). Fix for
+next time: push the feature branch, then `ssh <host> "cd .../openadr_lab && git
+fetch && git checkout <branch> && git pull"` *before* invoking `run_all_tests.sh`, or
+any run against a Node1/Node2 docker host will silently test stale `main`, not the
+working branch.
+
+**Verification**: 897/897 VEN Rust tests, `cargo fmt --check`/`clippy -D
+warnings`/`scripts/audit_file_sizes.py` all clean; 437/437 VEN UI tests, eslint/`npm
+run build` clean. New unit tests in `controller/milp_planner/tests/penalty.rs` cover
+threshold-not-exceeded (split across slots), exceeded-but-unavoidable (penalty
+accepted), and disabled-by-default (empty rule list = no-op). E2E BDD run on Node2
+against the correct branch: [fill in after the run completes].
+
+**Key learning**: same lesson as the Pi4/Po4 rename above, different domain — a
+validation or config check written against a field that has an "ignored when X"
+escape hatch (`plan_step_s` ignored when `plan_zones` is set) must validate against
+the *effective* value, not the raw field, or it silently validates the wrong thing
+for every profile that uses the escape hatch. Also: when adding a new BDD "profile"
+scenario, check whether the profile name actually needs a new docker-compose
+service before assuming the step definition alone is enough — the routing layer
+(`profile_urls`) can reference URLs for containers that don't exist yet.
+

@@ -53,11 +53,11 @@
 
 ## 8. Docs & backlog bookkeeping
 
-- [ ] 8.1 Remove the BL-09 entry from `docs/BACKLOG.md`
-- [ ] 8.2 Add a short penalty-threshold subsection to `docs/architecture/VEN_ARCHITECTURE.md` §2.3
-- [ ] 8.3 Mark WP6.3 done in `docs/plans/roadmap/phase-6-fidelity-and-cert.md` (or remove the file if it was the last remaining in-flight Track A item — check other Track A items' status first)
-- [ ] 8.4 Add an entry to `docs/history/project_journal.md`
-- [ ] 8.5 Run `/wiki-sync`
+- [x] 8.1 Remove the BL-09 entry from `docs/BACKLOG.md` (both the short table row/entry and a second, more detailed "Implementation Task List" section further down the same file that also referenced BL-09; also corrected BL-35's and `docs/plans/strategic_roadmap.md`'s false claim that BL-09 would unblock BL-35 — it doesn't, BL-35 needs separate Stage-5 tier/SIMPLE-fallback machinery this change never built)
+- [x] 8.2 Add a short penalty-threshold subsection to `docs/architecture/VEN_ARCHITECTURE.md` (new §2.3.2)
+- [x] 8.3 Mark WP6.3 done in `docs/plans/roadmap/phase-6-fidelity-and-cert.md` — removed the WP6.3 subsection (WP6.1/6.2/6.4 and Tracks B/C are still open, so the file stays; per the "remove just the done part" workflow rule)
+- [x] 8.4 Add an entry to `docs/history/project_journal.md`
+- [ ] 8.5 Run `/wiki-sync` — deferred until after 7.4 (e2e) confirms green, so the wiki reflects verified behavior
 
 ## 9. Final verification
 

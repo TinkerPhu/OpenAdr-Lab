@@ -5,7 +5,7 @@
 > hygiene queue. Unlike Phases 1–5, this is a **grab-bag of independent work
 > packages** — they can be interleaved into earlier phases whenever priorities shift
 > or a WP elsewhere touches the same files.
-> **Items:** BL-11, BL-13, BL-09, BL-27, BL-18, Cluster H (TLS, webhooks, MQTT,
+> **Items:** BL-11, BL-13, BL-27, BL-18, Cluster H (TLS, webhooks, MQTT,
 > `/auth/server`, gzip, `randomizeStart`, "now" sentinel, runtime reconfig, mDNS),
 > dependency-vulnerability batch, Cluster I hygiene (BL-21/22/23/26/29,
 > GB-01/04/05/08).
@@ -37,19 +37,6 @@
    FLEXIBLE slots; if < 0.10, reclassify and re-run allocation Phases 2–5.
 3. Interaction check: with Phase 4's OPPORTUNISTIC mode, firm-up must not defeat
    "only when ~free" semantics — add one combined test.
-
-### WP6.3 — BL-09: penalty threshold check — planner Phase 6 (L)
-
-1. Config: penalty rules in profile (threshold kW per measurement window, penalty
-   €/kW), typed params struct (profile rule).
-2. After allocation: project per-window peak; if above threshold, compare penalty
-   cost vs. rescheduling cost; reallocate when cheaper. Prefer expressing this
-   *inside* the MILP as a soft-penalty term over post-hoc reallocation if the solver
-   formulation allows — decide at proposal time with a small formulation spike.
-3. BDD per BL-09's verify: 10 kW threshold, 12 kW load in one slot → planner splits
-   across two slots.
-4. KPI hook: `kpi.py` gains penalty-cost-avoided — makes S-3 (capacity limit)
-   vs. penalty-based control comparable, a nice experiment extension (S-7 candidate).
 
 ### WP6.4 — BL-27 + BL-18: control-mode metadata + live flex widget (M)
 
@@ -128,7 +115,8 @@ same files):
 
 Tracks A, B, C are independent. Within B: WP6.5 → WP6.6 → WP6.7.
 Suggested interleaving if this phase runs as a block: WP6.1 + WP6.2 (quick fidelity
-wins) → WP6.5 (vulns overdue by then) → WP6.3 → WP6.6 → WP6.4 → Track C → WP6.7.
+wins) → WP6.5 (vulns overdue by then) → WP6.6 → WP6.4 → Track C → WP6.7.
+(WP6.3 — BL-09 penalty threshold check — is done; see `docs/history/project_journal.md`.)
 
 Risks: (a) reqwest major-version upgrade ripples through `vtn.rs` error handling —
 budget a full resilience-suite pass; (b) webhook receiver opens an inbound port on
@@ -137,6 +125,7 @@ posture in [[openadr-security]]; (c) BL-22 needs an explicit user decision — d
 resolve it unilaterally.
 
 Bookkeeping: re-run the full cert audit and update every touched percentage in
-`docs/BACKLOG_OpenADR_Cert.md`; mark BL-09/11/13/18/21/22/23/26/27/29 and GB items
-resolved; journal + `/wiki-sync` ([[openadr-security]], [[reliability-and-config]],
-[[vision-and-roadmap]] — the certification OPEN QUESTION gets its answer here).
+`docs/BACKLOG_OpenADR_Cert.md`; mark BL-11/13/18/21/22/23/26/27/29 and GB items
+resolved as they land (BL-09 already resolved); journal + `/wiki-sync`
+([[openadr-security]], [[reliability-and-config]], [[vision-and-roadmap]] — the
+certification OPEN QUESTION gets its answer here).

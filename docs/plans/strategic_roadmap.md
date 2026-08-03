@@ -25,7 +25,7 @@ SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort*
 
 ## 2. Where the open items live
 
-- `docs/BACKLOG.md` — feature gaps: BL-09, BL-11, BL-13, BL-17, BL-18, BL-21…BL-27,
+- `docs/BACKLOG.md` — feature gaps: BL-11, BL-13, BL-17, BL-18, BL-21…BL-27,
   BL-29, BL-34, BL-35; general items GB-04, GB-05, GB-07, GB-09, GB-11.
 - `docs/BACKLOG_OpenADR_Cert.md` — certification/transport line items (Cluster H).
 - `docs/reference/TECHNICAL_DEBTS.md` — the debt register (R-18…R-40).
@@ -68,7 +68,7 @@ Plan: `docs/plans/roadmap/phase-5-forecast-and-baseline.md` (WP5.1/WP5.2/WP5.3-w
 | Item | Content |
 |------|---------|
 | BL-34 | Translate comfort curves (default or user-override) into MILP tier constraints — today the resolved curve is dropped before the solver, so it influences nothing |
-| BL-35 | Notification producers for tier fallback / deadline-at-risk / packet abandoned (blocked on BL-09's tier machinery) |
+| BL-35 | Notification producers for tier fallback / deadline-at-risk / packet abandoned (blocked on Stage-5 tier/SIMPLE-level-fallback machinery — not unblocked by BL-09, which shipped a lightweight per-solve constraint with no persisted tier state) |
 | BL-27 / BL-18 | Control-mode metadata for UI sliders; instantaneous per-asset flexibility widget (scope decision first) |
 
 ### 3.4 Phase 6 — Planner fidelity & certification track
@@ -76,7 +76,6 @@ Plan: `docs/plans/roadmap/phase-5-forecast-and-baseline.md` (WP5.1/WP5.2/WP5.3-w
 | Item | Content |
 |------|---------|
 | BL-11 | Time-weighted tariff averaging per slot (slot straddling a tariff boundary) |
-| BL-09 | Penalty-threshold check (peak-demand penalties) — also unblocks BL-35 |
 | BL-13 | Early firm-up heuristic under flat rates |
 | Cluster H | Transport modernisation: TLS 1.2+ (cert MUST), webhooks/subscriptions, optional MQTT, `/auth/server` discovery, mDNS, randomizeStart, gzip — tracked in `docs/BACKLOG_OpenADR_Cert.md` |
 
