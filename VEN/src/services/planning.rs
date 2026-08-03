@@ -413,9 +413,21 @@ impl PlanningService {
     /// post-/pre-solve service-layer step.
     pub async fn solve_plan(solver: &Arc<dyn SolverPort>, req: SolveRequest) -> Plan {
         let solver = solver.clone();
-        tokio::task::spawn_blocking(move || solver.solve(req))
-            .await
-            .expect("planner task panicked")
+        tokio::task::spawn_blocking(move || {
+            let plan = solver.solve(req);
+            // Return this blocking thread's freed heap pages to the OS immediately.
+            // Without this, glibc keeps a large solve's dirtied pages mapped for reuse,
+            // so RSS ratchets up to the largest solve's high-water mark and never comes
+            // back down between cycles (observed: harder-solving VENs sitting 5-10x
+            // above trivial ones with no leak, just un-trimmed peak working set).
+            #[cfg(all(target_os = "linux", target_env = "gnu"))]
+            unsafe {
+                libc::malloc_trim(0);
+            }
+            plan
+        })
+        .await
+        .expect("planner task panicked")
     }
 
     /// Post-solve step: evaluate acceptance gate, adopt or reject, emit events, update state.
