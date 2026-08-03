@@ -7712,7 +7712,11 @@ warnings`/`scripts/audit_file_sizes.py` all clean; 437/437 VEN UI tests, eslint/
 run build` clean. New unit tests in `controller/milp_planner/tests/penalty.rs` cover
 threshold-not-exceeded (split across slots), exceeded-but-unavoidable (penalty
 accepted), and disabled-by-default (empty rule list = no-op). E2E BDD run on Node2
-against the correct branch: [fill in after the run completes].
+against the correct branch: 54 features passed, 270 scenarios passed, 1535 steps
+passed, 0 failed (1 whole feature skipped — pre-existing tag-gated resilience
+feature, expected outside a `--tags=@resilience` run) — including the new "Planner
+reschedules load to stay under a peak-demand penalty threshold" scenario against the
+new `test-ven-penalty` container (`Status.passed`, 70.6s).
 
 **Key learning**: same lesson as the Pi4/Po4 rename above, different domain — a
 validation or config check written against a field that has an "ignored when X"
