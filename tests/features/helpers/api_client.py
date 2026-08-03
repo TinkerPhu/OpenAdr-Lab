@@ -10,6 +10,9 @@ VTN_BASE_URL = os.environ.get("VTN_BASE_URL", "http://test-vtn:3000")
 VEN_BASE_URL = os.environ.get("VEN_BASE_URL", "http://test-ven-1:8080")
 VEN2_BASE_URL = os.environ.get("VEN2_BASE_URL", "http://test-ven-2:8080")
 VEN_NO_PV_BASE_URL = os.environ.get("VEN_NO_PV_BASE_URL", "http://test-ven-no-pv:8080")
+VEN_PENALTY_TEST_BASE_URL = os.environ.get(
+    "VEN_PENALTY_TEST_BASE_URL", "http://test-ven-penalty:8080"
+)
 _DEFAULT_VEN_BASE_URL = VEN_BASE_URL
 BFF_BASE_URL = os.environ.get("BFF_BASE_URL", "http://test-bff:8090")
 

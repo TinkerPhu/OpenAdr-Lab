@@ -5,8 +5,8 @@ use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::{BatteryParams, EvParams, HeaterParams};
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::plan::{
-    AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanWarning, PlanningHorizon,
-    SolveStatus, WarningSeverity,
+    ActivePenaltyRule, AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot,
+    PlanWarning, PlanningHorizon, SolveStatus, WarningSeverity,
 };
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
@@ -15,6 +15,19 @@ use super::asset_port::{
 };
 use super::envelopes::build_plan_envelopes;
 use super::types::*;
+
+/// WP6.3 (BL-09) — the penalty rules active for this plan, for UI consumption.
+fn active_penalty_rules(
+    inputs_penalty_rules: &[crate::entities::planner_params::PenaltyRuleParams],
+) -> Vec<ActivePenaltyRule> {
+    inputs_penalty_rules
+        .iter()
+        .map(|r| ActivePenaltyRule {
+            rule_id: r.rule_id.clone(),
+            threshold_kw: r.threshold_kw,
+        })
+        .collect()
+}
 
 /// Fallback plan returned when the MILP solver fails.
 /// When `inputs` is `Some`, emits populated slots with zero allocations
@@ -101,6 +114,9 @@ pub(crate) fn fallback_plan(
         ),
         None => vec![],
     };
+    let penalty_rules_active = inputs
+        .map(|i| active_penalty_rules(&i.penalty_rules))
+        .unwrap_or_default();
     Plan {
         id: Uuid::new_v4(),
         created_at: now,
@@ -116,6 +132,7 @@ pub(crate) fn fallback_plan(
         friction_eur: 0.0,
         cost_breakdown: CostBreakdown::default(),
         solve_status: SolveStatus::Infeasible,
+        penalty_rules_active,
     }
 }
 
@@ -406,6 +423,12 @@ pub(crate) fn translate_to_plan(
             })
             .sum(),
         v_services_eur: 0.0,
+        c_peak_penalty_eur: inputs
+            .penalty_rules
+            .iter()
+            .zip(sol.s_penalty_kw.iter())
+            .map(|(rule, windows)| rule.penalty_eur_per_kw * windows.iter().sum::<f64>())
+            .sum(),
     };
 
     // ── Warnings ────────────────────────────────────────────────────────
@@ -435,6 +458,35 @@ pub(crate) fn translate_to_plan(
             suggested_action: None,
         });
     }
+    // WP6.3 (BL-09): a window still exceeding its penalty threshold after
+    // solving means the penalty was accepted (cheaper than reallocating).
+    for (rule, windows) in inputs.penalty_rules.iter().zip(sol.s_penalty_kw.iter()) {
+        for (w, &slack_kw) in windows.iter().enumerate() {
+            if slack_kw > 0.01 {
+                let window_start =
+                    now + Duration::seconds(w as i64 * rule.measurement_window_s as i64);
+                let window_end =
+                    now + Duration::seconds((w as i64 + 1) * rule.measurement_window_s as i64);
+                let peak_kw = rule.threshold_kw + slack_kw;
+                warnings.push(PlanWarning {
+                    severity: WarningSeverity::Warning,
+                    message: format!(
+                        "Penalty rule '{}' exceeded in window {}–{}: peak {:.1} kW > threshold {:.1} kW (€{:.2} accepted)",
+                        rule.rule_id,
+                        window_start.format("%H:%M"),
+                        window_end.format("%H:%M"),
+                        peak_kw,
+                        rule.threshold_kw,
+                        rule.penalty_eur_per_kw * slack_kw
+                    ),
+                    suggested_action: Some(
+                        "Increase available flexible capacity or raise the threshold if this recurs"
+                            .to_string(),
+                    ),
+                });
+            }
+        }
+    }
 
     // ── Assemble plan ───────────────────────────────────────────────────
     let envelopes = build_plan_envelopes(
@@ -448,6 +500,7 @@ pub(crate) fn translate_to_plan(
         now,
         Some(&slots),
     );
+    let penalty_rules_active = active_penalty_rules(&inputs.penalty_rules);
     Plan {
         id: Uuid::new_v4(),
         created_at: now,
@@ -463,5 +516,6 @@ pub(crate) fn translate_to_plan(
         friction_eur,
         cost_breakdown,
         solve_status: SolveStatus::Optimal,
+        penalty_rules_active,
     }
 }

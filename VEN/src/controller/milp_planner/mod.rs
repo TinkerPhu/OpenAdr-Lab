@@ -56,6 +56,7 @@ use crate::entities::tariff_snapshot::TariffTimeSeries;
 pub mod asset_port;
 mod envelopes;
 mod inputs;
+pub(crate) mod penalty;
 mod results;
 mod solver_duals;
 mod solver_phase1;

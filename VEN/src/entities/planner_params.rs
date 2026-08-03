@@ -11,6 +11,20 @@ pub enum PlannerObjective {
     Custom,
 }
 
+/// A peak-demand penalty rule (WP6.3, BL-09): the planner keeps each fixed
+/// `measurement_window_s` window's peak grid import at or below
+/// `threshold_kw` via a soft penalty of `penalty_eur_per_kw` per kW over.
+/// Deliberately lightweight — not the stateful, persisted billing-period
+/// tracker sketched in `entities::design_vocabulary::PenaltyRule`; see
+/// `openspec/changes/penalty-threshold-check/design.md` (Decision D4).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PenaltyRuleParams {
+    pub rule_id: String,
+    pub threshold_kw: f64,
+    pub measurement_window_s: u64,
+    pub penalty_eur_per_kw: f64,
+}
+
 #[derive(Debug, Clone)]
 pub struct PlannerParams {
     pub plan_step_s: u64,
@@ -66,6 +80,9 @@ pub struct PlannerParams {
     /// WP4.4 — SAFE_AVERAGE percentile over the known import rates (0.0–1.0,
     /// nearest-rank; default 0.8 per REQUIREMENTS §3.2.1).
     pub stale_rate_safe_pctl: f64,
+    /// WP6.3 (BL-09) — active peak-demand penalty rules. Empty = feature
+    /// disabled, planner behavior unchanged (default).
+    pub penalty_rules: Vec<PenaltyRuleParams>,
 }
 
 impl Default for PlannerParams {
@@ -107,6 +124,7 @@ impl Default for PlannerParams {
             stale_rate_policy:
                 crate::entities::design_vocabulary::StaleRatePolicy::HeuristicForecast,
             stale_rate_safe_pctl: 0.8,
+            penalty_rules: vec![],
         }
     }
 }
