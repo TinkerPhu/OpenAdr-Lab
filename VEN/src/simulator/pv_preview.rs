@@ -25,6 +25,7 @@ impl SimState {
         pv_irradiance_override: Option<f64>,
         pv_alpha: f64,
         weather_pv_kw: Option<f64>,
+        pv_measured_kw: Option<f64>,
     ) -> Option<f64> {
         let pv_cfg = self.asset_configs.iter().find_map(|cfg| match cfg {
             AssetConfig::Pv(pv) => Some(pv),
@@ -45,8 +46,8 @@ impl SimState {
             if offset.abs() < 0.005 {
                 offset = 0.0;
             }
-            match weather_pv_kw {
-                Some(weather_kw) => -(weather_kw.max(0.0) + offset * pv_cfg.rated_kw).max(0.0),
+            match pv_measured_kw.or(weather_pv_kw) {
+                Some(base_kw) => -(base_kw.max(0.0) + offset * pv_cfg.rated_kw).max(0.0),
                 None => {
                     let natural_irradiance = PvInverter::natural_irradiance_at(now);
                     let irradiance = (natural_irradiance + offset).clamp(0.0, 1.0);

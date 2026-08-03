@@ -1,14 +1,17 @@
 // Simulator tick background task.
 
 mod arbiter_glue;
+mod context;
 mod dispatch_override;
 mod helpers;
+mod post_lock;
 mod publish;
 mod tick;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::controller::MeasurementPort;
 use crate::controller::VtnPort;
 use crate::controller::WeatherForecastPort;
 use crate::entities::asset::PlanTrigger;
@@ -30,6 +33,10 @@ pub(crate) fn spawn_sim_tick(
     event_tx: PlannerEventTx,
     weather: Arc<dyn WeatherForecastPort>,
     weather_pv_params: Option<PvForecastParams>,
+    pv_measurement: Arc<dyn MeasurementPort>,
+    pv_measurement_enabled: bool,
+    base_load_measurement: Arc<dyn MeasurementPort>,
+    base_load_measurement_enabled: bool,
 ) -> tokio::task::JoinHandle<()> {
     let tick_s = sim_params.tick_s;
     let persist_every_s = sim_params.persist_every_s;
@@ -66,6 +73,10 @@ pub(crate) fn spawn_sim_tick(
                 tick_s,
                 weather.clone(),
                 weather_pv_params,
+                pv_measurement.clone(),
+                pv_measurement_enabled,
+                base_load_measurement.clone(),
+                base_load_measurement_enabled,
             )
             .await;
 

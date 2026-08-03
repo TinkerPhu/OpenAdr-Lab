@@ -81,6 +81,16 @@ pub struct BaseLoad {
     /// Configured appliance-noise spikes (coffee/cooking/TV etc.), empty
     /// when the profile declares none.
     patterns: Vec<AppliancePattern>,
+    /// Real measured baseline-load power for this tick (kW, import-positive),
+    /// via `entities::measurement::resolve_measured_kw` — replaces the
+    /// synthetic natural-profile+noise base outright when present (simple
+    /// replace, unlike PV's 3-tier precedence: baseline has no intermediate
+    /// forecast tier). `None` when no measurement feed is configured, the
+    /// profile doesn't enable it (`measurements.base_load_enabled`), or the
+    /// cached reading has gone stale. Set each tick by the sim loop. NOT
+    /// from YAML.
+    #[serde(default)]
+    pub measured_load_kw: Option<f64>,
 }
 
 /// BaseLoad mutable state.
@@ -101,6 +111,7 @@ impl BaseLoad {
                 .enumerate()
                 .map(|(i, s)| AppliancePattern::from_params(i, s))
                 .collect(),
+            measured_load_kw: None,
         }
     }
 

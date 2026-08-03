@@ -63,6 +63,15 @@ pub struct PvInverter {
     /// (see `SimState::tick`). Set each tick by the sim loop. NOT from YAML.
     #[serde(default)]
     pub irradiance_forced: bool,
+    /// Real measured PV power for this tick (kW, generation-positive), via
+    /// `entities::measurement::resolve_measured_kw` — outranks
+    /// `weather_power_kw` when present (measured ground truth beats a
+    /// forecast estimate). `None` when no measurement feed is configured
+    /// (env var absent), the profile doesn't enable it
+    /// (`measurements.pv_enabled`), or the cached reading has gone stale.
+    /// Set each tick by the sim loop. NOT from YAML.
+    #[serde(default)]
+    pub measured_power_kw: Option<f64>,
 }
 
 /// PV mutable state.
@@ -92,6 +101,7 @@ impl PvInverter {
             pv_alpha: 0.1,
             weather_power_kw: None,
             irradiance_forced: false,
+            measured_power_kw: None,
         }
     }
 
@@ -105,19 +115,19 @@ impl PvInverter {
 
     /// Pure physics step. Ignores setpoint (non-curtailable in Phase A).
     /// While `irradiance_forced` (a manual override posted this exact tick),
-    /// `self.irradiance` fully dictates output, weather ignored entirely.
-    /// Otherwise, weather (if configured/fresh) is the base, with the
-    /// decaying `irradiance_offset` from any recently-released manual
-    /// override blended additively on top; falls back to the sin-model
-    /// `self.irradiance` when no weather is configured at all.
+    /// `self.irradiance` fully dictates output, weather/measurement ignored
+    /// entirely. Otherwise the base is `measured_power_kw` if present (real
+    /// ground truth outranks a forecast), else `weather_power_kw`, else the
+    /// sin-model `self.irradiance` — with the decaying `irradiance_offset`
+    /// from any recently-released manual override blended additively on top
+    /// of whichever base wins.
     pub fn step_inner(&self, _state: &PvState, _setpoint_kw: f64, _dt: Duration) -> (PvState, f64) {
+        let base_kw = self.measured_power_kw.or(self.weather_power_kw);
         let dc_potential_kw = if self.irradiance_forced {
             self.rated_kw * self.irradiance
         } else {
-            match self.weather_power_kw {
-                Some(weather_kw) => {
-                    (weather_kw.max(0.0) + self.irradiance_offset * self.rated_kw).max(0.0)
-                }
+            match base_kw {
+                Some(kw) => (kw.max(0.0) + self.irradiance_offset * self.rated_kw).max(0.0),
                 None => self.rated_kw * self.irradiance,
             }
         };
@@ -457,6 +467,7 @@ mod tests {
                 curtailment_source: PvCurtailmentSource::None,
                 weather_power_kw: None,
                 irradiance_forced: false,
+                measured_power_kw: None,
             },
             PvState {
                 actual_power_kw: 0.0,
@@ -588,6 +599,57 @@ mod tests {
         );
     }
 
+    // ── step_inner: measured_power_kw precedence (measured > weather > sin) ──
+
+    #[test]
+    fn step_inner_measured_power_kw_outranks_weather_power_kw() {
+        let (mut pv, state) = make_pv(10.0);
+        pv.weather_power_kw = Some(6.5);
+        pv.measured_power_kw = Some(4.0);
+        let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
+        assert!(
+            (power_kw + 4.0).abs() < 1e-9,
+            "measured_power_kw must outrank weather_power_kw, got {power_kw}"
+        );
+    }
+
+    #[test]
+    fn step_inner_falls_back_to_weather_when_measured_power_kw_is_none() {
+        let (mut pv, state) = make_pv(10.0);
+        pv.weather_power_kw = Some(6.5);
+        pv.measured_power_kw = None;
+        let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
+        assert!(
+            (power_kw + 6.5).abs() < 1e-9,
+            "must fall back to weather_power_kw when measured is absent, got {power_kw}"
+        );
+    }
+
+    #[test]
+    fn step_inner_measured_offset_blend_uses_measured_as_base() {
+        let (mut pv, state) = make_pv(20.0);
+        pv.measured_power_kw = Some(5.0);
+        pv.irradiance_offset = 0.5; // residual perturbation, still decaying
+        let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
+        assert!(
+            (power_kw + 15.0).abs() < 1e-9,
+            "expected measured(5.0) + offset(0.5)*rated_kw(20.0) = 15.0 kW export, got {power_kw}"
+        );
+    }
+
+    #[test]
+    fn step_inner_forced_override_ignores_measured_power_kw_too() {
+        let (mut pv, state) = make_pv(10.0);
+        pv.irradiance = 1.0;
+        pv.irradiance_forced = true;
+        pv.measured_power_kw = Some(4.0);
+        let (_, power_kw) = pv.step_inner(&state, 0.0, Duration::seconds(1));
+        assert!(
+            (power_kw + 10.0).abs() < 1e-9,
+            "forced override must ignore measured_power_kw entirely, got {power_kw}"
+        );
+    }
+
     #[test]
     fn forecast_zero_timespan_returns_empty() {
         let (pv, state) = make_pv(5.0);
@@ -677,6 +739,7 @@ mod tests {
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
             irradiance_forced: false,
+            measured_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: -5.0,
@@ -735,6 +798,7 @@ mod tests {
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
             irradiance_forced: false,
+            measured_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
@@ -772,6 +836,7 @@ mod tests {
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
             irradiance_forced: false,
+            measured_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
@@ -812,6 +877,7 @@ mod tests {
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
             irradiance_forced: false,
+            measured_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
@@ -866,6 +932,7 @@ mod tests {
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
             irradiance_forced: false,
+            measured_power_kw: None,
         };
         let state = AssetState::Pv(PvState {
             actual_power_kw: 0.0,
@@ -898,6 +965,7 @@ mod tests {
             curtailment_source: PvCurtailmentSource::None,
             weather_power_kw: None,
             irradiance_forced: false,
+            measured_power_kw: None,
         };
         // Verify offset is read from self.irradiance_offset, not from self.irradiance.
         // With pv_alpha=0 and offset=0.2, each slot must equal sin(t)+0.2 (clamped).

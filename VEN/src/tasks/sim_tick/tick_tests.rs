@@ -49,6 +49,10 @@ mod tests {
             1,   // tick_s
             Arc::new(crate::controller::NoopWeatherPort),
             None, // weather_pv_params
+            Arc::new(crate::controller::NoopMeasurementPort),
+            false,
+            Arc::new(crate::controller::NoopMeasurementPort),
+            false,
         )
         .await;
         // passes if no panic
@@ -100,6 +104,10 @@ mod tests {
             1,   // tick_s
             Arc::new(crate::controller::NoopWeatherPort),
             None, // weather_pv_params
+            Arc::new(crate::controller::NoopMeasurementPort),
+            false,
+            Arc::new(crate::controller::NoopMeasurementPort),
+            false,
         )
         .await;
 
@@ -256,6 +264,10 @@ mod tests {
             1,
             Arc::new(crate::controller::NoopWeatherPort),
             None,
+            Arc::new(crate::controller::NoopMeasurementPort),
+            false,
+            Arc::new(crate::controller::NoopMeasurementPort),
+            false,
         )
         .await;
 

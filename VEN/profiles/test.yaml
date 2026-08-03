@@ -48,6 +48,13 @@ weather_pv:
   azimuth_deg: 180.0
   rated_kwp: 5.0
 
+# Real-measurement MQTT feeds (real-measurement-mqtt BDD scenarios) — the
+# profile-level gate; the env-var/transport gate is set on the VEN-1 test
+# container in tests/docker-compose.test.yml.
+measurements:
+  pv_enabled: true
+  base_load_enabled: true
+
 packets:
   - asset: ev
     target_soc: 0.80

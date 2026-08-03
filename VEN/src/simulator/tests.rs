@@ -55,6 +55,8 @@ mod clock_and_rng_tests {
             None,
             None,
             PvCurtailmentSource::None,
+            None, // pv_measured_kw
+            None, // base_load_measured_kw
         );
     }
 
@@ -178,6 +180,8 @@ mod base_load_noise_tests {
             None,
             None,
             PvCurtailmentSource::None,
+            None, // pv_measured_kw
+            None, // base_load_measured_kw
         );
 
         let entry = sim
@@ -219,6 +223,8 @@ mod base_load_noise_tests {
             None,
             None,
             PvCurtailmentSource::None,
+            None, // pv_measured_kw
+            None, // base_load_measured_kw
         );
 
         let entry = sim
@@ -256,6 +262,8 @@ mod base_load_noise_tests {
             None,
             None,
             PvCurtailmentSource::None,
+            None, // pv_measured_kw
+            None, // base_load_measured_kw
         );
 
         let entry = sim
@@ -375,6 +383,8 @@ mod unmodelled_load_tests {
             None,
             None,
             PvCurtailmentSource::None,
+            None, // pv_measured_kw
+            None, // base_load_measured_kw
         );
     }
 
@@ -465,6 +475,8 @@ mod pv_weather_blend_tests {
             None,
             None,
             PvCurtailmentSource::None,
+            None, // pv_measured_kw
+            None, // base_load_measured_kw
         );
     }
 

@@ -296,6 +296,15 @@ export function useWeather(options?: { refetchInterval?: number | false }) {
   });
 }
 
+export function useMeasurement(options?: { refetchInterval?: number | false }) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["measurement", api.baseUrl],
+    queryFn: () => api.measurement(),
+    refetchInterval: options?.refetchInterval ?? 10_000,
+  });
+}
+
 export function useSetObjective() {
   const { api } = useVenContext();
   const queryClient = useQueryClient();

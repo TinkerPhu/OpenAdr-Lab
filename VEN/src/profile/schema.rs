@@ -113,6 +113,11 @@ pub struct Profile {
     /// it parses and behaves exactly as before this section existed.
     #[serde(default)]
     pub weather_pv: Option<WeatherPvConfig>,
+    /// Real-measurement MQTT feed enable flags (per-VEN gate, alongside the
+    /// env-var/transport gate — both must allow a signal for it to take
+    /// effect). Optional and additive — absent by default.
+    #[serde(default)]
+    pub measurements: Option<MeasurementsConfig>,
 }
 
 impl Profile {
@@ -122,6 +127,33 @@ impl Profile {
     pub fn weather_pv_params(&self) -> Option<PvForecastParams> {
         self.weather_pv.as_ref().map(WeatherPvConfig::to_params)
     }
+
+    /// Whether this VEN's profile enables trusting a real measured PV
+    /// reading. `false` when the profile has no `measurements` section or
+    /// omits `pv_enabled` — the profile-level half of the two-gate design
+    /// (the other half is the `PV_MEASUREMENT_MQTT_HOST` env var).
+    pub fn pv_measurement_enabled(&self) -> bool {
+        self.measurements.as_ref().is_some_and(|m| m.pv_enabled)
+    }
+
+    /// Whether this VEN's profile enables trusting a real measured baseline
+    /// load reading. Same two-gate design as `pv_measurement_enabled`.
+    pub fn base_load_measurement_enabled(&self) -> bool {
+        self.measurements
+            .as_ref()
+            .is_some_and(|m| m.base_load_enabled)
+    }
+}
+
+/// `measurements:` profile section — enable flags only; no physical params
+/// needed here since the asset structs already carry those (`rated_kw`
+/// etc.). See docs/architecture for the two-gate design (env var + profile).
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct MeasurementsConfig {
+    #[serde(default)]
+    pub pv_enabled: bool,
+    #[serde(default)]
+    pub base_load_enabled: bool,
 }
 
 /// WP1.2/WP1.3 (Phase 1, A-1) — persistent history sampling + retention.
