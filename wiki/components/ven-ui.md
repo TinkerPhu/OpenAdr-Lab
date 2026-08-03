@@ -2,8 +2,8 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-07-31
-synced_commit: e9f5207
+updated: 2026-08-03
+synced_commit: 1b007b7
 sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/pages/Weather.tsx, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx]
 tags: [ui, react, timeline]
 ---
@@ -58,8 +58,10 @@ analysis: [[planner-tab-purpose]]). Composition, top to bottom: objective select
 one real control — min_cost/GHG/grid/autarky/revenue) + collapsible weight legend; SSE
 `PlannerStatusBar` (live solve progress via `usePlannerEvents`); `PlanHeaderBar` (plan
 metadata + warnings badge); `PlanPowerStack`; `PlanTriggerTimeline` (why replans fired);
-`PlanDecisionMatrix` (per-slot decisions, hatched estimated-rate slots, plus the
-[[milp-planner]] marginal-cost dual as a "Marginal €" column); `SessionProgressBoard`;
+`PlanDecisionMatrix` (per-slot decisions, hatched estimated-rate slots, the
+[[milp-planner]] marginal-cost dual as a "Marginal €" column, and — only when
+`Plan.penalty_rules_active` is non-empty — a "Peak demand" row, green/red per slot
+against the tightest active `threshold_kw`, WP6.3/BL-09); `SessionProgressBoard`;
 collapsed `TraceTable` accordion; a `CorrectionBanner` snackbar labeled "Plan F: Layer 1
 reactive correction" that is permanently dead — it listens for SSE `correction_active`/
 `correction_cleared` events that no backend code emits (predates and was never rewired to

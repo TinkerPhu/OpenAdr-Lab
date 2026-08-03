@@ -57,7 +57,7 @@
 - [x] 8.2 Add a short penalty-threshold subsection to `docs/architecture/VEN_ARCHITECTURE.md` (new §2.3.2)
 - [x] 8.3 Mark WP6.3 done in `docs/plans/roadmap/phase-6-fidelity-and-cert.md` — removed the WP6.3 subsection (WP6.1/6.2/6.4 and Tracks B/C are still open, so the file stays; per the "remove just the done part" workflow rule)
 - [x] 8.4 Add an entry to `docs/history/project_journal.md`
-- [ ] 8.5 Run `/wiki-sync` — deferred until after 7.4 (e2e) confirms green, so the wiki reflects verified behavior
+- [x] 8.5 Run `/wiki-sync` (scoped to this change's impact, e9f5207..1b007b7 — the rest of that range is unrelated `main` drift already covered by its own project_journal.md entries). Updated: `wiki/components/milp-planner.md` (new Key-mechanics bullet), `wiki/components/ven-ui.md` (Decision Matrix bullet), `wiki/components/reliability-and-config.md` (config-knobs table), `wiki/architecture/testing-strategy.md` (feature count 51→54, Node1→Node1/Node2), `wiki/index.md`, `wiki/log.md`. `wiki_lint.sh`: 33 pre-existing STALE findings (unrelated `main` drift, already tracked in the wiki's ongoing triage backlog — none of the 4 pages touched here appear in that list). `wiki_callouts.sh`: unchanged (5 callouts).
 
 ## 9. Final verification
 
