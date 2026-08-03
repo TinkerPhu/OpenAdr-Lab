@@ -7585,3 +7585,55 @@ credentials exist caches the resulting 401 into an exponential backoff — after
 running `seed_vtn.py`, restart the affected containers rather than waiting out the
 backoff.
 
+## Fleet memory audit — malloc_trim after MILP solves
+
+**Trigger**: with 10 VENs running on Node2 (ven-4..13), asked to check whether CPU/memory
+headroom allowed adding more. CPU turned out fine (mostly idle between periodic solves), but
+per-container RSS varied ~10x across identically-configured VENs (30 MB to 330 MB) with no
+correlation to uptime, `history.sqlite`/WAL size, or profile/state.json size.
+
+**Root cause**: RSS tracked `solver_ms` almost exactly — VENs with a harder MILP problem
+(bigger asset mix, longer HiGHS solve) sat at proportionally higher steady-state memory.
+`pmap -x` showed the *virtual* size reserved was similar across VENs (~525-700 MB); only the
+*resident/dirty* portion differed, scaling with how much of that space a solve actually
+touched. glibc's malloc doesn't return a blocking thread's freed-but-dirtied heap pages to the
+OS on its own, so RSS ratchets up to the largest solve's high-water mark and plateaus there —
+not a leak, just an un-trimmed peak working set. A 10-minute observation window wasn't enough
+to see this clearly (RSS just looked like it was still climbing); a 30-minute trace across
+multiple full solve cycles was needed to see the plateau-then-step pattern and rule out
+unbounded growth.
+
+**Fix**: call `libc::malloc_trim(0)` on the blocking-pool thread immediately after
+`solver.solve(req)` returns, inside `PlanningService::solve_plan`
+(`VEN/src/services/planning.rs`) — `#[cfg(all(target_os = "linux", target_env = "gnu"))]`
+gated since it's a glibc extension (matches the `debian:bookworm-slim` runtime image; a no-op
+on local Windows/macOS dev builds). Added `libc = "0.2"` to `VEN/Cargo.toml`.
+
+**Verification**: `cargo fmt --check` / `clippy --all-targets --all-features -D warnings` /
+`scripts/audit_file_sizes.py` all clean; `cargo check` in WSL. No new automated test — this is
+an OS-level allocator side effect (verified via `/proc/<pid>/status` RSS sampling and `pmap`,
+not something a Rust unit/integration test can observe portably across platforms and glibc
+versions). Validated on ven-5 (heaviest solver, ~120s/cycle, one solve every ~7 min): a clean
+30-minute trace across 5 solve cycles showed RSS returning to a flat ~45 MB baseline within
+15-45s of every solve completing, instead of climbing 294→332 MB over 10 minutes and never
+coming back down (the pre-fix behavior). Rolled out to all 13 VENs (ven-1..3 on Node1, ven-4..13
+on Node2); all confirmed healthy post-restart. Commit `447de6a`.
+
+**Key learnings**:
+- When a background shell command's local tracker dies early (observed repeatedly on
+  multi-minute `ssh`-wrapped loops and even on a `docker compose build`), it does not mean the
+  remote work stopped — `ssh Node1/Node2 "docker compose build ..."` runs server-side in the
+  Docker daemon and survives the local SSH client disappearing; a bare shell loop
+  (`for ...; do ...; sleep 30; done`) run directly over `ssh` does *not* survive it, because
+  the loop has no life independent of that SSH session. For anything that must survive,
+  launch it with `nohup ... </dev/null >logfile 2>&1 & disown` *on the remote host*, then poll
+  the logfile — don't rely on the local background-task tracker for long-running remote loops.
+- Nested shell quoting through `ssh "..."` → `bash -c "..."` → escaped `awk`/heredocs is
+  fragile enough to silently produce empty output (RSS field blank, no error) rather than
+  fail loudly — burned two full sampling attempts before switching to writing the script as a
+  plain file with the `Write` tool and `scp`-ing it over, which sidesteps the quoting entirely
+  and should be the default for any multi-line remote script from now on.
+- A memory-footprint mystery across identical containers is a solve-difficulty/allocator
+  question before it's a leak question: check `solver_ms` (or equivalent per-instance workload
+  metric) and `pmap -x`'s resident-vs-dirty split before reaching for heap profiling tools.
+
