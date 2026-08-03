@@ -21,7 +21,9 @@ pub mod settings_port;
 pub use settings_port::SettingsPort;
 
 // ── WeatherForecastPort trait ──────────────────────────────────────────────────
+pub mod measurement_port;
 pub mod weather_port;
+pub use measurement_port::{MeasurementPort, MeasurementReading, NoopMeasurementPort};
 pub use weather_port::{NoopWeatherPort, WeatherForecastPort};
 
 // ── OpenADR interface ─────────────────────────────────────────────────────────

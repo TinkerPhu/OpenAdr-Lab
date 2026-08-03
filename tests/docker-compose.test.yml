@@ -95,6 +95,10 @@ services:
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "mosquitto"
       WEATHER_MQTT_SITE_ID: "ven-1"
+      PV_MEASUREMENT_MQTT_HOST: "mosquitto"
+      PV_MEASUREMENT_MQTT_SITE_ID: "ven-1"
+      BASE_LOAD_MEASUREMENT_MQTT_HOST: "mosquitto"
+      BASE_LOAD_MEASUREMENT_MQTT_SITE_ID: "ven-1"
     volumes:
       - ../VEN/profiles/test.yaml:/config/profile.yaml:ro
     healthcheck:

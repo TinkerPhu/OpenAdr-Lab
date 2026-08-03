@@ -122,4 +122,29 @@ weather_pv:
         assert_eq!(params.performance_ratio, 0.80);
         assert_eq!(params.ac_limit_kw, Some(8.0));
     }
+
+    #[test]
+    fn profile_without_measurements_disables_both_signals() {
+        let yaml = "assets: []\n";
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        assert!(p.measurements.is_none());
+        assert!(!p.pv_measurement_enabled());
+        assert!(!p.base_load_measurement_enabled());
+    }
+
+    #[test]
+    fn profile_with_measurements_section_enables_configured_signals_only() {
+        let yaml = "assets: []\nmeasurements:\n  pv_enabled: true\n";
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        assert!(p.pv_measurement_enabled());
+        assert!(!p.base_load_measurement_enabled());
+    }
+
+    #[test]
+    fn profile_with_measurements_section_enables_both_signals() {
+        let yaml = "assets: []\nmeasurements:\n  pv_enabled: true\n  base_load_enabled: true\n";
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        assert!(p.pv_measurement_enabled());
+        assert!(p.base_load_measurement_enabled());
+    }
 }

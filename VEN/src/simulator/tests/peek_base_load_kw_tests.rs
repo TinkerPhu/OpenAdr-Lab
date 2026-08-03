@@ -25,7 +25,7 @@ fn noon() -> DateTime<Utc> {
 #[test]
 fn peek_base_load_kw_returns_none_without_base_load_asset() {
     let sim = SimState::from_params(&[], noon());
-    assert_eq!(sim.peek_base_load_kw(noon(), 30.0, None, 0.1), None);
+    assert_eq!(sim.peek_base_load_kw(noon(), 30.0, None, 0.1, None), None);
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn peek_base_load_kw_matches_tick_output_for_same_now() {
     let base_load_alpha = 0.1;
 
     let preview = sim
-        .peek_base_load_kw(now, dt_s, None, base_load_alpha)
+        .peek_base_load_kw(now, dt_s, None, base_load_alpha, None)
         .expect("base_load asset is configured");
 
     sim.tick(
@@ -61,6 +61,8 @@ fn peek_base_load_kw_matches_tick_output_for_same_now() {
         None,
         None,
         PvCurtailmentSource::None,
+        None, // pv_measured_kw
+        None, // base_load_measured_kw
     );
 
     let bl_entry = sim
@@ -84,7 +86,7 @@ fn peek_base_load_kw_override_bypasses_decay() {
     sim.base_load_smoothing.load_offset_kw = 5.0;
 
     let preview = sim
-        .peek_base_load_kw(noon(), 30.0, Some(2.0), 0.1)
+        .peek_base_load_kw(noon(), 30.0, Some(2.0), 0.1, None)
         .expect("base_load asset is configured");
     assert!(
         (preview - 2.0).abs() < 1e-9,
@@ -98,7 +100,7 @@ fn peek_base_load_kw_decays_toward_natural_profile() {
     sim.base_load_smoothing.load_offset_kw = 2.0;
 
     let preview = sim
-        .peek_base_load_kw(noon(), 30.0, None, 0.1)
+        .peek_base_load_kw(noon(), 30.0, None, 0.1, None)
         .expect("base_load asset is configured");
     assert!(
         preview > 0.5 && preview < 2.5,
@@ -115,7 +117,7 @@ fn peek_base_load_kw_matches_tick_output_with_lingering_offset_for_same_now() {
     let dt_s = 30.0;
 
     let preview = sim
-        .peek_base_load_kw(now, dt_s, None, 0.1)
+        .peek_base_load_kw(now, dt_s, None, 0.1, None)
         .expect("base_load asset is configured");
 
     sim.tick(
@@ -136,6 +138,8 @@ fn peek_base_load_kw_matches_tick_output_with_lingering_offset_for_same_now() {
         None,
         None,
         PvCurtailmentSource::None,
+        None, // pv_measured_kw
+        None, // base_load_measured_kw
     );
 
     let bl_entry = sim

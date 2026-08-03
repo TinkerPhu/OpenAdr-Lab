@@ -5,6 +5,8 @@ mod controller;
 mod entities;
 mod history_store;
 mod ids;
+mod measurement;
+mod measurement_translation;
 mod models;
 mod planner_events;
 mod profile;
@@ -62,6 +64,13 @@ pub struct AppCtx {
     /// `None` when the profile has no `weather_pv` section — the `/weather`
     /// route's `derived` field is `null` in that case, not an error.
     pub weather_pv_params: Option<crate::entities::asset_params::PvForecastParams>,
+    /// Real-measurement MQTT feeds (real-measurement-mqtt). Always present —
+    /// `NoopMeasurementPort` when no MQTT broker is configured for a given
+    /// signal, so consumers never need `Option<Arc<dyn MeasurementPort>>`.
+    pub pv_measurement: Arc<dyn controller::MeasurementPort>,
+    pub pv_measurement_enabled: bool,
+    pub base_load_measurement: Arc<dyn controller::MeasurementPort>,
+    pub base_load_measurement_enabled: bool,
 }
 
 fn build_domain_params(profile: &Profile) -> (SimulatorParams, PlannerParams, Vec<AssetParams>) {
@@ -192,6 +201,36 @@ async fn main() -> anyhow::Result<()> {
             None => Arc::new(controller::NoopWeatherPort),
         };
 
+    // Real-measurement MQTT feeds (real-measurement-mqtt): each signal is an
+    // independent env-var-gated connection, mirroring the weather adapter's
+    // shape. A second, profile-level gate (`measurements.pv_enabled` /
+    // `.base_load_enabled`) is checked at the tick-loop call site — both
+    // gates must allow a signal for it to take effect.
+    let pv_measurement: Arc<dyn controller::MeasurementPort> =
+        match measurement::MeasurementMqttConfig::from_env("PV_MEASUREMENT", "pv") {
+            Some(cfg) => {
+                info!(broker = %cfg.broker_host, topic = %cfg.topic, "PV measurement feed: MQTT adapter configured");
+                Arc::new(measurement::MqttMeasurementAdapter::spawn(
+                    cfg,
+                    measurement_translation::parse_pv_measurement,
+                ))
+            }
+            None => Arc::new(controller::NoopMeasurementPort),
+        };
+    let base_load_measurement: Arc<dyn controller::MeasurementPort> =
+        match measurement::MeasurementMqttConfig::from_env("BASE_LOAD_MEASUREMENT", "base_load") {
+            Some(cfg) => {
+                info!(broker = %cfg.broker_host, topic = %cfg.topic, "baseline-load measurement feed: MQTT adapter configured");
+                Arc::new(measurement::MqttMeasurementAdapter::spawn(
+                    cfg,
+                    measurement_translation::parse_base_load_measurement,
+                ))
+            }
+            None => Arc::new(controller::NoopMeasurementPort),
+        };
+    let pv_measurement_enabled = profile.pv_measurement_enabled();
+    let base_load_measurement_enabled = profile.base_load_measurement_enabled();
+
     // Derive shared data_dir from persist_path
     let data_dir = cfg
         .persist_path
@@ -287,7 +326,7 @@ async fn main() -> anyhow::Result<()> {
     let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
     {
-        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp) = (
+        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp, pvm, pvme, blm, blme) = (
             state.clone(),
             sim_state.clone(),
             sim_params.clone(),
@@ -298,6 +337,10 @@ async fn main() -> anyhow::Result<()> {
             planner_event_tx.clone(),
             weather_port.clone(),
             profile.weather_pv_params(),
+            pv_measurement.clone(),
+            pv_measurement_enabled,
+            base_load_measurement.clone(),
+            base_load_measurement_enabled,
         );
         tasks::supervised_spawn("sim_tick", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_sim_tick(
@@ -311,6 +354,10 @@ async fn main() -> anyhow::Result<()> {
                 etx.clone(),
                 wp.clone(),
                 wpp,
+                pvm.clone(),
+                pvme,
+                blm.clone(),
+                blme,
             )
         });
     }
@@ -419,6 +466,10 @@ async fn main() -> anyhow::Result<()> {
         settings: settings_port,
         weather: weather_port,
         weather_pv_params: profile.weather_pv_params(),
+        pv_measurement,
+        pv_measurement_enabled,
+        base_load_measurement,
+        base_load_measurement_enabled,
     };
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;

@@ -94,6 +94,41 @@ pub(crate) async fn resolve_weather_pv_kw_now(
     .and_then(|v| v.first().copied())
 }
 
+/// Real-measurement MQTT feed value for this exact instant (real-measurement-mqtt).
+/// `enabled` is the profile-level gate (`measurements.pv_enabled` /
+/// `.base_load_enabled`) — the second gate alongside the port itself only
+/// existing when the corresponding env var was set at startup.
+async fn resolve_measured_kw_now(
+    port: &dyn crate::controller::MeasurementPort,
+    enabled: bool,
+    now: DateTime<Utc>,
+) -> Option<f64> {
+    if !enabled {
+        return None;
+    }
+    let latest = port.latest_kw().await;
+    crate::entities::measurement::resolve_measured_kw(
+        latest,
+        now,
+        crate::entities::measurement::MEASUREMENT_STALENESS_THRESHOLD,
+    )
+}
+
+/// Both signals' measured readings for this instant, `(pv, base_load)` —
+/// bundles the two `resolve_measured_kw_now` calls into one await site to
+/// keep `tick_once` under the tasks/ file-size cap.
+pub(crate) async fn resolve_measurements_now(
+    pv_port: &dyn crate::controller::MeasurementPort,
+    pv_enabled: bool,
+    base_load_port: &dyn crate::controller::MeasurementPort,
+    base_load_enabled: bool,
+    now: DateTime<Utc>,
+) -> (Option<f64>, Option<f64>) {
+    let pv = resolve_measured_kw_now(pv_port, pv_enabled, now).await;
+    let base_load = resolve_measured_kw_now(base_load_port, base_load_enabled, now).await;
+    (pv, base_load)
+}
+
 /// Manual sim-inject heater overrides win over the arbiter's decision
 /// (mirrors the existing "manual override wins" precedent for PV smoothing)
 /// — only fall back to the arbiter's mode when neither inject field is

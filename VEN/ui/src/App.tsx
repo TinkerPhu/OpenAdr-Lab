@@ -23,6 +23,7 @@ import { HistoryPage } from "./pages/History";
 import { NotificationsPage } from "./pages/Notifications";
 import { PlannerPage } from "./pages/Planner";
 import { WeatherPage } from "./pages/Weather";
+import { MeasurementPage } from "./pages/Measurement";
 import { DevicesPage } from "./pages/Devices";
 
 type VenContextType = {
@@ -253,6 +254,7 @@ export default function App() {
                 { to: "/raw-diagnostics", label: "Raw Data", testId: "nav-raw-diagnostics" },
                 { to: "/tasks", label: "Tasks", testId: "nav-tasks" },
                 { to: "/event-log", label: "Event Log", testId: "nav-event-log" },
+                { to: "/measurement", label: "Measurements", testId: "nav-measurement" },
               ]}
             />
             <Button component={Link} to="/notifications" data-testid="nav-notifications">
@@ -264,6 +266,7 @@ export default function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/planner" element={<PlannerPage />} />
             <Route path="/weather" element={<WeatherPage />} />
+            <Route path="/measurement" element={<MeasurementPage />} />
             <Route path="/controller" element={<ControllerPage />} />
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/programs" element={<ProgramsPage />} />

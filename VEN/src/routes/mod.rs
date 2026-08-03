@@ -3,6 +3,7 @@ pub mod debug;
 pub mod event_log;
 pub mod events;
 pub mod hems;
+pub mod measurement;
 pub mod notifications;
 pub mod reports;
 pub mod sim;
@@ -30,6 +31,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
     Router::new()
         .route("/health", get(system::health))
         .route("/weather", get(weather::get_weather))
+        .route("/measurement", get(measurement::get_measurement))
         .route("/vtn/status", get(system::vtn_status))
         .route("/tasks/status", get(system::tasks_status))
         .route("/events/log", get(event_log::get_event_log))

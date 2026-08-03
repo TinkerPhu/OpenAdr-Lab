@@ -7,6 +7,7 @@ pub mod design_vocabulary;
 pub mod device_session;
 pub mod error;
 pub mod history;
+pub mod measurement;
 pub mod notification;
 pub mod plan;
 pub mod planner_params;
