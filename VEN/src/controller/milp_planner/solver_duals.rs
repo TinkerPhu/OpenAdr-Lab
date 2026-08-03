@@ -39,6 +39,7 @@ use crate::controller::milp_planner::asset_port::{
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
+use super::penalty;
 use super::solver_phase1::add_model_constraints;
 use super::types::*;
 
@@ -273,6 +274,11 @@ pub(crate) fn solve_marginal_costs(
         shiftable: shift_vars,
     };
 
+    // WP6.3 (BL-09): declared fresh (not fixed to `winning`, like s_imp_viol above) —
+    // this is a free continuous slack, not a mode decision, so it needs no rounding fix.
+    let penalty_vars =
+        penalty::declare_penalty_vars(&inputs.penalty_rules, &inputs.cum_s, &mut vars);
+
     for ctx in asset_contexts {
         match ctx.asset_kind() {
             AssetKind::Battery => {
@@ -313,6 +319,10 @@ pub(crate) fn solve_marginal_costs(
         objective += (p1w.w_viol * inputs.pen_imp_eur_kwh * inputs.dt_h[t]) * s_imp_viol[t];
         objective += (p1w.w_viol * inputs.pen_exp_eur_kwh * inputs.dt_h[t]) * s_exp_viol[t];
     }
+    // WP6.3 (BL-09): mirrors solve_phase1's objective exactly, same rationale as
+    // this module's other terms (module doc: the dual must reflect the real
+    // objective's sensitivity).
+    objective += penalty::penalty_objective(&penalty_vars);
     for ctx in asset_contexts {
         match ctx.asset_kind() {
             AssetKind::Battery => {
@@ -349,6 +359,7 @@ pub(crate) fn solve_marginal_costs(
         &global,
         asset_contexts,
         n,
+        &penalty_vars,
     );
     let model = model.with_time_limit(timeout_s);
     let model = model.with_mip_gap(0.02)?;

@@ -65,6 +65,16 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
     When I wait for the VEN /plan to have envelopes
     Then the plan.envelopes is a non-empty array
 
+  # --- Peak-demand penalty threshold (WP6.3, BL-09) ---
+
+  Scenario: Planner reschedules load to stay under a peak-demand penalty threshold
+    Given the VEN is running with profile "penalty_test"
+    And I inject ev_soc 0.5 via sim inject
+    And I POST an EV session with target_soc 0.90 and departure in 12.0 hours
+    When I wait for the VEN /plan to have an EV allocation in slots
+    Then no plan slot's net_import_kw exceeds "10.0" within the horizon
+    And at least one firm slot has an allocation for asset "ev"
+
   # --- PV forecast override (022-deterministic-test-env) ---
 
   Scenario: PV forecast override does not trigger a replan

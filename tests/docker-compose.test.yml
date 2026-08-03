@@ -176,6 +176,39 @@ services:
       - test-net
 
   # ---------------------------------------------------------------------------
+  # VEN-penalty — fifth instance with an active peak-demand penalty rule
+  # (WP6.3, BL-09) for the penalty-threshold BDD scenario.
+  # ---------------------------------------------------------------------------
+  test-ven-penalty:
+    build:
+      context: ../VEN
+      dockerfile: Dockerfile
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://test-vtn:3000"
+      CLIENT_ID: "ven-1"
+      CLIENT_SECRET: "ven-1"
+      VEN_NAME: "ven-1"
+      POLL_EVENTS_SECS: "2"
+      POLL_PROGRAMS_SECS: "2"
+      POLL_REPORTS_SECS: "2"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+    volumes:
+      - ../VEN/profiles/penalty_test.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      test-vtn:
+        condition: service_healthy
+    networks:
+      - test-net
+
+  # ---------------------------------------------------------------------------
   # BFF — proxies VTN with dual credentials
   # ---------------------------------------------------------------------------
   test-bff:
@@ -262,6 +295,7 @@ services:
       VEN_BASE_URL: "http://test-ven-1:8080"
       VEN2_BASE_URL: "http://test-ven-2:8080"
       VEN_NO_PV_BASE_URL: "http://test-ven-no-pv:8080"
+      VEN_PENALTY_TEST_BASE_URL: "http://test-ven-penalty:8080"
       BFF_BASE_URL: "http://test-bff:8090"
       UI_BASE_URL: "http://test-ui:80"
       VEN_UI_BASE_URL: "http://test-ven-ui:80"
@@ -276,6 +310,8 @@ services:
       test-ven-2:
         condition: service_healthy
       test-ven-no-pv:
+        condition: service_healthy
+      test-ven-penalty:
         condition: service_healthy
       test-bff:
         condition: service_healthy

@@ -3,6 +3,7 @@ use crate::entities::asset_params::{
     PvForecastParams, PvParams,
 };
 use crate::entities::plan::PlanZone;
+use crate::entities::planner_params::PenaltyRuleParams;
 use crate::entities::PlannerObjective;
 use crate::profile::weather_pv::WeatherPvConfig;
 use serde::Deserialize;
@@ -488,4 +489,10 @@ pub struct PlannerConfig {
     /// (0.0–1.0, nearest-rank; default 0.8).
     #[serde(default = "super::defaults::default_stale_rate_safe_pctl")]
     pub stale_rate_safe_pctl: f64,
+
+    /// WP6.3 (BL-09) — active peak-demand penalty rules. Empty (default) =
+    /// feature disabled, planner behavior unchanged. Validated in
+    /// `Profile::validate` — see that method for the rules.
+    #[serde(default)]
+    pub penalty_rules: Vec<PenaltyRuleParams>,
 }

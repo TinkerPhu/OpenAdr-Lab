@@ -41,6 +41,7 @@ function MatrixLegend() {
       <Typography variant="caption" color="text.secondary">
         Cell color: grey = idle, teal = allocated (intensity scales with power).
         Tariff row: hatched/dimmed = estimated rate (beyond tariff coverage).
+        Peak row (when a penalty rule is active): green = within threshold, red = threshold exceeded.
       </Typography>
     </Box>
   );
@@ -124,6 +125,12 @@ export function PlanDecisionMatrix({ plan }: Props) {
     return [Math.min(...vals), Math.max(...vals)];
   }, [plan, allSlots]);
 
+  // WP6.3 (BL-09) — the tightest active peak-demand threshold, if any rule is
+  // configured. Row is only rendered when this is non-null.
+  const penaltyRules = plan?.penalty_rules_active ?? [];
+  const tightestThresholdKw =
+    penaltyRules.length > 0 ? Math.min(...penaltyRules.map((r) => r.threshold_kw)) : null;
+
   if (!plan) {
     return (
       <Typography data-testid="matrix-empty" color="text.secondary">
@@ -165,6 +172,15 @@ export function PlanDecisionMatrix({ plan }: Props) {
               <Box sx={{ height: CELL_H, display: "flex", alignItems: "center" }}>
                 <Typography variant="caption" color="text.secondary" noWrap>Marginal €</Typography>
               </Box>
+              {/* Peak-demand header label (WP6.3, BL-09) — only when a penalty rule is active */}
+              {tightestThresholdKw !== null && (
+                <Box
+                  data-testid="matrix-row-peak-demand"
+                  sx={{ height: CELL_H, display: "flex", alignItems: "center" }}
+                >
+                  <Typography variant="caption" color="text.secondary" noWrap>Peak</Typography>
+                </Box>
+              )}
               {/* Asset row labels */}
               {assetIds.map((id) => (
                 <Box
@@ -271,6 +287,34 @@ export function PlanDecisionMatrix({ plan }: Props) {
                   );
                 })}
               </Box>
+
+              {/* Peak-demand row (WP6.3, BL-09) — green when within the tightest active
+                  threshold, red when it's exceeded (penalty accepted for that slot). */}
+              {tightestThresholdKw !== null && (
+                <Box data-testid="matrix-peak-demand-cells" sx={{ display: "flex" }}>
+                  {allSlots.map((slot, ci) => {
+                    const overThreshold = slot.net_import_kw > tightestThresholdKw;
+                    const rulesNamed = penaltyRules.map((r) => `${r.rule_id} (${r.threshold_kw} kW)`).join(", ");
+                    return (
+                      <Tooltip
+                        key={ci}
+                        title={`${new Date(slot.start).toLocaleTimeString()} — import ${slot.net_import_kw.toFixed(2)} kW vs. threshold ${tightestThresholdKw.toFixed(1)} kW [${rulesNamed}]`}
+                      >
+                        <Box
+                          data-testid={overThreshold ? `peak-demand-cell-over-${ci}` : `peak-demand-cell-${ci}`}
+                          sx={{
+                            width: CELL_W,
+                            height: CELL_H,
+                            bgcolor: overThreshold ? "#e53935" : "#4caf50",
+                            flexShrink: 0,
+                            border: "1px solid rgba(0,0,0,0.08)",
+                          }}
+                        />
+                      </Tooltip>
+                    );
+                  })}
+                </Box>
+              )}
 
               {/* Asset rows — color by allocation */}
               {assetIds.map((assetId) => (

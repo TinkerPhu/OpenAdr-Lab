@@ -446,6 +446,7 @@ mod tests {
             envelopes: vec![],
             warnings: vec![],
             solve_status: crate::entities::plan::SolveStatus::Optimal,
+            penalty_rules_active: vec![],
         }
     }
 
@@ -520,6 +521,7 @@ mod tests {
             envelopes: vec![],
             warnings: vec![],
             solve_status: crate::entities::plan::SolveStatus::Optimal,
+            penalty_rules_active: vec![],
         };
         let result = zones_from_plan(Some(&plan), now);
         assert_eq!(result.len(), 3, "3-zone plan must produce 3 zone entries");
@@ -624,6 +626,7 @@ mod tests {
             envelopes: vec![],
             warnings: vec![],
             solve_status: crate::entities::plan::SolveStatus::Optimal,
+            penalty_rules_active: vec![],
         }
     }
 

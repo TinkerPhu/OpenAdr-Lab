@@ -34,6 +34,7 @@ def step_ven_running_with_profile(context, profile):
     """Route subsequent VEN calls to the container running the requested profile."""
     profile_urls = {
         "no_pv_test": api_client.VEN_NO_PV_BASE_URL,
+        "penalty_test": api_client.VEN_PENALTY_TEST_BASE_URL,
     }
     api_client.VEN_BASE_URL = profile_urls.get(profile, api_client._DEFAULT_VEN_BASE_URL)
     r = ven_get("/health")

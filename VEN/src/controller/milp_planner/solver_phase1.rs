@@ -11,6 +11,7 @@ use crate::controller::milp_interactions::{
 };
 use crate::controller::milp_planner::{AssetKind, AssetMilpContext};
 
+use super::penalty::{self, PenaltyRuleVars};
 use super::types::*;
 
 /// Phase 1: minimise economic cost only. Battery and EV declared without startup/ramp aux vars.
@@ -84,6 +85,11 @@ pub(crate) fn solve_phase1(
         shiftable: shift_vars,
     };
 
+    // WP6.3 (BL-09): one slack per window per active penalty rule. Empty
+    // `inputs.penalty_rules` (the default) declares nothing — no-op.
+    let penalty_vars =
+        penalty::declare_penalty_vars(&inputs.penalty_rules, &inputs.cum_s, &mut vars);
+
     // Phase 1: startup/ramp = 0.0 for all assets.
     for ctx in asset_contexts {
         ctx.declare_vars_into_pool(n, 0.0, 0.0, &mut vars, &mut pool);
@@ -114,6 +120,8 @@ pub(crate) fn solve_phase1(
         objective += (p1w.w_viol * inputs.pen_imp_eur_kwh * inputs.dt_h[t]) * s_imp_viol[t];
         objective += (p1w.w_viol * inputs.pen_exp_eur_kwh * inputs.dt_h[t]) * s_exp_viol[t];
     }
+    // WP6.3 (BL-09): peak-demand penalty slack cost, once per window (not per slot).
+    objective += penalty::penalty_objective(&penalty_vars);
     // Asset objective contributions — Phase 1: c_startup=0.0, c_ramp=0.0.
     // Battery: wear only. EV: service reward only. Heater: m_low penalty only.
     for ctx in asset_contexts {
@@ -155,12 +163,20 @@ pub(crate) fn solve_phase1(
         &global,
         asset_contexts,
         n,
+        &penalty_vars,
     );
     model = model.with_time_limit(timeout_s);
     model = model.with_mip_gap(0.02)?;
     let solution = model.solve()?;
 
-    Ok(read_solve_output(&solution, &objective, &pool, inputs, n))
+    Ok(read_solve_output(
+        &solution,
+        &objective,
+        &pool,
+        inputs,
+        n,
+        &penalty_vars,
+    ))
 }
 
 /// Helper: add power-balance and per-asset constraints to the model.
@@ -182,6 +198,7 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
     global: &GlobalMilpInputs,
     asset_contexts: &[Box<dyn AssetMilpContext>],
     n: usize,
+    penalty_vars: &[PenaltyRuleVars],
 ) -> (S, Vec<good_lp::constraint::ConstraintReference>) {
     let mut power_balance_refs = Vec::with_capacity(n);
     for t in 0..n {
@@ -261,6 +278,11 @@ pub(crate) fn add_model_constraints<S: SolverModel>(
             model = model.with(c);
         }
     }
+
+    // WP6.3 (BL-09): p_imp[t] <= threshold_kw + s_penalty[window_of(t)] for each active rule.
+    for c in penalty::penalty_constraints(p_imp, &inputs.cum_s, penalty_vars) {
+        model = model.with(c);
+    }
     (model, power_balance_refs)
 }
 
@@ -271,6 +293,7 @@ pub(crate) fn read_solve_output<S: Solution>(
     pool: &MilpVarPool,
     inputs: &MilpInputs,
     n: usize,
+    penalty_vars: &[PenaltyRuleVars],
 ) -> SolveOutput {
     let p_imp_ref = &pool.grid.p_imp;
     let p_exp_ref = &pool.grid.p_exp;
@@ -335,5 +358,6 @@ pub(crate) fn read_solve_output<S: Solution>(
         z_heat_ready: z_heat_ready_out,
         e_heat_tank_kwh: e_heat_tank_out,
         p_shiftable_kw,
+        s_penalty_kw: penalty::read_penalty_solution(solution, penalty_vars),
     }
 }
