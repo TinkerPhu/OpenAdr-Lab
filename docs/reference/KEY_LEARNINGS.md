@@ -769,3 +769,40 @@ outes/sim.rs causes a T1+T2 double-solve race:
   never got cleaned up at rename time. `nslookup name.local` will report "non-existent
   domain" even when the name is fine — `nslookup` only queries regular DNS, not mDNS;
   verify `.local` names with `curl`/a browser instead.
+- **A background shell task's local tracker can die early** (observed on both a multi-minute
+  `ssh`-wrapped sampling loop and a `docker compose build`) **without the remote work actually
+  stopping.** `ssh Node1/Node2 "docker compose build ..."` runs server-side in the Docker
+  daemon and survives the local SSH client disappearing — check `ps aux` on the remote host
+  before assuming a "killed" notification means the build failed. A bare shell loop
+  (`for ...; do ...; sleep 30; done`) run directly over `ssh`, by contrast, has no life
+  independent of that SSH session and dies with it. For anything that must survive, launch it
+  with `nohup ... </dev/null >logfile 2>&1 & disown` *on the remote host itself*, then poll the
+  logfile — don't rely on the local background-task tracker for long-running remote loops.
+- **Nested shell quoting through `ssh "..."` → `bash -c "..."` → escaped `awk`/heredocs is
+  fragile enough to silently produce empty output** (e.g. a field that should hold a number
+  comes back blank) **rather than fail loudly.** Burned two full sampling attempts before
+  switching to writing the script as a plain file with the `Write` tool and `scp`-ing it over —
+  sidesteps the quoting entirely and should be the default for any multi-line remote script.
+
+## Fleet Memory Diagnosis — malloc_trim after MILP Solves (BL-fleet-memory, 2026-08-02)
+
+- **A 10x memory spread across identically-configured VEN containers correlated almost
+  exactly with `solver_ms`** (the MILP solve duration logged per plan cycle), not with
+  uptime, database/WAL file size, or profile/state.json size. Harder solves (bigger asset
+  mix → bigger HiGHS problem) leave proportionally more resident memory behind. Check the
+  per-instance workload metric first, before reaching for heap-profiling tools, whenever
+  "identical" containers show wildly different RSS.
+- **`pmap -x`'s resident/dirty-vs-virtual split distinguishes "bigger working set" from
+  "bigger reservation."** Virtual size reserved was similar (~525-700 MB) across VENs with
+  30 MB vs 330 MB RSS — only the *touched* (dirtied) portion differed, confirming the
+  variance was in how much of the reserved space a solve actually used, not in what was
+  requested upfront.
+- **glibc's malloc does not return a thread's freed-but-dirtied heap pages to the OS on its
+  own** — RSS ratchets up to a solve's high-water mark and plateaus there indefinitely. This
+  looks exactly like a leak from outside (steady climb, never drops) but isn't one: a
+  10-minute observation window wasn't long enough to see the plateau-then-step pattern and
+  wrongly looked like unbounded growth; a 30-minute trace across multiple full solve cycles
+  was needed to confirm it. Fix: call `libc::malloc_trim(0)` on the same thread right after
+  the allocation-heavy work completes (here: the `tokio::spawn_blocking` closure running the
+  HiGHS solve, in `VEN/src/services/planning.rs`) — verified this returns RSS to a flat
+  baseline within 15-45s of each solve instead of leaving it at the peak.
