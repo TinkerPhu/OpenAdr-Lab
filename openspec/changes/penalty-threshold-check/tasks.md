@@ -61,7 +61,7 @@
 
 ## 9. Final verification
 
-- [ ] 9.1 `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings` clean
-- [ ] 9.2 `scripts/audit_file_sizes.py` clean (confirms `penalty.rs` split kept `solver_phase1.rs` under the ceiling)
-- [ ] 9.3 All four test suites green (UI unit, Rust unit+integration, E2E BDD, resilience)
-- [ ] 9.4 Manual UI walkthrough per this change's design/spec scenarios on a running VEN instance (VTN UI used only to set up a cheap price window; no VTN UI changes to verify)
+- [x] 9.1 `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings` clean (confirmed during 3.2/4.8; one clippy lint fixed — `needless_range_loop` in `penalty.rs`'s constraint-building loop)
+- [x] 9.2 `scripts/audit_file_sizes.py` clean (confirmed during 4.8 — `penalty.rs` split kept `solver_phase1.rs` under the ceiling)
+- [x] 9.3 All four test suites green (UI unit, Rust unit+integration, E2E BDD, resilience). Rust: 897/897. UI: 437/437. E2E: 54 features/270 scenarios/1535 steps passed, 0 failed. Resilience (`--tags=@resilience`, Node2): 5/5 scenarios passed, 0 failed. All on Node2 against `043-penalty-threshold-check` (commit `6ea458e`).
+- [x] 9.4 Manual walkthrough on Node2 (`test-ven-penalty` brought up standalone under the lock, then torn down). DEVIATION: verified via direct API calls (`curl` against the VEN's own endpoints), not a browser — no browser tooling available in this environment. Injected `ev_soc=0.5`, POSTed an EV session (`target_soc=0.90`, departure in 12h) → triggered a `USER_REQUEST` replan. Confirmed: `plan.penalty_rules_active == [{"rule_id":"peak-10kw","threshold_kw":10.0}]` (exactly what the new Decision Matrix row reads to render), every slot's `net_import_kw` ≤ 5.92 kW (well under the 10 kW threshold, 0 slots over), and `cost_breakdown.c_peak_penalty_eur` showed a ~0.02 numerical-tolerance residual (solver MIP-gap noise, ~0.004 kW slack) that correctly did **not** produce a `PlanWarning` — confirms the `slack_kw > 0.01` filter in `results.rs` suppresses solver noise rather than surfacing spurious warnings for it.

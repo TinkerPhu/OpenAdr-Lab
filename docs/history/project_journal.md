@@ -7716,7 +7716,16 @@ against the correct branch: 54 features passed, 270 scenarios passed, 1535 steps
 passed, 0 failed (1 whole feature skipped — pre-existing tag-gated resilience
 feature, expected outside a `--tags=@resilience` run) — including the new "Planner
 reschedules load to stay under a peak-demand penalty threshold" scenario against the
-new `test-ven-penalty` container (`Status.passed`, 70.6s).
+new `test-ven-penalty` container (`Status.passed`, 70.6s). Resilience suite
+(`--tags=@resilience`): 5/5 scenarios passed, 0 failed — this change touches nothing
+in the VTN-outage/backoff/restart path, and none broke. Manual walkthrough (no
+browser available in this environment, verified via direct API calls instead):
+brought `test-ven-penalty` up standalone on Node2, injected `ev_soc=0.5`, POSTed an
+EV session (target 0.90, departure in 12h) — triggered a `USER_REQUEST` replan;
+`plan.penalty_rules_active` correctly reported the active rule, every slot's
+`net_import_kw` stayed ≤ 5.92 kW (well under the 10 kW threshold), and a ~0.02 EUR
+solver-noise residual in `c_peak_penalty_eur` correctly stayed below the
+`slack_kw > 0.01` warning threshold rather than producing a spurious `PlanWarning`.
 
 **Key learning**: same lesson as the Pi4/Po4 rename above, different domain — a
 validation or config check written against a field that has an "ignored when X"
