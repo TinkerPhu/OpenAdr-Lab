@@ -60,6 +60,7 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | [BL-29](#bl-29-flexibilitydirection-ratetype-rateunit--narrow-supporting-enums) | No standalone value — fold into whichever future feature needs each enum | None |
 | [GB-07](#general-backlog) | Dev/ops convenience (container setup script), not user-facing | Low |
 | [GB-11](#general-backlog) | Process/docs alignment items, not user-facing | Low |
+| [GB-16](#general-backlog) | `npm audit` findings in `VEN/ui` (brace-expansion, react-router) — dependency hygiene, not user-facing | Low-Medium |
 
 ---
 
@@ -216,6 +217,7 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | GB-13 | Wire the Event Log's SSE stream (`GET /events/log/events`) into the UI — `useEventLog()` (`VEN/ui/src/api/hooks.ts`) still polls every 10s; the backend route works but nothing consumes it | Low-Medium — removes needless polling overhead, minor UX win | Low |
 | GB-14 | Create a dedicated SSH key pair for the `Node1` host instead of falling back to the default `id_rsa` — checked 2026-07-31: `~/.ssh/config`'s `Node1` entry has no `IdentityFile`, so it authenticates with whatever default identity (`id_rsa`) the server happens to accept, unlike `Node2` which already has its own pinned identity file | Low — security/hygiene hardening, no functional gap | Low |
 | GB-15 | The VTN's `/vens` list has no `ven-1` entry — only `ven-1-name`, an old provisioning typo predating the Node2 fleet work (found 2026-08-02 while running `seed_vtn.py`). The stale name also breaks the "Summer Peak DR" demo program's target update (targets `["ven-2", "ven-1-name"]`, 400 on re-seed). Rename the VEN entity to `ven-1` and fix the program's targets | Low — cosmetic/demo-data correctness, `ven-1` itself works fine under its real `CLIENT_ID` | Low |
+| GB-16 | `npm audit` in `VEN/ui` (checked 2026-08-03, pre-existing — not introduced by any recent change): `brace-expansion` (high, DoS via exponential/unbounded expansion, transitive via eslint — build-time only, not shipped) and `react-router`/`react-router-dom` 6.0.0–7.17.0 (moderate, open-redirect + arbitrary-constructor-injection CVEs — a real runtime dependency). Both have fixes via `npm audit fix`; not applied here since it's outside this session's scope — run it and re-test the UI suite before the next release | Low-Medium — react-router is runtime-shipped; brace-expansion is dev-only | Low — `npm audit fix` is typically a patch/minor bump, but re-run the full UI suite after |
 
 ---
 
