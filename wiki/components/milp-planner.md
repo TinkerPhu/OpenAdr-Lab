@@ -2,9 +2,9 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-07-31
-synced_commit: e9f5207
-sources: [docs/architecture/ven_milp_planner.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, VEN/src/controller/milp_planner/solver_duals.rs, VEN/src/entities/asset.rs, VEN/src/assets/ev_milp.rs, VEN/src/assets/heater_milp.rs]
+updated: 2026-08-03
+synced_commit: 1b007b7
+sources: [docs/architecture/ven_milp_planner.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, VEN/src/controller/milp_planner/solver_duals.rs, VEN/src/entities/asset.rs, VEN/src/entities/planner_params.rs, VEN/src/profile/validate.rs, VEN/src/assets/ev_milp.rs, VEN/src/assets/heater_milp.rs]
 tags: [planner, milp, highs, optimization]
 ---
 
@@ -153,6 +153,27 @@ see [[milp-over-greedy]].
   actually reshapes a plan (not just unit-level reward wiring):
   `tests/features/ven_comfort_curve.feature`. See [[hems-planning]] for where
   `comfort_rates` is resolved and attached to a session.
+- **Peak-demand penalty threshold** (WP6.3, BL-09, `docs/architecture/VEN_ARCHITECTURE.md`
+  §2.3.2): a profile may declare `planner.penalty_rules` (`entities::planner_params::
+  PenaltyRuleParams` — `rule_id`, `threshold_kw`, `measurement_window_s`,
+  `penalty_eur_per_kw`), each keeping grid import at or below `threshold_kw` within
+  fixed, horizon-aligned windows. Implemented in `controller/milp_planner/penalty.rs`
+  as a per-solve soft-penalty term mirroring the existing `s_imp_viol` idiom: one
+  shared slack per rule per window bounds every slot's import in that window
+  (`p_imp[t] <= threshold_kw + s_penalty[window]`), penalized once per window (not
+  per slot — a demand-charge-style peak cost, not an energy cost). Threaded through
+  both solver phases and the marginal-cost dual solve via `add_model_constraints`'s
+  existing shared constraint function. Deliberately **not** the stateful, persisted
+  billing-period tracker sketched in `entities::design_vocabulary::PenaltyRule`
+  (rolling averages, `breached_this_period` surviving restarts) — each solve
+  re-evaluates its own horizon fresh, no cross-restart state; that heavier feature
+  remains a separate, unbuilt future item if real multi-day billing tracking is ever
+  needed. Surfaces as `CostBreakdown.c_peak_penalty_eur` and a `PlanWarning` when a
+  window still breaches after solving; `Plan.penalty_rules_active` drives a new
+  "Peak demand" row in the VEN UI's Decision Matrix ([[ven-ui]]). Off by default
+  (empty `penalty_rules`). Also fixed in passing: `profile::validate`'s new
+  window-multiple check must use `PlannerConfig::effective_step_s()`, not the raw
+  (and, when `plan_zones` is set, silently ignored) `plan_step_s` field.
 
 ## File map
 

@@ -13,7 +13,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[testing-strategy]] — four suites, VEN test pyramid, test-first and determinism rules
 
 ## Components
-- [[milp-planner]] — two-phase HiGHS MILP, adoption gate, heater anchor, cross-asset interactions, session comfort curve (BL-34), file map
+- [[milp-planner]] — two-phase HiGHS MILP, adoption gate, heater anchor, cross-asset interactions, session comfort curve (BL-34), peak-demand penalty threshold (BL-09), file map
 - [[dispatcher]] — build_setpoints on the 1 s sim tick, surplus-EV overlay, shiftable-load runtimes
 - [[openadr-interface]] — event→signal translation tables, report obligations
 - [[simulator]] — physics models behind SimulatorPort, /sim endpoints (UI only), injectable clock/seedable RNG (R-24), sim-inject double-option null-clear fix

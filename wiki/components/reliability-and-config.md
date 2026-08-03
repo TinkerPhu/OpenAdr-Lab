@@ -2,8 +2,8 @@
 title: VEN Reliability & Config Hygiene
 type: component
 created: 2026-07-04
-updated: 2026-07-31
-synced_commit: e9f5207
+updated: 2026-08-03
+synced_commit: 1b007b7
 sources: [VEN/src/tasks/mod.rs, VEN/src/tasks/backoff.rs, VEN/src/entities/error.rs, VEN/src/profile/, VEN/src/tasks/obligation.rs, VEN/src/vtn.rs, VEN/src/controller/milp_planner/mod.rs, VEN/src/services/hems.rs, VEN/src/config.rs, docs/guidelines/ERROR_HANDLING.md, docs/architecture/ven_milp_planner.md]
 tags: [reliability, config, error-handling, ven]
 ---
@@ -81,6 +81,7 @@ are collected and reported together, and the process exits non-zero before touch
 | HiGHS time limit | `planner.solver_timeout_s` (profile field, default 60) — see [[milp-planner]] |
 | Planning loop startup delay | `planner.planning_initial_delay_s` (profile field, default 5) |
 | Replan interval | `planner.replan_interval_s` (profile field, default 300) |
+| Peak-demand penalty rules | `planner.penalty_rules` (profile field, default `[]` = off) — see [[milp-planner]] |
 | Poll intervals | `POLL_EVENTS_SECS` / `POLL_PROGRAMS_SECS` / `POLL_REPORTS_SECS` env vars (30/30/60), backed off adaptively per-poll (see above) |
 | Poll-loop startup jitter | `POLL_STARTUP_JITTER_S` env var (default 0) — Phase 2 GB-09, one-time pre-loop delay so a fleet of VENs brought up together don't poll in lockstep; see [[fleet-tooling]] |
 | Obligation check interval | `OBLIGATION_CHECK_INTERVAL_S` = 5, named constant, `tasks/obligation.rs` |
