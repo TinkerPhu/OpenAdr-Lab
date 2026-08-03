@@ -5,10 +5,11 @@ VEN/profiles/test.yaml.
 """
 
 import json
+import time
 from datetime import datetime, timezone
 
 from behave import given, then
-from features.helpers.api_client import ven_get
+from features.helpers.api_client import ven_get, ven_post
 from features.helpers.wait import poll_until
 
 
@@ -57,6 +58,19 @@ def step_no_pv_measurement_published(context):
     pass  # nothing to do — absence is the precondition
 
 
+@given("the VEN-1 pv irradiance offset is flushed to zero")
+def step_flush_pv_irradiance_offset(context):
+    # pv_irradiance_alpha=1.0 -> full decay in a single tick (see
+    # PvSmoothingState::update); a plain /sim/inject/reset alone only stops
+    # re-forcing the override, it does not accelerate the existing offset's
+    # decay, which at the default alpha=0.1 can linger for many minutes.
+    r = ven_post("/sim/inject", json={"pv_irradiance_alpha": 1.0})
+    r.raise_for_status()
+    time.sleep(3)  # >= a few ticks at the test profile's tick_s=1
+    r = ven_post("/sim/inject/reset", json={})
+    r.raise_for_status()
+
+
 @then("/measurement reports the PV signal as ok with the published reading")
 def step_measurement_pv_ok(context):
     poll_until(
@@ -92,11 +106,6 @@ def step_measurement_pv_not_configured(context):
 
 @then("the live PV power on VEN-1 reflects the measured reading rather than the weather estimate")
 def step_live_pv_matches_measured(context):
-    def pv_power_kw():
-        resp = ven_get("/sim")
-        assert resp.ok
-        return resp.json()["assets"]["pv"]["power_kw"]
-
     poll_until(
         lambda: ven_get("/sim"),
         lambda resp: resp.ok and abs(resp.json()["assets"]["pv"]["power_kw"] + PV_MEASURED_KW) < 0.05,
