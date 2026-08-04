@@ -41,6 +41,13 @@ services:
       # this stack's compose self-contained. See extra_hosts below.
       WEATHER_MQTT_HOST: "host.docker.internal"
       WEATHER_MQTT_SITE_ID: "zunzgen"
+      # Real-measurement plugin (docs/architecture/real_measurement_mqtt.md).
+      # ven-1 only — real PV inverter + house-load meter at the Zunzgen site.
+      # Same broker/host as the weather feed above.
+      PV_MEASUREMENT_MQTT_HOST: "host.docker.internal"
+      PV_MEASUREMENT_MQTT_SITE_ID: "zunzgen"
+      BASE_LOAD_MEASUREMENT_MQTT_HOST: "host.docker.internal"
+      BASE_LOAD_MEASUREMENT_MQTT_SITE_ID: "zunzgen"
     volumes:
       - ./data/ven-1:/data
       - ./profiles/ven-1.yaml:/config/profile.yaml:ro

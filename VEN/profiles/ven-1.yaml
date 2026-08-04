@@ -105,3 +105,10 @@ weather_pv:
   azimuth_deg: 267.0
   rated_kwp: 14.4
   performance_ratio: 0.84
+
+# Real-measurement ground truth (docs/architecture/real_measurement_mqtt.md).
+# ven-1 only: real inverter PV output and real house-load meter reading
+# outrank the weather/sin-model estimates whenever fresh.
+measurements:
+  pv_enabled: true
+  base_load_enabled: true
