@@ -2,8 +2,8 @@
 title: Simulator
 type: component
 created: 2026-07-04
-updated: 2026-07-31
-synced_commit: e9f5207
+updated: 2026-08-03
+synced_commit: 50961b5
 sources: [VEN/src/simulator/, VEN/src/state/mod.rs, VEN/src/routes/sim.rs, docs/architecture/asset_simulation.md, docs/architecture/VEN_ARCHITECTURE.md]
 tags: [simulator, physics, determinism]
 ---
@@ -61,6 +61,10 @@ field now deserializes through a `double_option` helper (`Option<Option<T>>`), r
 three-way absent/null/value distinction the endpoint's doc comment always claimed. The
 original unit tests only constructed `PostSimInjectBody` directly in Rust, bypassing real JSON
 deserialization — a false positive; the regression test now goes through `serde_json::from_str`.
+
+`SimState::to_sensor_snapshot`/`to_sim_snapshot`/`to_timeline_snapshot` moved out of
+`simulator/mod.rs` into `simulator/snapshot.rs` (file-size cap, `.claude/CLAUDE.md`) when
+[[real-measurement-mqtt]] threaded two new `Option<f64>` parameters through `SimState::tick`.
 
 ## Role in planning
 
