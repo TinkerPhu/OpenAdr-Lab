@@ -2,9 +2,9 @@
 title: Real-Measurement MQTT Feeds
 type: component
 created: 2026-08-03
-updated: 2026-08-03
-synced_commit: 50961b5
-sources: [docs/architecture/real_measurement_mqtt.md, VEN/src/measurement.rs, VEN/src/measurement_translation.rs, VEN/src/controller/measurement_port.rs, VEN/src/entities/measurement.rs, VEN/src/assets/pv.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/mod.rs, VEN/src/tasks/sim_tick/context.rs, VEN/src/routes/measurement.rs, VEN/ui/src/pages/Measurement.tsx, tests/features/real_measurement_mqtt.feature]
+updated: 2026-08-04
+synced_commit: 093fbd1
+sources: [docs/architecture/real_measurement_mqtt.md, VEN/src/measurement.rs, VEN/src/measurement_translation.rs, VEN/src/controller/measurement_port.rs, VEN/src/entities/measurement.rs, VEN/src/assets/pv.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/mod.rs, VEN/src/tasks/sim_tick/context.rs, VEN/src/routes/measurement.rs, VEN/ui/src/pages/Measurement.tsx, tests/features/real_measurement_mqtt.feature, VEN/docker-compose.yml, VEN/profiles/ven-1.yaml]
 tags: [measurement, pv, baseload, mqtt, ven, real-hardware]
 ---
 
@@ -70,10 +70,34 @@ feature was built on top of it. Building the 3-tier precedence directly on that 
 mechanism, rather than before it, avoided reintroducing the same class of bug (a lingering
 offset silently suppressing the new measured tier).
 
-Neither signal feeds the planner's forward horizon — a measurement is live ground truth for
-*now*, not a forecast series with future slots. Both are only ever resolved into the live
-tick (`tasks::sim_tick::context::resolve_tick_context`, called once per tick before the sync
-lock, mirroring how weather's own tick-time resolution works), never into `services::planning`.
+Neither signal feeds the planner's forward horizon *directly* — a measurement is live ground
+truth for *now*, not a forecast series with future slots. Both are only ever resolved into
+the live tick (`tasks::sim_tick::context::resolve_tick_context`, called once per tick before
+the sync lock, mirroring how weather's own tick-time resolution works), never into
+`services::planning`.
+
+## Indirect path into the forecast: composes with [[heuristics-pipeline]] (found 2026-08-04)
+
+Two features built independently turned out to compose. A measured baseline-load reading
+substituted into `SimState::tick`'s `BaseLoad` arm becomes that tick's `entry.last_power_kw`
+— the asset's one "actual power" value, same as any other asset — which `tasks/history_sampler`
+downsamples into `tick_samples` every minute unconditionally, with no awareness of whether the
+value's origin was a real MQTT reading or the synthetic fallback. [[heuristics-pipeline]]'s
+daily `learn_asset_heuristics` job trains the planner's `base_load` forecast from exactly that
+history. So once `base_load_enabled` measurement goes live on a VEN instance, the planner's
+base-load *forecast*, not just its live "now" value, converges toward real measured behavior
+automatically — verified on ven-1 (2026-08-04): `tick_samples` rows for `base_load` matched
+the live MQTT feed within the same minute of enabling it, and `GET /forecast`'s `base_load`
+entry was already `"source":"HEURISTIC"` (heuristics job fires on its first check after a
+restart, not just at UTC midnight — see [[heuristics-pipeline]]).
+
+Convergence timeline from `HeuristicsConfig::default()` (`ewma_halflife_days: 14.0`,
+`rolling_window_days: 42`), assuming continuous feed uptime: the most recent 14 days already
+outweighs all older (pre-measurement) history after one half-life; the pre-measurement history
+ages out of the window entirely after the full 42 days. No measured-vs-synthetic provenance
+tag exists on `tick_samples` — a feed dropout during that window silently re-mixes synthetic
+fallback samples into the learned profile with no record of which rows they were. Full writeup:
+`docs/architecture/real_measurement_mqtt.md`'s "Indirect path into the forecast" section.
 
 ## First full E2E run found two real test-isolation bugs (2026-08-03)
 

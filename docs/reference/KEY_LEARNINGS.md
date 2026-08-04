@@ -816,3 +816,26 @@ outes/sim.rs causes a T1+T2 double-solve race:
   the allocation-heavy work completes (here: the `tokio::spawn_blocking` closure running the
   HiGHS solve, in `VEN/src/services/planning.rs`) — verified this returns RSS to a flat
   baseline within 15-45s of each solve instead of leaving it at the peak.
+
+## Real Measurements Feed the Planner Forecast Indirectly (real-measurement-mqtt × BL-14, 2026-08-04)
+
+- **Two independently-built features compose into one nobody designed on purpose.** The
+  real-measurement-mqtt feature (live-tick-only, by design) and the pre-existing
+  `learn_asset_heuristics` daily job (WP5.2/BL-14, trains the planner's base-load forecast
+  from `tick_samples` history) were never meant to interact — but `tick_samples` records
+  whatever `entry.last_power_kw` was that tick, without caring whether it came from a real
+  measurement or the synthetic heuristic. So once a measured baseline-load reading starts
+  winning the live tick's substitution, it starts silently flowing into the planner's
+  *forecast* too, not just the live "now" value — no code change needed for that to happen.
+  Before shipping a "make X real" feature, check whether an existing history/learning
+  pipeline already downstream-consumes X's output; the two may already compose without
+  anyone asking them to.
+- **No measured/synthetic provenance tag on stored samples is a real gap, not a hypothetical
+  one.** `tick_samples` has no column distinguishing "this row came from a live MQTT reading"
+  vs. "this row is the synthetic fallback because the feed was stale." A feed outage
+  silently re-mixes synthetic-era behavior back into the EWMA-weighted learned heuristic for
+  up to the full `rolling_window_days` (42) afterward, with no way to audit which samples
+  caused it. Not fixed here (deliberately out of scope — see
+  `docs/architecture/real_measurement_mqtt.md`'s "Indirect path into the forecast" section)
+  but worth remembering before treating a "converged" learned heuristic as trustworthy after
+  any known outage window.
