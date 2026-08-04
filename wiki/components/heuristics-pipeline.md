@@ -2,9 +2,9 @@
 title: Heuristics Pipeline (learned baselines)
 type: component
 created: 2026-07-16
-updated: 2026-07-16
-synced_commit: ddeeb68
-sources: [VEN/src/services/heuristics.rs, VEN/src/tasks/heuristics_job/mod.rs, VEN/src/controller/residual.rs, VEN/src/entities/design_vocabulary.rs, VEN/src/services/forecast.rs, VEN/src/controller/milp_planner/inputs.rs, VEN/src/routes/debug.rs, VEN/src/assets/base_load.rs, docs/history/project_journal.md]
+updated: 2026-08-04
+synced_commit: 093fbd1
+sources: [VEN/src/services/heuristics.rs, VEN/src/tasks/heuristics_job/mod.rs, VEN/src/controller/residual.rs, VEN/src/entities/design_vocabulary.rs, VEN/src/services/forecast.rs, VEN/src/controller/milp_planner/inputs.rs, VEN/src/routes/debug.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/mod.rs, VEN/src/tasks/history_sampler/mod.rs, docs/architecture/real_measurement_mqtt.md, docs/history/project_journal.md]
 tags: [heuristics, forecasting, baseline, phase-5]
 ---
 
@@ -90,3 +90,17 @@ Verified end-to-end on Node1: ven-1's learned weekday bucket shows coffee
 lunch peak, adds a brunch peak (h10) and moves dinner an hour earlier — with a
 planner integration test proving `baseline_kw` differs for a Saturday-dated vs
 Tuesday-dated solve at the same hour ([[testing-strategy]]).
+
+## Composes with [[real-measurement-mqtt]] (found 2026-08-04)
+
+This pipeline doesn't distinguish where a `tick_samples` row's `power_kw` value came from —
+`tasks/history_sampler` records whatever `entry.last_power_kw` was that tick, whether it was
+the synthetic `appliance_noise_kw` model or a real, live-measured reading. Once
+[[real-measurement-mqtt]]'s `base_load_enabled` gate substitutes a measured value into the
+live tick, that value flows into `tick_samples` and therefore into this learner with zero
+additional plumbing — the two features were built independently but compose automatically.
+Verified on ven-1: `GET /forecast`'s `base_load` entry already reports
+`"source":"HEURISTIC"` with the learned profile actively driving the planner's forecast.
+See [[real-measurement-mqtt]]'s "Indirect path into the forecast" section for the
+convergence timeline (EWMA half-life ~14 days, full window 42 days) and the caveat that a
+feed dropout silently re-mixes synthetic samples back in with no provenance tag to detect it.

@@ -162,11 +162,55 @@ synthetic profile+noise base outright. The existing manual-override blend
 (`base_load_kw_override` / `BaseLoadSmoothingState`) still rides on top of
 whichever base is authoritative, unchanged.
 
-**Planner scope**: neither signal feeds the planner's forward horizon — a
-measurement is live ground truth for *now*, not a forecast series with
-future slots. Both are only ever passed into the live tick
+**Planner scope**: neither signal feeds the planner's forward horizon
+*directly* — a measurement is live ground truth for *now*, not a forecast
+series with future slots. Both are only ever passed into the live tick
 (`SimState::tick`/`peek_pv_kw`/`peek_base_load_kw`), never into
-`services::planning`.
+`services::planning`. There is, however, an *indirect* path for baseline
+load — see below.
+
+## Indirect path into the forecast: learned heuristics
+
+A measured baseline-load reading, once substituted into
+`SimState::tick`'s `BaseLoad` arm above, becomes that tick's
+`entry.last_power_kw` — the asset's single "actual power" value, same as any
+other asset. This value is what `tasks/history_sampler` downsamples into the
+`tick_samples` SQLite history table every minute, unconditionally, whether
+the tick's origin was measured or synthetic. It doesn't know or care which.
+
+Separately (and pre-existing — this is `services/heuristics.rs`'s WP5.2/BL-14
+`learn_asset_heuristics`, not part of this feature), a daily job
+(`tasks/heuristics_job::spawn_heuristics_job`) fits an EWMA-recency-weighted
+hour-of-day profile to `tick_samples` history and stores the result as
+`AssetHeuristics`, which `controller/milp_planner/inputs.rs` samples to
+build the planner's base-load forecast in place of the flat
+`baseline_kw_profile` fallback.
+
+The two features were built independently, but the effect is real: once
+`base_load_enabled` measurement is live on a VEN instance, the planner's
+base-load *forecast* — not just the live "now" value — converges toward real
+measured behavior automatically, with no additional code. Convergence
+timeline, from `HeuristicsConfig::default()`
+(`ewma_halflife_days: 14.0`, `rolling_window_days: 42`), assuming
+continuous, gap-free measurement uptime from the day the feed goes live:
+
+- After **one EWMA half-life (~14 days)**: the most recent two weeks of real
+  data already outweighs all older (pre-measurement, synthetic) history
+  combined.
+- After **the full 42-day rolling window**: zero pre-measurement samples
+  remain in the learning window at all — the forecast is built entirely
+  from real measurements.
+- The forecast only updates once per UTC calendar day (the job's own
+  cadence), not continuously.
+
+**Caveat — no measured/synthetic provenance tag.** If the MQTT feed drops
+out for longer than `MEASUREMENT_STALENESS_THRESHOLD` (5 min), the live tick
+silently falls back to the synthetic heuristic for that stretch, and that
+fallback value is recorded into `tick_samples` indistinguishable from a real
+reading — there is currently no column marking a sample's origin. So
+"fully converged" above assumes uninterrupted feed uptime; any outage
+quietly re-mixes some synthetic-era behavior back into the learned profile
+for the following 42 days, with no record of which samples caused it.
 
 ## Wire contract
 
