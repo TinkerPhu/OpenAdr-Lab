@@ -2,8 +2,8 @@
 title: VEN Hexagonal Architecture
 type: architecture
 created: 2026-07-04
-updated: 2026-07-16
-synced_commit: f08e469
+updated: 2026-08-03
+synced_commit: 50961b5
 sources: [.claude/CLAUDE.md, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/module_dependency_graph.md, VEN/src/]
 tags: [architecture, hexagonal, ports, ven]
 ---
@@ -35,10 +35,12 @@ inputs arrive only through the `AssetMilpContext` port. See [[milp-planner]] and
 | `AssetMilpContext` | planner input | solver receives `Vec<Box<dyn AssetMilpContext>>`; concrete asset types implement it in `assets/*.rs` (`controller/milp_planner/asset_port.rs`) |
 | `SolverPort` | services → `controller/milp_planner` | `solve(SolveRequest) -> Plan` (`controller/solver_port.rs`); `MilpSolver` (in `milp_planner/mod.rs`) is the real implementation, wrapping `run_planner()`; `services::PlanningService::solve_plan` is the only caller |
 | `HistoryPort` | domain/routes/tasks → `history_store` | append/query/prune for ticks, grid samples, plan snapshots, events, reports, ledger periods (`controller/history_port.rs`); `SqliteHistoryStore` is the real implementation, all methods synchronous (`rusqlite`), called from async contexts via `tokio::task::spawn_blocking` — see [[history-store]] |
+| `WeatherForecastPort` | services/tasks → `weather.rs` | `latest()`/`is_alive()` (`controller/weather_port.rs`); `MqttWeatherAdapter` is the real implementation — see [[weather-forecast]] |
+| `MeasurementPort` | tasks/routes → `measurement.rs` | `latest_kw()`/`is_alive()` (`controller/measurement_port.rs`); `MqttMeasurementAdapter` is the real implementation, one instance per signal (PV, baseline load) — see [[real-measurement-mqtt]] |
 
-All five ports are now real traits with a concrete implementation and a mock
-(`services/test_support/mock_solver_port.rs`, `mock_history_port.rs`, alongside the
-pre-existing simulator/VTN mocks) — `tasks/planning.rs`'s planning loop calls
+All seven ports are now real traits with a concrete implementation and a mock
+(`services/test_support/mock_solver_port.rs`, `mock_history_port.rs`, `mock_weather_port.rs`,
+alongside the pre-existing simulator/VTN mocks) — `tasks/planning.rs`'s planning loop calls
 `SolverPort::solve` through the trait object, not `milp_planner::run_planner()` directly.
 
 ## Enforced invariants (grep checks, run before any VEN PR)

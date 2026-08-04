@@ -13,7 +13,12 @@ tags: [dispatcher, realtime, ledger]
 The fast half of the VEN's two-speed loop. The dispatcher itself is a **pure-function
 module** (`VEN/src/controller/dispatcher.rs`); the 1-second tick that drives it lives in
 `VEN/src/tasks/sim_tick/` (`tick.rs::tick_once`), which snapshots plan/capacity/tariffs,
-calls the dispatcher, ticks the [[simulator]] physics, then publishes results.
+calls the dispatcher, ticks the [[simulator]] physics, then publishes results. `tick_once`'s
+pre-lock snapshot phase (weather/[[real-measurement-mqtt]] resolution, inject/plan/capacity/
+dispatch/tariff reads, arbiter gates) and its post-lock housekeeping (inject-field clearing,
+periodic report/persist counters) were split into `tasks/sim_tick/context.rs` and
+`tasks/sim_tick/post_lock.rs` respectively (file-size cap) when the two new measured-kw
+parameters were threaded through.
 
 Per tick, `build_setpoints(plan, sim, capacity, heater_setpoint_c, now, overlay_enabled)`:
 

@@ -2,8 +2,8 @@
 title: Asset Layer
 type: component
 created: 2026-07-04
-updated: 2026-07-31
-synced_commit: e9f5207
+updated: 2026-08-03
+synced_commit: 50961b5
 sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, VEN/src/controller/residual.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md, VEN/src/entities/asset_params.rs, VEN/src/entities/sim_inject.rs]
 tags: [assets, abstraction, ven]
 ---
@@ -103,6 +103,15 @@ unaffected" — is now set explicitly per VEN (12.5/10.0/7.5 kW, each below its 
 `rated_kw`). This surfaced a latent bug in `PvInverter::control_schema()`: the manual
 `pv_generation_limit_kw` slider capped at `rated_kw` instead of `inverter_max_kw`, invisible
 until the two values diverged — fixed to match what `step_inner` clamps against everywhere.
+
+## Real-measurement ground truth (ven-1 only)
+
+`PvInverter.measured_power_kw` / `BaseLoad.measured_load_kw` (both `Option<f64>`, set each
+tick, not from YAML) let a real MQTT reading outrank the simulated/forecast value —
+[[real-measurement-mqtt]]. PV: 3-tier `measured > weather-derived > sin-model`, folded into
+the same `base_kw.or(...)` selection `step_inner` already used for weather. BaseLoad: simple
+replace — `measured_load_kw.unwrap_or_else(natural_profile_plus_noise)`. Both still let the
+manual-override offset blend additively on top, unchanged.
 
 ## Heater safety envelope
 
