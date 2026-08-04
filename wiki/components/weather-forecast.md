@@ -2,8 +2,8 @@
 title: Weather Forecast Plugin
 type: component
 created: 2026-07-28
-updated: 2026-07-31
-synced_commit: e9f5207
+updated: 2026-08-03
+synced_commit: 50961b5
 sources: [docs/architecture/weather_forecast.md, VEN/src/weather.rs, VEN/src/entities/weather.rs, VEN/src/entities/solar.rs, VEN/src/entities/pv_snow.rs, VEN/src/controller/weather_port.rs, VEN/src/routes/weather.rs, VEN/src/profile/weather_pv.rs, VEN/src/services/forecast.rs, VEN/ui/src/pages/Weather.tsx, VEN/src/services/test_support/mock_weather_port.rs]
 tags: [weather, pv, forecast, mqtt, ven]
 ---
@@ -39,9 +39,11 @@ TECHNICAL_DEBTS.md R-50):
   precedence `pv_forecast_override` > `weather_pv_kw` > sin-model. See [[milp-planner]].
 - **Simulator ground truth**: `PvInverter.weather_power_kw`, resolved once per tick in
   `tasks::sim_tick::tick_once` and used by `step_inner` in place of the sin model —
-  precedence manual sim-inject override > weather > sin model, mirroring the planner's own
-  precedence. This closed the gap where the weather feed only affected `/weather`
-  diagnostics and the plan, not what the simulator actually produced.
+  precedence manual sim-inject override > **measured** > weather > sin model (measured added
+  by [[real-measurement-mqtt]]; a decaying manual-override offset blends additively onto
+  whichever base wins, rather than nulling it outright — see that page's fix note). This
+  closed the gap where the weather feed only affected `/weather` diagnostics and the plan,
+  not what the simulator actually produced.
 - **API-visible path**: `services::forecast::build_weather_pv_forecast`, tagged
   `ForecastSource::WeatherModel`, feeds `GET /weather` and the VEN UI Weather tab
   (`WeatherRawPanel`/`WeatherDerivedPanel`) — the required UI surface for this feed per the
@@ -81,6 +83,19 @@ diffuse-sky model are deliberately deferred accuracy improvements over the curre
 isotropic-on-zenith transposition; the snow-cover model's initial state has no cross-check
 against live PV telemetry deviation; and the Mosquitto broker accepts anonymous publishes on
 its plaintext listener (acceptable on the trusted lab LAN, revisit before any wider exposure).
+
+## E2E fixture was time-of-day flaky (found 2026-08-03)
+
+`weather_forecast.feature`'s `_sample_forecast_message` fixture published a single hourly
+sample 1h ahead of "now" — with real solar-position transposition against Zunzgen's
+coordinates, that one sample could land after sunset whenever the suite happened to run in
+the evening, zeroing every plan slot's `forecast_ac_kw` regardless of the (nonzero) GHI
+value, and failing the "non-zero, weather-influenced PV forecast" assertion
+(`tests/features/steps/weather_forecast_steps.py`). Fixed by spanning 24 hourly samples
+instead of one, guaranteeing genuine daytime coverage within the plan horizon no matter what
+wall-clock time the suite runs at. Found while first running full E2E against
+[[real-measurement-mqtt]]'s branch (unrelated to that feature itself, but blocking its own
+E2E verification since both features' scenarios run in the same suite).
 
 ## Relationship to the deviation arbiter
 

@@ -3,7 +3,7 @@ title: VEN UI
 type: component
 created: 2026-07-04
 updated: 2026-08-03
-synced_commit: 1b007b7
+synced_commit: 50961b5
 sources: [VEN/ui/src, docs/history/project_journal.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/pages/Weather.tsx, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx]
 tags: [ui, react, timeline]
 ---
@@ -20,11 +20,15 @@ React + TypeScript SPA (Vite build, nginx-served, port 8214) — the per-site da
   ([[dto-pass-through]]).
 - `VenContext` — multi-VEN selector switching all pages across the three instances.
 - Pages: Dashboard, History (placed directly after Dashboard in the nav),
-  Controller, Programs, Events, Sensors, Weather; plus the planner timeline views
-  exercised by `tests/features/ven_ui_planner.feature` and `ven_timeline.feature`.
+  Controller, Programs, Events, Sensors, Weather, Measurements (Diagnostics nav group);
+  plus the planner timeline views exercised by `tests/features/ven_ui_planner.feature`
+  and `ven_timeline.feature`.
 - **Weather page** (`pages/Weather.tsx`): raw MQTT feed (`WeatherRawPanel`) and the
   derived PV forecast (`WeatherDerivedPanel`) from [[weather-forecast]]'s `GET /weather`
   — the UI face of that plugin, per the `ui-transparency` rule.
+- **Measurements page** (Diagnostics nav group, `pages/Measurement.tsx`): both real-
+  measurement signals' (PV, baseline load) raw reading, freshness, and source-alive state
+  from [[real-measurement-mqtt]]'s `GET /measurement` — same `ui-transparency` rationale.
 - **ArbiterSettingsCard** (Devices page, `components/devices/ArbiterSettingsCard.tsx`):
   the toggle for [[deviation-arbiter]]'s `deviation_arbiter_enabled` runtime gate, via
   `GET/PUT /arbiter-settings`, plus a live readout (net site power, deviation, active lever)
