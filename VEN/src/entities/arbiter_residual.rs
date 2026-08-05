@@ -2,8 +2,8 @@
 //! `docs/architecture/VEN_ARCHITECTURE.md`'s Deviation Arbiter section).
 //!
 //! Deliberately a fresh, per-asset type rather than a repurposing of the
-//! (confirmed dead) `entities::site_meter::DispatchState` — that type is
-//! whole-site scalar, not per-asset, and doesn't fit the SoC-coupling
+//! now-deleted `entities::site_meter::DispatchState` (R-62) — that type was
+//! whole-site scalar, not per-asset, and wouldn't have fit the SoC-coupling
 //! resource this tracks (battery/EV capacity, not aggregate site power).
 
 use serde::{Deserialize, Serialize};
