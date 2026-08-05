@@ -122,12 +122,6 @@ export type SimSnapshot = {
   assets: Record<string, AssetSnapshot>;
 };
 
-export type Setpoints = {
-  ev_charge_kw: number;
-  heater_kw: number;
-  mode: string;
-};
-
 /** Simulation injection state — maps to /sim/inject backend endpoint. */
 export type SimInjectState = {
   // Behaviour A: one-shot jumps (auto-cleared after application)
@@ -194,9 +188,6 @@ export type TariffSnapshot = {
   export_tariff_eur_kwh: number | null;
   co2_g_kwh: number | null;
 };
-
-/** @deprecated Renamed to TariffSnapshot. Kept as alias for backward compat with Controller.tsx. */
-export type RateSnapshot = TariffSnapshot;
 
 export type PlannedRates = TariffSnapshot[];
 

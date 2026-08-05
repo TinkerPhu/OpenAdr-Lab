@@ -41,7 +41,7 @@ mod tests {
 
     #[test]
     fn from_converts_any_error_into_app_error() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "disk gone");
+        let io_err = std::io::Error::other("disk gone");
         let app_err: AppError = io_err.into();
         assert_eq!(app_err.0.to_string(), "disk gone");
     }
