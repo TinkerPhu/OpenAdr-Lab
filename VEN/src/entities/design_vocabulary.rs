@@ -169,6 +169,17 @@ pub struct DefaultValueCurve {
     pub rates: Vec<ComfortRate>,
 }
 
+/// Device health and communication status (§1.3). Moved here from the now-deleted
+/// entities/asset.rs (R-65) — its only remaining consumer is AssetState::responsiveness below.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DeviceResponsiveness {
+    Responsive,   // device confirms setpoints within expected delay
+    Degraded,     // device responds but outside expected parameters
+    Unresponsive, // device not confirming setpoint changes
+    Offline,      // device not communicating at all
+}
+
 /// Live snapshot of device status — updated every measurement cycle (§3.2).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetState {
@@ -179,7 +190,7 @@ pub struct AssetState {
     pub actual_kw: f64,          // measured power from device (positive = import)
     pub power_deviation_kw: f64, // = actual_kw - commanded_kw (derived)
 
-    pub responsiveness: crate::entities::asset::DeviceResponsiveness,
+    pub responsiveness: DeviceResponsiveness,
     pub last_confirmed_response: Option<DateTime<Utc>>,
 
     pub soc: Option<f64>,           // 0.0..1.0 for batteries/EV, None otherwise

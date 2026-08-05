@@ -16,16 +16,6 @@ pub enum AssetType {
     GenericProducer, // fallback
 }
 
-/// Device health and communication status (§1.3).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum DeviceResponsiveness {
-    Responsive,   // device confirms setpoints within expected delay
-    Degraded,     // device responds but outside expected parameters
-    Unresponsive, // device not confirming setpoint changes
-    Offline,      // device not communicating at all
-}
-
 /// How to handle completion when the last DeadlineTier expires (§1.10).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
