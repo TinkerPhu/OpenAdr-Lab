@@ -297,12 +297,13 @@ async fn main() -> anyhow::Result<()> {
         });
     }
     {
-        let (s, v, secs, tx, nf) = (
+        let (s, v, secs, tx, nf, h) = (
             state.clone(),
             vtn_port.clone(),
             cfg.poll_events_secs,
             trigger_tx.clone(),
             notifier.clone(),
+            history_port.clone(),
         );
         tasks::supervised_spawn("poll_events", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_event_poll(
@@ -312,6 +313,7 @@ async fn main() -> anyhow::Result<()> {
                 tx.clone(),
                 nf.clone(),
                 poll_jitter_s,
+                h.clone(),
             )
         });
     }

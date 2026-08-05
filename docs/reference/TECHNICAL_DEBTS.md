@@ -35,7 +35,6 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 | R-42 | `reports_steps.py` submits reports with the fixed `reportName` "TELEMETRY_USAGE" (an OpenADR payload-type constant, not a name). `report_name` is globally unique on the VTN (`report_report_name_uindex`), so the fixed name collides across scenarios/clients and exercises the upsert path unintentionally. Switch to per-scenario unique names (needs sign-off: changes test fixtures). | `tests/features/steps/reports_steps.py` | Trivial | Low | 🟡 | Low — test-fixture correctness only |
 | R-43 | `entities/history.rs::ReportSent` + `HistoryPort::append_report_sent` and the `GET /history/reports` route are fully wired end-to-end but no production call site ever invokes `append_report_sent` (only exercised in `history_store` unit tests) — found while implementing WP-T5. `GET /history/reports` therefore always returns empty. Wire it into the real report-submission call sites: `tasks/sim_tick/publish.rs::run_measurement_reports`, `services/obligation.rs`, and `routes/reports.rs`. | `VEN/src/tasks/sim_tick/publish.rs`, `VEN/src/services/obligation.rs`, `VEN/src/routes/reports.rs`, `VEN/src/history_store/mod.rs` | Small | Low (silent gap, no incorrect behaviour) | 🟡 | Medium — a whole user-visible endpoint (`/history/reports`) is currently silently empty |
 | R-63 | `entities/history.rs::PlanSnapshot` + `HistoryPort::append_plan_snapshot` and the `GET /history/plans` route are fully wired end-to-end (route mounted in `routes/mod.rs`, VEN UI's History page calls it via `useHistoryPlans` and renders a "Plans" panel) but no production call site ever invokes `append_plan_snapshot` — only `history_store` unit tests and the mock port do. `GET /history/plans` and the UI's "Plans" panel are therefore silently, permanently empty; a user can't distinguish "no plan snapshot yet" from "this was never wired up." Found 2026-08-05 during a dead-code audit triggered by the same symptom. Decide before wiring: does this belong at the moment a plan is adopted (`services/planning.rs`/`tasks/planning/cycle.rs`, mirroring how `tick_samples` captures state at resolution time — the pattern this codebase already prefers, per `openspec/changes/pv-curtailment-history/proposal.md`'s rejection of snapshot-replay design), or should the table be dropped and the route/UI panel removed instead if snapshot history isn't actually wanted? See parked idea `docs/plans/forecast-accuracy-idea.md` for one candidate consumer (forecast-vs-actual tracking) that considered and rejected reviving this table for its own purposes — don't default to reusing it for that without re-opening that discussion. | `VEN/src/tasks/planning/cycle.rs`, `VEN/src/services/planning.rs`, `VEN/src/routes/hems/history.rs`, `VEN/src/history_store/mod.rs`, `VEN/ui/src/pages/History.tsx` | Small | Low (silent gap, no incorrect behaviour) | 🟡 | Medium — a whole user-visible endpoint and UI panel (`/history/plans`) is currently silently empty |
-| R-64 | `entities/history.rs::EventReceived` + `HistoryPort::append_event_received` and the `GET /history/events` route are fully wired end-to-end (route mounted, VEN UI's History page calls it via `useHistoryEvents` and renders an "Events received" panel) but no production call site ever invokes `append_event_received` — only `history_store` unit tests and the mock port do. `GET /history/events` and the UI's "Events received" panel are therefore silently, permanently empty. Found 2026-08-05, same audit as R-63. Wire it into the real event-ingestion path (`tasks/poll_events.rs`, where VTN-sourced OADR events are received and cached) so every event VEN actually acts on is also durably recorded. | `VEN/src/tasks/poll_events.rs`, `VEN/src/routes/hems/history.rs`, `VEN/src/history_store/mod.rs`, `VEN/ui/src/pages/History.tsx` | Small | Low (silent gap, no incorrect behaviour) | 🟡 | Medium — a whole user-visible endpoint and UI panel (`/history/events`) is currently silently empty |
 | R-58 | Unconfirmed whether `PlanTrigger::CapacityChange`/`Alert` are actually wired to asset-level faults (thermal derate, BMS fault, breaker trip) rather than only tariff/VTN-sourced capacity changes — found during the deviation-scenarios analysis. Needs a verification pass: trace every call site that constructs these variants and confirm at least one covers an asset-originated fault, or extend one to. | `VEN/src/entities/asset.rs`, `VEN/src/services/planning.rs`, `VEN/src/assets/` | Small | Medium (unhandled asset fault may not trigger a replan) | 🟡 | Medium — an unwired asset fault could silently fail to trigger a needed replan |
 
 ## Low priority (🔵) — by topic
@@ -131,8 +130,8 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 ## Implementation Task List — Gain: High or Medium Items
 
 Scope: every item currently rated Gain exactly **High** or **Medium** (no compound levels
-like Medium-High/Low-Medium). No item is currently rated plain High, so this is the 7 items
-rated Medium: R-21, R-29, R-31, R-43, R-58, R-63, R-64 (R-22, R-52, R-56, R-24, and R-08 were
+like Medium-High/Low-Medium). No item is currently rated plain High, so this is the 6 items
+rated Medium: R-21, R-29, R-31, R-43, R-58, R-63 (R-22, R-52, R-56, R-24, R-08, and R-64 were
 also on this list and are now resolved — see below). Ordered by dependency, not by ID — work
 top-to-bottom.
 
@@ -148,9 +147,8 @@ top-to-bottom.
 3. **R-31, R-43** — both fully independent of everything above (R-31 is VTN/bff-only;
    R-43 wires VEN report-submission call sites nothing else on this list touches). Order
    between them doesn't matter; listed in ID order.
-4. **R-63, R-64** — same shape as R-43 (dead `HistoryPort` write side, permanently-empty
-   route + UI panel), independent of everything above; order between them and R-31/R-43
-   doesn't matter.
+4. **R-63** — same shape as R-43 (dead `HistoryPort` write side, permanently-empty
+   route + UI panel), independent of everything above.
 5. **R-21** — deliberately last and separate: its own entry has no concrete fix, only a
    workaround (root cause is allocator/heap-state-dependent inside the native HiGHS library
    via FFI, not this codebase). Its task below is an investigation, not a code fix.
@@ -215,23 +213,15 @@ update `docs/history/project_journal.md` and remove the item from this register 
       hook together, not piecemeal.
 - [ ] 5.4 Full verification; remove R-63 from this register.
 
-### 6. R-64 — Wire `append_event_received` into the real event-ingestion path
+### 6. R-21 — Investigate the intermittent `cargo test` heap-corruption crash
 
-- [ ] 6.1 Write a failing integration test: an event received via `tasks/poll_events.rs`'s
-      real ingestion path results in a row visible through `GET /history/events`.
-- [ ] 6.2 Call `HistoryPort::append_event_received` from `tasks/poll_events.rs` at the point
-      an event is accepted into VEN's cache.
-- [ ] 6.3 Full verification; remove R-64 from this register.
-
-### 7. R-21 — Investigate the intermittent `cargo test` heap-corruption crash
-
-- [ ] 7.1 Try to minimize a standalone repro isolating `run_planner_n48_full_horizon` and
+- [ ] 6.1 Try to minimize a standalone repro isolating `run_planner_n48_full_horizon` and
       `solve_ven3_heater_three_tier_zones_feasible` from the rest of the suite.
-- [ ] 7.2 Check for a `good_lp`/HiGHS version bump that might already fix an allocator bug;
+- [ ] 6.2 Check for a `good_lp`/HiGHS version bump that might already fix an allocator bug;
       try upgrading in isolation and re-running the full suite several times.
-- [ ] 7.3 If still reproducible, file an upstream issue against `good_lp` or HiGHS with the
+- [ ] 6.3 If still reproducible, file an upstream issue against `good_lp` or HiGHS with the
       minimized repro; link it from this entry.
-- [ ] 7.4 If no upstream fix lands, formalize the existing workaround (e.g. a
+- [ ] 6.4 If no upstream fix lands, formalize the existing workaround (e.g. a
       `scripts/`-level note or CI retry step) rather than leaving it tribal knowledge.
-- [ ] 7.5 This item stays in the register until the crash stops reproducing across several
+- [ ] 6.5 This item stays in the register until the crash stops reproducing across several
       full-suite runs — remove only then, not merely once a workaround is documented.
