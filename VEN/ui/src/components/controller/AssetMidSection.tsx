@@ -2,7 +2,6 @@ import { Box } from "@mui/material";
 import { CELL_CHART_HEIGHT, CELL_CHART_MIN_WIDTH } from "./chartLayout";
 import type { AssetId, AssetTimelinePoint } from "./types";
 import { AssetTimelineChart } from "./charts/AssetTimelineChart";
-import { MIN_POWER_SPAN_KW } from "./charts/axisDomain";
 import type { ZoneDef } from "../../api/types";
 
 interface AssetMidSectionProps {
@@ -44,7 +43,6 @@ export function AssetMidSection({
           stateKey={stateKey}
           zones={zones}
           pvCurtailment={assetId === "pv"}
-          minPowerSpanKw={assetId === "site-residual" ? MIN_POWER_SPAN_KW : undefined}
         />
       </div>
     </Box>

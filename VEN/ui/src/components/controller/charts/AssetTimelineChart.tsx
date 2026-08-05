@@ -14,7 +14,12 @@ import {
 import type { AssetTimelinePoint } from "../types";
 import { COLOR_NOW } from "../types";
 import type { ZoneDef } from "../../../api/types";
-import { minSpanDomain, MIN_COST_RATE_SPAN_EUR_H, MIN_CO2_RATE_SPAN_G_H } from "./axisDomain";
+import {
+  minSpanDomain,
+  MIN_COST_RATE_SPAN_EUR_H,
+  MIN_CO2_RATE_SPAN_G_H,
+  MIN_POWER_SPAN_KW,
+} from "./axisDomain";
 
 interface AssetTimelineChartProps {
   data: AssetTimelinePoint[];
@@ -28,9 +33,10 @@ interface AssetTimelineChartProps {
    * curtailment_source, inverter_max_kw for past points; pv_forecast_kw for future points).
    * See openspec/changes/pv-curtailment-history/. */
   pvCurtailment?: boolean;
-  /** Minimum power-axis span [kW]. When set, the power Y-axis never auto-zooms narrower than
-   * this, even when every visible point is near zero — see `MIN_POWER_SPAN_KW` in
-   * `axisDomain.ts`. Omit for assets whose power axis should auto-scale normally. */
+  /** Minimum power-axis span [kW]. The power Y-axis never auto-zooms narrower than this, even
+   * when every visible point is near zero — see `MIN_POWER_SPAN_KW` in `axisDomain.ts`. Defaults
+   * to that 1 W floor for every caller (Controller and History tabs both render through this one
+   * component); override only for a chart that genuinely needs a different floor. */
   minPowerSpanKw?: number;
 }
 
@@ -137,7 +143,7 @@ export function AssetTimelineChart({
   stateKey,
   zones,
   pvCurtailment,
-  minPowerSpanKw,
+  minPowerSpanKw = MIN_POWER_SPAN_KW,
 }: AssetTimelineChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes.
   const tMin = nowMs - hoursBack * 3_600_000;
@@ -173,13 +179,10 @@ export function AssetTimelineChart({
 
   const curtailmentZones = pvCurtailment ? buildCurtailmentZones(chartData) : [];
 
-  const powerDomain: [number, number] | undefined =
-    minPowerSpanKw != null
-      ? minSpanDomain(
-          chartData.map((p) => p.values?.["power_kw"] ?? null),
-          minPowerSpanKw
-        )
-      : undefined;
+  const powerDomain = minSpanDomain(
+    chartData.map((p) => p.values?.["power_kw"] ?? null),
+    minPowerSpanKw
+  );
 
   return (
     <ResponsiveContainer width="100%" height={CELL_CHART_HEIGHT}>
