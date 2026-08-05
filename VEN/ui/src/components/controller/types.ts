@@ -98,20 +98,6 @@ export type AssetTimelinePoint = {
   values: Record<string, number> | null;
 };
 
-/** @deprecated Use AssetTimelinePoint instead. Kept until dataBuilders cleanup (T031). */
-export type AssetTimePoint = {
-  /** Epoch ms — X-axis value */
-  ts: number;
-  /** Signed kW — null if no data at this point */
-  powerKw: number | null;
-  /** Derived cost rate [€/h] — null if no tariff data */
-  costRateEurH: number | null;
-  /** Derived CO₂eq rate [g CO₂eq/h] — null if no tariff data */
-  co2RateGH: number | null;
-  /** true if ts < nowMs (solid line); false = dashed (future plan) */
-  isPast: boolean;
-};
-
 // ─── Tariff (grid tariff cell) ───────────────────────────────────────────────
 
 /** Current tariff conditions snapshot for the Tariff Cell left section. */
@@ -169,10 +155,6 @@ export type StackedAreaPoint = {
 
 /** Cell ID format: "asset:{assetId}" | "grid:tariff" | "grid:accumulated" */
 export type CellId = string;
-
-export type PinnedState = {
-  pinnedCellIds: CellId[];
-};
 
 export type CollapseState = Record<
   CellId,
