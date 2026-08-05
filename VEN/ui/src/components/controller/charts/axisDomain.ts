@@ -35,3 +35,10 @@ export const MIN_COST_RATE_SPAN_EUR_H = 0.05;
 
 /** CO2-rate axis floor [g/h] — same rationale, sized for typical asset CO2 rates. */
 export const MIN_CO2_RATE_SPAN_G_H = 50;
+
+/** Site-residual power axis floor [kW] = 1 W — the residual is an unmeasured, computed
+ * leftover (site import/export minus every known asset), so it hovers near zero far more
+ * than any physically metered asset; without a floor, sub-watt arithmetic noise gets
+ * auto-scaled to fill the chart height the same way the cost-rate axis did (see this file's
+ * `minSpanDomain` doc comment). */
+export const MIN_POWER_SPAN_KW = 0.001;
