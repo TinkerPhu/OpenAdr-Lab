@@ -26,6 +26,9 @@ pub(crate) struct EventChanges {
     /// Parsed grid signals for this tick: alerts (WP3.1), SIMPLE levels
     /// (WP3.2), dispatch + charge-state setpoints (WP3.4).
     pub signals: super::poll_signals::ParsedSignals,
+    /// History rows for events newly seen this tick (R-64) — one per
+    /// `OpenAdrArrived` above, durable record of what VEN actually received.
+    pub event_records: Vec<entities::history::EventReceived>,
 }
 
 /// Pure change-detection pass over a freshly fetched event list.
@@ -53,6 +56,7 @@ pub(crate) fn detect_event_changes(
         events.iter().map(|e| e.id.clone()).collect();
 
     let mut trace_events = Vec::new();
+    let mut event_records = Vec::new();
 
     // OpenAdrArrived — events that are new this tick
     for evt in events {
@@ -72,6 +76,13 @@ pub(crate) fn detect_event_changes(
                 (sig, val, n)
             })
             .unwrap_or_else(|| ("UNKNOWN".to_string(), 0.0, 0));
+
+        event_records.push(entities::history::EventReceived {
+            received_at: now,
+            event_id: evt.id.clone(),
+            event_type: signal_type.clone(),
+            payload_json: serde_json::to_string(evt).unwrap_or_default(),
+        });
 
         trace_events.push(controller::trace::ControllerEvent::OpenAdrArrived {
             ts: now,
@@ -119,6 +130,7 @@ pub(crate) fn detect_event_changes(
         rates,
         capacity,
         signals,
+        event_records,
     }
 }
 
@@ -132,6 +144,7 @@ pub(crate) fn spawn_event_poll(
     trigger_tx: Arc<tokio::sync::watch::Sender<PlanTrigger>>,
     notifier: crate::services::notify::Notifier,
     startup_delay_s: u64,
+    history: Option<Arc<dyn crate::controller::HistoryPort>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         if startup_delay_s > 0 {
@@ -198,6 +211,16 @@ pub(crate) fn spawn_event_poll(
                     state.retire_obligations_not_in(&prev_event_ids).await;
 
                     state.set_events(events, 500).await;
+
+                    if let Some(h) = history.clone() {
+                        for row in changes.event_records {
+                            let h = h.clone();
+                            let row = row.clone();
+                            let _ =
+                                tokio::task::spawn_blocking(move || h.append_event_received(&row))
+                                    .await;
+                        }
+                    }
 
                     // Signal planner only when something actually changed (new/expired event,
                     // tariff count change, or capacity change). Firing on every poll caused
@@ -270,6 +293,29 @@ mod event_poll_tests {
             assert_eq!(signal_type, "PRICE");
             assert!((value - 0.30).abs() < 1e-9);
         }
+    }
+
+    // (a.1) new event appears → also recorded as an EventReceived history row
+    #[test]
+    fn new_event_emits_history_record() {
+        let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
+        let changes = detect_event_changes(&events, &empty_ids(), 0, None, ts());
+        assert_eq!(changes.event_records.len(), 1);
+        let row = &changes.event_records[0];
+        assert_eq!(row.event_id, "ev1");
+        assert_eq!(row.event_type, "PRICE");
+        assert_eq!(row.received_at, ts());
+        assert!(row.payload_json.contains("\"id\":\"ev1\""));
+    }
+
+    // (a.2) already-seen event → no history record emitted again
+    #[test]
+    fn already_seen_event_emits_no_history_record() {
+        let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
+        let mut prev_ids = empty_ids();
+        prev_ids.insert("ev1".to_string());
+        let changes = detect_event_changes(&events, &prev_ids, 0, None, ts());
+        assert!(changes.event_records.is_empty());
     }
 
     // (b) event disappears → OpenAdrExpired emitted
