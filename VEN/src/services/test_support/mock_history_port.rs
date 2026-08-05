@@ -10,9 +10,7 @@ use std::sync::Mutex;
 use chrono::{DateTime, Utc};
 
 use crate::controller::HistoryPort;
-use crate::entities::history::{
-    EventReceived, GridSample, LedgerPeriod, PlanSnapshot, ReportSent, TickSample,
-};
+use crate::entities::history::{EventReceived, GridSample, LedgerPeriod, ReportSent, TickSample};
 use crate::entities::notification::UserNotification;
 use crate::entities::DomainError;
 
@@ -20,7 +18,6 @@ use crate::entities::DomainError;
 pub struct MockHistoryPort {
     ticks: Mutex<Vec<TickSample>>,
     grid: Mutex<Vec<GridSample>>,
-    plans: Mutex<Vec<PlanSnapshot>>,
     events: Mutex<Vec<EventReceived>>,
     reports: Mutex<Vec<ReportSent>>,
     ledger_periods: Mutex<Vec<LedgerPeriod>>,
@@ -90,11 +87,6 @@ impl HistoryPort for MockHistoryPort {
     fn append_grid_sample(&self, row: &GridSample) -> Result<(), DomainError> {
         self.storage_result("insert grid sample")?;
         self.grid.lock().unwrap().push(row.clone());
-        Ok(())
-    }
-
-    fn append_plan_snapshot(&self, row: &PlanSnapshot) -> Result<(), DomainError> {
-        self.plans.lock().unwrap().push(row.clone());
         Ok(())
     }
 
@@ -218,21 +210,6 @@ impl HistoryPort for MockHistoryPort {
             .collect())
     }
 
-    fn query_plans(
-        &self,
-        from: DateTime<Utc>,
-        to: DateTime<Utc>,
-    ) -> Result<Vec<PlanSnapshot>, DomainError> {
-        Ok(self
-            .plans
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|r| r.created_at >= from && r.created_at < to)
-            .cloned()
-            .collect())
-    }
-
     fn query_ledger_periods(&self, asset_id: &str) -> Result<Vec<LedgerPeriod>, DomainError> {
         Ok(self
             .ledger_periods
@@ -257,12 +234,6 @@ impl HistoryPort for MockHistoryPort {
         grid.retain(|r| r.ts >= cutoff);
         total += (before - grid.len()) as u64;
         drop(grid);
-
-        let mut plans = self.plans.lock().unwrap();
-        let before = plans.len();
-        plans.retain(|r| r.created_at >= cutoff);
-        total += (before - plans.len()) as u64;
-        drop(plans);
 
         let mut events = self.events.lock().unwrap();
         let before = events.len();

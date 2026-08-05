@@ -378,17 +378,6 @@ export function useHistoryReports(from: string, to: string) {
   });
 }
 
-// WP-T6 (docs/history/project_journal.md, search "WP-T"): wiring previously-unused routes.
-
-export function useHistoryPlans(from: string, to: string) {
-  const { api } = useVenContext();
-  return useQuery({
-    queryKey: ["history/plans", api.baseUrl, from, to],
-    queryFn: () => api.historyPlans({ from, to }),
-    refetchInterval: false,
-  });
-}
-
 export function useObligations() {
   const { api } = useVenContext();
   return useQuery({

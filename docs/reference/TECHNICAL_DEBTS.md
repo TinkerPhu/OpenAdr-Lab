@@ -34,7 +34,6 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 | R-41 | Full-E2E-run degradation (observed 2026-07-17, 18 scenario failures): under the complete suite, VEN-1 progressively stops showing new (esp. targeted) events/programs and its report submissions fail, while the identical feature sequence passes in isolation. Correlates with a VTN warn-storm: before-feature cleanup (`environment.py`) hard-deletes programs/events while VEN caches still hold them, so auto/obligation reporters churn 409s (`report_report_name_uindex`) every tick. Investigate: does sim_tick/publish report churn delay event-cache refresh; add VEN cache invalidation for upstream-deleted objects; consider cleanup draining VEN caches. Note: this VTN fork maps FK violations to 409 too (openleadr-rs error.rs) — VEN error paths must always surface the problem body (done, `fix/report-upsert-409-transparency`). | `tests/features/environment.py`, `VEN/src/tasks/sim_tick/publish.rs`, `VEN/src/tasks/poll_events.rs` | Medium | Medium (E2E reliability) | 🟠 | Medium-High — blocks reliable full-suite E2E confidence, 18 scenario failures observed |
 | R-42 | `reports_steps.py` submits reports with the fixed `reportName` "TELEMETRY_USAGE" (an OpenADR payload-type constant, not a name). `report_name` is globally unique on the VTN (`report_report_name_uindex`), so the fixed name collides across scenarios/clients and exercises the upsert path unintentionally. Switch to per-scenario unique names (needs sign-off: changes test fixtures). | `tests/features/steps/reports_steps.py` | Trivial | Low | 🟡 | Low — test-fixture correctness only |
 | R-43 | `entities/history.rs::ReportSent` + `HistoryPort::append_report_sent` and the `GET /history/reports` route are fully wired end-to-end but no production call site ever invokes `append_report_sent` (only exercised in `history_store` unit tests) — found while implementing WP-T5. `GET /history/reports` therefore always returns empty. Wire it into the real report-submission call sites: `tasks/sim_tick/publish.rs::run_measurement_reports`, `services/obligation.rs`, and `routes/reports.rs`. | `VEN/src/tasks/sim_tick/publish.rs`, `VEN/src/services/obligation.rs`, `VEN/src/routes/reports.rs`, `VEN/src/history_store/mod.rs` | Small | Low (silent gap, no incorrect behaviour) | 🟡 | Medium — a whole user-visible endpoint (`/history/reports`) is currently silently empty |
-| R-63 | `entities/history.rs::PlanSnapshot` + `HistoryPort::append_plan_snapshot` and the `GET /history/plans` route are fully wired end-to-end (route mounted in `routes/mod.rs`, VEN UI's History page calls it via `useHistoryPlans` and renders a "Plans" panel) but no production call site ever invokes `append_plan_snapshot` — only `history_store` unit tests and the mock port do. `GET /history/plans` and the UI's "Plans" panel are therefore silently, permanently empty; a user can't distinguish "no plan snapshot yet" from "this was never wired up." Found 2026-08-05 during a dead-code audit triggered by the same symptom. Decide before wiring: does this belong at the moment a plan is adopted (`services/planning.rs`/`tasks/planning/cycle.rs`, mirroring how `tick_samples` captures state at resolution time — the pattern this codebase already prefers, per `openspec/changes/pv-curtailment-history/proposal.md`'s rejection of snapshot-replay design), or should the table be dropped and the route/UI panel removed instead if snapshot history isn't actually wanted? See parked idea `docs/plans/forecast-accuracy-idea.md` for one candidate consumer (forecast-vs-actual tracking) that considered and rejected reviving this table for its own purposes — don't default to reusing it for that without re-opening that discussion. | `VEN/src/tasks/planning/cycle.rs`, `VEN/src/services/planning.rs`, `VEN/src/routes/hems/history.rs`, `VEN/src/history_store/mod.rs`, `VEN/ui/src/pages/History.tsx` | Small | Low (silent gap, no incorrect behaviour) | 🟡 | Medium — a whole user-visible endpoint and UI panel (`/history/plans`) is currently silently empty |
 | R-58 | Unconfirmed whether `PlanTrigger::CapacityChange`/`Alert` are actually wired to asset-level faults (thermal derate, BMS fault, breaker trip) rather than only tariff/VTN-sourced capacity changes — found during the deviation-scenarios analysis. Needs a verification pass: trace every call site that constructs these variants and confirm at least one covers an asset-originated fault, or extend one to. | `VEN/src/entities/asset.rs`, `VEN/src/services/planning.rs`, `VEN/src/assets/` | Small | Medium (unhandled asset fault may not trigger a replan) | 🟡 | Medium — an unwired asset fault could silently fail to trigger a needed replan |
 
 ## Low priority (🔵) — by topic
@@ -130,8 +129,8 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 ## Implementation Task List — Gain: High or Medium Items
 
 Scope: every item currently rated Gain exactly **High** or **Medium** (no compound levels
-like Medium-High/Low-Medium). No item is currently rated plain High, so this is the 6 items
-rated Medium: R-21, R-29, R-31, R-43, R-58, R-63 (R-22, R-52, R-56, R-24, R-08, and R-64 were
+like Medium-High/Low-Medium). No item is currently rated plain High, so this is the 5 items
+rated Medium: R-21, R-29, R-31, R-43, R-58 (R-22, R-52, R-56, R-24, R-08, R-64, and R-63 were
 also on this list and are now resolved — see below). Ordered by dependency, not by ID — work
 top-to-bottom.
 
@@ -147,9 +146,7 @@ top-to-bottom.
 3. **R-31, R-43** — both fully independent of everything above (R-31 is VTN/bff-only;
    R-43 wires VEN report-submission call sites nothing else on this list touches). Order
    between them doesn't matter; listed in ID order.
-4. **R-63** — same shape as R-43 (dead `HistoryPort` write side, permanently-empty
-   route + UI panel), independent of everything above.
-5. **R-21** — deliberately last and separate: its own entry has no concrete fix, only a
+4. **R-21** — deliberately last and separate: its own entry has no concrete fix, only a
    workaround (root cause is allocator/heap-state-dependent inside the native HiGHS library
    via FFI, not this codebase). Its task below is an investigation, not a code fix.
 
@@ -199,29 +196,15 @@ update `docs/history/project_journal.md` and remove the item from this register 
       (BDD scenario, if practical, per this project's E2E conventions).
 - [ ] 4.5 Full verification; remove R-43 from this register.
 
-### 5. R-63 — Decide and wire (or remove) `plan_snapshots`
+### 5. R-21 — Investigate the intermittent `cargo test` heap-corruption crash
 
-- [ ] 5.1 Decide the write trigger: capture at plan-adoption time
-      (`services/planning.rs`/`tasks/planning/cycle.rs`), mirroring the codebase's existing
-      "capture at the moment of truth" pattern — or decide the table/route/UI panel should be
-      removed instead if snapshot history isn't actually wanted.
-- [ ] 5.2 If keeping: write a failing integration test asserting a newly-adopted plan is
-      visible through `GET /history/plans`; call `HistoryPort::append_plan_snapshot` from the
-      chosen call site until it passes.
-- [ ] 5.3 If removing: drop the table/migration, `HistoryPort::append_plan_snapshot`/
-      `query_plans`, the `/history/plans` route, and the UI's "Plans" panel + `useHistoryPlans`
-      hook together, not piecemeal.
-- [ ] 5.4 Full verification; remove R-63 from this register.
-
-### 6. R-21 — Investigate the intermittent `cargo test` heap-corruption crash
-
-- [ ] 6.1 Try to minimize a standalone repro isolating `run_planner_n48_full_horizon` and
+- [ ] 5.1 Try to minimize a standalone repro isolating `run_planner_n48_full_horizon` and
       `solve_ven3_heater_three_tier_zones_feasible` from the rest of the suite.
-- [ ] 6.2 Check for a `good_lp`/HiGHS version bump that might already fix an allocator bug;
+- [ ] 5.2 Check for a `good_lp`/HiGHS version bump that might already fix an allocator bug;
       try upgrading in isolation and re-running the full suite several times.
-- [ ] 6.3 If still reproducible, file an upstream issue against `good_lp` or HiGHS with the
+- [ ] 5.3 If still reproducible, file an upstream issue against `good_lp` or HiGHS with the
       minimized repro; link it from this entry.
-- [ ] 6.4 If no upstream fix lands, formalize the existing workaround (e.g. a
+- [ ] 5.4 If no upstream fix lands, formalize the existing workaround (e.g. a
       `scripts/`-level note or CI retry step) rather than leaving it tribal knowledge.
-- [ ] 6.5 This item stays in the register until the crash stops reproducing across several
+- [ ] 5.5 This item stays in the register until the crash stops reproducing across several
       full-suite runs — remove only then, not merely once a workaround is documented.
