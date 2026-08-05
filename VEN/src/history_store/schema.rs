@@ -1,7 +1,7 @@
 //! Versioned DDL for the history SQLite store, applied stepwise via
 //! `PRAGMA user_version` in `history_store::migrate`.
 
-pub(super) const SCHEMA_VERSION: i64 = 6;
+pub(super) const SCHEMA_VERSION: i64 = 7;
 
 pub(super) const SCHEMA_V1: &str = "
 CREATE TABLE tick_samples (
@@ -112,4 +112,13 @@ ALTER TABLE tick_samples ADD COLUMN curtailment_source TEXT;
 /// 3.45, well past the 3.25 minimum for this syntax).
 pub(super) const SCHEMA_V6: &str = "
 ALTER TABLE tick_samples RENAME COLUMN export_limit_kw TO generation_limit_kw;
+";
+
+/// R-63: plan_snapshots was dead code — its only writer (`append_plan_snapshot`) was never
+/// called from any production path (only unit tests and the mock port), so `GET /history/plans`
+/// and the VEN UI's "Plans" panel were permanently, silently empty. No replacement mechanism —
+/// see docs/plans/forecast-accuracy-idea.md for a candidate future consumer that explicitly
+/// considered and rejected reviving this table for its own purposes.
+pub(super) const SCHEMA_V7: &str = "
+DROP TABLE plan_snapshots;
 ";
