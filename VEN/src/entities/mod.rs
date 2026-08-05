@@ -14,7 +14,6 @@ pub mod planner_params;
 pub mod pv_snow;
 pub mod report_submission;
 pub mod sim_inject;
-pub mod site_meter;
 pub mod solar;
 pub mod tariff_snapshot;
 pub mod timeline;

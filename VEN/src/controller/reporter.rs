@@ -78,9 +78,7 @@ const OPERATING_STATE_STALENESS_S: i64 = 120;
 /// Derive the site-level OPERATING_STATE from sample freshness (WP3.6 —
 /// replaces the previously hardcoded "ACTIVE"): any sample within
 /// `OPERATING_STATE_STALENESS_S` of `now` → "ACTIVE"; samples exist but all
-/// stale → "UNRESPONSIVE"; no samples at all → "OFFLINE". Site-granularity
-/// mirror of the per-device `DeviceResponsiveness` vocabulary
-/// (`entities/asset.rs`).
+/// stale → "UNRESPONSIVE"; no samples at all → "OFFLINE".
 fn operating_state(
     asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
     now: DateTime<Utc>,

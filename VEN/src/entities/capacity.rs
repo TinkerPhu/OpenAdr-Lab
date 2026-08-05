@@ -7,7 +7,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::entities::site_meter::PowerSnapshot;
 use crate::entities::tariff_snapshot::TariffSnapshot;
 
 /// Current capacity state derived from active OpenADR events.
@@ -100,6 +99,15 @@ pub struct OadrProgramConfig {
     pub currency: Option<String>,  // e.g. "EUR"
     pub units: Option<String>,     // e.g. "KWH"
     pub is_capacity_program: bool, // participates in capacity management
+}
+
+/// A point-in-time power measurement. Positive = consuming/importing, negative =
+/// producing/exporting. Moved here from the now-deleted entities/site_meter.rs (R-62) — its
+/// only remaining consumer is OadrEventCache::dispatch_setpoints below.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PowerSnapshot {
+    pub ts: DateTime<Utc>,
+    pub power_kw: f64, // positive = import, negative = export
 }
 
 /// Internal representation of a received OpenADR event, translated into domain terms (§5.2).
