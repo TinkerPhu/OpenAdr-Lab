@@ -93,8 +93,6 @@ history_range_route!(get_history_grid, query_grid);
 history_range_route!(get_history_events, query_events);
 // GET /history/reports?from=&to= — OpenADR reports sent in `[from, to)`.
 history_range_route!(get_history_reports, query_reports);
-// GET /history/plans?from=&to= — plan snapshots created in `[from, to)`.
-history_range_route!(get_history_plans, query_plans);
 
 /// GET /history/ticks?from=&to=&asset_id= — 1-minute per-asset samples in
 /// `[from, to)`, optionally filtered to one asset.

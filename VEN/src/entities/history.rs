@@ -39,15 +39,6 @@ pub struct GridSample {
     pub co2_g_kwh: Option<f64>,
 }
 
-/// A snapshot of the planner's output at the moment a plan cycle completed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PlanSnapshot {
-    pub created_at: DateTime<Utc>,
-    pub horizon_start: DateTime<Utc>,
-    pub horizon_end: DateTime<Utc>,
-    pub plan_json: String,
-}
-
 /// An OpenADR event as accepted from the VTN.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventReceived {

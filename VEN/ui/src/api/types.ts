@@ -590,15 +590,6 @@ export type HistoryReportSent = {
   payload_json: string;
 };
 
-// WP-T6 (docs/history/project_journal.md, search "WP-T"): wiring previously-unused routes.
-
-export type PlanSnapshot = {
-  created_at: number;
-  horizon_start: string;
-  horizon_end: string;
-  plan_json: string;
-};
-
 export type ReportObligation = {
   id: string;
   event_id: string;

@@ -22,11 +22,11 @@ use chrono::{DateTime, TimeZone, Utc};
 use rusqlite::{params, Connection};
 
 use crate::controller::HistoryPort;
-use crate::entities::history::{
-    EventReceived, GridSample, LedgerPeriod, PlanSnapshot, ReportSent, TickSample,
-};
+use crate::entities::history::{EventReceived, GridSample, LedgerPeriod, ReportSent, TickSample};
 use crate::entities::DomainError;
-use schema::{SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_VERSION};
+use schema::{
+    SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_VERSION,
+};
 
 type GridSampleRow = (i64, f64, f64, Option<f64>, Option<f64>, Option<f64>);
 
@@ -101,6 +101,10 @@ impl SqliteHistoryStore {
             conn.execute_batch(SCHEMA_V6)
                 .map_err(|e| DomainError::StorageError(format!("apply schema v6: {e}")))?;
         }
+        if version < 7 {
+            conn.execute_batch(SCHEMA_V7)
+                .map_err(|e| DomainError::StorageError(format!("apply schema v7: {e}")))?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| DomainError::StorageError(format!("set user_version: {e}")))?;
         Ok(())
@@ -135,22 +139,6 @@ impl HistoryPort for SqliteHistoryStore {
             ],
         )
         .map_err(|e| DomainError::StorageError(format!("insert grid sample: {e}")))?;
-        Ok(())
-    }
-
-    fn append_plan_snapshot(&self, row: &PlanSnapshot) -> Result<(), DomainError> {
-        let conn = self.lock()?;
-        conn.execute(
-            "INSERT INTO plan_snapshots (created_at, horizon_start, horizon_end, plan_json)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![
-                to_unix(row.created_at),
-                to_unix(row.horizon_start),
-                to_unix(row.horizon_end),
-                row.plan_json,
-            ],
-        )
-        .map_err(|e| DomainError::StorageError(format!("insert plan snapshot: {e}")))?;
         Ok(())
     }
 
@@ -334,40 +322,6 @@ impl HistoryPort for SqliteHistoryStore {
             .collect()
     }
 
-    fn query_plans(
-        &self,
-        from: DateTime<Utc>,
-        to: DateTime<Utc>,
-    ) -> Result<Vec<PlanSnapshot>, DomainError> {
-        let conn = self.lock()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT created_at, horizon_start, horizon_end, plan_json FROM plan_snapshots
-                 WHERE created_at >= ?1 AND created_at < ?2 ORDER BY created_at ASC",
-            )
-            .map_err(|e| DomainError::StorageError(format!("prepare query_plans: {e}")))?;
-        let raw: Vec<(i64, i64, i64, String)> = stmt
-            .query_map(params![to_unix(from), to_unix(to)], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-            })
-            .map_err(|e| DomainError::StorageError(format!("query_plans: {e}")))?
-            .collect::<Result<_, _>>()
-            .map_err(|e| DomainError::StorageError(format!("read query_plans rows: {e}")))?;
-
-        raw.into_iter()
-            .map(
-                |(created_at, horizon_start, horizon_end, plan_json)| -> Result<PlanSnapshot, DomainError> {
-                    Ok(PlanSnapshot {
-                        created_at: from_unix(created_at)?,
-                        horizon_start: from_unix(horizon_start)?,
-                        horizon_end: from_unix(horizon_end)?,
-                        plan_json,
-                    })
-                },
-            )
-            .collect()
-    }
-
     fn query_ledger_periods(&self, asset_id: &str) -> Result<Vec<LedgerPeriod>, DomainError> {
         let conn = self.lock()?;
         let mut stmt = conn
@@ -441,7 +395,6 @@ impl HistoryPort for SqliteHistoryStore {
         for (table, col) in [
             ("tick_samples", "ts"),
             ("grid_samples", "ts"),
-            ("plan_snapshots", "created_at"),
             ("events_received", "received_at"),
             ("reports_sent", "sent_at"),
             ("ledger_periods", "period_end"),
@@ -485,8 +438,9 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            table_count, 8,
-            "expected 6 tables from schema v1 + notifications (v2) + user_settings (v3)"
+            table_count, 7,
+            "expected 5 tables from schema v1 (plan_snapshots dropped by v7, R-63) + \
+             notifications (v2) + user_settings (v3)"
         );
     }
 
@@ -572,20 +526,6 @@ mod tests {
         };
         store.append_grid_sample(&row).unwrap();
         let rows = store.query_grid(ts(0), ts(1000)).unwrap();
-        assert_eq!(rows, vec![row]);
-    }
-
-    #[test]
-    fn test_append_and_query_plan_snapshot() {
-        let store = SqliteHistoryStore::in_memory().unwrap();
-        let row = PlanSnapshot {
-            created_at: ts(100),
-            horizon_start: ts(100),
-            horizon_end: ts(100 + 48 * 3600),
-            plan_json: "{\"slots\":[]}".into(),
-        };
-        store.append_plan_snapshot(&row).unwrap();
-        let rows = store.query_plans(ts(0), ts(1000)).unwrap();
         assert_eq!(rows, vec![row]);
     }
 
@@ -870,6 +810,38 @@ mod tests {
             Some(-2.0),
             "data readable under the new column name after rename"
         );
+    }
+
+    #[test]
+    fn test_migrate_v7_drops_plan_snapshots_table() {
+        // Build a v6 database by hand with the (dead — R-63) plan_snapshots table still
+        // present, then let from_connection run the v7 drop migration against it.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(schema::SCHEMA_V1).unwrap();
+        conn.execute_batch(schema::SCHEMA_V2).unwrap();
+        conn.execute_batch(schema::SCHEMA_V3).unwrap();
+        conn.execute_batch(schema::SCHEMA_V4).unwrap();
+        conn.execute_batch(schema::SCHEMA_V5).unwrap();
+        conn.execute_batch(schema::SCHEMA_V6).unwrap();
+        conn.pragma_update(None, "user_version", 6).unwrap();
+        conn.execute(
+            "INSERT INTO plan_snapshots (created_at, horizon_start, horizon_end, plan_json)
+             VALUES (100, 100, 100, '{}')",
+            [],
+        )
+        .unwrap();
+
+        let store = SqliteHistoryStore::from_connection(conn).expect("v6→v7 migration");
+        let exists: i64 = store
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='plan_snapshots'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 0, "plan_snapshots table should be dropped by v7");
     }
 
     #[test]

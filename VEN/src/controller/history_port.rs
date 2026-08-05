@@ -14,16 +14,13 @@
 #![allow(dead_code)]
 use chrono::{DateTime, Utc};
 
-use crate::entities::history::{
-    EventReceived, GridSample, LedgerPeriod, PlanSnapshot, ReportSent, TickSample,
-};
+use crate::entities::history::{EventReceived, GridSample, LedgerPeriod, ReportSent, TickSample};
 use crate::entities::notification::UserNotification;
 use crate::entities::DomainError;
 
 pub trait HistoryPort: Send + Sync {
     fn append_tick_samples(&self, rows: &[TickSample]) -> Result<(), DomainError>;
     fn append_grid_sample(&self, row: &GridSample) -> Result<(), DomainError>;
-    fn append_plan_snapshot(&self, row: &PlanSnapshot) -> Result<(), DomainError>;
     fn append_event_received(&self, row: &EventReceived) -> Result<(), DomainError>;
     fn append_report_sent(&self, row: &ReportSent) -> Result<(), DomainError>;
     fn append_ledger_period(&self, row: &LedgerPeriod) -> Result<(), DomainError>;
@@ -55,11 +52,6 @@ pub trait HistoryPort: Send + Sync {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> Result<Vec<ReportSent>, DomainError>;
-    fn query_plans(
-        &self,
-        from: DateTime<Utc>,
-        to: DateTime<Utc>,
-    ) -> Result<Vec<PlanSnapshot>, DomainError>;
     fn query_ledger_periods(&self, asset_id: &str) -> Result<Vec<LedgerPeriod>, DomainError>;
     /// WP4.3 (BL-20): the NEWEST `limit` notifications last seen after `since`
     /// (all when `None`), returned oldest first. 030: optionally filtered to

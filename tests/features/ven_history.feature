@@ -31,11 +31,6 @@ Feature: Persistent history routes (Phase 1, WP1.4)
     Then the response status is 200
 
   @history
-  Scenario: GET /history/plans returns a JSON array
-    When I GET /history/plans from the VEN
-    Then the response status is 200
-
-  @history
   Scenario: GET /history/ticks with an unparseable "from" is rejected
     When I GET /history/ticks?from=not-a-date from the VEN
     Then the response status is 400
