@@ -28,6 +28,10 @@ interface AssetTimelineChartProps {
    * curtailment_source, inverter_max_kw for past points; pv_forecast_kw for future points).
    * See openspec/changes/pv-curtailment-history/. */
   pvCurtailment?: boolean;
+  /** Minimum power-axis span [kW]. When set, the power Y-axis never auto-zooms narrower than
+   * this, even when every visible point is near zero — see `MIN_POWER_SPAN_KW` in
+   * `axisDomain.ts`. Omit for assets whose power axis should auto-scale normally. */
+  minPowerSpanKw?: number;
 }
 
 function formatTs(ts: number) {
@@ -133,6 +137,7 @@ export function AssetTimelineChart({
   stateKey,
   zones,
   pvCurtailment,
+  minPowerSpanKw,
 }: AssetTimelineChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes.
   const tMin = nowMs - hoursBack * 3_600_000;
@@ -168,6 +173,14 @@ export function AssetTimelineChart({
 
   const curtailmentZones = pvCurtailment ? buildCurtailmentZones(chartData) : [];
 
+  const powerDomain: [number, number] | undefined =
+    minPowerSpanKw != null
+      ? minSpanDomain(
+          chartData.map((p) => p.values?.["power_kw"] ?? null),
+          minPowerSpanKw
+        )
+      : undefined;
+
   return (
     <ResponsiveContainer width="100%" height={CELL_CHART_HEIGHT}>
       <ComposedChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
@@ -180,7 +193,13 @@ export function AssetTimelineChart({
           tickFormatter={formatTs}
           tick={{ fontSize: 10 }}
         />
-        <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} unit=" kW" />
+        <YAxis
+          yAxisId="power"
+          tick={{ fontSize: 10 }}
+          width={40}
+          unit=" kW"
+          domain={powerDomain}
+        />
         <YAxis
           yAxisId="cost"
           orientation="right"

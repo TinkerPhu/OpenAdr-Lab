@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { minSpanDomain } from "../components/controller/charts/axisDomain";
+import { minSpanDomain, MIN_POWER_SPAN_KW } from "../components/controller/charts/axisDomain";
 
 describe("minSpanDomain", () => {
   it("expands a near-zero toggling series to the minimum span, centered on the data", () => {
@@ -43,5 +43,17 @@ describe("minSpanDomain", () => {
     const values = [null, 0, undefined, 0.0004, null];
     const [min, max] = minSpanDomain(values, 0.05);
     expect(max - min).toBeCloseTo(0.05, 9);
+  });
+});
+
+describe("MIN_POWER_SPAN_KW", () => {
+  it("is 1 W expressed in kW — power values elsewhere are always in kW", () => {
+    expect(MIN_POWER_SPAN_KW).toBeCloseTo(0.001, 9);
+  });
+
+  it("never lets a sub-watt power series auto-zoom narrower than 1 W", () => {
+    const values = [0, 0.0002, -0.0001, 0.00015];
+    const [min, max] = minSpanDomain(values, MIN_POWER_SPAN_KW);
+    expect(max - min).toBeGreaterThanOrEqual(MIN_POWER_SPAN_KW - 1e-12);
   });
 });
