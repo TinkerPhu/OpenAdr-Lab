@@ -3,8 +3,8 @@ import { useRef, useEffect, useLayoutEffect } from "react";
 import { useVenContext } from "../App";
 import type {
   SensorSnapshot, SimInjectState, CreateUserRequestBody,
-  CreateEvSessionBody, UpdateEvSettingsBody, UpdateArbiterSettingsBody,
-  CreateHeaterTargetBody, CreateShiftableLoadBody, CreateBaselineOverrideBody,
+  UpdateEvSettingsBody, UpdateArbiterSettingsBody,
+  CreateBaselineOverrideBody,
   PlannerObjective, PlannerEvent, ComfortRate, UserNotificationSeverity,
 } from "./types";
 
@@ -470,41 +470,6 @@ export function useDeleteRequest() {
   });
 }
 
-// ── Device Session hooks (Phase B) ──────────────────────────────────────────
-
-export function useEvSession() {
-  const { api } = useVenContext();
-  return useQuery({
-    queryKey: ["ev_session", api.baseUrl],
-    queryFn: () => api.evSession(),
-    refetchInterval: 10_000,
-  });
-}
-
-export function usePostEvSession() {
-  const { api } = useVenContext();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: CreateEvSessionBody) => api.postEvSession(body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["ev_session"] });
-      queryClient.invalidateQueries({ queryKey: ["plan"] });
-    },
-  });
-}
-
-export function useDeleteEvSession() {
-  const { api } = useVenContext();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.deleteEvSession(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["ev_session"] });
-      queryClient.invalidateQueries({ queryKey: ["plan"] });
-    },
-  });
-}
-
 export function useEvSettings() {
   const { api } = useVenContext();
   return useQuery({
@@ -552,72 +517,6 @@ export function useArbiterDiagnostics(enabled: boolean) {
     queryFn: () => api.arbiterDiagnostics(),
     refetchInterval: 5_000,
     enabled,
-  });
-}
-
-export function useHeaterTarget() {
-  const { api } = useVenContext();
-  return useQuery({
-    queryKey: ["heater_target", api.baseUrl],
-    queryFn: () => api.heaterTarget(),
-    refetchInterval: 10_000,
-  });
-}
-
-export function usePostHeaterTarget() {
-  const { api } = useVenContext();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: CreateHeaterTargetBody) => api.postHeaterTarget(body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["heater_target"] });
-      queryClient.invalidateQueries({ queryKey: ["plan"] });
-    },
-  });
-}
-
-export function useDeleteHeaterTarget() {
-  const { api } = useVenContext();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.deleteHeaterTarget(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["heater_target"] });
-      queryClient.invalidateQueries({ queryKey: ["plan"] });
-    },
-  });
-}
-
-export function useShiftableLoads() {
-  const { api } = useVenContext();
-  return useQuery({
-    queryKey: ["shiftable_loads", api.baseUrl],
-    queryFn: () => api.shiftableLoads(),
-    refetchInterval: 10_000,
-  });
-}
-
-export function usePostShiftableLoad() {
-  const { api } = useVenContext();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: CreateShiftableLoadBody) => api.postShiftableLoad(body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["shiftable_loads"] });
-      queryClient.invalidateQueries({ queryKey: ["plan"] });
-    },
-  });
-}
-
-export function useDeleteShiftableLoad() {
-  const { api } = useVenContext();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => api.deleteShiftableLoad(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["shiftable_loads"] });
-      queryClient.invalidateQueries({ queryKey: ["plan"] });
-    },
   });
 }
 

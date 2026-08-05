@@ -7,13 +7,6 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
     Given the VEN is running with profile "test"
     And I set pv plan forecast to 0.0 kW
 
-  Scenario: EV session appears in /ev-session after POST
-    When I POST an EV session with target_soc 0.90 and departure in 12.0 hours
-    And I GET the EV session from /ev-session
-    Then the response status is 200
-    And the response JSON has field "id"
-    And the response JSON has field "target_soc"
-
   # --- Plan smoke test ---
 
   Scenario: GET /plan returns a non-null plan after VEN starts
