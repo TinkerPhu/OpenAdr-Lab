@@ -2,21 +2,17 @@ mod arbiter;
 mod baseline_override;
 mod comfort;
 mod ev;
-mod heater;
 mod history;
 mod misc;
 mod sessions;
-mod shiftable_loads;
 
 pub use arbiter::*;
 pub use baseline_override::*;
 pub use comfort::*;
 pub use ev::*;
-pub use heater::*;
 pub use history::*;
 pub use misc::*;
 pub use sessions::*;
-pub use shiftable_loads::*;
 
 use serde::Serialize;
 

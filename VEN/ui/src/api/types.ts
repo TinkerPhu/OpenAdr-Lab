@@ -438,14 +438,6 @@ export type EvSession = {
   updated_at: string;
 };
 
-export type CreateEvSessionBody = {
-  target_soc: number;
-  departure_time: string;
-  soft_deadline?: boolean;
-  mode?: UserRequestMode;
-  budget_eur?: number;
-};
-
 export type EvSettings = {
   opportunistic_charging_enabled: boolean;
   /** Derived: true while any EvSession is active (auto-pause). */
@@ -484,11 +476,6 @@ export type HeaterTarget = {
   updated_at: string;
 };
 
-export type CreateHeaterTargetBody = {
-  target_temp_c: number;
-  ready_by: string;
-};
-
 export type ShiftableLoad = {
   id: string;
   asset_id: string;
@@ -499,14 +486,6 @@ export type ShiftableLoad = {
   mode: UserRequestMode;
   created_at: string;
   updated_at: string;
-};
-
-export type CreateShiftableLoadBody = {
-  asset_id: string;
-  power_kw: number;
-  duration_min: number;
-  earliest_start: string;
-  latest_end: string;
 };
 
 export type BaselineSlot = { slot_start: string; add_kw: number };

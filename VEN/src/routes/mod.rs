@@ -114,12 +114,6 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/user-requests/:id", delete(hems::delete_request))
         .route("/flexibility", get(hems::get_flexibility))
         .route(
-            "/ev-session",
-            get(hems::get_ev_session)
-                .post(hems::post_ev_session)
-                .delete(hems::delete_ev_session),
-        )
-        .route(
             "/ev-settings",
             get(hems::get_ev_settings).put(hems::put_ev_settings),
         )
@@ -128,17 +122,6 @@ pub fn build_router(ctx: AppCtx) -> Router {
             get(hems::get_arbiter_settings).put(hems::put_arbiter_settings),
         )
         .route("/arbiter-diagnostics", get(hems::get_arbiter_diagnostics))
-        .route(
-            "/heater-target",
-            get(hems::get_heater_target)
-                .post(hems::post_heater_target)
-                .delete(hems::delete_heater_target),
-        )
-        .route(
-            "/shiftable-loads",
-            get(hems::get_shiftable_loads).post(hems::post_shiftable_load),
-        )
-        .route("/shiftable-loads/:id", delete(hems::delete_shiftable_load))
         .route(
             "/baseline-override",
             get(hems::get_baseline_override)

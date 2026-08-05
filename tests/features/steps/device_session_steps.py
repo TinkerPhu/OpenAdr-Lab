@@ -1,24 +1,30 @@
-"""Step definitions for device-session API (Phase C).
+"""Step definitions used as EV-session / shiftable-load *setup fixtures* by many other
+feature files (dispatcher, planner, shiftable_lifecycle, uc_normal/stress/vtn_coordination,
+ui_planner, 05_ev_charging_scenarios, isolated/shiftable_lifecycle).
 
-Covers: EvSession, HeaterTarget, ShiftableLoad CRUD + plan integration.
+BL-41: these used to POST directly to the now-removed /ev-session, /heater-target,
+/shiftable-loads routes (a simpler, superseded CRUD API). Rewritten to go through the
+unified POST /user-requests (Stage 5) flow instead, which constructs the same underlying
+EvSession/HeaterTarget/ShiftableLoad domain objects — same Gherkin step phrasing, so none
+of the ~10 other feature files that use these steps as setup needed to change.
 """
 
 from datetime import datetime, timedelta, timezone
 from behave import given, when
-from features.helpers.api_client import ven_get, ven_post, ven_delete
+from features.helpers.api_client import ven_post, ven_delete
 
 
-# ── EV Session ───────────────────────────────────────────────────────────────
+# ── EV Session (now via /user-requests) ────────────────────────────────────────
 
 @given("I POST an EV session with target_soc {soc:f} and departure in {hours:f} hours")
 def step_given_post_ev_session(context, soc, hours):
     departure = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
-    r = ven_post("/ev-session", json={
+    r = ven_post("/user-requests", json={
+        "asset_id": "ev",
         "target_soc": soc,
-        "departure_time": departure,
-        "opportunistic": False,
+        "deadlines": [{"latest_end": departure}],
     })
     r.raise_for_status()
     context.last_response = r
@@ -30,10 +36,10 @@ def step_when_post_ev_session(context, soc, hours):
     departure = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
-    r = ven_post("/ev-session", json={
+    r = ven_post("/user-requests", json={
+        "asset_id": "ev",
         "target_soc": soc,
-        "departure_time": departure,
-        "opportunistic": False,
+        "deadlines": [{"latest_end": departure}],
     })
     context.last_response = r
     try:
@@ -42,93 +48,14 @@ def step_when_post_ev_session(context, soc, hours):
         context.last_response_json = None
 
 
-@when("I GET the EV session from /ev-session")
-def step_when_get_ev_session(context):
-    r = ven_get("/ev-session")
-    context.last_response = r
-    try:
-        context.last_response_json = r.json()
-    except Exception:
-        context.last_response_json = None
-
-
-@when("I DELETE the EV session")
-def step_when_delete_ev_session(context):
-    r = ven_delete("/ev-session")
-    context.last_response = r
-    try:
-        context.last_response_json = r.json()
-    except Exception:
-        context.last_response_json = None
-
-
-@given("I DELETE the EV session")
-def step_given_delete_ev_session(context):
-    r = ven_delete("/ev-session")
-    context.last_response = r
-
-
-# ── Heater Target ────────────────────────────────────────────────────────────
-
-@when("I POST a heater target of {temp:f} C ready in {hours:f} hours")
-def step_when_post_heater_target(context, temp, hours):
-    ready_by = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
-    r = ven_post("/heater-target", json={
-        "target_temp_c": temp,
-        "ready_by": ready_by,
-    })
-    context.last_response = r
-    try:
-        context.last_response_json = r.json()
-    except Exception:
-        context.last_response_json = None
-
-
-@given("I POST a heater target of {temp:f} C ready in {hours:f} hours")
-def step_given_post_heater_target(context, temp, hours):
-    ready_by = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
-    r = ven_post("/heater-target", json={
-        "target_temp_c": temp,
-        "ready_by": ready_by,
-    })
-    r.raise_for_status()
-    context.last_response = r
-    context.last_response_json = r.json()
-
-
-@when("I GET the heater target from /heater-target")
-def step_when_get_heater_target(context):
-    r = ven_get("/heater-target")
-    context.last_response = r
-    try:
-        context.last_response_json = r.json()
-    except Exception:
-        context.last_response_json = None
-
-
-@when("I DELETE the heater target")
-def step_when_delete_heater_target(context):
-    r = ven_delete("/heater-target")
-    context.last_response = r
-
-
-@given("I DELETE the heater target")
-def step_given_delete_heater_target(context):
-    ven_delete("/heater-target")
-
-
-# ── Shiftable Loads ──────────────────────────────────────────────────────────
+# ── Shiftable Loads (now via /user-requests) ────────────────────────────────────
 
 @when('I POST a shiftable load for asset "{asset_id}" at {kw:f} kW for {minutes:d} minutes within {window:d} hours')
 def step_when_post_shiftable_load(context, asset_id, kw, minutes, window):
     now = datetime.now(timezone.utc)
     earliest_start = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     latest_end = (now + timedelta(hours=window)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    r = ven_post("/shiftable-loads", json={
+    r = ven_post("/user-requests", json={
         "asset_id": asset_id,
         "power_kw": kw,
         "duration_min": minutes,
@@ -147,7 +74,7 @@ def step_given_post_shiftable_load(context, asset_id, kw, minutes, window):
     now = datetime.now(timezone.utc)
     earliest_start = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     latest_end = (now + timedelta(hours=window)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    r = ven_post("/shiftable-loads", json={
+    r = ven_post("/user-requests", json={
         "asset_id": asset_id,
         "power_kw": kw,
         "duration_min": minutes,
@@ -157,6 +84,8 @@ def step_given_post_shiftable_load(context, asset_id, kw, minutes, window):
     r.raise_for_status()
     context.last_response = r
     context.last_response_json = r.json()
+    # /user-requests returns the UserRequest, not the ShiftableLoad — its own "id" is what
+    # DELETE /user-requests/:id needs (not the linked session_id).
     context.last_shiftable_load_id = r.json().get("id")
 
 
@@ -165,7 +94,7 @@ def step_when_post_shiftable_load_min_window(context, asset_id, kw, minutes, win
     now = datetime.now(timezone.utc)
     earliest_start = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     latest_end = (now + timedelta(minutes=window_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    r = ven_post("/shiftable-loads", json={
+    r = ven_post("/user-requests", json={
         "asset_id": asset_id,
         "power_kw": kw,
         "duration_min": minutes,
@@ -184,7 +113,7 @@ def step_given_post_shiftable_load_min_window(context, asset_id, kw, minutes, wi
     now = datetime.now(timezone.utc)
     earliest_start = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     latest_end = (now + timedelta(minutes=window_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    r = ven_post("/shiftable-loads", json={
+    r = ven_post("/user-requests", json={
         "asset_id": asset_id,
         "power_kw": kw,
         "duration_min": minutes,
@@ -197,20 +126,10 @@ def step_given_post_shiftable_load_min_window(context, asset_id, kw, minutes, wi
     context.last_shiftable_load_id = r.json().get("id")
 
 
-@when("I GET the shiftable loads from /shiftable-loads")
-def step_when_get_shiftable_loads(context):
-    r = ven_get("/shiftable-loads")
-    context.last_response = r
-    try:
-        context.last_response_json = r.json()
-    except Exception:
-        context.last_response_json = None
-
-
 @when('I DELETE shiftable load with saved id')
 def step_when_delete_shiftable_load(context):
-    load_id = context.last_shiftable_load_id
-    r = ven_delete(f"/shiftable-loads/{load_id}")
+    request_id = context.last_shiftable_load_id
+    r = ven_delete(f"/user-requests/{request_id}")
     context.last_response = r
 
 
