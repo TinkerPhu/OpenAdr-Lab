@@ -160,6 +160,21 @@ finished one with polish pending. Precedent: the WP-T1..T8 work (docs/history/pr
 search "WP-T"; docs/architecture/VEN_ARCHITECTURE.md §4.10) that put VTN connection/plan/task
 status directly on the VEN UI Dashboard and under its Diagnostics menu group.
 
+no-half-built-features: don't build one side of an interface without the other in the same
+piece of work — a backend endpoint with no client calling it, or a client/hook with no UI
+surface using it, is an incomplete implementation, not a finished one with polish pending
+(same principle as `ui-transparency` above, generalized to any producer/consumer pair, not
+just backend→UI visibility). Before adding a new endpoint, identify what will call it in this
+same change; before adding a client method/hook, identify what will render it. If a richer
+mechanism is added to replace a simpler one (e.g. a unified request API superseding a
+per-device CRUD API), retire the superseded side's client, routes, and tests in the same
+piece of work — don't leave the old routes live-and-tested with a UI that quietly moved on,
+even though nothing is technically broken. Precedent: BL-41 (`docs/BACKLOG.md`) — a
+"Device Sessions API" (`/ev-session`, `/heater-target`, `/shiftable-loads`,
+`/baseline-override`) stayed live, mounted, and BDD-tested for an unknown period after the UI
+fully migrated to the richer unified `/user-requests` flow that constructs the same underlying
+domain objects; found only by an unrelated dead-code audit, not by anyone noticing the drift.
+
 refactoring: before adding a feature in an area listed in docs/reference/TECHNICAL_DEBTS.md,
 check that file first. If the relevant debt is Small or Trivial effort, refactor it before
 adding new behaviour. All tests must pass before and after any refactor. Record newly
