@@ -1,6 +1,7 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import type { SimSnapshot } from "../../api/types";
 import { CHART_COLORS } from "./colors";
+import { minSpanDomain, MIN_POWER_SPAN_KW } from "../controller/charts/axisDomain";
 
 interface SimProfileChartProps {
   data: SimSnapshot;
@@ -14,6 +15,10 @@ export function SimProfileChart({ data }: SimProfileChartProps) {
       power_kw: snap.power_kw,
     })),
   ];
+  const powerDomain = minSpanDomain(
+    points.map((p) => p.power_kw),
+    MIN_POWER_SPAN_KW
+  );
 
   return (
     <div data-testid="sim-profile-chart">
@@ -21,7 +26,7 @@ export function SimProfileChart({ data }: SimProfileChartProps) {
       <LineChart data={points} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis dataKey="name" />
-        <YAxis unit=" kW" />
+        <YAxis unit=" kW" domain={powerDomain} />
         <Tooltip formatter={(v: number) => `${v.toFixed(3)} kW`} />
         <Line
           type="monotone"

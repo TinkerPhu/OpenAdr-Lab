@@ -16,6 +16,7 @@ import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../types";
 import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_NOW, COLOR_ASSET_FALLBACK } from "../types";
 import type { ZoneDef } from "../../../api/types";
+import { minSpanDomain, MIN_POWER_SPAN_KW } from "./axisDomain";
 
 const COLOR_GRID_LINE = "#212121";
 
@@ -133,6 +134,17 @@ export function StackedAreaChart({
     ...assetIds.filter((id) => id !== "base_load"),
   ];
 
+  // Domain floor uses the summed stack top/bottom per point (not individual series), since
+  // that is what the chart actually renders — see MIN_POWER_SPAN_KW in axisDomain.ts.
+  const powerDomain = minSpanDomain(
+    chartData.flatMap((pt) => {
+      const posSum = assetIds.reduce((sum, id) => sum + (pt[`${id}_pos`] ?? 0), 0);
+      const negSum = assetIds.reduce((sum, id) => sum + (pt[`${id}_neg`] ?? 0), 0);
+      return [posSum, negSum, pt.gridPowerKw];
+    }),
+    MIN_POWER_SPAN_KW
+  );
+
   return (
     <div data-testid="accumulated-area-chart" style={{ width: "100%", height: height ?? CELL_CHART_HEIGHT }}>
       <ResponsiveContainer width="100%" height="100%">
@@ -149,7 +161,7 @@ export function StackedAreaChart({
             tickFormatter={formatTs}
             tick={{ fontSize: 10 }}
           />
-          <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} />
+          <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} domain={powerDomain} />
           <Tooltip content={<StackedAreaTooltip colorMap={colorMap} />} />
           <Legend
             iconSize={10}

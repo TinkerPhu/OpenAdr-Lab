@@ -2,6 +2,7 @@ import { Box, FormControl, InputLabel, MenuItem, Select, Typography } from "@mui
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import type { AssetTimelinePoint } from "../controller/types";
 import { CHART_COLORS } from "./colors";
+import { minSpanDomain, MIN_POWER_SPAN_KW } from "../controller/charts/axisDomain";
 
 interface TimelineSeriesChartProps {
   data: Record<string, AssetTimelinePoint[]>;
@@ -15,6 +16,10 @@ export function TimelineSeriesChart({ data, selectedSeries, onSeriesChange }: Ti
     ts: p.ts,
     power_kw: p.values?.power_kw ?? null,
   }));
+  const powerDomain = minSpanDomain(
+    points.map((p) => p.power_kw),
+    MIN_POWER_SPAN_KW
+  );
 
   return (
     <Box>
@@ -50,7 +55,7 @@ export function TimelineSeriesChart({ data, selectedSeries, onSeriesChange }: Ti
                 domain={["auto", "auto"]}
                 tickFormatter={(v: number) => new Date(v).toLocaleTimeString()}
               />
-              <YAxis unit=" kW" />
+              <YAxis unit=" kW" domain={powerDomain} />
               <Tooltip
                 labelFormatter={(v: number) => new Date(v).toLocaleString()}
                 formatter={(v: number) => [`${v.toFixed(3)} kW`, "power_kw"]}
