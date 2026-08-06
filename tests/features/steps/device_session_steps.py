@@ -2,11 +2,14 @@
 feature files (dispatcher, planner, shiftable_lifecycle, uc_normal/stress/vtn_coordination,
 ui_planner, 05_ev_charging_scenarios, isolated/shiftable_lifecycle).
 
-BL-41: these used to POST directly to the now-removed /ev-session, /heater-target,
-/shiftable-loads routes (a simpler, superseded CRUD API). Rewritten to go through the
-unified POST /user-requests (Stage 5) flow instead, which constructs the same underlying
-EvSession/HeaterTarget/ShiftableLoad domain objects — same Gherkin step phrasing, so none
-of the ~10 other feature files that use these steps as setup needed to change.
+BL-41: these used to POST directly to the now-removed POST/DELETE /ev-session,
+/heater-target, /shiftable-loads routes (a simpler, superseded CRUD API). Rewritten to go
+through the unified POST /user-requests (Stage 5) flow instead, which constructs the same
+underlying EvSession/HeaterTarget/ShiftableLoad domain objects — same Gherkin step
+phrasing, so none of the ~10 other feature files that use these steps as setup needed to
+change. GET /ev-session (read-only) was kept — see routes/hems/ev.rs — since a
+VTN-triggered CHARGE_STATE_SETPOINT session has no linked UserRequest and is otherwise
+unobservable.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -57,6 +60,7 @@ def step_when_post_shiftable_load(context, asset_id, kw, minutes, window):
     latest_end = (now + timedelta(hours=window)).strftime("%Y-%m-%dT%H:%M:%SZ")
     r = ven_post("/user-requests", json={
         "asset_id": asset_id,
+        "deadlines": [],
         "power_kw": kw,
         "duration_min": minutes,
         "earliest_start": earliest_start,
@@ -76,6 +80,7 @@ def step_given_post_shiftable_load(context, asset_id, kw, minutes, window):
     latest_end = (now + timedelta(hours=window)).strftime("%Y-%m-%dT%H:%M:%SZ")
     r = ven_post("/user-requests", json={
         "asset_id": asset_id,
+        "deadlines": [],
         "power_kw": kw,
         "duration_min": minutes,
         "earliest_start": earliest_start,
@@ -96,6 +101,7 @@ def step_when_post_shiftable_load_min_window(context, asset_id, kw, minutes, win
     latest_end = (now + timedelta(minutes=window_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
     r = ven_post("/user-requests", json={
         "asset_id": asset_id,
+        "deadlines": [],
         "power_kw": kw,
         "duration_min": minutes,
         "earliest_start": earliest_start,
@@ -115,6 +121,7 @@ def step_given_post_shiftable_load_min_window(context, asset_id, kw, minutes, wi
     latest_end = (now + timedelta(minutes=window_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
     r = ven_post("/user-requests", json={
         "asset_id": asset_id,
+        "deadlines": [],
         "power_kw": kw,
         "duration_min": minutes,
         "earliest_start": earliest_start,
