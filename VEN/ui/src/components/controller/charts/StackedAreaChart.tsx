@@ -16,7 +16,7 @@ import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../types";
 import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_NOW, COLOR_ASSET_FALLBACK } from "../types";
 import type { ZoneDef } from "../../../api/types";
-import { minSpanDomain, MIN_POWER_SPAN_KW } from "./axisDomain";
+import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick } from "./axisDomain";
 
 const COLOR_GRID_LINE = "#212121";
 
@@ -161,7 +161,13 @@ export function StackedAreaChart({
             tickFormatter={formatTs}
             tick={{ fontSize: 10 }}
           />
-          <YAxis yAxisId="power" tick={{ fontSize: 10 }} width={40} domain={powerDomain} />
+          <YAxis
+            yAxisId="power"
+            tick={{ fontSize: 10 }}
+            width={46}
+            tickFormatter={formatPowerTick}
+            domain={powerDomain}
+          />
           <Tooltip content={<StackedAreaTooltip colorMap={colorMap} />} />
           <Legend
             iconSize={10}
