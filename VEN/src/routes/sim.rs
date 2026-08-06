@@ -1,10 +1,11 @@
 use axum::{
-    extract::{Path, State},
+    extract::{ConnectInfo, Path, State},
     response::IntoResponse,
     Json,
 };
 use serde::{Deserialize, Deserializer};
-use tracing::debug;
+use std::net::SocketAddr;
+use tracing::{debug, warn};
 
 use crate::entities::asset::PlanTrigger;
 use crate::entities::sim_inject::SimInjectState;
@@ -218,10 +219,19 @@ pub async fn get_sim_inject(State(ctx): State<AppCtx>) -> impl IntoResponse {
 
 /// POST /sim/inject — partial-merge inject state.
 /// Absent fields are unchanged; `null` releases the override; a value activates it.
+///
+/// Logged at `warn!` (not `debug!`) with the caller's source address: this endpoint has
+/// caused multiple unattributed production incidents (repeated unexplained PV-irradiance
+/// overrides on ven-1 — see docs/history/project_journal.md) because it previously left zero
+/// trace of who called it. `ConnectInfo` only ever reflects the direct TCP peer, so a caller
+/// behind the `ven-ui` nginx proxy shows up as nginx's address, not the original browser/script
+/// — cross-reference nginx's own access log for that case.
 pub async fn post_sim_inject(
     State(ctx): State<AppCtx>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(body): Json<PostSimInjectBody>,
 ) -> impl IntoResponse {
+    warn!(?peer, ?body, "POST /sim/inject");
     // Trigger a replan only for fields the MILP planner uses as inputs.
     // base_load_kw / base_load_alpha are one-shot physics overrides for test
     // simulation — triggering a replan on them would race the BDD assertion window
@@ -260,7 +270,11 @@ pub async fn post_plan_trigger(State(ctx): State<AppCtx>) -> impl IntoResponse {
 }
 
 /// POST /sim/inject/reset — release all active overrides at once.
-pub async fn post_sim_inject_reset(State(ctx): State<AppCtx>) -> impl IntoResponse {
+pub async fn post_sim_inject_reset(
+    State(ctx): State<AppCtx>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> impl IntoResponse {
+    warn!(?peer, "POST /sim/inject/reset");
     ctx.state.set_inject_state(SimInjectState::default()).await;
     axum::http::StatusCode::NO_CONTENT
 }

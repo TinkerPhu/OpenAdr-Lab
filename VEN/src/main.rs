@@ -477,18 +477,21 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;
     info!("listening on {}", cfg.listen_addr);
 
-    axum::serve(listener, routes::build_router(ctx))
-        .with_graceful_shutdown(async move {
-            let _ = tokio::signal::ctrl_c().await;
-            info!("shutdown signal received, persisting sim state");
-            let sim_guard = sim_state.lock().await;
-            if let Err(e) = simulator::persist::save(&sim_guard, &data_dir).await {
-                error!("shutdown persist failed: {e:#}");
-            } else {
-                info!("sim state persisted on shutdown");
-            }
-        })
-        .await?;
+    axum::serve(
+        listener,
+        routes::build_router(ctx).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        info!("shutdown signal received, persisting sim state");
+        let sim_guard = sim_state.lock().await;
+        if let Err(e) = simulator::persist::save(&sim_guard, &data_dir).await {
+            error!("shutdown persist failed: {e:#}");
+        } else {
+            info!("sim state persisted on shutdown");
+        }
+    })
+    .await?;
 
     Ok(())
 }
