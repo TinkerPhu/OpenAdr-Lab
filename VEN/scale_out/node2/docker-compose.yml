@@ -19,7 +19,7 @@
 #     (scripts/seed_vtn.py — idempotent, safe to rerun)
 #
 # Usage:
-#   docker compose up -d --build ven-4 ven-5 ven-6 ven-7 ven-8 ven-9 ven-10 ven-11 ven-12 ven-13 ui
+#   docker compose up -d --build ven-4 ven-5 ven-6 ven-7 ven-8 ven-9 ven-10 ven-11 ven-12 ven-13
 #   curl http://localhost:8211/health   # ven-4; ven-5..13 are 8215..8223
 ###############################################################################
 
@@ -344,24 +344,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
-    networks:
-      - node2-ven-net
-
-  # UI build is identical to VEN/ui except for nginx.conf: this node has no
-  # local `bff`, so /api/vens-registry must proxy to the primary host's real
-  # BFF over the LAN instead of Docker DNS (see nginx/nginx.conf here).
-  ui:
-    build:
-      context: ../../ui
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    ports:
-      - "8214:80"
-    # Overrides the image's baked-in nginx.conf (VEN/ui/nginx.conf, which
-    # proxies /api/vens-registry to `bff` via Docker DNS) with this node's
-    # own config that proxies to the primary host's real BFF over the LAN.
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - node2-ven-net
 
