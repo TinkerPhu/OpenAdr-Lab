@@ -8,14 +8,6 @@ import { TariffChart } from "../components/controller/charts/TariffChart";
 import { ASSET_COLORS, ASSET_LABELS } from "../components/controller/types";
 import type { AssetTimelinePoint, TariffTimePoint } from "../components/controller/types";
 
-/** Yesterday's date (UTC), the sensible default — "today" barely has any
- * downsampled history to show, especially early in the day. */
-function defaultHistoryDate(): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
 /** [from, to) ISO bounds for the UTC calendar day `dateStr` ("YYYY-MM-DD"). */
 export function dayRangeIso(dateStr: string): { fromIso: string; toIso: string } {
   const from = new Date(`${dateStr}T00:00:00.000Z`);
@@ -23,9 +15,18 @@ export function dayRangeIso(dateStr: string): { fromIso: string; toIso: string }
   return { fromIso: from.toISOString(), toIso: to.toISOString() };
 }
 
+/** [from, to) ISO bounds for the rolling 24h window ending now — the default view, so the
+ * tab is useful the moment it's opened instead of showing an empty/mostly-empty calendar day. */
+function last24hRangeIso(): { fromIso: string; toIso: string } {
+  const to = new Date();
+  return { fromIso: new Date(to.getTime() - 24 * 3600 * 1000).toISOString(), toIso: to.toISOString() };
+}
+
 export function HistoryPage() {
-  const [date, setDate] = useState(defaultHistoryDate);
-  const { fromIso, toIso } = useMemo(() => dayRangeIso(date), [date]);
+  // null = default rolling last-24h window; a "YYYY-MM-DD" string once the user picks a
+  // specific UTC calendar day to inspect instead.
+  const [date, setDate] = useState<string | null>(null);
+  const { fromIso, toIso } = useMemo(() => (date ? dayRangeIso(date) : last24hRangeIso()), [date]);
   const toMs = useMemo(() => new Date(toIso).getTime(), [toIso]);
 
   const { data: ticks = [] } = useHistoryTicks(fromIso, toIso);
@@ -75,11 +76,14 @@ export function HistoryPage() {
         label="Date (UTC)"
         type="date"
         size="small"
-        value={date}
-        onChange={(e) => setDate(e.target.value)}
+        value={date ?? ""}
+        onChange={(e) => setDate(e.target.value || null)}
         inputProps={{ "data-testid": "history-date-input" }}
-        sx={{ mb: 2 }}
+        sx={{ mb: 1 }}
       />
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        {date ? `Showing ${date} (UTC)` : "Showing the last 24 hours — pick a date above to view a specific UTC day"}
+      </Typography>
 
       <Typography variant="h6">Grid</Typography>
       <TariffChart data={tariffPoints} nowMs={toMs} hoursBack={24} hoursForward={0} />
