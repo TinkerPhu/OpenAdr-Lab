@@ -119,11 +119,16 @@ def step_requests_at_least(context, count):
 
 @then("the EV session is cleared after cancellation")
 def step_ev_session_cleared(context):
-    """After cancelling a user request, GET /ev-session must return 204 (no session)."""
+    """After cancelling a user request, its entry in GET /user-requests must have no
+    linked session (state.cancel_request clears the EvSession atomically)."""
     from features.helpers.api_client import ven_get
-    r = ven_get("/ev-session")
-    assert r.status_code == 204, (
-        f"Expected 204 (EV session cleared), got {r.status_code}: {r.text}"
+    req_id = context.saved_request_id
+    r = ven_get("/user-requests")
+    r.raise_for_status()
+    items = [item for item in r.json() if item.get("id") == req_id]
+    assert items, f"request {req_id} not found in /user-requests"
+    assert items[0].get("session") is None, (
+        f"Expected EV session cleared, got {items[0].get('session')}"
     )
 
 

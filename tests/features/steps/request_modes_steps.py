@@ -10,10 +10,15 @@ def _post_mode_session(context, mode, budget_eur):
     departure = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
-    body = {"target_soc": 0.9, "departure_time": departure, "mode": mode}
+    body = {
+        "asset_id": "ev",
+        "target_soc": 0.9,
+        "deadlines": [{"latest_end": departure}],
+        "mode": mode,
+    }
     if budget_eur is not None:
         body["budget_eur"] = budget_eur
-    r = ven_post("/ev-session", json=body)
+    r = ven_post("/user-requests", json=body)
     r.raise_for_status()
     context.mode_session_created_at = datetime.now(timezone.utc)
     context.mode_session = r.json()
@@ -100,7 +105,8 @@ def step_plan_has_no_asset_alloc(context, asset_id):
 
 @then("the mode EV session is deleted")
 def step_delete_mode_session(context):
-    r = ven_delete("/ev-session")
+    request_id = context.mode_session["id"]
+    r = ven_delete(f"/user-requests/{request_id}")
     assert r.status_code in (204, 404), f"unexpected status {r.status_code}"
 
 

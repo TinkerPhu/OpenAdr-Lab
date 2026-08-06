@@ -112,6 +112,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
             get(hems::get_requests).post(hems::post_requests),
         )
         .route("/user-requests/:id", delete(hems::delete_request))
+        .route("/ev-session", get(hems::get_ev_session))
         .route("/flexibility", get(hems::get_flexibility))
         .route(
             "/ev-settings",
