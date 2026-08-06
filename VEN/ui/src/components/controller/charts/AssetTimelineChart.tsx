@@ -19,6 +19,7 @@ import {
   MIN_COST_RATE_SPAN_EUR_H,
   MIN_CO2_RATE_SPAN_G_H,
   MIN_POWER_SPAN_KW,
+  formatPowerTick,
 } from "./axisDomain";
 
 interface AssetTimelineChartProps {
@@ -199,8 +200,8 @@ export function AssetTimelineChart({
         <YAxis
           yAxisId="power"
           tick={{ fontSize: 10 }}
-          width={40}
-          unit=" kW"
+          width={46}
+          tickFormatter={formatPowerTick}
           domain={powerDomain}
         />
         <YAxis
