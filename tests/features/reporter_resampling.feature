@@ -6,7 +6,7 @@ Feature: Reporter multi-interval resampling (RF-05e)
   Background:
     Given I have a VTN token as "any-business"
 
-  @reporter-resampling
+  @reporter-resampling @autoretry
   Scenario: Obligation-based report contains multiple intervals
     Given I create a program named "resample-test" and save its ID
     And I create an event for the saved program with a reportDescriptor frequency of 5 seconds

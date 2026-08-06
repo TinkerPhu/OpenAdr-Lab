@@ -137,8 +137,32 @@ def _asset_charging_kw(plan, asset_id):
     ]
 
 
+def _wait_for_comfort_plan_matching(context, predicate, description):
+    """The "recomputed after" step only guarantees a plan *stamped* after the
+    request was created — under host load a cycle already in flight when the
+    request lands can still finish and get stamped with a fresh created_at
+    without having read the new request (TOCTOU on wall-clock freshness, not
+    plan content). Re-poll /plan itself against the actual assertion so a
+    later cycle that does reflect the request is picked up within budget."""
+    def fetch():
+        r = ven_get("/plan")
+        return r.json() if r.ok else None
+
+    context.comfort_plan = poll_until(
+        fetch, predicate, timeout=30, interval=3, description=description
+    )
+
+
 @then('the comfort-curve-driven plan has no "{asset_id}" charging')
 def step_comfort_plan_no_charging(context, asset_id):
+    def no_charging(plan):
+        kw = _asset_charging_kw(plan, asset_id) if plan else []
+        return not [p for p in kw if p > 0.01]
+
+    if not no_charging(context.comfort_plan):
+        _wait_for_comfort_plan_matching(
+            context, no_charging, f"plan has no {asset_id} charging"
+        )
     kw = _asset_charging_kw(context.comfort_plan, asset_id)
     offending = [p for p in kw if p > 0.01]
     assert not offending, f"expected no {asset_id} charging, got {kw}"
@@ -146,6 +170,14 @@ def step_comfort_plan_no_charging(context, asset_id):
 
 @then('the comfort-curve-driven plan has "{asset_id}" charging')
 def step_comfort_plan_has_charging(context, asset_id):
+    def has_charging(plan):
+        kw = _asset_charging_kw(plan, asset_id) if plan else []
+        return any(p > 0.01 for p in kw)
+
+    if not has_charging(context.comfort_plan):
+        _wait_for_comfort_plan_matching(
+            context, has_charging, f"plan has {asset_id} charging"
+        )
     kw = _asset_charging_kw(context.comfort_plan, asset_id)
     assert any(p > 0.01 for p in kw), f"expected {asset_id} charging, got {kw}"
 

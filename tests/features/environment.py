@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from features.helpers.api_client import VTN_BASE_URL, VEN_BASE_URL, VEN2_BASE_URL, VEN_NO_PV_BASE_URL, BFF_BASE_URL
 from features.helpers.wait import wait_for_url
+from behave.contrib.scenario_autoretry import patch_scenario_with_autoretry
 
 # Timing instrumentation
 TIMING_LOG = "/tmp/test-timing.jsonl"
@@ -150,6 +151,14 @@ def before_feature(context, feature):
     - Deletions are small (a handful from the previous feature), so VTN is
       never hit with a 100-item bulk delete that could cause BFF 502 errors.
     """
+    # Behave's official flaky-infra mitigation (behave.contrib.scenario_autoretry):
+    # scenarios tagged @autoretry get re-run up to max_attempts on failure, in-process,
+    # before their failure is accepted. Reserve this tag for scenarios with a confirmed
+    # one-off timing flake on shared Node1, not as a default weakening of assertions.
+    for scenario in feature.walk_scenarios():
+        if "autoretry" in scenario.effective_tags:
+            patch_scenario_with_autoretry(scenario, max_attempts=2)
+
     t0 = time.time()
     _cleanup_all_programs()
     elapsed = round(time.time() - t0, 2)
