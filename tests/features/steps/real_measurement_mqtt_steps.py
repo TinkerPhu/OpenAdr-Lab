@@ -55,7 +55,12 @@ def step_publish_base_load_measurement(context):
 
 @given("no PV measurement has ever been published for VEN-1")
 def step_no_pv_measurement_published(context):
-    pass  # nothing to do — absence is the precondition
+    # Nothing to do — absence is the precondition. This relies on test-ven-1 and the
+    # mosquitto broker being freshly created for this run (run_all_tests.sh tears the
+    # stack down with `docker compose down -v` both before and after the E2E/resilience
+    # suites specifically so a leftover retained MQTT reading from an interrupted prior
+    # run can't get replayed to test-ven-1 on startup and make this precondition false).
+    pass
 
 
 @given("the VEN-1 pv irradiance offset is flushed to zero")

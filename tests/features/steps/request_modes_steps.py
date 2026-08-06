@@ -91,15 +91,35 @@ def step_wait_plan_after_mode_session(context):
     )
 
 
-@then('the recomputed plan has no "{asset_id}" allocations')
-def step_plan_has_no_asset_alloc(context, asset_id):
-    plan = context.mode_plan
-    offending = [
+def _asset_allocations(plan, asset_id):
+    return [
         (slot.get("slot_index"), a.get("power_kw"))
         for slot in plan.get("slots", [])
         for a in slot.get("allocations", [])
         if a.get("asset_id") == asset_id and a.get("power_kw", 0.0) > 0.01
     ]
+
+
+@then('the recomputed plan has no "{asset_id}" allocations')
+def step_plan_has_no_asset_alloc(context, asset_id):
+    # step_wait_plan_after_mode_session only guarantees a plan *stamped* after the
+    # mode session was created — a cycle already in flight when the session lands
+    # can still finish and get a fresh created_at without having read it (TOCTOU on
+    # wall-clock freshness, not plan content; see comfort_steps.py's identical fix).
+    # Re-poll /plan itself if the captured snapshot doesn't already satisfy this.
+    if _asset_allocations(context.mode_plan, asset_id):
+        def fetch():
+            r = ven_get("/plan")
+            return r.json() if r.ok else None
+
+        context.mode_plan = poll_until(
+            fetch,
+            lambda plan: plan is not None and not _asset_allocations(plan, asset_id),
+            timeout=30,
+            interval=3,
+            description=f"plan has no {asset_id} allocations",
+        )
+    offending = _asset_allocations(context.mode_plan, asset_id)
     assert not offending, f"expected no {asset_id} allocations, got {offending}"
 
 

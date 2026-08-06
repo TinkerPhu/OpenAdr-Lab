@@ -197,7 +197,12 @@ if $RUN_E2E; then
         fi
 
         echo "  Building and running test stack (this may take a few minutes)..."
-        E2E_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.test.yml run --build --rm test-runner 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.test.yml down -v 2>&1; exit \$RESULT"
+        # Tear down before *and* after: an interrupted prior run (e.g. a dropped SSH
+        # session mid-build) can leave test-ven-1/mosquitto still running, and `docker
+        # compose run` reuses already-running dependencies rather than recreating them —
+        # so a stale retained MQTT reading or cached measurement state can silently carry
+        # into this run otherwise (see real_measurement_mqtt.feature flakiness).
+        E2E_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.test.yml down -v 2>&1; docker compose -f tests/docker-compose.test.yml run --build --rm test-runner 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.test.yml down -v 2>&1; exit \$RESULT"
         if run_docker_cmd "$E2E_CMD"; then
             pass "E2E behave tests"
         else
@@ -214,7 +219,8 @@ if $RUN_RESILIENCE; then
     header "5. Resilience / Failure Recovery Tests (docker: $_DOCKER_LABEL)"
     if can_reach_docker; then
         echo "  Building and running resilience tests..."
-        RES_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.test.yml run --build --rm test-runner --tags=@resilience 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.test.yml down -v 2>&1; exit \$RESULT"
+        # Pre-run teardown: same interrupted-prior-run rationale as the E2E suite above.
+        RES_CMD="cd $DOCKER_DIR && docker compose -f tests/docker-compose.test.yml down -v 2>&1; docker compose -f tests/docker-compose.test.yml run --build --rm test-runner --tags=@resilience 2>&1; RESULT=\$?; docker compose -f tests/docker-compose.test.yml down -v 2>&1; exit \$RESULT"
         if run_docker_cmd "$RES_CMD"; then
             pass "Resilience tests"
         else
