@@ -210,8 +210,10 @@ export class VenApi {
     return r.json();
   }
 
-  async postSimInject(patch: Partial<SimInjectState>): Promise<void> {
-    const r = await this.jsonReq("POST", "/sim/inject", patch);
+  async postSimInject(patch: Partial<SimInjectState>, source?: string): Promise<void> {
+    // `source` is a self-reported diagnostic tag (e.g. "ven-ui:Controller.tsx") logged
+    // server-side alongside the caller's IP — see routes/sim.rs PostSimInjectBody.source.
+    const r = await this.jsonReq("POST", "/sim/inject", { ...patch, source });
     if (!r.ok) throw new Error(`post sim inject ${r.status}`);
   }
 

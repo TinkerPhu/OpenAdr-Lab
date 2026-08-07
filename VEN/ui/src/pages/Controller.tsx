@@ -19,7 +19,7 @@ export function ControllerPage() {
   const { data: rates, refetch: refetchTariffs } = useTariffs({ refetchInterval: false });
   const { data: userRequests, refetch: refetchRequests } = useRequests({ refetchInterval: false });
   const { data: simInject } = useSimInject();
-  const { mutate: setSimInject } = useSetSimInject();
+  const { mutate: setSimInject } = useSetSimInject("ven-ui:pages/Controller.tsx#handleOverrideChange");
   const { mutate: resetAssetSoc } = useResetAssetSoc();
   // Prefetch sim schema so controls are available instantly when right sections expand.
   useSimSchema();

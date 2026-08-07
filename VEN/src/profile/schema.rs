@@ -341,6 +341,12 @@ pub struct SimulatorConfig {
     /// modelled assets and the residual is structurally 0. Zero disables.
     #[serde(default)]
     pub unmodelled_load_kw: f64,
+    /// Master switch for `POST /sim/inject` and `/sim/inject/reset`. Default `true`
+    /// (test/dev profiles). Set `false` on a live production VEN to hard-disable
+    /// the endpoint (returns 403) while an unattributed inject source is hunted —
+    /// see docs/history/project_journal.md, "ven-1 PV-injection mystery".
+    #[serde(default = "super::defaults::default_sim_inject_enabled")]
+    pub sim_inject_enabled: bool,
 }
 
 /// Physical grid connection limits — meter / main breaker hard ceiling.
