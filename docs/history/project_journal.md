@@ -7790,3 +7790,33 @@ the same mechanism — any ven-1 restart, not an external caller. See
 twice for confirmation. PV curve and inject-call logging monitored live on
 production ven-1 for ~75 minutes post-redeploy with no further anomalies.
 
+**The ven-1 PV-injection mystery, round 3**: the "solved" write-up above turned
+out to only explain the SIGTERM/restart-artifact cases. On 2026-08-07 ~16:09:51
+local, ven-1's new source-IP logging caught a **genuine** `POST /sim/inject`
+(peer `192.168.1.134`, the operator's own dev laptop — not a restart artifact,
+`ven-ven-1-1` had 0 restarts and had been up for hours), setting
+`pv_irradiance=0.5457`/`pv_irradiance_alpha=0.99`, followed 10s later by a second
+call resetting `pv_irradiance_alpha` to `0.1` — the exact shape of the "one-shot
+PV irradiance" pattern documented in
+`VEN/ui/src/__tests__/pv_irradiance_one_shot.test.ts`. The operator confirmed
+they did not trigger this manually; nothing matched in shell/PowerShell history.
+Root cause not found this session — no smoking-gun process, scheduled task, or
+misconfigured `VEN_BASE_URL` was located. Rather than continue guessing,
+shipped defense-in-depth instrumentation instead (`6b80be8`):
+- `simulator.sim_inject_enabled` profile flag (default `true`) hard-disables
+  `POST /sim/inject` (403) when `false` — set `false` on `VEN/profiles/ven-1.yaml`
+  to stop further unattributed overrides on the live production VEN while the
+  culprit is hunted. `/sim/inject/reset` (read-only-ish, only clears state) stays
+  enabled.
+- `PostSimInjectBody` gained an optional `source` field, logged alongside the
+  caller's peer address — the VEN UI's `useSetSimInject` hook now requires a
+  source tag (Controller.tsx passes its own file#function name), and the E2E
+  `ven_post()` Python helper auto-tags every `/sim/inject` call with the calling
+  test file:line via `inspect.stack()`, covering ~20 existing BDD call sites
+  without editing each one.
+Next occurrence (if the endpoint is ever re-enabled without a fix) should be
+immediately attributable via the `source` field. If it recurs while the
+endpoint is disabled, the culprit is not going through the HTTP route at all,
+which would point at something restart-adjacent again — re-check the SIGTERM
+persistence path first.
+
