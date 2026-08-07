@@ -334,17 +334,12 @@ pub struct SimulatorConfig {
     pub persist_every_s: u64,
     #[serde(default = "super::defaults::default_report_interval")]
     pub report_interval_s: u64,
-    /// Peak of a deterministic diurnal *unmodelled* load added to the derived
-    /// grid meter but to no asset (kW). Makes `site-residual` non-zero in
-    /// simulation, so the residual heuristic has a real signal to learn —
-    /// without it the simulator derives the meter as the exact sum of its
-    /// modelled assets and the residual is structurally 0. Zero disables.
+    /// Peak of a deterministic diurnal *unmodelled* load added to the derived grid meter but to
+    /// no asset (kW): gives the site-residual heuristic a real non-zero signal to learn from.
+    /// Zero disables (residual is then structurally 0, the exact sum of modelled assets).
     #[serde(default)]
     pub unmodelled_load_kw: f64,
-    /// Master switch for `POST /sim/inject` and `/sim/inject/reset`. Default `true`
-    /// (test/dev profiles). Set `false` on a live production VEN to hard-disable
-    /// the endpoint (returns 403) while an unattributed inject source is hunted —
-    /// see docs/history/project_journal.md, "ven-1 PV-injection mystery".
+    /// Master switch for `POST /sim/inject` (returns 403 when `false`); see R-65/project_journal.
     #[serde(default = "super::defaults::default_sim_inject_enabled")]
     pub sim_inject_enabled: bool,
 }
