@@ -407,8 +407,8 @@ impl HistoryPort for SqliteHistoryStore {
         ticks: &[TickSample],
         window_s: i64,
     ) -> Result<(), DomainError> {
-        let conn = self.lock()?;
-        forecast_accuracy::reconcile(&conn, ticks, window_s)
+        let mut conn = self.lock()?;
+        forecast_accuracy::reconcile(&mut conn, ticks, window_s)
     }
 
     fn query_forecast_accuracy(

@@ -40,6 +40,9 @@ pub async fn finish_plan_cycle(
     )
     .await;
     let sim_snap = sim.lock().await.to_sim_snapshot();
+    // Fetched once and shared: both publish_post_cycle_state and the forecast-accuracy
+    // capture below need it, and it's an RwLock read + full HashMap clone.
+    let heuristics = state.asset_heuristics().await;
     publish_post_cycle_state(
         state,
         &sim_snap,
@@ -47,13 +50,13 @@ pub async fn finish_plan_cycle(
         wall_now,
         weather,
         weather_pv_params,
+        &heuristics,
     )
     .await;
 
     // forecast-accuracy-tracking: best-effort write, log-and-continue on failure — same
     // pattern as history_sampler::write_window. Skipped entirely when history is disabled.
     if let Some(history) = history {
-        let heuristics = state.asset_heuristics().await;
         let samples = record_forecast_accuracy_samples(&cycle.plan, &heuristics, wall_now);
         if !samples.is_empty() {
             let res =
@@ -121,6 +124,7 @@ pub fn record_forecast_accuracy_samples(
 /// Post-plan-cycle state publication: site flexibility envelope and per-asset
 /// forecasts (WP3.6, BL-15), both derived from the *adopted* plan — the one
 /// actually driving dispatch, never a rejected candidate.
+#[allow(clippy::too_many_arguments)]
 pub async fn publish_post_cycle_state(
     state: &AppState,
     sim_snap: &SimSnapshot,
@@ -128,6 +132,7 @@ pub async fn publish_post_cycle_state(
     wall_now: DateTime<Utc>,
     weather: &Arc<dyn WeatherForecastPort>,
     weather_pv_params: Option<&PvForecastParams>,
+    heuristics: &HashMap<String, AssetHeuristics>,
 ) {
     let env = crate::controller::envelope::compute_envelope(sim_snap, wall_now);
     state.set_site_envelope(env).await;
@@ -138,10 +143,9 @@ pub async fn publish_post_cycle_state(
     // base_load/site-residual) — no precedence conflict since Optimization
     // and Heuristic never cover the same asset_id in practice.
     let existing_ids: HashSet<String> = forecasts.iter().map(|f| f.asset_id.clone()).collect();
-    let heuristics = state.asset_heuristics().await;
     if !heuristics.is_empty() {
         let slot_starts: Vec<DateTime<Utc>> = adopted_plan.slots.iter().map(|s| s.start).collect();
-        for hf in build_heuristic_forecasts(&heuristics, &slot_starts, wall_now) {
+        for hf in build_heuristic_forecasts(heuristics, &slot_starts, wall_now) {
             if !existing_ids.contains(&hf.asset_id) {
                 forecasts.push(hf);
             }

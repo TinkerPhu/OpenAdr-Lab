@@ -47,30 +47,39 @@ pub(super) fn append(
 /// For each tick row, fill in `actual_kw`/`actual_at` on any still-open (`actual_kw IS NULL`)
 /// sample for that `asset_id` whose `target_ts` falls in `[ticks.ts, ticks.ts + window_s)` —
 /// design.md Decision 4. A row is only ever reconciled once: the `actual_kw IS NULL` guard means
-/// a second call over the same window is a no-op for already-reconciled rows.
+/// a second call over the same window is a no-op for already-reconciled rows. Batched in one
+/// transaction (mirroring `append` above) so a multi-asset flush commits atomically instead of
+/// once per tick.
 pub(super) fn reconcile(
-    conn: &Connection,
+    conn: &mut Connection,
     ticks: &[TickSample],
     window_s: i64,
 ) -> Result<(), DomainError> {
-    let mut stmt = conn
-        .prepare(
-            "UPDATE forecast_accuracy_samples
-             SET actual_kw = ?1, actual_at = ?2
-             WHERE asset_id = ?3 AND actual_kw IS NULL AND target_ts >= ?4 AND target_ts < ?5",
-        )
-        .map_err(|e| DomainError::StorageError(format!("prepare reconcile: {e}")))?;
-    for tick in ticks {
-        let window_start = to_unix(tick.ts);
-        stmt.execute(params![
-            tick.power_kw,
-            window_start,
-            tick.asset_id,
-            window_start,
-            window_start + window_s,
-        ])
-        .map_err(|e| DomainError::StorageError(format!("reconcile forecast sample: {e}")))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| DomainError::StorageError(format!("begin tx: {e}")))?;
+    {
+        let mut stmt = tx
+            .prepare(
+                "UPDATE forecast_accuracy_samples
+                 SET actual_kw = ?1, actual_at = ?2
+                 WHERE asset_id = ?3 AND actual_kw IS NULL AND target_ts >= ?4 AND target_ts < ?5",
+            )
+            .map_err(|e| DomainError::StorageError(format!("prepare reconcile: {e}")))?;
+        for tick in ticks {
+            let window_start = to_unix(tick.ts);
+            stmt.execute(params![
+                tick.power_kw,
+                window_start,
+                tick.asset_id,
+                window_start,
+                window_start + window_s,
+            ])
+            .map_err(|e| DomainError::StorageError(format!("reconcile forecast sample: {e}")))?;
+        }
     }
+    tx.commit()
+        .map_err(|e| DomainError::StorageError(format!("commit tx: {e}")))?;
     Ok(())
 }
 
