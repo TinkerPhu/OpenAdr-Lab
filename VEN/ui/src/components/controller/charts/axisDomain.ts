@@ -63,3 +63,16 @@ export function formatPowerTick(valueKw: number): string {
   if (Math.abs(valueKw) < 1) return `${Math.round(valueKw * 1000)} W`;
   return `${valueKw.toFixed(2)} kW`;
 }
+
+/** Evenly-spaced X-axis tick timestamps within `[fromMs, toMs]`, snapped to the wall-clock
+ * (e.g. 10:00, 10:30, 11:00) — recharts' default "nice" tick generation instead lands on
+ * whatever offset the axis domain itself happens to start at (e.g. 10:09, 10:39), since the
+ * domain here is `now - hoursBack*3600000`, not a round time. */
+export function roundedTimeTicks(fromMs: number, toMs: number, intervalMinutes = 30): number[] {
+  const intervalMs = intervalMinutes * 60_000;
+  const ticks: number[] = [];
+  for (let t = Math.ceil(fromMs / intervalMs) * intervalMs; t <= toMs; t += intervalMs) {
+    ticks.push(t);
+  }
+  return ticks;
+}
