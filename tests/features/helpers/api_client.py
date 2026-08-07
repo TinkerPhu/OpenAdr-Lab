@@ -1,5 +1,6 @@
 """Thin HTTP helpers for talking to the VTN, VEN, and BFF APIs."""
 
+import inspect
 import os
 import requests
 
@@ -97,7 +98,18 @@ def ven_get(path, params=None):
 
 
 def ven_post(path, json=None):
-    """POST against the VEN (no auth required)."""
+    """POST against the VEN (no auth required).
+
+    For `/sim/inject` specifically, auto-tags the request body with a `source`
+    field identifying the calling test file:line (e.g.
+    "e2e:phase_a_physics_steps.py:116"), read from the immediate caller's stack
+    frame. This is a diagnostic breadcrumb the VEN logs alongside the caller's
+    IP (see routes/sim.rs PostSimInjectBody.source) — added to help attribute
+    unexplained `/sim/inject` calls on a live VEN to a specific call site.
+    """
+    if path == "/sim/inject" and isinstance(json, dict) and "source" not in json:
+        caller = inspect.stack()[1]
+        json = {**json, "source": f"e2e:{os.path.basename(caller.filename)}:{caller.lineno}"}
     return requests.post(
         f"{VEN_BASE_URL}{path}",
         json=json,
