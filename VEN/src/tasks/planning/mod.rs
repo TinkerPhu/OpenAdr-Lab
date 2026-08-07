@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::info;
 
-use crate::controller::{SolverPort, WeatherForecastPort};
+use crate::controller::{HistoryPort, SolverPort, WeatherForecastPort};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::{AssetParams, PvForecastParams};
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
@@ -29,6 +29,7 @@ pub(crate) fn spawn_planning(
     now_fn: impl Fn() -> chrono::DateTime<Utc> + Send + Sync + 'static,
     weather: Arc<dyn WeatherForecastPort>,
     weather_pv_params: Option<PvForecastParams>,
+    history: Option<Arc<dyn HistoryPort>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         // Initial delay: let event poll populate rates before first plan
@@ -74,6 +75,7 @@ pub(crate) fn spawn_planning(
                 &trigger_reason,
                 wall_now,
                 now,
+                history.clone(),
             )
             .await;
 
@@ -171,6 +173,7 @@ mod tests {
             crate::services::notify::Notifier::new(None),
             Utc::now,
             Arc::new(crate::controller::NoopWeatherPort),
+            None,
             None,
         );
         handle.abort();

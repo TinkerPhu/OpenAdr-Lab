@@ -7,6 +7,7 @@ import type {
   BaselineOverride, CreateBaselineOverrideBody,
   ZoneDef,
   HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent,
+  ForecastAccuracySample,
   UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, SignalsState,
   HealthResponse, VtnStatus, TaskStatusEntry, EventLogEntry,
   ReportObligation, AssetCapability, AssetForecast,
@@ -344,6 +345,30 @@ export class VenApi {
     if (!r.ok) throw new Error(`history/grid ${r.status}`);
     const raw: (Omit<HistoryGridSample, "ts"> & { ts: string })[] = await r.json();
     return raw.map((row) => ({ ...row, ts: new Date(row.ts).getTime() }));
+  }
+
+  async historyForecastAccuracy(params: {
+    from: string;
+    to: string;
+    assetId?: string;
+    leadKind?: "near" | "far";
+  }): Promise<ForecastAccuracySample[]> {
+    const qs = new URLSearchParams({ from: params.from, to: params.to });
+    if (params.assetId) qs.set("asset_id", params.assetId);
+    if (params.leadKind) qs.set("lead_kind", params.leadKind);
+    const r = await this.getReq(`/history/forecast-accuracy?${qs}`);
+    if (!r.ok) throw new Error(`history/forecast-accuracy ${r.status}`);
+    const raw: (Omit<ForecastAccuracySample, "target_ts" | "predicted_at" | "actual_at"> & {
+      target_ts: string;
+      predicted_at: string;
+      actual_at: string | null;
+    })[] = await r.json();
+    return raw.map((row) => ({
+      ...row,
+      target_ts: new Date(row.target_ts).getTime(),
+      predicted_at: new Date(row.predicted_at).getTime(),
+      actual_at: row.actual_at ? new Date(row.actual_at).getTime() : null,
+    }));
   }
 
   async historyEvents(params: { from: string; to: string }): Promise<HistoryEventReceived[]> {

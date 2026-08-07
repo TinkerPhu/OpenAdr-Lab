@@ -14,7 +14,10 @@
 #![allow(dead_code)]
 use chrono::{DateTime, Utc};
 
-use crate::entities::history::{EventReceived, GridSample, LedgerPeriod, ReportSent, TickSample};
+use crate::entities::history::{
+    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, LedgerPeriod, ReportSent,
+    TickSample,
+};
 use crate::entities::notification::UserNotification;
 use crate::entities::DomainError;
 
@@ -83,4 +86,37 @@ pub trait HistoryPort: Send + Sync {
     /// Delete all rows across every table with a time column older than `cutoff`.
     /// Returns the total number of rows deleted.
     fn prune_before(&self, cutoff: DateTime<Utc>) -> Result<u64, DomainError>;
+
+    /// forecast-accuracy-tracking: persist the plan's near/far forecast samples for one plan
+    /// cycle. Default no-op so history-less test doubles keep compiling; the SQLite store and
+    /// `MockHistoryPort` override.
+    fn append_forecast_samples(&self, rows: &[ForecastAccuracySample]) -> Result<(), DomainError> {
+        let _ = rows;
+        Ok(())
+    }
+
+    /// forecast-accuracy-tracking: fill in `actual_kw`/`actual_at` on any still-open forecast
+    /// sample whose `target_ts` falls inside a just-flushed `history_sampler` window. `window_s`
+    /// is that window's width. Default no-op, same rationale as `append_forecast_samples`.
+    fn reconcile_forecast_actuals(
+        &self,
+        ticks: &[TickSample],
+        window_s: i64,
+    ) -> Result<(), DomainError> {
+        let _ = (ticks, window_s);
+        Ok(())
+    }
+
+    /// forecast-accuracy-tracking: `[from, to)`, optionally filtered by asset and/or lead kind.
+    /// Default empty, same rationale as `append_forecast_samples`.
+    fn query_forecast_accuracy(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        asset_id: Option<&str>,
+        lead_kind: Option<ForecastLeadKind>,
+    ) -> Result<Vec<ForecastAccuracySample>, DomainError> {
+        let _ = (from, to, asset_id, lead_kind);
+        Ok(Vec::new())
+    }
 }

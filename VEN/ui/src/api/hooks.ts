@@ -378,6 +378,17 @@ export function useHistoryReports(from: string, to: string) {
   });
 }
 
+/** forecast-accuracy-tracking: near/far forecast samples (predicted, and actual once
+ * reconciled) for one asset, `[from, to)`. */
+export function useHistoryForecastAccuracy(from: string, to: string, assetId?: string) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["history/forecast-accuracy", api.baseUrl, from, to, assetId],
+    queryFn: () => api.historyForecastAccuracy({ from, to, assetId }),
+    refetchInterval: false,
+  });
+}
+
 export function useObligations() {
   const { api } = useVenContext();
   return useQuery({

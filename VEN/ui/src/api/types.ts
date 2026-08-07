@@ -555,6 +555,16 @@ export type HistoryGridSample = {
   co2_g_kwh: number | null;
 };
 
+export type ForecastAccuracySample = {
+  asset_id: string;
+  lead_kind: "near" | "far";
+  target_ts: number;
+  predicted_kw: number;
+  predicted_at: number;
+  actual_kw: number | null;
+  actual_at: number | null;
+};
+
 export type HistoryEventReceived = {
   received_at: number;
   event_id: string;

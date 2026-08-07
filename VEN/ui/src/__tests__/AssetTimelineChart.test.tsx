@@ -9,15 +9,19 @@ import { render } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
-const { referenceAreas } = vi.hoisted(() => ({
+const { referenceAreas, lines } = vi.hoisted(() => ({
   referenceAreas: [] as Array<Record<string, unknown>>,
+  lines: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("recharts", () => ({
   ComposedChart: ({ children }: { children: unknown }) => children,
   ResponsiveContainer: ({ children }: { children: unknown }) => children,
   YAxis: () => null,
-  Line: () => null,
+  Line: (props: Record<string, unknown>) => {
+    lines.push(props);
+    return null;
+  },
   ReferenceArea: (props: Record<string, unknown>) => {
     referenceAreas.push(props);
     return null;
@@ -30,6 +34,7 @@ vi.mock("recharts", () => ({
 }));
 
 import { AssetTimelineChart } from "../components/controller/charts/AssetTimelineChart";
+import type { ForecastAccuracySample } from "../api/types";
 
 const now = new Date("2026-01-01T12:00:00Z").getTime();
 const minute = 60_000;
@@ -38,9 +43,22 @@ function point(offsetMs: number, values: Record<string, number>): AssetTimelineP
   return { ts: now + offsetMs, values };
 }
 
+function forecastSample(leadKind: "near" | "far", targetTs: number): ForecastAccuracySample {
+  return {
+    asset_id: "pv",
+    lead_kind: leadKind,
+    target_ts: targetTs,
+    predicted_kw: -3.0,
+    predicted_at: now,
+    actual_kw: null,
+    actual_at: null,
+  };
+}
+
 describe("AssetTimelineChart — PV curtailment shading", () => {
   beforeEach(() => {
     referenceAreas.length = 0;
+    lines.length = 0;
   });
 
   it("renders no curtailment band for uncurtailed data", () => {
@@ -156,5 +174,46 @@ describe("AssetTimelineChart — PV curtailment shading", () => {
     ];
     render(<AssetTimelineChart data={data} color="#000" nowMs={now} />);
     expect(referenceAreas).toHaveLength(0);
+  });
+});
+
+// forecast-accuracy-tracking (task 6.3)
+describe("AssetTimelineChart — near/far forecast overlay", () => {
+  beforeEach(() => {
+    lines.length = 0;
+  });
+
+  it("renders both the near and far forecast series when data is present", () => {
+    const data = [point(-1 * minute, { power_kw: -3.0 })];
+    render(
+      <AssetTimelineChart
+        data={data}
+        color="#000"
+        nowMs={now}
+        nearForecast={[forecastSample("near", now + minute)]}
+        farForecast={[forecastSample("far", now + 5 * minute)]}
+      />
+    );
+    const names = lines.map((l) => l.name);
+    expect(names).toContain("Forecast (near) [kW]");
+    expect(names).toContain("Forecast (far) [kW]");
+  });
+
+  it("renders cleanly with no overlay lines when neither prop is passed", () => {
+    const data = [point(-1 * minute, { power_kw: -3.0 })];
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} />);
+    const names = lines.map((l) => l.name);
+    expect(names).not.toContain("Forecast (near) [kW]");
+    expect(names).not.toContain("Forecast (far) [kW]");
+  });
+
+  it("renders cleanly with no overlay lines when the query returned empty arrays", () => {
+    const data = [point(-1 * minute, { power_kw: -3.0 })];
+    render(
+      <AssetTimelineChart data={data} color="#000" nowMs={now} nearForecast={[]} farForecast={[]} />
+    );
+    const names = lines.map((l) => l.name);
+    expect(names).not.toContain("Forecast (near) [kW]");
+    expect(names).not.toContain("Forecast (far) [kW]");
   });
 });
