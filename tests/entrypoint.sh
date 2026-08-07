@@ -33,6 +33,34 @@ echo "Provisioning ven-2 via API..."
 python provision_ven2.py
 echo "Provisioning done."
 
+# Both timing-sensitive @isolated scenarios and the resilience suite
+# (features/ven_resilience.feature, run separately via `--tags=@resilience`)
+# flake under Node1 resource contention from whatever ran just before this
+# container started (a prior E2E/rust/UI section in the same run_all_tests.sh
+# invocation). Containers share the host kernel, so /proc/loadavg is the real
+# Node1 load. Wait for it to settle (1-min load < 2.0), capped at 8 minutes,
+# before any behave pass that hasn't already paid this cost this invocation.
+wait_for_load_to_settle() {
+  label="$1"
+  echo "=== Waiting for host load to settle before $label ==="
+  SETTLE_DEADLINE=$(( $(date +%s) + 480 ))
+  while :; do
+    LOAD1=$(cut -d' ' -f1 /proc/loadavg)
+    if [ "$(awk -v l="$LOAD1" 'BEGIN { print (l < 2.0) ? 1 : 0 }')" = "1" ]; then
+      echo "Host load settled at $LOAD1."
+      break
+    fi
+    if [ "$(date +%s)" -ge "$SETTLE_DEADLINE" ]; then
+      echo "Host load still $LOAD1 after 8 min — proceeding anyway."
+      break
+    fi
+    echo "  load $LOAD1 >= 2.0 — waiting 15 s"
+    sleep 15
+  done
+}
+
+wait_for_load_to_settle "main pass"
+
 # Run main suite first, excluding timing-sensitive @isolated scenarios.
 # Then run @isolated scenarios in a second pass so each gets a fresh VEN
 # state and is not affected by Node1 resource contention from prior scenarios.
@@ -41,27 +69,7 @@ python -m behave --tags=~@isolated --exclude "isolated" "$@"
 MAIN_EXIT=$?
 
 echo ""
-# The @isolated pass exists precisely because these scenarios are
-# timing-sensitive on Node1 — but starting them seconds after the ~40-minute
-# main suite defeats the purpose: the box is still busy (planner solves,
-# docker I/O) and their poll_until timeouts flake. Containers share the host
-# kernel, so /proc/loadavg is the real Node1 load. Wait for it to settle
-# (1-min load < 2.0), capped at 8 minutes.
-echo "=== Waiting for host load to settle before @isolated pass ==="
-SETTLE_DEADLINE=$(( $(date +%s) + 480 ))
-while :; do
-  LOAD1=$(cut -d' ' -f1 /proc/loadavg)
-  if [ "$(awk -v l="$LOAD1" 'BEGIN { print (l < 2.0) ? 1 : 0 }')" = "1" ]; then
-    echo "Host load settled at $LOAD1."
-    break
-  fi
-  if [ "$(date +%s)" -ge "$SETTLE_DEADLINE" ]; then
-    echo "Host load still $LOAD1 after 8 min — proceeding anyway."
-    break
-  fi
-  echo "  load $LOAD1 >= 2.0 — waiting 15 s"
-  sleep 15
-done
+wait_for_load_to_settle "@isolated pass"
 
 echo "=== Running @isolated scenarios (fresh VEN state) ==="
 # Point directly at the dedicated isolated/ subdirectory. Every scenario in
