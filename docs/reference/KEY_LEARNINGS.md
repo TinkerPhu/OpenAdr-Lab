@@ -866,3 +866,19 @@ outes/sim.rs causes a T1+T2 double-solve race:
   Rust service using `tokio::signal::ctrl_c()` alone for graceful shutdown** — it works
   perfectly under `Ctrl+C` in a dev terminal, which is exactly the scenario least likely to
   ever run in production, masking the gap until a docker-orchestrated restart exposes it.
+- **Round 3 (2026-08-07, same day): a genuine `/sim/inject`-shaped PV step recurred on a
+  long-uptime container (up since 12:27Z, no restart), from the operator's own dev-laptop
+  IP but explicitly not a manual action — root cause still unresolved.** Mitigated with
+  defense-in-depth rather than a fix: a `simulator.sim_inject_enabled` profile flag
+  hard-disables the endpoint on production ven-1, and every caller (VEN UI, E2E `ven_post()`)
+  now self-tags a `source` field logged with the request, so the next occurrence (if the
+  endpoint is ever re-enabled) is traceable to a call site immediately.
+- **Redeploying a container to ship a fix mid-incident destroys that container's own log
+  evidence, with no way to recover it.** A second PV step happened during this same
+  investigation, before the fix was deployed — but redeploying (`docker compose up -d`
+  recreates the container) deleted the old container along with its `json-file` driver log,
+  and Node1 runs no log aggregator (only `telegraf` for metrics). The persisted
+  `/history/ticks` data survived and proved the step happened, but the HTTP-level
+  `peer`/`source` trace for that specific event is gone forever. **Always capture
+  `docker compose logs <service> > file` before any redeploy while actively investigating a
+  live incident**, even if the redeploy itself is the fix.
