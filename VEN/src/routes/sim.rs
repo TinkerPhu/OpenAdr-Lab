@@ -72,6 +72,13 @@ pub struct PostSimInjectBody {
     pub pv_generation_limit_kw: Option<Option<f64>>,
     #[serde(default, deserialize_with = "double_option")]
     pub pv_plan_kw: Option<Option<f64>>,
+    /// Self-reported caller identity (e.g. `"ven-ui:PvPanel"`, `"e2e:pv_irradiance.feature:42"`).
+    /// Not required, not validated, and not persisted in `SimInjectState` — purely a
+    /// diagnostic breadcrumb logged alongside `peer` so an unattributed inject can be
+    /// traced back to the call site that sent it (an HTTP boundary has no caller stack
+    /// trace of its own). Absent/unknown callers log as `"source": null`.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 /// Apply partial-merge: absent = no change, null = release (None), value = set.
@@ -231,7 +238,20 @@ pub async fn post_sim_inject(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(body): Json<PostSimInjectBody>,
 ) -> impl IntoResponse {
-    warn!(?peer, ?body, "POST /sim/inject");
+    if !ctx.sim_inject_enabled {
+        warn!(
+            ?peer,
+            source = ?body.source,
+            ?body,
+            "POST /sim/inject rejected: sim_inject_enabled=false"
+        );
+        return (
+            axum::http::StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "sim inject is disabled on this VEN"})),
+        )
+            .into_response();
+    }
+    warn!(?peer, source = ?body.source, ?body, "POST /sim/inject");
     // Trigger a replan only for fields the MILP planner uses as inputs.
     // base_load_kw / base_load_alpha are one-shot physics overrides for test
     // simulation — triggering a replan on them would race the BDD assertion window
@@ -256,7 +276,7 @@ pub async fn post_sim_inject(
     if should_replan {
         let _ = ctx.trigger_tx.send(PlanTrigger::AssetStateChange);
     }
-    axum::http::StatusCode::NO_CONTENT
+    axum::http::StatusCode::NO_CONTENT.into_response()
 }
 
 /// POST /plan/trigger — force an immediate MILP replan.
