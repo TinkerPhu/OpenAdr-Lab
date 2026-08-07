@@ -106,7 +106,13 @@ export function HistoryPage() {
       </Typography>
 
       <Typography variant="h6">Grid</Typography>
-      <TariffChart data={tariffPoints} nowMs={toMs} hoursBack={24} hoursForward={0} />
+      <TariffChart
+        data={tariffPoints}
+        nowMs={toMs}
+        hoursBack={24}
+        hoursForward={0}
+        xAxisTickIntervalMinutes={30}
+      />
 
       {[...ticksByAsset.entries()].map(([assetId, points]) => {
         const hasSoc = points.some((p) => p.values?.soc !== undefined);
@@ -125,6 +131,7 @@ export function HistoryPage() {
               stateKey={hasSoc ? "soc" : hasTemp ? "temp_c" : undefined}
               nearForecast={forecast?.filter((s) => s.lead_kind === "near")}
               farForecast={forecast?.filter((s) => s.lead_kind === "far")}
+              xAxisTickIntervalMinutes={30}
             />
           </Box>
         );

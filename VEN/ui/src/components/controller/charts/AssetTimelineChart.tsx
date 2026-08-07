@@ -20,6 +20,7 @@ import {
   MIN_CO2_RATE_SPAN_G_H,
   MIN_POWER_SPAN_KW,
   formatPowerTick,
+  roundedTimeTicks,
 } from "./axisDomain";
 
 interface AssetTimelineChartProps {
@@ -45,6 +46,10 @@ interface AssetTimelineChartProps {
   nearForecast?: ForecastAccuracySample[];
   /** Same as `nearForecast`, but the far-lead (`slots.last()`) sample. */
   farForecast?: ForecastAccuracySample[];
+  /** X-axis ticks every N minutes, snapped to the wall-clock (10:00, 10:30, ...) instead of
+   * recharts' default "nice" ticks. History page only — Controller's real-time cells keep the
+   * default behavior. */
+  xAxisTickIntervalMinutes?: number;
 }
 
 function formatTs(ts: number) {
@@ -153,10 +158,14 @@ export function AssetTimelineChart({
   minPowerSpanKw = MIN_POWER_SPAN_KW,
   nearForecast,
   farForecast,
+  xAxisTickIntervalMinutes,
 }: AssetTimelineChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes.
   const tMin = nowMs - hoursBack * 3_600_000;
   const tMax = nowMs + hoursForward * 3_600_000;
+  const xAxisTicks = xAxisTickIntervalMinutes
+    ? roundedTimeTicks(tMin, tMax, xAxisTickIntervalMinutes)
+    : undefined;
 
   // Ensure at least a 2-point range so recharts can compute the X scale and render the
   // NOW reference line even when there are no data points yet.
@@ -217,6 +226,7 @@ export function AssetTimelineChart({
           scale="time"
           type="number"
           domain={[tMin, tMax]}
+          ticks={xAxisTicks}
           tickFormatter={formatTs}
           tick={{ fontSize: 10 }}
         />
