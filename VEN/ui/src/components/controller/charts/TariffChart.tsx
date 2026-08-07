@@ -14,7 +14,7 @@ import {
 import type { TariffTimePoint } from "../types";
 import { COLOR_NOW } from "../types";
 import type { ZoneDef } from "../../../api/types";
-import { minSpanDomain, MIN_CO2_RATE_SPAN_G_H } from "./axisDomain";
+import { minSpanDomain, MIN_CO2_RATE_SPAN_G_H, roundedTimeTicks } from "./axisDomain";
 
 const COLOR_IMPORT_TARIFF = "#f44336";
 const COLOR_EXPORT_TARIFF = "#4caf50";
@@ -28,17 +28,32 @@ interface TariffChartProps {
   hoursForward?: number;
   height?: number;
   zones?: ZoneDef[];
+  /** X-axis ticks every N minutes, snapped to the wall-clock (10:00, 10:30, ...) instead of
+   * recharts' default "nice" ticks. History page only — Controller's real-time cells keep the
+   * default behavior. */
+  xAxisTickIntervalMinutes?: number;
 }
 
 function formatTs(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, height, zones }: TariffChartProps) {
+export function TariffChart({
+  data,
+  nowMs,
+  hoursBack = 1.0,
+  hoursForward = 1.0,
+  height,
+  zones,
+  xAxisTickIntervalMinutes,
+}: TariffChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable and ensures the
   // NOW reference line is always visible even when past tariff data is absent.
   const tMin = nowMs - hoursBack * 3_600_000;
   const tMax = nowMs + hoursForward * 3_600_000;
+  const xAxisTicks = xAxisTickIntervalMinutes
+    ? roundedTimeTicks(tMin, tMax, xAxisTickIntervalMinutes)
+    : undefined;
 
   // Clip data to [tMin, tMax]. recharts does not clip rendered data to the XAxis domain —
   // without this the chart auto-scales to the full data extent (e.g. 6×24h from /tariffs).
@@ -101,6 +116,7 @@ export function TariffChart({ data, nowMs, hoursBack = 1.0, hoursForward = 1.0, 
             scale="time"
             type="number"
             domain={[tMin, tMax]}
+            ticks={xAxisTicks}
             tickFormatter={formatTs}
             tick={{ fontSize: 10 }}
           />

@@ -9,9 +9,10 @@ import { render } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
-const { referenceAreas, lines } = vi.hoisted(() => ({
+const { referenceAreas, lines, xAxes } = vi.hoisted(() => ({
   referenceAreas: [] as Array<Record<string, unknown>>,
   lines: [] as Array<Record<string, unknown>>,
+  xAxes: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("recharts", () => ({
@@ -26,7 +27,10 @@ vi.mock("recharts", () => ({
     referenceAreas.push(props);
     return null;
   },
-  XAxis: () => null,
+  XAxis: (props: Record<string, unknown>) => {
+    xAxes.push(props);
+    return null;
+  },
   CartesianGrid: () => null,
   Tooltip: () => null,
   Legend: () => null,
@@ -215,5 +219,28 @@ describe("AssetTimelineChart — near/far forecast overlay", () => {
     const names = lines.map((l) => l.name);
     expect(names).not.toContain("Forecast (near) [kW]");
     expect(names).not.toContain("Forecast (far) [kW]");
+  });
+});
+
+describe("AssetTimelineChart — X-axis tick rounding", () => {
+  beforeEach(() => {
+    xAxes.length = 0;
+  });
+
+  it("leaves ticks undefined (recharts default) when xAxisTickIntervalMinutes is omitted", () => {
+    const data = [point(-1 * minute, { power_kw: -3.0 })];
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} />);
+    expect(xAxes[0].ticks).toBeUndefined();
+  });
+
+  it("passes rounded-clock ticks when xAxisTickIntervalMinutes is set", () => {
+    const data = [point(-1 * minute, { power_kw: -3.0 })];
+    render(
+      <AssetTimelineChart data={data} color="#000" nowMs={now} xAxisTickIntervalMinutes={30} />
+    );
+    expect(Array.isArray(xAxes[0].ticks)).toBe(true);
+    for (const t of xAxes[0].ticks as number[]) {
+      expect(new Date(t).getUTCMinutes() % 30).toBe(0);
+    }
   });
 });

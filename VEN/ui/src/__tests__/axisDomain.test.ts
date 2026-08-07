@@ -3,6 +3,7 @@ import {
   minSpanDomain,
   MIN_POWER_SPAN_KW,
   formatPowerTick,
+  roundedTimeTicks,
 } from "../components/controller/charts/axisDomain";
 
 describe("minSpanDomain", () => {
@@ -84,5 +85,39 @@ describe("formatPowerTick", () => {
     expect(formatPowerTick(2.345)).toBe("2.35 kW");
     expect(formatPowerTick(-4.4)).toBe("-4.40 kW");
     expect(formatPowerTick(1)).toBe("1.00 kW");
+  });
+});
+
+describe("roundedTimeTicks", () => {
+  it("snaps ticks to the wall-clock, not to the domain's own (arbitrary) start offset", () => {
+    // Domain starts 9 minutes past the hour — ticks must still land on :00/:30, not :09/:39.
+    const from = Date.UTC(2026, 0, 1, 10, 9, 0);
+    const to = Date.UTC(2026, 0, 1, 12, 9, 0);
+    const ticks = roundedTimeTicks(from, to, 30);
+    const labels = ticks.map((t) => new Date(t).toISOString().slice(11, 16));
+    expect(labels).toEqual(["10:30", "11:00", "11:30", "12:00"]);
+  });
+
+  it("defaults to a 30-minute interval", () => {
+    const from = Date.UTC(2026, 0, 1, 10, 0, 0);
+    const to = Date.UTC(2026, 0, 1, 11, 0, 0);
+    expect(roundedTimeTicks(from, to)).toEqual([
+      Date.UTC(2026, 0, 1, 10, 0, 0),
+      Date.UTC(2026, 0, 1, 10, 30, 0),
+      Date.UTC(2026, 0, 1, 11, 0, 0),
+    ]);
+  });
+
+  it("honors a custom interval", () => {
+    const from = Date.UTC(2026, 0, 1, 10, 0, 0);
+    const to = Date.UTC(2026, 0, 1, 11, 0, 0);
+    const ticks = roundedTimeTicks(from, to, 15);
+    expect(ticks).toHaveLength(5);
+  });
+
+  it("returns an empty array when the window is narrower than the interval", () => {
+    const from = Date.UTC(2026, 0, 1, 10, 5, 0);
+    const to = Date.UTC(2026, 0, 1, 10, 10, 0);
+    expect(roundedTimeTicks(from, to, 30)).toEqual([]);
   });
 });
