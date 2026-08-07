@@ -94,4 +94,5 @@
 - [x] 8.2 `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings` — clean
 - [x] 8.3 `scripts/audit_file_sizes.py` — passed
 - [x] 8.4 VEN UI unit tests + `npm run build` — 443/443 passing, build + eslint clean
-- [ ] 8.5 Node1 E2E + resilience suites green (docker_host_lock) before merge
+- [x] 8.5 E2E + resilience suites green (docker_host_lock) before merge — run on Node2:
+      264/264 E2E scenarios (1496/1496 steps) and 5/5 resilience scenarios passed
