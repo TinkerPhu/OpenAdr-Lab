@@ -67,3 +67,77 @@ pub struct LedgerPeriod {
     pub cost_eur: f64,
     pub co2_kg: f64,
 }
+
+/// Lead-time bucket for a persisted forecast sample. `Near` = the plan's `slots[1]` (the closest
+/// genuinely-future instant — `slots[0]` is what's currently being commanded, not a forecast
+/// about to be tested); `Far` = `slots.last()`, the longest-lead prediction the current horizon
+/// reaches. See `openspec/changes/forecast-accuracy-tracking/design.md` Decisions 1-2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ForecastLeadKind {
+    Near,
+    Far,
+}
+
+impl std::fmt::Display for ForecastLeadKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ForecastLeadKind::Near => "near",
+            ForecastLeadKind::Far => "far",
+        })
+    }
+}
+
+impl std::str::FromStr for ForecastLeadKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "near" => Ok(ForecastLeadKind::Near),
+            "far" => Ok(ForecastLeadKind::Far),
+            other => Err(format!(
+                "invalid lead_kind '{other}': expected 'near' or 'far'"
+            )),
+        }
+    }
+}
+
+/// One forecast made for `target_ts`, recorded at `predicted_at` (the plan cycle that produced
+/// it). `actual_kw`/`actual_at` start `None` and are filled in once `history_sampler` flushes a
+/// downsampled window covering `target_ts` (`forecast-accuracy-tracking`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForecastAccuracySample {
+    pub asset_id: String,
+    pub lead_kind: ForecastLeadKind,
+    pub target_ts: DateTime<Utc>,
+    pub predicted_kw: f64,
+    pub predicted_at: DateTime<Utc>,
+    pub actual_kw: Option<f64>,
+    pub actual_at: Option<DateTime<Utc>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn forecast_lead_kind_round_trips_through_its_string_form() {
+        assert_eq!(ForecastLeadKind::Near.to_string(), "near");
+        assert_eq!(ForecastLeadKind::Far.to_string(), "far");
+        assert_eq!(
+            ForecastLeadKind::from_str("near").unwrap(),
+            ForecastLeadKind::Near
+        );
+        assert_eq!(
+            ForecastLeadKind::from_str("far").unwrap(),
+            ForecastLeadKind::Far
+        );
+    }
+
+    #[test]
+    fn forecast_lead_kind_rejects_an_invalid_string() {
+        assert!(ForecastLeadKind::from_str("soon").is_err());
+        assert!(ForecastLeadKind::from_str("").is_err());
+    }
+}

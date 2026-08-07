@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import type { AssetTimelinePoint } from "../types";
 import { COLOR_NOW } from "../types";
-import type { ZoneDef } from "../../../api/types";
+import type { ZoneDef, ForecastAccuracySample } from "../../../api/types";
 import {
   minSpanDomain,
   MIN_COST_RATE_SPAN_EUR_H,
@@ -39,6 +39,12 @@ interface AssetTimelineChartProps {
    * to that 1 W floor for every caller (Controller and History tabs both render through this one
    * component); override only for a chart that genuinely needs a different floor. */
   minPowerSpanKw?: number;
+  /** forecast-accuracy-tracking: the plan's near-lead (`slots[1]`) forecast sample for this
+   * asset from each plan cycle, overlaid on the power axis alongside the actual line. History
+   * page only — pass for the PV, base_load, and site-residual cells. */
+  nearForecast?: ForecastAccuracySample[];
+  /** Same as `nearForecast`, but the far-lead (`slots.last()`) sample. */
+  farForecast?: ForecastAccuracySample[];
 }
 
 function formatTs(ts: number) {
@@ -145,6 +151,8 @@ export function AssetTimelineChart({
   zones,
   pvCurtailment,
   minPowerSpanKw = MIN_POWER_SPAN_KW,
+  nearForecast,
+  farForecast,
 }: AssetTimelineChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes.
   const tMin = nowMs - hoursBack * 3_600_000;
@@ -180,8 +188,23 @@ export function AssetTimelineChart({
 
   const curtailmentZones = pvCurtailment ? buildCurtailmentZones(chartData) : [];
 
+  // forecast-accuracy-tracking: each sample's own target_ts, not chartData's ts grid —
+  // recharts' per-Line `data` override handles the mismatched x-values.
+  const nearForecastPoints = (nearForecast ?? []).map((s) => ({
+    ts: s.target_ts,
+    predicted_kw: s.predicted_kw,
+  }));
+  const farForecastPoints = (farForecast ?? []).map((s) => ({
+    ts: s.target_ts,
+    predicted_kw: s.predicted_kw,
+  }));
+
   const powerDomain = minSpanDomain(
-    chartData.map((p) => p.values?.["power_kw"] ?? null),
+    [
+      ...chartData.map((p) => p.values?.["power_kw"] ?? null),
+      ...nearForecastPoints.map((p) => p.predicted_kw),
+      ...farForecastPoints.map((p) => p.predicted_kw),
+    ],
     minPowerSpanKw
   );
 
@@ -257,6 +280,41 @@ export function AssetTimelineChart({
           connectNulls={false}
           isAnimationActive={false}
         />
+
+        {/* forecast-accuracy-tracking: near/far forecast overlay — visually distinct from the
+            actual Power line above (thin, dotted, muted) and from each other (dash pattern). */}
+        {nearForecastPoints.length > 0 && (
+          <Line
+            yAxisId="power"
+            data={nearForecastPoints}
+            type="monotone"
+            dataKey="predicted_kw"
+            name="Forecast (near) [kW]"
+            stroke={color}
+            strokeWidth={1}
+            strokeOpacity={0.6}
+            strokeDasharray="2 3"
+            dot={false}
+            connectNulls={false}
+            isAnimationActive={false}
+          />
+        )}
+        {farForecastPoints.length > 0 && (
+          <Line
+            yAxisId="power"
+            data={farForecastPoints}
+            type="monotone"
+            dataKey="predicted_kw"
+            name="Forecast (far) [kW]"
+            stroke={color}
+            strokeWidth={1}
+            strokeOpacity={0.6}
+            strokeDasharray="6 3"
+            dot={false}
+            connectNulls={false}
+            isAnimationActive={false}
+          />
+        )}
 
         {/* Cost rate — dashed, right axis */}
         <Line

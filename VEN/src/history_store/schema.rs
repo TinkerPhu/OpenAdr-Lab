@@ -1,7 +1,7 @@
 //! Versioned DDL for the history SQLite store, applied stepwise via
 //! `PRAGMA user_version` in `history_store::migrate`.
 
-pub(super) const SCHEMA_VERSION: i64 = 7;
+pub(super) const SCHEMA_VERSION: i64 = 8;
 
 pub(super) const SCHEMA_V1: &str = "
 CREATE TABLE tick_samples (
@@ -117,8 +117,24 @@ ALTER TABLE tick_samples RENAME COLUMN export_limit_kw TO generation_limit_kw;
 /// R-63: plan_snapshots was dead code — its only writer (`append_plan_snapshot`) was never
 /// called from any production path (only unit tests and the mock port), so `GET /history/plans`
 /// and the VEN UI's "Plans" panel were permanently, silently empty. No replacement mechanism —
-/// see docs/plans/forecast-accuracy-idea.md for a candidate future consumer that explicitly
-/// considered and rejected reviving this table for its own purposes.
+/// see `openspec/changes/forecast-accuracy-tracking/` (SCHEMA_V8 below) for a later, narrower
+/// mechanism that explicitly considered and rejected reviving this table for its own purposes.
 pub(super) const SCHEMA_V7: &str = "
 DROP TABLE plan_snapshots;
+";
+
+/// forecast-accuracy-tracking: near/far forecast samples for PV, base_load, and site-residual,
+/// reconciled with the real value once `target_ts` elapses. `actual_kw`/`actual_at` start NULL
+/// and are filled in by `history_sampler`'s per-minute flush — see design.md Decision 4.
+pub(super) const SCHEMA_V8: &str = "
+CREATE TABLE forecast_accuracy_samples (
+    asset_id TEXT NOT NULL,
+    lead_kind TEXT NOT NULL,
+    target_ts INTEGER NOT NULL,
+    predicted_kw REAL NOT NULL,
+    predicted_at INTEGER NOT NULL,
+    actual_kw REAL,
+    actual_at INTEGER
+);
+CREATE INDEX idx_forecast_accuracy_target ON forecast_accuracy_samples(asset_id, target_ts);
 ";

@@ -2,11 +2,18 @@ import { useMemo, useState } from "react";
 import {
   Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
-import { useHistoryTicks, useHistoryGrid, useHistoryEvents, useHistoryReports } from "../api/hooks";
+import {
+  useHistoryTicks, useHistoryGrid, useHistoryEvents, useHistoryReports, useHistoryForecastAccuracy,
+} from "../api/hooks";
 import { AssetTimelineChart } from "../components/controller/charts/AssetTimelineChart";
 import { TariffChart } from "../components/controller/charts/TariffChart";
 import { ASSET_COLORS, ASSET_LABELS } from "../components/controller/types";
 import type { AssetTimelinePoint, TariffTimePoint } from "../components/controller/types";
+import type { ForecastAccuracySample } from "../api/types";
+
+/** forecast-accuracy-tracking: only these three assets get near/far forecast samples
+ * recorded (see design.md Decision 5) — same set `record_forecast_accuracy_samples` writes. */
+const FORECAST_TRACKED_ASSETS = ["pv", "base_load", "site-residual"] as const;
 
 /** [from, to) ISO bounds for the UTC calendar day `dateStr` ("YYYY-MM-DD"). */
 export function dayRangeIso(dateStr: string): { fromIso: string; toIso: string } {
@@ -33,6 +40,19 @@ export function HistoryPage() {
   const { data: grid = [] } = useHistoryGrid(fromIso, toIso);
   const { data: events = [] } = useHistoryEvents(fromIso, toIso);
   const { data: reports = [] } = useHistoryReports(fromIso, toIso);
+  // Rules of hooks — fixed set, so called unconditionally rather than in the render loop below.
+  const { data: pvForecast = [] } = useHistoryForecastAccuracy(fromIso, toIso, "pv");
+  const { data: baseLoadForecast = [] } = useHistoryForecastAccuracy(fromIso, toIso, "base_load");
+  const { data: siteResidualForecast = [] } = useHistoryForecastAccuracy(
+    fromIso,
+    toIso,
+    "site-residual"
+  );
+  const forecastByAsset: Record<string, ForecastAccuracySample[]> = {
+    pv: pvForecast,
+    base_load: baseLoadForecast,
+    "site-residual": siteResidualForecast,
+  };
 
   const ticksByAsset = useMemo(() => {
     const map = new Map<string, AssetTimelinePoint[]>();
@@ -91,6 +111,8 @@ export function HistoryPage() {
       {[...ticksByAsset.entries()].map(([assetId, points]) => {
         const hasSoc = points.some((p) => p.values?.soc !== undefined);
         const hasTemp = points.some((p) => p.values?.temp_c !== undefined);
+        const isForecastTracked = (FORECAST_TRACKED_ASSETS as readonly string[]).includes(assetId);
+        const forecast = isForecastTracked ? forecastByAsset[assetId] : undefined;
         return (
           <Box key={assetId} sx={{ mt: 2 }} data-testid={`history-asset-chart-${assetId}`}>
             <Typography variant="subtitle1">{ASSET_LABELS[assetId] ?? assetId}</Typography>
@@ -101,6 +123,8 @@ export function HistoryPage() {
               hoursBack={24}
               hoursForward={0}
               stateKey={hasSoc ? "soc" : hasTemp ? "temp_c" : undefined}
+              nearForecast={forecast?.filter((s) => s.lead_kind === "near")}
+              farForecast={forecast?.filter((s) => s.lead_kind === "far")}
             />
           </Box>
         );

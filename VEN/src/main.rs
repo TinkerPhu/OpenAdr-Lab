@@ -383,7 +383,7 @@ async fn main() -> anyhow::Result<()> {
     let active_objective = Arc::new(RwLock::new(planner_params.objective));
     let weather_pv_params = profile.weather_pv_params();
     {
-        let (s, pp, gmax_i, gmax_e, ap, sv, rx, sim, ao, etx, nf, wp, wpp) = (
+        let (s, pp, gmax_i, gmax_e, ap, sv, rx, sim, ao, etx, nf, wp, wpp, hp) = (
             state.clone(),
             planner_params.clone(),
             grid_max_import_kw,
@@ -397,6 +397,7 @@ async fn main() -> anyhow::Result<()> {
             notifier.clone(),
             weather_port.clone(),
             weather_pv_params,
+            history_port.clone(),
         );
         tasks::supervised_spawn("planning", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_planning(
@@ -414,6 +415,7 @@ async fn main() -> anyhow::Result<()> {
                 chrono::Utc::now,
                 wp.clone(),
                 wpp,
+                hp.clone(),
             )
         });
     }

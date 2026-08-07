@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::info;
 
-use crate::controller::{SolverPort, WeatherForecastPort};
+use crate::controller::{HistoryPort, SolverPort, WeatherForecastPort};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::asset_params::{AssetParams, PvForecastParams};
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
@@ -46,6 +46,7 @@ pub(super) async fn run_plan_cycle(
     trigger_reason: &str,
     wall_now: DateTime<Utc>,
     now: DateTime<Utc>,
+    history: Option<Arc<dyn HistoryPort>>,
 ) {
     let rates = state.planned_tariffs().await;
     let capacity = state.capacity_state().await;
@@ -199,6 +200,7 @@ pub(super) async fn run_plan_cycle(
         &cycle,
         weather,
         weather_pv_params,
+        history,
     )
     .await;
 

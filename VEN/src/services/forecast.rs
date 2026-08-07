@@ -7,9 +7,10 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::controller::simulator_port::SimSnapshot;
-use crate::controller::WeatherForecastPort;
+use crate::controller::{HistoryPort, WeatherForecastPort};
 use crate::entities::asset_params::PvForecastParams;
 use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics, ForecastSource};
+use crate::entities::history::{ForecastAccuracySample, ForecastLeadKind};
 use crate::entities::plan::Plan;
 use crate::entities::weather::WeatherForecast;
 use crate::state::AppState;
@@ -27,6 +28,7 @@ pub async fn finish_plan_cycle(
     cycle: &crate::services::planning::PlanCycleResult,
     weather: &Arc<dyn WeatherForecastPort>,
     weather_pv_params: Option<&PvForecastParams>,
+    history: Option<Arc<dyn HistoryPort>>,
 ) {
     crate::services::notify::notify_new_plan_warnings(
         notifier,
@@ -47,6 +49,73 @@ pub async fn finish_plan_cycle(
         weather_pv_params,
     )
     .await;
+
+    // forecast-accuracy-tracking: best-effort write, log-and-continue on failure — same
+    // pattern as history_sampler::write_window. Skipped entirely when history is disabled.
+    if let Some(history) = history {
+        let heuristics = state.asset_heuristics().await;
+        let samples = record_forecast_accuracy_samples(&cycle.plan, &heuristics, wall_now);
+        if !samples.is_empty() {
+            let res =
+                tokio::task::spawn_blocking(move || history.append_forecast_samples(&samples))
+                    .await;
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::warn!("forecast-accuracy sample write failed: {e}"),
+                Err(e) => tracing::warn!("forecast-accuracy sample write task panicked: {e}"),
+            }
+        }
+    }
+}
+
+/// forecast-accuracy-tracking: build the plan's near (`slots[1]`) and far (`slots.last()`)
+/// forecast samples for PV, base_load, and site-residual. No-op for plans with fewer than two
+/// slots — `slots[1]` wouldn't exist yet. See design.md Decisions 1-3.
+pub fn record_forecast_accuracy_samples(
+    plan: &Plan,
+    heuristics: &HashMap<String, AssetHeuristics>,
+    now: DateTime<Utc>,
+) -> Vec<ForecastAccuracySample> {
+    if plan.slots.len() < 2 {
+        return Vec::new();
+    }
+    let Some(far_slot) = plan.slots.last() else {
+        return Vec::new();
+    };
+    let near_slot = &plan.slots[1];
+
+    let mut out = Vec::new();
+    for (lead_kind, slot) in [
+        (ForecastLeadKind::Near, near_slot),
+        (ForecastLeadKind::Far, far_slot),
+    ] {
+        out.push(ForecastAccuracySample {
+            asset_id: crate::ids::ASSET_PV.to_string(),
+            lead_kind,
+            target_ts: slot.start,
+            predicted_kw: slot.pv_forecast_kw,
+            predicted_at: now,
+            actual_kw: None,
+            actual_at: None,
+        });
+        for asset_id in [
+            crate::ids::ASSET_BASE_LOAD,
+            crate::controller::residual::SITE_RESIDUAL_ASSET_ID,
+        ] {
+            if let Some(h) = heuristics.get(asset_id) {
+                out.push(ForecastAccuracySample {
+                    asset_id: asset_id.to_string(),
+                    lead_kind,
+                    target_ts: slot.start,
+                    predicted_kw: h.sample_kw(slot.start),
+                    predicted_at: now,
+                    actual_kw: None,
+                    actual_at: None,
+                });
+            }
+        }
+    }
+    out
 }
 
 /// Post-plan-cycle state publication: site flexibility envelope and per-asset
@@ -544,5 +613,85 @@ mod tests {
         let af = build_weather_pv_forecast(&forecast, &params, ts(0));
         assert_eq!(af.confidence, 0.0);
         assert!(af.power_kw.is_empty());
+    }
+
+    // ── record_forecast_accuracy_samples (forecast-accuracy-tracking, task 3.3) ────
+
+    fn slot_with_pv(idx: usize, pv_forecast_kw: f64) -> PlanTimeSlot {
+        let mut s = slot(idx, &[], &[]);
+        s.pv_forecast_kw = pv_forecast_kw;
+        s
+    }
+
+    fn base_load_heuristic() -> AssetHeuristics {
+        AssetHeuristics {
+            asset_id: crate::ids::ASSET_BASE_LOAD.to_string(),
+            daytime_profile_kw: [vec![0.7; 24], vec![0.7; 24]],
+            seasonal_factor: 1.0,
+            last_updated: Some(ts(0)),
+        }
+    }
+
+    #[test]
+    fn record_forecast_accuracy_samples_two_slot_plan_yields_six_samples() {
+        let plan = make_plan_with_slots(vec![slot_with_pv(0, -1.0), slot_with_pv(1, -2.0)]);
+        let mut heuristics = HashMap::new();
+        heuristics.insert(
+            crate::ids::ASSET_BASE_LOAD.to_string(),
+            base_load_heuristic(),
+        );
+        heuristics.insert(
+            crate::controller::residual::SITE_RESIDUAL_ASSET_ID.to_string(),
+            AssetHeuristics {
+                asset_id: crate::controller::residual::SITE_RESIDUAL_ASSET_ID.to_string(),
+                ..base_load_heuristic()
+            },
+        );
+
+        let samples = record_forecast_accuracy_samples(&plan, &heuristics, ts(0));
+        assert_eq!(samples.len(), 6, "3 assets x 2 lead kinds (near, far)");
+    }
+
+    #[test]
+    fn record_forecast_accuracy_samples_single_slot_plan_yields_zero() {
+        let plan = make_plan_with_slots(vec![slot_with_pv(0, -1.0)]);
+        let samples = record_forecast_accuracy_samples(&plan, &HashMap::new(), ts(0));
+        assert!(samples.is_empty());
+    }
+
+    #[test]
+    fn record_forecast_accuracy_samples_near_point_never_uses_slot_zero() {
+        // slots[0] and slots[1] deliberately carry different pv_forecast_kw — the near
+        // sample must come from slots[1], never slots[0].
+        let plan = make_plan_with_slots(vec![slot_with_pv(0, -99.0), slot_with_pv(1, -2.0)]);
+        let samples = record_forecast_accuracy_samples(&plan, &HashMap::new(), ts(0));
+        let near_pv = samples
+            .iter()
+            .find(|s| s.asset_id == crate::ids::ASSET_PV && s.lead_kind == ForecastLeadKind::Near)
+            .unwrap();
+        assert_eq!(near_pv.predicted_kw, -2.0);
+        assert_eq!(near_pv.target_ts, ts(300));
+    }
+
+    #[test]
+    fn record_forecast_accuracy_samples_missing_heuristic_omits_only_that_asset() {
+        let plan = make_plan_with_slots(vec![slot_with_pv(0, -1.0), slot_with_pv(1, -2.0)]);
+        let mut heuristics = HashMap::new();
+        heuristics.insert(
+            crate::ids::ASSET_BASE_LOAD.to_string(),
+            base_load_heuristic(),
+        );
+        // No site-residual heuristic present.
+
+        let samples = record_forecast_accuracy_samples(&plan, &heuristics, ts(0));
+        // PV (2) + base_load (2) = 4; site-residual omitted entirely.
+        assert_eq!(samples.len(), 4);
+        assert!(samples
+            .iter()
+            .all(|s| s.asset_id != crate::controller::residual::SITE_RESIDUAL_ASSET_ID));
+        assert!(samples.iter().any(|s| s.asset_id == crate::ids::ASSET_PV));
+        assert!(samples
+            .iter()
+            .any(|s| s.asset_id == crate::ids::ASSET_BASE_LOAD));
     }
 }

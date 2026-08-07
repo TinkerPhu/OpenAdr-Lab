@@ -25,6 +25,11 @@ use crate::entities::DomainError;
 use crate::simulator::SimState;
 use crate::state::AppState;
 
+/// Width of each flushed downsample window — matches `accumulator.rs`'s fixed 1-minute
+/// bucketing (`now.timestamp() / 60`). Also the window `reconcile_forecast_actuals`
+/// (forecast-accuracy-tracking) matches an open forecast sample's `target_ts` against.
+const DOWNSAMPLE_WINDOW_S: i64 = 60;
+
 /// Append a flushed window through the (blocking) `HistoryPort`, logging and
 /// continuing on failure — history writes must never block or crash the
 /// control loop. 030: a `StorageError` additionally raises one deduplicated
@@ -40,7 +45,10 @@ async fn write_window(
 ) {
     let res = tokio::task::spawn_blocking(move || {
         history.append_tick_samples(&ticks)?;
-        history.append_grid_sample(&grid)
+        history.append_grid_sample(&grid)?;
+        // forecast-accuracy-tracking: reconcile any open forecast sample whose target_ts
+        // just elapsed inside this flushed window — see design.md Decision 4.
+        history.reconcile_forecast_actuals(&ticks, DOWNSAMPLE_WINDOW_S)
     })
     .await;
     match res {
@@ -377,5 +385,39 @@ mod tests {
         write_window(history.clone(), &notifier, &state, ts(0), ticks, grid).await;
         assert!(state.notifications_since(None).await.is_empty());
         assert_eq!(history.appended_ticks().len(), 1);
+    }
+
+    // forecast-accuracy-tracking (4.2): a flushed window reconciles any open forecast
+    // sample for the same asset whose target_ts falls inside it.
+    #[tokio::test]
+    async fn write_window_reconciles_open_forecast_sample_in_flushed_window() {
+        use crate::entities::history::{ForecastAccuracySample, ForecastLeadKind};
+        use crate::services::test_support::mock_history_port::MockHistoryPort;
+        let history = Arc::new(MockHistoryPort::new());
+        history
+            .append_forecast_samples(&[ForecastAccuracySample {
+                asset_id: "ev".into(),
+                lead_kind: ForecastLeadKind::Near,
+                target_ts: ts(0),
+                predicted_kw: 3.0,
+                predicted_at: ts(0),
+                actual_kw: None,
+                actual_at: None,
+            }])
+            .unwrap();
+        let state = AppState::new();
+        let notifier = crate::services::notify::Notifier::new(None);
+        let (ticks, grid) = sample_window();
+
+        write_window(history.clone(), &notifier, &state, ts(0), ticks, grid).await;
+
+        let rows = history
+            .query_forecast_accuracy(ts(-1), ts(1), None, None)
+            .unwrap();
+        assert_eq!(
+            rows[0].actual_kw,
+            Some(1.0),
+            "sample_window's ev tick is 1.0 kW"
+        );
     }
 }

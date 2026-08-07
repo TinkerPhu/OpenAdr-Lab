@@ -46,6 +46,21 @@ Feature: Persistent history routes (Phase 1, WP1.4)
     Then the response status is 400
 
   @history
+  Scenario: GET /history/forecast-accuracy returns a JSON array within the default range
+    When I GET /history/forecast-accuracy from the VEN
+    Then the response status is 200
+
+  @history
+  Scenario: GET /history/forecast-accuracy filtered by asset_id and lead_kind returns a JSON array
+    When I GET /history/forecast-accuracy?asset_id=pv&lead_kind=near from the VEN
+    Then the response status is 200
+
+  @history
+  Scenario: GET /history/forecast-accuracy with an invalid lead_kind is rejected
+    When I GET /history/forecast-accuracy?lead_kind=soon from the VEN
+    Then the response status is 400
+
+  @history
   Scenario: The live in-memory history route still resolves for a real asset id
     When I GET /history/ev from the VEN
     Then the response status is 200

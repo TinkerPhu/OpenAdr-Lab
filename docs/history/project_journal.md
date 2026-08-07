@@ -7820,3 +7820,48 @@ endpoint is disabled, the culprit is not going through the HTTP route at all,
 which would point at something restart-adjacent again — re-check the SIGTERM
 persistence path first.
 
+### Forecast Accuracy Tracking (openspec/changes/forecast-accuracy-tracking, 2026-08-07)
+
+Unparked from `docs/plans/forecast-accuracy-idea.md`: persist, every plan cycle, the plan's
+nearest- (`slots[1]`) and farthest-lead (`slots.last()`) forecast for PV, base_load, and
+site-residual — the three assets already tagged `WeatherModel`/`Heuristic` (not
+`Optimization`) in the live `/forecast` API — then reconcile each against the real value once
+its `target_ts` elapses, and expose both series for query and UI overlay.
+
+**Design** (fully resolved before implementation, see the change's `design.md`): no fixed
+canonical grid across the horizon — each row's `target_ts` is just the current plan's own
+slot-1/slot-last start time, so write volume is a flat 6 rows/cycle (3 assets × 2 points) with
+no cross-cycle grid alignment needed. `slots[0]` is deliberately skipped for "near" (it's the
+window currently being commanded, not a forecast about to be tested — the same objection that
+killed the parked idea's rejected nowcast design). Reconciliation piggybacks on
+`history_sampler`'s existing 1-minute flush (`write_window` → `reconcile_forecast_actuals`) —
+no new background task or polling.
+
+**What changed**: new `forecast_accuracy_samples` table (schema v8) via
+`history_store/forecast_accuracy.rs`; `HistoryPort` gained `append_forecast_samples` /
+`reconcile_forecast_actuals` / `query_forecast_accuracy` (default no-ops, so existing
+history-less test doubles keep compiling); `services::forecast::finish_plan_cycle` gained a
+best-effort capture step (`record_forecast_accuracy_samples`), which required threading
+`Option<Arc<dyn HistoryPort>>` down through `spawn_planning` → `run_plan_cycle` →
+`finish_plan_cycle` (it wasn't previously available at that call site — history was only wired
+into the sampler task before this); new `GET /history/forecast-accuracy` route; VEN UI got a
+`historyForecastAccuracy` client method/hook and two additional overlay `<Line>`s on
+`AssetTimelineChart` (near = fine dotted, far = coarse dashed, both using the chart's own
+`color` prop so they read as "this asset's forecast," not a competing series), wired into the
+History page for exactly the three tracked assets — a fixed set, so the three
+`useHistoryForecastAccuracy` calls are unconditional top-level hooks, not calls inside the
+per-asset render loop (rules of hooks).
+
+**Key learning**: `minSpanDomain`'s power-axis floor needed the new forecast points folded
+into its input array (`AssetTimelineChart.tsx`) — an overlay line's own value range isn't
+automatically included in a domain computed only from the base series, so a forecast spike
+outside the actual-power range would otherwise render clipped/off-chart.
+
+**Verification**: `wsl cargo test -p ven-app` 943/943 (up from 866), `cargo clippy
+--all-targets --all-features -- -D warnings` and `cargo fmt --check` clean,
+`scripts/audit_file_sizes.py` pass. VEN UI: 443/443 unit tests (up from 437), `npm run build`
+and eslint clean. BDD coverage added to `tests/features/ven_history.feature` (valid range,
+asset/lead_kind filter, invalid lead_kind → 400) rather than a hand-built `AppCtx` unit test,
+matching this route file's existing precedent (only `resolve_range` is unit-tested at the
+route layer; full route behavior is BDD-covered).
+

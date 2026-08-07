@@ -9,7 +9,9 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use std::str::FromStr;
 
+use crate::entities::history::ForecastLeadKind;
 use crate::AppCtx;
 
 /// Requests spanning more than this many days are rejected — bounds response size.
@@ -111,6 +113,53 @@ pub async fn get_history_ticks(
     let result =
         tokio::task::spawn_blocking(move || history.query_ticks(from, to, asset_id.as_deref()))
             .await;
+    match result {
+        Ok(Ok(rows)) => Json(rows).into_response(),
+        Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Err(e) => error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("task panicked: {e}"),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ForecastAccuracyParams {
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub asset_id: Option<String>,
+    pub lead_kind: Option<String>,
+}
+
+/// GET /history/forecast-accuracy?from=&to=&asset_id=&lead_kind= — near/far forecast samples
+/// (predicted, and actual once reconciled) in `[from, to)`, optionally filtered to one asset
+/// and/or lead kind. See `openspec/changes/forecast-accuracy-tracking/`.
+pub async fn get_history_forecast_accuracy(
+    State(ctx): State<AppCtx>,
+    Query(params): Query<ForecastAccuracyParams>,
+) -> impl IntoResponse {
+    let Some(history) = ctx.history.clone() else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "history store disabled");
+    };
+    let range_params = HistoryRangeParams {
+        from: params.from.clone(),
+        to: params.to.clone(),
+        asset_id: None,
+    };
+    let (from, to) = match resolve_range(&range_params) {
+        Ok(r) => r,
+        Err((status, msg)) => return error(status, msg),
+    };
+    let lead_kind = match params.lead_kind.as_deref().map(ForecastLeadKind::from_str) {
+        Some(Ok(k)) => Some(k),
+        Some(Err(msg)) => return error(StatusCode::BAD_REQUEST, msg),
+        None => None,
+    };
+    let asset_id = params.asset_id.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        history.query_forecast_accuracy(from, to, asset_id.as_deref(), lead_kind)
+    })
+    .await;
     match result {
         Ok(Ok(rows)) => Json(rows).into_response(),
         Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
