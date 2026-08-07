@@ -839,3 +839,30 @@ outes/sim.rs causes a T1+T2 double-solve race:
   `docs/architecture/real_measurement_mqtt.md`'s "Indirect path into the forecast" section)
   but worth remembering before treating a "converged" learned heuristic as trustworthy after
   any known outage window.
+
+## Container Restarts Masqueraded as Mystery PV Injections (ven-1, 2026-08-05 & 2026-08-07)
+
+- **A months-long "unexplained `/sim/inject` call" mystery on production ven-1 was never an
+  HTTP call at all.** Root cause: `main.rs`'s graceful-shutdown handler only listened for
+  `tokio::signal::ctrl_c()` (SIGINT). `docker stop` / `docker compose up -d` (container
+  recreate) send SIGTERM, which that handler never caught — so a routine redeploy never ran
+  the final `simulator::persist::save()`, leaving `state.json` up to `persist_every_s` (15s
+  for ven-1) stale relative to the continuously-decaying `PvSmoothingState.irradiance_offset`.
+  Reloading that stale, larger-magnitude offset on the next start produced an instant step in
+  `pv.power_kw` indistinguishable from a fresh external inject — same signature (single-tick
+  step, ~40min decay per `pv_alpha=0.1`) as a real `/sim/inject` call.
+  Confirmed by directly correlating a `/history/ticks` jump timestamp with the operator's own
+  `docker compose up -d` timestamp for an unrelated deploy — the two matched to the second.
+  Fix: also listen for `tokio::signal::unix::signal(SignalKind::terminate())` via
+  `tokio::select!` alongside `ctrl_c()`.
+- **A targeted "who called this endpoint" logging fix (source IP + payload on `/sim/inject`,
+  `ee6013b`) correctly showed *zero* calls during the incident window — and that absence was
+  the actual diagnostic signal, not a monitoring gap.** When an endpoint-level trace shows
+  nothing, the next place to look isn't "maybe the logging missed it" — it's every other code
+  path that can produce the same observable state without going through that endpoint
+  (here: process restart + stale persisted state). Don't discard a clean negative signal from
+  a tracing fix just because the anomaly still occurred.
+- **`docker stop`/`compose up -d` sending SIGTERM (not SIGINT) is an easy blind spot for any
+  Rust service using `tokio::signal::ctrl_c()` alone for graceful shutdown** — it works
+  perfectly under `Ctrl+C` in a dev terminal, which is exactly the scenario least likely to
+  ever run in production, masking the gap until a docker-orchestrated restart exposes it.

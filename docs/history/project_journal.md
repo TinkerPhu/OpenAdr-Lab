@@ -7736,3 +7736,57 @@ scenario, check whether the profile name actually needs a new docker-compose
 service before assuming the step definition alone is enough — the routing layer
 (`profile_urls`) can reference URLs for containers that don't exist yet.
 
+### Node1-Marginal Resilience Flakiness + Solving the ven-1 PV-Injection Mystery (2026-08-07)
+
+Two independent findings from the same session, both closing out longstanding
+questions rather than opening new ones.
+
+**Resilience suite load-gating**: `run_all_tests.sh --resilience`'s 5
+`ven_resilience.feature` scenarios (VTN restart/outage recovery) failed 4/5 with
+identical `poll_until(VEN-1 shows event) timed out after 60s. Last result: []`
+errors when run as the last section of a full ~1hr suite (UI+rust+E2E+isolated),
+but passed cleanly (2-10s each) run in isolation on a freshly idle Node1. Root
+cause: `tests/entrypoint.sh` already had a "wait for host load < 2.0" gate, but it
+only ran between the main behave pass and the `@isolated` pass — the standalone
+`--tags=@resilience` invocation goes through that same entrypoint's *main* pass, so
+it never benefited from the gate at all. Fix: extracted the wait into a
+`wait_for_load_to_settle()` function and call it before the main pass too, not just
+before `@isolated`. Confirmed via a scratch diagnostic run (docker stats + VEN-1
+`/tasks/status` + `docker compose logs` captured to disk *before* teardown, not
+relied on as a live-window race) that the isolated rerun reproduced nothing — pure
+host contention, no code defect. Verified fixed: a subsequent full-suite run passed
+5/5 sections including both the main-pass-embedded and standalone resilience
+invocations.
+
+**The ven-1 PV-injection mystery, solved**: `docs/history/project_journal.md`'s
+2026-08-05 entry and a memory record left this open — three unexplained
+single-tick PV power steps on production ven-1, decaying per the normal
+`pv_alpha=0.1` model, that looked exactly like an external `/sim/inject` call but
+couldn't be attributed (`ven-ven-1-1` bypasses `ven-ui`'s nginx, so direct-port
+traffic left zero trace anywhere). This session shipped `ee6013b` (log source IP +
+payload on every `/sim/inject`/`/sim/inject/reset` call) and deployed it to
+production for the first time (it had been committed 2026-08-06 but never actually
+rebuilt/redeployed — confirmed via `docker inspect`'s `Created` timestamp predating
+the commit by 2 days). Redeploying ven-1 to ship that fix caused *another* PV step
+at the exact moment of the `docker compose up -d` recreate — with the new logging
+showing **zero** `/sim/inject` calls. That absence was the real diagnostic signal:
+correlating `/history/ticks`' jump timestamp (07:52:00Z) against the operator's own
+deploy timestamp confirmed they matched to the second. Actual root cause:
+`main.rs`'s graceful-shutdown handler only listened for `tokio::signal::ctrl_c()`
+(SIGINT); `docker stop`/`compose up -d` send SIGTERM, which that handler never
+caught, so `simulator::persist::save()` never ran on a container-initiated stop —
+`state.json` was left up to `persist_every_s` (15s for ven-1) stale relative to the
+continuously-decaying `PvSmoothingState.irradiance_offset`. Reloading that stale,
+larger offset on next start produced an instant step indistinguishable from a fresh
+inject. Fix: `tokio::select!` on both `ctrl_c()` and
+`tokio::signal::unix::signal(SignalKind::terminate())` in the shutdown handler.
+Every prior occurrence (including all three from 2026-08-05) was almost certainly
+the same mechanism — any ven-1 restart, not an external caller. See
+`docs/reference/KEY_LEARNINGS.md` for the generalizable lessons.
+
+**Verification**: `wsl cargo check`/`cargo fmt`/`cargo clippy --all-targets
+--all-features -- -D warnings` clean on the SIGTERM fix. Full `run_all_tests.sh`
+(UI unit, rust, E2E 261/261, resilience 5/5) green after the load-gate fix, run
+twice for confirmation. PV curve and inject-call logging monitored live on
+production ven-1 for ~75 minutes post-redeploy with no further anomalies.
+

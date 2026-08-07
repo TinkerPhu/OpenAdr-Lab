@@ -482,7 +482,27 @@ async fn main() -> anyhow::Result<()> {
         routes::build_router(ctx).into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .with_graceful_shutdown(async move {
-        let _ = tokio::signal::ctrl_c().await;
+        // `docker stop` / `docker compose up -d` (container recreate) send SIGTERM, not
+        // SIGINT — listening only for ctrl_c() meant every container-initiated stop
+        // skipped this handler entirely, leaving state.json up to `persist_every_s`
+        // seconds stale relative to the continuously-decaying pv_smoothing offset. On
+        // the next start, reloading that stale (larger-magnitude) offset looked exactly
+        // like a fresh external `/sim/inject` call — see the ven-1 PV-injection mystery
+        // in docs/history/project_journal.md. Wait on whichever signal arrives first.
+        #[cfg(unix)]
+        {
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("failed to install SIGTERM handler");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = sigterm.recv() => {}
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+        }
         info!("shutdown signal received, persisting sim state");
         let sim_guard = sim_state.lock().await;
         if let Err(e) = simulator::persist::save(&sim_guard, &data_dir).await {
