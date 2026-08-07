@@ -31,6 +31,7 @@ vi.mock("../api/hooks", () => ({
   useHistoryGrid: () => ({ data: mockGrid }),
   useHistoryEvents: () => ({ data: mockEvents }),
   useHistoryReports: () => ({ data: mockReports }),
+  useHistoryForecastAccuracy: () => ({ data: [] }),
 }));
 
 vi.mock("../App", () => ({

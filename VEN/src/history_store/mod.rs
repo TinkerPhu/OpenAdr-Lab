@@ -11,6 +11,7 @@
 //! the schema/adapter as its own reviewable commit first.
 #![allow(dead_code)]
 
+mod forecast_accuracy;
 mod notifications;
 mod schema;
 mod settings;
@@ -22,10 +23,14 @@ use chrono::{DateTime, TimeZone, Utc};
 use rusqlite::{params, Connection};
 
 use crate::controller::HistoryPort;
-use crate::entities::history::{EventReceived, GridSample, LedgerPeriod, ReportSent, TickSample};
+use crate::entities::history::{
+    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, LedgerPeriod, ReportSent,
+    TickSample,
+};
 use crate::entities::DomainError;
 use schema::{
-    SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_VERSION,
+    SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8,
+    SCHEMA_VERSION,
 };
 
 type GridSampleRow = (i64, f64, f64, Option<f64>, Option<f64>, Option<f64>);
@@ -104,6 +109,10 @@ impl SqliteHistoryStore {
         if version < 7 {
             conn.execute_batch(SCHEMA_V7)
                 .map_err(|e| DomainError::StorageError(format!("apply schema v7: {e}")))?;
+        }
+        if version < 8 {
+            conn.execute_batch(SCHEMA_V8)
+                .map_err(|e| DomainError::StorageError(format!("apply schema v8: {e}")))?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| DomainError::StorageError(format!("set user_version: {e}")))?;
@@ -388,6 +397,31 @@ impl HistoryPort for SqliteHistoryStore {
         notifications::update_seen(&*self.lock()?, id, count, last_seen_at)
     }
 
+    fn append_forecast_samples(&self, rows: &[ForecastAccuracySample]) -> Result<(), DomainError> {
+        let mut conn = self.lock()?;
+        forecast_accuracy::append(&mut conn, rows)
+    }
+
+    fn reconcile_forecast_actuals(
+        &self,
+        ticks: &[TickSample],
+        window_s: i64,
+    ) -> Result<(), DomainError> {
+        let conn = self.lock()?;
+        forecast_accuracy::reconcile(&conn, ticks, window_s)
+    }
+
+    fn query_forecast_accuracy(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        asset_id: Option<&str>,
+        lead_kind: Option<ForecastLeadKind>,
+    ) -> Result<Vec<ForecastAccuracySample>, DomainError> {
+        let conn = self.lock()?;
+        forecast_accuracy::query(&conn, from, to, asset_id, lead_kind)
+    }
+
     fn prune_before(&self, cutoff: DateTime<Utc>) -> Result<u64, DomainError> {
         let conn = self.lock()?;
         let cutoff_unix = to_unix(cutoff);
@@ -399,6 +433,7 @@ impl HistoryPort for SqliteHistoryStore {
             ("reports_sent", "sent_at"),
             ("ledger_periods", "period_end"),
             ("notifications", "created_at"),
+            ("forecast_accuracy_samples", "target_ts"),
         ] {
             let sql = format!("DELETE FROM {table} WHERE {col} < ?1");
             let n = conn
@@ -438,9 +473,9 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            table_count, 7,
+            table_count, 8,
             "expected 5 tables from schema v1 (plan_snapshots dropped by v7, R-63) + \
-             notifications (v2) + user_settings (v3)"
+             notifications (v2) + user_settings (v3) + forecast_accuracy_samples (v8)"
         );
     }
 
@@ -636,6 +671,175 @@ mod tests {
             .unwrap();
         let deleted = store.prune_before(ts(100)).unwrap();
         assert_eq!(deleted, 0);
+    }
+
+    // ── forecast_accuracy_samples (forecast-accuracy-tracking, task 2.6) ────
+
+    fn forecast_sample(asset_id: &str, target_ts: DateTime<Utc>) -> ForecastAccuracySample {
+        ForecastAccuracySample {
+            asset_id: asset_id.into(),
+            lead_kind: ForecastLeadKind::Near,
+            target_ts,
+            predicted_kw: 1.5,
+            predicted_at: ts(0),
+            actual_kw: None,
+            actual_at: None,
+        }
+    }
+
+    #[test]
+    fn test_append_and_query_forecast_samples_roundtrip() {
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        let row = forecast_sample("pv", ts(100));
+        store
+            .append_forecast_samples(std::slice::from_ref(&row))
+            .unwrap();
+        let rows = store
+            .query_forecast_accuracy(ts(0), ts(200), None, None)
+            .unwrap();
+        assert_eq!(rows, vec![row]);
+    }
+
+    #[test]
+    fn test_reconcile_forecast_actuals_fills_matching_open_row() {
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        store
+            .append_forecast_samples(&[forecast_sample("pv", ts(100))])
+            .unwrap();
+        store
+            .reconcile_forecast_actuals(
+                &[TickSample {
+                    ts: ts(100),
+                    asset_id: "pv".into(),
+                    power_kw: 2.5,
+                    soc_pct: None,
+                    temperature_c: None,
+                    generation_limit_kw: None,
+                    curtailment_source: None,
+                }],
+                60,
+            )
+            .unwrap();
+        let rows = store
+            .query_forecast_accuracy(ts(0), ts(200), None, None)
+            .unwrap();
+        assert_eq!(rows[0].actual_kw, Some(2.5));
+        assert_eq!(rows[0].actual_at, Some(ts(100)));
+    }
+
+    #[test]
+    fn test_reconcile_forecast_actuals_leaves_non_matching_row_untouched() {
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        store
+            .append_forecast_samples(&[forecast_sample("pv", ts(1_000_000))])
+            .unwrap();
+        store
+            .reconcile_forecast_actuals(
+                &[TickSample {
+                    ts: ts(100),
+                    asset_id: "pv".into(),
+                    power_kw: 2.5,
+                    soc_pct: None,
+                    temperature_c: None,
+                    generation_limit_kw: None,
+                    curtailment_source: None,
+                }],
+                60,
+            )
+            .unwrap();
+        let rows = store
+            .query_forecast_accuracy(ts(0), ts(2_000_000), None, None)
+            .unwrap();
+        assert_eq!(rows[0].actual_kw, None);
+    }
+
+    #[test]
+    fn test_reconcile_forecast_actuals_does_not_overwrite_an_already_reconciled_row() {
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        store
+            .append_forecast_samples(&[forecast_sample("pv", ts(100))])
+            .unwrap();
+        let tick = TickSample {
+            ts: ts(100),
+            asset_id: "pv".into(),
+            power_kw: 2.5,
+            soc_pct: None,
+            temperature_c: None,
+            generation_limit_kw: None,
+            curtailment_source: None,
+        };
+        store
+            .reconcile_forecast_actuals(std::slice::from_ref(&tick), 60)
+            .unwrap();
+        let second_tick = TickSample {
+            power_kw: 9.9,
+            ..tick
+        };
+        store
+            .reconcile_forecast_actuals(&[second_tick], 60)
+            .unwrap();
+        let rows = store
+            .query_forecast_accuracy(ts(0), ts(200), None, None)
+            .unwrap();
+        assert_eq!(
+            rows[0].actual_kw,
+            Some(2.5),
+            "first reconciliation must stick"
+        );
+    }
+
+    #[test]
+    fn test_prune_before_deletes_forecast_samples_by_target_ts_regardless_of_reconciliation() {
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        store
+            .append_forecast_samples(&[
+                forecast_sample("pv", ts(1)),        // unreconciled, old
+                forecast_sample("base_load", ts(2)), // will be reconciled, old
+            ])
+            .unwrap();
+        store
+            .reconcile_forecast_actuals(
+                &[TickSample {
+                    ts: ts(2),
+                    asset_id: "base_load".into(),
+                    power_kw: 3.0,
+                    soc_pct: None,
+                    temperature_c: None,
+                    generation_limit_kw: None,
+                    curtailment_source: None,
+                }],
+                60,
+            )
+            .unwrap();
+
+        let deleted = store.prune_before(ts(1000)).unwrap();
+        assert_eq!(
+            deleted, 2,
+            "both rows pruned regardless of reconciliation state"
+        );
+        assert!(store
+            .query_forecast_accuracy(ts(0), ts(2000), None, None)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn test_query_forecast_accuracy_filters_by_lead_kind() {
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        store
+            .append_forecast_samples(&[
+                forecast_sample("pv", ts(100)),
+                ForecastAccuracySample {
+                    lead_kind: ForecastLeadKind::Far,
+                    ..forecast_sample("pv", ts(100))
+                },
+            ])
+            .unwrap();
+        let near_only = store
+            .query_forecast_accuracy(ts(0), ts(200), None, Some(ForecastLeadKind::Near))
+            .unwrap();
+        assert_eq!(near_only.len(), 1);
+        assert_eq!(near_only[0].lead_kind, ForecastLeadKind::Near);
     }
 
     #[test]

@@ -90,6 +90,10 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/history/grid", get(hems::get_history_grid))
         .route("/history/events", get(hems::get_history_events))
         .route("/history/reports", get(hems::get_history_reports))
+        .route(
+            "/history/forecast-accuracy",
+            get(hems::get_history_forecast_accuracy),
+        )
         .route("/history/:asset_id", get(assets::get_asset_history))
         .route("/capability/:asset_id", get(assets::get_asset_capability))
         .route(

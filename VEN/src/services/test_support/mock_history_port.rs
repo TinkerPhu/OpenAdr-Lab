@@ -10,7 +10,10 @@ use std::sync::Mutex;
 use chrono::{DateTime, Utc};
 
 use crate::controller::HistoryPort;
-use crate::entities::history::{EventReceived, GridSample, LedgerPeriod, ReportSent, TickSample};
+use crate::entities::history::{
+    EventReceived, ForecastAccuracySample, ForecastLeadKind, GridSample, LedgerPeriod, ReportSent,
+    TickSample,
+};
 use crate::entities::notification::UserNotification;
 use crate::entities::DomainError;
 
@@ -22,6 +25,7 @@ pub struct MockHistoryPort {
     reports: Mutex<Vec<ReportSent>>,
     ledger_periods: Mutex<Vec<LedgerPeriod>>,
     notifications: Mutex<Vec<UserNotification>>,
+    forecast_samples: Mutex<Vec<ForecastAccuracySample>>,
     /// 030: when set, append methods fail with `StorageError` — for testing
     /// the storage-failure notification producer.
     fail_storage: std::sync::atomic::AtomicBool,
@@ -74,6 +78,12 @@ impl MockHistoryPort {
     #[allow(dead_code)] // used by WP1.2 sampler tests, not yet by any WP1.1 test
     pub fn appended_reports(&self) -> Vec<ReportSent> {
         self.reports.lock().unwrap().clone()
+    }
+
+    /// All forecast-accuracy samples appended so far, in insertion order (forecast-accuracy-tracking).
+    #[allow(dead_code)] // available for future sampler-level tests, mirroring appended_grid/appended_events
+    pub fn appended_forecast_samples(&self) -> Vec<ForecastAccuracySample> {
+        self.forecast_samples.lock().unwrap().clone()
     }
 }
 
@@ -221,6 +231,56 @@ impl HistoryPort for MockHistoryPort {
             .collect())
     }
 
+    fn append_forecast_samples(&self, rows: &[ForecastAccuracySample]) -> Result<(), DomainError> {
+        self.forecast_samples
+            .lock()
+            .unwrap()
+            .extend_from_slice(rows);
+        Ok(())
+    }
+
+    fn reconcile_forecast_actuals(
+        &self,
+        ticks: &[TickSample],
+        window_s: i64,
+    ) -> Result<(), DomainError> {
+        let mut samples = self.forecast_samples.lock().unwrap();
+        for tick in ticks {
+            let window_start = tick.ts;
+            let window_end = tick.ts + chrono::Duration::seconds(window_s);
+            for sample in samples.iter_mut() {
+                if sample.asset_id == tick.asset_id
+                    && sample.actual_kw.is_none()
+                    && sample.target_ts >= window_start
+                    && sample.target_ts < window_end
+                {
+                    sample.actual_kw = Some(tick.power_kw);
+                    sample.actual_at = Some(window_start);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn query_forecast_accuracy(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        asset_id: Option<&str>,
+        lead_kind: Option<ForecastLeadKind>,
+    ) -> Result<Vec<ForecastAccuracySample>, DomainError> {
+        Ok(self
+            .forecast_samples
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.target_ts >= from && r.target_ts < to)
+            .filter(|r| asset_id.is_none_or(|id| r.asset_id == id))
+            .filter(|r| lead_kind.is_none_or(|k| r.lead_kind == k))
+            .cloned()
+            .collect())
+    }
+
     fn prune_before(&self, cutoff: DateTime<Utc>) -> Result<u64, DomainError> {
         let mut total: u64 = 0;
         let mut ticks = self.ticks.lock().unwrap();
@@ -251,6 +311,12 @@ impl HistoryPort for MockHistoryPort {
         let before = ledger_periods.len();
         ledger_periods.retain(|r| r.period_end >= cutoff);
         total += (before - ledger_periods.len()) as u64;
+        drop(ledger_periods);
+
+        let mut forecast_samples = self.forecast_samples.lock().unwrap();
+        let before = forecast_samples.len();
+        forecast_samples.retain(|r| r.target_ts >= cutoff);
+        total += (before - forecast_samples.len()) as u64;
 
         Ok(total)
     }
@@ -362,5 +428,123 @@ mod tests {
         };
         port.append_tick_samples(&[a.clone(), b.clone()]).unwrap();
         assert_eq!(port.appended_ticks(), vec![a, b]);
+    }
+
+    fn forecast_sample(asset_id: &str, target_ts: DateTime<Utc>) -> ForecastAccuracySample {
+        ForecastAccuracySample {
+            asset_id: asset_id.into(),
+            lead_kind: ForecastLeadKind::Near,
+            target_ts,
+            predicted_kw: 1.5,
+            predicted_at: ts(0),
+            actual_kw: None,
+            actual_at: None,
+        }
+    }
+
+    #[test]
+    fn test_append_and_query_forecast_samples_roundtrip() {
+        let port = MockHistoryPort::new();
+        let row = forecast_sample("pv", ts(100));
+        port.append_forecast_samples(std::slice::from_ref(&row))
+            .unwrap();
+        assert_eq!(
+            port.query_forecast_accuracy(ts(0), ts(200), None, None)
+                .unwrap(),
+            vec![row]
+        );
+    }
+
+    #[test]
+    fn test_reconcile_forecast_actuals_fills_matching_open_row() {
+        let port = MockHistoryPort::new();
+        port.append_forecast_samples(&[forecast_sample("pv", ts(100))])
+            .unwrap();
+        port.reconcile_forecast_actuals(
+            &[TickSample {
+                ts: ts(100),
+                asset_id: "pv".into(),
+                power_kw: 2.5,
+                soc_pct: None,
+                temperature_c: None,
+                generation_limit_kw: None,
+                curtailment_source: None,
+            }],
+            60,
+        )
+        .unwrap();
+        let rows = port
+            .query_forecast_accuracy(ts(0), ts(200), None, None)
+            .unwrap();
+        assert_eq!(rows[0].actual_kw, Some(2.5));
+        assert_eq!(rows[0].actual_at, Some(ts(100)));
+    }
+
+    #[test]
+    fn test_reconcile_forecast_actuals_leaves_non_matching_row_untouched() {
+        let port = MockHistoryPort::new();
+        port.append_forecast_samples(&[forecast_sample("pv", ts(1_000_000))])
+            .unwrap();
+        port.reconcile_forecast_actuals(
+            &[TickSample {
+                ts: ts(100),
+                asset_id: "pv".into(),
+                power_kw: 2.5,
+                soc_pct: None,
+                temperature_c: None,
+                generation_limit_kw: None,
+                curtailment_source: None,
+            }],
+            60,
+        )
+        .unwrap();
+        let rows = port
+            .query_forecast_accuracy(ts(0), ts(2_000_000), None, None)
+            .unwrap();
+        assert_eq!(rows[0].actual_kw, None);
+    }
+
+    #[test]
+    fn test_reconcile_forecast_actuals_does_not_overwrite_an_already_reconciled_row() {
+        let port = MockHistoryPort::new();
+        port.append_forecast_samples(&[forecast_sample("pv", ts(100))])
+            .unwrap();
+        let tick = TickSample {
+            ts: ts(100),
+            asset_id: "pv".into(),
+            power_kw: 2.5,
+            soc_pct: None,
+            temperature_c: None,
+            generation_limit_kw: None,
+            curtailment_source: None,
+        };
+        port.reconcile_forecast_actuals(std::slice::from_ref(&tick), 60)
+            .unwrap();
+        let second_tick = TickSample {
+            power_kw: 9.9,
+            ..tick
+        };
+        port.reconcile_forecast_actuals(&[second_tick], 60).unwrap();
+        let rows = port
+            .query_forecast_accuracy(ts(0), ts(200), None, None)
+            .unwrap();
+        assert_eq!(
+            rows[0].actual_kw,
+            Some(2.5),
+            "first reconciliation must stick"
+        );
+    }
+
+    #[test]
+    fn test_prune_before_removes_forecast_samples_by_target_ts() {
+        let port = MockHistoryPort::new();
+        port.append_forecast_samples(&[forecast_sample("pv", ts(1))])
+            .unwrap();
+        let deleted = port.prune_before(ts(1000)).unwrap();
+        assert_eq!(deleted, 1);
+        assert!(port
+            .query_forecast_accuracy(ts(0), ts(2000), None, None)
+            .unwrap()
+            .is_empty());
     }
 }
