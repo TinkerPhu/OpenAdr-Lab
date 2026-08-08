@@ -9,7 +9,7 @@ import {
 } from "recharts";
 import { Box, Typography } from "@mui/material";
 import type { ComfortRate } from "../../api/types";
-import { CELL_CHART_HEIGHT } from "../controller/chartLayout";
+import { CELL_CHART_HEIGHT } from "../charts/chartLayout";
 
 interface ComfortCurveChartProps {
   rows: ComfortRate[];

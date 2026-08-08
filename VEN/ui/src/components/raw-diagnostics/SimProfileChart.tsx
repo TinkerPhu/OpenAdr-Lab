@@ -1,7 +1,7 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import type { SimSnapshot } from "../../api/types";
-import { CHART_COLORS } from "./colors";
-import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick } from "../controller/charts/axisDomain";
+import { SERIES_COLORS } from "../controller/types";
+import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick } from "../charts/axisDomain";
 
 interface SimProfileChartProps {
   data: SimSnapshot;
@@ -31,7 +31,7 @@ export function SimProfileChart({ data }: SimProfileChartProps) {
         <Line
           type="monotone"
           dataKey="power_kw"
-          stroke={CHART_COLORS[0]}
+          stroke={SERIES_COLORS.power}
           dot={true}
           connectNulls={false}
           name="power_kw"

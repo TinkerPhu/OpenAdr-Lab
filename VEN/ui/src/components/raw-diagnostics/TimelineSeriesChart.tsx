@@ -1,8 +1,7 @@
 import { Box, FormControl, InputLabel, MenuItem, Select, Typography } from "@mui/material";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import type { AssetTimelinePoint } from "../controller/types";
-import { CHART_COLORS } from "./colors";
-import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick } from "../controller/charts/axisDomain";
+import { SERIES_COLORS, type AssetTimelinePoint } from "../controller/types";
+import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick } from "../charts/axisDomain";
 
 interface TimelineSeriesChartProps {
   data: Record<string, AssetTimelinePoint[]>;
@@ -63,7 +62,7 @@ export function TimelineSeriesChart({ data, selectedSeries, onSeriesChange }: Ti
               <Line
                 type="monotone"
                 dataKey="power_kw"
-                stroke={CHART_COLORS[3]}
+                stroke={SERIES_COLORS.power}
                 dot={false}
                 connectNulls={false}
                 name="power_kw"
