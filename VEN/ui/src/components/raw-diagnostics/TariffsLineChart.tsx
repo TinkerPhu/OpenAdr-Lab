@@ -1,6 +1,6 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { PlannedRates } from "../../api/types";
-import { CHART_COLORS } from "./colors";
+import { SERIES_COLORS } from "../controller/types";
 
 interface TariffsLineChartProps {
   data: PlannedRates;
@@ -41,7 +41,7 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
         <Line
           type="stepAfter"
           dataKey="import_tariff_eur_kwh"
-          stroke={CHART_COLORS[0]}
+          stroke={SERIES_COLORS.import_tariff}
           dot={false}
           connectNulls={false}
           name="import €/kWh"
@@ -50,7 +50,7 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
         <Line
           type="stepAfter"
           dataKey="export_tariff_eur_kwh"
-          stroke={CHART_COLORS[1]}
+          stroke={SERIES_COLORS.export_tariff}
           dot={false}
           connectNulls={false}
           name="export €/kWh"
@@ -59,7 +59,7 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
         <Line
           type="stepAfter"
           dataKey="co2_g_kwh"
-          stroke={CHART_COLORS[2]}
+          stroke={SERIES_COLORS.co2_rate}
           dot={false}
           connectNulls={false}
           name="CO₂ g/kWh"

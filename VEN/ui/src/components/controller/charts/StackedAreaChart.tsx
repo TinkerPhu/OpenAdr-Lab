@@ -1,4 +1,4 @@
-import { CELL_CHART_HEIGHT } from "../chartLayout";
+import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
 import {
   ComposedChart,
   Area,
@@ -14,11 +14,11 @@ import {
 } from "recharts";
 import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../types";
-import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_NOW, COLOR_ASSET_FALLBACK } from "../types";
+import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_NOW, COLOR_ASSET_FALLBACK, SERIES_COLORS } from "../types";
 import type { ZoneDef } from "../../../api/types";
-import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks } from "./axisDomain";
+import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks, zeroAnchoredTicks } from "../../charts/axisDomain";
 
-const COLOR_GRID_LINE = "#212121";
+const COLOR_GRID_LINE = SERIES_COLORS.grid_line;
 
 interface StackedAreaChartProps {
   data: StackedAreaPoint[];
@@ -175,6 +175,7 @@ export function StackedAreaChart({
             width={46}
             tickFormatter={formatPowerTick}
             domain={powerDomain}
+            ticks={zeroAnchoredTicks(powerDomain)}
           />
           <Tooltip content={<StackedAreaTooltip colorMap={colorMap} />} />
           <Legend

@@ -12,7 +12,7 @@ import { AssetRightSection } from "./AssetRightSection";
 import type { SimSnapshot, SimInjectState } from "../../api/types";
 import {
   DEFAULT_WINDOW, EXTENDED_WINDOW, DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
-} from "./chartLayout";
+} from "../charts/chartLayout";
 
 interface AssetCellProps {
   assetId: AssetId;

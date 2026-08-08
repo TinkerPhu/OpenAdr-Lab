@@ -1,4 +1,4 @@
-import { CELL_CHART_HEIGHT } from "../chartLayout";
+import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
 import {
   ComposedChart,
   Line,
@@ -12,14 +12,21 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { TariffTimePoint } from "../types";
-import { COLOR_NOW } from "../types";
+import { COLOR_NOW, SERIES_COLORS } from "../types";
 import type { ZoneDef } from "../../../api/types";
-import { minSpanDomain, MIN_CO2_RATE_SPAN_G_H, roundedTimeTicks } from "./axisDomain";
+import {
+  minSpanDomain,
+  MIN_CO2_RATE_SPAN_G_H,
+  MIN_COST_RATE_SPAN_EUR_H,
+  MIN_TARIFF_SPAN_EUR_KWH,
+  roundedTimeTicks,
+  zeroAnchoredTicks,
+} from "../../charts/axisDomain";
 
-const COLOR_IMPORT_TARIFF = "#f44336";
-const COLOR_EXPORT_TARIFF = "#4caf50";
-const COLOR_COST_RATE     = "#212121";
-const COLOR_CO2_RATE      = "#ff9800";
+const COLOR_IMPORT_TARIFF = SERIES_COLORS.import_tariff;
+const COLOR_EXPORT_TARIFF = SERIES_COLORS.export_tariff;
+const COLOR_COST_RATE     = SERIES_COLORS.cost_rate;
+const COLOR_CO2_RATE      = SERIES_COLORS.co2_rate;
 
 interface TariffChartProps {
   data: TariffTimePoint[];
@@ -96,6 +103,17 @@ export function TariffChart({
     clipped.map((p) => p.totalCo2RateGH ?? null),
     MIN_CO2_RATE_SPAN_G_H
   );
+  // Tariff (€/kWh) and cost rate (€/h) are different physical dimensions and must not
+  // share a Y-axis — plotting them together previously let cost rate's range flatten the
+  // tariff curves whenever the two magnitudes diverged.
+  const tariffDomain = minSpanDomain(
+    clipped.flatMap((p) => [p.importPriceEurKwh, p.exportPriceEurKwh]),
+    MIN_TARIFF_SPAN_EUR_KWH
+  );
+  const costDomain = minSpanDomain(
+    clipped.map((p) => p.totalCostRateEurH ?? null),
+    MIN_COST_RATE_SPAN_EUR_H
+  );
 
   // Ensure at least a 2-point range so recharts can render the NOW line when data is empty.
   const chartData: TariffTimePoint[] =
@@ -120,7 +138,23 @@ export function TariffChart({
             tickFormatter={formatTs}
             tick={{ fontSize: 10 }}
           />
-          <YAxis yAxisId="tariff" tick={{ fontSize: 10 }} width={40} unit=" €" />
+          <YAxis
+            yAxisId="tariff"
+            tick={{ fontSize: 10 }}
+            width={48}
+            unit=" €/kWh"
+            domain={tariffDomain}
+            ticks={zeroAnchoredTicks(tariffDomain)}
+          />
+          <YAxis
+            yAxisId="cost"
+            orientation="right"
+            tick={{ fontSize: 10 }}
+            width={48}
+            unit=" €/h"
+            domain={costDomain}
+            ticks={zeroAnchoredTicks(costDomain)}
+          />
           <YAxis
             yAxisId="co2"
             orientation="right"
@@ -128,6 +162,7 @@ export function TariffChart({
             width={52}
             unit=" g/h"
             domain={co2Domain}
+            ticks={zeroAnchoredTicks(co2Domain)}
           />
           <Tooltip
             contentStyle={{ fontSize: 9, padding: "1px 5px" }}
@@ -135,8 +170,9 @@ export function TariffChart({
             labelStyle={{ fontSize: 9, marginBottom: 1 }}
             labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
             formatter={(value: number, name: string) => {
-              if (name === "CO₂ rate [g/h]") return [value?.toFixed(0) + " g/h", name];
-              return [value?.toFixed(4) + " €", name];
+              if (name === "CO₂ rate [g/h]") return [value?.toFixed(1) + " g/h", name];
+              if (name === "Cost rate [€/h]") return [value?.toFixed(4) + " €/h", name];
+              return [value?.toFixed(4) + " €/kWh", name];
             }}
           />
           <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
@@ -169,9 +205,9 @@ export function TariffChart({
             isAnimationActive={false}
           />
 
-          {/* Total cost rate [€/h] — near-black dashed */}
+          {/* Total cost rate [€/h] — near-black dashed, own axis (distinct dimension from tariff) */}
           <Line
-            yAxisId="tariff"
+            yAxisId="cost"
             type="stepAfter"
             dataKey="totalCostRateEurH"
             name="Cost rate [€/h]"

@@ -31,6 +31,22 @@ export const ASSET_COLORS: Record<string, string> = {
   "site-residual": "#8BC34A",
 };
 
+/**
+ * Non-asset series colors — tariff/cost/CO2/grid semantics that appear in more than one
+ * chart. Single source of truth: any chart plotting one of these series looks up its
+ * color here instead of defining its own constant, so the same concept never renders in
+ * different colors depending on which chart draws it.
+ */
+export const SERIES_COLORS: Record<string, string> = {
+  import_tariff: "#f44336",
+  export_tariff: "#4caf50",
+  cost_rate: "#212121",
+  co2_rate: "#ff9800",
+  grid_line: "#212121",
+  /** Generic single-series power line (raw-diagnostics charts with no per-asset breakdown). */
+  power: "#1976d2",
+};
+
 /** Human-readable labels for known asset IDs. */
 export const ASSET_LABELS: Record<string, string> = {
   ev: "EV",

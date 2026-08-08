@@ -1,4 +1,4 @@
-import { CELL_CHART_HEIGHT } from "../chartLayout";
+import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
 import {
   ComposedChart,
   Line,
@@ -21,7 +21,8 @@ import {
   MIN_POWER_SPAN_KW,
   formatPowerTick,
   roundedTimeTicks,
-} from "./axisDomain";
+  zeroAnchoredTicks,
+} from "../../charts/axisDomain";
 
 interface AssetTimelineChartProps {
   data: AssetTimelinePoint[];
@@ -268,22 +269,25 @@ export function AssetTimelineChart({
           width={46}
           tickFormatter={formatPowerTick}
           domain={powerDomain}
+          ticks={zeroAnchoredTicks(powerDomain)}
         />
         <YAxis
           yAxisId="cost"
           orientation="right"
           tick={{ fontSize: 10 }}
           width={44}
-          unit=" €"
+          unit=" €/h"
           domain={costDomain}
+          ticks={zeroAnchoredTicks(costDomain)}
         />
         <YAxis
           yAxisId="co2"
           orientation="right"
           tick={{ fontSize: 10 }}
           width={44}
-          unit=" g"
+          unit=" g/h"
           domain={co2Domain}
+          ticks={zeroAnchoredTicks(co2Domain)}
         />
         {stateKey && (
           <YAxis

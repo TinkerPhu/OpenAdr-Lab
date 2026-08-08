@@ -47,6 +47,11 @@ export const MIN_COST_RATE_SPAN_EUR_H = 0.05;
 /** CO2-rate axis floor [g/h] — same rationale, sized for typical asset CO2 rates. */
 export const MIN_CO2_RATE_SPAN_G_H = 50;
 
+/** Tariff axis floor [€/kWh] — same rationale as the cost-rate/CO2 floors above; the
+ * tariff axis previously had no floor at all, letting near-flat tariff periods get
+ * auto-scaled to fill the chart the same way the unfloored cost-rate axis used to. */
+export const MIN_TARIFF_SPAN_EUR_KWH = 0.02;
+
 /** Power axis floor [kW] = 5 W — the residual/computed series (e.g. site residual) are
  * unmeasured leftovers, so they hover near zero far more than any physically metered asset;
  * without a floor, sub-watt arithmetic noise gets auto-scaled to fill the chart height the
@@ -93,4 +98,50 @@ export function roundedTimeTicks(fromMs: number, toMs: number, intervalMinutes =
     return roundedTimeTicks(fromMs, toMs, 60);
   }
   return ticks;
+}
+
+/** Rounds a raw tick step up to a "nice" 1/2/5×10^n value (the same family d3/recharts use
+ * internally for their own auto ticks), so zero-anchored ticks read like round numbers
+ * (0.5, 1, 2, 5, ...) instead of an arbitrary fraction of the domain span. */
+function niceStep(rawStep: number): number {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) return 1;
+  const exponent = Math.floor(Math.log10(rawStep));
+  const fraction = rawStep / Math.pow(10, exponent);
+  let niceFraction: number;
+  if (fraction <= 1) niceFraction = 1;
+  else if (fraction <= 2) niceFraction = 2;
+  else if (fraction <= 5) niceFraction = 5;
+  else niceFraction = 10;
+  return niceFraction * Math.pow(10, exponent);
+}
+
+/**
+ * Explicit Y-axis tick set for a domain that straddles zero, guaranteeing 0.0 is always one
+ * of the rendered ticks and that every other tick is a whole step away from it in both
+ * directions — rather than recharts' default "nice" tick generation, which computes ticks
+ * independently of where zero falls in the domain and can skip 0 entirely on a mixed-sign
+ * range (e.g. a domain of [-2, 5] with recharts' own step choice landing on -2, 0.75, 3.5,
+ * 6.25 — no 0 tick at all).
+ *
+ * Returns `undefined` when the domain does not straddle zero (entirely non-negative or
+ * entirely non-positive), so the caller falls back to recharts' default tick generation
+ * unchanged — this only changes behavior for the mixed-sign case it exists to fix.
+ */
+export function zeroAnchoredTicks(
+  domain: [number, number],
+  targetTickCount = 5
+): number[] | undefined {
+  const [min, max] = domain;
+  if (min >= 0 || max <= 0) return undefined;
+
+  const span = max - min;
+  const rawStep = span / Math.max(targetTickCount - 1, 1);
+  const step = niceStep(rawStep);
+  if (step <= 0) return undefined;
+
+  const ticks: number[] = [0];
+  const epsilon = step * 1e-6;
+  for (let t = step; t <= max + epsilon; t += step) ticks.push(roundToStep(t));
+  for (let t = -step; t >= min - epsilon; t -= step) ticks.push(roundToStep(t));
+  return ticks.sort((a, b) => a - b);
 }
