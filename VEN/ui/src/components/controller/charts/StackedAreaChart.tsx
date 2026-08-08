@@ -15,17 +15,10 @@ import type { AssetId, StackedAreaPoint } from "../types";
 import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_ASSET_FALLBACK, SERIES_COLORS } from "../types";
 import type { ZoneDef } from "../../../api/types";
 import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks, zeroAnchoredTicks } from "../../charts/axisDomain";
-import { formatPowerValue } from "../../charts/unitFormat";
+import { formatSignedPowerValue } from "../../charts/unitFormat";
 import { renderNowLine } from "../../charts/NowLine";
 import { renderZoneShading } from "../../charts/ZoneShading";
 import { TOOLTIP_BOX_STYLE } from "../../charts/tooltipStyle";
-
-/** Explicit-sign power display for the stacked tooltip's net values (e.g. "+1.00 kW",
- * "-4.20 kW") — the canonical formatter itself doesn't prepend "+" for positive values. */
-function signedPower(kw: number): string {
-  const formatted = formatPowerValue(kw);
-  return kw >= 0 ? `+${formatted}` : formatted;
-}
 
 const COLOR_GRID_LINE = SERIES_COLORS.grid_line;
 
@@ -83,12 +76,12 @@ export function StackedAreaTooltip({
       <div style={{ marginBottom: 1, fontWeight: "bold" }}>{time}</div>
       {Object.entries(netByAsset).map(([assetId, kw]) => (
         <div key={assetId} style={{ color: colorMap[assetId] ?? COLOR_ASSET_FALLBACK }}>
-          {assetLabel(assetId)}: {signedPower(kw)}
+          {assetLabel(assetId)}: {formatSignedPowerValue(kw)}
         </div>
       ))}
       {gridKw !== null && (
         <div style={{ color: COLOR_GRID_LINE, borderTop: "1px solid #eee", marginTop: 2, paddingTop: 2 }}>
-          Grid: {signedPower(gridKw)}
+          Grid: {formatSignedPowerValue(gridKw)}
         </div>
       )}
     </div>

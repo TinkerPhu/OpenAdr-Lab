@@ -145,8 +145,12 @@ describe("TariffChart — dual Y-axis", () => {
     const cost = axes.find((a) => a.yAxisId === "cost");
     const [tMin, tMax] = tariff?.domain as [number, number];
     const [cMin, cMax] = cost?.domain as [number, number];
-    // Tariff's own domain stays tight around its data (not stretched to ±5 by cost's range).
-    expect(tMax - tMin).toBeLessThan(1);
+    // Tariff's own domain stays tight around its real data (0.15-0.35), not stretched to
+    // cost's much wider range, AND not anchored down to 0 either (a domain of [0, 0.35]
+    // would still "pass" a bare width check while silently reintroducing the squeeze —
+    // see tightSpanDomain's doc comment).
+    expect(tMin).toBeCloseTo(0.15, 9);
+    expect(tMax).toBeCloseTo(0.35, 9);
     // Cost's domain, unconstrained by tariff, spans its own much wider real range.
     expect(cMax - cMin).toBeGreaterThan(5);
   });
