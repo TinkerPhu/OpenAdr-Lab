@@ -1,9 +1,11 @@
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { PlannedRates } from "../../api/types";
 import { SERIES_COLORS } from "../controller/types";
 import { DIAGNOSTIC_CHART_HEIGHT } from "../charts/chartLayout";
 import { formatTariffEurKwh, formatCo2IntensityGKwh } from "../charts/unitFormat";
 import { EmptyState } from "../charts/EmptyState";
+import { tightSpanDomain, MIN_TARIFF_SPAN_EUR_KWH, MIN_CO2_INTENSITY_SPAN_G_KWH } from "../charts/axisDomain";
+import { TimeSeriesChart, type TimeSeriesSeriesSpec } from "../charts/TimeSeriesChart";
+import type { TimestampedRow } from "../charts/mergeSeries";
 
 interface TariffsLineChartProps {
   data: PlannedRates;
@@ -20,64 +22,63 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
     );
   }
 
-  const points = data.map((snap) => ({
+  const points: TimestampedRow[] = data.map((snap) => ({
     ts: new Date(snap.interval_start).getTime(),
-    import_tariff_eur_kwh: snap.import_tariff_eur_kwh,
-    export_tariff_eur_kwh: snap.export_tariff_eur_kwh,
-    co2_g_kwh: snap.co2_g_kwh,
+    values: {
+      import_tariff_eur_kwh: snap.import_tariff_eur_kwh,
+      export_tariff_eur_kwh: snap.export_tariff_eur_kwh,
+      co2_g_kwh: snap.co2_g_kwh,
+    },
   }));
 
+  // Tariff (€/kWh) and CO2 intensity (g/kWh) are different physical dimensions — must not
+  // share a Y-axis, same reasoning as TariffChart's tariff/cost split.
+  const tariffDomain = tightSpanDomain(
+    points.flatMap((p) => [p.values?.import_tariff_eur_kwh, p.values?.export_tariff_eur_kwh]),
+    MIN_TARIFF_SPAN_EUR_KWH
+  );
+  const co2Domain = tightSpanDomain(
+    points.map((p) => p.values?.co2_g_kwh),
+    MIN_CO2_INTENSITY_SPAN_G_KWH
+  );
+
+  const series: TimeSeriesSeriesSpec[] = [
+    {
+      key: "import €/kWh",
+      axisId: "tariff",
+      dataKey: (row) => row.values?.import_tariff_eur_kwh ?? null,
+      color: SERIES_COLORS.import_tariff,
+    },
+    {
+      key: "export €/kWh",
+      axisId: "tariff",
+      dataKey: (row) => row.values?.export_tariff_eur_kwh ?? null,
+      color: SERIES_COLORS.export_tariff,
+    },
+    {
+      key: "CO₂ g/kWh",
+      axisId: "co2",
+      dataKey: (row) => row.values?.co2_g_kwh ?? null,
+      color: SERIES_COLORS.co2_rate,
+    },
+  ];
+
   return (
-    <div data-testid="tariffs-line-chart">
-    <ResponsiveContainer width="100%" height={DIAGNOSTIC_CHART_HEIGHT}>
-      <LineChart data={points} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" />
-        <XAxis
-          dataKey="ts"
-          scale="time"
-          type="number"
-          domain={["auto", "auto"]}
-          tickFormatter={(v: number) => new Date(v).toLocaleTimeString()}
-        />
-        <YAxis />
-        <Tooltip
-          labelFormatter={(v: number) => new Date(v).toLocaleString()}
-          formatter={(v, name) => {
-            if (typeof v !== "number") return ["—", String(name)];
-            if (name === "CO₂ g/kWh") return [formatCo2IntensityGKwh(v), String(name)];
-            return [formatTariffEurKwh(v), String(name)];
-          }}
-        />
-        <Legend />
-        <Line
-          type="stepAfter"
-          dataKey="import_tariff_eur_kwh"
-          stroke={SERIES_COLORS.import_tariff}
-          dot={false}
-          connectNulls={false}
-          name="import €/kWh"
-          isAnimationActive={false}
-        />
-        <Line
-          type="stepAfter"
-          dataKey="export_tariff_eur_kwh"
-          stroke={SERIES_COLORS.export_tariff}
-          dot={false}
-          connectNulls={false}
-          name="export €/kWh"
-          isAnimationActive={false}
-        />
-        <Line
-          type="stepAfter"
-          dataKey="co2_g_kwh"
-          stroke={SERIES_COLORS.co2_rate}
-          dot={false}
-          connectNulls={false}
-          name="CO₂ g/kWh"
-          isAnimationActive={false}
-        />
-      </LineChart>
-    </ResponsiveContainer>
-    </div>
+    <TimeSeriesChart
+      testId="tariffs-line-chart"
+      data={points}
+      xAxisTickFormatter={(v) => new Date(v).toLocaleTimeString()}
+      axes={[
+        { id: "tariff", unit: " €/kWh", domain: tariffDomain },
+        { id: "co2", orientation: "right", unit: " g/kWh", domain: co2Domain },
+      ]}
+      series={series}
+      tooltipFormatter={(value, name) => {
+        if (name === "CO₂ g/kWh") return [formatCo2IntensityGKwh(value), name];
+        return [formatTariffEurKwh(value), name];
+      }}
+      height={DIAGNOSTIC_CHART_HEIGHT}
+      margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
+    />
   );
 }
