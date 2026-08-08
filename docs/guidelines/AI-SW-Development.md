@@ -163,6 +163,11 @@ Autopilot-like mode — enables bypass of permission prompts:
 claude --permission-mode bypassPermissions
 ```
 
+to keep mouse wheel behaviour consistently:
+```
+/tui fullscreen
+```
+
 ### Speckit
 
 #### Project Preparation
