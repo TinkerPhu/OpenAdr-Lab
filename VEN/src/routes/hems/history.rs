@@ -133,7 +133,7 @@ pub struct ForecastAccuracyParams {
 
 /// GET /history/forecast-accuracy?from=&to=&asset_id=&lead_kind= — near/far forecast samples
 /// (predicted, and actual once reconciled) in `[from, to)`, optionally filtered to one asset
-/// and/or lead kind. See `openspec/changes/forecast-accuracy-tracking/`.
+/// and/or lead kind. See `docs/architecture/VEN_ARCHITECTURE.md` §4.9a.
 pub async fn get_history_forecast_accuracy(
     State(ctx): State<AppCtx>,
     Query(params): Query<ForecastAccuracyParams>,

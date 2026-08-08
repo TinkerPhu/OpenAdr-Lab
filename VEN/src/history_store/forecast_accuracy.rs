@@ -1,6 +1,6 @@
 //! forecast_accuracy_samples persistence, split from `mod.rs` for the
 //! 500-production-line file-size cap. Called only via the `HistoryPort`
-//! impl on `SqliteHistoryStore`. See `openspec/changes/forecast-accuracy-tracking/`.
+//! impl on `SqliteHistoryStore`. See `docs/architecture/VEN_ARCHITECTURE.md` §4.9a.
 
 use std::str::FromStr;
 

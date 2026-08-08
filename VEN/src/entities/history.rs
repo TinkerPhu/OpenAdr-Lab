@@ -71,7 +71,7 @@ pub struct LedgerPeriod {
 /// Lead-time bucket for a persisted forecast sample. `Near` = the plan's `slots[1]` (the closest
 /// genuinely-future instant — `slots[0]` is what's currently being commanded, not a forecast
 /// about to be tested); `Far` = `slots.last()`, the longest-lead prediction the current horizon
-/// reaches. See `openspec/changes/forecast-accuracy-tracking/design.md` Decisions 1-2.
+/// reaches. See `docs/architecture/VEN_ARCHITECTURE.md` §4.9a.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ForecastLeadKind {
