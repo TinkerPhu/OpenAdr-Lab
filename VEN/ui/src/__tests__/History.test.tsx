@@ -76,4 +76,27 @@ describe("HistoryPage", () => {
     fireEvent.change(input, { target: { value: "2026-02-15" } });
     expect(input.value).toBe("2026-02-15");
   });
+
+  it("defaults the date field to today's UTC date while in rolling last-24h mode", () => {
+    renderHistory();
+    const input = screen.getByTestId("history-date-input") as HTMLInputElement;
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    expect(input.value).toBe(todayUtc);
+    expect(screen.getByTestId("history-last-24h-btn")).toBeDisabled();
+  });
+
+  it("returns to rolling last-24h mode when 'Last 24h' is clicked", () => {
+    renderHistory();
+    const input = screen.getByTestId("history-date-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "2026-02-15" } });
+    expect(input.value).toBe("2026-02-15");
+
+    const button = screen.getByTestId("history-last-24h-btn");
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    expect(input.value).toBe(todayUtc);
+    expect(button).toBeDisabled();
+  });
 });

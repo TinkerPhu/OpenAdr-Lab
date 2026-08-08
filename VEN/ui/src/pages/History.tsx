@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
-  Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
+  Box, Button, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField,
+  Typography,
 } from "@mui/material";
 import {
   useHistoryTicks, useHistoryGrid, useHistoryEvents, useHistoryReports, useHistoryForecastAccuracy,
@@ -35,6 +36,9 @@ export function HistoryPage() {
   const [date, setDate] = useState<string | null>(null);
   const { fromIso, toIso } = useMemo(() => (date ? dayRangeIso(date) : last24hRangeIso()), [date]);
   const toMs = useMemo(() => new Date(toIso).getTime(), [toIso]);
+  // Rolling 24h mode has no single "the" date (it spans two UTC calendar days) — show the
+  // newest displayed day so the field is never blank, without treating that as a selection.
+  const displayDate = date ?? toIso.slice(0, 10);
 
   const { data: ticks = [] } = useHistoryTicks(fromIso, toIso);
   const { data: grid = [] } = useHistoryGrid(fromIso, toIso);
@@ -92,16 +96,26 @@ export function HistoryPage() {
   return (
     <Box sx={{ p: 2 }} data-testid="history-page">
       <Typography variant="h5" gutterBottom>History</Typography>
-      <TextField
-        label="Date (UTC)"
-        type="date"
-        size="small"
-        value={date ?? ""}
-        onChange={(e) => setDate(e.target.value || null)}
-        inputProps={{ "data-testid": "history-date-input" }}
-        InputLabelProps={{ shrink: true }}
-        sx={{ mb: 1 }}
-      />
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+        <TextField
+          label="Date (UTC)"
+          type="date"
+          size="small"
+          value={displayDate}
+          onChange={(e) => setDate(e.target.value || null)}
+          inputProps={{ "data-testid": "history-date-input" }}
+          InputLabelProps={{ shrink: true }}
+        />
+        <Button
+          size="small"
+          variant="outlined"
+          disabled={date === null}
+          onClick={() => setDate(null)}
+          data-testid="history-last-24h-btn"
+        >
+          Last 24h
+        </Button>
+      </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         {date ? `Showing ${date} (UTC)` : "Showing the last 24 hours — pick a date above to view a specific UTC day"}
       </Typography>
