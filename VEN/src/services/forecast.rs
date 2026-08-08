@@ -96,7 +96,12 @@ pub fn record_forecast_accuracy_samples(
             asset_id: crate::ids::ASSET_PV.to_string(),
             lead_kind,
             target_ts: slot.start,
-            predicted_kw: slot.pv_forecast_kw,
+            // Sign convention: slot.pv_forecast_kw (from the solver's p_pv_kw input, see
+            // milp_planner/results.rs) is a non-negative generation magnitude, but the
+            // asset's actual/tick power_kw is negative-for-export (assets/pv.rs) — negate
+            // so predicted_kw and actual_kw share one sign convention, same reasoning as
+            // build_weather_pv_forecast below.
+            predicted_kw: -slot.pv_forecast_kw,
             predicted_at: now,
             actual_kw: None,
             actual_at: None,
@@ -638,7 +643,7 @@ mod tests {
 
     #[test]
     fn record_forecast_accuracy_samples_two_slot_plan_yields_six_samples() {
-        let plan = make_plan_with_slots(vec![slot_with_pv(0, -1.0), slot_with_pv(1, -2.0)]);
+        let plan = make_plan_with_slots(vec![slot_with_pv(0, 1.0), slot_with_pv(1, 2.0)]);
         let mut heuristics = HashMap::new();
         heuristics.insert(
             crate::ids::ASSET_BASE_LOAD.to_string(),
@@ -658,7 +663,7 @@ mod tests {
 
     #[test]
     fn record_forecast_accuracy_samples_single_slot_plan_yields_zero() {
-        let plan = make_plan_with_slots(vec![slot_with_pv(0, -1.0)]);
+        let plan = make_plan_with_slots(vec![slot_with_pv(0, 1.0)]);
         let samples = record_forecast_accuracy_samples(&plan, &HashMap::new(), ts(0));
         assert!(samples.is_empty());
     }
@@ -667,19 +672,21 @@ mod tests {
     fn record_forecast_accuracy_samples_near_point_never_uses_slot_zero() {
         // slots[0] and slots[1] deliberately carry different pv_forecast_kw — the near
         // sample must come from slots[1], never slots[0].
-        let plan = make_plan_with_slots(vec![slot_with_pv(0, -99.0), slot_with_pv(1, -2.0)]);
+        let plan = make_plan_with_slots(vec![slot_with_pv(0, 99.0), slot_with_pv(1, 2.0)]);
         let samples = record_forecast_accuracy_samples(&plan, &HashMap::new(), ts(0));
         let near_pv = samples
             .iter()
             .find(|s| s.asset_id == crate::ids::ASSET_PV && s.lead_kind == ForecastLeadKind::Near)
             .unwrap();
+        // pv_forecast_kw is a non-negative generation magnitude (2.0); predicted_kw must be
+        // negated to match the actual/tick sign convention (negative = export).
         assert_eq!(near_pv.predicted_kw, -2.0);
         assert_eq!(near_pv.target_ts, ts(300));
     }
 
     #[test]
     fn record_forecast_accuracy_samples_missing_heuristic_omits_only_that_asset() {
-        let plan = make_plan_with_slots(vec![slot_with_pv(0, -1.0), slot_with_pv(1, -2.0)]);
+        let plan = make_plan_with_slots(vec![slot_with_pv(0, 1.0), slot_with_pv(1, 2.0)]);
         let mut heuristics = HashMap::new();
         heuristics.insert(
             crate::ids::ASSET_BASE_LOAD.to_string(),
