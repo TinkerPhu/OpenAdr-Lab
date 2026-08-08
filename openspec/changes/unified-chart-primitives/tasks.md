@@ -219,16 +219,27 @@
 
 ## 10. Migrate call sites
 
-- [ ] 10.1 `History.tsx` — update imports to the new `TimeSeriesChart`
-      (`AssetTimelineChart`/`TariffChart`) configurations
-- [ ] 10.2 `AssetMidSection.tsx` (Controller tab) — same
-- [ ] 10.3 `GridAccumulatedCell` — update to `StackedTimeSeriesChart`
-- [ ] 10.4 `GridTariffCell` — update to the migrated `TariffChart` configuration
-- [ ] 10.5 Devices tab comfort-curve editor — update to `CurveChart`
-- [ ] 10.6 Raw Diagnostics page — update to the migrated raw-diagnostics `TimeSeriesChart`
-      configurations
-- [ ] 10.7 Full grep sweep for any remaining import of a deleted component path; fix or
-      confirm none remain
+> Done incrementally as each migration/rename landed (Groups 6–8), rather than as a
+> separate batch — `AssetTimelineChart.tsx`/`TariffChart.tsx` were rewritten in place
+> (same file path, same export name), so `History.tsx`/`AssetMidSection.tsx`/
+> `GridTariffCell.tsx` never needed an import change at all. `GridAccumulatedCell`/
+> `PlanPowerStack` (task 7) and the Devices comfort-curve editor (task 8) were updated as
+> part of their respective rename commits. This group is now just the confirmation sweep.
+
+- [x] 10.1 `History.tsx` — no change needed; `AssetTimelineChart`/`TariffChart` kept their
+      file path and export name through migration
+- [x] 10.2 `AssetMidSection.tsx` (Controller tab) — same, no change needed
+- [x] 10.3 `GridAccumulatedCell` — updated to `StackedTimeSeriesChart` in task 7's commit
+- [x] 10.4 `GridTariffCell` — no change needed (imports `TariffChart` by its unchanged
+      path/name; only its `chartLayout`/`axisDomain` imports moved, updated in Group 1/2)
+- [x] 10.5 Devices tab comfort-curve editor (`ComfortCurveCard.tsx`) — updated to
+      `CurveChart` in task 8's commit
+- [x] 10.6 Raw Diagnostics page — no change needed; `SimProfileChart`/`TariffsLineChart`/
+      `TimelineSeriesChart` kept their file paths and export names through migration
+- [x] 10.7 Full grep sweep confirms zero remaining references to any deleted path
+      (`controller/chartLayout`, `controller/charts/axisDomain`, `StackedAreaChart`,
+      `ComfortCurveChart`, `CHART_COLORS`/`raw-diagnostics/colors`) anywhere in
+      `VEN/ui/src`
 
 ## 11. Documentation & backlog
 
