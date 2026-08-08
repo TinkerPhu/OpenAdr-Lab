@@ -107,11 +107,11 @@ export function HistoryPage() {
           InputLabelProps={{ shrink: true }}
         />
         <Button
-          size="small"
           variant="outlined"
           disabled={date === null}
           onClick={() => setDate(null)}
           data-testid="history-last-24h-btn"
+          sx={{ height: 40 }}
         >
           Last 24h
         </Button>
