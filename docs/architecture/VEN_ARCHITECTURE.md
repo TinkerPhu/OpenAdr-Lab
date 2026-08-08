@@ -655,6 +655,44 @@ behaviour classes (`state.rs::SimInjectState`):
 `/timeline` is the closest thing to a continuous power time series today (measured watts
 in the past window, planned watts in the future window).
 
+### 4.9a Forecast Accuracy Tracking (schema v8)
+
+Tracks how well the planner's own forecasts held up against what actually happened, for PV,
+base_load, and site-residual — the three assets whose power is forecast rather than
+user-commanded. Persisted in the `forecast_accuracy_samples` table (`asset_id`, `lead_kind`
+[`near`/`far`], `target_ts`, `predicted_kw`, `predicted_at`, `actual_kw`, `actual_at`), indexed
+on `(asset_id, target_ts)`; pruned alongside the other history tables via `prune_before`, keyed
+on `target_ts`.
+
+**Capture** — every plan cycle, `record_forecast_accuracy_samples` (`services/forecast.rs`,
+called from `finish_plan_cycle`) builds a *near* sample from `plan.slots[1]` and a *far* sample
+from `plan.slots.last()` (no-op below 2 slots) for each tracked asset: PV from
+`slot.pv_forecast_kw`, negated to match the actual/tick sign convention (negative = export) —
+the solver's own field is a non-negative generation magnitude; base_load and site-residual via
+`AssetHeuristics::sample_kw(slot.start)`, each skipped if no heuristic exists yet for that asset.
+Written through `HistoryPort::append_forecast_samples` off the async runtime
+(`spawn_blocking`), best-effort (log-and-continue on failure), same pattern as
+`history_sampler::write_window`.
+
+**Reconciliation** — piggybacks on `history_sampler`'s existing 1-minute tick flush: after a
+window's ticks are appended, `HistoryPort::reconcile_forecast_actuals` fills `actual_kw`/
+`actual_at` on any open sample whose `asset_id` matches and whose `target_ts` falls in
+`[tick.ts, tick.ts + window_s)`; an already-reconciled row is never overwritten by a later call.
+
+**Route**: `GET /history/forecast-accuracy?from=&to=&asset_id=&lead_kind=` (see DOCUMENTATION.md
+§History Store for the full persisted-history route list) — `resolve_range` plus optional
+`asset_id`/`lead_kind` filters; an invalid `lead_kind` value returns 400.
+
+**UI**: the History page overlays near/far forecast lines on the PV, base_load, and
+site-residual `AssetTimelineChart` cells only (the tracked-asset set). The overlay is folded
+into the same per-timestamp array the actual Power line reads (`AssetTimelineChart.tsx`) rather
+than given its own `data` override — recharts resolves tooltip hover by array index, not by
+re-matching timestamps across a series' independently-indexed `data`, so a forecast line on its
+own coarser (~5 min) array previously caused hover to show the actual line's value from an
+unrelated time; the sparse forecast samples are forward-filled (LOCF) across the shared array so
+their `stepAfter` line (matching the actual line's own step interpretation) has a value at every
+one-minute slot, not just the sample points.
+
 ### 4.10 Operational Diagnostics (WP-T1–T8, `docs/history/project_journal.md` — search "WP-T")
 
 Backend-process/task health and operational status, distinct from HEMS controller state (4.7) —
