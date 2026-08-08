@@ -10,7 +10,7 @@ import {
 } from "../charts/chartLayout";
 import type { AssetId, AssetSummary, AssetTimelinePoint, StackedAreaPoint } from "./types";
 import { ASSET_COLORS, COLOR_ASSET_FALLBACK } from "./types";
-import { StackedAreaChart } from "./charts/StackedAreaChart";
+import { StackedTimeSeriesChart } from "../charts/StackedTimeSeriesChart";
 import type { ZoneDef } from "../../api/types";
 import { formatSignedPowerValue } from "../charts/unitFormat";
 
@@ -115,7 +115,7 @@ export function GridAccumulatedCell({
 
       {/* Right: stacked area chart */}
       <Box sx={{ flex: 1, minWidth: CELL_CHART_MIN_WIDTH }}>
-        <StackedAreaChart
+        <StackedTimeSeriesChart
           data={stackedAreaPoints}
           assetIds={assetIds as AssetId[]}
           colorMap={ASSET_COLORS}

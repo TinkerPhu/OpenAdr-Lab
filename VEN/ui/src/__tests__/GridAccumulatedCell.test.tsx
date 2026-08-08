@@ -19,10 +19,10 @@ const baseSim: SimSnapshot = {
   assets: {},
 };
 
-// ─── Mock StackedAreaChart — expose nowMs as a DOM data attribute ─────────────
+// ─── Mock StackedTimeSeriesChart — expose nowMs as a DOM data attribute ──────
 
-vi.mock("../components/controller/charts/StackedAreaChart", () => ({
-  StackedAreaChart: ({ nowMs }: { nowMs: number }) => (
+vi.mock("../components/charts/StackedTimeSeriesChart", () => ({
+  StackedTimeSeriesChart: ({ nowMs }: { nowMs: number }) => (
     <div data-testid="stacked-area-chart" data-now-ms={String(nowMs)} />
   ),
 }));
@@ -68,7 +68,7 @@ describe("GridAccumulatedCell — now line position", () => {
     allTimelinesData = { zones: [], timelines: {} };
   });
 
-  it("nowMs passed to StackedAreaChart advances when allTimelines data refreshes after time has passed", () => {
+  it("nowMs passed to StackedTimeSeriesChart advances when allTimelines data refreshes after time has passed", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T10:00:00.000Z"));
 

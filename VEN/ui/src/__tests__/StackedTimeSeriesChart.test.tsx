@@ -4,7 +4,7 @@
  */
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
-import { StackedAreaTooltip } from "../components/controller/charts/StackedAreaChart";
+import { StackedAreaTooltip } from "../components/charts/StackedTimeSeriesChart";
 import { ASSET_COLORS } from "../components/controller/types";
 
 const colorMap = ASSET_COLORS;

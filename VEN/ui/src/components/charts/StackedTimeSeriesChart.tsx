@@ -1,4 +1,4 @@
-import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
+import { CELL_CHART_HEIGHT } from "./chartLayout";
 import {
   ComposedChart,
   Area,
@@ -11,18 +11,18 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { TooltipProps } from "recharts";
-import type { AssetId, StackedAreaPoint } from "../types";
-import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_ASSET_FALLBACK, SERIES_COLORS } from "../types";
-import type { ZoneDef } from "../../../api/types";
-import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks, zeroAnchoredTicks } from "../../charts/axisDomain";
-import { formatSignedPowerValue } from "../../charts/unitFormat";
-import { renderNowLine } from "../../charts/NowLine";
-import { renderZoneShading } from "../../charts/ZoneShading";
-import { TOOLTIP_BOX_STYLE } from "../../charts/tooltipStyle";
+import type { AssetId, StackedAreaPoint } from "../controller/types";
+import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_ASSET_FALLBACK, SERIES_COLORS } from "../controller/types";
+import type { ZoneDef } from "../../api/types";
+import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks, zeroAnchoredTicks } from "./axisDomain";
+import { formatSignedPowerValue } from "./unitFormat";
+import { renderNowLine } from "./NowLine";
+import { renderZoneShading } from "./ZoneShading";
+import { TOOLTIP_BOX_STYLE } from "./tooltipStyle";
 
 const COLOR_GRID_LINE = SERIES_COLORS.grid_line;
 
-interface StackedAreaChartProps {
+interface StackedTimeSeriesChartProps {
   data: StackedAreaPoint[];
   assetIds: AssetId[];
   colorMap: Record<string, string>;
@@ -98,7 +98,15 @@ const emptyPt = (assetIds: AssetId[]): Omit<StackedAreaPoint, "ts"> => {
   return pt as Omit<StackedAreaPoint, "ts">;
 };
 
-export function StackedAreaChart({
+/**
+ * Stacked-areas composition — kept as its own component rather than folded into
+ * `TimeSeriesChart` (see openspec/changes/unified-chart-primitives/design.md Decision 1):
+ * the pos/neg stacking and net-value tooltip re-aggregation (`StackedAreaTooltip`) are
+ * genuinely different logic from a plain multi-line chart, not duplication of it. Built on
+ * the same shared axis/tick/color/sizing/NOW-line/zone-shading primitives as
+ * `TimeSeriesChart`.
+ */
+export function StackedTimeSeriesChart({
   data,
   assetIds,
   colorMap,
@@ -108,7 +116,7 @@ export function StackedAreaChart({
   height,
   zones,
   xAxisTickIntervalMinutes,
-}: StackedAreaChartProps) {
+}: StackedTimeSeriesChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes
   // and ensures the NOW reference line is always within the visible range.
   const tMin = nowMs - hoursBack * 3_600_000;
