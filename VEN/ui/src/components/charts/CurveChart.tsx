@@ -9,22 +9,31 @@ import {
 } from "recharts";
 import { Box } from "@mui/material";
 import type { ComfortRate } from "../../api/types";
-import { CELL_CHART_HEIGHT } from "../charts/chartLayout";
-import { EmptyState } from "../charts/EmptyState";
-import { formatTariffEurKwh } from "../charts/unitFormat";
+import { CELL_CHART_HEIGHT } from "./chartLayout";
+import { EmptyState } from "./EmptyState";
+import { formatTariffEurKwh } from "./unitFormat";
 
-interface ComfortCurveChartProps {
+interface CurveChartProps {
   rows: ComfortRate[];
   color?: string;
 }
 
 type CurvePoint = { fillPct: number; bidEurKwh: number };
 
-/** Live preview of the (fill %, bid €/kWh) willingness-to-pay curve being
- *  edited in `ComfortCurveCard` — plotted in fill order so the shape of the
- *  curve (typically: pay more to reach a low fill fast, less once "enough"
- *  is already banked) is visible at a glance, not just as a row of numbers. */
-export function ComfortCurveChart({ rows, color = "#2196F3" }: ComfortCurveChartProps) {
+/**
+ * Non-temporal-X-axis composition (design.md's 3rd taxonomy member, alongside
+ * TimeSeriesChart and StackedTimeSeriesChart) — shares only sizing/empty-state/
+ * unit-formatting primitives with the other two, since a fill%-vs-price curve has no
+ * time domain, NOW line, or zone shading to share. Currently has one real consumer
+ * (the comfort-curve editor preview); kept scoped to that exact (fill%, €/kWh) shape
+ * rather than generalized further, since there's no second shape yet to generalize for.
+ *
+ * Live preview of the (fill %, bid €/kWh) willingness-to-pay curve being edited in
+ * `ComfortCurveCard` — plotted in fill order so the shape of the curve (typically: pay
+ * more to reach a low fill fast, less once "enough" is already banked) is visible at a
+ * glance, not just as a row of numbers.
+ */
+export function CurveChart({ rows, color = "#2196F3" }: CurveChartProps) {
   if (rows.length === 0) {
     return (
       <EmptyState
