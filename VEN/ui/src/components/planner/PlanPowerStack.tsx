@@ -1,4 +1,4 @@
-import { StackedAreaChart } from "../controller/charts/StackedAreaChart";
+import { StackedTimeSeriesChart } from "../charts/StackedTimeSeriesChart";
 import type { StackedAreaPoint, AssetId } from "../controller/types";
 import { ASSET_COLORS } from "../controller/types";
 import type { Plan } from "../../api/types";
@@ -85,7 +85,7 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
           kW)
         </Typography>
       )}
-      <StackedAreaChart
+      <StackedTimeSeriesChart
         data={points}
         assetIds={assetIds}
         colorMap={ASSET_COLORS}
