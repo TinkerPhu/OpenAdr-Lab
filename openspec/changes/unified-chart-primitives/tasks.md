@@ -42,14 +42,20 @@
 
 ## 3. Shared kit: canonical per-unit value formatting
 
-- [ ] 3.1 Add a single formatter module (`charts/unitFormat.ts`) implementing the spec's
+- [x] 3.1 Add a single formatter module (`charts/unitFormat.ts`) implementing the spec's
       per-unit table: power (magnitude-aware W/kW, extending `formatPowerTick` to cover
       tooltips too), cost €/h (4dp), CO₂ rate g/h (1dp), CO₂ intensity g/kWh (3dp, kept
       distinct from CO₂ rate), tariff €/kWh (4dp), SoC % (1dp), temperature °C (1dp) —
-      each returning both the formatted number and its unit label
-- [ ] 3.2 Unit tests: one test per unit rule from the spec's table, including the
+      each returning both the formatted number and its unit label. Wired into every
+      tooltip found: `AssetTimelineChart`, `TariffChart`, `StackedAreaChart` (via a local
+      `signedPower` wrapper preserving its existing "+/-" sign convention),
+      `SimProfileChart`, `TimelineSeriesChart`, `TariffsLineChart` (which previously
+      formatted CO₂ intensity with the same rule as tariff — now split correctly). Also
+      wired all three raw-diagnostics charts onto `DIAGNOSTIC_CHART_HEIGHT` (was a bare
+      `260` literal in each file) while touching these files, ahead of task 6.4.
+- [x] 3.2 Unit tests: one test per unit rule from the spec's table, including the
       boundary case at exactly 1 kW (Watts below, kW at-and-above); a value's unit label
-      is never a bare `€` for €/kWh or €/h series
+      is never a bare `€` for €/kWh or €/h series — `__tests__/unitFormat.test.ts`
 
 ## 4. Shared kit: data-merge builder (the cursor-correctness fix)
 
