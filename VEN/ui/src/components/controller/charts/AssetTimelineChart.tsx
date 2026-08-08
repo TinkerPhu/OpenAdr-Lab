@@ -1,15 +1,4 @@
-import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
-import {
-  ComposedChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ReferenceArea,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
+import { ReferenceArea } from "recharts";
 import type { AssetTimelinePoint } from "../types";
 import type { ZoneDef, ForecastAccuracySample } from "../../../api/types";
 import {
@@ -29,9 +18,8 @@ import {
   formatTemperatureC,
 } from "../../charts/unitFormat";
 import { mergeTimestampedSeries, locfFillKeys, type TimestampedRow } from "../../charts/mergeSeries";
-import { renderNowLine } from "../../charts/NowLine";
-import { renderZoneShading } from "../../charts/ZoneShading";
-import { TOOLTIP_CONTENT_STYLE, TOOLTIP_ITEM_STYLE, TOOLTIP_LABEL_STYLE } from "../../charts/tooltipStyle";
+import { CELL_CHART_HEIGHT } from "../../charts/chartLayout";
+import { TimeSeriesChart, type TimeSeriesSeriesSpec, type TimeSeriesAxisSpec } from "../../charts/TimeSeriesChart";
 
 interface AssetTimelineChartProps {
   data: AssetTimelinePoint[];
@@ -227,184 +215,123 @@ export function AssetTimelineChart({
     minPowerSpanKw
   );
 
+  const axes: TimeSeriesAxisSpec[] = [
+    { id: "power", width: 46, domain: powerDomain, tickFormatter: formatPowerTick, ticks: zeroAnchoredTicks(powerDomain) },
+    { id: "cost", orientation: "right", width: 44, unit: " €/h", domain: costDomain, ticks: zeroAnchoredTicks(costDomain) },
+    { id: "co2", orientation: "right", width: 44, unit: " g/h", domain: co2Domain, ticks: zeroAnchoredTicks(co2Domain) },
+    ...(stateKey ? [{ id: "state", hidden: true, domain: (stateKey === "soc" ? [0, 1] : [0, 100]) as [number, number] }] : []),
+  ];
+
+  const series: TimeSeriesSeriesSpec[] = [
+    {
+      key: "Power [kW]",
+      axisId: "power",
+      dataKey: (row) => row.values?.["power_kw"] ?? null,
+      color,
+      strokeWidth: 2,
+    },
+    // forecast-accuracy-tracking: near/far forecast overlay — visually distinct from the
+    // actual Power line above (thin, dotted, muted) and from each other (dash pattern).
+    // Reads the same merged `chartData` as every other line via `dataKey`, so hover/tooltip
+    // stays aligned with the actual line. `stepAfter` (not a smooth curve) — each sample is
+    // the planner's prediction for one discrete plan slot, holding until the next sample
+    // supersedes it, same interpretation as the actual Power line's own `stepAfter`.
+    // `connectNulls` stays as a backstop; the LOCF fill above already removes in-range
+    // nulls between samples.
+    ...(hasNearForecast
+      ? [
+          {
+            key: "Forecast (near) [kW]",
+            axisId: "power",
+            dataKey: (row: TimestampedRow) => row.values?.["predicted_kw_near"] ?? null,
+            color,
+            strokeWidth: 1,
+            strokeOpacity: 0.6,
+            strokeDasharray: "2 3",
+            connectNulls: true,
+          },
+        ]
+      : []),
+    ...(hasFarForecast
+      ? [
+          {
+            key: "Forecast (far) [kW]",
+            axisId: "power",
+            dataKey: (row: TimestampedRow) => row.values?.["predicted_kw_far"] ?? null,
+            color,
+            strokeWidth: 1,
+            strokeOpacity: 0.6,
+            strokeDasharray: "6 3",
+            connectNulls: true,
+          },
+        ]
+      : []),
+    {
+      key: "Cost rate [€/h]",
+      axisId: "cost",
+      dataKey: (row) => row.values?.["cost_rate_eur_h"] ?? null,
+      color,
+      strokeWidth: 1.5,
+      strokeDasharray: "5 5",
+    },
+    {
+      key: "CO₂eq rate [g/h]",
+      axisId: "co2",
+      dataKey: (row) => row.values?.["co2_rate_g_h"] ?? null,
+      color,
+      strokeWidth: 1.5,
+      strokeDasharray: "2 2",
+    },
+    ...(stateKey
+      ? [
+          {
+            key: stateKey === "soc" ? "SoC [%]" : "T_tank [°C]",
+            axisId: "state",
+            dataKey: (row: TimestampedRow) => row.values?.[stateKey] ?? null,
+            color,
+            strokeWidth: 1.5,
+            strokeDasharray: "4 2",
+            type: "monotone" as const,
+          },
+        ]
+      : []),
+  ];
+
+  // PV curtailment shading: hardware-capped (neutral), planned (amber), unplanned (red) —
+  // asset-specific overlay, not the generic zone-shading primitive.
+  const curtailmentAreas = curtailmentZones.map((z, i) => (
+    <ReferenceArea
+      key={`curtail-${i}-${z.x1}`}
+      yAxisId="power"
+      x1={z.x1}
+      x2={z.x2}
+      fill={CURTAILMENT_COLORS[z.kind]}
+      ifOverflow="hidden"
+    />
+  ));
+
   return (
-    <ResponsiveContainer width="100%" height={CELL_CHART_HEIGHT}>
-      <ComposedChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-        <XAxis
-          dataKey="ts"
-          scale="time"
-          type="number"
-          domain={[tMin, tMax]}
-          ticks={xAxisTicks}
-          tickFormatter={formatTs}
-          tick={{ fontSize: 10 }}
-        />
-        <YAxis
-          yAxisId="power"
-          tick={{ fontSize: 10 }}
-          width={46}
-          tickFormatter={formatPowerTick}
-          domain={powerDomain}
-          ticks={zeroAnchoredTicks(powerDomain)}
-        />
-        <YAxis
-          yAxisId="cost"
-          orientation="right"
-          tick={{ fontSize: 10 }}
-          width={44}
-          unit=" €/h"
-          domain={costDomain}
-          ticks={zeroAnchoredTicks(costDomain)}
-        />
-        <YAxis
-          yAxisId="co2"
-          orientation="right"
-          tick={{ fontSize: 10 }}
-          width={44}
-          unit=" g/h"
-          domain={co2Domain}
-          ticks={zeroAnchoredTicks(co2Domain)}
-        />
-        {stateKey && (
-          <YAxis
-            yAxisId="state"
-            axisLine={false}
-            tickLine={false}
-            tick={false}
-            width={0}
-            domain={stateKey === "soc" ? [0, 1] : [0, 100]}
-          />
-        )}
-        <Tooltip
-          contentStyle={TOOLTIP_CONTENT_STYLE}
-          itemStyle={TOOLTIP_ITEM_STYLE}
-          labelStyle={TOOLTIP_LABEL_STYLE}
-          labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
-          formatter={(value: number, name: string) => {
-            if (name === "CO₂eq rate [g/h]") return [formatCo2RateGH(value), name];
-            if (name === "Cost rate [€/h]") return [formatCostRateEurH(value), name];
-            if (name === "SoC [%]") return [formatSocPct(value), name];
-            if (name === "T_tank [°C]") return [formatTemperatureC(value), name];
-            return [formatPowerValue(value), name];
-          }}
-        />
-        <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
-
-        {/* Power — solid. Accessor function required; dataKey dot-notation cannot traverse nested maps. */}
-        <Line
-          yAxisId="power"
-          type="stepAfter"
-          dataKey={(pt: AssetTimelinePoint) => pt.values?.["power_kw"] ?? null}
-          name="Power [kW]"
-          stroke={color}
-          strokeWidth={2}
-          dot={false}
-          connectNulls={false}
-          isAnimationActive={false}
-        />
-
-        {/* forecast-accuracy-tracking: near/far forecast overlay — visually distinct from the
-            actual Power line above (thin, dotted, muted) and from each other (dash pattern).
-            Reads the same merged `chartData` as every other line (see above) instead of its
-            own overridden `data` array, so hover/tooltip stays aligned with the actual line.
-            `stepAfter` (not a smooth curve) — each sample is the planner's prediction for one
-            discrete plan slot, holding until the next sample supersedes it, same interpretation
-            as the actual Power line's own `stepAfter`. `connectNulls` stays as a backstop; the
-            LOCF fill above already removes in-range nulls between samples. */}
-        {hasNearForecast && (
-          <Line
-            yAxisId="power"
-            type="stepAfter"
-            dataKey={(pt: AssetTimelinePoint) => pt.values?.["predicted_kw_near"] ?? null}
-            name="Forecast (near) [kW]"
-            stroke={color}
-            strokeWidth={1}
-            strokeOpacity={0.6}
-            strokeDasharray="2 3"
-            dot={false}
-            connectNulls
-            isAnimationActive={false}
-          />
-        )}
-        {hasFarForecast && (
-          <Line
-            yAxisId="power"
-            type="stepAfter"
-            dataKey={(pt: AssetTimelinePoint) => pt.values?.["predicted_kw_far"] ?? null}
-            name="Forecast (far) [kW]"
-            stroke={color}
-            strokeWidth={1}
-            strokeOpacity={0.6}
-            strokeDasharray="6 3"
-            dot={false}
-            connectNulls
-            isAnimationActive={false}
-          />
-        )}
-
-        {/* Cost rate — dashed, right axis */}
-        <Line
-          yAxisId="cost"
-          type="stepAfter"
-          dataKey={(pt: AssetTimelinePoint) => pt.values?.["cost_rate_eur_h"] ?? null}
-          name="Cost rate [€/h]"
-          stroke={color}
-          strokeWidth={1.5}
-          strokeDasharray="5 5"
-          dot={false}
-          connectNulls={false}
-          isAnimationActive={false}
-        />
-
-        {/* CO₂eq rate — dotted, second right axis */}
-        <Line
-          yAxisId="co2"
-          type="stepAfter"
-          dataKey={(pt: AssetTimelinePoint) => pt.values?.["co2_rate_g_h"] ?? null}
-          name="CO₂eq rate [g/h]"
-          stroke={color}
-          strokeWidth={1.5}
-          strokeDasharray="2 2"
-          dot={false}
-          connectNulls={false}
-          isAnimationActive={false}
-        />
-
-        {/* State line: SoC (EV/battery) or T_tank (heater) — hidden axis, tooltip-only values */}
-        {stateKey && (
-          <Line
-            yAxisId="state"
-            type="monotone"
-            dataKey={(pt: AssetTimelinePoint) => pt.values?.[stateKey] ?? null}
-            name={stateKey === "soc" ? "SoC [%]" : "T_tank [°C]"}
-            stroke={color}
-            strokeWidth={1.5}
-            strokeDasharray="4 2"
-            dot={false}
-            connectNulls={false}
-            isAnimationActive={false}
-          />
-        )}
-
-        {/* Zone background shading — rendered before data lines so they sit behind */}
-        {renderZoneShading("power", zones)}
-
-        {/* PV curtailment shading: hardware-capped (neutral), planned (amber), unplanned (red) */}
-        {curtailmentZones.map((z, i) => (
-          <ReferenceArea
-            key={`curtail-${i}-${z.x1}`}
-            yAxisId="power"
-            x1={z.x1}
-            x2={z.x2}
-            fill={CURTAILMENT_COLORS[z.kind]}
-            ifOverflow="hidden"
-          />
-        ))}
-
-        {/* NOW reference line */}
-        {renderNowLine("power", nowMs)}
-      </ComposedChart>
-    </ResponsiveContainer>
+    <TimeSeriesChart
+      data={chartData}
+      tMin={tMin}
+      tMax={tMax}
+      xAxisTickFormatter={formatTs}
+      xAxisTicks={xAxisTicks}
+      axes={axes}
+      series={series}
+      nowMs={nowMs}
+      referenceAxisId="power"
+      zones={zones}
+      extraReferenceAreas={curtailmentAreas}
+      tooltipFormatter={(value, name) => {
+        if (name === "CO₂eq rate [g/h]") return [formatCo2RateGH(value), name];
+        if (name === "Cost rate [€/h]") return [formatCostRateEurH(value), name];
+        if (name === "SoC [%]") return [formatSocPct(value), name];
+        if (name === "T_tank [°C]") return [formatTemperatureC(value), name];
+        return [formatPowerValue(value), name];
+      }}
+      height={CELL_CHART_HEIGHT}
+      margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
+    />
   );
 }
