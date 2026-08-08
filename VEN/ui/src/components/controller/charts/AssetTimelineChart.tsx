@@ -23,6 +23,13 @@ import {
   roundedTimeTicks,
   zeroAnchoredTicks,
 } from "../../charts/axisDomain";
+import {
+  formatPowerValue,
+  formatCostRateEurH,
+  formatCo2RateGH,
+  formatSocPct,
+  formatTemperatureC,
+} from "../../charts/unitFormat";
 
 interface AssetTimelineChartProps {
   data: AssetTimelinePoint[];
@@ -305,11 +312,11 @@ export function AssetTimelineChart({
           labelStyle={{ fontSize: 9, marginBottom: 1 }}
           labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
           formatter={(value: number, name: string) => {
-            if (name === "CO₂eq rate [g/h]") return [value.toFixed(1) + " g/h", name];
-            if (name === "Cost rate [€/h]") return [value.toFixed(4) + " €/h", name];
-            if (name === "SoC [%]") return [(value * 100).toFixed(1) + " %", name];
-            if (name === "T_tank [°C]") return [value.toFixed(1) + " °C", name];
-            return [value.toFixed(3) + " kW", name];
+            if (name === "CO₂eq rate [g/h]") return [formatCo2RateGH(value), name];
+            if (name === "Cost rate [€/h]") return [formatCostRateEurH(value), name];
+            if (name === "SoC [%]") return [formatSocPct(value), name];
+            if (name === "T_tank [°C]") return [formatTemperatureC(value), name];
+            return [formatPowerValue(value), name];
           }}
         />
         <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
