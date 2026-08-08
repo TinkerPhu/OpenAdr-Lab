@@ -685,13 +685,16 @@ window's ticks are appended, `HistoryPort::reconcile_forecast_actuals` fills `ac
 
 **UI**: the History page overlays near/far forecast lines on the PV, base_load, and
 site-residual `AssetTimelineChart` cells only (the tracked-asset set). The overlay is folded
-into the same per-timestamp array the actual Power line reads (`AssetTimelineChart.tsx`) rather
+into the same per-timestamp array the actual Power line reads, via the shared
+`mergeTimestampedSeries`/`locfFillKeys` utilities (`components/charts/mergeSeries.ts`) rather
 than given its own `data` override — recharts resolves tooltip hover by array index, not by
 re-matching timestamps across a series' independently-indexed `data`, so a forecast line on its
 own coarser (~5 min) array previously caused hover to show the actual line's value from an
 unrelated time; the sparse forecast samples are forward-filled (LOCF) across the shared array so
 their `stepAfter` line (matching the actual line's own step interpretation) has a value at every
-one-minute slot, not just the sample points.
+one-minute slot, not just the sample points. Every multi-series chart in `VEN/ui` (not just
+`AssetTimelineChart`) is built on this same merge utility, structurally preventing the same
+class of bug elsewhere.
 
 ### 4.10 Operational Diagnostics (WP-T1–T8, `docs/history/project_journal.md` — search "WP-T")
 

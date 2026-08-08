@@ -882,3 +882,42 @@ outes/sim.rs causes a T1+T2 double-solve race:
   `peer`/`source` trace for that specific event is gone forever. **Always capture
   `docker compose logs <service> > file` before any redeploy while actively investigating a
   live incident**, even if the redeploy itself is the fix.
+
+## Chart Cursor/Tooltip Correctness (openspec/changes/unified-chart-primitives/, 2026-08-08)
+
+- **Recharts resolves a hovered tooltip's value by array index, not by re-matching
+  timestamps across series.** Any chart plotting two series from two separately-indexed
+  `data` arrays (e.g. a 1-minute actual line and its own 5-minute forecast overlay) risks
+  showing one series' real value next to another series' value from an unrelated timestamp.
+  This bug class was fixed twice, independently, in two different files
+  (`AssetTimelineChart` in `117b44f`, `StackedAreaChart` earlier in `f7b911e`) before being
+  recognized as one root cause and fixed structurally: fold every series into ONE
+  timestamp-keyed row array before rendering, and give every `<Line>`/`<Area>` a `dataKey`
+  accessor into that single array — never its own independent `data` prop. The fix is a
+  contract enforced by the composition component's own shape (no prop path exists for a
+  per-series array), not a convention documented and hoped for.
+- **A regression test that only checks a derived property (e.g. "is the axis span narrow
+  enough?") can pass even when the underlying computation is still wrong.** The first fix
+  for `TariffChart`'s squeezed axis (splitting tariff onto its own `<YAxis>`) was tested with
+  `expect(tMax - tMin).toBeLessThan(1)` — which passed even though the axis still used
+  `minSpanDomain` (0-anchored), silently reintroducing a milder version of the exact squeeze
+  the split was meant to fix (an always-positive ~0.04-wide series got a `[0, 0.32]` domain
+  instead of `[0.28, 0.32]`). A code-review pass caught it days later. Prefer asserting the
+  actual bounds a fix is supposed to produce over a bound that merely happens to be satisfied
+  by both the correct and incorrect implementation.
+- **A domain-flooring helper's "anchor at 0" behavior is only correct for quantities with a
+  genuine zero baseline (a rate that can swing through "no cost"), not for a strictly-positive
+  price.** `minSpanDomain` (seeds `dataMin`/`dataMax` at 0, widens outward) is right for
+  cost-rate/CO2-rate axes; a second function, `tightSpanDomain` (fits tightly to real data,
+  widens symmetrically around the data's own center only when necessary, never touches 0),
+  was needed for tariff and CO2-intensity axes. Two helpers with different anchor semantics,
+  not one helper with a flag — the doc comment on each explains which quantities it's for and
+  why, so a future caller doesn't have to guess.
+- **Building "one universal chart component" was explicitly rejected in favor of a shared
+  primitives kit plus three named compositions** (`TimeSeriesChart`, `StackedTimeSeriesChart`,
+  `CurveChart`) — forcing genuinely different shapes (stacked areas with net-value tooltip
+  re-aggregation; a non-temporal X-axis) through one component's prop API would have relocated
+  duplication into branchy config instead of removing it. Migrating the raw-diagnostics charts
+  surfaced a 4th, real shape mismatch (`SimProfileChart`'s categorical X-axis) — left as its
+  own small component rather than forced into either composition. Not every chart belongs in
+  the same abstraction just because it's a chart.

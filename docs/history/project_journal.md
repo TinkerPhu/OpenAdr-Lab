@@ -7865,3 +7865,63 @@ asset/lead_kind filter, invalid lead_kind → 400) rather than a hand-built `App
 matching this route file's existing precedent (only `resolve_range` is unit-tested at the
 route layer; full route behavior is BDD-covered).
 
+### Unified Chart Primitives (openspec/changes/unified-chart-primitives, 2026-08-08)
+
+Prompted by a concept discussion about why the Controller/History diagrams kept needing
+repeated axis-labeling, sizing, and cursor-label fixes — git history showed the same bug
+classes fixed per-component instead of once centrally, most seriously the cursor/tooltip
+index-mismatch bug (`117b44f`, and its earlier twin `f7b911e` in `StackedAreaChart`):
+recharts resolves a hovered tooltip's value by array index, so two series fed from
+separately-indexed arrays (e.g. a 1-minute actual line and a 5-minute forecast line) could
+show one series' value next to another series' timestamp.
+
+**Design** (see the change's `design.md` for the full decision log): a shared kit of
+primitives (axis-domain/tick engine, per-unit formatting, the data-merge builder, NOW line,
+zone shading, tooltip styling, sizing, colors) plus three named compositions
+(`TimeSeriesChart`, `StackedTimeSeriesChart`, `CurveChart`) — explicitly not one universal
+chart control, since forcing `StackedAreaChart`'s stacking and `ComfortCurveChart`'s
+non-temporal X-axis through one component's prop API would have relocated the duplication
+into branchy config instead of removing it.
+
+**What changed**: `VEN/ui/src/components/charts/` is now the single home for chart-kit code
+— `chartLayout.ts`/`axisDomain.ts` moved out of `controller/`, `unitFormat.ts`/
+`mergeSeries.ts`/`NowLine.tsx`/`ZoneShading.tsx`/`tooltipStyle.ts`/`EmptyState.tsx` are new.
+`mergeSeries.ts` (`mergeTimestampedSeries`/`locfFillKeys`) is the generalized `117b44f` fix —
+every multi-series chart now folds all its series into one timestamp-keyed row array before
+rendering, with a reusable test helper (`testUtils/assertTooltipMatchesData.ts`) that catches
+a reintroduction of the old per-series-array pattern (verified it actually fails against a
+deliberately-broken accessor, not just that it passes against a correct one).
+`AssetTimelineChart.tsx`, `TariffChart.tsx`, `TariffsLineChart.tsx`, `TimelineSeriesChart.tsx`
+now render through the new `TimeSeriesChart` composition; `StackedAreaChart` and
+`ComfortCurveChart` were renamed to `StackedTimeSeriesChart`/`CurveChart` and moved into
+`charts/` for taxonomy consistency, keeping their own genuinely-different logic (stacking,
+non-temporal X) as their own code. `SimProfileChart` stayed separate — its X-axis is
+categorical (asset id), not temporal, a real shape mismatch found during migration, not a
+shortcut.
+
+Concrete fixes landed alongside the restructuring: `TariffChart` gained a third Y-axis
+(tariff €/kWh split from cost rate €/h — they were sharing one axis, so cost rate's larger
+range flattened the tariff curves); `zeroAnchoredTicks()` guarantees 0.0 is always a rendered
+tick on any axis whose domain straddles zero; canonical per-unit tooltip/tick precision
+replaced six independently-drifted rules; the two independent color palettes
+(`ASSET_COLORS`/`CHART_COLORS`) were merged into one `SERIES_COLORS` registry.
+
+**Key learning**: a code-review pass on the branch caught that the tariff-axis fix was
+incomplete — `TariffChart`'s new axis used `minSpanDomain`, which seeds its domain at 0 and
+only widens outward, so an always-positive tariff series still got a domain starting at 0,
+compressing the real ~0.04 range into a sliver of the axis — the exact "squeezed" defect the
+axis split was meant to fix, reintroduced by the 0-anchor. `tightSpanDomain()` (fits tightly
+to real data, only widens symmetrically around the data's own center, never anchors at 0) is
+the correct floor for a strictly-positive price series; `minSpanDomain`'s 0-anchor is correct
+only for rates with a genuine "no cost"/"no CO2" zero baseline. The regression test for the
+original fix (`tMax - tMin < 1`) passed either way — it tested a width bound, not the actual
+domain bounds, so it couldn't have caught the reintroduced bug. Strengthened to assert the
+real tight bounds directly.
+
+**Verification**: 487/488 VEN UI unit tests pass throughout every incremental commit (the one
+failure is a pre-existing, network-dependent test unrelated to this change), typecheck and
+eslint clean at every step. Not yet verified: a manual visual pass in a running dev server
+(Controller tab, History tab, Devices comfort-curve editor, Raw Diagnostics page) — flagged
+as outstanding before merge, since none of the automated checks can catch a rendering
+regression a human would see immediately.
+
