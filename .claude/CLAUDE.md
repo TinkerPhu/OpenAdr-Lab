@@ -18,6 +18,13 @@ user if the lock stays held unusually long instead of bypassing it. run_all_test
 acquires/releases the lock automatically (-l 180) for remote docker suites. Never run
 docker commands on Node1 while another owner holds an unexpired lock.
 
+ven1-log-capture (TEMPORARY, remove once resolved — tracked in docs/BACKLOG.md): while the
+ven-1 PV-injection mystery is open (docs/history/project_journal.md, "round 3"), run
+`bash scripts/capture_ven1_logs.sh` before ANY `docker compose build/up -d` that recreates
+`ven-1` on Node1 — rebuilding deletes the container's own logs (no aggregator on Node1),
+which has already destroyed potential evidence twice. Takes a few seconds; applies
+regardless of which skill/workflow triggers the redeploy.
+
 node2-lock: Node2 (192.168.1.104) is a second docker host, used to take build/test load
 off Node1. It shares the same lock script and mechanism as Node1 (docker_host_lock.sh isn't
 Node1-specific despite the name — the lock file is derived from the target host, so
