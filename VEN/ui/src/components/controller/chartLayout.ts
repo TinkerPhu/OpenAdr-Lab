@@ -12,3 +12,10 @@ export const CELL_LEFT_SECTION_WIDTH = 196; // px
 export const DEFAULT_WINDOW = { hoursBack: 1.0, hoursForward: 1.0 };
 /** Extended time window: 1 h back, 48 h forward (full plan horizon). */
 export const EXTENDED_WINDOW = { hoursBack: 1.0, hoursForward: 48.0 };
+
+/** X-axis tick spacing [minutes] for the default (2h-span) cell view — rounded to the
+ * wall-clock via `roundedTimeTicks`, same mechanism as the History page. */
+export const DEFAULT_TICK_INTERVAL_MINUTES = 10;
+/** X-axis tick spacing [minutes] for the extended (49h-span) cell view — falls back to
+ * hourly automatically via `roundedTimeTicks`'s density guard. */
+export const EXTENDED_TICK_INTERVAL_MINUTES = 30;
