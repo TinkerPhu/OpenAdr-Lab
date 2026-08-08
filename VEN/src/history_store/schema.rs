@@ -117,7 +117,7 @@ ALTER TABLE tick_samples RENAME COLUMN export_limit_kw TO generation_limit_kw;
 /// R-63: plan_snapshots was dead code — its only writer (`append_plan_snapshot`) was never
 /// called from any production path (only unit tests and the mock port), so `GET /history/plans`
 /// and the VEN UI's "Plans" panel were permanently, silently empty. No replacement mechanism —
-/// see `openspec/changes/forecast-accuracy-tracking/` (SCHEMA_V8 below) for a later, narrower
+/// see `docs/architecture/VEN_ARCHITECTURE.md` §4.9a (SCHEMA_V8 below) for a later, narrower
 /// mechanism that explicitly considered and rejected reviving this table for its own purposes.
 pub(super) const SCHEMA_V7: &str = "
 DROP TABLE plan_snapshots;
