@@ -128,23 +128,42 @@
 
 ## 6. Composition: TimeSeriesChart
 
-- [ ] 6.1 Build `charts/TimeSeriesChart.tsx` — multi-axis (left + up to 2 right + 1 hidden),
+- [x] 6.1 Build `charts/TimeSeriesChart.tsx` — multi-axis (left + up to 2 right + 1 hidden),
       time X-axis, configured via a declarative series list (`{ key, axis, kind, color,
-      unit, formatter }`), built on tasks 1–5's primitives
-- [ ] 6.2 Migrate `AssetTimelineChart` to a `TimeSeriesChart` configuration; verify output
-      is visually unchanged (per design.md — no intended visual delta for this chart)
-- [ ] 6.3 Migrate `TariffChart` to a `TimeSeriesChart` configuration with its new third
-      axis (task 9 covers the axis-split specifics)
-- [ ] 6.4 Migrate `SimProfileChart`, `TariffsLineChart`, `TimelineSeriesChart`
-      (raw-diagnostics) to `TimeSeriesChart` configurations using `DIAGNOSTIC_CHART_HEIGHT`;
-      `TariffsLineChart` gains the axis floor it previously lacked (intentional behavior
-      change per spec)
-- [ ] 6.5 Delete the old `AssetTimelineChart.tsx`/`TariffChart.tsx`/`SimProfileChart.tsx`/
-      `TariffsLineChart.tsx`/`TimelineSeriesChart.tsx` bespoke implementations once their
-      call sites (task 10) point at the new configurations
-- [ ] 6.6 Unit tests: each migrated chart's existing test suite passes against the new
-      composition (update fixtures/selectors as needed, not test intent); new tests for
-      the 3rd tariff axis and the raw-diagnostics color/precision/floor changes
+      unit, formatter }`), built on tasks 1–5's primitives. `tMin`/`tMax`/`nowMs`/
+      `referenceAxisId` are all optional — not every consumer has a live "now" concept
+      (discovered migrating `TariffsLineChart`, a planned-rates viewer with no NOW line).
+- [x] 6.2 Migrate `AssetTimelineChart` to a `TimeSeriesChart` configuration; verified output
+      is visually unchanged — all 56 existing tests across `AssetTimelineChart`/
+      `AssetCell`/`Controller`/`History` pass with zero test-file edits needed. PV
+      curtailment shading passed through via the new `extraReferenceAreas` prop, kept as
+      this chart's own asset-specific logic (classification/zone-building), not shared.
+- [x] 6.3 Migrate `TariffChart` to a `TimeSeriesChart` configuration with its third axis
+      (task 9's axis-split, done earlier, carried through unchanged in this migration)
+- [x] 6.4 Migrate `TariffsLineChart`, `TimelineSeriesChart` (raw-diagnostics) to
+      `TimeSeriesChart` configurations using `DIAGNOSTIC_CHART_HEIGHT`. `TariffsLineChart`
+      gains not just an axis floor but a full axis split (tariff €/kWh vs. CO2 intensity
+      g/kWh, via a new `tightSpanDomain`+`MIN_CO2_INTENSITY_SPAN_G_KWH`) — migrating it
+      surfaced the exact same squeeze bug just fixed in `TariffChart`, so fixed
+      consistently rather than only adding a floor as originally scoped.
+      **`SimProfileChart` excluded** — scope correction found during implementation: its
+      X-axis is categorical (asset id via `dataKey="name"`), not temporal, so it doesn't
+      fit `TimeSeriesChart` (or `CurveChart`, which is for a continuous numeric X). Left
+      on its existing shared primitives (axisDomain/unitFormat/tooltipStyle/chartLayout)
+      as its own minimal ~40-line component — a 4th genuinely distinct shape, not
+      duplication with anything else in the codebase.
+- [x] 6.5 Deleted the old bespoke implementations by rewriting them in place (not a
+      separate delete step) — each file's content became its `TimeSeriesChart`
+      configuration directly, so there was no parallel old/new pair to later remove.
+      `SimProfileChart.tsx` intentionally not touched (see 6.4).
+- [x] 6.6 Unit tests: `AssetTimelineChart` needed zero test changes; `TariffChart.test.tsx`
+      updated 3 assertions from string-`dataKey` to `name`-based lookup (the composition
+      uses accessor-function dataKeys per the cursor-correctness contract, so raw dataKey
+      is no longer a plain string to compare against — `name` is the same stable,
+      human-readable identifier already used by the tooltip/legend). New coverage for the
+      3rd tariff axis (task 9) and `TariffsLineChart`'s axis split. 487/488 tests pass
+      throughout (same pre-existing, unrelated network failure); typecheck and lint clean
+      at every step.
 
 ## 7. Composition: StackedTimeSeriesChart
 
