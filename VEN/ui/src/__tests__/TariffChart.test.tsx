@@ -1,9 +1,11 @@
 /**
- * TariffChart — dual Y-axis structure test
+ * TariffChart — triple Y-axis structure test
  *
- * Verifies that import/export/cost lines use the left "tariff" axis (€/kWh)
- * and the CO₂ rate line uses an independent right "co2" axis (g/h).
- * Without this separation the CO₂ values compress the tariff curves into invisibility.
+ * Verifies that import/export tariff lines use their own left "tariff" axis (€/kWh),
+ * cost rate uses an independent right "cost" axis (€/h), and CO₂ rate uses an
+ * independent right "co2" axis (g/h) — three different physical dimensions must
+ * never share a scale, since sharing one previously let a larger-magnitude series
+ * flatten a smaller one into invisibility.
  */
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -86,38 +88,67 @@ describe("TariffChart — dual Y-axis", () => {
     expect(screen.getByTestId("tariff-chart")).toBeInTheDocument();
   });
 
-  it("renders exactly two Y-axes: left for tariff, right for CO₂", () => {
+  it("renders exactly three Y-axes: left for tariff, two right for cost and CO₂", () => {
     render(<TariffChart data={data} nowMs={now} />);
-    expect(axes).toHaveLength(2);
+    expect(axes).toHaveLength(3);
 
     const left = axes.find((a) => a.yAxisId === "tariff" && a.orientation !== "right");
-    const right = axes.find((a) => a.yAxisId === "co2" && a.orientation === "right");
+    const cost = axes.find((a) => a.yAxisId === "cost" && a.orientation === "right");
+    const co2 = axes.find((a) => a.yAxisId === "co2" && a.orientation === "right");
 
     expect(left).toBeDefined();
-    expect(right).toBeDefined();
+    expect(cost).toBeDefined();
+    expect(co2).toBeDefined();
   });
 
-  it("CO₂ rate line is bound to the right co2 axis — not the tariff axis", () => {
+  it("CO₂ rate line is bound to the right co2 axis — not tariff or cost", () => {
     render(<TariffChart data={data} nowMs={now} />);
     const co2Line = lines.find((l) => l.dataKey === "totalCo2RateGH");
     expect(co2Line?.yAxisId).toBe("co2");
   });
 
-  it("tariff lines (import, export, cost rate) are all on the left tariff axis", () => {
+  it("cost rate line is bound to its own cost axis, not the tariff axis", () => {
+    render(<TariffChart data={data} nowMs={now} />);
+    const costLine = lines.find((l) => l.dataKey === "totalCostRateEurH");
+    expect(costLine?.yAxisId).toBe("cost");
+  });
+
+  it("import/export tariff lines are on the left tariff axis only", () => {
     render(<TariffChart data={data} nowMs={now} />);
     const tariffLines = lines.filter((l) => l.yAxisId === "tariff");
     const dataKeys = tariffLines.map((l) => l.dataKey as string);
     expect(dataKeys).toContain("importPriceEurKwh");
     expect(dataKeys).toContain("exportPriceEurKwh");
-    expect(dataKeys).toContain("totalCostRateEurH");
+    expect(dataKeys).not.toContain("totalCostRateEurH");
   });
 
-  it("left axis has € unit and right axis has g/h unit", () => {
+  it("each axis carries its own physically-correct unit label, never a bare €", () => {
     render(<TariffChart data={data} nowMs={now} />);
-    const left = axes.find((a) => a.yAxisId === "tariff");
-    const right = axes.find((a) => a.yAxisId === "co2");
-    expect(left?.unit).toBe(" €");
-    expect(right?.unit).toBe(" g/h");
+    const tariff = axes.find((a) => a.yAxisId === "tariff");
+    const cost = axes.find((a) => a.yAxisId === "cost");
+    const co2 = axes.find((a) => a.yAxisId === "co2");
+    expect(tariff?.unit).toBe(" €/kWh");
+    expect(cost?.unit).toBe(" €/h");
+    expect(co2?.unit).toBe(" g/h");
+  });
+
+  it("tariff's rendered domain is independent of cost rate's magnitude", () => {
+    // A fixture where cost rate's range would previously have flattened tariff
+    // when both shared one axis: tariff stays within [0.15, 0.35], cost swings
+    // far wider (±5 €/h during a high-power event).
+    const wideCostData: TariffTimePoint[] = [
+      { ts: now - 1_800_000, importPriceEurKwh: 0.20, exportPriceEurKwh: 0.15, co2GKwh: 300, totalCostRateEurH: 5.0, totalCo2RateGH: 750, gridPowerKw: 25 },
+      { ts: now + 1_800_000, importPriceEurKwh: 0.35, exportPriceEurKwh: 0.26, co2GKwh: 420, totalCostRateEurH: -4.5, totalCo2RateGH: -840, gridPowerKw: null },
+    ];
+    render(<TariffChart data={wideCostData} nowMs={now} />);
+    const tariff = axes.find((a) => a.yAxisId === "tariff");
+    const cost = axes.find((a) => a.yAxisId === "cost");
+    const [tMin, tMax] = tariff?.domain as [number, number];
+    const [cMin, cMax] = cost?.domain as [number, number];
+    // Tariff's own domain stays tight around its data (not stretched to ±5 by cost's range).
+    expect(tMax - tMin).toBeLessThan(1);
+    // Cost's domain, unconstrained by tariff, spans its own much wider real range.
+    expect(cMax - cMin).toBeGreaterThan(5);
   });
 
   it("renders one ReferenceArea per zone when zones prop is provided", () => {
