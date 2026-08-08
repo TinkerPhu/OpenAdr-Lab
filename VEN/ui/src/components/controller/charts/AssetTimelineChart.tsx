@@ -30,6 +30,7 @@ import {
   formatSocPct,
   formatTemperatureC,
 } from "../../charts/unitFormat";
+import { mergeTimestampedSeries, locfFillKeys, type TimestampedRow } from "../../charts/mergeSeries";
 
 interface AssetTimelineChartProps {
   data: AssetTimelinePoint[];
@@ -86,7 +87,7 @@ interface CurtailmentZone {
  * time, so any gap there is always a planned choice, never a hardware ceiling to distinguish
  * separately.
  */
-function classifyPvPoint(values: Record<string, number> | null | undefined): CurtailmentKind | null {
+function classifyPvPoint(values: Record<string, number | null> | null | undefined): CurtailmentKind | null {
   const powerKw = values?.["power_kw"];
   if (powerKw == null) return null;
 
@@ -122,7 +123,7 @@ const CURTAILMENT_COLORS: Record<CurtailmentKind, string> = {
 /** Derive contiguous shaded bands from per-point curtailment classification. Each band spans
  * from its first point's ts to the next point's ts (or, for the final run, one extra point-gap
  * beyond the last ts so the band remains visible). */
-function buildCurtailmentZones(data: AssetTimelinePoint[]): CurtailmentZone[] {
+function buildCurtailmentZones(data: TimestampedRow[]): CurtailmentZone[] {
   const zones: CurtailmentZone[] = [];
   let runStart: number | null = null;
   let runKind: CurtailmentKind | null = null;
@@ -182,30 +183,15 @@ export function AssetTimelineChart({
 
   // forecast-accuracy-tracking: folded into the SAME per-ts array as the actual line
   // (rather than passed to their own `<Line data={...}>` override) so every series shares
-  // one index space. Recharts resolves tooltip hover by array index, not by re-matching
-  // timestamps across a series' own overridden `data` — a forecast line on its own coarser
-  // 5-minute array previously caused the tooltip to read `chartData[i]` for the *actual*
-  // line at the wrong `i`, showing a real reading from a different time under the hovered
-  // hour's label. Merging avoids the mismatch entirely.
-  const merged: AssetTimelinePoint[] = (() => {
-    const byTs = new Map<number, AssetTimelinePoint>();
-    for (const pt of rawData) {
-      byTs.set(pt.ts, { ts: pt.ts, values: { ...(pt.values ?? {}) } });
-    }
-    const foldIn = (samples: ForecastAccuracySample[] | undefined, key: string) => {
-      for (const s of samples ?? []) {
-        const existing = byTs.get(s.target_ts);
-        if (existing) {
-          existing.values = { ...(existing.values ?? {}), [key]: s.predicted_kw };
-        } else {
-          byTs.set(s.target_ts, { ts: s.target_ts, values: { [key]: s.predicted_kw } });
-        }
-      }
-    };
-    foldIn(nearForecast, "predicted_kw_near");
-    foldIn(farForecast, "predicted_kw_far");
-    return [...byTs.values()].sort((a, b) => a.ts - b.ts);
-  })();
+  // one index space — see mergeSeries.ts's doc comment for the bug this structurally
+  // prevents (recharts resolves tooltip hover by array index, not by re-matching
+  // timestamps across a series' own overridden `data`).
+  const foldSamples = (samples: ForecastAccuracySample[] | undefined, key: string) =>
+    (samples ?? []).map((s) => ({ ts: s.target_ts, key, value: s.predicted_kw }));
+  const merged: TimestampedRow[] = mergeTimestampedSeries(rawData, [
+    ...foldSamples(nearForecast, "predicted_kw_near"),
+    ...foldSamples(farForecast, "predicted_kw_far"),
+  ]);
 
   // LOCF: carry the last known value forward into slots where a key has no sample —
   // state (soc / temp_c) needs this for the tooltip to always show the current state;
@@ -215,24 +201,7 @@ export function AssetTimelineChart({
   // otherwise `connectNulls` would draw the step but hovering the plateau in between
   // would show no forecast value, disagreeing with what's drawn.
   const locfKeys = [...(stateKey ? [stateKey] : []), "predicted_kw_near", "predicted_kw_far"];
-  const chartData: AssetTimelinePoint[] = (() => {
-    const last: Record<string, number | null> = {};
-    for (const k of locfKeys) last[k] = null;
-    return merged.map((pt) => {
-      const values = { ...(pt.values ?? {}) };
-      let changed = false;
-      for (const k of locfKeys) {
-        const v = values[k] ?? null;
-        if (v !== null) {
-          last[k] = v;
-        } else if (last[k] !== null) {
-          values[k] = last[k];
-          changed = true;
-        }
-      }
-      return changed ? { ...pt, values } : pt;
-    });
-  })();
+  const chartData: TimestampedRow[] = locfFillKeys(merged, locfKeys);
 
   const costDomain = minSpanDomain(
     chartData.map((p) => p.values?.["cost_rate_eur_h"] ?? null),

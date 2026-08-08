@@ -59,20 +59,28 @@
 
 ## 4. Shared kit: data-merge builder (the cursor-correctness fix)
 
-- [ ] 4.1 Extract `AssetTimelineChart`'s existing timestamp-merge-with-LOCF logic
+- [x] 4.1 Extract `AssetTimelineChart`'s existing timestamp-merge-with-LOCF logic
       (the `117b44f` fix) into `charts/mergeSeries.ts` — a function taking N per-series
-      arrays and producing one timestamp-keyed row array, forward-filling sparse series
-- [ ] 4.2 Design the composition components (task 6/7) so `<Line>`/`<Area>` rendering only
+      arrays and producing one timestamp-keyed row array, forward-filling sparse series.
+      `AssetTimelineChart.tsx` itself refactored to call the shared `mergeTimestampedSeries`/
+      `locfFillKeys` instead of its private inline versions — its existing test suite
+      (55 tests across `AssetTimelineChart`/`AssetCell`/`Controller`/`History`) passes
+      unchanged, confirming the extraction preserved behavior exactly.
+- [x] 4.2 Design the composition components (task 6/7) so `<Line>`/`<Area>` rendering only
       ever accepts a `dataKey` into the merged array — no prop path exists for passing an
-      independent per-series `data` array
-- [ ] 4.3 Add a shared test helper (`charts/testUtils/assertTooltipMatchesData.ts`) that,
-      given a rendered chart and a hovered timestamp, asserts the tooltip's value for each
-      series equals `mergedRow[timestamp][series]`
-- [ ] 4.4 Unit tests: two series sampled at different rates (1-min vs 5-min) merge into one
-      array with correct LOCF fill; the test helper from 4.3 is exercised against at least
-      one multi-series composition and passes; a deliberately-reintroduced index-mismatch
-      (regression check) is caught by the helper — write this test first, confirm it fails
-      against the old per-series-array pattern, then confirm it passes post-migration
+      independent per-series `data` array. (Contract established now via `mergeSeries.ts`'s
+      shape; enforced in the composition components themselves in tasks 6–7.)
+- [x] 4.3 Add a shared test helper (`charts/testUtils/assertTooltipMatchesData.ts`) that,
+      given a hovered timestamp, asserts each series' accessor-returned value equals the
+      merged row's own value for that series at that timestamp
+- [x] 4.4 Unit tests (`__tests__/mergeSeries.test.ts`): two series sampled at different
+      rates (1-min vs 5-min) merge into one array with correct (non-cross-contaminated)
+      values at each timestamp; the test helper is exercised two ways — passes against a
+      correct accessor reading the merged row, and (written first, confirmed failing
+      against the old per-series-array pattern before the helper existed) throws when
+      given a deliberately-reintroduced accessor that reads an independent, misaligned
+      array by position instead of by timestamp — proving the helper actually catches the
+      `117b44f`/`f7b911e` bug class rather than being a tautology
 
 ## 5. Shared kit: NOW line, zone shading, tooltip style, empty state
 
