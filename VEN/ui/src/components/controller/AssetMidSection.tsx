@@ -12,6 +12,7 @@ interface AssetMidSectionProps {
   hoursBack?: number;
   hoursForward?: number;
   zones?: ZoneDef[];
+  xAxisTickIntervalMinutes?: number;
 }
 
 export function AssetMidSection({
@@ -22,6 +23,7 @@ export function AssetMidSection({
   hoursBack = 1.0,
   hoursForward = 1.0,
   zones,
+  xAxisTickIntervalMinutes,
 }: AssetMidSectionProps) {
   const stateKey =
     assetId === "ev" || assetId === "battery" ? "soc" :
@@ -43,6 +45,7 @@ export function AssetMidSection({
           stateKey={stateKey}
           zones={zones}
           pvCurtailment={assetId === "pv"}
+          xAxisTickIntervalMinutes={xAxisTickIntervalMinutes}
         />
       </div>
     </Box>
