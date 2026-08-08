@@ -1,9 +1,10 @@
-import { Box, FormControl, InputLabel, MenuItem, Select, Typography } from "@mui/material";
+import { Box, FormControl, InputLabel, MenuItem, Select } from "@mui/material";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { SERIES_COLORS, type AssetTimelinePoint } from "../controller/types";
 import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick } from "../charts/axisDomain";
 import { formatPowerValue } from "../charts/unitFormat";
 import { DIAGNOSTIC_CHART_HEIGHT } from "../charts/chartLayout";
+import { EmptyState } from "../charts/EmptyState";
 
 interface TimelineSeriesChartProps {
   data: Record<string, AssetTimelinePoint[]>;
@@ -41,9 +42,11 @@ export function TimelineSeriesChart({ data, selectedSeries, onSeriesChange }: Ti
       </FormControl>
 
       {points.length === 0 ? (
-        <Typography variant="body2" color="text.secondary" data-testid="timeline-series-chart">
-          No data for selected series
-        </Typography>
+        <EmptyState
+          testId="timeline-series-chart"
+          message="No data for selected series"
+          height={DIAGNOSTIC_CHART_HEIGHT}
+        />
       ) : (
         <div data-testid="timeline-series-chart">
           <ResponsiveContainer width="100%" height={DIAGNOSTIC_CHART_HEIGHT}>

@@ -84,17 +84,35 @@
 
 ## 5. Shared kit: NOW line, zone shading, tooltip style, empty state
 
-- [ ] 5.1 Extract the NOW `<ReferenceLine>` block (color, dash pattern, label) duplicated
-      in `AssetTimelineChart`/`StackedAreaChart`/`TariffChart` into `charts/NowLine.tsx`
-- [ ] 5.2 Extract the `zones?.map(...)` `<ReferenceArea>` block into `charts/ZoneShading.tsx`
-- [ ] 5.3 Extract tooltip container styling (`contentStyle`/`itemStyle`/`labelStyle`) into
+- [x] 5.1 Extract the NOW `<ReferenceLine>` block (color, dash pattern, label) duplicated
+      in `AssetTimelineChart`/`StackedAreaChart`/`TariffChart` into `charts/NowLine.tsx`.
+      Implemented as a `renderNowLine()` function returning the element directly (not a
+      wrapping component) — recharts inspects its direct children's types to compute axis
+      domains/positioning, so an intermediate custom component type would risk changing
+      what recharts sees at that position in the tree; a function call spliced as
+      `{renderNowLine(...)}` produces the identical element, avoiding that risk entirely.
+- [x] 5.2 Extract the `zones?.map(...)` `<ReferenceArea>` block into `charts/ZoneShading.tsx`
+      — same function-not-component approach as 5.1, for the same reason.
+- [x] 5.3 Extract tooltip container styling (`contentStyle`/`itemStyle`/`labelStyle`) into
       `charts/tooltipStyle.ts`, consumed by both the declarative `<Tooltip>` prop path and
-      `StackedAreaTooltip`'s custom JSX
-- [ ] 5.4 Extract one empty-state component (`charts/EmptyState.tsx`), replacing both the
-      2-point-placeholder-array pattern and the `data.length === 0` early-return pattern
-      with a single chosen strategy
-- [ ] 5.5 Unit tests: NOW line renders at the correct x-position given `nowMs`; zone shading
-      renders the given zones; empty-state component renders for zero-length data
+      `StackedAreaTooltip`'s custom JSX (added `TOOLTIP_BOX_STYLE`, replicating recharts'
+      own default tooltip box chrome for the custom-JSX path)
+- [x] 5.4 Extract one empty-state component (`charts/EmptyState.tsx`) — scoped narrower
+      than originally planned: covers only the three message-based charts
+      (`ComfortCurveChart`, `TariffsLineChart`, `TimelineSeriesChart`), sharing layout/
+      styling only, NOT message text (each keeps its own contextual wording) and NOT the
+      2-point-placeholder pattern used by `AssetTimelineChart`/`TariffChart`/
+      `StackedAreaChart` — that pattern exists to keep axes/NOW-line machinery rendering
+      even with no data, a materially different need from a bare "no data" message, so
+      forcing both into one strategy would have been a real behavior regression (losing
+      axis rendering), not deduplication. All existing test IDs and exact message text
+      (`getByText("No data for selected series")`) preserved unchanged.
+- [x] 5.5 Unit tests: covered via the existing (unchanged, still-passing) test suites for
+      each consumer — `AssetTimelineChart`/`TariffChart`/`StackedAreaChart` (NOW line +
+      zone shading rendering, via their existing `xAxisTicks`/`referenceAreas`-capturing
+      mocks), `ComfortCurveCard`/`RawDiagnostics` (empty-state rendering). No behavior
+      changed for any of these five charts, so no new assertions were needed beyond
+      confirming the existing 132 tests across these files still pass unchanged.
 
 ## 6. Composition: TimeSeriesChart
 
