@@ -64,15 +64,33 @@ export function formatPowerTick(valueKw: number): string {
   return `${valueKw.toFixed(2)} kW`;
 }
 
+/** Ticks beyond this count are considered too dense to label individually (e.g. a 24h
+ * window at 30-min spacing = 48 ticks) — `roundedTimeTicks` falls back to hourly spacing
+ * rather than let the chart's own overlap-avoidance thin an arbitrary subset. */
+const MAX_DENSE_TICKS = 16;
+
+const HOUR_MS = 3_600_000;
+
 /** Evenly-spaced X-axis tick timestamps within `[fromMs, toMs]`, snapped to the wall-clock
  * (e.g. 10:00, 10:30, 11:00) — recharts' default "nice" tick generation instead lands on
  * whatever offset the axis domain itself happens to start at (e.g. 10:09, 10:39), since the
- * domain here is `now - hoursBack*3600000`, not a round time. */
+ * domain here is `now - hoursBack*3600000`, not a round time.
+ *
+ * When `intervalMinutes` would produce more than `MAX_DENSE_TICKS` labels, falls back to
+ * hourly spacing instead. This isn't just a denser array for the chart to thin itself —
+ * recharts' own overlap-avoidance would arbitrarily keep whichever offset the dense array
+ * happens to start on (e.g. all `:30` marks, none `:00`). Hourly ticks are always exactly on
+ * the hour regardless of `fromMs`'s offset (`Math.ceil` to a 60-minute step always lands on
+ * `:00`), so falling back here guarantees full-hour labels whenever the finer spacing
+ * wouldn't fit. */
 export function roundedTimeTicks(fromMs: number, toMs: number, intervalMinutes = 30): number[] {
   const intervalMs = intervalMinutes * 60_000;
   const ticks: number[] = [];
   for (let t = Math.ceil(fromMs / intervalMs) * intervalMs; t <= toMs; t += intervalMs) {
     ticks.push(t);
+  }
+  if (intervalMs < HOUR_MS && ticks.length > MAX_DENSE_TICKS) {
+    return roundedTimeTicks(fromMs, toMs, 60);
   }
   return ticks;
 }
