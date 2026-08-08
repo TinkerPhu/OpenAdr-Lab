@@ -120,4 +120,24 @@ describe("roundedTimeTicks", () => {
     const to = Date.UTC(2026, 0, 1, 10, 10, 0);
     expect(roundedTimeTicks(from, to, 30)).toEqual([]);
   });
+
+  it("falls back to hourly, full-hour-anchored ticks when a 30-min window is too dense (e.g. 24h)", () => {
+    // A History-page-sized window starting at an arbitrary offset (10:07, not on any
+    // 30-min mark) — 30-min spacing here would produce 48 ticks, which is exactly the
+    // case that used to leave only :30 marks after the chart thinned the array itself.
+    const from = Date.UTC(2026, 0, 1, 10, 7, 0);
+    const to = Date.UTC(2026, 0, 2, 10, 7, 0);
+    const ticks = roundedTimeTicks(from, to, 30);
+    expect(ticks.length).toBeLessThanOrEqual(25);
+    for (const t of ticks) {
+      expect(new Date(t).getUTCMinutes()).toBe(0);
+    }
+  });
+
+  it("keeps 30-min spacing (with half-hour marks) when the window is short enough to fit", () => {
+    const from = Date.UTC(2026, 0, 1, 10, 9, 0);
+    const to = Date.UTC(2026, 0, 1, 12, 9, 0);
+    const ticks = roundedTimeTicks(from, to, 30);
+    expect(ticks.some((t) => new Date(t).getUTCMinutes() === 30)).toBe(true);
+  });
 });
