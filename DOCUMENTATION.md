@@ -210,7 +210,7 @@ three states: hardware-capped (neutral — the inverter's own ceiling, not a rea
 imposed curtailment (amber, past and future), and unplanned imposed curtailment (red, past only).
 See `openspec/changes/pv-curtailment-history/`.
 
-> **Reference:** [asset_simulation.md](docs/architecture/asset_simulation.md) · [ven_asset_interface_spec.md](docs/architecture/ven_asset_interface_spec.md)
+> **Reference:** [asset_simulation.md](docs/architecture/asset_simulation.md) · [ven_asset_interface_spec.md](docs/architecture/ven_asset_interface_spec.md) · [chart_diagrams.md § Special features](docs/architecture/chart_diagrams.md)
 
 ### 2.2 Energy Planning (MILP)
 *(UC-03, UC-04, UC-05, UC-07, UC-10; FR-ASSET-02)*

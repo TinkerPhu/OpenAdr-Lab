@@ -3,6 +3,7 @@
 **Authoritative reference for VEN components, data flows, planning algorithm, simulator, and API.**
 Domain vocabulary is in [docs/REQUIREMENTS.md](../REQUIREMENTS.md).
 VTN/BFF architecture is in [docs/architecture/VTN_ARCHITECTURE.md](VTN_ARCHITECTURE.md).
+VEN UI chart/diagram architecture is in [docs/architecture/chart_diagrams.md](chart_diagrams.md).
 
 ---
 
@@ -684,17 +685,11 @@ window's ticks are appended, `HistoryPort::reconcile_forecast_actuals` fills `ac
 `asset_id`/`lead_kind` filters; an invalid `lead_kind` value returns 400.
 
 **UI**: the History page overlays near/far forecast lines on the PV, base_load, and
-site-residual `AssetTimelineChart` cells only (the tracked-asset set). The overlay is folded
-into the same per-timestamp array the actual Power line reads, via the shared
-`mergeTimestampedSeries`/`locfFillKeys` utilities (`components/charts/mergeSeries.ts`) rather
-than given its own `data` override — recharts resolves tooltip hover by array index, not by
-re-matching timestamps across a series' independently-indexed `data`, so a forecast line on its
-own coarser (~5 min) array previously caused hover to show the actual line's value from an
-unrelated time; the sparse forecast samples are forward-filled (LOCF) across the shared array so
-their `stepAfter` line (matching the actual line's own step interpretation) has a value at every
-one-minute slot, not just the sample points. Every multi-series chart in `VEN/ui` (not just
-`AssetTimelineChart`) is built on this same merge utility, structurally preventing the same
-class of bug elsewhere.
+site-residual `AssetTimelineChart` cells only (the tracked-asset set), via the shared
+data-merge/LOCF mechanism every multi-series chart in `VEN/ui` is built on — see
+[docs/architecture/chart_diagrams.md](chart_diagrams.md)'s "cursor-correctness invariant"
+and "Special features → Forecast-accuracy overlay" sections for the full mechanism and why
+it's structured this way.
 
 ### 4.10 Operational Diagnostics (WP-T1–T8, `docs/history/project_journal.md` — search "WP-T")
 
