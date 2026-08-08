@@ -6,13 +6,11 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ReferenceLine,
-  ReferenceArea,
   Legend,
   ResponsiveContainer,
 } from "recharts";
 import type { TariffTimePoint } from "../types";
-import { COLOR_NOW, SERIES_COLORS } from "../types";
+import { SERIES_COLORS } from "../types";
 import type { ZoneDef } from "../../../api/types";
 import {
   minSpanDomain,
@@ -23,6 +21,9 @@ import {
   zeroAnchoredTicks,
 } from "../../charts/axisDomain";
 import { formatCo2RateGH, formatCostRateEurH, formatTariffEurKwh } from "../../charts/unitFormat";
+import { renderNowLine } from "../../charts/NowLine";
+import { renderZoneShading } from "../../charts/ZoneShading";
+import { TOOLTIP_CONTENT_STYLE, TOOLTIP_ITEM_STYLE, TOOLTIP_LABEL_STYLE } from "../../charts/tooltipStyle";
 
 const COLOR_IMPORT_TARIFF = SERIES_COLORS.import_tariff;
 const COLOR_EXPORT_TARIFF = SERIES_COLORS.export_tariff;
@@ -166,9 +167,9 @@ export function TariffChart({
             ticks={zeroAnchoredTicks(co2Domain)}
           />
           <Tooltip
-            contentStyle={{ fontSize: 9, padding: "1px 5px" }}
-            itemStyle={{ padding: "0" }}
-            labelStyle={{ fontSize: 9, marginBottom: 1 }}
+            contentStyle={TOOLTIP_CONTENT_STYLE}
+            itemStyle={TOOLTIP_ITEM_STYLE}
+            labelStyle={TOOLTIP_LABEL_STYLE}
             labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
             formatter={(value: number, name: string) => {
               if (name === "CO₂ rate [g/h]") return [formatCo2RateGH(value), name];
@@ -235,25 +236,10 @@ export function TariffChart({
           />
 
           {/* Zone background shading — rendered before data lines so they sit behind */}
-          {zones?.map((z, i) => (
-            <ReferenceArea
-              key={z.from}
-              yAxisId="tariff"
-              x1={new Date(z.from).getTime()}
-              x2={new Date(z.to).getTime()}
-              fill={`rgba(0,0,0,${0.04 * (i + 1)})`}
-              ifOverflow="hidden"
-            />
-          ))}
+          {renderZoneShading("tariff", zones)}
 
           {/* NOW reference line */}
-          <ReferenceLine
-            yAxisId="tariff"
-            x={nowMs}
-            stroke={COLOR_NOW}
-            strokeDasharray="3 3"
-            label={{ value: "NOW", position: "top", fontSize: 9, fill: COLOR_NOW }}
-          />
+          {renderNowLine("tariff", nowMs)}
         </ComposedChart>
       </ResponsiveContainer>
     </div>

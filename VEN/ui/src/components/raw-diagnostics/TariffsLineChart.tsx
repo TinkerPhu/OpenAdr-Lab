@@ -3,6 +3,7 @@ import type { PlannedRates } from "../../api/types";
 import { SERIES_COLORS } from "../controller/types";
 import { DIAGNOSTIC_CHART_HEIGHT } from "../charts/chartLayout";
 import { formatTariffEurKwh, formatCo2IntensityGKwh } from "../charts/unitFormat";
+import { EmptyState } from "../charts/EmptyState";
 
 interface TariffsLineChartProps {
   data: PlannedRates;
@@ -10,7 +11,13 @@ interface TariffsLineChartProps {
 
 export function TariffsLineChart({ data }: TariffsLineChartProps) {
   if (data.length === 0) {
-    return <div data-testid="tariffs-line-chart">No tariff data</div>;
+    return (
+      <EmptyState
+        testId="tariffs-line-chart"
+        message="No tariff data"
+        height={DIAGNOSTIC_CHART_HEIGHT}
+      />
+    );
   }
 
   const points = data.map((snap) => ({
