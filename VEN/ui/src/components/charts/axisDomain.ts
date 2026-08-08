@@ -41,15 +41,47 @@ export function minSpanDomain(
   return [roundToStep(center - minSpan / 2), roundToStep(center + minSpan / 2)];
 }
 
+/**
+ * Like `minSpanDomain`, but does NOT anchor the domain at 0 — `minSpanDomain` seeds
+ * `dataMin`/`dataMax` at 0 and only widens from there, which is correct for rate axes
+ * where "no cost"/"no CO2" is itself a meaningful baseline worth always showing, but wrong
+ * for a strictly-positive price series like tariff: an always-positive series (e.g.
+ * 0.28–0.32 €/kWh) would still get a domain of `[0, 0.32]` from `minSpanDomain`, visually
+ * compressing the real variation into the top slice of the axis — the exact "squeezed"
+ * defect a floor is supposed to fix, just reintroduced by the 0-anchor. This function fits
+ * tightly to the real data (like recharts' own `["auto","auto"]`) and only widens
+ * symmetrically around the data's own center when the real span is narrower than `minSpan`.
+ */
+export function tightSpanDomain(
+  values: Array<number | null | undefined>,
+  minSpan: number
+): [number, number] {
+  let dataMin: number | null = null;
+  let dataMax: number | null = null;
+  for (const v of values) {
+    if (v === null || v === undefined || !Number.isFinite(v)) continue;
+    if (dataMin === null || v < dataMin) dataMin = v;
+    if (dataMax === null || v > dataMax) dataMax = v;
+  }
+  if (dataMin === null || dataMax === null) return [-minSpan / 2, minSpan / 2];
+
+  const span = dataMax - dataMin;
+  if (span >= minSpan) return [roundToStep(dataMin), roundToStep(dataMax)];
+
+  const center = roundToStep((dataMin + dataMax) / 2);
+  return [roundToStep(center - minSpan / 2), roundToStep(center + minSpan / 2)];
+}
+
 /** Cost-rate axis floor [€/h] — keeps sub-cent residual noise from filling the chart. */
 export const MIN_COST_RATE_SPAN_EUR_H = 0.05;
 
 /** CO2-rate axis floor [g/h] — same rationale, sized for typical asset CO2 rates. */
 export const MIN_CO2_RATE_SPAN_G_H = 50;
 
-/** Tariff axis floor [€/kWh] — same rationale as the cost-rate/CO2 floors above; the
- * tariff axis previously had no floor at all, letting near-flat tariff periods get
- * auto-scaled to fill the chart the same way the unfloored cost-rate axis used to. */
+/** Tariff axis floor [€/kWh], used with `tightSpanDomain` (not `minSpanDomain` — tariff is
+ * a strictly-positive price, not a rate that meaningfully swings through a 0 baseline; see
+ * `tightSpanDomain`'s doc comment). The tariff axis previously had no floor at all, letting
+ * near-flat tariff periods auto-scale to fill the chart. */
 export const MIN_TARIFF_SPAN_EUR_KWH = 0.02;
 
 /** Power axis floor [kW] = 5 W — the residual/computed series (e.g. site residual) are

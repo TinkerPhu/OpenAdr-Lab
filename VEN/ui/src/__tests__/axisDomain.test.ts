@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   minSpanDomain,
+  tightSpanDomain,
   MIN_POWER_SPAN_KW,
   MIN_TARIFF_SPAN_EUR_KWH,
   formatPowerTick,
@@ -147,8 +148,47 @@ describe("roundedTimeTicks", () => {
 describe("MIN_TARIFF_SPAN_EUR_KWH", () => {
   it("never lets a near-flat tariff series auto-zoom narrower than the floor", () => {
     const values = [0.21, 0.2101, 0.2099];
-    const [min, max] = minSpanDomain(values, MIN_TARIFF_SPAN_EUR_KWH);
+    const [min, max] = tightSpanDomain(values, MIN_TARIFF_SPAN_EUR_KWH);
     expect(max - min).toBeGreaterThanOrEqual(MIN_TARIFF_SPAN_EUR_KWH - 1e-12);
+  });
+});
+
+describe("tightSpanDomain", () => {
+  it("does NOT anchor at 0 for an always-positive series — the bug minSpanDomain would have", () => {
+    // A realistic tariff band that never approaches 0. minSpanDomain would return
+    // [0, 0.32], compressing this real ~0.04 range into the top ~12% of the axis —
+    // exactly the "squeezed" defect this function exists to avoid reintroducing.
+    const values = [0.28, 0.30, 0.32, 0.29];
+    const [min, max] = tightSpanDomain(values, 0.02);
+    expect(min).toBeCloseTo(0.28, 9);
+    expect(max).toBeCloseTo(0.32, 9);
+  });
+
+  it("still expands a near-flat series to the minimum span, centered on the real data", () => {
+    const values = [0.30, 0.3001, 0.2999];
+    const [min, max] = tightSpanDomain(values, 0.02);
+    expect(max - min).toBeCloseTo(0.02, 9);
+    expect((min + max) / 2).toBeCloseTo(0.3, 9);
+  });
+
+  it("handles a negative-only series without forcing 0 into the domain", () => {
+    const values = [-0.5, -0.3, -0.4];
+    const [min, max] = tightSpanDomain(values, 0.02);
+    expect(min).toBeCloseTo(-0.5, 9);
+    expect(max).toBeCloseTo(-0.3, 9);
+  });
+
+  it("falls back to a span centered on 0 when there is no data at all", () => {
+    const [min, max] = tightSpanDomain([], 0.02);
+    expect(min).toBeCloseTo(-0.01, 9);
+    expect(max).toBeCloseTo(0.01, 9);
+  });
+
+  it("ignores null and undefined entries", () => {
+    const values = [null, 0.28, undefined, 0.32, null];
+    const [min, max] = tightSpanDomain(values, 0.02);
+    expect(min).toBeCloseTo(0.28, 9);
+    expect(max).toBeCloseTo(0.32, 9);
   });
 });
 

@@ -12,6 +12,7 @@ import type { AssetId, AssetSummary, AssetTimelinePoint, StackedAreaPoint } from
 import { ASSET_COLORS, COLOR_ASSET_FALLBACK } from "./types";
 import { StackedAreaChart } from "./charts/StackedAreaChart";
 import type { ZoneDef } from "../../api/types";
+import { formatSignedPowerValue } from "../charts/unitFormat";
 
 /** Discover all asset IDs present in the timelines (everything except "grid"). */
 function discoverAssetIds(allTimelines: Record<string, AssetTimelinePoint[]>): AssetId[] {
@@ -103,13 +104,12 @@ export function GridAccumulatedCell({
             data-testid={`accumulated-power-${s.assetId}`}
             sx={{ color: ASSET_COLORS[s.assetId] ?? COLOR_ASSET_FALLBACK }}
           >
-            {s.label}: {s.powerKw >= 0 ? "+" : ""}
-            {s.powerKw.toFixed(2)} kW
+            {s.label}: {formatSignedPowerValue(s.powerKw)}
           </Typography>
         ))}
         <Divider sx={{ my: 0.5 }} />
         <Typography variant="caption" color="text.secondary" data-testid="accumulated-grid-power">
-          Grid: {gridPowerKw >= 0 ? "+" : ""}{gridPowerKw.toFixed(2)} kW
+          Grid: {formatSignedPowerValue(gridPowerKw)}
         </Typography>
       </Box>
 
