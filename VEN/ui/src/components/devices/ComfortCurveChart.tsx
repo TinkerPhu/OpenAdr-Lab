@@ -11,6 +11,7 @@ import { Box } from "@mui/material";
 import type { ComfortRate } from "../../api/types";
 import { CELL_CHART_HEIGHT } from "../charts/chartLayout";
 import { EmptyState } from "../charts/EmptyState";
+import { formatTariffEurKwh } from "../charts/unitFormat";
 
 interface ComfortCurveChartProps {
   rows: ComfortRate[];
@@ -58,7 +59,7 @@ export function ComfortCurveChart({ rows, color = "#2196F3" }: ComfortCurveChart
           />
           <Tooltip
             formatter={(value: number, name: string) =>
-              name === "bidEurKwh" ? [`€${value.toFixed(3)}/kWh`, "Max bid"] : [value, name]
+              name === "bidEurKwh" ? [formatTariffEurKwh(value), "Max bid"] : [value, name]
             }
             labelFormatter={(fillPct: number) => `Fill: ${fillPct}%`}
           />

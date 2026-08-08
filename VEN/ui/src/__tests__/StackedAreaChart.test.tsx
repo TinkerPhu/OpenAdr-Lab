@@ -103,6 +103,20 @@ describe("StackedAreaTooltip", () => {
     expect(screen.getByText(/\+1\.00 kW/)).toBeInTheDocument();
   });
 
+  it("keeps a visible sign for a sub-watt negative residual that rounds to 0 W", () => {
+    // -0.0002 kW = -0.2 W, rounds to 0 W in formatPowerValue's Watts branch. A naive
+    // `kw >= 0 ? "+" : ""` + rounded-string approach silently drops the sign here
+    // (JS stringifies Math.round(-0.2) as "0", not "-0").
+    const payload = makePayload([
+      { name: "ev +", value: 0 },
+      { name: "ev -", value: -0.0002 },
+    ]);
+    render(
+      <StackedAreaTooltip active={true} payload={payload as never} label={1000} colorMap={colorMap} />
+    );
+    expect(screen.getByText(/-0 W/)).toBeInTheDocument();
+  });
+
   it("shows grid line separately below a divider", () => {
     const payload = makePayload([
       { name: "ev +", value: 3.0 },

@@ -14,6 +14,7 @@ import { SERIES_COLORS } from "../types";
 import type { ZoneDef } from "../../../api/types";
 import {
   minSpanDomain,
+  tightSpanDomain,
   MIN_CO2_RATE_SPAN_G_H,
   MIN_COST_RATE_SPAN_EUR_H,
   MIN_TARIFF_SPAN_EUR_KWH,
@@ -107,8 +108,11 @@ export function TariffChart({
   );
   // Tariff (€/kWh) and cost rate (€/h) are different physical dimensions and must not
   // share a Y-axis — plotting them together previously let cost rate's range flatten the
-  // tariff curves whenever the two magnitudes diverged.
-  const tariffDomain = minSpanDomain(
+  // tariff curves whenever the two magnitudes diverged. tightSpanDomain (not minSpanDomain)
+  // — tariff is a strictly-positive price, so anchoring the domain at 0 would still
+  // compress a narrow real range (e.g. 0.28-0.32) into a sliver of the axis, undoing the
+  // point of splitting the axis out in the first place.
+  const tariffDomain = tightSpanDomain(
     clipped.flatMap((p) => [p.importPriceEurKwh, p.exportPriceEurKwh]),
     MIN_TARIFF_SPAN_EUR_KWH
   );
