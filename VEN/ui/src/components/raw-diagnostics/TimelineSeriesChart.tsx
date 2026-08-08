@@ -1,10 +1,11 @@
 import { Box, FormControl, InputLabel, MenuItem, Select } from "@mui/material";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { SERIES_COLORS, type AssetTimelinePoint } from "../controller/types";
 import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick } from "../charts/axisDomain";
 import { formatPowerValue } from "../charts/unitFormat";
 import { DIAGNOSTIC_CHART_HEIGHT } from "../charts/chartLayout";
 import { EmptyState } from "../charts/EmptyState";
+import { TimeSeriesChart } from "../charts/TimeSeriesChart";
+import type { TimestampedRow } from "../charts/mergeSeries";
 
 interface TimelineSeriesChartProps {
   data: Record<string, AssetTimelinePoint[]>;
@@ -14,12 +15,12 @@ interface TimelineSeriesChartProps {
 
 export function TimelineSeriesChart({ data, selectedSeries, onSeriesChange }: TimelineSeriesChartProps) {
   const seriesKeys = Object.keys(data);
-  const points = (data[selectedSeries] ?? []).map((p) => ({
+  const points: TimestampedRow[] = (data[selectedSeries] ?? []).map((p) => ({
     ts: p.ts,
-    power_kw: p.values?.power_kw ?? null,
+    values: { power_kw: p.values?.power_kw ?? null },
   }));
   const powerDomain = minSpanDomain(
-    points.map((p) => p.power_kw),
+    points.map((p) => p.values?.power_kw ?? null),
     MIN_POWER_SPAN_KW
   );
 
@@ -48,34 +49,25 @@ export function TimelineSeriesChart({ data, selectedSeries, onSeriesChange }: Ti
           height={DIAGNOSTIC_CHART_HEIGHT}
         />
       ) : (
-        <div data-testid="timeline-series-chart">
-          <ResponsiveContainer width="100%" height={DIAGNOSTIC_CHART_HEIGHT}>
-            <LineChart data={points} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis
-                dataKey="ts"
-                scale="time"
-                type="number"
-                domain={["auto", "auto"]}
-                tickFormatter={(v: number) => new Date(v).toLocaleTimeString()}
-              />
-              <YAxis tickFormatter={formatPowerTick} domain={powerDomain} />
-              <Tooltip
-                labelFormatter={(v: number) => new Date(v).toLocaleString()}
-                formatter={(v: number) => [formatPowerValue(v), "power_kw"]}
-              />
-              <Line
-                type="monotone"
-                dataKey="power_kw"
-                stroke={SERIES_COLORS.power}
-                dot={false}
-                connectNulls={false}
-                name="power_kw"
-                isAnimationActive={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+        <TimeSeriesChart
+          testId="timeline-series-chart"
+          data={points}
+          xAxisTickFormatter={(v) => new Date(v).toLocaleTimeString()}
+          axes={[{ id: "power", domain: powerDomain, tickFormatter: formatPowerTick }]}
+          series={[
+            {
+              key: "power_kw",
+              axisId: "power",
+              dataKey: (row) => row.values?.power_kw ?? null,
+              color: SERIES_COLORS.power,
+              type: "monotone",
+            },
+          ]}
+          tooltipFormatter={(value) => [formatPowerValue(value), "power_kw"]}
+          height={DIAGNOSTIC_CHART_HEIGHT}
+          margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
+          legend={false}
+        />
       )}
     </Box>
   );

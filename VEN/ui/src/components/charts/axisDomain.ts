@@ -78,6 +78,10 @@ export const MIN_COST_RATE_SPAN_EUR_H = 0.05;
 /** CO2-rate axis floor [g/h] — same rationale, sized for typical asset CO2 rates. */
 export const MIN_CO2_RATE_SPAN_G_H = 50;
 
+/** CO2-intensity axis floor [g/kWh], used with `tightSpanDomain` — like tariff, intensity
+ * is a strictly-positive per-energy quantity, not a rate with a meaningful 0 baseline. */
+export const MIN_CO2_INTENSITY_SPAN_G_KWH = 20;
+
 /** Tariff axis floor [€/kWh], used with `tightSpanDomain` (not `minSpanDomain` — tariff is
  * a strictly-positive price, not a rate that meaningfully swings through a 0 baseline; see
  * `tightSpanDomain`'s doc comment). The tariff axis previously had no floor at all, letting
