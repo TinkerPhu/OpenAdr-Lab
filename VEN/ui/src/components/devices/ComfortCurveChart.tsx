@@ -7,9 +7,10 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { Box, Typography } from "@mui/material";
+import { Box } from "@mui/material";
 import type { ComfortRate } from "../../api/types";
 import { CELL_CHART_HEIGHT } from "../charts/chartLayout";
+import { EmptyState } from "../charts/EmptyState";
 
 interface ComfortCurveChartProps {
   rows: ComfortRate[];
@@ -25,19 +26,11 @@ type CurvePoint = { fillPct: number; bidEurKwh: number };
 export function ComfortCurveChart({ rows, color = "#2196F3" }: ComfortCurveChartProps) {
   if (rows.length === 0) {
     return (
-      <Box
-        data-testid="comfort-curve-chart-empty"
-        sx={{
-          height: CELL_CHART_HEIGHT,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Typography color="text.secondary" variant="body2">
-          Add points to preview the curve
-        </Typography>
-      </Box>
+      <EmptyState
+        testId="comfort-curve-chart-empty"
+        message="Add points to preview the curve"
+        height={CELL_CHART_HEIGHT}
+      />
     );
   }
 

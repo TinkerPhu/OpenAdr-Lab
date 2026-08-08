@@ -6,13 +6,11 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ReferenceLine,
   ReferenceArea,
   Legend,
   ResponsiveContainer,
 } from "recharts";
 import type { AssetTimelinePoint } from "../types";
-import { COLOR_NOW } from "../types";
 import type { ZoneDef, ForecastAccuracySample } from "../../../api/types";
 import {
   minSpanDomain,
@@ -31,6 +29,9 @@ import {
   formatTemperatureC,
 } from "../../charts/unitFormat";
 import { mergeTimestampedSeries, locfFillKeys, type TimestampedRow } from "../../charts/mergeSeries";
+import { renderNowLine } from "../../charts/NowLine";
+import { renderZoneShading } from "../../charts/ZoneShading";
+import { TOOLTIP_CONTENT_STYLE, TOOLTIP_ITEM_STYLE, TOOLTIP_LABEL_STYLE } from "../../charts/tooltipStyle";
 
 interface AssetTimelineChartProps {
   data: AssetTimelinePoint[];
@@ -276,9 +277,9 @@ export function AssetTimelineChart({
           />
         )}
         <Tooltip
-          contentStyle={{ fontSize: 9, padding: "1px 5px" }}
-          itemStyle={{ padding: "0" }}
-          labelStyle={{ fontSize: 9, marginBottom: 1 }}
+          contentStyle={TOOLTIP_CONTENT_STYLE}
+          itemStyle={TOOLTIP_ITEM_STYLE}
+          labelStyle={TOOLTIP_LABEL_STYLE}
           labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
           formatter={(value: number, name: string) => {
             if (name === "CO₂eq rate [g/h]") return [formatCo2RateGH(value), name];
@@ -387,16 +388,7 @@ export function AssetTimelineChart({
         )}
 
         {/* Zone background shading — rendered before data lines so they sit behind */}
-        {zones?.map((z, i) => (
-          <ReferenceArea
-            key={z.from}
-            yAxisId="power"
-            x1={new Date(z.from).getTime()}
-            x2={new Date(z.to).getTime()}
-            fill={`rgba(0,0,0,${0.04 * (i + 1)})`}
-            ifOverflow="hidden"
-          />
-        ))}
+        {renderZoneShading("power", zones)}
 
         {/* PV curtailment shading: hardware-capped (neutral), planned (amber), unplanned (red) */}
         {curtailmentZones.map((z, i) => (
@@ -411,13 +403,7 @@ export function AssetTimelineChart({
         ))}
 
         {/* NOW reference line */}
-        <ReferenceLine
-          yAxisId="power"
-          x={nowMs}
-          stroke={COLOR_NOW}
-          strokeDasharray="3 3"
-          label={{ value: "NOW", position: "top", fontSize: 9, fill: COLOR_NOW }}
-        />
+        {renderNowLine("power", nowMs)}
       </ComposedChart>
     </ResponsiveContainer>
   );

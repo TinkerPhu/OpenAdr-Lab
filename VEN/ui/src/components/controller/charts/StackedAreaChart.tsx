@@ -7,17 +7,18 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ReferenceLine,
-  ReferenceArea,
   Legend,
   ResponsiveContainer,
 } from "recharts";
 import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../types";
-import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_NOW, COLOR_ASSET_FALLBACK, SERIES_COLORS } from "../types";
+import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_ASSET_FALLBACK, SERIES_COLORS } from "../types";
 import type { ZoneDef } from "../../../api/types";
 import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks, zeroAnchoredTicks } from "../../charts/axisDomain";
 import { formatPowerValue } from "../../charts/unitFormat";
+import { renderNowLine } from "../../charts/NowLine";
+import { renderZoneShading } from "../../charts/ZoneShading";
+import { TOOLTIP_BOX_STYLE } from "../../charts/tooltipStyle";
 
 /** Explicit-sign power display for the stacked tooltip's net values (e.g. "+1.00 kW",
  * "-4.20 kW") — the canonical formatter itself doesn't prepend "+" for positive values. */
@@ -78,15 +79,7 @@ export function StackedAreaTooltip({
   const time = typeof label === "number" ? new Date(label).toLocaleTimeString() : label;
 
   return (
-    <div
-      style={{
-        background: "rgba(255,255,255,0.95)",
-        border: "1px solid #ccc",
-        borderRadius: 4,
-        padding: "1px 5px",
-        fontSize: 9,
-      }}
-    >
+    <div style={TOOLTIP_BOX_STYLE}>
       <div style={{ marginBottom: 1, fontWeight: "bold" }}>{time}</div>
       {Object.entries(netByAsset).map(([assetId, kw]) => (
         <div key={assetId} style={{ color: colorMap[assetId] ?? COLOR_ASSET_FALLBACK }}>
@@ -244,25 +237,10 @@ export function StackedAreaChart({
           />
 
           {/* Zone background shading — rendered before data lines so they sit behind */}
-          {zones?.map((z, i) => (
-            <ReferenceArea
-              key={z.from}
-              yAxisId="power"
-              x1={new Date(z.from).getTime()}
-              x2={new Date(z.to).getTime()}
-              fill={`rgba(0,0,0,${0.04 * (i + 1)})`}
-              ifOverflow="hidden"
-            />
-          ))}
+          {renderZoneShading("power", zones)}
 
           {/* NOW reference line */}
-          <ReferenceLine
-            yAxisId="power"
-            x={nowMs}
-            stroke={COLOR_NOW}
-            strokeDasharray="3 3"
-            label={{ value: "NOW", position: "top", fontSize: 9, fill: COLOR_NOW }}
-          />
+          {renderNowLine("power", nowMs)}
         </ComposedChart>
       </ResponsiveContainer>
     </div>
