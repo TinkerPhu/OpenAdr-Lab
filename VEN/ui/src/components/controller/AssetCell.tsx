@@ -10,7 +10,9 @@ import { AssetLeftSection } from "./AssetLeftSection";
 import { AssetMidSection } from "./AssetMidSection";
 import { AssetRightSection } from "./AssetRightSection";
 import type { SimSnapshot, SimInjectState } from "../../api/types";
-import { DEFAULT_WINDOW, EXTENDED_WINDOW } from "./chartLayout";
+import {
+  DEFAULT_WINDOW, EXTENDED_WINDOW, DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
+} from "./chartLayout";
 
 interface AssetCellProps {
   assetId: AssetId;
@@ -80,6 +82,7 @@ export function AssetCell({
         hoursBack={window.hoursBack}
         hoursForward={window.hoursForward}
         zones={zones}
+        xAxisTickIntervalMinutes={extended ? EXTENDED_TICK_INTERVAL_MINUTES : DEFAULT_TICK_INTERVAL_MINUTES}
       />
 
       {/* Right section — simulation controls */}

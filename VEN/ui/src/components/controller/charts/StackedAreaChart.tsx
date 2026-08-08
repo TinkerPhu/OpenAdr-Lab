@@ -16,7 +16,7 @@ import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../types";
 import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_NOW, COLOR_ASSET_FALLBACK } from "../types";
 import type { ZoneDef } from "../../../api/types";
-import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick } from "./axisDomain";
+import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks } from "./axisDomain";
 
 const COLOR_GRID_LINE = "#212121";
 
@@ -29,6 +29,9 @@ interface StackedAreaChartProps {
   hoursForward?: number;
   height?: number;
   zones?: ZoneDef[];
+  /** X-axis ticks every N minutes, snapped to the wall-clock (10:00, 10:10, ...) instead of
+   * recharts' default "nice" ticks. */
+  xAxisTickIntervalMinutes?: number;
 }
 
 function formatTs(ts: number) {
@@ -112,11 +115,15 @@ export function StackedAreaChart({
   hoursForward = 1.0,
   height,
   zones,
+  xAxisTickIntervalMinutes,
 }: StackedAreaChartProps) {
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes
   // and ensures the NOW reference line is always within the visible range.
   const tMin = nowMs - hoursBack * 3_600_000;
   const tMax = nowMs + hoursForward * 3_600_000;
+  const xAxisTicks = xAxisTickIntervalMinutes
+    ? roundedTimeTicks(tMin, tMax, xAxisTickIntervalMinutes)
+    : undefined;
 
   // Ensure at least two boundary points so recharts can render the X scale and
   // the NOW reference line even when there are no data points yet.
@@ -158,6 +165,7 @@ export function StackedAreaChart({
             scale="time"
             type="number"
             domain={[tMin, tMax]}
+            ticks={xAxisTicks}
             tickFormatter={formatTs}
             tick={{ fontSize: 10 }}
           />
