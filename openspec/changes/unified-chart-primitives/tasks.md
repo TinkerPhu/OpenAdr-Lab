@@ -243,12 +243,19 @@
 
 ## 11. Documentation & backlog
 
-- [ ] 11.1 Update any architecture doc referencing the old chart component names/locations
-      (check `docs/architecture/VEN_ARCHITECTURE.md` and similar for stale references)
-- [ ] 11.2 Append `docs/history/project_journal.md` entry (what changed, why, the
-      cursor-correctness invariant made structural) and `docs/reference/KEY_LEARNINGS.md`
-      (index-based tooltip resolution as a recurring bug class; kit-of-primitives vs.
-      universal-control trade-off)
+- [x] 11.1 Checked `docs/architecture/VEN_ARCHITECTURE.md` and `docs/history/*` for stale
+      references — only one precision update needed (§4.10's forecast-overlay paragraph
+      now names the shared `mergeTimestampedSeries`/`locfFillKeys` utility instead of
+      describing the merge as `AssetTimelineChart`-only logic). No other architecture docs
+      reference chart internals; renamed files (`StackedAreaChart`→`StackedTimeSeriesChart`,
+      `ComfortCurveChart`→`CurveChart`) weren't referenced by name anywhere in `docs/`.
+- [x] 11.2 Appended `docs/history/project_journal.md` entry and
+      `docs/reference/KEY_LEARNINGS.md`'s new "Chart Cursor/Tooltip Correctness" section
+      (index-based tooltip resolution as a recurring bug class fixed twice before being
+      recognized as one root cause; the weak-regression-test lesson from the tariff-axis
+      code-review finding; `minSpanDomain` vs. `tightSpanDomain`; the
+      kit-of-primitives-vs-universal-control decision, including the `SimProfileChart`
+      4th-shape discovery)
 
 ## 12. Verification
 
