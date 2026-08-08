@@ -99,6 +99,7 @@ export function HistoryPage() {
         value={date ?? ""}
         onChange={(e) => setDate(e.target.value || null)}
         inputProps={{ "data-testid": "history-date-input" }}
+        InputLabelProps={{ shrink: true }}
         sx={{ mb: 1 }}
       />
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
