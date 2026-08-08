@@ -87,6 +87,13 @@ tests/features/ that exercises that use case specifically — not just implement
 tests. A unit test proves the mechanism works internally; a use-case scenario proves the thing a
 user actually does (set a curve, create a session, get a different plan) works end-to-end. Do
 this as part of the same piece of work, not a deferred follow-up.
+5. no lingering checkouts/worktrees on Node1 or Node2 after a branch is merged to main. Once a
+branch's work is confirmed merged into origin/main, switch that host's checkout back to main
+(`git checkout main && git pull`) and delete the now-merged local branch; if the work was done in
+a `git worktree` (e.g. under worktrees/), remove the worktree (`git worktree remove`, `sudo rm -rf`
+first if build artifacts like VEN/target left root-owned files, then `git worktree prune`) rather
+than leaving it checked out on an old commit. Do this cleanup as soon as a merge is confirmed, not
+as a periodic sweep.
 
 NEVER stop docker containers that are not involved in this project without asking. They are productive containers.
 
