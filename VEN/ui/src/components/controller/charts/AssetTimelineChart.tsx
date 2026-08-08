@@ -172,19 +172,59 @@ export function AssetTimelineChart({
   const rawData: AssetTimelinePoint[] =
     data.length > 0 ? data : [{ ts: tMin, values: {} }, { ts: tMax, values: {} }];
 
-  // LOCF: carry the last known state value (soc / temp_c) into future slots where
-  // the backend emits no state — ensures the tooltip always shows the current state.
-  const chartData: AssetTimelinePoint[] = stateKey
-    ? (() => {
-        let last: number | null = null;
-        return rawData.map((pt) => {
-          const v = pt.values?.[stateKey] ?? null;
-          if (v !== null) { last = v; return pt; }
-          if (last === null) return pt;
-          return { ...pt, values: { ...(pt.values ?? {}), [stateKey]: last } };
-        });
-      })()
-    : rawData;
+  // forecast-accuracy-tracking: folded into the SAME per-ts array as the actual line
+  // (rather than passed to their own `<Line data={...}>` override) so every series shares
+  // one index space. Recharts resolves tooltip hover by array index, not by re-matching
+  // timestamps across a series' own overridden `data` — a forecast line on its own coarser
+  // 5-minute array previously caused the tooltip to read `chartData[i]` for the *actual*
+  // line at the wrong `i`, showing a real reading from a different time under the hovered
+  // hour's label. Merging avoids the mismatch entirely.
+  const merged: AssetTimelinePoint[] = (() => {
+    const byTs = new Map<number, AssetTimelinePoint>();
+    for (const pt of rawData) {
+      byTs.set(pt.ts, { ts: pt.ts, values: { ...(pt.values ?? {}) } });
+    }
+    const foldIn = (samples: ForecastAccuracySample[] | undefined, key: string) => {
+      for (const s of samples ?? []) {
+        const existing = byTs.get(s.target_ts);
+        if (existing) {
+          existing.values = { ...(existing.values ?? {}), [key]: s.predicted_kw };
+        } else {
+          byTs.set(s.target_ts, { ts: s.target_ts, values: { [key]: s.predicted_kw } });
+        }
+      }
+    };
+    foldIn(nearForecast, "predicted_kw_near");
+    foldIn(farForecast, "predicted_kw_far");
+    return [...byTs.values()].sort((a, b) => a.ts - b.ts);
+  })();
+
+  // LOCF: carry the last known value forward into slots where a key has no sample —
+  // state (soc / temp_c) needs this for the tooltip to always show the current state;
+  // the near/far forecast samples need it so their step-function line (rendered
+  // `type="stepAfter"`, same as the actual Power line) has a value at every one-minute
+  // slot between two ~5-minute-apart samples, not just the sample points themselves —
+  // otherwise `connectNulls` would draw the step but hovering the plateau in between
+  // would show no forecast value, disagreeing with what's drawn.
+  const locfKeys = [...(stateKey ? [stateKey] : []), "predicted_kw_near", "predicted_kw_far"];
+  const chartData: AssetTimelinePoint[] = (() => {
+    const last: Record<string, number | null> = {};
+    for (const k of locfKeys) last[k] = null;
+    return merged.map((pt) => {
+      const values = { ...(pt.values ?? {}) };
+      let changed = false;
+      for (const k of locfKeys) {
+        const v = values[k] ?? null;
+        if (v !== null) {
+          last[k] = v;
+        } else if (last[k] !== null) {
+          values[k] = last[k];
+          changed = true;
+        }
+      }
+      return changed ? { ...pt, values } : pt;
+    });
+  })();
 
   const costDomain = minSpanDomain(
     chartData.map((p) => p.values?.["cost_rate_eur_h"] ?? null),
@@ -197,23 +237,15 @@ export function AssetTimelineChart({
 
   const curtailmentZones = pvCurtailment ? buildCurtailmentZones(chartData) : [];
 
-  // forecast-accuracy-tracking: each sample's own target_ts, not chartData's ts grid —
-  // recharts' per-Line `data` override handles the mismatched x-values.
-  const nearForecastPoints = (nearForecast ?? []).map((s) => ({
-    ts: s.target_ts,
-    predicted_kw: s.predicted_kw,
-  }));
-  const farForecastPoints = (farForecast ?? []).map((s) => ({
-    ts: s.target_ts,
-    predicted_kw: s.predicted_kw,
-  }));
+  const hasNearForecast = (nearForecast ?? []).length > 0;
+  const hasFarForecast = (farForecast ?? []).length > 0;
 
   const powerDomain = minSpanDomain(
-    [
-      ...chartData.map((p) => p.values?.["power_kw"] ?? null),
-      ...nearForecastPoints.map((p) => p.predicted_kw),
-      ...farForecastPoints.map((p) => p.predicted_kw),
-    ],
+    chartData.flatMap((p) => [
+      p.values?.["power_kw"] ?? null,
+      p.values?.["predicted_kw_near"] ?? null,
+      p.values?.["predicted_kw_far"] ?? null,
+    ]),
     minPowerSpanKw
   );
 
@@ -292,36 +324,40 @@ export function AssetTimelineChart({
         />
 
         {/* forecast-accuracy-tracking: near/far forecast overlay — visually distinct from the
-            actual Power line above (thin, dotted, muted) and from each other (dash pattern). */}
-        {nearForecastPoints.length > 0 && (
+            actual Power line above (thin, dotted, muted) and from each other (dash pattern).
+            Reads the same merged `chartData` as every other line (see above) instead of its
+            own overridden `data` array, so hover/tooltip stays aligned with the actual line.
+            `stepAfter` (not a smooth curve) — each sample is the planner's prediction for one
+            discrete plan slot, holding until the next sample supersedes it, same interpretation
+            as the actual Power line's own `stepAfter`. `connectNulls` stays as a backstop; the
+            LOCF fill above already removes in-range nulls between samples. */}
+        {hasNearForecast && (
           <Line
             yAxisId="power"
-            data={nearForecastPoints}
-            type="monotone"
-            dataKey="predicted_kw"
+            type="stepAfter"
+            dataKey={(pt: AssetTimelinePoint) => pt.values?.["predicted_kw_near"] ?? null}
             name="Forecast (near) [kW]"
             stroke={color}
             strokeWidth={1}
             strokeOpacity={0.6}
             strokeDasharray="2 3"
             dot={false}
-            connectNulls={false}
+            connectNulls
             isAnimationActive={false}
           />
         )}
-        {farForecastPoints.length > 0 && (
+        {hasFarForecast && (
           <Line
             yAxisId="power"
-            data={farForecastPoints}
-            type="monotone"
-            dataKey="predicted_kw"
+            type="stepAfter"
+            dataKey={(pt: AssetTimelinePoint) => pt.values?.["predicted_kw_far"] ?? null}
             name="Forecast (far) [kW]"
             stroke={color}
             strokeWidth={1}
             strokeOpacity={0.6}
             strokeDasharray="6 3"
             dot={false}
-            connectNulls={false}
+            connectNulls
             isAnimationActive={false}
           />
         )}
