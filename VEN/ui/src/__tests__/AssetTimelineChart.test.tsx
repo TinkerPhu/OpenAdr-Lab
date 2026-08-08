@@ -9,14 +9,19 @@ import { render } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
-const { referenceAreas, lines, xAxes } = vi.hoisted(() => ({
+const { referenceAreas, lines, xAxes, composedChartData } = vi.hoisted(() => ({
   referenceAreas: [] as Array<Record<string, unknown>>,
   lines: [] as Array<Record<string, unknown>>,
   xAxes: [] as Array<Record<string, unknown>>,
+  composedChartData: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("recharts", () => ({
-  ComposedChart: ({ children }: { children: unknown }) => children,
+  ComposedChart: ({ children, data }: { children: unknown; data: Record<string, unknown>[] }) => {
+    composedChartData.length = 0;
+    composedChartData.push(...data);
+    return children;
+  },
   ResponsiveContainer: ({ children }: { children: unknown }) => children,
   YAxis: () => null,
   Line: (props: Record<string, unknown>) => {
@@ -219,6 +224,32 @@ describe("AssetTimelineChart — near/far forecast overlay", () => {
     const names = lines.map((l) => l.name);
     expect(names).not.toContain("Forecast (near) [kW]");
     expect(names).not.toContain("Forecast (far) [kW]");
+  });
+
+  it("holds (LOCF) the forecast value across one-minute ticks between two ~5-minute-apart samples, so the step line has no gap and hover anywhere on the plateau reports the held value", () => {
+    // One-minute tick grid, no forecast sample at most of these timestamps — only at
+    // now+0 and now+5min. Mirrors the real history-tab shape (1-min ticks, 5-min plan cycle).
+    const data = Array.from({ length: 6 }, (_, i) => point(i * minute, { power_kw: -1.0 }));
+    render(
+      <AssetTimelineChart
+        data={data}
+        color="#000"
+        nowMs={now}
+        nearForecast={[forecastSample("near", now), { ...forecastSample("near", now + 5 * minute), predicted_kw: -2.5 }]}
+      />
+    );
+    const nearLine = lines.find((l) => l.name === "Forecast (near) [kW]")!;
+    const dataKey = nearLine.dataKey as (pt: { values: Record<string, number> }) => number | null;
+    // Sample points themselves resolve directly.
+    const atStart = composedChartData.find((p) => p.ts === now)!;
+    const atEnd = composedChartData.find((p) => p.ts === now + 5 * minute)!;
+    expect(dataKey(atStart as { values: Record<string, number> })).toBe(-3.0); // default forecastSample predicted_kw
+    expect(dataKey(atEnd as { values: Record<string, number> })).toBe(-2.5);
+    // Every in-between minute must carry the LAST known sample forward, not null.
+    for (let i = 1; i < 5; i++) {
+      const pt = composedChartData.find((p) => p.ts === now + i * minute)!;
+      expect(dataKey(pt as { values: Record<string, number> })).toBe(-3.0);
+    }
   });
 });
 
