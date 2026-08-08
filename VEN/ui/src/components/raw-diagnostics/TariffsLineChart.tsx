@@ -1,6 +1,8 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { PlannedRates } from "../../api/types";
 import { SERIES_COLORS } from "../controller/types";
+import { DIAGNOSTIC_CHART_HEIGHT } from "../charts/chartLayout";
+import { formatTariffEurKwh, formatCo2IntensityGKwh } from "../charts/unitFormat";
 
 interface TariffsLineChartProps {
   data: PlannedRates;
@@ -20,7 +22,7 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
 
   return (
     <div data-testid="tariffs-line-chart">
-    <ResponsiveContainer width="100%" height={260}>
+    <ResponsiveContainer width="100%" height={DIAGNOSTIC_CHART_HEIGHT}>
       <LineChart data={points} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis
@@ -33,9 +35,11 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
         <YAxis />
         <Tooltip
           labelFormatter={(v: number) => new Date(v).toLocaleString()}
-          formatter={(v, name) =>
-            typeof v === "number" ? [`${v.toFixed(4)}`, String(name)] : ["—", String(name)]
-          }
+          formatter={(v, name) => {
+            if (typeof v !== "number") return ["—", String(name)];
+            if (name === "CO₂ g/kWh") return [formatCo2IntensityGKwh(v), String(name)];
+            return [formatTariffEurKwh(v), String(name)];
+          }}
         />
         <Legend />
         <Line

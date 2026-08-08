@@ -22,6 +22,7 @@ import {
   roundedTimeTicks,
   zeroAnchoredTicks,
 } from "../../charts/axisDomain";
+import { formatCo2RateGH, formatCostRateEurH, formatTariffEurKwh } from "../../charts/unitFormat";
 
 const COLOR_IMPORT_TARIFF = SERIES_COLORS.import_tariff;
 const COLOR_EXPORT_TARIFF = SERIES_COLORS.export_tariff;
@@ -170,9 +171,9 @@ export function TariffChart({
             labelStyle={{ fontSize: 9, marginBottom: 1 }}
             labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
             formatter={(value: number, name: string) => {
-              if (name === "CO₂ rate [g/h]") return [value?.toFixed(1) + " g/h", name];
-              if (name === "Cost rate [€/h]") return [value?.toFixed(4) + " €/h", name];
-              return [value?.toFixed(4) + " €/kWh", name];
+              if (name === "CO₂ rate [g/h]") return [formatCo2RateGH(value), name];
+              if (name === "Cost rate [€/h]") return [formatCostRateEurH(value), name];
+              return [formatTariffEurKwh(value), name];
             }}
           />
           <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />

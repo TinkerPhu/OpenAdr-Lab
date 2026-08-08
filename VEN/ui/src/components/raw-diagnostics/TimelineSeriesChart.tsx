@@ -2,6 +2,8 @@ import { Box, FormControl, InputLabel, MenuItem, Select, Typography } from "@mui
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { SERIES_COLORS, type AssetTimelinePoint } from "../controller/types";
 import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick } from "../charts/axisDomain";
+import { formatPowerValue } from "../charts/unitFormat";
+import { DIAGNOSTIC_CHART_HEIGHT } from "../charts/chartLayout";
 
 interface TimelineSeriesChartProps {
   data: Record<string, AssetTimelinePoint[]>;
@@ -44,7 +46,7 @@ export function TimelineSeriesChart({ data, selectedSeries, onSeriesChange }: Ti
         </Typography>
       ) : (
         <div data-testid="timeline-series-chart">
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={DIAGNOSTIC_CHART_HEIGHT}>
             <LineChart data={points} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis
@@ -57,7 +59,7 @@ export function TimelineSeriesChart({ data, selectedSeries, onSeriesChange }: Ti
               <YAxis tickFormatter={formatPowerTick} domain={powerDomain} />
               <Tooltip
                 labelFormatter={(v: number) => new Date(v).toLocaleString()}
-                formatter={(v: number) => [`${v.toFixed(3)} kW`, "power_kw"]}
+                formatter={(v: number) => [formatPowerValue(v), "power_kw"]}
               />
               <Line
                 type="monotone"
