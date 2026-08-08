@@ -1,3 +1,15 @@
+> **Review checkpoint (after tasks 1-5, 9):** a code review of the branch surfaced 5 issues,
+> all fixed in a follow-up commit: (1) `TariffChart`'s tariff-axis domain used
+> `minSpanDomain` (0-anchored), which reintroduced axis-squeeze for always-positive tariff
+> series — added `tightSpanDomain()` (data-tight, no 0-anchor) and switched tariff to it;
+> (2) `StackedAreaChart`'s signed-power tooltip could silently drop the sign on a sub-watt
+> negative residual — fixed and moved to a shared `formatSignedPowerValue` in
+> `unitFormat.ts`; (3) `unitFormat.ts`'s newer formatters used bare `value` params,
+> violating the project's unit-suffix naming rule — renamed; (4) `ComfortCurveChart`'s
+> tooltip still hand-rolled tariff formatting instead of using the new canonical
+> formatter — switched; (5) `GridAccumulatedCell.tsx` duplicated the signed-power pattern —
+> now shares `formatSignedPowerValue` too. All fixes covered by new regression tests.
+
 ## 1. Shared kit: sizing contract and color registry
 
 - [x] 1.1 Create `VEN/ui/src/components/charts/` (resolves design.md's open module-path
