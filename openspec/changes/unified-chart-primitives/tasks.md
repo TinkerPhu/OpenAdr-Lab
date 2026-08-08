@@ -259,12 +259,21 @@
 
 ## 12. Verification
 
-- [ ] 12.1 `cd VEN/ui && npm test` — full suite green, including new kit/composition tests
-- [ ] 12.2 `cd VEN/ui && npm run build`
-- [ ] 12.3 ESLint zero errors
-- [ ] 12.4 Manual visual check in a running dev server: Controller tab, History tab (both
-      the "Last 24h" and date-picker views), Devices comfort-curve editor, Raw Diagnostics
-      page — confirm each chart matches the visual-delta list in proposal.md's Impact
-      section exactly (no chart should differ from that list, in either direction)
-- [ ] 12.5 `scripts/audit_file_sizes.py` (new `charts/` files stay within VEN/ui size
-      norms; no file balloons from absorbing multiple charts' logic)
+- [x] 12.1 `cd VEN/ui && npm test` — 487/488 green (same one pre-existing, network-dependent
+      failure noted throughout every commit in this change; unrelated to chart work)
+- [x] 12.2 `cd VEN/ui && npm run build` — succeeds (pre-existing >500kB chunk-size warning,
+      unrelated to this change, not a new issue)
+- [x] 12.3 ESLint zero errors (`npx eslint .` — 9 pre-existing warnings in unrelated files,
+      zero errors)
+- [ ] **12.4 Manual visual check — BLOCKED, needs the user.** No browser-automation tool is
+      available in this environment (checked: no `chromium-cli`/`chromium`/`google-chrome`
+      on PATH), so this genuinely cannot be performed by the agent. Run `cd VEN/ui && npm
+      run dev` and check: Controller tab, History tab (both "Last 24h" and date-picker
+      views), Devices comfort-curve editor, Raw Diagnostics page — confirm each chart
+      matches the visual-delta list in `proposal.md`'s Impact section exactly (no chart
+      should differ from that list, in either direction). This is the one remaining gate
+      before merge.
+- [x] 12.5 File-size sanity check (no dedicated JS/TS line-count script exists in this repo
+      — `scripts/audit_file_sizes.py` covers `VEN/src/` Rust only): largest new/changed
+      chart file is `AssetTimelineChart.tsx` at 337 lines (down from ~410 pre-migration);
+      every other `charts/` file is 21-249 lines. Nothing ballooned from absorbing logic.
