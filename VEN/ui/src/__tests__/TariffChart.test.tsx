@@ -103,23 +103,23 @@ describe("TariffChart — dual Y-axis", () => {
 
   it("CO₂ rate line is bound to the right co2 axis — not tariff or cost", () => {
     render(<TariffChart data={data} nowMs={now} />);
-    const co2Line = lines.find((l) => l.dataKey === "totalCo2RateGH");
+    const co2Line = lines.find((l) => l.name === "CO₂ rate [g/h]");
     expect(co2Line?.yAxisId).toBe("co2");
   });
 
   it("cost rate line is bound to its own cost axis, not the tariff axis", () => {
     render(<TariffChart data={data} nowMs={now} />);
-    const costLine = lines.find((l) => l.dataKey === "totalCostRateEurH");
+    const costLine = lines.find((l) => l.name === "Cost rate [€/h]");
     expect(costLine?.yAxisId).toBe("cost");
   });
 
   it("import/export tariff lines are on the left tariff axis only", () => {
     render(<TariffChart data={data} nowMs={now} />);
     const tariffLines = lines.filter((l) => l.yAxisId === "tariff");
-    const dataKeys = tariffLines.map((l) => l.dataKey as string);
-    expect(dataKeys).toContain("importPriceEurKwh");
-    expect(dataKeys).toContain("exportPriceEurKwh");
-    expect(dataKeys).not.toContain("totalCostRateEurH");
+    const names = tariffLines.map((l) => l.name as string);
+    expect(names).toContain("Import tariff [€/kWh]");
+    expect(names).toContain("Export tariff [€/kWh]");
+    expect(names).not.toContain("Cost rate [€/h]");
   });
 
   it("each axis carries its own physically-correct unit label, never a bare €", () => {
