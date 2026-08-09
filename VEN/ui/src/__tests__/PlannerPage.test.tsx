@@ -20,6 +20,7 @@ vi.mock("../api/hooks", () => ({
   useSim: vi.fn(),
   useSetObjective: vi.fn(),
   usePlannerEvents: vi.fn(),
+  useAllTimelines: () => ({ data: { zones: [], timelines: {} }, refetch: vi.fn() }),
 }));
 
 import { usePlan, useTrace, useRequests, useSim, useSetObjective, usePlannerEvents } from "../api/hooks";
