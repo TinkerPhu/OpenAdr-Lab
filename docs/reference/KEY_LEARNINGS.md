@@ -882,6 +882,30 @@ outes/sim.rs causes a T1+T2 double-solve race:
   `peer`/`source` trace for that specific event is gone forever. **Always capture
   `docker compose logs <service> > file` before any redeploy while actively investigating a
   live incident**, even if the redeploy itself is the fix.
+- **Round 4 — actual root cause: a "skip if unreachable" integration test
+  (`pv_irradiance_one_shot.test.ts`) had a fallback default that pointed straight at
+  production hardware.** The intent ("skip cleanly in CI, run for real when a dev points
+  it at a live VEN") was sound; the mistake was making the *unset* case default to
+  Node1's real `ven-1` instead of failing safe (skip). On a LAN where every dev/AI
+  session's laptop can reach Node1, "opt-in via env var" quietly became "opt-out via env
+  var" — every plain `npm test` from every parallel branch (across three-plus rounds of
+  this mystery, from the original 2026-08-05 reports onward) silently exercised
+  production. **Any test with a live-server fallback must fail toward "skip," never
+  toward "target whatever's reachable."** Found by correlating logged attempt timestamps
+  against Node1's git history (`scripts/correlate_ven1_inject.sh`) — every attempt landed
+  2-25 minutes before a commit, the "test then commit" cadence of ordinary dev work, not
+  a mystery process. The disable-gate and source-tagging from round 3 didn't fix this,
+  but they're why nothing broke while it was being found: the gate blocked every write,
+  and the archived/live logs are what made the correlation possible at all.
+- **A shared checkout can have its branch switched by a concurrent session mid-task.**
+  While fixing this, a commit landed on `fix/plan-power-stack-grid-export` instead of
+  `main` because another session working in the *same* directory (not a separate
+  worktree) had checked out that branch — discovered only by noticing `git push origin
+  main` reported "Everything up-to-date" after a real commit. Recovered via a temporary
+  `git worktree add` + `cherry-pick` + push, without touching the shared checkout's
+  branch or working tree at all, so as not to disturb the other session's in-progress
+  work. Always confirm the current branch before assuming a commit went where intended
+  in a shared directory.
 
 ## Chart Cursor/Tooltip Correctness (openspec/changes/unified-chart-primitives/, 2026-08-08)
 
