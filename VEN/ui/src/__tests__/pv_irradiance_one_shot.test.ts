@@ -6,23 +6,24 @@
  *   The backend applies the offset once and immediately clears the inject field
  *   so the offset decays from that moment forward.
  *
- * Requires a running VEN instance.  Set VITE_VEN_URL to point at it, or let it
- * default to Node1's real LAN address.  The suite is skipped automatically when
- * the VEN is unreachable so CI stays green without a live server.
- *
- * Uses the IP, not the "Node1" hostname: "Node1" is only an SSH client alias
- * (~/.ssh/config), not a real DNS/hosts entry, so Node's getaddrinfo can't
- * reliably resolve it (falls back to unreliable Windows LLMNR/NetBIOS
- * broadcast resolution, which flakes independently on every call).
+ * Opt-in only: requires a running VEN instance and an EXPLICIT `VITE_VEN_URL`.
+ * There is deliberately no default/fallback URL — this file used to default to
+ * Node1's real production `ven-1` LAN address, which meant every plain `npm
+ * test` run on any machine with LAN access to Node1 silently POSTed real PV
+ * overrides into production (docs/history/project_journal.md, "ven-1
+ * PV-injection mystery, round 3" — that default was the actual root cause of
+ * months of unattributed production incidents, not a bug in the VEN itself).
+ * Point `VITE_VEN_URL` at an isolated/dev VEN if you want to run this locally;
+ * without it the suite skips itself, same as when the target is unreachable,
+ * so CI stays green without a live server.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { VenApi } from "../api/client";
 
-const VEN_URL = (import.meta as { env?: Record<string, string> }).env?.VITE_VEN_URL
-  ?? "http://192.168.1.103:8211";
+const VEN_URL = (import.meta as { env?: Record<string, string> }).env?.VITE_VEN_URL;
 
-const api = new VenApi(VEN_URL);
+const api = new VenApi(VEN_URL ?? "");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -31,6 +32,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let venReachable = false;
 
 beforeAll(async () => {
+  if (!VEN_URL) {
+    venReachable = false;
+    return;
+  }
   try {
     await api.sim();
     venReachable = true;
@@ -43,7 +48,7 @@ afterAll(async () => {
   // Restore alpha to default so the running sim is not left in a test state.
   if (venReachable) {
     try {
-      await api.postSimInject({ pv_irradiance_alpha: 0.1 } as never);
+      await api.postSimInject({ pv_irradiance_alpha: 0.1 } as never, "test:pv_irradiance_one_shot.test.ts");
     } catch { /* best-effort */ }
   }
 });
@@ -73,7 +78,10 @@ describe("PV irradiance one-shot inject", () => {
       const injectIrradiance = injectingUp
         ? Math.min(naturalIrradiance + 0.3, 1.0)
         : Math.max(naturalIrradiance - 0.3, 0.0);
-      await api.postSimInject({ pv_irradiance: injectIrradiance, pv_irradiance_alpha: 0.99 } as never);
+      await api.postSimInject(
+        { pv_irradiance: injectIrradiance, pv_irradiance_alpha: 0.99 } as never,
+        "test:pv_irradiance_one_shot.test.ts"
+      );
 
       // 3. Wait ≥ 1 sim tick (tick period = 1 s) so the backend processes the inject.
       await sleep(1_500);
