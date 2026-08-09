@@ -216,6 +216,21 @@ rules: docs/guidelines/ERROR_HANDLING.md.
 
 naming: variables and function names for physical quantities must include the unit as suffix (e.g. `power_kw`, `energy_kwh`, `temperature_c`, `tariff_eur_per_kwh`, `soc_pct`). When adding new code, check nearby code or nearby source files for existing suffixes to stay consistent.
 
+generic-over-bespoke: when several call sites solve the same shape of problem with separate
+near-identical helpers (e.g. `hasCostData`, `hasCo2Data`, `hasNearForecast`, one boolean per
+case), stop and name the general pattern instead of writing another one-off. Prefer pushing
+the fix into the shared component/primitive so it applies by construction to every current
+and future case, over a helper function every caller must remember to invoke.
+
+declare-dont-branch: when a component handles N structurally-similar cases (one per series,
+one per asset, one per event type), don't dispatch between them with a chain of `if`/`switch`
+conditions written separately from where each case is defined. Declare each case's behavior
+(visibility, formatting, styling) as data, at the point the case itself is declared, and have
+the shared code look it up — not branch on it. This does not mean eliminating conditionals
+generally: a single guard clause or a genuinely irreducible one-off decision (not a member of
+a repeating family) is still best expressed as a plain `if`. The target is repeated per-case
+branching, not conditionals as such.
+
 ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency rule: inner rings NEVER import outer rings.
 
   Ring map (outer → inner):
