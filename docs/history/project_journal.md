@@ -7925,3 +7925,37 @@ eslint clean at every step. Not yet verified: a manual visual pass in a running 
 as outstanding before merge, since none of the automated checks can catch a rendering
 regression a human would see immediately.
 
+Update: manually verified via an scp deploy to Node1 (VITE_VEN_1_URL wasn't set locally,
+so the local dev server's Devices/Controller tabs couldn't reach a real backend — unrelated
+pre-existing dev-environment gap, not a regression from this change). No issues found;
+merged to `main` and redeployed via a clean `git pull` + rebuild on Node1.
+
+### Chart Legend Toggle (openspec/changes/chart-legend-toggle, 2026-08-09)
+
+Follow-up to unified-chart-primitives, scoped during that change's final review: recharts'
+`<Legend>` is decorative only, with no way to isolate one series on a busy multi-series
+chart (`AssetTimelineChart` alone can show 5+ series at once). Separately,
+`StackedTimeSeriesChart`'s legend showed two entries per asset (`${id}_pos`/`${id}_neg`
+rendered as `"EV (planned) +"`/`"EV (planned) -"`) — an internal rendering detail leaking
+into the UI as apparent duplication, found while scoping the toggle (consolidating pos/neg
+into one legend entry is a prerequisite for the checkbox to mean "hide this asset" rather
+than "hide half its stack").
+
+**What changed**: `charts/useLegendToggle.ts` (local, unpersisted hidden-series state) and
+`charts/ChartLegend.tsx` (one `[checkbox] [color swatch] label` row per entry, checkbox
+only rendered when `interactive=true`) are new shared primitives. `TimeSeriesChart` and
+`StackedTimeSeriesChart` both gained an opt-in `interactiveLegend?: boolean` prop; toggling
+a series sets recharts' own `hide` prop (native mechanism — also removes it from the
+tooltip). `StackedTimeSeriesChart`'s one-entry-per-asset legend grouping applies
+unconditionally, not gated behind the opt-in flag, since it's a plain correctness fix.
+Enabled on `AssetTimelineChart`, `TariffChart`, and `GridAccumulatedCell`'s
+`StackedTimeSeriesChart` usage (Controller/History diagrams, per the requested scope);
+deliberately not enabled on `CurveChart`, the raw-diagnostics charts, or `PlanPowerStack`
+(Planner tab) — the last of which still gets the legend-grouping fix on its own merits.
+
+**Verification**: 503/504 VEN UI tests pass throughout (same pre-existing, unrelated
+network-dependent failure), typecheck/lint clean at every commit. New tests exercise the
+actual click-through interaction (via a mocked `recharts` whose `<Legend>` renders its real
+`content` element, making `ChartLegend`'s checkboxes genuinely clickable in jsdom), not just
+prop inspection — confirming a click actually flips the rendered `hide` prop end to end.
+
