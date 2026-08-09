@@ -25,13 +25,21 @@ const mockReports = [
   { sent_at: Date.UTC(2026, 0, 1, 8), report_type: "USAGE", event_id: "evt-1", payload_json: "{}" },
 ];
 
+const mockRefetch = vi.hoisted(() => ({
+  ticks: vi.fn(),
+  grid: vi.fn(),
+  events: vi.fn(),
+  reports: vi.fn(),
+  forecastAccuracy: vi.fn(),
+}));
+
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
-  useHistoryTicks: () => ({ data: mockTicks }),
-  useHistoryGrid: () => ({ data: mockGrid }),
-  useHistoryEvents: () => ({ data: mockEvents }),
-  useHistoryReports: () => ({ data: mockReports }),
-  useHistoryForecastAccuracy: () => ({ data: [] }),
+  useHistoryTicks: () => ({ data: mockTicks, refetch: mockRefetch.ticks }),
+  useHistoryGrid: () => ({ data: mockGrid, refetch: mockRefetch.grid }),
+  useHistoryEvents: () => ({ data: mockEvents, refetch: mockRefetch.events }),
+  useHistoryReports: () => ({ data: mockReports, refetch: mockRefetch.reports }),
+  useHistoryForecastAccuracy: () => ({ data: [], refetch: mockRefetch.forecastAccuracy }),
 }));
 
 vi.mock("../App", () => ({
@@ -82,7 +90,7 @@ describe("HistoryPage", () => {
     const input = screen.getByTestId("history-date-input") as HTMLInputElement;
     const todayUtc = new Date().toISOString().slice(0, 10);
     expect(input.value).toBe(todayUtc);
-    expect(screen.getByTestId("history-last-24h-btn")).toBeDisabled();
+    expect(screen.getByTestId("history-last-24h-btn")).not.toBeDisabled();
   });
 
   it("returns to rolling last-24h mode when 'Last 24h' is clicked", () => {
@@ -92,11 +100,45 @@ describe("HistoryPage", () => {
     expect(input.value).toBe("2026-02-15");
 
     const button = screen.getByTestId("history-last-24h-btn");
-    expect(button).not.toBeDisabled();
     fireEvent.click(button);
 
     const todayUtc = new Date().toISOString().slice(0, 10);
     expect(input.value).toBe(todayUtc);
-    expect(button).toBeDisabled();
+    expect(button).not.toBeDisabled();
+  });
+
+  it("refetches history data when the date control is clicked, even without changing the value", () => {
+    renderHistory();
+    mockRefetch.ticks.mockClear();
+    mockRefetch.grid.mockClear();
+    mockRefetch.events.mockClear();
+    mockRefetch.reports.mockClear();
+    mockRefetch.forecastAccuracy.mockClear();
+
+    const input = screen.getByTestId("history-date-input") as HTMLInputElement;
+    fireEvent.click(input);
+
+    expect(mockRefetch.ticks).toHaveBeenCalledTimes(1);
+    expect(mockRefetch.grid).toHaveBeenCalledTimes(1);
+    expect(mockRefetch.events).toHaveBeenCalledTimes(1);
+    expect(mockRefetch.reports).toHaveBeenCalledTimes(1);
+    expect(mockRefetch.forecastAccuracy).toHaveBeenCalledTimes(3);
+  });
+
+  it("refetches history data when 'Last 24h' is clicked while already in that mode", () => {
+    renderHistory();
+    mockRefetch.ticks.mockClear();
+    mockRefetch.grid.mockClear();
+    mockRefetch.events.mockClear();
+    mockRefetch.reports.mockClear();
+    mockRefetch.forecastAccuracy.mockClear();
+
+    fireEvent.click(screen.getByTestId("history-last-24h-btn"));
+
+    expect(mockRefetch.ticks).toHaveBeenCalledTimes(1);
+    expect(mockRefetch.grid).toHaveBeenCalledTimes(1);
+    expect(mockRefetch.events).toHaveBeenCalledTimes(1);
+    expect(mockRefetch.reports).toHaveBeenCalledTimes(1);
+    expect(mockRefetch.forecastAccuracy).toHaveBeenCalledTimes(3);
   });
 });
