@@ -7,7 +7,10 @@ import { render, screen, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { ControllerPage } from "../pages/Controller";
-import { buildStackedFromAllTimelines } from "../components/controller/GridAccumulatedCell";
+import {
+  buildStackedFromAllTimelines,
+  assetIdsWithTimelineData,
+} from "../components/controller/GridAccumulatedCell";
 import type { SimSnapshot } from "../api/types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
@@ -174,5 +177,29 @@ describe("buildStackedFromAllTimelines — positional zip", () => {
     expect(result[0].battery_pos).toBe(0);
     expect(result[0].base_load_pos).toBe(0);
     expect(result[0].gridPowerKw).toBeNull();
+  });
+});
+
+// ─── Tests: assetIdsWithTimelineData — legend/graph presence pairing ─────────
+
+describe("assetIdsWithTimelineData", () => {
+  it("excludes a candidate asset that has no timeline entries, even if otherwise configured", () => {
+    // "battery" is a configured/candidate asset (e.g. from assetSummaries) but has
+    // no entry in allTimelines yet — its legend/area must not appear on the chart.
+    const allTimelines: Record<string, AssetTimelinePoint[]> = {
+      ev: [pt(1000, 3.0)],
+      battery: [],
+    };
+    const result = assetIdsWithTimelineData(["ev", "battery", "pv"], allTimelines);
+    expect(result).toEqual(["ev"]);
+  });
+
+  it("keeps every candidate that has at least one timeline entry", () => {
+    const allTimelines: Record<string, AssetTimelinePoint[]> = {
+      ev: [pt(1000, 3.0)],
+      pv: [pt(1000, -1.0)],
+    };
+    const result = assetIdsWithTimelineData(["ev", "pv"], allTimelines);
+    expect(result).toEqual(["ev", "pv"]);
   });
 });
