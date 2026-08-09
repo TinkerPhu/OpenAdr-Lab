@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { StackedTimeSeriesChart } from "../charts/StackedTimeSeriesChart";
 import type { AssetId } from "../controller/types";
 import { ASSET_COLORS } from "../controller/types";
-import { buildStackedFromAllTimelines } from "../controller/GridAccumulatedCell";
+import { buildStackedFromAllTimelines, assetIdsWithTimelineData } from "../controller/GridAccumulatedCell";
 import type { Plan } from "../../api/types";
 import { useAllTimelines } from "../../api/hooks";
 import { Box, Typography } from "@mui/material";
@@ -53,7 +53,7 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
   }
 
   const points = buildStackedFromAllTimelines(allTimelines);
-  const assetIds = RENDER_ORDER.filter((id) => (allTimelines[id]?.length ?? 0) > 0);
+  const assetIds = assetIdsWithTimelineData(RENDER_ORDER, allTimelines);
 
   const curtailedSlots = plan.slots.filter(
     (slot) => (slot.pv_forecast_kw - (slot.pv_used_kw ?? slot.pv_forecast_kw)) > 0.05,

@@ -19,6 +19,22 @@ function discoverAssetIds(allTimelines: Record<string, AssetTimelinePoint[]>): A
   return Object.keys(allTimelines).filter((id) => id !== "grid");
 }
 
+/**
+ * Narrows a candidate asset-ID list (e.g. the currently-configured roster from
+ * assetSummaries) down to the ones that actually have timeline entries — i.e. the
+ * same set StackedTimeSeriesChart will actually draw a graph for. A candidate asset
+ * with no timeline data yet would otherwise still get a legend entry with nothing
+ * plotted next to it; this is the single filter both StackedTimeSeriesChart callers
+ * (GridAccumulatedCell, PlanPowerStack) apply before passing `assetIds` to the chart,
+ * so a legend entry and its graph can never drift apart.
+ */
+export function assetIdsWithTimelineData(
+  candidateIds: AssetId[],
+  allTimelines: Record<string, AssetTimelinePoint[]>
+): AssetId[] {
+  return candidateIds.filter((id) => (allTimelines[id]?.length ?? 0) > 0);
+}
+
 /** Build stacked-area data by positional zip across grid-aligned asset arrays. */
 export function buildStackedFromAllTimelines(
   allTimelines: Record<string, AssetTimelinePoint[]>
@@ -84,7 +100,12 @@ export function GridAccumulatedCell({
     return all.filter((p) => p.ts >= tMin && p.ts <= tMax);
   }, [allTimelines, tMin, tMax]);
 
-  const assetIds = assetSummaries.map((s) => s.assetId);
+  // Configured roster narrowed to what actually has plotted data in this window —
+  // see assetIdsWithTimelineData's doc comment for why (legend must match the graph).
+  const assetIds = assetIdsWithTimelineData(
+    assetSummaries.map((s) => s.assetId),
+    allTimelines
+  );
 
   return (
     <Paper
