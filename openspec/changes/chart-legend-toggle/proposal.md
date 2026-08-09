@@ -33,6 +33,25 @@ this asset," not "hide half of this asset's stack").
   `StackedTimeSeriesChart` on its current legend (still gaining the one-entry-per-asset
   fix on its own merits, decoupled from the toggle).
 
+## Correction pass (found during manual verification on Node1)
+
+- `AssetTimelineChart`/`TariffChart` showed toggle checkboxes for series with no actual
+  data (Cost rate, CO₂eq rate) on cells where those values are never sampled — an
+  unconditional series declaration that should have been gated, the same way the near/far
+  forecast lines already were. Fixed generically, not with a third one-off presence
+  boolean: `TimeSeriesChart` itself now excludes any series with no data anywhere in the
+  current window, from both rendering and the legend — see `design.md`'s Decision 7-8 and
+  the new `generic-over-bespoke` rule in `.claude/CLAUDE.md`.
+- The same pass folds in a related anti-pattern found in the same files: per-series
+  tooltip formatting was an `if (name === "...")` chain rather than declared alongside
+  each series — `TimeSeriesSeriesSpec` gains a `formatter` field (Decision 9, the
+  `declare-dont-branch` rule).
+- `StackedTimeSeriesChart`'s per-asset `<Area>` pair and legend entry move from two
+  independently-written derivations of the same asset list to one shared array
+  (Decision 10) — a structural tightening, not a behavior change.
+- Cosmetic: `ChartLegend` drops its redundant color-swatch square, keeping only the
+  (already color-tinted) checkbox and label.
+
 ## Capabilities
 
 ### New Capabilities

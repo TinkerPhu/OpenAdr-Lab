@@ -85,11 +85,96 @@
       warning, not a new issue)
 - [x] 6.3 ESLint zero errors (`npx eslint .` — same 9 pre-existing warnings in unrelated
       files as the prior change's verification, zero errors)
-- [ ] **6.4 Manual visual + interaction check — BLOCKED, needs the user** (same
-      limitation as the prior chart-primitives change: no browser-automation tool
-      available in this environment). Check: Controller tab (AssetTimelineChart cells,
-      Grid Tariff, Grid Accumulated — checkboxes appear, clicking one hides/shows that
-      series live, unchecked entries are dimmed), History tab (same), Planner tab
-      (`PlanPowerStack`'s legend shows one row per asset, no checkboxes), Raw
-      Diagnostics + Devices (confirm unaffected — plain legends, no checkboxes). This is
-      the one remaining gate before merge.
+- [x] **6.4 Manual visual + interaction check — done on Node1.** Two real issues found
+      (wrong checkboxes for dataless Cost-rate/CO₂eq-rate series; redundant color swatch)
+      — see the "Correction pass" groups below. Superseded by Group 14's re-check, which
+      re-verifies everything together once the corrections land; not re-run standalone.
+
+## 7. TimeSeriesChart core: generic data-presence filtering
+
+- [ ] 7.1 `charts/mergeSeries.ts` — add `seriesHasData(data: TimestampedRow[], dataKey:
+      TimeSeriesSeriesSpec["dataKey"]): boolean`, evaluating the accessor (or string key)
+      across every row, true if any row yields a non-null value.
+- [ ] 7.2 `TimeSeriesChart.tsx` — compute `visibleSeries = series.filter(s =>
+      seriesHasData(data, s.dataKey))` once; use `visibleSeries` for both the `<Line>` map
+      and `ChartLegend`'s `entries`. Applies regardless of `interactiveLegend`.
+- [ ] 7.3 Unit tests: a series with no non-null value anywhere in `data` has no `<Line>`
+      and no legend entry (checked both with and without `interactiveLegend`); a series
+      that gains a value on a re-render with new `data` appears without any caller-side
+      flag; a series whose value is exactly 0 at every row (present, not absent) still
+      renders and appears in the legend — locks in the null-vs-zero distinction.
+
+## 8. TimeSeriesChart core: per-series declarative tooltip formatter
+
+- [ ] 8.1 `TimeSeriesSeriesSpec` gains `formatter?: (value: number) => string`. The
+      composition's `tooltipFormatter` prop becomes optional (fallback only). Tooltip
+      value resolution: look up the hovered series by name in `series`, use its own
+      `formatter` if present, else the fallback `tooltipFormatter`, else raw `String(value)`.
+- [ ] 8.2 Unit tests: a series with its own `formatter` uses it for its tooltip value; a
+      series without one falls back to the chart-level `tooltipFormatter` when provided.
+
+## 9. Migrate AssetTimelineChart onto the generic mechanisms
+
+- [ ] 9.1 Delete `hasNearForecast`/`hasFarForecast`; push the near/far forecast series
+      unconditionally (same as Cost rate/CO₂eq rate always were) — task 7's filter hides
+      them automatically when the corresponding props are empty.
+- [ ] 9.2 Move each series' tooltip formatting (`formatCo2RateGH`, `formatCostRateEurH`,
+      `formatSocPct`, `formatTemperatureC`, `formatPowerValue`) from the `tooltipFormatter`
+      if-chain into that series' own `formatter` field; delete the if-chain.
+- [ ] 9.3 Regression: existing `AssetTimelineChart`/`AssetCell`/`Controller`/`History`
+      tests pass unchanged in behavior (update only what the removed booleans/if-chain
+      touched, not test intent); new test confirming Cost rate/CO₂eq rate no longer
+      appear in the legend for a fixture with no cost/CO2 data.
+
+## 10. Migrate TariffChart onto the generic mechanisms
+
+- [ ] 10.1 Move `formatCo2RateGH`/`formatCostRateEurH`/`formatTariffEurKwh` from the
+      `tooltipFormatter` if-chain into each series' own `formatter` field; delete the
+      if-chain. (Task 7's data-presence filter applies automatically — no `hasXData` ever
+      existed here to remove, since none of the 4 series had one.)
+- [ ] 10.2 Regression: existing `TariffChart`/`GridTariffCell`/`History` tests pass.
+
+## 11. Migrate the raw-diagnostics TimeSeriesChart consumers
+
+- [ ] 11.1 `TariffsLineChart.tsx` — move its `if (name === "CO₂ g/kWh") ... else ...`
+      tooltip formatter into per-series `formatter` fields; delete the if-chain.
+- [ ] 11.2 `TimelineSeriesChart.tsx` — move its (already-trivial, single-series) formatter
+      into the series' own `formatter` field, for consistency (no behavior change; it had
+      no branch to remove).
+- [ ] 11.3 Regression: existing `RawDiagnostics`/`DiagnosticCell` tests pass unchanged.
+
+## 12. StackedTimeSeriesChart: unify Area + legend derivation
+
+- [ ] 12.1 Build one `assetSeries = renderOrder.map(id => ({ id, label: assetLabel(id),
+      color: colorMap[id] ?? COLOR_ASSET_FALLBACK }))`; derive the positive-`<Area>` map,
+      negative-`<Area>` map, and `ChartLegend` entries all from `assetSeries` instead of
+      three independent derivations. Grid stays a separate, hardcoded 4th entry (not part
+      of the per-asset family). Deliberately NOT adding data-presence filtering here — see
+      design.md's "Additional Non-Goals" (no null/absent signal exists in
+      `StackedAreaPoint`'s always-`number` pos/neg fields; confirmed no conflict with the
+      unimplemented, unrelated `unify-plan-power-stack-grid` change).
+- [ ] 12.2 Regression: existing `StackedTimeSeriesChartLegend`/`GridAccumulatedCell`/
+      `PlannerPage` tests pass unchanged; new test confirming an asset's Area elements and
+      its legend entry share identical label/color (sourced from the same record).
+
+## 13. Cosmetic: remove the ChartLegend color swatch
+
+- [ ] 13.1 `ChartLegend.tsx` — remove the separate colored square `<span>`; keep the
+      (already color-tinted via `accentColor`) checkbox and the colored label text.
+- [ ] 13.2 Regression: existing `ChartLegend.test.tsx` assertions still pass (none of them
+      assert on the swatch specifically); no new test needed beyond a visual confirmation.
+
+## 14. Documentation & re-verification
+
+- [ ] 14.1 Update `docs/architecture/chart_diagrams.md`: document
+      `seriesHasData`/auto-filtering, the per-series `formatter` field, and
+      `StackedTimeSeriesChart`'s unified `assetSeries` array.
+- [ ] 14.2 Append a `docs/history/project_journal.md` entry for the correction pass; note
+      in `docs/reference/KEY_LEARNINGS.md` if anything further surfaces during
+      implementation.
+- [ ] 14.3 `cd VEN/ui && npm test`, `npm run build`, `npx eslint .` — full green, same
+      bar as Group 6.
+- [ ] 14.4 Manual visual + interaction check on Node1 (redeploy), replacing the finding
+      from 6.4: confirm Cost rate/CO₂eq rate checkboxes no longer appear where there's no
+      data, confirm the swatch is gone, re-confirm the original toggle/grouping behavior
+      from Group 6 still holds (no regression from this pass).
