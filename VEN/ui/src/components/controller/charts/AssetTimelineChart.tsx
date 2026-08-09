@@ -323,6 +323,7 @@ export function AssetTimelineChart({
       referenceAxisId="power"
       zones={zones}
       extraReferenceAreas={curtailmentAreas}
+      interactiveLegend
       tooltipFormatter={(value, name) => {
         if (name === "CO₂eq rate [g/h]") return [formatCo2RateGH(value), name];
         if (name === "Cost rate [€/h]") return [formatCostRateEurH(value), name];

@@ -183,6 +183,7 @@ export function TariffChart({
       nowMs={nowMs}
       referenceAxisId="tariff"
       zones={zones}
+      interactiveLegend
       tooltipFormatter={(value, name) => {
         if (name === "CO₂ rate [g/h]") return [formatCo2RateGH(value), name];
         if (name === "Cost rate [€/h]") return [formatCostRateEurH(value), name];

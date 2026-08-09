@@ -125,6 +125,7 @@ export function GridAccumulatedCell({
           height={tall ? CELL_CHART_HEIGHT_TALL : undefined}
           zones={zones}
           xAxisTickIntervalMinutes={extended ? EXTENDED_TICK_INTERVAL_MINUTES : DEFAULT_TICK_INTERVAL_MINUTES}
+          interactiveLegend
         />
       </Box>
 
