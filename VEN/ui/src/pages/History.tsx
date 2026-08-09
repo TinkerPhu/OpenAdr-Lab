@@ -40,22 +40,40 @@ export function HistoryPage() {
   // newest displayed day so the field is never blank, without treating that as a selection.
   const displayDate = date ?? toIso.slice(0, 10);
 
-  const { data: ticks = [] } = useHistoryTicks(fromIso, toIso);
-  const { data: grid = [] } = useHistoryGrid(fromIso, toIso);
-  const { data: events = [] } = useHistoryEvents(fromIso, toIso);
-  const { data: reports = [] } = useHistoryReports(fromIso, toIso);
+  const ticksQuery = useHistoryTicks(fromIso, toIso);
+  const gridQuery = useHistoryGrid(fromIso, toIso);
+  const eventsQuery = useHistoryEvents(fromIso, toIso);
+  const reportsQuery = useHistoryReports(fromIso, toIso);
   // Rules of hooks — fixed set, so called unconditionally rather than in the render loop below.
-  const { data: pvForecast = [] } = useHistoryForecastAccuracy(fromIso, toIso, "pv");
-  const { data: baseLoadForecast = [] } = useHistoryForecastAccuracy(fromIso, toIso, "base_load");
-  const { data: siteResidualForecast = [] } = useHistoryForecastAccuracy(
-    fromIso,
-    toIso,
-    "site-residual"
-  );
+  const pvForecastQuery = useHistoryForecastAccuracy(fromIso, toIso, "pv");
+  const baseLoadForecastQuery = useHistoryForecastAccuracy(fromIso, toIso, "base_load");
+  const siteResidualForecastQuery = useHistoryForecastAccuracy(fromIso, toIso, "site-residual");
+
+  const { data: ticks = [] } = ticksQuery;
+  const { data: grid = [] } = gridQuery;
+  const { data: events = [] } = eventsQuery;
+  const { data: reports = [] } = reportsQuery;
+  const { data: pvForecast = [] } = pvForecastQuery;
+  const { data: baseLoadForecast = [] } = baseLoadForecastQuery;
+  const { data: siteResidualForecast = [] } = siteResidualForecastQuery;
   const forecastByAsset: Record<string, ForecastAccuracySample[]> = {
     pv: pvForecast,
     base_load: baseLoadForecast,
     "site-residual": siteResidualForecast,
+  };
+
+  // The query keys are derived from `date`, so react-query already refetches whenever the
+  // date actually changes. This covers the cases where the user wants a refresh without a
+  // key change: reopening the date picker (stale last-24h view, same day re-confirmed) and
+  // re-clicking "Last 24h" while already in that mode (the rolling window has drifted).
+  const refetchAll = () => {
+    ticksQuery.refetch();
+    gridQuery.refetch();
+    eventsQuery.refetch();
+    reportsQuery.refetch();
+    pvForecastQuery.refetch();
+    baseLoadForecastQuery.refetch();
+    siteResidualForecastQuery.refetch();
   };
 
   const ticksByAsset = useMemo(() => {
@@ -103,13 +121,16 @@ export function HistoryPage() {
           size="small"
           value={displayDate}
           onChange={(e) => setDate(e.target.value || null)}
-          inputProps={{ "data-testid": "history-date-input" }}
+          inputProps={{ "data-testid": "history-date-input", onClick: refetchAll }}
           InputLabelProps={{ shrink: true }}
         />
         <Button
           variant="outlined"
-          disabled={date === null}
-          onClick={() => setDate(null)}
+          onClick={() => {
+            const alreadyOnLast24h = date === null;
+            setDate(null);
+            if (alreadyOnLast24h) refetchAll();
+          }}
           data-testid="history-last-24h-btn"
           sx={{ height: 40 }}
         >
