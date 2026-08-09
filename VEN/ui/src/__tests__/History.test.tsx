@@ -107,15 +107,34 @@ describe("HistoryPage", () => {
     expect(button).not.toBeDisabled();
   });
 
-  it("refetches history data when the date control is clicked, even without changing the value", () => {
+  it("clicking the date control switches out of rolling last-24h into the fixed day it's showing", () => {
     renderHistory();
+    expect(
+      screen.getByText("Showing the last 24 hours — pick a date above to view a specific UTC day")
+    ).toBeInTheDocument();
+
+    const input = screen.getByTestId("history-date-input") as HTMLInputElement;
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    fireEvent.click(input);
+
+    expect(screen.getByText(`Showing ${todayUtc} (UTC)`)).toBeInTheDocument();
+  });
+
+  it("refetches history data when the date control is clicked while already on that exact day", () => {
+    renderHistory();
+    const input = screen.getByTestId("history-date-input") as HTMLInputElement;
+    // First click just switches out of rolling mode into today's fixed day — no manual
+    // refetch needed there, since the query-key change already triggers one.
+    fireEvent.click(input);
+
     mockRefetch.ticks.mockClear();
     mockRefetch.grid.mockClear();
     mockRefetch.events.mockClear();
     mockRefetch.reports.mockClear();
     mockRefetch.forecastAccuracy.mockClear();
 
-    const input = screen.getByTestId("history-date-input") as HTMLInputElement;
+    // Second click: already showing this exact day, so nothing about the selection changes —
+    // this is the case that needs an explicit refetch.
     fireEvent.click(input);
 
     expect(mockRefetch.ticks).toHaveBeenCalledTimes(1);
