@@ -112,4 +112,14 @@ describe("StackedTimeSeriesChart — legend", () => {
     expect(evNeg?.fill).toBe(colorMap.ev);
     expect(screen.getByText("EV (planned)")).toHaveStyle({ color: colorMap.ev });
   });
+
+  it("renders pv's Area first (closest to the X axis) regardless of assetIds order", () => {
+    // assetIds is ["ev", "pv"] — pv must still render before ev in both the
+    // positive and negative stacks, since pv sits at the base of the stack.
+    render(<StackedTimeSeriesChart data={data} assetIds={assetIds} colorMap={colorMap} nowMs={now} />);
+    const posNames = areas.filter((a) => (a.name as string).endsWith(" +")).map((a) => a.name);
+    const negNames = areas.filter((a) => (a.name as string).endsWith(" -")).map((a) => a.name);
+    expect(posNames.indexOf("pv +")).toBeLessThan(posNames.indexOf("ev +"));
+    expect(negNames.indexOf("pv -")).toBeLessThan(negNames.indexOf("ev -"));
+  });
 });

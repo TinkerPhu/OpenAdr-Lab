@@ -145,10 +145,12 @@ export function StackedTimeSeriesChart({
           { ts: tMax, ...emptyPt(assetIds) } as StackedAreaPoint,
         ];
 
-  // base_load first so it sits closest to the X axis in both stacks.
+  // pv first so it sits closest to the X axis in both stacks — PV is generation
+  // (negative/export side), so this puts it at the base of the export stack with
+  // every consuming asset drawn on top of it.
   const renderOrder: AssetId[] = [
-    ...assetIds.filter((id) => id === "base_load"),
-    ...assetIds.filter((id) => id !== "base_load"),
+    ...assetIds.filter((id) => id === "pv"),
+    ...assetIds.filter((id) => id !== "pv"),
   ];
 
   // Domain floor uses the summed stack top/bottom per point (not individual series), since
