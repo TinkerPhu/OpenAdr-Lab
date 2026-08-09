@@ -15,6 +15,8 @@ import { renderZoneShading } from "./ZoneShading";
 import { TOOLTIP_CONTENT_STYLE, TOOLTIP_ITEM_STYLE, TOOLTIP_LABEL_STYLE } from "./tooltipStyle";
 import { CELL_CHART_HEIGHT } from "./chartLayout";
 import type { TimestampedRow } from "./mergeSeries";
+import { useLegendToggle } from "./useLegendToggle";
+import { ChartLegend } from "./ChartLegend";
 
 export interface TimeSeriesAxisSpec {
   id: string;
@@ -77,12 +79,17 @@ interface TimeSeriesChartProps {
   height?: number;
   testId?: string;
   legend?: boolean;
+  /** Opt-in: renders the legend with a checkbox per series, live-toggling that series'
+   * visibility (and removing it from the tooltip) — see chart_diagrams.md's "Interactive
+   * legend" section. Unset/false: legend is unchanged from before this capability
+   * existed. Toggle state is local to this chart instance, not persisted. */
+  interactiveLegend?: boolean;
   margin?: { top: number; right: number; left: number; bottom: number };
 }
 
 /**
  * Shared composition for every multi/single-series, time-X-axis chart in VEN/ui — see
- * openspec/changes/unified-chart-primitives/ for the duplication this replaces. Renders
+ * docs/architecture/chart_diagrams.md for the duplication this replaces. Renders
  * purely from the declarative `axes`/`series` config plus the pre-merged `data`; holds no
  * chart-specific domain/formatting logic itself (that lives in each caller, using the
  * shared axisDomain.ts/unitFormat.ts/mergeSeries.ts primitives).
@@ -103,8 +110,10 @@ export function TimeSeriesChart({
   height = CELL_CHART_HEIGHT,
   testId,
   legend = true,
+  interactiveLegend = false,
   margin = { top: 4, right: 4, left: 0, bottom: 0 },
 }: TimeSeriesChartProps) {
+  const { isHidden, toggle } = useLegendToggle();
   return (
     <div data-testid={testId} style={{ width: "100%", height }}>
       <ResponsiveContainer width="100%" height="100%">
@@ -151,7 +160,19 @@ export function TimeSeriesChart({
             labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
             formatter={tooltipFormatter}
           />
-          {legend && <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />}
+          {legend && interactiveLegend && (
+            <Legend
+              content={
+                <ChartLegend
+                  entries={series.map((s) => ({ key: s.key, label: s.key, color: s.color }))}
+                  isHidden={isHidden}
+                  toggle={toggle}
+                  interactive={true}
+                />
+              }
+            />
+          )}
+          {legend && !interactiveLegend && <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />}
 
           {series.map((s) => (
             <Line
@@ -167,6 +188,7 @@ export function TimeSeriesChart({
               dot={false}
               connectNulls={s.connectNulls ?? false}
               isAnimationActive={false}
+              hide={interactiveLegend && isHidden(s.key)}
             />
           ))}
 
