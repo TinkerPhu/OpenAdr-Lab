@@ -64,3 +64,57 @@ grouping SHALL apply whether or not `interactiveLegend` is set.
 #### Scenario: The grid line has its own independent legend entry
 - **WHEN** the chart renders the grid net-power line alongside per-asset stacked series
 - **THEN** the grid line has its own legend entry, toggleable independently of any asset
+
+### Requirement: A TimeSeriesChart series with no data anywhere in the current window is not rendered and has no legend entry
+`TimeSeriesChart` SHALL exclude, from both its rendered series and its legend, any
+declared series whose value is absent (null/undefined) at every row of the current `data`.
+This exclusion SHALL apply whether or not `interactiveLegend` is set, and SHALL require no
+per-series presence check at the call site — a chart declares every series it conceptually
+has; presence is derived from the data, not declared by the caller.
+
+#### Scenario: A series with no data anywhere in the window has no legend entry
+- **WHEN** a chart declares a series whose value is absent at every row of `data`
+- **THEN** that series has no entry in the legend, interactive or not
+
+#### Scenario: A series that gains data on a later render gets a legend entry
+- **WHEN** a chart re-renders with new `data` in which a previously-all-absent series now
+  has a value at one or more rows
+- **THEN** that series appears in the legend on that render, with no code change or
+  caller-side flag required
+
+#### Scenario: A series with only zero values (not absent) still gets a legend entry
+- **WHEN** a series has a real value of exactly 0 at every row (present, not absent)
+- **THEN** that series still appears in the legend — zero is data, not absence
+
+### Requirement: Each TimeSeriesChart series declares its own tooltip formatter; the composition does not branch on the hovered series' name
+`TimeSeriesSeriesSpec` SHALL support an optional per-series `formatter`. When a series
+declares one, `TimeSeriesChart`'s tooltip SHALL use it for that series' value, looked up by
+the series' own identity — not by a chart-level function branching on the hovered series'
+display name.
+
+#### Scenario: A series' own formatter is used for its tooltip value
+- **WHEN** a series declares a `formatter` and the user hovers a point on that series
+- **THEN** the tooltip value for that series is produced by that series' own `formatter`
+
+#### Scenario: A series without its own formatter falls back to the chart-level default
+- **WHEN** a series does not declare a `formatter` and the chart provides a fallback
+  `tooltipFormatter`
+- **THEN** the tooltip value for that series is produced by the fallback
+
+### Requirement: StackedTimeSeriesChart's per-asset Area rendering and legend entries are derived from one shared list
+The positive series, the negative series, and the legend entry for a given asset SHALL be
+derived from one shared per-asset data structure, not independently re-computed in more
+than one place.
+
+#### Scenario: An asset's label and color are consistent between its Areas and its legend entry
+- **WHEN** an asset's positive/negative `<Area>` elements and its legend entry are
+  rendered
+- **THEN** they use the identical label and color, sourced from the same per-asset record
+
+### Requirement: ChartLegend renders a checkbox and a label, without a separate color swatch
+Each `ChartLegend` entry SHALL render, at most, a checkbox (when interactive) and a
+label — no separate colored swatch element in addition to the checkbox.
+
+#### Scenario: An interactive legend entry has no extra color swatch
+- **WHEN** an interactive legend entry is rendered
+- **THEN** it contains a checkbox and a label, and no additional colored square element
