@@ -14,7 +14,7 @@ import { renderNowLine } from "./NowLine";
 import { renderZoneShading } from "./ZoneShading";
 import { TOOLTIP_CONTENT_STYLE, TOOLTIP_ITEM_STYLE, TOOLTIP_LABEL_STYLE } from "./tooltipStyle";
 import { CELL_CHART_HEIGHT } from "./chartLayout";
-import type { TimestampedRow } from "./mergeSeries";
+import { seriesHasData, type TimestampedRow } from "./mergeSeries";
 import { useLegendToggle } from "./useLegendToggle";
 import { ChartLegend } from "./ChartLegend";
 
@@ -49,6 +49,11 @@ export interface TimeSeriesSeriesSpec {
   strokeOpacity?: number;
   type?: "stepAfter" | "monotone" | "linear";
   connectNulls?: boolean;
+  /** This series' own tooltip value formatter, looked up by series identity — takes
+   * precedence over the chart-level `tooltipFormatter` fallback. Declaring formatting
+   * alongside the series avoids a chart-level if-chain branching on the hovered series'
+   * name (see `.claude/CLAUDE.md`'s `declare-dont-branch`). */
+  formatter?: (value: number) => string;
 }
 
 interface TimeSeriesChartProps {
@@ -70,7 +75,8 @@ interface TimeSeriesChartProps {
    * they only need one to map x-coordinates. Required whenever `nowMs` or `zones` is set. */
   referenceAxisId?: string;
   zones?: ZoneDef[];
-  tooltipFormatter: (value: number, name: string) => [string, string];
+  /** Fallback used only for series that don't declare their own `formatter`. */
+  tooltipFormatter?: (value: number, name: string) => [string, string];
   /** Chart-specific overlay `<ReferenceArea>` elements (e.g. AssetTimelineChart's PV
    * curtailment shading) that don't fit the generic zone-shading primitive — rendered
    * after zones, before the NOW line, same stacking order every consumer used before
@@ -114,6 +120,14 @@ export function TimeSeriesChart({
   margin = { top: 4, right: 4, left: 0, bottom: 0 },
 }: TimeSeriesChartProps) {
   const { isHidden, toggle } = useLegendToggle();
+  const visibleSeries = series.filter((s) => seriesHasData(data, s.dataKey));
+  const seriesByName = new Map(visibleSeries.map((s) => [s.key, s]));
+  const resolveTooltipValue = (value: number, name: string): [string, string] => {
+    const own = seriesByName.get(name)?.formatter;
+    if (own) return [own(value), name];
+    if (tooltipFormatter) return tooltipFormatter(value, name);
+    return [String(value), name];
+  };
   return (
     <div data-testid={testId} style={{ width: "100%", height }}>
       <ResponsiveContainer width="100%" height="100%">
@@ -158,13 +172,13 @@ export function TimeSeriesChart({
             itemStyle={TOOLTIP_ITEM_STYLE}
             labelStyle={TOOLTIP_LABEL_STYLE}
             labelFormatter={(v) => new Date(v as number).toLocaleTimeString()}
-            formatter={tooltipFormatter}
+            formatter={resolveTooltipValue}
           />
           {legend && interactiveLegend && (
             <Legend
               content={
                 <ChartLegend
-                  entries={series.map((s) => ({ key: s.key, label: s.key, color: s.color }))}
+                  entries={visibleSeries.map((s) => ({ key: s.key, label: s.key, color: s.color }))}
                   isHidden={isHidden}
                   toggle={toggle}
                   interactive={true}
@@ -174,7 +188,7 @@ export function TimeSeriesChart({
           )}
           {legend && !interactiveLegend && <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />}
 
-          {series.map((s) => (
+          {visibleSeries.map((s) => (
             <Line
               key={s.key}
               yAxisId={s.axisId}

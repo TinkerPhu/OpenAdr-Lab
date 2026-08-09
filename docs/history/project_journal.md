@@ -7959,3 +7959,35 @@ actual click-through interaction (via a mocked `recharts` whose `<Legend>` rende
 `content` element, making `ChartLegend`'s checkboxes genuinely clickable in jsdom), not just
 prop inspection — confirming a click actually flips the rendered `hide` prop end to end.
 
+**Correction pass** (found during the manual Node1 check above): two real bugs and one
+cosmetic issue. `AssetTimelineChart`/`TariffChart` showed toggle checkboxes for Cost
+rate/CO₂eq rate series even on cells with no actual cost/CO2 data — an unconditional
+series declaration, same shape of bug the near/far forecast lines had already been gated
+against with their own one-off `hasNearForecast`/`hasFarForecast` booleans. Rather than add
+a third such boolean, the fix went generic: `TimeSeriesChart` itself now computes
+`seriesHasData()` (`mergeSeries.ts`) per declared series and filters both rendering and the
+legend on it — a caller declares every series it conceptually has, presence is derived from
+`data`, never declared by the caller. This surfaced a broader anti-pattern in the same
+files: `tooltipFormatter` was an `if (name === "...") ... else if ...` chain branching on
+the hovered series' display name. `TimeSeriesSeriesSpec` gained a per-series `formatter`
+field instead, so each series' own formatting is declared where the series itself is
+declared — the chart-level `tooltipFormatter` is now an optional fallback only. Both fixes
+motivated two new project-wide rules recorded in `.claude/CLAUDE.md`: `generic-over-bespoke`
+(stop writing another one-off `hasXData` boolean; name the general pattern and push the fix
+into the shared primitive) and `declare-dont-branch` (declare each case's behavior as data
+at the point it's defined, instead of a chain of conditionals dispatching on it elsewhere).
+`StackedTimeSeriesChart`'s positive-Area, negative-Area, and legend-entry derivations were
+independently re-computed from `renderOrder` in three places; unified into one shared
+`assetSeries` array so an asset's label/color can never drift between what's drawn and what
+the legend shows — deliberately NOT extended with `TimeSeriesChart`'s data-presence
+filtering, since `StackedAreaPoint`'s pos/neg fields are always plain `number`, with no
+null/absence signal to filter on. Cosmetic: `ChartLegend` dropped its redundant color-swatch
+`<span>` — the checkbox (tinted via `accentColor`) and the color-tinted label text already
+carried the color, making the swatch pure duplication.
+
+**Verification**: full suite green again after the correction pass (same pre-existing
+network-dependent PV-inject test failure, unrelated), typecheck/lint clean at every step.
+Manually re-checked on Node1: Cost rate/CO₂eq rate checkboxes no longer appear where there's
+no data, the swatch is gone, and the original toggle/one-entry-per-asset behavior from the
+first pass still holds.
+
