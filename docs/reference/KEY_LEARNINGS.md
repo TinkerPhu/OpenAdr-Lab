@@ -921,3 +921,13 @@ outes/sim.rs causes a T1+T2 double-solve race:
   surfaced a 4th, real shape mismatch (`SimProfileChart`'s categorical X-axis) — left as its
   own small component rather than forced into either composition. Not every chart belongs in
   the same abstraction just because it's a chart.
+- **A recharts component mock can render its own `content`/`children` prop instead of
+  returning `null`, making a genuinely interactive test possible in jsdom without a full
+  recharts render.** `chart-legend-toggle`'s tests mock `recharts`' `<Legend>` as
+  `(props) => props.content ?? null` — since `content` is already a real React element
+  (`<ChartLegend .../>`) built by the composition, rendering it directly puts real,
+  clickable checkboxes in the DOM. This let tests click a checkbox and assert the resulting
+  `hide` prop on the mocked `<Line>`/`<Area>`, verifying the actual interaction rather than
+  just inspecting static props — same class of technique as the existing `ReferenceArea`/
+  `XAxis` prop-capturing mocks, extended to be interactive where the component under test
+  needs it to be.

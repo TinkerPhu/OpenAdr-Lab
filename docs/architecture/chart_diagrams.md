@@ -16,6 +16,8 @@ VEN/ui/src/components/charts/
   ZoneShading.tsx            zone background shading
   tooltipStyle.ts            shared tooltip container styling
   EmptyState.tsx             shared "no data" message treatment
+  useLegendToggle.ts          local per-series show/hide state for interactive legends
+  ChartLegend.tsx             shared checkbox-per-entry legend row
   TimeSeriesChart.tsx        composition 1: multi-axis line/step, time X-axis
   StackedTimeSeriesChart.tsx composition 2: stacked areas + net-value tooltip
   CurveChart.tsx             composition 3: non-temporal X-axis
@@ -131,6 +133,21 @@ This is a deliberately different mechanism from the 2-point-placeholder pattern
 when their `data` prop is empty (a 2-point array spanning `[tMin, tMax]`) — that pattern
 exists so axes and the NOW line still render with no data, which a bare message can't do.
 
+### `useLegendToggle.ts` / `ChartLegend.tsx`
+
+Interactive per-series legend: `useLegendToggle()` is a local (unpersisted, not shared
+across chart instances) `Set<string>` of hidden series keys, exposing `isHidden(key)`/
+`toggle(key)`. `ChartLegend` renders one `[checkbox] [color swatch] label` row per entry
+— the checkbox is only rendered (and clickable) when its `interactive` prop is true;
+with `interactive=false` it renders the identical row layout with no checkbox, which is
+what lets `StackedTimeSeriesChart` use one code path for both its always-on
+one-entry-per-asset grouping and its opt-in toggle (see "Interactive legend" under
+"The three compositions" below).
+
+Every `<Line>`/`<Area>` a composition renders gets recharts' own `hide` prop wired to
+`isHidden(key)` — this is the native recharts mechanism (not custom logic), and it
+removes a hidden series from the tooltip's payload as well as from rendering.
+
 ### Sizing (`chartLayout.ts`)
 
 `CELL_CHART_HEIGHT` (140px) is the height for Controller/History dashboard cells;
@@ -153,19 +170,25 @@ Multi-axis (left + up to 2 right + 1 hidden), time X-axis. Configured declarativ
 from the one merged `data` array passed in (see the cursor-correctness invariant above).
 `tMin`/`tMax`/`nowMs`/`referenceAxisId` are all optional — a chart with no live "now"
 concept (e.g. a planned-rates viewer) omits them and gets recharts' own `["auto","auto"]`
-X-domain and no NOW line.
+X-domain and no NOW line. `interactiveLegend?: boolean` (default false) opts into the
+checkbox-per-series legend (`ChartLegend`) described above; unset, the legend is the
+plain recharts `<Legend>`, unchanged from before that capability existed.
 
 Used by:
 - **`AssetTimelineChart`** (Controller cells, History) — power/cost/CO2/hidden-state
   axes; forecast near/far overlay lines (conditionally rendered); PV curtailment shading
   passed via `extraReferenceAreas` (kept as `AssetTimelineChart`'s own asset-specific
   classification logic, not a shared chart concern — see "Special features" below).
+  `interactiveLegend` enabled.
 - **`TariffChart`** (Controller Grid Tariff cell, History) — tariff/cost/CO2 3-axis
   split (see "Special features"); its own domain-clipping/carry-forward logic for
   windowing `/tariffs` data to `[tMin, tMax]` is kept as this chart's own code, not
   shared, since it's specific to how that endpoint's data needs windowing.
+  `interactiveLegend` enabled.
 - **`TariffsLineChart`**, **`TimelineSeriesChart`** (Raw Diagnostics page) — simpler
   single/multi-series diagnostic views, no NOW line, `DIAGNOSTIC_CHART_HEIGHT`.
+  `interactiveLegend` not enabled (out of the Controller/History scope this capability
+  shipped for).
 
 **Not used by `SimProfileChart`** (Raw Diagnostics) — its X-axis is categorical (asset
 id, `dataKey="name"`), not temporal, so it doesn't fit this composition or `CurveChart`.
@@ -182,8 +205,19 @@ and the tooltip's pos/neg-to-net re-aggregation (`StackedAreaTooltip`, merging
 are genuinely different logic from a plain multi-line chart — not duplication of it.
 Built on the same shared axis/tick/color/sizing/NOW-line/zone-shading primitives.
 
-Used by the Controller Grid Accumulated cell (`GridAccumulatedCell.tsx`) and the
-Planner tab's plan-power preview (`PlanPowerStack.tsx`).
+Its legend always shows exactly **one entry per asset** (via `ChartLegend`), never one
+per internal `${id}_pos`/`${id}_neg` series — this grouping applies unconditionally,
+regardless of `interactiveLegend`, since the pos/neg split is an internal rendering
+detail that should never have been user-visible in the first place. With
+`interactiveLegend` enabled, unchecking an asset's entry hides both its positive and
+negative `<Area>` together (the checkbox controls the asset as the user understands it,
+not its two internal series); the grid net-power line has its own, independently
+toggleable entry.
+
+Used by the Controller Grid Accumulated cell (`GridAccumulatedCell.tsx`,
+`interactiveLegend` enabled) and the Planner tab's plan-power preview
+(`PlanPowerStack.tsx`, `interactiveLegend` not enabled — still gets the
+one-entry-per-asset grouping, since that applies unconditionally).
 
 ### `CurveChart`
 
