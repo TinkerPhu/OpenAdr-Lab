@@ -14,11 +14,24 @@ interface PlanPowerStackProps {
 }
 
 export function PlanPowerStack({ plan }: PlanPowerStackProps) {
-  // eslint-disable-next-line react-hooks/purity -- intentional: snapshot current time relative to plan horizon; component re-renders on poll
+  // eslint-disable-next-line react-hooks/purity -- intentional: snapshot current time for the NOW line; component re-renders on poll
   const nowMs = Date.now();
   const lastEnd = plan?.slots[plan.slots.length - 1]?.end;
-  const tMax = lastEnd ? new Date(lastEnd).getTime() : nowMs + 12 * 3_600_000;
-  const hoursForward = Math.max(0.5, (tMax - nowMs) / 3_600_000);
+  // Memoized on the plan's own horizon (lastEnd), not recomputed from Date.now() on
+  // every render: this value feeds useAllTimelines()'s query key below, so letting it
+  // drift by milliseconds on every render (as it harmlessly did when it was only a
+  // chart-sizing prop) minted a new query key — and triggered a new fetch — on every
+  // render, including the frequent re-renders SSE solving_progress events cause during
+  // a solve. Recomputing only when the plan horizon actually changes fixes that without
+  // losing correctness: the window is always >= the remaining plan horizon.
+  const hoursForward = useMemo(() => {
+    // Recomputed only when the plan horizon (lastEnd) changes, not on every
+    // render; see comment above.
+    // eslint-disable-next-line react-hooks/purity -- intentional, see above
+    const now = Date.now();
+    const tMax = lastEnd ? new Date(lastEnd).getTime() : now + 12 * 3_600_000;
+    return Math.max(0.5, (tMax - now) / 3_600_000);
+  }, [lastEnd]);
 
   // Same backend-computed timeline the Controller tab's Accumulated Power chart
   // uses (net_import_kw - net_export_kw, correctly signed) — hoursBack: 0 keeps

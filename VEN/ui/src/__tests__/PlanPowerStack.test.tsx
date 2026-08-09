@@ -21,15 +21,21 @@ vi.mock("../components/charts/StackedTimeSeriesChart", () => ({
   },
 }));
 
-// ─── Mock useAllTimelines ─────────────────────────────────────────────────────
+// ─── Mock useAllTimelines — a spy so tests can assert on the (hoursBack,
+// hoursForward) query args, not just the returned data ──────────────────────
 
 let allTimelinesData: { zones: unknown[]; timelines: Record<string, AssetTimelinePoint[]> } = {
   zones: [],
   timelines: {},
 };
 
+const useAllTimelinesSpy = vi.fn<(hoursBack?: number, hoursForward?: number) => { data: typeof allTimelinesData; refetch: () => void }>(
+  () => ({ data: allTimelinesData, refetch: vi.fn() })
+);
+
 vi.mock("../api/hooks", () => ({
-  useAllTimelines: () => ({ data: allTimelinesData, refetch: vi.fn() }),
+  useAllTimelines: (hoursBack?: number, hoursForward?: number) =>
+    useAllTimelinesSpy(hoursBack, hoursForward),
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -76,6 +82,33 @@ describe("PlanPowerStack", () => {
   afterEach(() => {
     allTimelinesData = { zones: [], timelines: {} };
     capturedProps = null;
+    useAllTimelinesSpy.mockClear();
+    vi.useRealTimers();
+  });
+
+  // ── Regression: the refetch-storm bug the timeline-source fix introduced ──
+  it("does not recompute hoursForward (and thus the useAllTimelines query key) across re-renders when the plan is unchanged", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-04T10:00:00.000Z"));
+
+    const plan = makePlan([makeSlot({ end: "2026-04-04T22:00:00Z" })]);
+    const { rerender } = render(<PlanPowerStack plan={plan} />);
+
+    expect(useAllTimelinesSpy).toHaveBeenCalledTimes(1);
+    const [, firstHoursForward] = useAllTimelinesSpy.mock.calls[0];
+
+    // Simulate real time passing (e.g. an SSE solving_progress event forcing a
+    // re-render) without the plan itself changing.
+    vi.setSystemTime(new Date("2026-04-04T10:00:05.000Z"));
+    rerender(<PlanPowerStack plan={plan} />);
+
+    expect(useAllTimelinesSpy).toHaveBeenCalledTimes(2);
+    const [, secondHoursForward] = useAllTimelinesSpy.mock.calls[1];
+
+    // Same plan object → the query's hoursForward argument must be identical,
+    // not drift with Date.now() on every render (that drift is what turned
+    // every render into a new React Query key and a new fetch).
+    expect(secondHoursForward).toBe(firstHoursForward);
   });
 
   it("shows the no-plan empty state when plan is absent", () => {
