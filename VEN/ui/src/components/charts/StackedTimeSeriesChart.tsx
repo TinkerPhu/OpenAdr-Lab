@@ -162,11 +162,18 @@ export function StackedTimeSeriesChart({
     MIN_POWER_SPAN_KW
   );
 
-  // One legend entry per asset (not one per internal pos/neg series — see
-  // chart_diagrams.md's StackedTimeSeriesChart section) plus one for the grid line.
-  // Applies unconditionally, whether or not interactiveLegend is enabled.
+  // One record per asset drives its positive Area, negative Area, and legend entry —
+  // a single shared derivation instead of three independent ones, so an asset's label/
+  // color can never drift between what's drawn and what the legend shows (see
+  // chart_diagrams.md's StackedTimeSeriesChart section). The grid line stays a separate,
+  // hardcoded 4th legend entry — it isn't a member of the per-asset family.
+  const assetSeries = renderOrder.map((id) => ({
+    id,
+    label: assetLabel(id),
+    color: colorMap[id] ?? COLOR_ASSET_FALLBACK,
+  }));
   const legendEntries: ChartLegendEntry[] = [
-    ...renderOrder.map((id) => ({ key: id, label: assetLabel(id), color: colorMap[id] ?? COLOR_ASSET_FALLBACK })),
+    ...assetSeries.map(({ id, label, color }) => ({ key: id, label, color })),
     { key: GRID_LEGEND_KEY, label: "Grid", color: COLOR_GRID_LINE },
   ];
 
@@ -208,7 +215,7 @@ export function StackedTimeSeriesChart({
           />
 
           {/* For each asset: positive series (import, stacked above x-axis) */}
-          {renderOrder.map((id) => (
+          {assetSeries.map(({ id, color }) => (
             <Area
               key={`${id}_pos`}
               yAxisId="power"
@@ -216,7 +223,7 @@ export function StackedTimeSeriesChart({
               dataKey={`${id}_pos`}
               name={`${id} +`}
               stackId="positive"
-              fill={colorMap[id] ?? COLOR_ASSET_FALLBACK}
+              fill={color}
               stroke="none"
               fillOpacity={0.6}
               dot={false}
@@ -227,7 +234,7 @@ export function StackedTimeSeriesChart({
           ))}
 
           {/* For each asset: negative series (export/generation, stacked below x-axis) */}
-          {renderOrder.map((id) => (
+          {assetSeries.map(({ id, color }) => (
             <Area
               key={`${id}_neg`}
               yAxisId="power"
@@ -235,7 +242,7 @@ export function StackedTimeSeriesChart({
               dataKey={`${id}_neg`}
               name={`${id} -`}
               stackId="negative"
-              fill={colorMap[id] ?? COLOR_ASSET_FALLBACK}
+              fill={color}
               stroke="none"
               fillOpacity={0.6}
               dot={false}

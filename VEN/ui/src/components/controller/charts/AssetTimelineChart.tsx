@@ -203,9 +203,6 @@ export function AssetTimelineChart({
 
   const curtailmentZones = pvCurtailment ? buildCurtailmentZones(chartData) : [];
 
-  const hasNearForecast = (nearForecast ?? []).length > 0;
-  const hasFarForecast = (farForecast ?? []).length > 0;
-
   const powerDomain = minSpanDomain(
     chartData.flatMap((p) => [
       p.values?.["power_kw"] ?? null,
@@ -229,6 +226,7 @@ export function AssetTimelineChart({
       dataKey: (row) => row.values?.["power_kw"] ?? null,
       color,
       strokeWidth: 2,
+      formatter: formatPowerValue,
     },
     // forecast-accuracy-tracking: near/far forecast overlay — visually distinct from the
     // actual Power line above (thin, dotted, muted) and from each other (dash pattern).
@@ -237,35 +235,31 @@ export function AssetTimelineChart({
     // the planner's prediction for one discrete plan slot, holding until the next sample
     // supersedes it, same interpretation as the actual Power line's own `stepAfter`.
     // `connectNulls` stays as a backstop; the LOCF fill above already removes in-range
-    // nulls between samples.
-    ...(hasNearForecast
-      ? [
-          {
-            key: "Forecast (near) [kW]",
-            axisId: "power",
-            dataKey: (row: TimestampedRow) => row.values?.["predicted_kw_near"] ?? null,
-            color,
-            strokeWidth: 1,
-            strokeOpacity: 0.6,
-            strokeDasharray: "2 3",
-            connectNulls: true,
-          },
-        ]
-      : []),
-    ...(hasFarForecast
-      ? [
-          {
-            key: "Forecast (far) [kW]",
-            axisId: "power",
-            dataKey: (row: TimestampedRow) => row.values?.["predicted_kw_far"] ?? null,
-            color,
-            strokeWidth: 1,
-            strokeOpacity: 0.6,
-            strokeDasharray: "6 3",
-            connectNulls: true,
-          },
-        ]
-      : []),
+    // nulls between samples. Declared unconditionally — `TimeSeriesChart`'s own
+    // data-presence filtering hides these automatically when nearForecast/farForecast are
+    // empty, same as every other series here.
+    {
+      key: "Forecast (near) [kW]",
+      axisId: "power",
+      dataKey: (row: TimestampedRow) => row.values?.["predicted_kw_near"] ?? null,
+      color,
+      strokeWidth: 1,
+      strokeOpacity: 0.6,
+      strokeDasharray: "2 3",
+      connectNulls: true,
+      formatter: formatPowerValue,
+    },
+    {
+      key: "Forecast (far) [kW]",
+      axisId: "power",
+      dataKey: (row: TimestampedRow) => row.values?.["predicted_kw_far"] ?? null,
+      color,
+      strokeWidth: 1,
+      strokeOpacity: 0.6,
+      strokeDasharray: "6 3",
+      connectNulls: true,
+      formatter: formatPowerValue,
+    },
     {
       key: "Cost rate [€/h]",
       axisId: "cost",
@@ -273,6 +267,7 @@ export function AssetTimelineChart({
       color,
       strokeWidth: 1.5,
       strokeDasharray: "5 5",
+      formatter: formatCostRateEurH,
     },
     {
       key: "CO₂eq rate [g/h]",
@@ -281,6 +276,7 @@ export function AssetTimelineChart({
       color,
       strokeWidth: 1.5,
       strokeDasharray: "2 2",
+      formatter: formatCo2RateGH,
     },
     ...(stateKey
       ? [
@@ -292,6 +288,7 @@ export function AssetTimelineChart({
             strokeWidth: 1.5,
             strokeDasharray: "4 2",
             type: "monotone" as const,
+            formatter: stateKey === "soc" ? formatSocPct : formatTemperatureC,
           },
         ]
       : []),
@@ -324,13 +321,6 @@ export function AssetTimelineChart({
       zones={zones}
       extraReferenceAreas={curtailmentAreas}
       interactiveLegend
-      tooltipFormatter={(value, name) => {
-        if (name === "CO₂eq rate [g/h]") return [formatCo2RateGH(value), name];
-        if (name === "Cost rate [€/h]") return [formatCostRateEurH(value), name];
-        if (name === "SoC [%]") return [formatSocPct(value), name];
-        if (name === "T_tank [°C]") return [formatTemperatureC(value), name];
-        return [formatPowerValue(value), name];
-      }}
       height={CELL_CHART_HEIGHT}
       margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
     />

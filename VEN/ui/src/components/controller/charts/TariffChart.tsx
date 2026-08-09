@@ -139,6 +139,7 @@ export function TariffChart({
       color: SERIES_COLORS.import_tariff,
       strokeDasharray: "5 5",
       connectNulls: true,
+      formatter: formatTariffEurKwh,
     },
     {
       key: "Export tariff [€/kWh]",
@@ -147,6 +148,7 @@ export function TariffChart({
       color: SERIES_COLORS.export_tariff,
       strokeDasharray: "5 5",
       connectNulls: true,
+      formatter: formatTariffEurKwh,
     },
     {
       key: "Cost rate [€/h]",
@@ -155,6 +157,7 @@ export function TariffChart({
       color: SERIES_COLORS.cost_rate,
       strokeDasharray: "5 5",
       connectNulls: true,
+      formatter: formatCostRateEurH,
     },
     {
       key: "CO₂ rate [g/h]",
@@ -163,6 +166,7 @@ export function TariffChart({
       color: SERIES_COLORS.co2_rate,
       strokeDasharray: "2 2",
       connectNulls: true,
+      formatter: formatCo2RateGH,
     },
   ];
 
@@ -184,11 +188,6 @@ export function TariffChart({
       referenceAxisId="tariff"
       zones={zones}
       interactiveLegend
-      tooltipFormatter={(value, name) => {
-        if (name === "CO₂ rate [g/h]") return [formatCo2RateGH(value), name];
-        if (name === "Cost rate [€/h]") return [formatCostRateEurH(value), name];
-        return [formatTariffEurKwh(value), name];
-      }}
       height={height ?? CELL_CHART_HEIGHT}
       margin={{ top: 4, right: 40, left: 0, bottom: 0 }}
     />
