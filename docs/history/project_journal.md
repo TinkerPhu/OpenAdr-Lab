@@ -7814,11 +7814,31 @@ shipped defense-in-depth instrumentation instead (`6b80be8`):
   `ven_post()` Python helper auto-tags every `/sim/inject` call with the calling
   test file:line via `inspect.stack()`, covering ~20 existing BDD call sites
   without editing each one.
-Next occurrence (if the endpoint is ever re-enabled without a fix) should be
-immediately attributable via the `source` field. If it recurs while the
-endpoint is disabled, the culprit is not going through the HTTP route at all,
-which would point at something restart-adjacent again — re-check the SIGTERM
-persistence path first.
+**Round 4 (2026-08-08/09) — actual root cause found.** The disable-gate kept blocking
+attempts (26 rejected `/sim/inject` calls logged over the next two days, all peer
+`192.168.1.134` — this dev laptop, all `source: None`). Correlating each attempt's
+timestamp against Node1's own git commit history (`scripts/correlate_ven1_inject.sh`,
+written for this) showed every single one landing 2–25 minutes before a commit on
+whichever UI branch was active at the time (`045-unified-chart-primitives`,
+`046-chart-legend-toggle`, then the `fix/plan-power-stack-grid-export` branch) — the
+"test, then commit" cadence of ordinary iterative development, not a mystery process.
+A concurrent session investigating an unrelated grid-power-chart test failure hit the
+same 403 and traced it to `VEN/ui/src/__tests__/pv_irradiance_one_shot.test.ts`: an
+"opt-in integration test" whose `VITE_VEN_URL` fallback, when the env var was unset
+(the normal case for a plain `npm test`), defaulted to **Node1's real production
+`ven-1` address** (`http://192.168.1.103:8211`), with a comment explaining the
+hardcoded IP (Windows can't reliably resolve the `Node1` SSH-alias hostname) but never
+flagging the danger of the fallback itself. Every UI test run — from any of the many
+parallel sessions on this LAN, across every round of this mystery back to the original
+2026-08-05 reports — silently POSTed a real PV override into production and reset it
+~9.5s later (`sleep(1500)` + `sleep(8000)` in the test), exactly matching the
+"one-shot inject" shape chased through rounds 1–3. `source: None` on every capture
+was simply this test never having been updated to pass one. Fixed (`db555e1`): no
+default — the suite now skips itself whenever `VITE_VEN_URL` isn't explicitly set,
+same fail-safe CI already relied on, minus the fallback that made it dangerous
+everywhere else. `sim_inject_enabled` stays `false` on `VEN/profiles/ven-1.yaml` for
+now as a monitoring period before considering re-enabling it (tracked in
+`docs/BACKLOG.md`, GB-17).
 
 ### Forecast Accuracy Tracking (openspec/changes/forecast-accuracy-tracking, 2026-08-07)
 
