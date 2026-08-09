@@ -8011,3 +8011,45 @@ Manually re-checked on Node1: Cost rate/CO₂eq rate checkboxes no longer appear
 no data, the swatch is gone, and the original toggle/one-entry-per-asset behavior from the
 first pass still holds.
 
+### Planner Power Stack grid line dropped export (openspec/changes/unify-plan-power-stack-grid, 2026-08-09)
+
+Found via `/openspec-explore`: under an autarky (`min_import`) objective, the Planner tab's
+Power Stack chart showed the grid line stuck near 0 kW even while the stack above it showed
+heavy PV export — the Controller tab's near-identical Accumulated Power chart (same
+`StackedTimeSeriesChart` component since `unified-chart-primitives`) drew the same plan's
+grid line correctly. Root cause: `PlanPowerStack.tsx` built its `StackedAreaPoint[]`
+directly from `usePlan()`'s raw `Plan` object and set `gridPowerKw: slot.net_import_kw`.
+`net_import_kw`/`net_export_kw` are two separate non-negative MILP decision variables
+(`entities/plan.rs`) — under autarky, export is unpenalized and common, so most future
+slots had `net_import_kw ≈ 0` and a nonzero `net_export_kw` that was silently dropped.
+Every other place in the codebase that nets these two fields does
+`net_import_kw - net_export_kw` (`controller/timeline.rs`, `report_intervals.rs`,
+`arbiter.rs`); `PlanPowerStack` was the one place that reimplemented this arithmetic
+client-side, and the only one that got it wrong.
+
+**What changed**: `PlanPowerStack.tsx` now sources its chart data the same way
+`GridAccumulatedCell.tsx` (Controller tab) already did — `useAllTimelines()` +
+`buildStackedFromAllTimelines()` (exported from `GridAccumulatedCell.tsx`, no new module),
+reading the backend's "grid" virtual asset whose `power_kw` is already
+`net_import_kw - net_export_kw`, computed once in `controller/timeline.rs`. The buggy
+`buildStackedFromPlan()` was deleted rather than patched. `usePlan()` stays on the page for
+the header/decision-matrix/session-board and the PV-curtailment banner; the chart's
+`hoursForward` is still derived from the plan horizon. `hoursBack: 0` is kept — the one
+remaining intentional difference from Controller's chart (forecast-only vs. + trailing
+history).
+
+**Key learning applied**: same root cause shape as `unified-chart-primitives`'s
+cursor-correctness fix — two independent implementations of the same "plan/timeline data →
+chart point" transformation, one of which drifted wrong. Reused the existing correct one
+instead of writing a third variant or patching the wrong one's one-line bug in place.
+
+**Verification**: new regression test (`PlanPowerStack.test.tsx`) reproduces the exact bug
+shape (a slot with `net_export_kw > 0`, `net_import_kw ≈ 0`) and was confirmed red against
+the pre-fix implementation before writing the fix. Full VEN UI suite green (520/521; the
+one failure is the pre-existing, unrelated `pv_irradiance_one_shot.test.ts` network test).
+`tsc --noEmit`, `npm run build`, ESLint (zero errors), and the file-size audit all clean.
+Not yet verified: a manual visual check in a running dev server with an active autarky
+session and PV surplus (Planner tab's grid line should now visually match Controller's for
+the same time range) — flagged as outstanding before merge, same as prior chart-refactor
+entries above.
+

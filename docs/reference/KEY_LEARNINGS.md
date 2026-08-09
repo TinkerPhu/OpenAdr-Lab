@@ -937,6 +937,20 @@ outes/sim.rs causes a T1+T2 double-solve race:
   was needed for tariff and CO2-intensity axes. Two helpers with different anchor semantics,
   not one helper with a flag — the doc comment on each explains which quantities it's for and
   why, so a future caller doesn't have to guess.
+- **A third recurrence of the same root cause, one layer up the stack**
+  (`openspec/changes/unify-plan-power-stack-grid/`, 2026-08-09): where the above bullets are
+  about a chart component plotting two independently-indexed *arrays*, this was two
+  independently-*computed* single values — `PlanPowerStack.tsx` re-derived grid power from
+  `usePlan()`'s raw `Plan` object (`slot.net_import_kw` alone, dropping `net_export_kw`)
+  instead of reusing the already-correct `net_import_kw - net_export_kw` the backend computes
+  once (`controller/timeline.rs`) and that `GridAccumulatedCell.tsx` already consumed
+  correctly via `useAllTimelines()`. Same underlying failure mode as the tooltip-index bug:
+  two call sites independently reimplementing "raw data → the value actually shown," one of
+  them silently wrong, with nothing structural preventing a third. The fix wasn't patching the
+  one-line bug in place — it was deleting the second implementation and pointing both
+  consumers at the one that was already correct. When two components need the same derived
+  value from the same upstream source, that is a signal to share the derivation, not a
+  coincidence to leave alone.
 - **Building "one universal chart component" was explicitly rejected in favor of a shared
   primitives kit plus three named compositions** (`TimeSeriesChart`, `StackedTimeSeriesChart`,
   `CurveChart`) — forcing genuinely different shapes (stacked areas with net-value tooltip

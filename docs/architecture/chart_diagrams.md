@@ -246,6 +246,20 @@ Used by the Controller Grid Accumulated cell (`GridAccumulatedCell.tsx`,
 (`PlanPowerStack.tsx`, `interactiveLegend` not enabled — still gets the
 one-entry-per-asset grouping, since that applies unconditionally).
 
+Both consumers build their `StackedAreaPoint[]` the same way, from the same source: the
+shared `buildStackedFromAllTimelines()` (defined in `GridAccumulatedCell.tsx`, imported by
+`PlanPowerStack.tsx`) zips per-asset series from `useAllTimelines()`
+(`GET /timeline/all`). Its "grid" virtual asset carries `net_import_kw - net_export_kw`,
+computed once server-side (`controller/timeline.rs`) — neither component re-derives grid
+power from raw plan-slot fields itself. `PlanPowerStack` queries with `hoursBack: 0`
+(forecast-only) where `GridAccumulatedCell` includes trailing history; that's the only
+intentional difference between the two call sites. (Before this, `PlanPowerStack` built
+its points independently from `usePlan()`'s raw `Plan` object and read only
+`slot.net_import_kw`, silently dropping export — the grid line sat near zero under an
+autarky objective even while the stack showed heavy PV export. Two independent
+implementations of "plan slot → chart point" is what let one of them be wrong; there is
+now exactly one.)
+
 ### `CurveChart`
 
 Non-temporal X-axis (currently: fill % vs. €/kWh bid price). Shares only sizing,
