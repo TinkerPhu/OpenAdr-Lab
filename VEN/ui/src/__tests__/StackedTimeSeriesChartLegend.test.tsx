@@ -103,4 +103,13 @@ describe("StackedTimeSeriesChart — legend", () => {
     expect(gridLine?.hide).toBe(true);
     expect(evPos?.hide).toBe(false);
   });
+
+  it("an asset's Area fill and its legend entry text share the identical color", () => {
+    render(<StackedTimeSeriesChart data={data} assetIds={assetIds} colorMap={colorMap} nowMs={now} />);
+    const evPos = [...areas].reverse().find((a) => a.name === "ev +");
+    const evNeg = [...areas].reverse().find((a) => a.name === "ev -");
+    expect(evPos?.fill).toBe(colorMap.ev);
+    expect(evNeg?.fill).toBe(colorMap.ev);
+    expect(screen.getByText("EV (planned)")).toHaveStyle({ color: colorMap.ev });
+  });
 });

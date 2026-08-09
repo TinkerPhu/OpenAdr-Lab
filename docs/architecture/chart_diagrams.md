@@ -137,12 +137,13 @@ exists so axes and the NOW line still render with no data, which a bare message 
 
 Interactive per-series legend: `useLegendToggle()` is a local (unpersisted, not shared
 across chart instances) `Set<string>` of hidden series keys, exposing `isHidden(key)`/
-`toggle(key)`. `ChartLegend` renders one `[checkbox] [color swatch] label` row per entry
-— the checkbox is only rendered (and clickable) when its `interactive` prop is true;
-with `interactive=false` it renders the identical row layout with no checkbox, which is
-what lets `StackedTimeSeriesChart` use one code path for both its always-on
-one-entry-per-asset grouping and its opt-in toggle (see "Interactive legend" under
-"The three compositions" below).
+`toggle(key)`. `ChartLegend` renders one `[checkbox] label` row per entry — the checkbox
+is itself color-tinted via `accentColor`, and the label text is color-tinted too, so no
+separate swatch element is needed. The checkbox is only rendered (and clickable) when its
+`interactive` prop is true; with `interactive=false` it renders the identical row layout
+with no checkbox, which is what lets `StackedTimeSeriesChart` use one code path for both
+its always-on one-entry-per-asset grouping and its opt-in toggle (see "Interactive
+legend" under "The three compositions" below).
 
 Every `<Line>`/`<Area>` a composition renders gets recharts' own `hide` prop wired to
 `isHidden(key)` — this is the native recharts mechanism (not custom logic), and it
@@ -173,6 +174,24 @@ concept (e.g. a planned-rates viewer) omits them and gets recharts' own `["auto"
 X-domain and no NOW line. `interactiveLegend?: boolean` (default false) opts into the
 checkbox-per-series legend (`ChartLegend`) described above; unset, the legend is the
 plain recharts `<Legend>`, unchanged from before that capability existed.
+
+**Data-presence filtering** — a caller declares every series it conceptually has, even
+ones that may have no data in a given render (e.g. `AssetTimelineChart` always declares
+Cost rate/CO₂eq rate, whether or not the underlying asset has cost/CO2 data attached).
+`TimeSeriesChart` itself computes `visibleSeries = series.filter(s => seriesHasData(data,
+s.dataKey))` (`mergeSeries.ts`'s `seriesHasData` — true if any row's accessor yields a
+non-null value) and uses `visibleSeries` for both the rendered `<Line>`s and the legend
+entries, regardless of `interactiveLegend`. This applies by construction to every current
+and future series a caller declares — no caller writes its own `hasXData`-style boolean
+per series (see `.claude/CLAUDE.md`'s `generic-over-bespoke` rule). A series whose real
+value is exactly `0` at every row still counts as present (`0` is data, not absence).
+
+**Per-series tooltip formatter** — `TimeSeriesSeriesSpec.formatter?: (value: number) =>
+string` lets a series declare its own tooltip value formatting where it's declared,
+instead of a chart-level `tooltipFormatter` branching on the hovered series' display name
+(the `declare-dont-branch` rule in `.claude/CLAUDE.md`). Resolution: a hovered series'
+own `formatter` if present, else the chart-level `tooltipFormatter` (now optional,
+fallback-only), else `String(value)`.
 
 Used by:
 - **`AssetTimelineChart`** (Controller cells, History) — power/cost/CO2/hidden-state
@@ -208,7 +227,15 @@ Built on the same shared axis/tick/color/sizing/NOW-line/zone-shading primitives
 Its legend always shows exactly **one entry per asset** (via `ChartLegend`), never one
 per internal `${id}_pos`/`${id}_neg` series — this grouping applies unconditionally,
 regardless of `interactiveLegend`, since the pos/neg split is an internal rendering
-detail that should never have been user-visible in the first place. With
+detail that should never have been user-visible in the first place. An `assetSeries =
+renderOrder.map(id => ({ id, label, color }))` array is built once and drives all three
+derivations (the positive `<Area>` map, the negative `<Area>` map, and the legend
+entries) — a shared derivation, not three independently-written ones, so an asset's
+label/color can never drift between what's drawn and what the legend shows. The grid
+net-power line stays a separate, hardcoded 4th legend entry, not part of the per-asset
+family. Deliberately does NOT get `TimeSeriesChart`'s data-presence auto-filtering:
+`StackedAreaPoint`'s pos/neg fields are always plain `number` (never `null`), so there's
+no absence signal to filter on for this composition. With
 `interactiveLegend` enabled, unchecking an asset's entry hides both its positive and
 negative `<Area>` together (the checkbox controls the asset as the user understands it,
 not its two internal series); the grid net-power line has its own, independently

@@ -253,6 +253,28 @@ describe("AssetTimelineChart — near/far forecast overlay", () => {
   });
 });
 
+describe("AssetTimelineChart — Cost rate/CO2eq rate only render when data is present", () => {
+  beforeEach(() => {
+    lines.length = 0;
+  });
+
+  it("renders no Cost rate/CO2eq rate lines for a fixture with no cost/CO2 data", () => {
+    const data = [point(-1 * minute, { power_kw: -3.0 })];
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} />);
+    const names = lines.map((l) => l.name);
+    expect(names).not.toContain("Cost rate [€/h]");
+    expect(names).not.toContain("CO₂eq rate [g/h]");
+  });
+
+  it("renders Cost rate/CO2eq rate lines when that data is present", () => {
+    const data = [point(-1 * minute, { power_kw: -3.0, cost_rate_eur_h: 0.5, co2_rate_g_h: 120 })];
+    render(<AssetTimelineChart data={data} color="#000" nowMs={now} />);
+    const names = lines.map((l) => l.name);
+    expect(names).toContain("Cost rate [€/h]");
+    expect(names).toContain("CO₂eq rate [g/h]");
+  });
+});
+
 describe("AssetTimelineChart — X-axis tick rounding", () => {
   beforeEach(() => {
     xAxes.length = 0;

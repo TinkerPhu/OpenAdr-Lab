@@ -61,9 +61,9 @@ export function TimelineSeriesChart({ data, selectedSeries, onSeriesChange }: Ti
               dataKey: (row) => row.values?.power_kw ?? null,
               color: SERIES_COLORS.power,
               type: "monotone",
+              formatter: formatPowerValue,
             },
           ]}
-          tooltipFormatter={(value) => [formatPowerValue(value), "power_kw"]}
           height={DIAGNOSTIC_CHART_HEIGHT}
           margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
           legend={false}

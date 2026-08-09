@@ -48,18 +48,21 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
       axisId: "tariff",
       dataKey: (row) => row.values?.import_tariff_eur_kwh ?? null,
       color: SERIES_COLORS.import_tariff,
+      formatter: formatTariffEurKwh,
     },
     {
       key: "export €/kWh",
       axisId: "tariff",
       dataKey: (row) => row.values?.export_tariff_eur_kwh ?? null,
       color: SERIES_COLORS.export_tariff,
+      formatter: formatTariffEurKwh,
     },
     {
       key: "CO₂ g/kWh",
       axisId: "co2",
       dataKey: (row) => row.values?.co2_g_kwh ?? null,
       color: SERIES_COLORS.co2_rate,
+      formatter: formatCo2IntensityGKwh,
     },
   ];
 
@@ -73,10 +76,6 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
         { id: "co2", orientation: "right", unit: " g/kWh", domain: co2Domain },
       ]}
       series={series}
-      tooltipFormatter={(value, name) => {
-        if (name === "CO₂ g/kWh") return [formatCo2IntensityGKwh(value), name];
-        return [formatTariffEurKwh(value), name];
-      }}
       height={DIAGNOSTIC_CHART_HEIGHT}
       margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
     />

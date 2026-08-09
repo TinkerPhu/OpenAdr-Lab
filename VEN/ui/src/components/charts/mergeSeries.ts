@@ -19,6 +19,21 @@ export interface TimestampedRow {
   values: Record<string, number | null> | null;
 }
 
+/**
+ * True if the given accessor yields a non-null value at any row — the generic
+ * data-presence check every `TimeSeriesChart` series is filtered through, so a chart can
+ * declare every series it conceptually has without callers writing their own
+ * `hasXData`-style boolean per series (see `.claude/CLAUDE.md`'s `generic-over-bespoke`).
+ */
+export function seriesHasData(
+  data: TimestampedRow[],
+  dataKey: string | ((row: TimestampedRow) => number | null | undefined)
+): boolean {
+  const accessor: (row: TimestampedRow) => number | null | undefined =
+    typeof dataKey === "function" ? dataKey : (row) => row.values?.[dataKey];
+  return data.some((row) => accessor(row) !== null && accessor(row) !== undefined);
+}
+
 /** One named point to fold into the merged row array — e.g. a forecast sample keyed by
  * its own target timestamp and the series key it should appear under in the merged row. */
 export interface NamedSample {

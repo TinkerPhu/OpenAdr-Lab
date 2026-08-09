@@ -15,8 +15,10 @@ interface ChartLegendProps {
 }
 
 /**
- * Shared legend row for TimeSeriesChart/StackedTimeSeriesChart: one `[checkbox] [color
- * swatch] label` entry per series. Rendered via recharts' `<Legend content={...} />`,
+ * Shared legend row for TimeSeriesChart/StackedTimeSeriesChart: one `[checkbox] label`
+ * entry per series (the checkbox is itself color-tinted via `accentColor`, and the label
+ * text is color-tinted too — no separate swatch element). Rendered via recharts' `<Legend
+ * content={...} />`,
  * ignoring recharts' own auto-generated payload — the caller already knows its own
  * series identities/colors, so this renders directly from `entries` instead of
  * re-deriving them from recharts' internal series bookkeeping.
@@ -55,16 +57,6 @@ export function ChartLegend({ entries, isHidden, toggle, interactive }: ChartLeg
                 style={{ width: 10, height: 10, margin: 0, accentColor: entry.color, cursor: "pointer" }}
               />
             )}
-            <span
-              style={{
-                display: "inline-block",
-                width: 10,
-                height: 10,
-                borderRadius: 2,
-                background: entry.color,
-                flexShrink: 0,
-              }}
-            />
             <span style={{ color: entry.color }}>{entry.label}</span>
           </label>
         );
