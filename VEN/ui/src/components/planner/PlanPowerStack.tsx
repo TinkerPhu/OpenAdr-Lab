@@ -1,49 +1,34 @@
+import { useMemo } from "react";
 import { StackedTimeSeriesChart } from "../charts/StackedTimeSeriesChart";
-import type { StackedAreaPoint, AssetId } from "../controller/types";
+import type { AssetId } from "../controller/types";
 import { ASSET_COLORS } from "../controller/types";
+import { buildStackedFromAllTimelines } from "../controller/GridAccumulatedCell";
 import type { Plan } from "../../api/types";
+import { useAllTimelines } from "../../api/hooks";
 import { Box, Typography } from "@mui/material";
 
 const RENDER_ORDER: AssetId[] = ["base_load", "ev", "wm", "heater", "battery", "pv"];
-
-function buildStackedFromPlan(plan: Plan): { points: StackedAreaPoint[]; assetIds: AssetId[] } {
-  const present = new Set<string>(["base_load", "pv"]);
-  for (const slot of plan.slots) {
-    for (const key of Object.keys(slot.planned_kw_by_asset ?? {})) present.add(key);
-  }
-  const assetIds = RENDER_ORDER.filter((id) => present.has(id));
-
-  const points: StackedAreaPoint[] = plan.slots.map((slot) => {
-    const m = slot.planned_kw_by_asset ?? {};
-    const pt: StackedAreaPoint = {
-      ts: new Date(slot.start).getTime(),
-      base_load_pos: slot.baseline_kw,
-      base_load_neg: 0,
-      pv_pos: 0,
-      // Planned export after curtailment, not the raw forecast — falls back to
-      // the forecast when pv_used_kw is absent (older plans / not curtailed).
-      pv_neg: -(slot.pv_used_kw ?? slot.pv_forecast_kw),
-      ev_pos: 0, ev_neg: 0,
-      heater_pos: 0, heater_neg: 0,
-      battery_pos: 0, battery_neg: 0,
-      gridPowerKw: slot.net_import_kw,
-    };
-    for (const id of assetIds.filter((x) => x !== "base_load" && x !== "pv")) {
-      const kw = m[id] ?? 0;
-      pt[`${id}_pos`] = Math.max(0, kw);
-      pt[`${id}_neg`] = Math.min(0, kw);
-    }
-    return pt;
-  });
-
-  return { points, assetIds };
-}
 
 interface PlanPowerStackProps {
   plan: Plan | null | undefined;
 }
 
 export function PlanPowerStack({ plan }: PlanPowerStackProps) {
+  // eslint-disable-next-line react-hooks/purity -- intentional: snapshot current time relative to plan horizon; component re-renders on poll
+  const nowMs = Date.now();
+  const lastEnd = plan?.slots[plan.slots.length - 1]?.end;
+  const tMax = lastEnd ? new Date(lastEnd).getTime() : nowMs + 12 * 3_600_000;
+  const hoursForward = Math.max(0.5, (tMax - nowMs) / 3_600_000);
+
+  // Same backend-computed timeline the Controller tab's Accumulated Power chart
+  // uses (net_import_kw - net_export_kw, correctly signed) — hoursBack: 0 keeps
+  // this chart forecast-only, the one intentional difference from Controller's.
+  const { data: allTimelinesResponse } = useAllTimelines(0, hoursForward);
+  const allTimelines = useMemo(
+    () => allTimelinesResponse?.timelines ?? {},
+    [allTimelinesResponse]
+  );
+
   if (!plan || plan.slots.length === 0) {
     return (
       <Box sx={{ py: 2 }}>
@@ -54,12 +39,8 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
     );
   }
 
-  // eslint-disable-next-line react-hooks/purity -- intentional: snapshot current time relative to plan horizon; component re-renders on poll
-  const nowMs = Date.now();
-  const { points, assetIds } = buildStackedFromPlan(plan);
-  const lastEnd = plan.slots[plan.slots.length - 1]?.end;
-  const tMax = lastEnd ? new Date(lastEnd).getTime() : nowMs + 12 * 3_600_000;
-  const hoursForward = Math.max(0.5, (tMax - nowMs) / 3_600_000);
+  const points = buildStackedFromAllTimelines(allTimelines);
+  const assetIds = RENDER_ORDER.filter((id) => (allTimelines[id]?.length ?? 0) > 0);
 
   const curtailedSlots = plan.slots.filter(
     (slot) => (slot.pv_forecast_kw - (slot.pv_used_kw ?? slot.pv_forecast_kw)) > 0.05,
