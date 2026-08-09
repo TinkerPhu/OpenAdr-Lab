@@ -8067,3 +8067,16 @@ call args stay identical across a re-render with an unchanged plan; confirmed re
 the pre-fix code, green after. Redeployed to Node1 (`ui` compose service only —
 `ven-1` untouched, no restart).
 
+**Follow-up cosmetic** (same user Node1 session): PV moved to render first (closest to the
+X axis, base of the stack) instead of `base_load` — PV is generation (the negative/export
+side), so every consuming asset now draws on top of it, matching how the export makeup
+actually reads. Changed once in the shared `StackedTimeSeriesChart` component, so it
+applies to both the Planner and Controller tabs' power-stack charts. New regression test
+(`StackedTimeSeriesChartLegend.test.tsx`) asserts pv's Area renders before another asset's
+regardless of the `assetIds` order passed in; confirmed red against the prior
+`base_load`-first rule, green after.
+
+**Verified**: user confirmed both fixes visually on Node1 — grid line now correctly
+negative during autarky export, PV stacks first, chart renders normally (no more refetch
+storm). Nothing outstanding.
+
