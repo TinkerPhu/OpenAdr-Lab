@@ -8053,3 +8053,17 @@ session and PV surplus (Planner tab's grid line should now visually match Contro
 the same time range) — flagged as outstanding before merge, same as prior chart-refactor
 entries above.
 
+**Correction** (found by the user's manual Node1 check, immediately after deploy): the
+Power Stack chart rendered blank, browser console updating too fast to read. Root cause:
+`hoursForward` was still recomputed from `Date.now()` on every render (unchanged from the
+original code) — harmless when it only fed a chart-sizing prop, but the fix now also feeds
+it into `useAllTimelines()`'s React Query key, so every render minted a new query key and
+triggered a new fetch. `usePlannerEvents`' SSE `solving_progress` events force frequent
+re-renders during a solve, so this became a genuine refetch storm: no query ever settled
+long enough to render, console spammed. Fixed by memoizing `hoursForward` on the plan's own
+horizon (`useMemo(..., [lastEnd])`) instead of recomputing it unconditionally — it now only
+changes when the plan itself changes. New regression test asserts the `useAllTimelines`
+call args stay identical across a re-render with an unchanged plan; confirmed red against
+the pre-fix code, green after. Redeployed to Node1 (`ui` compose service only —
+`ven-1` untouched, no restart).
+
