@@ -19,8 +19,11 @@ import { formatSignedPowerValue } from "./unitFormat";
 import { renderNowLine } from "./NowLine";
 import { renderZoneShading } from "./ZoneShading";
 import { TOOLTIP_BOX_STYLE } from "./tooltipStyle";
+import { useLegendToggle } from "./useLegendToggle";
+import { ChartLegend, type ChartLegendEntry } from "./ChartLegend";
 
 const COLOR_GRID_LINE = SERIES_COLORS.grid_line;
+const GRID_LEGEND_KEY = "grid";
 
 interface StackedTimeSeriesChartProps {
   data: StackedAreaPoint[];
@@ -34,6 +37,10 @@ interface StackedTimeSeriesChartProps {
   /** X-axis ticks every N minutes, snapped to the wall-clock (10:00, 10:10, ...) instead of
    * recharts' default "nice" ticks. */
   xAxisTickIntervalMinutes?: number;
+  /** Opt-in: adds a checkbox to each legend entry, live-toggling that asset's (both
+   * positive and negative series together) or the grid line's visibility. Unset/false:
+   * legend behaves as a plain (still one-entry-per-asset) legend, no checkboxes. */
+  interactiveLegend?: boolean;
 }
 
 function formatTs(ts: number) {
@@ -116,7 +123,10 @@ export function StackedTimeSeriesChart({
   height,
   zones,
   xAxisTickIntervalMinutes,
+  interactiveLegend = false,
 }: StackedTimeSeriesChartProps) {
+  const { isHidden, toggle } = useLegendToggle();
+
   // Domain driven by hoursBack/hoursForward keeps the X-axis stable across refreshes
   // and ensures the NOW reference line is always within the visible range.
   const tMin = nowMs - hoursBack * 3_600_000;
@@ -152,6 +162,14 @@ export function StackedTimeSeriesChart({
     MIN_POWER_SPAN_KW
   );
 
+  // One legend entry per asset (not one per internal pos/neg series — see
+  // chart_diagrams.md's StackedTimeSeriesChart section) plus one for the grid line.
+  // Applies unconditionally, whether or not interactiveLegend is enabled.
+  const legendEntries: ChartLegendEntry[] = [
+    ...renderOrder.map((id) => ({ key: id, label: assetLabel(id), color: colorMap[id] ?? COLOR_ASSET_FALLBACK })),
+    { key: GRID_LEGEND_KEY, label: "Grid", color: COLOR_GRID_LINE },
+  ];
+
   return (
     <div data-testid="accumulated-area-chart" style={{ width: "100%", height: height ?? CELL_CHART_HEIGHT }}>
       <ResponsiveContainer width="100%" height="100%">
@@ -179,13 +197,14 @@ export function StackedTimeSeriesChart({
           />
           <Tooltip content={<StackedAreaTooltip colorMap={colorMap} />} />
           <Legend
-            iconSize={10}
-            wrapperStyle={{ fontSize: 10 }}
-            formatter={(value: string) => {
-              const id = value.replace(/ [+-]$/, "");
-              const suffix = value.endsWith(" +") ? " +" : " -";
-              return `${assetLabel(id)}${suffix}`;
-            }}
+            content={
+              <ChartLegend
+                entries={legendEntries}
+                isHidden={isHidden}
+                toggle={toggle}
+                interactive={interactiveLegend}
+              />
+            }
           />
 
           {/* For each asset: positive series (import, stacked above x-axis) */}
@@ -203,6 +222,7 @@ export function StackedTimeSeriesChart({
               dot={false}
               connectNulls={false}
               isAnimationActive={false}
+              hide={interactiveLegend && isHidden(id)}
             />
           ))}
 
@@ -221,6 +241,7 @@ export function StackedTimeSeriesChart({
               dot={false}
               connectNulls={false}
               isAnimationActive={false}
+              hide={interactiveLegend && isHidden(id)}
             />
           ))}
 
@@ -235,6 +256,7 @@ export function StackedTimeSeriesChart({
             dot={false}
             connectNulls={false}
             isAnimationActive={false}
+            hide={interactiveLegend && isHidden(GRID_LEGEND_KEY)}
           />
 
           {/* Zone background shading — rendered before data lines so they sit behind */}
