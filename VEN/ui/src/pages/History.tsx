@@ -76,6 +76,17 @@ export function HistoryPage() {
     siteResidualForecastQuery.refetch();
   };
 
+  // Clicking the date control means "show this day" even if the displayed value doesn't
+  // change (native date inputs only fire onChange on a genuine value change, e.g. re-picking
+  // today while the rolling last-24h view is showing the same date). Treat the click as if
+  // `displayDate` had just been selected: switch out of rolling mode into the fixed calendar
+  // day it's showing, and force a refetch only when that's a no-op (already on that exact day).
+  const handleDateControlClick = () => {
+    const alreadyOnThisDay = date === displayDate;
+    setDate(displayDate);
+    if (alreadyOnThisDay) refetchAll();
+  };
+
   const ticksByAsset = useMemo(() => {
     const map = new Map<string, AssetTimelinePoint[]>();
     for (const row of ticks) {
@@ -121,7 +132,7 @@ export function HistoryPage() {
           size="small"
           value={displayDate}
           onChange={(e) => setDate(e.target.value || null)}
-          inputProps={{ "data-testid": "history-date-input", onClick: refetchAll }}
+          inputProps={{ "data-testid": "history-date-input", onClick: handleDateControlClick }}
           InputLabelProps={{ shrink: true }}
         />
         <Button
