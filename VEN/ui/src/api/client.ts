@@ -1,6 +1,6 @@
 import type {
   VtnEvent, Program, Report, ReportSubmission, SensorSnapshot, SimSnapshot, TraceEntry,
-  SimInjectState, PlannedRates, OadrCapacityState, Plan, PlannerObjective, AssetLedger,
+  SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, AssetLedger,
   UserRequestWithSession, FlexibilityEnvelope, CreateUserRequestBody, ControlDescriptor,
   EvSettings, UpdateEvSettingsBody,
   ArbiterSettings, UpdateArbiterSettingsBody, ArbiterDiagnostics,
@@ -263,6 +263,12 @@ export class VenApi {
   async capacity(): Promise<OadrCapacityState> {
     const r = await this.getReq("/capacity");
     if (!r.ok) throw new Error(`capacity ${r.status}`);
+    return r.json();
+  }
+
+  async capacitySchedule(): Promise<CapacitySchedule> {
+    const r = await this.getReq("/capacity/schedule");
+    if (!r.ok) throw new Error(`capacity/schedule ${r.status}`);
     return r.json();
   }
 

@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   buildTariffPricePoints,
+  buildCapacityLimitPoints,
   buildPowerPoints,
   fillCostRateFromTariffs,
   enrichAllAssetTimelines,
 } from "../components/controller/tariffBuilders";
-import type { TariffSnapshot as ApiTariffSnapshot } from "../api/types";
+import type { TariffSnapshot as ApiTariffSnapshot, CapacitySnapshot as ApiCapacitySnapshot } from "../api/types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
 // ─── buildTariffPricePoints ───────────────────────────────────────────────────
@@ -55,6 +56,45 @@ describe("buildTariffPricePoints", () => {
     expect(result).toHaveLength(2);
     expect(result[0].ts).toBe(new Date("2026-01-01T10:00:00Z").getTime());
     expect(result[1].ts).toBe(new Date("2026-01-01T11:00:00Z").getTime());
+  });
+});
+
+// ─── buildCapacityLimitPoints ─────────────────────────────────────────────────
+
+describe("buildCapacityLimitPoints", () => {
+  function makeCapacitySnapshot(overrides: Partial<ApiCapacitySnapshot> = {}): ApiCapacitySnapshot {
+    return {
+      interval_start: "2026-01-01T10:00:00Z",
+      import_limit_kw: 5.0,
+      export_limit_kw: 3.0,
+      ...overrides,
+    };
+  }
+
+  it("converts ISO interval_start to epoch ms", () => {
+    const result = buildCapacityLimitPoints([makeCapacitySnapshot()]);
+    expect(result[0].ts).toBe(new Date("2026-01-01T10:00:00Z").getTime());
+  });
+
+  it("maps import_limit_kw and export_limit_kw", () => {
+    const result = buildCapacityLimitPoints([makeCapacitySnapshot({ import_limit_kw: 4.5, export_limit_kw: 2.5 })]);
+    expect(result[0].importLimitKw).toBe(4.5);
+    expect(result[0].exportLimitKw).toBe(2.5);
+  });
+
+  it("preserves null import_limit_kw as null", () => {
+    const result = buildCapacityLimitPoints([makeCapacitySnapshot({ import_limit_kw: null })]);
+    expect(result[0].importLimitKw).toBeNull();
+  });
+
+  it("sets tariff/rate/power fields to null (no cross-contamination)", () => {
+    const result = buildCapacityLimitPoints([makeCapacitySnapshot()]);
+    expect(result[0].importPriceEurKwh).toBeNull();
+    expect(result[0].exportPriceEurKwh).toBeNull();
+    expect(result[0].co2GKwh).toBeNull();
+    expect(result[0].totalCostRateEurH).toBeNull();
+    expect(result[0].totalCo2RateGH).toBeNull();
+    expect(result[0].gridPowerKw).toBeNull();
   });
 });
 
@@ -132,6 +172,8 @@ function makePoint(ts: number, overrides: Partial<ReturnType<typeof buildTariffP
     totalCostRateEurH: null,
     totalCo2RateGH: null,
     gridPowerKw: null,
+    importLimitKw: null,
+    exportLimitKw: null,
     ...overrides,
   };
 }

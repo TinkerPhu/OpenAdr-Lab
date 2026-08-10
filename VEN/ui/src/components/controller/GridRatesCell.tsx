@@ -9,14 +9,12 @@ import {
   DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
 } from "../charts/chartLayout";
 import type { TariffSnapshot, AssetTimelinePoint } from "./types";
-import { TariffEnvelopeChart } from "./charts/TariffEnvelopeChart";
+import { GridRatesChart } from "./charts/GridRatesChart";
 import type { ZoneDef } from "../../api/types";
-import { useTariffs, useCapacitySchedule } from "../../api/hooks";
-import {
-  buildTariffPricePoints, buildCapacityLimitPoints, buildPowerPoints, fillCostRateFromTariffs,
-} from "./tariffBuilders";
+import { useTariffs } from "../../api/hooks";
+import { buildTariffPricePoints, buildPowerPoints, fillCostRateFromTariffs } from "./tariffBuilders";
 
-interface GridTariffCellProps {
+interface GridRatesCellProps {
   snapshot: TariffSnapshot;
   gridTimeline: AssetTimelinePoint[];
   nowMs: number;
@@ -26,7 +24,13 @@ interface GridTariffCellProps {
   onTogglePin: () => void;
 }
 
-export function GridTariffCell({
+/**
+ * Derived signals — cost rate and CO₂ rate, both computed by the VEN as
+ * (tariff × grid power). Split out from the combined tariff/rates cell so direct
+ * VTN signals (GridTariffCell: tariff + capacity-limit envelope) and VEN-derived
+ * ones don't share a diagram — see GridRatesChart's doc comment.
+ */
+export function GridRatesCell({
   snapshot,
   gridTimeline,
   nowMs,
@@ -34,20 +38,18 @@ export function GridTariffCell({
   pinned,
   zones,
   onTogglePin,
-}: GridTariffCellProps) {
+}: GridRatesCellProps) {
   const [tall, setTall] = useState(false);
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
 
   const { data: tariffsData = [] } = useTariffs();
-  const { data: capacityScheduleData = [] } = useCapacitySchedule();
 
   const tariffTimePoints = useMemo(() => {
     const pricePoints = buildTariffPricePoints(tariffsData);
-    const capacityPoints = buildCapacityLimitPoints(capacityScheduleData);
     const powerPoints = buildPowerPoints(gridTimeline);
-    const merged = [...pricePoints, ...capacityPoints, ...powerPoints].sort((a, b) => a.ts - b.ts);
+    const merged = [...pricePoints, ...powerPoints].sort((a, b) => a.ts - b.ts);
     return fillCostRateFromTariffs(merged, tariffsData);
-  }, [gridTimeline, tariffsData, capacityScheduleData]);
+  }, [gridTimeline, tariffsData]);
 
   const fmt = (v: number | null, decimals = 4) =>
     v === null ? "—" : v.toFixed(decimals);
@@ -55,31 +57,25 @@ export function GridTariffCell({
   return (
     <Paper
       variant="outlined"
-      data-testid="grid-tariff-cell"
-      sx={{ display: "flex", flexDirection: "row", mb: 1, borderLeft: "4px solid #37474f" }}
+      data-testid="grid-rates-cell"
+      sx={{ display: "flex", flexDirection: "row", mb: 1, borderLeft: "4px solid #4e342e" }}
     >
-      {/* Left: tariff values */}
+      {/* Left: rate values */}
       <Box sx={{ minWidth: CELL_LEFT_SECTION_WIDTH, px: 1.5, py: 1, display: "flex", flexDirection: "column", gap: 0.5 }}>
         <Typography variant="body2" fontWeight="bold">
-          Tariff &amp; Envelope
+          Grid Rates
         </Typography>
-        <Typography variant="caption" color="text.secondary" data-testid="tariff-import-price">
-          Import: {fmt(snapshot.importPriceEurKwh)} €/kWh
-        </Typography>
-        <Typography variant="caption" color="text.secondary" data-testid="tariff-export-price">
-          Export: {fmt(snapshot.exportPriceEurKwh)} €/kWh
-        </Typography>
-        <Typography variant="caption" color="text.secondary" data-testid="tariff-co2">
-          CO₂eq: {fmt(snapshot.co2GKwh, 1)} g/kWh
-        </Typography>
-        <Typography variant="caption" color="text.secondary" data-testid="tariff-total-cost-rate">
+        <Typography variant="caption" color="text.secondary" data-testid="rates-total-cost-rate">
           Cost rate: {fmt(snapshot.totalCostRateEurH, 3)} €/h
+        </Typography>
+        <Typography variant="caption" color="text.secondary" data-testid="rates-total-co2-rate">
+          CO₂ rate: {fmt(snapshot.totalCo2RateGH, 1)} g/h
         </Typography>
       </Box>
 
-      {/* Right: direct VTN signals — tariff + capacity-limit envelope */}
+      {/* Right: derived signals — cost rate + CO2 rate */}
       <Box sx={{ flex: 1, minWidth: CELL_CHART_MIN_WIDTH }}>
-        <TariffEnvelopeChart
+        <GridRatesChart
           data={tariffTimePoints}
           nowMs={nowMs}
           hoursBack={window.hoursBack}
@@ -95,7 +91,7 @@ export function GridTariffCell({
         <Tooltip title={pinned ? "Unpin" : "Pin to top"}>
           <IconButton
             size="small"
-            data-testid="grid-tariff-cell-pin-btn"
+            data-testid="grid-rates-cell-pin-btn"
             onClick={onTogglePin}
             sx={{ m: 0.5 }}
           >
@@ -105,7 +101,7 @@ export function GridTariffCell({
         <Tooltip title={tall ? "Collapse chart" : "Expand chart"}>
           <IconButton
             size="small"
-            data-testid="grid-tariff-cell-tall-expand-btn"
+            data-testid="grid-rates-cell-tall-expand-btn"
             onClick={() => setTall((v) => !v)}
             sx={{ m: 0.5 }}
           >

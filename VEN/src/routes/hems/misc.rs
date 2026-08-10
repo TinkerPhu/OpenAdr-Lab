@@ -55,6 +55,13 @@ pub async fn get_capacity(State(ctx): State<AppCtx>) -> impl IntoResponse {
     Json(ctx.state.capacity_state().await)
 }
 
+/// GET /capacity/schedule — returns the Dynamic Operating Envelope schedule
+/// (per-interval import/export capacity limits parsed from active events),
+/// the timeline `GET /capacity` collapses into a single current-value scalar.
+pub async fn get_capacity_schedule(State(ctx): State<AppCtx>) -> impl IntoResponse {
+    Json(ctx.state.planned_capacity_limits().await)
+}
+
 /// GET /signals — WP4.6: one-round-trip aggregate of the active grid signals
 /// (alert / SIMPLE / dispatch windows + capacity state) for the UI status
 /// strip. Read-only view over state the poll loop already maintains.

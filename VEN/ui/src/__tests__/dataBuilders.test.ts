@@ -5,7 +5,7 @@
  * All tests check result[0].forecastEnergyKwh (the "ev" asset summary).
  */
 import { describe, it, expect } from "vitest";
-import { deriveAssetSummaries, computeCostRateEurH } from "../components/controller/dataBuilders";
+import { deriveAssetSummaries, computeCostRateEurH, computeCo2RateGH } from "../components/controller/dataBuilders";
 import type { SimSnapshot, TariffSnapshot as ApiTariffSnapshot } from "../api/types";
 import type { AssetTimelinePoint } from "../components/controller/types";
 
@@ -69,6 +69,31 @@ describe("computeCostRateEurH", () => {
   it("null export field falls back to zero", () => {
     const t: ApiTariffSnapshot = { ...TARIFF, export_tariff_eur_kwh: null };
     expect(computeCostRateEurH(-3.0, t)).toBe(0.0);
+  });
+});
+
+// ─── computeCo2RateGH ─────────────────────────────────────────────────────────
+
+describe("computeCo2RateGH", () => {
+  it("import: applies intensity to positive power", () => {
+    expect(computeCo2RateGH(4.0, TARIFF)).toBeCloseTo(4.0 * 300);
+  });
+
+  it("export: applies the same intensity to negative power (negative = displaced)", () => {
+    expect(computeCo2RateGH(-3.0, TARIFF)).toBeCloseTo(-3.0 * 300);
+  });
+
+  it("zero power gives zero", () => {
+    expect(computeCo2RateGH(0.0, TARIFF)).toBe(0.0);
+  });
+
+  it("null tariff gives zero regardless of power", () => {
+    expect(computeCo2RateGH(4.0, null)).toBe(0.0);
+  });
+
+  it("null co2 field falls back to zero", () => {
+    const t: ApiTariffSnapshot = { ...TARIFF, co2_g_kwh: null };
+    expect(computeCo2RateGH(4.0, t)).toBe(0.0);
   });
 });
 

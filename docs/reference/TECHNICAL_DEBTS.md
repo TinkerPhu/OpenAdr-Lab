@@ -98,7 +98,7 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 
 | ID | Description | Gain |
 |----|-------------|------|
-| R-40 | File-size near-cap watch (production lines, 2026-07-16): `services/planning.rs` 473/500, `simulator/mod.rs` 470/500, `milp_planner/results.rs` 415/500, `state/mod.rs` 412/500, `tasks/poll_events.rs` 162/200, `tasks/planning.rs` ~198/200. Split proactively when next touched; `scripts/audit_file_sizes.py` is the authority. | N/A — monitoring only, not an actionable fix until a cap is actually crossed |
+| R-40 | File-size near-cap watch (production lines, 2026-07-16): `services/planning.rs` 473/500, `simulator/mod.rs` 470/500, `milp_planner/results.rs` 415/500, `tasks/poll_events.rs` 162/200, `tasks/planning.rs` ~198/200. Split proactively when next touched; `scripts/audit_file_sizes.py` is the authority. (`state/mod.rs` crossed the cap 2026-08-10 while adding the capacity-limit envelope and was split — its tariff/capacity/alert/SIMPLE/dispatch-window `AppState` accessors moved to `state/grid_signals.rs`, following the existing `state/obligations.rs`/`state/arbiter.rs` split-impl pattern.) | N/A — monitoring only, not an actionable fix until a cap is actually crossed |
 
 ---
 

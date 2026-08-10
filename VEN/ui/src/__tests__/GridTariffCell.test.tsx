@@ -1,10 +1,10 @@
 /**
  * GridTariffCell — now line position test
  *
- * Asserts that the nowMs passed to TariffChart stays current as time passes
+ * Asserts that the nowMs passed to TariffEnvelopeChart stays current as time passes
  * and allTimelines data refreshes, rather than being frozen at page-mount time.
  *
- * Also asserts that TariffChart receives hoursBack and hoursForward so the
+ * Also asserts that TariffEnvelopeChart receives hoursBack and hoursForward so the
  * chart can use a fixed domain [nowMs - hoursBack*h, nowMs + hoursForward*h]
  * instead of Recharts auto-domain, which may exclude nowMs when past data is absent.
  */
@@ -23,10 +23,10 @@ const baseSim: SimSnapshot = {
   assets: {},
 };
 
-// ─── Mock TariffChart — expose nowMs, hoursBack, hoursForward as DOM data attrs
+// ─── Mock TariffEnvelopeChart — expose nowMs, hoursBack, hoursForward as DOM data attrs
 
-vi.mock("../components/controller/charts/TariffChart", () => ({
-  TariffChart: ({
+vi.mock("../components/controller/charts/TariffEnvelopeChart", () => ({
+  TariffEnvelopeChart: ({
     nowMs,
     hoursBack,
     hoursForward,
@@ -36,12 +36,18 @@ vi.mock("../components/controller/charts/TariffChart", () => ({
     hoursForward?: number;
   }) => (
     <div
-      data-testid="tariff-chart"
+      data-testid="tariff-envelope-chart"
       data-now-ms={String(nowMs)}
       data-hours-back={String(hoursBack ?? "")}
       data-hours-forward={String(hoursForward ?? "")}
     />
   ),
+}));
+
+// GridRatesCell also renders on the Controller page — stub its chart too so this
+// file's assertions stay scoped to GridTariffCell/TariffEnvelopeChart.
+vi.mock("../components/controller/charts/GridRatesChart", () => ({
+  GridRatesChart: () => <div data-testid="grid-rates-chart" />,
 }));
 
 // ─── Mutable: changed between renders to simulate React Query data refresh ───
@@ -53,6 +59,7 @@ vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
   useSim: () => ({ data: baseSim, isLoading: false, isError: false, refetch: vi.fn() }),
   useTariffs: () => ({ data: tariffsData, refetch: vi.fn() }),
+  useCapacitySchedule: () => ({ data: [], refetch: vi.fn() }),
   useRequests: () => ({ data: [], refetch: vi.fn() }),
   useSimInject: () => ({ data: {} }),
   useSetSimInject: () => ({ mutate: vi.fn() }),
@@ -92,7 +99,7 @@ describe("GridTariffCell — now line position", () => {
 
     const t0 = new Date("2026-01-01T10:00:00.000Z").getTime();
     const initialNowMs = parseInt(
-      screen.getByTestId("tariff-chart").getAttribute("data-now-ms")!,
+      screen.getByTestId("tariff-envelope-chart").getAttribute("data-now-ms")!,
       10
     );
     expect(initialNowMs).toBe(t0);
@@ -111,7 +118,7 @@ describe("GridTariffCell — now line position", () => {
     });
 
     const updatedNowMs = parseInt(
-      screen.getByTestId("tariff-chart").getAttribute("data-now-ms")!,
+      screen.getByTestId("tariff-envelope-chart").getAttribute("data-now-ms")!,
       10
     );
     const t5 = new Date("2026-01-01T10:05:00.000Z").getTime();
@@ -133,7 +140,7 @@ describe("GridTariffCell — now line position", () => {
 
     const t0 = new Date("2026-01-01T10:00:00.000Z").getTime();
     const initialNowMs = parseInt(
-      screen.getByTestId("tariff-chart").getAttribute("data-now-ms")!,
+      screen.getByTestId("tariff-envelope-chart").getAttribute("data-now-ms")!,
       10
     );
     expect(initialNowMs).toBe(t0);
@@ -150,7 +157,7 @@ describe("GridTariffCell — now line position", () => {
     });
 
     const nowMsAfter = parseInt(
-      screen.getByTestId("tariff-chart").getAttribute("data-now-ms")!,
+      screen.getByTestId("tariff-envelope-chart").getAttribute("data-now-ms")!,
       10
     );
 
@@ -169,7 +176,7 @@ describe("GridTariffCell — now line position", () => {
       </QueryClientProvider>
     );
 
-    const chart = screen.getByTestId("tariff-chart");
+    const chart = screen.getByTestId("tariff-envelope-chart");
     const hoursBack = parseFloat(chart.getAttribute("data-hours-back") ?? "0");
     const hoursForward = parseFloat(chart.getAttribute("data-hours-forward") ?? "0");
 
@@ -197,7 +204,7 @@ describe("GridTariffCell — expanded state via global button", () => {
 
     await user.click(screen.getByTestId("global-time-range-extend-btn"));
 
-    const chart = screen.getByTestId("tariff-chart");
+    const chart = screen.getByTestId("tariff-envelope-chart");
     expect(parseFloat(chart.getAttribute("data-hours-back") ?? "-1")).toBe(1);
     expect(parseFloat(chart.getAttribute("data-hours-forward") ?? "-1")).toBe(48);
   });
@@ -215,7 +222,7 @@ describe("GridTariffCell — expanded state via global button", () => {
     await user.click(btn); // expand
     await user.click(btn); // collapse
 
-    const chart = screen.getByTestId("tariff-chart");
+    const chart = screen.getByTestId("tariff-envelope-chart");
     expect(parseFloat(chart.getAttribute("data-hours-back") ?? "0")).toBeGreaterThanOrEqual(1);
     expect(parseFloat(chart.getAttribute("data-hours-forward") ?? "0")).toBeGreaterThanOrEqual(1);
   });

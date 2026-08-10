@@ -61,6 +61,8 @@ const data: TariffTimePoint[] = [
     totalCostRateEurH: 0.05,
     totalCo2RateGH: 750,
     gridPowerKw: 2.5,
+    importLimitKw: null,
+    exportLimitKw: null,
   },
   {
     ts: now + 1_800_000,
@@ -70,6 +72,8 @@ const data: TariffTimePoint[] = [
     totalCostRateEurH: -0.02,
     totalCo2RateGH: -840,
     gridPowerKw: null,
+    importLimitKw: null,
+    exportLimitKw: null,
   },
 ];
 
@@ -137,8 +141,8 @@ describe("TariffChart — dual Y-axis", () => {
     // when both shared one axis: tariff stays within [0.15, 0.35], cost swings
     // far wider (±5 €/h during a high-power event).
     const wideCostData: TariffTimePoint[] = [
-      { ts: now - 1_800_000, importPriceEurKwh: 0.20, exportPriceEurKwh: 0.15, co2GKwh: 300, totalCostRateEurH: 5.0, totalCo2RateGH: 750, gridPowerKw: 25 },
-      { ts: now + 1_800_000, importPriceEurKwh: 0.35, exportPriceEurKwh: 0.26, co2GKwh: 420, totalCostRateEurH: -4.5, totalCo2RateGH: -840, gridPowerKw: null },
+      { ts: now - 1_800_000, importPriceEurKwh: 0.20, exportPriceEurKwh: 0.15, co2GKwh: 300, totalCostRateEurH: 5.0, totalCo2RateGH: 750, gridPowerKw: 25, importLimitKw: null, exportLimitKw: null },
+      { ts: now + 1_800_000, importPriceEurKwh: 0.35, exportPriceEurKwh: 0.26, co2GKwh: 420, totalCostRateEurH: -4.5, totalCo2RateGH: -840, gridPowerKw: null, importLimitKw: null, exportLimitKw: null },
     ];
     render(<TariffChart data={wideCostData} nowMs={now} />);
     const tariff = axes.find((a) => a.yAxisId === "tariff");

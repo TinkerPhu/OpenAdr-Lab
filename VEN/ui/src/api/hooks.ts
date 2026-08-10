@@ -440,6 +440,15 @@ export function useCapacity() {
   });
 }
 
+export function useCapacitySchedule(options?: { refetchInterval?: number | false }) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["capacity-schedule", api.baseUrl],
+    queryFn: () => api.capacitySchedule(),
+    refetchInterval: options?.refetchInterval ?? 30_000,
+  });
+}
+
 export function useLedger() {
   const { api } = useVenContext();
   return useQuery({
