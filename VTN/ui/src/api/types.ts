@@ -1,7 +1,17 @@
+export type RecorderStatus = {
+  enabled: boolean;
+  connected: boolean;
+  lastPollAt: string | null;
+  lastSuccessAt: string | null;
+  consecutiveFailures: number;
+  lastError: string | null;
+};
+
 export type HealthStatus = {
   time: string;
   bff: { ok: boolean; version: string };
   vtn: { reachable: boolean; authOk: boolean };
+  recorder: RecorderStatus;
 };
 
 export type TargetEntry = {

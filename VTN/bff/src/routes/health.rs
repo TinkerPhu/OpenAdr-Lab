@@ -6,6 +6,7 @@ use crate::AppCtx;
 
 pub async fn health(State(ctx): State<AppCtx>) -> Json<serde_json::Value> {
     let (reachable, auth_ok) = ctx.business.check_health().await;
+    let recorder = ctx.recorder_status.read().await.clone();
 
     Json(json!({
         "time": Utc::now().to_rfc3339(),
@@ -16,6 +17,14 @@ pub async fn health(State(ctx): State<AppCtx>) -> Json<serde_json::Value> {
         "vtn": {
             "reachable": reachable,
             "authOk": auth_ok,
+        },
+        "recorder": {
+            "enabled": ctx.config.database_url.is_some(),
+            "connected": recorder.connected,
+            "lastPollAt": recorder.last_poll_at,
+            "lastSuccessAt": recorder.last_success_at,
+            "consecutiveFailures": recorder.consecutive_failures,
+            "lastError": recorder.last_error,
         }
     }))
 }
