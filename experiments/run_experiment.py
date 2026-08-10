@@ -132,14 +132,20 @@ def _persona_departure(hour_utc, now):
 
 def setup_persona_sessions(manifest_path, host):
     """WP4.5: give each fleet VEN its persona's EV session + comfort curve.
-    Returns (ven_names, teardown) — call teardown() in the finally block."""
+    Returns (ven_names, teardown) — call teardown() in the finally block.
+
+    The per-device `/ev-session` CRUD API (BL-41) was retired in favour of the
+    unified `POST /user-requests` (asset_id="ev") — only `GET /ev-session` (a
+    read-only projection) survives. This creates via `/user-requests` and tears
+    down via `DELETE /user-requests/:id` using the id `/user-requests` returns.
+    """
     import sys
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
     from personas import PERSONAS
 
     manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     now = datetime.now(timezone.utc)
-    created = []  # (base_url, had_curve)
+    created = []  # (base_url, request_id, had_curve)
     for ven in manifest["vens"]:
         persona = ven.get("persona")
         if not persona:
@@ -155,23 +161,27 @@ def setup_persona_sessions(manifest_path, host):
         dep_hour = preset["ev_departure_hour_utc"]
         dep = _persona_departure(dep_hour, now) if dep_hour is not None else now + timedelta(hours=8)
         body = {
+            "asset_id": "ev",
             "target_soc": preset["ev_target_soc"],
-            "departure_time": iso(dep),
+            "deadlines": [{"latest_end": iso(dep)}],
             "mode": preset["ev_mode"],
         }
         if preset["ev_budget_eur"] is not None:
             body["budget_eur"] = preset["ev_budget_eur"]
-        r = requests.post(f"{base}/ev-session", json=body, timeout=10)
+        r = requests.post(f"{base}/user-requests", json=body, timeout=10)
+        request_id = None
         if r.status_code not in (200, 201):
-            print(f"WARN: ev-session for {ven['ven_name']} ({persona}): {r.status_code} {r.text[:120]}")
+            print(f"WARN: user-request for {ven['ven_name']} ({persona}): {r.status_code} {r.text[:120]}")
         else:
+            request_id = r.json().get("id")
             print(f"  persona {persona:<9} {ven['ven_name']}: mode={preset['ev_mode']}")
-        created.append((base, curve_ok))
+        created.append((base, request_id, curve_ok))
 
     def teardown():
-        for base, had_curve in created:
+        for base, request_id, had_curve in created:
             try:
-                requests.delete(f"{base}/ev-session", timeout=10)
+                if request_id:
+                    requests.delete(f"{base}/user-requests/{request_id}", timeout=10)
                 if had_curve:
                     requests.delete(f"{base}/assets/ev/comfort_curve", timeout=10)
             except requests.RequestException as e:
