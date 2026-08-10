@@ -8226,3 +8226,57 @@ dispatch divergence) as BACKLOG entries — they're now confirmed-reproducible, 
 speculative. Also worth a small `fleet.sh down --purge` fix so its own cleanup doesn't need
 a manual `sudo rm -rf` afterward.
 
+## GB-18 root-caused and fixed: VTN recorder had been dead for 9 days (2026-08-10)
+
+Follow-up investigation into `report_timeliness` always being `null` (both experiment runs
+above). Root cause was not a clock/window-matching issue at all: the recorder background
+task had been **completely dead since 2026-08-01T11:04:21Z**, silently, for 9 days.
+
+**What happened**: `vtn-bff`'s `main.rs` connected to Postgres once at process startup
+(`sqlx::PgPool::connect(&database_url).await?`) with no retry. On 2026-08-01 there was a
+brief internal Docker DNS hiccup (`vtn`/DB hostnames briefly unresolvable, visible in the
+BFF's own logs as a burst of "dns error: failed to lookup address information" on unrelated
+VTN-API polls around 10:50–11:04Z) that happened to land on a `vtn-bff` container restart's
+startup connection attempt. That one failed connect logged a single `ERROR` line
+("recorder disabled: failed to connect to DATABASE_URL") and the recorder subsystem was
+never started for that process's entire lifetime — while the rest of the BFF kept serving
+API requests completely normally (`docker ps` showed `vtn-bff-1` healthy for all 9 days).
+Confirmed via `SELECT max(received_at), count(*) FROM lab_recorder.reports_received`:
+frozen at `2026-08-01 11:03:08`, 119,704 rows, unchanged until this fix.
+
+**Fix** (`fix/vtn-recorder-reconnect`, commit `c4ca5b8`, fast-forward merged to `main`):
+- `recorder.rs`: connect + `init_schema` now retry forever with exponential backoff
+  (5s → 300s cap), fully inside the recorder's own spawned task — a DB/DNS problem can
+  never block or fail BFF startup itself (previously `init_schema(&pool).await?` used `?`
+  directly in `main()`, so even a schema-init failure — not just a connect failure — could
+  have taken down the whole BFF, not just the recorder).
+- Added `RecorderStatus` (connected, last poll/success time, consecutive failures, last
+  error) tracked via `Arc<RwLock<_>>`, updated every connect attempt and every poll tick.
+- Per `ui-transparency`: this state had **zero** visibility before this fix — nothing but a
+  single log line, 9 days ago, that nobody was watching. Surfaced via `GET /api/health`'s
+  new `recorder` block and a "Recorder: connected/disconnected (N failed attempts)" line on
+  the VTN UI Dashboard's health card.
+- Test-first: added pure unit tests for the backoff calculation and the three status-mutation
+  helpers (`mark_connect_failure`/`mark_connect_success`/`mark_poll_tick`) before
+  implementing them — confirmed red (compile failure, functions didn't exist), then green.
+  Dashboard gained 3 new tests (connected / disconnected+failure-count / hidden-when-disabled)
+  following the same red→green flow. Full `VTN/bff` (26/26) and `VTN/ui` (67/67) suites green,
+  `cargo fmt`/`clippy -D warnings`/ESLint (0 errors) all clean, `cargo audit` shows only
+  pre-existing unrelated findings (no new dependencies added).
+
+**Mitigation + verification**: restarted `vtn-bff` immediately (before the code fix existed)
+to get data flowing again right away — confirmed archiving resumed instantly. After
+deploying the actual fix, redeployed `bff`+`ui` on Node1 (`docker compose up -d bff ui`
+unexpectedly also recreated `vtn-db`/`vtn-vtn` — all 4 containers came back healthy within
+~30s, recorder row count kept climbing through the recreate with no data loss, so treated as
+a non-issue rather than chased further). Verified live: `GET /api/health` now returns a
+populated `recorder` block (`connected: true`, fresh `lastPollAt`/`lastSuccessAt`), and the
+deployed UI bundle contains the new "Recorder:" status text.
+
+**Still open**: GB-18's *symptom* (report_timeliness null) is now explained and the root
+cause fixed, but the 9-day historical gap in `lab_recorder.reports_received` is permanent —
+any future analysis spanning 2026-08-01 through 2026-08-10 will have a reporting blind spot
+for that window. Not backfillable (the source data was never captured). GB-18 can be closed
+in BACKLOG.md; the underlying reliability gap (no retry, no health surface) is what's fixed
+here, not just the immediate incident.
+
