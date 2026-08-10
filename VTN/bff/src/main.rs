@@ -33,6 +33,7 @@ pub struct AppCtx {
     pub cache: Arc<TtlCache>,
     pub config: Arc<Config>,
     pub metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
+    pub recorder_status: recorder::SharedRecorderStatus,
 }
 
 async fn metrics_middleware(State(_ctx): State<AppCtx>, req: Request, next: Next) -> Response {
@@ -76,29 +77,31 @@ async fn main() -> anyhow::Result<()> {
         cfg.ven_mgr_client_secret.clone(),
     );
 
+    let recorder_status: recorder::SharedRecorderStatus = Arc::new(Default::default());
+
     let ctx = AppCtx {
         business: business.clone(),
         ven_mgr: ven_mgr.clone(),
         cache: Arc::new(TtlCache::new()),
         config: Arc::new(cfg.clone()),
         metrics_handle: Arc::new(metrics_handle),
+        recorder_status: recorder_status.clone(),
     };
 
-    // Phase 1 (A-2): VTN recorder, gated on DATABASE_URL being set.
+    // Phase 1 (A-2): VTN recorder, gated on DATABASE_URL being set. Spawning
+    // (rather than connecting inline here) means a DB/DNS problem — even at
+    // startup — can never fail or delay the rest of the BFF: connection is
+    // retried with backoff inside the spawned task (see recorder.rs, the
+    // 2026-08-10 fix for the incident where a one-shot connect failure
+    // permanently disabled the recorder for 9 days).
     if let Some(database_url) = cfg.database_url.clone() {
-        match sqlx::PgPool::connect(&database_url).await {
-            Ok(pool) => {
-                recorder::init_schema(&pool).await?;
-                recorder::spawn_recorder(pool, business, ven_mgr, cfg.recorder_poll_secs);
-                info!(
-                    "VTN recorder started (poll every {}s)",
-                    cfg.recorder_poll_secs
-                );
-            }
-            Err(e) => {
-                tracing::error!("recorder disabled: failed to connect to DATABASE_URL: {e:#}");
-            }
-        }
+        recorder::spawn_recorder(
+            database_url,
+            business,
+            ven_mgr,
+            cfg.recorder_poll_secs,
+            recorder_status,
+        );
     } else {
         info!("DATABASE_URL not set — VTN recorder disabled");
     }

@@ -8,6 +8,14 @@ const mockHealth = {
   time: "2026-01-01T00:00:00Z",
   bff: { ok: true, version: "0.1.0" },
   vtn: { reachable: true, authOk: true },
+  recorder: {
+    enabled: true,
+    connected: true,
+    lastPollAt: "2026-01-01T00:00:00Z",
+    lastSuccessAt: "2026-01-01T00:00:00Z",
+    consecutiveFailures: 0,
+    lastError: null,
+  },
 };
 
 const mockPrograms = [
@@ -73,5 +81,34 @@ describe("DashboardPage", () => {
     renderDashboard();
     expect(screen.getByTestId("dash-vens-card")).toBeVisible();
     expect(screen.getByTestId("dash-vens-count")).toHaveTextContent("2");
+  });
+
+  it("renders recorder status as connected when healthy", () => {
+    renderDashboard();
+    expect(screen.getByTestId("dash-health-recorder")).toHaveTextContent("connected");
+  });
+
+  it("renders recorder status as disconnected with failure count when down", async () => {
+    const { useHealth } = await import("../api/hooks");
+    vi.mocked(useHealth).mockReturnValueOnce({
+      data: {
+        ...mockHealth,
+        recorder: { ...mockHealth.recorder, connected: false, consecutiveFailures: 12 },
+      },
+      isError: false,
+    } as ReturnType<typeof useHealth>);
+    renderDashboard();
+    expect(screen.getByTestId("dash-health-recorder")).toHaveTextContent("disconnected");
+    expect(screen.getByTestId("dash-health-recorder")).toHaveTextContent("12");
+  });
+
+  it("does not render recorder status when the recorder is disabled", async () => {
+    const { useHealth } = await import("../api/hooks");
+    vi.mocked(useHealth).mockReturnValueOnce({
+      data: { ...mockHealth, recorder: { ...mockHealth.recorder, enabled: false } },
+      isError: false,
+    } as ReturnType<typeof useHealth>);
+    renderDashboard();
+    expect(screen.queryByTestId("dash-health-recorder")).not.toBeInTheDocument();
   });
 });
