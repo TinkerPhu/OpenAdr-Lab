@@ -6,160 +6,11 @@ use crate::controller::vtn_port::OadrEvent;
 use crate::entities::capacity::{
     AlertWindow, DispatchWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
 };
-use crate::entities::tariff_snapshot::TariffSnapshot;
 
-// ---------------------------------------------------------------------------
-// Rate snapshot parsing
-// ---------------------------------------------------------------------------
-
-/// Parse all rate snapshots from a slice of OpenADR events.
-/// Handles PRICE, EXPORT_PRICE, GHG payload types per event interval.
-/// Multiple payload types for the same interval are merged into one TariffSnapshot.
-///
-/// Supports looping events: when `event.intervalPeriod.duration` exceeds the total
-/// span of all intervals, the interval set is repeated (offset by one cycle each time)
-/// to cover [now − 1 cycle … now + 3 days]. This implements the OpenADR 3 spec's
-/// "persistent daily prices" pattern (`event.intervalPeriod.duration = "P9999Y"`).
-pub fn parse_rate_snapshots(events: &[OadrEvent], now: DateTime<Utc>) -> Vec<TariffSnapshot> {
-    let mut map: std::collections::BTreeMap<(i64, i64), TariffSnapshot> =
-        std::collections::BTreeMap::new();
-
-    // ── BL-02: priority-ordered merge ───────────────────────────────────────
-    // OpenADR 3 spec (§ 6.6): event `priority` — lower number = higher priority; an
-    // absent priority is treated as lowest. Sort ascending by "wins last" order so the
-    // last-write-wins merge below naturally lets the higher-priority event survive:
-    // lowest-priority events (including `None`) are processed first, highest-priority
-    // last. Equal priority breaks the tie on `createdDateTime` — newer wins, so older
-    // events are processed first.
-    let mut ordered: Vec<&OadrEvent> = events.iter().collect();
-    ordered.sort_by(|a, b| {
-        let pa = a.priority.unwrap_or(i64::MAX);
-        let pb = b.priority.unwrap_or(i64::MAX);
-        pb.cmp(&pa).then_with(|| {
-            let created = |e: &OadrEvent| {
-                e.createdDateTime
-                    .as_deref()
-                    .and_then(|s| s.parse::<DateTime<Utc>>().ok())
-                    .unwrap_or(DateTime::<Utc>::MIN_UTC)
-            };
-            created(a).cmp(&created(b))
-        })
-    });
-
-    for event in ordered {
-        if event.intervals.is_empty() {
-            continue;
-        }
-
-        // ── Collect base intervals ────────────────────────────────────────────
-        type IntervalEntry = (DateTime<Utc>, i64, Vec<(String, f64)>);
-        let mut base: Vec<IntervalEntry> = Vec::new();
-
-        for interval in &event.intervals {
-            let ip = match interval.intervalPeriod.as_ref() {
-                Some(ip) => ip,
-                None => continue,
-            };
-            let start_str = match ip.start.as_deref() {
-                Some(s) => s,
-                None => continue,
-            };
-            let interval_start: DateTime<Utc> = match start_str.parse() {
-                Ok(dt) => dt,
-                Err(_) => continue,
-            };
-            let duration_secs =
-                parse_iso8601_duration_secs(ip.duration.as_deref().unwrap_or("PT1H"));
-
-            let mut payloads: Vec<(String, f64)> = Vec::new();
-            for p in &interval.payloads {
-                let t = p.r#type.as_str();
-                let v = p.values.first().and_then(|v| v.as_f64());
-                if matches!(t, "PRICE" | "EXPORT_PRICE" | "GHG") {
-                    if let Some(val) = v {
-                        payloads.push((t.to_string(), val));
-                    }
-                }
-            }
-
-            base.push((interval_start, duration_secs, payloads));
-        }
-
-        if base.is_empty() {
-            continue;
-        }
-
-        // ── Determine looping offsets ─────────────────────────────────────────
-        let first_start = base.iter().map(|(s, _, _)| *s).min().unwrap();
-        let last_end = base
-            .iter()
-            .map(|(s, d, _)| *s + Duration::seconds(*d))
-            .max()
-            .unwrap();
-        let cycle_secs = (last_end - first_start).num_seconds();
-
-        let event_dur_secs = event
-            .intervalPeriod
-            .as_ref()
-            .and_then(|ip| ip.duration.as_deref())
-            .map(parse_iso8601_duration_secs)
-            .unwrap_or(cycle_secs);
-
-        let offsets: Vec<i64> = if cycle_secs > 0 && event_dur_secs > cycle_secs {
-            let elapsed = (now - first_start).num_seconds().max(0);
-            let n = elapsed / cycle_secs; // index of the cycle that contains now
-            let from = n.saturating_sub(1); // one cycle back for "most recent past" fallback
-            let ahead = (3 * 86400i64) / cycle_secs + 2; // cycles needed to cover 3 days ahead
-            let to = (from + ahead).min(from + 10); // hard cap: at most 11 cycles total
-            (from..=to).map(|k| k * cycle_secs).collect()
-        } else {
-            vec![0i64]
-        };
-
-        // ── Insert snapshots into map for each offset ─────────────────────────
-        for &offset in &offsets {
-            for (base_start, dur, payloads) in &base {
-                let start = *base_start + Duration::seconds(offset);
-                let end = start + Duration::seconds(*dur);
-                let key = (start.timestamp(), end.timestamp());
-
-                // CONFLICT NOTE: Multiple active events can define prices for the same interval
-                // (e.g. one PRICE event + one GHG event, or two PRICE events from different programs).
-                // This merge uses last-write-wins: whichever event is processed last in the loop
-                // overwrites a previously-set value for the same field. `ordered` above is sorted
-                // so the highest-priority event (BL-02) is processed last and therefore wins.
-                let entry = map.entry(key).or_insert_with(|| TariffSnapshot {
-                    interval_start: start,
-                    interval_end: end,
-                    import_tariff_eur_kwh: None,
-                    export_tariff_eur_kwh: None,
-                    co2_g_kwh: None,
-                });
-
-                for (t, v) in payloads {
-                    match t.as_str() {
-                        "PRICE" => entry.import_tariff_eur_kwh = Some(*v),
-                        "EXPORT_PRICE" => entry.export_tariff_eur_kwh = Some(*v),
-                        "GHG" => entry.co2_g_kwh = Some(*v),
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-
-    let mut result: Vec<TariffSnapshot> = map
-        .into_values()
-        .filter(|s| {
-            s.import_tariff_eur_kwh.is_some()
-                || s.export_tariff_eur_kwh.is_some()
-                || s.co2_g_kwh.is_some()
-        })
-        .collect();
-
-    result.sort_by_key(|s| s.interval_start);
-    result
-}
+// Rate/capacity-schedule parsing lives in `rate_schedule.rs` (split out to stay under the
+// VEN/src/ 500-production-line cap) — re-exported here so call sites and this file's own
+// tests can keep referencing `openadr_interface::{parse_rate_snapshots, parse_capacity_schedule}`.
+pub use crate::controller::rate_schedule::{parse_capacity_schedule, parse_rate_snapshots};
 
 // ---------------------------------------------------------------------------
 // Capacity state parsing
@@ -849,6 +700,77 @@ mod tests {
         );
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].export_tariff_eur_kwh, Some(0.10));
+    }
+
+    #[test]
+    fn test_parse_capacity_schedule_keeps_per_interval_limits() {
+        let events = json!([
+            {
+                "id": "evt-cap-sched",
+                "programID": "prog-1",
+                "intervals": [
+                    {
+                        "id": 0,
+                        "intervalPeriod": {
+                            "start": "2025-01-01T10:00:00Z",
+                            "duration": "PT1H"
+                        },
+                        "payloads": [
+                            {"type": "IMPORT_CAPACITY_LIMIT", "values": [5.0]}
+                        ]
+                    },
+                    {
+                        "id": 1,
+                        "intervalPeriod": {
+                            "start": "2025-01-01T11:00:00Z",
+                            "duration": "PT1H"
+                        },
+                        "payloads": [
+                            {"type": "IMPORT_CAPACITY_LIMIT", "values": [3.0]},
+                            {"type": "EXPORT_CAPACITY_LIMIT", "values": [2.0]}
+                        ]
+                    }
+                ]
+            }
+        ]);
+        let snapshots = parse_capacity_schedule(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            Utc::now(),
+        );
+        // Unlike parse_capacity_state (which collapses to the strictest single value),
+        // the schedule keeps both intervals with their own distinct limits.
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[0].import_limit_kw, Some(5.0));
+        assert_eq!(snapshots[0].export_limit_kw, None);
+        assert_eq!(snapshots[1].import_limit_kw, Some(3.0));
+        assert_eq!(snapshots[1].export_limit_kw, Some(2.0));
+    }
+
+    #[test]
+    fn test_parse_capacity_schedule_ignores_non_capacity_payloads() {
+        let events = json!([
+            {
+                "id": "evt-price-only",
+                "programID": "prog-1",
+                "intervals": [
+                    {
+                        "id": 0,
+                        "intervalPeriod": {
+                            "start": "2025-01-01T10:00:00Z",
+                            "duration": "PT1H"
+                        },
+                        "payloads": [
+                            {"type": "PRICE", "values": [0.25]}
+                        ]
+                    }
+                ]
+            }
+        ]);
+        let snapshots = parse_capacity_schedule(
+            &serde_json::from_value::<Vec<OadrEvent>>(events).unwrap(),
+            Utc::now(),
+        );
+        assert!(snapshots.is_empty());
     }
 
     #[test]

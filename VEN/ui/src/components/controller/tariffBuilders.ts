@@ -1,4 +1,4 @@
-import type { TariffSnapshot as ApiTariffSnapshot } from "../../api/types";
+import type { CapacitySnapshot as ApiCapacitySnapshot, TariffSnapshot as ApiTariffSnapshot } from "../../api/types";
 import { NEAR_ZERO_KW } from "../../thresholds";
 import type { AssetTimelinePoint, TariffTimePoint } from "./types";
 
@@ -45,6 +45,24 @@ export function buildTariffPricePoints(tariffs: ApiTariffSnapshot[]): TariffTime
     totalCostRateEurH: null,
     totalCo2RateGH: null,
     gridPowerKw: null,
+    importLimitKw: null,
+    exportLimitKw: null,
+  }));
+}
+
+// 1b. Capacity-limit (Dynamic Operating Envelope) steps from /capacity/schedule —
+//     same shape/cadence as buildTariffPricePoints, one point per interval_start.
+export function buildCapacityLimitPoints(schedule: ApiCapacitySnapshot[]): TariffTimePoint[] {
+  return schedule.map((c) => ({
+    ts: new Date(c.interval_start).getTime(),
+    importPriceEurKwh: null,
+    exportPriceEurKwh: null,
+    co2GKwh: null,
+    totalCostRateEurH: null,
+    totalCo2RateGH: null,
+    gridPowerKw: null,
+    importLimitKw: c.import_limit_kw ?? null,
+    exportLimitKw: c.export_limit_kw ?? null,
   }));
 }
 
@@ -59,6 +77,8 @@ export function buildPowerPoints(points: AssetTimelinePoint[]): TariffTimePoint[
     totalCostRateEurH: p.values?.["cost_rate_eur_h"] ?? null,
     totalCo2RateGH: p.values?.["co2_rate_g_h"] ?? null,
     gridPowerKw: p.values?.["power_kw"] ?? null,
+    importLimitKw: null,
+    exportLimitKw: null,
   }));
 }
 

@@ -620,7 +620,8 @@ behaviour classes (`state.rs::SimInjectState`):
 | Method | Path | Stage | Description |
 |---|---|---|---|
 | GET | `/tariffs` | 2 | `TariffSnapshot` array parsed from active events |
-| GET | `/capacity` | 2 | `OadrCapacityState` parsed from active events |
+| GET | `/capacity` | 2 | `OadrCapacityState` parsed from active events (single current-value scalar) |
+| GET | `/capacity/schedule` | 2 | `CapacitySnapshot[]` — the Dynamic Operating Envelope's per-interval import/export limit schedule, the timeline `/capacity` collapses away |
 | GET | `/obligations` | 2 | Pending report obligations extracted from events |
 | GET | `/plan` | 3 | Active Plan or `null` |
 | PUT | `/plan/objective` | 3 | Override the active `PlannerObjective` |

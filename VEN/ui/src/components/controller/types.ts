@@ -45,6 +45,10 @@ export const SERIES_COLORS: Record<string, string> = {
   grid_line: "#212121",
   /** Generic single-series power line (raw-diagnostics charts with no per-asset breakdown). */
   power: "#1976d2",
+  /** Dynamic Operating Envelope (IMPORT/EXPORT_CAPACITY_LIMIT) — distinct from tariff
+   * colors since it's a different physical quantity (kW, not €/kWh) sharing the diagram. */
+  import_capacity_limit: "#5d4037",
+  export_capacity_limit: "#00838f",
 };
 
 /** Human-readable labels for known asset IDs. */
@@ -124,6 +128,8 @@ export type TariffSnapshot = {
   co2GKwh: number | null;
   /** Derived: net_power_kw × applicable tariff → cost rate [€/h] */
   totalCostRateEurH: number;
+  /** Derived: net_power_kw × co2GKwh → CO₂ rate [g/h] */
+  totalCo2RateGH: number;
   /** Grid power [kW] = net_power_w / 1000 */
   gridPowerKw: number;
 };
@@ -141,6 +147,10 @@ export type TariffTimePoint = {
   totalCo2RateGH: number | null;
   /** Grid power [kW] from trace (past) or plan net_import_kw (future) */
   gridPowerKw: number | null;
+  /** Dynamic Operating Envelope import limit [kW] — direct VTN signal (IMPORT_CAPACITY_LIMIT) */
+  importLimitKw: number | null;
+  /** Dynamic Operating Envelope export limit [kW] — direct VTN signal (EXPORT_CAPACITY_LIMIT) */
+  exportLimitKw: number | null;
 };
 
 // ─── Stacked area (accumulated asset power cell) ──────────────────────────────
@@ -169,7 +179,7 @@ export type StackedAreaPoint = {
 
 // ─── UI state ────────────────────────────────────────────────────────────────
 
-/** Cell ID format: "asset:{assetId}" | "grid:tariff" | "grid:accumulated" */
+/** Cell ID format: "asset:{assetId}" | "grid:tariff" | "grid:rates" | "grid:accumulated" */
 export type CellId = string;
 
 export type CollapseState = Record<

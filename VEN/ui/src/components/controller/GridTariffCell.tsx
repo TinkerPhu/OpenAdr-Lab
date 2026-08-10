@@ -9,10 +9,12 @@ import {
   DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
 } from "../charts/chartLayout";
 import type { TariffSnapshot, AssetTimelinePoint } from "./types";
-import { TariffChart } from "./charts/TariffChart";
+import { TariffEnvelopeChart } from "./charts/TariffEnvelopeChart";
 import type { ZoneDef } from "../../api/types";
-import { useTariffs } from "../../api/hooks";
-import { buildTariffPricePoints, buildPowerPoints, fillCostRateFromTariffs } from "./tariffBuilders";
+import { useTariffs, useCapacitySchedule } from "../../api/hooks";
+import {
+  buildTariffPricePoints, buildCapacityLimitPoints, buildPowerPoints, fillCostRateFromTariffs,
+} from "./tariffBuilders";
 
 interface GridTariffCellProps {
   snapshot: TariffSnapshot;
@@ -37,13 +39,15 @@ export function GridTariffCell({
   const window = extended ? EXTENDED_WINDOW : DEFAULT_WINDOW;
 
   const { data: tariffsData = [] } = useTariffs();
+  const { data: capacityScheduleData = [] } = useCapacitySchedule();
 
   const tariffTimePoints = useMemo(() => {
     const pricePoints = buildTariffPricePoints(tariffsData);
+    const capacityPoints = buildCapacityLimitPoints(capacityScheduleData);
     const powerPoints = buildPowerPoints(gridTimeline);
-    const merged = [...pricePoints, ...powerPoints].sort((a, b) => a.ts - b.ts);
+    const merged = [...pricePoints, ...capacityPoints, ...powerPoints].sort((a, b) => a.ts - b.ts);
     return fillCostRateFromTariffs(merged, tariffsData);
-  }, [gridTimeline, tariffsData]);
+  }, [gridTimeline, tariffsData, capacityScheduleData]);
 
   const fmt = (v: number | null, decimals = 4) =>
     v === null ? "—" : v.toFixed(decimals);
@@ -57,7 +61,7 @@ export function GridTariffCell({
       {/* Left: tariff values */}
       <Box sx={{ minWidth: CELL_LEFT_SECTION_WIDTH, px: 1.5, py: 1, display: "flex", flexDirection: "column", gap: 0.5 }}>
         <Typography variant="body2" fontWeight="bold">
-          Tariff
+          Tariff &amp; Envelope
         </Typography>
         <Typography variant="caption" color="text.secondary" data-testid="tariff-import-price">
           Import: {fmt(snapshot.importPriceEurKwh)} €/kWh
@@ -73,9 +77,9 @@ export function GridTariffCell({
         </Typography>
       </Box>
 
-      {/* Right: tariff chart */}
+      {/* Right: direct VTN signals — tariff + capacity-limit envelope */}
       <Box sx={{ flex: 1, minWidth: CELL_CHART_MIN_WIDTH }}>
-        <TariffChart
+        <TariffEnvelopeChart
           data={tariffTimePoints}
           nowMs={nowMs}
           hoursBack={window.hoursBack}

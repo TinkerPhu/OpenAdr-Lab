@@ -191,6 +191,18 @@ export type TariffSnapshot = {
 
 export type PlannedRates = TariffSnapshot[];
 
+/** Dynamic Operating Envelope schedule entry (OpenADR 3.1 User Guide §8.10.1)
+ * — one per interval, mirroring TariffSnapshot's shape. Unlike OadrCapacityState
+ * below (a single current-value scalar), this keeps the full forward/backward
+ * schedule so it can be charted the same way tariffs are. */
+export type CapacitySnapshot = {
+  interval_start: string;
+  import_limit_kw: number | null;
+  export_limit_kw: number | null;
+};
+
+export type CapacitySchedule = CapacitySnapshot[];
+
 export type OadrCapacityState = {
   import_limit_kw: number | null;
   export_limit_kw: number | null;

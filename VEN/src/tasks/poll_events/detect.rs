@@ -22,6 +22,8 @@ pub(crate) struct EventChanges {
     pub rates: Vec<entities::tariff_snapshot::TariffSnapshot>,
     /// Parsed capacity state for this tick.
     pub capacity: entities::capacity::OadrCapacityState,
+    /// Parsed capacity-limit schedule (Dynamic Operating Envelope) for this tick.
+    pub capacity_schedule: Vec<entities::capacity::CapacitySnapshot>,
     /// Parsed grid signals for this tick: alerts (WP3.1), SIMPLE levels
     /// (WP3.2), dispatch + charge-state setpoints (WP3.4).
     pub signals: poll_signals::ParsedSignals,
@@ -44,6 +46,7 @@ pub(crate) fn detect_event_changes(
 ) -> EventChanges {
     let rates = controller::openadr_interface::parse_rate_snapshots(events, now);
     let capacity = controller::openadr_interface::parse_capacity_state(events, now);
+    let capacity_schedule = controller::openadr_interface::parse_capacity_schedule(events, now);
     let signals = poll_signals::ParsedSignals {
         alerts: controller::openadr_interface::parse_alert_windows(events),
         simple: controller::openadr_interface::parse_simple_windows(events),
@@ -128,6 +131,7 @@ pub(crate) fn detect_event_changes(
         current_ids,
         rates,
         capacity,
+        capacity_schedule,
         signals,
         event_records,
     }

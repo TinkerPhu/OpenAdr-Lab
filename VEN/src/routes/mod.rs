@@ -104,6 +104,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
         )
         // HEMS Stage 2 routes
         .route("/capacity", get(hems::get_capacity))
+        .route("/capacity/schedule", get(hems::get_capacity_schedule))
         .route("/signals", get(hems::get_signals))
         .route("/obligations", get(hems::get_obligations))
         // HEMS Stage 4 routes

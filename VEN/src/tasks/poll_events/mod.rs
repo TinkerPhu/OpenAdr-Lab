@@ -67,6 +67,9 @@ pub(crate) fn spawn_event_poll(
 
                     state.set_planned_tariffs(changes.rates).await;
                     state.set_capacity_state(changes.capacity).await;
+                    state
+                        .set_planned_capacity_limits(changes.capacity_schedule)
+                        .await;
 
                     // WP3.1/3.2/3.4: apply alert/SIMPLE/dispatch/charge-state
                     // signal changes (see poll_signals.rs). True = a plan

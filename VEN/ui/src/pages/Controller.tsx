@@ -9,6 +9,7 @@ import { enrichAllAssetTimelines } from "../components/controller/tariffBuilders
 import { AssetCell } from "../components/controller/AssetCell";
 import { PinnedZone } from "../components/controller/PinnedZone";
 import { GridTariffCell } from "../components/controller/GridTariffCell";
+import { GridRatesCell } from "../components/controller/GridRatesCell";
 import { GridSignalStrip } from "../components/controller/GridSignalStrip";
 import { GridAccumulatedCell } from "../components/controller/GridAccumulatedCell";
 import { FlexibilityForecastPanel } from "../components/controller/FlexibilityForecastPanel";
@@ -152,6 +153,21 @@ export function ControllerPage() {
         />
       );
     }
+    if (cellId === "grid:rates") {
+      if (!tariffSnapshot) return null;
+      return (
+        <GridRatesCell
+          key={cellId}
+          snapshot={tariffSnapshot}
+          gridTimeline={allTimelines["grid"] ?? []}
+          nowMs={nowMs}
+          extended={expanded}
+          pinned
+          zones={zones}
+          onTogglePin={() => handleTogglePin("grid:rates")}
+        />
+      );
+    }
     if (cellId === "grid:accumulated") {
       return (
         <GridAccumulatedCell
@@ -225,6 +241,18 @@ export function ControllerPage() {
             pinned={false}
             zones={zones}
             onTogglePin={() => handleTogglePin("grid:tariff")}
+          />
+        )}
+
+        {tariffSnapshot && !pinnedCellIds.includes("grid:rates") && (
+          <GridRatesCell
+            snapshot={tariffSnapshot}
+            gridTimeline={allTimelines["grid"] ?? []}
+            nowMs={nowMs}
+            extended={expanded}
+            pinned={false}
+            zones={zones}
+            onTogglePin={() => handleTogglePin("grid:rates")}
           />
         )}
 
