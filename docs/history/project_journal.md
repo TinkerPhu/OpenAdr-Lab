@@ -8280,3 +8280,86 @@ for that window. Not backfillable (the source data was never captured). GB-18 ca
 in BACKLOG.md; the underlying reliability gap (no retry, no health surface) is what's fixed
 here, not just the immediate incident.
 
+## Controller Tab — Tariff Chart Split: Direct VTN Signals vs. Derived Signals (2026-08-10)
+
+**What/why**: the Controller tab's single "Tariff" chart mixed two different kinds of
+series — direct VTN signals (import/export tariff €/kWh) with VEN-derived ones (cost rate
+€/h, CO2 rate €/h computed as tariff × power). User asked to split them, and separately
+flagged that a "power envelope" graph was missing entirely.
+
+**Investigation**: OpenADR 3.1's Dynamic Operating Envelope (`IMPORT_CAPACITY_LIMIT`/
+`EXPORT_CAPACITY_LIMIT`, User Guide §8.10.1) is exactly a third direct-VTN-signal series —
+a VTN-announced schedule of import/export power limits — but the backend only ever
+collapsed it into a single current-value scalar (`OadrCapacityState`, `GET /capacity`) via
+`parse_capacity_state`, discarding the per-interval schedule `parse_rate_snapshots` keeps
+for tariffs. No timeline existed to chart. Separately identified but *not* addressed here
+(logged as [[BL-43]] instead): `GET /flexibility` (`SiteFlexibilityEnvelope`, VEN-derived
+live headroom, distinct from the VTN-announced envelope above) has a client-side type bug
+and zero UI surface — different concept, same "envelope" name collision worth watching.
+Logged as BL-43 (`docs/BACKLOG.md`), ranked as the immediate follow-up to this work.
+
+**Backend**: added `parse_capacity_schedule()` (`VEN/src/controller/rate_schedule.rs`) —
+refactored the shared priority-merge/cycle-looping core out of `parse_rate_snapshots` into
+`collect_interval_groups()` so the new capacity-schedule parser doesn't duplicate that
+logic (generic-over-bespoke), each caller just filters different payload types and maps to
+its own snapshot type (`CapacitySnapshot`, mirroring `TariffSnapshot`'s shape). Wired
+through `state.planned_capacity_limits` → new `GET /capacity/schedule` endpoint. Test-first:
+two new unit tests confirmed the schedule keeps per-interval limits (unlike
+`parse_capacity_state`'s collapse) before wiring anything downstream.
+
+**Frontend**: split `TariffChart.tsx` into `TariffEnvelopeChart.tsx` (direct: tariff +
+capacity-limit envelope) and `GridRatesChart.tsx` (derived: cost/CO2 rate), sharing clip/
+carry-forward window logic via a new `tariffChartShared.ts` rather than duplicating it.
+`GridTariffCell` (renamed display label "Tariff & Envelope") now uses the envelope chart;
+new `GridRatesCell` (pinnable, same chrome as `GridAccumulatedCell`) renders the rates
+chart as a second grid-level cell on the Controller page. Old `TariffChart.tsx` kept as-is
+(unchanged, still used by `History.tsx`) since migrating History is an explicit follow-up —
+logged as BL-44 (`docs/BACKLOG.md`; that tab also has no historical capacity-limit data
+source yet).
+
+**File-size fallout**: both `openadr_interface.rs` and `state/mod.rs` crossed the
+500-production-line cap from this change (the latter was already flagged in R-40's watch
+list at 412/500). Split proactively per that rule: `collect_interval_groups`/
+`parse_rate_snapshots`/`parse_capacity_schedule` moved to the new `rate_schedule.rs`
+(re-exported from `openadr_interface.rs` so call sites/tests didn't need to change); the
+tariff/capacity/alert/SIMPLE/dispatch-window `AppState` accessors moved to
+`state/grid_signals.rs`, following the existing `state/obligations.rs` split-impl pattern.
+
+**Verification**: `cargo fmt`/`clippy -D warnings`/`cargo check` clean; full VEN Rust suite
+945/945 passing (including the 2 new + all pre-existing `openadr_interface`/`poll_events`
+tests); full VEN UI suite 534/534 passing; ESLint 0 errors; `scripts/audit_file_sizes.py`
+passes. `docs/reference/TECHNICAL_DEBTS.md` R-40 and `docs/architecture/{INTERFACES,
+VEN_ARCHITECTURE}.md` updated for the new endpoint and the state-module split.
+
+## GB-19 investigated: ven-3's S-5 dispatch divergence explained, not a bug (2026-08-10)
+
+Follow-up to the two S-1..S-6 experiment runs' recurring finding: `ven-3` (and its
+persona-fleet counterpart) shows a much larger, more variable response than `ven-2` across
+scenarios, most visibly in S-5 dispatch (~6.6 kW peak vs. `ven-2`'s steady ~0.5 kW, in both
+independent runs).
+
+**Root cause, found by diffing `VEN/profiles/ven-2.yaml` vs. `ven-3.yaml`**: `ven-3` is the
+only VEN of the three carrying an EV asset at all — `max_charge_kw: 11.0`, `battery_kwh:
+75.0` — while `ven-2` is heater+PV+base_load only, with nothing near that scale of
+adjustable draw. Neither VEN has a `battery` asset, so `apply_dispatch_override`'s own
+battery-steering path (`dispatch_override.rs`) never engages for either — ruling out a
+DISPATCH_SETPOINT-specific code bug as the cause.
+
+Checked whether the EV silently free-runs at a fixed default power even without an active
+user session (neither experiment run creates one for the base `ven-1..3`, only for the
+persona fleet): `assets/ev.rs`'s `default_setpoint()` (→ `default_charge_kw`) is only used
+in `simulator/mod.rs` as the fallback for assets *not covered by the current plan* — and
+`ven-3`'s own logs (`docker logs ven-ven-3-1`) show a continuously adopted 288-slot MILP
+plan throughout every scenario window, so the EV's charging is genuinely the planner's own
+economic decision (via `RateChange`/`CapacityChange`-triggered replans), not a hardcoded
+draw.
+
+**Conclusion**: this is real, expected per-VEN diversity, not a bug — `ven-3` simply owns a
+large flexible load (`ven-2` doesn't) that the MILP planner opportunistically charges
+whenever conditions favor it, which naturally produces bigger, timing-dependent swings in
+`ven-3`'s import profile. No code fix needed. Closed GB-19 in `docs/BACKLOG.md`. Worth
+knowing for future experiment design: results comparing `ven-2` and `ven-3` are comparing
+VENs with structurally different asset mixes, not identical VENs under different scenarios —
+any future apples-to-apples comparison should either pick VENs with matching asset mixes or
+explicitly account for the mix difference when interpreting KPIs.
+
