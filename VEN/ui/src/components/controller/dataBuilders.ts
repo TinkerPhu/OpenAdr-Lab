@@ -40,6 +40,13 @@ export function computeCostRateEurH(
   return powerKw * exportRate; // negative = revenue
 }
 
+/** Same shape as computeCostRateEurH, but for CO₂ intensity — a single g/kWh figure
+ * applies regardless of import/export direction (unlike tariff's asymmetric import/export
+ * price), so this is just powerKw × intensity with no directional branch. */
+export function computeCo2RateGH(powerKw: number, tariff: ApiTariffSnapshot | null): number {
+  return powerKw * (tariff?.co2_g_kwh ?? 0);
+}
+
 // ─── findCurrentTariff ────────────────────────────────────────────────────────
 
 /**
@@ -230,12 +237,14 @@ export function deriveTariffSnapshot(
   const importP = t?.import_tariff_eur_kwh ?? null;
   const exportP = t?.export_tariff_eur_kwh ?? null;
   const totalCostRateEurH = computeCostRateEurH(gridPowerKw, t);
+  const totalCo2RateGH = computeCo2RateGH(gridPowerKw, t);
 
   return {
     importPriceEurKwh: importP,
     exportPriceEurKwh: exportP,
     co2GKwh: t?.co2_g_kwh ?? null,
     totalCostRateEurH,
+    totalCo2RateGH,
     gridPowerKw,
   };
 }

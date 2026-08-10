@@ -3,7 +3,8 @@ use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport};
 use crate::controller::SimSnapshot;
 use crate::entities::asset_ledger::AssetLedgerEntry;
 use crate::entities::capacity::{
-    AlertWindow, DispatchWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
+    AlertWindow, CapacitySnapshot, DispatchWindow, OadrCapacityState, OadrReportObligation,
+    SimpleWindow,
 };
 use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics};
 use crate::entities::device_session::{
@@ -24,6 +25,7 @@ use tokio::sync::RwLock;
 mod arbiter;
 mod connection;
 mod event_log;
+mod grid_signals;
 mod heuristics;
 mod obligations;
 mod report_submissions;
@@ -86,6 +88,9 @@ pub struct HemsState {
     pub anchor_until: Option<DateTime<Utc>>,
     pub planned_tariffs: Vec<TariffSnapshot>,
     pub capacity_state: OadrCapacityState,
+    /// The Dynamic Operating Envelope schedule (per-interval import/export capacity
+    /// limits) — the timeline `capacity_state` collapses into a current-value scalar.
+    pub planned_capacity_limits: Vec<CapacitySnapshot>,
     /// WP3.1 (BL-04): active grid-alert windows parsed from ALERT_* events.
     pub alert_windows: Vec<AlertWindow>,
     /// WP3.2: active SIMPLE load-shed windows (levels 1–3).
@@ -352,45 +357,8 @@ impl AppState {
         self.hems.write().await.anchor_until = t;
     }
 
-    pub async fn planned_tariffs(&self) -> Vec<TariffSnapshot> {
-        self.hems.read().await.planned_tariffs.clone()
-    }
-
-    pub async fn set_planned_tariffs(&self, tariffs: Vec<TariffSnapshot>) {
-        self.hems.write().await.planned_tariffs = tariffs;
-    }
-
-    pub async fn capacity_state(&self) -> OadrCapacityState {
-        self.hems.read().await.capacity_state.clone()
-    }
-
-    pub async fn set_capacity_state(&self, state: OadrCapacityState) {
-        self.hems.write().await.capacity_state = state;
-    }
-
-    pub async fn alert_windows(&self) -> Vec<AlertWindow> {
-        self.hems.read().await.alert_windows.clone()
-    }
-
-    pub async fn set_alert_windows(&self, alerts: Vec<AlertWindow>) {
-        self.hems.write().await.alert_windows = alerts;
-    }
-
-    pub async fn simple_windows(&self) -> Vec<SimpleWindow> {
-        self.hems.read().await.simple_windows.clone()
-    }
-
-    pub async fn set_simple_windows(&self, windows: Vec<SimpleWindow>) {
-        self.hems.write().await.simple_windows = windows;
-    }
-
-    pub async fn dispatch_windows(&self) -> Vec<DispatchWindow> {
-        self.hems.read().await.dispatch_windows.clone()
-    }
-
-    pub async fn set_dispatch_windows(&self, windows: Vec<DispatchWindow>) {
-        self.hems.write().await.dispatch_windows = windows;
-    }
+    // Tariff/capacity-limit/alert/SIMPLE/dispatch-window accessors moved to
+    // `state/grid_signals.rs` (R-40 proactive split, see that file's doc comment).
 
     pub async fn asset_forecasts(&self) -> Vec<AssetForecast> {
         self.hems.read().await.asset_forecasts.clone()

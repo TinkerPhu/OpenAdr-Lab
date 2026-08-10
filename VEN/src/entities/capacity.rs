@@ -33,6 +33,21 @@ pub struct OadrCapacityState {
     pub last_updated: Option<DateTime<Utc>>,
 }
 
+/// A single capacity-limit snapshot for a time interval, mirroring
+/// `TariffSnapshot`'s shape. Parsed from IMPORT_CAPACITY_LIMIT/
+/// EXPORT_CAPACITY_LIMIT event payloads (the OpenADR 3.1 "Dynamic Operating
+/// Envelope", User Guide §8.10.1) — keeps the per-interval schedule that
+/// `OadrCapacityState` collapses into a single current-value scalar, so the
+/// UI can chart the envelope over time the same way it charts tariffs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapacitySnapshot {
+    pub interval_start: DateTime<Utc>,
+    #[serde(skip_serializing)]
+    pub interval_end: DateTime<Utc>,
+    pub import_limit_kw: Option<f64>,
+    pub export_limit_kw: Option<f64>,
+}
+
 /// WP3.1 (BL-04) — an active grid-alert window parsed from an
 /// ALERT_GRID_EMERGENCY / ALERT_BLACK_START event. Both alert types carry a
 /// human-readable string payload (Definition doc, event payload type table)

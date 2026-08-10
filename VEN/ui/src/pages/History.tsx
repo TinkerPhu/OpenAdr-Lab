@@ -118,6 +118,10 @@ export function HistoryPage() {
             : null,
         totalCo2RateGH: row.co2_g_kwh !== null ? row.import_kw * row.co2_g_kwh : null,
         gridPowerKw: row.import_kw - row.export_kw,
+        // BL-44 follow-up: the History tab has no capacity-limit-schedule endpoint wired
+        // yet (Controller's live GET /capacity/schedule has no historical equivalent).
+        importLimitKw: null,
+        exportLimitKw: null,
       })),
     [grid]
   );

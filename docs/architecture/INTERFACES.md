@@ -58,7 +58,8 @@ No authentication. CORS: any origin.
 | PUT | `/plan/objective` | Set optimisation objective |
 | GET | `/plan/events` | Events included in plan |
 | GET | `/tariffs` | Active tariff schedule |
-| GET | `/capacity` | Grid capacity limits |
+| GET | `/capacity` | Grid capacity limits (current-value snapshot) |
+| GET | `/capacity/schedule` | Capacity-limit schedule (Dynamic Operating Envelope), per-interval, unlike `/capacity` |
 | GET | `/obligations` | OpenADR obligations affecting plan |
 | GET | `/ledger` | Energy/cost ledger |
 | GET | `/flexibility` | Flexibility envelope |
