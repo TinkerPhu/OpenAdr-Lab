@@ -25,6 +25,15 @@ export function DashboardPage() {
               <Typography variant="body2" data-testid="dash-health-auth">
                 Auth: {health.data.vtn.authOk ? "ok" : "failed"}
               </Typography>
+              {health.data.recorder.enabled && (
+                <Typography variant="body2" data-testid="dash-health-recorder">
+                  Recorder: {health.data.recorder.connected ? "connected" : "disconnected"}
+                  {!health.data.recorder.connected &&
+                    ` (${health.data.recorder.consecutiveFailures} failed attempt${
+                      health.data.recorder.consecutiveFailures === 1 ? "" : "s"
+                    })`}
+                </Typography>
+              )}
             </Stack>
           )}
         </Paper>

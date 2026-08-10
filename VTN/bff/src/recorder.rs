@@ -8,16 +8,62 @@
 //! already support it, capped at 50/page). Dedup on `(id, modificationDateTime)`
 //! so re-polls don't duplicate rows — enforced via a composite primary key +
 //! `ON CONFLICT DO NOTHING`.
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
+use serde::Serialize;
 use serde_json::Value;
 use sqlx::PgPool;
-use tracing::{info, warn};
+use tokio::sync::RwLock;
+use tracing::{error, info, warn};
 
 use crate::vtn_client::VtnClient;
 
 const PAGE_LIMIT: i64 = 50;
+const INITIAL_BACKOFF_S: u64 = 5;
+const MAX_BACKOFF_S: u64 = 300;
+
+/// Observable recorder health (2026-08-10 incident fix) — before this, a
+/// single failed startup DB connection permanently disabled the recorder for
+/// the process's whole lifetime with only a one-line log as evidence; the
+/// recorder silently sat dead for 9 days with zero other visible signal.
+/// Surfaced via `/api/health` so it satisfies `ui-transparency` instead of
+/// being invisible outside the container logs.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RecorderStatus {
+    pub connected: bool,
+    pub last_poll_at: Option<DateTime<Utc>>,
+    pub last_success_at: Option<DateTime<Utc>>,
+    pub consecutive_failures: u32,
+    pub last_error: Option<String>,
+}
+
+pub type SharedRecorderStatus = Arc<RwLock<RecorderStatus>>;
+
+fn next_backoff(current: Duration) -> Duration {
+    (current * 2).min(Duration::from_secs(MAX_BACKOFF_S))
+}
+
+fn mark_connect_failure(status: &mut RecorderStatus, err: &str) {
+    status.connected = false;
+    status.consecutive_failures += 1;
+    status.last_error = Some(err.to_string());
+}
+
+fn mark_connect_success(status: &mut RecorderStatus) {
+    status.connected = true;
+    status.consecutive_failures = 0;
+    status.last_error = None;
+}
+
+fn mark_poll_tick(status: &mut RecorderStatus, now: DateTime<Utc>, had_success: bool) {
+    status.last_poll_at = Some(now);
+    if had_success {
+        status.last_success_at = Some(now);
+    }
+}
 
 pub async fn init_schema(pool: &PgPool) -> Result<()> {
     sqlx::query("CREATE SCHEMA IF NOT EXISTS lab_recorder")
@@ -246,19 +292,61 @@ async fn record_ven_snapshots(pool: &PgPool, client: &VtnClient) -> Result<u64> 
     Ok(n)
 }
 
+/// Connect + init the recorder schema, retrying forever with exponential
+/// backoff (capped at 5 min) instead of giving up after one attempt. A
+/// transient DB/DNS blip at startup (the 2026-08-10 incident: a Docker
+/// internal-DNS hiccup during a `vtn-bff` restart) must not permanently
+/// disable the recorder for the rest of the process's lifetime.
+async fn connect_and_init_with_retry(database_url: &str, status: &SharedRecorderStatus) -> PgPool {
+    let mut backoff = Duration::from_secs(INITIAL_BACKOFF_S);
+    loop {
+        let attempt = async {
+            let pool = PgPool::connect(database_url).await?;
+            init_schema(&pool).await?;
+            Ok::<PgPool, anyhow::Error>(pool)
+        };
+        match attempt.await {
+            Ok(pool) => {
+                mark_connect_success(&mut *status.write().await);
+                return pool;
+            }
+            Err(e) => {
+                error!("recorder: connect/init failed, retrying in {backoff:?}: {e:#}");
+                mark_connect_failure(&mut *status.write().await, &format!("{e:#}"));
+                tokio::time::sleep(backoff).await;
+                backoff = next_backoff(backoff);
+            }
+        }
+    }
+}
+
+/// Spawns the recorder as a self-contained background task: connects (with
+/// retry, see `connect_and_init_with_retry`) and then polls forever. Never
+/// blocks or fails the caller — the whole recorder lifecycle, including its
+/// initial connection, is decoupled from BFF startup so a recorder-side
+/// problem can never take down the rest of the BFF.
 pub fn spawn_recorder(
-    pool: PgPool,
+    database_url: String,
     business: VtnClient,
     ven_mgr: VtnClient,
     poll_secs: u64,
+    status: SharedRecorderStatus,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        let pool = connect_and_init_with_retry(&database_url, &status).await;
+        info!("VTN recorder started (poll every {poll_secs}s)");
+
         let mut interval = tokio::time::interval(Duration::from_secs(poll_secs));
         loop {
             interval.tick().await;
+            let mut had_success = false;
+
             match record_reports(&pool, &business).await {
-                Ok(0) => {}
-                Ok(n) => info!("recorder: {n} new report(s) archived"),
+                Ok(0) => had_success = true,
+                Ok(n) => {
+                    info!("recorder: {n} new report(s) archived");
+                    had_success = true;
+                }
                 Err(e) => warn!("recorder: reports poll failed: {e:#}"),
             }
             match record_events(&pool, &business).await {
@@ -271,6 +359,8 @@ pub fn spawn_recorder(
             if let Err(e) = record_ven_snapshots(&pool, &ven_mgr).await {
                 warn!("recorder: ven snapshot poll failed: {e:#}");
             }
+
+            mark_poll_tick(&mut *status.write().await, Utc::now(), had_success);
         }
     })
 }
@@ -362,5 +452,64 @@ mod tests {
 
         let no_intervals = json!({"createdDateTime": "2026-01-01T10:00:00Z", "resources": []});
         assert_eq!(report_submission_lag_s(&no_intervals), None);
+    }
+
+    // ── recorder health/reconnect (2026-08-10 incident fix) ─────────────
+
+    #[test]
+    fn test_next_backoff_doubles_until_cap() {
+        assert_eq!(
+            next_backoff(Duration::from_secs(5)),
+            Duration::from_secs(10)
+        );
+        assert_eq!(
+            next_backoff(Duration::from_secs(200)),
+            Duration::from_secs(300)
+        );
+        assert_eq!(
+            next_backoff(Duration::from_secs(300)),
+            Duration::from_secs(300)
+        );
+    }
+
+    #[test]
+    fn test_mark_connect_failure_sets_disconnected_and_increments_failures() {
+        let mut s = RecorderStatus::default();
+        mark_connect_failure(&mut s, "dns error");
+        assert!(!s.connected);
+        assert_eq!(s.consecutive_failures, 1);
+        assert_eq!(s.last_error.as_deref(), Some("dns error"));
+
+        mark_connect_failure(&mut s, "dns error again");
+        assert_eq!(s.consecutive_failures, 2);
+        assert_eq!(s.last_error.as_deref(), Some("dns error again"));
+    }
+
+    #[test]
+    fn test_mark_connect_success_resets_failure_state() {
+        let mut s = RecorderStatus {
+            connected: false,
+            consecutive_failures: 3,
+            last_error: Some("x".into()),
+            ..Default::default()
+        };
+        mark_connect_success(&mut s);
+        assert!(s.connected);
+        assert_eq!(s.consecutive_failures, 0);
+        assert_eq!(s.last_error, None);
+    }
+
+    #[test]
+    fn test_mark_poll_tick_updates_last_poll_always_and_success_conditionally() {
+        let now = chrono::Utc::now();
+        let mut s = RecorderStatus::default();
+
+        mark_poll_tick(&mut s, now, false);
+        assert_eq!(s.last_poll_at, Some(now));
+        assert_eq!(s.last_success_at, None);
+
+        mark_poll_tick(&mut s, now, true);
+        assert_eq!(s.last_poll_at, Some(now));
+        assert_eq!(s.last_success_at, Some(now));
     }
 }
