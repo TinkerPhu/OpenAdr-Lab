@@ -8080,3 +8080,149 @@ regardless of the `assetIds` order passed in; confirmed red against the prior
 negative during autarky export, PV stacks first, chart renders normally (no more refetch
 storm). Nothing outstanding.
 
+## SG-2 control-method comparison — first S-1..S-6 experiment run (2026-08-09/10)
+
+Ran the strategic-roadmap §3.1 item that had been sitting scheduled-but-unexecuted since
+Phase 3: the full S-1..S-6 real-time scenario matrix (`experiments/run_experiment.py`)
+against the live Node1 stack (`ven-1`, `ven-2`, `ven-3`, one 30-min window per scenario,
+~3h10m total incl. a 3-min smoke check). Held the Node1 lock for the whole sequence, run
+launched detached (`nohup` + `disown`) so it survived the SSH session, monitored via
+scheduled wakeups roughly every 30 min.
+
+**What ran**: smoke → S-1 flat tariff (baseline) → S-2 price spike → S-3 capacity limit →
+S-4 alert → S-5 dispatch → S-6 combined. All six posted their events and waited out their
+windows without incident; the harness itself performed correctly.
+
+**Driver-script bug (not a product bug)**: the ad-hoc bash wrapper written to chain the six
+`run_experiment.py` calls captured each scenario's output directory with
+`dir=$(echo "$out" | grep -oP ...)`, but a separate un-captured `echo | tee` line inside the
+same function leaked into the caller's command substitution, corrupting all six `$sN_dir`
+variables (header text + a stray trailing `===` concatenated onto the real path). `kpi.py`
+and `report.py` then failed on all six with `FileNotFoundError`. The underlying snapshot
+directories themselves (`experiments/results/<timestamp>-<scenario>/`, containing
+`run.json`, the VEN sqlite copies, and the recorder CSVs) were unaffected — `run_experiment.py`
+builds that path internally, not from the wrapper's variable. Recovered by re-running
+`kpi.py`/`report.py` by hand against the correctly-named directories; no data was lost.
+**Learning**: when a bash function both prints progress (`tee` to stdout) and returns a
+value via `$(...)`, the progress output must go to `stderr` or `/dev/null`, not stdout —
+command substitution captures everything the function prints, not just the final `echo`.
+
+**Findings from the report** (`experiments/results/s1-s6-report.md`):
+- `ven-1` (has PV) was a net exporter with ~zero import in every scenario — expected, and
+  visibly different behaviour from `ven-2`/`ven-3` (no PV, flat ~0.43-0.48 kWh/30min import
+  at `load_factor` 1.0 under S-1 baseline).
+- S-2 (price spike alone) produced **zero** `energy_shifted_kwh` for `ven-2`/`ven-3` vs.
+  baseline — a single dynamic-price signal did not move their load in this run.
+- S-3 (capacity limit) and S-4 (alert) did shift load measurably (~0.08 kWh and ~0.19 kWh
+  respectively vs. baseline) — capacity/alert control methods visibly outperformed price
+  alone at moving these two VENs' consumption.
+- S-5 (dispatch) is the one result that needs a closer look before trusting it: `ven-3`
+  spiked to 6.6 kW peak import (vs. 0.5-0.9 kW everywhere else in the whole matrix) while
+  `ven-2` under the same scenario stayed at its usual 0.5 kW. Not yet root-caused — could be
+  a genuine per-VEN response difference to the `DISPATCH_SETPOINT` value, or an artifact
+  worth checking against `ven-3`'s own logs for that window.
+- `report_timeliness` was `null` for every scenario — confirmed by grepping the recorder
+  CSV directly that zero `reports_received` rows fall inside any of the six 30-min windows,
+  even though the CSV holds ~120k historical rows going back months. The VTN recorder does
+  not appear to have logged any report during this run's actual wall-clock windows. This is
+  a gap worth investigating before the next experiment run (WP5.4/SG-3 depends on this data
+  path working) — not chased further here to keep the run moving.
+
+**Follow-up**: the S-5 dispatch anomaly and the `report_timeliness` gap are both open
+questions, not yet filed as BACKLOG items — do that before relying on this data path again.
+
+## SG-1/Phase-4-exit persona re-run of S-1..S-6 (2026-08-10)
+
+Immediate follow-on to the run above: same S-1..S-6 matrix, this time with a 3-VEN
+eco/comfort/commuter persona fleet (`fleet.sh up 3 --personas`) layered on top of the base
+`ven-1..3`, to check whether persona diversity (WP4.5) produces measurably different fleet
+response — the Phase 4 exit criterion. Took three attempts; both real bugs found along the
+way are now fixed in the codebase, not worked around.
+
+**Attempt 1** (22:54Z) — two independent bugs, both silent (no crash, just wrong data):
+1. `run_experiment.py --personas`' `setup_persona_sessions()` called `POST /ev-session` to
+   give each fleet VEN its persona's EV request. That route was retired down to `GET`-only
+   when BL-41 replaced the per-device Device-Sessions API with the unified `POST
+   /user-requests` — a stale caller nobody updated when the migration happened. Every
+   persona session creation failed with 405, silently producing zero persona
+   differentiation.
+2. `fleet.sh up` lets Docker Compose auto-create the bind-mounted `VEN/data/fleet-ven-*`
+   directories, which come out `root:root` — but the `ven-app` container runs as uid 2000
+   (matching `ven-1..3`'s directories, which get set up differently). Every persist write
+   failed with `Permission denied`; `history.sqlite` was never created for any fleet VEN.
+
+Killed mid-S3 (`kill -INT` did not reliably interrupt the Python process on this box, both
+here and later — had to `SIGKILL` and manually delete the dangling VTN program +
+event via the API each time cleanup was needed).
+
+**Fixes**: (1) `chown -R 2000:2000` the three `fleet-ven-*` data directories. (2) Committed
++ pushed + pulled a fix to `experiments/run_experiment.py` (commit `dc81d20`) retargeting
+`setup_persona_sessions()` at `POST /user-requests` (`asset_id: "ev"`, `deadlines: [...]`
+instead of the old `departure_time` field) with `DELETE /user-requests/:id` for teardown.
+Verified both fixes independently via direct `curl` against a live fleet VEN before
+resuming.
+
+**Attempt 2** (00:03Z) — `fleet.sh up` is idempotent and found the attempt-1 containers
+still running, so it left them alone rather than recreating them. That mattered because
+`main.rs` only calls `SqliteHistoryStore::open()` once at process boot; those containers had
+already tried and permanently failed at their original 22:58:54Z boot (directories were
+still root-owned then) and never retry. The chown fix only helps a *fresh* boot. S-1
+completed with correct persona sessions but **still** zero history data. Discovered
+mid-S2 and `docker restart`ed the three containers to force a fresh boot with the
+already-correct permissions — but active user-requests aren't part of the persisted
+`state.json`/`sim_state.json`, so the restart silently wiped S-2's in-flight persona
+session too (confirmed: `GET /user-requests` returned `[]` right after). Killed the run,
+cleaned up the dangling S-2 VTN program.
+
+**Learning for next time**: a `docker restart` of a warm container is not a safe way to
+"pick up a directory permission fix" if that container holds any request/session state that
+isn't in its persisted snapshot — always prefer a full stop+recreate (or just don't touch
+already-broken containers; kill the driver and relaunch fresh so `fleet.sh up` builds and
+boots them correctly from scratch).
+
+**Attempt 3** (00:40:19Z) — fully fresh containers, both fixes in place before any scenario
+ran. Confirmed clean at every step: S-1 had no "no history store" warning, `history.sqlite`
+plus its `-wal` sidecar grew steadily throughout (2.8 MB+ by S-4), and all six scenarios
+completed with directory-capture, KPI extraction, and report rendering all working (the
+run-dir capture bug from the earlier S-1..S-6 run had already been fixed in this driver
+script and held up across all 6 runs here too). `fleet.sh down --purge`'s own data-file
+`rm` failed with `Permission denied` (same uid-2000-vs-`pi`-user mismatch, this time on
+*deletion* rather than creation) — containers were still removed cleanly, just the data
+dirs needed a manual `sudo rm -rf` after. Not fixed in `fleet.sh` itself; noted here as a
+minor follow-up (the `--purge` path assumes it can delete files it didn't chown).
+
+**Findings from the report** (`experiments/results/s1-s6-persona-report.md`) — this is the
+result that matters, real persona-driven behavioural diversity, exactly the Phase-4 exit
+criterion:
+- **eco** (`fleet-ven-001`, OPPORTUNISTIC/free-energy-only): near-zero import in every
+  single scenario (0.003–0.15 kWh per 30-min window, cost ≈ €0) — textbook "only charge on
+  surplus" behaviour.
+- **comfort** (`fleet-ven-000`, ASAP/cost-blind): consistently the highest importer across
+  all six scenarios (2.9–3.8 kWh, €0.18–0.28) — convenience wins over price exactly as
+  designed, and barely responds to any control signal (S-2..S-6 costs stay close to the S-1
+  baseline).
+- **commuter** (`fleet-ven-002`, BY_DEADLINE + €2 budget ceiling): intermediate and the most
+  *reactive* of the three — import swings from 0.007 kWh (S-3, capacity-limited) up to 2.09
+  kWh (S-6, combined) depending on the scenario, showing the deadline pressure trading off
+  against the budget cap as conditions change.
+
+This is a clean confirmation of SG-1 (fleet diversity produces measurably different
+responses) — the three personas are visibly distinguishable on every KPI in every scenario.
+
+**Both open items from the first (non-persona) run reproduced independently here**, which
+upgrades them from "maybe a fluke" to "confirmed real, worth fixing before the data path is
+trusted further":
+- `report_timeliness` is `null` again in all 6 scenarios' `kpis.json` (verified: each
+  scenario's `recorder-reports_received.csv` has zero rows with `received_at` inside that
+  scenario's actual wall-clock window, same as the first run).
+- The S-5 dispatch divergence pattern recurs: `ven-3`/`fleet-ven-002` (its persona-fleet
+  counterpart role) shows a markedly larger response than `ven-2` under the exact same
+  `DISPATCH_SETPOINT` event in both independent runs (this run: `ven-3` 0.89 kWh / 6.6 kW
+  peak vs. `ven-2` 0.24 kWh / 0.5 kW peak — same shape as the first run). Reproducing across
+  two independent live runs rules out one-off noise; still not root-caused.
+
+**Follow-up**: file both open items (`report_timeliness` always null; the `ven-3` S-5
+dispatch divergence) as BACKLOG entries — they're now confirmed-reproducible, not
+speculative. Also worth a small `fleet.sh down --purge` fix so its own cleanup doesn't need
+a manual `sudo rm -rf` afterward.
+
