@@ -23,6 +23,14 @@ target
 # Docker bind-mount data directories
 **/data/
 
+# fleet.sh-generated artifacts (regenerated per run, host-local)
+VEN/docker-compose.fleet.yml
+VEN/fleet/
+VEN/profiles/fleet-ven-*.yaml
+
+# experiments/run_experiment.py output (host-local run snapshots)
+experiments/results/
+
 # Python
 __pycache__/
 *.pyc
