@@ -397,6 +397,8 @@ mod tests {
             import_tariff_eur_kwh: None,
             export_tariff_eur_kwh: None,
             co2_g_kwh: None,
+            import_limit_kw: None,
+            export_limit_kw: None,
         })
         .unwrap();
 

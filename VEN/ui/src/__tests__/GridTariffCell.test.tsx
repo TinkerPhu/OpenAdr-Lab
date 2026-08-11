@@ -86,7 +86,7 @@ describe("GridTariffCell — now line position", () => {
     tariffsData = [];
   });
 
-  it("nowMs passed to TariffChart advances when timeline data refreshes after time has passed", () => {
+  it("nowMs passed to TariffEnvelopeChart advances when timeline data refreshes after time has passed", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T10:00:00.000Z"));
 
@@ -165,7 +165,7 @@ describe("GridTariffCell — now line position", () => {
     expect(nowMsAfter).toBe(t0);
   });
 
-  it("TariffChart receives hoursBack >= 1 and hoursForward >= 1 for fixed-domain coverage", () => {
+  it("TariffEnvelopeChart receives hoursBack >= 1 and hoursForward >= 1 for fixed-domain coverage", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T10:00:00.000Z"));
 
@@ -193,7 +193,7 @@ describe("GridTariffCell — expanded state via global button", () => {
     tariffsData = [];
   });
 
-  it("TariffChart receives hoursBack=1 and hoursForward=48 when global expand button is clicked", async () => {
+  it("TariffEnvelopeChart receives hoursBack=1 and hoursForward=48 when global expand button is clicked", async () => {
     const user = userEvent.setup();
     const qc = makeQueryClient();
     render(
@@ -209,7 +209,7 @@ describe("GridTariffCell — expanded state via global button", () => {
     expect(parseFloat(chart.getAttribute("data-hours-forward") ?? "-1")).toBe(48);
   });
 
-  it("TariffChart returns to default window when global expand button is clicked again", async () => {
+  it("TariffEnvelopeChart returns to default window when global expand button is clicked again", async () => {
     const user = userEvent.setup();
     const qc = makeQueryClient();
     render(

@@ -32,7 +32,7 @@ export function TariffsLineChart({ data }: TariffsLineChartProps) {
   }));
 
   // Tariff (€/kWh) and CO2 intensity (g/kWh) are different physical dimensions — must not
-  // share a Y-axis, same reasoning as TariffChart's tariff/cost split.
+  // share a Y-axis, same reasoning as TariffEnvelopeChart's tariff/capacity split.
   const tariffDomain = tightSpanDomain(
     points.flatMap((p) => [p.values?.import_tariff_eur_kwh, p.values?.export_tariff_eur_kwh]),
     MIN_TARIFF_SPAN_EUR_KWH

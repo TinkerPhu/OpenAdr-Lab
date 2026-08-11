@@ -1,12 +1,10 @@
 //! WP1.2/1.3/1.6 — history sampler task glue: 1-minute downsample write path
 //! (accumulator in `accumulator.rs`), daily retention pruning, and monthly
 //! `AssetLedger` billing-period rollover. All boundary checks are pure and
-//! clock-injected (`now` passed in per call) so they're testable without
-//! sleeps; the async loop is a thin wrapper spawning its own 1s tick,
-//! snapshotting the simulator (matching the `sim.lock().await` pattern used
-//! by other tasks, e.g. `tasks::obligation`), and writing through
-//! `spawn_blocking` (history writes are best-effort — log-and-continue,
-//! never block the control loop).
+//! clock-injected (`now` passed in per call) so they're testable without sleeps;
+//! the async loop snapshots the simulator each 1s tick (same `sim.lock().await`
+//! pattern as `tasks::obligation`) and writes through `spawn_blocking` — history
+//! writes are best-effort, log-and-continue, never block the control loop.
 mod accumulator;
 
 use std::collections::HashMap;
@@ -196,7 +194,8 @@ pub(crate) fn spawn_history_sampler(
                 crate::controller::residual::site_residual_snapshot(residual_kw),
             );
             let tariffs_snap = state.planned_tariffs().await;
-            if let Some((ticks, grid)) = sampler.record(now, &snap, &tariffs_snap) {
+            let caps_snap = state.planned_capacity_limits().await;
+            if let Some((ticks, grid)) = sampler.record(now, &snap, &tariffs_snap, &caps_snap) {
                 write_window(history.clone(), &notifier, &state, now, ticks, grid).await;
             }
             if day_boundary_crossed(&mut last_pruned_day, now) {
@@ -340,6 +339,8 @@ mod tests {
                 import_tariff_eur_kwh: None,
                 export_tariff_eur_kwh: None,
                 co2_g_kwh: None,
+                import_limit_kw: None,
+                export_limit_kw: None,
             },
         )
     }
