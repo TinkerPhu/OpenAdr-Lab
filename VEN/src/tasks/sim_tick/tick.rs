@@ -34,6 +34,7 @@ pub(crate) async fn tick_once(
     pv_measurement_enabled: bool,
     base_load_measurement: Arc<dyn MeasurementPort>,
     base_load_measurement_enabled: bool,
+    notifier: crate::services::notify::Notifier,
 ) -> (u64, u64) {
     let now = chrono::Utc::now();
     let dt_s = tick_s as f64;
@@ -167,7 +168,7 @@ pub(crate) async fn tick_once(
 
     // PHASE 3.5 (post-lock): arbiter hysteresis + residual escalation (§5.5).
     let arbiter_summary = (new_active_lever, arbiter_net_kw, arbiter_dev_kw);
-    super::arbiter_glue::record_arbiter_outcome(&state, arbiter_summary, now).await;
+    super::arbiter_glue::record_arbiter_outcome(&state, &notifier, arbiter_summary, now).await;
     super::arbiter_glue::apply_residual_escalation(
         &state,
         &trigger_tx,

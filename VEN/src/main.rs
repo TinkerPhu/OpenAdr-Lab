@@ -331,7 +331,7 @@ async fn main() -> anyhow::Result<()> {
     let planner_event_tx: PlannerEventTx = Arc::new(planner_event_tx_inner);
 
     {
-        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp, pvm, pvme, blm, blme) = (
+        let (s, sim, sp, vn, v, tx, dd, etx, wp, wpp, pvm, pvme, blm, blme, sn) = (
             state.clone(),
             sim_state.clone(),
             sim_params.clone(),
@@ -346,6 +346,7 @@ async fn main() -> anyhow::Result<()> {
             pv_measurement_enabled,
             base_load_measurement.clone(),
             base_load_measurement_enabled,
+            notifier.clone(),
         );
         tasks::supervised_spawn("sim_tick", TASK_COOLDOWN_S, state.clone(), move || {
             tasks::spawn_sim_tick(
@@ -363,6 +364,7 @@ async fn main() -> anyhow::Result<()> {
                 pvme,
                 blm.clone(),
                 blme,
+                sn.clone(),
             )
         });
     }

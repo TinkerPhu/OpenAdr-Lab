@@ -131,6 +131,50 @@ pub fn outage_transition(
     }
 }
 
+/// BL-37: reactive-correction (Layer-1 arbiter) edge → notification text,
+/// `None` while the active-lever state doesn't cross an edge. Keyed on
+/// `is_some()` only (design.md D2) — a lever handoff mid-correction
+/// (`Some(a) -> Some(b)`) is not an edge and must not re-fire (D1: the
+/// message is deliberately lever-agnostic so a handoff can't make an
+/// already-emitted message stale).
+pub fn correction_transition(
+    prev_active_lever: Option<&str>,
+    active_lever: Option<&str>,
+) -> Option<(UserNotificationSeverity, &'static str, &'static str)> {
+    match (prev_active_lever.is_some(), active_lever.is_some()) {
+        (false, true) => Some((
+            UserNotificationSeverity::Warn,
+            "Reactive correction active — a Layer-1 lever is adjusting a setpoint to correct a sustained deviation",
+            "arbiter-correction-active",
+        )),
+        (true, false) => Some((
+            UserNotificationSeverity::Info,
+            "Reactive correction cleared",
+            "arbiter-correction-cleared",
+        )),
+        _ => None,
+    }
+}
+
+/// Edge-triggered reactive-correction producer for the sim-tick loop (kept
+/// here for the tasks/ file-size cap). Called from
+/// `tasks::sim_tick::arbiter_glue::record_arbiter_outcome` with the previous
+/// tick's `arbiter_active_lever` (read before it's overwritten) and this
+/// tick's freshly-computed value.
+pub async fn notify_correction_edge(
+    notifier: &Notifier,
+    state: &AppState,
+    now: DateTime<Utc>,
+    prev_active_lever: Option<&str>,
+    active_lever: Option<&str>,
+) {
+    if let Some((sev, msg, dedup_key)) = correction_transition(prev_active_lever, active_lever) {
+        notifier
+            .notify(state, now, sev, msg, None, None, Some(dedup_key.into()))
+            .await;
+    }
+}
+
 /// One-call producer for the planning task (kept here for the tasks/ file-size
 /// cap): surfaces warnings the newly-adopted plan carries that the previous
 /// plan didn't. No-op when the plan wasn't adopted.
@@ -484,6 +528,106 @@ mod tests {
         ));
         assert_eq!(outage_transition(true, true), None);
         assert_eq!(outage_transition(false, false), None);
+    }
+
+    #[test]
+    fn test_correction_transition_fires_on_edges_only() {
+        assert!(matches!(
+            correction_transition(None, Some("battery")),
+            Some((
+                UserNotificationSeverity::Warn,
+                _,
+                "arbiter-correction-active"
+            ))
+        ));
+        assert!(matches!(
+            correction_transition(Some("battery"), None),
+            Some((
+                UserNotificationSeverity::Info,
+                _,
+                "arbiter-correction-cleared"
+            ))
+        ));
+        assert_eq!(correction_transition(None, None), None);
+    }
+
+    #[test]
+    fn test_correction_transition_lever_handoff_is_not_an_edge() {
+        assert_eq!(
+            correction_transition(Some("battery"), Some("battery")),
+            None
+        );
+        assert_eq!(
+            correction_transition(Some("battery"), Some("heater_pause")),
+            None,
+            "handoff between two active levers must not re-fire"
+        );
+    }
+
+    #[tokio::test]
+    async fn notify_correction_edge_none_to_some_emits_one_active_notification() {
+        let state = AppState::new();
+        let notifier = Notifier::new(None);
+        notify_correction_edge(&notifier, &state, ts(0), None, Some("battery")).await;
+        let ring = state.notifications_since(None).await;
+        assert_eq!(ring.len(), 1);
+        assert_eq!(ring[0].severity, UserNotificationSeverity::Warn);
+        assert_eq!(
+            ring[0].dedup_key.as_deref(),
+            Some("arbiter-correction-active")
+        );
+    }
+
+    #[tokio::test]
+    async fn notify_correction_edge_some_to_same_some_emits_nothing() {
+        let state = AppState::new();
+        let notifier = Notifier::new(None);
+        notify_correction_edge(&notifier, &state, ts(0), Some("battery"), Some("battery")).await;
+        assert!(state.notifications_since(None).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn notify_correction_edge_lever_handoff_emits_nothing_and_leaves_active_message_unchanged(
+    ) {
+        let state = AppState::new();
+        let notifier = Notifier::new(None);
+        notify_correction_edge(&notifier, &state, ts(0), None, Some("battery")).await;
+        notify_correction_edge(
+            &notifier,
+            &state,
+            ts(60),
+            Some("battery"),
+            Some("heater_pause"),
+        )
+        .await;
+        let ring = state.notifications_since(None).await;
+        assert_eq!(ring.len(), 1, "handoff must not add or duplicate");
+        assert_eq!(
+            ring[0].message,
+            "Reactive correction active — a Layer-1 lever is adjusting a setpoint to correct a sustained deviation"
+        );
+    }
+
+    #[tokio::test]
+    async fn notify_correction_edge_some_to_none_emits_one_cleared_notification() {
+        let state = AppState::new();
+        let notifier = Notifier::new(None);
+        notify_correction_edge(&notifier, &state, ts(0), Some("battery"), None).await;
+        let ring = state.notifications_since(None).await;
+        assert_eq!(ring.len(), 1);
+        assert_eq!(ring[0].severity, UserNotificationSeverity::Info);
+        assert_eq!(
+            ring[0].dedup_key.as_deref(),
+            Some("arbiter-correction-cleared")
+        );
+    }
+
+    #[tokio::test]
+    async fn notify_correction_edge_none_to_none_emits_nothing() {
+        let state = AppState::new();
+        let notifier = Notifier::new(None);
+        notify_correction_edge(&notifier, &state, ts(0), None, None).await;
+        assert!(state.notifications_since(None).await.is_empty());
     }
 
     #[tokio::test]
