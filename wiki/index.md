@@ -52,7 +52,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[docker-host-lease-lock]] — lease lock on Node1 (and, via wsl_lock.sh, the shared WSL instance) serializes parallel sessions' builds/tests; why not a queue file
 
 ## Sources
-_none yet — seed pages cite repo files directly; per-document summary pages are created by `/wiki-ingest`_
+- [[power-envelope-forecast-basis]] — **open/unfinished**: summary of `docs/external_research/power-envelope-forecast-basis.md`, a two-round sourced web-research thread on why Dynamic Operating Envelope forecasts vary hour-by-hour, how DNSPs (SA Power Networks, Energex) actually compute them, and a critique of a proposed static equal-share alternative
 
 ## Queries
 - [[device-session-common-interface]] — why EvSession/HeaterTarget/ShiftableLoad stay separate structs, not one trait
@@ -64,4 +64,4 @@ _none yet — seed pages cite repo files directly; per-document summary pages ar
 - [[dso-retailer-unbundled-tariff-coordination]] — legally-unbundled DSO/retailer tariff coordination: multi-program protocol support, why an unbounded virtual DSO price is dishonest (shadows the real tariff), DLMP shadow-price duality with the envelope, regulator revenue-cap as the actual answer to "who sets the relation"
 
 ---
-Pages: 43 · Last sync: 2026-07-31 (d42dcd3..e9f5207: BL-34 session comfort curve, R-08 asset-dispatch macro refactor, R-24 injectable clock/RNG, PV generation_limit_kw rename + rated_kw/inverter_max_kw fix + nullable slider, sim-inject double-option null-clear fix, R-56 E2E coverage, Node1 hostname rename/centralization; new query page dso-retailer-unbundled-tariff-coordination filed, coverage-gap review item resolved). Stale-backlog triage batch 1 same day: 35→22 pages, 13 cleared, 22 re-queued in review.md
+Pages: 44 · Last sync: 2026-08-11 (9d2a538: scoped to this change's own impact — history-envelope-persistence's capacity-limit-schedule persistence work — rather than the full 093fbd1..HEAD range, which holds a large unrelated backlog already tracked in review.md's staged batches. New source page power-envelope-forecast-basis filed from docs/external_research/ (new ingest-input directory, first page of this type), explicitly marked open/unfinished. Updated: tariffs-and-capacity (new section distinguishing parse_capacity_state's collapsed scalar from parse_capacity_schedule's full schedule + its history persistence, linking to the new source page).
