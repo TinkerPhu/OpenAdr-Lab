@@ -309,15 +309,18 @@ range).
 - **Battery, PV, base-load**: unaffected — no session-intent path exists for them
   (`services/user_request.rs` has no `create_battery`/equivalent).
 
-**Known limitation (R-18, `docs/reference/TECHNICAL_DEBTS.md`)**: the EV's `v_extra_eur_kwh`
-reward is structurally inert for driving allocation — `e_ev_extra` is bounded only *above* by
-`e_extra_max_kwh × z_ev_core`, so the solver can "bank" the reward without any real charging
-change. The `v_core_eur`/`z_ev_core` half is genuinely coupled (`ev_energy ≥ e_core_kwh ×
-z_ev_core`) and is what the curve actually influences today for EV sessions. The heater's tier
-reward has no equivalent gap — `z_heat_mid`/`z_heat_full` are coupled to real tank-energy
-dynamics.
+EV's `v_extra_eur_kwh` reward is genuinely coupled to real charging: `EvMilpContext::constraints`
+ties `ev_energy` to `e_ev_extra` by *equality* (`ev_energy == e_core_kwh [× z_ev_core] +
+e_ev_extra`, not just an upper bound), so the solver can only "bank" the reward by actually
+charging that extra energy (fixed 2026-08-11, formerly R-18 in
+`docs/reference/TECHNICAL_DEBTS.md`). Both halves — `v_core_eur`/`z_ev_core` (whether to commit to
+core at all) and `v_extra_eur_kwh`/`e_ev_extra` (whether to top off beyond core) — now drive
+allocation. The heater's tier reward has no equivalent gap — `z_heat_mid`/`z_heat_full` are
+coupled to real tank-energy dynamics.
 
 Regression coverage: `entities/asset.rs::comfort_rate_tests`, `ev_milp.rs`'s
 `from_state_by_deadline_soft_sources_v_core_eur_from_curve`/`..._falls_back_to_global_defaults`,
 `heater_milp.rs`'s `test_comfort_full_reward_*`/`from_state_sources_comfort_full_reward_*`,
-`controller/milp_planner/tests/modes.rs`'s `test_by_deadline_soft_comfort_curve_shapes_core_commitment`.
+`controller/milp_planner/tests/modes.rs`'s
+`test_by_deadline_soft_comfort_curve_shapes_core_commitment` (core half) and
+`test_by_deadline_hard_extra_reward_drives_extra_charging` (extra half, R-18 fix).
