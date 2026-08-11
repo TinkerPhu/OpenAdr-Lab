@@ -64,6 +64,18 @@ def step_every_interval_has_numeric_payload(context, ptype):
         )
 
 
+@then('every interval of the latest report has a "{ptype}" payload with value "{expected}"')
+def step_every_interval_has_string_payload(context, ptype, expected):
+    intervals = _latest_report_intervals(context)
+    for iv in intervals:
+        matches = [p for p in iv.get("payloads", []) if p.get("type") == ptype]
+        assert matches, f"Interval {iv.get('id')} lacks a '{ptype}' payload: {iv}"
+        value = matches[0]["values"][0]
+        assert value == expected, (
+            f"Interval {iv.get('id')} '{ptype}' value {value!r} != {expected!r}"
+        )
+
+
 @then("every interval of the latest report has an intervalPeriod start")
 def step_every_interval_has_period_start(context):
     intervals = _latest_report_intervals(context)

@@ -6,6 +6,7 @@ use chrono::{DateTime, Duration, Utc};
 use crate::common::{Aggregation, Interpolation, TimeSeries};
 use crate::controller::reporter::{format_iso8601_duration, AssetReportSample};
 use crate::controller::vtn_port::{OadrIntervalPeriod, OadrReportInterval, OadrReportPayload};
+use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::plan::Plan;
 
 /// Build a `TimeSeries` of `power_kw` from a slice of `AssetReportSample`.
@@ -92,6 +93,52 @@ pub(crate) fn build_net_site_power_ts(
         samples,
         interpolation: Interpolation::Step,
     }
+}
+
+/// Build BASELINE report intervals (WP5.4): the heuristic forecast summed
+/// across all known assets, sampled on the same interval grid the `USAGE`
+/// report would use for this window — the grid's timestamps piggyback on
+/// `asset_samples`' own time range (their `power_kw` values are irrelevant
+/// here) so a concurrently-submitted BASELINE and USAGE report cover
+/// identical windows for `kpi.py` to diff. `AssetHeuristics::sample_kw` is
+/// event-blind by construction (see design.md's WP5.4 decision) — it never
+/// saw the event, so no extra "subtract the event" step is needed. Quality
+/// tag is always `"HEURISTIC"`: this only ever samples `AssetHeuristics`,
+/// never the richer multi-source `AssetForecast` pipeline. Empty when there
+/// are no asset samples yet (no grid to sample on).
+pub(crate) fn build_baseline_report_intervals(
+    asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
+    heuristics: &std::collections::HashMap<String, AssetHeuristics>,
+    interval_width: Duration,
+    duration_iso: &str,
+) -> Vec<OadrReportInterval> {
+    let net_power_ts = build_net_site_power_ts(asset_samples);
+    let grid = net_power_ts.resample_uniform(interval_width, Aggregation::Mean);
+
+    grid.samples
+        .iter()
+        .enumerate()
+        .map(|(i, &(ts, _))| {
+            let baseline_kw: f64 = heuristics.values().map(|h| h.sample_kw(ts)).sum();
+            OadrReportInterval {
+                id: i,
+                intervalPeriod: Some(OadrIntervalPeriod {
+                    start: Some(ts.to_rfc3339()),
+                    duration: Some(duration_iso.to_string()),
+                }),
+                payloads: vec![
+                    OadrReportPayload {
+                        r#type: "BASELINE".to_string(),
+                        values: vec![serde_json::Value::from(baseline_kw * 1000.0)],
+                    },
+                    OadrReportPayload {
+                        r#type: "DATA_QUALITY".to_string(),
+                        values: vec![serde_json::Value::from("HEURISTIC")],
+                    },
+                ],
+            }
+        })
+        .collect()
 }
 
 /// Build SoC intervals using point-in-time sampling at interval ends.
@@ -188,5 +235,151 @@ mod tests {
         assert_eq!(series.samples.len(), 3);
         assert!((series.samples[0].1 - 1.0).abs() < 1e-9);
         assert!((series.samples[2].1 - 3.0).abs() < 1e-9);
+    }
+
+    // ── build_baseline_report_intervals (WP5.4 BASELINE reports) ────────
+
+    use crate::entities::design_vocabulary::AssetHeuristics;
+
+    fn ts(offset_s: i64) -> DateTime<Utc> {
+        chrono::Utc
+            .timestamp_opt(1_700_000_000 + offset_s, 0)
+            .unwrap()
+    }
+
+    /// Flat heuristic (same power every hour) so tests don't depend on the
+    /// fixed epoch's weekday/hour bucket.
+    fn flat_heuristic(kw: f64) -> AssetHeuristics {
+        AssetHeuristics {
+            asset_id: "x".to_string(),
+            daytime_profile_kw: [vec![kw; 24], vec![kw; 24]],
+            seasonal_factor: 1.0,
+            last_updated: None,
+        }
+    }
+
+    fn samples_at(offsets_s: &[i64]) -> Vec<AssetReportSample> {
+        offsets_s
+            .iter()
+            .map(|&off_s| AssetReportSample {
+                ts: ts(off_s),
+                power_kw: 0.0, // irrelevant for BASELINE — only timestamps define the grid
+                soc: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn build_baseline_report_intervals_uses_heuristic_not_measured_power() {
+        let asset_samples: std::collections::HashMap<_, _> =
+            [("site".to_string(), samples_at(&[0, 900, 1800]))]
+                .into_iter()
+                .collect();
+        let heuristics: std::collections::HashMap<_, _> =
+            [("base_load".to_string(), flat_heuristic(2.0))]
+                .into_iter()
+                .collect();
+
+        let intervals = build_baseline_report_intervals(
+            &asset_samples,
+            &heuristics,
+            Duration::seconds(900),
+            "PT15M",
+        );
+
+        assert!(!intervals.is_empty());
+        for iv in &intervals {
+            let baseline = iv
+                .payloads
+                .iter()
+                .find(|p| p.r#type == "BASELINE")
+                .expect("BASELINE payload present");
+            let val = baseline.values[0].as_f64().unwrap();
+            assert!(
+                (val - 2000.0).abs() < 1.0,
+                "expected 2000 W (2 kW heuristic), got {val}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_baseline_report_intervals_sums_multiple_asset_heuristics() {
+        let asset_samples: std::collections::HashMap<_, _> =
+            [("site".to_string(), samples_at(&[0, 900]))]
+                .into_iter()
+                .collect();
+        let heuristics: std::collections::HashMap<_, _> = [
+            ("base_load".to_string(), flat_heuristic(1.5)),
+            ("heater".to_string(), flat_heuristic(0.5)),
+        ]
+        .into_iter()
+        .collect();
+
+        let intervals = build_baseline_report_intervals(
+            &asset_samples,
+            &heuristics,
+            Duration::seconds(900),
+            "PT15M",
+        );
+
+        let val = intervals[0]
+            .payloads
+            .iter()
+            .find(|p| p.r#type == "BASELINE")
+            .unwrap()
+            .values[0]
+            .as_f64()
+            .unwrap();
+        assert!(
+            (val - 2000.0).abs() < 1.0,
+            "expected 2000 W (1.5+0.5 kW), got {val}"
+        );
+    }
+
+    #[test]
+    fn build_baseline_report_intervals_includes_quality_tag() {
+        let asset_samples: std::collections::HashMap<_, _> =
+            [("site".to_string(), samples_at(&[0, 900]))]
+                .into_iter()
+                .collect();
+        let heuristics: std::collections::HashMap<_, _> =
+            [("base_load".to_string(), flat_heuristic(1.0))]
+                .into_iter()
+                .collect();
+
+        let intervals = build_baseline_report_intervals(
+            &asset_samples,
+            &heuristics,
+            Duration::seconds(900),
+            "PT15M",
+        );
+
+        let quality = intervals[0]
+            .payloads
+            .iter()
+            .find(|p| p.r#type == "DATA_QUALITY")
+            .expect("DATA_QUALITY payload present");
+        assert_eq!(quality.values[0].as_str().unwrap(), "HEURISTIC");
+    }
+
+    #[test]
+    fn build_baseline_report_intervals_empty_without_samples() {
+        let asset_samples: std::collections::HashMap<String, Vec<AssetReportSample>> =
+            std::collections::HashMap::new();
+        let heuristics: std::collections::HashMap<_, _> =
+            [("base_load".to_string(), flat_heuristic(1.0))]
+                .into_iter()
+                .collect();
+
+        let intervals = build_baseline_report_intervals(
+            &asset_samples,
+            &heuristics,
+            Duration::seconds(900),
+            "PT15M",
+        );
+        assert!(
+            intervals.is_empty(),
+            "no asset samples -> no grid -> no baseline intervals"
+        );
     }
 }

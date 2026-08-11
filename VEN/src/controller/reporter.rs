@@ -9,13 +9,15 @@ use tracing::debug;
 
 use crate::common::{parse_iso8601_duration_secs, Aggregation};
 use crate::controller::report_intervals::{
-    build_forecast_intervals, build_net_site_power_ts, build_soc_intervals,
+    build_baseline_report_intervals, build_forecast_intervals, build_net_site_power_ts,
+    build_soc_intervals,
 };
 use crate::controller::vtn_port::{
     OadrEvent, OadrIntervalPeriod, OadrReportBody, OadrReportInterval, OadrReportPayload,
     OadrReportResource,
 };
 use crate::entities::capacity::OadrReportObligation;
+use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::plan::{Plan, SiteFlexibilityEnvelope};
 
 // ---------------------------------------------------------------------------
@@ -253,6 +255,7 @@ pub fn build_measurement_report_for_obligation(
     ven_name: &str,
     site_envelope: Option<&SiteFlexibilityEnvelope>,
     active_plan: Option<&Plan>,
+    heuristics: &std::collections::HashMap<String, AssetHeuristics>,
     now: DateTime<Utc>,
 ) -> Option<OadrReportBody> {
     let op_state = operating_state(asset_samples, now);
@@ -312,6 +315,14 @@ pub fn build_measurement_report_for_obligation(
                 ],
             }]
         }
+        // WP5.4: event-blind heuristic counterfactual, submitted alongside USAGE
+        // during/after an event so `kpi.py` can quantify the event's impact.
+        "BASELINE" => build_baseline_report_intervals(
+            asset_samples,
+            heuristics,
+            interval_width,
+            &duration_iso,
+        ),
         // R-15: `reportDescriptor.historical: false` asks for a forecast of the
         // requested payload — serve plan slots instead of measured history.
         _ if !obligation.historical => build_forecast_intervals(active_plan, payload_type),
@@ -493,6 +504,7 @@ mod tests {
             "ven-1",
             None,
             None,
+            &std::collections::HashMap::new(),
             ts(1800),
         )
         .unwrap();
@@ -538,6 +550,7 @@ mod tests {
             "ven-1",
             None,
             None,
+            &std::collections::HashMap::new(),
             Utc::now()
         )
         .is_none());
@@ -553,6 +566,7 @@ mod tests {
             "ven-1",
             None,
             None,
+            &std::collections::HashMap::new(),
             Utc::now()
         )
         .is_none());
@@ -572,6 +586,7 @@ mod tests {
             "ven-1",
             None,
             None,
+            &std::collections::HashMap::new(),
             ts(1800),
         )
         .unwrap();
@@ -598,6 +613,7 @@ mod tests {
             "ven-1",
             None,
             None,
+            &std::collections::HashMap::new(),
             ts(1800),
         )
         .unwrap();
@@ -634,6 +650,7 @@ mod tests {
             "ven-1",
             None,
             None,
+            &std::collections::HashMap::new(),
             ts(1800),
         )
         .unwrap();
@@ -695,6 +712,7 @@ mod tests {
             "ven-test",
             Some(&env),
             None,
+            &std::collections::HashMap::new(),
             Utc::now(),
         )
         .expect("should return Some");
@@ -721,6 +739,7 @@ mod tests {
             "ven-test",
             Some(&env),
             None,
+            &std::collections::HashMap::new(),
             Utc::now(),
         )
         .expect("should return Some");
@@ -740,6 +759,7 @@ mod tests {
             "ven-test",
             None,
             None,
+            &std::collections::HashMap::new(),
             Utc::now(),
         )
         .expect("should return Some even with no envelope");
@@ -986,6 +1006,7 @@ mod tests {
             "ven-1",
             None,
             Some(&plan),
+            &std::collections::HashMap::new(),
             Utc::now(),
         )
         .expect("plan present -> report built");
@@ -1024,6 +1045,7 @@ mod tests {
             "ven-1",
             None,
             Some(&plan),
+            &std::collections::HashMap::new(),
             Utc::now(),
         )
         .expect("plan present -> forecast report built");
@@ -1044,9 +1066,62 @@ mod tests {
             "ven-1",
             None,
             None,
+            &std::collections::HashMap::new(),
             Utc::now(),
         );
         assert!(report.is_none(), "no adopted plan -> no forecast report");
+    }
+
+    // ── BASELINE obligation dispatch (WP5.4) ─────────────────────────
+
+    #[test]
+    fn baseline_obligation_uses_heuristic_not_measured_power() {
+        // Measured power (5 kW) and heuristic (1 kW) deliberately differ so a
+        // regression that accidentally routes BASELINE through the measured
+        // net_power_ts path (like every other obligation type) is caught.
+        let asset_samples: HashMap<_, _> =
+            [make_samples("site", &[(0, 5.0), (900, 5.0), (1800, 5.0)])]
+                .into_iter()
+                .collect();
+        let heuristics: HashMap<_, _> = [(
+            "base_load".to_string(),
+            crate::entities::design_vocabulary::AssetHeuristics {
+                asset_id: "base_load".to_string(),
+                daytime_profile_kw: [vec![1.0; 24], vec![1.0; 24]],
+                seasonal_factor: 1.0,
+                last_updated: None,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let ob = make_obligation("evt-b", "prog-b", "BASELINE", 900);
+
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &asset_samples,
+            "ven-1",
+            None,
+            None,
+            &heuristics,
+            ts(1800),
+        )
+        .expect("samples present -> baseline report built");
+
+        let intervals = &report.resources[0].intervals;
+        assert!(!intervals.is_empty());
+        for iv in intervals {
+            let baseline = iv
+                .payloads
+                .iter()
+                .find(|p| p.r#type == "BASELINE")
+                .expect("BASELINE payload present");
+            let val = baseline.values[0].as_f64().unwrap();
+            assert!(
+                (val - 1000.0).abs() < 1.0,
+                "expected 1000 W (1 kW heuristic), got {val} — measured power was 5 kW, \
+                 so this would fail if BASELINE fell through to the measured path"
+            );
+        }
     }
 
     // ── operating_state (WP3.6) ─────────────────────────────────────
