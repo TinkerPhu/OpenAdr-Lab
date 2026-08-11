@@ -118,15 +118,14 @@ impl EvMilpContext {
         }
         match self.mode {
             EvMilpMode::MustRun => {
-                cs.push(constraint!(ev_energy.clone() >= self.e_core_kwh));
-                cs.push(constraint!(ev_energy <= self.e_core_kwh + v.e_ev_extra));
+                // R-18 fix: equality (not just an upper bound) couples e_ev_extra to
+                // energy actually charged beyond core, so the extra-reward term in
+                // `objective()` can no longer be "banked" without moving p_ev.
+                cs.push(constraint!(ev_energy == self.e_core_kwh + v.e_ev_extra));
             }
             EvMilpMode::MayRun => {
                 cs.push(constraint!(
-                    ev_energy.clone() >= self.e_core_kwh * v.z_ev_core
-                ));
-                cs.push(constraint!(
-                    ev_energy <= self.e_core_kwh * v.z_ev_core + v.e_ev_extra
+                    ev_energy == self.e_core_kwh * v.z_ev_core + v.e_ev_extra
                 ));
                 cs.push(constraint!(
                     v.e_ev_extra <= self.e_extra_max_kwh * v.z_ev_core
@@ -175,10 +174,10 @@ impl EvMilpContext {
             obj += -(w_services * self.v_core_eur) * v.z_ev_core;
         }
         // WP4.1 (BL-28) OPPORTUNISTIC / *_FREE / MAX_COST: reward the energy
-        // actually charged, per slot. The e_ev_extra reward above cannot drive
-        // charging — e_ev_extra only *bounds* energy from above (ev_energy ≤
-        // core + e_ev_extra), so the solver banks that reward without moving
-        // p_ev. ASAP_FREE additionally biases the reward toward earlier slots
+        // actually charged, per slot, rather than the lump e_ev_extra reward
+        // above — these modes want the reward biased toward specific slots
+        // (free-energy gating, early-slot bias), which a lump sum can't express.
+        // ASAP_FREE additionally biases the reward toward earlier slots
         // (up to +100 %, decaying to 0 across the horizon) so free energy is
         // taken as soon as it appears without ever making later slots
         // unprofitable. The bias must be steep enough that phase 2's friction
