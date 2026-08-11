@@ -8406,3 +8406,89 @@ track the tightest value actually observed, with priority-tier ranking only if t
 more than one candidate source feeding the same field (here there wasn't, since the schedule
 parser already resolved that upstream).
 
+## WP5.4 shipped: BASELINE reports close the last Phase-5 item (2026-08-11)
+
+Implemented via `openspec/changes/wp5-4-baseline-reports/`, following the priority list from
+the 2026-08-10 experiment-results discussion (WP5.4 was the recommended next step once the
+VTN recorder crash was fixed, since BASELINE reports are what SG-3 needed all along).
+
+**Scope correction found during proposal drafting**: the source plan
+(`docs/plans/roadmap/phase-5-forecast-and-baseline.md`) was stale. Investigation showed items
+2–3 (`reportDescriptor.historical` parsing, forecast-vs-measurement routing, capacity-reservation
+reporting from `SiteFlexibilityEnvelope`) were already implemented (R-15, WP3.6 §8.8) — only
+BASELINE report generation was genuinely missing. The proposal was scoped down accordingly
+rather than re-building already-shipped ground.
+
+**What shipped**:
+- `VEN/src/controller/report_intervals.rs::build_baseline_report_intervals` — a `BASELINE`
+  report obligation now returns the heuristic forecast (`AssetHeuristics::sample_kw`, summed
+  across assets) sampled on the obligation's own interval grid, wired into
+  `build_measurement_report_for_obligation`'s `payload_type` match in `reporter.rs`.
+  **Key design decision**: `AssetHeuristics::sample_kw` is *already* event-blind by
+  construction (WP5.2 built it as the planner's uncontrollable-load input, with no event
+  awareness at all) — so BASELINE needed no "subtract the event" step, it's the counterfactual
+  as-is. Deliberately did **not** attempt a "re-solve the MILP without the event" baseline
+  (expensive, re-introduces planning-time cost at report-submission time) — noted as a
+  non-goal, revisit only if the heuristic proves too coarse.
+- Each BASELINE interval carries a `DATA_QUALITY` payload tagged `"HEURISTIC"` — provenance,
+  not a computed statistical confidence (`AssetHeuristics` has no sample-count/variance fields
+  to compute one from; a real confidence model is an explicit non-goal, not built here).
+  **Correction caught before merge**: the original design.md draft invented a `"QUALITY"`
+  payload type; cross-checking against openleadr-rs's actual wire schema
+  (`openleadr-wire/src/report.rs`'s `ReportType` enum) found the real OpenADR 3 name is
+  `DataQuality` → `"DATA_QUALITY"` (`SCREAMING_SNAKE_CASE`) — fixed before implementation,
+  not after. The same cross-check surfaced GB-21 (see below).
+- `experiments/kpi.py` gains `event_impact_kwh` per VEN per run window — `Σ(baseline − actual)`
+  computed from archived `BASELINE`/`USAGE` report pairs in the recorder CSV. Mirrors the
+  existing inter-run `energy_shifted_kwh` (`--baseline` flag) as an intra-run twin.
+- New BDD scenario (`tests/features/ven_reporting_out.feature`, tag `@wp5-4`) — reused the
+  *entire* existing generic reportDescriptor step machinery
+  (`tests/features/steps/reporting_out_steps.py`) with zero new step definitions beyond one
+  small string-payload assertion helper; no bespoke BASELINE-specific test scaffolding needed.
+
+**Test-first throughout**: 5 new Rust unit tests (4 for the interval builder in
+`report_intervals.rs`, 1 regression-shape test in `reporter.rs` proving BASELINE uses the
+heuristic and not measured power — deliberately constructed with measured ≠ heuristic power so
+a regression that fell through to the measured-power path would be caught) — all confirmed red
+(compile failure) before implementation, green after. `experiments/kpi.py` had no existing test
+harness; added a `--self-check` mode (matching `scripts/personas.py`'s established pattern)
+covering both spec scenarios (BASELINE above actual → positive impact; no BASELINE archived →
+`None`, not a computed value).
+
+**Verification — full chain, not just unit tests**:
+- `cargo fmt`/`clippy --all-targets --all-features -D warnings`/full VEN Rust suite (950/950)
+  clean.
+- Full VEN UI suite unaffected (confirmed, no incidental breakage — this change touched no UI
+  code).
+- `scripts/audit_file_sizes.py` passes.
+- Full E2E BDD suite on Node2 (`run_all_tests.sh --e2e`, 265 scenarios): the `@wp5-4` scenario
+  passed cleanly (BASELINE payload non-negative, `DATA_QUALITY` = `"HEURISTIC"`, both asserted
+  against a real VTN→VEN→recorder round-trip). One unrelated failure (battery capability
+  timeout, `phase_a_physics.feature`) investigated and confirmed a pre-existing host-load flake,
+  not a regression — passed cleanly (0.06s) when re-run in isolation under load ~1.8 vs. the
+  7.3–7.7 load during the main pass. Filed as GB-22 rather than silently dismissed.
+- **Exit demonstration** (the plan's own stated exit criterion): created a live program+event
+  with a `BASELINE` reportDescriptor against Node1's production VTN, targeting real `ven-1`.
+  Confirmed `ven-1` submitted real `BASELINE` reports (1.067 kW, its actual current learned
+  heuristic value) with the `DATA_QUALITY: HEURISTIC` tag, archived by the (now-healthy, per
+  the 2026-08-10 recorder fix) VTN recorder — a genuine live-production proof, not just a test
+  fixture.
+
+**Two more findings from the exit demonstration, filed as debt rather than fixed here**:
+- **GB-21** (found while cross-checking payload names for this change, unrelated to BASELINE
+  itself): `IMPORT_CAPACITY_RESERVATION`/`EXPORT_CAPACITY_RESERVATION` in `reporter.rs` don't
+  match openleadr-rs's actual wire schema — the real variant names have the words swapped
+  (`IMPORT_RESERVATION_CAPACITY`). Pre-existing, silently non-functional against a spec-strict
+  VTN, only ever exercised against this repo's own lenient VTN.
+- **GB-23**: the demo's test event was deleted while its 5s-frequency obligation was still due;
+  `ven-1` then retried the now-404 obligation every ~5s indefinitely (ERROR log spam), until
+  worked around by restarting `ven-1` (confirmed clean afterward). Not BASELINE-specific — any
+  obligation payload type hits this if its source event is deleted mid-flight. `check_and_report`
+  should drop an obligation whose event/program 404s rather than retrying forever.
+
+**Bookkeeping**: `docs/plans/roadmap/phase-5-forecast-and-baseline.md` deleted — WP5.4 was its
+last open item, and its still-relevant substance (the report-payload-types table, the
+BASELINE/DATA_QUALITY mechanism) is now in `docs/architecture/VEN_ARCHITECTURE.md` and
+`wiki/components/heuristics-pipeline.md`. `openspec/changes/wp5-4-baseline-reports/` deleted
+per the same plan-lifecycle rule, now that all 14 tasks are implemented and verified.
+

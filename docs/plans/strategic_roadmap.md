@@ -14,8 +14,8 @@
 | ID | Goal | Status |
 |----|------|--------|
 | **SG-1 Fleet** | Run a fleet of independent, *diverse* VEN agents against one VTN | **Built.** `fleet.sh up N` (bulk registration, personas, health checks); resource budget on Node1 caps practical size at N=3 base + fleet VENs |
-| **SG-2 Control-method lab** | Observe and compare VTN control methods (tariffs, limits, alerts, SIMPLE, dispatch) | **Built, not yet exercised.** All control paths implemented and BDD-covered; the experiment harness exists — the first full S-1…S-6 comparison run is still pending (see §3.1) |
-| **SG-3 Report evaluation** | Judge the *usefulness* of VEN reports from the VTN side | **Directional only.** VTN recorder archives reports incl. `report_lag_s`; rigorous M&V-grade evaluation needs BASELINE reports (WP5.4, §3.2) |
+| **SG-2 Control-method lab** | Observe and compare VTN control methods (tariffs, limits, alerts, SIMPLE, dispatch) | **Built and exercised.** Two full S-1…S-6 comparison runs done 2026-08-09/10 (non-persona baseline + persona re-run) — see `docs/history/project_journal.md`. Capacity limits/alerts measurably shift load; a price signal alone did not, in this run |
+| **SG-3 Report evaluation** | Judge the *usefulness* of VEN reports from the VTN side | **M&V-grade.** VTN recorder archives reports incl. `report_lag_s` (crash-fixed 2026-08-10); `BASELINE` reports ship (WP5.4, 2026-08-11) — `experiments/kpi.py`'s `event_impact_kwh` quantifies an event's actual impact from archived BASELINE vs. USAGE pairs |
 | **SG-4 Forecast from history** | VEN learns heuristics from its own past data | **Mostly done.** History store + learned weekday/weekend heuristics ship and feed the planner; a live weather feed (MQTT, `docs/architecture/weather_forecast.md`) now drives a physics-based PV forecast too. Remaining: the held-out-week validation demo and an external grid-CO₂ feed (BL-17) |
 | **SG-5 Client comfort** | The resident's experience is first-class | **Mostly done.** Request modes, comfort-curve overrides, notifications, History UI ship — with one substantive gap: comfort curves never reach the MILP constraints (BL-34) |
 
@@ -37,19 +37,12 @@ SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort*
 
 ## 3. Remaining work, priority order
 
-### 3.1 The experiment windows (highest value, zero new code)
+### 3.1 The experiment windows — done (2026-08-09/10)
 
-The whole SG-1/SG-2 arc converges on demonstrations that have not run yet — they are
-scheduled-time items (scenarios run in real time; the full set is ~3 h on Node1):
-
-1. **S-1…S-6 control-method comparison** (Phase 3 exit): one report comparing flat
-   tariff vs. dynamic tariff vs. capacity limit vs. emergency alert vs. direct
-   dispatch vs. combined, on the same fleet and day. Harness: `experiments/`
-   (`run_experiment.py` → `kpi.py` → `report.py`); only the 3-minute smoke scenario
-   has been exercised end-to-end.
-2. **Persona re-run** (Phase 4 exit): the same scenarios with eco-optimizer /
-   comfort-first / commuter personas (`fleet.sh --personas`) — expected to show
-   measurably different fleet response; KPI segmentation support exists.
+Both the S-1…S-6 control-method comparison and the persona re-run have now run against the
+live Node1 fleet; full results and the debugging saga (a dead VTN recorder found and fixed
+mid-arc) are in `docs/history/project_journal.md`. Remaining open questions from that work:
+GB-19-class findings (see BACKLOG.md) rather than un-run demonstrations.
 
 Scenario matrix and KPI definitions: §4 below.
 
@@ -58,10 +51,8 @@ Scenario matrix and KPI definitions: §4 below.
 | WP | Item | Content |
 |----|------|---------|
 | WP5.3 | BL-17 weather/PV done; CO₂ remains | PV forecasting from physics + a live MQTT weather feed ships (`docs/architecture/weather_forecast.md`, tagged `ForecastSource::WeatherModel`) — an MQTT push from SRF Meteo rather than the originally-sketched `ExternalDataSource` poll loop. Grid-CO₂-intensity forecast ingestion is the one part of BL-17 still open (no free-tier provider evaluated) |
-| WP5.4 | BASELINE + capability forecast | `BASELINE` report = heuristic forecast computed *as if no event* (M&V counterfactual); parse `reportDescriptor.historical`; `LOAD_SHED_DELTA_AVAILABLE`/`GENERATION_DELTA_AVAILABLE` payloads; data-quality metadata. **This is what upgrades SG-3 from directional to rigorous** |
-| exit | Validation demo | Heuristic forecast beats last-known extrapolation on a held-out week; baseline reports quantify one event's impact |
-
-Plan: `docs/plans/roadmap/phase-5-forecast-and-baseline.md` (WP5.1/WP5.2/WP5.3-weather are done).
+| WP5.4 | BASELINE reports — **done** (2026-08-11) | `BASELINE` report = heuristic forecast computed *as if no event* (M&V counterfactual), shipped via `openspec/changes/wp5-4-baseline-reports/` (now archived — see `docs/history/project_journal.md`'s WP5.4 entry). `reportDescriptor.historical` parsing and capacity-reservation reporting were already implemented before this work (found stale in the original plan). Not done: literal `LOAD_SHED_DELTA_AVAILABLE`/`GENERATION_DELTA_AVAILABLE` payload-type names (the existing `IMPORT_CAPACITY_RESERVATION`/`EXPORT_CAPACITY_RESERVATION` cover similar ground under different, also-non-canonical names — see GB-21); a real statistical confidence model for data-quality metadata (deliberate non-goal, `DATA_QUALITY` currently tags provenance only) |
+| exit | Validation demo | ~~Heuristic forecast beats last-known extrapolation on a held-out week~~ not attempted; **baseline reports quantify one event's impact** — done, verified live against Node1 production `ven-1` |
 
 ### 3.3 Comfort remainder (SG-5)
 
@@ -119,8 +110,10 @@ accuracy (forecast vs. later actuals — the SG-3 usefulness metric).
 **Report-usefulness evaluation (SG-3), concretely:** compare the operator's
 *predicted* fleet response (USAGE_FORECAST / flexibility-envelope reports in the
 recorder) against *actual* metered response (VEN history ground truth). Usefulness =
-prediction error + coverage + timeliness. Directional until WP5.4's baselines;
-M&V-grade after.
+prediction error + coverage + timeliness. M&V-grade now that WP5.4's BASELINE reports ship
+(2026-08-11) — not yet exercised on a fresh experiment run with a BASELINE reportDescriptor
+configured in the scenario matrix itself (the WP5.4 exit demo used a standalone manual event,
+not `experiments/run_experiment.py`'s scenario YAMLs).
 
 ---
 
