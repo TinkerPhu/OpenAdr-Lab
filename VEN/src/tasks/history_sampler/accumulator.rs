@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 
 use crate::controller::simulator_port::SimSnapshot;
+use crate::entities::capacity::CapacitySnapshot;
 use crate::entities::history::{GridSample, TickSample};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 
@@ -37,6 +38,14 @@ struct GridAcc {
     co2_sum: f64,
     co2_n: u32,
     n: u32,
+    /// Dynamic Operating Envelope capacity limit: not a mean (categorical + intermittent, usually
+    /// absent). Tracks the tightest (lowest) value observed anywhere in the window; `None` if no
+    /// capacity event was ever applicable. Simpler than PV curtailment's priority-tier tracking —
+    /// `parse_capacity_schedule` already resolves multi-event conflicts before this ever sees the
+    /// data, so there's only one source to track, not several to rank. See
+    /// `openspec/changes/history-envelope-persistence/`.
+    import_limit_kw: Option<f64>,
+    export_limit_kw: Option<f64>,
 }
 
 /// Feed samples via `record`; a flush (previous window's means) is returned
@@ -63,6 +72,7 @@ impl HistorySampler {
         now: DateTime<Utc>,
         sim: &SimSnapshot,
         tariffs: &[TariffSnapshot],
+        capacity_limits: &[CapacitySnapshot],
     ) -> Option<(Vec<TickSample>, GridSample)> {
         let minute = now.timestamp() / 60;
         let flushed = if self.window_minute.is_some_and(|m| m != minute) {
@@ -123,6 +133,16 @@ impl HistorySampler {
             self.grid.co2_n += 1;
         }
 
+        let applicable_capacity = capacity_limits
+            .iter()
+            .find(|c| c.interval_start <= now && now < c.interval_end);
+        if let Some(v) = applicable_capacity.and_then(|c| c.import_limit_kw) {
+            self.grid.import_limit_kw = Some(self.grid.import_limit_kw.map_or(v, |cur| cur.min(v)));
+        }
+        if let Some(v) = applicable_capacity.and_then(|c| c.export_limit_kw) {
+            self.grid.export_limit_kw = Some(self.grid.export_limit_kw.map_or(v, |cur| cur.min(v)));
+        }
+
         flushed
     }
 
@@ -170,6 +190,8 @@ impl HistorySampler {
             export_tariff_eur_kwh: (grid.export_tariff_n > 0)
                 .then(|| grid.export_tariff_sum / grid.export_tariff_n as f64),
             co2_g_kwh: (grid.co2_n > 0).then(|| grid.co2_sum / grid.co2_n as f64),
+            import_limit_kw: grid.import_limit_kw,
+            export_limit_kw: grid.export_limit_kw,
         };
         Some((ticks, grid_sample))
     }
@@ -221,10 +243,10 @@ mod tests {
     fn test_record_same_minute_does_not_flush() {
         let mut sampler = HistorySampler::new();
         assert!(sampler
-            .record(ts(0), &snap(ts(0), 1.0, Some(0.5)), &[])
+            .record(ts(0), &snap(ts(0), 1.0, Some(0.5)), &[], &[])
             .is_none());
         assert!(sampler
-            .record(ts(30), &snap(ts(30), 2.0, Some(0.5)), &[])
+            .record(ts(30), &snap(ts(30), 2.0, Some(0.5)), &[], &[])
             .is_none());
     }
 
@@ -242,9 +264,9 @@ mod tests {
         );
 
         let mut sampler = HistorySampler::new();
-        sampler.record(ts(0), &with_residual, &[]);
+        sampler.record(ts(0), &with_residual, &[], &[]);
         let (ticks, _grid) = sampler
-            .record(ts(60), &snap(ts(60), 1.0, Some(0.5)), &[])
+            .record(ts(60), &snap(ts(60), 1.0, Some(0.5)), &[], &[])
             .expect("crossing into minute 1 must flush minute 0");
 
         let residual_tick = ticks
@@ -261,10 +283,10 @@ mod tests {
     #[test]
     fn test_record_crossing_minute_boundary_flushes_previous_window_mean() {
         let mut sampler = HistorySampler::new();
-        sampler.record(ts(0), &snap(ts(0), 1.0, Some(0.5)), &[]);
-        sampler.record(ts(30), &snap(ts(30), 3.0, Some(0.5)), &[]);
+        sampler.record(ts(0), &snap(ts(0), 1.0, Some(0.5)), &[], &[]);
+        sampler.record(ts(30), &snap(ts(30), 3.0, Some(0.5)), &[], &[]);
         let (ticks, grid) = sampler
-            .record(ts(60), &snap(ts(60), 5.0, Some(0.5)), &[])
+            .record(ts(60), &snap(ts(60), 5.0, Some(0.5)), &[], &[])
             .expect("crossing into minute 1 must flush minute 0");
 
         assert_eq!(ticks.len(), 1);
@@ -281,7 +303,7 @@ mod tests {
     #[test]
     fn test_flush_emits_partial_window_on_shutdown() {
         let mut sampler = HistorySampler::new();
-        sampler.record(ts(0), &snap(ts(0), 4.0, None), &[]);
+        sampler.record(ts(0), &snap(ts(0), 4.0, None), &[], &[]);
         let (ticks, grid) = sampler
             .flush()
             .expect("a single-sample partial window must still flush");
@@ -299,7 +321,7 @@ mod tests {
     #[test]
     fn test_record_grid_export_when_net_power_negative() {
         let mut sampler = HistorySampler::new();
-        sampler.record(ts(0), &snap(ts(0), -3.0, None), &[]);
+        sampler.record(ts(0), &snap(ts(0), -3.0, None), &[], &[]);
         let (_, grid) = sampler.flush().unwrap();
         assert_eq!(grid.import_kw, 0.0);
         assert!((grid.export_kw - 3.0).abs() < 1e-9);
@@ -315,11 +337,105 @@ mod tests {
             export_tariff_eur_kwh: Some(0.05),
             co2_g_kwh: Some(300.0),
         }];
-        sampler.record(ts(0), &snap(ts(0), 1.0, None), &tariffs);
+        sampler.record(ts(0), &snap(ts(0), 1.0, None), &tariffs, &[]);
         let (_, grid) = sampler.flush().unwrap();
         assert_eq!(grid.import_tariff_eur_kwh, Some(0.25));
         assert_eq!(grid.export_tariff_eur_kwh, Some(0.05));
         assert_eq!(grid.co2_g_kwh, Some(300.0));
+    }
+
+    // ── Capacity-limit envelope aggregation (history-envelope-persistence) ──
+
+    fn capacity_snap(
+        interval_start: DateTime<Utc>,
+        interval_end: DateTime<Utc>,
+        import_limit_kw: Option<f64>,
+        export_limit_kw: Option<f64>,
+    ) -> CapacitySnapshot {
+        CapacitySnapshot {
+            interval_start,
+            interval_end,
+            import_limit_kw,
+            export_limit_kw,
+        }
+    }
+
+    #[test]
+    fn test_record_applies_matching_capacity_limit() {
+        let mut sampler = HistorySampler::new();
+        let limits = vec![capacity_snap(ts(0), ts(3600), Some(5.0), Some(3.0))];
+        sampler.record(ts(0), &snap(ts(0), 1.0, None), &[], &limits);
+        let (_, grid) = sampler.flush().unwrap();
+        assert_eq!(grid.import_limit_kw, Some(5.0));
+        assert_eq!(grid.export_limit_kw, Some(3.0));
+    }
+
+    #[test]
+    fn test_record_no_applicable_capacity_limit_persists_none_not_zero() {
+        let mut sampler = HistorySampler::new();
+        sampler.record(ts(0), &snap(ts(0), 1.0, None), &[], &[]);
+        let (_, grid) = sampler.flush().unwrap();
+        assert_eq!(grid.import_limit_kw, None);
+        assert_eq!(grid.export_limit_kw, None);
+    }
+
+    #[test]
+    fn test_record_mid_window_tighter_limit_is_not_diluted_by_unconstrained_portion() {
+        let mut sampler = HistorySampler::new();
+        // No applicable limit for the first half of the window...
+        sampler.record(ts(0), &snap(ts(0), 1.0, None), &[], &[]);
+        // ...then a limit becomes applicable partway through.
+        let limits = vec![capacity_snap(ts(30), ts(3600), Some(2.0), None)];
+        sampler.record(ts(30), &snap(ts(30), 1.0, None), &[], &limits);
+        let (_, grid) = sampler.flush().unwrap();
+        assert_eq!(
+            grid.import_limit_kw,
+            Some(2.0),
+            "the window's persisted limit must reflect the constrained portion, not be averaged \
+             away by the unconstrained portion"
+        );
+    }
+
+    #[test]
+    fn test_record_keeps_tightest_of_multiple_distinct_limits_order_independent() {
+        // Looser-then-tighter within the window.
+        let mut looser_then_tighter = HistorySampler::new();
+        looser_then_tighter.record(
+            ts(0),
+            &snap(ts(0), 1.0, None),
+            &[],
+            &[capacity_snap(ts(0), ts(30), Some(5.0), None)],
+        );
+        looser_then_tighter.record(
+            ts(30),
+            &snap(ts(30), 1.0, None),
+            &[],
+            &[capacity_snap(ts(30), ts(3600), Some(2.0), None)],
+        );
+        let (_, grid_a) = looser_then_tighter.flush().unwrap();
+
+        // Tighter-then-looser within the window.
+        let mut tighter_then_looser = HistorySampler::new();
+        tighter_then_looser.record(
+            ts(0),
+            &snap(ts(0), 1.0, None),
+            &[],
+            &[capacity_snap(ts(0), ts(30), Some(2.0), None)],
+        );
+        tighter_then_looser.record(
+            ts(30),
+            &snap(ts(30), 1.0, None),
+            &[],
+            &[capacity_snap(ts(30), ts(3600), Some(5.0), None)],
+        );
+        let (_, grid_b) = tighter_then_looser.flush().unwrap();
+
+        assert_eq!(grid_a.import_limit_kw, Some(2.0));
+        assert_eq!(
+            grid_b.import_limit_kw,
+            Some(2.0),
+            "order of observation within the window must not change which value survives"
+        );
     }
 
     // ── PV curtailment aggregation (pv-curtailment-history) ─────────────────
@@ -369,7 +485,7 @@ mod tests {
     #[test]
     fn flush_uncurtailed_window_has_no_limit_or_source() {
         let mut sampler = HistorySampler::new();
-        sampler.record(ts(0), &pv_snap(ts(0), -3.0, None), &[]);
+        sampler.record(ts(0), &pv_snap(ts(0), -3.0, None), &[], &[]);
         let (ticks, _) = sampler.flush().unwrap();
         assert_eq!(ticks[0].generation_limit_kw, None);
         assert_eq!(ticks[0].curtailment_source, None);
@@ -378,7 +494,7 @@ mod tests {
     #[test]
     fn flush_persists_single_active_limit_and_source() {
         let mut sampler = HistorySampler::new();
-        sampler.record(ts(0), &pv_snap(ts(0), -2.0, Some((-2.0, 1.0))), &[]);
+        sampler.record(ts(0), &pv_snap(ts(0), -2.0, Some((-2.0, 1.0))), &[], &[]);
         let (ticks, _) = sampler.flush().unwrap();
         assert!((ticks[0].generation_limit_kw.unwrap() - (-2.0)).abs() < 1e-9);
         assert_eq!(ticks[0].curtailment_source.as_deref(), Some("plan"));
@@ -390,9 +506,9 @@ mod tests {
         // fires for the second half. The window must be tagged capacity, not plan —
         // a brief unplanned event must never be masked by a plan-sourced majority.
         let mut sampler = HistorySampler::new();
-        sampler.record(ts(0), &pv_snap(ts(0), -3.0, Some((-3.0, 1.0))), &[]);
-        sampler.record(ts(10), &pv_snap(ts(10), -3.0, Some((-3.0, 1.0))), &[]);
-        sampler.record(ts(20), &pv_snap(ts(20), -2.0, Some((-2.0, 2.0))), &[]);
+        sampler.record(ts(0), &pv_snap(ts(0), -3.0, Some((-3.0, 1.0))), &[], &[]);
+        sampler.record(ts(10), &pv_snap(ts(10), -3.0, Some((-3.0, 1.0))), &[], &[]);
+        sampler.record(ts(20), &pv_snap(ts(20), -2.0, Some((-2.0, 2.0))), &[], &[]);
         let (ticks, _) = sampler.flush().unwrap();
         assert_eq!(
             ticks[0].curtailment_source.as_deref(),
@@ -408,8 +524,8 @@ mod tests {
     #[test]
     fn flush_picks_tightest_value_within_same_priority() {
         let mut sampler = HistorySampler::new();
-        sampler.record(ts(0), &pv_snap(ts(0), -3.0, Some((-3.0, 2.0))), &[]);
-        sampler.record(ts(10), &pv_snap(ts(10), -1.5, Some((-1.5, 2.0))), &[]);
+        sampler.record(ts(0), &pv_snap(ts(0), -3.0, Some((-3.0, 2.0))), &[], &[]);
+        sampler.record(ts(10), &pv_snap(ts(10), -1.5, Some((-1.5, 2.0))), &[], &[]);
         let (ticks, _) = sampler.flush().unwrap();
         assert!(
             (ticks[0].generation_limit_kw.unwrap() - (-1.5)).abs() < 1e-9,

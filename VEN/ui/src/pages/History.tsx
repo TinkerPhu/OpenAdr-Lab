@@ -7,7 +7,8 @@ import {
   useHistoryTicks, useHistoryGrid, useHistoryEvents, useHistoryReports, useHistoryForecastAccuracy,
 } from "../api/hooks";
 import { AssetTimelineChart } from "../components/controller/charts/AssetTimelineChart";
-import { TariffChart } from "../components/controller/charts/TariffChart";
+import { TariffEnvelopeChart } from "../components/controller/charts/TariffEnvelopeChart";
+import { GridRatesChart } from "../components/controller/charts/GridRatesChart";
 import { ASSET_COLORS, ASSET_LABELS } from "../components/controller/types";
 import type { AssetTimelinePoint, TariffTimePoint } from "../components/controller/types";
 import type { ForecastAccuracySample } from "../api/types";
@@ -118,10 +119,8 @@ export function HistoryPage() {
             : null,
         totalCo2RateGH: row.co2_g_kwh !== null ? row.import_kw * row.co2_g_kwh : null,
         gridPowerKw: row.import_kw - row.export_kw,
-        // BL-44 follow-up: the History tab has no capacity-limit-schedule endpoint wired
-        // yet (Controller's live GET /capacity/schedule has no historical equivalent).
-        importLimitKw: null,
-        exportLimitKw: null,
+        importLimitKw: row.import_limit_kw,
+        exportLimitKw: row.export_limit_kw,
       })),
     [grid]
   );
@@ -157,7 +156,14 @@ export function HistoryPage() {
       </Typography>
 
       <Typography variant="h6">Grid</Typography>
-      <TariffChart
+      <TariffEnvelopeChart
+        data={tariffPoints}
+        nowMs={toMs}
+        hoursBack={24}
+        hoursForward={0}
+        xAxisTickIntervalMinutes={30}
+      />
+      <GridRatesChart
         data={tariffPoints}
         nowMs={toMs}
         hoursBack={24}
