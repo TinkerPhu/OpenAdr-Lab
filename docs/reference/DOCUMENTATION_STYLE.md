@@ -22,6 +22,11 @@ Exempt (intentionally historical):
 `docs/openadr_3_1_specs/pdf/` is never read (project rule); the markdown spec
 copies in `docs/openadr_3_1_specs/` are third-party text — never rewritten.
 
+`docs/external_research/**` holds external (non-codebase) research material — sourced
+web research transcripts, cited external documents — feeding the wiki via
+`/wiki-ingest`. Not a description of this repo's current state, so exempt from the
+current-state/future-vision rule; historical/discussion framing is expected there.
+
 ## Practical corollary
 
 A plan document (`docs/plans/**`) whose work has been fully implemented is
