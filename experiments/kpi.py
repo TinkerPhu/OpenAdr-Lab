@@ -27,6 +27,13 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# The recorder dumps its whole lab_recorder table (unfiltered by run window),
+# which over a long-lived deployment accumulates payload_json blobs past
+# Python's 128 KiB default csv field limit. sys.maxsize overflows the C long
+# csv.field_size_limit uses internally on some platforms (Windows); 10 MiB is
+# comfortably above any real report payload.
+csv.field_size_limit(10 * 1024 * 1024)
+
 
 def window(run_meta):
     t0 = datetime.strptime(run_meta["started_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -167,6 +174,56 @@ def report_lag_stats(csv_path, t_from, t_to):
     }
 
 
+def plan_diagnostics_summary(run_dir, ven):
+    """Summarize a run_experiment.py --fleet-map poll of GET /plan (see
+    poll_plan_diagnostics): solve_status distribution, warning counts by
+    severity, and c_violations_eur stats — this is the "is this VEN's plan
+    quality expected or not" signal, distinct from the grid-power KPIs above.
+    Returns None when no diagnostics file exists for this VEN (e.g. a run
+    without --fleet-map)."""
+    path = run_dir / f"{ven}-plan-diagnostics.jsonl"
+    if not path.exists():
+        return None
+    solve_status_counts = {}
+    warning_severity_counts = {}
+    violations_eur = []
+    samples = 0
+    errors = 0
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            if "error" in rec:
+                errors += 1
+                continue
+            samples += 1
+            status = rec.get("solve_status")
+            if status:
+                solve_status_counts[status] = solve_status_counts.get(status, 0) + 1
+            for w in rec.get("warnings") or []:
+                sev = w.get("severity")
+                if sev:
+                    warning_severity_counts[sev] = warning_severity_counts.get(sev, 0) + 1
+            cb = rec.get("cost_breakdown") or {}
+            v = cb.get("c_violations_eur")
+            if isinstance(v, (int, float)):
+                violations_eur.append(v)
+    if samples == 0 and errors == 0:
+        return None
+    out = {
+        "samples": samples,
+        "poll_errors": errors,
+        "solve_status_counts": solve_status_counts,
+        "warning_severity_counts": warning_severity_counts,
+    }
+    if violations_eur:
+        out["c_violations_eur_mean"] = round(sum(violations_eur) / len(violations_eur), 4)
+        out["c_violations_eur_max"] = round(max(violations_eur), 4)
+    return out
+
+
 def _self_check():
     """No pytest harness for experiments/ scripts today — self-check in the
     style of scripts/personas.py's `if __name__ == "__main__"` block. Run via
@@ -275,6 +332,9 @@ def main():
         )
         if impact is not None:
             k["event_impact_kwh"] = impact
+        diag = plan_diagnostics_summary(run_dir, ven)
+        if diag is not None:
+            k["plan_diagnostics"] = diag
         out["vens"][ven] = k
 
     out["report_timeliness"] = report_lag_stats(
