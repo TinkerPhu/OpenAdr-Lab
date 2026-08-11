@@ -565,6 +565,10 @@ export type HistoryGridSample = {
   import_tariff_eur_kwh: number | null;
   export_tariff_eur_kwh: number | null;
   co2_g_kwh: number | null;
+  /** Dynamic Operating Envelope import limit (kW) — tightest value observed in this window,
+   * null if no capacity event was applicable during it (history-envelope-persistence). */
+  import_limit_kw: number | null;
+  export_limit_kw: number | null;
 };
 
 export type ForecastAccuracySample = {

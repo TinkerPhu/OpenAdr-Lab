@@ -37,6 +37,14 @@ pub struct GridSample {
     pub import_tariff_eur_kwh: Option<f64>,
     pub export_tariff_eur_kwh: Option<f64>,
     pub co2_g_kwh: Option<f64>,
+    /// Dynamic Operating Envelope import capacity limit (kW) — the tightest value observed at
+    /// any point in this window, `None` if no capacity event was applicable during the whole
+    /// window. Not a mean: see `history_sampler/accumulator.rs`'s `GridAcc`.
+    #[serde(default)]
+    pub import_limit_kw: Option<f64>,
+    /// Dynamic Operating Envelope export capacity limit (kW), same semantics as `import_limit_kw`.
+    #[serde(default)]
+    pub export_limit_kw: Option<f64>,
 }
 
 /// An OpenADR event as accepted from the VTN.

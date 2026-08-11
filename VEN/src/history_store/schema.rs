@@ -1,7 +1,7 @@
 //! Versioned DDL for the history SQLite store, applied stepwise via
 //! `PRAGMA user_version` in `history_store::migrate`.
 
-pub(super) const SCHEMA_VERSION: i64 = 8;
+pub(super) const SCHEMA_VERSION: i64 = 9;
 
 pub(super) const SCHEMA_V1: &str = "
 CREATE TABLE tick_samples (
@@ -137,4 +137,14 @@ CREATE TABLE forecast_accuracy_samples (
     actual_at INTEGER
 );
 CREATE INDEX idx_forecast_accuracy_target ON forecast_accuracy_samples(asset_id, target_ts);
+";
+
+/// history-envelope-persistence: the Dynamic Operating Envelope's capacity-limit schedule
+/// (`IMPORT_CAPACITY_LIMIT`/`EXPORT_CAPACITY_LIMIT`), persisted alongside the tariff fields
+/// already on `grid_samples`. Tightest value observed within the minute window, not a mean —
+/// see `history_sampler/accumulator.rs`'s `GridAcc`. `NULL` means "no capacity event was
+/// applicable during this window", not zero.
+pub(super) const SCHEMA_V9: &str = "
+ALTER TABLE grid_samples ADD COLUMN import_limit_kw REAL;
+ALTER TABLE grid_samples ADD COLUMN export_limit_kw REAL;
 ";

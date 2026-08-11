@@ -8363,3 +8363,46 @@ VENs with structurally different asset mixes, not identical VENs under different
 any future apples-to-apples comparison should either pick VENs with matching asset mixes or
 explicitly account for the mix difference when interpreting KPIs.
 
+## history-envelope-persistence: Persist the Capacity-Limit Envelope, Split History Tab Charts (2026-08-11)
+
+**What/why**: follow-up to the Controller-tab tariff/envelope split (BL-44, `openspec/changes/
+history-envelope-persistence/`). `GET /capacity/schedule` only ever reflected currently-active
+events, so the History tab hardcoded `importLimitKw`/`exportLimitKw` to `null` and still used the
+old combined `TariffChart`. Planned via openspec (proposal/design/specs/tasks) before
+implementation, in a dedicated worktree (`045-history-envelope-persistence`) per the user's
+request.
+
+**Backend**: `SCHEMA_V9` adds `import_limit_kw`/`export_limit_kw` to `grid_samples`
+(`history_store/schema.rs`, `SCHEMA_VERSION` 8→9). `GridSample` (`entities/history.rs`) and the
+`append_grid_sample`/`query_grid` INSERT/SELECT (`history_store/mod.rs`) extended for the two
+fields. `HistorySampler::record` (`tasks/history_sampler/accumulator.rs`) gains a
+`capacity_limits: &[CapacitySnapshot]` parameter and tracks the **tightest (lowest) value observed
+per window**, not a mean — a capacity limit is usually absent, and averaging it against
+"unlimited" would be meaningless. Deliberately simpler than `pv-curtailment-history`'s
+priority-tier accumulation: `parse_capacity_schedule` already resolves multi-event conflicts
+before `HistorySampler` ever sees the data, so there's only one source to track here, not several
+to rank. Wired via `state.planned_capacity_limits()` in `history_sampler/mod.rs`, parallel to the
+existing `state.planned_tariffs()` call.
+
+**Frontend**: `History.tsx` swapped from the old combined `TariffChart` to `TariffEnvelopeChart` +
+`GridRatesChart` (the same split Controller already uses), now mapping real
+`row.import_limit_kw`/`export_limit_kw` from `GET /history/grid` instead of a hardcoded `null`.
+With no remaining production consumer, `TariffChart.tsx` and its dedicated test file were deleted
+outright rather than left as dead code — a mechanical grep (`grep -rn "import.*TariffChart"`)
+confirmed only its own test imported it.
+
+**Testing**: test-first for the accumulator — four new unit tests (single applicable limit
+persisted; no applicable limit persists `None` not zero; a limit becoming applicable mid-window is
+not diluted by the unconstrained portion; tightest-of-multiple-values is order-independent) written
+and confirmed red before wiring `record`'s new parameter through. A migration-roundtrip test
+(`test_migrate_v9_adds_capacity_limit_columns_preserving_data`) builds a v8 database by hand and
+asserts existing rows survive with `NULL` (not a zero sentinel) in the new columns, mirroring the
+existing v6/v7 migration test pattern. `wsl cargo test` (945+ Rust tests), UI vitest suite, `tsc
+--noEmit`, and ESLint all green; `cargo fmt`/`clippy -D warnings` clean.
+
+**Key learning**: reused across two changes now (`pv-curtailment-history`, this one) — when
+persisting a categorical/intermittent limit into a history downsample window, never take a mean;
+track the tightest value actually observed, with priority-tier ranking only if there's genuinely
+more than one candidate source feeding the same field (here there wasn't, since the schedule
+parser already resolved that upstream).
+

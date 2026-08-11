@@ -1,7 +1,7 @@
 /**
  * TimeSeriesChart — interactiveLegend behavior
  *
- * Mocks recharts' structural components (same pattern as TariffChart.test.tsx) so we can
+ * Mocks recharts' structural components (same pattern as TariffEnvelopeChart.test.tsx-style mocking) so we can
  * capture props passed to <Line>/<Legend> without needing a full recharts render in
  * jsdom. The mocked <Legend> actually renders its `content` prop (rather than returning
  * null like the other mocks) so ChartLegend's real checkboxes are in the DOM and

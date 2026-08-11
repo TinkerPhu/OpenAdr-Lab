@@ -16,6 +16,8 @@ const mockGrid = [
     import_tariff_eur_kwh: 0.25,
     export_tariff_eur_kwh: 0.05,
     co2_g_kwh: 300,
+    import_limit_kw: 5.0,
+    export_limit_kw: null,
   },
 ];
 const mockEvents = [
@@ -70,6 +72,20 @@ describe("HistoryPage", () => {
     renderHistory();
     expect(screen.getByTestId("history-asset-chart-ev")).toBeInTheDocument();
     expect(screen.getByTestId("history-asset-chart-heater")).toBeInTheDocument();
+  });
+
+  it("renders the tariff/envelope and grid-rates chart sections (direct-vs-derived split)", () => {
+    renderHistory();
+    expect(screen.getByTestId("tariff-envelope-chart")).toBeInTheDocument();
+    expect(screen.getByTestId("grid-rates-chart")).toBeInTheDocument();
+  });
+
+  it("renders a historical capacity-limit value on the envelope chart without error", () => {
+    // mockGrid carries import_limit_kw: 5.0 — a non-null historical envelope value
+    // (history-envelope-persistence). Regression guard for the hardcoded-null placeholder
+    // this replaced: rendering must not throw and the chart section must still mount.
+    renderHistory();
+    expect(screen.getByTestId("tariff-envelope-chart")).toBeInTheDocument();
   });
 
   it("renders events and reports tables with the mocked rows", () => {
