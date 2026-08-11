@@ -55,7 +55,6 @@ Priority legend: 🔴 High / 🟠 Medium-High / 🟡 Medium / 🔵 Low (deferred
 | R-38 | (a) `VEN/Cargo.toml` carries blueprint-era comments (commented-out `openleadr-client` etc.); (b) verify `VTN/data/db` (runtime artifact) is gitignored. | `VEN/Cargo.toml`, `VTN/data/` | Trivial | Low | None — pure hygiene |
 | R-44 | `/health` handler (`routes/system.rs::health`) deep-clones the full `VtnConnectionStatus` and active `Plan` on every poll just to read a couple of fields. Cheap today but grows with `Plan` size; consider a narrower state accessor. Found during the WP-T1/T3/T5/T7 combined code review (2026-07-18). | `VEN/src/routes/system.rs` | Trivial | Low | Low — cheap today, future-proofing only |
 | R-45 | `routes/reports.rs::post_reports` and `put_report` duplicate the `submission_outcome()` call-and-record logic almost verbatim (WP-T5). Extract a shared helper. Found during the WP-T1/T3/T5/T7 combined code review (2026-07-18). | `VEN/src/routes/reports.rs` | Trivial | Low | Low — maintenance/consistency only |
-| R-46 | Ring-buffer eviction (push-and-truncate-to-capacity) is duplicated near-identically in at least 3 places (`state/event_log.rs`, `state/report_submissions.rs`, and a third ring state module). Extract a shared `RingBuffer<T>` helper. Found during the WP-T1/T3/T5/T7 combined code review (2026-07-18). | `VEN/src/state/event_log.rs`, `VEN/src/state/report_submissions.rs` | Small | Low | Low — maintenance/consistency only |
 
 ### UI performance
 

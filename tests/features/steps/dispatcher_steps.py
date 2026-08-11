@@ -3,7 +3,7 @@
 import time
 from datetime import datetime, timedelta, timezone
 from behave import given, when, then
-from features.helpers.api_client import ven_get, ven_post, VEN_BASE_URL
+from features.helpers.api_client import ven_get, ven_post, ven_put, VEN_BASE_URL
 from features.helpers.wait import poll_until
 
 
@@ -126,6 +126,28 @@ def step_response_json_field_is_string(context, field_path, expected):
 def step_inject_base_load(context, kw, alpha):
     """Inject a persistent base-load offset into the VEN sim."""
     r = ven_post("/sim/inject", json={"base_load_kw": kw, "base_load_alpha": alpha})
+    r.raise_for_status()
+
+
+@when("I clear the base_load_kw inject")
+def step_clear_base_load_inject(context):
+    """Reset the base-load override so subsequent ticks decay back to baseline."""
+    r = ven_post("/sim/inject", json={"base_load_kw": 0.0, "base_load_alpha": None})
+    r.raise_for_status()
+
+
+@given("the deviation arbiter is enabled")
+def step_deviation_arbiter_enabled(context):
+    """BL-37: flip the arbiter rollout gate on (PUT /arbiter-settings)."""
+    r = ven_put("/arbiter-settings", json={"deviation_arbiter_enabled": True})
+    r.raise_for_status()
+
+
+@when("the deviation arbiter is disabled")
+def step_deviation_arbiter_disabled(context):
+    """BL-37: reset the arbiter rollout gate to its default so later
+    scenarios start clean."""
+    r = ven_put("/arbiter-settings", json={"deviation_arbiter_enabled": False})
     r.raise_for_status()
 
 
