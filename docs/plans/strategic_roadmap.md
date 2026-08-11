@@ -17,7 +17,7 @@
 | **SG-2 Control-method lab** | Observe and compare VTN control methods (tariffs, limits, alerts, SIMPLE, dispatch) | **Built and exercised.** Two full S-1…S-6 comparison runs done 2026-08-09/10 (non-persona baseline + persona re-run) — see `docs/history/project_journal.md`. Capacity limits/alerts measurably shift load; a price signal alone did not, in this run |
 | **SG-3 Report evaluation** | Judge the *usefulness* of VEN reports from the VTN side | **M&V-grade.** VTN recorder archives reports incl. `report_lag_s` (crash-fixed 2026-08-10); `BASELINE` reports ship (WP5.4, 2026-08-11) — `experiments/kpi.py`'s `event_impact_kwh` quantifies an event's actual impact from archived BASELINE vs. USAGE pairs |
 | **SG-4 Forecast from history** | VEN learns heuristics from its own past data | **Mostly done.** History store + learned weekday/weekend heuristics ship and feed the planner; a live weather feed (MQTT, `docs/architecture/weather_forecast.md`) now drives a physics-based PV forecast too. Remaining: the held-out-week validation demo and an external grid-CO₂ feed (BL-17) |
-| **SG-5 Client comfort** | The resident's experience is first-class | **Mostly done.** Request modes, comfort-curve overrides, notifications, History UI ship — with one substantive gap: comfort curves never reach the MILP constraints (BL-34) |
+| **SG-5 Client comfort** | The resident's experience is first-class | **Done.** Request modes, comfort-curve overrides, notifications, History UI ship; comfort curves shape MILP reward terms for EV/heater sessions (BL-34, shipped 2026-07-31, `docs/architecture/ven_milp_planner.md` §10). Residual gap: EV's `e_ev_extra` reward is a structural no-op for MustRun/MayRun sessions (R-18) |
 
 SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort** axis.
 
@@ -58,7 +58,7 @@ Scenario matrix and KPI definitions: §4 below.
 
 | Item | Content |
 |------|---------|
-| BL-34 | Translate comfort curves (default or user-override) into MILP tier constraints — today the resolved curve is dropped before the solver, so it influences nothing |
+| R-18 | EV `e_ev_extra` reward is structurally inert for MustRun/MayRun sessions — only used as an upper-bound cap (`ev_energy ≤ e_core + e_ev_extra`), never a lower bound, so the solver banks the reward without charging extra energy. `docs/reference/TECHNICAL_DEBTS.md` |
 | BL-35 | Notification producers for tier fallback / deadline-at-risk / packet abandoned (blocked on Stage-5 tier/SIMPLE-level-fallback machinery — not unblocked by BL-09, which shipped a lightweight per-solve constraint with no persisted tier state) |
 | BL-27 / BL-18 | Control-mode metadata for UI sliders; instantaneous per-asset flexibility widget (scope decision first) |
 
