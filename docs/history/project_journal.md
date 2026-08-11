@@ -8492,3 +8492,49 @@ BASELINE/DATA_QUALITY mechanism) is now in `docs/architecture/VEN_ARCHITECTURE.m
 `wiki/components/heuristics-pipeline.md`. `openspec/changes/wp5-4-baseline-reports/` deleted
 per the same plan-lifecycle rule, now that all 14 tasks are implemented and verified.
 
+## R-18: EV `e_ev_extra` reward coupling (2026-08-11)
+
+Picked up as the next roadmap item after BL-34 ("comfort curves into MILP constraints") turned
+out to already be fully implemented — the roadmap doc (`docs/plans/strategic_roadmap.md`) was
+just stale, listing it as open a week after it shipped (2026-07-31). Research (spawned as an
+Explore agent) confirmed BL-34's actual state and surfaced its one residual, genuinely open
+gap: R-18 in `docs/reference/TECHNICAL_DEBTS.md`.
+
+**The bug**: `EvMilpContext::constraints` (`VEN/src/assets/ev_milp.rs`) coupled `e_ev_extra` to
+`ev_energy` only as an *upper bound* — `ev_energy <= e_core_kwh [× z_ev_core] + e_ev_extra` for
+MustRun/MayRun sessions (the legacy `ByDeadline`/`Asap` request modes; every other mode already
+used a separate, correctly-coupled per-slot reward path via `reward_per_slot`). Since nothing
+lower-bounded `e_ev_extra` by real charged power, and the objective rewards `e_ev_extra` directly
+(`obj += -(w_services * v_extra_eur_kwh) * v.e_ev_extra`), the solver could set `e_ev_extra` to
+its maximum allowed value purely to "bank" the reward, with zero effect on `p_ev` — the comfort
+curve's fill=1.0 ("top off beyond core") price was a structural no-op for these modes, silently
+discarded rather than shaping the plan.
+
+**The fix**: changed both branches' coupling from inequality to *equality* —
+`ev_energy == e_core_kwh [× z_ev_core] + e_ev_extra`. Since `e_ev_extra`'s own variable bound is
+`[0, e_extra_max_kwh]`, equality alone implies the old `ev_energy >= e_core_kwh` lower bound too,
+so that redundant constraint was dropped. Now the solver can only earn the extra-energy reward by
+actually charging that energy — the same principle already used correctly by the per-slot reward
+path for other modes.
+
+**Test-first**: added `test_by_deadline_hard_extra_reward_drives_extra_charging`
+(`VEN/src/controller/milp_planner/tests/modes.rs`) — two otherwise-identical MustRun sessions
+differing only in the comfort curve's fill=1.0 price (0.50 vs. 0.0 against a flat 0.20 tariff).
+Confirmed red first: both sessions charged exactly the 6 kWh core regardless of the high-value
+curve, reproducing the bug precisely (`got 5.999999999999998` for the high-price case, expected
+`> 6.5`). Green after the fix.
+
+**Verification**: full `ev_milp` unit tests (9/9), full `controller::milp_planner` test module
+(121/121, including all pre-existing comfort-curve and mode tests — the `soft_comfort_curve`
+test's own explanatory comment already flagged R-18 by name and had deliberately pinned its
+fill=1.0 price to 0.0 to avoid confounding with this exact bug, so it was unaffected by the fix),
+full `ven-app` suite (957/957), `cargo fmt --check` and `clippy --all-targets --all-features -D
+warnings` clean.
+
+**Bookkeeping**: R-18 removed from `docs/reference/TECHNICAL_DEBTS.md`. `docs/architecture/
+ven_milp_planner.md` §10 updated — the "Known limitation" paragraph rewritten to describe the
+fix instead of the gap, regression-coverage list extended. `docs/plans/strategic_roadmap.md`'s
+SG-5 row corrected from "Mostly done" (BL-34 open) to "Done" (BL-34 was already shipped; R-18
+now fixed too) — this also corrected the stale BL-34 listing itself, which was the original
+trigger for investigating this item.
+

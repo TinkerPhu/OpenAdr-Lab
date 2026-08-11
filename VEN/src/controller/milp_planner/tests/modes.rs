@@ -408,12 +408,13 @@ fn test_mode_asap_free_still_gated_to_free_energy() {
 // purely by whether v_core_eur (= e_core_kwh * curve.value_at_fill(0.0))
 // outweighs the tariff cost of charging that energy. This is the mechanism
 // that actually drives allocation — the parallel `e_ev_extra`/fill=1.0 reward
-// is a documented no-op in this branch — tracked as R-18 in
-// docs/reference/TECHNICAL_DEBTS.md: `e_ev_extra` is only bounded *above* by
-// `e_extra_max_kwh * z_ev_core`, nothing lower-bounds it by real charged
-// power, so the solver "banks" that reward without moving p_ev. Not fixed
-// here: R-18 is a pre-existing structural limitation, out of scope for this
-// change (session-driven reward *source*, not reward *mechanism*).
+// used to be a documented no-op in this branch, tracked as R-18 in
+// docs/reference/TECHNICAL_DEBTS.md: `e_ev_extra` was only bounded *above* by
+// `e_extra_max_kwh * z_ev_core`, nothing lower-bounded it by real charged
+// power, so the solver "banked" that reward without moving p_ev. Fixed by
+// coupling `ev_energy == e_core_kwh * z_ev_core + e_ev_extra` (equality, not
+// just an upper bound) in `EvMilpContext::constraints` — see
+// `test_by_deadline_hard_extra_reward_drives_extra_charging` below.
 
 /// Two BY_DEADLINE/soft_deadline sessions, identical except for their comfort
 /// curve's fill=0.0 price: only the session whose curve values core energy
@@ -502,5 +503,55 @@ fn test_by_deadline_soft_no_curve_override_uses_default_reward() {
     assert!(
         (5.9..=6.5).contains(&charged),
         "default curve commits to ~core energy, got {charged}"
+    );
+}
+
+/// R-18 fix: BY_DEADLINE/hard-deadline (MustRun) always charges the core
+/// energy regardless of the curve, so this isolates the `e_ev_extra`/fill=1.0
+/// reward specifically. Two sessions, identical except the curve's fill=1.0
+/// price: only the session valuing extra energy above the flat tariff
+/// actually charges beyond core.
+#[test]
+fn test_by_deadline_hard_extra_reward_drives_extra_charging() {
+    let now = fixed_now();
+    let profile = ev_only_profile();
+    let mut sim = make_snap_from_profile(&profile);
+    set_ev_plugged(&mut sim, true);
+    let tariffs = make_tariffs(0.20, 0.08, 300.0); // flat 0.20, no PV
+
+    let curve = |extra_price: f64| {
+        vec![
+            crate::entities::asset::ComfortRate {
+                fill: 0.0,
+                max_marginal_price: 0.0,
+                max_marginal_co2: 0.0,
+            },
+            crate::entities::asset::ComfortRate {
+                fill: 1.0,
+                max_marginal_price: extra_price,
+                max_marginal_co2: 0.0,
+            },
+        ]
+    };
+
+    let mut high = ev_session_with_mode(now, UserRequestMode::ByDeadline);
+    high.soft_deadline = false; // MustRun: core (6 kWh) is always charged
+    high.comfort_rates = curve(0.50); // well above the 0.20 tariff — worth topping off
+    let plan_high = solve_with_session(&profile, &sim, &tariffs, now, &high);
+    let charged_high: f64 = plan_ev_kw(&plan_high).iter().map(|p| p * 0.5).sum();
+
+    let mut low = ev_session_with_mode(now, UserRequestMode::ByDeadline);
+    low.soft_deadline = false;
+    low.comfort_rates = curve(0.0); // not worth the tariff cost — stays at core
+    let plan_low = solve_with_session(&profile, &sim, &tariffs, now, &low);
+    let charged_low: f64 = plan_ev_kw(&plan_low).iter().map(|p| p * 0.5).sum();
+
+    assert!(
+        charged_high > 6.5,
+        "high extra-price curve tops off beyond the 6 kWh core, got {charged_high}"
+    );
+    assert!(
+        (5.9..=6.1).contains(&charged_low),
+        "zero extra-price curve stays at the 6 kWh core, no free top-off, got {charged_low}"
     );
 }
