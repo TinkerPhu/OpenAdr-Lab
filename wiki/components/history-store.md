@@ -2,8 +2,8 @@
 title: History Store (VEN local persistence + VTN recorder)
 type: component
 created: 2026-07-10
-updated: 2026-07-10
-synced_commit: c5a1d03
+updated: 2026-08-09
+synced_commit: 329444a
 sources: [VEN/src/history_store/, VEN/src/controller/history_port.rs, VEN/src/entities/history.rs, VEN/src/tasks/history_sampler/, VEN/src/routes/hems/history.rs, VEN/ui/src/pages/History.tsx, VTN/bff/src/recorder.rs]
 tags: [history, sqlite, persistence, vtn, recorder, ports]
 ---
@@ -20,9 +20,9 @@ forecast/history from [[simulator]] ring buffers, never a true operational log.
 
 `HistoryPort` (`VEN/src/controller/history_port.rs`) is the domain-facing trait — following
 the same port discipline as `SimulatorPort`/`VtnPort`/`SolverPort` in
-[[ven-hexagonal-architecture]]: six `append_*` methods (ticks, grid samples, plan
-snapshots, events received, reports sent, ledger periods), six matching `query_*` methods,
-and `prune_before` for retention. All methods are **synchronous/blocking** — a deliberate
+[[ven-hexagonal-architecture]]: `append_*`/`query_*` method pairs for ticks, grid samples,
+events received, reports sent, and ledger periods, plus `prune_before` for retention. All
+methods are **synchronous/blocking** — a deliberate
 consequence of `rusqlite` not being async; callers on the async side (routes, tasks) go
 through `tokio::task::spawn_blocking`. `SqliteHistoryStore`
 (`VEN/src/history_store/mod.rs` + `schema.rs`) is the sole real implementation: bundled
@@ -58,11 +58,36 @@ Retention is a separate, disableable concern: `HistoryConfig { enabled, retentio
 
 ## Read path: history routes + VEN UI
 
-`GET /history/{ticks,grid,events,reports,plans}` (`VEN/src/routes/hems/history.rs`) share
+`GET /history/{ticks,grid,events,reports}` (`VEN/src/routes/hems/history.rs`) share
 one `resolve_range()` validator and a `history_range_route!` macro to avoid repeating
-query-param parsing five times. One Axum-specific gotcha: literal path segments must be
+query-param parsing. One Axum-specific gotcha: literal path segments must be
 registered before named-parameter routes with the same prefix, or the router never reaches
 the literal branch — `/history/ticks` has to precede `/history/:asset_id`-shaped routes.
+`GET /history/events` now returns real rows: `spawn_event_poll` (`tasks/poll_events/`) writes
+an `EventReceived` row for every newly-seen OpenADR event (R-64), whereas before this the
+route and the VEN UI's "Events received" panel were both live but permanently empty — no
+producer had ever been wired. `GET /history/plans`/`append_plan_snapshot` were removed (R-63):
+`PlanSnapshot` writes had been dead code end-to-end (nothing ever read the table back), so the
+route, the `HistoryPort` methods, and the entity were deleted together rather than kept as an
+unused surface.
+
+## Forecast accuracy tracking (schema v8)
+
+`forecast_accuracy_samples` persists how well the planner's own forecast held up against what
+actually happened, for the three assets whose power is forecast rather than user-commanded —
+PV, base_load, and site-residual. Every plan cycle, `services/forecast.rs::
+record_forecast_accuracy_samples` (called from `finish_plan_cycle`) writes a *near*
+(`plan.slots[1]`) and a *far* (`plan.slots.last()`) sample per tracked asset through
+`HistoryPort::append_forecast_samples`; `history_sampler`'s existing 1-minute tick flush then
+reconciles each open sample's `actual_kw`/`actual_at` once its `target_ts` has elapsed
+(`reconcile_forecast_actuals`). Both are best-effort, log-and-continue writes off the async
+runtime via `spawn_blocking`, and both default to a no-op on `HistoryPort` so a history-less
+test double keeps compiling without overriding them. `GET /history/forecast-accuracy?from=&
+to=&asset_id=&lead_kind=` serves the result; [[ven-ui]]'s History page overlays near (fine
+dotted)/far (coarse dashed) forecast lines on those three assets' `AssetTimelineChart` cells,
+via the same merged-array mechanism every multi-series chart in the UI is built on (see
+[[ven-ui]]'s chart-kit section). Full mechanism: `docs/architecture/VEN_ARCHITECTURE.md`
+§4.9a.
 
 `VEN/ui/src/pages/History.tsx` is a new page (TanStack Query hooks, `TextField
 type="date"` range picker — no new date-picker dependency) added to the router in

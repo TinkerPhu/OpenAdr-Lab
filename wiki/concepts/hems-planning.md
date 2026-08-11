@@ -2,8 +2,8 @@
 title: HEMS Planning Concepts
 type: concept
 created: 2026-07-04
-updated: 2026-07-31
-synced_commit: e9f5207
+updated: 2026-08-09
+synced_commit: 329444a
 sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems/, VEN/src/entities/device_session.rs, VEN/src/services/user_request.rs]
 tags: [hems, planning, sessions, domain]
 ---
@@ -58,13 +58,25 @@ sources reward coefficients for `ByDeadline`/`Asap` EV sessions and heater
 full-tier operation — see [[milp-planner]]'s comfort-curve section for the
 solver-side mechanics.
 
-**Session teardown closes the loop back onto the request.** Deleting an `EvSession`
-(`DELETE /ev-session`, `VEN/src/routes/hems/ev.rs`) does not just clear session state — it
-walks `UserRequest`s by `session_id` and transitions any still `Active` to `Completed`
-before the session is cleared (`docs/architecture/VEN_ARCHITECTURE.md` §4.7, `/ev-session` row).
-Only `Active` requests are touched; `Cancelled` ones and requests tied to a different
-session are left alone. Without this, a completed or manually-ended charge would leave
-its originating request stuck `Active` forever — a UI-visible dangling state.
+**Session teardown closes the loop back onto the request.** Clearing a device session no
+longer goes through per-device CRUD routes — BL-41 removed the direct-write `/ev-session`
+(POST/DELETE), `/heater-target`, and `/shiftable-loads` routes once the UI had fully moved to
+the unified `POST /user-requests` flow, which constructs the same underlying session objects
+(`services::user_request::UserRequestService`). Teardown is `state.cancel_request(id)`
+(`VEN/src/state/mod.rs`), called from `DELETE /user-requests/:id`
+(`routes/hems/sessions.rs::delete_request`): it clears the linked `EvSession`/
+`HeaterTarget`/`ShiftableLoad` and transitions the `UserRequest` itself, atomically, in one
+place — the older code split this across `EvSessionService::end`/`HvacService`/route-level
+logic (each now either deleted or reduced to a thin, unused sketch kept only as a decision
+record, `docs/BACKLOG.md` BL-23). `GET /ev-session` is the one CRUD-era route kept, read-only:
+a VTN-issued `CHARGE_STATE_SETPOINT` event still creates an `EvSession` directly
+(`tasks/poll_signals.rs`) with no linked `UserRequest`, so it would otherwise be invisible to
+`GET /user-requests`. `baseline_override`'s own `GET`/`POST`/`DELETE /baseline-override`
+routes are *not* part of this removal — investigation for BL-41 found `BaselineOverride` has
+no `/user-requests` equivalent at all (`CreateUserRequestBody`/`SessionType` don't model bulk
+per-slot forecast adjustment); it's a genuinely separate capability, split off as its own
+backlog item (BL-42) to give it a Devices-tab UI surface, since the backend route was already
+live and tested with none.
 
 ## Accounting
 
