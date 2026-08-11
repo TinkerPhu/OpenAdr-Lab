@@ -1,40 +1,40 @@
 ## 1. BASELINE report builder (backend, test-first)
 
-- [ ] 1.1 Write failing unit tests in `VEN/src/controller/reporter.rs` for a new
+- [x] 1.1 Write failing unit tests in `VEN/src/controller/reporter.rs` for a new
       `build_baseline_report_intervals` (or similarly named) function: given an obligation's
       requested interval grid and an `AssetHeuristics` map, returns one interval per
       requested slot with a `BASELINE` payload equal to the summed `sample_kw()` across all
       relevant assets (mirroring how `build_net_site_power_ts` sums assets for measurement
       reports) — confirm red (function doesn't exist).
-- [ ] 1.2 Implement `build_baseline_report_intervals`, confirm the tests from 1.1 go green.
-- [ ] 1.3 Add a `"BASELINE"` arm to `build_measurement_report_for_obligation`'s
+- [x] 1.2 Implement `build_baseline_report_intervals`, confirm the tests from 1.1 go green.
+- [x] 1.3 Add a `"BASELINE"` arm to `build_measurement_report_for_obligation`'s
       `payload_type` match, calling the new builder — new test: obligation with
       `payload_type: "BASELINE"` produces a report whose values match the heuristic, not
       `net_power_ts` (regression-shape test: construct a case where heuristic and measured
       power clearly differ, assert the report used the heuristic one).
-- [ ] 1.4 Add the quality-tag payload entry (`ForecastSource` variant name, e.g.
+- [x] 1.4 Add the quality-tag payload entry (`ForecastSource` variant name, e.g.
       `"HEURISTIC"`) to each BASELINE interval — new test asserting the tag is present with
       the expected value. Scope: BASELINE payloads only for this change (per design.md's
       resolved open question — not `USAGE_FORECAST`/capacity-reservation payloads, those are
       an easy follow-up once this pattern is proven).
-- [ ] 1.5 `cargo fmt`/`clippy --all-targets --all-features -D warnings`/full VEN Rust suite
+- [x] 1.5 `cargo fmt`/`clippy --all-targets --all-features -D warnings`/full VEN Rust suite
       green (via `wsl cargo test -p ven-app`, respecting `wsl_lock.sh` and the memory-budget
       rule).
 
 ## 2. Experiment KPI evaluation
 
-- [ ] 2.1 `experiments/kpi.py`: add `event_impact_kwh` computation — for each event window,
+- [x] 2.1 `experiments/kpi.py`: add `event_impact_kwh` computation — for each event window,
       sum `(baseline_kw − actual_kw) × interval_hours` from the recorder's archived
       `BASELINE` and `USAGE` rows (`report_type` column) for that event/window; `None` when
       no BASELINE rows exist for the window (per spec's "no BASELINE archived" scenario).
-- [ ] 2.2 Unit-test the new `kpi.py` logic (the file has no test harness today — add a small
+- [x] 2.2 Unit-test the new `kpi.py` logic (the file has no test harness today — add a small
       one, or a `__main__` self-check block matching the style of `scripts/personas.py`'s
       self-check, whichever fits the file better) covering both spec scenarios: BASELINE
       above actual, and no BASELINE archived.
 
 ## 3. BDD scenario
 
-- [ ] 3.1 Write a failing BDD scenario in `tests/features/` (new or existing report-related
+- [x] 3.1 Write a failing BDD scenario in `tests/features/` (new or existing report-related
       `.feature` file — check for one before creating a new file) exercising: an active event
       + a report obligation requesting `payloadType: "BASELINE"` → the recorder archives a
       BASELINE report whose value differs from the concurrently-archived USAGE report during

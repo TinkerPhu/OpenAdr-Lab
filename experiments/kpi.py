@@ -11,6 +11,8 @@ recorder CSVs. KPIs per VEN:
     event where import dropped >= 20% below the pre-event minute (rough
     signal->response measure; None when no constraining event in the run)
   - report_lag_s stats from recorder-reports_received.csv (SG-3 timeliness)
+  - event_impact_kwh (WP5.4): Σ(baseline − actual) over the run window, from archived
+    BASELINE vs. USAGE reports — absent when no BASELINE reports were archived
 
 Usage:
     python3 experiments/kpi.py --run experiments/results/<dir> [--baseline <s1 dir>]
@@ -21,6 +23,7 @@ import argparse
 import csv
 import json
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,6 +65,76 @@ def ven_kpis(db_path, t_from, t_to):
     }
 
 
+def _parse_iso8601_duration_hours(s):
+    """Minimal PT#H#M#S parser, mirroring VEN's parse_pt_duration_s. Unknown
+    shapes parse as 0."""
+    if not s or not s.startswith("PT"):
+        return 0.0
+    total_s = 0
+    num = ""
+    for c in s[2:]:
+        if c.isdigit():
+            num += c
+        else:
+            v = int(num) if num else 0
+            num = ""
+            if c == "H":
+                total_s += v * 3600
+            elif c == "M":
+                total_s += v * 60
+            elif c == "S":
+                total_s += v
+    return total_s / 3600.0
+
+
+def _report_energy_kwh(csv_path, t_from, t_to, ven_name, report_type):
+    """Sum a VEN's `report_type` report intervals (values in W) into kWh,
+    restricted to rows whose `received_at` falls in [t_from, t_to)."""
+    if not csv_path.exists():
+        return None
+    total_kwh = 0.0
+    found = False
+    with open(csv_path, encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            received = row.get("received_at", "")
+            try:
+                ts = datetime.fromisoformat(received.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                continue
+            if not (t_from <= ts < t_to):
+                continue
+            if row.get("ven_name") != ven_name:
+                continue
+            try:
+                payload = json.loads(row["payload_json"])
+            except (KeyError, ValueError):
+                continue
+            for resource in payload.get("resources", []):
+                for interval in resource.get("intervals", []):
+                    period = interval.get("intervalPeriod") or {}
+                    duration_h = _parse_iso8601_duration_hours(period.get("duration", ""))
+                    for p in interval.get("payloads", []):
+                        if p.get("type") != report_type:
+                            continue
+                        values = p.get("values") or []
+                        if not values or not isinstance(values[0], (int, float)):
+                            continue
+                        found = True
+                        total_kwh += (values[0] / 1000.0) * duration_h
+    return total_kwh if found else None
+
+
+def event_impact_kwh(csv_path, t_from, t_to, ven_name):
+    """WP5.4: Σ(baseline − actual) over the run window, from archived BASELINE
+    and USAGE reports. `None` when no BASELINE reports were archived for this
+    VEN in the window (nothing to compare against)."""
+    baseline_kwh = _report_energy_kwh(csv_path, t_from, t_to, ven_name, "BASELINE")
+    if baseline_kwh is None:
+        return None
+    usage_kwh = _report_energy_kwh(csv_path, t_from, t_to, ven_name, "USAGE") or 0.0
+    return round(baseline_kwh - usage_kwh, 4)
+
+
 def report_lag_stats(csv_path, t_from, t_to):
     """Only reports the recorder received during the run window count —
     the archive holds every report ever seen, including ancient ones."""
@@ -94,7 +167,74 @@ def report_lag_stats(csv_path, t_from, t_to):
     }
 
 
+def _self_check():
+    """No pytest harness for experiments/ scripts today — self-check in the
+    style of scripts/personas.py's `if __name__ == "__main__"` block. Run via
+    `python3 experiments/kpi.py --self-check`."""
+    import tempfile
+
+    t0 = datetime(2026, 1, 1, 10, 0, 0, tzinfo=timezone.utc).timestamp()
+    t_from, t_to = int(t0), int(t0) + 1800  # 30-minute window
+
+    def row(report_type, received_offset_s, payload_type, value_w, duration):
+        received = datetime.fromtimestamp(
+            t0 + received_offset_s, tz=timezone.utc
+        ).isoformat()
+        payload = {
+            "resources": [
+                {
+                    "intervals": [
+                        {
+                            "intervalPeriod": {"duration": duration},
+                            "payloads": [{"type": payload_type, "values": [value_w]}],
+                        }
+                    ]
+                }
+            ]
+        }
+        return {
+            "report_id": "r1",
+            "modification_date_time": "2026-01-01T10:00:00Z",
+            "received_at": received,
+            "ven_name": "ven-1",
+            "report_type": report_type,
+            "payload_json": json.dumps(payload),
+            "report_lag_s": "",
+        }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        csv_path = Path(tmp) / "recorder-reports_received.csv"
+
+        # Scenario 1: BASELINE (2 kW, PT15M -> 0.5 kWh) above USAGE (1 kW, PT15M
+        # -> 0.25 kWh) -> positive event_impact_kwh = 0.25.
+        rows = [
+            row("baseline-report", 60, "BASELINE", 2000.0, "PT15M"),
+            row("usage-report", 90, "USAGE", 1000.0, "PT15M"),
+        ]
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+        impact = event_impact_kwh(csv_path, t_from, t_to, "ven-1")
+        assert impact == 0.25, f"expected 0.25, got {impact}"
+
+        # Scenario 2: no BASELINE rows archived -> None, not a computed value.
+        rows2 = [row("usage-report", 90, "USAGE", 1000.0, "PT15M")]
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows2[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows2)
+        impact2 = event_impact_kwh(csv_path, t_from, t_to, "ven-1")
+        assert impact2 is None, f"expected None (no BASELINE archived), got {impact2}"
+
+    print("kpi.py self-check OK: event_impact_kwh")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--self-check":
+        _self_check()
+        return
+
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--run", required=True)
     p.add_argument("--baseline", help="an s1_flat run dir for energy_shifted_kwh")
@@ -130,6 +270,11 @@ def main():
             continue
         if ven in baseline:
             k["energy_shifted_kwh"] = round(baseline[ven] - k["energy_import_kwh"], 4)
+        impact = event_impact_kwh(
+            run_dir / "recorder-reports_received.csv", t_from, t_to, ven
+        )
+        if impact is not None:
+            k["event_impact_kwh"] = impact
         out["vens"][ven] = k
 
     out["report_timeliness"] = report_lag_stats(

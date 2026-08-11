@@ -2,10 +2,10 @@
 title: Heuristics Pipeline (learned baselines)
 type: component
 created: 2026-07-16
-updated: 2026-08-04
-synced_commit: 093fbd1
-sources: [VEN/src/services/heuristics.rs, VEN/src/tasks/heuristics_job/mod.rs, VEN/src/controller/residual.rs, VEN/src/entities/design_vocabulary.rs, VEN/src/services/forecast.rs, VEN/src/controller/milp_planner/inputs.rs, VEN/src/routes/debug.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/mod.rs, VEN/src/tasks/history_sampler/mod.rs, docs/architecture/real_measurement_mqtt.md, docs/history/project_journal.md]
-tags: [heuristics, forecasting, baseline, phase-5]
+updated: 2026-08-11
+synced_commit: 5547bc7
+sources: [VEN/src/services/heuristics.rs, VEN/src/tasks/heuristics_job/mod.rs, VEN/src/controller/residual.rs, VEN/src/entities/design_vocabulary.rs, VEN/src/services/forecast.rs, VEN/src/controller/milp_planner/inputs.rs, VEN/src/routes/debug.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/mod.rs, VEN/src/tasks/history_sampler/mod.rs, VEN/src/controller/report_intervals.rs, VEN/src/controller/reporter.rs, docs/architecture/real_measurement_mqtt.md, docs/history/project_journal.md]
+tags: [heuristics, forecasting, baseline, phase-5, wp5-4, baseline-reports]
 ---
 
 # Heuristics Pipeline (learned baselines)
@@ -84,6 +84,20 @@ to ~4 samples per weekday (limit recorded in TECHNICAL_DEBTS.md).
   the same sampling feeds the Controller tab's future-horizon lines in
   [[ven-ui]], which show real daily structure (coffee/lunch/dinner peaks,
   weekend brunch shift) once history is seeded.
+- **BASELINE reports** (WP5.4, `controller/report_intervals.rs::build_baseline_report_intervals`):
+  a VTN report obligation requesting `payloadType: "BASELINE"` gets each interval's value
+  from `AssetHeuristics::sample_kw` summed across assets — the counterfactual "what if this
+  event weren't happening" value, submitted alongside the concurrent `USAGE` measurement
+  report. Deliberately reuses the *same* event-blind sampling the planner and forecast
+  timeline already use rather than a fresh model: the heuristic never saw the event, so it
+  needs no adjustment to serve as the counterfactual. Each BASELINE interval also carries a
+  `DATA_QUALITY` payload tagged `"HEURISTIC"` — provenance, not a computed statistical
+  confidence (`AssetHeuristics` has no sample-count/variance fields to compute one from; a
+  real confidence model is a deliberate non-goal, tracked as a future BACKLOG item if ever
+  adopted). Downstream, `experiments/kpi.py`'s `event_impact_kwh` diffs archived BASELINE
+  vs. USAGE reports per VEN to quantify one event's actual impact in kWh — the piece that
+  upgrades SG-3 (report-usefulness evaluation, see [[experiment-harness]]) from directional
+  to M&V-grade.
 
 Verified end-to-end on Node1: ven-1's learned weekday bucket shows coffee
 (h8), lunch (h12) and dinner (h17–18) peaks while its weekend bucket drops the
@@ -104,3 +118,15 @@ Verified on ven-1: `GET /forecast`'s `base_load` entry already reports
 See [[real-measurement-mqtt]]'s "Indirect path into the forecast" section for the
 convergence timeline (EWMA half-life ~14 days, full window 42 days) and the caveat that a
 feed dropout silently re-mixes synthetic samples back in with no provenance tag to detect it.
+
+## Distinct from forecast-accuracy tracking
+
+This pipeline *produces* one of the forecasts ([[milp-planner]]'s base_load/site-residual
+input); it does not measure how good that forecast turned out to be. That's a separate,
+newer capability — persisted near/far predicted-vs-actual samples for PV, base_load, and
+site-residual, reconciled once each prediction's target time elapses — described in
+[[history-store]]'s "Forecast accuracy tracking" section and
+`docs/architecture/VEN_ARCHITECTURE.md` §4.9a. The two compose: forecast accuracy is exactly
+the tool that would let a future change verify whether this pipeline's learned profile is
+actually converging, rather than relying on the spot-checks in the "Verified end-to-end"
+paragraph above.

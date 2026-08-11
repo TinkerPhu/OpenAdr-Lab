@@ -22,3 +22,12 @@ Feature: Outbound flexibility and forecast reports (WP3.6 — BL-10, §8.8)
     Then the latest VEN-1 report for the event has multiple intervals
     And every interval of the latest report has a "USAGE_FORECAST" payload with a number value
     And every interval of the latest report has an intervalPeriod start
+
+  @wp5-4
+  Scenario: BASELINE descriptor yields an event-blind heuristic forecast report
+    Given I create a program named "baseline-report-test" and save its ID
+    And I create an event for the saved program with a reportDescriptor of type "BASELINE" and frequency 5 seconds
+    When I wait for VEN-1 to have at least 1 event
+    And I wait for VEN-1 to submit an obligation-driven report for the event
+    Then the latest VEN-1 report for the event has a "BASELINE" payload with a non-negative number value
+    And every interval of the latest report has a "DATA_QUALITY" payload with value "HEURISTIC"
