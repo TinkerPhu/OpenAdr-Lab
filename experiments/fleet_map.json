@@ -1,0 +1,18 @@
+{
+  "_comment": "Static host/port map for the full 13-VEN fleet (ven-1..3 on Node1, ven-4..13 on Node2). Orchestration (run_experiment.py) runs off-host, reaching every VEN over LAN for HTTP and over ssh/scp for sqlite snapshotting -- both host aliases (Node1, Node2) must be resolvable ssh targets from wherever run_experiment.py executes.",
+  "vens": {
+    "ven-1": {"host": "Node1", "lan_ip": "192.168.1.103", "port": 8211, "remote_data_root": "/srv/docker/openadr_lab/VEN/data"},
+    "ven-2": {"host": "Node1", "lan_ip": "192.168.1.103", "port": 8212, "remote_data_root": "/srv/docker/openadr_lab/VEN/data"},
+    "ven-3": {"host": "Node1", "lan_ip": "192.168.1.103", "port": 8213, "remote_data_root": "/srv/docker/openadr_lab/VEN/data"},
+    "ven-4": {"host": "Node2", "lan_ip": "192.168.1.104", "port": 8211, "remote_data_root": "/srv/docker/openadr_lab/VEN/scale_out/node2/data"},
+    "ven-5": {"host": "Node2", "lan_ip": "192.168.1.104", "port": 8215, "remote_data_root": "/srv/docker/openadr_lab/VEN/scale_out/node2/data"},
+    "ven-6": {"host": "Node2", "lan_ip": "192.168.1.104", "port": 8216, "remote_data_root": "/srv/docker/openadr_lab/VEN/scale_out/node2/data"},
+    "ven-7": {"host": "Node2", "lan_ip": "192.168.1.104", "port": 8217, "remote_data_root": "/srv/docker/openadr_lab/VEN/scale_out/node2/data"},
+    "ven-8": {"host": "Node2", "lan_ip": "192.168.1.104", "port": 8218, "remote_data_root": "/srv/docker/openadr_lab/VEN/scale_out/node2/data"},
+    "ven-9": {"host": "Node2", "lan_ip": "192.168.1.104", "port": 8219, "remote_data_root": "/srv/docker/openadr_lab/VEN/scale_out/node2/data"},
+    "ven-10": {"host": "Node2", "lan_ip": "192.168.1.104", "port": 8220, "remote_data_root": "/srv/docker/openadr_lab/VEN/scale_out/node2/data"},
+    "ven-11": {"host": "Node2", "lan_ip": "192.168.1.104", "port": 8221, "remote_data_root": "/srv/docker/openadr_lab/VEN/scale_out/node2/data"},
+    "ven-12": {"host": "Node2", "lan_ip": "192.168.1.104", "port": 8222, "remote_data_root": "/srv/docker/openadr_lab/VEN/scale_out/node2/data"},
+    "ven-13": {"host": "Node2", "lan_ip": "192.168.1.104", "port": 8223, "remote_data_root": "/srv/docker/openadr_lab/VEN/scale_out/node2/data"}
+  }
+}

@@ -21,6 +21,7 @@ vtn-db container).
 
 import argparse
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -95,31 +96,124 @@ def build_event(program_id, action, start):
     }
 
 
-def snapshot(out_dir, vens, pg_container, ven_data_root):
-    """Copy VEN sqlite stores + dump lab_recorder tables to CSV."""
+def _snapshot_local(out_dir, ven, ven_data_root):
+    src = Path(ven_data_root) / ven / "history.sqlite"
+    if not src.exists():
+        print(f"WARN: no history store at {src}")
+        return
+    # WAL mode: recent rows live in the -wal sidecar until the daily
+    # prune checkpoint — copy all three files so the snapshot opens
+    # with the un-checkpointed data visible.
+    for suffix in ("", "-wal", "-shm"):
+        side = Path(str(src) + suffix)
+        if side.exists():
+            shutil.copy2(side, out_dir / f"{ven}-history.sqlite{suffix}")
+
+
+def _snapshot_remote(out_dir, ven, ssh_host, remote_data_root):
+    """Same-shape copy as `_snapshot_local` but the VEN's data dir lives on a
+    different docker host (Node2) — pull the sqlite files over `ssh`/`scp`
+    instead of a local filesystem copy. Node2 has no Postgres of its own, so
+    only history.sqlite is remote; recorder CSVs always come from Node1's DB."""
+    remote_src = f"{remote_data_root}/{ven}/history.sqlite"
+    for suffix in ("", "-wal", "-shm"):
+        remote_path = f"{remote_src}{suffix}"
+        dest = out_dir / f"{ven}-history.sqlite{suffix}"
+        res = subprocess.run(
+            ["scp", "-q", f"{ssh_host}:{remote_path}", str(dest)],
+            capture_output=True, text=True, timeout=30,
+        )
+        if res.returncode != 0:
+            if suffix == "":
+                print(f"WARN: no history store at {ssh_host}:{remote_path} ({res.stderr.strip()})")
+            # -wal/-shm sidecars are optional (may not exist if nothing pending checkpoint)
+
+
+def snapshot(out_dir, vens, pg_container, ven_data_root, fleet_map=None, pg_host="local"):
+    """Copy VEN sqlite stores + dump lab_recorder tables to CSV.
+
+    `fleet_map` (parsed experiments/fleet_map.json's "vens" dict), when given,
+    routes each VEN to a local filesystem copy or a remote scp pull depending
+    on its "host" entry. Without it, every VEN is assumed local (unchanged
+    Node1-only behavior). `pg_host`: "local" runs `docker exec` directly
+    (script running on the VTN's own host); any other value is an ssh alias
+    to run it on instead (script running off-host, e.g. from a workstation
+    that can reach both docker hosts but isn't one of them)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     for ven in vens:
-        src = Path(ven_data_root) / ven / "history.sqlite"
-        if src.exists():
-            # WAL mode: recent rows live in the -wal sidecar until the daily
-            # prune checkpoint — copy all three files so the snapshot opens
-            # with the un-checkpointed data visible.
-            for suffix in ("", "-wal", "-shm"):
-                side = Path(str(src) + suffix)
-                if side.exists():
-                    shutil.copy2(side, out_dir / f"{ven}-history.sqlite{suffix}")
+        entry = (fleet_map or {}).get(ven, {"host": "local"})
+        if entry["host"] == "local":
+            _snapshot_local(out_dir, ven, ven_data_root)
         else:
-            print(f"WARN: no history store at {src}")
+            _snapshot_remote(out_dir, ven, entry["host"], entry["remote_data_root"])
     for table in ("reports_received", "events_published", "ven_snapshots"):
-        cmd = [
-            "docker", "exec", pg_container, "psql", "-U", "openadr", "openadr",
-            "-c", f"COPY (SELECT * FROM lab_recorder.{table}) TO STDOUT WITH CSV HEADER",
-        ]
+        copy_sql = f"COPY (SELECT * FROM lab_recorder.{table}) TO STDOUT WITH CSV HEADER"
+        if pg_host == "local":
+            cmd = ["docker", "exec", pg_container, "psql", "-U", "openadr", "openadr", "-c", copy_sql]
+        else:
+            # ssh joins trailing argv with spaces before the remote shell parses it,
+            # so the -c argument must be pre-quoted as a single shell token.
+            remote_cmd = f"docker exec {pg_container} psql -U openadr openadr -c {shlex.quote(copy_sql)}"
+            cmd = ["ssh", pg_host, remote_cmd]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if res.returncode == 0:
             (out_dir / f"recorder-{table}.csv").write_text(res.stdout, encoding="utf-8")
         else:
             print(f"WARN: recorder dump {table} failed: {res.stderr.strip()}")
+
+
+def _ven_base_url(entry):
+    if entry["host"] == "local":
+        return f"http://127.0.0.1:{entry['port']}"
+    return f"http://{entry['lan_ip']}:{entry['port']}"
+
+
+def poll_plan_diagnostics(out_dir, vens, fleet_map, interval_s, stop_event):
+    """Background poll loop (runs for the scenario's duration): every
+    `interval_s`, GET /plan on each VEN and append the fields useful for
+    judging plan *quality* (not just grid-power KPIs) as JSONL —
+    solve_status, warnings, cost_breakdown (incl. c_violations_eur),
+    objective/friction, penalty_rules_active. One file per VEN so kpi.py can
+    summarize per VEN like it does for grid_samples.
+
+    Known gap (kept out of scope here, see BACKLOG.md): solver_ms only exists
+    on the `plan_ready` SSE event (`GET /plan/events`), not on `GET /plan`
+    itself — a persistent per-VEN SSE listener would be needed to capture it,
+    which is more moving parts than an unattended multi-hour poll loop
+    should carry. Polling /plan is enough to see solve_status/warning
+    trends; solver timing is deferred.
+    """
+    handles = {ven: open(out_dir / f"{ven}-plan-diagnostics.jsonl", "a", encoding="utf-8") for ven in vens}
+    try:
+        while not stop_event.is_set():
+            for ven in vens:
+                entry = fleet_map.get(ven, {"host": "local", "port": None})
+                if entry.get("port") is None:
+                    continue
+                base = _ven_base_url(entry)
+                try:
+                    r = requests.get(f"{base}/plan", timeout=10)
+                    r.raise_for_status()
+                    plan = r.json()
+                except requests.RequestException as e:
+                    record = {"ts": iso(datetime.now(timezone.utc)), "ven": ven, "error": str(e)}
+                else:
+                    record = {
+                        "ts": iso(datetime.now(timezone.utc)),
+                        "ven": ven,
+                        "solve_status": plan.get("solve_status"),
+                        "warnings": plan.get("warnings"),
+                        "cost_breakdown": plan.get("cost_breakdown"),
+                        "objective_eur": plan.get("objective_eur"),
+                        "friction_eur": plan.get("friction_eur"),
+                        "penalty_rules_active": plan.get("penalty_rules_active"),
+                    }
+                handles[ven].write(json.dumps(record) + "\n")
+                handles[ven].flush()
+            stop_event.wait(interval_s)
+    finally:
+        for f in handles.values():
+            f.close()
 
 
 def _persona_departure(hour_utc, now):
@@ -198,6 +292,11 @@ def main():
     p.add_argument("--vens", default="ven-1,ven-2,ven-3", help="comma-separated VEN data dirs to snapshot")
     p.add_argument("--ven-data-root", default=str(REPO_ROOT / "VEN" / "data"))
     p.add_argument("--pg-container", default="vtn-db-1")
+    p.add_argument(
+        "--pg-host", default="local",
+        help="ssh alias to run the recorder-DB dump on, when this script itself runs "
+             "off the VTN's host (e.g. \"Node1\"); \"local\" runs docker exec directly",
+    )
     p.add_argument("--out", default=str(REPO_ROOT / "experiments" / "results"))
     p.add_argument(
         "--personas",
@@ -207,7 +306,19 @@ def main():
     )
     p.add_argument("--fleet-manifest", default=str(REPO_ROOT / "VEN" / "fleet" / "manifest.json"))
     p.add_argument("--fleet-host", default="localhost")
+    p.add_argument(
+        "--fleet-map",
+        help="experiments/fleet_map.json — host/port for each VEN. When given, --vens "
+             "defaults to every VEN in the map (all 13) instead of ven-1,ven-2,ven-3, "
+             "remote (Node2) VENs are snapshotted over scp instead of local file copy, "
+             "and GET /plan is polled on every VEN for the run's duration.",
+    )
+    p.add_argument("--plan-poll-interval-s", type=int, default=60)
     args = p.parse_args()
+
+    fleet_map = None
+    if args.fleet_map:
+        fleet_map = json.loads(Path(args.fleet_map).read_text(encoding="utf-8"))["vens"]
 
     scenario = yaml.safe_load(Path(args.scenario).read_text(encoding="utf-8"))
     name = scenario["name"]
@@ -217,10 +328,27 @@ def main():
     print(f"=== scenario {name}: {scenario.get('description', '')} ({duration_min} min) ===")
 
     persona_teardown = None
-    ven_names = args.vens.split(",")
+    vens_explicit = "--vens" in sys.argv
+    if fleet_map and not vens_explicit:
+        ven_names = sorted(fleet_map.keys(), key=lambda v: int(v.split("-")[1]))
+    else:
+        ven_names = args.vens.split(",")
     if args.personas:
         fleet_names, persona_teardown = setup_persona_sessions(args.fleet_manifest, args.fleet_host)
         ven_names = sorted(set(ven_names) | set(fleet_names))
+
+    diag_stop = None
+    diag_thread = None
+    if fleet_map:
+        import threading
+        run_dir.mkdir(parents=True, exist_ok=True)
+        diag_stop = threading.Event()
+        diag_thread = threading.Thread(
+            target=poll_plan_diagnostics,
+            args=(run_dir, ven_names, fleet_map, args.plan_poll_interval_s, diag_stop),
+            daemon=True,
+        )
+        diag_thread.start()
 
     token = get_token(args.vtn_url, "any-business", "any-business")
     r = requests.post(
@@ -258,8 +386,11 @@ def main():
         requests.delete(f"{args.vtn_url}/programs/{program_id}", headers=auth(token), timeout=10)
         if persona_teardown:
             persona_teardown()
+        if diag_stop:
+            diag_stop.set()
+            diag_thread.join(timeout=args.plan_poll_interval_s + 10)
 
-    snapshot(run_dir, ven_names, args.pg_container, args.ven_data_root)
+    snapshot(run_dir, ven_names, args.pg_container, args.ven_data_root, fleet_map, args.pg_host)
     meta = {
         "scenario": name,
         "started_at": iso(t0),
