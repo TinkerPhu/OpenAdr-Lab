@@ -969,3 +969,41 @@ outes/sim.rs causes a T1+T2 double-solve race:
   just inspecting static props — same class of technique as the existing `ReferenceArea`/
   `XAxis` prop-capturing mocks, extended to be interactive where the component under test
   needs it to be.
+
+## Reactive-Correction Notifications & RingBuffer<T> (BL-37 + R-46, 2026-08-11)
+
+- **A `len() >= capacity` eviction guard is silently wrong at `capacity == 0`, and only a
+  dedicated zero-capacity test catches it.** `RingBuffer<T>::push`'s first draft evicted when
+  `self.items.len() >= self.capacity` before pushing — correct for capacity ≥ 1, but at
+  capacity 0 that's `0 >= 0` (true), so `pop_front()` on an already-empty deque is a no-op and
+  the following `push_back` still lands, leaving the buffer holding 1 item instead of 0.
+  Nothing about the three real call sites (all capacity ≥ 100) would ever have exercised this,
+  since a generic reusable type invites capacities its current callers don't use. The
+  capacity-0 test (part of the task list's required test set, written before the
+  implementation per test-first) failed immediately and unambiguously
+  (`left: 1, right: 0`) — general-purpose infrastructure code needs its edge cases tested
+  even when no current caller hits them, because the whole point of extracting it is that a
+  *future* caller will.
+- **Edge-triggered notification producers should key on the boolean shape of a transition
+  (`is_some()`), not on full value equality, when the underlying condition can hand off
+  between values without ever going false.** The deviation arbiter can hand a sustained
+  correction from one lever to another (e.g. battery hits its SoC bound, `heater_pause` takes
+  over) without the correction itself ever clearing — `Some("battery") -> Some("heater_pause")`
+  is a lever handoff, not an edge, and a notification producer keyed on `Option<String>`
+  equality would wrongly treat it as clear-then-reactivate (two notifications, one spurious).
+  `notify_correction_edge` compares `prev.is_some()` vs `current.is_some()` instead. The
+  corollary: once a producer is keyed this coarsely, its message text must not embed the
+  specific value that can change without an edge (no `active_lever` in the notification body) —
+  otherwise a handoff leaves an already-emitted notification's text stale. Detail that *does*
+  vary per-tick stays on a separate, already-existing richer surface (`GET
+  /arbiter-diagnostics`) rather than being force-fit into the edge-triggered message.
+- **A step definition can sit unused in a steps file for a long time and still be exactly the
+  right one to reuse later.** `I inject base_load_kw {kw} with alpha {alpha} via sim inject`
+  and `within {N} seconds the VEN sim battery power_kw is less than {threshold}`
+  (`dispatcher_steps.py`, "Layer 1 — reactive battery correction" section) were written for a
+  since-twice-removed deviation-absorber feature and referenced by zero `.feature` files for
+  weeks — but the HTTP mechanics they wrap (`/sim/inject`, `/sim`) are feature-agnostic, so the
+  first step was still exactly right for exercising the current arbiter. Grep the steps
+  directory for existing step text before writing a new one with the same intent, even (or
+  especially) if no `.feature` file currently references it — an orphaned step can mean "not
+  yet reused," not "dead and safe to duplicate."

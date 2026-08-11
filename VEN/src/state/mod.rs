@@ -128,8 +128,13 @@ pub struct AppState {
     pub ctrl_sim: Arc<RwLock<ControllerSimState>>,
     pub hems: Arc<RwLock<HemsState>>,
     /// WP4.3 (BL-20): bounded ring of user-facing notifications, newest last.
-    pub notifications:
-        Arc<RwLock<std::collections::VecDeque<crate::entities::notification::UserNotification>>>,
+    pub notifications: Arc<
+        RwLock<
+            crate::entities::ring_buffer::RingBuffer<
+                crate::entities::notification::UserNotification,
+            >,
+        >,
+    >,
     /// WP4.2 (BL-19): per-asset user comfort-curve overrides (hot map;
     /// persisted through SettingsPort, re-seeded at startup).
     pub comfort_overrides:
@@ -145,12 +150,14 @@ pub struct AppState {
     pub task_status: Arc<RwLock<std::collections::HashMap<String, TaskStatus>>>,
     /// WP-T4: VEN-operational event log — deliberately separate from
     /// `notifications` (see `state/event_log.rs`).
-    pub event_log: Arc<RwLock<std::collections::VecDeque<EventLogEntry>>>,
+    pub event_log: Arc<RwLock<crate::entities::ring_buffer::RingBuffer<EventLogEntry>>>,
     pub event_log_tx: tokio::sync::broadcast::Sender<EventLogEntry>,
     /// WP-T5 (G-5): bounded ring of report submission outcomes, newest last.
     pub report_submissions: Arc<
         RwLock<
-            std::collections::VecDeque<crate::entities::report_submission::ReportSubmissionRecord>,
+            crate::entities::ring_buffer::RingBuffer<
+                crate::entities::report_submission::ReportSubmissionRecord,
+            >,
         >,
     >,
 }
@@ -188,14 +195,22 @@ impl AppState {
                 },
                 ..HemsState::default()
             })),
-            notifications: Arc::new(RwLock::new(std::collections::VecDeque::new())),
+            notifications: Arc::new(RwLock::new(crate::entities::ring_buffer::RingBuffer::new(
+                NOTIFICATION_RING_CAP,
+            ))),
             comfort_overrides: Arc::new(RwLock::new(std::collections::HashMap::new())),
             vtn_connection: Arc::new(RwLock::new(VtnConnectionStatus::default())),
             storage_ok: Arc::new(RwLock::new(true)),
             task_status: Arc::new(RwLock::new(std::collections::HashMap::new())),
-            event_log: Arc::new(RwLock::new(std::collections::VecDeque::new())),
+            event_log: Arc::new(RwLock::new(crate::entities::ring_buffer::RingBuffer::new(
+                event_log::EVENT_LOG_RING_CAP,
+            ))),
             event_log_tx: tokio::sync::broadcast::channel(64).0,
-            report_submissions: Arc::new(RwLock::new(std::collections::VecDeque::new())),
+            report_submissions: Arc::new(RwLock::new(
+                crate::entities::ring_buffer::RingBuffer::new(
+                    report_submissions::REPORT_SUBMISSION_RING_CAP,
+                ),
+            )),
         }
     }
 
@@ -226,11 +241,7 @@ impl AppState {
 
     /// WP4.3: append a notification, evicting the oldest past the ring cap.
     pub async fn push_notification(&self, n: crate::entities::notification::UserNotification) {
-        let mut ring = self.notifications.write().await;
-        if ring.len() >= NOTIFICATION_RING_CAP {
-            ring.pop_front();
-        }
-        ring.push_back(n);
+        self.notifications.write().await.push(n);
     }
 
     /// 030 (notification-dedup): find the newest ring entry carrying this

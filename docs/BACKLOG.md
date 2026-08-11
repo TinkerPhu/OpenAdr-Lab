@@ -39,7 +39,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 | [BL-42](#bl-42-baseline-override-needs-a-devices-tab-ui-surface) | Direct per-slot baseline-load-forecast override, already live/tested on the backend, gets a real UI control on the Devices tab | Medium | M | Low — backend already proven, UI-only addition |
 | [BL-43](#bl-43-siteflexibilityenvelope--flexibility-headroom-diagram) | A live "how much could the VEN flex right now" band on the Controller/History grid-power chart — currently a dead endpoint with zero UI | Medium | M | Low — needs new history retention for `up_kw`/`down_kw` plus a visible grid-power line to anchor the band to |
 | [BL-39](#bl-39-per-session-accumulated-cost-accounting-real-budget-bar) | Budget bar on the session board shows real money spent so far instead of a plan-time estimate | Medium | M | Medium — new accounting invariant in monitor/ledger or history-store, session attribution |
-| [BL-37](#bl-37-reactive-correction-events-into-the-notification-feed-sse-blind-spot) | Learns about reactive battery corrections even when not watching the Planner tab (today they're invisible elsewhere) | Medium | S | Low — one producer on the existing notification path |
 | [BL-18](#bl-18-assetflexibility--real-time-per-asset-flexibility-snapshot) | A live "how much can this device flex right now" widget, per asset instead of whole-site | Low-Medium | M (scope TBD) | Low — but needs a design decision (superseded by `FlexibilityEnvelope`?) before scoping |
 | [BL-38](#bl-38-planner-tab-layout--userdiagnostic-split-and-matrix-slottrace-linking) | Planner tab reads cleanly for operators (user zone on top) and debugs faster (click a slot → see its trace) | Low-Medium | S (layout) / M (slot→trace) | Low — UI-only |
 | [BL-35](#bl-35-notification-producers-for-tier-fallback--deadline-at-risk--packet-abandoned) | Gets warned *before* a tier fallback / missed deadline / abandoned session, not after | Low | S (once BL-09 lands) | Low — blocked on BL-09's tier machinery existing |
@@ -174,16 +173,6 @@ effort/risk — mirroring each item's own Gain field below (High/Medium/Low/None
 **Gain:** Low — incremental notification coverage, and blocked on that machinery existing first.
 **Complexity:** Small once the producing machinery exists.
 **Verify:** Test per producer: the triggering condition emits exactly one notification of the expected severity.
-
----
-
-### BL-37: Reactive-correction events into the notification feed (SSE blind spot)
-**Req:** `VEN/ui/src/pages/Planner.tsx` (`usePlannerEvents`, CorrectionBanner); `services/notify.rs`; wiki `queries/planner-tab-purpose.md`
-**Problem:** `usePlannerEvents` subscribes to the planner SSE stream only while the Planner page is mounted, so a Layer-1 reactive battery correction firing while the user is on any other tab is invisible — the CorrectionBanner never renders and no durable record reaches the user.
-**Fix:** Emit `correction_active`/`correction_cleared` through the existing backend `Notifier` (ring + SSE + persistence, stable dedup text), so the global NotificationsBell carries it on every tab; the Planner-tab banner remains as the richer live view.
-**Gain:** Medium — closes a real trust/visibility gap (a reactive correction firing while the user isn't on the Planner tab is currently invisible) for a small implementation cost.
-**Complexity:** Small — one edge-triggered producer on an existing signal, following the established producer pattern.
-**Verify:** Test: a sustained deviation triggering a correction emits exactly one notification of severity info/warning; clearing emits at most one follow-up; no duplicates while the correction stays active.
 
 ---
 

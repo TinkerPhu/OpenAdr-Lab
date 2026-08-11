@@ -37,13 +37,7 @@ impl AppState {
             category: category.to_string(),
             message: message.into(),
         };
-        {
-            let mut ring = self.event_log.write().await;
-            ring.push_back(entry.clone());
-            while ring.len() > EVENT_LOG_RING_CAP {
-                ring.pop_front();
-            }
-        }
+        self.event_log.write().await.push(entry.clone());
         let _ = self.event_log_tx.send(entry);
     }
 

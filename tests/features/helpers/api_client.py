@@ -117,6 +117,15 @@ def ven_post(path, json=None):
     )
 
 
+def ven_put(path, json=None):
+    """PUT against the VEN (no auth required)."""
+    return requests.put(
+        f"{VEN_BASE_URL}{path}",
+        json=json,
+        timeout=HTTP_TIMEOUT,
+    )
+
+
 def ven_delete(path):
     """DELETE against the VEN (no auth required)."""
     return requests.delete(

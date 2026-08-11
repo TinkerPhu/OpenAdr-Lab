@@ -16,11 +16,7 @@ pub const REPORT_SUBMISSION_RING_CAP: usize = 100;
 impl AppState {
     /// Append a submission outcome, evicting the oldest entry past the cap.
     pub async fn record_report_submission(&self, record: ReportSubmissionRecord) {
-        let mut ring = self.report_submissions.write().await;
-        if ring.len() >= REPORT_SUBMISSION_RING_CAP {
-            ring.pop_front();
-        }
-        ring.push_back(record);
+        self.report_submissions.write().await.push(record);
     }
 
     /// All recorded submission outcomes, newest first.

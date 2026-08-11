@@ -37,6 +37,7 @@ pub(crate) fn spawn_sim_tick(
     pv_measurement_enabled: bool,
     base_load_measurement: Arc<dyn MeasurementPort>,
     base_load_measurement_enabled: bool,
+    notifier: crate::services::notify::Notifier,
 ) -> tokio::task::JoinHandle<()> {
     let tick_s = sim_params.tick_s;
     let persist_every_s = sim_params.persist_every_s;
@@ -77,6 +78,7 @@ pub(crate) fn spawn_sim_tick(
                 pv_measurement_enabled,
                 base_load_measurement.clone(),
                 base_load_measurement_enabled,
+                notifier.clone(),
             )
             .await;
 

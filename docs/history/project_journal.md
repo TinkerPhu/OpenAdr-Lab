@@ -8538,3 +8538,94 @@ SG-5 row corrected from "Mostly done" (BL-34 open) to "Done" (BL-34 was already 
 now fixed too) — this also corrected the stale BL-34 listing itself, which was the original
 trigger for investigating this item.
 
+## BL-37 + R-46: Reactive-correction notifications, and a shared `RingBuffer<T>` (2026-08-11)
+
+Implemented the bundled openspec change `reactive-correction-notifications` (`openspec/changes/
+reactive-correction-notifications/`), combining a new notification producer (BL-37) with an
+unrelated-but-convenient refactor (R-46) the same change already had to touch and re-test one of
+the three affected call sites for.
+
+**BL-37 — the gap**: a Layer-1 reactive correction (`controller::arbiter::reconcile`, gated by
+`deviation_arbiter_enabled`) had exactly one visible surface — the Planner tab's
+`CorrectionBanner` — which only renders while that page happens to be mounted. Investigation
+also found `CorrectionBanner` itself is dead UI: it listens for SSE event types
+(`correction_active`/`correction_cleared`) that no backend code has ever constructed (a
+DRIFT note already recorded in `wiki/components/deviation-arbiter.md`). So the visibility gap
+was total, not just tab-scoped, until this change.
+
+**The fix**: a new edge-triggered producer, `notify_correction_edge`
+(`VEN/src/services/notify.rs`), mirroring the existing `notify_outage_edge` pattern — fires
+exactly one notification when the arbiter's per-tick `active_lever` transitions `None -> Some`
+(severity `Warn`, dedup key `arbiter-correction-active`) and at most one follow-up on
+`Some -> None` (severity `Info`, `arbiter-correction-cleared`). Wired into
+`tasks::sim_tick::arbiter_glue::record_arbiter_outcome`, which already read the *previous*
+tick's `arbiter_active_lever` before overwriting it — the prev/current pair edge detection needs
+was available for free at that exact call site, no new state field required. `Notifier` is now
+threaded through `spawn_sim_tick` → `tick_once` → `record_arbiter_outcome` (same shape already
+used for `poll_events`/`poll_signals`/`planning`), passed from `main.rs`'s already-constructed
+`notifier`.
+
+**Key design point (lever-agnostic message)**: edge detection is keyed on `is_some()` transitions
+only, not on `Option<String>` equality — a lever handoff mid-correction (e.g. battery hands off
+to `heater_pause` because the battery hit a SoC bound) is `Some -> Some`, not an edge, and must
+not re-fire. Consequently the notification text is fixed/generic ("a Layer-1 lever is adjusting a
+setpoint...") rather than naming the active lever, so a handoff can never make an already-emitted
+message stale. Lever/asset/magnitude detail stays available on the existing richer diagnostics
+surface (`GET /arbiter-diagnostics`) — satisfying `ui-transparency` without duplicating detail
+into the notification feed. Verified with an integration-level test driving
+`record_arbiter_outcome` across `None -> Some(battery) -> Some(heater_pause) -> None` and
+asserting exactly two notifications land (one active, one cleared), not four.
+
+**R-46 — the refactor**: extracted `RingBuffer<T>` (`VEN/src/entities/ring_buffer.rs`, Domain
+ring, zero outward dependencies) wrapping a `VecDeque<T>` with a fixed capacity and one
+eviction-bearing `push`. Replaced the three near-identical hand-rolled push-and-evict-oldest
+implementations: `state/mod.rs`'s notification ring, `state/event_log.rs::record_event`, and
+`state/report_submissions.rs::record_report_submission`. Each site kept its own domain-specific
+read accessors (`notifications_since`, `event_log_snapshot`, `report_submissions`) — only the
+write path is shared, per the design's D4 decision. All three sites' pre-existing eviction-order
+unit tests were re-run unchanged and stayed green, confirming no observable behavior change.
+
+**Key learning — test-first caught a real bug**: `RingBuffer::push`'s first draft evicted
+whenever `len() >= capacity` before pushing, which is correct for capacity ≥ 1 but wrong at
+capacity 0 — `0 >= 0` is true, so `pop_front()` on an already-empty deque is a no-op and the
+subsequent `push_back` still lands, leaving the buffer holding 1 item instead of 0. The
+capacity-0 edge-case test (written first, per test-first) caught this immediately
+(`cargo test` failure: `left: 1, right: 0`) before it reached any of the three real call sites
+(none of which use capacity 0 today, but the type is meant to be general). Fixed with an explicit
+`if self.capacity == 0 { return; }` guard. This is exactly the scenario test-first is for — an
+edge case easy to reason about wrong once, and cheap to codify as a permanent regression test.
+
+**BDD coverage**: added `tests/features/reactive_correction_notifications.feature` (new file —
+the existing `ven_notifications.feature` is explicitly scoped to the `/notifications/history`
+HTTP contract, not producer behavior, so didn't fit). The scenario enables the arbiter (`PUT
+/arbiter-settings`), injects a sustained `base_load_kw` deviation via `/sim/inject`, polls `GET
+/notifications` for the "active" text, clears the inject, polls for the "cleared" follow-up, then
+disables the arbiter again so later scenarios start clean. Reused the existing generic `I wait
+for a user notification containing "{text}"` step (`request_modes_steps.py`) and the existing
+`I inject base_load_kw {kw} with alpha {alpha} via sim inject` step
+(`dispatcher_steps.py`) — both already present but, it turned out, never exercised by any feature
+file until now. Added the small number of missing steps: `ven_put` (`api_client.py`, VEN had no
+PUT helper yet), `the deviation arbiter is enabled`/`is disabled`, and `I clear the base_load_kw
+inject`.
+
+**Verification**: `cargo fmt --check` and `cargo clippy --all-targets --all-features -D
+warnings` clean; `scripts/audit_file_sizes.py` passes; all four architecture-invariant greps from
+`.claude/CLAUDE.md` clean; full `wsl cargo test -p ven-app` — 969/969 passed (up from 957, +12
+new tests: 4 `RingBuffer` unit tests, 7 `notify_correction_edge`/`correction_transition` tests,
+1 sim-tick integration test); `behave --dry-run` confirmed the new
+feature file's steps all resolve with no ambiguity. **Not verified**: the E2E BDD run itself
+(`run_all_tests.sh --e2e` on Node1/Node2) — this branch's work was required to stay uncommitted
+and unpushed per the task's own instructions, and Node1/Node2 are separate git clones that only
+see pushed commits, so there was no way to sync this branch to either remote docker host without
+violating that constraint. This is a real gap in this session's verification, not a false "all
+green" — flagged explicitly rather than assumed.
+
+**Bookkeeping**: BL-37 and R-46 removed from `docs/BACKLOG.md` and
+`docs/reference/TECHNICAL_DEBTS.md`. `docs/architecture/VEN_ARCHITECTURE.md` was checked but not
+edited — its §4.10 table already documents `GET /notifications` generically as "User-facing
+notifications: current, history, SSE stream," and none of the existing producers
+(`notify_outage_edge`, `notify_new_plan_warnings`) are individually named there either, so adding
+one more producer to that same generic route entry would be inconsistent with how the doc already
+treats this feed. `openspec/changes/reactive-correction-notifications/` deleted — implemented and
+unit/integration-tested (E2E pending per the note above).
+

@@ -53,6 +53,7 @@ mod tests {
             false,
             Arc::new(crate::controller::NoopMeasurementPort),
             false,
+            crate::services::notify::Notifier::new(None),
         )
         .await;
         // passes if no panic
@@ -108,6 +109,7 @@ mod tests {
             false,
             Arc::new(crate::controller::NoopMeasurementPort),
             false,
+            crate::services::notify::Notifier::new(None),
         )
         .await;
 
@@ -268,6 +270,7 @@ mod tests {
             false,
             Arc::new(crate::controller::NoopMeasurementPort),
             false,
+            crate::services::notify::Notifier::new(None),
         )
         .await;
 

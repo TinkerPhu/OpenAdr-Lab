@@ -43,13 +43,26 @@ pub(crate) async fn apply_residual_escalation(
 }
 
 /// PHASE 3.5 (post-lock): update the preemption-margin hysteresis state
-/// (§4a.1) and record this tick's arbiter reasoning for
-/// `GET /arbiter-diagnostics` (ui-transparency) in one call.
+/// (§4a.1), record this tick's arbiter reasoning for `GET /arbiter-diagnostics`
+/// (ui-transparency), and emit a BL-37 edge-triggered notification when the
+/// active-lever state transitions — all in one call.
 pub(crate) async fn record_arbiter_outcome(
     state: &crate::state::AppState,
+    notifier: &crate::services::notify::Notifier,
     (active_lever, net_kw, dev_kw): (Option<String>, Option<f64>, Option<f64>),
     now: DateTime<Utc>,
 ) {
+    // Read the previous tick's value before it's overwritten below — the
+    // prev/current pair needed for edge detection (design.md D2).
+    let prev_active_lever = state.arbiter_active_lever().await;
+    crate::services::notify::notify_correction_edge(
+        notifier,
+        state,
+        now,
+        prev_active_lever.as_deref(),
+        active_lever.as_deref(),
+    )
+    .await;
     state
         .set_arbiter_diagnostics(net_kw, dev_kw, active_lever.clone(), now)
         .await;
@@ -146,5 +159,53 @@ pub(crate) fn resolve_heater_emergency_mode(
         (Some(curtail), Some(absorb))
     } else {
         (None, None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+
+    fn ts(secs: i64) -> DateTime<Utc> {
+        use chrono::TimeZone;
+        Utc.timestamp_opt(1_700_000_000 + secs, 0).unwrap()
+    }
+
+    /// BL-37 (task 3.4): `None -> Some -> Some(different lever) -> None`
+    /// across four ticks must produce exactly two notifications (one active,
+    /// one cleared) — a lever handoff mid-correction is not an edge.
+    #[tokio::test]
+    async fn record_arbiter_outcome_lever_handoff_sequence_emits_exactly_two_notifications() {
+        let state = AppState::new();
+        let notifier = crate::services::notify::Notifier::new(None);
+
+        record_arbiter_outcome(&state, &notifier, (None, None, None), ts(0)).await;
+        record_arbiter_outcome(
+            &state,
+            &notifier,
+            (Some("battery".to_string()), Some(1.0), Some(0.5)),
+            ts(1),
+        )
+        .await;
+        record_arbiter_outcome(
+            &state,
+            &notifier,
+            (Some("heater_pause".to_string()), Some(1.0), Some(0.5)),
+            ts(2),
+        )
+        .await;
+        record_arbiter_outcome(&state, &notifier, (None, None, None), ts(3)).await;
+
+        let ring = state.notifications_since(None).await;
+        assert_eq!(ring.len(), 2, "exactly one active + one cleared");
+        assert_eq!(
+            ring[0].dedup_key.as_deref(),
+            Some("arbiter-correction-active")
+        );
+        assert_eq!(
+            ring[1].dedup_key.as_deref(),
+            Some("arbiter-correction-cleared")
+        );
     }
 }

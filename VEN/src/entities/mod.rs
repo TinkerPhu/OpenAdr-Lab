@@ -13,6 +13,7 @@ pub mod plan;
 pub mod planner_params;
 pub mod pv_snow;
 pub mod report_submission;
+pub mod ring_buffer;
 pub mod sim_inject;
 pub mod solar;
 pub mod tariff_snapshot;
